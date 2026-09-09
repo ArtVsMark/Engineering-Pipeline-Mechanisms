@@ -37,6 +37,19 @@ def test_missing_record_is_rejected() -> None:
     assert len(problems) == 1 and "записи нет" in problems[0]
 
 
+def test_no_records_on_the_head_is_rejected() -> None:
+    """Записей на голове нет ни одной: прогон не стартовал, а не «все прошли».
+
+    Отдельно от недостачи одного имени: пустой вход — это отсутствие предмета
+    проверки, и гейт, не нашедший предмета, обязан падать (075). Проверяется
+    тем, что названы ОБА объявленных имени, а не «есть хотя бы одна находка».
+    """
+    problems, waiting = module.verdict([], REQUIRED, "ci-complete")
+    assert not waiting
+    assert {problem.split(":")[0] for problem in problems} == set(REQUIRED)
+    assert all("записи нет" in problem for problem in problems)
+
+
 def test_both_failures_are_named() -> None:
     """Вердикт выносится после последнего случая, а не на первой находке (159).
 
