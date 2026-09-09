@@ -89,7 +89,10 @@ def test_version_written_by_hand_is_a_finding(run_script: RunScript, tmp_path: P
 def test_stale_marker_is_a_finding(run_script: RunScript, tmp_path: Path) -> None:
     """Маркер есть, а значение чужое — сборка его не переписала (127)."""
     repo = prepare_repo(tmp_path)
-    opening, closing = "<!--m:contract-->", "<!--/m:contract-->"
+    # Теги собираются из частей: написанные парой, они стали бы настоящим
+    # маркером, и check_version.py нашёл бы находку в собственном тесте.
+    opening = "<!--" + "m:contract" + "-->"
+    closing = "<!--" + "/m:contract" + "-->"
     (repo / "doc.md").write_text(f"версия {opening}9.9.9{closing}\n", encoding="utf-8")
     git(repo, "add", "-A")
     result = run_script("check_version.py", cwd=repo)
@@ -100,7 +103,10 @@ def test_stale_marker_is_a_finding(run_script: RunScript, tmp_path: Path) -> Non
 def test_fresh_marker_passes(run_script: RunScript, tmp_path: Path) -> None:
     """Маркер с текущим значением проходит — иначе гейт красен неотвратимо."""
     repo = prepare_repo(tmp_path)
-    opening, closing = "<!--m:contract-->", "<!--/m:contract-->"
+    # Теги собираются из частей: написанные парой, они стали бы настоящим
+    # маркером, и check_version.py нашёл бы находку в собственном тесте.
+    opening = "<!--" + "m:contract" + "-->"
+    closing = "<!--" + "/m:contract" + "-->"
     (repo / "doc.md").write_text(f"версия {opening}1.2.3{closing}\n", encoding="utf-8")
     git(repo, "add", "-A")
     assert run_script("check_version.py", cwd=repo).code == CLEAN
