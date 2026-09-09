@@ -23,6 +23,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 BINDINGS = ROOT / ".rules" / "bindings.json"
+PROPOSALS = ROOT / ".rules" / "proposals.json"
+# Поля, которые в предложении заполняет каталог при приёме, а не проект.
+OWNED_BY_CATALOGUE = {"id", "number", "rule"}
 STATUSES = {"active", "rejected", "not-applicable", "unreviewed"}
 MECHANISMS = {"gate", "pipeline", "document", "none"}
 # Похоже на адрес в этом дереве: с косой чертой или с расширением.
@@ -73,7 +76,15 @@ def test_negative_answers_name_the_reason() -> None:
 
 
 @pytest.mark.parametrize(
-    "number", sorted(n for n, i in answers().items() if i["status"] == "active")
+    "number",
+    sorted(
+        n
+        for n, i in answers().items()
+        # У механизма «none» адреса нет по построению: правило признано
+        # действующим и не держится ничем, причина названа в why. Такой ответ
+        # проверяется правилом 154, а не адресом.
+        if i["status"] == "active" and i.get("mechanism") != "none"
+    ),
 )
 def test_declared_address_resolves(number: str) -> None:
     """Адрес механизма существует в дереве: иначе это ложный механизм."""
@@ -85,12 +96,36 @@ def test_declared_address_resolves(number: str) -> None:
         # разрешаются намеренно: их владелец другой, и правит их он (185).
         if "@" not in address and not address.startswith(("ArtVsMark/", "http"))
     ]
-    if not candidates:
-        return
+    # Раньше набор без адреса молча зеленел, и ответ `"where": "."` прошёл
+    # гейт 183 целиком: проверять было нечего, и «нечего проверять» считалось
+    # «проверено». Гейт, не нашедший предмета, обязан падать (075).
+    assert candidates, (
+        f"{number}: механизм назван, а адреса в прозе нет — "
+        f"проверять нечего, и это отказ, а не «зелено»: {where!r}"
+    )
     resolved = [
         address for address in candidates if (ROOT / address).exists() or list(ROOT.glob(address))
     ]
     assert resolved, f"{number}: ни один адрес не разрешается: {candidates}"
+
+
+def test_proposals_assign_no_numbers() -> None:
+    """Номер правилу присваивает каталог при приёме, а не проект (185).
+
+    Два проекта, выбравшие номер независимо, дают столкновение, которое уже
+    нечем починить: номера не переиспользуются. Поэтому поля ``id``, ``number``
+    и ``rule`` в предложении — ошибка, и это сказано гейтом, а не только прозой
+    в самом файле. Пустой список — законное состояние («предлагать нечего»);
+    отсутствие файла означает другое — «канал не подключён» (075).
+    """
+    assert PROPOSALS.exists(), "канал предложений не подключён: .rules/proposals.json нет"
+    document: dict[str, Any] = json.loads(PROPOSALS.read_text(encoding="utf-8"))
+    assert document.get("schema"), "след предложения без версии контракта"
+    items = document.get("proposals")
+    assert isinstance(items, list), "поле proposals — список, пустой в том числе"
+    for item in items:
+        assigned = OWNED_BY_CATALOGUE & set(item)
+        assert not assigned, f"номер присваивает каталог, а не проект: {sorted(assigned)}"
 
 
 def test_this_project_leans_on_gates() -> None:
