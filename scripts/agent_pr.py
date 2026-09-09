@@ -40,6 +40,19 @@ PREFIXES: Final = ("agent/",)
 #: Отметка, по которой видно, что тело собрано механизмом. Тело, правленное
 #: человеком, шаг не переписывает: он источник заголовка, а не хозяин страницы.
 MARK: Final = "Изменение открыто конвейером от лица владельца"
+#: Согласие отдать изменение очереди. Ставит его МЕХАНИЗМ, а не человек: ветка
+#: с приставкой конвейера и есть заявленное согласие — окно резало её под
+#: задачу, а не для того, чтобы изменение стояло зелёным и ждало.
+#:
+#: Приём взят у соседа по семье, где он обкатан: там согласие ставится сразу
+#: при открытии, а не ждёт обхода по расписанию, и метка работает не только
+#: включателем, но и СЛЕДОМ — по ней видно, что изменение отдано автоматике.
+CONSENT: Final = "automerge"
+#: Отзыв согласия человеком. Сильнее согласия и переживает повторный заход:
+#: «метку ещё не ставили» и «поставили и сняли» по состоянию изменения
+#: неразличимы, поэтому снятое согласие вернулось бы следующим же толчком.
+#: Увидев эту метку, шаг согласия не ставит, а стоящее — снимает.
+HOLD: Final = "hold"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -185,6 +198,38 @@ def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_
     print(f"проставлены зоны: {', '.join(zones)}")
 
 
+def apply_consent(repo: str, number: int, token: str, marks: set[str], dry_run: bool) -> None:
+    """Отдаёт изменение очереди — или снимает согласие, если стоит стоп-метка.
+
+    СОГЛАСИЕ СТАВИТ МЕХАНИЗМ. Ветка с приставкой конвейера и есть заявленное
+    согласие: окно резало её под задачу. Ждать, пока кто-то повесит метку
+    рукой, значит оставить зелёное изменение стоять — ровно та беда, от которой
+    очередь и заведена.
+
+    СТОП-МЕТКА СИЛЬНЕЕ И ПЕРЕЖИВАЕТ ЗАХОД. Отличить «метку ещё не ставили» от
+    «поставили и сняли» по состоянию изменения нельзя — оно одинаковое, — и
+    снятое человеком согласие вернулось бы следующим толчком. Поэтому отзыв
+    выражается явно: `hold` не только останавливает очередь, но и снимает
+    согласие, чтобы след не врал.
+
+    Отказ разметки шаг не роняет: изменение уже открыто, и терять открытие
+    из-за метки — худший размен (084).
+    """
+    if dry_run:
+        print(f"согласие {'сняло бы' if HOLD in marks else 'проставило бы'}: {CONSENT}")
+        return
+    try:
+        if HOLD in marks:
+            path = f"repos/{repo}/issues/{number}/labels/{ghrest.quote(CONSENT)}"
+            ghrest.request("DELETE", path, token)
+            print(f"снято согласие «{CONSENT}»: стоит стоп-метка «{HOLD}»")
+            return
+        ghrest.request("POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": [CONSENT]})
+        print(f"проставлено согласие: {CONSENT}")
+    except ghrest.TransportError as exc:
+        print(f"согласие не проставлено: {exc} — изменение открыто, метку ставит человек")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -230,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
             # попытавшись доставить метки, — а гейт разметки продолжает его
             # отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
             apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
+            marks = {str(item.get("name", "")) for item in existing[0].get("labels") or []}
+            apply_consent(args.repo, number, token, marks, args.dry_run)
             title, body = describe(args.branch, args.base)
             sync_description(args.repo, number, token, title, body, args.dry_run)
             return EXIT_OK
@@ -248,6 +295,9 @@ def main(argv: list[str] | None = None) -> int:
         number = created["number"]
         print(f"открыто изменение #{number}: {created['html_url']}")
         apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
+        # Только что открытое изменение стоп-метки нести не может: её ставит
+        # человек, а он его ещё не видел.
+        apply_consent(args.repo, number, token, set(), args.dry_run)
         print(
             "Проба, а не доверие (135): автор в общей ветке после слияния обязан\n"
             "стать человеком. Не стал — механизм неверен, и видно это сразу."
