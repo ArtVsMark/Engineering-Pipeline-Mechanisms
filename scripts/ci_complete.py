@@ -73,6 +73,25 @@ def belongs_to(run: dict[str, Any], run_id: str) -> bool:
     return f"/actions/runs/{run_id}/" in url
 
 
+def pending(run: dict[str, Any]) -> bool:
+    """Идёт ли проверка ещё — по ИСХОДУ, а не только по состоянию.
+
+    Площадка выставляет исход, когда запись завершилась, но состояние у неё
+    остаётся не всегда согласованным: погашенный группой отмены прогон
+    оставляет на голове запись со `status: in_progress` и уже проставленным
+    `conclusion`. Такая запись завершена — ждать её нечего, и ждали бы её
+    вечно.
+
+    Замер 09.09.2026: очередь встала на изменении #73 при девяти зелёных
+    записях, потому что рядом лежала одна запись-зомби `pipeline` —
+    `in_progress` с исходом `success`. Ни одного нового события у изменения
+    больше не было, и сдвинуть её было нечем.
+
+    Поэтому «идёт» означает: состояние переходное И исхода ещё нет.
+    """
+    return str(run.get("status")) in PENDING and run.get("conclusion") is None
+
+
 def verdict(
     runs: list[dict[str, Any]],
     required: list[str],
@@ -138,7 +157,7 @@ def verdict(
         for run in live:
             status = run.get("status")
             conclusion = run.get("conclusion")
-            if status in PENDING:
+            if pending(run):
                 waiting = True
             elif conclusion == "success":
                 continue

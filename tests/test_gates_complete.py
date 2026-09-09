@@ -129,6 +129,35 @@ def test_two_live_records_with_one_name_are_flagged() -> None:
     assert any("живых записей с одним именем" in problem for problem in problems)
 
 
+def test_a_record_with_a_conclusion_is_not_awaited() -> None:
+    """Запись с исходом завершена, каким бы ни было её состояние.
+
+    Погашенный группой отмены прогон оставляет на голове запись со `status:
+    in_progress` и уже проставленным `conclusion`. Ждать её нечего, а ждали бы
+    её вечно: новых событий у изменения больше нет, и сдвинуть её нечем.
+    Замер 09.09.2026: очередь встала на изменении #73 при девяти зелёных
+    записях из-за одной такой записи-зомби.
+    """
+    problems, waiting = module.verdict(
+        [run("lint"), run("test", status="in_progress")], REQUIRED, "ci-complete"
+    )
+    assert (problems, waiting) == ([], False)
+
+
+def test_a_record_without_a_conclusion_is_still_awaited() -> None:
+    """Настоящая идущая запись по-прежнему останавливает вердикт (097).
+
+    Иначе лечение хуже болезни: гейт перестал бы ждать вообще и выносил бы
+    вердикт по недосчитанной голове.
+    """
+    problems, waiting = module.verdict(
+        [run("lint"), run("test", status="in_progress", conclusion=None)],
+        REQUIRED,
+        "ci-complete",
+    )
+    assert waiting and not problems
+
+
 def test_itself_is_not_awaited() -> None:
     """Сводный не ждёт собственной записи — иначе он не дождётся никогда."""
     problems, waiting = module.verdict(
