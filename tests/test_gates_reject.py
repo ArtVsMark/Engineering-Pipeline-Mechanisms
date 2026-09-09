@@ -269,6 +269,32 @@ def test_deleting_a_fragment_is_not_bringing_one(run_script: RunScript, tmp_path
     assert "не несёт фрагмента" in result.text
 
 
+def test_a_pure_cleanup_gets_a_declared_outcome_not_a_traceback(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Изменение, которое только удаляет, получает объявленный исход.
+
+    Пустой ответ git значит разное: пустой ПОЛНЫЙ список — изменений нет вовсе
+    и это ошибка входа (075); пустой список ВЫЖИВШИХ — изменение всё удалило, и
+    это законное состояние. Пока их не развели, чистая уборка роняла гейт
+    необработанным исключением — то есть отказом, которого механизм не
+    объявлял (039).
+    """
+    repo = prepare_repo(tmp_path)
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "старое.added.md").write_text("старое\n\n#1\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "фрагмент лежит в базе")
+
+    git(repo, "checkout", "-qb", "work")
+    (repo / "changelog.d" / "старое.added.md").unlink()
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "только уборка")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code in {CLEAN, REJECTED}, result.text
+    assert "Traceback" not in result.text, result.text
+
+
 def test_no_diff_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Нечего проверять — ошибка входа, а не «прошло» (075)."""
     repo = prepare_repo(tmp_path)
