@@ -368,6 +368,15 @@ def test_kinds_are_declared_once_for_all_mechanisms() -> None:
         )
 
 
+def with_fragment(repo: Path, name: str, body: str) -> None:
+    """Кладёт в ветку изменения один фрагмент журнала."""
+    git(repo, "checkout", "-qb", "work")
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / name).write_text(body, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "фрагмент")
+
+
 def test_fragments_are_checked_without_the_assembled_file(
     run_script: RunScript, tmp_path: Path
 ) -> None:
@@ -376,19 +385,53 @@ def test_fragments_are_checked_without_the_assembled_file(
     Сборка — дело выпуска (030): общий файл, который трогает каждая ветка,
     даёт конфликт на каждом втором изменении.
     """
-    (tmp_path / "changelog.d").mkdir()
-    (tmp_path / "changelog.d" / "slug.added.md").write_text("текст\n\n#1\n", encoding="utf-8")
-    result = run_script("build_changelog.py", "--fragments", cwd=tmp_path)
+    repo = prepare_repo(tmp_path)
+    with_fragment(repo, "slug.added.md", "текст\n\n#1\n")
+    result = run_script("build_changelog.py", "--fragments", "--base", BASE_BRANCH, cwd=repo)
     assert result.code == CLEAN, result.text
-    assert not (tmp_path / "CHANGELOG.md").exists(), "проверка фрагментов собрала файл"
+    assert not (repo / "CHANGELOG.md").exists(), "проверка фрагментов собрала файл"
 
 
 def test_fragments_check_refuses_a_broken_fragment(run_script: RunScript, tmp_path: Path) -> None:
     """Дефект фрагмента ловится на изменении, а не при выпуске."""
-    (tmp_path / "changelog.d").mkdir()
-    (tmp_path / "changelog.d" / "заметка.md").write_text("текст\n", encoding="utf-8")
-    result = run_script("build_changelog.py", "--fragments", cwd=tmp_path)
+    repo = prepare_repo(tmp_path)
+    with_fragment(repo, "заметка.md", "текст\n")
+    result = run_script("build_changelog.py", "--fragments", "--base", BASE_BRANCH, cwd=repo)
     assert result.code == BROKEN, result.text
+
+
+def test_an_empty_catalogue_after_a_release_does_not_break_the_gate(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Пустой `changelog.d` после выпуска не роняет гейт на следующем изменении.
+
+    Раньше шаг разбирал ВЕСЬ каталог и падал третьим исходом, стоило выпуску
+    унести фрагменты в `released/`: изменение приносило свой фрагмент, а гейт
+    смотрел не туда. Предмет проверки — то, что приезжает С ИЗМЕНЕНИЕМ.
+    """
+    repo = prepare_repo(tmp_path)
+    with_fragment(repo, "after-a-release.added.md", "текст\n\n#1\n")
+    result = run_script("build_changelog.py", "--fragments", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == CLEAN, result.text
+    assert "фрагменты изменения разбираются: 1" in result.text
+
+
+def test_a_neighbours_broken_fragment_is_not_this_change_s_problem(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Негодный фрагмент, лежавший в базе, не роняет чужое изменение.
+
+    Гейт на изменении отвечает за то, что изменение принесло. Чужой дефект —
+    предмет выпуска и того изменения, которое его завело.
+    """
+    repo = prepare_repo(tmp_path)
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "негодный.md").write_text("текст\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "негодный фрагмент в базе")
+    with_fragment(repo, "moя-запись.added.md", "текст\n\n#1\n")
+    result = run_script("build_changelog.py", "--fragments", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == CLEAN, result.text
 
 
 def test_the_run_does_not_assemble_the_journal_on_a_change() -> None:

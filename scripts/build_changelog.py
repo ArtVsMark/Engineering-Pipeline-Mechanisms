@@ -59,22 +59,36 @@ class NotRun(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Fragment:
-    """Один фрагмент журнала: род, задача, текст."""
+    """Один фрагмент журнала: род, слаг имени, текст.
+
+    Поле звалось `task` от прежнего правила именования — по номеру задачи.
+    Правило снято вместе с потерянной записью, и имя поля шло за ним следом:
+    слаг говорит, ЧТО изменилось, а не какая задача.
+    """
 
     kind: str
-    task: str
+    slug: str
     body: str
 
 
 def read_fragments(directory: Path) -> list[Fragment]:
-    """Читает фрагменты каталога, отвергая файлы с неразбираемым именем."""
+    """Читает ВСЕ фрагменты каталога: предмет выпуска, а не изменения."""
     if not directory.is_dir():
         return []
+    return parse_fragments(sorted(directory.glob("*.md")))
 
+
+def parse_fragments(paths: list[Path]) -> list[Fragment]:
+    """Разбирает названные файлы, отвергая неразбираемые имена и пустые.
+
+    Разбор один на оба читателя — выпуск и гейт изменения. Двумя копиями он
+    разошёлся бы молча: один принял бы фрагмент, который второй отвергает
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
     fragments: list[Fragment] = []
     unnamed: list[str] = []
-    for path in sorted(directory.glob("*.md")):
-        if path.name == "README.md":
+    for path in paths:
+        if path.name == "README.md" or not path.is_file():
             continue
         match = FRAGMENT_RE.match(path.name)
         if match is None:
@@ -98,6 +112,21 @@ def read_fragments(directory: Path) -> list[Fragment]:
             + "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
         )
     return fragments
+
+
+def fragments_of(paths: list[str]) -> list[Fragment]:
+    """Разбирает фрагменты, которые тронуло ИЗМЕНЕНИЕ, и только их.
+
+    Берутся все `.md` под `changelog.d/`, а не только правильно названные:
+    иначе файл с негодным именем выпал бы из отбора ровно потому, что негоден,
+    и гейт зазеленел бы на том, что обязан отвергнуть (075).
+    """
+    touched = [
+        FRAGMENTS / name.rsplit("/", 1)[-1]
+        for name in paths
+        if name.startswith(f"{FRAGMENTS}/") and name.endswith(".md") and name.count("/") == 1
+    ]
+    return parse_fragments(touched)
 
 
 def render_section(title: str, fragments: list[Fragment]) -> str:
@@ -182,17 +211,27 @@ def main(argv: list[str] | None = None) -> int:
         help="проверить только фрагменты: имя, непустоту, ссылку в конце",
     )
     parser.add_argument("--release", metavar="ВЕРСИЯ", help="закрыть выпуск: перенести фрагменты")
+    parser.add_argument("--base", default="", help="ветка сравнения для --fragments")
     args = parser.parse_args(argv)
 
     try:
         if args.fragments:
-            # Предмет проверки — то, что приезжает С ИЗМЕНЕНИЕМ. Ни версия, ни
-            # собранный файл здесь не нужны и не трогаются: их спрашивает
-            # выпуск, а изменение отвечает за свой фрагмент.
-            found = read_fragments(FRAGMENTS)
-            if not found:
-                raise NotRun("ни одного фрагмента в changelog.d — предмет проверки не найден (075)")
-            print(f"фрагменты разбираются: {len(found)}")
+            # ПРЕДМЕТ ПРОВЕРКИ — ТО, ЧТО ПРИЕЗЖАЕТ С ИЗМЕНЕНИЕМ, и раньше это
+            # было сказано комментарием, а сделано наоборот: разбирался весь
+            # каталог целиком. Разница не отвлечённая. Выпуск переносит
+            # фрагменты в `changelog.d/released/`, и сразу после него каталог
+            # пуст — гейт валился третьим исходом на первом же изменении, хотя
+            # своё оно принесло. Ни версия, ни собранный файл здесь не нужны:
+            # их спрашивает выпуск, а изменение отвечает за свой фрагмент.
+            mine = fragments_of(journal.changed_files(journal.base_from_env(args.base)))
+            if not mine:
+                # Законное состояние, а не «нечего проверять»: нужен ли
+                # изменению фрагмент вообще, решает `check_journal.py` — он и
+                # отвергает изменение без него. Краснеть здесь вторым разом
+                # значило бы завести второй источник того же решения (022).
+                print("изменение не несёт фрагментов — их наличие спрашивает check_journal")
+                return EXIT_OK
+            print(f"фрагменты изменения разбираются: {len(mine)}")
             return EXIT_OK
 
         if args.release:
@@ -215,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         OUTPUT.write_text(assembled, encoding="utf-8")
         print(f"{OUTPUT} собран, версия контракта {version}")
         return EXIT_OK
-    except NotRun as exc:
+    except (NotRun, journal.NotRun) as exc:
         print(f"сборка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
