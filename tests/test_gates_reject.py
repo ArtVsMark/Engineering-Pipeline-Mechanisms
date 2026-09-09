@@ -246,6 +246,29 @@ def test_deleting_a_fragment_named_by_a_number_is_allowed(
     assert result.code == CLEAN, result.text
 
 
+def test_deleting_a_fragment_is_not_bringing_one(run_script: RunScript, tmp_path: Path) -> None:
+    """Удалённый фрагмент за принесённую запись не считается.
+
+    Иначе изменение, которое запись УНЕСЛО, а своей не оставило, проходит
+    гейт зелёным — и уборка старого фрагмента проносит мимо него любую правку
+    кода. «Файл упомянут в дифе» и «запись есть в голове» — разные вещи.
+    """
+    repo = prepare_repo(tmp_path)
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "старое.added.md").write_text("старое\n\n#1\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "фрагмент лежит в базе")
+
+    git(repo, "checkout", "-qb", "work")
+    (repo / "changelog.d" / "старое.added.md").unlink()
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "унёс запись, своей не принёс")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == REJECTED, result.text
+    assert "не несёт фрагмента" in result.text
+
+
 def test_no_diff_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Нечего проверять — ошибка входа, а не «прошло» (075)."""
     repo = prepare_repo(tmp_path)

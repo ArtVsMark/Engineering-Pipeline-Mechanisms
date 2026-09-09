@@ -70,18 +70,19 @@ def main(argv: list[str] | None = None) -> int:
     exempt = [name for name in files if name in EXEMPT_FILES or name.startswith(EXEMPT_PREFIXES)]
     print(f"тронутых путей прочитано: {len(files)}, из них журнальных: {len(exempt)}")
 
-    fragments = [name for name in files if FRAGMENT_RE.match(name)]
+    # ФРАГМЕНТОМ СЧИТАЕТСЯ ТОЛЬКО ВЫЖИВШИЙ ПУТЬ. Удалённого файла в голове нет:
+    # засчитывать его за принесённую запись значит зеленеть на изменении,
+    # которое запись УНЕСЛО, а своей не оставило. Ровно так уборка старого
+    # фрагмента пронесла бы мимо гейта любую правку кода.
+    alive = set(journal.changed_files(args.base, alive_only=True))
+    fragments = [name for name in alive if FRAGMENT_RE.match(name)]
 
     # ИМЯ ФРАГМЕНТА ГОВОРИТ, ЧТО ИЗМЕНИЛОСЬ, А НЕ КАКАЯ ЗАДАЧА. Одна задача
     # живёт дольше одного изменения, и два захода целятся в одно имя: конфликта
     # это не даёт — побеждает последний, и первая запись исчезает без следа и
     # без выпуска. Так была потеряна запись об исправлении атрибуции (#12).
-    # Судится ИМЯ существующего файла: удалённого и переименованного из старого
-    # имени в голове нет, и требовать от них правильного имени не на чем.
-    # Иначе уборка старых фрагментов, названных по номеру, отвергалась бы
-    # гейтом, который эту уборку и требует.
-    alive = set(journal.changed_files(args.base, alive_only=True))
-    by_number = [name for name in fragments if name in alive and numbered(name)]
+    # Судится тот же выживший список: у удалённого имени спрашивать нечего.
+    by_number = [name for name in fragments if numbered(name)]
     if by_number:
         print(
             "отвергнуто: фрагмент назван номером задачи, а не смыслом: "
