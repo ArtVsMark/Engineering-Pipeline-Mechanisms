@@ -97,6 +97,13 @@ RANK_NAMES: Final = {
 STATE_CONFLICT: Final = "dirty"
 #: Состояние «голова отстала от базы»: подтягивается ТОЛЬКО у головы очереди.
 STATE_BEHIND: Final = "behind"
+#: Состояния, при которых слияние ЗАКОННО, — список разрешительный (068).
+#: `unstable` значит «красна необязательная проверка»: класс объявлен данными,
+#: и совещательное красное слияния не держит. Всё прочее — `blocked`,
+#: `unknown`, `draft`, пустая строка — голова пропускается с названной
+#: причиной: площадка либо ещё считает, либо слить не даст, и звать слияние
+#: наугад значит менять пропуск одной головы на красный весь заход.
+STATE_MERGEABLE: Final = frozenset({"clean", "unstable", "has_hooks"})
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -298,9 +305,22 @@ def sync_head(repo: str, number: int, owner_token: str, *, dry_run: bool) -> Non
     ghrest.request("PUT", f"repos/{repo}/pulls/{number}/update-branch", owner_token, body={})
 
 
+def fetch(change: Change) -> None:
+    """Приносит ветку кандидата и базу в чекаут очереди.
+
+    Заход очереди работает не на ветке кандидата: чекаут у него свой, и голого
+    имени `agent/<задача>` в нём нет — `git log` по нему не разрешится, и тело
+    уплотнения не соберётся ни разу. Ветка приносится явно и читается как
+    `origin/<ветка>`: сборщик подставляет `origin/` только базе.
+    """
+    for ref in (change.base, change.branch):
+        squash_body.git("fetch", "--no-tags", "origin", f"{ref}:refs/remotes/origin/{ref}")
+
+
 def merge(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> str:
     """Сливает изменение уплотнением; тело собирает общий модуль."""
-    body = squash_body.compose(change.branch, change.base)
+    fetch(change)
+    body = squash_body.compose(f"origin/{change.branch}", change.base)
     title = f"{change.title} (#{change.number})"
     if dry_run:
         print(f"  (пробный заход) слилось бы #{change.number} телом:\n{body}")
@@ -389,15 +409,21 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             continue
 
         state = merge_state(repo, change.number, owner_token)
+        if state == STATE_BEHIND:
+            print(f"#{change.number}: голова очереди отстала от базы — подтягиваю только её (052)")
+            sync_head(repo, change.number, owner_token, dry_run=dry_run)
+            return EXIT_OK
         if state == STATE_CONFLICT:
             print(
                 f"#{change.number}: конфликт — штатный источник работы (004), очередь идёт дальше"
             )
             continue
-        if state == STATE_BEHIND:
-            print(f"#{change.number}: голова очереди отстала от базы — подтягиваю только её (052)")
-            sync_head(repo, change.number, owner_token, dry_run=dry_run)
-            return EXIT_OK
+        if state not in STATE_MERGEABLE:
+            # Список разрешительный: незнакомое состояние — повод пропустить
+            # голову, а не звать слияние наугад. Отказ площадки на `blocked`
+            # или `unknown` уронил бы весь заход вместо одной головы.
+            print(f"#{change.number}: состояние «{state or '—'}» слияния не допускает, пропущено")
+            continue
 
         sha = merge(repo, change, owner_token, dry_run=dry_run)
         print(f"слито #{change.number}{f' → {sha}' if sha else ''}")

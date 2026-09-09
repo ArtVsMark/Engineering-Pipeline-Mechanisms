@@ -273,6 +273,63 @@ def test_one_pass_merges_at_most_one_change(platform: dict[str, Any]) -> None:
     assert platform["merged"] == [1]
 
 
+def test_an_unmergeable_state_skips_the_head_instead_of_reddening(
+    platform: dict[str, Any],
+) -> None:
+    """Незнакомое состояние головы пропускается, а не зовёт слияние наугад.
+
+    Список разрешительный (068): на `blocked` и `unknown` площадка слияния не
+    даст, и её отказ уронил бы ВЕСЬ заход вместо одной головы. Проверяется
+    обоими значениями сразу — иначе разрешительный список неотличим от
+    запретительного, где перечислены ровно эти два.
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge"), change(3, "automerge")]
+    platform["states"] = {1: "blocked", 2: "unknown"}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["merged"] == [3]
+
+
+def test_an_advisory_red_still_merges(platform: dict[str, Any]) -> None:
+    """`unstable` — красна необязательная проверка, и слияния она не держит.
+
+    Класс проверки объявлен данными: совещательное красное оставляет запись
+    адресату, но очередь не останавливает (084).
+    """
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: "unstable"}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["merged"] == [1]
+
+
+def test_the_candidate_branch_is_fetched_before_the_body_is_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Тело собирается по `origin/<ветка>`, и ветка приносится перед сборкой.
+
+    Заход очереди работает в своём чекауте: голого имени `agent/<задача>` в
+    нём нет, и без явной доставки сборщик не разрешил бы ссылку ни разу —
+    слияние падало бы почти всегда.
+    """
+    fetched: list[tuple[str, ...]] = []
+    asked: list[tuple[str, str]] = []
+
+    def remember_git(*args: str) -> str:
+        fetched.append(args)
+        return ""
+
+    def remember_compose(branch: str, base: str) -> str:
+        asked.append((branch, base))
+        return "тело"
+
+    monkeypatch.setattr(module.squash_body, "git", remember_git)
+    monkeypatch.setattr(module.squash_body, "compose", remember_compose)
+    module.merge("o/r", change(1, "automerge"), "token", dry_run=True)
+
+    assert asked == [("origin/agent/change-1", "main")]
+    assert any("agent/change-1" in " ".join(call) for call in fetched)
+    assert any("main" in " ".join(call) for call in fetched)
+
+
 # --- вход механизма ----------------------------------------------------------
 
 
