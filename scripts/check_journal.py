@@ -74,7 +74,11 @@ def main(argv: list[str] | None = None) -> int:
     # засчитывать его за принесённую запись значит зеленеть на изменении,
     # которое запись УНЕСЛО, а своей не оставило. Ровно так уборка старого
     # фрагмента пронесла бы мимо гейта любую правку кода.
-    alive = set(journal.changed_files(args.base, alive_only=True))
+    try:
+        alive = set(journal.changed_files(args.base, alive_only=True))
+    except journal.NotRun as exc:
+        print(f"проверка не отработала: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
     fragments = [name for name in alive if FRAGMENT_RE.match(name)]
 
     # ИМЯ ФРАГМЕНТА ГОВОРИТ, ЧТО ИЗМЕНИЛОСЬ, А НЕ КАКАЯ ЗАДАЧА. Одна задача
