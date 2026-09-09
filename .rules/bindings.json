@@ -68,7 +68,9 @@
       "status": "unreviewed"
     },
     "017": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/ghrest.py — остаток квоты читается из заголовков ответа при каждом запросе, исчерпание отличается от прочих отказов отдельным родом (RateLimited) и называет срок сброса; tests/test_ghrest.py держит разбор отказа"
     },
     "018": {
       "status": "unreviewed"
@@ -106,7 +108,9 @@
       "status": "unreviewed"
     },
     "027": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/review_findings.py — render_body печатает «Пусто», а не оставляет пустой раздел; .rules/proposals.json объявляет пустой список законным состоянием; tests/test_review_findings.py::test_empty_body_says_so_explicitly"
     },
     "028": {
       "status": "unreviewed"
@@ -174,7 +178,9 @@
       "status": "unreviewed"
     },
     "045": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/agent_pr.py, scripts/debt.py, scripts/check_required_context.py — объявленные исходы разведены с единицей (0/2/3), прогоны разбирают коды списком разрешённого; tests/test_gates_reject.py и tests/test_review_safety.py держат оба конца"
     },
     "046": {
       "status": "active",
@@ -315,10 +321,14 @@
       "status": "unreviewed"
     },
     "084": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "."
     },
     "085": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/workflows/review.yml — промпт объявляет проверяемый текст данными, а не указаниями, и список инструментов агента закрыт; tests/test_review_safety.py запрещает голый Bash и pull_request_target"
     },
     "086": {
       "status": "unreviewed"
@@ -473,7 +483,9 @@
       "where": "scripts/check_pr_meta.py — разметка проверяется на полноту: зона выводится из путей состава и обязана стоять, а не просто «метка есть»"
     },
     "129": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".rules/bindings.json — ответ по каждой записи каталога; scripts/pipeline_checks.py повторяет ту же форму для классов проверок; tests/test_bindings.py держит полноту ответа"
     },
     "130": {
       "status": "unreviewed"
@@ -526,7 +538,9 @@
       "status": "unreviewed"
     },
     "142": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/review_findings.py — находки уезжают в живую задачу-адресата и переживают слияние, снимаются строкой «Разобрано: <отпечаток>»; scripts/debt.py печатает остаток на каждом изменении"
     },
     "144": {
       "status": "unreviewed"
@@ -653,7 +667,9 @@
       "status": "unreviewed"
     },
     "177": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/debt.py — три числа незакрытой работы по правилам читаются из задачи-«входящих» и печатаются шагом debt; docs/behaviour.md, контур 1 — источник 5 стоит выше плана"
     },
     "178": {
       "status": "unreviewed"
@@ -679,7 +695,9 @@
       "status": "unreviewed"
     },
     "185": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".rules/proposals.json — след предложения ведёт в дерево каталога и номера здесь не присваиваются; tests/test_bindings.py проверяет форму следа"
     },
     "186": {
       "status": "unreviewed"
@@ -708,7 +726,8 @@
       "status": "unreviewed"
     },
     "193": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "массовой автоматической починки данных в проекте нет: механизмы правят по одному предмету за изменение и проверяются отказом. Правило вступит вместе с первой такой починкой"
     },
     "194": {
       "status": "unreviewed"
