@@ -94,6 +94,82 @@ def test_repair_outruns_everything_ready_earlier() -> None:
     assert [item.number for item in ordered] == [9, 2, 1]
 
 
+def test_the_step_is_the_number_of_the_work_source() -> None:
+    """Ступень очереди — номер источника работы контура 1, а не свой словарь.
+
+    У проекта уже есть порядок, по которому окно БЕРЁТ работу. Второй,
+    собственный порядок для слияния означал бы, что важное на входе и важное на
+    выходе — разные вещи; они одно (022).
+    """
+    assert module.rank(change(1, "automerge", "fix-main")) == 0
+    assert module.rank(change(1, "automerge", body="Разобрано: abc1234")) == 3
+    assert module.rank(change(1, "automerge", "blocker")) == 4
+    assert module.rank(change(1, "automerge", files=(module.RULES_ANSWER,))) == 5
+    assert module.rank(change(1, "automerge")) == 6
+
+
+def test_the_vocabulary_covers_every_work_source() -> None:
+    """Словарь полный — все семь источников, а не только сортируемые.
+
+    Изменение из плана, покраснев, становится работой по источнику 2, а
+    конфликтнув — по источнику 1. Это то же изменение, сменившее источник, и
+    называть его надо тем же словом; отдельные слова завели бы второй словарь.
+    """
+    assert sorted(module.RANK_NAMES) == [0, 1, 2, 3, 4, 5, 6]
+
+
+def test_the_two_platform_sources_are_named_where_they_are_found(
+    platform: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Источники 1 и 2 называются там, где заход их обнаружил.
+
+    До обращения к площадке они не выводятся, и это цена правила 052: красноту
+    заход и так спрашивает у каждого кандидата, а состояние слияния площадка
+    считает лениво — спрашивать его у всех значит заказывать вычисление,
+    которое никому не понадобится.
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge"), change(3, "automerge")]
+    platform["runs"] = {1: (["lint: failure"], False)}
+    platform["states"] = {2: module.STATE_CONFLICT}
+    module.advance("o/r", "token", "main", dry_run=False)
+    printed = capsys.readouterr().out
+    assert module.RANK_NAMES[module.RANK_OWN_RED] in printed
+    assert module.RANK_NAMES[module.RANK_CONFLICT] in printed
+    assert platform["merged"] == [3]
+
+
+def test_a_finding_repair_outruns_the_plan() -> None:
+    """Снятие находки идёт раньше работы по плану — как и в контуре 1.
+
+    Долг по УЖЕ сделанному стоит перед новой работой: поверх непочиненного
+    механизма строится всё, что сольётся после него.
+    """
+    plan = change(1, "automerge")
+    debt = change(9, "automerge", body="Refs #23\nРазобрано: abc1234")
+    assert [item.number for item in module.order([plan, debt], frozenset())] == [9, 1]
+
+
+def test_the_owner_word_outruns_the_rules_debt() -> None:
+    """Слово владельца идёт раньше долга по правилам — тот же порядок (091)."""
+    rules = change(1, "automerge", files=(module.RULES_ANSWER,))
+    owner = change(9, "automerge", "blocker")
+    assert [item.number for item in module.order([rules, owner], frozenset())] == [9, 1]
+
+
+def test_a_shared_file_decides_inside_a_step_not_across_them() -> None:
+    """Общий файл — пропускная способность, а не приоритет.
+
+    Он уменьшает будущие конфликты, а не говорит о важности. Поэтому решает
+    ВНУТРИ ступени: изменение из плана, трогающее общий файл, не обгоняет
+    снятие находки.
+    """
+    debt = change(1, "automerge", body="Разобрано: abc1234", files=("docs/pipeline.md",))
+    plan = change(9, "automerge", files=("scripts/ghrest.py",))
+    other = change(10, "automerge", files=("scripts/ghrest.py",))
+    shared = module.shared_paths([debt, plan, other])
+    assert [item.number for item in module.order([plan, other, debt], shared)] == [1, 9, 10]
+
+
 def test_a_shared_file_outruns_the_rest() -> None:
     """Трогающее общий с соседом файл идёт раньше остальных."""
     first = change(5, "automerge", files=("scripts/ghrest.py",))

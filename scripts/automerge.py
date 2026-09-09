@@ -69,6 +69,7 @@ import changerefs
 import ci_complete
 import ghrest
 import labels
+import paths
 import pipeline_checks as policy
 import report
 import squash_body
@@ -83,18 +84,46 @@ READ_LABELS: Final = (LABEL_AUTOMERGE, LABEL_HOLD, LABEL_BLOCKER, LABEL_FIX_MAIN
 
 ENV_TOKEN: Final = "MERGE_QUEUE_TOKEN"
 
-#: Ступени очереди. Меньше — раньше; внутри ступени решает номер изменения.
-RANK_FIX_MAIN: Final = 0
-RANK_BLOCKER: Final = 1
-RANK_SHARED: Final = 2
-RANK_REST: Final = 3
+#: СТУПЕНЬ ОЧЕРЕДИ — ЭТО НОМЕР ИСТОЧНИКА РАБОТЫ ИЗ КОНТУРА 1. Словарь один на
+#: оба контура: у проекта уже есть порядок, по которому окно берёт работу
+#: (`docs/behaviour.md`), и заводить рядом второй, свой, значило бы объявить,
+#: что важное на входе и важное на выходе — разные вещи. Они одно.
+#:
+#: СЛОВАРЬ ПОЛНЫЙ — ВСЕ СЕМЬ ИСТОЧНИКОВ, а не только те, что даёт сортировка.
+#: Изменение, взятое из плана, стоит на 6; покраснев, оно становится работой по
+#: источнику 2, а конфликтнув — по источнику 1. Это не другая очередь, а то же
+#: изменение, сменившее источник, и печатать его надо тем же словом.
+#:
+#: ДВА ИСТОЧНИКА НЕ ВЫВОДЯТСЯ ДО ОБРАЩЕНИЯ К ПЛОЩАДКЕ, и это цена правила 052,
+#: а не недосмотр. Красноту головы заход и так спрашивает у каждого кандидата —
+#: значит источник 2 назвать может. Конфликт живёт в состоянии слияния, а его
+#: площадка считает лениво: спросить его у ВСЕХ значит заказать вычисление,
+#: которое никому не понадобится. Поэтому источник 1 называется там, где он
+#: обнаружен, — у головы, — а не заранее.
+RANK_MAIN_RED: Final = 0
+RANK_CONFLICT: Final = 1
+RANK_OWN_RED: Final = 2
+RANK_FINDINGS: Final = 3
+RANK_OWNER: Final = 4
+RANK_RULES: Final = 5
+RANK_PLAN: Final = 6
 
 RANK_NAMES: Final = {
-    RANK_FIX_MAIN: "чинит общую ветку",
-    RANK_BLOCKER: "блокирующее",
-    RANK_SHARED: "трогает общий файл",
-    RANK_REST: "остальное",
+    RANK_MAIN_RED: "0 · чинит красную общую ветку",
+    RANK_CONFLICT: "1 · конфликт слияния",
+    RANK_OWN_RED: "2 · красная проверка на своём изменении",
+    RANK_FINDINGS: "3 · снимает находку внешнего взгляда",
+    RANK_OWNER: "4 · слово владельца",
+    RANK_RULES: "5 · долг по правилам каталога",
+    RANK_PLAN: "6 · план",
 }
+
+#: Ответ проекта каталогу: правка здесь — признак работы по источнику 5.
+#: ЭТО ЭВРИСТИКА, И ОНА НАЗВАНА ЭВРИСТИКОЙ. Изменение может тронуть ответ
+#: попутно, делая работу из плана, и тогда ступень будет выше заслуженной.
+#: Ошибка тут дешёвая — порядок слияния, а не решение о слиянии, — а точного
+#: признака у долга по правилам в дереве нет вовсе.
+RULES_ANSWER: Final = f"{paths.BINDINGS}"
 
 #: Состояние изменения, при котором площадка сама говорит «слить нечем».
 STATE_CONFLICT: Final = "dirty"
@@ -232,26 +261,51 @@ def shared_paths(changes: list[Change]) -> frozenset[str]:
     return frozenset(path for path, count in seen.items() if count > 1)
 
 
-def rank(change: Change, shared: frozenset[str]) -> int:
-    """Ступень очереди для одного изменения.
+def rank(change: Change) -> int:
+    """Ступень очереди — номер источника работы, которому изменение отвечает.
+
+    Здесь называется источник, выводимый ДО обращения к площадке. Источники 1
+    и 2 добавляются заходом там, где он их обнаружил: изменение из плана,
+    покраснев, становится работой по источнику 2, а конфликтнув — по источнику
+    1, и это то же изменение, сменившее источник, а не другая очередь.
+
+    Признаки разные по природе, и это названо, а не сглажено. Источник 0 и
+    источник 4 приходят МЕТКОЙ: краснота общей ветки — решение конвейера,
+    слово владельца — решение человека, и вывести его из дерева нельзя вовсе
+    («у владельца есть предмет, которого механизм не знает»). Источник 3
+    выводится МАШИННО: снятие находки живёт строкой в теле изменения.
+    Источник 5 — ЭВРИСТИКА по тронутому файлу, и она объявлена такой.
 
     Заморозки здесь нет: красная общая ветка решается ОТБОРОМ, а не ступенью.
-    Учитывать её и тут значило бы завести ветку, которая в рабочем пути не
-    исполняется никогда. Ступень «чинит» первая и на зелёной базе: починка,
-    поданная позже, обгоняет готовое раньше.
+    Ступень «чинит» первая и на зелёной базе: починка, поданная позже,
+    обгоняет готовое раньше.
     """
     if change.fixes_main:
-        return RANK_FIX_MAIN
+        return RANK_MAIN_RED
+    if changerefs.resolved_in(change.body):
+        return RANK_FINDINGS
     if LABEL_BLOCKER in change.marks:
-        return RANK_BLOCKER
-    if change.files & shared:
-        return RANK_SHARED
-    return RANK_REST
+        return RANK_OWNER
+    if RULES_ANSWER in change.files:
+        return RANK_RULES
+    return RANK_PLAN
 
 
 def order(changes: list[Change], shared: frozenset[str]) -> list[Change]:
-    """Очередь по правилу; внутри ступени — по номеру изменения."""
-    return sorted(changes, key=lambda change: (rank(change, shared), change.number))
+    """Очередь: сначала правило, потом пропускная способность, потом приход.
+
+    «Трогает общий с соседом файл» — НЕ ступень и не приоритет: это способ
+    уменьшить будущие конфликты, а не утверждение о важности. Поэтому он решает
+    ВНУТРИ ступени, до номера: среди равных вперёд идёт тот, чьё слияние
+    избавит соседей от подтягивания базы.
+
+    Номер изменения — последний ключ: приход решает только там, где правило и
+    пропускная способность уже ничего не решают.
+    """
+    return sorted(
+        changes,
+        key=lambda change: (rank(change), not (change.files & shared), change.number),
+    )
 
 
 def on_the_shared_branch(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -537,7 +591,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
 
     print(f"кандидатов: {len(queue)}")
     for place, change in enumerate(queue, start=1):
-        step = RANK_NAMES[rank(change, shared)]
+        step = RANK_NAMES[rank(change)]
         print(f"  {place}. #{change.number} [{step}] — {change.title}")
 
     for change in queue:
@@ -548,7 +602,9 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         if problems:
             # Красное возвращает изменение в контур 1 источником 2, а очередь
             # идёт дальше: одна красная голова не обязана держать остальных.
-            print(f"#{change.number}: не готово, пропущено — {'; '.join(problems)}")
+            print(
+                f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — {'; '.join(problems)}"
+            )
             continue
 
         state = merge_state(repo, change.number, owner_token)
@@ -558,7 +614,8 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             return EXIT_OK
         if state == STATE_CONFLICT:
             print(
-                f"#{change.number}: конфликт — штатный источник работы (004), очередь идёт дальше"
+                f"#{change.number} [{RANK_NAMES[RANK_CONFLICT]}]: штатный источник работы "
+                "(004), очередь идёт дальше"
             )
             continue
         if state not in STATE_MERGEABLE:
