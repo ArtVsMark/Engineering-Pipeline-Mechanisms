@@ -39,10 +39,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+import paths
 import yaml
 
-DEFAULT_PATH: Final = Path(".pipeline.yml")
-WORKFLOWS: Final = Path(".github/workflows")
+DEFAULT_PATH: Final = paths.PIPELINE
+WORKFLOWS: Final = paths.WORKFLOWS
 SCHEMA: Final = 1
 
 REQUIRED: Final = "required"

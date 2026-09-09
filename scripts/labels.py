@@ -19,9 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import paths
 import yaml
 
-DEFAULT_PATH: Final = Path(".github/labels.yml")
+DEFAULT_PATH: Final = paths.LABELS
 COLOR_RE: Final = re.compile(r"^[0-9a-fA-F]{6}$")
 ZONE_PREFIX: Final = "area/"
 

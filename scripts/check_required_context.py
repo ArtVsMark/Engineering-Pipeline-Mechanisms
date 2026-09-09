@@ -26,13 +26,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from pathlib import Path
 from typing import Any, Final
 
 import ghrest
+import paths
 import yaml
 
-GATES_FILE: Final = Path(".github/workflows/ci.yml")
+GATES_FILE: Final = paths.WORKFLOWS / "ci.yml"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
