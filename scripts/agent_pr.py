@@ -34,6 +34,7 @@ from typing import Final
 import changerefs
 import ghrest
 import labels
+import report
 
 PREFIXES: Final = ("agent/", "claude/")
 #: Отметка, по которой видно, что тело собрано механизмом. Тело, правленное
@@ -61,7 +62,7 @@ def git(*args: str) -> str:
         return subprocess.run(["git", *args], capture_output=True, check=True, text=True).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
-        raise NotRun(f"git {' '.join(args)} → {str(detail).strip()[:300]}") from exc
+        raise NotRun(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
 
 
 def changed_files(branch: str, base: str) -> list[str]:

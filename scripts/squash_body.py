@@ -32,6 +32,7 @@ import sys
 from typing import Final
 
 import changerefs
+import report
 
 #: Трейлеры хвостового блока: соавторство и адрес окна. Читаются из последнего
 #: коммита ветки — он же самый свежий, и подпись окна в нём та же.
@@ -51,7 +52,7 @@ def git(*args: str) -> str:
         return subprocess.run(["git", *args], capture_output=True, check=True, text=True).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
-        raise NotRun(f"git {' '.join(args)} → {str(detail).strip()[:300]}") from exc
+        raise NotRun(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
 
 
 def trailers_of(text: str) -> list[str]:

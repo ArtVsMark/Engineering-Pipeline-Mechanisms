@@ -27,6 +27,7 @@ import sys
 from typing import Final
 
 import journal
+import report
 
 FRAGMENT_RE: Final = journal.PATH_RE
 # Тронув только это, изменение журналу ничего не сообщает.
@@ -48,7 +49,7 @@ def run(args: list[str]) -> str:
         return subprocess.run(args, capture_output=True, check=True, text=True).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
-        raise NotRun(f"{' '.join(args)} → {str(detail).strip()[:300]}") from exc
+        raise NotRun(f"{' '.join(args)} → {report.cut(str(detail))}") from exc
 
 
 def changed_files(base: str) -> list[str]:

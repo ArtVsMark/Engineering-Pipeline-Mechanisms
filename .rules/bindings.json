@@ -45,7 +45,9 @@
       "status": "unreviewed"
     },
     "010": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/ci_complete.py — пустой список записей на голове считается отказом, а не «зелено»: «прогон не стартовал» и «все прошли» разведены; tests/test_gates_complete.py держит это отказом"
     },
     "011": {
       "status": "active",
@@ -53,7 +55,9 @@
       "where": "scripts/ci_complete.py — опрос условный: с пределом ожидания и выходом по вердикту, а не бесконечный; прочие прогоны идут от событий, расписаний в проекте нет"
     },
     "012": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md, критические запреты — «НЕ пушить в ветку чужого изменения: её ведёт своё окно». Машинно не проверяется и назван в своде как раз поэтому"
     },
     "013": {
       "status": "unreviewed"
@@ -62,10 +66,13 @@
       "status": "unreviewed"
     },
     "015": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "параллельных исполнителей проект не запускает: окно одно, и оно же правит дерево. Правило вступит вместе с первым подагентом"
     },
     "016": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/report.py — обрезка вывода одна на все механизмы и называет полный объём; tests/test_report.py запрещает срез строки-вывода на месте, в обход общего механизма"
     },
     "017": {
       "status": "active",
@@ -79,7 +86,8 @@
       "status": "unreviewed"
     },
     "020": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "волн параллельных исполнителей нет — нечего перезапускать дельтой"
     },
     "021": {
       "status": "active",
@@ -126,7 +134,8 @@
       "where": "scripts/check_journal.py — изменение без фрагмента отвергается; changelog.d/ — фрагменты; scripts/build_changelog.py — сборка"
     },
     "031": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "залпов параллельных исполнителей проект не делает"
     },
     "032": {
       "status": "unreviewed"
@@ -135,7 +144,8 @@
       "status": "unreviewed"
     },
     "034": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "исполнителей, между которыми делится роль, в проекте нет"
     },
     "035": {
       "status": "active",
@@ -237,10 +247,12 @@
       "status": "unreviewed"
     },
     "060": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "волн нет, и разбирать между ними нечего"
     },
     "061": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "исполнителю, запускающему продукт, задание здесь не выдаётся: продукт проекта — механизмы конвейера"
     },
     "062": {
       "status": "unreviewed"
@@ -298,7 +310,8 @@
       "status": "unreviewed"
     },
     "077": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "проект одноязычный: строк с ключами и их переводов нет вовсе"
     },
     "078": {
       "status": "active",
@@ -314,13 +327,15 @@
       "where": "AGENTS.md — раздел «Новое правило — в общий каталог»; .rules/proposals.json — канал предложений"
     },
     "081": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "чужой код проект не исполняет; действия каталога подключаются ссылкой на версию, а не копией"
     },
     "082": {
       "status": "unreviewed"
     },
     "083": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "недетерминированного компонента в механизмах нет: вывод ревьюера читается строками, и его вердикт — вход, а не предмет проверки"
     },
     "084": {
       "status": "active",
@@ -371,7 +386,8 @@
       "status": "unreviewed"
     },
     "096": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "своего хранилища данных у проекта нет: состояние живёт в трекере площадки и в дереве"
     },
     "097": {
       "status": "active",
@@ -446,7 +462,8 @@
       "status": "unreviewed"
     },
     "117": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "заданий исполнителям проект не выдаёт — числовые границы задавать некому"
     },
     "118": {
       "status": "unreviewed"
@@ -464,7 +481,9 @@
       "where": "CLAUDE.md — окно эфемерно, и его закрытие ничего не закрывает: работа считается сделанной по слитому изменению и закрытой задаче, а состояние между окнами берётся из трекера, а не из пересказа"
     },
     "122": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": "шаг badges — facts.json отдаёт числа сырыми, значок рядом показывает то же число отформатированным; scripts/build_facts.py собирает оба из одного источника"
     },
     "123": {
       "status": "active",
