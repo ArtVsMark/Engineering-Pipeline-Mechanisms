@@ -33,6 +33,8 @@ import urllib.request
 from collections.abc import Iterator
 from typing import Any, Final
 
+import report
+
 API_ROOT: Final = "https://api.github.com"
 API_VERSION: Final = "2022-11-28"
 TIMEOUT: Final = 30
@@ -177,7 +179,7 @@ def request(
     except urllib.error.HTTPError as exc:
         # Тело читается ОДИН раз и ДО разбора: поток одноразовый, а именно в нём
         # приходит настоящая причина отказа.
-        detail = exc.read().decode(errors="replace")[:300]
+        detail = report.cut(exc.read().decode(errors="replace"))
         remaining, reset, resource = _quota_from(exc.headers)
         retry_after = exc.headers.get("retry-after") if exc.headers else None
         # Квота — ТОЛЬКО когда площадка о ней сказала: остаток равен нулю либо

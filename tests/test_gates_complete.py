@@ -37,6 +37,22 @@ def test_missing_record_is_rejected() -> None:
     assert len(problems) == 1 and "записи нет" in problems[0]
 
 
+def test_both_failures_are_named() -> None:
+    """Вердикт выносится после последнего случая, а не на первой находке (159).
+
+    Ранний выход снаружи неотличим от рабочего набора: первый отказ назван,
+    остальные превращаются в печать. Проверяется тем, что отказов ровно два и
+    названы оба, а не «есть хотя бы один».
+    """
+    problems, _ = module.verdict(
+        [run("lint", conclusion="failure"), run("test", conclusion="failure")],
+        REQUIRED,
+        "ci-complete",
+    )
+    assert len(problems) == 2
+    assert {problem.split(":")[0] for problem in problems} == {"lint", "test"}
+
+
 def test_skipped_is_rejected() -> None:
     """Пропущенный джоб — отказ: иначе выключение шага обходит гейт."""
     problems, _ = module.verdict(

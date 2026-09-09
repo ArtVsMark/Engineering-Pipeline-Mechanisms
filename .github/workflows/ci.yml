@@ -114,10 +114,13 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin "$BASE:refs/remotes/origin/$BASE"
           base_sha="$(git merge-base "origin/$BASE" HEAD)"
-          git diff --name-only "$base_sha...HEAD" > /tmp/changed.txt
-          echo "тронуто файлов: $(wc -l < /tmp/changed.txt)"
+          # `-z` обязателен: без него git экранирует имена с пробелами и
+          # не-ASCII, и такой путь молча выпадает из отбора зон (165). Список
+          # передаётся ФАЙЛОМ, а не подстановкой: оболочка вырезает NUL.
+          git diff --name-only -z "$base_sha...HEAD" > /tmp/changed.txt
+          echo "тронуто файлов: $(tr -cd '\0' < /tmp/changed.txt | wc -c)"
       - name: метки и связь с задачей
-        run: python scripts/check_pr_meta.py --files "$(cat /tmp/changed.txt)"
+        run: python scripts/check_pr_meta.py --files-from /tmp/changed.txt
 
   journal:
     name: journal
