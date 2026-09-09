@@ -125,3 +125,23 @@ def test_label_events_reach_the_gates() -> None:
     # `on:` — булев ключ, см. load_gates.
     triggers = load_gates()[True]["pull_request"]["types"]
     assert {"labeled", "unlabeled"} <= set(triggers)
+
+
+#: Программа, встроенная прямо в шаг прогона: оболочка меняет экранирование по
+#: дороге, и один и тот же код в файле и в строке ведёт себя по-разному (013).
+EMBEDDED_CODE_RE = re.compile(r"python3?\s+(?:-c\b|-\s*<<)|<<\s*['\"]?(?:PY|PYTHON|EOF_PY)")
+
+
+def test_workflows_do_not_embed_code() -> None:
+    """Логика зовётся файлом, а не встраивается строкой в шаг прогона (013).
+
+    Escape-последовательности проходят через оболочку и меняются, а встроенный
+    код вдобавок не виден ни линтеру, ни типизации, ни набору тестов: три гейта
+    разом перестают его касаться.
+    """
+    embedded = [
+        path.name
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        if EMBEDDED_CODE_RE.search(path.read_text(encoding="utf-8"))
+    ]
+    assert not embedded, f"код встроен в прогон, а не вызван файлом: {embedded}"
