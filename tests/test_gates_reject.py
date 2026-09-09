@@ -190,10 +190,34 @@ def test_change_with_fragment_passes(run_script: RunScript, tmp_path: Path) -> N
     git(repo, "checkout", "-qb", "work")
     (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
     (repo / "changelog.d").mkdir()
-    (repo / "changelog.d" / "7.added.md").write_text("что-то новое\n\n#7\n", encoding="utf-8")
+    (repo / "changelog.d" / "gate-reads-the-diff.added.md").write_text(
+        "что-то новое\n\n#7\n", encoding="utf-8"
+    )
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "с фрагментом")
     assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
+
+
+def test_a_fragment_named_by_the_task_number_is_rejected(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Имя фрагмента говорит, ЧТО изменилось, а не какая задача.
+
+    Одна задача живёт дольше одного изменения, и два захода целятся в одно имя.
+    Конфликта это не даёт — побеждает последний, — поэтому ловить обязан гейт, а
+    не внимательность (075). Замер: `12.fix.md` завели дважды, и запись об
+    исправлении атрибуции исчезла без следа и без выпуска.
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "12.fixed.md").write_text("правка\n\n#12\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "фрагмент назван номером")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == REJECTED
+    assert "назван номером задачи" in result.text
 
 
 def test_no_diff_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
