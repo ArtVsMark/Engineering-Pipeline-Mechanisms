@@ -8,17 +8,17 @@
     "001": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": "scripts/gates_complete.py · scripts/sync_labels.py · scripts/open_pr.py · scripts/check_required_context.py — все обращения к площадке идут REST стандартной библиотекой; GraphQL не вызывается нигде. Гейта на транспорт пока нет: проверка появится вместе с общим транспортным слоем (#2, фаза 2)"
+      "where": "scripts/ci_complete.py · scripts/sync_labels.py · scripts/agent_pr.py · scripts/check_required_context.py — все обращения к площадке идут REST стандартной библиотекой; GraphQL не вызывается нигде. Гейта на транспорт пока нет: проверка появится вместе с общим транспортным слоем (#2, фаза 2)"
     },
     "002": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/gates.yml — джоб на каждый шаг; tests/test_gates_reject.py — гейты проверены тем, что обязаны отвергнуть"
+      "where": ".github/workflows/ci.yml — джоб на каждый шаг; tests/test_gates_reject.py — гейты проверены тем, что обязаны отвергнуть"
     },
     "003": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/open-pr.yml — приставки `agent/**` и `claude/**` переключают открытие изменения; scripts/open_pr.py отказывает ветке без приставки"
+      "where": ".github/workflows/agent-pr.yml — приставки `agent/**` и `claude/**` переключают открытие изменения; scripts/agent_pr.py отказывает ветке без приставки"
     },
     "004": {
       "status": "unreviewed"
@@ -48,7 +48,7 @@
     "011": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": "scripts/gates_complete.py — опрос условный: с пределом ожидания и выходом по вердикту, а не бесконечный; прочие прогоны идут от событий, расписаний в проекте нет"
+      "where": "scripts/ci_complete.py — опрос условный: с пределом ожидания и выходом по вердикту, а не бесконечный; прочие прогоны идут от событий, расписаний в проекте нет"
     },
     "012": {
       "status": "unreviewed"
@@ -190,7 +190,7 @@
     "049": {
       "status": "active",
       "mechanism": "gate",
-      "where": "scripts/gates_complete.py — состояние берётся опросом проверок на голове изменения, реестра проверок проект не ведёт"
+      "where": "scripts/ci_complete.py — состояние берётся опросом проверок на голове изменения, реестра проверок проект не ведёт"
     },
     "050": {
       "status": "unreviewed"
@@ -198,7 +198,7 @@
     "051": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": ".github/workflows/open-pr.yml и .github/workflows/labels-sync.yml — ненастроенность даёт предупреждение, а не отказ; красным остаётся только третий исход"
+      "where": ".github/workflows/agent-pr.yml и .github/workflows/labels-sync.yml — ненастроенность даёт предупреждение, а не отказ; красным остаётся только третий исход"
     },
     "052": {
       "status": "not-applicable",
@@ -274,7 +274,7 @@
     "073": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": ".github/workflows/gates.yml и labels-sync.yml — pip install с верхними границами: ruff<1, mypy<2, pytest<10, pyyaml<7"
+      "where": ".github/workflows/ci.yml и labels-sync.yml — pip install с верхними границами: ruff<1, mypy<2, pytest<10, pyyaml<7"
     },
     "074": {
       "status": "active",
@@ -333,7 +333,7 @@
     "090": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": ".github/workflows/gates.yml — джоб attribution подключён действием каталога ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0, а не переписан здесь; .rules/bindings.json собран onboard_consumer.py каталога"
+      "where": ".github/workflows/ci.yml — джоб attribution подключён действием каталога ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0, а не переписан здесь; .rules/bindings.json собран onboard_consumer.py каталога"
     },
     "091": {
       "status": "active",
@@ -381,7 +381,7 @@
     "104": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": ".github/workflows/gates.yml · open-pr.yml · labels-sync.yml · required-context.yml · rules-inbox.yml — у каждого есть workflow_dispatch"
+      "where": ".github/workflows/ci.yml · agent-pr.yml · labels-sync.yml · required-context.yml · rules-inbox.yml — у каждого есть workflow_dispatch"
     },
     "105": {
       "status": "unreviewed"
@@ -404,7 +404,7 @@
     "111": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": ".github/workflows/open-pr.yml — конвейер открывает изменение сам, а не советует окну сделать это"
+      "where": ".github/workflows/agent-pr.yml — конвейер открывает изменение сам, а не советует окну сделать это"
     },
     "112": {
       "status": "unreviewed"
@@ -447,7 +447,7 @@
     "123": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/gates.yml — джоб attribution с baseline cb26ec4; .github/authors.txt — список согласованных имён"
+      "where": ".github/workflows/ci.yml — джоб attribution с baseline cb26ec4; .github/authors.txt — список согласованных имён"
     },
     "124": {
       "status": "unreviewed"
@@ -479,7 +479,7 @@
     "131": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/open-pr.yml — изменение открывает конвейер токеном владельца; scripts/open_pr.py не переходит на токен прогона даже при отсутствии секрета"
+      "where": ".github/workflows/agent-pr.yml — изменение открывает конвейер токеном владельца; scripts/agent_pr.py не переходит на токен прогона даже при отсутствии секрета"
     },
     "132": {
       "status": "active",
@@ -576,7 +576,7 @@
     "156": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/gates.yml — джоб attribution проверяет хвостовой блок трейлеров"
+      "where": ".github/workflows/ci.yml — джоб attribution проверяет хвостовой блок трейлеров"
     },
     "157": {
       "status": "active",
@@ -620,7 +620,7 @@
     "168": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/gates.yml — gates-complete собран опросом, без needs; scripts/gates_complete.py; tests/test_gates_contract.py проверяет отсутствие needs и полноту опроса"
+      "where": ".github/workflows/ci.yml — ci-complete собран опросом, без needs; scripts/ci_complete.py; tests/test_gates_contract.py проверяет отсутствие needs и полноту опроса"
     },
     "169": {
       "status": "unreviewed"
@@ -659,7 +659,7 @@
     "179": {
       "status": "active",
       "mechanism": "pipeline",
-      "where": ".github/workflows/gates.yml, open-pr.yml, labels-sync.yml — группа отмены называет голову, а не только номер изменения"
+      "where": ".github/workflows/ci.yml, agent-pr.yml, labels-sync.yml — группа отмены называет голову, а не только номер изменения"
     },
     "180": {
       "status": "unreviewed"
@@ -685,14 +685,14 @@
     "187": {
       "status": "active",
       "mechanism": "gate",
-      "where": "scripts/gates_complete.py — пропущенная, отменённая и отсутствующая записи считаются отказом; tests/test_gates_complete.py прогоняет каждый из этих случаев"
+      "where": "scripts/ci_complete.py — пропущенная, отменённая и отсутствующая записи считаются отказом; tests/test_gates_complete.py прогоняет каждый из этих случаев"
     },
     "188": {
       "status": "unreviewed"
     },
     "189": {
       "status": "rejected",
-      "why": "имя ветки в облачном окне назначает платформа, окно его не выбирает — правило требует того, чем проект не управляет. Не обойдено молча: open-pr.yml подхватывает и платформенную приставку `claude/**`, связь изменения с задачей держит scripts/check_pr_meta.py, а разрыв назван в CLAUDE.md. Пересмотр — вместе с #12, если появится способ назначать имя ветки из окна"
+      "why": "имя ветки в облачном окне назначает платформа, окно его не выбирает — правило требует того, чем проект не управляет. Не обойдено молча: agent-pr.yml подхватывает и платформенную приставку `claude/**`, связь изменения с задачей держит scripts/check_pr_meta.py, а разрыв назван в CLAUDE.md. Пересмотр — вместе с #12, если появится способ назначать имя ветки из окна"
     },
     "190": {
       "status": "active",

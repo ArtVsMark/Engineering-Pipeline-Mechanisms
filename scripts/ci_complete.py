@@ -138,9 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--sha", default=os.environ.get("HEAD_SHA", ""))
     parser.add_argument("--required", required=True, help="имена джобов через запятую")
-    parser.add_argument(
-        "--self-name", default="gates-complete", help="собственное имя, себя не ждём"
-    )
+    parser.add_argument("--self-name", default="ci-complete", help="собственное имя, себя не ждём")
     parser.add_argument("--timeout", type=int, default=900, help="сколько ждать соседей, секунд")
     parser.add_argument("--interval", type=int, default=20, help="пауза между опросами, секунд")
     args = parser.parse_args(argv)

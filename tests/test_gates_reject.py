@@ -320,7 +320,7 @@ def test_scripts_are_where_the_contract_says() -> None:
         "check_version.py",
         "check_pr_meta.py",
         "check_required_context.py",
-        "gates_complete.py",
+        "ci_complete.py",
         "agent_pr.py",
     }
     assert expected <= {path.name for path in (ROOT / "scripts").glob("*.py")}

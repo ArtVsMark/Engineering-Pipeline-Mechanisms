@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--branch", default="main")
-    parser.add_argument("--summary-job", default="gates-complete")
+    parser.add_argument("--summary-job", default="ci-complete")
     args = parser.parse_args(argv)
 
     try:

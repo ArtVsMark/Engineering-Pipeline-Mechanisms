@@ -17,7 +17,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 GATES = ROOT / ".github" / "workflows" / "ci.yml"
 CONTRACT = ROOT / "docs" / "pipeline.md"
-SUMMARY = "gates-complete"
+SUMMARY = "ci-complete"
 
 
 def load_gates() -> dict[Any, Any]:

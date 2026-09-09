@@ -124,7 +124,7 @@ def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
 def test_review_is_not_a_required_context() -> None:
     """Ревью не входит в сводный гейт: необязательный канал не держит слияние."""
     gates = load(WORKFLOWS / "ci.yml")
-    step = gates["jobs"]["gates-complete"]["steps"][-1]["run"]
+    step = gates["jobs"]["ci-complete"]["steps"][-1]["run"]
     match = re.search(r'--required "([^"]+)"', step)
     assert match, "сводный гейт не называет, что опрашивает — проверять нечего (075)"
     assert "review" not in match.group(1)
