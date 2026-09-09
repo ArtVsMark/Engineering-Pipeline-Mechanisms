@@ -190,3 +190,27 @@ def test_a_link_next_to_code_is_still_read() -> None:
     """Вырезается только код: настоящая связь рядом с примером остаётся."""
     text = "правка в `scripts/changerefs.py`\n\nRefs #7"
     assert [str(link) for link in changerefs.links_in(text)] == ["Refs #7"]
+
+
+def test_an_unpaired_backtick_eats_nothing() -> None:
+    """Забытая кавычка не съедает связь из соседнего коммита.
+
+    Шаг открытия склеивает тела всех коммитов ветки, и вставка, тянущаяся
+    через границу коммита, уносила с собой настоящие строки. Замер: связь
+    `Refs #12` пропадала целиком, и ветка с названной задачей не открывалась.
+    """
+    text = "fix: не используй `--no-verify\n\nRefs #12\n---\nfeat: правка `кода`\n\nRefs #7"
+    assert [str(link) for link in changerefs.links_in(text)] == ["Refs #12", "Refs #7"]
+
+
+def test_an_unpaired_backtick_does_not_eat_a_resolution() -> None:
+    """То же для снятия находки: строка не теряется по дороге в описание."""
+    text = "fix: флаг `--no-verify\n\nРазобрано: abc1234\n---\nfeat: `код`"
+    assert changerefs.resolved_in(text) == ["abc1234"]
+
+
+def test_a_code_block_is_still_cut_whole() -> None:
+    """Тройная вставка вырезается целиком, вместе с переносами внутри неё."""
+    assert changerefs.links_in("```\nRefs #12\nещё строка\n```\nRefs #7") == (
+        changerefs.links_in("Refs #7")
+    )
