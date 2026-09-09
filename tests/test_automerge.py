@@ -668,3 +668,70 @@ def test_a_dry_run_marks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     module.mark_closed_items(
         "o/r", change(1, "automerge", body="Refs #25\nЗакрывает пункт: этап"), "token", dry_run=True
     )
+
+
+# --- метка присвоенного источника --------------------------------------------
+
+
+def test_the_assigned_source_is_published_as_a_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Очередь выставляет изменению метку присвоенного источника."""
+    seen: list[tuple[str, str, Any]] = []
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda method, path, tok, body=None: seen.append((method, path, body)),
+    )
+    module.publish_source("o/r", change(7, "automerge"), module.RANK_PLAN, "token", dry_run=False)
+    assert seen == [("POST", "repos/o/r/issues/7/labels", {"labels": ["source/6"]})]
+
+
+def test_an_unchanged_source_costs_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Метка не переставляется, пока источник не сменился.
+
+    Заход идёт на каждое событие; платить запросом за неизменившееся состояние
+    значит тратить квоту на ничто (017).
+    """
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("метка не должна переставляться без нужды")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    item = change(7, "automerge", "source/6")
+    module.publish_source("o/r", item, module.RANK_PLAN, "token", dry_run=False)
+
+
+def test_a_changed_source_replaces_the_stale_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сменился источник — старая метка снимается, новая ставится.
+
+    Две метки источника разом означали бы, что изменение принадлежит двум
+    источникам сразу; такого состояния нет.
+    """
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda method, path, tok, body=None: seen.append((method, path.rsplit("/", 1)[-1])),
+    )
+    item = change(7, "automerge", "source/6")
+    module.publish_source("o/r", item, module.RANK_OWN_RED, "token", dry_run=False)
+    assert seen[0] == ("DELETE", "source%2F6")
+    assert seen[1][0] == "POST"
+
+
+def test_a_refused_label_does_not_stop_the_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ разметки заход не роняет: метка — след, а не вход (084)."""
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.publish_source("o/r", change(7, "automerge"), module.RANK_PLAN, "token", dry_run=False)
+
+
+def test_every_source_label_is_declared_in_the_config() -> None:
+    """Метка-след объявлена составом наравне со входом.
+
+    Гейт разметки отвергает изменение с меткой, которой нет в составе, — то
+    есть очередь могла бы своей же меткой сделать изменение красным (068).
+    """
+    module.check_labels_declared()
