@@ -36,11 +36,12 @@ from pathlib import Path
 from typing import Final
 
 import journal
+import paths
 
-FRAGMENTS: Final = Path("changelog.d")
-RELEASED: Final = FRAGMENTS / "released"
-OUTPUT: Final = Path("CHANGELOG.md")
-VERSION_FILE: Final = Path("CONTRACT_VERSION")
+FRAGMENTS: Final = paths.FRAGMENTS
+RELEASED: Final = paths.RELEASED
+OUTPUT: Final = paths.CHANGELOG
+VERSION_FILE: Final = paths.VERSION
 VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
 LINK_LINE_RE: Final = journal.LINK_LINE_RE
 

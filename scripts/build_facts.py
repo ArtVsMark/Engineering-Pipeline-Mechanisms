@@ -37,10 +37,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+import paths
 import pipeline_checks as policy
 
-VERSION_FILE: Final = Path("CONTRACT_VERSION")
-BINDINGS: Final = Path(".rules/bindings.json")
+VERSION_FILE: Final = paths.VERSION
+BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
 BADGE: Final = "rules.svg"
 

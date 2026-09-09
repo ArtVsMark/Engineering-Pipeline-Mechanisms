@@ -28,7 +28,9 @@ import sys
 from pathlib import Path
 from typing import Final
 
-VERSION_FILE: Final = Path("CONTRACT_VERSION")
+import paths
+
+VERSION_FILE: Final = paths.VERSION
 VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
 MARKER_RE: Final = re.compile(r"<!--m:contract-->(?P<value>[^<]*)<!--/m:contract-->")
 

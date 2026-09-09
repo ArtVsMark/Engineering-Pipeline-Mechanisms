@@ -167,7 +167,10 @@ YAML_READERS: Final = {
 
 @pytest.mark.parametrize(
     "path",
-    sorted(p for p in SCRIPTS.glob("*.py") if p.name not in {"labels.py", "ghrest.py"}),
+    # `paths.py` назван здесь по той же причине, что и `labels.py`: он ЯКОРЬ, а
+    # не читатель. Адрес состава объявлен в нём одном, и требовать от него
+    # ходить за адресом в разборщик значило бы завести круг.
+    sorted(p for p in SCRIPTS.glob("*.py") if p.name not in {"labels.py", "ghrest.py", "paths.py"}),
     ids=lambda p: p.name,
 )
 def test_no_mechanism_parses_the_label_config_itself(path: Path) -> None:
