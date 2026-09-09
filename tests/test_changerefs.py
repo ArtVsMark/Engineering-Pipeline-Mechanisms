@@ -280,3 +280,37 @@ def test_description_is_built_from_separate_bodies(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(agent_pr, "git", git)
     _, body = agent_pr.describe("agent/окно", "main")
     assert "Refs #12" in body and "Refs #7" in body
+
+
+# --- пункт чек-листа ---------------------------------------------------------
+
+
+def test_an_item_is_recognised_through_its_punctuation() -> None:
+    """Знак конца строки к пункту не относится.
+
+    В теле задачи пункты идут списком и кончаются точкой с запятой, а в теле
+    изменения их пишут рукой и без неё. Замер 09.09.2026: первое же слияние с
+    объявленным пунктом ничего не отметило именно из-за «;».
+    """
+    assert changerefs.normalise("сделать штуку;") == changerefs.normalise("сделать штуку")
+    assert changerefs.normalise("**сделать штуку**.") == changerefs.normalise("сделать штуку")
+
+
+def test_punctuation_inside_the_item_survives() -> None:
+    """Внутренний знак — часть пункта, и обрезать его нельзя.
+
+    Иначе два разных пункта, отличающиеся только запятой, стали бы одним, и
+    отметка уехала бы на соседний — молча.
+    """
+    assert "," in changerefs.normalise("отметить пункт, не закрывая задачу;")
+
+
+def test_a_line_break_does_not_break_the_match() -> None:
+    """Пункт, перенесённый по строкам, узнаётся так же."""
+    assert changerefs.normalise("длинный\n   пункт") == changerefs.normalise("длинный пункт")
+
+
+def test_a_declared_item_is_read_from_the_body() -> None:
+    """Строка объявления читается целиком и без повторов."""
+    text = "Refs #25\nЗакрывает пункт: первый\nЗакрывает пункт: первый\nЗакрывает пункт: второй"
+    assert changerefs.closed_items_in(text) == ["первый", "второй"]
