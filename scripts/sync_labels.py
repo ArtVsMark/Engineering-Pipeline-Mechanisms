@@ -28,9 +28,10 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Iterator
+from typing import Any, Final
 
 import yaml
 
@@ -58,10 +59,9 @@ class Label:
 
     def differs_from(self, actual: dict[str, Any]) -> bool:
         """Отвечает, расходится ли метка площадки с объявленной."""
-        return (
-            (actual.get("color") or "").lower() != self.color.lower()
-            or (actual.get("description") or "") != self.description
-        )
+        return (actual.get("color") or "").lower() != self.color.lower() or (
+            actual.get("description") or ""
+        ) != self.description
 
 
 def load_declared(path: Path) -> list[Label]:
@@ -188,7 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: разбирает ключи, печатает исход, возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="состав меток")
-    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="владелец/имя")
+    parser.add_argument(
+        "--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="владелец/имя"
+    )
     parser.add_argument("--dry-run", action="store_true", help="показать разницу, не применяя её")
     args = parser.parse_args(argv)
 

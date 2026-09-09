@@ -71,7 +71,8 @@ def api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -
             payload = response.read()
             return json.loads(payload) if payload else None
     except urllib.error.HTTPError as exc:
-        raise NotRun(f"{method} {url} → {exc.code}: {exc.read().decode(errors='replace')[:400]}") from exc
+        detail = exc.read().decode(errors="replace")[:400]
+        raise NotRun(f"{method} {url} → {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise NotRun(f"{method} {url} → площадка недоступна: {exc.reason}") from exc
 
@@ -79,7 +80,8 @@ def api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -
 def describe(branch: str, base: str) -> tuple[str, str]:
     """Собирает заголовок и тело изменения из коммитов ветки."""
     merge_base = git("merge-base", f"origin/{base}", branch).strip()
-    subjects = [s for s in git("log", "--reverse", "--format=%s", f"{merge_base}..{branch}").splitlines() if s]
+    log = git("log", "--reverse", "--format=%s", f"{merge_base}..{branch}")
+    subjects = [line for line in log.splitlines() if line]
     if not subjects:
         raise NotRun(f"в ветке {branch} нет коммитов сверх {base} — открывать нечего (075)")
 
@@ -138,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         query = urllib.parse.urlencode({"head": head, "state": "open"})
         existing = api("GET", f"{API_ROOT}/repos/{args.repo}/pulls?{query}", token) or []
         if existing:
-            print(f"изменение для ветки уже открыто: #{existing[0]['number']} — второе не заводится")
+            number = existing[0]["number"]
+            print(f"изменение для ветки уже открыто: #{number} — второе не заводится")
             return EXIT_OK
 
         title, body = describe(args.branch, args.base)

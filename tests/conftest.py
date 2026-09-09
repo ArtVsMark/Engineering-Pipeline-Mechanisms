@@ -1,0 +1,77 @@
+"""Общее для тестов: корень репозитория и запуск скриптов как процессов."""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import subprocess
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+@dataclass(frozen=True, slots=True)
+class Run:
+    """Результат прогона скрипта: код возврата и оба потока."""
+
+    code: int
+    out: str
+    err: str
+
+    @property
+    def text(self) -> str:
+        """Оба потока разом — исход печатается в любой из них."""
+        return self.out + self.err
+
+
+RunScript = Callable[..., "Run"]
+
+
+@pytest.fixture
+def run_script() -> RunScript:
+    """Запускает скрипт проекта отдельным процессом, как это делает прогон."""
+
+    def _run(
+        script: str,
+        *args: str,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> Run:
+        environment = dict(os.environ)
+        if env is not None:
+            for key, value in env.items():
+                if value == "":
+                    environment.pop(key, None)
+                else:
+                    environment[key] = value
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / script), *args],
+            capture_output=True,
+            text=True,
+            cwd=cwd or ROOT,
+            env=environment,
+        )
+        return Run(completed.returncode, completed.stdout, completed.stderr)
+
+    return _run
+
+
+def load_script(name: str) -> ModuleType:
+    """Импортирует скрипт проекта как модуль, чтобы проверять его логику прямо.
+
+    Скрипты живут в `scripts/` и не образуют пакет: они исполняемые, и друг
+    друга не импортируют. Для тестов модуль собирается по пути.
+    """
+    path = ROOT / "scripts" / name
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"не собрать модуль из {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

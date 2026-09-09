@@ -25,7 +25,6 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 from typing import Final
 
 FRAGMENT_RE: Final = re.compile(r"^changelog\.d/[\w.-]+\.(contract|feat|fix|docs|internal)\.md$")
@@ -89,9 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     substantive = [
-        name
-        for name in files
-        if name not in EXEMPT_FILES and not name.startswith(EXEMPT_PREFIXES)
+        name for name in files if name not in EXEMPT_FILES and not name.startswith(EXEMPT_PREFIXES)
     ]
     if not substantive:
         print("изменение тронуло только журнал и производные файлы — фрагмент не нужен")

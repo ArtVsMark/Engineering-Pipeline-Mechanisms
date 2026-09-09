@@ -29,7 +29,9 @@ RELEASED: Final = FRAGMENTS / "released"
 OUTPUT: Final = Path("CHANGELOG.md")
 VERSION_FILE: Final = Path("CONTRACT_VERSION")
 VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
-FRAGMENT_RE: Final = re.compile(r"^(?P<task>[\w.-]+)\.(?P<kind>contract|feat|fix|docs|internal)\.md$")
+FRAGMENT_RE: Final = re.compile(
+    r"^(?P<task>[\w.-]+)\.(?P<kind>contract|feat|fix|docs|internal)\.md$"
+)
 
 KINDS: Final = {
     "contract": "Несовместимое: поверхность контракта",
@@ -81,7 +83,8 @@ def read_fragments(directory: Path) -> list[Fragment]:
         raise NotRun(
             "фрагменты с неразбираемым именем или пустые:\n  "
             + "\n  ".join(unnamed)
-            + "\n\nИмя: <задача>.<род>.md, род — " + " · ".join(KINDS)
+            + "\n\nИмя: <задача>.<род>.md, род — "
+            + " · ".join(KINDS)
         )
     return fragments
 
