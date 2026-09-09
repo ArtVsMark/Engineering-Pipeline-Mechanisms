@@ -23,7 +23,9 @@
       "where": ".github/workflows/agent-pr.yml — приставки `agent/**` и `claude/**` переключают открытие изменения; scripts/agent_pr.py отказывает ветке без приставки"
     },
     "004": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": "scripts/ci_complete.py — совещательная проверка красной не роняет опрос: её краснота помечается, печатается с адресатом и вердикт по обязательным выносится дальше. Конфликт слияния назван штатным источником работы, а не аварией: docs/behaviour.md, контур 1, источник 1. Механизм, которому это правило стоило инцидента — очередь, обходящая конфликтную голову, — шаг 8 (docs/decisions/003-own-automerge-not-native-queue.md), и там ответ станет гейтом"
     },
     "005": {
       "status": "active",
@@ -121,7 +123,9 @@
       "where": "scripts/review_findings.py — render_body печатает «Пусто», а не оставляет пустой раздел; .rules/proposals.json объявляет пустой список законным состоянием; tests/test_review_findings.py::test_empty_body_says_so_explicitly"
     },
     "028": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md, раздел «Открытая работа» — комплексная задача ведётся подзадачами площадки, а не прозой в теле: состояние читается счётчиком, а не вычитыванием. Так закрыт эпик #7 — восемь подзадач, счётчик 8/8, а не абзац о том, что осталось"
     },
     "029": {
       "status": "active",
@@ -227,13 +231,17 @@
       "why": "порядок очереди задавать нечему: очереди нет до решения #3. По той же причине не заведены метки blocker и hold — причина записана в .github/labels.yml"
     },
     "054": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": "scripts/review_findings.py — шаг ревью только записывает сырые строки «НАХОДКА:» в живую задачу и идёт дальше; ничего не чинит и не оценивает. Разбор — отдельным проходом на границе работы: источник 3 в docs/behaviour.md, снятие записи по отпечатку в теле следующего изменения"
     },
     "055": {
       "status": "unreviewed"
     },
     "056": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "tests/test_gates_reject.py и tests/test_gates_complete.py — у каждого исхода проверяется вторая половина: «записи нет на голове — прогон не стартовал, а не „зелено“», «под учётом нет ни одного файла — ошибка входа, а не „чисто“». Тексты живут в scripts/ci_complete.py, scripts/check_version.py, scripts/check_journal.py, а держит их отказом гейт, а не внимательность"
     },
     "057": {
       "status": "active",
@@ -289,7 +297,9 @@
       "status": "unreviewed"
     },
     "072": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "tests/test_ghrest.py — две защиты на один предмет: AST-гейт test_no_mechanism_talks_to_the_platform_directly ловит намерение до запуска (импорт urllib.request мимо транспорта), живой HTTP-сервер в фикстуре ловит последствие после (разбор 404, квоты, неразобранного ответа). Каждая слепа там, где видит другая: гейт не знает, что механизм разберёт отказ неверно, фикстура не знает о механизме, который в неё не заглянул"
     },
     "073": {
       "status": "active",
@@ -307,7 +317,8 @@
       "where": "scripts/check_version.py · check_journal.py · check_pr_meta.py · gates_complete.py · build_changelog.py — отсутствие предмета даёт третий исход, а не «чисто»; tests/test_gates_reject.py прогоняет каждый такой случай"
     },
     "076": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "получателя вне дерева у проекта пока нет: все сообщения механизмов адресованы окну и прогону, работающим в этом же репозитории, и путь changelog.d/<слаг>.<род>.md у них действительно есть. Правило вступит вместе с пакетом (шаг 9 в docs/roadmap.md): у ставящего его получателя будет дистрибутив, а не дерево, и подсказка, зовущая в tests/ или .github/, станет ложной"
     },
     "077": {
       "status": "not-applicable",
@@ -357,7 +368,9 @@
       "status": "unreviewed"
     },
     "089": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/badges.yml и scripts/build_facts.py — витрина собирается ИЗ источника и толкается в ветку-сироту badges; обратного хода нет. README.md называет адрес витрины потребителю (соседу, каталогу), а читателя дерева за содержимым туда не отправляет: состав классов проверок он берёт из .pipeline.yml, ответы каталогу — из .rules/bindings.json"
     },
     "090": {
       "status": "active",
@@ -404,10 +417,13 @@
       "status": "unreviewed"
     },
     "101": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/ghrest.py — постоянный отказ отделён от временного и не повторяется: 404 — свой род, 401/403 без заголовков квоты — «причина другая», а не лимит. Исчерпанной квоте механизм не назначает своей паузы: срок берётся из retry-after либо x-ratelimit-reset площадки. Держат tests/test_ghrest.py: test_exhausted_quota_is_its_own_kind, test_forbidden_without_quota_headers_is_not_rate_limit, test_retry_after_alone_is_enough_for_rate_limit"
     },
     "102": {
-      "status": "unreviewed"
+      "status": "not-applicable",
+      "why": "сравнений с послаблениями проект не делает: гейты сверяют имена джобов, статусы и адреса точно, и «почти совпало» здесь не бывает — расхождение и есть предмет проекта. Правило живёт там, где сравнивают вывод решения с эталоном; у соседа-грейдера такой шаг есть, здесь его нет и не планируется"
     },
     "103": {
       "status": "unreviewed"
@@ -418,7 +434,9 @@
       "where": ".github/workflows/ci.yml · agent-pr.yml · labels-sync.yml · required-context.yml · rules-inbox.yml — у каждого есть workflow_dispatch"
     },
     "105": {
-      "status": "unreviewed"
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/review.yml — внешний взгляд ведёт отдельный прогон с закрытым списком инструментов и без истории окна, а не второй заход того же окна по своему же коду. Разбор образцов и что взято у каждого соседа — docs/decisions/002-review-taken-from-two-neighbours.md. Слепое пятно этого ответа названо: прогнать проверки ревью пока не может (#33), и потому видит код, а не поведение"
     },
     "106": {
       "status": "unreviewed"
