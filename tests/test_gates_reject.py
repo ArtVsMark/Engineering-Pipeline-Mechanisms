@@ -135,6 +135,41 @@ def test_missing_version_source_is_third_outcome(run_script: RunScript, tmp_path
 # --- журнал ------------------------------------------------------------------
 
 
+def test_labels_are_read_from_the_platform_not_the_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Гейт разметки читает изменение у площадки, а не снимок события.
+
+    Снимок `opened` не содержит меток по построению: их проставляет шаг
+    открытия через доли секунды ПОСЛЕ события. Замер 09.09: изменение #38
+    отвергнуто за «ни одной зоны», когда все три зоны на нём уже стояли, —
+    вердикт был вынесен по прошлому.
+    """
+    check = load_script("check_pr_meta.py")
+    stale = {"number": 38, "labels": [], "title": "тема", "body": "Refs #1"}
+    live = {"number": 38, "labels": [{"name": "area/core"}], "title": "тема", "body": "Refs #1"}
+
+    calls: list[str] = []
+
+    def request(method: str, path: str, token: str, body: object = None) -> object:
+        calls.append(path)
+        return live
+
+    # Подмена именно через monkeypatch: транспорт общий на все механизмы, и
+    # присвоение атрибута напрямую утекло бы в соседние тесты.
+    monkeypatch.setattr(check.ghrest, "request", request)
+    got = check.fresh(stale, "о/р", "токен")
+    assert calls == ["repos/о/р/pulls/38"]
+    assert got["labels"] == [{"name": "area/core"}]
+
+
+def test_without_a_token_the_snapshot_is_used_and_said_so() -> None:
+    """Без токена вердикт по снимку — и это сказано, а не подменено тихо (045)."""
+    check = load_script("check_pr_meta.py")
+    stale = {"number": 38, "labels": [], "title": "тема", "body": "Refs #1"}
+    assert check.fresh(stale, "о/р", "") is stale
+
+
 def test_change_without_fragment_is_rejected(run_script: RunScript, tmp_path: Path) -> None:
     """Изменение без фрагмента журнала отвергается (030)."""
     repo = prepare_repo(tmp_path)

@@ -149,6 +149,19 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 ([091](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/091-work-sources-are-ordered-first-non-empty-wins.md)).
 Порядок и состояния — [`docs/behaviour.md`](docs/behaviour.md), контур 1.
 
+**Перед планом идут два долга, и оба по уже сделанному:**
+
+1. **находки внешнего взгляда, пережившие слияние** — часть работы, помеченной
+   закрытой, не сделана;
+2. **незакрытая работа по правилам каталога** — правило без ответа, правило
+   «действует, но не держится ничем», поднявшийся контракт с неперечитанными
+   ответами. Этого требует сам каталог
+   ([177](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/177-unfinished-rule-work-comes-first.md)):
+   пока такая работа есть, новую не начинают.
+
+Оба остатка печатает шаг `debt` на каждом изменении: долг обязан быть виден, а
+не вспоминаться.
+
 Трекер — единственный источник статусов. В файлы дерева он не дублируется, и
 **журнала работ в действующих документах нет**
 ([024](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/024-no-worklog-in-active-docs.md)):

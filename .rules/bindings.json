@@ -1,5 +1,7 @@
 {
-  "schema": "1.0",
+  "schema": "1.2",
+  "answers_to": "1.5",
+  "_answers_to": "Версия ВЫГРУЗКИ каталога (export/rules.json → contracts.export), по которой построены ответы. Каталог сверяет её со своей и печатает отставание: подъём контракта — повод перечитать ответы, а не только формат (157). Читается из выгрузки, а не по памяти: первая редакция этого файла объявила schema 1.0, когда каталог ждал 1.2, и расхождение всплыло только на прогоне входящих.",
   "project": "ArtVsMark/Engineering-Pipeline-Mechanisms",
   "catalogue": "https://github.com/ArtVsMark/Engineering-Incidents-Playbook",
   "_": "Ответ ЭТОГО проекта по каждому правилу каталога. Статус — active, rejected, not-applicable или unreviewed; у двух отрицательных обязательна причина в поле why, у active — mechanism и where.",

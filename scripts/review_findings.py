@@ -49,14 +49,15 @@ import sys
 from typing import Any, Final
 
 import changerefs
+import findings
 import ghrest
 
-MARKER: Final = "<!-- review-findings: не удаляйте, по этой строке задача находится снова -->"
-TITLE: Final = "Находки внешнего взгляда: не разобранные"
+MARKER: Final = findings.MARKER
+TITLE: Final = findings.TITLE
 
 VERDICT_RE: Final = re.compile(r"^ВЕРДИКТ:\s*находок\s+(\d+)\s*$", re.I | re.M)
 FINDING_RE: Final = re.compile(r"^НАХОДКА:\s*(\S.*?)\s*$", re.I | re.M)
-ENTRY_RE: Final = re.compile(r"^- `([0-9a-f]{7})` · #(\d+) — (.+?)\s*$", re.M)
+ENTRY_RE: Final = findings.ENTRY_RE
 
 EXIT_NOTHING: Final = 0
 EXIT_BROKEN: Final = 2
@@ -95,9 +96,7 @@ def verdict_of(comments: list[dict[str, Any]]) -> int | None:
     return verdict
 
 
-def parse_entries(body: str | None) -> dict[str, tuple[int, str]]:
-    """Разбирает тело живой задачи обратно в записи по отпечатку."""
-    return {mark: (int(pr), title) for mark, pr, title in ENTRY_RE.findall(body or "")}
+parse_entries = findings.parse_entries
 
 
 def render_body(entries: dict[str, tuple[int, str]]) -> str:
@@ -130,20 +129,7 @@ def render_body(entries: dict[str, tuple[int, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def live_issue(repo: str, token: str) -> tuple[int | None, str]:
-    """Находит живую задачу по скрытому маркеру.
-
-    Списком, а не поиском: поисковый индекс площадки догоняет с задержкой в
-    минуты, и за это время механизм заводит вторую задачу вместо одной.
-    """
-    for item in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
-        # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
-        if item.get("pull_request") is not None:
-            continue
-        body = item.get("body") or ""
-        if MARKER in body:
-            return int(item["number"]), body
-    return None, ""
+live_issue = findings.live_issue
 
 
 def resolved_marks(repo: str, token: str, limit: int = 30) -> set[str]:
