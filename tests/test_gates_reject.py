@@ -65,9 +65,17 @@ def test_label_sync_without_token_does_not_report_clean(run_script: RunScript) -
 # --- версия ------------------------------------------------------------------
 
 
+BASE_BRANCH = "base"
+
+
 def prepare_repo(tmp_path: Path, version: str = "1.2.3") -> Path:
-    """Готовит крошечный репозиторий с источником версии."""
-    git(tmp_path, "init", "-q")
+    """Готовит крошечный репозиторий с источником версии.
+
+    Ветка названа явно: имя по умолчанию зависит от настройки машины — на одной
+    `master`, на другой `main`, — и тест, опирающийся на него, зелен ровно там,
+    где его писали.
+    """
+    git(tmp_path, "init", "-q", "-b", BASE_BRANCH)
     git(tmp_path, "config", "user.email", "t@example.com")
     git(tmp_path, "config", "user.name", "Тест")
     (tmp_path / "CONTRACT_VERSION").write_text(f"{version}\n", encoding="utf-8")
@@ -114,7 +122,7 @@ def test_fresh_marker_passes(run_script: RunScript, tmp_path: Path) -> None:
 
 def test_missing_version_source_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Нет источника версии — гейт не отработал, а не «чисто» (075)."""
-    git(tmp_path, "init", "-q")
+    git(tmp_path, "init", "-q", "-b", BASE_BRANCH)
     (tmp_path / "a.md").write_text("текст\n", encoding="utf-8")
     git(tmp_path, "add", "-A")
     result = run_script("check_version.py", cwd=tmp_path)
@@ -132,7 +140,7 @@ def test_change_without_fragment_is_rejected(run_script: RunScript, tmp_path: Pa
     (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "без фрагмента")
-    result = run_script("check_journal.py", "--base", "master", cwd=repo)
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
     assert result.code == REJECTED
     assert "не несёт фрагмента" in result.text
 
@@ -146,15 +154,36 @@ def test_change_with_fragment_passes(run_script: RunScript, tmp_path: Path) -> N
     (repo / "changelog.d" / "7.feat.md").write_text("что-то новое\n\n#7\n", encoding="utf-8")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "с фрагментом")
-    assert run_script("check_journal.py", "--base", "master", cwd=repo).code == CLEAN
+    assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
 
 
 def test_no_diff_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Нечего проверять — ошибка входа, а не «прошло» (075)."""
     repo = prepare_repo(tmp_path)
-    result = run_script("check_journal.py", "--base", "master", cwd=repo)
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
     assert result.code == BROKEN
     assert "изменений нет" in result.text
+
+
+def test_explicit_base_is_not_rewritten_by_the_environment(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Переданная ключом база не переписывается переменной площадки.
+
+    Гейт дописывал `origin/` ко ВСЯКОЙ базе, если в окружении была
+    GITHUB_BASE_REF, — то есть молча подменял то, что имел в виду зовущий.
+    Локально переменной нет, и расхождение вылезло только на площадке.
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "без фрагмента")
+    result = run_script(
+        "check_journal.py", "--base", BASE_BRANCH, cwd=repo, env={"GITHUB_BASE_REF": "main"}
+    )
+    assert result.code == REJECTED, result.text
+    assert "origin/" not in result.text
 
 
 # --- разметка изменения ------------------------------------------------------

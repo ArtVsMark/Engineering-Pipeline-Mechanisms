@@ -68,16 +68,19 @@ def changed_files(base: str) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
-    default_base = os.environ.get("GITHUB_BASE_REF") or "origin/main"
+    # Площадка отдаёт базу коротким именем («main»), а в дереве прогона она
+    # существует как `origin/main`, поэтому приставка нужна. Но ставится она
+    # ТОЛЬКО к умолчанию из окружения: переданное ключом имя — это то, что
+    # имел в виду зовущий, и молча переписывать его нельзя. Ровно на этом гейт
+    # и упал в первом же прогоне на площадке — локально переменной нет, и
+    # расхождение не воспроизводилось.
+    from_env = os.environ.get("GITHUB_BASE_REF")
+    default_base = f"origin/{from_env}" if from_env else "origin/main"
     parser.add_argument("--base", default=default_base, help="ветка сравнения")
     args = parser.parse_args(argv)
 
-    base = args.base
-    if os.environ.get("GITHUB_BASE_REF") and not base.startswith("origin/"):
-        base = f"origin/{base}"
-
     try:
-        files = changed_files(base)
+        files = changed_files(args.base)
     except NotRun as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN

@@ -35,12 +35,35 @@ def test_skipped_is_rejected() -> None:
     assert any("пропущен" in problem for problem in problems)
 
 
-def test_cancelled_is_rejected() -> None:
-    """Отменённая запись пройденной не является."""
+def test_all_cancelled_is_rejected() -> None:
+    """Если все записи имени отменены, живого вердикта нет — это отказ."""
     problems, _ = module.verdict(
         [run("lint"), run("test", conclusion="cancelled")], REQUIRED, "gates-complete"
     )
-    assert any("отменён" in problem for problem in problems)
+    assert any("все записи отменены" in problem for problem in problems)
+
+
+def test_cancelled_beside_a_live_record_is_ignored() -> None:
+    """Отмена от группы отмены не делает здоровую голову красной.
+
+    Новый толчок или новая метка гасят прогон на той же голове, и его записи
+    остаются лежать рядом с живыми. Первый прогон на площадке покраснел именно
+    на этом: `filter=latest` записи отменённого прогона не отсекает.
+    """
+    runs = [
+        run("lint", conclusion="cancelled"),
+        run("lint"),
+        run("test", conclusion="cancelled"),
+        run("test"),
+    ]
+    assert module.verdict(runs, REQUIRED, "gates-complete") == ([], False)
+
+
+def test_failure_beside_a_cancelled_record_still_rejects() -> None:
+    """Отбрасывание отмен не прячет настоящий отказ."""
+    runs = [run("lint"), run("test", conclusion="cancelled"), run("test", conclusion="failure")]
+    problems, _ = module.verdict(runs, REQUIRED, "gates-complete")
+    assert any("failure" in problem for problem in problems)
 
 
 def test_failure_is_rejected() -> None:
@@ -61,12 +84,12 @@ def test_pending_makes_it_wait() -> None:
     assert waiting is True
 
 
-def test_duplicate_names_are_flagged() -> None:
-    """Две живые записи с одним именем — неоднозначный вердикт, а не «зелено»."""
+def test_two_live_records_with_one_name_are_flagged() -> None:
+    """Одно обязательное имя от двух живых прогонов — вердикт неоднозначен."""
     problems, _ = module.verdict(
-        [run("lint"), run("test"), run("test", conclusion="failure")], REQUIRED, "gates-complete"
+        [run("lint"), run("test"), run("test")], REQUIRED, "gates-complete"
     )
-    assert any("записей с одним именем" in problem for problem in problems)
+    assert any("живых записей с одним именем" in problem for problem in problems)
 
 
 def test_itself_is_not_awaited() -> None:
