@@ -56,7 +56,12 @@ MARKER: Final = findings.MARKER
 TITLE: Final = findings.TITLE
 
 VERDICT_RE: Final = re.compile(r"^ВЕРДИКТ:\s*находок\s+(\d+)\s*$", re.I | re.M)
-FINDING_RE: Final = re.compile(r"^НАХОДКА:\s*(\S.*?)\s*$", re.I | re.M)
+#: Вес — в самой строке находки: `НАХОДКА[дефект]: …`. Скобки необязательны,
+#: и отсутствие веса не подставляет самый лёгкий, а объявляется отдельно.
+FINDING_RE: Final = re.compile(r"^НАХОДКА(?:\[\s*([^\]]+?)\s*\])?:\s*(\S.*?)\s*$", re.I | re.M)
+WEIGHTS: Final = findings.WEIGHTS
+UNWEIGHED: Final = findings.UNWEIGHED
+Entry = findings.Entry
 ENTRY_RE: Final = findings.ENTRY_RE
 
 EXIT_NOTHING: Final = 0
@@ -76,15 +81,28 @@ def fingerprint(title: str) -> str:
     return hashlib.sha1(" ".join(title.split()).encode()).hexdigest()[:7]
 
 
-def findings_of(comments: list[dict[str, Any]]) -> list[str]:
-    """Заголовки находок из комментариев ревьюера — по порядку и без повторов."""
-    titles: list[str] = []
+def weight_of(raw: str) -> str:
+    """Вес из строки находки: из объявленной шкалы либо «без веса».
+
+    Слово вне шкалы весом не считается и НЕ приводится к ближайшему: приведение
+    решило бы за ревьюера, а объявленное «без веса» видно и разбирающему, и
+    тому, кто правит подсказку ревью (154).
+    """
+    cleaned = " ".join(raw.strip("*_` ").split()).lower()
+    return cleaned if cleaned in WEIGHTS else UNWEIGHED
+
+
+def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов."""
+    found: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for comment in comments:
-        for title in FINDING_RE.findall(comment.get("body") or ""):
+        for raw_weight, title in FINDING_RE.findall(comment.get("body") or ""):
             cleaned = " ".join(title.strip("*_` ").split())
-            if cleaned and cleaned not in titles:
-                titles.append(cleaned)
-    return titles
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                found.append((weight_of(raw_weight), cleaned))
+    return found
 
 
 def verdict_of(comments: list[dict[str, Any]]) -> int | None:
@@ -99,7 +117,7 @@ def verdict_of(comments: list[dict[str, Any]]) -> int | None:
 parse_entries = findings.parse_entries
 
 
-def render_body(entries: dict[str, tuple[int, str]]) -> str:
+def render_body(entries: dict[str, findings.Entry]) -> str:
     """Собирает тело живой задачи: заметки, а не счётчики.
 
     Записывается заголовок находки, а не число: «находок 2» не отвечает на
@@ -111,6 +129,10 @@ def render_body(entries: dict[str, tuple[int, str]]) -> str:
         "> **Читатель:** окно, берущее работу. Это адресат находок внешнего",
         "> взгляда, переживающий слияние.",
         "",
+        "Вес — из объявленной шкалы: "
+        + " · ".join(f"`{name}` — {why}" for name, why in WEIGHTS.items())
+        + f". `{UNWEIGHED}` значит, что ревьюер его не назвал.",
+        "",
         "Запись снимается строкой `Разобрано: <отпечаток>` в теле изменения,",
         "которое её починило — снятие едет вместе с работой, а не отдельным",
         "жестом, который забудут. Задачу закрывает человек: механизм не знает,",
@@ -120,8 +142,14 @@ def render_body(entries: dict[str, tuple[int, str]]) -> str:
     if entries:
         lines.append("## Не разобрано")
         lines.append("")
-        for mark, (pr, title) in sorted(entries.items(), key=lambda item: item[1][0]):
-            lines.append(f"- `{mark}` · #{pr} — {title}")
+        # Порядок — по весу, а не по приходу: тяжёлое разбирают раньше, и
+        # решать это должен не порядок появления (053).
+        order = {name: place for place, name in enumerate(WEIGHTS)}
+        for mark, entry in sorted(
+            entries.items(),
+            key=lambda item: (order.get(item[1].weight, len(order)), item[1].pr),
+        ):
+            lines.append(f"- `{mark}` · #{entry.pr} · {entry.weight} — {entry.title}")
     else:
         lines.append("## Не разобрано")
         lines.append("")
@@ -143,7 +171,7 @@ def resolved_marks(repo: str, token: str, limit: int = 30) -> set[str]:
     return marks
 
 
-def save(repo: str, token: str, entries: dict[str, tuple[int, str]], apply: bool) -> None:
+def save(repo: str, token: str, entries: dict[str, findings.Entry], apply: bool) -> None:
     """Записывает живую задачу: обновляет по месту или заводит одну."""
     number, _ = live_issue(repo, token)
     body = render_body(entries)
@@ -200,8 +228,8 @@ def main(argv: list[str] | None = None) -> int:
                     f"а строк находок {len(titles)} — записаны строки",
                     file=sys.stderr,
                 )
-            for title in titles:
-                entries[fingerprint(title)] = (args.pr, title)
+            for weight, title in titles:
+                entries[fingerprint(title)] = findings.Entry(args.pr, weight, title)
             print(f"из #{args.pr}: вердикт {verdict}, строк находок {len(titles)}")
 
         # Уборка идёт ПОСЛЕ записи, а не вместо: обратный порядок терял бы
