@@ -142,6 +142,43 @@ def test_review_is_not_a_required_context() -> None:
 # --- прогон и его зависимости ------------------------------------------------
 
 
+@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+def test_a_permitted_run_is_actually_possible(path: Path) -> None:
+    """Что список разрешает запускать, то прогон обязан поставить.
+
+    Замер: список позволял `python -m pytest`, но в джобе не было ни
+    интерпретатора, ни самих проверок. Разрешение оставалось обещанием, ревью
+    тихо съезжало на чтение — и вердикт «находок 0» после прогона выглядел так
+    же, как после беглого просмотра (045). Отчёт по #32 прямо сказал, что
+    прогнать не смог, и всё равно вынес вердикт.
+    """
+    tools = declared_tools(path)
+    runs_python = [tool for tool in tools if tool.startswith(("Bash(python ", "Bash(python3 "))]
+    if not runs_python:
+        return
+
+    text = path.read_text(encoding="utf-8")
+    assert "setup-python" in text, f"{path.name}: разрешён запуск python, а его в джобе нет"
+    assert "pytest" not in " ".join(runs_python) or "pip install" in text, (
+        f"{path.name}: разрешён прогон тестов, но проверки не ставятся"
+    )
+
+
+@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+def test_both_interpreter_names_are_permitted(path: Path) -> None:
+    """Разрешение выдаётся по началу команды, и `python3` — другая строка.
+
+    Ровно на этом ревью и осталось без прогона: разрешение у него было, а
+    позвало оно другое имя.
+    """
+    tools = declared_tools(path)
+    for tool in tools:
+        if not tool.startswith("Bash(python "):
+            continue
+        twin = tool.replace("Bash(python ", "Bash(python3 ", 1)
+        assert twin in tools, f"{path.name}: разрешено «{tool}», а его двойник с python3 — нет"
+
+
 def scripts_called_by(path: Path) -> set[str]:
     """Имена скриптов проекта, которые зовёт этот прогон."""
     text = path.read_text(encoding="utf-8")
