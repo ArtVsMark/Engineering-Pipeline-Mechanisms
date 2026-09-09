@@ -73,7 +73,10 @@ def contract_note(body: str) -> str | None:
 def findings_debt(repo: str, token: str) -> list[tuple[str, int, str]]:
     """Неразобранные находки из живой задачи-адресата."""
     _, body = findings.live_issue(repo, token)
-    return [(mark, pr, title) for mark, (pr, title) in findings.parse_entries(body).items()]
+    return [
+        (mark, entry.pr, f"[{entry.weight}] {entry.title}")
+        for mark, entry in findings.parse_entries(body).items()
+    ]
 
 
 def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:

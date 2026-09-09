@@ -14,15 +14,46 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Final
 
 import ghrest
 
 MARKER: Final = "<!-- review-findings: не удаляйте, по этой строке задача находится снова -->"
 TITLE: Final = "Находки внешнего взгляда: не разобранные"
+#: ВЕС НАХОДКИ. Шкала закрытая, как роды у фрагментов журнала: слово вне её —
+#: не вес, а мнение, и сравнивать по нему нечего
+#: ([086](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/086-severity-is-set-by-someone-else.md)).
+#:
+#: ПОЧЕМУ ШКАЛА ВООБЩЕ НУЖНА. Без неё слабая находка отличается от сильной
+#: только прочтением, и разбирающий читает двадцать записей подряд, чтобы
+#: понять, с какой начинать. Порядок разбора становится делом настроения — то
+#: же самое, от чего очередь мержа лечится правилом 053.
+#:
+#: ПОЧЕМУ ТРИ. Больше градаций требуют от ревьюера различать то, что он
+#: различить не может: «важно» и «очень важно» на чужом коде неотличимы.
+WEIGHTS: Final = {
+    "дефект": "поведение расходится с обещанным",
+    "риск": "сломается при названном условии, но пока работает",
+    "замечание": "текст, ясность, единообразие",
+}
+#: Вес, которого ревьюер не назвал. Это ОБЪЯВЛЕННОЕ состояние, а не подстановка
+#: самого лёгкого: молча приписать находке «замечание» значило бы решить за
+#: ревьюера в сторону, удобную разбирающему (154).
+UNWEIGHED: Final = "без веса"
+
 #: Запись читается СТРОКОЙ, а не прозой: формулировка ревьюера меняется от
 #: прогона к прогону, отпечаток — нет.
-ENTRY_RE: Final = re.compile(r"^- `([0-9a-f]{7})` · #(\d+) — (.+?)\s*$", re.M)
+ENTRY_RE: Final = re.compile(r"^- `([0-9a-f]{7})` · #(\d+) · ([^—]+?) — (.+?)\s*$", re.M)
+
+
+@dataclass(frozen=True, slots=True)
+class Entry:
+    """Одна запись живой задачи: откуда пришла, чего стоит и о чём."""
+
+    pr: int
+    weight: str
+    title: str
 
 
 #: Задача-«входящие» каталога правил: её ведёт ночной прогон действия каталога,
@@ -51,6 +82,9 @@ def live_issue(repo: str, token: str, marker: str = MARKER) -> tuple[int | None,
     return None, ""
 
 
-def parse_entries(body: str | None) -> dict[str, tuple[int, str]]:
-    """Разбирает записи живой задачи: отпечаток → (изменение, заголовок)."""
-    return {mark: (int(pr), title) for mark, pr, title in ENTRY_RE.findall(body or "")}
+def parse_entries(body: str | None) -> dict[str, Entry]:
+    """Разбирает записи живой задачи: отпечаток → запись."""
+    return {
+        mark: Entry(int(pr), weight.strip(), title)
+        for mark, pr, weight, title in ENTRY_RE.findall(body or "")
+    }
