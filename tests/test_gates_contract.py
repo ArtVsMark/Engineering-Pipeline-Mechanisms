@@ -108,16 +108,51 @@ def test_the_shared_branch_is_checked_too() -> None:
     assert triggers["push"]["branches"] == ["main"]
 
 
+#: Условие, которым объявляется «шаг идёт только на изменении». Сверяется
+#: равенством, а не вхождением слова: подстрока «push» есть и у перевёрнутого
+#: `== 'push'`, то есть у шага, который пойдёт ТОЛЬКО на общей ветке.
+CHANGE_ONLY = "github.event_name != 'push'"
+
+
+def runs_only_on_a_change(condition: str) -> bool:
+    """Объявляет ли условие «этот шаг идёт только на изменении»."""
+    return " ".join(condition.split()) == CHANGE_ONLY
+
+
 def test_change_only_jobs_do_not_run_on_the_shared_branch() -> None:
     """Шаги, чей предмет — изменение, на общей ветке не идут.
 
     У них там нет предмета: разметки изменения, фрагмента относительно базы и
     вердикта по изменению на `main` не существует. Пропуск объявлен условием, а
     не молчаливым отказом внутри шага (154).
+
+    Проверяется НАПРАВЛЕНИЕ условия, а не наличие в нём слова «push». Прежняя
+    проверка искала подстроку и пропустила бы перевёрнутую полярность: шаг с
+    `== 'push'` идёт ровно наоборот — только там, где предмета нет, — и такую
+    подмену набор не заметил бы вовсе.
+
+    На это условие опирается и очередь: `scripts/automerge.py` считает пропуск
+    на общей ветке объявленным состоянием, а не краснотой, — и держится это
+    именно здесь.
     """
     jobs = load_gates()["jobs"]
     for name in ("pr-meta", "journal", "attribution", SUMMARY):
-        assert "push" in str(jobs[name].get("if", "")), f"{name} пойдёт на общей ветке без предмета"
+        condition = str(jobs[name].get("if", ""))
+        assert runs_only_on_a_change(condition), (
+            f"{name}: условие «{condition}» не объявляет «только на изменении» — "
+            f"ожидалось «{CHANGE_ONLY}»"
+        )
+
+
+def test_an_inverted_condition_would_be_caught() -> None:
+    """Перевёрнутая полярность отвергается, а не проходит по вхождению слова.
+
+    Гейт проверяется тем, что обязан отвергнуть (140): подстрока «push» есть в
+    обоих условиях, и разводит их только направление.
+    """
+    assert runs_only_on_a_change("github.event_name != 'push'")
+    assert not runs_only_on_a_change("github.event_name == 'push'")
+    assert not runs_only_on_a_change("")
 
 
 def test_label_events_reach_the_gates() -> None:
