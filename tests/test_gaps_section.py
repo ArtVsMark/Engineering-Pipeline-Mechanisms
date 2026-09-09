@@ -12,11 +12,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CHARTER = ROOT / "AGENTS.md"
+BINDINGS = ROOT / ".rules" / "bindings.json"
 HEADING = "## 🕳 Чего в проекте ещё нет"
 
 
@@ -44,3 +46,27 @@ def test_no_row_carries_a_count() -> None:
     """
     with_counts = [row for row in gaps_rows() if re.search(r"\d", row.split("|")[1])]
     assert not with_counts, f"число вписано в пробел прозой: {with_counts}"
+
+
+def unreviewed() -> int:
+    """Сколько записей каталога ещё без ответа — по дереву, а не по памяти."""
+    rules = json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"]
+    return sum(1 for answer in rules.values() if answer["status"] == "unreviewed")
+
+
+def test_the_catalogue_gap_matches_the_answer() -> None:
+    """Пробел «ответа по записям каталога нет» опровергается одной командой (175).
+
+    Ровно тот подкласс прозы, который сводится к наличию объекта: очередь либо
+    есть в `.rules/bindings.json`, либо её нет. Пока строка стояла на памяти,
+    она успела разойтись с деревом на 71 запись и продолжала выглядеть решением.
+    """
+    claims = [
+        row
+        for row in gaps_rows()
+        if "каталог" in row.split("|")[1] and "ответа" in row.split("|")[1]
+    ]
+    if unreviewed():
+        assert claims, "очередь без ответа есть, а пробел в своде не назван (046)"
+    else:
+        assert not claims, f"ответ каталогу полон, а свод всё ещё называет это пробелом: {claims}"

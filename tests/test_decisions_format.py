@@ -59,3 +59,20 @@ def test_record_links_its_task(path: Path) -> None:
     assert any(STATUS_RE.match(line) for line in lines[:8]), (
         f"{path.name}: нет строки «**Статус:** … · **Дата:** ГГГГ-ММ-ДД · **Задача:** [#N](…)»"
     )
+
+
+#: Раздел, без которого запись — не решение, а ход работы (161).
+REJECTED_RE = re.compile(r"^## Отвергнут(?:ые|ый) (?:варианты|вариант|альтернативы)", re.M)
+
+
+@pytest.mark.parametrize("path", records(), ids=lambda p: p.name)
+def test_record_names_the_rejected_alternative(path: Path) -> None:
+    """Запись называет отвергнутую альтернативу (161).
+
+    Без неё это не поворот, а ход работы, и место ему в журнале: читатель не
+    может отличить решение, у которого был выбор, от записи о сделанном.
+    """
+    text = path.read_text(encoding="utf-8")
+    assert REJECTED_RE.search(text), (
+        f"{path.name}: нет раздела об отвергнутом варианте — это ход работы, а не решение"
+    )
