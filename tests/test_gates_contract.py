@@ -95,6 +95,31 @@ def test_summary_does_not_answer_for_itself() -> None:
     assert SUMMARY not in checks
 
 
+def test_the_shared_branch_is_checked_too() -> None:
+    """Гейты идут и на общей ветке, а не только на изменении.
+
+    Замер 09.09: на `main` не шло ни одной проверки, кроме публикации фактов.
+    Два изменения, зелёных по отдельности, после слияния могли дать красное, и
+    узнать об этом было неоткуда — а «красная общая ветка» стоит источником 0 в
+    порядке работ. Источник без сигнала не источник.
+    """
+    triggers = load_gates()[True]
+    assert "push" in triggers, "общая ветка не проверяется ничем"
+    assert triggers["push"]["branches"] == ["main"]
+
+
+def test_change_only_jobs_do_not_run_on_the_shared_branch() -> None:
+    """Шаги, чей предмет — изменение, на общей ветке не идут.
+
+    У них там нет предмета: разметки изменения, фрагмента относительно базы и
+    вердикта по изменению на `main` не существует. Пропуск объявлен условием, а
+    не молчаливым отказом внутри шага (154).
+    """
+    jobs = load_gates()["jobs"]
+    for name in ("pr-meta", "journal", "attribution", SUMMARY):
+        assert "push" in str(jobs[name].get("if", "")), f"{name} пойдёт на общей ветке без предмета"
+
+
 def test_label_events_reach_the_gates() -> None:
     """Разметка — вход механизма, значит её правка обязана менять вердикт."""
     # `on:` — булев ключ, см. load_gates.
