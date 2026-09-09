@@ -163,6 +163,6 @@ jobs:
           python scripts/review_findings.py --pr "${{ github.event.pull_request.number }}" --apply || rc=$?
           case "$rc" in
             0) echo "вердикт есть, незакрытых находок нет — адресата не требуется" ;;
-            1) echo "находки записаны в живую задачу" ;;
+            3) echo "находки записаны в живую задачу" ;;
             *) echo "::warning::разбор вердикта не отработал (код $rc) — находки остались только комментарием" ;;
           esac

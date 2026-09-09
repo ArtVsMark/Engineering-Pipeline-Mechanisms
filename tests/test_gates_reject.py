@@ -19,6 +19,8 @@ from tests.conftest import ROOT, RunScript, load_script
 BROKEN = 2
 REJECTED = 1
 CLEAN = 0
+#: Объявленное состояние «не настроено»: намеренно не единица.
+NOT_CONFIGURED = 3
 
 
 def git(cwd: Path, *args: str) -> None:
@@ -302,7 +304,12 @@ def test_no_owner_token_is_not_configured(run_script: RunScript) -> None:
         "--dry-run",
         env={"MERGE_QUEUE_TOKEN": ""},
     )
-    assert result.code == REJECTED
+    # Не единица: её отдаёт Python при необработанном сбое, и объявленным
+    # состоянием она быть не может — иначе сломанный шаг читается как
+    # работающий. Ровно это и случилось на прогоне: ImportError отдал единицу,
+    # а прогон напечатал «секрет не задан» и остался зелёным.
+    assert result.code == NOT_CONFIGURED
+    assert result.code != REJECTED
     assert "не переходит намеренно" in result.text
 
 

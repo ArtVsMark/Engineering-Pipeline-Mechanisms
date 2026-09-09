@@ -128,3 +128,54 @@ def test_review_is_not_a_required_context() -> None:
     match = re.search(r'--required "([^"]+)"', step)
     assert match, "сводный гейт не называет, что опрашивает — проверять нечего (075)"
     assert "review" not in match.group(1)
+
+
+# --- прогон и его зависимости ------------------------------------------------
+
+
+def scripts_called_by(path: Path) -> set[str]:
+    """Имена скриптов проекта, которые зовёт этот прогон."""
+    text = path.read_text(encoding="utf-8")
+    return set(re.findall(r"python scripts/(\w+\.py)", text))
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_workflow_installs_what_its_scripts_import(path: Path) -> None:
+    """Прогон ставит то, что нужно зовомому им скрипту.
+
+    Замер: `agent-pr` стал звать механизм, читающий состав меток, а установку
+    разбора YAML в прогон не добавили. Шаг упал на импорте — ДО входа в скрипт,
+    поэтому свой третий исход выдать не мог, — и прогон прочитал сбой как
+    объявленное «секрет не задан», оставшись зелёным.
+    """
+    text = path.read_text(encoding="utf-8")
+    scripts_dir = ROOT / "scripts"
+    needs_yaml = False
+    for name in scripts_called_by(path):
+        script = scripts_dir / name
+        if not script.is_file():
+            continue
+        source = script.read_text(encoding="utf-8")
+        # Прямо или через общий модуль состава — YAML нужен в обоих случаях.
+        if "import yaml" in source or "import labels" in source:
+            needs_yaml = True
+    if needs_yaml:
+        assert "pyyaml" in text.lower(), (
+            f"{path.name} зовёт скрипт с разбором YAML, но не ставит его"
+        )
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_exit_codes_are_read_as_an_allowlist(path: Path) -> None:
+    """Зелёными считаются только объявленные коды, всё прочее — отказ.
+
+    Обратный порядок — «красным считаем перечисленное» — уже стоил зелёного
+    прогона на сломанном шаге: Python отдал единицу при необработанном сбое, а
+    она в разборе значила объявленное состояние (068, 045).
+    """
+    text = path.read_text(encoding="utf-8")
+    if "|| rc=$?" not in text:
+        return
+    assert 'case "$rc"' in text, (
+        f"{path.name} разбирает код возврата условиями вместо списка разрешённого"
+    )

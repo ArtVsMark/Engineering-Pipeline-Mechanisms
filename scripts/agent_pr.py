@@ -39,8 +39,14 @@ PREFIXES: Final = ("agent/", "claude/")
 TASK_RE: Final = re.compile(r"^(?:Closes|Fixes|Refs) #\d+$", re.MULTILINE)
 
 EXIT_OK: Final = 0
-EXIT_NOT_CONFIGURED: Final = 1
 EXIT_BROKEN: Final = 2
+#: «Не настроено» намеренно НЕ единица. Единицу отдаёт сам Python при любом
+#: необработанном сбое — включая ImportError, который случается до входа в
+#: main и которому шаг себя защитить не может. Пока коды совпадали, сломанный
+#: шаг печатал «секрет не задан» и оставлял прогон зелёным: тихий запасной
+#: путь (045), замаскированный под объявленное состояние. Теперь зелёными
+#: считаются только объявленные коды, всё прочее — отказ (068).
+EXIT_NOT_CONFIGURED: Final = 3
 
 
 class NotRun(RuntimeError):

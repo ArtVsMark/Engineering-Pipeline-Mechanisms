@@ -38,9 +38,16 @@ jobs:
           set -uo pipefail
           rc=0
           python scripts/check_required_context.py || rc=$?
-          if [ "$rc" -eq 2 ]; then exit 1; fi
-          if [ "$rc" -eq 1 ]; then
-            echo "::warning::Сверка не выполнена или нашла расхождение — смотрите вывод шага."
-            exit 1
-          fi
+          # Список разрешённого (068): зелёным считается только объявленное.
+          case "$rc" in
+            0) ;;
+            3)
+              echo "::warning::Сверка не выполнена или нашла расхождение — смотрите вывод шага."
+              exit 1
+              ;;
+            *)
+              echo "::error::Сверка контекста не отработала (код $rc) — смотрите вывод шага."
+              exit 1
+              ;;
+          esac
           exit 0
