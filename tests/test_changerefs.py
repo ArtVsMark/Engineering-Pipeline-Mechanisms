@@ -339,3 +339,16 @@ def test_the_change_body_carries_the_declared_item() -> None:
     """
     bodies = ["fix: что-то\n\nRefs #26\nЗакрывает пункт: Отметить пункт задачи;"]
     assert changerefs.closed_items_in_all(bodies) == ["Отметить пункт задачи;"]
+
+
+def test_one_item_declared_twice_in_the_branch_stays_one() -> None:
+    """Пункт, объявленный в двух коммитах по-разному, остаётся одним.
+
+    Повтор снимается по приведённому виду, а не по строке: иначе он попал бы в
+    тело изменения дважды, и человек прочитал бы это как два разных пункта.
+    """
+    bodies = [
+        "fix: раз\n\nRefs #26\nЗакрывает пункт: Отметить пункт;",
+        "fix: два\n\nRefs #26\nЗакрывает пункт: отметить пункт",
+    ]
+    assert changerefs.closed_items_in_all(bodies) == ["Отметить пункт;"]

@@ -849,3 +849,44 @@ def test_an_unreadable_task_is_a_third_outcome(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(check.ghrest, "request", refuse)
     with pytest.raises(check.NotRun):
         check.premature("о/р", "токен", check.changerefs.links_in("Closes #7"), [])
+
+
+def test_findings_survive_an_unreadable_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Найденное до отказа не пропадает вместе с отказом.
+
+    Метки и связь разобраны, и находки по ним верны независимо от того,
+    прочиталась ли задача. Выбросить их молча значит отдать автору «проверка не
+    отработала» там, где у него настоящий дефект разметки: он починит
+    недоступность площадки, а не свою метку.
+    """
+    check = load_script("check_pr_meta.py")
+    event = tmp_path / "event.json"
+    event.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "number": 7,
+                    "labels": [{"name": "area/docs"}, {"name": "выдуманная"}],
+                    "title": "t",
+                    "body": "Closes #8",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "о/р")
+    monkeypatch.setenv("GH_TOKEN", "токен")
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise check.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(check.ghrest, "request", refuse)
+    monkeypatch.setattr(check, "fresh", lambda pull, repo, token: pull)
+
+    assert check.main(["--files", "README.md"]) == BROKEN
+    printed = capsys.readouterr().err
+    assert "не отработала" in printed
+    assert "выдуманная" in printed, "находка разметки исчезла вместе с отказом"

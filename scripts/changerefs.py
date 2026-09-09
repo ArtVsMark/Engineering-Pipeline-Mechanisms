@@ -230,10 +230,19 @@ def resolved_in_all(texts: Iterable[str]) -> list[str]:
 
 
 def closed_items_in_all(texts: Iterable[str]) -> list[str]:
-    """Закрытые пункты из нескольких текстов — по той же причине, что и связи."""
+    """Закрытые пункты из нескольких текстов — по той же причине, что и связи.
+
+    Повтор снимается ПО ПРИВЕДЁННОМУ виду, а не по строке. Один пункт,
+    объявленный в двух коммитах ветки с разной раскладкой или знаком в конце,
+    попал бы в тело изменения дважды — и человек читал бы это как два разных
+    пункта. Внутри одного текста это уже так; между текстами было по строке.
+    """
     found: list[str] = []
+    seen: set[str] = set()
     for text in texts:
         for item in closed_items_in(text):
-            if item not in found:
+            key = normalise(item)
+            if key not in seen:
+                seen.add(key)
                 found.append(item)
     return found
