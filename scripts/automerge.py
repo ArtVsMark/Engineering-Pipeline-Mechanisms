@@ -60,10 +60,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+import changerefs
 import ci_complete
 import ghrest
 import labels
@@ -105,6 +107,9 @@ STATE_BEHIND: Final = "behind"
 #: причиной: площадка либо ещё считает, либо слить не даст, и звать слияние
 #: наугад значит менять пропуск одной головы на красный весь заход.
 STATE_MERGEABLE: Final = frozenset({"clean", "unstable", "has_hooks"})
+#: Незакрытый пункт чек-листа задачи. Отмечается ровно он: уже отмеченный
+#: остаётся отмеченным, и повторный заход ничего не портит.
+CHECKLIST_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(?P<text>\S.*?)\s*$")
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -124,6 +129,7 @@ class Change:
     base: str
     head: str
     title: str
+    body: str
     draft: bool
     marks: frozenset[str]
     files: frozenset[str] = field(default=frozenset())
@@ -181,6 +187,7 @@ def open_changes(repo: str, owner_token: str) -> list[Change]:
                 base=str(base.get("ref", "")),
                 head=str(head.get("sha", "")),
                 title=str(payload.get("title", "")),
+                body=str(payload.get("body") or ""),
                 draft=bool(payload.get("draft")),
                 marks=marks_of(payload),
             )
@@ -406,6 +413,69 @@ def merge(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> str:
     return str((payload or {}).get("sha", ""))
 
 
+def marked(body: str, item: str) -> str:
+    """Отмечает один пункт чек-листа сделанным, если он там есть.
+
+    Пункт узнаётся по ТЕКСТУ, приведённому к сравнимому виду: номер строки
+    сдвигается от любой правки тела задачи, и отметка уехала бы на соседний
+    пункт молча. Уже отмеченный остаётся отмеченным — заход идемпотентен.
+    """
+    wanted = changerefs.normalise(item)
+    lines = body.splitlines()
+    for place, line in enumerate(lines):
+        found = CHECKLIST_RE.match(line)
+        if found and changerefs.normalise(found.group("text")) == wanted:
+            lines[place] = line.replace("[ ]", "[x]", 1)
+            return "\n".join(lines)
+    return body
+
+
+def mark_closed_items(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> None:
+    """Отмечает в задачах пункты, которые изменение объявило закрытыми.
+
+    ПОЧЕМУ ЗДЕСЬ, А НЕ СВОИМ ШАГОМ. Пункт становится сделанным ровно тогда,
+    когда изменение слилось: раньше — обещание, позже — уже история. Момент
+    единственный, и он здесь; отдельный шаг ловил бы его опросом.
+
+    ПОЧЕМУ ПОСЛЕ СЛИЯНИЯ, А НЕ ВМЕСТО. Отказ разметки не отменяет слияния и
+    не роняет заход: изменение уже в общей ветке, и превращать это в красное
+    значило бы объявить сломанным то, что сработало (084). Ненайденный пункт
+    называется вслух — молча «отметил ноль из трёх» неотличимо от «отметил всё»
+    (045).
+    """
+    items = changerefs.closed_items_in(change.body)
+    if not items:
+        return
+    numbers = sorted({link.number for link in changerefs.links_in(change.body)})
+    if not numbers:
+        print("  пункты названы закрытыми, а связи с задачей нет — отмечать негде")
+        return
+    if dry_run:
+        print(f"  (пробный заход) отметил бы пунктов: {len(items)} в задачах {numbers}")
+        return
+
+    left = list(items)
+    for number in numbers:
+        try:
+            issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", owner_token) or {}
+            body = str(issue.get("body") or "")
+            updated = body
+            for item in list(left):
+                after = marked(updated, item)
+                if after != updated:
+                    updated = after
+                    left.remove(item)
+            if updated != body:
+                ghrest.request(
+                    "PATCH", f"repos/{repo}/issues/{number}", owner_token, {"body": updated}
+                )
+                print(f"  отмечено в #{number}: {len(items) - len(left)} из {len(items)}")
+        except ghrest.TransportError as exc:
+            print(f"  пункты в #{number} не отмечены: {report.cut(str(exc))}")
+    for item in left:
+        print(f"  пункт не найден ни в одной связанной задаче: «{item}»")
+
+
 def report_held(changes: list[Change]) -> None:
     """Называет остановленное меткой: отменяющий переключатель нужен адресату.
 
@@ -455,6 +525,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             base=change.base,
             head=change.head,
             title=change.title,
+            body=change.body,
             draft=change.draft,
             marks=change.marks,
             files=files_of(repo, change.number, owner_token),
@@ -499,6 +570,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
 
         sha = merge(repo, change, owner_token, dry_run=dry_run)
         print(f"слито #{change.number}{f' → {sha}' if sha else ''}")
+        mark_closed_items(repo, change, owner_token, dry_run=dry_run)
         return EXIT_OK
 
     print("готовой головы нет: все кандидаты либо красны, либо конфликтуют")

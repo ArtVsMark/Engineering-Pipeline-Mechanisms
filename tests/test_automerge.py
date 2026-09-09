@@ -27,6 +27,7 @@ def change(
     files: tuple[str, ...] = (),
     draft: bool = False,
     base: str = "main",
+    body: str = "",
 ) -> Any:
     """Собирает изменение-кандидат в том виде, в каком его строит модуль."""
     return module.Change(
@@ -35,6 +36,7 @@ def change(
         base=base,
         head=f"sha{number}",
         title=f"изменение {number}",
+        body=body,
         draft=draft,
         marks=frozenset(marks),
         files=frozenset(files),
@@ -490,3 +492,103 @@ def test_the_run_token_is_never_taken_for_the_merge(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("GH_TOKEN", "ghp_run")
     monkeypatch.delenv(module.ENV_TOKEN, raising=False)
     assert module.token() == ""
+
+
+# --- отметка пунктов задачи --------------------------------------------------
+
+
+def test_a_declared_item_is_ticked_in_the_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пункт, названный закрытым, отмечается в теле задачи при слиянии.
+
+    Момент единственный: раньше слияния это обещание, позже — уже история.
+    """
+    task = {"body": "- [ ] первый этап\n- [ ] второй этап\n"}
+    written: list[dict[str, Any]] = []
+
+    def platform(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET":
+            return task
+        written.append(body)
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    item = change(1, "automerge", body="Refs #25\nЗакрывает пункт: второй этап")
+    module.mark_closed_items("o/r", item, "token", dry_run=False)
+    assert written and written[0]["body"] == "- [ ] первый этап\n- [x] второй этап"
+
+
+def test_an_already_ticked_item_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Повторный заход ничего не портит: отмеченное остаётся отмеченным."""
+    task = {"body": "- [x] второй этап\n"}
+    written: list[Any] = []
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda method, path, tok, body=None: task if method == "GET" else written.append(body),
+    )
+    item = change(1, "automerge", body="Refs #25\nЗакрывает пункт: второй этап")
+    module.mark_closed_items("o/r", item, "token", dry_run=False)
+    assert written == [], "тело задачи переписано без нужды"
+
+
+def test_an_item_that_matches_nothing_is_named(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ненайденный пункт называется вслух, а не теряется молча.
+
+    «Отметил ноль из трёх» и «отметил всё» снаружи одинаковы (045).
+    """
+    monkeypatch.setattr(
+        module.ghrest, "request", lambda method, path, tok, body=None: {"body": "- [ ] другой"}
+    )
+    item = change(1, "automerge", body="Refs #25\nЗакрывает пункт: которого нет")
+    module.mark_closed_items("o/r", item, "token", dry_run=False)
+    assert "пункт не найден" in capsys.readouterr().out
+
+
+def test_a_declared_item_without_a_link_says_so(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пункт назван, а связи с задачей нет — отмечать негде, и это сказано."""
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("без связи задача читаться не должна")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.mark_closed_items(
+        "o/r", change(1, "automerge", body="Закрывает пункт: сирота"), "token", dry_run=False
+    )
+    assert "отмечать негде" in capsys.readouterr().out
+
+
+def test_a_refused_task_does_not_undo_the_merge(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ площадки на отметке заход не роняет: изменение уже слито (084).
+
+    Превращать это в красное значило бы объявить сломанным то, что сработало.
+    """
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.mark_closed_items(
+        "o/r",
+        change(1, "automerge", body="Refs #25\nЗакрывает пункт: этап"),
+        "token",
+        dry_run=False,
+    )
+    assert "не отмечены" in capsys.readouterr().out
+
+
+def test_a_dry_run_marks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пробный заход задачу не трогает."""
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("пробный заход не должен ходить на площадку")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.mark_closed_items(
+        "o/r", change(1, "automerge", body="Refs #25\nЗакрывает пункт: этап"), "token", dry_run=True
+    )
