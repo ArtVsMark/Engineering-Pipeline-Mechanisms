@@ -10,9 +10,19 @@ module = load_script("ci_complete.py")
 REQUIRED = ["lint", "test"]
 
 
-def run(name: str, status: str = "completed", conclusion: str | None = "success") -> dict[str, Any]:
+def run(
+    name: str,
+    status: str = "completed",
+    conclusion: str | None = "success",
+    run_id: str = "1",
+) -> dict[str, Any]:
     """Собирает одну запись проверки в том виде, в каком её отдаёт площадка."""
-    return {"name": name, "status": status, "conclusion": conclusion}
+    return {
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "details_url": f"https://github.com/o/r/actions/runs/{run_id}/job/9",
+    }
 
 
 def test_all_green_is_green() -> None:
@@ -96,3 +106,33 @@ def test_itself_is_not_awaited() -> None:
         [run("lint"), run("test")], [*REQUIRED, "ci-complete"], "ci-complete"
     )
     assert (problems, waiting) == ([], False)
+
+
+def test_records_of_a_foreign_run_do_not_confuse_the_verdict() -> None:
+    """Второй прогон того же файла на голове — штатное событие, а не беда.
+
+    Снятие черновика или новое событие запускают ci заново на том же коммите, и
+    каждое имя оказывается представлено дважды при обоих здоровых прогонах.
+    Замер 09.09: это уронило сводный гейт при восьми зелёных соседях.
+    """
+    runs = [
+        run("lint", run_id="old"),
+        run("test", run_id="old"),
+        run("lint", run_id="mine"),
+        run("test", run_id="mine"),
+    ]
+    assert module.verdict(runs, REQUIRED, "ci-complete", "mine") == ([], False)
+
+
+def test_a_foreign_record_still_counts_when_own_run_has_none() -> None:
+    """Имя, которого свой прогон не выдаёт, берётся у чужого — иначе пропуск."""
+    runs = [run("lint", run_id="mine"), run("test", conclusion="failure", run_id="old")]
+    problems, _ = module.verdict(runs, REQUIRED, "ci-complete", "mine")
+    assert any("failure" in problem for problem in problems)
+
+
+def test_two_records_of_the_same_run_are_still_ambiguous() -> None:
+    """Внутри одного прогона два одинаковых имени — по-прежнему неоднозначность."""
+    runs = [run("lint", run_id="mine"), run("test", run_id="mine"), run("test", run_id="mine")]
+    problems, _ = module.verdict(runs, REQUIRED, "ci-complete", "mine")
+    assert any("живых записей с одним именем" in problem for problem in problems)

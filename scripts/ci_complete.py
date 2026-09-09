@@ -82,8 +82,14 @@ def check_runs(repo: str, sha: str, token: str) -> list[dict[str, Any]]:
         page += 1
 
 
+def belongs_to(run: dict[str, Any], run_id: str) -> bool:
+    """Отвечает, выдана ли запись этим же прогоном."""
+    url = str(run.get("details_url") or run.get("html_url") or "")
+    return f"/actions/runs/{run_id}/" in url
+
+
 def verdict(
-    runs: list[dict[str, Any]], required: list[str], selfname: str
+    runs: list[dict[str, Any]], required: list[str], selfname: str, run_id: str = ""
 ) -> tuple[list[str], bool]:
     """Выносит вердикт по объявленным именам; вторым отдаёт «ещё идут»."""
     problems: list[str] = []
@@ -93,6 +99,18 @@ def verdict(
         if name == selfname:
             continue
         found = [run for run in runs if run.get("name") == name]
+        # Записи СВОЕГО прогона имеют преимущество. На одной голове легко
+        # оказываются два прогона одного файла — например, толчок и снятие
+        # черновика, — и тогда каждое имя представлено дважды, обе записи
+        # здоровые. Считать это неоднозначностью значит краснеть на штатном
+        # событии: замер 09.09 — снятие черновика уронило сводный гейт при
+        # восьми зелёных соседях.
+        #
+        # Для имени, которого в своём прогоне нет вовсе, смотрятся остальные
+        # записи: обязательное имя может выдавать и другой механизм.
+        if run_id:
+            mine = [run for run in found if belongs_to(run, run_id)]
+            found = mine or found
         if not found:
             problems.append(f"{name}: записи нет на голове — прогон не стартовал, а не «зелено»")
             continue
@@ -111,9 +129,9 @@ def verdict(
             problems.append(f"{name}: все записи отменены — пройденной ни одна не считается")
             continue
 
-        # Две НЕотменённые записи с одним именем — настоящая неоднозначность:
-        # одно обязательное имя выдают два разных прогона, и какой из них
-        # решает, неизвестно.
+        # Две живые записи одного имени ПОСЛЕ отбора по своему прогону —
+        # настоящая неоднозначность: обязательное имя выдают два разных
+        # механизма, и какой из них решает, неизвестно.
         if len(live) > 1:
             problems.append(
                 f"{name}: на голове {len(live)} живых записей с одним именем — вердикт неоднозначен"
@@ -139,6 +157,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sha", default=os.environ.get("HEAD_SHA", ""))
     parser.add_argument("--required", required=True, help="имена джобов через запятую")
     parser.add_argument("--self-name", default="ci-complete", help="собственное имя, себя не ждём")
+    parser.add_argument(
+        "--run-id",
+        default=os.environ.get("GITHUB_RUN_ID", ""),
+        help="свой прогон: его записи имеют преимущество перед чужими на той же голове",
+    )
     parser.add_argument("--timeout", type=int, default=900, help="сколько ждать соседей, секунд")
     parser.add_argument("--interval", type=int, default=20, help="пауза между опросами, секунд")
     args = parser.parse_args(argv)
@@ -162,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"на голове {args.sha[:8]} нет ни одной записи проверок — "
                     "это ошибка входа, а не «зелено» (075)"
                 )
-            problems, waiting = verdict(runs, required, args.self_name)
+            problems, waiting = verdict(runs, required, args.self_name, args.run_id)
             if not waiting:
                 break
             if time.monotonic() >= deadline:
