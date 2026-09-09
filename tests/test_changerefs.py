@@ -237,3 +237,46 @@ def test_inline_code_inside_a_block_changes_nothing() -> None:
     """Внутри блока вырезано всё, включая строки, похожие на связь."""
     text = "```\nпример: `Refs #12` и Refs #13\n```\n\nRefs #7"
     assert [str(link) for link in changerefs.links_in(text)] == ["Refs #7"]
+
+
+def test_two_unclosed_fences_in_different_bodies_eat_nothing() -> None:
+    """Разметка одного тела не достаёт до соседнего.
+
+    Замер: два коммита, в каждом свой незакрытый забор. Число заборов чётное,
+    склеенный текст читается как один блок — и связь между ними исчезает.
+    Счётом это не лечится: одна разметка на два документа. Тела разбираются
+    по одному.
+    """
+    bodies = ["fix: A\n```\nзаметка A\n\nRefs #12\n", "feat: B\n```\nзаметка B\n\nRefs #7\n"]
+    assert [str(link) for link in changerefs.links_in_all(bodies)] == ["Refs #12", "Refs #7"]
+
+
+def test_resolutions_survive_the_same_way() -> None:
+    """Снятие находки переживает чужую незакрытую разметку так же."""
+    bodies = ["fix: A\n```\nзаметка\n\nРазобрано: abc1234\n", "feat: B\n```\nещё\n"]
+    assert changerefs.resolved_in_all(bodies) == ["abc1234"]
+
+
+def test_repeats_across_bodies_collapse() -> None:
+    """Одна задача, названная в двух коммитах, даёт одну строку в описании."""
+    bodies = ["fix: A\n\nRefs #7", "feat: B\n\nRefs #7"]
+    assert [str(link) for link in changerefs.links_in_all(bodies)] == ["Refs #7"]
+
+
+def test_description_is_built_from_separate_bodies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Шаг открытия разбирает тела по одному, а не склейкой.
+
+    Проверяется на том самом входе, что был дефектом: незакрытый забор в
+    первом коммите и настоящая связь во втором.
+    """
+
+    def git(*args: str) -> str:
+        if "--format=%s" in args:
+            return "fix: A\nfeat: B\n"
+        if "--format=%B%x00" in args:
+            return "fix: A\n```\nзаметка\n\nRefs #12\n\x00feat: B\n\nRefs #7\n\x00"
+        return "основание\n"
+
+    monkeypatch.setattr(agent_pr, "git", git)
+    _, body = agent_pr.describe("agent/окно", "main")
+    assert "Refs #12" in body and "Refs #7" in body
