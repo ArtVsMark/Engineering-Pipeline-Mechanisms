@@ -162,3 +162,31 @@ def test_resolution_is_read_the_same_by_both(monkeypatch: pytest.MonkeyPatch) ->
     """Шаг открытия и механизм находок читают снятие одним разбором."""
     findings = load_script("review_findings.py")
     assert findings.changerefs.resolved_in is changerefs.resolved_in
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "старая регулярка была `^Refs #12$`, и это пример",
+        "```\nRefs #12\n```",
+    ],
+)
+def test_an_example_in_code_is_not_a_link(text: str) -> None:
+    """Ссылка внутри кодовой вставки — цитата, а не связь с задачей.
+
+    Поймано на себе: описание правки цитировало старую регулярку `^Refs #12$`,
+    и механизм записал изменению задачу #12, которой оно не касается. Площадка
+    ключевые слова внутри кода тоже не читает.
+    """
+    assert changerefs.links_in(text) == []
+
+
+def test_a_resolution_inside_code_is_not_a_resolution() -> None:
+    """Пример снятия в документации не снимает чужую находку."""
+    assert changerefs.resolved_in("пишется так: `Разобрано: abc1234`") == []
+
+
+def test_a_link_next_to_code_is_still_read() -> None:
+    """Вырезается только код: настоящая связь рядом с примером остаётся."""
+    text = "правка в `scripts/changerefs.py`\n\nRefs #7"
+    assert [str(link) for link in changerefs.links_in(text)] == ["Refs #7"]

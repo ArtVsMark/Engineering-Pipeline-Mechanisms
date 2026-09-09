@@ -44,6 +44,11 @@ LINK_RE: Final = re.compile(
     re.IGNORECASE,
 )
 NUMBER_RE: Final = re.compile(r"#?(\d+)")
+#: Кодовые вставки из разбора вырезаются: площадка ключевые слова внутри них
+#: тоже не читает. Замер, стоивший ложной связи: описание правки цитировало
+#: старую регулярку `^Refs #12$`, и механизм записал изменению задачу #12,
+#: которой оно не касается (PR #32). Пример в тексте — не ссылка.
+CODE_RE: Final = re.compile(r"```.*?```|`[^`]*`", re.DOTALL)
 #: Отпечаток находки — семь шестнадцатеричных знаков, как короткий хэш.
 RESOLVED_RE: Final = re.compile(r"^\s*Разобрано:\s*([0-9a-f]{7})\b", re.IGNORECASE | re.MULTILINE)
 
@@ -65,11 +70,16 @@ class Link:
         return self.verb in CLOSING
 
 
+def outside_code(text: str) -> str:
+    """Текст без кодовых вставок: пример в них ссылкой не считается."""
+    return CODE_RE.sub(" ", text)
+
+
 def links_in(text: str) -> list[Link]:
     """Связи с задачами в порядке появления, без повторов."""
     found: list[Link] = []
     seen: set[tuple[str, int]] = set()
-    for match in LINK_RE.finditer(text):
+    for match in LINK_RE.finditer(outside_code(text)):
         verb = CANON[match["verb"].lower()]
         for number in NUMBER_RE.findall(match["tasks"]):
             key = (verb, int(number))
@@ -88,7 +98,7 @@ def has_link(text: str) -> bool:
 def resolved_in(text: str) -> list[str]:
     """Отпечатки находок, названных разобранными, в порядке появления."""
     found: list[str] = []
-    for mark in RESOLVED_RE.findall(text):
+    for mark in RESOLVED_RE.findall(outside_code(text)):
         lowered = mark.lower()
         if lowered not in found:
             found.append(lowered)
