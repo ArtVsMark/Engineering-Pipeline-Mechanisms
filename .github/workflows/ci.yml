@@ -129,8 +129,11 @@ jobs:
           base="${GITHUB_BASE_REF:-main}"
           git fetch --no-tags origin "$base:refs/remotes/origin/$base"
           python scripts/check_journal.py
-      - name: журнал собран из фрагментов
-        run: python scripts/build_changelog.py --check
+      # Собранный журнал здесь НЕ сверяется: он собирается при выпуске (030).
+      # Общий файл, который трогает каждая ветка, даёт конфликт на каждом
+      # втором изменении — ровно тот инцидент, из-за которого правило и есть.
+      - name: фрагменты журнала разбираются
+        run: python scripts/build_changelog.py --fragments
       - name: версия не правлена руками
         run: python scripts/check_version.py
 

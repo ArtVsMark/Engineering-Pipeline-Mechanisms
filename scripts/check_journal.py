@@ -22,12 +22,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 from typing import Final
 
-FRAGMENT_RE: Final = re.compile(r"^changelog\.d/[\w.-]+\.(contract|feat|fix|docs|internal)\.md$")
+import journal
+
+FRAGMENT_RE: Final = journal.PATH_RE
 # Тронув только это, изменение журналу ничего не сообщает.
 EXEMPT_PREFIXES: Final = ("changelog.d/",)
 EXEMPT_FILES: Final = frozenset({"CHANGELOG.md"})
