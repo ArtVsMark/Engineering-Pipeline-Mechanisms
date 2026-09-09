@@ -388,13 +388,24 @@ def test_explicit_base_is_not_rewritten_by_the_environment(
 
 
 def write_event(tmp_path: Path, labels: list[str], body: str) -> dict[str, str]:
-    """Кладёт событие площадки об изменении и отдаёт окружение для гейта."""
+    """Кладёт событие площадки об изменении и отдаёт окружение для гейта.
+
+    Учётные данные площадки СНИМАЮТСЯ. В прогоне они в окружении есть, и гейт
+    пошёл бы за настоящей задачей: набор стал бы зависеть от чужого состояния и
+    от сети. Проверять надо решение гейта, а не доступность площадки — её
+    проверяет транспорт у себя.
+    """
     event = {
         "pull_request": {"labels": [{"name": name} for name in labels], "title": "t", "body": body}
     }
     path = tmp_path / "event.json"
     path.write_text(json.dumps(event), encoding="utf-8")
-    return {"GITHUB_EVENT_PATH": str(path)}
+    return {
+        "GITHUB_EVENT_PATH": str(path),
+        "GH_TOKEN": "",
+        "GITHUB_TOKEN": "",
+        "GITHUB_REPOSITORY": "",
+    }
 
 
 def test_undeclared_label_is_rejected(run_script: RunScript, tmp_path: Path) -> None:
@@ -433,6 +444,18 @@ def test_correct_meta_passes(run_script: RunScript, tmp_path: Path) -> None:
     """Верная разметка проходит."""
     env = write_event(tmp_path, ["area/docs", "documentation"], "Closes #8")
     assert run_script("check_pr_meta.py", "--files", "README.md", env=env).code == CLEAN
+
+
+def test_a_skipped_checklist_check_says_so(run_script: RunScript, tmp_path: Path) -> None:
+    """Без учётных данных полнота чек-листа не проверяется — и это сказано.
+
+    Молчащий пропуск неотличим от «проверено и чисто» (045): читатель зелёного
+    гейта решил бы, что задача закрывается правомерно, а её никто не смотрел.
+    """
+    env = write_event(tmp_path, ["area/docs", "documentation"], "Closes #8")
+    result = run_script("check_pr_meta.py", "--files", "README.md", env=env)
+    assert result.code == CLEAN
+    assert "полнота чек-листа не проверена" in result.text
 
 
 def test_no_event_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
@@ -807,3 +830,19 @@ def test_a_partial_link_is_not_checked_at_all(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(check.ghrest, "request", refuse)
     assert check.premature("о/р", "токен", check.changerefs.links_in("Refs #7"), []) == []
+
+
+def test_an_unreadable_task_is_a_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задача не прочитана — объявленный третий исход, а не трассировка.
+
+    Необработанное исключение отдаёт единицу, а единица здесь значит
+    «изменение отвергнуто»: сломанный гейт читался бы как сработавший (039).
+    """
+    check = load_script("check_pr_meta.py")
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise check.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(check.ghrest, "request", refuse)
+    with pytest.raises(check.NotRun):
+        check.premature("о/р", "токен", check.changerefs.links_in("Closes #7"), [])
