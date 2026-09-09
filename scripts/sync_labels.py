@@ -21,23 +21,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
-from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-import yaml
-
-API_ROOT: Final = "https://api.github.com"
-COLOR_RE: Final = re.compile(r"^[0-9a-fA-F]{6}$")
-DEFAULT_CONFIG: Final = Path(".github/labels.yml")
+import ghrest
+import labels
 
 EXIT_CLEAN: Final = 0
 EXIT_FINDINGS: Final = 1
@@ -48,104 +38,16 @@ class NotRun(RuntimeError):
     """Проверка не отработала: третий исход, а не находка."""
 
 
-@dataclass(frozen=True, slots=True)
-class Label:
-    """Объявленная метка: имя, цвет, описание и пути зоны."""
-
-    name: str
-    color: str
-    description: str
-    paths: tuple[str, ...] = ()
-
-    def differs_from(self, actual: dict[str, Any]) -> bool:
-        """Отвечает, расходится ли метка площадки с объявленной."""
-        return (actual.get("color") or "").lower() != self.color.lower() or (
-            actual.get("description") or ""
-        ) != self.description
+def differs(label: labels.Label, actual: dict[str, Any]) -> bool:
+    """Отвечает, расходится ли метка площадки с объявленной."""
+    return (actual.get("color") or "").lower() != label.color.lower() or (
+        actual.get("description") or ""
+    ) != label.description
 
 
-def load_declared(path: Path) -> list[Label]:
-    """Читает состав меток, падая на любом дефекте входа (правило 075)."""
-    if not path.is_file():
-        raise NotRun(f"состав меток не найден: {path}")
-
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise NotRun(f"состав меток не разбирается: {exc}") from exc
-
-    if not isinstance(raw, list) or not raw:
-        raise NotRun(f"состав меток пуст: {path} — это ошибка входа, а не «чисто»")
-
-    labels: list[Label] = []
-    problems: list[str] = []
-    for index, item in enumerate(raw, start=1):
-        if not isinstance(item, dict):
-            problems.append(f"запись {index}: не отображение")
-            continue
-        name = str(item.get("name", "")).strip()
-        color = str(item.get("color", "")).strip().lstrip("#")
-        description = str(item.get("description", "")).strip()
-        paths = item.get("paths", []) or []
-        if not name:
-            problems.append(f"запись {index}: пустое имя")
-        if not COLOR_RE.match(color):
-            problems.append(f"{name or index}: цвет «{color}» не шесть шестнадцатеричных цифр")
-        if not description:
-            problems.append(f"{name or index}: пустое описание — метка без описания нечитаема")
-        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
-            problems.append(f"{name or index}: paths — не список строк")
-            paths = []
-        if not problems:
-            labels.append(Label(name, color, description, tuple(paths)))
-
-    if problems:
-        raise NotRun("состав меток не проходит проверку:\n  " + "\n  ".join(problems))
-
-    names = [label.name for label in labels]
-    duplicates = sorted({name for name in names if names.count(name) > 1})
-    if duplicates:
-        raise NotRun(f"имя метки объявлено дважды: {', '.join(duplicates)}")
-
-    return labels
-
-
-def api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -> Any:
-    """Один запрос к REST площадки; любой отказ — третий исход."""
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-            return json.loads(payload) if payload else None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:400]
-        raise NotRun(f"{method} {url} → {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise NotRun(f"{method} {url} → площадка недоступна: {exc.reason}") from exc
-
-
-def fetch_existing(repo: str, token: str) -> Iterator[dict[str, Any]]:
-    """Отдаёт метки репозитория постранично."""
-    page = 1
-    while True:
-        chunk = api("GET", f"{API_ROOT}/repos/{repo}/labels?per_page=100&page={page}", token)
-        if not chunk:
-            return
-        yield from chunk
-        if len(chunk) < 100:
-            return
-        page += 1
-
-
-def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
+def sync(repo: str, token: str, declared: list[labels.Label], dry_run: bool) -> int:
     """Применяет объявленный состав и возвращает код исхода."""
-    existing = {item["name"]: item for item in fetch_existing(repo, token)}
+    existing = {item["name"]: item for item in ghrest.paginate(f"repos/{repo}/labels", token)}
     created: list[str] = []
     updated: list[str] = []
 
@@ -155,12 +57,12 @@ def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
         if actual is None:
             created.append(label.name)
             if not dry_run:
-                api("POST", f"{API_ROOT}/repos/{repo}/labels", token, body)
-        elif label.differs_from(actual):
+                ghrest.request("POST", f"repos/{repo}/labels", token, body)
+        elif differs(label, actual):
             updated.append(label.name)
             if not dry_run:
-                url = f"{API_ROOT}/repos/{repo}/labels/{urllib.parse.quote(label.name)}"
-                api("PATCH", url, token, body)
+                path = f"repos/{repo}/labels/{ghrest.quote(label.name)}"
+                ghrest.request("PATCH", path, token, body)
 
     undeclared = sorted(set(existing) - {label.name for label in declared})
 
@@ -187,7 +89,7 @@ def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: разбирает ключи, печатает исход, возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="состав меток")
+    parser.add_argument("--config", type=Path, default=labels.DEFAULT_PATH, help="состав меток")
     parser.add_argument(
         "--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="владелец/имя"
     )
@@ -195,18 +97,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+        token = ghrest.token_from_env()
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
 
-        declared = load_declared(args.config)
+        declared = labels.load(args.config)
         if not token:
             raise NotRun(
                 f"объявлено в файле: {len(declared)}, но состояние площадки не прочитано — "
                 "нет токена. Это третий исход, а не «чисто»"
             )
         return sync(args.repo, token, declared, args.dry_run)
-    except NotRun as exc:
+    except (NotRun, labels.BadConfig, ghrest.TransportError) as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

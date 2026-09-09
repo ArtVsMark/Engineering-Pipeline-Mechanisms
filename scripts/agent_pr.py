@@ -25,17 +25,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import subprocess
 import sys
-import urllib.error
 import urllib.parse
-import urllib.request
-from typing import Any, Final
+from typing import Final
 
-API_ROOT: Final = "https://api.github.com"
+import ghrest
+import labels
+
 PREFIXES: Final = ("agent/", "claude/")
 TASK_RE: Final = re.compile(r"^(?:Closes|Fixes|Refs) #\d+$", re.MULTILINE)
 
@@ -57,35 +56,11 @@ def git(*args: str) -> str:
         raise NotRun(f"git {' '.join(args)} → {str(detail).strip()[:300]}") from exc
 
 
-def api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -> Any:
-    """Один запрос к REST площадки — самый дешёвый транспорт для этой операции (001)."""
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-            return json.loads(payload) if payload else None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:400]
-        if exc.code in (401, 403):
-            # Истёкший токен и отсутствующий дают ОДИН исход, если их не
-            # различить: «PR перестали открываться» пойдут искать в скрипте.
-            # Отсутствие ловится до запроса и даёт «не настроено»; сюда
-            # попадает случай, когда секрет задан, а площадка его отвергла.
-            raise NotRun(
-                f"{method} {url} → {exc.code}: токен задан, но площадка его отвергла. "
-                "Обычно это истёкший или отозванный секрет, либо у него нет прав "
-                "contents:write и pull-requests:write на этот репозиторий. "
-                f"Ответ площадки: {detail}"
-            ) from exc
-        raise NotRun(f"{method} {url} → {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise NotRun(f"{method} {url} → площадка недоступна: {exc.reason}") from exc
+def changed_files(branch: str, base: str) -> list[str]:
+    """Файлы, тронутые веткой относительно базы."""
+    merge_base = git("merge-base", f"origin/{base}", branch).strip()
+    out = git("diff", "--name-only", f"{merge_base}...{branch}")
+    return [line.strip() for line in out.splitlines() if line.strip()]
 
 
 def describe(branch: str, base: str) -> tuple[str, str]:
@@ -112,6 +87,34 @@ def describe(branch: str, base: str) -> tuple[str, str]:
         "личность человека, из агентского окна не выполняется (правило 131).",
     ]
     return title, "\n".join(lines)
+
+
+def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_run: bool) -> None:
+    """Доставляет изменению зоны, выведенные из тронутых файлов.
+
+    ЗОНЫ СТАВИТ ТОТ, КТО ОТКРЫЛ. Метка — вход механизма (064), и гейт разметки
+    требует зону: изменение, открытое без неё, конвейер тут же отвергает за
+    собственную недоработку.
+
+    Ставятся ТОЛЬКО зоны: они выводятся из путей состава машинно, а род задачи
+    — суждение автора, и угадывать его нечем.
+
+    Вызывается и при создании, и когда изменение уже открыто: POST меток
+    добавляет, а не заменяет, поэтому повтор безвреден, а вот пропуск —
+    необратим.
+    """
+    zones = sorted(labels.zones_for(labels.load(), changed_files(branch, base)))
+    if not zones:
+        print(
+            "зоны не выведены: тронутое не покрыто путями состава — "
+            "разметку поставит человек, и гейт об этом скажет"
+        )
+        return
+    if dry_run:
+        print(f"проставил бы зоны: {', '.join(zones)}")
+        return
+    ghrest.request("POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": zones})
+    print(f"проставлены зоны: {', '.join(zones)}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,10 +152,16 @@ def main(argv: list[str] | None = None) -> int:
         owner = args.repo.split("/")[0]
         head = f"{owner}:{args.branch}"
         query = urllib.parse.urlencode({"head": head, "state": "open"})
-        existing = api("GET", f"{API_ROOT}/repos/{args.repo}/pulls?{query}", token) or []
+        existing = ghrest.request("GET", f"repos/{args.repo}/pulls?{query}", token) or []
         if existing:
             number = existing[0]["number"]
             print(f"изменение для ветки уже открыто: #{number} — второе не заводится")
+            # Зоны доставляются и здесь, а не только при создании. Иначе отказ
+            # на шаге разметки необратим: изменение уже открыто, следующий
+            # прогон уходит этой веткой и выходит с нулём, ни разу не
+            # попытавшись доставить метки, — а гейт разметки продолжает его
+            # отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
+            apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
             return EXIT_OK
 
         title, body = describe(args.branch, args.base)
@@ -160,19 +169,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"открыло бы: {title}\n\n{body}")
             return EXIT_OK
 
-        created = api(
+        created = ghrest.request(
             "POST",
-            f"{API_ROOT}/repos/{args.repo}/pulls",
+            f"repos/{args.repo}/pulls",
             token,
             {"title": title, "body": body, "head": args.branch, "base": args.base, "draft": False},
         )
-        print(f"открыто изменение #{created['number']}: {created['html_url']}")
+        number = created["number"]
+        print(f"открыто изменение #{number}: {created['html_url']}")
+        apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
         print(
             "Проба, а не доверие (135): автор в общей ветке после слияния обязан\n"
             "стать человеком. Не стал — механизм неверен, и видно это сразу."
         )
         return EXIT_OK
-    except NotRun as exc:
+    except (NotRun, labels.BadConfig, ghrest.TransportError) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

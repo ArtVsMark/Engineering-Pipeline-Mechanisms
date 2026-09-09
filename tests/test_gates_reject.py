@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT, RunScript
+from tests.conftest import ROOT, RunScript, load_script
 
 BROKEN = 2
 REJECTED = 1
@@ -324,3 +324,23 @@ def test_scripts_are_where_the_contract_says() -> None:
         "agent_pr.py",
     }
     assert expected <= {path.name for path in (ROOT / "scripts").glob("*.py")}
+
+
+def test_zones_are_applied_even_when_the_change_is_already_open(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Зоны доставляются и на уже открытом изменении, а не только при создании.
+
+    Иначе отказ на шаге разметки необратим: изменение открыто, следующий прогон
+    уходит веткой «уже открыто» и выходит с нулём, ни разу не попытавшись
+    доставить метки, — а гейт разметки продолжает его отвергать. Шаг обязан
+    быть идемпотентным целиком, а не наполовину.
+    """
+    module = load_script("agent_pr.py")
+    source = (ROOT / "scripts" / "agent_pr.py").read_text(encoding="utf-8")
+
+    # Ветка «уже открыто» обязана звать доставку зон до своего возврата.
+    already = source.index("изменение для ветки уже открыто")
+    returns = source.index("return EXIT_OK", already)
+    assert "apply_zones(" in source[already:returns], "ветка «уже открыто» не доставляет зоны"
+    assert callable(module.apply_zones)

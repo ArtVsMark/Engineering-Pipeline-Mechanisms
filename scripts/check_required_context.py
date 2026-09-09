@@ -24,17 +24,14 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, Final
 
+import ghrest
 import yaml
 
-API_ROOT: Final = "https://api.github.com"
 GATES_FILE: Final = Path(".github/workflows/ci.yml")
 
 EXIT_OK: Final = 0
@@ -65,25 +62,18 @@ def declared_context(summary_job: str) -> str:
 
 
 def protection(repo: str, branch: str, token: str) -> list[str]:
-    """Читает список обязательных контекстов защиты ветки."""
-    url = f"{API_ROOT}/repos/{repo}/branches/{branch}/protection/required_status_checks"
-    request = urllib.request.Request(url)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
+    """Читает список обязательных контекстов защиты ветки.
+
+    Отсутствие защиты — не отказ транспорта, а ответ: её может не быть, и это
+    находка для человека, а не поломка механизма.
+    """
+    path = f"repos/{repo}/branches/{branch}/protection/required_status_checks"
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload: dict[str, Any] = json.loads(response.read())
-    except urllib.error.HTTPError as exc:
-        if exc.code in (403, 401):
-            raise NotRun(
-                f"нет прав читать защиту ветки ({exc.code}) — нужен токен владельца"
-            ) from exc
-        if exc.code == 404:
-            return []
-        raise NotRun(f"GET {url} → {exc.code}") from exc
-    except urllib.error.URLError as exc:
-        raise NotRun(f"GET {url} → площадка недоступна: {exc.reason}") from exc
+        payload: dict[str, Any] = ghrest.request("GET", path, token)
+    except ghrest.NotFound:
+        return []
+    except ghrest.TransportError as exc:
+        raise NotRun(str(exc)) from exc
 
     contexts = payload.get("contexts")
     if contexts is None:

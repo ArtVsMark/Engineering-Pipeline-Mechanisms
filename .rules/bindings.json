@@ -7,8 +7,8 @@
   "rules": {
     "001": {
       "status": "active",
-      "mechanism": "pipeline",
-      "where": "scripts/ci_complete.py · scripts/sync_labels.py · scripts/agent_pr.py · scripts/check_required_context.py — все обращения к площадке идут REST стандартной библиотекой; GraphQL не вызывается нигде. Гейта на транспорт пока нет: проверка появится вместе с общим транспортным слоем (#2, фаза 2)"
+      "mechanism": "gate",
+      "where": "scripts/ghrest.py — единственный транспорт к площадке, REST стандартной библиотекой; tests/test_ghrest.py держит это гейтом: ни один механизм не импортирует urllib.request и не собирает заголовок с токеном сам. Раньше ответ был «pipeline»: транспорт соблюдался внимательностью, и пять копий обвязки с четырьмя разными разборами отказа — цена этого"
     },
     "002": {
       "status": "active",
@@ -243,7 +243,7 @@
     "064": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/labels.yml — состав файлом; scripts/sync_labels.py — синхронизация; scripts/check_pr_meta.py — метка вне состава отвергается"
+      "where": ".github/labels.yml — состав файлом; scripts/labels.py — одно чтение состава на все механизмы; scripts/sync_labels.py приводит к нему площадку; scripts/check_pr_meta.py отвергает изменение без зоны; scripts/agent_pr.py проставляет зоны при открытии — метку больше не ставит человек по памяти"
     },
     "065": {
       "status": "unreviewed"
@@ -332,8 +332,8 @@
     },
     "090": {
       "status": "active",
-      "mechanism": "pipeline",
-      "where": ".github/workflows/ci.yml — джоб attribution подключён действием каталога ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0, а не переписан здесь; .rules/bindings.json собран onboard_consumer.py каталога"
+      "mechanism": "gate",
+      "where": ".github/workflows/ci.yml — джоб attribution подключён действием каталога, а не переписан здесь; scripts/ghrest.py — общий транспорт вместо пяти копий, и tests/test_ghrest.py краснеет на появлении шестой"
     },
     "091": {
       "status": "active",
@@ -403,8 +403,8 @@
     },
     "111": {
       "status": "active",
-      "mechanism": "pipeline",
-      "where": ".github/workflows/agent-pr.yml — конвейер открывает изменение сам, а не советует окну сделать это"
+      "mechanism": "gate",
+      "where": ".github/workflows/agent-pr.yml — конвейер сам открывает изменение и сам проставляет зоны, вместо того чтобы советовать окну сделать это; tests/test_ghrest.py держит запрет на вторую реализацию транспорта и чтения состава"
     },
     "112": {
       "status": "unreviewed"

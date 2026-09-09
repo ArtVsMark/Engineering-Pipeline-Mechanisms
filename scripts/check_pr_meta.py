@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import os
 import re
@@ -28,10 +27,9 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
-import yaml
+import labels
 
-LABELS_FILE: Final = Path(".github/labels.yml")
-ZONE_PREFIX: Final = "area/"
+ZONE_PREFIX: Final = labels.ZONE_PREFIX
 TASK_RE: Final = re.compile(r"(?:closes|fixes|refs|part of)\s+#(\d+)", re.IGNORECASE)
 
 EXIT_OK: Final = 0
@@ -58,29 +56,6 @@ def load_event() -> dict[str, Any]:
     return pull
 
 
-def load_declared() -> dict[str, tuple[str, ...]]:
-    """Читает объявленный состав меток: имя → пути зоны."""
-    if not LABELS_FILE.is_file():
-        raise NotRun(f"нет состава меток: {LABELS_FILE}")
-    raw = yaml.safe_load(LABELS_FILE.read_text(encoding="utf-8"))
-    if not isinstance(raw, list) or not raw:
-        raise NotRun(f"состав меток пуст: {LABELS_FILE}")
-    return {str(item["name"]): tuple(item.get("paths") or []) for item in raw}
-
-
-def zones_from_files(declared: dict[str, tuple[str, ...]], files: list[str]) -> set[str]:
-    """Выводит зоны изменения из тронутых файлов по объявленным путям."""
-    zones: set[str] = set()
-    for name, patterns in declared.items():
-        if not name.startswith(ZONE_PREFIX) or not patterns:
-            continue
-        for pattern in patterns:
-            if any(fnmatch.fnmatch(path, pattern) for path in files):
-                zones.add(name)
-                break
-    return zones
-
-
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -89,8 +64,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         pull = load_event()
-        declared = load_declared()
-    except NotRun as exc:
+        declared = labels.load()
+    except (NotRun, labels.BadConfig) as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
@@ -101,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
 
     problems: list[str] = []
 
-    undeclared = sorted(on_pr - set(declared))
+    undeclared = sorted(on_pr - {label.name for label in declared})
     if undeclared:
         problems.append(
             "на изменении метки, которых не объявляет .github/labels.yml: "
@@ -113,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     if not zones_on_pr:
         problems.append("не поставлена ни одна зона (area/*) — изменение не разобрано")
 
-    expected = zones_from_files(declared, files)
+    expected = labels.zones_for(declared, files)
     missing = sorted(expected - zones_on_pr)
     if missing:
         problems.append(
