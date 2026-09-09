@@ -32,7 +32,7 @@ jobs:
           # Токен владельца: у токена прогона нет прав читать защиту ветки, и
           # на него шаг не переходит — иначе сверка зеленела бы, ничего не
           # прочитав.
-          OWNER_TOKEN: ${{ secrets.OWNER_TOKEN }}
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -uo pipefail

@@ -294,7 +294,13 @@ def test_branch_without_prefix_opens_nothing(run_script: RunScript) -> None:
 def test_no_owner_token_is_not_configured(run_script: RunScript) -> None:
     """Нет токена владельца — «не настроено», и на токен прогона шаг не переходит."""
     result = run_script(
-        "open_pr.py", "--repo", "o/r", "--branch", "agent/x", "--dry-run", env={"OWNER_TOKEN": ""}
+        "open_pr.py",
+        "--repo",
+        "o/r",
+        "--branch",
+        "agent/x",
+        "--dry-run",
+        env={"MERGE_QUEUE_TOKEN": ""},
     )
     assert result.code == REJECTED
     assert "не переходит намеренно" in result.text

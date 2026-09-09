@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"сверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    token = os.environ.get("OWNER_TOKEN") or ""
+    token = os.environ.get("MERGE_QUEUE_TOKEN") or ""
     if not token:
         print(
             f"не настроено: дерево выдаёт контекст «{expected}», но защиту ветки без\n"

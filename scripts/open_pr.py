@@ -72,6 +72,17 @@ def api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -
             return json.loads(payload) if payload else None
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:400]
+        if exc.code in (401, 403):
+            # Истёкший токен и отсутствующий дают ОДИН исход, если их не
+            # различить: «PR перестали открываться» пойдут искать в скрипте.
+            # Отсутствие ловится до запроса и даёт «не настроено»; сюда
+            # попадает случай, когда секрет задан, а площадка его отвергла.
+            raise NotRun(
+                f"{method} {url} → {exc.code}: токен задан, но площадка его отвергла. "
+                "Обычно это истёкший или отозванный секрет, либо у него нет прав "
+                "contents:write и pull-requests:write на этот репозиторий. "
+                f"Ответ площадки: {detail}"
+            ) from exc
         raise NotRun(f"{method} {url} → {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise NotRun(f"{method} {url} → площадка недоступна: {exc.reason}") from exc
@@ -124,10 +135,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             return EXIT_OK
 
-        token = os.environ.get("OWNER_TOKEN", "")
+        token = os.environ.get("MERGE_QUEUE_TOKEN", "")
         if not token:
             print(
-                "не настроено: нет токена владельца (OWNER_TOKEN).\n"
+                "не настроено: нет токена владельца (MERGE_QUEUE_TOKEN).\n"
                 "Изменение придётся открыть руками, и автором станет тот, кто открыл.\n"
                 "На токен прогона шаг не переходит намеренно: это дало бы ровно ту\n"
                 "подмену авторства, ради которой он заведён (131).",
