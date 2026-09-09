@@ -1,0 +1,66 @@
+# Шаг 14 скелета: факты о проекте и значок — в отдельную ветку.
+#
+# ПРОИЗВОДНОЕ НЕ КОММИТИТСЯ В ОБЩУЮ ВЕТКУ (правило 125). Значок и сводка,
+# лежащие рядом с источником, расходятся с ним молча: правится источник, а
+# число остаётся вчерашним, и заметить это можно только сверкой руками.
+#
+# ВЕТКА `badges` — СИРОТА И ПЕРЕЗАПИСЫВАЕТСЯ ЦЕЛИКОМ. История производного
+# ценности не имеет: его можно удалить и собрать заново, ничего не потеряв.
+# Поэтому ветка всегда состоит из одного коммита, а не наращивается — иначе
+# репозиторий копит мусор, который никто не читает.
+#
+# ЭТО КАНАЛ НАРУЖУ, А НЕ УКРАШЕНИЕ. Соседям по семье и каталогу правил нужно
+# знать, на какой версии контракта стоит проект и сколько правил он держит.
+# Факты о проекте публикует сам проект (174), а не тот, кто о нём пишет:
+# `facts.json` читается по адресу raw ветки `badges` без клона дерева.
+name: badges
+
+on:
+  push:
+    branches: [main]
+  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  workflow_dispatch:
+
+permissions:
+  # Единственное право на запись во всём конвейере, и оно нужно ровно на толчок
+  # в производную ветку.
+  contents: write
+
+concurrency:
+  # Голова здесь не нужна: ветка перезаписывается целиком, и последний прогон
+  # обязан быть последним словом.
+  group: badges
+  cancel-in-progress: true
+
+jobs:
+  badges:
+    name: badges
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - name: собрать факты и значок
+        run: |
+          python scripts/build_facts.py \
+            --out-dir "${RUNNER_TEMP}/badges" \
+            --sha "${GITHUB_SHA}"
+      - name: опубликовать в ветку badges
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/badges"
+          git init -q -b badges
+          # Производное собирает машина, и подписывать его человеком было бы
+          # ложью: автор здесь — прогон, и в истории это должно быть видно.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "факты и значок на ${GITHUB_SHA}"
+          git push -q --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" badges
+          echo "опубликовано: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/badges/facts.json"

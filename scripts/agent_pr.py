@@ -26,17 +26,19 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 import urllib.parse
 from typing import Final
 
+import changerefs
 import ghrest
 import labels
 
 PREFIXES: Final = ("agent/", "claude/")
-TASK_RE: Final = re.compile(r"^(?:Closes|Fixes|Refs) #\d+$", re.MULTILINE)
+#: Отметка, по которой видно, что тело собрано механизмом. Тело, правленное
+#: человеком, шаг не переписывает: он источник заголовка, а не хозяин страницы.
+MARK: Final = "Изменение открыто конвейером от лица владельца"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -80,19 +82,66 @@ def describe(branch: str, base: str) -> tuple[str, str]:
     title = subjects[0] if len(subjects) == 1 else f"{subjects[0]} (+{len(subjects) - 1})"
     bodies = git("log", "--reverse", "--format=%B%n---", f"{merge_base}..{branch}")
 
-    tasks = sorted(set(TASK_RE.findall(bodies)))
+    # Связь читается общим модулем, а не своей регуляркой: у гейта разметки она
+    # была другой, и строка «Refs #2, #29» для шага открытия не существовала.
+    links = changerefs.links_in(bodies)
+    if not links:
+        raise NotRun(
+            "ни один коммит ветки не называет задачу: ни «Closes #N», ни «Refs #N». "
+            "Изменение без связи гейт разметки отвергнет, и открывать его молча — "
+            "значит отдать красное туда, где предмет виден уже здесь (075)"
+        )
+
     lines = ["## Что в изменении", ""]
     lines += [f"- {subject}" for subject in subjects]
-    if tasks:
-        lines += ["", "## Связь с задачами", ""] + [f"{task}" for task in tasks]
+    # По строке на задачу: ключевое слово площадка читает у каждого номера
+    # отдельно, и список после одного глагола закрывает только первую задачу.
+    lines += ["", "## Связь с задачами", ""] + [str(link) for link in links]
+
+    # Снятие находки едет вместе с работой: строка из коммита попадает в тело
+    # изменения, а механизм находок читает именно тело слитого изменения. Без
+    # переноса «снятие вместе с работой» держалось бы тем, что кто-то вспомнит
+    # дописать описание руками.
+    resolved = changerefs.resolved_in(bodies)
+    if resolved:
+        lines += ["", "## Разобранные находки", ""]
+        lines += [f"Разобрано: {mark}" for mark in resolved]
+
     lines += [
         "",
         "---",
         "",
-        "Изменение открыто конвейером от лица владельца: операция, несущая",
+        f"{MARK}: операция, несущая",
         "личность человека, из агентского окна не выполняется (правило 131).",
     ]
     return title, "\n".join(lines)
+
+
+def sync_description(
+    repo: str, number: int, token: str, title: str, body: str, dry_run: bool
+) -> None:
+    """Приводит описание открытого изменения к тому, что говорят коммиты.
+
+    Шаг обязан быть идемпотентным целиком: изменение, открытое до правки
+    механизма, иначе навсегда остаётся с телом, собранным по старому чтению, —
+    и гейт разметки отвергает его на каждом прогоне, а починить это нечем,
+    кроме рук.
+
+    Тело, правленное человеком, не переписывается: отметка `MARK` отличает
+    собранное механизмом от написанного. Затирать чужой текст своим — цена,
+    которой идемпотентность не стоит.
+    """
+    current = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
+    if MARK not in str(current.get("body") or ""):
+        print("тело изменения писал человек — механизм его не переписывает")
+        return
+    if current.get("title") == title and current.get("body") == body:
+        return
+    if dry_run:
+        print(f"обновило бы описание #{number}")
+        return
+    ghrest.request("PATCH", f"repos/{repo}/pulls/{number}", token, {"title": title, "body": body})
+    print(f"описание #{number} приведено к коммитам ветки")
 
 
 def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_run: bool) -> None:
@@ -168,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
             # попытавшись доставить метки, — а гейт разметки продолжает его
             # отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
             apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
+            title, body = describe(args.branch, args.base)
+            sync_description(args.repo, number, token, title, body, args.dry_run)
             return EXIT_OK
 
         title, body = describe(args.branch, args.base)
