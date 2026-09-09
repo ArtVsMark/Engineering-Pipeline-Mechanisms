@@ -22,17 +22,12 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
 import ghrest
-import yaml
-
-COLOR_RE: Final = re.compile(r"^[0-9a-fA-F]{6}$")
-DEFAULT_CONFIG: Final = Path(".github/labels.yml")
+import labels
 
 EXIT_CLEAN: Final = 0
 EXIT_FINDINGS: Final = 1
@@ -43,69 +38,14 @@ class NotRun(RuntimeError):
     """Проверка не отработала: третий исход, а не находка."""
 
 
-@dataclass(frozen=True, slots=True)
-class Label:
-    """Объявленная метка: имя, цвет, описание и пути зоны."""
-
-    name: str
-    color: str
-    description: str
-    paths: tuple[str, ...] = ()
-
-    def differs_from(self, actual: dict[str, Any]) -> bool:
-        """Отвечает, расходится ли метка площадки с объявленной."""
-        return (actual.get("color") or "").lower() != self.color.lower() or (
-            actual.get("description") or ""
-        ) != self.description
+def differs(label: labels.Label, actual: dict[str, Any]) -> bool:
+    """Отвечает, расходится ли метка площадки с объявленной."""
+    return (actual.get("color") or "").lower() != label.color.lower() or (
+        actual.get("description") or ""
+    ) != label.description
 
 
-def load_declared(path: Path) -> list[Label]:
-    """Читает состав меток, падая на любом дефекте входа (правило 075)."""
-    if not path.is_file():
-        raise NotRun(f"состав меток не найден: {path}")
-
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise NotRun(f"состав меток не разбирается: {exc}") from exc
-
-    if not isinstance(raw, list) or not raw:
-        raise NotRun(f"состав меток пуст: {path} — это ошибка входа, а не «чисто»")
-
-    labels: list[Label] = []
-    problems: list[str] = []
-    for index, item in enumerate(raw, start=1):
-        if not isinstance(item, dict):
-            problems.append(f"запись {index}: не отображение")
-            continue
-        name = str(item.get("name", "")).strip()
-        color = str(item.get("color", "")).strip().lstrip("#")
-        description = str(item.get("description", "")).strip()
-        paths = item.get("paths", []) or []
-        if not name:
-            problems.append(f"запись {index}: пустое имя")
-        if not COLOR_RE.match(color):
-            problems.append(f"{name or index}: цвет «{color}» не шесть шестнадцатеричных цифр")
-        if not description:
-            problems.append(f"{name or index}: пустое описание — метка без описания нечитаема")
-        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
-            problems.append(f"{name or index}: paths — не список строк")
-            paths = []
-        if not problems:
-            labels.append(Label(name, color, description, tuple(paths)))
-
-    if problems:
-        raise NotRun("состав меток не проходит проверку:\n  " + "\n  ".join(problems))
-
-    names = [label.name for label in labels]
-    duplicates = sorted({name for name in names if names.count(name) > 1})
-    if duplicates:
-        raise NotRun(f"имя метки объявлено дважды: {', '.join(duplicates)}")
-
-    return labels
-
-
-def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
+def sync(repo: str, token: str, declared: list[labels.Label], dry_run: bool) -> int:
     """Применяет объявленный состав и возвращает код исхода."""
     existing = {item["name"]: item for item in ghrest.paginate(f"repos/{repo}/labels", token)}
     created: list[str] = []
@@ -118,7 +58,7 @@ def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
             created.append(label.name)
             if not dry_run:
                 ghrest.request("POST", f"repos/{repo}/labels", token, body)
-        elif label.differs_from(actual):
+        elif differs(label, actual):
             updated.append(label.name)
             if not dry_run:
                 path = f"repos/{repo}/labels/{ghrest.quote(label.name)}"
@@ -149,7 +89,7 @@ def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: разбирает ключи, печатает исход, возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="состав меток")
+    parser.add_argument("--config", type=Path, default=labels.DEFAULT_PATH, help="состав меток")
     parser.add_argument(
         "--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="владелец/имя"
     )
@@ -161,14 +101,14 @@ def main(argv: list[str] | None = None) -> int:
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
 
-        declared = load_declared(args.config)
+        declared = labels.load(args.config)
         if not token:
             raise NotRun(
                 f"объявлено в файле: {len(declared)}, но состояние площадки не прочитано — "
                 "нет токена. Это третий исход, а не «чисто»"
             )
         return sync(args.repo, token, declared, args.dry_run)
-    except (NotRun, ghrest.TransportError) as exc:
+    except (NotRun, labels.BadConfig, ghrest.TransportError) as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

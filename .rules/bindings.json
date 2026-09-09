@@ -243,7 +243,7 @@
     "064": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/labels.yml — состав файлом; scripts/sync_labels.py — синхронизация; scripts/check_pr_meta.py — метка вне состава отвергается"
+      "where": ".github/labels.yml — состав файлом; scripts/labels.py — одно чтение состава на все механизмы; scripts/sync_labels.py приводит к нему площадку; scripts/check_pr_meta.py отвергает изменение без зоны; scripts/agent_pr.py проставляет зоны при открытии — метку больше не ставит человек по памяти"
     },
     "065": {
       "status": "unreviewed"
@@ -403,8 +403,8 @@
     },
     "111": {
       "status": "active",
-      "mechanism": "pipeline",
-      "where": ".github/workflows/agent-pr.yml — конвейер открывает изменение сам, а не советует окну сделать это"
+      "mechanism": "gate",
+      "where": ".github/workflows/agent-pr.yml — конвейер сам открывает изменение и сам проставляет зоны, вместо того чтобы советовать окну сделать это; tests/test_ghrest.py держит запрет на вторую реализацию транспорта и чтения состава"
     },
     "112": {
       "status": "unreviewed"

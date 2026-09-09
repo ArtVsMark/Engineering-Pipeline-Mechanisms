@@ -33,6 +33,7 @@ import urllib.parse
 from typing import Final
 
 import ghrest
+import labels
 
 PREFIXES: Final = ("agent/", "claude/")
 TASK_RE: Final = re.compile(r"^(?:Closes|Fixes|Refs) #\d+$", re.MULTILINE)
@@ -53,6 +54,13 @@ def git(*args: str) -> str:
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
         raise NotRun(f"git {' '.join(args)} → {str(detail).strip()[:300]}") from exc
+
+
+def changed_files(branch: str, base: str) -> list[str]:
+    """Файлы, тронутые веткой относительно базы."""
+    merge_base = git("merge-base", f"origin/{base}", branch).strip()
+    out = git("diff", "--name-only", f"{merge_base}...{branch}")
+    return [line.strip() for line in out.splitlines() if line.strip()]
 
 
 def describe(branch: str, base: str) -> tuple[str, str]:
@@ -133,13 +141,31 @@ def main(argv: list[str] | None = None) -> int:
             token,
             {"title": title, "body": body, "head": args.branch, "base": args.base, "draft": False},
         )
-        print(f"открыто изменение #{created['number']}: {created['html_url']}")
+        number = created["number"]
+        print(f"открыто изменение #{number}: {created['html_url']}")
+
+        # ЗОНЫ СТАВИТ ТОТ, КТО ОТКРЫЛ. Метка — вход механизма (064), и гейт
+        # разметки требует зону; изменение, открытое без неё, конвейер тут же
+        # отвергает за собственную недоработку. Ставятся только ЗОНЫ: они
+        # выводятся из тронутых файлов машинно, а род задачи — суждение автора,
+        # и угадывать его нечем.
+        zones = sorted(labels.zones_for(labels.load(), changed_files(args.branch, args.base)))
+        if zones:
+            ghrest.request(
+                "POST", f"repos/{args.repo}/issues/{number}/labels", token, {"labels": zones}
+            )
+            print(f"проставлены зоны: {', '.join(zones)}")
+        else:
+            print(
+                "зоны не выведены: тронутое не покрыто путями состава — "
+                "разметку поставит человек, и гейт об этом скажет"
+            )
         print(
             "Проба, а не доверие (135): автор в общей ветке после слияния обязан\n"
             "стать человеком. Не стал — механизм неверен, и видно это сразу."
         )
         return EXIT_OK
-    except (NotRun, ghrest.TransportError) as exc:
+    except (NotRun, labels.BadConfig, ghrest.TransportError) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

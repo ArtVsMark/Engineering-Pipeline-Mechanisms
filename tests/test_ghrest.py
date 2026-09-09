@@ -148,3 +148,25 @@ def test_no_mechanism_builds_its_own_authorization(path: Path) -> None:
     """Заголовок с токеном собирается в одном месте, а не в каждом механизме."""
     text = path.read_text(encoding="utf-8")
     assert "Authorization" not in text, f"{path.name} собирает заголовок токена сам"
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(p for p in SCRIPTS.glob("*.py") if p.name not in {"labels.py", "ghrest.py"}),
+    ids=lambda p: p.name,
+)
+def test_no_mechanism_parses_the_label_config_itself(path: Path) -> None:
+    """Состав меток разбирает один модуль, а не каждый по-своему.
+
+    Читателей у файла трое, и читали они его по-разному: один с проверкой цвета
+    и описания, другой без неё, третий не читал вовсе — и открывал изменение,
+    которое второй тут же отвергал. Это дрейф на данных, и ловится он так же,
+    как дрейф на транспорте.
+    """
+    text = path.read_text(encoding="utf-8")
+    assert "labels.yml" not in text or "labels.load" in text or "import labels" in text, (
+        f"{path.name} обращается к составу меток мимо общего модуля"
+    )
+    assert "yaml.safe_load" not in text or path.name == "check_required_context.py", (
+        f"{path.name} разбирает YAML состава сам"
+    )
