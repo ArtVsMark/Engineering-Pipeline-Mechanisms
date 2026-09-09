@@ -76,6 +76,31 @@ def findings_debt(repo: str, token: str) -> list[tuple[str, int, str]]:
     return [(mark, pr, title) for mark, (pr, title) in findings.parse_entries(body).items()]
 
 
+def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
+    """Есть ли незакрытая работа по правилам — по ТРЁМ видам 177, а не по счёту задач.
+
+    Первое из трёх чисел — сколько задач по правилам заведено в трекере, и
+    долгом оно не является: задача может быть открыта и разобрана, а долг —
+    это правило без ответа, правило «действует и не держится ничем» и
+    разошедшийся контракт. Считать долгом любое ненулевое из трёх значило
+    объявлять долг ВСЕГДА: задачи по правилам у проекта есть постоянно, и
+    напоминание в таком виде перестаёт что-либо значить (051).
+
+    Третий вид — расхождение контракта — печатался, но в решение не входил
+    ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)):
+    поднявшийся контракт означает, что ответы надо перечитать, и молчать об
+    этом нельзя.
+
+    Числа не прочитаны — долг НЕИЗВЕСТЕН, а не равен нулю (045): неизвестность
+    считается долгом, потому что снимать приоритет с непроверенного источника
+    хуже, чем напомнить лишний раз.
+    """
+    if numbers is None:
+        return True
+    _, queue, unheld = numbers
+    return bool(queue or unheld or note)
+
+
 def remind(has_debt: bool) -> None:
     """Ведёт к договору, а не пересказывает его."""
     if has_debt:
@@ -118,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
 
     partial = False
     numbers = rules_debt(inbox)
+    note = contract_note(inbox)
     if numbers is None:
         partial = True
         print(
@@ -130,11 +156,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"правила (считает каталог): задач {tasks}, без ответа {queue}, держится ничем {unheld}"
         )
-        note = contract_note(inbox)
-        if note:
-            print(f"  контракт разошёлся: {note}")
+    # Расхождение контракта печатается и тогда, когда счёта нет: это отдельный
+    # вид долга, и от строки со счётом он не зависит.
+    if note:
+        print(f"  контракт разошёлся: {note}")
 
-    remind(bool(left) or bool(numbers and any(numbers)) or partial)
+    remind(bool(left) or rules_left(numbers, note))
     return EXIT_PARTIAL if partial else EXIT_OK
 
 
