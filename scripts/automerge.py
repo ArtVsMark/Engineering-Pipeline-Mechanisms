@@ -274,7 +274,9 @@ def on_the_shared_branch(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def severity(run: dict[str, Any]) -> int:
     """Насколько плоха одна запись. Больше — хуже; отменённая ниже любой живой."""
     conclusion = run.get("conclusion")
-    if run.get("status") in ci_complete.PENDING:
+    # «Идёт» решается общим разбором, а не своим: запись со `status:
+    # in_progress` и уже проставленным исходом завершена, и ждать её вечно.
+    if ci_complete.pending(run):
         return 1
     if conclusion == "cancelled":
         return -1

@@ -370,6 +370,16 @@ def test_all_cancelled_stays_cancelled() -> None:
     assert [run["conclusion"] for run in kept] == ["cancelled"]
 
 
+def test_a_zombie_record_does_not_stop_the_queue() -> None:
+    """Запись `in_progress` с исходом очередь не останавливает.
+
+    Она завершена, и ждать её нечего: новых событий у изменения больше нет.
+    Замер 09.09.2026 — изменение #73 стояло при девяти зелёных записях.
+    """
+    kept = module.worst_per_name([record("pipeline", status="in_progress")])
+    assert module.severity(kept[0]) == 0
+
+
 def test_pending_beats_success_but_not_failure() -> None:
     """Идущая запись важнее зелёной: имя ещё не досчитано, а не пройдено."""
     pending = module.worst_per_name(
