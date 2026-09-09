@@ -1,0 +1,95 @@
+# Ревью по обращению: агент запускается упоминанием в задаче или комментарии.
+#
+# ЭТО ДРУГОЙ МЕХАНИЗМ, А НЕ РЕЖИМ РЕВЬЮ. У авто-ревью (review.yml) вход — свой
+# код на своём изменении. Здесь вход — ТЕКСТ, написанный кем угодно в интернете,
+# а агент запускается токеном владельца. Разные поверхности атаки нельзя держать
+# в одном файле, даже если действие одно и то же.
+#
+# УПОМИНАНИЯ МАЛО. Триггеры `issues` и `issue_comment` открыты всем: без
+# требования к автору любой посторонний заводит задачу, жжёт квоту владельца, и
+# текст задачи идёт прямо в промпт агента. К упоминанию добавлено требование
+# `author_association` из закрытого списка — это список РАЗРЕШЁННОГО (068), а
+# проставляет его сама площадка по факту прав, и подделать его содержимым
+# задачи нельзя.
+name: claude
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  id-token: write
+  # Нужно, чтобы агент мог прочитать исход проверок на изменении.
+  actions: read
+
+concurrency:
+  # Обращений на одной задаче может быть несколько подряд; предыдущее не должно
+  # дописывать ответ к уже отвеченному. Голову назвать нечем — обращение
+  # приходит к задаче, а не к коммиту, — поэтому группу задаёт номер обсуждения.
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  respond:
+    name: respond
+    runs-on: ubuntu-latest
+    # Зависший агент держит слот и очередь проверок: умолчание площадки — шесть
+    # часов.
+    timeout-minutes: 30
+    if: >-
+      (github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)) ||
+      (github.event_name == 'issues' &&
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association))
+    steps:
+      - name: ключа нет — обращение не обслуживается
+        id: token
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "present=no" >> "$GITHUB_OUTPUT"
+            echo "::warning::Обращение не обслужено: секрет CLAUDE_CODE_OAUTH_TOKEN не задан. Это ненастроенная возможность, а не поломка обсуждения."
+          else
+            echo "present=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Версии закреплены по SHA: действие получает токен и исполняет промпт,
+      # собранный в том числе из чужого текста (152, 085).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.token.outputs.present == 'yes'
+        with:
+          fetch-depth: 1
+
+      - name: ответить на обращение
+        if: steps.token.outputs.present == 'yes'
+        uses: anthropics/claude-code-action@d75b94d5ad426cb8546e6628b6f5f19b84e5cce1 # v1.0.216
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          # Права джоба и так на чтение; закрытый список инструментов закрывает
+          # вторую половину — канал ИСПОЛНЕНИЯ. Текст обращения попадает в
+          # промпт как есть, и без списка агенту доступен произвольный Bash:
+          # «выполни команду и отправь результат наружу» стало бы исполнимым.
+          claude_args: >-
+            --allowedTools
+            "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(python -m pytest:*)"
