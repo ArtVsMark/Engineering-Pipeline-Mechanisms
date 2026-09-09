@@ -43,16 +43,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import re
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from typing import Any, Final
 
-API_ROOT: Final = "https://api.github.com"
+import ghrest
 
 MARKER: Final = "<!-- review-findings: не удаляйте, по этой строке задача находится снова -->"
 TITLE: Final = "Находки внешнего взгляда: не разобранные"
@@ -69,26 +65,6 @@ EXIT_BROKEN: Final = 2
 
 class NotRun(RuntimeError):
     """Механизм не отработал: третий исход, а не «находок нет»."""
-
-
-def api(method: str, path: str, token: str, body: dict[str, Any] | None = None) -> Any:
-    """Один запрос к REST площадки."""
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(f"{API_ROOT}/{path}", data=data, method=method)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-            return json.loads(payload) if payload else None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:300]
-        raise NotRun(f"{method} {path} → {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise NotRun(f"{method} {path} → площадка недоступна: {exc.reason}") from exc
 
 
 def fingerprint(title: str) -> str:
@@ -157,27 +133,20 @@ def live_issue(repo: str, token: str) -> tuple[int | None, str]:
     Списком, а не поиском: поисковый индекс площадки догоняет с задержкой в
     минуты, и за это время механизм заводит вторую задачу вместо одной.
     """
-    page = 1
-    while True:
-        items = api("GET", f"repos/{repo}/issues?state=open&per_page=100&page={page}", token)
-        if not items:
-            return None, ""
-        for item in items:
-            # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
-            if item.get("pull_request") is not None:
-                continue
-            body = item.get("body") or ""
-            if MARKER in body:
-                return int(item["number"]), body
-        if len(items) < 100:
-            return None, ""
-        page += 1
+    for item in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
+        # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
+        if item.get("pull_request") is not None:
+            continue
+        body = item.get("body") or ""
+        if MARKER in body:
+            return int(item["number"]), body
+    return None, ""
 
 
 def resolved_marks(repo: str, token: str, limit: int = 30) -> set[str]:
     """Отпечатки, названные разобранными в последних слитых изменениях."""
     marks: set[str] = set()
-    items = api("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
+    items = ghrest.request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
     for item in items:
         if not item.get("merged_at"):
             continue
@@ -195,10 +164,12 @@ def save(repo: str, token: str, entries: dict[str, tuple[int, str]], apply: bool
         )
         return
     if number is None:
-        created = api("POST", f"repos/{repo}/issues", token, {"title": TITLE, "body": body})
+        created = ghrest.request(
+            "POST", f"repos/{repo}/issues", token, {"title": TITLE, "body": body}
+        )
         print(f"заведена живая задача #{created['number']}")
         return
-    api("PATCH", f"repos/{repo}/issues/{number}", token, {"body": body})
+    ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": body})
     print(f"живая задача #{number} обновлена: заметок {len(entries)}")
 
 
@@ -224,9 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         entries = parse_entries(body)
 
         if args.pr is not None:
-            comments = api(
-                "GET", f"repos/{args.repo}/issues/{args.pr}/comments?per_page=100", token
-            )
+            comments = list(ghrest.paginate(f"repos/{args.repo}/issues/{args.pr}/comments", token))
             verdict = verdict_of(comments or [])
             if verdict is None:
                 raise NotRun(
@@ -255,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"снято как разобранное: {', '.join(sorted(swept))}")
 
         save(args.repo, token, entries, args.apply)
-    except NotRun as exc:
+    except (NotRun, ghrest.TransportError) as exc:
         print(f"механизм не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

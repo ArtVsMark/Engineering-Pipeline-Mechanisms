@@ -21,21 +21,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+import ghrest
 import yaml
 
-API_ROOT: Final = "https://api.github.com"
 COLOR_RE: Final = re.compile(r"^[0-9a-fA-F]{6}$")
 DEFAULT_CONFIG: Final = Path(".github/labels.yml")
 
@@ -110,42 +105,9 @@ def load_declared(path: Path) -> list[Label]:
     return labels
 
 
-def api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -> Any:
-    """Один запрос к REST площадки; любой отказ — третий исход."""
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-            return json.loads(payload) if payload else None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:400]
-        raise NotRun(f"{method} {url} → {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise NotRun(f"{method} {url} → площадка недоступна: {exc.reason}") from exc
-
-
-def fetch_existing(repo: str, token: str) -> Iterator[dict[str, Any]]:
-    """Отдаёт метки репозитория постранично."""
-    page = 1
-    while True:
-        chunk = api("GET", f"{API_ROOT}/repos/{repo}/labels?per_page=100&page={page}", token)
-        if not chunk:
-            return
-        yield from chunk
-        if len(chunk) < 100:
-            return
-        page += 1
-
-
 def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
     """Применяет объявленный состав и возвращает код исхода."""
-    existing = {item["name"]: item for item in fetch_existing(repo, token)}
+    existing = {item["name"]: item for item in ghrest.paginate(f"repos/{repo}/labels", token)}
     created: list[str] = []
     updated: list[str] = []
 
@@ -155,12 +117,12 @@ def sync(repo: str, token: str, declared: list[Label], dry_run: bool) -> int:
         if actual is None:
             created.append(label.name)
             if not dry_run:
-                api("POST", f"{API_ROOT}/repos/{repo}/labels", token, body)
+                ghrest.request("POST", f"repos/{repo}/labels", token, body)
         elif label.differs_from(actual):
             updated.append(label.name)
             if not dry_run:
-                url = f"{API_ROOT}/repos/{repo}/labels/{urllib.parse.quote(label.name)}"
-                api("PATCH", url, token, body)
+                path = f"repos/{repo}/labels/{ghrest.quote(label.name)}"
+                ghrest.request("PATCH", path, token, body)
 
     undeclared = sorted(set(existing) - {label.name for label in declared})
 
@@ -195,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+        token = ghrest.token_from_env()
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
 
@@ -206,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
                 "нет токена. Это третий исход, а не «чисто»"
             )
         return sync(args.repo, token, declared, args.dry_run)
-    except NotRun as exc:
+    except (NotRun, ghrest.TransportError) as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

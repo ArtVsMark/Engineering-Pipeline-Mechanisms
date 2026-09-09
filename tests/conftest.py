@@ -69,6 +69,14 @@ def load_script(name: str) -> ModuleType:
     друга не импортируют. Для тестов модуль собирается по пути.
     """
     path = ROOT / "scripts" / name
+    # Механизмы делят общий транспорт (`ghrest`), и при запуске файла его
+    # находит сам интерпретатор: каталог скрипта попадает в путь первым. При
+    # импорте отсюда этого не происходит, поэтому путь добавляется явно —
+    # тест обязан видеть модуль ровно так же, как его видит прогон.
+    scripts = str(ROOT / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+
     spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"не собрать модуль из {path}")

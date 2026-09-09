@@ -20,7 +20,8 @@ import pytest
 
 from tests.conftest import load_script
 
-module = load_script("agent_pr.py")
+agent_pr = load_script("agent_pr.py")
+transport = load_script("ghrest.py")
 
 
 class Refusing(BaseHTTPRequestHandler):
@@ -54,11 +55,17 @@ def refusing_server() -> Iterator[str]:
 
 
 def test_refused_token_names_the_expiry(refusing_server: str) -> None:
-    """Отказ по учётным данным называет срок и права, а не только код."""
-    with pytest.raises(module.NotRun) as caught:
+    """Отказ по учётным данным называет срок и права, а не только код.
+
+    Проверка живёт здесь, у транспорта: разбор отказа сведён в один модуль
+    именно затем, чтобы истёкший токен читался одинаково во всех механизмах.
+    Раньше каждый разбирал его сам, и в одном месте он выглядел как «не
+    настроено», а в другом — как поломка.
+    """
+    with pytest.raises(transport.TransportError) as caught:
         # Значение ASCII: заголовки HTTP кириллицу не несут, и настоящий
         # токен площадки её тоже не содержит.
-        module.api("GET", refusing_server, "ghp_expired000000000000000000000000000")
+        transport.request("GET", refusing_server, "ghp_expired000000000000000000000000000")
     message = str(caught.value)
     assert "токен задан" in message
     assert "истёкший" in message
@@ -67,5 +74,5 @@ def test_refused_token_names_the_expiry(refusing_server: str) -> None:
 
 def test_missing_token_is_a_different_outcome() -> None:
     """Отсутствие секрета — «не настроено», и это другой исход, а не отказ."""
-    code = module.main(["--repo", "o/r", "--branch", "agent/x", "--dry-run"])
-    assert code == module.EXIT_NOT_CONFIGURED
+    code = agent_pr.main(["--repo", "o/r", "--branch", "agent/x", "--dry-run"])
+    assert code == agent_pr.EXIT_NOT_CONFIGURED

@@ -25,17 +25,15 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import subprocess
 import sys
-import urllib.error
 import urllib.parse
-import urllib.request
-from typing import Any, Final
+from typing import Final
 
-API_ROOT: Final = "https://api.github.com"
+import ghrest
+
 PREFIXES: Final = ("agent/", "claude/")
 TASK_RE: Final = re.compile(r"^(?:Closes|Fixes|Refs) #\d+$", re.MULTILINE)
 
@@ -55,37 +53,6 @@ def git(*args: str) -> str:
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
         raise NotRun(f"git {' '.join(args)} → {str(detail).strip()[:300]}") from exc
-
-
-def api(method: str, url: str, token: str, body: dict[str, Any] | None = None) -> Any:
-    """Один запрос к REST площадки — самый дешёвый транспорт для этой операции (001)."""
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = response.read()
-            return json.loads(payload) if payload else None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:400]
-        if exc.code in (401, 403):
-            # Истёкший токен и отсутствующий дают ОДИН исход, если их не
-            # различить: «PR перестали открываться» пойдут искать в скрипте.
-            # Отсутствие ловится до запроса и даёт «не настроено»; сюда
-            # попадает случай, когда секрет задан, а площадка его отвергла.
-            raise NotRun(
-                f"{method} {url} → {exc.code}: токен задан, но площадка его отвергла. "
-                "Обычно это истёкший или отозванный секрет, либо у него нет прав "
-                "contents:write и pull-requests:write на этот репозиторий. "
-                f"Ответ площадки: {detail}"
-            ) from exc
-        raise NotRun(f"{method} {url} → {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise NotRun(f"{method} {url} → площадка недоступна: {exc.reason}") from exc
 
 
 def describe(branch: str, base: str) -> tuple[str, str]:
@@ -149,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         owner = args.repo.split("/")[0]
         head = f"{owner}:{args.branch}"
         query = urllib.parse.urlencode({"head": head, "state": "open"})
-        existing = api("GET", f"{API_ROOT}/repos/{args.repo}/pulls?{query}", token) or []
+        existing = ghrest.request("GET", f"repos/{args.repo}/pulls?{query}", token) or []
         if existing:
             number = existing[0]["number"]
             print(f"изменение для ветки уже открыто: #{number} — второе не заводится")
@@ -160,9 +127,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"открыло бы: {title}\n\n{body}")
             return EXIT_OK
 
-        created = api(
+        created = ghrest.request(
             "POST",
-            f"{API_ROOT}/repos/{args.repo}/pulls",
+            f"repos/{args.repo}/pulls",
             token,
             {"title": title, "body": body, "head": args.branch, "base": args.base, "draft": False},
         )
@@ -172,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             "стать человеком. Не стал — механизм неверен, и видно это сразу."
         )
         return EXIT_OK
-    except NotRun as exc:
+    except (NotRun, ghrest.TransportError) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

@@ -26,15 +26,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
-import urllib.error
-import urllib.request
 from typing import Any, Final
 
-API_ROOT: Final = "https://api.github.com"
+import ghrest
+
 PENDING: Final = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 
 EXIT_GREEN: Final = 0
@@ -46,40 +44,15 @@ class NotRun(RuntimeError):
     """Опрос не отработал: третий исход, а не «зелено»."""
 
 
-def api(url: str, token: str) -> Any:
-    """Читает REST площадки — самый дешёвый транспорт для опроса (001)."""
-    request = urllib.request.Request(url)
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:300]
-        raise NotRun(f"GET {url} → {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise NotRun(f"GET {url} → площадка недоступна: {exc.reason}") from exc
+def check_runs(repo: str, sha: str) -> list[dict[str, Any]]:
+    """Отдаёт записи проверок на голове.
 
-
-def check_runs(repo: str, sha: str, token: str) -> list[dict[str, Any]]:
-    """Отдаёт записи проверок на голове, включая повторы имён."""
-    runs: list[dict[str, Any]] = []
-    page = 1
-    while True:
-        # filter=latest — только последняя запись на каждое имя. Без него
-        # повторный прогон на той же голове оставляет прошлые записи, и
-        # проверка «больше одной живой записи» краснела бы на здоровом.
-        url = (
-            f"{API_ROOT}/repos/{repo}/commits/{sha}/check-runs"
-            f"?per_page=100&page={page}&filter=latest"
-        )
-        payload = api(url, token)
-        chunk = payload.get("check_runs", [])
-        runs.extend(chunk)
-        if len(chunk) < 100:
-            return runs
-        page += 1
+    filter=latest — только последняя запись на каждое имя. Без него повторный
+    прогон на той же голове оставляет прошлые записи, и проверка «больше одной
+    живой записи» краснела бы на здоровом.
+    """
+    path = f"repos/{repo}/commits/{sha}/check-runs?filter=latest"
+    return list(ghrest.paginate(path, ghrest.token_from_env(), key="check_runs"))
 
 
 def belongs_to(run: dict[str, Any], run_id: str) -> bool:
@@ -167,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+        token = ghrest.token_from_env()
         if not token:
             raise NotRun("нет токена: GH_TOKEN или GITHUB_TOKEN")
         if not args.repo or not args.sha:
@@ -179,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
 
         deadline = time.monotonic() + args.timeout
         while True:
-            runs = check_runs(args.repo, args.sha, token)
+            runs = check_runs(args.repo, args.sha)
             if not runs:
                 raise NotRun(
                     f"на голове {args.sha[:8]} нет ни одной записи проверок — "
@@ -193,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             print(f"ждём соседей на голове {args.sha[:8]}…", flush=True)
             time.sleep(args.interval)
-    except NotRun as exc:
+    except (NotRun, ghrest.TransportError) as exc:
         print(f"опрос не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
