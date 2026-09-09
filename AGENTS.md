@@ -96,8 +96,16 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 ([189](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/189-a-branch-is-named-by-its-task-not-its-window.md)),
 и префикс имени работает переключателем поведения конвейера
 ([003](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/003-branch-name-is-a-switch.md)).
-Пока [#12](../../issues/12) не сделан, **префикс не переключает ничего** — это
-объявленный пробел, а не работающий механизм.
+Приставка — `agent/<задача>`: по ней `agent-pr.yml` открывает изменение, а
+`scripts/agent_pr.py` отвергает ветку без неё. Переключатель работает — это
+видно на изменении [#35](../../pull/35), открытом конвейером с ветки
+`agent/branch-named-by-task`, а не объявлено с чужих слов
+([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-claim-about-the-platform-needs-a-run-or-a-citation.md)).
+
+**Ветку, выданную средой, работой не считают.** Облачное окно получает при
+старте ветку вида `claude/<имя-окна>`: это след запуска, а не задача. Работа
+режется в свою `agent/<задача>` — подробности механики окна в
+[`CLAUDE.md`](CLAUDE.md).
 
 **Одна тема на изменение**
 ([132](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/132-one-change-carries-one-topic.md)),
