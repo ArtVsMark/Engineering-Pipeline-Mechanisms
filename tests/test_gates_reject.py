@@ -295,6 +295,66 @@ def test_a_pure_cleanup_gets_a_declared_outcome_not_a_traceback(
     assert "Traceback" not in result.text, result.text
 
 
+def test_a_fix_without_a_test_is_rejected(run_script: RunScript, tmp_path: Path) -> None:
+    """Починка механизма без единой проверки не проходит (014).
+
+    Без входа, на котором гейт краснел до правки, убирается ПОВЕДЕНИЕ, а не
+    разбор: дефект может вернуться, и вернётся он молча — набор останется
+    зелёным.
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "gate.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "gate-stops-eating-input.fixed.md").write_text(
+        "починка\n\n#1\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "починка без проверки")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == REJECTED, result.text
+    assert "не принесла ни одной проверки" in result.text
+
+
+def test_a_fix_with_a_test_passes(run_script: RunScript, tmp_path: Path) -> None:
+    """Здоровый вход обязан пройти: починка с проверкой не отвергается (097)."""
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "gate.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "tests").mkdir(exist_ok=True)
+    (repo / "tests" / "test_gate.py").write_text(
+        "def test_x() -> None:\n    pass\n", encoding="utf-8"
+    )
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "gate-stops-eating-input.fixed.md").write_text(
+        "починка\n\n#1\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "починка с проверкой")
+    assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
+
+
+def test_a_fix_of_prose_needs_no_test(run_script: RunScript, tmp_path: Path) -> None:
+    """Починка текста проверки не требует: механизма она не трогает.
+
+    Требовать её значило бы заводить пустые проверки ради гейта — ровно то
+    поведение, ради борьбы с которым он и написан.
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "docs").mkdir(exist_ok=True)
+    (repo / "docs" / "pipeline.md").write_text("текст\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "wording-says-what-happens.fixed.md").write_text(
+        "починка текста\n\n#1\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "починка прозы")
+    assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
+
+
 def test_no_diff_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Нечего проверять — ошибка входа, а не «прошло» (075)."""
     repo = prepare_repo(tmp_path)
