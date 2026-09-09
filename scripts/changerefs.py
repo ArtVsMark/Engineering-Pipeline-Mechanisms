@@ -54,6 +54,19 @@ INLINE_RE: Final = re.compile(r"`[^`\n]*`")
 FENCE_RE: Final = re.compile(r"^\s*```")
 #: Отпечаток находки — семь шестнадцатеричных знаков, как короткий хэш.
 RESOLVED_RE: Final = re.compile(r"^\s*Разобрано:\s*([0-9a-f]{7})\b", re.IGNORECASE | re.MULTILINE)
+#: ЗАКРЫТЫЙ ПУНКТ ЧЕК-ЛИСТА. Площадка умеет только полное закрытие: `Closes #N`
+#: закрывает задачу целиком, и задача из нескольких этапов закрывается
+#: преждевременно вместе с несделанными. `Refs #N` не отмечает ничего, и после
+#: десяти изменений непонятно, что в задаче сделано.
+#:
+#: Отметка едет ВМЕСТЕ С РАБОТОЙ, тем же приёмом, что снятие находки: строка в
+#: теле изменения, а не отдельный жест, который забудут (002).
+#:
+#: Пункт называется ТЕКСТОМ, а не номером строки: номер сдвигается от любой
+#: правки тела задачи, и отметка уехала бы на соседний пункт молча.
+CLOSED_ITEM_RE: Final = re.compile(
+    r"^\s*Закрывает пункт:\s*(\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +152,27 @@ def resolved_in(text: str) -> list[str]:
     return found
 
 
+def closed_items_in(text: str) -> list[str]:
+    """Пункты чек-листа, названные закрытыми, в порядке появления."""
+    found: list[str] = []
+    for item in CLOSED_ITEM_RE.findall(outside_code(text)):
+        cleaned = normalise(item)
+        if cleaned and cleaned not in found:
+            found.append(cleaned)
+    return found
+
+
+def normalise(text: str) -> str:
+    """Приводит пункт к виду, в котором его сравнивают.
+
+    Перенос строки, лишние пробелы и оформление вокруг — не часть пункта:
+    в теле задачи он живёт с разметкой, а в теле изменения его пишут рукой.
+    Сравнивать их посимвольно значило бы требовать совпадения того, что
+    совпадать не обязано.
+    """
+    return " ".join(text.strip().strip("*_`").split()).lower()
+
+
 def links_in_all(texts: Iterable[str]) -> list[Link]:
     """Связи из НЕСКОЛЬКИХ текстов, каждый со своей разметкой.
 
@@ -169,4 +203,14 @@ def resolved_in_all(texts: Iterable[str]) -> list[str]:
         for mark in resolved_in(text):
             if mark not in found:
                 found.append(mark)
+    return found
+
+
+def closed_items_in_all(texts: Iterable[str]) -> list[str]:
+    """Закрытые пункты из нескольких текстов — по той же причине, что и связи."""
+    found: list[str] = []
+    for text in texts:
+        for item in closed_items_in(text):
+            if item not in found:
+                found.append(item)
     return found
