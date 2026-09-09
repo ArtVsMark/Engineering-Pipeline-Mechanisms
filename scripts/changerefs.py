@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
@@ -135,4 +136,37 @@ def resolved_in(text: str) -> list[str]:
         lowered = mark.lower()
         if lowered not in found:
             found.append(lowered)
+    return found
+
+
+def links_in_all(texts: Iterable[str]) -> list[Link]:
+    """Связи из НЕСКОЛЬКИХ текстов, каждый со своей разметкой.
+
+    Границы текстов знает вызывающий, разбор — нет, и склеенные тела коммитов
+    для него неразличимы. Замер на подделанном входе: два коммита, в каждом
+    свой незакрытый забор. Число заборов чётное, разбор считает их парой и
+    вырезает всё между ними — вместе с настоящей строкой связи. Ни счётом, ни
+    третьим образцом это не лечится: одна разметка на два документа.
+
+    Поэтому тела разбираются по одному, а объединяются уже связи.
+    """
+    found: list[Link] = []
+    seen: set[tuple[str, int]] = set()
+    for text in texts:
+        for link in links_in(text):
+            key = (link.verb, link.number)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(link)
+    return found
+
+
+def resolved_in_all(texts: Iterable[str]) -> list[str]:
+    """Снятия находок из нескольких текстов — по той же причине, что и связи."""
+    found: list[str] = []
+    for text in texts:
+        for mark in resolved_in(text):
+            if mark not in found:
+                found.append(mark)
     return found

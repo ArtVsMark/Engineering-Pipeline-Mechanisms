@@ -80,11 +80,16 @@ def describe(branch: str, base: str) -> tuple[str, str]:
         raise NotRun(f"в ветке {branch} нет коммитов сверх {base} — открывать нечего (075)")
 
     title = subjects[0] if len(subjects) == 1 else f"{subjects[0]} (+{len(subjects) - 1})"
-    bodies = git("log", "--reverse", "--format=%B%n---", f"{merge_base}..{branch}")
+    # Тела разделяются НУЛЕВЫМ байтом, а не строкой «---»: разделитель обязан
+    # быть таким, какого в теле коммита не бывает, иначе граница подделывается
+    # текстом. Разбор идёт по одному телу — склеенные документы неразличимы для
+    # разметки, и незакрытая вставка одного коммита съедала связь другого.
+    log_bodies = git("log", "--reverse", "--format=%B%x00", f"{merge_base}..{branch}")
+    bodies = log_bodies.split("\0")
 
     # Связь читается общим модулем, а не своей регуляркой: у гейта разметки она
     # была другой, и строка «Refs #2, #29» для шага открытия не существовала.
-    links = changerefs.links_in(bodies)
+    links = changerefs.links_in_all(bodies)
     if not links:
         raise NotRun(
             "ни один коммит ветки не называет задачу: ни «Closes #N», ни «Refs #N». "
@@ -102,7 +107,7 @@ def describe(branch: str, base: str) -> tuple[str, str]:
     # изменения, а механизм находок читает именно тело слитого изменения. Без
     # переноса «снятие вместе с работой» держалось бы тем, что кто-то вспомнит
     # дописать описание руками.
-    resolved = changerefs.resolved_in(bodies)
+    resolved = changerefs.resolved_in_all(bodies)
     if resolved:
         lines += ["", "## Разобранные находки", ""]
         lines += [f"Разобрано: {mark}" for mark in resolved]
