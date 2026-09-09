@@ -122,12 +122,21 @@ def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
 
 
 def test_review_is_not_a_required_context() -> None:
-    """Ревью не входит в сводный гейт: необязательный канал не держит слияние."""
-    gates = load(WORKFLOWS / "ci.yml")
-    step = gates["jobs"]["ci-complete"]["steps"][-1]["run"]
-    match = re.search(r'--required "([^"]+)"', step)
-    assert match, "сводный гейт не называет, что опрашивает — проверять нечего (075)"
-    assert "review" not in match.group(1)
+    """Ревью слияния не держит — и это НАЗВАНО, а не выражено отсутствием.
+
+    Класс проверки объявлен данными проекта, поэтому и проверяется он в данных.
+    Простое «ревью нет среди обязательных» здесь недостаточно: молчание
+    неотличимо от «забыли объявить», а объявленный класс `advisory` говорит,
+    что канал совещательный намеренно, и обязывает красное оставить запись
+    адресату, переживающему слияние (142).
+    """
+    checks = yaml.safe_load((ROOT / ".pipeline.yml").read_text(encoding="utf-8"))["checks"]
+    answer = checks.get("review")
+    assert answer is not None, (
+        "ревью не названо в ответе проекта: «не держит» неотличимо от «забыли»"
+    )
+    klass = answer["class"] if isinstance(answer, dict) else answer
+    assert klass == "advisory", f"ревью объявлено «{klass}», а обязано быть совещательным"
 
 
 # --- прогон и его зависимости ------------------------------------------------

@@ -83,5 +83,11 @@ def load_script(name: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"не собрать модуль из {path}")
     module = importlib.util.module_from_spec(spec)
+    # Модуль кладётся в sys.modules ДО исполнения — ровно так же, как это делает
+    # сам интерпретатор. Без этого dataclass со `slots=True` не собирается:
+    # `dataclasses` ищет модуль класса по имени, чтобы разобрать отложенные
+    # аннотации (`from __future__ import annotations`), не находит его и падает
+    # на пустом месте. Тест обязан видеть модуль так же, как прогон.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
