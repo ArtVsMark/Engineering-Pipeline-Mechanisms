@@ -286,7 +286,7 @@ def test_assembled_journal_matches_itself(run_script: RunScript, tmp_path: Path)
 
 def test_branch_without_prefix_opens_nothing(run_script: RunScript) -> None:
     """Имя ветки — переключатель: без приставки изменение не открывается (003)."""
-    result = run_script("open_pr.py", "--repo", "o/r", "--branch", "fix/x", "--dry-run")
+    result = run_script("agent_pr.py", "--repo", "o/r", "--branch", "fix/x", "--dry-run")
     assert result.code == CLEAN
     assert "без объявленной приставки" in result.text
 
@@ -294,7 +294,7 @@ def test_branch_without_prefix_opens_nothing(run_script: RunScript) -> None:
 def test_no_owner_token_is_not_configured(run_script: RunScript) -> None:
     """Нет токена владельца — «не настроено», и на токен прогона шаг не переходит."""
     result = run_script(
-        "open_pr.py",
+        "agent_pr.py",
         "--repo",
         "o/r",
         "--branch",
@@ -321,6 +321,6 @@ def test_scripts_are_where_the_contract_says() -> None:
         "check_pr_meta.py",
         "check_required_context.py",
         "gates_complete.py",
-        "open_pr.py",
+        "agent_pr.py",
     }
     assert expected <= {path.name for path in (ROOT / "scripts").glob("*.py")}

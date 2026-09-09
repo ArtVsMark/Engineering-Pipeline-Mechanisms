@@ -22,7 +22,7 @@
 # все шаги в одном прогоне, как и велит таблица договора, поэтому метка
 # перезапускает и тесты. Разделение шага по прогонам — предмет выноса
 # механизмов наружу (#2), а не молчаливая правка договора на ходу.
-name: gates
+name: ci
 
 on:
   pull_request:
@@ -41,7 +41,7 @@ permissions:
 concurrency:
   # Группа называет ГОЛОВУ, а не только номер изменения (правило 179): иначе
   # последнее слово остаётся за прогоном на устаревшем коммите.
-  group: gates-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:

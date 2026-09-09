@@ -55,7 +55,7 @@ Artem Markitanov <86671904+ArtVsMark@users.noreply.github.com>   (все)
 уплотнением
 ([131](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/131-no-writes-from-a-cloud-session.md),
 [135](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/135-session-identity-is-established-by-a-write.md)).
-Здесь уплотнения не было, но механизм `open-pr` нужен не поэтому: он снимает с
+Здесь уплотнения не было, но механизм `agent-pr` нужен не поэтому: он снимает с
 человека ручной шаг и делает авторство свойством конвейера, а не внимательности.
 
 ## Решение

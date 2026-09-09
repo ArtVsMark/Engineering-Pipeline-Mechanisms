@@ -10,7 +10,7 @@
 
 * в списке обязательных **ровно одно** имя — список, перечисляющий матрицу,
   ломается при добавлении версии;
-* это имя выдаёт джоб, объявленный в ``gates.yml``;
+* это имя выдаёт джоб, объявленный в ``ci.yml``;
 * матричные имена в список не попали.
 
 Прав на чтение защиты у токена прогона нет, и это не поломка, а
@@ -35,7 +35,7 @@ from typing import Any, Final
 import yaml
 
 API_ROOT: Final = "https://api.github.com"
-GATES_FILE: Final = Path(".github/workflows/gates.yml")
+GATES_FILE: Final = Path(".github/workflows/ci.yml")
 
 EXIT_OK: Final = 0
 EXIT_FINDINGS: Final = 1

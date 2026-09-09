@@ -20,7 +20,7 @@ import pytest
 
 from tests.conftest import load_script
 
-module = load_script("open_pr.py")
+module = load_script("agent_pr.py")
 
 
 class Refusing(BaseHTTPRequestHandler):

@@ -15,7 +15,7 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-GATES = ROOT / ".github" / "workflows" / "gates.yml"
+GATES = ROOT / ".github" / "workflows" / "ci.yml"
 CONTRACT = ROOT / "docs" / "pipeline.md"
 SUMMARY = "gates-complete"
 
@@ -38,7 +38,7 @@ def contract_jobs() -> set[str]:
     jobs: set[str] = set()
     for row in rows:
         cells = [cell.strip().strip("`*") for cell in row.split("|")]
-        if len(cells) < 6 or cells[3] != "gates.yml":
+        if len(cells) < 6 or cells[3] != "ci.yml":
             continue
         jobs.add(cells[4])
     return jobs
