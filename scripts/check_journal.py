@@ -54,6 +54,12 @@ def run(args: list[str]) -> str:
         raise NotRun(f"{' '.join(args)} → {report.cut(str(detail))}") from exc
 
 
+def numbered(path: str) -> bool:
+    """Назван ли фрагмент номером задачи, а не смыслом записи."""
+    match = journal.NAME_RE.match(path.rsplit("/", 1)[-1])
+    return bool(match and journal.DIGITS_ONLY_RE.match(match.group("slug")))
+
+
 def changed_files(base: str) -> list[str]:
     """Отдаёт файлы, тронутые изменением относительно общего предка с базой."""
     merge_base = run(["git", "merge-base", base, "HEAD"]).strip()
@@ -95,6 +101,23 @@ def main(argv: list[str] | None = None) -> int:
     print(f"тронутых путей прочитано: {len(files)}, из них журнальных: {len(exempt)}")
 
     fragments = [name for name in files if FRAGMENT_RE.match(name)]
+
+    # ИМЯ ФРАГМЕНТА ГОВОРИТ, ЧТО ИЗМЕНИЛОСЬ, А НЕ КАКАЯ ЗАДАЧА. Одна задача
+    # живёт дольше одного изменения, и два захода целятся в одно имя: конфликта
+    # это не даёт — побеждает последний, и первая запись исчезает без следа и
+    # без выпуска. Так была потеряна запись об исправлении атрибуции (#12).
+    by_number = [name for name in fragments if numbered(name)]
+    if by_number:
+        print(
+            "отвергнуто: фрагмент назван номером задачи, а не смыслом: "
+            f"{', '.join(by_number)}\n\n"
+            "Одна задача живёт дольше одного изменения, и второй заход перезапишет\n"
+            "первый молча — конфликта тут не бывает. Имя берётся от того, ЧТО\n"
+            "изменилось: changelog.d/README.md.",
+            file=sys.stderr,
+        )
+        return EXIT_REJECTED
+
     if fragments:
         print(f"фрагмент журнала есть: {', '.join(fragments)}")
         return EXIT_OK
@@ -110,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         "отвергнуто: изменение не несёт фрагмента журнала.\n\n"
         "Тронуто файлов вне журнала: "
         f"{len(substantive)}, первые — {', '.join(substantive[:5])}\n\n"
-        "Положите changelog.d/<задача>.<род>.md. Если потребителю это\n"
+        "Положите changelog.d/<что-изменилось>.<род>.md. Если потребителю это\n"
         "безразлично — род `internal`, и первой строкой названа причина:\n"
         "молчание состоянием не является (154). Формат — changelog.d/README.md.",
         file=sys.stderr,
