@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Final
@@ -31,6 +32,8 @@ import ghrest
 import labels
 
 ZONE_PREFIX: Final = labels.ZONE_PREFIX
+#: Незакрытый пункт чек-листа задачи в её теле.
+OPEN_ITEM_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(\S.*?)\s*$", re.MULTILINE)
 
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
@@ -82,6 +85,49 @@ def fresh(pull: dict[str, Any], repo: str, token: str) -> dict[str, Any]:
         print(f"состояние изменения не перечитано: {exc} — вердикт по снимку", file=sys.stderr)
         return pull
     return current if isinstance(current, dict) else pull
+
+
+def open_items(body: str) -> list[str]:
+    """Незакрытые пункты чек-листа задачи, как они в ней записаны."""
+    return [item.strip() for item in OPEN_ITEM_RE.findall(body or "")]
+
+
+def premature(repo: str, token: str, links: list[Any], declared: list[str]) -> list[str]:
+    """Задачи, которые изменение закрывает целиком, не доделав.
+
+    ПОЧЕМУ ЭТО ГЕЙТ, А НЕ ВНИМАНИЕ АВТОРА. Площадка умеет только полное
+    закрытие: `Closes #N` закрывает задачу вместе с несделанными этапами, и
+    они теряются молча — задача уходит из списка открытых, и туда больше никто
+    не смотрит. Проверка полноты, а не непустоты (128), на новом предмете.
+
+    Пункт, названный закрытым в теле самого изменения, из счёта уходит: иначе
+    последний этап закрыть было бы нечем — отметить его до слияния негде, а
+    после слияния задача уже закрыта.
+
+    Задача БЕЗ чек-листа проходит: отмечать в ней нечего, и требовать список
+    там, где этап один, значило бы заводить ритуал (154). Требование к
+    заведению задачи с этапами записано в AGENTS.md.
+    """
+    problems: list[str] = []
+    for link in links:
+        if not link.closes:
+            continue
+        try:
+            issue = ghrest.request("GET", f"repos/{repo}/issues/{link.number}", token) or {}
+        except ghrest.TransportError as exc:
+            raise NotRun(f"задача #{link.number} не прочитана: {exc}") from exc
+        left = [
+            item
+            for item in open_items(str(issue.get("body") or ""))
+            if changerefs.normalise(item) not in declared
+        ]
+        if left:
+            problems.append(
+                f"#{link.number} закрывается целиком, а в ней осталось незакрытых пунктов: "
+                f"{len(left)} — первый «{left[0]}». Либо связь «Refs», либо строка "
+                "«Закрывает пункт: <текст>» на каждый доделанный"
+            )
+    return problems
 
 
 def read_files(inline: str, from_path: str) -> list[str]:
@@ -151,7 +197,17 @@ def main(argv: list[str] | None = None) -> int:
             + " — зона выведена из путей состава, а не угадана"
         )
 
-    if not changerefs.has_link(f"{title}\n{body}"):
+    text = f"{title}\n{body}"
+    token = ghrest.token_from_env()
+    if token and os.environ.get("GITHUB_REPOSITORY"):
+        problems += premature(
+            os.environ["GITHUB_REPOSITORY"],
+            token,
+            changerefs.links_in(text),
+            changerefs.closed_items_in(text),
+        )
+
+    if not changerefs.has_link(text):
         problems.append(
             "нет связи с задачей: ни «Closes #N», ни «Refs #N» — "
             "без неё задача не закроется при слиянии, а приоритет очереди наследовать неоткуда"

@@ -738,3 +738,72 @@ def test_a_short_history_folds_nothing(tmp_path: Path) -> None:
         monkey.undo()
 
     assert "Выпуски раньше" not in assembled, assembled
+
+
+# --- частичное закрытие задачи -----------------------------------------------
+
+
+def issue_with(body: str) -> dict[str, object]:
+    """Задача площадки с заданным телом."""
+    return {"body": body}
+
+
+def test_closing_a_task_with_open_items_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`Closes` при незакрытых пунктах чек-листа — красное (026, 128).
+
+    Площадка умеет только полное закрытие: несделанные этапы уходят из списка
+    открытых вместе с задачей, и туда больше никто не смотрит.
+    """
+    check = load_script("check_pr_meta.py")
+    monkeypatch.setattr(
+        check.ghrest,
+        "request",
+        lambda method, path, token, body=None: issue_with("- [x] первый\n- [ ] второй\n"),
+    )
+    links = check.changerefs.links_in("Closes #7")
+    problems = check.premature("о/р", "токен", links, [])
+    assert problems and "осталось незакрытых пунктов" in problems[0]
+
+
+def test_an_item_closed_by_this_change_does_not_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пункт, названный закрытым в самом изменении, из счёта уходит.
+
+    Иначе последний этап закрыть было бы нечем: отметить его до слияния негде,
+    а после слияния задача уже закрыта.
+    """
+    check = load_script("check_pr_meta.py")
+    monkeypatch.setattr(
+        check.ghrest,
+        "request",
+        lambda method, path, token, body=None: issue_with("- [x] первый\n- [ ] второй\n"),
+    )
+    text = "Closes #7\nЗакрывает пункт: второй"
+    problems = check.premature(
+        "о/р", "токен", check.changerefs.links_in(text), check.changerefs.closed_items_in(text)
+    )
+    assert problems == []
+
+
+def test_a_task_without_a_checklist_closes_freely(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задача без чек-листа закрывается: отмечать в ней нечего.
+
+    Требовать список там, где этап один, значило бы заводить ритуал (154).
+    """
+    check = load_script("check_pr_meta.py")
+    monkeypatch.setattr(
+        check.ghrest,
+        "request",
+        lambda method, path, token, body=None: issue_with("Просто описание без списка."),
+    )
+    assert check.premature("о/р", "токен", check.changerefs.links_in("Closes #7"), []) == []
+
+
+def test_a_partial_link_is_not_checked_at_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`Refs` ничего не закрывает, и спрашивать с него полноту нечего."""
+    check = load_script("check_pr_meta.py")
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("частичная связь не должна читать задачу")
+
+    monkeypatch.setattr(check.ghrest, "request", refuse)
+    assert check.premature("о/р", "токен", check.changerefs.links_in("Refs #7"), []) == []
