@@ -1,0 +1,721 @@
+{
+  "schema": "1.0",
+  "project": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+  "catalogue": "https://github.com/ArtVsMark/Engineering-Incidents-Playbook",
+  "_": "Ответ ЭТОГО проекта по каждому правилу каталога. Статус — active, rejected, not-applicable или unreviewed; у двух отрицательных обязательна причина в поле why, у active — mechanism и where.",
+  "_зачем": "Ответ живёт здесь, а не в каталоге, потому что здесь живёт механизм: одно правило в разных проектах держится по-разному.",
+  "rules": {
+    "001": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": "scripts/gates_complete.py · scripts/sync_labels.py · scripts/open_pr.py · scripts/check_required_context.py — все обращения к площадке идут REST стандартной библиотекой; GraphQL не вызывается нигде. Гейта на транспорт пока нет: проверка появится вместе с общим транспортным слоем (#2, фаза 2)"
+    },
+    "002": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/workflows/gates.yml — джоб на каждый шаг; tests/test_gates_reject.py — гейты проверены тем, что обязаны отвергнуть"
+    },
+    "003": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/workflows/open-pr.yml — приставки `agent/**` и `claude/**` переключают открытие изменения; scripts/open_pr.py отказывает ветке без приставки"
+    },
+    "004": {
+      "status": "unreviewed"
+    },
+    "005": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/check_version.py — число версии вне CONTRACT_VERSION и вне маркера краснеет"
+    },
+    "006": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "CLAUDE.md — раздел «Когда окно перезапускают»: срок и признаки, по которым не ждут календаря. Механизма нет и быть не может — счётчика сессии площадка не даёт"
+    },
+    "007": {
+      "status": "unreviewed"
+    },
+    "008": {
+      "status": "unreviewed"
+    },
+    "009": {
+      "status": "unreviewed"
+    },
+    "010": {
+      "status": "unreviewed"
+    },
+    "011": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": "scripts/gates_complete.py — опрос условный: с пределом ожидания и выходом по вердикту, а не бесконечный; прочие прогоны идут от событий, расписаний в проекте нет"
+    },
+    "012": {
+      "status": "unreviewed"
+    },
+    "013": {
+      "status": "unreviewed"
+    },
+    "014": {
+      "status": "unreviewed"
+    },
+    "015": {
+      "status": "unreviewed"
+    },
+    "016": {
+      "status": "unreviewed"
+    },
+    "017": {
+      "status": "unreviewed"
+    },
+    "018": {
+      "status": "unreviewed"
+    },
+    "019": {
+      "status": "unreviewed"
+    },
+    "020": {
+      "status": "unreviewed"
+    },
+    "021": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md (агент) · CLAUDE.md (окно) · README.md (посетитель) · docs/pipeline.md и docs/behaviour.md (ведущий конвейер)"
+    },
+    "022": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/pipeline.md · docs/behaviour.md · docs/release.md — три вопроса, три канона; своды на них ссылаются и не пересказывают"
+    },
+    "023": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "README.md — витрина: что это, зачем, где граница с каталогом; устройство вынесено в docs/"
+    },
+    "024": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — раздел «Открытая работа»: статусы живут в трекере, журнал сделанного — в CHANGELOG.md, в действующих документах их нет"
+    },
+    "025": {
+      "status": "unreviewed"
+    },
+    "026": {
+      "status": "unreviewed"
+    },
+    "027": {
+      "status": "unreviewed"
+    },
+    "028": {
+      "status": "unreviewed"
+    },
+    "029": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md · CLAUDE.md — компактные триггеры со ссылкой на канон в docs/"
+    },
+    "030": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/check_journal.py — изменение без фрагмента отвергается; changelog.d/ — фрагменты; scripts/build_changelog.py — сборка"
+    },
+    "031": {
+      "status": "unreviewed"
+    },
+    "032": {
+      "status": "unreviewed"
+    },
+    "033": {
+      "status": "unreviewed"
+    },
+    "034": {
+      "status": "unreviewed"
+    },
+    "035": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "CONTRACT_VERSION — единственный источник; scripts/check_version.py — гейт на рукописное число"
+    },
+    "036": {
+      "status": "unreviewed"
+    },
+    "037": {
+      "status": "unreviewed"
+    },
+    "038": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "CLAUDE.md — раздел «Имя окна и его окружение»"
+    },
+    "039": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/*.py — коды возврата 0/1/2 у каждого механизма; tests/test_gates_reject.py прогоняет третий исход отдельно от второго"
+    },
+    "040": {
+      "status": "unreviewed"
+    },
+    "041": {
+      "status": "unreviewed"
+    },
+    "042": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/decisions/001-attribution-of-merged-1.md — решение с четырьмя названными отвергнутыми вариантами"
+    },
+    "043": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/decisions/001-attribution-of-merged-1.md — раздел «Последствия»: пересмотр это новая запись со ссылкой, а не правка"
+    },
+    "044": {
+      "status": "unreviewed"
+    },
+    "045": {
+      "status": "unreviewed"
+    },
+    "046": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — раздел «Чего в проекте ещё нет» таблицей с адресом задачи; README.md — раздел «Состояние: брать пока нечего»"
+    },
+    "047": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "CLAUDE.md — свод читается один раз при старте, правка живому окну не видна"
+    },
+    "048": {
+      "status": "unreviewed"
+    },
+    "049": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/gates_complete.py — состояние берётся опросом проверок на голове изменения, реестра проверок проект не ведёт"
+    },
+    "050": {
+      "status": "unreviewed"
+    },
+    "051": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/open-pr.yml и .github/workflows/labels-sync.yml — ненастроенность даёт предупреждение, а не отказ; красным остаётся только третий исход"
+    },
+    "052": {
+      "status": "not-applicable",
+      "why": "очереди мержа в проекте нет: её механизм — предмет решения #3, и до него у правила нет предмета. Вернётся вместе с очередью"
+    },
+    "053": {
+      "status": "not-applicable",
+      "why": "порядок очереди задавать нечему: очереди нет до решения #3. По той же причине не заведены метки blocker и hold — причина записана в .github/labels.yml"
+    },
+    "054": {
+      "status": "unreviewed"
+    },
+    "055": {
+      "status": "unreviewed"
+    },
+    "056": {
+      "status": "unreviewed"
+    },
+    "057": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — блок критических запретов с явной пометкой, какие из них машинно не проверяются"
+    },
+    "058": {
+      "status": "unreviewed"
+    },
+    "059": {
+      "status": "unreviewed"
+    },
+    "060": {
+      "status": "unreviewed"
+    },
+    "061": {
+      "status": "unreviewed"
+    },
+    "062": {
+      "status": "unreviewed"
+    },
+    "063": {
+      "status": "unreviewed"
+    },
+    "064": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/labels.yml — состав файлом; scripts/sync_labels.py — синхронизация; scripts/check_pr_meta.py — метка вне состава отвергается"
+    },
+    "065": {
+      "status": "unreviewed"
+    },
+    "066": {
+      "status": "unreviewed"
+    },
+    "067": {
+      "status": "unreviewed"
+    },
+    "068": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/labels.yml — список разрешительный; scripts/check_pr_meta.py краснеет на метке, которой файл не объявляет"
+    },
+    "069": {
+      "status": "unreviewed"
+    },
+    "070": {
+      "status": "unreviewed"
+    },
+    "071": {
+      "status": "unreviewed"
+    },
+    "072": {
+      "status": "unreviewed"
+    },
+    "073": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/gates.yml и labels-sync.yml — pip install с верхними границами: ruff<1, mypy<2, pytest<10, pyyaml<7"
+    },
+    "074": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/release.md — раздел «Порядок выпуска»: тег не переставляется, порядок шагов часть проверки. Механизма выпуска пока нет, и это названо в самом разделе"
+    },
+    "075": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/check_version.py · check_journal.py · check_pr_meta.py · gates_complete.py · build_changelog.py — отсутствие предмета даёт третий исход, а не «чисто»; tests/test_gates_reject.py прогоняет каждый такой случай"
+    },
+    "076": {
+      "status": "unreviewed"
+    },
+    "077": {
+      "status": "unreviewed"
+    },
+    "078": {
+      "status": "unreviewed"
+    },
+    "079": {
+      "status": "unreviewed"
+    },
+    "080": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — раздел «Новое правило — в общий каталог»; .rules/proposals.json — канал предложений"
+    },
+    "081": {
+      "status": "unreviewed"
+    },
+    "082": {
+      "status": "unreviewed"
+    },
+    "083": {
+      "status": "unreviewed"
+    },
+    "084": {
+      "status": "unreviewed"
+    },
+    "085": {
+      "status": "unreviewed"
+    },
+    "086": {
+      "status": "unreviewed"
+    },
+    "087": {
+      "status": "unreviewed"
+    },
+    "088": {
+      "status": "unreviewed"
+    },
+    "089": {
+      "status": "unreviewed"
+    },
+    "090": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/gates.yml — джоб attribution подключён действием каталога ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0, а не переписан здесь; .rules/bindings.json собран onboard_consumer.py каталога"
+    },
+    "091": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — раздел «Открытая работа»; docs/behaviour.md — контур 1 с упорядоченными источниками"
+    },
+    "092": {
+      "status": "unreviewed"
+    },
+    "093": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — обобщение по третьему случаю названо в разделе про каталог"
+    },
+    "094": {
+      "status": "unreviewed"
+    },
+    "095": {
+      "status": "unreviewed"
+    },
+    "096": {
+      "status": "unreviewed"
+    },
+    "097": {
+      "status": "unreviewed"
+    },
+    "098": {
+      "status": "unreviewed"
+    },
+    "099": {
+      "status": "unreviewed"
+    },
+    "100": {
+      "status": "unreviewed"
+    },
+    "101": {
+      "status": "unreviewed"
+    },
+    "102": {
+      "status": "unreviewed"
+    },
+    "103": {
+      "status": "unreviewed"
+    },
+    "104": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/gates.yml · open-pr.yml · labels-sync.yml · required-context.yml · rules-inbox.yml — у каждого есть workflow_dispatch"
+    },
+    "105": {
+      "status": "unreviewed"
+    },
+    "106": {
+      "status": "unreviewed"
+    },
+    "107": {
+      "status": "unreviewed"
+    },
+    "108": {
+      "status": "unreviewed"
+    },
+    "109": {
+      "status": "unreviewed"
+    },
+    "110": {
+      "status": "unreviewed"
+    },
+    "111": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/open-pr.yml — конвейер открывает изменение сам, а не советует окну сделать это"
+    },
+    "112": {
+      "status": "unreviewed"
+    },
+    "113": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/release.md — правила эволюции контракта записаны до первого потребителя"
+    },
+    "114": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/release.md — раздел «Несовместимое изменение»; docs/decisions/001-attribution-of-merged-1.md — отметка вместо требования задним числом"
+    },
+    "115": {
+      "status": "unreviewed"
+    },
+    "116": {
+      "status": "unreviewed"
+    },
+    "117": {
+      "status": "unreviewed"
+    },
+    "118": {
+      "status": "unreviewed"
+    },
+    "119": {
+      "status": "unreviewed"
+    },
+    "120": {
+      "status": "not-applicable",
+      "why": "проект ведёт механизмы, а не каталог правил: каталог — соседний репозиторий, и правила его ведения относятся к нему"
+    },
+    "121": {
+      "status": "unreviewed"
+    },
+    "122": {
+      "status": "unreviewed"
+    },
+    "123": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/workflows/gates.yml — джоб attribution с baseline cb26ec4; .github/authors.txt — список согласованных имён"
+    },
+    "124": {
+      "status": "unreviewed"
+    },
+    "125": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/build_changelog.py --check — CHANGELOG.md производный, собирается из changelog.d/ и changelog.d/released/, а не хранит выпущенное сам"
+    },
+    "126": {
+      "status": "unreviewed"
+    },
+    "127": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/check_version.py — маркер с чужим значением краснеет; docs/release.md — раздел «Маркер в прозе»"
+    },
+    "128": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/check_pr_meta.py — разметка проверяется на полноту: зона выводится из путей состава и обязана стоять, а не просто «метка есть»"
+    },
+    "129": {
+      "status": "unreviewed"
+    },
+    "130": {
+      "status": "unreviewed"
+    },
+    "131": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/workflows/open-pr.yml — изменение открывает конвейер токеном владельца; scripts/open_pr.py не переходит на токен прогона даже при отсутствии секрета"
+    },
+    "132": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — раздел «Ветка, изменение, коммит»"
+    },
+    "133": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — граница изменения задаётся пересечением файлов"
+    },
+    "134": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md и CLAUDE.md — свод существует до того, как в проект придёт следующее окно"
+    },
+    "135": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "CLAUDE.md — раздел «Подпись и открытие изменения»: личность узнаётся записью, после первого изменения смотрят автора в общей ветке"
+    },
+    "136": {
+      "status": "unreviewed"
+    },
+    "137": {
+      "status": "unreviewed"
+    },
+    "138": {
+      "status": "unreviewed"
+    },
+    "139": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — строка уходит из раздела пробелов, когда механизм подтверждён прогоном, а не когда написан"
+    },
+    "140": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "tests/test_gates_reject.py — 21 проверка на то, что механизмы обязаны отвергнуть; tests/test_gates_complete.py — вердикт сводного гейта на пропуске, отмене и отсутствии записи"
+    },
+    "141": {
+      "status": "unreviewed"
+    },
+    "142": {
+      "status": "unreviewed"
+    },
+    "144": {
+      "status": "unreviewed"
+    },
+    "145": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "tests/test_gates_complete.py и tests/test_gates_reject.py — прогнан каждый объявленный исход, включая третий"
+    },
+    "146": {
+      "status": "unreviewed"
+    },
+    "147": {
+      "status": "not-applicable",
+      "why": "переключателей, отменяющих операцию, в проекте нет: метка hold не заведена, потому что её читателя — очереди мержа — не существует до решения #3, а будить адресата отмены пока нечем. Причина записана в .github/labels.yml"
+    },
+    "148": {
+      "status": "unreviewed"
+    },
+    "149": {
+      "status": "unreviewed"
+    },
+    "150": {
+      "status": "unreviewed"
+    },
+    "151": {
+      "status": "unreviewed"
+    },
+    "152": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/pipeline.md — раздел «Что у проекта своё»: от дрейфа тег помогает, от недоверенного кода нет"
+    },
+    "153": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — правило названо прямо; все документы ссылаются на записи каталога и не копируют их разбор"
+    },
+    "154": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "changelog.d/README.md — род internal обязан назвать причину, и scripts/check_journal.py требует фрагмент; .github/labels.yml — раздел «чего здесь нет намеренно» с причиной у каждой невзятой метки"
+    },
+    "155": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "README.md — проект свой первый потребитель: механизм, которым не пользуется автор, находит дыры на чужом проекте"
+    },
+    "156": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/workflows/gates.yml — джоб attribution проверяет хвостовой блок трейлеров"
+    },
+    "157": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/release.md — смена версии контракта порождает перечитывание ответов, а не поднятие числа"
+    },
+    "158": {
+      "status": "unreviewed"
+    },
+    "159": {
+      "status": "unreviewed"
+    },
+    "160": {
+      "status": "unreviewed"
+    },
+    "161": {
+      "status": "unreviewed"
+    },
+    "162": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "AGENTS.md — пробел сначала спрашивает соседей; форма ответа каталогу взята у него самого, а не придумана здесь"
+    },
+    "163": {
+      "status": "unreviewed"
+    },
+    "164": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "CONTRACT_VERSION — версия контракта, а не проекта; scripts/check_version.py; docs/release.md — что именно версионируется"
+    },
+    "165": {
+      "status": "unreviewed"
+    },
+    "166": {
+      "status": "unreviewed"
+    },
+    "167": {
+      "status": "unreviewed"
+    },
+    "168": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": ".github/workflows/gates.yml — gates-complete собран опросом, без needs; scripts/gates_complete.py; tests/test_gates_contract.py проверяет отсутствие needs и полноту опроса"
+    },
+    "169": {
+      "status": "unreviewed"
+    },
+    "170": {
+      "status": "unreviewed"
+    },
+    "171": {
+      "status": "unreviewed"
+    },
+    "172": {
+      "status": "active",
+      "mechanism": "document",
+      "where": "docs/release.md — раздел «Переходная заглушка»: срок и перепись называются при её появлении"
+    },
+    "173": {
+      "status": "unreviewed"
+    },
+    "174": {
+      "status": "active",
+      "mechanism": "document",
+      "where": ".rules/bindings.json — факты о проекте публикует сам проект; каталог их читает, а не ведёт"
+    },
+    "175": {
+      "status": "unreviewed"
+    },
+    "176": {
+      "status": "unreviewed"
+    },
+    "177": {
+      "status": "unreviewed"
+    },
+    "178": {
+      "status": "unreviewed"
+    },
+    "179": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".github/workflows/gates.yml, open-pr.yml, labels-sync.yml — группа отмены называет голову, а не только номер изменения"
+    },
+    "180": {
+      "status": "unreviewed"
+    },
+    "181": {
+      "status": "unreviewed"
+    },
+    "182": {
+      "status": "unreviewed"
+    },
+    "183": {
+      "status": "unreviewed"
+    },
+    "184": {
+      "status": "unreviewed"
+    },
+    "185": {
+      "status": "unreviewed"
+    },
+    "186": {
+      "status": "unreviewed"
+    },
+    "187": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/gates_complete.py — пропущенная, отменённая и отсутствующая записи считаются отказом; tests/test_gates_complete.py прогоняет каждый из этих случаев"
+    },
+    "188": {
+      "status": "unreviewed"
+    },
+    "189": {
+      "status": "rejected",
+      "why": "имя ветки в облачном окне назначает платформа, окно его не выбирает — правило требует того, чем проект не управляет. Не обойдено молча: open-pr.yml подхватывает и платформенную приставку `claude/**`, связь изменения с задачей держит scripts/check_pr_meta.py, а разрыв назван в CLAUDE.md. Пересмотр — вместе с #12, если появится способ назначать имя ветки из окна"
+    },
+    "190": {
+      "status": "active",
+      "mechanism": "pipeline",
+      "where": ".rules/bindings.json и .rules/proposals.json собраны scripts/onboard_consumer.py каталога, .github/workflows/rules-inbox.yml подключён его действием — форма ответа спрошена у соседа, а не воспроизведена по памяти"
+    },
+    "191": {
+      "status": "unreviewed"
+    },
+    "192": {
+      "status": "unreviewed"
+    },
+    "193": {
+      "status": "unreviewed"
+    },
+    "194": {
+      "status": "unreviewed"
+    },
+    "195": {
+      "status": "unreviewed"
+    },
+    "196": {
+      "status": "unreviewed"
+    }
+  }
+}
