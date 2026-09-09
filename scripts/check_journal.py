@@ -46,7 +46,9 @@ class NotRun(RuntimeError):
 def run(args: list[str]) -> str:
     """Зовёт git, обращая любой отказ в третий исход."""
     try:
-        return subprocess.run(args, capture_output=True, check=True, text=True).stdout
+        return subprocess.run(
+            args, capture_output=True, check=True, text=True, encoding="utf-8"
+        ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
         raise NotRun(f"{' '.join(args)} → {report.cut(str(detail))}") from exc
@@ -86,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
     except NotRun as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+
+    # Охват называется до вердикта: проверка, читающая список путей, без числа
+    # неотличима от чистого результата (165).
+    exempt = [name for name in files if name in EXEMPT_FILES or name.startswith(EXEMPT_PREFIXES)]
+    print(f"тронутых путей прочитано: {len(files)}, из них журнальных: {len(exempt)}")
 
     fragments = [name for name in files if FRAGMENT_RE.match(name)]
     if fragments:

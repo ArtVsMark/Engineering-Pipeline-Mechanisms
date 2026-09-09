@@ -54,6 +54,7 @@ def run_script() -> RunScript:
             [sys.executable, str(ROOT / "scripts" / script), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=cwd or ROOT,
             env=environment,
         )

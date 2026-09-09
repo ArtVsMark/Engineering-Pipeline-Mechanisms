@@ -50,7 +50,11 @@ def tracked_files() -> list[Path]:
     """Отдаёт файлы под учётом; отсутствие предмета проверки — отказ (075)."""
     try:
         out = subprocess.run(
-            ["git", "ls-files", "-z"], capture_output=True, check=True, text=True
+            ["git", "ls-files", "-z"],
+            capture_output=True,
+            check=True,
+            text=True,
+            encoding="utf-8",
         ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         raise NotRun(f"список файлов не получен: {exc}") from exc
@@ -77,16 +81,20 @@ def check(version: str, files: list[Path]) -> list[str]:
     loose = re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
     findings: list[str] = []
     scanned = 0
+    skipped = 0
 
     for path in files:
         name = path.as_posix()
         if name in ALLOWED or name.startswith(ALLOWED_PREFIXES):
+            skipped += 1
             continue
         if path.suffix.lower() in BINARY_SUFFIXES:
+            skipped += 1
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
+            skipped += 1
             continue
         scanned += 1
 
@@ -105,6 +113,9 @@ def check(version: str, files: list[Path]) -> list[str]:
                     f"{name}:{number}: версия «{version}» вписана вне источника и вне маркера"
                 )
 
+    # Охват называется числом: проверка, читающая список путей, без него
+    # неотличима от чистого результата — слепота выглядит как «чисто» (165).
+    print(f"просмотрено файлов: {scanned}, пропущено: {skipped}")
     if scanned == 0:
         raise NotRun("не просмотрено ни одного файла — предмет проверки не найден (075)")
     return findings

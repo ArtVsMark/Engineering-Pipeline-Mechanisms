@@ -59,17 +59,24 @@ class NotRun(RuntimeError):
 def git(*args: str) -> str:
     """Зовёт git, обращая отказ в третий исход."""
     try:
-        return subprocess.run(["git", *args], capture_output=True, check=True, text=True).stdout
+        return subprocess.run(
+            ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8"
+        ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
         raise NotRun(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
 
 
 def changed_files(branch: str, base: str) -> list[str]:
-    """Файлы, тронутые веткой относительно базы."""
+    """Файлы, тронутые веткой относительно базы.
+
+    Список читается по NUL (`-z`): без него git экранирует имена с пробелами и
+    не-ASCII, построенный путь не разрешается, и файл молча выпадает из
+    обработки — метка зоны не выставится, и никто этого не заметит (165).
+    """
     merge_base = git("merge-base", f"origin/{base}", branch).strip()
-    out = git("diff", "--name-only", f"{merge_base}...{branch}")
-    return [line.strip() for line in out.splitlines() if line.strip()]
+    out = git("diff", "--name-only", "-z", f"{merge_base}...{branch}")
+    return [name for name in out.split("\0") if name]
 
 
 def describe(branch: str, base: str) -> tuple[str, str]:

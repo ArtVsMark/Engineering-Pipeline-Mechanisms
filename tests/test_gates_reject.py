@@ -25,7 +25,9 @@ NOT_CONFIGURED = 3
 
 def git(cwd: Path, *args: str) -> None:
     """Зовёт git в подготовленном репозитории теста."""
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8"
+    )
 
 
 # --- состав меток ------------------------------------------------------------

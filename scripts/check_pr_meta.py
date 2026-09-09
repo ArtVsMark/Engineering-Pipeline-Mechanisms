@@ -84,10 +84,29 @@ def fresh(pull: dict[str, Any], repo: str, token: str) -> dict[str, Any]:
     return current if isinstance(current, dict) else pull
 
 
+def read_files(inline: str, from_path: str) -> list[str]:
+    """Читает список тронутых путей: из файла по NUL либо из строки по строкам.
+
+    Путь с пробелом или не-ASCII git без `-z` отдаёт экранированным, и такой
+    путь молча выпадает из отбора зон: метка не выставится, а гейт останется
+    зелёным. Поэтому прогон передаёт список ФАЙЛОМ (`--files-from`), а не
+    строкой: оболочка вырезает NUL из подстановки.
+    """
+    if from_path:
+        raw = Path(from_path).read_bytes().decode("utf-8")
+        return [name for name in raw.split("\0") if name]
+    return [line.strip() for line in inline.splitlines() if line.strip()]
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--files", default="", help="тронутые файлы через перевод строки")
+    parser.add_argument(
+        "--files-from",
+        default="",
+        help="файл со списком тронутых путей, разделённых NUL (git diff -z)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -103,7 +122,11 @@ def main(argv: list[str] | None = None) -> int:
     on_pr = {str(label["name"]) for label in pull.get("labels", [])}
     body = pull.get("body") or ""
     title = pull.get("title") or ""
-    files = [line.strip() for line in args.files.splitlines() if line.strip()]
+    files = read_files(args.files, args.files_from)
+    # Охват печатается всегда: проверка, читающая список путей, без числа
+    # неотличима от чистого результата — слепота выглядит как «нечего держать»
+    # (165).
+    print(f"тронутых путей прочитано: {len(files)}")
 
     problems: list[str] = []
 

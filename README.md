@@ -48,12 +48,16 @@
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 Что именно ещё не доказано прогоном — таблицей в [`AGENTS.md`](AGENTS.md).
 
-Значка на витрине пока нет, хотя механизм уже написан: `badges.yml` собирает
-`facts.json` и один значок и толкает их в отдельную ветку `badges` —
-производное не коммитится туда, где живёт источник. Сюда значок попадёт после
-первого прогона публикации, а не раньше: механизм считается работающим по
-прогону, а не по написанному коду
+Значок ниже собран прогоном, а не вписан руками: `badges.yml` пересчитывает
+`facts.json` и `rules.svg` на каждое слияние и толкает их в отдельную ветку
+`badges` — производное не коммитится туда, где живёт источник, и не конфликтует
+на каждом слиянии
+([160](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/160-derived-artifacts-live-off-the-branch.md)).
+Строка о нём ушла из таблицы пробелов после первого прогона публикации, а не
+после написания кода
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+![правил каталога держится механизмами](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/rules.svg)
 
 Тем же файлом открыт канал соседям и каталогу правил: версия контракта,
 сколько правил каталога проект держит и чем именно, состав классов проверок —

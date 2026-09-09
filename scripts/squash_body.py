@@ -49,7 +49,9 @@ class NotRun(RuntimeError):
 def git(*args: str) -> str:
     """Зовёт git, обращая отказ в третий исход."""
     try:
-        return subprocess.run(["git", *args], capture_output=True, check=True, text=True).stdout
+        return subprocess.run(
+            ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8"
+        ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
         raise NotRun(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
