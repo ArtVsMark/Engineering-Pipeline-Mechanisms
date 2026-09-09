@@ -30,8 +30,11 @@ import ghrest
 import labels
 
 EXIT_CLEAN: Final = 0
-EXIT_FINDINGS: Final = 1
 EXIT_BROKEN: Final = 2
+#: Единицу отдаёт сам Python при необработанном сбое, поэтому объявленным
+#: состоянием она быть не может: иначе сломанный механизм читается как
+#: работающий. Объявленные исходы — 0, 2 и 3; всё прочее отказ (068).
+EXIT_FINDINGS: Final = 3
 
 
 class NotRun(RuntimeError):

@@ -59,8 +59,11 @@ RESOLVED_RE: Final = re.compile(r"^\s*Разобрано:\s*([0-9a-f]{7})\b", re
 ENTRY_RE: Final = re.compile(r"^- `([0-9a-f]{7})` · #(\d+) — (.+?)\s*$", re.M)
 
 EXIT_NOTHING: Final = 0
-EXIT_PENDING: Final = 1
 EXIT_BROKEN: Final = 2
+#: Единицу отдаёт сам Python при необработанном сбое, поэтому объявленным
+#: состоянием она быть не может: иначе сломанный механизм читается как
+#: работающий. Объявленные исходы — 0, 2 и 3; всё прочее отказ (068).
+EXIT_PENDING: Final = 3
 
 
 class NotRun(RuntimeError):
