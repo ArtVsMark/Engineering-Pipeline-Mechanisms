@@ -22,9 +22,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import load_script
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
 ANCHOR = SCRIPTS / "paths.py"
+paths = load_script("paths.py")
 
 #: Якорь объявляет адреса; все остальные их импортируют.
 ANCHOR_NAME = ANCHOR.name
@@ -43,11 +46,33 @@ def scripts() -> list[Path]:
     return sorted(p for p in SCRIPTS.glob("*.py") if p.name != ANCHOR_NAME)
 
 
+def declared_in_the_anchor() -> set[Path]:
+    """Адреса, объявленные якорем: читаются из модуля, а не из его текста."""
+    return {
+        value
+        for name, value in vars(paths).items()
+        if not name.startswith("_") and isinstance(value, Path)
+    }
+
+
 def test_the_anchor_exists_and_declares_something() -> None:
     """Предмет проверки найден: якорь есть и не пуст (075)."""
     assert ANCHOR.is_file(), "якоря настроек нет — проверять нечего"
-    declared = LITERAL_PATH_RE.findall(ANCHOR.read_text(encoding="utf-8"))
-    assert declared, "якорь не объявляет ни одного адреса"
+    assert declared_in_the_anchor(), "якорь не объявляет ни одного адреса"
+
+
+def test_the_declared_list_covers_every_address() -> None:
+    """`paths.ALL` — не украшение: он перечисляет ровно то, что объявлено.
+
+    Список, о котором сказано «по нему сверяет гейт», обязан быть тем, что гейт
+    действительно читает, иначе это обещание в прозе. Добавленный мимо `ALL`
+    адрес разошёлся бы с ним молча: снаружи полный список и неполный выглядят
+    одинаково ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
+    missing = sorted(str(item) for item in declared_in_the_anchor() - set(paths.ALL))
+    assert not missing, f"адрес объявлен, а в paths.ALL его нет: {missing}"
+    stray = sorted(str(item) for item in set(paths.ALL) - declared_in_the_anchor())
+    assert not stray, f"paths.ALL называет то, чего якорь не объявляет: {stray}"
 
 
 @pytest.mark.parametrize("path", scripts(), ids=lambda p: p.name)
