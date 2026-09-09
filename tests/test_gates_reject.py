@@ -220,6 +220,32 @@ def test_a_fragment_named_by_the_task_number_is_rejected(
     assert "назван номером задачи" in result.text
 
 
+def test_deleting_a_fragment_named_by_a_number_is_allowed(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Уборку старого фрагмента гейт имени не отвергает.
+
+    Гейт судит ИМЯ существующего файла. Удалённого в голове нет, и требовать от
+    него правильного имени не на чем — иначе уборка фрагментов, названных по
+    номеру, отвергалась бы гейтом, который эту уборку и требует.
+    """
+    repo = prepare_repo(tmp_path)
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "12.fixed.md").write_text("старое\n\n#12\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "фрагмент по номеру уже лежит в базе")
+
+    git(repo, "checkout", "-qb", "work")
+    (repo / "changelog.d" / "12.fixed.md").unlink()
+    (repo / "changelog.d" / "name-says-what-changed.fixed.md").write_text(
+        "новое\n\n#12\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "переименовал по смыслу")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == CLEAN, result.text
+
+
 def test_no_diff_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Нечего проверять — ошибка входа, а не «прошло» (075)."""
     repo = prepare_repo(tmp_path)
@@ -432,6 +458,26 @@ def test_a_neighbours_broken_fragment_is_not_this_change_s_problem(
     with_fragment(repo, "moя-запись.added.md", "текст\n\n#1\n")
     result = run_script("build_changelog.py", "--fragments", "--base", BASE_BRANCH, cwd=repo)
     assert result.code == CLEAN, result.text
+
+
+def test_a_change_without_fragments_is_not_the_fragment_gate_s_problem(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Изменение без фрагментов гейт разбора не роняет — и говорит почему.
+
+    Нужен ли фрагмент вообще, решает `check_journal.py`, и он же отвергает
+    изменение без него. Краснеть здесь вторым разом значило бы завести второй
+    источник того же решения (022). Ветка объявлена, поэтому она и прогоняется:
+    объявив исход, механизм проходит по каждому (145).
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "без фрагмента вовсе")
+    result = run_script("build_changelog.py", "--fragments", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == CLEAN, result.text
+    assert "не несёт фрагментов" in result.text
 
 
 def test_the_run_does_not_assemble_the_journal_on_a_change() -> None:

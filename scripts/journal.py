@@ -78,17 +78,29 @@ def git(args: list[str]) -> str:
         raise NotRun(f"{' '.join(args)} → {report.cut(str(detail))}") from exc
 
 
-def changed_files(base: str) -> list[str]:
+def changed_files(base: str, *, alive_only: bool = False) -> list[str]:
     """Файлы, тронутые изменением относительно общего предка с базой.
 
     `-z` обязателен: без него git экранирует имена с пробелами и не-ASCII, и
     такой путь молча выпадает из отбора
     ([165](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/165-git-path-lists-are-read-by-nul.md)).
+
+    ``alive_only`` отбрасывает удалённые пути. Разница нужна тем, кто судит о
+    СОДЕРЖИМОМ файла: удалённого файла в голове нет, и требовать от него
+    правильного имени или разбираемого текста не на чем. Тем же, кто решает
+    «затронуто ли что-то существенное», удаление важно наравне с правкой, —
+    поэтому умолчание оставляет полный список.
     """
     merge_base = git(["git", "merge-base", base, "HEAD"]).strip()
     if not merge_base:
         raise NotRun(f"общий предок с «{base}» не найден")
-    out = git(["git", "diff", "--name-only", "-z", f"{merge_base}...HEAD"])
+    # `--diff-filter=d` (строчная) отбрасывает удаления; переименование при
+    # обнаружении отдаёт НОВОЕ имя, а старое считается удалением — то есть
+    # отсюда уходит тоже, и это ровно то, что нужно.
+    command = ["git", "diff", "--name-only", "-z"]
+    if alive_only:
+        command.append("--diff-filter=d")
+    out = git([*command, f"{merge_base}...HEAD"])
     files = [name for name in out.split("\0") if name]
     if not files:
         raise NotRun(
