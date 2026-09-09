@@ -214,3 +214,26 @@ def test_a_code_block_is_still_cut_whole() -> None:
     assert changerefs.links_in("```\nRefs #12\nещё строка\n```\nRefs #7") == (
         changerefs.links_in("Refs #7")
     )
+
+
+def test_an_unclosed_fence_eats_nothing() -> None:
+    """Незакрытый забор не смыкается с блоком соседнего коммита.
+
+    Та же болезнь, что у одиночной кавычки, и та же цена: связь пропадала, а
+    шаг открытия отказывал ветке, задачу назвавшей. Половина пары — не пара:
+    при непарном числе заборов блоков в тексте нет вовсе.
+    """
+    text = "fix: X\n```\nзаметка\n\nRefs #12\n---\nfeat: Y\n```\nблок\n```\n\nRefs #7"
+    assert [str(link) for link in changerefs.links_in(text)] == ["Refs #12", "Refs #7"]
+
+
+def test_an_unclosed_fence_does_not_eat_a_resolution() -> None:
+    """То же для снятия находки: строка доезжает до тела изменения."""
+    text = "fix: X\n```\nзаметка\n\nРазобрано: abc1234\n---\nfeat: `код`"
+    assert changerefs.resolved_in(text) == ["abc1234"]
+
+
+def test_inline_code_inside_a_block_changes_nothing() -> None:
+    """Внутри блока вырезано всё, включая строки, похожие на связь."""
+    text = "```\nпример: `Refs #12` и Refs #13\n```\n\nRefs #7"
+    assert [str(link) for link in changerefs.links_in(text)] == ["Refs #7"]
