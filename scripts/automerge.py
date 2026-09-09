@@ -682,6 +682,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             print(
                 f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — {'; '.join(problems)}"
             )
+            publish_source(repo, change, RANK_OWN_RED, owner_token, dry_run=dry_run)
             continue
 
         state = merge_state(repo, change.number, owner_token)

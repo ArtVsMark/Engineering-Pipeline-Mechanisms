@@ -118,24 +118,34 @@ def test_the_vocabulary_covers_every_work_source() -> None:
     assert sorted(module.RANK_NAMES) == [0, 1, 2, 3, 4, 5, 6]
 
 
-def test_the_two_platform_sources_are_named_where_they_are_found(
-    platform: dict[str, object], capsys: pytest.CaptureFixture[str]
+def test_the_two_platform_sources_are_published_where_they_are_found(
+    platform: dict[str, Any],
 ) -> None:
-    """Источники 1 и 2 называются там, где заход их обнаружил.
+    """Источники 1 и 2 ВЫСТАВЛЯЮТСЯ там, где заход их обнаружил.
 
     До обращения к площадке они не выводятся, и это цена правила 052: красноту
     заход и так спрашивает у каждого кандидата, а состояние слияния площадка
     считает лениво — спрашивать его у всех значит заказывать вычисление,
     которое никому не понадобится.
+
+    Проверяется ДЕЙСТВИЕ, а не сообщение. Прежняя редакция сверяла строку
+    вывода — и проходила при отсутствующем вызове публикации: имя источника
+    печаталось рядом, а метка не выставлялась никогда. Замер 09.09.2026.
     """
     platform["changes"] = [change(1, "automerge"), change(2, "automerge"), change(3, "automerge")]
     platform["runs"] = {1: (["lint: failure"], False)}
     platform["states"] = {2: module.STATE_CONFLICT}
     module.advance("o/r", "token", "main", dry_run=False)
-    printed = capsys.readouterr().out
-    assert module.RANK_NAMES[module.RANK_OWN_RED] in printed
-    assert module.RANK_NAMES[module.RANK_CONFLICT] in printed
+    assert (1, module.RANK_OWN_RED) in platform["sources"]
+    assert (2, module.RANK_CONFLICT) in platform["sources"]
     assert platform["merged"] == [3]
+
+
+def test_every_candidate_gets_its_source_published(platform: dict[str, Any]) -> None:
+    """Метку получает каждый кандидат, а не только тот, кого пропустили."""
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert {number for number, _ in platform["sources"]} == {1, 2}
 
 
 def test_a_finding_repair_outruns_the_plan() -> None:
@@ -208,6 +218,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "states": {},
         "merged": [],
         "synced": [],
+        "sources": [],
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -239,6 +250,15 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return list(problems), bool(waiting)
 
     monkeypatch.setattr(module, "head_verdict", head_verdict)
+    # Разметка источника записывается стендом отдельно: проверять надо, что
+    # метка ВЫСТАВЛЕНА, а не что о ней напечатано. Замер 09.09.2026: вызов
+    # публикации в ветке красного отсутствовал, а тест сверял строку вывода —
+    # и потому проходил.
+    monkeypatch.setattr(
+        module,
+        "publish_source",
+        lambda repo, item, place, tok, *, dry_run: state["sources"].append((item.number, place)),
+    )
     return state
 
 
