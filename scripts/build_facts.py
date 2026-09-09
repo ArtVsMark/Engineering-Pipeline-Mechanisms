@@ -19,7 +19,12 @@
 `.rules/bindings.json`, `.pipeline.yml`. Источник у каждого числа один
 ([035](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/035-version-is-never-edited-by-hand.md)).
 
-Исходы (правило 039): ``0`` собрано · ``2`` не собрать.
+Исходы: ``0`` собрано · ``2`` не собрать. Третьего здесь нет, и это названо, а
+не пропущено: состояние «собрано, но с находками» у сборки фактов отсутствует —
+источники проверяют их собственные гейты, а этот механизм либо прочитал их и
+собрал, либо не смог. Правило 039 требует, чтобы исходы были объявлены и
+различались, а не чтобы их было ровно три
+([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 """
 
 from __future__ import annotations

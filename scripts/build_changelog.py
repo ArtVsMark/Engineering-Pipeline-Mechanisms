@@ -32,6 +32,11 @@ VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
 FRAGMENT_RE: Final = re.compile(
     r"^(?P<task>[\w.-]+)\.(?P<kind>contract|feat|fix|docs|internal)\.md$"
 )
+#: Ссылка на задачу — последней строкой. Правило было записано в README каталога
+#: фрагментов и держалось внимательностью: два фрагмента подряд поставили тег
+#: первой строкой, и сборка склеила их как есть. Читателю журнала это ломает
+#: порядок «что изменилось → где это заводилось».
+LINK_LINE_RE: Final = re.compile(r"^#\d+(?: #\d+)*$")
 
 KINDS: Final = {
     "contract": "Несовместимое: поверхность контракта",
@@ -77,14 +82,18 @@ def read_fragments(directory: Path) -> list[Fragment]:
         if not body:
             unnamed.append(f"{path.name} (пустой)")
             continue
+        if not LINK_LINE_RE.match(body.splitlines()[-1].strip()):
+            unnamed.append(f"{path.name} (ссылка на задачу не последней строкой)")
+            continue
         fragments.append(Fragment(match["kind"], match["task"], body))
 
     if unnamed:
         raise NotRun(
-            "фрагменты с неразбираемым именем или пустые:\n  "
+            "фрагменты с неразбираемым именем, пустые или без ссылки в конце:\n  "
             + "\n  ".join(unnamed)
             + "\n\nИмя: <задача>.<род>.md, род — "
             + " · ".join(KINDS)
+            + "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
         )
     return fragments
 

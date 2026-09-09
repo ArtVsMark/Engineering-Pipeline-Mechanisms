@@ -22,15 +22,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any, Final
 
+import changerefs
 import labels
 
 ZONE_PREFIX: Final = labels.ZONE_PREFIX
-TASK_RE: Final = re.compile(r"(?:closes|fixes|refs|part of)\s+#(\d+)", re.IGNORECASE)
 
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
@@ -97,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             + " — зона выведена из путей состава, а не угадана"
         )
 
-    if not TASK_RE.search(f"{title}\n{body}"):
+    if not changerefs.has_link(f"{title}\n{body}"):
         problems.append(
             "нет связи с задачей: ни «Closes #N», ни «Refs #N» — "
             "без неё задача не закроется при слиянии, а приоритет очереди наследовать неоткуда"

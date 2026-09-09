@@ -48,6 +48,7 @@ import re
 import sys
 from typing import Any, Final
 
+import changerefs
 import ghrest
 
 MARKER: Final = "<!-- review-findings: не удаляйте, по этой строке задача находится снова -->"
@@ -55,7 +56,6 @@ TITLE: Final = "Находки внешнего взгляда: не разоб�
 
 VERDICT_RE: Final = re.compile(r"^ВЕРДИКТ:\s*находок\s+(\d+)\s*$", re.I | re.M)
 FINDING_RE: Final = re.compile(r"^НАХОДКА:\s*(\S.*?)\s*$", re.I | re.M)
-RESOLVED_RE: Final = re.compile(r"^\s*Разобрано:\s*([0-9a-f]{7})\b", re.I | re.M)
 ENTRY_RE: Final = re.compile(r"^- `([0-9a-f]{7})` · #(\d+) — (.+?)\s*$", re.M)
 
 EXIT_NOTHING: Final = 0
@@ -153,7 +153,7 @@ def resolved_marks(repo: str, token: str, limit: int = 30) -> set[str]:
     for item in items:
         if not item.get("merged_at"):
             continue
-        marks.update(mark.lower() for mark in RESOLVED_RE.findall(item.get("body") or ""))
+        marks.update(changerefs.resolved_in(item.get("body") or ""))
     return marks
 
 

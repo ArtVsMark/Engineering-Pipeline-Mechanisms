@@ -81,6 +81,11 @@ def test_empty_body_says_so_explicitly() -> None:
 
 
 def test_resolution_line_is_recognised() -> None:
-    """Строка снятия читается из тела изменения, включая отступ и регистр."""
-    found = module.RESOLVED_RE.findall("текст\n  Разобрано: ABC1234 — починено\nещё")
-    assert [mark.lower() for mark in found] == ["abc1234"]
+    """Строка снятия читается из тела изменения, включая отступ и регистр.
+
+    Разбор общий с шагом открытия (`changerefs`): тот переносит строку из
+    коммита в тело изменения, этот читает её оттуда. Второе чтение той же
+    строки разошлось бы с первым молча — и снятие терялось бы по дороге.
+    """
+    found = module.changerefs.resolved_in("текст\n  Разобрано: ABC1234 — починено\nещё")
+    assert found == ["abc1234"]

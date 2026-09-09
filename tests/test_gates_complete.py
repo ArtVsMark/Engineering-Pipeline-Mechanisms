@@ -136,3 +136,52 @@ def test_two_records_of_the_same_run_are_still_ambiguous() -> None:
     runs = [run("lint", run_id="mine"), run("test", run_id="mine"), run("test", run_id="mine")]
     problems, _ = module.verdict(runs, REQUIRED, "ci-complete", "mine")
     assert any("живых записей с одним именем" in problem for problem in problems)
+
+
+# --- наполнение опроса приходит из данных ------------------------------------
+
+
+def test_two_sources_of_subject_are_refused() -> None:
+    """Наполнение объявлено дважды — отказ, а не «возьмём тот, что подробнее».
+
+    Два списка одного и того же расходятся молча (022), и молчание здесь стоит
+    дороже всего: разойдясь, они дадут зелёный гейт на неполном опросе.
+    """
+    try:
+        module.sources(".pipeline.yml", "lint,test")
+    except module.NotRun as exc:
+        assert "дважды" in str(exc)
+    else:
+        raise AssertionError("два источника наполнения приняты молча")
+
+
+def test_policy_gives_both_classes(tmp_path: Any) -> None:
+    """Из данных приходят обязательные и совещательные — разными списками."""
+    answer = tmp_path / ".pipeline.yml"
+    answer.write_text(
+        "schema: 1\nchecks:\n  lint: required\n  review:\n    class: advisory\n"
+        "    why: слияния не держит\n  e2e:\n    class: off\n    why: нет окружения\n",
+        encoding="utf-8",
+    )
+    required, advisory = module.sources(str(answer), "")
+    assert required == ["lint"]
+    assert advisory == ["review"]
+
+
+def test_advisory_missing_record_is_not_a_problem() -> None:
+    """У совещательной отсутствие записи законно: она могла не идти вовсе."""
+    problems, _ = module.verdict([], ["review"], "ci-complete", strict_missing=False)
+    assert problems == []
+
+
+def test_advisory_red_is_still_reported() -> None:
+    """Но красное у совещательной не молчит: иначе это «выключена» повежливее."""
+    failed = run("review", conclusion="failure")
+    problems, _ = module.verdict([failed], ["review"], "ci-complete", strict_missing=False)
+    assert len(problems) == 1 and "review" in problems[0]
+
+
+def test_required_missing_record_is_still_a_refusal() -> None:
+    """У обязательной послабления нет: нет записи — нет вердикта (075)."""
+    problems, _ = module.verdict([], ["lint"], "ci-complete")
+    assert len(problems) == 1 and "записи нет" in problems[0]

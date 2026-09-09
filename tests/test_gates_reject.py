@@ -268,6 +268,31 @@ def test_unnamed_fragment_is_third_outcome(run_script: RunScript, tmp_path: Path
     assert "неразбираемым именем" in result.text
 
 
+def test_fragment_with_the_link_on_top_is_third_outcome(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Ссылка на задачу не последней строкой — отказ, а не мелочь оформления.
+
+    Конвенция была записана в README каталога фрагментов и держалась
+    внимательностью: два фрагмента подряд поставили тег первой строкой, и
+    сборка склеила их как есть. Правило без механизма — обещание (002).
+    """
+    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "changelog.d" / "1.feat.md").write_text("#1\n\nтекст\n", encoding="utf-8")
+    result = run_script("build_changelog.py", "--check", cwd=tmp_path)
+    assert result.code == BROKEN
+    assert "не последней строкой" in result.text
+
+
+def test_fragment_may_name_two_tasks(run_script: RunScript, tmp_path: Path) -> None:
+    """Одна работа бывает по двум задачам, и такая ссылка законна."""
+    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "changelog.d" / "1.feat.md").write_text("текст\n\n#1 #2\n", encoding="utf-8")
+    assert run_script("build_changelog.py", cwd=tmp_path).code == CLEAN
+
+
 def test_assembled_journal_matches_itself(run_script: RunScript, tmp_path: Path) -> None:
     """Собранный журнал совпадает со сборкой, а изменённый рукой — нет (125)."""
     (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
