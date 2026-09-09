@@ -37,6 +37,8 @@ permissions:
   contents: read
   checks: read
   pull-requests: read
+  # Живая задача-адресат находок читается шагом `debt`; писать в неё он не умеет.
+  issues: read
 
 concurrency:
   # Группа называет ГОЛОВУ, а не только номер изменения (правило 179): иначе
@@ -167,6 +169,38 @@ jobs:
       - run: python -m pip install --quiet "pyyaml>=6,<7"
       - name: ответ по классам проверок полон и сходится с деревом
         run: python scripts/check_pipeline.py
+
+  debt:
+    # СОВЕЩАТЕЛЬНЫЙ ШАГ, А НЕ ГЕЙТ. Долг бывает больше одного изменения, и
+    # красное здесь стало бы проверкой, которую приучаются обходить (051).
+    # Его дело — не пускать долг в невидимое: находки и неотвеченные правила
+    # идут перед планом, и это должно быть видно, а не вспоминаться.
+    name: debt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: остаток долга — находки и неотвеченные правила
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Коды разбираются списком РАЗРЕШЁННОГО (068): объявленные исходы — 0
+          # и 3, всё прочее отказ. Третий здесь означает «часть источников не
+          # прочитана», и он не зеленит шаг молча.
+          set +e
+          python scripts/debt.py
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            3) echo "::warning::часть источников долга не прочитана — см. вывод шага" ;;
+            *) exit "$code" ;;
+          esac
 
   ci-complete:
     # ЕДИНСТВЕННЫЙ ОБЯЗАТЕЛЬНЫЙ КОНТЕКСТ. Имя джоба и есть имя контекста,
