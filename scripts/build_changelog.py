@@ -10,6 +10,17 @@
 ``changelog.d/released/<версия>/`` и остаются источником. `CHANGELOG.md`
 производный целиком: его можно удалить и собрать заново, ничего не потеряв.
 
+СОБРАННЫЙ ЖУРНАЛ — ДЕЛО ВЫПУСКА, А НЕ КАЖДОГО ИЗМЕНЕНИЯ
+([030](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/030-changelog-from-fragments.md)):
+«запись приезжает вместе с изменением, отдельным файлом; сборка — при выпуске».
+Инцидент, записанный в самом правиле, мы успели повторить: общий файл, который
+трогает каждая ветка, даёт конфликт на каждом втором изменении — за десять
+минут 9 сентября он случился дважды.
+
+Поэтому на изменении проверяются ФРАГМЕНТЫ (``--fragments``): имя разбирается,
+тело не пусто, ссылка на задачу последней строкой. Совпадение собранного файла
+со сборкой (``--check``) остаётся, но спрашивают его при выпуске.
+
 Исходы (правило 039): ``0`` собрано · ``1`` собранное расходится с файлом на
 диске при ``--check`` · ``2`` собрать не удалось.
 """
@@ -24,27 +35,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import journal
+
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
 OUTPUT: Final = Path("CHANGELOG.md")
 VERSION_FILE: Final = Path("CONTRACT_VERSION")
 VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
-FRAGMENT_RE: Final = re.compile(
-    r"^(?P<task>[\w.-]+)\.(?P<kind>contract|feat|fix|docs|internal)\.md$"
-)
-#: Ссылка на задачу — последней строкой. Правило было записано в README каталога
-#: фрагментов и держалось внимательностью: два фрагмента подряд поставили тег
-#: первой строкой, и сборка склеила их как есть. Читателю журнала это ломает
-#: порядок «что изменилось → где это заводилось».
-LINK_LINE_RE: Final = re.compile(r"^#\d+(?: #\d+)*$")
+LINK_LINE_RE: Final = journal.LINK_LINE_RE
 
-KINDS: Final = {
-    "contract": "Несовместимое: поверхность контракта",
-    "feat": "Добавлено",
-    "fix": "Исправлено",
-    "docs": "Документы",
-    "internal": "Внутреннее",
-}
+KINDS: Final = journal.KINDS
+
+FRAGMENT_RE: Final = journal.NAME_RE
 
 EXIT_OK: Final = 0
 EXIT_DIFFERS: Final = 1
@@ -85,13 +87,13 @@ def read_fragments(directory: Path) -> list[Fragment]:
         if not LINK_LINE_RE.match(body.splitlines()[-1].strip()):
             unnamed.append(f"{path.name} (ссылка на задачу не последней строкой)")
             continue
-        fragments.append(Fragment(match["kind"], match["task"], body))
+        fragments.append(Fragment(match["kind"], match["slug"], body))
 
     if unnamed:
         raise NotRun(
             "фрагменты с неразбираемым именем, пустые или без ссылки в конце:\n  "
             + "\n  ".join(unnamed)
-            + "\n\nИмя: <задача>.<род>.md, род — "
+            + "\n\nИмя: <слаг-по-смыслу>.<род>.md, род — "
             + " · ".join(KINDS)
             + "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
         )
@@ -174,10 +176,25 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает журнал, сверяет его или закрывает выпуск."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="сверить, не записывая")
+    parser.add_argument(
+        "--fragments",
+        action="store_true",
+        help="проверить только фрагменты: имя, непустоту, ссылку в конце",
+    )
     parser.add_argument("--release", metavar="ВЕРСИЯ", help="закрыть выпуск: перенести фрагменты")
     args = parser.parse_args(argv)
 
     try:
+        if args.fragments:
+            # Предмет проверки — то, что приезжает С ИЗМЕНЕНИЕМ. Ни версия, ни
+            # собранный файл здесь не нужны и не трогаются: их спрашивает
+            # выпуск, а изменение отвечает за свой фрагмент.
+            found = read_fragments(FRAGMENTS)
+            if not found:
+                raise NotRun("ни одного фрагмента в changelog.d — предмет проверки не найден (075)")
+            print(f"фрагменты разбираются: {len(found)}")
+            return EXIT_OK
+
         if args.release:
             do_release(args.release)
         version = read_version()

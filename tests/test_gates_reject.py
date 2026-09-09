@@ -188,7 +188,7 @@ def test_change_with_fragment_passes(run_script: RunScript, tmp_path: Path) -> N
     git(repo, "checkout", "-qb", "work")
     (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
     (repo / "changelog.d").mkdir()
-    (repo / "changelog.d" / "7.feat.md").write_text("что-то новое\n\n#7\n", encoding="utf-8")
+    (repo / "changelog.d" / "7.added.md").write_text("что-то новое\n\n#7\n", encoding="utf-8")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "с фрагментом")
     assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
@@ -314,7 +314,7 @@ def test_fragment_with_the_link_on_top_is_third_outcome(
     """
     (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
-    (tmp_path / "changelog.d" / "1.feat.md").write_text("#1\n\nтекст\n", encoding="utf-8")
+    (tmp_path / "changelog.d" / "1.added.md").write_text("#1\n\nтекст\n", encoding="utf-8")
     result = run_script("build_changelog.py", "--check", cwd=tmp_path)
     assert result.code == BROKEN
     assert "не последней строкой" in result.text
@@ -324,15 +324,63 @@ def test_fragment_may_name_two_tasks(run_script: RunScript, tmp_path: Path) -> N
     """Одна работа бывает по двум задачам, и такая ссылка законна."""
     (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
-    (tmp_path / "changelog.d" / "1.feat.md").write_text("текст\n\n#1 #2\n", encoding="utf-8")
+    (tmp_path / "changelog.d" / "1.added.md").write_text("текст\n\n#1 #2\n", encoding="utf-8")
     assert run_script("build_changelog.py", cwd=tmp_path).code == CLEAN
+
+
+def test_kinds_are_declared_once_for_all_mechanisms() -> None:
+    """Гейт на дрейф: роды записи объявляет один модуль.
+
+    Списки были копиями у сборки и у гейта изменения: достаточно добавить род
+    в одном месте, чтобы второй перестал видеть законный фрагмент. Расходились
+    бы они молча — как уже расходились состав меток и связь с задачей.
+    """
+    for name in ("build_changelog.py", "check_journal.py"):
+        source = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+        assert "contract|" not in source and "|internal" not in source, (
+            f"{name} объявляет роды своей копией"
+        )
+
+
+def test_fragments_are_checked_without_the_assembled_file(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """На изменении спрашивают фрагменты, а собранного файла может не быть.
+
+    Сборка — дело выпуска (030): общий файл, который трогает каждая ветка,
+    даёт конфликт на каждом втором изменении.
+    """
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "changelog.d" / "slug.added.md").write_text("текст\n\n#1\n", encoding="utf-8")
+    result = run_script("build_changelog.py", "--fragments", cwd=tmp_path)
+    assert result.code == CLEAN, result.text
+    assert not (tmp_path / "CHANGELOG.md").exists(), "проверка фрагментов собрала файл"
+
+
+def test_fragments_check_refuses_a_broken_fragment(run_script: RunScript, tmp_path: Path) -> None:
+    """Дефект фрагмента ловится на изменении, а не при выпуске."""
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "changelog.d" / "заметка.md").write_text("текст\n", encoding="utf-8")
+    result = run_script("build_changelog.py", "--fragments", cwd=tmp_path)
+    assert result.code == BROKEN, result.text
+
+
+def test_the_run_does_not_assemble_the_journal_on_a_change() -> None:
+    """Гейт на договор: прогон изменения не сверяет собранный журнал.
+
+    Иначе правило 030 держалось бы внимательностью автора, а стоило бы это
+    конфликта на каждом втором изменении.
+    """
+    gates = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "build_changelog.py --fragments" in gates
+    assert "build_changelog.py --check" not in gates
 
 
 def test_assembled_journal_matches_itself(run_script: RunScript, tmp_path: Path) -> None:
     """Собранный журнал совпадает со сборкой, а изменённый рукой — нет (125)."""
     (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
-    (tmp_path / "changelog.d" / "1.feat.md").write_text("новое\n\n#1\n", encoding="utf-8")
+    (tmp_path / "changelog.d" / "1.added.md").write_text("новое\n\n#1\n", encoding="utf-8")
     assert run_script("build_changelog.py", cwd=tmp_path).code == CLEAN
     assert run_script("build_changelog.py", "--check", cwd=tmp_path).code == CLEAN
 
