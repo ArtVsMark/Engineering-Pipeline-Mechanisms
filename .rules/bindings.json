@@ -256,7 +256,7 @@
     "052": {
       "status": "active",
       "mechanism": "gate",
-      "where": "scripts/automerge.py — базу подтягивает ТОЛЬКО голова очереди и только перед слиянием (sync_head), а за один заход сливается одно изменение: остальные после него всё равно устарели. Держат tests/test_automerge.py::test_only_the_head_pulls_the_base и ::test_one_pass_merges_at_most_one_change. Цена обратного названа замером соседа: 21 холостой прогон против 12 полезных на шести изменениях"
+      "where": "scripts/automerge.py — базу подтягивает ТОЛЬКО голова очереди и только перед слиянием (sync_head), а за один заход сливается одно изменение: остальные после него всё равно устарели. Держат tests/test_automerge.py::test_only_the_head_pulls_the_base и ::test_one_pass_merges_at_most_one_change. Цена обратного названа замером соседа на 09.09.2026 — 21 холостой прогон против 12 полезных на шести изменениях; след замера — docs/decisions/003-own-automerge-not-native-queue.md"
     },
     "053": {
       "status": "active",
