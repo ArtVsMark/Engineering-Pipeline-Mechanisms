@@ -47,6 +47,20 @@ LINK_LINE_RE: Final = journal.LINK_LINE_RE
 
 KINDS: Final = journal.KINDS
 
+#: Сколько ВЫПУСКОВ разворачивается в собранном журнале. Остальные остаются
+#: источником и называются ссылкой на каталог выпуска.
+#:
+#: ПОЧЕМУ ПРЕДЕЛ ЕСТЬ. Вышедшее из окна переезжает дословно и не сокращается —
+#: фрагменты уходят в `changelog.d/released/<версия>/` целиком. Но собранный
+#: файл читает человек, и без предела он растёт линейно по числу выпусков:
+#: к сотому читатель ищет свежее прокруткой. Предел — у ПРЕДСТАВЛЕНИЯ, не у
+#: источника: ни одна запись не пропадает, она перестаёт быть развёрнутой.
+#:
+#: ПОЧЕМУ ПЯТЬ. Столько помещается на экран, и столько же держит соседний
+#: проект семьи. Число небольшое намеренно: предел, выбранный «с запасом»,
+#: не срабатывает годами и потому не проверен ничем.
+UNFOLDED_RELEASES: Final = 5
+
 FRAGMENT_RE: Final = journal.NAME_RE
 
 EXIT_OK: Final = 0
@@ -162,16 +176,48 @@ def render(version: str) -> str:
         render_section("Не выпущено", read_fragments(FRAGMENTS)),
     ]
 
-    if RELEASED.is_dir():
-        released = sorted(
-            (p for p in RELEASED.iterdir() if p.is_dir()),
-            key=lambda p: [int(x) for x in p.name.split(".")] if VERSION_RE.match(p.name) else [0],
-            reverse=True,
-        )
-        for directory in released:
-            parts.append(render_section(directory.name, read_fragments(directory)))
+    released = releases()
+    for directory in released[:UNFOLDED_RELEASES]:
+        parts.append(render_section(directory.name, read_fragments(directory)))
+
+    folded = released[UNFOLDED_RELEASES:]
+    if folded:
+        parts.append(render_folded(folded))
 
     return "\n".join(parts).rstrip() + "\n"
+
+
+def releases() -> list[Path]:
+    """Каталоги выпусков от новых к старым."""
+    if not RELEASED.is_dir():
+        return []
+    return sorted(
+        (p for p in RELEASED.iterdir() if p.is_dir()),
+        key=lambda p: [int(x) for x in p.name.split(".")] if VERSION_RE.match(p.name) else [0],
+        reverse=True,
+    )
+
+
+def render_folded(directories: list[Path]) -> str:
+    """Свёрнутые выпуски: строка со ссылкой на источник, а не пропажа.
+
+    Запись не исчезает и не сокращается — она остаётся в каталоге выпуска
+    целиком. Свёрнуто только представление, и сказано об этом прямо: раздел,
+    молча оборванный на пятом выпуске, читался бы как «раньше ничего не было».
+    """
+    lines = [
+        f"## Выпуски раньше {directories[0].name}",
+        "",
+        "Записи не сокращены: каждая лежит в своём каталоге выпуска целиком.",
+        f"Развёрнутыми здесь собираются {UNFOLDED_RELEASES} последних — предел у",
+        "представления, а не у источника.",
+        "",
+    ]
+    lines += [
+        f"- [{directory.name}]({directory.as_posix()}/) — записей: {len(read_fragments(directory))}"
+        for directory in directories
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def read_version() -> str:

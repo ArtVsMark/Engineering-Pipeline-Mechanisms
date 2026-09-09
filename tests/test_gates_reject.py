@@ -683,3 +683,58 @@ def test_zones_are_applied_even_when_the_change_is_already_open(
     returns = source.index("return EXIT_OK", already)
     assert "apply_zones(" in source[already:returns], "ветка «уже открыто» не доставляет зоны"
     assert callable(module.apply_zones)
+
+
+def test_the_journal_unfolds_a_bounded_number_of_releases(tmp_path: Path) -> None:
+    """Собранный журнал разворачивает предел выпусков, а не все подряд.
+
+    Источник не сокращается: запись лежит в каталоге выпуска целиком. Предел
+    стоит у ПРЕДСТАВЛЕНИЯ — иначе файл растёт линейно по числу выпусков, и к
+    сотому свежее ищут прокруткой (108).
+    """
+    module = load_script("build_changelog.py")
+    released = tmp_path / "changelog.d" / "released"
+    for minor in range(module.UNFOLDED_RELEASES + 3):
+        directory = released / f"1.{minor}.0"
+        directory.mkdir(parents=True)
+        (directory / f"запись-{minor}.added.md").write_text("текст\n\n#1\n", encoding="utf-8")
+    (tmp_path / "changelog.d" / "свежее.added.md").write_text("текст\n\n#2\n", encoding="utf-8")
+
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.chdir(tmp_path)
+        monkey.setattr(module, "FRAGMENTS", Path("changelog.d"))
+        monkey.setattr(module, "RELEASED", Path("changelog.d/released"))
+        assembled = module.render("1.7.0")
+    finally:
+        monkey.undo()
+
+    unfolded = [line for line in assembled.splitlines() if line.startswith("## 1.")]
+    assert len(unfolded) == module.UNFOLDED_RELEASES, assembled
+    assert "Выпуски раньше" in assembled, "свёрнутые выпуски оборваны молча"
+    for minor in range(3):
+        assert f"1.{minor}.0" in assembled, "свёрнутый выпуск не назван ссылкой"
+
+
+def test_a_short_history_folds_nothing(tmp_path: Path) -> None:
+    """Пока выпусков меньше предела, свёрнутого раздела нет вовсе.
+
+    Раздел «раньше такой-то версии» на пустом месте объявлял бы предел там, где
+    его ещё не достигли, — и читался бы как пропажа (075).
+    """
+    module = load_script("build_changelog.py")
+    released = tmp_path / "changelog.d" / "released" / "1.0.0"
+    released.mkdir(parents=True)
+    (released / "запись.added.md").write_text("текст\n\n#1\n", encoding="utf-8")
+    (tmp_path / "changelog.d" / "свежее.added.md").write_text("текст\n\n#2\n", encoding="utf-8")
+
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.chdir(tmp_path)
+        monkey.setattr(module, "FRAGMENTS", Path("changelog.d"))
+        monkey.setattr(module, "RELEASED", Path("changelog.d/released"))
+        assembled = module.render("1.0.0")
+    finally:
+        monkey.undo()
+
+    assert "Выпуски раньше" not in assembled, assembled
