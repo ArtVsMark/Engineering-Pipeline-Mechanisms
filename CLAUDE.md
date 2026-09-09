@@ -99,10 +99,15 @@ git checkout -b agent/<короткое-имя-задачи> origin/main
 ограничено выданной веткой, и тогда обход возвращается вместе с записью о нём
 ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 
-Приставка `claude/**` в конвейере пока остаётся: её снятие — отдельное
-изменение, и снимать вход механизма стоит после того, как новый путь
-подтверждён прогоном
+**Приставки `claude/**` в конвейере больше нет.** Она была переходной
+заглушкой и снята после того, как новый путь подтверждён прогонами, а не когда
+был написан
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+Оставленный «на время» слой совместимости превращает один канонический путь в
+два и живёт дольше самой миграции
+([094](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/094-a-compatibility-shim-makes-migration-permanent.md)).
+Следствие для окна жёсткое: толчок в выданную платформой ветку изменения
+**не откроет** — резать `agent/<задача>` обязательно.
 
 ## 🔁 Когда окно перезапускают
 

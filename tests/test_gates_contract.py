@@ -145,3 +145,25 @@ def test_workflows_do_not_embed_code() -> None:
         if EMBEDDED_CODE_RE.search(path.read_text(encoding="utf-8"))
     ]
     assert not embedded, f"код встроен в прогон, а не вызван файлом: {embedded}"
+
+
+def test_branch_prefixes_match_the_workflow() -> None:
+    """Приставка ветки — вход механизма, и она одна и та же у прогона и у скрипта.
+
+    Разъехавшись, они дают худший из отказов: прогон стартует, скрипт отвечает
+    «ветка без объявленной приставки» и выходит нулём — изменение не открыто, и
+    красного нигде нет (003, 094).
+    """
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "agent-pr.yml").read_text("utf-8"))
+    # `on` в YAML читается как True: ключ приходится искать по обоим написаниям.
+    triggers = workflow.get("on") or workflow.get(True)
+    branches = list(triggers["push"]["branches"])
+
+    source = (ROOT / "scripts" / "agent_pr.py").read_text(encoding="utf-8")
+    declared = re.search(r"PREFIXES: Final = \(([^)]*)\)", source)
+    assert declared, "в scripts/agent_pr.py не нашлось PREFIXES — предмет проверки не найден (075)"
+    prefixes = re.findall(r'"([^"]+)"', declared.group(1))
+
+    assert [f"{prefix}**" for prefix in prefixes] == branches, (
+        f"приставки разъехались: прогон слушает {branches}, скрипт берёт {prefixes}"
+    )

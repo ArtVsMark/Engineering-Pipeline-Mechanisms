@@ -91,13 +91,13 @@ def test_opening_refuses_a_branch_without_a_task(monkeypatch: pytest.MonkeyPatch
     """
     monkeypatch.setattr(agent_pr, "git", lambda *args: "правка без задачи\n")
     with pytest.raises(agent_pr.NotRun, match="не называет задачу"):
-        agent_pr.describe("claude/окно", "main")
+        agent_pr.describe("agent/окно", "main")
 
 
 def test_description_puts_one_task_per_line(monkeypatch: pytest.MonkeyPatch) -> None:
     """Каждая задача получает свою строку: ключевое слово читается у каждой."""
     monkeypatch.setattr(agent_pr, "git", lambda *args: "feat: что-то\n\nRefs #2, #29\n")
-    _, body = agent_pr.describe("claude/окно", "main")
+    _, body = agent_pr.describe("agent/окно", "main")
     assert "Refs #2\nRefs #29" in body
 
 
@@ -154,7 +154,7 @@ def test_resolution_travels_with_the_work(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         agent_pr, "git", lambda *args: "fix: правка\n\nРазобрано: abc1234\nRefs #7\n"
     )
-    _, body = agent_pr.describe("claude/окно", "main")
+    _, body = agent_pr.describe("agent/окно", "main")
     assert "Разобрано: abc1234" in body
 
 
