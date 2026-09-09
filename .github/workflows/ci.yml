@@ -1,0 +1,179 @@
+# Гейты изменения: шаги 2–7 скелета (docs/pipeline.md).
+#
+# ОДИН ШАГ — ОДИН ДЖОБ. Не шаг внутри джоба: контекст проверки носит имя
+# джоба, и по красному контексту должно быть видно, что сломалось, без
+# открытия лога. У соседей 57 и 36 шагов сидят в одном джобе с именем вроде
+# `catalogue`, и причину иначе как из лога не узнать.
+#
+# СВОДНЫЙ ГЕЙТ СОБРАН ОПРОСОМ, А НЕ ЧЕРЕЗ `needs` (правило 168). Агрегатор на
+# зависимостях при падении соседа не краснеет, а ПРОПУСКАЕТСЯ, — а пропущенную
+# запись защита ветки засчитывает за пройденную (187). В норме он зелёный и
+# ничего не решает, в аварии — разрешает слияние ровно тогда, когда обязан
+# запретить. Поэтому `ci-complete` ни от кого не зависит и сам спрашивает у
+# площадки проверки на голове.
+#
+# В ЗАЩИТЕ ВЕТКИ РОВНО ОДНО ИМЯ — `ci-complete`. Список, перечисляющий
+# матрицу, ломается при добавлении версии. Совпадение имени с настройкой
+# держит scripts/check_required_context.py: настройка живёт вне дерева, её не
+# видит ни ревью, ни прогон.
+#
+# ИЗВЕСТНАЯ ЦЕНА, НАЗВАННАЯ, А НЕ ОБОЙДЁННАЯ (046). Договор требует, чтобы
+# гейты разметки перезапускались от навешивания метки, а тяжёлые — нет. Здесь
+# все шаги в одном прогоне, как и велит таблица договора, поэтому метка
+# перезапускает и тесты. Разделение шага по прогонам — предмет выноса
+# механизмов наружу (#2), а не молчаливая правка договора на ходу.
+name: ci
+
+on:
+  pull_request:
+    # `labeled`/`unlabeled` обязательны: разметка — вход механизма, и её правка
+    # обязана менять вердикт гейта. `edited` — потому что связь с задачей живёт
+    # в теле изменения.
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+concurrency:
+  # Группа называет ГОЛОВУ, а не только номер изменения (правило 179): иначе
+  # последнее слово остаётся за прогоном на устаревшем коммите.
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: поставить проверки
+        # Верхние границы обязательны (правило 073): без них несовместимая
+        # версия применяется молча.
+        run: python -m pip install --quiet "ruff>=0.6,<1" "mypy>=1.11,<2" "pyyaml>=6,<7"
+      - name: линтер
+        run: ruff check scripts/ tests/
+      - name: формат
+        run: ruff format --check scripts/ tests/
+      - name: типы
+        run: mypy scripts/ tests/
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Тесты гейтов ходят по истории — нужна вся.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: поставить проверки
+        run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: тесты
+        # Прогон без единого теста — ошибка входа, а не «чисто» (075). Ключ
+        # ниже делает пустой сбор красным, а не зелёным.
+        run: pytest --strict-markers -p no:cacheprovider
+
+  pr-meta:
+    name: pr-meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - name: тронутые файлы
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE:refs/remotes/origin/$BASE"
+          base_sha="$(git merge-base "origin/$BASE" HEAD)"
+          git diff --name-only "$base_sha...HEAD" > /tmp/changed.txt
+          echo "тронуто файлов: $(wc -l < /tmp/changed.txt)"
+      - name: метки и связь с задачей
+        run: python scripts/check_pr_meta.py --files "$(cat /tmp/changed.txt)"
+
+  journal:
+    name: journal
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: фрагмент журнала
+        env:
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          base="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags origin "$base:refs/remotes/origin/$base"
+          python scripts/check_journal.py
+      - name: журнал собран из фрагментов
+        run: python scripts/build_changelog.py --check
+      - name: версия не правлена руками
+        run: python scripts/check_version.py
+
+  attribution:
+    name: attribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Гейт не переписан здесь: каталог отдаёт его действием, и подключение
+      # идёт ссылкой на версию, а не копией (правило 090). Копия разъехалась бы
+      # с оригиналом на первой же правке — и разъехались бы при этом гейты.
+      - name: сверить атрибуцию
+        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0
+        with:
+          authors: .github/authors.txt
+          # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
+          # варианты — docs/decisions/001-attribution-of-merged-1.md.
+          baseline: cb26ec4
+          require-declared-author: "true"
+          require-coauthor: "true"
+          range: origin/${{ github.event.pull_request.base.ref || 'main' }}..HEAD
+          catalogue-ref: v1.2.0
+
+  ci-complete:
+    # ЕДИНСТВЕННЫЙ ОБЯЗАТЕЛЬНЫЙ КОНТЕКСТ. Имя джоба и есть имя контекста,
+    # поэтому `name:` совпадает с идентификатором намеренно: расхождение между
+    # ними оставило бы в защите имя, которого никто не выдаёт.
+    name: ci-complete
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # `needs` здесь НЕТ намеренно — см. шапку файла и правило 168.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: опросить проверки на голове
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python scripts/ci_complete.py \
+            --required "lint,test,pr-meta,journal,attribution" \
+            --self-name "ci-complete"
