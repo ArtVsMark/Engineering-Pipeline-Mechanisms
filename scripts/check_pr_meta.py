@@ -203,7 +203,10 @@ def main(argv: list[str] | None = None) -> int:
     if token and repo:
         try:
             problems += premature(
-                repo, token, changerefs.links_in(text), changerefs.closed_items_in(text)
+                repo,
+                token,
+                changerefs.links_in(text),
+                [changerefs.normalise(item) for item in changerefs.closed_items_in(text)],
             )
         except NotRun as exc:
             # Отказ чтения задачи — объявленный третий исход, а не трассировка:

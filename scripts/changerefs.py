@@ -153,11 +153,23 @@ def resolved_in(text: str) -> list[str]:
 
 
 def closed_items_in(text: str) -> list[str]:
-    """Пункты чек-листа, названные закрытыми, в порядке появления."""
+    """Пункты чек-листа, названные закрытыми, — КАК НАПИСАНЫ, в порядке появления.
+
+    Приведённый вид отдавать нельзя: строка едет в тело изменения и попадается
+    на глаза человеку, а приведение опускает регистр и срезает знак в конце.
+    Читатель увидел бы не пункт задачи, а его огрызок. Приводится текст только
+    при сравнении — там, где это и нужно.
+
+    Повторы при этом снимаются ПО ПРИВЕДЁННОМУ виду: «Первый пункт» и «первый
+    пункт;» — один и тот же пункт, названный дважды.
+    """
     found: list[str] = []
+    seen: set[str] = set()
     for item in CLOSED_ITEM_RE.findall(outside_code(text)):
-        cleaned = normalise(item)
-        if cleaned and cleaned not in found:
+        cleaned = " ".join(item.split())
+        key = normalise(item)
+        if key and key not in seen:
+            seen.add(key)
             found.append(cleaned)
     return found
 
