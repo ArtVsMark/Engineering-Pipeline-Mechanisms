@@ -1,0 +1,103 @@
+{
+  "_": "Снятый ответ площадки: форма записи проверки. Лежит здесь, чтобы подделки в наборе было с чем сверить: зелёное на подделке, собранной по разумению окна, доказывает согласованность кода с нашим представлением о площадке, а не о самой площадке (правило 170).",
+  "_снято": "09.09.2026",
+  "_откуда": "GET /repos/{owner}/{repo}/commits/{sha}/check-runs?filter=latest",
+  "_как_обновить": "curl -H 'Authorization: Bearer $GH_TOKEN' 'https://api.github.com/repos/<владелец>/<репозиторий>/commits/<голова>/check-runs?filter=latest' и переснять форму: ключи и типы, без идентификаторов и времён — они наполнение, а не форма, и устареют к первому же прогону.",
+  "_сколько_записей_было": 10,
+  "envelope": {
+    "total_count": "int"
+  },
+  "check_run": {
+    "app": {
+      "client_id": "str",
+      "created_at": "str",
+      "description": "str",
+      "events": [
+        "str"
+      ],
+      "external_url": "str",
+      "html_url": "str",
+      "id": "int",
+      "name": "str",
+      "node_id": "str",
+      "owner": {
+        "avatar_url": "str",
+        "events_url": "str",
+        "followers_url": "str",
+        "following_url": "str",
+        "gists_url": "str",
+        "gravatar_id": "str",
+        "html_url": "str",
+        "id": "int",
+        "login": "str",
+        "node_id": "str",
+        "organizations_url": "str",
+        "received_events_url": "str",
+        "repos_url": "str",
+        "site_admin": "bool",
+        "starred_url": "str",
+        "subscriptions_url": "str",
+        "type": "str",
+        "url": "str",
+        "user_view_type": "str"
+      },
+      "permissions": {
+        "actions": "str",
+        "administration": "str",
+        "artifact_metadata": "str",
+        "attestations": "str",
+        "checks": "str",
+        "code_quality": "str",
+        "contents": "str",
+        "copilot_requests": "str",
+        "deployments": "str",
+        "discussions": "str",
+        "drives": "str",
+        "issues": "str",
+        "merge_queues": "str",
+        "metadata": "str",
+        "models": "str",
+        "packages": "str",
+        "pages": "str",
+        "pull_requests": "str",
+        "repository_hooks": "str",
+        "repository_projects": "str",
+        "security_events": "str",
+        "statuses": "str",
+        "vulnerability_alerts": "str"
+      },
+      "slug": "str",
+      "updated_at": "str"
+    },
+    "check_suite": {
+      "id": "int"
+    },
+    "completed_at": "str",
+    "conclusion": "str",
+    "details_url": "str",
+    "external_id": "str",
+    "head_sha": "str",
+    "html_url": "str",
+    "id": "int",
+    "name": "str",
+    "node_id": "str",
+    "output": {
+      "annotations_count": "int",
+      "annotations_url": "str",
+      "summary": "NoneType",
+      "text": "NoneType",
+      "title": "NoneType"
+    },
+    "pull_requests": [],
+    "started_at": "str",
+    "status": "str",
+    "url": "str"
+  },
+  "conclusions_seen": [
+    "skipped",
+    "success"
+  ],
+  "statuses_seen": [
+    "completed"
+  ]
+}
