@@ -199,12 +199,26 @@ def main(argv: list[str] | None = None) -> int:
 
     text = f"{title}\n{body}"
     token = ghrest.token_from_env()
-    if token and os.environ.get("GITHUB_REPOSITORY"):
-        problems += premature(
-            os.environ["GITHUB_REPOSITORY"],
-            token,
-            changerefs.links_in(text),
-            changerefs.closed_items_in(text),
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if token and repo:
+        try:
+            problems += premature(
+                repo, token, changerefs.links_in(text), changerefs.closed_items_in(text)
+            )
+        except NotRun as exc:
+            # Отказ чтения задачи — объявленный третий исход, а не трассировка:
+            # необработанное исключение отдаёт единицу, а единица здесь значит
+            # «изменение отвергнуто», то есть сломанный гейт читался бы как
+            # сработавший (039, 068).
+            print(f"проверка не отработала: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+    else:
+        # Пропуск объявляется, а не молчит — тем же приёмом, что у соседней
+        # `fresh()`: «проверено и чисто» и «не проверено» снаружи одинаковы (045).
+        print(
+            "полнота чек-листа не проверена: нет токена или репозитория — "
+            "преждевременное закрытие задачи этот заход не поймает",
+            file=sys.stderr,
         )
 
     if not changerefs.has_link(text):
