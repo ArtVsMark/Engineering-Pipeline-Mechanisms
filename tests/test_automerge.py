@@ -330,6 +330,115 @@ def test_the_candidate_branch_is_fetched_before_the_body_is_built(
     assert any("main" in " ".join(call) for call in fetched)
 
 
+# --- две записи одного имени -------------------------------------------------
+
+
+def test_two_runs_on_one_head_are_not_an_ambiguity() -> None:
+    """Два прогона `ci` на одной голове — штатное следствие двух событий.
+
+    Сводный гейт различает своё от чужого по номеру прогона; у очереди своего
+    прогона среди них нет. Замер: на первом живом заходе очередь отвергла
+    изменение с шестью зелёными именами, потому что каждое было представлено
+    дважды.
+    """
+    runs = [record("lint"), record("lint"), record("test"), record("test")]
+    assert sorted(run["name"] for run in module.worst_per_name(runs)) == ["lint", "test"]
+
+
+def test_the_worst_record_of_a_name_wins() -> None:
+    """Из двух записей имени берётся ХУДШАЯ, а не первая попавшаяся.
+
+    Взять любую значило бы иногда сливать красное: зелёная запись попадалась бы
+    первой. Ошибаться здесь можно только в сторону строгости (051).
+    """
+    kept = module.worst_per_name([record("test"), record("test", conclusion="failure")])
+    assert [run["conclusion"] for run in kept] == ["failure"]
+
+
+def test_a_live_record_beats_a_cancelled_one() -> None:
+    """Отменённая ниже любой живой: она гасится новым прогоном, а не ломает."""
+    kept = module.worst_per_name([record("lint", conclusion="cancelled"), record("lint")])
+    assert [run["conclusion"] for run in kept] == ["success"]
+
+
+def test_all_cancelled_stays_cancelled() -> None:
+    """Если живой записи у имени нет вовсе, отмена доезжает до вердикта."""
+    kept = module.worst_per_name(
+        [record("lint", conclusion="cancelled"), record("lint", conclusion="cancelled")]
+    )
+    assert [run["conclusion"] for run in kept] == ["cancelled"]
+
+
+def test_pending_beats_success_but_not_failure() -> None:
+    """Идущая запись важнее зелёной: имя ещё не досчитано, а не пройдено."""
+    pending = module.worst_per_name(
+        [record("test"), record("test", conclusion=None, status="in_progress")]
+    )
+    assert [run["status"] for run in pending] == ["in_progress"]
+    red = module.worst_per_name(
+        [
+            record("test", conclusion=None, status="in_progress"),
+            record("test", conclusion="failure"),
+        ]
+    )
+    assert [run["conclusion"] for run in red] == ["failure"]
+
+
+# --- здоровье общей ветки ----------------------------------------------------
+
+
+def test_a_change_only_check_skipped_on_main_is_not_a_red_branch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Пропуск на общей ветке — объявленное состояние, а не краснота.
+
+    Разметка, фрагмент журнала и авторство коммитов проверяются на изменении, а
+    не на `main`: джобы объявлены change-only условием и кладут туда запись
+    `skipped`. Считать её отказом значит объявить общую ветку красной ВСЕГДА —
+    очередь тогда не сдвинется ни разу. Замер: первый живой прогон шага 8
+    сообщил «общая ветка красна» по трём пропускам.
+    """
+    runs = [
+        record("lint"),
+        record("test"),
+        record("pipeline"),
+        record("pr-meta", conclusion="skipped"),
+        record("journal", conclusion="skipped"),
+        record("attribution", conclusion="skipped"),
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, key=None: iter(runs))
+    assert module.branch_health("o/r", "sha", "token") == []
+
+
+def test_a_real_failure_on_main_still_freezes_the_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Послабление про пропуск не глушит настоящую красноту (097).
+
+    Иначе заморозка перестала бы наступать вовсе, и лечение оказалось бы хуже
+    болезни: очередь двигала бы изменения на сломанное основание.
+    """
+    runs = [record("lint"), record("test", conclusion="failure"), record("pipeline")]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, key=None: iter(runs))
+    problems = module.branch_health("o/r", "sha", "token")
+    assert problems and any("test" in problem for problem in problems)
+
+
+def test_a_skipped_check_on_a_candidate_head_is_still_a_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """На голове ИЗМЕНЕНИЯ пропуск остаётся отказом (040).
+
+    Послабление сделано для общей ветки и только для неё: иначе выключение
+    шага снова стало бы способом обойти гейт.
+    """
+    runs = [record(name) for name in ("lint", "test", "journal", "attribution", "pipeline")]
+    runs.append(record("pr-meta", conclusion="skipped"))
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, key=None: iter(runs))
+    problems, _ = module.head_verdict("o/r", change(1, "automerge"), "token")
+    assert problems and any("пропущен" in problem for problem in problems)
+
+
 # --- вход механизма ----------------------------------------------------------
 
 
