@@ -21,13 +21,10 @@
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 import sys
 from typing import Final
 
 import journal
-import report
 
 FRAGMENT_RE: Final = journal.PATH_RE
 # Тронув только это, изменение журналу ничего не сообщает.
@@ -39,40 +36,15 @@ EXIT_REJECTED: Final = 1
 EXIT_BROKEN: Final = 2
 
 
-class NotRun(RuntimeError):
-    """Гейт не отработал: третий исход, а не «прошло»."""
-
-
-def run(args: list[str]) -> str:
-    """Зовёт git, обращая любой отказ в третий исход."""
-    try:
-        return subprocess.run(
-            args, capture_output=True, check=True, text=True, encoding="utf-8"
-        ).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
-        detail = getattr(exc, "stderr", "") or exc
-        raise NotRun(f"{' '.join(args)} → {report.cut(str(detail))}") from exc
+#: Отказ чтения дифа приходит из общего модуля: у гейта он остаётся третьим
+#: исходом, а разбор его — один на всех читателей.
+NotRun = journal.NotRun
 
 
 def numbered(path: str) -> bool:
     """Назван ли фрагмент номером задачи, а не смыслом записи."""
     match = journal.NAME_RE.match(path.rsplit("/", 1)[-1])
     return bool(match and journal.DIGITS_ONLY_RE.match(match.group("slug")))
-
-
-def changed_files(base: str) -> list[str]:
-    """Отдаёт файлы, тронутые изменением относительно общего предка с базой."""
-    merge_base = run(["git", "merge-base", base, "HEAD"]).strip()
-    if not merge_base:
-        raise NotRun(f"общий предок с «{base}» не найден")
-    out = run(["git", "diff", "--name-only", "-z", f"{merge_base}...HEAD"])
-    files = [name for name in out.split("\0") if name]
-    if not files:
-        raise NotRun(
-            f"относительно «{base}» изменений нет — гейту нечего проверять, "
-            "и это ошибка входа, а не «прошло» (075)"
-        )
-    return files
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,13 +56,11 @@ def main(argv: list[str] | None = None) -> int:
     # имел в виду зовущий, и молча переписывать его нельзя. Ровно на этом гейт
     # и упал в первом же прогоне на площадке — локально переменной нет, и
     # расхождение не воспроизводилось.
-    from_env = os.environ.get("GITHUB_BASE_REF")
-    default_base = f"origin/{from_env}" if from_env else "origin/main"
-    parser.add_argument("--base", default=default_base, help="ветка сравнения")
+    parser.add_argument("--base", default=journal.base_from_env(), help="ветка сравнения")
     args = parser.parse_args(argv)
 
     try:
-        files = changed_files(args.base)
+        files = journal.changed_files(args.base)
     except NotRun as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
