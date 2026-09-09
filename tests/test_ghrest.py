@@ -170,3 +170,19 @@ def test_no_mechanism_parses_the_label_config_itself(path: Path) -> None:
     assert "yaml.safe_load" not in text or path.name == "check_required_context.py", (
         f"{path.name} разбирает YAML состава сам"
     )
+
+
+def test_quote_escapes_the_slash_in_a_path_segment() -> None:
+    """Отрезок пути экранируется целиком, включая слэш.
+
+    Реальные метки проекта — `area/docs`, `difficulty/easy` — содержат слэш, и
+    без экранирования он уходит в адрес разделителем пути.
+
+    ЗАМЕР: площадка сегодня принимает ОБА вида — и `area/docs`, и `area%2Fdocs`
+    отвечают одной меткой. То есть поломки здесь не было, и закрепляется не
+    починка, а независимость от недокументированного поведения: разбор чужого
+    неэкранированного пути — не то, на чём стоит держать механизм.
+    """
+    assert transport.quote("area/docs") == "area%2Fdocs"
+    assert transport.quote("difficulty/easy") == "difficulty%2Feasy"
+    assert transport.quote("bug") == "bug"

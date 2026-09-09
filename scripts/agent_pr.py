@@ -89,6 +89,34 @@ def describe(branch: str, base: str) -> tuple[str, str]:
     return title, "\n".join(lines)
 
 
+def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_run: bool) -> None:
+    """Доставляет изменению зоны, выведенные из тронутых файлов.
+
+    ЗОНЫ СТАВИТ ТОТ, КТО ОТКРЫЛ. Метка — вход механизма (064), и гейт разметки
+    требует зону: изменение, открытое без неё, конвейер тут же отвергает за
+    собственную недоработку.
+
+    Ставятся ТОЛЬКО зоны: они выводятся из путей состава машинно, а род задачи
+    — суждение автора, и угадывать его нечем.
+
+    Вызывается и при создании, и когда изменение уже открыто: POST меток
+    добавляет, а не заменяет, поэтому повтор безвреден, а вот пропуск —
+    необратим.
+    """
+    zones = sorted(labels.zones_for(labels.load(), changed_files(branch, base)))
+    if not zones:
+        print(
+            "зоны не выведены: тронутое не покрыто путями состава — "
+            "разметку поставит человек, и гейт об этом скажет"
+        )
+        return
+    if dry_run:
+        print(f"проставил бы зоны: {', '.join(zones)}")
+        return
+    ghrest.request("POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": zones})
+    print(f"проставлены зоны: {', '.join(zones)}")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -128,6 +156,12 @@ def main(argv: list[str] | None = None) -> int:
         if existing:
             number = existing[0]["number"]
             print(f"изменение для ветки уже открыто: #{number} — второе не заводится")
+            # Зоны доставляются и здесь, а не только при создании. Иначе отказ
+            # на шаге разметки необратим: изменение уже открыто, следующий
+            # прогон уходит этой веткой и выходит с нулём, ни разу не
+            # попытавшись доставить метки, — а гейт разметки продолжает его
+            # отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
+            apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
             return EXIT_OK
 
         title, body = describe(args.branch, args.base)
@@ -143,23 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         number = created["number"]
         print(f"открыто изменение #{number}: {created['html_url']}")
-
-        # ЗОНЫ СТАВИТ ТОТ, КТО ОТКРЫЛ. Метка — вход механизма (064), и гейт
-        # разметки требует зону; изменение, открытое без неё, конвейер тут же
-        # отвергает за собственную недоработку. Ставятся только ЗОНЫ: они
-        # выводятся из тронутых файлов машинно, а род задачи — суждение автора,
-        # и угадывать его нечем.
-        zones = sorted(labels.zones_for(labels.load(), changed_files(args.branch, args.base)))
-        if zones:
-            ghrest.request(
-                "POST", f"repos/{args.repo}/issues/{number}/labels", token, {"labels": zones}
-            )
-            print(f"проставлены зоны: {', '.join(zones)}")
-        else:
-            print(
-                "зоны не выведены: тронутое не покрыто путями состава — "
-                "разметку поставит человек, и гейт об этом скажет"
-            )
+        apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
         print(
             "Проба, а не доверие (135): автор в общей ветке после слияния обязан\n"
             "стать человеком. Не стал — механизм неверен, и видно это сразу."
