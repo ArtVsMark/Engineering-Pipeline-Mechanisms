@@ -81,6 +81,11 @@ LABEL_HOLD: Final = "hold"
 LABEL_BLOCKER: Final = "blocker"
 LABEL_FIX_MAIN: Final = "fix-main"
 READ_LABELS: Final = (LABEL_AUTOMERGE, LABEL_HOLD, LABEL_BLOCKER, LABEL_FIX_MAIN)
+#: Приставка метки-СЛЕДА: какой источник очередь присвоила изменению. Очередь
+#: решает по вычисленному источнику, а не по этой метке — устаревшая увела бы
+#: слияние не туда, и поймать это было бы нечем. Метка отвечает человеку на
+#: списке изменений, без открытия лога.
+SOURCE_PREFIX: Final = "source/"
 
 ENV_TOKEN: Final = "MERGE_QUEUE_TOKEN"
 
@@ -185,12 +190,58 @@ def check_labels_declared() -> None:
     перестала бы находить кандидатов и выглядела бы как «сливать нечего».
     """
     declared = {item.name for item in labels.load()}
-    missing = [name for name in READ_LABELS if name not in declared]
+    # Метки-следы объявляются наравне со входами: гейт разметки отвергает
+    # изменение с меткой, которой нет в составе, — то есть очередь могла бы
+    # своей же меткой сделать изменение красным.
+    wanted = (*READ_LABELS, *(source_label(place) for place in RANK_NAMES))
+    missing = [name for name in wanted if name not in declared]
     if missing:
         raise NotRun(
             f"очередь читает метки, которых нет в составе: {', '.join(missing)} — "
             "вход механизма не найден, и это отказ, а не «кандидатов нет» (064, 075)"
         )
+
+
+def source_label(place: int) -> str:
+    """Имя метки-следа для номера источника."""
+    return f"{SOURCE_PREFIX}{place}"
+
+
+def publish_source(
+    repo: str, change: Change, place: int, owner_token: str, *, dry_run: bool
+) -> None:
+    """Выставляет изменению метку присвоенного источника — ровно одну.
+
+    ПИШЕТ ТОЛЬКО ПРИ РАСХОЖДЕНИИ. Заход идёт на каждое событие, и переставлять
+    метку каждый раз значило бы платить запросом за неизменившееся состояние
+    ([017](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/017-measure-quota-do-not-guess.md)).
+    Цена в худшем случае — два запроса на изменение, и только когда источник
+    действительно сменился.
+
+    ОТКАЗ РАЗМЕТКИ ЗАХОД НЕ РОНЯЕТ. Метка — след, а не вход: без неё очередь
+    работает ровно так же, а красное здесь говорило бы о разметке, а не о
+    слиянии (084).
+    """
+    wanted = source_label(place)
+    present = {mark for mark in change.marks if mark.startswith(SOURCE_PREFIX)}
+    if present == {wanted}:
+        return
+    if dry_run:
+        print(f"  (пробный заход) #{change.number}: метка стала бы «{wanted}»")
+        return
+    try:
+        for stale in sorted(present - {wanted}):
+            path = f"repos/{repo}/issues/{change.number}/labels/{ghrest.quote(stale)}"
+            ghrest.request("DELETE", path, owner_token)
+        if wanted not in present:
+            ghrest.request(
+                "POST",
+                f"repos/{repo}/issues/{change.number}/labels",
+                owner_token,
+                {"labels": [wanted]},
+            )
+    except ghrest.TransportError as exc:
+        print(f"  #{change.number}: метка источника не выставлена — {report.cut(str(exc))}")
 
 
 def token() -> str:
@@ -591,8 +642,9 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
 
     print(f"кандидатов: {len(queue)}")
     for place, change in enumerate(queue, start=1):
-        step = RANK_NAMES[rank(change)]
-        print(f"  {place}. #{change.number} [{step}] — {change.title}")
+        source = rank(change)
+        print(f"  {place}. #{change.number} [{RANK_NAMES[source]}] — {change.title}")
+        publish_source(repo, change, source, owner_token, dry_run=dry_run)
 
     for change in queue:
         problems, waiting = head_verdict(repo, change, owner_token)
@@ -617,6 +669,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 f"#{change.number} [{RANK_NAMES[RANK_CONFLICT]}]: штатный источник работы "
                 "(004), очередь идёт дальше"
             )
+            publish_source(repo, change, RANK_CONFLICT, owner_token, dry_run=dry_run)
             continue
         if state not in STATE_MERGEABLE:
             # Список разрешительный: незнакомое состояние — повод пропустить
