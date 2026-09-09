@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import changerefs
+import ghrest
 import labels
 
 ZONE_PREFIX: Final = labels.ZONE_PREFIX
@@ -55,6 +56,34 @@ def load_event() -> dict[str, Any]:
     return pull
 
 
+def fresh(pull: dict[str, Any], repo: str, token: str) -> dict[str, Any]:
+    """Отдаёт изменение, каким оно ЕСТЬ, а не каким было в снимке события.
+
+    Снимок события — это состояние на момент срабатывания, и на `opened` меток
+    в нём нет по построению: их проставляет шаг открытия, и делает это через
+    доли секунды ПОСЛЕ. Гейт, читающий снимок, выносит вердикт по прошлому:
+    замер 09.09 — изменение #38 отвергнуто за «ни одной зоны», когда все три
+    зоны на нём уже стояли.
+
+    Без токена или номера остаётся снимок — и это объявлено, а не подменено
+    тихо (045): вердикт по снимку возможен, просто он может отстать.
+    """
+    number = pull.get("number")
+    if not token or not repo or not number:
+        print(
+            "состояние изменения не перечитано: нет токена или номера — вердикт по снимку\n"
+            "события, и он может отставать от площадки",
+            file=sys.stderr,
+        )
+        return pull
+    try:
+        current = ghrest.request("GET", f"repos/{repo}/pulls/{int(number)}", token)
+    except ghrest.TransportError as exc:
+        print(f"состояние изменения не перечитано: {exc} — вердикт по снимку", file=sys.stderr)
+        return pull
+    return current if isinstance(current, dict) else pull
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -67,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     except (NotRun, labels.BadConfig) as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+
+    # Метки — вход механизма, и читать их надо у площадки, а не у снимка.
+    pull = fresh(pull, os.environ.get("GITHUB_REPOSITORY", ""), ghrest.token_from_env())
 
     on_pr = {str(label["name"]) for label in pull.get("labels", [])}
     body = pull.get("body") or ""
