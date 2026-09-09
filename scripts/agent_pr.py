@@ -231,12 +231,28 @@ def apply_consent(repo: str, number: int, token: str, marks: set[str], dry_run: 
     if dry_run:
         print(f"согласие {'сняло бы' if HOLD in marks else 'проставило бы'}: {CONSENT}")
         return
-    try:
-        if HOLD in marks:
-            path = f"repos/{repo}/issues/{number}/labels/{ghrest.quote(CONSENT)}"
+    if HOLD in marks:
+        # Снимать нечего — обычное состояние повторного захода, а не отказ.
+        # Толчков в ветку с висящей стоп-меткой бывает много, и каждый звал
+        # DELETE по уже снятой метке: площадка отвечала 404, а механизм
+        # печатал «согласие не проставлено» — то есть жаловался на исправно
+        # работающую отмену (045).
+        if CONSENT not in marks:
+            print(f"согласия нет и не будет: стоит стоп-метка «{HOLD}»")
+            return
+        path = f"repos/{repo}/issues/{number}/labels/{ghrest.quote(CONSENT)}"
+        try:
             ghrest.request("DELETE", path, token)
             print(f"снято согласие «{CONSENT}»: стоит стоп-метка «{HOLD}»")
-            return
+        except ghrest.NotFound:
+            # Гонка со вторым заходом или с рукой человека: метки уже нет, и
+            # это тот же успех, только достигнутый не нами.
+            print(f"согласия уже нет: стоп-метка «{HOLD}» на месте")
+        except ghrest.TransportError as exc:
+            print(f"согласие не снято: {exc} — стоп-метка держит очередь и без этого")
+        return
+
+    try:
         ghrest.request("POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": [CONSENT]})
         print(f"проставлено согласие: {CONSENT}")
     except ghrest.TransportError as exc:

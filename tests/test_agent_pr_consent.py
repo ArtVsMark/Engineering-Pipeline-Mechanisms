@@ -72,3 +72,48 @@ def test_a_dry_run_touches_nothing(platform: list[tuple[str, str, Any]]) -> None
     module.apply_consent("о/р", 7, "токен", set(), dry_run=True)
     module.apply_consent("о/р", 7, "токен", {module.HOLD}, dry_run=True)
     assert platform == []
+
+
+def test_nothing_to_remove_is_not_a_refusal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Согласия нет и стоп-метка на месте — обычное состояние повторного захода.
+
+    Толчков в ветку с висящей стоп-меткой бывает много, и каждый звал снятие
+    уже снятой метки: площадка отвечала отказом, а механизм жаловался на
+    исправно работающую отмену (045).
+    """
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("снимать нечего — площадку звать незачем")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.apply_consent("о/р", 7, "токен", {module.HOLD}, dry_run=False)
+    assert "не будет" in capsys.readouterr().out
+
+
+def test_a_lost_race_is_the_same_success(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Метку сняли раньше нас — тот же успех, достигнутый не нами."""
+
+    def gone(*args: object, **kwargs: object) -> None:
+        raise module.ghrest.NotFound("404")
+
+    monkeypatch.setattr(module.ghrest, "request", gone)
+    module.apply_consent("о/р", 7, "токен", {module.HOLD, module.CONSENT}, dry_run=False)
+    printed = capsys.readouterr().out
+    assert "уже нет" in printed and "не снято" not in printed
+
+
+def test_a_real_refusal_on_removal_is_named(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Настоящий отказ транспорта называется отказом, а не «уже снято» (045)."""
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.apply_consent("о/р", 7, "токен", {module.HOLD, module.CONSENT}, dry_run=False)
+    assert "не снято" in capsys.readouterr().out

@@ -28,7 +28,7 @@
 КОНФЛИКТ — ШТАТНАЯ СИТУАЦИЯ, А НЕ АВАРИЯ
 ([004](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/004-conflict-is-normal-not-outage.md)).
 Конфликтная голова пропускается, очередь идёт дальше, и изменение возвращается
-в контур 1 источником 2. Ничего не замораживается и никто не будится: авария
+в контур 1 источником 1. Ничего не замораживается и никто не будится: авария
 здесь только у того, кто считает конфликт аварией.
 
 ЗАМОРОЗКА — СЛИЯНИЯ, А НЕ РАБОТЫ. Красная общая ветка останавливает очередь
@@ -144,6 +144,10 @@ STATE_MERGEABLE: Final = frozenset({"clean", "unstable", "has_hooks"})
 #: Незакрытый пункт чек-листа задачи. Отмечается ровно он: уже отмеченный
 #: остаётся отмеченным, и повторный заход ничего не портит.
 CHECKLIST_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(?P<text>\S.*?)\s*$")
+#: Уже отмеченный пункт. Нужен отдельно: «отметил» и «был отмечен» дают
+#: одинаковое тело задачи, а значат разное, и без второго образца повтор
+#: объявлялся бы ненайденным пунктом.
+DONE_ITEM_RE: Final = re.compile(r"^\s*[-*]\s*\[[xX]\]\s*(?P<text>\S.*?)\s*$")
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -518,8 +522,14 @@ def merge(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> str:
     return str((payload or {}).get("sha", ""))
 
 
-def marked(body: str, item: str) -> str:
-    """Отмечает один пункт чек-листа сделанным, если он там есть.
+def marked(body: str, item: str) -> tuple[str, bool]:
+    """Отмечает пункт сделанным; вторым отдаёт, НАШЁЛСЯ ли он вообще.
+
+    Два ответа вместо одного, и разница не косметическая. «Пункт отмечен этим
+    заходом» и «пункт был отмечен раньше» дают одинаковое тело задачи, а
+    значат разное: первое — работа, второе — повтор. Пока их различало
+    сравнение тел, уже отмеченный пункт объявлялся ненайденным — то есть
+    механизм звал на помощь там, где всё было в порядке (045).
 
     Пункт узнаётся по ТЕКСТУ, приведённому к сравнимому виду: номер строки
     сдвигается от любой правки тела задачи, и отметка уехала бы на соседний
@@ -528,11 +538,14 @@ def marked(body: str, item: str) -> str:
     wanted = changerefs.normalise(item)
     lines = body.splitlines()
     for place, line in enumerate(lines):
-        found = CHECKLIST_RE.match(line)
-        if found and changerefs.normalise(found.group("text")) == wanted:
+        open_item = CHECKLIST_RE.match(line)
+        if open_item and changerefs.normalise(open_item.group("text")) == wanted:
             lines[place] = line.replace("[ ]", "[x]", 1)
-            return "\n".join(lines)
-    return body
+            return "\n".join(lines), True
+        done_item = DONE_ITEM_RE.match(line)
+        if done_item and changerefs.normalise(done_item.group("text")) == wanted:
+            return body, True
+    return body, False
 
 
 def mark_closed_items(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> None:
@@ -565,16 +578,24 @@ def mark_closed_items(repo: str, change: Change, owner_token: str, *, dry_run: b
             issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", owner_token) or {}
             body = str(issue.get("body") or "")
             updated = body
+            here: list[str] = []
             for item in list(left):
-                after = marked(updated, item)
-                if after != updated:
+                after, found = marked(updated, item)
+                if found:
                     updated = after
-                    left.remove(item)
+                    here.append(item)
             if updated != body:
                 ghrest.request(
                     "PATCH", f"repos/{repo}/issues/{number}", owner_token, {"body": updated}
                 )
-                print(f"  отмечено в #{number}: {len(items) - len(left)} из {len(items)}")
+            # Из счёта пункт уходит ТОЛЬКО после удавшейся записи. Убрать его
+            # раньше значило бы объявить обработанным то, что не записалось:
+            # отказ на одной из нескольких задач тихо съел бы пункт, и он не
+            # попал бы ни в отметку, ни в список ненайденных.
+            for item in here:
+                left.remove(item)
+            if here:
+                print(f"  #{number}: пунктов на месте {len(here)} из {len(items)}")
         except ghrest.TransportError as exc:
             print(f"  пункты в #{number} не отмечены: {report.cut(str(exc))}")
     for item in left:
@@ -587,7 +608,11 @@ def report_held(changes: list[Change]) -> None:
     Полного адресата у забытого ``hold`` пока нет — им станет шаг 11, — и это
     названо пробелом в AGENTS.md, а не выровнено молчанием (046, 147).
     """
-    held = [change for change in changes if change.held and LABEL_AUTOMERGE in change.marks]
+    # Согласия у остановленного НЕТ и быть не должно: шаг открытия его снимает,
+    # увидев стоп-метку. Требовать его здесь значило бы показывать остановленное
+    # ровно до того мгновения, когда отмена сработала, — и терять из виду
+    # именно то, ради чего отчёт заведён.
+    held = [change for change in changes if change.held]
     if not held:
         return
     print(f"остановлено меткой «{LABEL_HOLD}»: {len(held)}")

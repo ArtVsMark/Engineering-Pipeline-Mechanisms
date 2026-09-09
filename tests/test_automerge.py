@@ -735,3 +735,58 @@ def test_every_source_label_is_declared_in_the_config() -> None:
     есть очередь могла бы своей же меткой сделать изменение красным (068).
     """
     module.check_labels_declared()
+
+
+def test_an_already_done_item_is_not_called_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Уже отмеченный пункт — повтор, а не пропажа.
+
+    «Отметил» и «был отмечен» дают одинаковое тело задачи, а значат разное.
+    Пока их различало сравнение тел, механизм звал на помощь там, где всё было
+    в порядке (045).
+    """
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda method, path, tok, body=None: {"body": "- [x] второй этап\n"},
+    )
+    item = change(1, "automerge", body="Refs #25\nЗакрывает пункт: второй этап")
+    module.mark_closed_items("o/r", item, "token", dry_run=False)
+    assert "пункт не найден" not in capsys.readouterr().out
+
+
+def test_a_failed_write_keeps_the_item_in_the_count(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пункт уходит из счёта только после удавшейся записи.
+
+    Убрать его раньше значило бы объявить обработанным то, что не записалось:
+    отказ на одной из нескольких задач тихо съел бы пункт, и он не попал бы ни
+    в отметку, ни в список ненайденных.
+    """
+
+    def platform(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET":
+            return {"body": "- [ ] этап\n"}
+        raise module.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    item = change(1, "automerge", body="Refs #25\nЗакрывает пункт: этап")
+    module.mark_closed_items("o/r", item, "token", dry_run=False)
+    printed = capsys.readouterr().out
+    assert "не отмечены" in printed
+    assert "пункт не найден" in printed, "пункт исчез из счёта, хотя запись не удалась"
+
+
+def test_a_held_change_is_reported_after_the_consent_is_gone(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Остановленное видно и после того, как согласие с него снято.
+
+    Шаг открытия снимает согласие, увидев стоп-метку. Требовать его в отчёте
+    значило бы показывать остановленное ровно до мгновения, когда отмена
+    сработала, — и терять из виду то, ради чего отчёт заведён.
+    """
+    module.report_held([change(7, "hold")])
+    assert "#7" in capsys.readouterr().out

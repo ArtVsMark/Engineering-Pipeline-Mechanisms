@@ -25,7 +25,7 @@
     "004": {
       "status": "active",
       "mechanism": "gate",
-      "where": "scripts/automerge.py — конфликтная голова ПРОПУСКАЕТСЯ, очередь идёт дальше и ничего не замораживает: изменение возвращается в контур 1 источником 2 (docs/behaviour.md). Держит tests/test_automerge.py::test_a_conflict_is_stepped_over_not_escalated. Тот же приём у сводного гейта: scripts/ci_complete.py не роняет опрос на красной совещательной, а помечает её и выносит вердикт по обязательным"
+      "where": "scripts/automerge.py — конфликтная голова ПРОПУСКАЕТСЯ, очередь идёт дальше и ничего не замораживает: изменение возвращается в контур 1 источником 1 (docs/behaviour.md). Держит tests/test_automerge.py::test_a_conflict_is_stepped_over_not_escalated. Тот же приём у сводного гейта: scripts/ci_complete.py не роняет опрос на красной совещательной, а помечает её и выносит вердикт по обязательным"
     },
     "005": {
       "status": "active",
