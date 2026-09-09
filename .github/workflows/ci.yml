@@ -155,6 +155,19 @@ jobs:
           range: origin/${{ github.event.pull_request.base.ref || 'main' }}..HEAD
           catalogue-ref: v1.2.0
 
+  pipeline:
+    name: pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - name: ответ по классам проверок полон и сходится с деревом
+        run: python scripts/check_pipeline.py
+
   ci-complete:
     # ЕДИНСТВЕННЫЙ ОБЯЗАТЕЛЬНЫЙ КОНТЕКСТ. Имя джоба и есть имя контекста,
     # поэтому `name:` совпадает с идентификатором намеренно: расхождение между
@@ -168,12 +181,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: python -m pip install --quiet "pyyaml>=6,<7"
       - name: опросить проверки на голове
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        # НАПОЛНЕНИЕ ОПРОСА ПРИХОДИТ ИЗ ДАННЫХ, А НЕ ИЗ ЭТОГО ФАЙЛА. Класс
+        # каждой проверки объявлен в `.pipeline.yml`: обязательная держит
+        # слияние, совещательная нет. Список именами здесь означал бы, что
+        # класс проверки — свойство механизма, а он свойство проекта (174).
         run: |
           python scripts/ci_complete.py \
-            --required "lint,test,pr-meta,journal,attribution" \
+            --policy .pipeline.yml \
             --self-name "ci-complete"

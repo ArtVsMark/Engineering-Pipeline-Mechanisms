@@ -33,7 +33,12 @@ def load_gates() -> dict[Any, Any]:
 
 def contract_jobs() -> set[str]:
     """Вынимает имена джобов из таблицы шагов договора."""
-    rows = re.findall(r"^\|\s*\d+\s*\|.*$", CONTRACT.read_text(encoding="utf-8"), re.MULTILINE)
+    # Номер шага бывает с буквой: `6a`, `12a` — подшаг того же шага скелета.
+    # Без буквы в образце подшаг молча выпадал бы из сверки, и джоб, которого
+    # нет в договоре, считался бы описанным.
+    rows = re.findall(
+        r"^\|\s*\d+[a-z]?\s*\|.*$", CONTRACT.read_text(encoding="utf-8"), re.MULTILINE
+    )
     assert rows, "в договоре не нашлось таблицы шагов — предмет сверки отсутствует"
     jobs: set[str] = set()
     for row in rows:
@@ -65,14 +70,29 @@ def test_summary_is_not_a_matrix() -> None:
     assert "strategy" not in load_gates()["jobs"][SUMMARY]
 
 
-def test_summary_polls_every_other_job() -> None:
-    """Сводный опрашивает все остальные джобы, а не подмножество."""
-    gates = load_gates()
-    step = gates["jobs"][SUMMARY]["steps"][-1]["run"]
-    required = re.search(r'--required "([^"]+)"', step)
-    assert required, "сводный джоб не называет, что опрашивает"
-    polled = {name.strip() for name in required.group(1).split(",")}
-    assert polled == set(gates["jobs"]) - {SUMMARY}
+def test_summary_takes_its_subject_from_data() -> None:
+    """Наполнение опроса приходит из данных проекта, а не из файла прогона.
+
+    Список именами, вписанный в прогон, делает класс проверки свойством
+    механизма. Он свойство проекта: у одного `e2e` обязателен, у другого
+    невозможен, и подключение к общему конвейеру не должно требовать правки
+    workflow.
+    """
+    step = load_gates()["jobs"][SUMMARY]["steps"][-1]["run"]
+    assert "--policy" in step, "сводный джоб не называет, откуда берёт наполнение"
+    assert "--required" not in step, "список именами в прогоне — это класс проверки в механизме"
+
+
+def test_every_job_of_the_tree_is_answered() -> None:
+    """По каждому джобу дерева есть ответ, а не только по обязательным."""
+    checks = yaml.safe_load((ROOT / ".pipeline.yml").read_text(encoding="utf-8"))["checks"]
+    assert set(load_gates()["jobs"]) - {SUMMARY} <= set(checks)
+
+
+def test_summary_does_not_answer_for_itself() -> None:
+    """Сводный гейт в ответе не объявляется: его класс задан построением."""
+    checks = yaml.safe_load((ROOT / ".pipeline.yml").read_text(encoding="utf-8"))["checks"]
+    assert SUMMARY not in checks
 
 
 def test_label_events_reach_the_gates() -> None:

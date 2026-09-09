@@ -16,7 +16,7 @@ import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Final
 
 import pytest
 
@@ -155,6 +155,16 @@ def test_no_mechanism_builds_its_own_authorization(path: Path) -> None:
     assert "Authorization" not in text, f"{path.name} собирает заголовок токена сам"
 
 
+#: Кому положено разбирать YAML самому — и почему. Список РАЗРЕШЁННОГО, а не
+#: запрещённого (068): предмет у каждого свой, и ни у одного это не состав
+#: меток. Новое имя добавляется сюда осознанно, вместе с причиной, — иначе
+#: гейт превращается в «кто первым сломался, тот и исключение».
+YAML_READERS: Final = {
+    "check_required_context.py": "джобы прогона, чтобы сверить имя обязательного контекста",
+    "pipeline_checks.py": "ответ проекта по классам проверок и джобы прогонов",
+}
+
+
 @pytest.mark.parametrize(
     "path",
     sorted(p for p in SCRIPTS.glob("*.py") if p.name not in {"labels.py", "ghrest.py"}),
@@ -172,8 +182,9 @@ def test_no_mechanism_parses_the_label_config_itself(path: Path) -> None:
     assert "labels.yml" not in text or "labels.load" in text or "import labels" in text, (
         f"{path.name} обращается к составу меток мимо общего модуля"
     )
-    assert "yaml.safe_load" not in text or path.name == "check_required_context.py", (
-        f"{path.name} разбирает YAML состава сам"
+    assert "yaml.safe_load" not in text or path.name in YAML_READERS, (
+        f"{path.name} разбирает YAML сам, а его нет среди тех, кому это положено: "
+        f"{', '.join(sorted(YAML_READERS))}"
     )
 
 

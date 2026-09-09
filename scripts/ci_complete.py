@@ -19,6 +19,16 @@
   отказ, иначе выключение шага становится способом обойти гейт;
 * джоб **отменён**: отменённая запись не является пройденной.
 
+Опрашиваются не все проверки подряд, а **обязательные**: класс каждой объявлен
+данными в `.pipeline.yml` и читается модулем ``pipeline_checks``. Совещательные
+опрашиваются тоже, но слияния не держат — их красное печатается отдельно и
+уходит адресату, переживающему слияние (142). Выключенные и неразобранные не
+опрашиваются вовсе.
+
+Класс — свойство потребителя: у одного проекта `e2e` обязателен, у другого
+невозможен. Поэтому список обязательных здесь не зашит, а приходит из данных
+проекта.
+
 Исходы (правило 039): ``0`` все зелёные · ``1`` есть незелёные или отсутствующие
 · ``2`` опрос не отработал.
 """
@@ -29,9 +39,11 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Final
 
 import ghrest
+import pipeline_checks as policy
 
 PENDING: Final = frozenset({"queued", "in_progress", "waiting", "pending", "requested"})
 
@@ -62,9 +74,20 @@ def belongs_to(run: dict[str, Any], run_id: str) -> bool:
 
 
 def verdict(
-    runs: list[dict[str, Any]], required: list[str], selfname: str, run_id: str = ""
+    runs: list[dict[str, Any]],
+    required: list[str],
+    selfname: str,
+    run_id: str = "",
+    *,
+    strict_missing: bool = True,
 ) -> tuple[list[str], bool]:
-    """Выносит вердикт по объявленным именам; вторым отдаёт «ещё идут»."""
+    """Выносит вердикт по объявленным именам; вторым отдаёт «ещё идут».
+
+    ``strict_missing`` разводит два класса. У обязательной проверки отсутствие
+    записи — отказ: пустой список означает «прогон не стартовал», а не «зелено»
+    (075). У совещательной оно законно: она могла не идти на этой голове вовсе,
+    и краснеть на этом значило бы сделать её обязательной обходным путём.
+    """
     problems: list[str] = []
     waiting = False
 
@@ -85,7 +108,10 @@ def verdict(
             mine = [run for run in found if belongs_to(run, run_id)]
             found = mine or found
         if not found:
-            problems.append(f"{name}: записи нет на голове — прогон не стартовал, а не «зелено»")
+            if strict_missing:
+                problems.append(
+                    f"{name}: записи нет на голове — прогон не стартовал, а не «зелено»"
+                )
             continue
 
         # Отменённые записи отбрасываются, ЕСЛИ у имени есть неотменённая.
@@ -123,12 +149,36 @@ def verdict(
     return problems, waiting
 
 
+def sources(policy_path: str, required_raw: str) -> tuple[list[str], list[str]]:
+    """Отдаёт обязательные и совещательные имена из ЕДИНСТВЕННОГО источника.
+
+    Источник ровно один: либо ответ проекта по классам проверок, либо явный
+    список именами. Два списка одного и того же расходятся молча (022), поэтому
+    оба ключа разом — ошибка входа, а не «возьмём тот, что подробнее».
+    """
+    if policy_path and required_raw:
+        raise NotRun(
+            "наполнение объявлено дважды: --policy и --required. "
+            "Источник обязан быть один, иначе списки разойдутся молча (022)"
+        )
+    if policy_path:
+        try:
+            checks = policy.load(Path(policy_path))
+        except policy.BadPolicy as exc:
+            raise NotRun(str(exc)) from exc
+        return policy.names_of(checks, policy.REQUIRED), policy.names_of(checks, policy.ADVISORY)
+
+    names = [name.strip() for name in required_raw.split(",") if name.strip()]
+    return names, []
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: опрашивает голову до вердикта и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--sha", default=os.environ.get("HEAD_SHA", ""))
-    parser.add_argument("--required", required=True, help="имена джобов через запятую")
+    parser.add_argument("--policy", default="", help="ответ проекта по классам проверок")
+    parser.add_argument("--required", default="", help="имена джобов через запятую")
     parser.add_argument("--self-name", default="ci-complete", help="собственное имя, себя не ждём")
     parser.add_argument(
         "--run-id",
@@ -146,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.repo or not args.sha:
             raise NotRun("не названы репозиторий или голова изменения")
 
-        required = [name.strip() for name in args.required.split(",") if name.strip()]
+        required, advisory = sources(args.policy, args.required)
         if not required:
             raise NotRun("список обязательных имён пуст — предмет опроса не найден (075)")
 
@@ -159,6 +209,11 @@ def main(argv: list[str] | None = None) -> int:
                     "это ошибка входа, а не «зелено» (075)"
                 )
             problems, waiting = verdict(runs, required, args.self_name, args.run_id)
+            # Совещательные опрашиваются, но их не ЖДУТ: слияния они не держат,
+            # и ожидание сделало бы их обязательными обходным путём.
+            advisory_problems, _ = verdict(
+                runs, advisory, args.self_name, args.run_id, strict_missing=False
+            )
             if not waiting:
                 break
             if time.monotonic() >= deadline:
@@ -169,6 +224,15 @@ def main(argv: list[str] | None = None) -> int:
     except (NotRun, ghrest.TransportError) as exc:
         print(f"опрос не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+
+    if advisory_problems:
+        print(f"совещательные ({len(advisory_problems)}) — слияния не держат, но не молчат:")
+        for problem in advisory_problems:
+            print(f"  {problem}")
+        # Обход назван, а не обойдён молча (154): адресат у совещательного
+        # красного обязателен, и механизм для него уже есть — review_findings.
+        # Подключение — второй этап #27, до него запись живёт в этом выводе.
+        print("  адресат, переживающий слияние, подключается вторым этапом #27")
 
     if problems:
         print(f"красно ({len(problems)}):")
