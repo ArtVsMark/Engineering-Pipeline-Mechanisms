@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +37,16 @@ API_ROOT: Final = "https://api.github.com"
 API_VERSION: Final = "2022-11-28"
 TIMEOUT: Final = 30
 PER_PAGE: Final = 100
+
+#: Останавливаться надо ДО нуля: на нуле операция уже брошена на середине, а
+#: счётчик обращений продолжает расти. Значение — порог соседа, выведенный из
+#: цены его самых дорогих операций; у нас запросы дешевле, но запас тот же.
+QUOTA_FLOOR: Final = 600
+ENV_QUOTA_FLOOR: Final = "GHREST_QUOTA_FLOOR"
+
+#: Предупреждение печатается один раз на процесс: смысл в сигнале, а не в шуме
+#: на каждый запрос пакетной операции.
+_warned: set[str] = set()
 
 
 class TransportError(RuntimeError):
@@ -53,6 +65,38 @@ class NotFound(TransportError):
     """
 
 
+class RateLimited(TransportError):
+    """Квота исчерпана: повторять бессмысленно, надо ждать сброса.
+
+    Отдельный род, а не текст отказа: это единственное состояние, в котором
+    верный ответ — «подожди», а не «почини». Смешивать его с отказом по правам
+    значит советовать чинить то, что чинится временем.
+
+    Замер соседа, из-за которого это выделено: ``used=10 435`` при лимите 5000 —
+    окна обращались и после нуля, а счётчик рос, отдаляя сброс.
+    """
+
+    def __init__(self, message: str, *, reset_at: int = 0, resource: str = "core") -> None:
+        super().__init__(message)
+        self.reset_at = reset_at
+        self.resource = resource
+
+    def wait_seconds(self, *, now: float | None = None) -> int:
+        """Сколько секунд осталось до сброса квоты (0 — уже можно)."""
+        moment = time.time() if now is None else now
+        return max(0, int(self.reset_at - moment))
+
+    def describe(self, *, now: float | None = None) -> str:
+        """Человеческая строка: что исчерпано и когда отпустит."""
+        seconds = self.wait_seconds(now=now)
+        when = time.strftime("%H:%M:%S", time.localtime(self.reset_at)) if self.reset_at else "?"
+        return (
+            f"квота площадки ({self.resource}) исчерпана — сброс в {when}, "
+            f"через {seconds // 60} мин {seconds % 60} с. Ждать, а не повторять: "
+            "счётчик обращений растёт и после нуля"
+        )
+
+
 def token_from_env() -> str:
     """Токен из окружения прогона; пусто — если его нет."""
     return os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
@@ -63,6 +107,46 @@ def _url(path: str) -> str:
     if path.startswith(("http://", "https://")):
         return path
     return f"{API_ROOT}/{path.lstrip('/')}"
+
+
+def quota_floor() -> int:
+    """Порог остатка, ниже которого длинную операцию начинать нечего."""
+    raw = os.environ.get(ENV_QUOTA_FLOOR, "")
+    try:
+        return int(raw) if raw else QUOTA_FLOOR
+    except ValueError:
+        return QUOTA_FLOOR
+
+
+def _quota_from(headers: Any) -> tuple[int | None, int, str]:
+    """Остаток, время сброса и ресурс — из заголовков ответа (бесплатно)."""
+    if headers is None:
+        return None, 0, "core"
+
+    def number(name: str) -> int:
+        try:
+            return int(headers.get(name) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    raw = headers.get("x-ratelimit-remaining")
+    remaining = None if raw is None else number("x-ratelimit-remaining")
+    return remaining, number("x-ratelimit-reset"), headers.get("x-ratelimit-resource") or "core"
+
+
+def _note_quota(headers: Any) -> None:
+    """Предупреждает о низком остатке — один раз на ресурс за процесс."""
+    remaining, reset, resource = _quota_from(headers)
+    if remaining is None or remaining > quota_floor() or resource in _warned:
+        return
+    _warned.add(resource)
+    when = time.strftime("%H:%M:%S", time.localtime(reset)) if reset else "?"
+    print(
+        f"ВНИМАНИЕ: квота площадки ({resource}) на исходе — осталось {remaining} "
+        f"при пороге {quota_floor()}, сброс в {when}. Длинную операцию лучше не "
+        "начинать: брошенная на середине дороже отложенной.",
+        file=sys.stderr,
+    )
 
 
 def request(
@@ -87,10 +171,28 @@ def request(
 
     try:
         with urllib.request.urlopen(prepared, timeout=TIMEOUT) as response:
+            _note_quota(response.headers)
             payload = response.read()
             return json.loads(payload) if payload else None
     except urllib.error.HTTPError as exc:
+        # Тело читается ОДИН раз и ДО разбора: поток одноразовый, а именно в нём
+        # приходит настоящая причина отказа.
         detail = exc.read().decode(errors="replace")[:300]
+        remaining, reset, resource = _quota_from(exc.headers)
+        retry_after = exc.headers.get("retry-after") if exc.headers else None
+        # Квота — ТОЛЬКО когда площадка о ней сказала: остаток равен нулю либо
+        # пришёл retry-after. Отсутствие заголовков означает «причина другая», и
+        # советовать ждать сброса там, где ждать нечего, хуже, чем молчать.
+        if exc.code in (403, 429) and (remaining == 0 or retry_after):
+            reset_at = reset
+            if not reset_at and retry_after:
+                try:
+                    reset_at = int(time.time()) + int(retry_after)
+                except (TypeError, ValueError):
+                    reset_at = 0
+            raise RateLimited(
+                f"{method} {path} → лимит исчерпан", reset_at=reset_at, resource=resource
+            ) from exc
         if exc.code == 404:
             raise NotFound(f"{method} {path} → 404: {detail}") from exc
         if exc.code in (401, 403):

@@ -12,9 +12,11 @@ from __future__ import annotations
 import ast
 import json
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -29,11 +31,14 @@ class Fake(BaseHTTPRequestHandler):
 
     code = 200
     payload: bytes = b"[]"
+    extra: ClassVar[dict[str, str]] = {}
 
     def do_GET(self) -> None:
         self.send_response(self.code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(self.payload)))
+        for name, value in self.extra.items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(self.payload)
 
@@ -41,9 +46,9 @@ class Fake(BaseHTTPRequestHandler):
         """Молчит: вывод сервера не нужен в отчёте теста."""
 
 
-def serve(code: int, payload: bytes) -> Iterator[str]:
+def serve(code: int, payload: bytes, extra: dict[str, str] | None = None) -> Iterator[str]:
     """Поднимает сервер с заданным ответом и отдаёт его адрес."""
-    handler = type("Once", (Fake,), {"code": code, "payload": payload})
+    handler = type("Once", (Fake,), {"code": code, "payload": payload, "extra": extra or {}})
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -186,3 +191,59 @@ def test_quote_escapes_the_slash_in_a_path_segment() -> None:
     assert transport.quote("area/docs") == "area%2Fdocs"
     assert transport.quote("difficulty/easy") == "difficulty%2Feasy"
     assert transport.quote("bug") == "bug"
+
+
+# --- квота -------------------------------------------------------------------
+
+
+def test_exhausted_quota_is_its_own_kind() -> None:
+    """Исчерпанная квота — отдельный род отказа, а не «почини права».
+
+    Это единственное состояние, в котором верный ответ «подожди»: счётчик
+    обращений растёт и после нуля, поэтому повтор только отдаляет сброс.
+    """
+    reset = int(time.time()) + 120
+    headers = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": str(reset)}
+    url = next(gen := serve(403, b'{"message":"rate limit"}', headers))
+    try:
+        with pytest.raises(transport.RateLimited) as caught:
+            transport.request("GET", url, "t")
+        assert caught.value.wait_seconds() > 0
+        assert "ждать" in caught.value.describe().lower()
+    finally:
+        next(gen, None)
+
+
+def test_forbidden_without_quota_headers_is_not_rate_limit() -> None:
+    """403 без заголовков квоты — «причина другая», а не исчерпанный лимит.
+
+    Советовать ждать сброса там, где ждать нечего, хуже, чем не советовать
+    ничего: настоящая причина (обычно права токена) при этом теряется.
+    """
+    url = next(gen := serve(403, b'{"message":"Resource not accessible"}'))
+    try:
+        with pytest.raises(transport.TransportError) as caught:
+            transport.request("GET", url, "t")
+        assert not isinstance(caught.value, transport.RateLimited)
+        assert "токен задан" in str(caught.value)
+    finally:
+        next(gen, None)
+
+
+def test_retry_after_alone_is_enough_for_rate_limit() -> None:
+    """`retry-after` без счётчика остатка — тоже сказанная площадкой квота."""
+    url = next(gen := serve(429, b"{}", {"retry-after": "30"}))
+    try:
+        with pytest.raises(transport.RateLimited) as caught:
+            transport.request("GET", url, "t")
+        assert 0 < caught.value.wait_seconds() <= 30
+    finally:
+        next(gen, None)
+
+
+def test_quota_floor_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Порог настраивается окружением, а битое значение не роняет запрос."""
+    monkeypatch.setenv(transport.ENV_QUOTA_FLOOR, "42")
+    assert transport.quota_floor() == 42
+    monkeypatch.setenv(transport.ENV_QUOTA_FLOOR, "не число")
+    assert transport.quota_floor() == transport.QUOTA_FLOOR
