@@ -802,7 +802,10 @@ def test_an_item_closed_by_this_change_does_not_count(monkeypatch: pytest.Monkey
     )
     text = "Closes #7\nЗакрывает пункт: второй"
     problems = check.premature(
-        "о/р", "токен", check.changerefs.links_in(text), check.changerefs.closed_items_in(text)
+        "о/р",
+        "токен",
+        check.changerefs.links_in(text),
+        [check.changerefs.normalise(item) for item in check.changerefs.closed_items_in(text)],
     )
     assert problems == []
 
