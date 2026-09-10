@@ -160,13 +160,10 @@ def render_body(entries: dict[str, findings.Entry]) -> str:
 live_issue = findings.live_issue
 
 
-def resolved_marks(repo: str, token: str, limit: int = 30) -> set[str]:
+def resolved_marks(repo: str, token: str, limit: int = ghrest.MERGED_WINDOW) -> set[str]:
     """Отпечатки, названные разобранными в последних слитых изменениях."""
     marks: set[str] = set()
-    items = ghrest.request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
-    for item in items:
-        if not item.get("merged_at"):
-            continue
+    for item in ghrest.merged_changes(repo, token, limit):
         marks.update(changerefs.resolved_in(item.get("body") or ""))
     return marks
 

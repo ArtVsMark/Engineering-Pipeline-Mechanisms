@@ -233,6 +233,25 @@ def paginate(path: str, token: str, key: str | None = None) -> Iterator[dict[str
         page += 1
 
 
+#: Сколько последних закрытых изменений спрашивается за раз. Окно — не история:
+#: механизмы, которые смотрят «что недавно слито», догоняют пропущенное событие,
+#: а не переобходят прошлое. Значение одно на всех: разъехавшиеся окна означали
+#: бы, что три механизма по-разному понимают слово «недавно»
+#: ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+MERGED_WINDOW: Final = 30
+
+
+def merged_changes(repo: str, token: str, limit: int = MERGED_WINDOW) -> list[dict[str, Any]]:
+    """Последние СЛИТЫЕ изменения: закрытые без слияния сюда не попадают.
+
+    Копий этого запроса было три — у реестра непросмотренного, у находок и у
+    отметки пунктов, — и отличались они только окном, причём разница нигде не
+    объяснялась. Разбор слитого нашёл это в #109.
+    """
+    items = request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
+    return [item for item in items if isinstance(item, dict) and item.get("merged_at")]
+
+
 def quote(value: str) -> str:
     """Экранирует отрезок пути: имя метки может содержать что угодно."""
     return urllib.parse.quote(value, safe="")

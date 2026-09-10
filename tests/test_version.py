@@ -10,6 +10,10 @@
   площадки, — тоже один раз;
 * след сборки значков и склеивающий мерж `git pull` изменениями не считаются;
 * тегов не видно — версия не выдумывается, а объявляется неполной.
+
+Две проверки идут по ЖИВОЙ истории и помечены `needs_history`: в чекауте без
+тегов их предмета попросту нет. Что история приходит туда, где нужна, держит
+гейт `version.py --check` в прогоне, а не падение проверки о чужой причине.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script, needs_history
 
 module = load_script("version.py")
 
@@ -90,6 +94,7 @@ def test_the_declared_version_is_read_from_its_single_source() -> None:
     assert module.RELEASE_TAG_RE.match(f"v{module.declared()}")
 
 
+@needs_history
 def test_the_project_version_is_computed_not_written() -> None:
     """Версия проекта считается механизмом и имеет вид X.Y.N."""
     number, whole = module.version()
@@ -97,6 +102,7 @@ def test_the_project_version_is_computed_not_written() -> None:
     assert whole is True, "релизных тегов не видно — в дереве с историей это дефект входа"
 
 
+@needs_history
 def test_the_patch_is_the_count_of_accepted_changes() -> None:
     """PATCH — число принятых изменений, а не номер патч-релиза.
 

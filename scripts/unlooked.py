@@ -104,7 +104,8 @@ EXIT_RECORDED: Final = 3
 #: Сколько последних слитых изменений видно за заход. Окно закрывает
 #: пропущенное событие, а не заменяет обход истории: если между заходами слито
 #: больше, отметка обхода перешагнёт неувиденное, и об этом будет сказано.
-WINDOW: Final = 30
+#: Значение общее с остальными механизмами окна: «недавно» у них одно.
+WINDOW: Final = ghrest.MERGED_WINDOW
 
 
 class NotRun(RuntimeError):
@@ -134,10 +135,7 @@ def parse_watermark(body: str | None) -> int:
     return int(found[-1]) if found else 0
 
 
-def merged_changes(repo: str, token: str, limit: int = WINDOW) -> list[dict[str, Any]]:
-    """Последние слитые изменения — только они предмет реестра."""
-    items = ghrest.request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
-    return [item for item in items if isinstance(item, dict) and item.get("merged_at")]
+merged_changes = ghrest.merged_changes
 
 
 def look_of(comments: list[dict[str, Any]]) -> str | None:

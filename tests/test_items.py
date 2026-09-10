@@ -275,3 +275,34 @@ def test_an_unmerged_change_is_not_swept(monkeypatch: pytest.MonkeyPatch) -> Non
     }
     monkeypatch.setattr(items.ghrest, "request", platform(state))
     assert items.sweep("o/r", "token") == 0
+
+
+def test_an_orphaned_declaration_is_named_by_the_sweep(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пункт объявлен, а задачи нет — обход говорит об этом и называет изменение.
+
+    Прежде такое объявление пропускалось по `not numbers` и исчезало молча —
+    то есть ровно в том механизме, который заведён против молчаливых потерь
+    (045). Нашёл это разбор слитого на #109.
+    """
+    state: dict[str, Any] = {
+        "merged": [{"number": 7, "merged_at": "2026-09-10", "body": "Закрывает пункт: этап"}],
+        "tasks": {},
+    }
+    monkeypatch.setattr(items.ghrest, "request", platform(state))
+    assert items.sweep("o/r", "token") == 0
+    said = capsys.readouterr().out
+    assert items.NO_ADDRESS in said, said
+    assert "#7" in said, "сказано об осиротевшем объявлении, но не сказано, чьём"
+
+
+def test_the_window_is_one_for_everyone() -> None:
+    """«Недавно слитое» у всех механизмов значит одно и то же.
+
+    Копий запроса было три — здесь, у реестра непросмотренного и у находок, —
+    и отличались они только окном (20 против 30), причём разница нигде не
+    объяснялась. Общий помощник поднимают вверх, а не тянут вбок (090).
+    """
+    assert items.merged_changes is items.ghrest.merged_changes
+    assert items.WINDOW == items.ghrest.MERGED_WINDOW
