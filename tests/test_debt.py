@@ -129,7 +129,7 @@ def test_the_order_puts_debts_before_the_plan() -> None:
     и перестановка строк меняет поведение проекта.
     """
     text = (ROOT / "docs" / "behaviour.md").read_text(encoding="utf-8")
-    findings_at = text.index("находки внешнего взгляда, пережившие слияние")
+    findings_at = text.index("неразобранные находки внешнего взгляда")
     rules_at = text.index("незакрытая работа по правилам каталога")
     plan_at = text.index("задача из трекера и план автора")
     assert findings_at < rules_at < plan_at
@@ -196,6 +196,69 @@ def test_the_third_number_does_not_switch_the_reminder_on() -> None:
     источника, и добавить третий молча не выйдет.
     """
     source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
-    assert "remind(bool(left) or rules_left(numbers, note))" in source, (
+    assert "remind(bool(left) or bool(lagging) or rules_left(numbers, note))" in source, (
         "решение о напоминании собрано иначе — проверьте, не вошло ли в него слитое без взгляда"
     )
+
+
+# --- краснота общей ветки: два разных состояния, а не одно --------------------
+
+
+RED_BODY = """## Держит слияние — источник 0
+
+- **test**
+
+## Не держит слияние, но не потеряно — источник 3
+
+- **test (3.15)**
+
+## Мигания
+
+- lint · 10.09.2026 · прогон 100
+"""
+
+
+def test_the_two_kinds_of_branch_red_are_read_apart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Держащее слияние и не держащее читаются раздельно.
+
+    Свалить их в одно число значило бы стереть разницу между простоем и
+    долгом: первое решается починкой, второе — порядком работ (154).
+    """
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (9, RED_BODY))
+    holding, lagging = debt.branch_debt("owner/repo", "token")
+    assert holding == ["test"]
+    assert lagging == ["test (3.15)"]
+
+
+def test_a_flake_is_not_counted_as_red(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Мигание красным не считается: оно уже позеленело, это находка о прошлом."""
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (9, RED_BODY))
+    holding, lagging = debt.branch_debt("owner/repo", "token")
+    assert "lint" not in holding + lagging
+
+
+def test_a_missing_issue_is_not_a_red_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задачи нет — краснота не выдумывается: пустое состояние это состояние."""
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (None, ""))
+    assert debt.branch_debt("owner/repo", "token") == ([], [])
+
+
+def test_an_advisory_red_switches_the_reminder_on() -> None:
+    """Совещательное красное общей ветки — долг перед планом.
+
+    Работа помечена закрытой, а часть её не работает. Это то же основание, по
+    которому выше плана стоят находки.
+    """
+    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
+    assert "bool(lagging)" in source, "совещательное красное в решение о долге не входит"
+
+
+def test_a_frozen_queue_is_not_called_a_debt() -> None:
+    """Держащее слияние в долг перед планом НЕ входит.
+
+    Это не долг, а остановка: пока очередь заморожена, порядок работ ничего не
+    решает — решает починка. Напоминание «сделай долг раньше плана» здесь
+    сказало бы не то (051).
+    """
+    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
+    assert "bool(holding)" not in source, "заморозка объявлена долгом перед планом"

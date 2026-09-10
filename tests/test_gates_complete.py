@@ -244,3 +244,67 @@ def test_required_missing_record_is_still_a_refusal() -> None:
     """У обязательной послабления нет: нет записи — нет вердикта (075)."""
     problems, _ = module.verdict([], ["lint"], "ci-complete")
     assert len(problems) == 1 and "записи нет" in problems[0]
+
+
+# --- одна запись на имя: чтение записей проверок -------------------------------------------------
+
+
+def test_two_runs_on_one_head_are_not_an_ambiguity() -> None:
+    """Два прогона `ci` на одной голове — штатное следствие двух событий.
+
+    Сводный гейт различает своё от чужого по номеру прогона; у очереди своего
+    прогона среди них нет. Замер 09.09.2026: на первом живом заходе очередь
+    отвергла изменение #57 с шестью зелёными именами, потому что каждое было
+    представлено дважды.
+    """
+    runs = [run("lint"), run("lint"), run("test"), run("test")]
+    assert sorted(run["name"] for run in module.worst_per_name(runs)) == ["lint", "test"]
+
+
+def test_the_worst_record_of_a_name_wins() -> None:
+    """Из двух записей имени берётся ХУДШАЯ, а не первая попавшаяся.
+
+    Взять любую значило бы иногда сливать красное: зелёная запись попадалась бы
+    первой. Ошибаться здесь можно только в сторону строгости (051).
+    """
+    kept = module.worst_per_name([run("test"), run("test", conclusion="failure")])
+    assert [run["conclusion"] for run in kept] == ["failure"]
+
+
+def test_a_live_record_beats_a_cancelled_one() -> None:
+    """Отменённая ниже любой живой: она гасится новым прогоном, а не ломает."""
+    kept = module.worst_per_name([run("lint", conclusion="cancelled"), run("lint")])
+    assert [run["conclusion"] for run in kept] == ["success"]
+
+
+def test_all_cancelled_stays_cancelled() -> None:
+    """Если живой записи у имени нет вовсе, отмена доезжает до вердикта."""
+    kept = module.worst_per_name(
+        [run("lint", conclusion="cancelled"), run("lint", conclusion="cancelled")]
+    )
+    assert [run["conclusion"] for run in kept] == ["cancelled"]
+
+
+def test_a_zombie_record_does_not_stop_the_queue() -> None:
+    """Запись `in_progress` с исходом очередь не останавливает.
+
+    Она завершена, и ждать её нечего: новых событий у изменения больше нет.
+    Замер 09.09.2026 — изменение #73 стояло при девяти зелёных записях.
+    """
+    kept = module.worst_per_name([run("pipeline", status="in_progress")])
+    assert module.severity(kept[0]) == 0
+
+
+def test_pending_beats_success_but_not_failure() -> None:
+    """Идущая запись важнее зелёной: имя ещё не досчитано, а не пройдено."""
+    pending = module.worst_per_name(
+        [run("test"), run("test", conclusion=None, status="in_progress")]
+    )
+    assert [run["status"] for run in pending] == ["in_progress"]
+    red = module.worst_per_name(
+        [
+            run("test", conclusion=None, status="in_progress"),
+            run("test", conclusion="failure"),
+        ]
+    )
+    assert [run["conclusion"] for run in red] == ["failure"]
