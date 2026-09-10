@@ -39,6 +39,7 @@ import argparse
 import os
 import re
 import sys
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
 import findings
@@ -132,7 +133,48 @@ def section(body: str | None, title: str) -> list[str]:
 CLOSED_INBOX: Final = "«входящие» закрыты — числа от последнего захода каталога"
 
 
-def inbox_body(repo: str, token: str) -> tuple[str, str]:
+#: После скольких часов снимок каталога считается вчерашним. Ночной прогон
+#: каталога ходит раз в сутки (6:17), поэтому суточный возраст нормален, а
+#: больший означает ПРОПУЩЕННЫЙ заход — не «немного устарело», а «один раз не
+#: пришло». Запас в два часа — на разброс времени старта у площадки.
+STALE_AFTER: Final = timedelta(hours=26)
+#: Что шаг делает со снимком старше срока: называет возраст и продолжает.
+#: Отказываться читать вчерашние числа нельзя — они последнее, что каталог
+#: сказал, и «неизвестно» вместо них строже, чем правда (051). Молчать о
+#: возрасте тоже нельзя: вчерашнее число, поданное как сегодняшнее, — это
+#: утверждение на все времена (005).
+STALE_NOTE: Final = "числам больше суток — ночной заход каталога, похоже, пропущен"
+
+
+def age_of(seen: str, now: datetime | None = None) -> timedelta | None:
+    """Сколько прошло с последней правки задачи; ``None`` — дата не разобралась.
+
+    Не ноль и не «свежо»: неразобранная дата означает, что возраст НЕИЗВЕСТЕН,
+    и выдавать его за свежесть — тихий запасной ответ (045).
+    """
+    try:
+        stamp = datetime.fromisoformat(seen.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return (now or datetime.now(UTC)) - stamp
+
+
+def said_age(age: timedelta | None) -> str:
+    """Возраст снимка словами — рядом с числами, а не в задаче.
+
+    ЗАЧЕМ ВСЛУХ. Числа правила 177 считает чужой прогон, и читаются они как
+    сегодняшние. Замер 10.09.2026: разрез приоритета строился по сводке семьи
+    семичасовой давности и назвал восемь правил документами, когда они уже
+    держались гейтами, — список заимствований по ним вышел неверным.
+    """
+    if age is None:
+        return "возраст снимка неизвестен: дата не разобралась"
+    hours = int(age.total_seconds() // 3600)
+    said = f"снято {hours} ч назад" if hours else "снято меньше часа назад"
+    return f"{said} · {STALE_NOTE}" if age > STALE_AFTER else said
+
+
+def inbox_body(repo: str, token: str) -> tuple[str, str, str]:
     """Тело задачи-«входящие» и пометка о её состоянии.
 
     ПОЧЕМУ НЕ ТОЛЬКО ЖИВАЯ. Живой считается открытая задача, а «входящие»
@@ -143,19 +185,20 @@ def inbox_body(repo: str, token: str) -> tuple[str, str]:
 
     Закрытая читается ТОЛЬКО если открытой нет: открытая всегда свежее.
     """
-    number, body = findings.live_issue(repo, token, findings.INBOX_MARKER)
+    number, body, seen = findings.live_issue_seen(repo, token, findings.INBOX_MARKER)
     if number is not None:
-        return body, ""
-    found: list[tuple[int, str]] = []
+        return body, "", seen
+    found: list[tuple[int, str, str]] = []
     for issue in ghrest.paginate(f"repos/{repo}/issues?state=closed", token):
         if issue.get("pull_request") is not None:
             continue
         said = str(issue.get("body") or "")
         if findings.INBOX_MARKER in said:
-            found.append((int(issue["number"]), said))
+            found.append((int(issue["number"]), said, str(issue.get("updated_at") or "")))
     if not found:
-        return "", ""
-    return max(found)[1], CLOSED_INBOX
+        return "", "", ""
+    newest = max(found)
+    return newest[1], CLOSED_INBOX, newest[2]
 
 
 def looks_done(repo: str, token: str) -> list[tuple[int, str]]:
@@ -244,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
         left = findings_debt(args.repo, token)
         unlooked_left = unlooked_debt(args.repo, token)
         holding, lagging = branch_debt(args.repo, token)
-        inbox, inbox_note = inbox_body(args.repo, token)
+        inbox, inbox_note, inbox_seen = inbox_body(args.repo, token)
         ready = looks_done(args.repo, token)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
@@ -301,6 +344,10 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"правила (считает каталог): задач {tasks}, без ответа {queue}, держится ничем {unheld}"
         )
+        # ВОЗРАСТ ПЕЧАТАЕТСЯ ВСЕГДА, А НЕ ТОЛЬКО КОГДА ОН ПЛОХОЙ. Строка,
+        # появляющаяся лишь при беде, читается как беда; строка, стоящая
+        # всегда, делает свежесть видимой величиной, а не предположением.
+        print(f"  {said_age(age_of(inbox_seen))}")
         if inbox_note:
             print(f"  {inbox_note}")
     # Расхождение контракта печатается и тогда, когда счёта нет: это отдельный

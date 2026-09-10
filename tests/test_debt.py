@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -337,23 +338,37 @@ def test_a_closed_inbox_is_still_read(monkeypatch: pytest.MonkeyPatch) -> None:
         "Задач по правилам: 0. Правил без ответа или «не рассмотрено»: 0. "
         "Признано действующими, но держится ничем: 1."
     )
-    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (None, ""))
+    monkeypatch.setattr(debt.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
     monkeypatch.setattr(
         debt.ghrest,
         "paginate",
-        issues_from([{"number": 37, "body": f"{debt.findings.INBOX_MARKER}\n{said}"}]),
+        issues_from(
+            [
+                {
+                    "number": 37,
+                    "body": f"{debt.findings.INBOX_MARKER}\n{said}",
+                    "updated_at": "2026-09-10T11:22:13Z",
+                }
+            ]
+        ),
     )
-    body, note = debt.inbox_body("o/r", "token")
+    body, note, seen = debt.inbox_body("o/r", "token")
     assert debt.rules_debt(body) == (0, 0, 1)
     assert note == debt.CLOSED_INBOX
+    assert seen == "2026-09-10T11:22:13Z", "закрытая задача отдала числа без их возраста"
 
 
 def test_an_open_inbox_wins_over_a_closed_one(monkeypatch: pytest.MonkeyPatch) -> None:
     """Открытая «входящие» читается всегда: она свежее закрытой."""
-    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (37, "живое тело"))
-    body, note = debt.inbox_body("o/r", "token")
+    monkeypatch.setattr(
+        debt.findings,
+        "live_issue_seen",
+        lambda *_, **__: (37, "живое тело", "2026-09-10T12:00:00Z"),
+    )
+    body, note, seen = debt.inbox_body("o/r", "token")
     assert body == "живое тело"
     assert note == ""
+    assert seen == "2026-09-10T12:00:00Z"
 
 
 def test_no_inbox_at_all_is_still_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -362,7 +377,66 @@ def test_no_inbox_at_all_is_still_unknown(monkeypatch: pytest.MonkeyPatch) -> No
     Послабление касается закрытых, а не отсутствующих: молчание непроверенного
     источника здесь по-прежнему считается долгом (045).
     """
-    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (None, ""))
+    monkeypatch.setattr(debt.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from([]))
-    assert debt.inbox_body("o/r", "token") == ("", "")
+    assert debt.inbox_body("o/r", "token") == ("", "", "")
     assert debt.rules_debt("") is None
+
+
+# --- возраст снимка ----------------------------------------------------------
+
+
+def test_the_age_of_the_snapshot_is_printed_beside_its_numbers() -> None:
+    """Возраст печатается всегда, а не только когда он плохой.
+
+    Строка, появляющаяся лишь при беде, читается как беда; строка, стоящая
+    всегда, делает свежесть видимой величиной, а не предположением.
+    """
+    said = debt.said_age(timedelta(hours=3))
+    assert "3 ч назад" in said
+    assert debt.STALE_NOTE not in said
+
+
+def test_a_snapshot_older_than_a_day_is_told_apart() -> None:
+    """Снимок старше суток отличим от свежего прямо в выводе шага.
+
+    Ночной заход каталога ходит раз в сутки: больший возраст означает не
+    «немного устарело», а ПРОПУЩЕННЫЙ заход — то есть числа не пересчитывались
+    вовсе.
+    """
+    said = debt.said_age(timedelta(hours=30))
+    assert debt.STALE_NOTE in said
+    assert "30 ч назад" in said
+
+
+def test_a_stale_snapshot_is_still_read() -> None:
+    """Вчерашние числа читаются, а не отбрасываются.
+
+    Они — последнее, что каталог сказал, и «неизвестно» вместо них строже
+    правды (051). Решение шага записано: назвать возраст и продолжить.
+    """
+    assert debt.STALE_NOTE.startswith("числам больше суток")
+    assert debt.rules_debt(
+        "Задач по правилам: 1. Правил без ответа или «не рассмотрено»: 2. "
+        "Признано действующими, но держится ничем: 3."
+    ) == (1, 2, 3)
+
+
+def test_an_unreadable_date_is_not_freshness() -> None:
+    """Дата не разобралась — возраст НЕИЗВЕСТЕН, а не «только что» (045)."""
+    assert debt.age_of("не дата") is None
+    assert "неизвестен" in debt.said_age(None)
+
+
+def test_a_forged_old_snapshot_reads_differently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проверено отказом: подделанный старый снимок читается иначе свежего.
+
+    Оба захода дают одни и те же числа — разница ровно в дате, и она обязана
+    доехать до вывода. Без этой проверки «возраст напечатан» держалось бы тем,
+    что строка есть, а не тем, что она меняется (140).
+    """
+    now = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
+    fresh = debt.said_age(debt.age_of("2026-09-10T11:00:00Z", now))
+    stale = debt.said_age(debt.age_of("2026-09-08T11:00:00Z", now))
+    assert fresh != stale
+    assert debt.STALE_NOTE in stale and debt.STALE_NOTE not in fresh

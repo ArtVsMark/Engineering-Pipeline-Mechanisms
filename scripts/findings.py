@@ -88,19 +88,36 @@ def live_issue(repo: str, token: str, marker: str = MARKER) -> tuple[int | None,
     того, чтобы положить её в известное место
     ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
     """
-    found: list[tuple[int, str]] = []
+    number, body, _ = live_issue_seen(repo, token, marker)
+    return number, body
+
+
+def live_issue_seen(repo: str, token: str, marker: str = MARKER) -> tuple[int | None, str, str]:
+    """То же, но третьим отдаёт, КОГДА задачу последний раз трогали.
+
+    ЗАЧЕМ ВОЗРАСТ. Часть этих задач ведёт не наш механизм, а чужой прогон:
+    «входящие» пишет ночной заход каталога. Числа из них читаются как сегодняшние,
+    а бывают вчерашними — и по вчерашним уже строилась работа
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+    ГРАНИЦА ЭТОЙ ДАТЫ НАЗВАНА ЗДЕСЬ, А НЕ У ЧИТАТЕЛЯ. `updated_at` двигает любая
+    правка задачи, включая комментарий человека. Поэтому «старо» она показывает
+    надёжно, а «свежо» — нет: свежая дата не доказывает, что числа пересчитаны.
+    Годится она ровно на то, для чего взята, — заметить ПРОПУЩЕННЫЙ заход.
+    """
+    found: list[tuple[int, str, str]] = []
     for item in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
         # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
         if item.get("pull_request") is not None:
             continue
         body = item.get("body") or ""
         if marker in body:
-            found.append((int(item["number"]), body))
+            found.append((int(item["number"]), body, str(item.get("updated_at") or "")))
     if not found:
-        return None, ""
+        return None, "", ""
     found.sort()
     if len(found) > 1:
-        extra = ", ".join(f"#{number}" for number, _ in found[1:])
+        extra = ", ".join(f"#{number}" for number, _, _ in found[1:])
         print(
             f"::warning::Живых задач с этим маркером {len(found)}, а обещана одна. "
             f"Записи идут в самую раннюю #{found[0][0]}; сведите и закройте лишние: {extra}",
