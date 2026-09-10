@@ -15,7 +15,8 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-GATES = ROOT / ".github" / "workflows" / "ci.yml"
+WORKFLOWS = ROOT / ".github" / "workflows"
+GATES = WORKFLOWS / "ci.yml"
 CONTRACT = ROOT / "docs" / "pipeline.md"
 SUMMARY = "ci-complete"
 
@@ -29,6 +30,38 @@ def load_gates() -> dict[Any, Any]:
     """
     document: dict[Any, Any] = yaml.safe_load(GATES.read_text(encoding="utf-8"))
     return document
+
+
+def contract_rows() -> list[tuple[str, str]]:
+    """Строки таблицы шагов договора парами «файл прогона, имя джоба».
+
+    Номер шага бывает с буквой (`6a`, `12b`) и бывает прочерком — у релиза
+    номера в скелете нет. Читаются все три вида: строка, выпавшая из образца,
+    молча выводит свой джоб из сверки, и расхождение с деревом становится
+    невидимым.
+
+    Буква обязана быть ЛАТИНСКОЙ, и это проверяется отдельно: кириллическая
+    «а» выглядит неотличимо, а под образец не подходит. Поймано на себе
+    10.09.2026 — дважды за одну смену.
+    """
+    text = CONTRACT.read_text(encoding="utf-8")
+    rows = re.findall(r"^\|\s*(?:\d+[a-z]?|—)\s*\|.*$", text, re.MULTILINE)
+    assert rows, "в договоре не нашлось таблицы шагов — предмет сверки отсутствует"
+
+    stray = re.findall(r"^\|\s*\d+[а-яё]\s*\|", text, re.MULTILINE | re.IGNORECASE)
+    assert not stray, (
+        f"номер подшага записан кириллицей: {stray} — такая строка выпадает "
+        "из сверки молча, буква обязана быть латинской"
+    )
+
+    found: list[tuple[str, str]] = []
+    for row in rows:
+        cells = [cell.strip().strip("`*") for cell in row.split("|")]
+        if len(cells) < 6:
+            continue
+        # У файла бывает пояснение рядом — `review.yml` (кнопкой, по номеру).
+        found.append((cells[3].split()[0].strip("`¹²³"), cells[4]))
+    return found
 
 
 def contract_jobs() -> set[str]:
@@ -58,9 +91,73 @@ def contract_jobs() -> set[str]:
     return jobs
 
 
+def tree_jobs() -> dict[str, str]:
+    """Джобы ВСЕХ прогонов дерева: имя джоба → файл, который его несёт."""
+    found: dict[str, str] = {}
+    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            continue
+        for job_id, job in (document.get("jobs") or {}).items():
+            found[str((job or {}).get("name") or job_id)] = path.name
+    return found
+
+
 def test_jobs_match_the_contract() -> None:
-    """Джобы дерева и джобы договора совпадают, а не «примерно соответствуют»."""
-    assert set(load_gates()["jobs"]) == contract_jobs()
+    """Джобы гейтов и джобы договора совпадают, а не «примерно соответствуют»."""
+    assert set(load_gates()["jobs"]) == {
+        job for workflow, job in contract_rows() if workflow == GATES.name
+    }
+
+
+def test_every_job_in_the_tree_is_described_by_the_contract() -> None:
+    """У КАЖДОГО джоба дерева есть строка договора — не только у гейтов.
+
+    Прежде сверялся один `ci.yml`, и шесть джобов жили вне договора: разбор
+    слитого, запись находок, поздний взгляд, состав меток, сверка контекста и
+    входящие каталога. Джоб без строки не сверяется ничем, и расхождение имени
+    с деревом становится невидимым — а имя джоба это ВХОД механизмов: по нему
+    очередь читает вердикт, а защита ветки — обязательный контекст.
+    """
+    described = {job for _, job in contract_rows()}
+    stray = sorted(set(tree_jobs()) - described)
+    assert not stray, f"джобы дерева не описаны договором: {stray}"
+
+
+def test_a_built_step_of_the_contract_exists_in_the_tree() -> None:
+    """Шаг договора, чей файл ПОСТРОЕН, обязан выдавать названный джоб.
+
+    Обратная сторона той же сверки, и здесь важна граница. Договор описывает и
+    то, чего ещё нет — разморозку, застрявшие изменения, релиз: это скелет, и
+    строка без файла законна. Незаконно другое: файл есть, а джоба с таким
+    именем в нём нет — значит договор отстал от дерева и врёт о построенном
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+
+    Замер 10.09.2026: шаг 13 называл джоб `rules-inbox`, а прогон выдаёт
+    `inbox`; шаг 12b называл `review`, а поздний взгляд уехал в свой джоб.
+    """
+    jobs = tree_jobs()
+    lying = [
+        (workflow, job)
+        for workflow, job in contract_rows()
+        if (WORKFLOWS / workflow).is_file() and jobs.get(job) != workflow
+    ]
+    assert not lying, (
+        f"договор называет джобы, которых нет в построенных прогонах: {lying} — "
+        "файл есть, значит это не пробел скелета, а отставший договор"
+    )
+
+
+def test_the_skeleton_may_name_what_is_not_built_yet() -> None:
+    """Предмет проверки найден: непостроенные шаги в договоре ЕСТЬ (075).
+
+    Без этой проверки предыдущая зеленела бы и на договоре, из которого убрали
+    весь скелет: «все описанные построены» верно и тогда, когда описанных нет.
+    """
+    planned = [
+        (workflow, job) for workflow, job in contract_rows() if not (WORKFLOWS / workflow).is_file()
+    ]
+    assert planned, "в договоре не осталось ни одного непостроенного шага — скелет исчез"
 
 
 def test_summary_has_no_needs() -> None:
