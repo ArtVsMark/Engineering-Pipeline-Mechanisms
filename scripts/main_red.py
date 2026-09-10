@@ -135,6 +135,34 @@ def rerun_failed(repo: str, run: int, token: str) -> None:
     ghrest.request("POST", f"repos/{repo}/actions/runs/{run}/rerun-failed-jobs", token, {})
 
 
+#: Почему перезапуск не делается. Причина называется словами: «не будем»
+#: без причины и «нечем» снаружи одинаковы (154).
+NOT_ALONE: Final = "упал не один — это похоже на дефект, а не на мигание"
+ALREADY: Final = "уже перезапускался — значит это дефект, а не мигание (124)"
+NO_ADDRESS: Final = "адрес записи не разобрался — перезапускать нечем"
+
+
+def rerun_reason(holds: list[str], rest: list[str], run: int, tries: int) -> str:
+    """Почему перезапуска НЕ будет; пустая строка — будет.
+
+    Решение вынесено из захода отдельно, потому что оно и есть предмет правила
+    124, а проверять его внутри `main()` пришлось бы подделкой всей площадки —
+    то есть не проверять вовсе
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-proved-by-what-it-rejects.md)).
+
+    Причины разведены поимённо. «Попытка уже была» и «адрес записи не
+    разобрался» дают одинаковое бездействие, а значат разное: первое —
+    состояние работы (дефект, идём чинить), второе — поломка чтения (площадка
+    ответила не тем). Одно сообщение на оба отправило бы разбирать дефект,
+    которого нет.
+    """
+    if len(holds) != 1 or rest:
+        return NOT_ALONE
+    if not run:
+        return NO_ADDRESS
+    return ALREADY if tries > 1 else ""
+
+
 def parse_flakes(body: str | None) -> list[Flake]:
     """Мигания, уже записанные в задаче."""
     return [
@@ -292,13 +320,20 @@ def main(argv: list[str] | None = None) -> int:
             if number and attempt(args.repo, number, token) > 1:
                 flakes = flakes_after(flakes, str(run.get("name", "")), number, day)
 
-        if len(holds) == 1 and not rest:
+        if holds or rest:
             # Упал ровно один — перезапускается он один и один раз. Номер
             # попытки спрашивается у площадки: свой счётчик разошёлся бы с ней
             # молча, и в сторону бесконечных перезапусков.
-            only = next(run for run in red if str(run.get("name")) == holds[0])
-            number = run_id_of(only)
-            if number and attempt(args.repo, number, token) == 1:
+            number = 0
+            tries = 1
+            if len(holds) == 1 and not rest:
+                only = next(item for item in red if str(item.get("name")) == holds[0])
+                number = run_id_of(only)
+                tries = attempt(args.repo, number, token) if number else 1
+            why = rerun_reason(holds, rest, number, tries)
+            if why:
+                print(f"перезапуска не будет: {why}")
+            else:
                 if args.apply:
                     rerun_failed(args.repo, number, token)
                 print(
@@ -306,8 +341,6 @@ def main(argv: list[str] | None = None) -> int:
                     + ("перезапущен" if args.apply else "перезапустил бы")
                     + f" прогон {number} (124)"
                 )
-            else:
-                print(f"«{holds[0]}» уже перезапускался — это дефект, а не мигание")
 
         print(f"голова {sha[:7]}: держат слияние {len(holds)}, не держат {len(rest)}")
         for name in holds:

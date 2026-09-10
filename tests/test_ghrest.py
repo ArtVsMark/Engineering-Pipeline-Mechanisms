@@ -162,6 +162,7 @@ def test_no_mechanism_builds_its_own_authorization(path: Path) -> None:
 YAML_READERS: Final = {
     "check_required_context.py": "джобы прогона, чтобы сверить имя обязательного контекста",
     "pipeline_checks.py": "ответ проекта по классам проверок и джобы прогонов",
+    "preflight.py": "КОМАНДЫ шагов прогона: их надо запустить так же, как площадка",
 }
 
 
