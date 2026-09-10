@@ -289,7 +289,13 @@ jobs:
           authors: .github/authors.txt
           # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
           # варианты — docs/decisions/001-attribution-of-merged-1.md.
-          baseline: cb26ec4
+          #
+          # Отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть
+          # однозначным, и отметка тогда указывает не туда. Соседний прогон
+          # `attribution-history.yml` требует того же от своей отметки, а здесь
+          # семь знаков жили с первого дня — одно правило, два прочтения (090).
+          # Нашёл внешний взгляд на #147.
+          baseline: cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b
           require-declared-author: "true"
           require-coauthor: "true"
           range: origin/${{ github.event.pull_request.base.ref || 'main' }}..HEAD
