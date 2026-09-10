@@ -28,12 +28,14 @@ def tree(
     for name in fragments:
         (kits / name).write_text("текст\n\n#1\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    # ПОДПИСЬ ЗАДАЁТСЯ В САМОЙ ПОДДЕЛКЕ, а не берётся у окружения. У исполнителя
+    # площадки её нет вовсе, и `git commit`/`git tag -a` там падают — то есть
+    # проверка зелена только на машине, где подпись настроена глобально. Замер
+    # 10.09.2026: набор прошёл локально и покраснел на всех версиях сразу.
+    subprocess.run(["git", "config", "user.email", "a@b"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "выпуск"], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "init"],
-        cwd=root,
-        check=True,
-    )
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
     return root
 
 
