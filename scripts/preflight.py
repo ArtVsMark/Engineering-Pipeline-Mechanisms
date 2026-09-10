@@ -55,8 +55,6 @@ UNRUNNABLE: Final[dict[str, str]] = {}
 NEEDS_PLATFORM: Final = {
     "python scripts/check_pr_meta.py": "разметку изменения читает площадка",
     "python scripts/debt.py": "долг читается из задач площадки",
-    "python scripts/check_journal.py": "сверяется с базой изменения",
-    "python scripts/build_changelog.py --fragments": "разбирает принесённое изменением",
     "python scripts/ci_complete.py": "опрашивает записи проверок на голове у площадки",
     # Шаг несёт `git fetch` с записью в `refs/remotes/origin/<база>`: локально
     # это не проверка, а правка чужого дерева. Сам гейт поверхности прогоняется
@@ -70,6 +68,24 @@ NEEDS_PLATFORM: Final = {
     # быть, и падение говорило бы о канале, а не о ссылках.
     "python scripts/check_rule_links.py": "имена правил берутся из выгрузки каталога",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """Одна команда прогона: чем названа и что запускает."""
+
+    name: str
+    command: str
+
+
+#: Проверки ПЕРЕД ТОЛЧКОМ, которых нет шагом прогона ни у кого. Это не второй
+#: список тех же команд (022): в `ci.yml` их нет вовсе, потому что предмет у
+#: них — ветка до открытия изменения. Приставка ветки и связь с задачей видны
+#: на дереве целиком, а ловились до сих пор отказом `agent-pr` — то есть уже
+#: после толчка. Замер 10.09.2026: три ветки подряд ушли без связи, и каждая
+#: вернулась ни с чем: изменение не открылось, красного тоже не было.
+BEFORE_PUSH: Final = (Step("ветка откроет изменение", "python scripts/agent_pr.py --dry-run"),)
+
 #: Проверки прогона, у которых здесь нет команды вовсе: они живут не шагом с
 #: командой, а действием площадки или чужим прогоном.
 ELSEWHERE: Final = {
@@ -86,14 +102,6 @@ EXIT_RED: Final = 3
 
 class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «всё зелено»."""
-
-
-@dataclass(frozen=True, slots=True)
-class Step:
-    """Одна команда прогона: чем названа и что запускает."""
-
-    name: str
-    command: str
 
 
 def steps(path: Path = CI) -> list[Step]:
@@ -204,7 +212,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        found = steps(args.root / CI)
+        # Проверки ветки идут ПЕРВЫМИ: их предмет — то, откроется ли изменение
+        # вообще, и красное здесь делает остальное бессмысленным.
+        found = [*BEFORE_PUSH, *steps(args.root / CI)]
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

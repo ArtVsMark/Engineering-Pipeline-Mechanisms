@@ -8,8 +8,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -649,14 +653,17 @@ def test_branch_without_prefix_opens_nothing(run_script: RunScript) -> None:
 
 
 def test_no_owner_token_is_not_configured(run_script: RunScript) -> None:
-    """Нет токена владельца — «не настроено», и на токен прогона шаг не переходит."""
+    """Нет токена владельца — «не настроено», и на токен прогона шаг не переходит.
+
+    Спрашивается НЕ сухой прогон: у него предмет — дерево, на площадку он не
+    ходит, и токен ему не нужен.
+    """
     result = run_script(
         "agent_pr.py",
         "--repo",
         "o/r",
         "--branch",
         "agent/x",
-        "--dry-run",
         env={"MERGE_QUEUE_TOKEN": ""},
     )
     # Не единица: её отдаёт Python при необработанном сбое, и объявленным
@@ -909,3 +916,53 @@ def test_the_version_gate_sees_a_file_not_yet_committed(
     run = run_script("check_version.py", cwd=tmp_path)
     assert run.code == 1, run.text
     assert "свежий.md" in run.text
+
+
+@contextmanager
+def inside(root: Path) -> Iterator[None]:
+    """Работает в чужом дереве и возвращается назад: разбор зовёт git в cwd."""
+    was = Path.cwd()
+    os.chdir(root)
+    try:
+        yield
+    finally:
+        os.chdir(was)
+
+
+def branch_with(root: Path, message: str) -> Path:
+    """Дерево с общей веткой и веткой работы, несущей один коммит."""
+    run = partial(subprocess.run, cwd=root, check=True, capture_output=True)
+    run(["git", "init", "--quiet", "-b", "main"])
+    (root / "readme.md").write_text("начало\n", encoding="utf-8")
+    run(["git", "add", "-A"])
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "начало"])
+    run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"])
+    run(["git", "checkout", "--quiet", "-b", "agent/x"])
+    (root / "readme.md").write_text("работа\n", encoding="utf-8")
+    run(["git", "add", "-A"])
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", message])
+    return root
+
+
+def test_a_dry_run_refuses_a_branch_without_a_task(tmp_path: Path) -> None:
+    """Сухой прогон краснеет на ветке без связи с задачей — до толчка.
+
+    Ровно этого не хватало 10.09.2026: три ветки подряд ушли на площадку без
+    строки `Refs #N`, `agent-pr` отказался открывать изменение, и узналось это
+    по ОТСУТСТВИЮ изменения, а не по красному. Гейт проверяется тем, что он
+    обязан отвергнуть (140).
+    """
+    agent_pr = load_script("agent_pr.py")
+    root = branch_with(tmp_path, "feat: работа без связи")
+    with inside(root), pytest.raises(agent_pr.NotRun) as caught:
+        agent_pr.describe("agent/x", "main")
+    assert "задачу" in str(caught.value)
+
+
+def test_a_dry_run_accepts_a_branch_that_names_its_task(tmp_path: Path) -> None:
+    """Связь названа — сухой прогон её принимает, и красное не ложное."""
+    agent_pr = load_script("agent_pr.py")
+    root = branch_with(tmp_path, "feat: работа со связью\n\nRefs #1")
+    with inside(root):
+        title, _ = agent_pr.describe("agent/x", "main")
+    assert "работа со связью" in title
