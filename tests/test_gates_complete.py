@@ -15,12 +15,14 @@ def run(
     status: str = "completed",
     conclusion: str | None = "success",
     run_id: str = "1",
+    started_at: str = "2026-09-10T06:00:00Z",
 ) -> dict[str, Any]:
     """Собирает одну запись проверки в том виде, в каком её отдаёт площадка."""
     return {
         "name": name,
         "status": status,
         "conclusion": conclusion,
+        "started_at": started_at,
         "details_url": f"https://github.com/o/r/actions/runs/{run_id}/job/9",
     }
 
@@ -308,3 +310,65 @@ def test_pending_beats_success_but_not_failure() -> None:
         ]
     )
     assert [run["conclusion"] for run in red] == ["failure"]
+
+
+def test_a_fresh_record_beats_a_stale_one() -> None:
+    """Свежая запись имени важнее старой, даже если старая хуже.
+
+    ЗАМЕР 10.09.2026, изменение #102. Новый толчок погасил прежний прогон, но
+    его записи остались лежать на голове: агрегат `test` — `failure` в 06:27:23
+    у погашенного и `success` в 06:27:57 у живого. Разбор брал худшую из всех —
+    и голова становилась красной НАВСЕГДА: новых событий у изменения больше не
+    будет, а зелёное живого прогона проигрывало мёртвому.
+    """
+    kept = module.worst_per_name(
+        [
+            run("test", conclusion="failure", started_at="2026-09-10T06:27:23Z"),
+            run("test", conclusion="success", started_at="2026-09-10T06:27:57Z"),
+        ]
+    )
+    assert [item["conclusion"] for item in kept] == ["success"]
+
+
+def test_a_stale_green_does_not_hide_a_fresh_red() -> None:
+    """И наоборот: свежее красное не прячется за старым зелёным.
+
+    Свежесть решает в обе стороны, иначе это была бы не свежесть, а поблажка.
+    """
+    kept = module.worst_per_name(
+        [
+            run("test", conclusion="success", started_at="2026-09-10T06:27:23Z"),
+            run("test", conclusion="failure", started_at="2026-09-10T06:27:57Z"),
+        ]
+    )
+    assert [item["conclusion"] for item in kept] == ["failure"]
+
+
+def test_records_of_one_moment_are_still_judged_by_severity() -> None:
+    """Записи, начатые в одну секунду, разбираются по тяжести — как и прежде.
+
+    Это случай двух прогонов одного файла от двух событий: обе записи живые, и
+    ошибаться среди них можно только в сторону строгости (051).
+    """
+    kept = module.worst_per_name(
+        [
+            run("test", conclusion="success", started_at="2026-09-10T06:00:00Z"),
+            run("test", conclusion="failure", started_at="2026-09-10T06:00:00Z"),
+        ]
+    )
+    assert [item["conclusion"] for item in kept] == ["failure"]
+
+
+def test_a_record_without_a_start_is_the_oldest() -> None:
+    """Запись без времени начала считается самой старой, а не самой свежей.
+
+    Неизвестное время не должно давать преимущество: иначе запись, у которой
+    площадка поля не заполнила, вытесняла бы настоящую (045).
+    """
+    kept = module.worst_per_name(
+        [
+            run("test", conclusion="success", started_at="2026-09-10T06:00:00Z"),
+            {"name": "test", "status": "completed", "conclusion": "failure"},
+        ]
+    )
+    assert [item["conclusion"] for item in kept] == ["success"]
