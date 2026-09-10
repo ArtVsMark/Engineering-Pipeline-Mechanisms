@@ -217,10 +217,19 @@ def test_the_item_marker_lives_in_one_place() -> None:
     Второе понимание того же разошлось бы с первым молча: у одного пункт
     находился бы, у другого нет, и оба выглядели бы правдоподобно (090).
     """
+    marking = (ROOT / "scripts" / "task_items.py").read_text(encoding="utf-8")
+    assert "items.mark(" in marking or "items.sweep(" in marking, (
+        "разбор отмечает пункты мимо общего механизма"
+    )
     for name in ("automerge.py", "task_items.py"):
         source = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-        assert "items.mark(" in source, f"{name} отмечает пункты мимо общего механизма"
         assert "CHECKLIST_RE" not in source, f"{name} завёл свой разбор пунктов"
+
+    # ОЧЕРЕДЬ ПУНКТОВ НЕ ОТМЕЧАЕТ, И ЭТО ПРОВЕРЯЕТСЯ. Момент слияния верный, но
+    # предмет чужой: очередь про слияние, а не про чужие задачи. Второй предмет
+    # делал её ответственной за то, чего она не решает.
+    queue = (ROOT / "scripts" / "automerge.py").read_text(encoding="utf-8")
+    assert "items.mark(" not in queue, "очередь снова взялась отмечать пункты задач"
 
 
 def test_the_shared_marker_is_where_it_says() -> None:

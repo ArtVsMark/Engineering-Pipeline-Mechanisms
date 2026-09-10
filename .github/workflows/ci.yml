@@ -243,6 +243,12 @@ jobs:
         run: python scripts/build_changelog.py --fragments
       - name: версия не правлена руками
         run: python scripts/check_version.py
+      # Полнота истории — предмет прогона, а не проверок. Две проверки версии
+      # идут по живому дереву и на обрезанном чекауте пропускаются (у них там
+      # нет предмета); чтобы пропуск не стал молчаливой дырой, здесь стоит
+      # гейт: тегов не пришло — третий исход вслух (045).
+      - name: история пришла целиком
+        run: python scripts/version.py --check
 
   attribution:
     name: attribution

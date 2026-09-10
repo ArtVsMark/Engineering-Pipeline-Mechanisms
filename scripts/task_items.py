@@ -191,6 +191,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--collect", type=Path, help="собрать предмет разбора в этот файл")
     parser.add_argument("--from", dest="source", type=Path, help="файл прогона с ответом разбора")
     parser.add_argument("--apply", action="store_true", help="записать, а не показать")
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="отметить объявленное автором в недавно слитых и выйти",
+    )
     args = parser.parse_args(argv)
 
     paired: list[tuple[str, str]] = []
@@ -200,6 +205,15 @@ def main(argv: list[str] | None = None) -> int:
             raise NotRun("нет токена: GH_TOKEN или GITHUB_TOKEN")
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
+
+        if args.sweep:
+            # ОБЪЯВЛЕННОЕ АВТОРОМ ОТМЕЧАЕТСЯ ЗДЕСЬ, А НЕ В ОЧЕРЕДИ. Момент тот
+            # же — событие слияния, — но предмет чужой очереди: она про
+            # слияние. Обход окна вдобавок догоняет потерянное событие и
+            # неудавшуюся запись: прежде такая потеря была окончательной.
+            touched = items.sweep(args.repo, token, dry_run=not args.apply)
+            print(f"отмечено пунктов по объявлению автора: {touched}")
+            return EXIT_RECORDED if touched else EXIT_NOTHING
 
         if args.collect is not None:
             args.collect.write_text(subject(args.repo, args.pr, token), encoding="utf-8")

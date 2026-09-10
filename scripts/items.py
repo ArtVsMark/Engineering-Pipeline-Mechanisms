@@ -72,6 +72,59 @@ def open_items(body: str) -> list[str]:
     return [found.group("text") for found in map(CHECKLIST_RE.match, body.splitlines()) if found]
 
 
+#: Окно догоняющего обхода — общее для всех, кто смотрит «что недавно слито».
+#: Оно закрывает ПРОПУЩЕННОЕ событие и неудавшуюся запись, а не заменяет
+#: историю: заход идёт по событию слияния, и обходить всё прошлое ему незачем.
+WINDOW: Final = ghrest.MERGED_WINDOW
+merged_changes = ghrest.merged_changes
+
+
+def declared_in(body: str) -> tuple[list[int], list[str]]:
+    """Что изменение объявило: связанные задачи и закрытые пункты."""
+    return (
+        sorted({link.number for link in changerefs.links_in(body)}),
+        changerefs.closed_items_in(body),
+    )
+
+
+def sweep(repo: str, token: str, limit: int = WINDOW, *, dry_run: bool = False) -> int:
+    """Догоняющий обход: отмечает объявленное в недавно слитых изменениях.
+
+    ПОЧЕМУ ОБХОД, А НЕ ТОЛЬКО СОБЫТИЕ. Событие слияния — верный момент, но не
+    единственный источник промаха: событие теряется
+    ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-a-manual-button-for-every-automation.md)),
+    запись в задачу отказывает, а заход в этот момент уже закончился. Прежде
+    такая потеря была молчаливой и окончательной: механизм печатал «пункты не
+    отмечены» и забывал о них навсегда.
+
+    ОТМЕТКА ИДЕМПОТЕНТНА, и на этом обход и держится: уже отмеченный пункт
+    остаётся отмеченным, а запись не отправляется вовсе, если тело задачи не
+    изменилось. Поэтому повторный проход по тем же изменениям ничего не портит
+    и почти ничего не стоит.
+    """
+    touched = 0
+    for change in merged_changes(repo, token, limit):
+        numbers, wanted = declared_in(str(change.get("body") or ""))
+        if not wanted:
+            continue
+        # Осиротевшее объявление сюда доходит намеренно: разбирает его `mark`,
+        # он же и говорит о нём вслух. Прежний пропуск по `not numbers`
+        # означал, что на обходе такое объявление исчезало молча — то есть
+        # ровно то, ради чего обход и заведён.
+        outcome = mark(
+            repo, numbers, wanted, token, dry_run=dry_run, origin=int(change.get("number") or 0)
+        )
+        if outcome.marked:
+            touched += len(outcome.marked)
+    return touched
+
+
+#: Объявление осиротело: пункты названы закрытыми, а задачи, где их отмечать,
+#: изменение не назвало. Текст один на всех, кто это состояние видит: два
+#: понимания одного состояния разошлись бы молча (090).
+NO_ADDRESS: Final = "пункты названы закрытыми, а связи с задачей нет — отмечать негде"
+
+
 def mark(
     repo: str,
     numbers: list[int],
@@ -79,6 +132,7 @@ def mark(
     token: str,
     *,
     dry_run: bool = False,
+    origin: int | None = None,
 ) -> Outcome:
     """Отмечает пункты в названных задачах и возвращает исход по каждому.
 
@@ -87,6 +141,14 @@ def mark(
     Но и молчать о нём нельзя: «отметил ноль из трёх» и «отметил всё» снаружи
     одинаковы.
     """
+    if items and not numbers:
+        # Пункты объявлены, а связи с задачей нет — отмечать негде, и это
+        # состояние, а не отказ: изменение уже сделано. Молчать нельзя,
+        # объявленный пункт иначе пропадает бесследно (045). Откуда объявление
+        # пришло, называется здесь же: на обходе окна без номера изменения
+        # строка не адресуется ни к чему.
+        print(f"  {f'#{origin}: ' if origin else ''}{NO_ADDRESS}")
+        return Outcome([], [], list(items))
     if dry_run:
         print(f"  (пробный заход) отметил бы пунктов: {len(items)} в задачах {numbers}")
         return Outcome([], [], [])
