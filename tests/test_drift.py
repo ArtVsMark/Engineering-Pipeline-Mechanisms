@@ -101,7 +101,7 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
     found, silent = module.look("o/r", "token", {"rules": {}})
     assert found == []
-    assert silent == ["каталог", "сводка семьи"]
+    assert silent == ["каталог", "сводка семьи", "вердикты по предложениям"]
     assert "Не спрошено" in module.render_body(found, silent)
 
 
@@ -246,3 +246,42 @@ def test_the_record_names_where_the_stale_pin_lives(monkeypatch: pytest.MonkeyPa
     found = module.pinned_tag_moved("o/r", "token")
     assert len(found) == 1
     assert ".yml" in found[0].said, found[0].said
+
+
+# --- вердикты по предложениям ------------------------------------------------
+
+MINE = {"proposals": [{"slug": "a-thing-broke", "claim": "…", "incident": "…", "trail": "x.py"}]}
+
+
+def test_an_admitted_proposal_stops_being_a_proposal() -> None:
+    """Каталог принял предложение — оно перестало быть предложением.
+
+    У принятого появился НОМЕР, и отвечают по нему теперь в `bindings.json`, а
+    не в очереди на приём. Вердикт выносит каталог у себя и по своему
+    расписанию: ни одна наша правка этого не делает, и события не приходит —
+    ровно предмет дрейфа (080).
+    """
+    answer = {"proposals": {"o/r:a-thing-broke": {"status": "admitted", "number": "196"}}}
+    found = module.proposals_answered(answer, MINE, "o/r")
+    assert len(found) == 1
+    assert "196" in found[0].said
+    assert "bindings.json" in found[0].next_step
+
+
+def test_a_rejected_proposal_names_the_reason() -> None:
+    """Отвергнутое несёт причину каталога, а не только слово «отвергнуто» (154)."""
+    answer = {"proposals": {"o/r:a-thing-broke": {"status": "rejected", "why": "уже есть 042"}}}
+    found = module.proposals_answered(answer, MINE, "o/r")
+    assert len(found) == 1
+    assert "уже есть 042" in found[0].said
+
+
+def test_a_proposal_without_a_verdict_is_not_a_drift() -> None:
+    """Каталог ещё не ответил — это ожидание, а не расхождение."""
+    assert module.proposals_answered({"proposals": {}}, MINE, "o/r") == []
+
+
+def test_a_verdict_for_another_project_is_not_ours() -> None:
+    """Ключ несёт владельца и репозиторий: чужой вердикт мимо нас."""
+    answer = {"proposals": {"other/repo:a-thing-broke": {"status": "admitted", "number": "196"}}}
+    assert module.proposals_answered(answer, MINE, "o/r") == []
