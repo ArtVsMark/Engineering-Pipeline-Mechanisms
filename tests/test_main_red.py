@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from tests.conftest import ROOT, load_script
@@ -355,3 +356,61 @@ def test_no_target_when_the_record_carries_no_run() -> None:
     """Запись без разбираемого адреса даёт ноль, а не выдуманный номер."""
     red = [{"name": "test", "details_url": "не адрес"}]
     assert module.target_run(["test"], [], red, FEEDS) == 0
+
+
+# --- заморозка называет, чем её снять -----------------------------------------
+
+
+def test_a_frozen_queue_says_nobody_unblocks_it() -> None:
+    """Заморозка без починки в очереди — сказано вслух, а не в лог прогона.
+
+    Дважды за смену починка стояла в очереди без метки: «это чинит общую ветку»
+    решает человек, а не механизм. Очередь при этом молчала — она пишет «нет
+    изменения с меткой» в лог своего прогона, куда никто не смотрит. Адресат у
+    такого сообщения есть, и это задача о красноте (142).
+    """
+    said = " ".join(module.said_queue(3, 0))
+    assert "ни одно не помечено" in said
+    assert "3" in said
+
+
+def test_a_frozen_queue_with_a_fix_says_so() -> None:
+    """Починка есть — сказано и это: молчание значило бы то же, что «нет»."""
+    said = " ".join(module.said_queue(3, 1))
+    assert "fix-main" in said
+    assert "ни одно не помечено" not in said
+
+
+def test_an_empty_queue_is_its_own_state() -> None:
+    """Пустая очередь — не «никто не чинит», а «двигать нечего» (154)."""
+    assert "пуста" in " ".join(module.said_queue(0, 0))
+
+
+def test_the_queue_count_reads_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Счёт берётся у площадки и считает только поданное в очередь.
+
+    Черновик в очередь не подан, изменение без метки `automerge` — тоже: они не
+    ждут слияния, и считать их значило бы завышать число ждущих.
+    """
+    rows = [
+        {"number": 1, "labels": [{"name": "automerge"}], "draft": False},
+        {"number": 2, "labels": [{"name": "automerge"}, {"name": "fix-main"}], "draft": False},
+        {"number": 3, "labels": [{"name": "automerge"}], "draft": True},
+        {"number": 4, "labels": [], "draft": False},
+    ]
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: rows)
+    assert module.queue_now("o/r", "token") == (2, 1)
+
+
+def test_an_unread_queue_is_not_an_empty_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка не ответила — счёт не выдумывается.
+
+    Ноль здесь означает «не спросили», и текст про пустую очередь честен: он
+    говорит, что двигать нечего, а не что починки нет.
+    """
+
+    def falls(*_: object, **__: object) -> object:
+        raise module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.ghrest, "request", falls)
+    assert module.queue_now("o/r", "token") == (0, 0)
