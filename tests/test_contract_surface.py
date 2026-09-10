@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
 
 contract = load_script("contract.py")
 policy = load_script("pipeline_checks.py")
@@ -172,7 +172,7 @@ def test_a_contract_outside_the_range_is_refused(tmp_path: Path) -> None:
     Не «подвинь границу»: механическое поднятие числа оставляет ненужный обход
     жить вечно, а смысл перечитывания ровно в том, чтобы его снять.
     """
-    (tmp_path / "CONTRACT_VERSION").write_text("0.9.0\n", encoding="utf-8")
+    (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
     path = tmp_path / ".pipeline.yml"
     path.write_text(ANSWER, encoding="utf-8")
     with pytest.raises(policy.BadPolicy, match="перечитайте ответы"):

@@ -1,0 +1,109 @@
+# Выпуск: собрать журнал, поднять версию контракта, поставить тег.
+#
+# ТОЛЬКО КНОПКОЙ, И ЭТО НЕ ОСТОРОЖНОСТЬ, А УСТРОЙСТВО. Тег не переставляется:
+# шаг, который нельзя отменить, получает собственную проверку ПЕРЕД собой (074),
+# а решение «выпускать» принимает человек. Событие, запускающее выпуск само,
+# сделало бы выпуском каждое слияние.
+#
+# ПРОВЕРКА ИДЁТ ДВАЖДЫ, И ВТОРОЙ РАЗ — НА ПЛОЩАДКЕ. Механизм отказывает по
+# списку причин сразу, а не по первой попавшейся: выпуск делают редко, и чинить
+# его по одной причине за заход дороже, чем увидеть все.
+#
+# ТОКЕН ВЛАДЕЛЬЦА, А НЕ ПРОГОНА. Выпуск несёт личность человека так же, как
+# слияние: на токене прогона автором тега и коммита стало бы приложение, и
+# переписать это потом нечем (131, 135).
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "номер выпуска; пусто — следующий по правилу"
+        required: false
+        type: string
+      first_consumer:
+        description: "владелец/репозиторий первого потребителя — только им поднимается мажор"
+        required: false
+        type: string
+      apply:
+        description: "сделать необратимое: собрать, пометить тегом и отправить"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Выпуск один на репозиторий, и вытеснять его нечем: два захода поставили бы
+  # два тега на разные головы.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: токен владельца не задан
+        id: token
+        env:
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MERGE_QUEUE_TOKEN:-}" ]; then
+            echo "present=no" >> "$GITHUB_OUTPUT"
+            echo "::warning::MERGE_QUEUE_TOKEN не задан — выпуск возможен только проверкой: тег и коммит несут личность человека, и токеном прогона их ставить нельзя."
+          else
+            echo "present=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ВСЯ ИСТОРИЯ И ТЕГИ: выпуск проверяет, что такого тега ещё нет, и считает
+      # версию проекта. Мелкий клон тегов не видит, и проверка стала бы ложной.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.MERGE_QUEUE_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet "pyyaml>=6,<7"
+
+      # Подпись — человека: автором выпуска в истории обязан быть он, а не
+      # приложение. Проверить это потом нечем — уплотнения тега не бывает.
+      - name: подпись выпуска
+        run: |
+          set -euo pipefail
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+
+      - name: проверить условия выпуска
+        run: |
+          set -euo pipefail
+          python scripts/release.py \
+            ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
+            ${{ inputs.first_consumer && format('--first-consumer {0}', inputs.first_consumer) || '' }}
+
+      - name: выпустить
+        if: inputs.apply && steps.token.outputs.present == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/release.py --apply \
+            ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
+            ${{ inputs.first_consumer && format('--first-consumer {0}', inputs.first_consumer) || '' }}
+
+          # Коммит и тег отправляются ВМЕСТЕ и последним действием: тег,
+          # уехавший без коммита, указывает в пустоту, а коммит без тега — это
+          # невыпущенный выпуск.
+          git push origin HEAD --follow-tags
+
+      - name: выпуск не сделан — сказано, а не пропущено
+        if: inputs.apply && steps.token.outputs.present != 'yes'
+        run: |
+          echo "::error::Выпуск запрошен, но MERGE_QUEUE_TOKEN не задан: тег несёт личность человека, и токеном прогона его ставить нельзя."
+          exit 1
