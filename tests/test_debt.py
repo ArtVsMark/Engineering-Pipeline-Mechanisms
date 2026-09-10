@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from tests.conftest import ROOT, RunScript, load_script
@@ -178,10 +180,17 @@ def test_the_third_number_is_read_not_counted_again() -> None:
 
     Второй счёт того же разошёлся бы с первым молча, и оба выглядели бы
     правдоподобно (022). Здесь это видно по коду: шаг не ходит за слитыми
-    изменениями сам.
+    ИЗМЕНЕНИЯМИ сам.
+
+    Предмет запрета — именно изменения, а не всякая закрытая запись: задачи со
+    `state=closed` шаг читает законно, потому что задачу-«входящие» закрывает
+    прогон каталога, и её числа остаются последним, что каталог сказал. Прежняя
+    редакция запрещала подстроку `state=closed` целиком и ловила это чтение как
+    второй счёт — гейт был шире своего предмета (154).
     """
     source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
-    assert "merged_changes" not in source and "state=closed" not in source
+    assert "merged_changes" not in source, "шаг считает слитое сам"
+    assert "pulls?state=closed" not in source, "шаг ходит за слитыми изменениями"
 
 
 def test_the_third_number_does_not_switch_the_reminder_on() -> None:
@@ -262,3 +271,98 @@ def test_a_frozen_queue_is_not_called_a_debt() -> None:
     """
     source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
     assert "bool(holding)" not in source, "заморозка объявлена долгом перед планом"
+
+
+# --- задача, выглядящая готовой ----------------------------------------------
+
+
+def issues_from(rows: list[dict[str, Any]]) -> Any:
+    """Подделка площадки: обход задач отдаёт ровно эти записи."""
+
+    def paginate(path: str, token: str, key: str | None = None) -> Any:
+        return iter(rows)
+
+    return paginate
+
+
+def test_a_task_with_every_item_closed_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Все пункты закрыты, а задача открыта — механизм её называет.
+
+    До этого состояние не видел никто: `task_items` его вычисляет и молчит
+    наружу. Живой случай 10.09.2026 — #26 и #25 простояли готовыми до вопроса
+    владельца, и сколько именно, сказать нечем.
+    """
+    rows = [{"number": 26, "title": "Частичное закрытие", "body": "- [x] раз\n- [x] два\n"}]
+    monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
+    assert debt.looks_done("o/r", "token") == [(26, "Частичное закрытие")]
+
+
+def test_one_open_item_is_enough_to_stay_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Один незакрытый пункт — задача не кандидат: работа не доделана."""
+    rows = [{"number": 39, "title": "Слито без взгляда", "body": "- [x] раз\n- [ ] два\n"}]
+    monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
+    assert debt.looks_done("o/r", "token") == []
+
+
+def test_a_task_without_items_is_not_a_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задача без пунктов кандидатом не считается.
+
+    Пустой чек-лист — это не «всё сделано», а «этапов не называли». У #25
+    пунктов не было вовсе, и автоматическое «готова» стояло бы на ней с первого
+    дня её жизни (154).
+    """
+    rows = [{"number": 25, "title": "Приоритет и мерило", "body": "Три вопроса прозой."}]
+    monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
+    assert debt.looks_done("o/r", "token") == []
+
+
+def test_a_change_is_not_a_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Изменения приходят в том же списке и в счёт не идут."""
+    rows = [{"number": 7, "title": "PR", "body": "- [x] раз\n", "pull_request": {"url": "…"}}]
+    monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
+    assert debt.looks_done("o/r", "token") == []
+
+
+# --- закрытые «входящие» -----------------------------------------------------
+
+
+def test_a_closed_inbox_is_still_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Входящие» закрыл прогон каталога — числа всё равно читаются.
+
+    Живой случай 10.09.2026: в 11:22 прогон каталога закрыл #37, и с той минуты
+    шаг долга объявлял долг по правилам НЕИЗВЕСТНЫМ на каждом изменении. Это
+    штатное состояние, а не поломка, и красное о нём учат пролистывать (142).
+    """
+    said = (
+        "Задач по правилам: 0. Правил без ответа или «не рассмотрено»: 0. "
+        "Признано действующими, но держится ничем: 1."
+    )
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (None, ""))
+    monkeypatch.setattr(
+        debt.ghrest,
+        "paginate",
+        issues_from([{"number": 37, "body": f"{debt.findings.INBOX_MARKER}\n{said}"}]),
+    )
+    body, note = debt.inbox_body("o/r", "token")
+    assert debt.rules_debt(body) == (0, 0, 1)
+    assert note == debt.CLOSED_INBOX
+
+
+def test_an_open_inbox_wins_over_a_closed_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Открытая «входящие» читается всегда: она свежее закрытой."""
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (37, "живое тело"))
+    body, note = debt.inbox_body("o/r", "token")
+    assert body == "живое тело"
+    assert note == ""
+
+
+def test_no_inbox_at_all_is_still_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Входящих» нет ни открытых, ни закрытых — долг НЕИЗВЕСТЕН, а не нулевой.
+
+    Послабление касается закрытых, а не отсутствующих: молчание непроверенного
+    источника здесь по-прежнему считается долгом (045).
+    """
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (None, ""))
+    monkeypatch.setattr(debt.ghrest, "paginate", issues_from([]))
+    assert debt.inbox_body("o/r", "token") == ("", "")
+    assert debt.rules_debt("") is None
