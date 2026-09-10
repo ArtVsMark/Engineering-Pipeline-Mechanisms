@@ -381,3 +381,92 @@ def test_the_pinning_gate_found_its_subject() -> None:
     """Предмет проверки найден: прогоны от общей ветки в дереве есть (075)."""
     from_shared = [path.name for path in WORKFLOWS.glob("*.yml") if shared_caller(load(path))]
     assert from_shared, "ни один прогон не идёт от общей ветки — проверять нечего"
+
+
+# --- карта взгляда -----------------------------------------------------------
+
+#: Образец ссылки на правило внутри промпта: «(039)», «(005, 127)». Ровно та
+#: форма, которой был написан прежний рукописный список.
+RULE_IN_PROMPT = re.compile(r"\((\d{3})(?:,\s*\d{3})*\)")
+#: Правила, которые промпт называть ВПРАВЕ и после появления карты: они говорят
+#: не «что проверить», а как устроен сам канал взгляда. Список закрытый, и
+#: каждое имя здесь названо с причиной — иначе он снова станет свалкой.
+PROMPT_MAY_NAME = {
+    "085": "недоверенный вход: этим абзацем канал признаёт отсутствие изоляции",
+    "142": "у находки есть адресат — про устройство канала, а не про предмет",
+    "152": "почему изменение, правящее сам прогон, ревью не получает",
+    "084": "почему красное ревью не держит слияние",
+    "090": "почему карта собирается механизмом, а не пишется руками",
+}
+
+
+def prompts_of(path: Path) -> list[str]:
+    """Тексты промптов агента в прогоне: их и проверяем."""
+    text = path.read_text(encoding="utf-8")
+    if "prompt: |" not in text:
+        return []
+    found: list[str] = []
+    for chunk in text.split("prompt: |")[1:]:
+        lines: list[str] = []
+        for line in chunk.splitlines()[1:]:
+            if line.strip() and not line.startswith(" " * 12):
+                break
+            lines.append(line)
+        found.append("\n".join(lines))
+    return found
+
+
+def test_the_prompt_does_not_keep_its_own_list_of_rules() -> None:
+    """Список правил в промпте не ведётся руками: он приходит картой.
+
+    Замер 10.09.2026: в промпте стояли десять правил «спрашивай по существу», и
+    семь из них к тому дню уже держались гейтами — то есть внешний взгляд звали
+    на работу, которую машина делает точнее. Рукописный список устаревает молча
+    (005), а второе место, где то же знание ведётся отдельно, расходится с
+    первым (090).
+    """
+    said: dict[str, set[str]] = {}
+    for path in WORKFLOWS.glob("*.yml"):
+        for prompt in prompts_of(path):
+            if "steps.map.outputs" not in prompt:
+                continue
+            names = {
+                number
+                for found in RULE_IN_PROMPT.finditer(prompt)
+                for number in re.findall(r"\d{3}", found.group())
+            }
+            extra = names - set(PROMPT_MAY_NAME)
+            if extra:
+                said[path.name] = extra
+    assert not said, f"промпт снова ведёт свой список правил: {said}"
+
+
+def test_the_map_is_taken_from_the_shared_branch() -> None:
+    """Карта читается с общей ветки, а не из головы изменения.
+
+    Голову пишет тот, кого проверяют: изменение, правящее ответ каталогу, могло
+    бы объявить все правила машинными и получить взгляд, которому некуда
+    смотреть (085).
+    """
+    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    calls = [line for line in text.splitlines() if "review_map.py" in line]
+    assert calls, "карта не собирается вовсе"
+    for line in calls:
+        words = line.split()
+        assert "--base" in words, f"карта собрана без базы: {line.strip()}"
+        base = words[words.index("--base") + 1]
+        # `FETCH_HEAD` — это база, подтянутая шагом; `HEAD` — голова изменения.
+        # Разница здесь и есть весь смысл проверки, поэтому сравнение точное.
+        assert base != "HEAD", f"карта взята из головы изменения: {line.strip()}"
+
+
+def test_a_missing_map_does_not_stop_the_look() -> None:
+    """Карта не собралась — взгляд идёт без неё, а не отменяется.
+
+    Канал совещательный: потерять взгляд целиком из-за подсказки к нему — тот
+    самый худший размен, от которого предостерегает 084.
+    """
+    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    for chunk in text.split("id: map")[1:]:
+        head = chunk[: chunk.index("- name:")] if "- name:" in chunk else chunk
+        assert "continue-on-error: true" in head, "отказ сборки карты роняет шаг"
