@@ -16,6 +16,7 @@ import yaml
 from tests.conftest import ROOT, load_script
 
 module = load_script("review_findings.py")
+findings_module = load_script("findings.py")
 
 
 def comment(body: str) -> dict[str, Any]:
@@ -76,6 +77,10 @@ def test_the_heaviest_finding_is_written_first() -> None:
 
     Иначе разбирающий читает двадцать записей подряд, чтобы понять, с какой
     начинать, и порядок разбора становится делом настроения (053).
+
+    Неназванный вес стоит ПЕРВЫМ: прежде эта проверка закрепляла его в конце —
+    то есть держала ровно то расхождение обещания с кодом, ради которого её и
+    писали. Порядок исправлен по находке позднего взгляда на #73.
     """
     body = module.render_body(
         {
@@ -85,7 +90,7 @@ def test_the_heaviest_finding_is_written_first() -> None:
         }
     )
     order = [line for line in body.splitlines() if line.startswith("- `")]
-    assert "тяжёлая" in order[0] and "лёгкая" in order[1] and "неназванная" in order[2], body
+    assert "неназванная" in order[0] and "тяжёлая" in order[1] and "лёгкая" in order[2], body
 
 
 def test_last_verdict_wins() -> None:
@@ -243,3 +248,29 @@ def test_the_writing_job_owns_the_shared_issue() -> None:
         assert (job.get("concurrency") or {}).get("cancel-in-progress") is False, (
             f"{name}: запись вытесняется — это дописывание в общий список, а не гонка за свежесть"
         )
+
+
+def test_an_unweighed_finding_is_not_lighter_than_the_lightest() -> None:
+    """Неназванный вес идёт ПЕРВЫМ, а не за самой лёгкой категорией.
+
+    Прежде он получал место после «замечания» — то есть на практике
+    трактовался как «легче самого лёгкого», ровно в ту сторону, которую модуль
+    обещает не выбирать: «не подставляет самый лёгкий, а объявляется отдельно».
+    Обещание и код разошлись молча.
+
+    Первым — не потому, что тяжелее, а потому, что неизвестное требует взгляда,
+    чтобы перестать быть неизвестным. Нашёл поздний взгляд по общей ветке на
+    #73 — первая находка этого канала.
+    """
+    entries = {
+        "a1": findings_module.Entry(1, "замечание", "лёгкое"),
+        "b2": findings_module.Entry(2, findings_module.UNWEIGHED, "неназванное"),
+        "c3": findings_module.Entry(3, "дефект", "тяжёлое"),
+    }
+    order = [
+        line.split("·")[2].split("—")[0].strip()
+        for line in module.render_body(entries).splitlines()
+        if line.startswith("- `")
+    ]
+    assert order[0] == findings_module.UNWEIGHED, order
+    assert order.index("дефект") < order.index("замечание"), order

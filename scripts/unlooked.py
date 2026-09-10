@@ -55,6 +55,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -279,6 +280,28 @@ def mark_late(entries: dict[int, Entry], number: int) -> dict[int, Entry]:
     return {**entries, number: Entry(number, STATE_LATE, entry.merged if entry else "")}
 
 
+#: Сколько изменений берётся в один заход обхода. Ограничение не про нагрузку
+#: площадки, а про цену: каждый поздний взгляд — прогон агента. Три за заход
+#: рассасывают очередь за дни, а не за месяцы, и не съедают смену целиком (051).
+LOOK_AT_ONCE: Final = 3
+
+
+def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
+    """Очередь на поздний взгляд: самые СТАРЫЕ непросмотренные, до `limit`.
+
+    ПОЧЕМУ САМЫЕ СТАРЫЕ. Свежее слитое ещё может получить вердикт само —
+    ревьюер бывает медленнее очереди, и запись снимется на следующем заходе.
+    Старое такой надежды не имеет: чем дольше изменение лежит без взгляда, тем
+    вернее, что его не посмотрит никто.
+
+    ПОЧЕМУ ЭТО ЧИСТАЯ ФУНКЦИЯ. Очередь выводится из реестра, а не хранится
+    вторым списком: второй разошёлся бы с первым молча
+    ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+    """
+    open_now = [number for number, entry in entries.items() if entry.state in OPEN_STATES]
+    return sorted(open_now)[:limit]
+
+
 def render_body(entries: dict[int, Entry], watermark: int) -> str:
     """Собирает тело реестра: записи, а не счётчик."""
     lines = [
@@ -356,6 +379,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=WINDOW, help="окно обхода слитых изменений")
     parser.add_argument("--apply", action="store_true", help="записать, а не показать")
     parser.add_argument("--late", type=int, help="номер изменения, по которому был поздний взгляд")
+    parser.add_argument(
+        "--queue",
+        action="store_true",
+        help="напечатать очередь на поздний взгляд списком JSON и выйти",
+    )
     args = parser.parse_args(argv)
 
     entries: dict[int, Entry] = {}
@@ -365,6 +393,14 @@ def main(argv: list[str] | None = None) -> int:
             raise NotRun("нет токена: GH_TOKEN или GITHUB_TOKEN")
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
+
+        if args.queue:
+            # ОЧЕРЕДЬ ЧИТАЕТСЯ, А НЕ ПЕРЕСЧИТЫВАЕТСЯ. Реестр уже ведёт свой
+            # механизм; заход сюда только выбирает из него, ничего не трогая,
+            # и потому не спрашивает площадку об изменениях вовсе (022).
+            _, said = findings.live_issue(args.repo, token, MARKER)
+            print(json.dumps(queue_of(parse_entries(said))))
+            return EXIT_NOTHING
 
         _, body = findings.live_issue(args.repo, token, MARKER)
         merged = merged_changes(args.repo, token, args.limit)
