@@ -95,8 +95,34 @@ def tracked(root: Path | None = None) -> set[str]:
     return {name for name in done.stdout.split("\0") if name}
 
 
+def shallow(root: Path | None = None) -> bool:
+    """Мелкий ли клон — то есть можно ли вообще спрашивать «когда появилось».
+
+    ЭТО НЕ ПРЕДОСТОРОЖНОСТЬ, А ПОЧИНКА. В мелком клоне история обрезана до
+    одного коммита, и `git log --diff-filter=A` показывает ВСЕ файлы
+    добавленными в нём: дата появления любого файла становится датой захода.
+    Сильный признак опирается на «появилось ПОСЛЕ постановки» — и срабатывал бы
+    на каждом названном файле, то есть врал бы уверенно.
+
+    Джоб `debt` берёт дерево `actions/checkout` без `fetch-depth`, а его
+    умолчание — единица. Нашёл внешний взгляд на #149; на дереве окна клон
+    полный, и локально это не воспроизводилось.
+    """
+    done = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return done.stdout.strip() == "true"
+
+
 def born(path: str, root: Path | None = None) -> datetime | None:
     """Когда имя впервые появилось в истории. ``None`` — история недоступна."""
+    if shallow(root):
+        return None
     done = subprocess.run(
         ["git", "log", "--diff-filter=A", "--format=%aI", "--", path],
         cwd=root,
@@ -119,6 +145,8 @@ def born_symbol(name: str, root: Path | None = None) -> datetime | None:
     Спрашивается объявление (`def <имя>`), а не любое упоминание: имя теста
     встречается и в прозе задачи, и в чужом сообщении коммита.
     """
+    if shallow(root):
+        return None
     done = subprocess.run(
         ["git", "log", "-S", f"def {name}", "--format=%aI", "--reverse"],
         cwd=root,
