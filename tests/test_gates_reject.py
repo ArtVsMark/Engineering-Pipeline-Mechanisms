@@ -470,16 +470,16 @@ def test_no_event_is_third_outcome(run_script: RunScript, tmp_path: Path) -> Non
 
 def test_release_without_fragments_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Выпуск без единого фрагмента — ошибка входа, а не пустой выпуск."""
-    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "CONTRACT_VERSION").write_text("9.9.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
-    result = run_script("build_changelog.py", "--release", "0.2.0", cwd=tmp_path)
+    result = run_script("build_changelog.py", "--release", "9.10.0", cwd=tmp_path)
     assert result.code == BROKEN
     assert "выпускать нечего" in result.text
 
 
 def test_unnamed_fragment_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
     """Фрагмент с неразбираемым именем не пропускается молча."""
-    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "CONTRACT_VERSION").write_text("9.9.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
     (tmp_path / "changelog.d" / "заметка.md").write_text("текст\n", encoding="utf-8")
     result = run_script("build_changelog.py", "--check", cwd=tmp_path)
@@ -496,7 +496,7 @@ def test_fragment_with_the_link_on_top_is_third_outcome(
     внимательностью: два фрагмента подряд поставили тег первой строкой, и
     сборка склеила их как есть. Правило без механизма — обещание (002).
     """
-    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "CONTRACT_VERSION").write_text("9.9.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
     (tmp_path / "changelog.d" / "1.added.md").write_text("#1\n\nтекст\n", encoding="utf-8")
     result = run_script("build_changelog.py", "--check", cwd=tmp_path)
@@ -506,7 +506,7 @@ def test_fragment_with_the_link_on_top_is_third_outcome(
 
 def test_fragment_may_name_two_tasks(run_script: RunScript, tmp_path: Path) -> None:
     """Одна работа бывает по двум задачам, и такая ссылка законна."""
-    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "CONTRACT_VERSION").write_text("9.9.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
     (tmp_path / "changelog.d" / "1.added.md").write_text("текст\n\n#1 #2\n", encoding="utf-8")
     assert run_script("build_changelog.py", cwd=tmp_path).code == CLEAN
@@ -625,7 +625,7 @@ def test_the_run_does_not_assemble_the_journal_on_a_change() -> None:
 
 def test_assembled_journal_matches_itself(run_script: RunScript, tmp_path: Path) -> None:
     """Собранный журнал совпадает со сборкой, а изменённый рукой — нет (125)."""
-    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "CONTRACT_VERSION").write_text("9.9.0\n", encoding="utf-8")
     (tmp_path / "changelog.d").mkdir()
     (tmp_path / "changelog.d" / "1.added.md").write_text("новое\n\n#1\n", encoding="utf-8")
     assert run_script("build_changelog.py", cwd=tmp_path).code == CLEAN
