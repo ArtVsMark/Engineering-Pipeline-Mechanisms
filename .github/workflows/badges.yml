@@ -49,11 +49,26 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --quiet "pyyaml>=6,<7"
+
+      # СВОДКА СЕМЬИ БЕРЁТСЯ У КАТАЛОГА, А НЕ СОБИРАЕТСЯ ЗАНОВО. Она уже
+      # собрана его ночным прогоном и лежит в его ветке значков; второй сборщик
+      # тех же чисел разошёлся бы с первым молча (022).
+      #
+      # Отказ здесь не роняет шаг: без сводки числа семьи объявляются НЕ
+      # прочитанными, а не нулевыми (045). Свои факты собираются в любом случае.
+      - name: взять сводку семьи у каталога
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/where.json" \
+            https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook/badges/export/where.json \
+            || echo "::warning::Сводка семьи не скачалась — числа общих механизмов будут объявлены непрочитанными."
       - name: собрать факты и значок
         run: |
           python scripts/build_facts.py \
             --out-dir "${RUNNER_TEMP}/badges" \
-            --sha "${GITHUB_SHA}"
+            --sha "${GITHUB_SHA}" \
+            --family "${RUNNER_TEMP}/where.json"
       - name: опубликовать в ветку badges
         env:
           GITHUB_TOKEN: ${{ github.token }}
