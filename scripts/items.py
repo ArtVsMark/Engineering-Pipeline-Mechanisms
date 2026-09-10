@@ -178,11 +178,12 @@ def follow(repo: str, token: str, *, dry_run: bool = False) -> int:
             continue
         body = str(epic.get("body") or "")
         number = int(epic.get("number") or 0)
-        try:
-            updated, done = followed(body, closed)
-        except ghrest.TransportError as exc:
-            print(f"  состояние пунктов #{number} не выведено: {report.cut(str(exc))}")
-            continue
+        # Перехвата вокруг `followed` здесь НЕТ намеренно: отказ по одной задаче
+        # ловит `closed` уровнем ниже и читает его как «не закрыта». Ветка,
+        # оставшаяся от прежнего поведения, недостижима — а недостижимая
+        # обработка выглядит защитой и молча ею быть перестаёт. Нашёл внешний
+        # взгляд на #159.
+        updated, done = followed(body, closed)
         if not done:
             continue
         # Основание печатается всегда: отметка выведена, а не объявлена

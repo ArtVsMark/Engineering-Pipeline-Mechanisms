@@ -72,7 +72,7 @@ Artem Markitanov <86671904+ArtVsMark@users.noreply.github.com>   (все)
 
 ## Решение
 
-**Отметка, с которой атрибуция обязательна, — коммит `cb26ec4`** (слияние
+**Отметка, с которой атрибуция обязательна, — коммит `cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b`** (слияние
 [#6](../../../pull/6), последний до появления гейта). Всё, что старше, гейт не
 спрашивает; всё, что новее, обязано проходить.
 
@@ -105,7 +105,7 @@ Artem Markitanov <86671904+ArtVsMark@users.noreply.github.com>   (все)
 
 ## Последствия
 
-- гейт атрибуции подключается с `baseline: cb26ec4`;
+- гейт атрибуции подключается с `baseline: cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b`;
 - первое изменение, открытое механизмом, служит **пробой**
   ([135](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/135-session-identity-is-established-by-a-write.md)):
   смотреть надо на автора коммитов ветки — он обязан стать человеком, а агент
