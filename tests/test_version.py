@@ -113,7 +113,7 @@ def test_a_clone_without_tags_says_so(run_script: RunScript, tmp_path: Path) -> 
     Так клонирует облачное окно и `actions/checkout` без `fetch-depth: 0`:
     `0.0.N` выглядел бы правдоподобно, будучи ложью (045).
     """
-    (tmp_path / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    (tmp_path / "CONTRACT_VERSION").write_text("9.9.0\n", encoding="utf-8")
     run = run_script("version.py", "--check", cwd=tmp_path)
     assert run.code == 3, run.text
     assert "тегов не видно" in run.text
@@ -125,7 +125,7 @@ def test_a_diverged_declaration_is_named(monkeypatch: pytest.MonkeyPatch) -> Non
 
     Тег ставится ПО объявленной версии; разошлись — значит одно правилось мимо
     другого, и какое именно, механизму знать неоткуда (154). Замер 10.09.2026:
-    тег `v0.1.0` при `CONTRACT_VERSION` 0.0.0 — файл отстал от выпуска.
+    тег выпуска стоял, а объявленный контракт отстал от него на целую MINOR.
     """
     monkeypatch.setattr(module, "release_tag", lambda: "v9.9.0")
     assert "9.9" in module.agrees()
