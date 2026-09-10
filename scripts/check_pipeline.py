@@ -53,6 +53,17 @@ def findings(
     found: list[str] = []
     beyond = beyond or {}
 
+    # ОДНО ИМЯ ПО ОБЕ СТОРОНЫ ДЕРЕВА — НЕОДНОЗНАЧНОСТЬ, И ЕЁ НИКТО НЕ ВИДЕЛ.
+    # Внутри каждого раздела совпадение имён отвергается разбором, а между
+    # разделами не проверял никто: ответ на такое имя один, и он объявляет
+    # класс сразу двум разным проверкам — той, что даёт запись на голове
+    # изменения, и той, что не даёт. Нашёл внешний взгляд на #150.
+    for name in sorted(set(jobs) & set(beyond)):
+        found.append(
+            f"{name}: имя выдают и прогон на изменении ({jobs[name].workflow}), и прогон вне "
+            f"его ({beyond[name].workflow}). Ответ по такому имени один, а предметов два"
+        )
+
     for name in jobs:
         if name not in checks:
             found.append(
@@ -132,12 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     # «совещательных девятнадцать» — число, из которого не видно, что девять из
     # них не могли бы держать слияние даже при желании (154).
     def named(klass: str, *, beyond_side: bool) -> str:
-        picked = [
-            check.name
-            for check in checks.values()
-            if check.klass == klass and check.beyond is beyond_side
-        ]
-        return ", ".join(picked) or "—"
+        return ", ".join(policy.names_of(checks, klass, beyond=beyond_side)) or "—"
 
     print(
         f"совпадает: {len(jobs)} проверок изменения и {len(beyond)} прогонов вне его, "

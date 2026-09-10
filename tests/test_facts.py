@@ -183,3 +183,25 @@ def test_the_badge_run_fetches_the_tags() -> None:
     text = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
     assert "fetch-depth: 0" in text
     assert "fetch-tags: true" in text
+
+
+def test_checks_facts_count_both_sections(tmp_path: Path) -> None:
+    """Факты считают проверки обоих разделов, а не половину на изменении.
+
+    Умолчание у `names_of` — первый раздел, и без явного «из любого» число
+    совещательных занизилось бы ровно на те прогоны, которые второй раздел и
+    завёл. Факты публикуются наружу и говорят о конвейере целиком. Нашёл
+    внешний взгляд на #155 — на том же изменении, которое умолчание ввело.
+    """
+    answer = tmp_path / ".pipeline.yml"
+    answer.write_text(
+        'schema: 4\ncontract: ">=9.9,<9.10"\n'
+        "checks:\n  lint: required\n"
+        "beyond_the_change:\n  nightly:\n    class: advisory\n"
+        "    why: идёт по толчку в общую ветку\n    addressee: none\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
+    counted = facts.checks_facts(answer)
+    assert counted["required"] == 1
+    assert counted["advisory"] == 1, "прогон вне изменения не попал в счёт"

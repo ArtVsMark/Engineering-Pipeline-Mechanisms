@@ -115,12 +115,19 @@ def rules_facts(path: Path = BINDINGS) -> dict[str, Any]:
 
 
 def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, int]:
-    """Считает классы проверок из ответа проекта."""
+    """Считает классы проверок из ответа проекта — по ОБОИМ разделам.
+
+    Факты публикуются наружу и говорят о конвейере целиком, а не о его половине
+    на изменении. Умолчание у `names_of` — первый раздел, и без явного «из
+    любого» число совещательных здесь молча занизилось бы на десять: ровно на
+    те прогоны, которые второй раздел и завёл. Нашёл внешний взгляд на #155 —
+    на том же изменении, которое умолчание и ввело.
+    """
     try:
         checks = policy.load(path)
     except policy.BadPolicy as exc:
         raise NotRun(str(exc)) from exc
-    return {klass: len(policy.names_of(checks, klass)) for klass in policy.CLASSES}
+    return {klass: len(policy.names_of(checks, klass, beyond=None)) for klass in policy.CLASSES}
 
 
 def family_facts(path: Path | None) -> dict[str, Any]:
