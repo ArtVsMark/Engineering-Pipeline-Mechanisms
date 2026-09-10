@@ -7,6 +7,9 @@ from typing import Any
 from tests.conftest import load_script
 
 module = load_script("ci_complete.py")
+
+#: Шапка ответа проекта: схема и диапазон совместимости — их требует разбор.
+HEAD = 'schema: 3\ncontract: ">=0.1,<0.2"\n'
 REQUIRED = ["lint", "test"]
 
 
@@ -219,7 +222,7 @@ def test_policy_gives_both_classes(tmp_path: Any) -> None:
     """Из данных приходят обязательные и совещательные — разными списками."""
     answer = tmp_path / ".pipeline.yml"
     answer.write_text(
-        "schema: 2\nchecks:\n  lint: required\n  review:\n    class: advisory\n"
+        HEAD + "checks:\n  lint: required\n  review:\n    class: advisory\n"
         '    why: слияния не держит\n    addressee: "#23"\n'
         "  e2e:\n    class: off\n    why: нет окружения\n",
         encoding="utf-8",

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script
 
 env = load_script("check_env.py")
 preflight = load_script("preflight.py")
@@ -277,3 +277,15 @@ def test_a_platform_substitution_makes_the_step_unrunnable(tmp_path: Path) -> No
     found = preflight.steps(root / ".github" / "workflows" / "ci.yml")
     assert [step.name for step in found] == ["линтер"]
     assert "свод" in preflight.UNRUNNABLE, "отложенный шаг не назван — пропуск стал молчанием"
+
+
+def test_the_shell_is_the_one_the_platform_uses() -> None:
+    """Команды идут той же оболочкой, что у площадки, а не умолчанием `sh`.
+
+    Площадка запускает шаги в bash; `shell=True` без указания берёт `/bin/sh`,
+    и `set -o pipefail` там не понят — здоровый шаг краснел с «Illegal
+    option». Прогон, идущий другой оболочкой, проверяет не то, что проверит
+    площадка (022). Замер 10.09.2026, на шаге поверхности контракта.
+    """
+    source = (ROOT / "scripts" / "preflight.py").read_text(encoding="utf-8")
+    assert 'executable="/bin/bash"' in source, "оболочка не названа — команды пойдут через sh"

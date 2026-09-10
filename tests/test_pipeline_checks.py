@@ -15,8 +15,12 @@ from tests.conftest import Run, RunScript, load_script
 
 policy = load_script("pipeline_checks.py")
 
+#: Шапка ответа проекта: схема и диапазон совместимости — их требует разбор.
+HEAD = 'schema: 3\ncontract: ">=0.1,<0.2"\n'
+
 GOOD = """
-schema: 2
+schema: 3
+contract: ">=0.1,<0.2"
 checks:
   lint: required
   review:
@@ -74,14 +78,17 @@ def gate(run_script: RunScript, root: Path) -> Run:
 def test_off_written_as_a_word_is_read_as_a_class(tmp_path: Path) -> None:
     """`off` в YAML 1.1 — булево, и ответ, написанный по-человечески, принимается."""
     path = tmp_path / ".pipeline.yml"
-    path.write_text("schema: 2\nchecks:\n  e2e:\n    class: off\n    why: нет окружения\n", "utf-8")
+    path.write_text(
+        HEAD + "checks:\n  e2e:\n    class: off\n    why: нет окружения\n",
+        "utf-8",
+    )
     assert policy.load(path)["e2e"].klass == policy.OFF
 
 
 def test_unknown_class_is_refused(tmp_path: Path) -> None:
     """Класс разбирается списком разрешённого: неизвестное — отказ, а не «наверное»."""
     path = tmp_path / ".pipeline.yml"
-    path.write_text("schema: 2\nchecks:\n  lint: maybe\n", encoding="utf-8")
+    path.write_text(HEAD + "checks:\n  lint: maybe\n", encoding="utf-8")
     with pytest.raises(policy.BadPolicy, match="неизвестен"):
         policy.load(path)
 
@@ -90,7 +97,10 @@ def test_unknown_class_is_refused(tmp_path: Path) -> None:
 def test_silent_class_without_a_reason_is_refused(tmp_path: Path, klass: str) -> None:
     """«Не подключено» и «отключено сознательно» снаружи неотличимы (154)."""
     path = tmp_path / ".pipeline.yml"
-    path.write_text(f"schema: 2\nchecks:\n  lint:\n    class: {klass}\n", encoding="utf-8")
+    path.write_text(
+        HEAD + f"checks:\n  lint:\n    class: {klass}\n",
+        encoding="utf-8",
+    )
     with pytest.raises(policy.BadPolicy, match="без причины"):
         policy.load(path)
 
@@ -98,7 +108,7 @@ def test_silent_class_without_a_reason_is_refused(tmp_path: Path, klass: str) ->
 def test_unreviewed_needs_no_reason(tmp_path: Path) -> None:
     """Неразобранная причины не требует: это очередь, а не решение."""
     path = tmp_path / ".pipeline.yml"
-    path.write_text("schema: 2\nchecks:\n  lint: unreviewed\n", encoding="utf-8")
+    path.write_text(HEAD + "checks:\n  lint: unreviewed\n", encoding="utf-8")
     check = policy.load(path)["lint"]
     assert not check.answered and not check.holds_merge
 
@@ -106,7 +116,7 @@ def test_unreviewed_needs_no_reason(tmp_path: Path) -> None:
 def test_matrix_cell_as_an_answer_is_refused(tmp_path: Path) -> None:
     """Ответ даётся по имени джоба: имя ячейки меняет договор при новой версии."""
     path = tmp_path / ".pipeline.yml"
-    path.write_text('schema: 2\nchecks:\n  "test (3.12)": required\n', encoding="utf-8")
+    path.write_text(HEAD + 'checks:\n  "test (3.12)": required\n', encoding="utf-8")
     with pytest.raises(policy.BadPolicy, match="матричной ячейки"):
         policy.load(path)
 
@@ -119,7 +129,10 @@ def test_foreign_schema_is_refused(tmp_path: Path) -> None:
         policy.load(path)
 
 
-@pytest.mark.parametrize("body", ["schema: 2\nchecks: {}\n", "schema: 2\n"])
+@pytest.mark.parametrize(
+    "body",
+    [HEAD + "checks: {}\n", 'schema: 3\ncontract: ">=0.1,<0.2"\n'],
+)
 def test_empty_answer_is_an_input_error(tmp_path: Path, body: str) -> None:
     """Пустой ответ — ошибка входа, а не «нечего опрашивать» (075)."""
     path = tmp_path / ".pipeline.yml"
@@ -177,7 +190,7 @@ def test_gate_passes_a_matching_tree(run_script: RunScript, tmp_path: Path) -> N
 
 def test_gate_refuses_a_check_without_an_answer(run_script: RunScript, tmp_path: Path) -> None:
     """Новая проверка не становится обязательной молча — и незамеченной тоже."""
-    tree(tmp_path, "schema: 2\nchecks:\n  lint: required\n", WORKFLOW, REVIEW)
+    tree(tmp_path, HEAD + "checks:\n  lint: required\n", WORKFLOW, REVIEW)
     run = gate(run_script, tmp_path)
     assert run.code == 3, run.text
     assert "review" in run.text
@@ -206,8 +219,7 @@ def test_gate_refuses_a_required_matrix(run_script: RunScript, tmp_path: Path) -
 def test_gate_refuses_an_answer_holding_nothing(run_script: RunScript, tmp_path: Path) -> None:
     """Без единой обязательной сводный гейт зелен всегда — это не «чисто» (075)."""
     answer = (
-        "schema: 2\nchecks:\n  lint:\n    class: advisory\n"
-        "    why: пока смотрим\n    addressee: none\n"
+        HEAD + "checks:\n  lint:\n    class: advisory\n    why: пока смотрим\n    addressee: none\n"
     )
     tree(tmp_path, answer, WORKFLOW)
     run = gate(run_script, tmp_path)
@@ -242,7 +254,7 @@ def test_an_advisory_without_an_addressee_is_refused(tmp_path: Path) -> None:
     """Совещательная без адресата отвергается: иначе класс ничего не значит."""
     path = tmp_path / ".pipeline.yml"
     path.write_text(
-        "schema: 2\nchecks:\n  review:\n    class: advisory\n    why: смотрим\n",
+        HEAD + "checks:\n  review:\n    class: advisory\n    why: смотрим\n",
         encoding="utf-8",
     )
     with pytest.raises(policy.BadPolicy, match="без адресата"):
@@ -258,7 +270,7 @@ def test_prose_instead_of_an_address_is_refused(tmp_path: Path) -> None:
     """
     path = tmp_path / ".pipeline.yml"
     path.write_text(
-        "schema: 2\nchecks:\n  review:\n    class: advisory\n"
+        HEAD + "checks:\n  review:\n    class: advisory\n"
         "    why: смотрим\n    addressee: находки живут в живой задаче\n",
         encoding="utf-8",
     )
@@ -274,7 +286,7 @@ def test_a_missing_path_is_not_an_address(tmp_path: Path) -> None:
     """
     path = tmp_path / ".pipeline.yml"
     path.write_text(
-        "schema: 2\nchecks:\n  review:\n    class: advisory\n"
+        HEAD + "checks:\n  review:\n    class: advisory\n"
         "    why: смотрим\n    addressee: scripts/nowhere.py\n",
         encoding="utf-8",
     )
@@ -292,7 +304,7 @@ def test_a_resolvable_address_is_accepted(tmp_path: Path, address: str) -> None:
     (tmp_path / "some.py").write_text("", encoding="utf-8")
     path = tmp_path / ".pipeline.yml"
     path.write_text(
-        f"schema: 2\nchecks:\n  review:\n    class: advisory\n"
+        HEAD + f"checks:\n  review:\n    class: advisory\n"
         f'    why: смотрим\n    addressee: "{address}"\n',
         encoding="utf-8",
     )
@@ -307,7 +319,7 @@ def test_no_addressee_is_said_with_a_word(tmp_path: Path) -> None:
     """
     path = tmp_path / ".pipeline.yml"
     path.write_text(
-        "schema: 2\nchecks:\n  debt:\n    class: advisory\n"
+        HEAD + "checks:\n  debt:\n    class: advisory\n"
         "    why: печатает уже записанное другими\n    addressee: none\n",
         encoding="utf-8",
     )

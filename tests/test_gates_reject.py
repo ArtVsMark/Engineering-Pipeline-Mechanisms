@@ -890,3 +890,22 @@ def test_findings_survive_an_unreadable_task(
     printed = capsys.readouterr().err
     assert "не отработала" in printed
     assert "выдуманная" in printed, "находка разметки исчезла вместе с отказом"
+
+
+def test_the_version_gate_sees_a_file_not_yet_committed(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Гейт версии видит файл, ещё не внесённый в учёт.
+
+    ЗАМЕР 10.09.2026. Гейт смотрел только `git ls-files` — то есть внесённое, —
+    и пропускал ровно тот файл, который окно пишет прямо сейчас. Новый тест с
+    примером версии прошёл свой прогон перед толчком зелёным и покраснел на
+    площадке сразу после коммита: гейт, не видящий предмета в момент проверки,
+    зелен на том, чего не смотрел (075).
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "CONTRACT_VERSION").write_text("9.9.0\n", encoding="utf-8")
+    (tmp_path / "свежий.md").write_text("версия 9.9.0 вписана руками\n", encoding="utf-8")
+    run = run_script("check_version.py", cwd=tmp_path)
+    assert run.code == 1, run.text
+    assert "свежий.md" in run.text

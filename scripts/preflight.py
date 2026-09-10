@@ -160,6 +160,11 @@ def run(step: Step, root: Path) -> tuple[int, str]:
     done = subprocess.run(
         step.command,
         shell=True,
+        # ОБОЛОЧКА ТА ЖЕ, ЧТО У ПЛОЩАДКИ. Умолчание `shell=True` — `/bin/sh`, а
+        # площадка запускает шаги в bash: `set -o pipefail` в sh не понят, и
+        # здоровый шаг краснел здесь с «Illegal option». Прогон, идущий другой
+        # оболочкой, проверяет не то, что проверит площадка (022).
+        executable="/bin/bash",
         cwd=root,
         capture_output=True,
         text=True,

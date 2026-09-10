@@ -49,10 +49,19 @@ class NotRun(RuntimeError):
 
 
 def tracked_files() -> list[Path]:
-    """Отдаёт файлы под учётом; отсутствие предмета проверки — отказ (075)."""
+    """Файлы под учётом И ещё не внесённые; отсутствие предмета — отказ (075).
+
+    Ключ `--others` не украшение. Гейт, видящий только внесённое, пропускает
+    ровно тот файл, который окно пишет прямо сейчас, — а свой прогон перед
+    толчком идёт по рабочему дереву. Замер 10.09.2026: новый тест с примером
+    версии прошёл `preflight` зелёным и покраснел на площадке сразу после
+    коммита. Гейт, не видящий предмета в момент проверки, зелен на том, чего
+    не смотрел
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
     try:
         out = subprocess.run(
-            ["git", "ls-files", "-z"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             capture_output=True,
             check=True,
             text=True,
