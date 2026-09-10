@@ -455,3 +455,35 @@ def test_no_runs_beyond_the_change_is_lawful(run_script: RunScript, tmp_path: Pa
     tree(tmp_path, GOOD, WORKFLOW, REVIEW)
     run = gate(run_script, tmp_path)
     assert run.code == 0, run.text
+
+
+def test_advisory_names_do_not_cross_the_sections(tmp_path: Path) -> None:
+    """Имя из второго раздела не попадает в список совещательных первого.
+
+    Сводный гейт опрашивает голову ИЗМЕНЕНИЯ по этому списку. Прогон вне
+    изменения записи там не оставляет — а `agent-pr` всё же оставляет, он идёт
+    по толчку той же ветки, — и его красное приезжало в вердикт по изменению
+    как совещательная проверка. Нашёл внешний взгляд на #150.
+    """
+    path = tree(tmp_path, GOOD + BEYOND_OK, WORKFLOW, REVIEW, NIGHTLY)
+    checks = policy.load(path)
+    assert "nightly" not in policy.names_of(checks, policy.ADVISORY)
+    assert "nightly" in policy.names_of(checks, policy.ADVISORY, beyond=True)
+    assert "nightly" in policy.names_of(checks, policy.ADVISORY, beyond=None)
+    assert "review" in policy.names_of(checks, policy.ADVISORY)
+
+
+def test_one_name_on_both_sides_of_the_tree_is_refused(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Одно имя у прогона на изменении и вне его — неоднозначность.
+
+    Внутри каждого раздела совпадение отвергает разбор, а между разделами не
+    проверял никто: ответ на такое имя один, а предметов два. Нашёл внешний
+    взгляд на #150.
+    """
+    twin = NIGHTLY.replace("  nightly:\n    name: nightly", "  twin:\n    name: lint")
+    tree(tmp_path, GOOD, WORKFLOW, REVIEW, twin)
+    run = gate(run_script, tmp_path)
+    assert run.code == 3, run.text
+    assert "и прогон на изменении" in run.text
