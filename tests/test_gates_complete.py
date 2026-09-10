@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from tests.conftest import load_script
 
 module = load_script("ci_complete.py")
