@@ -217,8 +217,9 @@ def test_policy_gives_both_classes(tmp_path: Any) -> None:
     """Из данных приходят обязательные и совещательные — разными списками."""
     answer = tmp_path / ".pipeline.yml"
     answer.write_text(
-        "schema: 1\nchecks:\n  lint: required\n  review:\n    class: advisory\n"
-        "    why: слияния не держит\n  e2e:\n    class: off\n    why: нет окружения\n",
+        "schema: 2\nchecks:\n  lint: required\n  review:\n    class: advisory\n"
+        '    why: слияния не держит\n    addressee: "#23"\n'
+        "  e2e:\n    class: off\n    why: нет окружения\n",
         encoding="utf-8",
     )
     required, advisory = module.sources(str(answer), "")
