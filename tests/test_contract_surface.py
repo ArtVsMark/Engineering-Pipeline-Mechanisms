@@ -283,7 +283,6 @@ def test_the_gate_declares_the_third_outcome_when_files_are_unreadable(
     гейт не отработал вовсе (039). Правка приехала без регрессионного теста;
     нашёл внешний взгляд на #159.
     """
-    gate = load_script("check_contract.py")
 
     def falls(*_: object, **__: object) -> list[str]:
         raise gate.journal.NotRun("дерева базы нет")

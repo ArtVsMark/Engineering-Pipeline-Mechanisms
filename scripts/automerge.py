@@ -713,6 +713,15 @@ def main(argv: list[str] | None = None) -> int:
         default=WAIT_STEP,
         help=f"шаг ожидания головы в секундах; 0 — не ждать (по умолчанию {WAIT_STEP})",
     )
+    # Ключ парный к шагу: предел ожидания складывается из обоих, и передавать
+    # один без другого значило бы держать заготовку, которой никто не
+    # пользуется (046). Нашёл внешний взгляд на #164.
+    parser.add_argument(
+        "--wait-tries",
+        type=int,
+        default=WAIT_TRIES,
+        help=f"сколько раз ждать голову (по умолчанию {WAIT_TRIES})",
+    )
     args = parser.parse_args(argv)
 
     owner_token = token()
@@ -730,7 +739,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return advance(
-            args.repo, owner_token, args.base, dry_run=args.dry_run, wait_step=args.wait_step
+            args.repo,
+            owner_token,
+            args.base,
+            dry_run=args.dry_run,
+            wait_step=args.wait_step,
+            wait_tries=args.wait_tries,
         )
     except (NotRun, labels.BadConfig, policy.BadPolicy, squash_body.NotRun) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
