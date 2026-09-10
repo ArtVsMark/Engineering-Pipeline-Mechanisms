@@ -480,3 +480,43 @@ def test_freshness_still_decides_among_live_records() -> None:
         ]
     )
     assert [item["conclusion"] for item in kept] == ["success"]
+
+
+def test_a_skipped_record_never_outranks_a_live_one() -> None:
+    """Свежая пропущенная запись не вытесняет живую зелёную.
+
+    Агрегат `test` при отменённой матрице кладёт `skipped`, и эта запись, будучи
+    свежее, объявляла отказ поверх зелёного вердикта живого прогона. Тот же
+    класс, что был у отменённой записи, только на другом исходе. Нашёл разбор
+    на #107.
+    """
+    runs = [
+        {"name": "test", "conclusion": "success", "started_at": "2026-09-10T07:50:00Z"},
+        {"name": "test", "conclusion": "skipped", "started_at": "2026-09-10T07:51:00Z"},
+    ]
+    assert module.worst_per_name(runs)[0]["conclusion"] == "success"
+
+
+def test_a_lone_skipped_required_is_still_a_refusal() -> None:
+    """Пропущенная в одиночестве по-прежнему отказ: 040 не ослаблен.
+
+    Разница между «есть живая запись рядом» и «живой нет вовсе» держит здесь обе
+    стороны: молчаливое «зелено» на пропуске было бы ровно той дырой, от которой
+    правило и написано.
+    """
+    problems, _ = module.verdict(
+        [{"name": "test", "conclusion": "skipped"}], ["test"], "ci-complete"
+    )
+    assert problems and "пропущен" in problems[0]
+
+
+def test_a_record_without_a_verdict_is_named_as_such() -> None:
+    """«Без вердикта» — это отмена и пропуск, и список закрыт.
+
+    Живые исходы сюда не попадают ни при каких обстоятельствах: иначе первый
+    ключ начал бы прятать настоящее красное.
+    """
+    assert not module.has_verdict({"conclusion": "cancelled"})
+    assert not module.has_verdict({"conclusion": "skipped"})
+    assert module.has_verdict({"conclusion": "failure"})
+    assert module.has_verdict({"conclusion": "success"})
