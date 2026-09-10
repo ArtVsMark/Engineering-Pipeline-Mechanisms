@@ -370,6 +370,27 @@ def run_of(path: Path) -> dict[Any, Any]:
     return document
 
 
+def feeds(directory: Path = WORKFLOWS) -> dict[str, set[str]]:
+    """Кто чей вердикт несёт: имя джоба → имена, чьи вердикты в него доезжают.
+
+    Читается `needs` из прогонов — то есть ДАННЫЕ, а не проза. Связь нужна там,
+    где падение одного шага неизбежно отражается вторым именем: матричный джоб
+    и его агрегат краснеют вместе всегда, потому что второй ждёт первого.
+    Считать это двумя падениями значит считать одно падение двумя.
+    """
+    fed: dict[str, set[str]] = {}
+    for path in sorted(directory.glob("*.y*ml")):
+        document = run_of(path)
+        jobs = document.get("jobs") or {}
+        names = {job_id: str((body or {}).get("name") or job_id) for job_id, body in jobs.items()}
+        for job_id, body in jobs.items():
+            raw = (body or {}).get("needs") or []
+            wanted = [raw] if isinstance(raw, str) else list(raw)
+            if wanted:
+                fed[names[job_id]] = {names.get(one, str(one)) for one in wanted}
+    return fed
+
+
 def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
     """Джобы прогонов, которые на изменении не идут вовсе.
 

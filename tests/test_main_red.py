@@ -22,6 +22,7 @@ import yaml
 from tests.conftest import ROOT, load_script
 
 module = load_script("main_red.py")
+policy = load_script("pipeline_checks.py")
 
 WORKFLOW = ROOT / ".github" / "workflows" / "main-red.yml"
 REQUIRED = ["lint", "test"]
@@ -277,3 +278,49 @@ def test_advisory_reds_never_reach_a_rerun() -> None:
     него тратил бы прогон на то, что и так записано.
     """
     assert module.rerun_reason([], ["a", "b"], run=100, tries=1) == module.ADVISORY_ONLY
+
+
+# --- одно падение, отражённое двумя именами -----------------------------------
+
+FEEDS = {"test": {"test-matrix"}}
+
+
+def test_an_aggregate_and_its_matrix_are_one_fall() -> None:
+    """Агрегат и его матричная ячейка — одно падение, а не два.
+
+    Агрегат ждёт матрицу через `needs` и краснеет ровно потому, что красна
+    ячейка. Пока это считалось двумя падениями, условие «упал ровно один» не
+    выполнялось ПО ПОСТРОЕНИЮ, и перезапуск мигнувшей общей ветки не случался
+    никогда.
+
+    Замер 10.09.2026: `main` встала красной на `test` и `test-matrix (3.12)`,
+    очередь заморозилась — а снять заморозку нечем, новых слияний в
+    замороженной очереди не бывает.
+    """
+    assert module.one_fall(["test"], ["test-matrix (3.12)"], FEEDS) is True
+    assert module.rerun_reason(["test"], ["test-matrix (3.12)"], 7, 1, FEEDS) == ""
+
+
+def test_an_unrelated_neighbour_is_still_two_falls() -> None:
+    """Чужое имя рядом — по-прежнему два падения, и перезапуска нет.
+
+    Правило 124 перезапускает ОДНО мигнувшее. Два независимых падения — это
+    похоже на дефект, и перезапуск скрыл бы его.
+    """
+    assert module.one_fall(["test"], ["lint"], FEEDS) is False
+    assert module.rerun_reason(["test"], ["lint"], 7, 1, FEEDS) == module.NOT_ALONE
+
+
+def test_two_holding_names_are_never_one_fall() -> None:
+    """Два обязательных красных — это не мигание, чем бы они ни были связаны."""
+    assert module.one_fall(["test", "lint"], [], FEEDS) is False
+
+
+def test_the_link_is_read_from_the_tree() -> None:
+    """Связь берётся из `needs` прогонов, а не вписана в механизм.
+
+    Проза `.pipeline.yml` про «доезжает через needs» — объяснение для человека;
+    решение принимается по данным дерева, иначе они разойдутся молча (022).
+    """
+    fed = policy.feeds()
+    assert fed.get("test") == {"test-matrix"}
