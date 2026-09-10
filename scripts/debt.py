@@ -204,7 +204,20 @@ def inbox_body(repo: str, token: str) -> tuple[str, str, str]:
     return newest[1], CLOSED_INBOX, newest[2]
 
 
-def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str]]:
+def merge_state(repo: str, number: int, token: str) -> str:
+    """Состояние слияния одного изменения; пустая строка — площадка не сказала.
+
+    Отдельный запрос на изменение — цена, названная, а не обойдённая (046):
+    списочный ответ этого поля не несёт, и читать его оттуда значит не читать
+    вовсе. Изменений в работе единицы, и запрос на каждое дешевле молчащего
+    источника.
+    """
+    one = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
+    state = str(one.get("mergeable_state") or "")
+    return "" if state in ("", "unknown") else state
+
+
+def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str]]:
     """Свои открытые изменения, застрявшие: конфликтом и красным.
 
     ПОЧЕМУ ЭТО ДОЛГ, И ПРИТОМ ПЕРВЫЙ. Источники 1 и 2 контура 1 — конфликт на
@@ -220,11 +233,13 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str]]:
     окно обязано само: долг перед планом — это не тревога, а порядок работ
     ([091](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/091-work-sources-are-ordered-first-non-empty-wins.md)).
 
-    Возвращает раздельно: конфликтующие (источник 1) и красные (источник 2).
-    Свалить их в одно число значило бы стереть разницу между «база устарела» и
-    «работа не работает» (154).
+    Возвращает раздельно: конфликтующие (источник 1), те, о ком площадка ещё
+    не сказала, и красные (источник 2). Свалить их в одно число значило бы
+    стереть разницу между «база устарела» и «работа не работает» (154), а
+    неизвестное выдать за пустое (045).
     """
     conflicting: list[str] = []
+    unknown: list[str] = []
     red: list[str] = []
     for change in ghrest.request("GET", f"repos/{repo}/pulls?state=open&per_page=50", token) or []:
         number = int(change.get("number") or 0)
@@ -233,8 +248,20 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str]]:
         if change.get("draft"):
             # Черновик застрять не может: он и не подан.
             continue
-        if str(change.get("mergeable_state") or "") == "dirty":
+        # СОСТОЯНИЕ СЛИЯНИЯ СПРАШИВАЕТСЯ ПОШТУЧНО, И ИНАЧЕ НЕЛЬЗЯ. В списочном
+        # ответе площадки поля `mergeable_state` НЕТ вовсе — оно приходит только
+        # в одиночном. Пока читался список, источник 1 не срабатывал ни разу:
+        # механизм молчал, и молчание выглядело как «конфликтов нет». Нашёл
+        # внешний взгляд на #132.
+        state = merge_state(repo, number, token)
+        if state == "dirty":
             conflicting.append(said)
+            continue
+        if not state:
+            # Площадка считает состояние асинхронно и до готовности отдаёт
+            # `unknown`. Это НЕ «конфликта нет»: неизвестность называется, а не
+            # подменяется тихим ответом (045).
+            unknown.append(said)
             continue
         runs = list(
             ghrest.paginate(
@@ -246,7 +273,7 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str]]:
         worst = ci_complete.worst_per_name(runs)
         if any(str(one.get("conclusion") or "") == "failure" for one in worst):
             red.append(said)
-    return conflicting, red
+    return conflicting, unknown, red
 
 
 def open_issues(repo: str, token: str) -> list[dict[str, Any]]:
@@ -347,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
         unlooked_left = unlooked_debt(args.repo, token)
         holding, lagging = branch_debt(args.repo, token)
         inbox, inbox_note, inbox_seen = inbox_body(args.repo, token)
-        conflicting, red = stuck_changes(args.repo, token)
+        conflicting, unknown, red = stuck_changes(args.repo, token)
         # Список задач читается ОДИН раз на оба счёта по пунктам: два прохода
         # по одному источнику расходятся тем охотнее, чем невиннее выглядят (022).
         issues = open_issues(args.repo, token)
@@ -363,6 +390,10 @@ def main(argv: list[str] | None = None) -> int:
     if conflicting:
         print(f"конфликт на своих изменениях: {len(conflicting)} — это источник 1")
         for said in conflicting:
+            print(f"  {said}")
+    if unknown:
+        print(f"состояние слияния не сказано: {len(unknown)} — площадка ещё считает")
+        for said in unknown:
             print(f"  {said}")
     if red:
         print(f"красное на своих изменениях: {len(red)} — это источник 2")
