@@ -271,3 +271,23 @@ def test_a_fragment_that_names_what_was_is_enough(tmp_path: Path) -> None:
     said = tmp_path / "a.contract.md"
     said.write_text("Джоб `test-matrix` переименован: было `matrix`.\n", encoding="utf-8")
     assert gate.migration_named([said]) is True
+
+
+def test_the_gate_declares_the_third_outcome_when_files_are_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ чтения тронутых файлов — третий исход, а не «нашёл находки».
+
+    `declared()` зовут уже ПОСЛЕ разбора поверхности, где перехват позади:
+    необработанное исключение вышло бы кодом 1 — «гейт нашёл находки», — хотя
+    гейт не отработал вовсе (039). Правка приехала без регрессионного теста;
+    нашёл внешний взгляд на #159.
+    """
+    gate = load_script("check_contract.py")
+
+    def falls(*_: object, **__: object) -> list[str]:
+        raise gate.journal.NotRun("дерева базы нет")
+
+    monkeypatch.setattr(gate.journal, "changed_files", falls)
+    with pytest.raises(gate.NotRun, match="не прочитаны"):
+        gate.declared("origin/main")
