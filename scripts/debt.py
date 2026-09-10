@@ -43,6 +43,7 @@ from typing import Final
 
 import findings
 import ghrest
+import main_red
 import unlooked
 
 #: Строка, которую пишет ночной прогон каталога. Три числа правила 177 в одном
@@ -99,6 +100,29 @@ def unlooked_debt(repo: str, token: str) -> list[unlooked.Entry]:
         for entry in unlooked.parse_entries(body).values()
         if entry.state in unlooked.OPEN_STATES
     ]
+
+
+def branch_debt(repo: str, token: str) -> tuple[list[str], list[str]]:
+    """Краснота общей ветки из задачи, которую ведёт шаг 9.
+
+    Возвращает раздельно: держащее слияние (источник 0) и не держащее
+    (источник 3). Числа ЧИТАЮТСЯ, а не пересчитываются: считает их `main_red`
+    по живым артефактам, и второй счёт того же разошёлся бы с первым молча
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    """
+    _, body = findings.live_issue(repo, token, main_red.MARKER)
+    return section(body, "Держит слияние"), section(body, "Не держит слияние")
+
+
+def section(body: str | None, title: str) -> list[str]:
+    """Имена проверок из одного раздела задачи о красноте."""
+    text = body or ""
+    start = text.find(f"## {title}")
+    if start < 0:
+        return []
+    end = text.find("\n## ", start + 1)
+    piece = text[start : end if end > 0 else len(text)]
+    return [line[4:-2].strip() for line in piece.splitlines() if line.startswith("- **")]
 
 
 def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
@@ -158,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         left = findings_debt(args.repo, token)
         unlooked_left = unlooked_debt(args.repo, token)
+        holding, lagging = branch_debt(args.repo, token)
         _, inbox = findings.live_issue(args.repo, token, findings.INBOX_MARKER)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
@@ -172,6 +197,20 @@ def main(argv: list[str] | None = None) -> int:
     # заново можно, но обязанности сделать это до новой работы нет, и
     # напоминание, звучащее всегда, перестаёт что-либо значить (051). Число
     # видно, решение — за человеком (154).
+    # КРАСНОТА ОБЩЕЙ ВЕТКИ ПЕЧАТАЕТСЯ ДВУМЯ СТРОКАМИ, А НЕ ОДНОЙ. Держащее
+    # слияние — источник 0: очередь заморожена, и это не «долг перед планом», а
+    # стоп. Не держащее — источник 3: работа помечена закрытой и частью не
+    # работает. Свалить их в одно число значило бы стереть разницу между
+    # простоем и долгом (154).
+    if holding:
+        print(f"общая ветка красна, слияние стоит: {len(holding)} — это источник 0")
+        for name in holding:
+            print(f"  {name}")
+    if lagging:
+        print(f"совещательные красные на общей ветке: {len(lagging)} — источник 3")
+        for name in lagging:
+            print(f"  {name}")
+
     print(f"слито без внешнего взгляда: {len(unlooked_left)}")
     for entry in sorted(unlooked_left, key=lambda item: -item.number):
         print(f"  #{entry.number} · {entry.state} · {entry.merged}")
@@ -196,7 +235,10 @@ def main(argv: list[str] | None = None) -> int:
     if note:
         print(f"  контракт разошёлся: {note}")
 
-    remind(bool(left) or rules_left(numbers, note))
+    # Совещательное красное общей ветки входит в долг перед планом; держащее
+    # слияние — нет: оно не долг, а остановка, и решается оно починкой, а не
+    # порядком работ.
+    remind(bool(left) or bool(lagging) or rules_left(numbers, note))
     return EXIT_PARTIAL if partial else EXIT_OK
 
 

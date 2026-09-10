@@ -356,76 +356,6 @@ def order(changes: list[Change], shared: frozenset[str]) -> list[Change]:
     )
 
 
-def on_the_shared_branch(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Оставляет записи, которые на общей ветке вообще что-то значат.
-
-    ПОЧЕМУ ПРОПУСК ЗДЕСЬ НЕ ОТКАЗ, ХОТЯ НА ГОЛОВЕ ИЗМЕНЕНИЯ — ОТКАЗ. Предмет у
-    части проверок — изменение, а не общая ветка: разметка, фрагмент журнала и
-    авторство коммитов на `main` проверять не на чем. Такие джобы объявлены
-    change-only условием `if: github.event_name != 'push'` и на общей ветке
-    кладут запись с исходом `skipped`. Считать её отказом — значит объявить
-    общую ветку красной ВСЕГДА.
-
-    Цена ошибки была ровно такой: замер 09.09.2026 — очередь на первом живом
-    прогоне сообщила «общая ветка красна» по трём пропускам и не сдвинулась.
-    Нашёл это прогон, а не набор — механизм подтверждается прогоном, а не чтением
-    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
-
-    Послабление держится не обещанием: то, что change-only джобы объявлены
-    условием, а не выключены руками, проверяет
-    `tests/test_gates_contract.py::test_change_only_jobs_do_not_run_on_the_shared_branch`.
-    Пропуск на голове ИЗМЕНЕНИЯ остаётся отказом (040) — здесь другая ветка и
-    другой предмет.
-    """
-    return [run for run in runs if run.get("conclusion") != "skipped"]
-
-
-def severity(run: dict[str, Any]) -> int:
-    """Насколько плоха одна запись. Больше — хуже; отменённая ниже любой живой."""
-    conclusion = run.get("conclusion")
-    # «Идёт» решается общим разбором, а не своим: запись со `status:
-    # in_progress` и уже проставленным исходом завершена, и ждать её вечно.
-    if ci_complete.pending(run):
-        return 1
-    if conclusion == "cancelled":
-        return -1
-    if conclusion == "success":
-        return 0
-    if conclusion == "skipped":
-        return 2
-    return 3
-
-
-def worst_per_name(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Оставляет по одной, САМОЙ ПЛОХОЙ записи на имя.
-
-    ПОЧЕМУ НЕ «НЕОДНОЗНАЧНОСТЬ». Сводный гейт, увидев две живые записи одного
-    имени, объявляет вердикт неоднозначным — и правильно делает: он опрашивает
-    голову изнутри своего же прогона и различает своё от чужого по номеру
-    прогона. У очереди своего прогона среди них нет: она приходит снаружи и
-    видит два прогона `ci` на одной голове — штатное следствие двух событий
-    (толчок и навешенная метка), а не спор механизмов. Замер 09.09.2026: на
-    первом живом заходе очередь отвергла изменение #57 с шестью зелёными
-    именами, потому что каждое было представлено дважды.
-
-    ПОЧЕМУ ХУДШАЯ, А НЕ ЛЮБАЯ. Взять первую попавшуюся значило бы иногда
-    сливать красное: из двух записей одного имени зелёная попадалась бы
-    первой. Худшая делает разбор строже сводного гейта, а не мягче, — и это
-    единственная сторона, в которую здесь можно ошибаться
-    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
-
-    Отменённая запись ниже любой живой: она пройденной не считается, но и
-    отказом становится только тогда, когда живой у имени нет вовсе.
-    """
-    best: dict[str, dict[str, Any]] = {}
-    for run in runs:
-        name = str(run.get("name", ""))
-        current = best.get(name)
-        if current is None or severity(run) > severity(current):
-            best[name] = run
-    return list(best.values())
-
-
 def branch_health(repo: str, sha: str, owner_token: str) -> list[str]:
     """Что не так на голове общей ветки: пусто — значит ветка зелёная.
 
@@ -442,9 +372,8 @@ def branch_health(repo: str, sha: str, owner_token: str) -> list[str]:
     )
     # Отсутствие записи здесь тоже не отказ, и по той же причине: проверка
     # изменения на общей ветке не идёт вовсе, а не «не стартовала».
-    problems, _ = ci_complete.verdict(
-        worst_per_name(on_the_shared_branch(runs)), required, "", strict_missing=False
-    )
+    alive = ci_complete.worst_per_name(ci_complete.on_the_shared_branch(runs))
+    problems, _ = ci_complete.verdict(alive, required, "", strict_missing=False)
     return problems
 
 
@@ -465,7 +394,7 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
     )
     if not runs:
         return ([f"#{change.number}: записей проверок на голове нет — прогон не стартовал"], False)
-    return ci_complete.verdict(worst_per_name(runs), required, "", strict_missing=True)
+    return ci_complete.verdict(ci_complete.worst_per_name(runs), required, "", strict_missing=True)
 
 
 def merge_state(repo: str, number: int, owner_token: str) -> str:
