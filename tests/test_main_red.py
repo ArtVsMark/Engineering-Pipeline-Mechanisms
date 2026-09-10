@@ -255,3 +255,25 @@ def test_an_unreadable_address_is_its_own_reason() -> None:
     """
     assert module.rerun_reason(["test"], [], run=0, tries=1) == module.NO_ADDRESS
     assert module.NO_ADDRESS != module.ALREADY
+
+
+def test_a_lone_advisory_red_is_not_called_a_crowd() -> None:
+    """Упала одна совещательная — сказано именно это, а не «упал не один».
+
+    Бездействие в обоих случаях одинаковое, а состояния разные: «упал не один»
+    отправляет читателя искать второй упавший джоб, которого нет. Прежняя
+    редакция говорила так про ЕДИНСТВЕННУЮ красную совещательную (154). Нашёл
+    разбор на #101.
+    """
+    said = module.rerun_reason([], ["test-next"], run=100, tries=1)
+    assert said == module.ADVISORY_ONLY
+    assert said != module.NOT_ALONE
+
+
+def test_advisory_reds_never_reach_a_rerun() -> None:
+    """Совещательное красное не перезапускается ни в каком числе.
+
+    Оно не держит ничего и уходит в долг источника 3 (084): перезапуск ради
+    него тратил бы прогон на то, что и так записано.
+    """
+    assert module.rerun_reason([], ["a", "b"], run=100, tries=1) == module.ADVISORY_ONLY

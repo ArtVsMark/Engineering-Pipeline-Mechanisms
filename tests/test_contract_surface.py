@@ -199,3 +199,31 @@ def test_the_gate_is_declared_required() -> None:
     """Гейт объявлен держащим слияние: правка поверхности ломает потребителя молча."""
     checks = policy.load()
     assert checks["contract"].klass == policy.REQUIRED
+
+
+#: Что документ обязан назвать, говоря о поверхности, — по одному слову на род
+#: снимка. Слово, а не фраза: проза правится, состав снимка — нет.
+SURFACE_WORDS = {
+    "jobs": "джоб",
+    "events": "событ",
+    "inputs": "вход",
+    "checks": "проверок",
+}
+
+
+def test_the_release_doc_names_the_same_surface_as_the_mechanism() -> None:
+    """Список поверхности в договоре о выпуске — один и сверен с механизмом.
+
+    Прежде их было два подряд, перекрывающихся: «имена шагов и их входы» рядом
+    с «имена джобов» и «входы ручного запуска», «форма .pipeline.yml» рядом с
+    «имена проверок в .pipeline.yml». Первый список к тому же говорил о ШАГАХ,
+    а снимок берёт джобы — то есть документ противоречил и себе, и
+    `contract.py`. Нашёл разбор на #108.
+    """
+    text = (ROOT / "docs" / "release.md").read_text(encoding="utf-8")
+    head = text.index("В снимок входит")
+    said = text[head : text.index("\n\n", text.index("- ", head) + 200)]
+    for field, word in SURFACE_WORDS.items():
+        assert word in said.lower(), f"поверхность не названа по роду «{field}»"
+    assert "имена шагов" not in said, "шаг — термин договора, а снимок берёт джобы"
+    assert said.count("`.pipeline.yml`") == 1, "ответ проекта назван в списке дважды"
