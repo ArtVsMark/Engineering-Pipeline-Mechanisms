@@ -328,11 +328,27 @@ def _read_section(
     return checks, problems
 
 
-def names_of(checks: dict[str, Check], klass: str) -> list[str]:
-    """Отдаёт имена проверок одного класса в порядке объявления."""
+def names_of(checks: dict[str, Check], klass: str, *, beyond: bool | None = False) -> list[str]:
+    """Имена проверок одного класса в порядке объявления.
+
+    РАЗДЕЛ СПРАШИВАЕТСЯ ВМЕСТЕ С КЛАССОМ, И УМОЛЧАНИЕ — ПЕРВЫЙ. Со схемы 4
+    ответов два раздела, а `checks` отдаёт их одним отображением: имя из
+    `beyond_the_change` попадало в список совещательных, и сводный гейт начинал
+    искать на голове ИЗМЕНЕНИЯ записи прогонов, которые там не появляются
+    вовсе. Часть из них там всё же есть — `agent-pr` идёт по толчку той же
+    ветки, — и его красное приезжало в вердикт по изменению как совещательная
+    проверка. Нашёл внешний взгляд на #150.
+
+    ``beyond=None`` значит «из любого раздела»: печать состава спрашивает
+    именно так, потому что показывает оба.
+    """
     if klass not in CLASSES:
         raise BadPolicy(f"класс «{klass}» неизвестен, из {', '.join(CLASSES)}")
-    return [check.name for check in checks.values() if check.klass == klass]
+    return [
+        check.name
+        for check in checks.values()
+        if check.klass == klass and (beyond is None or check.beyond is beyond)
+    ]
 
 
 def run_of(path: Path) -> dict[Any, Any]:
@@ -402,12 +418,11 @@ def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, J
 
     jobs: dict[str, Job] = {}
     for path in sorted(directory.glob("*.y*ml")):
-        try:
-            document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except yaml.YAMLError as exc:
-            raise BadPolicy(f"{path} не разбирается: {exc}") from exc
-        if not isinstance(document, dict):
-            raise BadPolicy(f"{path}: ожидалось отображение, пришло {type(document).__name__}")
+        # Разбор один на всех читателей прогонов: второй разбор той же формы —
+        # это второе её понимание, и расходятся они молча (090). Нашёл внешний
+        # взгляд на #150: `run_of` завели ровно ради этого, а здесь остался
+        # прежний разбор.
+        document = run_of(path)
         if ON_CHANGE not in _triggers_of(document):
             continue
 
