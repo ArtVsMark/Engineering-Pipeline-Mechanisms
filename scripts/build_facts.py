@@ -45,7 +45,11 @@ import version
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
+#: Значки ветки `badges`: имя файла → как его собрать. Списком, а не тремя
+#: вызовами подряд: добавить значок должно быть правкой данных, а не кода (049).
 BADGE: Final = "rules.svg"
+FAMILY_BADGE: Final = "family.svg"
+VERSION_BADGE: Final = "version.svg"
 
 #: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
 #: а не новая тонкость, о которой механизм обязан догадаться.
@@ -197,19 +201,59 @@ def badge(label: str, value: str, color: str) -> str:
     )
 
 
-def rules_badge(facts: dict[str, Any]) -> str:
-    """Значок один: сколько правил каталога проект уже держит.
+#: Роды ответа, означающие «держит машина». Тот же состав, что у разреза семьи
+#: и у дрейфа: три понимания одного слова разошлись бы молча (090).
+MACHINE: Final = frozenset({"gate", "pipeline", "code"})
 
-    Выбрано это число, а не «сборка зелёная»: зелёная сборка говорит о
-    последнем прогоне, а доля разобранных правил — о том, где проект стоит, и
-    она движется медленно и честно.
+
+def rules_badge(facts: dict[str, Any]) -> str:
+    """Сколько ДЕЙСТВУЮЩИХ правил держится машиной, а не документом.
+
+    ПОЧЕМУ НЕ «ОТВЕЧЕНО». Прежняя редакция показывала `answered/total` и
+    подписывала это «правил держится». Число было `195/195` и не могло стать
+    другим: проект отвечает по каждому правилу каталога по построению (129).
+    Значок, который не движется, — украшение: он не говорит, где проект стоит, и
+    не может сказать, что тот сдвинулся. Нашёл это владелец, спросив, почему
+    статистика собирается не вся.
+
+    ЗНАМЕНАТЕЛЬ — ДЕЙСТВУЮЩИЕ, А НЕ ВСЕ. Неприменимое правило машиной не
+    держится и держаться не должно; считать его в знаменателе значило бы
+    занижать долю за то, у чего нет предмета (154).
     """
-    rules = facts["rules"]
-    total = int(rules["total"])
-    answered = int(rules["answered"])
-    share = answered / total if total else 0.0
+    kinds = facts["rules"]["by_mechanism"]
+    machine = sum(int(count) for name, count in kinds.items() if name in MACHINE)
+    active = sum(int(count) for count in kinds.values())
+    share = machine / active if active else 0.0
     color = "#e05d44" if share < 0.34 else "#dfb317" if share < 0.67 else "#4c1"
-    return badge("правил держится", f"{answered}/{total}", color)
+    return badge("держится машиной", f"{machine}/{active}", color)
+
+
+def family_badge(facts: dict[str, Any]) -> str:
+    """Доля машинного соблюдения семьи, которую закрывают ОБЩИЕ механизмы.
+
+    Это прямое мерило «второго исхода» эпика #2: если общий модуль окупается,
+    доля растёт; если нет — стоит на месте, и это видно числом, а не ощущением.
+    Снимок не пришёл — значок не выдумывается, а говорит «нет данных» (045).
+    """
+    picture = facts.get("family") or {}
+    share = picture.get("share")
+    if not isinstance(share, int | float) or not picture.get("consumers"):
+        return badge("общие механизмы", "нет данных", "#9f9f9f")
+    percent = round(float(share) * 100)
+    color = "#e05d44" if percent < 30 else "#dfb317" if percent < 60 else "#4c1"
+    return badge("общие механизмы", f"{percent}% семьи", color)
+
+
+def version_badge(facts: dict[str, Any]) -> str:
+    """Версия проекта: она СЧИТАЕТСЯ по истории, и значок показывает счёт.
+
+    Неполнота названа цветом и словом: клон без тегов даёт правдоподобное
+    число, которое ложь, и молчать об этом нельзя (045).
+    """
+    number = str(facts.get("version") or "?")
+    whole = bool(facts.get("version_whole"))
+    said = number if whole else f"{number} (неполно)"
+    return badge("версия", said, "#4c1" if whole else "#dfb317")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -230,7 +274,12 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
-    (out / BADGE).write_text(rules_badge(facts) + "\n", encoding="utf-8")
+    for name, draw in (
+        (BADGE, rules_badge),
+        (FAMILY_BADGE, family_badge),
+        (VERSION_BADGE, version_badge),
+    ):
+        (out / name).write_text(draw(facts) + "\n", encoding="utf-8")
 
     rules = facts["rules"]
     print(
