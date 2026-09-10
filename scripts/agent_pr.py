@@ -92,6 +92,11 @@ def changed_files(branch: str, base: str) -> list[str]:
     return [name for name in out.split("\0") if name]
 
 
+def current_branch() -> str:
+    """Имя текущей ветки — для сухого прогона на своём дереве."""
+    return git("rev-parse", "--abbrev-ref", "HEAD").strip()
+
+
 def describe(branch: str, base: str) -> tuple[str, str]:
     """Собирает заголовок и тело изменения из коммитов ветки."""
     merge_base = git("merge-base", f"origin/{base}", branch).strip()
@@ -269,7 +274,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        if not args.repo or not args.branch:
+        # СУХОМУ ПРОГОНУ ХВАТАЕТ ДЕРЕВА. Имя ветки он берёт у git, а репозиторий
+        # ему не нужен вовсе: на площадку он не ходит. Требовать переменные
+        # прогона там, где предмет виден локально, значило бы оставить свой
+        # прогон перед толчком без этой проверки.
+        if args.dry_run and not args.branch:
+            args.branch = current_branch()
+        if not args.branch or (not args.repo and not args.dry_run):
             raise NotRun("не названы репозиторий или ветка")
 
         if not args.branch.startswith(PREFIXES):
@@ -278,6 +289,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"({', '.join(PREFIXES)}) — изменение не открывается.\n"
                 "Имя ветки здесь переключатель поведения (003), а не оформление."
             )
+            return EXIT_OK
+
+        # СУХОЙ ПРОГОН НЕ ХОДИТ НА ПЛОЩАДКУ ВОВСЕ, и это не мелочь удобства.
+        # Приставка ветки и связь с задачей — свойства ВЕТКИ: они видны на
+        # дереве, и проверять их у площадки незачем. Пока сухой прогон требовал
+        # токен, свой прогон перед толчком этого не видел, и связь ловилась уже
+        # отказом `agent-pr` — то есть после толчка. Замер 10.09.2026: три
+        # ветки подряд ушли без связи, и каждая вернулась красной.
+        if args.dry_run:
+            title, body = describe(args.branch, args.base)
+            print(f"открыло бы: {title}\n\n{body}")
             return EXIT_OK
 
         token = os.environ.get("MERGE_QUEUE_TOKEN", "")
@@ -311,10 +333,6 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK
 
         title, body = describe(args.branch, args.base)
-        if args.dry_run:
-            print(f"открыло бы: {title}\n\n{body}")
-            return EXIT_OK
-
         created = ghrest.request(
             "POST",
             f"repos/{args.repo}/pulls",

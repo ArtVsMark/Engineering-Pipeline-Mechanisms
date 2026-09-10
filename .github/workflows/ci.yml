@@ -223,14 +223,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: фрагмент журнала
+      # БАЗА ПОДТЯГИВАЕТСЯ ОТДЕЛЬНЫМ ШАГОМ, а не внутри блока проверки. Свой
+      # прогон перед толчком берёт команды блоками целиком и блок с `git fetch`
+      # запустить не может: локально это не проверка, а правка чужого дерева.
+      # Пока фетч жил внутри, гейт журнала был виден только площадке — и ловил
+      # то, что видно на дереве, уже после толчка.
+      - name: подтянуть базу
         env:
           GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
           base="${GITHUB_BASE_REF:-main}"
           git fetch --no-tags origin "$base:refs/remotes/origin/$base"
-          python scripts/check_journal.py
+      - name: фрагмент журнала
+        env:
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python scripts/check_journal.py
       # Собранный журнал здесь НЕ сверяется: он собирается при выпуске (030).
       # Общий файл, который трогает каждая ветка, даёт конфликт на каждом
       # втором изменении — ровно тот инцидент, из-за которого правило и есть.

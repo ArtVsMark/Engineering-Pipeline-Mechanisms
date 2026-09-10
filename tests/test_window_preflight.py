@@ -251,7 +251,7 @@ def test_a_block_needing_the_platform_is_skipped_whole(tmp_path: Path) -> None:
             "jobs:\n  x:\n    steps:\n      - name: журнал\n        run: |\n"
             "          set -euo pipefail\n"
             "          git fetch --no-tags origin main\n"
-            "          python scripts/check_journal.py\n"
+            "          python scripts/check_pr_meta.py\n"
             "      - name: линтер\n        run: ruff check scripts/\n"
         ),
     )
@@ -289,3 +289,41 @@ def test_the_shell_is_the_one_the_platform_uses() -> None:
     """
     source = (ROOT / "scripts" / "preflight.py").read_text(encoding="utf-8")
     assert 'executable="/bin/bash"' in source, "оболочка не названа — команды пойдут через sh"
+
+
+# --- проверки ветки, которых нет шагом прогона --------------------------------
+
+
+def test_branch_checks_run_before_the_workflow_ones() -> None:
+    """Проверки ветки идут первыми: без них остальное бессмысленно.
+
+    Красное здесь значит, что изменение не откроется вовсе, — и прогонять
+    линтер по ветке, которая никуда не поедет, незачем.
+    """
+    assert preflight.BEFORE_PUSH
+    assert "agent_pr.py --dry-run" in preflight.BEFORE_PUSH[0].command
+
+
+def test_the_branch_check_is_not_a_second_list_of_the_workflow() -> None:
+    """Это не второй список тех же команд (022), а то, чего в прогоне нет.
+
+    Предмет у проверок ветки — состояние ДО открытия изменения: приставка и
+    связь с задачей. Шага с такой командой нет ни в одном прогоне, потому что
+    прогон запускается уже после.
+    """
+    workflow = {step.command for step in preflight.steps()}
+    assert not any(step.command in workflow for step in preflight.BEFORE_PUSH)
+
+
+def test_the_journal_gate_is_run_locally() -> None:
+    """Гейт журнала спрашивается своим прогоном, а не только площадкой.
+
+    Замер 10.09.2026: три изменения подряд покраснели на разборе фрагмента —
+    имя, род и ссылка на задачу видны на дереве целиком, а ловились уже после
+    толчка. Причина была механической: `git fetch` жил внутри блока проверки, и
+    блок целиком считался требующим площадки.
+    """
+    commands = " ".join(step.command for step in preflight.steps())
+    assert "check_journal.py" in commands
+    assert "build_changelog.py --fragments" in commands
+    assert "git fetch" not in commands
