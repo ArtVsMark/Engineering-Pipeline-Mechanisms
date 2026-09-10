@@ -72,8 +72,22 @@ def test_the_boundary_is_a_commit_not_a_date() -> None:
     )
 
 
+def shared_branch() -> str:
+    """Общая ветка, как её видит прогон, — а НЕ `HEAD`.
+
+    На изменении площадка выдаёт рабочим деревом искусственный коммит слияния
+    `refs/pull/N/merge`. Он первопредок и трейлеров не несёт — их некому туда
+    положить, — и проверка по `HEAD` краснела бы на КАЖДОМ изменении. Предмет
+    же у прогона другой: история общей ветки, `origin/main`.
+    """
+    for name in (str(gate_step()["with"].get("ref", "")).strip(), "origin/main", "HEAD"):
+        if name and revision(name):
+            return name
+    return "HEAD"
+
+
 def test_nothing_after_the_boundary_lacks_attribution() -> None:
-    """После отметки история чиста — иначе прогон красен неотвратимо.
+    """После отметки история общей ветки чиста — иначе прогон красен неотвратимо.
 
     Вечное красное не сигнал, а фон: рядом с ним не заметят настоящего (051).
     Отметка потому и объявляется руками — она отделяет то, что переписать уже
@@ -88,7 +102,7 @@ def test_nothing_after_the_boundary_lacks_attribution() -> None:
             "log",
             "--first-parent",
             "--format=%h|%(trailers:key=Co-Authored-By,valueonly,separator=;)",
-            f"{since}..HEAD",
+            f"{since}..{shared_branch()}",
         ],
         capture_output=True,
         text=True,
