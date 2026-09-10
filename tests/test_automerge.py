@@ -12,13 +12,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
+import yaml
 
-from tests.conftest import RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script
 
 module = load_script("automerge.py")
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def change(
@@ -349,7 +352,9 @@ def test_pending_checks_make_the_queue_wait_not_skip(platform: dict[str, Any]) -
     """
     platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
     platform["runs"] = {1: ([], True)}
-    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    # Шаг ожидания ноль: проверке нельзя спать пять минут — тест, который столько
+    # ждёт, перестают гонять. Что ожидание ЕСТЬ, держат проверки `wait_for_head`.
+    assert module.advance("o/r", "token", "main", dry_run=False, wait_step=0) == module.EXIT_OK
     assert platform["merged"] == []
 
 
@@ -686,3 +691,89 @@ def test_the_source_of_a_change_is_decided_without_the_platform() -> None:
     assert module.source_of(plan, red=True) == module.RANK_OWN_RED
     fixing = change(2, "automerge", module.LABEL_FIX_MAIN)
     assert module.source_of(fixing, red=True) == module.RANK_MAIN_RED
+
+
+# --- очередь ждёт свою голову ------------------------------------------------
+
+
+def test_the_queue_waits_instead_of_hoping_for_an_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проверки идут — заход ждёт их, а не выходит в надежде на событие.
+
+    Событие приходит исправно: замер 10.09.2026 — за завершением `ci` на ветке
+    заход очереди следовал в 25 случаях из 25, медиана две секунды. Но заход
+    ГИБНЕТ В ОЖИДАНИИ: группа держит один ожидающий, и новый его вытесняет — 45
+    из 120 умерли, не начав работу. Выживший видит «идут», и повторить его
+    больше некому.
+    """
+    answers: Iterator[tuple[list[str], bool]] = iter([([], True), ([], True), ([], False)])
+    monkeypatch.setattr(module, "head_verdict", lambda *_: next(answers))
+    slept: list[float] = []
+    change = module.Change(
+        number=7,
+        branch="agent/x",
+        base="main",
+        head="abc",
+        title="что-то",
+        body="",
+        draft=False,
+        marks=frozenset(),
+    )
+    problems, waiting = module.wait_for_head("o/r", change, "token", sleep=slept.append)
+    assert (problems, waiting) == ([], False)
+    assert len(slept) == 2, "заход не ждал между опросами"
+
+
+def test_the_wait_has_a_named_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Предел назван числом: ждать без предела значит держать исполнителя.
+
+    Дождавшись предела, заход честно говорит «ещё идут» и уходит — его добудит
+    следующее событие или кнопка (104).
+    """
+    monkeypatch.setattr(module, "head_verdict", lambda *_: ([], True))
+    slept: list[float] = []
+    change = module.Change(
+        number=7,
+        branch="agent/x",
+        base="main",
+        head="abc",
+        title="что-то",
+        body="",
+        draft=False,
+        marks=frozenset(),
+    )
+    _, waiting = module.wait_for_head("o/r", change, "token", tries=3, step=1, sleep=slept.append)
+    assert waiting is True
+    assert len(slept) == 3, "заход ждал не столько раз, сколько объявлено"
+
+
+def test_a_ready_head_is_not_waited_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Голова уже готова — заход не спит ни секунды.
+
+    Иначе каждое слияние стоило бы лишнего ожидания на ровном месте.
+    """
+    monkeypatch.setattr(module, "head_verdict", lambda *_: (["красное"], False))
+    slept: list[float] = []
+    change = module.Change(
+        number=7,
+        branch="agent/x",
+        base="main",
+        head="abc",
+        title="что-то",
+        body="",
+        draft=False,
+        marks=frozenset(),
+    )
+    problems, waiting = module.wait_for_head("o/r", change, "token", sleep=slept.append)
+    assert problems == ["красное"] and waiting is False
+    assert slept == []
+
+
+def test_the_limit_fits_the_job_timeout() -> None:
+    """Ожидание короче предела джоба: иначе заход убьют на середине.
+
+    Убитый на середине заход не оставляет следа о том, чего он ждал, — и это
+    хуже, чем честный выход по своему пределу (039).
+    """
+    document = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))
+    limit = document["jobs"]["automerge"]["timeout-minutes"] * 60
+    assert limit > module.WAIT_TRIES * module.WAIT_STEP, "ожидание длиннее предела джоба"
