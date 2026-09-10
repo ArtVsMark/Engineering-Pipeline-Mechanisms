@@ -573,17 +573,29 @@ def mark_closed_items(repo: str, change: Change, owner_token: str, *, dry_run: b
         return
 
     left = list(items)
+    unwritten: list[str] = []
     for number in numbers:
+        # Список объявляется ДО попытки: отказ на самом чтении задачи оставил
+        # бы имя неопределённым, и разбор отказа упал бы раньше, чем сообщил о
+        # нём.
+        pending: list[str] = []
         try:
             issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", owner_token) or {}
             body = str(issue.get("body") or "")
             updated = body
-            here: list[str] = []
+            already: list[str] = []
             for item in list(left):
                 after, found = marked(updated, item)
-                if found:
-                    updated = after
-                    here.append(item)
+                if not found:
+                    continue
+                # Пункт, УЖЕ отмеченный раньше, записи не требует, и отказ
+                # записи по соседнему пункту той же задачи его не касается.
+                # Общий счёт объявил бы его ненайденным — то есть механизм
+                # звал бы на помощь там, где всё на месте (045).
+                (pending if after != updated else already).append(item)
+                updated = after
+            for item in already:
+                left.remove(item)
             if updated != body:
                 ghrest.request(
                     "PATCH", f"repos/{repo}/issues/{number}", owner_token, {"body": updated}
@@ -592,12 +604,23 @@ def mark_closed_items(repo: str, change: Change, owner_token: str, *, dry_run: b
             # раньше значило бы объявить обработанным то, что не записалось:
             # отказ на одной из нескольких задач тихо съел бы пункт, и он не
             # попал бы ни в отметку, ни в список ненайденных.
-            for item in here:
+            for item in pending:
                 left.remove(item)
-            if here:
-                print(f"  #{number}: пунктов на месте {len(here)} из {len(items)}")
+            if already or pending:
+                print(
+                    f"  #{number}: пунктов на месте {len(already) + len(pending)} из {len(items)}"
+                )
         except ghrest.TransportError as exc:
             print(f"  пункты в #{number} не отмечены: {report.cut(str(exc))}")
+            for item in pending:
+                if item in left:
+                    left.remove(item)
+                    unwritten.append(item)
+    # Два разных состояния и два разных сообщения: «пункта нигде нет» зовёт
+    # проверить формулировку, «нашёлся, но не записался» — повторить заход.
+    # Одно слово на оба отправило бы человека искать несуществующую опечатку.
+    for item in unwritten:
+        print(f"  пункт найден, но запись не удалась: «{item}»")
     for item in left:
         print(f"  пункт не найден ни в одной связанной задаче: «{item}»")
 

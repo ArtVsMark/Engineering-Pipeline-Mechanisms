@@ -142,10 +142,15 @@ def test_the_two_platform_sources_are_published_where_they_are_found(
 
 
 def test_every_candidate_gets_its_source_published(platform: dict[str, Any]) -> None:
-    """Метку получает каждый кандидат, а не только тот, кого пропустили."""
+    """Метку получает каждый кандидат — и ту, которая ему присвоена.
+
+    Сверять одни номера мало: заход, выставивший всем одну и ту же ступень,
+    прошёл бы такую проверку, а очередь по такой метке читалась бы неверно.
+    Оба кандидата здесь из плана, и сказано это должно быть именно так.
+    """
     platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
     module.advance("o/r", "token", "main", dry_run=False)
-    assert {number for number, _ in platform["sources"]} == {1, 2}
+    assert set(platform["sources"]) == {(1, module.RANK_PLAN), (2, module.RANK_PLAN)}
 
 
 def test_a_finding_repair_outruns_the_plan() -> None:
@@ -779,11 +784,15 @@ def test_an_already_done_item_is_not_called_missing(
 def test_a_failed_write_keeps_the_item_in_the_count(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Пункт уходит из счёта только после удавшейся записи.
+    """Пункт уходит из счёта только после удавшейся записи — и назван верно.
 
     Убрать его раньше значило бы объявить обработанным то, что не записалось:
     отказ на одной из нескольких задач тихо съел бы пункт, и он не попал бы ни
-    в отметку, ни в список ненайденных.
+    в отметку, ни в отчёт.
+
+    Но и «не найден» здесь неправда: пункт нашёлся, не записался. Одно слово на
+    оба состояния отправило бы человека искать опечатку в формулировке, которой
+    нет, — а повторить заход не подсказало бы (154).
     """
 
     def platform(method: str, path: str, tok: str, body: Any = None) -> Any:
@@ -796,7 +805,8 @@ def test_a_failed_write_keeps_the_item_in_the_count(
     module.mark_closed_items("o/r", item, "token", dry_run=False)
     printed = capsys.readouterr().out
     assert "не отмечены" in printed
-    assert "пункт не найден" in printed, "пункт исчез из счёта, хотя запись не удалась"
+    assert "запись не удалась" in printed, "пункт исчез из счёта, хотя запись не удалась"
+    assert "не найден" not in printed, "найденный пункт назван ненайденным"
 
 
 def test_a_held_change_is_reported_after_the_consent_is_gone(
@@ -810,3 +820,32 @@ def test_a_held_change_is_reported_after_the_consent_is_gone(
     """
     module.report_held([change(7, "hold")])
     assert "#7" in capsys.readouterr().out
+
+
+def test_an_already_marked_item_survives_a_failed_neighbour(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ записи по одному пункту не превращает соседний в ненайденный.
+
+    ЗАМЕР — находка ревью по #86. Пункт, отмеченный ещё прошлым заходом, записи
+    не требует: он уже на месте. Общий счёт снимался только после удавшегося
+    PATCH, поэтому отказ по СОСЕДНЕМУ пункту той же задачи уносил и его — и
+    механизм звал на помощь там, где всё в порядке (045).
+    """
+
+    def platform(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET":
+            return {"body": "- [x] первый этап\n- [ ] второй этап\n"}
+        raise module.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    item = change(
+        1,
+        "automerge",
+        body="Refs #25\nЗакрывает пункт: первый этап\nЗакрывает пункт: второй этап",
+    )
+    module.mark_closed_items("o/r", item, "token", dry_run=False)
+    printed = capsys.readouterr().out
+    assert "не найден" not in printed, "уже отмеченный пункт объявлен ненайденным"
+    assert "первый этап" not in printed, "пункт, который был на месте, попал в отчёт об отказе"
+    assert "второй этап" in printed, "пункт, который не записался, из отчёта пропал"
