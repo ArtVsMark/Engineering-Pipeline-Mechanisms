@@ -106,7 +106,9 @@ def live_issue_seen(repo: str, token: str, marker: str = MARKER) -> tuple[int | 
     Годится она ровно на то, для чего взята, — заметить ПРОПУЩЕННЫЙ заход.
     """
     found: list[tuple[int, str, str]] = []
+    seen = 0
     for item in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
+        seen += 1
         # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
         if item.get("pull_request") is not None:
             continue
@@ -114,6 +116,20 @@ def live_issue_seen(repo: str, token: str, marker: str = MARKER) -> tuple[int | 
         if marker in body:
             found.append((int(item["number"]), body, str(item.get("updated_at") or "")))
     if not found:
+        # ПУСТОЙ ОТВЕТ ПЛОЩАДКИ — НЕ «ЗАДАЧИ НЕТ». Список открытых записей у
+        # живого проекта пуст не бывает: там всегда есть хотя бы эта самая
+        # задача. Ноль записей означает, что ответ подозрителен — площадка
+        # отдала 200 с пустым телом, — и принять его за отсутствие значит
+        # завести вторую живую задачу на ровном месте (045).
+        #
+        # Замер 10.09.2026: так и вышло. Заход в 15:00:50 не нашёл #23, завёл
+        # #139 и переписал в неё 47 записей; уникального в ней не оказалось ни
+        # одного — все они уже лежали в #23, и следующий заход снова писал туда.
+        if not seen:
+            raise ghrest.TransportError(
+                "площадка вернула пустой список открытых записей — это не «задачи нет», "
+                "а подозрительный ответ: заводить вторую живую задачу по нему нельзя (045)"
+            )
         return None, "", ""
     found.sort()
     if len(found) > 1:

@@ -330,3 +330,60 @@ def test_the_aggregate_does_not_go_red_on_a_cancelled_matrix() -> None:
     assert "cancelled" in condition, (
         "агрегат краснеет на отменённой матрице — это красная запись мёртвого прогона"
     )
+
+
+#: Пометка, которой договор называет ОБЪЯВЛЕННЫЙ, но ещё не построенный шаг.
+#: Прочерк без слова читался бы как «файла нет и не нужно», а слово — как «шаг
+#: обещан и его ждут» (154).
+NOT_BUILT = "не построен"
+
+
+def test_every_file_named_by_the_contract_exists() -> None:
+    """Прогон, названный в таблице шагов, лежит в дереве — или помечен непостроенным.
+
+    Договор, обещающий механизм, которого нет, — это не пробел, а ложь о
+    действительности: читатель видит имя файла и считает шаг существующим.
+    Замер 10.09.2026: так стояли `thaw.yml` (шаг 10) и `stuck-prs.yml` (шаг 11),
+    причём второй не был назван и в таблице пробелов — то есть не существовал
+    вовсе нигде, кроме обещания (046, 175).
+    """
+    doc = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
+    live = {path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")}
+    missing: list[str] = []
+    for row in doc.splitlines():
+        if not row.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        for name in re.findall(r"`([\w.-]+\.yml)`", cells[2]):
+            if name not in live and NOT_BUILT not in cells[2]:
+                missing.append(name)
+    assert not missing, (
+        f"договор называет прогоны, которых в дереве нет: {sorted(set(missing))}. "
+        f"Постройте их или пометьте строку словом «{NOT_BUILT}»"
+    )
+
+
+def test_an_unbuilt_step_is_named_among_the_gaps() -> None:
+    """Непостроенный шаг назван в таблице пробелов свода, а не только помечен.
+
+    Пометка в договоре говорит «этого нет», но не говорит, КОГДА появится и чем
+    держится сейчас. Раздел «Чего в проекте ещё нет» несёт адрес задачи — то
+    есть переводит отсутствие в работу, а не оставляет фактом (046).
+
+    СВЕРЯЕТСЯ ИМЯ ПРОГОНА, А НЕ НОМЕР ШАГА. Первая редакция искала «шаг 11» и
+    столкнулась с соседним гейтом: в строках пробелов числа прозой запрещены
+    (005, 175), и номер пришлось писать словом. Имя прогона цифр не содержит,
+    уникально и не зависит от того, как в своде записаны числа.
+    """
+    doc = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
+    gaps = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    for row in doc.splitlines():
+        if not row.startswith("|") or NOT_BUILT not in row:
+            continue
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        name = cells[3].strip().strip("`") if len(cells) > 3 else ""
+        assert name and f"`{name}`" in gaps, (
+            f"шаг «{name}» помечен непостроенным в договоре, а в таблице пробелов свода его нет"
+        )
