@@ -159,9 +159,9 @@ def test_the_version_is_not_written_by_hand() -> None:
 def test_a_prerelease_tag_does_not_swallow_the_release(tmp_path: Path) -> None:
     """Предрелизный тег рядом не делает «выпусков не видно вовсе».
 
-    Прежде спрашивался ближайший тег по образцу, и `v0.2.0-rc1` под образец
+    Прежде спрашивался ближайший тег по образцу, и предрелизный под образец
     подходит, а под строгую форму — нет: ответом становилось `None`, хотя рядом
-    лежал настоящий `v0.1.0`. Один предрелизный тег обнулял бы версию проекта и
+    лежал настоящий выпуск. Один предрелизный тег обнулял бы версию проекта и
     значок. Нашёл внешний взгляд на #106.
     """
     run = partial(subprocess.run, cwd=tmp_path, check=True, capture_output=True)
@@ -169,16 +169,16 @@ def test_a_prerelease_tag_does_not_swallow_the_release(tmp_path: Path) -> None:
     (tmp_path / "readme.md").write_text("раз\n", encoding="utf-8")
     run(["git", "add", "-A"])
     run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "раз"])
-    run(["git", "tag", "v0.1.0"])
+    run(["git", "tag", "v7.3.0"])
     (tmp_path / "readme.md").write_text("два\n", encoding="utf-8")
     run(["git", "add", "-A"])
     run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "два (#7)"])
-    run(["git", "tag", "v0.2.0-rc1"])
+    run(["git", "tag", "v7.4.0-rc1"])
 
-    assert module.release_tag(tmp_path) == "v0.1.0"
+    assert module.release_tag(tmp_path) == "v7.3.0"
     number, whole = module.version(tmp_path)
     assert whole is True
-    assert number == "0.1.1"
+    assert number == "7.3.1"
 
 
 def test_the_tree_is_the_one_asked_about(tmp_path: Path) -> None:
