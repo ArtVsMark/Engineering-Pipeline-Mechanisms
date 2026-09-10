@@ -137,3 +137,54 @@ def test_this_project_leans_on_gates() -> None:
     active = [item for item in answers().values() if item["status"] == "active"]
     gates = [item for item in active if item.get("mechanism") == "gate"]
     assert len(gates) >= len(active) // 4, "механизмов-гейтов подозрительно мало для этого проекта"
+
+
+#: Поля, обязательные у предложения по контракту каталога (export/README.md).
+#: Список закрытый и взят оттуда, а не придуман здесь: расхождение форм значило
+#: бы, что предложение уедет и не будет принято (162).
+PROPOSAL_FIELDS = ("slug", "claim", "incident", "trail")
+#: Насколько подробным должен быть инцидент. Число не из вкуса: «что сломалось,
+#: С КОНКРЕТИКОЙ» — требование контракта, а строка короче этого конкретики не
+#: несёт и заставит каталог спрашивать заново.
+INCIDENT_AT_LEAST = 200
+
+
+def proposals() -> list[dict[str, Any]]:
+    """Предложения проекта каталогу."""
+    document: dict[str, Any] = json.loads(PROPOSALS.read_text(encoding="utf-8"))
+    said = document.get("proposals")
+    return list(said) if isinstance(said, list) else []
+
+
+@pytest.mark.parametrize("item", proposals(), ids=lambda one: str(one.get("slug", "?")))
+def test_a_proposal_carries_what_the_catalogue_asks(item: dict[str, Any]) -> None:
+    """У предложения есть все поля контракта, и инцидент — с конкретикой.
+
+    Потребитель шлёт ИНЦИДЕНТ, а не готовую запись: что сломалось, с числами и
+    последовательностью событий. Предложение без этого каталог принять не может
+    — ему придётся спрашивать заново, и правило, родившееся здесь, останется
+    здесь (080).
+    """
+    for field in PROPOSAL_FIELDS:
+        assert item.get(field), f"{item.get('slug', '?')}: поля «{field}» нет"
+    assert len(str(item["incident"])) >= INCIDENT_AT_LEAST, (
+        f"{item['slug']}: инцидент без конкретики — каталогу придётся спрашивать заново"
+    )
+
+
+@pytest.mark.parametrize("item", proposals(), ids=lambda one: str(one.get("slug", "?")))
+def test_a_proposal_trail_resolves_in_the_tree(item: dict[str, Any]) -> None:
+    """След предложения — артефакт ЭТОГО дерева, где поломка видна (044).
+
+    Ссылка на то, чего нет, превращает инцидент в рассказ: проверить его
+    каталог не сможет, а поверить ему — не должен.
+    """
+    said = str(item.get("trail") or "")
+    assert (ROOT / said).exists(), f"{item.get('slug', '?')}: след «{said}» не разрешается"
+
+
+def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:
+    """Слаг — короткое имя латиницей: по нему каталог отвечает по каждому."""
+    for item in proposals():
+        said = str(item.get("slug") or "")
+        assert re.fullmatch(r"[a-z0-9-]+", said), f"слаг «{said}» не по форме контракта"

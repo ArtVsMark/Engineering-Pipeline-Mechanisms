@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
 
@@ -101,3 +101,43 @@ def test_the_foreign_list_is_not_a_graveyard() -> None:
     """
     stray = sorted(set(FOREIGN) & tree_names())
     assert not stray, f"эти имена есть в дереве и в исключении не нуждаются: {stray}"
+
+
+#: Любой адрес файла в ответе, включая документы: нужен, чтобы отличить
+#: «назван документ» от «не названо ничего» — это разные находки (154).
+ANY_FILE_RE: Final = re.compile(r"(?<![\w./-])(\.?[\w./-]+\.[a-z]{2,5})\b")
+#: Что считается ИСПОЛНЯЕМЫМ адресом: то, что можно запустить и получить код
+#: возврата. Список закрытый: «похоже на путь» приняло бы и документ, а весь
+#: смысл правила в том, что документ механизмом не является.
+RUNNABLE_SUFFIXES = (".py", ".yml", ".yaml")
+#: Механизмы, у которых исполняемого адреса нет и быть не может, — с причиной.
+#: Пустой список тут был бы честнее пустой отговорки: имя попадает сюда только
+#: тогда, когда предмет действительно вне дерева (154).
+RUNNABLE_ELSEWHERE: dict[str, str] = {}
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [(number, one) for number, one in sorted(answers().items()) if one.get("mechanism") == "gate"],
+    ids=lambda pair: str(pair[0]),
+)
+def test_a_gate_names_something_runnable(answer: tuple[str, dict[str, Any]]) -> None:
+    """Ответ «держится гейтом» называет адрес ИСПОЛНЯЕМОГО, а не документа.
+
+    Правило 139: механизм считается работающим по прогону, а не по написанному.
+    Документ прогоном не подтверждается вовсе — он не запускается; ответ,
+    называющий гейтом абзац в `AGENTS.md`, обещает проверку, которой нет.
+
+    Правило соблюдалось всеми ста пятью ответами и держалось при этом
+    вниманием: сто шестому ничто не мешало назвать документ. Гейт перенесён от
+    каталога, где список видов тоже закрытый (162).
+    """
+    number, one = answer
+    if number in RUNNABLE_ELSEWHERE:
+        return
+    names = ANY_FILE_RE.findall(one.get("where") or "")
+    runnable = [name for name in names if name.endswith(RUNNABLE_SUFFIXES)]
+    assert runnable, (
+        f"правило {number}: ответ «gate» не назвал исполняемого — {names or 'адресов нет'}. "
+        "Механизм подтверждается прогоном, а документ не запускается (139)"
+    )

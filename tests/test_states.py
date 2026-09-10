@@ -1,0 +1,116 @@
+"""У состояния перечислены выходы, и каждый ведёт в существующее состояние.
+
+Правило 109 просит не список ради списка: молчаливый выход из переходного
+состояния — это место, где механизм останавливается и никто не знает почему.
+У соседей оно держится машиной у четверых из пяти: терминальные вердикты
+перечислены в коде, и выход из переходного всегда в терминальное.
+
+Здесь предмет — таблицы состояний трёх контуров в `docs/behaviour.md`. Проверки
+три, и все три о СОДЕРЖАНИИ, а не о форме:
+
+* у каждого состояния колонка выходов непуста;
+* состояние без выходов названо терминальным словом, а не оставлено пустым;
+* имя после стрелки — существующее состояние той же таблицы, а не выдуманное.
+"""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from tests.conftest import ROOT
+
+BEHAVIOUR = ROOT / "docs" / "behaviour.md"
+#: Строка таблицы состояний: имя в жирном, затем колонки. Номерные источники
+#: (`| **0** |`) сюда не попадают — у них другая таблица и другой предмет.
+STATE_ROW = re.compile(r"^\|\s*\*\*(?P<name>[^*\d][^*]*)\*\*\s*\|(?P<rest>.*)\|\s*$", re.M)
+#: Переход: стрелка и то, что за ней. Имя вычленяется отдельно — за стрелкой
+#: бывает не только имя: «→ Работа или Исправление», «→ Зелёный + находка».
+EXIT_TO = re.compile(r"→\s*(?P<said>[^;|→]+)")
+
+
+def names_in(said: str) -> list[str]:
+    """Имена состояний, названные одним переходом.
+
+    За стрелкой стоит не всегда одно имя: «Работа или Исправление» — это два
+    выхода, а «Зелёный + находка о мигании» — одно имя с пояснением. Разбор
+    здесь и решает, что именно проверять как имя.
+    """
+    found: list[str] = []
+    for part in re.split(r"\s+или\s+", said):
+        name = re.split(r"[+*(,.]", part)[0].strip().rstrip(".").strip()
+        if name:
+            found.append(name)
+    return found
+
+
+TERMINAL = "терминальное"
+
+
+def tables() -> list[dict[str, str]]:
+    """Таблицы состояний: имя состояния → колонка выходов.
+
+    Таблицы разделяются заголовками: строки, идущие подряд, — одна таблица.
+    Так и определяется «та же таблица», в которой обязано найтись имя выхода.
+    """
+    found: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    previous_end = -10
+    for match in STATE_ROW.finditer(BEHAVIOUR.read_text(encoding="utf-8")):
+        if match.start() - previous_end > 2 and current:
+            found.append(current)
+            current = {}
+        previous_end = match.end()
+        # Берётся ВСЯ строка, а не последняя колонка: «терминальное» у
+        # состояния без выходов стоит в колонке действия, и читать только
+        # последнюю значило бы объявить его молчащим (живой случай: «Слито»).
+        current[match.group("name").strip()] = match.group("rest")
+    if current:
+        found.append(current)
+    return found
+
+
+def test_there_are_state_tables_to_check() -> None:
+    """Предмет проверки найден: таблиц состояний в договоре несколько (075)."""
+    found = tables()
+    assert len(found) >= 2, f"таблиц состояний разобрано {len(found)}"
+    assert sum(len(one) for one in found) >= 8, "состояний подозрительно мало"
+
+
+@pytest.mark.parametrize(
+    "state",
+    [(name, exits) for table in tables() for name, exits in table.items()],
+    ids=lambda pair: str(pair[0]),
+)
+def test_a_state_names_its_exits(state: tuple[str, str]) -> None:
+    """У состояния либо перечислены выходы, либо оно названо терминальным.
+
+    Пустая колонка читается как «выходов не придумали», а не как «их нет», и
+    отличить одно от другого снаружи нельзя (154).
+    """
+    name, exits = state
+    said = exits.strip().strip("—").strip()
+    assert said, f"«{name}»: колонка выходов пуста — ни перехода, ни слова «{TERMINAL}»"
+    assert "→" in exits or TERMINAL in exits.lower(), (
+        f"«{name}»: выходов не названо, и терминальным состояние не объявлено"
+    )
+
+
+@pytest.mark.parametrize("table", tables(), ids=lambda t: str(sorted(t)[0] if t else "пусто"))
+def test_an_exit_leads_to_a_state_that_exists(table: dict[str, str]) -> None:
+    """Имя после стрелки — состояние той же таблицы, а не выдуманное.
+
+    Выход в несуществующее состояние выглядит как описанный переход и не
+    является им: читатель ищет продолжение и не находит. Это ровно то, что
+    правило 109 и запрещает.
+    """
+    known = {name.strip().lower() for name in table}
+    for name, exits in table.items():
+        for match in EXIT_TO.finditer(exits):
+            for said in names_in(match.group("said")):
+                # Переход в ДРУГОЙ контур называется его словом, а не именем
+                # состояния: такие выходы законны и проверяются чтением.
+                if said.lower().startswith(("контур", "эскалац", "повтор")):
+                    continue
+                assert said.lower() in known, f"«{name}»: выход «{said}» — нет такого состояния"

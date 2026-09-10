@@ -61,6 +61,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -396,6 +398,61 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
     return ci_complete.verdict(ci_complete.worst_per_name(runs), required, "", strict_missing=True)
 
 
+#: Сколько заход ждёт, пока проверки головы закончатся, и с каким шагом. Числа
+#: названы, а не подобраны: полный прогон гейтов у проекта укладывается в
+#: пять–семь минут, и восемь заходов по сорок секунд перекрывают это с запасом,
+#: оставаясь много меньше предела джоба (`timeout-minutes`).
+WAIT_TRIES: Final = 8
+WAIT_STEP: Final = 40
+
+
+def wait_for_head(
+    repo: str,
+    change: Change,
+    owner_token: str,
+    *,
+    tries: int = WAIT_TRIES,
+    step: int = WAIT_STEP,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[list[str], bool]:
+    """Ждёт, пока проверки головы закончатся; отдаёт последний вердикт.
+
+    ПОЧЕМУ ЖДАТЬ, А НЕ ВЫЙТИ В НАДЕЖДЕ НА СОБЫТИЕ. Событие приходит исправно —
+    замер 10.09.2026: за завершением `ci` на ветке изменения заход очереди
+    следовал в 25 случаях из 25, медиана задержки две секунды. Но заход
+    **гибнет в ожидании**: группа держит один ожидающий, и каждый новый его
+    вытесняет — 45 из 120 заходов умерли, не начав работу.
+    Из пачки доживает последний, а он приходит от прогона, завершившегося
+    последним, и не обязан быть тем, после которого голова стала зелёной:
+    записи сводного гейта проставляются позже. Выживший видит «проверки идут»,
+    и повторить его больше некому — новых событий не будет.
+
+    Это второй случай правила
+    [126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md):
+    доказательство «условие снято» принимается от любого равносильного
+    источника, а не от одного события. Здесь равносильный источник — опрос
+    внутри захода.
+
+    ПРЕДЕЛ НАЗВАН ЧИСЛОМ. Ждать без предела значило бы держать исполнителя,
+    пока чужой прогон висит; дождавшись предела, заход честно говорит «ещё
+    идут» и уходит — тогда его добудит следующее событие или кнопка (104).
+    """
+    problems, waiting = head_verdict(repo, change, owner_token)
+    # Нулевой шаг значит «не ждать»: так заход зовут проверки, и так же его
+    # можно позвать руками, когда ожидание не нужно.
+    if step <= 0:
+        return problems, waiting
+    for attempt in range(tries):
+        if not waiting:
+            return problems, waiting
+        print(
+            f"#{change.number}: проверки идут — жду голову, {attempt + 1} из {tries} (по {step} с)"
+        )
+        sleep(step)
+        problems, waiting = head_verdict(repo, change, owner_token)
+    return problems, waiting
+
+
 def merge_state(repo: str, number: int, owner_token: str) -> str:
     """Состояние слияния у головы очереди.
 
@@ -507,8 +564,20 @@ def classify(
     return verdicts
 
 
-def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
-    """Один заход очереди: читает, упорядочивает и двигает ГОЛОВУ."""
+def advance(
+    repo: str,
+    owner_token: str,
+    base: str,
+    *,
+    dry_run: bool,
+    wait_step: int = WAIT_STEP,
+) -> int:
+    """Один заход очереди: читает, упорядочивает и двигает ГОЛОВУ.
+
+    `wait_step` — шаг ожидания головы в секундах; ноль означает «не ждать».
+    Он параметр, а не константа внутри, потому что проверке нельзя спать: тест,
+    ждущий пять минут, перестают гонять, и он превращается в украшение (149).
+    """
     check_labels_declared()
     changes = open_changes(repo, owner_token)
     report_held(changes)
@@ -562,7 +631,14 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     for change in queue:
         problems, waiting = verdicts[change.number]
         if waiting:
-            print(f"#{change.number}: проверки ещё идут — очередь ждёт голову, а не обходит её")
+            # Голову ЖДЁМ внутри захода, а не выходим: следующего события может
+            # не быть вовсе — заход, который его принёс бы, гибнет в ожидании.
+            problems, waiting = wait_for_head(repo, change, owner_token, step=wait_step)
+        if waiting:
+            print(
+                f"#{change.number}: проверки не закончились за {WAIT_TRIES * wait_step} с — "
+                "очередь ждёт голову, а не обходит её"
+            )
             return EXIT_OK
         if problems:
             # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
@@ -612,6 +688,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--base", default="main", help="общая ветка")
     parser.add_argument("--dry-run", action="store_true", help="показать, но не сливать")
+    parser.add_argument(
+        "--wait-step",
+        type=int,
+        default=WAIT_STEP,
+        help=f"шаг ожидания головы в секундах; 0 — не ждать (по умолчанию {WAIT_STEP})",
+    )
     args = parser.parse_args(argv)
 
     owner_token = token()
@@ -628,7 +710,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
 
     try:
-        return advance(args.repo, owner_token, args.base, dry_run=args.dry_run)
+        return advance(
+            args.repo, owner_token, args.base, dry_run=args.dry_run, wait_step=args.wait_step
+        )
     except (NotRun, labels.BadConfig, policy.BadPolicy, squash_body.NotRun) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

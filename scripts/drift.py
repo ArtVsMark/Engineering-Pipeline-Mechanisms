@@ -119,6 +119,17 @@ class Drift:
 fetch = ghrest.raw_json
 
 
+def ours_proposals() -> dict[str, Any]:
+    """Наши предложения каталогу — из дерева."""
+    path = paths.PROPOSALS
+    if not path.is_file():
+        raise NotRun(f"нет {path}: канал предложений не подключён (075)")
+    said = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(said, dict):
+        raise NotRun(f"{path}: предложения не словарь")
+    return said
+
+
 def ours() -> dict[str, Any]:
     """Наш живой ответ каталогу — из дерева, а не из чужого снимка."""
     path = paths.BINDINGS
@@ -355,6 +366,62 @@ def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[D
     return found
 
 
+#: Ответ каталога по предложениям потребителей: ключ «владелец/репозиторий:слаг»,
+#: статус `admitted` с номером либо `rejected` с причиной. Файл каталога, а не
+#: наш: он и отвечает.
+CATALOGUE_PROPOSALS: Final = (
+    "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
+    "/main/.rules/proposals.json"
+)
+
+
+def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
+    """Каталог ответил по нашему предложению, а оно всё ещё числится предложением.
+
+    ПОЧЕМУ ЭТО ДРЕЙФ. Вердикт выносит каталог, у себя и по своему расписанию —
+    ни одна наша правка этого не делает, и события об этом не приходит. Принятое
+    предложение перестаёт быть предложением: у него появился НОМЕР, и по нему
+    теперь отвечают в `.rules/bindings.json`, а не в очереди на приём (080).
+    Отвергнутое тоже: причина названа, и держать его в списке значит обещать
+    отправку, которой не будет.
+
+    Приём взят у грейдера, где он уже стоит ночным обходом (162).
+    """
+    said = answer.get("proposals") or answer
+    if not isinstance(said, dict):
+        return []
+    found: list[Drift] = []
+    for one in mine.get("proposals") or []:
+        if not isinstance(one, dict):
+            continue
+        slug = str(one.get("slug") or "")
+        verdict = said.get(f"{project}:{slug}")
+        if not isinstance(verdict, dict):
+            continue
+        status = str(verdict.get("status") or "")
+        if status == "admitted":
+            number = str(verdict.get("number") or verdict.get("id") or "?")
+            found.append(
+                Drift(
+                    "proposal-admitted",
+                    f"каталог принял «{slug}» под номером {number}",
+                    f"убрать его из .rules/proposals.json и ответить по правилу {number} "
+                    "в .rules/bindings.json — принятое перестаёт быть предложением",
+                )
+            )
+        elif status == "rejected":
+            why = str(verdict.get("why") or verdict.get("reason") or "причина не названа")
+            found.append(
+                Drift(
+                    "proposal-rejected",
+                    f"каталог отверг «{slug}»: {report.cut(why)}",
+                    "убрать его из .rules/proposals.json: держать отвергнутое значит "
+                    "обещать отправку, которой не будет",
+                )
+            )
+    return found
+
+
 def render_body(found: list[Drift], silent: list[str] | None = None) -> str:
     """Тело живой задачи: записи, неопрошенные источники и как это снимается."""
     lines = [
@@ -436,7 +503,13 @@ def manifest(url: str) -> list[Any]:
 #: вызовов, потому что источники НЕЗАВИСИМЫ: недоступный каталог не отменяет
 #: устаревшей сводки семьи. Отказ одного источника печатается и заход идёт
 #: дальше; молча пропущенный источник выглядел бы как «дрейфа нет» (045).
-SOURCES: Final = ("каталог", "сводка семьи", "выпуск каталога", "версии языка")
+SOURCES: Final = (
+    "каталог",
+    "сводка семьи",
+    "выпуск каталога",
+    "версии языка",
+    "вердикты по предложениям",
+)
 
 
 def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list[str]]:
@@ -451,6 +524,12 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
+        (
+            "вердикты по предложениям",
+            lambda: proposals_answered(
+                fetch(CATALOGUE_PROPOSALS), ours_proposals(), str(mine.get("project") or repo)
+            ),
+        ),
     )
     for name, ask in asks:
         try:
