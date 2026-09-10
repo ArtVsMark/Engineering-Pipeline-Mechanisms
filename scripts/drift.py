@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Final
@@ -44,6 +45,7 @@ from typing import Any, Final
 import findings
 import ghrest
 import paths
+import pipeline_checks
 import report
 
 MARKER: Final = "<!-- drift: не удаляйте, по этой строке задача находится снова -->"
@@ -65,6 +67,19 @@ WHERE_URL: Final = (
     "/badges/export/where.json"
 )
 CATALOGUE: Final = "ArtVsMark/Engineering-Incidents-Playbook"
+
+#: Манифест версий, которые умеет ставить `actions/setup-python`. Источник
+#: выбран не «самый правдивый о языке», а САМЫЙ БЛИЗКИЙ К ПРЕДМЕТУ: вопрос здесь
+#: не «что выпустил CPython», а «что сможет поставить наш прогон». Между этими
+#: двумя ответами бывает несколько дней, и красное о версии, которой у площадки
+#: ещё нет, — это красное о чужом расписании.
+#:
+#: ГРАНИЦА ИСТОЧНИКА, КОТОРУЮ НАДО ЗНАТЬ: он не говорит о КОНЦЕ поддержки.
+#: Версия, снятая с поддержки, остаётся в манифесте, и «3.9 давно не
+#: поддерживается» отсюда не выводится. Это отдельный вход, и его тут нет (154).
+PYTHON_MANIFEST: Final = (
+    "https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json"
+)
 
 #: Механизмами считаются эти три рода ответа. Тот же состав, что у разреза
 #: семьи: два понимания слова «держится машиной» разошлись бы молча (090).
@@ -230,6 +245,110 @@ def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
     ]
 
 
+#: Версия языка вида `3.14` — по ней сравниваются матрица и манифест. Патч
+#: сюда не входит намеренно: матрица гоняет ветку языка, а не выпуск.
+MINOR_RE: Final = re.compile(r"^(?P<minor>\d+\.\d+)")
+
+
+def order(minor: str) -> tuple[int, ...]:
+    """Числовой порядок версии: `3.9` младше `3.10`, а по строке — старше."""
+    return tuple(int(part) for part in minor.split("."))
+
+
+def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
+    """Ветки языка из манифеста: со стабильным выпуском и пока только с пробным.
+
+    Разница здесь и есть предмет: ветка со стабильным выпуском — та, на которой
+    проект обещает работать; ветка с одними пробными — та, на которой он
+    обещаний не давал. Наша матрица построена ровно на этом делении.
+    """
+    stable: set[str] = set()
+    seen: set[str] = set()
+    for one in manifest:
+        if not isinstance(one, dict):
+            continue
+        found = MINOR_RE.match(str(one.get("version") or ""))
+        if not found:
+            continue
+        minor = found.group("minor")
+        seen.add(minor)
+        if one.get("stable"):
+            stable.add(minor)
+    ordered = sorted(stable, key=order)
+    return ordered, sorted(seen - stable, key=order)
+
+
+def declared_versions() -> tuple[list[str], str]:
+    """Что гоняет прогон: ветки матрицы и предрелизная ветка `test-next`."""
+    path = paths.WORKFLOWS / "ci.yml"
+    # Читается общим разбором, а не своим: форма прогона одна на всех, и
+    # второе её понимание разошлось бы с первым молча (090).
+    jobs = pipeline_checks.run_of(path).get("jobs") or {}
+    matrix = (((jobs.get("test-matrix") or {}).get("strategy") or {}).get("matrix") or {}).get(
+        "python"
+    )
+    if not isinstance(matrix, list) or not matrix:
+        raise NotRun(f"{path}: матрица версий не разобралась — сверять нечего (075)")
+    ahead = ""
+    for step in (jobs.get("test-next") or {}).get("steps") or []:
+        said = ((step or {}).get("with") or {}).get("python-version")
+        if said:
+            ahead = str(said)
+    return [str(one) for one in matrix], ahead
+
+
+def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[Drift]:
+    """Язык выпустил версию, а прогон об этом не знает.
+
+    ПОЧЕМУ ЭТО ДРЕЙФ, А НЕ ЗАДАЧА. Ни одна наша правка не делает 3.15
+    стабильной: это происходит по расписанию CPython, между нашими изменениями,
+    и не приходит ни красным, ни задачей. Замер 10.09.2026: о том, что 3.14 уже
+    вышла, а предрелизной стала 3.15, механизм не узнал — это сказал владелец.
+    """
+    stable, pre = minors(manifest)
+    if not stable:
+        raise NotRun("в манифесте нет ни одной стабильной ветки — читать нечего (075)")
+    found: list[Drift] = []
+    newest = stable[-1]
+    unknown = sorted(set(matrix) - set(stable) - set(pre), key=order)
+    if unknown:
+        found.append(
+            Drift(
+                "python-matrix",
+                f"матрица называет {', '.join(unknown)}, а площадка такой ветки не знает",
+                "прогон не сможет поставить эту версию — сверить матрицу с манифестом",
+            )
+        )
+    if newest not in matrix:
+        found.append(
+            Drift(
+                "python-stable",
+                f"стабильна {newest}, матрица гоняет {', '.join(matrix)}",
+                f"добавить {newest} в матрицу `test-matrix`: обязательный агрегат `test` "
+                f"обещает работу на стабильных ветках",
+            )
+        )
+    if ahead and ahead in stable:
+        found.append(
+            Drift(
+                "python-next",
+                f"{ahead} стоит предрелизной в `test-next`, а она уже стабильна",
+                f"перенести {ahead} в матрицу, а `test-next` навести на следующую ветку",
+            )
+        )
+    if pre:
+        newest_pre = pre[-1]
+        if ahead and ahead not in stable and order(newest_pre) > order(ahead):
+            found.append(
+                Drift(
+                    "python-next",
+                    f"предрелизная теперь {newest_pre}, а `test-next` держит {ahead}",
+                    f"навести `test-next` на {newest_pre}",
+                )
+            )
+    return found
+
+
 def render_body(found: list[Drift], silent: list[str] | None = None) -> str:
     """Тело живой задачи: записи, неопрошенные источники и как это снимается."""
     lines = [
@@ -291,11 +410,27 @@ def save(repo: str, token: str, found: list[Drift], silent: list[str], *, apply:
         print(f"::warning::Дрейф не записан: {report.cut(str(exc))}", file=sys.stderr)
 
 
+def manifest(url: str) -> list[Any]:
+    """Манифест версий приходит СПИСКОМ, а не словарём: свой разбор, не `fetch`.
+
+    Общий транспорт один (`ghrest`), а форма ответа у снимков разная, и делать
+    вид, что она одна, значило бы ронять разбор на первом же чужом файле.
+    """
+    text = ghrest.raw_text(url)
+    try:
+        said = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise NotRun(f"манифест версий не разбирается ({url}): {exc}") from exc
+    if not isinstance(said, list) or not said:
+        raise NotRun(f"манифест версий пуст или не список ({url})")
+    return said
+
+
 #: Источники дрейфа: имя и то, как его спросить. Списком, а не цепочкой
 #: вызовов, потому что источники НЕЗАВИСИМЫ: недоступный каталог не отменяет
 #: устаревшей сводки семьи. Отказ одного источника печатается и заход идёт
 #: дальше; молча пропущенный источник выглядел бы как «дрейфа нет» (045).
-SOURCES: Final = ("каталог", "сводка семьи", "выпуск каталога")
+SOURCES: Final = ("каталог", "сводка семьи", "выпуск каталога", "версии языка")
 
 
 def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list[str]]:
@@ -309,11 +444,12 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
             lambda: snapshot_is_stale(fetch(WHERE_URL), mine, str(mine.get("project") or repo)),
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
+        ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
     )
     for name, ask in asks:
         try:
             found.extend(ask())
-        except (NotRun, ghrest.TransportError) as exc:
+        except (NotRun, ghrest.TransportError, pipeline_checks.BadPolicy) as exc:
             silent.append(name)
             print(
                 f"::warning::Источник «{name}» не ответил: {report.cut(str(exc))}", file=sys.stderr
