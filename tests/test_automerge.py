@@ -788,4 +788,3 @@ def test_the_limit_in_the_message_is_the_one_waited_by() -> None:
     """
     assert "за 15 с" in module.said_waiting(7, 3, 5)
     assert "за 120 с" in module.said_waiting(7, 3, 40)
-
