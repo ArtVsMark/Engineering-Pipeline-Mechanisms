@@ -156,7 +156,7 @@ def rerun_reason(holds: list[str], rest: list[str], run: int, tries: int) -> str
     Решение вынесено из захода отдельно, потому что оно и есть предмет правила
     124, а проверять его внутри `main()` пришлось бы подделкой всей площадки —
     то есть не проверять вовсе
-    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-proved-by-what-it-rejects.md)).
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
 
     Причины разведены поимённо. «Попытка уже была» и «адрес записи не
     разобрался» дают одинаковое бездействие, а значат разное: первое —

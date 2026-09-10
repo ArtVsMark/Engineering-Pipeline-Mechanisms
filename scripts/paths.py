@@ -1,7 +1,7 @@
 """Якорь дерева: где лежат настройки. Один на все механизмы.
 
 ПОЧЕМУ ЭТО ОТДЕЛЬНЫЙ МОДУЛЬ, А НЕ КОНСТАНТА У КАЖДОГО. Правило каталога
-[115](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/115-settings-have-one-anchor-not-a-search.md)
+[115](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/115-config-has-one-anchor-and-a-bounded-search.md)
 требует у настроек ОДИН якорь и запрещает поиск вверх по дереву. До этого
 модуля якорь держался построением, а не механизмом: каждый читатель писал
 `Path("...")` сам, и завести второй якорь ничто не мешало.

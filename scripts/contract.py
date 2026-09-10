@@ -4,7 +4,7 @@
 Пока поверхность описана только словами, «контракт изменился» остаётся делом
 вкуса: одному переименование джоба кажется внутренним, другому — несовместимым.
 Проза при этом верна и нужна (`docs/release.md`), но проверить по ней нечего
-([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-a-rule-without-a-mechanism-is-a-wish.md)).
+([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
 ЧТО ВХОДИТ В ПОВЕРХНОСТЬ, И ПОЧЕМУ ИМЕННО ЭТО:
 

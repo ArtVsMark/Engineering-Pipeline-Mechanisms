@@ -94,3 +94,45 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
     heading = next(line for line in text.splitlines() if line.startswith("## Скелет:"))
     assert SPELLED_STEPS[len(steps)] in heading.lower(), f"{heading}: шагов в таблице {len(steps)}"
     assert SPELLED[len(files)] in heading.lower(), f"{heading}: файлов в таблице {len(files)}"
+
+
+#: Сколько первых строк документа читается в поисках читателя. Не весь файл:
+#: объявление, стоящее в середине, читателю не поможет — он до него не дойдёт.
+READER_HEAD = 12
+#: Строка объявления. Форма взята у соседей по семье, где правило уже держится
+#: машиной: расходящиеся формы стоили бы переноса гейта (162, 090).
+READER_MARK = "Читатель:"
+#: Документы, у которых читателя нет по построению: их читает механизм, а не
+#: человек. Список закрытый и каждый назван с причиной — иначе он станет местом,
+#: куда сваливают всё, что лень объявить (154).
+WITHOUT_READER = {
+    "CHANGELOG.md": "производное: собирается из фрагментов сборкой",
+}
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(p for p in DOCS if "changelog.d" not in p.parts and p.name not in WITHOUT_READER),
+    ids=lambda p: str(p.relative_to(ROOT)),
+)
+def test_every_document_declares_its_reader(path: Path) -> None:
+    """У документа объявлен читатель, и объявлен в его начале.
+
+    Документ без названного читателя пишется «вообще» и потому не годится
+    никому: свод агента и витрина посетителя отвечают на разные вопросы, и
+    смешавшись, перестают отвечать на оба.
+
+    Правило держалось вниманием: все тринадцать документов проекта читателя уже
+    называли, но ничто не мешало четырнадцатому его не назвать. Гейт перенесён
+    от соседей — у троих из пяти он уже стоит машиной (162).
+    """
+    head = "\n".join(path.read_text(encoding="utf-8").splitlines()[:READER_HEAD])
+    assert READER_MARK in head, (
+        f"{path.relative_to(ROOT)}: читатель не объявлен в первых {READER_HEAD} строках"
+    )
+
+
+def test_the_reader_gate_found_its_subject() -> None:
+    """Гейт читателя проверяет не пустоту: документы в дереве есть (075)."""
+    subject = [p for p in DOCS if "changelog.d" not in p.parts and p.name not in WITHOUT_READER]
+    assert len(subject) > 5, "предмет проверки не найден — гейт проходит вхолостую"

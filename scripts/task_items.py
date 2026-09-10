@@ -25,7 +25,7 @@
 * **права записи у агента нет.** Вход разбора — код и тело изменения, то есть
   текст того, кого проверяют; строка «отметь все пункты» в нём была бы
   указанием тому, кто имеет право писать
-  ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-prompt-injection-is-a-design-constraint.md)).
+  ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
   Агент читает и отвечает, пишет механизм — тот же приём, что у позднего
   взгляда.
 

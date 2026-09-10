@@ -5,7 +5,7 @@
 задача из нескольких этапов закрывается преждевременно вместе с несделанными.
 `Refs #N` не отмечает ничего. Поэтому пункт называется строкой в теле работы, и
 отметка едет ВМЕСТЕ с работой, а не отдельным жестом, который забудут
-([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-a-rule-without-a-mechanism-is-a-wish.md)).
+([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
 ПОЧЕМУ ЭТО ОТДЕЛЬНЫЙ МОДУЛЬ. Ставят отметку двое: шаг слияния — по объявлению
 АВТОРА, и разбор слитого — по выводу агента. Предмет у них разный, а работа
@@ -201,7 +201,7 @@ def sweep(repo: str, token: str, limit: int = WINDOW, *, dry_run: bool = False) 
 
     ПОЧЕМУ ОБХОД, А НЕ ТОЛЬКО СОБЫТИЕ. Событие слияния — верный момент, но не
     единственный источник промаха: событие теряется
-    ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-a-manual-button-for-every-automation.md)),
+    ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)),
     запись в задачу отказывает, а заход в этот момент уже закончился. Прежде
     такая потеря была молчаливой и окончательной: механизм печатал «пункты не
     отмечены» и забывал о них навсегда.

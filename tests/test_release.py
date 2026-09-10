@@ -153,7 +153,7 @@ def test_the_release_moves_fragments_and_tags(run_script: RunScript, tmp_path: P
     """Настоящий выпуск: фрагменты переезжают, версия поднята, тег стоит.
 
     Фрагменты именно ПЕРЕЕЗЖАЮТ, а не удаляются: собранный журнал производный,
-    и источником остаются они ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-derived-file-is-not-a-store.md)).
+    и источником остаются они ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-generated-file-is-not-a-store.md)).
     """
     tree(tmp_path)
     run = run_script("release.py", "--apply", cwd=tmp_path)
