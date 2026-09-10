@@ -19,6 +19,10 @@ name: task-items
 on:
   pull_request:
     types: [closed]
+  # Пункт эпика — ссылка на задачу, и своего состояния у него нет: оно уже есть
+  # у той задачи (049). Момент, когда состояние меняется, и есть её закрытие.
+  issues:
+    types: [closed]
   # У события всегда есть ручная кнопка: события теряются (правило 104).
   workflow_dispatch:
     inputs:
@@ -40,6 +44,7 @@ jobs:
     # На незлитом закрытии разбирать нечего: работа не поехала в общую ветку.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'issues' ||
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -64,6 +69,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: отметить объявленное автором
+        # По закрытию ЗАДАЧИ обходить слитое незачем: предмет там другой.
+        if: github.event_name != 'issues'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,16 +78,39 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          python scripts/task_items.py --pr "${{ inputs.pr || github.event.pull_request.number }}" --sweep --apply || rc=$?
+          python scripts/task_items.py --sweep --apply || rc=$?
           case "$rc" in
             0) echo "объявленных пунктов в окне обхода нет" ;;
             3) echo "пункты, объявленные авторами, отмечены" ;;
             *) echo "::warning::Отметка объявленного не отработала (код $rc)." ;;
           esac
 
+      # ПУНКТ-ССЫЛКА СЛЕДУЕТ ЗАДАЧЕ, А НЕ ВЕДЁТСЯ ОТДЕЛЬНО. Своего состояния у
+      # него нет: оно уже есть у задачи, на которую он показывает (049). Второе
+      # место, где то же состояние ведётся руками, расходится с первым — и
+      # разошлось: замер 10.09.2026 — четыре пункта эпика #2 стояли открытыми
+      # при закрытых задачах, старшая закрыта неделей раньше.
+      - name: пункты эпиков вслед за задачами
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/task_items.py --follow --apply || rc=$?
+          case "$rc" in
+            0) echo "пунктов, отставших от своих задач, нет" ;;
+            3) echo "пункты эпиков догнали состояние задач" ;;
+            *) echo "::warning::Следование за задачами не отработало (код $rc)." ;;
+          esac
+
       # Секрета может не быть, и это объявленное состояние, а не дефект.
       - name: ключа нет — разбор не состоится
         id: token
+        # По закрытию задачи разбирать нечего: слитого изменения нет. Условие
+        # стоит здесь одно на все шаги разбора — они идут по его выходу.
+        if: github.event_name != 'issues'
         env:
           TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
