@@ -57,7 +57,7 @@
 после написания кода
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
 
-![правил каталога держится машиной](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/rules.svg) ![доля машинного соблюдения семьи, закрытая общими механизмами](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/family.svg) ![версия проекта, посчитанная по истории](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/version.svg)
+![правил каталога держится машиной](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/rules.svg) ![доля машинного соблюдения семьи, закрытая общими механизмами](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/family.svg) ![версия проекта, посчитанная по истории](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/version.svg) ![последний выпуск: к нему прибивается потребитель](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/release.svg)
 
 Тем же файлом открыт канал соседям и каталогу правил: версия контракта,
 сколько правил каталога проект держит и чем именно, состав классов проверок —
