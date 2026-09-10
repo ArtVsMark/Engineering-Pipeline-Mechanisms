@@ -45,6 +45,7 @@ import argparse
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Final
 
 import paths
@@ -78,8 +79,13 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «версия 0.0.0»."""
 
 
-def git(*args: str) -> str | None:
+def git(*args: str, root: Path | None = None) -> str | None:
     """Ответ git без хвостового перевода строки; ``None`` — данных нет.
+
+    ДЕРЕВО НАЗЫВАЕТСЯ, А НЕ ПОДРАЗУМЕВАЕТСЯ. Без этого версия считалась по
+    ТЕКУЩЕМУ рабочему каталогу, каким бы дерево ни назвал зовущий: сборка
+    фактов принимает корень и передаёт его во всё, кроме версии, — и получала
+    число не о том дереве. Нашёл внешний взгляд на #106.
 
     Кодировка задана явно: темы коммитов проекта по-русски, а `text=True` без
     неё берёт кодовую страницу окружения. `errors="replace"` — потому что один
@@ -89,6 +95,7 @@ def git(*args: str) -> str | None:
     try:
         out = subprocess.check_output(
             ["git", *args],
+            cwd=root,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -99,12 +106,12 @@ def git(*args: str) -> str | None:
     return out.strip()
 
 
-def subjects(span: str, *, first_parent: bool = False) -> list[str]:
+def subjects(span: str, root: Path | None = None, *, first_parent: bool = False) -> list[str]:
     """Темы коммитов диапазона; при `first_parent` — только по главной линии."""
     args = ["log", "--pretty=%s"]
     if first_parent:
         args.append("--first-parent")
-    out = git(*args, span)
+    out = git(*args, span, root=root)
     return [line for line in (out or "").split("\n") if line]
 
 
@@ -129,7 +136,7 @@ def counts_alone(subject: str) -> bool:
     return BADGE_COMMIT not in subject and not SYNC_MERGE_RE.match(subject)
 
 
-def changes_in(span: str) -> int:
+def changes_in(span: str, root: Path | None = None) -> int:
     """Число принятых изменений в диапазоне: сущности, а не рёбра графа.
 
     Номера собираются по ВСЕЙ истории диапазона — при `git pull` мержем
@@ -139,10 +146,10 @@ def changes_in(span: str) -> int:
     Коммиты БЕЗ номера берутся только с главной линии: иначе внутренние коммиты
     слитой ветки считались бы поштучно, и дробление работы завышало бы счёт.
     """
-    numbered = numbers_in(subjects(span))
+    numbered = numbers_in(subjects(span, root))
     alone = [
         subject
-        for subject in subjects(span, first_parent=True)
+        for subject in subjects(span, root, first_parent=True)
         if not PR_NUMBER_RE.search(subject)
         and not MERGE_PR_RE.match(subject)
         and counts_alone(subject)
@@ -150,15 +157,28 @@ def changes_in(span: str) -> int:
     return len(numbered) + len(alone)
 
 
-def release_tag() -> str | None:
-    """Ближайший релизный тег или ``None``, если такого не видно."""
-    tag = git("describe", "--tags", "--abbrev=0", "--match", RELEASE_TAG_GLOB)
-    return tag if tag and RELEASE_TAG_RE.match(tag) else None
+def release_tag(root: Path | None = None) -> str | None:
+    """Последний ВЫПУЩЕННЫЙ тег из достижимых или ``None``, если такого нет.
+
+    ПРЕДРЕЛИЗНЫЙ ТЕГ БОЛЬШЕ НЕ ГЛОТАЕТ ОТВЕТ ЦЕЛИКОМ. Прежде спрашивался
+    ближайший тег по образцу, и `v0.2.0-rc1` под образец подходит, а под
+    строгую форму — нет: ответом становилось «выпусков не видно вовсе», хотя
+    рядом лежал настоящий `v0.1.0`. Один предрелизный тег обнулял бы версию
+    проекта и значок. Нашёл внешний взгляд на #106.
+
+    Спрашиваются ДОСТИЖИМЫЕ теги: тег из чужой ветки выпуском этой истории не
+    является, и считать от него было бы неверно.
+    """
+    out = git("tag", "--merged", "HEAD", "--list", RELEASE_TAG_GLOB, root=root)
+    released = [line for line in (out or "").split("\n") if RELEASE_TAG_RE.match(line)]
+    if not released:
+        return None
+    return max(released, key=lambda tag: tuple(int(part) for part in tag.lstrip("v").split(".")))
 
 
-def declared() -> str:
+def declared(root: Path | None = None) -> str:
     """Объявленная версия контракта — единый источник MAJOR.MINOR до тега."""
-    path = paths.VERSION
+    path = (root / paths.VERSION) if root else paths.VERSION
     if not path.is_file():
         raise NotRun(f"нет {path}: объявленную версию взять неоткуда (075)")
     value = path.read_text(encoding="utf-8").strip()
@@ -167,19 +187,19 @@ def declared() -> str:
     return value
 
 
-def version() -> tuple[str, bool]:
+def version(root: Path | None = None) -> tuple[str, bool]:
     """Версия проекта и признак «посчитана полно».
 
     Неполно — это когда тегов не видно: MAJOR.MINOR берутся из объявленного
     файла, а он говорит о контракте, а не о выпущенном. Разницу надо назвать,
     а не спрятать за правдоподобным числом.
     """
-    tag = release_tag()
+    tag = release_tag(root)
     if tag is not None:
         major, minor, _ = tag.lstrip("v").split(".")
-        return f"{major}.{minor}.{changes_in(f'{tag}..HEAD')}", True
-    major, minor, _ = declared().split(".")
-    return f"{major}.{minor}.{changes_in('HEAD')}", False
+        return f"{major}.{minor}.{changes_in(f'{tag}..HEAD', root)}", True
+    major, minor, _ = declared(root).split(".")
+    return f"{major}.{minor}.{changes_in('HEAD', root)}", False
 
 
 def agrees() -> str:

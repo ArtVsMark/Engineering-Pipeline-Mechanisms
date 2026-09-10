@@ -173,7 +173,7 @@ def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]
     # проекта СЧИТАЕТСЯ по истории — «столько изменений принято после выпуска».
     # Свести их в одно значило бы либо скрыть работу, либо объявить выпуском
     # каждое изменение (035).
-    number, whole = version.version()
+    number, whole = version.version(root)
     return {
         "schema": 1,
         "contract": contract_version(root / VERSION_FILE),
@@ -184,7 +184,7 @@ def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]
         # ВЫПУСК И ВЕРСИЯ ГОЛОВЫ — РАЗНЫЕ ЧИСЛА. Голова уходит вперёд каждым
         # изменением, потребитель живёт на выпущенном; одно вместо другого
         # обещало бы ему то, чего он не получал.
-        "release": version.release_tag() or "",
+        "release": version.release_tag(root) or "",
         # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им
         # не нужен и вреден — они дёргаются от каждого изменения, — но живой
         # адрес обязателен, и вот он (049).

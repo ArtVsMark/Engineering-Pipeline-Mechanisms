@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import subprocess
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -152,3 +154,43 @@ def test_the_version_is_not_written_by_hand() -> None:
     """
     source = (ROOT / "scripts" / "version.py").read_text(encoding="utf-8")
     assert "write_text" not in source, "механизм версии пишет в дерево"
+
+
+def test_a_prerelease_tag_does_not_swallow_the_release(tmp_path: Path) -> None:
+    """Предрелизный тег рядом не делает «выпусков не видно вовсе».
+
+    Прежде спрашивался ближайший тег по образцу, и `v0.2.0-rc1` под образец
+    подходит, а под строгую форму — нет: ответом становилось `None`, хотя рядом
+    лежал настоящий `v0.1.0`. Один предрелизный тег обнулял бы версию проекта и
+    значок. Нашёл внешний взгляд на #106.
+    """
+    run = partial(subprocess.run, cwd=tmp_path, check=True, capture_output=True)
+    run(["git", "init", "--quiet", "-b", "main"])
+    (tmp_path / "readme.md").write_text("раз\n", encoding="utf-8")
+    run(["git", "add", "-A"])
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "раз"])
+    run(["git", "tag", "v0.1.0"])
+    (tmp_path / "readme.md").write_text("два\n", encoding="utf-8")
+    run(["git", "add", "-A"])
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "два (#7)"])
+    run(["git", "tag", "v0.2.0-rc1"])
+
+    assert module.release_tag(tmp_path) == "v0.1.0"
+    number, whole = module.version(tmp_path)
+    assert whole is True
+    assert number == "0.1.1"
+
+
+def test_the_tree_is_the_one_asked_about(tmp_path: Path) -> None:
+    """Версия считается по НАЗВАННОМУ дереву, а не по текущему каталогу.
+
+    Сборка фактов принимает корень и передаёт его во всё — кроме версии, и та
+    отвечала про настоящее дерево проекта, каким бы дерево ни назвал зовущий.
+    """
+    run = partial(subprocess.run, cwd=tmp_path, check=True, capture_output=True)
+    run(["git", "init", "--quiet", "-b", "main"])
+    (tmp_path / "readme.md").write_text("раз\n", encoding="utf-8")
+    run(["git", "add", "-A"])
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "раз"])
+    assert module.release_tag(tmp_path) is None
+    assert module.release_tag() is not None
