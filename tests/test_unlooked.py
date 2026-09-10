@@ -222,3 +222,59 @@ def test_unresolved_findings_are_not_a_second_list() -> None:
     source = (ROOT / "scripts" / "unlooked.py").read_text(encoding="utf-8")
     assert "parse_entries(body)" in source, "предмет проверки не найден — разбор реестра исчез"
     assert "findings.parse_entries" not in source, "реестр завёл второй список незакрытых находок"
+
+
+# --- причина тишины ----------------------------------------------------------
+
+
+def test_no_record_of_the_look_means_it_never_ran() -> None:
+    """Записи проверки взгляда на голове нет — прогон не запускался.
+
+    Смотреть тогда надо условия шага, а не работу: это разные починки, и
+    прежде обе назывались одним словом «вердикта нет» (046).
+    """
+    assert module.why_quiet([]) == module.STATE_NONE
+    assert module.why_quiet([{"name": "lint", "conclusion": "success"}]) == module.STATE_NONE
+
+
+def test_a_red_look_run_is_told_apart_from_silence() -> None:
+    """Красная запись взгляда — поломка канала, а не молчание ревьюера."""
+    assert module.why_quiet([{"name": "review", "conclusion": "failure"}]) == module.STATE_BROKEN
+
+
+def test_a_green_run_without_an_answer_is_its_own_state() -> None:
+    """Запись зелёная, ответа нет — отдельное состояние, а не «вердикта нет»."""
+    assert module.why_quiet([{"name": "review", "conclusion": "success"}]) == module.STATE_SILENT
+
+
+def test_a_failed_run_outweighs_a_green_one() -> None:
+    """У имени несколько записей — «упал» важнее «прошёл».
+
+    Иначе повторный зелёный заход спрятал бы упавший, и причина указала бы на
+    ключ там, где чинить надо канал.
+    """
+    runs = [
+        {"name": "review", "conclusion": "success"},
+        {"name": "review", "conclusion": "failure"},
+    ]
+    assert module.why_quiet(runs) == module.STATE_BROKEN
+
+
+def test_the_reason_never_costs_the_record_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ на запросе причины не роняет заход: запись важнее подробности (084)."""
+
+    def broken(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("площадка отказала")
+
+    monkeypatch.setattr(module.ghrest, "request", broken)
+    assert module.head_runs("o/r", 7, "token") == []
+
+
+def test_a_cut_answer_needs_no_check_runs() -> None:
+    """Оборванный ответ объясняет себя сам — записи проверок для него не нужны.
+
+    Это не мелочь: второй запрос на каждое изменение окна стоил бы тридцати
+    обращений за заход ради причины, которая уже видна.
+    """
+    comments = [{"body": "НАХОДКА[дефект]: что-то не так"}]
+    assert module.look_of(comments) == module.STATE_CUT

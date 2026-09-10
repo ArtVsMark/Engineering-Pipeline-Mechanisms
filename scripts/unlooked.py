@@ -78,11 +78,24 @@ STATE_CUT: Final = "ответ оборван: находки есть, верд
 #: Был поздний взгляд — по общей ветке, после слияния. Другой предмет, и
 #: называется он другим словом.
 STATE_LATE: Final = "поздний взгляд по общей ветке"
-STATES: Final = (STATE_NONE, STATE_CUT, STATE_LATE)
+#: Прогон взгляда упал. Это НЕ «ответ оборван»: там ревьюер начал отвечать, а
+#: здесь не отработал сам прогон, и разбирать надо не работу, а канал.
+STATE_BROKEN: Final = "прогон взгляда упал — смотреть надо канал, а не работу"
+#: Прогон прошёл, а ответа нет. Причин у этого несколько, и механизм НЕ
+#: выбирает между ними: он называет видимое, а варианты перечислены в теле
+#: реестра (154). Замер 10.09.2026: четыре записи подряд выглядели одинаково, а
+#: у #120 причина была своя — оно правило сам файл прогона, и действие ревью
+#: отказалось работать по расхождению с общей веткой (152).
+STATE_SILENT: Final = "прогон взгляда прошёл, а ответа нет"
+STATES: Final = (STATE_NONE, STATE_CUT, STATE_LATE, STATE_BROKEN, STATE_SILENT)
 #: Состояния, которые заход перечитывает: вердикт бывает позже слияния.
 #: «Поздний взгляд» сюда не входит — его ставит человек, и вердикта на самом
 #: изменении от этого не появится.
-OPEN_STATES: Final = (STATE_NONE, STATE_CUT)
+OPEN_STATES: Final = (STATE_NONE, STATE_CUT, STATE_BROKEN, STATE_SILENT)
+
+#: Имя проверки, по записи которой на голове различаются причины. Берётся из
+#: договора, а не из памяти: имя джоба и есть имя контекста (`docs/pipeline.md`).
+REVIEW_CHECK: Final = "review"
 
 #: Скрытая строка, которой поздний взгляд называет себя поздним. Его вердикт
 #: тоже строка «ВЕРДИКТ: находок N», и без этой отметки он снял бы запись
@@ -138,16 +151,46 @@ def parse_watermark(body: str | None) -> int:
 merged_changes = ghrest.merged_changes
 
 
-def look_of(comments: list[dict[str, Any]]) -> str | None:
+def look_of(comments: list[dict[str, Any]], runs: list[dict[str, Any]] | None = None) -> str | None:
     """Что видно о взгляде на изменение: ``None`` — вердикт был, иначе состояние.
 
     Читаются те же строки тем же разбором, что и у механизма находок: второе
     понимание одного формата разошлось бы с первым молча
     ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    Записи проверок нужны только тогда, когда ответа НЕТ: оборванный ответ сам
+    себя объясняет, а «тишина» бывает трёх разных причин.
     """
     if review_findings.verdict_of(comments) is not None:
         return None
-    return STATE_CUT if review_findings.findings_of(comments) else STATE_NONE
+    if review_findings.findings_of(comments):
+        return STATE_CUT
+    return why_quiet(runs or [])
+
+
+def why_quiet(runs: list[dict[str, Any]]) -> str:
+    """Почему ответа нет — по записи проверки взгляда на голове изменения.
+
+    ЗАЧЕМ. Прежде все три случая назывались одним словом «вердикта нет», и
+    реестр честно писал, что различить их можно только логом прогона. Лог
+    живёт 90 дней и требует прав, а причина нужна тому, кто читает реестр
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-a-red-must-name-its-cause.md)):
+    «прогон упал» зовёт чинить канал, «ключа нет» — настроить секрет, «записи
+    нет вовсе» — посмотреть, почему шаг не запускался.
+
+    Площадки здесь нет: записи приходят списком, и подделать их в проверке
+    можно, не подделывая транспорт (140).
+    """
+    ours = [run for run in runs if str(run.get("name") or "") == REVIEW_CHECK]
+    if not ours:
+        return STATE_NONE
+    # Худшее из живых: у имени бывает несколько записей, и «упал» здесь важнее
+    # «прошёл» — иначе повторный зелёный заход спрятал бы упавший.
+    if any(str(run.get("conclusion") or "") == "failure" for run in ours):
+        return STATE_BROKEN
+    if any(str(run.get("conclusion") or "") == "success" for run in ours):
+        return STATE_SILENT
+    return STATE_NONE
 
 
 def look_at(repo: str, number: int, token: str) -> str | None:
@@ -162,7 +205,30 @@ def look_at(repo: str, number: int, token: str) -> str | None:
         for comment in ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token)
         if LATE_MARKER not in (comment.get("body") or "")
     ]
-    return look_of(comments)
+    if review_findings.verdict_of(comments) is not None or review_findings.findings_of(comments):
+        # Второй запрос делается ТОЛЬКО ради причины тишины: у изменения с
+        # ответом причина уже видна, и платить за неё лишним обращением незачем.
+        return look_of(comments)
+    return look_of(comments, head_runs(repo, number, token))
+
+
+def head_runs(repo: str, number: int, token: str) -> list[dict[str, Any]]:
+    """Записи проверок на голове изменения; отказ — пустой список, а не падение.
+
+    Причина — уточнение к записи, и потерять из-за неё саму запись значило бы
+    разменять факт на подробность о нём (084).
+    """
+    try:
+        change = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
+        head = str((change.get("head") or {}).get("sha") or "")
+        if not head:
+            return []
+        return list(
+            ghrest.paginate(f"repos/{repo}/commits/{head}/check-runs", token, key="check_runs")
+        )
+    except ghrest.TransportError as exc:
+        print(f"  причина по #{number} не выяснена: {report.cut(str(exc))}")
+        return []
 
 
 def scan(
@@ -227,9 +293,16 @@ def render_body(entries: dict[int, Entry], watermark: int) -> str:
         "",
         "Состояния — то, что видно, а не догадка о причине:",
         "",
-        f"* «{STATE_NONE}» — на изменении нет ни строк находок, ни итоговой.",
-        "  Почему — не сказано: «секрета не было» и «прогон промолчал» снаружи",
-        "  одинаковы, и различить их можно только логом прогона (046);",
+        f"* «{STATE_NONE}» — записи проверки взгляда на голове нет вовсе:",
+        "  прогон не запускался. Смотреть надо условия шага, а не работу;",
+        f"* «{STATE_BROKEN}» — запись есть и она красная. Это не про изменение:",
+        "  чинить надо канал;",
+        f"* «{STATE_SILENT}» — запись зелёная, а ответа нет. Механизм здесь не",
+        "  выбирает причину, потому что их несколько и снаружи они одинаковы:",
+        "  нет ключа `CLAUDE_CODE_OAUTH_TOKEN`; изменение правит сам файл",
+        "  прогона, и действие отказалось работать по расхождению с общей",
+        "  веткой (152); изменение из форка. Смотреть надо лог прогона —",
+        "  но искать в нём уже есть что (154);",
         f"* «{STATE_CUT}» — ревьюер начал отвечать и не закончил. Это видимая",
         "  часть «прогон упал»: сам джоб зелен всегда, шаг ревью объявлен",
         "  `continue-on-error`, и краснеть ему нечем;",
