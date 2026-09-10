@@ -295,14 +295,14 @@ def test_a_task_with_every_item_closed_is_named(monkeypatch: pytest.MonkeyPatch)
     """
     rows = [{"number": 26, "title": "Частичное закрытие", "body": "- [x] раз\n- [x] два\n"}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done("o/r", "token") == [(26, "Частичное закрытие")]
+    assert debt.looks_done(debt.open_issues("o/r", "token")) == [(26, "Частичное закрытие")]
 
 
 def test_one_open_item_is_enough_to_stay_silent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Один незакрытый пункт — задача не кандидат: работа не доделана."""
     rows = [{"number": 39, "title": "Слито без взгляда", "body": "- [x] раз\n- [ ] два\n"}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done("o/r", "token") == []
+    assert debt.looks_done(debt.open_issues("o/r", "token")) == []
 
 
 def test_a_task_without_items_is_not_a_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -314,14 +314,14 @@ def test_a_task_without_items_is_not_a_candidate(monkeypatch: pytest.MonkeyPatch
     """
     rows = [{"number": 25, "title": "Приоритет и мерило", "body": "Три вопроса прозой."}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done("o/r", "token") == []
+    assert debt.looks_done(debt.open_issues("o/r", "token")) == []
 
 
 def test_a_change_is_not_a_task(monkeypatch: pytest.MonkeyPatch) -> None:
     """Изменения приходят в том же списке и в счёт не идут."""
     rows = [{"number": 7, "title": "PR", "body": "- [x] раз\n", "pull_request": {"url": "…"}}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done("o/r", "token") == []
+    assert debt.looks_done(debt.open_issues("o/r", "token")) == []
 
 
 # --- закрытые «входящие» -----------------------------------------------------
