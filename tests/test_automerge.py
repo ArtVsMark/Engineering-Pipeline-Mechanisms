@@ -849,3 +849,86 @@ def test_an_already_marked_item_survives_a_failed_neighbour(
     assert "не найден" not in printed, "уже отмеченный пункт объявлен ненайденным"
     assert "первый этап" not in printed, "пункт, который был на месте, попал в отчёт об отказе"
     assert "второй этап" in printed, "пункт, который не записался, из отчёта пропал"
+
+
+# --- разметка не ждёт решения о заморозке -------------------------------------
+#
+# Замечено владельцем 10.09.2026: после движения общей ветки статусы должны
+# пересчитываться у КАЖДОГО открытого изменения, и «определение красного main»
+# этому не предшественник, а сосед — вычислять их независимо.
+
+
+def test_labels_are_set_even_when_the_shared_branch_is_red(platform: dict[str, Any]) -> None:
+    """Красная общая ветка морозит движение, но не разметку.
+
+    Прежний порядок морозил очередь ДО разметки, и метки застывали ровно
+    тогда, когда нужнее всего: по красной ветке надо видеть, кто её чинит, а
+    кто просто ждёт. Заморозка — решение о ДВИЖЕНИИ, а источник работы —
+    свойство самого изменения.
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["health"] = ["lint: failure"]
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert {number for number, _ in platform["sources"]} == {1, 2}
+    assert platform["merged"] == [], "очередь двинулась по красной общей ветке"
+
+
+def test_a_fix_for_the_shared_branch_keeps_source_zero(platform: dict[str, Any]) -> None:
+    """Источник 0 не перебивается своей краснотой.
+
+    Изменение, чинящее общую ветку, стоит работы всей семьи. Своя краснота с
+    головы очереди его не снимает — напротив, чинить его надо тем более.
+    """
+    platform["changes"] = [change(1, "automerge", module.LABEL_FIX_MAIN)]
+    platform["runs"] = {1: (["lint: failure"], False)}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert (1, module.RANK_MAIN_RED) in platform["sources"]
+    assert (1, module.RANK_OWN_RED) not in platform["sources"]
+
+
+def test_the_tail_of_the_queue_is_labelled_too(platform: dict[str, Any]) -> None:
+    """Метку получает и хвост очереди, а не только всё до готовой головы.
+
+    Прежний заход спрашивал вердикт до первой готовой головы и на ней
+    останавливался — у хвоста метка отставала на неопределённый срок, и
+    очередь по меткам читалась неверно.
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge"), change(3, "automerge")]
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert {number for number, _ in platform["sources"]} == {1, 2, 3}
+    assert platform["merged"] == [1], "слита не голова очереди"
+
+
+def test_the_head_verdict_is_asked_once_per_change(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Записи проверок опрашиваются ОДИН раз на кандидата за заход.
+
+    Второй опрос того же дал бы второе состояние того же: между двумя
+    обращениями прогон успевает закончиться, и разметка сказала бы одно, а
+    движение сделало другое (022).
+    """
+    asked: list[int] = []
+
+    def counting(repo: str, item: Any, tok: str) -> tuple[list[str], bool]:
+        asked.append(item.number)
+        return [], False
+
+    monkeypatch.setattr(module, "head_verdict", counting)
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert sorted(asked) == [1, 2], f"вердикт спрошен не по разу: {asked}"
+
+
+def test_the_source_of_a_change_is_decided_without_the_platform() -> None:
+    """Источник выводится из самого изменения — проверяется без площадки.
+
+    Разметка и движение решают разное, и решение о ступени обязано быть
+    проверяемым отдельно от захода: иначе его правильность видна только на
+    подделанном стенде целиком.
+    """
+    plan = change(1, "automerge")
+    assert module.source_of(plan, red=False) == module.RANK_PLAN
+    assert module.source_of(plan, red=True) == module.RANK_OWN_RED
+    fixing = change(2, "automerge", module.LABEL_FIX_MAIN)
+    assert module.source_of(fixing, red=True) == module.RANK_MAIN_RED
