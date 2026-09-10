@@ -44,16 +44,26 @@ EXIT_FINDINGS: Final = 3
 
 
 def findings(
-    checks: dict[str, policy.Check], jobs: dict[str, policy.Job], summary: str
+    checks: dict[str, policy.Check],
+    jobs: dict[str, policy.Job],
+    summary: str,
+    beyond: dict[str, policy.Job] | None = None,
 ) -> list[str]:
     """Собирает все расхождения состава, а не первое найденное."""
     found: list[str] = []
+    beyond = beyond or {}
 
     for name in jobs:
         if name not in checks:
             found.append(
                 f"{name}: проверка есть в дереве, ответа нет. Новая проверка не становится "
                 f"обязательной молча — назовите класс, хотя бы «{policy.UNREVIEWED}»"
+            )
+    for name in beyond:
+        if name not in checks:
+            found.append(
+                f"{name}: прогон вне изменения есть в дереве, ответа нет. Раздел "
+                f"`{policy.BEYOND}` спрашивается наравне: класс, хотя бы «{policy.UNREVIEWED}»"
             )
 
     for name, check in checks.items():
@@ -62,7 +72,20 @@ def findings(
                 f"{name}: сводный гейт не отвечает сам за себя — его класс задан построением"
             )
             continue
-        if name not in jobs:
+        # РАЗДЕЛ ОТВЕТА СВЕРЯЕТСЯ С ПРЕДМЕТОМ, А НЕ ТОЛЬКО ИМЯ. Ответ, попавший
+        # не в свой раздел, читается как здоровый: имя в дереве есть. Но
+        # предмет у разделов разный, и обязательным тогда объявляется прогон,
+        # записи на голове изменения не дающий, — сводный ждал бы её вечно.
+        here = beyond if check.beyond else jobs
+        there = jobs if check.beyond else beyond
+        if name not in here and name in there:
+            place = "вне изменения" if not check.beyond else "на изменении"
+            found.append(
+                f"{name}: ответ дан не в своём разделе — проверка идёт {place}. "
+                f"Предмет у разделов разный, и класс из чужого раздела к ней не относится"
+            )
+            continue
+        if name not in here:
             found.append(
                 f"{name}: ответ есть, а проверки в дереве нет. Сводный гейт ждал бы записи, "
                 "которую никто не выдаёт"
@@ -93,27 +116,40 @@ def main(argv: list[str] | None = None) -> int:
     try:
         checks = policy.load(Path(args.policy))
         jobs = policy.declared_jobs(Path(args.workflows), skip=args.self_name)
+        beyond = policy.beyond_jobs(Path(args.workflows))
     except policy.BadPolicy as exc:
         print(f"сверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    problems = findings(checks, jobs, args.self_name)
+    problems = findings(checks, jobs, args.self_name, beyond)
     if problems:
         print(f"находки ({len(problems)}):", file=sys.stderr)
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return EXIT_FINDINGS
 
-    queue = policy.names_of(checks, policy.UNREVIEWED)
-    required = policy.names_of(checks, policy.REQUIRED)
-    advisory = policy.names_of(checks, policy.ADVISORY)
-    disabled = policy.names_of(checks, policy.OFF)
+    # РАЗДЕЛЫ ПЕЧАТАЮТСЯ ПОРОЗНЬ. Свести их в один список значило бы сказать
+    # «совещательных девятнадцать» — число, из которого не видно, что девять из
+    # них не могли бы держать слияние даже при желании (154).
+    def named(klass: str, *, beyond_side: bool) -> str:
+        picked = [
+            check.name
+            for check in checks.values()
+            if check.klass == klass and check.beyond is beyond_side
+        ]
+        return ", ".join(picked) or "—"
+
     print(
-        f"совпадает: {len(jobs)} проверок дерева, ответ дан по каждой.\n"
-        f"  держат слияние: {', '.join(required)}\n"
-        f"  совещательные:  {', '.join(advisory) or '—'}\n"
-        f"  выключены:      {', '.join(disabled) or '—'}\n"
-        f"  в очереди разбора: {', '.join(queue) or '—'}"
+        f"совпадает: {len(jobs)} проверок изменения и {len(beyond)} прогонов вне его, "
+        "ответ дан по каждому.\n"
+        f"  держат слияние:    {named(policy.REQUIRED, beyond_side=False)}\n"
+        f"  совещательные:     {named(policy.ADVISORY, beyond_side=False)}\n"
+        f"  выключены:         {named(policy.OFF, beyond_side=False)}\n"
+        f"  в очереди разбора: {named(policy.UNREVIEWED, beyond_side=False)}\n"
+        "вне изменения (слияния не держат по построению):\n"
+        f"  совещательные:     {named(policy.ADVISORY, beyond_side=True)}\n"
+        f"  выключены:         {named(policy.OFF, beyond_side=True)}\n"
+        f"  в очереди разбора: {named(policy.UNREVIEWED, beyond_side=True)}"
     )
     return EXIT_OK
 

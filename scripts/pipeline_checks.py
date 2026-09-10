@@ -26,6 +26,20 @@
   «не подключено» и «отключено сознательно» снаружи неотличимы;
 * ``unreviewed`` — ответа ещё нет, и это видно.
 
+ВТОРОЙ РАЗДЕЛ — ПРОГОНЫ ЗА ПРЕДЕЛАМИ ИЗМЕНЕНИЯ. Записи на голове изменения они
+не оставляют: их события — толчок в общую ветку, расписание, ручная кнопка,
+чужой прогон. Первый раздел их не видит намеренно, и до сих пор это значило,
+что класса у них нет НИГДЕ: `main_red` считал совещательным всё, чего нет
+среди обязательных, — то есть выводил ответ из молчания (154). Замер
+10.09.2026: таких джобов десять из двадцати четырёх, и красное каждого
+попадало в «не держит слияние» не потому, что так решили, а потому, что не
+спросили.
+
+Класс ``required`` в этом разделе запрещён ПОСТРОЕНИЕМ, а не выбором: держать
+слияние нечем — сводный гейт опрашивает голову изменения, а такой прогон на
+ней не появляется. Остальное спрашивается наравне: причина у совещательного и
+выключенного, разрешимый адресат у совещательного.
+
 ЛОВУШКА YAML, КОТОРУЮ ЧТЕНИЕ НЕ ДАЁТ. В YAML 1.1 `off` — булево `False`, и
 запись `class: off` приходит сюда не строкой; тем же образом `on:` в файле
 прогона лежит под ключом `True`, а не под строкой «on». Разбор принимает обе
@@ -45,7 +59,7 @@ import yaml
 
 DEFAULT_PATH: Final = paths.PIPELINE
 WORKFLOWS: Final = paths.WORKFLOWS
-SCHEMA: Final = 3
+SCHEMA: Final = 4
 
 REQUIRED: Final = "required"
 ADVISORY: Final = "advisory"
@@ -80,6 +94,14 @@ GLOB_MARKS: Final = "*?["
 #: адресат, и слияния они не касаются.
 ON_CHANGE: Final = "pull_request"
 
+#: Раздел ответа по прогонам за пределами изменения.
+BEYOND: Final = "beyond_the_change"
+#: Классы, допустимые во втором разделе. `required` отсутствует по построению:
+#: держать слияние нечем — записи на голове изменения такой прогон не даёт.
+#: Защита ветки при этом сверяет ИМЯ записи, а не исход (187), и объявленное
+#: обязательным имя, которое никто не выдаёт, ждали бы вечно.
+BEYOND_CLASSES: Final = (ADVISORY, OFF, UNREVIEWED)
+
 
 class BadPolicy(RuntimeError):
     """Ответ по проверкам не разбирается или не проходит проверку.
@@ -101,6 +123,10 @@ class Check:
     #: который ведёт запись. Слово `none` значит «записи нет» — состояние, а не
     #: пропуск.
     addressee: str = ""
+    #: Из какого раздела ответ: проверка идёт на изменении или вне его. Знать
+    #: это нужно сверке состава — предмет у разделов разный, и ответ, попавший
+    #: не в свой, означал бы, что сводный гейт ждёт записи, которой не будет.
+    beyond: bool = False
 
     @property
     def records(self) -> bool:
@@ -225,6 +251,38 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
     if not isinstance(declared, dict) or not declared:
         raise BadPolicy(f"{path}: раздел checks пуст — предмет опроса не найден (075)")
 
+    checks, problems = _read_section(declared, path.parent, CLASSES)
+
+    beyond = raw.get(BEYOND)
+    if beyond is not None:
+        if not isinstance(beyond, dict):
+            problems.append(
+                f"раздел {BEYOND}: ожидалось отображение, пришло {type(beyond).__name__}"
+            )
+        else:
+            more, hurt = _read_section(beyond, path.parent, BEYOND_CLASSES, beyond=True)
+            problems.extend(hurt)
+            both = sorted(set(checks) & set(more))
+            if both:
+                problems.append(
+                    f"{', '.join(both)}: имя объявлено в обоих разделах — проверка идёт либо "
+                    "на изменении, либо вне его, и два ответа по имени расходятся молча (022)"
+                )
+            checks.update(more)
+
+    if problems:
+        raise BadPolicy("ответ по проверкам не проходит проверку:\n  " + "\n  ".join(problems))
+    return checks
+
+
+def _read_section(
+    declared: dict[Any, Any], root: Path, classes: tuple[str, ...], *, beyond: bool = False
+) -> tuple[dict[str, Check], list[str]]:
+    """Разбирает раздел ответа: одно прочтение формы на оба раздела.
+
+    Второе прочтение той же формы — это второе её понимание, и расходятся они
+    молча (090). Разделы отличаются только списком допустимых классов.
+    """
     checks: dict[str, Check] = {}
     problems: list[str] = []
     for key, item in declared.items():
@@ -244,8 +302,8 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
                 "иначе добавление версии в матрицу меняет договор молча"
             )
             continue
-        if klass not in CLASSES:
-            problems.append(f"{name}: класс «{klass}» неизвестен, из {', '.join(CLASSES)}")
+        if klass not in classes:
+            problems.append(f"{name}: класс «{klass}» неизвестен, из {', '.join(classes)}")
             continue
         if klass in NEEDS_REASON and not why:
             problems.append(
@@ -260,17 +318,14 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
                 f"(142). Адрес задачи, путь механизма или слово «{NO_ADDRESSEE}»"
             )
             continue
-        if addressee and addressee != NO_ADDRESSEE and not resolves(addressee, path.parent):
+        if addressee and addressee != NO_ADDRESSEE and not resolves(addressee, root):
             problems.append(
                 f"{name}: адресат «{addressee}» не разрешается — ни задача, ни путь в "
                 "дереве. Проза рядом с адресом законна, вместо адреса — нет"
             )
             continue
-        checks[name] = Check(name, klass, why, addressee)
-
-    if problems:
-        raise BadPolicy("ответ по проверкам не проходит проверку:\n  " + "\n  ".join(problems))
-    return checks
+        checks[name] = Check(name, klass, why, addressee, beyond)
+    return checks, problems
 
 
 def names_of(checks: dict[str, Check], klass: str) -> list[str]:
@@ -297,6 +352,41 @@ def run_of(path: Path) -> dict[Any, Any]:
     if not isinstance(document, dict):
         raise BadPolicy(f"{path}: прогон не словарь — читать нечего")
     return document
+
+
+def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
+    """Джобы прогонов, которые на изменении не идут вовсе.
+
+    Дополнение к `declared_jobs` ровно по одному признаку — есть ли среди
+    событий прогона событие изменения. Вместе они покрывают дерево прогонов
+    целиком: джоб попадает ровно в один раздел, и «не спросили» перестаёт быть
+    возможным состоянием.
+    """
+    if not directory.is_dir():
+        raise BadPolicy(f"нет описания прогонов: {directory} — предмет сверки не найден (075)")
+
+    jobs: dict[str, Job] = {}
+    for path in sorted(directory.glob("*.y*ml")):
+        document = run_of(path)
+        if ON_CHANGE in _triggers_of(document):
+            continue
+        for job_id, body in (document.get("jobs") or {}).items():
+            job = body or {}
+            name = str(job.get("name") or job_id)
+            matrix = bool((job.get("strategy") or {}).get("matrix"))
+            if name in jobs:
+                raise BadPolicy(
+                    f"имя проверки «{name}» выдают двое: {jobs[name].workflow} и {path.name} — "
+                    "вердикт по такому имени неоднозначен"
+                )
+            jobs[name] = Job(name, path.name, matrix)
+
+    # ПУСТО — ЗАКОННОЕ СОСТОЯНИЕ, и здесь оно отличается от первого раздела.
+    # Без проверок на изменении конвейера нет вовсе, и молчать об этом нельзя
+    # (075). А прогонов вне изменения у проекта может не быть ни одного:
+    # никаких расписаний, никакой публикации, всё на изменении. Требовать их
+    # значило бы требовать наличия того, чем проект не обязан пользоваться.
+    return jobs
 
 
 def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, Job]:
