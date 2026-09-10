@@ -201,3 +201,41 @@ def test_the_cut_carries_the_date_of_the_snapshot_it_read() -> None:
 def test_a_snapshot_without_a_date_says_so() -> None:
     """Даты в снимке нет — поле пустое, а не подставленное сегодняшним днём."""
     assert family.picture({"schema": "1.2", "consumers": []})["snapshot_at"] == ""
+
+
+# --- значки --------------------------------------------------------------
+
+
+def test_the_rules_badge_counts_machines_not_answers() -> None:
+    """Значок считает правила, держащиеся МАШИНОЙ, а не отвеченные.
+
+    Прежняя редакция показывала `answered/total` и подписывала это «правил
+    держится». Число было `195/195` и не могло стать другим: проект отвечает по
+    каждому правилу каталога по построению (129). Значок, который не движется,
+    ничего не говорит ни о том, где проект стоит, ни о том, что он сдвинулся.
+    """
+    said = facts.rules_badge(
+        {"rules": {"by_mechanism": {"gate": 10, "pipeline": 2, "document": 8, "none": 1}}}
+    )
+    assert "12/21" in said
+    assert "держится машиной" in said
+
+
+def test_the_family_badge_says_when_it_has_no_data() -> None:
+    """Снимок семьи не пришёл — значок говорит это, а не рисует ноль (045)."""
+    assert "нет данных" in facts.family_badge({"family": {"read": False}})
+    assert "нет данных" in facts.family_badge({})
+
+
+def test_the_family_badge_shows_the_measure_of_the_epic() -> None:
+    """Доля общих механизмов — прямое мерило «второго исхода» эпика #2."""
+    said = facts.family_badge({"family": {"share": 0.276, "consumers": 6}})
+    assert "28% семьи" in said
+
+
+def test_the_version_badge_names_incompleteness() -> None:
+    """Версия посчитана неполно — сказано словом и цветом, а не скрыто."""
+    whole = facts.version_badge({"version": "0.1.91", "version_whole": True})
+    partial = facts.version_badge({"version": "0.1.91", "version_whole": False})
+    assert "неполно" not in whole
+    assert "неполно" in partial

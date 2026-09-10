@@ -88,17 +88,24 @@ def test_missing_version_is_an_input_error(tmp_path: Path) -> None:
 
 
 def test_badge_shows_the_number_it_measured() -> None:
-    """Значок несёт то же число, что и факты: второго источника у него нет."""
-    drawn = facts.rules_badge({"rules": {"total": 195, "answered": 66}})
+    """Значок несёт то же число, что и факты: второго источника у него нет.
+
+    Считаются держащиеся МАШИНОЙ, а не отвеченные: `answered` равен `total` по
+    построению — проект отвечает по каждому правилу каталога (129), — и такой
+    значок не сдвинулся бы никогда.
+    """
+    drawn = facts.rules_badge(
+        {"rules": {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}}
+    )
     assert "66/195" in drawn
-    assert "правил держится" in drawn
+    assert "держится машиной" in drawn
 
 
 def test_badge_colour_follows_the_share() -> None:
     """Цвет говорит о доле, а не о настроении: три доли — три цвета."""
-    low = facts.rules_badge({"rules": {"total": 100, "answered": 10}})
-    mid = facts.rules_badge({"rules": {"total": 100, "answered": 50}})
-    high = facts.rules_badge({"rules": {"total": 100, "answered": 90}})
+    low = facts.rules_badge({"rules": {"by_mechanism": {"gate": 10, "document": 90}}})
+    mid = facts.rules_badge({"rules": {"by_mechanism": {"gate": 50, "document": 50}}})
+    high = facts.rules_badge({"rules": {"by_mechanism": {"gate": 90, "document": 10}}})
     assert len({low.split('fill="')[2], mid.split('fill="')[2], high.split('fill="')[2]}) == 3
 
 
