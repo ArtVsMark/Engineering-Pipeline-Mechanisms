@@ -17,7 +17,7 @@
 КАРТА БЕРЁТСЯ ИЗ БАЗЫ, А НЕ ИЗ ГОЛОВЫ ИЗМЕНЕНИЯ, И ЭТО НЕ ПЕДАНТИЗМ. Голову
 пишет тот, кого проверяют. Изменение, правящее `.rules/bindings.json`, могло бы
 объявить все правила машинными и получить ревью, которому некуда смотреть
-([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-untrusted-input-is-data-not-instructions.md)).
+([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
 Поэтому ответ читается из общей ветки — а правку самого ответа карта называет
 отдельной строкой: это то, на что смотреть надо в первую очередь.
 

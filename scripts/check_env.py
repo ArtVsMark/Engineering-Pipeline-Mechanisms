@@ -18,7 +18,7 @@ PEP 668. Окно почти прогнало проверки НЕ НА ТОЙ 
 ИСХОД НАЗЫВАЕТ, ЧТО ДЕЛАТЬ. «Версия не та» без продолжения оставляет окно там
 же, где застало: в окружении, где установка запрещена, а нужного
 интерпретатора нет. Поэтому расхождение печатается вместе с действием
-([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-a-manual-button-for-every-automation.md)).
+([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)).
 
 ЧЕГО МЕХАНИЗМ НЕ ДЕЛАЕТ: он не чинит окружение. Установка пакетов из шага,
 который проверяет окружение, превратила бы проверку в действие, и «сверено» и

@@ -1,7 +1,7 @@
 """У настроек один якорь, и поиска вверх по дереву нет.
 
 Правило каталога
-[115](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/115-settings-have-one-anchor-not-a-search.md)
+[115](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/115-config-has-one-anchor-and-a-bounded-search.md)
 до этого гейта держалось построением: адреса настроек были короткими, каждый
 читатель писал `Path("...")` сам, и завести второй якорь ничто не мешало.
 

@@ -7,7 +7,7 @@
 уже слитого изменения, и адресата действию взять неоткуда. Выдать ревьюеру
 право писать в площадку значило бы расширить список разрешённого до записи —
 на канале, чей вход собран из проверяемого текста
-([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-prompt-injection-is-a-design-constraint.md)).
+([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
 Поэтому ревьюер остаётся читателем, а комментарий пишет механизм: он берёт
 ответ из файла прогона (`execution_file`) и кладёт его туда же, куда кладёт
 ответ обычного ревью, — в само изменение.

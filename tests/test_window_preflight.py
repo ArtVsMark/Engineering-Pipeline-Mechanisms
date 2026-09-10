@@ -1,7 +1,7 @@
 """Окно проверяет окружение на входе и своё красное перед толчком.
 
 Оба механизма проверяются тем, что обязаны ОТВЕРГНУТЬ
-([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-proved-by-what-it-rejects.md)):
+([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)):
 подделанная версия интерпретатора и заведомо красная команда. Зелёное на
 здоровом дереве не доказывает ничего — оно так же выглядит у механизма,
 который не проверяет вовсе.

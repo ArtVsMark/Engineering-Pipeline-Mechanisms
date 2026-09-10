@@ -174,7 +174,7 @@ def why_quiet(runs: list[dict[str, Any]]) -> str:
     ЗАЧЕМ. Прежде все три случая назывались одним словом «вердикта нет», и
     реестр честно писал, что различить их можно только логом прогона. Лог
     живёт 90 дней и требует прав, а причина нужна тому, кто читает реестр
-    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-a-red-must-name-its-cause.md)):
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)):
     «прогон упал» зовёт чинить канал, «ключа нет» — настроить секрет, «записи
     нет вовсе» — посмотреть, почему шаг не запускался.
 
@@ -241,7 +241,7 @@ def scan(
 
     Площадки здесь нет намеренно: она приходит одним `look`, и подделать её в
     проверке можно, не подделывая транспорт
-    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-proved-by-what-it-rejects.md)).
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
     """
     entries = dict(known)
     # Сначала перечитывается уже записанное: вердикт мог опоздать к слиянию, и

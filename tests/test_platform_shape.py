@@ -1,7 +1,7 @@
 """Подделка ответа площадки сверяется со снятым ответом, а не с разумением окна.
 
 Правило каталога
-[170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-fakes-are-checked-against-a-captured-answer.md)
+[170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)
 до этого гейта не держалось ничем. Подделки в наборе были — сборщик записи
 проверки, свой сервер у транспорта, — но собраны они по документации и по
 разумению окна. Зелёное на такой подделке доказывает согласованность кода с

@@ -91,7 +91,7 @@ def test_the_two_tables_do_not_contradict_each_other() -> None:
     продлевает секрет, другая — чего у проекта нет. Секрет, попавший в обе,
     означает, что одна из них не обновлена, — и снаружи это неотличимо от
     осознанного решения
-    ([175](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/175-a-claim-of-absence-must-be-a-gate.md)).
+    ([175](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/175-an-absence-claim-that-a-command-can-refute-must-be-a-gate.md)).
 
     Замер, из-за которого проверка написана: `CLAUDE_CODE_OAUTH_TOKEN` стоял в
     таблице секретов с продлевающим и одновременно в пробелах как «секрета

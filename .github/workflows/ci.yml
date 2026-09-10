@@ -256,6 +256,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/check_own_name.py
+      # Ссылками на правила проект обосновывает решения, и битая ссылка
+      # обесценивает довод: проверить его нельзя. Имена берутся у каталога, а
+      # не из памяти — по памяти их и написали 29 раз.
+      - name: ссылки на правила разрешаются
+        run: python scripts/check_rule_links.py
 
   attribution:
     name: attribution

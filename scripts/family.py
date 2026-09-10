@@ -24,7 +24,7 @@
 СОПОСТАВЛЕНИЕ ИДЁТ ПО ИМЕНИ ФАЙЛА, И ОДНОИМЁННОСТЬ — НЕ ТОЖДЕСТВО. Копии лежат
 по разным путям намеренно, но замер расхождения говорит прямо: ни одна пара
 копий не совпала. Число показывает, ГДЕ смотреть, а не что делать
-([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-numbers-in-prose-need-a-marker.md)).
+([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
 
 ЧИСЛО НЕ РЕШАЕТ ЗА ЧЕЛОВЕКА. Механизм, держащий одно правило, бывает
 необходим; держащий восемнадцать — оставаться домашним, если правила про

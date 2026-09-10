@@ -1,7 +1,7 @@
 """Реестр слитого без внешнего взгляда: что он записывает и чего не записывает.
 
 Гейт проверяется тем, что обязан ОТВЕРГНУТЬ
-([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-proved-by-what-it-rejects.md)),
+([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)),
 и здесь отвергаемое — не «плохой код», а ЛОЖНАЯ ЗАПИСЬ. Реестр, записывающий
 всё подряд, читается как шум; реестр, молчащий о слитом без взгляда, вернул бы
 ровно ту неразличимость, ради которой заведён.

@@ -2,7 +2,7 @@
 
 Длинный вывод обрезают четверо: шаг открытия, гейт журнала, транспорт и сборка
 тела уплотнения. Обрезали молча — `[:300]`, — и это ровно то, что запрещает
-[016](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/016-truncated-output-must-say-so.md):
+[016](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/016-no-silent-truncation.md):
 урезанный результат выглядит как полный. Читатель ищет причину в первых
 трёхстах знаках, когда она в четырёхсот первом.
 

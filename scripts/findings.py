@@ -24,7 +24,7 @@ MARKER: Final = "<!-- review-findings: не удаляйте, по этой ст
 TITLE: Final = "Находки внешнего взгляда: не разобранные"
 #: ВЕС НАХОДКИ. Шкала закрытая, как роды у фрагментов журнала: слово вне её —
 #: не вес, а мнение, и сравнивать по нему нечего
-#: ([086](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/086-severity-is-set-by-someone-else.md)).
+#: ([086](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/086-the-finder-does-not-grade-the-finding.md)).
 #:
 #: ПОЧЕМУ ШКАЛА ВООБЩЕ НУЖНА. Без неё слабая находка отличается от сильной
 #: только прочтением, и разбирающий читает двадцать записей подряд, чтобы

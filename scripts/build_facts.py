@@ -8,7 +8,7 @@
 обязан.
 
 ПРОИЗВОДНОЕ НЕ ЖИВЁТ РЯДОМ С ИСТОЧНИКОМ
-([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-derived-file-is-not-a-store.md)).
+([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-generated-file-is-not-a-store.md)).
 Вывод этого механизма уезжает в отдельную ветку `badges` и там перезаписывается
 целиком: его можно удалить и собрать заново, ничего не потеряв. В общей ветке
 он протухал бы молча — и число из него разошлось бы с источником на первой же

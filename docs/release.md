@@ -163,7 +163,7 @@
 
 1. фрагменты, вошедшие в выпуск, **переезжают** в `changelog.d/released/<версия>/`
    — не удаляются: собранный журнал производный, а источником остаются они
-   ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-derived-file-is-not-a-store.md));
+   ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-generated-file-is-not-a-store.md));
 2. `CONTRACT_VERSION` поднимается;
 3. журнал собирается из фрагментов заново;
 4. коммит и тег ставятся последними и уезжают вместе.
