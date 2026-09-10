@@ -39,6 +39,7 @@ from typing import Any, Final
 
 import paths
 import pipeline_checks as policy
+import version
 
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
@@ -118,9 +119,19 @@ def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, int]:
 
 def collect(root: Path, sha: str) -> dict[str, Any]:
     """Собирает все факты о проекте в одно отображение."""
+    # ВЕРСИЯ ПРОЕКТА И ВЕРСИЯ КОНТРАКТА — РАЗНЫЕ ЧИСЛА, И ОБА НУЖНЫ. Контракт
+    # объявляет поверхность механизмов и поднимается решением человека; версия
+    # проекта СЧИТАЕТСЯ по истории — «столько изменений принято после выпуска».
+    # Свести их в одно значило бы либо скрыть работу, либо объявить выпуском
+    # каждое изменение (035).
+    number, whole = version.version()
     return {
         "schema": 1,
         "contract": contract_version(root / VERSION_FILE),
+        "version": number,
+        # Неполнота названа рядом с числом, а не выброшена: клон без тегов даёт
+        # правдоподобное число, которое ложь (045).
+        "version_whole": whole,
         "rules": rules_facts(root / BINDINGS),
         "checks": checks_facts(root / policy.DEFAULT_PATH),
         "generated": {
