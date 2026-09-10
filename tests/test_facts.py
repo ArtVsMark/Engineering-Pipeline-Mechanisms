@@ -145,3 +145,34 @@ def test_build_refuses_to_write_next_to_the_sources(run_script: RunScript) -> No
     run = run_script("build_facts.py")
     assert run.code != 0, run.text
     assert "--out-dir" in run.text
+
+
+def test_the_facts_carry_the_computed_version() -> None:
+    """Факты несут ПОСЧИТАННУЮ версию рядом с объявленным контрактом.
+
+    Числа разные и оба нужны: контракт объявляет поверхность механизмов и
+    поднимается решением человека, версия проекта считается по истории —
+    «столько изменений принято после выпуска». Свести их в одно значило бы либо
+    скрыть работу, либо объявить выпуском каждое изменение (035).
+    """
+    collected = facts.collect(ROOT, "abc1234")
+    assert collected["contract"], "объявленный контракт исчез из фактов"
+    assert collected["version"], "посчитанной версии в фактах нет"
+    assert collected["version"] != collected["contract"] or collected["version"].endswith(".0")
+
+
+def test_the_facts_say_whether_the_version_is_whole() -> None:
+    """Неполнота названа рядом с числом, а не выброшена.
+
+    Клон без тегов даёт правдоподобное число: MAJOR.MINOR берутся из
+    объявленного контракта вместо выпущенного. Потребитель фактов должен видеть
+    это в данных, а не догадываться (046).
+    """
+    assert "version_whole" in facts.collect(ROOT, "abc1234")
+
+
+def test_the_badge_run_fetches_the_tags() -> None:
+    """Прогон значков берёт всю историю и теги — иначе версия считается ложно."""
+    text = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
+    assert "fetch-depth: 0" in text
+    assert "fetch-tags: true" in text

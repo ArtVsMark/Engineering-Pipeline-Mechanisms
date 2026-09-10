@@ -38,7 +38,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # ВСЯ ИСТОРИЯ И ТЕГИ: версия проекта СЧИТАЕТСЯ по ним. Мелкий клон даёт
+      # правдоподобное число, которое ложь, — тегов не видно, и MAJOR.MINOR
+      # берутся из объявленного контракта вместо выпущенного (045).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
