@@ -52,6 +52,27 @@ def test_auto_review_cancellation_group_names_the_head() -> None:
     assert "head.sha" in group
 
 
+def test_the_group_names_the_subject_of_a_manual_run_too() -> None:
+    """У ручного запуска предмет называет ВХОД, а не событие.
+
+    При `workflow_dispatch` `pull_request` пуст, и без `inputs.pr` группа
+    схлопывается в одну на все номера: поздние взгляды по разным изменениям
+    гасят друг друга. Замер 10.09.2026 — владелец запустил пять заходов подряд
+    по разным номерам, до конца дошёл один, четыре отменены. Снаружи это
+    выглядело как «механизм не работает», хотя не работала группа.
+    """
+    document = load(AUTO_REVIEW)
+    group = document["concurrency"]["group"]
+    events = document[True] if True in document else document["on"]
+    if "workflow_dispatch" not in events:
+        return
+    inputs = (events["workflow_dispatch"] or {}).get("inputs") or {}
+    for name in inputs:
+        assert f"inputs.{name}" in group, (
+            f"вход «{name}» задаёт предмет ручного запуска, а в группе отмены его нет (179)"
+        )
+
+
 def test_mention_review_requires_a_trusted_author() -> None:
     """Обращение обслуживается только от доверенного автора — по всем событиям.
 
