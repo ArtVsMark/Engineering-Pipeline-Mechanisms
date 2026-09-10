@@ -100,12 +100,40 @@ def untracked() -> list[str]:
     return [line[3:].strip() for line in done.stdout.splitlines() if line[3:].strip()]
 
 
-def declared(base: str) -> bool:
-    """Есть ли во внесённом фрагмент рода `contract`."""
+def declared(base: str) -> list[Path]:
+    """Фрагменты рода `contract`, принесённые изменением."""
     names = [*journal.changed_files(base, alive_only=True), *untracked()]
-    return any(
-        name.startswith(f"{paths.FRAGMENTS}/") and name.endswith(CONTRACT_KIND) for name in names
-    )
+    return [
+        Path(name)
+        for name in names
+        if name.startswith(f"{paths.FRAGMENTS}/") and name.endswith(CONTRACT_KIND)
+    ]
+
+
+#: Слова, которыми фрагмент называет ПЕРЕХОД: что потребителю сделать со своим,
+#: уже работающим. Достаточно одного — форма прозы не диктуется, требуется
+#: только, чтобы переход был назван, а не подразумевался.
+MIGRATION_MARKS: Final = ("было", "перестал", "переименован", "удалён", "вместо", "→")
+
+
+def migration_named(fragments: list[Path]) -> bool:
+    """Назван ли во фрагментах переход, а не только сам факт правки.
+
+    ПОЧЕМУ ЭТОГО МАЛО — «поверхность изменилась». Потребитель живёт на своей
+    версии, и миграция идёт ОТ НЕЁ, а не от нуля
+    ([114](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/114-migrate-from-the-current-version-not-from-zero.md)):
+    «поставьте свежее и настройте заново» переписывает ему то, что уже работает,
+    и он этого не сделает. Поэтому у несовместимой правки фрагмент обязан
+    сказать, что было и что стало, — иначе он сообщение о погоде.
+    """
+    for path in fragments:
+        try:
+            said = path.read_text(encoding="utf-8").lower()
+        except OSError:
+            continue
+        if any(mark in said for mark in MIGRATION_MARKS):
+            return True
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,9 +168,25 @@ def main(argv: list[str] | None = None) -> int:
     for line in changes:
         print(f"  {line}")
 
-    if declared(base):
+    fragments = declared(base)
+    breaks = contract.breaking(changes)
+    if fragments and not breaks:
         print("\nизменение объявило это фрагментом рода `contract` — так и надо")
         return EXIT_CLEAN
+    if fragments and migration_named(fragments):
+        print("\nправка несовместима, и фрагмент называет переход — так и надо")
+        return EXIT_CLEAN
+    if fragments:
+        print(
+            "\nЭто НЕСОВМЕСТИМАЯ правка:\n  "
+            + "\n  ".join(breaks)
+            + "\n\nФрагмент рода `contract` есть, а перехода в нём нет. Потребитель живёт на\n"
+            "своей версии, и миграция идёт ОТ НЕЁ, а не от нуля (114): «поставьте свежее\n"
+            "и настройте заново» переписывает ему уже работающее, и он этого не сделает.\n"
+            "Скажите, ЧТО было и что стало — удалённое имя джоба потребитель держит в\n"
+            "защите ветки дословно, и она начнёт ждать контекста, которого никто не выдаст."
+        )
+        return EXIT_FINDINGS
 
     print(
         "\nЭто видит потребитель: имена джобов попадают в его защиту ветки дословно,\n"

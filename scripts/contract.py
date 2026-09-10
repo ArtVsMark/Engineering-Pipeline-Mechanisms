@@ -119,6 +119,25 @@ def as_text(shape: dict[str, Any]) -> str:
     return json.dumps(shape, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+#: Приметы НЕСОВМЕСТИМОГО изменения поверхности: у потребителя от них ломается
+#: то, что работало. Список закрытый и назван словами самих различий — второй
+#: разбор той же строки разошёлся бы с первым молча (090).
+BREAKING_MARKS: Final = ("джобов не стало", "прогон удалён", "схема ответа", "проверки не стало")
+
+
+def breaking(changes: list[str]) -> list[str]:
+    """Из различий поверхности — те, что ломают потребителя.
+
+    ПОЧЕМУ ЭТО РАЗВОДИТСЯ. Добавленный джоб потребитель может не заметить и
+    ничего не потерять; удалённый он держит в защите ветки ДОСЛОВНО, и защита
+    начинает ждать контекста, которого никто не выдаст — изменение молча
+    превращается в вечное ожидание. Требовать переход от обоих значило бы
+    объявлять миграцию на каждое расширение и приучить писать её формально
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    return [said for said in changes if any(mark in said for mark in BREAKING_MARKS)]
+
+
 def differences(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     """Что в поверхности изменилось — построчно и по-человечески.
 
