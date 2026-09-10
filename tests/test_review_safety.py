@@ -89,20 +89,41 @@ def test_actions_that_receive_the_token_are_pinned_by_sha(path: Path) -> None:
             assert SHA_PIN.search(uses), f"{path.name}: {uses} закреплено меткой, а не SHA"
 
 
-def declared_tools(path: Path) -> list[str]:
-    """Достаёт объявленный список инструментов агента из шага прогона.
+def agent_steps(path: Path) -> list[dict[str, Any]]:
+    """Шаги, запускающие агента: у них есть `claude_args`."""
+    return [
+        step
+        for job in load(path)["jobs"].values()
+        for step in job["steps"]
+        if "claude_args" in (step.get("with") or {})
+    ]
+
+
+def declared_tools(path: Path) -> list[tuple[str, list[str]]]:
+    """Списки инструментов агента — ВСЕ, а не первый попавшийся.
 
     Читается значение ключа, а не файл целиком: в комментариях рядом слово
     «Bash» встречается по делу, и поиск по тексту дал бы находку на пояснении,
     а не на списке.
+
+    ПОЧЕМУ ВСЕ. Прогон ревью держит больше одного шага агента — взгляд на
+    изменение и поздний взгляд по общей ветке, — и у каждого свой список.
+    Проверка первого зеленела бы на втором, сколько бы там ни было разрешено:
+    ровно тот случай, когда гейт смотрит не туда, где предмет (075).
     """
-    for job in load(path)["jobs"].values():
-        for step in job["steps"]:
-            args = (step.get("with") or {}).get("claude_args", "")
-            match = re.search(r'--allowedTools\s+"([^"]+)"', args)
-            if match:
-                return [tool.strip() for tool in match.group(1).split(",") if tool.strip()]
-    raise AssertionError(f"{path.name}: список инструментов агента не объявлен")
+    found = [
+        (str(step.get("name") or "без имени"), match)
+        for step in agent_steps(path)
+        if (match := re.search(r'--allowedTools\s+"([^"]+)"', step["with"]["claude_args"]))
+    ]
+    assert len(found) == len(agent_steps(path)), (
+        f"{path.name}: у шага агента список инструментов не объявлен"
+    )
+    assert found, f"{path.name}: список инструментов агента не объявлен"
+    return [
+        (name, [tool.strip() for tool in match.group(1).split(",") if tool.strip()])
+        for name, match in found
+    ]
 
 
 @pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
@@ -112,13 +133,36 @@ def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
     Список инструментов — единственный барьер против указания «выполни команду и
     отправь результат наружу», пришедшего из проверяемого текста (085).
     """
-    tools = declared_tools(path)
-    assert tools, f"{path.name}: список пуст — это не ограничение, а его отсутствие (075)"
-    bare = [tool for tool in tools if tool == "Bash" or tool.startswith("Bash ")]
-    assert not bare, f"{path.name}: разрешён Bash без ограничения команды: {bare}"
-    for tool in tools:
-        if tool.startswith("Bash"):
-            assert tool.startswith("Bash(") and tool.endswith(")"), f"{path.name}: {tool}"
+    for name, tools in declared_tools(path):
+        assert tools, f"{path.name}, «{name}»: список пуст — это не ограничение, а его отсутствие"
+        bare = [tool for tool in tools if tool == "Bash" or tool.startswith("Bash ")]
+        assert not bare, f"{path.name}, «{name}»: разрешён Bash без ограничения команды: {bare}"
+        for tool in tools:
+            if tool.startswith("Bash"):
+                assert tool.startswith("Bash(") and tool.endswith(")"), f"{path.name}: {tool}"
+
+
+#: Инструменты, которыми агент пишет в площадку или наружу. Список
+#: запретительный намеренно: разрешительный здесь пришлось бы держать полным
+#: списком безобидного, а безобидное растёт быстрее опасного.
+WRITING_TOOLS = ("Write", "Edit", "WebFetch", "WebSearch", "Bash(gh ", "Bash(curl ")
+
+
+@pytest.mark.parametrize("path", [AUTO_REVIEW], ids=lambda p: p.name)
+def test_the_reviewer_stays_a_reader(path: Path) -> None:
+    """Ревьюер не пишет ни в площадку, ни наружу — за него это делает механизм.
+
+    Вход ревью собран из проверяемого текста, и право записи в этом канале
+    означает, что чужой текст сможет им воспользоваться (085). Поздний взгляд
+    по общей ветке — самое место, где такое право хочется выдать: адресата у
+    него нет по построению. Поэтому ответ переносит `late_look.py`, а не агент.
+    """
+    for name, tools in declared_tools(path):
+        writing = [tool for tool in tools if tool.startswith(WRITING_TOOLS)]
+        assert not writing, (
+            f"{path.name}, «{name}»: ревьюеру разрешена запись: {writing} — "
+            "ответ обязан переносить механизм, а не агент"
+        )
 
 
 def test_review_is_not_a_required_context() -> None:
@@ -152,7 +196,7 @@ def test_a_permitted_run_is_actually_possible(path: Path) -> None:
     же, как после беглого просмотра (045). Отчёт по #32 прямо сказал, что
     прогнать не смог, и всё равно вынес вердикт.
     """
-    tools = declared_tools(path)
+    tools = [tool for _, allowed in declared_tools(path) for tool in allowed]
     runs_python = [tool for tool in tools if tool.startswith(("Bash(python ", "Bash(python3 "))]
     if not runs_python:
         return
@@ -171,12 +215,14 @@ def test_both_interpreter_names_are_permitted(path: Path) -> None:
     Ровно на этом ревью и осталось без прогона: разрешение у него было, а
     позвало оно другое имя.
     """
-    tools = declared_tools(path)
-    for tool in tools:
-        if not tool.startswith("Bash(python "):
-            continue
-        twin = tool.replace("Bash(python ", "Bash(python3 ", 1)
-        assert twin in tools, f"{path.name}: разрешено «{tool}», а его двойник с python3 — нет"
+    for name, tools in declared_tools(path):
+        for tool in tools:
+            if not tool.startswith("Bash(python "):
+                continue
+            twin = tool.replace("Bash(python ", "Bash(python3 ", 1)
+            assert twin in tools, (
+                f"{path.name}, «{name}»: разрешено «{tool}», а его двойника с python3 нет"
+            )
 
 
 def scripts_called_by(path: Path) -> set[str]:

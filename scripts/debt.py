@@ -12,6 +12,12 @@
   ответами. Этого требует сам каталог
   ([177](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/177-unfinished-rule-work-comes-first.md)).
 
+РЯДОМ ПЕЧАТАЕТСЯ ТРЕТЬЕ ЧИСЛО, И ОНО НЕ ДОЛГ, А МЕРА. Слитое без внешнего
+взгляда (`unlooked`) говорит, сколько работы прошло мимо совещательного канала.
+Приоритет перед планом оно не даёт: посмотреть слитое заново можно, обязанности
+сделать это до новой работы нет. Но и в невидимое это уходить не должно —
+именно из невидимости растёт привычка считать, что взгляд был.
+
 ЧИСЛА ЗДЕСЬ НЕ СЧИТАЮТСЯ, А ЧИТАЮТСЯ. По правилам их считает ночной прогон
 действия каталога и кладёт в задачу-«входящие»; по находкам — механизм ревью в
 свою живую задачу. Второй счёт того же разошёлся бы с первым молча
@@ -37,6 +43,7 @@ from typing import Final
 
 import findings
 import ghrest
+import unlooked
 
 #: Строка, которую пишет ночной прогон каталога. Три числа правила 177 в одном
 #: месте — читаются целиком, а не собираются заново.
@@ -76,6 +83,21 @@ def findings_debt(repo: str, token: str) -> list[tuple[str, int, str]]:
     return [
         (mark, entry.pr, f"[{entry.weight}] {entry.title}")
         for mark, entry in findings.parse_entries(body).items()
+    ]
+
+
+def unlooked_debt(repo: str, token: str) -> list[unlooked.Entry]:
+    """Слитое без внешнего взгляда — из реестра, где его ведёт свой механизм.
+
+    Третий долг ЧИТАЕТСЯ так же, как два первых: его считает `unlooked` в свою
+    живую задачу, а здесь только берётся готовое число
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    """
+    _, body = findings.live_issue(repo, token, unlooked.MARKER)
+    return [
+        entry
+        for entry in unlooked.parse_entries(body).values()
+        if entry.state in unlooked.OPEN_STATES
     ]
 
 
@@ -135,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         left = findings_debt(args.repo, token)
+        unlooked_left = unlooked_debt(args.repo, token)
         _, inbox = findings.live_issue(args.repo, token, findings.INBOX_MARKER)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
@@ -143,6 +166,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"находки, пережившие слияние: {len(left)}")
     for mark, pr, title in left:
         print(f"  {mark} · #{pr} — {title}")
+
+    # ТРЕТИЙ ДОЛГ ПЕЧАТАЕТСЯ, НО НАПОМИНАНИЯ НЕ ВКЛЮЧАЕТ. Слитое без взгляда —
+    # мера того, сколько прошло мимо канала, а не список работы: посмотреть
+    # заново можно, но обязанности сделать это до новой работы нет, и
+    # напоминание, звучащее всегда, перестаёт что-либо значить (051). Число
+    # видно, решение — за человеком (154).
+    print(f"слито без внешнего взгляда: {len(unlooked_left)}")
+    for entry in sorted(unlooked_left, key=lambda item: -item.number):
+        print(f"  #{entry.number} · {entry.state} · {entry.merged}")
 
     partial = False
     numbers = rules_debt(inbox)

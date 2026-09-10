@@ -145,3 +145,57 @@ def test_the_step_is_declared_advisory() -> None:
     """Класс шага объявлен данными: долг не держит слияние, но виден."""
     answer = (ROOT / ".pipeline.yml").read_text(encoding="utf-8")
     assert "debt:" in answer and "advisory" in answer
+
+
+# --- третье число: слитое без внешнего взгляда --------------------------------
+
+
+def registry(*lines: str) -> str:
+    """Тело реестра слитого без взгляда — в том виде, в каком его ведёт `unlooked`."""
+    return "\n".join(["Просмотрено до: #90", "", "## Не просмотрено", "", *lines])
+
+
+def test_the_third_number_counts_only_what_was_never_looked_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Считается «взгляда не было», а не все записи реестра.
+
+    Поздний взгляд по общей ветке — состоявшийся разбор, пусть и другой. Считать
+    его наравне с «взгляда не было» значило бы сказать, что работа канала
+    пропала, когда она состоялась (154).
+    """
+    body = registry(
+        f"- #88 · {debt.unlooked.STATE_NONE} · 2026-09-10",
+        f"- #80 · {debt.unlooked.STATE_LATE} · 2026-09-01",
+    )
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (7, body))
+    left = debt.unlooked_debt("owner/repo", "token")
+    assert [entry.number for entry in left] == [88]
+
+
+def test_the_third_number_is_read_not_counted_again() -> None:
+    """Число берётся из реестра, а не пересчитывается по площадке.
+
+    Второй счёт того же разошёлся бы с первым молча, и оба выглядели бы
+    правдоподобно (022). Здесь это видно по коду: шаг не ходит за слитыми
+    изменениями сам.
+    """
+    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
+    assert "merged_changes" not in source and "state=closed" not in source
+
+
+def test_the_third_number_does_not_switch_the_reminder_on() -> None:
+    """Слитое без взгляда печатается, но приоритета перед планом не даёт.
+
+    Долг — это работа, которую обязаны сделать раньше новой. Посмотреть слитое
+    заново можно, обязанности нет, и напоминание, звучащее всегда, перестаёт
+    что-либо значить (051).
+
+    Печать и решение здесь уже расходились однажды — на числах правила 177, —
+    поэтому решение проверяется отдельно от вывода: в него входят ровно два
+    источника, и добавить третий молча не выйдет.
+    """
+    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
+    assert "remind(bool(left) or rules_left(numbers, note))" in source, (
+        "решение о напоминании собрано иначе — проверьте, не вошло ли в него слитое без взгляда"
+    )
