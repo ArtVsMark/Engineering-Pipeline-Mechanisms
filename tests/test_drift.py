@@ -208,3 +208,41 @@ def test_the_matrix_is_read_from_the_run_itself() -> None:
     assert matrix, "матрица не разобралась"
     assert all(part.count(".") == 1 for part in matrix), matrix
     assert ahead, "предрелизная ветка не разобралась"
+
+
+def test_a_pin_without_a_subpath_is_still_a_pin() -> None:
+    """Действие каталога подключают двумя формами, и обе — предмет счёта.
+
+    `<repo>/.github/actions/<имя>@<тег>` подключает одно действие,
+    `<repo>@<тег>` — действие из корня. Прежняя редакция искала подстроку
+    `<repo>/` и вторую форму теряла молча: `rules-inbox.yml` выпадал из счёта, а
+    совпадение тегов у обоих подключений это маскировало. Нашёл разбор на #119.
+    """
+    said = "\n".join(
+        [
+            f"      - uses: {module.CATALOGUE}/.github/actions/attribution@v1.2.0",
+            f"      - uses: {module.CATALOGUE}@v1.3.0",
+        ]
+    )
+    assert sorted(found.group("tag") for found in module.PINNED_RE.finditer(said)) == [
+        "v1.2.0",
+        "v1.3.0",
+    ]
+
+
+def test_a_pin_of_a_stranger_is_not_ours() -> None:
+    """Чужое действие с похожим именем в счёт не идёт: предмет — наш каталог."""
+    said = "      - uses: someone/Engineering-Incidents-Playbook-fork@v9.9.9"
+    assert [found.group("tag") for found in module.PINNED_RE.finditer(said)] == []
+
+
+def test_the_record_names_where_the_stale_pin_lives(monkeypatch: pytest.MonkeyPatch) -> None:
+    """В записи назван файл с отставшим подключением, а не только тег.
+
+    «Подключено v1.2.0» без адреса заставляет искать его по всему дереву — то
+    есть делать руками работу, которую механизм уже сделал.
+    """
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: {"tag_name": "v9.9.9"})
+    found = module.pinned_tag_moved("o/r", "token")
+    assert len(found) == 1
+    assert ".yml" in found[0].said, found[0].said

@@ -68,6 +68,13 @@ WHERE_URL: Final = (
 )
 CATALOGUE: Final = "ArtVsMark/Engineering-Incidents-Playbook"
 
+#: Подключение действия каталога — с подпутём и без него. Обе формы законны и
+#: обе живут в дереве: `<repo>/.github/actions/<имя>@<тег>` подключает одно
+#: действие, `<repo>@<тег>` — действие из корня. Прежняя редакция искала подстроку
+#: `<repo>/` и вторую форму теряла: `rules-inbox.yml` выпадал из счёта молча, а
+#: совпадение тегов у обоих подключений это маскировало. Нашёл разбор на #119.
+PINNED_RE: Final = re.compile(rf"{re.escape(CATALOGUE)}(?:/[^@\s]+)?@(?P<tag>v[^\s#'\"]+)")
+
 #: Манифест версий, которые умеет ставить `actions/setup-python`. Источник
 #: выбран не «самый правдивый о языке», а САМЫЙ БЛИЗКИЙ К ПРЕДМЕТУ: вопрос здесь
 #: не «что выпустил CPython», а «что сможет поставить наш прогон». Между этими
@@ -222,12 +229,10 @@ def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
     со стороны), но «намеренно» не значит «навсегда»: выпуск каталога может
     нести починку гейта, которым мы держим своё правило.
     """
-    used: set[str] = set()
+    used: dict[str, set[str]] = {}
     for path in sorted(paths.WORKFLOWS.glob("*.yml")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            mark = f"{CATALOGUE}/"
-            if mark in line and "@v" in line:
-                used.add(line.rsplit("@", 1)[1].strip().split()[0])
+        for found in PINNED_RE.finditer(path.read_text(encoding="utf-8")):
+            used.setdefault(found.group("tag"), set()).add(path.name)
     if not used:
         return []
     latest = ghrest.request("GET", f"repos/{CATALOGUE}/releases/latest", token) or {}
@@ -235,10 +240,11 @@ def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
     behind = sorted(tag for tag in used if newest and tag != newest)
     if not behind:
         return []
+    where = sorted({name for tag in behind for name in used[tag]})
     return [
         Drift(
             "catalogue-action",
-            f"подключено {', '.join(behind)}, у каталога выпущен {newest}",
+            f"подключено {', '.join(behind)} ({', '.join(where)}), у каталога выпущен {newest}",
             f"прочитать журнал выпуска и поднять тег, если он нас касается: "
             f"https://github.com/{CATALOGUE}/releases/tag/{newest}",
         )
