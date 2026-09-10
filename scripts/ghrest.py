@@ -233,6 +233,29 @@ def paginate(path: str, token: str, key: str | None = None) -> Iterator[dict[str
         page += 1
 
 
+def raw_json(url: str, timeout: int = 30) -> dict[str, Any]:
+    """Читает ЧУЖОЙ снимок по прямой ссылке: не API площадки, но тот же транспорт.
+
+    Отдельный вход, а не `request`: у снимка нет ни токена, ни квоты, ни
+    страниц — это статический файл, который сосед собрал своим прогоном. А
+    место одно, потому что второй транспорт вырастает не файлом, а фразой «мне
+    нужен всего один запрос»: у соседей так и выросли 2436 строк против 131
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    Отказ — исключение, а не пустой словарь: пустой снимок читался бы как
+    «ничего не изменилось», то есть тихий запасной ответ на месте поломки (045).
+    """
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as answer:
+            snapshot = json.loads(answer.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        raise TransportError(f"снимок не прочитан ({url}): {exc}") from exc
+    if not isinstance(snapshot, dict):
+        raise TransportError(f"снимок не словарь ({url}): читать нечего")
+    return snapshot
+
+
 #: Сколько последних закрытых изменений спрашивается за раз. Окно — не история:
 #: механизмы, которые смотрят «что недавно слито», догоняют пропущенное событие,
 #: а не переобходят прошлое. Значение одно на всех: разъехавшиеся окна означали
