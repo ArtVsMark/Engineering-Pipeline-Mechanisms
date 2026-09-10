@@ -184,6 +184,35 @@ def worst_per_name(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(best.values())
 
 
+def own_jobs(repo: str, run_id: str, token: str) -> dict[str, str]:
+    """Джобы СВОЕГО прогона: имя → состояние. Пусто — спросить не у кого.
+
+    Нужны они ради одного различия, которое иначе не сделать. Джоб, ждущий
+    зависимости (`needs`), записи проверки на голове ещё не имеет — он не
+    стартовал. Снаружи это выглядит точно так же, как «прогон не стартовал
+    вовсе», а значит совсем другое: первый обязательно стартует, второго не
+    будет никогда. Прежде оба читались как отказ, и сводный гейт краснел на
+    здоровом прогоне.
+
+    ЗАМЕР 10.09.2026: агрегат `test` ждёт матрицу версий, а сводный гейт
+    опрашивает голову раньше и объявляет «прогон не стартовал». Изменение #102
+    при полностью зелёных проверках получило красный обязательный контекст.
+    """
+    if not repo or not run_id:
+        return {}
+    try:
+        payload = ghrest.request("GET", f"repos/{repo}/actions/runs/{run_id}/jobs", token) or {}
+    except ghrest.TransportError:
+        # Не спросили — значит различить нечем, и молчаливой поблажки быть не
+        # должно: разбор вернётся к прежней строгости (045).
+        return {}
+    return {
+        str(job.get("name", "")): str(job.get("status", ""))
+        for job in payload.get("jobs", [])
+        if isinstance(job, dict)
+    }
+
+
 def verdict(
     runs: list[dict[str, Any]],
     required: list[str],
@@ -191,6 +220,7 @@ def verdict(
     run_id: str = "",
     *,
     strict_missing: bool = True,
+    mine: dict[str, str] | None = None,
 ) -> tuple[list[str], bool]:
     """Выносит вердикт по объявленным именам; вторым отдаёт «ещё идут».
 
@@ -216,9 +246,18 @@ def verdict(
         # Для имени, которого в своём прогоне нет вовсе, смотрятся остальные
         # записи: обязательное имя может выдавать и другой механизм.
         if run_id:
-            mine = [run for run in found if belongs_to(run, run_id)]
-            found = mine or found
+            ours = [run for run in found if belongs_to(run, run_id)]
+            found = ours or found
         if not found:
+            # Джоб, который ЕЩЁ не стартовал, — это ожидание, а не отказ. Его
+            # отличает наличие среди джобов своего прогона в незавершённом
+            # состоянии: он объявлен, поставлен в очередь и обязательно
+            # доедет. Без этого различия гейт краснел бы на всяком джобе с
+            # `needs` — то есть на здоровом прогоне.
+            queued = (mine or {}).get(name, "")
+            if queued and queued != "completed":
+                waiting = True
+                continue
             if strict_missing:
                 problems.append(
                     f"{name}: записи нет на голове — прогон не стартовал, а не «зелено»"
@@ -319,7 +358,8 @@ def main(argv: list[str] | None = None) -> int:
                     f"на голове {args.sha[:8]} нет ни одной записи проверок — "
                     "это ошибка входа, а не «зелено» (075)"
                 )
-            problems, waiting = verdict(runs, required, args.self_name, args.run_id)
+            mine = own_jobs(args.repo, args.run_id, token)
+            problems, waiting = verdict(runs, required, args.self_name, args.run_id, mine=mine)
             # Совещательные опрашиваются, но их не ЖДУТ: слияния они не держат,
             # и ожидание сделало бы их обязательными обходным путём.
             advisory_problems, _ = verdict(
