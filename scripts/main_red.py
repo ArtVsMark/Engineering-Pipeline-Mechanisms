@@ -150,7 +150,35 @@ ADVISORY_ONLY: Final = (
 )
 
 
-def rerun_reason(holds: list[str], rest: list[str], run: int, tries: int) -> str:
+def one_fall(holds: list[str], rest: list[str], fed: dict[str, set[str]]) -> bool:
+    """Одно ли это падение, отражённое несколькими именами.
+
+    МАТРИЦА И ЕЁ АГРЕГАТ КРАСНЕЮТ ВМЕСТЕ ВСЕГДА. Агрегат ждёт матрицу через
+    `needs` и краснеет ровно потому, что красна ячейка: два имени, одно
+    падение. Пока это считалось двумя, перезапуск мигнувшей общей ветки не
+    случался НИКОГДА — условие «упал ровно один» не выполнялось по построению.
+
+    Замер 10.09.2026: `main` встала красной на `test` и `test-matrix (3.12)`,
+    очередь заморозилась, и снять заморозку было нечем — новых слияний в
+    замороженной очереди не бывает. Тупик разомкнулся руками.
+
+    Связь читается из `needs` прогонов, то есть из данных, а не из прозы: имя
+    матричной ячейки несёт версию (`test-matrix (3.12)`), поэтому сверяется
+    начало имени до скобки.
+    """
+    if len(holds) != 1:
+        return False
+    feeding = fed.get(holds[0], set())
+    return all(name.split(" (")[0] in feeding for name in rest)
+
+
+def rerun_reason(
+    holds: list[str],
+    rest: list[str],
+    run: int,
+    tries: int,
+    feeds: dict[str, set[str]] | None = None,
+) -> str:
     """Почему перезапуска НЕ будет; пустая строка — будет.
 
     Решение вынесено из захода отдельно, потому что оно и есть предмет правила
@@ -166,7 +194,7 @@ def rerun_reason(holds: list[str], rest: list[str], run: int, tries: int) -> str
     """
     if not holds:
         return ADVISORY_ONLY
-    if len(holds) != 1 or rest:
+    if not one_fall(holds, rest, feeds or {}):
         return NOT_ALONE
     if not run:
         return NO_ADDRESS
@@ -340,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
                 only = next(item for item in red if str(item.get("name")) == holds[0])
                 number = run_id_of(only)
                 tries = attempt(args.repo, number, token) if number else 1
-            why = rerun_reason(holds, rest, number, tries)
+            why = rerun_reason(holds, rest, number, tries, policy.feeds())
             if why:
                 print(f"перезапуска не будет: {why}")
             else:
