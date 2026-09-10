@@ -43,6 +43,7 @@ from typing import Final
 
 import findings
 import ghrest
+import items
 import main_red
 import unlooked
 
@@ -125,6 +126,66 @@ def section(body: str | None, title: str) -> list[str]:
     return [line[4:-2].strip() for line in piece.splitlines() if line.startswith("- **")]
 
 
+#: Состояние задачи-«входящие», когда её закрыл прогон каталога. Числа в ней
+#: остаются последними, что каталог сказал: закрытие говорит «я посмотрел», а
+#: не «долга нет» — в закрытой #37 на 10.09.2026 лежала единица по третьему виду.
+CLOSED_INBOX: Final = "«входящие» закрыты — числа от последнего захода каталога"
+
+
+def inbox_body(repo: str, token: str) -> tuple[str, str]:
+    """Тело задачи-«входящие» и пометка о её состоянии.
+
+    ПОЧЕМУ НЕ ТОЛЬКО ЖИВАЯ. Живой считается открытая задача, а «входящие»
+    закрывает прогон каталога — 10.09.2026 в 11:22 он это и сделал. С той
+    минуты шаг долга читал «числа не найдены» и объявлял долг по правилам
+    НЕИЗВЕСТНЫМ на каждом изменении: совещательный канал говорил о поломке там,
+    где было штатное состояние, а такое красное учат пролистывать (045, 142).
+
+    Закрытая читается ТОЛЬКО если открытой нет: открытая всегда свежее.
+    """
+    number, body = findings.live_issue(repo, token, findings.INBOX_MARKER)
+    if number is not None:
+        return body, ""
+    found: list[tuple[int, str]] = []
+    for issue in ghrest.paginate(f"repos/{repo}/issues?state=closed", token):
+        if issue.get("pull_request") is not None:
+            continue
+        said = str(issue.get("body") or "")
+        if findings.INBOX_MARKER in said:
+            found.append((int(issue["number"]), said))
+    if not found:
+        return "", ""
+    return max(found)[1], CLOSED_INBOX
+
+
+def looks_done(repo: str, token: str) -> list[tuple[int, str]]:
+    """Задачи, у которых пункты есть и все закрыты, а сама задача открыта.
+
+    ПОЧЕМУ ЭТО ВООБЩЕ НУЖНО. Пункты отмечает механизм, а закрывает задачу
+    человек — и это верно: «сделано» и «надоело» механизму неразличимы (154).
+    Но состояние «все пункты закрыты, а задача открыта» до сих пор не видел
+    НИКТО: `task_items` его прямо вычисляет и наружу об этом молчит. Живой
+    случай 10.09.2026 — #26 и #25 простояли готовыми до вопроса владельца, и
+    сколько именно, сказать нечем: этого никто не мерил.
+
+    ЭТО СЧЁТ, А НЕ ПРИКАЗ. Механизм называет кандидата и не закрывает ничего:
+    пункты не обязаны покрывать всю работу.
+
+    ЗАДАЧА БЕЗ ПУНКТОВ КАНДИДАТОМ НЕ СЧИТАЕТСЯ. Пустой чек-лист — это не «всё
+    сделано», а «этапов не называли»: у #25 пунктов не было вовсе, и
+    автоматическое «готова» стояло бы на ней с первого дня.
+    """
+    ready: list[tuple[int, str]] = []
+    for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
+        if issue.get("pull_request") is not None:
+            continue
+        body = str(issue.get("body") or "")
+        if items.open_items(body) or not items.done_items(body):
+            continue
+        ready.append((int(issue["number"]), str(issue.get("title") or "")))
+    return sorted(ready)
+
+
 def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
     """Есть ли незакрытая работа по правилам — по ТРЁМ видам 177, а не по счёту задач.
 
@@ -183,7 +244,8 @@ def main(argv: list[str] | None = None) -> int:
         left = findings_debt(args.repo, token)
         unlooked_left = unlooked_debt(args.repo, token)
         holding, lagging = branch_debt(args.repo, token)
-        _, inbox = findings.live_issue(args.repo, token, findings.INBOX_MARKER)
+        inbox, inbox_note = inbox_body(args.repo, token)
+        ready = looks_done(args.repo, token)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -211,6 +273,15 @@ def main(argv: list[str] | None = None) -> int:
         for name in lagging:
             print(f"  {name}")
 
+    # ГОТОВОЕ ПЕЧАТАЕТСЯ РЯДОМ С ДОЛГОМ, НО ДОЛГОМ НЕ ЯВЛЯЕТСЯ. Это не работа,
+    # которую надо сделать, а работа, которую, возможно, уже сделали и забыли
+    # закрыть. Приоритета перед планом не даёт и напоминания не включает:
+    # решение — за человеком (154).
+    if ready:
+        print(f"выглядят готовыми к закрытию: {len(ready)} — все пункты закрыты")
+        for number, title in ready:
+            print(f"  #{number} — {title}")
+
     print(f"слито без внешнего взгляда: {len(unlooked_left)}")
     for entry in sorted(unlooked_left, key=lambda item: -item.number):
         print(f"  #{entry.number} · {entry.state} · {entry.merged}")
@@ -230,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"правила (считает каталог): задач {tasks}, без ответа {queue}, держится ничем {unheld}"
         )
+        if inbox_note:
+            print(f"  {inbox_note}")
     # Расхождение контракта печатается и тогда, когда счёта нет: это отдельный
     # вид долга, и от строки со счётом он не зависит.
     if note:
