@@ -290,15 +290,76 @@ def jobs_of(path: Path) -> list[tuple[str, str]]:
     Текстом, а не разобранным деревом: предмет проверки — команды установки и
     запуска, они живут строками внутри `run:`, и собирать их обратно из дерева
     пришлось бы тем же разбором.
+
+    ГРАНИЦА БЕРЁТСЯ ПО ВЛОЖЕННОСТИ ПОД `jobs:`, А НЕ ПО ОТСТУПУ. Ключи события
+    — `push:`, `pull_request:`, `workflow_dispatch:` — тоже стоят на двух
+    пробелах, и раздел `on:` считался тремя джобами: проверка ходила по чужому
+    тексту и молчала бы о настоящем джобе, окажись он за ними. Замер 10.09.2026
+    на `ci.yml`: «джобов» находилось 14 при 11 настоящих. Нашёл внешний взгляд
+    на #100.
     """
     text = path.read_text(encoding="utf-8")
+    head = re.search(r"^jobs:$", text, re.M)
+    if head is None:
+        return []
+    body = text[head.end() :]
     found: list[tuple[str, str]] = []
-    starts = [match.start() for match in re.finditer(r"^  (\w[\w-]*):$", text, re.M)]
+    starts = [match.start() for match in re.finditer(r"^  (\w[\w-]*):$", body, re.M)]
     for place, start in enumerate(starts):
-        end = starts[place + 1] if place + 1 < len(starts) else len(text)
-        piece = text[start:end]
+        finish = starts[place + 1] if place + 1 < len(starts) else len(body)
+        piece = body[start:finish]
         found.append((piece.splitlines()[0].strip(" :"), piece))
     return found
+
+
+def test_jobs_are_read_from_under_jobs(tmp_path: Path) -> None:
+    """Ключи события джобами не считаются, а джоб за ними — находится.
+
+    `push:` и соседи стоят на тех же двух пробелах, что и джобы, и раздел `on:`
+    читался тремя джобами. Проверка ходила по чужому тексту — и молчала бы о
+    настоящем джобе, окажись он за ними. Нашёл внешний взгляд на #100.
+    """
+    path = tmp_path / "w.yml"
+    path.write_text(
+        "name: x\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n"
+        "jobs:\n  один:\n    steps: []\n  два:\n    steps: []\n",
+        encoding="utf-8",
+    )
+    assert [name for name, _ in jobs_of(path)] == ["один", "два"]
+
+
+def test_the_install_gate_is_red_on_a_broken_job(tmp_path: Path) -> None:
+    """Гейт установки проверяется тем, что он ОБЯЗАН отвергнуть (140).
+
+    Прежде он был подтверждён лишь тем, что проходит на сегодняшнем `ci.yml`, —
+    а это говорит о `ci.yml`, а не о гейте. Синтетический вход: джоб зовёт
+    скрипт с разбором YAML и не ставит его. Нашёл внешний взгляд на #100.
+    """
+    broken = tmp_path / "broken.yml"
+    hungry = next(name for name in ROOT.glob("scripts/*.py") if reads_yaml(name.name))
+    broken.write_text(
+        "name: x\non:\n  push:\n    branches: [main]\n"
+        "jobs:\n  голодный:\n    steps:\n"
+        "      - name: поставить\n        run: python -m pip install --quiet pytest\n"
+        f"      - name: работа\n        run: python scripts/{hungry.name}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError, match="не ставит его"):
+        test_workflow_installs_what_its_scripts_import(broken)
+
+
+def test_the_install_gate_is_green_when_the_job_installs(tmp_path: Path) -> None:
+    """И зелёный, когда джоб ставит разбор сам — иначе гейт красен всегда."""
+    whole = tmp_path / "whole.yml"
+    hungry = next(name for name in ROOT.glob("scripts/*.py") if reads_yaml(name.name))
+    whole.write_text(
+        "name: x\non:\n  push:\n    branches: [main]\n"
+        "jobs:\n  сытый:\n    steps:\n"
+        '      - name: поставить\n        run: python -m pip install --quiet "pyyaml>=6,<7"\n'
+        f"      - name: работа\n        run: python scripts/{hungry.name}\n",
+        encoding="utf-8",
+    )
+    test_workflow_installs_what_its_scripts_import(whole)
 
 
 @pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
