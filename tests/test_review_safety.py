@@ -320,3 +320,64 @@ def test_exit_codes_are_read_as_an_allowlist(path: Path) -> None:
     assert 'case "$rc"' in text, (
         f"{path.name} разбирает код возврата условиями вместо списка разрешённого"
     )
+
+
+#: Действие соседа, к ВЕРСИИ КОНТРАКТА которого проект прибит сознательно.
+#: Здесь тег — не подвижная метка, а предмет договора: потребитель прибивается к
+#: тегу, а не к общей ветке, и подъём версии обязан быть перечитыванием ответов,
+#: а не тихой подменой кода
+#: ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
+#: Список разрешительный и с причиной: тихого исключения здесь нет (068).
+BY_CONTRACT_TAG = ("ArtVsMark/Engineering-Incidents-Playbook@",)
+
+#: События, на которых площадка берёт файл прогона с ОБЩЕЙ ветки, а не из
+#: изменения. Ровно там закрепление вызываемого что-то значит.
+SHARED_CALLER = ("workflow_run", "pull_request_target", "schedule")
+
+
+def shared_caller(document: dict[Any, Any]) -> bool:
+    """Берётся ли файл этого прогона с общей ветки."""
+    events = document[True]
+    names = set(events) if isinstance(events, dict) else set(events or [])
+    return bool(names & set(SHARED_CALLER))
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
+    """Где вызывающий берётся с общей ветки, вызываемое закреплено по SHA.
+
+    Правило [152](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/152-pinning-callee-without-caller.md)
+    ставит вопрос не «закреплять ли вообще», а «где это что-то значит». На
+    `pull_request` площадка берёт файл прогона ИЗ ИЗМЕНЕНИЯ: кто правит
+    изменение, правит и шаг целиком, и закрепление ничего не добавляет. На
+    `workflow_run` и `pull_request_target` рассуждение переворачивается — файл
+    берётся с общей ветки, и подвижная метка меняет исполняемый код без нашего
+    ведома.
+
+    ЗАМЕР 10.09.2026, найден разбором соседей: у `automerge` и `main-red` —
+    обоих на `workflow_run` — действия стояли на метках `@v4` и `@v5`, тогда
+    как в прогоне ревью те же действия давно закреплены по SHA. Правило
+    держалось там, где о нём помнили, и не держалось там, где оно как раз
+    и работает.
+    """
+    document = load(path)
+    if not shared_caller(document):
+        return
+    unpinned = [
+        step["uses"]
+        for job in document["jobs"].values()
+        for step in job.get("steps") or []
+        if step.get("uses")
+        and not SHA_PIN.search(step["uses"])
+        and not step["uses"].startswith(BY_CONTRACT_TAG)
+    ]
+    assert not unpinned, (
+        f"{path.name} идёт от общей ветки, а вызывает незакреплённое: {unpinned} — "
+        "подвижная метка здесь меняет исполняемый код без нашего ведома (152)"
+    )
+
+
+def test_the_pinning_gate_found_its_subject() -> None:
+    """Предмет проверки найден: прогоны от общей ветки в дереве есть (075)."""
+    from_shared = [path.name for path in WORKFLOWS.glob("*.yml") if shared_caller(load(path))]
+    assert from_shared, "ни один прогон не идёт от общей ветки — проверять нечего"
