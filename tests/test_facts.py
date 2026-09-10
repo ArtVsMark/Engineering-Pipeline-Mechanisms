@@ -19,7 +19,7 @@ from tests.conftest import ROOT, RunScript, load_script
 facts = load_script("build_facts.py")
 
 WORKFLOW = ROOT / ".github" / "workflows" / "badges.yml"
-CHECKS = "schema: 1\nchecks:\n  lint: required\n"
+CHECKS = "schema: 2\nchecks:\n  lint: required\n"
 
 
 def bindings(**rules: dict[str, Any]) -> str:

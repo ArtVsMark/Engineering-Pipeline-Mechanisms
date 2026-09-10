@@ -35,6 +35,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -44,7 +45,7 @@ import yaml
 
 DEFAULT_PATH: Final = paths.PIPELINE
 WORKFLOWS: Final = paths.WORKFLOWS
-SCHEMA: Final = 1
+SCHEMA: Final = 2
 
 REQUIRED: Final = "required"
 ADVISORY: Final = "advisory"
@@ -54,6 +55,19 @@ UNREVIEWED: Final = "unreviewed"
 #: отказ, а не «наверное, что-то безобидное» (068).
 CLASSES: Final = (REQUIRED, ADVISORY, OFF, UNREVIEWED)
 NEEDS_REASON: Final = frozenset({ADVISORY, OFF})
+#: Класс, у которого обязан быть назван адресат: совещательное красное слияния
+#: не держит, и если его записи негде пережить слияние, «совещательная» — это
+#: вежливое «выключена» (142).
+NEEDS_ADDRESSEE: Final = frozenset({ADVISORY})
+#: Записи нет, и это сказано СЛОВОМ, а не пропуском поля. Приём взят у
+#: `mechanism: none` в ответе каталогу: «не замечается ничем» — объявленное
+#: состояние, а молчание неотличимо от «забыли ответить» (154).
+NO_ADDRESSEE: Final = "none"
+#: Разрешимый адрес задачи: `#12` в своём трекере или `владелец/репо#12`.
+ISSUE_RE: Final = re.compile(r"^(?:[\w.-]+/[\w.-]+)?#\d+$")
+#: Знаки образца пути: адрес вида `.github/workflows/*.yml` разрешается тем,
+#: что он ДЕЙСТВИТЕЛЬНО что-то находит в дереве, а не тем, что похож на путь.
+GLOB_MARKS: Final = "*?["
 #: Событие, от которого проверка выдаёт запись на голове изменения. Прогоны по
 #: расписанию и по толчку сюда не входят: у них другой предмет и другой
 #: адресат, и слияния они не касаются.
@@ -71,11 +85,20 @@ class BadPolicy(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Check:
-    """Ответ проекта по одной проверке: имя, класс и причина."""
+    """Ответ проекта по одной проверке: имя, класс, причина и адресат."""
 
     name: str
     klass: str
     why: str = ""
+    #: Где красное этой проверки переживает слияние: задача или файл механизма,
+    #: который ведёт запись. Слово `none` значит «записи нет» — состояние, а не
+    #: пропуск.
+    addressee: str = ""
+
+    @property
+    def records(self) -> bool:
+        """Оставляет ли красное этой проверки запись, переживающую слияние."""
+        return bool(self.addressee) and self.addressee != NO_ADDRESSEE
 
     @property
     def holds_merge(self) -> bool:
@@ -121,6 +144,22 @@ def _triggers_of(document: dict[Any, Any]) -> list[str]:
     return [str(raw)] if raw else []
 
 
+def resolves(address: str, root: Path = Path()) -> bool:
+    """Разрешается ли адрес адресата: задача, существующий путь или образец.
+
+    Проза адресом не считается. Требование то же, что каталог предъявил полю
+    `where` в ответе потребителя, и по той же причине: канал, чей адресат
+    нельзя назвать, обычно и не имеет адресата — а снаружи это выглядит как
+    осознанный совещательный класс
+    ([142](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/142-a-scheduled-red-needs-an-addressee.md)).
+    """
+    if ISSUE_RE.match(address):
+        return True
+    if any(mark in address for mark in GLOB_MARKS):
+        return any(root.glob(address))
+    return (root / address).exists()
+
+
 def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
     """Читает ответ проекта по проверкам, отвергая любой дефект входа."""
     if not path.is_file():
@@ -149,9 +188,11 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
         if isinstance(item, dict):
             klass = _text_of(item.get("class"))
             why = str(item.get("why") or "").strip()
+            addressee = str(item.get("addressee") or "").strip()
         else:
             klass = _text_of(item)
             why = ""
+            addressee = ""
 
         if "(" in name or ")" in name:
             problems.append(
@@ -168,7 +209,20 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
                 "сознательно» снаружи неотличимы (154)"
             )
             continue
-        checks[name] = Check(name, klass, why)
+        if klass in NEEDS_ADDRESSEE and not addressee:
+            problems.append(
+                f"{name}: класс «{klass}» без адресата — красное, которому негде "
+                f"пережить слияние, делает совещательную проверку вежливо выключенной "
+                f"(142). Адрес задачи, путь механизма или слово «{NO_ADDRESSEE}»"
+            )
+            continue
+        if addressee and addressee != NO_ADDRESSEE and not resolves(addressee, path.parent):
+            problems.append(
+                f"{name}: адресат «{addressee}» не разрешается — ни задача, ни путь в "
+                "дереве. Проза рядом с адресом законна, вместо адреса — нет"
+            )
+            continue
+        checks[name] = Check(name, klass, why, addressee)
 
     if problems:
         raise BadPolicy("ответ по проверкам не проходит проверку:\n  " + "\n  ".join(problems))
