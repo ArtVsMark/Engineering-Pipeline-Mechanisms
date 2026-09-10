@@ -18,6 +18,7 @@ from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
 
 contract = load_script("contract.py")
 policy = load_script("pipeline_checks.py")
+gate = load_script("check_contract.py")
 
 WORKFLOW = """
 name: ci
@@ -227,3 +228,46 @@ def test_the_release_doc_names_the_same_surface_as_the_mechanism() -> None:
         assert word in said.lower(), f"поверхность не названа по роду «{field}»"
     assert "имена шагов" not in said, "шаг — термин договора, а снимок берёт джобы"
     assert said.count("`.pipeline.yml`") == 1, "ответ проекта назван в списке дважды"
+
+
+# --- несовместимое объявляет переход -----------------------------------------
+
+
+def test_a_removed_job_is_a_breaking_change() -> None:
+    """Удалённый джоб ломает потребителя, добавленный — нет.
+
+    Имя джоба потребитель держит в защите ветки ДОСЛОВНО: удалённое превращает
+    её в вечное ожидание контекста, которого никто не выдаст. Добавленного он
+    может не заметить и ничего не потерять — требовать перехода от обоих значило
+    бы объявлять миграцию на каждое расширение (051).
+    """
+    assert contract.breaking(["ci.yml: джобов не стало — ['test']"])
+    assert not contract.breaking(["ci.yml: добавлены джобы — ['drift']"])
+
+
+def test_a_changed_answer_schema_is_breaking() -> None:
+    """Смена схемы ответа ломает всех: по ней потребитель отвечает."""
+    assert contract.breaking(["схема ответа: 2 → 3"])
+
+
+def test_a_new_run_is_not_breaking() -> None:
+    """Новый прогон ничего у потребителя не отнимает."""
+    assert not contract.breaking(["drift.yml: новый прогон, джобы ['drift']"])
+
+
+def test_a_fragment_without_a_migration_is_not_enough(tmp_path: Path) -> None:
+    """У несовместимой правки фрагмент обязан назвать переход, а не факт.
+
+    «Поверхность изменилась» — это сообщение о погоде: потребитель живёт на
+    своей версии, и миграция идёт ОТ НЕЁ, а не от нуля (114).
+    """
+    said = tmp_path / "a.contract.md"
+    said.write_text("Поверхность изменилась, обновите механизмы.\n", encoding="utf-8")
+    assert gate.migration_named([said]) is False
+
+
+def test_a_fragment_that_names_what_was_is_enough(tmp_path: Path) -> None:
+    """Названо «было → стало» — этого достаточно, форма прозы не диктуется."""
+    said = tmp_path / "a.contract.md"
+    said.write_text("Джоб `test-matrix` переименован: было `matrix`.\n", encoding="utf-8")
+    assert gate.migration_named([said]) is True
