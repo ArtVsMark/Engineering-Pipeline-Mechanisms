@@ -56,6 +56,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
 
+import automerge
 import ci_complete
 import findings
 import ghrest
@@ -243,7 +244,65 @@ def flakes_after(known: list[Flake], name: str, run: int, day: str) -> list[Flak
     return [*known, Flake(name, day, run)]
 
 
-def render_body(holds: list[str], rest: list[str], flakes: list[Flake], sha: str) -> str:
+def queue_now(repo: str, token: str) -> tuple[int, int]:
+    """Сколько изменений ждёт очереди и сколько из них помечены починкой.
+
+    ЧИТАЕТСЯ У ПЛОЩАДКИ, А НЕ СЧИТАЕТСЯ ЗАНОВО. Предмет — живые изменения и их
+    метки; вести это вторым списком значило бы разойтись с площадкой на первом
+    же закрытом изменении (049).
+    """
+    waiting = 0
+    fixing = 0
+    try:
+        changes = ghrest.request("GET", f"repos/{repo}/pulls?state=open&per_page=50", token) or []
+    except ghrest.TransportError:
+        return (0, 0)
+    for change in changes:
+        marks = {str(item.get("name", "")) for item in change.get("labels") or []}
+        if automerge.LABEL_AUTOMERGE not in marks or change.get("draft"):
+            continue
+        waiting += 1
+        if automerge.LABEL_FIX_MAIN in marks:
+            fixing += 1
+    return waiting, fixing
+
+
+def said_queue(waiting: int, fixing: int) -> list[str]:
+    """Что заморозка значит для очереди ПРЯМО СЕЙЧАС — словами и числом.
+
+    ЗАЧЕМ. Заморозка объявлена, метка названа — и всё равно дважды за смену
+    починка стояла в очереди без метки, потому что «это чинит общую ветку»
+    решает человек, а не механизм. Очередь при этом молчала: она пишет «нет
+    изменения с меткой» в лог своего прогона, куда никто не смотрит. Адресат у
+    такого сообщения есть — эта самая задача (142).
+
+    Механизм НЕ ставит метку сам: из дерева не следует, чинит ли изменение
+    красноту, и решать это за человека значило бы пропускать в замороженную
+    очередь что попало (154). Но сказать, что очередь стоит и никто её не
+    разблокирует, он обязан.
+    """
+    if fixing:
+        return [
+            f"В очереди {waiting}, из них с меткой `fix-main`: **{fixing}** — они и пойдут.",
+            "",
+        ]
+    if waiting:
+        return [
+            f"**В очереди {waiting}, и ни одно не помечено `fix-main`.** Очередь не",
+            "двинется, пока метку не поставят: механизм её не ставит сам — из дерева",
+            "не следует, чинит ли изменение красноту (154).",
+            "",
+        ]
+    return ["Очередь пуста: чинить некому и нечего двигать.", ""]
+
+
+def render_body(
+    holds: list[str],
+    rest: list[str],
+    flakes: list[Flake],
+    sha: str,
+    queue: tuple[int, int] | None = None,
+) -> str:
     """Собирает тело задачи: два зеркала и один журнал."""
     lines = [
         MARKER,
@@ -270,6 +329,7 @@ def render_body(holds: list[str], rest: list[str], flakes: list[Flake], sha: str
             "Починка подаётся изменением с меткой `fix-main`: очередь пропускает",
             "только его, и приёмка у него строже обычной (193).",
             "",
+            *(said_queue(*queue) if queue else []),
         ]
     else:
         lines += ["Пусто — обязательные проверки на голове зелены.", ""]
@@ -411,7 +471,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [источник 0] {name}")
         for name in rest:
             print(f"  [источник 3] {name}")
-        save(args.repo, token, render_body(holds, rest, flakes, sha), args.apply)
+        # Очередь спрашивается ТОЛЬКО при заморозке: без неё этот счёт ничего
+        # не решает, а лишний обход площадки стоит вызовов из общей квоты (058).
+        queue = queue_now(args.repo, token) if holds else None
+        save(args.repo, token, render_body(holds, rest, flakes, sha, queue), args.apply)
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
