@@ -500,3 +500,27 @@ def test_a_draft_is_not_stuck(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(debt.ghrest, "paginate", lambda *_, **__: iter([]))
     assert debt.stuck_changes("o/r", "token") == ([], [], [])
+
+
+# --- счёт по пунктам: то, что шаг говорит вслух ------------------------------
+
+
+def test_a_blind_count_says_so_instead_of_zero() -> None:
+    """В мелком клоне шаг говорит «не спрошено», а не «ноль».
+
+    Фрагмент журнала обещал ровно эту строку, а в коде её не было: правка
+    потерялась между двумя ветками, и ни один тест не заметил — вывода шага не
+    спрашивал никто. Нашёл внешний взгляд на #152.
+    """
+    lines = debt.items_report([], [], blind=True)
+    assert "не спрошено" in lines[0]
+    assert "история обрезана" in lines[0]
+
+
+def test_a_seeing_count_says_the_number() -> None:
+    """История цела — печатается число, и ноль тоже печатается.
+
+    Строка, появляющаяся лишь при находке, неотличима от выключенного
+    механизма (142).
+    """
+    assert debt.items_report([], [], blind=False)[0].endswith(": 0")

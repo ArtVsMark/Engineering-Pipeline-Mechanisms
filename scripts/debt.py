@@ -340,6 +340,39 @@ def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
     return bool(queue or unheld or note)
 
 
+def items_report(
+    built: list[items_left.Candidate], quiet: list[items_left.Quiet], *, blind: bool
+) -> list[str]:
+    """Строки счёта по пунктам — отдельно от печати, чтобы их можно было спросить.
+
+    СЛЕПОТА НАЗЫВАЕТСЯ, А НЕ ВЫДАЁТСЯ ЗА НОЛЬ. В мелком клоне спросить «когда
+    имя появилось» нечем, и сильный признак молчит. Ноль и молчание снаружи
+    неотличимы, а значат разное (045). Джобу `debt` история выдана целиком, но
+    шаг зовут и руками, и оттуда, где её нет.
+
+    ВЫНЕСЕНО РАДИ ПРОВЕРЯЕМОСТИ, и повод конкретный: фрагмент журнала обещал
+    эту строку, а в коде её не было — правка потерялась между двумя ветками, и
+    ни один тест этого не заметил, потому что вывода шага не спрашивал никто.
+    Нашёл внешний взгляд на #152.
+    """
+    lines: list[str] = []
+    if blind:
+        lines.append(
+            "открытых пунктов с готовой работой: не спрошено — история обрезана "
+            "(мелкий клон), и дату появления имени взять неоткуда"
+        )
+    else:
+        lines.append(f"открытых пунктов с готовой работой: {len(built)}")
+    for candidate in built:
+        lines.append(f"  #{candidate.number} · {', '.join(candidate.evidence)}")
+        lines.append(f"      {report.cut(' '.join(candidate.item.split()), 120)}")
+    lines.append(f"задач с открытыми пунктами и без событий: {len(quiet)}")
+    lines.extend(
+        f"  #{task.number} — {task.title} · {task.days} дн · пунктов {task.left}" for task in quiet
+    )
+    return lines
+
+
 def remind(has_debt: bool) -> None:
     """Ведёт к договору, а не пересказывает его."""
     if has_debt:
@@ -436,13 +469,8 @@ def main(argv: list[str] | None = None) -> int:
     # появляющаяся лишь при находке, не отличима от невключённого механизма, и
     # «вежливо выключен» выглядит снаружи как «чисто» (142). Ноль здесь —
     # ответ, а не молчание.
-    print(f"открытых пунктов с готовой работой: {len(built)}")
-    for candidate in built:
-        print(f"  #{candidate.number} · {', '.join(candidate.evidence)}")
-        print(f"      {report.cut(' '.join(candidate.item.split()), 120)}")
-    print(f"задач с открытыми пунктами и без событий: {len(quiet)}")
-    for task in quiet:
-        print(f"  #{task.number} — {task.title} · {task.days} дн · пунктов {task.left}")
+    for line in items_report(built, quiet, blind=items_left.shallow()):
+        print(line)
 
     print(f"слито без внешнего взгляда: {len(unlooked_left)}")
     for entry in sorted(unlooked_left, key=lambda item: -item.number):
