@@ -187,7 +187,9 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает предмет либо записывает разобранное."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--pr", type=int, required=True, help="номер слитого изменения")
+    # Не обязателен: обходу окна и следованию за задачами предмет задаёт не
+    # изменение, а площадка. Требование объявляется там, где предмет нужен.
+    parser.add_argument("--pr", type=int, help="номер слитого изменения")
     parser.add_argument("--collect", type=Path, help="собрать предмет разбора в этот файл")
     parser.add_argument("--from", dest="source", type=Path, help="файл прогона с ответом разбора")
     parser.add_argument("--apply", action="store_true", help="записать, а не показать")
@@ -195,6 +197,11 @@ def main(argv: list[str] | None = None) -> int:
         "--sweep",
         action="store_true",
         help="отметить объявленное автором в недавно слитых и выйти",
+    )
+    parser.add_argument(
+        "--follow",
+        action="store_true",
+        help="отметить пункты эпиков вслед за закрытыми задачами и выйти",
     )
     args = parser.parse_args(argv)
 
@@ -214,6 +221,17 @@ def main(argv: list[str] | None = None) -> int:
             touched = items.sweep(args.repo, token, dry_run=not args.apply)
             print(f"отмечено пунктов по объявлению автора: {touched}")
             return EXIT_RECORDED if touched else EXIT_NOTHING
+
+        if args.follow:
+            # ПУНКТ-ССЫЛКА СВОЕГО СОСТОЯНИЯ НЕ ИМЕЕТ: оно уже есть у задачи, на
+            # которую он показывает, и второе место, где то же ведётся руками,
+            # расходится с первым (049).
+            touched = items.follow(args.repo, token, dry_run=not args.apply)
+            print(f"отмечено пунктов вслед за закрытыми задачами: {touched}")
+            return EXIT_RECORDED if touched else EXIT_NOTHING
+
+        if args.pr is None:
+            raise NotRun("не назван предмет: --pr нужен всем режимам, кроме --sweep и --follow")
 
         if args.collect is not None:
             args.collect.write_text(subject(args.repo, args.pr, token), encoding="utf-8")

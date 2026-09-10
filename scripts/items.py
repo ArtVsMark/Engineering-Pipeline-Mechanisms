@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
 
@@ -77,6 +78,103 @@ def open_items(body: str) -> list[str]:
 #: историю: заход идёт по событию слияния, и обходить всё прошлое ему незачем.
 WINDOW: Final = ghrest.MERGED_WINDOW
 merged_changes = ghrest.merged_changes
+
+
+#: Голая ссылка на задачу внутри пункта: `#27`. Глагола здесь нет и быть не
+#: должно — пункт эпика НАЗЫВАЕТ задачу, а не объявляет связь изменения с ней,
+#: и `changerefs.links_in` такой формы не читает намеренно.
+TASK_REF_RE: Final = re.compile(r"(?<![\w/])#(?P<number>\d+)\b")
+
+#: Метка задачи, чьи пункты следуют состоянию названных ими задач. Предмет
+#: сужен меткой намеренно: в обычной задаче `#N` может стоять «см. #52», и
+#: отметка по чужому закрытию была бы враньём.
+EPIC_LABEL: Final = "epic"
+
+
+def linked_item(text: str) -> int | None:
+    """Задача, которую пункт называет, — если РОВНО одну; иначе ``None``.
+
+    Одна ссылка — пункт и есть эта задача, и её состояние про него. Две и
+    больше — пункт говорит о чём-то своём, а задачи упомянуты, и вывести из их
+    закрытия ничего нельзя (045: лучше не отметить, чем отметить неверно).
+    """
+    plain = changerefs.outside_code(text)
+    numbers = {int(found["number"]) for found in TASK_REF_RE.finditer(plain)}
+    return next(iter(numbers)) if len(numbers) == 1 else None
+
+
+def followed(body: str, closed: Callable[[int], bool]) -> tuple[str, list[int]]:
+    """Отмечает пункты, чьи задачи закрыты; отдаёт новое тело и их номера.
+
+    Чистая: площадка приходит одним `closed`. Так проверка идёт по данным, а
+    не по подделке транспорта.
+    """
+    lines = body.splitlines()
+    followed_now: list[int] = []
+    for place, line in enumerate(lines):
+        open_item = CHECKLIST_RE.match(line)
+        if not open_item:
+            continue
+        number = linked_item(open_item.group("text"))
+        if number is None or not closed(number):
+            continue
+        lines[place] = line.replace("[ ]", "[x]", 1)
+        followed_now.append(number)
+    return "\n".join(lines), followed_now
+
+
+def follow(repo: str, token: str, *, dry_run: bool = False) -> int:
+    """Пункт эпика следует состоянию названной им задачи.
+
+    ПОЧЕМУ ЭТО ВЫВОДИТСЯ, А НЕ ВЕДЁТСЯ. Пункт-ссылка не имеет своего состояния:
+    оно уже есть у задачи, на которую он показывает
+    ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+    Второе место, где то же состояние ведётся руками, расходится с первым — и
+    расходилось: замер 10.09.2026 — четыре пункта эпика #2 стояли открытыми при
+    закрытых задачах, и старшая из них закрыта неделей раньше.
+
+    ПОЧЕМУ ТОЛЬКО ВПЕРЁД. Закрытая задача отмечает пункт; переоткрытая его НЕ
+    снимает. Снятие отметки — потеря следа работы, а переоткрытие задачи чаще
+    значит новую работу, чем отменённую старую (154: механизм не выбирает за
+    человека там, где знать неоткуда).
+    """
+    state: dict[int, bool] = {}
+
+    def closed(number: int) -> bool:
+        if number not in state:
+            issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+            state[number] = issue.get("state") == "closed"
+        return state[number]
+
+    touched = 0
+    epics = ghrest.request(
+        "GET", f"repos/{repo}/issues?state=open&labels={EPIC_LABEL}&per_page=100", token
+    )
+    for epic in epics or []:
+        if "pull_request" in epic:
+            continue
+        body = str(epic.get("body") or "")
+        number = int(epic.get("number") or 0)
+        try:
+            updated, done = followed(body, closed)
+        except ghrest.TransportError as exc:
+            print(f"  состояние пунктов #{number} не выведено: {report.cut(str(exc))}")
+            continue
+        if not done:
+            continue
+        # Основание печатается всегда: отметка выведена, а не объявлена
+        # автором, и человеку должно быть видно, из чего.
+        said = ", ".join(f"#{one}" for one in done)
+        print(f"  #{number}: пунктов вслед за закрытыми задачами {len(done)} — {said}")
+        if dry_run:
+            continue
+        try:
+            ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": updated})
+        except ghrest.TransportError as exc:
+            print(f"  пункты #{number} не записаны: {report.cut(str(exc))}")
+            continue
+        touched += len(done)
+    return touched
 
 
 def declared_in(body: str) -> tuple[list[int], list[str]]:

@@ -306,3 +306,74 @@ def test_the_window_is_one_for_everyone() -> None:
     """
     assert items.merged_changes is items.ghrest.merged_changes
     assert items.WINDOW == items.ghrest.MERGED_WINDOW
+
+
+def test_an_epic_item_follows_the_task_it_names() -> None:
+    """Пункт-ссылка отмечается, когда названная им задача закрыта."""
+    body = "- [ ] **1. Решения** — #3 (родная очередь)\n- [ ] #14 — обратная связь"
+    updated, done = items.followed(body, lambda number: number == 3)
+    assert done == [3]
+    assert updated.startswith("- [x] **1. Решения**")
+    assert "- [ ] #14" in updated, "пункт открытой задачи отмечен зря"
+
+
+def test_an_item_naming_two_tasks_is_left_alone() -> None:
+    """Пункт с двумя ссылками не отмечается: вывести из них нечего.
+
+    «Как в #52 и #3» говорит о своей работе, а задачи упомянуты. Отметить его
+    по чужому закрытию значило бы соврать о сделанном (045).
+    """
+    body = "- [ ] как в #52 и #3 сразу"
+    updated, done = items.followed(body, lambda number: True)
+    assert done == []
+    assert updated == body
+
+
+def test_a_reference_inside_code_is_not_a_link() -> None:
+    """Ссылка внутри инлайн-кода — текст, а не адрес задачи."""
+    assert items.linked_item("правило `#42` в примере") is None
+
+
+def test_following_never_unmarks() -> None:
+    """Отметка не снимается: переоткрытая задача чаще значит новую работу.
+
+    Механизм не выбирает за человека там, где знать неоткуда (154), а снятие
+    отметки — потеря следа уже сделанного.
+    """
+    body = "- [x] #27 — классы проверок"
+    updated, done = items.followed(body, lambda number: False)
+    assert done == []
+    assert updated == body
+
+
+def test_the_epic_label_is_the_subject(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Предмет следования сужен меткой: в обычной задаче `#N` может быть «см.».
+
+    Проверяется именно запрос: без метки в него попали бы все задачи проекта,
+    и «см. #52» отметилось бы как сделанное.
+    """
+    asked: list[str] = []
+
+    def spy(method: str, path: str, token: str, data: Any = None) -> Any:
+        asked.append(path)
+        return []
+
+    monkeypatch.setattr(items.ghrest, "request", spy)
+    items.follow("o/r", "token", dry_run=True)
+    assert any(f"labels={items.EPIC_LABEL}" in path for path in asked), asked
+
+
+def test_a_dry_follow_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пробный заход называет находки и не пишет ни одной."""
+    written: list[str] = []
+
+    def spy(method: str, path: str, token: str, data: Any = None) -> Any:
+        if method == "PATCH":
+            written.append(path)
+        if "labels=" in path:
+            return [{"number": 2, "body": "- [ ] #27 — классы проверок"}]
+        return {"state": "closed"}
+
+    monkeypatch.setattr(items.ghrest, "request", spy)
+    assert items.follow("o/r", "token", dry_run=True) == 0
+    assert written == [], written
