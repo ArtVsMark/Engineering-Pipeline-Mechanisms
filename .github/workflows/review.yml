@@ -37,7 +37,14 @@ on:
 concurrency:
   # Группа называет ГОЛОВУ, а не только номер изменения (правило 179): у соседа
   # её нет, и там прогон на устаревшем коммите способен вытеснить более новый.
-  group: review-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
+  #
+  # У РУЧНОГО ЗАПУСКА ПРЕДМЕТ НАЗЫВАЕТ ВХОД, А НЕ СОБЫТИЕ. При `workflow_dispatch`
+  # `pull_request` пуст, и без `inputs.pr` группа схлопывалась в одну на все
+  # номера: поздние взгляды по РАЗНЫМ изменениям гасили друг друга. Замер
+  # 10.09.2026 — владелец запустил пять заходов подряд по разным номерам, до
+  # конца дошёл один, четыре отменены. Снаружи это выглядело как «механизм не
+  # работает», хотя не работала именно группа.
+  group: review-${{ github.event.pull_request.number || inputs.pr || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
