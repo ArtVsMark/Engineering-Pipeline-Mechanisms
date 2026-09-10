@@ -563,3 +563,25 @@ def test_a_record_without_a_verdict_is_named_as_such() -> None:
     assert not module.has_verdict({"conclusion": "skipped"})
     assert module.has_verdict({"conclusion": "failure"})
     assert module.has_verdict({"conclusion": "success"})
+
+
+def test_a_job_with_a_conclusion_is_not_still_coming(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Джоб с проставленным исходом «ещё идущим» не считается.
+
+    Тот же класс рассинхрона, что у записей проверок: площадка выставляет
+    исход, а состояние остаётся переходным. Прочитанный по одному лишь
+    `status`, такой джоб держал бы `waiting=True` до тайм-аута вместо отказа.
+    Нашёл внешний взгляд на #148.
+    """
+    payload = {
+        "jobs": [
+            {"name": "test", "status": "in_progress", "conclusion": "failure"},
+            {"name": "lint", "status": "in_progress", "conclusion": None},
+        ]
+    }
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: payload)
+    mine = module.own_jobs("o/r", "7", "token")
+    assert "test" not in mine
+    assert mine["lint"] == "in_progress"
+    assert module.still_coming("test", mine) is False
+    assert module.still_coming("lint", mine) is True
