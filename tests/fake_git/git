@@ -1,0 +1,4 @@
+#!/bin/sh
+# Подделка git для проверки сторожа: отвечает объявленной головой и ничем больше.
+if [ "$1" = "rev-parse" ]; then echo "${FAKE_HEAD:-agent/here}"; exit 0; fi
+exit 1
