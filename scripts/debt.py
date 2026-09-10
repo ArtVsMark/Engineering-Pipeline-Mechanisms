@@ -40,13 +40,15 @@ import os
 import re
 import sys
 from datetime import UTC, datetime, timedelta
-from typing import Final
+from typing import Any, Final
 
 import ci_complete
 import findings
 import ghrest
 import items
+import items_left
 import main_red
+import report
 import unlooked
 
 #: Строка, которую пишет ночной прогон каталога. Три числа правила 177 в одном
@@ -247,7 +249,20 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str]]:
     return conflicting, red
 
 
-def looks_done(repo: str, token: str) -> list[tuple[int, str]]:
+def open_issues(repo: str, token: str) -> list[dict[str, Any]]:
+    """Открытые задачи без изменений — общий вход обоих счётов по пунктам.
+
+    Список читается ОДИН раз: два прохода по одному источнику расходятся тем
+    охотнее, чем невиннее выглядят, и расходятся молча (022).
+    """
+    return [
+        issue
+        for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token)
+        if issue.get("pull_request") is None
+    ]
+
+
+def looks_done(issues: list[dict[str, Any]]) -> list[tuple[int, str]]:
     """Задачи, у которых пункты есть и все закрыты, а сама задача открыта.
 
     ПОЧЕМУ ЭТО ВООБЩЕ НУЖНО. Пункты отмечает механизм, а закрывает задачу
@@ -265,9 +280,7 @@ def looks_done(repo: str, token: str) -> list[tuple[int, str]]:
     автоматическое «готова» стояло бы на ней с первого дня.
     """
     ready: list[tuple[int, str]] = []
-    for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
-        if issue.get("pull_request") is not None:
-            continue
+    for issue in issues:
         body = str(issue.get("body") or "")
         if items.open_items(body) or not items.done_items(body):
             continue
@@ -335,7 +348,11 @@ def main(argv: list[str] | None = None) -> int:
         holding, lagging = branch_debt(args.repo, token)
         inbox, inbox_note, inbox_seen = inbox_body(args.repo, token)
         conflicting, red = stuck_changes(args.repo, token)
-        ready = looks_done(args.repo, token)
+        # Список задач читается ОДИН раз на оба счёта по пунктам: два прохода
+        # по одному источнику расходятся тем охотнее, чем невиннее выглядят (022).
+        issues = open_issues(args.repo, token)
+        ready = looks_done(issues)
+        built, quiet = items_left.look(issues, items.open_items)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -383,6 +400,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"выглядят готовыми к закрытию: {len(ready)} — все пункты закрыты")
         for number, title in ready:
             print(f"  #{number} — {title}")
+
+    # СЧЁТ ПО ПУНКТАМ ПЕЧАТАЕТСЯ ВСЕГДА, А НЕ ТОЛЬКО КОГДА НАШЁЛ. Строка,
+    # появляющаяся лишь при находке, не отличима от невключённого механизма, и
+    # «вежливо выключен» выглядит снаружи как «чисто» (142). Ноль здесь —
+    # ответ, а не молчание.
+    print(f"открытых пунктов с готовой работой: {len(built)}")
+    for candidate in built:
+        print(f"  #{candidate.number} · {', '.join(candidate.evidence)}")
+        print(f"      {report.cut(' '.join(candidate.item.split()), 120)}")
+    print(f"задач с открытыми пунктами и без событий: {len(quiet)}")
+    for task in quiet:
+        print(f"  #{task.number} — {task.title} · {task.days} дн · пунктов {task.left}")
 
     print(f"слито без внешнего взгляда: {len(unlooked_left)}")
     for entry in sorted(unlooked_left, key=lambda item: -item.number):
