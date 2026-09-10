@@ -130,6 +130,12 @@ def picture(summary: dict[str, Any]) -> dict[str, Any]:
     closed = sum(item.rules for item in shared.values())
     return {
         "schema_read": schema_of(summary),
+        # КОГДА СНЯТ СНИМОК, ПО КОТОРОМУ ЭТО ПОСЧИТАНО. Числа ниже — не о
+        # сегодняшнем дне семьи, а о том, каким её видел последний ночной заход
+        # каталога. Замер 10.09.2026: сводка семичасовой давности показывала
+        # восемь наших правил документами, когда они уже держались гейтами, и
+        # разрез приоритета по ней назвал долгом то, чего нет (005).
+        "snapshot_at": str(summary.get("generated_at") or ""),
         "consumers": len(summary.get("consumers") or []),
         "mechanisms": len(found),
         "shared": len(shared),
