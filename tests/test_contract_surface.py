@@ -129,8 +129,8 @@ def test_the_answer_schema_is_the_surface(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("span", "version", "fits"),
     [
-        (">=0.1,<0.2", "0.1.0", True),
-        (">=0.1,<0.2", "0.1.67", True),
+        (">=0.1,<0.2", "0.1.4", True),
+        (">=0.1,<0.2", "0.1.99", True),
         (">=0.1,<0.2", "0.2.0", False),
         (">=0.1,<0.2", "0.0.9", False),
         (">=1.0,<2.0", "1.9.0", True),
@@ -155,7 +155,7 @@ def test_a_range_without_an_upper_bound_is_refused(span: str) -> None:
     о которой не знает, и узнаёт об этом красным на ровном месте.
     """
     with pytest.raises(policy.BadPolicy):
-        policy.compatible(span, "0.1.0")
+        policy.compatible(span, "0.1.4")
 
 
 def test_an_answer_without_a_range_is_refused(tmp_path: Path) -> None:
