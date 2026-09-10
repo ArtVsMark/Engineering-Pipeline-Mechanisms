@@ -285,3 +285,17 @@ def test_a_verdict_for_another_project_is_not_ours() -> None:
     """Ключ несёт владельца и репозиторий: чужой вердикт мимо нас."""
     answer = {"proposals": {"other/repo:a-thing-broke": {"status": "admitted", "number": "196"}}}
     assert module.proposals_answered(answer, MINE, "o/r") == []
+
+
+def test_a_non_numeric_matrix_entry_does_not_fell_the_pass() -> None:
+    """Опечатка в матрице не роняет весь дрейф, а уходит в конец.
+
+    Матрица читается из `ci.yml` — правимого руками файла. Запись вроде
+    `3.13-dev` давала `ValueError`, и падал ВЕСЬ заход, включая источники, к
+    языку отношения не имеющие: источники затем и разделены, чтобы отказ одного
+    не уносил остальные. Нашёл внешний взгляд на #121.
+    """
+    assert module.order("3.13-dev") == ()
+    assert module.order("pypy3.10") == ()
+    assert module.order("3.9") < module.order("3.10")
+    assert sorted(["3.13-dev", "3.10", "3.9"], key=module.order) == ["3.13-dev", "3.9", "3.10"]

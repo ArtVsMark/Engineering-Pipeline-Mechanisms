@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
@@ -152,8 +153,19 @@ def follow(repo: str, token: str, *, dry_run: bool = False) -> int:
     state: dict[int, bool] = {}
 
     def closed(number: int) -> bool:
+        # ОТКАЗ ПО ОДНОМУ ПУНКТУ НЕ УНОСИТ ВЕСЬ ЗАХОД. Спрашивается площадка, и
+        # спрашивается по разу на каждую названную задачу: один отказ транспорта
+        # ронял бы отметку ВСЕХ пунктов эпика, включая уже сосчитанные. Незнание
+        # трактуется как «не закрыта» — сторону выбираем ту, где механизм ничего
+        # не портит: неотмеченный пункт отметится следующим заходом, а
+        # отмеченный по ошибке снимет только человек. Нашёл внешний взгляд
+        # на #118.
         if number not in state:
-            issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+            try:
+                issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+            except ghrest.TransportError as exc:
+                print(f"::warning::задача #{number} не прочитана: {exc}", file=sys.stderr)
+                return False
             state[number] = issue.get("state") == "closed"
         return state[number]
 

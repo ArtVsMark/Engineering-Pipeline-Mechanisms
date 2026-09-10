@@ -327,3 +327,35 @@ def test_the_journal_gate_is_run_locally() -> None:
     assert "check_journal.py" in commands
     assert "build_changelog.py --fragments" in commands
     assert "git fetch" not in commands
+
+
+def test_deferred_steps_belong_to_this_read(tmp_path: Path) -> None:
+    """Отложенное относится к ЭТОМУ дереву, а не ко всем прочитанным за жизнь.
+
+    Словарь копился между вызовами в одном процессе и требовал ручной очистки в
+    тесте — то есть механизм отвечал не про то дерево, которое у него спросили.
+    Нашёл внешний взгляд на #101.
+    """
+    first = tmp_path / "с подстановкой"
+    first.mkdir()
+    with_mark = tree(
+        first,
+        workflow=(
+            "jobs:\n  x:\n    steps:\n      - name: разметка\n"
+            "        run: pytest --strict-markers -k ${{ github.event.number }}\n"
+            "      - name: линтер\n        run: ruff check scripts/\n"
+        ),
+    )
+    preflight.steps(with_mark / ".github" / "workflows" / "ci.yml")
+    assert "разметка" in preflight.UNRUNNABLE
+
+    second = tmp_path / "чистое"
+    second.mkdir()
+    clean = tree(
+        second,
+        workflow=(
+            "jobs:\n  x:\n    steps:\n      - name: линтер\n        run: ruff check scripts/\n"
+        ),
+    )
+    preflight.steps(clean / ".github" / "workflows" / "ci.yml")
+    assert preflight.UNRUNNABLE == {}, "отложенное прошлого чтения осталось в ответе"
