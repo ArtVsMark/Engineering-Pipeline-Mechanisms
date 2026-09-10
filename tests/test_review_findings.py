@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.conftest import load_script
+import pytest
+import yaml
+
+from tests.conftest import ROOT, load_script
 
 module = load_script("review_findings.py")
 
@@ -131,3 +134,112 @@ def test_resolution_line_is_recognised() -> None:
     """
     found = module.changerefs.resolved_in("текст\n  Разобрано: ABC1234 — починено\nещё")
     assert found == ["abc1234"]
+
+
+# --- одна живая задача, а не пять ---------------------------------------------
+#
+# ЗАМЕР 09.09.2026: за смену завелось ПЯТЬ живых задач-адресатов вместо одной
+# (#23, #42, #49, #50, #51), и находки разъехались по ним. Ломался не поиск, а
+# порядок: «найти» и «завести» — разные обращения, а группа отмены прогона
+# названа по изменению, поэтому прогоны разных изменений шли параллельно.
+# Владение общим ресурсом лечится группой у джоба записи; здесь проверяется
+# вторая половина — что механизм, увидев копии, не выбирает молча.
+
+
+def issue(number: int, body: str) -> dict[str, Any]:
+    """Задача в том виде, в каком её отдаёт площадка."""
+    return {"number": number, "body": body}
+
+
+def test_the_earliest_live_issue_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Из нескольких копий берётся самая ранняя, а не первая в ответе площадки.
+
+    Ранняя, а не любая: она старше, в ней больше записей и на неё уже
+    ссылаются. Порядок ответа площадки решать это не должен — иначе записи
+    гуляют между копиями от захода к заходу.
+    """
+    monkeypatch.setattr(
+        module.findings.ghrest,
+        "paginate",
+        lambda *_, **__: iter(
+            [issue(51, module.MARKER + "\nпоздняя"), issue(23, module.MARKER + "\nранняя")]
+        ),
+    )
+    number, body = module.live_issue("o/r", "token")
+    assert number == 23
+    assert "ранняя" in body
+
+
+def test_extra_live_issues_are_said_out_loud(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """О лишних копиях механизм говорит, а не молчит.
+
+    Адресат, размноженный на пять, — это отсутствующий адресат (142): часть
+    находок лежит там, куда никто не смотрит. Снаружи «одна задача» и «пять
+    задач» выглядят одинаково, пока об этом не сказано.
+    """
+    monkeypatch.setattr(
+        module.findings.ghrest,
+        "paginate",
+        lambda *_, **__: iter([issue(23, module.MARKER), issue(42, module.MARKER)]),
+    )
+    module.live_issue("o/r", "token")
+    printed = capsys.readouterr().err
+    assert "#42" in printed, "о лишней копии не сказано"
+    assert "#23" in printed, "не названо, куда пойдут записи"
+
+
+def test_one_live_issue_says_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Одна задача — тишина: предупреждение, звучащее всегда, не значит ничего (051)."""
+    monkeypatch.setattr(
+        module.findings.ghrest, "paginate", lambda *_, **__: iter([issue(23, module.MARKER)])
+    )
+    module.live_issue("o/r", "token")
+    assert capsys.readouterr().err == ""
+
+
+def test_a_change_is_not_mistaken_for_the_live_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Изменение с тем же маркером в теле задачей-адресатом не считается.
+
+    REST кладёт изменения в `/issues` наравне с задачами, а маркер попадает в
+    тело изменения всякий раз, когда оно правит этот механизм.
+    """
+    change = {"number": 5, "body": module.MARKER, "pull_request": {"url": "…"}}
+    monkeypatch.setattr(
+        module.findings.ghrest,
+        "paginate",
+        lambda *_, **__: iter([change, issue(23, module.MARKER)]),
+    )
+    assert module.live_issue("o/r", "token")[0] == 23
+
+
+def test_the_writing_job_owns_the_shared_issue() -> None:
+    """Запись в живую задачу идёт джобом с репозиторной группой, а не по изменению.
+
+    Группа, названная по изменению, разгораживает прогоны там, где ресурс
+    общий, — и каждый в своём окне между «найти» и «завести» не видит чужой
+    ещё не созданной задачи (149). Проверяется описание прогона: механизм тут
+    ни при чём, лечится это владением.
+    """
+    document = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "review.yml").read_text(encoding="utf-8")
+    )
+    writing = [
+        (name, job)
+        for name, job in document["jobs"].items()
+        if "review_findings.py" in yaml.dump(job, allow_unicode=True)
+    ]
+    assert writing, "джоба, пишущего находки, в прогоне не нашлось — предмет не найден (075)"
+    for name, job in writing:
+        group = (job.get("concurrency") or {}).get("group", "")
+        assert group, f"{name}: у джоба записи нет группы — общий ресурс без владельца"
+        assert "${{" not in group, (
+            f"{name}: группа «{group}» названа контекстом изменения — значит она "
+            "разная у разных изменений, и запись снова идёт параллельно"
+        )
+        assert (job.get("concurrency") or {}).get("cancel-in-progress") is False, (
+            f"{name}: запись вытесняется — это дописывание в общий список, а не гонка за свежесть"
+        )

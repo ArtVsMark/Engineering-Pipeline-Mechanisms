@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import Final
 
@@ -71,15 +72,41 @@ def live_issue(repo: str, token: str, marker: str = MARKER) -> tuple[int | None,
 
     Маркер — параметр: живых задач-адресатов в проекте больше одной, а способ
     их находить один.
+
+    ВТОРАЯ ЖИВАЯ ЗАДАЧА — НЕ ВЫБОР, А ПРОИСШЕСТВИЕ. Механизм обещает ОДНУ, и
+    если их две, то часть записей лежит там, куда никто не смотрит: адресат,
+    размноженный надвое, — это отсутствующий адресат
+    ([142](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/142-a-scheduled-red-needs-an-addressee.md)).
+    Замер 09.09.2026: за смену завелось ПЯТЬ копий, и находки разъехались по
+    ним. Прежняя редакция брала первую попавшуюся из списка — то есть ту, чей
+    номер площадка вернёт первым, — и молчала.
+
+    Здесь выбирается САМАЯ РАННЯЯ (наименьший номер), и о лишних говорится
+    вслух. Ранняя, а не любая: она старше остальных, в ней больше записей и на
+    неё уже ссылаются. Отказом это не делается намеренно: канал находок
+    необязательный, и упасть здесь значило бы потерять запись целиком вместо
+    того, чтобы положить её в известное место
+    ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
     """
+    found: list[tuple[int, str]] = []
     for item in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
         # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
         if item.get("pull_request") is not None:
             continue
         body = item.get("body") or ""
         if marker in body:
-            return int(item["number"]), body
-    return None, ""
+            found.append((int(item["number"]), body))
+    if not found:
+        return None, ""
+    found.sort()
+    if len(found) > 1:
+        extra = ", ".join(f"#{number}" for number, _ in found[1:])
+        print(
+            f"::warning::Живых задач с этим маркером {len(found)}, а обещана одна. "
+            f"Записи идут в самую раннюю #{found[0][0]}; сведите и закройте лишние: {extra}",
+            file=sys.stderr,
+        )
+    return found[0]
 
 
 def parse_entries(body: str | None) -> dict[str, Entry]:
