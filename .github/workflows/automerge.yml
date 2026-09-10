@@ -58,11 +58,18 @@ jobs:
     timeout-minutes: 10
     steps:
       # Тело уплотнения собирается из коммитов ветки — нужна вся история.
-      - uses: actions/checkout@v4
+      # ЗАКРЕПЛЕНО ПО SHA, ПОТОМУ ЧТО ВЫЗЫВАЮЩИЙ БЕРЁТСЯ С ОБЩЕЙ ВЕТКИ. На
+      # `workflow_run` площадка берёт файл прогона с `main`, а не из изменения:
+      # значит вызываемое обязано быть закреплено, иначе подвижная метка меняет
+      # исполняемый код без нашего ведома
+      # ([152](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/152-pinning-callee-without-caller.md)).
+      # На `pull_request` рассуждение обратное — там файл прогона правит тот же,
+      # кто правит изменение, и закрепление ничего не добавляет.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 

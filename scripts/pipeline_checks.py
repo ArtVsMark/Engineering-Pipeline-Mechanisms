@@ -45,7 +45,7 @@ import yaml
 
 DEFAULT_PATH: Final = paths.PIPELINE
 WORKFLOWS: Final = paths.WORKFLOWS
-SCHEMA: Final = 2
+SCHEMA: Final = 3
 
 REQUIRED: Final = "required"
 ADVISORY: Final = "advisory"
@@ -63,6 +63,13 @@ NEEDS_ADDRESSEE: Final = frozenset({ADVISORY})
 #: `mechanism: none` в ответе каталогу: «не замечается ничем» — объявленное
 #: состояние, а молчание неотличимо от «забыли ответить» (154).
 NO_ADDRESSEE: Final = "none"
+#: Диапазон совместимости с контрактом механизмов: `>=X.Y,<A.B`.
+#: ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА. Без неё несовместимая версия применяется молча
+#: ([073](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/073-tool-version-from-one-source-with-an-upper-bound.md)):
+#: потребитель, объявивший только «не старше», однажды получает поверхность, о
+#: которой не знает, и узнаёт об этом красным на ровном месте.
+RANGE_RE: Final = re.compile(r"^>=\s*(\d+)\.(\d+)\s*,\s*<\s*(\d+)\.(\d+)$")
+
 #: Разрешимый адрес задачи: `#12` в своём трекере или `владелец/репо#12`.
 ISSUE_RE: Final = re.compile(r"^(?:[\w.-]+/[\w.-]+)?#\d+$")
 #: Знаки образца пути: адрес вида `.github/workflows/*.yml` разрешается тем,
@@ -144,6 +151,28 @@ def _triggers_of(document: dict[Any, Any]) -> list[str]:
     return [str(raw)] if raw else []
 
 
+def compatible(declared: str, version: str) -> bool:
+    """Попадает ли версия контракта в объявленный потребителем диапазон.
+
+    Сравниваются MAJOR.MINOR: патч контракта поверхности не трогает по
+    построению, и требовать его совпадения значило бы тревожить потребителя
+    выпуском, который его не касается.
+    """
+    bounds = RANGE_RE.match(declared.strip())
+    if bounds is None:
+        raise BadPolicy(
+            f"диапазон совместимости «{declared}» не разбирается — нужен вид "
+            '">=X.Y,<A.B" с ОБЯЗАТЕЛЬНОЙ верхней границей (073)'
+        )
+    low = (int(bounds.group(1)), int(bounds.group(2)))
+    high = (int(bounds.group(3)), int(bounds.group(4)))
+    parts = version.split(".")
+    if len(parts) < 2 or not all(piece.isdigit() for piece in parts[:2]):
+        raise BadPolicy(f"версия контракта «{version}» не разбирается")
+    now = (int(parts[0]), int(parts[1]))
+    return low <= now < high
+
+
 def resolves(address: str, root: Path = Path()) -> bool:
     """Разрешается ли адрес адресата: задача, существующий путь или образец.
 
@@ -176,6 +205,21 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
         raise BadPolicy(
             f"{path}: схема «{raw.get('schema')}» не та, что читает механизм ({SCHEMA})"
         )
+
+    span = str(raw.get("contract") or "").strip()
+    if not span:
+        raise BadPolicy(
+            f"{path}: не объявлен диапазон совместимости с контрактом механизмов. "
+            "«Подходит любая версия» — не состояние, а молчание (154)"
+        )
+    version_file = path.parent / paths.VERSION
+    if version_file.is_file():
+        now = version_file.read_text(encoding="utf-8").strip()
+        if not compatible(span, now):
+            raise BadPolicy(
+                f"{path}: контракт механизмов {now} вне объявленного диапазона «{span}» — "
+                "перечитайте ответы под новый контракт (157), а не двигайте границу"
+            )
 
     declared = raw.get("checks")
     if not isinstance(declared, dict) or not declared:

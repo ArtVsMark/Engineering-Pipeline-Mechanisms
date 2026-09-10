@@ -7,6 +7,9 @@ from typing import Any
 from tests.conftest import load_script
 
 module = load_script("ci_complete.py")
+
+#: Шапка ответа проекта: схема и диапазон совместимости — их требует разбор.
+HEAD = 'schema: 3\ncontract: ">=0.1,<0.2"\n'
 REQUIRED = ["lint", "test"]
 
 
@@ -219,7 +222,7 @@ def test_policy_gives_both_classes(tmp_path: Any) -> None:
     """Из данных приходят обязательные и совещательные — разными списками."""
     answer = tmp_path / ".pipeline.yml"
     answer.write_text(
-        "schema: 2\nchecks:\n  lint: required\n  review:\n    class: advisory\n"
+        HEAD + "checks:\n  lint: required\n  review:\n    class: advisory\n"
         '    why: слияния не держит\n    addressee: "#23"\n'
         "  e2e:\n    class: off\n    why: нет окружения\n",
         encoding="utf-8",
@@ -427,3 +430,53 @@ def test_without_the_run_the_strictness_stays() -> None:
     problems, waiting = module.verdict([run("lint")], ["lint", "test"], "ci-complete")
     assert waiting is False
     assert problems
+
+
+def test_a_cancelled_record_never_outranks_a_live_one() -> None:
+    """Отменённая запись не побеждает живую, даже будучи свежее.
+
+    ЗАМЕР 10.09.2026, изменение #109. Семь прогонов подряд гасили друг друга:
+    последней записью имени оказалась отменённая в 07:51, а зелёная — в 07:50.
+    Разбор, ставший считать по свежести, объявил «все записи отменены» и выдал
+    метку источника 2 изменению с зелёным вердиктом.
+
+    Вердикта в отменённой записи нет НИКАКОГО, поэтому свежесть между ней и
+    живой ничего не значит.
+    """
+    kept = module.worst_per_name(
+        [
+            run("test", conclusion="success", started_at="2026-09-10T07:50:43Z"),
+            run("test", conclusion="cancelled", started_at="2026-09-10T07:51:35Z"),
+        ]
+    )
+    assert [item["conclusion"] for item in kept] == ["success"]
+
+
+def test_all_cancelled_still_reaches_the_verdict() -> None:
+    """Если живой записи у имени нет вовсе, отмена доезжает до вердикта.
+
+    Пройденной она не считается, и молчаливое «зелено» здесь было бы ложью:
+    вердикта у этого имени просто нет (075).
+    """
+    kept = module.worst_per_name(
+        [
+            run("test", conclusion="cancelled", started_at="2026-09-10T07:50:00Z"),
+            run("test", conclusion="cancelled", started_at="2026-09-10T07:51:00Z"),
+        ]
+    )
+    assert [item["conclusion"] for item in kept] == ["cancelled"]
+
+
+def test_freshness_still_decides_among_live_records() -> None:
+    """Между живыми записями по-прежнему решает свежесть.
+
+    Иначе возвращается прежний дефект: красная запись погашенного прогона
+    держала голову красной навсегда.
+    """
+    kept = module.worst_per_name(
+        [
+            run("test", conclusion="failure", started_at="2026-09-10T06:27:23Z"),
+            run("test", conclusion="success", started_at="2026-09-10T06:27:57Z"),
+        ]
+    )
+    assert [item["conclusion"] for item in kept] == ["success"]

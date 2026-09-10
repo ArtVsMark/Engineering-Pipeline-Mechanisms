@@ -294,7 +294,8 @@ def test_no_records_on_the_head_refuses_to_merge(monkeypatch: pytest.MonkeyPatch
 def test_a_green_head_passes_the_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
     """Здоровый вход обязан пройти: гейт проверяется обеими ошибками (097)."""
     green = [
-        record(name) for name in ("lint", "test", "pr-meta", "journal", "attribution", "pipeline")
+        record(name)
+        for name in ("lint", "test", "pr-meta", "journal", "attribution", "pipeline", "contract")
     ]
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, key=None: iter(green))
     problems, waiting = module.head_verdict("o/r", change(1, "automerge"), "token")

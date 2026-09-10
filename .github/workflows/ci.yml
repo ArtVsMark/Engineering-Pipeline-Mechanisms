@@ -320,6 +320,37 @@ jobs:
             *) exit "$code" ;;
           esac
 
+  # ГЛАВНЫЙ ГЕЙТ СВЯЗИ С ПОТРЕБИТЕЛЕМ (#15). Имена джобов уезжают в чужую
+  # защиту ветки ДОСЛОВНО и вне дерева, входы кнопки — в чужие вызовы, классы
+  # проверок — в чужой ответ. Правка этого, прошедшая молча, ломает потребителя,
+  # и узнаётся об этом от него, а не отсюда.
+  #
+  # На общей ветке шаг не идёт: предмет — что ИЗМЕНЕНИЕ делает с поверхностью
+  # относительно базы, а на `main` сравнивать не с чем.
+  contract:
+    name: contract
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Снимок «до» берётся из дерева базы целиком: поверхность собирается
+          # из всех прогонов разом, и по одному файлу её не восстановить.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - name: поверхность контракта не тронута молча
+        env:
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          base="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags origin "$base:refs/remotes/origin/$base"
+          python scripts/check_contract.py
+
   ci-complete:
     # ЕДИНСТВЕННЫЙ ОБЯЗАТЕЛЬНЫЙ КОНТЕКСТ. Имя джоба и есть имя контекста,
     # поэтому `name:` совпадает с идентификатором намеренно: расхождение между
