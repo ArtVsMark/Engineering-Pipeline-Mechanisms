@@ -14,12 +14,12 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
 
 facts = load_script("build_facts.py")
 
 WORKFLOW = ROOT / ".github" / "workflows" / "badges.yml"
-CHECKS = 'schema: 3\ncontract: ">=1.2,<1.3"\nchecks:\n  lint: required\n'
+CHECKS = 'schema: 3\ncontract: ">=9.9,<9.10"\nchecks:\n  lint: required\n'
 
 
 def bindings(**rules: dict[str, Any]) -> str:
@@ -29,7 +29,7 @@ def bindings(**rules: dict[str, Any]) -> str:
 
 def tree(root: Path, answer: str) -> Path:
     """Собирает дерево-источник: версия, ответ каталогу, ответ по проверкам."""
-    (root / "CONTRACT_VERSION").write_text("1.2.3\n", encoding="utf-8")
+    (root / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
     (root / ".rules").mkdir(exist_ok=True)
     (root / ".rules" / "bindings.json").write_text(answer, encoding="utf-8")
     (root / ".pipeline.yml").write_text(CHECKS, encoding="utf-8")
@@ -50,7 +50,7 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
         ),
     )
     collected = facts.collect(tmp_path, "голова")
-    assert collected["contract"] == "1.2.3"
+    assert collected["contract"] == FAKE_VERSION
     assert collected["rules"]["total"] == 4
     assert collected["rules"]["answered"] == 3
     assert collected["rules"]["by_mechanism"] == {"document": 1, "gate": 1}
