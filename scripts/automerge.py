@@ -67,7 +67,6 @@ from typing import Any, Final
 import changerefs
 import ci_complete
 import ghrest
-import items
 import labels
 import paths
 import pipeline_checks as policy
@@ -444,32 +443,6 @@ def merge(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> str:
     return str((payload or {}).get("sha", ""))
 
 
-def mark_closed_items(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> None:
-    """Отмечает в задачах пункты, которые изменение объявило закрытыми.
-
-    ПОЧЕМУ ЗДЕСЬ, А НЕ СВОИМ ШАГОМ. Пункт становится сделанным ровно тогда,
-    когда изменение слилось: раньше — обещание, позже — уже история. Момент
-    единственный, и он здесь; отдельный шаг ловил бы его опросом.
-
-    ПОЧЕМУ ПОСЛЕ СЛИЯНИЯ, А НЕ ВМЕСТО. Отказ разметки не отменяет слияния и
-    не роняет заход: изменение уже в общей ветке, и превращать это в красное
-    значило бы объявить сломанным то, что сработало (084).
-
-    ЗДЕСЬ ОТМЕЧАЕТСЯ ОБЪЯВЛЕННОЕ АВТОРОМ, и это не то же, что вывод разбора:
-    автор сказал «этот пункт закрыт», а разбор слитого догадывается по коду.
-    Разные основания — разные механизмы (`scripts/task_items.py`), и стирать
-    между ними границу нельзя (154).
-    """
-    declared = changerefs.closed_items_in(change.body)
-    if not declared:
-        return
-    numbers = sorted({link.number for link in changerefs.links_in(change.body)})
-    if not numbers:
-        print("  пункты названы закрытыми, а связи с задачей нет — отмечать негде")
-        return
-    items.mark(repo, numbers, declared, owner_token, dry_run=dry_run)
-
-
 def report_held(changes: list[Change]) -> None:
     """Называет остановленное меткой: отменяющий переключатель нужен адресату.
 
@@ -621,7 +594,12 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
 
         sha = merge(repo, change, owner_token, dry_run=dry_run)
         print(f"слито #{change.number}{f' → {sha}' if sha else ''}")
-        mark_closed_items(repo, change, owner_token, dry_run=dry_run)
+        # Отметка пунктов задачи здесь БЫЛА и отсюда ушла. Момент верный —
+        # пункт становится сделанным ровно при слиянии, — но предмет чужой:
+        # очередь про слияние, а не про чужие задачи, и второй предмет делал её
+        # ответственной за то, чего она не решает. Отмечает шаг `task-items`:
+        # он идёт по тому же событию и вдобавок догоняет пропущенное обходом
+        # окна (022).
         return EXIT_OK
 
     print("готовой головы нет: все кандидаты либо красны, либо конфликтуют")
