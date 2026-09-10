@@ -16,10 +16,10 @@ from tests.conftest import Run, RunScript, load_script
 policy = load_script("pipeline_checks.py")
 
 #: Шапка ответа проекта: схема и диапазон совместимости — их требует разбор.
-HEAD = 'schema: 3\ncontract: ">=0.1,<0.2"\n'
+HEAD = 'schema: 4\ncontract: ">=0.1,<0.2"\n'
 
 GOOD = """
-schema: 3
+schema: 4
 contract: ">=0.1,<0.2"
 checks:
   lint: required
@@ -50,6 +50,29 @@ jobs:
   review:
     name: review
     steps: []
+"""
+
+#: Прогон ЗА ПРЕДЕЛАМИ ИЗМЕНЕНИЯ: события — толчок в общую ветку и кнопка.
+#: Записи на голове изменения он не оставляет, и спрашивается вторым разделом.
+NIGHTLY = """
+name: nightly
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  nightly:
+    name: nightly
+    steps: []
+"""
+
+#: Ответ по нему — тот же по форме, что и по проверке изменения.
+BEYOND_OK = """
+beyond_the_change:
+  nightly:
+    class: advisory
+    why: идёт по толчку в общую ветку, слияния не касается
+    addressee: "#23"
 """
 
 
@@ -131,7 +154,7 @@ def test_foreign_schema_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "body",
-    [HEAD + "checks: {}\n", 'schema: 3\ncontract: ">=0.1,<0.2"\n'],
+    [HEAD + "checks: {}\n", 'schema: 4\ncontract: ">=0.1,<0.2"\n'],
 )
 def test_empty_answer_is_an_input_error(tmp_path: Path, body: str) -> None:
     """Пустой ответ — ошибка входа, а не «нечего опрашивать» (075)."""
@@ -185,7 +208,7 @@ def test_gate_passes_a_matching_tree(run_script: RunScript, tmp_path: Path) -> N
     tree(tmp_path, GOOD, WORKFLOW, REVIEW)
     run = gate(run_script, tmp_path)
     assert run.code == 0, run.text
-    assert "держат слияние: lint" in run.text
+    assert "держат слияние:    lint" in run.text
 
 
 def test_gate_refuses_a_check_without_an_answer(run_script: RunScript, tmp_path: Path) -> None:
@@ -338,3 +361,97 @@ def test_the_project_answer_declares_an_addressee_for_every_advisory() -> None:
     advisory = [item for item in checks.values() if item.klass == policy.ADVISORY]
     assert advisory, "совещательных проверок в ответе проекта нет — предмет не найден"
     assert all(item.addressee for item in advisory), "совещательная без адресата"
+
+
+# --- прогоны за пределами изменения ------------------------------------------
+
+
+def test_a_run_beyond_the_change_needs_an_answer(run_script: RunScript, tmp_path: Path) -> None:
+    """Прогон вне изменения без ответа — находка, а не «его не спрашивают».
+
+    До второго раздела таких джобов у нас было десять, и класса у них не было
+    нигде: `main_red` считал совещательным всё, чего нет среди обязательных, —
+    то есть выводил ответ из молчания (154).
+    """
+    tree(tmp_path, GOOD, WORKFLOW, REVIEW, NIGHTLY)
+    run = gate(run_script, tmp_path)
+    assert run.code == 3, run.text
+    assert "nightly" in run.text
+
+
+def test_an_answered_run_beyond_the_change_passes(run_script: RunScript, tmp_path: Path) -> None:
+    """Названный класс снимает находку — и печатается отдельным разделом."""
+    tree(tmp_path, GOOD + BEYOND_OK, WORKFLOW, REVIEW, NIGHTLY)
+    run = gate(run_script, tmp_path)
+    assert run.code == 0, run.text
+    assert "вне изменения" in run.text
+
+
+def test_required_is_refused_beyond_the_change(run_script: RunScript, tmp_path: Path) -> None:
+    """`required` во втором разделе запрещён построением, а не вкусом.
+
+    Держать слияние такому прогону нечем: сводный гейт опрашивает голову
+    изменения, а записи он там не оставляет. Защита ветки сверяет ИМЯ записи, а
+    не исход (187), — объявленное обязательным имя, которое никто не выдаёт,
+    ждали бы вечно.
+    """
+    bad = BEYOND_OK.replace(
+        "    class: advisory\n    why: идёт по толчку в общую ветку, слияния не касается\n"
+        '    addressee: "#23"\n',
+        "    class: required\n",
+    )
+    tree(tmp_path, GOOD + bad, WORKFLOW, REVIEW, NIGHTLY)
+    run = gate(run_script, tmp_path)
+    assert run.code == 2, run.text
+    assert "required" in run.text
+
+
+def test_an_answer_in_the_wrong_section_is_refused(run_script: RunScript, tmp_path: Path) -> None:
+    """Ответ, попавший не в свой раздел, читается как здоровый — и не должен.
+
+    Имя в дереве есть, класс допустим, а предмет разный: ответ по прогону вне
+    изменения, положенный в первый раздел, объявляет обязательным то, что
+    записи на голове не даёт, — сводный ждал бы её вечно.
+    """
+    answer = (
+        GOOD
+        + """  nightly:
+    class: advisory
+    why: не в своём разделе
+    addressee: "#23"
+"""
+    )
+    tree(tmp_path, answer, WORKFLOW, REVIEW, NIGHTLY)
+    run = gate(run_script, tmp_path)
+    assert run.code == 3, run.text
+    assert "не в своём разделе" in run.text
+
+
+def test_one_name_in_both_sections_is_refused(run_script: RunScript, tmp_path: Path) -> None:
+    """Одно имя в обоих разделах — два ответа по одной проверке (022)."""
+    answer = (
+        GOOD
+        + BEYOND_OK
+        + """  lint:
+    class: advisory
+    why: второй ответ по тому же имени
+    addressee: "#23"
+"""
+    )
+    tree(tmp_path, answer, WORKFLOW, REVIEW, NIGHTLY)
+    run = gate(run_script, tmp_path)
+    assert run.code == 2, run.text
+    assert "в обоих разделах" in run.text
+
+
+def test_no_runs_beyond_the_change_is_lawful(run_script: RunScript, tmp_path: Path) -> None:
+    """Ни одного прогона вне изменения — законное состояние, а не ошибка входа.
+
+    Здесь второй раздел отличается от первого: без проверок НА изменении
+    конвейера нет вовсе (075), а расписаний и публикаций у проекта может не
+    быть ни одной — требовать их значило бы требовать того, чем проект не
+    обязан пользоваться.
+    """
+    tree(tmp_path, GOOD, WORKFLOW, REVIEW)
+    run = gate(run_script, tmp_path)
+    assert run.code == 0, run.text

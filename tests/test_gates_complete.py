@@ -9,7 +9,7 @@ from tests.conftest import load_script
 module = load_script("ci_complete.py")
 
 #: Шапка ответа проекта: схема и диапазон совместимости — их требует разбор.
-HEAD = 'schema: 3\ncontract: ">=0.1,<0.2"\n'
+HEAD = 'schema: 4\ncontract: ">=0.1,<0.2"\n'
 REQUIRED = ["lint", "test"]
 
 
