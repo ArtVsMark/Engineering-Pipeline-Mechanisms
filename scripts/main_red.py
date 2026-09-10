@@ -172,6 +172,28 @@ def one_fall(holds: list[str], rest: list[str], fed: dict[str, set[str]]) -> boo
     return all(name.split(" (")[0] in feeding for name in rest)
 
 
+def target_run(
+    holds: list[str], rest: list[str], red: list[dict[str, Any]], fed: dict[str, set[str]]
+) -> int:
+    """Номер прогона, который перезапускают; ``0`` — перезапускать нечего.
+
+    Решение о перезапуске и ВЫБОР ЕГО ПРЕДМЕТА — один вопрос, и спрашиваться он
+    обязан одинаково. Пока выбор жил своим условием внутри захода, он
+    расходился с решением: `one_fall` уже говорил «одно падение», а предмет
+    по-прежнему не находился, и отказ приходил под другим именем.
+
+    Перезапускается запись ОБЯЗАТЕЛЬНОГО имени: она и держит слияние. Соседние
+    имена того же падения (матричные ячейки) поедут вместе с ней — их вердикт
+    в неё и доезжает.
+    """
+    if not one_fall(holds, rest, fed):
+        return 0
+    for item in red:
+        if str(item.get("name")) == holds[0]:
+            return run_id_of(item)
+    return 0
+
+
 def rerun_reason(
     holds: list[str],
     rest: list[str],
@@ -362,13 +384,17 @@ def main(argv: list[str] | None = None) -> int:
             # Упал ровно один — перезапускается он один и один раз. Номер
             # попытки спрашивается у площадки: свой счётчик разошёлся бы с ней
             # молча, и в сторону бесконечных перезапусков.
-            number = 0
-            tries = 1
-            if len(holds) == 1 and not rest:
-                only = next(item for item in red if str(item.get("name")) == holds[0])
-                number = run_id_of(only)
-                tries = attempt(args.repo, number, token) if number else 1
-            why = rerun_reason(holds, rest, number, tries, policy.feeds())
+            #
+            # УСЛОВИЕ ЗДЕСЬ ТО ЖЕ, ЧТО И В РЕШЕНИИ. Пока оно было своим
+            # («ровно один и никого рядом»), сценарий «агрегат плюс его
+            # матрица» до перезапуска не доходил: номер прогона не вычислялся,
+            # и отказ приходил уже по другой причине — «адрес записи не
+            # разобрался». Починка меняла причину отказа, а не исход. Нашёл
+            # внешний взгляд на #160.
+            fed = policy.feeds()
+            number = target_run(holds, rest, red, fed)
+            tries = attempt(args.repo, number, token) if number else 1
+            why = rerun_reason(holds, rest, number, tries, fed)
             if why:
                 print(f"перезапуска не будет: {why}")
             else:
