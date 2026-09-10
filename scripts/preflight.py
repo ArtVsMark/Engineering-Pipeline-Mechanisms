@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -37,12 +36,20 @@ from pathlib import Path
 from typing import Final
 
 import paths
+import yaml
 
 CI: Final = paths.WORKFLOWS / "ci.yml"
 
 #: Команда шага прогона: строка, начинающаяся с зовомого инструмента. Читается
 #: список РАЗРЕШЁННОГО (068): что не узнано, то не запускается, а называется.
 RUNNABLE: Final = ("ruff ", "mypy ", "pytest", "python scripts/")
+#: Подстановка площадки. Блок с ней локально не раскрывается, и запускать его
+#: значит проверять не ту команду.
+PLATFORM_MARK: Final = "${{"
+#: Шаги, отложенные разбором с названной причиной. Заполняется при чтении и
+#: печатается вместе с прочим невыполнимым: пропуск без имени неотличим от
+#: «шага не было» (046).
+UNRUNNABLE: Final[dict[str, str]] = {}
 #: Шаги, которым нужна площадка: их команды сюда не берутся, а перечисляются
 #: как невыполнимые. Ключ — начало команды, значение — почему.
 NEEDS_PLATFORM: Final = {
@@ -81,37 +88,53 @@ class Step:
 def steps(path: Path = CI) -> list[Step]:
     """Команды прогона, выполнимые без площадки, — в порядке объявления.
 
-    Разбор текстовый, а не по YAML, намеренно: команда живёт в блоке `run:`
-    вместе с оболочечной обвязкой, и восстанавливать её из разобранного дерева
-    пришлось бы тем же перечислением, от которого механизм и уходит.
+    Разбор идёт по ДЕРЕВУ, а не по строкам, и это не вкус. Команда шага живёт в
+    блоке `run:` вместе с оболочечной обвязкой — `set -euo pipefail`,
+    подготовкой базы, `git fetch`, — и строка, выдернутая из середины такого
+    блока, запускается без неё. Итог выглядит как проверка, а проверяет другое:
+    зелёное там, где площадка краснеет, и наоборот
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Замер — находка ревью по #94.
+
+    Поэтому берётся ВЕСЬ блок шага, и берётся он целиком либо не берётся вовсе.
     """
     if not path.is_file():
         raise NotRun(f"нет {path}: список проверок взять неоткуда (075)")
 
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise NotRun(f"{path} не разбирается: {exc}") from exc
+    if not isinstance(document, dict):
+        raise NotRun(f"{path}: ожидалось отображение, пришло {type(document).__name__}")
+
     found: list[Step] = []
-    name = ""
     seen: set[str] = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        named = re.match(r"\s*-?\s*name:\s*(\S.*?)\s*$", line)
-        if named:
-            name = named.group(1)
-            continue
-        # `- run: …` и `run: …` — одна и та же форма записи шага; читаются обе,
-        # иначе часть команд дерева не увидели бы молча.
-        command = line.strip().removeprefix("- ").removeprefix("run: ").strip()
-        if not command.startswith(RUNNABLE) or command in seen:
-            continue
-        if any(command.startswith(prefix) for prefix in NEEDS_PLATFORM):
-            continue
-        if command.endswith("\\"):
-            # Команда продолжается на следующей строке, а разбор построчный.
-            # Запустить её обрезанной значило бы проверить не то, что проверяет
-            # площадка, и промолчать об этом (045).
-            raise NotRun(
-                f"команда шага «{name}» многострочная — разбор её не читает целиком: {command}"
-            )
-        seen.add(command)
-        found.append(Step(name or command, command))
+    for job in (document.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            command = str((step or {}).get("run") or "").strip()
+            name = str((step or {}).get("name") or "").strip()
+            if not command or command in seen:
+                continue
+            if not any(line.strip().startswith(RUNNABLE) for line in command.splitlines()):
+                continue
+            # Площадка нужна блоку целиком, если её требует ХОТЯ БЫ одна его
+            # строка: запустить остальное без неё значит проверить половину и
+            # назвать это проверкой.
+            if any(
+                line.strip().startswith(prefix)
+                for line in command.splitlines()
+                for prefix in NEEDS_PLATFORM
+            ):
+                continue
+            if PLATFORM_MARK in command:
+                # Подстановка площадки локально не раскрывается: запустить блок
+                # с ней значит проверить не ту команду. Названо, а не выкинуто
+                # молча (046) — такие шаги перечисляет `report_gaps`.
+                UNRUNNABLE[name or command] = "в команде подстановка площадки"
+                continue
+            seen.add(command)
+            found.append(Step(name or command.splitlines()[0], command))
 
     if not found:
         raise NotRun(f"{path}: ни одной выполнимой команды не нашлось — предмет не найден (075)")
@@ -149,6 +172,8 @@ def run(step: Step, root: Path) -> tuple[int, str]:
 def report_gaps() -> None:
     """Называет то, что здесь проверить нечем, — списком, а не молчанием."""
     print("\nчего этот прогон не проверяет (проверит площадка):")
+    for name, why in UNRUNNABLE.items():
+        print(f"  {name} — {why}")
     for command, why in NEEDS_PLATFORM.items():
         print(f"  {command} — {why}")
     for check, why in ELSEWHERE.items():

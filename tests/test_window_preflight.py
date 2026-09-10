@@ -174,20 +174,6 @@ def test_a_platform_command_is_not_run_locally(tmp_path: Path) -> None:
     assert [step.command for step in found] == ["ruff check scripts/"]
 
 
-def test_a_multiline_command_is_refused(tmp_path: Path) -> None:
-    """Многострочную команду механизм не обрезает, а отвергает.
-
-    Обрезанная команда запустилась бы и проверила НЕ ТО, что проверяет
-    площадка, — и промолчала бы об этом.
-    """
-    root = tree(
-        tmp_path,
-        workflow=("jobs:\n  x:\n    steps:\n      - name: свод\n        run: ruff check \\\\\n"),
-    )
-    with pytest.raises(preflight.NotRun, match="многострочная"):
-        preflight.steps(root / ".github" / "workflows" / "ci.yml")
-
-
 def test_a_workflow_without_commands_is_an_input_error(tmp_path: Path) -> None:
     """Ни одной выполнимой команды — отказ входа, а не «всё зелено» (075)."""
     root = tree(tmp_path, workflow="jobs:\n  x:\n    steps:\n      - uses: actions/checkout@v4\n")
@@ -227,3 +213,67 @@ def test_the_tools_come_from_the_running_interpreter(tmp_path: Path) -> None:
     """
     room = preflight.environment()
     assert room["PATH"].startswith(str(Path(preflight.sys.executable).parent))
+
+
+# --- команда берётся блоком, а не строкой из середины -------------------------
+#
+# Находка ревью по #94: построчный разбор выдёргивал команду из середины блока
+# `run: |`, оставляя за бортом обвязку — `set -euo pipefail`, подготовку базы,
+# `git fetch`. Запускалось не то, что запускает площадка, и молча.
+
+
+def test_a_command_is_taken_with_its_shell_wrapping(tmp_path: Path) -> None:
+    """Блок берётся целиком: обвязка — часть команды, а не оформление."""
+    root = tree(
+        tmp_path,
+        workflow=(
+            "jobs:\n  x:\n    steps:\n      - name: гейт\n        run: |\n"
+            "          set -euo pipefail\n"
+            "          export MODE=strict\n"
+            "          ruff check scripts/\n"
+        ),
+    )
+    found = preflight.steps(root / ".github" / "workflows" / "ci.yml")
+    assert len(found) == 1
+    assert "set -euo pipefail" in found[0].command
+    assert "ruff check scripts/" in found[0].command
+
+
+def test_a_block_needing_the_platform_is_skipped_whole(tmp_path: Path) -> None:
+    """Площадка нужна блоку целиком, если её требует хотя бы одна строка.
+
+    Запустить остальное без неё значит проверить половину и назвать это
+    проверкой.
+    """
+    root = tree(
+        tmp_path,
+        workflow=(
+            "jobs:\n  x:\n    steps:\n      - name: журнал\n        run: |\n"
+            "          set -euo pipefail\n"
+            "          git fetch --no-tags origin main\n"
+            "          python scripts/check_journal.py\n"
+            "      - name: линтер\n        run: ruff check scripts/\n"
+        ),
+    )
+    found = preflight.steps(root / ".github" / "workflows" / "ci.yml")
+    assert [step.name for step in found] == ["линтер"]
+
+
+def test_a_platform_substitution_makes_the_step_unrunnable(tmp_path: Path) -> None:
+    """Подстановка площадки локально не раскрывается — шаг называется, а не запускается.
+
+    Запустить блок с нераскрытой подстановкой значит проверить не ту команду и
+    получить правдоподобный результат (045).
+    """
+    preflight.UNRUNNABLE.clear()
+    root = tree(
+        tmp_path,
+        workflow=(
+            "jobs:\n  x:\n    steps:\n      - name: свод\n        run: |\n"
+            '          python scripts/check_pipeline.py --self "${{ github.job }}"\n'
+            "      - name: линтер\n        run: ruff check scripts/\n"
+        ),
+    )
+    found = preflight.steps(root / ".github" / "workflows" / "ci.yml")
+    assert [step.name for step in found] == ["линтер"]
+    assert "свод" in preflight.UNRUNNABLE, "отложенный шаг не назван — пропуск стал молчанием"
