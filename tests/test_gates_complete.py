@@ -372,3 +372,58 @@ def test_a_record_without_a_start_is_the_oldest() -> None:
         ]
     )
     assert [item["conclusion"] for item in kept] == ["success"]
+
+
+# --- джоб, который ещё не стартовал ------------------------------------------
+#
+# ЗАМЕР 10.09.2026: агрегат `test` ждёт матрицу версий через `needs`, а сводный
+# гейт опрашивает голову раньше — записи ещё нет. Отсутствие читалось как
+# «прогон не стартовал», и изменение #102 получило красный обязательный
+# контекст при полностью зелёных проверках.
+
+
+def test_a_queued_job_is_waited_for_not_failed() -> None:
+    """Джоб своего прогона, ещё не стартовавший, — ожидание, а не отказ.
+
+    Его отличает от «не стартует вовсе» ровно одно: он объявлен в своём
+    прогоне и не завершён. Без этого различия гейт краснеет на всяком джобе с
+    `needs`, то есть на здоровом прогоне.
+    """
+    problems, waiting = module.verdict(
+        [run("lint")], ["lint", "test"], "ci-complete", mine={"test": "queued"}
+    )
+    assert problems == []
+    assert waiting is True
+
+
+def test_a_job_absent_from_the_run_is_still_a_refusal() -> None:
+    """Имени нет ни на голове, ни среди джобов прогона — отказ, как и прежде.
+
+    Это вторая половина различия: «ещё не стартовал» и «не будет никогда»
+    снаружи одинаковы, и поблажка второму означала бы зелёное на прогоне,
+    которого не было (075).
+    """
+    problems, waiting = module.verdict(
+        [run("lint")], ["lint", "test"], "ci-complete", mine={"lint": "completed"}
+    )
+    assert waiting is False
+    assert any("не стартовал" in problem for problem in problems)
+
+
+def test_a_completed_job_without_a_record_is_a_refusal() -> None:
+    """Джоб завершился, а записи нет — отказ: ждать больше нечего."""
+    problems, _ = module.verdict(
+        [run("lint")], ["lint", "test"], "ci-complete", mine={"test": "completed"}
+    )
+    assert any("не стартовал" in problem for problem in problems)
+
+
+def test_without_the_run_the_strictness_stays() -> None:
+    """Не спросили о своём прогоне — разбор возвращается к прежней строгости.
+
+    Молчаливая поблажка на неизвестности хуже лишнего красного: она делает
+    гейт зелёным ровно тогда, когда он не смог проверить (045).
+    """
+    problems, waiting = module.verdict([run("lint")], ["lint", "test"], "ci-complete")
+    assert waiting is False
+    assert problems
