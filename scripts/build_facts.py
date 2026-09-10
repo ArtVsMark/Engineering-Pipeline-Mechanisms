@@ -115,12 +115,19 @@ def rules_facts(path: Path = BINDINGS) -> dict[str, Any]:
 
 
 def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, int]:
-    """Считает классы проверок из ответа проекта."""
+    """Считает классы проверок из ответа проекта — по ОБОИМ разделам.
+
+    Факты публикуются наружу и говорят о конвейере целиком, а не о его половине
+    на изменении. Умолчание у `names_of` — первый раздел, и без явного «из
+    любого» число совещательных здесь молча занизилось бы на десять: ровно на
+    те прогоны, которые второй раздел и завёл. Нашёл внешний взгляд на #155 —
+    на том же изменении, которое умолчание и ввело.
+    """
     try:
         checks = policy.load(path)
     except policy.BadPolicy as exc:
         raise NotRun(str(exc)) from exc
-    return {klass: len(policy.names_of(checks, klass)) for klass in policy.CLASSES}
+    return {klass: len(policy.names_of(checks, klass, beyond=None)) for klass in policy.CLASSES}
 
 
 def family_facts(path: Path | None) -> dict[str, Any]:
@@ -173,7 +180,7 @@ def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]
     # проекта СЧИТАЕТСЯ по истории — «столько изменений принято после выпуска».
     # Свести их в одно значило бы либо скрыть работу, либо объявить выпуском
     # каждое изменение (035).
-    number, whole = version.version()
+    number, whole = version.version(root)
     return {
         "schema": 1,
         "contract": contract_version(root / VERSION_FILE),
@@ -184,7 +191,7 @@ def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]
         # ВЫПУСК И ВЕРСИЯ ГОЛОВЫ — РАЗНЫЕ ЧИСЛА. Голова уходит вперёд каждым
         # изменением, потребитель живёт на выпущенном; одно вместо другого
         # обещало бы ему то, чего он не получал.
-        "release": version.release_tag() or "",
+        "release": version.release_tag(root) or "",
         # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им
         # не нужен и вреден — они дёргаются от каждого изменения, — но живой
         # адрес обязателен, и вот он (049).

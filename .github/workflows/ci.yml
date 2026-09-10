@@ -318,6 +318,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Счёт по пунктам спрашивает, КОГДА имя появилось в истории. В мелком
+          # клоне она обрезана до одного коммита, и все файлы выглядят
+          # добавленными в нём — признак срабатывал бы на каждом названном.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

@@ -153,3 +153,50 @@ def test_a_recently_touched_task_is_not_quiet(tmp_path: Path) -> None:
     tasks = [issue(4, "- [ ] что-то", DAY_ONE, DAY_TEN)]
     built, quiet = module.look(tasks, items.open_items, now=DAY_TEN + timedelta(days=1), root=root)
     assert (built, quiet) == ([], [])
+
+
+def test_a_shallow_clone_answers_unknown_not_a_date(tmp_path: Path) -> None:
+    """В мелком клоне дата появления НЕИЗВЕСТНА, а не равна дате захода.
+
+    История там обрезана до одного коммита, и `git log --diff-filter=A`
+    показывает все файлы добавленными в нём. Сильный признак опирается на
+    «появилось ПОСЛЕ постановки» — и срабатывал бы на каждом названном файле,
+    то есть врал бы уверенно. Выдавать это за находку — тихий запасной ответ
+    (045).
+
+    Нашёл внешний взгляд на #149: джоб `debt` брал дерево без `fetch-depth`, а
+    умолчание у него единица. На дереве окна клон полный, и локально это не
+    воспроизводилось.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    repo_with(origin, "scripts/check_thing.py", DAY_ONE)
+    (origin / "second.py").write_text("y = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=origin, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "второй"],
+        cwd=origin,
+        check=True,
+        env={
+            "GIT_AUTHOR_DATE": DAY_TEN.isoformat(),
+            "GIT_COMMITTER_DATE": DAY_TEN.isoformat(),
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+        },
+    )
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "--quiet", "--depth", "1", f"file://{origin}", str(shallow)],
+        check=True,
+        capture_output=True,
+    )
+
+    assert module.shallow(shallow) is True
+    # Файл РОДИЛСЯ до постановки, но в мелком клоне выглядит добавленным сегодня.
+    assert module.born("scripts/check_thing.py", shallow) is None
+    assert (
+        module.evidence(
+            "- [ ] гейт в `scripts/check_thing.py`", DAY_ONE, module.tracked(shallow), shallow
+        )
+        == []
+    )

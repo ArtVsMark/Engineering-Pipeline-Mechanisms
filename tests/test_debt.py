@@ -440,3 +440,63 @@ def test_a_forged_old_snapshot_reads_differently(monkeypatch: pytest.MonkeyPatch
     stale = debt.said_age(debt.age_of("2026-09-08T11:00:00Z", now))
     assert fresh != stale
     assert debt.STALE_NOTE in stale and debt.STALE_NOTE not in fresh
+
+
+# --- застрявшие изменения: источники 1 и 2 ------------------------------------
+
+
+def test_a_conflict_is_asked_per_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Состояние слияния берётся из одиночного ответа, а не из списка.
+
+    В списочном ответе площадки поля `mergeable_state` НЕТ вовсе. Пока оно
+    читалось оттуда, источник 1 не срабатывал ни разу: механизм молчал, и
+    молчание выглядело как «конфликтов нет». Нашёл внешний взгляд на #132.
+    """
+    listing = [{"number": 5, "title": "работа", "draft": False, "head": {"sha": "abc"}}]
+
+    def request(method: str, path: str, *_: object, **__: object) -> object:
+        if path.startswith("repos/o/r/pulls?"):
+            return listing
+        if path == "repos/o/r/pulls/5":
+            return {"mergeable_state": "dirty"}
+        return None
+
+    monkeypatch.setattr(debt.ghrest, "request", request)
+    monkeypatch.setattr(debt.ghrest, "paginate", lambda *_, **__: iter([]))
+    conflicting, unknown, red = debt.stuck_changes("o/r", "token")
+    assert conflicting == ["#5 — работа"]
+    assert (unknown, red) == ([], [])
+
+
+def test_an_unknown_merge_state_is_not_a_clean_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`unknown` — не «конфликта нет»: площадка ещё считает.
+
+    Выдать неизвестность за пустоту значит завести тихий запасной ответ (045):
+    источник 1 молчал бы ровно тогда, когда о нём и надо спросить ещё раз.
+    """
+    listing = [{"number": 6, "title": "работа", "draft": False, "head": {"sha": "abc"}}]
+
+    def request(method: str, path: str, *_: object, **__: object) -> object:
+        if path.startswith("repos/o/r/pulls?"):
+            return listing
+        if path == "repos/o/r/pulls/6":
+            return {"mergeable_state": "unknown"}
+        return None
+
+    monkeypatch.setattr(debt.ghrest, "request", request)
+    monkeypatch.setattr(debt.ghrest, "paginate", lambda *_, **__: iter([]))
+    conflicting, unknown, red = debt.stuck_changes("o/r", "token")
+    assert (conflicting, red) == ([], [])
+    assert unknown == ["#6 — работа"]
+
+
+def test_a_draft_is_not_stuck(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Черновик застрять не может: он и не подан."""
+    listing = [{"number": 7, "title": "черновик", "draft": True, "head": {"sha": "abc"}}]
+    monkeypatch.setattr(
+        debt.ghrest,
+        "request",
+        lambda method, path, *_, **__: listing if path.startswith("repos/o/r/pulls?") else None,
+    )
+    monkeypatch.setattr(debt.ghrest, "paginate", lambda *_, **__: iter([]))
+    assert debt.stuck_changes("o/r", "token") == ([], [], [])
