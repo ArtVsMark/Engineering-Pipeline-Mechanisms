@@ -37,6 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+import family
 import paths
 import pipeline_checks as policy
 import version
@@ -117,7 +118,35 @@ def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, int]:
     return {klass: len(policy.names_of(checks, klass)) for klass in policy.CLASSES}
 
 
-def collect(root: Path, sha: str) -> dict[str, Any]:
+def family_facts(path: Path | None) -> dict[str, Any]:
+    """Разрез по общим механизмам семьи — вторая ось приоритета переноса.
+
+    ПОЧЕМУ ЭТО ЗДЕСЬ, А НЕ У КАТАЛОГА. Решение владельца 09.09.2026: считает и
+    публикует проект механизмов, потому что вопрос его — «окупается ли общий
+    модуль». Данные при этом чужие и уже собранные: второй сборщик тех же
+    чисел разошёлся бы с первым молча (022).
+
+    СВОДКИ МОЖЕТ НЕ БЫТЬ, И ЭТО СОСТОЯНИЕ, А НЕ НОЛЬ. Ветка каталога
+    недоступна, файл не скачался, форма разошлась — во всех случаях числа
+    НЕИЗВЕСТНЫ, и нулевая доля выглядела бы как «общие механизмы ничего не
+    закрывают»
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    if path is None or not path.is_file():
+        return {"read": False, "why": "сводка семьи не прочитана — числа неизвестны, а не нулевые"}
+    try:
+        picture = family.picture(family.load(path))
+    except family.NotRun as exc:
+        return {"read": False, "why": str(exc)}
+    # Форма чужая: её подъём — повод перечитать разрез, а не подвинуть число
+    # (157). Расхождение называется рядом с числами, а не прячется.
+    picture["read"] = True
+    picture["schema_expected"] = family.READS_SCHEMA
+    picture["schema_agrees"] = picture["schema_read"] == family.READS_SCHEMA
+    return picture
+
+
+def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]:
     """Собирает все факты о проекте в одно отображение."""
     # ВЕРСИЯ ПРОЕКТА И ВЕРСИЯ КОНТРАКТА — РАЗНЫЕ ЧИСЛА, И ОБА НУЖНЫ. Контракт
     # объявляет поверхность механизмов и поднимается решением человека; версия
@@ -134,6 +163,7 @@ def collect(root: Path, sha: str) -> dict[str, Any]:
         "version_whole": whole,
         "rules": rules_facts(root / BINDINGS),
         "checks": checks_facts(root / policy.DEFAULT_PATH),
+        "family": family_facts(summary),
         "generated": {
             "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "sha": sha,
@@ -188,10 +218,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=".", help="корень дерева, откуда читаются источники")
     parser.add_argument("--out-dir", required=True, help="куда положить производное")
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
+    parser.add_argument("--family", default="", help="сводка каталога export/where.json")
     args = parser.parse_args(argv)
 
     try:
-        facts = collect(Path(args.root), args.sha)
+        facts = collect(Path(args.root), args.sha, Path(args.family) if args.family else None)
     except NotRun as exc:
         print(f"факты не собраны: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -207,6 +238,15 @@ def main(argv: list[str] | None = None) -> int:
         f"правил {rules['answered']} из {rules['total']}, "
         f"проверок обязательных {facts['checks']['required']}"
     )
+    kin = facts["family"]
+    if kin.get("read"):
+        print(
+            f"общих механизмов семьи: {kin['shared']} из {kin['mechanisms']}, "
+            f"они держат {kin['closed_by_shared']} правил из {kin['held_by_machine']} "
+            f"({kin['share']:.0%} машинного соблюдения)"
+        )
+    else:
+        print(f"сводка семьи: {kin['why']}", file=sys.stderr)
     return EXIT_OK
 
 
