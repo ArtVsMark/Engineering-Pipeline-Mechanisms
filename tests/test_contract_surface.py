@@ -37,7 +37,7 @@ jobs:
     steps: []
 """
 
-ANSWER = 'schema: 3\ncontract: ">=0.1,<0.2"\nchecks:\n  lint: required\n'
+ANSWER = 'schema: 4\ncontract: ">=0.1,<0.2"\nchecks:\n  lint: required\n'
 
 
 def tree(root: Path, workflow: str = WORKFLOW, answer: str = ANSWER) -> Path:
@@ -119,7 +119,7 @@ def test_the_answer_schema_is_the_surface(tmp_path: Path) -> None:
     """Схема ответа — тоже поверхность: по ней потребитель пишет свой файл."""
     before = contract.surface(tree(tmp_path / "before"))
     after = contract.surface(
-        tree(tmp_path / "after", answer=ANSWER.replace("schema: 3", "schema: 4"))
+        tree(tmp_path / "after", answer=ANSWER.replace("schema: 4", "schema: 5"))
     )
     assert any("схема" in line for line in contract.differences(before, after))
 
@@ -162,7 +162,7 @@ def test_a_range_without_an_upper_bound_is_refused(span: str) -> None:
 def test_an_answer_without_a_range_is_refused(tmp_path: Path) -> None:
     """Ответ без диапазона отвергается: «подходит любая» — молчание, а не состояние."""
     path = tmp_path / ".pipeline.yml"
-    path.write_text("schema: 3\nchecks:\n  lint: required\n", encoding="utf-8")
+    path.write_text("schema: 4\nchecks:\n  lint: required\n", encoding="utf-8")
     with pytest.raises(policy.BadPolicy, match="диапазон"):
         policy.load(path)
 
