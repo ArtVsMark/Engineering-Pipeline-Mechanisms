@@ -231,30 +231,79 @@ def scripts_called_by(path: Path) -> set[str]:
     return set(re.findall(r"python scripts/(\w+\.py)", text))
 
 
-@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
-def test_workflow_installs_what_its_scripts_import(path: Path) -> None:
-    """Прогон ставит то, что нужно зовомому им скрипту.
+#: Импорт соседнего механизма: `import ghrest`, `import labels as x`.
+LOCAL_IMPORT_RE = re.compile(r"^import (\w+)|^from (\w+) import", re.M)
 
-    Замер: `agent-pr` стал звать механизм, читающий состав меток, а установку
-    разбора YAML в прогон не добавили. Шаг упал на импорте — ДО входа в скрипт,
-    поэтому свой третий исход выдать не мог, — и прогон прочитал сбой как
-    объявленное «секрет не задан», оставшись зелёным.
+
+def reads_yaml(name: str, seen: frozenset[str] = frozenset()) -> bool:
+    """Нужен ли этому механизму разбор YAML — прямо ИЛИ через соседей.
+
+    ПОЧЕМУ ОБХОД, А НЕ СПИСОК ИМЁН. Прежняя редакция смотрела прямой `import
+    yaml` и одно имя соседа, вписанное руками. Список руками отстаёт от дерева
+    молча: 10.09.2026 шаг `debt` стал звать `main_red`, тот тянет разбор
+    состава проверок, а установку в прогон не добавили — и шаг упал на импорте,
+    ДО входа в скрипт, то есть свой третий исход выдать не мог. На общей ветке
+    это увидел не набор, а `main-red`
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    Обход по дереву держится сам: новый сосед добавляется импортом, и гейт
+    узнаёт о нём в тот же момент, что и интерпретатор.
+    """
+    script = ROOT / "scripts" / name
+    if name in seen or not script.is_file():
+        return False
+    source = script.read_text(encoding="utf-8")
+    if "import yaml" in source:
+        return True
+    return any(
+        reads_yaml(f"{found}.py", seen | {name})
+        for line in LOCAL_IMPORT_RE.findall(source)
+        for found in line
+        if found
+    )
+
+
+def jobs_of(path: Path) -> list[tuple[str, str]]:
+    """Джобы прогона парами «имя, его текст».
+
+    Текстом, а не разобранным деревом: предмет проверки — команды установки и
+    запуска, они живут строками внутри `run:`, и собирать их обратно из дерева
+    пришлось бы тем же разбором.
     """
     text = path.read_text(encoding="utf-8")
-    scripts_dir = ROOT / "scripts"
-    needs_yaml = False
-    for name in scripts_called_by(path):
-        script = scripts_dir / name
-        if not script.is_file():
-            continue
-        source = script.read_text(encoding="utf-8")
-        # Прямо или через общий модуль состава — YAML нужен в обоих случаях.
-        if "import yaml" in source or "import labels" in source:
-            needs_yaml = True
-    if needs_yaml:
-        assert "pyyaml" in text.lower(), (
-            f"{path.name} зовёт скрипт с разбором YAML, но не ставит его"
+    found: list[tuple[str, str]] = []
+    starts = [match.start() for match in re.finditer(r"^  (\w[\w-]*):$", text, re.M)]
+    for place, start in enumerate(starts):
+        end = starts[place + 1] if place + 1 < len(starts) else len(text)
+        piece = text[start:end]
+        found.append((piece.splitlines()[0].strip(" :"), piece))
+    return found
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_workflow_installs_what_its_scripts_import(path: Path) -> None:
+    """ДЖОБ ставит то, что нужно зовомому им скрипту — не файл, а джоб.
+
+    Замер 09.09: `agent-pr` стал звать механизм, читающий состав меток, а
+    установку разбора YAML в прогон не добавили. Шаг упал на импорте — ДО входа
+    в скрипт, поэтому свой третий исход выдать не мог, — и прогон прочитал сбой
+    как объявленное «секрет не задан», оставшись зелёным.
+
+    Замер 10.09, ровно тот же класс и уже при живом гейте: шаг `debt` стал
+    звать `main_red`, тот тянет разбор состава проверок. Гейт смотрел ФАЙЛ
+    прогона, а `pyyaml` в `ci.yml` ставился соседним джобом — и проверка была
+    зелёной на сломанном. Джобы окружений не делят
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
+    for name, text in jobs_of(path):
+        hungry = sorted(
+            item for item in re.findall(r"python scripts/(\w+\.py)", text) if reads_yaml(item)
         )
+        if hungry:
+            assert "pyyaml" in text.lower(), (
+                f"{path.name}, джоб «{name}» зовёт скрипт с разбором YAML, "
+                f"но не ставит его: {sorted(set(hungry))}"
+            )
 
 
 @pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
