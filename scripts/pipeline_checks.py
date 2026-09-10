@@ -162,14 +162,21 @@ def _text_of(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
-def _triggers_of(document: dict[Any, Any]) -> list[str]:
-    """Отдаёт имена событий прогона.
+def events_raw(document: dict[Any, Any]) -> Any:
+    """Раздел событий прогона, как он лежит в разобранном YAML.
 
-    Раздел событий лежит под ключом `True`, а не под строкой «on»: YAML 1.1
-    читает `on:` булевым. Оба ключа разбираются, иначе механизм молча решил бы,
-    что событий у прогона нет вовсе.
+    ЛОВУШКА ОДНА НА ВСЕХ ЧИТАТЕЛЕЙ. Раздел лежит под ключом `True`, а не под
+    строкой «on»: YAML 1.1 читает `on:` булевым. Разбирать это в каждом
+    читателе значит держать два понимания одной формы — и разойдутся они молча
+    (090). Нашёл внешний взгляд на #108: то же место было переписано в
+    `contract.py`.
     """
-    raw = document.get("on", document.get(True))
+    return document.get("on", document.get(True))
+
+
+def _triggers_of(document: dict[Any, Any]) -> list[str]:
+    """Отдаёт имена событий прогона."""
+    raw = events_raw(document)
     if isinstance(raw, dict):
         return [str(key) for key in raw]
     if isinstance(raw, list):
@@ -339,8 +346,9 @@ def names_of(checks: dict[str, Check], klass: str, *, beyond: bool | None = Fals
     ветки, — и его красное приезжало в вердикт по изменению как совещательная
     проверка. Нашёл внешний взгляд на #150.
 
-    ``beyond=None`` значит «из любого раздела»: печать состава спрашивает
-    именно так, потому что показывает оба.
+    ``beyond=None`` значит «из любого раздела». Так спрашивают публикуемые
+    факты (`build_facts.checks_facts`): они говорят о конвейере целиком, а не о
+    его половине на изменении.
     """
     if klass not in CLASSES:
         raise BadPolicy(f"класс «{klass}» неизвестен, из {', '.join(CLASSES)}")
@@ -386,8 +394,21 @@ def feeds(directory: Path = WORKFLOWS) -> dict[str, set[str]]:
         for job_id, body in jobs.items():
             raw = (body or {}).get("needs") or []
             wanted = [raw] if isinstance(raw, str) else list(raw)
-            if wanted:
-                fed[names[job_id]] = {names.get(one, str(one)) for one in wanted}
+            if not wanted:
+                continue
+            # ССЫЛКА НА ЧУЖОЙ ДЖОБ — ОТКАЗ, А НЕ ТИХАЯ ПОТЕРЯ СВЯЗИ. `needs`
+            # называет идентификатор джоба ТОГО ЖЕ прогона; имя, которого в
+            # прогоне нет, означает опечатку или переименование, и подстановка
+            # строки вместо связи оставила бы дежурного без предмета —
+            # молча. Соседние функции этого файла отвергают такое, а здесь
+            # стояла тихая подстановка. Нашёл внешний взгляд на #160.
+            missing = sorted(str(one) for one in wanted if str(one) not in names)
+            if missing:
+                raise BadPolicy(
+                    f"{path.name}, джоб «{names[job_id]}» ждёт {', '.join(missing)} — "
+                    "таких джобов в прогоне нет: связь `needs` названа мимо"
+                )
+            fed[names[job_id]] = {names[str(one)] for one in wanted}
     return fed
 
 
