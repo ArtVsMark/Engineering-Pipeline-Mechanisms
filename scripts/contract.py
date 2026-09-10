@@ -41,8 +41,6 @@ import paths
 import pipeline_checks as policy
 import yaml
 
-#: Ключ, под которым YAML 1.1 кладёт раздел событий: `on:` читается булевым.
-
 
 def _events_of(document: dict[Any, Any]) -> dict[str, Any]:
     """События прогона и входы ручного запуска — как их видит потребитель."""
