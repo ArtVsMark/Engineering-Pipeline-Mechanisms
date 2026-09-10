@@ -87,6 +87,49 @@ def test_all_cancelled_is_rejected() -> None:
     assert any("все записи отменены" in problem for problem in problems)
 
 
+def test_a_cancelled_record_does_not_hide_a_queued_job() -> None:
+    """Отменённая запись прежнего захода не прячет свой же джоб в очереди.
+
+    Замер 10.09.2026, изменение #145: сводный опросил голову в 16:33:40, у
+    `test` на ней лежала одна запись — отменённая в 16:33:02 вытесненным
+    заходом. Свой `test` ждал матрицу через `needs` и завершился зелёным в
+    16:33:57, на семнадцать секунд позже вердикта. Гейт объявил «все записи
+    отменены», хотя ждать оставалось семнадцать секунд.
+
+    Красное было о гонке, а не о работе: следующий заход дал зелёное на том же
+    коммите — то есть мигание (124), которое чинят, а не перезапускают.
+    """
+    runs = [run("lint"), run("test", conclusion="cancelled")]
+    mine = {"lint": "completed", "test": "queued"}
+    problems, waiting = module.verdict(runs, REQUIRED, "ci-complete", mine=mine)
+    assert problems == []
+    assert waiting is True
+
+
+def test_a_cancelled_record_of_a_foreign_name_is_still_a_refusal() -> None:
+    """Дыры это не открывает: ждём только объявленный СВОИМ прогоном джоб.
+
+    Имя, которого в своём прогоне нет вовсе, с одной отменённой записью
+    остаётся отказом. Иначе достаточно было бы отменить прогон, чтобы
+    обязательная проверка перестала держать слияние (075).
+    """
+    runs = [run("lint"), run("test", conclusion="cancelled")]
+    problems, _ = module.verdict(runs, REQUIRED, "ci-complete", mine={"lint": "completed"})
+    assert any("все записи отменены" in problem for problem in problems)
+
+
+def test_a_finished_job_of_ours_does_not_excuse_a_cancelled_record() -> None:
+    """Свой джоб завершён, а живой записи нет — ждать больше нечего.
+
+    Это то же различие, что у имени без записей: `completed` в своём прогоне
+    означает, что запись уже не появится, и отказ остаётся отказом.
+    """
+    runs = [run("lint"), run("test", conclusion="cancelled")]
+    mine = {"lint": "completed", "test": "completed"}
+    problems, _ = module.verdict(runs, REQUIRED, "ci-complete", mine=mine)
+    assert any("все записи отменены" in problem for problem in problems)
+
+
 def test_cancelled_beside_a_live_record_is_ignored() -> None:
     """Отмена от группы отмены не делает здоровую голову красной.
 
