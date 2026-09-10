@@ -643,6 +643,52 @@ def report_held(changes: list[Change]) -> None:
         print(f"  #{change.number} — {change.title}")
 
 
+def source_of(change: Change, red: bool) -> int:
+    """Источник работы одного изменения: выводимый признак плюс своя краснота.
+
+    Источник 0 не перебивается ничем: изменение, чинящее общую ветку, стоит
+    работы всей семьи, и своя краснота его с головы очереди не снимает —
+    напротив, чинить его надо тем более. Всё прочее краснота перебивает: по
+    контуру 1 своё красное — источник 2, а находки, слово владельца, правила и
+    план идут ниже.
+    """
+    place = rank(change)
+    if place == RANK_MAIN_RED:
+        return place
+    return RANK_OWN_RED if red else place
+
+
+def classify(
+    repo: str, queue: list[Change], owner_token: str, *, dry_run: bool
+) -> dict[int, tuple[list[str], bool]]:
+    """Присваивает источник КАЖДОМУ кандидату и отдаёт прочитанные вердикты.
+
+    ЗАЧЕМ ВСЕМ, А НЕ ГОЛОВЕ. Метка источника — не украшение головы очереди, а
+    способ увидеть, чем занят каждый открытый кандидат: кто чинит общую ветку,
+    у кого своё красное, кто ждёт плана. Прежний заход спрашивал вердикт до
+    первой готовой головы и на ней останавливался, поэтому у хвоста очереди
+    метка отставала на неопределённый срок.
+
+    Опрос записей проверок здесь ОДИН на кандидата за заход, и его же читает
+    движение головы ниже: второй опрос того же дал бы второе состояние того же
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+    ЧЕГО ЗДЕСЬ НЕТ: конфликта. Состояние слияния площадка считает ЛЕНИВО, и
+    запрос его заказывает вычисление; спрашивать у всех значит заказывать
+    работу, которая понадобится одному. Источник 1 остаётся тем, что заход
+    обнаруживает на голове, и это названо, а не сглажено (046).
+    """
+    verdicts: dict[int, tuple[list[str], bool]] = {}
+    print(f"кандидатов: {len(queue)}")
+    for place, change in enumerate(queue, start=1):
+        problems, waiting = head_verdict(repo, change, owner_token)
+        verdicts[change.number] = (problems, waiting)
+        source = source_of(change, bool(problems))
+        print(f"  {place}. #{change.number} [{RANK_NAMES[source]}] — {change.title}")
+        publish_source(repo, change, source, owner_token, dry_run=dry_run)
+    return verdicts
+
+
 def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     """Один заход очереди: читает, упорядочивает и двигает ГОЛОВУ."""
     check_labels_declared()
@@ -659,17 +705,6 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     )
     if not base_sha:
         raise NotRun(f"голова общей ветки «{base}» не прочитана — двигать очередь не на что")
-
-    troubles = branch_health(repo, base_sha, owner_token)
-    base_red = bool(troubles)
-    if base_red:
-        print("общая ветка красна — очередь заморожена, кроме починки:")
-        for trouble in troubles:
-            print(f"  {trouble}")
-        queue = [change for change in queue if change.fixes_main]
-        if not queue:
-            print(f"изменения с меткой «{LABEL_FIX_MAIN}» нет — не двигается ничего")
-            return EXIT_OK
 
     queue = [
         Change(
@@ -688,24 +723,36 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     shared = shared_paths(queue)
     queue = order(queue, shared)
 
-    print(f"кандидатов: {len(queue)}")
-    for place, change in enumerate(queue, start=1):
-        source = rank(change)
-        print(f"  {place}. #{change.number} [{RANK_NAMES[source]}] — {change.title}")
-        publish_source(repo, change, source, owner_token, dry_run=dry_run)
+    # РАЗМЕТКА ИДЁТ ДО РЕШЕНИЯ О ЗАМОРОЗКЕ И НЕ ЗАВИСИТ ОТ НЕГО. Источник
+    # работы — свойство самого изменения, а не общей ветки, и вычислять его
+    # нечем, кроме самого изменения. Прежний порядок замораживал очередь
+    # раньше разметки, и метки застывали ровно тогда, когда нужнее всего:
+    # красная общая ветка — момент, когда надо видеть, кто её чинит (0), а кто
+    # просто ждёт.
+    verdicts = classify(repo, queue, owner_token, dry_run=dry_run)
+
+    troubles = branch_health(repo, base_sha, owner_token)
+    if troubles:
+        print("общая ветка красна — очередь заморожена, кроме починки:")
+        for trouble in troubles:
+            print(f"  {trouble}")
+        queue = [change for change in queue if change.fixes_main]
+        if not queue:
+            print(f"изменения с меткой «{LABEL_FIX_MAIN}» нет — не двигается ничего")
+            return EXIT_OK
 
     for change in queue:
-        problems, waiting = head_verdict(repo, change, owner_token)
+        problems, waiting = verdicts[change.number]
         if waiting:
             print(f"#{change.number}: проверки ещё идут — очередь ждёт голову, а не обходит её")
             return EXIT_OK
         if problems:
-            # Красное возвращает изменение в контур 1 источником 2, а очередь
-            # идёт дальше: одна красная голова не обязана держать остальных.
+            # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
+            # а очередь идёт дальше: одна красная голова не обязана держать
+            # остальных.
             print(
                 f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — {'; '.join(problems)}"
             )
-            publish_source(repo, change, RANK_OWN_RED, owner_token, dry_run=dry_run)
             continue
 
         state = merge_state(repo, change.number, owner_token)
