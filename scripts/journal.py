@@ -83,7 +83,7 @@ def changed_files(base: str, *, alive_only: bool = False) -> list[str]:
 
     `-z` обязателен: без него git экранирует имена с пробелами и не-ASCII, и
     такой путь молча выпадает из отбора
-    ([165](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/165-git-path-lists-are-read-by-nul.md)).
+    ([165](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/165-git-file-list-needs-nul.md)).
 
     ``alive_only`` отбрасывает удалённые пути. Разница нужна тем, кто судит о
     СОДЕРЖИМОМ файла: удалённого файла в голове нет, и требовать от него

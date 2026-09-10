@@ -14,7 +14,7 @@
 По документации площадки ключевое слово действует на **каждый** номер
 отдельно: `Closes #12, #13` закрывает только первую задачу. Замером это здесь
 не проверялось и помечено гипотезой
-([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-by-measuring.md)),
+([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)),
 но собирать тело по строке на задачу дешевле, чем выяснять это отказом при
 слиянии.
 

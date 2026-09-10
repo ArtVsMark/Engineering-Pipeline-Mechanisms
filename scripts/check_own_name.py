@@ -9,7 +9,7 @@
 гейтов прошли.
 
 КАНОН — У ПЛОЩАДКИ, И ТОЛЬКО У НЕЁ
-([172](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/172-own-name-comes-from-origin.md)).
+([172](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/172-a-shim-you-cannot-decline-needs-an-inventory.md)).
 В прогоне это `GITHUB_REPOSITORY`, локально — адрес `origin`. Реестр имён,
 ведомый руками, разошёлся бы с площадкой на первом же переименовании — то есть
 ровно тогда, когда он нужен.

@@ -42,6 +42,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
+import ci_complete
 import findings
 import ghrest
 import items
@@ -201,6 +202,51 @@ def inbox_body(repo: str, token: str) -> tuple[str, str, str]:
     return newest[1], CLOSED_INBOX, newest[2]
 
 
+def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str]]:
+    """Свои открытые изменения, застрявшие: конфликтом и красным.
+
+    ПОЧЕМУ ЭТО ДОЛГ, И ПРИТОМ ПЕРВЫЙ. Источники 1 и 2 контура 1 — конфликт на
+    своём изменении и красная проверка на нём — стоят выше находок, правил и
+    плана. Механизма у них до сих пор не было: их видел только тот, кто откроет
+    список изменений глазами, и открытое красное висело, пока о нём не спросят.
+    Живой случай 10.09.2026: изменение с починкой ревью простояло красным час,
+    и заметил это владелец, а не конвейер.
+
+    ПОЧЕМУ ЗДЕСЬ, А НЕ ТРЕВОГОЙ. Тревога о застрявшем — предмет службы
+    наблюдения (`docs/decisions/004-schedules-stay-service-observes.md`), и
+    строить её здесь значило бы делать работу дважды. Но ЧИТАТЬ своё состояние
+    окно обязано само: долг перед планом — это не тревога, а порядок работ
+    ([091](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/091-work-sources-are-ordered-first-non-empty-wins.md)).
+
+    Возвращает раздельно: конфликтующие (источник 1) и красные (источник 2).
+    Свалить их в одно число значило бы стереть разницу между «база устарела» и
+    «работа не работает» (154).
+    """
+    conflicting: list[str] = []
+    red: list[str] = []
+    for change in ghrest.request("GET", f"repos/{repo}/pulls?state=open&per_page=50", token) or []:
+        number = int(change.get("number") or 0)
+        title = str(change.get("title") or "")[:60]
+        said = f"#{number} — {title}"
+        if change.get("draft"):
+            # Черновик застрять не может: он и не подан.
+            continue
+        if str(change.get("mergeable_state") or "") == "dirty":
+            conflicting.append(said)
+            continue
+        runs = list(
+            ghrest.paginate(
+                f"repos/{repo}/commits/{change['head']['sha']}/check-runs", token, key="check_runs"
+            )
+        )
+        if not runs:
+            continue
+        worst = ci_complete.worst_per_name(runs)
+        if any(str(one.get("conclusion") or "") == "failure" for one in worst):
+            red.append(said)
+    return conflicting, red
+
+
 def looks_done(repo: str, token: str) -> list[tuple[int, str]]:
     """Задачи, у которых пункты есть и все закрыты, а сама задача открыта.
 
@@ -288,10 +334,23 @@ def main(argv: list[str] | None = None) -> int:
         unlooked_left = unlooked_debt(args.repo, token)
         holding, lagging = branch_debt(args.repo, token)
         inbox, inbox_note, inbox_seen = inbox_body(args.repo, token)
+        conflicting, red = stuck_changes(args.repo, token)
         ready = looks_done(args.repo, token)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+
+    # СВОИ ЗАСТРЯВШИЕ ИЗМЕНЕНИЯ ПЕЧАТАЮТСЯ ПЕРВЫМИ, потому что они и есть
+    # первые источники: 1 — конфликт, 2 — красное на своём. Всё остальное ниже
+    # по порядку контура 1, и порядок вывода повторяет его намеренно (091).
+    if conflicting:
+        print(f"конфликт на своих изменениях: {len(conflicting)} — это источник 1")
+        for said in conflicting:
+            print(f"  {said}")
+    if red:
+        print(f"красное на своих изменениях: {len(red)} — это источник 2")
+        for said in red:
+            print(f"  {said}")
 
     print(f"находки, пережившие слияние: {len(left)}")
     for mark, pr, title in left:

@@ -122,7 +122,7 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 `scripts/agent_pr.py` отвергает ветку без неё. Переключатель работает — это
 видно на изменении [#35](../../pull/35), открытом конвейером с ветки
 `agent/branch-named-by-task`, а не объявлено с чужих слов
-([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-claim-about-the-platform-needs-a-run-or-a-citation.md)).
+([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
 
 **Ветку, выданную средой, работой не считают.** Облачное окно получает при
 старте ветку вида `claude/<имя-окна>`: это след запуска, а не задача. Работа

@@ -76,7 +76,7 @@
 **Тесты — три шага, и обязательный из них один.** `requires-python` объявляет
 `>=3.12`, то есть проект утверждает, что работает и на следующих версиях. Пока
 проверялась одна, это утверждение держалось ничем
-([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-a-rule-without-a-mechanism-is-a-wish.md)).
+([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 Матрица проверяет обязательные версии, но обязательным именем быть не может:
 имя контекста у неё несёт версию, и добавление версии меняло бы договор молча,
 а удаление оставляло бы защиту ветки требовать несуществующий контекст.
@@ -114,7 +114,7 @@
 ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 Ответ ревьюера переносит в изменение механизм (`late_look`), а не сам агент:
 права записи у канала, чей вход собран из проверяемого текста, быть не должно
-([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-prompt-injection-is-a-design-constraint.md)).
+([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
 
 ## Четыре правила формы
 
