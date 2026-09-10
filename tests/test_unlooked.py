@@ -278,3 +278,46 @@ def test_a_cut_answer_needs_no_check_runs() -> None:
     """
     comments = [{"body": "НАХОДКА[дефект]: что-то не так"}]
     assert module.look_of(comments) == module.STATE_CUT
+
+
+# --- очередь позднего взгляда ------------------------------------------------
+
+
+def test_the_queue_takes_the_oldest_first() -> None:
+    """Очередь берёт самые СТАРЫЕ непросмотренные.
+
+    Свежее слитое ещё может получить вердикт само — ревьюер бывает медленнее
+    очереди, и запись снимется на следующем заходе. Старое такой надежды не
+    имеет: чем дольше изменение лежит без взгляда, тем вернее, что его не
+    посмотрит никто.
+    """
+    entries = {
+        120: module.Entry(120, module.STATE_NONE, "2026-09-10"),
+        73: module.Entry(73, module.STATE_SILENT, "2026-09-09"),
+        95: module.Entry(95, module.STATE_CUT, "2026-09-10"),
+    }
+    assert module.queue_of(entries) == [73, 95, 120]
+
+
+def test_the_queue_skips_what_was_already_looked_at() -> None:
+    """Уже просмотренное в очередь не попадает: у него состояние не открытое."""
+    entries = {
+        73: module.Entry(73, module.STATE_LATE, "2026-09-09"),
+        95: module.Entry(95, module.STATE_NONE, "2026-09-10"),
+    }
+    assert module.queue_of(entries) == [95]
+
+
+def test_the_queue_is_bounded() -> None:
+    """Очередь ограничена: каждый поздний взгляд — прогон агента.
+
+    Ограничение не про нагрузку площадки, а про цену: заход, берущий всё
+    накопленное разом, съел бы смену целиком (051).
+    """
+    entries = {n: module.Entry(n, module.STATE_NONE, "2026-09-10") for n in range(1, 20)}
+    assert len(module.queue_of(entries)) == module.LOOK_AT_ONCE
+
+
+def test_an_empty_queue_is_a_state_not_a_failure() -> None:
+    """Смотреть нечего — это пустой список, а не отказ."""
+    assert module.queue_of({}) == []
