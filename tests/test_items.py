@@ -377,3 +377,35 @@ def test_a_dry_follow_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(items.ghrest, "request", spy)
     assert items.follow("o/r", "token", dry_run=True) == 0
     assert written == [], written
+
+
+def test_one_unread_task_does_not_lose_the_others(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ по одной задаче не уносит отметки остальных пунктов эпика.
+
+    Площадка спрашивается по разу на каждую названную задачу, и один отказ
+    транспорта ронял бы заход целиком — вместе с уже сосчитанными пунктами.
+    Незнание трактуется как «не закрыта»: неотмеченный пункт отметится
+    следующим заходом, а отмеченный по ошибке снимет только человек. Нашёл
+    внешний взгляд на #118.
+    """
+    epic = {"number": 2, "body": "- [ ] #7 первая\n- [ ] #8 вторая\n"}
+    written: dict[str, object] = {}
+
+    def request(method: str, path: str, *rest: object, **__: object) -> object:
+        if "labels=" in path:
+            return [epic]
+        if "/issues/7" in path:
+            raise items.ghrest.TransportError("площадка молчит")
+        if "/issues/8" in path:
+            return {"state": "closed"}
+        if method == "PATCH":
+            written["body"] = rest[1] if len(rest) > 1 else None
+        return {}
+
+    monkeypatch.setattr(items.ghrest, "request", request)
+    items.follow("o/r", "token", dry_run=True)
+    said = capsys.readouterr().out
+    assert "#8" in said, said
+    assert "не выведено" not in said, "отказ по одной задаче унёс весь эпик"

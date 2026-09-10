@@ -101,8 +101,20 @@ def untracked() -> list[str]:
 
 
 def declared(base: str) -> list[Path]:
-    """Фрагменты рода `contract`, принесённые изменением."""
-    names = [*journal.changed_files(base, alive_only=True), *untracked()]
+    """Фрагменты рода `contract`, принесённые изменением.
+
+    ОТКАЗ ЧТЕНИЯ ЗДЕСЬ — ТРЕТИЙ ИСХОД, А НЕ ТРАССИРОВКА. `changed_files` кидает
+    `journal.NotRun`, а зовут эту функцию уже ПОСЛЕ разбора поверхности, где
+    перехват давно позади: необработанное исключение вышло бы кодом 1 — «гейт
+    нашёл находки», — хотя гейт не отработал вовсе. Разница между «поверхность
+    тронута молча» и «посмотреть не удалось» стоит ровно того, ради чего
+    объявлены три исхода (039). Нашёл внешний взгляд на #108.
+    """
+    try:
+        alive = journal.changed_files(base, alive_only=True)
+    except journal.NotRun as exc:
+        raise NotRun(f"тронутые файлы не прочитаны: {exc}") from exc
+    names = [*alive, *untracked()]
     return [
         Path(name)
         for name in names
@@ -168,7 +180,11 @@ def main(argv: list[str] | None = None) -> int:
     for line in changes:
         print(f"  {line}")
 
-    fragments = declared(base)
+    try:
+        fragments = declared(base)
+    except NotRun as exc:
+        print(f"гейт не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
     breaks = contract.breaking(changes)
     if fragments and not breaks:
         print("\nизменение объявило это фрагментом рода `contract` — так и надо")
