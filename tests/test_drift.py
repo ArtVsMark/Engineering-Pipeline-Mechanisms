@@ -129,3 +129,82 @@ def test_every_record_carries_its_next_step() -> None:
 def test_an_empty_body_is_not_a_lie() -> None:
     """Пустое тело говорит «сошлись», а не молчит."""
     assert "сошлись" in module.render_body([])
+
+
+# --- версии языка ------------------------------------------------------------
+
+#: Мир на 10.09.2026: 3.14 вышла, 3.15 только пробная. Подделка держит ровно ту
+#: форму, что у настоящего манифеста: версия и признак стабильности.
+TODAY = [
+    {"version": "3.13.15", "stable": True},
+    {"version": "3.14.7", "stable": True},
+    {"version": "3.15.0-rc.2", "stable": False},
+]
+
+
+def test_todays_matrix_is_not_a_drift() -> None:
+    """Матрица гоняет стабильные, `test-next` — пробную: расхождения нет."""
+    assert module.language_moved(TODAY, ["3.13", "3.14"], "3.15") == []
+
+
+def test_a_released_branch_missing_from_the_matrix_is_named() -> None:
+    """Ветка стала стабильной, а матрица её не гоняет — это дрейф.
+
+    Ни одна наша правка не делает ветку стабильной: это расписание CPython, и
+    приходит оно между нашими изменениями. Замер 10.09.2026: о выходе 3.14
+    механизм не узнал — это сказал владелец.
+    """
+    found = module.language_moved(TODAY, ["3.13"], "3.15")
+    assert [one.source for one in found] == ["python-stable"]
+    assert "3.14" in found[0].said
+
+
+def test_a_prerelease_that_grew_up_is_moved_not_kept() -> None:
+    """Пробная ветка стала стабильной — `test-next` держит её зря."""
+    grown = [{"version": "3.15.0", "stable": True}, {"version": "3.16.0-alpha.1", "stable": False}]
+    found = module.language_moved(grown, ["3.15"], "3.15")
+    assert [one.source for one in found] == ["python-next"]
+    assert "уже стабильна" in found[0].said
+
+
+def test_a_newer_prerelease_moves_the_next_job() -> None:
+    """Появилась следующая пробная ветка — `test-next` отстал."""
+    ahead = [
+        {"version": "3.14.7", "stable": True},
+        {"version": "3.15.0-rc.1", "stable": False},
+        {"version": "3.16.0-alpha.1", "stable": False},
+    ]
+    found = module.language_moved(ahead, ["3.14"], "3.15")
+    assert [one.source for one in found] == ["python-next"]
+    assert "3.16" in found[0].said
+
+
+def test_a_branch_the_platform_never_heard_of_is_a_drift() -> None:
+    """Матрица называет ветку, которой площадка не знает — прогон её не поставит."""
+    found = module.language_moved(TODAY, ["3.14", "3.99"], "3.15")
+    assert "python-matrix" in [one.source for one in found]
+
+
+def test_versions_are_ordered_by_number_not_by_string() -> None:
+    """`3.9` младше `3.10`: по строке вышло бы наоборот, и «новейшая» соврала бы."""
+    older = [{"version": "3.9.1", "stable": True}, {"version": "3.10.1", "stable": True}]
+    stable, _ = module.minors(older)
+    assert stable == ["3.9", "3.10"]
+
+
+def test_an_empty_manifest_is_the_third_outcome() -> None:
+    """Ни одной стабильной ветки — это поломка входа, а не «всё сошлось» (075)."""
+    with pytest.raises(module.NotRun):
+        module.language_moved([{"version": "3.15.0-rc.1", "stable": False}], ["3.14"], "")
+
+
+def test_the_matrix_is_read_from_the_run_itself() -> None:
+    """Версии берутся из `ci.yml`, а не из второго списка рядом.
+
+    Второе место, где то же знание ведётся отдельно, разошлось бы с первым
+    молча — и дрейф сравнивал бы мир со своей копией вчерашней матрицы (090).
+    """
+    matrix, ahead = module.declared_versions()
+    assert matrix, "матрица не разобралась"
+    assert all(part.count(".") == 1 for part in matrix), matrix
+    assert ahead, "предрелизная ветка не разобралась"

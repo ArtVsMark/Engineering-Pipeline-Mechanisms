@@ -245,15 +245,28 @@ def raw_json(url: str, timeout: int = 30) -> dict[str, Any]:
     Отказ — исключение, а не пустой словарь: пустой снимок читался бы как
     «ничего не изменилось», то есть тихий запасной ответ на месте поломки (045).
     """
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as answer:
-            snapshot = json.loads(answer.read())
-    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-        raise TransportError(f"снимок не прочитан ({url}): {exc}") from exc
+        snapshot = json.loads(raw_text(url, timeout))
+    except json.JSONDecodeError as exc:
+        raise TransportError(f"снимок не разбирается ({url}): {exc}") from exc
     if not isinstance(snapshot, dict):
         raise TransportError(f"снимок не словарь ({url}): читать нечего")
     return snapshot
+
+
+def raw_text(url: str, timeout: int = 30) -> str:
+    """Тот же чужой снимок, но БЕЗ разбора: форма у чужих файлов разная.
+
+    Манифест версий приходит списком, сводка семьи — словарём, и разбор здесь
+    один на всех означал бы, что транспорт знает форму чужих данных. Транспорт
+    её знать не должен: он про доставку (090).
+    """
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as answer:
+            return str(answer.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, UnicodeDecodeError) as exc:
+        raise TransportError(f"снимок не прочитан ({url}): {exc}") from exc
 
 
 #: Сколько последних закрытых изменений спрашивается за раз. Окно — не история:

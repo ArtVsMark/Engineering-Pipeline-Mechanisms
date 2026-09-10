@@ -280,6 +280,25 @@ def names_of(checks: dict[str, Check], klass: str) -> list[str]:
     return [check.name for check in checks.values() if check.klass == klass]
 
 
+def run_of(path: Path) -> dict[Any, Any]:
+    """Прогон, прочитанный целиком: один разбор YAML на всех, кто их читает.
+
+    Читателей у прогонов уже несколько, и каждый второй разбор — это второе
+    понимание одной формы, расходящееся с первым молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    Отказ разбора — ошибка входа, а не пустой прогон (075).
+    """
+    if not path.is_file():
+        raise BadPolicy(f"нет прогона {path}: предмет чтения не найден (075)")
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise BadPolicy(f"{path} не разбирается: {exc}") from exc
+    if not isinstance(document, dict):
+        raise BadPolicy(f"{path}: прогон не словарь — читать нечего")
+    return document
+
+
 def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, Job]:
     """Собирает проверки, выдающие запись на голове изменения.
 
