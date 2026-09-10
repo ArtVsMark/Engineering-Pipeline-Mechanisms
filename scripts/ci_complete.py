@@ -132,6 +132,11 @@ def severity(run: dict[str, Any]) -> int:
     return 3
 
 
+def started(run: dict[str, Any]) -> str:
+    """Когда запись началась. Пустое значение — самое старое из возможных."""
+    return str(run.get("started_at") or "")
+
+
 def worst_per_name(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Оставляет по одной, САМОЙ ПЛОХОЙ записи на имя.
 
@@ -157,7 +162,24 @@ def worst_per_name(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for run in runs:
         name = str(run.get("name", ""))
         current = best.get(name)
-        if current is None or severity(run) > severity(current):
+        if current is None:
+            best[name] = run
+            continue
+        # СВЕЖЕСТЬ РЕШАЕТ ПЕРВОЙ, ТЯЖЕСТЬ — ВТОРОЙ. Записи одного имени бывают
+        # не только от одновременных прогонов, но и от ПОСЛЕДОВАТЕЛЬНЫХ: новый
+        # толчок гасит прежний прогон, и его записи остаются лежать на голове
+        # рядом с живыми. Прежняя редакция брала худшую из всех — и красная
+        # запись вытесненного прогона делала голову красной НАВСЕГДА: новых
+        # событий у изменения больше нет, а зелёное живого прогона проигрывало
+        # мёртвому. Замер 10.09.2026: #102, агрегат `test` — `failure` в 06:27:23
+        # у погашенного прогона и `success` в 06:27:57 у живого.
+        #
+        # Тяжесть остаётся вторым ключом, и это по-прежнему нужно: у записей,
+        # начатых В ОДНУ секунду (два прогона одного файла от двух событий),
+        # ошибаться можно только в сторону строгости (051).
+        newer = started(run) > started(current)
+        same_moment = started(run) == started(current)
+        if newer or (same_moment and severity(run) > severity(current)):
             best[name] = run
     return list(best.values())
 
