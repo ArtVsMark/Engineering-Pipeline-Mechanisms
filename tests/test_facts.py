@@ -80,10 +80,17 @@ def test_empty_answer_is_an_input_error(tmp_path: Path) -> None:
 
 
 def test_missing_version_is_an_input_error(tmp_path: Path) -> None:
-    """Без версии контракта факты не собираются: публиковать нечего."""
+    """Без версии контракта факты не собираются: публиковать нечего.
+
+    Отказ приходит из счёта версии, а не из сборки: та спрашивает версию у
+    НАЗВАННОГО дерева. Пока корень не передавался, версия читалась из текущего
+    рабочего каталога — то есть из настоящего дерева проекта, — и подделанное
+    дерево без файла версии всё равно получало число. Нашёл внешний взгляд
+    на #106.
+    """
     tree(tmp_path, bindings(**{"001": {"status": "unreviewed"}}))
     (tmp_path / "CONTRACT_VERSION").unlink()
-    with pytest.raises(facts.NotRun):
+    with pytest.raises((facts.NotRun, facts.version.NotRun)):
         facts.collect(tmp_path, "")
 
 
