@@ -50,6 +50,7 @@ FACTS: Final = "facts.json"
 BADGE: Final = "rules.svg"
 FAMILY_BADGE: Final = "family.svg"
 VERSION_BADGE: Final = "version.svg"
+RELEASE_BADGE: Final = "release.svg"
 
 #: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
 #: а не новая тонкость, о которой механизм обязан догадаться.
@@ -150,6 +151,21 @@ def family_facts(path: Path | None) -> dict[str, Any]:
     return picture
 
 
+def test_counts(root: Path) -> dict[str, int]:
+    """Сколько тестов и тестовых модулей в наборе.
+
+    Считается ПО ДЕРЕВУ, а не прогоном: прогон даёт то же число дороже и не в
+    том месте. Тест узнаётся по объявлению `def test_`; второго счётчика той же
+    территории не заводится (022).
+    """
+    modules = sorted((root / "tests").glob("test_*.py"))
+    total = 0
+    for path in modules:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        total += sum(1 for line in lines if line.startswith("def test_"))
+    return {"total": total, "modules": len(modules)}
+
+
 def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]:
     """Собирает все факты о проекте в одно отображение."""
     # ВЕРСИЯ ПРОЕКТА И ВЕРСИЯ КОНТРАКТА — РАЗНЫЕ ЧИСЛА, И ОБА НУЖНЫ. Контракт
@@ -165,6 +181,14 @@ def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]
         # Неполнота названа рядом с числом, а не выброшена: клон без тегов даёт
         # правдоподобное число, которое ложь (045).
         "version_whole": whole,
+        # ВЫПУСК И ВЕРСИЯ ГОЛОВЫ — РАЗНЫЕ ЧИСЛА. Голова уходит вперёд каждым
+        # изменением, потребитель живёт на выпущенном; одно вместо другого
+        # обещало бы ему то, чего он не получал.
+        "release": version.release_tag() or "",
+        # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им
+        # не нужен и вреден — они дёргаются от каждого изменения, — но живой
+        # адрес обязателен, и вот он (049).
+        "tests": test_counts(root),
         "rules": rules_facts(root / BINDINGS),
         "checks": checks_facts(root / policy.DEFAULT_PATH),
         "family": family_facts(summary),
@@ -244,6 +268,20 @@ def family_badge(facts: dict[str, Any]) -> str:
     return badge("общие механизмы", f"{percent}% семьи", color)
 
 
+def release_badge(facts: dict[str, Any]) -> str:
+    """Последний выпуск: то, к чему потребитель прибивается тегом.
+
+    Версия головы и выпуск — РАЗНЫЕ числа, и оба нужны: голова уходит вперёд
+    каждым изменением, а потребитель живёт на выпущенном. Показывать одно
+    вместо другого значило бы обещать ему то, чего он не получал.
+
+    Выпусков ещё не было — сказано словом: пустой значок и «не выпускался»
+    снаружи одинаковы (045).
+    """
+    said = str(facts.get("release") or "")
+    return badge("выпуск", said, "#4c1") if said else badge("выпуск", "не выпускался", "#9f9f9f")
+
+
 def version_badge(facts: dict[str, Any]) -> str:
     """Версия проекта: она СЧИТАЕТСЯ по истории, и значок показывает счёт.
 
@@ -278,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         (BADGE, rules_badge),
         (FAMILY_BADGE, family_badge),
         (VERSION_BADGE, version_badge),
+        (RELEASE_BADGE, release_badge),
     ):
         (out / name).write_text(draw(facts) + "\n", encoding="utf-8")
 
