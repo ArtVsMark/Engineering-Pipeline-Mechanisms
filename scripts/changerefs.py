@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import Final
 
@@ -53,7 +53,12 @@ INLINE_RE: Final = re.compile(r"`[^`\n]*`")
 #: Забор блока узнаётся по началу строки, как его понимает и разметка.
 FENCE_RE: Final = re.compile(r"^\s*```")
 #: Отпечаток находки — семь шестнадцатеричных знаков, как короткий хэш.
-RESOLVED_RE: Final = re.compile(r"^\s*Разобрано:\s*([0-9a-f]{7})\b", re.IGNORECASE | re.MULTILINE)
+#: Кавычки вокруг отпечатка допускаются: строку пишет человек, и оформить хэш
+#: как код — первое, что он делает. Без этого отпечаток в кавычках терялся
+#: молча: разбор вырезал кодовую вставку раньше, чем доходил до отпечатка.
+RESOLVED_RE: Final = re.compile(
+    r"^\s*(?P<mark>Разобрано:)\s*`?(?P<text>[0-9a-f]{7})`?\b", re.IGNORECASE | re.MULTILINE
+)
 #: ЗАКРЫТЫЙ ПУНКТ ЧЕК-ЛИСТА. Площадка умеет только полное закрытие: `Closes #N`
 #: закрывает задачу целиком, и задача из нескольких этапов закрывается
 #: преждевременно вместе с несделанными. `Refs #N` не отмечает ничего, и после
@@ -65,7 +70,7 @@ RESOLVED_RE: Final = re.compile(r"^\s*Разобрано:\s*([0-9a-f]{7})\b", re
 #: Пункт называется ТЕКСТОМ, а не номером строки: номер сдвигается от любой
 #: правки тела задачи, и отметка уехала бы на соседний пункт молча.
 CLOSED_ITEM_RE: Final = re.compile(
-    r"^\s*Закрывает пункт:\s*(\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
+    r"^\s*(?P<mark>Закрывает пункт:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
 )
 
 
@@ -84,6 +89,11 @@ class Link:
     def closes(self) -> bool:
         """Закроет ли эта связь задачу при слиянии."""
         return self.verb in CLOSING
+
+
+def blank(match: re.Match[str]) -> str:
+    """Пробелы вместо вырезанного — ровно столько же, сколько было знаков."""
+    return " " * len(match.group(0))
 
 
 def outside_code(text: str) -> str:
@@ -106,20 +116,64 @@ def outside_code(text: str) -> str:
     заборы тогда просто разметка, и вырезать по ним нечего. Опечатка не
     уносит данные с собой.
     """
+    return "\n".join(mask for mask, _ in masked_lines(text))
+
+
+def masked_lines(text: str) -> list[tuple[str, str]]:
+    """Строки текста парами «маска, как есть».
+
+    Маска — строка с вырезанным кодом: по ней РЕШАЮТ, настоящая это строка или
+    пример. Оригинал нужен тем, кто берёт из строки текст: инлайн-код внутри
+    пункта — часть пункта, а не пример.
+
+    ЗАМЕР 10.09.2026, на слиянии #88. Пункт «`debt` печатает это число рядом с
+    находками и правилами» приехал в тело изменения как «печатает это число
+    рядом с находками и правилами»: разбор вырезал `debt` вместе с кавычками
+    ДО того, как взял текст. В задаче пункт остался целым, совпадения не
+    вышло, и механизм честно сказал «пункт не найден» — то есть отметил не всё
+    и назвал это вслух, но пункт остался неотмеченным, а человек увидел в теле
+    изменения огрызок собственной строки
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
     lines = text.splitlines()
     fences = {index for index, line in enumerate(lines) if FENCE_RE.match(line)}
     # Незакрытый забор не открывает блок: половина пары — это не пара.
     paired = len(fences) % 2 == 0
 
-    kept: list[str] = []
+    pairs: list[tuple[str, str]] = []
     inside = False
     for index, line in enumerate(lines):
         if paired and index in fences:
             inside = not inside
-            kept.append(" ")
+            pairs.append((" " * len(line), line))
             continue
-        kept.append(" " if inside else INLINE_RE.sub(" ", line))
-    return "\n".join(kept)
+        # Длина сохраняется: по маске сверяют ПОЛОЖЕНИЕ маркера в оригинале, а
+        # сдвиг на длину вырезанного увёл бы сверку на соседние знаки.
+        masked = " " * len(line) if inside else INLINE_RE.sub(blank, line)
+        pairs.append((masked, line))
+    return pairs
+
+
+def marked_lines(text: str, pattern: re.Pattern[str]) -> Iterator[re.Match[str]]:
+    """Совпадения построчного маркера: решает маска, а текст даёт оригинал.
+
+    Один разбор на всех, кто читает строку-маркер: у `Разобрано:` и у
+    `Закрывает пункт:` предмет разный, а вопрос один — где кончается пример и
+    начинается настоящая строка
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    Образец обязан назвать две группы: ``mark`` — сам маркер, по нему решают,
+    настоящая строка или пример, и ``text`` — то, что из строки берут.
+    """
+    for mask, line in masked_lines(text):
+        for found in pattern.finditer(line):
+            # Настоящий маркер — тот, что в маске уцелел. Сверяется ровно он, а
+            # не вся строка: сам текст вырезанным быть вправе — инлайн-код
+            # внутри пункта это часть пункта, а не пример, и отпечаток человек
+            # оформляет кодом чаще, чем не оформляет.
+            head = slice(*found.span("mark"))
+            if mask[head] == line[head]:
+                yield found
 
 
 def links_in(text: str) -> list[Link]:
@@ -145,8 +199,8 @@ def has_link(text: str) -> bool:
 def resolved_in(text: str) -> list[str]:
     """Отпечатки находок, названных разобранными, в порядке появления."""
     found: list[str] = []
-    for mark in RESOLVED_RE.findall(outside_code(text)):
-        lowered = mark.lower()
+    for match in marked_lines(text, RESOLVED_RE):
+        lowered = match.group("text").lower()
         if lowered not in found:
             found.append(lowered)
     return found
@@ -165,7 +219,8 @@ def closed_items_in(text: str) -> list[str]:
     """
     found: list[str] = []
     seen: set[str] = set()
-    for item in CLOSED_ITEM_RE.findall(outside_code(text)):
+    for match in marked_lines(text, CLOSED_ITEM_RE):
+        item = match.group("text")
         cleaned = " ".join(item.split())
         key = normalise(item)
         if key and key not in seen:
