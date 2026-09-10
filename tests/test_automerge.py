@@ -777,3 +777,14 @@ def test_the_limit_fits_the_job_timeout() -> None:
     document = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))
     limit = document["jobs"]["automerge"]["timeout-minutes"] * 60
     assert limit > module.WAIT_TRIES * module.WAIT_STEP, "ожидание длиннее предела джоба"
+
+
+def test_the_limit_in_the_message_is_the_one_waited_by() -> None:
+    """Названный предел — тот, которым ждали, а не глобальная константа.
+
+    Сообщение считало предел по `WAIT_TRIES`, а ожидание шло по переданному
+    значению: разойтись они могли молча, и первым это заметил бы читатель лога,
+    гадающий, почему число не сходится. Нашёл внешний взгляд на #133.
+    """
+    assert "за 15 с" in module.said_waiting(7, 3, 5)
+    assert "за 120 с" in module.said_waiting(7, 3, 40)

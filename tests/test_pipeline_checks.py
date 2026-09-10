@@ -487,3 +487,63 @@ def test_one_name_on_both_sides_of_the_tree_is_refused(
     run = gate(run_script, tmp_path)
     assert run.code == 3, run.text
     assert "и прогон на изменении" in run.text
+
+
+# --- прочтение формы прогона: одно на всех ------------------------------------
+
+
+def test_run_of_refuses_a_missing_file(tmp_path: Path) -> None:
+    """Нет файла — ошибка входа, а не пустой прогон (075).
+
+    У соседней `load()` такие исходы проверены давно, а у этой не было ни
+    одного прямого теста. Нашёл внешний взгляд на #121.
+    """
+    with pytest.raises(policy.BadPolicy, match="нет прогона"):
+        policy.run_of(tmp_path / "нет-такого.yml")
+
+
+def test_run_of_refuses_broken_yaml(tmp_path: Path) -> None:
+    """Битый YAML называется битым, а не читается как пустота."""
+    path = tmp_path / "w.yml"
+    path.write_text("jobs:\n  x:\n   - [не закрыт\n", encoding="utf-8")
+    with pytest.raises(policy.BadPolicy, match="не разбирается"):
+        policy.run_of(path)
+
+
+def test_run_of_refuses_a_non_mapping(tmp_path: Path) -> None:
+    """Список вместо отображения — читать нечего, и это сказано."""
+    path = tmp_path / "w.yml"
+    path.write_text("- один\n- два\n", encoding="utf-8")
+    with pytest.raises(policy.BadPolicy, match="не словарь"):
+        policy.run_of(path)
+
+
+def test_the_events_key_is_read_in_one_place(tmp_path: Path) -> None:
+    """Ловушка `on:` → `True` разбирается одной функцией на всех читателей.
+
+    Второе понимание той же формы расходится с первым молча (090). Нашёл
+    внешний взгляд на #108: то же место было переписано в `contract.py`.
+    """
+    contract = load_script("contract.py")
+    assert contract.policy.events_raw is policy.events_raw
+    path = tmp_path / "w.yml"
+    path.write_text("on:\n  push:\n    branches: [main]\njobs:\n  x:\n    steps: []\n", "utf-8")
+    assert "push" in policy.events_raw(policy.run_of(path))
+
+
+def test_needs_naming_a_stranger_is_refused(tmp_path: Path) -> None:
+    """`needs` мимо джобов прогона — отказ, а не тихая потеря связи.
+
+    Подстановка строки вместо связи оставила бы дежурного по общей ветке без
+    предмета: он решает по ней, одно ли это падение. Нашёл внешний взгляд
+    на #160.
+    """
+    directory = tmp_path / "workflows"
+    directory.mkdir()
+    (directory / "w.yml").write_text(
+        "on: [pull_request]\njobs:\n  свой:\n    name: свой\n    steps: []\n"
+        "  агрегат:\n    name: агрегат\n    needs: чужой\n    steps: []\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(policy.BadPolicy, match="названа мимо"):
+        policy.feeds(directory)

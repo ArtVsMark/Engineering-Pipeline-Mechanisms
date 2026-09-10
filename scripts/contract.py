@@ -38,15 +38,15 @@ from pathlib import Path
 from typing import Any, Final
 
 import paths
+import pipeline_checks as policy
 import yaml
 
 #: Ключ, под которым YAML 1.1 кладёт раздел событий: `on:` читается булевым.
-ON_KEY: Final = True
 
 
 def _events_of(document: dict[Any, Any]) -> dict[str, Any]:
     """События прогона и входы ручного запуска — как их видит потребитель."""
-    raw = document.get("on", document.get(ON_KEY))
+    raw = policy.events_raw(document)
     if isinstance(raw, list):
         return {str(name): {} for name in raw}
     if not isinstance(raw, dict):

@@ -324,3 +324,34 @@ def test_the_link_is_read_from_the_tree() -> None:
     """
     fed = policy.feeds()
     assert fed.get("test") == {"test-matrix"}
+
+
+def test_the_target_of_the_rerun_matches_the_decision() -> None:
+    """Предмет перезапуска ищется по тому же условию, что и решение.
+
+    Пока выбор жил своим условием, сценарий «агрегат плюс его матрица» до
+    перезапуска не доходил: `one_fall` уже говорил «одно падение», а номер
+    прогона не вычислялся — и отказ приходил под другим именем, «адрес записи
+    не разобрался». Починка меняла причину отказа, а не исход. Нашёл внешний
+    взгляд на #160.
+    """
+    red = [
+        {"name": "test", "details_url": "https://x/actions/runs/777/job/1"},
+        {"name": "test-matrix (3.12)", "details_url": "https://x/actions/runs/777/job/2"},
+    ]
+    assert module.target_run(["test"], ["test-matrix (3.12)"], red, FEEDS) == 777
+
+
+def test_no_target_when_it_is_not_one_fall() -> None:
+    """Два падения — предмета нет, и перезапускать нечего."""
+    red = [
+        {"name": "test", "details_url": "https://x/actions/runs/777/job/1"},
+        {"name": "lint", "details_url": "https://x/actions/runs/777/job/3"},
+    ]
+    assert module.target_run(["test"], ["lint"], red, FEEDS) == 0
+
+
+def test_no_target_when_the_record_carries_no_run() -> None:
+    """Запись без разбираемого адреса даёт ноль, а не выдуманный номер."""
+    red = [{"name": "test", "details_url": "не адрес"}]
+    assert module.target_run(["test"], [], red, FEEDS) == 0
