@@ -693,3 +693,23 @@ def test_the_debt_count_asks_the_owner_of_the_state(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (99, body))
     left = debt.unlooked_debt("o/r", "token")
     assert [entry.number for entry in left] == [7], "суффиксная запись выпала из счёта долга"
+
+
+def test_the_revision_counts_before_and_after_the_counter_apart() -> None:
+    """Ревизия закрытого считается двумя числами, а не одним (нашёл владелец).
+
+    Задачи, закрытые до появления счётчика пунктов, не изменятся никогда:
+    отметить их было нечем. Держать их в общем числе значит держать в счёте
+    постоянное слагаемое, а счёт, который не меняется, перестают читать (051).
+    Они не исчезают — их называют тем, что они есть (046).
+    """
+    live = [
+        task_shape.Live(3, "первый день", 5, 0, before_the_counter=True),
+        task_shape.Live(99, "свежая", 2, 0),
+    ]
+    lines = debt.shape_report([], live)
+    head = next(line for line in lines if line.startswith("закрыто при живых"))
+    assert head.startswith("закрыто при живых единицах: 1"), head
+    said = " ".join(lines)
+    assert "#99" in said and "#3" in said, "старая запись исчезла из вывода"
+    assert "до счётчика пунктов" in said and task_shape.ITEMS_SINCE in said

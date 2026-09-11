@@ -53,6 +53,28 @@ class Prose:
     items: int
 
 
+#: С какого дня у проекта есть чем отмечать пункты. До него отметить их было
+#: НЕЧЕМ: `scripts/items.py`, `scripts/task_items.py` и прогон `task-items`
+#: заведены 10.09.2026 изменением #97, а все задачи первого дня закрыты 09.09 —
+#: за сутки до.
+#:
+#: ПОЧЕМУ ЭТО ГРАНИЦА, А НЕ ПОБЛАЖКА. Ревизия закрытого (121) отвечает на
+#: вопрос «не осталось ли живой работы за закрытым контейнером». Для задач,
+#: закрытых до счётчика, ответ известен заранее и одинаков для всех: пункты в
+#: них не отмечены не потому, что работа не сделана, а потому, что отмечать
+#: было нечем. Считать их наравне со свежими значит держать в счёте
+#: четырнадцать записей, которые не изменятся никогда, — а счёт, не меняющийся
+#: никогда, перестают читать (051).
+#:
+#: ПРИЁМ ТОТ ЖЕ, ЧТО У АТРИБУЦИИ: там объявлена отметка `cb26ec4`, до которой
+#: авторство не спрашивается, и по той же причине — механизма ещё не было.
+#: Граница названа ДАТОЙ, а не молчаливым пропуском: старые задачи из ревизии
+#: не исчезают, они считаются отдельно и названы тем, что они есть (046, 154).
+#:
+#: Нашёл владелец вопросом «механизм сам не пройдёт, мне ручками тыкать надо?».
+ITEMS_SINCE: Final = "2026-09-10"
+
+
 @dataclass(frozen=True, slots=True)
 class Live:
     """Закрытая задача, у которой остались живые единицы работы."""
@@ -61,6 +83,7 @@ class Live:
     title: str
     unchecked: int
     children: int
+    before_the_counter: bool = False
 
     @property
     def said(self) -> str:
@@ -106,6 +129,18 @@ def without_a_checklist(issues: list[dict[str, Any]]) -> list[Prose]:
     return sorted(found, key=lambda task: -task.items)
 
 
+def before_the_counter(closed_at: str) -> bool:
+    """Закрыта ли задача ДО того, как у проекта появился счётчик пунктов.
+
+    ДАТЫ НЕТ — ЗНАЧИТ СЧИТАЕМ СВЕЖЕЙ. Пустая строка меньше любой даты, и
+    сравнение «в лоб» уводило бы задачу без даты в старые — то есть выводило бы
+    из ревизии по НЕИЗВЕСТНОСТИ. Ошибка обязана идти в сторону лишнего взгляда,
+    а не пропуска (045).
+    """
+    said = closed_at[:10]
+    return bool(said) and said < ITEMS_SINCE
+
+
 def closed_with_live_units(issues: list[dict[str, Any]]) -> list[Live]:
     """Закрытые задачи, у которых остались незакрытые единицы работы (121).
 
@@ -120,5 +155,13 @@ def closed_with_live_units(issues: list[dict[str, Any]]) -> list[Live]:
         unchecked, children = len(items.open_items(body)), children_left(issue)
         if not unchecked and not children:
             continue
-        found.append(Live(int(issue["number"]), str(issue.get("title") or ""), unchecked, children))
+        found.append(
+            Live(
+                int(issue["number"]),
+                str(issue.get("title") or ""),
+                unchecked,
+                children,
+                before_the_counter=before_the_counter(str(issue.get("closed_at") or "")),
+            )
+        )
     return sorted(found, key=lambda task: -task.number)
