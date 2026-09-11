@@ -20,12 +20,21 @@
 фрагментам противоречит
 ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 
-МАЖОР ДО ЕДИНИЦЫ ПОДНИМАЕТ НЕ ВЫПУСК, А ПЕРВЫЙ ПОТРЕБИТЕЛЬ. `0.x` означает
-ровно одно: поверхность ещё никому не обещана. Это записано в `docs/release.md`
-до первого потребителя и задним числом не вводится
-([113](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/113-a-contract-states-how-it-may-change.md)),
-поэтому переход `0.y → 1.0` механизм требует объявить отдельно — ключом
-`--first-consumer` с именем того, кто прибился.
+МАЖОР ПОДНИМАЕТ ЗАКРЫТАЯ ПРИЁМКА, А НЕ ВЫПУСК. `0.x` означает «ещё не доделано
+здесь», и единицу выпускает не появление потребителя, а закрытая приёмка
+(`docs/decisions/009-one-zero-means-it-works-at-home.md`). Поэтому мажор
+механизм требует объявить отдельно — ключом `--acceptance <номер задачи>`, — и
+САМ спрашивает у площадки, закрыта ли она: приёмка, названная словом, но не
+закрытая, ничем не отличалась бы от прежнего «назовите потребителя».
+
+Ключ один на обе поры намеренно. До передачи приёмка — эпик «работает у себя»;
+после неё мажор растёт с каждым подключённым, и приёмкой становится задача его
+подключения. Номер задачи здесь не зашит: зашитый устарел бы молча (005).
+
+НЕЗНАНИЕ — ТРЕТИЙ ИСХОД, А НЕ ПОБЛАЖКА. Если состояние приёмки не прочитано —
+нет токена, площадка молчит, — выпуск не идёт и причина называется. Считать
+непрочитанное за «закрыта» значило бы завести обход там, где стоит проверка
+([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
 Исходы (правило 039): ``0`` выпуск готов либо сделан · ``1`` условия не
 сошлись · ``2`` шаг не отработал.
@@ -34,6 +43,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -41,6 +51,7 @@ from pathlib import Path
 from typing import Final
 
 import build_changelog
+import ghrest
 import paths
 import report
 import version as project_version
@@ -88,7 +99,7 @@ def next_after(current: str, *, contract: bool) -> str:
 
     МИНОР растёт ВСЕГДА при постановке тега — схема семьи держит инвариант
     «каждый тег вида `vX.Y.0`», и патч-тегов не существует. Правка поверхности
-    при этом не поднимает мажор сама: `0.x` живёт до первого потребителя.
+    при этом не поднимает мажор сама: `0.x` живёт до закрытой приёмки.
     """
     found = VERSION_RE.match(current)
     if found is None:
@@ -97,7 +108,25 @@ def next_after(current: str, *, contract: bool) -> str:
     return f"{major}.{minor + 1}.0"
 
 
-def refusals(wanted: str, *, first_consumer: str) -> list[str]:
+def acceptance_is_closed(repo: str, number: int, token: str) -> bool | None:
+    """Закрыта ли названная приёмка. ``None`` — состояние НЕ прочитано.
+
+    Три ответа вместо двух, и третий здесь главный: «не прочитано» и «открыта»
+    значат разное — первое чинится токеном, второе работой, — а «не прочитано»,
+    сведённое к «закрыта», было бы обходом проверки, стоящей перед необратимым
+    (045, 074).
+    """
+    if not repo or not token:
+        return None
+    try:
+        issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+    except ghrest.TransportError:
+        return None
+    state = issue.get("state")
+    return state == "closed" if state else None
+
+
+def refusals(wanted: str, *, acceptance: str, accepted: bool | None = None) -> list[str]:
     """Все причины НЕ выпускать — списком, а не первой попавшейся.
 
     Списком потому, что выпуск делают редко и по одной причине за раз чинить
@@ -123,11 +152,21 @@ def refusals(wanted: str, *, first_consumer: str) -> list[str]:
     major_now = int(VERSION_RE.match(current).group(1))  # type: ignore[union-attr]
     major_wanted = int(VERSION_RE.match(wanted).group(1))  # type: ignore[union-attr]
 
-    if major_wanted > major_now and not first_consumer:
+    if major_wanted > major_now and not acceptance:
         problems.append(
-            f"мажор {major_now} → {major_wanted} поднимает не выпуск, а появление первого "
-            "потребителя: «0.x» значит «поверхность ещё никому не обещана» (docs/release.md). "
-            "Назовите его: --first-consumer <владелец/репозиторий>"
+            f"мажор {major_now} → {major_wanted} поднимает не выпуск, а ЗАКРЫТАЯ приёмка: "
+            "«0.x» значит «ещё не доделано здесь» (docs/release.md, decisions/009). "
+            "Назовите её: --acceptance <номер задачи>"
+        )
+    elif major_wanted > major_now and accepted is None:
+        problems.append(
+            f"мажор {major_now} → {major_wanted}: состояние приёмки #{acceptance} не прочитано "
+            "— нет токена или площадка молчит. Непрочитанное за «закрыта» не считается (045)"
+        )
+    elif major_wanted > major_now and not accepted:
+        problems.append(
+            f"мажор {major_now} → {major_wanted}: приёмка #{acceptance} ещё ОТКРЫТА. "
+            "Единицу выпускает её закрытие, а не выпуск (decisions/009)"
         )
     elif major_wanted == major_now and wanted != expected:
         problems.append(
@@ -137,7 +176,7 @@ def refusals(wanted: str, *, first_consumer: str) -> list[str]:
     return problems
 
 
-def announce(wanted: str, *, first_consumer: str) -> None:
+def announce(wanted: str, *, acceptance: str, accepted: bool | None = None) -> None:
     """Печатает, из чего собран выпуск: человек читает это перед необратимым."""
     waiting = fragments()
     contract = touches_contract(waiting)
@@ -148,8 +187,9 @@ def announce(wanted: str, *, first_consumer: str) -> None:
     print(
         f"версия проекта на этой голове: {number}" + ("" if whole else " (неполна: тегов не видно)")
     )
-    if first_consumer:
-        print(f"первый потребитель: {first_consumer} — им и поднимается мажор")
+    if acceptance:
+        said = {True: "закрыта", False: "ОТКРЫТА", None: "состояние не прочитано"}[accepted]
+        print(f"приёмка мажора: #{acceptance} — {said}")
 
 
 def do_release(wanted: str) -> None:
@@ -173,9 +213,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", default="", help="номер выпуска; по умолчанию следующий")
     parser.add_argument("--apply", action="store_true", help="сделать необратимое")
     parser.add_argument(
-        "--first-consumer",
+        "--acceptance",
         default="",
-        help="владелец/репозиторий того, кто прибился: только им поднимается мажор",
+        help="номер задачи-приёмки: мажор поднимает её ЗАКРЫТИЕ, а не выпуск",
+    )
+    parser.add_argument(
+        "--repo",
+        default=os.environ.get("GITHUB_REPOSITORY", ""),
+        help="где спрашивать состояние приёмки",
     )
     args = parser.parse_args(argv)
 
@@ -183,8 +228,16 @@ def main(argv: list[str] | None = None) -> int:
         wanted = args.version or next_after(
             declared_version(), contract=bool(touches_contract(fragments()))
         )
-        problems = refusals(wanted, first_consumer=args.first_consumer)
-        announce(wanted, first_consumer=args.first_consumer)
+        # Состояние приёмки спрашивается ОДИН раз и передаётся обоим: разбор и
+        # печать обязаны говорить об одном состоянии, а два запроса на одном
+        # заходе могли бы разойтись.
+        accepted = (
+            acceptance_is_closed(args.repo, int(args.acceptance), ghrest.token_from_env())
+            if args.acceptance.isdigit()
+            else None
+        )
+        problems = refusals(wanted, acceptance=args.acceptance, accepted=accepted)
+        announce(wanted, acceptance=args.acceptance, accepted=accepted)
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

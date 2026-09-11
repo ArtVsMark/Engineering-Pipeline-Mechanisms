@@ -58,26 +58,62 @@ def test_a_contract_fragment_does_not_raise_the_major() -> None:
     assert module.next_after("9.9.0", contract=True) == "9.10.0"
 
 
-def test_the_major_needs_a_named_consumer(run_script: RunScript, tmp_path: Path) -> None:
-    """Мажор до единицы поднимает не выпуск, а появление первого потребителя.
+def test_the_major_needs_a_named_acceptance(run_script: RunScript, tmp_path: Path) -> None:
+    """Мажор поднимает не выпуск, а ЗАКРЫТАЯ приёмка (decisions/009).
 
-    Это записано в договоре до первого потребителя и задним числом не вводится
-    (113). Механизм требует назвать того, кто прибился, — иначе `1.0` было бы
-    обещанием совместимости, данным никому.
+    Договор и механизм говорили разное: договор — «единицу выпускает закрытая
+    приёмка эпика», механизм — «назовите первого потребителя». Расхождение
+    нашёл внешний взгляд на #198, и оно было не косметическим: исполнял
+    механизм СТАРОЕ правило, то есть договор не значил ничего (002).
     """
     tree(tmp_path)
     run = run_script("release.py", "--version", "10.0.0", cwd=tmp_path)
     assert run.code == 1, run.text
-    assert "первого потребителя" in run.text
-    assert "--first-consumer" in run.text
+    assert "приёмка" in run.text.lower()
+    assert "--acceptance" in run.text
 
 
-def test_a_named_consumer_allows_the_major(run_script: RunScript, tmp_path: Path) -> None:
-    """С названным потребителем мажор поднимается: обещание есть кому дать."""
+def test_a_named_but_unread_acceptance_is_still_a_refusal(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Названная, но НЕ прочитанная приёмка выпуск не пускает.
+
+    Три состояния вместо двух: закрыта, открыта, не прочитана. Свести третье к
+    первому значило бы завести обход ровно там, где стоит проверка перед
+    необратимым (045, 074) — ключ стал бы подписью под тем, чего никто не
+    видел.
+    """
     tree(tmp_path)
-    run = run_script("release.py", "--version", "10.0.0", "--first-consumer", "o/r", cwd=tmp_path)
-    assert run.code == 0, run.text
-    assert "o/r" in run.text
+    run = run_script(
+        "release.py",
+        "--version",
+        "10.0.0",
+        "--acceptance",
+        "196",
+        cwd=tmp_path,
+        env={"GH_TOKEN": "", "GITHUB_TOKEN": ""},
+    )
+    assert run.code == 1, run.text
+    assert "не прочитано" in run.text
+
+
+def test_a_closed_acceptance_allows_the_major() -> None:
+    """С закрытой приёмкой мажор проходит; с открытой — нет.
+
+    Разбор проверяется данными, а не подделкой транспорта: состояние приходит
+    в `refusals` готовым ответом.
+    """
+
+    def said(accepted: bool | None) -> list[str]:
+        return [
+            one
+            for one in module.refusals("1.0.0", acceptance="196", accepted=accepted)
+            if "мажор" in one
+        ]
+
+    assert said(True) == []
+    assert "ОТКРЫТА" in "".join(said(False))
+    assert "не прочитано" in "".join(said(None))
 
 
 def test_a_wrong_minor_is_refused(run_script: RunScript, tmp_path: Path) -> None:
