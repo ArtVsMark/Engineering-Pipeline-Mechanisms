@@ -250,21 +250,27 @@ def queue_now(repo: str, token: str) -> tuple[int, int]:
     ЧИТАЕТСЯ У ПЛОЩАДКИ, А НЕ СЧИТАЕТСЯ ЗАНОВО. Предмет — живые изменения и их
     метки; вести это вторым списком значило бы разойтись с площадкой на первом
     же закрытом изменении (049).
+
+    СПИСОК БЕРЁТСЯ У ОЧЕРЕДИ, А НЕ СОБИРАЕТСЯ ЗДЕСЬ ВТОРОЙ РАЗ. Прежде шаг
+    запрашивал открытые изменения сам, одной страницей на пятьдесят: при
+    большем числе счёт «в очереди» занижался молча, и хуже того — занижался
+    счёт помеченных `fix-main`, то есть механизм мог сказать «разблокировать
+    некому», когда разблокирующее изменение уже стояло. Тот же список читает
+    `automerge.open_changes`, страницами и с теми же метками; второе прочтение
+    одного источника расходится с первым молча (022, 090). Нашёл внешний
+    взгляд на #168 — трижды, и все три раза об одном.
     """
-    waiting = 0
-    fixing = 0
     try:
-        changes = ghrest.request("GET", f"repos/{repo}/pulls?state=open&per_page=50", token) or []
+        changes = automerge.open_changes(repo, token)
     except ghrest.TransportError:
         return (0, 0)
-    for change in changes:
-        marks = {str(item.get("name", "")) for item in change.get("labels") or []}
-        if automerge.LABEL_AUTOMERGE not in marks or change.get("draft"):
-            continue
-        waiting += 1
-        if automerge.LABEL_FIX_MAIN in marks:
-            fixing += 1
-    return waiting, fixing
+    queued = [
+        change
+        for change in changes
+        if automerge.LABEL_AUTOMERGE in change.marks and not change.draft
+    ]
+    fixing = sum(1 for change in queued if automerge.LABEL_FIX_MAIN in change.marks)
+    return len(queued), fixing
 
 
 def said_queue(waiting: int, fixing: int) -> list[str]:
