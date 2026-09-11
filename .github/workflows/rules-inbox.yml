@@ -20,6 +20,8 @@ permissions:
   issues: write
 
 concurrency:
+  # Голова здесь не нужна: предмет — состояние ответа каталогу, а не коммит;
+  # два захода писали бы в одну задачу наперегонки (179).
   group: rules-inbox
   cancel-in-progress: true
 
