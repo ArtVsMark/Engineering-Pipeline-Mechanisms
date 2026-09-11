@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import family
+import kinds
 import paths
 import pipeline_checks as policy
 import version
@@ -234,7 +235,8 @@ def badge(label: str, value: str, color: str) -> str:
 
 #: Роды ответа, означающие «держит машина». Тот же состав, что у разреза семьи
 #: и у дрейфа: три понимания одного слова разошлись бы молча (090).
-MACHINE: Final = frozenset({"gate", "pipeline", "code"})
+#: Виды механизма — из общего места (`scripts/kinds.py`), а не своей копией.
+MACHINE: Final = kinds.MACHINE
 
 
 def rules_badge(facts: dict[str, Any]) -> str:

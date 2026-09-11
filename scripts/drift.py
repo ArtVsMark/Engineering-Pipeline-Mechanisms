@@ -45,6 +45,7 @@ from typing import Any, Final
 
 import findings
 import ghrest
+import kinds
 import paths
 import pipeline_checks
 import report
@@ -91,7 +92,8 @@ PYTHON_MANIFEST: Final = (
 
 #: Механизмами считаются эти три рода ответа. Тот же состав, что у разреза
 #: семьи: два понимания слова «держится машиной» разошлись бы молча (090).
-MACHINE: Final = frozenset({"gate", "pipeline", "code"})
+#: Виды механизма — из общего места (`scripts/kinds.py`), а не своей копией.
+MACHINE: Final = kinds.MACHINE
 
 
 class NotRun(RuntimeError):
