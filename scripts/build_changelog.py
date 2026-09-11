@@ -116,6 +116,14 @@ def parse_fragments(paths: list[Path]) -> list[Fragment]:
         if not LINK_LINE_RE.match(body.splitlines()[-1].strip()):
             unnamed.append(f"{path.name} (ссылка на задачу не последней строкой)")
             continue
+        # Причина у `internal` проверяется ЗДЕСЬ, а не у гейта изменения: разбор
+        # фрагментов один на обоих читателей, и вторая копия правила разошлась
+        # бы с первой молча (090).
+        if match["kind"] == journal.INTERNAL and not journal.REASON_LINE_RE.match(
+            body.splitlines()[0].strip()
+        ):
+            unnamed.append(f"{path.name} (род `internal` без причины первой строкой)")
+            continue
         fragments.append(Fragment(match["kind"], match["slug"], body))
 
     if unnamed:
@@ -125,6 +133,8 @@ def parse_fragments(paths: list[Path]) -> list[Fragment]:
             + "\n\nИмя: <слаг-по-смыслу>.<род>.md, род — "
             + " · ".join(KINDS)
             + "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
+            + "\nУ рода `internal` ПЕРВАЯ строка — причина: "
+            + "«> **Потребителю безразлично:** …» (154)"
         )
     return fragments
 

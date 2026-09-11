@@ -39,9 +39,18 @@ changelog.d/<что-изменилось>.<род>.md
 | `internal` | для потребителя не меняется **ничего** | Внутреннее |
 
 Род `internal` — это ответ «не нужно», и он **обязан назвать причину**
-([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)):
-первой строкой фрагмента пишется, почему потребителю это безразлично. Молчание
-состоянием не является.
+([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+Форма задана, и **первой строкой** фрагмента идёт ровно она:
+
+```
+> **Потребителю безразлично:** <почему это его не касается>
+```
+
+Молчание состоянием не является. Форму держит разбор фрагментов
+(`scripts/build_changelog.py`), а не внимание автора: пока правило жило одной
+прозой здесь, оба внутренних фрагмента проекта открывались заголовком, и нашёл
+это внешний взгляд, а не сборка
+([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
 ## Что внутри
 
