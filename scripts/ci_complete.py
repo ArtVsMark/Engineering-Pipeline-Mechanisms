@@ -39,6 +39,7 @@ import argparse
 import os
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -243,7 +244,7 @@ def summarised_run(
     ЭТОГО прогона, и после переезда гейта в свой файл он не принадлежит ни
     одному из соседей. От этого разом отказывали оба различия, на которых
     держится разбор гонки: предпочтение записей своего прогона (два прогона на
-    одной голове) и `own_jobs` (джоб ждёт `needs`, а не «не стартовал»).
+    одной голове) и `roster_of` (джоб ждёт `needs`, а не «не стартовал»).
 
     ЗАМЕР 11.09.2026, изменение #199. Толчок и снятие черновика дали два
     прогона `ci` на одной голове: первый отменён группой, второй зелён. Гейт
@@ -275,8 +276,8 @@ def summarised_run(
     return newest
 
 
-def named_its_jobs(run: dict[str, Any] | None, jobs: dict[str, str]) -> bool:
-    """Сводимый прогон НАЗВАЛ свой состав: список джобов у него непуст.
+def ready_to_judge(run: dict[str, Any] | None, roster: Roster) -> bool:
+    """Можно ли выносить вердикт: прогон найден, не отменён и НАЗВАЛ состав.
 
     ЗАМЕР 11.09.2026, изменение #199, третий заход. Прогон `ci` создан в
     15:14:18 и в этот момент существовал; джобов в нём ещё не было ни одного —
@@ -297,8 +298,18 @@ def named_its_jobs(run: dict[str, Any] | None, jobs: dict[str, str]) -> bool:
 
     Отменённый прогон вердикта не несёт: его погасила группа отмены, следом
     идёт новый заход, и последнее слово за ним (179).
+
+    НЕПРОЧИТАННЫЙ СОСТАВ — НЕ ПУСТОЙ, И ЗАВЕРШЁННЫЙ ТОЖЕ. Оба сводились к
+    пустому словарю едущих джобов, и оба вешали гейт до тайм-аута: у полностью
+    зелёного прогона едущих нет ВСЕГДА. Ложное красное вместо вердикта на
+    здоровом прогоне — тот же класс, что и первые две поломки этого переезда.
+    Нашёл внешний взгляд на #203.
     """
-    return bool(run) and not was_cancelled(run) and bool(jobs)
+    if not run or was_cancelled(run):
+        return False
+    # Список не прочитан — ждать нечего: различать нечем, и разбор идёт прежней
+    # строгостью, как и было до этой ветки.
+    return roster.named > 0 if roster.read else True
 
 
 def was_cancelled(run: dict[str, Any] | None) -> bool:
@@ -306,8 +317,23 @@ def was_cancelled(run: dict[str, Any] | None) -> bool:
     return (run or {}).get("conclusion") == "cancelled"
 
 
-def own_jobs(repo: str, run_id: str, token: str) -> dict[str, str]:
-    """Джобы СВОДИМОГО прогона: имя → состояние. Пусто — спросить не у кого.
+@dataclass(frozen=True, slots=True)
+class Roster:
+    """Состав сводимого прогона: прочитан ли, сколько назвал, кто ещё едет.
+
+    ТРИ ПОЛЯ, ПОТОМУ ЧТО СОСТОЯНИЙ ТРИ, А НЕ ДВА. «Список не прочитан»,
+    «прочитан и пуст» и «прочитан, и в нём все уже завершились» — снаружи
+    одинаковы, а значат разное, и сведение их в один пустой словарь стоило
+    проекту дефекта (см. `ready_to_judge`).
+    """
+
+    read: bool
+    named: int
+    running: dict[str, str]
+
+
+def roster_of(repo: str, run_id: str, token: str) -> Roster:
+    """Джобы СВОДИМОГО прогона: сколько названо и кто из них ещё едет.
 
     Нужны они ради одного различия, которое иначе не сделать. Джоб, ждущий
     зависимости (`needs`), записи проверки на голове ещё не имеет — он не
@@ -321,7 +347,7 @@ def own_jobs(repo: str, run_id: str, token: str) -> dict[str, str]:
     при полностью зелёных проверках получило красный обязательный контекст.
     """
     if not repo or not run_id:
-        return {}
+        return Roster(False, 0, {})
     try:
         # СПИСОК ИДЁТ СТРАНИЦАМИ. Умолчание площадки — тридцать джобов на
         # страницу, и при большем числе хвост пропадал молча: джоб за краем
@@ -332,19 +358,28 @@ def own_jobs(repo: str, run_id: str, token: str) -> dict[str, str]:
         jobs = list(ghrest.paginate(f"repos/{repo}/actions/runs/{run_id}/jobs", token, key="jobs"))
     except ghrest.TransportError:
         # Не спросили — значит различить нечем, и молчаливой поблажки быть не
-        # должно: разбор вернётся к прежней строгости (045).
-        return {}
+        # должно: разбор вернётся к прежней строгости (045). НО и ждать этого
+        # нельзя: непрочитанный список — не «состав ещё не назван», и вешать на
+        # нём гейт до тайм-аута значило бы менять строгость на ложное красное.
+        return Roster(False, 0, {})
     # ЧИТАЮТСЯ ОБА ПОЛЯ, А НЕ ОДНО. Ровно этот класс рассинхрона уже измерен
     # для записей проверок: площадка выставляет исход, а состояние остаётся
     # переходным — запись-зомби `in_progress` с готовым `conclusion` (см.
     # `pending`). Джоб, прочитанный по одному лишь `status`, оставался бы
     # «ещё идёт» вечно, и сводный гейт ждал бы до тайм-аута вместо отказа.
     # Нашёл внешний взгляд на #148.
-    return {
-        str(job.get("name", "")): str(job.get("status", ""))
-        for job in jobs
-        if isinstance(job, dict) and job.get("conclusion") is None
-    }
+    return Roster(
+        read=True,
+        # СЧИТАЮТСЯ ВСЕ НАЗВАННЫЕ, А ЕДУЩИЕ — ОТДЕЛЬНО. Прогон, у которого все
+        # джобы уже завершились, назвал состав полностью; словарь едущих у него
+        # пуст, и по нему одному он неотличим от «прогон ещё ничего не назвал».
+        named=sum(1 for job in jobs if isinstance(job, dict)),
+        running={
+            str(job.get("name", "")): str(job.get("status", ""))
+            for job in jobs
+            if isinstance(job, dict) and job.get("conclusion") is None
+        },
+    )
 
 
 def still_coming(name: str, mine: dict[str, str] | None) -> bool:
@@ -354,7 +389,7 @@ def still_coming(name: str, mine: dict[str, str] | None) -> bool:
     отменены, — снаружи разные состояния, а решается ими одно и то же. Два
     прочтения одного состояния разошлись бы молча (090).
 
-    Джоб с проставленным исходом сюда не доходит: `own_jobs` его не отдаёт —
+    Джоб с проставленным исходом сюда не доходит: `roster_of` его не отдаёт среди едущих —
     «идёт» означает переходное состояние И отсутствие исхода, ровно как у
     записей проверок в `pending`.
     """
@@ -531,10 +566,10 @@ def main(argv: list[str] | None = None) -> int:
             # значило бы ждать её до конца срока.
             found = summarised_run(args.repo, args.sha, token, args.summarises)
             summarised = args.run_id or str((found or {}).get("id") or "")
-            mine = own_jobs(args.repo, summarised, token)
+            roster = roster_of(args.repo, summarised, token)
             # ЖДЁМ, ПОКА СВОДИМЫЙ ПРОГОН НЕ НАЗОВЁТ СОСТАВ. Явно названный номер
             # это не проверяет: его даёт человек или тест, и решение принято.
-            if not args.run_id and not named_its_jobs(found, mine):
+            if not args.run_id and not ready_to_judge(found, roster):
                 if not found:
                     why = f"прогон «{args.summarises}» на голове {args.sha[:8]} не найден"
                 elif was_cancelled(found):
@@ -557,7 +592,9 @@ def main(argv: list[str] | None = None) -> int:
                     f"на голове {args.sha[:8]} нет ни одной записи проверок — "
                     "это ошибка входа, а не «зелено» (075)"
                 )
-            problems, waiting = verdict(runs, required, args.self_name, summarised, mine=mine)
+            problems, waiting = verdict(
+                runs, required, args.self_name, summarised, mine=roster.running
+            )
             # Совещательные опрашиваются, но их не ЖДУТ: слияния они не держат,
             # и ожидание сделало бы их обязательными обходным путём.
             advisory_problems, _ = verdict(
