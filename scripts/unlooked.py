@@ -141,6 +141,22 @@ OPEN_STATES: Final = (
     STATE_ODD,
 )
 
+
+def is_open(state: str) -> bool:
+    """Перечитывается ли запись с этим состоянием.
+
+    СРАВНЕНИЕ ПО НАЧАЛУ, А НЕ ПО РАВЕНСТВУ, и это не мелочь разбора. Состояние
+    «исход, которого разбор не знает» несёт САМ исход суффиксом — иначе оно
+    ничего не говорит читателю. При точном равенстве такая запись не попадала
+    ни в одну из трёх проверок: она не перечитывалась (то есть не снималась бы
+    сама НИКОГДА, вопреки обещанию реестра), не попадала в очередь позднего
+    взгляда — и, что хуже всего, считалась «позже просмотренной», то есть
+    объявлялась взглядом то, на что никто не смотрел. Нашёл внешний взгляд
+    на #187.
+    """
+    return any(state.startswith(one) for one in OPEN_STATES)
+
+
 #: Имя проверки, по записи которой на голове различаются причины. Берётся из
 #: договора, а не из памяти: имя джоба и есть имя контекста (`docs/pipeline.md`).
 REVIEW_CHECK: Final = "review"
@@ -330,7 +346,7 @@ def scan(
     # запись обязана уйти сама, а не ждать, пока её снимут рукой. Состояние при
     # этом тоже уточняется: оборванный ответ бывает дописан.
     for number, entry in list(entries.items()):
-        if entry.state not in OPEN_STATES:
+        if not is_open(entry.state):
             continue
         state = look(number)
         if state is None:
@@ -379,7 +395,7 @@ def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
     вторым списком: второй разошёлся бы с первым молча
     ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
     """
-    open_now = [number for number, entry in entries.items() if entry.state in OPEN_STATES]
+    open_now = [number for number, entry in entries.items() if is_open(entry.state)]
     return sorted(open_now)[:limit]
 
 
@@ -517,7 +533,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-        without = [item for item in entries.values() if item.state in OPEN_STATES]
+        without = [item for item in entries.values() if is_open(item.state)]
         print(
             f"слито без взгляда: {len(without)}, позже просмотрено: {len(entries) - len(without)}"
         )

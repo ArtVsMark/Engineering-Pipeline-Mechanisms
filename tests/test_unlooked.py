@@ -437,3 +437,40 @@ def test_skipped_means_a_fork_and_says_so() -> None:
     body = module.render_body({}, "#0")
     place = body.index(module.STATE_SILENT)
     assert "continue-on-error" in body[place : place + 700], "причина не названа там, где живёт"
+
+
+def test_a_state_with_a_suffix_is_still_open() -> None:
+    """Состояние с суффиксом исхода перечитывается наравне с голым (находка #187).
+
+    «Исход, которого разбор не знает» несёт САМ исход суффиксом — иначе он
+    ничего не говорит читателю. При точном сравнении такая запись выпадала из
+    всех трёх проверок сразу.
+    """
+    odd = f"{module.STATE_ODD}: timed_out"
+    assert module.is_open(odd), "запись с суффиксом не перечитывается — снять её нечем"
+    assert module.is_open(module.STATE_NONE)
+    assert not module.is_open(module.STATE_LATE), "поздний взгляд открытым не считается"
+
+
+def test_a_suffixed_state_is_counted_as_unlooked_not_as_looked() -> None:
+    """Такая запись считается НЕПРОСМОТРЕННОЙ, а не «позже просмотренной».
+
+    Худшее из трёх следствий точного сравнения: механизм объявлял взглядом то,
+    на что никто не смотрел (045).
+    """
+    entries = {
+        7: module.Entry(7, f"{module.STATE_ODD}: stale", "2026-09-11"),
+        8: module.Entry(8, module.STATE_LATE, "2026-09-11"),
+    }
+    assert module.queue_of(entries) == [7]
+
+
+def test_a_suffixed_state_is_re_read_on_the_next_pass() -> None:
+    """Заход перечитывает такую запись, и она уходит сама, когда вердикт пришёл.
+
+    Обещание реестра — «запись снимается сама, если вердикт всё же появился».
+    Для состояний с суффиксом оно не выполнялось ни разу.
+    """
+    entries = {7: module.Entry(7, f"{module.STATE_ODD}: neutral", "2026-09-11")}
+    left, _ = module.scan([], entries, 0, lambda number: None)
+    assert 7 not in left, "запись не перечитана — снять её было бы нечем"
