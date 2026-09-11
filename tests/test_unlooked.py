@@ -321,3 +321,56 @@ def test_the_queue_is_bounded() -> None:
 def test_an_empty_queue_is_a_state_not_a_failure() -> None:
     """Смотреть нечего — это пустой список, а не отказ."""
     assert module.queue_of({}) == []
+
+
+# --- что нашёл внешний взгляд: запись есть, а вердикта нет --------------------
+
+
+def test_a_skipped_review_is_not_a_missing_one() -> None:
+    """Шаг пропущен условием — это не «прогон не запускался» (находка #127).
+
+    Площадка отдаёт `skipped`, когда условие вычислено и оказалось ложным:
+    запись есть и она говорит «пропущено». Форк-изменение получало «вердикта
+    нет» — то есть читателя отправляли смотреть, почему шаг не запускался,
+    когда он и не должен был.
+    """
+    runs = [{"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "skipped"}]
+    assert module.why_quiet(runs) == module.STATE_SKIPPED
+
+
+def test_a_cancelled_review_is_not_a_missing_one() -> None:
+    """Отменённый прогон зовёт смотреть, кто его гасит, а не условия шага (154)."""
+    runs = [{"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "cancelled"}]
+    assert module.why_quiet(runs) == module.STATE_CANCELLED
+
+
+def test_a_running_review_is_not_a_missing_one() -> None:
+    """Прогон ещё идёт — вердикта нет и не должно быть: спрашивать рано."""
+    runs = [{"name": module.REVIEW_CHECK, "status": "in_progress", "conclusion": None}]
+    assert module.why_quiet(runs) == module.STATE_RUNNING
+
+
+def test_a_failure_still_outranks_the_rest() -> None:
+    """«Упал» важнее всего прочего: иначе отменённый сосед спрятал бы красное."""
+    runs = [
+        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "cancelled"},
+        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "failure"},
+    ]
+    assert module.why_quiet(runs) == module.STATE_BROKEN
+
+
+def test_no_record_at_all_is_still_its_own_state() -> None:
+    """Записи нет вовсе — это по-прежнему отдельное состояние, а не «пропущено»."""
+    assert module.why_quiet([]) == module.STATE_NONE
+    assert module.why_quiet([{"name": "ci", "conclusion": "success"}]) == module.STATE_NONE
+
+
+def test_every_state_is_described_in_the_registry() -> None:
+    """Каждое состояние объяснено в теле реестра, а не только названо (046).
+
+    Состояние, которого нет в объяснении, читатель встретит в списке и не
+    поймёт, что с ним делать, — а именно ради этого реестр и заведён.
+    """
+    body = module.render_body({}, "#0")
+    missing = [state for state in module.STATES if state not in body]
+    assert not missing, f"состояния названы, но не объяснены: {missing}"
