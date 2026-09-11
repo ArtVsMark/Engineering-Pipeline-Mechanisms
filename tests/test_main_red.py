@@ -398,7 +398,7 @@ def test_the_queue_count_reads_the_platform(monkeypatch: pytest.MonkeyPatch) -> 
         {"number": 3, "labels": [{"name": "automerge"}], "draft": True},
         {"number": 4, "labels": [], "draft": False},
     ]
-    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: rows)
+    monkeypatch.setattr(module.automerge.ghrest, "paginate", lambda *_, **__: iter(rows))
     assert module.queue_now("o/r", "token") == (2, 1)
 
 
@@ -407,10 +407,75 @@ def test_an_unread_queue_is_not_an_empty_one(monkeypatch: pytest.MonkeyPatch) ->
 
     Ноль здесь означает «не спросили», и текст про пустую очередь честен: он
     говорит, что двигать нечего, а не что починки нет.
+
+    Отказ поднимается классом ЕДИНСТВЕННОГО транспорта: `ghrest` у проекта
+    один на все механизмы (001), и держит это `tests/test_ghrest.py`. В
+    прогоне `main_red.ghrest` и `automerge.ghrest` — один и тот же модуль,
+    поэтому и класс отказа один.
     """
 
     def falls(*_: object, **__: object) -> object:
         raise module.ghrest.TransportError("площадка молчит")
 
-    monkeypatch.setattr(module.ghrest, "request", falls)
+    monkeypatch.setattr(module.automerge.ghrest, "paginate", falls)
     assert module.queue_now("o/r", "token") == (0, 0)
+
+
+# --- что нашёл внешний взгляд: каждая находка проверена отказом ---------------
+
+
+def test_the_queue_count_goes_by_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Счёт очереди читает ВСЕ открытые изменения, а не первую страницу (находка #168).
+
+    Одна страница на пятьдесят занижала не только «в очереди», но и счёт
+    помеченных `fix-main`: механизм мог сказать «разблокировать некому», когда
+    разблокирующее изменение уже стояло за краем. Проверяется тем, что
+    помеченное лежит шестидесятым.
+    """
+    rows: list[dict[str, Any]] = [
+        {
+            "number": n,
+            "labels": [{"name": "automerge"}],
+            "draft": False,
+            "head": {"ref": "b", "sha": "s"},
+            "base": {"ref": "main"},
+        }
+        for n in range(1, 60)
+    ]
+    rows.append(
+        {
+            "number": 60,
+            "labels": [{"name": "automerge"}, {"name": "fix-main"}],
+            "draft": False,
+            "head": {"ref": "b", "sha": "s"},
+            "base": {"ref": "main"},
+        }
+    )
+    monkeypatch.setattr(module.automerge.ghrest, "paginate", lambda *_, **__: iter(rows))
+    assert module.queue_now("o/r", "token") == (60, 1), "хвост списка потерян"
+
+
+def test_the_queue_count_reads_the_queue_not_its_own_listing() -> None:
+    """Список открытых изменений читает очередь, а не второй сборщик (находка #168).
+
+    Второе прочтение одного источника расходится с первым молча (022, 090).
+    Проверяется по самому механизму: своего запроса открытых изменений в нём
+    не осталось.
+    """
+    source = (ROOT / "scripts" / "main_red.py").read_text(encoding="utf-8")
+    place = source.index("def queue_now")
+    body = source[place : source.index("def said_queue")]
+    assert "automerge.open_changes" in body, "счёт собирает список сам"
+    assert "pulls?state=open" not in body, "в механизме остался свой запрос открытых изменений"
+
+
+def test_a_frozen_queue_is_shown_beside_what_holds_it() -> None:
+    """Строка очереди сшита с телом задачи при НЕПУСТЫХ обоих концах (находка #168).
+
+    Прежде проверялись порознь: `said_queue` — своими случаями, `render_body`
+    — с пустой очередью. Сшивка не проверялась ни разу, а именно она и говорит
+    читателю, что держит слияние и кто это разблокирует.
+    """
+    body = module.render_body(["test"], ["test-next"], [], "abc1234", (3, 1))
+    assert "test" in body and "test-next" in body
+    assert "с меткой `fix-main`: **1**" in body, body
