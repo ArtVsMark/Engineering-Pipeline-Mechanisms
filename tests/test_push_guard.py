@@ -280,3 +280,81 @@ def test_a_harmless_wrapped_command_still_passes() -> None:
     assert ask("env -i ls -la").returncode == 0
     assert ask('bash -lc "git status"').returncode == 0
     assert ask("nice -n 5 python -c pass").returncode == 0
+
+
+# --- обёртка знает свои ключи, а не угадывает их ------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'env bash -c "git push origin agent/other"',
+        'nohup bash -c "git push origin agent/other"',
+        'command bash -lc "git push origin agent/other"',
+        'nice -n 5 sh -c "git push origin agent/other"',
+    ],
+    ids=["env+bash", "nohup+bash", "command+bash -lc", "nice+sh"],
+)
+def test_a_wrapper_around_a_shell_is_still_a_push(command: str) -> None:
+    """Обёртка вокруг оболочки — тоже обёртка (находка #186).
+
+    Разбор снимал `env` и на этом останавливался: дальше шёл не `git`, а
+    `bash`. Снятие идёт по кругу, пока снимается.
+    """
+    said = ask(command)
+    assert said.returncode == 2, f"пропущено: {command}\n{said.stdout}{said.stderr}"
+    assert "agent/other" in said.stderr
+
+
+def test_a_wrappers_own_positional_is_not_the_command() -> None:
+    """Длительность `timeout` — её слово, а не имя программы.
+
+    `timeout 30 git push …` проходил необнаруженным: разбор принимал `30` за
+    команду и уходил ни с чем.
+    """
+    assert ask("timeout 30 git push origin main").returncode == 2
+    assert ask("timeout -k 5 30 git push origin main").returncode == 2
+    assert ask("timeout 30 echo hi").returncode == 0
+
+
+def test_data_of_another_program_is_not_a_push() -> None:
+    """`git` в АРГУМЕНТАХ чужой программы толчком не является (находка #186).
+
+    Прежде внутри обёртки шло сканирование — «найти `git` дальше по словам», —
+    и оно дотягивалось до данных: `env echo git push origin main` отвергалось
+    как толчок в общую ветку. Гейт, краснеющий на верной работе, учит читать
+    красное как фон (051).
+    """
+    assert ask("env echo git push origin main").returncode == 0
+    assert ask("echo git push origin main").returncode == 0
+    assert ask('bash -c "echo git push origin main"').returncode == 0
+
+
+def test_an_ambiguous_shell_flag_cluster_blinds_the_guard() -> None:
+    """Связка с `c` не на конце — не `-c`, и сторож это говорит (находка #186).
+
+    `-norc` содержит `c`, но `c` в нём не последний, а `o` несёт значение.
+    Принять такую связку за `-c` значит прочитать не тот аргумент как скрипт —
+    и толчок под ней пройдёт необнаруженным.
+    """
+    said = ask('bash -norc "git push origin main"')
+    assert said.returncode == 2, said.stdout + said.stderr
+    assert "неоднозначна" in said.stderr
+
+
+def test_an_unknown_wrapper_flag_blinds_the_guard() -> None:
+    """Ключ вне набора обёртки — слепота, а не догадка.
+
+    Угадать, несёт он значение или нет, нечем, а ошибка в любую сторону молча
+    меняет, что считается командой.
+    """
+    said = ask("env --unknown-flag git push origin main")
+    assert said.returncode == 2
+    assert "неизвестен" in said.stderr
+
+
+def test_a_known_shell_cluster_still_works() -> None:
+    """Законная связка перед `-c` по-прежнему читается: `-lc`, `-xc`, `-ic`."""
+    for flag in ("-lc", "-xc", "-ic", "-c"):
+        said = ask(f'bash {flag} "git push origin agent/other"')
+        assert said.returncode == 2, f"{flag}: {said.stdout}{said.stderr}"
