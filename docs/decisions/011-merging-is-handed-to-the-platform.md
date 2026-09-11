@@ -137,19 +137,34 @@
 Ровно это и случилось с прежним доводом «трое из четырёх»: он был записан без
 следа и оказался неверен. Нашёл внешний взгляд на #202.
 
-Адреса на 11.09.2026, все на общей ветке своих проектов:
+**Владелец следа — владелец этого проекта** (`ArtVsMark`): он же владеет всеми
+четырьмя клонами, поэтому адреса ниже остаются достижимыми, пока жив он сам.
+Отдельного хранителя у следа нет и заводить его нечего — 185 требует живого
+владельца, а не второго человека.
 
-| проект | что смотрели |
-|---|---|
-| `Glossary-Python` | `scripts/automerge.py` — мутация `enablePullRequestAutoMerge` и её обоснование в шапке |
-| `Engineering-Incidents-Playbook` | `.github/workflows/automerge.yml` — та же мутация |
-| `stepik-python-grader` | `.github/workflows/merge-when-green.yml` (взводит и снимает) и `.github/workflows/merge-queue.yml` (двигает голову) |
-| `Claude-Code_Usage-Token` | `scripts/gh_rest.py` — запрет GraphQL и названная им цена: «авто-мержа GitHub у нас не будет» |
+Адреса на 11.09.2026, все на общей ветке своих проектов (владелец у всех —
+`ArtVsMark`):
 
-**Замер повторяем одной командой**, и это часть следа: поиск
-`enablePullRequestAutoMerge` по клонам семьи разделяет тех, кто взводит, от тех,
-кто сливает сам. Число в «Контексте» держится этой процедурой, а не памятью
-автора записи
+| проект | взводит авто-мерж | сливает сам |
+|---|---|---|
+| `Glossary-Python` | `scripts/automerge.py` — мутация и её обоснование в шапке | — |
+| `Engineering-Incidents-Playbook` | `.github/workflows/automerge.yml` — та же мутация | — |
+| `stepik-python-grader` | `.github/workflows/merge-when-green.yml` — взводит и снимает (`--disable`) | `scripts/gh_rest.py` — `PUT repos/{repo}/pulls/{number}/merge`, зовётся из `move_merge_queue.py` по `merge-queue.yml` |
+| `Claude-Code_Usage-Token` | — · запрет GraphQL и названная им цена: «авто-мержа GitHub у нас не будет» (`scripts/gh_rest.py`, шапка) | `scripts/merge_queue.py` — свой `PUT …/merge` |
+
+Столбцы разведены намеренно: адрес, показывающий ПРОДВИЖЕНИЕ очереди, ничего не
+говорит о том, кто делает само слияние, — а замер именно об этом.
+
+**Замер повторяется командой**, и это часть следа:
+
+```sh
+# у кого есть взведение авто-мержа площадки
+grep -rl enablePullRequestAutoMerge <клоны>/*/{scripts,.github/workflows}
+# а у кого — своё слияние
+grep -rn 'pulls/{number}/merge\|pulls/{n}/merge' <клоны>/*/scripts
+```
+
+Число в «Контексте» держится этой процедурой, а не памятью автора записи
 ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
 
 Ни один из четырёх не передаёт `commitHeadline`/`commitBody` — это тоже часть
