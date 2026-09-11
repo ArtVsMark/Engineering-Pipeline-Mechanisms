@@ -542,6 +542,45 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
         assert base != "HEAD", f"карта взята из головы изменения: {line.strip()}"
 
 
+def test_the_registry_is_swept_outside_a_review() -> None:
+    """Уборка разобранного идёт СВОИМ заходом, а не попутно с чужим разбором.
+
+    Снятие находки объявляет тело СЛИТОГО изменения, значит и момент уборки
+    задаёт слияние. Пока она шла только внутри разбора очередного изменения,
+    опустевшая очередь означала, что разобранное висит в реестре навсегда: убрать
+    его некому, — и приёмка «реестр пуст и держится сутки» была недостижима не
+    из-за работы, а из-за устройства.
+    """
+    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    document = yaml.safe_load(text)
+    sweeping = [
+        name
+        for name, job in document["jobs"].items()
+        if any("--sweep" in str(step.get("run", "")) for step in job.get("steps", []))
+    ]
+    assert sweeping, "ключ --sweep не подключён ни к одному джобу — правило без механизма (002)"
+    for name in sweeping:
+        condition = str(document["jobs"][name].get("if", ""))
+        assert "pull_request" not in condition, (
+            f"{name}: уборка привязана к событию изменения — на пустой очереди она не пойдёт"
+        )
+
+
+def test_a_job_condition_names_its_events_instead_of_excluding_them() -> None:
+    """Условие джоба ПЕРЕЧИСЛЯЕТ события, а не исключает одно.
+
+    «Не изменение» — список запрещённого: стоит завести третье событие, и джоб
+    поедет на нём молча
+    ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
+    Ровно это и случилось бы с уборкой, добавленной четвёртым событием.
+    """
+    document = yaml.safe_load((WORKFLOWS / "review.yml").read_text(encoding="utf-8"))
+    denying = [
+        name for name, job in document["jobs"].items() if "event_name !=" in str(job.get("if", ""))
+    ]
+    assert not denying, f"условие исключает событие вместо перечисления: {denying}"
+
+
 def test_a_failed_fetch_never_falls_back_to_the_head() -> None:
     """Не получилась общая ветка — карта не собирается вовсе.
 
