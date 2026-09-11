@@ -44,6 +44,8 @@ permissions:
   contents: read
 
 concurrency:
+  # Голова здесь не нужна: предмет — состояние истории общей ветки, а не
+  # конкретный коммит, и вытеснять старое поколение обязан новый заход (179).
   group: attribution-history
   cancel-in-progress: true
 

@@ -38,6 +38,8 @@ permissions:
   issues: write
 
 concurrency:
+  # Голова здесь не нужна: предмет — состояние внешних источников, а не
+  # коммит; последний заход обязан быть последним словом (179).
   group: drift
   cancel-in-progress: true
 

@@ -313,6 +313,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             return EXIT_NOT_CONFIGURED
 
+        # ОПИСАНИЕ СОБИРАЕТСЯ ДО ПЕРВОГО ОБРАЩЕНИЯ К ПЛОЩАДКЕ. Связь коммитов с
+        # задачей — свойство ВЕТКИ: она видна на дереве, и `describe` падает
+        # без неё третьим исходом. Пока сборка стояла после запроса «есть ли
+        # уже изменение», ветка без связи сначала опрашивала площадку и только
+        # потом отказывала — то есть шаг трогал чужую систему, зная заранее,
+        # что работать не будет (110). Нашла ревизия механизмов 11.09.2026.
+        title, body = describe(args.branch, args.base)
+
         owner = args.repo.split("/")[0]
         head = f"{owner}:{args.branch}"
         query = urllib.parse.urlencode({"head": head, "state": "open"})
@@ -328,11 +336,9 @@ def main(argv: list[str] | None = None) -> int:
             apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
             marks = {str(item.get("name", "")) for item in existing[0].get("labels") or []}
             apply_consent(args.repo, number, token, marks, args.dry_run)
-            title, body = describe(args.branch, args.base)
             sync_description(args.repo, number, token, title, body, args.dry_run)
             return EXIT_OK
 
-        title, body = describe(args.branch, args.base)
         created = ghrest.request(
             "POST",
             f"repos/{args.repo}/pulls",
