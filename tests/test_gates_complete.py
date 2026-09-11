@@ -643,24 +643,43 @@ def test_the_gate_does_not_take_its_own_run_for_the_summarised_one() -> None:
     assert "summarised_run(" in parser_source
 
 
-def test_a_summary_is_never_ready_before_what_it_summarises() -> None:
-    """Сводка не бывает готова раньше того, что она сводит.
+def test_the_gate_waits_for_the_roster_not_for_the_whole_run() -> None:
+    """Ждут СОСТАВ сводимого прогона, а не его завершение.
 
     ЗАМЕР 11.09.2026, #199, третий заход. Прогон `ci` создан в 15:14:18 и уже
     существовал, а джобов в нём не было ни одного — первый стартовал в
     15:14:55. Гейт опросил голову в 15:14:22, увидел пустой список джобов и
     только отменённые записи прежних заходов — и вынес «все записи отменены»
-    за одиннадцать секунд. Признак «джоб ещё едет» этого не ловит: ловит
-    только состояние самого сводимого прогона.
+    за одиннадцать секунд.
 
-    Отменённый прогон завершён, но вердикта не несёт: его погасила группа
-    отмены, следом идёт новый заход, и последнее слово за ним (179).
+    Ждать при этом ЗАВЕРШЕНИЯ нельзя: так совещательная проверка начинает
+    задерживать вердикт, то есть становится обязательной обходным путём (051).
+    Нашёл внешний взгляд на #199. Состава довольно — дальше каждое имя ждут
+    отдельно, и совещательное не ждут вовсе.
+
+    Отменённый прогон вердикта не несёт: следом идёт новый заход (179).
     """
-    assert not module.settled(None)
-    assert not module.settled({"status": "queued", "conclusion": None})
-    assert not module.settled({"status": "in_progress", "conclusion": None})
-    assert not module.settled({"status": "completed", "conclusion": "cancelled"})
-    assert module.settled({"status": "completed", "conclusion": "success"})
-    assert module.settled({"status": "completed", "conclusion": "failure"})
+    roster = {"lint": "queued"}
+    assert not module.named_its_jobs(None, roster)
+    assert not module.named_its_jobs({"status": "queued", "conclusion": None}, {})
+    assert not module.named_its_jobs({"status": "completed", "conclusion": "cancelled"}, roster)
+    assert module.named_its_jobs({"status": "queued", "conclusion": None}, roster)
+    assert module.named_its_jobs({"status": "in_progress", "conclusion": None}, roster)
+    assert module.named_its_jobs({"status": "completed", "conclusion": "success"}, roster)
     assert module.was_cancelled({"status": "completed", "conclusion": "cancelled"})
     assert not module.was_cancelled({"status": "completed", "conclusion": "failure"})
+
+
+def test_an_advisory_check_never_delays_the_verdict() -> None:
+    """Совещательная проверка вердикта не держит — ни красным, ни ожиданием.
+
+    `.pipeline.yml` объявляет `test-next` совещательным: «слияния не держит».
+    Ожидание всего прогона `ci` делало его задерживающим на КАЖДОМ изменении —
+    обязательным обходным путём. Здесь предмет прямой: незавершённая
+    совещательная запись не поднимает флаг ожидания.
+    """
+    runs = [run("lint"), run("test"), run("test-next", status="in_progress", conclusion=None)]
+    problems, waiting = module.verdict(runs, REQUIRED, "ci-complete", "1")
+    assert problems == [] and waiting is False, (problems, waiting)
+    advisory, _ = module.verdict(runs, ["test-next"], "ci-complete", "1", strict_missing=False)
+    assert advisory == [], advisory
