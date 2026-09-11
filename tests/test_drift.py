@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -299,3 +301,54 @@ def test_a_non_numeric_matrix_entry_does_not_fell_the_pass() -> None:
     assert module.order("pypy3.10") == ()
     assert module.order("3.9") < module.order("3.10")
     assert sorted(["3.13-dev", "3.10", "3.9"], key=module.order) == ["3.13-dev", "3.9", "3.10"]
+
+
+# --- номера контрактов: их шесть, и двигаются они порознь ---------------------
+
+
+def test_every_contract_of_ours_is_compared(tmp_path: Path) -> None:
+    """Сверяются все наши номера, а не один.
+
+    Каталог отдаёт блок `contracts` со всеми форматами разом, и двигаются они
+    ПОРОЗНЬ: подъём выгрузки не означает подъёма формы ответа. Пока сверялась
+    одна `bindings`, отставание `proposals` жило незамеченным — файл валиден,
+    номер старый, и обе стороны видят своё зелёное. Замер 11.09.2026: каталог
+    поднял шесть контрактов разом, у нас разошлись два.
+    """
+    (tmp_path / ".rules").mkdir()
+    (tmp_path / ".rules" / "proposals.json").write_text('{"schema": "1.0"}', encoding="utf-8")
+    (tmp_path / ".rules" / "showcase.json").write_text('{"schema": "1.1"}', encoding="utf-8")
+    said = module.ours_by_contract({"schema": "1.3"}, tmp_path)
+    assert ("bindings", ".rules/bindings.json", "1.3") in said
+    assert ("proposals", ".rules/proposals.json", "1.0") in said
+    assert ("showcase", ".rules/showcase.json", "1.1") in said
+
+
+def test_a_lagging_contract_is_a_drift(tmp_path: Path) -> None:
+    """Отставший номер — сдвиг внешнего входа, а не мелочь оформления.
+
+    Подъём контракта означает ПЕРЕЧИТАТЬ ответы, а не только починить число
+    (157). Поэтому находка называет файл и говорит о перечитывании.
+    """
+    (tmp_path / ".rules").mkdir()
+    (tmp_path / ".rules" / "proposals.json").write_text('{"schema": "1.0"}', encoding="utf-8")
+    export = {"contracts": {"export": "1.7", "bindings": "1.3", "proposals": "1.1"}, "count": 1}
+    mine = {"schema": "1.3", "answers_to": "1.7", "rules": {"001": {}}}
+    was = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        found = module.catalogue_moved(export, mine)
+    finally:
+        os.chdir(was)
+    names = {one.source for one in found}
+    assert "proposals-schema" in names, names
+    assert "bindings-schema" not in names
+
+
+def test_foreign_contracts_are_not_ours(tmp_path: Path) -> None:
+    """`consumers` и `where` — файлы САМОГО каталога, и сверять нам в них нечего.
+
+    Требовать от себя чужой номер значило бы краснеть на том, чего у нас нет
+    и быть не должно (051).
+    """
+    assert {name for name, _ in module.OUR_CONTRACTS} == {"bindings", "proposals", "showcase"}

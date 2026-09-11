@@ -40,6 +40,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 import findings
@@ -141,6 +142,40 @@ def ours() -> dict[str, Any]:
     return answer
 
 
+#: Наши файлы, отвечающие контрактам каталога: имя контракта → путь и ключ
+#: версии. Контракты `consumers` и `where` сюда не входят — это файлы САМОГО
+#: каталога (реестр потребителей и карта «где действует правило»), и сверять
+#: нам в них нечего.
+OUR_CONTRACTS: Final = (
+    ("bindings", ".rules/bindings.json"),
+    ("proposals", ".rules/proposals.json"),
+    ("showcase", ".rules/showcase.json"),
+)
+
+
+def ours_by_contract(mine: dict[str, Any], root: Path | None = None) -> list[tuple[str, str, str]]:
+    """Наши объявленные номера контрактов: имя, путь, версия.
+
+    Ответ по правилам уже прочитан зовущим и передаётся готовым — второе чтение
+    того же файла разошлось бы с первым молча (022). Остальные читаются здесь.
+
+    Файла нет или он без `schema` — номер пустой, и сверять нечего: ключа нет
+    значит «не прочитали», а не «ноль» (так же читает это сам каталог).
+    """
+    said: list[tuple[str, str, str]] = []
+    base = root or Path()
+    for name, path in OUR_CONTRACTS:
+        if name == "bindings":
+            said.append((name, path, str(mine.get("schema") or "")))
+            continue
+        try:
+            answer = json.loads((base / path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        said.append((name, path, str(answer.get("schema") or "")))
+    return said
+
+
 def catalogue_moved(export: dict[str, Any], mine: dict[str, Any]) -> list[Drift]:
     """Каталог сдвинулся: новые правила или новая версия выгрузки.
 
@@ -160,15 +195,22 @@ def catalogue_moved(export: dict[str, Any], mine: dict[str, Any]) -> list[Drift]
                 "перечитать ответы под новую выгрузку, затем поднять `answers_to` (157)",
             )
         )
-    bindings, mine_schema = str(contracts.get("bindings") or ""), str(mine.get("schema") or "")
-    if bindings and mine_schema and bindings != mine_schema:
-        found.append(
-            Drift(
-                "bindings-schema",
-                f"каталог ждёт схему ответа {bindings}, у нас {mine_schema}",
-                "привести `.rules/bindings.json` к схеме каталога",
+    # СВЕРЯЮТСЯ ВСЕ НАШИ НОМЕРА, А НЕ ОДИН. Каталог отдаёт блок `contracts` со
+    # всеми форматами разом, и двигаются они ПОРОЗНЬ: подъём выгрузки не
+    # означает подъёма формы ответа, и наоборот. Пока сверялась одна `bindings`,
+    # отставание `proposals` жило незамеченным — файл валиден, номер старый,
+    # и обе стороны видят своё зелёное. Замер 11.09.2026: каталог поднял шесть
+    # контрактов разом, у нас разошлись два.
+    for name, path, said in ours_by_contract(mine):
+        theirs_now = str(contracts.get(name) or "")
+        if theirs_now and said and theirs_now != said:
+            found.append(
+                Drift(
+                    f"{name}-schema",
+                    f"каталог ждёт {name} {theirs_now}, у нас {said}",
+                    f"привести `{path}` к контракту каталога и перечитать ответы (157)",
+                )
             )
-        )
     theirs_count = export.get("count")
     answered = len(mine.get("rules") or {})
     if isinstance(theirs_count, int) and theirs_count != answered:
