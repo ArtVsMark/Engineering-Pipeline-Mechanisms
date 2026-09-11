@@ -40,14 +40,19 @@ REFERENCE_RE = re.compile(r"`(?P<module>[a-z_][a-z0-9_]*)\.(?P<name>[a-z_][a-z0-
 #: неразличимы. Перечислены, а не угаданы по длине (068).
 FILE_SUFFIXES = frozenset({"py", "yml", "yaml", "json", "md", "svg", "txt", "toml", "cfg", "lock"})
 
-#: Файлы, где такие адреса — ДАННЫЕ, а не ссылки. Список закрытый, и у каждого
-#: названа причина: иначе он станет местом, куда сваливают неудобное (154).
-NOT_REFERENCES = {
-    "test_finding_identity.py": (
-        "дословные записи реестра находок: их текст — предмет проверки, "
-        "и править его значило бы подделать замер"
-    ),
-}
+#: Файлы, где такие адреса были бы ДАННЫМИ, а не ссылками: дословные записи
+#: реестра находок, чей текст сам является предметом проверки.
+#:
+#: СПИСОК ПУСТ, И ЭТО СОСТОЯНИЕ, А НЕ ЗАБЫВЧИВОСТЬ. Он был заведён сразу с
+#: одной записью — «на всякий случай», — а в названном файле не нашлось ни
+#: одного адреса, который поймал бы образец. Исключение, чья премиса не
+#: проверена, выглядит защитой и ею не является
+#: ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+#: Нашёл внешний взгляд на #211.
+#:
+#: Новая запись сюда допускается, только если файл ДЕЙСТВИТЕЛЬНО несёт такой
+#: адрес: это проверяет `test_every_exception_is_earned`.
+NOT_REFERENCES: dict[str, str] = {}
 
 
 def names_of(path: Path) -> set[str]:
@@ -99,3 +104,23 @@ def test_the_gate_has_a_subject() -> None:
         if found.group("module") in LIVE and found.group("name") not in FILE_SUFFIXES
     )
     assert seen, "адресов вида `модуль.имя` в дереве нет — предмет проверки не найден"
+
+
+def test_every_exception_is_earned() -> None:
+    """Исключение допускается, только если файл ДЕЙСТВИТЕЛЬНО несёт такой адрес.
+
+    Незаслуженное исключение выглядит защитой и ею не является: читатель верит,
+    что предмет там есть и намеренно пропущен, а его нет вовсе (044, 075).
+    Ровно это и было: список завели с одной записью «на всякий случай», и
+    поймал её внешний взгляд, а не прогон.
+    """
+    for name, why in NOT_REFERENCES.items():
+        path = next((one for one in SOURCES if one.name == name), None)
+        assert path is not None, f"исключение названо для файла, которого нет: {name}"
+        assert why.strip(), f"{name}: исключение без причины (154)"
+        addresses = [
+            found.group(0)
+            for found in REFERENCE_RE.finditer(path.read_text(encoding="utf-8"))
+            if found.group("module") in LIVE and found.group("name") not in FILE_SUFFIXES
+        ]
+        assert addresses, f"{name}: исключать нечего — в файле нет ни одного такого адреса"
