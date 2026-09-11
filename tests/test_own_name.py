@@ -110,3 +110,37 @@ def test_an_empty_tree_is_the_third_outcome(tmp_path: Path) -> None:
     root = repo_with(tmp_path, "ни одного адреса\n")
     assert module.mentions(root) == {}
     assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+
+
+def test_a_foreign_rename_is_caught_and_named_as_foreign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Чужое переименование ловится и НАЗЫВАЕТСЯ чужим (находка #130).
+
+    Прежде докстрока обещала, что чужие имена не предмет, а второй проход
+    спрашивал площадку обо всех — переименованный каталог краснил бы гейт
+    вопреки написанному. Ссылка чинится у нас и нами, поэтому находка наша; но
+    кто переименовался — своё или чужое — читателю сказано (154).
+    """
+    root = repo_with(tmp_path, "https://github.com/other/catalogue/x\n")
+    monkeypatch.setattr(module, "canon", lambda: ("o/name", True))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "token")
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: {"full_name": "other/renamed"})
+    code = module.main(["--root", str(root)])
+    said = capsys.readouterr().out
+    assert code == module.EXIT_FOUND, said
+    assert "other/renamed" in said and "чужое" in said, said
+
+
+def test_our_own_rename_is_named_as_ours(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Своё переименование названо своим: отвечает за него не тот, кто за чужое."""
+    root = repo_with(tmp_path, "https://github.com/o/name/x\n")
+    monkeypatch.setattr(module, "canon", lambda: ("o/name", True))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "token")
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: {"full_name": "o/new"})
+    code = module.main(["--root", str(root)])
+    said = capsys.readouterr().out
+    assert code == module.EXIT_FOUND, said
+    assert "своё" in said, said

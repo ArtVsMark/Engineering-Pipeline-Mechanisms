@@ -245,7 +245,13 @@ def own_jobs(repo: str, run_id: str, token: str) -> dict[str, str]:
     if not repo or not run_id:
         return {}
     try:
-        payload = ghrest.request("GET", f"repos/{repo}/actions/runs/{run_id}/jobs", token) or {}
+        # СПИСОК ИДЁТ СТРАНИЦАМИ. Умолчание площадки — тридцать джобов на
+        # страницу, и при большем числе хвост пропадал молча: джоб за краем
+        # выглядел «не объявленным своим прогоном», а это ровно то различие,
+        # ради которого список и читается. У нас джобов сейчас меньше, но
+        # матрица версий растёт именно так — по одному имени за версию.
+        # Нашёл внешний взгляд на #104.
+        jobs = list(ghrest.paginate(f"repos/{repo}/actions/runs/{run_id}/jobs", token, key="jobs"))
     except ghrest.TransportError:
         # Не спросили — значит различить нечем, и молчаливой поблажки быть не
         # должно: разбор вернётся к прежней строгости (045).
@@ -258,7 +264,7 @@ def own_jobs(repo: str, run_id: str, token: str) -> dict[str, str]:
     # Нашёл внешний взгляд на #148.
     return {
         str(job.get("name", "")): str(job.get("status", ""))
-        for job in payload.get("jobs", [])
+        for job in jobs
         if isinstance(job, dict) and job.get("conclusion") is None
     }
 

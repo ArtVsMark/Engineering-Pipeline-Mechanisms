@@ -29,6 +29,13 @@ LABELS: Final = Path(".github/labels.yml")
 #: Ответ проекта каталогу правил и канал предложений в него.
 BINDINGS: Final = Path(".rules/bindings.json")
 PROPOSALS: Final = Path(".rules/proposals.json")
+
+#: Ответ проекта по набору вопросов витрины — файл каталога по форме, наш по
+#: содержанию.
+SHOWCASE: Final = Path(".rules/showcase.json")
+
+#: Объявленные расписания и роль каждого: наблюдает оно или действует.
+SCHEDULES: Final = Path(".rules/schedules.json")
 #: Фрагменты журнала и собранный журнал.
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
@@ -50,6 +57,8 @@ ALL: Final = (
     LABELS,
     BINDINGS,
     PROPOSALS,
+    SHOWCASE,
+    SCHEDULES,
     FRAGMENTS,
     RELEASED,
     CHANGELOG,

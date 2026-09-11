@@ -48,3 +48,47 @@ def test_a_non_empty_answer_without_our_task_is_an_absence(
         lambda *_, **__: iter([{"number": 7, "body": "чужая задача"}]),
     )
     assert module.live_issue("o/r", "token") == (None, "")
+
+
+def test_a_listing_of_only_changes_is_not_an_absence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """В ответе одни ИЗМЕНЕНИЯ и ни одной задачи — это не «задачи нет» (находка #144).
+
+    Ветка `seen` считает ЗАПИСИ ответа, а не задачи: изменения приходят в том
+    же списке и отсеиваются ниже. Если площадка отдала только их, счёт записей
+    ненулевой, и отсутствие нашей задачи законно — заводить вторую живую не
+    нужно. Ветка не была покрыта ничем, а разница здесь та же, что стоила
+    дубля #139: «пусто» и «нашей нет» — разные состояния (045).
+    """
+    monkeypatch.setattr(
+        module.ghrest,
+        "paginate",
+        lambda *_, **__: iter([{"number": 7, "body": "", "pull_request": {"url": "…"}}]),
+    )
+    assert module.live_issue_seen("o/r", "token") == (None, "", "")
+
+
+def test_an_empty_answer_is_suspicious_for_the_dated_reader_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Тот же запрет на пустой ответ держится и у чтения с датой.
+
+    Два входа в один источник расходятся тем охотнее, чем невиннее выглядят
+    (022): здесь проверяется, что строгость у них одна.
+    """
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([]))
+    with pytest.raises(module.ghrest.TransportError):
+        module.live_issue_seen("o/r", "token")
+
+
+def test_the_earliest_live_task_wins_and_the_rest_are_named(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Живых задач несколько — пишем в самую раннюю и называем лишние (154)."""
+    rows = [
+        {"number": 139, "body": module.MARKER, "updated_at": "b"},
+        {"number": 23, "body": module.MARKER, "updated_at": "a"},
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(rows))
+    number, _, seen = module.live_issue_seen("o/r", "token")
+    assert (number, seen) == (23, "a")
+    assert "#139" in capsys.readouterr().err
