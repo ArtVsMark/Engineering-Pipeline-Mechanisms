@@ -677,3 +677,19 @@ def test_the_stale_threshold_says_it_is_an_assumption() -> None:
     place = source.index("STALE_AFTER: Final")
     said = source[max(0, place - 1200) : place]
     assert "допущение, а не замер" in said.lower(), "порог подан как измеренная величина"
+
+
+def test_the_debt_count_asks_the_owner_of_the_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Открытость состояния спрашивается у того, кто его ведёт (находка #190).
+
+    У состояний реестра два читателя — сам реестр и счёт долга, — а сравнение
+    было написано дважды. Одно из состояний несёт исход суффиксом, точное
+    равенство его не берёт, и такая запись выпадала из долга молча. Первый
+    конец чинился накануне в `unlooked`, второй остался здесь (090).
+    """
+    unlooked = load_script("unlooked.py")
+    odd = f"{unlooked.STATE_ODD}: timed_out"
+    body = f"- #7 · {odd} · 2026-09-11\n- #8 · {unlooked.STATE_LATE} · 2026-09-11\n"
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (99, body))
+    left = debt.unlooked_debt("o/r", "token")
+    assert [entry.number for entry in left] == [7], "суффиксная запись выпала из счёта долга"

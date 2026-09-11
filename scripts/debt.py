@@ -101,10 +101,14 @@ def unlooked_debt(repo: str, token: str) -> list[unlooked.Entry]:
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
     """
     _, body = findings.live_issue(repo, token, unlooked.MARKER)
+    # ОТКРЫТОСТЬ СОСТОЯНИЯ СПРАШИВАЕТСЯ У ТОГО, КТО ЕГО ВЕДЁТ, а не сверяется
+    # здесь вторым сравнением. Состояний стало восемь, и одно из них несёт
+    # исход суффиксом — точное равенство его не берёт, и такая запись выпадала
+    # из счёта долга молча. Первый конец этой же ошибки чинился в `unlooked`
+    # накануне; второй остался здесь, потому что читателя у состояний два, а
+    # правка была одна (090). Нашёл внешний взгляд на #190.
     return [
-        entry
-        for entry in unlooked.parse_entries(body).values()
-        if entry.state in unlooked.OPEN_STATES
+        entry for entry in unlooked.parse_entries(body).values() if unlooked.is_open(entry.state)
     ]
 
 

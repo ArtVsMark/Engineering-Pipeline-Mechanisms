@@ -76,7 +76,7 @@ REF_PREFIX: Final = "refs/heads/"
 #: её набор: список закрытый, а ключ вне его делает сторожа слепым, и слепой
 #: отвергает (068).
 WRAPPERS: Final[dict[str, frozenset[str]]] = {
-    "env": frozenset({"-u", "--unset"}),
+    "env": frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}),
     "command": frozenset(),
     "nice": frozenset({"-n", "--adjustment"}),
     "nohup": frozenset(),
@@ -87,14 +87,22 @@ WRAPPERS: Final[dict[str, frozenset[str]]] = {
 #: Ключи обёрток БЕЗ значения: их пропускают по одному слову. Тоже поимённо и
 #: по той же причине.
 WRAPPER_FLAGS: Final[dict[str, frozenset[str]]] = {
-    "env": frozenset({"-i", "--ignore-environment", "-0", "--null", "-v"}),
+    "env": frozenset({"-i", "--ignore-environment", "-0", "--null", "-v", "--debug"}),
     "command": frozenset({"-p", "-v", "-V"}),
     "nice": frozenset(),
     "nohup": frozenset(),
     "stdbuf": frozenset(),
-    "time": frozenset({"-p", "-v", "--verbose", "--portability"}),
+    "time": frozenset({"-p", "-v", "--verbose", "--portability", "-a", "--append"}),
     "timeout": frozenset({"--preserve-status", "--foreground", "-v", "--verbose"}),
 }
+#: ЧТО ДЕЛАЕТ НЕПОЛНОТА ЭТИХ СПИСКОВ, И ПОЧЕМУ ОНА ТЕРПИМА. Набор ключей у
+#: утилиты растёт с версиями, и список по памяти отстаёт — `env -C`, `env -S`,
+#: `time -a` первая редакция не знала (нашёл внешний взгляд на #189). Цена
+#: отставания названа и идёт в безопасную сторону: неизвестный ключ делает
+#: сторожа слепым, а слепой ОТВЕРГАЕТ. То есть законная команда получит отказ с
+#: названной причиной — «ключ сторожу неизвестен», — и человек либо перепишет
+#: её проще, либо допишет ключ сюда. Обратная ошибка — угадать и пропустить
+#: толчок — здесь невозможна по построению, и это и есть смысл выбора (051).
 #: Сколько СВОИХ позиционных слов обёртка съедает перед командой. У `timeout`
 #: это длительность (`timeout 30 git push …`) — не ключ, а обычное слово, и без
 #: этого числа разбор принимал его за имя программы и уходил ни с чем.
@@ -168,6 +176,23 @@ def script_of(segment: list[str]) -> tuple[str | None, str]:
                 return segment[place + 1], ""
             return None, f"у оболочки ключ «{word}» без скрипта — читать нечего"
         return None, f"связка ключей «{word}» неоднозначна: где в ней скрипт, сторожу неизвестно"
+    return None, ""
+
+
+def split_string_of(segment: list[str]) -> tuple[str | None, str]:
+    """Строка `env -S «…»`, если она есть: `env` разбивает её сам, как оболочка."""
+    for place, word in enumerate(segment[1:], start=1):
+        if word == "--":
+            return None, ""
+        head, sign, joined = word.partition("=")
+        if head in ("-S", "--split-string"):
+            if sign:
+                return joined, ""
+            if place + 1 < len(segment):
+                return segment[place + 1], ""
+            return None, "у `env -S` нет строки — читать нечего"
+        if word.startswith("-S") and len(word) > 2:
+            return word[2:], ""
     return None, ""
 
 
@@ -255,6 +280,26 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
                 return [], blind
             found.extend(deeper)
         return found or [segment], ""
+    if first == "env":
+        # `env -S "git push …"` — та же передача СКРИПТА строкой, что и `-c` у
+        # оболочки: `env` сам разбивает её на слова. Пропустить её как обычное
+        # значение ключа значило бы остаться без команды — сторож отвергал бы
+        # такую строку слепотой, не назвав ветки. Нашёл внешний взгляд на #189.
+        script, blind = split_string_of(segment)
+        if blind:
+            return [], blind
+        if script is not None:
+            try:
+                inner = shlex.split(script)
+            except ValueError:
+                return [], f"строка `env -S` не разбирается: {script[:60]}"
+            split: list[list[str]] = []
+            for part in segments(inner):
+                deeper, blind = unwrap(part, depth - 1)
+                if blind:
+                    return [], blind
+                split.extend(deeper)
+            return split or [segment], ""
     if first in WRAPPERS and len(segment) > 1:
         rest, blind = after_wrapper(first, segment[1:])
         if blind:
