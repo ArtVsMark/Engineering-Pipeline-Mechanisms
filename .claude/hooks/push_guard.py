@@ -64,6 +64,58 @@ GLOBAL_WITH_VALUE: Final = frozenset(
 )
 #: Приставка ссылки: в `refs/heads/agent/x` предметом сверки служит имя ветки.
 REF_PREFIX: Final = "refs/heads/"
+#: Обёртки, за которыми команда идёт СЛЕДУЮЩИМ словом. Список закрытый и
+#: каждая названа: «похоже на обёртку» пропустило бы и то, что обёрткой не
+#: является (068). `env` перед командой несёт ещё и присваивания `VAR=value` —
+#: они пропускаются отдельно.
+WRAPPERS: Final = frozenset({"env", "command", "nice", "nohup", "stdbuf", "time"})
+#: Обёртки, которые принимают СКРИПТ строкой: `bash -c "git push …"`. Их
+#: содержимое разбирается заново, как отдельная команда.
+SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+#: Насколько глубоко сторож идёт внутрь вложенных оболочек. Предел нужен:
+#: `bash -c "bash -c …"` без него ушёл бы в бесконечность, а не в отказ.
+DEPTH: Final = 4
+
+
+def is_git(word: str) -> bool:
+    """Слово вызывает git — под любым написанием пути.
+
+    Сторож ловил только буквальное `git`, и `/usr/bin/git push` проходил мимо
+    целиком. Признак — ИМЯ программы, а не строка вызова: путь до неё дело
+    окружения, а не намерения. Нашёл внешний взгляд на #143.
+    """
+    return word.rsplit("/", 1)[-1] == "git"
+
+
+def unwrap(segment: list[str], depth: int) -> list[list[str]]:
+    """Снимает обёртки и раскрывает `bash -c «…»`; отдаёт команды к разбору.
+
+    ОБЁРТКА — НЕ МАСКИРОВКА, И СПИСОК ЕЁ ЗАКРЫТ. `env git push`, `nohup git
+    push`, `bash -c "git push …"` — законные написания того же действия, и
+    сторож, смотрящий только на первое слово, пропускал их все. Список
+    разрешительный: что не названо обёрткой, обёрткой не считается (068).
+    """
+    if depth <= 0 or not segment:
+        return [segment]
+    first = segment[0].rsplit("/", 1)[-1]
+    # `VAR=value git push` — присваивания перед командой, своё написание того же.
+    if "=" in first and not first.startswith("=") and len(segment) > 1:
+        return unwrap(segment[1:], depth - 1)
+    if first in WRAPPERS and len(segment) > 1:
+        return unwrap(segment[1:], depth - 1)
+    if first in SHELLS:
+        found: list[list[str]] = []
+        for place, word in enumerate(segment[1:], start=1):
+            if word == "-c" and place + 1 < len(segment):
+                try:
+                    inner = shlex.split(segment[place + 1])
+                except ValueError:
+                    break
+                for part in segments(inner):
+                    found.extend(unwrap(part, depth - 1))
+                break
+        return found or [segment]
+    return [segment]
 
 
 def push_targets(command: str) -> list[str] | None:
@@ -76,14 +128,15 @@ def push_targets(command: str) -> list[str] | None:
         words = shlex.split(command)
     except ValueError:
         return None
-    for segment in segments(words):
-        if not segment or segment[0] != "git":
-            continue
-        rest = segment[1:]
-        while rest and rest[0].startswith("-"):
-            rest = rest[2:] if rest[0] in GLOBAL_WITH_VALUE else rest[1:]
-        if rest and rest[0] == "push":
-            return named_branches(rest[1:])
+    for part in segments(words):
+        for segment in unwrap(part, DEPTH):
+            if not segment or not is_git(segment[0]):
+                continue
+            rest = segment[1:]
+            while rest and rest[0].startswith("-"):
+                rest = rest[2:] if rest[0] in GLOBAL_WITH_VALUE else rest[1:]
+            if rest and rest[0] == "push":
+                return named_branches(rest[1:])
     return None
 
 
@@ -123,15 +176,28 @@ def named_branches(arguments: list[str]) -> list[str]:
     return found
 
 
-def head() -> str:
-    """Текущая ветка; пусто — головы нет (отсоединённое состояние)."""
+def head() -> tuple[str, str]:
+    """Текущая ветка и причина, по которой её не узнать.
+
+    ДВА ОТВЕТА, А НЕ ОДИН, и разница здесь стоит половины сторожа. Прежде отказ
+    `git rev-parse` отдавался пустой строкой — той же, что и отсоединённая
+    голова, — и половина проверки («толчок мимо своей ветки») исчезала МОЛЧА.
+    Докстрока при этом уверяла, что пусто бывает только при отсоединённой
+    голове; на деле пусто бывает и когда git не нашёлся, и когда каталог не
+    репозиторий. Нашёл внешний взгляд на #143.
+
+    Отсоединённая голова даёт `HEAD` и код 0 — это не отказ, и сюда не
+    попадает.
+    """
     said = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         capture_output=True,
         text=True,
         encoding="utf-8",
     )
-    return said.stdout.strip() if said.returncode == 0 else ""
+    if said.returncode != 0:
+        return "", said.stderr.strip() or f"git rev-parse вернул {said.returncode}"
+    return said.stdout.strip(), ""
 
 
 def refused(targets: list[str], current: str) -> str:
@@ -168,7 +234,27 @@ def main() -> int:
     targets = push_targets(command)
     if not targets:
         return 0
-    why = refused(targets, head())
+    current, broken = head()
+    # ЗАПРЕТ НА ОБЩУЮ ВЕТКУ ГОЛОВЫ НЕ ТРЕБУЕТ, и спрашивается он первым: его
+    # причина точнее, чем «сторож ослеп», и читателю нужна именно она (154).
+    shared = refused(targets, "")
+    if shared:
+        print(f"Толчок отвергнут до вызова git: {shared}", file=sys.stderr)
+        return 2
+    if broken:
+        # СТОРОЖ, КОТОРЫЙ НЕ СМОГ ПРОВЕРИТЬ, НЕ МАШЕТ РУКОЙ. Толчок необратим:
+        # отправленную ветку окно удалить не может, и цена этого уже оплачена
+        # (#116, воскрешённая ветка после слияния). Пропустить здесь значило бы
+        # завести тихий запасной ответ ровно в том месте, ради которого сторож
+        # и стоит (045).
+        print(
+            "Толчок отвергнут до вызова git: сторож не смог узнать текущую ветку — "
+            f"{broken}. Проверка «толчок мимо своей ветки» не выполнена, а не пройдена. "
+            "Почините git в этом каталоге и повторите.",
+            file=sys.stderr,
+        )
+        return 2
+    why = refused(targets, current)
     if not why:
         return 0
     print(f"Толчок отвергнут до вызова git: {why}", file=sys.stderr)
