@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -353,7 +354,8 @@ def test_a_closed_inbox_is_still_read(monkeypatch: pytest.MonkeyPatch) -> None:
             ]
         ),
     )
-    body, note, seen = debt.inbox_body("o/r", "token")
+    closed = debt.closed_issues("o/r", "token")
+    body, note, seen = debt.inbox_body("o/r", "token", closed)
     assert debt.rules_debt(body) == (0, 0, 1)
     assert note == debt.CLOSED_INBOX
     assert seen == "2026-09-10T11:22:13Z", "закрытая задача отдала числа без их возраста"
@@ -366,7 +368,7 @@ def test_an_open_inbox_wins_over_a_closed_one(monkeypatch: pytest.MonkeyPatch) -
         "live_issue_seen",
         lambda *_, **__: (37, "живое тело", "2026-09-10T12:00:00Z"),
     )
-    body, note, seen = debt.inbox_body("o/r", "token")
+    body, note, seen = debt.inbox_body("o/r", "token", [])
     assert body == "живое тело"
     assert note == ""
     assert seen == "2026-09-10T12:00:00Z"
@@ -380,7 +382,7 @@ def test_no_inbox_at_all_is_still_unknown(monkeypatch: pytest.MonkeyPatch) -> No
     """
     monkeypatch.setattr(debt.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from([]))
-    assert debt.inbox_body("o/r", "token") == ("", "", "")
+    assert debt.inbox_body("o/r", "token", []) == ("", "", "")
     assert debt.rules_debt("") is None
 
 
@@ -449,6 +451,25 @@ def test_a_forged_old_snapshot_reads_differently(monkeypatch: pytest.MonkeyPatch
 # --- застрявшие изменения: источники 1 и 2 ------------------------------------
 
 
+def walks(
+    changes: list[dict[str, Any]], runs: list[dict[str, Any]] | None = None
+) -> Callable[..., Iterator[dict[str, Any]]]:
+    """Подделка страничного обхода: открытые изменения и записи проверок.
+
+    Список открытых изменений идёт СТРАНИЦАМИ, а не одним ответом: одна
+    страница молча теряет хвост, и застрявшее за краем в долг не попадало.
+    Подделка повторяет тот же вход, иначе тест проверял бы не то, что пойдёт
+    в прогоне.
+    """
+
+    def paginate(path: str, *_: object, **__: object) -> Iterator[dict[str, Any]]:
+        if path.startswith("repos/o/r/pulls?"):
+            return iter(changes)
+        return iter(runs or [])
+
+    return paginate
+
+
 def test_a_conflict_is_asked_per_change(monkeypatch: pytest.MonkeyPatch) -> None:
     """Состояние слияния берётся из одиночного ответа, а не из списка.
 
@@ -459,14 +480,10 @@ def test_a_conflict_is_asked_per_change(monkeypatch: pytest.MonkeyPatch) -> None
     listing = [{"number": 5, "title": "работа", "draft": False, "head": {"sha": "abc"}}]
 
     def request(method: str, path: str, *_: object, **__: object) -> object:
-        if path.startswith("repos/o/r/pulls?"):
-            return listing
-        if path == "repos/o/r/pulls/5":
-            return {"mergeable_state": "dirty"}
-        return None
+        return {"mergeable_state": "dirty"} if path == "repos/o/r/pulls/5" else None
 
     monkeypatch.setattr(debt.ghrest, "request", request)
-    monkeypatch.setattr(debt.ghrest, "paginate", lambda *_, **__: iter([]))
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
     conflicting, unknown, red = debt.stuck_changes("o/r", "token")
     assert conflicting == ["#5 — работа"]
     assert (unknown, red) == ([], [])
@@ -481,14 +498,10 @@ def test_an_unknown_merge_state_is_not_a_clean_one(monkeypatch: pytest.MonkeyPat
     listing = [{"number": 6, "title": "работа", "draft": False, "head": {"sha": "abc"}}]
 
     def request(method: str, path: str, *_: object, **__: object) -> object:
-        if path.startswith("repos/o/r/pulls?"):
-            return listing
-        if path == "repos/o/r/pulls/6":
-            return {"mergeable_state": "unknown"}
-        return None
+        return {"mergeable_state": "unknown"} if path == "repos/o/r/pulls/6" else None
 
     monkeypatch.setattr(debt.ghrest, "request", request)
-    monkeypatch.setattr(debt.ghrest, "paginate", lambda *_, **__: iter([]))
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
     conflicting, unknown, red = debt.stuck_changes("o/r", "token")
     assert (conflicting, red) == ([], [])
     assert unknown == ["#6 — работа"]
@@ -497,12 +510,8 @@ def test_an_unknown_merge_state_is_not_a_clean_one(monkeypatch: pytest.MonkeyPat
 def test_a_draft_is_not_stuck(monkeypatch: pytest.MonkeyPatch) -> None:
     """Черновик застрять не может: он и не подан."""
     listing = [{"number": 7, "title": "черновик", "draft": True, "head": {"sha": "abc"}}]
-    monkeypatch.setattr(
-        debt.ghrest,
-        "request",
-        lambda method, path, *_, **__: listing if path.startswith("repos/o/r/pulls?") else None,
-    )
-    monkeypatch.setattr(debt.ghrest, "paginate", lambda *_, **__: iter([]))
+    monkeypatch.setattr(debt.ghrest, "request", lambda *_, **__: None)
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
     assert debt.stuck_changes("o/r", "token") == ([], [], [])
 
 
@@ -554,3 +563,117 @@ def test_the_shape_report_names_every_candidate() -> None:
 def test_the_revision_window_is_named_in_the_line() -> None:
     """Строка называет границу утверждения: живого нет ИМЕННО среди этих задач."""
     assert str(debt.CLOSED_WINDOW) in debt.shape_report([], [])[1]
+
+
+# --- что нашёл внешний взгляд: каждая находка проверена отказом ---------------
+
+
+def test_the_open_change_listing_goes_by_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Список открытых изменений идёт страницами, а не одной (находка #132).
+
+    Одна страница молча теряет хвост: при числе открытых изменений больше
+    пятидесяти застрявшее уезжало за край, и механизм отвечал «застрявших
+    нет», не посмотрев на них. Проверяется тем, что найдено ИМЕННО то
+    изменение, которое лежит за пятидесятым.
+    """
+    listing = [
+        {"number": n, "title": f"работа {n}", "draft": False, "head": {"sha": "abc"}}
+        for n in range(1, 61)
+    ]
+    monkeypatch.setattr(
+        debt.ghrest,
+        "request",
+        lambda method, path, *_, **__: (
+            {"mergeable_state": "dirty"}
+            if path == "repos/o/r/pulls/57"
+            else {"mergeable_state": "clean"}
+        ),
+    )
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
+    conflicting, _, _ = debt.stuck_changes("o/r", "token")
+    assert conflicting == ["#57 — работа 57"], "хвост списка потерян — читается одна страница"
+
+
+def test_a_snapshot_dated_in_the_future_is_unknown() -> None:
+    """Дата снимка в будущем — «неизвестно», а не «очень свежо» (находка #126).
+
+    «Снято -1 ч назад» читается как исправная работа: расхождение часов
+    выглядело бы свежестью. Неизвестность называется, а не подменяется бодрым
+    числом (045).
+    """
+    said = debt.said_age(timedelta(hours=-1))
+    assert "-1" not in said
+    assert "неизвестен" in said and "будущем" in said
+
+
+def test_the_revision_window_is_taken_by_closing_not_by_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ревизия закрытого берёт недавно ЗАКРЫТЫЕ, а не недавно заведённые (находка #173).
+
+    Умолчание площадки — сортировка по заведению, и окно набиралось из самых
+    новых задач: старая задача, закрытая вчера, в ревизию не попадала вовсе.
+    Проверяется двумя концами: и запросом, и порядком выдачи.
+    """
+    asked: list[str] = []
+
+    def paginate(path: str, *_: object, **__: object) -> Iterator[dict[str, Any]]:
+        asked.append(path)
+        return iter(
+            [
+                {"number": 3, "closed_at": "2026-09-01T10:00:00Z"},
+                {"number": 90, "closed_at": "2026-09-11T10:00:00Z"},
+            ]
+        )
+
+    monkeypatch.setattr(debt.ghrest, "paginate", paginate)
+    got = debt.closed_issues("o/r", "token")
+    assert "sort=updated" in asked[0], f"запрос идёт с умолчанием площадки: {asked[0]}"
+    assert [one["number"] for one in got] == [90, 3], "порядок не по дате закрытия"
+
+
+def test_the_inbox_reads_the_window_it_was_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Входящие» читаются из уже прочитанного окна, а не вторым обходом (находка #125).
+
+    Прежде шаг обходил ВСЕ закрытые задачи репозитория на каждом изменении.
+    Проверяется тем, что страничный обход не зовётся вовсе: предмет приходит
+    аргументом.
+    """
+    monkeypatch.setattr(debt.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
+
+    def forbidden(*_: object, **__: object) -> Iterator[dict[str, Any]]:
+        raise AssertionError("шаг пошёл за закрытыми задачами второй раз")
+
+    monkeypatch.setattr(debt.ghrest, "paginate", forbidden)
+    closed = [{"number": 37, "body": f"{debt.findings.INBOX_MARKER}\nчисла", "updated_at": "t"}]
+    body, note, _ = debt.inbox_body("o/r", "token", closed)
+    assert "числа" in body and note == debt.CLOSED_INBOX
+
+
+def test_extra_closed_inboxes_are_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Лишние закрытые «входящие» называются, а не выбираются молча (находка #125).
+
+    Две закрытые копии означают, что задачу заводили дважды; числа читаются из
+    одной, и молчать о второй значит выбирать за читателя (154).
+    """
+    monkeypatch.setattr(debt.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
+    closed = [
+        {"number": 37, "body": f"{debt.findings.INBOX_MARKER}\nстарое", "updated_at": "a"},
+        {"number": 58, "body": f"{debt.findings.INBOX_MARKER}\nновое", "updated_at": "b"},
+    ]
+    body, note, _ = debt.inbox_body("o/r", "token", closed)
+    assert "новое" in body, "числа взяты не из последней копии"
+    assert "#37" in note and "ещё 1" in note, note
+
+
+def test_the_stale_threshold_says_it_is_an_assumption() -> None:
+    """Порог устаревания объявлен допущением, а не выдан за замер (находка #126).
+
+    Число, поданное как измеренное, спорить с собой не даёт: его двигают «по
+    ощущению» и никогда не перепроверяют. Проверяется по самому модулю —
+    ровно там, где читатель на порог и наткнётся.
+    """
+    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
+    place = source.index("STALE_AFTER: Final")
+    said = source[max(0, place - 1200) : place]
+    assert "допущение, а не замер" in said.lower(), "порог подан как измеренная величина"
