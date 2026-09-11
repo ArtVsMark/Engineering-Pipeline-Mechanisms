@@ -108,25 +108,42 @@ def next_after(current: str, *, contract: bool) -> str:
     return f"{major}.{minor + 1}.0"
 
 
-def acceptance_is_closed(repo: str, number: int, token: str) -> bool | None:
-    """Закрыта ли названная приёмка. ``None`` — состояние НЕ прочитано.
+#: Состояния названной приёмки. Четыре, а не три: «такой задачи нет» чинится
+#: НОМЕРОМ, «не прочитано» — токеном, и назвать второе вместо первого значит
+#: отправить человека искать не туда (154).
+ACCEPTANCE_CLOSED: Final = "closed"
+ACCEPTANCE_OPEN: Final = "open"
+ACCEPTANCE_MISSING: Final = "missing"
+ACCEPTANCE_UNREAD: Final = "unread"
 
-    Три ответа вместо двух, и третий здесь главный: «не прочитано» и «открыта»
-    значат разное — первое чинится токеном, второе работой, — а «не прочитано»,
-    сведённое к «закрыта», было бы обходом проверки, стоящей перед необратимым
-    (045, 074).
+
+def acceptance_state(repo: str, number: int, token: str) -> str:
+    """Состояние названной приёмки одним из четырёх слов.
+
+    ЧЕТЫРЕ, А НЕ ДВА, И РАЗНИЦА ВСЯ В ТОМ, ЧТО ЧЕЛОВЕКУ ЧИНИТЬ. «Закрыта» и
+    «открыта» — про работу; «такой задачи нет» — про НОМЕР, набранный с
+    опечаткой; «не прочитано» — про токен или молчащую площадку. Сведение
+    третьего ко второму отправляло бы искать токен там, где неверна цифра.
+    Нашёл внешний взгляд на #204.
+
+    Ни одно из двух незнаний не считается за «закрыта»: это был бы обход
+    проверки, стоящей перед необратимым (045, 074).
     """
     if not repo or not token:
-        return None
+        return ACCEPTANCE_UNREAD
     try:
         issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+    except ghrest.NotFound:
+        return ACCEPTANCE_MISSING
     except ghrest.TransportError:
-        return None
+        return ACCEPTANCE_UNREAD
     state = issue.get("state")
-    return state == "closed" if state else None
+    if not state:
+        return ACCEPTANCE_UNREAD
+    return ACCEPTANCE_CLOSED if state == "closed" else ACCEPTANCE_OPEN
 
 
-def refusals(wanted: str, *, acceptance: str, accepted: bool | None = None) -> list[str]:
+def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) -> list[str]:
     """Все причины НЕ выпускать — списком, а не первой попавшейся.
 
     Списком потому, что выпуск делают редко и по одной причине за раз чинить
@@ -158,12 +175,17 @@ def refusals(wanted: str, *, acceptance: str, accepted: bool | None = None) -> l
             "«0.x» значит «ещё не доделано здесь» (docs/release.md, decisions/009). "
             "Назовите её: --acceptance <номер задачи>"
         )
-    elif major_wanted > major_now and accepted is None:
+    elif major_wanted > major_now and state == ACCEPTANCE_MISSING:
+        problems.append(
+            f"мажор {major_now} → {major_wanted}: задачи #{acceptance} у площадки НЕТ. "
+            "Чинится номером, а не токеном: приёмка названа несуществующей"
+        )
+    elif major_wanted > major_now and state == ACCEPTANCE_UNREAD:
         problems.append(
             f"мажор {major_now} → {major_wanted}: состояние приёмки #{acceptance} не прочитано "
             "— нет токена или площадка молчит. Непрочитанное за «закрыта» не считается (045)"
         )
-    elif major_wanted > major_now and not accepted:
+    elif major_wanted > major_now and state != ACCEPTANCE_CLOSED:
         problems.append(
             f"мажор {major_now} → {major_wanted}: приёмка #{acceptance} ещё ОТКРЫТА. "
             "Единицу выпускает её закрытие, а не выпуск (decisions/009)"
@@ -176,7 +198,7 @@ def refusals(wanted: str, *, acceptance: str, accepted: bool | None = None) -> l
     return problems
 
 
-def announce(wanted: str, *, acceptance: str, accepted: bool | None = None) -> None:
+def announce(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) -> None:
     """Печатает, из чего собран выпуск: человек читает это перед необратимым."""
     waiting = fragments()
     contract = touches_contract(waiting)
@@ -188,7 +210,12 @@ def announce(wanted: str, *, acceptance: str, accepted: bool | None = None) -> N
         f"версия проекта на этой голове: {number}" + ("" if whole else " (неполна: тегов не видно)")
     )
     if acceptance:
-        said = {True: "закрыта", False: "ОТКРЫТА", None: "состояние не прочитано"}[accepted]
+        said = {
+            ACCEPTANCE_CLOSED: "закрыта",
+            ACCEPTANCE_OPEN: "ОТКРЫТА",
+            ACCEPTANCE_MISSING: "такой задачи у площадки нет",
+            ACCEPTANCE_UNREAD: "состояние не прочитано",
+        }[state]
         print(f"приёмка мажора: #{acceptance} — {said}")
 
 
@@ -231,13 +258,13 @@ def main(argv: list[str] | None = None) -> int:
         # Состояние приёмки спрашивается ОДИН раз и передаётся обоим: разбор и
         # печать обязаны говорить об одном состоянии, а два запроса на одном
         # заходе могли бы разойтись.
-        accepted = (
-            acceptance_is_closed(args.repo, int(args.acceptance), ghrest.token_from_env())
+        state = (
+            acceptance_state(args.repo, int(args.acceptance), ghrest.token_from_env())
             if args.acceptance.isdigit()
-            else None
+            else ACCEPTANCE_UNREAD
         )
-        problems = refusals(wanted, acceptance=args.acceptance, accepted=accepted)
-        announce(wanted, acceptance=args.acceptance, accepted=accepted)
+        problems = refusals(wanted, acceptance=args.acceptance, state=state)
+        announce(wanted, acceptance=args.acceptance, state=state)
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

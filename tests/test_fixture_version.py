@@ -30,8 +30,8 @@ def test_the_fake_version_is_not_the_real_one() -> None:
 def test_the_fake_version_stays_out_of_reach() -> None:
     """Подделка заведомо выше настоящей: проект до неё не дорастёт случайно.
 
-    Мажор растёт только с появлением первого потребителя, поэтому чужой мажор —
-    надёжная граница, а не «пока не совпало».
+    Мажор растёт только с закрытой приёмкой (decisions/009), поэтому чужой
+    мажор — надёжная граница, а не «пока не совпало».
     """
     real = (ROOT / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
     assert int(FAKE_VERSION.split(".")[0]) > int(real.split(".")[0]), (

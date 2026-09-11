@@ -12,6 +12,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
 
 module = load_script("release.py")
@@ -52,8 +54,8 @@ def test_the_next_version_raises_the_minor() -> None:
 def test_a_contract_fragment_does_not_raise_the_major() -> None:
     """Правка поверхности сама по себе мажор не поднимает.
 
-    `0.x` живёт до первого потребителя: поверхность ещё никому не обещана, и
-    ломать нечего.
+    `0.x` живёт до закрытой приёмки: поверхность ещё не доделана здесь, и
+    правка её сама по себе разряда не поднимает (decisions/009).
     """
     assert module.next_after("9.9.0", contract=True) == "9.10.0"
 
@@ -104,16 +106,54 @@ def test_a_closed_acceptance_allows_the_major() -> None:
     в `refusals` готовым ответом.
     """
 
-    def said(accepted: bool | None) -> list[str]:
+    def said(state: str) -> list[str]:
         return [
-            one
-            for one in module.refusals("1.0.0", acceptance="196", accepted=accepted)
-            if "мажор" in one
+            one for one in module.refusals("1.0.0", acceptance="196", state=state) if "мажор" in one
         ]
 
-    assert said(True) == []
-    assert "ОТКРЫТА" in "".join(said(False))
-    assert "не прочитано" in "".join(said(None))
+    assert said(module.ACCEPTANCE_CLOSED) == []
+    assert "ОТКРЫТА" in "".join(said(module.ACCEPTANCE_OPEN))
+    assert "не прочитано" in "".join(said(module.ACCEPTANCE_UNREAD))
+    # Несуществующий номер чинится НОМЕРОМ, и причина обязана сказать об этом,
+    # а не отправить искать токен (154). Нашёл внешний взгляд на #204.
+    missing = "".join(said(module.ACCEPTANCE_MISSING))
+    assert "НЕТ" in missing and "номером" in missing
+
+
+def test_the_acceptance_state_separates_the_two_unknowns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """«Такой задачи нет» и «не прочитано» — разные состояния и разная починка.
+
+    Первое чинится номером, второе токеном. Сведение их в одно отправляло бы
+    человека искать секрет там, где неверна цифра. Здесь проверяется и путь
+    отказа транспорта, которого прежде не касался ни один тест (#204).
+    """
+
+    def answer(exc: Exception | None, state: str | None = None):
+        def _ask(*_: object, **__: object) -> object:
+            if exc is not None:
+                raise exc
+            return {"state": state} if state else {}
+
+        return _ask
+
+    monkeypatch.setattr(module.ghrest, "request", answer(module.ghrest.NotFound("404")))
+    assert module.acceptance_state("o/r", 999, "t") == module.ACCEPTANCE_MISSING
+
+    monkeypatch.setattr(module.ghrest, "request", answer(module.ghrest.TransportError("молчит")))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_UNREAD
+
+    monkeypatch.setattr(module.ghrest, "request", answer(None, "closed"))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_CLOSED
+
+    monkeypatch.setattr(module.ghrest, "request", answer(None, "open"))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_OPEN
+
+    monkeypatch.setattr(module.ghrest, "request", answer(None))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_UNREAD
+    assert module.acceptance_state("", 196, "t") == module.ACCEPTANCE_UNREAD
+    assert module.acceptance_state("o/r", 196, "") == module.ACCEPTANCE_UNREAD
 
 
 def test_a_wrong_minor_is_refused(run_script: RunScript, tmp_path: Path) -> None:
