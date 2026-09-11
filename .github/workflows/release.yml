@@ -21,8 +21,8 @@ on:
         description: "номер выпуска; пусто — следующий по правилу"
         required: false
         type: string
-      first_consumer:
-        description: "владелец/репозиторий первого потребителя — только им поднимается мажор"
+      acceptance:
+        description: "номер задачи-приёмки: мажор поднимает её ЗАКРЫТИЕ, а не выпуск"
         required: false
         type: string
       apply:
@@ -33,6 +33,9 @@ on:
 
 permissions:
   contents: read
+  # Состояние приёмки мажора читается у площадки: механизм не верит ключу на
+  # слово. Право только на чтение — выпуск ничего в задачах не меняет.
+  issues: read
 
 concurrency:
   # Выпуск один на репозиторий, и вытеснять его нечем: два захода поставили бы
@@ -81,21 +84,25 @@ jobs:
           git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
 
       - name: проверить условия выпуска
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           python scripts/release.py \
             ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
-            ${{ inputs.first_consumer && format('--first-consumer {0}', inputs.first_consumer) || '' }}
+            ${{ inputs.acceptance && format('--acceptance {0}', inputs.acceptance) || '' }}
 
       - name: выпустить
         if: inputs.apply && steps.token.outputs.present == 'yes'
         env:
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           python scripts/release.py --apply \
             ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
-            ${{ inputs.first_consumer && format('--first-consumer {0}', inputs.first_consumer) || '' }}
+            ${{ inputs.acceptance && format('--acceptance {0}', inputs.acceptance) || '' }}
 
           # Коммит и тег отправляются ВМЕСТЕ и последним действием: тег,
           # уехавший без коммита, указывает в пустоту, а коммит без тега — это

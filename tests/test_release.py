@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
 
@@ -52,32 +55,110 @@ def test_the_next_version_raises_the_minor() -> None:
 def test_a_contract_fragment_does_not_raise_the_major() -> None:
     """Правка поверхности сама по себе мажор не поднимает.
 
-    `0.x` живёт до первого потребителя: поверхность ещё никому не обещана, и
-    ломать нечего.
+    `0.x` живёт до закрытой приёмки: поверхность ещё не доделана здесь, и
+    правка её сама по себе разряда не поднимает (decisions/009).
     """
     assert module.next_after("9.9.0", contract=True) == "9.10.0"
 
 
-def test_the_major_needs_a_named_consumer(run_script: RunScript, tmp_path: Path) -> None:
-    """Мажор до единицы поднимает не выпуск, а появление первого потребителя.
+def test_the_major_needs_a_named_acceptance(run_script: RunScript, tmp_path: Path) -> None:
+    """Мажор поднимает не выпуск, а ЗАКРЫТАЯ приёмка (decisions/009).
 
-    Это записано в договоре до первого потребителя и задним числом не вводится
-    (113). Механизм требует назвать того, кто прибился, — иначе `1.0` было бы
-    обещанием совместимости, данным никому.
+    Договор и механизм говорили разное: договор — «единицу выпускает закрытая
+    приёмка эпика», механизм — «назовите первого потребителя». Расхождение
+    нашёл внешний взгляд на #198, и оно было не косметическим: исполнял
+    механизм СТАРОЕ правило, то есть договор не значил ничего (002).
     """
     tree(tmp_path)
     run = run_script("release.py", "--version", "10.0.0", cwd=tmp_path)
     assert run.code == 1, run.text
-    assert "первого потребителя" in run.text
-    assert "--first-consumer" in run.text
+    assert "приёмка" in run.text.lower()
+    assert "--acceptance" in run.text
 
 
-def test_a_named_consumer_allows_the_major(run_script: RunScript, tmp_path: Path) -> None:
-    """С названным потребителем мажор поднимается: обещание есть кому дать."""
+def test_a_named_but_unread_acceptance_is_still_a_refusal(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Названная, но НЕ прочитанная приёмка выпуск не пускает.
+
+    Три состояния вместо двух: закрыта, открыта, не прочитана. Свести третье к
+    первому значило бы завести обход ровно там, где стоит проверка перед
+    необратимым (045, 074) — ключ стал бы подписью под тем, чего никто не
+    видел.
+    """
     tree(tmp_path)
-    run = run_script("release.py", "--version", "10.0.0", "--first-consumer", "o/r", cwd=tmp_path)
-    assert run.code == 0, run.text
-    assert "o/r" in run.text
+    run = run_script(
+        "release.py",
+        "--version",
+        "10.0.0",
+        "--acceptance",
+        "196",
+        cwd=tmp_path,
+        env={"GH_TOKEN": "", "GITHUB_TOKEN": ""},
+    )
+    assert run.code == 1, run.text
+    assert "не прочитано" in run.text
+
+
+def test_a_closed_acceptance_allows_the_major() -> None:
+    """С закрытой приёмкой мажор проходит; с открытой — нет.
+
+    Разбор проверяется данными, а не подделкой транспорта: состояние приходит
+    в `refusals` готовым ответом.
+    """
+
+    def said(state: str) -> list[str]:
+        return [
+            one for one in module.refusals("1.0.0", acceptance="196", state=state) if "мажор" in one
+        ]
+
+    assert said(module.ACCEPTANCE_CLOSED) == []
+    assert "ОТКРЫТА" in "".join(said(module.ACCEPTANCE_OPEN))
+    assert "не прочитано" in "".join(said(module.ACCEPTANCE_UNREAD))
+    # Несуществующий номер чинится НОМЕРОМ, и причина обязана сказать об этом,
+    # а не отправить искать токен (154). Нашёл внешний взгляд на #204.
+    missing = "".join(said(module.ACCEPTANCE_MISSING))
+    assert "НЕТ" in missing and "номером" in missing
+    # Форма входа — пятое состояние: «#196» не число, и причина обязана сказать
+    # именно это, а не «нет токена» (154). Нашёл внешний взгляд на #204.
+    shape = "".join(said(module.ACCEPTANCE_NOT_A_NUMBER))
+    assert "не разобрано как номер" in shape
+
+
+def test_the_acceptance_state_separates_the_two_unknowns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """«Такой задачи нет» и «не прочитано» — разные состояния и разная починка.
+
+    Первое чинится номером, второе токеном. Сведение их в одно отправляло бы
+    человека искать секрет там, где неверна цифра. Здесь проверяется и путь
+    отказа транспорта, которого прежде не касался ни один тест (#204).
+    """
+
+    def answer(exc: Exception | None, state: str | None = None) -> Callable[..., dict[str, str]]:
+        def _ask(*_: object, **__: object) -> dict[str, str]:
+            if exc is not None:
+                raise exc
+            return {"state": state} if state else {}
+
+        return _ask
+
+    monkeypatch.setattr(module.ghrest, "request", answer(module.ghrest.NotFound("404")))
+    assert module.acceptance_state("o/r", 999, "t") == module.ACCEPTANCE_MISSING
+
+    monkeypatch.setattr(module.ghrest, "request", answer(module.ghrest.TransportError("молчит")))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_UNREAD
+
+    monkeypatch.setattr(module.ghrest, "request", answer(None, "closed"))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_CLOSED
+
+    monkeypatch.setattr(module.ghrest, "request", answer(None, "open"))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_OPEN
+
+    monkeypatch.setattr(module.ghrest, "request", answer(None))
+    assert module.acceptance_state("o/r", 196, "t") == module.ACCEPTANCE_UNREAD
+    assert module.acceptance_state("", 196, "t") == module.ACCEPTANCE_UNREAD
+    assert module.acceptance_state("o/r", 196, "") == module.ACCEPTANCE_UNREAD
 
 
 def test_a_wrong_minor_is_refused(run_script: RunScript, tmp_path: Path) -> None:
@@ -181,3 +262,33 @@ def test_the_procedure_matches_the_contract() -> None:
     text = (ROOT / "docs" / "release.md").read_text(encoding="utf-8")
     assert "## Порядок выпуска" in text
     assert "тег не переставляется" in text.lower()
+
+
+def test_a_hash_prefixed_acceptance_names_the_input_not_the_token(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """«#196» отвергается по ФОРМЕ, а не как «состояние не прочитано».
+
+    Прежде нечисловой вход молча становился «нет токена или площадка молчит» —
+    и человек шёл искать секрет там, где лишняя решётка (154). Нашёл внешний
+    взгляд на #204.
+    """
+    tree(tmp_path)
+    run = run_script("release.py", "--version", "10.0.0", "--acceptance", "#196", cwd=tmp_path)
+    assert run.code == 1, run.text
+    assert "не разобрано как номер" in run.text
+    assert "нет токена" not in run.text
+
+
+def test_the_contract_names_every_state_the_mechanism_tells_apart() -> None:
+    """Договор о выпуске называет ВСЕ состояния приёмки, что различает механизм.
+
+    Расхождение договора и механизма здесь уже было и стоило дороже прочего:
+    новое правило мажора жило в `docs/release.md`, пока `release.py` исполнял
+    старое (#198). Пять состояний — пять строк таблицы, и сверяет их машина, а
+    не внимание автора
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    contract = (ROOT / "docs" / "release.md").read_text(encoding="utf-8").lower()
+    missing = [said for said in module.ACCEPTANCE_SAID.values() if said.lower() not in contract]
+    assert not missing, f"механизм различает, а договор не называет: {missing}"
