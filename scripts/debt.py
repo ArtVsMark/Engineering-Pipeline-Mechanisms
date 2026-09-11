@@ -469,10 +469,24 @@ def shape_report(by_prose: list[task_shape.Prose], live: list[task_shape.Live]) 
     """
     lines = [f"задач с пунктами прозой, а не галочками: {len(by_prose)} — от трёх пунктов (028)"]
     lines.extend(f"  #{task.number} — {task.title} · пунктов {task.items}" for task in by_prose)
+    # РЕВИЗИЯ ЗАКРЫТОГО СЧИТАЕТСЯ ДВУМЯ ЧИСЛАМИ, А НЕ ОДНИМ. Задачи, закрытые
+    # ДО того, как у проекта появился счётчик пунктов, не изменятся никогда:
+    # отметить их было нечем, и ответ по ним известен заранее. Держать их в
+    # общем числе значит держать в счёте постоянное слагаемое, а счёт, который
+    # не меняется, перестают читать (051). Они не исчезают — их называют тем,
+    # что они есть (046).
+    fresh = [task for task in live if not task.before_the_counter]
+    old_ones = [task for task in live if task.before_the_counter]
     lines.append(
-        f"закрыто при живых единицах: {len(live)} из последних {CLOSED_WINDOW} закрытых (121)"
+        f"закрыто при живых единицах: {len(fresh)} из последних {CLOSED_WINDOW} закрытых (121)"
     )
-    lines.extend(f"  #{task.number} — {task.title} · {task.said}" for task in live)
+    lines.extend(f"  #{task.number} — {task.title} · {task.said}" for task in fresh)
+    if old_ones:
+        lines.append(
+            f"  из них до счётчика пунктов ({task_shape.ITEMS_SINCE}): {len(old_ones)} — "
+            f"{', '.join(f'#{task.number}' for task in old_ones)}. Отмечать их было нечем: "
+            "механизм заведён позже, и решение по ним за человеком (154)"
+        )
     return lines
 
 
