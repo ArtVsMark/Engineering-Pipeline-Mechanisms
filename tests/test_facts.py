@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -147,15 +148,42 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
         assert not list(ROOT.glob(f"**/{name}")), f"{name} лежит в общей ветке рядом с источником"
 
 
-def test_every_declared_badge_is_covered_by_the_gate() -> None:
-    """Гейт покрывает все объявленные значки, а не те, что помнил автор (находка #134).
+#: Адрес значка в витрине: `badges/<имя>.svg`. Витрина — ИСТОЧНИК, НЕЗАВИСИМЫЙ
+#: от сборки: её пишет человек, а имена берёт у площадки. Сверять список гейта
+#: с тем же модулем, из которого он собран, значит проверять равенство самому
+#: себе — ровно это и делала прежняя редакция. Нашёл внешний взгляд на #183.
+SHOWCASE_BADGE_RE = re.compile(r"badges/([\w.-]+\.svg)")
 
-    Проверяется именно покрытие, а не отсутствие файлов: список, отставший от
-    сборки, снаружи неотличим от полного.
+
+def shown_badges() -> list[str]:
+    """Значки, на которые ссылается витрина: второй источник тех же имён."""
+    found = sorted(set(SHOWCASE_BADGE_RE.findall((ROOT / "README.md").read_text("utf-8"))))
+    assert len(found) >= 4, f"витрина показывает {found} — предмет проверки не найден (075)"
+    return found
+
+
+def test_every_badge_the_showcase_shows_is_covered_by_the_gate() -> None:
+    """Гейт видит все значки витрины, а не те, что помнил автор (находка #183).
+
+    ДВА ИСТОЧНИКА, А НЕ ОДИН. Прежняя редакция брала имена из того же модуля,
+    из которого их берёт и сам гейт, — и проверяла равенство самому себе.
+    `release.svg` в ней не был назван вовсе, а он выпал бы из проверки вместе
+    со всеми, потому что и список, и сверка читали один список.
     """
     said = derived_names()
-    for name in (facts.FACTS, facts.BADGE, facts.FAMILY_BADGE, facts.VERSION_BADGE):
-        assert name in said, f"{name} объявлен сборкой, а гейт его не видит"
+    missing = [name for name in shown_badges() if name not in said]
+    assert not missing, f"витрина показывает {missing}, а гейт производного их не видит"
+
+
+def test_every_badge_the_build_draws_is_shown() -> None:
+    """Обратная сторона: нарисованное сборкой доезжает до витрины.
+
+    Значок, который рисуется и никому не показан, — это работа прогона в
+    никуда; значок, который показан и не рисуется, — сломанная картинка (196).
+    Оба конца сверяются здесь, потому что источники у них разные.
+    """
+    drawn = {facts.BADGE, facts.FAMILY_BADGE, facts.VERSION_BADGE, facts.RELEASE_BADGE}
+    assert drawn == set(shown_badges()), "сборка рисует не то, что показывает витрина"
 
 
 def push_command(step: str) -> str:

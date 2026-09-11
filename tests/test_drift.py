@@ -461,3 +461,20 @@ def test_we_are_recognised_by_the_full_address_not_by_a_name_tail() -> None:
     ours = {"consumers": [{"repo": "ArtVsMark/Engineering-Pipeline-Mechanisms", "holds": {}}]}
     found = module.snapshot_is_stale(ours, mine, "ArtVsMark/Engineering-Pipeline-Mechanisms")
     assert len(found) == 1 and "документами" in found[0].said, found
+
+
+def test_a_verdict_without_a_status_is_named_not_skipped() -> None:
+    """Вердикт есть, а статуса в нём нет — это запись, а не тишина (находка #179).
+
+    Пропустить такую значит объявить отвеченное неотвеченным и держать
+    предложение в очереди на приём навсегда (045).
+    """
+    found = module.proposals_answered(answer({"rule": "196"}), MINE, "o/r")
+    assert len(found) == 1
+    assert "«status»" in found[0].said and "a-thing-broke" in found[0].said
+
+
+def test_a_verdict_that_is_not_a_mapping_is_named_too() -> None:
+    """Ответ пришёл не словарём — тоже «прочитать нечем», а не «ответа нет»."""
+    found = module.proposals_answered(answer("admitted"), MINE, "o/r")  # type: ignore[arg-type]
+    assert len(found) == 1 and "не словарём" in found[0].said
