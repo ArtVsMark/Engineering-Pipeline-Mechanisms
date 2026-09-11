@@ -156,6 +156,27 @@ def proposals() -> list[dict[str, Any]]:
     return list(said) if isinstance(said, list) else []
 
 
+#: Шов, оставшийся от дописывания: предложение приклеили к строке, которая уже
+#: кончалась точкой. Троеточие и числа с точкой сюда не попадают.
+SEAM_RE = re.compile(r"(?<![.\d])\.\.(?!\.)")
+
+
+@pytest.mark.parametrize("number", sorted(answers()))
+def test_an_answer_carries_no_seam_from_appending(number: str) -> None:
+    """В прозе ответа нет шва от дописывания (замечание #188).
+
+    Ответы дописываются по ходу: разобрали находку — приписали к `where`
+    предложение о том, чем она теперь держится. Приписать к строке, уже
+    кончавшейся точкой, — типовая ошибка этого приёма, и она не косметическая:
+    ответ читает человек, а двойная точка ровно в месте стыка говорит, что
+    строку собирали, не перечитав. Замер 11.09.2026: три шва, все — от правок
+    этой смены.
+    """
+    answer = answers()[number]
+    said = " ".join(str(answer.get(field) or "") for field in ("where", "why"))
+    assert not SEAM_RE.search(said), f"{number}: шов от дописывания — двойная точка в прозе"
+
+
 def test_an_empty_queue_is_a_declared_state_not_a_missing_one() -> None:
     """Пустая очередь предложений — объявленное состояние, а не молчание (154).
 
