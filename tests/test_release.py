@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -130,8 +131,8 @@ def test_the_acceptance_state_separates_the_two_unknowns(
     отказа транспорта, которого прежде не касался ни один тест (#204).
     """
 
-    def answer(exc: Exception | None, state: str | None = None):
-        def _ask(*_: object, **__: object) -> object:
+    def answer(exc: Exception | None, state: str | None = None) -> Callable[..., dict[str, str]]:
+        def _ask(*_: object, **__: object) -> dict[str, str]:
             if exc is not None:
                 raise exc
             return {"state": state} if state else {}
