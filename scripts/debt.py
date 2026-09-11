@@ -140,7 +140,15 @@ CLOSED_INBOX: Final = "«входящие» закрыты — числа от �
 #: После скольких часов снимок каталога считается вчерашним. Ночной прогон
 #: каталога ходит раз в сутки (6:17), поэтому суточный возраст нормален, а
 #: больший означает ПРОПУЩЕННЫЙ заход — не «немного устарело», а «один раз не
-#: пришло». Запас в два часа — на разброс времени старта у площадки.
+#: пришло».
+#:
+#: ЗАПАС В ДВА ЧАСА — ДОПУЩЕНИЕ, А НЕ ЗАМЕР, и это сказано, а не умолчано
+#: (154). Разброс старта у расписаний площадки проект не мерил: логи чужих
+#: прогонов ему недоступны, а свой ряд запусков короче, чем нужно для вывода.
+#: Цена ошибки в обе стороны названа и невелика: занижен — шаг называет
+#: возраст на здоровом снимке (лишняя строка, не красное); завышен — пропуск
+#: замечается на сутки позже, чем мог бы. Порог двинется от РЯДА замеров
+#: возраста, когда он наберётся, а не от ощущения.
 STALE_AFTER: Final = timedelta(hours=26)
 #: Что шаг делает со снимком старше срока: называет возраст и продолжает.
 #: Отказываться читать вчерашние числа нельзя — они последнее, что каталог
@@ -176,15 +184,23 @@ def said_age(age: timedelta | None) -> str:
     сегодняшние. Замер 10.09.2026: разрез приоритета строился по сводке семьи
     семичасовой давности и назвал восемь правил документами, когда они уже
     держались гейтами, — список заимствований по ним вышел неверным.
+
+    ОТРИЦАТЕЛЬНЫЙ ВОЗРАСТ — ЭТО «НЕИЗВЕСТНО», А НЕ «ОЧЕНЬ СВЕЖО». Дата в
+    будущем означает расхождение часов или чужую правку задачи вперёд, и
+    «снято -1 ч назад» читается как исправная работа. Неизвестность
+    называется, а не подменяется бодрым числом (045). Нашёл внешний взгляд
+    на #126.
     """
     if age is None:
         return "возраст снимка неизвестен: дата не разобралась"
+    if age < timedelta(0):
+        return "возраст снимка неизвестен: дата снимка в будущем — разошлись часы"
     hours = int(age.total_seconds() // 3600)
     said = f"снято {hours} ч назад" if hours else "снято меньше часа назад"
     return f"{said} · {STALE_NOTE}" if age > STALE_AFTER else said
 
 
-def inbox_body(repo: str, token: str) -> tuple[str, str, str]:
+def inbox_body(repo: str, token: str, closed: list[dict[str, Any]]) -> tuple[str, str, str]:
     """Тело задачи-«входящие» и пометка о её состоянии.
 
     ПОЧЕМУ НЕ ТОЛЬКО ЖИВАЯ. Живой считается открытая задача, а «входящие»
@@ -194,21 +210,36 @@ def inbox_body(repo: str, token: str) -> tuple[str, str, str]:
     где было штатное состояние, а такое красное учат пролистывать (045, 142).
 
     Закрытая читается ТОЛЬКО если открытой нет: открытая всегда свежее.
+
+    ЗАКРЫТЫЕ БЕРУТСЯ ИЗ УЖЕ ПРОЧИТАННОГО ОКНА, А НЕ ВТОРЫМ ОБХОДОМ. Прежде шаг
+    обходил ВСЕ закрытые задачи репозитория целиком, без окна и без ранней
+    остановки, — и делал это на каждом изменении. Второй проход по тому же
+    источнику расходится с первым молча (022), а цена его растёт с историей
+    проекта. Нашёл внешний взгляд на #125.
+
+    ЛИШНИЕ КАНДИДАТЫ НАЗЫВАЮТСЯ. Две закрытые «входящие» означают, что задачу
+    заводили дважды, и числа читаются из одной из них — молчать о второй
+    значит выбирать за читателя (154). Так же поступает `live_issue_seen` с
+    живыми копиями.
     """
     number, body, seen = findings.live_issue_seen(repo, token, findings.INBOX_MARKER)
     if number is not None:
         return body, "", seen
-    found: list[tuple[int, str, str]] = []
-    for issue in ghrest.paginate(f"repos/{repo}/issues?state=closed", token):
-        if issue.get("pull_request") is not None:
-            continue
-        said = str(issue.get("body") or "")
-        if findings.INBOX_MARKER in said:
-            found.append((int(issue["number"]), said, str(issue.get("updated_at") or "")))
+    found = [
+        (int(issue["number"]), str(issue.get("body") or ""), str(issue.get("updated_at") or ""))
+        for issue in closed
+        if findings.INBOX_MARKER in str(issue.get("body") or "")
+    ]
     if not found:
         return "", "", ""
     newest = max(found)
-    return newest[1], CLOSED_INBOX, newest[2]
+    note = CLOSED_INBOX
+    if len(found) > 1:
+        others = ", ".join(f"#{one[0]}" for one in sorted(found, reverse=True)[1:])
+        note = (
+            f"{CLOSED_INBOX}; закрытых копий ещё {len(found) - 1}: {others} — числа из #{newest[0]}"
+        )
+    return newest[1], note, newest[2]
 
 
 def merge_state(repo: str, number: int, token: str) -> str:
@@ -248,7 +279,11 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
     conflicting: list[str] = []
     unknown: list[str] = []
     red: list[str] = []
-    for change in ghrest.request("GET", f"repos/{repo}/pulls?state=open&per_page=50", token) or []:
+    # СПИСОК ИДЁТ СТРАНИЦАМИ, А НЕ ОДНОЙ. Одна страница молча теряет хвост:
+    # при числе открытых изменений больше пятидесяти застрявшее уезжало за
+    # край и в долг не попадало — то есть механизм отвечал «застрявших нет»,
+    # не посмотрев на них. Нашёл внешний взгляд на #132.
+    for change in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
         number = int(change.get("number") or 0)
         title = str(change.get("title") or "")[:60]
         said = f"#{number} — {title}"
@@ -298,15 +333,30 @@ def closed_issues(repo: str, token: str) -> list[dict[str, Any]]:
     больше. Страница на пятьдесят записей дала три задачи — то есть ревизия
     смотрела бы на три последние и честно печатала «живого нет». Поэтому
     страницы идут, пока не наберётся окно.
+
+    «НЕДАВНО ЗАКРЫТЫЕ» — ЭТО ПО ЗАКРЫТИЮ, А НЕ ПО ЗАВЕДЕНИЮ. Умолчание
+    площадки — `sort=created`, и окно набиралось из самых НОВЫХ задач: старая
+    задача, закрытая вчера, в ревизию не попадала вовсе, а только что
+    заведённая и ещё не закрытая — попадала бы первой, будь она закрыта.
+    Запрос идёт с `sort=updated` (закрытие правит задачу), а набранное
+    пересортировывается по `closed_at`: сортировки по нему у площадки нет.
+    Нашёл внешний взгляд на #173.
+
+    ГРАНИЦА У ЭТОГО ЕСТЬ, И ОНА НАЗВАНА: комментарий к давно закрытой задаче
+    тоже правит её и поднимает в `updated`. Такая задача войдёт в окно и
+    вытеснит более раннюю — ревизия посмотрит на неё лишний раз, а не
+    пропустит живое. Ошибка в сторону лишнего взгляда, а не пропуска.
     """
     found: list[dict[str, Any]] = []
-    for issue in ghrest.paginate(f"repos/{repo}/issues?state=closed", token):
+    for issue in ghrest.paginate(
+        f"repos/{repo}/issues?state=closed&sort=updated&direction=desc", token
+    ):
         if issue.get("pull_request") is not None:
             continue
         found.append(issue)
         if len(found) >= CLOSED_WINDOW:
             break
-    return found
+    return sorted(found, key=lambda issue: str(issue.get("closed_at") or ""), reverse=True)
 
 
 def open_issues(repo: str, token: str) -> list[dict[str, Any]]:
@@ -455,7 +505,10 @@ def main(argv: list[str] | None = None) -> int:
         left = findings_debt(args.repo, token)
         unlooked_left = unlooked_debt(args.repo, token)
         holding, lagging = branch_debt(args.repo, token)
-        inbox, inbox_note, inbox_seen = inbox_body(args.repo, token)
+        # Закрытые задачи читаются ОДИН раз на оба счёта: «входящие» и ревизию
+        # закрытого. Два прохода по одному источнику расходятся молча (022).
+        closed = closed_issues(args.repo, token)
+        inbox, inbox_note, inbox_seen = inbox_body(args.repo, token, closed)
         conflicting, unknown, red = stuck_changes(args.repo, token)
         # Список задач читается ОДИН раз на оба счёта по пунктам: два прохода
         # по одному источнику расходятся тем охотнее, чем невиннее выглядят (022).
@@ -463,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         ready = looks_done(issues)
         built, quiet = items_left.look(issues, items.open_items)
         by_prose = task_shape.without_a_checklist(issues)
-        still_live = task_shape.closed_with_live_units(closed_issues(args.repo, token))
+        still_live = task_shape.closed_with_live_units(closed)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
