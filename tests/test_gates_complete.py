@@ -587,3 +587,56 @@ def test_a_job_with_a_conclusion_is_not_still_coming(monkeypatch: pytest.MonkeyP
     assert mine["lint"] == "in_progress"
     assert module.still_coming("test", mine) is False
     assert module.still_coming("lint", mine) is True
+
+
+def test_the_summarised_run_is_the_freshest_one_on_the_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сводится самый свежий прогон `ci` на голове, а не первый попавшийся.
+
+    Два прогона одного файла на одной голове — штатное следствие двух событий
+    (толчок и снятие черновика). Группа отмены гасит предыдущий, и последнее
+    слово обязано остаться за новым (179).
+    """
+    payload = {
+        "workflow_runs": [
+            {"name": "ci", "id": 11, "created_at": "2026-09-11T14:45:17Z"},
+            {"name": "ci", "id": 22, "created_at": "2026-09-11T14:45:18Z"},
+            {"name": "review", "id": 33, "created_at": "2026-09-11T14:46:00Z"},
+        ]
+    }
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: payload)
+    assert module.summarised_run("o/r", "abc", "token") == "22"
+
+
+def test_no_summarised_run_is_waiting_not_a_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Прогона, который сводится, ещё нет — это ожидание, а не отказ и не «зелено».
+
+    События приходят в своём порядке, и сводный гейт легко стартует раньше
+    `ci`. Отказ здесь был бы красным на здоровом, молчаливое «зелено» —
+    нарушением 075.
+    """
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: {"workflow_runs": []})
+    assert module.summarised_run("o/r", "abc", "token") == ""
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda *_, **__: (_ for _ in ()).throw(module.ghrest.TransportError("площадка молчит")),
+    )
+    assert module.summarised_run("o/r", "abc", "token") == ""
+
+
+def test_the_gate_does_not_take_its_own_run_for_the_summarised_one() -> None:
+    """Номер прогона больше НЕ берётся из окружения — он чужой всем соседям.
+
+    Пока гейт был джобом внутри `ci`, `GITHUB_RUN_ID` совпадал со сводимым
+    прогоном. После переезда в свой файл совпадение исчезло, и от этого разом
+    отказали оба различия, на которых держится разбор гонки: предпочтение
+    записей сводимого прогона и `own_jobs`. Замер 11.09.2026 — #199 получил
+    красное «все записи отменены» за 51 секунду вместо ожидания, дважды подряд.
+    """
+    source = module.__doc__ or ""
+    assert "GITHUB_RUN_ID" not in source
+    parser_source = __import__("inspect").getsource(module.main)
+    assert "GITHUB_RUN_ID" not in parser_source, "номер прогона снова берётся из окружения"
+    assert "summarised_run(" in parser_source
