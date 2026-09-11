@@ -788,3 +788,44 @@ def test_the_limit_in_the_message_is_the_one_waited_by() -> None:
     """
     assert "за 15 с" in module.said_waiting(7, 3, 5)
     assert "за 120 с" in module.said_waiting(7, 3, 40)
+
+
+def test_the_queue_waits_for_the_head_and_then_merges(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Заход очереди действительно ЖДЁТ голову, а потом сливает (находка #133).
+
+    Ожидание проверялось только у `wait_for_head` в отрыве: в стенде очереди
+    подменён `head_verdict`, и путь `advance()` → `wait_for_head()` не
+    проходился ни разу. А именно на нём и стоит вся ценность ожидания: заход
+    гибнет в ожидании события, и опрос внутри захода — единственный
+    равносильный источник (126).
+    """
+    # Первый ответ забирает сам `advance`, собирая вердикты по очереди; дальше
+    # спрашивает `wait_for_head`. Порядок здесь и есть предмет проверки.
+    answers: Iterator[tuple[list[str], bool]] = iter(
+        [([], True), ([], True), ([], True), ([], False)]
+    )
+    monkeypatch.setattr(module, "head_verdict", lambda *_: next(answers))
+    slept: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", slept.append)
+    platform["changes"] = [change(1, module.LABEL_AUTOMERGE)]
+    code = module.advance("o/r", "token", "main", dry_run=False, wait_step=1, wait_tries=5)
+    assert code == module.EXIT_OK
+    assert platform["merged"] == [1], "голова дождалась зелени и не слилась"
+    assert len(slept) == 2, f"заход не ждал между опросами: пауз {len(slept)}"
+
+
+def test_the_queue_does_not_merge_a_head_that_never_went_green(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Предел ожидания истёк — заход уходит, ничего не слив.
+
+    Вторая половина той же проверки: без неё «ждёт и сливает» держалось бы
+    тем, что слияние вообще случается (140).
+    """
+    monkeypatch.setattr(module, "head_verdict", lambda *_: ([], True))
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    platform["changes"] = [change(1, module.LABEL_AUTOMERGE)]
+    module.advance("o/r", "token", "main", dry_run=False, wait_step=1, wait_tries=2)
+    assert platform["merged"] == [], "слито при идущих проверках"

@@ -33,6 +33,13 @@ paths = load_script("paths.py")
 ANCHOR_NAME = ANCHOR.name
 #: Построение пути литералом: `Path("что-то")`.
 LITERAL_PATH_RE = re.compile(r'Path\(\s*["\']([^"\']+)["\']')
+#: Адрес настройки, написанный ГОЛОЙ строкой: `".rules/bindings.json"`. Второй
+#: якорь заводится и так — обёртка в `Path` тут ни при чём, а прежний образец
+#: видел только её. Замер 11.09.2026: три адреса каталога правил жили в
+#: `drift.py` строками, два из них уже были объявлены якорем, третий — нет.
+#: Нашёл внешний взгляд на #170.
+SETTING_DIRS = ("\\.rules", "\\.github", "changelog\\.d")
+BARE_PATH_RE = re.compile(r'["\']((?:' + "|".join(SETTING_DIRS) + r')/[\w./-]+\.[a-z]{2,5})["\']')
 #: Поиск вверх по дереву в любом виде.
 SEARCH_RE = re.compile(r"\.parents\b|\.parent\.parent\b|rglob\(|os\.getcwd\(")
 
@@ -81,11 +88,11 @@ def test_no_second_anchor_is_declared(path: Path) -> None:
 
     Замер 09.09.2026: у `CONTRACT_VERSION` было три независимых адреса.
     """
-    built = {
-        found
-        for found in LITERAL_PATH_RE.findall(path.read_text(encoding="utf-8"))
-        if found not in NOT_SETTINGS
-    }
+    said = path.read_text(encoding="utf-8")
+    built = {found for found in LITERAL_PATH_RE.findall(said) if found not in NOT_SETTINGS}
+    # ГОЛАЯ СТРОКА — ТОТ ЖЕ ВТОРОЙ ЯКОРЬ. Обёртка в `Path` к делу не относится:
+    # расходятся адреса, а не их типы.
+    built |= {found for found in BARE_PATH_RE.findall(said) if found not in NOT_SETTINGS}
     assert not built, (
         f"{path.name} строит адрес настройки сам: {sorted(built)} — "
         f"второй якорь заводится именно так, а объявлены они в {ANCHOR_NAME}"

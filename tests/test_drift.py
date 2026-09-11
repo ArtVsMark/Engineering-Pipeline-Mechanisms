@@ -444,3 +444,20 @@ def test_an_empty_queue_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     «форма не узнана» на каждом ночном заходе — то есть красное на здоровом (051).
     """
     assert module.proposals_answered({}, {"proposals": []}, "o/r") == []
+
+
+def test_we_are_recognised_by_the_full_address_not_by_a_name_tail() -> None:
+    """Себя узнаём по полному адресу владелец/имя (находка #119).
+
+    Сверка по хвосту имени принимает за нас форк или одноимённый репозиторий
+    другого владельца: разрез приоритета считался бы по ЧУЖОЙ сводке. Имя без
+    владельца идентификатором не является (194).
+    """
+    mine = {"rules": {"001": {"mechanism": "gate"}}}
+    stranger = {"consumers": [{"repo": "someone/Engineering-Pipeline-Mechanisms", "holds": {}}]}
+    found = module.snapshot_is_stale(stranger, mine, "ArtVsMark/Engineering-Pipeline-Mechanisms")
+    assert len(found) == 1 and "нас нет в сводке" in found[0].said, found
+
+    ours = {"consumers": [{"repo": "ArtVsMark/Engineering-Pipeline-Mechanisms", "holds": {}}]}
+    found = module.snapshot_is_stale(ours, mine, "ArtVsMark/Engineering-Pipeline-Mechanisms")
+    assert len(found) == 1 and "документами" in found[0].said, found

@@ -182,7 +182,14 @@ def test_a_workflow_without_commands_is_an_input_error(tmp_path: Path) -> None:
 
 
 def test_red_is_caught_before_the_push(run_script: RunScript, tmp_path: Path) -> None:
-    """Заведомо красная команда ловится здесь, а не логами площадки."""
+    """Заведомо красная команда ловится здесь, а не логами площадки.
+
+    ПРЕДМЕТ НАЗВАН ПОИМЁННО, А НЕ ПО ИСХОДУ. На синтетическом дереве проверка
+    ветки (`agent_pr.py --dry-run`) красна всегда: ветки с задачей там нет.
+    Пока тест смотрел только на код возврата и слово «толкать рано», он был
+    зелен и без своей красной команды — то есть проверял чужой отказ. Нашёл
+    внешний взгляд на #151.
+    """
     tree(
         tmp_path,
         workflow=(
@@ -193,6 +200,25 @@ def test_red_is_caught_before_the_push(run_script: RunScript, tmp_path: Path) ->
     run = run_script("preflight.py", "--root", str(tmp_path))
     assert run.code == 3, run.text
     assert "толкать рано" in run.text
+    assert "заведомо красное" in run.text, run.text
+
+
+def test_a_green_command_is_not_listed_among_the_red(run_script: RunScript, tmp_path: Path) -> None:
+    """Зелёная команда в списке красных не появляется — вторая половина проверки.
+
+    Без неё «красное названо» держалось бы тем, что имя вообще печатается: шаг
+    печатает все имена в режиме списка, и отличить «названо среди красных» от
+    «названо вообще» было бы нечем (140).
+    """
+    tree(
+        tmp_path,
+        workflow=(
+            "jobs:\n  x:\n    steps:\n      - name: заведомо зелёное\n        run: python -c pass\n"
+        ),
+    )
+    run = run_script("preflight.py", "--root", str(tmp_path))
+    red = run.text.split("толкать рано", 1)[-1]
+    assert "заведомо зелёное" not in red, run.text
 
 
 def test_the_step_names_what_it_cannot_check(run_script: RunScript, tmp_path: Path) -> None:

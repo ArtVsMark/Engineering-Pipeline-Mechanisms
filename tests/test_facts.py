@@ -116,6 +116,26 @@ def test_badge_colour_follows_the_share() -> None:
     assert len({low.split('fill="')[2], mid.split('fill="')[2], high.split('fill="')[2]}) == 3
 
 
+def derived_names() -> list[str]:
+    """Имена производного — ВСЕ, какие объявляет сборка, а не список руками.
+
+    Список руками отстаёт молча: значков стало четыре, а гейт проверял два —
+    `family.svg` и `version.svg` появились вместе с витриной и в проверку не
+    попали (049). Имена читаются из модуля: добавится пятое — попадёт само.
+    Нашёл внешний взгляд на #134.
+    """
+    found = sorted(
+        value
+        for name, value in vars(facts).items()
+        if not name.startswith("_")
+        and isinstance(value, str)
+        and value.endswith((".svg", ".json"))
+        and "/" not in value
+    )
+    assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
+    return found
+
+
 def test_derived_output_is_not_in_the_shared_branch() -> None:
     """Производного нет в дереве: оно живёт в ветке `badges` (125).
 
@@ -123,8 +143,19 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
     закоммиченный рядом с источником, выглядит безобидно ровно до того дня,
     когда число в нём разойдётся с источником.
     """
-    for name in (facts.FACTS, facts.BADGE):
+    for name in derived_names():
         assert not list(ROOT.glob(f"**/{name}")), f"{name} лежит в общей ветке рядом с источником"
+
+
+def test_every_declared_badge_is_covered_by_the_gate() -> None:
+    """Гейт покрывает все объявленные значки, а не те, что помнил автор (находка #134).
+
+    Проверяется именно покрытие, а не отсутствие файлов: список, отставший от
+    сборки, снаружи неотличим от полного.
+    """
+    said = derived_names()
+    for name in (facts.FACTS, facts.BADGE, facts.FAMILY_BADGE, facts.VERSION_BADGE):
+        assert name in said, f"{name} объявлен сборкой, а гейт его не видит"
 
 
 def push_command(step: str) -> str:

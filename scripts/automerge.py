@@ -430,7 +430,7 @@ def wait_for_head(
     *,
     tries: int = WAIT_TRIES,
     step: int = WAIT_STEP,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Callable[[float], None] | None = None,
 ) -> tuple[list[str], bool]:
     """Ждёт, пока проверки головы закончатся; отдаёт последний вердикт.
 
@@ -454,6 +454,12 @@ def wait_for_head(
     пока чужой прогон висит; дождавшись предела, заход честно говорит «ещё
     идут» и уходит — тогда его добудит следующее событие или кнопка (104).
     """
+    # ПАУЗА БЕРЁТСЯ В МОМЕНТ ВЫЗОВА, А НЕ В МОМЕНТ ОБЪЯВЛЕНИЯ. Значение по
+    # умолчанию вычисляется один раз при чтении файла, и `time.sleep`,
+    # захваченный так, подменить снаружи уже нечем: путь `advance()` →
+    # `wait_for_head()` из-за этого не проверялся ни разу — стенд очереди
+    # вынужден был подменять весь шаг целиком. Нашёл внешний взгляд на #133.
+    pause = sleep or time.sleep
     problems, waiting = head_verdict(repo, change, owner_token)
     # Нулевой шаг значит «не ждать»: так заход зовут проверки, и так же его
     # можно позвать руками, когда ожидание не нужно.
@@ -465,7 +471,7 @@ def wait_for_head(
         print(
             f"#{change.number}: проверки идут — жду голову, {attempt + 1} из {tries} (по {step} с)"
         )
-        sleep(step)
+        pause(step)
         problems, waiting = head_verdict(repo, change, owner_token)
     return problems, waiting
 

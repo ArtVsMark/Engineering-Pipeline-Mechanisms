@@ -147,9 +147,9 @@ def ours() -> dict[str, Any]:
 #: каталога (реестр потребителей и карта «где действует правило»), и сверять
 #: нам в них нечего.
 OUR_CONTRACTS: Final = (
-    ("bindings", ".rules/bindings.json"),
-    ("proposals", ".rules/proposals.json"),
-    ("showcase", ".rules/showcase.json"),
+    ("bindings", paths.BINDINGS.as_posix()),
+    ("proposals", paths.PROPOSALS.as_posix()),
+    ("showcase", paths.SHOWCASE.as_posix()),
 )
 
 
@@ -232,11 +232,18 @@ def snapshot_is_stale(where: dict[str, Any], mine: dict[str, Any], project: str)
     10.09.2026: снимок семичасовой давности показывал шесть правил документами,
     когда они уже держались гейтами, и разрез назвал их «долгом», которого нет.
     """
+    # СЕБЯ УЗНАЁМ ПО ПОЛНОМУ АДРЕСУ, А НЕ ПО ХВОСТУ ИМЕНИ. Сверка по хвосту
+    # («…заканчивается на Engineering-Pipeline-Mechanisms») принимает за нас
+    # форк или одноимённый репозиторий другого владельца — и тогда разрез
+    # приоритета считается по ЧУЖОЙ сводке, а мы получаем «нас нет в сводке»
+    # ровно тогда, когда мы в ней есть. Имя без владельца вообще не
+    # идентификатор (194), и слабее необходимого оно здесь без всякой причины:
+    # полный адрес у нас есть. Нашёл внешний взгляд на #119.
     us = next(
         (
             consumer
             for consumer in where.get("consumers") or []
-            if str(consumer.get("repo") or "").endswith(project.split("/")[-1])
+            if str(consumer.get("repo") or "").lower() == project.lower()
         ),
         None,
     )
