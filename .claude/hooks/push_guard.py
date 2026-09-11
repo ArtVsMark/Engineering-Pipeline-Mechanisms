@@ -65,14 +65,49 @@ GLOBAL_WITH_VALUE: Final = frozenset(
 )
 #: Приставка ссылки: в `refs/heads/agent/x` предметом сверки служит имя ветки.
 REF_PREFIX: Final = "refs/heads/"
-#: Обёртки, за которыми команда идёт СЛЕДУЮЩИМ словом. Список закрытый и
-#: каждая названа: «похоже на обёртку» пропустило бы и то, что обёрткой не
-#: является (068). `env` перед командой несёт ещё и присваивания `VAR=value` —
-#: они пропускаются отдельно.
-WRAPPERS: Final = frozenset({"env", "command", "nice", "nohup", "stdbuf", "time"})
+#: Обёртки, за которыми идёт команда, и КЛЮЧИ КАЖДОЙ, несущие значение.
+#:
+#: ПОЧЕМУ КЛЮЧИ НАЗВАНЫ ПОИМЁННО, А НЕ УГАДЫВАЮТСЯ. Обёртке нужно пропустить её
+#: собственные ключи и взять СЛЕДУЮЩЕЕ слово как программу. «Пропустить всё, что
+#: начинается с дефиса» не работает: `nice -n 5` оставляет `5` первым словом, то
+#: есть командой. Поиск `git` дальше по словам — тоже: он находит его в ДАННЫХ
+#: чужой программы, и `env echo git push origin main` отвергалось как толчок в
+#: общую ветку (нашёл внешний взгляд на #186). Поэтому у каждой обёртки назван
+#: её набор: список закрытый, а ключ вне его делает сторожа слепым, и слепой
+#: отвергает (068).
+WRAPPERS: Final[dict[str, frozenset[str]]] = {
+    "env": frozenset({"-u", "--unset"}),
+    "command": frozenset(),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "nohup": frozenset(),
+    "stdbuf": frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
+    "time": frozenset({"-f", "--format", "-o", "--output"}),
+    "timeout": frozenset({"-s", "--signal", "-k", "--kill-after"}),
+}
+#: Ключи обёрток БЕЗ значения: их пропускают по одному слову. Тоже поимённо и
+#: по той же причине.
+WRAPPER_FLAGS: Final[dict[str, frozenset[str]]] = {
+    "env": frozenset({"-i", "--ignore-environment", "-0", "--null", "-v"}),
+    "command": frozenset({"-p", "-v", "-V"}),
+    "nice": frozenset(),
+    "nohup": frozenset(),
+    "stdbuf": frozenset(),
+    "time": frozenset({"-p", "-v", "--verbose", "--portability"}),
+    "timeout": frozenset({"--preserve-status", "--foreground", "-v", "--verbose"}),
+}
+#: Сколько СВОИХ позиционных слов обёртка съедает перед командой. У `timeout`
+#: это длительность (`timeout 30 git push …`) — не ключ, а обычное слово, и без
+#: этого числа разбор принимал его за имя программы и уходил ни с чем.
+WRAPPER_ARGS: Final[dict[str, int]] = {"timeout": 1}
 #: Обёртки, которые принимают СКРИПТ строкой: `bash -c "git push …"`. Их
 #: содержимое разбирается заново, как отдельная команда.
 SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+#: Короткие ключи оболочки БЕЗ значения, которые законно стоят в одной связке
+#: перед `-c`: `bash -lc "…"`, `sh -xc "…"`. Список закрытый, и это важно:
+#: `-norc` содержит `c`, но `c` в нём не последний и `o` несёт значение —
+#: принять такую связку за `-c` значит прочитать не тот аргумент как скрипт, а
+#: толчок под ней пройдёт необнаруженным (нашёл внешний взгляд на #186).
+SHELL_FLAGS: Final = "ilsrxevh"
 #: Насколько глубоко сторож идёт внутрь вложенных оболочек. Предел нужен:
 #: `bash -c "bash -c …"` без него ушёл бы в бесконечность. ИСЧЕРПАНИЕ ПРЕДЕЛА —
 #: ОТКАЗ, А НЕ ПРОПУСК: сторож, не дочитавший команду, не знает, толчок это или
@@ -106,42 +141,77 @@ class Look:
     blind: str = ""
 
 
-def script_of(segment: list[str]) -> str | None:
-    """Скрипт, переданный оболочке ключом `-c`; ``None`` — его там нет.
+def script_of(segment: list[str]) -> tuple[str | None, str]:
+    """Скрипт, переданный оболочке ключом `-c`, и причина слепоты.
 
-    КЛЮЧ БЫВАЕТ СОВМЕЩЁННЫМ, И ЭТО НЕ РЕДКОСТЬ. `bash -lc "…"`, `sh -xc "…"` —
-    обычные написания, а разбор искал ровно слово `-c` и на них ломался. Ищется
-    короткая связка ключей, в которой есть `c`; длинные ключи (`--norc`) сюда не
-    попадают. Нашёл внешний взгляд на #181.
+    КЛЮЧ БЫВАЕТ СОВМЕЩЁННЫМ, НО НЕ ЛЮБАЯ СВЯЗКА С БУКВОЙ `c` — ЭТО `-c`.
+    `bash -lc "…"`, `sh -xc "…"` — обычные написания, и разбор, искавший ровно
+    слово `-c`, на них ломался. Но `-norc` тоже содержит `c`, а значит совсем
+    другое: `c` в нём не последний, а `o` несёт значение. Принять такую связку
+    за `-c` — прочитать не тот аргумент как скрипт, и толчок под ней пройдёт
+    необнаруженным. Нашёл внешний взгляд на #186, оба конца.
+
+    Поэтому связка принимается, только если `c` в ней ПОСЛЕДНИЙ, а всё до него —
+    известные короткие ключи без значения. Всё прочее с буквой `c` делает
+    сторожа слепым: он не берётся угадывать, какой из аргументов скрипт.
     """
     for place, word in enumerate(segment[1:], start=1):
-        if word.startswith("--") or not word.startswith("-") or len(word) < 2:
+        if word == "--":
+            return None, ""
+        if not word.startswith("-") or word.startswith("--") or len(word) < 2:
             continue
-        if "c" in word[1:] and place + 1 < len(segment):
-            return segment[place + 1]
-    return None
+        cluster = word[1:]
+        if "c" not in cluster:
+            continue
+        if cluster.endswith("c") and all(letter in SHELL_FLAGS for letter in cluster[:-1]):
+            if place + 1 < len(segment):
+                return segment[place + 1], ""
+            return None, f"у оболочки ключ «{word}» без скрипта — читать нечего"
+        return None, f"связка ключей «{word}» неоднозначна: где в ней скрипт, сторожу неизвестно"
+    return None, ""
 
 
-def after_flags(rest: list[str]) -> list[str]:
-    """Слова обёртки, начиная с команды, которую она запускает.
+def after_wrapper(name: str, rest: list[str]) -> tuple[list[str], str]:
+    """Слова после ключей обёртки — начиная с программы, которую она запускает.
 
-    КЛЮЧИ ОБЁРТКИ НЕ ПЕРЕЧИСЛЯЮТСЯ ПОИМЁННО, И ЭТО НАМЕРЕННО. `env -i`,
-    `nice -n 5`, `stdbuf -oL`, `env -u HOME` — у каждой обёртки свой набор, он
-    растёт с версиями, и список по памяти отставал бы молча. Хуже того, часть
-    ключей несёт значение (`-n 5`), и пропуск «всего, что начинается с дефиса»
-    оставляет это значение первым словом — то есть командой. Прежде разбор
-    требовал, чтобы команда шла сразу за именем обёртки, и все эти написания
-    проходили мимо сторожа. Нашёл внешний взгляд на #181.
-
-    Поэтому внутри обёртки вызов git ищется СКАНИРОВАНИЕМ. На верхнем уровне
-    сканировать нельзя: там в словах законно живёт текст документа
-    (`cat > f <<EOF … git push … EOF`), и поиск принял бы его за действие. А
-    внутри обёртки слова — это уже команда, которую она запускает.
+    КЛЮЧИ ПРОПУСКАЮТСЯ ПО ИМЕНИ, А КОМАНДА БЕРЁТСЯ СЛЕДУЮЩИМ СЛОВОМ. Прежде
+    здесь стояло сканирование — «найти `git` дальше по словам», — и оно
+    дотягивалось до ДАННЫХ чужой программы: `env echo git push origin main`
+    отвергалось как толчок в общую ветку. Ключ, которого нет в наборе обёртки,
+    делает сторожа слепым: угадать, несёт он значение или нет, нечем, а ошибка
+    в любую сторону молча меняет, что считается командой.
     """
-    for place, word in enumerate(rest):
-        if is_git(word):
-            return rest[place:]
-    return [word for word in rest if not word.startswith("-")]
+    values, flags = WRAPPERS.get(name, frozenset()), WRAPPER_FLAGS.get(name, frozenset())
+    place = 0
+    eaten = 0
+    while place < len(rest):
+        word = rest[place]
+        if word == "--":
+            return rest[place + 1 + WRAPPER_ARGS.get(name, 0) - eaten :], ""
+        if not word.startswith("-"):
+            # `VAR=value` перед командой — то же присваивание, что и на верхнем
+            # уровне: своё написание того же вызова.
+            if "=" in word and not word.startswith("="):
+                place += 1
+                continue
+            if eaten < WRAPPER_ARGS.get(name, 0):
+                eaten += 1
+                place += 1
+                continue
+            return rest[place:], ""
+        head, _, joined = word.partition("=")
+        if head in values:
+            place += 1 if joined else 2
+            continue
+        if head in flags:
+            place += 1
+            continue
+        # Совмещённый короткий ключ со значением: `stdbuf -oL`, `nice -n5`.
+        if len(word) > 2 and word[:2] in values:
+            place += 1
+            continue
+        return [], f"ключ «{word}» у обёртки «{name}» сторожу неизвестен"
+    return [], f"после обёртки «{name}» команды нет"
 
 
 def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
@@ -152,8 +222,13 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
     сторож, смотрящий только на первое слово, пропускал их все. Список
     разрешительный: что не названо обёрткой, обёрткой не считается (068).
 
-    ВТОРЫМ ОТДАЁТСЯ ПРИЧИНА СЛЕПОТЫ. Предел вложенности исчерпан — команда не
-    дочитана, и сторож об этом говорит, а не отдаёт её дальше молча.
+    ОБЁРТКА ВОКРУГ ОБОЛОЧКИ — ТОЖЕ ОБЁРТКА. `env bash -c "git push …"`
+    проходил необнаруженным: разбор снимал `env` и на этом останавливался,
+    потому что дальше шёл не `git`. Снятие идёт по кругу, пока снимается.
+
+    ВТОРЫМ ОТДАЁТСЯ ПРИЧИНА СЛЕПОТЫ. Предел вложенности исчерпан, ключ обёртки
+    неизвестен, связка ключей оболочки неоднозначна — команда не дочитана, и
+    сторож об этом говорит, а не отдаёт её дальше молча.
     """
     if not segment:
         return [segment], ""
@@ -164,7 +239,9 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
     if "=" in first and not first.startswith("=") and len(segment) > 1:
         return unwrap(segment[1:], depth - 1)
     if first in SHELLS:
-        script = script_of(segment)
+        script, blind = script_of(segment)
+        if blind:
+            return [], blind
         if script is None:
             return [segment], ""
         try:
@@ -179,9 +256,12 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
             found.extend(deeper)
         return found or [segment], ""
     if first in WRAPPERS and len(segment) > 1:
-        # Ключи обёртки пропускаются по форме, а команда ищется дальше: внутри
-        # обёртки слова — это команда, а не текст документа.
-        return unwrap(after_flags(segment[1:]), depth - 1)
+        rest, blind = after_wrapper(first, segment[1:])
+        if blind:
+            return [], blind
+        # Внутри обёртки может стоять другая обёртка или оболочка — снятие идёт
+        # по кругу, а не один раз.
+        return unwrap(rest, depth - 1)
     return [segment], ""
 
 
