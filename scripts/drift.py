@@ -499,9 +499,35 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
     for one in ours:
         slug = str(one.get("slug") or "")
         verdict = said.get(f"{project}:{slug}")
+        if verdict is None:
+            # Каталог ещё не ответил — ожидание, а не расхождение.
+            continue
         if not isinstance(verdict, dict):
+            found.append(
+                Drift(
+                    "proposal-answer-unread",
+                    f"вердикт по «{slug}» пришёл не словарём, а {type(verdict).__name__}",
+                    "сверить разбор с export/README.md каталога: ответ есть, а прочитать "
+                    "его нечем — молчать об этом значит выдать неразобранное за «нет ответа»",
+                )
+            )
             continue
         status = str(verdict.get("status") or "")
+        if not status:
+            # ВЕРДИКТ БЕЗ СТАТУСА — НЕ «ВЕРДИКТА НЕТ». Запись есть, ответ дан, а
+            # прочитать его нечем: пропустить такую значит объявить отвеченное
+            # неотвеченным и держать предложение в очереди навсегда (045).
+            # Нашёл внешний взгляд на #179.
+            found.append(
+                Drift(
+                    "proposal-answer-unread",
+                    f"вердикт по «{slug}» есть, а поля «status» в нём нет "
+                    f"(поля: {report.cut(', '.join(sorted(map(str, verdict))))})",
+                    "сверить разбор с export/README.md каталога: ответ есть, "
+                    "и молчать о нём нельзя",
+                )
+            )
+            continue
         # Номер присваивает КАТАЛОГ и называет его полем `rule`. Наш файл
         # предложений номера не несёт и нести не может — это сказано в нём же.
         number = str(verdict.get("rule") or "?")
