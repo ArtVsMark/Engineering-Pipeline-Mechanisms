@@ -32,6 +32,31 @@ def load_gates() -> dict[Any, Any]:
     return document
 
 
+def summary_lives_in() -> tuple[Path, dict[Any, Any]]:
+    """Где объявлен сводный джоб: файл и его прогон целиком.
+
+    Джоб ищется ПО ИМЕНИ во всех прогонах, а не по адресу файла. 11.09.2026 он
+    переехал из `ci.yml` в собственный прогон, чтобы группа отмены `ci` не
+    гасила обязательный контекст, — и набор, прибитый к имени файла, сломался
+    бы этим переездом, ничего не сказав о существе. Имя джоба — предмет
+    договора с защитой ветки, файл — его адрес (168).
+    """
+    found = [
+        (path, document)
+        for path in sorted(WORKFLOWS.glob("*.yml"))
+        if SUMMARY
+        in ((document := yaml.safe_load(path.read_text(encoding="utf-8"))) or {}).get("jobs", {})
+    ]
+    assert len(found) == 1, f"сводный джоб «{SUMMARY}» объявлен {len(found)} раз — ожидался один"
+    return found[0]
+
+
+def summary_job() -> dict[Any, Any]:
+    """Сводный джоб, где бы он ни жил."""
+    job: dict[Any, Any] = summary_lives_in()[1]["jobs"][SUMMARY] or {}
+    return job
+
+
 def contract_rows() -> list[tuple[str, str]]:
     """Строки таблицы шагов договора парами «файл прогона, имя джоба».
 
@@ -135,7 +160,7 @@ def test_the_skeleton_may_name_what_is_not_built_yet() -> None:
 
 def test_summary_has_no_needs() -> None:
     """Сводный гейт собран опросом: `needs` превращает отказ соседа в пропуск."""
-    assert "needs" not in load_gates()["jobs"][SUMMARY]
+    assert "needs" not in summary_job()
 
 
 def test_job_name_equals_context_name() -> None:
@@ -146,7 +171,7 @@ def test_job_name_equals_context_name() -> None:
 
 def test_summary_is_not_a_matrix() -> None:
     """Матричные имена в список обязательных не попадают никогда."""
-    assert "strategy" not in load_gates()["jobs"][SUMMARY]
+    assert "strategy" not in summary_job()
 
 
 def test_summary_takes_its_subject_from_data() -> None:
@@ -157,7 +182,7 @@ def test_summary_takes_its_subject_from_data() -> None:
     невозможен, и подключение к общему конвейеру не должно требовать правки
     workflow.
     """
-    step = load_gates()["jobs"][SUMMARY]["steps"][-1]["run"]
+    step = summary_job()["steps"][-1]["run"]
     assert "--policy" in step, "сводный джоб не называет, откуда берёт наполнение"
     assert "--required" not in step, "список именами в прогоне — это класс проверки в механизме"
 
@@ -215,12 +240,33 @@ def test_change_only_jobs_do_not_run_on_the_shared_branch() -> None:
     именно здесь.
     """
     jobs = load_gates()["jobs"]
-    for name in ("pr-meta", "journal", "attribution", SUMMARY):
+    for name in ("pr-meta", "journal", "attribution"):
         condition = str(jobs[name].get("if", ""))
         assert runs_only_on_a_change(condition), (
             f"{name}: условие «{condition}» не объявляет «только на изменении» — "
             f"ожидалось «{CHANGE_ONLY}»"
         )
+
+
+def test_the_summary_never_comes_to_the_shared_branch_at_all() -> None:
+    """Сводный гейт на общую ветку не приходит ВОВСЕ, а не пропускается условием.
+
+    Пока он жил джобом в `ci`, событие толчка в общую ветку до него доходило, и
+    не идти ему приходилось условием. Со своим прогоном условие не нужно: у него
+    просто нет события `push`. Это сильнее — условие вычисляет площадка уже
+    ПОСЛЕ создания записи, а отсутствующее событие записи не создаёт.
+
+    Проверяется именно отсутствие события, а не отсутствие условия: джоб без
+    `if` в прогоне, который ходит на `push`, шёл бы на общей ветке каждый раз.
+    """
+    _, document = summary_lives_in()
+    # YAML 1.1 читает `on:` как булево `True` — раздел событий лежит под ним.
+    events = document.get(True) or document.get("on") or {}
+    assert "push" not in events, (
+        f"прогон сводного гейта ходит на {sorted(events)}: событие толчка в общую ветку "
+        "создаёт запись там, где сводить нечего"
+    )
+    assert "pull_request" in events, "сводный гейт не ходит на изменение — сводить будет нечего"
 
 
 def test_an_inverted_condition_would_be_caught() -> None:
@@ -236,6 +282,10 @@ def test_an_inverted_condition_would_be_caught() -> None:
     `test_change_only_jobs_do_not_run_on_the_shared_branch`: она гоняет ту же
     функцию по живому `ci.yml`. Порознь каждая из них говорила бы о себе,
     вместе — о конвейере. Нашёл внешний взгляд на #107.
+
+    Сводного гейта в том списке больше нет: он ушёл в свой прогон, и там
+    «не идти на общей ветке» держится ОТСУТСТВИЕМ события, а не условием, —
+    это проверяет `test_the_summary_never_comes_to_the_shared_branch_at_all`.
     """
     assert runs_only_on_a_change("github.event_name != 'push'")
     assert not runs_only_on_a_change("github.event_name == 'push'")
@@ -368,3 +418,35 @@ def test_an_unbuilt_step_is_named_among_the_gaps() -> None:
         assert name and f"`{name}`" in gaps, (
             f"шаг «{name}» помечен непостроенным в договоре, а в таблице пробелов свода его нет"
         )
+
+
+def test_the_summary_is_not_cancelled_together_with_the_gates() -> None:
+    """Группа отмены `ci` сводного гейта не касается — ради этого он и переехал.
+
+    У `ci` стоит `cancel-in-progress: true`, и гасит она ВЕСЬ прогон целиком.
+    Пока сводный гейт жил внутри, новый толчок оставлял на прежней голове
+    `cancelled` там, где защита ветки ждёт вердикт: отменённая запись слияния
+    не держит, но и зелёной не является. Замер 10.09.2026 — #105 получил
+    красный обязательный контекст при полностью зелёных проверках.
+
+    Проверяется РАЗНИЦА ГРУПП, а не наличие своей: одинаковое имя группы в двух
+    файлах гасило бы их вместе ровно так же, как один файл.
+    """
+    summary_file, summary = summary_lives_in()
+    assert summary_file != GATES, "сводный гейт снова живёт в прогоне гейтов"
+    mine = str((summary.get("concurrency") or {}).get("group") or "")
+    theirs = str((load_gates().get("concurrency") or {}).get("group") or "")
+    assert mine and theirs, "у одного из прогонов нет группы отмены — сравнивать нечего"
+    assert mine != theirs, f"группа отмены общая ({mine}): гаснуть они будут вместе"
+
+
+def test_the_summary_names_the_head_in_its_own_group() -> None:
+    """Своя группа отмены называет голову, а не только номер изменения (179).
+
+    Иначе последнее слово осталось бы за заходом на устаревшем коммите — и
+    обязательный контекст отвечал бы о чужой голове.
+    """
+    group = str((summary_lives_in()[1].get("concurrency") or {}).get("group") or "")
+    assert "head.sha" in group or "github.sha" in group, (
+        f"группа «{group}» не называет головы: вердикт о старом коммите вытеснит новый"
+    )

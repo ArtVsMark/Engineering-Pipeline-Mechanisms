@@ -10,7 +10,7 @@
 
 * в списке обязательных **ровно одно** имя — список, перечисляющий матрицу,
   ломается при добавлении версии;
-* это имя выдаёт джоб, объявленный в ``ci.yml``;
+* это имя выдаёт джоб, объявленный в дереве прогонов;
 * матричные имена в список не попали;
 * способ слияния ограничен уплотнением — решение ``006``, а держится оно тоже
   настройкой вне дерева.
@@ -36,13 +36,19 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import Any, Final
 
 import ghrest
 import paths
 import yaml
 
-GATES_FILE: Final = paths.WORKFLOWS / "ci.yml"
+#: Где живёт сводный джоб. Файл НЕ назван одним именем намеренно: 11.09.2026
+#: гейт переехал из `ci.yml` в собственный прогон, чтобы группа отмены `ci` не
+#: гасила обязательный контекст, — и сверка, прибитая к имени файла, сломалась
+#: бы этим переездом. Ищется джоб по ИМЕНИ во всех прогонах: имя и есть предмет
+#: договора с защитой ветки, а файл — его адрес, и адрес вправе меняться (168).
+GATES_DIR: Final = paths.WORKFLOWS
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -57,14 +63,33 @@ class NotRun(RuntimeError):
 
 
 def declared_context(summary_job: str) -> str:
-    """Отдаёт имя контекста, которое выдаст сводный джоб дерева."""
-    if not GATES_FILE.is_file():
-        raise NotRun(f"нет описания гейтов: {GATES_FILE}")
-    document = yaml.safe_load(GATES_FILE.read_text(encoding="utf-8"))
-    jobs = (document or {}).get("jobs") or {}
-    if summary_job not in jobs:
-        raise NotRun(f"в {GATES_FILE} нет джоба «{summary_job}» — предмет сверки не найден (075)")
-    job = jobs[summary_job] or {}
+    """Отдаёт имя контекста, которое выдаст сводный джоб дерева.
+
+    Джоб ищется ПО ИМЕНИ во всех прогонах, а не по адресу файла: имя — предмет
+    договора с защитой ветки, файл — его адрес, и адрес вправе меняться. Найтись
+    он обязан ровно в одном месте: два джоба с именем обязательного контекста
+    дали бы на голове две записи, и защита ветки зачла бы любую из них (187).
+    """
+    if not GATES_DIR.is_dir():
+        raise NotRun(f"нет каталога прогонов: {GATES_DIR}")
+    found: list[tuple[Path, Any]] = []
+    for path in sorted(GATES_DIR.glob("*.yml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        jobs = document.get("jobs") or {}
+        if summary_job in jobs:
+            found.append((path, jobs[summary_job] or {}))
+    if not found:
+        raise NotRun(
+            f"ни один прогон в {GATES_DIR} не объявляет джоба «{summary_job}» — "
+            "предмет сверки не найден (075)"
+        )
+    if len(found) > 1:
+        where = ", ".join(path.name for path, _ in found)
+        raise NotRun(
+            f"джоб «{summary_job}» объявлен дважды ({where}): на голове окажутся две "
+            "записи с именем обязательного контекста, и защита зачтёт любую (187)"
+        )
+    job = found[0][1]
     if "strategy" in job:
         raise NotRun(
             f"джоб «{summary_job}» матричный: матричные имена в список обязательных "

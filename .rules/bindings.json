@@ -850,7 +850,7 @@
     "168": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/ci.yml — ci-complete собран опросом, без needs; scripts/ci_complete.py; tests/test_gates_contract.py проверяет отсутствие needs и полноту опроса"
+      "where": ".github/workflows/ci-complete.yml — сводный гейт собран опросом, без needs, и живёт ОТДЕЛЬНЫМ прогоном: группа отмены ci гасила его вместе с гейтами, и на голове оставалось cancelled там, где защита ждёт вердикт; scripts/ci_complete.py; tests/test_gates_contract.py проверяет отсутствие needs и полноту опроса"
     },
     "169": {
       "status": "active",
