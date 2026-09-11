@@ -188,3 +188,43 @@ def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:
     for item in proposals():
         said = str(item.get("slug") or "")
         assert re.fullmatch(r"[a-z0-9-]+", said), f"слаг «{said}» не по форме контракта"
+
+
+# --- контракт 1.3: у ответа «документом» назван предел ------------------------
+
+
+def test_every_document_answer_names_its_limit() -> None:
+    """У каждого `document` сказано, есть ли машинная половина вовсе.
+
+    Контракт 1.3 расколол ответ «документом» надвое: `impossible` — машинной
+    половины нет, документ и есть предел; `not-yet` — половина есть и не
+    построена. Слово закрытое, потому что счётчику доли машинного соблюдения
+    надо РАЗДЕЛИТЬ знаменатель, а прозу сложить нельзя.
+
+    Требуется от ВСЕХ, а не только от новых: ревизия 11.09.2026 прочитала все
+    28 ответов по букве и границе правила, и предел назван у каждого. Оставить
+    часть без ответа значило бы сделать вид, что их не разбирали.
+    """
+    answers = load()["rules"]
+    bare = [
+        rule
+        for rule, one in answers.items()
+        if one.get("status") == "active"
+        and one.get("mechanism") == "document"
+        and one.get("document_reason") not in ("impossible", "not-yet")
+    ]
+    assert not bare, "ответ «документом» без названного предела: " + ", ".join(sorted(bare))
+
+
+def test_a_named_limit_carries_its_reason() -> None:
+    """Рядом с пределом стоит причина: значение из двух выбирается не думая.
+
+    Причину не написать, не подумав, — этим она и держит выбор (154).
+    """
+    answers = load()["rules"]
+    silent = [
+        rule
+        for rule, one in answers.items()
+        if one.get("document_reason") and not str(one.get("why") or "").strip()
+    ]
+    assert not silent, "предел назван без причины: " + ", ".join(sorted(silent))
