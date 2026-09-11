@@ -258,7 +258,7 @@ def why_quiet(runs: list[dict[str, Any]]) -> str:
     #
     # ИДУЩИМ СЧИТАЕТСЯ ЗАПИСЬ БЕЗ ИСХОДА, а не просто незавершённая: площадка
     # оставляет записи-зомби с готовым `conclusion` при переходном `status`.
-    # Тот же приём и по той же причине — в `ci_complete.own_jobs`.
+    # Тот же приём и по той же причине — в `ci_complete.roster_of`.
     if any(
         str(run.get("status") or "") != "completed" and run.get("conclusion") is None
         for run in ours
