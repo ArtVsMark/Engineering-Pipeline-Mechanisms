@@ -128,3 +128,44 @@
 объявленного исхода — взвели, отозвали, заморозили, разморозили — обязан быть
 прогон, в котором он случился
 ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+
+## След замера по клонам — адресами, а не памятью
+
+Замер, на котором стоит первый абзац «Контекста», обязан иметь адрес и
+владельца, иначе следующее окно унаследует непроверяемую премису
+([185](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/185-a-trail-is-an-address-and-its-owner-keeps-it-alive.md)).
+Ровно это и случилось с прежним доводом «трое из четырёх»: он был записан без
+следа и оказался неверен. Нашёл внешний взгляд на #202.
+
+**Владелец следа — владелец этого проекта** (`ArtVsMark`): он же владеет всеми
+четырьмя клонами, поэтому адреса ниже остаются достижимыми, пока жив он сам.
+Отдельного хранителя у следа нет и заводить его нечего — 185 требует живого
+владельца, а не второго человека.
+
+Адреса на 11.09.2026, все на общей ветке своих проектов (владелец у всех —
+`ArtVsMark`):
+
+| проект | взводит авто-мерж | сливает сам |
+|---|---|---|
+| `Glossary-Python` | `scripts/automerge.py` — мутация и её обоснование в шапке | — |
+| `Engineering-Incidents-Playbook` | `.github/workflows/automerge.yml` — та же мутация | — |
+| `stepik-python-grader` | `.github/workflows/merge-when-green.yml` — взводит и снимает (`--disable`) | `scripts/gh_rest.py` — `PUT repos/{repo}/pulls/{number}/merge`, зовётся из `move_merge_queue.py` по `merge-queue.yml` |
+| `Claude-Code_Usage-Token` | — · запрет GraphQL и названная им цена: «авто-мержа GitHub у нас не будет» (`scripts/gh_rest.py`, шапка) | `scripts/merge_queue.py` — свой `PUT …/merge` |
+
+Столбцы разведены намеренно: адрес, показывающий ПРОДВИЖЕНИЕ очереди, ничего не
+говорит о том, кто делает само слияние, — а замер именно об этом.
+
+**Замер повторяется командой**, и это часть следа:
+
+```sh
+# у кого есть взведение авто-мержа площадки
+grep -rl enablePullRequestAutoMerge <клоны>/*/{scripts,.github/workflows}
+# а у кого — своё слияние
+grep -rn 'pulls/{number}/merge\|pulls/{n}/merge' <клоны>/*/scripts
+```
+
+Число в «Контексте» держится этой процедурой, а не памятью автора записи
+([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+Ни один из четырёх не передаёт `commitHeadline`/`commitBody` — это тоже часть
+замера и основание для пункта решения о теле уплотнения.

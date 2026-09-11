@@ -65,8 +65,9 @@ jobs:
     # причины читается как поломка изменения. Пустое состояние объявляется
     # (правило 027).
     #
-    # У ручного захода предмет обязателен: заход без номера смотрел бы в
-    # текущую ветку и назывался бы ревью, им не будучи (154).
+    # РУЧНОГО ЗАХОДА У ЭТОГО ДЖОБА НЕТ ВОВСЕ: условие пускает только
+    # `pull_request`. Требование «у ручного захода предмет обязателен» живёт
+    # там, где ручной заход есть, — у позднего взгляда ниже.
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -136,17 +137,33 @@ jobs:
           BASE: ${{ github.event.pull_request.base.ref || 'main' }}
         run: |
           set -uo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE"
-          rc=0
-          python scripts/review_map.py --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            echo "::warning::Карта не собрана (код $rc): взгляд пойдёт без неё."
-            printf '' > "$RUNNER_TEMP/map.md"
+          : > "$RUNNER_TEMP/map.md"
+          # ОТКАЗ ФЕТЧА — ЭТО ОТКАЗ КАРТЫ, А НЕ ТИХАЯ ПОДМЕНА БАЗЫ. Без этой
+          # проверки `FETCH_HEAD` оставался тем, что положил `actions/checkout`,
+          # — то есть головой САМОГО изменения. Карта тогда собиралась бы по
+          # ответу, который пишет проверяемый, и изменение могло объявить все
+          # правила машинными, получив взгляд, которому некуда смотреть (085).
+          # Сбой сети превращался в ту самую подмену, от которой шаг и заведён.
+          # Нашёл внешний взгляд на #120.
+          if git fetch --no-tags --depth=1 origin "$BASE"; then
+            rc=0
+            python scripts/review_map.py --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::warning::Карта не собрана (код $rc): взгляд пойдёт без неё."
+              : > "$RUNNER_TEMP/map.md"
+            fi
+          else
+            echo "::warning::Общая ветка «$BASE» не получена: карта не собирается. Брать её с головы изменения нельзя — ответ каталогу пишет тот, кого проверяют (085)."
           fi
+          # РАЗДЕЛИТЕЛЬ СЛУЧАЕН, А НЕ ПОСТОЯНЕН. В карту попадают заголовки
+          # правил, приходящие ПО СЕТИ из выгрузки соседнего репозитория; строка
+          # с постоянным маркером внутри такого текста закрыла бы блок раньше
+          # времени и дала бы дописать в `$GITHUB_OUTPUT` что угодно.
+          eof="CLAUDE_MAP_EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<CLAUDE_MAP_EOF"
+            echo "text<<$eof"
             cat "$RUNNER_TEMP/map.md"
-            echo "CLAUDE_MAP_EOF"
+            echo "$eof"
           } >> "$GITHUB_OUTPUT"
 
       - name: внешний взгляд
@@ -400,17 +417,25 @@ jobs:
           BASE: main
         run: |
           set -uo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE"
-          rc=0
-          python scripts/review_map.py --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            echo "::warning::Карта не собрана (код $rc): взгляд пойдёт без неё."
-            printf '' > "$RUNNER_TEMP/map.md"
+          : > "$RUNNER_TEMP/map.md"
+          # Второй экземпляр того же шага — у позднего взгляда. Правка одного
+          # конца из двух уже стоила проекту находки, поэтому оба места правятся
+          # разом (195).
+          if git fetch --no-tags --depth=1 origin "$BASE"; then
+            rc=0
+            python scripts/review_map.py --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::warning::Карта не собрана (код $rc): взгляд пойдёт без неё."
+              : > "$RUNNER_TEMP/map.md"
+            fi
+          else
+            echo "::warning::Общая ветка «$BASE» не получена: карта не собирается."
           fi
+          eof="CLAUDE_MAP_EOF_$(openssl rand -hex 16)"
           {
-            echo "text<<CLAUDE_MAP_EOF"
+            echo "text<<$eof"
             cat "$RUNNER_TEMP/map.md"
-            echo "CLAUDE_MAP_EOF"
+            echo "$eof"
           } >> "$GITHUB_OUTPUT"
 
       - name: поздний взгляд по слитому

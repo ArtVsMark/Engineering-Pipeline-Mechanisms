@@ -582,11 +582,11 @@ def test_a_job_with_a_conclusion_is_not_still_coming(monkeypatch: pytest.MonkeyP
         ]
     }
     monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: payload)
-    mine = module.own_jobs("o/r", "7", "token")
-    assert "test" not in mine
-    assert mine["lint"] == "in_progress"
-    assert module.still_coming("test", mine) is False
-    assert module.still_coming("lint", mine) is True
+    roster = module.roster_of("o/r", "7", "token")
+    assert "test" not in roster.running
+    assert roster.running["lint"] == "in_progress"
+    assert module.still_coming("test", roster.running) is False
+    assert module.still_coming("lint", roster.running) is True
 
 
 def test_the_summarised_run_is_the_freshest_one_on_the_head(
@@ -633,7 +633,7 @@ def test_the_gate_does_not_take_its_own_run_for_the_summarised_one() -> None:
     Пока гейт был джобом внутри `ci`, `GITHUB_RUN_ID` совпадал со сводимым
     прогоном. После переезда в свой файл совпадение исчезло, и от этого разом
     отказали оба различия, на которых держится разбор гонки: предпочтение
-    записей сводимого прогона и `own_jobs`. Замер 11.09.2026 — #199 получил
+    записей сводимого прогона и `roster_of`. Замер 11.09.2026 — #199 получил
     красное «все записи отменены» за 51 секунду вместо ожидания, дважды подряд.
     """
     source = module.__doc__ or ""
@@ -643,24 +643,76 @@ def test_the_gate_does_not_take_its_own_run_for_the_summarised_one() -> None:
     assert "summarised_run(" in parser_source
 
 
-def test_a_summary_is_never_ready_before_what_it_summarises() -> None:
-    """Сводка не бывает готова раньше того, что она сводит.
+def test_the_gate_waits_for_the_roster_not_for_the_whole_run() -> None:
+    """Ждут СОСТАВ сводимого прогона, а не его завершение.
 
     ЗАМЕР 11.09.2026, #199, третий заход. Прогон `ci` создан в 15:14:18 и уже
     существовал, а джобов в нём не было ни одного — первый стартовал в
     15:14:55. Гейт опросил голову в 15:14:22, увидел пустой список джобов и
     только отменённые записи прежних заходов — и вынес «все записи отменены»
-    за одиннадцать секунд. Признак «джоб ещё едет» этого не ловит: ловит
-    только состояние самого сводимого прогона.
+    за одиннадцать секунд.
 
-    Отменённый прогон завершён, но вердикта не несёт: его погасила группа
-    отмены, следом идёт новый заход, и последнее слово за ним (179).
+    Ждать при этом ЗАВЕРШЕНИЯ нельзя: так совещательная проверка начинает
+    задерживать вердикт, то есть становится обязательной обходным путём (051).
+    Нашёл внешний взгляд на #199. Состава довольно — дальше каждое имя ждут
+    отдельно, и совещательное не ждут вовсе.
+
+    Отменённый прогон вердикта не несёт: следом идёт новый заход (179).
     """
-    assert not module.settled(None)
-    assert not module.settled({"status": "queued", "conclusion": None})
-    assert not module.settled({"status": "in_progress", "conclusion": None})
-    assert not module.settled({"status": "completed", "conclusion": "cancelled"})
-    assert module.settled({"status": "completed", "conclusion": "success"})
-    assert module.settled({"status": "completed", "conclusion": "failure"})
+    live = module.Roster(read=True, named=2, running={"lint": "queued"})
+    empty = module.Roster(read=True, named=0, running={})
+    assert not module.ready_to_judge(None, live)
+    assert not module.ready_to_judge({"status": "queued", "conclusion": None}, empty)
+    assert not module.ready_to_judge({"status": "completed", "conclusion": "cancelled"}, live)
+    assert module.ready_to_judge({"status": "queued", "conclusion": None}, live)
+    assert module.ready_to_judge({"status": "in_progress", "conclusion": None}, live)
+    assert module.ready_to_judge({"status": "completed", "conclusion": "success"}, live)
     assert module.was_cancelled({"status": "completed", "conclusion": "cancelled"})
     assert not module.was_cancelled({"status": "completed", "conclusion": "failure"})
+
+
+def test_an_advisory_check_never_delays_the_verdict() -> None:
+    """Совещательная проверка вердикта не держит — ни красным, ни ожиданием.
+
+    `.pipeline.yml` объявляет `test-next` совещательным: «слияния не держит».
+    Ожидание всего прогона `ci` делало его задерживающим на КАЖДОМ изменении —
+    обязательным обходным путём. Здесь предмет прямой: незавершённая
+    совещательная запись не поднимает флаг ожидания.
+    """
+    runs = [run("lint"), run("test"), run("test-next", status="in_progress", conclusion=None)]
+    problems, waiting = module.verdict(runs, REQUIRED, "ci-complete", "1")
+    assert problems == [] and waiting is False, (problems, waiting)
+    advisory, _ = module.verdict(runs, ["test-next"], "ci-complete", "1", strict_missing=False)
+    assert advisory == [], advisory
+
+
+def test_a_finished_run_is_not_an_unnamed_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Прогон, у которого ВСЕ джобы завершились, состав назвал — и вердикт идёт.
+
+    Список едущих джобов у такого прогона пуст ВСЕГДА, и по нему одному он
+    неотличим от «прогон ещё ничего не назвал». Ожидание на этом висело бы до
+    тайм-аута и кончалось ложным красным на здоровом прогоне. Нашёл внешний
+    взгляд на #203.
+    """
+    done = {"jobs": [{"name": "lint", "status": "completed", "conclusion": "success"}]}
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: done)
+    roster = module.roster_of("o/r", "7", "token")
+    assert roster.read and roster.named == 1 and roster.running == {}
+    assert module.ready_to_judge({"status": "completed", "conclusion": "success"}, roster)
+
+
+def test_an_unread_roster_never_holds_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не прочитанный список — не пустой: гейт идёт прежней строгостью.
+
+    Отказ транспорта означает «различить нечем» и возврат к строгости (045).
+    Сведённый к «состав ещё не назван», он повесил бы гейт до тайм-аута — то
+    есть поменял бы строгость на ложное красное.
+    """
+
+    def silent(*_: object, **__: object) -> object:
+        raise module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.ghrest, "request", silent)
+    roster = module.roster_of("o/r", "7", "token")
+    assert roster.read is False and roster.named == 0
+    assert module.ready_to_judge({"status": "in_progress", "conclusion": None}, roster)

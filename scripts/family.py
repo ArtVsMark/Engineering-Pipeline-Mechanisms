@@ -40,10 +40,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+import kinds
+
 #: Адрес механизма внутри ответа: путь к файлу с расширением, которое исполняют.
 ADDRESS_RE: Final = re.compile(r"[\w./-]+\.(?:py|yml|yaml)\b")
-#: Виды, которые считаются механизмом. Документ — не механизм: его не вынести.
-KINDS: Final = frozenset({"gate", "pipeline", "code"})
+#: Виды, которые считаются механизмом, — из общего места (`scripts/kinds.py`).
+#: Своё имя для того же набора было ЧЕТВЁРТОЙ копией и вторым именем разом.
+KINDS: Final = kinds.MACHINE
 #: Со скольких проектов механизм считается общим.
 SHARED_FROM: Final = 2
 #: Версия сводки каталога, под которую написан этот разрез. Подъём — повод

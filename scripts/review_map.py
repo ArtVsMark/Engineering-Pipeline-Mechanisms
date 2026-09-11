@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import ghrest
+import kinds
 import paths
 
 EXIT_OK: Final = 0
@@ -45,7 +46,9 @@ EXIT_BROKEN: Final = 2
 
 #: Роды ответа, означающие «держит машина». Тот же состав, что у разреза семьи
 #: и у дрейфа: три понимания одного слова разошлись бы молча (090).
-MACHINE: Final = frozenset({"gate", "pipeline", "code"})
+#: Виды механизма — из общего места: четыре копии одного набора разъехались
+#: бы молча (090). Разбор см. `scripts/kinds.py`.
+MACHINE: Final = kinds.MACHINE
 
 EXPORT_URL: Final = (
     "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
