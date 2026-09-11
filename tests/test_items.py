@@ -329,6 +329,40 @@ def test_an_item_naming_two_tasks_is_left_alone() -> None:
     assert updated == body
 
 
+def test_an_item_that_only_cites_a_task_is_not_that_task() -> None:
+    """Ссылка внутри прозы — упоминание, а не тождество, и это стоило эпика.
+
+    11.09.2026 три пункта эпика #196 встали отмеченными, не будучи сделанными:
+    «Пересмотр решения #3», «Последний открытый пункт #39», «Половина #15» —
+    все три задачи закрыты, и следование прочитало цитату как «пункт и есть
+    эта задача». Образцы здесь — дословные, из того самого тела
+    ([204](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/204-a-citation-is-checked-by-applicability.md)).
+    """
+    cited = [
+        "**2. Слияние отдаётся площадке.** Пересмотр решения #3 — НОВОЙ записью в",
+        "**5. Повторный взгляд по номеру слитого.** Последний открытый пункт #39:",
+        "**6. Версия контракта дисциплинирует СЕБЯ.** Половина #15, обращённая",
+    ]
+    for text in cited:
+        assert items.linked_item(text) is None, text
+    body = "\n".join(f"- [ ] {one}" for one in cited)
+    updated, done = items.followed(body, lambda number: True)
+    assert done == []
+    assert updated == body
+
+
+def test_a_heading_does_not_hide_the_subject() -> None:
+    """Пункт-ссылка узнаётся и под жирным номером: заголовок — не проза.
+
+    `**1. Решения** — #3` называет задачу собой; заголовок лишь нумерует пункт
+    внутри эпика. Отличать его от «Пересмотр решения #3» и есть работа образца.
+    """
+    assert items.names_a_task("**1. Решения** — #3 (родная очередь)")
+    assert items.names_a_task("#14 — обратная связь")
+    assert not items.names_a_task("Пересмотр решения #3")
+    assert not items.names_a_task("**0. Цели.** Свести `docs/roadmap.md`")
+
+
 def test_a_reference_inside_code_is_not_a_link() -> None:
     """Ссылка внутри инлайн-кода — текст, а не адрес задачи."""
     assert items.linked_item("правило `#42` в примере") is None
