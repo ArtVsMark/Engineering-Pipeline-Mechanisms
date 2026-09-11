@@ -124,6 +124,8 @@ def test_the_verdict_does_not_depend_on_how_full_the_registry_is() -> None:
 def test_a_human_task_with_prose_is_still_a_candidate() -> None:
     """Граница не съела предмет: задача человека с прозой по-прежнему кандидат."""
     assert [task.number for task in module.without_a_checklist([issue(182, PROSE)])] == [182]
+
+
 def test_a_task_closed_before_the_counter_is_marked_as_such() -> None:
     """Закрытое до счётчика пунктов помечено (нашёл владелец вопросом).
 
