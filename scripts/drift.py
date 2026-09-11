@@ -293,11 +293,16 @@ def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
     behind = sorted(tag for tag in used if newest and tag != newest)
     if not behind:
         return []
-    where = sorted({name for tag in behind for name in used[tag]})
+    # ТЕГ НАЗЫВАЕТСЯ ВМЕСТЕ СО СВОИМИ ФАЙЛАМИ, А НЕ РЯДОМ С ЧУЖИМИ. Прежде
+    # печатались два плоских списка — теги и все файлы разом, — и при разных
+    # отставших тегах в разных прогонах читатель не мог понять, что где: а
+    # править надо именно тот файл, где стоит именно тот тег. Нашёл внешний
+    # взгляд на #122.
+    where = "; ".join(f"{tag} — {', '.join(sorted(used[tag]))}" for tag in behind)
     return [
         Drift(
             "catalogue-action",
-            f"подключено {', '.join(behind)} ({', '.join(where)}), у каталога выпущен {newest}",
+            f"подключено {where}; у каталога выпущен {newest}",
             f"прочитать журнал выпуска и поднять тег, если он нас касается: "
             f"https://github.com/{CATALOGUE}/releases/tag/{newest}",
         )
@@ -319,10 +324,11 @@ def order(minor: str) -> tuple[int, ...]:
     остальные. Непонятная запись уходит в НАЧАЛО: пустой кортеж младше любого
     номера. Это не случайность разбора, а верная сторона ошибки — непонятное
     надо увидеть, а не задвинуть в хвост; молча выбрасывать её тем более
-    нельзя, тогда скрылось бы, что в матрице что-то не то. Прежде здесь стояло
-    «в конец» — текст расходился с кодом и с собственным тестом. Нашёл внешний
-    взгляд на #159.
-    Нашёл внешний взгляд на #121.
+    нельзя, тогда скрылось бы, что в матрице что-то не то.
+
+    Найдено внешним взглядом дважды, и это два разных захода: на #159 — что
+    текст расходился с кодом и с собственным тестом («в конец» вместо «в
+    начало»), на #121 — что нечисловая запись роняла весь дрейф исключением.
     """
     parts: list[int] = []
     for part in minor.split("."):
@@ -433,6 +439,9 @@ CATALOGUE_PROPOSALS: Final = (
     "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
     "/main/.rules/proposals.json"
 )
+#: Раздел ответа, в котором каталог держит вердикты. Имя взято У КАТАЛОГА, а не
+#: придумано: разбор по памяти молчал четыре раза подряд (#140).
+VERDICTS: Final = "verdicts"
 
 
 def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
@@ -446,21 +455,51 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
     отправку, которой не будет.
 
     Приём взят у грейдера, где он уже стоит ночным обходом (162).
+
+    ФОРМА ОТВЕТА ЧИТАЕТСЯ У КАТАЛОГА, А НЕ ПО ПАМЯТИ. Прежняя редакция искала
+    вердикты под ключом `proposals`, номер — в полях `number`/`id`, и статуса
+    `merged-into` не знала вовсе. Каталог отдаёт их под `verdicts`, номер в
+    поле `rule`, и третий статус у него есть. Расхождение молчало: не найдя
+    ключа, обход переходил к следующему предложению — то есть источник дрейфа
+    ровно так же печатал «сошлось», как если бы вердиктов и правда не было.
+    Цена измерена: к 11.09.2026 каталог принял ВСЕ ЧЕТЫРЕ наших предложения
+    (правила 198–201), и ни об одном источник не сказал. Нашёл внешний взгляд
+    на #140 — предупредив ровно об этом и до того, как это стоило работы.
+
+    НЕУЗНАННАЯ ФОРМА — ЭТО ЗАПИСЬ, А НЕ МОЛЧАНИЕ. «Ответа нет» и «ответ в
+    незнакомом виде» снаружи одинаковы и значат разное (045, 154): первое
+    штатно, второе означает, что источник ослеп.
     """
-    said = answer.get("proposals") or answer
-    if not isinstance(said, dict):
+    # ПРЕДМЕТА НЕТ — И СПРАШИВАТЬ НЕ О ЧЕМ. Пустая очередь предложений законна
+    # и объявлена таковой в самом файле: вердиктов по ней быть не может, и
+    # разбирать форму чужого ответа незачем. Проверка формы ниже относится к
+    # случаю «нам есть о чём спросить, а ответ не узнан».
+    ours = [one for one in mine.get("proposals") or [] if isinstance(one, dict)]
+    if not ours:
         return []
+    said = answer.get(VERDICTS)
+    if not isinstance(said, dict):
+        return [
+            Drift(
+                "proposal-answer-unread",
+                f"ответ каталога по предложениям без раздела «{VERDICTS}» — "
+                f"форма не узнана (ключи: {report.cut(', '.join(sorted(map(str, answer))))})",
+                "сверить разбор с export/README.md каталога: пока форма не узнана, "
+                "источник молчит не потому, что вердиктов нет",
+            )
+        ]
     found: list[Drift] = []
-    for one in mine.get("proposals") or []:
-        if not isinstance(one, dict):
-            continue
+    for one in ours:
         slug = str(one.get("slug") or "")
         verdict = said.get(f"{project}:{slug}")
         if not isinstance(verdict, dict):
             continue
         status = str(verdict.get("status") or "")
+        # Номер присваивает КАТАЛОГ и называет его полем `rule`. Наш файл
+        # предложений номера не несёт и нести не может — это сказано в нём же.
+        number = str(verdict.get("rule") or "?")
+        why = str(verdict.get("why") or "причина не названа")
         if status == "admitted":
-            number = str(verdict.get("number") or verdict.get("id") or "?")
             found.append(
                 Drift(
                     "proposal-admitted",
@@ -469,14 +508,31 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
                     "в .rules/bindings.json — принятое перестаёт быть предложением",
                 )
             )
+        elif status == "merged-into":
+            found.append(
+                Drift(
+                    "proposal-merged",
+                    f"каталог свёл «{slug}» с правилом {number}: {report.cut(why)}",
+                    f"убрать его из .rules/proposals.json и перечитать ответ по {number}: "
+                    "предмет тот же, запись уже есть",
+                )
+            )
         elif status == "rejected":
-            why = str(verdict.get("why") or verdict.get("reason") or "причина не названа")
             found.append(
                 Drift(
                     "proposal-rejected",
                     f"каталог отверг «{slug}»: {report.cut(why)}",
                     "убрать его из .rules/proposals.json: держать отвергнутое значит "
                     "обещать отправку, которой не будет",
+                )
+            )
+        elif status:
+            found.append(
+                Drift(
+                    "proposal-answer-unread",
+                    f"каталог ответил по «{slug}» статусом «{status}», которого разбор не знает",
+                    "сверить список статусов с export/README.md каталога: незнакомый "
+                    "статус молча уходит в «вердикта нет»",
                 )
             )
     return found
