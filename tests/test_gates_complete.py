@@ -582,11 +582,11 @@ def test_a_job_with_a_conclusion_is_not_still_coming(monkeypatch: pytest.MonkeyP
         ]
     }
     monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: payload)
-    mine = module.own_jobs("o/r", "7", "token")
-    assert "test" not in mine
-    assert mine["lint"] == "in_progress"
-    assert module.still_coming("test", mine) is False
-    assert module.still_coming("lint", mine) is True
+    roster = module.roster_of("o/r", "7", "token")
+    assert "test" not in roster.running
+    assert roster.running["lint"] == "in_progress"
+    assert module.still_coming("test", roster.running) is False
+    assert module.still_coming("lint", roster.running) is True
 
 
 def test_the_summarised_run_is_the_freshest_one_on_the_head(
@@ -659,13 +659,14 @@ def test_the_gate_waits_for_the_roster_not_for_the_whole_run() -> None:
 
     Отменённый прогон вердикта не несёт: следом идёт новый заход (179).
     """
-    roster = {"lint": "queued"}
-    assert not module.named_its_jobs(None, roster)
-    assert not module.named_its_jobs({"status": "queued", "conclusion": None}, {})
-    assert not module.named_its_jobs({"status": "completed", "conclusion": "cancelled"}, roster)
-    assert module.named_its_jobs({"status": "queued", "conclusion": None}, roster)
-    assert module.named_its_jobs({"status": "in_progress", "conclusion": None}, roster)
-    assert module.named_its_jobs({"status": "completed", "conclusion": "success"}, roster)
+    live = module.Roster(read=True, named=2, running={"lint": "queued"})
+    empty = module.Roster(read=True, named=0, running={})
+    assert not module.ready_to_judge(None, live)
+    assert not module.ready_to_judge({"status": "queued", "conclusion": None}, empty)
+    assert not module.ready_to_judge({"status": "completed", "conclusion": "cancelled"}, live)
+    assert module.ready_to_judge({"status": "queued", "conclusion": None}, live)
+    assert module.ready_to_judge({"status": "in_progress", "conclusion": None}, live)
+    assert module.ready_to_judge({"status": "completed", "conclusion": "success"}, live)
     assert module.was_cancelled({"status": "completed", "conclusion": "cancelled"})
     assert not module.was_cancelled({"status": "completed", "conclusion": "failure"})
 
@@ -683,3 +684,35 @@ def test_an_advisory_check_never_delays_the_verdict() -> None:
     assert problems == [] and waiting is False, (problems, waiting)
     advisory, _ = module.verdict(runs, ["test-next"], "ci-complete", "1", strict_missing=False)
     assert advisory == [], advisory
+
+
+def test_a_finished_run_is_not_an_unnamed_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Прогон, у которого ВСЕ джобы завершились, состав назвал — и вердикт идёт.
+
+    Список едущих джобов у такого прогона пуст ВСЕГДА, и по нему одному он
+    неотличим от «прогон ещё ничего не назвал». Ожидание на этом висело бы до
+    тайм-аута и кончалось ложным красным на здоровом прогоне. Нашёл внешний
+    взгляд на #203.
+    """
+    done = {"jobs": [{"name": "lint", "status": "completed", "conclusion": "success"}]}
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: done)
+    roster = module.roster_of("o/r", "7", "token")
+    assert roster.read and roster.named == 1 and roster.running == {}
+    assert module.ready_to_judge({"status": "completed", "conclusion": "success"}, roster)
+
+
+def test_an_unread_roster_never_holds_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не прочитанный список — не пустой: гейт идёт прежней строгостью.
+
+    Отказ транспорта означает «различить нечем» и возврат к строгости (045).
+    Сведённый к «состав ещё не назван», он повесил бы гейт до тайм-аута — то
+    есть поменял бы строгость на ложное красное.
+    """
+
+    def silent(*_: object, **__: object) -> object:
+        raise module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.ghrest, "request", silent)
+    roster = module.roster_of("o/r", "7", "token")
+    assert roster.read is False and roster.named == 0
+    assert module.ready_to_judge({"status": "in_progress", "conclusion": None}, roster)
