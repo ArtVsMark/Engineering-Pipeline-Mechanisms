@@ -394,7 +394,7 @@ def test_a_zombie_record_is_not_running() -> None:
     """Запись с готовым исходом при переходном состоянии идущей не считается.
 
     Площадка оставляет такие записи-зомби; принять их за идущие значило бы
-    ждать вечно. Тот же приём и по той же причине — в `ci_complete.own_jobs`.
+    ждать вечно. Тот же приём и по той же причине — в `ci_complete.roster_of`.
     """
     runs = [{"name": module.REVIEW_CHECK, "status": "in_progress", "conclusion": "success"}]
     assert module.why_quiet(runs) == module.STATE_SILENT
