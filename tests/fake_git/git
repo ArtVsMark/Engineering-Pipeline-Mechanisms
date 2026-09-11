@@ -1,4 +1,9 @@
 #!/bin/sh
 # Подделка git для проверки сторожа: отвечает объявленной головой и ничем больше.
-if [ "$1" = "rev-parse" ]; then echo "${FAKE_HEAD:-agent/here}"; exit 0; fi
+# FAKE_HEAD_BROKEN=<причина> заставляет её отказать — так проверяется, что
+# сторож, не сумевший узнать голову, отвергает толчок, а не машет рукой.
+if [ "$1" = "rev-parse" ]; then
+  if [ -n "$FAKE_HEAD_BROKEN" ]; then echo "$FAKE_HEAD_BROKEN" >&2; exit 128; fi
+  echo "${FAKE_HEAD:-agent/here}"; exit 0
+fi
 exit 1
