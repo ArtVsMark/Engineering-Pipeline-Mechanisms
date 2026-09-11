@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any
+
+import pytest
 
 from tests.conftest import load_script
 
@@ -88,3 +91,50 @@ def test_a_broken_child_count_does_not_go_negative() -> None:
     """Площадка сказала «закрыто больше, чем всего» — это ноль, а не минус."""
     odd = issue(9, "", sub_issues_summary={"total": 1, "completed": 3})
     assert module.children_left(odd) == 0
+
+
+def test_a_task_closed_before_the_counter_is_marked_as_such() -> None:
+    """Закрытое до счётчика пунктов помечено (нашёл владелец вопросом).
+
+    Отметить пункты в таких задачах было НЕЧЕМ: механизм заведён позже. Ответ
+    по ним известен заранее и одинаков для всех, а счёт, который не меняется
+    никогда, перестают читать (051).
+    """
+    early = issue(3, BOXES, closed_at="2026-09-09T10:00:00Z")
+    late = issue(99, BOXES, closed_at="2026-09-12T10:00:00Z")
+    found = {
+        task.number: task.before_the_counter
+        for task in module.closed_with_live_units([early, late])
+    }
+    assert found == {3: True, 99: False}
+
+
+def test_the_boundary_is_the_day_the_mechanism_appeared() -> None:
+    """Граница названа датой заведения механизма, а не круглым числом.
+
+    `scripts/items.py`, `scripts/task_items.py` и прогон `task-items` заведены
+    изменением #97; задачи первого дня закрыты сутками раньше. Дата берётся
+    оттуда, и проверка держит связь: сдвинуть её «на глаз» не выйдет.
+    """
+    from tests.conftest import ROOT
+
+    born = subprocess.run(
+        ["git", "log", "--reverse", "--format=%ad", "--date=short", "--", "scripts/items.py"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=ROOT,
+    ).stdout.split("\n")[0]
+    if not born:
+        pytest.skip("история обрезана: дату заведения механизма взять неоткуда")
+    assert born == module.ITEMS_SINCE, f"граница {module.ITEMS_SINCE}, а механизм заведён {born}"
+
+
+def test_a_task_closed_without_a_date_is_counted_as_fresh() -> None:
+    """Даты закрытия нет — задача считается свежей, а не списанной в старые.
+
+    Ошибка в сторону лишнего взгляда: неизвестность не должна выводить запись
+    из ревизии (045).
+    """
+    said = module.closed_with_live_units([issue(50, BOXES)])
+    assert said[0].before_the_counter is False
