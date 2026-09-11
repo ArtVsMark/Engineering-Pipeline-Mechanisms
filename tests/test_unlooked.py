@@ -374,3 +374,66 @@ def test_every_state_is_described_in_the_registry() -> None:
     body = module.render_body({}, "#0")
     missing = [state for state in module.STATES if state not in body]
     assert not missing, f"состояния названы, но не объяснены: {missing}"
+
+
+def test_a_running_run_outranks_yesterdays_green() -> None:
+    """Идущий прогон сильнее прошлого исхода (находка #180).
+
+    Повторный заход руками кладёт новую запись рядом со старой. Пока «прошёл»
+    проверялся первым, свежий идущий прогон прятался за вчерашним зелёным —
+    реестр говорил «прошёл, а ответа нет» там, где ответа ещё просто не было.
+    """
+    runs = [
+        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "success"},
+        {"name": module.REVIEW_CHECK, "status": "in_progress", "conclusion": None},
+    ]
+    assert module.why_quiet(runs) == module.STATE_RUNNING
+
+
+def test_a_zombie_record_is_not_running() -> None:
+    """Запись с готовым исходом при переходном состоянии идущей не считается.
+
+    Площадка оставляет такие записи-зомби; принять их за идущие значило бы
+    ждать вечно. Тот же приём и по той же причине — в `ci_complete.own_jobs`.
+    """
+    runs = [{"name": module.REVIEW_CHECK, "status": "in_progress", "conclusion": "success"}]
+    assert module.why_quiet(runs) == module.STATE_SILENT
+
+
+def test_an_unknown_conclusion_is_named_with_its_word() -> None:
+    """Исход, которого разбор не знает, называется, а не сворачивается в «нет записи».
+
+    Запись ЕСТЬ, и говорить «шаг не запускался» значит послать читателя искать
+    не там (046). Слово исхода — от площадки: догадываться о нём нечем (154).
+    """
+    runs = [{"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "timed_out"}]
+    said = module.why_quiet(runs)
+    assert said.startswith(module.STATE_ODD)
+    assert "timed_out" in said
+
+
+def test_every_unknown_conclusion_is_listed_once() -> None:
+    """Несколько незнакомых исходов названы все и без повторов (159)."""
+    runs = [
+        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "neutral"},
+        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "stale"},
+        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "neutral"},
+    ]
+    said = module.why_quiet(runs)
+    assert "neutral" in said and "stale" in said
+    assert said.count("neutral") == 1
+
+
+def test_skipped_means_a_fork_and_says_so() -> None:
+    """«Пропущено» означает форк, и только его (находка #180).
+
+    Правка самого файла прогона сюда не относится: джоб при ней стартует,
+    отказывается работать действие, а шаг объявлен `continue-on-error` —
+    запись выходит ЗЕЛЁНОЙ. Живой случай #120 лежит в реестре как «прогон
+    прошёл, а ответа нет», и прежняя редакция противоречила собственному замеру.
+    """
+    assert "форк" in module.STATE_SKIPPED
+    assert "прогона" not in module.STATE_SKIPPED
+    body = module.render_body({}, "#0")
+    place = body.index(module.STATE_SILENT)
+    assert "continue-on-error" in body[place : place + 700], "причина не названа там, где живёт"
