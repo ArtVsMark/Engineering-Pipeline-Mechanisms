@@ -358,3 +358,36 @@ def test_a_known_shell_cluster_still_works() -> None:
     for flag in ("-lc", "-xc", "-ic", "-c"):
         said = ask(f'bash {flag} "git push origin agent/other"')
         assert said.returncode == 2, f"{flag}: {said.stdout}{said.stderr}"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "env -C /tmp git push origin agent/other",
+        "env -S 'git push origin agent/other'",
+        "time -a -o /tmp/t git push origin agent/other",
+    ],
+    ids=["env -C", "env -S", "time -a -o"],
+)
+def test_the_flag_lists_know_the_real_utilities(command: str) -> None:
+    """Списки ключей знают настоящие ключи этих утилит (находка #189).
+
+    Первая редакция не знала `env -C`, `env -S`, `time -a` — и на них сторож
+    слеп, то есть отвергал законную команду. Отказ безопасен, но он мешает
+    работать, и список пополняется по мере встречи.
+    """
+    said = ask(command)
+    assert said.returncode == 2, f"{command}: {said.stdout}{said.stderr}"
+    assert "agent/other" in said.stderr, said.stderr
+
+
+def test_an_unknown_flag_still_errs_towards_refusing() -> None:
+    """Неполнота списка идёт в безопасную сторону, и это названо.
+
+    Ключ, которого в наборе нет, делает сторожа слепым — и слепой ОТВЕРГАЕТ.
+    Обратная ошибка, угадать и пропустить толчок, здесь невозможна по
+    построению: в этом и смысл выбора (051).
+    """
+    said = ask("env --some-future-flag git push origin main")
+    assert said.returncode == 2
+    assert "неизвестен" in said.stderr
