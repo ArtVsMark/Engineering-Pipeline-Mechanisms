@@ -49,6 +49,7 @@ import items
 import items_left
 import main_red
 import report
+import task_shape
 import unlooked
 
 #: Строка, которую пишет ночной прогон каталога. Три числа правила 177 в одном
@@ -282,6 +283,32 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
     return conflicting, unknown, red
 
 
+#: Окно ревизии закрытого. Ревизия — не переобход всей истории: правило просит
+#: смотреть на закрытое, а не пересчитывать прошлое проекта целиком. Окно
+#: названо здесь, а не спрятано в запросе, потому что оно — граница
+#: утверждения: «живого среди закрытого нет» верно ровно для этих задач.
+CLOSED_WINDOW: Final = 50
+
+
+def closed_issues(repo: str, token: str) -> list[dict[str, Any]]:
+    """Недавно закрытые задачи: предмет ревизии закрытого (121).
+
+    ОКНО СЧИТАЕТСЯ В ЗАДАЧАХ, А НЕ В ЗАПИСЯХ ОТВЕТА. Площадка отдаёт закрытые
+    задачи и закрытые ИЗМЕНЕНИЯ одним списком, и изменений там на порядок
+    больше. Страница на пятьдесят записей дала три задачи — то есть ревизия
+    смотрела бы на три последние и честно печатала «живого нет». Поэтому
+    страницы идут, пока не наберётся окно.
+    """
+    found: list[dict[str, Any]] = []
+    for issue in ghrest.paginate(f"repos/{repo}/issues?state=closed", token):
+        if issue.get("pull_request") is not None:
+            continue
+        found.append(issue)
+        if len(found) >= CLOSED_WINDOW:
+            break
+    return found
+
+
 def open_issues(repo: str, token: str) -> list[dict[str, Any]]:
     """Открытые задачи без изменений — общий вход обоих счётов по пунктам.
 
@@ -379,6 +406,22 @@ def items_report(
     return lines
 
 
+def shape_report(by_prose: list[task_shape.Prose], live: list[task_shape.Live]) -> list[str]:
+    """Строки о форме задач — отдельно от печати, чтобы их можно было спросить.
+
+    ОБА ЧИСЛА ПЕЧАТАЮТСЯ ВСЕГДА, а не только когда нашлось. Строка,
+    появляющаяся лишь при находке, снаружи неотличима от невключённого
+    механизма (142): ноль здесь — ответ, а не молчание.
+    """
+    lines = [f"задач с пунктами прозой, а не галочками: {len(by_prose)} — от трёх пунктов (028)"]
+    lines.extend(f"  #{task.number} — {task.title} · пунктов {task.items}" for task in by_prose)
+    lines.append(
+        f"закрыто при живых единицах: {len(live)} из последних {CLOSED_WINDOW} закрытых (121)"
+    )
+    lines.extend(f"  #{task.number} — {task.title} · {task.said}" for task in live)
+    return lines
+
+
 def remind(has_debt: bool) -> None:
     """Ведёт к договору, а не пересказывает его."""
     if has_debt:
@@ -419,6 +462,8 @@ def main(argv: list[str] | None = None) -> int:
         issues = open_issues(args.repo, token)
         ready = looks_done(issues)
         built, quiet = items_left.look(issues, items.open_items)
+        by_prose = task_shape.without_a_checklist(issues)
+        still_live = task_shape.closed_with_live_units(closed_issues(args.repo, token))
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -476,6 +521,13 @@ def main(argv: list[str] | None = None) -> int:
     # «вежливо выключен» выглядит снаружи как «чисто» (142). Ноль здесь —
     # ответ, а не молчание.
     for line in items_report(built, quiet, blind=items_left.shallow()):
+        print(line)
+
+    # ФОРМА ЗАДАЧИ ПЕЧАТАЕТСЯ РЯДОМ СО СЧЁТОМ ПО ПУНКТАМ, А НЕ ВМЕСТО НЕГО.
+    # Оба числа про одно: состояние задачи читается счётчиком, а не
+    # вычитыванием. Долгом перед планом ни одно не является — это форма
+    # работы, а не невыполненная работа, и решение по ним за человеком (154).
+    for line in shape_report(by_prose, still_live):
         print(line)
 
     print(f"слито без внешнего взгляда: {len(unlooked_left)}")
