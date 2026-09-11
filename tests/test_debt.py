@@ -16,6 +16,7 @@ import pytest
 from tests.conftest import ROOT, RunScript, load_script
 
 debt = load_script("debt.py")
+task_shape = load_script("task_shape.py")
 
 INBOX = """## Ступень 0 — незакрытая работа по правилам
 
@@ -527,3 +528,29 @@ def test_a_seeing_count_says_the_number() -> None:
     механизма (142).
     """
     assert debt.items_report([], [], blind=False)[0].endswith(": 0")
+
+
+# --- форма задачи: чек-лист вместо прозы и ревизия закрытого -----------------
+
+
+def test_the_shape_report_speaks_both_numbers_at_zero() -> None:
+    """Оба счёта печатаются и на нуле: молчащая строка выглядит выключенной (142)."""
+    lines = debt.shape_report([], [])
+    assert len(lines) == 2
+    assert lines[0].startswith("задач с пунктами прозой, а не галочками: 0")
+    assert lines[1].startswith("закрыто при живых единицах: 0")
+
+
+def test_the_shape_report_names_every_candidate() -> None:
+    """Названы все кандидаты, а не число: по номеру задачу открывают."""
+    lines = debt.shape_report(
+        [task_shape.Prose(23, "реестр находок", 33)],
+        [task_shape.Live(7, "эпик", 0, 2)],
+    )
+    assert any("#23" in line and "пунктов 33" in line for line in lines), lines
+    assert any("#7" in line and "подзадач открыто 2" in line for line in lines), lines
+
+
+def test_the_revision_window_is_named_in_the_line() -> None:
+    """Строка называет границу утверждения: живого нет ИМЕННО среди этих задач."""
+    assert str(debt.CLOSED_WINDOW) in debt.shape_report([], [])[1]
