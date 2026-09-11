@@ -51,6 +51,7 @@ import json
 import shlex
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import Final
 
 #: Ветка, в которую писать напрямую нельзя ни из какой головы (131).
@@ -73,7 +74,11 @@ WRAPPERS: Final = frozenset({"env", "command", "nice", "nohup", "stdbuf", "time"
 #: содержимое разбирается заново, как отдельная команда.
 SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 #: Насколько глубоко сторож идёт внутрь вложенных оболочек. Предел нужен:
-#: `bash -c "bash -c …"` без него ушёл бы в бесконечность, а не в отказ.
+#: `bash -c "bash -c …"` без него ушёл бы в бесконечность. ИСЧЕРПАНИЕ ПРЕДЕЛА —
+#: ОТКАЗ, А НЕ ПРОПУСК: сторож, не дочитавший команду, не знает, толчок это или
+#: нет, и «не знаю» здесь обязано значить «не пущу» — как и у неузнанной головы.
+#: Прежде предел молча отдавал команду дальше, и это расходилось с фейл-клоузом,
+#: выбранным в том же изменении для `head()`. Нашёл внешний взгляд на #181.
 DEPTH: Final = 4
 
 
@@ -87,57 +92,127 @@ def is_git(word: str) -> bool:
     return word.rsplit("/", 1)[-1] == "git"
 
 
-def unwrap(segment: list[str], depth: int) -> list[list[str]]:
-    """Снимает обёртки и раскрывает `bash -c «…»`; отдаёт команды к разбору.
+@dataclass(frozen=True, slots=True)
+class Look:
+    """Что сторож разглядел в команде: цели толчка либо причину слепоты.
+
+    ТРИ ОТВЕТА, А НЕ ДВА. «Это толчок вот туда», «это не толчок» и «разобрать
+    не удалось» — разные состояния, и сваливать третье во второе значит
+    пропускать ровно то, чего не понял (045). Прежде разбор отдавал `None` и
+    на «не толчок», и на исчерпанный предел вложенности.
+    """
+
+    targets: tuple[str, ...] = ()
+    blind: str = ""
+
+
+def script_of(segment: list[str]) -> str | None:
+    """Скрипт, переданный оболочке ключом `-c`; ``None`` — его там нет.
+
+    КЛЮЧ БЫВАЕТ СОВМЕЩЁННЫМ, И ЭТО НЕ РЕДКОСТЬ. `bash -lc "…"`, `sh -xc "…"` —
+    обычные написания, а разбор искал ровно слово `-c` и на них ломался. Ищется
+    короткая связка ключей, в которой есть `c`; длинные ключи (`--norc`) сюда не
+    попадают. Нашёл внешний взгляд на #181.
+    """
+    for place, word in enumerate(segment[1:], start=1):
+        if word.startswith("--") or not word.startswith("-") or len(word) < 2:
+            continue
+        if "c" in word[1:] and place + 1 < len(segment):
+            return segment[place + 1]
+    return None
+
+
+def after_flags(rest: list[str]) -> list[str]:
+    """Слова обёртки, начиная с команды, которую она запускает.
+
+    КЛЮЧИ ОБЁРТКИ НЕ ПЕРЕЧИСЛЯЮТСЯ ПОИМЁННО, И ЭТО НАМЕРЕННО. `env -i`,
+    `nice -n 5`, `stdbuf -oL`, `env -u HOME` — у каждой обёртки свой набор, он
+    растёт с версиями, и список по памяти отставал бы молча. Хуже того, часть
+    ключей несёт значение (`-n 5`), и пропуск «всего, что начинается с дефиса»
+    оставляет это значение первым словом — то есть командой. Прежде разбор
+    требовал, чтобы команда шла сразу за именем обёртки, и все эти написания
+    проходили мимо сторожа. Нашёл внешний взгляд на #181.
+
+    Поэтому внутри обёртки вызов git ищется СКАНИРОВАНИЕМ. На верхнем уровне
+    сканировать нельзя: там в словах законно живёт текст документа
+    (`cat > f <<EOF … git push … EOF`), и поиск принял бы его за действие. А
+    внутри обёртки слова — это уже команда, которую она запускает.
+    """
+    for place, word in enumerate(rest):
+        if is_git(word):
+            return rest[place:]
+    return [word for word in rest if not word.startswith("-")]
+
+
+def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
+    """Снимает обёртки и раскрывает `bash -c «…»`; отдаёт команды и слепоту.
 
     ОБЁРТКА — НЕ МАСКИРОВКА, И СПИСОК ЕЁ ЗАКРЫТ. `env git push`, `nohup git
     push`, `bash -c "git push …"` — законные написания того же действия, и
     сторож, смотрящий только на первое слово, пропускал их все. Список
     разрешительный: что не названо обёрткой, обёрткой не считается (068).
+
+    ВТОРЫМ ОТДАЁТСЯ ПРИЧИНА СЛЕПОТЫ. Предел вложенности исчерпан — команда не
+    дочитана, и сторож об этом говорит, а не отдаёт её дальше молча.
     """
-    if depth <= 0 or not segment:
-        return [segment]
+    if not segment:
+        return [segment], ""
+    if depth <= 0:
+        return [], "предел вложенности оболочек исчерпан — команда не дочитана"
     first = segment[0].rsplit("/", 1)[-1]
     # `VAR=value git push` — присваивания перед командой, своё написание того же.
     if "=" in first and not first.startswith("=") and len(segment) > 1:
         return unwrap(segment[1:], depth - 1)
-    if first in WRAPPERS and len(segment) > 1:
-        return unwrap(segment[1:], depth - 1)
     if first in SHELLS:
+        script = script_of(segment)
+        if script is None:
+            return [segment], ""
+        try:
+            inner = shlex.split(script)
+        except ValueError:
+            return [], f"скрипт оболочки не разбирается: {script[:60]}"
         found: list[list[str]] = []
-        for place, word in enumerate(segment[1:], start=1):
-            if word == "-c" and place + 1 < len(segment):
-                try:
-                    inner = shlex.split(segment[place + 1])
-                except ValueError:
-                    break
-                for part in segments(inner):
-                    found.extend(unwrap(part, depth - 1))
-                break
-        return found or [segment]
-    return [segment]
+        for part in segments(inner):
+            deeper, blind = unwrap(part, depth - 1)
+            if blind:
+                return [], blind
+            found.extend(deeper)
+        return found or [segment], ""
+    if first in WRAPPERS and len(segment) > 1:
+        # Ключи обёртки пропускаются по форме, а команда ищется дальше: внутри
+        # обёртки слова — это команда, а не текст документа.
+        return unwrap(after_flags(segment[1:]), depth - 1)
+    return [segment], ""
 
 
-def push_targets(command: str) -> list[str] | None:
-    """Имена веток, названные в `git push`; ``None`` — это не толчок.
+def push_targets(command: str) -> Look:
+    """Что сторож разглядел: цели толчка, «не толчок» или причину слепоты.
 
     Разбор по СЛОВАМ: подстрока `git push` встречается и в тексте документа, и
     в сообщении коммита, а действие — только у разобранной команды.
+
+    НЕРАЗОБРАННАЯ КОМАНДА — НЕ «НЕ ТОЛЧОК». Строка с незакрытой кавычкой и
+    исчерпанный предел вложенности прежде отдавались тем же ответом, что и
+    безобидный `ls`, — то есть сторож пропускал ровно то, чего не понял (045).
+    Нашёл внешний взгляд на #181.
     """
     try:
         words = shlex.split(command)
     except ValueError:
-        return None
+        return Look(blind="команда не разбирается на слова — кавычки не закрыты")
     for part in segments(words):
-        for segment in unwrap(part, DEPTH):
+        found, blind = unwrap(part, DEPTH)
+        if blind:
+            return Look(blind=blind)
+        for segment in found:
             if not segment or not is_git(segment[0]):
                 continue
             rest = segment[1:]
             while rest and rest[0].startswith("-"):
                 rest = rest[2:] if rest[0] in GLOBAL_WITH_VALUE else rest[1:]
             if rest and rest[0] == "push":
-                return named_branches(rest[1:])
-    return None
+                return Look(targets=tuple(named_branches(rest[1:])))
+    return Look()
 
 
 def segments(words: list[str]) -> list[list[str]]:
@@ -231,7 +306,19 @@ def main() -> int:
         # своего разбора хуже, чем пропустить одну команду (084).
         return 0
     command = str(((event or {}).get("tool_input") or {}).get("command") or "")
-    targets = push_targets(command)
+    look = push_targets(command)
+    if look.blind:
+        # РАЗБОР, НЕ ДОШЕДШИЙ ДО КОНЦА, НЕ МАШЕТ РУКОЙ. Сторож не знает, толчок
+        # перед ним или нет, и «не знаю» здесь обязано значить «не пущу» — как
+        # и у неузнанной головы ниже. Толчок необратим, цена уже оплачена
+        # (#116), а команду можно переписать проще.
+        print(
+            f"Толчок отвергнут до вызова git: {look.blind}. Сторож не смог "
+            "разобрать команду, а значит и не проверил её — перепишите проще.",
+            file=sys.stderr,
+        )
+        return 2
+    targets = list(look.targets)
     if not targets:
         return 0
     current, broken = head()
