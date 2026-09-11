@@ -16,8 +16,10 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,13 @@ import pytest
 from tests.conftest import ROOT
 
 HOOK = ROOT / ".claude" / "hooks" / "push_guard.py"
+#: Сам сторож как модуль: часть его разбора проверяется прямо, без процесса.
+#: Он лежит не в `scripts/`, поэтому общий загрузчик набора сюда не годится.
+_spec = importlib.util.spec_from_file_location("push_guard", HOOK)
+assert _spec is not None and _spec.loader is not None
+module = importlib.util.module_from_spec(_spec)
+sys.modules["push_guard"] = module
+_spec.loader.exec_module(module)
 SETTINGS = ROOT / ".claude" / "settings.json"
 
 
@@ -206,3 +215,68 @@ def test_the_shared_branch_is_refused_even_blind() -> None:
     said = ask("git push origin main", broken="not a git repository")
     assert said.returncode == 2
     assert "общая ветка" in said.stderr, said.stderr
+
+
+# --- разбор, не дошедший до конца, отвергает ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "env -i git push origin agent/other",
+        "nice -n 5 git push origin agent/other",
+        "stdbuf -oL git push origin agent/other",
+        "env -u HOME git push origin agent/other",
+        'bash -lc "git push origin agent/other"',
+        'sh -xc "git push origin agent/other"',
+    ],
+    ids=["env -i", "nice -n", "stdbuf -oL", "env -u", "bash -lc", "sh -xc"],
+)
+def test_a_wrapper_with_its_own_flags_is_still_a_push(command: str) -> None:
+    """Свои ключи обёртки не делают толчок невидимым (находки #181).
+
+    Разбор требовал, чтобы команда шла сразу за именем обёртки, и `env -i`,
+    `nice -n 5`, `stdbuf -oL` проходили мимо целиком. Совмещённый короткий ключ
+    оболочки (`-lc`, `-xc`) — обычное написание, а искалось ровно слово `-c`.
+    """
+    said = ask(command)
+    assert said.returncode == 2, f"пропущено: {command}\n{said.stdout}{said.stderr}"
+    assert "agent/other" in said.stderr
+
+
+def test_an_exhausted_depth_refuses_instead_of_passing() -> None:
+    """Предел вложенности исчерпан — отказ, а не пропуск (находки #181).
+
+    Сторож, не дочитавший команду, не знает, толчок это или нет, и «не знаю»
+    здесь обязано значить «не пущу» — как и у неузнанной головы. Прежде предел
+    молча отдавал команду дальше, расходясь с фейл-клоузом того же изменения.
+    """
+    said = ask('bash -c "bash -c \'bash -c \\"bash -c \\\\\\"git push origin x\\\\\\"\\"\'"')
+    assert said.returncode == 2, said.stdout + said.stderr
+
+
+def test_the_depth_limit_is_reached_by_the_declared_budget() -> None:
+    """Граница DEPTH названа числом и проверяется им же (замечание #181).
+
+    Бюджет общий на присваивания и оболочки, и именно он обнажает находку выше:
+    без проверки предел был бы числом, о котором никто не спрашивал.
+    """
+    inner = ["git", "push", "origin", "agent/other"]
+    found, blind = module.unwrap(inner, module.DEPTH)
+    assert not blind and found == [inner]
+    found, blind = module.unwrap(inner, 0)
+    assert not found and "предел вложенности" in blind
+
+
+def test_an_unparsable_command_refuses() -> None:
+    """Незакрытая кавычка — тоже «не разобрал», и тоже отказ."""
+    said = ask('git push origin "agent/other')
+    assert said.returncode == 2, said.stdout + said.stderr
+    assert "кавычки не закрыты" in said.stderr
+
+
+def test_a_harmless_wrapped_command_still_passes() -> None:
+    """Фейл-клоуз не значит «отвергать всё»: разобранное и безобидное проходит."""
+    assert ask("env -i ls -la").returncode == 0
+    assert ask('bash -lc "git status"').returncode == 0
+    assert ask("nice -n 5 python -c pass").returncode == 0
