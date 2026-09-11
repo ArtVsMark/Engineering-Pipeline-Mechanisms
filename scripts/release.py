@@ -115,6 +115,9 @@ ACCEPTANCE_CLOSED: Final = "closed"
 ACCEPTANCE_OPEN: Final = "open"
 ACCEPTANCE_MISSING: Final = "missing"
 ACCEPTANCE_UNREAD: Final = "unread"
+#: Пятое: вход не разобрался как номер — «#196», «196 », «эпик». Это тоже
+#: чинится человеком, но ещё раньше: до всякого запроса к площадке.
+ACCEPTANCE_NOT_A_NUMBER: Final = "not-a-number"
 
 
 def acceptance_state(repo: str, number: int, token: str) -> str:
@@ -175,6 +178,11 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
             "«0.x» значит «ещё не доделано здесь» (docs/release.md, decisions/009). "
             "Назовите её: --acceptance <номер задачи>"
         )
+    elif major_wanted > major_now and state == ACCEPTANCE_NOT_A_NUMBER:
+        problems.append(
+            f"мажор {major_now} → {major_wanted}: «{acceptance}» не разобрано как номер задачи. "
+            "Ожидается одно число без решётки и пробелов: --acceptance 196"
+        )
     elif major_wanted > major_now and state == ACCEPTANCE_MISSING:
         problems.append(
             f"мажор {major_now} → {major_wanted}: задачи #{acceptance} у площадки НЕТ. "
@@ -215,6 +223,7 @@ def announce(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
             ACCEPTANCE_OPEN: "ОТКРЫТА",
             ACCEPTANCE_MISSING: "такой задачи у площадки нет",
             ACCEPTANCE_UNREAD: "состояние не прочитано",
+            ACCEPTANCE_NOT_A_NUMBER: "не разобрано как номер задачи",
         }[state]
         print(f"приёмка мажора: #{acceptance} — {said}")
 
@@ -258,10 +267,14 @@ def main(argv: list[str] | None = None) -> int:
         # Состояние приёмки спрашивается ОДИН раз и передаётся обоим: разбор и
         # печать обязаны говорить об одном состоянии, а два запроса на одном
         # заходе могли бы разойтись.
+        # ФОРМА ВХОДА РАЗБИРАЕТСЯ ДО ЗАПРОСА, И ОТКАЗ У НЕЁ СВОЙ. «#196» не
+        # число, и молчаливое сведение его к «состояние не прочитано» называло
+        # причиной токен там, где неверна форма (154). Нашёл внешний взгляд
+        # на #204.
         state = (
             acceptance_state(args.repo, int(args.acceptance), ghrest.token_from_env())
             if args.acceptance.isdigit()
-            else ACCEPTANCE_UNREAD
+            else ACCEPTANCE_NOT_A_NUMBER
         )
         problems = refusals(wanted, acceptance=args.acceptance, state=state)
         announce(wanted, acceptance=args.acceptance, state=state)

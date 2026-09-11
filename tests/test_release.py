@@ -119,6 +119,10 @@ def test_a_closed_acceptance_allows_the_major() -> None:
     # а не отправить искать токен (154). Нашёл внешний взгляд на #204.
     missing = "".join(said(module.ACCEPTANCE_MISSING))
     assert "НЕТ" in missing and "номером" in missing
+    # Форма входа — пятое состояние: «#196» не число, и причина обязана сказать
+    # именно это, а не «нет токена» (154). Нашёл внешний взгляд на #204.
+    shape = "".join(said(module.ACCEPTANCE_NOT_A_NUMBER))
+    assert "не разобрано как номер" in shape
 
 
 def test_the_acceptance_state_separates_the_two_unknowns(
@@ -258,3 +262,19 @@ def test_the_procedure_matches_the_contract() -> None:
     text = (ROOT / "docs" / "release.md").read_text(encoding="utf-8")
     assert "## Порядок выпуска" in text
     assert "тег не переставляется" in text.lower()
+
+
+def test_a_hash_prefixed_acceptance_names_the_input_not_the_token(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """«#196» отвергается по ФОРМЕ, а не как «состояние не прочитано».
+
+    Прежде нечисловой вход молча становился «нет токена или площадка молчит» —
+    и человек шёл искать секрет там, где лишняя решётка (154). Нашёл внешний
+    взгляд на #204.
+    """
+    tree(tmp_path)
+    run = run_script("release.py", "--version", "10.0.0", "--acceptance", "#196", cwd=tmp_path)
+    assert run.code == 1, run.text
+    assert "не разобрано как номер" in run.text
+    assert "нет токена" not in run.text
