@@ -32,10 +32,33 @@ FRAGMENTS = ROOT / "changelog.d"
 
 
 def files() -> list[Path]:
-    """Все фрагменты папки, кроме её описания."""
-    found = sorted(p for p in FRAGMENTS.glob("*.md") if p.name != "README.md")
-    assert found, "фрагментов журнала нет — предмет проверки не найден (075)"
-    return found
+    """Все фрагменты папки, кроме её описания.
+
+    ПУСТАЯ ПАПКА ЗДЕСЬ — ЗАКОННОЕ СОСТОЯНИЕ, А НЕ ОТСУТСТВИЕ ПРЕДМЕТА. Выпуск
+    переносит фрагменты в `changelog.d/released/<версия>/`, и сразу после него в
+    папке остаётся один `README.md`. Красное на этом было бы ложным ровно того
+    класса, который этот набор и ловит: здоровое дерево, объявленное поломкой.
+    Нашёл внешний взгляд на #212.
+
+    Разница с правилом
+    [075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)
+    проходит по тому, ОБЯЗАН ли предмет существовать. У гейта изменения обязан —
+    изменение без фрагмента отвергается. У дерева между выпуском и следующим
+    изменением — нет.
+    """
+    assert FRAGMENTS.is_dir(), "папки фрагментов нет вовсе — это поломка дерева, а не пустота"
+    assert (FRAGMENTS / "README.md").is_file(), "описание папки фрагментов пропало"
+    return sorted(p for p in FRAGMENTS.glob("*.md") if p.name != "README.md")
+
+
+def test_an_emptied_folder_is_a_state_not_a_failure() -> None:
+    """Сразу после выпуска в папке остаётся один `README.md` — и это не красное.
+
+    Проверяется тем, что гейт обязан ПРИНЯТЬ: пустой список фрагментов
+    разбирается в пустой список записей, а не в отказ (140).
+    """
+    assert module.parse_fragments([]) == []
+    assert module.parse_fragments([FRAGMENTS / "README.md"]) == []
 
 
 def test_every_fragment_in_the_tree_parses() -> None:
