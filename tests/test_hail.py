@@ -157,3 +157,31 @@ def test_the_hail_does_not_promise_to_wake_the_window() -> None:
     пока кто-нибудь не заметит.
     """
     assert "Толкнуть окно этот механизм не может" in module.render(subject())
+
+
+def test_a_conflict_is_not_announced_by_its_own_run() -> None:
+    """У оклика есть путь, не зависящий от прогона окликаемого изменения.
+
+    ЗАМЕР 11.09.2026, изменение #217. Конфликт был сделан НАМЕРЕННО, чтобы
+    прогнать объявленный исход (145), — и прогон нашёл замкнутый круг: у
+    конфликтного изменения нет ссылки слияния, площадке нечего собрать, и `ci`
+    на нём не стартует вовсе. Записей проверок на голове оказалась одна —
+    `agent-pr`, и та от толчка ветки.
+
+    Значит оклик про конфликт не может прийти по прогону ТОГО ЖЕ изменения:
+    сработал бы только чужой прогон, а при пустой очереди чужого нет. Второй
+    путь обязателен — события теряются
+    ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)).
+    """
+    import yaml
+
+    from tests.conftest import ROOT
+
+    document = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "hail.yml").read_text(encoding="utf-8")
+    )
+    events = set(document[True])
+    assert "workflow_run" in events, "оклик перестал ходить по событию"
+    assert events - {"workflow_run", "workflow_dispatch"}, (
+        "у оклика остался единственный путь — чужой прогон; конфликт по нему не находится"
+    )
