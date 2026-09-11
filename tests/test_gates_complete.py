@@ -606,7 +606,8 @@ def test_the_summarised_run_is_the_freshest_one_on_the_head(
         ]
     }
     monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: payload)
-    assert module.summarised_run("o/r", "abc", "token") == "22"
+    found = module.summarised_run("o/r", "abc", "token")
+    assert found is not None and found["id"] == 22
 
 
 def test_no_summarised_run_is_waiting_not_a_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -617,13 +618,13 @@ def test_no_summarised_run_is_waiting_not_a_verdict(monkeypatch: pytest.MonkeyPa
     нарушением 075.
     """
     monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: {"workflow_runs": []})
-    assert module.summarised_run("o/r", "abc", "token") == ""
+    assert module.summarised_run("o/r", "abc", "token") is None
     monkeypatch.setattr(
         module.ghrest,
         "request",
         lambda *_, **__: (_ for _ in ()).throw(module.ghrest.TransportError("площадка молчит")),
     )
-    assert module.summarised_run("o/r", "abc", "token") == ""
+    assert module.summarised_run("o/r", "abc", "token") is None
 
 
 def test_the_gate_does_not_take_its_own_run_for_the_summarised_one() -> None:
@@ -640,3 +641,26 @@ def test_the_gate_does_not_take_its_own_run_for_the_summarised_one() -> None:
     parser_source = __import__("inspect").getsource(module.main)
     assert "GITHUB_RUN_ID" not in parser_source, "номер прогона снова берётся из окружения"
     assert "summarised_run(" in parser_source
+
+
+def test_a_summary_is_never_ready_before_what_it_summarises() -> None:
+    """Сводка не бывает готова раньше того, что она сводит.
+
+    ЗАМЕР 11.09.2026, #199, третий заход. Прогон `ci` создан в 15:14:18 и уже
+    существовал, а джобов в нём не было ни одного — первый стартовал в
+    15:14:55. Гейт опросил голову в 15:14:22, увидел пустой список джобов и
+    только отменённые записи прежних заходов — и вынес «все записи отменены»
+    за одиннадцать секунд. Признак «джоб ещё едет» этого не ловит: ловит
+    только состояние самого сводимого прогона.
+
+    Отменённый прогон завершён, но вердикта не несёт: его погасила группа
+    отмены, следом идёт новый заход, и последнее слово за ним (179).
+    """
+    assert not module.settled(None)
+    assert not module.settled({"status": "queued", "conclusion": None})
+    assert not module.settled({"status": "in_progress", "conclusion": None})
+    assert not module.settled({"status": "completed", "conclusion": "cancelled"})
+    assert module.settled({"status": "completed", "conclusion": "success"})
+    assert module.settled({"status": "completed", "conclusion": "failure"})
+    assert module.was_cancelled({"status": "completed", "conclusion": "cancelled"})
+    assert not module.was_cancelled({"status": "completed", "conclusion": "failure"})

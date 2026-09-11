@@ -234,8 +234,10 @@ def worst_per_name(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 SUMMARISED: Final = "ci"
 
 
-def summarised_run(repo: str, sha: str, token: str, name: str = SUMMARISED) -> str:
-    """Номер прогона, чьи джобы сводятся: самый свежий ``name`` на этой голове.
+def summarised_run(
+    repo: str, sha: str, token: str, name: str = SUMMARISED
+) -> dict[str, Any] | None:
+    """Прогон, чьи джобы сводятся: самый свежий ``name`` на этой голове.
 
     ПОЧЕМУ ЭТО СПРАШИВАЕТСЯ, А НЕ БЕРЁТСЯ ИЗ ОКРУЖЕНИЯ. `GITHUB_RUN_ID` — номер
     ЭТОГО прогона, и после переезда гейта в свой файл он не принадлежит ни
@@ -255,20 +257,47 @@ def summarised_run(repo: str, sha: str, token: str, name: str = SUMMARISED) -> s
     красным на здоровом, а молчаливое «зелено» — тем, что запрещает 075.
     """
     if not repo or not sha:
-        return ""
+        return None
     try:
         runs = ghrest.request("GET", f"repos/{repo}/actions/runs?head_sha={sha}&per_page=50", token)
     except ghrest.TransportError:
         # Не спросили — не угадываем. Снаружи это то же ожидание: заход
         # повторится, а вердикта из незнания не выводится (045).
-        return ""
+        return None
     found = [run for run in (runs or {}).get("workflow_runs", []) if run.get("name") == name]
     if not found:
-        return ""
+        return None
     # Самый свежий, а не первый попавшийся: группа отмены гасит предыдущие
     # заходы на той же голове, и последнее слово за новым (179).
-    newest = max(found, key=lambda run: (str(run.get("created_at") or ""), int(run.get("id") or 0)))
-    return str(newest.get("id") or "")
+    newest: dict[str, Any] = max(
+        found, key=lambda run: (str(run.get("created_at") or ""), int(run.get("id") or 0))
+    )
+    return newest
+
+
+def settled(run: dict[str, Any] | None) -> bool:
+    """Досмотрен ли сводимый прогон: завершён и не отменён.
+
+    СВОДКА НЕ БЫВАЕТ ГОТОВА РАНЬШЕ ТОГО, ЧТО ОНА СВОДИТ. Это единственная
+    премиса, которая держится сама по себе, — и она заменяет собой всю прежнюю
+    склейку признаков «джоб ещё едет».
+
+    ЗАМЕР 11.09.2026, изменение #199, третий заход. Прогон `ci` создан в
+    15:14:18 и в этот момент существовал; джобов в нём ещё не было ни одного —
+    первый стартовал в 15:14:55. Гейт опросил голову в 15:14:22: список джобов
+    сводимого прогона пуст, на голове лежат только отменённые записи прежних
+    заходов — и вердикт «все записи отменены» вынесен за одиннадцать секунд.
+
+    Ждать нечего ТОЛЬКО у завершённого прогона. Отменённый завершён, но
+    вердикта не несёт: его погасила группа отмены, и следом идёт новый заход.
+    Считать его последним словом значило бы краснеть на вытесненном (179).
+    """
+    return bool(run) and (run or {}).get("status") == "completed" and not was_cancelled(run)
+
+
+def was_cancelled(run: dict[str, Any] | None) -> bool:
+    """Прогон погашен группой отмены, а не вынес исход."""
+    return (run or {}).get("conclusion") == "cancelled"
 
 
 def own_jobs(repo: str, run_id: str, token: str) -> dict[str, str]:
@@ -494,13 +523,21 @@ def main(argv: list[str] | None = None) -> int:
             # Номер сводимого прогона ищется НА КАЖДОМ заходе, а не однажды: в
             # первую секунду его могло не быть вовсе, и запомнить пустоту
             # значило бы ждать её до конца срока.
-            summarised = args.run_id or summarised_run(args.repo, args.sha, token, args.summarises)
-            if not summarised:
-                problems = [f"прогон «{args.summarises}» на голове {args.sha[:8]} не найден"]
-                waiting, advisory_problems = True, []
+            found = summarised_run(args.repo, args.sha, token, args.summarises)
+            summarised = args.run_id or str((found or {}).get("id") or "")
+            # ЖДЁМ, ПОКА СВОДИМЫЙ ПРОГОН НЕ ДОСМОТРЕН. Явно названный номер это
+            # не проверяет: его даёт человек или тест, и решение уже принято.
+            if not args.run_id and not settled(found):
+                why = (
+                    f"прогон «{args.summarises}» на голове {args.sha[:8]} "
+                    + ("отменён — идёт новый" if was_cancelled(found) else "ещё не досмотрен")
+                    if found
+                    else f"прогон «{args.summarises}» на голове {args.sha[:8]} не найден"
+                )
+                problems, waiting, advisory_problems = [why], True, []
                 if time.monotonic() >= deadline:
                     break
-                print(f"ждём прогон «{args.summarises}» на голове {args.sha[:8]}…", flush=True)
+                print(f"ждём: {why}…", flush=True)
                 time.sleep(args.interval)
                 continue
             runs = check_runs(args.repo, args.sha)
