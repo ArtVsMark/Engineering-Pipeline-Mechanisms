@@ -119,6 +119,19 @@ ACCEPTANCE_UNREAD: Final = "unread"
 #: чинится человеком, но ещё раньше: до всякого запроса к площадке.
 ACCEPTANCE_NOT_A_NUMBER: Final = "not-a-number"
 
+#: Как состояние называется человеку. Словарь объявлен ЗДЕСЬ, а не собран на
+#: месте печати, ради одного: договор о выпуске обязан называть все состояния,
+#: которые механизм различает, и сверить это можно только по перечислимому
+#: списку. Договор и механизм уже расходились — новое правило мажора жило в
+#: `docs/release.md`, пока механизм исполнял старое (#198).
+ACCEPTANCE_SAID: Final = {
+    ACCEPTANCE_CLOSED: "закрыта",
+    ACCEPTANCE_OPEN: "ОТКРЫТА",
+    ACCEPTANCE_MISSING: "такой задачи у площадки нет",
+    ACCEPTANCE_UNREAD: "состояние не прочитано",
+    ACCEPTANCE_NOT_A_NUMBER: "не разобрано как номер задачи",
+}
+
 
 def acceptance_state(repo: str, number: int, token: str) -> str:
     """Состояние названной приёмки одним из четырёх слов.
@@ -218,14 +231,7 @@ def announce(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
         f"версия проекта на этой голове: {number}" + ("" if whole else " (неполна: тегов не видно)")
     )
     if acceptance:
-        said = {
-            ACCEPTANCE_CLOSED: "закрыта",
-            ACCEPTANCE_OPEN: "ОТКРЫТА",
-            ACCEPTANCE_MISSING: "такой задачи у площадки нет",
-            ACCEPTANCE_UNREAD: "состояние не прочитано",
-            ACCEPTANCE_NOT_A_NUMBER: "не разобрано как номер задачи",
-        }[state]
-        print(f"приёмка мажора: #{acceptance} — {said}")
+        print(f"приёмка мажора: #{acceptance} — {ACCEPTANCE_SAID[state]}")
 
 
 def do_release(wanted: str) -> None:

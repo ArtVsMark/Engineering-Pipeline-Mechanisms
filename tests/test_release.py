@@ -278,3 +278,17 @@ def test_a_hash_prefixed_acceptance_names_the_input_not_the_token(
     assert run.code == 1, run.text
     assert "не разобрано как номер" in run.text
     assert "нет токена" not in run.text
+
+
+def test_the_contract_names_every_state_the_mechanism_tells_apart() -> None:
+    """Договор о выпуске называет ВСЕ состояния приёмки, что различает механизм.
+
+    Расхождение договора и механизма здесь уже было и стоило дороже прочего:
+    новое правило мажора жило в `docs/release.md`, пока `release.py` исполнял
+    старое (#198). Пять состояний — пять строк таблицы, и сверяет их машина, а
+    не внимание автора
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    contract = (ROOT / "docs" / "release.md").read_text(encoding="utf-8").lower()
+    missing = [said for said in module.ACCEPTANCE_SAID.values() if said.lower() not in contract]
+    assert not missing, f"механизм различает, а договор не называет: {missing}"
