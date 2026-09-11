@@ -128,3 +128,29 @@
 объявленного исхода — взвели, отозвали, заморозили, разморозили — обязан быть
 прогон, в котором он случился
 ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+
+## След замера по клонам — адресами, а не памятью
+
+Замер, на котором стоит первый абзац «Контекста», обязан иметь адрес и
+владельца, иначе следующее окно унаследует непроверяемую премису
+([185](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/185-a-trail-is-an-address-and-its-owner-keeps-it-alive.md)).
+Ровно это и случилось с прежним доводом «трое из четырёх»: он был записан без
+следа и оказался неверен. Нашёл внешний взгляд на #202.
+
+Адреса на 11.09.2026, все на общей ветке своих проектов:
+
+| проект | что смотрели |
+|---|---|
+| `Glossary-Python` | `scripts/automerge.py` — мутация `enablePullRequestAutoMerge` и её обоснование в шапке |
+| `Engineering-Incidents-Playbook` | `.github/workflows/automerge.yml` — та же мутация |
+| `stepik-python-grader` | `.github/workflows/merge-when-green.yml` (взводит и снимает) и `.github/workflows/merge-queue.yml` (двигает голову) |
+| `Claude-Code_Usage-Token` | `scripts/gh_rest.py` — запрет GraphQL и названная им цена: «авто-мержа GitHub у нас не будет» |
+
+**Замер повторяем одной командой**, и это часть следа: поиск
+`enablePullRequestAutoMerge` по клонам семьи разделяет тех, кто взводит, от тех,
+кто сливает сам. Число в «Контексте» держится этой процедурой, а не памятью
+автора записи
+([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+Ни один из четырёх не передаёт `commitHeadline`/`commitBody` — это тоже часть
+замера и основание для пункта решения о теле уплотнения.
