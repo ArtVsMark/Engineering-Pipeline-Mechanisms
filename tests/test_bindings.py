@@ -156,6 +156,23 @@ def proposals() -> list[dict[str, Any]]:
     return list(said) if isinstance(said, list) else []
 
 
+def test_an_empty_queue_is_a_declared_state_not_a_missing_one() -> None:
+    """Пустая очередь предложений — объявленное состояние, а не молчание (154).
+
+    Без этой строки набор на пустой очереди просто пропускает обе проверки
+    ниже — «нет предмета» и «предмет проверен» становятся неотличимы (075).
+    Пустой список законен и означает «предлагать пока нечего»; отсутствие
+    файла означает другое — «канал не подключён», — и это разные состояния.
+    """
+    document: dict[str, Any] = json.loads(PROPOSALS.read_text(encoding="utf-8"))
+    assert isinstance(document.get("proposals"), list), (
+        "раздела предложений нет вовсе: «пусто» и «канала нет» — разные состояния"
+    )
+    assert any("пуст" in str(key) + str(value) for key, value in document.items()), (
+        "пустое состояние не объявлено словами — читателю нечем отличить его от забытого"
+    )
+
+
 @pytest.mark.parametrize("item", proposals(), ids=lambda one: str(one.get("slug", "?")))
 def test_a_proposal_carries_what_the_catalogue_asks(item: dict[str, Any]) -> None:
     """У предложения есть все поля контракта, и инцидент — с конкретикой.
