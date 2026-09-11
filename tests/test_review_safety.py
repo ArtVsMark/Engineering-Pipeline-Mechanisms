@@ -542,6 +542,44 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
         assert base != "HEAD", f"карта взята из головы изменения: {line.strip()}"
 
 
+def test_a_failed_fetch_never_falls_back_to_the_head() -> None:
+    """Не получилась общая ветка — карта не собирается вовсе.
+
+    Проверка `--base FETCH_HEAD` смотрит на ТЕКСТ и потому слепа к тому, ЧЕМ
+    окажется `FETCH_HEAD` в прогоне. Без проверки кода возврата `git fetch`
+    сбой сети оставлял бы там то, что положил `actions/checkout`, — голову
+    самого изменения. Сбой превращался бы ровно в ту подмену, от которой шаг и
+    заведён (085). Нашёл внешний взгляд на #120.
+
+    Проверяются ОБА экземпляра шага — у взгляда на изменение и у позднего:
+    починка одного конца из двух здесь уже стоила находки (195).
+    """
+    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    fetches = [line for line in text.splitlines() if "git fetch" in line and "origin" in line]
+    assert fetches, "общая ветка не подтягивается вовсе — предмет проверки не найден (075)"
+    for line in fetches:
+        assert line.strip().startswith("if git fetch"), (
+            f"код возврата фетча не проверяется, и сбой подменит базу головой: {line.strip()}"
+        )
+
+
+def test_the_output_delimiter_is_not_guessable() -> None:
+    """Разделитель блока в `$GITHUB_OUTPUT` случаен, а не постоянен.
+
+    В карту попадают заголовки правил, приходящие ПО СЕТИ из выгрузки соседнего
+    репозитория, не закреплённой по отпечатку. Строка с ПОСТОЯННЫМ маркером
+    внутри такого текста закрыла бы блок раньше времени — и дописала бы в вывод
+    шага что угодно. Нашёл внешний взгляд на #120.
+    """
+    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    heredocs = [line for line in text.splitlines() if "text<<" in line]
+    assert heredocs, "блок вывода не собирается — предмет проверки не найден (075)"
+    for line in heredocs:
+        assert "$" in line.split("text<<", 1)[1], (
+            f"разделитель постоянен и угадывается из дерева: {line.strip()}"
+        )
+
+
 def test_a_missing_map_does_not_stop_the_look() -> None:
     """Карта не собралась — взгляд идёт без неё, а не отменяется.
 
