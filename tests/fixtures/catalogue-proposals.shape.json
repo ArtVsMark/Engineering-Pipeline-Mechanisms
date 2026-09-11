@@ -1,0 +1,30 @@
+{
+  "_": "Снятый ответ КАТАЛОГА по предложениям: форма вердикта. Лежит здесь, чтобы подделки в наборе было с чем сверить — зелёное на подделке, собранной по разумению окна, доказывает согласованность кода с нашим представлением о каталоге, а не о самом каталоге (правило 170). Именно так и вышло: разбор искал вердикты под ключом «proposals», номер — в полях «number»/«id», а каталог отдаёт «verdicts» и «rule». Тест повторял ту же ошибку, и оба молчали, пока каталог принимал наши предложения.",
+  "_снято": "11.09.2026",
+  "_откуда": "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook/main/.rules/proposals.json",
+  "_как_обновить": "curl -sS <адрес выше> — и оставить здесь только вердикты по нашему проекту",
+  "_обрезано": "оставлены вердикты по ArtVsMark/Engineering-Pipeline-Mechanisms; поле why укорочено",
+  "schema": "1.1",
+  "verdicts": {
+    "ArtVsMark/Engineering-Pipeline-Mechanisms:a-link-to-a-foreign-rule-is-checked-by-a-gate": {
+      "status": "admitted",
+      "rule": "198",
+      "why": "Предмет новый: ближайшая буква корпуса — 044 с близостью 0,074, при том что уже принятые предложения дают со своим прави…"
+    },
+    "ArtVsMark/Engineering-Pipeline-Mechanisms:a-run-cancelled-while-queued-is-not-a-missing-event": {
+      "status": "admitted",
+      "rule": "199",
+      "why": "Предмет новый: ближайшая буква — 127 с близостью 0,082. Ценность не в починке, а в опровергнутой премисе: вывод «событие…"
+    },
+    "ArtVsMark/Engineering-Pipeline-Mechanisms:a-badge-that-cannot-move-is-not-a-measure": {
+      "status": "admitted",
+      "rule": "200",
+      "why": "Предмет новый: ближайшая буква — 122 с близостью 0,080. Инцидент редкой чистоты: значок 195/195 не мог показать другое П…"
+    },
+    "ArtVsMark/Engineering-Pipeline-Mechanisms:an-export-without-the-rule-text-is-read-by-its-title": {
+      "status": "admitted",
+      "rule": "201",
+      "why": "Предмет новый: ближайшая буква корпуса — 182 с близостью 0,080. Инцидент назван двумя конкретными правилами (114 и 106) …"
+    }
+  }
+}

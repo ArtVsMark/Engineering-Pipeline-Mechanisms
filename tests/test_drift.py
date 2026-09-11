@@ -10,13 +10,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("drift.py")
 
@@ -250,9 +251,60 @@ def test_the_record_names_where_the_stale_pin_lives(monkeypatch: pytest.MonkeyPa
     assert ".yml" in found[0].said, found[0].said
 
 
+def test_each_stale_tag_is_named_with_its_own_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Отставший тег назван вместе со СВОИМИ файлами, а не рядом с чужими (находка #122).
+
+    Два плоских списка — теги и все файлы разом — при разных тегах в разных
+    прогонах не говорят, что где; а править надо именно тот файл, где стоит
+    именно тот тег.
+    """
+    catalogue = module.CATALOGUE
+    (tmp_path / "one.yml").write_text(f"uses: {catalogue}/.github/actions/a@v1.0.0\n", "utf-8")
+    (tmp_path / "two.yml").write_text(f"uses: {catalogue}/.github/actions/b@v1.1.0\n", "utf-8")
+    monkeypatch.setattr(module.paths, "WORKFLOWS", tmp_path)
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: {"tag_name": "v9.9.9"})
+    said = module.pinned_tag_moved("o/r", "token")[0].said
+    assert "v1.0.0 — one.yml" in said, said
+    assert "v1.1.0 — two.yml" in said, said
+
+
 # --- вердикты по предложениям ------------------------------------------------
+#
+# ФОРМА ОТВЕТА ВЗЯТА У КАТАЛОГА, А НЕ ПРИДУМАНА. Прежде подделки здесь были
+# собраны по разумению окна: вердикты под ключом `proposals`, номер в поле
+# `number`. Каталог отдаёт `verdicts` и `rule`, и разбор молчал — а тест
+# молчал вместе с ним, потому что повторял ту же ошибку (170). Цена: к
+# 11.09.2026 каталог принял все четыре наших предложения, и ни об одном
+# источник не сказал. Снятый ответ лежит в
+# `tests/fixtures/catalogue-proposals.shape.json`.
 
 MINE = {"proposals": [{"slug": "a-thing-broke", "claim": "…", "incident": "…", "trail": "x.py"}]}
+CAPTURED = ROOT / "tests" / "fixtures" / "catalogue-proposals.shape.json"
+
+
+def captured() -> dict[str, Any]:
+    """Снятый ответ каталога — то, с чем сверяются подделки."""
+    return dict(json.loads(CAPTURED.read_text(encoding="utf-8")))
+
+
+def answer(verdict: dict[str, Any], key: str = "o/r:a-thing-broke") -> dict[str, Any]:
+    """Ответ каталога той же формы, что и снятый: раздел `verdicts`."""
+    return {"schema": captured()["schema"], module.VERDICTS: {key: verdict}}
+
+
+def test_the_shape_of_the_answer_is_taken_from_the_catalogue() -> None:
+    """Подделки собраны по СНЯТОМУ ответу, а не по памяти окна (170).
+
+    Без этой сверки набор доказывает согласованность кода с представлением
+    окна о каталоге, а не с каталогом. Ровно так четыре вердикта и прошли мимо.
+    """
+    real = captured()
+    assert module.VERDICTS in real, f"снятый ответ не несёт раздела «{module.VERDICTS}»"
+    one = next(iter(real[module.VERDICTS].values()))
+    assert "rule" in one, "номер в снятом ответе назван не полем rule — разбор смотрит не туда"
+    assert "status" in one, "статус в снятом ответе назван иначе"
 
 
 def test_an_admitted_proposal_stops_being_a_proposal() -> None:
@@ -263,8 +315,7 @@ def test_an_admitted_proposal_stops_being_a_proposal() -> None:
     расписанию: ни одна наша правка этого не делает, и события не приходит —
     ровно предмет дрейфа (080).
     """
-    answer = {"proposals": {"o/r:a-thing-broke": {"status": "admitted", "number": "196"}}}
-    found = module.proposals_answered(answer, MINE, "o/r")
+    found = module.proposals_answered(answer({"status": "admitted", "rule": "196"}), MINE, "o/r")
     assert len(found) == 1
     assert "196" in found[0].said
     assert "bindings.json" in found[0].next_step
@@ -272,21 +323,52 @@ def test_an_admitted_proposal_stops_being_a_proposal() -> None:
 
 def test_a_rejected_proposal_names_the_reason() -> None:
     """Отвергнутое несёт причину каталога, а не только слово «отвергнуто» (154)."""
-    answer = {"proposals": {"o/r:a-thing-broke": {"status": "rejected", "why": "уже есть 042"}}}
-    found = module.proposals_answered(answer, MINE, "o/r")
+    said = {"status": "rejected", "why": "уже есть 042"}
+    found = module.proposals_answered(answer(said), MINE, "o/r")
     assert len(found) == 1
     assert "уже есть 042" in found[0].said
 
 
+def test_a_merged_proposal_points_at_the_existing_rule() -> None:
+    """Третий статус каталога — «свёрнуто с существующим» — разбор знает.
+
+    Прежде его не знал никто: незнакомый статус молча уходил в «вердикта нет»,
+    и предложение оставалось в очереди на приём навсегда.
+    """
+    said = {"status": "merged-into", "rule": "042", "why": "предмет тот же"}
+    found = module.proposals_answered(answer(said), MINE, "o/r")
+    assert len(found) == 1 and "042" in found[0].said
+    assert "предмет тот же" in found[0].said
+
+
+def test_an_unknown_status_is_named_not_swallowed() -> None:
+    """Статус, которого разбор не знает, называется, а не молчит (045)."""
+    found = module.proposals_answered(answer({"status": "deferred"}), MINE, "o/r")
+    assert len(found) == 1
+    assert "deferred" in found[0].said and "не знает" in found[0].said
+
+
+def test_an_unrecognised_answer_is_a_record_not_silence() -> None:
+    """Ответ без раздела вердиктов — запись «форма не узнана», а не «сошлось».
+
+    «Ответа нет» и «ответ в незнакомом виде» снаружи одинаковы и значат
+    разное: первое штатно, второе означает, что источник ослеп. Ровно это и
+    случилось, когда разбор искал раздел «proposals».
+    """
+    found = module.proposals_answered({"proposals": {}}, MINE, "o/r")
+    assert len(found) == 1
+    assert "форма не узнана" in found[0].said
+
+
 def test_a_proposal_without_a_verdict_is_not_a_drift() -> None:
     """Каталог ещё не ответил — это ожидание, а не расхождение."""
-    assert module.proposals_answered({"proposals": {}}, MINE, "o/r") == []
+    assert module.proposals_answered({module.VERDICTS: {}}, MINE, "o/r") == []
 
 
 def test_a_verdict_for_another_project_is_not_ours() -> None:
     """Ключ несёт владельца и репозиторий: чужой вердикт мимо нас."""
-    answer = {"proposals": {"other/repo:a-thing-broke": {"status": "admitted", "number": "196"}}}
-    assert module.proposals_answered(answer, MINE, "o/r") == []
+    said = answer({"status": "admitted", "rule": "196"}, key="other/repo:a-thing-broke")
+    assert module.proposals_answered(said, MINE, "o/r") == []
 
 
 def test_a_non_numeric_matrix_entry_does_not_fell_the_pass() -> None:
@@ -352,3 +434,13 @@ def test_foreign_contracts_are_not_ours(tmp_path: Path) -> None:
     и быть не должно (051).
     """
     assert {name for name, _ in module.OUR_CONTRACTS} == {"bindings", "proposals", "showcase"}
+
+
+def test_an_empty_queue_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Предложений нет — вердиктов по ним быть не может, и форма чужого ответа не предмет.
+
+    Пустая очередь объявлена законным состоянием в самом `.rules/proposals.json`.
+    Без этой границы проект, которому нечего предлагать, получал бы запись
+    «форма не узнана» на каждом ночном заходе — то есть красное на здоровом (051).
+    """
+    assert module.proposals_answered({}, {"proposals": []}, "o/r") == []
