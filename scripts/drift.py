@@ -49,7 +49,7 @@ import paths
 import pipeline_checks
 import report
 
-MARKER: Final = "<!-- drift: не удаляйте, по этой строке задача находится снова -->"
+MARKER: Final = findings.marker("drift")
 TITLE: Final = "Дрейф: внешнее состояние сдвинулось"
 
 EXIT_NOTHING: Final = 0

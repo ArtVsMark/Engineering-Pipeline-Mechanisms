@@ -63,7 +63,7 @@ import ghrest
 import pipeline_checks as policy
 import report
 
-MARKER: Final = "<!-- main-red: не удаляйте, по этой строке задача находится снова -->"
+MARKER: Final = findings.marker("main-red")
 TITLE: Final = "Общая ветка: краснота"
 
 #: Номер прогона внутри адреса записи проверки: `…/actions/runs/<id>/job/<id>`.

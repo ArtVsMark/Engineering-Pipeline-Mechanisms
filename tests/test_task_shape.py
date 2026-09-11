@@ -88,3 +88,36 @@ def test_a_broken_child_count_does_not_go_negative() -> None:
     """Площадка сказала «закрыто больше, чем всего» — это ноль, а не минус."""
     odd = issue(9, "", sub_issues_summary={"total": 1, "completed": 3})
     assert module.children_left(odd) == 0
+
+
+def test_a_task_kept_by_a_mechanism_is_not_a_candidate() -> None:
+    """Задачу, которую ведёт механизм, чек-лист не касается (нашёл владелец).
+
+    Её тело пересобирается заново каждым заходом: галочка, поставленная рукой,
+    исчезнет на следующем. А состояние её и так счётчик — записи появляются и
+    уходят сами; требовать сверх этого чек-лист значит требовать второй счёт
+    того же (022).
+    """
+    findings = load_script("findings.py")
+    registry = issue(89, findings.marker("unlooked") + "\n" + PROSE)
+    assert module.without_a_checklist([registry]) == []
+
+
+def test_the_verdict_does_not_depend_on_how_full_the_registry_is() -> None:
+    """Форма задачи не зависит от того, сколько в неё записал механизм.
+
+    Правило 028 — о ФОРМЕ. Без границы выше счёт менялся с наполнением:
+    реестр находок #23 утром 11.09.2026 считался кандидатом с тридцатью тремя
+    «пунктами прозой», а к вечеру перестал — не изменившись ни формой, ни
+    назначением.
+    """
+    findings = load_script("findings.py")
+    mark = findings.marker("review-findings")
+    full = issue(23, mark + "\n" + PROSE + "\n".join(f"- запись {n}" for n in range(30)))
+    empty = issue(23, mark + "\nПусто — все находки названы разобранными.")
+    assert module.without_a_checklist([full]) == module.without_a_checklist([empty]) == []
+
+
+def test_a_human_task_with_prose_is_still_a_candidate() -> None:
+    """Граница не съела предмет: задача человека с прозой по-прежнему кандидат."""
+    assert [task.number for task in module.without_a_checklist([issue(182, PROSE)])] == [182]

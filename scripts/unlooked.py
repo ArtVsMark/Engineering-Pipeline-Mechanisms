@@ -68,7 +68,7 @@ import ghrest
 import report
 import review_findings
 
-MARKER: Final = "<!-- unlooked: не удаляйте, по этой строке задача находится снова -->"
+MARKER: Final = findings.marker("unlooked")
 TITLE: Final = "Слитое без внешнего взгляда"
 
 #: Взгляда не было вовсе: ни строк находок, ни строки вердикта.

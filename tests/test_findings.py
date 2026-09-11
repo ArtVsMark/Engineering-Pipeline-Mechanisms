@@ -92,3 +92,25 @@ def test_the_earliest_live_task_wins_and_the_rest_are_named(
     number, _, seen = module.live_issue_seen("o/r", "token")
     assert (number, seen) == (23, "a")
     assert "#139" in capsys.readouterr().err
+
+
+def test_every_registry_marker_is_built_from_one_phrase() -> None:
+    """Метка живой задачи собирается из одной фразы, а не повторяется в пяти модулях.
+
+    Фразу повторяли дословно реестр находок, «входящие», непросмотренное,
+    краснота общей ветки и дрейф. Разошлись бы они молча: задача с чуть иной
+    фразой просто перестала бы находиться (022, 090).
+    """
+    for name in ("main_red.py", "unlooked.py", "drift.py"):
+        other = load_script(name)
+        assert module.is_kept_by_a_mechanism(other.MARKER), (
+            f"{name}: метка собрана мимо общей фразы"
+        )
+    assert module.is_kept_by_a_mechanism(module.MARKER)
+    assert module.is_kept_by_a_mechanism(module.INBOX_MARKER)
+
+
+def test_a_plain_body_is_not_kept_by_a_mechanism() -> None:
+    """Обычная задача машинной не считается: признак — метка, а не догадка."""
+    assert not module.is_kept_by_a_mechanism("задача человека с прозой\n- раз\n- два")
+    assert not module.is_kept_by_a_mechanism("")
