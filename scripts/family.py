@@ -120,6 +120,38 @@ def held_by_machine(summary: dict[str, Any]) -> int:
     )
 
 
+def behind(summary: dict[str, Any], *, mine: str, ours: dict[str, Any]) -> list[str]:
+    """Правила, которые кто-то в семье держит МАШИНОЙ, а мы — нет.
+
+    ЧТО ЭТО ЗА МЕРИЛО. «Конвейер удовлетворяет потребности семьи» — цель, и
+    пока у неё нет числа, она остаётся ощущением. Число здесь честное: правило,
+    которое сосед закрывает гейтом, а мы документом или «неприменимо», — это
+    либо наш пробел, либо наш устаревший ответ. Оба случая требуют работы, и
+    оба до сих пор были не видны
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+
+    НАШИ ОТВЕТЫ БЕРУТСЯ НЕ ИЗ СНИМКА. Сводка каталога снимается ночью, и наши
+    ответы в ней отстают на смену: замер 10.09.2026 показал восемь наших правил
+    документами, когда они уже держались гейтами. Поэтому соседи читаются из
+    снимка, а мы — из живого дерева, и это названо, а не умолчано
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+    ЧИСЛО НЕ РЕШАЕТ ЗА ЧЕЛОВЕКА. Правило, закрытое соседом гейтом, у нас может
+    быть неприменимо по существу — у проектов разные предметы. Мерило говорит,
+    ГДЕ смотреть, а перечитывание ответа остаётся работой человека.
+    """
+    theirs: set[str] = set()
+    for consumer in summary.get("consumers") or []:
+        if str(consumer.get("repo") or "") == mine:
+            continue
+        for number, answer in (consumer.get("holds") or {}).items():
+            if isinstance(answer, dict) and answer.get("mechanism") in KINDS:
+                theirs.add(str(number))
+    return sorted(
+        number for number in theirs if (ours.get(number) or {}).get("mechanism") not in KINDS
+    )
+
+
 def picture(summary: dict[str, Any]) -> dict[str, Any]:
     """Разрез целиком: числа, которые публикуются фактом.
 

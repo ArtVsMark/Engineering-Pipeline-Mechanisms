@@ -239,3 +239,53 @@ def test_the_version_badge_names_incompleteness() -> None:
     partial = facts.version_badge({"version": "0.1.91", "version_whole": False})
     assert "неполно" not in whole
     assert "неполно" in partial
+
+
+# --- отставание от семьи -----------------------------------------------------
+
+
+MINE = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+
+
+def test_a_rule_a_neighbour_holds_by_machine_and_we_do_not_is_named() -> None:
+    """Сосед держит гейтом, у нас документ — это отставание, и оно видно числом.
+
+    Цель «конвейер удовлетворяет потребности семьи» без числа остаётся
+    ощущением: документ вместо гейта — либо наш пробел, либо устаревший ответ,
+    и оба случая требуют работы (046).
+    """
+    document = summary(consumer("ArtVsMark/Glossary-Python", **{"077": ("gate", "scripts/x.py")}))
+    left = family.behind(document, mine=MINE, ours={"077": {"mechanism": "document"}})
+    assert left == ["077"]
+
+
+def test_a_rule_we_hold_by_machine_is_not_behind() -> None:
+    """Держим машиной — отставания нет, каким бы механизмом ни держал сосед."""
+    document = summary(consumer("ArtVsMark/Glossary-Python", **{"077": ("gate", "scripts/x.py")}))
+    for ours in ("gate", "pipeline", "code"):
+        assert family.behind(document, mine=MINE, ours={"077": {"mechanism": ours}}) == []
+
+
+def test_a_rule_nobody_holds_by_machine_is_not_behind() -> None:
+    """Сосед держит документом — это не отставание: машины нет ни у кого.
+
+    Иначе число мерило бы объём чужой документации, а не машинное соблюдение.
+    """
+    document = summary(consumer("ArtVsMark/Glossary-Python", **{"077": ("document", "docs/x.md")}))
+    assert family.behind(document, mine=MINE, ours={}) == []
+
+
+def test_our_own_answers_in_the_snapshot_do_not_count_as_a_neighbours() -> None:
+    """Себя в чужих не считаем: снимок наших ответов отстаёт на смену.
+
+    Иначе отставание выросло бы ровно на нашу же работу, сделанную после
+    ночного захода каталога (005).
+    """
+    document = summary(consumer(MINE, **{"077": ("gate", "scripts/x.py")}))
+    assert family.behind(document, mine=MINE, ours={"077": {"mechanism": "document"}}) == []
+
+
+def test_an_unanswered_rule_counts_as_behind() -> None:
+    """Ответа у нас нет вовсе — отставание тоже: молчание не механизм (154)."""
+    document = summary(consumer("ArtVsMark/ArtVsMark", **{"112": ("gate", "scripts/x.py")}))
+    assert family.behind(document, mine=MINE, ours={}) == ["112"]

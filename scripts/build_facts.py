@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import sys
 from collections import Counter
 from datetime import UTC, datetime
@@ -134,7 +135,9 @@ def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, int]:
     return {klass: len(policy.names_of(checks, klass, beyond=None)) for klass in policy.CLASSES}
 
 
-def family_facts(path: Path | None) -> dict[str, Any]:
+def family_facts(
+    path: Path | None, *, mine: str = "", answers: Path | None = None
+) -> dict[str, Any]:
     """Разрез по общим механизмам семьи — вторая ось приоритета переноса.
 
     ПОЧЕМУ ЭТО ЗДЕСЬ, А НЕ У КАТАЛОГА. Решение владельца 09.09.2026: считает и
@@ -159,6 +162,25 @@ def family_facts(path: Path | None) -> dict[str, Any]:
     picture["read"] = True
     picture["schema_expected"] = family.READS_SCHEMA
     picture["schema_agrees"] = picture["schema_read"] == family.READS_SCHEMA
+    # ОТСТАВАНИЕ ОТ СЕМЬИ — ВТОРОЕ ЧИСЛО ЭТОГО РАЗРЕЗА, И ОНО ПРО НАС. Доля
+    # общих механизмов отвечает «окупается ли вынос», а это — «удовлетворяет ли
+    # конвейер потребности семьи»: сколько правил сосед закрывает машиной там,
+    # где у нас документ или «неприменимо». Цель без числа остаётся ощущением
+    # (`docs/decisions/016-family-completeness-outranks-the-release-number.md`).
+    #
+    # НАШИ ОТВЕТЫ ЧИТАЮТСЯ ИЗ ДЕРЕВА, а соседей — из снимка: снимок наших
+    # отстаёт на смену, и «отставание» вышло бы завышенным на нашу же работу.
+    if mine and answers is not None and answers.is_file():
+        try:
+            ours = json.loads(answers.read_text(encoding="utf-8")).get("rules") or {}
+        except json.JSONDecodeError as exc:
+            picture["behind_read"] = False
+            picture["behind_why"] = f"наши ответы не разобраны: {exc}"
+            return picture
+        left = family.behind(family.load(path), mine=mine, ours=ours)
+        picture["behind_read"] = True
+        picture["behind"] = len(left)
+        picture["behind_rules"] = left
     return picture
 
 
@@ -234,8 +256,14 @@ def collect(
     sha: str,
     summary: Path | None = None,
     coverage: Path | None = None,
+    mine: str = "",
 ) -> dict[str, Any]:
-    """Собирает все факты о проекте в одно отображение."""
+    """Собирает все факты о проекте в одно отображение.
+
+    `mine` — наше каноничное имя у площадки. Оно нужно ровно одному числу:
+    отставанию от семьи, где своё надо отличить от чужого. Пусто — число не
+    считается и говорит об этом, а не выходит нулём (045).
+    """
     # ВЕРСИЯ ПРОЕКТА И ВЕРСИЯ КОНТРАКТА — РАЗНЫЕ ЧИСЛА, И ОБА НУЖНЫ. Контракт
     # объявляет поверхность механизмов и поднимается решением человека; версия
     # проекта СЧИТАЕТСЯ по истории — «столько изменений принято после выпуска».
@@ -264,7 +292,7 @@ def collect(
         "coverage": coverage_facts(coverage),
         "rules": rules_facts(root / BINDINGS),
         "checks": checks_facts(root / policy.DEFAULT_PATH),
-        "family": family_facts(summary),
+        "family": family_facts(summary, mine=mine, answers=root / BINDINGS),
         "generated": {
             "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "sha": sha,
@@ -403,6 +431,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
     parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
+    # Наше имя у площадки. Умолчание берётся у прогона, а не выдумывается:
+    # выдуманное отличило бы нас от себя же и завысило отставание на все наши
+    # ответы сразу.
+    parser.add_argument(
+        "--repo",
+        default=os.environ.get("GITHUB_REPOSITORY", ""),
+        help="наше имя у площадки — нужно, чтобы отличить свои ответы от чужих",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -411,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
             args.sha,
             Path(args.family) if args.family else None,
             Path(args.coverage) if args.coverage else None,
+            args.repo,
         )
     except NotRun as exc:
         print(f"факты не собраны: {exc}", file=sys.stderr)
