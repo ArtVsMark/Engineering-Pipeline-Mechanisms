@@ -231,6 +231,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "asked": [],
         "disarmed": [],
         "echo": True,
+        "held": {},
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -275,6 +276,11 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return {"commitHeadline": headline, "commitBody": body}
 
     monkeypatch.setattr(module.arm, "arm", armed)
+    # Что площадка ДЕРЖИТ взведённым, читается отдельно: значок несёт тело
+    # момента взведения, и ветка с тех пор могла уехать.
+    monkeypatch.setattr(
+        module, "held_body", lambda repo, number, tok: state["held"].get(number, ("", ""))
+    )
     monkeypatch.setattr(module.arm, "disarm", lambda node, tok: state["disarmed"].append(node))
     # Разметка источника записывается стендом отдельно: проверять надо, что
     # метка ВЫСТАВЛЕНА, а не что о ней напечатано. Замер 09.09.2026: вызов
@@ -433,15 +439,46 @@ def test_only_the_head_of_the_queue_stays_armed(platform: dict[str, Any]) -> Non
 
 
 def test_an_already_armed_head_is_not_armed_twice(platform: dict[str, Any]) -> None:
-    """Взведённая голова не взводится заново: площадка уже ждёт.
+    """Взведённая голова не взводится заново: площадка уже ждёт ТЕМ ЖЕ телом.
 
     Повторное взведение стоило бы обращения к площадке на каждом заходе, а
     заходов у очереди столько, сколько прогонов.
     """
     platform["changes"] = [change(1, "automerge", armed=True)]
     platform["states"] = {1: module.STATE_ARMABLE}
+    platform["held"] = {1: ("изменение 1 (#1)", "тело origin/agent/change-1")}
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["asked"] == [] and platform["disarmed"] == []
+
+
+def test_a_stale_arming_is_renewed_with_the_new_body(platform: dict[str, Any]) -> None:
+    """В ветку дотолкнули — значок несёт СТАРОЕ тело, и его перевзводят.
+
+    Тело собирается в момент взведения; коммит, пришедший позже, площадка
+    сольёт телом без него — то есть работа рассказалась бы в общей ветке не
+    вся. Сверка идёт с тем, что площадка ДЕРЖИТ, а не с предположением о её
+    поведении при толчке (044).
+    """
+    platform["changes"] = [change(1, "automerge", armed=True)]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    platform["held"] = {1: ("изменение 1 (#1)", "тело до последнего коммита")}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["disarmed"] == ["PR_1"], "черствое взведение не снято"
+    assert [body for _, _, body in platform["asked"]] == ["тело origin/agent/change-1"]
+
+
+def test_our_own_merge_also_takes_back_a_neighbours_arming(platform: dict[str, Any]) -> None:
+    """Сливая старшего САМИ, значок соседа тоже снимаем.
+
+    Иначе мы сливаем голову, а площадка следом сливает взведённого соседа —
+    даже если между ними по нашему порядку стоял третий. Это и есть «кто
+    первее, того и тапки», от которого очередь и существует (053).
+    """
+    platform["changes"] = [change(1, "automerge"), change(5, "automerge", armed=True)]
+    platform["states"] = {1: "clean"}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["merged"] == [1]
+    assert platform["disarmed"] == ["PR_5"], "значок соседа остался висеть"
 
 
 def test_a_withdrawn_consent_takes_the_arming_back(platform: dict[str, Any]) -> None:
@@ -849,3 +886,40 @@ def test_handing_over_shows_the_body_instead_of_arming_on_a_dry_run(
     module.hand_over("o/r", head, [head], "token", dry_run=True)
     assert platform["asked"] == [], "пробный заход взвёл слияние"
     assert "тело origin/agent/change-4" in capsys.readouterr().out
+
+
+def test_only_the_named_head_keeps_its_arming(platform: dict[str, Any]) -> None:
+    """Прямой вызов: названная голова значок сохраняет, соседи — нет.
+
+    Проверяется отдельно от захода, потому что зовётся из ДВУХ путей — «взвожу»
+    и «сливаю сам», — и щель была именно в том, что на втором пути этого вызова
+    не было (053).
+    """
+    head = change(1, "automerge", armed=True)
+    queue = [head, change(5, "automerge", armed=True), change(7, "automerge")]
+    module.keep_only("o/r", head, queue, "token", dry_run=False)
+    assert platform["disarmed"] == ["PR_5"], "снято не то взведение"
+
+
+def test_what_the_platform_holds_is_read_by_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Взведённое ЧИТАЕТСЯ обычным REST: поле `auto_merge` приходит с изменением.
+
+    Взвести дешевле нельзя — у мутации нет REST-эквивалента, — а прочитать
+    можно, и «раз уж пошли в GraphQL, спросим и это» — ровно тот путь, которым
+    у соседей выросли 2436 строк из 131 (001).
+    """
+    seen: list[tuple[str, str]] = []
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> dict[str, Any]:
+        seen.append((method, path))
+        return {"auto_merge": {"commit_title": "изменение 1 (#1)", "commit_message": "тело"}}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.held_body("o/r", 1, "token") == ("изменение 1 (#1)", "тело")
+    assert seen == [("GET", "repos/o/r/pulls/1")]
+
+
+def test_a_change_without_an_arming_holds_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Значка нет — читается пустое, а не падает: это законное состояние."""
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"auto_merge": None})
+    assert module.held_body("o/r", 1, "token") == ("", "")
