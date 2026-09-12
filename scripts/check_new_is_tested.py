@@ -142,9 +142,29 @@ def told_by_tests(name: str, module: str, tests: str) -> bool:
     докстроке, прогоном не считается — иначе достаточно было бы про него
     написать
     ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    ВЫЗОВ БЫВАЕТ НЕ СКОБКАМИ, И СОСЕД НАЗВАН. Функция, переданная как значение
+    — обработчик, ключ сортировки, декоратор, подмена в стенде, — вызывается
+    НЕ здесь, а тем, кому её отдали, и скобок рядом с её именем нет. Сужение до
+    `имя(` объявляло такое непрогнанным: ложная находка, которая учит обходить
+    гейт
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Поэтому к вызову добавлены ровно те формы, в которых имя ОТДАЮТ:
+    `@имя` (декоратор), `имя,` и `имя)` (аргумент), `=имя` (значение) — и
+    ничего больше
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Упоминание в прозе по-прежнему не проходит: после имени обязан стоять знак,
+    которым его отдают или зовут, а не пробел и точка. Нашёл внешний взгляд на
+    #227.
     """
-    called = re.escape(name) + r"\s*\("
-    if re.search(rf"(?<![\w.]){called}|\.{called}", tests):
+    bare = re.escape(name)
+    #: Знаки, которыми имя ЗОВУТ или ОТДАЮТ. Список закрытый: каждая форма —
+    #: утверждение «здесь имя попадает в работу», и добавляется она разбором
+    #: случая, а не на всякий случай.
+    handed = r"(?:\s*\(|\s*,|\s*\)|\s*=(?!=))"
+    if re.search(rf"(?<![\w.]){bare}{handed}|\.{bare}{handed}", tests):
+        return True
+    if re.search(rf"@\s*{bare}\b", tests):
         return True
     return name == ENTRY and Path(module).name in tests
 
