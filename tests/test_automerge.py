@@ -231,6 +231,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "asked": [],
         "disarmed": [],
         "echo": True,
+        "swallow": set(),
         "held": {},
     }
 
@@ -271,7 +272,11 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     def armed(node: str, headline: str, body: str, tok: str) -> dict[str, Any]:
         state["asked"].append((node, headline, body))
-        if not state["echo"]:
+        # Тело проглатывается либо у ВСЕХ (`echo: False`), либо у названных
+        # номеров (`swallow`): без второго нельзя собрать случай «один отказ,
+        # сосед взведён», а именно там и была асимметрия пояснения.
+        swallowed = not state["echo"] or int(node.removeprefix("PR_")) in state["swallow"]
+        if swallowed:
             return {"enabledAt": "2026-09-12T10:00:00Z"}
         return {"commitHeadline": headline, "commitBody": body}
 
@@ -975,3 +980,21 @@ def test_a_refused_arming_skips_the_head_instead_of_felling_the_pass(
     # Сосед слит — очередь не встала; исход красный — отказ не исчез (045).
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
     assert platform["merged"] == [2], "заход упал на первой голове вместо того, чтобы идти дальше"
+
+
+def test_a_red_outcome_is_explained_on_both_paths(
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Красный исход после чужого отказа поясняется и на пути ВЗВЕДЕНИЯ.
+
+    Прежде пояснение печаталось только там, где заход сливал сам, — и красное
+    при взведённой голове выглядело противоречием «взвёл и покраснел». Нашёл
+    внешний взгляд на #245.
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["states"] = {1: module.STATE_ARMABLE, 2: module.STATE_ARMABLE}
+    platform["swallow"] = {1}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
+    said = capsys.readouterr().out
+    assert "исход красный" in said, said
+    assert [node for node, _, _ in platform["asked"]] == ["PR_1", "PR_2"], platform["asked"]

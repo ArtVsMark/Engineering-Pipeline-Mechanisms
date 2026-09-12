@@ -779,6 +779,12 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 print(f"#{change.number}: не взведено — {exc}")
                 refused.append(str(exc))
                 continue
+            if refused:
+                # Пояснение печатается НА ОБОИХ путях, а не только на слиянии:
+                # красный исход при взведённой голове иначе выглядит
+                # противоречием — «взвёл и покраснел». Нашёл внешний взгляд
+                # на #245.
+                print("голова взведена, но отказы по головам выше остались — исход красный")
             return EXIT_BROKEN if refused else EXIT_OK
         if state not in STATE_MERGEABLE:
             # Список разрешительный: незнакомое состояние — повод пропустить
