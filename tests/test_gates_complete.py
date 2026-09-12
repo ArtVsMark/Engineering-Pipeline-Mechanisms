@@ -768,3 +768,60 @@ def test_the_state_says_which_jobs_are_still_running() -> None:
     """
     said = module.judged_on([], ["lint"], {"lint": "in_progress"})
     assert "в сводимом прогоне: in_progress" in said[0]
+
+
+def verdict_of(
+    runs: list[dict[str, Any]], names: list[str], *, mine: dict[str, str], run_live: bool
+) -> tuple[list[str], bool]:
+    """Вердикт по подделанному состоянию головы — без сети и без прогона."""
+    problems, waiting = module.verdict(runs, names, "ci-complete", "", mine=mine, run_live=run_live)
+    return list(problems), bool(waiting)
+
+
+def test_a_name_missing_from_a_live_run_waits_rather_than_refuses() -> None:
+    """Имя, которого нет в списке джобов ИДУЩЕГО прогона, ждут, а не отвергают.
+
+    Замер 12.09.2026, изменение #267: третий заход `ci` шёл вторую секунду,
+    семь его джобов уже дали `success`, а `test-matrix` и агрегат `test` не
+    значились в списке джобов вовсе — матрица ещё не развернулась. У `test` на
+    голове лежали две записи, обе отменённые прежними заходами, и гейт объявил
+    «все записи отменены» при живом прогоне, который через минуту стал зелёным.
+    """
+    runs = [
+        {
+            "name": "test",
+            "status": "completed",
+            "conclusion": "cancelled",
+            "started_at": "2026-09-12T22:11:32Z",
+        }
+    ]
+    problems, waiting = verdict_of(runs, ["test"], mine={}, run_live=True)
+    assert waiting, "живой прогон не дождались"
+    assert not problems, problems
+
+
+def test_a_finished_run_missing_a_name_is_still_a_refusal() -> None:
+    """Обратная сторона: прогон ЗАВЕРШЁН, а имени нет — это отказ (075).
+
+    Без этого случая послабление стало бы дырой: «ждём» по всякому имени,
+    которого нет, зеленило бы гейт на прогоне, где обязательная проверка не
+    создалась вовсе (097).
+    """
+    problems, waiting = verdict_of([], ["test"], mine={}, run_live=False)
+    assert not waiting
+    assert problems and "test" in problems[0]
+
+
+def test_a_cancelled_only_name_refuses_once_the_run_is_done() -> None:
+    """Все записи отменены и прогон завершён — отказ остаётся отказом."""
+    runs = [
+        {
+            "name": "test",
+            "status": "completed",
+            "conclusion": "cancelled",
+            "started_at": "2026-09-12T22:11:32Z",
+        }
+    ]
+    problems, waiting = verdict_of(runs, ["test"], mine={}, run_live=False)
+    assert not waiting
+    assert problems and "отменены" in problems[0]
