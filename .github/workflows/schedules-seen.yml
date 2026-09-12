@@ -1,0 +1,63 @@
+# Шаг 12: заход по расписанию случился — или не случился, и это видно.
+#
+# ПЛОЩАДКА НЕ ОБЕЩАЕТ `schedule`. Потерянный запуск снаружи неотличим от
+# ненаступившего часа: он нигде не краснеет, потому что краснеть нечему.
+# Упавший заход краснеет — но на вкладке прогонов, а вкладка адресатом не
+# является: её открывают, уже заподозрив (104, 169).
+#
+# САМ СЕБЯ ЭТОТ ЗАХОД НЕ СТОРОЖИТ, и это названо, а не умолчано. Он идёт по
+# СОБЫТИЮ, а не по расписанию, и в объявлении расписаний его нет — иначе
+# сторожа пришлось бы сторожить вторым сторожем, а второй счёт того же
+# расходится с первым молча (022).
+#
+# ПО ОБЩЕЙ ВЕТКЕ, А НЕ ПО ИЗМЕНЕНИЮ. Предмет — история прогонов репозитория,
+# и на голове изменения его нет вовсе.
+name: schedules-seen
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Реестр пропусков — задача, и ведёт её механизм.
+  issues: write
+  actions: read
+
+concurrency:
+  # Один заход на репозиторий: реестр — общий ресурс, и у него один владелец
+  # (149).
+  group: schedules-seen
+  cancel-in-progress: false
+
+jobs:
+  schedules-seen:
+    name: schedules-seen
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.head_branch == 'main'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: пропущенные и упавшие заходы
+        # Отказ обхода не роняет ничего: это след, а не условие работы (084).
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/schedules_seen.py --apply || rc=$?
+          case "$rc" in
+            0) echo "все объявленные заходы на месте" ;;
+            1) echo "::warning::есть пропущенные или упавшие заходы — ряд в реестре" ;;
+            *) echo "::warning::обход не отработал (код $rc) — пропуски остались без адресата" ;;
+          esac
