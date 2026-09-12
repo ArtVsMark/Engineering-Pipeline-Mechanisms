@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import sys
 from collections import Counter
@@ -52,6 +53,8 @@ BADGE: Final = "rules.svg"
 FAMILY_BADGE: Final = "family.svg"
 VERSION_BADGE: Final = "version.svg"
 RELEASE_BADGE: Final = "release.svg"
+SCRIPTS_BADGE: Final = "scripts.svg"
+COVERAGE_BADGE: Final = "coverage.svg"
 
 #: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
 #: а не новая тонкость, о которой механизм обязан догадаться.
@@ -174,7 +177,64 @@ def test_counts(root: Path) -> dict[str, int]:
     return {"total": total, "modules": len(modules)}
 
 
-def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]:
+def script_runs(root: Path) -> dict[str, int]:
+    """Сколько механизмов набор запускает ОТДЕЛЬНЫМ ПРОЦЕССОМ — и сколько их всего.
+
+    ПОЧЕМУ ЭТО ОТДЕЛЬНОЕ ЧИСЛО, А НЕ ЧАСТЬ ПОКРЫТИЯ. Гейт проверяется запуском:
+    тест зовёт модуль процессом и смотрит ИСХОД — то, ради чего гейт и
+    существует. Счётчик покрытия про такой прогон долго не знал вовсе, и четыре
+    полностью проверенных модуля показывали ноль. Число ниже считается по
+    дереву и не зависит ни от счётчика, ни от того, включён ли замер.
+
+    ЗНАМЕНАТЕЛЬ — ЗАПУСКАЕМЫЕ, А НЕ ВСЕ. Модуль без точки входа процессом не
+    запускается по устройству (`paths.py`, `journal.py`), и требовать от него
+    такого прогона значило бы мерить долг там, где его нет
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    """
+    runnable = {
+        path.name
+        for path in sorted((root / "scripts").glob("*.py"))
+        if any(
+            isinstance(node, ast.FunctionDef) and node.name == "main"
+            for node in ast.parse(path.read_text(encoding="utf-8")).body
+        )
+    }
+    tests = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((root / "tests").glob("*.py"))
+    )
+    started = {name for name in runnable if f'run_script("{name}"' in tests}
+    return {"runnable": len(runnable), "started": len(started)}
+
+
+def coverage_facts(path: Path | None) -> dict[str, Any]:
+    """Покрытие строк из отчёта счётчика; без отчёта — «не прочитано».
+
+    ЧИСЛО ПРИХОДИТ ИЗ ПРОГОНА, А НЕ СЧИТАЕТСЯ ЗДЕСЬ. Считать покрытие по дереву
+    нельзя: оно про исполнение, а не про текст. Отчёта нет — так и говорится;
+    ноль вместо незнания читался бы как «ничего не покрыто» (045).
+
+    ЗАМЕР ОБЯЗАН ВИДЕТЬ ПОДПРОЦЕССЫ. Гейты проверяются запуском, и счётчик без
+    этого показывал ноль у полностью проверенных модулей: 66% против настоящих
+    77%. Держит это `tests/conftest.py` (`under_counter`), а не договорённость.
+    """
+    if path is None or not path.is_file():
+        return {"read": False, "percent": 0.0}
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise NotRun(f"отчёт покрытия не разобрался: {exc}") from exc
+    percent = (report.get("totals") or {}).get("percent_covered")
+    if percent is None:
+        raise NotRun(f"{path}: в отчёте нет доли покрытия — форма ответа изменилась")
+    return {"read": True, "percent": round(float(percent), 1)}
+
+
+def collect(
+    root: Path,
+    sha: str,
+    summary: Path | None = None,
+    coverage: Path | None = None,
+) -> dict[str, Any]:
     """Собирает все факты о проекте в одно отображение."""
     # ВЕРСИЯ ПРОЕКТА И ВЕРСИЯ КОНТРАКТА — РАЗНЫЕ ЧИСЛА, И ОБА НУЖНЫ. Контракт
     # объявляет поверхность механизмов и поднимается решением человека; версия
@@ -197,6 +257,11 @@ def collect(root: Path, sha: str, summary: Path | None = None) -> dict[str, Any]
         # не нужен и вреден — они дёргаются от каждого изменения, — но живой
         # адрес обязателен, и вот он (049).
         "tests": test_counts(root),
+        # Гейты проверяются ЗАПУСКОМ, и это отдельный предмет от покрытия строк:
+        # исход процесса — то, ради чего гейт существует.
+        "scripts": script_runs(root),
+        # Покрытие строк приходит из прогона: по дереву его не сосчитать.
+        "coverage": coverage_facts(coverage),
         "rules": rules_facts(root / BINDINGS),
         "checks": checks_facts(root / policy.DEFAULT_PATH),
         "family": family_facts(summary),
@@ -277,6 +342,33 @@ def family_badge(facts: dict[str, Any]) -> str:
     return badge("общие механизмы", f"{percent}% семьи", color)
 
 
+def scripts_badge(facts: dict[str, Any]) -> str:
+    """Сколько запускаемых механизмов набор гоняет процессом.
+
+    Порог здесь не назначен, а взят у того же правила, что и прочие значки:
+    цвет говорит о доле, а решает человек. Число без знаменателя ничего не
+    значит, поэтому показываются оба (005).
+    """
+    counts = facts.get("scripts") or {}
+    runnable = int(counts.get("runnable") or 0)
+    started = int(counts.get("started") or 0)
+    if not runnable:
+        return badge("гейты прогоном", "нет данных", "#9f9f9f")
+    share = started / runnable
+    color = "#4c1" if share >= 0.8 else "#dfb317" if share >= 0.5 else "#e05d44"
+    return badge("гейты прогоном", f"{started}/{runnable}", color)
+
+
+def coverage_badge(facts: dict[str, Any]) -> str:
+    """Доля покрытых строк — или прямое «не прочитано»."""
+    said = facts.get("coverage") or {}
+    if not said.get("read"):
+        return badge("покрытие", "не прочитано", "#9f9f9f")
+    percent = float(said.get("percent") or 0.0)
+    color = "#4c1" if percent >= 85 else "#dfb317" if percent >= 70 else "#e05d44"
+    return badge("покрытие", f"{percent:g}%", color)
+
+
 def release_badge(facts: dict[str, Any]) -> str:
     """Последний выпуск: то, к чему потребитель прибивается тегом.
 
@@ -310,10 +402,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", required=True, help="куда положить производное")
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
+    parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
     args = parser.parse_args(argv)
 
     try:
-        facts = collect(Path(args.root), args.sha, Path(args.family) if args.family else None)
+        facts = collect(
+            Path(args.root),
+            args.sha,
+            Path(args.family) if args.family else None,
+            Path(args.coverage) if args.coverage else None,
+        )
     except NotRun as exc:
         print(f"факты не собраны: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -326,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
         (FAMILY_BADGE, family_badge),
         (VERSION_BADGE, version_badge),
         (RELEASE_BADGE, release_badge),
+        (SCRIPTS_BADGE, scripts_badge),
+        (COVERAGE_BADGE, coverage_badge),
     ):
         (out / name).write_text(draw(facts) + "\n", encoding="utf-8")
 
