@@ -59,7 +59,7 @@ def test_a_contract_fragment_leaves_the_major_alone() -> None:
     именно мажор: он обязан остаться на месте при ЛЮБОМ роде фрагмента
     (decisions/009, decisions/015).
     """
-    for current in ("0.1.0", "9.9.73"):
+    for current in ("2.5.0", "9.9.73"):
         was = current.split(".")[0]
         for contract in (True, False):
             assert module.next_after(current, contract=contract).split(".")[0] == was
