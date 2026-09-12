@@ -154,7 +154,11 @@ def family_facts(
     if path is None or not path.is_file():
         return {"read": False, "why": "сводка семьи не прочитана — числа неизвестны, а не нулевые"}
     try:
-        picture = family.picture(family.load(path))
+        # Разбор ОДИН: `family.load` читал файл дважды за вызов — для разреза и
+        # для отставания, — и второе чтение могло прийти уже другим (022).
+        # Нашёл внешний взгляд на #240.
+        summary_read = family.load(path)
+        picture = family.picture(summary_read)
     except family.NotRun as exc:
         return {"read": False, "why": str(exc)}
     # Форма чужая: её подъём — повод перечитать разрез, а не подвинуть число
@@ -170,17 +174,33 @@ def family_facts(
     #
     # НАШИ ОТВЕТЫ ЧИТАЮТСЯ ИЗ ДЕРЕВА, а соседей — из снимка: снимок наших
     # отстаёт на смену, и «отставание» вышло бы завышенным на нашу же работу.
-    if mine and answers is not None and answers.is_file():
-        try:
-            ours = json.loads(answers.read_text(encoding="utf-8")).get("rules") or {}
-        except json.JSONDecodeError as exc:
-            picture["behind_read"] = False
-            picture["behind_why"] = f"наши ответы не разобраны: {exc}"
-            return picture
-        left = family.behind(family.load(path), mine=mine, ours=ours)
-        picture["behind_read"] = True
-        picture["behind"] = len(left)
-        picture["behind_rules"] = left
+    if not mine or answers is None or not answers.is_file():
+        # НЕПОСЧИТАННОЕ НАЗЫВАЕТСЯ. Молчание здесь читалось бы как «отставания
+        # нет», а отсутствие числа и нулевое число — разные состояния (045).
+        # Нашёл внешний взгляд на #240.
+        picture["behind_read"] = False
+        picture["behind_why"] = (
+            "отставание не посчитано: не названо наше имя у площадки (--repo) "
+            f"либо не найден файл ответов ({answers})"
+        )
+        return picture
+    try:
+        ours = json.loads(answers.read_text(encoding="utf-8"))["rules"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        # ДЕФЕКТНЫЙ ОТВЕТ — ОТКАЗ, А НЕ ПУСТОЙ СЛОВАРЬ. Пустой дал бы
+        # отставание, равное числу ВСЕХ машинных ответов семьи: правдоподобное
+        # число, которое ложь. Нашёл внешний взгляд на #240.
+        picture["behind_read"] = False
+        picture["behind_why"] = f"наши ответы не прочитаны: {exc}"
+        return picture
+    if not isinstance(ours, dict) or not ours:
+        picture["behind_read"] = False
+        picture["behind_why"] = "в наших ответах нет ни одного правила — считать нечего (075)"
+        return picture
+    left = family.behind(summary_read, mine=mine, ours=ours)
+    picture["behind_read"] = True
+    picture["behind"] = len(left)
+    picture["behind_rules"] = left
     return picture
 
 
