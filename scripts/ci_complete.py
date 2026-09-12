@@ -382,19 +382,35 @@ def roster_of(repo: str, run_id: str, token: str) -> Roster:
     )
 
 
-def still_coming(name: str, mine: dict[str, str] | None) -> bool:
-    """Объявлен ли этот джоб СВОДИМЫМ прогоном и ещё не завершён.
+def still_coming(name: str, mine: dict[str, str] | None, *, run_live: bool = False) -> bool:
+    """Может ли этот джоб ещё приехать: он объявлен и не завершён — или прогон идёт.
 
     Один вопрос на два места: имя без записей и имя, у которого все записи
     отменены, — снаружи разные состояния, а решается ими одно и то же. Два
     прочтения одного состояния разошлись бы молча (090).
 
-    Джоб с проставленным исходом сюда не доходит: `roster_of` его не отдаёт среди едущих —
-    «идёт» означает переходное состояние И отсутствие исхода, ровно как у
-    записей проверок в `pending`.
+    Джоб с проставленным исходом сюда не доходит: `roster_of` его не отдаёт
+    среди едущих — «идёт» означает переходное состояние И отсутствие исхода,
+    ровно как у записей проверок в `pending`.
+
+    СПИСОК ДЖОБОВ ИДУЩЕГО ПРОГОНА НЕПОЛОН, И ЭТО ПРОЧИТАНО, А НЕ ВЫВЕДЕНО.
+    Замер 12.09.2026, изменение #267 (аннотация прогона `ci-complete #708`):
+    на голове `13dc9b7a` третий заход `ci` шёл вторую секунду, семь его джобов
+    уже дали `success`, а `test-matrix` и агрегат `test` не значились в списке
+    джобов ВОВСЕ — матрица ещё не развернулась. У `test` на голове лежали две
+    записи, обе отменённые прежними заходами, и гейт объявил «все записи
+    отменены» при живом прогоне, который через минуту стал зелёным.
+
+    Отсюда второй путь: пока САМ сводимый прогон не завершён, отсутствие имени
+    в его списке ничего не доказывает. Строгость это не отменяет — завершённый
+    прогон без имени остаётся отказом
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)),
+    — а переносит её на момент, когда состав действительно известен.
     """
     state = (mine or {}).get(name, "")
-    return bool(state) and state != "completed"
+    if bool(state) and state != "completed":
+        return True
+    return run_live
 
 
 def judged_on(
@@ -438,6 +454,7 @@ def verdict(
     *,
     strict_missing: bool = True,
     mine: dict[str, str] | None = None,
+    run_live: bool = False,
 ) -> tuple[list[str], bool]:
     """Выносит вердикт по объявленным именам; вторым отдаёт «ещё идут».
 
@@ -471,7 +488,7 @@ def verdict(
             # состоянии: он объявлен, поставлен в очередь и обязательно
             # доедет. Без этого различия гейт краснел бы на всяком джобе с
             # `needs` — то есть на здоровом прогоне.
-            if still_coming(name, mine):
+            if still_coming(name, mine, run_live=run_live):
                 waiting = True
                 continue
             if strict_missing:
@@ -508,7 +525,7 @@ def verdict(
             # джоб. Отменённая запись имени, которого в сводимом прогоне нет,
             # остаётся отказом — живого вердикта у такого шага нет, а
             # отменённая запись пройденной не является.
-            if still_coming(name, mine):
+            if still_coming(name, mine, run_live=run_live):
                 waiting = True
                 continue
             problems.append(f"{name}: все записи отменены — пройденной ни одна не считается")
@@ -625,8 +642,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"на голове {args.sha[:8]} нет ни одной записи проверок — "
                     "это ошибка входа, а не «зелено» (075)"
                 )
+            # ИДЁТ ЛИ ЕЩЁ СВОДИМЫЙ ПРОГОН — отдельный вход разбора, а не
+            # догадка по его джобам: список джобов идущего прогона неполон,
+            # пока матрица не развернулась (см. `still_coming`).
+            run_live = found is not None and str(found.get("status") or "") != "completed"
             problems, waiting = verdict(
-                runs, required, args.self_name, summarised, mine=roster.running
+                runs, required, args.self_name, summarised, mine=roster.running, run_live=run_live
             )
             # Совещательные опрашиваются, но их не ЖДУТ: слияния они не держат,
             # и ожидание сделало бы их обязательными обходным путём.
