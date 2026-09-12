@@ -48,8 +48,8 @@ def test_the_next_version_raises_the_minor() -> None:
     Патч-тегов не существует: патч это счётчик принятых изменений после тега, а
     не номер выпуска.
     """
-    assert module.next_after("9.9.0", contract=False) == "9.10.0"
-    assert module.next_after("9.9.73", contract=False) == "9.10.0"
+    assert module.next_after("9.9.0") == "9.10.0"
+    assert module.next_after("9.9.73") == "9.10.0"
 
 
 def test_a_contract_fragment_does_not_raise_the_major() -> None:
@@ -58,7 +58,7 @@ def test_a_contract_fragment_does_not_raise_the_major() -> None:
     `0.x` живёт до закрытой приёмки: поверхность ещё не доделана здесь, и
     правка её сама по себе разряда не поднимает (decisions/009).
     """
-    assert module.next_after("9.9.0", contract=True) == "9.10.0"
+    assert module.next_after("9.9.0") == "9.10.0"
 
 
 def test_the_major_needs_a_named_acceptance(run_script: RunScript, tmp_path: Path) -> None:
