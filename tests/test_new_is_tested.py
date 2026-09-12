@@ -157,3 +157,45 @@ def test_a_missing_base_is_a_refusal(repo: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.chdir(repo)
     with pytest.raises(module.NotRun):
         module.touched("origin/нет-такой-ветки")
+
+
+# --- имя, переданное как значение, тоже прогнано -----------------------------
+
+HANDED = {
+    "декоратором": "@порядок\ndef x() -> None: ...",
+    "ключом сортировки": "sorted(rows, key=порядок)",
+    "аргументом": "call(порядок, rows)",
+    "последним аргументом": "call(rows, порядок)",
+    "подменой в стенде": "monkeypatch.setattr(mod, 'x', порядок)",
+}
+
+NOT_HANDED = {
+    "прозой": "Функция порядок делает то и это.",
+    "частью слова": "порядковый(1)",
+    "сравнением": "assert порядок == 1",
+    "в докстроке": '"""Смотри порядок ниже."""',
+}
+
+
+@pytest.mark.parametrize("said", sorted(HANDED.values()), ids=sorted(HANDED))
+def test_a_name_handed_to_someone_else_counts_as_run(said: str) -> None:
+    """Имя, ОТДАННОЕ вызывающему, прогнано — скобок рядом с ним нет.
+
+    Обработчик, ключ сортировки, декоратор, подмена в стенде: вызывает их не
+    тест, а тот, кому их отдали. Сужение до `имя(` объявляло такое
+    непрогнанным — ложная находка, которая учит обходить гейт (051). Нашёл
+    внешний взгляд на #227.
+    """
+    assert module.told_by_tests("порядок", "scripts/x.py", said) is True
+
+
+@pytest.mark.parametrize("said", sorted(NOT_HANDED.values()), ids=sorted(NOT_HANDED))
+def test_a_mention_is_still_not_a_run(said: str) -> None:
+    """Упоминание прогоном не стало: расширение назвало соседей, а не сняло их.
+
+    После имени обязан стоять знак, которым его зовут или отдают, — а не пробел
+    и точка. Иначе вернулась бы первая редакция гейта, где `at` и `touched`
+    засчитывались из чужой прозы
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    assert module.told_by_tests("порядок", "scripts/x.py", said) is False

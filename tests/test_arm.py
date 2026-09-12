@@ -43,9 +43,14 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def request(method: str, path: str, token: str, payload: Any = None) -> Any:
         if method == "GET":
             number = int(path.rsplit("/", 1)[-1])
-            # Пусто, а не исключение: «изменения нет» — законный ответ площадки,
-            # и разбирать его обязан сам шаг.
-            return next((one for one in state["changes"] if one["number"] == number), {})
+            # «ИЗМЕНЕНИЯ НЕТ» ПОДДЕЛЫВАЕТСЯ ТАК, КАК ВЕДЁТ СЕБЯ ПЛОЩАДКА: 404,
+            # то есть `ghrest.NotFound`. Пустой словарь был ветвью, которой
+            # площадка не порождает, и тест проверял не то, что случится.
+            # Нашёл внешний взгляд на #235.
+            found = next((one for one in state["changes"] if one["number"] == number), None)
+            if found is None:
+                raise module.ghrest.NotFound(f"GET {path} → 404")
+            return found
         state["posted"].append((path, payload))
         return {}
 
@@ -107,6 +112,19 @@ def test_no_subject_is_not_run_not_clean(platform: dict[str, Any]) -> None:
     platform["changes"] = [change(4, "behind")]
     with pytest.raises(module.NotRun):
         module.probe("o/r", 4, "t", dry_run=False)
+
+
+def test_a_missing_change_is_read_from_a_real_404(platform: dict[str, Any]) -> None:
+    """«Изменения нет» приходит 404 — и разбирается как «предмета не найдено».
+
+    Прежде эта ветка подделывалась пустым словарём, которого площадка не
+    порождает: тест проверял не то, что случится в прогоне. Нашёл внешний
+    взгляд на #235.
+    """
+    platform["changes"] = []
+    with pytest.raises(module.NotRun) as caught:
+        module.subject("o/r", 404, "t")
+    assert "изменения у площадки нет" in str(caught.value)
 
 
 def test_the_body_is_passed_and_asked_back(platform: dict[str, Any]) -> None:

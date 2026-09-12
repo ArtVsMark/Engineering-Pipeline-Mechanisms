@@ -117,3 +117,47 @@ def test_a_real_refusal_on_removal_is_named(
     monkeypatch.setattr(module.ghrest, "request", refuse)
     module.apply_consent("о/р", 7, "токен", {module.HOLD, module.CONSENT}, dry_run=False)
     assert "не снято" in capsys.readouterr().out
+
+
+def test_a_branch_with_commits_but_no_diff_is_not_opened(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Коммиты есть, а диффа против общей ветки нет — открывать нечего.
+
+    Так выходит, когда работа уже уехала в общую ветку соседним изменением:
+    коммиты в ветке остались, содержимого сверх базы нет. Такое изменение
+    объявляло бы работу, которой не делает — замер 12.09.2026: #224 заявлял два
+    исправления при пустом диффе, и нашёл это внешний взгляд, а не механизм
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
+
+    def git(*args: str) -> str:
+        if args[0] == "merge-base":
+            return "base-sha\n"
+        if args[0] == "diff":
+            return "\0"
+        return "fix: работа, уже слитая соседом\n\nRefs #224\n"
+
+    monkeypatch.setattr(module, "git", git)
+    with pytest.raises(module.NotRun, match="диффа против main нет"):
+        module.describe("agent/окно", "main")
+
+
+def test_a_branch_with_a_real_diff_is_opened(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Здоровый вход обязан пройти: дифф есть — изменение открывается.
+
+    Иначе гейт нулевого диффа неотличим от «открытие сломалось» (097).
+    """
+
+    def git(*args: str) -> str:
+        if args[0] == "merge-base":
+            return "base-sha\n"
+        if args[0] == "diff":
+            return "scripts/x.py\0"
+        return "fix: настоящая работа\n\nRefs #224\n"
+
+    monkeypatch.setattr(module, "git", git)
+    title, body = module.describe("agent/окно", "main")
+    # Подделка отдаёт один и тот же текст на любую команду, поэтому строк
+    # «предмета» в нём выходит две и заголовок получает «(+1)». Проверяется
+    # здесь другое: заход НЕ отказал и собрал описание.
+    assert title.startswith("fix: настоящая работа")
+    assert "Refs #224" in body
