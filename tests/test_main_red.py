@@ -479,3 +479,60 @@ def test_a_frozen_queue_is_shown_beside_what_holds_it() -> None:
     body = module.render_body(["test"], ["test-next"], [], "abc1234", (3, 1))
     assert "test" in body and "test-next" in body
     assert "с меткой `fix-main`: **1**" in body, body
+
+
+def test_a_flake_is_seen_without_a_rerun() -> None:
+    """Мигание — зелёное ПОСЛЕ красного на той же голове, и перезапуск не нужен.
+
+    Прежний замер искал мигания среди перезапусков и не мог их найти:
+    перезапускать было некому, и отсутствие перезапусков доказывало само себя.
+    Голова та же — значит дерево то же, и зелёное получено не правкой (044).
+    Разбор — `docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md`.
+    """
+    runs = [
+        {"name": "review", "status": "completed", "conclusion": "failure", "started_at": "01"},
+        {"name": "review", "status": "completed", "conclusion": "success", "started_at": "02"},
+    ]
+    assert module.flaky_names(runs) == ["review"]
+
+
+def test_green_before_red_is_not_a_flake() -> None:
+    """Зелёное ДО красного — обычная краснота, а не мигание.
+
+    Порядок читается по времени начала записи, а не по порядку ответа
+    площадки: иначе всякое упавшее после успеха имя считалось бы мигающим.
+    """
+    runs = [
+        {"name": "test", "status": "completed", "conclusion": "success", "started_at": "01"},
+        {"name": "test", "status": "completed", "conclusion": "failure", "started_at": "02"},
+    ]
+    assert module.flaky_names(runs) == []
+
+
+def test_a_cancelled_record_is_not_a_fall() -> None:
+    """Отменённая и пропущенная записи миганием не считаются.
+
+    Пройденной ни одна не считается, но и отказом не является: считать отмену
+    падением значило бы объявлять мигающим каждое имя, вытесненное группой
+    отмены, — а это штатное событие, а не находка (124).
+    """
+    runs = [
+        {"name": "lint", "status": "completed", "conclusion": "cancelled", "started_at": "01"},
+        {"name": "lint", "status": "completed", "conclusion": "success", "started_at": "02"},
+        {"name": "pr-meta", "status": "completed", "conclusion": "skipped", "started_at": "01"},
+        {"name": "pr-meta", "status": "completed", "conclusion": "success", "started_at": "02"},
+    ]
+    assert module.flaky_names(runs) == []
+
+
+def test_a_flake_on_a_change_names_where_it_blinked() -> None:
+    """Запись мигания говорит, ГДЕ мигнуло: общая ветка не подписывается.
+
+    Умолчание молчаливое намеренно: записи общей ветки заведены раньше, и
+    переписывать их задним числом незачем (043).
+    """
+    shared = module.Flake("test", "12.09.2026", 7)
+    on_change = module.Flake("review", "12.09.2026", 217, "#217")
+    assert shared.said().endswith("прогон 7")
+    assert on_change.said().endswith("прогон 217 · #217")
+    assert module.parse_flakes(f"{shared.said()}\n{on_change.said()}") == [shared, on_change]
