@@ -232,3 +232,79 @@ def test_the_registry_names_the_reason_of_every_entry() -> None:
 def test_the_neighbour_is_named_in_the_registry() -> None:
     """Реестр называет соседа: читатель не должен гадать, где своё красное (195)."""
     assert "hail.py" in module.render_body([], NOW)
+
+
+def test_the_head_time_is_read_from_the_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отметка берётся у коммита головы, а не у изменения.
+
+    `updated_at` изменения двигает любой комментарий, и срок по нему обнулялся
+    бы разговором, а не работой.
+    """
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda *a, **k: {"commit": {"committer": {"date": "2026-09-12T11:00:00Z"}}},
+    )
+    assert module.head_time("o/r", "deadbee", "t") == "2026-09-12T11:00:00Z"
+
+
+def test_an_unasked_head_time_is_empty_not_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не спросили — не угадываем: пустая отметка, а не «только что».
+
+    Подставить текущее время значило бы выдать «изменение свежее» за
+    прочитанное и замолчать застрявшее ровно там, где площадка не ответила
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Пустая отметка читается как СТАРАЯ — разбор идёт, а не отменяется.
+    """
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    assert module.head_time("o/r", "deadbee", "t") == ""
+    assert module.is_fresh("", NOW) is False
+
+
+def test_marks_read_a_change_without_labels() -> None:
+    """Меток может не быть вовсе, и это пустое множество, а не отказ.
+
+    Ключ `labels` площадка отдаёт пустым списком, но у сухого захода и у
+    подделки его может не быть ключом — разбор не должен на этом падать.
+    """
+    assert module.marks_of({}) == set()
+    assert module.marks_of({"labels": [{"name": "hold"}, {"name": "automerge"}]}) == {
+        "hold",
+        "automerge",
+    }
+
+
+def test_a_dry_sweep_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без ключа записи реестр не трогается вовсе — только называется намерение.
+
+    Необратимого здесь нет, но тело живой задачи — общий ресурс, и сухой заход,
+    молча его переписывающий, отличался бы от настоящего только выводом.
+    """
+    calls: list[str] = []
+
+    def note(method: str, path: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+        calls.append(f"{method} {path}")
+        return {}
+
+    monkeypatch.setattr(module.findings, "live_issue", lambda *a, **k: (77, ""))
+    monkeypatch.setattr(module.ghrest, "request", note)
+    module.save("o/r", "t", [module.Verdict(7, True, module.STUCK_ARMED)], NOW, apply=False)
+    assert calls == []
+
+
+def test_an_applied_sweep_updates_the_living_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """С ключом — обновляет по месту, а не заводит вторую задачу (022)."""
+    calls: list[tuple[str, str]] = []
+
+    def note(method: str, path: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+        calls.append((method, path))
+        return {}
+
+    monkeypatch.setattr(module.findings, "live_issue", lambda *a, **k: (77, ""))
+    monkeypatch.setattr(module.ghrest, "request", note)
+    module.save("o/r", "t", [], NOW, apply=True)
+    assert calls == [("PATCH", "repos/o/r/issues/77")]
