@@ -391,12 +391,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # ВВОД ИДЁТ ОКРУЖЕНИЕМ, А НЕ ПОДСТАНОВКОЙ В ТЕКСТ КОМАНДЫ. Подставленный
+          # `${{ }}` — это чужая строка ВНУТРИ нашей оболочки: кавычка или `$()`
+          # во входе исполнятся как код, а у этого джоба права на запись
+          # (`pull-requests`, `issues`, `id-token`). Соседние шаги файла давно
+          # ходят через `env:`, а новый джоб приёма не подхватил. Нашёл внешний
+          # взгляд на #131
+          # ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
+          ASKED: ${{ inputs.pr }}
         run: |
           set -uo pipefail
           # Названный руками номер сильнее очереди: человек попросил именно его.
-          if [ -n "${{ inputs.pr }}" ]; then
-            echo 'numbers=["${{ inputs.pr }}"]' >> "$GITHUB_OUTPUT"
-            echo "смотрим названное: #${{ inputs.pr }}"
+          # ЦИФРЫ ПРОВЕРЯЮТСЯ, а не принимаются на слово: дальше номер уезжает в
+          # аргумент шага, и «не число» обязано быть отказом, а не строкой в
+          # команде (068 — список разрешённого, здесь это разрешённая форма).
+          if [ -n "${ASKED:-}" ]; then
+            case "$ASKED" in
+              ''|*[!0-9]*)
+                echo "::error::номер изменения обязан быть цифрами, пришло: $ASKED"
+                exit 1 ;;
+            esac
+            printf 'numbers=["%s"]\n' "$ASKED" >> "$GITHUB_OUTPUT"
+            echo "смотрим названное: #$ASKED"
             exit 0
           fi
           numbers=$(python scripts/unlooked.py --queue) || numbers="[]"
