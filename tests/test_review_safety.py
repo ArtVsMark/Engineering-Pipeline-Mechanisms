@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -629,3 +629,102 @@ def test_a_missing_map_does_not_stop_the_look() -> None:
     for chunk in text.split("id: map")[1:]:
         head = chunk[: chunk.index("- name:")] if "- name:" in chunk else chunk
         assert "continue-on-error: true" in head, "отказ сборки карты роняет шаг"
+
+
+#: Выражения, чьё значение пишет ЧЕЛОВЕК СО СТОРОНЫ, а не площадка. Список
+#: закрытый и назван причинами: подставленное в текст команды или в промпт, оно
+#: исполняется — и это не «теоретически», а класс, которым ломают конвейеры
+#: ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
+UNTRUSTED: Final = {
+    "inputs.": "ввод кнопки: его набирает человек, и цифрами он быть не обязан",
+    "github.event.issue.title": "заголовок задачи пишет кто угодно",
+    "github.event.issue.body": "тело задачи пишет кто угодно",
+    "github.event.comment.body": "текст обращения пишет кто угодно",
+    "github.event.pull_request.title": "заголовок изменения пишет его автор",
+    "github.event.pull_request.body": "тело изменения пишет его автор",
+    "github.event.pull_request.head.ref": "имя ветки выбирает автор изменения",
+    "github.head_ref": "то же имя ветки, другим именем контекста",
+}
+
+#: Ключи прогона, чьё значение попадает в ОБОЛОЧКУ или в ИНСТРУКЦИЮ агента.
+#: `env:` в этот список не входит намеренно: туда значение и переносят, чтобы
+#: оно стало данными, а не кодом.
+EXECUTED: Final = ("run:", "prompt:")
+
+INTERPOLATION: Final = re.compile(r"\$\{\{\s*(?P<expr>[^}]+?)\s*\}\}")
+
+
+def executed_lines(text: str) -> list[tuple[int, str]]:
+    """Строки, попадающие в оболочку или в промпт, с их номерами.
+
+    Разбор идёт по ОТСТУПУ, а не по YAML: значение `run:` — блочный скаляр, и
+    после разбора в нём уже не видно, какая строка откуда пришла. Здесь нужен
+    как раз адрес строки, чтобы отказ называл место.
+    """
+    found: list[tuple[int, str]] = []
+    inside = 0
+    for number, line in enumerate(text.splitlines(), start=1):
+        # Ключ шага пишут и списком — `- run: |`, — и такую строку разбор
+        # обязан видеть: пропущенная, она уносит из проверки весь блок.
+        bare = line.strip().removeprefix("- ")
+        indent = len(line) - len(line.lstrip())
+        if inside and bare and indent <= inside:
+            inside = 0
+        if any(bare.startswith(key) for key in EXECUTED):
+            inside = indent
+            found.append((number, line))
+            continue
+        if inside and bare:
+            found.append((number, line))
+    return found
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_untrusted_input_never_lands_in_a_command(path: Path) -> None:
+    """Чужой ввод приходит ОКРУЖЕНИЕМ, а не подстановкой в текст команды.
+
+    Подставленный `${{ … }}` — это чужая строка ВНУТРИ нашей оболочки: кавычка
+    или `$()` во входе исполнятся как код, и права у джоба при этом свои.
+    Замер 12.09.2026: так стояло в четырёх местах — `review.yml` (нашёл внешний
+    взгляд на #131) и трижды `task-items.yml`, которого он не назвал. Ровно
+    поэтому у правила обязан быть механизм, а не обещание (002).
+    """
+    problems = [
+        f"{path.name}:{number} — {expr}"
+        for number, line in executed_lines(path.read_text(encoding="utf-8"))
+        for expr in (found.group("expr") for found in INTERPOLATION.finditer(line))
+        if any(one in expr for one in UNTRUSTED)
+    ]
+    assert not problems, (
+        "чужой ввод подставлен в исполняемое; перенесите его в `env:` и читайте "
+        "переменной:\n  " + "\n  ".join(problems)
+    )
+
+
+def test_the_untrusted_list_names_a_reason_for_every_entry() -> None:
+    """У каждого имени в списке названа причина: иначе список станет догадкой."""
+    for name, why in UNTRUSTED.items():
+        assert len(why) > 20, f"{name} внесён без причины"
+
+
+def test_the_gate_catches_a_planted_interpolation(tmp_path: Path) -> None:
+    """Гейт проверяется подделанным нарушением, а не зелёным на своём дереве (140)."""
+    planted = tmp_path / "плохой.yml"
+    planted.write_text(
+        'jobs:\n  x:\n    steps:\n      - run: |\n          echo "номер ${{ inputs.pr }}"\n',
+        encoding="utf-8",
+    )
+    lines = executed_lines(planted.read_text(encoding="utf-8"))
+    assert any("inputs.pr" in line for _, line in lines), lines
+
+
+def test_a_number_from_a_button_is_checked_to_be_digits() -> None:
+    """Прогоны, берущие номер кнопкой, проверяют его цифрами ДО использования.
+
+    Одна проверка на входе дешевле экранирования в каждом месте: место можно
+    забыть, вход — один. И она обязана быть отказом, а не подстановкой
+    умолчания (045).
+    """
+    for name in ("review.yml", "task-items.yml"):
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        assert "*[!0-9]*" in text, f"{name}: номер из кнопки не проверяется цифрами"
