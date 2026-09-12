@@ -199,6 +199,20 @@
 ([064](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/064-labels-are-machine-input-not-decoration.md),
 [147](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/147-a-cancelling-switch-needs-an-addressee.md)).
 
+**И она называет, чего ждёт** — строкой в теле изменения (решение
+[`018`](decisions/018-a-stop-switch-names-what-it-waits-for.md)):
+
+```
+Ждёт: #262
+```
+
+Названное спрашивается у площадки, а не выводится, и отсюда три исхода:
+названная задача **закрыта** — снимать больше не о чем, и шаг 11 снимает метку
+сам, возвращая согласие; **открыта** — стоп-кран осознан, и шаг молчит; строки
+**нет вовсе** — это стоп-кран без адресата, и он попадает в реестр застрявших
+отдельной причиной. Свободный текст вместо номера законен и означает второй
+исход: назвать причину словом лучше, чем не назвать, но снять по ней нечего.
+
 **Синхронизируется только голова очереди, и только перед слиянием**
 ([052](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/052-only-the-head-of-the-queue-moves.md)).
 Обновлять всех после каждого слияния — квадрат холостой работы: замер каталога
