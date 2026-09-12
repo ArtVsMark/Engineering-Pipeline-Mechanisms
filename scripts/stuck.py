@@ -75,6 +75,16 @@ PASSED: Final = frozenset({"success", "neutral"})
 #: Срок отсчитывается от ГОЛОВЫ, а не от открытия изменения: толчок обнуляет
 #: ожидание, потому что обнуляет и прогоны
 #: ([100](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/100-two-deadlines-start-and-work.md)).
+#:
+#: ЭТО ГИПОТЕЗА, А НЕ ЗАМЕР, и названа она так намеренно. Числа, из которого
+#: следовало бы двадцать, у нас нет: ряда «сколько на самом деле занимает путь
+#: от толчка до последней записи» никто не собирал. Двадцать взято с запасом к
+#: наблюдаемому — полный прогон гейтов укладывается в единицы минут, — и
+#: пересматривается по первому же ряду, а не по ощущению
+#: ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+#: Ошибка в БОЛЬШУЮ сторону дешевле: застрявшее найдётся следующим заходом, а
+#: ложный крик про здоровое учит не читать реестр
+#: ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
 FRESH_MINUTES: Final = 20
 
 #: Почему изменение НЕ застряло — состояние, а не молчание (154). Список
@@ -312,8 +322,12 @@ def sweep(repo: str, token: str, now: datetime, minutes: int = FRESH_MINUTES) ->
             ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
             or {}
         ).get("check_runs") or []
-        said = waits_for(str(full.get("body") or "")) if HOLD in marks_of(full) else ""
-        subject = named_subject(said)
+        # ЧЕРНОВИК ОТСЕИВАЕТСЯ ДО ВОПРОСА ПЛОЩАДКЕ. `judge` отбросит его
+        # первым же условием, и спрашивать состояние названного стоп-меткой
+        # значило бы платить запросом за ответ, который никто не прочтёт.
+        # Нашёл внешний взгляд на #264.
+        asks = not bool(full.get("draft")) and HOLD in marks_of(full)
+        subject = named_subject(waits_for(str(full.get("body") or ""))) if asks else 0
         seen.append(
             judge(
                 full,

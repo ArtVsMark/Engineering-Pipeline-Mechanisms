@@ -417,3 +417,37 @@ def test_a_refused_lift_does_not_stop_the_sweep(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(module.ghrest, "request", refuse)
     module.lift_hold("o/r", 7, "t", apply=True)
+
+
+def test_a_draft_is_not_paid_for_with_a_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Черновик со стоп-меткой не стоит обходу вопроса о названном условии.
+
+    `judge` отбрасывает черновик первым же условием, и состояние названного
+    никто не прочтёт: запрос был бы платой за ответ, который выбрасывают.
+    Нашёл внешний взгляд на #264.
+    """
+    asked: list[str] = []
+
+    def answer(_method: str, path: str, *_args: object, **_kwargs: object) -> dict[str, Any]:
+        asked.append(path)
+        if path.endswith("/commits/deadbee"):
+            return {"commit": {"committer": {"date": "2026-09-12T09:00:00Z"}}}
+        if "check-runs" in path:
+            return {"check_runs": []}
+        return {
+            "number": 42,
+            "draft": True,
+            "mergeable_state": "clean",
+            "labels": [{"name": "hold"}],
+            "body": "Ждёт: #7",
+            "auto_merge": None,
+            "head": {"sha": "deadbee"},
+        }
+
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter([{"number": 42}]))
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    seen = module.sweep("o/r", "t", NOW)
+    assert [item.why for item in seen] == [module.WHY_DRAFT]
+    assert not [path for path in asked if path.endswith("issues/7")], (
+        f"состояние названного спрошено у черновика: {asked}"
+    )
