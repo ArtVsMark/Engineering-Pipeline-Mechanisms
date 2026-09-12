@@ -290,3 +290,105 @@ def test_the_gate_declares_the_third_outcome_when_files_are_unreadable(
     monkeypatch.setattr(gate.journal, "changed_files", falls)
     with pytest.raises(gate.NotRun, match="не прочитаны"):
         gate.declared("origin/main")
+
+
+# --- что гейт обязан назвать НЕСОВМЕСТИМЫМ -----------------------------------
+
+
+def changed(tmp_path: Path, *, workflow: str = WORKFLOW, answer: str = ANSWER) -> list[str]:
+    """Различия поверхности между образцом и правкой."""
+    before = contract.surface(tree(tmp_path / "before"))
+    after = contract.surface(tree(tmp_path / "after", workflow=workflow, answer=answer))
+    return contract.differences(before, after)
+
+
+def test_a_removed_check_is_breaking(tmp_path: Path) -> None:
+    """Снятая проверка — несовместимая правка, а не «класс изменился».
+
+    Потребитель держит её имя в защите ветки ДОСЛОВНО, и защита начинает ждать
+    контекста, которого никто не выдаст. Примета была в списке и раньше —
+    словами «проверки не стало», — но таких слов не печатал никто: снятие
+    выходило строкой «проверка «x»: required → —» и проходило мимо списка.
+    МЁРТВАЯ ПРИМЕТА ХУЖЕ ОТСУТСТВУЮЩЕЙ: список выглядел полным. Нашёл внешний
+    взгляд на #142.
+    """
+    changes = changed(tmp_path, answer='schema: 4\ncontract: ">=0.1,<0.2"\nchecks: {}\n')
+    assert changes, "снятие проверки не замечено вовсе"
+    assert contract.breaking(changes), f"снятие не названо несовместимым: {changes}"
+
+
+def test_an_added_check_is_not_breaking(tmp_path: Path) -> None:
+    """Добавленную проверку потребитель может не заметить и не потерять ничего.
+
+    Требовать миграцию от каждого расширения значит приучить писать её
+    формально (051).
+    """
+    answer = 'schema: 4\ncontract: ">=0.1,<0.2"\nchecks:\n  lint: required\n  test: required\n'
+    changes = changed(tmp_path, answer=answer)
+    assert changes and not contract.breaking(changes), changes
+
+
+def test_a_removed_event_is_breaking(tmp_path: Path) -> None:
+    """Снятое событие превращает работающий шаг в молчащий.
+
+    Снаружи это неотличимо от «шаг сломался»: прежде обе стороны — снятие и
+    добавление — накрывались одной строкой «события или входы изменились», и
+    несовместимое проходило как расширение.
+    """
+    without = WORKFLOW.replace("  pull_request:\n    types: [opened]\n", "")
+    changes = changed(tmp_path, workflow=without)
+    assert contract.breaking(changes), f"снятие события не названо несовместимым: {changes}"
+
+
+def test_a_removed_event_type_is_breaking(tmp_path: Path) -> None:
+    """Снятый ТИП события — то же самое, только тише."""
+    narrowed = WORKFLOW.replace("    types: [opened]", "    types: []")
+    changes = changed(tmp_path, workflow=narrowed)
+    assert contract.breaking(changes), f"снятие типа не названо несовместимым: {changes}"
+
+
+def test_an_added_event_is_not_breaking(tmp_path: Path) -> None:
+    """Добавленное событие — расширение: шаг сработает чаще, ломаться нечему."""
+    wider = WORKFLOW.replace("  workflow_dispatch:", "  push:\n  workflow_dispatch:")
+    changes = changed(tmp_path, workflow=wider)
+    assert changes and not contract.breaking(changes), changes
+
+
+def test_a_newly_required_input_is_breaking(tmp_path: Path) -> None:
+    """Вход, ставший обязательным, отвергает существующий вызов кнопки.
+
+    И новый обязательный ломает так же, как ужесточённый: у потребителя кнопка
+    вызывается без него.
+    """
+    tightened = WORKFLOW.replace(
+        '      pr:\n        description: "номер"\n        required: true\n        type: string\n',
+        '      pr:\n        description: "номер"\n        required: true\n        type: string\n'
+        '      why:\n        description: "зачем"\n        required: true\n        type: string\n',
+    )
+    changes = changed(tmp_path, workflow=tightened)
+    assert contract.breaking(changes), f"новый обязательный вход не назван: {changes}"
+
+
+def test_a_loosened_input_is_not_breaking(tmp_path: Path) -> None:
+    """Послабление видно, но не ломает: прежний вызов остаётся верным."""
+    loosened = WORKFLOW.replace("required: true", "required: false")
+    changes = changed(tmp_path, workflow=loosened)
+    assert changes and not contract.breaking(changes), changes
+
+
+def test_every_breaking_mark_is_printed_by_someone() -> None:
+    """У каждой приметы несовместимого есть тот, кто её печатает.
+
+    Мёртвая примета — худший вид полноты: список выглядит закрытым, а строка,
+    которую он ждёт, не появляется ни при каком изменении. Ровно это и было с
+    «проверки не стало» (075).
+    """
+    printed = (Path(__file__).resolve().parent.parent / "scripts" / "contract.py").read_text(
+        encoding="utf-8"
+    )
+    orphans = [
+        mark
+        for mark in contract.BREAKING_MARKS
+        if f"{mark}" not in printed.replace("BREAKING_MARKS", "")
+    ]
+    assert not orphans, f"приметы, которых никто не печатает: {orphans}"

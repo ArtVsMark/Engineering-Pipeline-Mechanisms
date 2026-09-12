@@ -120,7 +120,27 @@ def as_text(shape: dict[str, Any]) -> str:
 #: Приметы НЕСОВМЕСТИМОГО изменения поверхности: у потребителя от них ломается
 #: то, что работало. Список закрытый и назван словами самих различий — второй
 #: разбор той же строки разошёлся бы с первым молча (090).
-BREAKING_MARKS: Final = ("джобов не стало", "прогон удалён", "схема ответа", "проверки не стало")
+BREAKING_MARKS: Final = (
+    "джобов не стало",
+    "прогон удалён",
+    "схема ответа",
+    # Снятая проверка: потребитель держит её имя в защите ветки ДОСЛОВНО, и
+    # защита начинает ждать контекста, которого никто не выдаст. Примета была
+    # в списке и раньше — словами «проверки не стало», — но таких слов не
+    # печатал никто: снятие выходило строкой «проверка «x»: required → —» и
+    # мимо списка. Мёртвая примета хуже отсутствующей: список выглядел полным.
+    # Нашёл внешний взгляд на #142.
+    "проверка снята",
+    # Снятое событие превращает работающий шаг в молчащий, а снаружи это
+    # неотличимо от «шаг сломался». Снятый ТИП события — то же самое, только
+    # тише.
+    "событий не стало",
+    "типов события не стало",
+    # Вход, ставший обязательным, ломает существующий вызов кнопки: у
+    # потребителя он идёт без этого входа и начинает отвергаться.
+    "входы стали обязательными",
+    "входов не стало",
+)
 
 
 def breaking(changes: list[str]) -> list[str]:
@@ -134,6 +154,69 @@ def breaking(changes: list[str]) -> list[str]:
     ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
     """
     return [said for said in changes if any(mark in said for mark in BREAKING_MARKS)]
+
+
+def _event_changes(file: str, was: dict[str, Any], now: dict[str, Any]) -> list[str]:
+    """Различия в событиях прогона — РАЗДЕЛЬНО: снятое отдельно от добавленного.
+
+    Прежде здесь стояла одна строка «события или входы изменились», и она
+    накрывала оба случая сразу. Для потребителя они противоположны: добавленное
+    событие он может не заметить и ничего не потерять, а снятое превращает
+    работающий шаг в молчащий — и снаружи это неотличимо от «шаг сломался».
+    Одной строкой различить их было нельзя, и несовместимое проходило как
+    расширение. Нашёл внешний взгляд на #142.
+    """
+    found: list[str] = []
+    gone = sorted(set(was) - set(now))
+    fresh = sorted(set(now) - set(was))
+    if gone:
+        found.append(f"{file}: событий не стало — {gone}")
+    if fresh:
+        found.append(f"{file}: добавлены события — {fresh}")
+    for name in sorted(set(was) & set(now)):
+        before_shape = was.get(name) or {}
+        after_shape = now.get(name) or {}
+        lost_types = sorted(
+            set(before_shape.get("types") or ()) - set(after_shape.get("types") or ())
+        )
+        if lost_types:
+            # ИМЯ СОБЫТИЯ ИДЁТ ПОСЛЕ ПРИМЕТЫ, а не внутри неё: примета ищется
+            # подстрокой, и вставленное в середину имя разрывало совпадение —
+            # строка печаталась, а несовместимой не считалась.
+            found.append(f"{file}: типов события не стало у «{name}» — {lost_types}")
+        new_types = sorted(
+            set(after_shape.get("types") or ()) - set(before_shape.get("types") or ())
+        )
+        if new_types:
+            # Расширение: шаг начнёт срабатывать чаще. Потребителю это видно и
+            # его не ломает — поэтому строка есть, а приметы несовместимого нет.
+            found.append(f"{file}: типы события «{name}» добавлены — {new_types}")
+        was_inputs = before_shape.get("inputs") or {}
+        now_inputs = after_shape.get("inputs") or {}
+        lost_inputs = sorted(set(was_inputs) - set(now_inputs))
+        if lost_inputs:
+            found.append(f"{file}: входов не стало у «{name}» — {lost_inputs}")
+        # ОБЯЗАТЕЛЬНОСТЬ ВХОДА — ЧАСТЬ ПОВЕРХНОСТИ, и она движется в одну
+        # сторону больно: вход, ставший обязательным, отвергает существующий
+        # вызов кнопки. Обратное — послабление, и ломать оно не может.
+        # НОВЫЙ обязательный вход ломает так же, как ужесточённый: у
+        # потребителя кнопка вызывается без него и начинает отвергаться.
+        tightened = sorted(
+            key for key, needed in now_inputs.items() if needed and not was_inputs.get(key, False)
+        )
+        if tightened:
+            found.append(f"{file}: входы стали обязательными у «{name}» — {tightened}")
+        loosened = sorted(
+            key for key, needed in now_inputs.items() if not needed and was_inputs.get(key, False)
+        )
+        if loosened:
+            # Послабление: прежний вызов остаётся верным. Видно — да, ломает —
+            # нет, и различие названо строкой, а не молчанием (051).
+            found.append(f"{file}: входы стали необязательными у «{name}» — {loosened}")
+        added_inputs = sorted(set(now_inputs) - set(was_inputs) - set(tightened))
+        if added_inputs:
+            found.append(f"{file}: добавлены входы у «{name}» — {added_inputs}")
+    return found
 
 
 def differences(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
@@ -155,8 +238,7 @@ def differences(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
             found.append(f"{file}: джобов не стало — {gone}")
         if fresh:
             found.append(f"{file}: добавлены джобы — {fresh}")
-        if was["events"] != shape["events"]:
-            found.append(f"{file}: события или входы изменились")
+        found += _event_changes(file, was["events"], shape["events"])
     for file in sorted(set(before.get("workflows", {})) - set(after.get("workflows", {}))):
         found.append(f"{file}: прогон удалён целиком")
 
@@ -167,8 +249,16 @@ def differences(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     was_checks = was_answer.get("checks") or {}
     now_checks = now_answer.get("checks") or {}
     for name in sorted(set(was_checks) | set(now_checks)):
-        if was_checks.get(name) != now_checks.get(name):
-            found.append(
-                f"проверка «{name}»: {was_checks.get(name, '—')} → {now_checks.get(name, '—')}"
-            )
+        if was_checks.get(name) == now_checks.get(name):
+            continue
+        if name not in now_checks:
+            # СНЯТИЕ НАЗЫВАЕТСЯ СВОИМИ СЛОВАМИ, а не стрелкой в пустоту:
+            # по этим словам его узнаёт `breaking()`, и «→ —» мимо него
+            # проходило молча.
+            found.append(f"проверка снята: «{name}» была {was_checks[name]}")
+            continue
+        if name not in was_checks:
+            found.append(f"проверка добавлена: «{name}» — {now_checks[name]}")
+            continue
+        found.append(f"проверка «{name}»: {was_checks[name]} → {now_checks[name]}")
     return found
