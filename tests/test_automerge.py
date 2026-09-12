@@ -886,3 +886,40 @@ def test_handing_over_shows_the_body_instead_of_arming_on_a_dry_run(
     module.hand_over("o/r", head, [head], "token", dry_run=True)
     assert platform["asked"] == [], "пробный заход взвёл слияние"
     assert "тело origin/agent/change-4" in capsys.readouterr().out
+
+
+def test_only_the_named_head_keeps_its_arming(platform: dict[str, Any]) -> None:
+    """Прямой вызов: названная голова значок сохраняет, соседи — нет.
+
+    Проверяется отдельно от захода, потому что зовётся из ДВУХ путей — «взвожу»
+    и «сливаю сам», — и щель была именно в том, что на втором пути этого вызова
+    не было (053).
+    """
+    head = change(1, "automerge", armed=True)
+    queue = [head, change(5, "automerge", armed=True), change(7, "automerge")]
+    module.keep_only("o/r", head, queue, "token", dry_run=False)
+    assert platform["disarmed"] == ["PR_5"], "снято не то взведение"
+
+
+def test_what_the_platform_holds_is_read_by_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Взведённое ЧИТАЕТСЯ обычным REST: поле `auto_merge` приходит с изменением.
+
+    Взвести дешевле нельзя — у мутации нет REST-эквивалента, — а прочитать
+    можно, и «раз уж пошли в GraphQL, спросим и это» — ровно тот путь, которым
+    у соседей выросли 2436 строк из 131 (001).
+    """
+    seen: list[tuple[str, str]] = []
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> dict[str, Any]:
+        seen.append((method, path))
+        return {"auto_merge": {"commit_title": "изменение 1 (#1)", "commit_message": "тело"}}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.held_body("o/r", 1, "token") == ("изменение 1 (#1)", "тело")
+    assert seen == [("GET", "repos/o/r/pulls/1")]
+
+
+def test_a_change_without_an_arming_holds_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Значка нет — читается пустое, а не падает: это законное состояние."""
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"auto_merge": None})
+    assert module.held_body("o/r", 1, "token") == ("", "")
