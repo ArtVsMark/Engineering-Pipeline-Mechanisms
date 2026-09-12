@@ -287,6 +287,16 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: python scripts/check_derived_refs.py
+      # НОВОЕ ПРИЕЗЖАЕТ СО СВОИМ ПРОГОНОМ. Замер 12.09.2026 по одиннадцати
+      # настоящим дефектам смены: покрытие поймало бы два, и оба одного класса
+      # — «новая функция, у которой тестов нет вообще». Остальные девять —
+      # верно работающий покрытый код с неверной премисой, и процентами они не
+      # видны. Судится только ДОБАВЛЕННОЕ: в дереве 75 имён из 327 не названы
+      # ни одним прогоном, и краснеть на них значило бы судить чужую работу.
+      - name: новое приезжает со своим прогоном
+        env:
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python scripts/check_new_is_tested.py
 
   attribution:
     name: attribution
