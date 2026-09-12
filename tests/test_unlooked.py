@@ -135,8 +135,26 @@ def test_a_late_look_at_a_change_the_registry_did_not_know() -> None:
     изменение не попало. Поздний взгляд по нему всё равно состоялся, и молчать
     о нём значило бы отчитаться о меньшем, чем было.
     """
-    entries = module.mark_late({}, 55)
+    entries = module.mark_late({}, 55, "2026-09-12")
     assert entries[55].state == module.STATE_LATE
+    assert entries[55].late == "2026-09-12"
+
+
+def test_a_late_look_adds_a_state_and_does_not_replace_one() -> None:
+    """Поздний взгляд ДОПИСЫВАЕТСЯ к состоянию, а не заменяет его.
+
+    «Прогон взгляда прошёл, а ответа нет» отвечает на вопрос о КАНАЛЕ; «поздний
+    взгляд состоялся» — на вопрос об остатке. Пока второе затирало первое,
+    после позднего взгляда узнать, почему изменение попало в реестр, было
+    нечем — а счёт этих причин и есть мера надёжности канала.
+    """
+    было = module.Entry(7, module.STATE_SILENT, "2026-09-10")
+    стало = module.mark_late({7: было}, 7, "2026-09-12")[7]
+    assert стало.state == было.state, "прежнее состояние затёрто"
+    assert стало.merged == было.merged
+    assert стало.late == "2026-09-12"
+    assert стало.said() == f"- #7 · {было.state} · 2026-09-10 · поздний взгляд 2026-09-12"
+    assert module.parse_entries(стало.said())[7] == стало, "своя же строка не разбирается обратно"
 
 
 @pytest.mark.parametrize("state", module.STATES, ids=lambda state: state)
