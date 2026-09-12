@@ -397,6 +397,39 @@ def still_coming(name: str, mine: dict[str, str] | None) -> bool:
     return bool(state) and state != "completed"
 
 
+def judged_on(
+    runs: list[dict[str, Any]], names: list[str], mine: dict[str, str] | None
+) -> list[str]:
+    """Состояние, на котором вынесен вердикт: по имени — все его записи.
+
+    ЗАЧЕМ ОТДЕЛЬНЫЙ ВЫВОД. Разбор гонки в этом модуле стоил шести починок, и
+    каждая начиналась одинаково: красное есть, а состояние, по которому оно
+    вынесено, уже другое. Лог прогона читается не из всякого окна — облачному
+    хранилище закрыто, — и остаётся код возврата, по которому не разобрать
+    ничего. Поэтому состояние печатается САМИМ заходом и тем же выводом уходит
+    в аннотацию прогона, которую отдаёт REST
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    Печатаются ВСЕ записи имени, а не выбранная: выбор между ними и есть то,
+    что разбирают, и показать один итог значило бы скрыть предмет.
+    """
+    edet = mine or {}
+    lines: list[str] = []
+    for name in names:
+        found = [run for run in runs if run.get("name") == name]
+        said = (
+            ", ".join(
+                f"{run.get('conclusion') or run.get('status') or '?'}"
+                f"@{str(run.get('started_at') or '?')[11:19]}"
+                f"/{run.get('id') or '?'}"
+                for run in sorted(found, key=lambda run: str(run.get("started_at") or ""))
+            )
+            or "записей нет"
+        )
+        lines.append(f"  {name}: {said}; в сводимом прогоне: {edet.get(name, 'нет')}")
+    return lines
+
+
 def verdict(
     runs: list[dict[str, Any]],
     required: list[str],
@@ -624,6 +657,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"красно ({len(problems)}):")
         for problem in problems:
             print(f"  {problem}")
+        # СОСТОЯНИЕ ПЕЧАТАЕТСЯ ВМЕСТЕ С ОТКАЗОМ, а не вместо него. Без него
+        # красное этого гейта неразбираемо задним числом: голова к моменту
+        # разбора уже другая, а из кода возврата не следует ничего (#261).
+        print(f"вердикт вынесен на таком состоянии головы {args.sha[:8]}:")
+        for line in judged_on(runs, required + advisory, roster.running):
+            print(line)
         return EXIT_RED
 
     print(f"зелено: все объявленные проверки на голове {args.sha[:8]} пройдены")

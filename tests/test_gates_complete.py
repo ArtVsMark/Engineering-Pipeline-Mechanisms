@@ -716,3 +716,55 @@ def test_an_unread_roster_never_holds_the_gate(monkeypatch: pytest.MonkeyPatch) 
     roster = module.roster_of("o/r", "7", "token")
     assert roster.read is False and roster.named == 0
     assert module.ready_to_judge({"status": "in_progress", "conclusion": None}, roster)
+
+
+def test_the_verdict_shows_every_record_it_weighed() -> None:
+    """Вердикт печатает ВСЕ записи имени, а не выбранную из них.
+
+    Выбор между записями и есть то, что разбирают, когда красное оказывается о
+    гонке: показать один итог значило бы скрыть предмет разбора. Замер
+    12.09.2026 — три захода подряд вынесли решённое красное за полминуты при
+    сроке 900, и разобрать их было нечем: логи прогона читаются не из всякого
+    окна (#261).
+    """
+    runs = [
+        {
+            "name": "test",
+            "status": "completed",
+            "conclusion": "cancelled",
+            "started_at": "2026-09-12T19:49:17Z",
+            "id": 1,
+        },
+        {
+            "name": "test",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-09-12T19:51:02Z",
+            "id": 2,
+        },
+    ]
+    said = module.judged_on(runs, ["test"], {})
+    assert len(said) == 1
+    assert "cancelled" in said[0], "отменённая запись скрыта — именно её и разбирают"
+    assert "success" in said[0]
+
+
+def test_a_name_without_records_says_so_rather_than_vanishing() -> None:
+    """Имя без записей печатается словами, а не пропадает из вывода.
+
+    Пропажа записи — самый частый предмет отказа этого гейта, и увидеть её надо
+    прямо в состоянии, а не выводить из того, что строки нет
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
+    said = module.judged_on([], ["lint"], {})
+    assert said == ["  lint: записей нет; в сводимом прогоне: нет"]
+
+
+def test_the_state_says_which_jobs_are_still_running() -> None:
+    """Состав едущих джобов — часть состояния: им объясняется ожидание.
+
+    «Записей нет» и «джоб ещё едет» снаружи одинаковы, а решается ими разное
+    (097).
+    """
+    said = module.judged_on([], ["lint"], {"lint": "in_progress"})
+    assert "в сводимом прогоне: in_progress" in said[0]
