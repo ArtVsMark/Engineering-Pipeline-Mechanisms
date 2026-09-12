@@ -15,12 +15,24 @@
 Режим ``--probe`` взводит и СРАЗУ снимает, ничего не сливая, и пишет ответ
 площадки туда, где его прочтёт человек.
 
-ПРЕДМЕТ ЗАМЕРА — ИЗМЕНЕНИЕ, КОТОРОЕ ВЗВЕСТИ МОЖНО, А СЛИТЬ НЕЛЬЗЯ. Между
-взведением и снятием проходят миллисекунды, но окно всё же есть, и брать под
-замер готовое к слиянию значило бы рисковать чужой работой. Состояние
-``blocked`` даёт ровно то, что нужно: мутация его принимает, а площадка не
-сольёт — обязательные проверки не пройдены. Конфликтное (``dirty``) и черновик
-мутация отвергает сама, и это тоже ответ, но не про тело.
+ПРЕДМЕТ ЗАМЕРА — ИЗМЕНЕНИЕ, КОТОРОЕ СЛИТЬ НЕЛЬЗЯ. Между взведением и снятием
+проходят миллисекунды, но окно всё же есть, и брать под замер готовое к
+слиянию значило бы рисковать чужой работой. Поэтому предмет выбирается из
+состояний, в которых площадка слить не может ВООБЩЕ, и выбирается по старшинству
+(:data:`UNMERGEABLE`): конфликтное надёжнее закрытого проверками.
+
+ЗАМЕР 12.09.2026 ПОКАЗАЛ, ЧТО ОДНОГО СОСТОЯНИЯ МАЛО. Первый заход искал только
+``blocked`` — и не нашёл ничего: живых изменений было два, одно конфликтное
+(``dirty``), другое отставшее (``behind``). Шаг сказал «предмета нет» вместо
+того, чтобы взять конфликтное, потому что шапка утверждала «конфликтное мутация
+отвергает сама». Премиса не проверялась
+([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)),
+и проверяет её теперь сам заход: отказ площадки приходит её словами в задачу.
+
+``behind`` в список НЕ входит намеренно. Отставшее площадка сливать умеет — она
+сама подтянет базу и сольёт, как только проверки позеленеют, — и это ровно тот
+риск, которого замер избегает. Мало предмета лучше, чем слитая без спроса чужая
+работа.
 
 ТОКЕН — ВЛАДЕЛЬЦА. Взведение это запись, несущая личность: на токене прогона
 слияние в общей ветке подписало бы приложение
@@ -52,8 +64,17 @@ ENV_TOKEN: Final = "MERGE_QUEUE_TOKEN"
 #: `docs/decisions/006-merge-by-squash.md`.
 METHOD: Final = "SQUASH"
 
-#: Состояние, годное под замер: взвести можно, слить нельзя.
-ARMABLE_UNMERGEABLE: Final = "blocked"
+#: Состояния, годные под замер, ПО СТАРШИНСТВУ. Общее у них одно: площадка
+#: такое изменение слить не может, и потому не сольёт в зазоре между взведением
+#: и снятием. Порядок — от самого безопасного:
+#:
+#: * ``dirty`` — конфликт. Слить нечем до правки руками: риск нулевой.
+#: * ``blocked`` — обязательные проверки не пройдены. Слить нельзя, пока они
+#:   красные или не шли, а позеленеть за миллисекунды зазора им нечем.
+#:
+#: ``behind`` здесь отсутствует НЕ по забывчивости: отставшее площадка умеет
+#: подтянуть и слить сама, и это тот самый риск, от которого весь отбор.
+UNMERGEABLE: Final = ("dirty", "blocked")
 
 ARM: Final = """
 mutation($id: ID!, $method: PullRequestMergeMethod!, $headline: String!, $body: String!) {
@@ -89,15 +110,27 @@ class NotRun(RuntimeError):
 
 
 def armable(repo: str, token: str) -> dict[str, Any] | None:
-    """Живое изменение, которое взвести можно, а слить нельзя; иначе ``None``."""
+    """Живое изменение, которое площадка слить не может; иначе ``None``.
+
+    Обходятся ВСЕ живые изменения, а не берётся первое подходящее: выбор идёт
+    по старшинству :data:`UNMERGEABLE`, и конфликтное предпочитается закрытому
+    проверками. Первое подходящее зависело бы от порядка ответа площадки, а
+    порядок решением не является
+    ([053](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/053-queue-order-is-a-rule-not-arrival.md)).
+    """
+    best: tuple[int, dict[str, Any]] | None = None
     for payload in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
         number = int(payload.get("number") or 0)
         if not number or payload.get("draft"):
             continue
         full = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
-        if str(full.get("mergeable_state") or "") == ARMABLE_UNMERGEABLE:
-            return full
-    return None
+        state = str(full.get("mergeable_state") or "")
+        if state not in UNMERGEABLE:
+            continue
+        rank = UNMERGEABLE.index(state)
+        if best is None or rank < best[0]:
+            best = (rank, full)
+    return None if best is None else best[1]
 
 
 def arm(node: str, headline: str, body: str, token: str) -> dict[str, Any]:
@@ -133,16 +166,17 @@ def probe(repo: str, token: str, *, dry_run: bool) -> str:
     change = armable(repo, token)
     if change is None:
         raise NotRun(
-            f"изменения в состоянии «{ARMABLE_UNMERGEABLE}» нет — предмета замера не найдено. "
-            "Готовое к слиянию под замер не берётся: площадка сольёт его между взведением и "
-            "снятием (075)"
+            f"живого изменения в состоянии {' или '.join(UNMERGEABLE)} нет — предмета замера "
+            "не найдено. Слить не может ТОЛЬКО такое, а остальное площадка сольёт в зазоре "
+            "между взведением и снятием (075)"
         )
     number = int(change["number"])
     node = str(change.get("node_id") or "")
+    state = str(change.get("mergeable_state") or "")
     headline = f"замер взведения: тело передано явно (#{number})"
     body = "Разобрано: замер\nClaude-Session: проверка полей commitHeadline и commitBody"
     if dry_run:
-        return f"(пробный заход) взвёл бы #{number} и сразу снял"
+        return f"(пробный заход) взвёл бы #{number} — состояние «{state}» — и сразу снял"
     answer = arm(node, headline, body, token)
     try:
         missing = kept_the_body(answer, headline, body)
@@ -152,11 +186,12 @@ def probe(repo: str, token: str, *, dry_run: bool) -> str:
         disarm(node, token)
     if missing:
         return (
-            f"#{number}: взведение принято, а ТЕЛО НЕТ — {'; '.join(missing)}. "
+            f"#{number} («{state}»): взведение принято, а ТЕЛО НЕТ — {'; '.join(missing)}. "
             "Условие пересмотра решения 011 наступило"
         )
     return (
-        f"#{number}: взведение принято ВМЕСТЕ с телом — площадка вернула и заголовок, "
+        f"#{number} («{state}»): взведение принято ВМЕСТЕ с телом — площадка вернула "
+        "и заголовок, "
         "и тело дословно. Решение 011 строится на проверенном"
     )
 

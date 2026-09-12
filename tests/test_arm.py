@@ -72,23 +72,47 @@ def test_the_subject_is_armable_but_unmergeable(platform: dict[str, Any]) -> Non
     Готовое к слиянию она сольёт сама в зазоре между взведением и снятием — и
     замер стал бы слиянием чужой работы без спроса.
     """
-    platform["changes"] = [change(3, "clean"), change(7, module.ARMABLE_UNMERGEABLE)]
+    platform["changes"] = [change(3, "clean"), change(7, module.UNMERGEABLE[1])]
     found = module.armable("o/r", "t")
     assert found is not None and found["number"] == 7
 
 
 def test_a_draft_is_not_taken_under_the_probe(platform: dict[str, Any]) -> None:
     """Черновик мутация отвергает сама — и это ответ не про тело, а про черновик."""
-    platform["changes"] = [change(9, module.ARMABLE_UNMERGEABLE, draft=True)]
+    platform["changes"] = [change(9, module.UNMERGEABLE[1], draft=True)]
     assert module.armable("o/r", "t") is None
 
 
 def test_no_subject_is_not_run_not_clean(platform: dict[str, Any]) -> None:
     """Предмета не нашлось — «не отработал», а не «взводить некого» (075)."""
-    platform["changes"] = [change(3, "clean"), change(4, "dirty")]
+    platform["changes"] = [change(3, "clean"), change(4, "behind")]
     with pytest.raises(module.NotRun) as caught:
         module.probe("o/r", "t", dry_run=False)
-    assert module.ARMABLE_UNMERGEABLE in str(caught.value)
+    assert module.UNMERGEABLE[1] in str(caught.value)
+
+
+def test_a_conflicting_change_outranks_a_blocked_one(platform: dict[str, Any]) -> None:
+    """Конфликтное берётся ПРЕЖДЕ закрытого проверками: слить его нечем вовсе.
+
+    Первое подходящее зависело бы от порядка ответа площадки, а порядок решением
+    не является (053).
+    """
+    platform["changes"] = [change(7, "blocked"), change(8, "dirty")]
+    found = module.armable("o/r", "t")
+    assert found is not None and found["number"] == 8
+
+
+def test_a_change_the_platform_can_merge_itself_is_never_the_subject(
+    platform: dict[str, Any],
+) -> None:
+    """`behind` под замер не берут: базу площадка подтянет и сольёт сама.
+
+    Это ровно тот риск, от которого весь отбор, — и отсутствие состояния в
+    списке названо причиной, а не умолчано (154).
+    """
+    assert "behind" not in module.UNMERGEABLE
+    platform["changes"] = [change(9, "behind")]
+    assert module.armable("o/r", "t") is None
 
 
 def test_the_body_is_passed_and_asked_back(platform: dict[str, Any]) -> None:
@@ -117,7 +141,7 @@ def test_the_arming_is_always_taken_back(platform: dict[str, Any]) -> None:
     позеленеют: незакрытое согласие тут дороже красного шага
     ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)).
     """
-    platform["changes"] = [change(7, module.ARMABLE_UNMERGEABLE)]
+    platform["changes"] = [change(7, module.UNMERGEABLE[1])]
 
     def explode(*args: object, **kwargs: object) -> list[str]:
         raise RuntimeError("разбор ответа упал")
@@ -131,21 +155,21 @@ def test_the_arming_is_always_taken_back(platform: dict[str, Any]) -> None:
 
 def test_the_dry_run_touches_nothing(platform: dict[str, Any]) -> None:
     """Без `--apply` шаг ничего не взводит: показ и действие — разные заходы (104)."""
-    platform["changes"] = [change(7, module.ARMABLE_UNMERGEABLE)]
+    platform["changes"] = [change(7, module.UNMERGEABLE[1])]
     said = module.probe("o/r", "t", dry_run=True)
     assert "#7" in said and not platform["graphql"]
 
 
 def test_a_kept_body_says_the_decision_stands(platform: dict[str, Any]) -> None:
     """Тело вернулось дословно — решение 011 строится на проверенном."""
-    platform["changes"] = [change(7, module.ARMABLE_UNMERGEABLE)]
+    platform["changes"] = [change(7, module.UNMERGEABLE[1])]
     said = module.probe("o/r", "t", dry_run=False)
     assert "ВМЕСТЕ с телом" in said
 
 
 def test_a_lost_body_names_the_condition_of_review(platform: dict[str, Any]) -> None:
     """Тело проглочено — наступило названное решением условие пересмотра."""
-    platform["changes"] = [change(7, module.ARMABLE_UNMERGEABLE)]
+    platform["changes"] = [change(7, module.UNMERGEABLE[1])]
     platform["echo"] = False
     said = module.probe("o/r", "t", dry_run=False)
     assert "ТЕЛО НЕТ" in said and "пересмотра" in said
@@ -175,7 +199,7 @@ def test_the_answer_is_written_where_a_human_reads_it(
     platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Замер, оставшийся в логе прогона, замером не является: логи окну не видны."""
-    platform["changes"] = [change(7, module.ARMABLE_UNMERGEABLE)]
+    platform["changes"] = [change(7, module.UNMERGEABLE[1])]
     monkeypatch.setenv(module.ENV_TOKEN, "t")
     assert module.main(["--repo", "o/r", "--probe", "--apply", "--say-to", "196"]) == module.EXIT_OK
     path, payload = platform["posted"][0]
@@ -220,7 +244,7 @@ def test_an_unwritable_answer_is_not_a_measurement(
     platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Замер, который некуда записать, замером не является — исход красный."""
-    platform["changes"] = [change(7, module.ARMABLE_UNMERGEABLE)]
+    platform["changes"] = [change(7, module.UNMERGEABLE[1])]
     monkeypatch.setenv(module.ENV_TOKEN, "t")
 
     def refuse(repo: str, task: str, said: str, token: str) -> None:
