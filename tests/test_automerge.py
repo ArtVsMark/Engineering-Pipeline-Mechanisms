@@ -925,6 +925,25 @@ def test_a_change_without_an_arming_holds_nothing(monkeypatch: pytest.MonkeyPatc
     assert module.held_body("o/r", 1, "token") == ("", "")
 
 
+def test_an_arming_without_body_fields_is_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Взведение есть, а полей тела в ответе нет — отказ ВСЛУХ, а не пустота.
+
+    Имена полей были объявлены по памяти, а не замером, и внешний взгляд назвал
+    это на #234. Пустая строка вместо отсутствующего поля читалась бы как «тело
+    у площадки другое», и заход снимал бы и взводил значок на КАЖДОМ проходе,
+    не сходясь никогда (045).
+    """
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda *a, **k: {"auto_merge": {"enabled_by": {"login": "ArtVsMark"}}},
+    )
+    with pytest.raises(module.NotRun) as caught:
+        module.held_body("o/r", 1, "token")
+    assert "полей тела в ответе нет" in str(caught.value)
+    assert "enabled_by" in str(caught.value), "отказ не назвал, что пришло вместо них"
+
+
 def test_an_arming_on_a_foreign_base_is_left_alone(platform: dict[str, Any]) -> None:
     """Значок на изменении в ЧУЖУЮ базу очередь не трогает.
 

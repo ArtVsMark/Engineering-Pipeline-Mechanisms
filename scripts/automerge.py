@@ -486,8 +486,26 @@ def held_body(repo: str, number: int, owner_token: str) -> tuple[str, str]:
     ровно тот путь, которым у соседей выросли 2436 строк из 131.
     """
     payload = ghrest.request("GET", f"repos/{repo}/pulls/{number}", owner_token) or {}
-    kept = payload.get("auto_merge") or {}
-    return str(kept.get("commit_title") or ""), str(kept.get("commit_message") or "")
+    kept = payload.get("auto_merge")
+    if not kept:
+        # Значка нет — законное состояние, и молчать о нём можно: спрашивали
+        # именно это.
+        return "", ""
+    title, body = kept.get("commit_title"), kept.get("commit_message")
+    if title is None or body is None:
+        # ФОРМА ОТВЕТА НЕ УГАДЫВАЕТСЯ. Имена полей я объявил по памяти, а не
+        # замером, и внешний взгляд назвал это на #234 (`9a451c0`). Пустая
+        # строка вместо отсутствующего поля читалась бы как «тело у площадки
+        # другое» — и заход снимал бы и взводил значок на КАЖДОМ проходе, не
+        # сходясь никогда
+        # ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+        # Поэтому взведение без полей тела — отказ вслух, а не тихий пропуск.
+        raise NotRun(
+            f"#{number}: площадка держит взведение, но полей тела в ответе нет — "
+            f"пришло {sorted(kept)}. Форма ответа изменилась либо названа неверно, и "
+            "сверять тело не с чем"
+        )
+    return str(title), str(body)
 
 
 def keep_only(
@@ -637,7 +655,10 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     Площадка ждёт бесплатно и без предела. Поэтому голове, у которой проверки
     ещё идут, очередь ОТДАЁТ последнее действие: взводит слияние нашим телом
     уплотнения и уходит. Порядок вставки остаётся нашим целиком — взведённой
-    держится ровно одна голова, и ею распоряжается :func:`hand_over`.
+    держится ровно одна голова, и следит за этим :func:`keep_only`, которую
+    зовут ОБА пути: и взведение, и собственное слияние зелёной головы. Нашёл
+    внешний взгляд на #234: докстрока называла распорядителем `hand_over`, то
+    есть ровно тот путь, на котором щель и была.
     """
     check_labels_declared()
     changes = open_changes(repo, owner_token)
