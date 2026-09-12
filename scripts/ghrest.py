@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -208,6 +209,69 @@ def request(
         raise TransportError(f"{method} {path} → площадка недоступна: {exc.reason}") from exc
     except ValueError as exc:
         raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
+
+
+#: Адрес GraphQL. Он здесь ОДИН и с единственным входом ниже: правило каталога
+#: [001](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/001-transport-rest-not-graphql.md)
+#: требует REST по умолчанию, и цена разницы измерена соседями — около трёхсот
+#: единиц часовой квоты за операцию GraphQL против одной у REST, причём счётчик
+#: считает попытки, а не успехи (017).
+GRAPHQL: Final = f"{API_ROOT}/graphql"
+
+#: Операции, у которых REST-эквивалента НЕТ ВОВСЕ. Список ЗАКРЫТЫЙ, и он
+#: механизм, а не пожелание: `graphql` отказывает операции, которой здесь нет.
+#: Каждое имя — утверждение «дешевле нельзя», и добавляется оно правкой этого
+#: списка с причиной, а не по ходу дела
+#: ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
+NO_REST: Final = {
+    "enablePullRequestAutoMerge": "взведение авто-мержа площадки: REST такой операции не имеет",
+    "disablePullRequestAutoMerge": "снятие взведения — обратная к ней, и тоже только здесь",
+}
+
+#: Имя операции в запросе: `mutation(...) { имяОперации(...` — первое имя после
+#: открывающей скобки. Разбор строгий: не разобралось — значит форма запроса не
+#: та, о которой договаривались, и пускать её нельзя (045).
+OPERATION_RE: Final = re.compile(r"\{\s*(?P<name>[A-Za-z][A-Za-z0-9_]*)\s*\(")
+
+
+def operation_of(query: str) -> str:
+    """Имя операции в запросе; пусто — форма не разобралась."""
+    found = OPERATION_RE.search(query)
+    return found.group("name") if found else ""
+
+
+def graphql(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]:
+    """Единственный путь к GraphQL — и он спрашивает, положено ли туда идти.
+
+    ПРОВЕРКА СПИСКОМ, А НЕ ДОГОВОРЁННОСТЬЮ. Операция, которой нет в
+    :data:`NO_REST`, отвергается до запроса: иначе «мне нужен всего один
+    запрос» однажды окажется тем, что у REST есть и втрое дешевле.
+
+    ОТКАЗ ПРИХОДИТ С КОДОМ 200, И ЭТО ГЛАВНАЯ ЛОВУШКА GraphQL. Ошибки лежат в
+    теле ответа полем `errors`, а не в коде; прочитанный по коду ответ
+    выглядел бы удачей
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Поэтому тело читается ВСЕГДА, и непустые `errors` — отказ.
+    """
+    name = operation_of(query)
+    if not name:
+        raise TransportError("запрос GraphQL не разобрался: имя операции не найдено")
+    if name not in NO_REST:
+        raise TransportError(
+            f"операция «{name}» не в закрытом списке GraphQL: у неё есть REST-эквивалент "
+            "либо он не искался. Список и причины — ghrest.NO_REST (001, 068)"
+        )
+    answer = request("POST", GRAPHQL, token, {"query": query, "variables": variables})
+    if not isinstance(answer, dict):
+        raise TransportError(f"{name}: ответ GraphQL не отображение — форма изменилась")
+    troubles = answer.get("errors") or []
+    if troubles:
+        said = "; ".join(str((one or {}).get("message") or one) for one in troubles)
+        raise TransportError(f"{name} отвергнут площадкой: {said}")
+    data = answer.get("data")
+    if not isinstance(data, dict):
+        raise TransportError(f"{name}: в ответе нет данных и нет ошибок — читать нечего")
+    return data
 
 
 def paginate(path: str, token: str, key: str | None = None) -> Iterator[dict[str, Any]]:

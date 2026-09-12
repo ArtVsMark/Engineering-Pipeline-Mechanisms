@@ -1,0 +1,74 @@
+# Замер взведения: площадку спрашивают, принимает ли мутация ТЕЛО уплотнения.
+#
+# ЗАЧЕМ ЗАМЕР ОТДЕЛЬНЫМ ПРОГОНОМ. Решение
+# `docs/decisions/011-merging-is-handed-to-the-platform.md` отдаёт площадке
+# последнее действие — само слияние, — и назвало непроверенным ровно одно:
+# доходят ли до уплотнения `commitHeadline` и `commitBody`. Поля объявлены
+# входом мутации, но в семье их не передаёт никто, то есть проверено это не
+# было. Переключать очередь на непроверенной премисе смена уже ловила себя
+# трижды, поэтому сначала вопрос, потом переключение
+# ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+#
+# ПОЧЕМУ НА ИЗМЕНЕНИИ, ДА ЕЩЁ И С ФИЛЬТРОМ ПО ПУТИ. Механизм подтверждается
+# прогоном, а не тем, что он написан
+# ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)),
+# и подтверждение обязано ехать вместе с изменением, которое механизм трогает.
+# Фильтр по пути держит заход РЕДКИМ: без него замер шёл бы на каждом
+# изменении проекта и трогал бы площадку без предмета.
+#
+# ОТВЕТ ПИШЕТСЯ В ЗАДАЧУ, А НЕ В ЛОГ. Логи прогонов агентскому окну недоступны
+# — прокси режет хранилище, — и замер, оставшийся в логе, не прочтёт тот, кому
+# он нужен. Адресат назван в `.pipeline.yml` и это эпик #196: там принимается
+# решение, для которого замер и делается (142).
+#
+# ТОКЕН ВЛАДЕЛЬЦА. Взведение — запись, несущая личность: на токене прогона
+# слияние в общей ветке подписало бы приложение
+# ([131](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/131-no-writes-from-a-cloud-session.md)).
+name: arm
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - scripts/arm.py
+      - scripts/ghrest.py
+      - .github/workflows/arm.yml
+  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Один заход на голову. Взведение и снятие идут парой, и два захода подряд
+  # сняли бы друг за другом чужое согласие (149).
+  group: arm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: arm-probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: спросить площадку про тело уплотнения
+        env:
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/arm.py --probe --apply --say-to 196 || rc=$?
+          # Исходы разбираются СПИСКОМ: неизвестный код — не «почти удача» (039).
+          case "$rc" in
+            0) echo "замер отработал — ответ записан в #196" ;;
+            3) echo "::warning::замер не настроен — нет MERGE_QUEUE_TOKEN, взводить нечем" ;;
+            *) echo "::error::замер не отработал (код $rc) — решение 011 осталось без ответа"
+               exit 1 ;;
+          esac

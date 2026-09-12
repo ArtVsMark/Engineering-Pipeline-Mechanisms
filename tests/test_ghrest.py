@@ -42,6 +42,10 @@ class Fake(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(self.payload)
 
+    def do_POST(self) -> None:
+        """GraphQL ходит только POST — отвечаем ему тем же, что и GET."""
+        self.do_GET()
+
     def log_message(self, *args: object) -> None:
         """Молчит: вывод сервера не нужен в отчёте теста."""
 
@@ -263,3 +267,88 @@ def test_quota_floor_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> N
     assert transport.quota_floor() == 42
     monkeypatch.setenv(transport.ENV_QUOTA_FLOOR, "не число")
     assert transport.quota_floor() == transport.QUOTA_FLOOR
+
+
+# --- GraphQL: дверь одна, и она спрашивает -----------------------------------
+
+
+def test_the_operation_name_is_read_from_the_query() -> None:
+    """Имя операции берут ИЗ запроса, а не передают рядом с ним.
+
+    Переданное рядом рассогласуется с телом при первой же правке запроса, и
+    проверка списком станет проверкой подписи под ним.
+    """
+    assert transport.operation_of("mutation($id: ID!) {\n enablePullRequestAutoMerge(") == (
+        "enablePullRequestAutoMerge"
+    )
+    assert transport.operation_of("query { viewer { login } }") == "", (
+        "форма без вызова разобралась"
+    )
+
+
+def test_an_operation_outside_the_allowlist_never_reaches_the_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ наступает ДО запроса: иначе список стал бы отчётом, а не гейтом."""
+
+    def unreached(*args: object, **kwargs: object) -> None:
+        raise AssertionError("запрос ушёл в площадку, хотя операции нет в списке")
+
+    monkeypatch.setattr(transport, "request", unreached)
+    with pytest.raises(transport.TransportError) as caught:
+        transport.graphql("mutation { createRef(input: {}) { ref { name } } }", {}, "t")
+    assert "createRef" in str(caught.value)
+    assert "REST" in str(caught.value), "отказ не назвал причину: дешевле можно"
+
+
+def test_the_allowlist_names_a_reason_for_every_entry() -> None:
+    """Каждое имя в списке — утверждение «дешевле нельзя», и оно записано словами."""
+    assert transport.NO_REST, "закрытый список пуст — дверь открыта всем"
+    for name, why in transport.NO_REST.items():
+        assert len(why) > 20, f"{name} внесён в список без причины"
+
+
+def test_errors_at_two_hundred_are_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ GraphQL приходит с кодом 200 — и читается телом, а не кодом (045)."""
+    payload = b'{"data": null, "errors": [{"message": "Resource not accessible"}]}'
+    url = next(gen := serve(200, payload))
+    try:
+        monkeypatch.setattr(transport, "GRAPHQL", url)
+        with pytest.raises(transport.TransportError) as caught:
+            transport.graphql(
+                "mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }", {}, "t"
+            )
+        assert "Resource not accessible" in str(caught.value)
+        assert "отвергнут площадкой" in str(caught.value)
+    finally:
+        next(gen, None)
+
+
+def test_neither_data_nor_errors_is_not_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ни данных, ни ошибок — форма ответа изменилась, и это не «чисто»."""
+    url = next(gen := serve(200, b'{"whatever": 1}'))
+    try:
+        monkeypatch.setattr(transport, "GRAPHQL", url)
+        with pytest.raises(transport.TransportError) as caught:
+            transport.graphql(
+                "mutation { disablePullRequestAutoMerge(input: {}) { clientMutationId } }", {}, "t"
+            )
+        assert "читать нечего" in str(caught.value)
+    finally:
+        next(gen, None)
+
+
+def test_the_data_comes_back_unwrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Удача отдаёт `data` — обёртку разбирает дверь, а не каждый механизм."""
+    payload = b'{"data": {"enablePullRequestAutoMerge": {"pullRequest": {"number": 7}}}}'
+    url = next(gen := serve(200, payload))
+    try:
+        monkeypatch.setattr(transport, "GRAPHQL", url)
+        got = transport.graphql(
+            "mutation { enablePullRequestAutoMerge(input: {}) { pullRequest { number } } }",
+            {},
+            "t",
+        )
+        assert got["enablePullRequestAutoMerge"]["pullRequest"]["number"] == 7
+    finally:
+        next(gen, None)
