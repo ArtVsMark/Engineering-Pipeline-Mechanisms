@@ -122,6 +122,25 @@ jobs:
             echo "present=yes" >> "$GITHUB_OUTPUT"
           fi
 
+      # НОМЕР ПРОВЕРЯЕТСЯ ОДИН РАЗ И ДО ВСЕГО. Дальше он уезжает и в аргумент
+      # шага, и в ИНСТРУКЦИЮ агента, а «не число» там исполнится как чужая
+      # строка — в оболочке или в промпте
+      # ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
+      # Одна проверка на входе дешевле и надёжнее, чем экранирование в каждом
+      # месте: место можно забыть, вход — один.
+      - name: номер изменения — цифры
+        if: steps.token.outputs.present == 'yes'
+        env:
+          SUBJECT: ${{ inputs.pr || github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          case "${SUBJECT:-}" in
+            ''|*[!0-9]*)
+              echo "::error::номер изменения обязан быть цифрами, пришло: ${SUBJECT:-—}"
+              exit 1 ;;
+          esac
+          echo "предмет разбора: #$SUBJECT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.present == 'yes'
         with:
@@ -146,11 +165,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # НОМЕР ИДЁТ ОКРУЖЕНИЕМ, А НЕ ПОДСТАНОВКОЙ В ТЕКСТ КОМАНДЫ.
+          # Подставленный `${{ }}` — чужая строка ВНУТРИ нашей оболочки (085).
+          # Взгляд нашёл это в `review.yml` (#131); здесь тот же класс, и
+          # починка идёт по всем местам сразу, а не только по названному.
+          SUBJECT: ${{ inputs.pr || github.event.pull_request.number }}
         run: |
           set -uo pipefail
           rc=0
           python scripts/task_items.py \
-            --pr "${{ inputs.pr || github.event.pull_request.number }}" \
+            --pr "$SUBJECT" \
             --collect "$RUNNER_TEMP/subject.md" || rc=$?
           case "$rc" in
             3) echo "ready=yes" >> "$GITHUB_OUTPUT" ;;
@@ -180,10 +204,13 @@ jobs:
                 ${{ runner.temp }}/subject.md
 
             Там тело изменения и НЕЗАКРЫТЫЕ пункты связанных задач, записанные
-            дословно. Найди уплотнённый коммит изменения и посмотри, что в нём
-            на самом деле сделано:
+            дословно. НОМЕР изменения — в первой строке того же файла; сюда он
+            не подставляется намеренно: подставленный ввод — чужая строка
+            внутри инструкции тебе, а проверенный номер и так лежит в предмете.
+            Найди уплотнённый коммит по этому номеру и посмотри, что в нём на
+            самом деле сделано:
 
-                git log --oneline --grep "(#${{ inputs.pr || github.event.pull_request.number }})" -n 5
+                git log --oneline --grep "(#НОМЕР)" -n 5
                 git show <хэш>
 
             ТВОЁ ОСНОВАНИЕ СЛАБЕЕ, ЧЕМ У АВТОРА. Он говорит «я это сделал», а
@@ -214,11 +241,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # НОМЕР ИДЁТ ОКРУЖЕНИЕМ, А НЕ ПОДСТАНОВКОЙ В ТЕКСТ КОМАНДЫ.
+          # Подставленный `${{ }}` — чужая строка ВНУТРИ нашей оболочки (085).
+          # Взгляд нашёл это в `review.yml` (#131); здесь тот же класс, и
+          # починка идёт по всем местам сразу, а не только по названному.
+          SUBJECT: ${{ inputs.pr || github.event.pull_request.number }}
         run: |
           set -uo pipefail
           rc=0
           python scripts/task_items.py \
-            --pr "${{ inputs.pr || github.event.pull_request.number }}" \
+            --pr "$SUBJECT" \
             --from "${{ steps.review.outputs.execution_file }}" --apply || rc=$?
           case "$rc" in
             0) echo "разбор не назвал ни одного закрытого пункта с доказательством" ;;
