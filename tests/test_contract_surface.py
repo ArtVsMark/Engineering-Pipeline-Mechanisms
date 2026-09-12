@@ -299,7 +299,8 @@ def changed(tmp_path: Path, *, workflow: str = WORKFLOW, answer: str = ANSWER) -
     """Различия поверхности между образцом и правкой."""
     before = contract.surface(tree(tmp_path / "before"))
     after = contract.surface(tree(tmp_path / "after", workflow=workflow, answer=answer))
-    return contract.differences(before, after)
+    found: list[str] = contract.differences(before, after)
+    return found
 
 
 def test_a_removed_check_is_breaking(tmp_path: Path) -> None:
