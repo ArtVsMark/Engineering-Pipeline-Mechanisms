@@ -128,21 +128,24 @@ def test_a_clone_without_tags_says_so(run_script: RunScript, tmp_path: Path) -> 
     assert "git fetch --tags" in run.text
 
 
-def test_a_diverged_declaration_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Объявленная версия и тег разошлись — механизм называет это, а не выбирает.
+def test_the_tag_and_the_contract_version_are_independent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Расхождение тега с версией контракта — ЗАКОННОЕ состояние, а не дефект.
 
-    Тег ставится ПО объявленной версии; разошлись — значит одно правилось мимо
-    другого, и какое именно, механизму знать неоткуда (154). Замер 10.09.2026:
-    тег выпуска стоял, а объявленный контракт отстал от него на целую MINOR.
+    Числа развязаны решением
+    `docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md`:
+    выпуск двигает минор тега всегда, а версия контракта поднимается только
+    вместе с тронутой поверхностью. Прежняя сверка называла такое расхождение
+    дефектом — и после развязки ругалась бы на каждом заходе, то есть приучала
+    бы себя обходить (051). Поэтому её не стало, и держится это тем, что имени
+    в модуле больше нет.
     """
-    monkeypatch.setattr(module, "release_tag", lambda: "v9.9.0")
-    assert "9.9" in module.agrees()
-
-
-def test_no_tag_means_nothing_to_diverge_from(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Тега нет — расхождения нет: сверять объявленное не с чем."""
-    monkeypatch.setattr(module, "release_tag", lambda: None)
-    assert module.agrees() == ""
+    assert not hasattr(module, "agrees"), "сверка вернулась: она спорит с решением 017"
+    monkeypatch.setattr(module, "release_tag", lambda root=None: "v9.9.0")
+    number, whole = module.version()
+    assert number.startswith("9.9."), number
+    assert whole is True
 
 
 def test_the_version_is_not_written_by_hand() -> None:

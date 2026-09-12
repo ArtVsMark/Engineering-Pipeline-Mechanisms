@@ -202,22 +202,6 @@ def version(root: Path | None = None) -> tuple[str, bool]:
     return f"{major}.{minor}.{changes_in('HEAD', root)}", False
 
 
-def agrees() -> str:
-    """Расхождение объявленной версии с последним тегом; пусто — сошлись.
-
-    Тег ставится ПО объявленной версии, поэтому MAJOR.MINOR у них обязаны
-    совпадать. Разошлись — значит одно из двух правилось мимо другого, и
-    какое именно, механизму знать неоткуда: он называет расхождение, а не
-    выбирает победителя (154).
-    """
-    tag = release_tag()
-    if tag is None:
-        return ""
-    theirs = ".".join(tag.lstrip("v").split(".")[:2])
-    ours = ".".join(declared().split(".")[:2])
-    return "" if theirs == ours else f"тег {tag} говорит {theirs}, CONTRACT_VERSION — {ours}"
-
-
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает версию и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -226,7 +210,6 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         number, whole = version()
-        divergence = agrees()
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -238,9 +221,15 @@ def main(argv: list[str] | None = None) -> int:
             "и это объявленный контракт, а не выпущенное. Подтяните теги: git fetch --tags",
             file=sys.stderr,
         )
-    if divergence:
-        print(f"warning: объявленная версия разошлась с тегом — {divergence}", file=sys.stderr)
-    if args.check and (divergence or not whole):
+    # СВЕРКИ ТЕГА С ВЕРСИЕЙ КОНТРАКТА ЗДЕСЬ БОЛЬШЕ НЕТ, и это не упрощение.
+    # Числа развязаны решением
+    # `docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md`:
+    # тег двигает минор на каждом выпуске, а версия контракта — только когда
+    # тронута поверхность. Их расхождение стало ЗАКОННЫМ, и проверка, прежде
+    # называвшая его дефектом, теперь ругалась бы на каждом заходе — то есть
+    # приучала бы обходить себя
+    # ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    if args.check and not whole:
         return EXIT_PARTIAL
     return EXIT_OK
 

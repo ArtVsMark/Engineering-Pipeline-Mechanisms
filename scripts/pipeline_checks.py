@@ -184,6 +184,23 @@ def _triggers_of(document: dict[Any, Any]) -> list[str]:
     return [str(raw)] if raw else []
 
 
+def span(path: Path = DEFAULT_PATH) -> str:
+    """Объявленный потребителем диапазон совместимости — как он написан.
+
+    Читатель у него теперь не один: `load` проверяет им версию контракта, а шаг
+    выпуска спрашивает ЗАРАНЕЕ, поместится ли в него подъём. Второй разбор того
+    же поля разошёлся бы с первым молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
+    if not isinstance(raw, dict):
+        raise BadPolicy(f"{path}: ответ проекта не прочитан — диапазон спросить не у чего")
+    found = str(raw.get("contract") or "").strip()
+    if not found:
+        raise BadPolicy(f"{path}: диапазон совместимости не объявлен (154)")
+    return found
+
+
 def compatible(declared: str, version: str) -> bool:
     """Попадает ли версия контракта в объявленный потребителем диапазон.
 
