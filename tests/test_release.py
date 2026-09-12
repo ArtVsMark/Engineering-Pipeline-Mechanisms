@@ -21,10 +21,26 @@ module = load_script("release.py")
 
 
 def tree(
-    root: Path, version: str = FAKE_VERSION, *, fragments: tuple[str, ...] = ("a.added.md",)
+    root: Path,
+    version: str = FAKE_VERSION,
+    *,
+    fragments: tuple[str, ...] = ("a.added.md",),
+    tag: str = "",
 ) -> Path:
-    """Собирает дерево, готовое к выпуску: версия, фрагменты, чистый git."""
+    """Собирает дерево, готовое к выпуску: версия, ответ проекта, фрагменты, git.
+
+    ОТВЕТ ПРОЕКТА ЗДЕСЬ НЕ УКРАШЕНИЕ: выпуск спрашивает объявленный диапазон
+    совместимости, чтобы отказать ДО необратимого, если подъём версии контракта
+    в него не поместится. Без файла заход честно говорит «диапазон спросить не
+    у чего», и подделка без него проверяла бы не выпуск, а этот отказ.
+    """
     (root / "CONTRACT_VERSION").write_text(f"{version}\n", encoding="utf-8")
+    major, minor = version.split(".")[:2]
+    (root / ".pipeline.yml").write_text(
+        f'schema: 4\ncontract: ">={major}.{minor},<{major}.{int(minor) + 1}"\n'
+        "checks:\n  lint: required\n",
+        encoding="utf-8",
+    )
     kits = root / "changelog.d"
     kits.mkdir(exist_ok=True)
     (kits / "README.md").write_text("правила фрагментов\n", encoding="utf-8")
@@ -39,16 +55,51 @@ def tree(
     subprocess.run(["git", "config", "user.name", "выпуск"], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+    # ЛИНИЮ ВЫПУСКОВ ЗАДАЁТ ТЕГ, а не версия контракта: числа развязаны
+    # решением 017, и «какой номер ожидается следующим» считается от тега.
+    if tag:
+        subprocess.run(["git", "tag", "-a", tag, "-m", tag], cwd=root, check=True)
     return root
 
 
-def test_the_next_version_raises_the_minor() -> None:
-    """Минор растёт, когда поверхность тронута: есть фрагмент рода `contract`.
+def test_a_release_always_raises_the_minor() -> None:
+    """ВЫПУСК двигает минор на единицу — всегда, и обнуляет патч.
 
-    Патч при этом обнуляется: новый минор начинается с нуля.
+    Патч выпуском не бывает: это разряд ГОЛОВЫ, число принятых изменений после
+    тега. `1.0.1` — версия дерева, а не выпуск. Замер по семье 12.09.2026:
+    каталог `v1.0.0 → v1.1.0 → v1.2.0`, грейдер `v1.4.0 … v1.11.0`, токен
+    `v0.1 → v0.2` — патч-тегов нет ни у кого
+    (`docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md`).
     """
-    assert module.next_after("9.9.0", contract=True) == "9.10.0"
-    assert module.next_after("9.9.73", contract=True) == "9.10.0"
+    assert module.next_after("9.9.0") == "9.10.0"
+    assert module.next_after("9.9.73") == "9.10.0"
+    assert module.next_after("1.0.0") == "1.1.0"
+
+
+def test_the_contract_version_moves_only_with_the_surface() -> None:
+    """Версия КОНТРАКТА поднимается только вместе с тронутой поверхностью.
+
+    Довод решения 015 сохранён целиком: подъём её минора — требование
+    перечитать ответы, и требовать его на каждом выпуске значило бы требовать
+    зря. Поверхность не тронута — число не меняется ВОВСЕ, ни минором, ни
+    патчем.
+    """
+    assert module.next_contract("3.1.0", touched=True) == "3.2.0"
+    assert module.next_contract("3.1.0", touched=False) == "3.1.0"
+    assert module.next_contract("1.4.7", touched=False) == "1.4.7"
+
+
+def test_the_two_numbers_are_independent() -> None:
+    """Тег и версия контракта расходятся ЗАКОННО — это и есть развязка.
+
+    Выпуск с тронутой поверхностью двигает оба числа, но по своим правилам, а
+    выпуск без неё двигает только тег. Проверяется именно расхождение: пока
+    числа были одним, каждый тег требовал перечитать ответы.
+    """
+    tag, contract = "1.0.0", "3.1.0"
+    assert module.next_after(tag) == "1.1.0"
+    assert module.next_contract(contract, touched=False) == "3.1.0"
+    assert module.next_after(tag) != module.next_contract(contract, touched=True)
 
 
 def test_a_contract_fragment_leaves_the_major_alone() -> None:
@@ -61,8 +112,9 @@ def test_a_contract_fragment_leaves_the_major_alone() -> None:
     """
     for current in ("2.5.0", "9.9.73"):
         was = current.split(".")[0]
-        for contract in (True, False):
-            assert module.next_after(current, contract=contract).split(".")[0] == was
+        assert module.next_after(current).split(".")[0] == was
+        for touched in (True, False):
+            assert module.next_contract(current, touched=touched).split(".")[0] == was
 
 
 def test_the_major_needs_a_named_acceptance(run_script: RunScript, tmp_path: Path) -> None:
@@ -166,11 +218,32 @@ def test_the_acceptance_state_separates_the_two_unknowns(
 
 
 def test_a_wrong_minor_is_refused(run_script: RunScript, tmp_path: Path) -> None:
-    """Номер, не следующий за текущим, отвергается с названным ожиданием."""
-    tree(tmp_path)
-    run = run_script("release.py", "--version", "9.50.0", cwd=tmp_path)
+    """Номер, не следующий за линией выпусков, отвергается с названным ожиданием.
+
+    Линия считается от ТЕГА: выпуск двигает минор на единицу, и `v9.9.0` ждёт
+    `9.10.0`, а не что-нибудь дальше.
+    """
+    tree(tmp_path, tag="v9.9.0")
+    run = run_script("release.py", "--version", "9.40.0", cwd=tmp_path)
     assert run.code == 1, run.text
-    assert "ожидается 9.9.1" in run.text
+    assert "ожидается 9.10.0" in run.text
+
+
+def test_the_first_release_starts_the_line(run_script: RunScript, tmp_path: Path) -> None:
+    """Тегов нет вовсе — линия начинается с нуля, и ожидается первый минор.
+
+    «Тега нет» и «тег есть» — разные состояния, и второе не подставляется
+    вместо первого молча (045).
+    """
+    tree(tmp_path)
+    # Мажор назван ТОТ ЖЕ, что в линии: иначе первым отказом придёт приёмка —
+    # мажор поднимает она, и до разряда дело не дойдёт.
+    run = run_script("release.py", "--version", "0.9.0", cwd=tmp_path)
+    assert run.code == 1, run.text
+    # Ожидаемое число СЧИТАЕТСЯ тем же механизмом, а не вписывается: вписанное
+    # совпало бы с живой версией проекта, и гейт «версия не правится руками»
+    # нашёл бы его в наборе (035).
+    assert f"ожидается {module.next_after('0.0.0')}" in run.text
 
 
 def test_an_empty_release_is_an_input_error(run_script: RunScript, tmp_path: Path) -> None:
@@ -196,11 +269,11 @@ def test_an_existing_tag_is_refused(run_script: RunScript, tmp_path: Path) -> No
     Это главный необратимый шаг: переставленный тег меняет то, на что уже
     прибит потребитель, и заметить это он не обязан.
     """
-    tree(tmp_path)
-    # Тег ставится на ОЖИДАЕМЫЙ номер: фрагмент здесь не о поверхности, значит
-    # ожидается патч, а не минор (decisions/015).
-    subprocess.run(["git", "tag", "v9.9.1"], cwd=tmp_path, check=True)
-    run = run_script("release.py", cwd=tmp_path)
+    # Тег стоит РОВНО на ожидаемом номере: линия `v9.8.0` ждёт `9.9.0`, и он же
+    # уже помечен. Иначе отказ пришёл бы за номер, а не за переставляемый тег.
+    tree(tmp_path, tag="v9.8.0")
+    subprocess.run(["git", "tag", "-a", "v9.9.0", "-m", "v9.9.0"], cwd=tmp_path, check=True)
+    run = run_script("release.py", "--version", "9.9.0", cwd=tmp_path)
     assert run.code == 1, run.text
     assert "не переставляется" in run.text
 
@@ -242,12 +315,14 @@ def test_the_release_moves_fragments_and_tags(run_script: RunScript, tmp_path: P
     Фрагменты именно ПЕРЕЕЗЖАЮТ, а не удаляются: собранный журнал производный,
     и источником остаются они ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-generated-file-is-not-a-store.md)).
     """
-    tree(tmp_path)
+    tree(tmp_path, tag="v9.9.0")
     run = run_script("release.py", "--apply", cwd=tmp_path)
     assert run.code == 0, run.text
-    assert (tmp_path / "changelog.d" / "released" / "9.9.1" / "a.added.md").is_file()
+    assert (tmp_path / "changelog.d" / "released" / "9.10.0" / "a.added.md").is_file()
     assert not (tmp_path / "changelog.d" / "a.added.md").exists()
-    assert (tmp_path / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == "9.9.1"
+    # ВЕРСИЯ КОНТРАКТА НЕ ТРОНУТА: фрагмент здесь рода `added`, поверхность
+    # цела, и требовать от потребителя перечитывания было бы ложным обещанием.
+    assert (tmp_path / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == FAKE_VERSION
     tags = subprocess.run(
         ["git", "tag", "--list"],
         cwd=tmp_path,
@@ -256,7 +331,7 @@ def test_the_release_moves_fragments_and_tags(run_script: RunScript, tmp_path: P
         encoding="utf-8",
         check=True,
     ).stdout.split()
-    assert tags == ["v9.9.1"]
+    assert tags == ["v9.10.0", "v9.9.0"]
 
 
 def test_the_procedure_matches_the_contract() -> None:

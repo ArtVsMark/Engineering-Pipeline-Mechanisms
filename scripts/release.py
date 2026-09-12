@@ -53,6 +53,7 @@ from typing import Final
 import build_changelog
 import ghrest
 import paths
+import pipeline_checks as policy
 import report
 import version as project_version
 
@@ -94,31 +95,53 @@ def declared_version() -> str:
     return paths.VERSION.read_text(encoding="utf-8").strip()
 
 
-def next_after(current: str, *, contract: bool) -> str:
-    """Какой номер выпуска ожидается после текущего.
+def next_after(current: str) -> str:
+    """Какой номер ВЫПУСКА ожидается после текущего: минор плюс один.
 
-    РАЗРЯД ВЫБИРАЮТ ФРАГМЕНТЫ, А НЕ ФАКТ ПОСТАНОВКИ ТЕГА. Фрагмент рода
-    `contract` означает, что поверхность тронута, — такой выпуск поднимает
-    минор. Ни одного такого нет — поверхность не тронута, и это патч, ровно как
-    сказано в таблице разрядов `docs/release.md`.
+    ВЫПУСК ДВИГАЕТ МИНОР, А ПАТЧ ВЫПУСКОМ НЕ БЫВАЕТ. Патч — разряд ГОЛОВЫ:
+    `version.version()` считает его числом принятых изменений после тега, и
+    `1.0.1` это версия дерева, а не выпуск. Замер по семье 12.09.2026: каталог
+    `v1.0.0 → v1.1.0 → v1.2.0`, грейдер `v1.4.0 … v1.11.0`, токен
+    `v0.1 → v0.2` — **патч-тегов нет ни у кого**.
 
-    ПРЕЖНИЙ РАСЧЁТ СПОРИЛ С ДОГОВОРОМ. Минор рос ВСЕГДА под инвариантом «каждый
-    тег вида `vX.Y.0`», и каждый выпуск объявлял потребителю «поверхность
-    расширена», даже когда правилась опечатка. Ложное обещание стоит
-    перечитывания ответов, которых ничто не отменяло, а перечитывание,
-    потребованное зря, перестают делать
-    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
-    Разбор и отвергнутые варианты —
-    `docs/decisions/015-the-contract-version-moves-by-its-own-digits.md`.
+    ПОЧЕМУ ЭТО НЕ ВОЗВРАТ К ОТМЕНЁННОМУ. Решение 015 сняло прежний расчёт
+    потому, что тег и версия контракта были ОДНИМ числом: минор тега двигал
+    минор контракта, и каждый выпуск ложно объявлял «поверхность расширена».
+    Числа развязаны (`docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md`),
+    и довод 015 остался в силе — он теперь про :func:`next_contract`, а не про
+    этот расчёт.
 
-    МАЖОР ЗДЕСЬ НЕ РАСТЁТ НИКОГДА: его поднимает закрытая приёмка, а не род
-    фрагмента, и состояние приёмки механизм спрашивает у площадки.
+    МАЖОР ЗДЕСЬ НЕ РАСТЁТ НИКОГДА: его поднимает закрытая приёмка, и состояние
+    приёмки механизм спрашивает у площадки.
     """
     found = VERSION_RE.match(current)
     if found is None:
-        raise NotRun(f"объявленная версия «{current}» не вида МАЖОР.МИНОР.ПАТЧ")
-    major, minor, patch = (int(found.group(one)) for one in (1, 2, 3))
-    return f"{major}.{minor + 1}.0" if contract else f"{major}.{minor}.{patch + 1}"
+        raise NotRun(f"версия «{current}» не вида МАЖОР.МИНОР.ПАТЧ")
+    major, minor = (int(found.group(one)) for one in (1, 2))
+    return f"{major}.{minor + 1}.0"
+
+
+def next_contract(current: str, *, touched: bool) -> str:
+    """Какой станет версия КОНТРАКТА: минор, только если поверхность тронута.
+
+    ВЕРСИЯ КОНТРАКТА ДВИЖЕТСЯ СВОИМИ РАЗРЯДАМИ, и это довод решения 015,
+    сохранённый целиком. Подъём её минора — требование перечитать ответы
+    ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)),
+    и требовать его на каждом выпуске значило бы требовать зря: перечитывание,
+    потребованное зря, перестают делать
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    Поверхность не тронута — число НЕ МЕНЯЕТСЯ вовсе: ни минор, ни патч. Патч
+    контракта в этом проекте не растёт ни от чего, и это названо, а не забыто:
+    у контракта нет события, которое двигало бы его, не тронув поверхность.
+    """
+    found = VERSION_RE.match(current)
+    if found is None:
+        raise NotRun(f"версия контракта «{current}» не вида МАЖОР.МИНОР.ПАТЧ")
+    if not touched:
+        return current
+    major, minor = (int(found.group(one)) for one in (1, 2))
+    return f"{major}.{minor + 1}.0"
 
 
 #: Состояния названной приёмки. Четыре, а не три: «такой задачи нет» чинится
@@ -193,9 +216,13 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
     if tags:
         problems.append(f"тег v{wanted} уже стоит — тег не переставляется (074)")
 
+    # ЛИНИЯ ВЫПУСКОВ СЧИТАЕТСЯ ОТ ТЕГА, А НЕ ОТ ВЕРСИИ КОНТРАКТА: числа
+    # развязаны (решение 017), и версия контракта больше не говорит, какой тег
+    # ожидается следующим. Тега нет вовсе — линия начинается с нуля.
+    line = (project_version.release_tag() or "v0.0.0").lstrip("v")
+    expected = next_after(line)
     current = declared_version()
-    expected = next_after(current, contract=bool(touches_contract(waiting)))
-    major_now = int(VERSION_RE.match(current).group(1))  # type: ignore[union-attr]
+    major_now = int(VERSION_RE.match(line).group(1))  # type: ignore[union-attr]
     major_wanted = int(VERSION_RE.match(wanted).group(1))  # type: ignore[union-attr]
 
     if major_wanted > major_now and not acceptance:
@@ -226,9 +253,30 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
         )
     elif major_wanted == major_now and wanted != expected:
         problems.append(
-            f"ожидается {expected}, а названо {wanted}: разряд выбирают ФРАГМЕНТЫ — "
-            "фрагмент рода `contract` поднимает минор, его отсутствие — патч"
+            f"ожидается {expected}, а названо {wanted}: выпуск двигает МИНОР на единицу. "
+            "Патч выпуском не бывает — это разряд головы (`1.0.1` версия, а не выпуск)"
         )
+
+    # ПОДЪЁМ ВЕРСИИ КОНТРАКТА ОБЯЗАН ПОМЕЩАТЬСЯ В НАШ ЖЕ ОТВЕТ. Мы сами
+    # потребитель своего контракта: `.pipeline.yml` объявляет диапазон
+    # совместимости, и версия вне него роняет обязательную проверку `pipeline`
+    # на общей ветке — то есть выпуск покрасил бы её сразу после себя.
+    # Отказ идёт ДО необратимого, и перечитывание требуется словами (157).
+    after = next_contract(current, touched=bool(touches_contract(waiting)))
+    try:
+        span = policy.span()
+    except policy.BadPolicy as exc:
+        # Ответ проекта не прочитан — это НЕ «диапазон подходит». Выпуск не
+        # может убедиться, что подъём в него поместится, и говорит об этом
+        # причиной, а не трассировкой (045).
+        problems.append(f"ответ проекта не прочитан, и диапазон спросить не у чего: {exc}")
+    else:
+        if after != current and not policy.compatible(span, after):
+            problems.append(
+                f"выпуск поднимет версию контракта {current} → {after}, а объявленный диапазон "
+                f"«{span}» её не принимает: обязательная проверка `pipeline` покраснеет сразу "
+                "после выпуска. Перечитайте ответы и подвиньте диапазон в `.pipeline.yml` (157)"
+            )
     return problems
 
 
@@ -254,7 +302,18 @@ def do_release(wanted: str) -> None:
     не соглашение: тег ставится последним, когда всё остальное уже в коммите.
     """
     build_changelog.do_release(wanted)
-    paths.VERSION.write_text(f"{wanted}\n", encoding="utf-8")
+    # ВЕРСИЯ КОНТРАКТА ПИШЕТСЯ ТОЛЬКО ЕСЛИ ПОВЕРХНОСТЬ ТРОНУТА. Прежде здесь
+    # стоял номер выпуска, и два числа были одним: каждый тег двигал версию
+    # контракта, то есть требовал перечитать ответы, которых ничто не
+    # отменяло. Решение 017 развязало их.
+    touched = bool(touches_contract(fragments()))
+    contract_now = declared_version()
+    contract_after = next_contract(contract_now, touched=touched)
+    if contract_after != contract_now:
+        paths.VERSION.write_text(f"{contract_after}\n", encoding="utf-8")
+        print(f"версия контракта {contract_now} → {contract_after}: поверхность тронута")
+    else:
+        print(f"версия контракта осталась {contract_now}: поверхность не тронута")
     build_changelog.main([])
     git("add", "-A")
     git("commit", "-m", f"release: {wanted}")
@@ -280,9 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        wanted = args.version or next_after(
-            declared_version(), contract=bool(touches_contract(fragments()))
-        )
+        wanted = args.version or next_after((project_version.release_tag() or "v0.0.0").lstrip("v"))
         # Состояние приёмки спрашивается ОДИН раз и передаётся обоим: разбор и
         # печать обязаны говорить об одном состоянии, а два запроса на одном
         # заходе могли бы разойтись.
