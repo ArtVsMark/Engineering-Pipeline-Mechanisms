@@ -146,16 +146,24 @@ def test_a_built_step_of_the_contract_exists_in_the_tree() -> None:
     )
 
 
-def test_the_skeleton_may_name_what_is_not_built_yet() -> None:
-    """Предмет проверки найден: непостроенные шаги в договоре ЕСТЬ (075).
+def test_the_contract_rows_have_a_built_subject() -> None:
+    """Предмет проверки найден: строки с ПОСТРОЕННЫМ файлом в договоре есть (075).
 
-    Без этой проверки предыдущая зеленела бы и на договоре, из которого убрали
-    весь скелет: «все описанные построены» верно и тогда, когда описанных нет.
+    Без этого предыдущая зеленела бы и на договоре, из которого убрали весь
+    скелет: «ни одна построенная строка не врёт» верно и тогда, когда
+    построенных строк нет вовсе.
+
+    ЗДЕСЬ СТОЯЛО ОБРАТНОЕ ТРЕБОВАНИЕ, и оно держалось лишь тем, что скелет был
+    неполон: «непостроенный шаг обязан остаться». 12.09.2026 построен шаг 11 —
+    последний объявленный без файла, — и проверка покраснела на ЗАКРЫТОМ
+    пробеле, то есть запретила доделать работу. Предмет соседней проверки —
+    строки с файлом, их и надо спрашивать
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
     """
-    planned = [
-        (workflow, job) for workflow, job in contract_rows() if not (WORKFLOWS / workflow).is_file()
+    built = [
+        (workflow, job) for workflow, job in contract_rows() if (WORKFLOWS / workflow).is_file()
     ]
-    assert planned, "в договоре не осталось ни одного непостроенного шага — скелет исчез"
+    assert built, "в договоре не осталось ни одной построенной строки — сверять нечего"
 
 
 def test_summary_has_no_needs() -> None:
