@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
 
@@ -475,3 +476,52 @@ def test_a_breaking_flag_with_a_touched_surface_is_labelled(
     assert run.code == 0, run.text
     assert "несовместимо" in run.text.lower(), run.text
     assert "10.0.0" in run.text, run.text
+
+
+def release_step() -> str:
+    """ИСПОЛНЯЕМЫЙ текст необратимого шага выпуска: комментарии сняты.
+
+    Сняты не для красоты: разбор, объясняющий старую ошибку, называет её же
+    дословно, и гейт, читающий весь текст шага, видел бы `--follow-tags` в
+    собственном объяснении и краснел на починенном механизме.
+    """
+    document = yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text("utf-8"))
+    steps = document["jobs"]["release"]["steps"]
+    found = [step for step in steps if step.get("name") == "выпустить"]
+    if len(found) != 1:
+        raise AssertionError(f"шаг «выпустить» найден {len(found)} раз — читать нечего (075)")
+    lines = [line for line in str(found[0]["run"]).splitlines() if not line.lstrip().startswith("#")]
+    return "\n".join(lines)
+
+
+def test_the_tag_leaves_only_after_the_commit_landed() -> None:
+    """Тег отправляется ПОСЛЕ ветки, отдельным толчком, а не вместе с ней.
+
+    Замер 12.09.2026, прогон `release #3`: здесь стоял `git push origin HEAD
+    --follow-tags` — один заход на два ref'а без порядка между ними. Площадка
+    отвергла ветку (набор правил общей ветки требует `ci-complete`, а у
+    коммита выпуска проверки нет) и приняла тег: `v1.0.0` повис на коммите,
+    которого в общей ветке не было, а необратимое при этом уже случилось
+    ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)).
+    """
+    text = release_step()
+    assert "--follow-tags" not in text, "тег снова уезжает вместе с веткой, без порядка"
+    branch = text.find("git push origin HEAD")
+    assert branch != -1, "ветка не отправляется вовсе"
+    tag = text.find('git push origin "${tag}"')
+    assert tag != -1, "тег не отправляется отдельным толчком"
+    assert branch < tag, "тег отправляется раньше ветки — метить будет нечего"
+
+
+def test_a_rejected_branch_is_named_not_swallowed() -> None:
+    """Отказ общей ветки называется причиной, а не голым кодом возврата.
+
+    Отказ был бы виден как «упал шаг», и искать стали бы в механизме выпуска,
+    а искать надо в наборе правил общей ветки
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
+    text = release_step()
+    assert "if ! git push origin HEAD; then" in text, "отказ ветки ничем не перехвачен"
+    said = text[text.find("if ! git push origin HEAD; then") :]
+    assert "::error::" in said, "отказ ветки не назван"
+    assert "обход" in said.lower(), "причина отказа не названа: обход набора правил"
