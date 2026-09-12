@@ -497,12 +497,13 @@ def release_step() -> str:
 def test_the_tag_leaves_only_after_the_commit_landed() -> None:
     """Тег отправляется ПОСЛЕ ветки, отдельным толчком, а не вместе с ней.
 
-    Замер 12.09.2026, прогон `release #3`: здесь стоял `git push origin HEAD
-    --follow-tags` — один заход на два ref'а без порядка между ними. Площадка
-    отвергла ветку (набор правил общей ветки требует `ci-complete`, а у
-    коммита выпуска проверки нет) и приняла тег: `v1.0.0` повис на коммите,
-    которого в общей ветке не было, а необратимое при этом уже случилось
+    Один заход на два ref'а не даёт порядка между ними: площадка вправе
+    принять тег и отвергнуть ветку, и метка остаётся на коммите, до общей
+    ветки не доехавшем — необратимое случилось, а выход оказался
+    нетерминальным
     ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)).
+    Чем это обошлось — в журнале, фрагмент
+    `a-tag-follows-the-commit-that-landed`.
     """
     text = release_step()
     assert "--follow-tags" not in text, "тег снова уезжает вместе с веткой, без порядка"
@@ -525,3 +526,21 @@ def test_a_rejected_branch_is_named_not_swallowed() -> None:
     said = text[text.find("if ! git push origin HEAD; then") :]
     assert "::error::" in said, "отказ ветки не назван"
     assert "обход" in said.lower(), "причина отказа не названа: обход набора правил"
+
+
+def test_a_rejected_tag_is_named_too_and_names_its_own_repair() -> None:
+    """Отказ ВТОРОГО толчка называется тоже, и починка у него своя.
+
+    Состояния разные: после отказа ветки не сделано ничего, после отказа тега
+    коммит выпуска уже в общей ветке, а метки на нём нет. Свести их к одному
+    «упало» значит отправить человека чинить не то
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    Нашёл внешний взгляд на #259: здесь толчок тега падал голым кодом возврата.
+    """
+    text = release_step()
+    start = text.find('if ! git push origin "${tag}"; then')
+    assert start != -1, "отказ тега ничем не перехвачен"
+    said = text[start:]
+    assert "::error::" in said, "отказ тега не назван"
+    assert "git push origin ${tag}" in said, "починка отказа тега не названа"
+    assert "не повторять" in said.lower(), "повтор выпуска после этого отказа не запрещён"
