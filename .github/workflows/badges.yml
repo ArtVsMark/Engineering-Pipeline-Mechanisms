@@ -63,12 +63,42 @@ jobs:
           curl -sSfL -o "$RUNNER_TEMP/where.json" \
             https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook/badges/export/where.json \
             || echo "::warning::Сводка семьи не скачалась — числа общих механизмов будут объявлены непрочитанными."
+      # ПОКРЫТИЕ СЧИТАЕТСЯ ПРОГОНОМ, И СЧЁТЧИК ОБЯЗАН ВИДЕТЬ ПОДПРОЦЕССЫ. Гейты
+      # проверяются ЗАПУСКОМ, и без ключа `COVERAGE_SUBPROCESS` счётчик показывал
+      # ноль у полностью проверенных модулей: 66% против настоящих 77%. Обёртку
+      # ставит `tests/conftest.py`, а не `.pth` в чужом каталоге пакетов —
+      # молчаливый приём сломался бы незаметно.
+      #
+      # Отказ здесь не роняет шаг: без отчёта покрытие объявляется НЕ
+      # прочитанным, а не нулевым (045). Прочие факты собираются в любом случае.
+      - name: сосчитать покрытие
+        continue-on-error: true
+        env:
+          COVERAGE_SUBPROCESS: "1"
+        run: |
+          set -uo pipefail
+          python -m pip install --quiet "coverage>=7,<8"
+          rc=0
+          python -m coverage run --parallel-mode --source=scripts -m pytest -q || rc=$?
+          # Зелёным считается ТОЛЬКО объявленный код: Python отдаёт единицу и
+          # при необработанном сбое, и читать её условием значило бы засчитать
+          # поломку за известное состояние (068).
+          case "$rc" in
+            0)
+              python -m coverage combine -q
+              python -m coverage json -o "$RUNNER_TEMP/coverage.json" -q
+              ;;
+            *)
+              echo "::warning::Набор не прошёл под счётчиком (код $rc) — покрытие будет объявлено непрочитанным."
+              ;;
+          esac
       - name: собрать факты и значок
         run: |
           python scripts/build_facts.py \
             --out-dir "${RUNNER_TEMP}/badges" \
             --sha "${GITHUB_SHA}" \
-            --family "${RUNNER_TEMP}/where.json"
+            --family "${RUNNER_TEMP}/where.json" \
+            --coverage "${RUNNER_TEMP}/coverage.json"
       - name: опубликовать в ветку badges
         env:
           GITHUB_TOKEN: ${{ github.token }}

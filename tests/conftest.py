@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+from typing import Final
 
 import pytest
 
@@ -71,6 +72,45 @@ class Run:
 RunScript = Callable[..., "Run"]
 
 
+#: Ключ, которым заход объявляет себя ЗАМЕРОМ покрытия. Пусто — обычный
+#: прогон, и никакой счётчик не поднимается: платить за измерение на каждом
+#: заходе незачем.
+MEASURING: Final = "COVERAGE_SUBPROCESS"
+
+
+def under_counter(script: Path, args: tuple[str, ...]) -> list[str]:
+    """Команда запуска механизма — при замере обёрнутая счётчиком покрытия.
+
+    ПОЧЕМУ ЭТО ВООБЩЕ НУЖНО. Гейты этого проекта проверяются ЗАПУСКОМ: тест
+    зовёт модуль отдельным процессом и смотрит исход. Счётчик покрытия
+    подпроцессов не видит, и четыре полностью проверенных модуля показывали
+    ноль при семнадцати вызовах из набора — то есть число, на котором собрались
+    строить порог, было ложным
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+
+    ПОЧЕМУ ОБЁРТКОЙ, А НЕ ПОДМЕНОЙ ЗАПУСКА PYTHON. Обычный приём — положить
+    `.pth` в каталог пакетов и поднимать счётчик у КАЖДОГО процесса — правит
+    чужое дерево и работает молча: сломается — никто не заметит. Здесь замер
+    объявлен ключом, виден в команде и выключен по умолчанию.
+
+    `--parallel-mode` обязателен: процессов много, и без него они переписывали
+    бы один файл данных друг за другом. Сводит их `coverage combine`.
+    """
+    plain = [sys.executable, str(script), *args]
+    if not os.environ.get(MEASURING):
+        return plain
+    return [
+        sys.executable,
+        "-m",
+        "coverage",
+        "run",
+        "--parallel-mode",
+        f"--source={ROOT / 'scripts'}",
+        str(script),
+        *args,
+    ]
+
+
 @pytest.fixture
 def run_script() -> RunScript:
     """Запускает скрипт проекта отдельным процессом, как это делает прогон."""
@@ -82,6 +122,11 @@ def run_script() -> RunScript:
         env: dict[str, str] | None = None,
     ) -> Run:
         environment = dict(os.environ)
+        # Файл данных — АБСОЛЮТНЫЙ: тесты бегают в своих временных каталогах, и
+        # относительное имя завело бы по файлу на каталог, а свести их потом
+        # было бы нечем.
+        if environment.get(MEASURING):
+            environment["COVERAGE_FILE"] = str(ROOT / ".coverage")
         if env is not None:
             for key, value in env.items():
                 if value == "":
@@ -89,7 +134,7 @@ def run_script() -> RunScript:
                 else:
                     environment[key] = value
         completed = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / script), *args],
+            under_counter(ROOT / "scripts" / script, args),
             capture_output=True,
             text=True,
             encoding="utf-8",
