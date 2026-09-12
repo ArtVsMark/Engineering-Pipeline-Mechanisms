@@ -30,6 +30,14 @@ on:
         required: false
         default: false
         type: boolean
+      # НЕСОВМЕСТИМОСТЬ ОБЪЯВЛЯЕТ ЧЕЛОВЕК: род фрагмента `contract` говорит
+      # «поверхность тронута» и только, а гейт связи смотрит дифф ИЗМЕНЕНИЯ,
+      # которого у выпуска уже нет — к этому моменту слито много изменений.
+      breaking:
+        description: "поверхность изменена НЕСОВМЕСТИМО: поднимает мажор версии контракта"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -87,22 +95,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # ВВОД ИДЁТ ОКРУЖЕНИЕМ, А НЕ ПОДСТАНОВКОЙ В ТЕКСТ КОМАНДЫ (085).
+          # Кавычка или `$()` во входе кнопки исполнились бы как код.
+          ASKED_VERSION: ${{ inputs.version }}
+          ASKED_ACCEPTANCE: ${{ inputs.acceptance }}
+          ASKED_BREAKING: ${{ inputs.breaking }}
         run: |
           set -euo pipefail
-          python scripts/release.py \
-            ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
-            ${{ inputs.acceptance && format('--acceptance {0}', inputs.acceptance) || '' }}
+          args=()
+          if [ -n "${ASKED_VERSION:-}" ]; then args+=(--version "$ASKED_VERSION"); fi
+          if [ -n "${ASKED_ACCEPTANCE:-}" ]; then args+=(--acceptance "$ASKED_ACCEPTANCE"); fi
+          if [ "${ASKED_BREAKING:-false}" = "true" ]; then args+=(--breaking); fi
+          python scripts/release.py "${args[@]}"
 
       - name: выпустить
         if: inputs.apply && steps.token.outputs.present == 'yes'
         env:
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # То же окружение, что и у сухого захода: два разных способа читать
+          # один вход разошлись бы молча (090).
+          ASKED_VERSION: ${{ inputs.version }}
+          ASKED_ACCEPTANCE: ${{ inputs.acceptance }}
+          ASKED_BREAKING: ${{ inputs.breaking }}
         run: |
           set -euo pipefail
-          python scripts/release.py --apply \
-            ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
-            ${{ inputs.acceptance && format('--acceptance {0}', inputs.acceptance) || '' }}
+          args=(--apply)
+          if [ -n "${ASKED_VERSION:-}" ]; then args+=(--version "$ASKED_VERSION"); fi
+          if [ -n "${ASKED_ACCEPTANCE:-}" ]; then args+=(--acceptance "$ASKED_ACCEPTANCE"); fi
+          if [ "${ASKED_BREAKING:-false}" = "true" ]; then args+=(--breaking); fi
+          python scripts/release.py "${args[@]}"
 
           # Коммит и тег отправляются ВМЕСТЕ и последним действием: тег,
           # уехавший без коммита, указывает в пустоту, а коммит без тега — это

@@ -651,7 +651,14 @@ UNTRUSTED: Final = {
 #: оно стало данными, а не кодом.
 EXECUTED: Final = ("run:", "prompt:")
 
-INTERPOLATION: Final = re.compile(r"\$\{\{\s*(?P<expr>[^}]+?)\s*\}\}")
+#: Подстановка выражения площадки. Внутри неё бывают СВОИ фигурные скобки —
+#: `format('{0}')`, `toJSON({})`, — поэтому тело читается «что угодно до первого
+#: `}}`», а не «без фигурных вовсе». Первая редакция читала `[^}]+?` и потому НЕ
+#: ВИДЕЛА `${{ inputs.version && format('--version {0}', inputs.version) }}` —
+#: то есть молчала именно на той форме, которой в дереве и подставляли ввод.
+#: Гейт, слепой на живом дереве, хуже отсутствующего: он выглядит охраной
+#: ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+INTERPOLATION: Final = re.compile(r"\$\{\{(?P<expr>.*?)\}\}")
 
 
 def executed_lines(text: str) -> list[tuple[int, str]]:
