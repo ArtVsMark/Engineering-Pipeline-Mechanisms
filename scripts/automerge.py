@@ -734,6 +734,11 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             print(f"изменения с меткой «{LABEL_FIX_MAIN}» нет — не двигается ничего")
             return EXIT_OK
 
+    # Отказы ПО ГОЛОВАМ копятся и объявляются исходом захода. Пропустить голову
+    # и уйти зелёным значило бы спрятать «тело не принято» — названное условие
+    # пересмотра решения 011 — за успехом соседа (045).
+    refused: list[str] = []
+
     for change in queue:
         problems, _ = verdicts[change.number]
         if problems:
@@ -760,8 +765,21 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         if state == STATE_ARMABLE:
             # СЛИТЬ НЕЛЬЗЯ СЕЙЧАС — не значит «нельзя». Проверки идут либо не
             # отчитались, и ждать их теперь площадке, а не заходу.
-            hand_over(repo, change, queue, owner_token, dry_run=dry_run)
-            return EXIT_OK
+            #
+            # ОДНА ГОЛОВА НЕ УНОСИТ ВЕСЬ ЗАХОД. Отказ здесь — это отказ по
+            # ЭТОЙ голове: форма ответа площадки не та, тело не принято,
+            # мутация отвергнута. Очередь идёт дальше, ровно как на красной и
+            # конфликтной голове, — иначе одна странная голова держала бы всю
+            # очередь до вмешательства человека
+            # ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+            # Нашёл внешний взгляд на #236.
+            try:
+                hand_over(repo, change, queue, owner_token, dry_run=dry_run)
+            except NotRun as exc:
+                print(f"#{change.number}: не взведено — {exc}")
+                refused.append(str(exc))
+                continue
+            return EXIT_BROKEN if refused else EXIT_OK
         if state not in STATE_MERGEABLE:
             # Список разрешительный: незнакомое состояние — повод пропустить
             # голову, а не звать слияние наугад. Отказ площадки на `unknown`
@@ -780,14 +798,19 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             take_back(repo, change, "сливаю сам: голова уже зелена", owner_token, dry_run=dry_run)
         sha = merge(repo, change, owner_token, dry_run=dry_run)
         print(f"слито #{change.number}{f' → {sha}' if sha else ''}")
+        if refused:
+            print("заход отработал, но отказы по головам выше остались — исход красный")
         # Отметка пунктов задачи здесь БЫЛА и отсюда ушла. Момент верный —
         # пункт становится сделанным ровно при слиянии, — но предмет чужой:
         # очередь про слияние, а не про чужие задачи, и второй предмет делал её
         # ответственной за то, чего она не решает. Отмечает шаг `task-items`:
         # он идёт по тому же событию и вдобавок догоняет пропущенное обходом
         # окна (022).
-        return EXIT_OK
+        return EXIT_BROKEN if refused else EXIT_OK
 
+    if refused:
+        print(f"взвести не удалось ни одну голову: отказов {len(refused)}")
+        return EXIT_BROKEN
     print("готовой головы нет: все кандидаты либо красны, либо конфликтуют")
     return EXIT_OK
 

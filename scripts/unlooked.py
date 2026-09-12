@@ -434,7 +434,11 @@ def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
     ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
     """
     open_now = [entry for entry in entries.values() if is_open(entry.state)]
-    ordered = sorted(open_now, key=lambda entry: (entry.merged or "", entry.number))
+    # `merged` — строка по устройству записи: пустая, если дата неизвестна.
+    # Защиты от `None` здесь нет намеренно — её и не было чем породить, а
+    # мёртвая защита говорит читателю, что `None` бывает. Нашёл внешний взгляд
+    # на #241.
+    ordered = sorted(open_now, key=lambda entry: (entry.merged, entry.number))
     return [entry.number for entry in ordered[:limit]]
 
 
