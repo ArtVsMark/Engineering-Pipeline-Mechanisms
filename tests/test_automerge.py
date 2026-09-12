@@ -12,11 +12,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
-import yaml
 
 from tests.conftest import ROOT, RunScript, load_script
 
@@ -31,6 +29,7 @@ def change(
     draft: bool = False,
     base: str = "main",
     body: str = "",
+    armed: bool = False,
 ) -> Any:
     """Собирает изменение-кандидат в том виде, в каком его строит модуль."""
     return module.Change(
@@ -43,6 +42,8 @@ def change(
         draft=draft,
         marks=frozenset(marks),
         files=frozenset(files),
+        node=f"PR_{number}",
+        armed=armed,
     )
 
 
@@ -227,6 +228,9 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "merged": [],
         "synced": [],
         "sources": [],
+        "asked": [],
+        "disarmed": [],
+        "echo": True,
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -258,6 +262,20 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return list(problems), bool(waiting)
 
     monkeypatch.setattr(module, "head_verdict", head_verdict)
+    # Взведение подменяется НА УРОВНЕ МУТАЦИИ, а не целым шагом: между «очередь
+    # отдала последнее действие» и «очередь позвала свою функцию» разница ровно
+    # в том, доходит ли до площадки НАШЕ тело уплотнения.
+    monkeypatch.setattr(module, "fetch", lambda item: None)
+    monkeypatch.setattr(module.squash_body, "compose", lambda branch, base: f"тело {branch}")
+
+    def armed(node: str, headline: str, body: str, tok: str) -> dict[str, Any]:
+        state["asked"].append((node, headline, body))
+        if not state["echo"]:
+            return {"enabledAt": "2026-09-12T10:00:00Z"}
+        return {"commitHeadline": headline, "commitBody": body}
+
+    monkeypatch.setattr(module.arm, "arm", armed)
+    monkeypatch.setattr(module.arm, "disarm", lambda node, tok: state["disarmed"].append(node))
     # Разметка источника записывается стендом отдельно: проверять надо, что
     # метка ВЫСТАВЛЕНА, а не что о ней напечатано. Замер 09.09.2026: вызов
     # публикации в ветке красного отсутствовал, а тест сверял строку вывода —
@@ -344,18 +362,124 @@ def test_only_the_head_pulls_the_base(platform: dict[str, Any]) -> None:
     assert platform["merged"] == []
 
 
-def test_pending_checks_make_the_queue_wait_not_skip(platform: dict[str, Any]) -> None:
-    """Идущие проверки головы останавливают заход, а не пропускают её.
+def test_a_head_whose_checks_are_running_is_handed_to_the_platform(
+    platform: dict[str, Any],
+) -> None:
+    """Проверки головы идут — очередь ВЗВОДИТ её и уходит, а не ждёт и не обходит.
 
     Пропустить голову, пока её проверки идут, значило бы обойти порядок:
-    следующий за ней слился бы раньше на ровном месте.
+    следующий за ней слился бы раньше на ровном месте. Ждать внутри захода —
+    держать исполнителя и гибнуть в ожидании (замер 10.09.2026: 45 мёртвых
+    заходов из 120). Ждёт площадка
+    (`docs/decisions/011-merging-is-handed-to-the-platform.md`).
     """
     platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["states"] = {1: module.STATE_ARMABLE}
     platform["runs"] = {1: ([], True)}
-    # Шаг ожидания ноль: проверке нельзя спать пять минут — тест, который столько
-    # ждёт, перестают гонять. Что ожидание ЕСТЬ, держат проверки `wait_for_head`.
-    assert module.advance("o/r", "token", "main", dry_run=False, wait_step=0) == module.EXIT_OK
-    assert platform["merged"] == []
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["merged"] == [], "заход слил голову сам, хотя проверки шли"
+    assert [node for node, _, _ in platform["asked"]] == ["PR_1"]
+
+
+def test_the_body_of_the_squash_is_ours_and_it_reaches_the_mutation(
+    platform: dict[str, Any],
+) -> None:
+    """Тело уплотнения собираем МЫ и передаём его взведению.
+
+    Иначе площадка соберёт своё — список коммитов ветки, — и работа
+    рассказалась бы в общей ветке столько раз, сколько было правок (`006`).
+    """
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    module.advance("o/r", "token", "main", dry_run=False)
+    node, headline, body = platform["asked"][0]
+    assert node == "PR_1"
+    assert headline == "изменение 1 (#1)", "заголовок уплотнения не наш"
+    assert body == "тело origin/agent/change-1", "тело уплотнения не наше"
+
+
+def test_a_swallowed_body_stops_the_step_instead_of_merging_quietly(
+    platform: dict[str, Any],
+) -> None:
+    """Тело не принято — шаг говорит, а не сливает молча (045).
+
+    Это названное условие пересмотра решения 011: уплотнение ушло бы в общую
+    ветку не нашим телом, и заметить это было бы нечем.
+    """
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    platform["echo"] = False
+    with pytest.raises(module.NotRun) as caught:
+        module.advance("o/r", "token", "main", dry_run=False)
+    assert "ТЕЛО не приняла" in str(caught.value)
+    assert "011" in str(caught.value)
+
+
+def test_only_the_head_of_the_queue_stays_armed(platform: dict[str, Any]) -> None:
+    """Взведённой держится РОВНО ОДНА голова — иначе очередь станет гонкой.
+
+    Площадка сливает взведённое в порядке позеленения, а не вставки. Взведи
+    двоих — и порядок вставки перестанет что-либо значить, а он у нас правило,
+    а не порядок прибытия (053).
+    """
+    platform["changes"] = [
+        change(1, "automerge"),
+        change(2, "automerge", armed=True),
+    ]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["disarmed"] == ["PR_2"], "взведение соседа не снято"
+    assert [node for node, _, _ in platform["asked"]] == ["PR_1"]
+
+
+def test_an_already_armed_head_is_not_armed_twice(platform: dict[str, Any]) -> None:
+    """Взведённая голова не взводится заново: площадка уже ждёт.
+
+    Повторное взведение стоило бы обращения к площадке на каждом заходе, а
+    заходов у очереди столько, сколько прогонов.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True)]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["asked"] == [] and platform["disarmed"] == []
+
+
+def test_a_withdrawn_consent_takes_the_arming_back(platform: dict[str, Any]) -> None:
+    """Согласие снято — взведение снимается тем же заходом (147).
+
+    Метка `hold`, снятая `automerge`, черновик: всё это выводит изменение из
+    кандидатов, а взведение, оставшееся на нём, однажды сольёт его без согласия.
+    """
+    platform["changes"] = [change(7, "automerge", "hold", armed=True)]
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["disarmed"] == ["PR_7"]
+
+
+def test_a_frozen_queue_takes_back_what_was_armed(platform: dict[str, Any]) -> None:
+    """Заморозка СНИМАЕТ взведённое, а не только не выдаёт новое.
+
+    Не выдавать нового согласия недостаточно: взведённое площадка сольёт сама,
+    как только проверки позеленеют, — и заморозка, которая только молчит,
+    ничего не держит (126).
+    """
+    platform["changes"] = [change(1, "automerge", armed=True), change(9, "automerge", "fix-main")]
+    platform["health"] = ["test: failure"]
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["disarmed"] == ["PR_1"]
+    assert platform["merged"] == [9], "починка не прошла через заморозку"
+
+
+def test_the_arming_is_taken_back_before_our_own_merge(platform: dict[str, Any]) -> None:
+    """Зелёную голову сливаем САМИ — и снимаем с неё взведение перед этим.
+
+    Брошенное согласие переживает слитое изменение в глазах площадки: она
+    помнит его и на закрытом.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True)]
+    platform["states"] = {1: "clean"}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["disarmed"] == ["PR_1"]
+    assert platform["merged"] == [1]
 
 
 def test_a_red_shared_branch_freezes_everything_but_the_repair(
@@ -388,13 +512,16 @@ def test_an_unmergeable_state_skips_the_head_instead_of_reddening(
 ) -> None:
     """Незнакомое состояние головы пропускается, а не зовёт слияние наугад.
 
-    Список разрешительный (068): на `blocked` и `unknown` площадка слияния не
-    даст, и её отказ уронил бы ВЕСЬ заход вместо одной головы. Проверяется
-    обоими значениями сразу — иначе разрешительный список неотличим от
-    запретительного, где перечислены ровно эти два.
+    Список разрешительный (068): на `unknown` и на пустом ответе площадка
+    слияния не даст, и её отказ уронил бы ВЕСЬ заход вместо одной головы.
+    Проверяется обоими значениями сразу — иначе разрешительный список
+    неотличим от запретительного, где перечислены ровно эти два.
+
+    `blocked` сюда не входит: он значит «слить нельзя СЕЙЧАС», и его очередь
+    отдаёт площадке отдельным путём.
     """
     platform["changes"] = [change(1, "automerge"), change(2, "automerge"), change(3, "automerge")]
-    platform["states"] = {1: "blocked", 2: "unknown"}
+    platform["states"] = {1: "unknown", 2: ""}
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["merged"] == [3]
 
@@ -691,141 +818,3 @@ def test_the_source_of_a_change_is_decided_without_the_platform() -> None:
     assert module.source_of(plan, red=True) == module.RANK_OWN_RED
     fixing = change(2, "automerge", module.LABEL_FIX_MAIN)
     assert module.source_of(fixing, red=True) == module.RANK_MAIN_RED
-
-
-# --- очередь ждёт свою голову ------------------------------------------------
-
-
-def test_the_queue_waits_instead_of_hoping_for_an_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Проверки идут — заход ждёт их, а не выходит в надежде на событие.
-
-    Событие приходит исправно: замер 10.09.2026 — за завершением `ci` на ветке
-    заход очереди следовал в 25 случаях из 25, медиана две секунды. Но заход
-    ГИБНЕТ В ОЖИДАНИИ: группа держит один ожидающий, и новый его вытесняет — 45
-    из 120 умерли, не начав работу. Выживший видит «идут», и повторить его
-    больше некому.
-    """
-    answers: Iterator[tuple[list[str], bool]] = iter([([], True), ([], True), ([], False)])
-    monkeypatch.setattr(module, "head_verdict", lambda *_: next(answers))
-    slept: list[float] = []
-    change = module.Change(
-        number=7,
-        branch="agent/x",
-        base="main",
-        head="abc",
-        title="что-то",
-        body="",
-        draft=False,
-        marks=frozenset(),
-    )
-    problems, waiting = module.wait_for_head("o/r", change, "token", sleep=slept.append)
-    assert (problems, waiting) == ([], False)
-    assert len(slept) == 2, "заход не ждал между опросами"
-
-
-def test_the_wait_has_a_named_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Предел назван числом: ждать без предела значит держать исполнителя.
-
-    Дождавшись предела, заход честно говорит «ещё идут» и уходит — его добудит
-    следующее событие или кнопка (104).
-    """
-    monkeypatch.setattr(module, "head_verdict", lambda *_: ([], True))
-    slept: list[float] = []
-    change = module.Change(
-        number=7,
-        branch="agent/x",
-        base="main",
-        head="abc",
-        title="что-то",
-        body="",
-        draft=False,
-        marks=frozenset(),
-    )
-    _, waiting = module.wait_for_head("o/r", change, "token", tries=3, step=1, sleep=slept.append)
-    assert waiting is True
-    assert len(slept) == 3, "заход ждал не столько раз, сколько объявлено"
-
-
-def test_a_ready_head_is_not_waited_for(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Голова уже готова — заход не спит ни секунды.
-
-    Иначе каждое слияние стоило бы лишнего ожидания на ровном месте.
-    """
-    monkeypatch.setattr(module, "head_verdict", lambda *_: (["красное"], False))
-    slept: list[float] = []
-    change = module.Change(
-        number=7,
-        branch="agent/x",
-        base="main",
-        head="abc",
-        title="что-то",
-        body="",
-        draft=False,
-        marks=frozenset(),
-    )
-    problems, waiting = module.wait_for_head("o/r", change, "token", sleep=slept.append)
-    assert problems == ["красное"] and waiting is False
-    assert slept == []
-
-
-def test_the_limit_fits_the_job_timeout() -> None:
-    """Ожидание короче предела джоба: иначе заход убьют на середине.
-
-    Убитый на середине заход не оставляет следа о том, чего он ждал, — и это
-    хуже, чем честный выход по своему пределу (039).
-    """
-    document = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))
-    limit = document["jobs"]["automerge"]["timeout-minutes"] * 60
-    assert limit > module.WAIT_TRIES * module.WAIT_STEP, "ожидание длиннее предела джоба"
-
-
-def test_the_limit_in_the_message_is_the_one_waited_by() -> None:
-    """Названный предел — тот, которым ждали, а не глобальная константа.
-
-    Сообщение считало предел по `WAIT_TRIES`, а ожидание шло по переданному
-    значению: разойтись они могли молча, и первым это заметил бы читатель лога,
-    гадающий, почему число не сходится. Нашёл внешний взгляд на #133.
-    """
-    assert "за 15 с" in module.said_waiting(7, 3, 5)
-    assert "за 120 с" in module.said_waiting(7, 3, 40)
-
-
-def test_the_queue_waits_for_the_head_and_then_merges(
-    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Заход очереди действительно ЖДЁТ голову, а потом сливает (находка #133).
-
-    Ожидание проверялось только у `wait_for_head` в отрыве: в стенде очереди
-    подменён `head_verdict`, и путь `advance()` → `wait_for_head()` не
-    проходился ни разу. А именно на нём и стоит вся ценность ожидания: заход
-    гибнет в ожидании события, и опрос внутри захода — единственный
-    равносильный источник (126).
-    """
-    # Первый ответ забирает сам `advance`, собирая вердикты по очереди; дальше
-    # спрашивает `wait_for_head`. Порядок здесь и есть предмет проверки.
-    answers: Iterator[tuple[list[str], bool]] = iter(
-        [([], True), ([], True), ([], True), ([], False)]
-    )
-    monkeypatch.setattr(module, "head_verdict", lambda *_: next(answers))
-    slept: list[float] = []
-    monkeypatch.setattr(module.time, "sleep", slept.append)
-    platform["changes"] = [change(1, module.LABEL_AUTOMERGE)]
-    code = module.advance("o/r", "token", "main", dry_run=False, wait_step=1, wait_tries=5)
-    assert code == module.EXIT_OK
-    assert platform["merged"] == [1], "голова дождалась зелени и не слилась"
-    assert len(slept) == 2, f"заход не ждал между опросами: пауз {len(slept)}"
-
-
-def test_the_queue_does_not_merge_a_head_that_never_went_green(
-    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Предел ожидания истёк — заход уходит, ничего не слив.
-
-    Вторая половина той же проверки: без неё «ждёт и сливает» держалось бы
-    тем, что слияние вообще случается (140).
-    """
-    monkeypatch.setattr(module, "head_verdict", lambda *_: ([], True))
-    monkeypatch.setattr(module.time, "sleep", lambda _: None)
-    platform["changes"] = [change(1, module.LABEL_AUTOMERGE)]
-    module.advance("o/r", "token", "main", dry_run=False, wait_step=1, wait_tries=2)
-    assert platform["merged"] == [], "слито при идущих проверках"

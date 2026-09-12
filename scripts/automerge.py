@@ -61,11 +61,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
+import arm
 import changerefs
 import ci_complete
 import ghrest
@@ -142,6 +141,15 @@ STATE_BEHIND: Final = "behind"
 #: причиной: площадка либо ещё считает, либо слить не даст, и звать слияние
 #: наугад значит менять пропуск одной головы на красный весь заход.
 STATE_MERGEABLE: Final = frozenset({"clean", "unstable", "has_hooks"})
+#: Состояние, при котором слить НЕЛЬЗЯ СЕЙЧАС, но можно потом: обязательные
+#: проверки ещё идут либо не отчитались. Именно оно отдаётся площадке — она
+#: дождётся зелёного и сольёт сама
+#: (`docs/decisions/011-merging-is-handed-to-the-platform.md`).
+#:
+#: Красную голову сюда не пускает вердикт разметки: взведённое красное заняло
+#: бы единственное место взведения и держало бы очередь до починки, а красное —
+#: это работа по источнику 2, вернувшаяся в окно, а не голова очереди.
+STATE_ARMABLE: Final = "blocked"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -165,6 +173,13 @@ class Change:
     draft: bool
     marks: frozenset[str]
     files: frozenset[str] = field(default=frozenset())
+    #: Узел изменения в терминах площадки: взведение адресуется им, а не
+    #: номером. Номер — адрес REST, узел — адрес мутации, и подменять один
+    #: другим нечем.
+    node: str = ""
+    #: Взведено ли слияние у площадки. Читается из того же ответа, что и всё
+    #: остальное: второй запрос за тем же знанием — вторая версия правды (052).
+    armed: bool = False
 
     @property
     def fixes_main(self) -> bool:
@@ -268,6 +283,8 @@ def open_changes(repo: str, owner_token: str) -> list[Change]:
                 body=str(payload.get("body") or ""),
                 draft=bool(payload.get("draft")),
                 marks=marks_of(payload),
+                node=str(payload.get("node_id") or ""),
+                armed=payload.get("auto_merge") is not None,
             )
         )
     return found
@@ -398,84 +415,6 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
     return ci_complete.verdict(ci_complete.worst_per_name(runs), required, "", strict_missing=True)
 
 
-#: Сколько заход ждёт, пока проверки головы закончатся, и с каким шагом. Числа
-#: названы, а не подобраны: замер 10.09.2026 — полный прогон гейтов проекта
-#: укладывался в пять–семь минут, и восемь заходов по сорок секунд перекрывают
-#: это с запасом, оставаясь много меньше предела джоба (`timeout-minutes`).
-#: Замер датирован намеренно: без даты это число в прозе, которое устареет
-#: молча (005, 127).
-WAIT_TRIES: Final = 8
-WAIT_STEP: Final = 40
-
-
-def said_waiting(number: int, tries: int, step: int) -> str:
-    """Строка «голову ещё ждём» — с тем пределом, которым ждали.
-
-    ПРЕДЕЛ НАЗЫВАЕТСЯ ТОТ, ЧТО ПРИМЕНЯЛСЯ. Сообщение считало его по глобальной
-    константе, а ожидание шло по переданному значению: разойтись они могли
-    молча, и первым это заметил бы читатель лога, гадающий, почему число не
-    сходится. Вынесено отдельно, чтобы предмет можно было спросить, не поднимая
-    всю площадку. Нашёл внешний взгляд на #133.
-    """
-    return (
-        f"#{number}: проверки не закончились за {tries * step} с — "
-        "очередь ждёт голову, а не обходит её"
-    )
-
-
-def wait_for_head(
-    repo: str,
-    change: Change,
-    owner_token: str,
-    *,
-    tries: int = WAIT_TRIES,
-    step: int = WAIT_STEP,
-    sleep: Callable[[float], None] | None = None,
-) -> tuple[list[str], bool]:
-    """Ждёт, пока проверки головы закончатся; отдаёт последний вердикт.
-
-    ПОЧЕМУ ЖДАТЬ, А НЕ ВЫЙТИ В НАДЕЖДЕ НА СОБЫТИЕ. Событие приходит исправно —
-    замер 10.09.2026: за завершением `ci` на ветке изменения заход очереди
-    следовал в 25 случаях из 25, медиана задержки две секунды. Но заход
-    **гибнет в ожидании**: группа держит один ожидающий, и каждый новый его
-    вытесняет — 45 из 120 заходов умерли, не начав работу.
-    Из пачки доживает последний, а он приходит от прогона, завершившегося
-    последним, и не обязан быть тем, после которого голова стала зелёной:
-    записи сводного гейта проставляются позже. Выживший видит «проверки идут»,
-    и повторить его больше некому — новых событий не будет.
-
-    Это второй случай правила
-    [126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md):
-    доказательство «условие снято» принимается от любого равносильного
-    источника, а не от одного события. Здесь равносильный источник — опрос
-    внутри захода.
-
-    ПРЕДЕЛ НАЗВАН ЧИСЛОМ. Ждать без предела значило бы держать исполнителя,
-    пока чужой прогон висит; дождавшись предела, заход честно говорит «ещё
-    идут» и уходит — тогда его добудит следующее событие или кнопка (104).
-    """
-    # ПАУЗА БЕРЁТСЯ В МОМЕНТ ВЫЗОВА, А НЕ В МОМЕНТ ОБЪЯВЛЕНИЯ. Значение по
-    # умолчанию вычисляется один раз при чтении файла, и `time.sleep`,
-    # захваченный так, подменить снаружи уже нечем: путь `advance()` →
-    # `wait_for_head()` из-за этого не проверялся ни разу — стенд очереди
-    # вынужден был подменять весь шаг целиком. Нашёл внешний взгляд на #133.
-    pause = sleep or time.sleep
-    problems, waiting = head_verdict(repo, change, owner_token)
-    # Нулевой шаг значит «не ждать»: так заход зовут проверки, и так же его
-    # можно позвать руками, когда ожидание не нужно.
-    if step <= 0:
-        return problems, waiting
-    for attempt in range(tries):
-        if not waiting:
-            return problems, waiting
-        print(
-            f"#{change.number}: проверки идут — жду голову, {attempt + 1} из {tries} (по {step} с)"
-        )
-        pause(step)
-        problems, waiting = head_verdict(repo, change, owner_token)
-    return problems, waiting
-
-
 def merge_state(repo: str, number: int, owner_token: str) -> str:
     """Состояние слияния у головы очереди.
 
@@ -521,6 +460,62 @@ def merge(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> str:
         body={"merge_method": "squash", "commit_title": title, "commit_message": body},
     )
     return str((payload or {}).get("sha", ""))
+
+
+def take_back(repo: str, change: Change, why: str, owner_token: str, *, dry_run: bool) -> None:
+    """Снимает взведение с изменения, называя причину.
+
+    Причина печатается ВСЕГДА: снятие согласия — действие, и «почему» у него
+    ровно столько же читателей, сколько у самого слияния
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
+    print(f"#{change.number}: снимаю взведение — {why}")
+    if dry_run:
+        return
+    arm.disarm(change.node, owner_token)
+
+
+def hand_over(
+    repo: str, change: Change, queue: list[Change], owner_token: str, *, dry_run: bool
+) -> None:
+    """Отдаёт площадке последнее действие: взводит слияние НАШИМ телом.
+
+    ВЗВЕДЁННОЙ ДЕРЖИТСЯ РОВНО ОДНА ГОЛОВА, и это то, чем сохраняется наш
+    порядок. Площадка сливает взведённое в порядке позеленения, а не вставки:
+    взведи двоих — и очередь станет их гонкой, а порядок у нас правило, а не
+    порядок прибытия
+    ([053](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/053-queue-order-is-a-rule-not-arrival.md)).
+    Поэтому взведение соседей снимается здесь же, до выдачи нового.
+
+    ТЕЛО УПЛОТНЕНИЯ СОБИРАЕМ МЫ. Мутация принимает `commitHeadline` и
+    `commitBody`, и это проверено прогоном, а не прочитано: замер 12.09.2026 на
+    #231 («blocked») и #217 («dirty») вернул и заголовок, и тело дословно. Тем
+    же заходом проверяется и здесь: проглоченное тело — наступившее условие
+    пересмотра решения 011, и заход об этом ГОВОРИТ, а не сливает молча (045).
+    """
+    for neighbour in queue:
+        if neighbour.armed and neighbour.number != change.number:
+            take_back(repo, neighbour, "взведена не голова очереди", owner_token, dry_run=dry_run)
+
+    if change.armed:
+        print(f"#{change.number}: уже взведено — площадка ждёт зелёного, заход не нужен")
+        return
+
+    fetch(change)
+    body = squash_body.compose(f"origin/{change.branch}", change.base)
+    title = f"{change.title} (#{change.number})"
+    if dry_run:
+        print(f"  (пробный заход) взвёл бы #{change.number} телом:\n{body}")
+        return
+    answer = arm.arm(change.node, title, body, owner_token)
+    lost = arm.kept_the_body(answer, title, body)
+    if lost:
+        raise NotRun(
+            f"#{change.number}: площадка взвела слияние, но ТЕЛО не приняла — "
+            f"{'; '.join(lost)}. Уплотнение уйдёт в общую ветку не нашим телом, и это "
+            "названное условие пересмотра решения 011"
+        )
+    print(f"взведено #{change.number} — площадка дождётся зелёного и сольёт уплотнением")
 
 
 def report_held(changes: list[Change]) -> None:
@@ -587,28 +582,41 @@ def classify(
     return verdicts
 
 
-def advance(
-    repo: str,
-    owner_token: str,
-    base: str,
-    *,
-    dry_run: bool,
-    wait_step: int = WAIT_STEP,
-    wait_tries: int = WAIT_TRIES,
-) -> int:
+def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     """Один заход очереди: читает, упорядочивает и двигает ГОЛОВУ.
 
-    `wait_step` — шаг ожидания головы в секундах; ноль означает «не ждать».
-    `wait_tries` — сколько таких шагов; передаётся вместе с шагом, чтобы предел
-    в сообщении был тем же, которым ждали.
-    Он параметр, а не константа внутри, потому что проверке нельзя спать: тест,
-    ждущий пять минут, перестают гонять, и он превращается в украшение (149).
+    ЗЕЛЁНОГО ЗАХОД БОЛЬШЕ НЕ ЖДЁТ — ждёт площадка
+    (`docs/decisions/011-merging-is-handed-to-the-platform.md`). Прежде здесь
+    стояло ожидание внутри захода, и заводилось оно от честной беды: заход
+    **гибнет в ожидании** события — группа держит одного ожидающего, и замер
+    10.09.2026 дал 45 мёртвых заходов из 120. Ожидание спасало вердикт, но
+    держало исполнителя и упиралось в собственный предел.
+
+    Площадка ждёт бесплатно и без предела. Поэтому голове, у которой проверки
+    ещё идут, очередь ОТДАЁТ последнее действие: взводит слияние нашим телом
+    уплотнения и уходит. Порядок вставки остаётся нашим целиком — взведённой
+    держится ровно одна голова, и ею распоряжается :func:`hand_over`.
     """
     check_labels_declared()
     changes = open_changes(repo, owner_token)
     report_held(changes)
 
     queue = candidates(changes, base)
+
+    # СОГЛАСИЕ ОТОЗВАНО — ВЗВЕДЕНИЕ СНИМАЕТСЯ, И ДО ВСЕГО ОСТАЛЬНОГО. Метка
+    # `hold`, снятая `automerge`, черновик, сменившаяся база: всё это выводит
+    # изменение из кандидатов, а взведение, оставшееся на нём, однажды сольёт
+    # его без согласия. Отменяющий переключатель обязан отменять
+    # ([147](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/147-a-cancelling-switch-needs-an-addressee.md)).
+    #
+    # ВЫШЕ ПУСТОЙ ОЧЕРЕДИ — не для порядка: когда согласие снято у единственного
+    # кандидата, очередь как раз и становится пустой. Стоя ниже, снятие не
+    # случилось бы ровно в том случае, ради которого оно есть.
+    asked = {change.number for change in queue}
+    for change in changes:
+        if change.armed and change.number not in asked:
+            take_back(repo, change, "согласия на слияние больше нет", owner_token, dry_run=dry_run)
+
     if not queue:
         print("очередь пуста: слияния никто не просит — это состояние, а не отказ")
         return EXIT_OK
@@ -619,20 +627,7 @@ def advance(
     if not base_sha:
         raise NotRun(f"голова общей ветки «{base}» не прочитана — двигать очередь не на что")
 
-    queue = [
-        Change(
-            number=change.number,
-            branch=change.branch,
-            base=change.base,
-            head=change.head,
-            title=change.title,
-            body=change.body,
-            draft=change.draft,
-            marks=change.marks,
-            files=files_of(repo, change.number, owner_token),
-        )
-        for change in queue
-    ]
+    queue = [replace(change, files=files_of(repo, change.number, owner_token)) for change in queue]
     shared = shared_paths(queue)
     queue = order(queue, shared)
 
@@ -649,22 +644,21 @@ def advance(
         print("общая ветка красна — очередь заморожена, кроме починки:")
         for trouble in troubles:
             print(f"  {trouble}")
+        # ЗАМОРОЗКА СНИМАЕТ УЖЕ ВЗВЕДЁННОЕ. Не выдавать новое согласие
+        # недостаточно: взведённое площадка сольёт сама, как только проверки
+        # позеленеют, — то есть заморозка, которая только молчит, ничего не
+        # держит
+        # ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+        for change in queue:
+            if change.armed and not change.fixes_main:
+                take_back(repo, change, "общая ветка красна", owner_token, dry_run=dry_run)
         queue = [change for change in queue if change.fixes_main]
         if not queue:
             print(f"изменения с меткой «{LABEL_FIX_MAIN}» нет — не двигается ничего")
             return EXIT_OK
 
     for change in queue:
-        problems, waiting = verdicts[change.number]
-        if waiting:
-            # Голову ЖДЁМ внутри захода, а не выходим: следующего события может
-            # не быть вовсе — заход, который его принёс бы, гибнет в ожидании.
-            problems, waiting = wait_for_head(
-                repo, change, owner_token, tries=wait_tries, step=wait_step
-            )
-        if waiting:
-            print(said_waiting(change.number, wait_tries, wait_step))
-            return EXIT_OK
+        problems, _ = verdicts[change.number]
         if problems:
             # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
             # а очередь идёт дальше: одна красная голова не обязана держать
@@ -686,13 +680,23 @@ def advance(
             )
             publish_source(repo, change, RANK_CONFLICT, owner_token, dry_run=dry_run)
             continue
+        if state == STATE_ARMABLE:
+            # СЛИТЬ НЕЛЬЗЯ СЕЙЧАС — не значит «нельзя». Проверки идут либо не
+            # отчитались, и ждать их теперь площадке, а не заходу.
+            hand_over(repo, change, queue, owner_token, dry_run=dry_run)
+            return EXIT_OK
         if state not in STATE_MERGEABLE:
             # Список разрешительный: незнакомое состояние — повод пропустить
-            # голову, а не звать слияние наугад. Отказ площадки на `blocked`
-            # или `unknown` уронил бы весь заход вместо одной головы.
+            # голову, а не звать слияние наугад. Отказ площадки на `unknown`
+            # уронил бы весь заход вместо одной головы.
             print(f"#{change.number}: состояние «{state or '—'}» слияния не допускает, пропущено")
             continue
 
+        if change.armed:
+            # Взведение снимается ПЕРЕД своим слиянием: у мутации обратная
+            # сторона, и брошенное согласие пережило бы слитое изменение в
+            # чужих глазах — площадка помнит его на закрытом.
+            take_back(repo, change, "сливаю сам: голова уже зелена", owner_token, dry_run=dry_run)
         sha = merge(repo, change, owner_token, dry_run=dry_run)
         print(f"слито #{change.number}{f' → {sha}' if sha else ''}")
         # Отметка пунктов задачи здесь БЫЛА и отсюда ушла. Момент верный —
@@ -713,21 +717,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--base", default="main", help="общая ветка")
     parser.add_argument("--dry-run", action="store_true", help="показать, но не сливать")
-    parser.add_argument(
-        "--wait-step",
-        type=int,
-        default=WAIT_STEP,
-        help=f"шаг ожидания головы в секундах; 0 — не ждать (по умолчанию {WAIT_STEP})",
-    )
-    # Ключ парный к шагу: предел ожидания складывается из обоих, и передавать
-    # один без другого значило бы держать заготовку, которой никто не
-    # пользуется (046). Нашёл внешний взгляд на #164.
-    parser.add_argument(
-        "--wait-tries",
-        type=int,
-        default=WAIT_TRIES,
-        help=f"сколько раз ждать голову (по умолчанию {WAIT_TRIES})",
-    )
     args = parser.parse_args(argv)
 
     owner_token = token()
@@ -744,14 +733,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
 
     try:
-        return advance(
-            args.repo,
-            owner_token,
-            args.base,
-            dry_run=args.dry_run,
-            wait_step=args.wait_step,
-            wait_tries=args.wait_tries,
-        )
+        return advance(args.repo, owner_token, args.base, dry_run=args.dry_run)
     except (NotRun, labels.BadConfig, policy.BadPolicy, squash_body.NotRun) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
