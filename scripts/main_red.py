@@ -107,7 +107,7 @@ class Flake:
 REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
 
 
-def flaky_names(runs: list[dict[str, Any]]) -> list[str]:
+def flaky_names(runs: list[dict[str, Any]]) -> dict[str, int]:
     """Имена, давшие на ОДНОЙ голове настоящее красное и затем зелёное.
 
     ЭТО И ЕСТЬ МИГАНИЕ, И ВИДНО ОНО БЕЗ ПЕРЕЗАПУСКА. Голова та же — значит
@@ -120,7 +120,7 @@ def flaky_names(runs: list[dict[str, Any]]) -> list[str]:
     Порядок читается по времени начала записи, а не по порядку ответа площадки:
     зелёное ДО красного — это обычная краснота, а не мигание.
     """
-    fell: dict[str, str] = {}
+    fell: dict[str, tuple[str, int]] = {}
     rose: dict[str, str] = {}
     for run in runs:
         if run.get("status") != "completed":
@@ -129,10 +129,17 @@ def flaky_names(runs: list[dict[str, Any]]) -> list[str]:
         started = str(run.get("started_at") or "")
         outcome = run.get("conclusion")
         if outcome in REAL_RED:
-            fell[name] = min(fell.get(name, started), started) if fell.get(name) else started
+            if name not in fell or started < fell[name][0]:
+                fell[name] = (started, run_id_of(run))
         elif outcome == "success":
             rose[name] = max(rose.get(name, started), started)
-    return sorted(name for name, red in fell.items() if rose.get(name, "") > red)
+    # НОМЕР ПАДАВШЕГО ПРОГОНА — ЧАСТЬ НАХОДКИ, А НЕ УКРАШЕНИЕ. По нему запись
+    # отличается от следующей такой же: одно имя мигает не единожды, и сводить
+    # эти случаи в один значило бы потерять частоту — то самое, ради чего
+    # мигания и записывают. Нашёл внешний взгляд на #222.
+    return {
+        name: where[1] for name, where in fell.items() if rose.get(name, "") > where[0] and where[1]
+    }
 
 
 def red_of(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -318,18 +325,20 @@ def flakes_on_changes(repo: str, token: str, known: list[Flake], day: str) -> li
         if not head or not number:
             continue
         try:
-            runs = (
-                ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
-                or {}
-            ).get("check_runs") or []
+            # СПИСОК ИДЁТ СТРАНИЦАМИ, как и у общей ветки. Умолчание площадки
+            # обрезает хвост молча, а хвост — это и есть вторая запись имени,
+            # без которой мигание неотличимо от обычной красноты (#222).
+            runs = list(
+                ghrest.paginate(f"repos/{repo}/commits/{head}/check-runs", token, key="check_runs")
+            )
         except ghrest.TransportError as exc:
             print(f"  #{number}: записи проверок не прочитаны: {report.cut(str(exc))}")
             continue
-        for name in flaky_names(list(runs)):
+        for name, run in flaky_names(runs).items():
             before = len(found)
-            found = flakes_after(found, name, number, day, where=f"#{number}")
+            found = flakes_after(found, name, run, day, where=f"#{number}")
             if len(found) > before:
-                print(f"  #{number}: мигание «{name}» — зелёное после красного на той же голове")
+                print(f"  #{number}: мигание «{name}» на прогоне {run} — зелёное после красного")
     return found
 
 
