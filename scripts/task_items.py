@@ -273,7 +273,21 @@ def main(argv: list[str] | None = None) -> int:
         # если запись не удалась.
         # Пометка основания живёт в комментарии, а не в тексте пункта: пункт
         # узнаётся по тексту, и приписка к нему сделала бы его ненаходимым.
-        items.mark(args.repo, numbers, [item for item, _ in paired], token)
+        outcome = items.mark(args.repo, numbers, [item for item, _ in paired], token)
+        # «ОТМЕТИЛ НОЛЬ ИЗ ТРЁХ» И «ОТМЕТИЛ ВСЁ» СНАРУЖИ ОДИНАКОВЫ, и это уже
+        # стоило эпику вранья о себе: замер 12.09.2026 — разбор по #232
+        # написал «Закрыто: 2. Слияние отдаётся площадке», галочка не встала, а
+        # шаг остался зелёным, потому что исход брался из наличия разбора, а не
+        # из его записи
+        # ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+        # Причина была в сравнении (`items.marked` читал строку, а пункт эпика
+        # — абзац), но найти её мешало ровно это молчание.
+        if outcome.missing or outcome.unwritten:
+            raise NotRun(
+                "разбор назвал закрытыми пункты, которых отметка не записала: "
+                f"{', '.join(f'«{item}»' for item in (*outcome.missing, *outcome.unwritten))}. "
+                "Пункт остался открытым, а разбор о нём уже сказал"
+            )
     except late_look.NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

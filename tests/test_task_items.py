@@ -243,3 +243,32 @@ def test_an_answer_that_was_cut_short_is_not_a_proposal(tmp_path: Path) -> None:
     """Оборванный прогон не даёт отметок: ответа нет — значит нечего разбирать."""
     with pytest.raises(module.late_look.NotRun):
         module.late_look.answer_of("[]")
+
+
+def test_a_proposal_that_marked_nothing_is_not_a_green_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Разбор сказал «Закрыто», а отметка не легла — шаг НЕ отработал (045).
+
+    «Отметил ноль из трёх» и «отметил всё» снаружи одинаковы, и это уже стоило
+    эпику вранья о себе: замер 12.09.2026 — разбор по #232 объявил закрытым
+    пункт 2, галочка в #196 не встала, а шаг остался зелёным, потому что исход
+    брался из наличия разбора, а не из его записи. Причина была в сравнении, но
+    найти её мешало ровно это молчание.
+    """
+    answer = tmp_path / "ответ.md"
+    answer.write_text(
+        "### Закрыто\n\n- **2. Слияние отдаётся площадке**\n  — `scripts/automerge.py` "
+        "и `tests/test_automerge.py::test_x` доказывают это\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GH_TOKEN", "t")
+    monkeypatch.setattr(module, "linked", lambda repo, number, token: ([196], {}))
+    monkeypatch.setattr(module, "publish", lambda repo, numbers, body, token: None)
+    monkeypatch.setattr(
+        module.items,
+        "mark",
+        lambda *a, **k: items.Outcome([], [], ["2. Слияние отдаётся площадке"]),
+    )
+    code = module.main(["--repo", "o/r", "--pr", "232", "--from", str(answer), "--apply"])
+    assert code == module.EXIT_BROKEN, "шаг зелен, хотя пункт остался открытым"
