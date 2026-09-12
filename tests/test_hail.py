@@ -182,6 +182,12 @@ def test_a_conflict_is_not_announced_by_its_own_run() -> None:
     )
     events = set(document[True])
     assert "workflow_run" in events, "оклик перестал ходить по событию"
-    assert events - {"workflow_run", "workflow_dispatch"}, (
-        "у оклика остался единственный путь — чужой прогон; конфликт по нему не находится"
+    # ПРОВЕРЯЕТСЯ ИМЕННО ПЕРИОДИЧНОСТЬ, А НЕ «ЕЩЁ КАКОЕ-ТО СОБЫТИЕ». Кнопка —
+    # тоже событие, но она требует руки, а работа не должна её ждать (104).
+    # Нашёл внешний взгляд на #218.
+    assert "schedule" in events, (
+        "у оклика нет ПЕРИОДИЧЕСКОГО пути: конфликт, чей прогон не стартует, "
+        "не найдётся, пока кто-нибудь не нажмёт кнопку"
     )
+    hours = {str(one["cron"]).split()[1] for one in document[True]["schedule"]}
+    assert hours == {"*"}, f"заход не ежечасный: {hours}"
