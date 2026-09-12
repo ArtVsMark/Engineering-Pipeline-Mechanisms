@@ -415,10 +415,10 @@ def test_a_swallowed_body_stops_the_step_instead_of_merging_quietly(
     platform["changes"] = [change(1, "automerge")]
     platform["states"] = {1: module.STATE_ARMABLE}
     platform["echo"] = False
-    with pytest.raises(module.NotRun) as caught:
-        module.advance("o/r", "token", "main", dry_run=False)
-    assert "ТЕЛО не приняла" in str(caught.value)
-    assert "011" in str(caught.value)
+    # Исход КРАСНЫЙ, а не исключение: голова пропускается, чтобы не держать
+    # очередь, но «тело не принято» обязано быть видно вердиктом захода.
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
+    assert platform["merged"] == [], "слито с чужим телом уплотнения"
 
 
 def test_only_the_head_of_the_queue_stays_armed(platform: dict[str, Any]) -> None:
@@ -957,3 +957,21 @@ def test_an_arming_on_a_foreign_base_is_left_alone(platform: dict[str, Any]) -> 
     ]
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["disarmed"] == ["PR_4"], "снят значок с чужой базы"
+
+
+def test_a_refused_arming_skips_the_head_instead_of_felling_the_pass(
+    platform: dict[str, Any],
+) -> None:
+    """Отказ взведения — отказ по ЭТОЙ голове, а не по всему заходу.
+
+    Форма ответа площадки не та, тело не принято, мутация отвергнута — очередь
+    обязана идти дальше, как на красной и конфликтной голове. Иначе одна
+    странная голова держит всю очередь до вмешательства человека (051). Нашёл
+    внешний взгляд на #236.
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["states"] = {1: module.STATE_ARMABLE, 2: "clean"}
+    platform["echo"] = False
+    # Сосед слит — очередь не встала; исход красный — отказ не исчез (045).
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
+    assert platform["merged"] == [2], "заход упал на первой голове вместо того, чтобы идти дальше"
