@@ -104,7 +104,7 @@ def test_armed_and_green_but_unmerged_is_named() -> None:
     ("payload", "found", "why"),
     [
         (change(draft=True), [], module.WHY_DRAFT),
-        (change(labels=[{"name": "hold"}]), [], module.WHY_HOLD),
+        (change(labels=[{"name": "hold"}], body="Ждёт: #262"), [], module.WHY_HOLD),
         (change(mergeable_state="unknown"), [], module.WHY_UNCOMPUTED),
         (change(mergeable_state="dirty"), [], module.WHY_NEIGHBOUR),
         (change(), runs("lint", "test", "pr-meta", conclusion="failure"), module.WHY_NEIGHBOUR),
@@ -308,3 +308,112 @@ def test_an_applied_sweep_updates_the_living_registry(monkeypatch: pytest.Monkey
     monkeypatch.setattr(module.ghrest, "request", note)
     module.save("o/r", "t", [], NOW, apply=True)
     assert calls == [("PATCH", "repos/o/r/issues/77")]
+
+
+def held(body: str) -> dict[str, Any]:
+    """Изменение, остановленное меткой, с названным (или нет) условием."""
+    return change(labels=[{"name": "hold"}], body=body)
+
+
+def test_a_stop_switch_that_names_nothing_has_no_addressee() -> None:
+    """Стоп-метка без строки «Ждёт:» — отменяющий переключатель без адресата.
+
+    Это ТРЕТИЙ исход, а не «остановлено»: поставивший знает, чего ждёт, а через
+    неделю не знает никто, и снять такую метку механизму нечем
+    ([147](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/147-a-cancelling-switch-needs-an-addressee.md)).
+    """
+    said = verdict(held("обычное тело без условия"), [])
+    assert said.stuck
+    assert said.why == module.STUCK_HOLD_MUTE
+    assert not said.lift
+
+
+def test_a_named_and_open_subject_keeps_the_switch_down() -> None:
+    """Названное открыто — стоп-кран осознан, и шаг молчит."""
+    said = verdict(held("Ждёт: #262"), [], lifted=False)
+    assert not said.stuck
+    assert said.why == module.WHY_HOLD
+    assert not said.lift
+
+
+def test_a_named_and_closed_subject_lifts_the_switch() -> None:
+    """Названное закрыто — снимать больше не о чем, и метка снимается (018)."""
+    said = verdict(held("Ждёт: #262"), [], lifted=True)
+    assert not said.stuck
+    assert said.why == module.WHY_HOLD_LIFTED
+    assert said.lift
+
+
+def test_free_text_is_a_named_reason_but_not_a_resolvable_one() -> None:
+    """Свободный текст — законный второй исход: причина есть, спросить нечего."""
+    assert module.waits_for("Ждёт: пока вернётся владелец") == "пока вернётся владелец"
+    assert module.named_subject("пока вернётся владелец") == 0
+    assert module.named_subject("#262") == 262
+
+
+def test_the_first_named_condition_is_the_one() -> None:
+    """Читается ПЕРВАЯ строка: два условия означали бы снятие по половине."""
+    assert module.waits_for("Ждёт: #262\nЖдёт: #99") == "#262"
+
+
+def test_an_unasked_subject_counts_as_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не спросили — считаем открытым: чужую остановку по незнанию не снимают.
+
+    Вернуть стоп-кран может только человек, и «закрыто», выведенное из отказа
+    площадки, стоило бы слитого изменения, которого не ждали (045).
+    """
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    assert module.is_settled("o/r", 262, "t") is False
+
+
+def test_a_closed_subject_is_read_as_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обратная сторона: прочитанное закрытое читается закрытым (097)."""
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"state": "closed"})
+    assert module.is_settled("o/r", 262, "t") is True
+
+
+def test_lifting_returns_the_consent_the_switch_took(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Снятие возвращает согласие: его снял сам стоп-кран, а не человек.
+
+    Убрать причину и оставить следствие значило бы, что снятия нет, — есть
+    уборка мусора, после которой изменение стоит так же, только молча (018).
+    """
+    calls: list[tuple[str, str]] = []
+
+    def note(method: str, path: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+        calls.append((method, path))
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", note)
+    module.lift_hold("o/r", 7, "t", apply=True)
+    assert calls == [
+        ("DELETE", "repos/o/r/issues/7/labels/hold"),
+        ("POST", "repos/o/r/issues/7/labels"),
+    ]
+
+
+def test_a_dry_lift_touches_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без ключа записи чужая метка не трогается — только называется намерение."""
+    calls: list[str] = []
+
+    def note(*_args: object, **_kwargs: object) -> dict[str, object]:
+        calls.append("тронул")
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", note)
+    module.lift_hold("o/r", 7, "t", apply=False)
+    assert calls == []
+
+
+def test_a_refused_lift_does_not_stop_the_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ снятия не роняет обход: остальные изменения ещё не посмотрены (084)."""
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.lift_hold("o/r", 7, "t", apply=True)

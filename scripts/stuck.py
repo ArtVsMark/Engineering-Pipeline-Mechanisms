@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -80,6 +81,7 @@ FRESH_MINUTES: Final = 20
 #: закрытый: новое состояние обязано получить строку, а не попасть в «прочее».
 WHY_DRAFT: Final = "черновик — готовым не объявлен"
 WHY_HOLD: Final = "остановлено меткой «hold» — стоп-кран стоит осознанно"
+WHY_HOLD_LIFTED: Final = "стоп-кран снят: названного больше нет смысла ждать"
 WHY_UNCOMPUTED: Final = "состояние слияния ещё не посчитано площадкой"
 WHY_NEIGHBOUR: Final = "своё красное или конфликт — это предмет оклика, а не шага 11"
 WHY_RUNNING: Final = "проверки идут"
@@ -92,6 +94,13 @@ STUCK_NO_RUNS: Final = "записей проверок на голове нет
 STUCK_MISSING: Final = "обязательная проверка объявлена, но на голове не создана"
 STUCK_UNARMED: Final = "зелено и согласие есть, а значок слияния не выдан"
 STUCK_ARMED: Final = "значок выдан, всё зелено, а слияния нет"
+STUCK_HOLD_MUTE: Final = "стоп-метка не называет, чего ждёт — отменяющий переключатель без адресата"
+
+#: Чего ждёт стоп-метка — строкой в теле изменения (решение 018). Номер,
+#: а не свободный текст: спрашивать у площадки можно только разрешимый адрес.
+WAITS_RE: Final = re.compile(r"^Ждёт:\s*(?P<said>.+?)\s*$", re.MULTILINE)
+#: Разрешимая форма названного: «#262».
+SUBJECT_RE: Final = re.compile(r"^#(?P<number>\d+)$")
 
 
 class NotRun(RuntimeError):
@@ -110,11 +119,51 @@ class Verdict:
     stuck: bool
     why: str
     missing: tuple[str, ...] = ()
+    #: Снять ли стоп-метку: названное ею закрыто, ждать больше нечего (018).
+    lift: bool = False
 
     def said(self) -> str:
         """Строка реестра: номер, причина и — если пропажа — чьи имена."""
         names = f" ({', '.join(self.missing)})" if self.missing else ""
         return f"- #{self.number} — {self.why}{names}"
+
+
+def waits_for(body: str) -> str:
+    """Что названо строкой «Ждёт:» — как написано, без разбора смысла.
+
+    Пусто значит «строки нет»: стоп-кран без названного условия и есть предмет
+    жалобы, а не пустая строка
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    Читается ПЕРВАЯ строка: две означали бы два условия, а снятие по одному из
+    них было бы снятием по половине.
+    """
+    found = WAITS_RE.search(body or "")
+    return found.group("said") if found else ""
+
+
+def named_subject(said: str) -> int:
+    """Номер, если названное разрешимо; ``0`` — если назван свободный текст.
+
+    Ноль здесь не «не нашёл», а ВТОРОЙ исход: причина названа словом, спросить
+    её у площадки нечем, и стоп-кран остаётся стоять осознанно (решение 018).
+    """
+    found = SUBJECT_RE.match(said.strip())
+    return int(found.group("number")) if found else 0
+
+
+def is_settled(repo: str, number: int, token: str) -> bool:
+    """Закрыто ли названное. Неспрошенное считается ОТКРЫТЫМ.
+
+    Снятие стоп-крана необратимо в том смысле, что вернуть его может только
+    человек, и выводить «закрыто» из «не смог спросить» значит снимать
+    чужую остановку по незнанию
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    try:
+        got = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+    except ghrest.TransportError:
+        return False
+    return str(got.get("state") or "") == "closed"
 
 
 def marks_of(payload: dict[str, Any]) -> set[str]:
@@ -146,6 +195,7 @@ def judge(
     *,
     armed: bool,
     fresh: bool,
+    lifted: bool = False,
 ) -> Verdict:
     """Вердикт по одному изменению: застряло ли и чем именно.
 
@@ -164,7 +214,13 @@ def judge(
     if bool(payload.get("draft")):
         return Verdict(number, False, WHY_DRAFT)
     if HOLD in marks:
-        return Verdict(number, False, WHY_HOLD)
+        # ТРИ ИСХОДА, А НЕ ДВА (039). «Остановлено» и «остановлено и забыто»
+        # снаружи одинаковы, и различает их только то, названо ли условие
+        # (решение 018). Третий — стоп-кран, не назвавший ничего: у него нет
+        # адресата, и он идёт в реестр, а не в молчание (147, 158).
+        if not waits_for(str(payload.get("body") or "")):
+            return Verdict(number, True, STUCK_HOLD_MUTE)
+        return Verdict(number, False, WHY_HOLD_LIFTED if lifted else WHY_HOLD, lift=lifted)
     state = str(payload.get("mergeable_state") or "")
     if state in UNCOMPUTED:
         return Verdict(number, False, WHY_UNCOMPUTED)
@@ -256,6 +312,8 @@ def sweep(repo: str, token: str, now: datetime, minutes: int = FRESH_MINUTES) ->
             ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
             or {}
         ).get("check_runs") or []
+        said = waits_for(str(full.get("body") or "")) if HOLD in marks_of(full) else ""
+        subject = named_subject(said)
         seen.append(
             judge(
                 full,
@@ -263,9 +321,34 @@ def sweep(repo: str, token: str, now: datetime, minutes: int = FRESH_MINUTES) ->
                 required,
                 armed=bool(full.get("auto_merge")),
                 fresh=is_fresh(head_time(repo, head, token), now, minutes),
+                lifted=bool(subject) and is_settled(repo, subject, token),
             )
         )
     return seen
+
+
+def lift_hold(repo: str, number: int, token: str, *, apply: bool) -> None:
+    """Снимает стоп-метку и ВОЗВРАЩАЕТ согласие: причина снятия была одна.
+
+    Согласие снял не человек, а сама метка (`agent_pr.apply_consent`). Убрать причину
+    и оставить следствие значило бы, что снятия нет вовсе, — есть уборка
+    мусора, после которой изменение стоит ровно так же, только молча
+    (решение 018).
+
+    Отказ площадки здесь не роняет обход: остальные изменения ещё не
+    посмотрены, а стоп-кран простоит до следующего захода
+    ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
+    """
+    if not apply:
+        print(f"  #{number}: снял бы «{HOLD}» и вернул «{CONSENT}» — названное закрыто")
+        return
+    try:
+        ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{ghrest.quote(HOLD)}", token)
+        ghrest.request("POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": [CONSENT]})
+    except ghrest.TransportError as exc:
+        print(f"  #{number}: стоп-кран снять не удалось — {report.cut(str(exc))}")
+        return
+    print(f"  #{number}: «{HOLD}» снят, «{CONSENT}» возвращено — названное закрыто")
 
 
 def render_body(stuck: list[Verdict], now: datetime) -> str:
@@ -348,6 +431,8 @@ def main(argv: list[str] | None = None) -> int:
 
     stuck = [item for item in seen if item.stuck]
     for item in seen:
+        if item.lift:
+            lift_hold(args.repo, item.number, token, apply=args.apply)
         if not item.stuck:
             print(f"  #{item.number}: не застряло — {item.why}")
     save(args.repo, token, stuck, now, apply=args.apply)
