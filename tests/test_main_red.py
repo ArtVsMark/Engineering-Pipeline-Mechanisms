@@ -490,10 +490,18 @@ def test_a_flake_is_seen_without_a_rerun() -> None:
     Разбор — `docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md`.
     """
     runs = [
-        {"name": "review", "status": "completed", "conclusion": "failure", "started_at": "01"},
+        {
+            "name": "review",
+            "status": "completed",
+            "conclusion": "failure",
+            "started_at": "01",
+            "details_url": "https://github.com/o/r/actions/runs/7001/job/1",
+        },
         {"name": "review", "status": "completed", "conclusion": "success", "started_at": "02"},
     ]
-    assert module.flaky_names(runs) == ["review"]
+    # Номер ПАДАВШЕГО прогона — часть находки: по нему одна запись отличается
+    # от следующей такой же, и частота не теряется (#222).
+    assert module.flaky_names(runs) == {"review": 7001}
 
 
 def test_green_before_red_is_not_a_flake() -> None:
@@ -506,7 +514,7 @@ def test_green_before_red_is_not_a_flake() -> None:
         {"name": "test", "status": "completed", "conclusion": "success", "started_at": "01"},
         {"name": "test", "status": "completed", "conclusion": "failure", "started_at": "02"},
     ]
-    assert module.flaky_names(runs) == []
+    assert module.flaky_names(runs) == {}
 
 
 def test_a_cancelled_record_is_not_a_fall() -> None:
@@ -522,7 +530,7 @@ def test_a_cancelled_record_is_not_a_fall() -> None:
         {"name": "pr-meta", "status": "completed", "conclusion": "skipped", "started_at": "01"},
         {"name": "pr-meta", "status": "completed", "conclusion": "success", "started_at": "02"},
     ]
-    assert module.flaky_names(runs) == []
+    assert module.flaky_names(runs) == {}
 
 
 def test_a_flake_on_a_change_names_where_it_blinked() -> None:
@@ -536,3 +544,78 @@ def test_a_flake_on_a_change_names_where_it_blinked() -> None:
     assert shared.said().endswith("прогон 7")
     assert on_change.said().endswith("прогон 217 · #217")
     assert module.parse_flakes(f"{shared.said()}\n{on_change.said()}") == [shared, on_change]
+
+
+def test_a_flake_without_a_run_number_is_not_recorded() -> None:
+    """Запись, чей прогон не разобрался, миганием не считается.
+
+    Разбор строгий по той же причине, что и у перезапуска: не разобралось —
+    значит запись поставило не то приложение, и отличить это мигание от
+    следующего будет нечем (045).
+    """
+    runs = [
+        {"name": "x", "status": "completed", "conclusion": "failure", "started_at": "01"},
+        {"name": "x", "status": "completed", "conclusion": "success", "started_at": "02"},
+    ]
+    assert module.flaky_names(runs) == {}
+
+
+def test_two_flakes_of_one_name_are_two_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Одно имя, мигнувшее дважды, даёт ДВЕ записи, а не одну.
+
+    Дедупликация шла по номеру ИЗМЕНЕНИЯ, и второе мигание того же имени на том
+    же изменении терялось — то есть терялась частота, ради которой мигания и
+    записывают. Нашёл внешний взгляд на #222.
+    """
+
+    def head(sha: str, run: int) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "review",
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "01",
+                "details_url": f"https://github.com/o/r/actions/runs/{run}/job/1",
+            },
+            {"name": "review", "status": "completed", "conclusion": "success", "started_at": "02"},
+        ]
+
+    heads = {"aaa": head("aaa", 11), "bbb": head("bbb", 22)}
+
+    def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
+        if "pulls?" in path:
+            return [
+                {"number": 7, "head": {"sha": "aaa"}},
+                {"number": 7, "head": {"sha": "bbb"}},
+            ]
+        for sha, runs in heads.items():
+            if sha in path:
+                return runs
+        return []
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    found = module.flakes_on_changes("o/r", "token", [], "12.09.2026")
+    assert [(one.name, one.run, one.where) for one in found] == [
+        ("review", 11, "#7"),
+        ("review", 22, "#7"),
+    ]
+
+
+def test_a_change_head_is_read_by_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Записи головы изменения читаются СТРАНИЦАМИ, как и у общей ветки.
+
+    Умолчание площадки обрезает хвост молча, а хвост — это и есть вторая запись
+    имени, без которой мигание неотличимо от обычной красноты (#222).
+    """
+    asked: list[str] = []
+
+    def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
+        asked.append(path)
+        return [{"number": 7, "head": {"sha": "aaa"}}] if "pulls?" in path else []
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    module.flakes_on_changes("o/r", "token", [], "12.09.2026")
+    checks = [path for path in asked if "check-runs" in path]
+    assert checks, "записи проверок головы изменения не читались вовсе"
+    for path in checks:
+        assert "per_page=100" not in path, f"страница одна, хвост теряется: {path}"
