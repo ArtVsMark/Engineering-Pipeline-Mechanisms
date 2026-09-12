@@ -158,12 +158,21 @@ def told_by_tests(name: str, module: str, tests: str) -> bool:
     #227.
     """
     bare = re.escape(name)
-    #: Знаки, которыми имя ЗОВУТ или ОТДАЮТ. Список закрытый: каждая форма —
-    #: утверждение «здесь имя попадает в работу», и добавляется она разбором
-    #: случая, а не на всякий случай.
-    handed = r"(?:\s*\(|\s*,|\s*\)|\s*=(?!=))"
-    if re.search(rf"(?<![\w.]){bare}{handed}|\.{bare}{handed}", tests):
+    # ЗВАТЬ — ЭТО СКОБКА СРАЗУ ЗА ИМЕНЕМ.
+    if re.search(rf"(?<![\w.]){bare}\s*\(|\.{bare}\s*\(", tests):
         return True
+    # ОТДАВАТЬ — ЭТО ИМЯ НА МЕСТЕ ЗНАЧЕНИЯ, то есть ПОСЛЕ `=`, `,`, `(` или
+    # `[`: `key=имя`, `setattr(x, "y", имя)`, `[имя]`.
+    #
+    # ПОРЯДОК ЗНАКА РЕШАЕТ ВСЁ, и на этом я ошибся. Первая редакция искала знак
+    # ПОСЛЕ имени (`имя=`) и потому засчитывала `имя = 5` — присваивание,
+    # которое прогоном не является вовсе. Нашёл внешний взгляд на #247. Знак
+    # перед именем говорит «имя отдают», знак после — «имени присваивают», и
+    # это противоположные вещи
+    # ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    if re.search(rf"[=,(\[]\s*{bare}\s*(?=[),\]]|$)", tests, re.MULTILINE):
+        return True
+    # ДЕКОРАТОР — тоже передача, только записанная иначе.
     if re.search(rf"@\s*{bare}\b", tests):
         return True
     return name == ENTRY and Path(module).name in tests
