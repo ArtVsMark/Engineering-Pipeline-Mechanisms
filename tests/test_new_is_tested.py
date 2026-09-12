@@ -62,3 +62,15 @@ def test_the_gate_judges_only_what_the_change_added() -> None:
     source = module.__doc__ or ""
     assert "ТОЛЬКО ДОБАВЛЕННОЕ" in source
     assert "added_names" in __import__("inspect").getsource(module.main)
+
+
+def test_the_base_is_the_shared_branch_of_the_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    """База берётся у площадки, а не назначается «main» навсегда.
+
+    Изменение может идти в другую ветку, и судить его относительно `main`
+    значило бы считать добавленным всё, что есть у его настоящей базы.
+    """
+    monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+    assert module.base_ref() == "origin/main"
+    monkeypatch.setenv("GITHUB_BASE_REF", "release/0.2")
+    assert module.base_ref() == "origin/release/0.2"
