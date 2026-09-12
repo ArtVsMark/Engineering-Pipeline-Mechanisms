@@ -271,3 +271,78 @@ def test_checks_facts_count_both_sections(tmp_path: Path) -> None:
     counted = facts.checks_facts(answer)
     assert counted["required"] == 1
     assert counted["advisory"] == 1, "прогон вне изменения не попал в счёт"
+
+
+# --- отставание от семьи: непосчитанное называется ---------------------------
+
+
+def where_snapshot(tmp_path: Path) -> Path:
+    """Сводка каталога с одним чужим ответом, который держится гейтом."""
+    path = tmp_path / "where.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "1.2",
+                "consumers": [
+                    {
+                        "repo": "ArtVsMark/Glossary-Python",
+                        "holds": {"077": {"mechanism": "gate", "where": "scripts/x.py"}},
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def answers(tmp_path: Path, body: str) -> Path:
+    """Наши ответы каталогу — файлом, как их читает сборщик."""
+    path = tmp_path / "bindings.json"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_the_gap_is_counted_when_both_sides_are_named(tmp_path: Path) -> None:
+    """Названы и наше имя, и файл ответов — отставание посчитано.
+
+    Здоровый вход обязан пройти: иначе «не посчитано» неотличимо от «нечего
+    считать» (097).
+    """
+    ours = answers(tmp_path, '{"rules": {"077": {"mechanism": "document", "status": "active"}}}')
+    got = facts.family_facts(
+        where_snapshot(tmp_path), mine="ArtVsMark/Engineering-Pipeline-Mechanisms", answers=ours
+    )
+    assert got["behind_read"] is True
+    assert got["behind"] == 1 and got["behind_rules"] == ["077"]
+
+
+def test_an_uncounted_gap_says_so_instead_of_showing_zero(tmp_path: Path) -> None:
+    """Имя не названо — отставание НЕ посчитано, и это сказано словами.
+
+    Молчание читалось бы как «отставания нет», а отсутствие числа и нулевое
+    число — разные состояния
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд на #240.
+    """
+    got = facts.family_facts(where_snapshot(tmp_path), mine="", answers=None)
+    assert got["behind_read"] is False
+    assert "behind" not in got, "непосчитанное отставание вышло числом"
+    assert "не посчитано" in got["behind_why"]
+
+
+def test_a_broken_answers_file_refuses_instead_of_counting_everything(tmp_path: Path) -> None:
+    """Дефектный ответ — отказ, а не пустой словарь.
+
+    Пустой дал бы отставание, равное числу ВСЕХ машинных ответов семьи:
+    правдоподобное число, которое ложь. Нашёл внешний взгляд на #240.
+    """
+    for body in ('{"правила": {}}', "{ это не json", '{"rules": []}', '{"rules": {}}'):
+        got = facts.family_facts(
+            where_snapshot(tmp_path),
+            mine="ArtVsMark/Engineering-Pipeline-Mechanisms",
+            answers=answers(tmp_path, body),
+        )
+        assert got["behind_read"] is False, body
+        assert "behind" not in got, body

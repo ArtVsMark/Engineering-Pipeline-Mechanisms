@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -40,11 +40,17 @@ jobs:
 ANSWER = 'schema: 4\ncontract: ">=0.1,<0.2"\nchecks:\n  lint: required\n'
 
 
-def tree(root: Path, workflow: str = WORKFLOW, answer: str = ANSWER) -> Path:
-    """Собирает дерево с одним прогоном и ответом проекта."""
+def tree(root: Path, workflow: str | None = WORKFLOW, answer: str = ANSWER) -> Path:
+    """Собирает дерево с одним прогоном и ответом проекта.
+
+    `workflow=None` значит «прогонов нет вовсе»: так подделывается снятие
+    прогона целиком — иначе примету «прогон удалён» не печатает никто, а
+    проверить её иначе нечем.
+    """
     directory = root / ".github" / "workflows"
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "ci.yml").write_text(workflow, encoding="utf-8")
+    if workflow is not None:
+        (directory / "ci.yml").write_text(workflow, encoding="utf-8")
     (root / ".pipeline.yml").write_text(answer, encoding="utf-8")
     return root
 
@@ -273,6 +279,40 @@ def test_a_fragment_that_names_what_was_is_enough(tmp_path: Path) -> None:
     assert gate.migration_named([said]) is True
 
 
+def test_the_word_was_alone_is_not_a_transition(tmp_path: Path) -> None:
+    """«Было» в одиночку переходом НЕ является — это частое слово прозы.
+
+    «Раньше это было неудобно» проходило гейт, не сказав потребителю ничего.
+    Переход называет обе стороны: что было И что стало. Нашёл внешний взгляд на
+    #142; закреплено здесь, иначе послабление вернулось бы молча
+    ([114](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/114-migrate-from-the-current-version-not-from-zero.md)).
+    """
+    said = tmp_path / "a.contract.md"
+    said.write_text("Раньше это было неудобно, теперь удобнее.\n", encoding="utf-8")
+    assert gate.migration_named([said]) is False
+
+
+def test_the_pair_was_and_became_is_a_transition(tmp_path: Path) -> None:
+    """Пара «было … стало» переход называет — обе стороны на месте."""
+    said = tmp_path / "a.contract.md"
+    said.write_text("было: `matrix`\nстало: `test-matrix`\n", encoding="utf-8")
+    assert gate.migration_named([said]) is True
+
+
+def test_every_single_word_mark_names_a_transition_by_itself() -> None:
+    """Каждая одиночная примета перехода что-то говорит о ПРЕЖНЕМ состоянии.
+
+    Список одиночных примет — утверждение «этого слова достаточно», и проверять
+    его надо каждым словом, а не первым: ровно так в списке и осталось «было»,
+    которого достаточно НЕ было (145).
+    """
+    for mark in gate.MIGRATION_MARKS:
+        assert mark not in {"было", "стало"}, (
+            f"«{mark}» одиночной приметой быть не может: слово называет одну "
+            "сторону перехода, и в прозе встречается само по себе"
+        )
+
+
 def test_the_gate_declares_the_third_outcome_when_files_are_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -295,7 +335,7 @@ def test_the_gate_declares_the_third_outcome_when_files_are_unreadable(
 # --- что гейт обязан назвать НЕСОВМЕСТИМЫМ -----------------------------------
 
 
-def changed(tmp_path: Path, *, workflow: str = WORKFLOW, answer: str = ANSWER) -> list[str]:
+def changed(tmp_path: Path, *, workflow: str | None = WORKFLOW, answer: str = ANSWER) -> list[str]:
     """Различия поверхности между образцом и правкой."""
     before = contract.surface(tree(tmp_path / "before"))
     after = contract.surface(tree(tmp_path / "after", workflow=workflow, answer=answer))
@@ -377,19 +417,97 @@ def test_a_loosened_input_is_not_breaking(tmp_path: Path) -> None:
     assert changes and not contract.breaking(changes), changes
 
 
-def test_every_breaking_mark_is_printed_by_someone() -> None:
-    """У каждой приметы несовместимого есть тот, кто её печатает.
+#: Вход кнопки в образце и второй такой же — чтобы подделки не собирали одну и
+#: ту же строку по частям в двух местах (090).
+INPUT_PR: Final = (
+    '      pr:\n        description: "номер"\n        required: true\n        type: string\n'
+)
+INPUT_WHY: Final = (
+    '      why:\n        description: "зачем"\n        required: true\n        type: string\n'
+)
+
+#: Подделанные правки, каждая — ОДИН род несовместимого изменения. Список
+#: закрытый и служит двум целям: проверить, что каждая примета действительно
+#: печатается, и что печатает её именно этот род правки.
+PLANTED: Final[dict[str, dict[str, Any]]] = {
+    "джоб снят": {
+        "workflow": lambda text: text.replace("  lint:\n    name: lint\n    steps: []\n", "")
+    },
+    "проверка снята": {"answer": 'schema: 4\ncontract: ">=0.1,<0.2"\nchecks: {}\n'},
+    # Прогона нет вовсе: без этого случая примета «прогон удалён» не печаталась
+    # НИКЕМ — и тест, проверяющий приметы поведением, назвал это сразу.
+    "прогон снят": {"workflow": None},
+    "схема ответа": {"answer": 'schema: 5\ncontract: ">=0.1,<0.2"\nchecks:\n  lint: required\n'},
+    "событие снято": {
+        "workflow": lambda text: text.replace("  pull_request:\n    types: [opened]\n", "")
+    },
+    "тип события снят": {
+        "workflow": lambda text: text.replace("    types: [opened]", "    types: []")
+    },
+    "вход снят": {
+        "workflow": lambda text: text.replace(INPUT_PR, ""),
+    },
+    "вход стал обязательным": {
+        "workflow": lambda text: text.replace(INPUT_PR, INPUT_PR + INPUT_WHY),
+    },
+}
+
+
+def _planted_workflow(edit: dict[str, Any]) -> str | None:
+    """Прогон подделки: правка образца, снятие целиком или образец как есть."""
+    if "workflow" not in edit:
+        return WORKFLOW
+    asked = edit["workflow"]
+    return None if asked is None else str(asked(WORKFLOW))
+
+
+def _planted_answer(edit: dict[str, Any]) -> str:
+    """Ответ проекта в подделке — правленый либо образцовый."""
+    return str(edit.get("answer") or ANSWER)
+
+
+def planted_lines(tmp_path: Path) -> list[str]:
+    """Все строки различий, которые механизм печатает на подделанных правках."""
+    said: list[str] = []
+    for name, edit in PLANTED.items():
+        said += changed(
+            tmp_path / name, workflow=_planted_workflow(edit), answer=_planted_answer(edit)
+        )
+    return said
+
+
+def test_every_breaking_mark_is_actually_printed(tmp_path: Path) -> None:
+    """У каждой приметы несовместимого есть ПРАВКА, на которой она печатается.
 
     Мёртвая примета — худший вид полноты: список выглядит закрытым, а строка,
     которую он ждёт, не появляется ни при каком изменении. Ровно это и было с
     «проверки не стало» (075).
+
+    ПРОВЕРЯЕТСЯ ПОВЕДЕНИЕМ, А НЕ ТЕКСТОМ ФАЙЛА. Первая попытка искала приметы
+    подстрокой в исходнике `contract.py` — и не могла упасть: сами приметы там
+    же и перечислены, так что каждая находила себя. Гейт, который не способен
+    отказать, — тот самый дефект, который этим изменением и чинится. Нашёл
+    внешний взгляд на #242
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
     """
-    printed = (Path(__file__).resolve().parent.parent / "scripts" / "contract.py").read_text(
-        encoding="utf-8"
+    said = planted_lines(tmp_path)
+    orphans = [mark for mark in contract.BREAKING_MARKS if not any(mark in line for line in said)]
+    assert not orphans, (
+        f"приметы, которых не печатает ни одна подделанная правка: {orphans}. "
+        f"Напечатано было:\n  " + "\n  ".join(sorted(set(said)))
     )
-    orphans = [
-        mark
-        for mark in contract.BREAKING_MARKS
-        if f"{mark}" not in printed.replace("BREAKING_MARKS", "")
-    ]
-    assert not orphans, f"приметы, которых никто не печатает: {orphans}"
+
+
+def test_the_planted_edits_are_each_breaking(tmp_path: Path) -> None:
+    """Каждая подделанная правка признаётся несовместимой — по отдельности.
+
+    Без этого список подделок мог бы держаться одной правкой, накрывающей все
+    приметы разом, и «каждый род проверен» стало бы неправдой (145).
+    """
+    for name, edit in PLANTED.items():
+        changes = changed(
+            tmp_path / f"one-{name}",
+            workflow=_planted_workflow(edit),
+            answer=_planted_answer(edit),
+        )
+        assert contract.breaking(changes), f"«{name}» не признано несовместимым: {changes}"
