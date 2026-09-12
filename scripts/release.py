@@ -94,29 +94,31 @@ def declared_version() -> str:
     return paths.VERSION.read_text(encoding="utf-8").strip()
 
 
-def next_after(current: str) -> str:
+def next_after(current: str, *, contract: bool) -> str:
     """Какой номер выпуска ожидается после текущего.
 
-    МИНОР растёт ВСЕГДА при постановке тега — схема семьи держит инвариант
-    «каждый тег вида `vX.Y.0`», и патч-тегов не существует. Правка поверхности
-    при этом не поднимает мажор сама: `0.x` живёт до закрытой приёмки.
+    РАЗРЯД ВЫБИРАЮТ ФРАГМЕНТЫ, А НЕ ФАКТ ПОСТАНОВКИ ТЕГА. Фрагмент рода
+    `contract` означает, что поверхность тронута, — такой выпуск поднимает
+    минор. Ни одного такого нет — поверхность не тронута, и это патч, ровно как
+    сказано в таблице разрядов `docs/release.md`.
 
-    ПАРАМЕТРА «ТРОНУТ ЛИ КОНТРАКТ» ЗДЕСЬ БОЛЬШЕ НЕТ. Он принимался и не
-    использовался ни одной строкой: оба вызова считали `touches_contract` и
-    отдавали результат в никуда. Читатель при этом видел вход и заключал, что
-    род фрагментов на номер влияет, — то есть подпись врала о поведении
-    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    ПРЕЖНИЙ РАСЧЁТ СПОРИЛ С ДОГОВОРОМ. Минор рос ВСЕГДА под инвариантом «каждый
+    тег вида `vX.Y.0`», и каждый выпуск объявлял потребителю «поверхность
+    расширена», даже когда правилась опечатка. Ложное обещание стоит
+    перечитывания ответов, которых ничто не отменяло, а перечитывание,
+    потребованное зря, перестают делать
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Разбор и отвергнутые варианты —
+    `docs/decisions/015-the-contract-version-moves-by-its-own-digits.md`.
 
-    Вопрос, который за ним стоял, не снят, а НАЗВАН: сегодня `do_release`
-    пишет `CONTRACT_VERSION` на каждом выпуске, включая не тронувший
-    поверхность. Пробел и его цена — в таблице `AGENTS.md`; развязать версию
-    контракта с тегом молча нельзя, это решение владельца.
+    МАЖОР ЗДЕСЬ НЕ РАСТЁТ НИКОГДА: его поднимает закрытая приёмка, а не род
+    фрагмента, и состояние приёмки механизм спрашивает у площадки.
     """
     found = VERSION_RE.match(current)
     if found is None:
         raise NotRun(f"объявленная версия «{current}» не вида МАЖОР.МИНОР.ПАТЧ")
-    major, minor = int(found.group(1)), int(found.group(2))
-    return f"{major}.{minor + 1}.0"
+    major, minor, patch = (int(found.group(one)) for one in (1, 2, 3))
+    return f"{major}.{minor + 1}.0" if contract else f"{major}.{minor}.{patch + 1}"
 
 
 #: Состояния названной приёмки. Четыре, а не три: «такой задачи нет» чинится
@@ -192,7 +194,7 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
         problems.append(f"тег v{wanted} уже стоит — тег не переставляется (074)")
 
     current = declared_version()
-    expected = next_after(current)
+    expected = next_after(current, contract=bool(touches_contract(waiting)))
     major_now = int(VERSION_RE.match(current).group(1))  # type: ignore[union-attr]
     major_wanted = int(VERSION_RE.match(wanted).group(1))  # type: ignore[union-attr]
 
@@ -224,8 +226,8 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
         )
     elif major_wanted == major_now and wanted != expected:
         problems.append(
-            f"ожидается {expected}, а названо {wanted}: минор растёт при каждой постановке "
-            "тега — схема держит инвариант «каждый тег вида vX.Y.0»"
+            f"ожидается {expected}, а названо {wanted}: разряд выбирают ФРАГМЕНТЫ — "
+            "фрагмент рода `contract` поднимает минор, его отсутствие — патч"
         )
     return problems
 
@@ -278,7 +280,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        wanted = args.version or next_after(declared_version())
+        wanted = args.version or next_after(
+            declared_version(), contract=bool(touches_contract(fragments()))
+        )
         # Состояние приёмки спрашивается ОДИН раз и передаётся обоим: разбор и
         # печать обязаны говорить об одном состоянии, а два запроса на одном
         # заходе могли бы разойтись.
