@@ -47,6 +47,16 @@ class Outcome:
     missing: list[str]
 
 
+def names_of(text: str) -> tuple[str, ...]:
+    """Имена, под которыми пункт узнаётся: весь его текст и его ЗАГОЛОВОК."""
+    whole = changerefs.normalise(text)
+    heading = ITEM_HEADING_RE.match(text)
+    if not heading:
+        return (whole,)
+    bare = changerefs.normalise(heading.group(0).strip().strip("*").strip().rstrip("."))
+    return (whole, bare) if bare and bare != whole else (whole,)
+
+
 def marked(body: str, item: str) -> tuple[str, bool]:
     """Отмечает пункт сделанным; вторым отдаёт, НАШЁЛСЯ ли он вообще.
 
@@ -55,16 +65,30 @@ def marked(body: str, item: str) -> tuple[str, bool]:
     значат разное: первое — работа, второе — повтор. Пока их различало
     сравнение тел, уже отмеченный пункт объявлялся ненайденным — то есть
     механизм звал на помощь там, где всё было в порядке (045).
+
+    ПУНКТ УЗНАЁТСЯ И ПО ЗАГОЛОВКУ, А НЕ ТОЛЬКО ЦЕЛИКОМ. Пункт эпика — это
+    абзац: жирный заголовок и проза под ним, и в теле задачи он занимает
+    несколько строк. Образец читает СТРОКУ, а называют такой пункт заголовком —
+    и человек, и разбор слитого. Сравнение целых строк на таком пункте не
+    совпадало никогда: замер 12.09.2026 — разбор по #232 написал «Закрыто: 2.
+    Слияние отдаётся площадке», а галочка в #196 не встала; то же случилось
+    пунктом 6 по #230.
+
+    СОСЕД НАЗВАН: сравнение по-прежнему СТРОГОЕ, а не «подстрока в строке».
+    Вхождение отметило бы пункт 2 по слову из пункта 12, и порядок находок
+    решал бы, какой
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Имён у пункта ровно два, оба берутся из его же текста.
     """
     wanted = changerefs.normalise(item)
     lines = body.splitlines()
     for place, line in enumerate(lines):
         open_item = CHECKLIST_RE.match(line)
-        if open_item and changerefs.normalise(open_item.group("text")) == wanted:
+        if open_item and wanted in names_of(open_item.group("text")):
             lines[place] = line.replace("[ ]", "[x]", 1)
             return "\n".join(lines), True
         done_item = DONE_ITEM_RE.match(line)
-        if done_item and changerefs.normalise(done_item.group("text")) == wanted:
+        if done_item and wanted in names_of(done_item.group("text")):
             return body, True
     return body, False
 

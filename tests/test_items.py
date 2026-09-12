@@ -443,3 +443,57 @@ def test_one_unread_task_does_not_lose_the_others(
     said = capsys.readouterr().out
     assert "#8" in said, said
     assert "не выведено" not in said, "отказ по одной задаче унёс весь эпик"
+
+
+# --- пункт эпика — абзац, а не строка ---------------------------------------
+
+EPIC_ITEM = """## Пункты
+
+- [ ] **2. Слияние отдаётся площадке.** Пересмотр решения #3 — НОВОЙ записью в
+  `docs/decisions/`, и замер прежде доверия.
+- [ ] **12. Что-то другое.** Проза про слияние и площадку тоже есть здесь.
+"""
+
+
+def test_an_item_is_recognised_by_its_heading() -> None:
+    """Пункт эпика — АБЗАЦ, и называют его заголовком: и человек, и разбор.
+
+    Замер 12.09.2026: разбор по #232 написал «Закрыто: 2. Слияние отдаётся
+    площадке», а галочка в #196 не встала — образец читает строку, а сравнение
+    шло на равенство целых строк, и совпасть оно не могло никогда. Тем же
+    промахом остался открытым пункт 6 по #230.
+    """
+    after, found = items.marked(EPIC_ITEM, "2. Слияние отдаётся площадке")
+    assert found, "пункт не найден по своему же заголовку"
+    assert "- [x] **2. Слияние отдаётся площадке.**" in after
+    assert "- [ ] **12." in after, "отмечен соседний пункт"
+
+
+def test_a_word_from_the_prose_marks_nothing() -> None:
+    """Сравнение осталось СТРОГИМ: вхождение отметило бы пункт по слову (195).
+
+    Имён у пункта ровно два — весь его текст и его заголовок, — и оба берутся
+    из его же текста, а не из совпадения по прозе.
+    """
+    assert items.marked(EPIC_ITEM, "Слияние")[1] is False
+    assert items.marked(EPIC_ITEM, "площадке")[1] is False
+    assert items.marked(EPIC_ITEM, "2. Слияние")[1] is False
+
+
+def test_an_item_already_marked_is_found_by_its_heading_too() -> None:
+    """Повтор отличается от находки и на заголовке: тело не правится заново."""
+    done = EPIC_ITEM.replace("- [ ] **2.", "- [x] **2.")
+    after, found = items.marked(done, "2. Слияние отдаётся площадке")
+    assert found and after == done, "уже отмеченный пункт правил тело задачи"
+
+
+def test_the_two_names_of_an_item_are_its_own_text() -> None:
+    """Имён у пункта ровно два, и второе — заголовок без разметки и точки."""
+    names = items.names_of("**5. Повторный взгляд.** Проза под заголовком.")
+    # Имена приведены тем же `items.changerefs.normalise`, каким сравнивается всё
+    # остальное: второе понимание «та же строка» разошлось бы с первым молча.
+    assert items.changerefs.normalise("5. Повторный взгляд") in names
+    assert len(names) == 2, names
+    assert items.names_of("пункт без заголовка") == (
+        items.changerefs.normalise("пункт без заголовка"),
+    )
