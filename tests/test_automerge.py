@@ -231,6 +231,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "asked": [],
         "disarmed": [],
         "echo": True,
+        "held": {},
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -275,6 +276,11 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return {"commitHeadline": headline, "commitBody": body}
 
     monkeypatch.setattr(module.arm, "arm", armed)
+    # Что площадка ДЕРЖИТ взведённым, читается отдельно: значок несёт тело
+    # момента взведения, и ветка с тех пор могла уехать.
+    monkeypatch.setattr(
+        module, "held_body", lambda repo, number, tok: state["held"].get(number, ("", ""))
+    )
     monkeypatch.setattr(module.arm, "disarm", lambda node, tok: state["disarmed"].append(node))
     # Разметка источника записывается стендом отдельно: проверять надо, что
     # метка ВЫСТАВЛЕНА, а не что о ней напечатано. Замер 09.09.2026: вызов
@@ -433,15 +439,46 @@ def test_only_the_head_of_the_queue_stays_armed(platform: dict[str, Any]) -> Non
 
 
 def test_an_already_armed_head_is_not_armed_twice(platform: dict[str, Any]) -> None:
-    """Взведённая голова не взводится заново: площадка уже ждёт.
+    """Взведённая голова не взводится заново: площадка уже ждёт ТЕМ ЖЕ телом.
 
     Повторное взведение стоило бы обращения к площадке на каждом заходе, а
     заходов у очереди столько, сколько прогонов.
     """
     platform["changes"] = [change(1, "automerge", armed=True)]
     platform["states"] = {1: module.STATE_ARMABLE}
+    platform["held"] = {1: ("изменение 1 (#1)", "тело origin/agent/change-1")}
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["asked"] == [] and platform["disarmed"] == []
+
+
+def test_a_stale_arming_is_renewed_with_the_new_body(platform: dict[str, Any]) -> None:
+    """В ветку дотолкнули — значок несёт СТАРОЕ тело, и его перевзводят.
+
+    Тело собирается в момент взведения; коммит, пришедший позже, площадка
+    сольёт телом без него — то есть работа рассказалась бы в общей ветке не
+    вся. Сверка идёт с тем, что площадка ДЕРЖИТ, а не с предположением о её
+    поведении при толчке (044).
+    """
+    platform["changes"] = [change(1, "automerge", armed=True)]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    platform["held"] = {1: ("изменение 1 (#1)", "тело до последнего коммита")}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["disarmed"] == ["PR_1"], "черствое взведение не снято"
+    assert [body for _, _, body in platform["asked"]] == ["тело origin/agent/change-1"]
+
+
+def test_our_own_merge_also_takes_back_a_neighbours_arming(platform: dict[str, Any]) -> None:
+    """Сливая старшего САМИ, значок соседа тоже снимаем.
+
+    Иначе мы сливаем голову, а площадка следом сливает взведённого соседа —
+    даже если между ними по нашему порядку стоял третий. Это и есть «кто
+    первее, того и тапки», от которого очередь и существует (053).
+    """
+    platform["changes"] = [change(1, "automerge"), change(5, "automerge", armed=True)]
+    platform["states"] = {1: "clean"}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["merged"] == [1]
+    assert platform["disarmed"] == ["PR_5"], "значок соседа остался висеть"
 
 
 def test_a_withdrawn_consent_takes_the_arming_back(platform: dict[str, Any]) -> None:

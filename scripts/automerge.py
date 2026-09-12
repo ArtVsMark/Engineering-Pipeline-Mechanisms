@@ -475,17 +475,58 @@ def take_back(repo: str, change: Change, why: str, owner_token: str, *, dry_run:
     arm.disarm(change.node, owner_token)
 
 
+def held_body(repo: str, number: int, owner_token: str) -> tuple[str, str]:
+    """Чем площадка держит изменение взведённым: заголовок и тело уплотнения.
+
+    ЧИТАЕТСЯ REST, И ЭТО ВАЖНО. Взвести дешевле нельзя — у мутации нет
+    REST-эквивалента, — а вот ПРОЧИТАТЬ взведённое можно обычным запросом:
+    поле `auto_merge` отдаётся вместе с изменением. Правило
+    [001](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/001-transport-rest-not-graphql.md)
+    требует REST по умолчанию, и «раз уж пошли в GraphQL, спросим и это» —
+    ровно тот путь, которым у соседей выросли 2436 строк из 131.
+    """
+    payload = ghrest.request("GET", f"repos/{repo}/pulls/{number}", owner_token) or {}
+    kept = payload.get("auto_merge") or {}
+    return str(kept.get("commit_title") or ""), str(kept.get("commit_message") or "")
+
+
+def keep_only(
+    repo: str, change: Change, queue: list[Change], owner_token: str, *, dry_run: bool
+) -> None:
+    """Оставляет взведённой ровно одну голову — названную, — и снимает остальные.
+
+    ЭТО И ЕСТЬ ТО, ЧЕМ СОХРАНЯЕТСЯ НАШ ПОРЯДОК. Площадка сливает взведённое в
+    порядке позеленения, а не вставки: взведи двоих — и очередь станет их
+    гонкой, «кто первее, того и тапки», а порядок у нас правило, а не порядок
+    прибытия
+    ([053](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/053-queue-order-is-a-rule-not-arrival.md)).
+    Одному кандидату гонку составить некому — площадке просто некого гнать.
+
+    ЗОВЁТСЯ ИЗ ОБОИХ ПУТЕЙ, и это была щель. Снятие стояло внутри взведения, и
+    на пути «голова зелена, сливаю сам» значок соседа оставался висеть: мы
+    сливали старшего, а площадка следом сливала взведённого — даже если между
+    ними по нашему порядку стоял третий.
+    """
+    for neighbour in queue:
+        if neighbour.armed and neighbour.number != change.number:
+            take_back(repo, neighbour, "взведена не голова очереди", owner_token, dry_run=dry_run)
+
+
 def hand_over(
     repo: str, change: Change, queue: list[Change], owner_token: str, *, dry_run: bool
 ) -> None:
     """Отдаёт площадке последнее действие: взводит слияние НАШИМ телом.
 
-    ВЗВЕДЁННОЙ ДЕРЖИТСЯ РОВНО ОДНА ГОЛОВА, и это то, чем сохраняется наш
-    порядок. Площадка сливает взведённое в порядке позеленения, а не вставки:
-    взведи двоих — и очередь станет их гонкой, а порядок у нас правило, а не
-    порядок прибытия
-    ([053](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/053-queue-order-is-a-rule-not-arrival.md)).
-    Поэтому взведение соседей снимается здесь же, до выдачи нового.
+    ВЗВЕДЁННОЙ ДЕРЖИТСЯ РОВНО ОДНА ГОЛОВА — за этим следит :func:`keep_only`,
+    и зовётся она из обоих путей, а не только отсюда.
+
+    ТЕЛО СВЕРЯЕТСЯ, А НЕ ПРЕДПОЛАГАЕТСЯ ЗАСТЫВШИМ. Значок несёт тело,
+    собранное в момент взведения; в ветку могли дотолкнуть коммит, и тогда
+    площадка сольёт СТАРЫМ телом — без последней работы. Поэтому заход читает
+    у площадки то, что она держит, и сверяет со свежесобранным: разошлось —
+    снять и взвести заново. Премисы «площадка сама сбрасывает значок на
+    толчок» здесь нет намеренно: если сбрасывает, сверка просто не срабатывает
+    ни разу, и механизм верен в обоих мирах (044).
 
     ТЕЛО УПЛОТНЕНИЯ СОБИРАЕМ МЫ. Мутация принимает `commitHeadline` и
     `commitBody`, и это проверено прогоном, а не прочитано: замер 12.09.2026 на
@@ -493,17 +534,18 @@ def hand_over(
     же заходом проверяется и здесь: проглоченное тело — наступившее условие
     пересмотра решения 011, и заход об этом ГОВОРИТ, а не сливает молча (045).
     """
-    for neighbour in queue:
-        if neighbour.armed and neighbour.number != change.number:
-            take_back(repo, neighbour, "взведена не голова очереди", owner_token, dry_run=dry_run)
-
-    if change.armed:
-        print(f"#{change.number}: уже взведено — площадка ждёт зелёного, заход не нужен")
-        return
+    keep_only(repo, change, queue, owner_token, dry_run=dry_run)
 
     fetch(change)
     body = squash_body.compose(f"origin/{change.branch}", change.base)
     title = f"{change.title} (#{change.number})"
+    if change.armed:
+        if held_body(repo, change.number, owner_token) == (title, body):
+            print(f"#{change.number}: уже взведено тем же телом — площадка ждёт зелёного")
+            return
+        take_back(
+            repo, change, "взведено телом без последней работы ветки", owner_token, dry_run=dry_run
+        )
     if dry_run:
         print(f"  (пробный заход) взвёл бы #{change.number} телом:\n{body}")
         return
@@ -692,6 +734,10 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             print(f"#{change.number}: состояние «{state or '—'}» слияния не допускает, пропущено")
             continue
 
+        # Значок остаётся у ОДНОЙ головы и на этом пути тоже: иначе мы сливаем
+        # старшего, а площадка следом сливает взведённого соседа — даже если
+        # между ними по нашему порядку стоял третий.
+        keep_only(repo, change, queue, owner_token, dry_run=dry_run)
         if change.armed:
             # Взведение снимается ПЕРЕД своим слиянием: у мутации обратная
             # сторона, и брошенное согласие пережило бы слитое изменение в
