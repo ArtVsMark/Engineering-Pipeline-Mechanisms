@@ -9,12 +9,17 @@
 # трижды, поэтому сначала вопрос, потом переключение
 # ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 #
-# ПОЧЕМУ НА ИЗМЕНЕНИИ, ДА ЕЩЁ И С ФИЛЬТРОМ ПО ПУТИ. Механизм подтверждается
-# прогоном, а не тем, что он написан
-# ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)),
-# и подтверждение обязано ехать вместе с изменением, которое механизм трогает.
-# Фильтр по пути держит заход РЕДКИМ: без него замер шёл бы на каждом
-# изменении проекта и трогал бы площадку без предмета.
+# ТОЛЬКО КНОПКА, И ЭТО ИСПРАВЛЕНИЕ, А НЕ ОСТОРОЖНОСТЬ. Заход стоял на
+# `pull_request`: замер обязан ехать вместе с изменением, которое механизм
+# трогает (139). Но у такого прогона в окружении лежит `MERGE_QUEUE_TOKEN`, а
+# исполняет он код ИЗ САМОГО ИЗМЕНЕНИЯ — то есть любая правка `scripts/arm.py`
+# в ветке становится кодом, которому выдали токен владельца. Это известный путь
+# кражи секрета, и нашёл его внешний взгляд на #231 (`b41a6ce`).
+#
+# Своё подтверждение прогоном замер уже получил — 12.09.2026, ответ записан в
+# #196 и в решении 011. Дальше он нужен как КНОПКА: спросить площадку снова,
+# когда premise понадобится перечитать. Взведение же живёт теперь в шаге 8, и
+# там оно не исполняет код изменения — прогон очереди берёт файлы с общей ветки.
 #
 # ОТВЕТ ПИШЕТСЯ В ЗАДАЧУ, А НЕ В ЛОГ. Логи прогонов агентскому окну недоступны
 # — прокси режет хранилище, — и замер, оставшийся в логе, не прочтёт тот, кому
@@ -27,23 +32,27 @@
 name: arm
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - scripts/arm.py
-      - scripts/ghrest.py
-      - .github/workflows/arm.yml
-  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  # Событие сюда не ведёт намеренно: см. шапку. Кнопка — единственный вход, и
+  # предмет она СПРАШИВАЕТ: замер трогает чужую работу, и выбирать её за
+  # человека нечем.
   workflow_dispatch:
+    inputs:
+      pr:
+        description: номер изменения под замер (годны конфликтное и закрытое проверками)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  # Один заход на голову. Взведение и снятие идут парой, и два захода подряд
-  # сняли бы друг за другом чужое согласие (149).
-  group: arm-${{ github.ref }}
-  cancel-in-progress: true
+  # Один заход на репозиторий, и ОТМЕНЫ НЕТ. Взведение и снятие идут парой:
+  # заход, убитый между ними, оставляет чужой значок висеть, и снять его будет
+  # некому — площадка сольёт изменение, как только проверки позеленеют
+  # ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)).
+  # Нашёл внешний взгляд на #231 (`e189694`, `0d569d4`).
+  group: arm
+  cancel-in-progress: false
 
 jobs:
   probe:
@@ -61,10 +70,14 @@ jobs:
         env:
           MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Ввод идёт ОКРУЖЕНИЕМ, а не подстановкой в текст команды: подставленный
+          # `${{ }}` — это чужая строка внутри нашей оболочки
+          # ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
+          SUBJECT: ${{ inputs.pr }}
         run: |
           set -uo pipefail
           rc=0
-          python scripts/arm.py --probe --apply --say-to 196 || rc=$?
+          python scripts/arm.py --probe --pr "$SUBJECT" --apply --say-to 196 || rc=$?
           # Исходы разбираются СПИСКОМ: неизвестный код — не «почти удача» (039).
           case "$rc" in
             0) echo "замер отработал — ответ записан в #196" ;;

@@ -923,3 +923,18 @@ def test_a_change_without_an_arming_holds_nothing(monkeypatch: pytest.MonkeyPatc
     """Значка нет — читается пустое, а не падает: это законное состояние."""
     monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"auto_merge": None})
     assert module.held_body("o/r", 1, "token") == ("", "")
+
+
+def test_an_arming_on_a_foreign_base_is_left_alone(platform: dict[str, Any]) -> None:
+    """Значок на изменении в ЧУЖУЮ базу очередь не трогает.
+
+    Предмет очереди — вставка в её собственную ветку; значок на изменении,
+    нацеленном в другую базу, поставлен не ею, и снимать его значит
+    распоряжаться чужим согласием. Нашёл внешний взгляд на #232.
+    """
+    platform["changes"] = [
+        change(3, "automerge", "hold", armed=True, base="release/1.x"),
+        change(4, "automerge", "hold", armed=True),
+    ]
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["disarmed"] == ["PR_4"], "снят значок с чужой базы"

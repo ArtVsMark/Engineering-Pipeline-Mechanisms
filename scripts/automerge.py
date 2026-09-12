@@ -654,9 +654,13 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     # ВЫШЕ ПУСТОЙ ОЧЕРЕДИ — не для порядка: когда согласие снято у единственного
     # кандидата, очередь как раз и становится пустой. Стоя ниже, снятие не
     # случилось бы ровно в том случае, ради которого оно есть.
+    # ЧУЖАЯ БАЗА — ЧУЖОЕ ДЕЛО. Обход идёт по живым изменениям НАШЕЙ ветки: у
+    # очереди предмет — вставка в неё, и значок на изменении, нацеленном в
+    # другую базу, поставлен не ею. Снимать его значило бы распоряжаться чужим
+    # согласием. Нашёл внешний взгляд на #232 (`9459ea9`).
     asked = {change.number for change in queue}
     for change in changes:
-        if change.armed and change.number not in asked:
+        if change.base == base and change.armed and change.number not in asked:
             take_back(repo, change, "согласия на слияние больше нет", owner_token, dry_run=dry_run)
 
     if not queue:
