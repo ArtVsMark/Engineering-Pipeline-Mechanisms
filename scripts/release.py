@@ -317,6 +317,16 @@ def announce(
     # называется числами, а не словом «изменится».
     now = declared_version()
     after = next_contract(now, touched=bool(contract), breaking=breaking)
+    # ПОМЕТКА СЛЕДУЕТ ЧИСЛУ, А НЕ КЛЮЧУ. `--breaking` без фрагментов поверхности
+    # ничего не двигает, и метить такой заход «НЕСОВМЕСТИМО» значило бы пугать
+    # человека перед необратимым тем, чего не происходит
+    # ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    # Нашёл внешний взгляд на #255.
+    if after == now:
+        print(f"версия контракта: {now} — не меняется, поверхность не тронута")
+        if breaking:
+            print("  ключ --breaking передан, но двигать нечего: фрагментов поверхности нет")
+        return
     said = " (НЕСОВМЕСТИМО, объявлено ключом --breaking)" if breaking else ""
     print(f"версия контракта: {now} → {after}{said}")
 

@@ -714,15 +714,34 @@ def test_the_untrusted_list_names_a_reason_for_every_entry() -> None:
         assert len(why) > 20, f"{name} внесён без причины"
 
 
-def test_the_gate_catches_a_planted_interpolation(tmp_path: Path) -> None:
-    """Гейт проверяется подделанным нарушением, а не зелёным на своём дереве (140)."""
+#: Подделанные подстановки: простая и та, у которой ВНУТРИ свои фигурные скобки.
+#: Вторая — не придирка: именно она стояла в `release.yml` в четырёх местах и
+#: проходила мимо первой редакции образца.
+PLANTED_INTERPOLATIONS: Final = (
+    '          echo "номер ${{ inputs.pr }}"\n',
+    "          python шаг.py ${{ inputs.pr && format('--pr {0}', inputs.pr) || '' }}\n",
+)
+
+
+@pytest.mark.parametrize("said", PLANTED_INTERPOLATIONS, ids=("простая", "со своими скобками"))
+def test_the_gate_catches_a_planted_interpolation(tmp_path: Path, said: str) -> None:
+    """Гейт проверяется подделанным нарушением, а не зелёным на своём дереве (140).
+
+    Две формы, и вторая важнее: подстановка с `format('{0}')` несёт свои
+    фигурные скобки, а первая редакция образца читала тело «без фигурных
+    вовсе» — то есть не видела ровно ту форму, которой ввод и подставляли.
+    Журнал прошлого изменения ЗАЯВИЛ эту подделку, а её не было: правка не
+    применилась, и я этого не проверил. Нашёл внешний взгляд на #255.
+    """
     planted = tmp_path / "плохой.yml"
-    planted.write_text(
-        'jobs:\n  x:\n    steps:\n      - run: |\n          echo "номер ${{ inputs.pr }}"\n',
-        encoding="utf-8",
-    )
-    lines = executed_lines(planted.read_text(encoding="utf-8"))
-    assert any("inputs.pr" in line for _, line in lines), lines
+    planted.write_text("jobs:\n  x:\n    steps:\n      - run: |\n" + said, encoding="utf-8")
+    found = [
+        expr
+        for _, line in executed_lines(planted.read_text(encoding="utf-8"))
+        for expr in (one.group("expr") for one in INTERPOLATION.finditer(line))
+        if any(mark in expr for mark in UNTRUSTED)
+    ]
+    assert found, f"подстановка не увидена образцом: {said!r}"
 
 
 def test_a_number_from_a_button_is_checked_to_be_digits() -> None:
