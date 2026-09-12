@@ -547,3 +547,28 @@ def test_needs_naming_a_stranger_is_refused(tmp_path: Path) -> None:
     )
     with pytest.raises(policy.BadPolicy, match="названа мимо"):
         policy.feeds(directory)
+
+
+def test_the_span_is_parsed_in_one_place() -> None:
+    """Диапазон разбирает ОДНА функция, и её же зовёт проверка ответа.
+
+    Первая редакция завела второе чтение файла — и оно уже расходилось с
+    проверкой формы, оставаясь правдоподобным: докстрока обещала общий разбор,
+    а разбора было два
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    Нашёл внешний взгляд на #253.
+    """
+    assert policy.span_of({"contract": ">=1.2,<1.3"}) == ">=1.2,<1.3"
+    assert policy.span_of({"contract": "  >=1.2,<1.3  "}) == ">=1.2,<1.3"
+
+
+def test_an_unnamed_span_is_a_refusal_not_a_blank() -> None:
+    """Диапазона нет — отказ с причиной, а не пустая строка.
+
+    «Подходит любая версия» — не состояние, а молчание
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
+    for raw in ({}, {"contract": ""}, {"contract": "   "}, {"contract": None}):
+        with pytest.raises(policy.BadPolicy) as caught:
+            policy.span_of(raw)
+        assert "диапазон" in str(caught.value).lower()
