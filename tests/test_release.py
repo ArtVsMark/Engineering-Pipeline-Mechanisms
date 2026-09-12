@@ -490,8 +490,8 @@ def release_step() -> str:
     found = [step for step in steps if step.get("name") == "выпустить"]
     if len(found) != 1:
         raise AssertionError(f"шаг «выпустить» найден {len(found)} раз — читать нечего (075)")
-    lines = [line for line in str(found[0]["run"]).splitlines() if not line.lstrip().startswith("#")]
-    return "\n".join(lines)
+    said = str(found[0]["run"]).splitlines()
+    return "\n".join(line for line in said if not line.lstrip().startswith("#"))
 
 
 def test_the_tag_leaves_only_after_the_commit_landed() -> None:
