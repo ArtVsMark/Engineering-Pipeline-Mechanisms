@@ -818,3 +818,34 @@ def test_the_source_of_a_change_is_decided_without_the_platform() -> None:
     assert module.source_of(plan, red=True) == module.RANK_OWN_RED
     fixing = change(2, "automerge", module.LABEL_FIX_MAIN)
     assert module.source_of(fixing, red=True) == module.RANK_MAIN_RED
+
+
+def test_taking_the_arming_back_names_its_reason(
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Снятие согласия называет причину и НИЧЕГО не делает на пробном заходе.
+
+    «Почему сняли» имеет ровно столько же читателей, сколько само слияние
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)),
+    а пробный заход обязан оставаться показом, а не действием (104).
+    """
+    module.take_back("o/r", change(5, "automerge"), "проверяю показ", "token", dry_run=True)
+    assert platform["disarmed"] == [], "пробный заход тронул площадку"
+    assert "проверяю показ" in capsys.readouterr().out
+
+    module.take_back("o/r", change(5, "automerge"), "а теперь всерьёз", "token", dry_run=False)
+    assert platform["disarmed"] == ["PR_5"]
+
+
+def test_handing_over_shows_the_body_instead_of_arming_on_a_dry_run(
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пробный заход ПОКАЗЫВАЕТ тело уплотнения, а не взводит.
+
+    Проверяется прямым вызовом, а не через весь заход: показ — отдельное
+    обещание шага, и ломаться оно может отдельно от порядка очереди.
+    """
+    head = change(4, "automerge")
+    module.hand_over("o/r", head, [head], "token", dry_run=True)
+    assert platform["asked"] == [], "пробный заход взвёл слияние"
+    assert "тело origin/agent/change-4" in capsys.readouterr().out
