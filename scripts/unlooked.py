@@ -60,7 +60,8 @@ import os
 import re
 import sys
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any, Final
 
 import findings
@@ -168,7 +169,11 @@ REVIEW_CHECK: Final = "review"
 LATE_MARKER: Final = "<!-- late-look: этот взгляд по общей ветке, а не по изменению -->"
 
 #: Запись реестра читается СТРОКОЙ: номер, состояние, дата слияния.
-ENTRY_RE: Final = re.compile(r"^- #(\d+) · ([^·]+) · (\S*)\s*$", re.M)
+ENTRY_RE: Final = re.compile(r"^- #(\d+) · ([^·]+) · (\S*)(?: · поздний взгляд (\S+))?\s*$", re.M)
+#: Хвост записи, которым поздний взгляд ДОПИСЫВАЕТСЯ к состоянию, а не заменяет
+#: его. Пока он заменял, после позднего взгляда узнать, ПОЧЕМУ изменение попало
+#: в реестр, было нечем — а это и есть мера надёжности канала.
+LATE_TAIL: Final = "поздний взгляд"
 #: Отметка обхода: до какого номера реестр уже смотрел. Без неё каждый заход
 #: перечитывал бы комментарии всего окна — тридцать запросов к площадке на
 #: каждое событие очереди.
@@ -191,18 +196,24 @@ class NotRun(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Entry:
-    """Одна запись реестра: что слито, в каком состоянии и когда."""
+    """Одна запись реестра: что слито, в каком состоянии, когда и был ли поздний взгляд."""
 
     number: int
     state: str
     merged: str
+    late: str = ""
+
+    def said(self) -> str:
+        """Строка записи. Хвост появляется, только если поздний взгляд был."""
+        tail = f" · {LATE_TAIL} {self.late}" if self.late else ""
+        return f"- #{self.number} · {self.state} · {self.merged}{tail}"
 
 
 def parse_entries(body: str | None) -> dict[int, Entry]:
     """Разбирает реестр: номер изменения → запись."""
     return {
-        int(number): Entry(int(number), state.strip(), merged)
-        for number, state, merged in ENTRY_RE.findall(body or "")
+        int(number): Entry(int(number), state.strip(), merged, late)
+        for number, state, merged, late in ENTRY_RE.findall(body or "")
     }
 
 
@@ -366,15 +377,26 @@ def scan(
     return entries, mark
 
 
-def mark_late(entries: dict[int, Entry], number: int) -> dict[int, Entry]:
-    """Переводит запись в «поздний взгляд»: он состоялся, но это другой взгляд.
+def mark_late(entries: dict[int, Entry], number: int, day: str) -> dict[int, Entry]:
+    """ДОПИСЫВАЕТ поздний взгляд к записи, не трогая её состояния.
 
-    Записи о таком изменении может и не быть — тогда она заводится: поздний
-    взгляд по слитому это событие само по себе, и терять его из-за того, что
-    реестр этого номера не знал, значило бы отчитаться о меньшем, чем было.
+    ПРЕЖНЕЕ СОСТОЯНИЕ — ЭТО ОТВЕТ НА ДРУГОЙ ВОПРОС. «Прогон взгляда прошёл, а
+    ответа нет» говорит о КАНАЛЕ; «поздний взгляд состоялся» — о том, что
+    остаток всё-таки посмотрели. Пока второе заменяло первое, после позднего
+    взгляда узнать, почему изменение вообще попало в реестр, было нечем, — а
+    счёт этих причин и есть мера надёжности канала. Ровно этого счёта не
+    хватило 12.09.2026, когда предмет автоперезапуска искали среди исходов
+    проверок, не найдя его там по построению
+    (`docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md`).
+
+    Записи о таком изменении может и не быть — тогда она заводится, и состояние
+    у неё одно: сам поздний взгляд. Терять его из-за того, что реестр этого
+    номера не знал, значило бы отчитаться о меньшем, чем было.
     """
     entry = entries.get(number)
-    return {**entries, number: Entry(number, STATE_LATE, entry.merged if entry else "")}
+    if entry is None:
+        return {**entries, number: Entry(number, STATE_LATE, "", day)}
+    return {**entries, number: replace(entry, late=day)}
 
 
 #: Сколько изменений берётся в один заход обхода. Ограничение не про нагрузку
@@ -452,6 +474,12 @@ def render_body(entries: dict[int, Entry], watermark: int) -> str:
         "слияния. Задачу закрывает человек: механизм не знает, разобран остаток",
         "или просто надоел.",
         "",
+        "**Хвост «поздний взгляд ДАТА» ДОПИСЫВАЕТСЯ, а не заменяет состояние.**",
+        "Состояние отвечает на вопрос о КАНАЛЕ — почему изменение сюда попало;",
+        "поздний взгляд — на вопрос об остатке, посмотрели ли его всё-таки. Пока",
+        "второе затирало первое, счёт осечек канала терялся, а он и есть мера",
+        "его надёжности.",
+        "",
         f"Просмотрено до: #{watermark}",
         "",
         "## Не просмотрено",
@@ -462,7 +490,7 @@ def render_body(entries: dict[int, Entry], watermark: int) -> str:
         return "\n".join(lines) + "\n"
     for number in sorted(entries, reverse=True):
         entry = entries[number]
-        lines.append(f"- #{entry.number} · {entry.state} · {entry.merged}")
+        lines.append(entry.said())
     return "\n".join(lines) + "\n"
 
 
@@ -522,7 +550,7 @@ def main(argv: list[str] | None = None) -> int:
             lambda number: look_at(args.repo, number, token),
         )
         if args.late is not None:
-            entries = mark_late(entries, args.late)
+            entries = mark_late(entries, args.late, datetime.now(UTC).strftime("%Y-%m-%d"))
 
         if len(merged) >= args.limit:
             # Окно заполнено целиком — значит, за ним могло остаться слитое,
@@ -538,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
             f"слито без взгляда: {len(without)}, позже просмотрено: {len(entries) - len(without)}"
         )
         for entry in sorted(entries.values(), key=lambda item: -item.number):
-            print(f"  #{entry.number} · {entry.state} · {entry.merged}")
+            print(f"  {entry.said()[2:]}")
 
         save(args.repo, token, entries, watermark, args.apply)
     except NotRun as exc:
