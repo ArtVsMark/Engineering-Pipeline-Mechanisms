@@ -97,12 +97,45 @@ def test_the_hourly_price_fits_the_declared_share() -> None:
     """
     said = declared()
     limit = int(said["limits"]["gh_api_per_hour"]) * float(said["share"])
-    by_hour: dict[str, int] = {}
+    by_hour: dict[int, int] = {}
+    # ЗАХОД, ИДУЩИЙ КАЖДЫЙ ЧАС, ПОПАДАЕТ В КАЖДЫЙ ЧАС. Прежде он считался
+    # отдельной корзиной по строке «*», и худший час выходил заниженным: три
+    # фиксированных прогона и часовой сверх них складывались как четыре разных
+    # часа. Запас держал, точность — нет. Нашёл внешний взгляд на #218.
+    every_hour = 0
     for one in said["runs"].values():
-        hour = str(one["cron"]).split()[1]
-        by_hour[hour] = by_hour.get(hour, 0) + int(one["gh_calls_per_run"])
-    worst = max(by_hour.values()) if by_hour else 0
+        price = int(one["gh_calls_per_run"])
+        field = str(one["cron"]).split()[1]
+        if field.isdigit():
+            by_hour[int(field)] = by_hour.get(int(field), 0) + price
+            continue
+        # Всё, что не одно число, — списком, шагом, диапазоном — считается
+        # идущим КАЖДЫЙ час: ошибаться здесь можно только в сторону строгости
+        # ([050](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/050-limits-move-down-only.md)).
+        every_hour += price
+    worst = (max(by_hour.values()) if by_hour else 0) + every_hour
     assert worst <= limit, f"худший час стоит {worst} вызовов при доле {limit:.0f}"
+
+
+def test_an_hourly_run_is_counted_in_every_hour() -> None:
+    """Часовой заход складывается с фиксированными, а не стоит своей корзиной.
+
+    Проверяется тем, что счёт обязан ОТВЕРГНУТЬ: часовой прогон ценой в долю
+    лимита не может «поместиться» рядом с фиксированным просто потому, что у
+    него другая строка расписания.
+    """
+    said = declared()
+    hourly = [one for one in said["runs"].values() if not str(one["cron"]).split()[1].isdigit()]
+    if not hourly:
+        pytest.skip("часовых заходов нет — складывать нечего")
+    fixed = [one for one in said["runs"].values() if str(one["cron"]).split()[1].isdigit()]
+    assert fixed, "фиксированных заходов нет — складывать не с чем"
+    both = max(int(one["gh_calls_per_run"]) for one in fixed) + sum(
+        int(one["gh_calls_per_run"]) for one in hourly
+    )
+    assert both > max(int(one["gh_calls_per_run"]) for one in said["runs"].values()), (
+        "счёт худшего часа не вырос от часового захода — значит он в него не вошёл"
+    )
 
 
 def test_a_safety_net_is_not_leaned_on() -> None:

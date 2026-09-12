@@ -36,6 +36,13 @@
 адресуется владельцу и говорит, почему адресат сменился
 ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)).
 
+ТОКЕН — ВЛАДЕЛЬЦА, И ЭТО ВЫЯСНИЛОСЬ ПРОГОНОМ. Состояние слияния площадка
+отдаёт только тому, у кого есть доступ на запись: у `github.token` его нет, и
+конфликт для шага становится невидим. Замер 11.09.2026: изменение #217 стояло
+конфликтным, локальный сухой заход владельцем видел его и называл, а прогон на
+токене прогона молчал. Очередь это уже знала — `automerge.merge_state()`
+принимает `owner_token`, — а шапка этого шага утверждала обратное.
+
 ТОЛЧОК В ЖИВУЮ СЕССИЮ СЮДА НЕ ВХОДИТ, и это названо, а не забыто. Разбудить
 окно может учётная запись Claude, а не токен репозитория: положить её в секреты
 значило бы дать прогону право вести сессии на всей учётке — несопоставимо
@@ -56,10 +63,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+import ci_complete
 import findings
 import ghrest
 import pipeline_checks as policy
 import report
+
+#: Токен владельца: тот же, что у очереди. Имя общее намеренно — два имени для
+#: одного секрета разошлись бы при первой же смене.
+ENV_TOKEN: Final = "MERGE_QUEUE_TOKEN"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -91,6 +103,11 @@ KIND_SAID: Final = {
 
 #: Состояние слияния, означающее конфликт. Слово площадки, а не наше.
 STATE_CONFLICT: Final = "dirty"
+
+#: Состояния, означающие «ответа ещё нет»: площадка считает слияние лениво, и
+#: первый запрос лишь заказывает вычисление. Читать их как «конфликта нет»
+#: значило бы выводить ответ из незнания (045).
+UNCOMPUTED: Final = frozenset({"", "unknown"})
 
 #: Сколько часов без нового коммита делает окно предположительно мёртвым.
 #: ВЕЛИЧИНА ОБЪЯВЛЕНА, А НЕ ВЫВЕДЕНА: она про внимание человека и его смену, а
@@ -165,13 +182,23 @@ def own_red(runs: list[dict[str, Any]], required: list[str]) -> list[str]:
     Отсутствие записи сюда НЕ входит: «проверка ещё не шла» и «проверка упала»
     значат разное, и оклик про первое звал бы окно чинить то, чего ещё нет.
     Разводит их сводный гейт, а не этот шаг.
+
+    ПО ХУДШЕЙ ЗАПИСИ, А НЕ ПО ПОСЛЕДНЕЙ. На одной голове легко оказываются две
+    записи одного имени — два прогона от двух событий, — и порядок, в котором
+    их отдаёт площадка, ничего не решает. Прежний разбор брал ту, что пришла
+    позже, и красное могло тихо не сработать. Отбор общий со сводным гейтом
+    (`ci_complete.worst_per_name`): второе понимание «какая из двух главная»
+    разошлось бы с первым молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    Нашёл внешний взгляд на #216.
     """
-    verdicts: dict[str, str | None] = {}
-    for run in runs:
-        name = str(run.get("name") or "")
-        if name in required and run.get("status") == "completed":
-            verdicts[name] = run.get("conclusion")
-    return sorted(name for name, outcome in verdicts.items() if outcome not in ("success", None))
+    wanted = set(required)
+    mine = [run for run in runs if str(run.get("name") or "") in wanted]
+    return sorted(
+        str(run.get("name") or "")
+        for run in ci_complete.worst_per_name(mine)
+        if run.get("status") == "completed" and run.get("conclusion") not in ("success", None)
+    )
 
 
 def standing(comments: list[dict[str, Any]]) -> set[str]:
@@ -242,6 +269,12 @@ def subjects(repo: str, token: str, now: datetime) -> list[Subject]:
             continue
         full = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
         state = str(full.get("mergeable_state") or "")
+        if state in UNCOMPUTED:
+            # СОСТОЯНИЕ ЕЩЁ НЕ ПОСЧИТАНО — ЭТО ОТВЕТ, А НЕ ПУСТОТА. Площадка
+            # считает его лениво, и первый запрос заказывает вычисление. Молча
+            # пропустить значило бы читать «конфликта нет» из «я не знаю» (045).
+            print(f"  #{number}: состояние слияния ещё не посчитано — окликать рано")
+            continue
         runs = (
             ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
             or {}
@@ -321,9 +354,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        token = ghrest.token_from_env()
+        # ТОКЕН ВЛАДЕЛЬЦА, А НЕ ПРОГОНА, И ПРИЧИНА ИЗМЕРЕНА. Состояние слияния
+        # площадка отдаёт только с доступом на запись; на токене прогона шаг
+        # конфликта не видит вовсе и молчит, выглядя при этом зелёным.
+        token = os.environ.get(ENV_TOKEN, "") or ""
         if not token:
-            print("не настроено: нет токена — окликать нечем", file=sys.stderr)
+            print(
+                f"не настроено: нет {ENV_TOKEN} — состояние слияния площадка не отдаст, "
+                "и оклик про конфликт был бы слепым",
+                file=sys.stderr,
+            )
             return EXIT_UNSET
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
