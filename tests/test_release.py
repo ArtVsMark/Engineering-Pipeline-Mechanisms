@@ -51,13 +51,18 @@ def test_the_next_version_raises_the_minor() -> None:
     assert module.next_after("9.9.73", contract=True) == "9.10.0"
 
 
-def test_a_contract_fragment_does_not_raise_the_major() -> None:
-    """Правка поверхности поднимает МИНОР, а не мажор.
+def test_a_contract_fragment_leaves_the_major_alone() -> None:
+    """Правка поверхности мажор НЕ поднимает — его поднимает приёмка.
 
-    `0.x` живёт до закрытой приёмки: мажор поднимает она, а не род фрагмента
+    Прежняя редакция этого теста повторяла соседний слово в слово и не
+    проверяла ничего своего; нашёл внешний взгляд на #229. Предмет здесь
+    именно мажор: он обязан остаться на месте при ЛЮБОМ роде фрагмента
     (decisions/009, decisions/015).
     """
-    assert module.next_after("9.9.0", contract=True) == "9.10.0"
+    for current in ("0.1.0", "9.9.73"):
+        was = current.split(".")[0]
+        for contract in (True, False):
+            assert module.next_after(current, contract=contract).split(".")[0] == was
 
 
 def test_the_major_needs_a_named_acceptance(run_script: RunScript, tmp_path: Path) -> None:
