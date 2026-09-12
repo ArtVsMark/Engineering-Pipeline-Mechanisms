@@ -70,7 +70,13 @@ TITLE: Final = "Общая ветка: краснота"
 RUN_ID_RE: Final = re.compile(r"/actions/runs/(\d+)")
 #: Мигание в теле задачи: копится списком, потому что событие в артефактах не
 #: остаётся. Читается строкой, чтобы заход не заводил его заново.
-FLAKE_RE: Final = re.compile(r"^- (?P<name>[^·]+) · (?P<day>\S+) · прогон (?P<run>\d+)\s*$", re.M)
+FLAKE_RE: Final = re.compile(
+    r"^- (?P<name>[^·]+) · (?P<day>\S+) · прогон (?P<run>\d+)(?: · (?P<where>\S+))?\s*$", re.M
+)
+
+#: Где мигнуло, если не на общей ветке. Умолчание молчаливое намеренно: записи
+#: общей ветки были заведены раньше и переписывать их задним числом незачем.
+SHARED: Final = "общая ветка"
 
 EXIT_GREEN: Final = 0
 EXIT_BROKEN: Final = 2
@@ -83,11 +89,50 @@ class NotRun(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class Flake:
-    """Мигание: имя проверки, день и прогон, на котором это увидели."""
+    """Мигание: имя проверки, день, прогон и где это увидели."""
 
     name: str
     day: str
     run: int
+    where: str = SHARED
+
+    def said(self) -> str:
+        """Строка записи. Общая ветка не подписывается: она умолчание."""
+        tail = "" if self.where == SHARED else f" · {self.where}"
+        return f"- {self.name} · {self.day} · прогон {self.run}{tail}"
+
+
+#: Исходы, которые считаются НАСТОЯЩИМ красным. Отменённая и пропущенная сюда не
+#: входят: пройденной ни одна не считается, но и отказом не является.
+REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
+
+
+def flaky_names(runs: list[dict[str, Any]]) -> list[str]:
+    """Имена, давшие на ОДНОЙ голове настоящее красное и затем зелёное.
+
+    ЭТО И ЕСТЬ МИГАНИЕ, И ВИДНО ОНО БЕЗ ПЕРЕЗАПУСКА. Голова та же — значит
+    дерево то же, и зелёное после красного получено не правкой. Прежний замер
+    искал мигания среди перезапусков и не мог их найти: перезапускать было
+    некому, и отсутствие перезапусков доказывало само себя
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    Разбор — `docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md`.
+
+    Порядок читается по времени начала записи, а не по порядку ответа площадки:
+    зелёное ДО красного — это обычная краснота, а не мигание.
+    """
+    fell: dict[str, str] = {}
+    rose: dict[str, str] = {}
+    for run in runs:
+        if run.get("status") != "completed":
+            continue
+        name = str(run.get("name") or "")
+        started = str(run.get("started_at") or "")
+        outcome = run.get("conclusion")
+        if outcome in REAL_RED:
+            fell[name] = min(fell.get(name, started), started) if fell.get(name) else started
+        elif outcome == "success":
+            rose[name] = max(rose.get(name, started), started)
+    return sorted(name for name, red in fell.items() if rose.get(name, "") > red)
 
 
 def red_of(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -227,12 +272,14 @@ def rerun_reason(
 def parse_flakes(body: str | None) -> list[Flake]:
     """Мигания, уже записанные в задаче."""
     return [
-        Flake(found["name"].strip(), found["day"], int(found["run"]))
+        Flake(found["name"].strip(), found["day"], int(found["run"]), found["where"] or SHARED)
         for found in FLAKE_RE.finditer(body or "")
     ]
 
 
-def flakes_after(known: list[Flake], name: str, run: int, day: str) -> list[Flake]:
+def flakes_after(
+    known: list[Flake], name: str, run: int, day: str, where: str = SHARED
+) -> list[Flake]:
     """Добавляет мигание, если этого прогона в списке ещё нет.
 
     По прогону, а не по имени: одна и та же проверка мигает не единожды, и
@@ -241,7 +288,49 @@ def flakes_after(known: list[Flake], name: str, run: int, day: str) -> list[Flak
     """
     if any(item.run == run and item.name == name for item in known):
         return known
-    return [*known, Flake(name, day, run)]
+    return [*known, Flake(name, day, run, where)]
+
+
+def flakes_on_changes(repo: str, token: str, known: list[Flake], day: str) -> list[Flake]:
+    """Дописывает мигания, увиденные на головах ЖИВЫХ изменений.
+
+    ПОЧЕМУ ЗДЕСЬ, А НЕ ОТДЕЛЬНЫМ МЕХАНИЗМОМ. Реестр мигания один — #99, — и он
+    уже ведётся этим шагом. Второй механизм, пишущий в тот же список, разошёлся
+    бы с первым молча
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)),
+    а второй список того же — ровно то, ради чего реестр и заведён один.
+
+    ПЕРЕЗАПУСКА ЗДЕСЬ НЕТ НАМЕРЕННО. Правило 124 требует двух вещей, и записать
+    можно то, чего ещё не перезапускали; обратное — нет. Разрешённый список
+    автоперезапуска остаётся пустым, пока эти записи не назовут первое имя.
+    """
+    found = list(known)
+    try:
+        changes = list(ghrest.paginate(f"repos/{repo}/pulls?state=open", token))
+    except ghrest.TransportError as exc:
+        # Отказ здесь не роняет заход: краснота общей ветки — главный предмет
+        # шага, и терять её из-за соседнего счёта нельзя (084).
+        print(f"мигания изменений не сосчитаны: {report.cut(str(exc))}")
+        return found
+    for change in changes:
+        head = str((change.get("head") or {}).get("sha") or "")
+        number = int(change.get("number") or 0)
+        if not head or not number:
+            continue
+        try:
+            runs = (
+                ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
+                or {}
+            ).get("check_runs") or []
+        except ghrest.TransportError as exc:
+            print(f"  #{number}: записи проверок не прочитаны: {report.cut(str(exc))}")
+            continue
+        for name in flaky_names(list(runs)):
+            before = len(found)
+            found = flakes_after(found, name, number, day, where=f"#{number}")
+            if len(found) > before:
+                print(f"  #{number}: мигание «{name}» — зелёное после красного на той же голове")
+    return found
 
 
 def queue_now(repo: str, token: str) -> tuple[int, int]:
@@ -366,7 +455,7 @@ def render_body(
         "",
     ]
     if flakes:
-        lines += [f"- {item.name} · {item.day} · прогон {item.run}" for item in flakes]
+        lines += [item.said() for item in flakes]
     else:
         lines.append("Пусто — повторных зелёных не было.")
     return "\n".join(lines) + "\n"
@@ -477,6 +566,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [источник 0] {name}")
         for name in rest:
             print(f"  [источник 3] {name}")
+        # МИГАНИЕ НА ГОЛОВЕ ИЗМЕНЕНИЯ ВИДНО ОТСЮДА ЖЕ. Реестр мигания один
+        # (#99), и второй список того же разошёлся бы с первым молча (022).
+        # Перезапуск на изменении при этом НЕ делается: пока у разрешённого
+        # списка нет ни одного измеренного имени, автоперезапуск был бы
+        # заполнен догадкой
+        # (`docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md`).
+        flakes = flakes_on_changes(args.repo, token, flakes, day)
+
         # Очередь спрашивается ТОЛЬКО при заморозке: без неё этот счёт ничего
         # не решает, а лишний обход площадки стоит вызовов из общей квоты (058).
         queue = queue_now(args.repo, token) if holds else None
