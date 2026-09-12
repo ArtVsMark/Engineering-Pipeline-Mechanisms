@@ -436,3 +436,42 @@ def test_the_contract_names_every_state_the_mechanism_tells_apart() -> None:
     contract = (ROOT / "docs" / "release.md").read_text(encoding="utf-8").lower()
     missing = [said for said in module.ACCEPTANCE_SAID.values() if said.lower() not in contract]
     assert not missing, f"механизм различает, а договор не называет: {missing}"
+
+
+def test_a_needless_breaking_flag_is_said_not_labelled(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """`--breaking` без фрагментов поверхности НЕ метит заход несовместимым.
+
+    Сам дефект воспроизводился только заходом CLI: `next_contract` отдавала
+    верное число, а печатала пометку `announce`. Юнит-теста числа для этого
+    мало — гоняется именно то, что читает человек перед необратимым
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+    Нашёл внешний взгляд на #256.
+    """
+    tree(tmp_path, tag="v9.9.0", fragments=("a.added.md",))
+    run = run_script("release.py", "--breaking", cwd=tmp_path)
+    assert run.code == 0, run.text
+    assert "не меняется" in run.text, run.text
+    assert "двигать нечего" in run.text, run.text
+    assert "несовместимо" not in run.text.lower(), "пометка поставлена там, где нечего двигать"
+
+
+def test_a_breaking_flag_with_a_touched_surface_is_labelled(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Обратная сторона: поверхность тронута — пометка на месте.
+
+    Без этого случая «пометка следует числу» держалось бы одним отказом, и
+    пропажа пометки вовсе выглядела бы как починка (097).
+    """
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    (root / ".pipeline.yml").write_text(
+        'schema: 4\ncontract: ">=9.9,<11.0"\nchecks:\n  lint: required\n', encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "окно миграции"], cwd=root, check=True)
+    run = run_script("release.py", "--breaking", cwd=root)
+    assert run.code == 0, run.text
+    assert "несовместимо" in run.text.lower(), run.text
+    assert "10.0.0" in run.text, run.text
