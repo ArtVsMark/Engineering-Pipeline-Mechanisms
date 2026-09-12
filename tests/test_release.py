@@ -43,20 +43,19 @@ def tree(
 
 
 def test_the_next_version_raises_the_minor() -> None:
-    """Минор растёт при каждой постановке тега — инвариант «каждый тег vX.Y.0».
+    """Минор растёт, когда поверхность тронута: есть фрагмент рода `contract`.
 
-    Патч-тегов не существует: патч это счётчик принятых изменений после тега, а
-    не номер выпуска.
+    Патч при этом обнуляется: новый минор начинается с нуля.
     """
-    assert module.next_after("9.9.0", contract=False) == "9.10.0"
-    assert module.next_after("9.9.73", contract=False) == "9.10.0"
+    assert module.next_after("9.9.0", contract=True) == "9.10.0"
+    assert module.next_after("9.9.73", contract=True) == "9.10.0"
 
 
 def test_a_contract_fragment_does_not_raise_the_major() -> None:
-    """Правка поверхности сама по себе мажор не поднимает.
+    """Правка поверхности поднимает МИНОР, а не мажор.
 
-    `0.x` живёт до закрытой приёмки: поверхность ещё не доделана здесь, и
-    правка её сама по себе разряда не поднимает (decisions/009).
+    `0.x` живёт до закрытой приёмки: мажор поднимает она, а не род фрагмента
+    (decisions/009, decisions/015).
     """
     assert module.next_after("9.9.0", contract=True) == "9.10.0"
 
@@ -166,7 +165,7 @@ def test_a_wrong_minor_is_refused(run_script: RunScript, tmp_path: Path) -> None
     tree(tmp_path)
     run = run_script("release.py", "--version", "9.50.0", cwd=tmp_path)
     assert run.code == 1, run.text
-    assert "ожидается 9.10.0" in run.text
+    assert "ожидается 9.9.1" in run.text
 
 
 def test_an_empty_release_is_an_input_error(run_script: RunScript, tmp_path: Path) -> None:
@@ -193,7 +192,9 @@ def test_an_existing_tag_is_refused(run_script: RunScript, tmp_path: Path) -> No
     прибит потребитель, и заметить это он не обязан.
     """
     tree(tmp_path)
-    subprocess.run(["git", "tag", "v9.10.0"], cwd=tmp_path, check=True)
+    # Тег ставится на ОЖИДАЕМЫЙ номер: фрагмент здесь не о поверхности, значит
+    # ожидается патч, а не минор (decisions/015).
+    subprocess.run(["git", "tag", "v9.9.1"], cwd=tmp_path, check=True)
     run = run_script("release.py", cwd=tmp_path)
     assert run.code == 1, run.text
     assert "не переставляется" in run.text
@@ -239,9 +240,9 @@ def test_the_release_moves_fragments_and_tags(run_script: RunScript, tmp_path: P
     tree(tmp_path)
     run = run_script("release.py", "--apply", cwd=tmp_path)
     assert run.code == 0, run.text
-    assert (tmp_path / "changelog.d" / "released" / "9.10.0" / "a.added.md").is_file()
+    assert (tmp_path / "changelog.d" / "released" / "9.9.1" / "a.added.md").is_file()
     assert not (tmp_path / "changelog.d" / "a.added.md").exists()
-    assert (tmp_path / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == "9.10.0"
+    assert (tmp_path / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == "9.9.1"
     tags = subprocess.run(
         ["git", "tag", "--list"],
         cwd=tmp_path,
@@ -250,7 +251,7 @@ def test_the_release_moves_fragments_and_tags(run_script: RunScript, tmp_path: P
         encoding="utf-8",
         check=True,
     ).stdout.split()
-    assert tags == ["v9.10.0"]
+    assert tags == ["v9.9.1"]
 
 
 def test_the_procedure_matches_the_contract() -> None:

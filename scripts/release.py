@@ -97,15 +97,28 @@ def declared_version() -> str:
 def next_after(current: str, *, contract: bool) -> str:
     """Какой номер выпуска ожидается после текущего.
 
-    МИНОР растёт ВСЕГДА при постановке тега — схема семьи держит инвариант
-    «каждый тег вида `vX.Y.0`», и патч-тегов не существует. Правка поверхности
-    при этом не поднимает мажор сама: `0.x` живёт до закрытой приёмки.
+    РАЗРЯД ВЫБИРАЮТ ФРАГМЕНТЫ, А НЕ ФАКТ ПОСТАНОВКИ ТЕГА. Фрагмент рода
+    `contract` означает, что поверхность тронута, — такой выпуск поднимает
+    минор. Ни одного такого нет — поверхность не тронута, и это патч, ровно как
+    сказано в таблице разрядов `docs/release.md`.
+
+    ПРЕЖНИЙ РАСЧЁТ СПОРИЛ С ДОГОВОРОМ. Минор рос ВСЕГДА под инвариантом «каждый
+    тег вида `vX.Y.0`», и каждый выпуск объявлял потребителю «поверхность
+    расширена», даже когда правилась опечатка. Ложное обещание стоит
+    перечитывания ответов, которых ничто не отменяло, а перечитывание,
+    потребованное зря, перестают делать
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Разбор и отвергнутые варианты —
+    `docs/decisions/015-the-contract-version-moves-by-its-own-digits.md`.
+
+    МАЖОР ЗДЕСЬ НЕ РАСТЁТ НИКОГДА: его поднимает закрытая приёмка, а не род
+    фрагмента, и состояние приёмки механизм спрашивает у площадки.
     """
     found = VERSION_RE.match(current)
     if found is None:
         raise NotRun(f"объявленная версия «{current}» не вида МАЖОР.МИНОР.ПАТЧ")
-    major, minor = int(found.group(1)), int(found.group(2))
-    return f"{major}.{minor + 1}.0"
+    major, minor, patch = (int(found.group(one)) for one in (1, 2, 3))
+    return f"{major}.{minor + 1}.0" if contract else f"{major}.{minor}.{patch + 1}"
 
 
 #: Состояния названной приёмки. Четыре, а не три: «такой задачи нет» чинится
@@ -213,8 +226,8 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
         )
     elif major_wanted == major_now and wanted != expected:
         problems.append(
-            f"ожидается {expected}, а названо {wanted}: минор растёт при каждой постановке "
-            "тега — схема держит инвариант «каждый тег вида vX.Y.0»"
+            f"ожидается {expected}, а названо {wanted}: разряд выбирают ФРАГМЕНТЫ — "
+            "фрагмент рода `contract` поднимает минор, его отсутствие — патч"
         )
     return problems
 
