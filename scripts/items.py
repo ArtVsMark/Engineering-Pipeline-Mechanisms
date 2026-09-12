@@ -53,7 +53,11 @@ def names_of(text: str) -> tuple[str, ...]:
     heading = ITEM_HEADING_RE.match(text)
     if not heading:
         return (whole,)
-    bare = changerefs.normalise(heading.group(0).strip().strip("*").strip().rstrip("."))
+    # Разметку и точку на краях снимает САМО приведение (`ITEM_EDGES`): вторая,
+    # ручная зачистка перед ним — то же понимание «где кончается пункт»,
+    # написанное второй раз, и расходятся такие молча (090). Нашёл внешний
+    # взгляд на #233.
+    bare = changerefs.normalise(heading.group(0))
     return (whole, bare) if bare and bare != whole else (whole,)
 
 

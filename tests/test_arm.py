@@ -43,7 +43,9 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def request(method: str, path: str, token: str, payload: Any = None) -> Any:
         if method == "GET":
             number = int(path.rsplit("/", 1)[-1])
-            return next(one for one in state["changes"] if one["number"] == number)
+            # Пусто, а не исключение: «изменения нет» — законный ответ площадки,
+            # и разбирать его обязан сам шаг.
+            return next((one for one in state["changes"] if one["number"] == number), {})
         state["posted"].append((path, payload))
         return {}
 
@@ -66,53 +68,45 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return state
 
 
-def test_the_subject_is_armable_but_unmergeable(platform: dict[str, Any]) -> None:
-    """Под замер берут то, что площадка взведёт, но не сольёт.
+def test_the_subject_is_named_not_chosen(platform: dict[str, Any]) -> None:
+    """Предмет называет человек: заход не выбирает чужую работу за него.
 
-    Готовое к слиянию она сольёт сама в зазоре между взведением и снятием — и
-    замер стал бы слиянием чужой работы без спроса.
+    Прежде шаг обходил живые изменения и брал первое подходящее — то есть
+    трогал чужое, выбранное порядком ответа площадки (053). Нашёл внешний
+    взгляд на #231.
     """
-    platform["changes"] = [change(3, "clean"), change(7, module.UNMERGEABLE[1])]
-    found = module.armable("o/r", "t")
-    assert found is not None and found["number"] == 7
+    platform["changes"] = [change(7, module.UNMERGEABLE[1])]
+    assert module.subject("o/r", 7, "t")["number"] == 7
+
+
+def test_a_change_the_platform_can_merge_is_refused_as_a_subject(
+    platform: dict[str, Any],
+) -> None:
+    """Годны только те состояния, в которых слить НЕЛЬЗЯ.
+
+    Всё остальное площадка сольёт в зазоре между взведением и снятием, и замер
+    стал бы слиянием чужой работы без спроса.
+    """
+    platform["changes"] = [change(7, "clean"), change(8, "behind")]
+    for number in (7, 8):
+        with pytest.raises(module.NotRun) as caught:
+            module.subject("o/r", number, "t")
+        assert "под замер не годится" in str(caught.value)
 
 
 def test_a_draft_is_not_taken_under_the_probe(platform: dict[str, Any]) -> None:
     """Черновик мутация отвергает сама — и это ответ не про тело, а про черновик."""
     platform["changes"] = [change(9, module.UNMERGEABLE[1], draft=True)]
-    assert module.armable("o/r", "t") is None
+    with pytest.raises(module.NotRun) as caught:
+        module.subject("o/r", 9, "t")
+    assert "черновик" in str(caught.value)
 
 
 def test_no_subject_is_not_run_not_clean(platform: dict[str, Any]) -> None:
-    """Предмета не нашлось — «не отработал», а не «взводить некого» (075)."""
-    platform["changes"] = [change(3, "clean"), change(4, "behind")]
-    with pytest.raises(module.NotRun) as caught:
-        module.probe("o/r", "t", dry_run=False)
-    assert module.UNMERGEABLE[1] in str(caught.value)
-
-
-def test_a_conflicting_change_outranks_a_blocked_one(platform: dict[str, Any]) -> None:
-    """Конфликтное берётся ПРЕЖДЕ закрытого проверками: слить его нечем вовсе.
-
-    Первое подходящее зависело бы от порядка ответа площадки, а порядок решением
-    не является (053).
-    """
-    platform["changes"] = [change(7, "blocked"), change(8, "dirty")]
-    found = module.armable("o/r", "t")
-    assert found is not None and found["number"] == 8
-
-
-def test_a_change_the_platform_can_merge_itself_is_never_the_subject(
-    platform: dict[str, Any],
-) -> None:
-    """`behind` под замер не берут: базу площадка подтянет и сольёт сама.
-
-    Это ровно тот риск, от которого весь отбор, — и отсутствие состояния в
-    списке названо причиной, а не умолчано (154).
-    """
-    assert "behind" not in module.UNMERGEABLE
-    platform["changes"] = [change(9, "behind")]
-    assert module.armable("o/r", "t") is None
+    """Предмет не годится — «не отработал», а не «взводить некого» (075)."""
+    platform["changes"] = [change(4, "behind")]
+    with pytest.raises(module.NotRun):
+        module.probe("o/r", 4, "t", dry_run=False)
 
 
 def test_the_body_is_passed_and_asked_back(platform: dict[str, Any]) -> None:
@@ -149,21 +143,21 @@ def test_the_arming_is_always_taken_back(platform: dict[str, Any]) -> None:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(module, "kept_the_body", explode)
         with pytest.raises(RuntimeError):
-            module.probe("o/r", "t", dry_run=False)
+            module.probe("o/r", 7, "t", dry_run=False)
     assert [name for name, _ in platform["graphql"]] == ["arm", "disarm"]
 
 
 def test_the_dry_run_touches_nothing(platform: dict[str, Any]) -> None:
     """Без `--apply` шаг ничего не взводит: показ и действие — разные заходы (104)."""
     platform["changes"] = [change(7, module.UNMERGEABLE[1])]
-    said = module.probe("o/r", "t", dry_run=True)
+    said = module.probe("o/r", 7, "t", dry_run=True)
     assert "#7" in said and not platform["graphql"]
 
 
 def test_a_kept_body_says_the_decision_stands(platform: dict[str, Any]) -> None:
     """Тело вернулось дословно — решение 011 строится на проверенном."""
     platform["changes"] = [change(7, module.UNMERGEABLE[1])]
-    said = module.probe("o/r", "t", dry_run=False)
+    said = module.probe("o/r", 7, "t", dry_run=False)
     assert "ВМЕСТЕ с телом" in said
 
 
@@ -171,7 +165,7 @@ def test_a_lost_body_names_the_condition_of_review(platform: dict[str, Any]) -> 
     """Тело проглочено — наступило названное решением условие пересмотра."""
     platform["changes"] = [change(7, module.UNMERGEABLE[1])]
     platform["echo"] = False
-    said = module.probe("o/r", "t", dry_run=False)
+    said = module.probe("o/r", 7, "t", dry_run=False)
     assert "ТЕЛО НЕТ" in said and "пересмотра" in said
 
 
@@ -190,7 +184,9 @@ def test_a_missing_owner_token_is_its_own_outcome(run_script: RunScript) -> None
     прогоне
     ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
     """
-    done = run_script("arm.py", "--repo", "o/r", "--probe", "--apply", env={module.ENV_TOKEN: ""})
+    done = run_script(
+        "arm.py", "--repo", "o/r", "--probe", "--pr", "7", "--apply", env={module.ENV_TOKEN: ""}
+    )
     assert done.code == module.EXIT_UNSET, done.text
     assert module.ENV_TOKEN in done.text
 
@@ -201,7 +197,10 @@ def test_the_answer_is_written_where_a_human_reads_it(
     """Замер, оставшийся в логе прогона, замером не является: логи окну не видны."""
     platform["changes"] = [change(7, module.UNMERGEABLE[1])]
     monkeypatch.setenv(module.ENV_TOKEN, "t")
-    assert module.main(["--repo", "o/r", "--probe", "--apply", "--say-to", "196"]) == module.EXIT_OK
+    assert (
+        module.main(["--repo", "o/r", "--probe", "--pr", "7", "--apply", "--say-to", "196"])
+        == module.EXIT_OK
+    )
     path, payload = platform["posted"][0]
     assert path.endswith("issues/196/comments")
     assert "Замер взведения" in payload["body"]
@@ -232,9 +231,9 @@ def test_a_refused_measurement_is_written_too(
     Молчание неотличимо от «не запускали», а логи прогона окну не видны: отказ,
     оставшийся в них, выглядел бы так, будто замера не было.
     """
-    platform["changes"] = [change(3, "clean")]
+    platform["changes"] = [change(7, "clean")]
     monkeypatch.setenv(module.ENV_TOKEN, "t")
-    code = module.main(["--repo", "o/r", "--probe", "--apply", "--say-to", "196"])
+    code = module.main(["--repo", "o/r", "--probe", "--pr", "7", "--apply", "--say-to", "196"])
     assert code == module.EXIT_BROKEN
     _, payload = platform["posted"][0]
     assert "не отработал" in payload["body"]
@@ -251,7 +250,7 @@ def test_an_unwritable_answer_is_not_a_measurement(
         raise module.ghrest.TransportError("403: лента закрыта")
 
     monkeypatch.setattr(module, "say", refuse)
-    assert module.main(["--repo", "o/r", "--probe", "--apply", "--say-to", "196"]) == (
+    assert module.main(["--repo", "o/r", "--probe", "--pr", "7", "--apply", "--say-to", "196"]) == (
         module.EXIT_BROKEN
     )
     assert [name for name, _ in platform["graphql"]] == ["arm", "disarm"], "взведение не снято"

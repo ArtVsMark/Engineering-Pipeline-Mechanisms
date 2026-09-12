@@ -15,6 +15,18 @@
 Режим ``--probe`` взводит и СРАЗУ снимает, ничего не сливая, и пишет ответ
 площадки туда, где его прочтёт человек.
 
+ПРЕДМЕТ НАЗЫВАЕТ ЧЕЛОВЕК, А НЕ ВЫБИРАЕТ ЗАХОД. Прежде шаг обходил живые
+изменения и брал первое подходящее — то есть трогал ЧУЖУЮ работу, выбранную за
+владельца порядком ответа площадки. Нашёл внешний взгляд на #231 (`47c0b03`,
+`5d076a7`). Теперь номер приходит входом кнопки, а заход лишь проверяет, что
+названное слить нельзя.
+
+ЕСЛИ ЗАХОД УМРЁТ МЕЖДУ ВЗВЕДЕНИЕМ И СНЯТИЕМ, значок снимет ОЧЕРЕДЬ: шаг 8
+держит взведённой ровно одну голову и снимает всё прочее — брошенное замером в
+том числе. Это и есть терминальный выход из промежуточного состояния
+([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)),
+и он не зависит от того, дочитал ли упавший заход свой ответ.
+
 ПРЕДМЕТ ЗАМЕРА — ИЗМЕНЕНИЕ, КОТОРОЕ СЛИТЬ НЕЛЬЗЯ. Между взведением и снятием
 проходят миллисекунды, но окно всё же есть, и брать под замер готовое к
 слиянию значило бы рисковать чужой работой. Поэтому предмет выбирается из
@@ -109,28 +121,26 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «взводить некого»."""
 
 
-def armable(repo: str, token: str) -> dict[str, Any] | None:
-    """Живое изменение, которое площадка слить не может; иначе ``None``.
+def subject(repo: str, number: int, token: str) -> dict[str, Any]:
+    """Названное изменение, годное под замер; иначе отказ с причиной.
 
-    Обходятся ВСЕ живые изменения, а не берётся первое подходящее: выбор идёт
-    по старшинству :data:`UNMERGEABLE`, и конфликтное предпочитается закрытому
-    проверками. Первое подходящее зависело бы от порядка ответа площадки, а
-    порядок решением не является
-    ([053](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/053-queue-order-is-a-rule-not-arrival.md)).
+    Проверяются два условия, и оба — про безопасность чужой работы: изменение
+    не черновик и площадка слить его НЕ МОЖЕТ. Всё остальное она сольёт в
+    зазоре между взведением и снятием, и замер стал бы слиянием без спроса.
     """
-    best: tuple[int, dict[str, Any]] | None = None
-    for payload in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
-        number = int(payload.get("number") or 0)
-        if not number or payload.get("draft"):
-            continue
-        full = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
-        state = str(full.get("mergeable_state") or "")
-        if state not in UNMERGEABLE:
-            continue
-        rank = UNMERGEABLE.index(state)
-        if best is None or rank < best[0]:
-            best = (rank, full)
-    return None if best is None else best[1]
+    full = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
+    if not full:
+        raise NotRun(f"#{number}: изменения нет — предмет замера не найден (075)")
+    if full.get("draft"):
+        raise NotRun(f"#{number}: черновик, и мутация отвергнет его сама — замер не о том")
+    state = str(full.get("mergeable_state") or "")
+    if state not in UNMERGEABLE:
+        raise NotRun(
+            f"#{number}: состояние «{state or '—'}» под замер не годится — годны только "
+            f"{' и '.join(UNMERGEABLE)}, потому что их площадка слить не может. Остальное "
+            "она сольёт между взведением и снятием (075)"
+        )
+    return full
 
 
 def arm(node: str, headline: str, body: str, token: str) -> dict[str, Any]:
@@ -161,16 +171,9 @@ def kept_the_body(answer: dict[str, Any], headline: str, body: str) -> list[str]
     return missing
 
 
-def probe(repo: str, token: str, *, dry_run: bool) -> str:
-    """Взводит и сразу снимает; отдаёт человеческий ответ о теле."""
-    change = armable(repo, token)
-    if change is None:
-        raise NotRun(
-            f"живого изменения в состоянии {' или '.join(UNMERGEABLE)} нет — предмета замера "
-            "не найдено. Слить не может ТОЛЬКО такое, а остальное площадка сольёт в зазоре "
-            "между взведением и снятием (075)"
-        )
-    number = int(change["number"])
+def probe(repo: str, number: int, token: str, *, dry_run: bool) -> str:
+    """Взводит НАЗВАННОЕ изменение и сразу снимает; отдаёт ответ о теле."""
+    change = subject(repo, number, token)
     node = str(change.get("node_id") or "")
     state = str(change.get("mergeable_state") or "")
     headline = f"замер взведения: тело передано явно (#{number})"
@@ -217,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--probe", action="store_true", help="взвести и сразу снять — замер")
+    parser.add_argument("--pr", type=int, default=0, help="номер изменения под замер")
     parser.add_argument("--apply", action="store_true", help="делать, а не показывать")
     parser.add_argument("--say-to", default="", help="номер задачи, куда записать ответ замера")
     args = parser.parse_args(argv)
@@ -232,7 +236,12 @@ def main(argv: list[str] | None = None) -> int:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
         if not args.probe:
             raise NotRun("предмет не назван: пока у шага есть только --probe")
-        said = probe(args.repo, token, dry_run=not args.apply)
+        if not args.pr:
+            raise NotRun(
+                "изменение не названо: --pr. Замер трогает ЧУЖУЮ работу, и выбирать её за "
+                "человека нечем — порядок ответа площадки решением не является (053)"
+            )
+        said = probe(args.repo, args.pr, token, dry_run=not args.apply)
         print(said)
     except (NotRun, ghrest.TransportError) as exc:
         said = f"замер не отработал: {report.cut(str(exc))}"
