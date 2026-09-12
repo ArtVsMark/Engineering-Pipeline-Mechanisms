@@ -117,6 +117,69 @@ def test_a_contract_fragment_leaves_the_major_alone() -> None:
             assert module.next_contract(current, touched=touched).split(".")[0] == was
 
 
+def test_a_contract_bump_outside_the_declared_span_is_refused(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Подъём версии контракта не помещается в объявленный диапазон — отказ ДО тега.
+
+    Мы сами потребитель своего контракта: `.pipeline.yml` объявляет диапазон, и
+    версия вне него роняет ОБЯЗАТЕЛЬНУЮ проверку `pipeline` на общей ветке.
+    То есть выпуск покрасил бы ветку сразу после себя, и чинить пришлось бы
+    уже после необратимого
+    ([074](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/074-one-shot-irreversible-steps-get-their-own-guard.md)).
+    Склейка «фрагмент поверхности → подъём → диапазон» тестом не держалась
+    вовсе — нашёл внешний взгляд на #253.
+    """
+    tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    run = run_script("release.py", cwd=tmp_path)
+    assert run.code == 1, run.text
+    assert "не принимает" in run.text
+    assert "перечитайте ответы" in run.text.lower()
+
+
+def test_a_bump_inside_the_declared_span_passes(run_script: RunScript, tmp_path: Path) -> None:
+    """Диапазон принимает подъём — выпуск не возражает.
+
+    Здоровый вход обязан пройти: иначе отказ неотличим от «шаг всегда против»
+    (097). Диапазон здесь держит ДВА минора — окно миграции, ровно как у нас
+    самих на время перехода.
+    """
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    (root / ".pipeline.yml").write_text(
+        'schema: 4\ncontract: ">=9.9,<9.11"\nchecks:\n  lint: required\n', encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "окно миграции"], cwd=root, check=True)
+    run = run_script("release.py", cwd=root)
+    assert run.code == 0, run.text
+    assert "условия сошлись" in run.text
+
+
+def test_a_breaking_surface_raises_the_contract_major(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Несовместимая правка поднимает МАЖОР версии контракта, и объявляют её ключом.
+
+    Род фрагмента `contract` не различает расширение от поломки, а гейт связи
+    смотрит дифф изменения, которого у выпуска уже нет. Пути к мажору не было
+    вовсе: несовместимость ушла бы минором, то есть обещанием «можно не
+    читать». Нашёл внешний взгляд на #253.
+    """
+    assert module.next_contract("9.9.0", touched=True, breaking=True) == "10.0.0"
+    assert module.next_contract("9.9.0", touched=False, breaking=True) == "9.9.0"
+
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    (root / ".pipeline.yml").write_text(
+        'schema: 4\ncontract: ">=9.9,<11.0"\nchecks:\n  lint: required\n', encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "окно миграции"], cwd=root, check=True)
+    run = run_script("release.py", "--breaking", "--apply", cwd=root)
+    assert run.code == 0, run.text
+    assert (root / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == "10.0.0"
+    assert "несовместимо" in run.text.lower()
+
+
 def test_the_major_needs_a_named_acceptance(run_script: RunScript, tmp_path: Path) -> None:
     """Мажор поднимает не выпуск, а ЗАКРЫТАЯ приёмка (decisions/009).
 

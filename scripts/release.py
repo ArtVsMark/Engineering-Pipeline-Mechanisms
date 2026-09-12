@@ -14,10 +14,15 @@
 печатаются, и лишь потом — с ключом `--apply` — делается то, что откатить
 нельзя.
 
-РАЗРЯД НОМЕРА НЕ ВЫДУМЫВАЕТСЯ, А ЧИТАЕТСЯ У ФРАГМЕНТОВ. Род `contract` среди
-них означает, что поверхность тронута, — такой выпуск не может быть патчем.
-Механизм не выбирает разряд за человека: он отвергает номер, который
-фрагментам противоречит
+ДВА ЧИСЛА, ДВА ПРАВИЛА. Тег выпуска двигает МИНОР на каждом выпуске, и линия
+считается от тега; версия контракта поднимается только вместе с тронутой
+поверхностью, а несовместимость объявляют ключом `--breaking`. Патч не растёт
+ни у одного из них: он разряд ГОЛОВЫ, число принятых изменений после тега.
+Разбор и отвергнутые варианты —
+`docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md`.
+
+Механизм не выбирает разряд за человека: он отвергает номер, который линии
+противоречит
 ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 
 МАЖОР ПОДНИМАЕТ ЗАКРЫТАЯ ПРИЁМКА, А НЕ ВЫПУСК. `0.x` означает «ещё не доделано
@@ -121,7 +126,7 @@ def next_after(current: str) -> str:
     return f"{major}.{minor + 1}.0"
 
 
-def next_contract(current: str, *, touched: bool) -> str:
+def next_contract(current: str, *, touched: bool, breaking: bool = False) -> str:
     """Какой станет версия КОНТРАКТА: минор, только если поверхность тронута.
 
     ВЕРСИЯ КОНТРАКТА ДВИЖЕТСЯ СВОИМИ РАЗРЯДАМИ, и это довод решения 015,
@@ -134,6 +139,17 @@ def next_contract(current: str, *, touched: bool) -> str:
     Поверхность не тронута — число НЕ МЕНЯЕТСЯ вовсе: ни минор, ни патч. Патч
     контракта в этом проекте не растёт ни от чего, и это названо, а не забыто:
     у контракта нет события, которое двигало бы его, не тронув поверхность.
+
+    НЕСОВМЕСТИМАЯ ПРАВКА ПОДНИМАЕТ МАЖОР, И ОБЪЯВЛЯЕТ ЕЁ ЧЕЛОВЕК. Род
+    фрагмента `contract` не различает расширение от поломки — он говорит
+    «поверхность тронута», и только. Различает это гейт связи, но он смотрит
+    ДИФФ изменения, которого у выпуска уже нет: к моменту выпуска слито много
+    изменений сразу. Поэтому несовместимость приходит ключом `--breaking`,
+    ровно как мажор выпуска приходит закрытой приёмкой: угадывать необратимое
+    механизм не берётся
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    Первая редакция пути к мажору не имела вовсе — несовместимость ушла бы
+    минором, то есть обещанием «можно не читать». Нашёл внешний взгляд на #253.
     """
     found = VERSION_RE.match(current)
     if found is None:
@@ -141,7 +157,7 @@ def next_contract(current: str, *, touched: bool) -> str:
     if not touched:
         return current
     major, minor = (int(found.group(one)) for one in (1, 2))
-    return f"{major}.{minor + 1}.0"
+    return f"{major + 1}.0.0" if breaking else f"{major}.{minor + 1}.0"
 
 
 #: Состояния названной приёмки. Четыре, а не три: «такой задачи нет» чинится
@@ -195,7 +211,9 @@ def acceptance_state(repo: str, number: int, token: str) -> str:
     return ACCEPTANCE_CLOSED if state == "closed" else ACCEPTANCE_OPEN
 
 
-def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) -> list[str]:
+def refusals(
+    wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD, breaking: bool = False
+) -> list[str]:
     """Все причины НЕ выпускать — списком, а не первой попавшейся.
 
     Списком потому, что выпуск делают редко и по одной причине за раз чинить
@@ -262,7 +280,7 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
     # совместимости, и версия вне него роняет обязательную проверку `pipeline`
     # на общей ветке — то есть выпуск покрасил бы её сразу после себя.
     # Отказ идёт ДО необратимого, и перечитывание требуется словами (157).
-    after = next_contract(current, touched=bool(touches_contract(waiting)))
+    after = next_contract(current, touched=bool(touches_contract(waiting)), breaking=breaking)
     try:
         span = policy.span()
     except policy.BadPolicy as exc:
@@ -280,7 +298,9 @@ def refusals(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
     return problems
 
 
-def announce(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) -> None:
+def announce(
+    wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD, breaking: bool = False
+) -> None:
     """Печатает, из чего собран выпуск: человек читает это перед необратимым."""
     waiting = fragments()
     contract = touches_contract(waiting)
@@ -293,22 +313,34 @@ def announce(wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD) ->
     )
     if acceptance:
         print(f"приёмка мажора: #{acceptance} — {ACCEPTANCE_SAID[state]}")
+    # ЧЕЛОВЕК ЧИТАЕТ ЭТО ПЕРЕД НЕОБРАТИМЫМ, поэтому подъём версии контракта
+    # называется числами, а не словом «изменится».
+    now = declared_version()
+    after = next_contract(now, touched=bool(contract), breaking=breaking)
+    said = " (НЕСОВМЕСТИМО, объявлено ключом --breaking)" if breaking else ""
+    print(f"версия контракта: {now} → {after}{said}")
 
 
-def do_release(wanted: str) -> None:
+def do_release(wanted: str, *, breaking: bool = False) -> None:
     """Необратимая часть: журнал, версия, коммит, тег.
 
     Порядок ровно тот, что записан в `docs/release.md`, и он часть проверки, а
     не соглашение: тег ставится последним, когда всё остальное уже в коммите.
     """
+    # ПОВЕРХНОСТЬ СПРАШИВАЕТСЯ ДО ПЕРЕЕЗДА ФРАГМЕНТОВ, а не после. Сборка
+    # журнала УНОСИТ их в `released/`, и спрошенное после неё всегда отвечало
+    # «не тронута»: версия контракта не двигалась ни при какой правке
+    # поверхности. Нашёл это интеграционный тест, которого сначала не было, —
+    # ровно тот случай, ради которого он и потребован внешним взглядом на #253
+    # ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+    touched = bool(touches_contract(fragments()))
     build_changelog.do_release(wanted)
     # ВЕРСИЯ КОНТРАКТА ПИШЕТСЯ ТОЛЬКО ЕСЛИ ПОВЕРХНОСТЬ ТРОНУТА. Прежде здесь
     # стоял номер выпуска, и два числа были одним: каждый тег двигал версию
     # контракта, то есть требовал перечитать ответы, которых ничто не
     # отменяло. Решение 017 развязало их.
-    touched = bool(touches_contract(fragments()))
     contract_now = declared_version()
-    contract_after = next_contract(contract_now, touched=touched)
+    contract_after = next_contract(contract_now, touched=touched, breaking=breaking)
     if contract_after != contract_now:
         paths.VERSION.write_text(f"{contract_after}\n", encoding="utf-8")
         print(f"версия контракта {contract_now} → {contract_after}: поверхность тронута")
@@ -336,6 +368,14 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("GITHUB_REPOSITORY", ""),
         help="где спрашивать состояние приёмки",
     )
+    # НЕСОВМЕСТИМОСТЬ ОБЪЯВЛЯЕТ ЧЕЛОВЕК: род фрагмента `contract` не различает
+    # расширение от поломки, а гейт связи смотрит дифф ИЗМЕНЕНИЯ, которого у
+    # выпуска уже нет — к этому моменту слито много изменений сразу.
+    parser.add_argument(
+        "--breaking",
+        action="store_true",
+        help="поверхность изменена НЕСОВМЕСТИМО: поднимает МАЖОР версии контракта",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -352,8 +392,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.acceptance.isdigit()
             else ACCEPTANCE_NOT_A_NUMBER
         )
-        problems = refusals(wanted, acceptance=args.acceptance, state=state)
-        announce(wanted, acceptance=args.acceptance, state=state)
+        problems = refusals(wanted, acceptance=args.acceptance, state=state, breaking=args.breaking)
+        announce(wanted, acceptance=args.acceptance, state=state, breaking=args.breaking)
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -369,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     try:
-        do_release(wanted)
+        do_release(wanted, breaking=args.breaking)
     except (NotRun, build_changelog.NotRun) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

@@ -184,21 +184,31 @@ def _triggers_of(document: dict[Any, Any]) -> list[str]:
     return [str(raw)] if raw else []
 
 
-def span(path: Path = DEFAULT_PATH) -> str:
-    """Объявленный потребителем диапазон совместимости — как он написан.
+def span_of(raw: dict[str, Any], path: Path = DEFAULT_PATH) -> str:
+    """Диапазон совместимости из УЖЕ прочитанного ответа.
 
-    Читатель у него теперь не один: `load` проверяет им версию контракта, а шаг
-    выпуска спрашивает ЗАРАНЕЕ, поместится ли в него подъём. Второй разбор того
-    же поля разошёлся бы с первым молча
+    Разбор поля здесь ОДИН, и это весь смысл функции: и проверка ответа, и шаг
+    выпуска спрашивают её, а не читают файл каждый по-своему. Первая редакция
+    завела второе чтение — и оно уже расходилось с проверкой формы, оставаясь
+    правдоподобным
     ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    Нашёл внешний взгляд на #253.
     """
+    found = str(raw.get("contract") or "").strip()
+    if not found:
+        raise BadPolicy(
+            f"{path}: не объявлен диапазон совместимости с контрактом механизмов. "
+            "«Подходит любая версия» — не состояние, а молчание (154)"
+        )
+    return found
+
+
+def span(path: Path = DEFAULT_PATH) -> str:
+    """Диапазон совместимости, прочитанный с диска: тот же разбор, что у `load`."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
     if not isinstance(raw, dict):
         raise BadPolicy(f"{path}: ответ проекта не прочитан — диапазон спросить не у чего")
-    found = str(raw.get("contract") or "").strip()
-    if not found:
-        raise BadPolicy(f"{path}: диапазон совместимости не объявлен (154)")
-    return found
+    return span_of(raw, path)
 
 
 def compatible(declared: str, version: str) -> bool:
@@ -256,18 +266,13 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
             f"{path}: схема «{raw.get('schema')}» не та, что читает механизм ({SCHEMA})"
         )
 
-    span = str(raw.get("contract") or "").strip()
-    if not span:
-        raise BadPolicy(
-            f"{path}: не объявлен диапазон совместимости с контрактом механизмов. "
-            "«Подходит любая версия» — не состояние, а молчание (154)"
-        )
+    declared_span = span_of(raw, path)
     version_file = path.parent / paths.VERSION
     if version_file.is_file():
         now = version_file.read_text(encoding="utf-8").strip()
-        if not compatible(span, now):
+        if not compatible(declared_span, now):
             raise BadPolicy(
-                f"{path}: контракт механизмов {now} вне объявленного диапазона «{span}» — "
+                f"{path}: контракт механизмов {now} вне объявленного диапазона «{declared_span}» — "
                 "перечитайте ответы под новый контракт (157), а не двигайте границу"
             )
 
