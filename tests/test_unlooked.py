@@ -317,6 +317,49 @@ def test_the_queue_takes_the_oldest_first() -> None:
     assert module.queue_of(entries) == [73, 95, 120]
 
 
+def test_the_oldest_is_counted_by_the_merge_date_not_the_number() -> None:
+    """Выборка, где номер и дата СПОРЯТ, — и порядок решает дата слияния.
+
+    Номер говорит, когда изменение открыли; очередь про то, сколько оно лежит
+    СЛИТЫМ. Здесь #7 открыт раньше всех, но провисел на ревью и слился позже
+    всех — значит он самый свежий, а не самый старый. Прежняя сортировка по
+    номеру ставила его первым, и прежний тест этого не ловил: в его выборке
+    номер и дата были упорядочены одинаково (107). Нашёл внешний взгляд на #131.
+    """
+    entries = {
+        7: module.Entry(7, module.STATE_NONE, "2026-09-12"),
+        200: module.Entry(200, module.STATE_SILENT, "2026-09-08"),
+        150: module.Entry(150, module.STATE_CUT, "2026-09-10"),
+    }
+    assert module.queue_of(entries) == [200, 150, 7]
+
+
+def test_an_entry_without_a_date_is_taken_first() -> None:
+    """Даты нет — лежит с неизвестных пор, и это ПЕРВЫЙ в очереди.
+
+    Запись из старой формы реестра даты не несёт. В конец её ставить значило бы
+    прятать самое старое за самым понятным (045).
+    """
+    entries = {
+        9: module.Entry(9, module.STATE_NONE, ""),
+        3: module.Entry(3, module.STATE_NONE, "2026-09-01"),
+    }
+    assert module.queue_of(entries) == [9, 3]
+
+
+def test_the_order_is_defined_when_dates_agree() -> None:
+    """При равной дате порядок решает номер: ответ обязан быть одним и тем же.
+
+    Иначе заход отдаёт разную очередь на одном и том же реестре, и «первый в
+    очереди» перестаёт быть правилом (053).
+    """
+    entries = {
+        80: module.Entry(80, module.STATE_NONE, "2026-09-09"),
+        12: module.Entry(12, module.STATE_NONE, "2026-09-09"),
+    }
+    assert module.queue_of(entries) == [12, 80]
+
+
 def test_the_queue_skips_what_was_already_looked_at() -> None:
     """Уже просмотренное в очередь не попадает: у него состояние не открытое."""
     entries = {
