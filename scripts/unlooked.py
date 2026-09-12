@@ -413,12 +413,29 @@ def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
     Старое такой надежды не имеет: чем дольше изменение лежит без взгляда, тем
     вернее, что его не посмотрит никто.
 
+    «СТАРЫЕ» СЧИТАЮТСЯ ПО ДАТЕ СЛИЯНИЯ, А НЕ ПО НОМЕРУ. Номер говорит, когда
+    изменение ОТКРЫЛИ, а очередь про то, сколько оно лежит СЛИТЫМ. Числа
+    расходятся ровно в том случае, ради которого очередь и есть: изменение с
+    меньшим номером может пролежать на ревью неделю и слиться позже соседа, —
+    и тогда сортировка по номеру ставила его первым, хотя по факту слияния оно
+    самое свежее. Нашёл внешний взгляд на #131; прежний тест этого не ловил,
+    потому что в его выборке номер и дата были упорядочены одинаково
+    ([107](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/107-it-works-for-the-author-means-tested-on-the-authors-sample.md)).
+
+    ДАТА МОЖЕТ БЫТЬ ПУСТОЙ — у записи, пришедшей из старой формы реестра.
+    Такая идёт ПЕРВОЙ: «даты нет» значит «лежит с неизвестных пор», и ставить
+    её в конец очереди означало бы прятать самое старое. Номер остаётся вторым
+    ключом — при равной дате порядок обязан быть определённым, иначе заход
+    отдаёт разный ответ на одном и том же реестре
+    ([053](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/053-queue-order-is-a-rule-not-arrival.md)).
+
     ПОЧЕМУ ЭТО ЧИСТАЯ ФУНКЦИЯ. Очередь выводится из реестра, а не хранится
     вторым списком: второй разошёлся бы с первым молча
     ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
     """
-    open_now = [number for number, entry in entries.items() if is_open(entry.state)]
-    return sorted(open_now)[:limit]
+    open_now = [entry for entry in entries.values() if is_open(entry.state)]
+    ordered = sorted(open_now, key=lambda entry: (entry.merged or "", entry.number))
+    return [entry.number for entry in ordered[:limit]]
 
 
 def render_body(entries: dict[int, Entry], watermark: int) -> str:
