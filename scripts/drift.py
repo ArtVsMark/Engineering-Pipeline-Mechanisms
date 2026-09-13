@@ -791,7 +791,15 @@ def gap_tasks_closed(repo: str, token: str, mine: dict[str, Any]) -> list[Drift]
     """
     found: list[Drift] = []
     for rule, number in gaps_naming_a_task(mine):
-        task = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+        # НЕРАЗРЕШИМЫЙ НОМЕР ГАСИТ ТОЛЬКО СВОЮ ПАРУ. Номера берутся из ПРОЗЫ, и
+        # там попадается всё: чужой репозиторий, опечатка, номер, которого ещё
+        # нет. Один такой ронял весь источник за заход — то есть молчание об
+        # опечатке выглядело как «дрейфа нет» по всем остальным парам (045).
+        try:
+            task = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+        except ghrest.TransportError as exc:
+            print(f"::warning::#{number} из ответа по {rule} не прочитан: {report.cut(str(exc))}")
+            continue
         state = str(task.get("state") or "")
         if state != "closed":
             continue
