@@ -124,7 +124,17 @@ def relink(text: str, *, was: Path, now: Path) -> str:
         if not path or not (was / path).exists():
             return match.group(0)
         fresh = Path(os.path.relpath((was / path).resolve(), now.resolve())).as_posix()
-        return match.group(0).replace(target, fresh + (f"#{anchor}" if anchor else ""), 1)
+        said = fresh + (f"#{anchor}" if anchor else "")
+        # ЗАМЕНЯЕТСЯ ИМЕННО АДРЕС, А НЕ ПЕРВОЕ ПОХОЖЕЕ МЕСТО. Поиск по строке
+        # правил видимый текст, когда тот совпадал с адресом: из
+        # `[../docs/x.md](../docs/x.md)` выходила ссылка с новым текстом и
+        # старым адресом — то есть ровно наоборот. Позиция группы такой
+        # двусмысленности не имеет. Нашёл внешний взгляд на #297.
+        start, end = match.span("target")
+        whole = match.group(0)
+        head = whole[: start - match.start()]
+        tail = whole[end - match.start() :]
+        return head + said + tail
 
     return LINK_RE.sub(moved, text)
 
