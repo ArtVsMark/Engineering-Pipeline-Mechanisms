@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from typing import Any, Final
@@ -71,9 +72,31 @@ def at(ref: str, path: str) -> dict[str, Any]:
     return said
 
 
+def order(said: str) -> tuple[int, ...]:
+    """Номер выгрузки числами — для сравнения «раньше/позже», а не по строке.
+
+    По строке «1.10» младше «1.9», и гейт, сравнивающий текстом, объявил бы
+    подъём понижением на первой же двузначной минорной.
+    """
+    return tuple(int(part) for part in re.findall(r"\d+", said))
+
+
 def lonely(was: dict[str, Any], now: dict[str, Any]) -> str:
-    """Пусто, если подпись честна; иначе — чем именно она неправда."""
-    if str(was.get(READ_AT) or "") == str(now.get(READ_AT) or ""):
+    """Пусто, если подпись честна; иначе — чем именно она неправда.
+
+    СУДИТСЯ ОДНО НАПРАВЛЕНИЕ — ПОДЪЁМ, и теперь это не только написано, но и
+    сделано. Прежде сравнение шло на неравенство: понижение номера отвергалось
+    наравне с подъёмом, а сообщение всё равно говорило «поднят» — то есть гейт
+    обвинял в том, чего не было, и сам себе противоречил. Нашёл внешний взгляд
+    на #279.
+
+    ПОНИЖЕНИЕ — ДРУГОЕ УТВЕРЖДЕНИЕ, и оно законно: им говорят «наши ответы
+    сняты против выгрузки постарше, чем мы думали». Подписью под несделанным
+    оно не является — наоборот, снимает её. Сосед у сужения назван
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    before, after = str(was.get(READ_AT) or ""), str(now.get(READ_AT) or "")
+    if order(after) <= order(before):
         return ""
     if (was.get(ANSWERS) or {}) != (now.get(ANSWERS) or {}):
         return ""

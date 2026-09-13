@@ -71,3 +71,26 @@ def test_the_refusal_names_both_repairs() -> None:
     """
     said = module.lonely(answers("1.6"), answers("1.7"))
     assert "перечитайте" in said.lower() and "верните номер" in said.lower()
+
+
+def test_a_lowered_number_is_a_different_statement_and_passes() -> None:
+    """Понижение номера — другое утверждение, и оно законно.
+
+    Им говорят «наши ответы сняты против выгрузки постарше, чем мы думали».
+    Подписью под несделанным оно не является — наоборот, снимает её. Прежде
+    сравнение шло на неравенство: понижение отвергалось наравне с подъёмом, а
+    сообщение всё равно говорило «поднят», то есть гейт обвинял в том, чего не
+    было. Нашёл внешний взгляд на #279.
+    """
+    assert not module.lonely(answers("1.7"), answers("1.6"))
+
+
+def test_a_two_digit_minor_is_compared_by_number_not_by_text() -> None:
+    """«1.10» новее «1.9», хотя по строке — младше.
+
+    Сравнение текстом объявило бы подъём понижением на первой же двузначной
+    минорной, и гейт замолчал бы ровно там, где ряд вырос.
+    """
+    said = module.lonely(answers("1.9"), answers("1.10"))
+    assert said, "двузначная минорная прочитана как понижение"
+    assert module.order("1.10") > module.order("1.9")
