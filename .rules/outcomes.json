@@ -15,11 +15,6 @@
       "EXIT_NOTHING",
       "EXIT_RECORDED"
     ],
-    "hail.py": [
-      "EXIT_BROKEN",
-      "EXIT_OK",
-      "EXIT_UNSET"
-    ],
     "late_look.py": [
       "EXIT_OK"
     ],
@@ -31,11 +26,6 @@
     ],
     "review_map.py": [
       "EXIT_OK"
-    ],
-    "stuck.py": [
-      "EXIT_BROKEN",
-      "EXIT_STUCK",
-      "EXIT_UNSET"
     ],
     "task_items.py": [
       "EXIT_NOTHING",
