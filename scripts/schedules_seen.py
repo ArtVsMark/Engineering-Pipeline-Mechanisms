@@ -181,11 +181,17 @@ def fired(repo: str, name: str, token: str, since: datetime) -> tuple[int, int]:
     заходом по расписанию не являются, и складывать их значило бы прятать
     пропуск за ручным запуском.
     """
+    # СПИСОК ИДЁТ СТРАНИЦАМИ, И ЭТО НЕ ЗАПАС НА БУДУЩЕЕ. Ежечасное расписание
+    # за неделю даёт 168 заходов — больше страницы, — и обход, читающий одну,
+    # объявил бы пропуском всё, что за её краем: чем ИСПРАВНЕЕ канал, тем
+    # больше он «пропускает». Нашёл внешний взгляд на #269.
     try:
-        got = ghrest.request(
-            "GET",
-            f"repos/{repo}/actions/workflows/{name}/runs?event=schedule&per_page=100",
-            token,
+        found = list(
+            ghrest.paginate(
+                f"repos/{repo}/actions/workflows/{name}/runs?event=schedule",
+                token,
+                key="workflow_runs",
+            )
         )
     except ghrest.NotFound:
         # Прогона с таким именем у площадки нет: объявление разошлось с
@@ -195,7 +201,7 @@ def fired(repo: str, name: str, token: str, since: datetime) -> tuple[int, int]:
         ) from None
     happened = 0
     fell = 0
-    for run in (got or {}).get("workflow_runs") or []:
+    for run in found:
         started = str(run.get("created_at") or "")
         if not started:
             continue
@@ -284,13 +290,19 @@ def main(argv: list[str] | None = None) -> int:
         token = ghrest.token_from_env()
         now = datetime.now(UTC)
         seen = sweep(args.repo, token, now, args.days)
+        for item in seen:
+            print(item.said())
+        # ЗАПИСЬ РЕЕСТРА — ВНУТРИ РАЗБОРА ОТКАЗОВ. Отказ площадки на записи
+        # (права, квота, сеть) выходил отсюда необработанным и становился
+        # кодом 1, а единица по договору значит «есть пропуски»: читатель
+        # получал бы «канал осекается» там, где осеклась сама запись, — то
+        # есть третий исход подменялся первым (039). Нашёл внешний взгляд
+        # на #269.
+        save(args.repo, token, seen, now, args.days, apply=args.apply)
     except (NotRun, ghrest.TransportError) as exc:
         print(f"обход не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
 
-    for item in seen:
-        print(item.said())
-    save(args.repo, token, seen, now, args.days, apply=args.apply)
     loud = [item for item in seen if item.loud]
     if not loud:
         print(f"все объявленные заходы на месте: расписаний {len(seen)}, окно {args.days} сут.")
