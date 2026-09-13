@@ -117,26 +117,35 @@ class Drift:
 fetch = ghrest.raw_json
 
 
-def ours_proposals() -> dict[str, Any]:
-    """Наши предложения каталогу — из дерева."""
-    path = paths.PROPOSALS
+def ours_file(path: Path, *, missing: str) -> dict[str, Any]:
+    """Наш ответ каталогу из дерева: читает, проверяет форму, зовёт третий исход.
+
+    ОБОБЩЕНО ПО ТРЕТЬЕМУ СЛУЧАЮ, А НЕ ПО ВТОРОМУ
+    ([093](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/093-seam-early-generalisation-late.md)).
+    Два файла читались порознь законно: одинаковая форма ещё не общий приём.
+    Третий — набор вопросов витрины, заведённый 13.09.2026, — и стал поводом;
+    нашёл его замер по всем 473 функциям дерева, а не глаз.
+
+    ЧЕГО ЗДЕСЬ НЕТ. Что делать с прочитанным, решает зовущий: у ответов
+    каталогу, предложений и витрины общее только чтение. Свести их разбор
+    значило бы связать три разных предмета одной формой.
+    """
     if not path.is_file():
-        raise NotRun(f"нет {path}: канал предложений не подключён (075)")
+        raise NotRun(f"нет {path}: {missing} (075)")
     said = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(said, dict):
-        raise NotRun(f"{path}: предложения не словарь")
+        raise NotRun(f"{path}: прочитанное не словарь")
     return said
+
+
+def ours_proposals() -> dict[str, Any]:
+    """Наши предложения каталогу — из дерева."""
+    return ours_file(paths.PROPOSALS, missing="канал предложений не подключён")
 
 
 def ours() -> dict[str, Any]:
     """Наш живой ответ каталогу — из дерева, а не из чужого снимка."""
-    path = paths.BINDINGS
-    if not path.is_file():
-        raise NotRun(f"нет {path}: сверять снимок не с чем (075)")
-    answer = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(answer, dict):
-        raise NotRun(f"{path}: ответ каталогу не словарь")
-    return answer
+    return ours_file(paths.BINDINGS, missing="сверять снимок не с чем")
 
 
 #: Наши файлы, отвечающие контрактам каталога: имя контракта → путь и ключ
@@ -680,13 +689,7 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
 
 def ours_showcase() -> dict[str, Any]:
     """Наш набор вопросов витрины — из дерева."""
-    path = paths.SHOWCASE
-    if not path.is_file():
-        raise NotRun(f"нет {path}: сверять набор вопросов не с чем (075)")
-    said = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(said, dict):
-        raise NotRun(f"{path}: ответ витрины не словарь")
-    return said
+    return ours_file(paths.SHOWCASE, missing="сверять набор вопросов не с чем")
 
 
 def asked_ids(said: dict[str, Any]) -> list[str]:
