@@ -11,6 +11,15 @@
 дерева нет, базы нет, репозиторий не назван. Это не выдуманная поломка, а
 ровно то, что случается на обрезанном чекауте и в чужом каталоге.
 
+И ОН ЖЕ НАЗЫВАЕТ ПРЕДМЕТ. Мало сказать «не отработал»: отказ без предмета
+отправляет читателя искать причину самому — и искать он будет там же, где
+механизм уже был
+([158](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/158-the-third-outcome-names-its-subject.md)).
+Что считается предметом, взято замером с пятнадцати живых сообщений, а не
+придумано, и проверка отвергает то, ради чего написана: «не отработал: что-то
+пошло не так» она не принимает
+([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+
 Исход спрашивается У ГЕЙТА — по его собственной константе, а не назначается
 числом: у части механизмов объявленные числа другие, и назначенное ожидание
 «чинило» бы исправное
@@ -19,6 +28,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Final
 
@@ -72,6 +82,55 @@ NO_HINTS: Final = {
 }
 
 
+#: Чем третий исход называет ПРЕДМЕТ: чего именно не хватило. Формы взяты не
+#: из головы, а из замера 13.09.2026 — так говорят все пятнадцать механизмов,
+#: у которых этот путь прогоняется:
+#:
+#: * имя файла или каталога — `pyproject.toml`, `.github/workflows`;
+#: * имя переменной окружения — `GH_TOKEN`, `CONTRACT_VERSION`;
+#: * ключ запуска — `--repo`;
+#: * команда, которая отказала, — `git merge-base …`;
+#: * имя в кавычках — «origin/main».
+#:
+#: Список разрешительный
+#: ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)):
+#: новая форма предмета дописывается сюда осознанно, а не проходит сама.
+SUBJECT: Final = re.compile(
+    r"[\w.-]+\.(?:py|ya?ml|json|toml|md|txt)\b"  # файл
+    r"|[\w.-]*/[\w./-]+"  # путь
+    r"|\b[A-Z][A-Z0-9_]{3,}\b"  # переменная окружения
+    r"|--[a-z][a-z-]+"  # ключ запуска
+    r"|\bgit\b"  # отказавшая команда
+    r"|«[^»]+»"  # имя в кавычках
+)
+
+
+def names_a_subject(said: str) -> bool:
+    """Назвал ли третий исход, ЧЕГО не хватило, — или только что «не смог».
+
+    «Не отработал» без предмета отправляет читателя искать причину самому, а
+    искать он будет там же, где механизм уже был
+    ([158](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/158-the-third-outcome-names-its-subject.md)).
+    """
+    for line in said.splitlines():
+        if "не отработал" in line and SUBJECT.search(line.split(":", 1)[-1]):
+            return True
+    return False
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "гейт не отработал: что-то пошло не так",
+        "шаг не отработал",
+        "сверка не отработала: ошибка",
+    ],
+)
+def test_a_third_outcome_without_a_subject_is_rejected(said: str) -> None:
+    """Проверка отвергает то, ради чего написана (140): отказ без предмета."""
+    assert not names_a_subject(said), f"«{said}» принято за названный предмет"
+
+
 @pytest.mark.parametrize("gate", WITHOUT_INPUT)
 def test_a_gate_without_input_says_it_did_not_run(
     run_script: RunScript, tmp_path: Path, gate: str
@@ -85,6 +144,9 @@ def test_a_gate_without_input_says_it_did_not_run(
     assert "не отработал" in result.text, (
         f"{gate} назвал третий исход, но не сказал этого словами — "
         "красное, не называющее своей причины, учит не смотреть на красное"
+    )
+    assert names_a_subject(result.text), (
+        f"{gate} сказал «не отработал» и не назвал ПРЕДМЕТ (158): {result.text.strip()[:200]}"
     )
 
 
@@ -102,6 +164,9 @@ def test_a_step_with_its_keys_still_says_it_did_not_run(
         f"{step} ответил {result.code}: вывод — {result.text.strip()[:200]}"
     )
     assert "не отработал" in result.text, f"{step} не назвал третий исход словами"
+    assert names_a_subject(result.text), (
+        f"{step} сказал «не отработал» и не назвал ПРЕДМЕТ (158): {result.text.strip()[:200]}"
+    )
     assert "usage:" not in result.text, (
         f"{step} упал на разборе ключей — это двойка argparse, а не объявленный исход"
     )
