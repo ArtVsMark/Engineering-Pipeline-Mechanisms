@@ -511,3 +511,41 @@ def test_the_planted_edits_are_each_breaking(tmp_path: Path) -> None:
             answer=_planted_answer(edit),
         )
         assert contract.breaking(changes), f"«{name}» не признано несовместимым: {changes}"
+
+
+GROWTH_HEADING = "## Как поверхность растёт"
+
+
+def growth_section() -> str:
+    """Раздел договора о том, как поверхность растёт."""
+    text = (ROOT / "docs" / "release.md").read_text(encoding="utf-8")
+    head = text.find(GROWTH_HEADING)
+    if head == -1:
+        raise AssertionError(f"в договоре нет раздела «{GROWTH_HEADING}» — читать нечего (075)")
+    tail = text.find("\n## ", head + len(GROWTH_HEADING))
+    return text[head : tail if tail != -1 else len(text)]
+
+
+def test_the_contract_says_how_each_kind_of_surface_grows() -> None:
+    """Договор называет правила СВОЕЙ эволюции, а не только состав (113).
+
+    Перечислить поля и промолчать о том, что в них устойчиво, значит оставить
+    решение «это совместимо?» вкусу читателя — ровно то, от чего снимок
+    поверхности уже избавил спор о составе. Роды берутся из того же словаря,
+    что и сверка состава: второй список того же разошёлся бы молча (022).
+    """
+    said = growth_section().lower()
+    for field, word in SURFACE_WORDS.items():
+        assert word in said, f"о роде «{field}» не сказано, как он растёт"
+
+
+def test_the_growth_section_tells_adding_from_removing() -> None:
+    """Раздел различает добавление и снятие: это разные ответы (097).
+
+    Раздел, говорящий только «несовместимо», запрещал бы рост вовсе; говорящий
+    только «совместимо» — разрешал бы снимать имена, которые стоят в защите
+    ветки у потребителя.
+    """
+    said = growth_section().lower()
+    assert "добавить" in said, "как добавляют новое — не сказано"
+    assert "несовместимо" in said, "что ломает потребителя — не сказано"
