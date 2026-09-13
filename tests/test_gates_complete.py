@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import yaml
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("ci_complete.py")
 
@@ -825,3 +826,30 @@ def test_a_cancelled_only_name_refuses_once_the_run_is_done() -> None:
     problems, waiting = verdict_of(runs, ["test"], mine={}, run_live=False)
     assert not waiting
     assert problems and "отменены" in problems[0]
+
+
+def annotation_line() -> str:
+    """Строка прогона, готовящая вывод к аннотации площадки."""
+    document = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "ci-complete.yml").read_text(encoding="utf-8")
+    )
+    said = str(document["jobs"]["ci-complete"]["steps"][-1]["run"])
+    found = [line for line in said.splitlines() if "sed -z" in line]
+    if len(found) != 1:
+        raise AssertionError(
+            f"строка подготовки аннотации найдена {len(found)} раз — читать нечего"
+        )
+    return found[0]
+
+
+def test_the_annotation_escapes_the_percent_first() -> None:
+    """Знак процента экранируется ПЕРВЫМ, иначе экранирование съедает себя.
+
+    Обратный порядок превращает подставленный `%0A` в `%250A`, а знак процента,
+    пришедший из вывода, обрезает сообщение — то самое, ради читаемости
+    которого аннотация и заведена. Нашёл внешний взгляд на #265.
+    """
+    said = annotation_line()
+    where = {mark: said.find(mark) for mark in ("s/%/%25/g", "s/\\n/%0A/g")}
+    assert all(place != -1 for place in where.values()), f"замены не на месте: {where}"
+    assert where["s/%/%25/g"] < where["s/\\n/%0A/g"], "процент экранируется не первым"
