@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+import catalogue
 import findings
 import ghrest
 import kinds
@@ -60,15 +61,9 @@ EXIT_RECORDED: Final = 3
 #: Выгрузка каталога и сводка потребителей. Оба — СНИМКИ: каталог собирает их
 #: своим прогоном, и читаются они по сети, а не из дерева. В этом весь предмет
 #: механизма: дерево не менялось, а снимок — да.
-EXPORT_URL: Final = (
-    "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
-    "/main/export/rules.json"
-)
-WHERE_URL: Final = (
-    "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
-    "/badges/export/where.json"
-)
-CATALOGUE: Final = "ArtVsMark/Engineering-Incidents-Playbook"
+EXPORT_URL: Final = catalogue.EXPORT_URL
+WHERE_URL: Final = catalogue.WHERE_URL
+CATALOGUE: Final = catalogue.REPO
 
 #: Подключение действия каталога — с подпутём и без него. Обе формы законны и
 #: обе живут в дереве: `<repo>/.github/actions/<имя>@<тег>` подключает одно
@@ -556,10 +551,7 @@ def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[D
 #: Ответ каталога по предложениям потребителей: ключ «владелец/репозиторий:слаг»,
 #: статус `admitted` с номером либо `rejected` с причиной. Файл каталога, а не
 #: наш: он и отвечает.
-CATALOGUE_PROPOSALS: Final = (
-    "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
-    "/main/.rules/proposals.json"
-)
+CATALOGUE_PROPOSALS: Final = catalogue.PROPOSALS_URL
 #: Раздел ответа, в котором каталог держит вердикты. Имя взято У КАТАЛОГА, а не
 #: придумано: разбор по памяти молчал четыре раза подряд (#140).
 VERDICTS: Final = "verdicts"
