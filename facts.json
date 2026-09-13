@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "contract": "0.1.0",
+  "version": "0.1.235",
+  "version_whole": true,
+  "release": "v0.1.0",
+  "tests": {
+    "total": 1135,
+    "modules": 73
+  },
+  "scripts": {
+    "runnable": 35,
+    "started": 19
+  },
+  "coverage": {
+    "read": false,
+    "percent": 0.0
+  },
+  "rules": {
+    "total": 203,
+    "answered": 203,
+    "by_status": {
+      "active": 172,
+      "rejected": 0,
+      "not-applicable": 31,
+      "unreviewed": 0
+    },
+    "by_mechanism": {
+      "document": 20,
+      "gate": 127,
+      "none": 1,
+      "pipeline": 24
+    }
+  },
+  "checks": {
+    "required": 7,
+    "advisory": 24,
+    "off": 0,
+    "unreviewed": 0
+  },
+  "family": {
+    "schema_read": "1.2",
+    "snapshot_at": "2026-09-10T22:21:07+00:00",
+    "consumers": 6,
+    "mechanisms": 229,
+    "shared": 27,
+    "held_by_machine": 685,
+    "closed_by_shared": 193,
+    "share": 0.282,
+    "top": [
+      {
+        "name": "ci.yml",
+        "projects": 5,
+        "rules": 23
+      },
+      {
+        "name": "preflight.py",
+        "projects": 3,
+        "rules": 19
+      },
+      {
+        "name": "check_bindings.py",
+        "projects": 2,
+        "rules": 16
+      },
+      {
+        "name": "rules-inbox.yml",
+        "projects": 4,
+        "rules": 16
+      },
+      {
+        "name": "agent-pr.yml",
+        "projects": 3,
+        "rules": 12
+      },
+      {
+        "name": "automerge.yml",
+        "projects": 4,
+        "rules": 12
+      },
+      {
+        "name": "gh_rest.py",
+        "projects": 2,
+        "rules": 8
+      },
+      {
+        "name": "check_attribution.py",
+        "projects": 3,
+        "rules": 7
+      },
+      {
+        "name": "check_journal.py",
+        "projects": 3,
+        "rules": 7
+      },
+      {
+        "name": "badges.yml",
+        "projects": 4,
+        "rules": 6
+      }
+    ],
+    "read": true,
+    "schema_expected": "1.2",
+    "schema_agrees": true,
+    "behind_read": true,
+    "behind": 39,
+    "behind_rules": [
+      "019",
+      "023",
+      "029",
+      "032",
+      "033",
+      "044",
+      "048",
+      "055",
+      "062",
+      "065",
+      "066",
+      "067",
+      "071",
+      "076",
+      "077",
+      "079",
+      "081",
+      "082",
+      "083",
+      "093",
+      "095",
+      "096",
+      "099",
+      "102",
+      "103",
+      "107",
+      "112",
+      "120",
+      "132",
+      "133",
+      "134",
+      "136",
+      "153",
+      "163",
+      "188",
+      "192",
+      "193",
+      "194",
+      "201"
+    ]
+  },
+  "generated": {
+    "at": "2026-09-13T10:58:17Z",
+    "sha": "92da2200993ae3e29c7c898f5556bdcfa32d8ec3"
+  }
+}
