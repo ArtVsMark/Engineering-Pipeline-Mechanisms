@@ -514,7 +514,11 @@ def tag_exists(tag: str) -> bool:
     ([074](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/074-one-shot-irreversible-steps-get-their-own-guard.md)).
     Нашёл внешний взгляд на #299.
     """
-    return bool(git("tag", "--list", tag))
+    # СВЕРКА ТОЧНАЯ, А НЕ ПО ШАБЛОНУ. `git tag --list` понимает образцы: на
+    # `v1.0.*` он ответил бы «есть», хотя такого тега нет ни одного, и
+    # догоняющая кнопка сочла бы страницу заведённой для несуществующего
+    # выпуска. Нашёл внешний взгляд на #303, двумя записями.
+    return tag in git("tag", "--list", tag).split()
 
 
 def page_body(version: str, repo: str) -> str:

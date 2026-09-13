@@ -496,10 +496,35 @@ def test_a_creating_request_is_not_retried_on_a_gateway_error(code: int) -> None
     502 и 504 отдаёт ШЛЮЗ, не получивший ответа от бэкенда, — а тот запрос мог
     выполнить. Нашёл внешний взгляд на #284.
     """
-    assert transport._survivable(transport.CREATES, refused(code)) is False
+    assert transport._survivable(transport.CREATES, "repos/o/r/issues", refused(code)) is False
 
 
 @pytest.mark.parametrize("method", ["PATCH", "PUT", "DELETE", "GET"])
 def test_an_idempotent_write_still_survives_a_gateway_error(method: str) -> None:
     """Идемпотентное повторяется: повтор с тем же телом не родит второй сущности."""
-    assert transport._survivable(method, refused(503)) is True
+    assert transport._survivable(method, "repos/o/r/issues", refused(503)) is True
+
+
+def test_an_idempotent_mutation_keeps_its_retry() -> None:
+    """GraphQL ходит `POST`, но разрешённые операции идемпотентны.
+
+    Граница по методу сделала взведение и снятие авто-мержа хрупкими на ровном
+    месте: второй вызов приводит к тому же состоянию, а не заводит вторую
+    сущность. Нашёл внешний взгляд на #302.
+    """
+    assert transport._survivable("POST", transport.GRAPHQL, refused(502)) is True
+
+
+def test_every_allowed_mutation_is_declared_idempotent() -> None:
+    """Закрытый список GraphQL и список идемпотентных не расходятся.
+
+    Повтор у GraphQL разрешён ЦЕЛИКОМ, и держится это тем, что туда пускают
+    только идемпотентные операции. Новая операция обязана попасть в оба списка
+    осознанно — вместе с ответом на вопрос «а её-то повторять можно?» (068).
+    """
+    unknown = sorted(set(transport.NO_REST) - transport.IDEMPOTENT)
+    assert not unknown, (
+        "в GraphQL пускают операции, об идемпотентности которых не сказано: "
+        + ", ".join(unknown)
+        + " — повтор у GraphQL разрешён целиком, и это решение надо пересмотреть"
+    )
