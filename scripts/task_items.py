@@ -152,6 +152,61 @@ def subject(repo: str, number: int, token: str) -> str:
     return "\n".join(lines)
 
 
+def closed_by(repo: str, number: int, token: str) -> str:
+    """Каким коммитом закрыта задача; пусто — если открыта или закрыта не им.
+
+    Площадка помечает закрытие событием `closed`, и у закрытия ПО КОММИТУ там
+    стоит его отпечаток. Это единственный способ отличить «закрыло изменение»
+    от «закрыл человек» — по состоянию задачи они неразличимы.
+    """
+    try:
+        events = list(ghrest.paginate(f"repos/{repo}/issues/{number}/events", token))
+    except ghrest.TransportError:
+        return ""
+    for event in reversed(events):
+        if str(event.get("event") or "") == "closed":
+            return str(event.get("commit_id") or "")
+    return ""
+
+
+def fate(repo: str, change: dict[str, Any], links: list[Any], token: str) -> list[str]:
+    """Судьба связанных задач ПОСЛЕ слияния: сбылось ли обещанное связью.
+
+    ГЕЙТ СВЯЗИ СМОТРИТ ДО, А ЭТОТ — ПОСЛЕ, и это разные предметы. Гейт разметки
+    проверяет, что связь названа и названа верно; сбылась ли она, он знать не
+    может — слияния ещё не было. После слияния связь становится проверяемым
+    утверждением, и ровно здесь она начинает врать молча: `Closes` не закрыл
+    (площадка не приняла ключевое слово, или задача была переоткрыта), либо
+    закрылось то, чего никто не обещал.
+
+    ОБЕ СТОРОНЫ, А НЕ ОДНА (097). Проверять только несбывшееся закрытие значит
+    ловить забывчивость и пропускать противоположное — закрытую задачу, которой
+    обещали лишь упоминание. Второе дороже: незакрытое видно в трекере, а
+    закрытое лишнее уходит из поля зрения вместе с невыполненной работой.
+    """
+    merge = str(change.get("merge_commit_sha") or "")
+    said: list[str] = []
+    for link in links:
+        issue = ghrest.request("GET", f"repos/{repo}/issues/{link.number}", token) or {}
+        state = str(issue.get("state") or "")
+        if link.closes and state != "closed":
+            said.append(
+                f"#{link.number}: изменение обещало «{link}», а задача открыта — "
+                "площадка закрытия не сделала, либо задачу переоткрыли"
+            )
+        if (
+            not link.closes
+            and state == "closed"
+            and merge
+            and closed_by(repo, link.number, token) == merge
+        ):
+            said.append(
+                f"#{link.number}: изменение обещало «{link}», то есть НЕ закрывать, "
+                "а задача закрыта этим же слиянием"
+            )
+    return said
+
+
 def render(number: int, answer: str, paired: list[tuple[str, str]], bare: list[str]) -> str:
     """Собирает комментарий в задачу: разбор, а не голый список отметок."""
     lines = [
@@ -213,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="отметить пункты эпиков вслед за закрытыми задачами и выйти",
     )
+    parser.add_argument(
+        "--fate",
+        action="store_true",
+        help="проверить, сбылась ли связь слитого с задачей, и выйти",
+    )
     args = parser.parse_args(argv)
 
     paired: list[tuple[str, str]] = []
@@ -231,6 +291,34 @@ def main(argv: list[str] | None = None) -> int:
             touched = items.sweep(args.repo, token, dry_run=not args.apply)
             print(f"отмечено пунктов по объявлению автора: {touched}")
             return EXIT_RECORDED if touched else EXIT_NOTHING
+
+        if args.fate:
+            # СУДЬБА ЗАДАЧИ — ПРЕДМЕТ ПОСЛЕ СЛИЯНИЯ, и своего разбора агентом
+            # он не требует: связь названа автором, состояние задачи знает
+            # площадка, и сравнить их может механизм.
+            if not args.pr:
+                raise NotRun("номер слитого изменения не назван: --pr")
+            numbers, change = linked(args.repo, args.pr, token)
+            said = fate(
+                args.repo, change, changerefs.links_in(str(change.get("body") or "")), token
+            )
+            if not said:
+                print(f"#{args.pr}: связь с задачами сбылась — расхождений нет")
+                return EXIT_NOTHING
+            note = "\n".join(
+                [
+                    f"## Судьба задачи после слияния #{args.pr}",
+                    "",
+                    "Связь, названная в теле изменения, после слияния становится",
+                    "проверяемым утверждением — и ровно здесь она начинает врать молча.",
+                    "",
+                    *[f"- {one}" for one in said],
+                ]
+            )
+            print(note)
+            if args.apply:
+                publish(args.repo, numbers, note, token)
+            return EXIT_RECORDED
 
         if args.follow:
             # ПУНКТ-ССЫЛКА СВОЕГО СОСТОЯНИЯ НЕ ИМЕЕТ: оно уже есть у задачи, на

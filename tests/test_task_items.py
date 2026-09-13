@@ -272,3 +272,90 @@ def test_a_proposal_that_marked_nothing_is_not_a_green_step(
     )
     code = module.main(["--repo", "o/r", "--pr", "232", "--from", str(answer), "--apply"])
     assert code == module.EXIT_BROKEN, "шаг зелен, хотя пункт остался открытым"
+
+
+def linked_change(body: str, merge: str = "deadbee") -> dict[str, Any]:
+    """Слитое изменение с названной связью."""
+    return {"number": 7, "body": body, "merge_commit_sha": merge}
+
+
+def platform_says(states: dict[int, str], closers: dict[int, str] | None = None) -> Any:
+    """Ответ площадки о задачах и о том, чем каждая закрыта."""
+    shut = closers or {}
+
+    def reply(_method: str, path: str, *_args: object, **_kwargs: object) -> Any:
+        number = int(path.rstrip("/").rsplit("/", 1)[1].split("?")[0])
+        return {"state": states.get(number, "open")}
+
+    return reply, shut
+
+
+def test_a_promised_closure_that_did_not_happen_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обещали `Closes`, а задача открыта — связь соврала, и это сказано.
+
+    Гейт разметки этого знать не может: он работает ДО слияния, когда сбыться
+    ещё нечему.
+    """
+    reply, _ = platform_says({12: "open"})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    said = module.fate(
+        "o/r", linked_change("Closes #12"), module.changerefs.links_in("Closes #12"), "t"
+    )
+    assert len(said) == 1
+    assert "#12" in said[0] and "открыта" in said[0]
+
+
+def test_a_kept_promise_is_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обещали закрыть и закрыли — записи нет: канал не шумит на исправном."""
+    reply, _ = platform_says({12: "closed"})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    assert (
+        module.fate(
+            "o/r", linked_change("Closes #12"), module.changerefs.links_in("Closes #12"), "t"
+        )
+        == []
+    )
+
+
+def test_a_task_closed_without_a_promise_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`Refs` значит «не закрывать» — а задача закрыта этим же слиянием.
+
+    Вторая сторона, и она дороже первой: незакрытое видно в трекере, а
+    закрытое лишнее уходит из поля зрения вместе с невыполненной работой
+    ([097](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/097-a-checker-has-two-error-types.md)).
+    """
+    reply, _ = platform_says({12: "closed"})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    monkeypatch.setattr(module, "closed_by", lambda *a, **k: "deadbee")
+    said = module.fate(
+        "o/r", linked_change("Refs #12"), module.changerefs.links_in("Refs #12"), "t"
+    )
+    assert len(said) == 1
+    assert "НЕ закрывать" in said[0]
+
+
+def test_a_task_closed_by_someone_else_is_not_blamed_on_the_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Закрытая задача, закрытая НЕ этим слиянием, изменению не вменяется.
+
+    По состоянию задачи «закрыл человек» и «закрыло изменение» неразличимы, и
+    свести их значило бы обвинять изменение в чужой работе (044).
+    """
+    reply, _ = platform_says({12: "closed"})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    monkeypatch.setattr(module, "closed_by", lambda *a, **k: "чужой-коммит")
+    assert (
+        module.fate("o/r", linked_change("Refs #12"), module.changerefs.links_in("Refs #12"), "t")
+        == []
+    )
+
+
+def test_an_unreadable_closer_is_not_read_as_this_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка не ответила, чем закрыта задача — обвинения нет (045)."""
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setattr(module.ghrest, "paginate", refuse)
+    assert module.closed_by("o/r", 12, "t") == ""
