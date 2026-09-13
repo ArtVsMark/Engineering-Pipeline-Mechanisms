@@ -298,15 +298,23 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         module, "held_body", lambda repo, number, tok: state["held"].get(number, ("", ""))
     )
     monkeypatch.setattr(module.arm, "disarm", lambda node, tok: state["disarmed"].append(node))
+
     # Разметка источника записывается стендом отдельно: проверять надо, что
     # метка ВЫСТАВЛЕНА, а не что о ней напечатано. Замер 09.09.2026: вызов
     # публикации в ветке красного отсутствовал, а тест сверял строку вывода —
     # и потому проходил.
-    monkeypatch.setattr(
-        module,
-        "publish_source",
-        lambda repo, item, place, tok, *, dry_run: state["sources"].append((item.number, place)),
-    )
+    def publish(repo: str, item: Any, place: int, tok: str, *, dry_run: bool) -> frozenset[str]:
+        """Подделка соблюдает контракт: она ОТДАЁТ поставленную метку.
+
+        Настоящая функция возвращает то, что теперь стоит на изменении, — по
+        этому ответу заход снимает метку с пустой головы, не спрашивая снимок,
+        снятый до записи. Подделка, возвращавшая ничего, гасила бы ровно ту
+        связь, ради которой ответ и заведён.
+        """
+        state["sources"].append((item.number, place))
+        return frozenset({module.source_label(place)})
+
+    monkeypatch.setattr(module, "publish_source", publish)
     return state
 
 
@@ -496,6 +504,29 @@ def test_a_red_head_that_is_empty_is_named_empty(platform: dict[str, Any]) -> No
     assert "PR_1" in platform["disarmed"], "у пустой головы остался значок"
     assert platform["synced"] == [], "пустую голову подтянули"
     assert platform["merged"] == [2], "очередь встала на пустой голове"
+
+
+def test_an_empty_head_loses_the_label_this_very_pass_set(platform: dict[str, Any]) -> None:
+    """Метку источника снимает тот же заход, который её поставил.
+
+    ЭТО БЫЛ ДЕФЕКТ, А НЕ МЕЛОЧЬ ОФОРМЛЕНИЯ. Метку ставит перечисление очереди —
+    до того, как спрошен объём, — а пустоту головы заход узнаёт позже. Снятие
+    же смотрело в `change.marks`, снимок ДО этой записи: свежей метки там нет,
+    и заход решал, что снимать нечего. Пустая голова так и оставалась висеть с
+    «6 · план», то есть выглядела обычной работой в хвосте очереди — ровно тем,
+    что предыдущая починка и убирала. Нашёл внешний взгляд на #311.
+
+    Настоящая разметка здесь не подделывается: проверяется, что DELETE ушёл на
+    площадку (135) — по печатной строке это было бы неотличимо от молчания.
+    """
+    state = platform
+    state["changes"] = [change(1, "automerge")]
+    state["files_changed"] = {1: 0}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert "source/6" in state["dropped"], (
+        "метка источника осталась на пустой голове: снятие смотрит снимок, "
+        "снятый до собственной записи"
+    )
 
 
 def test_a_red_head_of_unknown_size_is_treated_as_live(

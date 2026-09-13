@@ -223,7 +223,7 @@ def source_label(place: int) -> str:
 
 def publish_source(
     repo: str, change: Change, place: int, owner_token: str, *, dry_run: bool
-) -> None:
+) -> frozenset[str]:
     """Выставляет изменению метку присвоенного источника — ровно одну.
 
     ПИШЕТ ТОЛЬКО ПРИ РАСХОЖДЕНИИ. Заход идёт на каждое событие, и переставлять
@@ -239,10 +239,10 @@ def publish_source(
     wanted = source_label(place)
     present = {mark for mark in change.marks if mark.startswith(SOURCE_PREFIX)}
     if present == {wanted}:
-        return
+        return frozenset(present)
     if dry_run:
         print(f"  (пробный заход) #{change.number}: метка стала бы «{wanted}»")
-        return
+        return frozenset({wanted})
     try:
         for stale in sorted(present - {wanted}):
             path = f"repos/{repo}/issues/{change.number}/labels/{ghrest.quote(stale)}"
@@ -256,9 +256,22 @@ def publish_source(
             )
     except ghrest.TransportError as exc:
         print(f"  #{change.number}: метка источника не выставлена — {report.cut(str(exc))}")
+        return frozenset(present)
+    # ЧТО СТОИТ ПОСЛЕ ЗАПИСИ, ЗНАЕТ ЗАПИСЬ, А НЕ СНИМОК. `change.marks` снят
+    # перечислением — ДО этой постановки, — и снятие метки по нему не видело
+    # той, которую заход поставил секундой раньше
+    # ([135](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/135-session-identity-is-established-by-a-write.md)).
+    return frozenset({wanted})
 
 
-def drop_source(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> None:
+def drop_source(
+    repo: str,
+    change: Change,
+    owner_token: str,
+    *,
+    dry_run: bool,
+    also: frozenset[str] = frozenset(),
+) -> None:
     """Снимает метку источника у изменения, по которому работать нечем.
 
     ИСТОЧНИК — ЭТО «ОТКУДА ВЗЯЛАСЬ РАБОТА», А У ПУСТОГО ЕЁ НЕТ. Метку ставит
@@ -270,7 +283,14 @@ def drop_source(repo: str, change: Change, owner_token: str, *, dry_run: bool) -
     вход
     ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
     """
-    present = sorted(mark for mark in change.marks if mark.startswith(SOURCE_PREFIX))
+    # СНИМАЕТСЯ И ТО, ЧТО ПОСТАВИЛ ЭТОТ ЖЕ ЗАХОД. Метку источника ставит
+    # перечисление очереди, а пустоту головы заход узнаёт позже — по снимку
+    # `change.marks` свежей метки не видно, и она оставалась на пустой голове
+    # навсегда: заход, который её поставил, сам же считал, что снимать нечего.
+    # Нашёл внешний взгляд на #311.
+    present = sorted(
+        mark for mark in (set(change.marks) | set(also)) if mark.startswith(SOURCE_PREFIX)
+    )
     if not present:
         return
     if dry_run:
@@ -525,7 +545,14 @@ def take_back(repo: str, change: Change, why: str, owner_token: str, *, dry_run:
     arm.disarm(change.node, owner_token)
 
 
-def name_the_emptiness(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> None:
+def name_the_emptiness(
+    repo: str,
+    change: Change,
+    owner_token: str,
+    *,
+    dry_run: bool,
+    also: frozenset[str] = frozenset(),
+) -> None:
     """Называет пустую голову и снимает с неё согласие, не трогая ветку.
 
     ПУСТОЕ ИЗМЕНЕНИЕ — СОСТОЯНИЕ ТЕРМИНАЛЬНОЕ, А НЕ «ОТСТАЛО». 13.09.2026
@@ -549,7 +576,7 @@ def name_the_emptiness(repo: str, change: Change, owner_token: str, *, dry_run: 
     # Источник работы снимается: у пустого изменения его нет, а метка,
     # поставленная перечислением очереди до вопроса об объёме, выдавала бы его
     # за обычную работу в хвосте плана.
-    drop_source(repo, change, owner_token, dry_run=dry_run)
+    drop_source(repo, change, owner_token, dry_run=dry_run, also=also)
     if change.armed:
         take_back(
             repo, change, "изменение пусто: содержимое уже в базе", owner_token, dry_run=dry_run
@@ -704,7 +731,7 @@ def source_of(change: Change, red: bool) -> int:
 
 def classify(
     repo: str, queue: list[Change], owner_token: str, *, dry_run: bool
-) -> dict[int, tuple[list[str], bool]]:
+) -> tuple[dict[int, tuple[list[str], bool]], dict[int, frozenset[str]]]:
     """Присваивает источник КАЖДОМУ кандидату и отдаёт прочитанные вердикты.
 
     ЗАЧЕМ ВСЕМ, А НЕ ГОЛОВЕ. Метка источника — не украшение головы очереди, а
@@ -723,14 +750,17 @@ def classify(
     обнаруживает на голове, и это названо, а не сглажено (046).
     """
     verdicts: dict[int, tuple[list[str], bool]] = {}
+    # Что заход ПОСТАВИЛ — отдельно от того, что он прочитал: снимать метку
+    # ниже придётся по записи, а не по снимку, снятому до неё.
+    placed: dict[int, frozenset[str]] = {}
     print(f"кандидатов: {len(queue)}")
     for place, change in enumerate(queue, start=1):
         problems, waiting = head_verdict(repo, change, owner_token)
         verdicts[change.number] = (problems, waiting)
         source = source_of(change, bool(problems))
         print(f"  {place}. #{change.number} [{RANK_NAMES[source]}] — {change.title}")
-        publish_source(repo, change, source, owner_token, dry_run=dry_run)
-    return verdicts
+        placed[change.number] = publish_source(repo, change, source, owner_token, dry_run=dry_run)
+    return verdicts, placed
 
 
 def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
@@ -795,7 +825,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     # раньше разметки, и метки застывали ровно тогда, когда нужнее всего:
     # красная общая ветка — момент, когда надо видеть, кто её чинит (0), а кто
     # просто ждёт.
-    verdicts = classify(repo, queue, owner_token, dry_run=dry_run)
+    verdicts, placed = classify(repo, queue, owner_token, dry_run=dry_run)
 
     troubles = branch_health(repo, base_sha, owner_token)
     if troubles:
@@ -837,7 +867,13 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # голова была и пуста, и красна, и очередь назвала только красноту.
             # Цена — один запрос на КРАСНУЮ голову, а не на каждого кандидата.
             if head_look(repo, change.number, owner_token).changed == 0:
-                name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
+                name_the_emptiness(
+                    repo,
+                    change,
+                    owner_token,
+                    dry_run=dry_run,
+                    also=placed.get(change.number, frozenset()),
+                )
                 skipped["пусты"] += 1
                 continue
             # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
@@ -852,7 +888,13 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         look = head_look(repo, change.number, owner_token)
         state = look.state
         if look.changed == 0:
-            name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
+            name_the_emptiness(
+                repo,
+                change,
+                owner_token,
+                dry_run=dry_run,
+                also=placed.get(change.number, frozenset()),
+            )
             skipped["пусты"] += 1
             continue
         if state == STATE_BEHIND:
