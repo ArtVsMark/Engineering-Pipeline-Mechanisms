@@ -61,6 +61,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
@@ -784,6 +785,12 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     # и уйти зелёным значило бы спрятать «тело не принято» — названное условие
     # пересмотра решения 011 — за успехом соседа (045).
     refused: list[str] = []
+    # Почему каждая голова не поехала. Итог захода перечисляет ИМЕННО ЭТО:
+    # строка «все кандидаты либо красны, либо конфликтуют» называла причину
+    # наугад и 13.09.2026 назвала неверно — единственный кандидат #285 был
+    # ПУСТ, а не красен. Красное, называющее не свою причину, учит не смотреть
+    # на красное (045).
+    skipped: Counter[str] = Counter()
 
     for change in queue:
         problems, _ = verdicts[change.number]
@@ -797,6 +804,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # Цена — один запрос на КРАСНУЮ голову, а не на каждого кандидата.
             if head_look(repo, change.number, owner_token).files == 0:
                 name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
+                skipped["пусты"] += 1
                 continue
             # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
             # а очередь идёт дальше: одна красная голова не обязана держать
@@ -804,12 +812,14 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             print(
                 f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — {'; '.join(problems)}"
             )
+            skipped["красны"] += 1
             continue
 
         look = head_look(repo, change.number, owner_token)
         state = look.state
         if look.files == 0:
             name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
+            skipped["пусты"] += 1
             continue
         if state == STATE_BEHIND:
             print(f"#{change.number}: голова очереди отстала от базы — подтягиваю только её (052)")
@@ -821,6 +831,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 "(004), очередь идёт дальше"
             )
             publish_source(repo, change, RANK_CONFLICT, owner_token, dry_run=dry_run)
+            skipped["конфликтуют"] += 1
             continue
         if state == STATE_ARMABLE:
             # СЛИТЬ НЕЛЬЗЯ СЕЙЧАС — не значит «нельзя». Проверки идут либо не
@@ -851,6 +862,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # голову, а не звать слияние наугад. Отказ площадки на `unknown`
             # уронил бы весь заход вместо одной головы.
             print(f"#{change.number}: состояние «{state or '—'}» слияния не допускает, пропущено")
+            skipped[f"в состоянии «{state or '—'}»"] += 1
             continue
 
         # Значок остаётся у ОДНОЙ головы и на этом пути тоже: иначе мы сливаем
@@ -877,7 +889,8 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     if refused:
         print(f"взвести не удалось ни одну голову: отказов {len(refused)}")
         return EXIT_BROKEN
-    print("готовой головы нет: все кандидаты либо красны, либо конфликтуют")
+    why = ", ".join(f"{count} {said}" for said, count in sorted(skipped.items()))
+    print(f"готовой головы нет: {why}" if why else "готовой головы нет: кандидатов не осталось")
     return EXIT_OK
 
 

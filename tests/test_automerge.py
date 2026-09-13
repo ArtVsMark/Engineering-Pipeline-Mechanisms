@@ -418,6 +418,21 @@ def test_an_emptied_head_is_not_revived(platform: dict[str, Any]) -> None:
     assert platform["merged"] == [2], "очередь встала на пустой голове"
 
 
+def test_the_queue_names_why_no_head_was_ready(platform: dict[str, Any], capsys: Any) -> None:
+    """Итог захода перечисляет НАСТОЯЩИЕ причины, а не две привычные.
+
+    13.09.2026 заход с единственным кандидатом #285 закончился строкой «все
+    кандидаты либо красны, либо конфликтуют», а кандидат был ПУСТ. Итог,
+    называющий причину наугад, учит не смотреть на итог (045).
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["runs"] = {2: (["lint: failure"], False)}
+    platform["files_changed"] = {1: 0}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "готовой головы нет: 1 красны, 1 пусты" in said, said[-300:]
+
+
 def test_name_the_emptiness_says_it_and_disarms(platform: dict[str, Any], capsys: Any) -> None:
     """Ответ о пустоте: сказать владельцу и снять согласие — ветку не трогать."""
     module.name_the_emptiness("o/r", change(4, "automerge", armed=True), "token", dry_run=False)
