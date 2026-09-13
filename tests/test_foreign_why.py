@@ -55,6 +55,24 @@ def test_pieces_are_counted_by_words_not_by_letters() -> None:
     assert module.pieces("коротко") == set(), "кусок короче окна куском не считается"
 
 
+def test_an_address_is_not_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Адрес ссылки словами не считается: иначе два документа, ссылающиеся на
+    одно правило, выглядели бы копиями друг друга.
+
+    Замер 13.09.2026: из 2592 кусков `AGENTS.md` 343 — разобранная по словам
+    ссылка. В разборах каталога ссылок нет, так что вреда пока не было; класс
+    закрыт заранее (051).
+    """
+    адрес = (
+        "https://github.com/ArtVsMark/Engineering-Incidents-Playbook"
+        "/blob/main/rules/ru/153-foreign-why-is-a-link-not-a-copy.md"
+    )
+    assert module.pieces(адрес) == set()
+    monkeypatch.setattr(module, "claims", lambda: {"153": адрес + " " + адрес})
+    root = tree(tmp_path, f"см. {адрес}\n")
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+
+
 def test_a_copy_is_seen_and_a_paraphrase_is_not() -> None:
     """Копия — дословный кусок; пересказ теми же словами врозь ею не является."""
     said = {"153": " ".join(f"слово{at}" for at in range(module.WINDOW + 2))}
