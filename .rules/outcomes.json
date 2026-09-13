@@ -11,10 +11,6 @@
     "debt.py": [
       "EXIT_OK"
     ],
-    "drift.py": [
-      "EXIT_NOTHING",
-      "EXIT_RECORDED"
-    ],
     "late_look.py": [
       "EXIT_OK"
     ],
@@ -26,10 +22,6 @@
     ],
     "review_map.py": [
       "EXIT_OK"
-    ],
-    "task_items.py": [
-      "EXIT_NOTHING",
-      "EXIT_RECORDED"
     ]
   }
 }
