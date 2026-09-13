@@ -238,7 +238,7 @@ def test_the_release_page_is_a_summary_not_a_copy(monkeypatch: pytest.MonkeyPatc
             module.build_changelog.Fragment("fixed", "три", "текст"),
         ],
     )
-    monkeypatch.setattr(module, "declared_version", lambda: FAKE_VERSION)
+    monkeypatch.setattr(module, "contract_at", lambda tag: FAKE_VERSION)
     said = module.page_body("9.10.0", "o/r")
     assert "Записей в выпуске: **3**" in said
     assert "| Исправлено | 2 |" in said
@@ -275,8 +275,79 @@ def test_a_page_that_is_not_there_reads_as_absent(monkeypatch: pytest.MonkeyPatc
     assert module.page_exists("o/r", "9.10.0", "токен") is False
 
 
+def test_a_tag_of_the_tree_is_seen_and_a_stranger_is_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`tag_exists` отвечает по ДЕРЕВУ: тег — свойство истории, а не площадки."""
+    root = tree(tmp_path, tag="v9.9.0")
+    monkeypatch.chdir(root)
+    assert module.tag_exists("v9.9.0") is True
+    assert module.tag_exists("v9.9.1") is False
+
+
+def test_the_contract_version_is_read_out_of_the_tagged_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Версия читается из дерева тега — даже когда голова ушла вперёд."""
+    root = tree(tmp_path, version=FAKE_VERSION, tag="v9.9.0")
+    (root / "CONTRACT_VERSION").write_text("9.9.9\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "голова ушла вперёд"], cwd=root, check=True)
+    monkeypatch.chdir(root)
+    assert module.contract_at("v9.9.0") == FAKE_VERSION
+    assert module.declared_version() == "9.9.9"
+
+
+def test_a_page_is_not_asked_for_a_tag_that_is_not_there(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тега нет — площадку не зовут вовсе: она завела бы тег сама.
+
+    На запрос о странице для несуществующего тега площадка не отказывает, а
+    создаёт его на голове общей ветки. Опечатка в догоняющей кнопке поставила
+    бы тег там, где его никто не ставил, а тег не переставляется (074).
+    Нашёл внешний взгляд на #299.
+    """
+    asked: list[str] = []
+    monkeypatch.setattr(module, "tag_exists", lambda tag: False)
+
+    def visited(*_args: object, **_kwargs: object) -> dict[str, str]:
+        asked.append("зашли")
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", visited)
+    with pytest.raises(module.NotRun, match="не переставляется"):
+        module.ensure_page("o/r", "9.10.0", "токен")
+    assert asked == [], "площадку позвали, не проверив тег"
+
+
+def test_the_page_takes_the_contract_version_of_its_own_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Версия контракта читается с дерева ТЕГА, а не с головы.
+
+    Голова к моменту создания страницы уже ушла вперёд — особенно у догоняющей
+    кнопки. Число с головы называло бы выпуску чужую версию, и заметить это
+    было бы нечем: оно правдоподобно. Нашёл внешний взгляд на #299.
+    """
+    asked: list[tuple[str, ...]] = []
+
+    def remember(*args: str) -> str:
+        asked.append(args)
+        return "9.1.0\n"
+
+    monkeypatch.setattr(module, "git", remember)
+    monkeypatch.setattr(
+        module.build_changelog,
+        "read_fragments",
+        lambda where: [module.build_changelog.Fragment("added", "раз", "текст")],
+    )
+    said = module.page_body("9.10.0", "o/r")
+    assert "`9.1.0`" in said
+    assert ("show", f"v9.10.0:{module.paths.VERSION}") in asked
+
+
 def test_a_second_run_does_not_make_a_second_page(monkeypatch: pytest.MonkeyPatch) -> None:
     """Страница у тега одна: второй заход её не задваивает (074)."""
+    monkeypatch.setattr(module, "tag_exists", lambda tag: True)
     posted: list[str] = []
 
     def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
@@ -292,6 +363,7 @@ def test_a_second_run_does_not_make_a_second_page(monkeypatch: pytest.MonkeyPatc
 
 def test_a_missing_page_is_created(monkeypatch: pytest.MonkeyPatch) -> None:
     """Страницы нет — механизм её заводит, а не оставляет человеку."""
+    monkeypatch.setattr(module, "tag_exists", lambda tag: True)
     posted: list[tuple[str, object]] = []
 
     def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
@@ -310,6 +382,7 @@ def test_a_missing_page_is_created(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_a_dry_run_makes_no_page(monkeypatch: pytest.MonkeyPatch) -> None:
     """Пробный заход рассказывает, а не заводит: у необратимого своя кнопка."""
+    monkeypatch.setattr(module, "tag_exists", lambda tag: True)
     posted: list[str] = []
 
     def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
@@ -326,6 +399,7 @@ def test_a_dry_run_makes_no_page(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_a_body_over_the_limit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """Тело сверх предела площадки — отказ, а не обрезка на середине фразы."""
+    monkeypatch.setattr(module, "tag_exists", lambda tag: True)
 
     def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
         raise module.ghrest.NotFound(path)
