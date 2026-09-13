@@ -86,3 +86,31 @@ def test_the_decision_is_recorded_not_only_coded() -> None:
     said = DECISION.read_text(encoding="utf-8")
     assert "## Отвергнутые варианты" in said
     assert "Оставить один гейт" in said, "не назван вариант, который был до этого решения"
+
+
+def test_the_context_gate_reports_a_divergence_when_it_is_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сверка ПРОГОНЯЕТСЯ по пути находки, а не только разбирается по частям.
+
+    Чистые функции проверяли решение, но не проводку: заход мог решить
+    «расходится» и вернуть ноль, и набор этого бы не заметил
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+    """
+    monkeypatch.setenv("MERGE_QUEUE_TOKEN", "подделка")
+    monkeypatch.setattr(module, "declared_context", lambda *a, **k: "ci-complete")
+    monkeypatch.setattr(module, "protection", lambda *a, **k: ["чужое-имя"])
+    assert module.main(["--repo", "o/r"]) == module.EXIT_FINDINGS
+
+
+def test_the_context_gate_is_silent_when_the_names_agree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Обратная сторона того же прогона: совпали имена — находки нет (097)."""
+    monkeypatch.setenv("MERGE_QUEUE_TOKEN", "подделка")
+    monkeypatch.setattr(module, "declared_context", lambda *a, **k: "ci-complete")
+    monkeypatch.setattr(module, "protection", lambda *a, **k: ["ci-complete"])
+    # Способы слияния — второй предмет того же захода, и без него он честно
+    # уходит в третий исход: сеть в наборе не спрашивают.
+    monkeypatch.setattr(module, "merge_ways", lambda *a, **k: [])
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK

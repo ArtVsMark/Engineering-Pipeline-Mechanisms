@@ -9,11 +9,14 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import RunScript, load_script
 
 module = load_script("check_reread.py")
 
@@ -94,3 +97,52 @@ def test_a_two_digit_minor_is_compared_by_number_not_by_text() -> None:
     said = module.lonely(answers("1.9"), answers("1.10"))
     assert said, "двузначная минорная прочитана как понижение"
     assert module.order("1.10") > module.order("1.9")
+
+
+def repo_with(tmp_path: Path, said: dict[str, Any]) -> Path:
+    """Крошечный репозиторий с ответами проекта на общей ветке."""
+    root = tmp_path / "дерево"
+    (root / ".rules").mkdir(parents=True)
+    (root / ".rules" / "bindings.json").write_text(
+        json.dumps(said, ensure_ascii=False), encoding="utf-8"
+    )
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "a@b"),
+        ("config", "user.name", "подделка"),
+        ("add", "-A"),
+        ("commit", "-qm", "ответы"),
+    ):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def test_the_gate_refuses_a_lonely_raise_when_it_is_run(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Гейт ПРОГОНЯЕТСЯ по пути отказа, а не только разбирается по частям.
+
+    Чистые функции проверяли решение, но не проводку: заход мог решить
+    «отвергнуть» и вернуть ноль, и набор этого бы не заметил. Ровно этот класс
+    за смену уже случался дважды
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+    """
+    root = repo_with(tmp_path, answers("1.6"))
+    (root / ".rules" / "bindings.json").write_text(
+        json.dumps(answers("1.7"), ensure_ascii=False), encoding="utf-8"
+    )
+    done = run_script("check_reread.py", "--base", "main", cwd=root)
+    assert done.code == module.EXIT_REJECTED, done.text
+    assert "перечитыван" in done.text
+
+
+def test_the_gate_passes_a_raise_that_carries_its_work(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Обратная сторона того же прогона: честный подъём проходит (097)."""
+    root = repo_with(tmp_path, answers("1.6"))
+    (root / ".rules" / "bindings.json").write_text(
+        json.dumps(answers("1.7", {"001": {"status": "off"}}), ensure_ascii=False), encoding="utf-8"
+    )
+    done = run_script("check_reread.py", "--base", "main", cwd=root)
+    assert done.code == module.EXIT_OK, done.text
