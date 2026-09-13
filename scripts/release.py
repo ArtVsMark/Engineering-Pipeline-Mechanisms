@@ -52,6 +52,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Final
 
@@ -479,6 +480,92 @@ def do_release(wanted: str, *, breaking: bool = False) -> None:
     print(f"выпуск {wanted} собран и помечен тегом v{wanted}")
 
 
+#: Предел площадки на тело выпуска. Раздел журнала в него не помещается и не
+#: должен: замер 13.09.2026 на выпуске 1.0.0 — 336 178 символов при пределе
+#: 125 000, то есть почти втрое. Обрезать текст значило бы оборвать запись на
+#: середине фразы, а хранить её копию на площадке — держать источник в двух
+#: местах (125).
+PAGE_LIMIT: Final = 125_000
+
+
+def page_body(version: str, repo: str) -> str:
+    """Тело страницы выпуска: СВОДКА и адреса источника, а не копия журнала.
+
+    Страница — витрина, источник остаётся в дереве
+    ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-generated-file-is-not-a-store.md)).
+    Поэтому здесь счёт записей по родам и две ссылки: собранный журнал и
+    каталог записей этого выпуска. Обе ведут на дерево ПО ТЕГУ, а не на
+    подвижную ветку: страница выпуска описывает то, что выпущено, и должна
+    говорить о нём же и через год.
+    """
+    kept = build_changelog.read_fragments(paths.RELEASED / version)
+    counted = Counter(one.kind for one in kept)
+    tree = f"https://github.com/{repo}/blob/v{version}"
+    lines = [
+        f"Записей в выпуске: **{len(kept)}**.",
+        "",
+        "| род | записей |",
+        "|---|---|",
+    ]
+    lines += [
+        f"| {said} | {counted[kind]} |"
+        for kind, said in build_changelog.KINDS.items()
+        if counted[kind]
+    ]
+    lines += [
+        "",
+        f"Полный журнал — [`CHANGELOG.md`]({tree}/CHANGELOG.md).",
+        "Записи этого выпуска целиком — "
+        f"[`changelog.d/released/{version}/`]({tree}/changelog.d/released/{version}).",
+        "",
+        f"Версия контракта на момент выпуска — `{declared_version()}`; "
+        f"что означают её разряды, говорит [`docs/release.md`]({tree}/docs/release.md).",
+    ]
+    return "\n".join(lines)
+
+
+def page_exists(repo: str, version: str, token: str) -> bool:
+    """Есть ли уже страница у этого тега.
+
+    Спрашивается ДО создания: страница выпуска — шаг необратимый по смыслу
+    (её адрес уходит читателям), и второй заход не должен заводить вторую
+    ([074](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/074-one-shot-irreversible-steps-get-their-own-guard.md)).
+    """
+    try:
+        ghrest.request("GET", f"repos/{repo}/releases/tags/v{version}", token)
+    except ghrest.NotFound:
+        return False
+    return True
+
+
+def ensure_page(repo: str, version: str, token: str, *, dry_run: bool = False) -> str:
+    """Создаёт страницу выпуска, если её ещё нет. Отдаёт, что сделано.
+
+    ДОГОНЯЮЩИЙ ЗАХОД ЕСТЬ НАМЕРЕННО. Тег может уже стоять, а страницы не быть —
+    так и случилось с 1.0.0, выпущенным до появления этого шага. Событийная
+    автоматика нуждается в ручной кнопке
+    ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)),
+    и здесь она же: `--page <версия>` доводит страницу для уже стоящего тега.
+    """
+    if page_exists(repo, version, token):
+        return f"страница выпуска v{version} уже есть — второй не заводим (074)"
+    body = page_body(version, repo)
+    if len(body) > PAGE_LIMIT:
+        raise NotRun(
+            f"тело страницы {len(body)} символов при пределе {PAGE_LIMIT}: "
+            "страница обязана быть сводкой, а не копией журнала"
+        )
+    if dry_run:
+        return f"(пробный заход) страница выпуска v{version} создалась бы телом:\n{body}"
+    ghrest.request(
+        "POST",
+        f"repos/{repo}/releases",
+        token,
+        {"tag_name": f"v{version}", "name": f"v{version}", "body": body},
+    )
+    return f"страница выпуска v{version} создана"
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: сухая проверка, а по ключу — необратимый шаг."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -502,7 +589,33 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="поверхность изменена НЕСОВМЕСТИМО: поднимает МАЖОР версии контракта",
     )
+    parser.add_argument(
+        "--page",
+        metavar="ВЕРСИЯ",
+        default="",
+        help="довести страницу выпуска для уже стоящего тега и выйти",
+    )
     args = parser.parse_args(argv)
+
+    # ДОГОНЯЮЩАЯ КНОПКА ИДЁТ ПЕРВОЙ И ОТДЕЛЬНО: у неё свой предмет — тег уже
+    # стоит, журнал уже собран, спрашивать условия выпуска не о чем (104).
+    if args.page:
+        if not args.repo:
+            print(
+                "шаг не отработал: репозиторий не назван: --repo или GITHUB_REPOSITORY",
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
+        token = push_token() or ghrest.token_from_env()
+        if not token:
+            print(f"шаг не отработал: нет токена: {PUSH_TOKEN_ENV} или GH_TOKEN", file=sys.stderr)
+            return EXIT_BROKEN
+        try:
+            print(ensure_page(args.repo, args.page, token, dry_run=not args.apply))
+        except (NotRun, ghrest.TransportError) as exc:
+            print(f"шаг не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        return EXIT_OK
 
     try:
         wanted = args.version or next_after((project_version.release_tag() or "v0.0.0").lstrip("v"))

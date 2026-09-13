@@ -166,6 +166,46 @@ jobs:
             exit 1
           fi
 
+      # СТРАНИЦА ВЫПУСКА — ПЯТЫЙ ШАГ, И ОН ИДЁТ ПОСЛЕ ТЕГА. Раньше её заводил
+      # человек, и площадка наполняла её своим списком изменений вместо нашего
+      # журнала. Шаг отдельный: тег к этому моменту уже уехал, и отказ здесь
+      # не отменяет выпуска — он говорит, что довести страницу надо кнопкой
+      # `--page` (104).
+      - name: завести страницу выпуска
+        if: inputs.apply && steps.token.outputs.present == 'yes'
+        env:
+          # Страницу заводит токен ВЛАДЕЛЬЦА: её автор — человек, выпустивший
+          # версию, а не приложение (131). `GH_TOKEN` назван тем же секретом:
+          # транспорт читает его, и без него механизм пошёл бы к площадке без
+          # ключа.
+          GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ASKED_VERSION: ${{ inputs.version }}
+        run: |
+          set -uo pipefail
+          version="${ASKED_VERSION:-}"
+          if [ -z "${version}" ]; then
+            version="$(git tag --points-at HEAD | head -1 | sed 's/^v//')"
+          fi
+          if [ -z "${version}" ]; then
+            echo "::error::Тега на HEAD нет — страницу заводить не для чего (075)."
+            exit 1
+          fi
+          rc=0
+          python scripts/release.py --page "${version}" --apply || rc=$?
+
+          # Коды разбираются СПИСКОМ РАЗРЕШЁННОГО (068): зелёным считается
+          # только объявленный ноль, всё прочее — отказ. «Красным считаем
+          # перечисленное» прочитало бы необработанный сбой Python как успех.
+          case "$rc" in
+            0) ;;
+            *)
+              echo "::error::Страница выпуска v${version} не заведена (код $rc). Тег и журнал на месте, выпуск повторять НЕ надо: страница доводится отдельной кнопкой — python scripts/release.py --page ${version} --apply"
+              exit 1
+              ;;
+          esac
+
       - name: выпуск не сделан — сказано, а не пропущено
         if: inputs.apply && steps.token.outputs.present != 'yes'
         run: |
