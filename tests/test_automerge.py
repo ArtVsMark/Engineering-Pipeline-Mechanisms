@@ -230,6 +230,8 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "sources": [],
         "asked": [],
         "disarmed": [],
+        # Снятые метки: у пустой головы источника работы нет.
+        "dropped": [],
         "echo": True,
         "swallow": set(),
         "held": {},
@@ -243,9 +245,13 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         module, "files_of", lambda repo, number, tok: frozenset(state["files"].get(number, ()))
     )
     monkeypatch.setattr(module, "branch_health", lambda repo, sha, tok: state["health"])
-    monkeypatch.setattr(
-        module.ghrest, "request", lambda method, path, tok, body=None: {"sha": "base-sha"}
-    )
+
+    def platform_call(method: str, path: str, tok: str, body: Any = None) -> dict[str, str]:
+        if method == "DELETE" and "/labels/" in path:
+            state["dropped"].append(path.rsplit("/", 1)[-1].replace("%2F", "/"))
+        return {"sha": "base-sha"}
+
+    monkeypatch.setattr(module.ghrest, "request", platform_call)
     monkeypatch.setattr(
         module,
         "head_look",
@@ -431,6 +437,31 @@ def test_the_queue_names_why_no_head_was_ready(platform: dict[str, Any], capsys:
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     said = capsys.readouterr().out
     assert "готовой головы нет: 1 красны, 1 пусты" in said, said[-300:]
+
+
+def test_dropping_a_source_touches_nothing_when_there_is_none(
+    platform: dict[str, Any],
+) -> None:
+    """Метки источника нет — площадку не трогают: снимать нечего."""
+    module.drop_source("o/r", change(9, "automerge"), "token", dry_run=False)
+    assert platform["dropped"] == []
+
+
+def test_dropping_a_source_keeps_a_dry_run_dry(platform: dict[str, Any]) -> None:
+    """Пробный заход рассказывает, а не снимает."""
+    module.drop_source("o/r", change(9, "automerge", "source/2"), "token", dry_run=True)
+    assert platform["dropped"] == []
+
+
+def test_an_emptied_head_loses_its_source_label(platform: dict[str, Any]) -> None:
+    """У пустой головы снимается метка источника: работы за ней нет.
+
+    Метку ставит перечисление очереди — до того, как спрошен объём, — и пустая
+    голова выглядела обычной работой в хвосте плана. Нашёл внешний взгляд
+    на #288.
+    """
+    module.name_the_emptiness("o/r", change(8, "automerge", "source/6"), "token", dry_run=False)
+    assert platform["dropped"] == ["source/6"], "метка источника осталась на пустом"
 
 
 def test_name_the_emptiness_says_it_and_disarms(platform: dict[str, Any], capsys: Any) -> None:

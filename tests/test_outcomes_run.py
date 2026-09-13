@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from typing import Final
 
@@ -107,4 +108,42 @@ def test_no_outcome_stays_unrun_outside_the_debt() -> None:
         "исходы объявлены, но не прогоняются и в долге не числятся: "
         + "; ".join(f"{script}: {', '.join(names)}" for script, names in sorted(fresh.items()))
         + " — прогоните их, а не дописывайте в .rules/outcomes.json"
+    )
+
+
+def narrowed_to_functions() -> dict[str, set[int]]:
+    """Покрытие, засчитанное лишь когда запуск и утверждение в одном теле.
+
+    Это и есть то сужение, которое просил внешний взгляд на #289. Считается
+    здесь, чтобы цена отказа от него была ПРОВЕРЯЕМА, а не лежала в прозе
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+    """
+    said = outcomes.with_outcomes()
+    found: dict[str, set[int]] = {name: set() for name in said}
+    for path in sorted((ROOT / "tests").glob("test_*.py")):
+        for node in ast.walk(outcomes.tree_of(path)):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            numbers, names = outcomes.asserted(node)
+            for script in outcomes.started_by(node) & set(said):
+                found[script] |= numbers & set(said[script].values())
+                found[script] |= {said[script][one] for one in names if one in said[script]}
+    return found
+
+
+def test_narrowing_the_parser_would_hide_runs_that_exist() -> None:
+    """Сужение разбора до функции отняло бы покрытие, которое ЕСТЬ.
+
+    Предел разбора оставлен намеренно, и читатель не обязан верить прозе:
+    цена считается здесь. Порог взят с большим запасом от замера 13.09.2026
+    (64 исхода у 33 механизмов) — проверяется ПОРЯДОК величины, а не число,
+    которое поедет с деревом
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+    """
+    ran = outcomes.run_by_the_suite()
+    tight = narrowed_to_functions()
+    lost = sum(len(ran[script] - tight[script]) for script in ran)
+    assert lost > 20, (
+        f"сужение до функции отняло бы всего {lost} исходов — цена предела упала, "
+        "и решение его оставить надо пересмотреть"
     )
