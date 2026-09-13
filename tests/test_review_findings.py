@@ -304,3 +304,32 @@ def test_a_registry_with_entries_stays_pending(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_PENDING
+
+
+def test_a_verdict_that_disagrees_with_its_list_is_announced(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вердикт спорит со списком находок — это сказано наружу, а не в лог.
+
+    Вердикт и строки находок пишет ОДИН ответ: если они спорят, доверять
+    нечему ни тому, ни другому. Машинная половина правила 136 держится именно
+    здесь — «вердикт после перечисления всех предметов» проверяется тем, что
+    число и перечисление сошлись
+    ([182](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/182-an-unmechanisable-answer-is-split-in-two.md)).
+    Аннотация выбрана намеренно: её отдаёт REST, а лог прогона читается не из
+    всякого окна.
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module, "parse_entries", lambda body: {})
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter([]))
+    monkeypatch.setattr(module, "verdict_of", lambda comments: 3)
+    monkeypatch.setattr(
+        module, "findings_of", lambda comments: [("дефект", "очередь читает не то")]
+    )
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    module.main(["--repo", "o/r", "--pr", "131"])
+    said = capsys.readouterr().err
+    assert "::warning::" in said, "расхождение осталось в логе — наружу его не видно"
+    assert "находок 3" in said and "строк находок 1" in said, "числа не названы"
