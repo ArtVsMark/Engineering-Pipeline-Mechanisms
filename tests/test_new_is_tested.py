@@ -8,12 +8,13 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Final
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import RunScript, load_script
 
 module = load_script("check_new_is_tested.py")
 
@@ -236,3 +237,42 @@ def test_a_mention_is_still_not_a_run(said: str) -> None:
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
     assert module.told_by_tests("порядок", "scripts/x.py", said) is False
+
+
+def test_the_gate_refuses_an_untested_addition_when_it_is_run(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Гейт ПРОГОНЯЕТСЯ по пути отказа, а не только разбирается по частям.
+
+    Чистые функции проверяли решение, но не проводку: заход мог решить
+    «отвергнуть» и вернуть ноль, и набор этого бы не заметил
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+    """
+    root = tmp_path / "дерево"
+    (root / "scripts").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "scripts" / "новый.py").write_text("def было() -> None:\n    ...\n", encoding="utf-8")
+    (root / "tests" / "test_всё.py").write_text("def test_ничего() -> None:\n    ...\n", "utf-8")
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "a@b"),
+        ("config", "user.name", "подделка"),
+        ("add", "-A"),
+        ("commit", "-qm", "было"),
+    ):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    # РАБОТА ИДЁТ В СВОЕЙ ВЕТКЕ: гейт смотрит дифф ОТНОСИТЕЛЬНО базы, и на самой
+    # базе ему нечего сравнивать — «изменение не трогает механизмов» здесь
+    # означало бы не пропуск, а отсутствие предмета.
+    subprocess.run(
+        ["git", "checkout", "-q", "-b", "работа"], cwd=root, check=True, capture_output=True
+    )
+    (root / "scripts" / "новый.py").write_text(
+        "def было() -> None:\n    ...\n\n\ndef без_прогона() -> None:\n    ...\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "стало"], cwd=root, check=True, capture_output=True)
+
+    done = run_script("check_new_is_tested.py", "--base", "main", cwd=root)
+    assert done.code == module.EXIT_FOUND, done.text
+    assert "без_прогона" in done.text
