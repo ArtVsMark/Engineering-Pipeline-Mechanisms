@@ -418,6 +418,40 @@ def test_an_emptied_head_is_not_revived(platform: dict[str, Any]) -> None:
     assert platform["merged"] == [2], "очередь встала на пустой голове"
 
 
+def test_name_the_emptiness_says_it_and_disarms(platform: dict[str, Any], capsys: Any) -> None:
+    """Ответ о пустоте: сказать владельцу и снять согласие — ветку не трогать."""
+    module.name_the_emptiness("o/r", change(4, "automerge", armed=True), "token", dry_run=False)
+    said = capsys.readouterr().out
+    assert "ПУСТО" in said and "Закрыть его может владелец" in said, (
+        "пустота названа молча — у снятия согласия столько же читателей, сколько у слияния (154)"
+    )
+    assert platform["disarmed"] == ["PR_4"]
+    assert platform["synced"] == []
+
+
+def test_name_the_emptiness_keeps_a_dry_run_dry(platform: dict[str, Any]) -> None:
+    """Пробный заход площадку не трогает: он рассказывает, а не делает."""
+    module.name_the_emptiness("o/r", change(5, "automerge", armed=True), "token", dry_run=True)
+    assert platform["disarmed"] == []
+
+
+def test_a_red_head_that_is_empty_is_named_empty(platform: dict[str, Any]) -> None:
+    """Пустая голова называется пустой, даже когда её проверки красны.
+
+    Пустое изменение краснеет САМО: гейты отказываются работать без входа — и
+    правильно делают (075). Замер 13.09.2026 на #285: голова была и пуста, и
+    красна, и очередь назвала только красноту — то есть послала владельца
+    искать поломку там, где чинить нечего (045).
+    """
+    platform["changes"] = [change(1, "automerge", armed=True), change(2, "automerge")]
+    platform["runs"] = {1: (["journal: failure"], False)}
+    platform["files_changed"] = {1: 0}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert "PR_1" in platform["disarmed"], "у пустой головы остался значок"
+    assert platform["synced"] == [], "пустую голову подтянули"
+    assert platform["merged"] == [2], "очередь встала на пустой голове"
+
+
 def test_a_head_of_unknown_size_is_treated_as_live(platform: dict[str, Any]) -> None:
     """Площадка не назвала объём — изменение живое, а не пустое (045).
 

@@ -494,6 +494,33 @@ def take_back(repo: str, change: Change, why: str, owner_token: str, *, dry_run:
     arm.disarm(change.node, owner_token)
 
 
+def name_the_emptiness(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> None:
+    """Называет пустую голову и снимает с неё согласие, не трогая ветку.
+
+    ПУСТОЕ ИЗМЕНЕНИЕ — СОСТОЯНИЕ ТЕРМИНАЛЬНОЕ, А НЕ «ОТСТАЛО». 13.09.2026
+    площадка слила #285 уплотнением, но метаданные изменения этого не
+    отразили: `merged_at` пуст, изменение открыто. Очередь увидела «behind»,
+    подтянула базу — и прогоны пошли по второму кругу на дифе, которого уже
+    нет. Выход из такого состояния обязан быть терминальным
+    ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)),
+    а закрыть изменение может только владелец — значит дело очереди назвать
+    это и не оживлять. Разбор — #287.
+
+    Читателей у этого ответа двое — пустая голова и голова, которая пуста И
+    красна, — и второе их понимание разошлось бы с первым молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    print(
+        f"#{change.number}: изменение ПУСТО — содержимое уже в базе. Работать по нему "
+        "нечем; обновление ветки только погнало бы прогоны по второму кругу (109). "
+        "Закрыть его может владелец."
+    )
+    if change.armed:
+        take_back(
+            repo, change, "изменение пусто: содержимое уже в базе", owner_token, dry_run=dry_run
+        )
+
+
 def held_body(repo: str, number: int, owner_token: str) -> tuple[str, str]:
     """Чем площадка держит изменение взведённым: заголовок и тело уплотнения.
 
@@ -761,6 +788,16 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     for change in queue:
         problems, _ = verdicts[change.number]
         if problems:
+            # КРАСНУЮ ГОЛОВУ СПРАШИВАЕМ ОБ ОБЪЁМЕ, И ЭТО НЕ НАРУШЕНИЕ 052.
+            # Пустое изменение краснеет САМО: гейты отказываются работать без
+            # входа — и правильно делают (075). Объявить такую голову «красной
+            # проверкой» значит назвать не ту причину: чинить там нечего, а
+            # владелец пойдёт искать поломку (045). Замер 13.09.2026 на #285:
+            # голова была и пуста, и красна, и очередь назвала только красноту.
+            # Цена — один запрос на КРАСНУЮ голову, а не на каждого кандидата.
+            if head_look(repo, change.number, owner_token).files == 0:
+                name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
+                continue
             # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
             # а очередь идёт дальше: одна красная голова не обязана держать
             # остальных.
@@ -772,28 +809,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         look = head_look(repo, change.number, owner_token)
         state = look.state
         if look.files == 0:
-            # ПУСТОЕ ИЗМЕНЕНИЕ — СОСТОЯНИЕ ТЕРМИНАЛЬНОЕ, А НЕ «ОТСТАЛО».
-            # 13.09.2026 площадка слила #285 уплотнением, но метаданные
-            # изменения этого не отразили: `merged_at` пуст, изменение открыто.
-            # Очередь увидела «behind», подтянула базу — и прогоны пошли по
-            # второму кругу на дифе, которого уже нет. Выход из такого
-            # состояния обязан быть терминальным
-            # ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)),
-            # а закрыть изменение может только владелец — значит дело очереди
-            # назвать это и не оживлять. Разбор — #287.
-            print(
-                f"#{change.number}: изменение ПУСТО — содержимое уже в базе. Работать по нему "
-                "нечем; обновление ветки только погнало бы прогоны по второму кругу (109). "
-                "Закрыть его может владелец."
-            )
-            if change.armed:
-                take_back(
-                    repo,
-                    change,
-                    "изменение пусто: содержимое уже в базе",
-                    owner_token,
-                    dry_run=dry_run,
-                )
+            name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
             continue
         if state == STATE_BEHIND:
             print(f"#{change.number}: голова очереди отстала от базы — подтягиваю только её (052)")
