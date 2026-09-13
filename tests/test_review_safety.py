@@ -744,16 +744,79 @@ def test_the_gate_catches_a_planted_interpolation(tmp_path: Path, said: str) -> 
     assert found, f"подстановка не увидена образцом: {said!r}"
 
 
-def test_a_number_from_a_button_is_checked_to_be_digits() -> None:
-    """Прогоны, берущие номер кнопкой, проверяют его цифрами ДО использования.
+#: Прогоны, у которых есть кнопка с номером изменения.
+TAKES_A_NUMBER: Final = ("review.yml", "task-items.yml")
+
+#: Как выглядит проверка «это цифры и ничего кроме».
+DIGITS: Final = "*[!0-9]*"
+
+
+def jobs_taking_the_button(run: dict[str, Any]) -> dict[str, str]:
+    """Джобы, которым номер из кнопки приходит окружением, — вместе с их командами.
+
+    ГРАНУЛЯРНОСТЬ — ДЖОБ, И ЭТО НЕ ПРОИЗВОЛ. Номер проверяется один раз на
+    входе джоба, а дальше живёт переменной окружения: требовать проверку в
+    каждом шаге значило бы требовать её там, где вход уже проверен. Дыра же
+    была именно джобовая — новый джоб не подхватил проверку вовсе.
+    """
+    found: dict[str, str] = {}
+    for job, said in (run.get("jobs") or {}).items():
+        takes = False
+        commands: list[str] = []
+        for step in said.get("steps") or []:
+            values = " ".join(str(one) for one in (step.get("env") or {}).values())
+            takes = takes or "inputs.pr" in values
+            commands.append(str(step.get("run") or ""))
+        if takes:
+            found[job] = "\n".join(commands)
+    return found
+
+
+@pytest.mark.parametrize("name", TAKES_A_NUMBER)
+def test_a_number_from_a_button_is_checked_to_be_digits(name: str) -> None:
+    """КАЖДЫЙ шаг, берущий номер кнопкой, проверяет его цифрами ДО использования.
 
     Одна проверка на входе дешевле экранирования в каждом месте: место можно
     забыть, вход — один. И она обязана быть отказом, а не подстановкой
     умолчания (045).
+
+    СПРАШИВАЕТСЯ ШАГ, А НЕ ФАЙЛ. Прежняя проверка искала образец цифр где
+    угодно в файле — и молчала бы о новом джобе, который его не подхватил.
+    Ровно так и вышло: джоб приёма позднего взгляда подставлял номер прямо в
+    строку команды, пока образец лежал в соседнем шаге, и нашёл это внешний
+    взгляд, а не набор
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
-    for name in ("review.yml", "task-items.yml"):
-        text = (WORKFLOWS / name).read_text(encoding="utf-8")
-        assert "*[!0-9]*" in text, f"{name}: номер из кнопки не проверяется цифрами"
+    run = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    taking = jobs_taking_the_button(run)
+    assert taking, f"{name}: джоба, берущего номер кнопкой, не найдено — предмет исчез (075)"
+    naked = [job for job, commands in taking.items() if DIGITS not in commands]
+    assert not naked, (
+        f"{name}: номер из кнопки принят окружением, но цифрами не проверен в джобах "
+        + ", ".join(naked)
+        + " — дальше он уезжает в аргумент команды"
+    )
+
+
+@pytest.mark.parametrize("name", TAKES_A_NUMBER)
+def test_the_button_number_never_goes_straight_into_a_command(name: str) -> None:
+    """Номер из кнопки не подставляется в текст команды напрямую.
+
+    Подставленный `${{ }}` — это чужая строка ВНУТРИ нашей оболочки, и у этих
+    джобов права на запись. Проверка цифрами защищает вход; эта — путь
+    ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
+    """
+    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    straight = [
+        line
+        for _, line in executed_lines(text)
+        for expr in (one.group("expr") for one in INTERPOLATION.finditer(line))
+        if "inputs.pr" in expr
+    ]
+    assert not straight, (
+        f"{name}: номер из кнопки подставлен прямо в команду: {straight[:2]} — "
+        "он обязан приходить окружением"
+    )
 
 
 #: Действия, которые зовут модель. Список ЗАКРЫТЫЙ и растёт правкой, а не
