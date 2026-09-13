@@ -129,6 +129,7 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
     monkeypatch.setattr(module, "showcase_questions_moved", lambda *_: [])
+    monkeypatch.setattr(module, "gap_tasks_closed", lambda *a: [])
     found, silent = module.look("o/r", "token", {})
     assert found == [drift]
     assert silent == ["каталог"]
@@ -784,6 +785,72 @@ def test_our_showcase_is_read_from_the_tree(
         json.dumps(showcase("ci"), ensure_ascii=False), encoding="utf-8"
     )
     assert module.asked_ids(module.ours_showcase()) == ["ci"]
+
+
+# --- пробелы, названные задачей ----------------------------------------------
+
+
+def отвечает(состояния: dict[int, str]) -> Any:
+    """Площадка, отвечающая о задачах названными состояниями."""
+
+    def request(method: str, path: str, token: str, body: Any = None) -> dict[str, Any]:
+        номер = int(path.rsplit("/", 1)[-1])
+        return {"state": состояния.get(номер, "open")}
+
+    return request
+
+
+def test_a_gap_that_names_a_closed_task_is_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ответ обещает пробел и называет закрытую задачу — это дрейф.
+
+    Замер 13.09.2026: ответ по 032 говорил «у роли этого пока нет — названо
+    задачей #33», а #33 закрыта тремя днями раньше вместе с починкой. Четвёртый
+    случай одного класса за смену, и все четыре нашёл человек, а не механизм.
+    """
+    mine = {"rules": {"032": {"where": "у роли этого пока нет — названо задачей #33"}}}
+    monkeypatch.setattr(module.ghrest, "request", отвечает({33: "closed"}))
+    found = module.gap_tasks_closed("о/р", "токен", mine)
+    assert [one.source for one in found] == ["gap-032"]
+    assert "#33" in found[0].said
+    assert found[0].next_step, "запись без того, что делать, — сообщение о погоде (142)"
+
+
+def test_an_open_task_behind_a_gap_is_not_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пробел, названный ОТКРЫТОЙ задачей, — честная работа, а не находка."""
+    mine = {"rules": {"087": {"where": "вторая половина пока не сделана — #87"}}}
+    monkeypatch.setattr(module.ghrest, "request", отвечает({87: "open"}))
+    assert module.gap_tasks_closed("о/р", "токен", mine) == []
+
+
+def test_a_closed_task_without_a_gap_is_not_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ссылка на закрытую задачу сама по себе законна: это история.
+
+    Из одиннадцати ссылок на задачи в ответах девять именно таковы — на
+    источник инцидента. Судится только СОСЕДСТВО с утверждением о пробеле:
+    сосед у сужения назван (195).
+    """
+    mine = {"rules": {"166": {"where": "разбор и починка — #12"}}}
+    monkeypatch.setattr(module.ghrest, "request", отвечает({12: "closed"}))
+    assert module.gap_tasks_closed("о/р", "токен", mine) == []
+
+
+def test_a_task_far_from_the_gap_is_not_counted() -> None:
+    """Номер из соседнего абзаца к пробелу отношения не имеет.
+
+    Ответы длинные, и без окна любой пробел притягивал бы к себе все номера
+    ответа — механизм ловил бы законное (051).
+    """
+    далеко = "вторая половина пока не сделана" + "х" * (module.GAP_WINDOW + 10) + " #77"
+    assert module.gaps_naming_a_task({"rules": {"130": {"where": далеко}}}) == []
+
+
+def test_the_live_answers_have_no_stale_gap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Живое дерево: ни одного пробела, названного задачей, не осталось.
+
+    Пустой ответ здесь — состояние, а не молчание: пары «пробел → задача» в
+    ответах сегодня нет вовсе, и проверять нечего именно поэтому (154).
+    """
+    assert module.gaps_naming_a_task(module.ours()) == []
 
 
 def test_every_named_source_is_actually_asked() -> None:

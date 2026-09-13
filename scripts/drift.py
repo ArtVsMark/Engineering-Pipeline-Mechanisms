@@ -738,6 +738,74 @@ def showcase_questions_moved(theirs: dict[str, Any], mine: dict[str, Any]) -> li
     return found
 
 
+#: Утверждение о пробеле в ответе каталогу: «пока не может», «ещё не сделана».
+#: Образец узкий НАМЕРЕННО. Замер 13.09.2026 по 203 ответам: слов о пробеле —
+#: одиннадцать, и десять из них законны (внешних участников нет, получателя вне
+#: дерева нет, вторая половина правила не построена). Красное на них приучало
+#: бы пролистывать
+#: ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+GAP_RE: Final = re.compile(r"пока (?:не|нет)\b|ещё не\b", re.IGNORECASE)
+
+#: Номер задачи рядом с утверждением о пробеле — в пределах этого окна знаков.
+#: Дальше по тексту задача говорит уже о другом: ответы длинные, и номер из
+#: соседнего абзаца к пробелу отношения не имеет.
+GAP_WINDOW: Final = 160
+TASK_RE: Final = re.compile(r"#(?P<number>\d{1,4})\b")
+
+
+def gaps_naming_a_task(mine: dict[str, Any]) -> list[tuple[str, int]]:
+    """Пары «правило → задача», где пробел подкреплён номером задачи."""
+    found: list[tuple[str, int]] = []
+    for number, answer in sorted((mine.get("rules") or {}).items()):
+        if not isinstance(answer, dict):
+            continue
+        text = f"{answer.get('where') or ''} {answer.get('why') or ''}"
+        for said in GAP_RE.finditer(text):
+            рядом = text[said.start() : said.end() + GAP_WINDOW]
+            for task in TASK_RE.finditer(рядом):
+                pair = (str(number), int(task.group("number")))
+                if pair not in found:
+                    found.append(pair)
+    return found
+
+
+def gap_tasks_closed(repo: str, token: str, mine: dict[str, Any]) -> list[Drift]:
+    """Ответ обещает пробел и называет задачу, а задача закрыта.
+
+    ПОЧЕМУ ЭТО ДРЕЙФ, А НЕ ГЕЙТ. Задачу закрывают снаружи и в своё время; наша
+    правка при этом ничего не делает, и события об этом не приходит. Ответ
+    остаётся стоять и обещает читателю пробел, которого больше нет, — а
+    счётчику машинного соблюдения занижает нашу же работу
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+    ЭТО ЗАМЕР, А НЕ ОПАСЕНИЕ. 13.09.2026 разбор пункта 5.1 нашёл ровно такую
+    пару: ответ по 032 говорил «у роли этого пока нет — названо задачей #33», а
+    #33 закрыта 09.09 вместе с починкой; тем же номером обещал пробел и ответ
+    по 105. Обе — четвёртый случай одного класса за смену, и все четыре нашёл
+    человек, а не механизм.
+
+    ЗАКРЫТАЯ ЗАДАЧА САМА ПО СЕБЕ НЕ НАХОДКА. Ответы законно ссылаются на
+    закрытые задачи как на ИСТОРИЮ — так в одиннадцати ссылках девять, — и
+    судится здесь только соседство с утверждением о пробеле
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    found: list[Drift] = []
+    for rule, number in gaps_naming_a_task(mine):
+        task = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+        state = str(task.get("state") or "")
+        if state != "closed":
+            continue
+        found.append(
+            Drift(
+                f"gap-{rule}",
+                f"ответ по правилу {rule} обещает пробел и называет #{number}, а она закрыта",
+                "перечитать ответ: пробел либо закрыт вместе с задачей, либо назван не тем "
+                "номером — читателю он обещан до сих пор",
+            )
+        )
+    return found
+
+
 def render_body(found: list[Drift], silent: list[str] | None = None) -> str:
     """Тело живой задачи: записи, неопрошенные источники и как это снимается."""
     lines = [
@@ -827,6 +895,7 @@ SOURCES: Final = (
     "вердикты по предложениям",
     "защита общей ветки",
     "набор вопросов витрины",
+    "пробелы, названные задачей",
 )
 
 
@@ -853,6 +922,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
             "набор вопросов витрины",
             lambda: showcase_questions_moved(fetch(CATALOGUE_SHOWCASE), ours_showcase()),
         ),
+        ("пробелы, названные задачей", lambda: gap_tasks_closed(repo, token, mine)),
     )
     for name, ask in asks:
         try:
