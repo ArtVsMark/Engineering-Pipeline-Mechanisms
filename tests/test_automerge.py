@@ -233,6 +233,9 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "echo": True,
         "swallow": set(),
         "held": {},
+        # Сколько файлов трогает изменение. По умолчанию — один: пустая голова
+        # это отдельный случай, и объявлять его умолчанием нельзя.
+        "files_changed": {},
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -245,8 +248,10 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     )
     monkeypatch.setattr(
         module,
-        "merge_state",
-        lambda repo, number, tok: state["states"].get(number, "clean"),
+        "head_look",
+        lambda repo, number, tok: module.Head(
+            state["states"].get(number, "clean"), state["files_changed"].get(number, 1)
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -371,6 +376,60 @@ def test_only_the_head_pulls_the_base(platform: dict[str, Any]) -> None:
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["synced"] == [1]
     assert platform["merged"] == []
+
+
+def test_head_look_reads_state_and_size_in_one_request(monkeypatch: Any) -> None:
+    """Голова читается одним запросом, и объём приезжает вместе с состоянием."""
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str, body: Any = None) -> dict[str, Any]:
+        asked.append(path)
+        return {"mergeable_state": "behind", "changed_files": 3}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    look = module.head_look("o/r", 7, "token")
+    assert (look.state, look.files) == ("behind", 3)
+    assert asked == ["repos/o/r/pulls/7"], "объём стоил лишнего запроса (052)"
+
+
+def test_head_look_keeps_silence_apart_from_zero(monkeypatch: Any) -> None:
+    """Поля объёма нет — это `None`, а не ноль: молчание не пустота (045)."""
+    monkeypatch.setattr(
+        module.ghrest, "request", lambda method, path, tok, body=None: {"mergeable_state": "clean"}
+    )
+    assert module.head_look("o/r", 7, "token").files is None
+
+
+def test_an_emptied_head_is_not_revived(platform: dict[str, Any]) -> None:
+    """Пустая голова не обновляется, а называется: её содержимое уже в базе.
+
+    13.09.2026 площадка слила #285 уплотнением, но метаданные изменения этого
+    не отразили — оно осталось открытым. Очередь увидела «отстало от базы»,
+    подтянула базу, и прогоны пошли по второму кругу на дифе, которого больше
+    нет. Пустота — состояние ТЕРМИНАЛЬНОЕ (109): закрыть изменение может
+    только владелец, а дело очереди — не оживлять его. Разбор — #287.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True), change(2, "automerge")]
+    platform["states"] = {1: module.STATE_BEHIND}
+    platform["files_changed"] = {1: 0}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["synced"] == [], "пустую голову подтянули — прогоны пойдут по кругу"
+    assert "PR_1" in platform["disarmed"], "значок остался на изменении, которого нет"
+    assert platform["merged"] == [2], "очередь встала на пустой голове"
+
+
+def test_a_head_of_unknown_size_is_treated_as_live(platform: dict[str, Any]) -> None:
+    """Площадка не назвала объём — изменение живое, а не пустое (045).
+
+    «Поле не пришло» и «файлов ноль» снаружи одинаковы, и принять молчание за
+    пустоту значит снять согласие с живой головы по отсутствию поля.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True)]
+    platform["states"] = {1: module.STATE_BEHIND}
+    platform["files_changed"] = {1: None}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["synced"] == [1], "молчание о объёме приняли за пустоту"
+    assert platform["disarmed"] == []
 
 
 def test_a_head_whose_checks_are_running_is_handed_to_the_platform(

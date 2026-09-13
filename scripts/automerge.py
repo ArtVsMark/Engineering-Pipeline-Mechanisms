@@ -415,14 +415,33 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
     return ci_complete.verdict(ci_complete.worst_per_name(runs), required, "", strict_missing=True)
 
 
-def merge_state(repo: str, number: int, owner_token: str) -> str:
-    """Состояние слияния у головы очереди.
+@dataclass(frozen=True, slots=True)
+class Head:
+    """Что площадка говорит о голове очереди: чем слить и сколько там работы.
 
-    Читается ТОЛЬКО у головы (052): площадка считает его лениво, и спрашивать
-    его у всех значит заказывать вычисление, которое никому не понадобится.
+    `files` — число тронутых файлов, и `None` здесь НЕ ноль: «площадка не
+    сказала» и «изменение пусто» — разные ответы, и путать их значит снимать
+    согласие с живого изменения по молчанию поля
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+
+    state: str
+    files: int | None
+
+
+def head_look(repo: str, number: int, owner_token: str) -> Head:
+    """Состояние слияния и объём изменения у головы очереди — одним запросом.
+
+    Читается ТОЛЬКО у головы (052): площадка считает состояние лениво, и
+    спрашивать его у всех значит заказывать вычисление, которое никому не
+    понадобится. Объём приезжает тем же ответом и своего запроса не стоит.
     """
     payload = ghrest.request("GET", f"repos/{repo}/pulls/{number}", owner_token) or {}
-    return str(payload.get("mergeable_state") or "")
+    said = payload.get("changed_files")
+    return Head(
+        str(payload.get("mergeable_state") or ""),
+        said if isinstance(said, int) and not isinstance(said, bool) else None,
+    )
 
 
 def sync_head(repo: str, number: int, owner_token: str, *, dry_run: bool) -> None:
@@ -750,7 +769,32 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             )
             continue
 
-        state = merge_state(repo, change.number, owner_token)
+        look = head_look(repo, change.number, owner_token)
+        state = look.state
+        if look.files == 0:
+            # ПУСТОЕ ИЗМЕНЕНИЕ — СОСТОЯНИЕ ТЕРМИНАЛЬНОЕ, А НЕ «ОТСТАЛО».
+            # 13.09.2026 площадка слила #285 уплотнением, но метаданные
+            # изменения этого не отразили: `merged_at` пуст, изменение открыто.
+            # Очередь увидела «behind», подтянула базу — и прогоны пошли по
+            # второму кругу на дифе, которого уже нет. Выход из такого
+            # состояния обязан быть терминальным
+            # ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)),
+            # а закрыть изменение может только владелец — значит дело очереди
+            # назвать это и не оживлять. Разбор — #287.
+            print(
+                f"#{change.number}: изменение ПУСТО — содержимое уже в базе. Работать по нему "
+                "нечем; обновление ветки только погнало бы прогоны по второму кругу (109). "
+                "Закрыть его может владелец."
+            )
+            if change.armed:
+                take_back(
+                    repo,
+                    change,
+                    "изменение пусто: содержимое уже в базе",
+                    owner_token,
+                    dry_run=dry_run,
+                )
+            continue
         if state == STATE_BEHIND:
             print(f"#{change.number}: голова очереди отстала от базы — подтягиваю только её (052)")
             sync_head(repo, change.number, owner_token, dry_run=dry_run)
