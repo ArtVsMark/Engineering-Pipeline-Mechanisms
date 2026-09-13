@@ -844,6 +844,35 @@ def test_a_task_far_from_the_gap_is_not_counted() -> None:
     assert module.gaps_naming_a_task({"rules": {"130": {"where": далеко}}}) == []
 
 
+def test_an_unreadable_number_silences_only_its_own_pair(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Один неразрешимый номер не гасит весь источник за заход.
+
+    Номера берутся из ПРОЗЫ, и там попадается всё: чужой репозиторий, опечатка,
+    номер, которого ещё нет. Пока один такой ронял источник целиком, молчание
+    об опечатке выглядело как «дрейфа нет» по всем остальным парам (045).
+    Нашёл внешний взгляд на #330.
+    """
+
+    def request(method: str, path: str, token: str, body: Any = None) -> dict[str, Any]:
+        номер = int(path.rsplit("/", 1)[-1])
+        if номер == 9999:
+            raise module.ghrest.TransportError("404: такой задачи нет")
+        return {"state": "closed"}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    mine = {
+        "rules": {
+            "001": {"where": "половина пока не сделана — #9999"},
+            "002": {"where": "половина пока не сделана — #33"},
+        }
+    }
+    found = module.gap_tasks_closed("о/р", "токен", mine)
+    assert [one.source for one in found] == ["gap-002"], "живая пара потеряна из-за соседней"
+    assert "9999" in capsys.readouterr().out, "нечитаемый номер пропущен молча"
+
+
 def test_the_live_answers_have_no_stale_gap(monkeypatch: pytest.MonkeyPatch) -> None:
     """Живое дерево: ни одного пробела, названного задачей, не осталось.
 

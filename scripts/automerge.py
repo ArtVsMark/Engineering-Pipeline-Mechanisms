@@ -296,12 +296,18 @@ def drop_source(
     if dry_run:
         print(f"  (пробный заход) #{change.number}: метки источника сняли бы — {present}")
         return
-    try:
-        for stale in present:
-            path = f"repos/{repo}/issues/{change.number}/labels/{ghrest.quote(stale)}"
+    # КАЖДАЯ МЕТКА СНИМАЕТСЯ ОТДЕЛЬНО. Один `try` на весь список обрывался на
+    # первом же отказе, а самый частый отказ здесь — 404 по метке, снятой
+    # раньше: список собран из снимка И из записи этого захода, и они
+    # пересекаются. Оборвавшись на снятой, цикл оставлял висеть ещё стоящую —
+    # то есть терял ровно ту метку, ради которой заведён (084; нашёл внешний
+    # взгляд на #328).
+    for stale in present:
+        path = f"repos/{repo}/issues/{change.number}/labels/{ghrest.quote(stale)}"
+        try:
             ghrest.request("DELETE", path, owner_token)
-    except ghrest.TransportError as exc:
-        print(f"  #{change.number}: метка источника не снята — {report.cut(str(exc))}")
+        except ghrest.TransportError as exc:
+            print(f"  #{change.number}: метка «{stale}» не снята — {report.cut(str(exc))}")
 
 
 def token() -> str:

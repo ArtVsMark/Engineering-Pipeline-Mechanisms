@@ -529,6 +529,34 @@ def test_an_empty_head_loses_the_label_this_very_pass_set(platform: dict[str, An
     )
 
 
+def test_a_refused_label_does_not_stop_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ по одной метке не оставляет висеть остальные.
+
+    Список для снятия собран из снимка И из записи этого захода, и они
+    пересекаются — самый частый отказ здесь 404 по метке, снятой раньше. Один
+    `try` на весь цикл обрывался на ней и оставлял стоять ещё висящую: заход
+    терял ровно ту метку, ради которой заведён (084). Нашёл внешний взгляд
+    на #328.
+    """
+    ушли: list[str] = []
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> None:
+        имя = path.rsplit("/", 1)[-1].replace("%2F", "/")
+        if имя == "source/1":
+            raise module.ghrest.TransportError("404: метки уже нет")
+        ушли.append(имя)
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    module.drop_source(
+        "o/r",
+        change(7, "automerge", "source/1"),
+        "token",
+        dry_run=False,
+        also=frozenset({"source/6"}),
+    )
+    assert ушли == ["source/6"], "снятие оборвалось на уже снятой метке"
+
+
 def test_a_red_head_of_unknown_size_is_treated_as_live(
     platform: dict[str, Any], capsys: Any
 ) -> None:

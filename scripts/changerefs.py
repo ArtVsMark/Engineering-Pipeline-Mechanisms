@@ -333,12 +333,25 @@ def links_in_all(texts: Iterable[str]) -> list[Link]:
 
 
 def resolutions_in_all(texts: Iterable[str]) -> list[str]:
-    """Строки снятия со всех тел ветки, в порядке появления и без повторов."""
+    """Строки снятия со всех тел ветки: один отпечаток — ровно одна запись.
+
+    ПОВТОР УЗНАЁТСЯ ПО ОТПЕЧАТКУ, А НЕ ПО СТРОКЕ. Одну находку разбирают в
+    нескольких коммитах ветки, и текст рядом с ней каждый раз свой: «Разобрано:
+    abc1234» и «Разобрано: abc1234 — премиса не подтвердилась» — это одно
+    снятие, описанное дважды. Сверка строк пропускала оба, и в общую ветку
+    ехали две записи об одной находке (нашёл внешний взгляд на #331).
+
+    ПОБЕЖДАЕТ ПЕРВАЯ ЗАПИСЬ отпечатка: она ближе к работе, которая его сняла.
+    """
     found: list[str] = []
+    seen: set[str] = set()
     for text in texts:
         for line in resolutions_in(text):
-            if line not in found:
-                found.append(line)
+            marks = set(MARK_RE.findall(line))
+            if marks & seen:
+                continue
+            seen |= marks
+            found.append(line)
     return found
 
 
