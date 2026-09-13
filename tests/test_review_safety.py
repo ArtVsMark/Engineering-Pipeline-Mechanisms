@@ -799,6 +799,30 @@ def test_a_number_from_a_button_is_checked_to_be_digits(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", TAKES_A_NUMBER)
+def test_only_one_step_takes_the_number_from_the_button(name: str) -> None:
+    """Кнопку читает ОДИН шаг — тот, что проверяет. Остальные берут проверенное.
+
+    «Одна проверка на входе» работает, только если вход один. Пока номер брали
+    из кнопки несколько шагов, порядок решал всё: шаг «судьба задачи после
+    слияния» стоял РАНЬШЕ проверки и обходил её, а гейт этого не видел —
+    проверка в джобе была, просто не первой. Нашёл внешний взгляд на #305
+    ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
+    """
+    run = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    taking: list[str] = []
+    for job, said in (run.get("jobs") or {}).items():
+        for step in said.get("steps") or []:
+            values = " ".join(str(one) for one in (step.get("env") or {}).values())
+            if "inputs.pr" in values:
+                taking.append(f"{job}/{step.get('name') or step.get('id') or '—'}")
+    assert taking, f"{name}: кнопку не читает никто — предмет исчез (075)"
+    assert len(taking) == 1, (
+        f"{name}: номер из кнопки читают несколько шагов ({', '.join(taking)}) — "
+        "какой из них идёт до проверки, решает порядок, а не механизм"
+    )
+
+
+@pytest.mark.parametrize("name", TAKES_A_NUMBER)
 def test_the_button_number_never_goes_straight_into_a_command(name: str) -> None:
     """Номер из кнопки не подставляется в текст команды напрямую.
 
