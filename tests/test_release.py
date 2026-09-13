@@ -592,10 +592,60 @@ def test_an_unread_answer_does_not_block_the_release(tmp_path: Path) -> None:
 def test_an_unread_answer_is_said_out_loud(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    """…но молчанием оно не становится: непрочитанное называется (154)."""
+    """…но молчанием оно не становится: непроверенное называется (154).
+
+    И называет ОБЕ причины: площадка молчит либо токена владельца нет. Одна
+    названная причина из двух отправляет искать поломку не там.
+    """
     tree(tmp_path, tag="v9.9.0")
     module.announce("9.10.0", acceptance="", push="")
-    assert "не прочитано" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "не проверено" in said
+    assert module.PUSH_TOKEN_ENV in said, "не сказано, чей токен спрашивается"
+
+
+def test_the_right_is_asked_of_the_token_that_pushes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Спрашивается токен ВЛАДЕЛЬЦА — тот, которым выпуск потом толкает.
+
+    13.09.2026 проверка шла токеном прогона, а толкать собирался токен
+    владельца. Площадка отвечала про спросившего — «обход: никогда» — и
+    отвечала верно: обход прогону не положен, этого требует наше же
+    объявление защиты. Выпуск отказывал ВСЕГДА, а владелец тем временем выдал
+    обход своей роли и видел, что ничего не изменилось (044).
+    """
+    monkeypatch.setenv(module.PUSH_TOKEN_ENV, "владельца")
+    monkeypatch.setenv("GH_TOKEN", "прогона")
+    assert module.push_token() == "владельца"
+
+
+def test_without_the_owners_token_the_question_is_not_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Токена владельца нет — вопрос не задаётся, и это не «толкать нельзя».
+
+    Ответ про чужого актора хуже отсутствия ответа: он выглядит знанием.
+    Выпуск без токена владельца и так остановит отдельный шаг, назвав причину.
+    """
+    monkeypatch.delenv(module.PUSH_TOKEN_ENV, raising=False)
+    monkeypatch.setenv("GH_TOKEN", "прогона")
+    assert module.push_token() == ""
+
+
+def test_the_release_run_hands_the_owner_token_to_the_check() -> None:
+    """Прогон выпуска даёт шагу проверки тот же токен, которым толкает.
+
+    Механизм спрашивает правильного актора только если этот токен до него
+    доехал: правка кода без правки прогона осталась бы обещанием
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+    """
+    run = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    steps = run["jobs"]["release"]["steps"]
+    checking = [one for one in steps if one.get("name") == "проверить условия выпуска"]
+    assert checking, "шаг проверки условий не найден — предмет исчез (075)"
+    assert module.PUSH_TOKEN_ENV in (checking[0].get("env") or {}), (
+        "шаг проверки не получает токен владельца: он спросит площадку о токене "
+        "прогона, а тот обхода не имеет и иметь не должен"
+    )
 
 
 def test_a_branch_without_rules_is_read_as_open(monkeypatch: pytest.MonkeyPatch) -> None:
