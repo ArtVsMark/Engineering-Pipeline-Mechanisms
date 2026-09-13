@@ -15,7 +15,6 @@
       "EXIT_OK"
     ],
     "drift.py": [
-      "EXIT_BROKEN",
       "EXIT_NOTHING",
       "EXIT_RECORDED"
     ],
@@ -25,25 +24,15 @@
       "EXIT_UNSET"
     ],
     "late_look.py": [
-      "EXIT_BROKEN",
       "EXIT_OK"
     ],
     "main_red.py": [
-      "EXIT_BROKEN",
       "EXIT_RED"
     ],
-    "preflight.py": [
-      "EXIT_BROKEN"
-    ],
-    "release.py": [
-      "EXIT_BROKEN"
-    ],
     "review_findings.py": [
-      "EXIT_BROKEN",
       "EXIT_NOTHING"
     ],
     "review_map.py": [
-      "EXIT_BROKEN",
       "EXIT_OK"
     ],
     "squash_body.py": [
@@ -59,7 +48,6 @@
       "EXIT_RECORDED"
     ],
     "version.py": [
-      "EXIT_BROKEN",
       "EXIT_OK"
     ]
   }
