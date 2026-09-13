@@ -33,6 +33,28 @@ def test_trailers_appear_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert assembled.count("Refs #7") == 1
 
 
+def test_a_composed_body_is_printed_and_the_run_is_clean(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Тело собралось — оно печатается, а исход чистый.
+
+    Прогонялся только отказ: ветка без коммитов. «Чисто» у сборщика объявлено,
+    но не проверялось ни разу
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+
+    def git(*args: str) -> str:
+        if "--format=%s" in args:
+            return "работа\n"
+        if "--format=%B%x00" in args:
+            return "работа\n\nRefs #7\n\x00"
+        return "основание\n"
+
+    monkeypatch.setattr(body, "git", git)
+    assert body.main(["--branch", "agent/ветка"]) == body.EXIT_OK
+    assert "работа" in capsys.readouterr().out
+
+
 def test_service_merge_is_not_a_line_of_work(monkeypatch: pytest.MonkeyPatch) -> None:
     """Подтягивание базы — не запись о работе, и в теле его нет.
 

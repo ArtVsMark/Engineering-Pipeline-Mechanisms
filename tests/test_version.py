@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT, RunScript, load_script, needs_history
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, needs_history
 
 module = load_script("version.py")
 
@@ -126,6 +126,29 @@ def test_a_clone_without_tags_says_so(run_script: RunScript, tmp_path: Path) -> 
     assert run.code == 3, run.text
     assert "тегов не видно" in run.text
     assert "git fetch --tags" in run.text
+
+
+def test_a_whole_clone_reports_the_version_and_says_nothing_else(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Полное дерево: версия печатается, исход чистый.
+
+    Прогонялся только НЕПОЛНЫЙ вход — обрезанный клон. «Чисто» у этого шага
+    объявлено, но не проверялось ни разу, а объявление поведением не является
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+    git = partial(subprocess.run, cwd=tmp_path, check=True, capture_output=True)
+    git(["git", "init", "--quiet", "-b", "main"])
+    git(["git", "config", "user.email", "кто@то"])
+    git(["git", "config", "user.name", "Кто-то"])
+    (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
+    git(["git", "add", "-A"])
+    git(["git", "commit", "--quiet", "-m", "начало"])
+    git(["git", "tag", f"v{FAKE_VERSION}"])
+
+    run = run_script("version.py", "--check", cwd=tmp_path)
+    assert run.code == module.EXIT_OK, run.text
+    assert FAKE_VERSION in run.text
 
 
 def test_the_tag_and_the_contract_version_are_independent(
