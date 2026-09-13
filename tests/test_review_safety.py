@@ -754,3 +754,62 @@ def test_a_number_from_a_button_is_checked_to_be_digits() -> None:
     for name in ("review.yml", "task-items.yml"):
         text = (WORKFLOWS / name).read_text(encoding="utf-8")
         assert "*[!0-9]*" in text, f"{name}: номер из кнопки не проверяется цифрами"
+
+
+#: Действия, которые зовут модель. Список ЗАКРЫТЫЙ и растёт правкой, а не
+#: догадкой: «что-то похожее на ИИ» — находка о форме, а не о предмете (068).
+#: Имя взято у каталога, чтобы два понимания одного правила не разошлись (090).
+CALLS_A_MODEL: Final = ("anthropics/claude-code-action",)
+
+#: Признак пометки. Проверяется СМЫСЛОВОЕ ядро, а не дословная фраза: редакцию
+#: правят, и гейт, требующий буквы, ловил бы редактуру вместо пропажи. Образец
+#: тот же, что у `check_untrusted_prompt.py` каталога.
+MARKED: Final = re.compile(r"недовер|это\s+ДАННЫЕ|данные,?\s+а\s+не\s+указан", re.I)
+
+#: Сколько строк шага считать его телом. Шаг с вызовом модели длиннее обычного:
+#: у него список инструментов и промпт.
+STEP_LINES: Final = 60
+
+
+def model_calls(path: Path) -> list[tuple[int, bool]]:
+    """Вызовы модели в прогоне и есть ли у каждого пометка о недоверенном входе."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    found: list[tuple[int, bool]] = []
+    for place, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        if any(name in line for name in CALLS_A_MODEL):
+            near = "\n".join(lines[place : place + STEP_LINES])
+            found.append((place + 1, bool(MARKED.search(near))))
+    return found
+
+
+@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+def test_every_model_call_declares_its_input_as_data(path: Path) -> None:
+    """Шаг, кладущий чужой текст в запрос к модели, объявляет его ДАННЫМИ (085).
+
+    ДЕРЖИТСЯ МАШИННАЯ ПОЛОВИНА, И ЭТО НАЗВАНО. Послушание модели гейт не держит
+    и держать не может; он держит то, что может машина, — что оговорка вообще
+    есть. Половину, которую машина не может, правило требует признать вслух
+    ([182](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/182-an-unmechanisable-answer-is-split-in-two.md)).
+
+    Замер 13.09.2026: из четырёх вызовов модели три несли оговорку, а ревью по
+    обращению — НЕТ. Там её отсутствие дороже всего: у ревью на изменении вход
+    пишет автор изменения, а здесь — кто угодно в интернете, и задачу агенту
+    ставит сам текст обращения.
+    """
+    naked = [place for place, marked in model_calls(path) if not marked]
+    assert not naked, (
+        f"{path.name}: вызов модели без оговорки о недоверенном входе, строки {naked} — "
+        "чужой текст попадает в запрос как указание"
+    )
+
+
+def test_the_model_calls_are_found_at_all() -> None:
+    """Предмет найден: вызовы модели в дереве ЕСТЬ (075).
+
+    Без этого соседняя проверка зеленела бы на дереве, где разбор перестал их
+    узнавать — например, после переименования действия.
+    """
+    found = [one for path in WORKFLOWS.glob("*.yml") for one in model_calls(path)]
+    assert found, "вызовов модели не найдено — разбор не узнаёт предмета"
