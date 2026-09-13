@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -966,3 +967,131 @@ def test_a_dry_run_accepts_a_branch_that_names_its_task(tmp_path: Path) -> None:
     with inside(root):
         title, _ = agent_pr.describe("agent/x", "main")
     assert "работа со связью" in title
+
+
+# --- реестр: у КАЖДОГО гейта есть прогон отказа -------------------------------
+
+
+#: Гейты дерева узнаются по приставке имени — это соглашение самого проекта, и
+#: второй список того же разошёлся бы с ним молча (022). Граница названа: шаги,
+#: не начинающиеся с `check_`, сюда не попадают, и если такой появится, его
+#: придётся внести — молча он не пройдёт (068).
+GATES = sorted(path.name for path in (ROOT / "scripts").glob("check_*.py"))
+
+#: Как в этом дереве выражается ОТКАЗ гейта. Список разрешительный: новое имя
+#: исхода дописывается сюда, а не проходит само.
+REFUSAL_NAMES = ("EXIT_REJECTED", "EXIT_FOUND", "EXIT_FINDINGS", "REJECTED")
+
+
+def gates_run_by(tree: ast.AST) -> set[str]:
+    """Гейты, которые этот модуль ЗАПУСКАЕТ или загружает.
+
+    Считаются только доводы `run_script`/`load_script`: имя гейта, попавшее в
+    прозу или в набор строк, запуском не является и покрытием не считается.
+    """
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, "id", "") not in {"run_script", "load_script"}:
+            continue
+        for one in node.args:
+            if isinstance(one, ast.Constant) and str(one.value).startswith("check_"):
+                found.add(str(one.value))
+    return found
+
+
+def refusal_of(gate: str) -> set[int]:
+    """Какими числами ЭТОТ гейт объявляет отказ — по его собственным константам.
+
+    СПРАШИВАЕТСЯ У ГЕЙТА, А НЕ НАЗНАЧАЕТСЯ СПИСКОМ. Отказ не всегда единица:
+    у `check_pipeline` и `check_required_context` находка объявлена исходом 3,
+    и требовать от них единицы значило бы требовать невозможного, а потом
+    «чинить» исправное. Замер 13.09.2026: из пяти гейтов, которые реестр назвал
+    непокрытыми, два были покрыты своим объявленным исходом
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    """
+    tree = ast.parse((ROOT / "scripts" / gate).read_text(encoding="utf-8"), filename=gate)
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        said = node.value.value if isinstance(node.value, ast.Constant) else None
+        if node.target.id in REFUSAL_NAMES and isinstance(said, int):
+            found.add(said)
+    return found
+
+
+def asserted_codes(tree: ast.AST) -> set[int]:
+    """Числа, с которыми модуль сравнивает исход, и имена исходов, что он называет."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            for one in node.comparators:
+                said = one.value if isinstance(one, ast.Constant) else None
+                if isinstance(said, int) and not isinstance(said, bool):
+                    found.add(said)
+                if isinstance(one, ast.Attribute) and one.attr in REFUSAL_NAMES:
+                    found.add(-1)
+                if isinstance(one, ast.Name) and one.id in REFUSAL_NAMES:
+                    found.add(-1)
+    return found
+
+
+def gates_with_a_refusal_run() -> set[str]:
+    """Гейты, у которых в наборе есть прогон ИХ отказа.
+
+    ЧИТАЕТСЯ МОДУЛЬ ЦЕЛИКОМ, И ПРЕДЕЛ ЭТОГО НАЗВАН. Гейт нередко запускают
+    вспомогательной функцией модуля, а не прямо в случае, и разбор по
+    отдельным случаям такие прогоны терял: замер дал восемь «непокрытых», из
+    которых шесть были покрыты через помощника. Поэтому предметом считается
+    модуль — запускает гейт и утверждает его отказ.
+
+    Цена известна: модуль, запускающий ДВА гейта и отвергающий одним из них,
+    засчитает оба. Реестр ловит не это, а другое — гейт, у которого прогона
+    отказа нет НИГДЕ, — и притворяться, что он ловит больше, было бы хуже
+    неполноты
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    found: set[str] = set()
+    for path in sorted((ROOT / "tests").glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        said = asserted_codes(tree)
+        if not said:
+            continue
+        for gate in gates_run_by(tree):
+            wanted = refusal_of(gate)
+            if not wanted or said & wanted or -1 in said:
+                found.add(gate)
+    return found
+
+
+def test_every_gate_has_a_run_of_its_refusal() -> None:
+    """У каждого гейта дерева есть прогон того, что он обязан отвергнуть (140).
+
+    Отдельные случаи отказа в наборе были и раньше — их полсотни. Чего не было:
+    РЕЕСТРА. Новый гейт, приехавший без прогона отказа, не замечал никто:
+    порядок работы окна держал это вниманием автора, а внимание — не механизм
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    Замер 13.09.2026, первый же заход: из тринадцати гейтов **два** проверялись
+    только чистыми функциями, а по пути отказа не прогонялись ни разу —
+    `check_derived_refs.py` и `check_reread.py`, причём второй написан в ту же
+    смену и ровно с этим упрёком в шапке.
+    """
+    missing = sorted(set(GATES) - gates_with_a_refusal_run())
+    assert not missing, (
+        "гейты без прогона отказа: " + ", ".join(missing) + " — гейт, проверенный "
+        "только пропуском верного, зелен всегда и не держит ничего"
+    )
+
+
+def test_the_roster_finds_its_subject() -> None:
+    """Предмет реестра найден: гейты в дереве ЕСТЬ, и прогоны отказа у них тоже.
+
+    Без этого соседняя проверка зеленела бы на пустом списке — «все гейты
+    покрыты» верно и тогда, когда гейтов не нашлось
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
+    assert GATES, "гейтов в дереве не найдено — разбор не находит предмета"
+    assert gates_with_a_refusal_run(), "прогонов отказа не найдено ни одного — разбор слеп"

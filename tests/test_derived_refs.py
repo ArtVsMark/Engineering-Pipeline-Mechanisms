@@ -81,3 +81,26 @@ def test_the_readme_badges_are_seen_by_this_parser() -> None:
     seen = module.ours(readme, OURS)
     assert len(seen) >= 4, f"значков витрины разобрано {len(seen)} — разбор их не видит"
     assert {ref for ref, _ in seen} == {"badges"}, seen
+
+
+def test_the_gate_reports_an_undrawn_artefact_when_it_is_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Гейт ПРОГОНЯЕТСЯ по пути находки, а не только разбирается по частям.
+
+    Чистые функции проверяли решение, но не проводку: заход мог решить
+    «не нарисовано» и вернуть ноль, и набор этого бы не заметил
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+    """
+    monkeypatch.setenv("GH_TOKEN", "подделка")
+    monkeypatch.setattr(module, "added_lines", lambda *a, **k: [BADGE])
+    monkeypatch.setattr(module, "drawn", lambda *a, **k: False)
+    assert module.main(["--repo", OURS, "--base", "main"]) == module.EXIT_FOUND
+
+
+def test_the_gate_is_silent_when_the_artefact_is_drawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обратная сторона того же прогона: нарисованное проходит (097)."""
+    monkeypatch.setenv("GH_TOKEN", "подделка")
+    monkeypatch.setattr(module, "added_lines", lambda *a, **k: [BADGE])
+    monkeypatch.setattr(module, "drawn", lambda *a, **k: True)
+    assert module.main(["--repo", OURS, "--base", "main"]) == module.EXIT_OK
