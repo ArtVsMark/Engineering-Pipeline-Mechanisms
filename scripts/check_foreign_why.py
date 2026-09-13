@@ -49,6 +49,14 @@ LINK_RE: Final = re.compile(r"rules/ru/(?P<rule>\d{3})-")
 
 WORD_RE: Final = re.compile(r"\w+")
 
+#: Адрес — НЕ СЛОВА, и разбирать его как слова нельзя. Замер 13.09.2026: из
+#: 2592 кусков `AGENTS.md` 343 состоят из разобранной по словам ссылки, и два
+#: документа, ссылающиеся на одно правило, выглядели бы копиями друг друга.
+#: Здесь это ещё не вредит — в разборах каталога ссылок нет вовсе, — но класс
+#: закрыт заранее, а не после первого совпадения
+#: ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+LINKS_RE: Final = re.compile(r"https?://\S+")
+
 
 class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «чисто»."""
@@ -96,7 +104,7 @@ def pieces(text: str) -> set[str]:
     По словам потому, что перенос строки и лишний пробел — оформление, а не
     заимствование: разбор, чувствительный к ним, ловил бы вёрстку.
     """
-    words = WORD_RE.findall(text.lower())
+    words = WORD_RE.findall(LINKS_RE.sub(" ", text).lower())
     return {" ".join(words[at : at + WINDOW]) for at in range(len(words) - WINDOW + 1)}
 
 
