@@ -43,8 +43,17 @@ def documents_now() -> int:
 
 
 def fragments() -> list[Path]:
-    """Фрагменты журнала, лежащие в дереве сейчас."""
-    return sorted((ROOT / "changelog.d").glob("*.md"))
+    """Все записи журнала дерева — и ждущие выпуска, и уже выпущенные.
+
+    ВЫПУЩЕННОЕ ОСТАЁТСЯ ЗАПИСЬЮ. Фрагменты не удаляются выпуском, а переезжают
+    в `changelog.d/released/<версия>/`: собранный журнал производный, а
+    источником остаются они
+    ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-generated-file-is-not-a-store.md)).
+    Разбор, смотревший только в ждущие, потерял предмет ровно в момент первого
+    выпуска: 13.09.2026 все 280 записей уехали разом, и проверка объявила, что
+    записей со счётом нет вовсе.
+    """
+    return sorted(path for path in (ROOT / "changelog.d").rglob("*.md") if path.name != "README.md")
 
 
 def prose(path: Path) -> str:

@@ -11,7 +11,7 @@
 ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
 
 Порядок работ теперь задаёт это число, а не номер выпуска — решение
-[`016`](../docs/decisions/016-family-completeness-outranks-the-release-number.md).
+[`016`](../../../docs/decisions/016-family-completeness-outranks-the-release-number.md).
 Определение единицы («работает у себя полностью») остаётся прежним: решение
 `009` не отменяется, оно перестаёт быть очередью работ.
 

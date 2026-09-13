@@ -135,12 +135,18 @@ def test_the_answer_schema_is_the_surface(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("span", "version", "fits"),
+    # ЧИСЛА ЗАВЕДОМО ЧУЖИЕ, И ЭТО НЕ ПРИДИРКА. Гейт «версия живёт в одном
+    # источнике» видит число в дереве и не знает, что это пример. Пока примеры
+    # брались из низких разрядов, совпадение было вопросом времени — и
+    # случилось: выпуск 13.09.2026 поднял версию контракта на минор, и она
+    # совпала с границей диапазона отсюда — гейт покраснел на исправном коде
+    # ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
     [
-        (">=0.1,<0.2", "0.1.4", True),
-        (">=0.1,<0.2", "0.1.99", True),
-        (">=0.1,<0.2", "0.2.0", False),
-        (">=0.1,<0.2", "0.0.9", False),
-        (">=1.0,<2.0", "1.9.0", True),
+        (">=9.1,<9.2", "9.1.4", True),
+        (">=9.1,<9.2", "9.1.99", True),
+        (">=9.1,<9.2", "9.2.0", False),
+        (">=9.1,<9.2", "9.0.9", False),
+        (">=9.0,<10.0", "9.9.0", True),
     ],
 )
 def test_the_range_decides_by_major_minor(span: str, version: str, fits: bool) -> None:

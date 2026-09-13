@@ -106,13 +106,36 @@ def test_the_project_version_is_computed_not_written() -> None:
 
 @needs_history
 def test_the_patch_is_the_count_of_accepted_changes() -> None:
-    """PATCH — число принятых изменений, а не номер патч-релиза.
+    """PATCH — число принятых изменений после тега, а не номер патч-релиза.
 
-    Проверяется по живой истории: изменений после тега у проекта заведомо
-    больше одного, и счёт обязан это показывать.
+    СПРАШИВАЕТСЯ ОБЩАЯ ВЕТКА, А НЕ ГОЛОВА РАБОТЫ. Счёт — свойство принятого, и
+    на ветке в работе он ещё не определён: её коммиты номера не имеют, пока их
+    не приняли.
+
+    СВЕРЯЕТСЯ СО СЧЁТОМ, А НЕ С «БОЛЬШЕ ОДНОГО». Прежняя проверка опиралась на
+    то, что изменений после тега «заведомо больше одного», — верно в любой
+    день, кроме дня выпуска: 13.09.2026 тег встал на голову, счёт стал нулём, и
+    проверка покраснела на исправном механизме. Ноль сразу после выпуска —
+    законное состояние, а не дефект
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
     """
-    number, _ = module.version()
-    assert int(number.split(".")[2]) > 1
+    tag = module.release_tag()
+    span = f"{tag}..origin/main"
+    counted = module.changes_in(span)
+    # Независимая оценка: первопредки общей ветки после тега. Признак другой —
+    # рёбра графа, а не сущности, — и на нашей истории они обязаны сойтись:
+    # каждое принятое изменение приезжает в общую ветку одним уплотнением.
+    listed = subprocess.run(
+        ["git", "rev-list", "--count", "--first-parent", span],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=ROOT,
+        check=True,
+    ).stdout.strip()
+    assert counted == int(listed), (
+        f"механизм насчитал {counted} принятых изменений после {tag}, а первопредков там {listed}"
+    )
 
 
 def test_a_clone_without_tags_says_so(run_script: RunScript, tmp_path: Path) -> None:

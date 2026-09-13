@@ -1,7 +1,7 @@
 ### Мигание на изменении стало видно — и прежний замер признан порочным
 
-Решение [`014`](../docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
-заменяет [`013`](../docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
+Решение [`014`](../../../docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
+заменяет [`013`](../../../docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
 целиком. Его центральное утверждение — «миганий не было, значит предмета нет» —
 получено **кругом**, и это назвал владелец, а не механизм.
 

@@ -30,7 +30,7 @@
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
 Разбор и отвергнутые варианты — решение
-[`018`](../docs/decisions/018-a-stop-switch-names-what-it-waits-for.md); главный
+[`018`](../../../docs/decisions/018-a-stop-switch-names-what-it-waits-for.md); главный
 из отвергнутых — снимать по сроку: срок не знает, чего ждали, и осознанный
 месячный стоп-кран снялся бы наравне с забытым.
 

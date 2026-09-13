@@ -18,7 +18,7 @@
 
 `docs/release.md` держал **два правила мажора сразу**: новое — «единицу
 выпускает закрытая приёмка» (решение
-[`009`](../docs/decisions/009-one-zero-means-it-works-at-home.md)) — и старое,
+[`009`](../../../docs/decisions/009-one-zero-means-it-works-at-home.md)) — и старое,
 «мажор поднимает первый потребитель», в разделе о порядке выпуска. А
 `scripts/release.py` исполнял **старое**: требовал `--first-consumer`.
 

@@ -25,11 +25,11 @@
 минор плюс один, а патч живёт в версии ГОЛОВЫ: `1.0.1` — версия дерева, не
 выпуск.
 
-Решение [`015`](../docs/decisions/015-the-contract-version-moves-by-its-own-digits.md)
+Решение [`015`](../../../docs/decisions/015-the-contract-version-moves-by-its-own-digits.md)
 сняло прежний расчёт потому, что тег и версия контракта были ОДНИМ числом.
 Числа развязаны — и довод `015` остался в силе целиком, только адресат у него
 теперь `next_contract`, а не расчёт тега
-([`017`](../docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md)).
+([`017`](../../../docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md)).
 
 ### Что это чинило прямо сейчас
 

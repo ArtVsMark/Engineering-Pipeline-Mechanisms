@@ -1,7 +1,7 @@
 ### Записано: слияние отдаётся площадке, порядок остаётся своим
 
-Решение [`011`](../docs/decisions/011-merging-is-handed-to-the-platform.md)
-пересматривает [`003`](../docs/decisions/003-own-automerge-not-native-queue.md)
+Решение [`011`](../../../docs/decisions/011-merging-is-handed-to-the-platform.md)
+пересматривает [`003`](../../../docs/decisions/003-own-automerge-not-native-queue.md)
 в одной половине: очередь по-прежнему решает, КОГО взвести, а сливает площадка
 мутацией `enablePullRequestAutoMerge`. Опроса головы в шаге очереди не
 остаётся — вместе с ним уходит класс, из которого пришли все три поломки 09.09
