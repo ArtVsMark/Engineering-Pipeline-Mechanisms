@@ -5,9 +5,6 @@
     "check_new_is_tested.py": [
       "EXIT_OK"
     ],
-    "check_own_name.py": [
-      "EXIT_OK"
-    ],
     "check_rule_links.py": [
       "EXIT_OK"
     ],
@@ -35,9 +32,6 @@
     "review_map.py": [
       "EXIT_OK"
     ],
-    "squash_body.py": [
-      "EXIT_OK"
-    ],
     "stuck.py": [
       "EXIT_BROKEN",
       "EXIT_STUCK",
@@ -46,9 +40,6 @@
     "task_items.py": [
       "EXIT_NOTHING",
       "EXIT_RECORDED"
-    ],
-    "version.py": [
-      "EXIT_OK"
     ]
   }
 }
