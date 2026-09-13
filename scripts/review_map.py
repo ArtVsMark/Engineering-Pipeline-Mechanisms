@@ -37,6 +37,7 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+import catalogue
 import ghrest
 import kinds
 import paths
@@ -50,10 +51,7 @@ EXIT_BROKEN: Final = 2
 #: бы молча (090). Разбор см. `scripts/kinds.py`.
 MACHINE: Final = kinds.MACHINE
 
-EXPORT_URL: Final = (
-    "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
-    "/main/export/rules.json"
-)
+EXPORT_URL: Final = catalogue.EXPORT_URL
 #: Файл ответа каталогу — он же предмет подделки, если читать его из головы.
 ANSWER: Final = paths.BINDINGS
 

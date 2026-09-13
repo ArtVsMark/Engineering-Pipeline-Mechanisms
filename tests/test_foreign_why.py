@@ -1,0 +1,166 @@
+"""Чужое «почему» — ссылка, а не копия (правило 153).
+
+Разбор правила живёт в каталоге, и мы на него ССЫЛАЕМСЯ. Переписанный к себе,
+он расходится с источником при первой же правке каталога — и расходится молча:
+копия выглядит прежней, а правило под ней уже другое.
+
+ЦИТАТА НЕ ЗАПРЕЩЕНА — ЗАПРЕЩЕНА КОПИЯ БЕЗ АДРЕСА. Привести чужие слова, чтобы
+довод читался на месте, законно; правило требует, чтобы читатель мог дойти до
+источника.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from tests.conftest import ROOT, RunScript, load_script
+
+module = load_script("check_foreign_why.py")
+
+#: Разбор правила, длиннее окна: короче — совпадут обороты речи, а не
+#: заимствование.
+CLAIM = (
+    "чужое почему приводится ссылкой на источник а не переписывается к себе "
+    "потому что копия расходится с оригиналом молча"
+)
+
+
+def tree(root: Path, text: str) -> Path:
+    """Дерево под git с одним документом: гейт читает отслеживаемое."""
+    subprocess.run(["git", "init", "--quiet", "-b", "main"], cwd=root, check=True)
+    (root / "документ.md").write_text(text, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def catalogue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Подделывает выгрузку каталога: сеть в наборе не трогается."""
+    monkeypatch.setattr(module, "claims", lambda: {"153": CLAIM})
+
+
+def test_pieces_are_counted_by_words_not_by_letters() -> None:
+    """Куски режутся ПО СЛОВАМ: перенос строки и лишний пробел — оформление.
+
+    Разбор, чувствительный к вёрстке, ловил бы её вместо заимствования: тот же
+    текст, перенесённый иначе, переставал бы считаться копией.
+    """
+    ровно = " ".join(str(at) for at in range(module.WINDOW))
+    врозь = "\n".join(str(at) for at in range(module.WINDOW))
+    assert module.pieces(ровно) == module.pieces(врозь)
+    assert len(module.pieces(ровно)) == 1
+    assert module.pieces("коротко") == set(), "кусок короче окна куском не считается"
+
+
+def test_a_copy_is_seen_and_a_paraphrase_is_not() -> None:
+    """Копия — дословный кусок; пересказ теми же словами врозь ею не является."""
+    said = {"153": " ".join(f"слово{at}" for at in range(module.WINDOW + 2))}
+    дословно = "вводные слова " + said["153"]
+    assert module.copied(дословно, said) == {"153"}
+    вразбивку = " и ".join(said["153"].split())
+    assert module.copied(вразбивку, said) == set()
+
+
+def test_a_link_is_read_by_its_address() -> None:
+    """Ссылка узнаётся адресом файла правила, а не упоминанием номера.
+
+    «Правило 153» в прозе адресом не является: по нему читатель никуда не
+    дойдёт, а гейт ради этого и стоит.
+    """
+    адрес = (
+        "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/"
+        "rules/ru/153-foreign-why-is-a-link-not-a-copy.md"
+    )
+    assert module.linked(f"см. [153]({адрес})") == {"153"}
+    assert module.linked("см. правило 153") == set()
+
+
+def test_a_copy_without_a_link_is_a_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Переписанный разбор без ссылки — находка, ради которой гейт и есть (140)."""
+    catalogue(monkeypatch)
+    root = tree(tmp_path, f"Мы считаем так: {CLAIM}.\n")
+    assert module.main(["--root", str(root)]) == module.EXIT_FOUND
+    assert "разбор правила 153 переписан" in capsys.readouterr().err
+
+
+def test_a_quote_with_a_link_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Та же цитата со ссылкой на источник — не находка.
+
+    Гейт судит не заимствование, а потерю адреса: читатель обязан дойти до
+    правила, а не поверить нашему пересказу.
+    """
+    catalogue(monkeypatch)
+    root = tree(
+        tmp_path,
+        f"Мы считаем так: {CLAIM} "
+        "([153](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/"
+        "rules/ru/153-foreign-why-is-a-link-not-a-copy.md)).\n",
+    )
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    assert "чисто" in capsys.readouterr().out
+
+
+def test_a_short_echo_is_not_a_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Короткое совпадение оборотов копией не считается.
+
+    Окно в десять слов выбрано замером: короче гейт ловил бы язык, а не
+    заимствование, и приучал бы себя обходить
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    catalogue(monkeypatch)
+    root = tree(tmp_path, "копия расходится с оригиналом молча — об этом и речь\n")
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+
+
+def test_a_silent_catalogue_is_the_third_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Каталог не ответил — «не отработал», а не «копий нет» (045)."""
+
+    def refuse() -> dict[str, str]:
+        raise module.NotRun("выгрузка каталога не прочитана: 503")
+
+    monkeypatch.setattr(module, "claims", refuse)
+    assert module.main([]) == module.EXIT_BROKEN
+    assert "не отработал" in capsys.readouterr().err
+
+
+def test_an_empty_export_is_not_a_clean_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пустая выгрузка — ошибка входа: сверять не с чем (075)."""
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: {"rules": []})
+    with pytest.raises(module.NotRun, match="сверять не с чем"):
+        module.claims()
+
+
+def test_a_tree_without_documents_is_the_third_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Документов нет вовсе — предмета нет, и это отказ, а не «чисто» (075)."""
+    catalogue(monkeypatch)
+    subprocess.run(["git", "init", "--quiet", "-b", "main"], cwd=tmp_path, check=True)
+    assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN
+    assert "ни одного документа" in capsys.readouterr().err
+
+
+def test_the_gate_runs_on_the_live_tree(run_script: RunScript) -> None:
+    """Гейт объявлен в прогоне: механизм без шага остаётся обещанием (139)."""
+    text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "check_foreign_why.py" in text, "гейт не подключён ни к одному прогону"
+
+
+def test_the_window_is_declared_not_guessed() -> None:
+    """Окно — объявленное число, а не литерал посреди разбора (005)."""
+    assert isinstance(module.WINDOW, int) and module.WINDOW >= 8
+
+
+def test_the_catalogue_address_is_shared(monkeypatch: Any) -> None:
+    """Адрес выгрузки берётся из общего объявления, а не пишется заново."""
+    shared = load_script("catalogue.py")
+    assert module.EXPORT_URL is shared.EXPORT_URL

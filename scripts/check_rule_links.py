@@ -34,16 +34,14 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import catalogue
 import ghrest
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 
-EXPORT_URL: Final = (
-    "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook"
-    "/main/export/rules.json"
-)
+EXPORT_URL: Final = catalogue.EXPORT_URL
 #: Ссылка на файл правила: `rules/ru/<номер>-<имя>.md`. Ловится и в прозе, и в
 #: докстроке — форма одна, и разбирать её по видам файлов незачем.
 LINK_RE: Final = re.compile(r"rules/ru/(?P<number>\d{3})-(?P<slug>[a-z0-9-]+)\.md")
