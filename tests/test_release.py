@@ -12,6 +12,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 import pytest
 import yaml
@@ -687,19 +688,28 @@ def test_without_the_owners_token_the_question_is_not_asked(
     assert module.push_token() == ""
 
 
-def test_the_release_run_hands_the_owner_token_to_the_check() -> None:
-    """Прогон выпуска даёт шагу проверки тот же токен, которым толкает.
+#: Шаги прогона выпуска, которые зовут механизм. Спрашивается КАЖДЫЙ: проверка
+#: получила токен владельца сразу, а необратимый шаг остался без него — и
+#: вопрос о праве в нём не задавался вовсе. Нашёл внешний взгляд на #296.
+CALLS_THE_MECHANISM: Final = ("проверить условия выпуска", "выпустить")
+
+
+@pytest.mark.parametrize("step", CALLS_THE_MECHANISM)
+def test_every_release_step_gets_the_owner_token(step: str) -> None:
+    """Оба шага выпуска получают тот токен, которым идёт толчок.
 
     Механизм спрашивает правильного актора только если этот токен до него
     доехал: правка кода без правки прогона осталась бы обещанием
     ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+    Проверка по СПИСКУ, а не по одному шагу: один читатель был исправлен, а
+    второй молчал — ровно то расхождение, которое список и закрывает.
     """
     run = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
     steps = run["jobs"]["release"]["steps"]
-    checking = [one for one in steps if one.get("name") == "проверить условия выпуска"]
-    assert checking, "шаг проверки условий не найден — предмет исчез (075)"
-    assert module.PUSH_TOKEN_ENV in (checking[0].get("env") or {}), (
-        "шаг проверки не получает токен владельца: он спросит площадку о токене "
+    found = [one for one in steps if one.get("name") == step]
+    assert found, f"шаг «{step}» не найден — предмет исчез (075)"
+    assert module.PUSH_TOKEN_ENV in (found[0].get("env") or {}), (
+        f"шаг «{step}» не получает токен владельца: он спросит площадку о токене "
         "прогона, а тот обхода не имеет и иметь не должен"
     )
 
