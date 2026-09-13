@@ -72,3 +72,20 @@ def test_the_log_keeps_the_output_too(run: str) -> None:
     """
     text = (ROOT / ".github" / "workflows" / run).read_text(encoding="utf-8")
     assert "cat " in text, f"{run} увёл вывод в файл и не вернул его в лог"
+
+
+@pytest.mark.parametrize("run", SPEAKS_OUT)
+def test_the_summary_body_cannot_be_broken_by_its_own_text(run: str) -> None:
+    """Тело сводки подаётся отступом, а не забором из кавычек.
+
+    В вывод попадают заголовки изменений и тексты отказов, а их пишет человек:
+    три кавычки подряд закрывают забор раньше времени, и остаток разбора
+    разъезжается по разметке. Отступ ломать нечем. Нашли внешние взгляды на
+    #292.
+    """
+    text = (ROOT / ".github" / "workflows" / run).read_text(encoding="utf-8")
+    assert "echo '```'" not in text, (
+        f"{run} заворачивает тело сводки в забор из кавычек: текст из заголовка "
+        "изменения закроет его раньше времени"
+    )
+    assert "sed 's/^/    /'" in text, f"{run} не подаёт тело сводки отступом"

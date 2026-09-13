@@ -89,12 +89,13 @@ jobs:
             --policy .pipeline.yml \
             --self-name "ci-complete" > "${RUNNER_TEMP}/verdict.txt" 2>&1 || rc=$?
           cat "${RUNNER_TEMP}/verdict.txt"
+          # ТЕЛО ПОДАЁТСЯ ОТСТУПОМ, А НЕ ЗАБОРОМ ИЗ КАВЫЧЕК: в вердикт попадают
+          # имена проверок и тексты отказов, а три кавычки подряд закрыли бы
+          # забор раньше времени. Отступ в четыре пробела ломать нечем.
           {
             echo "### ci-complete: вердикт ${rc}"
             echo
-            echo '```'
-            cat "${RUNNER_TEMP}/verdict.txt"
-            echo '```'
+            sed 's/^/    /' "${RUNNER_TEMP}/verdict.txt"
           } >> "${GITHUB_STEP_SUMMARY}"
           # Аннотация одной строкой: переводы строк в ней экранируются, иначе
           # площадка обрежет сообщение первой же из них.

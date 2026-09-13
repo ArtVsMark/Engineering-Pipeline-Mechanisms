@@ -467,6 +467,26 @@ def test_a_red_head_that_is_empty_is_named_empty(platform: dict[str, Any]) -> No
     assert platform["merged"] == [2], "очередь встала на пустой голове"
 
 
+def test_a_red_head_of_unknown_size_is_treated_as_live(
+    platform: dict[str, Any], capsys: Any
+) -> None:
+    """Площадка не назвала объём красной головы — она живая, а не пустая.
+
+    Тот же разбор на обычной ветке прогонялся, а на красной — нет: ветки две,
+    а проверка была одна, и регресс повторился бы молча в половине случаев
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    Нашли внешние взгляды на #290 — двумя записями.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True), change(2, "automerge")]
+    platform["runs"] = {1: (["journal: failure"], False)}
+    platform["files_changed"] = {1: None}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "ПУСТО" not in said, "молчание об объёме приняли за пустоту"
+    assert "красная проверка" in said, "красная голова не названа красной"
+    assert platform["merged"] == [2], "очередь встала на красной голове"
+
+
 def test_a_head_of_unknown_size_is_treated_as_live(platform: dict[str, Any]) -> None:
     """Площадка не назвала объём — изменение живое, а не пустое (045).
 
