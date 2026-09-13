@@ -336,7 +336,7 @@ def declared_protection(where: Path | None = None) -> dict[str, Any]:
     return said
 
 
-def protection_moved(repo: str, token: str, mine: dict[str, Any] | None = None) -> list[Drift]:
+def protection_moved(repo: str, token: str) -> list[Drift]:
     """Защита общей ветки против объявленной: что ослаблено молча.
 
     НАСТРОЙКА ЖИВЁТ ВНЕ ДЕРЕВА, и это делает её слепым пятном: её не видит ни
@@ -402,12 +402,15 @@ def protection_moved(repo: str, token: str, mine: dict[str, Any] | None = None) 
                 )
             )
 
-    # ПРАВО ОБХОДА ЧИТАЕТСЯ У КАЖДОГО НАБОРА, ПРИКРЫВАЮЩЕГО ЭТУ ВЕТКУ. Их может
-    # быть несколько, и вправе обойти достаточно одного.
-    for one in rules:
-        ruleset = one.get("ruleset_id")
-        if ruleset is None:
-            continue
+    # ПРАВО ОБХОДА ЧИТАЕТСЯ У КАЖДОГО НАБОРА, ПРИКРЫВАЮЩЕГО ЭТУ ВЕТКУ, А НЕ У
+    # ПЕРВОГО. Наборов бывает несколько, и вправе обойти достаточно одного:
+    # выйти после первого значило бы проверить самый безобидный и назвать это
+    # проверкой. Нашёл внешний взгляд на #272 — докстринг обещал обход всех, а
+    # код читал один.
+    want = str(said.get("run_token_may_bypass") or NEVER)
+    for ruleset in sorted(
+        {one["ruleset_id"] for one in rules if one.get("ruleset_id") is not None}
+    ):
         got = ghrest.request("GET", f"repos/{repo}/rulesets/{ruleset}", token) or {}
         can = str(got.get("current_user_can_bypass") or "")
         if not can:
@@ -415,17 +418,16 @@ def protection_moved(repo: str, token: str, mine: dict[str, Any] | None = None) 
                 f"набор {ruleset}: площадка не сказала про право обхода — "
                 "ответ не прочитан, и «обхода нет» из этого не следует (045)"
             )
-        want = str(said.get("run_token_may_bypass") or NEVER)
         if can != want:
             found.append(
                 Drift(
                     "защита общей ветки",
-                    f"право обхода у токена прогона: объявлено «{want}», площадка говорит «{can}»",
+                    f"право обхода у токена прогона в наборе {ruleset}: "
+                    f"объявлено «{want}», площадка говорит «{can}»",
                     "снять обход у прогона либо объявить его в `.rules/protection.json` "
                     "с названной причиной — прогон мимо гейтов это путь в общую ветку",
                 )
             )
-        break
 
     return found
 
@@ -785,7 +787,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
             lambda: snapshot_is_stale(fetch(WHERE_URL), mine, str(mine.get("project") or repo)),
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
-        ("защита общей ветки", lambda: protection_moved(repo, token, mine)),
+        ("защита общей ветки", lambda: protection_moved(repo, token)),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
         (
             "вердикты по предложениям",
