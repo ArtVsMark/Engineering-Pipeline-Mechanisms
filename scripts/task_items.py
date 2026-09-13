@@ -169,7 +169,7 @@ def closed_by(repo: str, number: int, token: str) -> str:
     return ""
 
 
-def fate(repo: str, change: dict[str, Any], links: list[Any], token: str) -> list[str]:
+def fate(repo: str, change: dict[str, Any], links: list[Any], token: str) -> dict[int, str]:
     """Судьба связанных задач ПОСЛЕ слияния: сбылось ли обещанное связью.
 
     ГЕЙТ СВЯЗИ СМОТРИТ ДО, А ЭТОТ — ПОСЛЕ, и это разные предметы. Гейт разметки
@@ -185,13 +185,17 @@ def fate(repo: str, change: dict[str, Any], links: list[Any], token: str) -> lis
     закрытое лишнее уходит из поля зрения вместе с невыполненной работой.
     """
     merge = str(change.get("merge_commit_sha") or "")
-    said: list[str] = []
+    # ЗАПИСЬ АДРЕСУЕТСЯ ТОЙ ЗАДАЧЕ, ЧЬЁ ОБЕЩАНИЕ НЕ СБЫЛОСЬ, а не всем связанным
+    # сразу. Общая рассылка кладёт разбор и туда, где всё в порядке, и приучает
+    # его не читать, а читателю приходится искать, о нём ли речь (142). Нашёл
+    # внешний взгляд на #275.
+    said: dict[int, str] = {}
     for link in links:
         issue = ghrest.request("GET", f"repos/{repo}/issues/{link.number}", token) or {}
         state = str(issue.get("state") or "")
         if link.closes and state != "closed":
-            said.append(
-                f"#{link.number}: изменение обещало «{link}», а задача открыта — "
+            said[link.number] = (
+                f"изменение обещало «{link}», а задача открыта — "
                 "площадка закрытия не сделала, либо задачу переоткрыли"
             )
         if (
@@ -200,8 +204,8 @@ def fate(repo: str, change: dict[str, Any], links: list[Any], token: str) -> lis
             and merge
             and closed_by(repo, link.number, token) == merge
         ):
-            said.append(
-                f"#{link.number}: изменение обещало «{link}», то есть НЕ закрывать, "
+            said[link.number] = (
+                f"изменение обещало «{link}», то есть НЕ закрывать, "
                 "а задача закрыта этим же слиянием"
             )
     return said
@@ -298,26 +302,27 @@ def main(argv: list[str] | None = None) -> int:
             # площадка, и сравнить их может механизм.
             if not args.pr:
                 raise NotRun("номер слитого изменения не назван: --pr")
-            numbers, change = linked(args.repo, args.pr, token)
+            _, change = linked(args.repo, args.pr, token)
             said = fate(
                 args.repo, change, changerefs.links_in(str(change.get("body") or "")), token
             )
             if not said:
                 print(f"#{args.pr}: связь с задачами сбылась — расхождений нет")
                 return EXIT_NOTHING
-            note = "\n".join(
-                [
-                    f"## Судьба задачи после слияния #{args.pr}",
-                    "",
-                    "Связь, названная в теле изменения, после слияния становится",
-                    "проверяемым утверждением — и ровно здесь она начинает врать молча.",
-                    "",
-                    *[f"- {one}" for one in said],
-                ]
-            )
-            print(note)
-            if args.apply:
-                publish(args.repo, numbers, note, token)
+            for number, why in sorted(said.items()):
+                note = "\n".join(
+                    [
+                        f"## Судьба этой задачи после слияния #{args.pr}",
+                        "",
+                        "Связь, названная в теле изменения, после слияния становится",
+                        "проверяемым утверждением — и ровно здесь она начинает врать молча.",
+                        "",
+                        f"- {why}",
+                    ]
+                )
+                print(f"#{number}: {why}")
+                if args.apply:
+                    publish(args.repo, [number], note, token)
             return EXIT_RECORDED
 
         if args.follow:

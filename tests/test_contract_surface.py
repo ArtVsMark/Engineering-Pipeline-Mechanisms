@@ -335,9 +335,20 @@ def test_the_gate_declares_the_third_outcome_when_files_are_unreadable(
 # --- что гейт обязан назвать НЕСОВМЕСТИМЫМ -----------------------------------
 
 
-def changed(tmp_path: Path, *, workflow: str | None = WORKFLOW, answer: str = ANSWER) -> list[str]:
-    """Различия поверхности между образцом и правкой."""
-    before = contract.surface(tree(tmp_path / "before"))
+def changed(
+    tmp_path: Path,
+    *,
+    workflow: str | None = WORKFLOW,
+    answer: str = ANSWER,
+    was: str = ANSWER,
+) -> list[str]:
+    """Различия поверхности между образцом и правкой.
+
+    `was` меняет и ИСХОДНОЕ состояние: часть переходов видна только между двумя
+    правлеными ответами — например, класс, поднятый до обязательного, требует,
+    чтобы прежде он был совещательным.
+    """
+    before = contract.surface(tree(tmp_path / "before", answer=was))
     after = contract.surface(tree(tmp_path / "after", workflow=workflow, answer=answer))
     found: list[str] = contract.differences(before, after)
     return found
@@ -450,6 +461,17 @@ PLANTED: Final[dict[str, dict[str, Any]]] = {
     "вход стал обязательным": {
         "workflow": lambda text: text.replace(INPUT_PR, INPUT_PR + INPUT_WHY),
     },
+    # Класс, поднятый до обязательного: у потребителя меняется то, что держит
+    # его слияние. Договор объявлял это несовместимым, а примета была мёртвой —
+    # переход печатался как «False → True» и мимо списка проходил молча.
+    "класс поднят до обязательного": {
+        "answer": ANSWER.replace("  lint: required\n", "  lint: required\n  probe: required\n"),
+        "was": ANSWER.replace(
+            "  lint: required\n",
+            "  lint: required\n  probe:\n"
+            "    class: advisory\n    why: подделка\n    addressee: none\n",
+        ),
+    },
 }
 
 
@@ -471,7 +493,10 @@ def planted_lines(tmp_path: Path) -> list[str]:
     said: list[str] = []
     for name, edit in PLANTED.items():
         said += changed(
-            tmp_path / name, workflow=_planted_workflow(edit), answer=_planted_answer(edit)
+            tmp_path / name,
+            workflow=_planted_workflow(edit),
+            answer=_planted_answer(edit),
+            was=str(edit.get("was") or ANSWER),
         )
     return said
 
@@ -509,6 +534,7 @@ def test_the_planted_edits_are_each_breaking(tmp_path: Path) -> None:
             tmp_path / f"one-{name}",
             workflow=_planted_workflow(edit),
             answer=_planted_answer(edit),
+            was=str(edit.get("was") or ANSWER),
         )
         assert contract.breaking(changes), f"«{name}» не признано несовместимым: {changes}"
 

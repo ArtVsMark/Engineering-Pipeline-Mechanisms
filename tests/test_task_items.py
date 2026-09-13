@@ -301,8 +301,8 @@ def test_a_promised_closure_that_did_not_happen_is_named(monkeypatch: pytest.Mon
     said = module.fate(
         "o/r", linked_change("Closes #12"), module.changerefs.links_in("Closes #12"), "t"
     )
-    assert len(said) == 1
-    assert "#12" in said[0] and "открыта" in said[0]
+    assert list(said) == [12], said
+    assert "открыта" in said[12]
 
 
 def test_a_kept_promise_is_silent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,7 +313,7 @@ def test_a_kept_promise_is_silent(monkeypatch: pytest.MonkeyPatch) -> None:
         module.fate(
             "o/r", linked_change("Closes #12"), module.changerefs.links_in("Closes #12"), "t"
         )
-        == []
+        == {}
     )
 
 
@@ -330,8 +330,8 @@ def test_a_task_closed_without_a_promise_is_named(monkeypatch: pytest.MonkeyPatc
     said = module.fate(
         "o/r", linked_change("Refs #12"), module.changerefs.links_in("Refs #12"), "t"
     )
-    assert len(said) == 1
-    assert "НЕ закрывать" in said[0]
+    assert list(said) == [12], said
+    assert "НЕ закрывать" in said[12]
 
 
 def test_a_task_closed_by_someone_else_is_not_blamed_on_the_merge(
@@ -347,7 +347,7 @@ def test_a_task_closed_by_someone_else_is_not_blamed_on_the_merge(
     monkeypatch.setattr(module, "closed_by", lambda *a, **k: "чужой-коммит")
     assert (
         module.fate("o/r", linked_change("Refs #12"), module.changerefs.links_in("Refs #12"), "t")
-        == []
+        == {}
     )
 
 

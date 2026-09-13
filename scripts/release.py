@@ -242,17 +242,24 @@ def may_push(repo: str, branch: str, token: str) -> str:
         rules = ghrest.request("GET", f"repos/{repo}/rules/branches/{branch}", token) or []
     except ghrest.TransportError:
         return ""
-    for one in rules:
-        ruleset = (one or {}).get("ruleset_id")
-        if ruleset is None:
-            continue
+    # СПРАШИВАЮТСЯ ВСЕ НАБОРЫ, А НЕ ПЕРВЫЙ, И РЕШАЕТ САМЫЙ СТРОГИЙ. Наборов на
+    # ветке бывает несколько, и толчок отвергает ЛЮБОЙ из них: ответ первого
+    # мог бы разрешить то, что запрещает второй. Нашёл внешний взгляд на #273 —
+    # тот же недосмотр в тот же день был в источнике дрейфа.
+    said = ""
+    for ruleset in sorted({one["ruleset_id"] for one in rules if (one or {}).get("ruleset_id")}):
         try:
             got = ghrest.request("GET", f"repos/{repo}/rulesets/{ruleset}", token) or {}
         except ghrest.TransportError:
             return ""
-        return str(got.get("current_user_can_bypass") or "")
-    # Правил на ветке нет вовсе — толкать некуда не мешает никто.
-    return MAY_PUSH
+        can = str(got.get("current_user_can_bypass") or "")
+        if not can:
+            return ""
+        if can in CANNOT_PUSH:
+            return can
+        said = can
+    # Правил на ветке нет вовсе — толкать никто не мешает.
+    return said or MAY_PUSH
 
 
 def refusals(
@@ -478,7 +485,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         # ПРАВО ТОЛКНУТЬ СПРАШИВАЕТСЯ ТЕМ ЖЕ ТОКЕНОМ, которым выпуск потом
         # толкает: ответ площадки про обход относится к спрашивающему.
-        push = may_push(args.repo, paths.TRUNK, ghrest.token_from_env()) if args.repo else ""
+        #
+        # БЕЗ ТОКЕНА ВОПРОС НЕ ЗАДАЁТСЯ ВОВСЕ. Заход без него всё равно не
+        # получит ответа, а сетевое обращение уедет — и уехало: шесть прежде
+        # офлайновых проверок `test_release.py` начали ходить к настоящей
+        # площадке, потому что имя репозитория приходит из окружения. Набор,
+        # который ходит в сеть, проверяет уже не механизм, а связь. Нашёл
+        # внешний взгляд на #273.
+        asking = ghrest.token_from_env()
+        push = may_push(args.repo, paths.TRUNK, asking) if args.repo and asking else ""
         problems = refusals(
             wanted,
             acceptance=args.acceptance,
