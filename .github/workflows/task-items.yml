@@ -54,6 +54,32 @@ jobs:
       group: task-items
       cancel-in-progress: false
     steps:
+      # НОМЕР ПРОВЕРЯЕТСЯ ОДИН РАЗ И ПЕРВЫМ, А ДАЛЬШЕ БЕРЁТСЯ ПРОВЕРЕННЫЙ.
+      # Проверка стояла в середине джоба, а шаг «судьба задачи после слияния»
+      # шёл раньше и брал номер из кнопки в обход неё: одна проверка на входе
+      # дешевле экранирования в каждом месте, но только если она и правда НА
+      # ВХОДЕ (068). Нашёл внешний взгляд на #305.
+      - name: номер изменения — цифры
+        id: number
+        env:
+          ASKED: ${{ inputs.pr || github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          # ПУСТО — ЗАКОННОЕ СОСТОЯНИЕ, И ТОЛЬКО ЗДЕСЬ. Прогон идёт и по
+          # событию задачи, где изменения нет вовсе: требовать номер там
+          # значило бы красить исправный заход. А вот НЕПУСТОЙ номер обязан
+          # быть цифрами — иначе он уедет в аргумент шага (045).
+          if [ -z "${ASKED:-}" ]; then
+            echo "номера изменения нет — заход не про изменение"
+            exit 0
+          fi
+          case "$ASKED" in
+            *[!0-9]*)
+              echo "::error::номер изменения обязан быть цифрами, пришло: ${ASKED}"
+              exit 1 ;;
+          esac
+          echo "number=${ASKED}" >> "$GITHUB_OUTPUT"
+
       # ОБЪЯВЛЕННОЕ АВТОРОМ ОТМЕЧАЕТСЯ ВСЕГДА, ДАЖЕ БЕЗ КЛЮЧА РАЗБОРА. Это две
       # разные работы с разными основаниями: здесь автор сам написал «этот
       # пункт закрыт», и агент для этого не нужен. Раньше отметку делала
@@ -98,7 +124,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          MERGED_PR: ${{ github.event.pull_request.number || inputs.pr }}
+          MERGED_PR: ${{ steps.number.outputs.number }}
         run: |
           set -uo pipefail
           rc=0
@@ -154,17 +180,19 @@ jobs:
       # ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
       # Одна проверка на входе дешевле и надёжнее, чем экранирование в каждом
       # месте: место можно забыть, вход — один.
-      - name: номер изменения — цифры
+      # Проверка номера сюда НЕ возвращается: она стоит первым шагом джоба, и
+      # второй её экземпляр разошёлся бы с первым молча (022). Здесь предмет
+      # только называется — чтобы в логе было видно, о чём заход.
+      - name: предмет разбора назван
         if: steps.token.outputs.present == 'yes'
         env:
-          SUBJECT: ${{ inputs.pr || github.event.pull_request.number }}
+          SUBJECT: ${{ steps.number.outputs.number }}
         run: |
           set -uo pipefail
-          case "${SUBJECT:-}" in
-            ''|*[!0-9]*)
-              echo "::error::номер изменения обязан быть цифрами, пришло: ${SUBJECT:-—}"
-              exit 1 ;;
-          esac
+          if [ -z "${SUBJECT:-}" ]; then
+            echo "::error::номер изменения не дошёл от шага проверки — разбирать нечего (075)"
+            exit 1
+          fi
           echo "предмет разбора: #$SUBJECT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -195,7 +223,7 @@ jobs:
           # Подставленный `${{ }}` — чужая строка ВНУТРИ нашей оболочки (085).
           # Взгляд нашёл это в `review.yml` (#131); здесь тот же класс, и
           # починка идёт по всем местам сразу, а не только по названному.
-          SUBJECT: ${{ inputs.pr || github.event.pull_request.number }}
+          SUBJECT: ${{ steps.number.outputs.number }}
         run: |
           set -uo pipefail
           rc=0
@@ -271,7 +299,7 @@ jobs:
           # Подставленный `${{ }}` — чужая строка ВНУТРИ нашей оболочки (085).
           # Взгляд нашёл это в `review.yml` (#131); здесь тот же класс, и
           # починка идёт по всем местам сразу, а не только по названному.
-          SUBJECT: ${{ inputs.pr || github.event.pull_request.number }}
+          SUBJECT: ${{ steps.number.outputs.number }}
         run: |
           set -uo pipefail
           rc=0
