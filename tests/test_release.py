@@ -220,6 +220,121 @@ def test_a_named_but_unread_acceptance_is_still_a_refusal(
     assert "не прочитано" in run.text
 
 
+def test_the_release_page_is_a_summary_not_a_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тело страницы — сводка и адреса источника, а не копия журнала.
+
+    Замер 13.09.2026: раздел журнала за 1.0.0 — 336 178 символов при пределе
+    площадки 125 000. Копия туда не влезет и не должна: источник остаётся в
+    дереве
+    ([125](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/125-a-generated-file-is-not-a-store.md)).
+    """
+    monkeypatch.setattr(
+        module.build_changelog,
+        "read_fragments",
+        lambda where: [
+            module.build_changelog.Fragment("added", "раз", "текст"),
+            module.build_changelog.Fragment("fixed", "два", "текст"),
+            module.build_changelog.Fragment("fixed", "три", "текст"),
+        ],
+    )
+    monkeypatch.setattr(module, "declared_version", lambda: FAKE_VERSION)
+    said = module.page_body("9.10.0", "o/r")
+    assert "Записей в выпуске: **3**" in said
+    assert "| Исправлено | 2 |" in said
+    assert "blob/v9.10.0/CHANGELOG.md" in said, "нет адреса собранного журнала"
+    assert "changelog.d/released/9.10.0" in said, "нет адреса записей выпуска"
+    assert len(said) < module.PAGE_LIMIT
+
+
+def test_an_existing_page_is_seen_before_it_is_made(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Наличие страницы спрашивается у площадки, а не выводится из тега.
+
+    Тег и страница — разные сущности: 13.09.2026 тег `v1.0.0` стоял, а страницы
+    не было, и позже она появилась рукой. Судить о второй по первому значит
+    угадывать.
+    """
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
+        asked.append(path)
+        return {"tag_name": "v9.10.0"}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    assert module.page_exists("o/r", "9.10.0", "токен") is True
+    assert asked == ["repos/o/r/releases/tags/v9.10.0"]
+
+
+def test_a_page_that_is_not_there_reads_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Нет такой страницы» — это ответ площадки, а не сбой транспорта (097)."""
+
+    def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
+        raise module.ghrest.NotFound(path)
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    assert module.page_exists("o/r", "9.10.0", "токен") is False
+
+
+def test_a_second_run_does_not_make_a_second_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Страница у тега одна: второй заход её не задваивает (074)."""
+    posted: list[str] = []
+
+    def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
+        if method == "POST":
+            posted.append(path)
+        return {"tag_name": "v9.10.0"}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    said = module.ensure_page("o/r", "9.10.0", "токен")
+    assert "уже есть" in said
+    assert posted == [], "завели вторую страницу поверх существующей"
+
+
+def test_a_missing_page_is_created(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Страницы нет — механизм её заводит, а не оставляет человеку."""
+    posted: list[tuple[str, object]] = []
+
+    def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
+        if method == "GET":
+            raise module.ghrest.NotFound(path)
+        posted.append((path, body))
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    monkeypatch.setattr(module, "page_body", lambda version, repo: "сводка")
+    said = module.ensure_page("o/r", "9.10.0", "токен")
+    assert "создана" in said
+    assert posted and posted[0][0] == "repos/o/r/releases"
+    assert posted[0][1] == {"tag_name": "v9.10.0", "name": "v9.10.0", "body": "сводка"}
+
+
+def test_a_dry_run_makes_no_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пробный заход рассказывает, а не заводит: у необратимого своя кнопка."""
+    posted: list[str] = []
+
+    def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
+        if method == "GET":
+            raise module.ghrest.NotFound(path)
+        posted.append(path)
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    monkeypatch.setattr(module, "page_body", lambda version, repo: "сводка")
+    said = module.ensure_page("o/r", "9.10.0", "токен", dry_run=True)
+    assert "пробный заход" in said and posted == []
+
+
+def test_a_body_over_the_limit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тело сверх предела площадки — отказ, а не обрезка на середине фразы."""
+
+    def answer(method: str, path: str, token: str, body: object = None) -> dict[str, str]:
+        raise module.ghrest.NotFound(path)
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    monkeypatch.setattr(module, "page_body", lambda version, repo: "я" * (module.PAGE_LIMIT + 1))
+    with pytest.raises(module.NotRun, match="сводкой"):
+        module.ensure_page("o/r", "9.10.0", "токен")
+
+
 def test_the_release_commit_is_signed_by_the_mechanism(monkeypatch: pytest.MonkeyPatch) -> None:
     """Машинный коммит выпуска несёт объявленного соавтора-механизм.
 
