@@ -40,6 +40,10 @@ SCHEDULES: Final = Path(".rules/schedules.json")
 #: Чем защищена общая ветка — объявлением, а не памятью. Настройка живёт вне
 #: дерева, и ослабление её не краснеет нигде само по себе.
 PROTECTION: Final = Path(".rules/protection.json")
+
+#: Объявленные исходы механизмов, которые набор пока не прогоняет. Список
+#: только убывает: он называет пробел, а не ровняет его (046).
+OUTCOMES: Final = Path(".rules/outcomes.json")
 #: Фрагменты журнала и собранный журнал.
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
@@ -75,6 +79,7 @@ ALL: Final = (
     SHOWCASE,
     SCHEDULES,
     PROTECTION,
+    OUTCOMES,
     FRAGMENTS,
     RELEASED,
     CHANGELOG,

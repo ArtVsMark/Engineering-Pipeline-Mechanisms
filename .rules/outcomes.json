@@ -1,0 +1,83 @@
+{
+  "почему": "Механизм объявляет исходы константами EXIT_*, но объявление — ещё не поведение (145). Замер 13.09.2026: из 102 объявленных исходов 35 не прогонялись набором ни разу, и большинство из них — третий исход «не отработал», который снаружи неотличим от «чисто» (045).",
+  "как сокращается": "Список только УБЫВАЕТ. Появился прогон — строка вычёркивается, и это требует гейт: покрытая строка долга краснеет так же, как непокрытый исход вне списка (075). Новый механизм в долг не дописывается: его исходы прогоняются сразу.",
+  "долг": {
+    "check_contract.py": [
+      "EXIT_BROKEN"
+    ],
+    "check_derived_refs.py": [
+      "EXIT_BROKEN"
+    ],
+    "check_env.py": [
+      "EXIT_BROKEN"
+    ],
+    "check_new_is_tested.py": [
+      "EXIT_BROKEN",
+      "EXIT_OK"
+    ],
+    "check_own_name.py": [
+      "EXIT_OK"
+    ],
+    "check_required_context.py": [
+      "EXIT_BROKEN"
+    ],
+    "check_reread.py": [
+      "EXIT_BROKEN"
+    ],
+    "check_rule_links.py": [
+      "EXIT_BROKEN",
+      "EXIT_OK"
+    ],
+    "debt.py": [
+      "EXIT_OK"
+    ],
+    "drift.py": [
+      "EXIT_BROKEN",
+      "EXIT_NOTHING",
+      "EXIT_RECORDED"
+    ],
+    "hail.py": [
+      "EXIT_BROKEN",
+      "EXIT_OK",
+      "EXIT_UNSET"
+    ],
+    "late_look.py": [
+      "EXIT_BROKEN",
+      "EXIT_OK"
+    ],
+    "main_red.py": [
+      "EXIT_BROKEN",
+      "EXIT_RED"
+    ],
+    "preflight.py": [
+      "EXIT_BROKEN"
+    ],
+    "release.py": [
+      "EXIT_BROKEN"
+    ],
+    "review_findings.py": [
+      "EXIT_BROKEN",
+      "EXIT_NOTHING"
+    ],
+    "review_map.py": [
+      "EXIT_BROKEN",
+      "EXIT_OK"
+    ],
+    "squash_body.py": [
+      "EXIT_OK"
+    ],
+    "stuck.py": [
+      "EXIT_BROKEN",
+      "EXIT_STUCK",
+      "EXIT_UNSET"
+    ],
+    "task_items.py": [
+      "EXIT_NOTHING",
+      "EXIT_RECORDED"
+    ],
+    "version.py": [
+      "EXIT_BROKEN",
+      "EXIT_OK"
+    ]
+  }
+}
