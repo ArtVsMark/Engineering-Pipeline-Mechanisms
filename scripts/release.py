@@ -488,6 +488,35 @@ def do_release(wanted: str, *, breaking: bool = False) -> None:
 PAGE_LIMIT: Final = 125_000
 
 
+def contract_at(tag: str) -> str:
+    """Версия контракта на дереве ЭТОГО тега, а не на голове.
+
+    Страница описывает выпущенное, а голова к моменту её создания уже ушла
+    вперёд — особенно у догоняющей кнопки, где между тегом и заходом лежат
+    дни. Число с головы называло бы выпуску чужую версию, и заметить это было
+    бы нечем: оно правдоподобно
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    Нашёл внешний взгляд на #299.
+    """
+    said = git("show", f"{tag}:{paths.VERSION}")
+    if not said:
+        raise NotRun(f"версия контракта на дереве {tag} не прочитана")
+    return said.strip()
+
+
+def tag_exists(tag: str) -> bool:
+    """Стоит ли такой тег в дереве.
+
+    СПРАШИВАЕТСЯ ДО СОЗДАНИЯ СТРАНИЦЫ, И ЭТО НЕ ПРИДИРКА. Площадка на запрос о
+    странице для несуществующего тега не отказывает, а СОЗДАЁТ его — на голове
+    общей ветки. Опечатка в догоняющей кнопке завела бы тег там, где его никто
+    не ставил, а тег не переставляется
+    ([074](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/074-one-shot-irreversible-steps-get-their-own-guard.md)).
+    Нашёл внешний взгляд на #299.
+    """
+    return bool(git("tag", "--list", tag))
+
+
 def page_body(version: str, repo: str) -> str:
     """Тело страницы выпуска: СВОДКА и адреса источника, а не копия журнала.
 
@@ -499,6 +528,7 @@ def page_body(version: str, repo: str) -> str:
     говорить о нём же и через год.
     """
     kept = build_changelog.read_fragments(paths.RELEASED / version)
+    said = contract_at(f"v{version}")
     counted = Counter(one.kind for one in kept)
     tree = f"https://github.com/{repo}/blob/v{version}"
     lines = [
@@ -518,7 +548,7 @@ def page_body(version: str, repo: str) -> str:
         "Записи этого выпуска целиком — "
         f"[`changelog.d/released/{version}/`]({tree}/changelog.d/released/{version}).",
         "",
-        f"Версия контракта на момент выпуска — `{declared_version()}`; "
+        f"Версия контракта на момент выпуска — `{said}`; "
         f"что означают её разряды, говорит [`docs/release.md`]({tree}/docs/release.md).",
     ]
     return "\n".join(lines)
@@ -547,6 +577,11 @@ def ensure_page(repo: str, version: str, token: str, *, dry_run: bool = False) -
     ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)),
     и здесь она же: `--page <версия>` доводит страницу для уже стоящего тега.
     """
+    if not tag_exists(f"v{version}"):
+        raise NotRun(
+            f"тега v{version} в дереве нет: площадка завела бы его сама, на голове общей "
+            "ветки, — а тег не переставляется (074)"
+        )
     if page_exists(repo, version, token):
         return f"страница выпуска v{version} уже есть — второй не заводим (074)"
     body = page_body(version, repo)
