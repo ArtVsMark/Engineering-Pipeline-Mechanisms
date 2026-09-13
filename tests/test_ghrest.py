@@ -10,13 +10,16 @@
 from __future__ import annotations
 
 import ast
+import email.message
+import io
 import json
 import threading
 import time
+import urllib.error
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import ClassVar, Final
+from typing import Any, ClassVar, Final
 
 import pytest
 
@@ -352,3 +355,115 @@ def test_the_data_comes_back_unwrapped(monkeypatch: pytest.MonkeyPatch) -> None:
         assert got["enablePullRequestAutoMerge"]["pullRequest"]["number"] == 7
     finally:
         next(gen, None)
+
+
+def raising(*outcomes: object) -> Any:
+    """Подделка открытия соединения: отдаёт названные исходы по очереди."""
+    said = list(outcomes)
+
+    def opener(*_args: object, **_kwargs: object) -> Any:
+        one = said.pop(0)
+        if isinstance(one, Exception):
+            raise one
+        return one
+
+    return opener
+
+
+class Answer:
+    """Ответ площадки, каким его видит транспорт."""
+
+    def __init__(self, payload: bytes = b"{}") -> None:
+        self.payload = payload
+        self.headers: dict[str, str] = {}
+
+    def __enter__(self) -> Answer:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.payload
+
+
+def refusal(code: int) -> urllib.error.HTTPError:
+    """Отказ площадки с названным кодом."""
+    return urllib.error.HTTPError(
+        "https://x", code, "нет", email.message.Message(), io.BytesIO("тело".encode())
+    )
+
+
+def test_a_transient_refusal_is_survived_by_a_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """503 переживается повтором, и человек об этом не узнаёт.
+
+    Замер 13.09.2026, изменение #282: площадка отдавала 503, шаг разметки упал,
+    следующий заход не стартовал вовсе, и метки доставил только третий —
+    запущенный человеком. Приём к тому моменту писался в окне руками трижды за
+    смену: известен и без механизма
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    monkeypatch.setattr(transport.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        transport.urllib.request,
+        "urlopen",
+        raising(refusal(503), refusal(502), Answer('{"да": 1}'.encode())),
+    )
+    assert transport.request("GET", "/x", "t") == {"да": 1}
+
+
+def test_a_refusal_by_rights_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """403 повтором не лечится, и ждать по нему значит прятать причину (045).
+
+    Обратная сторона: гейт повтора, повторяющий всё подряд, превращает
+    названный отказ в долгое молчание (097).
+    """
+    asked = 0
+
+    def opener(*_args: object, **_kwargs: object) -> Any:
+        nonlocal asked
+        asked += 1
+        raise refusal(403)
+
+    monkeypatch.setattr(transport.time, "sleep", lambda _: None)
+    monkeypatch.setattr(transport.urllib.request, "urlopen", opener)
+    with pytest.raises(transport.TransportError):
+        transport.request("GET", "/x", "t")
+    assert asked == 1, f"отказ по правам повторён {asked} раз"
+
+
+def test_the_retry_is_bounded_and_then_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Попыток объявленное число, и после них отказ называется, а не ждётся (100)."""
+    asked = 0
+
+    def opener(*_args: object, **_kwargs: object) -> Any:
+        nonlocal asked
+        asked += 1
+        raise refusal(503)
+
+    monkeypatch.setattr(transport.time, "sleep", lambda _: None)
+    monkeypatch.setattr(transport.urllib.request, "urlopen", opener)
+    with pytest.raises(transport.TransportError):
+        transport.request("GET", "/x", "t")
+    assert asked == transport.TRIES, f"попыток {asked}, а объявлено {transport.TRIES}"
+
+
+def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обрыв связи повторяется у чтения и НЕ повторяется у записи.
+
+    У записи исход неизвестен: повторённый POST завёл бы вторую запись там, где
+    первая уже прошла. Разница названа, а не выровнена молчанием (046).
+    """
+    for method, expected in (("GET", transport.TRIES), ("POST", 1)):
+        asked = 0
+
+        def opener(*_args: object, **_kwargs: object) -> Any:
+            nonlocal asked
+            asked += 1
+            raise urllib.error.URLError("связь оборвалась")
+
+        monkeypatch.setattr(transport.time, "sleep", lambda _: None)
+        monkeypatch.setattr(transport.urllib.request, "urlopen", opener)
+        with pytest.raises(transport.TransportError):
+            transport.request(method, "/x", "t", {"тело": 1} if method == "POST" else None)
+        assert asked == expected, f"{method}: попыток {asked}, ожидалось {expected}"
