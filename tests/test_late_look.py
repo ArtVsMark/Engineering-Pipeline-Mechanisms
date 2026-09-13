@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -96,3 +97,37 @@ def test_the_reviewers_answer_survives_verbatim() -> None:
     """
     body = module.compose(77, ANSWER)
     assert ANSWER in body
+
+
+def test_a_look_that_was_written_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ответ позднего взгляда записан — чистый исход.
+
+    Прогонялись отказы: нет токена, нет файла прогона. «Чисто» было объявлено
+    и не проверялось ни разу
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+    said = tmp_path / "прогон.json"
+    said.write_text(json.dumps([{"type": "result", "result": "Находок нет."}]), encoding="utf-8")
+    written: list[tuple[int, str]] = []
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "post", lambda repo, pr, token, body: written.append((pr, body)))
+    code = module.main(["--repo", "o/r", "--pr", "7", "--from", str(said), "--apply"])
+    assert code == module.EXIT_OK
+    assert written and written[0][0] == 7, "ответ не записан в изменение"
+    assert "записан в #7" in capsys.readouterr().out
+
+
+def test_a_dry_look_writes_nothing_and_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пробный заход показывает, что записал бы, и площадку не трогает."""
+    said = tmp_path / "прогон.json"
+    said.write_text(json.dumps([{"type": "result", "result": "Находок нет."}]), encoding="utf-8")
+    written: list[int] = []
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "post", lambda repo, pr, token, body: written.append(pr))
+    assert module.main(["--repo", "o/r", "--pr", "7", "--from", str(said)]) == module.EXIT_OK
+    assert written == [], "пробный заход записал в изменение"
+    assert "записал бы в #7" in capsys.readouterr().out

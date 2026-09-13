@@ -276,3 +276,29 @@ def test_the_gate_refuses_an_untested_addition_when_it_is_run(
     done = run_script("check_new_is_tested.py", "--base", "main", cwd=root)
     assert done.code == module.EXIT_FOUND, done.text
     assert "без_прогона" in done.text
+
+
+def test_a_change_without_mechanisms_is_clean(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Изменение не трогает механизмов — проверять нечего, и это ноль.
+
+    «Чисто» у гейта было объявлено и не прогонялось ни разу
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+    monkeypatch.setattr(module, "base_ref", lambda: "origin/main")
+    monkeypatch.setattr(module, "touched", lambda base: [])
+    assert module.main([]) == module.EXIT_OK
+    assert "проверять нечего" in capsys.readouterr().out
+
+
+def test_added_names_that_are_run_are_clean(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Добавленное названо набором — чистый исход, и число модулей названо."""
+    monkeypatch.setattr(module, "base_ref", lambda: "origin/main")
+    monkeypatch.setattr(module, "touched", lambda base: ["scripts/x.py"])
+    monkeypatch.setattr(module, "added_names", lambda base, path: {"работа"})
+    monkeypatch.setattr(module, "told_by_tests", lambda name, path, tests: True)
+    assert module.main([]) == module.EXIT_OK
+    assert "модулей тронуто 1" in capsys.readouterr().out

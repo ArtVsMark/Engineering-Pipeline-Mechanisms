@@ -274,3 +274,33 @@ def test_an_unweighed_finding_is_not_lighter_than_the_lightest() -> None:
     ]
     assert order[0] == findings_module.UNWEIGHED, order
     assert order.index("дефект") < order.index("замечание"), order
+
+
+# --- объявленные исходы захода -----------------------------------------------
+
+
+def test_an_empty_registry_is_its_own_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Реестр пуст — свой исход, а не «есть неразобранное» и не «не смог».
+
+    «Разобрано всё» и «разбирать нечего, потому что не прочитали» снаружи
+    одинаковы, и различает их только отдельный исход
+    ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_NOTHING
+
+
+def test_a_registry_with_entries_stays_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Неразобранное осталось — исход «ждёт», и он не тот же, что пустой реестр."""
+    kept = {"abc1234": findings_module.Entry(131, "дефект", "очередь читает не то")}
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_PENDING

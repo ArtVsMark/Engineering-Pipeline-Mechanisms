@@ -125,3 +125,22 @@ def test_a_bilingual_title_takes_the_project_language(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(module.ghrest, "raw_json", export)
     assert module.titles() == {"003": "По-русски"}
+
+
+def test_a_map_that_assembled_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Карта собралась и легла в файл — чистый исход.
+
+    Прогонялся только отказ: ответ каталогу пуст. «Чисто» у шага было
+    объявлено и не проверялось ни разу
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+    where = tmp_path / "карта.json"
+    monkeypatch.setattr(module, "from_base", lambda base: {"001": "mechanism"})
+    monkeypatch.setattr(module, "split", lambda said: (["001"], ["002"]))
+    monkeypatch.setattr(module, "titles", dict)
+    monkeypatch.setattr(module, "touches_the_answer", lambda base: False)
+    assert module.main(["--out", str(where)]) == module.EXIT_OK
+    assert where.is_file(), "карта не легла в файл"
+    assert "карта собрана" in capsys.readouterr().out
