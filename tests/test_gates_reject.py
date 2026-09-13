@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import os
 import subprocess
@@ -19,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import outcomes
 from tests.conftest import ROOT, RunScript, load_script
 
 BROKEN = 2
@@ -983,24 +983,6 @@ GATES = sorted(path.name for path in (ROOT / "scripts").glob("check_*.py"))
 REFUSAL_NAMES = ("EXIT_REJECTED", "EXIT_FOUND", "EXIT_FINDINGS", "REJECTED")
 
 
-def gates_run_by(tree: ast.AST) -> set[str]:
-    """Гейты, которые этот модуль ЗАПУСКАЕТ или загружает.
-
-    Считаются только доводы `run_script`/`load_script`: имя гейта, попавшее в
-    прозу или в набор строк, запуском не является и покрытием не считается.
-    """
-    found: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if getattr(node.func, "id", "") not in {"run_script", "load_script"}:
-            continue
-        for one in node.args:
-            if isinstance(one, ast.Constant) and str(one.value).startswith("check_"):
-                found.add(str(one.value))
-    return found
-
-
 def refusal_of(gate: str) -> set[int]:
     """Какими числами ЭТОТ гейт объявляет отказ — по его собственным константам.
 
@@ -1011,31 +993,7 @@ def refusal_of(gate: str) -> set[int]:
     непокрытыми, два были покрыты своим объявленным исходом
     ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
     """
-    tree = ast.parse((ROOT / "scripts" / gate).read_text(encoding="utf-8"), filename=gate)
-    found: set[int] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
-            continue
-        said = node.value.value if isinstance(node.value, ast.Constant) else None
-        if node.target.id in REFUSAL_NAMES and isinstance(said, int):
-            found.add(said)
-    return found
-
-
-def asserted_codes(tree: ast.AST) -> set[int]:
-    """Числа, с которыми модуль сравнивает исход, и имена исходов, что он называет."""
-    found: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Compare):
-            for one in node.comparators:
-                said = one.value if isinstance(one, ast.Constant) else None
-                if isinstance(said, int) and not isinstance(said, bool):
-                    found.add(said)
-                if isinstance(one, ast.Attribute) and one.attr in REFUSAL_NAMES:
-                    found.add(-1)
-                if isinstance(one, ast.Name) and one.id in REFUSAL_NAMES:
-                    found.add(-1)
-    return found
+    return {code for name, code in outcomes.declared(gate).items() if name in REFUSAL_NAMES}
 
 
 def gates_with_a_refusal_run() -> set[str]:
@@ -1055,13 +1013,15 @@ def gates_with_a_refusal_run() -> set[str]:
     """
     found: set[str] = set()
     for path in sorted((ROOT / "tests").glob("test_*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        said = asserted_codes(tree)
-        if not said:
-            continue
-        for gate in gates_run_by(tree):
+        tree = outcomes.tree_of(path)
+        numbers, names = outcomes.asserted(tree)
+        for gate in outcomes.started_by(tree):
+            if gate not in GATES:
+                continue
+            said = outcomes.declared(gate)
             wanted = refusal_of(gate)
-            if not wanted or said & wanted or -1 in said:
+            hit = numbers | {said[name] for name in names if name in said}
+            if not wanted or hit & wanted:
                 found.add(gate)
     return found
 
