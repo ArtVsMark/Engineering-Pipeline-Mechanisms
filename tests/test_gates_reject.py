@@ -980,7 +980,7 @@ GATES = sorted(path.name for path in (ROOT / "scripts").glob("check_*.py"))
 
 #: Как в этом дереве выражается ОТКАЗ гейта. Список разрешительный: новое имя
 #: исхода дописывается сюда, а не проходит само.
-REFUSAL_NAMES = ("EXIT_REJECTED", "EXIT_FOUND", "EXIT_FINDINGS", "REJECTED")
+REFUSAL_NAMES = ("EXIT_REJECTED", "EXIT_FOUND", "EXIT_FINDINGS", "EXIT_MISMATCH", "REJECTED")
 
 
 def refusal_of(gate: str) -> set[int]:
@@ -1021,9 +1021,24 @@ def gates_with_a_refusal_run() -> set[str]:
             said = outcomes.declared(gate)
             wanted = refusal_of(gate)
             hit = numbers | {said[name] for name in names if name in said}
-            if not wanted or hit & wanted:
+            if wanted and hit & wanted:
                 found.add(gate)
     return found
+
+
+def gates_without_a_known_refusal() -> list[str]:
+    """Гейты, чьё имя отказа росписи незнакомо.
+
+    ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ НАХОДКА, А НЕ ТИХИЙ ПРОПУСК. Раньше такой гейт
+    считался покрытым: `not wanted` читалось как «отказа у него нет, значит и
+    спрашивать нечего». На деле отказ был, только назывался иначе —
+    `check_env.py` объявляет `EXIT_MISMATCH`, и реестр зеленел на нём вслепую,
+    ни одного прогона не найдя. Разрешительный список пополняется ОСОЗНАННО, а
+    не обходится молчанием
+    ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
+    Нашёл внешний взгляд на #282.
+    """
+    return [gate for gate in GATES if not refusal_of(gate)]
 
 
 def test_every_gate_has_a_run_of_its_refusal() -> None:
@@ -1039,6 +1054,12 @@ def test_every_gate_has_a_run_of_its_refusal() -> None:
     `check_derived_refs.py` и `check_reread.py`, причём второй написан в ту же
     смену и ровно с этим упрёком в шапке.
     """
+    unknown = gates_without_a_known_refusal()
+    assert not unknown, (
+        "росписи незнакомо имя отказа у: " + ", ".join(unknown) + " — такой гейт "
+        "считался бы покрытым, не имея ни одного прогона отказа. Внесите имя в "
+        "REFUSAL_NAMES осознанно (068)"
+    )
     missing = sorted(set(GATES) - gates_with_a_refusal_run())
     assert not missing, (
         "гейты без прогона отказа: " + ", ".join(missing) + " — гейт, проверенный "
