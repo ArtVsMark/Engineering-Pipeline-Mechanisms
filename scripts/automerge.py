@@ -420,14 +420,18 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
 class Head:
     """Что площадка говорит о голове очереди: чем слить и сколько там работы.
 
-    `files` — число тронутых файлов, и `None` здесь НЕ ноль: «площадка не
+    `changed` — число тронутых файлов, и `None` здесь НЕ ноль: «площадка не
     сказала» и «изменение пусто» — разные ответы, и путать их значит снимать
     согласие с живого изменения по молчанию поля
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     """
 
     state: str
-    files: int | None
+    #: Сколько файлов тронуто. Имя НЕ `files`: у изменения уже есть поле с этим
+    #: именем и другим смыслом — там пути, здесь счёт. Одно имя на два смысла в
+    #: одном модуле читается как одно и то же (022). Нашёл внешний взгляд
+    #: на #288.
+    changed: int | None
 
 
 def head_look(repo: str, number: int, owner_token: str) -> Head:
@@ -802,7 +806,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # владелец пойдёт искать поломку (045). Замер 13.09.2026 на #285:
             # голова была и пуста, и красна, и очередь назвала только красноту.
             # Цена — один запрос на КРАСНУЮ голову, а не на каждого кандидата.
-            if head_look(repo, change.number, owner_token).files == 0:
+            if head_look(repo, change.number, owner_token).changed == 0:
                 name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
                 skipped["пусты"] += 1
                 continue
@@ -817,7 +821,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
 
         look = head_look(repo, change.number, owner_token)
         state = look.state
-        if look.files == 0:
+        if look.changed == 0:
             name_the_emptiness(repo, change, owner_token, dry_run=dry_run)
             skipped["пусты"] += 1
             continue

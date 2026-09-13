@@ -388,7 +388,7 @@ def test_head_look_reads_state_and_size_in_one_request(monkeypatch: Any) -> None
 
     monkeypatch.setattr(module.ghrest, "request", answer)
     look = module.head_look("o/r", 7, "token")
-    assert (look.state, look.files) == ("behind", 3)
+    assert (look.state, look.changed) == ("behind", 3)
     assert asked == ["repos/o/r/pulls/7"], "объём стоил лишнего запроса (052)"
 
 
@@ -397,7 +397,7 @@ def test_head_look_keeps_silence_apart_from_zero(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         module.ghrest, "request", lambda method, path, tok, body=None: {"mergeable_state": "clean"}
     )
-    assert module.head_look("o/r", 7, "token").files is None
+    assert module.head_look("o/r", 7, "token").changed is None
 
 
 def test_an_emptied_head_is_not_revived(platform: dict[str, Any]) -> None:

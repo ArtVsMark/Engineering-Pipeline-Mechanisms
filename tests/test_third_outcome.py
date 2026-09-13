@@ -112,10 +112,13 @@ def names_a_subject(said: str) -> bool:
     искать он будет там же, где механизм уже был
     ([158](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/158-the-third-outcome-names-its-subject.md)).
     """
-    for line in said.splitlines():
-        if "не отработал" in line and SUBJECT.search(line.split(":", 1)[-1]):
-            return True
-    return False
+    # Ищется ВО ВСЕЙ строке отказа. Привязка к «после первого двоеточия»
+    # работала на всех нынешних сообщениях и сломалась бы на первом, где предмет
+    # назван раньше, — то есть проверяла бы порядок слов вместо предмета. Сами
+    # слова отказа («гейт не отработал») ни путём, ни ключом, ни именем
+    # переменной не являются, так что шире здесь не слабее. Нашёл внешний взгляд
+    # на #295.
+    return any("не отработал" in line and SUBJECT.search(line) for line in said.splitlines())
 
 
 @pytest.mark.parametrize(
