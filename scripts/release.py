@@ -214,8 +214,6 @@ def acceptance_state(repo: str, number: int, token: str) -> str:
 #: Как площадка называет право обхода защиты для спрашивающего. Прямому толчку
 #: помогает только «always»: «pull_requests_only» разрешает обойти проверки
 #: через изменение, а выпуск толкает коммит напрямую.
-#: Общая ветка проекта: её защиту и спрашивает выпуск.
-DEFAULT_BRANCH: Final = "main"
 MAY_PUSH: Final = "always"
 CANNOT_PUSH: Final = frozenset({"never", "pull_requests_only"})
 
@@ -480,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         # ПРАВО ТОЛКНУТЬ СПРАШИВАЕТСЯ ТЕМ ЖЕ ТОКЕНОМ, которым выпуск потом
         # толкает: ответ площадки про обход относится к спрашивающему.
-        push = may_push(args.repo, DEFAULT_BRANCH, ghrest.token_from_env()) if args.repo else ""
+        push = may_push(args.repo, paths.TRUNK, ghrest.token_from_env()) if args.repo else ""
         problems = refusals(
             wanted,
             acceptance=args.acceptance,

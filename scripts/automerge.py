@@ -825,7 +825,7 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: двигает очередь на один шаг и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--base", default="main", help="общая ветка")
+    parser.add_argument("--base", default=paths.TRUNK, help="общая ветка")
     parser.add_argument("--dry-run", action="store_true", help="показать, но не сливать")
     args = parser.parse_args(argv)
 

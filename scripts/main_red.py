@@ -60,6 +60,7 @@ import automerge
 import ci_complete
 import findings
 import ghrest
+import paths
 import pipeline_checks as policy
 import report
 
@@ -491,7 +492,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--sha", default="", help="голова общей ветки; по умолчанию — её вершина")
-    parser.add_argument("--branch", default="main", help="общая ветка")
+    parser.add_argument("--branch", default=paths.TRUNK, help="общая ветка")
     parser.add_argument("--apply", action="store_true", help="записать и перезапустить")
     args = parser.parse_args(argv)
 

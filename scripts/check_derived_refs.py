@@ -35,6 +35,7 @@ import sys
 from typing import Final
 
 import ghrest
+import paths
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -42,7 +43,6 @@ EXIT_BROKEN: Final = 2
 
 #: Общая ветка: производное на ней не живёт по построению, и ссылки в неё —
 #: обычные ссылки дерева, их держит гейт 022.
-TRUNK: Final = "main"
 #: Адреса производного у площадки. Форм две, и обе ведут к файлу на ветке.
 DERIVED_RE: Final = re.compile(
     r"https://(?:raw\.githubusercontent\.com/(?P<rawrepo>[\w.-]+/[\w.-]+)/(?P<rawref>[\w.-]+)/(?P<rawpath>[\w./-]+)"
@@ -82,7 +82,7 @@ def ours(lines: list[str], repo: str) -> list[tuple[str, str]]:
             where = match["rawrepo"] or match["repo"]
             ref = match["rawref"] or match["ref"]
             path = match["rawpath"] or match["path"]
-            if where.lower() != repo.lower() or ref == TRUNK:
+            if where.lower() != repo.lower() or ref == paths.TRUNK:
                 continue
             if (ref, path) not in found:
                 found.append((ref, path))
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY"), help="владелец/имя")
     parser.add_argument("--base", default=None, help="точка сравнения; по умолчанию общая ветка")
     args = parser.parse_args(argv)
-    base = args.base or f"origin/{os.environ.get('GITHUB_BASE_REF') or TRUNK}"
+    base = args.base or f"origin/{os.environ.get('GITHUB_BASE_REF') or paths.TRUNK}"
 
     if not args.repo:
         print(

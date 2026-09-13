@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--branch", default="main")
+    parser.add_argument("--branch", default=paths.TRUNK)
     parser.add_argument("--summary-job", default="ci-complete")
     args = parser.parse_args(argv)
 
