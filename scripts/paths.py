@@ -36,6 +36,10 @@ SHOWCASE: Final = Path(".rules/showcase.json")
 
 #: Объявленные расписания и роль каждого: наблюдает оно или действует.
 SCHEDULES: Final = Path(".rules/schedules.json")
+
+#: Чем защищена общая ветка — объявлением, а не памятью. Настройка живёт вне
+#: дерева, и ослабление её не краснеет нигде само по себе.
+PROTECTION: Final = Path(".rules/protection.json")
 #: Фрагменты журнала и собранный журнал.
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
@@ -59,6 +63,7 @@ ALL: Final = (
     PROPOSALS,
     SHOWCASE,
     SCHEDULES,
+    PROTECTION,
     FRAGMENTS,
     RELEASED,
     CHANGELOG,

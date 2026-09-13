@@ -320,6 +320,116 @@ def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
 
 #: Версия языка вида `3.14` — по ней сравниваются матрица и манифест. Патч
 #: сюда не входит намеренно: матрица гоняет ветку языка, а не выпуск.
+#: Как площадка называет право обхода для спрашивающего. «never» — не вправе
+#: никогда; прочие значения означают, что вправе при каких-то условиях.
+NEVER: Final = "never"
+
+
+def declared_protection(where: Path | None = None) -> dict[str, Any]:
+    """Объявленная защита общей ветки — из дерева."""
+    path = where or paths.PROTECTION
+    if not path.is_file():
+        raise NotRun(f"нет {path}: защита общей ветки не объявлена (075)")
+    said: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    if not said.get("branch"):
+        raise NotRun(f"{path}: ветка не названа — сравнивать не с чем (075)")
+    return said
+
+
+def protection_moved(repo: str, token: str, mine: dict[str, Any] | None = None) -> list[Drift]:
+    """Защита общей ветки против объявленной: что ослаблено молча.
+
+    НАСТРОЙКА ЖИВЁТ ВНЕ ДЕРЕВА, и это делает её слепым пятном: её не видит ни
+    ревью, ни прогон гейтов, а ослабление не краснеет нигде. У соседа-грейдера
+    то же место закрыто `check_branch_protection.py`, и там же названа причина:
+    публичное утверждение «список обходов пуст» должно кем-то проверяться.
+
+    СРАВНИВАЕТСЯ С ОБЪЯВЛЕНИЕМ, А НЕ СО ВЧЕРАШНИМ СНИМКОМ. Снимок согласился бы
+    с любым изменением: он описывает, а не требует. Объявление требует, и
+    потому ослабление становится правкой файла — то есть изменением, которое
+    кто-то открывает и объясняет (064).
+
+    ПРАВО ОБХОДА СПРАШИВАЕТСЯ ПРО СПРАШИВАЮЩЕГО. Площадка отдаёт
+    `current_user_can_bypass` — ответ про ТОТ токен, которым задан вопрос.
+    Здесь это токен прогона, и объявление говорит о нём: прогон не вправе
+    толкать мимо проверок никогда. Про токен владельца поле не говорит ничего,
+    и выдавать один ответ за другой значило бы назвать проверенным то, чего не
+    спрашивали (046).
+    """
+    said = declared_protection()
+    branch = str(said["branch"])
+    found: list[Drift] = []
+
+    rules = ghrest.request("GET", f"repos/{repo}/rules/branches/{branch}", token) or []
+    kinds_now = sorted({str(one.get("type") or "") for one in rules})
+    kinds_want = sorted(str(one) for one in said.get("rules") or [])
+    gone = [name for name in kinds_want if name not in kinds_now]
+    if gone:
+        found.append(
+            Drift(
+                "защита общей ветки",
+                f"правил объявлено {len(kinds_want)}, на площадке действует {len(kinds_now)}: "
+                f"нет {', '.join(gone)}",
+                "вернуть правило в набор либо объявить ослабление в `.rules/protection.json` "
+                "с названной причиной",
+            )
+        )
+
+    checks = [one for one in rules if str(one.get("type") or "") == "required_status_checks"]
+    for one in checks:
+        given = one.get("parameters") or {}
+        names_now = sorted(
+            str((item or {}).get("context") or "")
+            for item in given.get("required_status_checks") or []
+        )
+        names_want = sorted(str(name) for name in said.get("required_contexts") or [])
+        if names_now != names_want:
+            found.append(
+                Drift(
+                    "защита общей ветки",
+                    f"обязательные контексты: объявлено {names_want}, на площадке {names_now}",
+                    "привести набор к объявленному либо перечитать объявление",
+                )
+            )
+        strict_now = bool(given.get("strict_required_status_checks_policy"))
+        if strict_now != bool(said.get("strict")):
+            found.append(
+                Drift(
+                    "защита общей ветки",
+                    f"свежесть относительно общей ветки: объявлено {said.get('strict')}, "
+                    f"на площадке {strict_now}",
+                    "вернуть требование свежести либо объявить отказ от него с причиной",
+                )
+            )
+
+    # ПРАВО ОБХОДА ЧИТАЕТСЯ У КАЖДОГО НАБОРА, ПРИКРЫВАЮЩЕГО ЭТУ ВЕТКУ. Их может
+    # быть несколько, и вправе обойти достаточно одного.
+    for one in rules:
+        ruleset = one.get("ruleset_id")
+        if ruleset is None:
+            continue
+        got = ghrest.request("GET", f"repos/{repo}/rulesets/{ruleset}", token) or {}
+        can = str(got.get("current_user_can_bypass") or "")
+        if not can:
+            raise NotRun(
+                f"набор {ruleset}: площадка не сказала про право обхода — "
+                "ответ не прочитан, и «обхода нет» из этого не следует (045)"
+            )
+        want = str(said.get("run_token_may_bypass") or NEVER)
+        if can != want:
+            found.append(
+                Drift(
+                    "защита общей ветки",
+                    f"право обхода у токена прогона: объявлено «{want}», площадка говорит «{can}»",
+                    "снять обход у прогона либо объявить его в `.rules/protection.json` "
+                    "с названной причиной — прогон мимо гейтов это путь в общую ветку",
+                )
+            )
+        break
+
+    return found
+
+
 MINOR_RE: Final = re.compile(r"^(?P<minor>\d+\.\d+)")
 
 
@@ -660,6 +770,7 @@ SOURCES: Final = (
     "выпуск каталога",
     "версии языка",
     "вердикты по предложениям",
+    "защита общей ветки",
 )
 
 
@@ -674,6 +785,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
             lambda: snapshot_is_stale(fetch(WHERE_URL), mine, str(mine.get("project") or repo)),
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
+        ("защита общей ветки", lambda: protection_moved(repo, token, mine)),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
         (
             "вердикты по предложениям",

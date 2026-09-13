@@ -102,6 +102,10 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(module, "fetch", broken)
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
+    # Источник защиты ветки ходит к площадке своим запросом, а не через
+    # `fetch`: в подделке его гасят отдельно, иначе проверка молчания одних
+    # источников пошла бы в сеть за другим.
+    monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
     found, silent = module.look("o/r", "token", {"rules": {}})
     assert found == []
     assert silent == ["каталог", "сводка семьи", "вердикты по предложениям"]
@@ -117,6 +121,7 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     )
     monkeypatch.setattr(module, "snapshot_is_stale", lambda *_: [drift])
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
+    monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
     found, silent = module.look("o/r", "token", {})
     assert found == [drift]
     assert silent == ["каталог"]
@@ -478,3 +483,128 @@ def test_a_verdict_that_is_not_a_mapping_is_named_too() -> None:
     """Ответ пришёл не словарём — тоже «прочитать нечем», а не «ответа нет»."""
     found = module.proposals_answered(answer("admitted"), MINE, "o/r")  # type: ignore[arg-type]
     assert len(found) == 1 and "не словарём" in found[0].said
+
+
+PROTECTED: dict[str, Any] = {
+    "branch": "main",
+    "enforcement": "active",
+    "rules": ["deletion", "non_fast_forward", "required_status_checks"],
+    "required_contexts": ["ci-complete"],
+    "strict": True,
+    "run_token_may_bypass": "never",
+}
+
+
+def platform(
+    *,
+    kinds: tuple[str, ...] = ("deletion", "non_fast_forward", "required_status_checks"),
+    contexts: tuple[str, ...] = ("ci-complete",),
+    strict: bool = True,
+    bypass: str | None = "never",
+) -> Any:
+    """Ответ площадки о защите ветки — подделываемый по каждому свойству."""
+    rules: list[dict[str, Any]] = []
+    for kind in kinds:
+        one: dict[str, Any] = {"type": kind, "ruleset_id": 1}
+        if kind == "required_status_checks":
+            one["parameters"] = {
+                "strict_required_status_checks_policy": strict,
+                "required_status_checks": [{"context": name} for name in contexts],
+            }
+        rules.append(one)
+
+    def reply(_method: str, path: str, *_args: object, **_kwargs: object) -> Any:
+        if "/rules/branches/" in path:
+            return rules
+        return {} if bypass is None else {"current_user_can_bypass": bypass}
+
+    return reply
+
+
+def watched(monkeypatch: pytest.MonkeyPatch, reply: Any) -> list[Any]:
+    """Находки источника «защита общей ветки» на подделанном ответе."""
+    monkeypatch.setattr(module, "declared_protection", lambda *a, **k: PROTECTED)
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    found: list[Any] = module.protection_moved("o/r", "t")
+    return found
+
+
+def test_protection_that_matches_the_declaration_is_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сошлось — записи нет. Иначе канал шумит на исправном (051)."""
+    assert watched(monkeypatch, platform()) == []
+
+
+def test_a_removed_rule_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Снятое правило названо поимённо: «правил стало меньше» чинить нечем."""
+    found = watched(monkeypatch, platform(kinds=("required_status_checks",)))
+    assert len(found) == 1
+    assert "deletion" in found[0].said and "non_fast_forward" in found[0].said
+    assert found[0].next_step, "запись без следующего шага — сообщение о погоде"
+
+
+def test_a_changed_required_context_is_named_with_both_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Обязательный контекст разошёлся — сказано, что объявлено и что стоит.
+
+    Имя контекста — дословный вход защиты: расхождение на один символ значит,
+    что защита ждёт вердикта, которого никто не выдаёт.
+    """
+    found = watched(monkeypatch, platform(contexts=("ci",)))
+    assert len(found) == 1
+    assert "ci-complete" in found[0].said and "'ci'" in found[0].said
+
+
+def test_a_dropped_freshness_requirement_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Снятая свежесть — тоже ослабление: два зелёных порознь дают красное после слияния."""
+    found = watched(monkeypatch, platform(strict=False))
+    assert len(found) == 1
+    assert "свежесть" in found[0].said
+
+
+def test_a_granted_bypass_for_the_run_token_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Право обхода у токена ПРОГОНА — находка, а не новость.
+
+    Прогон, способный толкать мимо гейтов, и есть путь в общую ветку мимо них:
+    объявить это можно, но молча получить — нет (064).
+    """
+    found = watched(monkeypatch, platform(bypass="always"))
+    assert len(found) == 1
+    assert "обхода" in found[0].said and "always" in found[0].said
+
+
+def test_an_unanswered_bypass_is_not_read_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка промолчала про обход — это отказ, а не «обхода нет».
+
+    Молчание, прочитанное как «всё хорошо», — ровно тот вывод из незнания,
+    который запрещён
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Источник дрейфа при этом не роняет остальные: заход назовёт его молчащим.
+    """
+    with pytest.raises(module.NotRun):
+        watched(monkeypatch, platform(bypass=None))
+
+
+def test_the_declaration_is_read_from_the_tree(tmp_path: Path) -> None:
+    """Объявление берётся файлом дерева, а не снимком площадки."""
+    where = tmp_path / "protection.json"
+    where.write_text(json.dumps(PROTECTED, ensure_ascii=False), encoding="utf-8")
+    assert module.declared_protection(where)["branch"] == "main"
+
+
+def test_a_declaration_without_a_branch_is_an_input_error(tmp_path: Path) -> None:
+    """Объявление без ветки — ошибка входа, а не «сравнивать нечего» (075)."""
+    where = tmp_path / "protection.json"
+    where.write_text(json.dumps({"rules": []}), encoding="utf-8")
+    with pytest.raises(module.NotRun):
+        module.declared_protection(where)
+
+
+def test_the_live_declaration_matches_the_shape_the_source_reads() -> None:
+    """Объявление в дереве читается тем же разбором, что и в прогоне (022)."""
+    said = module.declared_protection(ROOT / ".rules" / "protection.json")
+    assert said["branch"] == "main"
+    assert said["required_contexts"] == ["ci-complete"]
+    assert said["run_token_may_bypass"] == "never"
