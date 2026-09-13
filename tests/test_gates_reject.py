@@ -224,7 +224,7 @@ def test_two_records_outward_are_warned_about_not_rejected(
     result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
     assert result.code == CLEAN, "предупреждение не отказ: слияние оно не держит"
     assert "::warning::" in result.text, "сборность названа вслух, а не молча пропущена"
-    assert "2 записи" in result.text and "132" in result.text
+    assert "наружу: 2" in result.text and "132" in result.text
 
 
 def test_an_internal_record_is_not_a_second_theme(run_script: RunScript, tmp_path: Path) -> None:

@@ -197,5 +197,5 @@ def test_say_if_compound_speaks_only_above_the_threshold(
 
     check.say_if_compound(["changelog.d/one.added.md", "changelog.d/two.fixed.md"])
     said = capsys.readouterr().err
-    assert "::warning::" in said and "2 записи" in said
+    assert "::warning::" in said and "наружу: 2" in said
     assert "разделите" in said, "предупреждение называет, что делать (142)"
