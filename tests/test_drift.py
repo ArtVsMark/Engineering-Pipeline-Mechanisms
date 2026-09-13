@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from pathlib import Path
@@ -108,7 +109,12 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
     found, silent = module.look("o/r", "token", {"rules": {}})
     assert found == []
-    assert silent == ["каталог", "сводка семьи", "вердикты по предложениям"]
+    assert silent == [
+        "каталог",
+        "сводка семьи",
+        "вердикты по предложениям",
+        "набор вопросов витрины",
+    ]
     assert "Не спрошено" in module.render_body(found, silent)
 
 
@@ -122,6 +128,7 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(module, "snapshot_is_stale", lambda *_: [drift])
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
+    monkeypatch.setattr(module, "showcase_questions_moved", lambda *_: [])
     found, silent = module.look("o/r", "token", {})
     assert found == [drift]
     assert silent == ["каталог"]
@@ -693,3 +700,80 @@ def test_all_sources_silent_is_not_a_settled_state(
     monkeypatch.setattr(module, "look", lambda repo, token, mine: ([], list(module.SOURCES)))
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
     assert "ни один источник не ответил" in capsys.readouterr().err
+
+
+#: Эталонный набор каталога в прогонах: два вопроса, больше не нужно.
+THEIR_SHOWCASE = {"questions": [{"id": "ci"}, {"id": "release"}]}
+
+
+def showcase(*ids: str) -> dict[str, Any]:
+    """Наш ответ витрины из названных вопросов."""
+    return {"questions": [{"id": one} for one in ids]}
+
+
+def test_a_question_the_catalogue_asks_and_we_do_not_is_drift() -> None:
+    """Каталог спросил новое — у нас пробел, и он назван.
+
+    Пока сверялся только НОМЕР контракта витрины, состав мог разойтись молча:
+    добавить вопрос, не тронув схему, каталог вправе, и обе стороны видели бы
+    своё зелёное (055).
+    """
+    found = module.showcase_questions_moved(THEIR_SHOWCASE, showcase("ci"))
+    assert [one.source for one in found] == ["showcase-questions"]
+    assert "release" in found[0].said
+    assert found[0].next_step, "запись без того, что делать, — сообщение о погоде (142)"
+
+
+def test_an_answer_of_ours_the_catalogue_does_not_ask_is_drift() -> None:
+    """Свой вопрос сверх набора — второй список, и он расходится молча."""
+    found = module.showcase_questions_moved(THEIR_SHOWCASE, showcase("ci", "release", "своё"))
+    assert [one.source for one in found] == ["showcase-extra"]
+    assert "своё" in found[0].said
+
+
+def test_an_agreeing_showcase_is_silent() -> None:
+    """Состав сошёлся — молчание: дрейф говорит о расхождении, а не о погоде."""
+    assert module.showcase_questions_moved(THEIR_SHOWCASE, showcase("ci", "release")) == []
+
+
+def test_the_order_of_questions_is_not_drift() -> None:
+    """Порядок — оформление витрины, а не её состав.
+
+    Судить порядок значило бы красить перестановку строк; сосед у сужения
+    назван (195).
+    """
+    assert module.showcase_questions_moved(THEIR_SHOWCASE, showcase("release", "ci")) == []
+
+
+def test_an_empty_showcase_is_the_third_outcome() -> None:
+    """Набор без вопросов — поломка входа, а не «состав сошёлся» (075)."""
+    with pytest.raises(module.NotRun):
+        module.showcase_questions_moved(THEIR_SHOWCASE, {"questions": []})
+
+
+def test_our_showcase_is_read_from_the_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Наш набор берётся из дерева, а отсутствие файла — третий исход."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(module.NotRun):
+        module.ours_showcase()
+    (tmp_path / ".rules").mkdir()
+    (tmp_path / ".rules" / "showcase.json").write_text(
+        json.dumps(showcase("ci"), ensure_ascii=False), encoding="utf-8"
+    )
+    assert module.asked_ids(module.ours_showcase()) == ["ci"]
+
+
+def test_every_named_source_is_actually_asked() -> None:
+    """Имя источника в списке и вопрос к нему — одно и то же.
+
+    Источник, названный в `SOURCES` и не спрошенный, делал бы проверку «молчат
+    все» неверной: знаменатель больше числителя, и заход никогда не признал бы
+    себя сломанным (075). Обратное так же: спрошенный и не названный не попадёт
+    в раздел «Не спрошено» и пропадёт молча.
+    """
+    said = inspect.getsource(module.look)
+    unasked = [one for one in module.SOURCES if f'"{one}"' not in said]
+    assert not unasked, f"источник назван, а вопроса к нему нет: {unasked}"
+    assert len(module.SOURCES) == len(set(module.SOURCES)), "имя источника названо дважды"

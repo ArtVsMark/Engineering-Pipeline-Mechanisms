@@ -33,3 +33,9 @@ WHERE_URL: Final = f"{RAW}/badges/export/where.json"
 
 #: Ответ каталога на предложения: вердикты по нашим записям.
 PROPOSALS_URL: Final = f"{RAW}/main/.rules/proposals.json"
+
+#: НАБОР ВОПРОСОВ ВИТРИНЫ — ЭТАЛОН, А НЕ НАША ПАМЯТЬ. Список один на все
+#: проекты семьи, и живёт он у каталога; наш файл — копия, снятая рукой. Копия,
+#: которую не с чем сверить, расходится молча
+#: ([055](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/055-your-own-expectations-are-a-hypothesis.md)).
+SHOWCASE_URL: Final = f"{RAW}/main/.rules/showcase.json"

@@ -552,6 +552,7 @@ def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[D
 #: статус `admitted` с номером либо `rejected` с причиной. Файл каталога, а не
 #: наш: он и отвечает.
 CATALOGUE_PROPOSALS: Final = catalogue.PROPOSALS_URL
+CATALOGUE_SHOWCASE: Final = catalogue.SHOWCASE_URL
 #: Раздел ответа, в котором каталог держит вердикты. Имя взято У КАТАЛОГА, а не
 #: придумано: разбор по памяти молчал четыре раза подряд (#140).
 VERDICTS: Final = "verdicts"
@@ -677,6 +678,63 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
     return found
 
 
+def ours_showcase() -> dict[str, Any]:
+    """Наш набор вопросов витрины — из дерева."""
+    path = paths.SHOWCASE
+    if not path.is_file():
+        raise NotRun(f"нет {path}: сверять набор вопросов не с чем (075)")
+    said = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(said, dict):
+        raise NotRun(f"{path}: ответ витрины не словарь")
+    return said
+
+
+def asked_ids(said: dict[str, Any]) -> list[str]:
+    """Имена вопросов в объявленном порядке; пустой список — не ответ (075)."""
+    questions = said.get("questions")
+    if not isinstance(questions, list) or not questions:
+        raise NotRun("в наборе витрины нет ни одного вопроса")
+    return [str(one.get("id") or "") for one in questions if isinstance(one, dict)]
+
+
+def showcase_questions_moved(theirs: dict[str, Any], mine: dict[str, Any]) -> list[Drift]:
+    """Набор вопросов витрины разошёлся с эталоном каталога.
+
+    ЭТАЛОН ЗДЕСЬ ЧУЖОЙ, А КОПИЯ НАША. Список вопросов один на все проекты
+    семьи — иначе витрины не сравнить, — и живёт он у каталога; наш файл снят
+    с него рукой. Пока сверялся только НОМЕР контракта, состав мог разойтись
+    молча: каталог вправе добавить вопрос, не тронув схему, и обе стороны видят
+    своё зелёное
+    ([055](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/055-your-own-expectations-are-a-hypothesis.md)).
+
+    СУДИТСЯ СОСТАВ, А НЕ ПОРЯДОК И НЕ ОТВЕТЫ. Порядок вопросов — оформление
+    витрины, а ответ по каждому — наш и обязан быть нашим: сверять его с чужим
+    значило бы требовать одинаковых проектов
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    theirs_ids, ours_ids = set(asked_ids(theirs)), set(asked_ids(mine))
+    found: list[Drift] = []
+    added = sorted(theirs_ids - ours_ids)
+    if added:
+        found.append(
+            Drift(
+                "showcase-questions",
+                f"каталог спрашивает то, чего у нас нет: {', '.join(added)}",
+                "ответить по новым вопросам витрины — `absent` с причиной тоже ответ (154)",
+            )
+        )
+    gone = sorted(ours_ids - theirs_ids)
+    if gone:
+        found.append(
+            Drift(
+                "showcase-extra",
+                f"у нас отвечено то, чего каталог не спрашивает: {', '.join(gone)}",
+                "снять свой вопрос либо предложить его каталогу — второй список расходится молча",
+            )
+        )
+    return found
+
+
 def render_body(found: list[Drift], silent: list[str] | None = None) -> str:
     """Тело живой задачи: записи, неопрошенные источники и как это снимается."""
     lines = [
@@ -765,6 +823,7 @@ SOURCES: Final = (
     "версии языка",
     "вердикты по предложениям",
     "защита общей ветки",
+    "набор вопросов витрины",
 )
 
 
@@ -786,6 +845,10 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
             lambda: proposals_answered(
                 fetch(CATALOGUE_PROPOSALS), ours_proposals(), str(mine.get("project") or repo)
             ),
+        ),
+        (
+            "набор вопросов витрины",
+            lambda: showcase_questions_moved(fetch(CATALOGUE_SHOWCASE), ours_showcase()),
         ),
     )
     for name, ask in asks:
