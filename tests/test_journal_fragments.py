@@ -166,3 +166,36 @@ def test_a_text_that_did_not_move_is_untouched() -> None:
     """Переезда не было — переписывать нечего: разбор не трогает текст зря."""
     said = "[решение](../docs/decisions/006-merge-by-squash.md)"
     assert module.relink(said, was=Path("changelog.d"), now=Path("changelog.d")) == said
+
+
+check = load_script("check_journal.py")
+
+
+def test_outward_counts_themes_and_not_internal_notes() -> None:
+    """Тема — запись наружу; внутренней сопровождают чужую работу (132)."""
+    записи = [
+        "changelog.d/a-theme.added.md",
+        "changelog.d/a-side-note.internal.md",
+        "changelog.d/another-theme.fixed.md",
+    ]
+    assert check.outward(записи) == [
+        "changelog.d/a-theme.added.md",
+        "changelog.d/another-theme.fixed.md",
+    ]
+
+
+def test_say_if_compound_speaks_only_above_the_threshold(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Порог взят замером, и молчание ниже него — тоже ответ.
+
+    Замер 13.09.2026 по 120 слитым: одна запись наружу у 101 изменения. Гейт,
+    предупреждающий на норме, учит пролистывать предупреждения (051).
+    """
+    check.say_if_compound(["changelog.d/one.added.md", "changelog.d/note.internal.md"])
+    assert capsys.readouterr().err == "", "одна тема предупреждения не заслуживает"
+
+    check.say_if_compound(["changelog.d/one.added.md", "changelog.d/two.fixed.md"])
+    said = capsys.readouterr().err
+    assert "::warning::" in said and "2 записи" in said
+    assert "разделите" in said, "предупреждение называет, что делать (142)"
