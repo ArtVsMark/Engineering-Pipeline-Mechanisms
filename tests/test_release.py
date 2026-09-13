@@ -283,6 +283,11 @@ def test_a_tag_of_the_tree_is_seen_and_a_stranger_is_not(
     monkeypatch.chdir(root)
     assert module.tag_exists("v9.9.0") is True
     assert module.tag_exists("v9.9.1") is False
+    # ОБРАЗЕЦ — НЕ ТЕГ. `git tag --list` понимает шаблоны, и на `v9.9.*` он
+    # ответил бы «есть»: догоняющая кнопка сочла бы страницу заведённой для
+    # выпуска, которого нет. Нашёл внешний взгляд на #303.
+    assert module.tag_exists("v9.9.*") is False
+    assert module.tag_exists("v9.9.?") is False
 
 
 def test_the_contract_version_is_read_out_of_the_tagged_tree(

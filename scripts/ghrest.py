@@ -169,7 +169,16 @@ BACKOFF: Final = 2.0
 CREATES: Final = "POST"
 
 
-def _survivable(method: str, exc: Exception) -> bool:
+#: Операции GraphQL, повтор которых безопасен: они ИДЕМПОТЕНТНЫ — второй вызов
+#: с теми же доводами не рождает второй сущности, а приводит к тому же
+#: состоянию. Список держится рядом с :data:`NO_REST` и сверяется с ним
+#: прогоном: новая операция обязана попасть сюда осознанно, вместе с ответом на
+#: вопрос «а её-то повторять можно?»
+#: ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
+IDEMPOTENT: Final = frozenset({"enablePullRequestAutoMerge", "disablePullRequestAutoMerge"})
+
+
+def _survivable(method: str, path: str, exc: Exception) -> bool:
     """Стоит ли повторять этот отказ — и повторять ли его ЭТОМУ запросу.
 
     ПЯТИСОТЫЙ НЕ ЗНАЧИТ «НЕ ОБРАБОТАНО», И ЭТО БЫЛО ОШИБКОЙ ПРЕМИСЫ. Прежняя
@@ -185,6 +194,13 @@ def _survivable(method: str, exc: Exception) -> bool:
     `DELETE` идемпотентны по смыслу: повтор с тем же телом не рождает второй
     сущности. `POST` рождает — и не повторяется ни при каком 5xx.
 
+    GraphQL — ИСКЛЮЧЕНИЕ, И ОНО ОБЪЯВЛЕНО. Туда всё ходит `POST`, включая
+    взведение и снятие авто-мержа, а они идемпотентны: второй вызов приводит к
+    тому же состоянию. Граница по методу сделала их хрупкими на ровном месте —
+    нашёл внешний взгляд на #302, двумя записями. Список операций закрыт
+    (:data:`NO_REST`) и сверяется с :data:`IDEMPOTENT` прогоном, так что новая
+    операция потребует ответа на вопрос о повторе, а не проскочит молча.
+
     ЦЕНА НАЗВАНА: на сбое площадки создающий запрос теперь не переживёт отказ и
     вернёт его зовущему. Это выбрано осознанно — потерянный комментарий видно и
     можно повторить рукой, а задвоенный живёт вечно и выглядит как две разные
@@ -194,8 +210,9 @@ def _survivable(method: str, exc: Exception) -> bool:
     ОБРЫВ СВЯЗИ — по-прежнему только у чтения: там исход неизвестен у ЛЮБОЙ
     записи, а не только у создающей.
     """
+    creates = method == CREATES and path != GRAPHQL
     if isinstance(exc, urllib.error.HTTPError):
-        return exc.code in TRANSIENT and method != CREATES
+        return exc.code in TRANSIENT and not creates
     return isinstance(exc, urllib.error.URLError) and method == "GET"
 
 
@@ -243,7 +260,7 @@ def request(
                 return json.loads(payload) if payload else None
         except (urllib.error.HTTPError, urllib.error.URLError) as exc:
             last = exc
-            if not _survivable(method, exc):
+            if not _survivable(method, path, exc):
                 break
         except ValueError as exc:
             raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
