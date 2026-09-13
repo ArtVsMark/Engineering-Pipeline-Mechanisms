@@ -55,6 +55,14 @@ from dataclasses import dataclass
 from typing import Final
 
 #: Ветка, в которую писать напрямую нельзя ни из какой головы (131).
+#:
+#: ЛИТЕРАЛ ЗДЕСЬ НАМЕРЕННЫЙ, а не забытая унификация с `paths.TRUNK`. Перехват
+#: живёт вне `scripts/`: он запускается оболочкой до и вместо механизмов, своего
+#: окружения не имеет и импортировать дерево не вправе — зависимость от него
+#: означала бы, что запрет на толчок в общую ветку перестаёт работать ровно
+#: тогда, когда дерево сломано. Цена названа: имя ветки здесь второе, и при
+#: переименовании его правят оба места
+#: ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 SHARED: Final = "main"
 #: Ключи `git push`, за которыми идёт значение, а не имя ветки.
 WITH_VALUE: Final = frozenset({"--repo", "-o", "--push-option", "--exec", "--receive-pack"})

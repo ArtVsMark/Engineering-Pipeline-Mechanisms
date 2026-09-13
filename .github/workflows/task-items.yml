@@ -89,21 +89,26 @@ jobs:
       # Гейт разметки проверяет связь ДО слияния, когда сбыться ей ещё нечему.
       # После слияния связь становится проверяемым утверждением: `Closes` мог
       # не закрыть, а `Refs` — закрыть. Оба состояния молчаливы.
+      # КНОПКА ЕСТЬ, И ЭТО НЕ УДОБСТВО: события теряются, и у потерянного
+      # события должен быть ручной повтор по названному номеру (104).
       - name: судьба задачи после слияния
-        if: github.event_name == 'pull_request' && github.event.pull_request.merged
-        continue-on-error: true
+        if: >-
+          (github.event_name == 'pull_request' && github.event.pull_request.merged)
+          || (github.event_name == 'workflow_dispatch' && inputs.pr != '')
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          MERGED_PR: ${{ github.event.pull_request.number }}
+          MERGED_PR: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           set -uo pipefail
           rc=0
           python scripts/task_items.py --fate --pr "${MERGED_PR}" --apply || rc=$?
           case "$rc" in
             0) echo "связь с задачами сбылась" ;;
-            3) echo "::warning::связь с задачей не сбылась — разбор в самой задаче" ;;
-            *) echo "::warning::Проверка судьбы задачи не отработала (код $rc)." ;;
+            3) echo "::error::связь с задачей не сбылась — разбор в самой задаче"
+               exit 1 ;;
+            *) echo "::error::Проверка судьбы задачи не отработала (код $rc)."
+               exit 1 ;;
           esac
 
       # ПУНКТ-ССЫЛКА СЛЕДУЕТ ЗАДАЧЕ, А НЕ ВЕДЁТСЯ ОТДЕЛЬНО. Своего состояния у

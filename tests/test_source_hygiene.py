@@ -126,6 +126,28 @@ def sleeping(tree: ast.AST) -> list[ast.FunctionDef]:
     return found
 
 
+def without_prose(node: ast.FunctionDef) -> ast.FunctionDef:
+    """Та же функция без докстроки: проза сроком не является."""
+    body = list(node.body)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    bare = ast.FunctionDef(
+        name=node.name,
+        args=node.args,
+        body=body or [ast.Pass()],
+        decorator_list=[],
+        returns=None,
+        type_comment=None,
+        type_params=[],
+    )
+    return ast.fix_missing_locations(bare)
+
+
 #: Слова, которыми в этом дереве называется срок ожидания. Список
 #: РАЗРЕШИТЕЛЬНЫЙ: новое имя срока не проходит молча, а дописывается сюда (068).
 DEADLINE_WORDS = ("deadline", "timeout", "tries", "until")
@@ -145,7 +167,11 @@ def test_every_wait_has_a_deadline(path: Path) -> None:
     """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in sleeping(tree):
-        said = ast.dump(node)
+        # СРОК ИЩЕТСЯ В КОДЕ, А НЕ В ТЕКСТЕ. Разбор всей функции вместе с
+        # докстрокой засчитывал бы за срок слово «timeout», написанное в
+        # объяснении: механизм, у которого срок только в прозе, ждёт ровно так
+        # же долго. Нашёл внешний взгляд на #277.
+        said = ast.dump(without_prose(node))
         assert any(word in said for word in DEADLINE_WORDS), (
             f"{path.name}: «{node.name}» ждёт, но срока не называет — "
             "ожидание без срока неотличимо от зависшего механизма (100)"
@@ -163,10 +189,17 @@ def env_defaults(tree: ast.AST) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
 
     def is_env(node: ast.AST) -> bool:
+        """`os.environ.get(…)` и `os.getenv(…)` — одно и то же, и обе формы в счёт.
+
+        Разбор, знающий одну, давал бы уверенность ровно там, где написана
+        другая. Нашёл внешний взгляд на #277.
+        """
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            return False
+        if node.func.attr == "getenv":
+            return True
         return (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "get"
+            node.func.attr == "get"
             and isinstance(node.func.value, ast.Attribute)
             and node.func.value.attr == "environ"
         )

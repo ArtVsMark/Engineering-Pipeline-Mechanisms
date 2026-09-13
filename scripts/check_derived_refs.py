@@ -41,8 +41,6 @@ EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 
-#: Общая ветка: производное на ней не живёт по построению, и ссылки в неё —
-#: обычные ссылки дерева, их держит гейт 022.
 #: Адреса производного у площадки. Форм две, и обе ведут к файлу на ветке.
 DERIVED_RE: Final = re.compile(
     r"https://(?:raw\.githubusercontent\.com/(?P<rawrepo>[\w.-]+/[\w.-]+)/(?P<rawref>[\w.-]+)/(?P<rawpath>[\w./-]+)"
