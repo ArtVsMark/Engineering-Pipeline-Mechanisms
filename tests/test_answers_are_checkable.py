@@ -56,6 +56,10 @@ ELSEWHERE: Final[dict[str, str]] = {}
 #: гейта, и ведётся отдельно намеренно — там имя, здесь путь.
 FOREIGN_PATHS: Final[dict[str, str]] = {
     "scripts/onboard_consumer.py": "механизм каталога: им собран наш ответ, у нас его нет",
+    "scripts/check_untrusted_prompt.py": (
+        "механизм каталога: у него вторая половина 085, "
+        "и наш гейт взял у него образец пометки (090)"
+    ),
 }
 
 
