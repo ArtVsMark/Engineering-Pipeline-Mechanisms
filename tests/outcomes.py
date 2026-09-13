@@ -124,7 +124,8 @@ def started_by(tree: ast.AST) -> set[str]:
     параметризованно: `@pytest.mark.parametrize("gate", WITHOUT_INPUT)` и
     `run_script(gate, ...)`. Разбор, знающий только литерал в скобках, таких
     прогонов не видел вовсе — семь прогонов третьего исхода не засчитались, и
-    реестр показывал долг, которого уже нет (044).
+    реестр показывал долг, которого уже нет
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 
     Поэтому имена берутся ещё из набора параметров и из констант уровня
     модуля — но ТОЛЬКО у модуля, который механизмы действительно запускает.

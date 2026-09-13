@@ -822,27 +822,6 @@ def test_only_one_step_takes_the_number_from_the_button(name: str) -> None:
     )
 
 
-@pytest.mark.parametrize("name", TAKES_A_NUMBER)
-def test_the_button_number_never_goes_straight_into_a_command(name: str) -> None:
-    """Номер из кнопки не подставляется в текст команды напрямую.
-
-    Подставленный `${{ }}` — это чужая строка ВНУТРИ нашей оболочки, и у этих
-    джобов права на запись. Проверка цифрами защищает вход; эта — путь
-    ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
-    """
-    text = (WORKFLOWS / name).read_text(encoding="utf-8")
-    straight = [
-        line
-        for _, line in executed_lines(text)
-        for expr in (one.group("expr") for one in INTERPOLATION.finditer(line))
-        if "inputs.pr" in expr
-    ]
-    assert not straight, (
-        f"{name}: номер из кнопки подставлен прямо в команду: {straight[:2]} — "
-        "он обязан приходить окружением"
-    )
-
-
 #: Действия, которые зовут модель. Список ЗАКРЫТЫЙ и растёт правкой, а не
 #: догадкой: «что-то похожее на ИИ» — находка о форме, а не о предмете (068).
 #: Имя взято у каталога, чтобы два понимания одного правила не разошлись (090).

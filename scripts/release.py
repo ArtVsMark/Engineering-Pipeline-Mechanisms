@@ -212,14 +212,14 @@ def acceptance_state(repo: str, number: int, token: str) -> str:
     return ACCEPTANCE_CLOSED if state == "closed" else ACCEPTANCE_OPEN
 
 
-#: Как площадка называет право обхода защиты для спрашивающего. Прямому толчку
-#: помогает только «always»: «pull_requests_only» разрешает обойти проверки
-#: через изменение, а выпуск толкает коммит напрямую.
 #: Соавтор машинного коммита выпуска. Написание сверяется целиком со списком
 #: `.github/authors.txt`: разночтение означало бы, что подпись ставит не то,
 #: что думали, — а это и есть та поломка, ради которой список заведён (123).
 MECHANISM: Final = "Engineering Pipeline Mechanisms <noreply@github.com>"
 
+#: Как площадка называет право обхода защиты для спрашивающего. Прямому толчку
+#: помогает только «always»: «pull_requests_only» разрешает обойти проверки
+#: через изменение, а выпуск толкает коммит напрямую.
 MAY_PUSH: Final = "always"
 CANNOT_PUSH: Final = frozenset({"never", "pull_requests_only"})
 
@@ -532,7 +532,7 @@ def page_body(version: str, repo: str) -> str:
     говорить о нём же и через год.
     """
     kept = build_changelog.read_fragments(paths.RELEASED / version)
-    said = contract_at(f"v{version}")
+    at_tag = contract_at(f"v{version}")
     counted = Counter(one.kind for one in kept)
     tree = f"https://github.com/{repo}/blob/v{version}"
     lines = [
@@ -552,7 +552,7 @@ def page_body(version: str, repo: str) -> str:
         "Записи этого выпуска целиком — "
         f"[`changelog.d/released/{version}/`]({tree}/changelog.d/released/{version}).",
         "",
-        f"Версия контракта на момент выпуска — `{said}`; "
+        f"Версия контракта на момент выпуска — `{at_tag}`; "
         f"что означают её разряды, говорит [`docs/release.md`]({tree}/docs/release.md).",
     ]
     return "\n".join(lines)

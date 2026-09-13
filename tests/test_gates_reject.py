@@ -1021,7 +1021,7 @@ def gates_with_a_refusal_run() -> set[str]:
             said = outcomes.declared(gate)
             wanted = refusal_of(gate)
             hit = numbers | {said[name] for name in names if name in said}
-            if wanted and hit & wanted:
+            if hit & wanted:
                 found.add(gate)
     return found
 
@@ -1049,10 +1049,14 @@ def test_every_gate_has_a_run_of_its_refusal() -> None:
     порядок работы окна держал это вниманием автора, а внимание — не механизм
     ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
-    Замер 13.09.2026, первый же заход: из тринадцати гейтов **два** проверялись
-    только чистыми функциями, а по пути отказа не прогонялись ни разу —
-    `check_derived_refs.py` и `check_reread.py`, причём второй написан в ту же
-    смену и ровно с этим упрёком в шапке.
+    Замер 13.09.2026, и чисел в нём ДВА — они о разных моментах, а не спорят.
+    Первый заход назвал непокрытыми **четыре** гейта из тринадцати; проверка
+    премисы сняла два из них — у `check_pipeline` и `check_required_context`
+    отказ объявлен исходом 3, и требовать от них единицы значило бы «чинить»
+    исправное (044). Осталось **два**: `check_derived_refs.py` и
+    `check_reread.py`, причём второй написан в ту же смену и ровно с этим
+    упрёком в шапке. Запись журнала называет первое число, эта строка —
+    второе; расхождение нашёл внешний взгляд на #282.
     """
     unknown = gates_without_a_known_refusal()
     assert not unknown, (
