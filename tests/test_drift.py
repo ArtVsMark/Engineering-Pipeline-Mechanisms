@@ -642,3 +642,54 @@ def test_every_ruleset_is_asked_about_the_bypass(monkeypatch: pytest.MonkeyPatch
     assert sorted(asked) == [1, 2], f"спрошены не все наборы: {asked}"
     assert len(found) == 1, found
     assert "наборе 2" in found[0].said and "always" in found[0].said
+
+
+# --- объявленные исходы захода -----------------------------------------------
+
+
+def test_no_drift_is_its_own_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Внешние входы сошлись с деревом — свой исход, а не «записано».
+
+    «Спросили и сошлось» и «записали находку» — разные состояния, и путать их
+    значит терять ответ там, где он есть
+    ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "ours", dict)
+    monkeypatch.setattr(module, "look", lambda repo, token, mine: ([], []))
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_NOTHING
+    assert "дрейфа нет" in capsys.readouterr().out
+
+
+def test_a_found_drift_is_recorded(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вход сдвинулся — исход записи, и число находок названо."""
+    moved = module.Drift("каталог", "было 200, стало 203", "перечитать ответы")
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "ours", dict)
+    monkeypatch.setattr(module, "look", lambda repo, token, mine: ([moved], []))
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_RECORDED
+    said = capsys.readouterr().out
+    assert "сдвинулось внешних входов: 1" in said
+    assert "перечитать ответы" in said, "запись без того, что делать, — сообщение о погоде"
+
+
+def test_all_sources_silent_is_not_a_settled_state(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Молчат ВСЕ источники — поломка захода, а не «дрейфа нет».
+
+    «Спросить не удалось» и «сошлось» снаружи одинаковы, и принять первое за
+    второе значит зазеленеть на незнании
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "ours", dict)
+    monkeypatch.setattr(module, "look", lambda repo, token, mine: ([], list(module.SOURCES)))
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+    assert "ни один источник не ответил" in capsys.readouterr().err

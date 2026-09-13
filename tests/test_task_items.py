@@ -359,3 +359,31 @@ def test_an_unreadable_closer_is_not_read_as_this_merge(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(module.ghrest, "paginate", refuse)
     assert module.closed_by("o/r", 12, "t") == ""
+
+
+# --- объявленные исходы захода -----------------------------------------------
+
+
+def test_a_sweep_that_marked_nothing_is_its_own_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Обход прошёл, отмечать было нечего — свой исход, а не «записано».
+
+    «Прошёл и отметил» и «прошёл и нечего» — разные состояния: по первому
+    видно работу, по второму — что работы не было
+    ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module.items, "sweep", lambda repo, token, *, dry_run: 0)
+    assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_NOTHING
+    assert "отмечено пунктов по объявлению автора: 0" in capsys.readouterr().out
+
+
+def test_a_sweep_that_marked_something_records_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пункты отмечены — исход записи, и число названо."""
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module.items, "sweep", lambda repo, token, *, dry_run: 2)
+    assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_RECORDED
+    assert "отмечено пунктов по объявлению автора: 2" in capsys.readouterr().out
