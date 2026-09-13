@@ -105,6 +105,24 @@ def test_the_platform_name_beats_the_origin_url(monkeypatch: pytest.MonkeyPatch)
     assert "/" in name
 
 
+def test_a_tree_that_agrees_with_the_platform_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Имена в дереве совпали с каноном — исход чистый.
+
+    Прогонялись отказ и находка, а «чисто» у гейта объявлено и не проверялось
+    ни разу
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    Сеть сюда не ходит: канон приходит окружением прогона, а редирект не
+    спрашивается без токена.
+    """
+    root = repo_with(tmp_path, "см. https://github.com/o/name/blob/main/x\n")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/name")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+
+
 def test_an_empty_tree_is_the_third_outcome(tmp_path: Path) -> None:
     """Имён в дереве нет — гейт падает, а не проходит вхолостую (075)."""
     root = repo_with(tmp_path, "ни одного адреса\n")
