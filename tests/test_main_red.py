@@ -594,6 +594,9 @@ def test_two_flakes_of_one_name_are_two_records(monkeypatch: pytest.MonkeyPatch)
         return []
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    # Обход слитых гасится явно: предмет этой подделки — открытые изменения, и
+    # сеть за слитыми увела бы проверку к настоящей площадке.
+    monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
     found = module.flakes_on_changes("o/r", "token", [], "12.09.2026")
     assert [(one.name, one.run, one.where) for one in found] == [
         ("review", 11, "#7"),
@@ -614,8 +617,74 @@ def test_a_change_head_is_read_by_pages(monkeypatch: pytest.MonkeyPatch) -> None
         return [{"number": 7, "head": {"sha": "aaa"}}] if "pulls?" in path else []
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
     module.flakes_on_changes("o/r", "token", [], "12.09.2026")
     checks = [path for path in asked if "check-runs" in path]
     assert checks, "записи проверок головы изменения не читались вовсе"
     for path in checks:
         assert "per_page=100" not in path, f"страница одна, хвост теряется: {path}"
+
+
+def test_a_flake_on_a_merged_change_is_still_a_flake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слитое изменение обходится наравне с открытым: мигание — свойство головы.
+
+    Замер 13.09.2026: реестр #99 говорил «повторных зелёных не было», а на
+    головах слитых #259 и #262 лежало по настоящему миганию `ci-complete`.
+    Изменение, слившееся за минуты, исчезает из списка открытых раньше, чем шаг
+    успевает заглянуть, — то есть чем БЫСТРЕЕ очередь, тем меньше миганий видит
+    детектор, и молчание реестра оказывается следствием того, куда он смотрит, а
+    не наблюдением
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    """
+    blinked: list[dict[str, object]] = [
+        {
+            "name": "ci-complete",
+            "status": "completed",
+            "conclusion": "failure",
+            "started_at": "01",
+            "details_url": "https://github.com/o/r/actions/runs/77/job/1",
+        },
+        {"name": "ci-complete", "status": "completed", "conclusion": "success", "started_at": "02"},
+    ]
+
+    def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
+        if "pulls?" in path:
+            return []
+        return blinked if "ccc" in path else []
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(
+        module.ghrest,
+        "merged_changes",
+        lambda *a, **k: [{"number": 262, "head": {"sha": "ccc"}, "merged_at": "вчера"}],
+    )
+    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026")
+    assert [(one.name, one.run, one.where) for one in found] == [("ci-complete", 77, "#262")]
+
+
+def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обратная сторона: открытые изменения из обхода не выпали (097).
+
+    Добавив слитые, легко подменить один список другим — и потерять ровно те
+    мигания, которые видны прямо сейчас.
+    """
+    blinked: list[dict[str, object]] = [
+        {
+            "name": "lint",
+            "status": "completed",
+            "conclusion": "failure",
+            "started_at": "01",
+            "details_url": "https://github.com/o/r/actions/runs/88/job/1",
+        },
+        {"name": "lint", "status": "completed", "conclusion": "success", "started_at": "02"},
+    ]
+
+    def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
+        if "pulls?" in path:
+            return [{"number": 9, "head": {"sha": "ddd"}}]
+        return blinked if "ddd" in path else []
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
+    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026")
+    assert [(one.name, one.where) for one in found] == [("lint", "#9")]
