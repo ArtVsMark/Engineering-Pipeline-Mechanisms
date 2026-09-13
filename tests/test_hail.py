@@ -191,3 +191,43 @@ def test_a_conflict_is_not_announced_by_its_own_run() -> None:
     )
     hours = {str(one["cron"]).split()[1] for one in document[True]["schedule"]}
     assert hours == {"*"}, f"заход не ежечасный: {hours}"
+
+
+# --- объявленные исходы захода -----------------------------------------------
+
+
+def test_without_the_owner_token_the_hail_says_it_is_not_set(monkeypatch: Any, capsys: Any) -> None:
+    """Нет токена владельца — «не настроено», а не «окликать некого».
+
+    Состояние слияния площадка отдаёт только с доступом на запись: на токене
+    прогона оклик про конфликт был бы слепым, а слепой оклик хуже
+    отсутствующего. Молчание тут состоянием не является
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
+    monkeypatch.delenv(module.ENV_TOKEN, raising=False)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_UNSET
+    assert module.ENV_TOKEN in capsys.readouterr().err
+
+
+def test_a_hail_that_placed_nothing_is_clean(monkeypatch: Any, capsys: Any) -> None:
+    """Никому не о чем сказать — законный ноль, а не «предмет не найден».
+
+    Предмет здесь список живых изменений, и он прочитан; пустой список окликов
+    — ответ, а не молчание.
+    """
+    monkeypatch.setenv(module.ENV_TOKEN, "владельца")
+    monkeypatch.setattr(module, "hail", lambda repo, token, *, dry_run, now: 0)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+    assert "окликов поставлено: 0" in capsys.readouterr().out
+
+
+def test_a_platform_refusal_is_the_third_outcome(monkeypatch: Any, capsys: Any) -> None:
+    """Площадка отказала — «не отработал», а не «окликать некого» (045)."""
+
+    def refuse(repo: str, token: str, *, dry_run: bool, now: Any) -> int:
+        raise module.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setenv(module.ENV_TOKEN, "владельца")
+    monkeypatch.setattr(module, "hail", refuse)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+    assert "не отработал" in capsys.readouterr().err

@@ -451,3 +451,74 @@ def test_a_draft_is_not_paid_for_with_a_request(monkeypatch: pytest.MonkeyPatch)
     assert not [path for path in asked if path.endswith("issues/7")], (
         f"состояние названного спрошено у черновика: {asked}"
     )
+
+
+# --- объявленные исходы захода -----------------------------------------------
+
+
+def test_without_the_owner_token_the_sweep_says_it_is_not_set(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Нет токена владельца — «не настроено», а не «застрявших нет».
+
+    Состояние слияния площадка отдаёт только с доступом на запись, и обход без
+    него был бы слепым. Слепой обход, отвечающий «чисто», хуже отсутствующего
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    monkeypatch.delenv(module.ENV_TOKEN, raising=False)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_UNSET
+    assert module.ENV_TOKEN in capsys.readouterr().err
+
+
+def test_a_sweep_that_found_nothing_is_clean(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Живые изменения прочитаны, застрявших нет — законный ноль."""
+    monkeypatch.setenv(module.ENV_TOKEN, "владельца")
+    monkeypatch.setattr(
+        module,
+        "sweep",
+        lambda repo, token, now, after: [module.Verdict(7, False, "идут проверки")],
+    )
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "застрявших нет" in said
+    assert "#7: не застряло" in said, "о здоровом изменении не сказано ничего (154)"
+
+
+def test_a_stuck_change_is_its_own_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Застрявшее — свой исход, а не «чисто» и не «не отработал».
+
+    Три исхода, а не два: «обошёл и нашёл», «обошёл и не нашёл», «не обошёл»
+    ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
+    """
+    monkeypatch.setenv(module.ENV_TOKEN, "владельца")
+    monkeypatch.setattr(
+        module,
+        "sweep",
+        lambda repo, token, now, after: [
+            module.Verdict(7, True, "прогонов нет", ("ci-complete",)),
+            module.Verdict(8, False, "идут проверки"),
+        ],
+    )
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_STUCK
+    assert "застрявших: 1 из 2 живых" in capsys.readouterr().out
+
+
+def test_a_platform_refusal_is_the_third_outcome_of_the_sweep(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Площадка отказала — «не отработал», и предмет назван (158)."""
+
+    def refuse(repo: str, token: str, now: Any, after: Any) -> list[Any]:
+        raise module.ghrest.TransportError("repos/o/r/pulls → 503")
+
+    monkeypatch.setenv(module.ENV_TOKEN, "владельца")
+    monkeypatch.setattr(module, "sweep", refuse)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+    said = capsys.readouterr().err
+    assert "не отработал" in said and "repos/o/r/pulls" in said
