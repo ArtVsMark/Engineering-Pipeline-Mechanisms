@@ -751,6 +751,27 @@ def test_an_empty_showcase_is_the_third_outcome() -> None:
         module.showcase_questions_moved(THEIR_SHOWCASE, {"questions": []})
 
 
+def test_ours_file_names_what_is_missing_and_what_is_malformed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Общее чтение наших файлов: отсутствие и негодная форма — третий исход.
+
+    Обобщено по ТРЕТЬЕМУ случаю (093): два чтения жили порознь законно, третье
+    стало поводом. Причина отсутствия остаётся своей у каждого зовущего — она
+    объясняет читателю, чего именно не подключено.
+    """
+    monkeypatch.chdir(tmp_path)
+    негодный = Path(".rules/showcase.json")
+    with pytest.raises(module.NotRun, match="канал не подключён"):
+        module.ours_file(негодный, missing="канал не подключён")
+    негодный.parent.mkdir(parents=True)
+    негодный.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="не словарь"):
+        module.ours_file(негодный, missing="канал не подключён")
+    негодный.write_text('{"questions": []}', encoding="utf-8")
+    assert module.ours_file(негодный, missing="канал не подключён") == {"questions": []}
+
+
 def test_our_showcase_is_read_from_the_tree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
