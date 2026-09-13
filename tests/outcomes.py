@@ -83,15 +83,49 @@ def with_outcomes() -> dict[str, dict[str, int]]:
     return found
 
 
+def script_names(node: ast.AST) -> set[str]:
+    """Имена `*.py` среди строковых литералов этого узла."""
+    return {
+        str(one.value)
+        for one in ast.walk(node)
+        if isinstance(one, ast.Constant)
+        and isinstance(one.value, str)
+        and one.value.endswith(".py")
+    }
+
+
 def started_by(tree: ast.AST) -> set[str]:
-    """Механизмы, которые этот модуль запускает или загружает."""
+    """Механизмы, которые этот модуль запускает или загружает.
+
+    ПРЯМОЙ ВЫЗОВ — НЕ ЕДИНСТВЕННАЯ ФОРМА ЗАПУСКА. Набор гоняет гейты и
+    параметризованно: `@pytest.mark.parametrize("gate", WITHOUT_INPUT)` и
+    `run_script(gate, ...)`. Разбор, знающий только литерал в скобках, таких
+    прогонов не видел вовсе — семь прогонов третьего исхода не засчитались, и
+    реестр показывал долг, которого уже нет (044).
+
+    Поэтому имена берутся ещё из набора параметров и из констант уровня
+    модуля — но ТОЛЬКО у модуля, который механизмы действительно запускает.
+    Цена названа: модуль, перечисливший имя в константе и не прогнавший его,
+    засчитает лишнее. Имя в прозе так не пройдёт — докстринг константой
+    модуля не является
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
     found: set[str] = set()
+    direct = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or getattr(node.func, "id", "") not in WAYS_IN:
             continue
-        for one in node.args:
-            if isinstance(one, ast.Constant) and str(one.value).endswith(".py"):
-                found.add(str(one.value))
+        direct = True
+        found |= {name for one in node.args for name in script_names(one)}
+    if not direct:
+        return found
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "parametrize":
+            found |= {name for one in node.args for name in script_names(one)}
+    for node in getattr(tree, "body", []):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            found |= script_names(node.value)
     return found
 
 
@@ -114,6 +148,17 @@ def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
                     names.add(one.id)
             elif isinstance(one, ast.Attribute) and one.attr.startswith(OUTCOME_PREFIX):
                 names.add(one.attr)
+            # Исход берут и по имени из разбора самого механизма:
+            # `declared(gate)["EXIT_BROKEN"]`. Строка живёт внутри сравнения, а
+            # не в прозе, и не назвать это прогоном значило бы держать в долге
+            # строку, которую уже прогоняют (075).
+            names |= {
+                str(said.value)
+                for said in ast.walk(one)
+                if isinstance(said, ast.Constant)
+                and isinstance(said.value, str)
+                and said.value.startswith(OUTCOME_PREFIX)
+            }
     return numbers, names
 
 
