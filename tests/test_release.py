@@ -544,3 +544,75 @@ def test_a_rejected_tag_is_named_too_and_names_its_own_repair() -> None:
     assert "::error::" in said, "отказ тега не назван"
     assert "git push origin ${tag}" in said, "починка отказа тега не названа"
     assert "не повторять" in said.lower(), "повтор выпуска после этого отказа не запрещён"
+
+
+def test_a_branch_that_will_refuse_the_push_is_named_before_the_build(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Право толкнуть спрашивается ДО сборки журнала, а не после неё.
+
+    12.09.2026 выпуск `1.0.0` собрал журнал, поставил тег и упёрся в набор
+    правил общей ветки: у машинного коммита выпуска нет проверки изменения.
+    Порядок толчков починен тогда же, но узнавалось это по-прежнему после
+    сборки. Шаг, который нельзя отменить, получает проверку ПЕРЕД собой
+    ([074](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/074-one-shot-irreversible-steps-get-their-own-guard.md)).
+    """
+    tree(tmp_path, tag="v9.9.0")
+    said = module.refusals("9.10.0", acceptance="", push="never")
+    assert any("не примет коммит выпуска" in one for one in said), said
+    assert any("Bypass" in one for one in said), "починка не названа"
+
+
+@pytest.mark.parametrize("answer", ["never", "pull_requests_only"], ids=["никогда", "только PR"])
+def test_both_refusing_answers_stop_the_release(answer: str, tmp_path: Path) -> None:
+    """Прямому толчку помогает только «always».
+
+    «pull_requests_only» разрешает обойти проверки через изменение, а выпуск
+    толкает коммит напрямую: считать это разрешением значило бы пропустить
+    выпуск, который наверняка не доедет (097).
+    """
+    tree(tmp_path, tag="v9.9.0")
+    assert any(
+        "право обхода" in one for one in module.refusals("9.10.0", acceptance="", push=answer)
+    )
+
+
+def test_an_unread_answer_does_not_block_the_release(tmp_path: Path) -> None:
+    """Непрочитанный ответ площадки выпуск НЕ держит: запрета из незнания нет.
+
+    Отказ только на определённом, предупреждение на вероятном
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)):
+    порядок толчков и так не даст уехать тегу без ветки.
+    """
+    tree(tmp_path, tag="v9.9.0")
+    said = module.refusals("9.10.0", acceptance="", push=module.MAY_PUSH)
+    assert not any("обход" in one for one in said), said
+
+
+def test_an_unread_answer_is_said_out_loud(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """…но молчанием оно не становится: непрочитанное называется (154)."""
+    tree(tmp_path, tag="v9.9.0")
+    module.announce("9.10.0", acceptance="", push="")
+    assert "не прочитано" in capsys.readouterr().out
+
+
+def test_a_branch_without_rules_is_read_as_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Правил на ветке нет вовсе — толкать никто не мешает.
+
+    Это не поблажка из незнания: пустой ответ площадки о правилах и есть
+    ответ, в отличие от непрочитанного (097).
+    """
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: [])
+    assert module.may_push("o/r", "main", "t") == module.MAY_PUSH
+
+
+def test_an_unreachable_platform_reads_as_unasked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка не ответила — пусто, а не «обход есть» (045)."""
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    assert module.may_push("o/r", "main", "t") == ""

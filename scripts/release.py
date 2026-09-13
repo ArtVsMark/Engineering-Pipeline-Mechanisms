@@ -211,8 +211,59 @@ def acceptance_state(repo: str, number: int, token: str) -> str:
     return ACCEPTANCE_CLOSED if state == "closed" else ACCEPTANCE_OPEN
 
 
+#: Как площадка называет право обхода защиты для спрашивающего. Прямому толчку
+#: помогает только «always»: «pull_requests_only» разрешает обойти проверки
+#: через изменение, а выпуск толкает коммит напрямую.
+#: Общая ветка проекта: её защиту и спрашивает выпуск.
+DEFAULT_BRANCH: Final = "main"
+MAY_PUSH: Final = "always"
+CANNOT_PUSH: Final = frozenset({"never", "pull_requests_only"})
+
+
+def may_push(repo: str, branch: str, token: str) -> str:
+    """Что площадка говорит про право ЭТОГО токена толкать в общую ветку.
+
+    Пусто — значит не спрошено: ответ площадки не прочитан, и «обход есть» из
+    незнания не выводится
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ЗАЧЕМ ЭТО ВООБЩЕ. 12.09.2026 выпуск `1.0.0` собрал журнал, поставил тег и
+    упёрся в набор правил общей ветки: у машинного коммита выпуска нет и не
+    может быть проверки изменения. Толчок ветки отвергнут, тег принят — метка
+    повисла на коммите, до общей ветки не доехавшем. Порядок толчков починен
+    тогда же, но узнаётся всё это по-прежнему ПОСЛЕ сборки. Шаг, который
+    нельзя отменить, получает собственную проверку ПЕРЕД собой
+    ([074](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/074-one-shot-irreversible-steps-get-their-own-guard.md)),
+    и вот она.
+
+    СПРАШИВАЕТСЯ ПРО СПРАШИВАЮЩЕГО, и это единственный честный способ: поле
+    `current_user_can_bypass` отвечает про тот токен, которым задан вопрос. У
+    выпуска это токен владельца — тот самый, которым он потом толкает.
+    """
+    try:
+        rules = ghrest.request("GET", f"repos/{repo}/rules/branches/{branch}", token) or []
+    except ghrest.TransportError:
+        return ""
+    for one in rules:
+        ruleset = (one or {}).get("ruleset_id")
+        if ruleset is None:
+            continue
+        try:
+            got = ghrest.request("GET", f"repos/{repo}/rulesets/{ruleset}", token) or {}
+        except ghrest.TransportError:
+            return ""
+        return str(got.get("current_user_can_bypass") or "")
+    # Правил на ветке нет вовсе — толкать некуда не мешает никто.
+    return MAY_PUSH
+
+
 def refusals(
-    wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD, breaking: bool = False
+    wanted: str,
+    *,
+    acceptance: str,
+    state: str = ACCEPTANCE_UNREAD,
+    breaking: bool = False,
+    push: str = MAY_PUSH,
 ) -> list[str]:
     """Все причины НЕ выпускать — списком, а не первой попавшейся.
 
@@ -229,6 +280,18 @@ def refusals(
 
     if git("status", "--porcelain"):
         problems.append("дерево грязно: выпуск делается с чистого дерева, иначе тег врёт")
+
+    # ОТКАЗ ТОЛЬКО НА ОПРЕДЁННОМ, ПРЕДУПРЕЖДЕНИЕ НА ВЕРОЯТНОМ (051). «never» и
+    # «pull_requests_only» значат, что прямой толчок отвергнут наверняка, и
+    # собирать журнал незачем. Непрочитанный ответ означает незнание, а не
+    # запрет: он печатается отдельной строкой в `announce`, но выпуск не
+    # держит — порядок толчков и так не даст уехать тегу без ветки.
+    if push in CANNOT_PUSH:
+        problems.append(
+            f"общая ветка не примет коммит выпуска: право обхода у этого токена — «{push}». "
+            "Коммит выпуска собирает машина из уже слитых фрагментов, проверки изменения у "
+            "него нет и быть не может (Settings → Rules → Bypass list)"
+        )
 
     tags = git("tag", "--list", f"v{wanted}")
     if tags:
@@ -299,9 +362,22 @@ def refusals(
 
 
 def announce(
-    wanted: str, *, acceptance: str, state: str = ACCEPTANCE_UNREAD, breaking: bool = False
+    wanted: str,
+    *,
+    acceptance: str,
+    state: str = ACCEPTANCE_UNREAD,
+    breaking: bool = False,
+    push: str = MAY_PUSH,
 ) -> None:
     """Печатает, из чего собран выпуск: человек читает это перед необратимым."""
+    if not push:
+        # НЕПРОЧИТАННОЕ НАЗЫВАЕТСЯ, А НЕ МОЛЧИТ (154). Выпуск это не держит:
+        # запрета из незнания не выводят, а порядок толчков и так не даст
+        # уехать тегу без ветки.
+        print(
+            "право обхода защиты не прочитано: площадка не ответила. Если общая ветка "
+            "отвергнет коммит, тег НЕ уедет — но узнается это после сборки"
+        )
     waiting = fragments()
     contract = touches_contract(waiting)
     print(f"выпуск {wanted}: фрагментов {len(waiting)}, из них о поверхности {len(contract)}")
@@ -402,8 +478,23 @@ def main(argv: list[str] | None = None) -> int:
             if args.acceptance.isdigit()
             else ACCEPTANCE_NOT_A_NUMBER
         )
-        problems = refusals(wanted, acceptance=args.acceptance, state=state, breaking=args.breaking)
-        announce(wanted, acceptance=args.acceptance, state=state, breaking=args.breaking)
+        # ПРАВО ТОЛКНУТЬ СПРАШИВАЕТСЯ ТЕМ ЖЕ ТОКЕНОМ, которым выпуск потом
+        # толкает: ответ площадки про обход относится к спрашивающему.
+        push = may_push(args.repo, DEFAULT_BRANCH, ghrest.token_from_env()) if args.repo else ""
+        problems = refusals(
+            wanted,
+            acceptance=args.acceptance,
+            state=state,
+            breaking=args.breaking,
+            push=push or MAY_PUSH,
+        )
+        announce(
+            wanted,
+            acceptance=args.acceptance,
+            state=state,
+            breaking=args.breaking,
+            push=push,
+        )
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
