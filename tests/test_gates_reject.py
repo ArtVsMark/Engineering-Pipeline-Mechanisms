@@ -203,6 +203,51 @@ def test_change_with_fragment_passes(run_script: RunScript, tmp_path: Path) -> N
     assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
 
 
+def test_two_records_outward_are_warned_about_not_rejected(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Две записи наружу — два «зачем»: предупреждение, а не отказ (132).
+
+    ОТКАЗА ЗДЕСЬ БЫТЬ НЕ ДОЛЖНО, и это требование самого правила: широкая тема
+    — переименование вместе со всеми его следствиями — неделима, и машине не
+    отличить её от сборности. Ложный отказ на ней дороже пропуска (051), а
+    совещательный канал основного пути не держит (084).
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "first-theme.added.md").write_text("одно\n\n#7\n", encoding="utf-8")
+    (repo / "changelog.d" / "second-theme.fixed.md").write_text("другое\n\n#8\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "две темы разом")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == CLEAN, "предупреждение не отказ: слияние оно не держит"
+    assert "::warning::" in result.text, "сборность названа вслух, а не молча пропущена"
+    assert "2 записи" in result.text and "132" in result.text
+
+
+def test_an_internal_record_is_not_a_second_theme(run_script: RunScript, tmp_path: Path) -> None:
+    """Внутренняя запись темой не считается: ею сопровождают чужую работу.
+
+    Иначе предупреждение срабатывало бы ровно на том, что автор объявил
+    безразличным потребителю, — и его научились бы пролистывать (051).
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "the-theme.added.md").write_text("одно\n\n#7\n", encoding="utf-8")
+    (repo / "changelog.d" / "a-side-note.internal.md").write_text(
+        "> **Потребителю безразлично:** внутренняя правка\n\nтекст\n\n#7\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "тема и внутренняя запись")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == CLEAN
+    assert "::warning::" not in result.text, "внутренняя запись второй темой не является"
+
+
 def test_a_fragment_named_by_the_task_number_is_rejected(
     run_script: RunScript, tmp_path: Path
 ) -> None:

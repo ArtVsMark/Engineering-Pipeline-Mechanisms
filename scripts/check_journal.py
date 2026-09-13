@@ -37,6 +37,24 @@ CODE_PREFIXES: Final = ("scripts/", ".github/workflows/")
 TESTS_PREFIX: Final = "tests/"
 #: Род записи, означающий починку дефекта.
 FIXED: Final = "fixed"
+#: Род записи, которой потребителю безразлично: внутренняя. Темой изменения она
+#: не является — ею сопровождают чужую работу, и считать её второй темой значило
+#: бы предупреждать о том, что автор как раз и объявил безразличным.
+INTERNAL: Final = "internal"
+
+#: Сколько тем наружу изменение везёт БЕЗ предупреждения. Тема объявляется
+#: записью журнала: две записи наружу — это два «зачем», сказанные самим
+#: автором, а не догадка машины о смысле правки.
+#:
+#: ЗАМЕР 13.09.2026 ПО 120 СЛИТЫМ: одна запись наружу у 101 изменения, две — у
+#: шести, четыре — у одного. Порог берётся оттуда, а не из головы.
+#:
+#: ПЕРВЫЙ ПРИЗНАК ЗАМЕР ОТВЕРГ. Считать зоны (`area/*`) не вышло: они вложены
+#: друг в друга — правка `automerge.py` даёт разом `area/gates` и `area/merge`,
+#: — и порог в четыре зоны дал бы пять ложных срабатываний из 120 и ни одного
+#: истинного
+#: ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+TOPICS_WITHOUT_WARNING: Final = 1
 
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
@@ -52,6 +70,44 @@ def numbered(path: str) -> bool:
     """Назван ли фрагмент номером задачи, а не смыслом записи."""
     match = journal.NAME_RE.match(path.rsplit("/", 1)[-1])
     return bool(match and journal.DIGITS_ONLY_RE.match(match.group("slug")))
+
+
+def outward(fragments: list[str]) -> list[str]:
+    """Записи, обращённые НАРУЖУ: внутренние темой изменения не считаются."""
+    return sorted(name for name in fragments if not name.endswith(f".{INTERNAL}.md"))
+
+
+def say_if_compound(fragments: list[str]) -> None:
+    """Предупреждает о сборном изменении — предупреждает, а не отвергает.
+
+    ОДНО ИЗМЕНЕНИЕ — ОДНА ТЕМА
+    ([132](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/132-one-change-carries-one-topic.md)).
+    Сборное можно сделать честным, объявив все задачи, но нельзя сделать
+    разбираемым: его не отревьюить по частям, не откатить по частям и не найти
+    в нём причину поломки по частям.
+
+    ОТКАЗА ЗДЕСЬ НЕТ, И ЭТО ТРЕБОВАНИЕ САМОГО ПРАВИЛА: широкая тема — это одна
+    тема, и ложный отказ на ней дороже пропуска
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md),
+    [084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
+    Переименование вместе со всеми его следствиями неделимо, и машине это не
+    отличить от сборности — поэтому решает автор, а механизм только спрашивает.
+
+    ПРЕДМЕТ — ОБЪЯВЛЕНИЕ АВТОРА, А НЕ ДОГАДКА О СМЫСЛЕ. Запись журнала отвечает
+    «что изменилось» читателю снаружи; две записи наружу — это два «зачем»,
+    названные самой работой.
+    """
+    themes = outward(fragments)
+    if len(themes) <= TOPICS_WITHOUT_WARNING:
+        return
+    print(
+        f"::warning::Изменение везёт {len(themes)} записи журнала наружу "
+        f"({', '.join(themes)}) — то есть {len(themes)} темы, объявленные им самим. "
+        "Сборное изменение не отревьюить, не откатить и не разобрать по частям (132). "
+        "Если темы независимы — разделите; если тема одна и просто широкая, это законно "
+        "и предупреждение можно пропустить.",
+        file=sys.stderr,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if fragments:
         print(f"фрагмент журнала есть: {', '.join(fragments)}")
+        say_if_compound(fragments)
         return EXIT_OK
 
     substantive = [
