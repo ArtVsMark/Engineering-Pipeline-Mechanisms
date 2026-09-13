@@ -713,3 +713,32 @@ def test_the_revision_counts_before_and_after_the_counter_apart() -> None:
     said = " ".join(lines)
     assert "#99" in said and "#3" in said, "старая запись исчезла из вывода"
     assert "до счётчика пунктов" in said and task_shape.ITEMS_SINCE in said
+
+
+def test_a_fully_read_debt_is_clean(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Все источники долга прочитаны — чистый исход, а не «частично».
+
+    «Прочитано всё» и «часть неизвестна» — разные состояния, и второе у этого
+    шага уже прогонялось, а первое было объявлено и не проверялось ни разу
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(debt, "findings_debt", lambda repo, token: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: [])
+    monkeypatch.setattr(debt, "branch_debt", lambda repo, token: ([], []))
+    monkeypatch.setattr(debt, "closed_issues", lambda repo, token: [])
+    monkeypatch.setattr(
+        debt, "inbox_body", lambda repo, token, closed: ("правила: осталось 0", "", None)
+    )
+    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
+    monkeypatch.setattr(debt, "open_issues", lambda repo, token: [])
+    monkeypatch.setattr(debt, "looks_done", lambda issues: [])
+    monkeypatch.setattr(debt.items_left, "look", lambda issues, opener: ([], []))
+    monkeypatch.setattr(debt.task_shape, "without_a_checklist", lambda issues: [])
+    monkeypatch.setattr(debt.task_shape, "closed_with_live_units", lambda closed: [])
+    monkeypatch.setattr(debt, "rules_debt", lambda inbox: (0, 0, 0))
+    monkeypatch.setattr(debt, "contract_note", lambda inbox: "")
+    assert debt.main(["--repo", "o/r"]) == debt.EXIT_OK
+    assert "слито без внешнего взгляда: 0" in capsys.readouterr().out

@@ -77,3 +77,22 @@ def test_the_live_tree_has_no_broken_links() -> None:
     found = module.links(Path())
     assert found, "ссылок на правила в дереве нет — предмет не найден"
     assert module.broken(found, real) == []
+
+
+def test_links_that_resolve_are_clean(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Все ссылки разрешились — чистый исход, и охват назван числом.
+
+    Охват печатается ВСЕГДА: проверка, читающая список, без числа неотличима
+    от той, что не нашла ничего
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
+    monkeypatch.setattr(module, "known", lambda: {"044": "check-the-premise-before-fixing"})
+    monkeypatch.setattr(
+        module,
+        "links",
+        lambda root: [("AGENTS.md", 1, "044", "check-the-premise-before-fixing")],
+    )
+    assert module.main([]) == module.EXIT_OK
+    assert "проверено 1" in capsys.readouterr().out

@@ -688,3 +688,54 @@ def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
     found = module.flakes_on_changes("o/r", "token", [], "13.09.2026")
     assert [(one.name, one.where) for one in found] == [("lint", "#9")]
+
+
+# --- объявленные исходы захода -----------------------------------------------
+
+
+def platform(monkeypatch: pytest.MonkeyPatch, records: list[dict[str, Any]]) -> list[str]:
+    """Подделывает площадку и отдаёт список того, что заход записал.
+
+    Подделывается ГРАНИЦА с площадкой, а не разбор: красноту, обязательность и
+    вид записи считает сам механизм — иначе проверялась бы подделка.
+    """
+    written: list[str] = []
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"sha": "0123456789abcdef"})
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter(records))
+    monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, mark: (1, ""))
+    monkeypatch.setattr(module, "flakes_on_changes", lambda repo, token, known, day: known)
+    monkeypatch.setattr(module, "queue_now", lambda repo, token: (0, 0))
+    monkeypatch.setattr(module, "save", lambda repo, token, body, apply: written.append(body))
+    return written
+
+
+def test_a_green_shared_branch_is_its_own_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Все записи на голове зелены — свой исход, а не «красно» и не «не смог».
+
+    Три исхода, а не два: «посмотрел и красно», «посмотрел и зелено», «не
+    посмотрел»
+    ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
+    """
+    platform(monkeypatch, [{"name": "lint", "status": "completed", "conclusion": "success"}])
+    assert module.main(["--repo", "o/r"]) == module.EXIT_GREEN
+
+
+def test_a_red_required_check_is_the_red_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красная проверка на голове — исход «красно», и запись об этом ложится."""
+    written = platform(
+        monkeypatch, [{"name": "lint", "status": "completed", "conclusion": "failure"}]
+    )
+    assert module.main(["--repo", "o/r"]) == module.EXIT_RED
+    assert written and "lint" in written[0], "о красной проверке не записано"
+
+
+def test_a_head_without_records_is_the_third_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Записей проверок на голове нет — «не отработал», а не «зелено» (075)."""
+    platform(monkeypatch, [])
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+    assert "ни одной записи проверки" in capsys.readouterr().err
