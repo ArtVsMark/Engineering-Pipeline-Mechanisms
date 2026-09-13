@@ -72,7 +72,10 @@ RESOLVED_RE: Final = re.compile(
 #: Разбор кончается на первом же слове, отпечатком не являющемся, — так
 #: «`abc1234` — почему» по-прежнему снимает одну находку и не ищет хэшей в
 #: пояснении, где семь букв подряд из a—f сложились бы случайно (068).
-MARK_RUN_RE: Final = re.compile(r"\A(?:[\s,;`]*[0-9a-f]{7}(?![0-9a-f]))+")
+#: Хвостовая разметка входит в ПРОБЕГ отпечатков, а не в причину: иначе
+#: закрывающая кавычка от «`abc1234`» уезжала в пояснение и печаталась в общей
+#: ветке огрызком.
+MARK_RUN_RE: Final = re.compile(r"\A(?:[\s,;`]*[0-9a-f]{7}(?![0-9a-f]))+[\s,;`]*")
 MARK_RE: Final = re.compile(r"[0-9a-f]{7}")
 #: ЗАКРЫТЫЙ ПУНКТ ЧЕК-ЛИСТА. Площадка умеет только полное закрытие: `Closes #N`
 #: закрывает задачу целиком, и задача из нескольких этапов закрывается
@@ -229,6 +232,38 @@ def resolved_in(text: str) -> list[str]:
     return found
 
 
+def resolutions_in(text: str) -> list[str]:
+    """Строки снятия целиком — с причиной, если она названа.
+
+    ПОЧЕМУ НЕ ОДНИХ ОТПЕЧАТКОВ ХВАТАЕТ. У снятия два разных исхода: находка
+    ПОЧИНЕНА либо её премиса НЕ ПОДТВЕРДИЛАСЬ — и второй закрывается «как
+    неверная, с записью причины», иначе вернётся следующим обходом
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    В общую ветку же ехал голый отпечаток: тело уплотнения собиралось из
+    отпечатков заново, и причина, написанная автором, терялась по дороге. Через
+    месяц два исхода в истории неотличимы (039).
+
+    Строка отдаётся КАК НАПИСАНА, приводится только регистр отпечатков: причину
+    читает человек, и огрызок пояснения хуже его отсутствия.
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in marked_lines(text, RESOLVED_RE):
+        tail = match.group("text").strip()
+        run = MARK_RUN_RE.match(tail.lower())
+        if not run:
+            continue
+        marks = MARK_RE.findall(run.group(0))
+        why = tail[run.end() :].strip()
+        key = ",".join(marks)
+        if key in seen:
+            continue
+        seen.add(key)
+        said = ", ".join(marks)
+        found.append(f"Разобрано: {said} {why}".rstrip() if why else f"Разобрано: {said}")
+    return found
+
+
 def closed_items_in(text: str) -> list[str]:
     """Пункты чек-листа, названные закрытыми, — КАК НАПИСАНЫ, в порядке появления.
 
@@ -294,6 +329,16 @@ def links_in_all(texts: Iterable[str]) -> list[Link]:
                 continue
             seen.add(key)
             found.append(link)
+    return found
+
+
+def resolutions_in_all(texts: Iterable[str]) -> list[str]:
+    """Строки снятия со всех тел ветки, в порядке появления и без повторов."""
+    found: list[str] = []
+    for text in texts:
+        for line in resolutions_in(text):
+            if line not in found:
+                found.append(line)
     return found
 
 

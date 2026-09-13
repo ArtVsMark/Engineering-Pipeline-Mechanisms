@@ -230,6 +230,28 @@ def test_a_resolution_line_reads_its_whole_list() -> None:
     ]
 
 
+def test_a_resolution_keeps_what_the_author_wrote_after_the_marks() -> None:
+    """Строка снятия отдаётся целиком: причина — часть записи, а не шум.
+
+    У снятия два исхода — «починено» и «премиса не подтвердилась», — и второй
+    обязан нести причину (044). Пока тело уплотнения собиралось из отпечатков,
+    причина терялась по дороге в общую ветку, и оба исхода выглядели там
+    одинаково (039).
+    """
+    сказано = "Разобрано: a70f8f5 — премиса не подтвердилась: у 136 механизм уже был"
+    assert changerefs.resolutions_in(сказано) == [сказано]
+    assert changerefs.resolutions_in("Разобрано: `abc1234`") == ["Разобрано: abc1234"], (
+        "оформление кодом — дело автора, а запись нормализуется"
+    )
+    assert changerefs.resolutions_in("Разобрано: замер") == []
+
+
+def test_one_line_of_marks_is_kept_once() -> None:
+    """Повтор той же строки в двух коммитах ветки записью не удваивается."""
+    тела = ["fix: раз\n\nРазобрано: abc1234\n", "fix: два\n\nРазобрано: abc1234\n"]
+    assert changerefs.resolutions_in_all(тела) == ["Разобрано: abc1234"]
+
+
 def test_a_resolution_stops_where_the_marks_end() -> None:
     """Разбор кончается на первом же слове, отпечатком не являющемся.
 

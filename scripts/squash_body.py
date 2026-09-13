@@ -79,7 +79,11 @@ def compose(branch: str, base: str) -> str:
 
     bodies = git("log", "--reverse", "--format=%B%x00", f"{merge_base}..{branch}").split("\0")
     links = changerefs.links_in_all(bodies)
-    resolved = changerefs.resolved_in_all(bodies)
+    # СТРОКИ СНЯТИЯ ПЕРЕНОСЯТСЯ, А НЕ СОБИРАЮТСЯ ЗАНОВО. Прежде тело строилось
+    # из одних отпечатков, и причина — «премиса не подтвердилась, потому что…» —
+    # терялась по дороге в общую ветку: два разных исхода снятия становились
+    # там одной строкой (039, 044).
+    resolved = changerefs.resolutions_in_all(bodies)
     # Трейлеры берутся из ПОСЛЕДНЕГО коммита: подпись у ветки одна, и повторять
     # её столько раз, сколько было коммитов, — это шум, а не атрибуция.
     trailers = trailers_of("\n".join(bodies))
@@ -88,7 +92,7 @@ def compose(branch: str, base: str) -> str:
     if links:
         lines += ["", *[str(link) for link in links]]
     if resolved:
-        lines += ["", *[f"Разобрано: {mark}" for mark in resolved]]
+        lines += ["", *resolved]
     if trailers:
         lines += ["", *trailers]
     return "\n".join(lines)
