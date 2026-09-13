@@ -52,6 +52,11 @@ CHANGELOG: Final = Path("CHANGELOG.md")
 VERSION: Final = Path("CONTRACT_VERSION")
 #: Описания прогонов.
 WORKFLOWS: Final = Path(".github/workflows")
+#: Механизмы проекта — каталог, а не отдельный файл: его читают те, кто судит о
+#: дереве целиком, а не об одном скрипте.
+SCRIPTS: Final = Path("scripts")
+#: Вход посетителя: тот документ, который читает пришедший за механизмами.
+ENTRANCE: Final = Path("README.md")
 #: Согласованные имена атрибуции.
 AUTHORS: Final = Path(".github/authors.txt")
 
@@ -85,5 +90,7 @@ ALL: Final = (
     CHANGELOG,
     VERSION,
     WORKFLOWS,
+    SCRIPTS,
+    ENTRANCE,
     AUTHORS,
 )
