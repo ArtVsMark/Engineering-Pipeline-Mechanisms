@@ -214,6 +214,11 @@ def acceptance_state(repo: str, number: int, token: str) -> str:
 #: Как площадка называет право обхода защиты для спрашивающего. Прямому толчку
 #: помогает только «always»: «pull_requests_only» разрешает обойти проверки
 #: через изменение, а выпуск толкает коммит напрямую.
+#: Соавтор машинного коммита выпуска. Написание сверяется целиком со списком
+#: `.github/authors.txt`: разночтение означало бы, что подпись ставит не то,
+#: что думали, — а это и есть та поломка, ради которой список заведён (123).
+MECHANISM: Final = "Engineering Pipeline Mechanisms <noreply@github.com>"
+
 MAY_PUSH: Final = "always"
 CANNOT_PUSH: Final = frozenset({"never", "pull_requests_only"})
 
@@ -463,7 +468,13 @@ def do_release(wanted: str, *, breaking: bool = False) -> None:
         print(f"версия контракта осталась {contract_now}: поверхность не тронута")
     build_changelog.main([])
     git("add", "-A")
-    git("commit", "-m", f"release: {wanted}")
+    # ПОДПИСЬ СОАВТОРА У МАШИННОГО КОММИТА. Гейт атрибуции требует её у
+    # КАЖДОГО первопредка общей ветки, а коммит выпуска собирает механизм — не
+    # окно и не рука. Без подписи каждый выпуск красит общую ветку (замер
+    # 13.09.2026 на 1.0.0), с чужой подписью — записывает в историю неправду,
+    # которую не переписать (123). Поэтому подпись своя и объявленная:
+    # соавтором стоит то, что коммит собрало.
+    git("commit", "-m", f"release: {wanted}\n\nCo-Authored-By: {MECHANISM}")
     git("tag", "-a", f"v{wanted}", "-m", f"v{wanted}")
     print(f"выпуск {wanted} собран и помечен тегом v{wanted}")
 

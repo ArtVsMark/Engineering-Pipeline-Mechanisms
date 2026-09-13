@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import sys
@@ -86,6 +87,48 @@ class Fragment:
     body: str
 
 
+#: Ссылка Markdown: `[текст](адрес)`. Разбор один на оба переезда — в
+#: собранный журнал и в каталог выпуска.
+LINK_RE: Final = re.compile(r"\[[^\]]*\]\((?P<target>[^)\s]+)\)")
+
+#: Схемы и формы, которые переездом не задеваются: внешний адрес и якорь
+#: указывают не на файл дерева, а путь от корня («/x») от места не зависит.
+KEEPS_ITS_SHAPE: Final = ("http://", "https://", "mailto:", "tel:", "#", "/")
+
+
+def relink(text: str, *, was: Path, now: Path) -> str:
+    """Пересчитывает относительные ссылки текста, переехавшего из `was` в `now`.
+
+    ЗАЧЕМ. Фрагмент пишется, лёжа в `changelog.d/`, и адресует соседей
+    оттуда — `../docs/decisions/008-…`. Собранный журнал живёт в КОРНЕ, а сам
+    фрагмент уезжает на два уровня вниз, в `changelog.d/released/<версия>/`:
+    та же строка ведёт уже выше корня и в пустоту. Выпуск 1.0.0 обнаружил это
+    разом в семнадцати документах — до него журнал не собирался ни разу, и
+    предмета у гейта ссылок просто не было
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+    ПЕРЕСЧИТЫВАЕТСЯ ТОЛЬКО ТО, ЧТО РАЗРЕШАЕТСЯ В ФАЙЛ ДЕРЕВА, и предел назван
+    честно: адрес площадки (`../../pull/183`) выглядит относительным, но
+    разрешается не в дереве, а на сайте — трогать его вслепую значит менять
+    работающее на угаданное. Такой адрес остаётся как есть
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    if was.resolve() == now.resolve():
+        return text
+
+    def moved(match: re.Match[str]) -> str:
+        target = match["target"]
+        if target.startswith(KEEPS_ITS_SHAPE):
+            return match.group(0)
+        path, _, anchor = target.partition("#")
+        if not path or not (was / path).exists():
+            return match.group(0)
+        fresh = Path(os.path.relpath((was / path).resolve(), now.resolve())).as_posix()
+        return match.group(0).replace(target, fresh + (f"#{anchor}" if anchor else ""), 1)
+
+    return LINK_RE.sub(moved, text)
+
+
 def read_fragments(directory: Path) -> list[Fragment]:
     """Читает ВСЕ фрагменты каталога: предмет выпуска, а не изменения."""
     if not directory.is_dir():
@@ -109,7 +152,9 @@ def parse_fragments(paths: list[Path]) -> list[Fragment]:
         if match is None:
             unnamed.append(path.name)
             continue
-        body = path.read_text(encoding="utf-8").strip()
+        # Тело едет в собранный журнал, а тот лежит в корне: ссылки,
+        # написанные из каталога фрагментов, пересчитываются под новое место.
+        body = relink(path.read_text(encoding="utf-8").strip(), was=path.parent, now=OUTPUT.parent)
         if not body:
             unnamed.append(f"{path.name} (пустой)")
             continue
@@ -254,7 +299,12 @@ def do_release(version: str) -> None:
 
     target.mkdir(parents=True)
     for path in moving:
+        # Переезд МЕНЯЕТ АДРЕС ФАЙЛА, а значит и смысл его относительных
+        # ссылок. Перенести текст дословно значит увезти рабочие ссылки в
+        # пустоту — ровно это и случилось на выпуске 1.0.0.
+        text = relink(path.read_text(encoding="utf-8"), was=path.parent, now=target)
         shutil.move(str(path), str(target / path.name))
+        (target / path.name).write_text(text, encoding="utf-8")
     print(f"в выпуск {version} перенесено фрагментов: {len(moving)}")
 
 

@@ -133,11 +133,11 @@
 минор плюс один, а патч живёт в версии ГОЛОВЫ: `1.0.1` — версия дерева, не
 выпуск.
 
-Решение [`015`](../docs/decisions/015-the-contract-version-moves-by-its-own-digits.md)
+Решение [`015`](docs/decisions/015-the-contract-version-moves-by-its-own-digits.md)
 сняло прежний расчёт потому, что тег и версия контракта были ОДНИМ числом.
 Числа развязаны — и довод `015` остался в силе целиком, только адресат у него
 теперь `next_contract`, а не расчёт тега
-([`017`](../docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md)).
+([`017`](docs/decisions/017-a-release-moves-the-minor-the-contract-moves-itself.md)).
 
 ### Что это чинило прямо сейчас
 
@@ -218,7 +218,7 @@
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
 Разбор и отвергнутые варианты — решение
-[`018`](../docs/decisions/018-a-stop-switch-names-what-it-waits-for.md); главный
+[`018`](docs/decisions/018-a-stop-switch-names-what-it-waits-for.md); главный
 из отвергнутых — снимать по сроку: срок не знает, чего ждали, и осознанный
 месячный стоп-кран снялся бы наравне с забытым.
 
@@ -463,7 +463,7 @@ N», а состояние, которое **не краснеет нигде**:
 
 ### Взведение у площадки сначала замеряют, а потом ему доверяют
 
-Решение [`011`](../docs/decisions/011-merging-is-handed-to-the-platform.md) отдаёт
+Решение [`011`](docs/decisions/011-merging-is-handed-to-the-platform.md) отдаёт
 площадке последнее действие — само слияние — и назвало непроверенным ровно
 одно: доходит ли до уплотнения **тело** (`commitHeadline` и `commitBody`).
 Поля объявлены входом мутации, но в семье их не передаёт никто, то есть
@@ -856,7 +856,7 @@ REST-эквивалента нет вовсе, и «нельзя» здесь п
 
 ### Очередь отдала площадке последнее действие — и только его
 
-Решение [`011`](../docs/decisions/011-merging-is-handed-to-the-platform.md)
+Решение [`011`](docs/decisions/011-merging-is-handed-to-the-platform.md)
 вступило в силу после замера 12.09.2026: мутация приняла `commitHeadline` и
 `commitBody` и вернула их дословно (#231 в состоянии `blocked`, #217 в
 `dirty`). Пока ответа не было, очередь не переключалась — премиса решает форму
@@ -955,7 +955,7 @@ REST-эквивалента нет вовсе, и «нельзя» здесь п
 
 `docs/release.md` держал **два правила мажора сразу**: новое — «единицу
 выпускает закрытая приёмка» (решение
-[`009`](../docs/decisions/009-one-zero-means-it-works-at-home.md)) — и старое,
+[`009`](docs/decisions/009-one-zero-means-it-works-at-home.md)) — и старое,
 «мажор поднимает первый потребитель», в разделе о порядке выпуска. А
 `scripts/release.py` исполнял **старое**: требовал `--first-consumer`.
 
@@ -1379,8 +1379,8 @@ REST-эквивалента нет вовсе, и «нельзя» здесь п
 
 ### Мигание на изменении стало видно — и прежний замер признан порочным
 
-Решение [`014`](../docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
-заменяет [`013`](../docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
+Решение [`014`](docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
+заменяет [`013`](docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
 целиком. Его центральное утверждение — «миганий не было, значит предмета нет» —
 получено **кругом**, и это назвал владелец, а не механизм.
 
@@ -1486,7 +1486,7 @@ REST-эквивалента нет вовсе, и «нельзя» здесь п
 
 ### Записано: оклик — это след, а не толчок
 
-Решение [`012`](../docs/decisions/012-a-hail-is-a-trail-not-a-poke.md) закрывает
+Решение [`012`](docs/decisions/012-a-hail-is-a-trail-not-a-poke.md) закрывает
 вопрос «чем разбудить окно, оставившее работу» — **замером, а не осторожностью**.
 
 Адрес у нас машинный: трейлер `Claude-Session` несёт настоящий номер сессии,
@@ -1652,7 +1652,7 @@ REST-эквивалента нет вовсе, и «нельзя» здесь п
 Шаг «перезапуск мигнувшей проверки» стоял непостроенным с оговоркой «сначала
 проверить права `actions: write`». Проверка дала **не тот ответ**, которого
 ждала постановка — и решение
-[`013`](../docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
+[`013`](docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
 записывает его.
 
 **Право есть и уже работает.** `main-red.yml` держит `actions: write` ровно ради
@@ -2139,7 +2139,7 @@ code 1», а к моменту разбора голова уже другая.
 ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
 
 Порядок работ теперь задаёт это число, а не номер выпуска — решение
-[`016`](../docs/decisions/016-family-completeness-outranks-the-release-number.md).
+[`016`](docs/decisions/016-family-completeness-outranks-the-release-number.md).
 Определение единицы («работает у себя полностью») остаётся прежним: решение
 `009` не отменяется, оно перестаёт быть очередью работ.
 
@@ -2233,8 +2233,8 @@ code 1», а к моменту разбора голова уже другая.
 
 ### Записано: слияние отдаётся площадке, порядок остаётся своим
 
-Решение [`011`](../docs/decisions/011-merging-is-handed-to-the-platform.md)
-пересматривает [`003`](../docs/decisions/003-own-automerge-not-native-queue.md)
+Решение [`011`](docs/decisions/011-merging-is-handed-to-the-platform.md)
+пересматривает [`003`](docs/decisions/003-own-automerge-not-native-queue.md)
 в одной половине: очередь по-прежнему решает, КОГО взвести, а сливает площадка
 мутацией `enablePullRequestAutoMerge`. Опроса головы в шаге очереди не
 остаётся — вместе с ним уходит класс, из которого пришли все три поломки 09.09
@@ -2879,7 +2879,7 @@ argparse: обязательного ключа нет, и число совпа
 эпика #196, прочитав цитату задачи как тождество.
 
 Премиса сужена изменением #200. Решение
-[`010`](../docs/decisions/010-who-marks-an-item-is-decided-by-its-kind.md)
+[`010`](docs/decisions/010-who-marks-an-item-is-decided-by-its-kind.md)
 отвечает на второй вопрос — кому вообще отмечать:
 
 * **пункт-ссылка** (подлежащее — задача) → следование, основание «задача
@@ -3412,7 +3412,7 @@ argparse: обязательного ключа нет, и число совпа
 ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 
 **Цена этого молчания больше одной потерянной записи.** Решение
-[`014`](../docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
+[`014`](docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
 держит разрешённый список автоперезапуска пустым **до первой записи
 детектора** — и условие пересмотра, поставленное так, не наступало бы никогда.
 Пустота списка выглядела осторожностью, а была слепотой.
@@ -4745,7 +4745,7 @@ argparse: обязательного ключа нет, и число совпа
   `coverage`, и значок витрины) и дата замера
   ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md));
 - **свод не пересказывает обещание выпуска**, а ссылается на
-  [`docs/release.md`](../docs/release.md) и решение `015`: два текста об одном
+  [`docs/release.md`](docs/release.md) и решение `015`: два текста об одном
   расходятся молча
   ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md));
 - **неточность в контексте решения 010 названа, а не переписана.** Следование
@@ -5822,7 +5822,7 @@ GraphQL), и сверяет со свежесобранным: разошлос�
 #196
 
 Последняя непроверенная премиса решения
-[`011`](../docs/decisions/011-merging-is-handed-to-the-platform.md) закрыта
+[`011`](docs/decisions/011-merging-is-handed-to-the-platform.md) закрыта
 прогоном: изменение #235 очередь **взвела**, а слила **площадка**, и уплотнение
 в общей ветке (`ec32850`) несёт наше тело дословно — заголовок с номером,
 список работы, трейлеры `Разобрано:` и подпись сессии. «Принято» оказалось
@@ -6310,7 +6310,7 @@ GraphQL), и сверяет со свежесобранным: разошлос�
 
 ### Хвост реестра, заход второй: шесть находок в четырёх местах
 
-По решению [`008`](../docs/decisions/008-a-batch-of-corrections-is-one-subject.md)
+По решению [`008`](docs/decisions/008-a-batch-of-corrections-is-one-subject.md)
 — одним изменением: все шесть правок мелкие и местные, новой логики ни в одной.
 
 **Тест покрытия значков проверял равенство самому себе** (дефект). Он брал

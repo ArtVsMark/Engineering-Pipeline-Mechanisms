@@ -13,7 +13,7 @@
 ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 
 **Цена этого молчания больше одной потерянной записи.** Решение
-[`014`](../docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
+[`014`](../../../docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md)
 держит разрешённый список автоперезапуска пустым **до первой записи
 детектора** — и условие пересмотра, поставленное так, не наступало бы никогда.
 Пустота списка выглядела осторожностью, а была слепотой.

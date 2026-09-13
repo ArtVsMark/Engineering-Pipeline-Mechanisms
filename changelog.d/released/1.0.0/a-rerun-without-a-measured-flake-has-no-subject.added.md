@@ -3,7 +3,7 @@
 Шаг «перезапуск мигнувшей проверки» стоял непостроенным с оговоркой «сначала
 проверить права `actions: write`». Проверка дала **не тот ответ**, которого
 ждала постановка — и решение
-[`013`](../docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
+[`013`](../../../docs/decisions/013-a-rerun-on-a-change-waits-for-a-measured-flake.md)
 записывает его.
 
 **Право есть и уже работает.** `main-red.yml` держит `actions: write` ровно ради

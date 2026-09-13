@@ -220,12 +220,68 @@ def test_a_named_but_unread_acceptance_is_still_a_refusal(
     assert "не прочитано" in run.text
 
 
-def test_a_closed_acceptance_allows_the_major() -> None:
+def test_the_release_commit_is_signed_by_the_mechanism(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Машинный коммит выпуска несёт объявленного соавтора-механизм.
+
+    Гейт атрибуции требует строку соавтора у КАЖДОГО первопредка общей ветки.
+    Коммит выпуска собирает механизм — не окно и не рука, — и без подписи
+    каждый выпуск красит общую ветку: замер 13.09.2026 на первом же выпуске
+    `1.0.0`. Подписать его окном значило бы записать в историю неправду, а
+    переписать её нечем
+    ([123](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/123-attribution-is-verified-on-the-final-history.md)).
+    """
+    said: list[tuple[str, ...]] = []
+
+    def remember(*args: str) -> str:
+        said.append(args)
+        return ""
+
+    monkeypatch.setattr(module, "git", remember)
+    monkeypatch.setattr(module.build_changelog, "main", lambda argv: 0)
+    # Переезд фрагментов и сборка журнала — не предмет этой проверки: здесь
+    # спрашивается ПОДПИСЬ коммита, и своё дерево ради неё не собирается.
+    monkeypatch.setattr(module.build_changelog, "do_release", lambda version: None)
+    # Версия контракта не двигается: поверхность не тронута — значит файл
+    # версии никто не пишет, и подделывать запись на диск не нужно.
+    monkeypatch.setattr(module, "declared_version", lambda: "9.9.0")
+    monkeypatch.setattr(module, "touches_contract", lambda waiting: [])
+    monkeypatch.setattr(module, "fragments", lambda: [Path("a.added.md")])
+    module.do_release("9.10.0", breaking=False)
+    committed = [one for one in said if one[0] == "commit"]
+    assert committed, "коммита выпуска не было — предмет не найден (075)"
+    assert module.MECHANISM in committed[0][-1], (
+        f"коммит выпуска без объявленного соавтора: {committed[0][-1]!r}"
+    )
+
+
+def test_the_mechanism_signature_is_declared() -> None:
+    """Подпись механизма есть в согласованном списке — иначе гейт её отвергнет.
+
+    Написание сверяется целиком: расхождение между тем, что ставит механизм, и
+    тем, что объявлено, снаружи выглядит как отсутствие подписи.
+    """
+    listed = (ROOT / ".github/authors.txt").read_text(encoding="utf-8")
+    assert module.MECHANISM in listed, (
+        f"«{module.MECHANISM}» не объявлен в .github/authors.txt — гейт атрибуции "
+        "отвергнет коммит выпуска"
+    )
+
+
+def test_a_closed_acceptance_allows_the_major(monkeypatch: pytest.MonkeyPatch) -> None:
     """С закрытой приёмкой мажор проходит; с открытой — нет.
 
     Разбор проверяется данными, а не подделкой транспорта: состояние приходит
     в `refusals` готовым ответом.
     """
+
+    # ЛИНИЯ ВЫПУСКОВ ЗАДАЁТСЯ ЗДЕСЬ, А НЕ БЕРЁТСЯ У ПРОЕКТА. Отказ про мажор
+    # появляется, только когда мажор действительно двигается, а это считается
+    # от ЖИВОГО тега. Пока проект стоял на `v0.1.0`, проверка проходила сама
+    # собой; выпуск `1.0.0` 13.09.2026 обнулил её предмет — и она покраснела
+    # на исправном коде. Тест, зависящий от того, что происходит в проекте,
+    # проверяет не механизм, а день
+    # ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    monkeypatch.setattr(module.project_version, "release_tag", lambda: "v0.9.0")
 
     def said(state: str) -> list[str]:
         return [

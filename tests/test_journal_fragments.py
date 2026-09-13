@@ -117,3 +117,52 @@ def test_the_reason_line_matches_what_the_spec_shows() -> None:
     assert shown, "описание папки не показывает форму причины"
     for line in shown:
         assert journal.REASON_LINE_RE.match(line.strip()), f"образец не проходит разбор: {line}"
+
+
+# --- переезд записи и её ссылки ----------------------------------------------
+
+
+def test_a_link_into_the_tree_is_recalculated_on_the_way_to_the_changelog() -> None:
+    """Ссылка на файл дерева пересчитывается под новое место записи.
+
+    Фрагмент пишется, лёжа в `changelog.d/`, и адресует соседей оттуда.
+    Собранный журнал живёт в корне: та же строка ведёт выше корня и в пустоту.
+    """
+    said = "[решение](../docs/decisions/006-merge-by-squash.md)"
+    assert module.relink(said, was=Path("changelog.d"), now=Path(".")) == (
+        "[решение](docs/decisions/006-merge-by-squash.md)"
+    )
+
+
+def test_a_link_follows_the_fragment_into_the_release_directory() -> None:
+    """Переезд в каталог выпуска уводит запись на два уровня вниз — и ссылку тоже."""
+    said = "[решение](../docs/decisions/006-merge-by-squash.md)"
+    moved = module.relink(said, was=Path("changelog.d"), now=Path("changelog.d/released/9.9.0"))
+    assert moved == "[решение](../../../docs/decisions/006-merge-by-squash.md)"
+
+
+def test_a_platform_address_is_left_alone() -> None:
+    """Адрес площадки выглядит относительным, но разрешается не в дереве.
+
+    Трогать его вслепую значит менять работающее на угаданное. Предел назван, а
+    не заровнен
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    said = "[#183](../../pull/183)"
+    assert module.relink(said, was=Path("changelog.d"), now=Path(".")) == said
+
+
+def test_an_outside_address_and_an_anchor_keep_their_shape() -> None:
+    """Внешний адрес не трогается, а якорь переезжает вместе со своим файлом."""
+    outside = "[каталог](https://github.com/ArtVsMark/Engineering-Incidents-Playbook)"
+    assert module.relink(outside, was=Path("changelog.d"), now=Path(".")) == outside
+    anchored = "[порядок](../docs/release.md#порядок-выпуска)"
+    assert module.relink(anchored, was=Path("changelog.d"), now=Path(".")) == (
+        "[порядок](docs/release.md#порядок-выпуска)"
+    )
+
+
+def test_a_text_that_did_not_move_is_untouched() -> None:
+    """Переезда не было — переписывать нечего: разбор не трогает текст зря."""
+    said = "[решение](../docs/decisions/006-merge-by-squash.md)"
+    assert module.relink(said, was=Path("changelog.d"), now=Path("changelog.d")) == said
