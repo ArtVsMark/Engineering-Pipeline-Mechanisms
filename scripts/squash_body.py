@@ -32,6 +32,7 @@ import sys
 from typing import Final
 
 import changerefs
+import paths
 import report
 
 #: Трейлеры хвостового блока: соавторство и адрес окна. Читаются из последнего
@@ -97,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает тело уплотнения для слияния."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--branch", required=True, help="ветка изменения")
-    parser.add_argument("--base", default="main", help="общая ветка")
+    parser.add_argument("--base", default=paths.TRUNK, help="общая ветка")
     args = parser.parse_args(argv)
 
     try:

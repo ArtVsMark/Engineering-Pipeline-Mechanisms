@@ -35,6 +35,15 @@ PROPOSALS: Final = Path(".rules/proposals.json")
 SHOWCASE: Final = Path(".rules/showcase.json")
 
 #: Объявленные расписания и роль каждого: наблюдает оно или действует.
+#: ОБЩАЯ ВЕТКА НАЗЫВАЕТСЯ ОДИН РАЗ. Её имя — вход сразу нескольких механизмов:
+#: база сравнения у гейтов, предмет защиты у дрейфа, цель толчка у выпуска. Пока
+#: оно писалось литералом, в дереве жили три написания одного и того же —
+#: `"main"`, `TRUNK` и `DEFAULT_BRANCH`, — и переименование общей ветки чинилось
+#: бы поиском по строке
+#: ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
+#: [090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+TRUNK: Final = "main"
+
 SCHEDULES: Final = Path(".rules/schedules.json")
 
 #: Чем защищена общая ветка — объявлением, а не памятью. Настройка живёт вне

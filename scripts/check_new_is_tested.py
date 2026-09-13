@@ -38,6 +38,8 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import paths
+
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
@@ -58,7 +60,7 @@ class NotRun(RuntimeError):
 
 def base_ref() -> str:
     """Общая ветка, относительно которой смотрится изменение."""
-    return f"origin/{os.environ.get('GITHUB_BASE_REF') or 'main'}"
+    return f"origin/{os.environ.get('GITHUB_BASE_REF') or paths.TRUNK}"
 
 
 def _git(*args: str) -> str:

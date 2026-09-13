@@ -34,6 +34,7 @@ from typing import Final
 import changerefs
 import ghrest
 import labels
+import paths
 import report
 
 PREFIXES: Final = ("agent/",)
@@ -286,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--branch", default=os.environ.get("GITHUB_REF_NAME", ""))
-    parser.add_argument("--base", default="main")
+    parser.add_argument("--base", default=paths.TRUNK)
     parser.add_argument("--dry-run", action="store_true", help="показать, но не открывать")
     args = parser.parse_args(argv)
 

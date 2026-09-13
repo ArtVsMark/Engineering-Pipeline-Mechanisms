@@ -107,3 +107,105 @@ def test_shell_variable_names_are_ascii(path: Path) -> None:
     names = SHELL_ASSIGN_RE.findall(path.read_text(encoding="utf-8"))
     bad = [name for name in names if not name.isascii()]
     assert not bad, f"{path.name}: имя переменной оболочки не на латинице: {bad}"
+
+
+def sleeping(tree: ast.AST) -> list[ast.FunctionDef]:
+    """Функции, в которых есть ожидание — `time.sleep`."""
+    found: list[ast.FunctionDef] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Attribute)
+                and inner.func.attr == "sleep"
+            ):
+                found.append(node)
+                break
+    return found
+
+
+#: Слова, которыми в этом дереве называется срок ожидания. Список
+#: РАЗРЕШИТЕЛЬНЫЙ: новое имя срока не проходит молча, а дописывается сюда (068).
+DEADLINE_WORDS = ("deadline", "timeout", "tries", "until")
+
+
+@pytest.mark.parametrize("path", SOURCES, ids=lambda p: p.name)
+def test_every_wait_has_a_deadline(path: Path) -> None:
+    """У всякого ожидания есть срок: цикл без него ждёт до конца прогона.
+
+    Правило 100. Ожидание без срока снаружи неотличимо от зависшего механизма:
+    прогон стоит, лога нет, и единственное, что его кончает, — предел времени
+    самой площадки, который скажет «job timed out», а не что ждали и чего не
+    дождались.
+
+    Сроком считается любое из названных слов в той же функции: заход, который
+    спит, обязан знать, когда перестать.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in sleeping(tree):
+        said = ast.dump(node)
+        assert any(word in said for word in DEADLINE_WORDS), (
+            f"{path.name}: «{node.name}» ждёт, но срока не называет — "
+            "ожидание без срока неотличимо от зависшего механизма (100)"
+        )
+
+
+def env_defaults(tree: ast.AST) -> list[tuple[int, str]]:
+    """Умолчания, подставляемые вместо непрочитанного окружения.
+
+    Считаются обе формы: второй довод `os.environ.get(…, «что-то»)` и правая
+    часть `os.environ.get(…) or «что-то»`. Форма разная, смысл один — тихая
+    подстановка, и разбор, знающий одну, дал бы уверенность на половине
+    дерева.
+    """
+    found: list[tuple[int, str]] = []
+
+    def is_env(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "environ"
+        )
+
+    def said_of(node: ast.expr) -> str:
+        return str(node.value) if isinstance(node, ast.Constant) else ""
+
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and is_env(node)
+            and len(node.args) > 1
+            and said_of(node.args[1]).strip()
+        ):
+            found.append((node.lineno, said_of(node.args[1])))
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            for left, right in zip(node.values, node.values[1:], strict=False):
+                if is_env(left) and said_of(right).strip():
+                    found.append((node.lineno, said_of(right)))
+    return found
+
+
+@pytest.mark.parametrize("path", SOURCES, ids=lambda p: p.name)
+def test_an_environment_default_is_declared_not_inlined(path: Path) -> None:
+    """Умолчание вместо непрочитанного окружения — объявленная константа, не литерал.
+
+    Правило 176: умолчание из окружения — скрытая зависимость от площадки. Пока
+    оно стоит литералом в строке, у него нет имени, а значит нет и места, где
+    сказано, ПОЧЕМУ именно это значение. Замер: имя общей ветки жило в дереве
+    тремя написаниями сразу — `"main"`, `TRUNK` и `DEFAULT_BRANCH`, — и
+    переименование ветки чинилось бы поиском по строке.
+
+    Пустая строка умолчанием не считается: она означает «не задано» и ведёт к
+    отказу, а не к тихой подстановке.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    said = env_defaults(tree)
+    assert not said, (
+        f"{path.name}: умолчание окружения литералом — "
+        + ", ".join(f"строка {line}: «{value}»" for line, value in said)
+        + " — дайте ему имя (176)"
+    )
