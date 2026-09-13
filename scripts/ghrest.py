@@ -152,6 +152,31 @@ def _note_quota(headers: Any) -> None:
     )
 
 
+#: Коды, за которыми стоит ВРЕМЕННЫЙ отказ площадки: запрос до неё дошёл, но
+#: обработан не был. Список РАЗРЕШИТЕЛЬНЫЙ (068): что в нём не названо, тем и
+#: не повторяется — отказ по правам или по данным повтором не лечится, и
+#: повторять его значило бы прятать причину за ожиданием (045).
+TRANSIENT: Final = frozenset({500, 502, 503, 504})
+#: Сколько раз пробовать и с каким отступом, секунд. Объявлено данными: срок
+#: ожидания обязан быть назван, а не спрятан в коде (100).
+TRIES: Final = 3
+BACKOFF: Final = 2.0
+
+
+def _survivable(method: str, exc: Exception) -> bool:
+    """Стоит ли повторять этот отказ — и повторять ли его ЭТОМУ запросу.
+
+    ПЯТИСОТЫЙ ПОВТОРЯЕТСЯ ВСЕГДА: площадка сказала, что не обработала запрос, и
+    повтор не удвоит сделанного. ОБРЫВ СВЯЗИ — только у чтения: у записи исход
+    неизвестен, и повторённый POST завёл бы вторую запись там, где первая уже
+    прошла. Разница названа, а не выровнена молчанием
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in TRANSIENT
+    return isinstance(exc, urllib.error.URLError) and method == "GET"
+
+
 def request(
     method: str,
     path: str,
@@ -165,18 +190,44 @@ def request(
     различить, искать будут в механизме, а искать надо в сроке секрета.
     """
     data = json.dumps(body).encode() if body is not None else None
-    prepared = urllib.request.Request(_url(path), data=data, method=method)
-    prepared.add_header("Authorization", f"Bearer {token}")
-    prepared.add_header("Accept", "application/vnd.github+json")
-    prepared.add_header("X-GitHub-Api-Version", API_VERSION)
-    if data is not None:
-        prepared.add_header("Content-Type", "application/json")
+
+    def prepare() -> urllib.request.Request:
+        """Свежий запрос на каждую попытку: тело ответа и поток одноразовы."""
+        asked = urllib.request.Request(_url(path), data=data, method=method)
+        asked.add_header("Authorization", f"Bearer {token}")
+        asked.add_header("Accept", "application/vnd.github+json")
+        asked.add_header("X-GitHub-Api-Version", API_VERSION)
+        if data is not None:
+            asked.add_header("Content-Type", "application/json")
+        return asked
+
+    # ВРЕМЕННЫЙ ОТКАЗ ПЕРЕЖИВАЕТСЯ ПОВТОРОМ, А НЕ РУКОЙ. Замер 13.09.2026,
+    # изменение #282: площадка отдавала 503, шаг открытия изменения упал на
+    # разметке, следующий заход не стартовал вовсе, и метки доставил только
+    # ТРЕТИЙ — запущенный человеком. Приём к тому моменту писался в окне руками
+    # трижды за смену: то есть был известен и не имел механизма (002).
+    #
+    # Ожидание ограничено объявленным числом попыток: цикл без предела ждал бы
+    # до предела времени площадки, а тот скажет «job timed out», и ни чего
+    # ждали, ни чего не дождались из этого не следует (100).
+    last: Exception | None = None
+    for tries in range(TRIES):
+        if tries:
+            time.sleep(BACKOFF * tries)
+        try:
+            with urllib.request.urlopen(prepare(), timeout=TIMEOUT) as response:
+                _note_quota(response.headers)
+                payload = response.read()
+                return json.loads(payload) if payload else None
+        except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+            last = exc
+            if not _survivable(method, exc):
+                break
+        except ValueError as exc:
+            raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
 
     try:
-        with urllib.request.urlopen(prepared, timeout=TIMEOUT) as response:
-            _note_quota(response.headers)
-            payload = response.read()
-            return json.loads(payload) if payload else None
+        raise last if last is not None else TransportError(f"{method} {path} → ответа нет")
     except urllib.error.HTTPError as exc:
         # Тело читается ОДИН раз и ДО разбора: поток одноразовый, а именно в нём
         # приходит настоящая причина отказа.
@@ -207,8 +258,6 @@ def request(
         raise TransportError(f"{method} {path} → {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise TransportError(f"{method} {path} → площадка недоступна: {exc.reason}") from exc
-    except ValueError as exc:
-        raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
 
 
 #: Адрес GraphQL. Он здесь ОДИН и с единственным входом ниже: правило каталога
