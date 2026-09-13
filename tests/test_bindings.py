@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -248,13 +248,29 @@ def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:
 # --- контракт 1.3: у ответа «документом» назван предел ------------------------
 
 
+#: Пределы ответа «документом». Первые два пришли контрактом каталога 1.3,
+#: третий добавлен 13.09.2026 по находке внешнего взгляда на #317.
+#:
+#: ПОЧЕМУ ДВУХ НЕ ХВАТИЛО. Разбор пункта 5.1 дал случай, который в них не
+#: укладывается: машинная половина СЧИТАЕТСЯ и проверена замером, но механизмом
+#: не становится — гейт краснел бы на законном (051). Это не «невозможно» и не
+#: «ещё не построено»: строить его и не собираются, и причина измерена, а не
+#: предположена. Со шкалой из двух значений ответ обязан был солгать, и лгал:
+#: 071 и 133 стояли `impossible` при `why`, описывающем работающую половину.
+#: Третий исход называется, а не подгоняется под два
+#: ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md),
+#: [046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+LIMITS: Final = ("impossible", "not-yet", "measured-refusal")
+
+
 def test_every_document_answer_names_its_limit() -> None:
     """У каждого `document` сказано, есть ли машинная половина вовсе.
 
     Контракт 1.3 расколол ответ «документом» надвое: `impossible` — машинной
     половины нет, документ и есть предел; `not-yet` — половина есть и не
-    построена. Слово закрытое, потому что счётчику доли машинного соблюдения
-    надо РАЗДЕЛИТЬ знаменатель, а прозу сложить нельзя.
+    построена. Третье значение наше: `measured-refusal` — половина есть и
+    ОТВЕРГНУТА замером. Слово закрытое, потому что счётчику доли машинного
+    соблюдения надо РАЗДЕЛИТЬ знаменатель, а прозу сложить нельзя.
 
     Требуется от ВСЕХ, а не только от новых: ревизия 11.09.2026 прочитала все
     28 ответов по букве и границе правила, и предел назван у каждого. Оставить
@@ -266,7 +282,7 @@ def test_every_document_answer_names_its_limit() -> None:
         for rule, one in answers.items()
         if one.get("status") == "active"
         and one.get("mechanism") == "document"
-        and one.get("document_reason") not in ("impossible", "not-yet")
+        and one.get("document_reason") not in LIMITS
     ]
     assert not bare, "ответ «документом» без названного предела: " + ", ".join(sorted(bare))
 

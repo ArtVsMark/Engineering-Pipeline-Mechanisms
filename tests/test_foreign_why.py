@@ -55,6 +55,26 @@ def test_pieces_are_counted_by_words_not_by_letters() -> None:
     assert module.pieces("коротко") == set(), "кусок короче окна куском не считается"
 
 
+def test_two_addresses_without_a_space_do_not_swallow_the_prose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Адрес кончается там, где его заканчивает разметка, а не пробел.
+
+    Жадное `\\S+` съело бы всё до следующего пробела: две ссылки подряд без
+    разделителя вычистились бы вместе с прозой между ними, и гейт молча
+    перестал бы видеть там копию. В дереве такого пока нет — находка названа
+    риском, а не дефектом (внешний взгляд на #318), и класс закрыт до первого
+    случая (051).
+    """
+    подряд = "[а](https://example.com/один)[б](https://example.com/два)"
+    assert module.ADDRESS_RE.sub(" ", подряд).split() == ["[а](", ")[б](", ")"], (
+        "между двумя адресами осталась разметка, а не пустота: проза уцелела бы тоже"
+    )
+    слова = f"начало {подряд} конец"
+    assert "начало" in module.ADDRESS_RE.sub(" ", слова)
+    assert "конец" in module.ADDRESS_RE.sub(" ", слова)
+
+
 def test_an_address_is_not_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Адрес ссылки словами не считается: иначе два документа, ссылающиеся на
     одно правило, выглядели бы копиями друг друга.
