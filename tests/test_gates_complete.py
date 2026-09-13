@@ -853,3 +853,26 @@ def test_the_annotation_escapes_the_percent_first() -> None:
     where = {mark: said.find(mark) for mark in ("s/%/%25/g", "s/\\n/%0A/g")}
     assert all(place != -1 for place in where.values()), f"замены не на месте: {where}"
     assert where["s/%/%25/g"] < where["s/\\n/%0A/g"], "процент экранируется не первым"
+
+
+def test_a_deadline_on_the_waiting_path_still_explains_itself(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Срок вышел, а сводимый прогон так и не появился — причина названа.
+
+    Выход по сроку с пути ожидания не доходит до опроса записей, и печать
+    состояния падала `UnboundLocalError`: вместо названной причины «прогон не
+    найден» человек получал след падения самого гейта. Нашёл внешний взгляд
+    на #265.
+    """
+    monkeypatch.setattr(module, "summarised_run", lambda *a, **k: None)
+    monkeypatch.setattr(module, "roster_of", lambda *a, **k: module.Roster(False, 0, {}))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    code = module.main(
+        ["--repo", "o/r", "--sha", "deadbeef", "--required", "lint", "--timeout", "0"]
+    )
+    said = capsys.readouterr().out
+    assert code == module.EXIT_RED
+    assert "не найден" in said
+    assert "вердикт вынесен на таком состоянии" in said
+    assert "lint: записей нет" in said

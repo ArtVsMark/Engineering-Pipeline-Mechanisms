@@ -608,3 +608,37 @@ def test_the_live_declaration_matches_the_shape_the_source_reads() -> None:
     assert said["branch"] == "main"
     assert said["required_contexts"] == ["ci-complete"]
     assert said["run_token_may_bypass"] == "never"
+
+
+def test_every_ruleset_is_asked_about_the_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Право обхода читается у КАЖДОГО набора, а не у первого.
+
+    Наборов бывает несколько, и вправе обойти достаточно одного: выйти после
+    первого значило бы проверить самый безобидный и назвать это проверкой.
+    Нашёл внешний взгляд на #272 — докстринг обещал обход всех, код читал один.
+    """
+    rules = [
+        {"type": "deletion", "ruleset_id": 1},
+        {"type": "non_fast_forward", "ruleset_id": 2},
+        {
+            "type": "required_status_checks",
+            "ruleset_id": 1,
+            "parameters": {
+                "strict_required_status_checks_policy": True,
+                "required_status_checks": [{"context": "ci-complete"}],
+            },
+        },
+    ]
+    asked: list[int] = []
+
+    def reply(_method: str, path: str, *_args: object, **_kwargs: object) -> Any:
+        if "/rules/branches/" in path:
+            return rules
+        ruleset = int(path.rsplit("/", 1)[1])
+        asked.append(ruleset)
+        return {"current_user_can_bypass": "never" if ruleset == 1 else "always"}
+
+    found = watched(monkeypatch, reply)
+    assert sorted(asked) == [1, 2], f"спрошены не все наборы: {asked}"
+    assert len(found) == 1, found
+    assert "наборе 2" in found[0].said and "always" in found[0].said
