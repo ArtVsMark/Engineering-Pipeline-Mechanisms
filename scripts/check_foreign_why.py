@@ -86,9 +86,16 @@ def claims() -> dict[str, str]:
         if not isinstance(rule, dict):
             continue
         number = str(rule.get("id") or "")
-        said = (rule.get("claim") or {}).get("ru") or ""
-        if number and said:
-            found[number] = str(said)
+        # ФОРМА ЧУЖОГО ПОЛЯ ПРОВЕРЯЕТСЯ, А НЕ ПРЕДПОЛАГАЕТСЯ. `claim` приходит
+        # из выгрузки каталога, и `(… or {}).get("ru")` бросал AttributeError
+        # на любом не-словаре: гейт падал трассировкой вместо объявленного
+        # третьего исхода, то есть давал ЧЕТВЁРТЫЙ (039). Отклонение формы —
+        # это «каталог сказал не то», и оно пропускается вместе с правилом, а
+        # не роняет разбор остальных (нашёл внешний взгляд на #315).
+        claim = rule.get("claim")
+        said = claim.get("ru") if isinstance(claim, dict) else ""
+        if number and isinstance(said, str) and said:
+            found[number] = said
     if not found:
         raise NotRun("в выгрузке каталога нет ни одного разбора — сверять не с чем (075)")
     return found
@@ -150,7 +157,11 @@ def main(argv: list[str] | None = None) -> int:
     for path in docs:
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
+            # НЕ-UTF8 В ДЕРЕВЕ — ЭТО ТОЖЕ «НЕ ПРОЧИТАН», а не падение. Ловился
+            # только OSError, и документ в чужой кодировке ронял гейт
+            # трассировкой мимо всех трёх объявленных исходов (039, находка
+            # внешнего взгляда на #315).
             print(f"гейт не отработал: {path} не прочитан: {exc}", file=sys.stderr)
             return EXIT_BROKEN
         here = copied(text, said)

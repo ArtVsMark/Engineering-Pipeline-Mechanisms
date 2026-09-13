@@ -93,6 +93,49 @@ def test_an_address_is_not_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert module.main(["--root", str(root)]) == module.EXIT_OK
 
 
+def test_a_claim_of_the_wrong_shape_does_not_crash_the_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отклонение формы в чужой выгрузке — не четвёртый исход.
+
+    `claim` приходит из каталога, и «(… or {}).get» бросал AttributeError на
+    любом не-словаре: гейт падал трассировкой мимо всех трёх объявленных
+    исходов (039). Правило с негодной формой пропускается вместе со своим
+    разбором и не роняет разбор остальных — нашёл внешний взгляд на #315.
+    """
+    кривая = {
+        "rules": [
+            {"id": "153", "claim": "строка вместо словаря"},
+            {"id": "154", "claim": {"ru": ["список вместо строки"]}},
+            {"id": "155", "claim": {"ru": "настоящий разбор правила"}},
+            {"id": "156"},
+            "вовсе не словарь",
+        ]
+    }
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: кривая)
+    assert module.claims() == {"155": "настоящий разбор правила"}
+
+
+def test_an_export_without_a_single_claim_is_the_third_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Выгрузка, где ни одной годной формы, — «не отработал», а не «чисто»."""
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: {"rules": [{"id": "153"}]})
+    with pytest.raises(module.NotRun, match="ни одного разбора"):
+        module.claims()
+
+
+def test_a_file_in_another_encoding_is_named_not_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Не-UTF8 в дереве читается как «не прочитан», а не роняет гейт (039)."""
+    catalogue(monkeypatch)
+    root = tree(tmp_path, "обычный документ\n")
+    (root / "чужая-кодировка.md").write_bytes("привет".encode("cp1251"))
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+
+
 def test_a_copy_is_seen_and_a_paraphrase_is_not() -> None:
     """Копия — дословный кусок; пересказ теми же словами врозь ею не является."""
     said = {"153": " ".join(f"слово{at}" for at in range(module.WINDOW + 2))}
