@@ -76,8 +76,14 @@ def test_not_found_is_its_own_kind() -> None:
         next(gen, None)
 
 
-def test_server_error_is_a_transport_error() -> None:
-    """Отказ площадки, не связанный с токеном, называется своим кодом."""
+def test_server_error_is_a_transport_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ площадки, не связанный с токеном, называется своим кодом.
+
+    Ожидание между попытками подменяется: `GET` на 500 теперь повторяется, и
+    набор платил бы за этот случай шестью секундами сна. Проверка про ИМЯ
+    отказа, а не про терпение (замечание внешнего взгляда на #284).
+    """
+    monkeypatch.setattr(transport.time, "sleep", lambda _seconds: None)
     url = next(gen := serve(500, b'{"message":"boom"}'))
     try:
         with pytest.raises(transport.TransportError) as caught:
@@ -467,3 +473,33 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         with pytest.raises(transport.TransportError):
             transport.request(method, "/x", "t", {"тело": 1} if method == "POST" else None)
         assert asked == expected, f"{method}: попыток {asked}, ожидалось {expected}"
+
+
+def test_the_number_of_tries_is_at_least_one() -> None:
+    """Попытка делается хотя бы одна — иначе запрос не уходит вовсе.
+
+    Ветка «попыток не делалось» существует ради этого случая и недостижима,
+    пока число попыток не ноль. Держится это здесь, а не комментарием.
+    """
+    assert transport.TRIES >= 1
+
+
+def refused(code: int) -> urllib.error.HTTPError:
+    """Отказ площадки с этим кодом — в том виде, в каком его ловит транспорт."""
+    return urllib.error.HTTPError("u", code, "отказ", email.message.Message(), None)
+
+
+@pytest.mark.parametrize("code", sorted(transport.TRANSIENT))
+def test_a_creating_request_is_not_retried_on_a_gateway_error(code: int) -> None:
+    """`POST` не повторяется ни при каком 5xx: повтор удвоил бы созданное.
+
+    502 и 504 отдаёт ШЛЮЗ, не получивший ответа от бэкенда, — а тот запрос мог
+    выполнить. Нашёл внешний взгляд на #284.
+    """
+    assert transport._survivable(transport.CREATES, refused(code)) is False
+
+
+@pytest.mark.parametrize("method", ["PATCH", "PUT", "DELETE", "GET"])
+def test_an_idempotent_write_still_survives_a_gateway_error(method: str) -> None:
+    """Идемпотентное повторяется: повтор с тем же телом не родит второй сущности."""
+    assert transport._survivable(method, refused(503)) is True
