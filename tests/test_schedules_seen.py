@@ -198,3 +198,47 @@ def test_an_empty_registry_says_empty() -> None:
     """Пусто говорится словом, а не выглядит незаполненным (154)."""
     body = module.render_body([module.Seen("a.yml", "17 6 * * *", 7, 7, 0)], NOW, 7)
     assert "Пусто" in body
+
+
+def test_runs_beyond_the_first_page_are_counted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Заходы за краем первой страницы считаются состоявшимися.
+
+    Ежечасное расписание за неделю даёт 168 заходов — больше страницы, — и
+    обход, читающий одну, объявил бы пропуском всё остальное: чем ИСПРАВНЕЕ
+    канал, тем больше он «пропускает». Нашёл внешний взгляд на #269.
+    """
+    page_size = 100
+
+    def reply(_method: str, path: str, *_args: object, **_kwargs: object) -> dict[str, Any]:
+        if "/runs?" not in path:
+            return {"created_at": "2026-09-01T00:00:00Z"}
+        page = int(path.rsplit("page=", 1)[1])
+        made = [
+            {"created_at": "2026-09-12T06:17:00Z", "conclusion": "success"}
+            for _ in range(page_size)
+        ]
+        return {"workflow_runs": made if page == 1 else made[:20] if page == 2 else []}
+
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    happened, _ = module.fired("o/r", "hail.yml", "t", NOW - timedelta(days=7))
+    assert happened == 120, "хвост за первой страницей потерян — пропуски будут выдуманы"
+
+
+def test_a_refused_write_is_the_third_outcome_not_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ записи реестра — исход 2, а не 1.
+
+    Единица по договору значит «есть пропуски», и читатель искал бы осечку
+    канала там, где осеклась сама запись
+    ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
+    Нашёл внешний взгляд на #269.
+    """
+    monkeypatch.setattr(
+        module, "sweep", lambda *a, **k: [module.Seen("a.yml", "17 6 * * *", 7, 7, 0)]
+    )
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка отвергла запись")
+
+    monkeypatch.setattr(module, "save", refuse)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_BROKEN
