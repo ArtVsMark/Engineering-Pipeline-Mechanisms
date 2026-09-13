@@ -258,6 +258,32 @@ def publish_source(
         print(f"  #{change.number}: метка источника не выставлена — {report.cut(str(exc))}")
 
 
+def drop_source(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> None:
+    """Снимает метку источника у изменения, по которому работать нечем.
+
+    ИСТОЧНИК — ЭТО «ОТКУДА ВЗЯЛАСЬ РАБОТА», А У ПУСТОГО ЕЁ НЕТ. Метку ставит
+    перечисление очереди, и ставит ДО того, как спрошен объём: пустая голова
+    получала «6 · план» и выглядела обычной работой в хвосте очереди. Нашёл
+    внешний взгляд на #288.
+
+    ОТКАЗ РАЗМЕТКИ ЗАХОД НЕ РОНЯЕТ — как и у выставления метки: это след, а не
+    вход
+    ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
+    """
+    present = sorted(mark for mark in change.marks if mark.startswith(SOURCE_PREFIX))
+    if not present:
+        return
+    if dry_run:
+        print(f"  (пробный заход) #{change.number}: метки источника сняли бы — {present}")
+        return
+    try:
+        for stale in present:
+            path = f"repos/{repo}/issues/{change.number}/labels/{ghrest.quote(stale)}"
+            ghrest.request("DELETE", path, owner_token)
+    except ghrest.TransportError as exc:
+        print(f"  #{change.number}: метка источника не снята — {report.cut(str(exc))}")
+
+
 def token() -> str:
     """Токен владельца. Токен прогона сюда НЕ подставляется (131)."""
     return os.environ.get(ENV_TOKEN, "")
@@ -520,6 +546,10 @@ def name_the_emptiness(repo: str, change: Change, owner_token: str, *, dry_run: 
         "нечем; обновление ветки только погнало бы прогоны по второму кругу (109). "
         "Закрыть его может владелец."
     )
+    # Источник работы снимается: у пустого изменения его нет, а метка,
+    # поставленная перечислением очереди до вопроса об объёме, выдавала бы его
+    # за обычную работу в хвосте плана.
+    drop_source(repo, change, owner_token, dry_run=dry_run)
     if change.armed:
         take_back(
             repo, change, "изменение пусто: содержимое уже в базе", owner_token, dry_run=dry_run
