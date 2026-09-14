@@ -118,6 +118,18 @@ UNCOMPUTED: Final = frozenset({"", "unknown"})
 #: исполняет 14 раз из 60 (реестр #270).
 WAIT_TRIES: Final = 3
 WAIT_PAUSE: Final = 2.0
+#: Сколько секунд ожидания заход тратит НА ВЕСЬ ОБХОД, а не на одно изменение.
+#: Ожидание на каждом изменении складывается: заход идёт по всем живым сразу, и
+#: пачка одновременно непосчитанных состояний упёрлась бы в предел шага в десять
+#: минут — 150 изменений по четыре секунды и есть эти десять минут. Нашёл внешний
+#: взгляд находкой `0b5393c` на #340.
+#:
+#: ВЕЛИЧИНА ВЗЯТА ИЗ ЗАМЕРА, А НЕ ИЗ ОЩУЩЕНИЯ. Замер 14.09.2026 по 293
+#: изменениям: одновременно открытых бывало не больше СЕМИ (10.09 в 19:44), то
+#: есть пик стоил бы 28 секунд. Шестьдесят покрывают пятнадцать изменений с
+#: полным ожиданием — вдвое больше пика, — а дальше ожидание отключается и об
+#: этом говорится вслух. Бюджет дешевле догадки о росте: он верен при любом числе.
+WAIT_BUDGET: Final = 60.0
 
 #: Сколько часов без нового коммита делает окно предположительно мёртвым.
 #: ВЕЛИЧИНА ОБЪЯВЛЕНА, А НЕ ВЫВЕДЕНА: она про внимание человека и его смену, а
@@ -285,13 +297,26 @@ def undecided(runs: list[dict[str, Any]], required: list[str]) -> list[str]:
     и без этой строки состояние «вердикта пока нет» стало бы неотличимо от
     «всё прошло». Молчание о незнании и есть то, из чего выросли ложные оклики
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ИДУЩАЯ ПРОВЕРКА СЮДА ВХОДИТ, И ЭТО ПЕРВАЯ РЕДАКЦИЯ ЗАБЫЛА. `has_verdict`
+    заимствован у сводного гейта и отвечает там на свой вопрос: «отменена или
+    пропущена». У записи, которая ещё выполняется, исход пуст — и для него это
+    вердикт, потому что идущие сводный гейт различает ОТДЕЛЬНОЙ функцией. В
+    результате обязательная в работе не попадала ни в красные (верно), ни сюда
+    (неверно): оклик молчал о ней вовсе. Нашёл внешний взгляд находкой `6d1eab8`
+    на #341.
+
+    Поэтому спрашиваются ОБА признака соседа — `has_verdict` и `pending`, — а не
+    один: второй знает про запись-зомби, у которой состояние переходное, а исход
+    уже стоит, и ждать её нечего
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
     """
     wanted = set(required)
     mine = [run for run in runs if str(run.get("name") or "") in wanted]
     return sorted(
         str(run.get("name") or "")
         for run in ci_complete.worst_per_name(mine)
-        if not ci_complete.has_verdict(run)
+        if not ci_complete.has_verdict(run) or ci_complete.pending(run)
     )
 
 
@@ -356,17 +381,25 @@ def subjects(repo: str, token: str, now: datetime) -> list[Subject]:
         raise NotRun("обязательных имён не объявлено — предмет оклика не найден (075)")
 
     found: list[Subject] = []
+    # Бюджет ожидания на весь обход. Считается от начала, а не по изменениям:
+    # предмет предела — время ЗАХОДА, и его тратят все изменения вместе.
+    deadline = time.monotonic() + WAIT_BUDGET
     for payload in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
         number = int(payload["number"])
         head = str((payload.get("head") or {}).get("sha") or "")
         if bool(payload.get("draft")) or not head:
             continue
-        state = merge_state(repo, number, token)
+        spent = time.monotonic() >= deadline
+        state = merge_state(repo, number, token, tries=1 if spent else WAIT_TRIES)
         if state in UNCOMPUTED:
             # СОСТОЯНИЕ ЕЩЁ НЕ ПОСЧИТАНО — ЭТО ОТВЕТ, А НЕ ПУСТОТА. Площадка
             # считает его лениво, и первый запрос заказывает вычисление. Молча
             # пропустить значило бы читать «конфликта нет» из «я не знаю» (045).
-            print(f"  #{number}: состояние слияния не посчитано и после ожидания — окликать рано")
+            #
+            # ДВА СОСТОЯНИЯ РАЗВЕДЕНЫ СЛОВАМИ: «ждали и не дождались» и «ждать уже
+            # не стали» — разные вещи, и второе говорит о заходе, а не о площадке.
+            said = "бюджет ожидания на этом заходе израсходован" if spent else "после ожидания"
+            print(f"  #{number}: состояние слияния не посчитано, {said} — окликать рано")
             continue
         runs = (
             ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
