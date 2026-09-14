@@ -32,6 +32,8 @@ from typing import Any, Final
 import pytest
 import yaml
 
+from tests.conftest import needs_history
+
 #: Прогон, чью отметку сверяем.
 RUN: Final = Path(".github/workflows/attribution-history.yml")
 
@@ -61,6 +63,7 @@ def revision(name: str) -> str | None:
     return done.stdout.strip() or None
 
 
+@needs_history
 def test_the_boundary_is_a_commit_not_a_date() -> None:
     """Отметка обязана разбираться как ревизия — ровно то, чем она станет.
 
