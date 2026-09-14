@@ -41,6 +41,15 @@
 видно, и срок вышел бы короче настоящего — то есть гейт зеленел бы тем охотнее,
 чем меньше знает. Разбор этого — в ``scripts/window.py``.
 
+ЧТО ЭТОТ ШАГ НЕ ЛОВИТ, И ЭТО НАЗВАНО, А НЕ УМОЛЧАНО. Он идёт по событиям
+изменения, поэтому окно, пережившее срок уже ПОСЛЕ своего последнего толчка, на
+СТОЯЩЕМ изменении видно не будет: записи на голове нечем обновиться. Вечным
+пропуск не становится — то же окно ловится на любом своём следующем изменении, —
+но запись на молчащем изменении устаревает молча. Ни расписания, ни оклика здесь
+нет: заводить событие до решения о классе проверки рано. Пробел назван в
+`AGENTS.md`, находка внешнего взгляда `1b58e64`
+([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+
 Исходы (правило 039): ``0`` окно в пределах срока или предмета нет ·
 ``1`` окно пережило предел · ``2`` не отработал: нет входа или истории.
 """
@@ -105,10 +114,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_BROKEN
 
-    head = by_window[-1]
-    sessions = sorted({commit.session for commit in by_window if commit.session})
+    # У КАЖДОГО ОКНА СВОЯ ГОЛОВА, А НЕ ГОЛОВА ВЕТКИ. Последний коммит ветки
+    # принадлежит тому окну, что подписалось позже; мерить по нему все окна
+    # значит завышать срок чужого — окно, дописавшее на второй день, выглядело бы
+    # прожившим столько же, сколько то, что дописало на седьмой. Нашёл внешний
+    # взгляд находкой `1160e6d` на #336.
+    last: dict[str, window.Commit] = {}
+    for commit in by_window:
+        if commit.session:
+            last[commit.session] = commit
     try:
-        ages = [window.lifetime(name, args.history, head, cwd=cwd) for name in sessions]
+        ages = [window.lifetime(name, args.history, last[name], cwd=cwd) for name in sorted(last)]
     except window.NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

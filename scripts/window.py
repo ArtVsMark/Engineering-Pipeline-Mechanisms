@@ -186,9 +186,13 @@ def lifetime(session: str, history: str, head: Commit, *, cwd: str | None = None
     """
     seen = [commit for commit in commits(history, cwd=cwd) if commit.session == session]
     if not seen:
-        # Окно в истории ещё не отметилось: первая его работа. Начало — голова
-        # же, и срок нулевой. Это не пробел, а законное состояние.
-        return Lifetime(session=session, first=head, last=head, whole=True)
+        # ПУСТОЙ ОТВЕТ ЗНАЧИТ ДВА РАЗНОГО, И РАЗВОДИТ ИХ ПОЛНОТА ИСТОРИИ. На
+        # полной истории окна в ней действительно нет: первая его работа, начало
+        # — сама голова, срок нулевой, и это законное состояние. В обрезанной тот
+        # же пустой ответ означает лишь, что коммиты окна отрезаны, и назвать его
+        # началом значило бы зеленеть тем охотнее, чем меньше механизм знает
+        # (045). Нашёл внешний взгляд находкой `b91e5ff` на #336.
+        return Lifetime(session=session, first=head, last=head, whole=not is_shallow(cwd=cwd))
     first = seen[0]
     whole = True
     if is_shallow(cwd=cwd):
