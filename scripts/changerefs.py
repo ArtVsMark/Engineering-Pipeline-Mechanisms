@@ -109,6 +109,18 @@ class Link:
         return self.verb in CLOSING
 
 
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """Одно снятие: отпечатки из головы строки и причина, как написал автор."""
+
+    marks: tuple[str, ...]
+    why: str
+
+    def __str__(self) -> str:
+        """Строка того вида, который едет в тело изменения и читает человек."""
+        return f"Разобрано: {', '.join(self.marks)} {self.why}".rstrip()
+
+
 def blank(match: re.Match[str]) -> str:
     """Пробелы вместо вырезанного — ровно столько же, сколько было знаков."""
     return " " * len(match.group(0))
@@ -222,13 +234,32 @@ def resolved_in(text: str) -> list[str]:
     сказать реестру неправду о сделанной работе (045).
     """
     found: list[str] = []
-    for match in marked_lines(text, RESOLVED_RE):
-        run = MARK_RUN_RE.match(match.group("text").lower())
-        if not run:
-            continue
-        for mark in MARK_RE.findall(run.group(0)):
+    for record in resolutions_parsed(text):
+        for mark in record.marks:
             if mark not in found:
                 found.append(mark)
+    return found
+
+
+def resolutions_parsed(text: str) -> list[Resolution]:
+    """Снятия одного текста РАЗОБРАННЫМИ: отпечатки отдельно, причина отдельно.
+
+    Один разбор на всех читателей строки, а их трое: реестру нужны отпечатки,
+    телу изменения — строка целиком, а сверке повторов — отпечатки внутри
+    строки. Пока разбор был у каждого свой, они расходились молча: сборка по
+    ветке искала отпечатки во ВСЕЙ строке, включая причину, — то есть список из
+    разрешительного становился запретительным, ровно против 068. Замер
+    14.09.2026: «Разобрано: 1111111 — сосед deadbeef рядом» давал лишний
+    отпечаток `deadbee`, и настоящее снятие `deadbee` из следующего коммита
+    ветки в общую ветку не уезжало (090).
+    """
+    found: list[Resolution] = []
+    for match in marked_lines(text, RESOLVED_RE):
+        tail = match.group("text").strip()
+        run = MARK_RUN_RE.match(tail.lower())
+        if not run:
+            continue
+        found.append(Resolution(tuple(MARK_RE.findall(run.group(0))), tail[run.end() :].strip()))
     return found
 
 
@@ -245,23 +276,12 @@ def resolutions_in(text: str) -> list[str]:
 
     Строка отдаётся КАК НАПИСАНА, приводится только регистр отпечатков: причину
     читает человек, и огрызок пояснения хуже его отсутствия.
+
+    ПРАВИЛО ПОВТОРА ЗДЕСЬ ТО ЖЕ, ЧТО У ВЕТКИ ЦЕЛИКОМ: один отпечаток — одна
+    запись. Двух правил не бывает: текст один или их несколько — это разница
+    вызывающего, а не смысла записи.
     """
-    found: list[str] = []
-    seen: set[str] = set()
-    for match in marked_lines(text, RESOLVED_RE):
-        tail = match.group("text").strip()
-        run = MARK_RUN_RE.match(tail.lower())
-        if not run:
-            continue
-        marks = MARK_RE.findall(run.group(0))
-        why = tail[run.end() :].strip()
-        key = ",".join(marks)
-        if key in seen:
-            continue
-        seen.add(key)
-        said = ", ".join(marks)
-        found.append(f"Разобрано: {said} {why}".rstrip() if why else f"Разобрано: {said}")
-    return found
+    return resolutions_in_all([text])
 
 
 def closed_items_in(text: str) -> list[str]:
@@ -342,16 +362,32 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
     ехали две записи об одной находке (нашёл внешний взгляд на #331).
 
     ПОБЕЖДАЕТ ПЕРВАЯ ЗАПИСЬ отпечатка: она ближе к работе, которая его сняла.
+
+    ПОВТОР СНИМАЕТСЯ С ОТПЕЧАТКА, А НЕ СО СТРОКИ. Строка несёт список, и у
+    второй строки ветки часть отпечатков бывает новой: «Разобрано: abc1234,
+    def5678» после «Разобрано: abc1234» — это одно повторённое снятие и одно
+    новое. Прежде вся строка отбрасывалась по одному совпадению, и `def5678`
+    пропадал молча: работа сделана, а запись в реестре осталась висеть
+    неразобранной — тот же вред, что у потери шести отпечатков из семи на #325
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Замер 14.09.2026 на этих двух телах: из двух снятий уезжало одно.
+
+    ПРИЧИНА ОСТАЁТСЯ ПРИ УЦЕЛЕВШИХ отпечатках: автор писал её обо всей строке,
+    и отбросить её вместе с уже записанным отпечатком значило бы снова свести
+    два исхода снятия к одному (039).
     """
     found: list[str] = []
     seen: set[str] = set()
     for text in texts:
-        for line in resolutions_in(text):
-            marks = set(MARK_RE.findall(line))
-            if marks & seen:
+        for record in resolutions_parsed(text):
+            fresh: list[str] = []
+            for mark in record.marks:
+                if mark not in seen and mark not in fresh:
+                    fresh.append(mark)
+            if not fresh:
                 continue
-            seen |= marks
-            found.append(line)
+            seen.update(fresh)
+            found.append(str(Resolution(tuple(fresh), record.why)))
     return found
 
 
