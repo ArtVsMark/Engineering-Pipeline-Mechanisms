@@ -693,15 +693,27 @@ def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- объявленные исходы захода -----------------------------------------------
 
 
-def platform(monkeypatch: pytest.MonkeyPatch, records: list[dict[str, Any]]) -> list[str]:
+def platform(
+    monkeypatch: pytest.MonkeyPatch,
+    records: list[dict[str, Any]],
+    proofs: list[dict[str, Any]] | None = None,
+) -> list[str]:
     """Подделывает площадку и отдаёт список того, что заход записал.
 
-    Подделывается ГРАНИЦА с площадкой, а не разбор: красноту, обязательность и
-    вид записи считает сам механизм — иначе проверялась бы подделка.
+    Подделывается ГРАНИЦА с площадкой, а не разбор: красноту, обязательность,
+    счётчик попыток и вид записи считает сам механизм — иначе проверялась бы
+    подделка. Поэтому ответ зависит от АДРЕСА, как у настоящей площадки: голова
+    общей ветки и список заходов `ci` живут по разным адресам.
     """
     written: list[str] = []
     monkeypatch.setenv("GH_TOKEN", "токен")
-    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"sha": "0123456789abcdef"})
+
+    def asked(method: str, path: str, *rest: Any, **kw: Any) -> dict[str, Any]:
+        if "actions/workflows" in path:
+            return {"workflow_runs": list(proofs or [{"conclusion": "success"}])}
+        return {"sha": "0123456789abcdef"}
+
+    monkeypatch.setattr(module.ghrest, "request", asked)
     monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter(records))
     monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, mark: (1, ""))
     monkeypatch.setattr(module, "flakes_on_changes", lambda repo, token, known, day: known)
@@ -739,6 +751,111 @@ def test_a_head_without_records_is_the_third_outcome(
     platform(monkeypatch, [])
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
     assert "ни одной записи проверки" in capsys.readouterr().err
+
+
+# --- у цикла починки есть дно --------------------------------------------------
+
+
+def test_the_counter_of_proofs_comes_from_the_platform() -> None:
+    """Попытка — заход, НЕ доказавший зелень; счёт идёт до первого зелёного.
+
+    Свой счётчик разошёлся бы с площадкой молча, и в сторону бесконечных
+    попыток (049). Полоса читается от свежего к старому: зелёный её закрывает.
+    """
+    заходы = [
+        {"conclusion": "failure"},
+        {"conclusion": "timed_out"},
+        {"conclusion": "success"},
+        {"conclusion": "failure"},
+    ]
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(module.ghrest, "request", lambda *a, **k: {"workflow_runs": заходы})
+    try:
+        assert module.proofs("o/r", "токен") == module.Proof(tries=2, whole=True), (
+            "зелёный закрывает полосу, и старое красное за ним не считается"
+        )
+    finally:
+        monkey.undo()
+
+
+def test_a_cancelled_run_neither_counts_nor_breaks_the_streak() -> None:
+    """Отменённый заход вердикта не несёт: ни попытка, ни доказательство зелени.
+
+    Считать отсутствие вердикта доказательством — то же молчаливое умолчание, от
+    которого страхует 045: полоса оборвалась бы на отмене, и предел не наступил
+    бы никогда.
+    """
+    заходы = [
+        {"conclusion": "failure"},
+        {"conclusion": "cancelled"},
+        {"conclusion": "failure"},
+        {"conclusion": "success"},
+    ]
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(module.ghrest, "request", lambda *a, **k: {"workflow_runs": заходы})
+    try:
+        assert module.proofs("o/r", "токен") == module.Proof(tries=2, whole=True)
+    finally:
+        monkey.undo()
+
+
+def test_a_count_without_a_green_in_sight_says_it_is_a_lower_bound() -> None:
+    """Зелёного в прочитанном окне нет — число НЕ МЕНЬШЕЕ, а не точное (045)."""
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(
+        module.ghrest, "request", lambda *a, **k: {"workflow_runs": [{"conclusion": "failure"}] * 4}
+    )
+    try:
+        счёт = module.proofs("o/r", "токен")
+    finally:
+        monkey.undo()
+    assert счёт == module.Proof(tries=4, whole=False)
+    assert "не меньше 4" in module.said_tries(счёт)[0]
+
+
+def test_the_owner_becomes_the_addressee_only_at_the_limit() -> None:
+    """Предел исчерпан — адресат владелец; до предела адресат прежний (109).
+
+    Механизм при этом никого не останавливает: он называет число и того, кому
+    дальше решать. Остановка починки решением механизма была бы решением за
+    человека (154).
+    """
+    ниже = module.render_body(["test"], [], [], "0123456", (1, 0), module.Proof(2, True))
+    предел = module.render_body(["test"], [], [], "0123456", (1, 0), module.Proof(3, True))
+    assert "**2** из 3" in ниже and "Адресат — владелец" not in ниже
+    assert "Адресат — владелец" in предел, "на пределе адресат обязан смениться"
+    assert "не починка" in предел, "названо и то, чем следующий шаг НЕ является"
+
+
+def test_the_counter_is_not_asked_when_nothing_holds_the_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Совещательное красное очередь не морозит — и владельца по нему не будят.
+
+    Предел живёт у состояния «Проверка» контура 3, а оно наступает от красной
+    ОБЯЗАТЕЛЬНОЙ. Иначе приоритет звучал бы всегда и перестал что-либо значить
+    (051).
+    """
+    written = platform(
+        monkeypatch,
+        [{"name": "debt", "status": "completed", "conclusion": "failure"}],
+        proofs=[{"conclusion": "failure"}] * 5,
+    )
+    assert module.main(["--repo", "o/r"]) == module.EXIT_RED
+    assert written and "из 3" not in written[0], "счётчик попыток спрошен без заморозки"
+
+
+def test_the_record_carries_the_counter_when_the_queue_is_frozen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """При заморозке счётчик попыток стоит в записи, а не в выводе шага (142)."""
+    written = platform(
+        monkeypatch,
+        [{"name": "lint", "status": "completed", "conclusion": "failure"}],
+        proofs=[{"conclusion": "failure"}, {"conclusion": "success"}],
+    )
+    assert module.main(["--repo", "o/r"]) == module.EXIT_RED
+    assert "**1** из 3" in written[0]
 
 
 # --- запись мигания не заглатывает тело ----------------------------------------
