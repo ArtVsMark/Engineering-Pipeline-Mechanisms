@@ -271,6 +271,69 @@ def test_one_mark_is_recorded_once_even_when_described_twice() -> None:
     ]
 
 
+def test_a_new_mark_survives_a_line_that_repeats_an_old_one() -> None:
+    """Строка со старым и новым отпечатком записывает новый, а не пропадает вся.
+
+    Строка снятия несёт список, и у второй строки ветки часть отпечатков бывает
+    новой. Снятие повтора по СТРОКЕ отбрасывало её целиком по одному
+    совпадению: работа сделана, а запись в реестре висела неразобранной — та же
+    молчаливая потеря, что шести отпечатков из семи на #325 (045).
+    """
+    тела = [
+        "fix: раз\n\nРазобрано: abc1234\n",
+        "fix: два\n\nРазобрано: abc1234, def5678 — две находки одной правкой\n",
+    ]
+    assert changerefs.resolutions_in_all(тела) == [
+        "Разобрано: abc1234",
+        "Разобрано: def5678 — две находки одной правкой",
+    ], "новый отпечаток не теряется из-за соседа, записанного раньше"
+
+
+def test_a_reason_does_not_lend_its_words_to_the_marks() -> None:
+    """Семь букв из a—f внутри причины чужого снятия не съедают.
+
+    Сборка по ветке искала отпечатки во ВСЕЙ строке, включая причину, — список
+    из разрешительного становился запретительным (068). Цена: `deadbeef`,
+    названный в пояснении, давал отпечаток `deadbee`, и настоящее снятие
+    `deadbee` из следующего коммита в общую ветку не уезжало.
+    """
+    тела = [
+        "fix: раз\n\nРазобрано: 1111111 — иначе deadbeef висит\n",
+        "fix: два\n\nРазобрано: deadbee\n",
+    ]
+    assert changerefs.resolutions_in_all(тела) == [
+        "Разобрано: 1111111 — иначе deadbeef висит",
+        "Разобрано: deadbee",
+    ]
+
+
+def test_one_mark_named_twice_in_one_line_is_printed_once() -> None:
+    """Правило повтора одно на текст и на ветку: один отпечаток — одна запись."""
+    assert changerefs.resolutions_in("Разобрано: abc1234 abc1234") == ["Разобрано: abc1234"]
+    assert changerefs.resolutions_in("Разобрано: abc1234") == changerefs.resolutions_in_all(
+        ["Разобрано: abc1234"]
+    ), "один текст — частный случай ветки, а не второе правило"
+
+
+def test_a_resolution_is_parsed_once_for_every_reader() -> None:
+    """Разбор один: отпечатки из головы строки, причина — всё после них (090)."""
+    (запись,) = changerefs.resolutions_parsed("Разобрано: `abc1234`, def5678 — почему")
+    assert запись.marks == ("abc1234", "def5678")
+    assert запись.why == "— почему"
+    assert str(запись) == "Разобрано: abc1234, def5678 — почему"
+    assert changerefs.resolutions_parsed("Разобрано: замер") == []
+    assert запись == changerefs.Resolution(marks=("abc1234", "def5678"), why="— почему")
+
+
+def test_a_resolution_prints_itself_the_way_the_body_reads_it() -> None:
+    """Запись сама печатает строку: вид един у разбора и у сборки тела (022)."""
+    assert str(changerefs.Resolution(marks=("abc1234",), why="")) == "Разобрано: abc1234"
+    assert (
+        str(changerefs.Resolution(marks=("abc1234", "def5678"), why="— премиса не подтвердилась"))
+        == "Разобрано: abc1234, def5678 — премиса не подтвердилась"
+    )
+
+
 def test_a_resolution_stops_where_the_marks_end() -> None:
     """Разбор кончается на первом же слове, отпечатком не являющемся.
 
