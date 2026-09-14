@@ -68,6 +68,7 @@ import findings
 import ghrest
 import pipeline_checks as policy
 import report
+import window
 
 #: Токен владельца: тот же, что у очереди. Имя общее намеренно — два имени для
 #: одного секрета разошлись бы при первой же смене.
@@ -81,9 +82,9 @@ EXIT_UNSET: Final = 3
 #: понимания «это ведёт механизм» разошлись бы молча (090).
 MARKER: Final = findings.marker("hail")
 
-#: Адрес окна в трейлере коммита. Читается номер, а не ссылка целиком: ссылка
-#: — способ открыть, номер — то, чем окно называется.
-SESSION_RE: Final = re.compile(r"^Claude-Session:\s*\S*?(session_[A-Za-z0-9]+)", re.MULTILINE)
+#: Адрес окна в трейлере коммита. Образец живёт в `window`: его читает и гейт
+#: срока жизни окна, а второй образец того же разошёлся бы с первым молча (090).
+SESSION_RE: Final = window.SESSION_RE
 
 #: Отпечаток состояния внутри оклика: по нему заход узнаёт свой прежний.
 STAMP_RE: Final = re.compile(r"<!--\s*hail-stamp:\s*(?P<stamp>[\w.:-]+)\s*-->")
