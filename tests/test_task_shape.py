@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import load_script, needs_history
 
 module = load_script("task_shape.py")
 
@@ -142,6 +142,7 @@ def test_a_task_closed_before_the_counter_is_marked_as_such() -> None:
     assert found == {3: True, 99: False}
 
 
+@needs_history
 def test_the_boundary_is_the_day_the_mechanism_appeared() -> None:
     """Граница названа датой заведения механизма, а не круглым числом.
 
