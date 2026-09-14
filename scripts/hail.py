@@ -59,6 +59,7 @@ import argparse
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -109,6 +110,14 @@ STATE_CONFLICT: Final = "dirty"
 #: первый запрос лишь заказывает вычисление. Читать их как «конфликта нет»
 #: значило бы выводить ответ из незнания (045).
 UNCOMPUTED: Final = frozenset({"", "unknown"})
+
+#: Сколько раз спросить состояние слияния и с какой паузой. ВЕЛИЧИНЫ ОБЪЯВЛЕНЫ:
+#: расчёт у площадки занимает секунды, и три попытки с парой секунд покрывают его,
+#: не превращая обход живых изменений в простой. Больше — заход начнёт держать
+#: смену; меньше — оклик снова будет зависеть от расписания, которое площадка
+#: исполняет 14 раз из 60 (реестр #270).
+WAIT_TRIES: Final = 3
+WAIT_PAUSE: Final = 2.0
 
 #: Сколько часов без нового коммита делает окно предположительно мёртвым.
 #: ВЕЛИЧИНА ОБЪЯВЛЕНА, А НЕ ВЫВЕДЕНА: она про внимание человека и его смену, а
@@ -175,6 +184,48 @@ def is_quiet(said: str, now: datetime, hours: int = QUIET_AFTER_HOURS) -> bool:
     except ValueError:
         return False
     return now - when > timedelta(hours=hours)
+
+
+def merge_state(
+    repo: str,
+    number: int,
+    token: str,
+    *,
+    tries: int = WAIT_TRIES,
+    pause: float = WAIT_PAUSE,
+) -> str:
+    """Состояние слияния, с ОЖИДАНИЕМ ленивого ответа площадки.
+
+    ПЕРВЫЙ ЗАПРОС ЗАКАЗЫВАЕТ РАСЧЁТ, А НЕ ОТВЕЧАЕТ. Площадка считает готовность
+    слияния лениво: спросив изменение впервые, она ставит расчёт в работу и
+    отдаёт `unknown`. Прежняя редакция читала это как «окликать рано» и шла
+    дальше — то есть один заход оклика тратился впустую на каждом изменении,
+    которого до него не спрашивали.
+
+    ПОЧЕМУ ЭТО ВАЖНО ИМЕННО ЗДЕСЬ. Второго шанса у оклика почти нет. Про
+    конфликт он не может узнать по прогону самого конфликтного изменения — `ci`
+    на нём не стартует вовсе, — и остаётся расписание. А расписание площадка
+    исполняет плохо: замер 14.09.2026 по реестру [#270](../../issues/270) даёт у
+    этого прогона 14 состоявшихся заходов из 60 ожидаемых. Полагаться на канал,
+    пропускающий три четверти, значило бы оставлять конфликт без адресата на
+    часы
+    ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)).
+
+    ОЖИДАНИЕ КОРОТКОЕ И ОБЪЯВЛЕННОЕ, а не «пока не ответит». Расчёт у площадки
+    занимает секунды; три попытки с парой секунд паузы покрывают его и не
+    превращают обход в простой. Не дождались — это по-прежнему ответ «не знаю», и
+    он называется словом, а не округляется до «конфликта нет»
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    state = ""
+    for attempt in range(max(1, tries)):
+        full = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
+        state = str(full.get("mergeable_state") or "")
+        if state not in UNCOMPUTED:
+            return state
+        if attempt + 1 < max(1, tries):
+            time.sleep(pause)
+    return state
 
 
 def own_red(runs: list[dict[str, Any]], required: list[str]) -> list[str]:
@@ -268,13 +319,12 @@ def subjects(repo: str, token: str, now: datetime) -> list[Subject]:
         head = str((payload.get("head") or {}).get("sha") or "")
         if bool(payload.get("draft")) or not head:
             continue
-        full = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
-        state = str(full.get("mergeable_state") or "")
+        state = merge_state(repo, number, token)
         if state in UNCOMPUTED:
             # СОСТОЯНИЕ ЕЩЁ НЕ ПОСЧИТАНО — ЭТО ОТВЕТ, А НЕ ПУСТОТА. Площадка
             # считает его лениво, и первый запрос заказывает вычисление. Молча
             # пропустить значило бы читать «конфликта нет» из «я не знаю» (045).
-            print(f"  #{number}: состояние слияния ещё не посчитано — окликать рано")
+            print(f"  #{number}: состояние слияния не посчитано и после ожидания — окликать рано")
             continue
         runs = (
             ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)

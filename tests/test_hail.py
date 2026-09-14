@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from tests.conftest import load_script
 
 module = load_script("hail.py")
@@ -231,3 +233,58 @@ def test_a_platform_refusal_is_the_third_outcome(monkeypatch: Any, capsys: Any) 
     monkeypatch.setattr(module, "hail", refuse)
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
     assert "не отработал" in capsys.readouterr().err
+
+
+# --- ленивый ответ площадки ----------------------------------------------------
+
+
+def test_the_lazy_answer_is_awaited_not_skipped(monkeypatch: Any) -> None:
+    """Первый запрос заказывает расчёт — оклик ждёт, а не уходит ни с чем.
+
+    Площадка отдаёт `unknown` на первый вопрос о готовности слияния. Прежняя
+    редакция читала это как «окликать рано» и шла дальше, а второго шанса у
+    оклика почти нет: про конфликт он узнаёт либо чужим прогоном, либо
+    расписанием, которое площадка исполняет 14 раз из 60 (реестр #270).
+    """
+    answers = ["unknown", "unknown", module.STATE_CONFLICT]
+    asked: list[str] = []
+
+    def fake(method: str, path: str, token: str, *args: Any, **kwargs: Any) -> Any:
+        asked.append(path)
+        return {"mergeable_state": answers[len(asked) - 1]}
+
+    monkeypatch.setattr(module.ghrest, "request", fake)
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    assert module.merge_state("o/r", 7, "токен") == module.STATE_CONFLICT
+    assert len(asked) == 3, f"ожидание не состоялось: спрошено {len(asked)} раз"
+
+
+def test_a_state_that_never_comes_stays_unknown(monkeypatch: Any) -> None:
+    """Не дождались — это по-прежнему «не знаю», а не «конфликта нет» (045).
+
+    Округлить незнание до чистого значило бы промолчать там, где предмет есть.
+    """
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"mergeable_state": "unknown"})
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    assert module.merge_state("o/r", 7, "токен") in module.UNCOMPUTED
+
+
+def test_a_ready_answer_is_not_asked_twice(monkeypatch: Any) -> None:
+    """Готовый ответ берётся с первого раза: ожидание не цена по умолчанию."""
+    asked: list[str] = []
+
+    def fake(method: str, path: str, token: str, *args: Any, **kwargs: Any) -> Any:
+        asked.append(path)
+        return {"mergeable_state": "clean"}
+
+    monkeypatch.setattr(module.ghrest, "request", fake)
+    monkeypatch.setattr(module.time, "sleep", lambda _: pytest.fail("паузы быть не должно"))
+    assert module.merge_state("o/r", 7, "токен") == "clean"
+    assert len(asked) == 1
+
+
+def test_the_wait_is_declared_not_endless() -> None:
+    """Ожидание объявлено числами, а не «пока не ответит»."""
+    assert module.WAIT_TRIES == 3, "число попыток разошлось с объявленным"
+    assert module.WAIT_PAUSE == 2.0, "пауза разошлась с объявленной"
+    assert module.WAIT_TRIES * module.WAIT_PAUSE <= 10, "ожидание держало бы обход"
