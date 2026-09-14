@@ -347,3 +347,69 @@ def test_an_unknown_revision_is_not_run(tree: Path) -> None:
     """Спросили несуществующее — третий исход, а не пустая история (045)."""
     with pytest.raises(window.NotRun):
         window.commits("несуществующая-ветка", cwd=str(tree))
+
+
+# --- находки внешнего взгляда на #336 -----------------------------------------
+
+
+def test_each_window_is_measured_to_its_own_last_commit(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Срок окна считается до ЕГО последнего коммита, а не до головы ветки.
+
+    Голова ветки принадлежит тому окну, что подписалось позже. Мерить по ней все
+    окна значит завышать срок чужого: окно, дописавшее на второй день, выглядело
+    бы прожившим столько же, сколько то, что дописало на седьмой. Находка
+    внешнего взгляда `1160e6d` на #336.
+    """
+    commit(tree, "работа окна B", day=0, session=WINDOW_B)
+    git(tree, "checkout", "-b", "work")
+    commit(tree, "B дописало на второй день", day=1, session=WINDOW_B)
+    commit(tree, "A дописало на седьмой день", day=6, session=WINDOW_A)
+    assert run(tree, "--head", "work") == REJECTED
+    said = capsys.readouterr().out
+    for line in said.splitlines():
+        if line.startswith(WINDOW_B):
+            assert "1 сут" in line, f"срок окна B завышен головой чужого окна: {line}"
+            break
+    else:
+        pytest.fail(f"окно B не названо вовсе: {said}")
+
+
+def test_an_unseen_window_in_a_cut_history_is_not_called_new(
+    tmp_path: Path, tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Окна не видно в ОБРЕЗАННОЙ истории — это не «первая его работа».
+
+    «Окно ещё не отметилось» и «коммиты окна отрезаны» дают один и тот же пустой
+    ответ, и в мелком клоне различить их нечем. Считать пустоту началом окна
+    значит зеленеть тем охотнее, чем меньше механизм знает — ровно тот дефект,
+    который этот гейт и завёлся ловить. Находка внешнего взгляда `b91e5ff`.
+    """
+    commit(tree, "вторая работа окна", day=1)
+    shallow = tmp_path / "shallow-unseen"
+    subprocess.run(
+        ["git", "clone", "--depth", "1", f"file://{tree}", str(shallow)],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    git(shallow, "config", "user.name", "Artem Markitanov")
+    git(shallow, "config", "user.email", "86671904+ArtVsMark@users.noreply.github.com")
+    git(shallow, "checkout", "-b", "work")
+    # Окно, которого в обрезанной истории не видно вовсе.
+    commit(shallow, "работа третьего окна", day=7, session="session_CCC")
+    assert run(shallow, "--head", "work") == BROKEN
+    assert "история обрезана" in capsys.readouterr().err
+
+
+def test_a_first_appearance_is_still_new_on_a_whole_history(tree: Path) -> None:
+    """Граница предыдущего: на ПОЛНОЙ истории первая работа окна — срок нулевой.
+
+    Иначе починка съела бы законное состояние и гейт краснел бы на каждом новом
+    окне (075 — про предмет, а не про строгость).
+    """
+    head = window.Commit(sha="new", when=START + timedelta(days=2), message="первая работа")
+    age = window.lifetime(WINDOW_B, "main", head, cwd=str(tree))
+    assert age.whole and age.age == timedelta(0)
