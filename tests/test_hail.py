@@ -288,3 +288,52 @@ def test_the_wait_is_declared_not_endless() -> None:
     assert module.WAIT_TRIES == 3, "число попыток разошлось с объявленным"
     assert module.WAIT_PAUSE == 2.0, "пауза разошлась с объявленной"
     assert module.WAIT_TRIES * module.WAIT_PAUSE <= 10, "ожидание держало бы обход"
+
+
+# --- отменённая запись не отказ -------------------------------------------------
+
+
+def run_of(name: str, conclusion: str | None, status: str = "completed") -> dict[str, Any]:
+    """Запись проверки в том виде, в каком её отдаёт площадка."""
+    return {"name": name, "status": status, "conclusion": conclusion}
+
+
+def test_a_cancelled_record_is_not_a_red_one() -> None:
+    """Погашенная группой отмены запись отказом не считается.
+
+    Замер 14.09.2026, два ложных оклика за смену: на #336 окно позвали чинить
+    `test`, на #338 — пять имён сразу, и на обеих головах все они завершились
+    успехом через минуту. Прежнее поколение гасится, новое ещё не стартовало — и
+    единственная запись имени выглядела отказом.
+    """
+    runs = [run_of("test", "cancelled"), run_of("lint", "cancelled")]
+    assert module.own_red(runs, ["test", "lint"]) == [], "отмена прочитана как отказ"
+
+
+def test_a_live_failure_is_still_red() -> None:
+    """Настоящий отказ по-прежнему красный — иначе починка выключила бы оклик."""
+    runs = [run_of("test", "failure"), run_of("lint", "cancelled")]
+    assert module.own_red(runs, ["test", "lint"]) == ["test"]
+
+
+def test_a_cancelled_record_next_to_a_green_one_is_ignored() -> None:
+    """Отменённая рядом с живой зелёной ничего не меняет: живая выше (090)."""
+    runs = [run_of("test", "cancelled"), run_of("test", "success")]
+    assert module.own_red(runs, ["test"]) == []
+
+
+def test_a_name_without_a_verdict_is_named_not_swallowed() -> None:
+    """«Вердикта ещё нет» — объявленное состояние, а не тишина (045)."""
+    runs = [run_of("test", "cancelled"), run_of("lint", "success")]
+    assert module.undecided(runs, ["test", "lint"]) == ["test"]
+    assert module.undecided([run_of("test", "success")], ["test"]) == []
+
+
+def test_a_skipped_required_is_not_hailed_either() -> None:
+    """Пропущенная обязательная тоже не вердикт: её предмет у шага застрявших.
+
+    Слияния она не пройдёт, и у соседа на это свои признаки — «записи нет вовсе»
+    и «значок не выдан» (195). Оклик говорит только о вердикте.
+    """
+    assert module.own_red([run_of("test", "skipped")], ["test"]) == []
+    assert module.undecided([run_of("test", "skipped")], ["test"]) == ["test"]

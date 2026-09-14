@@ -243,13 +243,55 @@ def own_red(runs: list[dict[str, Any]], required: list[str]) -> list[str]:
     разошлось бы с первым молча
     ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
     Нашёл внешний взгляд на #216.
+
+    ОТМЕНЁННАЯ ЗАПИСЬ — НЕ ОТКАЗ, И ЭТО СТОИЛО ДВУХ ЛОЖНЫХ ОКЛИКОВ ЗА ОДНУ
+    СМЕНУ. Шапка выше обещала, что «проверка ещё не шла» сюда не входит, — и
+    обещание держалось лишь для ОТСУТСТВИЯ записи. Когда прежнее поколение
+    погашено группой отмены, а новое ещё не стартовало, у имени есть запись:
+    `completed` + `cancelled`. Она проходила оба условия и объявлялась красной.
+
+    Замер 14.09.2026, два случая: на #336 оклик назвал упавшим `test`, на #338 —
+    `attribution`, `contract`, `journal`, `lint` и `test`; на обеих головах все
+    эти имена завершились `success` через минуту. Окно звали чинить зелёное, а
+    оклик про чужое приучают пропускать
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    РАЗЛИЧИЕ БЕРЁТСЯ У СОСЕДА, А НЕ ПИШЕТСЯ ЗАНОВО: `ci_complete.has_verdict`
+    уже разводит «отменено или пропущено» и «сказало о проверке». Тот же приём,
+    что с `worst_per_name` выше — второе понимание одного состояния разошлось бы
+    с первым молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    СОСЕД НАЗВАН, ЧТОБЫ СОСТОЯНИЕ НЕ ПОТЕРЯЛОСЬ (195). Обязательная, у которой
+    вердикта нет и уже не будет, слияния не пройдёт — и это предмет шага
+    застрявших (`scripts/stuck.py`): у него на такое свои признаки, «записи нет
+    вовсе» и «значок не выдан». Оклик же говорит только о вердикте.
     """
     wanted = set(required)
     mine = [run for run in runs if str(run.get("name") or "") in wanted]
     return sorted(
         str(run.get("name") or "")
         for run in ci_complete.worst_per_name(mine)
-        if run.get("status") == "completed" and run.get("conclusion") not in ("success", None)
+        if ci_complete.has_verdict(run)
+        and run.get("status") == "completed"
+        and run.get("conclusion") not in ("success", None)
+    )
+
+
+def undecided(runs: list[dict[str, Any]], required: list[str]) -> list[str]:
+    """Обязательные имена, у которых вердикта на голове ещё нет.
+
+    ПОЧЕМУ ЭТО ПЕЧАТАЕТСЯ, А НЕ МОЛЧИТ. Оклик перестал считать отмену отказом —
+    и без этой строки состояние «вердикта пока нет» стало бы неотличимо от
+    «всё прошло». Молчание о незнании и есть то, из чего выросли ложные оклики
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    wanted = set(required)
+    mine = [run for run in runs if str(run.get("name") or "") in wanted]
+    return sorted(
+        str(run.get("name") or "")
+        for run in ci_complete.worst_per_name(mine)
+        if not ci_complete.has_verdict(run)
     )
 
 
@@ -331,6 +373,11 @@ def subjects(repo: str, token: str, now: datetime) -> list[Subject]:
             or {}
         ).get("check_runs") or []
         red = own_red(list(runs), required)
+        # НЕЗНАНИЕ НАЗЫВАЕТСЯ ВСЛУХ. Имя без вердикта красным больше не считается,
+        # и без этой строки «вердикта пока нет» выглядело бы как «всё прошло» (045).
+        waiting = undecided(list(runs), required)
+        if waiting and not red:
+            print(f"  #{number}: вердикта ещё нет у {', '.join(waiting)} — окликать рано")
 
         if state == STATE_CONFLICT:
             kind, why = (
