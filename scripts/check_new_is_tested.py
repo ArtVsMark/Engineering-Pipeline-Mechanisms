@@ -46,7 +46,10 @@ EXIT_BROKEN: Final = 2
 
 #: Где живут механизмы и где живёт набор. Пара, а не одна папка: предмет гейта
 #: — отношение между ними.
-SOURCES: Final = "scripts/"
+#: Где живёт код, чьи новые имена обязаны звать прогоны. Каталогов два: механизмы
+#: и общий низ пакетом. Пока был один, перенос транспорта наружу вывел бы его
+#: из-под гейта молча — а именно его имена зовут все прочие (090).
+SOURCES: Final = ("scripts/", "packages/transport/")
 TESTS: Final = "tests"
 
 #: Имя точки входа. Засчитывается упоминанием файла модуля: тест гейта зовёт
@@ -71,7 +74,7 @@ def _git(*args: str) -> str:
     return done.stdout
 
 
-def touched(base: str) -> list[str]:
+def touched(base: str) -> list[tuple[str, str]]:
     """Модули механизмов, тронутые изменением.
 
     Список путей читается по NUL: без него git экранирует имена с не-ASCII, и
@@ -84,16 +87,22 @@ def touched(base: str) -> list[str]:
     fields = [
         one for one in _git("diff", "--name-status", "-z", f"{spot}...HEAD").split("\0") if one
     ]
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
     while fields:
         state = fields.pop(0)[:1]
         if not fields:
             break
         path = fields.pop(0)
+        # ПЕРЕИМЕНОВАНИЕ НЕСЁТ ДВА ПУТИ, и второй здесь нужен: переезд файла — не
+        # добавление. Пока запоминался только новый путь, вынос общего низа в
+        # пакет объявил непрогнанным ВСЁ его содержимое: на базе по новому адресу
+        # файла нет, значит все имена «новые». Ложная находка учит обходить гейт
+        # (051), поэтому старый путь запоминается и вычитается ниже.
+        was = ""
         if state == "R" and fields:
-            path = fields.pop(0)
+            was, path = path, fields.pop(0)
         if state != "D" and path.startswith(SOURCES) and path.endswith(".py"):
-            found.append(path)
+            found.append((path, was))
     return found
 
 
@@ -125,9 +134,18 @@ def at(ref: str, path: str) -> str:
         return ""
 
 
-def added_names(base: str, path: str) -> set[str]:
-    """Имена, которых на базе не было, а в голове есть."""
-    return names_in(at("HEAD", path)) - names_in(at(base, path))
+def added_names(base: str, path: str, was: str = "") -> set[str]:
+    """Имена, которых на базе не было, а в голове есть.
+
+    ПЕРЕЕХАВШЕЕ ИМЯ НЕ НОВОЕ. У переименованного файла на базе по новому адресу
+    нет ничего, и без старого адреса гейт объявил бы новым весь модуль целиком —
+    так и вышло при выносе общего низа в пакет. Поэтому вычитается и то, что
+    лежало по прежнему пути (044).
+    """
+    before = names_in(at(base, path))
+    if was:
+        before |= names_in(at(base, was))
+    return names_in(at("HEAD", path)) - before
 
 
 def told_by_tests(name: str, module: str, tests: str) -> bool:
@@ -220,8 +238,8 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK
         tests = tests_text()
         naked: list[str] = []
-        for path in modules:
-            for name in sorted(added_names(base, path)):
+        for path, was in modules:
+            for name in sorted(added_names(base, path, was)):
                 if not told_by_tests(name, path, tests):
                     naked.append(f"{path}:{name}")
     except NotRun as exc:

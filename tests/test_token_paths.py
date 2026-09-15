@@ -16,12 +16,12 @@ import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import ghrest as transport
 import pytest
 
 from tests.conftest import load_script
 
 agent_pr = load_script("agent_pr.py")
-transport = load_script("ghrest.py")
 
 
 class Refusing(BaseHTTPRequestHandler):

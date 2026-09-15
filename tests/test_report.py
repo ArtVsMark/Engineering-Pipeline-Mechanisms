@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import ast
 
-from tests.conftest import ROOT, load_script
+import report
 
-report = load_script("report.py")
+from tests.conftest import ROOT
+
 SCRIPTS = ROOT / "scripts"
 
 

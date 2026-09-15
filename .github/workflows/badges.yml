@@ -92,7 +92,7 @@ jobs:
           # счётчика 12.09. Число, ни разу не опубликованное, выглядело
           # опубликованным (045).
           python -m pip install --quiet \
-            "coverage>=7,<8" "pytest>=8,<10" "pytest-randomly>=3,<4"
+            "coverage>=7,<8" "pytest>=8,<10" "pytest-randomly>=3,<4" ./packages/transport
           rc=0
           python -m coverage run --parallel-mode --source=scripts -m pytest \
             --strict-markers -p no:cacheprovider \

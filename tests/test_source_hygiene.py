@@ -20,7 +20,15 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = sorted((ROOT / "scripts").glob("*.py")) + sorted((ROOT / "tests").glob("*.py"))
+#: Источники проекта: механизмы, общий низ пакетом и набор. Пакет назван здесь
+#: отдельно не для полноты списка: после переноса транспорта наружу глоб по
+#: `scripts/` молча перестал бы его видеть, и гигиена источника кончалась бы на
+#: границе каталога (090).
+SOURCES = (
+    sorted((ROOT / "scripts").glob("*.py"))
+    + sorted((ROOT / "packages" / "transport").glob("*.py"))
+    + sorted((ROOT / "tests").glob("*.py"))
+)
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 
 #: Команды git, отдающие СПИСОК ПУТЕЙ для последующего чтения.

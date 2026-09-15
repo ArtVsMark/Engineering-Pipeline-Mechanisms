@@ -58,7 +58,7 @@ jobs:
       # Ставится то, что механизм импортирует: разбор прогона читает YAML, и
       # без этого шаг падает вторым исходом на ровном месте.
       - name: поставить разбор состава
-        run: python -m pip install --quiet "pyyaml>=6,<7"
+        run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
       - name: спросить внешние входы
         env:
           GH_TOKEN: ${{ github.token }}
