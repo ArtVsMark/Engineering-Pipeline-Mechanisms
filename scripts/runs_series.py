@@ -205,7 +205,11 @@ def merge(
     for day, runs in fresh.items():
         if edge <= day <= today:
             days.setdefault(day, {})["runs"] = runs
-    if coverage is not None and edge <= today:
+    # Условия о крае здесь нет намеренно: окно хранения не бывает короче суток
+    # (это проверяет `Bounds.read`), значит нынешний день в окно входит всегда.
+    # Условие, которое не может быть ложным, читается как проверка и ею не
+    # является (075; нашёл внешний взгляд, `a6a8a5f`).
+    if coverage is not None:
         days.setdefault(today, {})["coverage"] = coverage
     return dict(sorted(days.items()))
 
