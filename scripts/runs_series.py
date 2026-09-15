@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""Ряд прогонов: как конвейер работает НА САМОМ ДЕЛЕ, а не по памяти.
+
+Записи проверок живут, пока живёт изменение; логи прогонов из части окон не
+читаются вовсе. Поэтому вопрос «как отработал конвейер» отвечался руками и по
+памяти, а разбор гонки сводного гейта 13.09.2026 стоил часа именно поэтому.
+
+ИНТЕРЕСНОЕ ЖИВЁТ В РЯДЕ, А НЕ В ОДНОМ ПРОГОНЕ. Ни один заход не показывает, что
+треть заходов гаснет группой отмены, что ежечасное расписание площадка исполняет
+раз из пяти и что одно имя мигало пятнадцать раз подряд. Предмет здесь —
+накопленный ряд, и вопросы у него названы заранее, иначе выйдет витрина, которую
+никто не читает: какое имя чаще краснеет · сколько заходов гаснет впустую ·
+растёт ли время прогона.
+
+СТРОКА РЯДА — ДЕНЬ И ПРОГОН, А НЕ ОТДЕЛЬНЫЙ ЗАХОД. Заходов у площадки полторы
+тысячи в сутки, и ряд из них был бы не рядом, а копией её базы. День на прогон
+сжимает сутки в две дюжины строк и отвечает на все названные вопросы: числа
+складываются, а не перечисляются.
+
+ПОСЛЕДНИЕ ДНИ ПЕРЕСЧИТЫВАЮТСЯ, СТАРЫЕ ЗАМОРОЖЕНЫ. Пока записи прогонов живы,
+день — зеркало живых артефактов
+([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)):
+пропущенный заход по расписанию не оставляет в ряду дыру, потому что следующий
+пересчитает тот же день заново. Дальше окна пересчёта день уже не меняется —
+артефактов под ним нет, и трогать его было бы выдумыванием.
+
+ГРАНИЦЫ ОБЪЯВЛЕНЫ ДАННЫМИ (`.rules/series.json`), а не зашиты здесь: окно — это
+решение о цене хранения, и менять его правкой числа в коде значило бы менять
+договор молча (042). Где ряд лежит и почему не в ветке значков —
+`docs/decisions/022-the-series-of-runs-lives-in-its-own-branch.md`.
+
+ЧЕГО ЗДЕСЬ НЕТ НАМЕРЕННО: счёта миганий. Мигание — «красное, затем зелёное на
+той же голове», и его считает шаг 9 в реестре #99. Второй счёт того же разошёлся
+бы с первым молча
+([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+Исходы (правило 039): ``0`` ряд обновлён · ``2`` заход не отработал. Третьего у
+накопления нет, и это названо, а не пропущено: «обновил, но с находками» здесь
+не существует — механизм либо прочитал прогоны и свёл день, либо не смог (154).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections import Counter
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Final
+
+import ghrest
+import paths
+
+EXIT_OK: Final = 0
+EXIT_BROKEN: Final = 2
+
+#: Границы ряда: объявление, а не догадка. Адрес берётся у общего якоря, а не
+#: строится здесь: второй адрес того же файла разошёлся бы с первым молча (090).
+BOUNDS_FILE: Final = paths.SERIES
+
+#: Исходы, которые считаются настоящим красным. Слово в слово как у шага 9:
+#: отменённая не пройдена, но и не отказ, а «идёт» вердикта не несёт вовсе.
+REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
+
+
+class NotRun(RuntimeError):
+    """Заход не отработал: второй исход, а не пустой ряд."""
+
+
+@dataclass(frozen=True, slots=True)
+class Bounds:
+    """Границы ряда, прочитанные из объявления."""
+
+    window_days: int
+    recount_days: int
+
+    @classmethod
+    def read(cls, path: Path) -> Bounds:
+        """Читает границы; отсутствие объявления — отказ входа, а не умолчание."""
+        try:
+            said = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise NotRun(f"границы ряда не прочитаны ({path}): {exc}") from exc
+        try:
+            window, recount = int(said["window_days"]), int(said["recount_days"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise NotRun(f"в {path} нет объявленных window_days и recount_days: {exc}") from exc
+        if not 0 < recount <= window:
+            raise NotRun(
+                f"окно пересчёта {recount} не помещается в окно хранения {window} — "
+                "границы противоречат друг другу (075)"
+            )
+        return cls(window_days=window, recount_days=recount)
+
+
+def day_of(run: dict[str, Any]) -> str:
+    """День захода по его началу у площадки: `ГГГГ-ММ-ДД`."""
+    return str(run.get("created_at") or "")[:10]
+
+
+def elapsed(run: dict[str, Any]) -> int | None:
+    """Сколько секунд заход занял у площадки; `None` — время НЕ СКАЗАНО.
+
+    Ноль и «не сказано» — разные вещи, и сводить их к нулю нельзя: заход,
+    уложившийся в секунду, существует, а средний по дню считается только по
+    тем, у кого время известно. Молча подставить ноль значило бы занижать
+    среднее ровно на числе неразобранных
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    started, ended = run.get("run_started_at"), run.get("updated_at")
+    if not started or not ended:
+        return None
+    try:
+        began = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        done = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0, int((done - began).total_seconds()))
+
+
+def red_jobs(repo: str, run: int, token: str) -> list[str]:
+    """Имена упавших джобов захода — спрашиваются ТОЛЬКО у красных.
+
+    Джобы каждого захода стоили бы полутора тысяч вызовов в сутки, а красных за
+    те же сутки было тринадцать: вопрос «какое имя чаще краснеет» отвечается по
+    ним, и цена остаётся счётной (058).
+    """
+    payload = ghrest.request("GET", f"repos/{repo}/actions/runs/{run}/jobs", token) or {}
+    return sorted(
+        str(job.get("name") or "")
+        for job in payload.get("jobs") or []
+        if job.get("conclusion") in REAL_RED
+    )
+
+
+def swept(repo: str, token: str, since: str) -> dict[str, dict[str, dict[str, Any]]]:
+    """Сводит заходы площадки от дня `since` в строки «день → прогон → числа»."""
+    days: dict[str, dict[str, dict[str, Any]]] = {}
+    seen = 0
+    for run in ghrest.paginate(
+        f"repos/{repo}/actions/runs?created=%3E%3D{since}&status=completed",
+        token,
+        key="workflow_runs",
+    ):
+        day, name = day_of(run), str(run.get("name") or "")
+        if not day or not name or day < since:
+            continue
+        seen += 1
+        row = days.setdefault(day, {}).setdefault(
+            name, {"runs": 0, "red": 0, "cancelled": 0, "seconds": 0, "timed": 0, "red_jobs": {}}
+        )
+        row["runs"] += 1
+        end = str(run.get("conclusion") or "")
+        if end in REAL_RED:
+            row["red"] += 1
+            number = int(run.get("id") or 0)
+            if number:
+                for job in red_jobs(repo, number, token):
+                    row["red_jobs"][job] = int(row["red_jobs"].get(job, 0)) + 1
+        elif end == "cancelled":
+            row["cancelled"] += 1
+        spent = elapsed(run)
+        if spent is not None:
+            row["seconds"] += spent
+            row["timed"] += 1
+    if not seen:
+        raise NotRun(f"заходов от {since} площадка не отдала ни одного — сводить нечего (075)")
+    return days
+
+
+def merge(
+    known: dict[str, Any], fresh: dict[str, dict[str, dict[str, Any]]], bounds: Bounds, today: str
+) -> dict[str, Any]:
+    """Сливает прежний ряд со свежим замером: пересчёт молодых, окно у старых.
+
+    ОКНО ОГРАНИЧЕНО С ОБЕИХ СТОРОН. Старое уходит — это и есть окно. День ПОСЛЕ
+    нынешнего уходит тоже: заход из будущего означает сбитые часы или подделку, а
+    оставленный, он вытеснил бы из окна настоящий день, то есть чистка теряла бы
+    не старое, а нужное (075).
+    """
+    edge = str(
+        (
+            datetime.fromisoformat(f"{today}T00:00:00+00:00")
+            - timedelta(days=bounds.window_days - 1)
+        ).date()
+    )
+    days = {day: rows for day, rows in known.items() if edge <= day <= today}
+    days.update({day: rows for day, rows in fresh.items() if edge <= day <= today})
+    return dict(sorted(days.items()))
+
+
+def since_day(today: str, back: int) -> str:
+    """День, от которого идёт пересчёт: `back` дней назад, считая нынешний."""
+    return str(
+        (datetime.fromisoformat(f"{today}T00:00:00+00:00") - timedelta(days=back - 1)).date()
+    )
+
+
+def total(days: dict[str, Any], field: str) -> int:
+    """Сумма поля по всему ряду."""
+    return sum(int(row.get(field, 0)) for rows in days.values() for row in rows.values())
+
+
+def reds(days: dict[str, Any]) -> Counter[str]:
+    """Сколько раз каждое имя джоба краснело за весь ряд."""
+    found: Counter[str] = Counter()
+    for rows in days.values():
+        for row in rows.values():
+            for name, count in (row.get("red_jobs") or {}).items():
+                found[name] += int(count)
+    return found
+
+
+def minutes_of(days: dict[str, Any], name: str, day: str) -> float:
+    """Среднее время захода прогона `name` в минутах за один день; ноль — не было."""
+    row = (days.get(day) or {}).get(name) or {}
+    timed = int(row.get("timed", 0))
+    return round(int(row.get("seconds", 0)) / timed / 60, 1) if timed else 0.0
+
+
+def report(days: dict[str, Any], bounds: Bounds, today: str) -> str:
+    """Отчёт по ряду: ответы на названные вопросы ЧИСЛОМ С ДАТОЙ.
+
+    Отчёт — не витрина: он существует потому, что логи прогонов из части окон не
+    читаются, а живой файл ряда читается по прямой ссылке. Число без даты
+    устаревает молча (005), поэтому у каждого ответа стоит окно, за которое он
+    получен.
+    """
+    runs, cancelled = total(days, "runs"), total(days, "cancelled")
+    red = total(days, "red")
+    known = sorted(days)
+    share = round(100 * cancelled / runs, 1) if runs else 0.0
+    lines = [
+        "# Ряд прогонов: чем отвечает конвейер",
+        "",
+        "> **Читатель:** окно и владелец. Здесь ответы о работе конвейера числом,",
+        "> а не по памяти. Источник — `runs.json` в этой же ветке.",
+        "",
+        f"Собрано {today}. Дней в ряду: {len(known)}"
+        + (f" ({known[0]} — {known[-1]})" if known else "")
+        + f", окно хранения {bounds.window_days} дней, пересчёт последних"
+        f" {bounds.recount_days}.",
+        "",
+        "## Сколько заходов гаснет впустую",
+        "",
+        f"Отменённых {cancelled} из {runs} завершённых заходов — **{share} %**. Отмена здесь"
+        " штатна: группа отмены гасит устаревший заход на той же голове, и это цена"
+        " свежести, а не поломка.",
+        "",
+        "## Какое имя чаще краснеет",
+        "",
+    ]
+    top = reds(days).most_common(5)
+    if top:
+        lines += [f"Красных заходов {red}, и красное разошлось по джобам так:", ""]
+        lines += [f"- `{name}` — {count}" for name, count in top]
+        lines += [""]
+    else:
+        lines += [
+            f"Красных заходов за окно {red}, и ни одного имени джоба назвать нельзя:"
+            " площадка отдаёт джобы только пока хранит заход.",
+            "",
+        ]
+    lines += ["## Растёт ли время прогона", ""]
+    if len(known) >= 2:
+        first, last = known[0], known[-1]
+        было, стало = minutes_of(days, "ci", first), minutes_of(days, "ci", last)
+        lines += [
+            f"Средний заход `ci`: {было} мин {first} → {стало} мин {last}. Два дня — это"
+            " не ряд, и вывода здесь пока нет; ответ появится, когда дней станет"
+            " достаточно, а не когда его захочется получить (044).",
+            "",
+        ]
+    else:
+        lines += ["Дней в ряду меньше двух — сравнивать нечего.", ""]
+    lines += [
+        "## Чего здесь нет",
+        "",
+        "Счёта миганий: «красное, затем зелёное на той же голове» считает шаг 9 и"
+        " ведёт реестр #99. Второй счёт того же разошёлся бы с первым молча (022).",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Точка входа: пересчитывает молодые дни ряда и пишет ряд с отчётом."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="владелец/имя"
+    )
+    parser.add_argument("--store", required=True, help="файл ряда (runs.json) — читается и пишется")
+    parser.add_argument("--report", default="", help="куда положить отчёт по ряду")
+    parser.add_argument("--bounds", default=str(BOUNDS_FILE), help="объявление границ ряда")
+    parser.add_argument("--apply", action="store_true", help="писать файлы, а не только считать")
+    args = parser.parse_args(argv)
+
+    store = Path(args.store)
+    try:
+        if not args.repo:
+            raise NotRun("не сказано, чей ряд считать (--repo) — предмет не найден (075)")
+        bounds = Bounds.read(Path(args.bounds))
+        token = ghrest.token_from_env()
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        known: dict[str, Any] = {}
+        if store.exists():
+            said = json.loads(store.read_text(encoding="utf-8"))
+            known = dict(said.get("days") or {})
+        fresh = swept(args.repo, token, since_day(today, bounds.recount_days))
+        days = merge(known, fresh, bounds, today)
+        body = {
+            "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
+            "window_days": bounds.window_days,
+            "recount_days": bounds.recount_days,
+            "updated": datetime.now(UTC).isoformat(timespec="seconds"),
+            "days": days,
+        }
+    except NotRun as exc:
+        print(f"заход не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    except ghrest.TransportError as exc:
+        print(f"заход не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    except json.JSONDecodeError as exc:
+        print(f"заход не отработал: прежний ряд не читается ({store}): {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+
+    said = report(days, bounds, today)
+    if args.apply:
+        store.parent.mkdir(parents=True, exist_ok=True)
+        store.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.report:
+            Path(args.report).write_text(said + "\n", encoding="utf-8")
+    print(
+        f"дней в ряду {len(days)}, из них пересчитано {len(fresh)}; "
+        f"заходов за окно {total(days, 'runs')}"
+        + ("" if args.apply else " — записи не было, это сухой заход")
+    )
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

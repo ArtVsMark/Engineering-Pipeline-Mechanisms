@@ -37,6 +37,9 @@ SHOWCASE: Final = Path(".rules/showcase.json")
 #: Объявленные расписания и роль каждого: наблюдает оно или действует.
 SCHEDULES: Final = Path(".rules/schedules.json")
 
+#: Границы ряда прогонов: сколько дней он хранит и сколько пересчитывает.
+SERIES: Final = Path(".rules/series.json")
+
 #: Чем защищена общая ветка — объявлением, а не памятью. Настройка живёт вне
 #: дерева, и ослабление её не краснеет нигде само по себе.
 PROTECTION: Final = Path(".rules/protection.json")
@@ -83,6 +86,7 @@ ALL: Final = (
     PROPOSALS,
     SHOWCASE,
     SCHEDULES,
+    SERIES,
     PROTECTION,
     OUTCOMES,
     FRAGMENTS,
