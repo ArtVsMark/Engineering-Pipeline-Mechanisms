@@ -611,6 +611,70 @@ def test_the_summarised_run_is_the_freshest_one_on_the_head(
     assert found is not None and found["id"] == 22
 
 
+def test_a_cancelled_zombie_does_not_win_over_a_live_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Самый свежий прогон бывает ЗОМБИ, и тогда сводится живой.
+
+    ЗАМЕР 15.09.2026, изменение #366. На одной голове лежали три прогона `ci`:
+    два отменённых и один зелёный, созданы в одну секунду — и номер у погашенного
+    больше. Гейт выбрал отменённого и пятнадцать минут печатал «прогон отменён,
+    идёт новый», ожидая того, кто уже никогда не завершится; зелёный в это время
+    лежал рядом и закончился за девять минут до того, как гейт сдался. Красное
+    было о выборе прогона, а не о работе
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    СТАРШЕ — НЕ ХУЖЕ: голова та же, значит дерево то же, и вердикт прежнего
+    прогона описывает ровно этот тред.
+    """
+    payload = {
+        "workflow_runs": [
+            {"name": "ci", "id": 40, "created_at": "2026-09-15T10:18:32Z", "conclusion": "success"},
+            {
+                "name": "ci",
+                "id": 41,
+                "created_at": "2026-09-15T10:18:32Z",
+                "conclusion": "cancelled",
+            },
+        ]
+    }
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: payload)
+    found = module.summarised_run("o/r", "abc", "token")
+    assert found is not None and found["id"] == 40, (
+        "выбран отменённый прогон с большим номером — гейт ждал бы его завершения вечно"
+    )
+
+
+def test_all_cancelled_is_still_the_declared_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Живого прогона нет вовсе — отдаётся самый свежий отменённый.
+
+    Это объявленное состояние «все записи отменены», и разбирает его вызывающий:
+    подменять его на «прогона нет» значило бы свести два состояния к одному (154).
+    """
+    payload = {
+        "workflow_runs": [
+            {
+                "name": "ci",
+                "id": 7,
+                "created_at": "2026-09-15T10:00:00Z",
+                "conclusion": "cancelled",
+            },
+            {
+                "name": "ci",
+                "id": 8,
+                "created_at": "2026-09-15T10:01:00Z",
+                "conclusion": "cancelled",
+            },
+        ]
+    }
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: payload)
+    found = module.summarised_run("o/r", "abc", "token")
+    assert found is not None and found["id"] == 8
+    assert module.ready_to_judge(found, module.Roster(read=True, named=3, running={})) is False, (
+        "отменённый вердикта не несёт — этого правила починка не отменяет"
+    )
+
+
 def test_no_summarised_run_is_waiting_not_a_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
     """Прогона, который сводится, ещё нет — это ожидание, а не отказ и не «зелено».
 
