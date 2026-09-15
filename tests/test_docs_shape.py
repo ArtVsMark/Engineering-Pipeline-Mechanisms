@@ -224,7 +224,7 @@ def test_the_main_file_stays_a_trigger() -> None:
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
     said = prose_words(MAIN_FILE.read_text(encoding="utf-8"))
-    assert said <= MAIN_FILE_WORDS, (
+    assert not over_part(said, MAIN_FILE_WORDS), (
         f"свод вырос до {said} слов при пределе {MAIN_FILE_WORDS}: его читают целиком и при "
         "каждом старте, и объём здесь — налог на любую работу. Вынесите подробности в канон "
         "(docs/) и оставьте триггер — то, что нужно знать, чтобы не сделать ошибку прямо "
@@ -290,7 +290,7 @@ def test_the_window_file_stays_a_trigger() -> None:
     читателе и остаётся автору (195).
     """
     said = prose_words(WINDOW_FILE.read_text(encoding="utf-8"))
-    assert said <= WINDOW_FILE_WORDS, (
+    assert not over_part(said, WINDOW_FILE_WORDS), (
         f"свод окна вырос до {said} слов при пределе {WINDOW_FILE_WORDS}: его читают целиком "
         "и при каждом старте, сразу после ядра. Вынесите подробности в ядро (AGENTS.md) или "
         "канон (docs/) и оставьте то, что верно ТОЛЬКО для этого окна (029, 021)"
@@ -314,6 +314,15 @@ def test_the_window_file_stays_a_trigger() -> None:
 #: 3150, запас около абзаца, как и у частей. Двигать вверх можно, но это
 #: решение с ценой, а не правка числа (050).
 START_TAX_WORDS = 3150
+
+
+def over_part(said: int, limit: int) -> bool:
+    """Превышен ли предел одной половины.
+
+    Предикат один на живой замер и на прогон отказа: без него отказ сравнивал бы
+    предел сам с собой и проходил бы при любом устройстве гейта (090, 140).
+    """
+    return said > limit
 
 
 def over_tax(core: int, window: int) -> bool:
@@ -356,12 +365,18 @@ def test_the_start_tax_can_go_red_on_its_own() -> None:
     одной части, арифметически невозможно. Зелёное такого гейта означало лишь,
     что предикат не умеет краснеть (075).
     """
-    красный = (MAIN_FILE_WORDS, WINDOW_FILE_WORDS)
-    assert красный[0] <= MAIN_FILE_WORDS and красный[1] <= WINDOW_FILE_WORDS, (
-        "обе половины на своих пределах, то есть по частям такой вход зелен"
+    # Вход берётся С ЗАПАСОМ от обоих пределов, а не равным им: сравнение
+    # предела с самим собой прошло бы при любом устройстве гейта и проверяло бы
+    # арифметику вместо предиката (нашёл внешний взгляд, `838969f`).
+    ядро, окно = MAIN_FILE_WORDS - 20, WINDOW_FILE_WORDS - 20
+    assert not over_part(ядро, MAIN_FILE_WORDS), f"{ядро} по своей половине зелено"
+    assert not over_part(окно, WINDOW_FILE_WORDS), f"{окно} по своей половине зелено"
+    assert over_tax(ядро, окно), (
+        f"а вместе {ядро + окно} шире потолка {START_TAX_WORDS} — иначе общего запаса не"
+        " существует, и потолок суммы недостижим"
     )
-    assert over_tax(*красный), "а по сумме он красен — иначе общего запаса не существует"
-    assert not over_tax(*start_tax()), "сегодняшний замер при этом зелен"
+    core, window = start_tax()
+    assert not over_tax(core, window), "сегодняшний замер при этом зелен"
 
 
 def test_the_window_file_limit_rejects_what_it_must() -> None:
