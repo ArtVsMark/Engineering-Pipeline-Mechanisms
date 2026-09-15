@@ -1004,6 +1004,33 @@ def test_a_held_change_is_reported_after_the_consent_is_gone(
     assert "#7" in capsys.readouterr().out
 
 
+def test_a_paused_change_is_not_a_candidate() -> None:
+    """Метка заморозки снимает изменение с очереди так же, как `hold`.
+
+    Владелец у метки при этом ДРУГОЙ: `hold` ставит человек, `paused/main-red` —
+    шаг 9 на время заморозки. Для очереди действие одно, и читать его вторым
+    способом значило бы развести два понимания одной остановки (022).
+    """
+    остановленные = [change(1, "automerge", module.LABEL_PAUSED), change(2, "automerge", "hold")]
+    assert module.candidates(остановленные, "main") == []
+    assert module.candidates([change(3, "automerge")], "main") != []
+
+
+def test_the_pause_names_its_owner_in_the_report(capsys: pytest.CaptureFixture[str]) -> None:
+    """В отчёте видно, КТО остановил: человек меткой `hold` или заморозка (154)."""
+    module.report_held([change(7, "hold"), change(8, module.LABEL_PAUSED)])
+    said = capsys.readouterr().out
+    assert "#7" in said and "«hold»" in said
+    assert "#8" in said and f"«{module.LABEL_PAUSED}»" in said
+
+
+def test_the_pause_label_is_declared_in_the_tree() -> None:
+    """Имя метки — вход механизма, и оно объявлено в составе, а не в коде (064)."""
+    module.check_labels_declared()
+    said = (ROOT / ".github" / "labels.yml").read_text(encoding="utf-8")
+    assert module.LABEL_PAUSED in said
+
+
 def test_labels_are_set_even_when_the_shared_branch_is_red(platform: dict[str, Any]) -> None:
     """Красная общая ветка морозит движение, но не разметку.
 

@@ -99,7 +99,7 @@ def test_the_context_gate_reports_a_divergence_when_it_is_run(
     """
     monkeypatch.setenv("MERGE_QUEUE_TOKEN", "подделка")
     monkeypatch.setattr(module, "declared_context", lambda *a, **k: "ci-complete")
-    monkeypatch.setattr(module, "protection", lambda *a, **k: ["чужое-имя"])
+    monkeypatch.setattr(module, "live_contexts", lambda *a, **k: (["чужое-имя"], False))
     assert module.main(["--repo", "o/r"]) == module.EXIT_FINDINGS
 
 
@@ -109,8 +109,71 @@ def test_the_context_gate_is_silent_when_the_names_agree(
     """Обратная сторона того же прогона: совпали имена — находки нет (097)."""
     monkeypatch.setenv("MERGE_QUEUE_TOKEN", "подделка")
     monkeypatch.setattr(module, "declared_context", lambda *a, **k: "ci-complete")
-    monkeypatch.setattr(module, "protection", lambda *a, **k: ["ci-complete"])
+    monkeypatch.setattr(module, "live_contexts", lambda *a, **k: (["ci-complete"], False))
     # Способы слияния — второй предмет того же захода, и без него он честно
     # уходит в третий исход: сеть в наборе не спрашивают.
     monkeypatch.setattr(module, "merge_ways", lambda *a, **k: [])
     assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+
+
+def test_a_branch_guarded_another_way_is_its_own_finding(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """«Защищена, но не набором правил» — отдельная находка, а не «защиты нет».
+
+    У соседей по семье защита классическая, и свести два состояния к одному
+    значило бы отправить человека чинить не то (154). Прежде сверка читала
+    классическую защиту, а проект защищён набором правил — и объявляла находку на
+    здоровой настройке: первый настоящий заход 15.09.2026 так и сделал.
+    """
+    monkeypatch.setenv("MERGE_QUEUE_TOKEN", "подделка")
+    monkeypatch.setattr(module, "declared_context", lambda *a, **k: "ci-complete")
+    monkeypatch.setattr(module, "live_contexts", lambda *a, **k: ([], True))
+    assert module.main(["--repo", "o/r"]) == module.EXIT_FINDINGS
+    said = capsys.readouterr().err
+    assert "не набором правил" in said and "молча зеленеть" in said
+
+
+def test_no_protection_at_all_is_the_other_finding(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ветка не защищена вовсе — своя находка со своей починкой (154)."""
+    monkeypatch.setenv("MERGE_QUEUE_TOKEN", "подделка")
+    monkeypatch.setattr(module, "declared_context", lambda *a, **k: "ci-complete")
+    monkeypatch.setattr(module, "live_contexts", lambda *a, **k: ([], False))
+    assert module.main(["--repo", "o/r"]) == module.EXIT_FINDINGS
+    assert "нет обязательных контекстов" in capsys.readouterr().err
+
+
+def test_the_gate_reads_the_ruleset_surface_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сам гейт спрашивает набор правил, а не классическую защиту.
+
+    Прогоняется его собственное чтение, а не подделка вместо него: иначе
+    проверялось бы только то, что подделка умеет отвечать (140).
+    """
+    seen: list[str] = []
+
+    def request(method: str, path: str, token: str, *rest: object, **kw: object) -> object:
+        seen.append(path)
+        return [
+            {
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": [{"context": "ci-complete"}]},
+            }
+        ]
+
+    monkeypatch.setattr(module.protection.ghrest, "request", request)
+    assert module.live_contexts("o/r", "main", "токен") == (["ci-complete"], False)
+    assert seen == ["repos/o/r/rules/branches/main"]
+    assert not any("/protection" in path for path in seen)
+
+
+def test_an_unread_protection_is_the_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Настройку не прочитать — отказ входа гейта, а не «контекстов нет» (045)."""
+
+    def refuse(method: str, path: str, token: str, *rest: object, **kw: object) -> object:
+        raise module.protection.NotRead("площадка не ответила")
+
+    monkeypatch.setattr(module.protection, "live", refuse)
+    with pytest.raises(module.NotRun, match="не ответила"):
+        module.live_contexts("o/r", "main", "токен")

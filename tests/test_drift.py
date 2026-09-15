@@ -930,3 +930,21 @@ def test_every_named_source_is_actually_asked() -> None:
     unasked = [one for one in module.SOURCES if f'"{one}"' not in said]
     assert not unasked, f"источник назван, а вопроса к нему нет: {unasked}"
     assert len(module.SOURCES) == len(set(module.SOURCES)), "имя источника названо дважды"
+
+
+def test_an_unread_protection_is_the_third_outcome_of_the_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ общего чтения защиты — третий исход источника, а не падение захода.
+
+    Прочие источники дрейфа к осечке сети на этом не причастны, и ронять из-за неё
+    весь заход значило бы терять их находки (084, 039).
+    """
+
+    def refuse(repo: str, branch: str, token: str) -> Any:
+        raise module.protection.NotRead("площадка не ответила")
+
+    monkeypatch.setattr(module.protection, "live", refuse)
+    monkeypatch.setattr(module, "declared_protection", lambda *a, **k: PROTECTED)
+    with pytest.raises(module.NotRun, match="не ответила"):
+        module.protection_moved("o/r", "токен")

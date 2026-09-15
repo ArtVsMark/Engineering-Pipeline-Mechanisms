@@ -49,6 +49,7 @@ import ghrest
 import kinds
 import paths
 import pipeline_checks
+import protection
 import report
 
 MARKER: Final = findings.marker("drift")
@@ -330,14 +331,17 @@ NEVER: Final = "never"
 
 
 def declared_protection(where: Path | None = None) -> dict[str, Any]:
-    """Объявленная защита общей ветки — из дерева."""
-    path = where or paths.PROTECTION
-    if not path.is_file():
-        raise NotRun(f"нет {path}: защита общей ветки не объявлена (075)")
-    said: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    if not said.get("branch"):
-        raise NotRun(f"{path}: ветка не названа — сравнивать не с чем (075)")
-    return said
+    """Объявленная защита общей ветки — из дерева.
+
+    Чтение общее с сверкой обязательного контекста (`scripts/protection.py`): два
+    понимания одной настройки уже расходились — сверка спрашивала классическую
+    защиту, дрейф набор правил, — и одно из них объявляло находку на здоровой
+    настройке (090, 022).
+    """
+    try:
+        return protection.declared(where)
+    except protection.NotRead as exc:
+        raise NotRun(str(exc)) from exc
 
 
 def protection_moved(repo: str, token: str) -> list[Drift]:
@@ -364,8 +368,15 @@ def protection_moved(repo: str, token: str) -> list[Drift]:
     branch = str(said["branch"])
     found: list[Drift] = []
 
-    rules = ghrest.request("GET", f"repos/{repo}/rules/branches/{branch}", token) or []
-    kinds_now = sorted({str(one.get("type") or "") for one in rules})
+    # ОТКАЗ ОБЩЕГО ЧТЕНИЯ — ТРЕТИЙ ИСХОД ЭТОГО ИСТОЧНИКА, А НЕ ПАДЕНИЕ ЗАХОДА.
+    # `protection.live` говорит о непрочитанном своим исключением, и пропустить
+    # его наружу значило бы уронить весь дрейф из-за одной осечки сети: прочие
+    # источники к ней отношения не имеют (084, 039). Нашёл внешний взгляд (74a6c07).
+    try:
+        rules = protection.live(repo, branch, token)
+    except protection.NotRead as exc:
+        raise NotRun(str(exc)) from exc
+    kinds_now = protection.kinds(rules)
     kinds_want = sorted(str(one) for one in said.get("rules") or [])
     gone = [name for name in kinds_want if name not in kinds_now]
     if gone:

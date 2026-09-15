@@ -41,6 +41,7 @@ from typing import Any, Final
 
 import ghrest
 import paths
+import protection
 import yaml
 
 #: Где живёт сводный джоб. Файл НЕ назван одним именем намеренно: 11.09.2026
@@ -99,24 +100,28 @@ def declared_context(summary_job: str) -> str:
     return str(job.get("name") or summary_job)
 
 
-def protection(repo: str, branch: str, token: str) -> list[str]:
-    """Читает список обязательных контекстов защиты ветки.
+def live_contexts(repo: str, branch: str, token: str) -> tuple[list[str], bool]:
+    """Обязательные контексты ветки и признак «защита есть, но другой формы».
 
-    Отсутствие защиты — не отказ транспорта, а ответ: её может не быть, и это
-    находка для человека, а не поломка механизма.
+    ЧИТАЕТСЯ ТАМ, ГДЕ ЗАЩИТА ЖИВЁТ. Прежде здесь спрашивалась КЛАССИЧЕСКАЯ
+    защита (`branches/<ветка>/protection/...`), а проект защищён НАБОРОМ ПРАВИЛ —
+    и та же настройка по второму адресу выглядела отсутствующей. Первый же
+    настоящий заход сверки объявил находку «у ветки нет обязательных контекстов»
+    на здоровой настройке. Разбор и общее чтение — `scripts/protection.py` (090).
+
+    Пустой набор правил на ЗАЩИЩЁННОЙ ветке — это «защита другой формы», а не
+    «защиты нет»: у соседей по семье защита классическая, и выдать одно за другое
+    значило бы отправить человека чинить не то
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md),
+    [154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
     """
-    path = f"repos/{repo}/branches/{branch}/protection/required_status_checks"
     try:
-        payload: dict[str, Any] = ghrest.request("GET", path, token)
-    except ghrest.NotFound:
-        return []
-    except ghrest.TransportError as exc:
+        rules = protection.live(repo, branch, token)
+        if rules:
+            return protection.contexts(rules), False
+        return [], protection.guarded(repo, branch, token)
+    except protection.NotRead as exc:
         raise NotRun(str(exc)) from exc
-
-    contexts = payload.get("contexts")
-    if contexts is None:
-        contexts = [check["context"] for check in payload.get("checks", [])]
-    return [str(name) for name in contexts]
 
 
 #: Способ слияния, объявленный решением 006. Остальные кнопки площадки лишние:
@@ -151,22 +156,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"сверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    token = os.environ.get("MERGE_QUEUE_TOKEN") or ""
-    if not token:
-        print(
-            f"не настроено: дерево выдаёт контекст «{expected}», но защиту ветки без\n"
-            "токена владельца не прочитать. Сверка не выполнена — и это сказано,\n"
-            "а не зазеленено: настройка живёт вне дерева, и её расхождение с ним\n"
-            "не ловится ничем другим.",
-            file=sys.stderr,
-        )
-        return EXIT_FINDINGS
+    # ТОКЕН — ЛЮБОЙ, КАКОЙ ЕСТЬ У ЗАХОДА. Набор правил и настройки слияния
+    # площадка отдаёт публично (замер 15.09.2026: оба адреса прочитаны вообще без
+    # токена), поэтому прав владельца здесь больше не требуется — это и был весь
+    # пробел «без токена владельца сверка не выполняется».
+    token = os.environ.get("MERGE_QUEUE_TOKEN") or ghrest.token_from_env()
 
     try:
-        actual = protection(args.repo, args.branch, token)
+        actual, guarded_otherwise = live_contexts(args.repo, args.branch, token)
     except NotRun as exc:
         print(f"сверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+
+    if not actual and guarded_otherwise:
+        print(
+            f"находка: ветка «{args.branch}» защищена, но не набором правил — эта сверка\n"
+            "читает набор правил и о классической защите сказать ничего не может.\n"
+            "Либо переведите защиту в набор правил, либо научите сверку второй форме:\n"
+            "молча зеленеть на непрочитанном она не будет.",
+            file=sys.stderr,
+        )
+        return EXIT_FINDINGS
 
     if not actual:
         print(
