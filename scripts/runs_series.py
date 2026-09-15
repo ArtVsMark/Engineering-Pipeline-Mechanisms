@@ -65,6 +65,11 @@ BOUNDS_FILE: Final = paths.SERIES
 #: отменённая не пройдена, но и не отказ, а «идёт» вердикта не несёт вовсе.
 REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
 
+#: Витрина проекта: факты, опубликованные шагом значков в ветку-сироту `badges`.
+#: Адрес тот же, что этот шаг печатает по окончании; читается по прямой ссылке,
+#: без клона — ради этого производное туда и уезжает (125).
+FACTS_URL: Final = "https://raw.githubusercontent.com/{repo}/badges/facts.json"
+
 
 class NotRun(RuntimeError):
     """Заход не отработал: второй исход, а не пустой ряд."""
@@ -172,7 +177,11 @@ def swept(repo: str, token: str, since: str) -> dict[str, dict[str, dict[str, An
 
 
 def merge(
-    known: dict[str, Any], fresh: dict[str, dict[str, dict[str, Any]]], bounds: Bounds, today: str
+    known: dict[str, Any],
+    fresh: dict[str, dict[str, dict[str, Any]]],
+    bounds: Bounds,
+    today: str,
+    coverage: float | None = None,
 ) -> dict[str, Any]:
     """Сливает прежний ряд со свежим замером: пересчёт молодых, окно у старых.
 
@@ -180,6 +189,11 @@ def merge(
     нынешнего уходит тоже: заход из будущего означает сбитые часы или подделку, а
     оставленный, он вытеснил бы из окна настоящий день, то есть чистка теряла бы
     не старое, а нужное (075).
+
+    ПЕРЕСЧЁТ ТРОГАЕТ ТОЛЬКО ЗАХОДЫ. Покрытие за прошлый день заново не прочесть:
+    витрина публикует ТЕКУЩЕЕ число, а не вчерашнее. Поэтому пересчёт заменяет
+    заходы дня и оставляет его покрытие как было — иначе ряд терял бы вчерашнее
+    покрытие на каждом заходе, и «ряда всё ещё нет» получалось бы само собой (045).
     """
     edge = str(
         (
@@ -187,9 +201,42 @@ def merge(
             - timedelta(days=bounds.window_days - 1)
         ).date()
     )
-    days = {day: rows for day, rows in known.items() if edge <= day <= today}
-    days.update({day: rows for day, rows in fresh.items() if edge <= day <= today})
+    days: dict[str, Any] = {day: dict(rows) for day, rows in known.items() if edge <= day <= today}
+    for day, runs in fresh.items():
+        if edge <= day <= today:
+            days.setdefault(day, {})["runs"] = runs
+    if coverage is not None and edge <= today:
+        days.setdefault(today, {})["coverage"] = coverage
     return dict(sorted(days.items()))
+
+
+def coverage_now(repo: str) -> float | None:
+    """Доля покрытых строк с витрины проекта; ``None`` — НЕ ПРОЧИТАНО.
+
+    ЧИСЛО НЕ СЧИТАЕТСЯ ЗДЕСЬ. Покрытие считает шаг значков прогоном набора под
+    счётчиком и публикует в `facts.json`; второй счёт того же разошёлся бы с
+    первым молча
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Ряд его только ЗАПИСЫВАЕТ, и в этом весь смысл: у порога покрытия нет ряда, а
+    назначить порог по одной точке значит решать на непроверенном замере
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+
+    «НЕ ПРОЧИТАНО» ОСТАЁТСЯ СОСТОЯНИЕМ, А НЕ НУЛЁМ. Витрина отвечает об этом
+    полем `read`, и подставить ноль вместо незнания значило бы записать в ряд
+    обвал покрытия там, где его не было (045). День без покрытия остаётся днём
+    без покрытия, и отчёт это называет.
+    """
+    try:
+        facts = ghrest.raw_json(FACTS_URL.format(repo=repo))
+    except (ghrest.TransportError, OSError, ValueError):
+        return None
+    said = facts.get("coverage") or {}
+    if not said.get("read"):
+        return None
+    try:
+        return round(float(said.get("percent") or 0.0), 1)
+    except (TypeError, ValueError):
+        return None
 
 
 def since_day(today: str, back: int) -> str:
@@ -199,16 +246,21 @@ def since_day(today: str, back: int) -> str:
     )
 
 
+def runs_of(days: dict[str, Any], day: str) -> dict[str, Any]:
+    """Заходы одного дня. Строка дня несёт два поля, и это разные вопросы."""
+    return dict((days.get(day) or {}).get("runs") or {})
+
+
 def total(days: dict[str, Any], field: str) -> int:
     """Сумма поля по всему ряду."""
-    return sum(int(row.get(field, 0)) for rows in days.values() for row in rows.values())
+    return sum(int(row.get(field, 0)) for day in days for row in runs_of(days, day).values())
 
 
 def reds(days: dict[str, Any]) -> Counter[str]:
     """Сколько раз каждое имя джоба краснело за весь ряд."""
     found: Counter[str] = Counter()
-    for rows in days.values():
-        for row in rows.values():
+    for day in days:
+        for row in runs_of(days, day).values():
             for name, count in (row.get("red_jobs") or {}).items():
                 found[name] += int(count)
     return found
@@ -216,9 +268,18 @@ def reds(days: dict[str, Any]) -> Counter[str]:
 
 def minutes_of(days: dict[str, Any], name: str, day: str) -> float:
     """Среднее время захода прогона `name` в минутах за один день; ноль — не было."""
-    row = (days.get(day) or {}).get(name) or {}
+    row = runs_of(days, day).get(name) or {}
     timed = int(row.get("timed", 0))
     return round(int(row.get("seconds", 0)) / timed / 60, 1) if timed else 0.0
+
+
+def covered(days: dict[str, Any]) -> list[tuple[str, float]]:
+    """Дни, у которых покрытие ПРОЧИТАНО, и само число — по возрастанию дня."""
+    return [
+        (day, float(row["coverage"]))
+        for day, row in sorted(days.items())
+        if isinstance(row, dict) and row.get("coverage") is not None
+    ]
 
 
 def report(days: dict[str, Any], bounds: Bounds, today: str) -> str:
@@ -276,6 +337,26 @@ def report(days: dict[str, Any], bounds: Bounds, today: str) -> str:
         ]
     else:
         lines += ["Дней в ряду меньше двух — сравнивать нечего.", ""]
+    ряд = covered(days)
+    lines += ["## Растёт ли покрытие", ""]
+    if not ряд:
+        lines += [
+            "Ни одного прочитанного числа: витрина отвечает «не прочитано», и ряд честно"
+            " пуст. Ноль вместо незнания записал бы обвал покрытия там, где его не было"
+            " (045).",
+            "",
+        ]
+    else:
+        (первый, было), (последний, стало) = ряд[0], ряд[-1]
+        lines += [
+            f"Прочитанных дней {len(ряд)} из {len(known)}: {было} % {первый} → {стало} %"
+            f" {последний}.",
+            "",
+            "**Порога покрытия здесь нет, и это не забывчивость.** Порог — решение"
+            " владельца, и берётся он из РЯДА («не ниже достигнутого», только вверх,"
+            " 050), а не из одной точки. Ряд для этого и копится.",
+            "",
+        ]
     lines += [
         "## Чего здесь нет",
         "",
@@ -310,7 +391,10 @@ def main(argv: list[str] | None = None) -> int:
             said = json.loads(store.read_text(encoding="utf-8"))
             known = dict(said.get("days") or {})
         fresh = swept(args.repo, token, since_day(today, bounds.recount_days))
-        days = merge(known, fresh, bounds, today)
+        # Покрытие берётся ОДИН раз и только за нынешний день: витрина публикует
+        # текущее число, и записать его во вчерашний день значило бы подделать
+        # замер, которого не было (005).
+        days = merge(known, fresh, bounds, today, coverage_now(args.repo))
         body = {
             "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
             "window_days": bounds.window_days,
