@@ -81,7 +81,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
 
       # Подпись — человека: автором выпуска в истории обязан быть он, а не
       # приложение. Проверить это потом нечем — уплотнения тега не бывает.

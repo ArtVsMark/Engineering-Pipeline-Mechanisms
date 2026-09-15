@@ -207,7 +207,7 @@ jobs:
           python-version: "3.12"
       - name: поставить разбор состава
         if: steps.token.outputs.present == 'yes'
-        run: python -m pip install --quiet "pyyaml>=6,<7"
+        run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
 
       # Предмет собирает механизм, а не агент: пункты задачи он обязан увидеть
       # ДОСЛОВНО, а права ходить в трекер у него нет. Третий исход здесь —

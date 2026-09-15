@@ -107,6 +107,24 @@ def needs(root: Path = Path()) -> dict[str, Need]:
     return found
 
 
+def local_packages(root: Path = Path()) -> list[tuple[str, Path]]:
+    """Пакеты САМОГО дерева: имя из объявления и путь, которым их ставят.
+
+    Общий низ конвейера уехал из `scripts/` в пакет (решение 024), и окно без него
+    узнаёт об этом падением импорта на первом же механизме. Требование читается
+    из объявления пакета, а не из второго списка рядом: второй разошёлся бы с
+    первым молча (022).
+    """
+    found: list[tuple[str, Path]] = []
+    for manifest in sorted((root / "packages").glob("*/pyproject.toml")):
+        said = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        name = str((said.get("project") or {}).get("name") or "")
+        if not name:
+            raise NotRun(f"{manifest}: пакет не назвал себя — ставить нечего (075)")
+        found.append((name, manifest.parent))
+    return found
+
+
 def installed(name: str) -> str | None:
     """Версия установленного инструмента; ``None`` — его нет."""
     try:
@@ -188,6 +206,21 @@ def main(argv: list[str] | None = None) -> int:
         if not good:
             problems.append(f"{need.name}: {version or 'не установлен'}, нужно {need.bounds}")
             gaps.append(f'"{need.name}{need.bounds}"')
+
+    # ПАКЕТЫ ДЕРЕВА СПРАШИВАЮТСЯ НАРАВНЕ С ИНСТРУМЕНТАМИ. Без общего низа не
+    # запускается ни один механизм, и узнавать об этом падением импорта — то же,
+    # что не сверять окружение вовсе.
+    try:
+        ours = local_packages(args.root)
+    except (NotRun, tomllib.TOMLDecodeError) as exc:
+        print(f"шаг не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    for name, where in ours:
+        version = installed(name)
+        print(f"  {name}: {version or 'нет'}, ставится из {where}")
+        if version is None:
+            problems.append(f"{name}: не установлен, а без него механизмы не запускаются")
+            gaps.append(f"-e ./{where.as_posix()}")
 
     if not problems:
         print("\nокружение годится: версии совпадают с тем, что ставит прогон")
