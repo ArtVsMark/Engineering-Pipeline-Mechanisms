@@ -81,16 +81,24 @@ def kinds(rules: list[dict[str, Any]]) -> list[str]:
 
 
 def contexts(rules: list[dict[str, Any]]) -> list[str]:
-    """Обязательные контексты из действующих правил."""
-    found: list[str] = []
+    """Обязательные контексты из действующих правил — каждое имя по одному разу.
+
+    ПОВТОР ИМЕНИ НЕ НАХОДКА. Ветку вправе накрывать несколько наборов правил —
+    репозитория и организации, — и один и тот же контекст приходит тогда дважды.
+    Список с повтором не сошёлся бы с объявлением, и сверка назвала бы находку на
+    исправной настройке: красное на законном учат обходить
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Нашёл внешний взгляд (`824d3cf`).
+    """
+    found: set[str] = set()
     for one in rules:
         if str(one.get("type") or "") != CHECKS_RULE:
             continue
         given = one.get("parameters") or {}
-        found += [
+        found.update(
             str((item or {}).get("context") or "")
             for item in given.get("required_status_checks") or []
-        ]
+        )
     return sorted(name for name in found if name)
 
 

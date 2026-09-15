@@ -131,3 +131,27 @@ def test_the_declaration_matches_what_the_platform_serves() -> None:
     assert sorted(said["required_contexts"]) == module.contexts(LIVE)
     assert bool(said["strict"]) is module.strict(LIVE)
     assert (ROOT / ".rules" / "protection.json").is_file()
+
+
+def test_one_context_named_by_two_rulesets_is_counted_once() -> None:
+    """Ветку накрывают два набора — контекст в списке всё равно один.
+
+    Повтор не сошёлся бы с объявлением, и сверка назвала бы находку на исправной
+    настройке: красное на законном учат обходить (051).
+    """
+    двумя = [
+        {
+            "type": "required_status_checks",
+            "ruleset_id": 1,
+            "parameters": {"required_status_checks": [{"context": "ci-complete"}]},
+        },
+        {
+            "type": "required_status_checks",
+            "ruleset_id": 2,
+            "parameters": {
+                "required_status_checks": [{"context": "ci-complete"}, {"context": "review"}]
+            },
+        },
+    ]
+    assert module.contexts(двумя) == ["ci-complete", "review"]
+    assert module.kinds(двумя) == ["required_status_checks"], "вид правила тоже один"
