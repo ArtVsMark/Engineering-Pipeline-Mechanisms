@@ -486,23 +486,40 @@ def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
     return ordered, sorted(seen - stable, key=order)
 
 
+def matrix_of(jobs: dict[str, Any], job: str, path: Path) -> list[str]:
+    """Ветки языка из матрицы названного джоба; пусто — третий исход, а не «нет».
+
+    ОБА ДЖОБА НАЗЫВАЮТ ВЕРСИИ МАТРИЦЕЙ, и читаются они одинаково. У предрелизного
+    ячейка одна, и она же даёт версию в ИМЕНИ записи проверки — `test-next
+    (3.15)`, — то есть в списке проверок изменения видно, на чём прогнали.
+    Прежде версия предрелизного жила в шаге, а разбор читал шаг: после переезда
+    в матрицу он молча получал бы `${{ matrix.python }}` и дрейф предрелизной
+    ветки не находился бы вовсе
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md),
+    [090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    said = (((jobs.get(job) or {}).get("strategy") or {}).get("matrix") or {}).get("python")
+    if not isinstance(said, list) or not said:
+        raise NotRun(
+            f"{path}: матрица версий у джоба «{job}» не разобралась — сверять нечего (075)"
+        )
+    return [str(one) for one in said]
+
+
 def declared_versions() -> tuple[list[str], str]:
-    """Что гоняет прогон: ветки матрицы и предрелизная ветка `test-next`."""
+    """Что гоняет прогон: ветки обязательной матрицы и предрелизная ветка.
+
+    ПРЕДРЕЛИЗНОЙ СЧИТАЕТСЯ НОВЕЙШАЯ ячейка предрелизного джоба. Сегодня она одна,
+    но ячеек может стать больше — тогда сверять со стабильными надо ту, что впереди
+    всех; выбор назван здесь, а не оставлен на «как получится» (154).
+    """
     path = paths.WORKFLOWS / "ci.yml"
     # Читается общим разбором, а не своим: форма прогона одна на всех, и
     # второе её понимание разошлось бы с первым молча (090).
     jobs = pipeline_checks.run_of(path).get("jobs") or {}
-    matrix = (((jobs.get("test-matrix") or {}).get("strategy") or {}).get("matrix") or {}).get(
-        "python"
-    )
-    if not isinstance(matrix, list) or not matrix:
-        raise NotRun(f"{path}: матрица версий не разобралась — сверять нечего (075)")
-    ahead = ""
-    for step in (jobs.get("test-next") or {}).get("steps") or []:
-        said = ((step or {}).get("with") or {}).get("python-version")
-        if said:
-            ahead = str(said)
-    return [str(one) for one in matrix], ahead
+    matrix = matrix_of(jobs, "test-matrix", path)
+    ahead = sorted(matrix_of(jobs, "test-next", path), key=order)[-1]
+    return matrix, ahead
 
 
 def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[Drift]:

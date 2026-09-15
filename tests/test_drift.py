@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tests.conftest import ROOT, load_script
 
@@ -224,6 +225,41 @@ def test_the_matrix_is_read_from_the_run_itself() -> None:
     assert matrix, "матрица не разобралась"
     assert all(part.count(".") == 1 for part in matrix), matrix
     assert ahead, "предрелизная ветка не разобралась"
+    assert "${{" not in ahead, (
+        "предрелизная версия прочитана как подстановка площадки, а не как число: "
+        "разбор смотрит не туда, и дрейф предрелизной ветки не нашёлся бы вовсе (045)"
+    )
+    assert ahead.count(".") == 1 and ahead not in matrix, (
+        "предрелизная ветка — ветка языка и не повторяет обязательную матрицу"
+    )
+
+
+def test_both_version_lists_come_from_a_matrix() -> None:
+    """Версии называет матрица — у обоих джобов, и это ради имени записи.
+
+    Площадка приписывает значения матрицы к имени джоба: `test-next (3.15)`
+    читается в списке проверок изменения, а версия внутри шага — нет. Владелец
+    прочёл именно так: «3.15 в проверках не видно» (046).
+    """
+    path = ROOT / ".github" / "workflows" / "ci.yml"
+    jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
+    for job in ("test-matrix", "test-next"):
+        cells = module.matrix_of(jobs, job, path)
+        assert cells, f"{job}: версии не в матрице — из имени записи они пропадут"
+        step = [
+            said
+            for step in (jobs[job].get("steps") or [])
+            if (said := ((step or {}).get("with") or {}).get("python-version"))
+        ]
+        assert step == ["${{ matrix.python }}"], (
+            f"{job}: шаг берёт версию не из матрицы — источников числа стало два (022)"
+        )
+
+
+def test_a_job_without_a_matrix_is_the_third_outcome() -> None:
+    """Матрицы нет — отказ входа с названным джобом, а не «версий нет» (075, 158)."""
+    with pytest.raises(module.NotRun, match="test-next"):
+        module.matrix_of({"test-next": {"steps": []}}, "test-next", Path("ci.yml"))
 
 
 def test_a_pin_without_a_subpath_is_still_a_pin() -> None:
