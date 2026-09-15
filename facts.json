@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "contract": "0.3.0",
+  "version": "1.1.9",
+  "version_whole": true,
+  "release": "v1.1.0",
+  "tests": {
+    "total": 1406,
+    "modules": 83
+  },
+  "scripts": {
+    "runnable": 39,
+    "started": 20
+  },
+  "coverage": {
+    "read": true,
+    "percent": 87.7
+  },
+  "rules": {
+    "total": 203,
+    "answered": 203,
+    "by_status": {
+      "active": 172,
+      "rejected": 0,
+      "not-applicable": 31,
+      "unreviewed": 0
+    },
+    "by_mechanism": {
+      "document": 9,
+      "gate": 139,
+      "pipeline": 24
+    }
+  },
+  "checks": {
+    "required": 7,
+    "advisory": 25,
+    "off": 0,
+    "unreviewed": 1
+  },
+  "family": {
+    "schema_read": "1.2",
+    "snapshot_at": "2026-09-13T20:58:27+00:00",
+    "consumers": 6,
+    "mechanisms": 243,
+    "shared": 27,
+    "held_by_machine": 711,
+    "closed_by_shared": 195,
+    "share": 0.274,
+    "top": [
+      {
+        "name": "ci.yml",
+        "projects": 5,
+        "rules": 22
+      },
+      {
+        "name": "preflight.py",
+        "projects": 3,
+        "rules": 19
+      },
+      {
+        "name": "check_bindings.py",
+        "projects": 2,
+        "rules": 16
+      },
+      {
+        "name": "rules-inbox.yml",
+        "projects": 4,
+        "rules": 16
+      },
+      {
+        "name": "agent-pr.yml",
+        "projects": 3,
+        "rules": 12
+      },
+      {
+        "name": "automerge.yml",
+        "projects": 3,
+        "rules": 11
+      },
+      {
+        "name": "check_journal.py",
+        "projects": 3,
+        "rules": 8
+      },
+      {
+        "name": "gh_rest.py",
+        "projects": 2,
+        "rules": 8
+      },
+      {
+        "name": "automerge.py",
+        "projects": 2,
+        "rules": 7
+      },
+      {
+        "name": "check_attribution.py",
+        "projects": 3,
+        "rules": 7
+      }
+    ],
+    "read": true,
+    "schema_expected": "1.2",
+    "schema_agrees": true,
+    "behind_read": true,
+    "behind": 28,
+    "behind_rules": [
+      "033",
+      "044",
+      "048",
+      "062",
+      "065",
+      "066",
+      "067",
+      "071",
+      "076",
+      "077",
+      "079",
+      "081",
+      "082",
+      "083",
+      "095",
+      "096",
+      "099",
+      "102",
+      "103",
+      "107",
+      "112",
+      "120",
+      "133",
+      "134",
+      "188",
+      "193",
+      "194",
+      "201"
+    ]
+  },
+  "generated": {
+    "at": "2026-09-15T12:02:59Z",
+    "sha": "ba8c55ea1bd3b35a747c077bd46308bf84065e02"
+  }
+}
