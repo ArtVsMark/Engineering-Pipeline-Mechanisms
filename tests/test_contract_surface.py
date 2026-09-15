@@ -19,6 +19,7 @@ from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
 contract = load_script("contract.py")
 policy = load_script("pipeline_checks.py")
 gate = load_script("check_contract.py")
+release = load_script("release.py")
 
 WORKFLOW = """
 name: ci
@@ -199,6 +200,47 @@ def test_the_project_answer_declares_its_range() -> None:
     """Ответ САМОГО проекта несёт диапазон, а не только подделки (075)."""
     text = (ROOT / ".pipeline.yml").read_text(encoding="utf-8")
     assert "contract:" in text, "проект не объявил, с каким контрактом он совместим"
+
+
+def test_a_pending_surface_fragment_fits_the_declared_window() -> None:
+    """Очередь выпуска с фрагментом о поверхности обязана помещаться в наш ответ.
+
+    МЫ САМИ ПОТРЕБИТЕЛЬ СВОЕГО КОНТРАКТА: `.pipeline.yml` объявляет диапазон
+    совместимости, и версия вне него роняет обязательную проверку `pipeline` на
+    общей ветке. Выпуск это проверяет — но ПЕРЕД собой, то есть узнаётся
+    расхождение в день выпуска, а завелось оно в день, когда лёг фрагмент.
+
+    Замер 15.09.2026: диапазон «>=0.1,<0.3» стоял с 12.09 с пояснением «приняты
+    оба минора: нынешний и тот, на который перейдёт выпуск», — а принимал 0.1 и
+    0.2, то есть нынешний и УЖЕ ПРОЙДЕННЫЙ. Три дня объявление было неверным, и
+    сказал об этом сухой заход выпуска, а не набор
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    waiting = sorted((ROOT / "changelog.d").glob("*.contract.md"))
+    current = (ROOT / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
+    after = release.next_contract(current, touched=bool(waiting))
+    span = policy.span()
+    if not waiting:
+        assert after == current, "без фрагмента о поверхности версия контракта не двигается"
+        return
+    assert policy.compatible(span, after), (
+        f"в очереди выпуска {len(waiting)} фрагмент(ов) о поверхности: выпуск поднимет контракт"
+        f" {current} → {after}, а объявленный диапазон «{span}» её не принимает. Перечитайте"
+        " ответы и подвиньте окно миграции в `.pipeline.yml` (157) — иначе обязательная"
+        " проверка `pipeline` покраснеет сразу после выпуска"
+    )
+
+
+def test_the_window_admits_where_we_stand() -> None:
+    """Диапазон принимает и нынешнюю версию контракта, а не только будущую.
+
+    Сужать окно снизу законно — минор позади нас никому не отвечает, — но
+    выпасть из него самим значило бы объявить несовместимость с собой (075).
+    """
+    current = (ROOT / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
+    assert policy.compatible(policy.span(), current), (
+        f"объявленный диапазон «{policy.span()}» не принимает нынешнюю версию {current}"
+    )
 
 
 def test_the_gate_shows_the_surface(run_script: RunScript) -> None:
