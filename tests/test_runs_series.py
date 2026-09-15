@@ -163,9 +163,9 @@ def test_the_average_counts_only_what_was_timed(monkeypatch: pytest.MonkeyPatch)
         "timed": 1,
         "red_jobs": {},
     }
-    assert module.minutes_of(days, "ci", "2026-09-14") == 2.0, (
-        "неразобранный заход не тянет среднее вниз"
-    )
+    assert module.minutes_of({"2026-09-14": {"runs": days["2026-09-14"]}}, "ci", "2026-09-14") == (
+        2.0
+    ), "неразобранный заход не тянет среднее вниз"
 
 
 # --- джобы спрашиваются только у красных ---------------------------------------
@@ -203,11 +203,11 @@ def test_a_platform_without_runs_is_the_second_outcome(monkeypatch: pytest.Monke
 
 def test_a_recounted_day_replaces_the_old_row() -> None:
     """Пересчёт закрывает дыру от пропущенного захода, а не добавляет вторую строку."""
-    known = {"2026-09-14": {"ci": {"runs": 1, "red": 0, "cancelled": 0, "seconds": 1, "timed": 1}}}
+    known = {"2026-09-14": {"runs": {"ci": {"runs": 1, "red": 0, "cancelled": 0, "seconds": 1}}}}
     fresh = {"2026-09-14": {"ci": {"runs": 9, "red": 1, "cancelled": 2, "seconds": 90, "timed": 9}}}
     bounds = module.Bounds(window_days=90, recount_days=3)
     days = module.merge(known, fresh, bounds, "2026-09-15")
-    assert days["2026-09-14"]["ci"]["runs"] == 9, "свежий замер молодого дня побеждает прежний"
+    assert days["2026-09-14"]["runs"]["ci"]["runs"] == 9, "свежий замер дня побеждает прежний"
 
 
 def test_the_window_sweeps_what_fell_out_of_it() -> None:
@@ -246,14 +246,22 @@ def test_the_recount_window_names_its_first_day() -> None:
 def test_the_report_answers_with_a_number_and_a_date() -> None:
     """Ответ ряда — число с датой; без даты оно устаревает молча (005)."""
     days = {
-        "2026-09-14": {"ci": {"runs": 10, "red": 1, "cancelled": 4, "seconds": 600, "timed": 10}},
-        "2026-09-15": {"ci": {"runs": 10, "red": 0, "cancelled": 1, "seconds": 900, "timed": 10}},
+        "2026-09-14": {
+            "runs": {"ci": {"runs": 10, "red": 1, "cancelled": 4, "seconds": 600, "timed": 10}},
+            "coverage": 86.9,
+        },
+        "2026-09-15": {
+            "runs": {"ci": {"runs": 10, "red": 0, "cancelled": 1, "seconds": 900, "timed": 10}},
+            "coverage": 87.3,
+        },
     }
     said = module.report(days, module.Bounds(window_days=90, recount_days=3), "2026-09-15")
     assert "Собрано 2026-09-15" in said
     assert "25.0 %" in said, "доля погашенных заходов названа числом"
     assert "1.0 мин 2026-09-14 → 1.5 мин 2026-09-15" in said, "время прогона названо по дням"
     assert "реестр #99" in said, "чего в ряду нет — названо, а не умолчано (022)"
+    assert "86.9 % 2026-09-14 → 87.3 % 2026-09-15" in said, "покрытие названо числом с днём"
+    assert "решение" in said and "владельца" in said, "порог остаётся решением человека"
 
 
 def test_the_sums_of_the_series_are_counted_across_days() -> None:
@@ -265,11 +273,15 @@ def test_the_sums_of_the_series_are_counted_across_days() -> None:
     """
     days = {
         "2026-09-14": {
-            "ci": {"runs": 10, "red": 2, "cancelled": 3, "red_jobs": {"test": 2}},
-            "hail": {"runs": 4, "red": 0, "cancelled": 1, "red_jobs": {}},
+            "runs": {
+                "ci": {"runs": 10, "red": 2, "cancelled": 3, "red_jobs": {"test": 2}},
+                "hail": {"runs": 4, "red": 0, "cancelled": 1, "red_jobs": {}},
+            }
         },
         "2026-09-15": {
-            "ci": {"runs": 6, "red": 1, "cancelled": 0, "red_jobs": {"test": 1, "lint": 1}}
+            "runs": {
+                "ci": {"runs": 6, "red": 1, "cancelled": 0, "red_jobs": {"test": 1, "lint": 1}}
+            }
         },
     }
     assert module.total(days, "runs") == 20
@@ -282,6 +294,91 @@ def test_the_sums_of_the_series_are_counted_across_days() -> None:
     )
 
 
+# --- покрытие: записывается, а не считается ------------------------------------
+
+
+def test_the_coverage_is_taken_from_the_storefront(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Число берётся у витрины, а не считается заново: счёт один (022)."""
+    monkeypatch.setattr(
+        module.ghrest, "raw_json", lambda url: {"coverage": {"read": True, "percent": 87.34}}
+    )
+    assert module.coverage_now("o/r") == 87.3
+
+
+@pytest.mark.parametrize(
+    "facts",
+    [
+        pytest.param({"coverage": {"read": False, "percent": 0.0}}, id="витрина не прочитала"),
+        pytest.param({"coverage": {}}, id="поля read нет"),
+        pytest.param({}, id="покрытия в фактах нет вовсе"),
+        pytest.param({"coverage": {"read": True, "percent": "почти всё"}}, id="не число"),
+    ],
+)
+def test_an_unread_coverage_is_not_a_zero(
+    monkeypatch: pytest.MonkeyPatch, facts: dict[str, Any]
+) -> None:
+    """«Не прочитано» остаётся состоянием: ноль записал бы обвал, которого нет (045)."""
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: facts)
+    assert module.coverage_now("o/r") is None
+
+
+def test_an_unreachable_storefront_is_not_a_zero_either(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Витрина не ответила — у дня просто нет покрытия, и ряд не испорчен."""
+
+    def refuse(url: str) -> dict[str, Any]:
+        raise module.ghrest.TransportError("витрина недоступна")
+
+    monkeypatch.setattr(module.ghrest, "raw_json", refuse)
+    assert module.coverage_now("o/r") is None
+
+
+def test_the_coverage_lands_only_on_the_present_day() -> None:
+    """Покрытие пишется в нынешний день: витрина публикует текущее число (005)."""
+    bounds = module.Bounds(window_days=90, recount_days=3)
+    days = module.merge({}, {"2026-09-14": {"ci": {"runs": 1}}}, bounds, "2026-09-15", 87.3)
+    assert days["2026-09-15"]["coverage"] == 87.3
+    assert "coverage" not in days["2026-09-14"], "вчерашнему дню чужое число не дописывается"
+
+
+def test_a_recount_does_not_lose_the_coverage_of_that_day() -> None:
+    """Пересчёт дня меняет заходы и оставляет покрытие: заново его не прочесть.
+
+    Иначе ряд терял бы вчерашнее покрытие на каждом заходе, и «ряда всё ещё нет»
+    получалось бы само собой — а порог ждёт именно ряда (045).
+    """
+    bounds = module.Bounds(window_days=90, recount_days=3)
+    known = {"2026-09-14": {"runs": {"ci": {"runs": 1}}, "coverage": 86.9}}
+    days = module.merge(known, {"2026-09-14": {"ci": {"runs": 9}}}, bounds, "2026-09-15", 87.3)
+    assert days["2026-09-14"] == {"runs": {"ci": {"runs": 9}}, "coverage": 86.9}
+    assert days["2026-09-15"]["coverage"] == 87.3
+
+
+def test_the_two_fields_of_a_day_are_read_apart() -> None:
+    """Заходы и покрытие — разные вопросы одной строки, и читаются по отдельности.
+
+    Пока строка дня была словарём прогонов, покрытию в ней места не было: оно
+    оказалось бы «прогоном по имени coverage» и попало бы в суммы заходов (022).
+    """
+    days = {
+        "2026-09-14": {"runs": {"ci": {"runs": 4}}, "coverage": 86.9},
+        "2026-09-15": {"runs": {"ci": {"runs": 6}}},
+    }
+    assert module.runs_of(days, "2026-09-15") == {"ci": {"runs": 6}}
+    assert module.runs_of(days, "нет такого дня") == {}
+    assert module.total(days, "runs") == 10, "покрытие в счёт заходов не попадает"
+    assert module.covered(days) == [("2026-09-14", 86.9)], (
+        "прочитанным считается день с числом, а не всякий день ряда"
+    )
+
+
+def test_the_report_names_an_empty_coverage_series() -> None:
+    """Ряда покрытия нет — отчёт это говорит, а не пропускает раздел (046)."""
+    days = {"2026-09-15": {"runs": {"ci": {"runs": 1, "red": 0, "cancelled": 0}}}}
+    said = module.report(days, module.Bounds(window_days=90, recount_days=3), "2026-09-15")
+    assert "Ни одного прочитанного числа" in said
+    assert "не прочитано" in said
+
+
 def test_a_dry_walk_writes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Сухой заход считает и не пишет: запись — отдельное разрешение."""
     platform(monkeypatch, [run("ci", "2026-09-15")])
@@ -291,7 +388,7 @@ def test_a_dry_walk_writes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert not store.exists(), "сухой заход не оставляет файла"
     assert module.main(["--repo", "o/r", "--store", str(store), "--apply"]) == module.EXIT_OK
     said = json.loads(store.read_text(encoding="utf-8"))
-    assert said["days"]["2026-09-15"]["ci"]["runs"] == 1
+    assert said["days"]["2026-09-15"]["runs"]["ci"]["runs"] == 1
     assert said["window_days"] == module.Bounds.read(BOUNDS).window_days
 
 
