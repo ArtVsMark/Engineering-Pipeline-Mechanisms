@@ -39,6 +39,8 @@ SCHEDULES: Final = Path(".rules/schedules.json")
 
 #: Границы ряда прогонов: сколько дней он хранит и сколько пересчитывает.
 SERIES: Final = Path(".rules/series.json")
+#: Проверки, чьё одиночное красное на общей ветке перезапускается один раз.
+RERUN: Final = Path(".rules/rerun.json")
 
 #: Чем защищена общая ветка — объявлением, а не памятью. Настройка живёт вне
 #: дерева, и ослабление её не краснеет нигде само по себе.
@@ -98,6 +100,7 @@ ALL: Final = (
     SHOWCASE,
     SCHEDULES,
     SERIES,
+    RERUN,
     PROTECTION,
     OUTCOMES,
     FRAGMENTS,

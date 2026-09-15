@@ -272,13 +272,76 @@ def test_a_lone_advisory_red_is_not_called_a_crowd() -> None:
     assert said != module.NOT_ALONE
 
 
-def test_advisory_reds_never_reach_a_rerun() -> None:
-    """Совещательное красное не перезапускается ни в каком числе.
+def test_several_advisory_reds_are_not_a_flake() -> None:
+    """Совещательных красных несколько — это похоже на дефект, а не на осечку.
 
-    Оно не держит ничего и уходит в долг источника 3 (084): перезапуск ради
-    него тратил бы прогон на то, что и так записано.
+    Перезапуск одного не вернул бы ветку в зелень, а два сразу — уже не осечка
+    канала (124). Причина при этом СВОЯ, а не «не в списке»: читателю важно,
+    что дело в числе, а не в имени (154).
     """
-    assert module.rerun_reason([], ["a", "b"], run=100, tries=1) == module.ADVISORY_ONLY
+    said = module.rerun_reason([], ["a", "b"], run=100, tries=1, allowed={"a": "почему"})
+    assert said == module.ADVISORY_NOT_ALONE
+
+
+def test_a_lone_advisory_red_is_rerun_when_the_list_allows_it() -> None:
+    """Одиночное совещательное красное перезапускается, если имя разрешено.
+
+    ЗАМЕР 15.09.2026, с которого список и начался: на голове deaf0c0 упал шаг
+    значков — на толчке витрины в ветку-сироту, — и перезапуск того же прогона
+    дал зелёное без единой правки. Перезапустил владелец рукой: приём известен,
+    механизма у него не было (002). Разбор — решение 025.
+    """
+    allowed = module.rerunnable()
+    assert allowed.get("badges"), "список пуст — предмет не найден (075)"
+    assert module.rerun_reason([], ["badges"], run=100, tries=1, allowed=allowed) == ""
+    assert module.rerun_reason([], ["badges"], run=100, tries=2, allowed=allowed) == module.ALREADY
+    assert module.rerun_reason([], ["badges"], run=0, tries=1, allowed=allowed) == module.NO_ADDRESS
+
+
+def test_an_unlisted_advisory_red_is_not_rerun() -> None:
+    """Имя не в списке — перезапуска нет: список разрешительный (068).
+
+    Красное `debt` означает настоящий долг, и второй заход ответит то же самое:
+    перезапуск прятал бы работу вместо того, чтобы её показать.
+    """
+    said = module.rerun_reason([], ["debt"], run=100, tries=1, allowed=module.rerunnable())
+    assert said == module.ADVISORY_ONLY
+
+
+def test_a_required_red_is_still_judged_by_its_own_rule() -> None:
+    """Обязательное красное разбирается прежним правилом, а не списком.
+
+    Список — про совещательные, чьё красное дерева не судит. Обязательное
+    красное считает дерево, и подмешивать его сюда значило бы прятать дефект
+    (013, 014).
+    """
+    assert module.rerun_reason(["test"], [], run=100, tries=1, allowed={}) == ""
+    assert (
+        module.rerun_reason(["test"], ["other"], run=100, tries=1, allowed={}) == module.NOT_ALONE
+    )
+
+
+def test_the_allowed_list_names_a_reason_for_every_name(tmp_path: Path) -> None:
+    """Имя в списке без причины — отказ входа: перезапуск без объяснения (154)."""
+    path = tmp_path / "rerun.json"
+    path.write_text('{"allowed": [{"check": "badges"}]}', encoding="utf-8")
+    with pytest.raises(module.NotRun, match="без причины"):
+        module.rerunnable(path)
+    path.write_text("не json", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="не прочитан"):
+        module.rerunnable(path)
+
+
+def test_every_allowed_name_is_an_advisory_check() -> None:
+    """В списке только совещательные имена, и каждое объявлено в ответе проекта.
+
+    Обязательное имя здесь означало бы перезапуск дефекта, а незнакомое —
+    список, разошедшийся с деревом (022, 075).
+    """
+    checks = policy.load()
+    for name in module.rerunnable():
+        assert name in checks, f"«{name}» не объявлен в .pipeline.yml"
+        assert not checks[name].holds_merge, f"«{name}» держит слияние — его перезапускать нельзя"
 
 
 # --- одно падение, отражённое двумя именами -----------------------------------
@@ -350,6 +413,28 @@ def test_no_target_when_it_is_not_one_fall() -> None:
         {"name": "lint", "details_url": "https://x/actions/runs/777/job/3"},
     ]
     assert module.target_run(["test"], ["lint"], red, FEEDS) == 0
+
+
+def test_the_target_of_a_lone_advisory_red_is_its_own_run() -> None:
+    """Одиночное совещательное красное становится предметом перезапуска.
+
+    Тот же урок, что на #160, только с другой стороны: решение о перезапуске
+    (`rerun_reason`) и выбор его предмета — один вопрос. Пока предмет не
+    находился, решение уже говорило «перезапускаем», а заход отказывал под
+    именем «адрес записи не разобрался» — чинилась бы причина отказа, а не
+    исход.
+    """
+    red = [{"name": "badges", "details_url": "https://x/actions/runs/34960373446/job/1"}]
+    assert module.target_run([], ["badges"], red, FEEDS) == 34960373446
+
+
+def test_no_target_when_several_advisory_reds_stand_together() -> None:
+    """Совещательных несколько — предмета нет: перезапуск одного не даёт зелень."""
+    red = [
+        {"name": "badges", "details_url": "https://x/actions/runs/777/job/1"},
+        {"name": "review", "details_url": "https://x/actions/runs/777/job/2"},
+    ]
+    assert module.target_run([], ["badges", "review"], red, FEEDS) == 0
 
 
 def test_no_target_when_the_record_carries_no_run() -> None:
