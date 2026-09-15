@@ -81,7 +81,17 @@ LABEL_AUTOMERGE: Final = "automerge"
 LABEL_HOLD: Final = "hold"
 LABEL_BLOCKER: Final = "blocker"
 LABEL_FIX_MAIN: Final = "fix-main"
-READ_LABELS: Final = (LABEL_AUTOMERGE, LABEL_HOLD, LABEL_BLOCKER, LABEL_FIX_MAIN)
+#: Остановка ЗАМОРОЗКОЙ, а не человеком: ставит и снимает шаг 9. Очередь читает
+#: её так же, как `hold`, — не взводит и снимает согласие, — но владелец у метки
+#: один, и это механизм: две руки на одной метке расходятся молча (022).
+LABEL_PAUSED: Final = "paused/main-red"
+READ_LABELS: Final = (
+    LABEL_AUTOMERGE,
+    LABEL_HOLD,
+    LABEL_BLOCKER,
+    LABEL_FIX_MAIN,
+    LABEL_PAUSED,
+)
 #: Приставка метки-СЛЕДА: какой источник очередь присвоила изменению. Очередь
 #: решает по вычисленному источнику, а не по этой метке — устаревшая увела бы
 #: слияние не туда, и поймать это было бы нечем. Метка отвечает человеку на
@@ -189,8 +199,19 @@ class Change:
 
     @property
     def held(self) -> bool:
-        """Остановлено ли изменение меткой, сколько бы зелёного на нём ни было."""
-        return LABEL_HOLD in self.marks
+        """Остановлено ли изменение меткой, сколько бы зелёного на нём ни было.
+
+        Остановок две, и они РАЗНЫЕ по владельцу: `hold` ставит человек,
+        `paused/main-red` — шаг 9 на время заморозки. Для очереди действие одно,
+        поэтому спрашивается здесь вместе; кто остановил — видно по имени метки
+        на самом изменении, без чтения логов.
+        """
+        return LABEL_HOLD in self.marks or LABEL_PAUSED in self.marks
+
+    @property
+    def paused(self) -> bool:
+        """Остановлено ли изменение заморозкой общей ветки."""
+        return LABEL_PAUSED in self.marks
 
 
 def check_labels_declared() -> None:
@@ -715,9 +736,10 @@ def report_held(changes: list[Change]) -> None:
     held = [change for change in changes if change.held]
     if not held:
         return
-    print(f"остановлено меткой «{LABEL_HOLD}»: {len(held)}")
+    print(f"остановлено меткой: {len(held)}")
     for change in held:
-        print(f"  #{change.number} — {change.title}")
+        why = LABEL_PAUSED if change.paused else LABEL_HOLD
+        print(f"  #{change.number} — {change.title} (метка «{why}»)")
 
 
 def source_of(change: Change, red: bool) -> int:
