@@ -1,0 +1,172 @@
+"""Где бы набор ни прогонялся, он прогоняется ТЕМ ЖЕ составом.
+
+ЗАМЕР 15.09.2026, из-за которого проверка и написана. Шаг значков считал
+покрытие так: ставил счётчик и звал `python -m coverage run … -m pytest`. Самого
+набора в том окружении не было вовсе — `pytest` там никто не ставил, — и заход
+падал на первом же шаге. Механизм при этом вёл себя честно: объявлял покрытие НЕ
+ПРОЧИТАННЫМ, а не нулевым
+([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)),
+и значок витрины так и говорил — «покрытие: не прочитано». Но единственным
+следом причины было предупреждение в логе прогона, которого часть окон не видит
+вовсе, и число не публиковалось НИ РАЗУ с появления счётчика 12.09. Локальный
+замер того же дня: набор под счётчиком зелен, покрытие 87.3 %.
+
+ПРЕДМЕТ — ШАГ, КОТОРЫЙ ЗОВЁТ НАБОР, а не джоб, который его РАЗРЕШАЕТ. У ревью и
+обращения в списке разрешённых команд агента `pytest` тоже стоит, и они ставят
+его себе сами — но их собственные шаги набор не запускают, и требовать от них
+состава прогонщика значило бы судить чужой предмет
+([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+
+СОСТАВ БЕРЁТСЯ ИЗ ДЕРЕВА, А НЕ ОБЪЯВЛЯЕТСЯ ЗДЕСЬ ВТОРЫМ СПИСКОМ: канон — строка
+установки прогонщика набора на изменении. Второй список тех же имён разошёлся бы
+с первым молча
+([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any, Final
+
+import yaml
+
+from tests.conftest import ROOT
+
+WORKFLOWS: Final = ROOT / ".github" / "workflows"
+#: Прогонщик набора на изменении: его строка установки и есть канон состава.
+CANON: Final = (".github/workflows/ci.yml", "test-matrix")
+#: Вызов набора в команде шага: `pytest`, `python -m pytest`, в том числе под
+#: счётчиком. Слово ищется как команда, а не как подстрока: `pytest-randomly` в
+#: строке установки вызовом не является.
+CALL_RE: Final = re.compile(r"(?:^|[\s;&|])(?:python3?\s+-m\s+)?pytest(?:$|[\s;&|])")
+#: Одно требование строки установки: имя пакета в кавычках с границами версий.
+NEED_RE: Final = re.compile(r'"([A-Za-z][\w.-]*)(?:[<>=!~][^"]*)?"')
+
+
+def workflows() -> list[Path]:
+    """Прогоны дерева — все, а не перечисленные: новый попадает сам."""
+    return sorted(WORKFLOWS.glob("*.y*ml"))
+
+
+def steps_of(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """Шаги джоба, у которых есть команда."""
+    return [step for step in (job or {}).get("steps") or [] if isinstance(step, dict)]
+
+
+def commands(step: dict[str, Any]) -> list[str]:
+    """Строки команды без пояснений, с развёрнутыми переносами.
+
+    ПОЯСНЕНИЕ ВЫЗОВОМ НЕ ЯВЛЯЕТСЯ. Без этого проверка ловила бы саму себя:
+    комментарий к правке, называющий `pytest`, читался бы как вызов набора (044).
+
+    ПЕРЕНОС СТРОКИ ОБРАТНЫМ СЛЕШЕМ РАЗВЁРНУТ. Команда, разбитая для читаемости,
+    остаётся одной командой: разбор по физическим строкам объявил бы строку
+    установки пустой — имена пакетов уехали бы на следующую. Замер 15.09.2026:
+    ровно так проверка и промахнулась на первой же своей правке.
+    """
+    said: list[str] = []
+    joined = ""
+    for line in str(step.get("run") or "").splitlines():
+        bare = line.strip()
+        if not bare or bare.startswith("#"):
+            continue
+        if bare.endswith("\\"):
+            joined += bare[:-1].strip() + " "
+            continue
+        said.append((joined + bare).strip())
+        joined = ""
+    if joined:
+        said.append(joined.strip())
+    return said
+
+
+def calls_the_suite(step: dict[str, Any]) -> bool:
+    """Зовёт ли шаг набор."""
+    return any(CALL_RE.search(line) for line in commands(step))
+
+
+def installs_of(job: dict[str, Any]) -> set[str]:
+    """Имена пакетов, которые джоб ставит себе — из всех его строк установки."""
+    found: set[str] = set()
+    for step in steps_of(job):
+        for line in commands(step):
+            if "pip install" in line:
+                found.update(NEED_RE.findall(line))
+    return found
+
+
+def jobs_of(path: Path) -> dict[str, dict[str, Any]]:
+    """Джобы прогона: имя ключа → тело."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        return {}
+    return {str(name): job or {} for name, job in (document.get("jobs") or {}).items()}
+
+
+def runners() -> list[tuple[str, str, dict[str, Any]]]:
+    """Джобы дерева, чьи шаги зовут набор: файл, имя, тело."""
+    found: list[tuple[str, str, dict[str, Any]]] = []
+    for path in workflows():
+        for name, job in jobs_of(path).items():
+            if any(calls_the_suite(step) for step in steps_of(job)):
+                found.append((path.name, name, job))
+    return found
+
+
+def canon_kit() -> set[str]:
+    """Состав набора по канону — строка установки прогонщика на изменении."""
+    path, name = CANON
+    job = jobs_of(ROOT / path).get(name) or {}
+    kit = installs_of(job)
+    assert kit, f"{path}:{name} — канонной строки установки нет, сверять нечем (075)"
+    return kit
+
+
+def test_the_canon_runner_is_found() -> None:
+    """Предмет проверки найден: канон существует и зовёт набор (075)."""
+    path, name = CANON
+    job = jobs_of(ROOT / path).get(name)
+    assert job is not None, f"в {path} нет джоба {name}"
+    assert any(calls_the_suite(step) for step in steps_of(job)), (
+        f"{path}:{name} больше не зовёт набор — канон состава стоит не там"
+    )
+    assert "pytest" in canon_kit(), "канонный состав обязан включать сам набор"
+
+
+def test_every_step_that_runs_the_suite_installs_it() -> None:
+    """У каждого прогонщика набора в окружении есть то, чем набор ходит.
+
+    Иначе заход падает не на тесте, а на «модуля нет», и читается это как
+    «замер не получился» вместо «набор сломан».
+    """
+    kit = canon_kit()
+    lacking = {
+        f"{where}:{name}": sorted(kit - installs_of(job))
+        for where, name, job in runners()
+        if kit - installs_of(job)
+    }
+    assert not lacking, f"прогонщик набора без его состава: {lacking}"
+
+
+def test_the_predicate_names_the_suite_and_not_its_permission() -> None:
+    """Считается вызов набора, а не разрешение агенту его звать (195).
+
+    Граница названа проверкой, а не прозой: список разрешённых команд агента
+    (`Bash(python -m pytest:*)`) вызовом не считается, иначе от ревью требовался
+    бы состав прогонщика — чужой предмет.
+    """
+    assert calls_the_suite({"run": "python -m coverage run --source=scripts -m pytest -q"})
+    assert calls_the_suite({"run": "pytest --strict-markers"})
+    assert not calls_the_suite({"run": "# сюда нельзя: python -m pytest в пояснении"})
+    assert not calls_the_suite({"run": 'python -m pip install --quiet "pytest-randomly>=3,<4"'})
+    assert not calls_the_suite({"with": {"allowed_tools": "Bash(python -m pytest:*)"}})
+
+
+def test_the_measuring_runner_is_among_them() -> None:
+    """Шаг значков, считающий покрытие, — прогонщик набора, а не сосед.
+
+    Это и есть находка 15.09.2026: он зовёт набор, и состав ему нужен тот же.
+    Без этой проверки он снова окажется вне сверки — от одной правки строки.
+    """
+    assert ("badges.yml", "badges") in [(where, name) for where, name, _ in runners()]

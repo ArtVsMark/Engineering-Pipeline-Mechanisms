@@ -78,11 +78,25 @@ jobs:
         continue-on-error: true
         env:
           COVERAGE_SUBPROCESS: "1"
+          # Зерно порядка — номер прогона, как и на изменении: упавший порядок
+          # воспроизводим снаружи, а логи этого прогона из части окон не читаются.
+          RANDOM_SEED: ${{ github.run_id }}
         run: |
           set -uo pipefail
-          python -m pip install --quiet "coverage>=7,<8"
+          # НАБОР ПРОГОНЯЕТСЯ ТЕМ ЖЕ СОСТАВОМ, ЧТО И НА ИЗМЕНЕНИИ. Прежде здесь
+          # ставился только счётчик, а самого набора в окружении не было вовсе:
+          # заход падал, покрытие объявлялось НЕ ПРОЧИТАННЫМ — честно, но
+          # единственным следом было предупреждение в логе, которого часть окон
+          # не видит. Замер 15.09.2026: значок витрины показывал «покрытие: не
+          # прочитано», а facts.json — `read: false`, и так с самого появления
+          # счётчика 12.09. Число, ни разу не опубликованное, выглядело
+          # опубликованным (045).
+          python -m pip install --quiet \
+            "coverage>=7,<8" "pytest>=8,<10" "pytest-randomly>=3,<4"
           rc=0
-          python -m coverage run --parallel-mode --source=scripts -m pytest -q || rc=$?
+          python -m coverage run --parallel-mode --source=scripts -m pytest \
+            --strict-markers -p no:cacheprovider \
+            ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED} -q || rc=$?
           # Зелёным считается ТОЛЬКО объявленный код: Python отдаёт единицу и
           # при необработанном сбое, и читать её условием значило бы засчитать
           # поломку за известное состояние (068).
