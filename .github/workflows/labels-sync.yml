@@ -43,7 +43,7 @@ jobs:
       - name: поставить разбор состава
         # Версия закреплена с верхней границей (правило 073): без неё
         # несовместимая версия применяется молча.
-        run: python -m pip install --quiet "pyyaml>=6,<7"
+        run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
 
       - name: применить объявленный состав
         env:

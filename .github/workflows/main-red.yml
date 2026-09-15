@@ -70,7 +70,7 @@ jobs:
       # строки шаг падал бы на импорте — ДО входа в скрипт — и свой третий
       # исход выдать не мог.
       - name: поставить разбор состава
-        run: python -m pip install --quiet "pyyaml>=6,<7"
+        run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
 
       - name: разобрать красноту общей ветки
         env:

@@ -21,11 +21,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, ClassVar, Final
 
+import ghrest as transport
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT
 
-transport = load_script("ghrest.py")
 SCRIPTS = ROOT / "scripts"
 
 
@@ -83,7 +83,7 @@ def test_server_error_is_a_transport_error(monkeypatch: pytest.MonkeyPatch) -> N
     набор платил бы за этот случай шестью секундами сна. Проверка про ИМЯ
     отказа, а не про терпение (замечание внешнего взгляда на #284).
     """
-    monkeypatch.setattr(transport.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("ghrest.time.sleep", lambda _seconds: None)
     url = next(gen := serve(500, b'{"message":"boom"}'))
     try:
         with pytest.raises(transport.TransportError) as caught:
@@ -409,10 +409,9 @@ def test_a_transient_refusal_is_survived_by_a_retry(monkeypatch: pytest.MonkeyPa
     смену: известен и без механизма
     ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
     """
-    monkeypatch.setattr(transport.time, "sleep", lambda _: None)
+    monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
     monkeypatch.setattr(
-        transport.urllib.request,
-        "urlopen",
+        "ghrest.urllib.request.urlopen",
         raising(refusal(503), refusal(502), Answer('{"да": 1}'.encode())),
     )
     assert transport.request("GET", "/x", "t") == {"да": 1}
@@ -431,8 +430,8 @@ def test_a_refusal_by_rights_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> 
         asked += 1
         raise refusal(403)
 
-    monkeypatch.setattr(transport.time, "sleep", lambda _: None)
-    monkeypatch.setattr(transport.urllib.request, "urlopen", opener)
+    monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
     with pytest.raises(transport.TransportError):
         transport.request("GET", "/x", "t")
     assert asked == 1, f"отказ по правам повторён {asked} раз"
@@ -447,8 +446,8 @@ def test_the_retry_is_bounded_and_then_says_so(monkeypatch: pytest.MonkeyPatch) 
         asked += 1
         raise refusal(503)
 
-    monkeypatch.setattr(transport.time, "sleep", lambda _: None)
-    monkeypatch.setattr(transport.urllib.request, "urlopen", opener)
+    monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
     with pytest.raises(transport.TransportError):
         transport.request("GET", "/x", "t")
     assert asked == transport.TRIES, f"попыток {asked}, а объявлено {transport.TRIES}"
@@ -468,8 +467,8 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
             asked += 1
             raise urllib.error.URLError("связь оборвалась")
 
-        monkeypatch.setattr(transport.time, "sleep", lambda _: None)
-        monkeypatch.setattr(transport.urllib.request, "urlopen", opener)
+        monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+        monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
         with pytest.raises(transport.TransportError):
             transport.request(method, "/x", "t", {"тело": 1} if method == "POST" else None)
         assert asked == expected, f"{method}: попыток {asked}, ожидалось {expected}"

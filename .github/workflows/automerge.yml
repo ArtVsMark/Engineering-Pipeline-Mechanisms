@@ -77,7 +77,7 @@ jobs:
       # строки шаг падал бы на импорте — ДО входа в скрипт, — и свой третий
       # исход выдать не мог: прогон прочитал бы сбой как «секрет не задан».
       - name: поставить разбор состава
-        run: python -m pip install --quiet "pyyaml>=6,<7"
+        run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
 
       - name: двигать очередь
         env:

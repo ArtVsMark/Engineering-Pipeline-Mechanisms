@@ -31,7 +31,7 @@ from typing import Any, Final
 
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, load_script
 
 WORKFLOWS: Final = ROOT / ".github" / "workflows"
 #: Прогонщик набора на изменении: его строка установки и есть канон состава.
@@ -132,6 +132,31 @@ def test_the_canon_runner_is_found() -> None:
         f"{path}:{name} больше не зовёт набор — канон состава стоит не там"
     )
     assert "pytest" in canon_kit(), "канонный состав обязан включать сам набор"
+
+
+def test_the_canon_kit_carries_the_tree_packages() -> None:
+    """Состав набора включает пакеты САМОГО дерева, а не только инструменты.
+
+    ЗАМЕР 15.09.2026, стоивший красного изменения. Общий низ конвейера уехал в
+    пакет, и набор стал его импортировать — а прогонщики набора пакет не ставили:
+    `test-matrix` упал с кодом 2, то есть на СБОРЕ, не дойдя ни до одного теста.
+    Проверка «каждый прогонщик ставит канон» при этом молчала: канон сам его не
+    называл. Требование читается из объявления пакета, а не из второго списка
+    рядом (022, 090).
+    """
+    env = load_script("check_env.py")
+    ours = env.local_packages(ROOT)
+    assert ours, "пакетов дерева не найдено — сверять нечего (075)"
+    path, name = CANON
+    job = jobs_of(ROOT / path).get(name) or {}
+    installs = "\n".join(
+        line for step in steps_of(job) for line in commands(step) if "pip install" in line
+    )
+    for _, where in ours:
+        assert f"./{where.relative_to(ROOT).as_posix()}" in installs, (
+            f"{path}:{name} не ставит пакет дерева {where.relative_to(ROOT)}: набор его "
+            "импортирует, и сбор упадёт раньше первого теста"
+        )
 
 
 def test_every_step_that_runs_the_suite_installs_it() -> None:

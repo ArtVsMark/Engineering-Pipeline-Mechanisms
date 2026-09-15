@@ -26,7 +26,7 @@ from typing import Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, load_script
 
 CI: Final = ROOT / ".github" / "workflows" / "ci.yml"
 #: Джобы, которые гоняют набор. Перечислены, а не выведены: список
@@ -100,3 +100,19 @@ def test_the_plugin_is_declared_where_the_run_installs_it(job: str) -> None:
     assert re.search(r'"pytest-randomly>=\d+,<\d+"', said), (
         f"{job}: плагин случайного порядка не объявлен с границами версий (073)"
     )
+
+
+def test_the_environment_check_asks_for_the_tree_packages() -> None:
+    """Сверка окружения спрашивает пакеты САМОГО дерева, а не только инструменты.
+
+    Общий низ конвейера уехал в пакет (решение 024), и окно без него узнаёт об этом
+    падением импорта на первом же механизме. Требование читается из объявления
+    пакета, а не из второго списка рядом (022).
+    """
+    env = load_script("check_env.py")
+    ours = env.local_packages(ROOT)
+    assert ours, "пакетов дерева не найдено — сверять нечего (075)"
+    имена = {name for name, _ in ours}
+    assert "engineering-pipeline-transport" in имена, имена
+    for name, where in ours:
+        assert (where / "pyproject.toml").is_file(), f"{name}: объявления пакета нет"

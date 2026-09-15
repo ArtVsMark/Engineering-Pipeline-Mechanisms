@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import pathlib
 import subprocess
 from pathlib import Path
 from typing import Final
@@ -122,7 +123,9 @@ def test_only_mechanisms_are_judged(repo: Path, monkeypatch: pytest.MonkeyPatch)
     )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "правка")
-    assert module.touched("main") == ["scripts/thing.py"]
+    assert module.touched("main") == [("scripts/thing.py", "")], (
+        "у непереименованного файла прежнего пути нет — это пустая строка, а не имя"
+    )
 
 
 def test_only_what_the_change_added_is_named(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -297,8 +300,57 @@ def test_added_names_that_are_run_are_clean(
 ) -> None:
     """Добавленное названо набором — чистый исход, и число модулей названо."""
     monkeypatch.setattr(module, "base_ref", lambda: "origin/main")
-    monkeypatch.setattr(module, "touched", lambda base: ["scripts/x.py"])
-    monkeypatch.setattr(module, "added_names", lambda base, path: {"работа"})
+    monkeypatch.setattr(module, "touched", lambda base: [("scripts/x.py", "")])
+    monkeypatch.setattr(module, "added_names", lambda base, path, was="": {"работа"})
     monkeypatch.setattr(module, "told_by_tests", lambda name, path, tests: True)
     assert module.main([]) == module.EXIT_OK
     assert "модулей тронуто 1" in capsys.readouterr().out
+
+
+def test_a_moved_module_is_not_a_new_one(tmp_path: Path) -> None:
+    """Переезд файла не делает его содержимое новым (044).
+
+    ЗАМЕР 15.09.2026. Общий низ конвейера уехал из `scripts/` в пакет, и гейт
+    объявил непрогнанным ВЕСЬ транспорт: на базе по новому адресу файла нет,
+    значит все имена «новые». Ложная находка на законной правке учит обходить
+    гейт (051), поэтому у переименования читается и прежний путь.
+    """
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "packages" / "transport").mkdir(parents=True)
+    было = tmp_path / "scripts" / "ghrest.py"
+    было.write_text("def request():\n    return 1\n", encoding="utf-8")
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "окно@пример")
+    git("config", "user.name", "окно")
+    git("add", "-A")
+    git("commit", "-qm", "транспорт рядом с механизмами")
+    стало = tmp_path / "packages" / "transport" / "ghrest.py"
+    стало.write_text(было.read_text(encoding="utf-8"), encoding="utf-8")
+    было.unlink()
+    git("add", "-A")
+    git("commit", "-qm", "транспорт уехал в пакет")
+
+    было_имён = module.names_in("def request():\n    return 1\n")
+    assert было_имён == {"request"}, "предмет проверки найден: имя в модуле есть"
+
+    сюда = pathlib.Path.cwd()
+    try:
+        import os
+
+        os.chdir(tmp_path)
+        переезд = module.touched("HEAD~1")
+        assert переезд, "переезд не замечен вовсе — гейту нечего проверять (075)"
+        for path, was in переезд:
+            assert module.added_names("HEAD~1", path, was) == set(), (
+                f"{path}: переехавшее имя объявлено новым, хотя оно лежало в {was}"
+            )
+            assert module.added_names("HEAD~1", path) == было_имён, (
+                "без прежнего пути гейт по-прежнему считает переехавшее новым — "
+                "значит проверка смотрит именно на это"
+            )
+    finally:
+        os.chdir(сюда)
