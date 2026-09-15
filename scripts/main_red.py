@@ -49,11 +49,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Final
 
 import automerge
@@ -280,14 +282,44 @@ def rerun_failed(repo: str, run: int, token: str) -> None:
 NOT_ALONE: Final = "упал не один — это похоже на дефект, а не на мигание"
 ALREADY: Final = "уже перезапускался — значит это дефект, а не мигание (124)"
 NO_ADDRESS: Final = "адрес записи не разобрался — перезапускать нечем"
-#: Красных ОБЯЗАТЕЛЬНЫХ нет, а совещательные есть. Перезапуска не будет, но
-#: причина здесь другая: не «упал не один», а «упало то, что ничего не держит».
-#: Разница не косметическая — прежняя редакция говорила «упал не один» про
-#: единственную красную совещательную, то есть называла состояние неверно, и
-#: читатель шёл искать второй упавший джоб, которого нет (154).
+#: Красных ОБЯЗАТЕЛЬНЫХ нет, а совещательные есть, и ни одна из них не в
+#: разрешённом списке. Перезапуска не будет, и причина здесь своя: не «упал не
+#: один», а «упало то, что ничего не держит и перезапуску не подлежит».
 ADVISORY_ONLY: Final = (
-    "красных обязательных нет — упавшее совещательное уходит в долг, а не в перезапуск (084)"
+    "красных обязательных нет, а упавшее совещательное не в разрешённом списке — "
+    "уходит в долг, а не в перезапуск (084)"
 )
+#: Совещательных красных несколько. Перезапуск одного не вернул бы ветку в
+#: зелень, а несколько сразу похожи на дефект, не на осечку канала (124).
+ADVISORY_NOT_ALONE: Final = (
+    "красных совещательных больше одной — это похоже на дефект, а не на осечку канала"
+)
+
+
+def rerunnable(where: Path | None = None) -> dict[str, str]:
+    """Проверки, чьё одиночное красное перезапускается: имя → причина.
+
+    СПИСОК РАЗРЕШИТЕЛЬНЫЙ И ЖИВЁТ В ДАННЫХ (068, 042). Имя попадает в него по
+    одной причине — красное этой проверки НЕ означает дефекта дерева, — и причина
+    объявляется рядом с именем. «Перезапускать всё красное» прятало бы дефект:
+    зелёное со второго раза выглядит как работа
+    ([124](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/124-rerun-the-minimum-and-record-the-flake.md)).
+
+    Пустой список — законное состояние: до 15.09.2026 он был пуст, и это было
+    ИЗМЕРЕНО, а не забыто (решения 013, 014, 025).
+    """
+    path = where or paths.RERUN
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NotRun(f"разрешённый список перезапуска не прочитан ({path}): {exc}") from exc
+    found: dict[str, str] = {}
+    for one in said.get("allowed") or []:
+        name, why = str(one.get("check") or ""), str(one.get("why") or "")
+        if not name or not why:
+            raise NotRun(f"{path}: имя в списке без причины — перезапуск без объяснения (154)")
+        found[name] = why
+    return found
 
 
 def one_fall(holds: list[str], rest: list[str], fed: dict[str, set[str]]) -> bool:
@@ -325,7 +357,20 @@ def target_run(
     Перезапускается запись ОБЯЗАТЕЛЬНОГО имени: она и держит слияние. Соседние
     имена того же падения (матричные ячейки) поедут вместе с ней — их вердикт
     в неё и доезжает.
+
+    СОВЕЩАТЕЛЬНОЕ ОДИНОЧНОЕ — ТОТ ЖЕ ВОПРОС, И ОТВЕТ ТОТ ЖЕ. Когда обязательных
+    красных нет вовсе, предметом становится единственное красное совещательное:
+    решение о его перезапуске принимает `rerun_reason` по разрешённому списку, а
+    выбор предмета обязан спрашиваться здесь же — иначе он снова разойдётся с
+    решением (это уже стоило отказа под чужим именем).
     """
+    if not holds:
+        if len(rest) != 1:
+            return 0
+        for item in red:
+            if str(item.get("name")) == rest[0]:
+                return run_id_of(item)
+        return 0
     if not one_fall(holds, rest, fed):
         return 0
     for item in red:
@@ -340,6 +385,7 @@ def rerun_reason(
     run: int,
     tries: int,
     feeds: dict[str, set[str]] | None = None,
+    allowed: dict[str, str] | None = None,
 ) -> str:
     """Почему перезапуска НЕ будет; пустая строка — будет.
 
@@ -354,8 +400,19 @@ def rerun_reason(
     ответила не тем). Одно сообщение на оба отправило бы разбирать дефект,
     которого нет.
     """
+    # СОВЕЩАТЕЛЬНОЕ ОДИНОЧНОЕ ПЕРЕЗАПУСКАЕТСЯ, ЕСЛИ ИМЯ В РАЗРЕШЁННОМ СПИСКЕ.
+    # Обязательные не перезапускаются никогда — их красное считает дерево и
+    # означает дефект (013, 014). А красное шага, который дерево не судит вовсе,
+    # бывает осечкой канала; замер 15.09.2026 на `badges` и есть первый такой
+    # случай (решение 025).
     if not holds:
-        return ADVISORY_ONLY
+        if len(rest) != 1:
+            return ADVISORY_NOT_ALONE if rest else ADVISORY_ONLY
+        if rest[0] not in (allowed or {}):
+            return ADVISORY_ONLY
+        if not run:
+            return NO_ADDRESS
+        return ALREADY if tries > 1 else ""
     if not one_fall(holds, rest, feeds or {}):
         return NOT_ALONE
     if not run:
@@ -774,14 +831,14 @@ def main(argv: list[str] | None = None) -> int:
             fed = policy.feeds()
             number = target_run(holds, rest, red, fed)
             tries = attempt(args.repo, number, token) if number else 1
-            why = rerun_reason(holds, rest, number, tries, fed)
+            why = rerun_reason(holds, rest, number, tries, fed, rerunnable())
             if why:
                 print(f"перезапуска не будет: {why}")
             else:
                 if args.apply:
                     rerun_failed(args.repo, number, token)
                 print(
-                    f"упал ровно один — «{holds[0]}»: "
+                    f"упал ровно один — «{(holds or rest)[0]}»: "
                     + ("перезапущен" if args.apply else "перезапустил бы")
                     + f" прогон {number} (124)"
                 )
