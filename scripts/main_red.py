@@ -446,6 +446,84 @@ def flakes_on_changes(repo: str, token: str, known: list[Flake], day: str) -> li
     return found
 
 
+#: Метка заморозки. Имя читает очередь (`scripts/automerge.py`), объявлено оно в
+#: составе меток дерева, а ставит и снимает его ЭТОТ шаг: у метки один владелец —
+#: механизм, и этим она отличается от `hold`, которую ставит человек (022).
+LABEL_PAUSED: Final = automerge.LABEL_PAUSED
+#: Метка починки: её несущее изменение заморозка не останавливает — оно и есть
+#: выход из неё.
+LABEL_FIX_MAIN: Final = automerge.LABEL_FIX_MAIN
+
+
+def stamp(repo: str, number: int, token: str, *, on: bool) -> None:
+    """Ставит или снимает метку заморозки на одном изменении."""
+    if on:
+        ghrest.request(
+            "POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": [LABEL_PAUSED]}
+        )
+        return
+    # Имя метки несёт косую черту, и в адресе она обязана быть закодирована:
+    # иначе площадка ищет метку «main-red» внутри пути «paused» и отвечает
+    # «не найдено» — снятие выглядело бы сделанным (045).
+    ghrest.request(
+        "DELETE", f"repos/{repo}/issues/{number}/labels/{ghrest.quote(LABEL_PAUSED)}", token
+    )
+
+
+def pause(repo: str, token: str, *, frozen: bool, apply: bool) -> tuple[list[int], list[int]]:
+    """Отмечает заморозку на живых изменениях: ставит на все, кроме починки.
+
+    ПОЧЕМУ МЕТКА, А НЕ ТОЛЬКО СНЯТИЕ ВЗВЕДЕНИЯ. Очередь и так снимает согласие
+    при красной общей ветке, но снятие живёт в выводе её захода: человек на
+    списке изменений видит зелёные проверки и не видит причины, почему ничего не
+    сливается. Метка — состояние НА изменении, и она не отменяется следующим
+    решением очереди
+    ([142](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/142-a-scheduled-red-needs-an-addressee.md)).
+
+    ПОЧИНКА НЕ ОСТАНАВЛИВАЕТСЯ: изменение с меткой `fix-main` — единственный
+    выход из заморозки, и остановить его значило бы запереть выход
+    ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+
+    СНЯТИЕ — ТОГО ЖЕ ШАГА, а не человека: у метки один владелец. Позеленела
+    общая ветка — метка уходит сама, и «забытая метка» означает не забывчивость
+    человека, а незашедший механизм; об этом говорит счёт пропущенных заходов по
+    расписанию, а не вторая метка.
+
+    Возвращает два списка: помеченные и освобождённые.
+    """
+    try:
+        changes = list(ghrest.paginate(f"repos/{repo}/pulls?state=open", token))
+    except ghrest.TransportError as exc:
+        # Отказ здесь не роняет заход: краснота — главный предмет шага, и терять
+        # её из-за соседнего действия нельзя (084).
+        print(f"метки заморозки не расставлены: {report.cut(str(exc))}")
+        return [], []
+
+    marked: list[int] = []
+    freed: list[int] = []
+    for change in changes:
+        number = int(change.get("number") or 0)
+        if not number:
+            continue
+        marks = {str((one or {}).get("name") or "") for one in change.get("labels") or []}
+        paused_now = LABEL_PAUSED in marks
+        want = frozen and LABEL_FIX_MAIN not in marks
+        if want == paused_now:
+            continue
+        try:
+            if apply:
+                stamp(repo, number, token, on=want)
+        except ghrest.TransportError as exc:
+            print(f"#{number}: метка заморозки не {'поставлена' if want else 'снята'}: {exc}")
+            continue
+        (marked if want else freed).append(number)
+    if marked:
+        print(f"заморозка отмечена{'' if apply else ' была бы'} на: {marked}")
+    if freed:
+        print(f"метка заморозки снята{'' if apply else ' была бы'} с: {freed}")
+    return marked, freed
+
+
 def queue_now(repo: str, token: str) -> tuple[int, int]:
     """Сколько изменений ждёт очереди и сколько из них помечены починкой.
 
@@ -724,6 +802,10 @@ def main(argv: list[str] | None = None) -> int:
         # Очередь спрашивается ТОЛЬКО при заморозке: без неё этот счёт ничего
         # не решает, а лишний обход площадки стоит вызовов из общей квоты (058).
         queue = queue_now(args.repo, token) if holds else None
+        # МЕТКА ЗАМОРОЗКИ РАССТАВЛЯЕТСЯ В ОБЕ СТОРОНЫ И КАЖДЫМ ЗАХОДОМ: она
+        # зеркало состояния общей ветки, а не журнал события. Позеленело —
+        # снимается сама, покраснело снова — вернулась (049).
+        pause(args.repo, token, frozen=bool(holds), apply=args.apply)
         # СЧЁТЧИК ПОПЫТОК СПРАШИВАЕТСЯ ТОЛЬКО ПРИ ЗАМОРОЗКЕ. Предел живёт в
         # контуре 3 у состояния «Проверка», а оно наступает от красной
         # ОБЯЗАТЕЛЬНОЙ: совещательное красное очередь не морозит, чинить его

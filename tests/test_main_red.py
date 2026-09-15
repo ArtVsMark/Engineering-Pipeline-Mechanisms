@@ -718,6 +718,9 @@ def platform(
     monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, mark: (1, ""))
     monkeypatch.setattr(module, "flakes_on_changes", lambda repo, token, known, day: known)
     monkeypatch.setattr(module, "queue_now", lambda repo, token: (0, 0))
+    # Метки заморозки — отдельный предмет и свои проверки ниже: здесь важны
+    # исходы захода, и подделка списка проверок на список изменений не похожа.
+    monkeypatch.setattr(module, "pause", lambda repo, token, *, frozen, apply: ([], []))
     monkeypatch.setattr(module, "save", lambda repo, token, body, apply: written.append(body))
     return written
 
@@ -914,3 +917,103 @@ def test_the_body_does_not_grow_when_rebuilt() -> None:
         holds=[], rest=["debt"], flakes=module.parse_flakes(first), sha="abcdef1"
     )
     assert again == first, "пересборка изменила тело — зеркало копит вместо отражения"
+
+
+# --- метка заморозки: состояние видно на изменении ------------------------------
+
+
+def changes_and_writes(
+    monkeypatch: pytest.MonkeyPatch, changes: list[dict[str, Any]]
+) -> list[tuple[str, str]]:
+    """Подделывает список живых изменений и записывает, что механизм пишет."""
+    written: list[tuple[str, str]] = []
+
+    def paginate(path: str, token: str, key: str | None = None) -> Any:
+        assert "pulls?state=open" in path, path
+        return iter(changes)
+
+    def request(method: str, path: str, token: str, *rest: Any, **kw: Any) -> Any:
+        written.append((method, path))
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "request", request)
+    return written
+
+
+def change(number: int, *marks: str) -> dict[str, Any]:
+    """Живое изменение — в тех полях, которые читает расстановка меток."""
+    return {"number": number, "labels": [{"name": name} for name in marks]}
+
+
+def test_the_freeze_is_marked_on_everything_but_the_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Красная обязательная — метка на всех живых, кроме несущих `fix-main`.
+
+    Починка — единственный выход из заморозки, и остановить её значило бы запереть
+    выход (126).
+    """
+    written = changes_and_writes(
+        monkeypatch,
+        [change(1), change(2, "fix-main"), change(3, module.LABEL_PAUSED)],
+    )
+    marked, freed = module.pause("o/r", "токен", frozen=True, apply=True)
+    assert (marked, freed) == ([1], []), "помечается только то, чего ещё не помечено"
+    assert written == [("POST", "repos/o/r/issues/1/labels")]
+
+
+def test_a_green_branch_takes_the_mark_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Позеленела общая ветка — метку снимает тот же шаг, а не человек.
+
+    Метка — зеркало состояния ветки, а не журнал события: снятие рукой означало бы
+    второго владельца у одной метки (022, 049).
+    """
+    written = changes_and_writes(
+        monkeypatch, [change(1, module.LABEL_PAUSED), change(2), change(3, module.LABEL_PAUSED)]
+    )
+    marked, freed = module.pause("o/r", "токен", frozen=False, apply=True)
+    assert (marked, freed) == ([], [1, 3])
+    assert all(method == "DELETE" for method, _ in written)
+    assert written[0][1] == "repos/o/r/issues/1/labels/paused%2Fmain-red", (
+        "косая черта в имени метки обязана быть закодирована: иначе площадка "
+        "ищет метку не там и отвечает «не найдено», а снятие выглядит сделанным (045)"
+    )
+
+
+def test_a_dry_walk_marks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сухой заход называет, что сделал бы, и не пишет ничего."""
+    written = changes_and_writes(monkeypatch, [change(1)])
+    marked, freed = module.pause("o/r", "токен", frozen=True, apply=False)
+    assert (marked, freed) == ([1], []), "сказано, что было бы помечено"
+    assert written == [], "сухой заход площадку не трогает"
+
+
+def test_a_refused_listing_does_not_drop_the_red(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Список изменений не прочитан — заход не падает: краснота важнее меток (084)."""
+
+    def refuse(path: str, token: str, key: str | None = None) -> Any:
+        raise module.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setattr(module.ghrest, "paginate", refuse)
+    assert module.pause("o/r", "токен", frozen=True, apply=True) == ([], [])
+    assert "метки заморозки не расставлены" in capsys.readouterr().out
+
+
+def test_a_refused_write_names_the_change(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ на одном изменении назван и не уносит остальные (154)."""
+
+    def request(method: str, path: str, token: str, *rest: Any, **kw: Any) -> Any:
+        if "/issues/1/" in path:
+            raise module.ghrest.TransportError("нет прав")
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter([change(1), change(2)]))
+    monkeypatch.setattr(module.ghrest, "request", request)
+    marked, freed = module.pause("o/r", "токен", frozen=True, apply=True)
+    assert (marked, freed) == ([2], [])
+    assert "#1: метка заморозки не поставлена" in capsys.readouterr().out
