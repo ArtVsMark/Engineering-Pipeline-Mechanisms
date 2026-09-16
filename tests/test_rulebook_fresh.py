@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Final
 
@@ -228,6 +229,67 @@ def skills() -> list[Path]:
 def test_the_tree_declares_a_skill_at_all() -> None:
     """Навык найден: без него проверки ниже — поверхность без предмета (075)."""
     assert skills(), f"в {SKILL_DIR} нет ни одного SKILL.md"
+
+
+#: Разделы, которыми навык этого проекта отличается от памятки. Список
+#: разрешительный (068): раздел вне его — вольность оформления, а не форма.
+#:
+#: ПОЧЕМУ ИМЕННО ЭТИ ТРИ. «Читатель» отвечает, кому навык адресован, — у
+#: документа проекта это уже обязательно, и навык здесь не исключение (021).
+#: «Зачем это существует» держит ПРИЧИНУ: навык, заведённый без неё, снаружи
+#: неотличим от привычки автора. «Чего НЕ делает» держит ГРАНИЦУ: невызванный
+#: навык неотличим от вызванного и проигнорированного, и признать это обязан он
+#: сам, иначе читатель примет приглашение за проверку (002).
+SKILL_READER: Final = re.compile(r"^> \*\*Читатель:\*\* \S", re.M)
+SKILL_WHY: Final = re.compile(r"^## Зачем это существует", re.M)
+SKILL_LIMITS: Final = re.compile(r"^## Чего этот навык НЕ делает", re.M)
+#: Замер: день, названный числом. Та же форма, что у расписаний и у списка
+#: перезапуска, — и по той же причине (005, 139).
+SKILL_MEASURED: Final = re.compile(r"[Зз]амер\w*[^.]{0,80}?\d{2}\.\d{2}\.\d{4}")
+
+
+@pytest.mark.parametrize("path", skills(), ids=lambda p: p.parent.name)
+def test_a_skill_says_who_reads_it_and_what_it_is_not(path: Path) -> None:
+    """Навык объявляет читателя, причину и границу — как документ проекта.
+
+    Навык — не памятка автора: его читает другое окно, в другой день, в момент
+    вызова. Без читателя непонятно, кому он адресован; без причины — зачем он
+    заведён; без границы читатель принимает приглашение за проверку.
+
+    ЗАМЕР 16.09.2026, на самих навыках: из пяти форму держали четыре.
+    """
+    said = path.read_text(encoding="utf-8")
+    missing = [
+        name
+        for name, found in (
+            ("> **Читатель:**", SKILL_READER),
+            ("## Зачем это существует", SKILL_WHY),
+            ("## Чего этот навык НЕ делает", SKILL_LIMITS),
+        )
+        if not found.search(said)
+    ]
+    assert not missing, f"{path}: навык не несёт разделов формы: {', '.join(missing)}"
+
+
+@pytest.mark.parametrize("path", skills(), ids=lambda p: p.parent.name)
+def test_a_skill_names_the_measurement_that_earned_it(path: Path) -> None:
+    """Навык назван замером, а не ощущением: день и число.
+
+    Каждый навык стоит внимания при КАЖДОМ вызове, и набор, заведённый «на
+    всякий случай», перестают читать целиком — вместе с теми, что заслужены
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Отличает заслуженный навык одно: у него есть день, когда его отсутствие
+    что-то стоило
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    ЗАМЕР 16.09.2026: из пяти навыков дерева замер несли четыре. Пятый —
+    `role-coverage` — опирался на карту направлений, но своего дня не называл.
+    """
+    said = path.read_text(encoding="utf-8")
+    assert SKILL_MEASURED.search(said), (
+        f"{path}: навык не называет замера — дня, когда его отсутствие что-то стоило. "
+        "Без него он неотличим от привычки автора (139)"
+    )
 
 
 @pytest.mark.parametrize("path", skills(), ids=lambda p: p.parent.name)
