@@ -133,6 +133,71 @@ def annotated() -> list[tuple[str, int, str]]:
     return found
 
 
+#: Шаг вычислил причину: вывод шага, сложенный в одну строку.
+COMPUTES: Final = re.compile(r'^\s*reason="\$\(tr\b')
+#: …и подставил её куда-нибудь.
+SUBSTITUTES: Final = "${reason}"
+
+
+def blocks() -> list[tuple[str, int, list[str]]]:
+    """Тела шагов `run:` прогонов дерева: файл, строка начала, строки тела.
+
+    Границей взят отступ: тело блока идёт глубже строки `run:`, и первая
+    строка с отступом не глубже — уже сосед. Разбирать YAML ради этого нечем:
+    тело блока — текст оболочки, и именно как текст его и читают соседние
+    проверки этого файла.
+    """
+    found: list[tuple[str, int, list[str]]] = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for number, line in enumerate(lines, 1):
+            head = re.match(r"^(\s*)-?\s*run:\s*\|", line)
+            if not head:
+                continue
+            deep = len(head.group(1))
+            body: list[str] = []
+            for below in lines[number:]:
+                if below.strip() and len(below) - len(below.lstrip()) <= deep:
+                    break
+                body.append(below)
+            found.append((path.name, number, body))
+    return found
+
+
+def test_the_tree_has_run_blocks_to_look_at() -> None:
+    """Блоки найдены: без них проверка ниже — поверхность без предмета (075)."""
+    assert len(blocks()) >= 20, f"блоков `run:` найдено {len(blocks())} — разбор их не видит"
+
+
+@pytest.mark.parametrize(
+    "block",
+    blocks(),
+    ids=lambda one: f"{one[0]}:{one[1]}" if isinstance(one, tuple) else str(one),
+)
+def test_a_computed_reason_is_substituted(block: tuple[str, int, list[str]]) -> None:
+    """Шаг, вычисливший причину, обязан её подставить.
+
+    ПОЧЕМУ ЭТО НЕ ПРИДИРКА К МЁРТВОЙ ПЕРЕМЕННОЙ. Рядом с вычислением стоит
+    пояснение «причина едет в аннотацию, а не остаётся в логе», и пока
+    подстановки нет, ПОЯСНЕНИЕ ЛЖЁТ: читатель верит, что причина доедет, и не
+    ищет её в логе — которого из части окон не видно вовсе (142). Соседний
+    гейт этого не берёт намеренно: он принимает и СЛЕДСТВИЕ словами, а
+    следствие здесь как раз было написано.
+
+    ЗАМЕР 16.09.2026 ПО ВСЕМУ ДЕРЕВУ, а не по найденному случаю: причину
+    вычисляют одиннадцать шагов в девяти прогонах, и ровно один её не
+    подставлял — `automerge.yml`, шаг записи слитого без взгляда. Нашёл
+    внешний взгляд находкой `08d2f71` на #383.
+    """
+    name, number, body = block
+    if not any(COMPUTES.match(line) for line in body):
+        pytest.skip("шаг не вычисляет причину")
+    assert any(SUBSTITUTES in line for line in body), (
+        f"{name}:{number}: шаг сложил вывод в `reason`, но никуда его не подставил — "
+        "пояснение обещает причину в аннотации, а её там нет (142)"
+    )
+
+
 def test_the_tree_has_annotations_to_look_at() -> None:
     """Аннотации найдены: без них проверки ниже — поверхность без предмета (075)."""
     assert len(annotated()) >= 10, (
