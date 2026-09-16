@@ -26,13 +26,23 @@ import sys
 from typing import Final
 
 import journal
+import paths
 
 FRAGMENT_RE: Final = journal.PATH_RE
 # Тронув только это, изменение журналу ничего не сообщает.
 EXEMPT_PREFIXES: Final = ("changelog.d/",)
 EXEMPT_FILES: Final = frozenset({"CHANGELOG.md"})
-#: Где живут механизмы: правка здесь меняет поведение, а не текст.
-CODE_PREFIXES: Final = ("scripts/", ".github/workflows/")
+#: Где живут механизмы: правка здесь меняет поведение, а не текст. Состав
+#: источников ЧИТАЕТСЯ из объявления и не перечисляется тут: третье написание
+#: того же нашлось внешним взглядом (`675d64c`), а здесь оно уже стоило дыры —
+#: `packages/transport/` в перечне не было, и починка общего низа проходила
+#: гейт БЕЗ единой проверки (022, 090). Прогоны добавлены рядом: они тоже
+#: механизм, но объявлению `paths.SOURCES` не принадлежат — это не код проекта,
+#: а его обвязка.
+CODE_PREFIXES: Final = (
+    *(f"{one.as_posix()}/" for one in paths.SOURCES),
+    f"{paths.WORKFLOWS.as_posix()}/",
+)
 #: Где живут проверки.
 TESTS_PREFIX: Final = "tests/"
 #: Род записи, означающий починку дефекта.

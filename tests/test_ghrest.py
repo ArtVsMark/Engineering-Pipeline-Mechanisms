@@ -24,9 +24,7 @@ from typing import Any, ClassVar, Final
 import ghrest as transport
 import pytest
 
-from tests.conftest import ROOT, code_files
-
-SCRIPTS = ROOT / "scripts"
+from tests.conftest import code_files
 
 
 class Fake(BaseHTTPRequestHandler):
