@@ -87,6 +87,40 @@ def test_a_foreign_edit_under_a_live_window_is_named(
     assert module.SKILL in said, "навык перечитывания не назван — чинить нечем"
 
 
+def test_a_first_change_of_a_window_still_sees_the_edit(tmp_path: Path) -> None:
+    """Окно, чья первая работа ещё НЕ слита, всё равно видит чужую правку свода.
+
+    ЗДЕСЬ ГЕЙТ БЫЛ СЛЕП, И СЛЕП МОЛЧА. Начало окна искалось только в истории
+    общей ветки; у окна без слитых коммитов там нет ничего, и `window.lifetime`
+    законно называет началом саму голову — для СРОКА жизни это верно, срок
+    нулевой. Для свежести свода тот же ответ даёт пустой промежуток: между
+    «началом» и головой не помещается ни одна правка, и гейт молчит ровно на
+    первом изменении окна — том самом, где свод новее всего. Нашёл внешний
+    взгляд находкой `734268a` на #377.
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    git(root, "init", "--initial-branch=main")
+    git(root, "config", "user.name", "Artem Markitanov")
+    git(root, "config", "user.email", "86671904+ArtVsMark@users.noreply.github.com")
+    (root / "AGENTS.md").write_text("свод при старте окна A", encoding="utf-8")
+    git(root, "add", "AGENTS.md")
+    # В общей ветке окна A нет вовсе: работал здесь только сосед.
+    commit(root, "работа соседа", day=0, session=WINDOW_B)
+    git(root, "checkout", "-b", "work")
+    commit(root, "первый коммит окна A", day=1, session=WINDOW_A)
+    git(root, "checkout", "main")
+    edit_rulebook(root, "сосед переписал свод", day=2, session=WINDOW_B)
+    # Сливать ветку незачем: правка лежит в ИСТОРИИ, а гейт читает историю.
+    # Предмет здесь — начало окна, а не состав ветки.
+    git(root, "checkout", "work")
+    commit(root, "вторая работа окна A", day=3, session=WINDOW_A)
+    code = module.main(
+        ["--root", str(root), "--base", "main", "--history", "main", "--head", "work"]
+    )
+    assert code == FOUND, "правка свода под первым изменением окна не найдена"
+
+
 def test_a_windows_own_edit_is_not_a_finding(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

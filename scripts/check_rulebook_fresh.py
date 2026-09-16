@@ -166,10 +166,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_BROKEN
 
+    # НАЧАЛО ОКНА ЧИТАЕТСЯ ПО ОБОИМ ИСТОЧНИКАМ: истории общей ветки И коммитам
+    # ЭТОГО изменения. У окна, чья первая работа ещё не слита, в истории нет
+    # ничего, и `window.lifetime` законно называет началом саму голову: для
+    # СРОКА жизни это верно — срок нулевой. Здесь тот же ответ даёт ПУСТОЙ
+    # промежуток, и гейт молчит ровно на первом изменении окна — том самом, где
+    # свод новее всего. Нашёл внешний взгляд находкой `734268a` на #377.
+    started: dict[str, window.Commit] = {}
+    for commit in mine:
+        if commit.session and commit.session not in started:
+            started[commit.session] = commit
+
     told: list[str] = []
     for life in lives:
+        begun = started.get(life.session)
+        start = begun if begun and begun.when < life.first.when else life.first
         try:
-            edits = changed_under(life.session, life.first, life.last, args.history, cwd=cwd)
+            edits = changed_under(life.session, start, life.last, args.history, cwd=cwd)
         except window.NotRun as exc:
             print(f"шаг не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
