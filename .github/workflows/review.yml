@@ -591,10 +591,15 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
+          # Причина едет в аннотацию: прежде здесь стояло признание «он остался
+          # только в логе прогона», и признание было верным — из части окон лог
+          # не читается вовсе (142). Приём один на проект (090).
+          said="${RUNNER_TEMP}/late.txt"
           python scripts/late_look.py --pr "${{ matrix.pr }}" \
-            --from "${{ steps.late.outputs.execution_file }}" --apply || rc=$?
+            --from "${{ steps.late.outputs.execution_file }}" --apply >"$said" 2>&1 || rc=$?
+          cat "$said"
           if [ "$rc" != 0 ]; then
-            echo "::warning::Ответ позднего взгляда не перенесён (код $rc) — он остался только в логе прогона, и реестр об этом взгляде не узнал."
+            echo "::warning::Ответ позднего взгляда не перенесён (код $rc): $(tr '\n' ' ' <"$said")"
             exit 0
           fi
 

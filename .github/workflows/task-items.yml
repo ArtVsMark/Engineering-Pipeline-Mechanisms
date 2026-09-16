@@ -118,11 +118,14 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          python scripts/task_items.py --sweep --apply || rc=$?
+          said="${RUNNER_TEMP}/sweep.txt"
+          python scripts/task_items.py --sweep --apply >"$said" 2>&1 || rc=$?
+          cat "$said"
+          reason="$(tr '\n' ' ' <"$said")"
           case "$rc" in
             0) echo "объявленных пунктов в окне обхода нет" ;;
             3) echo "пункты, объявленные авторами, отмечены" ;;
-            *) echo "::warning::Отметка объявленного не отработала (код $rc)." ;;
+            *) echo "::warning::Отметка объявленного не отработала (код $rc): ${reason}" ;;
           esac
 
       # СУДЬБА ЗАДАЧИ ПОСЛЕ СЛИЯНИЯ — ОТДЕЛЬНЫЙ ВОПРОС, И ЗАДАЁТСЯ ОН ПОСЛЕ.
@@ -142,12 +145,15 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          python scripts/task_items.py --fate --pr "${MERGED_PR}" --apply || rc=$?
+          said="${RUNNER_TEMP}/fate.txt"
+          python scripts/task_items.py --fate --pr "${MERGED_PR}" --apply >"$said" 2>&1 || rc=$?
+          cat "$said"
+          reason="$(tr '\n' ' ' <"$said")"
           case "$rc" in
             0) echo "связь с задачами сбылась" ;;
             3) echo "::error::связь с задачей не сбылась — разбор в самой задаче"
                exit 1 ;;
-            *) echo "::error::Проверка судьбы задачи не отработала (код $rc)."
+            *) echo "::error::Проверка судьбы задачи не отработала (код $rc): ${reason}"
                exit 1 ;;
           esac
 
