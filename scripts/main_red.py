@@ -421,11 +421,32 @@ def rerun_reason(
 
 
 def parse_flakes(body: str | None) -> list[Flake]:
-    """Мигания, уже записанные в задаче."""
-    return [
-        Flake(found["name"].strip(), found["day"], int(found["run"]), found["where"] or SHARED)
-        for found in FLAKE_RE.finditer(body or "")
-    ]
+    """Мигания, уже записанные в задаче.
+
+    ПОВТОР ОТСЕИВАЕТСЯ НА ЧТЕНИИ, И ЭТИМ РЕЕСТР ЗАЖИВАЕТ САМ. Запись добавляют
+    по прогону (`flakes_after`), но тело пересобирается ИЗ ПРОЧИТАННОГО: повтор,
+    попавший в него однажды, переписывался бы обратно каждым заходом и не
+    уходил бы никогда — список без входа не растёт, но и не чинится.
+
+    ЗАМЕР 16.09.2026: в реестре #99 лежал ровно один такой повтор —
+    `ci-complete · прогон 34721547141 · #266` дважды. Родился он 14.09, когда
+    разбор строки был сломан и `known` приходил неверным: сам дефект починен,
+    а след его остался — и снять его было некому
+    ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+
+    ПЕРВАЯ ЗАПИСЬ ВЫЖИВАЕТ, А НЕ ПОСЛЕДНЯЯ: у мигания есть день, и день первого
+    наблюдения — это то, что записали, а не то, что переписали.
+    """
+    found: list[Flake] = []
+    seen: set[tuple[str, int, str]] = set()
+    for one in FLAKE_RE.finditer(body or ""):
+        flake = Flake(one["name"].strip(), one["day"], int(one["run"]), one["where"] or SHARED)
+        key = (flake.name, flake.run, flake.where)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(flake)
+    return found
 
 
 def flakes_after(
