@@ -237,20 +237,39 @@ def script_runs(root: Path) -> dict[str, int]:
     # состава расходится с первым молча (022, 090). Число от этого не меняется —
     # у общего низа точки входа нет, — но литерал был четвёртым по счёту, и
     # именно такой выпал бы при следующем переносе.
-    runnable = {
-        path.name
-        for where in paths.SOURCES
-        for path in sorted((root / where).glob("*.py"))
-        if any(
-            isinstance(node, ast.FunctionDef) and node.name == "main"
-            for node in ast.parse(path.read_text(encoding="utf-8")).body
+    # ИМЯ — НЕ ТОЖДЕСТВО МОДУЛЯ, когда каталогов два. Прежде множество ключевалось
+    # `path.name`, и одноимённый модуль с точкой входа в обоих каталогах схлопнулся
+    # бы МОЛЧА: знаменатель уменьшился, а витрина показала бы покрытие лучше
+    # настоящего. Нашёл внешний взгляд находкой `2ce9aef` на #411 — риск, а не
+    # дефект: одноимённых сегодня нет, и это проверено.
+    #
+    # Столкновение НАЗЫВАЕТСЯ, а не чинится подстановкой: набор зовёт механизм по
+    # имени файла (`run_script("имя")`), и при двух одноимённых неизвестно, какой
+    # из них прогнан. Выбрать за человека значило бы отчитаться о непроверенном
+    # (045, 154).
+    found: dict[str, list[str]] = {}
+    for where in paths.SOURCES:
+        for path in sorted((root / where).glob("*.py")):
+            if any(
+                isinstance(node, ast.FunctionDef) and node.name == "main"
+                for node in ast.parse(path.read_text(encoding="utf-8")).body
+            ):
+                found.setdefault(path.name, []).append(f"{where.as_posix()}/{path.name}")
+    same = {name: where for name, where in found.items() if len(where) > 1}
+    if same:
+        print(
+            "::warning::одноимённые механизмы с точкой входа в разных каталогах: "
+            + "; ".join(f"{name} — {', '.join(where)}" for name, where in sorted(same.items()))
+            + ". Набор зовёт их по имени файла, и какой из них прогнан — неизвестно",
+            file=sys.stderr,
         )
-    }
     tests = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted((root / "tests").glob("*.py"))
     )
-    started = {name for name in runnable if f'run_script("{name}"' in tests}
-    return {"runnable": len(runnable), "started": len(started)}
+    started = {name for name in found if f'run_script("{name}"' in tests}
+    # Знаменатель считается по МОДУЛЯМ, а числитель — по именам, которые набор
+    # умеет позвать: это разные единицы, и при столкновении первое больше второго.
+    return {"runnable": sum(len(where) for where in found.values()), "started": len(started)}
 
 
 def coverage_facts(path: Path | None) -> dict[str, Any]:
