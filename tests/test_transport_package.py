@@ -142,6 +142,17 @@ def calls_in(document: Any, name: str, need: set[str]) -> list[Call]:
         for step in steps_of(body):
             runs = str(step.get("run") or "")
             called = tuple(sorted({m.group(2) for m in CALLS.finditer(runs)} & need))
+            # УСТАНОВКА В ТОМ ЖЕ БЛОКЕ СЧИТАЕТСЯ, ЕСЛИ СТОИТ ВЫШЕ ВЫЗОВА.
+            # Прежде разбор смотрел только на ПРЕДЫДУЩИЕ шаги, и шаг вида
+            # «поставить и тут же позвать» объявлялся непрогнанным — ложная
+            # находка, которая учит дробить шаг ради гейта (051). Граница была
+            # объявлена и оставлена наблюдением; внешний взгляд назвал её
+            # находкой `ca78822` на #369, и закрывается она дешевле, чем
+            # объясняется.
+            if called and INSTALL in runs and "pip install" in runs:
+                at_install = runs.index(INSTALL)
+                if all(m.start() > at_install for m in CALLS.finditer(runs) if m.group(2) in need):
+                    put = str(step.get("if") or "")
             if called:
                 guard = str(step.get("if") or "")
                 if put is None:
@@ -284,6 +295,54 @@ def test_the_gate_catches_an_install_under_a_condition_of_its_own() -> None:
     found = calls_in(guarded, "выдумка.yml", need)
     assert len(found) == 1, f"вызов не найден вовсе: {found}"
     assert "под условием" in found[0].why, found[0].why
+
+
+def test_an_install_and_a_call_in_one_block_are_accepted() -> None:
+    """Шаг, который ставит пакет и тут же зовёт механизм, — законный случай.
+
+    Прежде разбор смотрел только на ПРЕДЫДУЩИЕ шаги, и такой шаг объявлялся
+    непрогнанным: ложная находка, которая учит дробить шаг ради гейта (051).
+    Граница была объявлена в разборе и оставлена наблюдением; внешний взгляд
+    назвал её находкой `ca78822` на #369.
+    """
+    need = scripts_needing_the_package()
+    together = {
+        "jobs": {
+            "job": {
+                "steps": [
+                    {
+                        "name": "поставить и позвать",
+                        "run": f"python -m pip install {INSTALL}\npython scripts/main_red.py",
+                    }
+                ]
+            }
+        }
+    }
+    found = calls_in(together, "выдумка.yml", need)
+    assert len(found) == 1 and not found[0].why, found
+
+
+def test_a_call_above_the_install_in_one_block_is_refused() -> None:
+    """Порядок внутри блока решает: вызов ВЫШЕ установки — по-прежнему отказ.
+
+    Иначе закрытие границы превратилось бы в разрешение «где-то в том же шаге»,
+    то есть вернуло бы ровно ту слепоту к порядку, ради которой гейт и заведён.
+    """
+    need = scripts_needing_the_package()
+    wrong = {
+        "jobs": {
+            "job": {
+                "steps": [
+                    {
+                        "name": "позвать и поставить",
+                        "run": f"python scripts/main_red.py\npython -m pip install {INSTALL}",
+                    }
+                ]
+            }
+        }
+    }
+    found = calls_in(wrong, "выдумка.yml", need)
+    assert len(found) == 1 and found[0].why, "порядок внутри блока перестал решать"
 
 
 def test_the_gate_lets_the_same_condition_through() -> None:

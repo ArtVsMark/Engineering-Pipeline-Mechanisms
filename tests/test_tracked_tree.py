@@ -37,7 +37,7 @@ IGNORE_BEGIN: Final = "# начало списка производного сб
 IGNORE_END: Final = "# конец списка производного сборки"
 
 BUILD_OUTPUTS: Final = (
-    ("x.egg-info/PKG-INFO", "метаданные, которые пишет `pip install`"),
+    ("<пакет>.egg-info/PKG-INFO", "метаданные, которые пишет `pip install`"),
     ("build/lib/модуль.py", "промежуточная сборка `python -m build`"),
     ("dist/пакет-0.1.0.tar.gz", "готовый архив выпуска"),
     ("dist/пакет-0.1.0-py3-none-any.whl", "готовое колесо выпуска"),
@@ -161,7 +161,7 @@ def test_every_declared_ignore_names_what_writes_it(name: str) -> None:
     обратная сторона (покрыт ли путь игнором), а не эта (154, 068).
 
     Сверка идёт по ПЕРВОМУ сегменту пути: `build/` покрывает `build/lib/…`, а
-    `*.egg-info/` — `x.egg-info/PKG-INFO`.
+    `*.egg-info/` — `<пакет>.egg-info/PKG-INFO`.
     """
     stem = name.rstrip("/")
     # ШИРОКИЙ ШАБЛОН ПРОХОДИЛ БЫ, НИЧЕГО НЕ НАЗВАВ. `*` совпадает с любым
