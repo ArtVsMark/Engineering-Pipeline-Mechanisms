@@ -384,6 +384,26 @@ def test_the_queue_skips_what_was_already_looked_at() -> None:
 # --- снятие просмотренного и счёт осечек --------------------------------------
 
 
+def test_an_updated_state_keeps_the_look_tail() -> None:
+    """Уточнение состояния не стирает хвост позднего взгляда.
+
+    Состояние уточняется само собой: оборванный ответ дописывают, прогон
+    доезжает. Пока запись при этом пересобиралась заново, `late` терялся — и
+    уже посмотренная запись молча возвращалась в список, снятие отменялось,
+    очередь снова предлагала её на прогон агента. Нашёл внешний взгляд
+    находкой `093d002` на #391 в тот же день, когда снятие и завели.
+    """
+    known = {88: module.Entry(88, module.STATE_CUT, "2026-09-09", "2026-09-16")}
+    entries, _ = module.scan([], known, 100, lambda number: module.STATE_SILENT)
+    assert entries[88].state == module.STATE_SILENT
+    assert entries[88].late == "2026-09-16", "хвост взгляда потерян при уточнении состояния"
+    assert entries[88].merged == "2026-09-09", "дата слияния потеряна"
+    # И следствие: такая запись снимается, а не возвращается в список.
+    left, tally = module.retire(entries, {})
+    assert left == {}, left
+    assert tally == {module.STATE_SILENT: 1}, tally
+
+
 def test_a_looked_remnant_is_told_by_the_tail_not_the_state() -> None:
     """«Остаток посмотрен» читается по хвосту взгляда, а не по состоянию.
 
