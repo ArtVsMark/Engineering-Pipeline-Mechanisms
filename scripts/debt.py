@@ -93,7 +93,7 @@ def findings_debt(repo: str, token: str) -> list[tuple[str, int, str]]:
     ]
 
 
-def unlooked_debt(repo: str, token: str) -> list[unlooked.Entry]:
+def unlooked_debt(repo: str, token: str) -> tuple[list[unlooked.Entry], dict[str, int]]:
     """Слитое без внешнего взгляда — из реестра, где его ведёт свой механизм.
 
     Третий долг ЧИТАЕТСЯ так же, как два первых: его считает `unlooked` в свою
@@ -107,9 +107,14 @@ def unlooked_debt(repo: str, token: str) -> list[unlooked.Entry]:
     # из счёта долга молча. Первый конец этой же ошибки чинился в `unlooked`
     # накануне; второй остался здесь, потому что читателя у состояний два, а
     # правка была одна (090). Нашёл внешний взгляд на #190.
-    return [
-        entry for entry in unlooked.parse_entries(body).values() if unlooked.is_open(entry.state)
-    ]
+    # СНЯТОЕ ЧИТАЕТСЯ РЯДОМ С ОТКРЫТЫМ, а не выпадает из меры. Запись, чей
+    # остаток посмотрели, из реестра уходит — и если бы здесь читался только
+    # список, третье число падало бы до нуля ровно тогда, когда осечек было
+    # больше всего. Это не «долга нет», это другая единица счёта (045).
+    return (
+        [entry for entry in unlooked.parse_entries(body).values() if unlooked.is_open(entry.state)],
+        unlooked.parse_tally(body),
+    )
 
 
 def branch_debt(repo: str, token: str) -> tuple[list[str], list[str]]:
@@ -521,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         left = findings_debt(args.repo, token)
-        unlooked_left = unlooked_debt(args.repo, token)
+        unlooked_left, unlooked_tally = unlooked_debt(args.repo, token)
         holding, lagging = branch_debt(args.repo, token)
         # Закрытые задачи читаются ОДИН раз на оба счёта: «входящие» и ревизию
         # закрытого. Два прохода по одному источнику расходятся молча (022).
@@ -604,6 +609,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"слито без внешнего взгляда: {len(unlooked_left)}")
     for entry in sorted(unlooked_left, key=lambda item: -item.number):
         print(f"  #{entry.number} · {entry.state} · {entry.merged}")
+    # Накопитель печатается ВСЕГДА, и пустой тоже: «счёта нет» и «осечек не
+    # было» снаружи одинаковы, а различает их только объявленное слово (154).
+    if unlooked_tally:
+        said = " · ".join(f"{state} — {count}" for state, count in sorted(unlooked_tally.items()))
+        print(f"  осечек канала снято за всё время: {sum(unlooked_tally.values())} — {said}")
+    else:
+        print("  осечек канала снято за всё время: 0 — снятых записей ещё не было")
 
     partial = False
     numbers = rules_debt(inbox)
