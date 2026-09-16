@@ -218,7 +218,7 @@ def test_a_name_assigned_as_a_value_is_handed() -> None:
     assert module.told_by_tests("порядок", "scripts/x.py", HANDED_BY_ASSIGNMENT) is True
 
 
-@pytest.mark.parametrize("said", sorted(HANDED.values()), ids=sorted(HANDED))
+@pytest.mark.parametrize("said", list(HANDED.values()), ids=list(HANDED))
 def test_a_name_handed_to_someone_else_counts_as_run(said: str) -> None:
     """Имя, ОТДАННОЕ вызывающему, прогнано — скобок рядом с ним нет.
 
@@ -230,7 +230,7 @@ def test_a_name_handed_to_someone_else_counts_as_run(said: str) -> None:
     assert module.told_by_tests("порядок", "scripts/x.py", said) is True
 
 
-@pytest.mark.parametrize("said", sorted(NOT_HANDED.values()), ids=sorted(NOT_HANDED))
+@pytest.mark.parametrize("said", list(NOT_HANDED.values()), ids=list(NOT_HANDED))
 def test_a_mention_is_still_not_a_run(said: str) -> None:
     """Упоминание прогоном не стало: расширение назвало соседей, а не сняло их.
 
@@ -239,6 +239,44 @@ def test_a_mention_is_still_not_a_run(said: str) -> None:
     засчитывались из чужой прозы
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
+    assert module.told_by_tests("порядок", "scripts/x.py", said) is False
+
+
+#: Формы, которыми зовут КЛАСС ИСКЛЮЧЕНИЯ. Создавать его в тесте незачем: его
+#: поднимают и ловят, и этим проверяют. Замер 16.09.2026: новый класс
+#: `catalogue.Silent` объявлялся непрогнанным, хотя набор ловил его и сверял
+#: родителя.
+RAISED: Final = {
+    "ловят вместе с модулем": "with pytest.raises(module.порядок):",
+    "ловят без модуля": "with pytest.raises(порядок) as fell:",
+    "ловят в except": "    except порядок as exc:\n        pass",
+    "ловят в except с модулем": "    except module.порядок:\n        pass",
+    "поднимают": '        raise module.порядок("так")',
+    "сверяют родителя": "assert issubclass(module.порядок, RuntimeError)",
+}
+
+#: Не прогон и здесь: имя названо в прозе рядом со словом «исключение».
+NOT_RAISED: Final = {
+    "названо в докстроке": "    Класс порядок поднимается при отказе канала.",
+    "названо в комментарии": "# порядок — это отказ канала, а не находка",
+}
+
+
+@pytest.mark.parametrize("said", list(RAISED.values()), ids=list(RAISED))
+def test_an_exception_raised_or_caught_counts_as_run(said: str) -> None:
+    """Класс исключения прогнан тем, что его подняли или поймали.
+
+    Скобок рядом с ним нет, и сужение до вызова объявляло новый класс
+    непрогнанным — ложная находка, которая учит писать в тест лишний вызов ради
+    гейта (051). Три формы названы сразу: починка по одному случаю оставила бы
+    две другие за границей (195).
+    """
+    assert module.told_by_tests("порядок", "scripts/x.py", said) is True
+
+
+@pytest.mark.parametrize("said", list(NOT_RAISED.values()), ids=list(NOT_RAISED))
+def test_an_exception_only_mentioned_is_not_run(said: str) -> None:
+    """Упоминание класса в прозе прогоном не стало — граница не сдвинулась."""
     assert module.told_by_tests("порядок", "scripts/x.py", said) is False
 
 
