@@ -46,6 +46,8 @@ import hashlib
 import os
 import re
 import sys
+from dataclasses import replace
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any, Final
 
@@ -246,6 +248,12 @@ def render_body(entries: dict[str, findings.Entry]) -> str:
         "жестом, который забудут. Задачу закрывает человек: механизм не знает,",
         "разобрана находка или просто надоела.",
         "",
+        f"Хвост «{findings.REFUTED}» ставит ВЕРИФИКАТОР — отдельный заход,",
+        "входящий от ОДНОЙ находки и пытающийся её опровергнуть. Это НЕ снятие:",
+        "находку снимает работа, а верификатор лишь говорит, что чинить, возможно,",
+        "нечего — взгляд смотрит дифф изменения, а не нынешнюю общую ветку, и",
+        "законно находит то, что уже починено. Решение за тем, кто берёт работу.",
+        "",
     ]
     if entries:
         lines.append("## Не разобрано")
@@ -268,7 +276,7 @@ def render_body(entries: dict[str, findings.Entry]) -> str:
             entries.items(),
             key=lambda item: (order.get(item[1].weight, -1), item[1].pr),
         ):
-            lines.append(f"- `{mark}` · #{entry.pr} · {entry.weight} — {entry.title}")
+            lines.append(f"- `{mark}` {entry.said()}")
     else:
         lines.append("## Не разобрано")
         lines.append("")
@@ -277,6 +285,46 @@ def render_body(entries: dict[str, findings.Entry]) -> str:
 
 
 live_issue = findings.live_issue
+
+
+#: Ответ верификатора в комментарии захода. Слово из закрытой шкалы, причина —
+#: необязательна у подтверждения и обязательна у опровержения: «не
+#: подтвердилась» без причины не даёт разбирающему ничего (154).
+PREMISE_RE: Final = re.compile(
+    r"^ПРЕМИСА:\s*(?P<said>подтверждена|не подтвердилась)\s*(?:—\s*(?P<why>\S.*?))?\s*$",
+    re.I | re.M,
+)
+
+
+def premise_of(comments: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """Последний ответ верификатора: («подтверждена»|«не подтвердилась», причина).
+
+    Последний, а не первый: заход повторяют, и свежий ответ отменяет прежний —
+    тем же правилом, что и вердикт находок.
+    """
+    found: tuple[str, str] | None = None
+    for comment in comments:
+        for one in PREMISE_RE.finditer(comment.get("body") or ""):
+            found = (one["said"].lower(), (one["why"] or "").strip())
+    return found
+
+
+def verified(entry: findings.Entry, said: str, why: str, day: str) -> findings.Entry:
+    """Дописывает к записи ответ верификатора, не трогая ничего другого.
+
+    ЭТО НЕ СНЯТИЕ. Находку снимает работа строкой «Разобрано»; верификатор лишь
+    говорит, что чинить, возможно, нечего: взгляд смотрит дифф изменения, а не
+    нынешнюю общую ветку, и законно находит уже починенное. Замер 16.09.2026:
+    находка `1fd43a4` описывала дефект, закрытый двумя днями раньше, и заметил
+    это человек, а не механизм.
+
+    Причина у опровержения переносится в запись целиком: без неё разбирающий
+    узнаёт, что премиса не подтвердилась, и не узнаёт почему — то есть обязан
+    проверять заново (046).
+    """
+    head = findings.REFUTED if said.startswith("не") else findings.CONFIRMED
+    tail = f"{head} {day}" + (f": {why}" if why else "")
+    return replace(entry, checked=tail)
 
 
 def resolved_marks(repo: str, token: str, limit: int = ghrest.MERGED_WINDOW) -> set[str]:
@@ -312,6 +360,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--pr", type=int, help="изменение, чей вердикт разбирается")
     parser.add_argument("--sweep", action="store_true", help="только уборка разобранного")
+    parser.add_argument("--verify", help="отпечаток находки, чью премису проверил верификатор")
+    parser.add_argument(
+        "--tell", help="отпечаток находки: напечатать её предмет парами ключ=значение"
+    )
     parser.add_argument("--apply", action="store_true", help="записывать, а не показывать")
     args = parser.parse_args(argv)
 
@@ -321,11 +373,45 @@ def main(argv: list[str] | None = None) -> int:
             raise NotRun("нет токена: GH_TOKEN или GITHUB_TOKEN")
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
-        if not args.sweep and args.pr is None:
-            raise NotRun("не назван предмет разбора: --pr или --sweep")
+        if not args.sweep and args.pr is None and not args.verify and not args.tell:
+            raise NotRun("не назван предмет разбора: --pr, --sweep, --verify или --tell")
 
         _, body = live_issue(args.repo, token)
         entries = parse_entries(body)
+
+        if args.tell:
+            # ПРЕДМЕТ ВЕРИФИКАТОРА ЧИТАЕТСЯ ИЗ РЕЕСТРА, а не передаётся кнопкой
+            # второй раз: номер изменения у находки уже записан, и два его
+            # источника разошлись бы молча — а проверять премису не на том
+            # изменении хуже, чем не проверять вовсе (022, 049).
+            one = entries.get(args.tell)
+            if one is None:
+                raise NotRun(f"находки «{args.tell}» в реестре нет — проверять нечего")
+            print(f"pr={one.pr}")
+            print(f"weight={one.weight}")
+            print(f"title={one.title}")
+            return EXIT_PENDING
+
+        if args.verify:
+            # ПРЕДМЕТ БЕРЁТСЯ ИЗ РЕЕСТРА, А НЕ ИЗ ВХОДА. Номер изменения у
+            # находки уже записан, и второй его источник разошёлся бы с первым
+            # молча — а проверять премису не на том изменении хуже, чем не
+            # проверять вовсе (022).
+            entry = entries.get(args.verify)
+            if entry is None:
+                raise NotRun(f"находки «{args.verify}» в реестре нет — проверять нечего")
+            heard = list(ghrest.paginate(f"repos/{args.repo}/issues/{entry.pr}/comments", token))
+            answer = premise_of(heard)
+            if answer is None:
+                raise NotRun(
+                    f"в изменении #{entry.pr} нет строки «ПРЕМИСА:» — верификатор не ответил "
+                    "или не отработал вовсе; это не «премиса подтверждена» (075)"
+                )
+            word, why = answer
+            entries[args.verify] = verified(
+                entry, word, why, datetime.now(UTC).strftime("%d.%m.%Y")
+            )
+            print(f"премиса «{args.verify}» из #{entry.pr}: {word}" + (f" — {why}" if why else ""))
 
         if args.pr is not None:
             comments = list(ghrest.paginate(f"repos/{args.repo}/issues/{args.pr}/comments", token))
@@ -361,7 +447,12 @@ def main(argv: list[str] | None = None) -> int:
                 mark = existing_mark(entries, args.pr, title)
                 if mark is not None:
                     renamed += 1
-                    entries[mark] = findings.Entry(args.pr, weight, entries[mark].title)
+                    # Ответ верификатора ПЕРЕЖИВАЕТ пересказ находки: он о
+                    # премисе, а не о формулировке, и переписывать запись
+                    # заново значило бы терять уже сделанную работу — тот же
+                    # класс, что потеря хвоста позднего взгляда в реестре
+                    # непросмотренного (022).
+                    entries[mark] = replace(entries[mark], pr=args.pr, weight=weight)
                     continue
                 entries[fingerprint(title)] = findings.Entry(args.pr, weight, title)
             said = f"из #{args.pr}: вердикт {verdict}, строк находок {len(titles)}"

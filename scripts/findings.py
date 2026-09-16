@@ -71,16 +71,40 @@ UNWEIGHED: Final = "без веса"
 
 #: Запись читается СТРОКОЙ, а не прозой: формулировка ревьюера меняется от
 #: прогона к прогону, отпечаток — нет.
-ENTRY_RE: Final = re.compile(r"^- `([0-9a-f]{7})` · #(\d+) · ([^—]+?) — (.+?)\s*$", re.M)
+#: Запись читается СТРОКОЙ, и поля в ней разделены точкой, а не позицией. Вес
+#: берётся до первой же точки-разделителя: иначе необязательный хвост проверки
+#: премисы уезжал бы внутрь веса и запись читалась бы как «вес неизвестен».
+ENTRY_RE: Final = re.compile(
+    r"^- `([0-9a-f]{7})` · #(\d+) · ([^·—]+?)(?: · (премиса[^—]*?))? — (.+?)\s*$", re.M
+)
+
+#: Ответ верификатора: подтверждена премиса находки или нет. Шкала закрытая, как
+#: у веса: слово вне её — мнение, и сравнивать по нему нечего (068).
+CONFIRMED: Final = "премиса подтверждена"
+REFUTED: Final = "премиса не подтвердилась"
+CHECKED: Final = (CONFIRMED, REFUTED)
 
 
 @dataclass(frozen=True, slots=True)
 class Entry:
-    """Одна запись живой задачи: откуда пришла, чего стоит и о чём."""
+    """Одна запись живой задачи: откуда пришла, чего стоит, о чём и оспорена ли.
+
+    ХВОСТ ПРОВЕРКИ ДОПИСЫВАЕТСЯ, А НЕ ЗАМЕНЯЕТ ЗАПИСЬ. «Премиса не
+    подтвердилась» — не снятие: находку снимает работа, а верификатор только
+    говорит, что чинить, возможно, нечего. Решение остаётся за тем, кто берёт
+    работу
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
 
     pr: int
     weight: str
     title: str
+    checked: str = ""
+
+    def said(self) -> str:
+        """Строка записи. Хвост появляется, только если проверка была."""
+        tail = f" · {self.checked}" if self.checked else ""
+        return f"· #{self.pr} · {self.weight}{tail} — {self.title}"
 
 
 #: Задача-«входящие» каталога правил: её ведёт ночной прогон действия каталога,
@@ -171,6 +195,6 @@ def live_issue_seen(repo: str, token: str, marker: str = MARKER) -> tuple[int | 
 def parse_entries(body: str | None) -> dict[str, Entry]:
     """Разбирает записи живой задачи: отпечаток → запись."""
     return {
-        mark: Entry(int(pr), weight.strip(), title)
-        for mark, pr, weight, title in ENTRY_RE.findall(body or "")
+        mark: Entry(int(pr), weight.strip(), title, checked.strip())
+        for mark, pr, weight, checked, title in ENTRY_RE.findall(body or "")
     }

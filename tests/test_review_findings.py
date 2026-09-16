@@ -376,6 +376,118 @@ def test_an_unweighed_finding_is_not_lighter_than_the_lightest() -> None:
     assert order.index("дефект") < order.index("замечание"), order
 
 
+# --- верификатор: вход от ОДНОЙ находки ---------------------------------------
+
+
+def test_the_premise_answer_is_read_from_a_closed_scale() -> None:
+    """Ответ верификатора — слово из двух, и причина едет вместе с ним."""
+    assert module.premise_of([comment("ПРЕМИСА: подтверждена")]) == ("подтверждена", "")
+    assert module.premise_of([comment("ПРЕМИСА: не подтвердилась — починено изменением #348")]) == (
+        "не подтвердилась",
+        "починено изменением #348",
+    )
+
+
+def test_no_premise_line_is_not_a_confirmation() -> None:
+    """Молчание верификатора — не «премиса подтверждена», а отсутствие ответа (075).
+
+    Принять тишину за подтверждение значило бы дать находке вес, которого ей
+    никто не давал: заход мог не запуститься вовсе.
+    """
+    assert module.premise_of([comment("просто текст")]) is None
+
+
+def test_the_last_premise_answer_wins() -> None:
+    """Заход повторяют, и свежий ответ отменяет прежний — как и вердикт находок."""
+    said = [comment("ПРЕМИСА: подтверждена"), comment("ПРЕМИСА: не подтвердилась — уже чинено")]
+    assert module.premise_of(said) == ("не подтвердилась", "уже чинено")
+
+
+def test_a_refuted_premise_is_not_a_resolution() -> None:
+    """Опровержение ДОПИСЫВАЕТСЯ к записи, а не снимает её.
+
+    Находку снимает работа строкой «Разобрано»; верификатор лишь говорит, что
+    чинить, возможно, нечего. Снимать по его слову значило бы отдать решение
+    механизму, который премису не чинил и кода не менял (154).
+    """
+    entry = findings_module.Entry(333, "дефект", "resolutions_in_all теряет метку")
+    after = module.verified(entry, "не подтвердилась", "починено изменением #348", "16.09.2026")
+    assert after.title == entry.title and after.pr == entry.pr and after.weight == entry.weight
+    assert after.checked.startswith(findings_module.REFUTED)
+    assert "#348" in after.checked, "причина опровержения не доехала до записи"
+
+
+def test_the_verifier_answer_survives_a_round_trip() -> None:
+    """Хвост проверки разбирается обратно вместе с записью.
+
+    Тело задачи — единственное хранилище этого механизма: не прочитанный
+    обратно хвост означал бы, что проверку придётся делать заново каждый заход.
+    """
+    entries = {
+        "abc1234": findings_module.Entry(
+            18, "дефект", "первая", f"{findings_module.REFUTED} 16.09.2026: уже чинено"
+        ),
+        "def5678": findings_module.Entry(21, "замечание", "вторая"),
+    }
+    assert module.parse_entries(module.render_body(entries)) == entries
+
+
+def test_the_verifier_answer_survives_a_retelling() -> None:
+    """Пересказ находки на новом заходе не стирает ответ верификатора.
+
+    Отпечаток сохраняется намеренно, и вместе с ним обязана сохраниться уже
+    сделанная проверка: она о ПРЕМИСЕ, а не о формулировке (022).
+    """
+    kept = f"{findings_module.REFUTED} 16.09.2026: уже чинено"
+    entries = {"abc1234": findings_module.Entry(333, "дефект", "старый заголовок", kept)}
+    monkey = pytest.MonkeyPatch()
+    monkey.setenv("GH_TOKEN", "токен")
+    monkey.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkey.setattr(module, "parse_entries", lambda body: dict(entries))
+    monkey.setattr(module.ghrest, "paginate", lambda path, token: iter([]))
+    monkey.setattr(module, "verdict_of", lambda look: 1)
+    monkey.setattr(
+        module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами")]
+    )
+    monkey.setattr(module, "existing_mark", lambda entries, pr, title: "abc1234")
+    monkey.setattr(module, "resolved_marks", lambda repo, token: set())
+    written: dict[str, Any] = {}
+    monkey.setattr(module, "save", lambda repo, token, entries, apply: written.update(entries))
+    module.main(["--repo", "o/r", "--pr", "333"])
+    monkey.undo()
+    assert written["abc1234"].checked == kept, "ответ верификатора стёрт пересказом находки"
+
+
+def test_the_subject_of_a_check_comes_from_the_registry(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Предмет верификатора читается из реестра, а не передаётся кнопкой второй раз.
+
+    Номер изменения у находки уже записан. Второй его источник разошёлся бы с
+    первым молча, а проверить премису не на том изменении хуже, чем не
+    проверять вовсе (022, 049).
+    """
+    kept = {"abc1234": findings_module.Entry(333, "дефект", "resolutions_in_all теряет метку")}
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
+    module.main(["--repo", "o/r", "--tell", "abc1234"])
+    said = capsys.readouterr().out
+    assert "pr=333" in said and "дефект" in said and "resolutions_in_all" in said, said
+
+
+def test_an_unknown_mark_is_not_an_empty_subject(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отпечатка нет в реестре — это отказ, а не «проверять нечего» (039, 075).
+
+    Молча отдать пустой предмет значило бы отправить верификатора смотреть в
+    никуда, и его ответ выглядел бы добросовестным.
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module, "parse_entries", lambda body: {})
+    assert module.main(["--repo", "o/r", "--tell", "0000000"]) == module.EXIT_BROKEN
+
+
 # --- объявленные исходы захода -----------------------------------------------
 
 
