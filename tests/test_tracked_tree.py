@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import subprocess
+from fnmatch import fnmatch
 from typing import Final
 
 import pytest
@@ -30,8 +31,13 @@ from tests.conftest import ROOT
 #: Список ОБЪЯВЛЕН, а не выведен: имена задаёт setuptools и `python -m build`, и
 #: угадывать их по дереву нечем — на чистой выкладке их там нет вовсе. Каждое имя
 #: стоит здесь потому, что его пишет инструмент, а не «на всякий случай» (154).
+#: Метки, ограничивающие список производного сборки в `.gitignore`. Строка одна
+#: на обе стороны проверки: второе написание разошлось бы с первым молча (022).
+IGNORE_BEGIN: Final = "# начало списка производного сборки"
+IGNORE_END: Final = "# конец списка производного сборки"
+
 BUILD_OUTPUTS: Final = (
-    ("<пакет>.egg-info/PKG-INFO", "метаданные, которые пишет `pip install`"),
+    ("x.egg-info/PKG-INFO", "метаданные, которые пишет `pip install`"),
     ("build/lib/модуль.py", "промежуточная сборка `python -m build`"),
     ("dist/пакет-0.1.0.tar.gz", "готовый архив выпуска"),
     ("dist/пакет-0.1.0-py3-none-any.whl", "готовое колесо выпуска"),
@@ -125,4 +131,45 @@ def test_every_build_output_of_a_package_is_ignored(package: str, output: str, w
     assert done.returncode == 0, (
         f"{path} не покрыт `.gitignore` — это {why}, и однажды собранный он "
         f"уедет в дерево первым же `git add -A`"
+    )
+
+
+def declared_ignores() -> list[str]:
+    """Имена производного сборки, объявленные в `.gitignore` между метками."""
+    lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    if IGNORE_BEGIN not in lines or IGNORE_END not in lines:
+        return []
+    inside = lines[lines.index(IGNORE_BEGIN) + 1 : lines.index(IGNORE_END)]
+    return [one.strip() for one in inside if one.strip() and not one.startswith("#")]
+
+
+def test_the_declared_list_is_found_at_all() -> None:
+    """Метки списка на месте: без них проверка ниже молчала бы на пустоте (075)."""
+    assert declared_ignores(), (
+        f"в `.gitignore` не найден список между «{IGNORE_BEGIN}» и «{IGNORE_END}» — "
+        "либо метки переписали, либо список пуст, и тогда гейт ниже ничего не держит"
+    )
+
+
+@pytest.mark.parametrize("name", declared_ignores())
+def test_every_declared_ignore_names_what_writes_it(name: str) -> None:
+    """У каждого имени в списке названо, ЧТО ИМЕННО его пишет.
+
+    Иначе сюда попадает имя «на всякий случай»: так здесь оказался `wheels/`,
+    которого не пишет ни один инструмент проекта. Комментарий при этом обещал,
+    что список держит гейт, — и обещание было неверным, потому что проверялась
+    обратная сторона (покрыт ли путь игнором), а не эта (154, 068).
+
+    Сверка идёт по ПЕРВОМУ сегменту пути: `build/` покрывает `build/lib/…`, а
+    `*.egg-info/` — `x.egg-info/PKG-INFO`.
+    """
+    stem = name.rstrip("/")
+    covered = [
+        why
+        for output, why in BUILD_OUTPUTS
+        if fnmatch(output.split("/")[0], stem) or output.split("/")[0] == stem
+    ]
+    assert covered, (
+        f"`{name}` объявлен игнорируемым, но в BUILD_OUTPUTS его никто не пишет — "
+        "либо назовите инструмент, либо уберите строку"
     )
