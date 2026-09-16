@@ -1069,11 +1069,7 @@ def test_a_red_with_nothing_after_it_is_unfixed() -> None:
 
 
 def test_a_red_followed_by_green_is_a_flake_not_unfixed() -> None:
-    """Красное, за которым пришло зелёное, — МИГАНИЕ, и здесь его нет.
-
-    Два разбора одной выборки обязаны делить её без пересечения: имя, попавшее в
-    оба списка, читалось бы как две разные находки об одном (016).
-    """
+    """Красное, за которым пришло зелёное, — МИГАНИЕ, и долгом оно не становится."""
     runs = records(("lint", "01", "failure", 77), ("lint", "02", "success", 78))
     assert module.unfixed_names(runs) == {}
     assert module.flaky_names(runs) == {"lint": 77}
@@ -1088,6 +1084,42 @@ def test_a_green_then_red_is_unfixed_not_a_flake() -> None:
     runs = records(("debt", "01", "success", 77), ("debt", "02", "failure", 78))
     assert module.unfixed_names(runs) == {"debt": 78}
     assert module.flaky_names(runs) == {}
+
+
+def test_red_green_red_is_both_and_that_is_named() -> None:
+    """Красное → зелёное → красное даёт ОБА факта, и это не дефект.
+
+    Мигание на первом прогоне (зелёное получено без правки дерева) и долг на
+    последнем (проверка так и осталась красной) — разные наблюдения о разных
+    прогонах. Спрятать одно ради непересечения значило бы потерять его (016).
+
+    ЗДЕСЬ БЫЛО ЛОЖНОЕ УТВЕРЖДЕНИЕ. Запись проекта обещала, что списки делят
+    выборку без пересечения по ИМЕНИ; на этой последовательности обещание не
+    выполнялось. Нашёл внешний взгляд находкой `359a558` на #379. Настоящая
+    граница — разные ПРОГОНЫ, и держится она здесь.
+    """
+    runs = records(
+        ("x", "01", "failure", 11), ("x", "02", "success", 22), ("x", "03", "failure", 33)
+    )
+    assert module.flaky_names(runs) == {"x": 11}
+    assert module.unfixed_names(runs) == {"x": 33}
+    assert module.flaky_names(runs)["x"] != module.unfixed_names(runs)["x"], (
+        "оба списка назвали один прогон — тогда это действительно одна находка дважды"
+    )
+
+
+def test_an_unfixed_line_is_never_read_as_a_flake() -> None:
+    """Строка долга не разбирается как мигание — ни при каком классе.
+
+    Разделы живут в одном теле задачи, разбор у них общий. Пропущенный класс
+    давал строку, НЕОТЛИЧИМУЮ от записи мигания, и следующий заход уносил долг
+    слитого изменения в реестр миганий с выдуманным днём и местом (045). Нашёл
+    внешний взгляд находкой `b5dd9e7` на #379.
+    """
+    for klass in ("", "advisory", "required", "unreviewed"):
+        line = module.Unfixed("task-items", "#368", 77, klass).said()
+        assert module.parse_flakes(line) == [], f"строка долга прочтена как мигание: {line!r}"
+        assert module.NO_CLASS in line or klass in line, "класс не попал в запись"
 
 
 def test_a_cancelled_last_record_is_not_unfixed() -> None:
