@@ -430,7 +430,17 @@ def scan(
         if state is None:
             entries.pop(number)
         elif state != entry.state:
-            entries[number] = Entry(number, state, entry.merged)
+            # ХВОСТ ВЗГЛЯДА ПЕРЕЖИВАЕТ УТОЧНЕНИЕ СОСТОЯНИЯ. Запись
+            # пересобиралась заново, и `late` терялся: уточнение состояния —
+            # оборванный ответ дописан, прогон доехал — молча отменяло снятие
+            # уже посмотренной записи, и она возвращалась в список навсегда.
+            # Нашёл внешний взгляд находкой `093d002` на #391 — в тот же день,
+            # когда снятие и завели.
+            #
+            # Меняется РОВНО состояние: `replace` называет это в одном слове, а
+            # перечисление полей повторяет их состав вторым местом и расходится
+            # с первым на следующем поле (022).
+            entries[number] = replace(entry, state=state)
     mark = watermark
     for item in merged:
         number = int(item["number"])
@@ -667,19 +677,23 @@ def main(argv: list[str] | None = None) -> int:
 
         _, body = findings.live_issue(args.repo, token, MARKER)
         merged = merged_changes(args.repo, token, args.limit)
+        known = parse_entries(body)
         entries, watermark = scan(
             merged,
-            parse_entries(body),
+            known,
             parse_watermark(body),
             lambda number: look_at(args.repo, number, token),
         )
+        answered = sorted(set(known) - set(entries))
         if args.late is not None:
             entries = mark_late(entries, args.late, datetime.now(UTC).strftime("%Y-%m-%d"))
 
         # СНЯТИЕ ИДЁТ ПОСЛЕ ОТМЕТКИ, а не вместо: обратный порядок оставлял бы
         # в списке запись, чей поздний взгляд состоялся этим же заходом, — то
         # есть ровно ту, ради которой заход и был.
+        before = set(entries)
         entries, tally = retire(entries, parse_tally(body))
+        retired = sorted(before - set(entries))
 
         if len(merged) >= args.limit:
             # Окно заполнено целиком — значит, за ним могло остаться слитое,
@@ -692,6 +706,18 @@ def main(argv: list[str] | None = None) -> int:
 
         without = [item for item in entries.values() if is_open(item.state)]
         print(f"слито без взгляда: {len(without)}, снятых осечек всего: {sum(tally.values())}")
+        # УХОД ЗАПИСИ НАЗЫВАЕТСЯ, А НЕ ПРОИСХОДИТ МОЛЧА, и путей у него два:
+        # вердикт всё-таки появился — запись уходит НЕ снятой и в счёт не идёт;
+        # остаток посмотрели — уходит снятой и в счёт идёт. Снаружи оба
+        # одинаковы: список просто стал короче. 16.09.2026 реестр опустел
+        # с пустым счётом, и понять, каким из двух путей ушли четыре записи,
+        # было нечем — разбор превратился в догадку (046).
+        if answered:
+            said = ", ".join(f"#{number}" for number in answered)
+            print(f"  вердикт всё-таки появился, в счёт осечек не идут: {said}")
+        if retired:
+            said = ", ".join(f"#{number}" for number in retired)
+            print(f"  остаток посмотрен, сняты: {said}")
         for entry in sorted(entries.values(), key=lambda item: -item.number):
             print(f"  {entry.said()[2:]}")
 
