@@ -253,6 +253,58 @@ def flaky_names(runs: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+@dataclass(frozen=True, slots=True)
+class Unfixed:
+    """Красное, ПЕРЕЖИВШЕЕ слияние: оно лежит на голове слитого изменения.
+
+    Это не мигание и не краснота общей ветки, а третье: работа помечена
+    закрытой, а часть её проверок на её же голове красна — и позеленеть им
+    больше нечем. Голова слитого изменения не пересобирается, прогонов по ней
+    никто не назначает.
+
+    ЗАМЕР 16.09.2026, окно тридцати слитых: таких записей три — `task-items` на
+    #366, #367 и #368, все совещательные, у всех объявлен адресат. Увидел их
+    человек глазами; механизм, который их назвал бы, отсутствовал
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+
+    name: str
+    where: str
+    run: int
+    klass: str = ""
+
+    def said(self) -> str:
+        """Строка записи: имя, изменение, класс и прогон."""
+        klass = f" · {self.klass}" if self.klass else ""
+        return f"- {self.name} · {self.where}{klass} · прогон {self.run}"
+
+
+def unfixed_names(runs: list[dict[str, Any]]) -> dict[str, int]:
+    """Имена, чья ПОСЛЕДНЯЯ запись на этой голове — настоящее красное.
+
+    ДОПОЛНЕНИЕ МИГАНИЯ, И ЧИТАЕТСЯ ТА ЖЕ ВЫБОРКА. Мигание — красное, за которым
+    пришло зелёное; здесь — красное, за которым не пришло ничего. Два разбора
+    одной выборки, а не два обхода площадки: второй обход того же источника
+    стоил бы вызовов из общей квоты
+    ([058](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/058-when-the-quota-is-out-stop.md)).
+
+    Порядок читается по времени начала записи — тем же приёмом, что у мигания:
+    иначе «последняя» зависела бы от порядка ответа площадки.
+
+    Отменённая запись не считается ни красным, ни вердиктом: её разбирает
+    сводный гейт, и здесь она прошла бы за отказ, которым не является.
+    """
+    last: dict[str, tuple[str, str, int]] = {}
+    for run in runs:
+        if run.get("status") != "completed" or run.get("conclusion") == "cancelled":
+            continue
+        name = str(run.get("name") or "")
+        started = str(run.get("started_at") or "")
+        if name not in last or started >= last[name][0]:
+            last[name] = (started, str(run.get("conclusion") or ""), run_id_of(run))
+    return {name: where[2] for name, where in last.items() if where[1] in REAL_RED and where[2]}
+
+
 def red_of(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Записи, которые на общей ветке означают красное.
 
@@ -518,10 +570,34 @@ def live_changes(repo: str, token: str) -> list[automerge.Change] | None:
         return None
 
 
-def flakes_on_changes(
-    repo: str, token: str, known: list[Flake], day: str, live: list[automerge.Change] | None
-) -> list[Flake]:
-    """Дописывает мигания, увиденные на головах ЖИВЫХ изменений.
+@dataclass(frozen=True, slots=True)
+class Seen:
+    """Что увидел один обход голов изменений: два предмета, одна выборка.
+
+    Мигания КОПЯТСЯ (событие, из артефактов исчезает), стойко красное —
+    ЗЕРКАЛО окна слитых (запись на голове остаётся лежать). Разные контракты, и
+    поэтому они названы врозь, а не сложены в один список (016).
+    """
+
+    flakes: list[Flake]
+    unfixed: list[Unfixed]
+
+
+def seen_on_changes(
+    repo: str,
+    token: str,
+    known: list[Flake],
+    day: str,
+    live: list[automerge.Change] | None,
+    answer: dict[str, policy.Check] | None = None,
+) -> Seen:
+    """Один обход голов изменений — и мигания, и красное, пережившее слияние.
+
+    ДВА ПРЕДМЕТА, ОДНА ВЫБОРКА. Записи проверок головы читаются РАЗ, и разбор
+    их идёт дважды: `flaky_names` ищет зелёное после красного, `unfixed_names` —
+    красное, за которым не пришло ничего. Второй обход того же источника стоил
+    бы вызовов из общей квоты и расходился бы с первым молча (058, 022) — это
+    уже стоило находки `b0396e9`.
 
     ПОЧЕМУ ЗДЕСЬ, А НЕ ОТДЕЛЬНЫМ МЕХАНИЗМОМ. Реестр мигания один — #99, — и он
     уже ведётся этим шагом. Второй механизм, пишущий в тот же список, разошёлся
@@ -534,10 +610,15 @@ def flakes_on_changes(
     автоперезапуска остаётся пустым, пока эти записи не назовут первое имя.
     """
     found = list(known)
+    unfixed: list[Unfixed] = []
     # ЖИВЫЕ ПРИХОДЯТ СПИСКОМ, А НЕ ЧИТАЮТСЯ ЗДЕСЬ: их читает `live_changes`, один
     # раз на заход (058, 022). Слитые читаются здесь — они свой источник, и
     # список открытых их не содержит.
     heads: list[tuple[int, str]] = [(one.number, one.head) for one in live or []]
+    #: Головы СЛИТЫХ изменений: только на них красное «пережило слияние». У
+    #: живого изменения красное ещё держит очередь или ждёт починки — это не
+    #: долг по сделанному, и путать их значило бы звать чинить то, что в работе.
+    merged: set[int] = set()
     try:
         # СЛИТЫЕ ОБХОДЯТСЯ НАРАВНЕ С ОТКРЫТЫМИ, И БЕЗ ЭТОГО СПИСОК БЫЛ ПУСТ ПО
         # ПОСТРОЕНИЮ. Мигание — свойство ГОЛОВЫ, и слияние его не отменяет:
@@ -555,10 +636,12 @@ def flakes_on_changes(
         # Цена молчания здесь не «одна потерянная запись»: пока записей нет,
         # не наступает и условие пересмотра решения `014`, то есть разрешённый
         # список автоперезапуска остаётся пустым НАВСЕГДА.
-        heads += [
+        after = [
             (int(one.get("number") or 0), str((one.get("head") or {}).get("sha") or ""))
             for one in ghrest.merged_changes(repo, token)
         ]
+        heads += after
+        merged = {number for number, _ in after}
     except ghrest.TransportError as exc:
         # Отказ здесь не роняет ни заход, ни разбор ЖИВЫХ голов: краснота общей
         # ветки — главный предмет шага, а слитые и живые — разные источники, и
@@ -582,7 +665,15 @@ def flakes_on_changes(
             found = flakes_after(found, name, run, day, where=f"#{number}")
             if len(found) > before:
                 print(f"  #{number}: мигание «{name}» на прогоне {run} — зелёное после красного")
-    return found
+        if number not in merged:
+            continue
+        for name, run in sorted(unfixed_names(runs).items()):
+            said = answer.get(name) if answer else None
+            unfixed.append(
+                Unfixed(name=name, where=f"#{number}", run=run, klass=said.klass if said else "")
+            )
+            print(f"  #{number}: «{name}» осталась красной после слияния — прогон {run}")
+    return Seen(flakes=found, unfixed=unfixed)
 
 
 #: Метка заморозки. Имя читает очередь (`scripts/automerge.py`), объявлено оно в
@@ -795,17 +886,20 @@ def render_body(
     sha: str,
     queue: Queue | None = None,
     tries: Proof | None = None,
+    unfixed: list[Unfixed] | None = None,
 ) -> str:
-    """Собирает тело задачи: два зеркала и один журнал."""
+    """Собирает тело задачи: три зеркала и один журнал."""
     lines = [
         MARKER,
         "",
         "> **Читатель:** окно, берущее работу, и владелец. Здесь то, что красно",
-        "> на общей ветке прямо сейчас, и то, что мигало.",
+        "> на общей ветке прямо сейчас, что осталось красным на слитом, и то,",
+        "> что мигало.",
         "",
-        "Разделы ниже — **зеркало живых артефактов**: они пересобираются каждым",
-        "заходом. Позеленело — запись уходит сама, упало снова — возвращается.",
-        "Снимать их рукой не нужно и не следует.",
+        "Разделы ниже, кроме последнего, — **зеркало живых артефактов**: они",
+        "пересобираются каждым заходом. Позеленело — запись уходит сама, упало",
+        "снова — возвращается. Снимать их рукой не нужно и не следует. Мигания",
+        "копятся отдельно и по своей причине: из артефактов они исчезают.",
         "",
         f"Голова общей ветки: `{sha[:7] or '—'}`.",
         "",
@@ -844,6 +938,24 @@ def render_body(
         ]
     else:
         lines += ["Пусто — совещательные проверки на голове зелены.", ""]
+
+    lines += ["## Красное, пережившее слияние — источник 3", ""]
+    lines += [
+        "Работа помечена закрытой, а часть её проверок на её же голове **красна**,",
+        "и позеленеть им больше нечем: голова слитого изменения не пересобирается,",
+        "прогонов по ней никто не назначает. Это долг по УЖЕ сделанному.",
+        "",
+        "Раздел — **зеркало окна последних слитых изменений**, а не накопитель:",
+        "запись читается из живых артефактов каждым заходом (049). Ушедшее из окна",
+        "из раздела исчезает — если запись нужна дольше, из неё заводят задачу, и",
+        "тогда она живёт там, а не здесь.",
+        "",
+    ]
+    if unfixed:
+        lines += [item.said() for item in unfixed]
+        lines.append("")
+    else:
+        lines += ["Пусто — на головах слитых изменений красного не осталось.", ""]
 
     lines += [
         "## Мигания",
@@ -916,7 +1028,11 @@ def main(argv: list[str] | None = None) -> int:
         if not runs:
             raise NotRun(f"на голове {sha[:7]} нет ни одной записи проверки — считать нечего (075)")
 
-        required = policy.names_of(policy.load(), policy.REQUIRED)
+        # ОТВЕТ ПРОЕКТА ЧИТАЕТСЯ ОДИН РАЗ НА ЗАХОД: его спрашивают и разбивка
+        # красного по классу, и запись стойко красного на слитом. Второе чтение
+        # того же файла разошлось бы с первым молча (022).
+        answer = policy.load()
+        required = policy.names_of(answer, policy.REQUIRED)
         red = red_of(runs)
         holds, rest = split(red, required)
 
@@ -976,7 +1092,8 @@ def main(argv: list[str] | None = None) -> int:
         # одного источника за заход стоят вызовов из общей квоты (058) и
         # расходятся между собой молча (022, 090).
         live = live_changes(args.repo, token)
-        flakes = flakes_on_changes(args.repo, token, flakes, day, live)
+        seen = seen_on_changes(args.repo, token, flakes, day, live, answer)
+        flakes = seen.flakes
 
         # Очередь СЧИТАЕТСЯ только при заморозке: без неё этот счёт ничего не
         # решает. Спрашивать площадку для него больше не нужно — счёт идёт по
@@ -996,7 +1113,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"заходов подряд без зелени: {proof.said()} из {TRIES_LIMIT}")
             if proof.spent:
                 print("предел попыток исчерпан — адресат владелец (109)")
-        save(args.repo, token, render_body(holds, rest, flakes, sha, queue, proof), args.apply)
+        save(
+            args.repo,
+            token,
+            render_body(holds, rest, flakes, sha, queue, proof, seen.unfixed),
+            args.apply,
+        )
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
