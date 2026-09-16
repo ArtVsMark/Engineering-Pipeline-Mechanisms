@@ -367,6 +367,37 @@ def test_a_fix_without_a_test_is_rejected(run_script: RunScript, tmp_path: Path)
     assert "не принесла ни одной проверки" in result.text
 
 
+def test_a_fix_in_the_shared_bottom_needs_a_test_too(run_script: RunScript, tmp_path: Path) -> None:
+    """Починка ОБЩЕГО НИЗА без проверки отвергается наравне с починкой скрипта.
+
+    ПРЕЖДЕ ЗДЕСЬ БЫЛА ДЫРА. Перечень «где живут механизмы» у гейта состоял из
+    `scripts/` и прогонов, а транспорт с обрезкой вывода уехали в
+    `packages/transport/` — и починка общего низа проходила БЕЗ единой проверки.
+    Того самого низа, чьи имена зовут все прочие механизмы (090).
+
+    Нашёл внешний взгляд находкой `adaa7ce` на #411, и назвал точно: перечень
+    стал читаться из объявления, а прогона на НОВОЙ половине предмета не было —
+    держался только образец на форму объявления. Форму можно написать верно и
+    поведения не получить, и снаружи это выглядит ровно как работающий гейт
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    bottom = repo / "packages" / "transport"
+    bottom.mkdir(parents=True, exist_ok=True)
+    (bottom / "ghrest.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "the-transport-stops-swallowing.fixed.md").write_text(
+        "починка\n\n#1\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "починка общего низа без проверки")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == REJECTED, result.text
+    assert "не принесла ни одной проверки" in result.text
+    assert "packages/transport" in result.text, "гейт не назвал, ЧТО он счёл механизмом"
+
+
 def test_a_fix_with_a_test_passes(run_script: RunScript, tmp_path: Path) -> None:
     """Здоровый вход обязан пройти: починка с проверкой не отвергается (097)."""
     repo = prepare_repo(tmp_path)
