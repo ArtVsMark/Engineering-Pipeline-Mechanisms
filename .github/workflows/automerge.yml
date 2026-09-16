@@ -128,7 +128,7 @@ jobs:
               echo "::warning::MERGE_QUEUE_TOKEN не задан — очередь не двигается. Нужен токен владельца с правами contents:write и pull-requests:write; иначе слияние делает человек, и в общей ветке автором станет он."
               ;;
             *)
-              echo "::error::Шаг очереди не отработал (код $rc) — смотрите вывод выше."
+              echo "::error::Шаг очереди не отработал (код $rc): $(tr '\n' ' ' <"${RUNNER_TEMP}/queue.txt")"
               exit 1
               ;;
           esac
@@ -151,7 +151,13 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          python scripts/unlooked.py --apply || rc=$?
+          # Причина отказа едет в аннотацию, а не остаётся в логе: логи прогонов
+          # из части окон не читаются вовсе, и «смотрите вывод шага» для них —
+          # тупик (142). Приём один на проект (090).
+          said="${RUNNER_TEMP}/unlooked.txt"
+          python scripts/unlooked.py --apply >"$said" 2>&1 || rc=$?
+          cat "$said"
+          reason="$(tr '\n' ' ' <"$said")"
           case "$rc" in
             0) echo "у всего слитого в окне обхода взгляд был" ;;
             3) echo "реестр слитого без взгляда обновлён" ;;
