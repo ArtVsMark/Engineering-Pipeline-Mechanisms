@@ -360,6 +360,18 @@ jobs:
         env:
           GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: python scripts/check_decisions_edit.py
+
+      # ВОПРОС О ПРАВИЛЕ ЗАДАЁТСЯ ЗДЕСЬ, ПОТОМУ ЧТО ЗДЕСЬ ЕГО ЕЩЁ ЕСТЬ КОМУ
+      # ОТВЕТИТЬ. После слияния окно ушло, и разбирать за него значило бы
+      # угадывать. Гейт не решает, правило это или нет, — он не даёт промолчать.
+      - name: новая запись решения называет судьбу правила
+        env:
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          base="${GITHUB_BASE_REF:-main}"
+          python scripts/check_rule_birth.py --base "origin/$base"
+
       # Ссылка на производное — значок, картинку, отчёт — не уезжает в общую
       # ветку раньше, чем прогон его нарисовал. Проверкой «файл есть в дереве»
       # это не лечится: производного в дереве и не должно быть, — спрашивается
