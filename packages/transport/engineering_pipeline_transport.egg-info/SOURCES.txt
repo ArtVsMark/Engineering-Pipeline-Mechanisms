@@ -1,8 +1,0 @@
-VERSION
-ghrest.py
-pyproject.toml
-report.py
-engineering_pipeline_transport.egg-info/PKG-INFO
-engineering_pipeline_transport.egg-info/SOURCES.txt
-engineering_pipeline_transport.egg-info/dependency_links.txt
-engineering_pipeline_transport.egg-info/top_level.txt

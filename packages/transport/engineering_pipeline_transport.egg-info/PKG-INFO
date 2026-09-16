@@ -1,5 +1,0 @@
-Metadata-Version: 2.4
-Name: engineering-pipeline-transport
-Version: 0.1.0
-Summary: Транспорт к площадке и обрезка вывода — общий низ конвейера семьи
-Requires-Python: >=3.12
