@@ -8,6 +8,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Final
@@ -192,3 +193,77 @@ def load_script(name: str) -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+# --- ПОДГОТОВЛЕННОЕ ДЕРЕВО С ОКНАМИ -------------------------------------------
+#
+# Живут здесь, а не в одном из тестов: их спрашивают двое — гейт срока жизни
+# окна (006) и гейт свежести свода (047), — и оба строят одно и то же дерево с
+# трейлерами окна и заданными датами. Второй экземпляр этих помощников
+# разошёлся бы с первым молча: правка формата трейлера в одном месте из двух
+# выглядит полной
+# ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+#: Начало отсчёта в подготовленном дереве. Дата заведомо своя: гейт считает
+#: РАЗНОСТЬ, и привязка к «сегодня» сделала бы тест зависимым от дня прогона.
+START: Final = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+
+WINDOW_A: Final = "session_AAA"
+WINDOW_B: Final = "session_BBB"
+
+COAUTHOR: Final = "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+
+
+def git(
+    cwd: Path, *args: str, when: datetime | None = None, committed: datetime | None = None
+) -> None:
+    """Зовёт git в подготовленном дереве, при нужде подставляя даты."""
+    env = dict(os.environ)
+    if when is not None:
+        env["GIT_AUTHOR_DATE"] = when.isoformat()
+        env["GIT_COMMITTER_DATE"] = (committed or when).isoformat()
+    subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+
+
+def tail(session: str | None, *, by_window: bool = True) -> str:
+    """Хвостовой блок трейлеров: соавторство и адрес окна (156)."""
+    lines = []
+    if by_window:
+        lines.append(COAUTHOR)
+    if session:
+        lines.append(
+            f"Claude-Session: https://claude.ai/code/session_{session.removeprefix('session_')}"
+        )
+    return ("\n\n" + "\n".join(lines)) if lines else ""
+
+
+def commit(
+    root: Path,
+    subject: str,
+    *,
+    day: float,
+    session: str | None = WINDOW_A,
+    by_window: bool = True,
+    committed_day: float | None = None,
+) -> None:
+    """Один коммит на указанный день от начала отсчёта."""
+    when = START + timedelta(days=day)
+    committed = START + timedelta(days=committed_day) if committed_day is not None else None
+    (root / "file.txt").write_text(subject, encoding="utf-8")
+    git(root, "add", "file.txt")
+    git(
+        root,
+        "commit",
+        "-m",
+        subject + tail(session, by_window=by_window),
+        when=when,
+        committed=committed,
+    )

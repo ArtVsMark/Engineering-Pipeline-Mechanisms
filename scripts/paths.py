@@ -72,6 +72,10 @@ TRANSPORT: Final = Path("packages/transport")
 #: заведённых ради него же (090).
 SOURCES: Final = (SCRIPTS, TRANSPORT)
 #: Вход посетителя: тот документ, который читает пришедший за механизмами.
+#: Навыки окна: процедуры, читаемые В МОМЕНТ ВЫЗОВА, а не при старте окна. Этим
+#: они отличаются от свода и этим закрывают машинную половину правила 047 —
+#: правка навыка видна живому окну без перезапуска.
+SKILLS: Final = Path(".claude/skills")
 ENTRANCE: Final = Path("README.md")
 #: Согласованные имена атрибуции.
 AUTHORS: Final = Path(".github/authors.txt")
@@ -108,6 +112,7 @@ ALL: Final = (
     CHANGELOG,
     VERSION,
     WORKFLOWS,
+    SKILLS,
     SCRIPTS,
     TRANSPORT,
     ENTRANCE,
