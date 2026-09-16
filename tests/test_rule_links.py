@@ -48,20 +48,34 @@ def test_a_correct_link_is_not_a_finding() -> None:
 
 def test_an_empty_catalogue_is_the_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
     """Выгрузка пуста — гейт падает, а не объявляет «чисто» (045, 075)."""
-    monkeypatch.setattr(module.ghrest, "raw_json", lambda *_: {"rules": []})
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", lambda *_: {"rules": []})
     with pytest.raises(module.NotRun):
         module.known()
 
 
-def test_an_unreachable_catalogue_is_the_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Каталог недоступен — это «не спросили», а не «всё сошлось»."""
+def test_an_unreachable_catalogue_is_its_own_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Каталог недоступен — СВОЙ исход: не «не спросили» и не «всё сошлось».
+
+    ЗДЕСЬ БЫЛА ЧЕТВЁРТАЯ СТОРОНА ОДНОГО РЕШЕНИЯ. Прежде молчание канала давало
+    «не отработал», то есть красную ОБЯЗАТЕЛЬНУЮ проверку — и очередь вставала
+    из-за сети. Замер 16.09.2026, голова #370: `journal` дала зелёное, красное и
+    снова зелёное на ОДНОМ дереве; общая ветка за те три минуты не двигалась, а
+    упал шаг «чужой разбор приведён ссылкой» — на чтении выгрузки.
+
+    Зелёным это тоже не стало: гейт, молча зеленеющий при недоступном предмете,
+    снаружи неотличим от работающего (045). Разбор — решение `027`.
+    """
 
     def broken(*_: Any, **__: Any) -> Any:
-        raise module.ghrest.TransportError("нет сети")
+        raise module.catalogue.ghrest.TransportError("нет сети")
 
-    monkeypatch.setattr(module.ghrest, "raw_json", broken)
-    with pytest.raises(module.NotRun):
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", broken)
+    with pytest.raises(module.catalogue.Silent, match="каталог не ответил"):
         module.known()
+    assert module.main([]) == module.EXIT_SILENT
+    assert module.EXIT_SILENT not in (module.EXIT_OK, module.EXIT_FOUND, module.EXIT_BROKEN), (
+        "исход канала совпал с другим — снаружи они неразличимы (039)"
+    )
 
 
 def test_the_live_tree_has_no_broken_links() -> None:

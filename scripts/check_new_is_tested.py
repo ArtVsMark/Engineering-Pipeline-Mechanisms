@@ -178,6 +178,16 @@ def told_by_tests(name: str, module: str, tests: str) -> bool:
     отличается от хвоста сравнения: `x == имя` передачей не является (нашёл
     внешний взгляд на #249).
 
+    КЛАСС ИСКЛЮЧЕНИЯ ЗОВУТ НЕ СКОБКАМИ, И ЭТО ПЯТАЯ ФОРМА. Его не создают — его
+    ПОДНИМАЮТ и ЛОВЯТ: `pytest.raises(имя)`, `except имя`, `raise имя(…)`, `issubclass(имя, …)`. Ни
+    одна не подходит под признак передачи: между знаком и именем стоит точка
+    модуля. Новый класс исключения объявлялся непрогнанным, хотя набор проверял
+    ровно его поведение.
+    Замер 16.09.2026: так вышло с `catalogue.Silent` — тест ловил его и сверял
+    родителя, а гейт требовал вызова. Починка по одному найденному случаю
+    («добавить `pytest.raises`») оставила бы `except` и `issubclass` за
+    границей — признак назван целиком.
+
     Формы перечислены СПИСКОМ, а не выведены, и каждая держится своим случаем
     в наборе
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
@@ -212,6 +222,17 @@ def told_by_tests(name: str, module: str, tests: str) -> bool:
         return True
     # ДЕКОРАТОР — тоже передача, только записанная иначе.
     if re.search(rf"@\s*{bare}\b", tests):
+        return True
+    # ПОДНИМАТЬ И ЛОВИТЬ — это тоже прогон, и для класса исключения он
+    # единственный: создавать его в тесте незачем, а поведение его проверяется
+    # тем, что он пойман и опознан.
+    raised = (
+        rf"except\s+[\w.]*{bare}\b",
+        rf"raise\s+[\w.]*{bare}\b",
+        rf"raises\s*\(\s*[\w.]*{bare}\b",
+        rf"issubclass\s*\(\s*[\w.]*{bare}\b",
+    )
+    if any(re.search(one, tests) for one in raised):
         return True
     return name == ENTRY and Path(module).name in tests
 
