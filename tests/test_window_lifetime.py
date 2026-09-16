@@ -15,15 +15,14 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Final
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import COAUTHOR, START, WINDOW_A, WINDOW_B, commit, git, load_script
 
 module = load_script("check_window_lifetime.py")
 window = load_script("window.py")
@@ -31,70 +30,6 @@ window = load_script("window.py")
 BROKEN: Final = 2
 REJECTED: Final = 1
 CLEAN: Final = 0
-
-#: Начало отсчёта в подготовленном дереве. Дата заведомо своя: гейт считает
-#: РАЗНОСТЬ, и привязка к «сегодня» сделала бы тест зависимым от дня прогона.
-START: Final = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
-
-WINDOW_A: Final = "session_AAA"
-WINDOW_B: Final = "session_BBB"
-
-COAUTHOR: Final = "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
-
-
-def git(
-    cwd: Path, *args: str, when: datetime | None = None, committed: datetime | None = None
-) -> None:
-    """Зовёт git в подготовленном дереве, при нужде подставляя даты."""
-    env = dict(os.environ)
-    if when is not None:
-        env["GIT_AUTHOR_DATE"] = when.isoformat()
-        env["GIT_COMMITTER_DATE"] = (committed or when).isoformat()
-    subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-    )
-
-
-def tail(session: str | None, *, by_window: bool = True) -> str:
-    """Хвостовой блок трейлеров: соавторство и адрес окна (156)."""
-    lines = []
-    if by_window:
-        lines.append(COAUTHOR)
-    if session:
-        lines.append(
-            f"Claude-Session: https://claude.ai/code/session_{session.removeprefix('session_')}"
-        )
-    return ("\n\n" + "\n".join(lines)) if lines else ""
-
-
-def commit(
-    root: Path,
-    subject: str,
-    *,
-    day: float,
-    session: str | None = WINDOW_A,
-    by_window: bool = True,
-    committed_day: float | None = None,
-) -> None:
-    """Один коммит на указанный день от начала отсчёта."""
-    when = START + timedelta(days=day)
-    committed = START + timedelta(days=committed_day) if committed_day is not None else None
-    (root / "file.txt").write_text(subject, encoding="utf-8")
-    git(root, "add", "file.txt")
-    git(
-        root,
-        "commit",
-        "-m",
-        subject + tail(session, by_window=by_window),
-        when=when,
-        committed=committed,
-    )
 
 
 @pytest.fixture
