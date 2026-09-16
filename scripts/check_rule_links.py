@@ -35,11 +35,16 @@ from pathlib import Path
 from typing import Final
 
 import catalogue
-import ghrest
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
+#: КАТАЛОГ НЕ ОТВЕТИЛ — свой исход, и он НЕ красный. Предмет проверки лежит в
+#: чужой выгрузке: молчание канала говорит о сети, а не о нашем дереве, и держать
+#: слияние оно не вправе (084). Зелёным это тоже не считается — иначе гейт молча
+#: выключался бы ровно тогда, когда перестал работать (045). Разбор и условие
+#: пересмотра — docs/decisions/027-a-silent-catalogue-is-its-own-outcome.md.
+EXIT_SILENT: Final = 4
 
 EXPORT_URL: Final = catalogue.EXPORT_URL
 #: Ссылка на файл правила: `rules/ru/<номер>-<имя>.md`. Ловится и в прозе, и в
@@ -55,9 +60,11 @@ class NotRun(RuntimeError):
 def known() -> dict[str, str]:
     """Номер → имя файла правила, как их публикует каталог."""
     try:
-        export = ghrest.raw_json(EXPORT_URL)
-    except ghrest.TransportError as exc:
-        raise NotRun(f"выгрузка каталога не прочитана: {exc}") from exc
+        export = catalogue.read(EXPORT_URL)
+    except catalogue.Silent:
+        # Молчание канала НЕ превращается в «не отработал»: у него свой исход,
+        # и поднимается он до точки входа нетронутым (039).
+        raise
     found: dict[str, str] = {}
     for rule in export.get("rules") or []:
         if not isinstance(rule, dict):
@@ -123,6 +130,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         real = known()
         found = links(args.root)
+    except catalogue.Silent as exc:
+        # ОТКАЗ КАНАЛА НАЗЫВАЕТСЯ И НЕ КРАСИТ. Печатается в поток вывода, а не
+        # ошибок: это не находка и не поломка шага, а состояние сети. Адресата
+        # даёт сам шаг прогона — он превращает этот исход в предупреждение на
+        # изменении, видимое автору (084, 154).
+        print(f"каталог молчит — не проверено: {exc}")
+        return EXIT_SILENT
     except NotRun as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

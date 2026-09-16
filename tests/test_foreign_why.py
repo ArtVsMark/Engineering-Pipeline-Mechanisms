@@ -112,7 +112,7 @@ def test_a_claim_of_the_wrong_shape_does_not_crash_the_gate(
             "вовсе не словарь",
         ]
     }
-    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: кривая)
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", lambda url: кривая)
     assert module.claims() == {"155": "настоящий разбор правила"}
 
 
@@ -120,9 +120,41 @@ def test_an_export_without_a_single_claim_is_the_third_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Выгрузка, где ни одной годной формы, — «не отработал», а не «чисто»."""
-    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: {"rules": [{"id": "153"}]})
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", lambda url: {"rules": [{"id": "153"}]})
     with pytest.raises(module.NotRun, match="ни одного разбора"):
         module.claims()
+
+
+def test_a_silent_catalogue_is_its_own_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Каталог не ответил — свой исход, не красный и не зелёный.
+
+    Предмет этого гейта лежит в ЧУЖОЙ выгрузке. Молчание канала говорит о сети,
+    а не о нашем дереве, и держать слияние оно не вправе (084). Зелёное здесь
+    было бы молчаливым отключением гейта (045). Разбор — решение `027`.
+    """
+
+    def broken(*_: object, **__: object) -> object:
+        raise module.catalogue.ghrest.TransportError("нет сети")
+
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", broken)
+    assert module.main([]) == module.EXIT_SILENT
+    assert module.EXIT_SILENT not in (module.EXIT_OK, module.EXIT_FOUND, module.EXIT_BROKEN)
+
+
+def test_the_silent_outcome_names_the_channel(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Исход канала НАЗЫВАЕТ причину и адрес: молчание — не состояние (154)."""
+
+    def broken(*_: object, **__: object) -> object:
+        raise module.catalogue.ghrest.TransportError("нет сети")
+
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", broken)
+    module.main([])
+    said = capsys.readouterr()
+    assert "каталог молчит" in said.out, "исход не назван читателю"
+    assert "нет сети" in said.out, "причина отказа потеряна"
+    assert not said.err, "отказ канала уехал в поток ошибок — он не поломка шага"
 
 
 def test_a_file_in_another_encoding_is_named_not_a_traceback(
@@ -215,7 +247,7 @@ def test_a_silent_catalogue_is_the_third_outcome(
 
 def test_an_empty_export_is_not_a_clean_tree(monkeypatch: pytest.MonkeyPatch) -> None:
     """Пустая выгрузка — ошибка входа: сверять не с чем (075)."""
-    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: {"rules": []})
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", lambda url: {"rules": []})
     with pytest.raises(module.NotRun, match="сверять не с чем"):
         module.claims()
 
