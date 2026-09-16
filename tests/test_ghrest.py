@@ -24,7 +24,7 @@ from typing import Any, ClassVar, Final
 import ghrest as transport
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, code_files
 
 SCRIPTS = ROOT / "scripts"
 
@@ -146,7 +146,7 @@ def imports_of(path: Path) -> set[str]:
 
 
 @pytest.mark.parametrize(
-    "path", sorted(p for p in SCRIPTS.glob("*.py") if p.name != "ghrest.py"), ids=lambda p: p.name
+    "path", [p for p in code_files() if p.name != "ghrest.py"], ids=lambda p: p.name
 )
 def test_no_mechanism_talks_to_the_platform_directly(path: Path) -> None:
     """Мимо общего транспорта в площадку не ходят.
@@ -160,7 +160,7 @@ def test_no_mechanism_talks_to_the_platform_directly(path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "path", sorted(p for p in SCRIPTS.glob("*.py") if p.name != "ghrest.py"), ids=lambda p: p.name
+    "path", [p for p in code_files() if p.name != "ghrest.py"], ids=lambda p: p.name
 )
 def test_no_mechanism_builds_its_own_authorization(path: Path) -> None:
     """Заголовок с токеном собирается в одном месте, а не в каждом механизме."""
@@ -185,7 +185,7 @@ YAML_READERS: Final = {
     # `paths.py` назван здесь по той же причине, что и `labels.py`: он ЯКОРЬ, а
     # не читатель. Адрес состава объявлен в нём одном, и требовать от него
     # ходить за адресом в разборщик значило бы завести круг.
-    sorted(p for p in SCRIPTS.glob("*.py") if p.name not in {"labels.py", "ghrest.py", "paths.py"}),
+    [p for p in code_files() if p.name not in {"labels.py", "ghrest.py", "paths.py"}],
     ids=lambda p: p.name,
 )
 def test_no_mechanism_parses_the_label_config_itself(path: Path) -> None:

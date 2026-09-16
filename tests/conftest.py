@@ -147,6 +147,29 @@ def run_script() -> RunScript:
     return _run
 
 
+def code_files(*, with_tests: bool = False) -> list[Path]:
+    """Файлы кода проекта — из ОБЪЯВЛЕННОГО списка, а не из глоба по каталогу.
+
+    Где живёт код, названо один раз — `scripts/paths.py::SOURCES`, — и до сих
+    пор это объявление не читал никто: каждый гейт строил свой глоб. Пока
+    источник был один, глобы совпадали; после переноса транспорта в пакет один
+    гейт молча перестал видеть общий низ, а объявление продолжало утверждать,
+    что источников два
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md),
+    [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+    Набор добавляется отдельным словом: он не «источник проекта» — потребители
+    его не ставят, — но правилам прозы и живых ссылок подчиняется наравне.
+    """
+    paths = load_script("paths.py")
+    found: list[Path] = []
+    for where in paths.SOURCES:
+        found += sorted((ROOT / where).glob("*.py"))
+    if with_tests:
+        found += sorted((ROOT / "tests").glob("*.py"))
+    return found
+
+
 def load_script(name: str) -> ModuleType:
     """Импортирует скрипт проекта как модуль, чтобы проверять его логику прямо.
 
