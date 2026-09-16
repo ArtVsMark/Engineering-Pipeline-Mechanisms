@@ -66,11 +66,14 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          python scripts/drift.py --apply || rc=$?
+          said="${RUNNER_TEMP}/drift.txt"
+          python scripts/drift.py --apply >"$said" 2>&1 || rc=$?
+          cat "$said"
+          reason="$(tr '\n' ' ' <"$said")"
           case "$rc" in
             0) echo "дрейфа нет: внешние входы сошлись с деревом" ;;
             3) echo "дрейф записан в живую задачу" ;;
             # Второй исход красным не делается: шаг совещательный, и его
             # поломка не повод держать что-либо. Но и молчать о ней нельзя.
-            *) echo "::warning::Заход дрейфа не отработал (код $rc)." ;;
+            *) echo "::warning::Заход дрейфа не отработал (код $rc): ${reason}" ;;
           esac

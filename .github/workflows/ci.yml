@@ -470,13 +470,16 @@ jobs:
           # Коды разбираются списком РАЗРЕШЁННОГО (068): объявленные исходы — 0
           # и 3, всё прочее отказ. Третий здесь означает «часть источников не
           # прочитана», и он не зеленит шаг молча.
+          said="${RUNNER_TEMP}/debt.txt"
           set +e
-          python scripts/debt.py
+          python scripts/debt.py >"$said" 2>&1
           code=$?
           set -e
+          cat "$said"
+          reason="$(tr '\n' ' ' <"$said")"
           case "$code" in
             0) ;;
-            3) echo "::warning::часть источников долга не прочитана — см. вывод шага" ;;
+            3) echo "::warning::часть источников долга не прочитана: ${reason}" ;;
             *) exit "$code" ;;
           esac
 

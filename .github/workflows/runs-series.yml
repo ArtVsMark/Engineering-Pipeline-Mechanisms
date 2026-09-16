@@ -63,8 +63,16 @@ jobs:
           cd "$store"
           git init -q -b runs
           git remote add origin "$remote"
-          git ls-remote --exit-code --heads origin runs >/dev/null 2>&1
-          case "$?" in
+          # СТАТУС, КОТОРЫЙ ЧИТАЮТ, ОБЯЗАН БЫТЬ ПОЙМАН СТРАХОВКОЙ `||`.
+          # Площадка запускает блок через `bash -e`, и `set -uo pipefail` этого
+          # не отменяет: `--exit-code` вернул 2, оболочка оборвала шаг ДО `case`,
+          # и разбор «ветки ещё нет» не исполнился ни разу. Замер 16.09.2026: у
+          # ряда прогонов один заход за всю жизнь, и он упал кодом 2 — то есть
+          # накопитель не собрал ни одного дня, а пункт 13.1 ждал точек, которые
+          # не могли появиться (045).
+          asked=0
+          git ls-remote --exit-code --heads origin runs >/dev/null 2>&1 || asked=$?
+          case "$asked" in
             0)
               git -c protocol.version=2 fetch -q origin runs
               git checkout -q -B runs FETCH_HEAD
