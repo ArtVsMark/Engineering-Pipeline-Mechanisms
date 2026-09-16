@@ -81,3 +81,20 @@ def read(url: str) -> dict[str, Any]:
         return ghrest.raw_json(url)
     except ghrest.TransportError as exc:
         raise Silent(f"каталог не ответил ({url}): {report.cut(str(exc))}") from exc
+
+
+def read_text(url: str) -> str:
+    """Тот же канал, но для файла каталога, а не выгрузки.
+
+    Разбор правила живёт в его собственном файле, и адрес этого файла берётся
+    из выгрузки, а не пишется рукой: рукописный путь к чужому документу гниёт
+    первым же переименованием
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+    Молчание канала — тот же третий исход, что и у выгрузки: читатель ловит
+    `Silent` и отвечает на него своим состоянием, а не красным о дереве (084).
+    """
+    try:
+        return ghrest.raw_text(url)
+    except ghrest.TransportError as exc:
+        raise Silent(f"каталог не ответил ({url}): {report.cut(str(exc))}") from exc
