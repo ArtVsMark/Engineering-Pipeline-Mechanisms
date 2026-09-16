@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -476,6 +477,11 @@ def test_the_queue_count_reads_the_platform(monkeypatch: pytest.MonkeyPatch) -> 
 
     Черновик в очередь не подан, изменение без метки `automerge` — тоже: они не
     ждут слияния, и считать их значило бы завышать число ждущих.
+
+    Чтение и счёт теперь РАЗДЕЛЕНЫ: площадку спрашивает `live_changes`, один раз
+    на заход, а `queue_now` только считает по готовому списку (находка `b0396e9`
+    на #364). Здесь проверяется связка целиком — счёт по тому, что реально
+    пришло с площадки.
     """
     rows = [
         {"number": 1, "labels": [{"name": "automerge"}], "draft": False},
@@ -484,7 +490,7 @@ def test_the_queue_count_reads_the_platform(monkeypatch: pytest.MonkeyPatch) -> 
         {"number": 4, "labels": [], "draft": False},
     ]
     monkeypatch.setattr(module.automerge.ghrest, "paginate", lambda *_, **__: iter(rows))
-    assert module.queue_now("o/r", "token") == (2, 1)
+    assert module.queue_now(module.live_changes("o/r", "token")) == (2, 1)
 
 
 def test_an_unread_queue_is_not_an_empty_one(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -503,14 +509,29 @@ def test_an_unread_queue_is_not_an_empty_one(monkeypatch: pytest.MonkeyPatch) ->
         raise module.ghrest.TransportError("площадка молчит")
 
     monkeypatch.setattr(module.automerge.ghrest, "paginate", falls)
-    assert module.queue_now("o/r", "token") == (0, 0)
+    assert module.live_changes("o/r", "token") is None, "отказ прочтён как пустой список"
+    assert module.queue_now(None) == (0, 0)
+
+
+def test_an_unread_list_is_not_an_empty_one_for_the_freeze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не прочитано — метка не расставляется, а не «расставлять некому» (045).
+
+    Пустой список означал бы «живых изменений нет», и заморозка молча не
+    отметилась бы ни на ком: отказ чтения выглядел бы сделанной работой.
+    """
+    put: list[object] = []
+    monkeypatch.setattr(module, "stamp", lambda *a, **k: put.append(a))
+    marked, freed = module.pause("o/r", "token", None, frozen=True, apply=True)
+    assert (marked, freed, put) == ([], [], []), "по непрочитанному списку что-то отметили"
 
 
 # --- что нашёл внешний взгляд: каждая находка проверена отказом ---------------
 
 
-def test_the_queue_count_goes_by_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Счёт очереди читает ВСЕ открытые изменения, а не первую страницу (находка #168).
+def test_the_live_list_goes_by_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Живые изменения читаются ВСЕ, а не первой страницей (находка #168).
 
     Одна страница на пятьдесят занижала не только «в очереди», но и счёт
     помеченных `fix-main`: механизм мог сказать «разблокировать некому», когда
@@ -537,21 +558,42 @@ def test_the_queue_count_goes_by_pages(monkeypatch: pytest.MonkeyPatch) -> None:
         }
     )
     monkeypatch.setattr(module.automerge.ghrest, "paginate", lambda *_, **__: iter(rows))
-    assert module.queue_now("o/r", "token") == (60, 1), "хвост списка потерян"
+    assert module.queue_now(module.live_changes("o/r", "token")) == (60, 1), "хвост списка потерян"
 
 
-def test_the_queue_count_reads_the_queue_not_its_own_listing() -> None:
-    """Список открытых изменений читает очередь, а не второй сборщик (находка #168).
+def test_only_one_place_asks_the_platform_for_open_changes() -> None:
+    """Открытые изменения спрашивает ОДИН заход, и он назван (находки #168, #364).
 
-    Второе прочтение одного источника расходится с первым молча (022, 090).
-    Проверяется по самому механизму: своего запроса открытых изменений в нём
-    не осталось.
+    Сперва свой обход завёл счёт очереди (#168), потом — метка заморозки (#364).
+    Оба раза класс один: второе прочтение одного источника расходится с первым
+    молча и стоит вызовов из общей квоты (022, 090, 058). Поэтому проверяется не
+    отдельная функция, а ВЕСЬ механизм: строка запроса в нём ровно одна, и лежит
+    она в `live_changes`.
     """
     source = (ROOT / "scripts" / "main_red.py").read_text(encoding="utf-8")
-    place = source.index("def queue_now")
-    body = source[place : source.index("def said_queue")]
-    assert "automerge.open_changes" in body, "счёт собирает список сам"
-    assert "pulls?state=open" not in body, "в механизме остался свой запрос открытых изменений"
+    # Считаются СТРОКОВЫЕ ЛИТЕРАЛЫ разбора, а не вхождения в текст файла: адрес,
+    # названный в пояснении, — это объяснение, а не запрос, и гейт, спотыкающийся
+    # о собственный комментарий, красит исправное дерево (051). Отдельного
+    # исключения для строк документации не нужно: запрос строится литералом
+    # внутри вызова, и проверка меряет ровно это.
+    asked = [
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "pulls?state=open" in node.value
+    ]
+    assert not asked, (
+        f"в механизме появился свой запрос открытых изменений ({asked}) — читать их "
+        "должен канонический читатель очереди, а не сырой обход"
+    )
+    place = source.index("def live_changes")
+    body = source[place : source.index("def flakes_on_changes")]
+    assert "automerge.open_changes" in body, "читатель не зовёт канонический список"
+    assert source.count("automerge.open_changes(") == 1, (
+        "канонический список зовётся из механизма больше одного раза — это снова "
+        "два обхода за заход"
+    )
 
 
 def test_a_frozen_queue_is_shown_beside_what_holds_it() -> None:
@@ -564,6 +606,27 @@ def test_a_frozen_queue_is_shown_beside_what_holds_it() -> None:
     body = module.render_body(["test"], ["test-next"], [], "abc1234", (3, 1))
     assert "test" in body and "test-next" in body
     assert "с меткой `fix-main`: **1**" in body, body
+
+
+def live(*pairs: tuple[int, str], marks: tuple[str, ...] = ()) -> list[Any]:
+    """Живые изменения подделкой: номер и голова — всё, что читают потребители.
+
+    Строится НАСТОЯЩИМ типом очереди, а не словарём: подделка своей формы
+    разошлась бы с площадкой молча, и проверка держала бы не тот предмет (049).
+    """
+    return [
+        module.automerge.Change(
+            number=number,
+            branch="b",
+            base="main",
+            head=head,
+            title="",
+            body="",
+            draft=False,
+            marks=frozenset(marks),
+        )
+        for number, head in pairs
+    ]
 
 
 def test_a_flake_is_seen_without_a_rerun() -> None:
@@ -668,11 +731,6 @@ def test_two_flakes_of_one_name_are_two_records(monkeypatch: pytest.MonkeyPatch)
     heads = {"aaa": head("aaa", 11), "bbb": head("bbb", 22)}
 
     def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
-        if "pulls?" in path:
-            return [
-                {"number": 7, "head": {"sha": "aaa"}},
-                {"number": 7, "head": {"sha": "bbb"}},
-            ]
         for sha, runs in heads.items():
             if sha in path:
                 return runs
@@ -682,7 +740,7 @@ def test_two_flakes_of_one_name_are_two_records(monkeypatch: pytest.MonkeyPatch)
     # Обход слитых гасится явно: предмет этой подделки — открытые изменения, и
     # сеть за слитыми увела бы проверку к настоящей площадке.
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
-    found = module.flakes_on_changes("o/r", "token", [], "12.09.2026")
+    found = module.flakes_on_changes("o/r", "token", [], "12.09.2026", live((7, "aaa"), (7, "bbb")))
     assert [(one.name, one.run, one.where) for one in found] == [
         ("review", 11, "#7"),
         ("review", 22, "#7"),
@@ -699,11 +757,11 @@ def test_a_change_head_is_read_by_pages(monkeypatch: pytest.MonkeyPatch) -> None
 
     def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
         asked.append(path)
-        return [{"number": 7, "head": {"sha": "aaa"}}] if "pulls?" in path else []
+        return []
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
-    module.flakes_on_changes("o/r", "token", [], "12.09.2026")
+    module.flakes_on_changes("o/r", "token", [], "12.09.2026", live((7, "aaa")))
     checks = [path for path in asked if "check-runs" in path]
     assert checks, "записи проверок головы изменения не читались вовсе"
     for path in checks:
@@ -743,7 +801,7 @@ def test_a_flake_on_a_merged_change_is_still_a_flake(monkeypatch: pytest.MonkeyP
         "merged_changes",
         lambda *a, **k: [{"number": 262, "head": {"sha": "ccc"}, "merged_at": "вчера"}],
     )
-    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026")
+    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026", [])
     assert [(one.name, one.run, one.where) for one in found] == [("ci-complete", 77, "#262")]
 
 
@@ -765,13 +823,11 @@ def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
     def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
-        if "pulls?" in path:
-            return [{"number": 9, "head": {"sha": "ddd"}}]
         return blinked if "ddd" in path else []
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
-    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026")
+    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026", live((9, "ddd")))
     assert [(one.name, one.where) for one in found] == [("lint", "#9")]
 
 
@@ -801,11 +857,13 @@ def platform(
     monkeypatch.setattr(module.ghrest, "request", asked)
     monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter(records))
     monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, mark: (1, ""))
-    monkeypatch.setattr(module, "flakes_on_changes", lambda repo, token, known, day: known)
-    monkeypatch.setattr(module, "queue_now", lambda repo, token: (0, 0))
-    # Метки заморозки — отдельный предмет и свои проверки ниже: здесь важны
-    # исходы захода, и подделка списка проверок на список изменений не похожа.
-    monkeypatch.setattr(module, "pause", lambda repo, token, *, frozen, apply: ([], []))
+    # Живые изменения — отдельный предмет и свои проверки выше. Здесь важны
+    # исходы захода, и подделка списка проверок на список изменений не похожа:
+    # чтение гасится целиком, а не подсовыванием чужой формы (049).
+    monkeypatch.setattr(module, "live_changes", lambda repo, token: [])
+    monkeypatch.setattr(module, "flakes_on_changes", lambda repo, token, known, day, live: known)
+    monkeypatch.setattr(module, "queue_now", lambda live: (0, 0))
+    monkeypatch.setattr(module, "pause", lambda repo, token, live, *, frozen, apply: ([], []))
     monkeypatch.setattr(module, "save", lambda repo, token, body, apply: written.append(body))
     return written
 
@@ -1026,9 +1084,13 @@ def changes_and_writes(
     return written
 
 
-def change(number: int, *marks: str) -> dict[str, Any]:
-    """Живое изменение — в тех полях, которые читает расстановка меток."""
-    return {"number": number, "labels": [{"name": name} for name in marks]}
+def change(number: int, *marks: str) -> Any:
+    """Живое изменение — в тех полях, которые читает расстановка меток.
+
+    Настоящим типом очереди, а не словарём: список приходит в `pause` уже
+    разобранным, и подделка своей формы держала бы не тот предмет (049).
+    """
+    return live((number, f"голова{number}"), marks=marks)[0]
 
 
 def test_the_freeze_is_marked_on_everything_but_the_fix(
@@ -1039,11 +1101,9 @@ def test_the_freeze_is_marked_on_everything_but_the_fix(
     Починка — единственный выход из заморозки, и остановить её значило бы запереть
     выход (126).
     """
-    written = changes_and_writes(
-        monkeypatch,
-        [change(1), change(2, "fix-main"), change(3, module.LABEL_PAUSED)],
-    )
-    marked, freed = module.pause("o/r", "токен", frozen=True, apply=True)
+    changes = [change(1), change(2, "fix-main"), change(3, module.LABEL_PAUSED)]
+    written = changes_and_writes(monkeypatch, [])
+    marked, freed = module.pause("o/r", "токен", changes, frozen=True, apply=True)
     assert (marked, freed) == ([1], []), "помечается только то, чего ещё не помечено"
     assert written == [("POST", "repos/o/r/issues/1/labels")]
 
@@ -1054,10 +1114,9 @@ def test_a_green_branch_takes_the_mark_off(monkeypatch: pytest.MonkeyPatch) -> N
     Метка — зеркало состояния ветки, а не журнал события: снятие рукой означало бы
     второго владельца у одной метки (022, 049).
     """
-    written = changes_and_writes(
-        monkeypatch, [change(1, module.LABEL_PAUSED), change(2), change(3, module.LABEL_PAUSED)]
-    )
-    marked, freed = module.pause("o/r", "токен", frozen=False, apply=True)
+    changes = [change(1, module.LABEL_PAUSED), change(2), change(3, module.LABEL_PAUSED)]
+    written = changes_and_writes(monkeypatch, [])
+    marked, freed = module.pause("o/r", "токен", changes, frozen=False, apply=True)
     assert (marked, freed) == ([], [1, 3])
     assert all(method == "DELETE" for method, _ in written)
     assert written[0][1] == "repos/o/r/issues/1/labels/paused%2Fmain-red", (
@@ -1068,8 +1127,8 @@ def test_a_green_branch_takes_the_mark_off(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_a_dry_walk_marks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Сухой заход называет, что сделал бы, и не пишет ничего."""
-    written = changes_and_writes(monkeypatch, [change(1)])
-    marked, freed = module.pause("o/r", "токен", frozen=True, apply=False)
+    written = changes_and_writes(monkeypatch, [])
+    marked, freed = module.pause("o/r", "токен", [change(1)], frozen=True, apply=False)
     assert (marked, freed) == ([1], []), "сказано, что было бы помечено"
     assert written == [], "сухой заход площадку не трогает"
 
@@ -1077,13 +1136,22 @@ def test_a_dry_walk_marks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_refused_listing_does_not_drop_the_red(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Список изменений не прочитан — заход не падает: краснота важнее меток (084)."""
+    """Список изменений не прочитан — заход не падает: краснота важнее меток (084).
+
+    Отказ ловится ОДИН раз, в чтении, а не в каждом потребителе: читателей у
+    списка трое, и три своих обработчика отказа разошлись бы между собой молча
+    (090). Потребители дальше видят `None` и каждый говорит своё.
+    """
 
     def refuse(path: str, token: str, key: str | None = None) -> Any:
         raise module.ghrest.TransportError("площадка не ответила")
 
     monkeypatch.setattr(module.ghrest, "paginate", refuse)
-    assert module.pause("o/r", "токен", frozen=True, apply=True) == ([], [])
+    assert module.live_changes("o/r", "токен") is None
+    said = capsys.readouterr().out
+    assert "живые изменения не прочитаны" in said
+    assert "площадка не ответила" in said, "причина отказа потеряна (154)"
+    assert module.pause("o/r", "токен", None, frozen=True, apply=True) == ([], [])
     assert "метки заморозки не расставлены" in capsys.readouterr().out
 
 
@@ -1097,8 +1165,7 @@ def test_a_refused_write_names_the_change(
             raise module.ghrest.TransportError("нет прав")
         return {}
 
-    monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter([change(1), change(2)]))
     monkeypatch.setattr(module.ghrest, "request", request)
-    marked, freed = module.pause("o/r", "токен", frozen=True, apply=True)
+    marked, freed = module.pause("o/r", "токен", [change(1), change(2)], frozen=True, apply=True)
     assert (marked, freed) == ([2], [])
     assert "#1: метка заморозки не поставлена" in capsys.readouterr().out
