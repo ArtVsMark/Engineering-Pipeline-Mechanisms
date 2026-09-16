@@ -645,7 +645,25 @@ def pause(
     return marked, freed
 
 
-def queue_now(live: list[automerge.Change] | None) -> tuple[int, int]:
+@dataclass(frozen=True, slots=True)
+class Queue:
+    """Очередь на момент захода: числа И ПРОЧИТАНЫ ЛИ ОНИ.
+
+    Признак прочитанности стоит рядом с числом по той же причине, что `whole` у
+    счётчика попыток: ноль, взятый из отказа чтения, и ноль, взятый у пустой
+    очереди, — РАЗНЫЕ утверждения, а выглядят одинаково. Пока их сводили в одну
+    пару чисел, текст в теле задачи говорил «очередь пуста, двигать нечего» там,
+    где площадка просто не ответила
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд находкой `4925118` на #370.
+    """
+
+    waiting: int
+    fixing: int
+    read: bool = True
+
+
+def queue_now(live: list[automerge.Change] | None) -> Queue:
     """Сколько изменений ждёт очереди и сколько из них помечены починкой.
 
     ЧИТАЕТСЯ У ПЛОЩАДКИ, А НЕ СЧИТАЕТСЯ ЗАНОВО. Предмет — живые изменения и их
@@ -666,11 +684,13 @@ def queue_now(live: list[automerge.Change] | None) -> tuple[int, int]:
         for change in live or []
         if automerge.LABEL_AUTOMERGE in change.marks and not change.draft
     ]
+    if live is None:
+        return Queue(0, 0, read=False)
     fixing = sum(1 for change in queued if automerge.LABEL_FIX_MAIN in change.marks)
-    return len(queued), fixing
+    return Queue(len(queued), fixing)
 
 
-def said_queue(waiting: int, fixing: int) -> list[str]:
+def said_queue(queue: Queue) -> list[str]:
     """Что заморозка значит для очереди ПРЯМО СЕЙЧАС — словами и числом.
 
     ЗАЧЕМ. Заморозка объявлена, метка названа — и всё равно дважды за смену
@@ -684,14 +704,23 @@ def said_queue(waiting: int, fixing: int) -> list[str]:
     очередь что попало (154). Но сказать, что очередь стоит и никто её не
     разблокирует, он обязан.
     """
-    if fixing:
+    # НЕ ПРОЧИТАНО — СВОЙ СЛУЧАЙ, И ОН ПЕРВЫЙ. Иначе ноль отказа доезжает до
+    # ветки «пуста», и запись утверждает про очередь то, чего никто не смотрел.
+    if not queue.read:
         return [
-            f"В очереди {waiting}, из них с меткой `fix-main`: **{fixing}** — они и пойдут.",
+            "**Очередь не прочитана: площадка не ответила.** Сколько изменений ждёт и",
+            "есть ли среди них починка — неизвестно, и это НЕ «пусто» (045).",
             "",
         ]
-    if waiting:
+    if queue.fixing:
         return [
-            f"**В очереди {waiting}, и ни одно не помечено `fix-main`.** Очередь не",
+            f"В очереди {queue.waiting}, из них с меткой `fix-main`: "
+            f"**{queue.fixing}** — они и пойдут.",
+            "",
+        ]
+    if queue.waiting:
+        return [
+            f"**В очереди {queue.waiting}, и ни одно не помечено `fix-main`.** Очередь не",
             "двинется, пока метку не поставят: механизм её не ставит сам — из дерева",
             "не следует, чинит ли изменение красноту (154).",
             "",
@@ -736,7 +765,7 @@ def render_body(
     rest: list[str],
     flakes: list[Flake],
     sha: str,
-    queue: tuple[int, int] | None = None,
+    queue: Queue | None = None,
     tries: Proof | None = None,
 ) -> str:
     """Собирает тело задачи: два зеркала и один журнал."""
@@ -765,7 +794,7 @@ def render_body(
             "Починка подаётся изменением с меткой `fix-main`: очередь пропускает",
             "только его, и приёмка у него строже обычной (193).",
             "",
-            *(said_queue(*queue) if queue else []),
+            *(said_queue(queue) if queue else []),
             *(said_tries(tries) if tries else []),
         ]
     else:

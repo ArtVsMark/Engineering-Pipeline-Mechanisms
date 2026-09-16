@@ -455,21 +455,21 @@ def test_a_frozen_queue_says_nobody_unblocks_it() -> None:
     изменения с меткой» в лог своего прогона, куда никто не смотрит. Адресат у
     такого сообщения есть, и это задача о красноте (142).
     """
-    said = " ".join(module.said_queue(3, 0))
+    said = " ".join(module.said_queue(module.Queue(3, 0)))
     assert "ни одно не помечено" in said
     assert "3" in said
 
 
 def test_a_frozen_queue_with_a_fix_says_so() -> None:
     """Починка есть — сказано и это: молчание значило бы то же, что «нет»."""
-    said = " ".join(module.said_queue(3, 1))
+    said = " ".join(module.said_queue(module.Queue(3, 1)))
     assert "fix-main" in said
     assert "ни одно не помечено" not in said
 
 
 def test_an_empty_queue_is_its_own_state() -> None:
     """Пустая очередь — не «никто не чинит», а «двигать нечего» (154)."""
-    assert "пуста" in " ".join(module.said_queue(0, 0))
+    assert "пуста" in " ".join(module.said_queue(module.Queue(0, 0)))
 
 
 def test_the_queue_count_reads_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -490,14 +490,17 @@ def test_the_queue_count_reads_the_platform(monkeypatch: pytest.MonkeyPatch) -> 
         {"number": 4, "labels": [], "draft": False},
     ]
     monkeypatch.setattr(module.automerge.ghrest, "paginate", lambda *_, **__: iter(rows))
-    assert module.queue_now(module.live_changes("o/r", "token")) == (2, 1)
+    assert module.queue_now(module.live_changes("o/r", "token")) == module.Queue(2, 1)
 
 
 def test_an_unread_queue_is_not_an_empty_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Площадка не ответила — счёт не выдумывается.
+    """Площадка не ответила — счёт НЕ ВЫДУМЫВАЕТСЯ и не выдаётся за пустоту.
 
-    Ноль здесь означает «не спросили», и текст про пустую очередь честен: он
-    говорит, что двигать нечего, а не что починки нет.
+    ЗДЕСЬ БЫЛА ЗАЩИЩЁННАЯ ЛОЖЬ. Прежняя подпись этого теста говорила, что ноль
+    отказа честен, «потому что текст сообщает: двигать нечего». Но текст
+    утверждает `Очередь пуста: чинить некому и нечего двигать` — это заявление
+    ПРО ОЧЕРЕДЬ, а в неё никто не смотрел. Нашёл внешний взгляд находкой
+    `4925118` на #370; правило — 045.
 
     Отказ поднимается классом ЕДИНСТВЕННОГО транспорта: `ghrest` у проекта
     один на все механизмы (001), и держит это `tests/test_ghrest.py`. В
@@ -510,7 +513,26 @@ def test_an_unread_queue_is_not_an_empty_one(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(module.automerge.ghrest, "paginate", falls)
     assert module.live_changes("o/r", "token") is None, "отказ прочтён как пустой список"
-    assert module.queue_now(None) == (0, 0)
+    counted = module.queue_now(None)
+    assert not counted.read, "непрочитанная очередь не отличается от прочитанной"
+    said = " ".join(module.said_queue(counted))
+    assert "не прочитана" in said, "запись молчит о том, что смотреть не удалось"
+    assert "пуста" not in said, "непрочитанная очередь объявлена пустой — это и есть ложь"
+
+
+def test_an_empty_queue_and_an_unread_one_do_not_say_the_same(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Пусто и не прочитано — РАЗНЫЕ тексты, а не одно число в двух ролях (039).
+
+    Проверяется парой: совпадение строк означало бы, что различие завели в типе,
+    а до читателя оно не доехало.
+    """
+    monkeypatch.setattr(module.automerge.ghrest, "paginate", lambda *_, **__: iter([]))
+    empty = " ".join(module.said_queue(module.queue_now(module.live_changes("o/r", "t"))))
+    unread = " ".join(module.said_queue(module.queue_now(None)))
+    assert empty != unread, "два разных состояния очереди читаются одинаково"
+    assert "пуста" in empty
 
 
 def test_an_unread_list_is_not_an_empty_one_for_the_freeze(
@@ -558,7 +580,9 @@ def test_the_live_list_goes_by_pages(monkeypatch: pytest.MonkeyPatch) -> None:
         }
     )
     monkeypatch.setattr(module.automerge.ghrest, "paginate", lambda *_, **__: iter(rows))
-    assert module.queue_now(module.live_changes("o/r", "token")) == (60, 1), "хвост списка потерян"
+    assert module.queue_now(module.live_changes("o/r", "token")) == module.Queue(60, 1), (
+        "хвост списка потерян"
+    )
 
 
 def test_only_one_place_asks_the_platform_for_open_changes() -> None:
@@ -603,7 +627,7 @@ def test_a_frozen_queue_is_shown_beside_what_holds_it() -> None:
     — с пустой очередью. Сшивка не проверялась ни разу, а именно она и говорит
     читателю, что держит слияние и кто это разблокирует.
     """
-    body = module.render_body(["test"], ["test-next"], [], "abc1234", (3, 1))
+    body = module.render_body(["test"], ["test-next"], [], "abc1234", module.Queue(3, 1))
     assert "test" in body and "test-next" in body
     assert "с меткой `fix-main`: **1**" in body, body
 
@@ -862,7 +886,7 @@ def platform(
     # чтение гасится целиком, а не подсовыванием чужой формы (049).
     monkeypatch.setattr(module, "live_changes", lambda repo, token: [])
     monkeypatch.setattr(module, "flakes_on_changes", lambda repo, token, known, day, live: known)
-    monkeypatch.setattr(module, "queue_now", lambda live: (0, 0))
+    monkeypatch.setattr(module, "queue_now", lambda live: module.Queue(0, 0))
     monkeypatch.setattr(module, "pause", lambda repo, token, live, *, frozen, apply: ([], []))
     monkeypatch.setattr(module, "save", lambda repo, token, body, apply: written.append(body))
     return written
@@ -966,8 +990,12 @@ def test_the_owner_becomes_the_addressee_only_at_the_limit() -> None:
     дальше решать. Остановка починки решением механизма была бы решением за
     человека (154).
     """
-    ниже = module.render_body(["test"], [], [], "0123456", (1, 0), module.Proof(2, True))
-    предел = module.render_body(["test"], [], [], "0123456", (1, 0), module.Proof(3, True))
+    ниже = module.render_body(
+        ["test"], [], [], "0123456", module.Queue(1, 0), module.Proof(2, True)
+    )
+    предел = module.render_body(
+        ["test"], [], [], "0123456", module.Queue(1, 0), module.Proof(3, True)
+    )
     assert "**2** из 3" in ниже and "Адресат — владелец" not in ниже
     assert "Адресат — владелец" in предел, "на пределе адресат обязан смениться"
     assert "не починка" in предел, "названо и то, чем следующий шаг НЕ является"
