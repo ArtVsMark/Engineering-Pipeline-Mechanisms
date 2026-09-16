@@ -174,7 +174,7 @@ def test_the_third_number_counts_only_what_was_never_looked_at(
         f"- #80 · {debt.unlooked.STATE_LATE} · 2026-09-01",
     )
     monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (7, body))
-    left = debt.unlooked_debt("owner/repo", "token")
+    left, _ = debt.unlooked_debt("owner/repo", "token")
     assert [entry.number for entry in left] == [88]
 
 
@@ -691,7 +691,7 @@ def test_the_debt_count_asks_the_owner_of_the_state(monkeypatch: pytest.MonkeyPa
     odd = f"{unlooked.STATE_ODD}: timed_out"
     body = f"- #7 · {odd} · 2026-09-11\n- #8 · {unlooked.STATE_LATE} · 2026-09-11\n"
     monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (99, body))
-    left = debt.unlooked_debt("o/r", "token")
+    left, _ = debt.unlooked_debt("o/r", "token")
     assert [entry.number for entry in left] == [7], "суффиксная запись выпала из счёта долга"
 
 
@@ -726,7 +726,7 @@ def test_a_fully_read_debt_is_clean(
     """
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(debt, "findings_debt", lambda repo, token: [])
-    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: ([], {}))
     monkeypatch.setattr(debt, "branch_debt", lambda repo, token: ([], []))
     monkeypatch.setattr(debt, "closed_issues", lambda repo, token: [])
     monkeypatch.setattr(

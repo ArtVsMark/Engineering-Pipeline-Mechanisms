@@ -361,12 +361,138 @@ def test_the_order_is_defined_when_dates_agree() -> None:
 
 
 def test_the_queue_skips_what_was_already_looked_at() -> None:
-    """Уже просмотренное в очередь не попадает: у него состояние не открытое."""
+    """Уже просмотренное в очередь не попадает — в обеих своих формах.
+
+    ФОРМ ДВЕ, А ПРОВЕРЯЛАСЬ ОДНА. Запись, чьё СОСТОЯНИЕ — сам поздний взгляд,
+    бывает только у изменения, которого реестр не знал. Обычная выглядит иначе:
+    состояние осталось открытым (оно про канал и после взгляда не меняется), а
+    поздний взгляд дописан хвостом. Её в выборке не было, и обещание держалось
+    на форме, которая в реестре почти не встречается
+    ([107](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/107-it-works-for-the-author-means-tested-on-the-authors-sample.md)).
+
+    ЗАМЕР 16.09.2026 на живом #89: все пять записей посмотрены в тот же день, а
+    очередь предлагала три из них — по прогону агента за заход, без конца.
+    """
     entries = {
         73: module.Entry(73, module.STATE_LATE, "2026-09-09"),
+        88: module.Entry(88, module.STATE_SILENT, "2026-09-09", "2026-09-16"),
         95: module.Entry(95, module.STATE_NONE, "2026-09-10"),
     }
     assert module.queue_of(entries) == [95]
+
+
+# --- снятие просмотренного и счёт осечек --------------------------------------
+
+
+def test_a_looked_remnant_is_told_by_the_tail_not_the_state() -> None:
+    """«Остаток посмотрен» читается по хвосту взгляда, а не по состоянию.
+
+    Состояние отвечает на вопрос о канале и после позднего взгляда не меняется:
+    осечка уже случилась. Спрашивать по нему «смотрели ли» значит спрашивать
+    не о том — и именно так очередь и промахивалась.
+    """
+    assert module.looked(module.Entry(88, module.STATE_SILENT, "2026-09-09", "2026-09-16"))
+    assert not module.looked(module.Entry(95, module.STATE_NONE, "2026-09-10"))
+    # Состояние «поздний взгляд» без хвоста — запись, которую ЗАВЕЛ поздний
+    # взгляд, но дату ей ещё не проставили: смотреть на неё как на посмотренную
+    # значило бы поверить состоянию, а не факту.
+    assert not module.looked(module.Entry(73, module.STATE_LATE, "2026-09-09"))
+
+
+def test_an_empty_tally_is_said_in_words_not_by_a_blank() -> None:
+    """Пустой счёт объявляется словом: пропуск строки читается как поломка (154)."""
+    said = module.said_tally({})
+    assert said.startswith(module.TALLY_HEAD)
+    assert "пусто" in said, said
+
+
+def test_the_tally_is_written_in_a_defined_order() -> None:
+    """Порядок слагаемых определён, иначе тело переписывается на ровном месте.
+
+    Задача правится по месту каждым заходом: если порядок зависит от прихода,
+    два одинаковых счёта дают разные тела, и читатель видит правку там, где
+    ничего не изменилось (053).
+    """
+    one = module.said_tally({module.STATE_SILENT: 3, module.STATE_CUT: 1})
+    two = module.said_tally({module.STATE_CUT: 1, module.STATE_SILENT: 3})
+    assert one == two, (one, two)
+
+
+def test_a_looked_remnant_leaves_the_registry() -> None:
+    """Остаток посмотрен — запись уходит из списка, а не висит навсегда.
+
+    Список здесь — то, на что ещё никто не смотрел. Пока снятия не было вовсе,
+    он только рос; список, который не пустеет, перестают читать вместе со
+    свежими записями (051).
+    """
+    entries = {
+        88: module.Entry(88, module.STATE_SILENT, "2026-09-09", "2026-09-16"),
+        95: module.Entry(95, module.STATE_NONE, "2026-09-10"),
+    }
+    left, tally = module.retire(entries, {})
+    assert list(left) == [95], left
+    assert tally == {module.STATE_SILENT: 1}, tally
+
+
+def test_the_state_of_a_retired_record_is_not_lost() -> None:
+    """Состояние снятой записи переезжает в счёт, а не пропадает.
+
+    Состояние — мера надёжности канала, и счёт этих причин уже был нужен
+    однажды: предмет автоперезапуска искали среди исходов проверок, не найдя
+    его там по построению.
+    """
+    tally = {module.STATE_SILENT: 2}
+    entries = {
+        88: module.Entry(88, module.STATE_SILENT, "2026-09-09", "2026-09-16"),
+        90: module.Entry(90, module.STATE_NONE, "2026-09-09", "2026-09-16"),
+    }
+    _, counted = module.retire(entries, tally)
+    assert counted == {module.STATE_SILENT: 3, module.STATE_NONE: 1}, counted
+
+
+def test_a_late_look_is_not_counted_as_a_channel_miss() -> None:
+    """Запись, чьё состояние — сам поздний взгляд, в счёт осечек не идёт (044).
+
+    Это аудит общей ветки, а не пропущенный взгляд на изменение. Считать её
+    значило бы завысить меру тем самым механизмом, который её и чинит.
+    """
+    entries = {73: module.Entry(73, module.STATE_LATE, "2026-09-09", "2026-09-16")}
+    left, tally = module.retire(entries, {})
+    assert left == {}, left
+    assert tally == {}, tally
+
+
+def test_the_tally_survives_a_round_trip() -> None:
+    """Счёт читается обратно из тела: другого хранилища у него нет."""
+    tally = {module.STATE_SILENT: 3, module.STATE_CUT: 1}
+    body = module.render_body({}, 387, tally)
+    assert module.parse_tally(body) == tally, module.parse_tally(body)
+
+
+def test_an_empty_tally_says_so_in_words() -> None:
+    """Пустой счёт объявляется словом: «счёта нет» и «осечек нет» иначе слипаются."""
+    body = module.render_body({}, 387, {})
+    assert module.TALLY_HEAD in body
+    assert module.parse_tally(body) == {}
+    assert "пусто" in body[body.index(module.TALLY_HEAD) :].splitlines()[0]
+
+
+def test_only_the_tally_line_is_read_as_the_tally() -> None:
+    """Счёт берётся со СВОЕЙ строки, а не образцом по всему телу.
+
+    Тело этой задачи читают и правят люди: в нём бывает и приписка, и цитата
+    из разбора, и в них те же кавычки с тем же числом. Разбор по всему
+    документу принял бы такую строку за слагаемое и завысил бы меру — молча,
+    потому что снаружи оба числа выглядят одинаково правдоподобно (045).
+
+    ПОЙМАНО ОТКАТОМ. Первая редакция этой проверки брала тело, собранное самим
+    механизмом, и ничего не проверяла: перечень состояний в нём кончается
+    словами, а не числом, и разбор по всему телу давал тот же ответ. Откат на
+    разбор по всему телу не покраснел — проверка была зелёной впустую (075).
+    """
+    body = module.render_body({}, 387, {module.STATE_SILENT: 2})
+    body += f"\nВ разборе на #333 говорилось: «{module.STATE_CUT}» — 9 раз за неделю.\n"
+    assert module.parse_tally(body) == {module.STATE_SILENT: 2}, module.parse_tally(body)
 
 
 def test_the_queue_is_bounded() -> None:
