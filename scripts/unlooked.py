@@ -179,6 +179,17 @@ LATE_TAIL: Final = "поздний взгляд"
 #: каждое событие очереди.
 WATERMARK_RE: Final = re.compile(r"^Просмотрено до: #(\d+)\s*$", re.M)
 
+#: Начало строки счёта осечек канала. Счёт — НАКОПИТЕЛЬ, и это сказано прямо:
+#: запись, чей остаток посмотрели, из реестра уходит, а её состояние остаётся
+#: только здесь. Потеря тела задачи теряет счёт; восстановить его можно обходом
+#: истории слитого, но сам механизм этого не делает — заявлять «столько и было»
+#: он не вправе
+#: ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+TALLY_HEAD: Final = "Осечки канала (накопитель):"
+#: Слагаемое счёта: «состояние — число». Разбирается ТОЛЬКО из строки счёта, а
+#: не из тела целиком: перечень состояний выше по телу выглядит так же.
+TALLY_RE: Final = re.compile(r"«([^»]+)» — (\d+)")
+
 EXIT_NOTHING: Final = 0
 EXIT_BROKEN: Final = 2
 EXIT_RECORDED: Final = 3
@@ -215,6 +226,62 @@ def parse_entries(body: str | None) -> dict[int, Entry]:
         int(number): Entry(int(number), state.strip(), merged, late)
         for number, state, merged, late in ENTRY_RE.findall(body or "")
     }
+
+
+def looked(entry: Entry) -> bool:
+    """Посмотрен ли ОСТАТОК: поздний взгляд по общей ветке состоялся.
+
+    Это не то же, что состояние записи. Состояние отвечает, почему изменение
+    попало в реестр (вопрос о КАНАЛЕ), и после позднего взгляда не меняется —
+    осечка канала уже случилась. Здесь спрашивается второе: посмотрел ли на
+    работу хоть кто-нибудь.
+    """
+    return bool(entry.late)
+
+
+def parse_tally(body: str | None) -> dict[str, int]:
+    """Счёт осечек канала из тела реестра; пусто — счёта ещё не было."""
+    for line in (body or "").splitlines():
+        if line.startswith(TALLY_HEAD):
+            return {state: int(count) for state, count in TALLY_RE.findall(line)}
+    return {}
+
+
+def retire(
+    entries: dict[int, Entry], tally: dict[str, int]
+) -> tuple[dict[int, Entry], dict[str, int]]:
+    """Снимает записи, чей остаток посмотрен, — состояние уходит в счёт.
+
+    ЗАЧЕМ СНИМАТЬ. Реестр — список того, на что ещё никто не смотрел, и читают
+    его ради этого. Запись, остаток которой посмотрели, оставалась в нём
+    навсегда: снятия у неё не было вовсе, и список только рос. Список, который
+    не пустеет, перестают читать — вместе с ним перестают читать и свежие
+    записи
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    ЗАМЕР 16.09.2026 на живом #89: пять записей, у всех пяти поздний взгляд
+    состоялся в тот же день, и ни одна не ушла.
+
+    ПОЧЕМУ НЕ ПРОСТО ВЫБРОСИТЬ. Состояние — мера надёжности канала, и счёт этих
+    причин уже был нужен однажды: 12.09.2026 предмет автоперезапуска искали
+    среди исходов проверок, не найдя его там по построению
+    (`docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md`).
+    Поэтому состояние переезжает в счёт, а не пропадает.
+
+    В СЧЁТ ИДЁТ ТОЛЬКО ОСЕЧКА. Запись, чьё состояние — сам поздний взгляд,
+    осечкой канала не является: это аудит общей ветки, а не пропущенный взгляд
+    на изменение. Считать её значило бы завысить меру тем самым механизмом,
+    который её и чинит (044).
+    """
+    left: dict[int, Entry] = {}
+    counted = dict(tally)
+    for number, entry in entries.items():
+        if not looked(entry):
+            left[number] = entry
+            continue
+        if is_open(entry.state):
+            counted[entry.state] = counted.get(entry.state, 0) + 1
+    return left, counted
 
 
 def parse_watermark(body: str | None) -> int:
@@ -433,7 +500,17 @@ def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
     вторым списком: второй разошёлся бы с первым молча
     ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
     """
-    open_now = [entry for entry in entries.values() if is_open(entry.state)]
+    # ПРОСМОТРЕННОЕ В ОЧЕРЕДЬ НЕ ИДЁТ, и спрашивается это отдельно от
+    # состояния. Прежде отбор шёл только по состоянию, а состояние после
+    # позднего взгляда НЕ меняется — оно про канал. Обещание «просмотренное в
+    # очередь не попадает» держалось тестом на записи, у которой состояние и
+    # есть сам поздний взгляд; записи с открытым состоянием и хвостом взгляда,
+    # то есть обычной, в выборке не было (107).
+    #
+    # ЗАМЕР 16.09.2026 на живом #89: все пять записей посмотрены в тот же день,
+    # а очередь предлагала три из них — то есть поздний взгляд гонялся бы по
+    # одному и тому же вечно, по прогону агента за заход.
+    open_now = [entry for entry in entries.values() if is_open(entry.state) and not looked(entry)]
     # `merged` — строка по устройству записи: пустая, если дата неизвестна.
     # Защиты от `None` здесь нет намеренно — её и не было чем породить, а
     # мёртвая защита говорит читателю, что `None` бывает. Нашёл внешний взгляд
@@ -442,8 +519,10 @@ def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
     return [entry.number for entry in ordered[:limit]]
 
 
-def render_body(entries: dict[int, Entry], watermark: int) -> str:
-    """Собирает тело реестра: записи, а не счётчик."""
+def render_body(
+    entries: dict[int, Entry], watermark: int, tally: dict[str, int] | None = None
+) -> str:
+    """Собирает тело реестра: записи, а рядом счёт снятых осечек."""
     lines = [
         MARKER,
         "",
@@ -501,7 +580,16 @@ def render_body(entries: dict[int, Entry], watermark: int) -> str:
         "второе затирало первое, счёт осечек канала терялся, а он и есть мера",
         "его надёжности.",
         "",
+        "**Запись, чей остаток посмотрели, из списка УХОДИТ, а её состояние",
+        "остаётся в счёте ниже.** Список здесь — то, на что ещё никто не смотрел;",
+        "список, который не пустеет, перестают читать вместе со свежими записями",
+        "(051). Счёт — накопитель: он живёт только в этом теле, и потеря тела",
+        "теряет его. Восстановить можно обходом истории слитого, но механизм",
+        "этого не делает — заявлять «столько и было» он не вправе (154).",
+        "",
         f"Просмотрено до: #{watermark}",
+        "",
+        said_tally(tally or {}),
         "",
         "## Не просмотрено",
         "",
@@ -515,10 +603,25 @@ def render_body(entries: dict[int, Entry], watermark: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def save(repo: str, token: str, entries: dict[int, Entry], watermark: int, apply: bool) -> None:
+def said_tally(tally: dict[str, int]) -> str:
+    """Строка счёта. Пустой счёт объявляется словом, а не пропуском строки (154)."""
+    if not tally:
+        return f"{TALLY_HEAD} пусто — снятых записей ещё не было."
+    parts = " · ".join(f"«{state}» — {count}" for state, count in sorted(tally.items()))
+    return f"{TALLY_HEAD} {parts}"
+
+
+def save(
+    repo: str,
+    token: str,
+    entries: dict[int, Entry],
+    watermark: int,
+    apply: bool,
+    tally: dict[str, int] | None = None,
+) -> None:
     """Записывает реестр: обновляет по месту или заводит одну задачу."""
     number, _ = findings.live_issue(repo, token, MARKER)
-    body = render_body(entries, watermark)
+    body = render_body(entries, watermark, tally)
     if not apply:
         print(f"записал бы {len(entries)} в " + (f"#{number}" if number else "новую задачу"))
         return
@@ -573,6 +676,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.late is not None:
             entries = mark_late(entries, args.late, datetime.now(UTC).strftime("%Y-%m-%d"))
 
+        # СНЯТИЕ ИДЁТ ПОСЛЕ ОТМЕТКИ, а не вместо: обратный порядок оставлял бы
+        # в списке запись, чей поздний взгляд состоялся этим же заходом, — то
+        # есть ровно ту, ради которой заход и был.
+        entries, tally = retire(entries, parse_tally(body))
+
         if len(merged) >= args.limit:
             # Окно заполнено целиком — значит, за ним могло остаться слитое,
             # которого заход не увидел, а отметка обхода его перешагнула.
@@ -583,13 +691,11 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         without = [item for item in entries.values() if is_open(item.state)]
-        print(
-            f"слито без взгляда: {len(without)}, позже просмотрено: {len(entries) - len(without)}"
-        )
+        print(f"слито без взгляда: {len(without)}, снятых осечек всего: {sum(tally.values())}")
         for entry in sorted(entries.values(), key=lambda item: -item.number):
             print(f"  {entry.said()[2:]}")
 
-        save(args.repo, token, entries, watermark, args.apply)
+        save(args.repo, token, entries, watermark, args.apply, tally)
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
