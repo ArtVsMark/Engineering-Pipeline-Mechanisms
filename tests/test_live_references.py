@@ -28,9 +28,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import code_files
+
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = ROOT / "scripts"
-SOURCES = sorted(SCRIPTS.glob("*.py")) + sorted((ROOT / "tests").glob("*.py"))
+#: Где живёт код, названо ОДИН раз — `paths.py::SOURCES`, — и читается отсюда.
+#: Пока список строился глобом по `scripts/`, общий низ, уехавший в пакет, в
+#: него не попадал вовсе: мёртвый адрес в `ghrest` или `report` этот гейт не
+#: видел, а объявление рядом утверждало, что источников два. Нашёл внешний
+#: взгляд находкой `23549d5` на #366.
+SOURCES = code_files(with_tests=True)
 
 #: Адрес вида `модуль.имя` внутри инлайн-кода. Скобки вызова необязательны:
 #: в прозе пишут и `roster_of`, и `roster_of()`.
@@ -76,7 +82,10 @@ def names_of(path: Path) -> set[str]:
     return found
 
 
-LIVE = {path.stem: names_of(path) for path in sorted(SCRIPTS.glob("*.py"))}
+#: Живые имена берутся с ТЕХ ЖЕ источников, что и адреса. Разойдись эти два
+#: списка — гейт молча перестал бы разрешать адрес в модуль, которого в первом
+#: списке нет: ссылка на живое имя читалась бы как чужая и пропускалась (022).
+LIVE = {path.stem: names_of(path) for path in code_files()}
 
 
 @pytest.mark.parametrize("path", SOURCES, ids=lambda p: p.name)
@@ -92,6 +101,29 @@ def test_a_named_function_of_ours_still_exists(path: Path) -> None:
         and found.group("name") not in LIVE[found.group("module")]
     ]
     assert not dead, f"{path.name}: адреса ведут в пустоту после переименования: {dead}"
+
+
+def test_the_shared_bottom_is_read_as_a_source() -> None:
+    """Общий низ — источник наравне со скриптами, и гейт его видит.
+
+    ПРОПУСК ЗДЕСЬ БЕСШУМЕН ПО УСТРОЙСТВУ. Адрес в модуль, которого нет в списке
+    живых, гейт считает ЧУЖИМ и пропускает — у чужого имени нашего дерева нет,
+    и проверять его нечем. Значит потеря источника не краснеет нигде: она
+    выглядит ровно как «адресов в этот модуль не писали»
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    Держать её можно только проверкой на сам ОХВАТ.
+
+    ЗАМЕР 16.09.2026: в прозе дерева два адреса в общий низ — `ghrest.paginate`
+    и `ghrest.token_from_env`. Пока список строился глобом по `scripts/`, оба
+    не проверялись вовсе. Нашёл внешний взгляд находкой `23549d5` на #366.
+    """
+    bottom = {"ghrest", "report"}
+    assert bottom <= {path.stem for path in SOURCES}, (
+        f"общий низ выпал из источников: {sorted(bottom - {p.stem for p in SOURCES})}"
+    )
+    assert bottom <= set(LIVE), (
+        "имена общего низа не разобраны — адрес в него гейт сочтёт чужим и пропустит"
+    )
 
 
 def test_the_gate_has_a_subject() -> None:
