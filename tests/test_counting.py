@@ -57,6 +57,31 @@ def test_the_runnable_are_the_denominator() -> None:
     assert counts["runnable"] < modules, "все модули объявлены запускаемыми — разбор не разбирает"
 
 
+def test_a_same_named_mechanism_is_named_not_collapsed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Одноимённые механизмы в двух каталогах не схлопываются в одну единицу.
+
+    Знаменатель ключевался именем файла, а каталогов с кодом два. Одноимённый
+    модуль с точкой входа в обоих уменьшал бы знаменатель МОЛЧА — и витрина
+    показывала бы покрытие лучше настоящего
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд находкой `2ce9aef` на #411; одноимённых в дереве
+    сегодня нет, поэтому это риск, а не дефект, и проверяется он подделкой.
+
+    СТОЛКНОВЕНИЕ НАЗЫВАЕТСЯ, а не чинится выбором: набор зовёт механизм по имени
+    файла, и при двух одноимённых неизвестно, какой из них прогнан (154).
+    """
+    said = "def main() -> int:\n    return 0\n"
+    for where in facts.paths.SOURCES:
+        (tmp_path / where).mkdir(parents=True)
+        (tmp_path / where / "двойник.py").write_text(said, encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    counts = facts.script_runs(tmp_path)
+    assert counts["runnable"] == 2, f"два модуля схлопнулись в {counts['runnable']}"
+    assert "::warning::" in capsys.readouterr().err, "столкновение осталось молчаливым"
+
+
 def test_the_badge_shows_both_numbers() -> None:
     """Значок показывает долю, а не голое число: одно без другого ничего не значит."""
     said = facts.scripts_badge({"scripts": {"runnable": 31, "started": 17}})
