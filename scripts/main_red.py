@@ -112,6 +112,28 @@ class Flake:
         tail = "" if self.where == SHARED else f" · {self.where}"
         return f"- {self.name} · {self.day} · прогон {self.run}{tail}"
 
+    @property
+    def same(self) -> tuple[str, int]:
+        """ТОЖДЕСТВО МИГАНИЯ: имя проверки и прогон, на котором его увидели.
+
+        Объявлено ОДИН раз и здесь, потому что спрашивают его двое — отсев
+        повтора при чтении и добавление новой записи, — а два ключа для одного
+        понятия расходятся молча (022, 090). Именно это и разошлось: чтение
+        отсеивало по `(имя, прогон, где)`, добавление считало тождеством
+        `(имя, прогон)`, и повтор с иным «где» при том же прогоне читателем не
+        отсеивался. Нашёл внешний взгляд находками `acdf734` и `f8d8414` на #372.
+
+        «ГДЕ» В ТОЖДЕСТВО НЕ ВХОДИТ, И ЭТО НЕ УПРОЩЕНИЕ. Прогон принадлежит ровно
+        одному месту: из номера прогона место выводится, а не выбирается. Две
+        записи одного прогона с разным «где» означают не два мигания, а ошибку
+        записи — и вторую из них надо отсеять, а не сохранить как отдельную.
+
+        ДЕНЬ В ТОЖДЕСТВО НЕ ВХОДИТ ПО ТОЙ ЖЕ ПРИЧИНЕ: он свойство наблюдения, а
+        не мигания, и одно мигание не становится двумя от того, что его
+        перезаписали назавтра.
+        """
+        return (self.name, self.run)
+
 
 #: Исходы, которые считаются НАСТОЯЩИМ красным. Отменённая и пропущенная сюда не
 #: входят: пройденной ни одна не считается, но и отказом не является.
@@ -438,13 +460,12 @@ def parse_flakes(body: str | None) -> list[Flake]:
     наблюдения — это то, что записали, а не то, что переписали.
     """
     found: list[Flake] = []
-    seen: set[tuple[str, int, str]] = set()
+    seen: set[tuple[str, int]] = set()
     for one in FLAKE_RE.finditer(body or ""):
         flake = Flake(one["name"].strip(), one["day"], int(one["run"]), one["where"] or SHARED)
-        key = (flake.name, flake.run, flake.where)
-        if key in seen:
+        if flake.same in seen:
             continue
-        seen.add(key)
+        seen.add(flake.same)
         found.append(flake)
     return found
 
@@ -454,13 +475,18 @@ def flakes_after(
 ) -> list[Flake]:
     """Добавляет мигание, если этого прогона в списке ещё нет.
 
+    ТОЖДЕСТВО СПРАШИВАЕТСЯ У САМОГО МИГАНИЯ (`Flake.same`), а не собирается
+    здесь: второй ключ того же понятия разошёлся бы с первым молча, и это уже
+    случилось (022, 090).
+
     По прогону, а не по имени: одна и та же проверка мигает не единожды, и
     сводить эти случаи в один значило бы потерять частоту — то самое, ради чего
     мигания и записывают.
     """
-    if any(item.run == run and item.name == name for item in known):
+    fresh = Flake(name, day, run, where)
+    if fresh.same in {item.same for item in known}:
         return known
-    return [*known, Flake(name, day, run, where)]
+    return [*known, fresh]
 
 
 def live_changes(repo: str, token: str) -> list[automerge.Change] | None:
@@ -679,13 +705,15 @@ def queue_now(live: list[automerge.Change] | None) -> Queue:
     одного источника расходится с первым молча (022, 090). Нашёл внешний
     взгляд на #168 — трижды, и все три раза об одном.
     """
-    queued = [
-        change
-        for change in live or []
-        if automerge.LABEL_AUTOMERGE in change.marks and not change.draft
-    ]
+    # НЕ ПРОЧИТАНО — ПЕРВЫМ ВОПРОСОМ, А НЕ ПОСЛЕ РАБОТЫ. Проверка стояла ниже
+    # сборки списка, и та шла по `live or []`: работа делалась впустую, а
+    # читателю причина раннего возврата была не видна. Нашёл внешний взгляд
+    # находкой `79585a4` на #374.
     if live is None:
         return Queue(0, 0, read=False)
+    queued = [
+        change for change in live if automerge.LABEL_AUTOMERGE in change.marks and not change.draft
+    ]
     fixing = sum(1 for change in queued if automerge.LABEL_FIX_MAIN in change.marks)
     return Queue(len(queued), fixing)
 
