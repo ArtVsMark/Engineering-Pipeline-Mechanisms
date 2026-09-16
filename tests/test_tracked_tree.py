@@ -20,8 +20,29 @@
 from __future__ import annotations
 
 import subprocess
+from typing import Final
+
+import pytest
 
 from tests.conftest import ROOT
+
+#: Что установка и сборка пишут рядом с `pyproject.toml` локального пакета.
+#: Список ОБЪЯВЛЕН, а не выведен: имена задаёт setuptools и `python -m build`, и
+#: угадывать их по дереву нечем — на чистой выкладке их там нет вовсе. Каждое имя
+#: стоит здесь потому, что его пишет инструмент, а не «на всякий случай» (154).
+BUILD_OUTPUTS: Final = (
+    ("<пакет>.egg-info/PKG-INFO", "метаданные, которые пишет `pip install`"),
+    ("build/lib/модуль.py", "промежуточная сборка `python -m build`"),
+    ("dist/пакет-0.1.0.tar.gz", "готовый архив выпуска"),
+    ("dist/пакет-0.1.0-py3-none-any.whl", "готовое колесо выпуска"),
+)
+
+
+def packages() -> list[str]:
+    """Локальные пакеты дерева — по объявлению, а не по списку имён (005)."""
+    return sorted(
+        str(one.parent.relative_to(ROOT)) for one in ROOT.glob("packages/*/pyproject.toml")
+    )
 
 
 def tracked_but_ignored() -> list[str]:
@@ -71,3 +92,37 @@ def test_the_gate_has_a_subject_to_look_at() -> None:
         check=True,
     )
     assert [one for one in done.stdout.split("\0") if one], "git не видит дерева проекта"
+
+
+def test_the_tree_declares_local_packages_at_all() -> None:
+    """Локальные пакеты находятся: без них проверка ниже — поверхность без предмета (075)."""
+    assert packages(), "в дереве не найдено ни одного локального пакета"
+
+
+@pytest.mark.parametrize("package", packages())
+@pytest.mark.parametrize("output,why", BUILD_OUTPUTS, ids=lambda one: str(one).split("/")[0])
+def test_every_build_output_of_a_package_is_ignored(package: str, output: str, why: str) -> None:
+    """Производное сборки объявлено игнорируемым ДО того, как его кто-то соберёт.
+
+    Спрашивается у самого git, а не разбором `.gitignore`: свой толкователь его
+    синтаксиса разошёлся бы с настоящим молча — и разошёлся бы в сторону «всё
+    покрыто» (049).
+
+    ПОЧЕМУ ЭТОГО НЕ ЛОВИТ СОСЕДНЯЯ ПРОВЕРКА. Та спрашивает «под учётом и в
+    игноре одновременно», и файл, которого в игноре НЕТ, её предикату не
+    подходит вовсе: пока его не закоммитили, он невидим, а после — уже поздно.
+    Здесь предмет обратный и проверяется заранее. Нашёл внешний взгляд находкой
+    `789055e` на #371.
+    """
+    path = f"{package}/{output}"
+    done = subprocess.run(
+        ["git", "check-ignore", "-q", path],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert done.returncode == 0, (
+        f"{path} не покрыт `.gitignore` — это {why}, и однажды собранный он "
+        f"уедет в дерево первым же `git add -A`"
+    )
