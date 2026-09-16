@@ -4,7 +4,8 @@
 вредит больше, чем помогает:
 
 * карта берётся с ОБЩЕЙ ветки — иначе её подделает то самое изменение;
-* отвергнутое и неприменимое в неё не попадает: взгляд не зовут на отсутствие;
+* неприменимое НАЗВАНО отдельной группой: взгляд не ищет его нарушений, но
+  говорит, если предмет попался — это находка об ОТВЕТЕ, а не о коде;
 * заголовки не пришли — сказано вслух, а не подменено молчанием.
 """
 
@@ -32,13 +33,22 @@ def test_a_machine_held_rule_is_not_sent_to_the_eyes() -> None:
             "003": {"status": "active", "mechanism": "document"},
         }
     }
-    machine, eyes = module.split(answer)
+    machine, eyes, _ = module.split(answer)
     assert machine == ["001", "002"]
     assert eyes == ["003"]
 
 
-def test_a_rule_without_a_subject_is_in_neither_half() -> None:
-    """Отвергнутое и неприменимое не зовёт взгляд: у него нет предмета (154)."""
+def test_a_rule_declared_inapplicable_is_named_to_the_eyes() -> None:
+    """Неприменимое не зовёт взгляд искать нарушения, но НАЗВАНО ему.
+
+    Прежде оно не попадало в карту вовсе, и рассуждение было верным ровно до
+    тех пор, пока верен ответ, — а проверяет ответ тот же взгляд, которому его
+    и не показывали. Замер 16.09.2026: из 29 ответов «неприменимо» четыре
+    оказались неверными и стояли месяцами (044).
+
+    Правило, объявленное действующим и не держащееся ничем, по-прежнему идёт
+    глазам как работа: у него предмет ЕСТЬ.
+    """
     answer = {
         "rules": {
             "001": {"status": "not-applicable"},
@@ -46,21 +56,37 @@ def test_a_rule_without_a_subject_is_in_neither_half() -> None:
             "003": {"status": "active", "mechanism": "none"},
         }
     }
-    machine, eyes = module.split(answer)
+    machine, eyes, denied = module.split(answer)
     assert machine == []
     assert eyes == ["003"], "правило, не держащееся ничем, глазам показать надо"
+    assert denied == ["001", "002"], "неприменимое пропало из карты — петля замкнулась снова"
+
+
+def test_the_inapplicable_group_asks_for_a_collision_not_a_hunt() -> None:
+    """Просьба к взгляду асимметрична: не искать нарушения, а сказать о предмете.
+
+    Симметричная просьба («проверь и эти двадцать три») стоила бы взгляду
+    втрое дороже и утонула бы в шуме — а такую подсказку перестают читать
+    целиком, вместе с полезной
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    text = module.render(["001"], ["003"], ["007"], {"007": "Правило без предмета"}, touched=False)
+    assert "НЕПРИМЕНИМЫМИ 1" in text
+    assert "НЕ НАДО" in text, "просьба не названа асимметричной — взгляд пойдёт искать"
+    assert "находка об ОТВЕТЕ" in text
+    assert "007" in text and "Правило без предмета" in text
 
 
 def test_the_map_names_where_the_machine_is_absent() -> None:
     """В карте названо, сколько правил без машины и какие именно."""
-    text = module.render(["001"], ["003"], {"003": "Заголовок правила"}, touched=False)
+    text = module.render(["001"], ["003"], [], {"003": "Заголовок правила"}, touched=False)
     assert "003" in text and "Заголовок правила" in text
     assert "Машина держит 1" in text
 
 
 def test_missing_titles_are_said_not_hidden() -> None:
     """Заголовки не пришли — карта говорит об этом, а не молчит (045)."""
-    text = module.render(["001"], ["003"], {}, touched=False)
+    text = module.render(["001"], ["003"], [], {}, touched=False)
     assert "не пришли" in text
     assert "003" in text, "без заголовков остаются номера, а не пустота"
 
@@ -71,7 +97,7 @@ def test_touching_the_answer_is_flagged_to_the_reviewer() -> None:
     Карта взята с общей ветки и правки не видит; молчание об этом дало бы
     ревьюеру уверенность, которой у него нет (085).
     """
-    text = module.render(["001"], ["003"], {"003": "Правило"}, touched=True)
+    text = module.render(["001"], ["003"], [], {"003": "Правило"}, touched=True)
     assert "правит сам ответ" in text
 
 
@@ -104,7 +130,7 @@ def test_the_answer_is_read_from_the_base_not_the_worktree(tmp_path: Path) -> No
     here = Path.cwd()
     try:
         os.chdir(tmp_path)
-        machine, eyes = module.split(module.from_base("HEAD~1"))
+        machine, eyes, _ = module.split(module.from_base("HEAD~1"))
     finally:
         os.chdir(here)
     assert eyes == ["003"], "подделанная голова победила базу"
@@ -138,9 +164,13 @@ def test_a_map_that_assembled_is_clean(
     """
     where = tmp_path / "карта.json"
     monkeypatch.setattr(module, "from_base", lambda base: {"001": "mechanism"})
-    monkeypatch.setattr(module, "split", lambda said: (["001"], ["002"]))
+    monkeypatch.setattr(module, "split", lambda said: (["001"], ["002"], ["003"]))
     monkeypatch.setattr(module, "titles", dict)
     monkeypatch.setattr(module, "touches_the_answer", lambda base: False)
     assert module.main(["--out", str(where)]) == module.EXIT_OK
     assert where.is_file(), "карта не легла в файл"
-    assert "карта собрана" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "карта собрана" in said
+    # Третья группа считается вслух наравне с двумя первыми: число, которого нет
+    # в отчёте, читатель считает нулём (046).
+    assert "неприменимыми 1" in said, said
