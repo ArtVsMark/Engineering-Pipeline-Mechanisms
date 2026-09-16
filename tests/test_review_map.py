@@ -59,7 +59,11 @@ def test_a_rule_declared_inapplicable_is_named_to_the_eyes() -> None:
     machine, eyes, denied = module.split(answer)
     assert machine == []
     assert eyes == ["003"], "правило, не держащееся ничем, глазам показать надо"
-    assert denied == ["001", "002"], "неприменимое пропало из карты — петля замкнулась снова"
+    # ТРИ ОТРИЦАТЕЛЬНЫХ ОТВЕТА РАЗВЕДЕНЫ: «неприменимо» обещает, что предмета
+    # нет; «отвергнуто» — что предмет есть, а правило не принято, и нарушение
+    # там ожидаемо. Под одной вывеской это неправда (022). Нашёл внешний взгляд
+    # находкой `b724e53`.
+    assert denied == {"not-applicable": ["001"], "rejected": ["002"]}, denied
 
 
 def test_the_inapplicable_group_asks_for_a_collision_not_a_hunt() -> None:
@@ -70,23 +74,66 @@ def test_the_inapplicable_group_asks_for_a_collision_not_a_hunt() -> None:
     целиком, вместе с полезной
     ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
     """
-    text = module.render(["001"], ["003"], ["007"], {"007": "Правило без предмета"}, touched=False)
-    assert "НЕПРИМЕНИМЫМИ 1" in text
+    text = module.render(
+        ["001"],
+        ["003"],
+        {"not-applicable": ["007"]},
+        {"007": "Правило без предмета"},
+        touched=False,
+    )
+    assert "НЕПРИМЕНИМЫМИ" in text
     assert "НЕ НАДО" in text, "просьба не названа асимметричной — взгляд пойдёт искать"
     assert "находка об ОТВЕТЕ" in text
     assert "007" in text and "Правило без предмета" in text
 
 
+def test_each_negative_answer_asks_its_own_question() -> None:
+    """У каждого отрицательного ответа своя просьба, а не общая вывеска.
+
+    «Неприменимо» — предмета нет, скажи, если попался. «Отвергнуто» — предмет
+    есть, нарушение ОЖИДАЕМО, находка одна: причина отвержения устарела. «Не
+    смотрели» — обещаний не давали, любая находка новая. Свалить их вместе
+    значит сказать взгляду неправду о двух третях списка (022, 046).
+    """
+    text = module.render(
+        ["001"],
+        [],
+        {"not-applicable": ["007"], "rejected": ["008"], "unreviewed": ["009"]},
+        {},
+        touched=False,
+    )
+    assert "НЕПРИМЕНИМЫМИ" in text and "007" in text
+    assert "ОТВЕРГ" in text and "ОЖИДАЕМО" in text and "008" in text
+    assert "ответа ещё НЕТ" in text and "009" in text
+
+
+def test_a_status_outside_the_contract_is_named_not_lumped() -> None:
+    """Статус вне договора назван словом, а не свален к соседям (045, 068).
+
+    Молча положить незнакомый статус в чужую группу значило бы сказать взгляду
+    о правиле то, чего проект не обещал.
+    """
+    text = module.render(["001"], [], {"почти-неприменимо": ["010"]}, {}, touched=False)
+    assert "договором не объявлен" in text
+    assert "010" in text
+    # Текст просьбы спрашивается у самого разбора: назвать статус и число —
+    # его работа, и проверять её через сборку всей карты значило бы проверять
+    # заодно всё остальное.
+    said = "\n".join(module.unknown_status("почти-неприменимо", 3))
+    assert "почти-неприменимо" in said and "3" in said
+    assert "находка" in said, "расхождение ответа со своей схемой не названо находкой"
+
+
 def test_the_map_names_where_the_machine_is_absent() -> None:
     """В карте названо, сколько правил без машины и какие именно."""
-    text = module.render(["001"], ["003"], [], {"003": "Заголовок правила"}, touched=False)
+    text = module.render(["001"], ["003"], {}, {"003": "Заголовок правила"}, touched=False)
     assert "003" in text and "Заголовок правила" in text
     assert "Машина держит 1" in text
 
 
 def test_missing_titles_are_said_not_hidden() -> None:
     """Заголовки не пришли — карта говорит об этом, а не молчит (045)."""
-    text = module.render(["001"], ["003"], [], {}, touched=False)
+    text = module.render(["001"], ["003"], {}, {}, touched=False)
     assert "не пришли" in text
     assert "003" in text, "без заголовков остаются номера, а не пустота"
 
@@ -97,7 +144,7 @@ def test_touching_the_answer_is_flagged_to_the_reviewer() -> None:
     Карта взята с общей ветки и правки не видит; молчание об этом дало бы
     ревьюеру уверенность, которой у него нет (085).
     """
-    text = module.render(["001"], ["003"], [], {"003": "Правило"}, touched=True)
+    text = module.render(["001"], ["003"], {}, {"003": "Правило"}, touched=True)
     assert "правит сам ответ" in text
 
 
@@ -164,7 +211,9 @@ def test_a_map_that_assembled_is_clean(
     """
     where = tmp_path / "карта.json"
     monkeypatch.setattr(module, "from_base", lambda base: {"001": "mechanism"})
-    monkeypatch.setattr(module, "split", lambda said: (["001"], ["002"], ["003"]))
+    monkeypatch.setattr(
+        module, "split", lambda said: (["001"], ["002"], {"not-applicable": ["003"]})
+    )
     monkeypatch.setattr(module, "titles", dict)
     monkeypatch.setattr(module, "touches_the_answer", lambda base: False)
     assert module.main(["--out", str(where)]) == module.EXIT_OK
@@ -173,4 +222,4 @@ def test_a_map_that_assembled_is_clean(
     assert "карта собрана" in said
     # Третья группа считается вслух наравне с двумя первыми: число, которого нет
     # в отчёте, читатель считает нулём (046).
-    assert "неприменимыми 1" in said, said
+    assert "not-applicable 1" in said, said

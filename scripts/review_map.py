@@ -104,7 +104,7 @@ def titles() -> dict[str, str]:
     return found
 
 
-def split(answer: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+def split(answer: dict[str, Any]) -> tuple[list[str], list[str], dict[str, list[str]]]:
     """Делит правила на «держит машина», «держат глаза» и «объявлено неприменимым».
 
     ТРЕТЬЯ ГРУППА ПОЯВИЛАСЬ ПОТОМУ, ЧТО ПЕТЛЯ ЗАМЫКАЛАСЬ. Прежде неприменимое не
@@ -125,12 +125,19 @@ def split(answer: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
     """
     machine: list[str] = []
     eyes: list[str] = []
-    denied: list[str] = []
+    # ТРИ ОТРИЦАТЕЛЬНЫХ ОТВЕТА — ТРИ РАЗНЫХ ОБЕЩАНИЯ, и под одной вывеской они
+    # значат неправду. «Неприменимо» обещает, что предмета в дереве нет;
+    # «отвергнуто» — что предмет есть, а правило мы не приняли, и нарушение там
+    # ОЖИДАЕМО; «не смотрели» не обещает ничего, и это самое дорогое место для
+    # взгляда. Первая редакция звала их все «объявлено неприменимым» — нашёл
+    # внешний взгляд находкой `b724e53` на #408 (022, 046).
+    denied: dict[str, list[str]] = {}
     for number, one in sorted((answer.get("rules") or {}).items()):
         if not isinstance(one, dict):
             continue
-        if one.get("status") != "active":
-            denied.append(number)
+        said = str(one.get("status") or "")
+        if said != "active":
+            denied.setdefault(said, []).append(number)
             continue
         (machine if one.get("mechanism") in MACHINE else eyes).append(number)
     return machine, eyes, denied
@@ -156,10 +163,44 @@ def touches_the_answer(base: str) -> bool:
     return bool(shown.stdout.strip())
 
 
+#: Что просят у взгляда по каждому отрицательному ответу. Список
+#: разрешительный (068): статус вне его — не состояние, а расхождение с
+#: договором, и о нём говорится отдельно.
+ASKED: Final = {
+    "not-applicable": [
+        "**Проект объявил эти правила НЕПРИМЕНИМЫМИ.** По нашему ответу предмета",
+        "у них в дереве нет вовсе — поэтому и гейта у них нет. Искать их нарушения",
+        "НЕ НАДО. Но если предмет всё-таки попался тебе в этом изменении — это",
+        "находка об ОТВЕТЕ, а не о коде, и она дороже любой другой: ответ живёт",
+        "годами и читается как факт. 16.09.2026 в таком проходе нашлось четыре",
+        "неверных ответа, стоявших месяцами.",
+    ],
+    "rejected": [
+        "**Эти правила проект ОТВЕРГ с причиной.** Предмет у них есть, и нарушение",
+        "здесь ОЖИДАЕМО — находкой оно не является, называть его не надо. Находка",
+        "тут одна: причина отвержения перестала быть верной. Это тоже находка об",
+        "ОТВЕТЕ.",
+    ],
+    "unreviewed": [
+        "**По этим правилам ответа ещё НЕТ.** Их не смотрел никто — ни машина, ни",
+        "глаза, и обещания по ним проект не давал. Самое дорогое место для взгляда:",
+        "здесь любая находка новая.",
+    ],
+}
+
+
+def unknown_status(said: str, count: int) -> list[str]:
+    """Статус вне договора: назван словом, а не свален к соседям (045, 068)."""
+    return [
+        f"**Статус «{said}» договором не объявлен, а стоит у {count} правил.**",
+        "Это расхождение ответа с его же схемой, и оно само по себе находка.",
+    ]
+
+
 def render(
     machine: list[str],
     eyes: list[str],
-    denied: list[str],
+    denied: dict[str, list[str]],
     named: dict[str, str],
     *,
     touched: bool,
@@ -187,18 +228,11 @@ def render(
         lines.append(
             f"- **{number}** — {title}" if title else f"- **{number}** — (заголовок не пришёл)"
         )
-    if denied:
-        lines += [
-            "",
-            f"**Проект объявил НЕПРИМЕНИМЫМИ {len(denied)} правил.** По нашему ответу",
-            "предмета у них в дереве нет вовсе — поэтому гейта у них тоже нет.",
-            "Искать их нарушения НЕ НАДО. Но если предмет всё-таки попался тебе в",
-            "этом изменении — это находка об ОТВЕТЕ, а не о коде, и она дороже",
-            "любой другой: ответ живёт годами и читается как факт. 16.09.2026 в",
-            "таком проходе нашлось четыре неверных ответа, стоявших месяцами.",
-            "",
-        ]
-        for number in denied:
+    for said, numbers in sorted(denied.items()):
+        if not numbers:
+            continue
+        lines += ["", *ASKED.get(said, unknown_status(said, len(numbers))), ""]
+        for number in numbers:
             title = named.get(number)
             lines.append(f"- {number} — {title}" if title else f"- {number}")
     if not named:
@@ -238,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         f"карта собрана: машиной {len(machine)}, глазами {len(eyes)}, "
-        f"объявлено неприменимыми {len(denied)} → {args.out}"
+        + ", ".join(f"{said} {len(numbers)}" for said, numbers in sorted(denied.items()))
+        + f" → {args.out}"
     )
     return EXIT_OK
 
