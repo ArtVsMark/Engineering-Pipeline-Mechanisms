@@ -198,6 +198,60 @@ def test_a_computed_reason_is_substituted(block: tuple[str, int, list[str]]) -> 
     )
 
 
+#: Ветка «всё прочее» разбора кода возврата: она и есть отказ (068).
+OTHERWISE: Final = re.compile(r"^\s*\*\)")
+
+
+def otherwise_of(body: list[str]) -> list[str]:
+    """Ветка отказа шага: от «*)» до конца случая. Пусто — ветки нет."""
+    branch: list[str] = []
+    inside = False
+    for line in body:
+        if OTHERWISE.match(line):
+            inside, branch = True, [line]
+            continue
+        if inside:
+            branch.append(line)
+            if ";;" in line:
+                break
+    return branch
+
+
+@pytest.mark.parametrize(
+    "block",
+    blocks(),
+    ids=lambda one: f"{one[0]}:{one[1]}" if isinstance(one, tuple) else str(one),
+)
+def test_the_failing_branch_names_the_reason(block: tuple[str, int, list[str]]) -> None:
+    """Ветка ОТКАЗА несёт причину, а не только объявленный исход.
+
+    Соседний гейт требует, чтобы вычисленная причина была подставлена хоть
+    куда-нибудь, — и этого мало. Причину подставляли в ветку объявленного
+    третьего исхода, а ветка отказа выходила кодом, не сказав наружу ничего:
+    шаг падал молча, хотя причина лежала вычисленной строкой выше.
+
+    ОТКАЗ — ХУДШИЙ МОМЕНТ ДЛЯ МОЛЧАНИЯ. Объявленный исход читатель и так
+    понимает по слову рядом; отказ — это ровно тот случай, когда нужно знать,
+    ЧТО именно не получилось, и именно тогда лог из части окон не читается
+    ([142](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/142-a-scheduled-red-needs-an-addressee.md)).
+
+    ЗАМЕР 16.09.2026 ПО ВСЕМУ ДЕРЕВУ: причину вычисляют одиннадцать шагов, и
+    ровно один ронял её в отказе — шаг остатка долга в `ci.yml`. В тот же день
+    он и упал на голове `229fb95`: общая ветка встала красной, а почему —
+    неизвестно до сих пор, разбирать нечего.
+    """
+    name, number, body = block
+    if not any(COMPUTES.match(line) for line in body):
+        pytest.skip("шаг не вычисляет причину")
+    branch = otherwise_of(body)
+    if not branch:
+        pytest.skip("у шага нет ветки отказа — разбирать нечего")
+    assert any(SUBSTITUTES in line for line in branch), (
+        f"{name}:{number}: ветка отказа выходит, не назвав причину, — а причина "
+        "вычислена строкой выше. Снаружи такой отказ неотличим от любого другого (142)"
+    )
+
+
 def test_the_tree_has_annotations_to_look_at() -> None:
     """Аннотации найдены: без них проверки ниже — поверхность без предмета (075)."""
     assert len(annotated()) >= 10, (
