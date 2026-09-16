@@ -104,6 +104,106 @@ def test_absent_verdict_is_not_zero() -> None:
     assert module.verdict_of([comment("просто текст")]) is None
 
 
+# --- граница захода взгляда ---------------------------------------------------
+
+
+def test_a_finding_of_an_earlier_look_does_not_come_back() -> None:
+    """Разобранная находка прошлого захода не переезжает в новый.
+
+    Строки находок остаются на изменении навсегда, а снятие живёт в теле
+    слитого изменения и уходит из окна последних тридцати. Значит вернувшаяся
+    запись не снимается уже ничем: работа сделана, а реестр говорит обратное
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    Замер 16.09.2026 на #333: поздний взгляд объявил «находок 2», а записал
+    три — третьей уехала находка от 13.09, снятая изменением #348 14.09.
+    """
+    comments = [
+        comment("НАХОДКА[дефект]: старое, уже починенное"),
+        comment("ВЕРДИКТ: находок 1"),
+        comment("НАХОДКА[риск]: новое, этого захода"),
+        comment("ВЕРДИКТ: находок 1"),
+    ]
+    titles = [title for _, title in module.findings_of(module.last_look(comments))]
+    assert titles == ["новое, этого захода"], titles
+
+
+def test_a_single_look_is_read_whole() -> None:
+    """Вердикт один — отрезать нечего: находки лежат ДО него.
+
+    Обратное — «брать всё после последнего вердикта» — выбросило бы находки
+    единственного захода целиком, то есть превратило бы работающий канал в
+    «находок нет»
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
+    comments = [
+        comment("НАХОДКА[дефект]: первая"),
+        comment("НАХОДКА[риск]: вторая"),
+        comment("ВЕРДИКТ: находок 2"),
+    ]
+    look = module.last_look(comments)
+    assert module.verdict_of(look) == 2
+    assert len(module.findings_of(look)) == 2
+
+
+def test_a_finding_written_after_the_verdict_belongs_to_that_look() -> None:
+    """Находку дописывают и после числа — отрезок идёт до конца ленты.
+
+    Границей взят вердикт ПРЕДЫДУЩЕГО захода, а не последнего: иначе находка,
+    добавленная тем же заходом следом за числом, терялась бы — и терялась бы
+    молча, с уже объявленным расхождением числа и списка.
+    """
+    comments = [
+        comment("НАХОДКА[дефект]: прошлый заход"),
+        comment("ВЕРДИКТ: находок 1"),
+        comment("ВЕРДИКТ: находок 2"),
+        comment("НАХОДКА[риск]: дописано следом"),
+    ]
+    titles = [title for _, title in module.findings_of(module.last_look(comments))]
+    assert titles == ["дописано следом"], titles
+
+
+def test_the_registry_does_not_get_the_earlier_look_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Заход целиком: в реестр уезжает последний взгляд, а не вся лента.
+
+    Проверка берёт ход механизма, а не отдельную функцию: границу захода можно
+    посчитать верно и не применить, и снаружи это выглядит ровно как её
+    отсутствие.
+    """
+    feed = [
+        comment("НАХОДКА[дефект]: старое, уже починенное"),
+        comment("ВЕРДИКТ: находок 1"),
+        comment("НАХОДКА[риск]: новое, этого захода"),
+        comment("ВЕРДИКТ: находок 1"),
+    ]
+    written: dict[str, Any] = {}
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter(feed))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkeypatch.setattr(module, "save", lambda repo, token, entries, apply: written.update(entries))
+    module.main(["--repo", "o/r", "--pr", "333"])
+    titles = sorted(entry.title for entry in written.values())
+    assert titles == ["новое, этого захода"], titles
+
+
+def test_the_verdict_and_its_list_are_read_off_one_stretch() -> None:
+    """Число и строки читаются с ОДНОГО отрезка, а не с разных (022).
+
+    Пока число брали с последнего захода, а строки — со всей ленты, они спорили
+    по устройству механизма, а не по вине ревьюера: предупреждение о расхождении
+    звучало на каждом втором взгляде и переставало что-либо значить (051).
+    """
+    comments = [
+        comment("НАХОДКА[дефект]: прошлый заход\nВЕРДИКТ: находок 1"),
+        comment("НАХОДКА[риск]: этот заход\nВЕРДИКТ: находок 1"),
+    ]
+    look = module.last_look(comments)
+    assert module.verdict_of(look) == len(module.findings_of(look)) == 1
+
+
 def test_entries_survive_a_round_trip() -> None:
     """Тело живой задачи разбирается обратно в те же записи.
 
