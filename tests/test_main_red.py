@@ -612,7 +612,7 @@ def test_only_one_place_asks_the_platform_for_open_changes() -> None:
         "должен канонический читатель очереди, а не сырой обход"
     )
     place = source.index("def live_changes")
-    body = source[place : source.index("def flakes_on_changes")]
+    body = source[place : source.index("@dataclass(frozen=True, slots=True)\nclass Seen")]
     assert "automerge.open_changes" in body, "читатель не зовёт канонический список"
     assert source.count("automerge.open_changes(") == 1, (
         "канонический список зовётся из механизма больше одного раза — это снова "
@@ -764,7 +764,9 @@ def test_two_flakes_of_one_name_are_two_records(monkeypatch: pytest.MonkeyPatch)
     # Обход слитых гасится явно: предмет этой подделки — открытые изменения, и
     # сеть за слитыми увела бы проверку к настоящей площадке.
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
-    found = module.flakes_on_changes("o/r", "token", [], "12.09.2026", live((7, "aaa"), (7, "bbb")))
+    found = module.seen_on_changes(
+        "o/r", "token", [], "12.09.2026", live((7, "aaa"), (7, "bbb"))
+    ).flakes
     assert [(one.name, one.run, one.where) for one in found] == [
         ("review", 11, "#7"),
         ("review", 22, "#7"),
@@ -785,7 +787,7 @@ def test_a_change_head_is_read_by_pages(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
-    module.flakes_on_changes("o/r", "token", [], "12.09.2026", live((7, "aaa")))
+    module.seen_on_changes("o/r", "token", [], "12.09.2026", live((7, "aaa")))
     checks = [path for path in asked if "check-runs" in path]
     assert checks, "записи проверок головы изменения не читались вовсе"
     for path in checks:
@@ -825,7 +827,7 @@ def test_a_flake_on_a_merged_change_is_still_a_flake(monkeypatch: pytest.MonkeyP
         "merged_changes",
         lambda *a, **k: [{"number": 262, "head": {"sha": "ccc"}, "merged_at": "вчера"}],
     )
-    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026", [])
+    found = module.seen_on_changes("o/r", "token", [], "13.09.2026", []).flakes
     assert [(one.name, one.run, one.where) for one in found] == [("ci-complete", 77, "#262")]
 
 
@@ -851,7 +853,7 @@ def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
-    found = module.flakes_on_changes("o/r", "token", [], "13.09.2026", live((9, "ddd")))
+    found = module.seen_on_changes("o/r", "token", [], "13.09.2026", live((9, "ddd"))).flakes
     assert [(one.name, one.where) for one in found] == [("lint", "#9")]
 
 
@@ -885,7 +887,11 @@ def platform(
     # исходы захода, и подделка списка проверок на список изменений не похожа:
     # чтение гасится целиком, а не подсовыванием чужой формы (049).
     monkeypatch.setattr(module, "live_changes", lambda repo, token: [])
-    monkeypatch.setattr(module, "flakes_on_changes", lambda repo, token, known, day, live: known)
+    monkeypatch.setattr(
+        module,
+        "seen_on_changes",
+        lambda repo, token, known, day, live, answer=None: module.Seen(flakes=known, unfixed=[]),
+    )
     monkeypatch.setattr(module, "queue_now", lambda live: module.Queue(0, 0))
     monkeypatch.setattr(module, "pause", lambda repo, token, live, *, frozen, apply: ([], []))
     monkeypatch.setattr(module, "save", lambda repo, token, body, apply: written.append(body))
@@ -1033,6 +1039,124 @@ def test_the_record_carries_the_counter_when_the_queue_is_frozen(
 
 
 # --- запись мигания не заглатывает тело ----------------------------------------
+
+
+# --- красное, пережившее слияние ----------------------------------------------
+
+
+def records(*rows: tuple[str, str, str, int]) -> list[dict[str, Any]]:
+    """Записи проверок головы: имя, начало, исход, прогон."""
+    return [
+        {
+            "name": name,
+            "status": "completed",
+            "started_at": started,
+            "conclusion": outcome,
+            "details_url": f"https://x/actions/runs/{run}/job/1",
+        }
+        for name, started, outcome, run in rows
+    ]
+
+
+def test_a_red_with_nothing_after_it_is_unfixed() -> None:
+    """Последняя запись имени красна — значит красное пережило слияние.
+
+    Позеленеть ему нечем: голова слитого изменения не пересобирается, и прогонов
+    по ней никто не назначает.
+    """
+    runs = records(("task-items", "01", "failure", 77))
+    assert module.unfixed_names(runs) == {"task-items": 77}
+
+
+def test_a_red_followed_by_green_is_a_flake_not_unfixed() -> None:
+    """Красное, за которым пришло зелёное, — МИГАНИЕ, и здесь его нет.
+
+    Два разбора одной выборки обязаны делить её без пересечения: имя, попавшее в
+    оба списка, читалось бы как две разные находки об одном (016).
+    """
+    runs = records(("lint", "01", "failure", 77), ("lint", "02", "success", 78))
+    assert module.unfixed_names(runs) == {}
+    assert module.flaky_names(runs) == {"lint": 77}
+
+
+def test_a_green_then_red_is_unfixed_not_a_flake() -> None:
+    """Обратный порядок: зелёное, затем красное — это НЕ мигание, а долг.
+
+    Порядок читается по времени начала записи. По порядку ответа площадки оба
+    случая выглядели бы одинаково.
+    """
+    runs = records(("debt", "01", "success", 77), ("debt", "02", "failure", 78))
+    assert module.unfixed_names(runs) == {"debt": 78}
+    assert module.flaky_names(runs) == {}
+
+
+def test_a_cancelled_last_record_is_not_unfixed() -> None:
+    """Отменённая запись вердиктом не считается — её разбирает сводный гейт."""
+    runs = records(("test", "01", "failure", 77), ("test", "02", "cancelled", 78))
+    assert module.unfixed_names(runs) == {"test": 77}, "отменённая заслонила настоящее красное"
+
+
+def test_unfixed_is_read_only_on_merged_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красное ЖИВОГО изменения долгом по сделанному не считается.
+
+    Там оно ещё держит очередь или ждёт починки: путать это с долгом значило бы
+    звать чинить то, что в работе (195).
+    """
+    runs = records(("task-items", "01", "failure", 77))
+
+    def paginate(path: str, *_: object, **__: object) -> list[dict[str, Any]]:
+        return runs if "check-runs" in path else []
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
+    seen = module.seen_on_changes("o/r", "t", [], "16.09.2026", live((7, "aaa")))
+    assert seen.unfixed == [], "красное живого изменения попало в долг по слитому"
+
+
+def test_unfixed_on_a_merged_change_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """На слитом изменении красное записывается, и класс проверки назван.
+
+    ЗАМЕР 16.09.2026: таких записей три — `task-items` на #366, #367 и #368, все
+    совещательные. Увидел их человек глазами, механизма не было (002).
+    """
+    runs = records(("task-items", "01", "failure", 104367663319))
+
+    def paginate(path: str, *_: object, **__: object) -> list[dict[str, Any]]:
+        return runs if "check-runs" in path else []
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(
+        module.ghrest,
+        "merged_changes",
+        lambda *a, **k: [{"number": 368, "head": {"sha": "ddd"}}],
+    )
+    answer = {"task-items": module.policy.Check(name="task-items", klass="advisory")}
+    seen = module.seen_on_changes("o/r", "t", [], "16.09.2026", [], answer)
+    assert [(one.name, one.where, one.klass) for one in seen.unfixed] == [
+        ("task-items", "#368", "advisory")
+    ]
+
+
+def test_the_unfixed_section_names_its_window() -> None:
+    """Раздел говорит, что он ЗЕРКАЛО ОКНА, а не накопитель (016, 049).
+
+    Иначе исчезновение записи вместе с уходом изменения из окна читалось бы как
+    «разобрано».
+    """
+    body = module.render_body(
+        [], [], [], "abc1234", unfixed=[module.Unfixed("task-items", "#368", 77, "advisory")]
+    )
+    said = body[body.index("## Красное, пережившее") :]
+    assert "зеркало окна" in said, "граница окна не названа — молчание прочтётся как «чисто»"
+    assert "заводят задачу" in said, "не сказано, чем запись переживает окно"
+    assert "task-items · #368 · advisory · прогон 77" in said
+
+
+def test_an_empty_unfixed_section_says_so() -> None:
+    """Пустой раздел называет себя — молчание не состояние (154)."""
+    body = module.render_body([], [], [], "abc1234", unfixed=[])
+    said = body[body.index("## Красное, пережившее") :]
+    assert "Пусто" in said
 
 
 def test_a_flake_name_does_not_swallow_the_body() -> None:
