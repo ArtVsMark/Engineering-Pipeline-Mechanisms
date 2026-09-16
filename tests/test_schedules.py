@@ -148,3 +148,38 @@ def test_a_safety_net_is_not_leaned_on() -> None:
         if one.get("role") != "safety-net":
             continue
         assert one.get("measured"), f"{name}: страховка без замера срабатываний"
+
+
+#: Форма даты замера: день.месяц.год. Она обязательна, потому что число без даты
+#: читается как сегодняшнее и живёт дольше, чем верно
+#: ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+MEASURED_RE = re.compile(r"^\d{2}\.\d{2}\.\d{4}$")
+
+
+def test_a_recorded_firing_names_its_day() -> None:
+    """Замер срабатываний планировщика назван с датой и сходится сам с собой.
+
+    ЗАЧЕМ ЗАПИСЫВАТЬ ЕГО ВООБЩЕ. Реестр пропущенных заходов называет число
+    каждый день, и у `hail` оно велико: 16.09.2026 — ожидалось 112, случилось
+    25. Дефектом это не является, планировщик площадки обещает «когда-нибудь»
+    (104). Но сигнал, у которого нет ответа, читается как новая работа, и окно
+    выводит ответ заново каждую смену. Записанный замер — и есть ответ.
+
+    ДАТА ОБЯЗАТЕЛЬНА. Без неё «25 из 112» через неделю прочтётся как сегодняшнее
+    состояние, и следующее решение встанет на устаревшем числе (005).
+    """
+    said = declared()["runs"]
+    recorded = {name: one["fires"] for name, one in said.items() if one.get("fires")}
+    assert recorded, "ни у одного расписания нет записанного замера — предмета нет (075)"
+    for name, fires in recorded.items():
+        assert MEASURED_RE.match(str(fires.get("measured") or "")), (
+            f"{name}: у замера нет даты в виде ДД.ММ.ГГГГ — число без даты устаревает молча"
+        )
+        expected, happened = fires.get("expected"), fires.get("happened")
+        assert isinstance(expected, int) and isinstance(happened, int), (
+            f"{name}: замер назван не числами"
+        )
+        assert 0 <= happened <= expected, (
+            f"{name}: случилось {happened} при ожидавшихся {expected} — "
+            "замер не сходится сам с собой"
+        )
