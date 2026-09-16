@@ -16,8 +16,10 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from typing import Final
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Источники проекта: механизмы, общий низ пакетом и набор. Пакет назван здесь
@@ -249,4 +251,104 @@ def test_an_environment_default_is_declared_not_inlined(path: Path) -> None:
         f"{path.name}: умолчание окружения литералом — "
         + ", ".join(f"строка {line}: «{value}»" for line, value in said)
         + " — дайте ему имя (176)"
+    )
+
+
+#: Чтение статуса: `case "$rc"` либо `case "$?"`. Именно здесь шаг решает по
+#: КОДУ, а не по тому, упала ли команда.
+READS_STATUS: Final = re.compile(r'case\s+"\$\{?(?P<said>\w+|\?)\}?"\s+in')
+
+
+def status_reads() -> list[tuple[str, str, str, str]]:
+    """Места, где шаг читает статус: файл, джоб, шаг и чем статус пойман.
+
+    ЧЕМ ПОЙМАН — ИЩЕТСЯ ПО ВСЕМУ ШАГУ, а не в строке перед разбором. Первая
+    редакция смотрела соседнюю строку и краснела на четырёх исправных шагах:
+    между страховкой и `case` законно стоят `cat "$said"` и сборка причины.
+    Предмет не в порядке строк, а в том, ПОЙМАН ли статус вообще (195).
+    """
+    found: list[tuple[str, str, str, str]] = []
+    for path in WORKFLOWS:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            continue
+        for key, job in (document.get("jobs") or {}).items():
+            for step in (job or {}).get("steps") or []:
+                if not isinstance(step, dict):
+                    continue
+                run = str(step.get("run") or "")
+                said = READS_STATUS.search(run)
+                if not said:
+                    continue
+                name = said["said"]
+                # СТАТУС — ЭТО ТО, ЧТО ПРИСВОЕНО ИЗ `$?`. Первая редакция считала
+                # статусом всякий `case "$X"` и краснела на переменных ОКРУЖЕНИЯ:
+                # `case "$ASKED"` разбирает номер изменения, пришедший из `env`,
+                # и страховки там быть не может — её нечем страховать. Предмет
+                # назван соседом: не «разбор по переменной», а «разбор по коду
+                # возврата» (195).
+                if name != "?" and not re.search(rf"{re.escape(name)}=\$\?", run):
+                    continue
+                if name == "?":
+                    # `case "$?"` читает статус ПОСЛЕДНЕЙ команды, и поймать его
+                    # можно только страховкой на ней самой. В «поймано» попадает
+                    # строка ТОЛЬКО со страховкой: непустая строка без неё —
+                    # ровно тот дефект, который ищут, и записывать её как
+                    # пойманную значило бы зеленеть на предмете проверки (075).
+                    lines = run.splitlines()
+                    at = next(i for i, one in enumerate(lines) if READS_STATUS.search(one))
+                    before = next(
+                        (
+                            one.strip()
+                            for one in reversed(lines[:at])
+                            if one.strip() and not one.strip().startswith("#")
+                        ),
+                        "",
+                    )
+                    caught = before if "||" in before or "set +e" in run else ""
+                else:
+                    # СТРАХОВОК ДВЕ, И ОБЕ ЗАКОННЫ. `|| X=$?` ловит статус на
+                    # самой команде; `set +e` снимает обрыв на весь участок. Взять
+                    # только первую значило бы покрасить исправный шаг за то, что
+                    # он написан другим из двух объявленных способов (068).
+                    guarded = rf"\|\|\s*{re.escape(name)}=\$\?"
+                    lines = run.splitlines()
+                    caught = next((one.strip() for one in lines if re.search(guarded, one)), "")
+                    if not caught:
+                        at = next(
+                            (i for i, one in enumerate(lines) if f"{name}=$?" in one), len(lines)
+                        )
+                        if any("set +e" in one for one in lines[:at]):
+                            caught = "set +e"
+                found.append((path.name, str(key), str(step.get("name") or ""), caught))
+    return found
+
+
+def test_the_tree_reads_statuses_somewhere() -> None:
+    """Чтения статуса найдены: без них проверка ниже — поверхность без предмета (075)."""
+    assert status_reads(), "ни один шаг не читает статус — разбор не видит прогонов"
+
+
+@pytest.mark.parametrize(
+    "where",
+    status_reads(),
+    ids=lambda one: f"{one[0]}:{one[2][:24]}" if isinstance(one, tuple) else str(one),
+)
+def test_a_status_that_is_read_was_caught_by_a_guard(where: tuple[str, str, str, str]) -> None:
+    """Команда, чей статус читают, поймана страховкой `||`.
+
+    ПЛОЩАДКА ЗАПУСКАЕТ БЛОК ЧЕРЕЗ `bash -e`, и `set -uo pipefail` этого не
+    отменяет. Значит команда с ненулевым статусом обрывает шаг ДО разбора — и
+    разбор, написанный ради трёх исходов, не исполняется ни разу. Снаружи это
+    выглядит как «шаг упал», а не как «шаг не дошёл до разбора».
+
+    ЗАМЕР 16.09.2026: у ряда прогонов был один заход за всю жизнь, и он упал
+    кодом 2 на `git ls-remote --exit-code` — без страховки. Ветка накопителя не
+    создалась ни разу, ряд не собрал ни одного дня, а пункт 13.1 «порог
+    покрытия» ждал точек, которые не могли появиться (045).
+    """
+    name, job, step, caught = where
+    assert caught, (
+        f"{name}:{job} «{step}»: статус читают, а поймать его страховкой `||` "
+        "нечем — под `bash -e` шаг оборвётся до разбора"
     )

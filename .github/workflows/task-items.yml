@@ -170,11 +170,14 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          python scripts/task_items.py --follow --apply || rc=$?
+          said="${RUNNER_TEMP}/follow.txt"
+          python scripts/task_items.py --follow --apply >"$said" 2>&1 || rc=$?
+          cat "$said"
+          reason="$(tr '\n' ' ' <"$said")"
           case "$rc" in
             0) echo "пунктов, отставших от своих задач, нет" ;;
             3) echo "пункты эпиков догнали состояние задач" ;;
-            *) echo "::warning::Следование за задачами не отработало (код $rc)." ;;
+            *) echo "::warning::Следование за задачами не отработало (код $rc): ${reason}" ;;
           esac
 
       # Секрета может не быть, и это объявленное состояние, а не дефект.
