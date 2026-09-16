@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import ast
+import json
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -300,12 +302,25 @@ def test_a_lone_advisory_red_is_rerun_when_the_list_allows_it() -> None:
 
 
 def test_an_unlisted_advisory_red_is_not_rerun() -> None:
-    """Имя не в списке — перезапуска нет: список разрешительный (068).
+    """Имя не в списке — перезапуска нет, какова бы ни была природа красноты.
 
-    Красное `debt` означает настоящий долг, и второй заход ответит то же самое:
-    перезапуск прятал бы работу вместо того, чтобы её показать.
+    Список разрешительный (068), и попадают в него по ЗАМЕРУ, а не по
+    рассуждению о том, «бывает ли у этой проверки мигание». Рассуждение здесь
+    уже ошиблось: прежняя редакция этой проверки брала примером `debt` и
+    объясняла, что его красное «означает настоящий долг, и второй заход ответит
+    то же самое». 16.09.2026 замер сказал обратное — тот же прогон со второй
+    попытки позеленел без единой правки, — и имя переехало в список. Премиса
+    проверки была догадкой, и держалась она ровно до первого замера
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+
+    Поэтому образцом взято имя, которого в списке НЕТ и чей замер не сделан:
+    отсутствие в списке — это и есть «замера не было», а не суждение о природе.
     """
-    said = module.rerun_reason([], ["debt"], run=100, tries=1, allowed=module.rerunnable())
+    unlisted = "review"
+    assert unlisted not in module.rerunnable(), (
+        f"{unlisted} попало в список — образцу «не в списке» нужно другое имя"
+    )
+    said = module.rerun_reason([], [unlisted], run=100, tries=1, allowed=module.rerunnable())
     assert said == module.ADVISORY_ONLY
 
 
@@ -331,6 +346,40 @@ def test_the_allowed_list_names_a_reason_for_every_name(tmp_path: Path) -> None:
     path.write_text("не json", encoding="utf-8")
     with pytest.raises(module.NotRun, match="не прочитан"):
         module.rerunnable(path)
+
+
+#: Замер входа в список: день, номер прогона, исход второй попытки. Форма та
+#: же, что у расписаний, и по той же причине — «сделано 15 сентября» и «прогон
+#: 34960373446, попытка 2 зелена» проверяются по-разному: первое читается, а
+#: второе спрашивается у площадки (005, 139).
+MEASURED_RE: Final = re.compile(r"^\d{2}\.\d{2}\.\d{4} · прогон \d+ · попытка \d+ зелена$")
+
+
+def test_every_allowed_name_carries_its_measurement() -> None:
+    """Имя попадает в список по ЗАМЕРУ, и замер назван датой и прогоном.
+
+    Правило списка объявлено в самих данных: имя входит потому, что красное
+    этой проверки НЕ означает дефекта дерева, и доказывается это одним —
+    перезапуск того же прогона дал зелёное без единой правки. Пока поле
+    `measured` никто не спрашивал, вход в список держался на прозе `why`, а
+    проза не отличает замер от рассуждения — и уже ошиблась: про `debt` было
+    написано, что «второй заход ответит то же самое»
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md),
+    [139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    Форма замера — та же, что у расписаний: день, номер прогона, исход второй
+    попытки. Второе написание того же расходится с первым молча (022).
+    """
+    said = json.loads((ROOT / ".rules" / "rerun.json").read_text(encoding="utf-8"))
+    names = [str(one.get("check") or "") for one in said["allowed"]]
+    assert names, "список пуст — предмет проверки не найден (075)"
+    for one in said["allowed"]:
+        name = str(one.get("check") or "")
+        stamp = str(one.get("measured") or "")
+        assert MEASURED_RE.match(stamp), (
+            f"«{name}»: замер не назван или не той формы — «{stamp}». "
+            "Нужны день ДД.ММ.ГГГГ, номер прогона и исход второй попытки (139)"
+        )
 
 
 def test_every_allowed_name_is_an_advisory_check() -> None:
