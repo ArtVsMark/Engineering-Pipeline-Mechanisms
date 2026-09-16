@@ -442,7 +442,38 @@ def flakes_after(
     return [*known, Flake(name, day, run, where)]
 
 
-def flakes_on_changes(repo: str, token: str, known: list[Flake], day: str) -> list[Flake]:
+def live_changes(repo: str, token: str) -> list[automerge.Change] | None:
+    """Живые изменения площадки: ОДНО чтение на заход.
+
+    Тот же список нужен трём предметам захода — миганиям на головах изменений,
+    счёту очереди и метке заморозки, — и каждый прежде спрашивал его сам. Три
+    обхода одного источника стоят вызовов из ОБЩЕЙ квоты
+    ([058](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/058-when-the-quota-is-out-stop.md))
+    и расходятся между собой молча: пока читал первый, второй мог увидеть уже
+    другое (022, 090).
+
+    Читается КАНОНИЧЕСКИМ читателем очереди, а не сырым обходом: разбор метки и
+    черновика живёт там, и второй его экземпляр разошёлся бы с первым. Нашёл
+    внешний взгляд находкой `b0396e9` на #364 — тем же классом, каким находил
+    счёт очереди на #168.
+
+    ``None`` — площадка не ответила, и это НЕ «живых изменений нет»: потребитель
+    обязан отличать одно от другого
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md),
+    049).
+    """
+    try:
+        return automerge.open_changes(repo, token)
+    except ghrest.TransportError as exc:
+        # Отказ здесь не роняет заход: краснота общей ветки — главный предмет
+        # шага, и терять её из-за соседнего чтения нельзя (084).
+        print(f"живые изменения не прочитаны: {report.cut(str(exc))}")
+        return None
+
+
+def flakes_on_changes(
+    repo: str, token: str, known: list[Flake], day: str, live: list[automerge.Change] | None
+) -> list[Flake]:
     """Дописывает мигания, увиденные на головах ЖИВЫХ изменений.
 
     ПОЧЕМУ ЗДЕСЬ, А НЕ ОТДЕЛЬНЫМ МЕХАНИЗМОМ. Реестр мигания один — #99, — и он
@@ -456,6 +487,10 @@ def flakes_on_changes(repo: str, token: str, known: list[Flake], day: str) -> li
     автоперезапуска остаётся пустым, пока эти записи не назовут первое имя.
     """
     found = list(known)
+    # ЖИВЫЕ ПРИХОДЯТ СПИСКОМ, А НЕ ЧИТАЮТСЯ ЗДЕСЬ: их читает `live_changes`, один
+    # раз на заход (058, 022). Слитые читаются здесь — они свой источник, и
+    # список открытых их не содержит.
+    heads: list[tuple[int, str]] = [(one.number, one.head) for one in live or []]
     try:
         # СЛИТЫЕ ОБХОДЯТСЯ НАРАВНЕ С ОТКРЫТЫМИ, И БЕЗ ЭТОГО СПИСОК БЫЛ ПУСТ ПО
         # ПОСТРОЕНИЮ. Мигание — свойство ГОЛОВЫ, и слияние его не отменяет:
@@ -473,16 +508,16 @@ def flakes_on_changes(repo: str, token: str, known: list[Flake], day: str) -> li
         # Цена молчания здесь не «одна потерянная запись»: пока записей нет,
         # не наступает и условие пересмотра решения `014`, то есть разрешённый
         # список автоперезапуска остаётся пустым НАВСЕГДА.
-        changes = list(ghrest.paginate(f"repos/{repo}/pulls?state=open", token))
-        changes += ghrest.merged_changes(repo, token)
+        heads += [
+            (int(one.get("number") or 0), str((one.get("head") or {}).get("sha") or ""))
+            for one in ghrest.merged_changes(repo, token)
+        ]
     except ghrest.TransportError as exc:
-        # Отказ здесь не роняет заход: краснота общей ветки — главный предмет
-        # шага, и терять её из-за соседнего счёта нельзя (084).
-        print(f"мигания изменений не сосчитаны: {report.cut(str(exc))}")
-        return found
-    for change in changes:
-        head = str((change.get("head") or {}).get("sha") or "")
-        number = int(change.get("number") or 0)
+        # Отказ здесь не роняет ни заход, ни разбор ЖИВЫХ голов: краснота общей
+        # ветки — главный предмет шага, а слитые и живые — разные источники, и
+        # отказ одного не отменяет второго (084).
+        print(f"мигания слитых изменений не сосчитаны: {report.cut(str(exc))}")
+    for number, head in heads:
         if not head or not number:
             continue
         try:
@@ -527,7 +562,14 @@ def stamp(repo: str, number: int, token: str, *, on: bool) -> None:
     )
 
 
-def pause(repo: str, token: str, *, frozen: bool, apply: bool) -> tuple[list[int], list[int]]:
+def pause(
+    repo: str,
+    token: str,
+    live: list[automerge.Change] | None,
+    *,
+    frozen: bool,
+    apply: bool,
+) -> tuple[list[int], list[int]]:
     """Отмечает заморозку на живых изменениях: ставит на все, кроме починки.
 
     ПОЧЕМУ МЕТКА, А НЕ ТОЛЬКО СНЯТИЕ ВЗВЕДЕНИЯ. Очередь и так снимает согласие
@@ -548,23 +590,24 @@ def pause(repo: str, token: str, *, frozen: bool, apply: bool) -> tuple[list[int
 
     Возвращает два списка: помеченные и освобождённые.
     """
-    try:
-        changes = list(ghrest.paginate(f"repos/{repo}/pulls?state=open", token))
-    except ghrest.TransportError as exc:
-        # Отказ здесь не роняет заход: краснота — главный предмет шага, и терять
-        # её из-за соседнего действия нельзя (084).
-        print(f"метки заморозки не расставлены: {report.cut(str(exc))}")
+    # СПИСОК ПРИХОДИТ, А НЕ ЧИТАЕТСЯ ЗДЕСЬ. Прежде шаг обходил `pulls?state=open`
+    # сам — третьим обходом одного источника за заход, — и это стоило вызовов из
+    # общей квоты (058). Нашёл внешний взгляд находкой `b0396e9` на #364.
+    #
+    # НЕ ПРОЧИТАНО — НЕ «НЕТ ЖИВЫХ». Пустой список означал бы «размечать нечего»,
+    # и заморозка молча не отметилась бы ни на ком (045).
+    if live is None:
+        print("метки заморозки не расставлены: живые изменения не прочитаны")
         return [], []
 
     marked: list[int] = []
     freed: list[int] = []
-    for change in changes:
-        number = int(change.get("number") or 0)
+    for change in live:
+        number = change.number
         if not number:
             continue
-        marks = {str((one or {}).get("name") or "") for one in change.get("labels") or []}
-        paused_now = LABEL_PAUSED in marks
-        want = frozen and LABEL_FIX_MAIN not in marks
+        paused_now = LABEL_PAUSED in change.marks
+        want = frozen and LABEL_FIX_MAIN not in change.marks
         if want == paused_now:
             continue
         try:
@@ -581,7 +624,7 @@ def pause(repo: str, token: str, *, frozen: bool, apply: bool) -> tuple[list[int
     return marked, freed
 
 
-def queue_now(repo: str, token: str) -> tuple[int, int]:
+def queue_now(live: list[automerge.Change] | None) -> tuple[int, int]:
     """Сколько изменений ждёт очереди и сколько из них помечены починкой.
 
     ЧИТАЕТСЯ У ПЛОЩАДКИ, А НЕ СЧИТАЕТСЯ ЗАНОВО. Предмет — живые изменения и их
@@ -597,13 +640,9 @@ def queue_now(repo: str, token: str) -> tuple[int, int]:
     одного источника расходится с первым молча (022, 090). Нашёл внешний
     взгляд на #168 — трижды, и все три раза об одном.
     """
-    try:
-        changes = automerge.open_changes(repo, token)
-    except ghrest.TransportError:
-        return (0, 0)
     queued = [
         change
-        for change in changes
+        for change in live or []
         if automerge.LABEL_AUTOMERGE in change.marks and not change.draft
     ]
     fixing = sum(1 for change in queued if automerge.LABEL_FIX_MAIN in change.marks)
@@ -854,15 +893,21 @@ def main(argv: list[str] | None = None) -> int:
         # списка нет ни одного измеренного имени, автоперезапуск был бы
         # заполнен догадкой
         # (`docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md`).
-        flakes = flakes_on_changes(args.repo, token, flakes, day)
+        # ЖИВЫЕ ИЗМЕНЕНИЯ ЧИТАЮТСЯ ОДИН РАЗ НА ЗАХОД И РАЗДАЮТСЯ. Тот же список
+        # нужен трём предметам ниже, и каждый прежде читал его сам: три обхода
+        # одного источника за заход стоят вызовов из общей квоты (058) и
+        # расходятся между собой молча (022, 090).
+        live = live_changes(args.repo, token)
+        flakes = flakes_on_changes(args.repo, token, flakes, day, live)
 
-        # Очередь спрашивается ТОЛЬКО при заморозке: без неё этот счёт ничего
-        # не решает, а лишний обход площадки стоит вызовов из общей квоты (058).
-        queue = queue_now(args.repo, token) if holds else None
+        # Очередь СЧИТАЕТСЯ только при заморозке: без неё этот счёт ничего не
+        # решает. Спрашивать площадку для него больше не нужно — счёт идёт по
+        # уже прочитанному списку, и его цена теперь нулевая.
+        queue = queue_now(live) if holds else None
         # МЕТКА ЗАМОРОЗКИ РАССТАВЛЯЕТСЯ В ОБЕ СТОРОНЫ И КАЖДЫМ ЗАХОДОМ: она
         # зеркало состояния общей ветки, а не журнал события. Позеленело —
         # снимается сама, покраснело снова — вернулась (049).
-        pause(args.repo, token, frozen=bool(holds), apply=args.apply)
+        pause(args.repo, token, live, frozen=bool(holds), apply=args.apply)
         # СЧЁТЧИК ПОПЫТОК СПРАШИВАЕТСЯ ТОЛЬКО ПРИ ЗАМОРОЗКЕ. Предел живёт в
         # контуре 3 у состояния «Проверка», а оно наступает от красной
         # ОБЯЗАТЕЛЬНОЙ: совещательное красное очередь не морозит, чинить его
