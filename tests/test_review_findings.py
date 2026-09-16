@@ -449,7 +449,7 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
     monkey.setattr(
         module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами")]
     )
-    monkey.setattr(module, "existing_mark", lambda entries, pr, title: "abc1234")
+    monkey.setattr(module, "existing_mark", lambda entries, pr, title, strict=False: "abc1234")
     monkey.setattr(module, "resolved_marks", lambda repo, token: set())
     written: dict[str, Any] = {}
     monkey.setattr(module, "save", lambda repo, token, entries, apply: written.update(entries))

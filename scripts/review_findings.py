@@ -112,7 +112,7 @@ def addresses(title: str) -> frozenset[str]:
     return frozenset(ADDRESS_RE.findall(title))
 
 
-def same_finding(one: str, other: str) -> bool:
+def same_finding(one: str, other: str, *, strict: bool = False) -> bool:
     """Одна ли это находка, названная дважды.
 
     Два признака, и они разной силы. Совпавшие адреса — точный: место в дереве
@@ -131,20 +131,29 @@ def same_finding(one: str, other: str) -> bool:
     разводит дубль с чужой находкой: 0.960 против 0.400 (по знакам было 0.986
     против 0.514).
     """
+    if strict:
+        # СТРОГИЙ РЕЖИМ НЕ ПРОЩАЕТ НИЧЕГО, и нужен он не из аккуратности.
+        # Послабление ошибается в обе стороны, и одна из сторон дорогая:
+        # слипшиеся находки стоят потерянной находки. Когда есть подозрение,
+        # что реестр слепил две разные, строгий заход покажет их по отдельности
+        # — и это единственный способ такое подозрение проверить (102).
+        return one == other
     here, there = addresses(one), addresses(other)
     if here and here == there:
         return True
     return SequenceMatcher(None, one.lower().split(), other.lower().split()).ratio() >= SAME_ENOUGH
 
 
-def existing_mark(entries: dict[str, Entry], pr: int, title: str) -> str | None:
+def existing_mark(
+    entries: dict[str, Entry], pr: int, title: str, *, strict: bool = False
+) -> str | None:
     """Отпечаток уже лежащей записи о ТОЙ ЖЕ находке, если она есть.
 
     Ищется только среди находок ТОГО ЖЕ изменения: одна и та же беда в двух
     разных изменениях — это две находки, и снимать их надо по отдельности.
     """
     for mark, entry in entries.items():
-        if entry.pr == pr and same_finding(entry.title, title):
+        if entry.pr == pr and same_finding(entry.title, title, strict=strict):
             return mark
     return None
 
@@ -364,6 +373,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--tell", help="отпечаток находки: напечатать её предмет парами ключ=значение"
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="сверять заголовки дословно: ни сходства, ни совпадения адресов (102)",
+    )
     parser.add_argument("--apply", action="store_true", help="записывать, а не показывать")
     args = parser.parse_args(argv)
 
@@ -444,7 +458,7 @@ def main(argv: list[str] | None = None) -> int:
                 # Прежний отпечаток при этом СОХРАНЯЕТСЯ: по нему находку уже
                 # могли назвать разобранной в теле изменения, и смена отпечатка
                 # обессмыслила бы снятие.
-                mark = existing_mark(entries, args.pr, title)
+                mark = existing_mark(entries, args.pr, title, strict=args.strict)
                 if mark is not None:
                     renamed += 1
                     # Ответ верификатора ПЕРЕЖИВАЕТ пересказ находки: он о

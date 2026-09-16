@@ -71,6 +71,9 @@ TRANSPORT: Final = Path("packages/transport")
 #: молча перестал бы его видеть, то есть общий низ выпал бы из проверок,
 #: заведённых ради него же (090).
 SOURCES: Final = (SCRIPTS, TRANSPORT)
+#: Послабления при сравнении: что прощается, где и почему. Один адрес на всех
+#: читателей, как у остальных таблиц `.rules/` (115).
+LENIENCY: Final = Path(".rules/leniency.json")
 #: Записи решений: почему выбрано так, а не иначе. Адрес объявлен здесь, а не
 #: строится читателем: второй якорь заводится именно так (115).
 DECISIONS: Final = Path("docs/decisions")
@@ -108,6 +111,7 @@ ALL: Final = (
     SCHEDULES,
     SERIES,
     RERUN,
+    LENIENCY,
     PROTECTION,
     OUTCOMES,
     FRAGMENTS,
