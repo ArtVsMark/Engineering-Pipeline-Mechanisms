@@ -21,16 +21,15 @@ from typing import Final
 import pytest
 import yaml
 
+from tests.conftest import code_files
+
 ROOT = Path(__file__).resolve().parent.parent
-#: Источники проекта: механизмы, общий низ пакетом и набор. Пакет назван здесь
-#: отдельно не для полноты списка: после переноса транспорта наружу глоб по
-#: `scripts/` молча перестал бы его видеть, и гигиена источника кончалась бы на
-#: границе каталога (090).
-SOURCES = (
-    sorted((ROOT / "scripts").glob("*.py"))
-    + sorted((ROOT / "packages" / "transport").glob("*.py"))
-    + sorted((ROOT / "tests").glob("*.py"))
-)
+#: Источники проекта: механизмы, общий низ пакетом и набор. Список НЕ строится
+#: здесь: где живёт код, объявлено один раз в `scripts/paths.py::SOURCES`.
+#: Второй такой список расходился бы с первым молча — и уже расходился: после
+#: переноса транспорта в пакет сюда его вписали, а в гейт живых ссылок забыли
+#: (022, 090).
+SOURCES = code_files(with_tests=True)
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 
 #: Команды git, отдающие СПИСОК ПУТЕЙ для последующего чтения.
