@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -46,6 +47,16 @@ SEARCH_RE = re.compile(r"\.parents\b|\.parent\.parent\b|rglob\(|os\.getcwd\(")
 #: Пути, которые механизм вправе построить сам: они не настройки, а его
 #: собственный вывод или временный файл. Список разрешительный (068).
 NOT_SETTINGS = frozenset({".", "..", ""})
+
+#: Каталоги кода, объявленные якорем. ИХ СОСТАВ — ТОЖЕ НАСТРОЙКА, и образец
+#: выше его не видел: он ловит адреса ФАЙЛОВ под `.rules`, `.github` и
+#: `changelog.d`, а «где живёт код» — это каталоги, и написаны они иначе.
+#:
+#: Замер 16.09.2026: состав источников был объявлен строками ДВАЖДЫ помимо
+#: якоря — в гейте «новое приезжает со своим прогоном» (нашёл внешний взгляд,
+#: `675d64c`) и в гейте журнала, где это уже стоило дыры: `packages/transport/`
+#: в перечне не было, и починка общего низа проходила БЕЗ единой проверки.
+SOURCE_DIRS = frozenset(one.as_posix() for one in paths.SOURCES)
 
 
 def scripts() -> list[Path]:
@@ -96,6 +107,64 @@ def test_no_second_anchor_is_declared(path: Path) -> None:
     assert not built, (
         f"{path.name} строит адрес настройки сам: {sorted(built)} — "
         f"второй якорь заводится именно так, а объявлены они в {ANCHOR_NAME}"
+    )
+
+
+def source_dirs_in(path: Path) -> set[str]:
+    """Каталоги кода, написанные в файле КАК ПУТЬ, а не как слово.
+
+    СУДИТСЯ УПОТРЕБЛЕНИЕ, А НЕ СТРОКА, и это не педантизм: «scripts» — ещё и
+    ключ в витрине фактов, и запретить слово значило бы красить исправный код.
+    Путь узнаётся по тому, что с ним делают: делят через `/`, кладут в `Path()`
+    или ищут по нему начало пути. Первая редакция сверяла строки и покраснела на
+    ключе JSON — поймано первым же прогоном (051).
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: set[str] = set()
+
+    def named(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            said = node.value.rstrip("/")
+            return said if said in SOURCE_DIRS else None
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            for side in (node.left, node.right):
+                if (said := named(side)) is not None:
+                    found.add(said)
+        elif isinstance(node, ast.Call):
+            call = node.func
+            head = call.attr if isinstance(call, ast.Attribute) else getattr(call, "id", "")
+            if head in {"Path", "startswith", "glob", "rglob"}:
+                for one in node.args:
+                    if (said := named(one)) is not None:
+                        found.add(said)
+        # Прибитый слэш делает строку путём независимо от употребления:
+        # «scripts/» ключом не бывает.
+        elif (
+            isinstance(node, ast.Constant)
+            and str(node.value).endswith("/")
+            and (said := named(node)) is not None
+        ):
+            found.add(said)
+    return found
+
+
+@pytest.mark.parametrize("path", scripts(), ids=lambda p: p.name)
+def test_no_mechanism_lists_the_source_dirs_itself(path: Path) -> None:
+    """«Где живёт код» механизм читает у якоря, а не перечисляет строками.
+
+    Состав источников — настройка наравне с адресами файлов, и второе его
+    написание расходится с первым МОЛЧА: новый каталог кода выпадает из-под
+    гейта, не покраснев. Здесь это уже случилось — гейт журнала не считал
+    `packages/transport/` механизмом, и починка общего низа проходила без
+    единой проверки (022, 090).
+    """
+    listed = sorted(source_dirs_in(path))
+    assert not listed, (
+        f"{path.name} перечисляет каталоги кода строками: {listed} — "
+        f"состав источников объявлен в {ANCHOR_NAME}, поле SOURCES"
     )
 
 

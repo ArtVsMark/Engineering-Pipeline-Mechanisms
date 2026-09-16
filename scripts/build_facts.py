@@ -233,9 +233,14 @@ def script_runs(root: Path) -> dict[str, int]:
     такого прогона значило бы мерить долг там, где его нет
     ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
     """
+    # ГДЕ ЖИВЁТ КОД — ЧИТАЕТСЯ, а не перечисляется здесь: второе написание
+    # состава расходится с первым молча (022, 090). Число от этого не меняется —
+    # у общего низа точки входа нет, — но литерал был четвёртым по счёту, и
+    # именно такой выпал бы при следующем переносе.
     runnable = {
         path.name
-        for path in sorted((root / "scripts").glob("*.py"))
+        for where in paths.SOURCES
+        for path in sorted((root / where).glob("*.py"))
         if any(
             isinstance(node, ast.FunctionDef) and node.name == "main"
             for node in ast.parse(path.read_text(encoding="utf-8")).body
