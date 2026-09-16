@@ -104,19 +104,36 @@ def titles() -> dict[str, str]:
     return found
 
 
-def split(answer: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """Делит правила на «держит машина» и «держат глаза».
+def split(answer: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+    """Делит правила на «держит машина», «держат глаза» и «объявлено неприменимым».
 
-    Отвергнутое и неприменимое не попадает никуда: у него нет предмета, и звать
-    на него взгляд значило бы тратить его на объявленное отсутствие (154).
+    ТРЕТЬЯ ГРУППА ПОЯВИЛАСЬ ПОТОМУ, ЧТО ПЕТЛЯ ЗАМЫКАЛАСЬ. Прежде неприменимое не
+    попадало в карту вовсе, и рассуждение было такое: предмета у него нет, звать
+    на него взгляд — тратить канал на объявленное отсутствие. Рассуждение верно
+    ровно до тех пор, пока ответ верен, — а проверяет ответ ТОТ ЖЕ взгляд,
+    которому мы его и не показываем.
+
+    ЗАМЕР 16.09.2026. Проход по 29 ответам «неприменимо» нашёл ЧЕТЫРЕ неверных:
+    082 и 088 отвечали про штат, а правило спрашивало про вопрос; 096 отвечало
+    про СУБД; 067 утверждал факт, который протух. Все четыре стояли месяцами, и
+    нашёл их не взгляд — он их не видел
+    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+
+    СПИСОК ДАЁТСЯ НОМЕРАМИ, А НЕ РАЗБОРОМ, и просьба к взгляду асимметрична: не
+    искать нарушения, а сказать, если предмет попался. Цена такого списка —
+    строка на правило; цена его отсутствия измерена выше (051).
     """
     machine: list[str] = []
     eyes: list[str] = []
+    denied: list[str] = []
     for number, one in sorted((answer.get("rules") or {}).items()):
-        if not isinstance(one, dict) or one.get("status") != "active":
+        if not isinstance(one, dict):
+            continue
+        if one.get("status") != "active":
+            denied.append(number)
             continue
         (machine if one.get("mechanism") in MACHINE else eyes).append(number)
-    return machine, eyes
+    return machine, eyes, denied
 
 
 def touches_the_answer(base: str) -> bool:
@@ -139,7 +156,14 @@ def touches_the_answer(base: str) -> bool:
     return bool(shown.stdout.strip())
 
 
-def render(machine: list[str], eyes: list[str], named: dict[str, str], *, touched: bool) -> str:
+def render(
+    machine: list[str],
+    eyes: list[str],
+    denied: list[str],
+    named: dict[str, str],
+    *,
+    touched: bool,
+) -> str:
     """Карта в том виде, в каком её читает ревьюер."""
     lines = [
         "## Карта: чем что держится в этом проекте",
@@ -163,6 +187,20 @@ def render(machine: list[str], eyes: list[str], named: dict[str, str], *, touche
         lines.append(
             f"- **{number}** — {title}" if title else f"- **{number}** — (заголовок не пришёл)"
         )
+    if denied:
+        lines += [
+            "",
+            f"**Проект объявил НЕПРИМЕНИМЫМИ {len(denied)} правил.** По нашему ответу",
+            "предмета у них в дереве нет вовсе — поэтому гейта у них тоже нет.",
+            "Искать их нарушения НЕ НАДО. Но если предмет всё-таки попался тебе в",
+            "этом изменении — это находка об ОТВЕТЕ, а не о коде, и она дороже",
+            "любой другой: ответ живёт годами и читается как факт. 16.09.2026 в",
+            "таком проходе нашлось четыре неверных ответа, стоявших месяцами.",
+            "",
+        ]
+        for number in denied:
+            title = named.get(number)
+            lines.append(f"- {number} — {title}" if title else f"- {number}")
     if not named:
         lines += [
             "",
@@ -187,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        machine, eyes = split(from_base(args.base))
+        machine, eyes, denied = split(from_base(args.base))
         if not eyes and not machine:
             raise NotRun("в ответе каталогу нет ни одного действующего правила (075)")
     except NotRun as exc:
@@ -195,9 +233,13 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
 
     args.out.write_text(
-        render(machine, eyes, titles(), touched=touches_the_answer(args.base)), encoding="utf-8"
+        render(machine, eyes, denied, titles(), touched=touches_the_answer(args.base)),
+        encoding="utf-8",
     )
-    print(f"карта собрана: машиной {len(machine)}, глазами {len(eyes)} → {args.out}")
+    print(
+        f"карта собрана: машиной {len(machine)}, глазами {len(eyes)}, "
+        f"объявлено неприменимыми {len(denied)} → {args.out}"
+    )
     return EXIT_OK
 
 
