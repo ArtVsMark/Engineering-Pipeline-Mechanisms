@@ -35,6 +35,7 @@ import json
 import os
 import sys
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -48,14 +49,6 @@ import version
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
-#: Значки ветки `badges`: имя файла → как его собрать. Списком, а не тремя
-#: вызовами подряд: добавить значок должно быть правкой данных, а не кода (049).
-BADGE: Final = "rules.svg"
-FAMILY_BADGE: Final = "family.svg"
-VERSION_BADGE: Final = "version.svg"
-RELEASE_BADGE: Final = "release.svg"
-SCRIPTS_BADGE: Final = "scripts.svg"
-COVERAGE_BADGE: Final = "coverage.svg"
 
 #: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
 #: а не новая тонкость, о которой механизм обязан догадаться.
@@ -470,6 +463,29 @@ def version_badge(facts: dict[str, Any]) -> str:
     return badge("версия", said, "#4c1" if whole else "#dfb317")
 
 
+#: ЧТО СБОРКА РИСУЕТ — ОБЪЯВЛЕНО ЗДЕСЬ ОДИН РАЗ: имя файла → чем его рисуют.
+#: Порядок записей — порядок сборки.
+#:
+#: ПОЧЕМУ ЭТО ДАННЫЕ, А НЕ ШЕСТЬ КОНСТАНТ И КОРТЕЖ ВНУТРИ `main`. Список нужен
+#: не только сборке: гейт витрины спрашивает «всё ли нарисованное названо», и
+#: спросить ему было не у кого. Прежняя редакция гейта держала свой список из
+#: ЧЕТЫРЁХ имён, выписанных рукой, — `scripts.svg` и `coverage.svg` в него не
+#: попали, и проверка «нарисованное доезжает до витрины» два месяца сверяла
+#: память автора с README, а не сборку с витриной. Тот же класс, что #183, где
+#: гейт производного сверялся сам с собой. Инвентарь в одном месте убирает
+#: второй список как таковой: добавить значок — правка этих строк, и обе
+#: стороны узнают о нём в тот же миг
+#: ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+BADGES: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
+    "rules.svg": rules_badge,
+    "family.svg": family_badge,
+    "version.svg": version_badge,
+    "release.svg": release_badge,
+    "scripts.svg": scripts_badge,
+    "coverage.svg": coverage_badge,
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает факты и значок в каталог вывода."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -503,14 +519,7 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
-    for name, draw in (
-        (BADGE, rules_badge),
-        (FAMILY_BADGE, family_badge),
-        (VERSION_BADGE, version_badge),
-        (RELEASE_BADGE, release_badge),
-        (SCRIPTS_BADGE, scripts_badge),
-        (COVERAGE_BADGE, coverage_badge),
-    ):
+    for name, draw in BADGES.items():
         (out / name).write_text(draw(facts) + "\n", encoding="utf-8")
 
     rules = facts["rules"]

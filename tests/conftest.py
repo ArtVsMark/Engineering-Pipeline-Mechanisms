@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -145,6 +146,24 @@ def run_script() -> RunScript:
         return Run(completed.returncode, completed.stdout, completed.stderr)
 
     return _run
+
+
+#: Адрес значка в витрине: `…/badges/<имя>.svg`. ПОКАЗАН — ЭТО АДРЕС, А НЕ
+#: УПОМИНАНИЕ ИМЕНИ. Два гейта витрины мерили «показан ли значок» вхождением
+#: имени файла в текст README, и проза этому предикату удовлетворяет: строка
+#: «собирает `facts.json` и `rules.svg` на каждое слияние» держала проверку
+#: зелёной при снятой картинке. Поймано откатом 17.09.2026: ссылка на значок
+#: была заменена, проверка не покраснела
+#: ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
+#:
+#: Предикат здесь ОДИН на всех спрашивающих: их трое, и прежде он был у каждого
+#: свой — двое мерили подстрокой, третий адресом (022, 049).
+BADGE_IN_SHOWCASE: Final = re.compile(r"badges/(?P<name>[\w.-]+\.svg)")
+
+
+def badges_shown(readme: str) -> set[str]:
+    """Значки, которые витрина ПОКАЗЫВАЕТ: имена, стоящие адресом картинки."""
+    return set(BADGE_IN_SHOWCASE.findall(readme))
 
 
 def code_files(*, with_tests: bool = False) -> list[Path]:

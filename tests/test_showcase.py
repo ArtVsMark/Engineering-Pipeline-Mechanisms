@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, badges_shown, load_script
 
 facts = load_script("build_facts.py")
 
@@ -90,7 +90,8 @@ def test_a_visitor_badge_is_shown_and_built(question: dict[str, Any]) -> None:
     никто не собирает, застывает — и с витрины эти два случая неотличимы.
     """
     name = Path(str(question["badge"])).name
-    assert name in README.read_text(encoding="utf-8"), f"{question['id']}: значка нет в витрине"
+    shown = badges_shown(README.read_text(encoding="utf-8"))
+    assert name in shown, f"{question['id']}: значка нет в витрине — показано {sorted(shown)}"
     source = (ROOT / "scripts" / "build_facts.py").read_text(encoding="utf-8")
     assert name in source, f"{question['id']}: значок объявлен, а собирать его нечем"
 
@@ -105,3 +106,87 @@ def test_a_badge_from_another_branch_is_not_expected_in_the_tree() -> None:
         badge = question.get("badge")
         if badge and question.get("branch") == "badges":
             assert not (ROOT / str(badge)).exists(), f"{question['id']}: артефакт вернулся в дерево"
+
+
+def own() -> list[dict[str, Any]]:
+    """Свои значки проекта — те, что рисуются сверх общего набора вопросов."""
+    said = json.loads(SHOWCASE.read_text(encoding="utf-8"))
+    return list(said.get("own") or [])
+
+
+def drawn() -> set[str]:
+    """Что сборка РИСУЕТ — спрошено у её инвентаря, а не выписано сюда.
+
+    Список, выписанный в проверку рукой, отстаёт молча и при этом зеленеет:
+    ровно так `tests/test_facts.py` два месяца сверял четыре имени из шести
+    (146). Здесь предмет тот же, и источник поэтому один — `build_facts.BADGES`.
+    """
+    names = set(facts.BADGES)
+    assert len(names) >= 5, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
+    return names
+
+
+def test_every_badge_the_build_draws_is_named_by_the_showcase() -> None:
+    """ОБРАТНЫЙ ХОД: нарисованное объявлено — вопросом набора либо своим.
+
+    Прежде проверка шла только в одну сторону, объявление → дерево: у каждого
+    ОБЪЯВЛЕННОГО значка спрашивалось, показан ли он и собирается ли. Значок,
+    который собирается и не объявлен, для набора не существовал вовсе — и так
+    вышло с четырьмя из шести. Замер 17.09.2026: сборка рисует шесть значков,
+    витрина знала два.
+
+    Это тот же рисунок, что каталог принял правилом
+    [206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md):
+    гейт находит предмет не весь и потому зеленеет законно.
+    """
+    named = {Path(str(q["badge"])).name for q in answers() if q.get("badge")}
+    named |= {Path(str(one["badge"])).name for one in own()}
+    silent = sorted(drawn() - named)
+    assert not silent, (
+        f"сборка рисует {silent}, и витрина о них молчит: назвать вопросом набора "
+        "либо объявить своим в `own` с вопросом и причиной"
+    )
+
+
+def test_the_showcase_names_only_what_is_drawn() -> None:
+    """И наоборот: объявленного, но не рисуемого значка быть не может.
+
+    Показанный и не рисуемый значок — сломанная картинка на витрине (196), и от
+    имени с опечаткой она неотличима.
+    """
+    named = {Path(str(q["badge"])).name for q in answers() if q.get("badge")}
+    named |= {Path(str(one["badge"])).name for one in own()}
+    phantom = sorted(named - drawn())
+    assert not phantom, f"витрина называет {phantom}, а сборка их не рисует"
+
+
+@pytest.mark.parametrize("one", own(), ids=lambda one: str(one["badge"]))
+def test_an_own_badge_is_shown_and_explains_why_it_is_own(one: dict[str, Any]) -> None:
+    """У своего значка есть вопрос, причина и место в витрине.
+
+    Без этого `own` становится списком исключений: туда уезжает всё, что лень
+    объявлять, и обратный ход снова перестаёт что-либо держать (051).
+    """
+    name = Path(str(one["badge"])).name
+    shown = badges_shown(README.read_text(encoding="utf-8"))
+    assert name in shown, f"{name}: своего значка нет в витрине — показано {sorted(shown)}"
+    assert str(one.get("ask") or "").strip(), f"{name}: не назван вопрос, на который он отвечает"
+    why = str(one.get("why") or "")
+    assert len(why) >= REASON_AT_LEAST, f"{name}: причина «{why}» — отписка, а не причина"
+
+
+@pytest.mark.parametrize("one", own(), ids=lambda one: str(one["badge"]))
+def test_an_own_badge_does_not_answer_a_question_declared_absent(one: dict[str, Any]) -> None:
+    """Своим не объявляется значок на вопрос, о котором сказано «предмета нет».
+
+    Иначе `own` становится отмычкой: предмет объявлен несуществующим — и тут же
+    нарисован каждым прогоном. Признак берётся механический, а не на глаз:
+    у значка `<id>.svg` имя совпадает с идентификатором вопроса набора (046).
+    """
+    stem = Path(str(one["badge"])).stem
+    absent = {str(q["id"]) for q in answers() if q.get("absent")}
+    assert stem not in absent, (
+        f"{stem}.svg объявлен своим, а на вопрос «{stem}» витрина отвечает «предмета нет». "
+        "Одно из двух неверно: либо предмет есть и вопросу отвечает значок, либо значок "
+        "рисовать незачем"
+    )

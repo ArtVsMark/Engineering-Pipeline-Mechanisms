@@ -8,14 +8,13 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, load_script
 
 facts = load_script("build_facts.py")
 
@@ -124,15 +123,14 @@ def derived_names() -> list[str]:
     `family.svg` и `version.svg` появились вместе с витриной и в проверку не
     попали (049). Имена читаются из модуля: добавится пятое — попадёт само.
     Нашёл внешний взгляд на #134.
+
+    ЧИТАЕТСЯ ИНВЕНТАРЬ, А НЕ ПРОСТРАНСТВО ИМЁН МОДУЛЯ. Прежняя редакция
+    соскребала строковые константы через `vars()` по хвосту имени файла —
+    приём работал ровно до тех пор, пока у значков не появился один список: он
+    видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
+    данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted(
-        value
-        for name, value in vars(facts).items()
-        if not name.startswith("_")
-        and isinstance(value, str)
-        and value.endswith((".svg", ".json"))
-        and "/" not in value
-    )
+    found = sorted({*facts.BADGES, facts.FACTS})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
@@ -148,16 +146,18 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
         assert not list(ROOT.glob(f"**/{name}")), f"{name} лежит в общей ветке рядом с источником"
 
 
-#: Адрес значка в витрине: `badges/<имя>.svg`. Витрина — ИСТОЧНИК, НЕЗАВИСИМЫЙ
-#: от сборки: её пишет человек, а имена берёт у площадки. Сверять список гейта
-#: с тем же модулем, из которого он собран, значит проверять равенство самому
-#: себе — ровно это и делала прежняя редакция. Нашёл внешний взгляд на #183.
-SHOWCASE_BADGE_RE = re.compile(r"badges/([\w.-]+\.svg)")
-
-
 def shown_badges() -> list[str]:
-    """Значки, на которые ссылается витрина: второй источник тех же имён."""
-    found = sorted(set(SHOWCASE_BADGE_RE.findall((ROOT / "README.md").read_text("utf-8"))))
+    """Значки, на которые ссылается витрина: второй источник тех же имён.
+
+    Витрина — ИСТОЧНИК, НЕЗАВИСИМЫЙ от сборки: её пишет человек, а имена берёт
+    у площадки. Сверять список гейта с тем же модулем, из которого он собран,
+    значит проверять равенство самому себе — ровно это и делала редакция,
+    найденная внешним взглядом на #183.
+
+    Сам образец адреса живёт в `tests/conftest.py`: спрашивающих трое, и
+    экземпляр здесь был третьим (022).
+    """
+    found = sorted(badges_shown((ROOT / "README.md").read_text("utf-8")))
     assert len(found) >= 4, f"витрина показывает {found} — предмет проверки не найден (075)"
     return found
 
@@ -181,9 +181,21 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     Значок, который рисуется и никому не показан, — это работа прогона в
     никуда; значок, который показан и не рисуется, — сломанная картинка (196).
     Оба конца сверяются здесь, потому что источники у них разные.
+
+    СПИСОК НАРИСОВАННОГО СПРАШИВАЕТСЯ У СБОРКИ, А НЕ ПОМНИТСЯ. Прежняя
+    редакция держала здесь множество из ЧЕТЫРЁХ имён, выписанных рукой, при
+    шести рисуемых: `scripts.svg` и `coverage.svg` в него не попали, и
+    проверка два месяца сверяла память автора с README — зелёная при том, что
+    два значка рисовались каждым прогоном и не были показаны нигде. Обещание
+    докстринга «нарисованное сборкой» при этом стояло на месте, то есть гейт
+    утверждал о себе неправду
+    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    drawn = {facts.BADGE, facts.FAMILY_BADGE, facts.VERSION_BADGE, facts.RELEASE_BADGE}
-    assert drawn == set(shown_badges()), "сборка рисует не то, что показывает витрина"
+    drawn = set(facts.BADGES)
+    assert len(drawn) >= 5, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
+    assert drawn == set(shown_badges()), (
+        f"сборка рисует {sorted(drawn)}, витрина показывает {shown_badges()}"
+    )
 
 
 def push_command(step: str) -> str:

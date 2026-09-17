@@ -55,16 +55,16 @@
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 Что именно ещё не доказано прогоном — таблицей в [`AGENTS.md`](AGENTS.md).
 
-Значок ниже собран прогоном, а не вписан руками: `badges.yml` пересчитывает
-`facts.json` и `rules.svg` на каждое слияние и толкает их в отдельную ветку
-`badges` — производное не коммитится туда, где живёт источник, и не конфликтует
-на каждом слиянии
+Значки ниже собраны прогоном, а не вписаны руками: `badges.yml` пересчитывает
+`facts.json` и весь набор значков на каждое слияние и толкает их в отдельную
+ветку `badges` — производное не коммитится туда, где живёт источник, и не
+конфликтует на каждом слиянии
 ([160](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/160-derived-artifacts-live-off-the-branch.md)).
 Строка о нём ушла из таблицы пробелов после первого прогона публикации, а не
 после написания кода
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
 
-![правил каталога держится машиной](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/rules.svg) ![доля машинного соблюдения семьи, закрытая общими механизмами](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/family.svg) ![версия проекта, посчитанная по истории](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/version.svg) ![последний выпуск: к нему прибивается потребитель](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/release.svg)
+![правил каталога держится машиной](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/rules.svg) ![доля машинного соблюдения семьи, закрытая общими механизмами](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/family.svg) ![версия проекта, посчитанная по истории](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/version.svg) ![последний выпуск: к нему прибивается потребитель](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/release.svg) ![запускаемых механизмов гоняется процессом](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/scripts.svg) ![доля покрытых строк: мерило охвата, а не верности механизма](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/coverage.svg)
 
 Тем же файлом открыт канал соседям и каталогу правил: версия контракта,
 сколько правил каталога проект держит и чем именно, состав классов проверок —
