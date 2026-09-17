@@ -653,3 +653,60 @@ def test_an_event_alone_is_not_a_predicate() -> None:
     assert not TREE_PREDICATE.search("предмета у правила в проекте нет и не предвидится")
     assert TREE_PREDICATE.search("`git ls-files '*.po'` даёт ноль файлов")
     assert TREE_PREDICATE.search("в .github/workflows/ ни одного такого шага")
+
+
+#: Где живут навыки проекта. Один адрес на гейт и на поле ответа: два понимания
+#: «где лежит навык» разошлись бы молча (022).
+SKILLS_DIR: Final = ROOT / ".claude" / "skills"
+#: Ссылка на правило внутри навыка: `rules/ru/NNN-…`.
+RULE_IN_SKILL: Final = re.compile(r"rules/ru/(\d{3})")
+
+
+def skills_citing() -> list[tuple[str, str]]:
+    """Пары «адрес навыка — номер правила, которое он цитирует»."""
+    found: list[tuple[str, str]] = []
+    for skill in sorted(SKILLS_DIR.iterdir()):
+        card = skill / "SKILL.md"
+        if not card.is_file():
+            continue
+        said = card.read_text(encoding="utf-8")
+        for rule in sorted(set(RULE_IN_SKILL.findall(said))):
+            found.append((f".claude/skills/{skill.name}", rule))
+    return found
+
+
+def test_the_skills_cite_rules_at_all() -> None:
+    """Предмет есть: навыки ссылаются на правила, иначе сверять нечего (075)."""
+    assert len(skills_citing()) >= 10, f"ссылок навыков на правила {len(skills_citing())}"
+
+
+def test_a_skill_holding_an_unmachined_rule_is_named_by_its_answer() -> None:
+    """Навык, цитирующий правило ВНЕ МАШИНЫ, назван ответом на это правило.
+
+    Навык — это МОМЕНТ: он срабатывает в минуту вызова, тогда как документ
+    читается один раз при старте окна. Если правило держится навыком, а ответ об
+    этом молчит, счёт «чем держится проект» считает его неудержанным, и внешний
+    взгляд идёт искать глазами то, у чего процедура есть.
+
+    ЗАМЕР 17.09.2026: навыков шесть, назван ответами был ОДИН. Три правила вне
+    машины держались навыком молча — 044, 062, 107, — и нашлось это вопросом
+    человека, а не механизмом.
+
+    ПРЕДМЕТ СУЖЕН ДО ПРАВИЛ ВНЕ МАШИНЫ, и это не послабление. Навык цитирует
+    правила и как ДОВОД — `build-a-gate` ссылается на 051, 075, 139, объясняя
+    себя, а держатся они гейтами. Требовать поля от них значило бы объявить
+    навык механизмом всего, на что он сослался (051).
+    """
+    unnamed = [
+        f"{rule} → {skill}"
+        for skill, rule in skills_citing()
+        if (one := answers().get(rule))
+        if one.get("status") == "active"
+        if (one.get("mechanism") or "none") not in MACHINE_KINDS
+        if one.get("skill") != skill
+    ]
+    assert not unnamed, (
+        "правило вне машины цитируется навыком, а ответ навыка не называет: "
+        + ", ".join(sorted(unnamed))
+        + " — либо назовите его полем `skill`, либо уберите ссылку из навыка"
+    )
