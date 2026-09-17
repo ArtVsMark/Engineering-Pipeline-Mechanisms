@@ -302,6 +302,11 @@ def render_body(entries: dict[str, findings.Entry], swept_to: str = "") -> str:
         "жестом, который забудут. Задачу закрывает человек: механизм не знает,",
         "разобрана находка или просто надоела.",
         "",
+        "Находку **об ОТВЕТЕ** снимает только изменение, тронувшее сам ответ",
+        "(`.rules/bindings.json`): предмет у неё ровно один файл, и снятие без",
+        "правки этого файла говорит о работе, которой нет. Отказ снятия",
+        "называется вслух предупреждением, а запись остаётся.",
+        "",
         f"Хвост «{findings.REFUTED}» ставит ВЕРИФИКАТОР — отдельный заход,",
         "входящий от ОДНОЙ находки и пытающийся её опровергнуть. Это НЕ снятие:",
         "находку снимает работа, а верификатор лишь говорит, что чинить, возможно,",
@@ -541,6 +546,64 @@ def resolved_marks(
     return marks, mark
 
 
+#: Файл, правкой которого чинится находка ОБ ОТВЕТЕ. Один и тот же адрес у
+#: механического пола рода и у этой проверки: два понимания «где живёт ответ»
+#: разошлись бы молча (022).
+ANSWER_FILE: Final = findings.ANSWER_FILE
+
+
+def touched(repo: str, token: str, number: int) -> set[str]:
+    """Пути, тронутые слитым изменением. Пусто — площадка не ответила."""
+    try:
+        return {
+            str(one.get("filename") or "")
+            for one in ghrest.paginate(f"repos/{repo}/pulls/{number}/files", token)
+        }
+    except ghrest.TransportError:
+        return set()
+
+
+def closable(
+    repo: str, token: str, marks: set[str], entries: dict[str, findings.Entry]
+) -> tuple[set[str], dict[str, str]]:
+    """Какие снятия принимаются, а какие — нет, и почему.
+
+    НАХОДКА ОБ ОТВЕТЕ ЧИНИТСЯ ПРАВКОЙ ОТВЕТА, И ЭТО ПРОВЕРЯЕМО. У находки о коде
+    предмет размыт — починить её можно где угодно в дереве, — а у находки об
+    ответе он ровно один файл: `.rules/bindings.json`. Значит изменение,
+    объявившее её разобранной и не тронувшее этот файл, говорит о работе,
+    которой не делало.
+
+    ПОЧЕМУ ЭТО СТАЛО ВОЗМОЖНО ТОЛЬКО СЕЙЧАС: до появления рода предмета отличить
+    такую находку от прочих было нечем, и проверка била бы по всем подряд (051).
+
+    ТРЕТИЙ ИСХОД ИДЁТ В СТОРОНУ СНЯТИЯ, А НЕ УДЕРЖАНИЯ. Площадка не ответила о
+    файлах — список пуст, и мы не знаем, трогали ответ или нет. Держать запись
+    по НЕЗНАНИЮ значило бы наказывать за отказ сети того, кто работу сделал:
+    отметка уже стоит в теле слитого, то есть утверждение человеком сделано
+    (039, 084).
+    """
+    берём: set[str] = set()
+    держим: dict[str, str] = {}
+    файлы: dict[int, set[str]] = {}
+    for mark in marks:
+        entry = entries[mark]
+        if entry.kind != findings.ANSWER_KIND:
+            берём.add(mark)
+            continue
+        if entry.pr not in файлы:
+            файлы[entry.pr] = touched(repo, token, entry.pr)
+        тронуто = файлы[entry.pr]
+        if not тронуто or ANSWER_FILE in тронуто:
+            берём.add(mark)
+            continue
+        держим[mark] = (
+            f"находка об ОТВЕТЕ, а изменение #{entry.pr} не трогало {ANSWER_FILE}. "
+            "Ответ каталогу чинится правкой ответа: снятие говорит о работе, которой нет"
+        )
+    return берём, держим
+
+
 def save(
     repo: str,
     token: str,
@@ -680,11 +743,16 @@ def main(argv: list[str] | None = None) -> int:
         # Уборка идёт ПОСЛЕ записи, а не вместо: обратный порядок терял бы
         # заметку, снятую и заново найденную одним заходом.
         marks, swept_to = resolved_marks(args.repo, token, parse_swept(body))
-        swept = marks & set(entries)
+        swept, held = closable(args.repo, token, marks & set(entries), entries)
         for mark in swept:
             entries.pop(mark, None)
         if swept:
             print(f"снято как разобранное: {', '.join(sorted(swept))}")
+        for mark, why in sorted(held.items()):
+            # ОТКАЗ СНЯТИЯ НАЗЫВАЕТСЯ ВСЛУХ, А НЕ МОЛЧА ОСТАВЛЯЕТ ЗАПИСЬ.
+            # Иначе разбирающий видит «отметку поставил, а запись висит» и
+            # решает, что сломалась уборка (045).
+            print(f"::warning::снятие `{mark}` не принято: {why}", file=sys.stderr)
 
         save(args.repo, token, entries, args.apply, swept_to)
     except (NotRun, ghrest.TransportError) as exc:
