@@ -252,3 +252,19 @@ def test_slug_of_answers_an_empty_line_without_guessing() -> None:
     assert module.slug_of("") == ""
     assert module.slug_of("   ") == ""
     assert module.slug_of("``") == ""
+
+
+def test_an_empty_slug_is_not_a_match(tmp_path: Path) -> None:
+    """Ответ «предложено» с пустым именем отвергается.
+
+    Сверка идёт ВХОЖДЕНИЕМ в текст очереди, а пустая строка входит в любой
+    текст: ответ «предложено — ``» проходил гейт целиком, и очередь при этом
+    могла быть любой. Нашёл внешний взгляд на #428 — при том что соседний тест
+    держал, что разбор даёт на такой строке пустое имя, и последствия этого не
+    замечал: зелёное на подделке тоже гипотеза
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    """
+    root = tree(tmp_path, queue=("a-red-that-survived-the-merge",))
+    git(root, "checkout", "-b", "work")
+    born(root, "002-пусто.md", "# 002\n\n**Каталогу:** предложено — ``\n")
+    assert run(root) == FOUND
