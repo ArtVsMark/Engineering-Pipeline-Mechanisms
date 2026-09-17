@@ -169,13 +169,36 @@ def weight_of(raw: str) -> str:
     return cleaned if cleaned in WEIGHTS else UNWEIGHED
 
 
+#: Чем взгляд говорит «находок нет» В ТОЙ ЖЕ СТРОКЕ, что и находку. Формат
+#: требует строки `НАХОДКА:`, и при пустом заходе ревьюер пишет в неё отрицание
+#: — это ОТВЕТ «предмета нет», а не находка с таким заголовком.
+#:
+#: ЗАМЕР: на #414 взгляд написал «ВЕРДИКТ: находок 0» и рядом «НАХОДКА: нет».
+#: Разбор завёл запись с заголовком «нет», и она пролежала в реестре сутки,
+#: пережив пять заходов уборки: снять её нечем — работы, которая бы её починила,
+#: не существует. Расхождение при этом БЫЛО НАЗВАНО вслух предупреждением
+#: «вердикт говорит 0, а строк находок 1» — и предупреждение никого не
+#: остановило, потому что запись всё равно записывалась
+#: ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+#:
+#: СПИСОК ЗАКРЫТЫЙ И СРАВНЕНИЕ ТОЧНОЕ. «нет проверки на пустой ввод» — законный
+#: заголовок находки, и отвергать всё, что начинается с «нет», значило бы
+#: запретить целый класс формулировок (051).
+ABSENCE: Final = frozenset({"нет", "нет находок", "находок нет", "none", "no findings"})
+
+
 def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов."""
+    """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов.
+
+    Строка отрицания находкой не считается: см. `ABSENCE`.
+    """
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
     for comment in comments:
         for raw_weight, title in FINDING_RE.findall(comment.get("body") or ""):
             cleaned = " ".join(title.strip("*_` ").split())
+            if cleaned.casefold().rstrip(".") in ABSENCE:
+                continue
             if cleaned and cleaned not in seen:
                 seen.add(cleaned)
                 found.append((weight_of(raw_weight), cleaned))
