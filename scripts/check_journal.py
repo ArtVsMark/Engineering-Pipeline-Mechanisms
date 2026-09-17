@@ -22,20 +22,16 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 from typing import Final
 
+import changerefs
 import journal
 import paths
 
 FRAGMENT_RE: Final = journal.PATH_RE
-#: Строка снятия находки — та же форма, что читает разбор тела изменения.
-#: Образец здесь свой, а не общий: `changerefs` читает ТЕЛО и тянет за собой
-#: транспорт, а этому гейту нужен только вид строки в тексте. Разъехаться им
-#: не даёт `tests/test_journal.py`, где обе формы сверяются на одном примере.
-RESOLVED_LINE: Final = re.compile(r"^\s*Разобрано:[^\n]*", re.M)
+
 # Тронув только это, изменение журналу ничего не сообщает.
 EXEMPT_PREFIXES: Final = ("changelog.d/",)
 EXEMPT_FILES: Final = frozenset({"CHANGELOG.md"})
@@ -132,10 +128,28 @@ def say_if_compound(fragments: list[str]) -> None:
 
 
 def marks_of(text: str) -> set[str]:
-    """Отпечатки находок, снятых строкой «Разобрано:» в этом тексте."""
-    return {
-        mark for line in RESOLVED_LINE.findall(text) for mark in re.findall(r"[0-9a-f]{7}", line)
-    }
+    """Отпечатки находок, снятых строкой «Разобрано:» в этом тексте.
+
+    РАЗБОР ОДИН НА ВСЕХ ЧИТАТЕЛЕЙ СТРОКИ, и берётся он у `changerefs`. Здесь
+    жил свой: строка находилась образцом, а отпечатки выбирались `[0-9a-f]{7}`
+    по ВСЕЙ строке — то есть и по тексту причины. Ровно этот дефект `changerefs`
+    уже чинил у себя, разведя отпечатки и причину, и второй разбор повторял его
+    заново (нашёл внешний взгляд на #439).
+
+    ДВА ДОВОДА, КОТОРЫМИ ДУБЛЬ ОПРАВДЫВАЛСЯ, ОКАЗАЛИСЬ НЕВЕРНЫ ОБА. Первый —
+    «`changerefs` тянет за собой транспорт»: он импортирует только стандартную
+    библиотеку, и проверить это стоило одного взгляда на его шапку. Второй —
+    «разъехаться им не даёт `tests/test_journal.py`»: такого файла в дереве нет
+    и не было, то есть сторожем был назначен адрес, которого не существует
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
+    [090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    ЗАМЕР 17.09.2026: по 660 строкам «Разобрано» в журнале и последних 400 телах
+    коммитов два разбора совпали на ВСЕХ — дефект скрытый, а не сработавший.
+    Предъявить его при этом можно одной строкой: «Разобрано: abc1234 — премиса
+    опровергнута заходом deadbee» свой разбор читает как ДВА снятия.
+    """
+    return set(changerefs.resolved_in(text))
 
 
 #: Как площадка говорит «такого пути там не было». Отличать это от прочих
