@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -815,6 +815,42 @@ def test_a_line_saying_there_are_none_is_not_a_finding() -> None:
     """
     said = [comment("НАХОДКА: нет\n\nВЕРДИКТ: находок 0")]
     assert module.findings_of(said) == [], "отрицание записано находкой"
+
+
+#: Слова отрицания, названные ЗДЕСЬ, а не взятые у механизма. Второй источник
+#: нужен: перебор самого словаря доказывает лишь, что перечисленное в нём
+#: отвергается, и молчит, если список УРЕЗАЛИ. Поймано откатом — урезание до
+#: одного слова проверку не покрасило (014).
+ABSENCE_EXPECTED: Final = frozenset({"нет", "нет находок", "находок нет", "none", "no findings"})
+
+
+def test_the_absence_vocabulary_is_what_it_was_declared_to_be() -> None:
+    """Словарь отрицаний сверяется с независимым перечнем, а не сам с собой."""
+    assert module.ABSENCE == ABSENCE_EXPECTED, (
+        "словарь отрицаний разошёлся с объявленным: слово ушло или пришло молча"
+    )
+
+
+@pytest.mark.parametrize("said", sorted(ABSENCE_EXPECTED))
+def test_every_word_of_the_absence_vocabulary_is_refused(said: str) -> None:
+    """Прогнан КАЖДЫЙ вариант словаря, а не один из пяти.
+
+    Проверка одного слова из закрытого списка говорит о списке ровно столько же,
+    сколько о нём говорит его длина: четыре остальных могли бы быть написаны с
+    опечаткой, и набор был бы зелен (нашёл внешний взгляд на #453).
+    """
+    assert module.findings_of([comment(f"НАХОДКА: {said}")]) == [], f"«{said}» записано находкой"
+    assert module.findings_of([comment(f"НАХОДКА: {said.upper()}")]) == [], "регистр решает"
+
+
+@pytest.mark.parametrize("знак", list(module.ENDINGS))
+def test_an_ending_sign_does_not_revive_the_phantom(знак: str) -> None:
+    """Знак конца не возвращает призрака: «нет!» и «нет?» — то же отрицание.
+
+    `rstrip(".")` снимал точку и пропускал остальные — призрак заводился снова,
+    просто с восклицательным знаком в заголовке.
+    """
+    assert module.findings_of([comment(f"НАХОДКА: нет{знак}")]) == [], f"«нет{знак}» прошло"
 
 
 def test_a_title_that_merely_starts_with_no_is_still_a_finding() -> None:
