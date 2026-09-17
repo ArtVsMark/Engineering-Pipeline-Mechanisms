@@ -139,15 +139,30 @@ def test_an_hourly_run_is_counted_in_every_hour() -> None:
 
 
 def test_a_safety_net_is_not_leaned_on() -> None:
-    """У страховки обязан быть замер срабатываний.
+    """У страховки обязан быть замер срабатываний — в поле `fires`, как у всех.
 
-    Пока его нет, основной путь строят так, будто страховки не существует:
+    Пока замера нет, основной путь строят так, будто страховки не существует:
     планировщик площадки говорит «когда-нибудь» (169).
+
+    ЗАМЕР ИМЕНУЕТСЯ ОДИНАКОВО ДЛЯ ВСЕХ РОЛЕЙ. Прежде здесь спрашивалось плоское
+    поле `measured`, а у расписаний замер живёт в `fires` — то есть одно понятие
+    имело две формы, и вторая ждала первой записи со страховкой, чтобы разойтись.
+    Нашёл внешний взгляд замечанием `f55e4a0` на #392, назвав именно это:
+    «источник путаницы для будущей записи». Имя `measured` осталось за замером
+    СЛОВАМИ в `.rules/rerun.json` и `.rules/leniency.json` (022).
+
+    ПРОВЕРКА СЕГОДНЯ БЕЗ ПРЕДМЕТА, И ЭТО СКАЗАНО, А НЕ ЗЕЛЕНО. Страховочных
+    расписаний в объявлении нет ни одного: все пять — `main`. Обход пустого
+    списка проходил молча и читался как работающая проверка
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
     """
-    for name, one in declared()["runs"].items():
-        if one.get("role") != "safety-net":
-            continue
-        assert one.get("measured"), f"{name}: страховка без замера срабатываний"
+    nets = {
+        name: one for name, one in declared()["runs"].items() if one.get("role") == "safety-net"
+    }
+    if not nets:
+        pytest.skip("страховочных расписаний в объявлении нет — предмета у проверки нет")
+    for name, one in nets.items():
+        assert one.get("fires"), f"{name}: страховка без замера срабатываний в `fires`"
 
 
 #: Форма даты замера: день.месяц.год. Она обязательна, потому что число без даты
@@ -156,24 +171,56 @@ def test_a_safety_net_is_not_leaned_on() -> None:
 MEASURED_RE = re.compile(r"^\d{2}\.\d{2}\.\d{4}$")
 
 
+def test_the_prose_does_not_repeat_the_measured_numbers() -> None:
+    """Проза расписания не повторяет числа замера: они живут в данных.
+
+    Второе написание того же расходится с первым молча, и расходится в худшую
+    сторону: проза читается первой, а поправят её последней. Этот файл уже
+    чинили от того же класса, и класс вернулся — нашёл внешний взгляд находками
+    `046aaba` и `6a7bbc5` на #392, ОДНА беда, названная дважды
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md),
+    [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+    Судятся ЧИСЛА ЗАМЕРА, а не всякая цифра: номера правил, задач и часы в прозе
+    законны. Предмет — ровно значения из `fires`.
+    """
+    said = declared()["runs"]
+    recorded = {name: one for name, one in said.items() if one.get("fires")}
+    assert recorded, "ни у одного расписания нет замера — предмета нет (075)"
+    for name, one in recorded.items():
+        numbers = [str(v) for k, v in one["fires"].items() if isinstance(v, int)]
+        assert numbers, f"{name}: в замере нет чисел — проверять нечего"
+        said_twice = [number for number in numbers if number in str(one.get("why") or "")]
+        assert not said_twice, (
+            f"{name}: числа замера повторены в прозе: {said_twice} — "
+            "они объявлены в `fires`, и второе написание разойдётся молча"
+        )
+
+
 def test_a_recorded_firing_names_its_day() -> None:
     """Замер срабатываний планировщика назван с датой и сходится сам с собой.
 
     ЗАЧЕМ ЗАПИСЫВАТЬ ЕГО ВООБЩЕ. Реестр пропущенных заходов называет число
-    каждый день, и у `hail` оно велико: 16.09.2026 — ожидалось 112, случилось
-    25. Дефектом это не является, планировщик площадки обещает «когда-нибудь»
-    (104). Но сигнал, у которого нет ответа, читается как новая работа, и окно
-    выводит ответ заново каждую смену. Записанный замер — и есть ответ.
+    каждый день, и у `hail` оно велико. Дефектом это не является, планировщик
+    площадки обещает «когда-нибудь» (104). Но сигнал, у которого нет ответа,
+    читается как новая работа, и окно выводит ответ заново каждую смену.
+    Записанный замер — и есть ответ. Сами числа здесь НЕ повторяются: они живут
+    в данных, и второе их написание разошлось бы с первым молча (022).
 
-    ДАТА ОБЯЗАТЕЛЬНА. Без неё «25 из 112» через неделю прочтётся как сегодняшнее
+    ДЕНЬ ОБЯЗАТЕЛЕН. Без него доля через неделю прочтётся как сегодняшнее
     состояние, и следующее решение встанет на устаревшем числе (005).
+
+    ПОЛЕ ЗОВЁТСЯ `day`, А НЕ `measured`. В `.rules/rerun.json` и
+    `.rules/leniency.json` `measured` означает замер СЛОВАМИ — «день · прогон ·
+    исход», — и одно имя на две формы расходится молча. Нашёл внешний взгляд
+    замечанием `f55e4a0` на #392.
     """
     said = declared()["runs"]
     recorded = {name: one["fires"] for name, one in said.items() if one.get("fires")}
     assert recorded, "ни у одного расписания нет записанного замера — предмета нет (075)"
     for name, fires in recorded.items():
-        assert MEASURED_RE.match(str(fires.get("measured") or "")), (
-            f"{name}: у замера нет даты в виде ДД.ММ.ГГГГ — число без даты устаревает молча"
+        assert MEASURED_RE.match(str(fires.get("day") or "")), (
+            f"{name}: у замера нет дня в виде ДД.ММ.ГГГГ — число без дня устаревает молча"
         )
         expected, happened = fires.get("expected"), fires.get("happened")
         assert isinstance(expected, int) and isinstance(happened, int), (
