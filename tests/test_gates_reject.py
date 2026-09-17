@@ -1217,3 +1217,29 @@ def test_a_fragment_without_resolutions_is_asked_nothing(
         tmp_path, fragment="что-то починено\n\n#7\n", message="починка без снятий"
     )
     assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
+
+
+def test_the_common_ancestor_is_asked_of_git_and_refuses_when_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Общий предок спрашивается у git, а его отсутствие — третий исход.
+
+    Точка сравнения объявлена отдельным именем ради того, чтобы читатели брали
+    ОДНУ: вершина базы движется, пока изменение открыто. Пустой ответ здесь
+    значит «сравнивать не с чем», и молчаливое «ну ладно» подставило бы пустую
+    ссылку во все последующие вызовы (045).
+    """
+    journal = load_script("journal.py")
+    asked: list[list[str]] = []
+
+    def remembering(args: list[str]) -> str:
+        asked.append(args)
+        return "деадбиф\n"
+
+    monkeypatch.setattr(journal, "git", remembering)
+    assert journal.common_ancestor("origin/main") == "деадбиф"
+    assert asked == [["git", "merge-base", "origin/main", "HEAD"]]
+
+    monkeypatch.setattr(journal, "git", lambda args: "   \n")
+    with pytest.raises(journal.NotRun):
+        journal.common_ancestor("origin/main")
