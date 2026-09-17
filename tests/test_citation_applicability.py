@@ -34,12 +34,47 @@ from tests.conftest import ROOT
 
 BINDINGS = ROOT / ".rules" / "bindings.json"
 LINK_RE = re.compile(r"rules/ru/(?P<number>\d{3})-")
+#: ВТОРАЯ ФОРМА ЦИТАТЫ, И ДО 17.09.2026 ГЕЙТ ЕЁ НЕ ВИДЕЛ. Номер в скобках —
+#: «(193)», «(005, 127)» — та же цитата, что и ссылка: она так же утверждает
+#: применимость правила к названному случаю. Замер того же дня: ссылками в
+#: дереве названо 1007 упоминаний, ГОЛЫМ ЧИСЛОМ — 1744, и 23 правила названы
+#: только так. То есть невидимого гейту было больше, чем видимого.
+#:
+#: ФОРМА СУЖЕНА ДВАЖДЫ, И ОБА СУЖЕНИЯ ЗАМЕРЕНЫ. Скобка не приклеена к имени —
+#: иначе `range(200)` читается цитатой правила 200 (нашлось в
+#: `tests/test_runs_series.py`). И число обязано быть НОМЕРОМ ПРАВИЛА из нашего
+#: ответа — иначе цитатами становятся коды ответа площадки: 401, 403, 429, 502,
+#: 503 нашлись в первом же прогоне. Голая форма двусмысленна по построению, и
+#: гейт не вправе краснеть на двусмысленном
+#: ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+BARE_RE = re.compile(r"(?<![\w(])\((?P<numbers>\d{3}(?:,\s*\d{3})*)\)")
 SUFFIXES = frozenset({".py", ".md", ".yml", ".yaml", ".json"})
+
+#: ИСТОРИЯ ЗАДНИМ ЧИСЛОМ НЕ ПРАВИТСЯ. Выпущенный журнал и сводный `CHANGELOG.md`
+#: — запись о том, что было сказано тогда; менять её, чтобы угодить сегодняшнему
+#: гейту, значит подделывать историю
+#: ([043](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/043-decisions-are-superseded-not-edited.md)).
+#: Четыре голых упоминания живут там и предметом этого гейта не являются.
+HISTORY = ("CHANGELOG.md", "changelog.d/released/")
 
 #: Ссылки на правила, чья применимость у нас отвергнута, и которые всё же
 #: законны: речь идёт о ГРАНИЦЕ цитируемого правила, а не о нашем требовании.
 #: Ключ — «путь:номер правила», значение — почему это упоминание, а не основание.
 MENTIONS: dict[str, str] = {
+    "tests/test_bindings_addresses.py:194": (
+        "здесь 194 — НОМЕР НАШЕГО ОТВЕТА, а не цитата требования: перечислены три "
+        "записи `.rules/bindings.json`, на чьих формулировках образец адреса "
+        "спотыкался. Номер называет, ГДЕ был дефект, и применимости правила не "
+        "утверждает"
+    ),
+    "changelog.d/the-gate-is-measured-against-the-whole-tree.fixed.md:194": (
+        "тот же счёт трёх ответов, пересказанный журналом: номер называет запись "
+        "ответа, а не требование, на которое опираются"
+    ),
+    "tests/test_derived_refs.py:194": (
+        "близнец записи ниже: это граница правила 196, а не наше требование. Тест "
+        "проверяет ровно то, ЧЕГО механизм не судит, — чужой значок"
+    ),
     "scripts/check_derived_refs.py:194": (
         "это граница правила 196, а не наше требование: 196 само говорит, что для "
         "ЧУЖОГО ресурса предмет другой и держит его 194. Механизм здесь ссылается "
@@ -59,15 +94,24 @@ def cited() -> dict[str, list[str]]:
         check=True,
     )
     found: dict[str, list[str]] = {}
+    known = set(answers())
     for name in listed.stdout.split("\0"):
         if not name or Path(name).suffix not in SUFFIXES:
             continue
         # Сам этот файл называет номера как ПРИМЕРЫ разбора, а не как основание.
         if name == "tests/test_citation_applicability.py":
             continue
+        if name == "CHANGELOG.md" or name.startswith(HISTORY):
+            continue
         for number, line in enumerate((ROOT / name).read_text(encoding="utf-8").splitlines(), 1):
             for match in LINK_RE.finditer(line):
                 found.setdefault(match["number"], []).append(f"{name}:{number}")
+            # ОБЕ ФОРМЫ ЦИТАТЫ РАВНЫ. Гейт, читающий одну из двух, обещает
+            # больше, чем делает: он ловит аккуратных и пропускает остальных.
+            for match in BARE_RE.finditer(line):
+                for one in re.findall(r"\d{3}", match["numbers"]):
+                    if one in known:
+                        found.setdefault(one, []).append(f"{name}:{number}")
     return found
 
 
