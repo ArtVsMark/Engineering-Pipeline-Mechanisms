@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -230,6 +231,25 @@ def test_a_prose_mention_of_the_word_is_not_a_mark() -> None:
     assert journal_gate.marks_of("снятие живёт строкой «Разобрано:» в теле изменения") == set()
 
 
+#: Что git говорит, когда пути у предка не было. Снято с живого вызова
+#: 17.09.2026; путь и ссылка заменены скобками, дословна ФОРМА сообщения — её и
+#: разбирает гейт. Формулировка по памяти здесь уже подвела — подделка говорила
+#: «fatal: path does not exist», а площадка называет путь и ссылку, — и гейт,
+#: разбирающий сообщение, на такой
+#: подделке проверялся впустую (170).
+NO_SUCH_PATH_SAYS: Final = (
+    "git show <ссылка>:<путь> → fatal: path '<путь>' does not exist in '<ссылка>'"
+)
+#: Вторая форма того же: путь ЕСТЬ в рабочем дереве и отсутствует в коммите.
+#: Её нашёл живой прогон, а не память: первая редакция гейта знала одну форму и
+#: покраснела на этой — то есть строгая сторона сработала, как обещано.
+ON_DISK_NOT_IN_SAYS: Final = (
+    "git show <sha>:<путь> → fatal: path '<путь>' exists on disk, but not in '<sha>'"
+)
+#: Отказ ДРУГОЙ природы: ссылки нет вовсе. Снято тем же заходом.
+BROKEN_REF_SAYS: Final = "git show нет-такой-ссылки:README.md → fatal: invalid object name"
+
+
 def fake_git(body: str, at_base: str) -> Callable[[list[str]], str]:
     """Подделка транспорта, РАЗБИРАЮЩАЯ команду: тело коммитов и вид у основания.
 
@@ -245,6 +265,8 @@ def fake_git(body: str, at_base: str) -> Callable[[list[str]], str]:
     """
 
     def _git(args: list[str]) -> str:
+        if "merge-base" in args:
+            return "деадбиф\n"
         if "show" in args:
             return at_base
         return f"починка\n\n{body}"
@@ -355,8 +377,10 @@ def test_a_fragment_born_here_has_no_base_and_all_its_marks_are_new(
     )
 
     def refusing(args: list[str]) -> str:
+        if "merge-base" in args:
+            return "деадбиф\n"
         if "show" in args:
-            raise journal_gate.NotRun("такого пути у основания нет")
+            raise journal_gate.NotRun(NO_SUCH_PATH_SAYS)
         return "починка без отметок"
 
     monkeypatch.setattr(journal_gate.journal, "git", refusing)
@@ -377,17 +401,88 @@ def test_at_base_reads_the_file_as_it_was(monkeypatch: pytest.MonkeyPatch) -> No
         return "Разобрано: abc1234\n"
 
     monkeypatch.setattr(journal_gate.journal, "git", remembering)
-    assert journal_gate.at_base("origin/main", "changelog.d/правка.fixed.md") == (
+    assert journal_gate.at_base("деадбиф", "changelog.d/правка.fixed.md") == (
         "Разобрано: abc1234\n"
     )
-    assert asked == [["git", "show", "origin/main:changelog.d/правка.fixed.md"]]
+    assert asked == [["git", "show", "деадбиф:changelog.d/правка.fixed.md"]]
 
 
 def test_at_base_says_empty_when_the_path_was_not_there(monkeypatch: pytest.MonkeyPatch) -> None:
     """Пути у основания не было — пусто, и это законный исход, а не отказ захода."""
 
     def refusing(args: list[str]) -> str:
-        raise journal_gate.NotRun("fatal: path does not exist")
+        raise journal_gate.NotRun(NO_SUCH_PATH_SAYS)
 
     monkeypatch.setattr(journal_gate.journal, "git", refusing)
-    assert journal_gate.at_base("origin/main", "changelog.d/новое.added.md") == ""
+    assert journal_gate.at_base("деадбиф", "changelog.d/новое.added.md") == ""
+
+
+def test_both_forms_of_no_such_path_are_read_as_absence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обе формы отказа «пути там нет» читаются одинаково — как отсутствие.
+
+    Форм у git две, и вторую нашёл ЖИВОЙ ПРОГОН: первая редакция знала одну, и
+    набор покраснел на пути, который есть в рабочем дереве и отсутствует в
+    коммите. Строгая сторона сработала как обещано — неузнанное назвалось, а не
+    прочиталось как «файла не было».
+    """
+    for said in (NO_SUCH_PATH_SAYS, ON_DISK_NOT_IN_SAYS):
+
+        def refusing(args: list[str], said: str = said) -> str:
+            raise journal_gate.NotRun(said)
+
+        monkeypatch.setattr(journal_gate.journal, "git", refusing)
+        assert journal_gate.at_base("деадбиф", "changelog.d/новое.added.md") == "", said
+
+
+def test_at_base_lets_an_unknown_refusal_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ НЕ про отсутствие пути уходит наверх, а не читается как «файла не было».
+
+    Битая ссылка, обрезанный чекаут, сломанный репозиторий — при глушении любого
+    отказа все они читались бы как «фрагмент здесь родился», и заход требовал бы
+    увезти ВСЕ отметки, не сказав почему. Своя поломка не бывает зелёной (039).
+    """
+
+    def broken(args: list[str]) -> str:
+        raise journal_gate.NotRun(BROKEN_REF_SAYS)
+
+    monkeypatch.setattr(journal_gate.journal, "git", broken)
+    with pytest.raises(journal_gate.NotRun):
+        journal_gate.at_base("деадбиф", "changelog.d/правка.fixed.md")
+
+
+def test_the_content_is_read_at_the_same_point_as_the_file_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Список файлов и их содержимое берутся у ОДНОГО общего предка.
+
+    Вершина базы движется, пока изменение открыто: выпуск переносит фрагменты в
+    `released/`, и `main:changelog.d/<фрагмент>` перестаёт существовать — все его
+    отметки становятся «новыми», и заход требует увезти уже уехавшее. Нашёл
+    внешний взгляд на #441.
+    """
+    fragment = tmp_path / "changelog.d" / "правка.fixed.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text("Разобрано: abc1234\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        journal_gate.journal,
+        "changed_files",
+        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+    )
+    asked: list[list[str]] = []
+
+    def remembering(args: list[str]) -> str:
+        asked.append(args)
+        if "merge-base" in args:
+            return "деадбиф\n"
+        if "show" in args:
+            return "Разобрано: abc1234\n"
+        return "починка без отметок"
+
+    monkeypatch.setattr(journal_gate.journal, "git", remembering)
+    assert journal_gate.travelled("origin/main") == []
+    shown = [args for args in asked if "show" in args]
+    assert shown, "содержимое у основания не спрашивалось вовсе"
+    assert all(args[2].startswith("деадбиф:") for args in shown), (
+        f"содержимое взято не у общего предка, а у движущейся вершины: {shown}"
+    )
