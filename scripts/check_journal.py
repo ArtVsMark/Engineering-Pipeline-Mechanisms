@@ -138,6 +138,18 @@ def marks_of(text: str) -> set[str]:
     }
 
 
+def at_base(base: str, name: str) -> str:
+    """Каким файл был у основания: пусто, если его там не было вовсе.
+
+    Отсутствие — законный исход, а не отказ: фрагмент, ЗАВЕДЁННЫЙ этой работой,
+    у основания не существует, и все его отметки новые.
+    """
+    try:
+        return journal.git(["git", "show", f"{base}:{name}"])
+    except NotRun:
+        return ""
+
+
 def travelled(base: str) -> list[str]:
     """Отметки снятия, объявленные фрагментом и НЕ уехавшие с работой.
 
@@ -164,9 +176,17 @@ def travelled(base: str) -> list[str]:
     claimed: set[str] = set()
     for name in fragments:
         try:
-            claimed |= marks_of(Path(name).read_text(encoding="utf-8"))
+            now = marks_of(Path(name).read_text(encoding="utf-8"))
         except OSError:
             continue
+        # СПРАШИВАЕТСЯ ТО, ЧТО ОБЪЯВИЛО ЭТО ИЗМЕНЕНИЕ, А НЕ ВСЁ, ЧТО СТОИТ ВО
+        # ФРАГМЕНТЕ. Первая редакция брала текущий текст целиком — и требовала
+        # повезти отметки, которые фрагмент нёс ЕЩЁ ДО этой работы: изменение,
+        # правящее в нём одну фразу, обязано было заново положить в тело ДЕВЯТЬ
+        # чужих отпечатков. Поймано на #438: правка прозы в уже слитом фрагменте
+        # покраснела отметками, уехавшими с тем изменением, которое их и
+        # объявило. Отметку везёт тот, кто её поставил, и везёт один раз (045).
+        claimed |= now - marks_of(at_base(base, name))
     if not claimed:
         return []
     carried = marks_of(journal.git(["git", "log", "--format=%B", f"{base}..HEAD"]))

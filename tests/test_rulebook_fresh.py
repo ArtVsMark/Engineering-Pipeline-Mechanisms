@@ -335,7 +335,11 @@ def test_the_skill_names_the_rule_it_closes() -> None:
 #: Снятая форма выгрузки каталога: с ней сверяется обещание навыка.
 EXPORT_SHAPE: Final = ROOT / "tests" / "fixtures" / "catalogue-export.shape.json"
 #: Как навык достаёт поле записи правила: `one["claim"]["ru"]`, `one["files"]["ru"]`.
-FIELD_RE: Final = re.compile(r"one\[\"(\w+)\"\]\[\"(\w+)\"\]")
+#: КАВЫЧКИ ОБЕ, И ЭТО НЕ ПРИДИРКА. Первая редакция видела только двойные — а
+#: сниппет несёт `one['files']['ru']` с одинарными, и ровно это поле оставалось
+#: непроверенным. Гейт, видящий часть предмета, зеленеет на остальном (075).
+#: Нашёл внешний взгляд на #435.
+FIELD_RE: Final = re.compile(r"""one\[(['"])(\w+)\1\]\[(['"])(\w+)\3\]""")
 
 
 def test_the_skill_reads_only_fields_the_export_really_has() -> None:
@@ -360,7 +364,7 @@ def test_the_skill_reads_only_fields_the_export_really_has() -> None:
     record = (shape.get("rules") or [{}])[0]
     assert record, "снимок выгрузки пуст — предмета у проверки нет (075)"
     text = (SKILL_DIR / "answer-a-rule" / "SKILL.md").read_text(encoding="utf-8")
-    asked = set(FIELD_RE.findall(text))
+    asked = {(outer, inner) for _, outer, _, inner in FIELD_RE.findall(text)}
     assert asked, "сниппет навыка не читает ни одного поля — проверять нечего (075)"
     missing = sorted(
         f"{outer}.{inner}"
@@ -378,3 +382,21 @@ def test_the_export_snapshot_says_when_and_whence_it_was_taken() -> None:
     shape = json.loads(EXPORT_SHAPE.read_text(encoding="utf-8"))
     assert shape.get("_снято"), "снимок без даты — отличить свежий от протухшего нечем"
     assert str(shape.get("_откуда") or "").startswith("https://"), "снимок без адреса источника"
+
+
+def test_the_field_pattern_sees_both_kinds_of_quote() -> None:
+    """Образец полей видит и одинарные кавычки, и двойные.
+
+    ГЕЙТ, ВИДЯЩИЙ ЧАСТЬ ПРЕДМЕТА, ЗЕЛЕНЕЕТ НА ОСТАЛЬНОМ. Первая редакция искала
+    только двойные — а сниппет несёт `one['files']['ru']` с одинарными, и ровно
+    это поле оставалось непроверенным: подмена его на несуществующее НЕ краснела
+    (проверено прямо). Нашёл внешний взгляд на #435.
+
+    Сверяется здесь сам образец, а не дерево: дерево может завтра написать поле
+    иначе, и тогда гейт снова ослабнет молча (075).
+    """
+    both = "one[\"claim\"][\"ru\"] и one['files']['ru']"
+    seen = {(outer, inner) for _, outer, _, inner in FIELD_RE.findall(both)}
+    assert seen == {("claim", "ru"), ("files", "ru")}, (
+        f"образец видит не обе формы записи поля: {seen}"
+    )
