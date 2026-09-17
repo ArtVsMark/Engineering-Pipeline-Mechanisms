@@ -1156,3 +1156,64 @@ def test_the_roster_finds_its_subject() -> None:
     """
     assert GATES, "гейтов в дереве не найдено — разбор не находит предмета"
     assert gates_with_a_refusal_run(), "прогонов отказа не найдено ни одного — разбор слеп"
+
+
+def journal_change(tmp_path: Path, *, fragment: str, message: str) -> Path:
+    """Дерево с правкой кода, фрагментом журнала и заданным телом коммита.
+
+    Форма у трёх проверок ниже одна, и разводит их ровно две строки — текст
+    фрагмента и текст коммита. Поднято вверх, а не повторено трижды (090).
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "fix-a-thing.fixed.md").write_text(fragment, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", message)
+    return repo
+
+
+#: Фрагмент, объявляющий находку разобранной.
+SAYS_RESOLVED = "что-то починено\n\nРазобрано: abc1234\n\n#7\n"
+
+
+def test_a_resolution_left_in_the_journal_is_refused(run_script: RunScript, tmp_path: Path) -> None:
+    """Отметка снятия во фрагменте и не в коммите — отказ.
+
+    СНЯТИЕ ЕДЕТ ТЕЛОМ КОММИТА. Уборка реестра читает тело слитого ИЗМЕНЕНИЯ, а
+    его собирает `agent_pr` из тел коммитов; фрагмент журнала в эту цепочку не
+    входит вовсе. Отметка, написанная только во фрагменте, адресату не
+    доезжает: работа сделана, находка в реестре осталась, и снять её больше
+    нечем.
+
+    ЗАМЕР 17.09.2026: так потерялись ДВАДЦАТЬ ТРИ снятия за одну смену — семь
+    изменений подряд. Причина не в забывчивости: навык разбора находки говорил
+    «снять строкой в ТЕЛЕ ИЗМЕНЕНИЯ», а тело изменения окно писать не вправе
+    ([131](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/131-no-writes-from-a-cloud-session.md))
+    — назван был адрес, которого у окна нет, и окно выбрало похожий.
+    """
+    repo = journal_change(tmp_path, fragment=SAYS_RESOLVED, message="починка без отметки в коммите")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == REJECTED
+    assert "abc1234" in result.text and "ТЕЛЕ КОММИТА" in result.text
+
+
+def test_a_resolution_carried_by_the_commit_passes(run_script: RunScript, tmp_path: Path) -> None:
+    """Та же отметка в теле коммита — проходит: снятие уехало с работой."""
+    repo = journal_change(tmp_path, fragment=SAYS_RESOLVED, message="починка\n\nРазобрано: abc1234")
+    assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
+
+
+def test_a_fragment_without_resolutions_is_asked_nothing(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Фрагмент без отметок ничего не требует: судится ЗАЯВЛЕННОЕ.
+
+    Требовать отметку у каждого изменения значило бы красить работу, которая
+    находок не разбирала вовсе (051).
+    """
+    repo = journal_change(
+        tmp_path, fragment="что-то починено\n\n#7\n", message="починка без снятий"
+    )
+    assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
