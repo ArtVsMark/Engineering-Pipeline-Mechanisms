@@ -480,3 +480,56 @@ def test_a_tree_without_a_branch_is_the_third_outcome(tmp_path: Path) -> None:
     """Ветку не прочитать — это отказ входа, а не пустое имя (045)."""
     with pytest.raises(preflight.NotRun):
         preflight.branch_now(tmp_path)
+
+
+def test_a_branch_without_the_prefix_is_never_pushed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ветка без приставки конвейера не толкается — изменения по ней не откроется.
+
+    ПРИСТАВКА — ПЕРЕКЛЮЧАТЕЛЬ, А НЕ СТИЛЬ (003). Первая редакция отвергала два
+    имени, `main` и `HEAD`, и пропускала всё остальное — включая `claude/<окно>`,
+    ветку, которую окну выдаёт сама площадка. Толчок туда проходит, изменения не
+    открывает, и заход рапортует успех: работа уезжает в никуда. Сообщение при
+    этом уже ссылалось на 003 и проверяло не то, о чём 003 говорит. Нашёл
+    внешний взгляд на #433.
+    """
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "claude/окно-1"], cwd=tmp_path, check=True)
+    (tmp_path / "файл").write_text("предмет", encoding="utf-8")
+    for args in (
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "набор"],
+        ["add", "-A"],
+        ["commit", "-qm", "предмет"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    said: list[list[str]] = []
+    original = subprocess.run
+
+    def watched(args, **rest):  # type: ignore[no-untyped-def]
+        said.append(list(args))
+        return original(args, **rest)
+
+    monkeypatch.setattr(preflight.subprocess, "run", watched)
+    assert preflight.push_branch(tmp_path) == preflight.EXIT_BROKEN
+    # ОТКАЗ ОБЯЗАН ПРИЙТИ ОТ ПРОВЕРКИ, А НЕ ОТ НЕУДАЧНОГО ТОЛЧКА. В пустом
+    # дереве `git push` падает и сам по себе, и первая редакция этого теста
+    # зеленела на прежнем — негодном — условии: код возврата совпадал, причина
+    # была другая. Поэтому судится СОСТАВ вызовов: толчка не должно случиться
+    # вовсе (170 — зелёное на подделке тоже гипотеза).
+    assert not any("push" in one for one in said), f"толчок случился на ветке без приставки: {said}"
+
+
+def test_the_prefix_comes_from_the_one_who_decides_by_it() -> None:
+    """Список приставок берётся у `agent_pr`, а не пишется здесь второй копией.
+
+    Разъехавшись, два списка дали бы худший из отказов: толчок прошёл,
+    изменение не открылось, красного нет нигде (022, 090).
+    """
+    agent_pr = load_script("agent_pr.py")
+    assert preflight.agent_pr.PREFIXES is agent_pr.PREFIXES or (
+        preflight.agent_pr.PREFIXES == agent_pr.PREFIXES
+    ), "проверка толчка ведёт свой список приставок"
+    assert agent_pr.PREFIXES, "приставок не объявлено — предмета у проверки нет (075)"
