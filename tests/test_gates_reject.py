@@ -1243,3 +1243,46 @@ def test_the_common_ancestor_is_asked_of_git_and_refuses_when_absent(
     monkeypatch.setattr(journal, "git", lambda args: "   \n")
     with pytest.raises(journal.NotRun):
         journal.common_ancestor("origin/main")
+
+
+def test_a_given_ancestor_is_not_asked_of_git_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Готовая точка сравнения принимается, а не переспрашивается.
+
+    Зовущему, которому предок нужен и самому, незачем платить вторым вызовом
+    `git merge-base`. И дело не только в вызове: между двумя вопросами общая
+    ветка может сдвинуться, и два читателя ОДНОГО захода получат разные точки
+    (нашёл внешний взгляд на #445).
+    """
+    journal = load_script("journal.py")
+    asked: list[list[str]] = []
+
+    def remembering(args: list[str]) -> str:
+        asked.append(args)
+        return "путь\0"
+
+    monkeypatch.setattr(journal, "git", remembering)
+    journal.changed_files("origin/main", ancestor="деадбиф")
+    assert not any("merge-base" in args for args in asked), (
+        f"предок спрошен заново при готовом: {asked}"
+    )
+    assert any("деадбиф...HEAD" in args for args in asked), (
+        f"переданный предок не использован: {asked}"
+    )
+
+
+def test_without_a_given_ancestor_git_is_still_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вторая половина: без готового предка он по-прежнему спрашивается.
+
+    Без неё послабление сняло бы точку сравнения вовсе — и отбор пошёл бы от
+    пустой ссылки (051).
+    """
+    journal = load_script("journal.py")
+    asked: list[list[str]] = []
+
+    def remembering(args: list[str]) -> str:
+        asked.append(args)
+        return "деадбиф\n" if "merge-base" in args else "путь\0"
+
+    monkeypatch.setattr(journal, "git", remembering)
+    journal.changed_files("origin/main")
+    assert any("merge-base" in args for args in asked), "предок не спрошен вовсе"
