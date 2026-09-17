@@ -158,15 +158,32 @@ def existing_mark(
     return None
 
 
+def marks_in(raw: str) -> list[str]:
+    """Слова из скобки находки: `[дефект · ответ]` — два, `[дефект]` — одно.
+
+    Разделителем служит точка-разделитель или запятая: ревьюер пишет то, что
+    видит в подсказке, и требовать от него одного знака значило бы ронять
+    запись из-за оформления (051).
+    """
+    return [" ".join(part.strip("*_` ").split()).lower() for part in re.split(r"[·,]", raw)]
+
+
 def weight_of(raw: str) -> str:
     """Вес из строки находки: из объявленной шкалы либо «без веса».
 
     Слово вне шкалы весом не считается и НЕ приводится к ближайшему: приведение
     решило бы за ревьюера, а объявленное «без веса» видно и разбирающему, и
     тому, кто правит подсказку ревью (154).
+
+    СКОБКА НЕСЁТ ДВА СЛОВА, И ВТОРОЕ НЕ ПОРТИТ ПЕРВОГО. С появлением рода
+    предмета ревьюер пишет `[дефект · ответ]`; прежний разбор брал скобку
+    ЦЕЛИКОМ, не находил её в шкале и объявлял «без веса» — то есть новая
+    пометка обнуляла бы старую (090).
     """
-    cleaned = " ".join(raw.strip("*_` ").split()).lower()
-    return cleaned if cleaned in WEIGHTS else UNWEIGHED
+    for said in marks_in(raw):
+        if said in WEIGHTS:
+            return said
+    return UNWEIGHED
 
 
 #: Чем взгляд говорит «находок нет» В ТОЙ ЖЕ СТРОКЕ, что и находку. Формат
@@ -187,12 +204,13 @@ def weight_of(raw: str) -> str:
 ABSENCE: Final = frozenset({"нет", "нет находок", "находок нет", "none", "no findings"})
 
 
-def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str]]:
+def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
     """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов.
 
+    Третьим в паре идёт РОД предмета: «код» либо «ответ» (`findings.KINDS`).
     Строка отрицания находкой не считается: см. `ABSENCE`.
     """
-    found: list[tuple[str, str]] = []
+    found: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     for comment in comments:
         for raw_weight, title in FINDING_RE.findall(comment.get("body") or ""):
@@ -201,7 +219,11 @@ def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str]]:
                 continue
             if cleaned and cleaned not in seen:
                 seen.add(cleaned)
-                found.append((weight_of(raw_weight), cleaned))
+                род = next(
+                    (one for one in marks_in(raw_weight) if one in findings.KINDS),
+                    "",
+                )
+                found.append((weight_of(raw_weight), cleaned, findings.kind_of(cleaned, род)))
     return found
 
 
@@ -308,10 +330,35 @@ def render_body(entries: dict[str, findings.Entry], swept_to: str = "") -> str:
         # не расставляет по важности. Ошибаться здесь можно только в сторону
         # «посмотреть лишний раз» (051).
         order = {name: place for place, name in enumerate(WEIGHTS)}
-        for mark, entry in sorted(
+        # НАХОДКИ ОБ ОТВЕТЕ ИДУТ ПЕРВЫМИ, И ЭТО НЕ ВКУС. Карта, которую проект
+        # выдаёт взгляду, говорит ему прямо: «это находка об ОТВЕТЕ, а не о
+        # коде, и она дороже любой другой — ответ живёт годами и читается как
+        # факт». Пока род не записывался, механизм объявлял их ценнее и терял
+        # различие при записи: отдачу канала по ответам посчитать было нечем.
+        порядок = sorted(
             entries.items(),
-            key=lambda item: (order.get(item[1].weight, -1), item[1].pr),
-        ):
+            key=lambda item: (
+                item[1].kind != findings.ANSWER_KIND,
+                order.get(item[1].weight, -1),
+                item[1].pr,
+            ),
+        )
+        об_ответе = [one for one in порядок if one[1].kind == findings.ANSWER_KIND]
+        if об_ответе:
+            lines.append("### Об ОТВЕТЕ каталогу — разбирать первыми")
+            lines.append("")
+            lines.append(
+                "Ответ живёт годами и читается соседями как факт. Находка здесь говорит, "
+                "что предмет правила в дереве ЕСТЬ, а ответ утверждает обратное."
+            )
+            lines.append("")
+        for mark, entry in порядок:
+            if об_ответе and entry is об_ответе[-1][1]:
+                lines.append(f"- `{mark}` {entry.said()}")
+                lines.append("")
+                lines.append("### О коде")
+                lines.append("")
+                continue
             lines.append(f"- `{mark}` {entry.said()}")
     else:
         lines.append("## Не разобрано")
@@ -605,7 +652,7 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
             renamed = 0
-            for weight, title in titles:
+            for weight, title, род in titles:
                 # ЗАПИСЬ ИЩЕТСЯ ПРЕЖДЕ, ЧЕМ ЗАВОДИТСЯ. Отпечаток берётся от
                 # заголовка, а заголовок ревьюер на новом заходе пересказывает
                 # — и та же находка ложилась второй записью. Замер 10.09.2026:
@@ -622,9 +669,9 @@ def main(argv: list[str] | None = None) -> int:
                     # заново значило бы терять уже сделанную работу — тот же
                     # класс, что потеря хвоста позднего взгляда в реестре
                     # непросмотренного (022).
-                    entries[mark] = replace(entries[mark], pr=args.pr, weight=weight)
+                    entries[mark] = replace(entries[mark], pr=args.pr, weight=weight, kind=род)
                     continue
-                entries[fingerprint(title)] = findings.Entry(args.pr, weight, title)
+                entries[fingerprint(title)] = findings.Entry(args.pr, weight, title, kind=род)
             said = f"из #{args.pr}: вердикт {verdict}, строк находок {len(titles)}"
             if renamed:
                 said += f", из них уже лежат под своим отпечатком {renamed}"
