@@ -402,7 +402,9 @@ def test_a_resolution_is_read_from_the_sweep_mark_not_a_fixed_window(
     реестре #348 лежало за тридцатым закрытым — уборка на него уже не смотрела.
     """
     page = [merged(50, "Разобрано: aaaaaaa"), merged(49, "Разобрано: bbbbbbb")]
-    monkeypatch.setattr(module.ghrest, "merged_changes", lambda repo, token, limit: page)
+    # Читается СТРАНИЦА, а не только слитое на ней: полнота страницы
+    # меряется её размером (находка #418).
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, len(page)))
     marks, mark = module.resolved_marks("o/r", "токен", 49)
     assert marks == {"aaaaaaa"}, "прочитано не от отметки уборки"
     assert mark == 50, "отметка не сдвинулась на прочитанное"
@@ -425,7 +427,9 @@ def test_a_full_page_beyond_the_sweep_mark_is_said_out_loud(
     унёс (045).
     """
     page = [merged(number, "") for number in range(100, 97, -1)]
-    monkeypatch.setattr(module.ghrest, "merged_changes", lambda repo, token, limit: page)
+    # Читается СТРАНИЦА, а не только слитое на ней: полнота страницы
+    # меряется её размером (находка #418).
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, len(page)))
     module.resolved_marks("o/r", "токен", 10, limit=3)
     said = capsys.readouterr().err
     assert "::warning::" in said and "#10" in said, said
@@ -602,3 +606,44 @@ def test_a_verdict_that_disagrees_with_its_list_is_announced(
     said = capsys.readouterr().err
     assert "::warning::" in said, "расхождение осталось в логе — наружу его не видно"
     assert "находок 3" in said and "строк находок 1" in said, "числа не названы"
+
+
+def test_a_full_page_of_closed_warns_even_when_few_were_merged(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Полнота страницы меряется СТРАНИЦЕЙ, а не слитыми на ней.
+
+    Запрос идёт за ЗАКРЫТЫМИ, и слитые — их подмножество. Счёт по слитым молчал
+    бы ровно тогда, когда закрытых без слияния много, — то есть в том самом
+    случае, ради которого предупреждение и заведено: за полной страницей
+    остаётся неувиденное. Нашёл внешний взгляд на #418.
+
+    ЗДЕСЬ СЛИТОЕ ОДНО, А СТРАНИЦА ПОЛНА: прежний счёт (`len(merged) >= limit`)
+    дал бы 1 >= 3 и промолчал.
+    """
+    page = [{"number": 300, "merged_at": "x", "body": ""}]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, limit))
+    module.resolved_marks("o/r", "t", since=10, limit=3)
+    assert "страница слитого заполнена" in capsys.readouterr().err
+
+
+def test_a_page_with_room_left_says_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Страница не полна — предупреждения нет: крик о законном учит не слушать (051)."""
+    page = [{"number": 300, "merged_at": "x", "body": ""}]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, 1))
+    module.resolved_marks("o/r", "t", since=10, limit=3)
+    assert "страница слитого заполнена" not in capsys.readouterr().err
+
+
+def test_the_page_size_comes_from_the_page_not_the_filter() -> None:
+    """Транспорт отдаёт размер страницы отдельным числом.
+
+    Форма держит смысл: зовущему нужны ДВА числа, и вывести второе из первого
+    нельзя — фильтр их разводит.
+    """
+    import inspect
+
+    said = inspect.signature(module.ghrest.merged_page).return_annotation
+    assert "tuple" in str(said), "страница обязана отдавать свой размер вторым значением"
