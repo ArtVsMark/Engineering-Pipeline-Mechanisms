@@ -190,6 +190,50 @@ def describe(branch: str, base: str) -> tuple[str, str]:
     return title, "\n".join(lines)
 
 
+def say_lost_marks(published: str, sent: str) -> None:
+    """Говорит наружу, если снятие не пережило публикацию.
+
+    Предупреждение, а не отказ: изменение уже открыто, и ронять шаг здесь
+    значило бы менять потерю записи на потерю изменения (084). Но молчать
+    нельзя: «снятие доехало» и «снятие исчезло» снаружи одинаковы (045).
+    """
+    lost = kept_the_marks(published, sent)
+    if lost:
+        print(
+            "::warning::площадка не сохранила строки снятия: "
+            + ", ".join(lost)
+            + ". Отправленное не равно доставленному (188): уборка реестра находок "
+            "их не увидит, и записи останутся висеть неразобранными",
+            file=sys.stderr,
+        )
+
+
+def kept_the_marks(published: str, sent: str) -> list[str]:
+    """Отпечатки снятия, не пережившие публикацию. Пусто — тело доехало.
+
+    ОТПРАВЛЕННОЕ НЕ РАВНО ДОСТАВЛЕННОМУ, и успешный код ответа доказывает приём
+    запроса, а не доставку смысла
+    ([188](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/188-published-is-not-delivered.md)).
+    Строка «Разобрано: <отпечаток>» — команда ДРУГОМУ механизму: уборка реестра
+    находок читает её из тела и по ней уносит запись. Если площадка перепишет
+    тело — подставит ссылку, свернёт разметку, обрежет длину, — снятие исчезнет
+    молча: работа сделана, а запись висит неразобранной.
+
+    СВЕРКА СТОИТ НОЛЬ ЗАПРОСОВ. Площадка возвращает опубликованное тело прямо в
+    ответе на запись, и сравнить его с отправленным можно тут же. Приём тот же,
+    что у замера взведения (`arm.py::kept_the_body`), и предмет тот же: поле
+    объявлено входом — проверяется, что оно работает.
+
+    СУДЯТСЯ ОТПЕЧАТКИ, А НЕ ТЕЛО ЦЕЛИКОМ. Площадка вправе нормализовать перевод
+    строки и пробел, и требовать побайтового совпадения значило бы краснеть на
+    исправном (051). Предмет — ровно то, что кто-то обязан прочитать и по чему
+    обязан действовать.
+    """
+    was = changerefs.resolved_in(sent)
+    now = set(changerefs.resolved_in(published))
+    return [mark for mark in was if mark not in now]
+
+
 def sync_description(
     repo: str, number: int, token: str, title: str, body: str, dry_run: bool
 ) -> None:
@@ -213,8 +257,11 @@ def sync_description(
     if dry_run:
         print(f"обновило бы описание #{number}")
         return
-    ghrest.request("PATCH", f"repos/{repo}/pulls/{number}", token, {"title": title, "body": body})
+    said = ghrest.request(
+        "PATCH", f"repos/{repo}/pulls/{number}", token, {"title": title, "body": body}
+    )
     print(f"описание #{number} приведено к коммитам ветки")
+    say_lost_marks(str((said or {}).get("body") or ""), body)
 
 
 def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_run: bool) -> None:
@@ -376,6 +423,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         number = created["number"]
         print(f"открыто изменение #{number}: {created['html_url']}")
+        say_lost_marks(str(created.get("body") or ""), body)
         apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
         # Только что открытое изменение стоп-метки нести не может: её ставит
         # человек, а он его ещё не видел.

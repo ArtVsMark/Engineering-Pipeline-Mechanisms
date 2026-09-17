@@ -161,3 +161,46 @@ def test_a_branch_with_a_real_diff_is_opened(monkeypatch: pytest.MonkeyPatch) ->
     # здесь другое: заход НЕ отказал и собрал описание.
     assert title.startswith("fix: настоящая работа")
     assert "Refs #224" in body
+
+
+# --- опубликованное перечитывают (188) ----------------------------------------
+
+
+def test_a_resolution_that_did_not_survive_publication_is_named(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Снятие, не пережившее публикацию, называется вслух, а не теряется молча.
+
+    Строка «Разобрано: <отпечаток>» — команда ДРУГОМУ механизму: уборка реестра
+    находок читает её из тела изменения и по ней уносит запись. Успешный код
+    ответа доказывает приём запроса, а не доставку смысла
+    ([188](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/188-published-is-not-delivered.md)):
+    перепиши площадка тело — снятие исчезнет, работа окажется сделанной, а
+    запись останется висеть неразобранной. Ровно такую потерю проект уже
+    пережил 16.09.2026, хотя и по другой причине.
+
+    ПРЕДУПРЕЖДЕНИЕ, А НЕ ОТКАЗ: изменение уже открыто, и ронять шаг значило бы
+    менять потерю записи на потерю изменения (084).
+    """
+    sent = "тело\n\nРазобрано: abc1234\nРазобрано: def5678\n"
+    module.say_lost_marks("тело\n\nРазобрано: abc1234\n", sent)
+    said = capsys.readouterr().err
+    assert "::warning::" in said and "def5678" in said, said
+
+
+def test_a_body_that_arrived_whole_says_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    """Тело доехало — предупреждения нет: сигнал, звучащий всегда, не читают (051)."""
+    sent = "тело\n\nРазобрано: abc1234\n"
+    module.say_lost_marks(sent, sent)
+    assert capsys.readouterr().err == ""
+
+
+def test_the_platform_may_normalise_whitespace() -> None:
+    """Судятся ОТПЕЧАТКИ, а не тело побайтово.
+
+    Площадка вправе нормализовать перевод строки и пробел, и требовать точного
+    совпадения значило бы краснеть на исправном (051). Предмет — ровно то, что
+    кто-то обязан прочитать и по чему обязан действовать.
+    """
+    sent = "тело\n\nРазобрано: abc1234\n"
+    assert module.kept_the_marks(sent.replace("\n", "\r\n"), sent) == []
