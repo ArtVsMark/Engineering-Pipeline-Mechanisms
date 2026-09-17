@@ -479,6 +479,7 @@ PROMPT_MAY_NAME = {
     "152": "почему изменение, правящее сам прогон, ревью не получает",
     "084": "почему красное ревью не держит слияние",
     "090": "почему карта собирается механизмом, а не пишется руками",
+    "071": "почему разрешённые команды названы в задании вторым списком — дубль подписан",
 }
 
 
@@ -999,4 +1000,83 @@ def test_a_matrix_of_agents_runs_as_a_wave_not_a_salvo() -> None:
         assert size == 1, (
             f"«{name}»: матрица агентов идёт по {size or 'без предела'} разом — "
             "волна обязана быть объявлена числом, а залп сам себе создаёт отказ"
+        )
+
+
+#: Команды, разрешённые шагу: имя инструмента `Bash(<команда>:*)` без хвоста.
+PERMITTED_COMMAND: Final = re.compile(r"Bash\(([^:)]+)")
+
+
+def commands_and_task(path: Path) -> list[tuple[str, list[str], str]]:
+    """По каждому шагу агента: имя, разрешённые команды и текст задания.
+
+    ЗАДАНИЕ — ЭТО ЛЮБОЙ КАНАЛ УКАЗАНИЙ, А НЕ КЛЮЧ `prompt`. У взгляда на
+    изменение указания едут ключом `prompt`; у ответа на обращение промпта нет
+    вовсе — задачу ставит сам текст упоминания, а наши указания идут надбавкой
+    к системному промпту. Проверка по одному ключу зеленела бы на втором шаге,
+    сколько бы там ни было разрешено, — гейт смотрел бы не туда, где предмет
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    Нашёл это сам гейт, на первом же прогоне: он покраснел на `claude.yml`,
+    которого замер не видел.
+    """
+    said = []
+    for step in agent_steps(path):
+        args = step["with"]["claude_args"]
+        tools = re.search(r'--allowedTools\s+"([^"]+)"', args)
+        assert tools, f"{path.name}: список инструментов шага не объявлен"
+        appended = re.search(r'--append-system-prompt\s+"([^"]+)"', args)
+        task = str(step["with"].get("prompt") or "") + (appended.group(1) if appended else "")
+        said.append(
+            (str(step.get("name") or "без имени"), PERMITTED_COMMAND.findall(tools.group(1)), task)
+        )
+    return said
+
+
+@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+def test_the_task_names_the_environments_limit(path: Path) -> None:
+    """Каждая разрешённая команда названа в ТЕКСТЕ задания, а не только в настройке.
+
+    ИСПОЛНИТЕЛЬ НЕ ВИДИТ ТОГО, ЧТО ЗНАЕТ ХОЗЯИН ПРОГОНА. Список инструментов
+    живёт в `claude_args` — агенту он не показан, и о границе окружения агент
+    узнаёт, только упёршись в неё
+    ([061](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/061-environment-bans-belong-in-the-task.md)).
+
+    ИНЦИДЕНТ ЗДЕСЬ УЖЕ ОПЛАЧЕН И ЗАПИСАН СОСЕДНИМ КОММЕНТАРИЕМ: разрешение
+    выдаётся по НАЧАЛУ команды, и `python3 -m pytest` — другая строка, чем
+    `python -m pytest`. Взгляд остался без прогона, разрешение имея, и починен
+    был тогда список, а не задание: агент по-прежнему не знал, что ему можно.
+
+    ЗАМЕР 17.09.2026 ПО ВСЕМУ ДЕРЕВУ: разрешённых команд по трём заданиям 22,
+    названо в тексте заданий — 4.
+
+    СПИСОК В ЗАДАНИИ — НАМЕРЕННЫЙ ДУБЛЬ, и он подписан таковым в самом задании
+    ([071](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/071-deliberate-duplication-is-signed.md)).
+    Канонический список один — `claude_args`; дубль нужен потому, что канон
+    адресату не виден. Держит их вместе эта проверка: команда, добавленная в
+    разрешение и не названная в задании, краснеет здесь.
+    """
+    for name, commands, task in commands_and_task(path):
+        assert commands, (
+            f"{path.name}, «{name}»: разрешённых команд нет — предмета у проверки нет (075)"
+        )
+        silent = [command for command in commands if command not in task]
+        assert not silent, (
+            f"{path.name}, «{name}»: разрешено, но в задании не названо: {silent} — "
+            "исполнитель узнает о границе, только упёршись в неё"
+        )
+
+
+@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+def test_the_task_says_the_list_is_closed(path: Path) -> None:
+    """Задание говорит, что список ЗАКРЫТЫЙ, а не просто перечисляет команды.
+
+    Перечень без слова «закрытый» читается как примеры: исполнитель попробует
+    соседнюю форму, получит отказ и примет его за поломку изменения, которое
+    смотрит. Отказ окружения обязан быть назван отказом ОКРУЖЕНИЯ
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    for name, _, task in commands_and_task(path):
+        assert "ЗАКРЫТЫЙ" in task, (
+            f"{path.name}, «{name}»: задание перечисляет команды, но не говорит, "
+            "что список закрыт — перечень без этого читается как примеры"
         )
