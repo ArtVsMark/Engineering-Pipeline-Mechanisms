@@ -101,7 +101,11 @@ def cited() -> dict[str, list[str]]:
         # Сам этот файл называет номера как ПРИМЕРЫ разбора, а не как основание.
         if name == "tests/test_citation_applicability.py":
             continue
-        if name == "CHANGELOG.md" or name.startswith(HISTORY):
+        # Проверка одна: `HISTORY` уже несёт «CHANGELOG.md» первой строкой, и
+        # отдельное равенство было вторым написанием того же (нашёл внешний
+        # взгляд на #429). Второе условие расходится с первым молча, если
+        # список однажды поправят.
+        if name.startswith(HISTORY):
             continue
         for number, line in enumerate((ROOT / name).read_text(encoding="utf-8").splitlines(), 1):
             for match in LINK_RE.finditer(line):

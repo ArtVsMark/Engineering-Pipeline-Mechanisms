@@ -1,0 +1,52 @@
+{
+  "_": "Снятая форма ВЫГРУЗКИ каталога — той самой, из которой навык `answer-a-rule` читает букву правила. Лежит здесь, чтобы обещание навыка было с чем сверить: сниппет, читающий поле, которого в выгрузке нет, сломается ровно в ту минуту, когда окно собралось прочитать правило по букве, — и окно вернётся к чтению по ЗАГОЛОВКУ, то есть к той самой беде, против которой навык и заведён (правило 170: зелёное на подделке — тоже гипотеза). Нашёл внешний взгляд на #401.",
+  "_снято": "17.09.2026",
+  "_откуда": "https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook/main/export/rules.json",
+  "_как_обновить": "python -c \"import sys;sys.path.insert(0,'scripts');import catalogue,json;print(json.dumps(catalogue.read(catalogue.EXPORT_URL))[:0])\" — и пересобрать срез одной записи",
+  "_обрезано": "оставлена ОДНА запись правила целиком и блок contracts; тексты укорочены",
+  "schema": "1.7",
+  "contracts": {
+    "export": "1.7",
+    "bindings": "1.5",
+    "consumers": "1.1",
+    "proposals": "1.1",
+    "showcase": "1.1",
+    "where": "1.4"
+  },
+  "count": 203,
+  "rules": [
+    {
+      "id": "044",
+      "slug": "check-the-premise-before-fixing",
+      "title": {
+        "ru": "Премиса находки проверяется прежде, чем по ней работают",
+        "en": "Verify a finding's premise before working from it"
+      },
+      "claim": {
+        "ru": "Находка содержит утверждение о текущем состоянии. Оно проверяется первым действием — до планирования, до задачи, до кода",
+        "en": "A finding contains a claim about the current state. That claim is verified as the first action — before planning, before"
+      },
+      "applies": {
+        "ru": "**Работает** для находок аудита, отчётов инструментов, чужих замечаний в ревью.\n\n**Не работает** там, где проверка преми",
+        "en": "**Works** for audit findings, tool reports, other people's review comments.\n\n**Does not work** where verifying the premi"
+      },
+      "files": {
+        "ru": "rules/ru/044-check-the-premise-before-fixing.md",
+        "en": "rules/en/044-check-the-premise-before-fixing.md"
+      },
+      "areas": {
+        "ru": [
+          "аудит"
+        ],
+        "en": [
+          "audit"
+        ]
+      },
+      "tier": {
+        "n": 3,
+        "ru": "гейты и процессы",
+        "en": "gates and processes"
+      }
+    }
+  ]
+}
