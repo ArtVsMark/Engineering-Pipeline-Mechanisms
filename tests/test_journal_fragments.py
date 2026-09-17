@@ -30,6 +30,7 @@ from tests.conftest import ROOT, load_script
 module = load_script("build_changelog.py")
 journal = load_script("journal.py")
 journal_gate = load_script("check_journal.py")
+changerefs = load_script("changerefs.py")
 
 FRAGMENTS = ROOT / "changelog.d"
 
@@ -485,4 +486,24 @@ def test_the_content_is_read_at_the_same_point_as_the_file_list(
     assert shown, "содержимое у основания не спрашивалось вовсе"
     assert all(args[2].startswith("деадбиф:") for args in shown), (
         f"содержимое взято не у общего предка, а у движущейся вершины: {shown}"
+    )
+
+
+def test_the_resolution_parse_is_the_same_one_the_change_body_uses() -> None:
+    """Строку снятия разбирает ОДИН разбор, и он общий с телом изменения.
+
+    Здесь жил свой: строка находилась образцом, а отпечатки выбирались по ВСЕЙ
+    строке — включая текст причины. Ровно этот дефект `changerefs` уже чинил у
+    себя, разведя отпечатки и причину, и второй разбор повторял его заново.
+
+    ЗАМЕР 17.09.2026: по 660 строкам «Разобрано» в журнале и последних 400 телах
+    коммитов два разбора совпали на ВСЕХ — дефект был скрытым, а не сработавшим.
+    Предъявляется он одной строкой, и она здесь.
+    """
+    said = "Разобрано: abc1234 — премиса опровергнута заходом deadbee, чинить нечего"
+    assert journal_gate.marks_of(said) == {"abc1234"}, (
+        "отпечаток взят из ТЕКСТА ПРИЧИНЫ — значит разбор снова свой, а не общий"
+    )
+    assert journal_gate.marks_of(said) == set(changerefs.resolved_in(said)), (
+        "разбор гейта разошёлся с разбором тела изменения"
     )
