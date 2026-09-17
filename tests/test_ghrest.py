@@ -525,3 +525,32 @@ def test_every_allowed_mutation_is_declared_idempotent() -> None:
         + ", ".join(unknown)
         + " — повтор у GraphQL разрешён целиком, и это решение надо пересмотреть"
     )
+
+
+def test_merged_page_reports_the_page_size_not_the_merged_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Страница отдаёт СВОЙ размер, а не число слитых на ней.
+
+    Запрос идёт за закрытыми, и слитые — их подмножество: страница бывает
+    полной при горстке слитых. Вывести одно число из другого нельзя — их
+    разводит фильтр, — и зовущему нужны оба. Нашёл внешний взгляд на #418.
+    """
+    page = [
+        {"number": 3, "merged_at": "2026-09-17T00:00:00Z"},
+        {"number": 2, "merged_at": None},
+        {"number": 1, "merged_at": None},
+    ]
+    monkeypatch.setattr(transport, "request", lambda *a, **k: page)
+    merged, size = transport.merged_page("o/r", "t", 3)
+    assert [one["number"] for one in merged] == [3], "слитым считается только слитое"
+    assert size == 3, "размер страницы взят по странице, а не по отфильтрованному"
+
+
+def test_merged_changes_still_answers_with_the_merged_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Прежнее имя отвечает прежним: у него три зовущих, и форма им не менялась."""
+    page = [{"number": 2, "merged_at": "x"}, {"number": 1, "merged_at": None}]
+    monkeypatch.setattr(transport, "request", lambda *a, **k: page)
+    assert [one["number"] for one in transport.merged_changes("o/r", "t", 2)] == [2]

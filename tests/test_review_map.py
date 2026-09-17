@@ -216,6 +216,7 @@ def test_a_map_that_assembled_is_clean(
     )
     monkeypatch.setattr(module, "titles", dict)
     monkeypatch.setattr(module, "touches_the_answer", lambda base: False)
+    monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
     assert module.main(["--out", str(where)]) == module.EXIT_OK
     assert where.is_file(), "карта не легла в файл"
     said = capsys.readouterr().out
@@ -223,3 +224,24 @@ def test_a_map_that_assembled_is_clean(
     # Третья группа считается вслух наравне с двумя первыми: число, которого нет
     # в отчёте, читатель считает нулём (046).
     assert "not-applicable 1" in said, said
+
+
+def test_the_tally_line_has_no_dangling_comma_when_nothing_is_denied(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """При пустом «неприменимо» в строке итога нет висящей запятой.
+
+    Склейка через `", ".join(...)` давала на пустом словаре пустую строку, и
+    итог читался как «глазами 8,  → путь». Случай не выдуман: «неприменимых»
+    может не остаться вовсе — это и есть цель разбора ответов. Нашёл внешний
+    взгляд на #416.
+    """
+    monkeypatch.setattr(module, "split", lambda answer: (["001"], ["002"], {}))
+    monkeypatch.setattr(module, "titles", lambda: {})
+    monkeypatch.setattr(module, "touches_the_answer", lambda base: False)
+    monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
+    monkeypatch.setattr(module, "from_base", lambda base: {"rules": {}})
+    module.main(["--base", "HEAD", "--out", str(tmp_path / "map.md")])
+    said = capsys.readouterr().out
+    assert ",  " not in said and ", →" not in said, f"висящая запятая в итоге: {said!r}"
+    assert "машиной 1, глазами 1 →" in said

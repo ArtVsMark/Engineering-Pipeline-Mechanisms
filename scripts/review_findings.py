@@ -381,16 +381,21 @@ def resolved_marks(
     """
     marks: set[str] = set()
     mark = since
-    merged = ghrest.merged_changes(repo, token, limit)
+    merged, page = ghrest.merged_page(repo, token, limit)
     for item in merged:
         number = int(item.get("number") or 0)
         mark = max(mark, number)
         if number <= since:
             continue
         marks.update(changerefs.resolved_in(item.get("body") or ""))
+    # ПОЛНОТА СТРАНИЦЫ МЕРЯЕТСЯ СТРАНИЦЕЙ, А НЕ СЛИТЫМИ НА НЕЙ. Запрос идёт за
+    # закрытыми, и слитых на полной странице бывает горстка: счёт по слитым
+    # молчал бы ровно тогда, когда закрытых без слияния много, — то есть в том
+    # случае, ради которого предупреждение и заведено. Нашёл внешний взгляд
+    # на #418.
     if (
         since
-        and len(merged) >= limit
+        and page >= limit
         and min((int(one.get("number") or 0) for one in merged), default=0) > since
     ):
         print(
