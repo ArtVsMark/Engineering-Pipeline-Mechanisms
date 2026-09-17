@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -229,6 +230,28 @@ def test_a_prose_mention_of_the_word_is_not_a_mark() -> None:
     assert journal_gate.marks_of("снятие живёт строкой «Разобрано:» в теле изменения") == set()
 
 
+def fake_git(body: str, at_base: str) -> Callable[[list[str]], str]:
+    """Подделка транспорта, РАЗБИРАЮЩАЯ команду: тело коммитов и вид у основания.
+
+    Подделка, отвечающая одним текстом на любой вызов, здесь неверна с тех пор,
+    как разбор спрашивает ДВЕ разные вещи: тело коммитов и вид фрагмента у
+    основания. Отвечая обоим одно, она делает объявленное пустым — и проверка
+    «все отметки уехали» перестаёт проверять то, чем названа.
+
+    ЗАМЕРЕНО, А НЕ ОБЪЯВЛЕНО: механизм окалечен так, что тело коммитов не
+    спрашивается ВОВСЕ (`carried = set()`). Со старой подделкой проверка
+    осталась зелёной, с этой — покраснела
+    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
+    """
+
+    def _git(args: list[str]) -> str:
+        if "show" in args:
+            return at_base
+        return f"починка\n\n{body}"
+
+    return _git
+
+
 def test_travelled_compares_the_fragment_with_the_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -246,7 +269,7 @@ def test_travelled_compares_the_fragment_with_the_commit(
         "changed_files",
         lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
     )
-    monkeypatch.setattr(journal_gate.journal, "git", lambda args: "починка\n\nРазобрано: abc1234\n")
+    monkeypatch.setattr(journal_gate.journal, "git", fake_git("Разобрано: abc1234\n", ""))
     assert journal_gate.travelled("origin/main") == ["def5678"]
 
 
@@ -263,5 +286,108 @@ def test_travelled_says_nothing_when_all_marks_rode_along(
         "changed_files",
         lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
     )
-    monkeypatch.setattr(journal_gate.journal, "git", lambda args: "починка\n\nРазобрано: abc1234\n")
+    monkeypatch.setattr(journal_gate.journal, "git", fake_git("Разобрано: abc1234\n", ""))
     assert journal_gate.travelled("origin/main") == []
+
+
+def test_a_mark_the_fragment_already_carried_is_not_demanded_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Отметку, стоявшую во фрагменте У ОСНОВАНИЯ, это изменение не везёт.
+
+    Первая редакция гейта читала текущий текст фрагмента ЦЕЛИКОМ. Изменение,
+    правящее в уже слитом фрагменте одну фразу, получало красное на чужих
+    отметках — уехавших с тем изменением, которое их и объявило. Поймано на
+    #438: девять отпечатков, повезти которые заново значило бы снять находки
+    дважды.
+    """
+    fragment = tmp_path / "changelog.d" / "правка.fixed.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text("Разобрано: abc1234\n\nдописанная фраза\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        journal_gate.journal,
+        "changed_files",
+        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+    )
+    monkeypatch.setattr(journal_gate.journal, "git", fake_git("", "Разобрано: abc1234\n"))
+    assert journal_gate.travelled("origin/main") == []
+
+
+def test_a_mark_added_by_this_change_is_still_demanded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Вторая половина: НОВАЯ отметка в том же фрагменте по-прежнему требуется.
+
+    Без неё послабление снесло бы гейт целиком: «фрагмент уже существовал»
+    стало бы пропуском для всего, что в него допишут (051).
+    """
+    fragment = tmp_path / "changelog.d" / "правка.fixed.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text("Разобрано: abc1234\nРазобрано: def5678\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        journal_gate.journal,
+        "changed_files",
+        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+    )
+    monkeypatch.setattr(journal_gate.journal, "git", fake_git("", "Разобрано: abc1234\n"))
+    assert journal_gate.travelled("origin/main") == ["def5678"]
+
+
+def test_a_fragment_born_here_has_no_base_and_all_its_marks_are_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Фрагмента у основания нет — отказ `git show` значит «все отметки новые».
+
+    Третий исход здесь обязан идти в СТРОГУЮ сторону: принять отказ чтения за
+    «отметок у основания много» значило бы зеленеть ровно на новых фрагментах,
+    ради которых гейт и стоит (045, 068).
+    """
+    fragment = tmp_path / "changelog.d" / "новое.added.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text("Разобрано: abc1234\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        journal_gate.journal,
+        "changed_files",
+        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+    )
+
+    def refusing(args: list[str]) -> str:
+        if "show" in args:
+            raise journal_gate.NotRun("такого пути у основания нет")
+        return "починка без отметок"
+
+    monkeypatch.setattr(journal_gate.journal, "git", refusing)
+    assert journal_gate.travelled("origin/main") == ["abc1234"]
+
+
+def test_at_base_reads_the_file_as_it_was(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вид файла у основания спрашивается у истории, а не у рабочего дерева.
+
+    Спрашивается прямо, а не только через вердикт: сойдись вердикт по другой
+    причине, вычитаемое было бы взято не оттуда, и послабление стало бы шире
+    заявленного.
+    """
+    asked: list[list[str]] = []
+
+    def remembering(args: list[str]) -> str:
+        asked.append(args)
+        return "Разобрано: abc1234\n"
+
+    monkeypatch.setattr(journal_gate.journal, "git", remembering)
+    assert journal_gate.at_base("origin/main", "changelog.d/правка.fixed.md") == (
+        "Разобрано: abc1234\n"
+    )
+    assert asked == [["git", "show", "origin/main:changelog.d/правка.fixed.md"]]
+
+
+def test_at_base_says_empty_when_the_path_was_not_there(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пути у основания не было — пусто, и это законный исход, а не отказ захода."""
+
+    def refusing(args: list[str]) -> str:
+        raise journal_gate.NotRun("fatal: path does not exist")
+
+    monkeypatch.setattr(journal_gate.journal, "git", refusing)
+    assert journal_gate.at_base("origin/main", "changelog.d/новое.added.md") == ""
