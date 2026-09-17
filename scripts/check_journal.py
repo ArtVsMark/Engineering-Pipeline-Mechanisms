@@ -221,7 +221,9 @@ def travelled(base: str) -> list[str]:
     """
     ancestor = journal.common_ancestor(base)
     fragments = [
-        name for name in journal.changed_files(base, alive_only=True) if FRAGMENT_RE.match(name)
+        name
+        for name in journal.changed_files(base, alive_only=True, ancestor=ancestor)
+        if FRAGMENT_RE.match(name)
     ]
     claimed: set[str] = set()
     for name in fragments:

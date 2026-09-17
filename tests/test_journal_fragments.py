@@ -290,7 +290,7 @@ def test_travelled_compares_the_fragment_with_the_commit(
     monkeypatch.setattr(
         journal_gate.journal,
         "changed_files",
-        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+        lambda base, alive_only=False, ancestor=None: [str(fragment.relative_to(tmp_path))],
     )
     monkeypatch.setattr(journal_gate.journal, "git", fake_git("Разобрано: abc1234\n", ""))
     assert journal_gate.travelled("origin/main") == ["def5678"]
@@ -307,7 +307,7 @@ def test_travelled_says_nothing_when_all_marks_rode_along(
     monkeypatch.setattr(
         journal_gate.journal,
         "changed_files",
-        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+        lambda base, alive_only=False, ancestor=None: [str(fragment.relative_to(tmp_path))],
     )
     monkeypatch.setattr(journal_gate.journal, "git", fake_git("Разобрано: abc1234\n", ""))
     assert journal_gate.travelled("origin/main") == []
@@ -331,7 +331,7 @@ def test_a_mark_the_fragment_already_carried_is_not_demanded_again(
     monkeypatch.setattr(
         journal_gate.journal,
         "changed_files",
-        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+        lambda base, alive_only=False, ancestor=None: [str(fragment.relative_to(tmp_path))],
     )
     monkeypatch.setattr(journal_gate.journal, "git", fake_git("", "Разобрано: abc1234\n"))
     assert journal_gate.travelled("origin/main") == []
@@ -352,7 +352,7 @@ def test_a_mark_added_by_this_change_is_still_demanded(
     monkeypatch.setattr(
         journal_gate.journal,
         "changed_files",
-        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+        lambda base, alive_only=False, ancestor=None: [str(fragment.relative_to(tmp_path))],
     )
     monkeypatch.setattr(journal_gate.journal, "git", fake_git("", "Разобрано: abc1234\n"))
     assert journal_gate.travelled("origin/main") == ["def5678"]
@@ -374,7 +374,7 @@ def test_a_fragment_born_here_has_no_base_and_all_its_marks_are_new(
     monkeypatch.setattr(
         journal_gate.journal,
         "changed_files",
-        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+        lambda base, alive_only=False, ancestor=None: [str(fragment.relative_to(tmp_path))],
     )
 
     def refusing(args: list[str]) -> str:
@@ -468,7 +468,7 @@ def test_the_content_is_read_at_the_same_point_as_the_file_list(
     monkeypatch.setattr(
         journal_gate.journal,
         "changed_files",
-        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+        lambda base, alive_only=False, ancestor=None: [str(fragment.relative_to(tmp_path))],
     )
     asked: list[list[str]] = []
 
