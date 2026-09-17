@@ -441,18 +441,24 @@ MERGED_WINDOW: Final = 30
 
 def merged_page(
     repo: str, token: str, limit: int = MERGED_WINDOW
-) -> tuple[list[dict[str, Any]], int]:
-    """Слитые изменения страницы И РАЗМЕР САМОЙ СТРАНИЦЫ.
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Слитые изменения страницы И САМА СТРАНИЦА, целиком.
 
-    ДВА ЧИСЛА, А НЕ ОДНО, И ЭТО НЕ ИЗЛИШЕСТВО. Запрос идёт за ЗАКРЫТЫМИ, а
-    слитые — их подмножество: страница бывает полной при горстке слитых на ней.
-    Кто судит «за страницей осталось неувиденное» по числу СЛИТЫХ, промолчит
-    ровно тогда, когда закрытых без слияния много, — то есть в том самом
-    случае, ради которого предупреждение и заведено. Нашёл внешний взгляд на
-    #418.
+    ОТДАЁТСЯ СТРАНИЦА, А НЕ ВЫЖИМКА ИЗ НЕЁ. Запрос идёт за ЗАКРЫТЫМИ, а слитые
+    — их подмножество: страница бывает полной при горстке слитых, и бывает
+    полной при НУЛЕ слитых. Первая редакция отдавала размер страницы числом — и
+    этого не хватило: зовущему нужен ещё и самый старый номер НА СТРАНИЦЕ, а
+    при пустом списке слитых считать его не по чему. Отдавать вместо данных
+    выжимку значит решать за зовущего, какой вопрос он задаст
+    ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+    Нашёл внешний взгляд: #418 — первую половину, #431 — вторую, трижды подряд.
     """
-    items = request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
-    return [item for item in items if isinstance(item, dict) and item.get("merged_at")], len(items)
+    items = [
+        item
+        for item in request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
+        if isinstance(item, dict)
+    ]
+    return [item for item in items if item.get("merged_at")], items
 
 
 def merged_changes(repo: str, token: str, limit: int = MERGED_WINDOW) -> list[dict[str, Any]]:

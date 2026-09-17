@@ -404,7 +404,7 @@ def test_a_resolution_is_read_from_the_sweep_mark_not_a_fixed_window(
     page = [merged(50, "Разобрано: aaaaaaa"), merged(49, "Разобрано: bbbbbbb")]
     # Читается СТРАНИЦА, а не только слитое на ней: полнота страницы
     # меряется её размером (находка #418).
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, len(page)))
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     marks, mark = module.resolved_marks("o/r", "токен", 49)
     assert marks == {"aaaaaaa"}, "прочитано не от отметки уборки"
     assert mark == 50, "отметка не сдвинулась на прочитанное"
@@ -429,7 +429,7 @@ def test_a_full_page_beyond_the_sweep_mark_is_said_out_loud(
     page = [merged(number, "") for number in range(100, 97, -1)]
     # Читается СТРАНИЦА, а не только слитое на ней: полнота страницы
     # меряется её размером (находка #418).
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, len(page)))
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     module.resolved_marks("o/r", "токен", 10, limit=3)
     said = capsys.readouterr().err
     assert "::warning::" in said and "#10" in said, said
@@ -622,9 +622,11 @@ def test_a_full_page_of_closed_warns_even_when_few_were_merged(
     дал бы 1 >= 3 и промолчал.
     """
     page = [{"number": 300, "merged_at": "x", "body": ""}]
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, limit))
+    monkeypatch.setattr(
+        module.ghrest, "merged_page", lambda repo, token, limit: (page, page * limit)
+    )
     module.resolved_marks("o/r", "t", since=10, limit=3)
-    assert "страница слитого заполнена" in capsys.readouterr().err
+    assert "страница закрытых заполнена" in capsys.readouterr().err
 
 
 def test_a_page_with_room_left_says_nothing(
@@ -632,9 +634,9 @@ def test_a_page_with_room_left_says_nothing(
 ) -> None:
     """Страница не полна — предупреждения нет: крик о законном учит не слушать (051)."""
     page = [{"number": 300, "merged_at": "x", "body": ""}]
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, 1))
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     module.resolved_marks("o/r", "t", since=10, limit=3)
-    assert "страница слитого заполнена" not in capsys.readouterr().err
+    assert "страница закрытых заполнена" not in capsys.readouterr().err
 
 
 def test_the_page_size_comes_from_the_page_not_the_filter() -> None:
@@ -647,3 +649,42 @@ def test_the_page_size_comes_from_the_page_not_the_filter() -> None:
 
     said = inspect.signature(module.ghrest.merged_page).return_annotation
     assert "tuple" in str(said), "страница обязана отдавать свой размер вторым значением"
+
+
+def test_a_full_page_with_nothing_merged_still_warns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ПРЕДЕЛЬНЫЙ СЛУЧАЙ СОБСТВЕННОГО ОПИСАНИЯ: полная страница, ноль слитых.
+
+    Предупреждение обещает сказать, когда за страницей осталось неувиденное.
+    Считало оно самый старый номер по СЛИТЫМ, и при нуле слитых `default=0`
+    делал условие ложным ВСЕГДА — механизм молчал ровно в том случае, ради
+    которого заведён, и молчал тем вернее, чем хуже дело: чем больше закрытых
+    без слияния, тем дальше за страницу уехали снятия.
+
+    Нашёл внешний взгляд на #431 и назвал ТРИЖДЫ подряд — первая починка
+    закрыла только половину предиката.
+    """
+    closed = [{"number": n, "merged_at": None, "body": ""} for n in range(200, 203)]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], closed))
+    marks, mark = module.resolved_marks("o/r", "t", since=10, limit=3)
+    said = capsys.readouterr().err
+    assert "страница закрытых заполнена" in said, "механизм молчит в своём предельном случае"
+    assert "#200" in said, "самый старый номер взят со страницы, а не со слитых"
+    assert marks == set() and mark == 10, "отметка не двигается по непрочитанному"
+
+
+def test_the_oldest_number_comes_from_the_page_not_the_merged(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Самый старый номер — со страницы: слитое на ней может быть свежее всех."""
+    closed = [
+        {"number": 300, "merged_at": "x", "body": ""},
+        {"number": 201, "merged_at": None, "body": ""},
+        {"number": 200, "merged_at": None, "body": ""},
+    ]
+    merged = [closed[0]]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (merged, closed))
+    module.resolved_marks("o/r", "t", since=10, limit=3)
+    said = capsys.readouterr().err
+    assert "#200" in said and "#300" not in said, f"назван не тот край страницы: {said}"
