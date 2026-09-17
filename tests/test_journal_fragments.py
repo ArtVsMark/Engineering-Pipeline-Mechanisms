@@ -27,6 +27,7 @@ from tests.conftest import ROOT, load_script
 
 module = load_script("build_changelog.py")
 journal = load_script("journal.py")
+journal_gate = load_script("check_journal.py")
 
 FRAGMENTS = ROOT / "changelog.d"
 
@@ -199,3 +200,68 @@ def test_say_if_compound_speaks_only_above_the_threshold(
     said = capsys.readouterr().err
     assert "::warning::" in said and "наружу: 2" in said
     assert "разделите" in said, "предупреждение называет, что делать (142)"
+
+
+def test_travelled_names_only_what_the_commit_left_behind() -> None:
+    """Разбор снятий прогнан НАПРЯМУЮ, а не только через вердикт гейта.
+
+    Через вердикт проверяется, что гейт в целом отвергает верное; здесь — что
+    именно он считает отставшим. Разница важна: сойдись вердикт по другой
+    причине, отставшие назывались бы неверно, и чинить пошли бы не то.
+    """
+    said = journal_gate.marks_of("Разобрано: abc1234\nРазобрано: def5678, 21e7c8e — один дефект\n")
+    assert said == {"abc1234", "def5678", "21e7c8e"}
+
+
+def test_a_text_without_resolutions_yields_nothing() -> None:
+    """Текста без снятий не хватает на отметку: пусто — это пусто, а не ноль."""
+    assert journal_gate.marks_of("### Правка\n\nПроза без отметок.\n") == set()
+    assert journal_gate.marks_of("") == set()
+
+
+def test_a_prose_mention_of_the_word_is_not_a_mark() -> None:
+    """Слово «Разобрано» в прозе без отпечатка отметкой не считается.
+
+    Фрагменты этого проекта РАССКАЗЫВАЮТ о снятиях — «снятие живёт строкой
+    „Разобрано:“ в теле», — и такой пересказ не должен требовать отпечатка в
+    коммите: гейт краснел бы на тексте о механизме (051).
+    """
+    assert journal_gate.marks_of("снятие живёт строкой «Разобрано:» в теле изменения") == set()
+
+
+def test_travelled_compares_the_fragment_with_the_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Отставшими названы ровно те отметки, которых нет в теле коммита.
+
+    Прогоняется сам разбор, а не только вердикт гейта: сойдись вердикт по
+    другой причине, отставшие назывались бы неверно, и чинить пошли бы не то.
+    """
+    fragment = tmp_path / "changelog.d" / "правка.fixed.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text("Разобрано: abc1234\nРазобрано: def5678\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        journal_gate.journal,
+        "changed_files",
+        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+    )
+    monkeypatch.setattr(journal_gate.journal, "git", lambda args: "починка\n\nРазобрано: abc1234\n")
+    assert journal_gate.travelled("origin/main") == ["def5678"]
+
+
+def test_travelled_says_nothing_when_all_marks_rode_along(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Все отметки уехали — отставших нет: гейт судит расхождение, а не наличие."""
+    fragment = tmp_path / "changelog.d" / "правка.fixed.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text("Разобрано: abc1234\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        journal_gate.journal,
+        "changed_files",
+        lambda base, alive_only=False: [str(fragment.relative_to(tmp_path))],
+    )
+    monkeypatch.setattr(journal_gate.journal, "git", lambda args: "починка\n\nРазобрано: abc1234\n")
+    assert journal_gate.travelled("origin/main") == []

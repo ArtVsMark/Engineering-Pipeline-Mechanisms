@@ -22,13 +22,20 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
+from pathlib import Path
 from typing import Final
 
 import journal
 import paths
 
 FRAGMENT_RE: Final = journal.PATH_RE
+#: Строка снятия находки — та же форма, что читает разбор тела изменения.
+#: Образец здесь свой, а не общий: `changerefs` читает ТЕЛО и тянет за собой
+#: транспорт, а этому гейту нужен только вид строки в тексте. Разъехаться им
+#: не даёт `tests/test_journal.py`, где обе формы сверяются на одном примере.
+RESOLVED_LINE: Final = re.compile(r"^\s*Разобрано:[^\n]*", re.M)
 # Тронув только это, изменение журналу ничего не сообщает.
 EXEMPT_PREFIXES: Final = ("changelog.d/",)
 EXEMPT_FILES: Final = frozenset({"CHANGELOG.md"})
@@ -124,6 +131,48 @@ def say_if_compound(fragments: list[str]) -> None:
     )
 
 
+def marks_of(text: str) -> set[str]:
+    """Отпечатки находок, снятых строкой «Разобрано:» в этом тексте."""
+    return {
+        mark for line in RESOLVED_LINE.findall(text) for mark in re.findall(r"[0-9a-f]{7}", line)
+    }
+
+
+def travelled(base: str) -> list[str]:
+    """Отметки снятия, объявленные фрагментом и НЕ уехавшие с работой.
+
+    СНЯТИЕ ЕДЕТ ТЕЛОМ КОММИТА, А НЕ ФРАГМЕНТОМ ЖУРНАЛА. Уборка реестра читает
+    тело слитого ИЗМЕНЕНИЯ, а тело изменения собирает `scripts/agent_pr.py` из
+    тел коммитов. Фрагмент журнала в эту цепочку не входит вовсе: отметка,
+    написанная только в нём, адресату не доезжает — работа сделана, находка в
+    реестре осталась, и снять её больше нечем.
+
+    ЗАМЕР 17.09.2026: так потерялись ДВАДЦАТЬ ТРИ снятия за одну смену. Семь
+    изменений подряд объявляли находки разобранными во фрагменте и ни одного
+    отпечатка не положили в коммит. Реестр всё это время рос: к концу смены он
+    держал 33 записи, из которых 23 были починены.
+
+    ПОЧЕМУ ЭТО СЛУЧИЛОСЬ, А НЕ «КТО ЗАБЫЛ». Навык разбора находки говорил «снять
+    строкой в ТЕЛЕ ИЗМЕНЕНИЯ» — а тело изменения окно писать не вправе вовсе
+    ([131](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/131-no-writes-from-a-cloud-session.md)):
+    его собирает конвейер. Адрес был назван тот, которого у окна нет, и окно
+    выбрало похожий.
+    """
+    fragments = [
+        name for name in journal.changed_files(base, alive_only=True) if FRAGMENT_RE.match(name)
+    ]
+    claimed: set[str] = set()
+    for name in fragments:
+        try:
+            claimed |= marks_of(Path(name).read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    if not claimed:
+        return []
+    carried = marks_of(journal.git(["git", "log", "--format=%B", f"{base}..HEAD"]))
+    return sorted(claimed - carried)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -157,6 +206,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     fragments = [name for name in alive if FRAGMENT_RE.match(name)]
+
+    # СНЯТИЕ, ОСТАВШЕЕСЯ В ЖУРНАЛЕ, НЕ ЕДЕТ НИКУДА. Отметка «Разобрано:» из
+    # фрагмента адресату не доходит: уборка читает тело изменения, а его
+    # собирает конвейер из тел КОММИТОВ. Замер 17.09.2026 — так потерялись
+    # двадцать три снятия за смену.
+    try:
+        stranded = travelled(args.base)
+    except NotRun as exc:
+        print(f"проверка не отработала: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    if stranded:
+        print(
+            "снятие находки объявлено фрагментом журнала и не уехало с работой: "
+            + ", ".join(stranded)
+            + "\n  Отметка «Разобрано: <отпечаток>» обязана стоять в ТЕЛЕ КОММИТА — "
+            "оттуда её переносит scripts/agent_pr.py. Во фрагменте она остаётся "
+            "рассказом о снятии, а реестр держит находку дальше",
+            file=sys.stderr,
+        )
+        return EXIT_REJECTED
 
     # ИМЯ ФРАГМЕНТА ГОВОРИТ, ЧТО ИЗМЕНИЛОСЬ, А НЕ КАКАЯ ЗАДАЧА. Одна задача
     # живёт дольше одного изменения, и два захода целятся в одно имя: конфликта
