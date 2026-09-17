@@ -385,3 +385,98 @@ def test_deferred_steps_belong_to_this_read(tmp_path: Path) -> None:
     )
     preflight.steps(clean / ".github" / "workflows" / "ci.yml")
     assert preflight.UNRUNNABLE == {}, "отложенное прошлого чтения осталось в ответе"
+
+
+def remember(where: list[object], what: object) -> int:
+    """Запоминает вызов и отвечает успехом: подделка толчка для проверок ниже."""
+    where.append(what)
+    return int(preflight.EXIT_OK)
+
+
+def test_a_red_verdict_never_reaches_the_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красный вердикт до толчка НЕ ДОХОДИТ: толкать нечем, а не «не следует».
+
+    ВЕРДИКТ, КОТОРЫЙ ЧИТАЕТ ТОТ ЖЕ, КТО ДЕЙСТВУЕТ, — НАПОМИНАНИЕ, А НЕ
+    МЕХАНИЗМ. Замер 17.09.2026: за смену ТРИ толчка из примерно пятнадцати ушли
+    при красном вердикте, и каждый раз вердикт печатался тем же заходом, что и
+    толчок. Ловил это человек, а не машина — а человек тут и есть тот, кто
+    спешит.
+    """
+    pushed: list[object] = []
+    monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
+    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("красный", "false")])
+    monkeypatch.setattr(preflight, "run", lambda step, root: (1, "красное"))
+    monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    assert preflight.main(["--push"]) == preflight.EXIT_RED
+    assert not pushed, "толчок случился при красном вердикте"
+
+
+def test_a_green_verdict_pushes_in_the_same_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Зелёный вердикт толкает ТЕМ ЖЕ заходом: проверка и действие — один акт."""
+    pushed: list[object] = []
+    monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
+    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
+    monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
+    monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    assert preflight.main(["--push"]) == preflight.EXIT_OK
+    assert pushed, "зелёный вердикт не довёл до толчка"
+
+
+def test_without_the_flag_nothing_is_pushed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без флага заход остаётся ЧТЕНИЕМ: проверка сама ничего не отправляет.
+
+    Толкать по умолчанию значило бы отправлять работу того, кто звал проверку
+    посмотреть, — и обратной дороги у толчка нет.
+    """
+    pushed: list[object] = []
+    monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
+    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
+    monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
+    monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    assert preflight.main([]) == preflight.EXIT_OK
+    assert not pushed, "проверка толкнула без просьбы"
+
+
+def test_the_shared_branch_is_never_pushed_by_the_check(tmp_path: Path) -> None:
+    """Общую ветку проверка не толкает: работа идёт в `agent/<задача>` (003)."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    (tmp_path / "файл").write_text("предмет", encoding="utf-8")
+    for args in (
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "набор"],
+        ["add", "-A"],
+        ["commit", "-qm", "предмет"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    assert preflight.push_branch(tmp_path) == preflight.EXIT_BROKEN
+
+
+def test_the_branch_name_is_read_from_the_tree(tmp_path: Path) -> None:
+    """Имя ветки берётся из дерева, а не из памяти зовущего.
+
+    Толкать по имени, переданному руками, значит отправлять работу туда, куда
+    её никто не клал: дерево знает своё имя само (049).
+    """
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", "agent/предмет"], cwd=tmp_path, check=True)
+    (tmp_path / "файл").write_text("предмет", encoding="utf-8")
+    for args in (
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "набор"],
+        ["add", "-A"],
+        ["commit", "-qm", "предмет"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    assert preflight.branch_now(tmp_path) == "agent/предмет"
+
+
+def test_a_tree_without_a_branch_is_the_third_outcome(tmp_path: Path) -> None:
+    """Ветку не прочитать — это отказ входа, а не пустое имя (045)."""
+    with pytest.raises(preflight.NotRun):
+        preflight.branch_now(tmp_path)
