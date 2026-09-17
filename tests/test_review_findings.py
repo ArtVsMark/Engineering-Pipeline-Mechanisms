@@ -665,16 +665,24 @@ def test_a_page_with_room_left_says_nothing(
     assert "страница закрытых заполнена" not in capsys.readouterr().err
 
 
-def test_the_page_size_comes_from_the_page_not_the_filter() -> None:
-    """Транспорт отдаёт размер страницы отдельным числом.
+def test_the_page_comes_back_whole_not_just_its_filtered_part() -> None:
+    """Транспорт отдаёт САМУ СТРАНИЦУ, а не только отфильтрованное на ней.
 
-    Форма держит смысл: зовущему нужны ДВА числа, и вывести второе из первого
-    нельзя — фильтр их разводит.
+    Форма держит смысл: зовущему нужны обе величины — слитое и страница
+    целиком, — и вывести вторую из первой нельзя, фильтр их разводит. Полнота
+    страницы меряется страницей, а её край — временем закрытия, которое есть у
+    каждого закрытого и которого у отфильтрованного может не быть вовсе.
+
+    ДОКСТРОКА ГОВОРИЛА «размер страницы отдельным ЧИСЛОМ» — контракт, которого
+    у транспорта уже нет: он отдаёт страницу, а не её длину. Проверка при этом
+    сверяла `tuple` и проходила, то есть текст разошёлся с предметом молча
+    (нашёл внешний взгляд на #434).
     """
     import inspect
 
-    said = inspect.signature(module.ghrest.merged_page).return_annotation
-    assert "tuple" in str(said), "страница обязана отдавать свой размер вторым значением"
+    said = str(inspect.signature(module.ghrest.merged_page).return_annotation)
+    assert "tuple" in said, "страница обязана возвращаться вторым значением"
+    assert said.count("list") == 2, f"вторым значением возвращается не страница целиком: {said}"
 
 
 def test_a_full_page_with_nothing_merged_still_warns(
