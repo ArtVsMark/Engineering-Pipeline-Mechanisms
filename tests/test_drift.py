@@ -123,13 +123,113 @@ def test_a_summary_without_a_form_is_not_read_as_zero() -> None:
     assert module.reader_is_behind({"schema": ""}) == []
 
 
-def test_both_questions_to_the_summary_read_one_answer() -> None:
-    """Сводка читается ОДИН раз на оба вопроса, а не по разу на каждый.
+def slice_with(findings: Any) -> dict[str, Any]:
+    """Сводка, где наш срез несёт заданные находки каталога."""
+    return {
+        "consumers": [
+            {
+                "repo": "o/Engineering-Pipeline-Mechanisms",
+                "holds": {},
+                "findings": findings,
+            }
+        ]
+    }
 
-    Второе чтение того же адреса могло бы прийти уже другим, и два вердикта
+
+def test_a_catalogue_finding_about_us_reaches_the_registry() -> None:
+    """Находка каталога о НАШЕМ ответе доезжает до того, кто её чинит.
+
+    Канал был построен той стороной и не читался этой: ключ `findings` завёлся
+    в форме сводки 1.2 восьмого сентября ровно ради адресата (142), и девять
+    дней его не читала ни одна строка кода.
+    """
+    found = module.catalogue_found(
+        slice_with(["ответ по схеме 1.3, у контракта 1.4"]), "o/Engineering-Pipeline-Mechanisms"
+    )
+    assert len(found) == 1
+    assert "1.4" in found[0].said
+    assert "bindings.json" in found[0].next_step, "починка живёт у нас, а не у каталога (086)"
+
+
+def test_a_finding_of_many_lines_stays_one_record() -> None:
+    """Перенос строки из чужого текста не разрывает запись на две.
+
+    Чужой текст едет ЦИТАТОЙ: тело задачи разбирается построчно, и находка с
+    переносом дала бы обрывок, который разбор прочитал бы отдельной записью
+    (085).
+    """
+    found = module.catalogue_found(
+        slice_with(["первая строка\nвторая строка\n\nтретья"]), "o/Engineering-Pipeline-Mechanisms"
+    )
+    assert len(found) == 1
+    assert "\n" not in str(found[0])
+    assert "третья" in found[0].said, "хвост находки не потерян"
+
+
+def test_a_long_finding_says_how_much_was_cut() -> None:
+    """Длинная находка обрезается ВСЛУХ: урезанное молча выглядит полным (016)."""
+    found = module.catalogue_found(slice_with(["я" * 900]), "o/Engineering-Pipeline-Mechanisms")
+    assert len(found) == 1
+    assert "обрезано" in found[0].said and "900" in found[0].said
+
+
+def test_no_findings_is_a_state_not_a_record() -> None:
+    """Каталог не нашёл у нас ничего — записи нет, и это состояние (027).
+
+    `null` каталог ставит себе сам: находок о себе у него не бывает. Пустой
+    список и отсутствие ключа значат то же самое — «не нашли».
+    """
+    empty: tuple[Any, ...] = ([], None)
+    for said in empty:
+        assert module.catalogue_found(slice_with(said), "o/Engineering-Pipeline-Mechanisms") == []
+    assert (
+        module.catalogue_found(
+            {"consumers": [{"repo": "o/Engineering-Pipeline-Mechanisms"}]},
+            "o/Engineering-Pipeline-Mechanisms",
+        )
+        == []
+    )
+
+
+def test_a_blank_finding_is_not_a_record() -> None:
+    """Пустая строка в списке — не находка: запись без предмета хуже молчания."""
+    assert (
+        module.catalogue_found(slice_with(["", "   "]), "o/Engineering-Pipeline-Mechanisms") == []
+    )
+
+
+def test_missing_from_the_summary_is_said_once() -> None:
+    """Нас нет в сводке — говорит об этом ОДИН читатель, а не оба.
+
+    Второй раз то же самое было бы вторым счётом одного (022): находку «нас нет
+    в сводке вовсе» ставит `snapshot_is_stale`, и находки каталога о нашем
+    ответе её не повторяют.
+    """
+    assert module.catalogue_found({"consumers": []}, "o/Engineering-Pipeline-Mechanisms") == []
+
+
+def test_the_slice_is_found_by_the_full_address() -> None:
+    """Себя узнаём по полному адресу, а не по хвосту имени (194, находка #119).
+
+    Поиск теперь один на двоих читателей, и проверяется он на обоих: копия
+    разошлась бы с оригиналом молча (090).
+    """
+    stranger = {"consumers": [{"repo": "чужой/Engineering-Pipeline-Mechanisms", "findings": ["х"]}]}
+    assert module.our_slice(stranger, "o/Engineering-Pipeline-Mechanisms") is None
+    assert module.catalogue_found(stranger, "o/Engineering-Pipeline-Mechanisms") == []
+
+
+def test_all_questions_to_the_summary_read_one_answer() -> None:
+    """Сводка читается ОДИН раз на все три вопроса, а не по разу на каждый.
+
+    Второе чтение того же адреса могло бы прийти уже другим, и вердикты
     разошлись бы молча (022) — ровно ту поломку внешний взгляд нашёл в
     `build_facts` на #240. Здесь это держится формой: `family_summary`
     принимает уже прочитанное, а не адрес.
+
+    Вопроса три, и слить их нельзя: форму чиним правкой кода, находку каталога
+    — правкой ответа, отставший снимок не чиним вовсе (ждём прогона каталога).
+    Адресат у каждого свой (142).
     """
     names = list(inspect.signature(module.family_summary).parameters)
     assert names[0] == "where", "сводка обязана приходить прочитанной, а не адресом"
@@ -139,14 +239,15 @@ def test_both_questions_to_the_summary_read_one_answer() -> None:
             {
                 "repo": "o/Engineering-Pipeline-Mechanisms",
                 "holds": {"074": {"mechanism": "document"}},
+                "findings": ["ответ построен на выгрузке 1.5, у нас 1.7"],
             }
         ],
     }
     mine = {"rules": {"074": {"mechanism": "gate"}}}
     found = module.family_summary(where, mine, "o/Engineering-Pipeline-Mechanisms")
     kinds_found = {record.source for record in found}
-    assert kinds_found == {"family-schema", "family-snapshot"}, (
-        f"оба вопроса задаются по одному чтению, и вердикты у них разные: {kinds_found}"
+    assert kinds_found == {"family-schema", "catalogue-finding", "family-snapshot"}, (
+        f"все три вопроса задаются по одному чтению, и вердикты у них разные: {kinds_found}"
     )
 
 
