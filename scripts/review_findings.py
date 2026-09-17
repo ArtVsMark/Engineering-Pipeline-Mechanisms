@@ -202,6 +202,11 @@ def weight_of(raw: str) -> str:
 #: заголовок находки, и отвергать всё, что начинается с «нет», значило бы
 #: запретить целый класс формулировок (051).
 ABSENCE: Final = frozenset({"нет", "нет находок", "находок нет", "none", "no findings"})
+#: Знаки конца, которые снимаются перед сверкой со словарём. Список закрытый:
+#: `rstrip(".")` снимал точку и пропускал «нет!», «нет?», «нет…» — призрак
+#: заводился снова, просто с восклицательным знаком в заголовке. Нашёл внешний
+#: взгляд на #453.
+ENDINGS: Final = ".!?…"
 
 
 def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
@@ -215,7 +220,7 @@ def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
     for comment in comments:
         for raw_weight, title in FINDING_RE.findall(comment.get("body") or ""):
             cleaned = " ".join(title.strip("*_` ").split())
-            if cleaned.casefold().rstrip(".") in ABSENCE:
+            if cleaned.casefold().rstrip(ENDINGS).strip() in ABSENCE:
                 continue
             if cleaned and cleaned not in seen:
                 seen.add(cleaned)
