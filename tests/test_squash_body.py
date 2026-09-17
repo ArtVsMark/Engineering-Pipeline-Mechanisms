@@ -39,14 +39,23 @@ def test_a_resolution_keeps_the_reason_it_was_written_with() -> None:
 
 
 def test_trailers_appear_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Подпись у ветки одна, сколько бы коммитов в ней ни было."""
+    """Подпись у ветки одна, сколько бы коммитов в ней ни было.
+
+    ФОРМА ТЕЛА ВЗЯТА У ЖИВОЙ ИСТОРИИ, А НЕ ПРИДУМАНА. Прежняя подделка клеила
+    `Refs #7` к трейлерам одним абзацем — так в проекте не пишут: замер
+    17.09.2026 по 300 телам показал, что у ВСЕХ 290 тел с трейлерами хвостовой
+    блок состоит целиком из строк «Ключ: значение», а ссылка на задачу стоит
+    своим абзацем выше. Подделка, умеющая то, чего не бывает, роняла бы разбор
+    хвостового блока на форме, которой нет
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    """
     trailer = "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
     def git(*args: str) -> str:
         if "--format=%s" in args:
             return "первое\nвторое\n"
         if "--format=%B%x00" in args:
-            return f"первое\n\nRefs #7\n{trailer}\n\x00второе\n\nRefs #7\n{trailer}\n\x00"
+            return f"первое\n\nRefs #7\n\n{trailer}\n\x00второе\n\nRefs #7\n\n{trailer}\n\x00"
         return "основание\n"
 
     monkeypatch.setattr(body, "git", git)
@@ -117,3 +126,59 @@ def test_a_branch_without_commits_is_an_input_error(run_script: RunScript, tmp_p
     """Собирать нечего — третий исход, а не пустое тело (075)."""
     run = run_script("squash_body.py", "--branch", "нет-такой", "--base", "main")
     assert run.code == 2, run.text
+
+
+def test_a_trailer_is_read_only_from_the_tail_block() -> None:
+    """Прозаическое упоминание трейлера директивой не становится.
+
+    Тело уплотнения уезжает в общую ветку, и подставленный так «соавтор»
+    переписыванию уже не поддаётся. Прежний разбор брал строку по приставке
+    имени трейлера из текста ВСЕХ коммитов, склеенных вместе.
+    """
+    тело = (
+        "Правка подписи\n\n"
+        "В своде сказано, что строка `Co-Authored-By: Кто-то <кто@то>` ставится\n"
+        "в хвост, а не в середину. Вот пример того, как НЕ надо:\n"
+        "Co-Authored-By: Самозванец <chuzhoy@example.com>\n\n"
+        "Refs #243\n\n"
+        "Co-Authored-By: Настоящий <real@example.com>\n"
+    )
+    assert body.trailers_of([тело]) == ["Co-Authored-By: Настоящий <real@example.com>"], (
+        "прозаическое упоминание уехало в тело уплотнения настоящим трейлером"
+    )
+
+
+def test_a_trailer_from_an_earlier_commit_is_not_lost() -> None:
+    """Блок читается у КАЖДОГО сообщения свой, а не один на склейку.
+
+    У склейки хвостовой блок один — последний, — и соавтор, названный в первом
+    коммите ветки, потерялся бы. Это второй конец: починка «читать только хвост»
+    без этого ломала бы атрибуцию (051).
+    """
+    первый = "Первый шаг\n\nRefs #1\n\nCo-Authored-By: Первый <one@example.com>\n"
+    второй = "Второй шаг\n\nRefs #1\n\nCo-Authored-By: Второй <two@example.com>\n"
+    assert body.trailers_of([первый, второй]) == [
+        "Co-Authored-By: Первый <one@example.com>",
+        "Co-Authored-By: Второй <two@example.com>",
+    ]
+
+
+def test_a_paragraph_with_prose_in_it_is_not_a_tail_block() -> None:
+    """Абзац, где есть хоть одна прозаическая строка, хвостовым блоком не считается.
+
+    Так директива и отличается от рассказа о ней: положение задаёт смысл.
+    """
+    assert body.tail_block("Тема\n\nRefs #1\n\nCo-Authored-By: Кто <k@e.com>") == [
+        "Co-Authored-By: Кто <k@e.com>",
+    ], "хвостовой блок — последний абзац, а `Refs #1` стоит своим"
+    assert body.tail_block("Тема\n\nRefs #1\nCo-Authored-By: Кто <k@e.com>") == [], (
+        "абзац со строкой не вида «Ключ: значение» хвостовым блоком не является"
+    )
+    assert body.tail_block("Тема\n\nCo-Authored-By: Кто <k@e.com>\nи ещё пара слов") == []
+    assert body.tail_block("Тема без хвоста вовсе") == []
+
+
+def test_the_same_trailer_twice_is_written_once() -> None:
+    """Подпись у ветки одна: повторять её по числу коммитов — шум, а не атрибуция."""
+    один = "Шаг\n\nCo-Authored-By: Он <he@example.com>\n"
+    assert body.trailers_of([один, один]) == ["Co-Authored-By: Он <he@example.com>"]
