@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import catalogue
+import family
 import findings
 import ghrest
 import kinds
@@ -150,9 +151,17 @@ def ours() -> dict[str, Any]:
 
 
 #: Наши файлы, отвечающие контрактам каталога: имя контракта → путь и ключ
-#: версии. Контракты `consumers` и `where` сюда не входят — это файлы САМОГО
-#: каталога (реестр потребителей и карта «где действует правило»), и сверять
-#: нам в них нечего.
+#: версии. Контракт `consumers` сюда не входит — это файл САМОГО каталога
+#: (реестр потребителей), и своего номера у нас против него нет.
+#:
+#: ПРО `where` ЗДЕСЬ СТОЯЛА ОПРОВЕРГНУТАЯ ПРЕМИСА. Было написано: «это файлы
+#: самого каталога, и сверять нам в них нечего». Первое верно, второе — нет:
+#: файл чужой, но ЧИТАТЕЛЬ наш, и у него есть объявленный номер —
+#: `family.READS_SCHEMA`. Цена премисы измерена: сводка ушла на 1.3 восьмого
+#: сентября, разрез остался под 1.2, и девять дней об этом не сказал никто —
+#: расхождение считалось в `build_facts` и никуда не печаталось. Сверяется
+#: `where` теперь там, где сводка и читается, — в `reader_is_behind`, а не
+#: здесь: предмет у него другой, не наш файл, а наш читатель (044).
 OUR_CONTRACTS: Final = (
     ("bindings", paths.BINDINGS.as_posix()),
     ("proposals", paths.PROPOSALS.as_posix()),
@@ -231,6 +240,37 @@ def catalogue_moved(export: dict[str, Any], mine: dict[str, Any]) -> list[Drift]
     return found
 
 
+def reader_is_behind(where: dict[str, Any]) -> list[Drift]:
+    """Сводка семьи сменила форму, а разрез написан под прежнюю.
+
+    ЧУЖОЙ ФАЙЛ, НО СВОЙ ЧИТАТЕЛЬ. Сводку пишет каталог, и править её нам
+    нечего — а вот номер, под который написан наш разрез, наш целиком
+    (`family.READS_SCHEMA`). Подъём означает перечитать разрез, а не подвинуть
+    число
+    ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
+
+    ЗАМЕР, ИЗ КОТОРОГО ЭТА СВЕРКА ВЫРОСЛА: 8 сентября сводка ушла на 1.3,
+    разрез остался под 1.2, и расхождение прожило девять дней. Считалось оно
+    всё это время — `build_facts` клал его в факты ключом `schema_agrees`, — и
+    не печаталось нигде. Вычисленное и несказанное равно несчитанному (046).
+
+    Номер отсутствует — сверять нечего, и это не «ноль»: ключа нет значит «не
+    прочитали» (045). То же соглашение у самого каталога.
+    """
+    theirs = str(where.get("schema") or "")
+    if not theirs or theirs == family.READS_SCHEMA:
+        return []
+    return [
+        Drift(
+            "family-schema",
+            f"сводка семьи отдаётся по форме {theirs}, разрез написан под {family.READS_SCHEMA}",
+            "перечитать `scripts/family.py` под новую форму, затем поднять "
+            "`READS_SCHEMA` — механическое поднятие числа оставляет разрез "
+            "отвечать на прежний вопрос (157)",
+        )
+    ]
+
+
 def snapshot_is_stale(where: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
     """Сводка семьи показывает нас не тем, чем мы стали.
 
@@ -287,6 +327,17 @@ def snapshot_is_stale(where: dict[str, Any], mine: dict[str, Any], project: str)
             "до тех пор разрез приоритета по этой сводке врёт",
         )
     ]
+
+
+def family_summary(where: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
+    """Два вопроса к одной сводке: наша ли она форма и не отстал ли снимок.
+
+    Вопроса именно два, и слить их нельзя: «разрез читает не ту форму» чинится
+    у нас правкой кода, «снимок отстал» — прогоном каталога, и адресаты у них
+    разные (142). Читается при этом ОДИН ответ: второе чтение того же адреса
+    могло бы прийти уже другим (022).
+    """
+    return reader_is_behind(where) + snapshot_is_stale(where, mine, project)
 
 
 def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
@@ -942,8 +993,12 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
     asks: tuple[tuple[str, Any], ...] = (
         ("каталог", lambda: catalogue_moved(fetch(EXPORT_URL), mine)),
         (
+            # ФЕТЧ ОДИН НА ОБА ВОПРОСА. Второе чтение того же адреса могло бы
+            # прийти уже другим, и два вердикта разошлись бы молча (022) —
+            # ровно та поломка, которую внешний взгляд нашёл в `build_facts`
+            # на #240.
             "сводка семьи",
-            lambda: snapshot_is_stale(fetch(WHERE_URL), mine, str(mine.get("project") or repo)),
+            lambda: family_summary(fetch(WHERE_URL), mine, str(mine.get("project") or repo)),
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
         ("защита общей ветки", lambda: protection_moved(repo, token)),

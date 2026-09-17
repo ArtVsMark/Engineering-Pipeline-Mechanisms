@@ -91,6 +91,65 @@ def test_missing_from_the_family_is_said_out_loud() -> None:
     assert "нет в сводке" in found[0].said
 
 
+def test_a_moved_summary_form_is_a_drift() -> None:
+    """Сводка сменила форму — разрез об этом узнаёт, а не считает по прежней.
+
+    ЗАМЕР, ИЗ КОТОРОГО ВЫРОСЛА СВЕРКА: сводка ушла на 1.3 восьмого сентября,
+    `family.READS_SCHEMA` остался под 1.2, и расхождение прожило девять дней.
+    Считалось оно всё это время — `build_facts` клал его в факты ключом
+    `schema_agrees`, — и не печаталось нигде. Из сверки контрактов `where` был
+    исключён комментарием «сверять нам в них нечего»: файл чужой, но ЧИТАТЕЛЬ
+    наш, и номер у него свой (044).
+    """
+    found = module.reader_is_behind({"schema": "9.9"})
+    assert len(found) == 1
+    assert "9.9" in found[0].said
+    assert module.family.READS_SCHEMA in found[0].said
+    assert "157" in found[0].next_step
+
+
+def test_a_summary_of_our_own_form_is_not_a_drift() -> None:
+    """Форма та же — записи нет: дрейф называет сдвиг, а не состояние."""
+    assert module.reader_is_behind({"schema": module.family.READS_SCHEMA}) == []
+
+
+def test_a_summary_without_a_form_is_not_read_as_zero() -> None:
+    """Номера нет — сверять нечего, и это не «ноль».
+
+    Ключа нет значит «не прочитали», а не «версия нулевая» (045). То же
+    соглашение действует у самого каталога по всей выгрузке.
+    """
+    assert module.reader_is_behind({}) == []
+    assert module.reader_is_behind({"schema": ""}) == []
+
+
+def test_both_questions_to_the_summary_read_one_answer() -> None:
+    """Сводка читается ОДИН раз на оба вопроса, а не по разу на каждый.
+
+    Второе чтение того же адреса могло бы прийти уже другим, и два вердикта
+    разошлись бы молча (022) — ровно ту поломку внешний взгляд нашёл в
+    `build_facts` на #240. Здесь это держится формой: `family_summary`
+    принимает уже прочитанное, а не адрес.
+    """
+    names = list(inspect.signature(module.family_summary).parameters)
+    assert names[0] == "where", "сводка обязана приходить прочитанной, а не адресом"
+    where = {
+        "schema": "9.9",
+        "consumers": [
+            {
+                "repo": "o/Engineering-Pipeline-Mechanisms",
+                "holds": {"074": {"mechanism": "document"}},
+            }
+        ],
+    }
+    mine = {"rules": {"074": {"mechanism": "gate"}}}
+    found = module.family_summary(where, mine, "o/Engineering-Pipeline-Mechanisms")
+    kinds_found = {record.source for record in found}
+    assert kinds_found == {"family-schema", "family-snapshot"}, (
+        f"оба вопроса задаются по одному чтению, и вердикты у них разные: {kinds_found}"
+    )
+
+
 def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Источник не ответил — это сказано, а не превращено в «дрейфа нет».
 
