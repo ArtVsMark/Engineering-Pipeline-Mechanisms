@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Final
@@ -329,3 +330,51 @@ def test_the_skill_names_the_rule_it_closes() -> None:
     assert "047" in text, "навык не называет правила, ради которого заведён"
     for name in module.RULEBOOK:
         assert name in text, f"навык не называет {name} — перечитывать нечего"
+
+
+#: Снятая форма выгрузки каталога: с ней сверяется обещание навыка.
+EXPORT_SHAPE: Final = ROOT / "tests" / "fixtures" / "catalogue-export.shape.json"
+#: Как навык достаёт поле записи правила: `one["claim"]["ru"]`, `one["files"]["ru"]`.
+FIELD_RE: Final = re.compile(r"one\[\"(\w+)\"\]\[\"(\w+)\"\]")
+
+
+def test_the_skill_reads_only_fields_the_export_really_has() -> None:
+    """Сниппет навыка читает ТОЛЬКО те поля, что у выгрузки есть.
+
+    СЛОМАЕТСЯ ОН В ХУДШУЮ МИНУТУ. Сниппет вызывается ровно тогда, когда окно
+    собралось прочитать правило ПО БУКВЕ; поле, которого в выгрузке нет, даст
+    отказ, и окно вернётся к чтению по ЗАГОЛОВКУ — то есть к той самой беде,
+    против которой навык и заведён.
+
+    СВЕРЯЕТСЯ СО СНЯТЫМ ОТВЕТОМ, А НЕ С НАШИМ ПРЕДСТАВЛЕНИЕМ. Подделка,
+    собранная по разумению окна, доказывает согласованность окна с самим собой
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    Снимок лежит в `tests/fixtures/catalogue-export.shape.json` с датой и
+    адресом, откуда снят. Нашёл внешний взгляд на #401.
+
+    ЧТО ЭТОТ ГЕЙТ НЕ ДЕРЖИТ: что ЖИВАЯ выгрузка всё ещё такова. Это работа
+    другого механизма — номер контракта `export` сверяется дрейфом, и его
+    подъём означает перечитать снимок (157).
+    """
+    shape = json.loads(EXPORT_SHAPE.read_text(encoding="utf-8"))
+    record = (shape.get("rules") or [{}])[0]
+    assert record, "снимок выгрузки пуст — предмета у проверки нет (075)"
+    text = (SKILL_DIR / "answer-a-rule" / "SKILL.md").read_text(encoding="utf-8")
+    asked = set(FIELD_RE.findall(text))
+    assert asked, "сниппет навыка не читает ни одного поля — проверять нечего (075)"
+    missing = sorted(
+        f"{outer}.{inner}"
+        for outer, inner in asked
+        if not isinstance(record.get(outer), dict) or inner not in record[outer]
+    )
+    assert not missing, (
+        f"навык читает поля, которых в снятой выгрузке нет: {missing} — "
+        "сниппет сломается ровно в ту минуту, когда правило собрались прочитать по букве"
+    )
+
+
+def test_the_export_snapshot_says_when_and_whence_it_was_taken() -> None:
+    """У снимка чужой формы названы день и адрес: без них он не проверяем (005)."""
+    shape = json.loads(EXPORT_SHAPE.read_text(encoding="utf-8"))
+    assert shape.get("_снято"), "снимок без даты — отличить свежий от протухшего нечем"
+    assert str(shape.get("_откуда") or "").startswith("https://"), "снимок без адреса источника"

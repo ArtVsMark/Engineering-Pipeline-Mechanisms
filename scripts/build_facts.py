@@ -255,11 +255,14 @@ def script_runs(root: Path) -> dict[str, int]:
                 for node in ast.parse(path.read_text(encoding="utf-8")).body
             ):
                 found.setdefault(path.name, []).append(f"{where.as_posix()}/{path.name}")
-    same = {name: where for name, where in found.items() if len(where) > 1}
+    # ИМЯ `where` выше означало КАТАЛОГ, здесь означало бы СПИСОК ПУТЕЙ. Одно
+    # имя на два предмета в соседних строках читается как одно (нашёл внешний
+    # взгляд на #412), поэтому список зовётся своим именем.
+    same = {name: places for name, places in found.items() if len(places) > 1}
     if same:
         print(
             "::warning::одноимённые механизмы с точкой входа в разных каталогах: "
-            + "; ".join(f"{name} — {', '.join(where)}" for name, where in sorted(same.items()))
+            + "; ".join(f"{name} — {', '.join(places)}" for name, places in sorted(same.items()))
             + ". Набор зовёт их по имени файла, и какой из них прогнан — неизвестно",
             file=sys.stderr,
         )
