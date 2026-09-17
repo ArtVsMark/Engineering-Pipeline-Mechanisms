@@ -439,6 +439,22 @@ def raw_text(url: str, timeout: int = 30) -> str:
 MERGED_WINDOW: Final = 30
 
 
+def merged_page(
+    repo: str, token: str, limit: int = MERGED_WINDOW
+) -> tuple[list[dict[str, Any]], int]:
+    """Слитые изменения страницы И РАЗМЕР САМОЙ СТРАНИЦЫ.
+
+    ДВА ЧИСЛА, А НЕ ОДНО, И ЭТО НЕ ИЗЛИШЕСТВО. Запрос идёт за ЗАКРЫТЫМИ, а
+    слитые — их подмножество: страница бывает полной при горстке слитых на ней.
+    Кто судит «за страницей осталось неувиденное» по числу СЛИТЫХ, промолчит
+    ровно тогда, когда закрытых без слияния много, — то есть в том самом
+    случае, ради которого предупреждение и заведено. Нашёл внешний взгляд на
+    #418.
+    """
+    items = request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
+    return [item for item in items if isinstance(item, dict) and item.get("merged_at")], len(items)
+
+
 def merged_changes(repo: str, token: str, limit: int = MERGED_WINDOW) -> list[dict[str, Any]]:
     """Последние СЛИТЫЕ изменения: закрытые без слияния сюда не попадают.
 
@@ -446,8 +462,7 @@ def merged_changes(repo: str, token: str, limit: int = MERGED_WINDOW) -> list[di
     отметки пунктов, — и отличались они только окном, причём разница нигде не
     объяснялась. Разбор слитого нашёл это в #109.
     """
-    items = request("GET", f"repos/{repo}/pulls?state=closed&per_page={limit}", token) or []
-    return [item for item in items if isinstance(item, dict) and item.get("merged_at")]
+    return merged_page(repo, token, limit)[0]
 
 
 def quote(value: str) -> str:

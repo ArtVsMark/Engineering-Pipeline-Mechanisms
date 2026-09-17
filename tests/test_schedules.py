@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -190,11 +190,30 @@ def test_the_prose_does_not_repeat_the_measured_numbers() -> None:
     for name, one in recorded.items():
         numbers = [str(v) for k, v in one["fires"].items() if isinstance(v, int)]
         assert numbers, f"{name}: в замере нет чисел — проверять нечего"
-        said_twice = [number for number in numbers if number in str(one.get("why") or "")]
+        said_twice = [number for number in numbers if repeated(number, str(one.get("why") or ""))]
         assert not said_twice, (
             f"{name}: числа замера повторены в прозе: {said_twice} — "
             "они объявлены в `fires`, и второе написание разойдётся молча"
         )
+
+
+#: Ссылка на задачу или изменение — АДРЕС, а не число замера. «#217» несёт
+#: внутри себя «17», «21» и «217», и поиск подстрокой зачёл бы любое из них
+#: повтором. Замер 17.09.2026: такая ссылка в прозе расписаний одна, и до
+#: столкновения с числом замера ей оставался один подъём. Нашёл внешний взгляд
+#: на #417.
+ADDRESS_IN_PROSE: Final = re.compile(r"#\d+")
+
+
+def repeated(number: str, prose: str) -> bool:
+    """Повторено ли число замера в прозе — по ГРАНИЦЕ, а не подстрокой.
+
+    Подстрока находит «17» внутри «2017», «417» и «#217»: законный номер
+    задачи, год и соседнее число становились бы повтором замера, и гейт
+    краснел бы на исправном
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    return bool(re.search(rf"(?<!\d){number}(?!\d)", ADDRESS_IN_PROSE.sub("", prose)))
 
 
 def test_a_recorded_firing_names_its_day() -> None:
@@ -230,3 +249,32 @@ def test_a_recorded_firing_names_its_day() -> None:
             f"{name}: случилось {happened} при ожидавшихся {expected} — "
             "замер не сходится сам с собой"
         )
+
+
+def test_a_task_reference_is_not_a_repeated_measurement() -> None:
+    """Номер задачи в прозе повтором замера не считается.
+
+    «#217» несёт внутри себя «17», «21» и «217». Поиск подстрокой зачёл бы
+    любое из них повтором и покрасил бы законную прозу. Замер 17.09.2026: такая
+    ссылка в расписаниях одна, и до столкновения ей оставался один подъём.
+    """
+    assert not repeated("17", "разбор на #217 показал, что оклик доезжает")
+    assert not repeated("21", "разбор на #217 показал, что оклик доезжает")
+    assert not repeated("217", "разбор на #217 показал, что оклик доезжает")
+
+
+def test_a_year_is_not_a_repeated_measurement() -> None:
+    """Год и соседнее число повтором не считаются: граница слова, а не вхождение."""
+    assert not repeated("17", "замер 12.09.2017 по тридцати прогонам")
+    assert not repeated("3", "замер дал 13 срабатываний")
+
+
+def test_a_real_repeat_is_still_caught() -> None:
+    """Обратный конец: настоящий повтор числа ловится.
+
+    Сужение предиката не должно превратить гейт в «ничего не находит»: число,
+    написанное прозой отдельным словом, — это и есть второе написание, которое
+    разойдётся молча (075).
+    """
+    assert repeated("30", "замер по 30 прогонам общей ветки")
+    assert repeated("5", "срабатывало 5 раз за смену")

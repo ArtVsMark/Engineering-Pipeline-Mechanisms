@@ -270,11 +270,12 @@ def main(argv: list[str] | None = None) -> int:
         render(machine, eyes, denied, titles(), touched=touches_the_answer(args.base)),
         encoding="utf-8",
     )
-    print(
-        f"карта собрана: машиной {len(machine)}, глазами {len(eyes)}, "
-        + ", ".join(f"{said} {len(numbers)}" for said, numbers in sorted(denied.items()))
-        + f" → {args.out}"
-    )
+    # СОБИРАЕТСЯ СПИСКОМ, А НЕ СКЛЕЙКОЙ. При пустом `denied` склейка давала
+    # висящую запятую и двойной пробел: «глазами 8,  → путь». Нашёл внешний
+    # взгляд на #416.
+    counted = [f"машиной {len(machine)}", f"глазами {len(eyes)}"]
+    counted += [f"{said} {len(numbers)}" for said, numbers in sorted(denied.items())]
+    print("карта собрана: " + ", ".join(counted) + f" → {args.out}")
     return EXIT_OK
 
 
