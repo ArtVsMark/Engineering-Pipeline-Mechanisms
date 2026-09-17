@@ -968,3 +968,35 @@ def test_the_model_calls_are_found_at_all() -> None:
     """
     found = [one for path in WORKFLOWS.glob("*.yml") for one in model_calls(path)]
     assert found, "вызовов модели не найдено — разбор не узнаёт предмета"
+
+
+def test_a_matrix_of_agents_runs_as_a_wave_not_a_salvo() -> None:
+    """Джоб, раздающий агентов матрицей, идёт волной, а не залпом.
+
+    ВОЛНА ЗДЕСЬ ДЕРЖИТСЯ ДВУМЯ ЧИСЛАМИ, И ВТОРОЕ НЕ ДЕРЖАЛОСЬ НИЧЕМ.
+    `scripts/unlooked.py::LOOK_AT_ONCE` ограничивает, сколько изменений попадёт
+    в очередь за заход, и это проверено. А `max-parallel` ограничивает,
+    сколько агентов пойдёт ОДНОВРЕМЕННО, — и его не проверял никто: снятая
+    строка выпустила бы всю очередь залпом, и красного бы не было нигде.
+
+    Залп здесь дорог вдвойне: каждый запуск это прогон агента, и пишут они все
+    в одну задачу-реестр — параллельные заходы наступали бы друг на друга
+    ([031](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/031-waves-not-salvos.md),
+    [149](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/149-the-suite-owns-its-temp.md)).
+    """
+    jobs = load(AUTO_REVIEW)["jobs"]
+    fanned = {
+        name: job
+        for name, job in jobs.items()
+        if (job.get("strategy") or {}).get("matrix")
+        and any("claude_args" in (step.get("with") or {}) for step in job["steps"])
+    }
+    assert fanned, (
+        "джоба, раздающего агентов матрицей, в прогоне нет — предмета у проверки нет (075)"
+    )
+    for name, job in fanned.items():
+        size = (job.get("strategy") or {}).get("max-parallel")
+        assert size == 1, (
+            f"«{name}»: матрица агентов идёт по {size or 'без предела'} разом — "
+            "волна обязана быть объявлена числом, а залп сам себе создаёт отказ"
+        )
