@@ -527,14 +527,15 @@ def test_every_allowed_mutation_is_declared_idempotent() -> None:
     )
 
 
-def test_merged_page_reports_the_page_size_not_the_merged_count(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Страница отдаёт СВОЙ размер, а не число слитых на ней.
+def test_merged_page_answers_with_the_page_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Страница отдаётся ЦЕЛИКОМ, а не выжимкой из неё.
 
     Запрос идёт за закрытыми, и слитые — их подмножество: страница бывает
-    полной при горстке слитых. Вывести одно число из другого нельзя — их
-    разводит фильтр, — и зовущему нужны оба. Нашёл внешний взгляд на #418.
+    полной при горстке слитых и полной при НУЛЕ слитых. Первая редакция
+    отдавала размер числом, и зовущему не хватило: самый старый номер на
+    странице при пустом списке слитых считать не по чему. Отдавать выжимку
+    значит решать за зовущего, какой вопрос он задаст. Нашёл внешний взгляд:
+    #418 — первую половину, #431 — вторую.
     """
     page = [
         {"number": 3, "merged_at": "2026-09-17T00:00:00Z"},
@@ -542,9 +543,18 @@ def test_merged_page_reports_the_page_size_not_the_merged_count(
         {"number": 1, "merged_at": None},
     ]
     monkeypatch.setattr(transport, "request", lambda *a, **k: page)
-    merged, size = transport.merged_page("o/r", "t", 3)
+    merged, whole = transport.merged_page("o/r", "t", 3)
     assert [one["number"] for one in merged] == [3], "слитым считается только слитое"
-    assert size == 3, "размер страницы взят по странице, а не по отфильтрованному"
+    assert [one["number"] for one in whole] == [3, 2, 1], "страница отдана целиком"
+    assert min(one["number"] for one in whole) == 1, "самый старый на странице виден зовущему"
+
+
+def test_a_page_of_nothing_merged_is_still_a_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ноль слитых — не пустая страница: закрытые на ней есть, и их видно."""
+    page = [{"number": 9, "merged_at": None}, {"number": 8, "merged_at": None}]
+    monkeypatch.setattr(transport, "request", lambda *a, **k: page)
+    merged, whole = transport.merged_page("o/r", "t", 2)
+    assert merged == [] and len(whole) == 2, "страница исчезла вместе со слитыми"
 
 
 def test_merged_changes_still_answers_with_the_merged_only(

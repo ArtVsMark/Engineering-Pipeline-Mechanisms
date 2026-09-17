@@ -382,6 +382,12 @@ def resolved_marks(
     marks: set[str] = set()
     mark = since
     merged, page = ghrest.merged_page(repo, token, limit)
+    # САМЫЙ СТАРЫЙ НОМЕР БЕРЁТСЯ СО СТРАНИЦЫ, А НЕ СО СЛИТЫХ НА НЕЙ. При нуле
+    # слитых считать его не по чему, и `default=0` делал условие ложным ВСЕГДА:
+    # предупреждение молчало ровно в своём предельном случае — полная страница
+    # закрытых, из которых не слит ни один. Нашёл внешний взгляд на #431, и
+    # назвал трижды подряд, потому что первая починка закрыла только половину.
+    oldest = min((int(one.get("number") or 0) for one in page), default=0)
     for item in merged:
         number = int(item.get("number") or 0)
         mark = max(mark, number)
@@ -393,16 +399,11 @@ def resolved_marks(
     # молчал бы ровно тогда, когда закрытых без слияния много, — то есть в том
     # случае, ради которого предупреждение и заведено. Нашёл внешний взгляд
     # на #418.
-    if (
-        since
-        and page >= limit
-        and min((int(one.get("number") or 0) for one in merged), default=0) > since
-    ):
+    if since and len(page) >= limit and oldest > since:
         print(
-            f"::warning::страница слитого заполнена ({limit}), и за ней осталось "
+            f"::warning::страница закрытых заполнена ({limit}), и за ней осталось "
             f"неувиденное: уборка читала от #{since}, а самое старое на странице — "
-            f"#{min(int(one.get('number') or 0) for one in merged)}. Снятия между ними "
-            "не прочитаны",
+            f"#{oldest}. Снятия между ними не прочитаны",
             file=sys.stderr,
         )
     return marks, mark
