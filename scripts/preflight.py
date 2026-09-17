@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Final
 
 import paths
+import report
 import yaml
 
 CI: Final = paths.WORKFLOWS / "ci.yml"
@@ -217,11 +218,70 @@ def report_gaps() -> None:
         print(f"  {check} — {why}")
 
 
+def branch_now(root: Path) -> str:
+    """Имя текущей ветки — из дерева, а не из памяти зовущего."""
+    said = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=root or None,
+    )
+    if said.returncode != 0:
+        raise NotRun(f"ветка не прочитана: {report.cut(said.stderr.strip())}")
+    return said.stdout.strip()
+
+
+def push_branch(root: Path) -> int:
+    """Толкает текущую ветку — и зовётся ТОЛЬКО после зелёного вердикта.
+
+    ВЕРДИКТ, КОТОРЫЙ ЧИТАЕТ ТОТ ЖЕ, КТО ДЕЙСТВУЕТ, — НЕ МЕХАНИЗМ, А
+    НАПОМИНАНИЕ. Проверка перед толчком считала своё дело сделанным, напечатав
+    «толкать рано»: держать толчок ей было нечем, а толкал тот же, кто её и
+    запускал. Замер 17.09.2026: за смену ТРИ толчка из примерно пятнадцати ушли
+    при красном вердикте — и каждый раз вердикт был напечатан на экран тем же
+    заходом, что и толчок. Вреда не вышло только потому, что ветки были новыми,
+    и каждый раз это ловил человек, а не механизм.
+
+    ЗДЕСЬ ПРОВЕРКА И ДЕЙСТВИЕ СТАЛИ ОДНИМ ЗАХОДОМ. Красное просто не доходит до
+    этой строки: толкать нечем, а не «не следует».
+
+    ЧЕГО ЭТО НЕ ДЕЛАЕТ: не мешает толкнуть руками. Запретить `git push` проект
+    не может и не должен — обход законен, когда он назван (154), а неназванный
+    обход стоил ровно тех трёх раз.
+    """
+    branch = branch_now(root)
+    if branch in ("HEAD", "main"):
+        print(
+            f"толчок не сделан: ветка «{branch}» — работа идёт в agent/<задача> (003)",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
+    said = subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=root or None,
+    )
+    print(said.stdout.rstrip() or said.stderr.rstrip())
+    if said.returncode != 0:
+        print(f"толчок не прошёл: {report.cut(said.stderr.strip())}", file=sys.stderr)
+        return EXIT_BROKEN
+    print(f"толкнуто: {branch}")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: прогоняет проверки дерева и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     parser.add_argument("--list", action="store_true", help="только показать, что будет запущено")
+    parser.add_argument(
+        "--push",
+        action="store_true",
+        help="толкнуть текущую ветку, ЕСЛИ зелено: проверка и действие одним заходом",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -253,6 +313,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {step.name}: {step.command}")
         return EXIT_RED
     print(f"\nзелено: {len(found)} проверок дерева прошли")
+    if args.push:
+        return push_branch(args.root)
     return EXIT_OK
 
 
