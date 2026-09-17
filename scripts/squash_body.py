@@ -29,15 +29,17 @@ import argparse
 import re
 import subprocess
 import sys
+from collections.abc import Iterable
 from typing import Final
 
 import changerefs
 import paths
 import report
 
-#: Трейлеры хвостового блока: соавторство и адрес окна. Читаются из последнего
-#: коммита ветки — он же самый свежий, и подпись окна в нём та же.
+#: Трейлеры, которые тело уплотнения переносит: соавторство и адрес окна.
 TRAILER_RE: Final = re.compile(r"^(?:Co-Authored-By|Claude-Session):\s*\S", re.IGNORECASE)
+#: Строка вида «Ключ: значение» — из таких целиком состоит хвостовой блок.
+KEY_VALUE: Final = re.compile(r"^[A-Za-z][\w-]*:\s*\S")
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -58,12 +60,50 @@ def git(*args: str) -> str:
         raise NotRun(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
 
 
-def trailers_of(text: str) -> list[str]:
-    """Хвостовые трейлеры сообщения, без повторов и в порядке появления."""
+def tail_block(text: str) -> list[str]:
+    """Хвостовой блок сообщения: последний абзац, ЦЕЛИКОМ из «Ключ: значение».
+
+    Абзац, в котором есть хоть одна прозаическая строка, хвостовым блоком не
+    является — и это не придирка: именно так отличается директива от рассказа о
+    ней.
+    """
+    строки = [line.rstrip() for line in text.strip().splitlines()]
+    хвост: list[str] = []
+    for line in reversed(строки):
+        if not line.strip():
+            break
+        хвост.append(line.strip())
+    хвост.reverse()
+    if not хвост or not all(KEY_VALUE.match(line) for line in хвост):
+        return []
+    return хвост
+
+
+def trailers_of(bodies: Iterable[str]) -> list[str]:
+    """Трейлеры из ХВОСТОВЫХ БЛОКОВ сообщений, без повторов и по порядку.
+
+    ЧИТАЕТСЯ ХВОСТОВОЙ БЛОК КАЖДОГО СООБЩЕНИЯ, А НЕ СТРОКА ГДЕ УГОДНО В СКЛЕЙКЕ.
+    Прежняя редакция брала строку по приставке имени трейлера из текста ВСЕХ
+    коммитов, склеенных вместе, — то есть принимала за директиву прозаическое
+    упоминание. Тело уплотнения уезжает в общую ветку, и подставленный так
+    «соавтор» переписыванию уже не поддаётся
+    ([156](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/156-trailers-live-in-the-tail-not-in-the-prose.md)).
+
+    ЗАМЕР 17.09.2026 по 500 телам коммитов: строк-трейлеров 866, и ШЕСТЬ из них
+    стояли вне хвостового блока. Вреда пока не вышло — все шесть настоящие, —
+    но предмет живой, а разбор его не различал.
+
+    БЛОК ЧИТАЕТСЯ У КАЖДОГО СООБЩЕНИЯ СВОЙ, А НЕ ОДИН НА СКЛЕЙКУ: у склейки
+    хвостовой блок один — последний, — и соавтор, названный в первом коммите
+    ветки, потерялся бы. Два ложных утверждения стояли рядом: комментарий
+    обещал «трейлеры берутся из последнего коммита», а брались они из всех
+    сразу.
+    """
     found: list[str] = []
-    for line in text.splitlines():
-        if TRAILER_RE.match(line.strip()) and line.strip() not in found:
-            found.append(line.strip())
+    for body in bodies:
+        for line in tail_block(body):
+            if TRAILER_RE.match(line) and line not in found:
+                found.append(line)
     return found
 
 
@@ -84,9 +124,9 @@ def compose(branch: str, base: str) -> str:
     # терялась по дороге в общую ветку: два разных исхода снятия становились
     # там одной строкой (039, 044).
     resolved = changerefs.resolutions_in_all(bodies)
-    # Трейлеры берутся из ПОСЛЕДНЕГО коммита: подпись у ветки одна, и повторять
-    # её столько раз, сколько было коммитов, — это шум, а не атрибуция.
-    trailers = trailers_of("\n".join(bodies))
+    # Трейлеры берутся из хвостового блока КАЖДОГО коммита и склеиваются без
+    # повторов: подпись у ветки одна, повторять её по числу коммитов — шум.
+    trailers = trailers_of(bodies)
 
     lines = [f"- {subject}" for subject in subjects]
     if links:
