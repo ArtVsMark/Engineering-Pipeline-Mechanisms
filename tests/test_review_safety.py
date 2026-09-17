@@ -15,6 +15,8 @@ from typing import Any, Final
 import pytest
 import yaml
 
+from tests.conftest import load_script
+
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 AUTO_REVIEW = WORKFLOWS / "review.yml"
@@ -1003,6 +1005,9 @@ def test_a_matrix_of_agents_runs_as_a_wave_not_a_salvo() -> None:
         )
 
 
+#: Предел размера ответа — из общего места, а не своей копией числа (022, 115).
+FINDING_LIMIT: Final = load_script("findings.py").SAID_LIMIT
+
 #: Команды, разрешённые шагу: имя инструмента `Bash(<команда>:*)` без хвоста.
 PERMITTED_COMMAND: Final = re.compile(r"Bash\(([^:)]+)")
 
@@ -1080,3 +1085,41 @@ def test_the_task_says_the_list_is_closed(path: Path) -> None:
             f"{path.name}, «{name}»: задание перечисляет команды, но не говорит, "
             "что список закрыт — перечень без этого читается как примеры"
         )
+
+
+@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+def test_the_task_carries_its_numbers(path: Path) -> None:
+    """В задании стоят ЧИСЛА, и оба взяты из своих канонических мест.
+
+    БЕЗ ЧИСЕЛ ИСПОЛНИТЕЛЬ ВЫБИРАЕТ ИХ САМ — И ВЫБИРАЕТ ПЛОХО
+    ([117](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/117-numeric-limits-belong-in-the-task-spec.md)).
+    Замер 17.09.2026: ни в одном из четырёх заданий не стояло ни одного числа —
+    ни предела ответа, ни срока захода.
+
+    ЧИСЛА НЕ ВПИСАНЫ РУКОЙ, А ВЗЯТЫ У ТЕХ, КТО ИМИ ВЛАДЕЕТ. Предел находки —
+    `findings.SAID_LIMIT`, и он подобран замером по живому реестру. Срок захода
+    — `timeout-minutes` того самого джоба: число, которое площадка И ТАК
+    применит, и разойдись оно с обещанным в задании, исполнитель планировал бы
+    заход по неверному сроку. Оба сверяются здесь, потому что в задании они
+    стоят ВТОРОЙ копией: канон адресату не виден, и дубль подписан (071) — тем
+    же приёмом, что и список разрешённых команд.
+    """
+    doc = load(path)
+    for job, body in doc["jobs"].items():
+        for step in body["steps"]:
+            if "claude_args" not in (step.get("with") or {}):
+                continue
+            name = str(step.get("name") or "без имени")
+            args = step["with"]["claude_args"]
+            appended = re.search(r'--append-system-prompt\s+"([^"]+)"', args)
+            task = str(step["with"].get("prompt") or "") + (appended.group(1) if appended else "")
+            assert str(FINDING_LIMIT) in task, (
+                f"{path.name}, «{name}»: предел размера ответа в задании не назван — "
+                f"канон `findings.SAID_LIMIT` = {FINDING_LIMIT}"
+            )
+            deadline = body.get("timeout-minutes")
+            assert deadline, f"{path.name}, джоб «{job}»: у шага агента нет срока — назвать нечего"
+            assert str(deadline) in task, (
+                f"{path.name}, «{name}»: срок захода в задании не назван либо разошёлся с "
+                f"`timeout-minutes: {deadline}` — исполнитель планировал бы по неверному числу"
+            )
