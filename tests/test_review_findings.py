@@ -381,9 +381,26 @@ def test_an_unweighed_finding_is_not_lighter_than_the_lightest() -> None:
 # --- срок жизни снятия ---------------------------------------------------------
 
 
-def merged(number: int, body: str) -> dict[str, Any]:
-    """Слитое изменение в том виде, в каком его отдаёт площадка."""
-    return {"number": number, "body": body}
+def merged(number: int, body: str, when: str = "") -> dict[str, Any]:
+    """Слитое изменение в том виде, в каком его отдаёт площадка.
+
+    ВРЕМЯ ЗДЕСЬ ОБЯЗАТЕЛЬНО, И ЭТО НЕ УКРАШЕНИЕ. Уборка ведёт отметку по
+    ВРЕМЕНИ СЛИЯНИЯ, а не по номеру: номер говорит, когда изменение открыто, и
+    изменение, простоявшее открытым, сливается ПОСЛЕ соседей с бо́льшими
+    номерами. Подделка без времени умела бы то, чего площадка не отдаёт, и
+    держала бы проверку зелёной на механизме, который времени не читает (170).
+    """
+    return {
+        "number": number,
+        "body": body,
+        "merged_at": when or f"2026-09-17T{number % 24:02d}:00:00Z",
+        "closed_at": when or f"2026-09-17T{number % 24:02d}:00:00Z",
+    }
+
+
+def closed(number: int, when: str) -> dict[str, Any]:
+    """Закрытое БЕЗ слияния: время закрытия есть, времени слияния нет."""
+    return {"number": number, "body": "", "merged_at": None, "closed_at": when}
 
 
 def test_a_resolution_is_read_from_the_sweep_mark_not_a_fixed_window(
@@ -401,20 +418,27 @@ def test_a_resolution_is_read_from_the_sweep_mark_not_a_fixed_window(
     ЗАМЕР 16.09.2026: находку `a98cee5` сняло #348, а к появлению записи в
     реестре #348 лежало за тридцатым закрытым — уборка на него уже не смотрела.
     """
-    page = [merged(50, "Разобрано: aaaaaaa"), merged(49, "Разобрано: bbbbbbb")]
+    page = [
+        merged(50, "Разобрано: aaaaaaa", "2026-09-16T12:00:00Z"),
+        merged(49, "Разобрано: bbbbbbb", "2026-09-16T11:00:00Z"),
+    ]
     # Читается СТРАНИЦА, а не только слитое на ней: полнота страницы
     # меряется её размером (находка #418).
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
-    marks, mark = module.resolved_marks("o/r", "токен", 49)
+    marks, mark = module.resolved_marks("o/r", "токен", "2026-09-16T11:00:00Z")
     assert marks == {"aaaaaaa"}, "прочитано не от отметки уборки"
-    assert mark == 50, "отметка не сдвинулась на прочитанное"
+    assert mark == "2026-09-16T12:00:00Z", "отметка не сдвинулась на прочитанное"
 
 
 def test_the_sweep_mark_survives_a_round_trip() -> None:
     """Отметка уборки читается обратно из тела: другого хранилища у неё нет."""
-    body = module.render_body({}, 417)
-    assert module.parse_swept(body) == 417
-    assert module.parse_swept("") == 0, "пустое тело — ноль, а не догадка"
+    body = module.render_body({}, "2026-09-17T14:41:00Z")
+    assert module.parse_swept(body) == "2026-09-17T14:41:00Z"
+    assert module.parse_swept("") == "", "пустое тело — пусто, а не догадка"
+    # ПРЕЖНЯЯ ФОРМА ПЕРЕВОДИТСЯ В ПУСТО, А НЕ В ВРЕМЯ ТОГО ИЗМЕНЕНИЯ: времени в
+    # номере нет, и догадка здесь стоила бы ровно того пропуска, ради которого
+    # форма и меняется.
+    assert module.parse_swept("Убрано до: #442") == "", "старая отметка выдана за время"
 
 
 def test_a_full_page_beyond_the_sweep_mark_is_said_out_loud(
@@ -426,13 +450,15 @@ def test_a_full_page_beyond_the_sweep_mark_is_said_out_loud(
     отметку через неувиденное значило бы объявить прочитанным то, чего заход не
     унёс (045).
     """
-    page = [merged(number, "") for number in range(100, 97, -1)]
+    page = [
+        merged(number, "", f"2026-09-1{number - 96}T10:00:00Z") for number in range(100, 97, -1)
+    ]
     # Читается СТРАНИЦА, а не только слитое на ней: полнота страницы
     # меряется её размером (находка #418).
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
-    module.resolved_marks("o/r", "токен", 10, limit=3)
+    module.resolved_marks("o/r", "токен", "2026-09-10T10:00:00Z", limit=3)
     said = capsys.readouterr().err
-    assert "::warning::" in said and "#10" in said, said
+    assert "::warning::" in said and "2026-09-10T10:00:00Z" in said, said
 
 
 # --- верификатор: вход от ОДНОЙ находки ---------------------------------------
@@ -621,11 +647,11 @@ def test_a_full_page_of_closed_warns_even_when_few_were_merged(
     ЗДЕСЬ СЛИТОЕ ОДНО, А СТРАНИЦА ПОЛНА: прежний счёт (`len(merged) >= limit`)
     дал бы 1 >= 3 и промолчал.
     """
-    page = [{"number": 300, "merged_at": "x", "body": ""}]
+    page = [merged(300, "", "2026-09-17T10:00:00Z")]
     monkeypatch.setattr(
         module.ghrest, "merged_page", lambda repo, token, limit: (page, page * limit)
     )
-    module.resolved_marks("o/r", "t", since=10, limit=3)
+    module.resolved_marks("o/r", "t", since="2026-09-01T00:00:00Z", limit=3)
     assert "страница закрытых заполнена" in capsys.readouterr().err
 
 
@@ -633,9 +659,9 @@ def test_a_page_with_room_left_says_nothing(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Страница не полна — предупреждения нет: крик о законном учит не слушать (051)."""
-    page = [{"number": 300, "merged_at": "x", "body": ""}]
+    page = [merged(300, "", "2026-09-17T10:00:00Z")]
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
-    module.resolved_marks("o/r", "t", since=10, limit=3)
+    module.resolved_marks("o/r", "t", since="2026-09-01T00:00:00Z", limit=3)
     assert "страница закрытых заполнена" not in capsys.readouterr().err
 
 
@@ -665,26 +691,74 @@ def test_a_full_page_with_nothing_merged_still_warns(
     Нашёл внешний взгляд на #431 и назвал ТРИЖДЫ подряд — первая починка
     закрыла только половину предиката.
     """
-    closed = [{"number": n, "merged_at": None, "body": ""} for n in range(200, 203)]
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], closed))
-    marks, mark = module.resolved_marks("o/r", "t", since=10, limit=3)
+    page = [closed(n, f"2026-09-1{n - 198}T10:00:00Z") for n in range(200, 203)]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], page))
+    marks, mark = module.resolved_marks("o/r", "t", since="2026-09-01T00:00:00Z", limit=3)
     said = capsys.readouterr().err
     assert "страница закрытых заполнена" in said, "механизм молчит в своём предельном случае"
-    assert "#200" in said, "самый старый номер взят со страницы, а не со слитых"
-    assert marks == set() and mark == 10, "отметка не двигается по непрочитанному"
+    assert "2026-09-12T10:00:00Z" in said, "край страницы взят не со страницы, а со слитых"
+    assert marks == set(), "прочитано то, чего на странице нет"
+    assert mark == "2026-09-01T00:00:00Z", "отметка двинулась по непрочитанному"
 
 
-def test_the_oldest_number_comes_from_the_page_not_the_merged(
+def test_the_page_edge_comes_from_the_page_not_the_merged(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Самый старый номер — со страницы: слитое на ней может быть свежее всех."""
-    closed = [
-        {"number": 300, "merged_at": "x", "body": ""},
-        {"number": 201, "merged_at": None, "body": ""},
-        {"number": 200, "merged_at": None, "body": ""},
+    page = [
+        merged(300, "", "2026-09-17T10:00:00Z"),
+        closed(201, "2026-09-13T10:00:00Z"),
+        closed(200, "2026-09-12T10:00:00Z"),
     ]
-    merged = [closed[0]]
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (merged, closed))
-    module.resolved_marks("o/r", "t", since=10, limit=3)
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([page[0]], page))
+    module.resolved_marks("o/r", "t", since="2026-09-01T00:00:00Z", limit=3)
     said = capsys.readouterr().err
-    assert "#200" in said and "#300" not in said, f"назван не тот край страницы: {said}"
+    assert "2026-09-12T10:00:00Z" in said, f"назван не тот край страницы: {said}"
+    assert "2026-09-17T10:00:00Z" not in said, f"край взят со слитого, а не со страницы: {said}"
+
+
+def test_a_change_merged_late_with_a_lower_number_is_still_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отметка идёт по ВРЕМЕНИ СЛИЯНИЯ, а не по номеру изменения.
+
+    Номер говорит, когда изменение ОТКРЫТО. Изменение, простоявшее открытым,
+    пока соседи с бо́льшими номерами уехали в общую ветку, оказывалось НИЖЕ
+    курсора в тот самый заход, который его впервые увидел, — и его снятия не
+    читались уже никогда.
+
+    ЗАМЕР 17.09.2026 ПО ВСЕЙ ИСТОРИИ: из 386 слитых изменений 36 слились не в
+    порядке номера, и в них 76 отметок снятия, которых уборка не прочла ни разу.
+    Последний случай — #438: слит в 14:41, курсор к тому времени стоял на #442,
+    пять отметок остались в реестре неразобранными при сделанной работе.
+    """
+    page = [
+        merged(442, "Разобрано: ccccccc", "2026-09-17T14:52:00Z"),
+        merged(438, "Разобрано: aaaaaaa", "2026-09-17T14:41:00Z"),
+        merged(440, "Разобрано: bbbbbbb", "2026-09-17T13:51:00Z"),
+    ]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
+    marks, mark = module.resolved_marks("o/r", "токен", "2026-09-17T13:51:00Z")
+    assert marks == {"aaaaaaa", "ccccccc"}, (
+        "снятие изменения с МЕНЬШИМ номером, слитого позже, не прочитано — "
+        "отметка идёт по номеру, а не по времени слияния"
+    )
+    assert mark == "2026-09-17T14:52:00Z"
+
+
+def test_a_merge_without_a_time_does_not_move_the_mark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """«Не знаю когда» значит «не прочитано», а не «прочитано сейчас».
+
+    Одна запись без времени иначе перепрыгнула бы курсор через всё, что ниже
+    неё, — то есть сделала бы ровно то, что чинится (045, 068).
+    """
+    page = [
+        {"number": 500, "body": "Разобрано: ddddddd", "merged_at": None, "closed_at": "2026-09-18"},
+        merged(499, "Разобрано: eeeeeee", "2026-09-17T15:00:00Z"),
+    ]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
+    marks, mark = module.resolved_marks("o/r", "токен", "2026-09-17T14:00:00Z")
+    assert marks == {"eeeeeee"}, "прочитано слитое без времени"
+    assert mark == "2026-09-17T15:00:00Z", "отметка сдвинулась по записи без времени"
