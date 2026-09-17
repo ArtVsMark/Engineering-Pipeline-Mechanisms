@@ -106,6 +106,27 @@ def queued(where: Path | None = None) -> str:
         raise NotRun(f"очередь предложений не прочитана ({path}): {exc}") from exc
 
 
+#: Оформление вокруг слага: обратные кавычки, кавычки-ёлочки и знак конца
+#: предложения. Снимается ДО сверки с очередью.
+AROUND_SLUG: Final = "`\"'«».,;:()[]"
+
+
+def slug_of(said: str) -> str:
+    """Слаг из строки ответа — без оформления вокруг него.
+
+    ГЕЙТ СУДИТ СУЩЕСТВО, А НЕ РАЗМЕТКУ. Первое слово строки бралось целиком, и
+    слаг, записанный в обратных кавычках — то есть ровно так, как имя пишут в
+    документе этого проекта повсюду, — не сходился с очередью: гейт видел
+    «`имя`.» и честного ответа не признавал. Красное на законном учит обходить
+    красное
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Поймано 17.09.2026 на ПЕРВОЙ же записи с ответом «предложено» — до неё у
+    этой ветки разбора не было живого предмета вовсе.
+    """
+    first = said.split()[0] if said.split() else ""
+    return first.strip(AROUND_SLUG)
+
+
 def missing(paths_: list[str], queue: str, root: Path = Path()) -> list[str]:
     """Записи, чей ответ отсутствует или не сходится с очередью."""
     told: list[str] = []
@@ -122,9 +143,9 @@ def missing(paths_: list[str], queue: str, root: Path = Path()) -> list[str]:
             )
             continue
         kind, what = said
-        if kind == "предложено" and what.split()[0] not in queue:
+        if kind == "предложено" and slug_of(what) not in queue:
             told.append(
-                f"  {one}: назван слаг «{what.split()[0]}», а в очереди предложений "
+                f"  {one}: назван слаг «{slug_of(what)}», а в очереди предложений "
                 f"({paths.PROPOSALS}) его нет — ответ обещает то, чего не отправили"
             )
     return told

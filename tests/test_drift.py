@@ -280,7 +280,17 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Недоступный каталог не отменяет устаревшей сводки: источники независимы."""
+    """Недоступный каталог не отменяет устаревшей сводки: источники независимы.
+
+    ПОДДЕЛЫВАЮТСЯ ВСЕ ИСТОЧНИКИ, А НЕ ТЕ, У КОГО СЕГОДНЯ ЕСТЬ ПРЕДМЕТ. Разбор
+    вердиктов по предложениям здесь не подделывался — и тест проходил ровно
+    потому, что очередь предложений была ПУСТА: источник молчал не по замыслу
+    теста, а от отсутствия предмета. Первое же записанное предложение (17.09.2026)
+    это вскрыло, покрасив тест, не имеющий к предложениям отношения. Зелёное,
+    державшееся на пустоте соседнего файла, — то же вырожденное зелёное, что
+    ловит
+    [075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md).
+    """
     drift = module.Drift("family-snapshot", "разошлось", "починить")
     monkeypatch.setattr(module, "fetch", lambda url: {})
     monkeypatch.setattr(
@@ -289,11 +299,40 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(module, "snapshot_is_stale", lambda *_: [drift])
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
+    monkeypatch.setattr(module, "proposals_answered", lambda *a, **k: [])
+    # Версии языка не подделывались вовсе, и этот источник ходил из набора в
+    # СЕТЬ по-настоящему: манифест берётся не через `fetch`, а своим чтением.
+    # Нашёл это соседний тест ниже, в тот же день, что и пропущенные вердикты.
+    monkeypatch.setattr(module, "language_moved", lambda *a, **k: [])
     monkeypatch.setattr(module, "showcase_questions_moved", lambda *_: [])
     monkeypatch.setattr(module, "gap_tasks_closed", lambda *a: [])
     found, silent = module.look("o/r", "token", {})
     assert found == [drift]
     assert silent == ["каталог"]
+
+
+def test_every_source_of_the_sweep_is_faked_by_that_test() -> None:
+    """Тест независимости источников подделывает КАЖДЫЙ из них поимённо.
+
+    Пропущенный источник не ломает тест, пока его предмет пуст, — он ломает его
+    в тот день, когда предмет появится, и покрасит работу, к нему не
+    относящуюся. Так и вышло: разбор вердиктов по предложениям не подделывался,
+    и красное пришло с первым же записанным предложением.
+
+    Сверяется по ИМЕНАМ ИСТОЧНИКОВ, объявленным самим механизмом (`SOURCES`), а
+    не по списку, написанному здесь второй копией
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    source = inspect.getsource(test_one_silent_source_does_not_stop_the_others)
+    asked = {name for name in module.SOURCES}
+    assert asked, "механизм не объявляет источников — предмета у проверки нет (075)"
+    # Имя источника в объявлении человеческое, а подделывается функция: связь
+    # между ними держит сам механизм, и проверяется здесь их ЧИСЛО.
+    faked = source.count("monkeypatch.setattr(module, ")
+    assert faked >= len(asked), (
+        f"источников у механизма {len(asked)}, подделок в тесте {faked} — "
+        "неподделанный источник зеленеет, пока его предмет пуст"
+    )
 
 
 def test_every_record_carries_its_next_step() -> None:

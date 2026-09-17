@@ -194,3 +194,61 @@ def test_the_gate_reads_its_own_record() -> None:
     said = module.fate(text)
     assert said is not None, "своя же запись молчит о судьбе правила"
     assert said[0] == "своё" and said[1], said
+
+
+def test_a_slug_in_backticks_is_still_the_slug(tmp_path: Path) -> None:
+    """Слаг в обратных кавычках гейт узнаёт: он судит существо, а не разметку.
+
+    ИМЯ В ЭТОМ ПРОЕКТЕ ПИШУТ В КАВЫЧКАХ ПОВСЮДУ, и первая же запись с ответом
+    «предложено» была написана так — `имя`. с точкой на конце. Гейт брал первое
+    слово целиком, видел «`имя`.» и честного ответа не признавал: красное на
+    законном
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    До 17.09.2026 у этой ветки разбора не было живого предмета вовсе — очередь
+    предложений стояла пустой, и проверял её только тест на подделке.
+    """
+    root = tree(tmp_path, queue=("a-red-that-survived-the-merge",))
+    git(root, "checkout", "-b", "work")
+    born(
+        root,
+        "002-в-кавычках.md",
+        "# 002\n\n**Каталогу:** предложено — `a-red-that-survived-the-merge`. "
+        "И дальше проза о предмете.\n",
+    )
+    assert run(root) == CLEAN
+
+
+def test_markup_does_not_invent_a_slug(tmp_path: Path) -> None:
+    """Снятие оформления НЕ превращает чужой слаг в свой.
+
+    Обратная половина: гейт стал мягче к разметке и не должен стать мягче к
+    существу. Имени, которого в очереди нет, кавычки не помогают.
+    """
+    root = tree(tmp_path, queue=("a-red-that-survived-the-merge",))
+    git(root, "checkout", "-b", "work")
+    born(root, "002-чужой.md", "# 002\n\n**Каталогу:** предложено — `совсем-другое-имя`.\n")
+    assert run(root) == FOUND
+
+
+def test_slug_of_takes_the_name_and_drops_the_dressing() -> None:
+    """Разбор слага прогнан НАПРЯМУЮ, а не только через вердикт гейта.
+
+    Через вердикт проверяется, что гейт в целом не отказывает на верном; здесь
+    — что именно снимается. Разница важна: пройди оформление мимо, вердикт всё
+    равно мог бы сойтись по другой причине.
+    """
+    assert module.slug_of("`имя-правила`. И проза дальше") == "имя-правила"
+    assert module.slug_of("имя-правила — причина") == "имя-правила"
+    assert module.slug_of("«имя-правила»,") == "имя-правила"
+    assert module.slug_of("(имя-правила)") == "имя-правила"
+
+
+def test_slug_of_answers_an_empty_line_without_guessing() -> None:
+    """Пустая строка даёт пустой слаг, а не падение и не выдуманное имя.
+
+    Пустое имя в очереди не найдётся, и отказ придёт от сверки — то есть от
+    того, кто про очередь знает, а не от разбора строки (045).
+    """
+    assert module.slug_of("") == ""
+    assert module.slug_of("   ") == ""
+    assert module.slug_of("``") == ""
