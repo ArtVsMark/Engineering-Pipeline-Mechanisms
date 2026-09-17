@@ -23,9 +23,15 @@ family = load_script("family.py")
 facts = load_script("build_facts.py")
 
 
-def summary(*consumers: dict[str, Any], schema: str = "1.2") -> dict[str, Any]:
-    """Сводка каталога в том виде, в каком он её публикует."""
-    return {"schema": schema, "consumers": list(consumers)}
+def summary(*consumers: dict[str, Any], schema: str = "") -> dict[str, Any]:
+    """Сводка каталога в том виде, в каком он её публикует.
+
+    Форма по умолчанию — ТА, ПОД КОТОРУЮ НАПИСАН РАЗРЕЗ, а не переписанное
+    рядом число. Копия здесь стояла: `"1.2"` жило в подделке ещё девять дней
+    после того, как каталог ушёл на 1.3, — и «сходится» проверялось против
+    самой подделки, а не против живого разреза (022).
+    """
+    return {"schema": schema or family.READS_SCHEMA, "consumers": list(consumers)}
 
 
 def consumer(repo: str, **holds: tuple[str, str]) -> dict[str, Any]:
@@ -157,6 +163,35 @@ def test_a_diverged_schema_is_named_not_hidden(tmp_path: Path) -> None:
     answer = facts.family_facts(path)
     assert answer["read"] is True
     assert answer["schema_agrees"] is False
+
+
+def test_a_diverged_schema_is_said_out_loud(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Расхождение формы ПЕЧАТАЕТСЯ, а не только кладётся в факты.
+
+    ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Соседний тест держал, что
+    расхождение «названо прямо», — и держал он при этом ключ в словаре,
+    который никто не открывает. Замер: сводка ушла на 1.3 восьмого сентября,
+    разрез остался под 1.2, `schema_agrees` считался ложью каждый прогон, и
+    девять дней об этом не знал никто (046).
+    """
+    path = written(
+        tmp_path, summary(consumer("o/a", **{"001": ("gate", "scripts/x.py")}), schema="9.9")
+    )
+    code = facts.main(["--family", str(path), "--out", str(tmp_path / "out")])
+    said = capsys.readouterr()
+    assert code == facts.EXIT_OK
+    assert "9.9" in said.err and family.READS_SCHEMA in said.err, (
+        "расхождение формы не сказано вслух: " + said.err
+    )
+
+
+def test_a_matching_schema_says_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Форма сошлась — про неё молчат: строка о сходящемся учит не читать строк."""
+    path = written(tmp_path, summary(consumer("o/a", **{"001": ("gate", "scripts/x.py")})))
+    facts.main(["--family", str(path), "--out", str(tmp_path / "out")])
+    assert "форма сводки" not in capsys.readouterr().err
 
 
 def test_the_top_is_ordered_by_rules(tmp_path: Path) -> None:
