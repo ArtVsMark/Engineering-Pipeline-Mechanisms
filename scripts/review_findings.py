@@ -236,7 +236,7 @@ def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
 parse_entries = findings.parse_entries
 
 
-def render_body(entries: dict[str, findings.Entry]) -> str:
+def render_body(entries: dict[str, findings.Entry], swept_to: int = 0) -> str:
     """Собирает тело живой задачи: заметки, а не счётчики.
 
     Записывается заголовок находки, а не число: «находок 2» не отвечает на
@@ -264,6 +264,10 @@ def render_body(entries: dict[str, findings.Entry]) -> str:
         "законно находит то, что уже починено. Решение за тем, кто берёт работу.",
         "",
     ]
+    # ОТМЕТКА УБОРКИ — СРОК ЖИЗНИ СНЯТИЯ, СЧИТАННЫЙ ОТ ПРОЧТЕНИЯ. Без неё окно
+    # было бы «последние тридцать закрытых», то есть отсчёт шёл бы от публикации
+    # снятия и тем короче, чем быстрее мержатся соседи (079).
+    lines += [f"Убрано до: #{swept_to}", ""]
     if entries:
         lines.append("## Не разобрано")
         lines.append("")
@@ -336,18 +340,79 @@ def verified(entry: findings.Entry, said: str, why: str, day: str) -> findings.E
     return replace(entry, checked=tail)
 
 
-def resolved_marks(repo: str, token: str, limit: int = ghrest.MERGED_WINDOW) -> set[str]:
-    """Отпечатки, названные разобранными в последних слитых изменениях."""
+#: Докуда уборка уже дочитала слитое. Без отметки окно было бы «последние
+#: тридцать закрытых» — то есть срок жизни снятия отсчитывался бы от его
+#: ПУБЛИКАЦИИ и тем короче, чем быстрее мержатся соседи.
+SWEPT_RE: Final = re.compile(r"^Убрано до: #(\d+)\s*$", re.M)
+
+
+def parse_swept(body: str | None) -> int:
+    """Докуда уборка дочитала; ноль — не читала никуда."""
+    found = SWEPT_RE.findall(body or "")
+    return int(found[-1]) if found else 0
+
+
+def resolved_marks(
+    repo: str, token: str, since: int = 0, limit: int = ghrest.MERGED_WINDOW
+) -> tuple[set[str], int]:
+    """Отпечатки, названные разобранными в слитом ПОСЛЕ отметки уборки.
+
+    СРОК ЖИЗНИ СНЯТИЯ СЧИТАЕТСЯ ОТ ТОГО, КОГДА ЕГО ПРОЧЛИ, А НЕ КОГДА ОПУБЛИКОВАЛИ
+    ([079](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/079-ttl-counts-from-completion.md)).
+    Прежде окно было «последние тридцать закрытых»: снятие, опубликованное в теле
+    изменения, обязано было попасть под уборку раньше, чем тридцать соседей
+    сольются следом. Отсчёт шёл от ПУБЛИКАЦИИ, и жило снятие тем меньше, чем
+    быстрее движется очередь, — ровно признак правила: «результат длинной
+    операции исчезает раньше, чем результат короткой».
+
+    ЗАМЕР 16.09.2026, и он стоил потерянной записи. Находку `a98cee5` починило
+    #348 и сняло строкой «Разобрано» 14.09 в 15:46. К моменту, когда запись о ней
+    появилась в реестре, #348 лежало за тридцатым закрытым изменением — и уборка
+    на него уже не смотрела. Работа сделана, запись висит неразобранной, и снять
+    её нечем.
+
+    ОТМЕТКА ДВИГАЕТСЯ ТОЛЬКО ПО ПРОЧИТАННОМУ. Отдаётся она вторым значением, и
+    записывает её вызывающий: заход, не дошедший до записи, не вправе объявить
+    прочитанным то, чего не унёс.
+
+    ОКНО ОСТАЁТСЯ ПРЕДЕЛОМ ЗАПРОСА, а не сроком хранения. Если за один заход
+    слито больше, чем помещается на странице, отметка перешагнёт неувиденное — и
+    об этом говорится вслух, как у реестра непросмотренного (045).
+    """
     marks: set[str] = set()
-    for item in ghrest.merged_changes(repo, token, limit):
+    mark = since
+    merged = ghrest.merged_changes(repo, token, limit)
+    for item in merged:
+        number = int(item.get("number") or 0)
+        mark = max(mark, number)
+        if number <= since:
+            continue
         marks.update(changerefs.resolved_in(item.get("body") or ""))
-    return marks
+    if (
+        since
+        and len(merged) >= limit
+        and min((int(one.get("number") or 0) for one in merged), default=0) > since
+    ):
+        print(
+            f"::warning::страница слитого заполнена ({limit}), и за ней осталось "
+            f"неувиденное: уборка читала от #{since}, а самое старое на странице — "
+            f"#{min(int(one.get('number') or 0) for one in merged)}. Снятия между ними "
+            "не прочитаны",
+            file=sys.stderr,
+        )
+    return marks, mark
 
 
-def save(repo: str, token: str, entries: dict[str, findings.Entry], apply: bool) -> None:
+def save(
+    repo: str,
+    token: str,
+    entries: dict[str, findings.Entry],
+    apply: bool,
+    swept_to: int = 0,
+) -> None:
     """Записывает живую задачу: обновляет по месту или заводит одну."""
     number, _ = live_issue(repo, token)
-    body = render_body(entries)
+    body = render_body(entries, swept_to)
     if not apply:
         print(
             f"записал бы {len(entries)} заметок " + (f"в #{number}" if number else "в новую задачу")
@@ -476,13 +541,14 @@ def main(argv: list[str] | None = None) -> int:
 
         # Уборка идёт ПОСЛЕ записи, а не вместо: обратный порядок терял бы
         # заметку, снятую и заново найденную одним заходом.
-        swept = resolved_marks(args.repo, token) & set(entries)
+        marks, swept_to = resolved_marks(args.repo, token, parse_swept(body))
+        swept = marks & set(entries)
         for mark in swept:
             entries.pop(mark, None)
         if swept:
             print(f"снято как разобранное: {', '.join(sorted(swept))}")
 
-        save(args.repo, token, entries, args.apply)
+        save(args.repo, token, entries, args.apply, swept_to)
     except (NotRun, ghrest.TransportError) as exc:
         print(f"механизм не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

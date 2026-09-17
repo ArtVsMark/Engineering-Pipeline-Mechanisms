@@ -182,8 +182,10 @@ def test_the_registry_does_not_get_the_earlier_look_back(
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter(feed))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
-    monkeypatch.setattr(module, "save", lambda repo, token, entries, apply: written.update(entries))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
+    monkeypatch.setattr(
+        module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
+    )
     module.main(["--repo", "o/r", "--pr", "333"])
     titles = sorted(entry.title for entry in written.values())
     assert titles == ["новое, этого захода"], titles
@@ -376,6 +378,59 @@ def test_an_unweighed_finding_is_not_lighter_than_the_lightest() -> None:
     assert order.index("дефект") < order.index("замечание"), order
 
 
+# --- срок жизни снятия ---------------------------------------------------------
+
+
+def merged(number: int, body: str) -> dict[str, Any]:
+    """Слитое изменение в том виде, в каком его отдаёт площадка."""
+    return {"number": number, "body": body}
+
+
+def test_a_resolution_is_read_from_the_sweep_mark_not_a_fixed_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Снятие живёт до того, как его ПРОЧЛИ, а не тридцать слияний с публикации.
+
+    Прежде окно было «последние тридцать закрытых»: снятие обязано было попасть
+    под уборку раньше, чем тридцать соседей сольются следом. Отсчёт шёл от
+    ПУБЛИКАЦИИ, и жило снятие тем меньше, чем быстрее движется очередь — ровно
+    признак правила
+    ([079](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/079-ttl-counts-from-completion.md)):
+    «результат длинной операции исчезает раньше, чем результат короткой».
+
+    ЗАМЕР 16.09.2026: находку `a98cee5` сняло #348, а к появлению записи в
+    реестре #348 лежало за тридцатым закрытым — уборка на него уже не смотрела.
+    """
+    page = [merged(50, "Разобрано: aaaaaaa"), merged(49, "Разобрано: bbbbbbb")]
+    monkeypatch.setattr(module.ghrest, "merged_changes", lambda repo, token, limit: page)
+    marks, mark = module.resolved_marks("o/r", "токен", 49)
+    assert marks == {"aaaaaaa"}, "прочитано не от отметки уборки"
+    assert mark == 50, "отметка не сдвинулась на прочитанное"
+
+
+def test_the_sweep_mark_survives_a_round_trip() -> None:
+    """Отметка уборки читается обратно из тела: другого хранилища у неё нет."""
+    body = module.render_body({}, 417)
+    assert module.parse_swept(body) == 417
+    assert module.parse_swept("") == 0, "пустое тело — ноль, а не догадка"
+
+
+def test_a_full_page_beyond_the_sweep_mark_is_said_out_loud(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Страница заполнена, а до отметки не дочитано — сказано, а не проглочено.
+
+    Окно остаётся пределом ЗАПРОСА, а не сроком хранения. Молча передвинуть
+    отметку через неувиденное значило бы объявить прочитанным то, чего заход не
+    унёс (045).
+    """
+    page = [merged(number, "") for number in range(100, 97, -1)]
+    monkeypatch.setattr(module.ghrest, "merged_changes", lambda repo, token, limit: page)
+    module.resolved_marks("o/r", "токен", 10, limit=3)
+    said = capsys.readouterr().err
+    assert "::warning::" in said and "#10" in said, said
+
+
 # --- верификатор: вход от ОДНОЙ находки ---------------------------------------
 
 
@@ -450,9 +505,11 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
         module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами")]
     )
     monkey.setattr(module, "existing_mark", lambda entries, pr, title, strict=False: "abc1234")
-    monkey.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkey.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
     written: dict[str, Any] = {}
-    monkey.setattr(module, "save", lambda repo, token, entries, apply: written.update(entries))
+    monkey.setattr(
+        module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
+    )
     module.main(["--repo", "o/r", "--pr", "333"])
     monkey.undo()
     assert written["abc1234"].checked == kept, "ответ верификатора стёрт пересказом находки"
@@ -502,7 +559,7 @@ def test_an_empty_registry_is_its_own_outcome(
     """
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_NOTHING
 
@@ -513,7 +570,7 @@ def test_a_registry_with_entries_stays_pending(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_PENDING
 
@@ -539,7 +596,7 @@ def test_a_verdict_that_disagrees_with_its_list_is_announced(
     monkeypatch.setattr(
         module, "findings_of", lambda comments: [("дефект", "очередь читает не то")]
     )
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token: set())
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     module.main(["--repo", "o/r", "--pr", "131"])
     said = capsys.readouterr().err
