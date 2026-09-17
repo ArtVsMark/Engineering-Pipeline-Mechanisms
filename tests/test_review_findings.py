@@ -919,3 +919,74 @@ def test_kind_of_reads_the_mark_and_falls_back_to_the_address() -> None:
         "механический пол не сработал"
     )
     assert findings_module.kind_of("обычная находка о коде") == findings_module.CODE
+
+
+def отметка(pr: int, kind: str) -> dict[str, Any]:
+    """Реестр из одной записи заданного рода — общий вход для проверок снятия."""
+    return {"abc1234": findings_module.Entry(pr, "дефект", "находка", kind=kind)}
+
+
+def test_an_answer_finding_is_not_closed_without_touching_the_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Снятие находки ОБ ОТВЕТЕ не принимается, если ответ не правили.
+
+    У находки о коде предмет размыт — починить её можно где угодно в дереве, — а
+    у находки об ответе он ровно один файл. Изменение, объявившее её разобранной
+    и не тронувшее этот файл, говорит о работе, которой не делало.
+    """
+    entries = отметка(10, findings_module.ANSWER_KIND)
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    assert берём == set(), "снятие принято при нетронутом ответе"
+    assert "abc1234" in держим and module.ANSWER_FILE in держим["abc1234"]
+
+
+def test_an_answer_finding_is_closed_when_the_answer_was_edited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Вторая половина: ответ правили — снятие принимается.
+
+    Без неё проверка была бы неотличима от «находки об ответе не снимаются
+    никогда» (051).
+    """
+    entries = отметка(10, findings_module.ANSWER_KIND)
+    monkeypatch.setattr(
+        module, "touched", lambda repo, token, number: {module.ANSWER_FILE, "scripts/arm.py"}
+    )
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    assert берём == {"abc1234"} and not держим
+
+
+def test_a_code_finding_is_closed_without_asking_the_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """У находки о КОДЕ файлы не спрашиваются вовсе: предмет размыт, и цена зря.
+
+    Проверяется именно НЕВЫЗОВ: лишний запрос к площадке на каждое снятие —
+    плата, которой требование не оправдывает.
+    """
+    entries = отметка(10, findings_module.CODE)
+
+    def нельзя(repo: str, token: str, number: int) -> set[str]:
+        raise AssertionError("файлы спрошены у находки о коде")
+
+    monkeypatch.setattr(module, "touched", нельзя)
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    assert берём == {"abc1234"} and not держим
+
+
+def test_a_silent_platform_lets_the_resolution_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ТРЕТИЙ ИСХОД ИДЁТ В СТОРОНУ СНЯТИЯ, и это выбор с названной ценой.
+
+    Площадка не ответила о файлах — мы не знаем, правили ответ или нет. Держать
+    запись по НЕЗНАНИЮ значило бы наказывать за отказ сети того, кто работу
+    сделал: отметка уже стоит в теле слитого, то есть утверждение сделано
+    человеком (039, 084).
+    """
+    entries = отметка(10, findings_module.ANSWER_KIND)
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: set())
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    assert берём == {"abc1234"} and not держим
