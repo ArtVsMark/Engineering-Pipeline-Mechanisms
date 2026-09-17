@@ -158,3 +158,24 @@ def test_the_strict_mode_reaches_the_registry() -> None:
     other = "шаг долга не называет причину отказа"
     assert module.existing_mark(entries, 7, other) == "abc1234"
     assert module.existing_mark(entries, 7, other, strict=True) is None
+
+
+def test_the_table_signs_itself_as_a_deliberate_duplicate() -> None:
+    """Таблица подписана дублем: канон живёт у механизма, здесь пересказ.
+
+    Причины в таблице — пересказ докстрок, местами слово в слово. Дубль
+    законный: у таблицы ДРУГОЙ читатель и другой вопрос — не «почему эта
+    функция прощает вот это», а «что вообще прощает проект» (022). Но
+    намеренный дубль обязан быть ПОДПИСАН
+    ([071](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/071-deliberate-duplication-is-signed.md)),
+    иначе следующий читатель примет пересказ за второй источник истины и
+    поправит не тот. Нашёл неподписанность внешний взгляд на #406.
+    """
+    said = json.loads(TABLE.read_text(encoding="utf-8"))
+    signed = [value for key, value in said.items() if key.startswith("_") and "071" in str(value)]
+    assert signed, "таблица повторяет докстроки и дублем себя не объявляет (071)"
+    only = signed[0]
+    assert "границ" in only or "не ловит" in only.lower(), (
+        "подпись дубля не называет, чего гейт не держит — "
+        "подписанный дубль без названной цены читается как гарантия (046)"
+    )
