@@ -199,7 +199,7 @@ def at_base(ancestor: str, name: str) -> str:
         raise
 
 
-def travelled(base: str) -> list[str]:
+def travelled(base: str, ancestor: str | None = None) -> list[str]:
     """Отметки снятия, объявленные фрагментом и НЕ уехавшие с работой.
 
     СНЯТИЕ ЕДЕТ ТЕЛОМ КОММИТА, А НЕ ФРАГМЕНТОМ ЖУРНАЛА. Уборка реестра читает
@@ -219,7 +219,7 @@ def travelled(base: str) -> list[str]:
     его собирает конвейер. Адрес был назван тот, которого у окна нет, и окно
     выбрало похожий.
     """
-    ancestor = journal.common_ancestor(base)
+    ancestor = ancestor or journal.common_ancestor(base)
     fragments = [
         name
         for name in journal.changed_files(base, alive_only=True, ancestor=ancestor)
@@ -257,8 +257,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", default=journal.base_from_env(), help="ветка сравнения")
     args = parser.parse_args(argv)
 
+    # ТОЧКА СРАВНЕНИЯ СПРАШИВАЕТСЯ ОДИН РАЗ НА ЗАХОД, И СПРАШИВАЕТСЯ ЗДЕСЬ.
+    # Прежде её брали трижды: дважды внутри `changed_files` и ещё раз внутри
+    # `travelled`. Заявление «спрашивается однажды» было сделано, когда убрали
+    # ОДИН из трёх — то есть оказалось шире починки (нашёл внешний взгляд на
+    # #451, и назвал дважды).
+    #
+    # Цена трёх вопросов не в трёх вызовах git: общая ветка движется, пока
+    # изменение открыто, и три читателя одного захода могут получить РАЗНЫЕ
+    # точки — список путей от одной, выжившие от другой, содержимое от третьей.
     try:
-        files = journal.changed_files(args.base)
+        ancestor = journal.common_ancestor(args.base)
+        files = journal.changed_files(args.base, ancestor=ancestor)
     except NotRun as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -273,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     # которое запись УНЕСЛО, а своей не оставило. Ровно так уборка старого
     # фрагмента пронесла бы мимо гейта любую правку кода.
     try:
-        alive = set(journal.changed_files(args.base, alive_only=True))
+        alive = set(journal.changed_files(args.base, alive_only=True, ancestor=ancestor))
     except journal.NotRun as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -284,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     # собирает конвейер из тел КОММИТОВ. Замер 17.09.2026 — так потерялись
     # двадцать три снятия за смену.
     try:
-        stranded = travelled(args.base)
+        stranded = travelled(args.base, ancestor)
     except NotRun as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN

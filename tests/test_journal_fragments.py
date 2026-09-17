@@ -507,3 +507,45 @@ def test_the_resolution_parse_is_the_same_one_the_change_body_uses() -> None:
     assert journal_gate.marks_of(said) == set(changerefs.resolved_in(said)), (
         "разбор гейта разошёлся с разбором тела изменения"
     )
+
+
+def test_the_ancestor_is_asked_exactly_once_per_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """За весь заход гейта `git merge-base` зовётся ОДИН раз, и это считается.
+
+    Прежде точку брали ТРИЖДЫ: дважды внутри `changed_files` и ещё раз внутри
+    `travelled`. Заявление «спрашивается однажды» было сделано, когда убрали
+    один из трёх, — то есть оказалось шире починки (нашёл внешний взгляд на
+    #451, и назвал дважды).
+
+    Цена трёх вопросов не в трёх вызовах git: общая ветка движется, пока
+    изменение открыто, и три читателя ОДНОГО захода могут получить разные
+    точки — список путей от одной, выжившие от другой, содержимое от третьей.
+
+    СЧИТАЕТСЯ ВЫЗОВ, А НЕ ЧИТАЕТСЯ КОД. Обещание «один раз» проверяемо только
+    счётом: правка, добавляющая четвёртого читателя, в глазах не отличается от
+    правки, которая его не добавляет (139).
+    """
+    journal_dir = tmp_path / "changelog.d"
+    journal_dir.mkdir()
+    (journal_dir / "правка.fixed.md").write_text("### Правка\n\n#243\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    asked: list[list[str]] = []
+
+    def remembering(args: list[str]) -> str:
+        asked.append(args)
+        if "merge-base" in args:
+            return "деадбиф\n"
+        if "show" in args:
+            raise journal_gate.NotRun(NO_SUCH_PATH_SAYS)
+        if "diff" in args:
+            return "changelog.d/правка.fixed.md\0scripts/что-то.py\0"
+        return "починка без отметок"
+
+    monkeypatch.setattr(journal_gate.journal, "git", remembering)
+    journal_gate.main(["--base", "origin/main"])
+    merge_bases = [args for args in asked if "merge-base" in args]
+    assert len(merge_bases) == 1, (
+        f"общий предок спрошен {len(merge_bases)} раз(а) за заход: {merge_bases}"
+    )
