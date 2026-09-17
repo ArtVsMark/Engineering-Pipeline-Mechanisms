@@ -42,13 +42,13 @@ def test_findings_are_read_in_order_without_repeats() -> None:
         comment("НАХОДКА[дефект]: первая\nтекст\nНАХОДКА[риск]: вторая"),
         comment("НАХОДКА[дефект]: первая\nВЕРДИКТ: находок 2"),
     ]
-    assert module.findings_of(comments) == [("дефект", "первая"), ("риск", "вторая")]
+    assert module.findings_of(comments) == [("дефект", "первая", "код"), ("риск", "вторая", "код")]
 
 
 def test_finding_survives_markdown_decoration() -> None:
     """Оформление вокруг заголовка не мешает: ревьюер пишет прозой вокруг строк."""
     assert module.findings_of([comment("НАХОДКА[замечание]: **жирный заголовок**")]) == [
-        ("замечание", "жирный заголовок")
+        ("замечание", "жирный заголовок", "код")
     ]
 
 
@@ -58,7 +58,9 @@ def test_a_finding_without_a_weight_says_so() -> None:
     Подстановка решила бы за ревьюера в сторону, удобную разбирающему, и
     сделала бы «он не назвал» неотличимым от «он назвал лёгкое» (154).
     """
-    assert module.findings_of([comment("НАХОДКА: без веса")]) == [(module.UNWEIGHED, "без веса")]
+    assert module.findings_of([comment("НАХОДКА: без веса")]) == [
+        (module.UNWEIGHED, "без веса", "код")
+    ]
 
 
 def test_a_weight_outside_the_scale_is_not_a_weight() -> None:
@@ -68,7 +70,7 @@ def test_a_weight_outside_the_scale_is_not_a_weight() -> None:
     «дефекту» — догадка механизма о том, что имел в виду ревьюер (068).
     """
     assert module.findings_of([comment("НАХОДКА[критично]: чужое слово")]) == [
-        (module.UNWEIGHED, "чужое слово")
+        (module.UNWEIGHED, "чужое слово", "код")
     ]
 
 
@@ -124,7 +126,7 @@ def test_a_finding_of_an_earlier_look_does_not_come_back() -> None:
         comment("НАХОДКА[риск]: новое, этого захода"),
         comment("ВЕРДИКТ: находок 1"),
     ]
-    titles = [title for _, title in module.findings_of(module.last_look(comments))]
+    titles = [title for _, title, _ in module.findings_of(module.last_look(comments))]
     assert titles == ["новое, этого захода"], titles
 
 
@@ -159,7 +161,7 @@ def test_a_finding_written_after_the_verdict_belongs_to_that_look() -> None:
         comment("ВЕРДИКТ: находок 2"),
         comment("НАХОДКА[риск]: дописано следом"),
     ]
-    titles = [title for _, title in module.findings_of(module.last_look(comments))]
+    titles = [title for _, title, _ in module.findings_of(module.last_look(comments))]
     assert titles == ["дописано следом"], titles
 
 
@@ -182,7 +184,7 @@ def test_the_registry_does_not_get_the_earlier_look_back(
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter(feed))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
     monkeypatch.setattr(
         module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
     )
@@ -532,10 +534,10 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
     monkey.setattr(module.ghrest, "paginate", lambda path, token: iter([]))
     monkey.setattr(module, "verdict_of", lambda look: 1)
     monkey.setattr(
-        module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами")]
+        module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами", "код")]
     )
     monkey.setattr(module, "existing_mark", lambda entries, pr, title, strict=False: "abc1234")
-    monkey.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
+    monkey.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
     written: dict[str, Any] = {}
     monkey.setattr(
         module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
@@ -589,7 +591,7 @@ def test_an_empty_registry_is_its_own_outcome(
     """
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_NOTHING
 
@@ -600,7 +602,7 @@ def test_a_registry_with_entries_stays_pending(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_PENDING
 
@@ -624,9 +626,9 @@ def test_a_verdict_that_disagrees_with_its_list_is_announced(
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter([]))
     monkeypatch.setattr(module, "verdict_of", lambda comments: 3)
     monkeypatch.setattr(
-        module, "findings_of", lambda comments: [("дефект", "очередь читает не то")]
+        module, "findings_of", lambda comments: [("дефект", "очередь читает не то", "код")]
     )
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since=0: (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     module.main(["--repo", "o/r", "--pr", "131"])
     said = capsys.readouterr().err
@@ -822,4 +824,98 @@ def test_a_title_that_merely_starts_with_no_is_still_a_finding() -> None:
     формулировок, и такой запрет обходится перестановкой слов (051).
     """
     said = [comment("НАХОДКА[дефект]: нет проверки на пустой ввод\n\nВЕРДИКТ: находок 1")]
-    assert module.findings_of(said) == [("дефект", "нет проверки на пустой ввод")]
+    assert module.findings_of(said) == [("дефект", "нет проверки на пустой ввод", "код")]
+
+
+def test_the_reviewer_can_mark_a_finding_as_being_about_the_answer() -> None:
+    """Род предмета читается из той же скобки, что и вес, и не портит его.
+
+    Прежний разбор брал скобку ЦЕЛИКОМ и искал её в шкале весов: `[дефект ·
+    ответ]` не нашлось бы там, и новая пометка обнулила бы старую (090).
+    """
+    сказано = "НАХОДКА[дефект · ответ]: правило объявлено неприменимым, а предмет есть"
+    said = [comment(сказано)]
+    вес, _, род = module.findings_of(said)[0]
+    assert вес == "дефект", "род съел вес"
+    assert род == findings_module.ANSWER_KIND
+    # порядок слов в скобке не решает: ревьюер пишет как видит
+    обратно = [comment("НАХОДКА[ответ, дефект]: то же самое другими словами")]
+    assert module.findings_of(обратно)[0][0] == "дефект"
+    assert module.findings_of(обратно)[0][2] == findings_module.ANSWER_KIND
+
+
+def test_a_finding_naming_the_answer_file_is_about_the_answer_unmarked() -> None:
+    """МЕХАНИЧЕСКИЙ ПОЛ: назвал файл ответа — значит об ответе, помечено или нет.
+
+    Пометка ревьюера шире (находка об ответе может файла не называть), признак
+    по адресу уже — зато не забывается. Это требование и его нижняя граница, а
+    не два ответа на один вопрос (051).
+    """
+    said = [comment("НАХОДКА[риск]: .rules/bindings.json:120 утверждает то, чего в дереве нет")]
+    assert module.findings_of(said)[0][2] == findings_module.ANSWER_KIND
+
+
+def test_a_plain_finding_stays_about_the_code() -> None:
+    """Второй конец: обычная находка родом не меняется.
+
+    Без него «об ответе» стало бы значить «любая находка», и раздел, куда их
+    выносят первыми, перестал бы что-либо выделять (051).
+    """
+    said = [comment("НАХОДКА[дефект]: scripts/arm.py роняет заход на пустом ответе")]
+    assert module.findings_of(said)[0][2] == findings_module.CODE
+
+
+def test_the_registry_puts_answer_findings_first_and_names_the_section() -> None:
+    """Реестр разводит находки по разделам, и об ответе идут первыми.
+
+    Карта, которую проект выдаёт взгляду, говорит, что такая находка «дороже
+    любой другой». Пока род не записывался, механизм объявлял их ценнее и терял
+    различие при записи — отдачу канала по ответам посчитать было нечем.
+    """
+    entries = {
+        "aaaaaaa": findings_module.Entry(10, "дефект", "о коде, и тяжёлая"),
+        "bbbbbbb": findings_module.Entry(
+            11, "замечание", "об ответе, и лёгкая", kind=findings_module.ANSWER_KIND
+        ),
+    }
+    body = module.render_body(entries)
+    место_ответа = body.index("bbbbbbb")
+    место_кода = body.index("aaaaaaa")
+    assert место_ответа < место_кода, "лёгкая находка об ОТВЕТЕ ушла за тяжёлую о коде"
+    assert "### Об ОТВЕТЕ каталогу" in body and "### О коде" in body
+    assert module.parse_entries(body) == entries, "род не пережил круговорот"
+
+
+def test_without_answer_findings_the_registry_has_no_empty_section() -> None:
+    """Раздела «об ответе» нет, когда таких находок нет: пустой заголовок — шум."""
+    entries = {"aaaaaaa": findings_module.Entry(10, "дефект", "о коде")}
+    body = module.render_body(entries)
+    assert "### Об ОТВЕТЕ каталогу" not in body
+    assert module.parse_entries(body) == entries
+
+
+def test_marks_in_splits_the_bracket_by_either_separator() -> None:
+    """Скобка режется точкой-разделителем И запятой — ревьюер пишет как видит.
+
+    Требовать одного знака значило бы ронять запись из-за оформления: слово
+    названо верно, а механизм его не увидел (051).
+    """
+    assert module.marks_in("дефект · ответ") == ["дефект", "ответ"]
+    assert module.marks_in("ответ, дефект") == ["ответ", "дефект"]
+    assert module.marks_in("**Дефект**") == ["дефект"], "оформление не должно мешать"
+    assert module.marks_in("замечание") == ["замечание"]
+
+
+def test_kind_of_reads_the_mark_and_falls_back_to_the_address() -> None:
+    """Разбор рода прогнан ПРЯМО, а не только через вердикт.
+
+    Сойдись вердикт по другой причине — род назывался бы неверно, и находка
+    легла бы не в тот раздел.
+    """
+    ответ = findings_module.ANSWER_KIND
+    assert findings_module.kind_of("что угодно", "ответ") == ответ, "пометка не прочитана"
+    assert findings_module.kind_of("что угодно", "об ответе") == ответ, "форма записи не прочитана"
+    assert findings_module.kind_of(f"{findings_module.ANSWER_FILE}:12 врёт") == ответ, (
+        "механический пол не сработал"
+    )
+    assert findings_module.kind_of("обычная находка о коде") == findings_module.CODE
