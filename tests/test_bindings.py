@@ -21,13 +21,22 @@ from typing import Any, Final
 
 import pytest
 
+from tests.conftest import load_script
+
+kinds = load_script("kinds.py")
+
 ROOT = Path(__file__).resolve().parent.parent
 BINDINGS = ROOT / ".rules" / "bindings.json"
 PROPOSALS = ROOT / ".rules" / "proposals.json"
 # Поля, которые в предложении заполняет каталог при приёме, а не проект.
 OWNED_BY_CATALOGUE = {"id", "number", "rule"}
 STATUSES = {"active", "rejected", "not-applicable", "unreviewed"}
-MECHANISMS = {"gate", "pipeline", "document", "none"}
+# Виды механизма, которыми отвечает ЭТОТ проект. Не копия набора каталога:
+# там есть `code`, которого у нас нет, — и наоборот, здесь перечислены только
+# те, что мы вправе написать в своём ответе. `skill` читается из общего места
+# (`scripts/kinds.py`), потому что на нём стоят ещё четыре счётчика, и вторая
+# копия имени разъехалась бы молча (022, 090).
+MECHANISMS = {"gate", "pipeline", "document", "none", kinds.SKILL}
 # Похоже на адрес в этом дереве: с косой чертой или с расширением.
 ADDRESS_RE = re.compile(r"[\w./*-]+\.(?:py|md|json|ya?ml)|[\w.-]+/[\w./*-]+")
 
@@ -324,3 +333,111 @@ def test_no_answer_carries_a_broken_relative_address() -> None:
     """
     said = json.dumps(answers(), ensure_ascii=False)
     assert "././" not in said, "в ответе остался адрес, испорченный массовой заменой"
+
+
+#: Адрес навыка внутри ответа: контракт 1.4 требует ровно эту форму.
+SKILL_ADDRESS_RE: Final = re.compile(r"\.claude/skills/[\w-]+")
+#: Механизм, рядом с которым навык ЗАПРЕЩЁН контрактом: «не держится ничем» и
+#: «держится навыком» — разные ответы, и второй не прячется в первом.
+NO_SKILL_BESIDE: Final = "none"
+
+
+def named_skill() -> list[str]:
+    """Правила, чей ответ несёт поле `skill`."""
+    return sorted(n for n, one in answers().items() if one.get("skill"))
+
+
+@pytest.mark.parametrize("number", named_skill())
+def test_a_named_skill_resolves(number: str) -> None:
+    """Адрес навыка разрешается в дереве, а не остаётся обещанием.
+
+    `mechanism: skill` и поле `skill` — утверждение о механизме, и оно обязано
+    проверяться механизмом. Проверяемого у навыка ровно столько: он есть в
+    дереве и у него есть `SKILL.md`. Что навык СРАБОТАЛ, не проверяет никто, и
+    это его названная граница, а не упущение
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+
+    Форму самого навыка — непустые `name`, `description` и совпадение имени с
+    каталогом — держит `tests/test_rulebook_fresh.py`, и второй копии этой
+    проверки здесь нет
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Проверяет это НАШ гейт, а не каталог: каталог читает ответ по HTTPS и
+    нашего дерева не видит — та же граница, что у `where`.
+    """
+    address = str(answers()[number]["skill"])
+    assert SKILL_ADDRESS_RE.fullmatch(address), (
+        f"{number}: адрес навыка не той формы — контракт ждёт "
+        f"`.claude/skills/<имя>`, а стоит {address!r}"
+    )
+    assert (ROOT / address / "SKILL.md").is_file(), (
+        f"{number}: ответ называет навык {address}, а SKILL.md по этому адресу нет — "
+        "ложный механизм хуже отсутствия ответа: он выглядит выполненным"
+    )
+
+
+def test_a_skill_named_in_prose_is_named_by_the_field() -> None:
+    """Навык, на который ответ опирается прозой, назван и ПОЛЕМ.
+
+    ЗАЧЕМ ПОЛЕ, ЕСЛИ АДРЕС УЖЕ В ПРОЗЕ. Проза не считается: доля машинного
+    соблюдения по семье считается по полям, и навык, названный только словами,
+    для счётчика не существует вовсе. Контракт 1.4 завёл поле рядом со
+    значением именно потому, что навык бывает ВТОРОЙ половиной — гейт берёт
+    машинное, навык берёт остаток, — и одним значением `mechanism` этот случай
+    не выразить: пришлось бы выбирать, какую половину спрятать.
+
+    ЗАМЕР 17.09.2026 ПО ВСЕМУ ДЕРЕВУ: из 203 ответов адрес навыка называли
+    прозой ДВА (047 и 082), и поля не нёс НИ ОДИН. Каталог увидел это раньше
+    нас и назвал нас в контракте поимённо. Предикат меряется по всем ответам, а
+    не по этим двум: следующий такой ответ напишется так же — прозой, — и
+    молча.
+    """
+    leaning = {
+        number: sorted(
+            set(
+                SKILL_ADDRESS_RE.findall(
+                    " ".join(str(one.get(key) or "") for key in ("where", "why", "machine_half"))
+                )
+            )
+        )
+        for number, one in answers().items()
+    }
+    silent = {
+        number: found
+        for number, found in leaning.items()
+        if found and not answers()[number].get("skill")
+    }
+    assert not silent, "ответ опирается на навык прозой, а полем его не называет: " + "; ".join(
+        f"{number} → {', '.join(found)}" for number, found in sorted(silent.items())
+    )
+
+
+def test_a_skill_mechanism_names_its_skill() -> None:
+    """`mechanism: skill` без поля `skill` — механизм без адреса.
+
+    Зеркало к `test_active_names_its_mechanism_and_address`: там адрес спрошен
+    у гейта, здесь — у навыка. Разными полями, потому что предметы разные:
+    `where` разрешается путём в дереве, `skill` — каталогом навыка.
+    """
+    bare = [
+        number
+        for number, one in answers().items()
+        if one.get("mechanism") == kinds.SKILL and not one.get("skill")
+    ]
+    assert not bare, "механизм назван навыком, а навык не назван: " + ", ".join(bare)
+
+
+def test_no_skill_stands_beside_an_empty_mechanism() -> None:
+    """Рядом с `mechanism: none` навыка быть не может.
+
+    «Правило действует и не держится ничем» и «держится навыком» — два разных
+    состояния, и слияние их прячет механизм внутри ответа о его отсутствии
+    (045). Контракт запрещает это прямо.
+    """
+    mixed = [
+        number
+        for number, one in answers().items()
+        if one.get("mechanism") == NO_SKILL_BESIDE and one.get("skill")
+    ]
+    assert not mixed, "ответ «не держится ничем» называет навык — состояния слиты: " + ", ".join(
+        mixed
+    )
