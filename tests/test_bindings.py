@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any, Final
 
@@ -265,46 +266,133 @@ def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:
         assert re.fullmatch(r"[a-z0-9-]+", said), f"слаг «{said}» не по форме контракта"
 
 
-# --- контракт 1.3: у ответа «документом» назван предел ------------------------
+# --- контракт 1.5: у ответа, которого не держит машина, назван предел ---------
 
 
-#: Пределы ответа «документом». Первые два пришли контрактом каталога 1.3,
-#: третий добавлен 13.09.2026 по находке внешнего взгляда на #317.
+#: Признак ЗАМЕРА в тексте: число, «ноль», «ни одного», «первый». Образец взят
+#: у каталога — им он держит то же поле — и проверяет, что вопрос ЗАМЕРЕН, а не
+#: что замер верен: второе требует чтения, а не разбора (182).
+COUNTED_RE: Final = re.compile(
+    r"\d|\bноль\b|\bни одного\b|\bни одной\b|\bпервый\b|\bпервая\b|\bпервое\b", re.I
+)
+
+
+#: Слова предела — ЗАКРЫТЫЙ словарь каталога, контракт 1.5. Счётчику доли
+#: машинного соблюдения знаменатель надо РАЗДЕЛИТЬ, а прозу сложить нельзя.
+#:   no          — машинной половины нет вовсе, текст и есть предел;
+#:   not-yet     — половина есть и не построена, стройка возможна сегодня;
+#:   conditional — станет возможна, когда появится названный ПРЕДМЕТ; до него
+#:                 гейт зеленел бы вокруг пустоты (146), и предмет называется
+#:                 полем `awaiting`.
 #:
-#: ПОЧЕМУ ДВУХ НЕ ХВАТИЛО. Разбор пункта 5.1 дал случай, который в них не
-#: укладывается: машинная половина СЧИТАЕТСЯ и проверена замером, но механизмом
-#: не становится — гейт краснел бы на законном (051). Это не «невозможно» и не
-#: «ещё не построено»: строить его и не собираются, и причина измерена, а не
-#: предположена. Со шкалой из двух значений ответ обязан был солгать, и лгал:
-#: 071 и 133 стояли `impossible` при `why`, описывающем работающую половину.
-#: Третий исход называется, а не подгоняется под два
-#: ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md),
-#: [046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
-LIMITS: Final = ("impossible", "not-yet", "measured-refusal")
+#: НАШЕ ЧЕТВЁРТОЕ СЛОВО СНЯТО, И ЭТО ЗАМЕР, А НЕ УСТУПКА. С 13.09.2026 здесь
+#: жило собственное `measured-refusal` — «половина есть и ОТВЕРГНУТА замером», —
+#: заведённое, когда словарь каталога был из двух слов. Перечитывание всех
+#: восьми ответов под словарь из трёх (17.09.2026) показало, что слово было
+#: ПЕРЕРАСШИРЕНО: шесть означали `no` (машинной половины нет: имя окна из дерева
+#: убрано решением, приёмка роли решается смыслом, границы чужой выборки машине
+#: неизвестны), один — `conditional` (машина повтор отличит, предмета ноль).
+#: Остаток ОДИН — 133, и словаря на него нет: половина считается, а гейт краснел
+#: бы на том, что решение 008 прямо разрешает. Он записан наименее ложным словом
+#: с названной ценой в `why` и отправлен каталогу предложением; своё слово рядом
+#: с чужим словарём не заводится — разойдясь, они дали бы два ответа на один
+#: вопрос
+#: ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
+#: [157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
+LIMITS: Final = ("no", "not-yet", "conditional")
+
+#: Механизмы, которые КРАСНЕЮТ. У прочих — `document`, `none`, `skill` —
+#: исполнение не проверяется ничем, и вопрос «а можно ли держать машиной» у всех
+#: троих один. Прежде он задавался только `document`, и два ответа оставались
+#: вне счёта.
+MACHINE_KINDS: Final = ("gate", "pipeline")
 
 
-def test_every_document_answer_names_its_limit() -> None:
-    """У каждого `document` сказано, есть ли машинная половина вовсе.
-
-    Контракт 1.3 расколол ответ «документом» надвое: `impossible` — машинной
-    половины нет, документ и есть предел; `not-yet` — половина есть и не
-    построена. Третье значение наше: `measured-refusal` — половина есть и
-    ОТВЕРГНУТА замером. Слово закрытое, потому что счётчику доли машинного
-    соблюдения надо РАЗДЕЛИТЬ знаменатель, а прозу сложить нельзя.
-
-    Требуется от ВСЕХ, а не только от новых: ревизия 11.09.2026 прочитала все
-    28 ответов по букве и границе правила, и предел назван у каждого. Оставить
-    часть без ответа значило бы сделать вид, что их не разбирали.
-    """
-    answers = load()["rules"]
-    bare = [
-        rule
-        for rule, one in answers.items()
-        if one.get("status") == "active"
-        and one.get("mechanism") == "document"
-        and one.get("document_reason") not in LIMITS
+def unheld() -> list[tuple[str, dict[str, Any]]]:
+    """Действующие ответы, которых не держит машина, — предмет предела."""
+    return [
+        (rule, one)
+        for rule, one in load()["rules"].items()
+        if one.get("status") == "active" and (one.get("mechanism") or "none") not in MACHINE_KINDS
     ]
-    assert not bare, "ответ «документом» без названного предела: " + ", ".join(sorted(bare))
+
+
+def test_the_predicate_of_the_limit_has_a_subject() -> None:
+    """Предмет у проверки предела есть — иначе она доказывает только себя (075)."""
+    assert len(unheld()) >= 5, f"ответов не под машиной {len(unheld())} — предмет не найден"
+
+
+def test_every_unheld_answer_names_its_limit() -> None:
+    """У каждого ответа вне машины сказано, есть ли машинная половина вовсе.
+
+    Требуется от ВСЕХ, а не только от новых: оставить часть без ответа значило
+    бы сделать вид, что их не разбирали.
+    """
+    bare = [rule for rule, one in unheld() if one.get("holdable") not in LIMITS]
+    assert not bare, "ответ вне машины без названного предела: " + ", ".join(sorted(bare))
+
+
+def test_a_conditional_limit_names_the_subject_it_waits_for() -> None:
+    """`conditional` без события неотличим от долга, отложенного на «когда-нибудь».
+
+    Событие называется полем `awaiting`, и отсутствие предмета там ИЗМЕРЕНО:
+    в тексте есть число. «Пока рано» выводило бы правило из счёта долга даром.
+    """
+    silent = [
+        rule
+        for rule, one in unheld()
+        if one.get("holdable") == "conditional"
+        and not COUNTED_RE.search(str(one.get("awaiting") or ""))
+    ]
+    assert not silent, "«при условии» без замеренного предмета: " + ", ".join(sorted(silent))
+
+
+def test_awaiting_is_absent_where_the_mechanism_reddens() -> None:
+    """У готового механизма «ждём предмета, чтобы строить» утверждает неправду."""
+    wrong = [
+        rule
+        for rule, one in load()["rules"].items()
+        if str(one.get("awaiting") or "").strip()
+        and (one.get("mechanism") or "none") in MACHINE_KINDS
+    ]
+    assert not wrong, "механизм краснеет, а поле awaiting осталось: " + ", ".join(sorted(wrong))
+
+
+def test_a_date_in_an_answer_is_iso_and_not_in_the_future() -> None:
+    """Даты ответа сравнивает машина: «16.09» и «Sep 16» она сравнить не может.
+
+    Отсутствие даты — законный ответ «не сверяли». Неверная дата законной не
+    бывает: её нельзя ни сравнить, ни отличить от опечатки (039).
+    """
+    today = date.today()
+    broken: list[str] = []
+    for rule, one in load()["rules"].items():
+        for field in ("analysed", "decided"):
+            raw = str(one.get(field) or "")
+            if not raw:
+                continue
+            try:
+                when = date.fromisoformat(raw)
+            except ValueError:
+                broken.append(f"{rule}.{field}=«{raw[:20]}»")
+                continue
+            if when > today:
+                broken.append(f"{rule}.{field} в будущем: {raw}")
+    assert not broken, "дата ответа негодна: " + ", ".join(broken)
+
+
+def test_a_verdict_is_not_newer_than_the_look_that_produced_it() -> None:
+    """Решают, посмотрев: `decided` не может быть позже `analysed`, и не бывает без него."""
+    wrong: list[str] = []
+    for rule, one in load()["rules"].items():
+        decided, analysed = str(one.get("decided") or ""), str(one.get("analysed") or "")
+        if not decided:
+            continue
+        if not analysed:
+            wrong.append(f"{rule}: вердикт датирован, а сверка — нет")
+        elif date.fromisoformat(decided) > date.fromisoformat(analysed):
+            wrong.append(f"{rule}: вердикт {decided} новее сверки {analysed}")
+    assert not wrong, "; ".join(wrong)
 
 
 def test_a_named_limit_carries_its_reason() -> None:
@@ -316,7 +404,7 @@ def test_a_named_limit_carries_its_reason() -> None:
     silent = [
         rule
         for rule, one in answers.items()
-        if one.get("document_reason") and not str(one.get("why") or "").strip()
+        if one.get("holdable") and not str(one.get("why") or "").strip()
     ]
     assert not silent, "предел назван без причины: " + ", ".join(sorted(silent))
 
