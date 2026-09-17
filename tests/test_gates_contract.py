@@ -458,3 +458,60 @@ def test_the_summary_names_the_head_in_its_own_group() -> None:
     assert "head.sha" in group or "github.sha" in group, (
         f"группа «{group}» не называет головы: вердикт о старом коммите вытеснит новый"
     )
+
+
+#: Прогоны, которые ОТМЕНЯЮТ предыдущий и голову в группе НЕ называют намеренно:
+#: предмет проверки у них не коммит, а СОСТОЯНИЕ. Правило 179 само называет эту
+#: границу, и голова в группе вернула бы гонку за свежесть вместо гашения
+#: старого поколения целиком. Список разрешительный, и причина у каждого своя
+#: ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md),
+#: [154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+STATE_NOT_A_COMMIT: dict[str, str] = {
+    "badges.yml": "пересобирает витрину с общей ветки: старое поколение значков гасится целиком",
+    "drift.yml": "сводит внешнее состояние в одну живую задачу — предмет не коммит, а мир вокруг",
+    "rules-inbox.yml": "разбирает входящее от каталога: предмет — чужая выгрузка, а не наша голова",
+    "attribution-history.yml": "считает авторство по ИСТОРИИ общей ветки, а не по одному коммиту",
+}
+
+
+def test_a_cancelling_group_names_the_head_or_declares_why_not() -> None:
+    """Каждый отменяющий прогон называет голову — либо объявлен состоянием.
+
+    ПРОВЕРЯЛИСЬ ДВА ПРОГОНА ИЗ СЕМИ. Голову в своей группе держали поимённо
+    сводный гейт и ревью; остальные пять не проверял никто, и новый отменяющий
+    прогон без головы прошёл бы молча. Замер 17.09.2026: отменяют семь,
+    голову называют три (`ci`, `ci-complete`, `review`), четыре объявлены
+    состоянием.
+
+    ЦЕНА ПРОПУСКА НАЗВАНА САМИМ ПРАВИЛОМ: события площадки доставляются не в
+    том порядке, в каком сделаны коммиты, и без головы в группе вытеснить может
+    прогон на УСТАРЕВШЕМ коммите. Тогда на актуальном обязательной проверки нет
+    вовсе, а создать её больше нечем
+    ([179](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/179-cancellation-group-must-name-the-head.md)).
+
+    Нашёл внешний взгляд на #427: ответ по 179 называл три прогона, и из них
+    один головы не имел, а другой не отменял вовсе.
+    """
+    cancelling = {}
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        group = yaml.safe_load(path.read_text(encoding="utf-8")).get("concurrency")
+        if isinstance(group, dict) and group.get("cancel-in-progress") is True:
+            cancelling[path.name] = str(group.get("group") or "")
+    assert cancelling, "отменяющих прогонов в дереве нет — предмета у проверки нет (075)"
+    headless = {
+        name: said
+        for name, said in cancelling.items()
+        if "sha" not in said and name not in STATE_NOT_A_COMMIT
+    }
+    assert not headless, (
+        "прогон отменяет предыдущий, а голову в группе не называет: "
+        + "; ".join(f"{name} → «{said}»" for name, said in sorted(headless.items()))
+        + " — вытеснить может прогон на устаревшем коммите, и красного нигде не будет"
+    )
+
+
+def test_the_state_list_has_no_dead_or_silent_entries() -> None:
+    """Список состояний живой и с причинами: иначе он разрешает несуществующее."""
+    for name, why in STATE_NOT_A_COMMIT.items():
+        assert why.strip(), f"{name}: объявлен состоянием без причины (154)"
+        assert (WORKFLOWS / name).is_file(), f"{name}: объявлен состоянием, а прогона нет"
