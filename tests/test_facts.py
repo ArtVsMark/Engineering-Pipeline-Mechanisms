@@ -117,6 +117,107 @@ def test_badge_colour_follows_the_share() -> None:
     assert len({low.split('fill="')[2], mid.split('fill="')[2], high.split('fill="')[2]}) == 3
 
 
+#: Разрезы витрины, публикующие ДОЛЮ, и два числа, из которых она сделана.
+#: Список разрешительный (068): доля, которой здесь нет, гейтом отвергается —
+#: она обязана приехать со своими слагаемыми либо быть объявлена тут с ними.
+A_SHARE_AND_ITS_NUMBERS: dict[str, tuple[str, str]] = {
+    "coverage.percent": ("coverage.covered", "coverage.lines"),
+    "family.share": ("family.closed_by_shared", "family.held_by_machine"),
+}
+
+
+def flat(said: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Витрина в один уровень: «разрез.ключ» → значение."""
+    found: dict[str, Any] = {}
+    for key, value in said.items():
+        where = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            found |= flat(value, where)
+        else:
+            found[where] = value
+    return found
+
+
+def test_every_published_share_stands_beside_its_two_numbers(tmp_path: Path) -> None:
+    """Доля публикуется вместе с числами, из которых сделана (041).
+
+    «77 %» отвечает на «много ли» и не отвечает на «много ЧЕГО»: та же доля у
+    дерева в сто строк и в десять тысяч значит разное, а падение с 77 до 70
+    бывает и новым кодом без проверок, и удалением покрытого. Читатель одной
+    доли этого не различит и различить не может.
+
+    ЗАМЕР 18.09.2026: долей в витрине две, слагаемые были у ОДНОЙ. У семьи доля
+    ехала рядом с `closed_by_shared` из `held_by_machine`, у покрытия — одна.
+    То есть ответ проекта «витрина публикует несколько честных чисел и ни одного
+    усреднённого» о покрытии был неверен, и опровергался одной командой
+    ([175](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/175-an-absence-claim-that-a-command-can-refute-must-be-a-gate.md)).
+
+    ЧИСЛА БЕРУТСЯ ИЗ СОБРАННОЙ ВИТРИНЫ, А НЕ ИЗ СПИСКА: новая доля, добавленная
+    мимо объявления, краснеет здесь, а не расходится с ним молча.
+    """
+    collected = facts.collect(
+        tree(
+            tmp_path,
+            bindings(**{"001": {"status": "active", "mechanism": "gate", "where": "x.py"}}),
+        ),
+        "голова",
+    )
+    numbers = flat(collected)
+    bare = [
+        f"{where} = {value}"
+        for where, value in numbers.items()
+        if isinstance(value, float) and where not in A_SHARE_AND_ITS_NUMBERS
+    ]
+    assert not bare, (
+        "доля опубликована без чисел, из которых сделана (041):\n  "
+        + "\n  ".join(bare)
+        + "\n  Публикуйте рядом числитель и знаменатель и объявите пару в"
+        " A_SHARE_AND_ITS_NUMBERS: читатель одной доли не отличит рост от усадки."
+    )
+
+
+def test_the_declared_pairs_are_not_a_promise(tmp_path: Path) -> None:
+    """Объявленная пара действительно публикуется, а не обещана списком.
+
+    Список, о котором сказано «доля едет со слагаемыми», обязан быть тем, что
+    витрина собирает. Иначе это обещание в прозе, и снаружи полная пара и
+    отсутствующая выглядят одинаково
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+    Разрез, который в этом прогоне НЕ прочитан, из предмета выпадает и назван:
+    сводка семьи приходит из чужого дерева, и требовать её здесь значило бы
+    требовать сети от набора (084).
+    """
+    root = tree(
+        tmp_path, bindings(**{"001": {"status": "active", "mechanism": "gate", "where": "x.py"}})
+    )
+    report = tmp_path / "coverage.json"
+    # Отчёт счётчика в той форме, в какой его отдаёт `coverage json`. Поля взяты
+    # у настоящего отчёта, а не по памяти: имена проверены прогоном 18.09.2026.
+    report.write_text(
+        json.dumps(
+            {"totals": {"percent_covered": 77.0, "covered_lines": 226, "num_statements": 293}}
+        ),
+        encoding="utf-8",
+    )
+    collected = facts.collect(root, "голова", coverage=report)
+    numbers = flat(collected)
+    checked = 0
+    for share, pair in A_SHARE_AND_ITS_NUMBERS.items():
+        if share not in numbers:
+            continue
+        section = share.split(".")[0]
+        if not (collected.get(section) or {}).get("read"):
+            continue
+        checked += 1
+        for one in pair:
+            assert one in numbers, f"{share} объявлена с {one}, а витрина его не публикует"
+    assert checked, (
+        "ни один разрез с долей не прочитан — проверка зеленеет вокруг пустоты (075)."
+        " Подайте разрез, который читается: отчёт покрытия собирается прямо здесь"
+    )
+
+
 def derived_names() -> list[str]:
     """Имена производного — ВСЕ, какие объявляет сборка, а не список руками.
 
