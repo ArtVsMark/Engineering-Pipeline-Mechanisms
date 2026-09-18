@@ -1,9 +1,27 @@
 #!/bin/sh
-# Подделка git для проверки сторожа: отвечает объявленной головой и ничем больше.
-# FAKE_HEAD_BROKEN=<причина> заставляет её отказать — так проверяется, что
-# сторож, не сумевший узнать голову, отвергает толчок, а не машет рукой.
-if [ "$1" = "rev-parse" ]; then
-  if [ -n "$FAKE_HEAD_BROKEN" ]; then echo "$FAKE_HEAD_BROKEN" >&2; exit 128; fi
-  echo "${FAKE_HEAD:-agent/here}"; exit 0
-fi
+# Подделка git для проверки сторожа. ОТВЕЧАЕТ ПО ПОДКОМАНДЕ, А НЕ НА ВСЁ СРАЗУ:
+# первая редакция отдавала голову на ЛЮБОЙ `rev-parse`, включая запрос о ветке
+# на площадке, — и запрет на воскрешение слитой ветки в проверках не исполнялся
+# вовсе, выглядя при этом проверенным (146).
+#
+# FAKE_HEAD_BROKEN=<причина> заставляет её отказать на чтении головы — так
+# проверяется, что сторож, не сумевший узнать голову, отвергает толчок.
+# FAKE_REMOTE_GONE=1 — ссылки origin/<ветка> нет: площадка её удалила.
+# FAKE_MERGED=1 — голова достижима из общей ветки: работа слита.
+case "$1 $2" in
+  "rev-parse --abbrev-ref")
+    if [ -n "$FAKE_HEAD_BROKEN" ]; then echo "$FAKE_HEAD_BROKEN" >&2; exit 128; fi
+    echo "${FAKE_HEAD:-agent/here}"; exit 0 ;;
+  "rev-parse --verify")
+    [ -n "$FAKE_REMOTE_GONE" ] && exit 1
+    echo "деадбиф"; exit 0 ;;
+  "config --get")
+    # Upstream настроен ровно тогда, когда площадка ветку удалила: остальные
+    # случаи подделке не нужны, и выдумывать их она не вправе (170).
+    [ -n "$FAKE_REMOTE_GONE" ] && { echo "refs/heads/${FAKE_HEAD:-agent/here}"; exit 0; }
+    exit 1 ;;
+  "merge-base --is-ancestor")
+    [ -n "$FAKE_MERGED" ] && exit 0
+    exit 1 ;;
+esac
 exit 1
