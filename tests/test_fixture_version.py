@@ -11,7 +11,31 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 from tests.conftest import FAKE_VERSION, ROOT
+
+#: Имя файла версии: по нему узнают получателя записи.
+VERSION_FILE = "CONTRACT_VERSION"
+
+
+def writes_the_version(path: Path) -> bool:
+    """Записывает ли тест файл версии в подделанное дерево — по разбору.
+
+    Отношение здесь составное: вызов `.write_text`, а внутри его получателя
+    названа версия. Обе половины читаются из дерева разбора, а не из написания
+    ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+    """
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if not isinstance(node, ast.Call):
+            continue
+        head = node.func
+        if not (isinstance(head, ast.Attribute) and head.attr == "write_text"):
+            continue
+        if VERSION_FILE in ast.unparse(head.value):
+            return True
+    return False
 
 
 def test_the_fake_version_is_not_the_real_one() -> None:
@@ -48,12 +72,17 @@ def test_the_checklists_of_the_project_use_it() -> None:
     Предмет — те, кто версию ЗАПИСЫВАЕТ в подделанное дерево. Упоминание её
     имени в прозе поводом не является: замер о трёх якорях говорит о ней
     словами и подделкой не занимается.
+
+    ОТБОР ИДЁТ РАЗБОРОМ. Прежний образец требовал буквального
+    `"CONTRACT_VERSION").write_text` — то есть закрывающей скобки вплотную к
+    точке. Тот же вызов через переменную, через `paths.CONTRACT_VERSION` или
+    разнесённый по строкам не виден, и подделка со своим литералом молча
+    выпадала из предмета: гейт зеленел, ничего о ней не проверив (045).
     """
     users = [
         path.name
         for path in (ROOT / "tests").glob("test_*.py")
-        if '"CONTRACT_VERSION").write_text' in path.read_text(encoding="utf-8")
-        and path.name not in {"test_fixture_version.py"}
+        if path.name != "test_fixture_version.py" and writes_the_version(path)
     ]
     assert users, "ни один тест не подделывает версию — предмет не найден (075)"
     for name in users:
