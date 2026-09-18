@@ -48,6 +48,72 @@ def tree(root: Path, project: str = PYPROJECT, workflow: str = WORKFLOW) -> Path
 # --- сверка окружения ---------------------------------------------------------
 
 
+def test_a_survey_names_what_it_saw_and_what_diverged(tmp_path: Path) -> None:
+    """Сверка отдаёт и увиденное, и расхождения — одним разбором на двух зовущих.
+
+    До 18.09.2026 разбор жил ВНУТРИ точки входа и печатал по ходу: второму
+    зовущему — предполётной — оставалось запустить процесс и разобрать его вывод,
+    то есть завести второй разбор того же
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    said = env.survey(tree(tmp_path))
+    assert said.seen, "сверка не назвала ни одного инструмента — читателю нечего прочесть"
+    assert any("интерпретатор" in one for one in said.seen)
+
+
+def test_the_survey_answers_three_questions_not_one(tmp_path: Path) -> None:
+    """У сверки три поля, и каждое отвечает своему читателю.
+
+    `seen` — человеку: что вообще увидено, включая сошедшееся. `problems` —
+    зовущему механизму: расходится ли, и ему всё равно, чем это ставится.
+    `gaps` — команде установки. Слить их в одно значило бы заставить каждого
+    читателя разбирать чужой формат обратно
+    ([021](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/021-split-docs-by-reader.md)).
+    """
+    empty = env.Survey(seen=[], problems=[], gaps=[])
+    assert (empty.seen, empty.problems, empty.gaps) == ([], [], []), (
+        "поля сверки перепутаны местами: три списка с разными читателями легко"
+        " переставить, и снаружи подмена не видна"
+    )
+    # ПРЕДМЕТ ЗДЕСЬ — ФОРМА ОТВЕТА, А НЕ ЧУЖОЕ ОКРУЖЕНИЕ. Первая редакция
+    # требовала пустых `problems` — то есть утверждала, что у ЗАПУСТИВШЕГО
+    # установлено всё, что объявляет поддельное дерево. На матричной ячейке
+    # площадки стоит один `pytest`, и здоровый набор краснел там из-за
+    # отсутствующего `mypy`: проверка судила окружение прогона вместо своего
+    # предмета
+    # ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    said = env.survey(tree(tmp_path))
+    assert said.seen, "сверка не назвала ни одного инструмента — читателю нечего прочесть"
+    assert len(said.gaps) <= len(said.problems), (
+        "команд установки больше, чем расхождений: у каждого куска команды обязано быть"
+        f" своё расхождение — {said.gaps} против {said.problems}"
+    )
+    for gap in said.gaps:
+        assert any(
+            gap.strip('"-e ./').split(">")[0].split("<")[0] in one for one in said.problems
+        ), f"кусок команды «{gap}» не отвечает ни одному названному расхождению"
+
+
+def test_a_tool_outside_the_declared_bounds_is_named(tmp_path: Path) -> None:
+    """Инструмент вне объявленных границ назван расхождением, а не мелочью.
+
+    ЗАМЕР 18.09.2026, ИЗ-ЗА КОТОРОГО ПРОВЕРКА И НАПИСАНА: окно гоняло mypy
+    2.3.1 при объявленных `>=1.11,<2`. Предполётная давала «зелено: 18»,
+    площадка краснела на шаге типов — то есть зелёное окна не предсказывало
+    площадку, а именно это оно и обещает
+    ([073](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/073-tool-version-from-one-source-with-an-upper-bound.md)).
+    """
+    root = tree(
+        tmp_path,
+        workflow=WORKFLOW.replace('"mypy>=1.11,<2"', '"mypy>=99,<100"'),
+    )
+    said = env.survey(root)
+    assert any(one.startswith("mypy:") for one in said.problems), (
+        f"mypy вне границ не назван расхождением: {said.problems}"
+    )
+    assert any("mypy" in one for one in said.gaps), "расхождение названо, а команда установки — нет"
+
+
 def test_the_floor_comes_from_the_tree(tmp_path: Path) -> None:
     """Требование к интерпретатору читается из `pyproject.toml`, а не из кода."""
     assert env.python_floor(tree(tmp_path)) == (3, 12)
@@ -201,6 +267,50 @@ def test_red_is_caught_before_the_push(run_script: RunScript, tmp_path: Path) ->
     assert run.code == 3, run.text
     assert "толкать рано" in run.text
     assert "заведомо красное" in run.text, run.text
+
+
+def test_a_foreign_root_is_not_surveyed_at_all(tmp_path: Path) -> None:
+    """Чужой корень не сверяется, и расхождений оттуда не приходит.
+
+    Сверка отвечает на вопрос «предскажет ли зелёное площадку», а площадка есть
+    у ОДНОГО дерева — того, в котором лежит сама предполётная. На чужом корне
+    она сравнивала бы установленное у запустившего с объявлениями чужого дерева
+    (044).
+    """
+    tree(tmp_path)
+    assert preflight.environment_gap(tmp_path) == [], (
+        "чужой корень дал расхождение: сверка судит не то дерево"
+    )
+
+
+def test_its_own_root_is_surveyed(tmp_path: Path) -> None:
+    """Своё дерево сверяется — иначе шов зеленел бы всегда и не значил ничего.
+
+    Вторая половина предыдущей проверки: без неё «расхождений нет» держалось бы
+    тем, что сверка не идёт НИКОГДА
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+    """
+    assert preflight.environment_gap(ROOT) == env.survey(ROOT).problems, (
+        "на своём дереве шов отдаёт не то, что говорит сверка"
+    )
+
+
+def test_an_unsurveyed_environment_is_said_out_loud(run_script: RunScript, tmp_path: Path) -> None:
+    """Сверка не отработала — это сказано, а не превращено в «сошлось».
+
+    ПРИЧИН ДВЕ, И ОБЕ ГОВОРЯТСЯ ВСЛУХ. Первая: корень ЧУЖОЙ — предполётную
+    натравили на дерево, в котором её самой нет, и объявления там про чужую
+    площадку. Вторая: в дереве нет строк установки, читать нечего. Глушить из-за
+    любой из них все проверки значило бы чинить не то; молчать — выдавать
+    непроверенное за проверенное (045).
+
+    ЗАМЕР 18.09.2026: пока сверка шла на ЛЮБОМ корне, она сравнивала
+    установленное у запустившего с объявлениями поддельного дерева — и здоровый
+    набор краснел на матричной ячейке площадки, где стоит один `pytest`.
+    """
+    tree(tmp_path, workflow="jobs:\n  x:\n    steps:\n      - run: true\n")
+    run = run_script("preflight.py", "--root", str(tmp_path))
+    assert "окружение НЕ сверено" in run.text, run.text
 
 
 def test_a_green_command_is_not_listed_among_the_red(run_script: RunScript, tmp_path: Path) -> None:
@@ -408,6 +518,10 @@ def test_a_red_verdict_never_reaches_the_push(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("красный", "false")])
     monkeypatch.setattr(preflight, "run", lambda step, root: (1, "красное"))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    # СВЕРКА ОКРУЖЕНИЯ — ТАКОЙ ЖЕ СОСЕД, как `steps` и `run`. Предмет здесь —
+    # отношение «красное → не толкаем», а не состав чужой машины: без подмены
+    # прогон зависел бы от того, стоит ли у запустившего `mypy` (150).
+    monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
     assert preflight.main(["--push"]) == preflight.EXIT_RED
     assert not pushed, "толчок случился при красном вердикте"
 
@@ -420,6 +534,10 @@ def test_a_green_verdict_pushes_in_the_same_run(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
     monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    # СВЕРКА ОКРУЖЕНИЯ — ТАКОЙ ЖЕ СОСЕД, как `steps` и `run`. Предмет здесь —
+    # отношение «красное → не толкаем», а не состав чужой машины: без подмены
+    # прогон зависел бы от того, стоит ли у запустившего `mypy` (150).
+    monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
     assert preflight.main(["--push"]) == preflight.EXIT_OK
     assert pushed, "зелёный вердикт не довёл до толчка"
 
@@ -436,6 +554,10 @@ def test_without_the_flag_nothing_is_pushed(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
     monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    # СВЕРКА ОКРУЖЕНИЯ — ТАКОЙ ЖЕ СОСЕД, как `steps` и `run`. Предмет здесь —
+    # отношение «красное → не толкаем», а не состав чужой машины: без подмены
+    # прогон зависел бы от того, стоит ли у запустившего `mypy` (150).
+    monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
     assert preflight.main([]) == preflight.EXIT_OK
     assert not pushed, "проверка толкнула без просьбы"
 

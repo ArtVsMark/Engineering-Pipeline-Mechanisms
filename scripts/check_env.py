@@ -171,6 +171,57 @@ def advise(floor: tuple[int, int], gaps: list[str]) -> None:
     print(f"     python -m pip install {' '.join(gaps)}" if gaps else "     (всё на месте)")
 
 
+@dataclass(frozen=True)
+class Survey:
+    """Итог сверки окружения: что видно, что расходится и чем это ставится."""
+
+    #: Строки для читателя — по одной на инструмент, включая сошедшиеся.
+    seen: list[str]
+    #: Расхождения словами. Пусто — окружение годится.
+    problems: list[str]
+    #: Куски команды установки, которыми расхождения закрываются.
+    gaps: list[str]
+
+
+def survey(root: Path = Path()) -> Survey:
+    """Сверяет окружение с объявлениями дерева — БЕЗ печати.
+
+    ВЫНЕСЕНО ИЗ ТОЧКИ ВХОДА, ЧТОБЫ У СВЕРКИ БЫЛ ВТОРОЙ ЗОВУЩИЙ. Предполётная
+    обещает «площадка скажет то же», и обещание держится только на тех же
+    версиях инструментов; до 18.09.2026 звать сверку ей было нечем, кроме как
+    запустив процесс и разобрав его вывод — то есть заведя второй разбор того же
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    floor = python_floor(root)
+    declared = needs(root)
+    running = sys.version_info[:2]
+    seen = [f"интерпретатор: {running[0]}.{running[1]}, дерево требует >={floor[0]}.{floor[1]}"]
+    problems: list[str] = []
+    gaps: list[str] = []
+    if running < floor:
+        problems.append(
+            f"интерпретатор {running[0]}.{running[1]} старше требуемого — проверки пойдут "
+            "не на той версии, на которой их гоняет площадка"
+        )
+    for need in declared.values():
+        version = installed(need.name)
+        good = version is not None and fits(version, need.bounds)
+        seen.append(f"  {need.name}: {version or 'нет'}, дерево требует {need.bounds or 'любую'}")
+        if not good:
+            problems.append(f"{need.name}: {version or 'не установлен'}, нужно {need.bounds}")
+            gaps.append(f'"{need.name}{need.bounds}"')
+    # ПАКЕТЫ ДЕРЕВА СПРАШИВАЮТСЯ НАРАВНЕ С ИНСТРУМЕНТАМИ. Без общего низа не
+    # запускается ни один механизм, и узнавать об этом падением импорта — то же,
+    # что не сверять окружение вовсе.
+    for name, where in local_packages(root):
+        version = installed(name)
+        seen.append(f"  {name}: {version or 'нет'}, ставится из {where}")
+        if version is None:
+            problems.append(f"{name}: не установлен, а без него механизмы не запускаются")
+            gaps.append(f"-e ./{where.as_posix()}")
+    return Survey(seen, problems, gaps)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: сверяет окружение с деревом и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -179,48 +230,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         floor = python_floor(args.root)
-        declared = needs(args.root)
-    except NotRun as exc:
-        print(f"шаг не отработал: {exc}", file=sys.stderr)
-        return EXIT_BROKEN
-
-    running = sys.version_info[:2]
-    problems: list[str] = []
-    gaps: list[str] = []
-
-    print(f"интерпретатор: {running[0]}.{running[1]}, дерево требует >={floor[0]}.{floor[1]}")
-    if running < floor:
-        problems.append(
-            f"интерпретатор {running[0]}.{running[1]} старше требуемого — проверки пойдут "
-            "не на той версии, на которой их гоняет площадка"
-        )
-
-    for need in declared.values():
-        version = installed(need.name)
-        try:
-            good = version is not None and fits(version, need.bounds)
-        except NotRun as exc:
-            print(f"шаг не отработал: {exc}", file=sys.stderr)
-            return EXIT_BROKEN
-        print(f"  {need.name}: {version or 'нет'}, дерево требует {need.bounds or 'любую'}")
-        if not good:
-            problems.append(f"{need.name}: {version or 'не установлен'}, нужно {need.bounds}")
-            gaps.append(f'"{need.name}{need.bounds}"')
-
-    # ПАКЕТЫ ДЕРЕВА СПРАШИВАЮТСЯ НАРАВНЕ С ИНСТРУМЕНТАМИ. Без общего низа не
-    # запускается ни один механизм, и узнавать об этом падением импорта — то же,
-    # что не сверять окружение вовсе.
-    try:
-        ours = local_packages(args.root)
+        said = survey(args.root)
     except (NotRun, tomllib.TOMLDecodeError) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    for name, where in ours:
-        version = installed(name)
-        print(f"  {name}: {version or 'нет'}, ставится из {where}")
-        if version is None:
-            problems.append(f"{name}: не установлен, а без него механизмы не запускаются")
-            gaps.append(f"-e ./{where.as_posix()}")
+
+    problems, gaps = said.problems, said.gaps
+    for line in said.seen:
+        print(line)
 
     if not problems:
         print("\nокружение годится: версии совпадают с тем, что ставит прогон")
