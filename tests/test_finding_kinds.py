@@ -86,6 +86,22 @@ def test_a_kind_counts_by_fingerprints_not_by_a_number(name: str) -> None:
     assert not wrong, f"{name}: {'; '.join(wrong)}"
 
 
+def test_the_word_no_is_matched_whole_not_by_prefix() -> None:
+    """«Нет» узнаётся целым словом: приставка увела бы род в долг по первой букве.
+
+    `startswith("нет")` читает «нетронутый», «нетривиально» и «нет-нет» как
+    объявление отсутствия механизма — то есть род с ЖИВЫМ механизмом попал бы в
+    долг, а долг перестал бы быть долгом
+    ([141](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/141-a-marker-is-matched-whole-not-by-prefix.md)).
+    """
+    говорит_нет = ("нет", "НЕТ — причина", "нет, потому что", " нет — причина ")
+    не_говорит = ("нетривиально держится разбором", "нетронутый гейт", "держится гейтом", "")
+    wrong = [one for one in говорит_нет if not module.said_no(one)]
+    assert not wrong, f"объявление отсутствия не опознано: {wrong}"
+    wrong = [one for one in не_говорит if module.said_no(one)]
+    assert not wrong, f"живой механизм прочитан как «нет» по приставке: {wrong}"
+
+
 @pytest.mark.parametrize("name", sorted(kinds()), ids=lambda one: one)
 def test_the_split_of_origins_adds_up(name: str) -> None:
     """Состав встреч печатается сложением, а не вторым счётом.
@@ -108,7 +124,7 @@ def test_a_kind_says_what_holds_it_or_why_nothing_does(name: str) -> None:
     """Род держится механизмом либо называет причину, почему не держится (154)."""
     held = str(kinds()[name].get("закрыт", "")).strip()
     assert held, f"{name}: не сказано, чем род закрыт"
-    if held.lower().startswith(module.NO_MECHANISM):
+    if module.said_no(held):
         assert len(held) > len(module.NO_MECHANISM) + 10, (
             f"{name}: «{held}» — молчание под видом ответа; «нет» обязано назвать причину"
         )
@@ -147,7 +163,7 @@ def test_a_repeated_kind_without_a_mechanism_is_named() -> None:
     debt = module.unheld(said)
     for name, times in debt:
         assert times >= module.REPEATED_AT
-        assert str(said[name].get("закрыт", "")).lower().startswith(module.NO_MECHANISM)
+        assert module.said_no(str(said[name].get("закрыт", "")))
 
 
 def test_the_threshold_is_declared_not_buried() -> None:
