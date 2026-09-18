@@ -370,9 +370,16 @@ def test_a_broken_answers_file_refuses_instead_of_counting_everything(tmp_path: 
 #: Разрешительный список ошибается в безопасную сторону: новый законный вызов
 #: получит отказ с названной причиной и будет дописан сюда осознанно.
 #:
+#: СПИСОК РАВЕН ЗАМЕРУ, А НЕ ШИРЕ ЕГО. Первая редакция дописала сюда `len`,
+#: `max`, `min`, `sorted`, `abs`, `.keys`, `.join`, `.format` — ничего из этого
+#: рисовалки не зовут, и разрешение выдавалось впрок. Разрешительный список,
+#: выданный впрок, держит ровно столько же, сколько запретительный: он перестаёт
+#: быть замером и становится догадкой о будущем (005). Нашёл внешний взгляд.
+#:
 #: Замер 18.09.2026: шесть рисовалок зовут ровно `badge`, `sum`, `int`, `float`,
 #: `str`, `bool`, `round`, `isinstance` и методы отображения `.get`, `.items`,
-#: `.values` — ничего сверх счёта по переданным фактам.
+#: `.values` — ничего сверх счёта по переданным фактам. Понадобится новое имя —
+#: оно дописывается вместе с вызовом, а не заранее.
 INSIDE_THE_FACTS: Final = frozenset(
     {
         "badge",
@@ -383,17 +390,9 @@ INSIDE_THE_FACTS: Final = frozenset(
         "bool",
         "round",
         "isinstance",
-        "len",
-        "max",
-        "min",
-        "sorted",
-        "abs",
         ".get",
         ".items",
         ".values",
-        ".keys",
-        ".join",
-        ".format",
     }
 )
 
@@ -489,4 +488,28 @@ def test_every_badge_maker_is_in_the_inventory() -> None:
     assert not forgotten, (
         "рисовалка есть в коде, но не в инвентаре — значок собирается в обход, и"
         f" проверка выше его не судит: {', '.join(forgotten)}"
+    )
+
+
+def test_the_allowed_list_equals_the_measurement() -> None:
+    """Разрешено ровно то, что рисовалки зовут, — ни именем больше.
+
+    Разрешительный список, выданный впрок, держит столько же, сколько
+    запретительный: он перестаёт быть замером и становится догадкой о будущем.
+    Нашёл внешний взгляд.
+    """
+    called: set[str] = set()
+    for maker in badge_makers():
+        for node in ast.walk(maker):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name):
+                called.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                called.add(f".{node.func.attr}")
+    assert called, "рисовалки не зовут ничего — предмет замера не найден (075)"
+    spare = sorted(INSIDE_THE_FACTS - called)
+    assert not spare, (
+        "разрешено впрок то, чего рисовалки не зовут: " + ", ".join(spare) + "\n  Разрешение"
+        " дописывают вместе с вызовом, а не заранее."
     )

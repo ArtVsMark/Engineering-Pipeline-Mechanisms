@@ -46,23 +46,31 @@ def _git(*args: str) -> str:
     return done.stdout
 
 
-def touched(base: str) -> list[list[str]]:
-    """Файлы каждого коммита ветки: внутри списка они связаны одним коммитом.
+def files_of(sha: str) -> list[str]:
+    """Файлы одного коммита — ПРОТИВ ПЕРВОГО РОДИТЕЛЯ, а не комбинированно.
 
-    ПУТИ ЧИТАЮТСЯ ПО NUL, А НЕ ПО ПЕРЕВОДУ СТРОКИ. Без `-z` git экранирует имена
-    с пробелами и не-ASCII, построенный путь не разрешается, и файл молча
-    выпадает из счёта — а счёт частей на неполном списке даёт правдоподобное
-    число
+    У merge-коммита `git show --name-only` печатает КОМБИНИРОВАННЫЙ дифф: только
+    файлы, отличные от ОБОИХ родителей. Совпавшее с одним из них выпадает молча,
+    и счёт частей на таком списке отвечает правдоподобным числом
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Замер 18.09.2026 по трём слияниям дерева: комбинированный дал НОЛЬ файлов
+    там, где против первого родителя их четыре и два. Нашёл внешний взгляд.
+
+    ПУТИ ЧИТАЮТСЯ ПО NUL: без `-z` git экранирует имена с не-ASCII, и файл молча
+    выпадает из счёта
     ([165](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/165-git-file-list-needs-nul.md)).
-    В дереве таких имён полно: сами механизмы названы по-русски.
+    В дереве такие имена — норма: механизмы названы по-русски.
     """
+    said = _git("diff", "--name-only", "-z", f"{sha}^", sha)
+    return [name for name in said.split("\0") if name]
+
+
+def touched(base: str) -> list[list[str]]:
+    """Файлы каждого коммита ветки: внутри списка они связаны одним коммитом."""
     shas = _git("log", "--format=%H", f"{base}..HEAD").split()
     if not shas:
         raise NotRun(f"между {base} и HEAD коммитов нет — предмет счёта не найден (075)")
-    return [
-        [name for name in _git("show", "--name-only", "--format=", "-z", sha).split("\0") if name]
-        for sha in shas
-    ]
+    return [files_of(sha) for sha in shas]
 
 
 def parts(commits: list[list[str]]) -> list[list[str]]:
