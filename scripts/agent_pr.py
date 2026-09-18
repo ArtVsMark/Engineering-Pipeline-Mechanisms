@@ -354,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", default=paths.TRUNK)
     parser.add_argument("--dry-run", action="store_true", help="показать, но не открывать")
     args = parser.parse_args(argv)
+    report.announce(args.dry_run)
 
     try:
         # СУХОМУ ПРОГОНУ ХВАТАЕТ ДЕРЕВА. Имя ветки он берёт у git, а репозиторий

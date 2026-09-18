@@ -283,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--days", type=int, default=WINDOW_DAYS, help="окно обхода, суток")
     parser.add_argument("--apply", action="store_true", help="записать реестр, а не показать")
     args = parser.parse_args(argv)
+    report.announce(not args.apply)
 
     try:
         if not args.repo:

@@ -278,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         help="проверить, сбылась ли связь слитого с задачей, и выйти",
     )
     args = parser.parse_args(argv)
+    report.announce(not args.apply)
 
     paired: list[tuple[str, str]] = []
     try:

@@ -457,7 +457,7 @@ def hail(repo: str, token: str, *, dry_run: bool, now: datetime) -> int:
             continue
         whom = "владельцу" if (subject.quiet or not subject.session) else subject.session
         if dry_run:
-            print(f"  (пробный заход) #{subject.number}: оклик «{subject.kind}» → {whom}")
+            print(f"  {report.DRY} #{subject.number}: оклик «{subject.kind}» → {whom}")
             continue
         try:
             ghrest.request(
