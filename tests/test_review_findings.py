@@ -1026,3 +1026,31 @@ def test_a_silent_platform_lets_the_resolution_through(
     monkeypatch.setattr(module, "touched", lambda repo, token, number: set())
     берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
     assert берём == {"abc1234"} and not держим
+
+
+def test_a_refusing_platform_is_caught_by_the_reader_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Перехват отказа проверен НА САМОМ ОТКАЗЕ, а не через подделку читателя.
+
+    Прежде наружное поведение проверялось моком `touched`, то есть перехват
+    `TransportError` не исполнялся ни разу: проверка зеленела бы и при снятом
+    `try`. Нашёл внешний взгляд на #458.
+    """
+
+    def отказ(repo: str, number: int, token: str) -> frozenset[str]:
+        raise findings_module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.ghrest, "files_of", отказ)
+    assert module.touched("o/r", "токен", 7) == set(), "отказ площадки не перехвачен"
+
+
+def test_the_reader_passes_a_real_answer_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Второй конец: площадка ответила — состав доезжает как есть.
+
+    Без него перехват был бы неотличим от «всегда пусто» (051).
+    """
+    monkeypatch.setattr(
+        module.ghrest, "files_of", lambda repo, number, token: frozenset({"scripts/x.py"})
+    )
+    assert module.touched("o/r", "токен", 7) == {"scripts/x.py"}

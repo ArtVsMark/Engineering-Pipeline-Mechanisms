@@ -439,6 +439,26 @@ def raw_text(url: str, timeout: int = 30) -> str:
 MERGED_WINDOW: Final = 30
 
 
+def files_of(repo: str, number: int, token: str) -> frozenset[str]:
+    """Пути, тронутые изменением. Читается страницами: состав бывает длинным.
+
+    ЖИВЁТ В ТРАНСПОРТЕ, А НЕ У ОДНОГО ИЗ ЗОВУЩИХ. Состав изменения спрашивают
+    двое и по разным поводам: очередь слияний — чтобы увидеть пересечение с
+    соседом (133), уборка реестра — чтобы убедиться, что находку об ОТВЕТЕ
+    закрыла правка ответа. Копия у каждого разошлась бы молча, а импорт из
+    соседа завёл бы ребро между подсистемами, которого быть не должно: общее
+    выносится ВЫШЕ обеих
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    Нашёл внешний взгляд на #458.
+
+    ЧЕГО ЭТА ФУНКЦИЯ НЕ РЕШАЕТ: что делать при отказе площадки. У очереди
+    слияний «не знаю состав» — повод не двигать изменение, у уборки — повод
+    снятие принять. Один исход на двоих был бы выбором за них (084).
+    """
+    path = f"repos/{repo}/pulls/{number}/files"
+    return frozenset(str(item.get("filename") or "") for item in paginate(path, token))
+
+
 def merged_page(
     repo: str, token: str, limit: int = MERGED_WINDOW
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

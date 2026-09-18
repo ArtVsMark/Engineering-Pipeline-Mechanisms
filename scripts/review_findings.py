@@ -558,12 +558,17 @@ ANSWER_FILE: Final = findings.ANSWER_FILE
 
 
 def touched(repo: str, token: str, number: int) -> set[str]:
-    """Пути, тронутые слитым изменением. Пусто — площадка не ответила."""
+    """Пути, тронутые слитым изменением. Пусто — площадка не ответила.
+
+    ЧИТАТЕЛЬ ОБЩИЙ, А ПОЛИТИКА ОТКАЗА — СВОЯ. Сам запрос живёт в транспорте:
+    состав изменения спрашивает ещё и очередь слияний, и копия разошлась бы
+    молча (090, нашёл внешний взгляд на #458). А вот что делать при отказе
+    площадки, решает зовущий: здесь «не знаю состав» означает принять снятие,
+    у очереди — не двигать изменение. Один исход на двоих был бы выбором за
+    них (084).
+    """
     try:
-        return {
-            str(one.get("filename") or "")
-            for one in ghrest.paginate(f"repos/{repo}/pulls/{number}/files", token)
-        }
+        return set(ghrest.files_of(repo, number, token))
     except ghrest.TransportError:
         return set()
 
