@@ -53,6 +53,13 @@ PROTECTION: Final = Path(".rules/protection.json")
 #: Объявленные исходы механизмов, которые набор пока не прогоняет. Список
 #: только убывает: он называет пробел, а не ровняет его (046).
 OUTCOMES: Final = Path(".rules/outcomes.json")
+
+#: Исключительные утверждения свода — те, что опровергаются одной командой и
+#: потому обязаны считаться механизмом (175). Адрес объявлен здесь с 18.09.2026:
+#: до того файл лежал в `.rules/` наравне с прочими, а якорь о нём молчал, и
+#: единственный читатель строил адрес сам. Нашёл аудит ответа по 096 — не гейтом,
+#: потому что гейта на это и не было (115).
+CLAIMS: Final = Path(".rules/claims.json")
 #: Фрагменты журнала и собранный журнал.
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
@@ -119,6 +126,7 @@ ALL: Final = (
     LENIENCY,
     PROTECTION,
     OUTCOMES,
+    CLAIMS,
     FRAGMENTS,
     RELEASED,
     CHANGELOG,

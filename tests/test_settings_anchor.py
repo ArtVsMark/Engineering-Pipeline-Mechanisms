@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -107,6 +108,48 @@ def test_no_second_anchor_is_declared(path: Path) -> None:
     assert not built, (
         f"{path.name} строит адрес настройки сам: {sorted(built)} — "
         f"второй якорь заводится именно так, а объявлены они в {ANCHOR_NAME}"
+    )
+
+
+#: Каталоги, целиком отданные под хранилища объявлений: всё, что там лежит, —
+#: настройка, и адрес ей полагается у якоря. Список закрытый и мал намеренно:
+#: `.github/` и `changelog.d/` сюда не идут — там живут прогоны и фрагменты,
+#: то есть файлы, которые механизмы перебирают глобом, а не адресуют поимённо.
+STORAGE_DIRS: Final = (".rules",)
+
+
+def test_every_file_of_the_storage_is_declared() -> None:
+    """Файл, лежащий в хранилище объявлений, назван якорем поимённо.
+
+    ПОЛНОТА СПИСКА — НЕ ТО ЖЕ, ЧТО ЕГО СОГЛАСОВАННОСТЬ. Соседняя проверка
+    сверяет `paths.ALL` с тем, что якорь объявил, — то есть якорь с самим собой.
+    Файл, положенный в `.rules/` мимо якоря, обе стороны этой сверки оставляет
+    верными и потому не краснеет нигде
+    ([115](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/115-config-has-one-anchor-and-a-bounded-search.md),
+    [096](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/096-storage-follows-lifecycle-not-convenience.md)).
+
+    ЗАМЕР 18.09.2026, ИЗ-ЗА КОТОРОГО ПРОВЕРКА И НАПИСАНА: в `.rules/` одиннадцать
+    записей, якорь объявлял десять. Необъявленным был `claims.json` —
+    исключительные утверждения свода, — и единственный его читатель строил адрес
+    сам. Ответ проекта при этом утверждал, что полноту держит механизм. Нашёл
+    аудит ответа, а не гейт, потому что гейта на это и не было
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    declared = {value.as_posix() for value in declared_in_the_anchor()}
+    stray: list[str] = []
+    for where in STORAGE_DIRS:
+        directory = ROOT / where
+        assert directory.is_dir(), f"хранилища {where} нет — предмет проверки не найден (075)"
+        stray += [
+            f"{where}/{item.name}"
+            for item in sorted(directory.iterdir())
+            if item.is_file() and f"{where}/{item.name}" not in declared
+        ]
+    assert not stray, (
+        "файл хранилища не объявлен якорем (096, 115):\n  "
+        + "\n  ".join(stray)
+        + f"\n  Объявите адрес в {ANCHOR_NAME} и внесите его в ALL: читатель,"
+        " строящий адрес сам, и есть второй якорь."
     )
 
 

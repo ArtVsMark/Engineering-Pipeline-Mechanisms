@@ -278,6 +278,20 @@ def coverage_facts(path: Path | None) -> dict[str, Any]:
     ЗАМЕР ОБЯЗАН ВИДЕТЬ ПОДПРОЦЕССЫ. Гейты проверяются запуском, и счётчик без
     этого показывал ноль у полностью проверенных модулей: 66% против настоящих
     77%. Держит это `tests/conftest.py` (`under_counter`), а не договорённость.
+
+    ДОЛЯ ЕДЕТ ВМЕСТЕ С ДВУМЯ ЧИСЛАМИ, ИЗ КОТОРЫХ СДЕЛАНА. «77 %» отвечает на
+    вопрос «много ли», но не на «много ЧЕГО»: та же доля у дерева в сто строк и
+    в десять тысяч значит разное, а падение с 77 до 70 бывает и новым кодом без
+    проверок, и удалением покрытого
+    ([041](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/041-two-honest-numbers-beat-one-averaged.md)).
+    До 18.09.2026 витрина публиковала ОДНУ долю покрытия — единственное
+    усреднённое число во всём наборе фактов, и единственное без своих слагаемых:
+    у семьи доля стоит рядом с `closed_by_shared` из `held_by_machine`, у правил
+    вместо доли пара «отвечено из всего».
+
+    ОТСУТСТВИЕ ЧИСЕЛ — ОТКАЗ, А НЕ МОЛЧАНИЕ, и той же породы, что у доли выше:
+    форма чужого отчёта меняется, и опубликовать долю без слагаемых значило бы
+    вернуться к тому, что здесь и чинится (045).
     """
     if path is None or not path.is_file():
         return {"read": False, "percent": 0.0}
@@ -285,10 +299,21 @@ def coverage_facts(path: Path | None) -> dict[str, Any]:
         report = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         raise NotRun(f"отчёт покрытия не разобрался: {exc}") from exc
-    percent = (report.get("totals") or {}).get("percent_covered")
+    totals = report.get("totals") or {}
+    percent = totals.get("percent_covered")
     if percent is None:
         raise NotRun(f"{path}: в отчёте нет доли покрытия — форма ответа изменилась")
-    return {"read": True, "percent": round(float(percent), 1)}
+    covered, lines = totals.get("covered_lines"), totals.get("num_statements")
+    if covered is None or lines is None:
+        raise NotRun(
+            f"{path}: в отчёте нет чисел, из которых сделана доля — форма ответа изменилась"
+        )
+    return {
+        "read": True,
+        "percent": round(float(percent), 1),
+        "covered": int(covered),
+        "lines": int(lines),
+    }
 
 
 def collect(

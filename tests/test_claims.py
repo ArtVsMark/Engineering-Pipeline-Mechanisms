@@ -34,9 +34,9 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, load_script
 
-CLAIMS = ROOT / ".rules" / "claims.json"
+CLAIMS = ROOT / load_script("paths.py").CLAIMS
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 #: Отсутствие механизма говорится СЛОВОМ, а не пропуском поля (154).
