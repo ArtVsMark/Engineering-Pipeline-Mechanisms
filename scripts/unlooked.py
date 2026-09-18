@@ -598,6 +598,7 @@ def render_body(
         "этого не делает — заявлять «столько и было» он не вправе (154).",
         "",
         f"Просмотрено до: #{watermark}",
+        f"Обход: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC.",
         "",
         said_tally(tally or {}),
         "",
