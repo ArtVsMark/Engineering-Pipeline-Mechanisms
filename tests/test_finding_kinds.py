@@ -61,11 +61,46 @@ def test_a_kind_says_what_the_mistake_is(name: str) -> None:
 
 @pytest.mark.parametrize("name", sorted(kinds()), ids=lambda one: one)
 def test_a_kind_counts_by_fingerprints_not_by_a_number(name: str) -> None:
-    """Встречи названы ОТПЕЧАТКАМИ: число рассохлось бы первой же находкой (005)."""
+    """Встречи перечислены ПОШТУЧНО: число рассохлось бы первой же находкой (005).
+
+    Штука — отпечаток находки внешнего взгляда либо запись «окно: <адрес>» о
+    роде, пойманном собственным откатом до толчка. Второй формы до 18.09.2026
+    не было, и это был не пробел оформления: род, дважды пойманный в окне,
+    считался встреченным ноль раз и порога не достигал никогда.
+
+    АДРЕС У ВСТРЕЧИ В ОКНЕ ОБЯЗАТЕЛЕН по той же причине, по какой обязателен у
+    пометки «породил»: без него «поймали такое же» неотличимо от впечатления, а
+    проверить нечем — коммита с находкой не существует.
+    """
     met = kinds()[name].get("встречен")
-    assert isinstance(met, list) and met, f"{name}: встречи не перечислены отпечатками"
-    wrong = [str(one) for one in met if not FINGERPRINT.match(str(one))]
-    assert not wrong, f"{name}: не отпечатки находок: {', '.join(wrong)}"
+    assert isinstance(met, list) and met, f"{name}: встречи не перечислены поштучно"
+    wrong: list[str] = []
+    for one in (str(each) for each in met):
+        if FINGERPRINT.match(one):
+            continue
+        if one.startswith(module.IN_WINDOW):
+            if not ADDRESS.search(one[len(module.IN_WINDOW) :]):
+                wrong.append(f"«{one}» — встреча в окне без адреса")
+            continue
+        wrong.append(f"«{one}» — ни отпечаток, ни «{module.IN_WINDOW}<адрес>»")
+    assert not wrong, f"{name}: {'; '.join(wrong)}"
+
+
+@pytest.mark.parametrize("name", sorted(kinds()), ids=lambda one: one)
+def test_the_split_of_origins_adds_up(name: str) -> None:
+    """Состав встреч печатается сложением, а не вторым счётом.
+
+    «Взгляд» и «окно» — разные совокупности, и читателю долга видно, дошёл ли
+    род до общей ветки. Второй список того же разошёлся бы с первым молча
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)),
+    поэтому происхождение живёт в самой записи встречи, а состав вычисляется.
+    """
+    body = kinds()[name]
+    seen, caught = module.origins(body)
+    met = body.get("встречен")
+    assert seen + caught == len(met if isinstance(met, list) else []), (
+        f"{name}: состав встреч не сходится с их числом — счёт разошёлся с записью"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(kinds()), ids=lambda one: one)
