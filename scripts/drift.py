@@ -40,6 +40,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -974,6 +975,12 @@ def render_body(found: list[Drift], silent: list[str] | None = None) -> str:
         "",
         "Запись снимается сама, когда расхождения больше нет: тело переписывается",
         "на каждом заходе целиком, и ведётся не руками, а механизмом (049).",
+        "",
+        # ДЕНЬ ОБХОДА СТОИТ ДАЖЕ КОГДА ПУСТО, И ОСОБЕННО КОГДА ПУСТО. «Пусто» без
+        # даты неотличимо от «не смотрели»: обе записи выглядят одинаково
+        # спокойно, а значат противоположное
+        # ([027](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/027-empty-state-is-a-state.md)).
+        f"Обход: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC.",
         "",
         "## Сдвинулось",
         "",
