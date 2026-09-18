@@ -1,0 +1,95 @@
+"""Счёт частей изменения проверяется тем, что он обязан отвергнуть.
+
+Механизм не краснеет — он называет число (051). Ошибиться он может тихо: на
+пустом входе отдать «одна часть» вместо отказа, и тогда «граница соблюдена»
+прозвучало бы там, где предмета не было вовсе
+([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from tests.conftest import ROOT, load_script
+
+module = load_script("change_parts.py")
+
+
+def test_files_touched_by_one_commit_are_one_part() -> None:
+    """Файлы одного коммита связаны — это и есть признак границы (133)."""
+    assert module.parts([["а.py", "б.py", "в.py"]]) == [["а.py", "б.py", "в.py"]]
+
+
+def test_commits_with_no_common_file_fall_apart() -> None:
+    """Коммиты без общего файла дают РАЗНЫЕ части: работа сшита не пересечением."""
+    said = module.parts([["а.py"], ["б.py"], ["в.py"]])
+    assert len(said) == 3, said
+
+
+def test_a_shared_file_sews_two_commits_together() -> None:
+    """Один общий файл связывает коммиты: предмет у них общий."""
+    said = module.parts([["а.py", "общий.py"], ["общий.py", "б.py"]])
+    assert said == [["а.py", "б.py", "общий.py"]], said
+
+
+def test_a_chain_through_a_third_commit_still_connects() -> None:
+    """Связность ПЕРЕХОДНАЯ: а—б и б—в делают одну часть, а не две.
+
+    Разбор, сравнивающий только пары соседних коммитов, насчитал бы здесь две
+    части и звал бы резать то, что связано через третий файл.
+    """
+    said = module.parts([["а.py", "б.py"], ["б.py", "в.py"]])
+    assert said == [["а.py", "б.py", "в.py"]], said
+
+
+def test_parts_come_biggest_first() -> None:
+    """Части идут от крупной к мелкой: читателю нужна главная, а не первая попавшаяся."""
+    said = module.parts([["а.py"], ["б.py", "в.py", "г.py"]])
+    assert [len(one) for one in said] == [3, 1], said
+
+
+def test_an_empty_change_is_the_third_outcome() -> None:
+    """Коммитов нет — отказ, а не «одна часть».
+
+    «Одна часть» на пустом входе прозвучало бы как «граница соблюдена» — то
+    есть отказ входа выдал бы себя за вердикт (045).
+    """
+    with pytest.raises(module.NotRun, match="считать нечего"):
+        module.parts([])
+
+
+def test_commits_that_touched_nothing_are_the_third_outcome() -> None:
+    """Коммиты есть, а файлов не тронуто — тоже отказ, а не пустой вердикт."""
+    with pytest.raises(module.NotRun, match="считать нечего"):
+        module.parts([[], []])
+
+
+def test_the_walk_names_its_parts_on_a_live_branch(tmp_path, run_script) -> None:  # type: ignore[no-untyped-def]
+    """Заход процессом называет части и выходит нулём — исход прогоняется, а не объявляется."""
+    done = run_script("change_parts.py", "--base", "HEAD~1")
+    assert done.code == module.EXIT_OK, done.err
+    assert "частей" in done.out, done.out
+
+
+def test_a_base_that_is_not_a_commit_is_the_third_outcome(run_script) -> None:  # type: ignore[no-untyped-def]
+    """База не разрешается — отказ с причиной, а не «одна часть» (075).
+
+    Опечатка в имени базы снаружи неотличима от цельного изменения: обе дают
+    ноль частей. Поэтому отказ git доезжает до кода возврата, а не гасится.
+    """
+    done = run_script("change_parts.py", "--base", "нет-такой-базы")
+    assert done.code == module.EXIT_BROKEN, done.out
+    assert "не сосчитаны" in done.err, done.err
+
+
+def test_paths_are_read_by_nul_not_by_newline() -> None:
+    """Пути из git читаются по NUL: имя с пробелом иначе выпадает молча (165).
+
+    В дереве имена по-русски, и первая редакция звала `git show --name-only` без
+    `-z`: git экранировал бы такие имена, путь не разрешался, файл выпадал из
+    счёта — а счёт частей на неполном списке даёт правдоподобное число. Поймал
+    гейт чистоты источников, а не вычитка.
+    """
+    source = (ROOT / "scripts" / "change_parts.py").read_text(encoding="utf-8")
+    assert '"-z"' in source, "перечисление путей идёт без -z"
+    assert 'split("\\0")' in source, "вывод разбирается не по NUL"
