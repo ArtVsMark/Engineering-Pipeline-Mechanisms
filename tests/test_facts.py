@@ -7,9 +7,10 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -358,3 +359,104 @@ def test_a_broken_answers_file_refuses_instead_of_counting_everything(tmp_path: 
         )
         assert got["behind_read"] is False, body
         assert "behind" not in got, body
+
+
+#: Что рисовалка значка НЕ вправе читать: любой источник помимо переданных фактов.
+BESIDE_THE_FACTS: Final = frozenset(
+    {"read_text", "glob", "rglob", "iterdir", "loads", "load", "run", "open", "getenv", "walk"}
+)
+
+
+def badge_makers() -> list[ast.FunctionDef]:
+    """Рисовалки значков — те, что объявлены в инвентаре BADGES, а не по имени.
+
+    ИМЯ БРАТЬ НЕЛЬЗЯ: признак «функция кончается на `_badge`» — подстрока, и
+    рисовалка, названная иначе, ушла бы из-под проверки молча
+    ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+    Инвентарь `BADGES` — тот же источник, по которому значки и собираются, так что
+    предмет проверки и предмет сборки совпадают по построению (022).
+    """
+    named = {maker.__name__ for maker in facts.BADGES.values()}
+    tree = ast.parse((ROOT / "scripts" / "build_facts.py").read_text(encoding="utf-8"))
+    found = [
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name in named
+    ]
+    assert len(found) == len(named), f"в дереве найдены не все рисовалки: {named} против {found}"
+    return found
+
+
+def test_a_badge_shows_only_what_the_facts_already_say() -> None:
+    """Значок рисуется ТОЛЬКО из переданных фактов — тогда сырое лежит рядом всегда.
+
+    Форматирование — операция с потерей, и разбор строки обратно есть
+    восстановление того, что сам же и уничтожил. Поэтому рядом с показанной
+    величиной отдаётся исходное число
+    ([122](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/122-ship-the-raw-value-next-to-the-formatted-one.md)).
+
+    У нас это держится УСТРОЙСТВОМ: рисовалка получает факты и больше ничего, а
+    факты публикуются рядом со значками тем же прогоном. Рисовалка, посчитавшая
+    число сама — обходом дерева, чтением файла, запуском команды, — оставила бы
+    потребителю только картинку, и сырого рядом не было бы вовсе.
+
+    ЗАМЕР 18.09.2026: рисовалок шесть, сторонних источников у них ноль, единственный
+    аргумент у каждой — факты. То есть требование исполнялось и не держалось ничем
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    guilty: list[str] = []
+    for maker in badge_makers():
+        names = [arg.arg for arg in maker.args.args]
+        if names != ["facts"]:
+            guilty.append(f"{maker.name} берёт {names}, а не одни факты")
+        reached = sorted(
+            {
+                node.func.attr
+                for node in ast.walk(maker)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in BESIDE_THE_FACTS
+            }
+            | {
+                node.func.id
+                for node in ast.walk(maker)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in BESIDE_THE_FACTS
+            }
+        )
+        if reached:
+            guilty.append(f"{maker.name} читает мимо фактов: {', '.join(reached)}")
+    assert not guilty, (
+        "значок получает число не из фактов — сырого рядом с показанным не будет (122):\n  "
+        + "\n  ".join(guilty)
+        + "\n  Считайте число в сборке фактов и передайте его сюда: публикуется оно"
+        " рядом со значком."
+    )
+
+
+def test_every_badge_maker_is_in_the_inventory() -> None:
+    """Каждая рисовалка в коде стоит в инвентаре — иначе проверка выше говорит о части.
+
+    ЗДЕСЬ НУЖЕН НЕЗАВИСИМЫЙ СВИДЕТЕЛЬ, И ЭТО НЕ ПРИДИРКА. Первая редакция
+    сравнивала инвентарь с функциями, найденными ПО ЭТОМУ ЖЕ инвентарю, — то есть
+    сама с собой, и снятие значка из `BADGES` она не замечала: рисовалка уходила из
+    предмета вместе с записью о ней. Поймано откатом
+    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
+
+    Свидетель — имя функции, кончающееся на `_badge`. Признак это слабый, и
+    основным он быть не может (166), но роль у него обратная: он ищет рисовалку,
+    которую инвентарь ЗАБЫЛ. Ошибётся он в безопасную сторону — потребует записать
+    в инвентарь то, что и так там должно быть.
+    """
+    assert facts.BADGES, "инвентарь значков пуст — предмет проверки не найден (075)"
+    tree = ast.parse((ROOT / "scripts" / "build_facts.py").read_text(encoding="utf-8"))
+    in_code = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name.endswith("_badge")
+    }
+    assert in_code, "рисовалок значков в дереве не нашлось — предмет проверки не найден (075)"
+    forgotten = sorted(in_code - {maker.__name__ for maker in facts.BADGES.values()})
+    assert not forgotten, (
+        "рисовалка есть в коде, но не в инвентаре — значок собирается в обход, и"
+        f" проверка выше его не судит: {', '.join(forgotten)}"
+    )
