@@ -381,11 +381,17 @@ def render_body(entries: dict[str, findings.Entry], swept_to: str = "") -> str:
 live_issue = findings.live_issue
 
 
+#: Слова закрытой шкалы верификатора. Объявлены ОДИН раз и отсюда же собирается
+#: образец: копия словаря рядом с образцом разошлась бы с ним молча
+#: ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+SAYS_YES: Final = "подтверждена"
+SAYS_NO: Final = "не подтвердилась"
+
 #: Ответ верификатора в комментарии захода. Слово из закрытой шкалы, причина —
 #: необязательна у подтверждения и обязательна у опровержения: «не
 #: подтвердилась» без причины не даёт разбирающему ничего (154).
 PREMISE_RE: Final = re.compile(
-    r"^ПРЕМИСА:\s*(?P<said>подтверждена|не подтвердилась)\s*(?:—\s*(?P<why>\S.*?))?\s*$",
+    rf"^ПРЕМИСА:\s*(?P<said>{SAYS_YES}|{SAYS_NO})\s*(?:—\s*(?P<why>\S.*?))?\s*$",
     re.I | re.M,
 )
 
@@ -416,7 +422,12 @@ def verified(entry: findings.Entry, said: str, why: str, day: str) -> findings.E
     узнаёт, что премиса не подтвердилась, и не узнаёт почему — то есть обязан
     проверять заново (046).
     """
-    head = findings.REFUTED if said.startswith("не") else findings.CONFIRMED
+    # СЛОВО СВЕРЯЕТСЯ ЦЕЛИКОМ, А НЕ ПО НАЧАЛУ. Прежде здесь стояло
+    # `said.startswith("не")`: безопасно, пока шкалу держит образец выше, — но
+    # связь эта невидима у самого сравнения, а функция открыта и принимает любую
+    # строку. «Нейтрально», «независимо», «нельзя» прочлись бы как опровержение
+    # ([141](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/141-a-marker-is-matched-whole-not-by-prefix.md)).
+    head = findings.REFUTED if said.strip().lower() == SAYS_NO else findings.CONFIRMED
     tail = f"{head} {day}" + (f": {why}" if why else "")
     return replace(entry, checked=tail)
 
