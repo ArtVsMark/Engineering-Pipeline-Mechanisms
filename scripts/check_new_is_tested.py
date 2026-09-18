@@ -219,8 +219,21 @@ def told_by_tests(name: str, module: str, tests: str) -> bool:
     # операции. Исключать их поштучно («сначала сравнения, потом составные»)
     # значит чинить по одному найденному случаю — так этот признак уже дважды и
     # чинился. Нашли внешние взгляды на #249 и #251.
+    # ТОЧКА ПЕРЕД ИМЕНЕМ — ТА ЖЕ ПЕРЕДАЧА. `isinstance(said, env.Survey)` отдаёт
+    # имя ровно так же, как `isinstance(said, Survey)`: набор зовёт механизм
+    # модулем, и обращение через точку у него основное. Ветка ВЫЗОВА это знала с
+    # самого начала (`\.{bare}\s*\(`), а ветка ПЕРЕДАЧИ — нет, и одна форма
+    # засчитывалась, а другая нет
+    # ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    #
+    # ЭТО ЛОЖНОЕ КРАСНОЕ, А НЕ ПРОПУСК, и цена его выше: гейт отвергает верную
+    # работу, и его учатся обходить. 18.09.2026 так и вышло — окно переписало
+    # СВОЙ ТЕСТ под слепоту гейта вместо того, чтобы починить гейт
+    # ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    # Замер того же дня: имён, видных набору только через точку, — четыре.
     handed = r"(?:(?<![=!<>+\-*/%&|^@~])=|[,(\[])"
-    if re.search(rf"{handed}\s*{bare}\s*(?=[),\]]|$)", tests, re.MULTILINE):
+    through_dot = r"(?:[\w]+\.)?"
+    if re.search(rf"{handed}\s*{through_dot}{bare}\s*(?=[),\]]|$)", tests, re.MULTILINE):
         return True
     # ДЕКОРАТОР — тоже передача, только записанная иначе.
     if re.search(rf"@\s*{bare}\b", tests):
