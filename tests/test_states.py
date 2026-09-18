@@ -11,6 +11,22 @@
 * у каждого состояния колонка выходов непуста;
 * состояние без выходов названо терминальным словом, а не оставлено пустым;
 * имя после стрелки — существующее состояние той же таблицы, а не выдуманное.
+
+ПЕРЕХОД В ДРУГОЙ КОНТУР ПРОВЕРЯЕТСЯ, А НЕ ОТПУСКАЕТСЯ. До 18.09.2026 выход,
+начинавшийся со слов «контур», «эскалац» или «повтор», пропускался целиком —
+приставкой строки. Замер: таких выходов **три из 23**, и один из них,
+`Исправление → Эскалация`, называл живое состояние ЧУЖОЙ таблицы (контур 3).
+Переименуйте там «Эскалацию» — и выход контура 1 повиснет молча: ровно тот
+оборванный переход, который правило и запрещает. Приставка отпускала заодно всё,
+что с неё начинается, включая опечатку: «контуо 1» прошло бы наравне с «контур 1»
+([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+
+Теперь у выхода три законных исхода, и каждый проверяется: состояние ЭТОЙ
+таблицы, состояние ЧУЖОЙ таблицы того же договора, либо контур целиком — и
+номер контура обязан существовать. Всё прочее — закрытый список с причиной у
+каждого слова, а не приставка
+([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md),
+[154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 """
 
 from __future__ import annotations
@@ -64,6 +80,20 @@ def names_in(said: str) -> list[str]:
 
 
 TERMINAL = "терминальное"
+
+#: Заголовок контура: по нему узнают, какие контуры в договоре вообще есть.
+CONTOUR_HEAD = re.compile(r"^##\s*Контур\s+(?P<number>\d+)\.", re.M)
+#: Выход, называющий контур целиком: «→ контур 1, источник 2».
+TO_CONTOUR = re.compile(r"^контур\s+(?P<number>\d+)\b", re.I)
+#: Выходы, которые не называют НИ состояния, НИ контура, — закрытый список с
+#: причиной у каждого (068, 154). Приставка слова таким списком не является:
+#: она отпускает всё, что с неё начинается, включая опечатку и переименование.
+NOT_A_STATE = {
+    "повтор": (
+        "перезапуск того же джоба, а не переход: голова изменения не меняется, "
+        "и состояние остаётся прежним. Состоянием это не является по построению"
+    ),
+}
 
 
 def tables() -> list[dict[str, str]]:
@@ -124,14 +154,30 @@ def test_an_exit_leads_to_a_state_that_exists(table: dict[str, str]) -> None:
     правило 109 и запрещает.
     """
     known = {name.strip().lower() for name in table}
+    anywhere = {one.strip().lower() for other in tables() for one in other}
+    contours = set(CONTOUR_HEAD.findall(BEHAVIOUR.read_text(encoding="utf-8")))
     for name, exits in table.items():
         for match in EXIT_TO.finditer(exits):
             for said in names_in(match.group("said")):
-                # Переход в ДРУГОЙ контур называется его словом, а не именем
-                # состояния: такие выходы законны и проверяются чтением.
-                if said.lower().startswith(("контур", "эскалац", "повтор")):
+                low = said.lower()
+                if low in known:
                     continue
-                assert said.lower() in known, f"«{name}»: выход «{said}» — нет такого состояния"
+                # Переход в ДРУГОЙ контур: либо называет состояние ЧУЖОЙ
+                # таблицы, либо контур целиком. И то и другое существует в
+                # документе — значит проверяется, а не отпускается.
+                if low in anywhere:
+                    continue
+                to_contour = TO_CONTOUR.match(low)
+                if to_contour:
+                    assert to_contour.group("number") in contours, (
+                        f"«{name}»: выход «{said}» — такого контура в договоре нет"
+                    )
+                    continue
+                assert low in NOT_A_STATE, (
+                    f"«{name}»: выход «{said}» — ни состояние этой таблицы, ни состояние"
+                    f" чужой, ни контур. Если это и не переход вовсе — назовите его в"
+                    f" NOT_A_STATE с причиной, а не отпускайте приставкой слова (068, 154)"
+                )
 
 
 def test_an_exit_written_in_bold_is_still_checked() -> None:
