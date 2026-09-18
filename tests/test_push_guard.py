@@ -43,6 +43,8 @@ def ask(
     broken: str = "",
     gone: str = "",
     merged: str = "",
+    elsewhere: str = "",
+    tracked: str = "",
 ) -> subprocess.CompletedProcess[str]:
     """Спрашивает сторожа о команде, подделав состояние репозитория.
 
@@ -64,6 +66,8 @@ def ask(
             "FAKE_HEAD_BROKEN": broken,
             "FAKE_REMOTE_GONE": gone,
             "FAKE_MERGED": merged,
+            "FAKE_UPSTREAM_ELSEWHERE": elsewhere,
+            "FAKE_TRACKED": tracked,
         },
     )
 
@@ -423,7 +427,7 @@ def test_a_push_into_an_already_merged_branch_is_refused() -> None:
     а история всё равно уже в общей. Тогда продолжение даёт конфликт ИСТОРИИ,
     который выглядит конфликтом содержимого — диф в четыре файла вместо одного.
     """
-    done = ask("git push origin agent/here", merged="1")
+    done = ask("git push origin agent/here", merged="1", tracked="1")
     assert done.returncode == 2, done.stdout
     assert "уже достижима" in done.stderr, done.stderr
 
@@ -481,7 +485,16 @@ def test_the_revival_check_runs_against_a_real_repository(tmp_path: Path) -> Non
     run("checkout", "--quiet", "-b", "agent/work")
     (tmp_path / "файл").write_text("два", encoding="utf-8")
     run("commit", "--quiet", "-am", "работа")
-    # «Площадка» слила работу в общую ветку и опубликовала её.
+    # ВЕТКУ ТОЛКАЛИ, и это часть предмета: воскресить можно лишь то, что на
+    # площадке было. Слежение за одноимённой веткой ставит `push -u` — здесь
+    # оно записывается прямо, потому что площадки у временного клона нет.
+    run("config", "branch.agent/work.merge", "refs/heads/agent/work")
+    run("config", "branch.agent/work.remote", "origin")
+    # «Площадка» приняла толчок ветки, слила работу и общую ветку опубликовала.
+    # ВЕТКУ ПРИ ЭТОМ НЕ УДАЛИЛА — это отдельный случай, и предмет здесь именно
+    # он: первый признак («ссылки нет») молчит, второй («уже достижима») обязан
+    # сработать. Настройка площадки удалять ветку при слиянии есть не везде.
+    run("update-ref", "refs/remotes/origin/agent/work", "refs/heads/agent/work")
     run("checkout", "--quiet", "main")
     run("merge", "--quiet", "--ff-only", "agent/work")
     run("update-ref", "refs/remotes/origin/main", "refs/heads/main")
@@ -496,3 +509,85 @@ def test_the_revival_check_runs_against_a_real_repository(tmp_path: Path) -> Non
     finally:
         os.chdir(here)
     assert "уже достижима" in said, said or "живой репозиторий не дал признака слияния"
+
+
+def test_a_first_push_of_a_fresh_branch_passes() -> None:
+    """Первый толчок НОВОЙ ветки проходит: воскрешать ещё нечего.
+
+    `git checkout -b <новая> origin/main` — процедура свода — оставляет
+    `branch.<новая>.merge = refs/heads/main`: git настраивает слежение за той
+    веткой, ОТ КОТОРОЙ отрезали. Ссылки `origin/<новая>` при этом нет, потому
+    что ветки на площадке нет вовсе. Первая редакция запрета считала это
+    воскрешением слитой и отвергала первый же толчок — то есть ломала ровно ту
+    процедуру, которой сама и учит в тексте отказа. Нашёл внешний взгляд.
+    """
+    done = ask("git push -u origin agent/here", gone="1", elsewhere="1")
+    assert done.returncode == 0, done.stderr
+
+
+def test_the_revival_check_survives_the_real_auto_tracking(tmp_path: Path) -> None:
+    """Автотрекинг воспроизведён НАСТОЯЩИМ git, а не объявлен подделкой.
+
+    Подделка отвечает то, что мы ей велели, — и первая редакция запрета была
+    зелёной на ней ровно потому, что связь «есть конфиг ⇒ ветку удалили» задали
+    ей мы сами
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    Здесь клон настоящий, с объявленным `origin`: без него git слежения не
+    ставит вовсе, и замер прошёл бы мимо предмета.
+    """
+    import os
+
+    bare = tmp_path / "площадка"
+    clone = tmp_path / "клон"
+
+    def run(where: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=where, check=True, capture_output=True)
+
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    subprocess.run(["git", "clone", "-q", str(bare), str(clone)], check=True, capture_output=True)
+    run(clone, "config", "user.email", "кто@то")
+    run(clone, "config", "user.name", "кто-то")
+    (clone / "файл").write_text("раз", encoding="utf-8")
+    run(clone, "add", "-A")
+    run(clone, "commit", "--quiet", "-m", "первый")
+    run(clone, "push", "--quiet", "-u", "origin", "main")
+    run(clone, "checkout", "--quiet", "-b", "agent/новая", "origin/main")
+
+    upstream = subprocess.run(
+        ["git", "config", "--get", "branch.agent/новая.merge"],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert upstream.stdout.strip() == "refs/heads/main", (
+        "git не поставил слежение за общей веткой — предмет проверки не"
+        f" воспроизвёлся: {upstream.stdout!r}"
+    )
+
+    here = Path.cwd()
+    try:
+        os.chdir(clone)
+        said = module.merged_away("agent/новая")
+    finally:
+        os.chdir(here)
+    assert said == "", f"первый толчок новой ветки отвергнут ложно: {said}"
+
+
+@pytest.mark.parametrize(
+    ("target", "expect"),
+    [
+        ("agent/here", "agent/here"),
+        ("HEAD:agent/here", "agent/here"),
+        ("refs/heads/agent/here", "agent/here"),
+        ("HEAD:refs/heads/agent/here", "agent/here"),
+    ],
+)
+def test_the_target_branch_is_read_the_same_way_everywhere(target: str, expect: str) -> None:
+    """Имя ветки из записи цели читается ОДНИМ разбором на всех спрашивающих.
+
+    Разбор был вписан дважды — в проверке запретов и в проверке воскрешения, — и
+    второе понимание той же формы разошлось бы с первым молча. Нашёл внешний
+    взгляд (090).
+    """
+    assert module.branch_of(target) == expect
