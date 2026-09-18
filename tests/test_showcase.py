@@ -18,8 +18,10 @@
 from __future__ import annotations
 
 import json
+import re
+from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -67,17 +69,59 @@ def test_an_absent_answer_explains_itself(question: dict[str, Any]) -> None:
     assert len(said) >= REASON_AT_LEAST, f"{question['id']}: причина слишком коротка"
 
 
+#: Адрес опубликованного числа: файл витрины и путь к ключу внутри него.
+PUBLISHED: Final = re.compile(r"^[\w.-]+\.json#[\w.]+$")
+
+
+@cache
+def collected() -> dict[str, Any]:
+    """Факты, собранные ТЕМ ЖЕ механизмом, что публикует витрину.
+
+    Сборка одна на весь модуль: она ходит по всему дереву, и повтор на каждый
+    вопрос стоил бы секунд на ровном месте.
+    """
+    build = load_script("build_facts.py")
+    return dict(build.collect(ROOT, sha="проверка", mine=""))
+
+
 @pytest.mark.parametrize(
     "question", [q for q in answers() if q.get("where")], ids=lambda q: str(q["id"])
 )
-def test_a_maintainer_answer_resolves_in_the_tree(question: dict[str, Any]) -> None:
-    """Адрес источника разрешается в дереве, а не назван прозой.
+def test_a_maintainer_answer_points_at_the_published_number(question: dict[str, Any]) -> None:
+    """Адрес ведёт к ОПУБЛИКОВАННОМУ числу, а не к тому, чем его считают.
 
     Рецепт для человека («получается прогоном pytest -q») разошёлся бы с деревом
-    молча: у сопровождающего должен быть адрес, по которому число ЖИВЁТ (049).
+    молча: у сопровождающего должен быть адрес, по которому число ЖИВЁТ
+    ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+
+    ПУТЬ К СКРИПТУ ЭТОМУ НЕ ОТВЕЧАЕТ, И ПРЕЖНЯЯ ПРОВЕРКА ЕГО ПРИНИМАЛА. Она
+    спрашивала лишь, разрешается ли путь в дереве, — и три ответа сопровождающему
+    называли `scripts/build_facts.py` и `.pipeline.yml`, то есть ВЫЧИСЛИТЕЛЬ.
+    Сосед, пришедший по такому адресу, обязан склонировать нас и посчитать число
+    сам по нашему определению; копия чужого определения верна до первой правки на
+    той стороне и расходится молча
+    ([174](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/174-facts-about-a-project-are-published-by-it.md)).
+
+    Поэтому форма адреса — `<опубликованный файл>#<путь.к.ключу>`, и ключ обязан
+    существовать в СОБРАННЫХ фактах, а не только в объявлении: проверять адрес по
+    тому же файлу, который его и объявляет, значило бы сравнивать запись с самой
+    собой
+    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     said = str(question["where"])
-    assert (ROOT / said).exists(), f"{question['id']}: адрес «{said}» в дереве не разрешается"
+    assert PUBLISHED.match(said), (
+        f"{question['id']}: адрес «{said}» — путь в дереве, а не опубликованное число."
+        " Форма: facts.json#путь.к.ключу"
+    )
+    assert question.get("branch"), f"{question['id']}: не названа ветка, где лежит опубликованное"
+    _, _, path = said.partition("#")
+    value: Any = collected()
+    for step in path.split("."):
+        assert isinstance(value, dict) and step in value, (
+            f"{question['id']}: в собранных фактах нет ключа «{path}» — адрес ведёт в пустоту (075)"
+        )
+        value = value[step]
+    assert value is not None, f"{question['id']}: по адресу «{path}» нет значения"
 
 
 @pytest.mark.parametrize(
