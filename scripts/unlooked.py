@@ -658,6 +658,7 @@ def main(argv: list[str] | None = None) -> int:
         help="напечатать очередь на поздний взгляд списком JSON и выйти",
     )
     args = parser.parse_args(argv)
+    report.announce(not args.apply)
 
     entries: dict[int, Entry] = {}
     try:

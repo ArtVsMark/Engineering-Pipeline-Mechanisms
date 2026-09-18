@@ -262,7 +262,7 @@ def publish_source(
     if present == {wanted}:
         return frozenset(present)
     if dry_run:
-        print(f"  (пробный заход) #{change.number}: метка стала бы «{wanted}»")
+        print(f"  {report.DRY} #{change.number}: метка стала бы «{wanted}»")
         return frozenset({wanted})
     try:
         for stale in sorted(present - {wanted}):
@@ -315,7 +315,7 @@ def drop_source(
     if not present:
         return
     if dry_run:
-        print(f"  (пробный заход) #{change.number}: метки источника сняли бы — {present}")
+        print(f"  {report.DRY} #{change.number}: метки источника сняли бы — {present}")
         return
     # КАЖДАЯ МЕТКА СНИМАЕТСЯ ОТДЕЛЬНО. Один `try` на весь список обрывался на
     # первом же отказе, а самый частый отказ здесь — 404 по метке, снятой
@@ -525,7 +525,7 @@ def head_look(repo: str, number: int, owner_token: str) -> Head:
 def sync_head(repo: str, number: int, owner_token: str, *, dry_run: bool) -> None:
     """Подтягивает базу в голову очереди — и только в неё."""
     if dry_run:
-        print(f"  (пробный заход) база подтянулась бы в #{number}")
+        print(f"  {report.DRY} база подтянулась бы в #{number}")
         return
     ghrest.request("PUT", f"repos/{repo}/pulls/{number}/update-branch", owner_token, body={})
 
@@ -548,7 +548,7 @@ def merge(repo: str, change: Change, owner_token: str, *, dry_run: bool) -> str:
     body = squash_body.compose(f"origin/{change.branch}", change.base)
     title = f"{change.title} (#{change.number})"
     if dry_run:
-        print(f"  (пробный заход) слилось бы #{change.number} телом:\n{body}")
+        print(f"  {report.DRY} слилось бы #{change.number} телом:\n{body}")
         return ""
     payload = ghrest.request(
         "PUT",
@@ -710,7 +710,7 @@ def hand_over(
             repo, change, "взведено телом без последней работы ветки", owner_token, dry_run=dry_run
         )
     if dry_run:
-        print(f"  (пробный заход) взвёл бы #{change.number} телом:\n{body}")
+        print(f"  {report.DRY} взвёл бы #{change.number} телом:\n{body}")
         return
     answer = arm.arm(change.node, title, body, owner_token)
     lost = arm.kept_the_body(answer, title, body)

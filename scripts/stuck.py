@@ -420,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--apply", action="store_true", help="записать реестр, а не показать")
     args = parser.parse_args(argv)
+    report.announce(not args.apply)
 
     try:
         # ОТКАТА НА ТОКЕН ПРОГОНА НЕТ, И ЭТО ИЗМЕРЕНО У СОСЕДА. Состояние

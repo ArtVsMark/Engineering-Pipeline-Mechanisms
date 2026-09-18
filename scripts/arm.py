@@ -189,7 +189,7 @@ def probe(repo: str, number: int, token: str, *, dry_run: bool) -> str:
     headline = f"замер взведения: тело передано явно (#{number})"
     body = "Разобрано: замер\nClaude-Session: проверка полей commitHeadline и commitBody"
     if dry_run:
-        return f"(пробный заход) взвёл бы #{number} — состояние «{state}» — и сразу снял"
+        return f"{report.DRY} взвёл бы #{number} — состояние «{state}» — и сразу снял"
     answer = arm(node, headline, body, token)
     try:
         missing = kept_the_body(answer, headline, body)

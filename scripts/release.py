@@ -595,7 +595,7 @@ def ensure_page(repo: str, version: str, token: str, *, dry_run: bool = False) -
             "страница обязана быть сводкой, а не копией журнала"
         )
     if dry_run:
-        return f"(пробный заход) страница выпуска v{version} создалась бы телом:\n{body}"
+        return f"{report.DRY} страница выпуска v{version} создалась бы телом:\n{body}"
     ghrest.request(
         "POST",
         f"repos/{repo}/releases",

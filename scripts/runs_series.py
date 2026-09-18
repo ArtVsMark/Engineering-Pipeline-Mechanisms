@@ -53,6 +53,7 @@ from typing import Any, Final
 
 import ghrest
 import paths
+from report import announce
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -382,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bounds", default=str(BOUNDS_FILE), help="объявление границ ряда")
     parser.add_argument("--apply", action="store_true", help="писать файлы, а не только считать")
     args = parser.parse_args(argv)
+    announce(not args.apply)
 
     store = Path(args.store)
     try:
@@ -424,8 +426,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.report).write_text(said + "\n", encoding="utf-8")
     print(
         f"дней в ряду {len(days)}, из них пересчитано {len(fresh)}; "
-        f"заходов за окно {total(days, 'runs')}"
-        + ("" if args.apply else " — записи не было, это сухой заход")
+        f"заходов за окно {total(days, 'runs')}" + ("" if args.apply else " — записи не было")
     )
     return EXIT_OK
 

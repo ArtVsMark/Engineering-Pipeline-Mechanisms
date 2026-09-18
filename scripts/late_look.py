@@ -103,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--from", dest="source", required=True, help="файл прогона действия")
     parser.add_argument("--apply", action="store_true", help="записать, а не показать")
     args = parser.parse_args(argv)
+    report.announce(not args.apply)
 
     try:
         token = ghrest.token_from_env()
