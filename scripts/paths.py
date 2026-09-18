@@ -34,6 +34,10 @@ PROPOSALS: Final = Path(".rules/proposals.json")
 #: содержанию.
 SHOWCASE: Final = Path(".rules/showcase.json")
 
+#: Роды находок внешнего взгляда: в чём косяк, сколько раз встречался, чем
+#: закрыт и что из него выросло.
+FINDING_KINDS: Final = Path(".rules/finding-kinds.json")
+
 #: Объявленные расписания и роль каждого: наблюдает оно или действует.
 SCHEDULES: Final = Path(".rules/schedules.json")
 
@@ -108,6 +112,7 @@ ALL: Final = (
     BINDINGS,
     PROPOSALS,
     SHOWCASE,
+    FINDING_KINDS,
     SCHEDULES,
     SERIES,
     RERUN,
