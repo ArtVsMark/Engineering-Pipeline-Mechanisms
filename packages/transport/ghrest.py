@@ -160,6 +160,12 @@ def _note_quota(headers: Any) -> None:
 #: и не повторяется — отказ по правам или по данным повтором не лечится, и
 #: повторять его значило бы прятать причину за ожиданием (045).
 TRANSIENT: Final = frozenset({500, 502, 503, 504})
+#: Коды, которыми площадка говорит «ресурс ИСЧЕРПАН». Объявлены один раз и здесь:
+#: ниже по ним опознаётся квота, а гейт сверяет, что ни один из них не попал в
+#: :data:`TRANSIENT`. Повторять исчерпание — значит ЖДАТЬ на исчерпанном
+#: ресурсе, а правило требует копить, а не ждать
+#: ([059](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/059-map-the-detour-before-the-resource-runs-out.md)).
+EXHAUSTED: Final = frozenset({403, 429})
 #: Сколько раз пробовать и с каким отступом, секунд. Объявлено данными: срок
 #: ожидания обязан быть назван, а не спрятан в коде (100).
 TRIES: Final = 3
@@ -286,7 +292,7 @@ def request(
         # Квота — ТОЛЬКО когда площадка о ней сказала: остаток равен нулю либо
         # пришёл retry-after. Отсутствие заголовков означает «причина другая», и
         # советовать ждать сброса там, где ждать нечего, хуже, чем молчать.
-        if exc.code in (403, 429) and (remaining == 0 or retry_after):
+        if exc.code in EXHAUSTED and (remaining == 0 or retry_after):
             reset_at = reset
             if not reset_at and retry_after:
                 try:
