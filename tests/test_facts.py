@@ -361,9 +361,40 @@ def test_a_broken_answers_file_refuses_instead_of_counting_everything(tmp_path: 
         assert "behind" not in got, body
 
 
-#: Что рисовалка значка НЕ вправе читать: любой источник помимо переданных фактов.
-BESIDE_THE_FACTS: Final = frozenset(
-    {"read_text", "glob", "rglob", "iterdir", "loads", "load", "run", "open", "getenv", "walk"}
+#: Что рисовалке значка МОЖНО звать. Список РАЗРЕШИТЕЛЬНЫЙ: имя вне его делает
+#: проверку слепой, а слепая отвергает (068).
+#:
+#: ПЕРВАЯ РЕДАКЦИЯ БЫЛА ЗАПРЕТИТЕЛЬНОЙ — перечисляла «нельзя», — и потому
+#: держала не запрет, а список УГАДАННЫХ имён: `read_bytes`, `listdir`,
+#: `check_output`, `urlopen` прошли бы незамеченными. Нашёл внешний взгляд.
+#: Разрешительный список ошибается в безопасную сторону: новый законный вызов
+#: получит отказ с названной причиной и будет дописан сюда осознанно.
+#:
+#: Замер 18.09.2026: шесть рисовалок зовут ровно `badge`, `sum`, `int`, `float`,
+#: `str`, `bool`, `round`, `isinstance` и методы отображения `.get`, `.items`,
+#: `.values` — ничего сверх счёта по переданным фактам.
+INSIDE_THE_FACTS: Final = frozenset(
+    {
+        "badge",
+        "sum",
+        "int",
+        "float",
+        "str",
+        "bool",
+        "round",
+        "isinstance",
+        "len",
+        "max",
+        "min",
+        "sorted",
+        "abs",
+        ".get",
+        ".items",
+        ".values",
+        ".keys",
+        ".join",
+        ".format",
+    }
 )
 
 
@@ -381,7 +412,10 @@ def badge_makers() -> list[ast.FunctionDef]:
     found = [
         node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name in named
     ]
-    assert len(found) == len(named), f"в дереве найдены не все рисовалки: {named} против {found}"
+    assert len(found) == len(named), (
+        "в дереве найдены не все рисовалки инвентаря: "
+        f"{sorted(named)} против {sorted(node.name for node in found)}"
+    )
     return found
 
 
@@ -407,29 +441,25 @@ def test_a_badge_shows_only_what_the_facts_already_say() -> None:
         names = [arg.arg for arg in maker.args.args]
         if names != ["facts"]:
             guilty.append(f"{maker.name} берёт {names}, а не одни факты")
-        reached = sorted(
-            {
-                node.func.attr
-                for node in ast.walk(maker)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in BESIDE_THE_FACTS
-            }
-            | {
-                node.func.id
-                for node in ast.walk(maker)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in BESIDE_THE_FACTS
-            }
-        )
+        called: set[str] = set()
+        for node in ast.walk(maker):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name):
+                called.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                called.add(f".{node.func.attr}")
+            else:
+                called.add("<вызов неразобранной формы>")
+        reached = sorted(called - INSIDE_THE_FACTS)
         if reached:
-            guilty.append(f"{maker.name} читает мимо фактов: {', '.join(reached)}")
+            guilty.append(f"{maker.name} зовёт не из разрешённого: {', '.join(reached)}")
     assert not guilty, (
         "значок получает число не из фактов — сырого рядом с показанным не будет (122):\n  "
         + "\n  ".join(guilty)
         + "\n  Считайте число в сборке фактов и передайте его сюда: публикуется оно"
-        " рядом со значком."
+        " рядом со значком.\n  Если вызов законен и ничего не читает — допишите его"
+        " в INSIDE_THE_FACTS осознанно."
     )
 
 

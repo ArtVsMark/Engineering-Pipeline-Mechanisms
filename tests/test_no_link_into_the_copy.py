@@ -44,8 +44,12 @@ paths = load_script("paths.py")
 
 #: Цель картинки: `![подпись](адрес)`. Ссылка без восклицательного знака — не она.
 IMAGE: Final = re.compile(r"!\[[^\]]*\]\([^)\s]*\)")
-#: Где живёт производное чужих проектов — их витрины нам не копии.
-OURS: Final = "Engineering-Pipeline-Mechanisms"
+#: Наше имя у площадки — ВЛАДЕЛЕЦ И РЕПОЗИТОРИЙ ЦЕЛИКОМ, а не подстрока.
+#: Сравнение подстрокой принимало за своё чужой `Somebody/…-Mechanisms-Fork`:
+#: у соседа по имени наша копия не наша, и ссылка на неё законна
+#: ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+#: Нашёл внешний взгляд.
+OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
 
 
 def documents() -> list[Path]:
@@ -61,7 +65,7 @@ def addresses() -> list[tuple[Path, int, str, bool]]:
             for match in der.DERIVED_RE.finditer(line):
                 where = match["rawrepo"] or match["repo"] or ""
                 ref = match["rawref"] or match["ref"] or ""
-                if OURS.lower() not in where.lower() or ref == paths.TRUNK:
+                if where.lower() != OURS.lower() or ref == paths.TRUNK:
                     continue
                 inside = any(
                     shot.start() <= match.start() and match.end() <= shot.end()
@@ -93,3 +97,19 @@ def test_a_derived_address_is_only_ever_an_image() -> None:
         + "\n  Значок показывают картинкой — он несёт число и никуда не ведёт."
         "\n  За содержимым читателя отправляют к источнику в дереве, а не к витрине."
     )
+
+
+def test_a_neighbours_repository_is_not_taken_for_ours() -> None:
+    """Чужой репозиторий с похожим именем своим не считается.
+
+    Сравнение подстрокой принимало за своё `Somebody/…-Mechanisms-Fork`: у
+    соседа по имени наша копия не наша, и ссылка на неё законна — правило о
+    связи оригинала с копией говорит о СВОЕЙ копии. Нашёл внешний взгляд.
+    """
+    assert OURS.count("/") == 1, "своё имя названо без владельца — сравнивать будет нечего"
+    for foreign in (
+        "Somebody/Engineering-Pipeline-Mechanisms-Fork",
+        "Other/Engineering-Pipeline-Mechanisms",
+        "ArtVsMark/Engineering-Pipeline-Mechanisms-Docs",
+    ):
+        assert foreign.lower() != OURS.lower(), f"{foreign} принят за своё"
