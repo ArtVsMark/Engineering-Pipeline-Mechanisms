@@ -30,6 +30,8 @@ import re
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 from tests.conftest import ROOT
 
 SUITE: Final = ROOT / "tests"
@@ -62,6 +64,36 @@ def suite_files() -> list[Path]:
         for path in SUITE.rglob("*.py")
         if "__pycache__" not in path.parts and path.resolve() != here
     )
+
+
+def called_name(node: ast.Call) -> str:
+    """Имя того, что зовут, — и голым именем, и через точку.
+
+    `HTTPServer(...)` и `server.HTTPServer(...)` — один и тот же сервер, а
+    первая редакция знала только первую форму: вызов через атрибут или алиас
+    проходил мимо проверки молча. Нашёл внешний взгляд.
+    """
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return ""
+
+
+def server_address(node: ast.Call) -> ast.expr | None:
+    """Адрес, отданный серверу, — позиционно или именованным доводом.
+
+    `HTTPServer(server_address=(...))` — та же запись другими словами, и первая
+    редакция её не видела: ветка `not node.args` обрывала разбор до чтения
+    порта. Возвращается `None`, когда формы разобрать не удалось: это «не
+    проверил», а не «порт хорош».
+    """
+    if node.args:
+        return node.args[0]
+    for keyword in node.keywords:
+        if keyword.arg == "server_address":
+            return keyword.value
+    return None
 
 
 def test_the_subject_of_this_gate_exists() -> None:
@@ -99,17 +131,22 @@ def test_a_server_of_the_suite_takes_the_port_it_is_given() -> None:
     for path in suite_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-                continue
-            if node.func.id not in SERVERS or not node.args:
+            if not isinstance(node, ast.Call) or called_name(node) not in SERVERS:
                 continue
             seen += 1
-            where = node.args[0]
-            if not (isinstance(where, ast.Tuple) and len(where.elts) == 2):
+            where = server_address(node)
+            if where is None:
+                # Форма записи сторожу неизвестна — значит порт он НЕ ПРОВЕРИЛ, и
+                # молчать здесь нельзя: слепой отвергает (045, 068).
+                fixed.append(
+                    f"{path.relative_to(ROOT)}:{node.lineno} — адрес сервера записан формой,"
+                    " которой проверка не знает, и порт остался непроверенным"
+                )
                 continue
-            port = where.elts[1]
-            if isinstance(port, ast.Constant) and port.value != 0:
-                fixed.append(f"{path.relative_to(ROOT)}:{node.lineno} — порт {port.value!r}")
+            if isinstance(where, ast.Tuple) and len(where.elts) == 2:
+                port = where.elts[1]
+                if isinstance(port, ast.Constant) and port.value != 0:
+                    fixed.append(f"{path.relative_to(ROOT)}:{node.lineno} — порт {port.value!r}")
     assert seen, "набор не поднимает своего сервера — предмет проверки не найден (075)"
     assert not fixed, (
         "сервер набора занимает ФИКСИРОВАННЫЙ порт — общий ресурс машины (149):\n  "
@@ -132,3 +169,40 @@ def test_the_suite_actually_takes_a_ground_of_its_own() -> None:
         if "tmp_path" in path.read_text(encoding="utf-8")
     ]
     assert users, "ни один модуль не берёт своей площадки — запрет выше держит пустоту"
+
+
+@pytest.mark.parametrize(
+    ("source", "seen", "about"),
+    [
+        ('HTTPServer(("127.0.0.1", 8080), h)', True, "голым именем"),
+        ('server.HTTPServer(("127.0.0.1", 8080), h)', True, "через атрибут"),
+        ('HTTPServer(server_address=("127.0.0.1", 8080))', True, "именованным доводом"),
+        ('HTTPServer(("127.0.0.1", 0), h)', False, "порт выбирает площадка"),
+    ],
+)
+def test_a_fixed_port_is_seen_in_every_form_of_the_call(
+    source: str, seen: bool, about: str
+) -> None:
+    """Фиксированный порт виден в каждой форме записи вызова.
+
+    Первая редакция знала одну: вызов через атрибут (`server.HTTPServer(…)`) и
+    адрес именованным доводом (`server_address=…`) проходили мимо молча — то
+    есть гейт говорил о запрете, не проверяя его. Обе нашёл внешний взгляд.
+    """
+    node = next(one for one in ast.walk(ast.parse(source)) if isinstance(one, ast.Call))
+    assert called_name(node) in SERVERS, f"{about}: сервер не узнан вовсе"
+    where = server_address(node)
+    assert where is not None, f"{about}: адрес сервера не найден"
+    assert isinstance(where, ast.Tuple)
+    port = where.elts[1]
+    fixed = isinstance(port, ast.Constant) and port.value != 0
+    assert fixed is seen, f"{about}: фиксированный порт {'не ' if seen else ''}замечен"
+
+
+def test_an_unreadable_address_is_not_taken_for_a_good_one() -> None:
+    """Форму адреса не разобрали — это «не проверил», а не «порт хорош» (045)."""
+    node = next(
+        one for one in ast.walk(ast.parse("HTTPServer(**настройки)")) if isinstance(one, ast.Call)
+    )
+    assert called_name(node) in SERVERS
+    assert server_address(node) is None, "неразобранная форма выдана за проверенную"
