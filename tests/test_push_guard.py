@@ -38,12 +38,17 @@ SETTINGS = ROOT / ".claude" / "settings.json"
 
 
 def ask(
-    command: str, head: str = "agent/here", broken: str = ""
+    command: str,
+    head: str = "agent/here",
+    broken: str = "",
+    gone: str = "",
+    merged: str = "",
 ) -> subprocess.CompletedProcess[str]:
-    """Спрашивает сторожа о команде, подделав текущую голову.
+    """Спрашивает сторожа о команде, подделав состояние репозитория.
 
     `broken` заставляет подделку git отказать: так проверяется, что сторож,
     не сумевший узнать голову, отвергает толчок, а не пропускает его молча.
+    `gone` — площадка удалила ветку, `merged` — работа уже слита.
     """
     event = json.dumps({"tool_input": {"command": command}})
     fake = ROOT / "tests" / "fake_git"
@@ -57,6 +62,8 @@ def ask(
             "PATH": f"{fake}:/usr/bin:/bin",
             "FAKE_HEAD": head,
             "FAKE_HEAD_BROKEN": broken,
+            "FAKE_REMOTE_GONE": gone,
+            "FAKE_MERGED": merged,
         },
     )
 
@@ -391,3 +398,101 @@ def test_an_unknown_flag_still_errs_towards_refusing() -> None:
     said = ask("env --some-future-flag git push origin main")
     assert said.returncode == 2
     assert "неизвестен" in said.stderr
+
+
+def test_a_push_into_a_branch_the_platform_deleted_is_refused() -> None:
+    """Ветку удалила площадка — толчок воскресит её, и сторож отвергает.
+
+    ЗАМЕР 17.09.2026, РАДИ КОТОРОГО ЗАПРЕТ И ЗАВЕДЁН: за одну смену слияние
+    прошло под ногами ЧЕТЫРЕ раза, и прежний сторож не отверг ни одного — во
+    всех четырёх голова стояла на той же ветке, в которую шёл толчок, то есть
+    оба прежних запрета проходили. Один случай из четырёх нашёл ВЛАДЕЛЕЦ, а не
+    механизм
+    ([202](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/202-a-merged-branch-is-recreated-by-any-push.md)).
+    """
+    done = ask("git push -u origin agent/here", gone="1")
+    assert done.returncode == 2, done.stdout
+    assert "площадка удалила" in done.stderr, done.stderr
+    assert "checkout -b" in done.stderr, "отказ обязан назвать, что делать вместо толчка (104)"
+
+
+def test_a_push_into_an_already_merged_branch_is_refused() -> None:
+    """Работа слита — дописывать в эту ветку нечего.
+
+    Второй признак нужен отдельно: ветку могли не удалить (настройка площадки),
+    а история всё равно уже в общей. Тогда продолжение даёт конфликт ИСТОРИИ,
+    который выглядит конфликтом содержимого — диф в четыре файла вместо одного.
+    """
+    done = ask("git push origin agent/here", merged="1")
+    assert done.returncode == 2, done.stdout
+    assert "уже достижима" in done.stderr, done.stderr
+
+
+def test_a_live_branch_still_passes() -> None:
+    """Здоровый вход обязан пройти: ветка на месте и не слита (140)."""
+    done = ask("git push -u origin agent/here")
+    assert done.returncode == 0, done.stderr
+
+
+def test_the_merge_check_asks_about_the_target_not_the_head() -> None:
+    """Предмет — ветка ЦЕЛИ толчка, а не голова: у формы `HEAD:имя` они разные.
+
+    ГОЛОВА И ЦЕЛЬ ЗДЕСЬ НАЗВАНЫ РАЗНО НАМЕРЕННО. Первая редакция проверки брала
+    обе одинаковыми — и подмена предмета на голову её не роняла: проверка
+    говорила о различении, не различая. Поймано откатом
+    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
+    """
+    done = ask("git push origin HEAD:agent/here", head="agent/other", gone="1")
+    assert done.returncode == 2, done.stdout
+    assert "agent/here" in done.stderr, done.stderr
+    assert "agent/other" not in done.stderr, "спрошена голова вместо цели толчка"
+
+
+def test_a_detached_head_is_not_asked_about_revival(tmp_path: Path) -> None:
+    """У отсоединённой головы имени ветки нет — спрашивать не о чем.
+
+    Пустое имя и `HEAD` дошли бы до `git config branch..merge`, то есть до
+    запроса о ветке, которой не существует. Молчание здесь верно: предмета нет,
+    а не «ветка жива».
+    """
+    assert module.merged_away("") == ""
+    assert module.merged_away("HEAD") == ""
+
+
+def test_the_revival_check_runs_against_a_real_repository(tmp_path: Path) -> None:
+    """Признак проверен на НАСТОЯЩЕМ git, а не только на подделке.
+
+    Подделка отвечает то, что мы ей велели, и потому подтверждает согласие кода
+    с нашим представлением о git, а не с git
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    Здесь заводится живой репозиторий, работа сливается в общую ветку — и
+    признак «уже достижима» обязан сработать на нём.
+    """
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    run("init", "--quiet", "-b", "main")
+    run("config", "user.email", "кто@то")
+    run("config", "user.name", "кто-то")
+    (tmp_path / "файл").write_text("раз", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "первый")
+    run("checkout", "--quiet", "-b", "agent/work")
+    (tmp_path / "файл").write_text("два", encoding="utf-8")
+    run("commit", "--quiet", "-am", "работа")
+    # «Площадка» слила работу в общую ветку и опубликовала её.
+    run("checkout", "--quiet", "main")
+    run("merge", "--quiet", "--ff-only", "agent/work")
+    run("update-ref", "refs/remotes/origin/main", "refs/heads/main")
+    run("checkout", "--quiet", "agent/work")
+
+    here = Path.cwd()
+    try:
+        import os
+
+        os.chdir(tmp_path)
+        said = module.merged_away("agent/work")
+    finally:
+        os.chdir(here)
+    assert "уже достижима" in said, said or "живой репозиторий не дал признака слияния"

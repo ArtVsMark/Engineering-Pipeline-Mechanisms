@@ -430,6 +430,73 @@ def refused(targets: list[str], current: str) -> str:
     return ""
 
 
+def merged_away(branch: str) -> str:
+    """Причина отказа, если ветку уже слили и удалили; пусто — толчок разрешён.
+
+    ВЕТКА, УДАЛЁННАЯ ПЛОЩАДКОЙ ПРИ СЛИЯНИИ, ВОСКРЕСАЕТ ОТ ЛЮБОГО СЛЕДУЮЩЕГО
+    ТОЛЧКА — вместе со всеми коммитами, которых нет в общей ветке. Продолжение
+    работы после слияния идёт с НОВОЙ ветки от свежей общей, и проверяется это
+    ДО толчка, существованием ветки, а не памятью о том, слился ли PR
+    ([202](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/202-a-merged-branch-is-recreated-by-any-push.md)).
+
+    ЗАМЕР 17.09.2026, РАДИ КОТОРОГО ЗАПРЕТ И ЗАВЕДЁН: за ОДНУ смену слияние
+    прошло под ногами ЧЕТЫРЕ раза, и прежний сторож не отверг ни одного — во
+    всех четырёх голова стояла на той же ветке, в которую шёл толчок, то есть
+    оба прежних запрета проходили. Один случай из четырёх нашёл ВЛАДЕЛЕЦ, а не
+    механизм. Следствия наблюдались оба: продолжение переписало запись журнала
+    уже слитого изменения, а конфликт истории выглядел конфликтом содержимого —
+    диф в четыре файла вместо одного.
+
+    ПРИЗНАКОВ ДВА, И ОБА ЛОКАЛЬНЫЕ. Первый: у ветки настроен upstream
+    (`branch.<имя>.merge`), а ссылки `origin/<имя>` больше нет — значит площадка
+    её удалила. Второй: голова ветки достижима из `origin/main` — работа уже
+    слита, и дописывать в эту ветку нечего. Сети ни один не требует: сторож
+    живёт перед git и своего окружения не имеет.
+
+    ЦЕНА НАЗВАНА: оба признака читают ЛОКАЛЬНЫЕ ссылки, и после слияния они
+    устаревают до первого `git fetch`. То есть сторож ловит случай, когда окно
+    уже видело слияние, — а это и есть наблюдавшийся случай: ветку удаляет
+    площадка при слиянии, и окно узнаёт об этом ближайшим фетчем. Толчок сразу
+    после слияния, без единого фетча, пройдёт, и это названный предел, а не
+    полнота
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    if not branch or branch == "HEAD":
+        return ""
+    tracked = subprocess.run(
+        ["git", "config", "--get", f"branch.{branch}.merge"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    gone = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if tracked.returncode == 0 and tracked.stdout.strip() and gone.returncode != 0:
+        return (
+            f"ветку «{branch}» площадка удалила — так она поступает при слиянии. Толчок "
+            "воскресит её вместе с коммитами, которых нет в общей ветке (202). Продолжение "
+            f"идёт с НОВОЙ ветки: git fetch origin {SHARED} && git checkout -b <новая> "
+            f"origin/{SHARED}"
+        )
+    merged = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", "HEAD", f"refs/remotes/origin/{SHARED}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if merged.returncode == 0:
+        return (
+            f"голова ветки «{branch}» уже достижима из origin/{SHARED} — работа слита, и "
+            "дописывать в эту ветку нечего (202). Продолжение идёт с НОВОЙ ветки от свежей "
+            "общей, иначе конфликт истории выглядит конфликтом содержимого"
+        )
+    return ""
+
+
 def main() -> int:
     """Точка входа: читает событие, решает, пускать ли команду."""
     try:
@@ -461,6 +528,11 @@ def main() -> int:
     if shared:
         print(f"Толчок отвергнут до вызова git: {shared}", file=sys.stderr)
         return 2
+    for target in targets:
+        revived = merged_away(target.split(":", 1)[-1].removeprefix(REF_PREFIX))
+        if revived:
+            print(f"Толчок отвергнут до вызова git: {revived}", file=sys.stderr)
+            return 2
     if broken:
         # СТОРОЖ, КОТОРЫЙ НЕ СМОГ ПРОВЕРИТЬ, НЕ МАШЕТ РУКОЙ. Толчок необратим:
         # отправленную ветку окно удалить не может, и цена этого уже оплачена
