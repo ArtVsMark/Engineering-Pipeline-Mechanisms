@@ -234,3 +234,55 @@ def test_an_own_badge_does_not_answer_a_question_declared_absent(one: dict[str, 
         "Одно из двух неверно: либо предмет есть и вопросу отвечает значок, либо значок "
         "рисовать незачем"
     )
+
+
+def moves() -> dict[str, str]:
+    """Объявление «что сдвинет значок» — по одному на значок инвентаря."""
+    said = json.loads(SHOWCASE.read_text(encoding="utf-8"))
+    return {str(k): str(v) for k, v in (said.get("moves") or {}).items()}
+
+
+def test_every_badge_declares_what_moves_it() -> None:
+    """У каждого значка названо СОБЫТИЕ, при котором он покажет другое.
+
+    Число, равное знаменателю по построению, — украшение на месте мерила: оно не
+    говорит ни где проект стоит, ни что он сдвинулся. Заметить это можно только
+    назвав событие ЗАРАНЕЕ, до того как значок повешен
+    ([200](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/200-a-badge-that-cannot-move-is-not-a-measure.md)).
+
+    ЗАМЕР 18.09.2026: значков шесть, событие не называл НИ ОДИН — при том что
+    проект уже пережил этот дефект: значок правил считал `answered/total`, был
+    равен знаменателю по построению и не мог сдвинуться никогда. Нашёл это
+    владелец, спросив, почему число не меняется, — то есть не механизм
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    ПРЕДМЕТ БЕРЁТСЯ ИЗ ИНВЕНТАРЯ СБОРКИ, а не из объявления: иначе значок,
+    забытый в объявлении, вышел бы из-под проверки вместе со своей записью —
+    проверка сравнивала бы объявление сама с собой
+    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
+    """
+    said = moves()
+    assert facts.BADGES, "инвентарь значков пуст — предмет проверки не найден (075)"
+    mute = [
+        f"{name}: {'нет записи' if name not in said else 'событие не названо'}"
+        for name in sorted(facts.BADGES)
+        if len(said.get(name, "").strip()) < REASON_AT_LEAST
+    ]
+    assert not mute, (
+        "значок не говорит, при каком событии покажет другое (200):\n  "
+        + "\n  ".join(mute)
+        + "\n  Пока событие не названо, неподвижный значок неотличим от подвижного."
+    )
+
+
+def test_no_declaration_outlives_its_badge() -> None:
+    """Объявление не переживает свой значок: снятый значок уносит и запись.
+
+    Обратная половина, и без неё раздел копит мёртвые строки: они читаются как
+    обещание показать число, которого никто не рисует
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
+    orphan = sorted(set(moves()) - set(facts.BADGES))
+    assert not orphan, (
+        f"объявлено, что сдвинет значок, которого сборка не рисует: {', '.join(orphan)}"
+    )
