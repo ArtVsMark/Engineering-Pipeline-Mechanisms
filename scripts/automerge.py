@@ -364,10 +364,10 @@ def open_changes(repo: str, owner_token: str) -> list[Change]:
     return found
 
 
-def files_of(repo: str, number: int, owner_token: str) -> frozenset[str]:
-    """Пути, тронутые изменением: по ним видно пересечение с соседом (133)."""
-    path = f"repos/{repo}/pulls/{number}/files"
-    return frozenset(str(item.get("filename", "")) for item in ghrest.paginate(path, owner_token))
+#: Пути, тронутые изменением: по ним видно пересечение с соседом (133). Читатель
+#: общий с уборкой реестра находок и живёт в транспорте — копия у каждого
+#: разошлась бы молча (090).
+files_of = ghrest.files_of
 
 
 def candidates(changes: list[Change], base: str) -> list[Change]:

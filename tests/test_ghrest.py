@@ -564,3 +564,26 @@ def test_merged_changes_still_answers_with_the_merged_only(
     page = [{"number": 2, "merged_at": "x"}, {"number": 1, "merged_at": None}]
     monkeypatch.setattr(transport, "request", lambda *a, **k: page)
     assert [one["number"] for one in transport.merged_changes("o/r", "t", 2)] == [2]
+
+
+def test_files_of_reads_every_page_of_the_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Состав изменения читается страницами: длинный состав не обрывается.
+
+    Читатель общий — его зовут и очередь слияний, и уборка реестра находок, — и
+    обрыв на первой странице врал бы обоим по-разному: очередь не увидела бы
+    пересечения с соседом, уборка приняла бы снятие, которого не заслужили.
+    """
+    страницы = [
+        [{"filename": "scripts/один.py"}, {"filename": "scripts/два.py"}],
+        [{"filename": ".rules/bindings.json"}],
+    ]
+
+    def paginate(path: str, token: str) -> Iterator[dict[str, Any]]:
+        assert path == "repos/o/r/pulls/7/files", path
+        for страница in страницы:
+            yield from страница
+
+    monkeypatch.setattr(transport, "paginate", paginate)
+    assert transport.files_of("o/r", 7, "токен") == frozenset(
+        {"scripts/один.py", "scripts/два.py", ".rules/bindings.json"}
+    )
