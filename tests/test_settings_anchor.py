@@ -110,14 +110,60 @@ def test_no_second_anchor_is_declared(path: Path) -> None:
     )
 
 
-def source_dirs_in(path: Path) -> set[str]:
-    """Каталоги кода, написанные в файле КАК ПУТЬ, а не как слово.
+def anchor_files() -> set[str]:
+    """Адреса ФАЙЛОВ, объявленных якорем, — прочитанные у якоря, а не угаданные.
+
+    Каталоги (`scripts`, `changelog.d`) сюда не идут: их имена — ещё и обычные
+    слова, ключ в витрине фактов среди прочего, и судить их по строке значило бы
+    красить исправный код. Для них есть :func:`source_dirs_in`, который судит
+    УПОТРЕБЛЕНИЕ. Каталог узнаётся по дереву, а не по списку имён.
+    """
+    return {
+        value.as_posix()
+        for value in declared_in_the_anchor()
+        if not (ROOT / value).is_dir() and value.as_posix() not in NOT_SETTINGS
+    }
+
+
+@pytest.mark.parametrize("path", scripts(), ids=lambda p: p.name)
+def test_no_declared_address_is_written_out_by_hand(path: Path) -> None:
+    """Адрес, объявленный якорем, не вписан в механизм строкой.
+
+    ПРЕДМЕТ БЕРЁТСЯ У ЯКОРЯ, А НЕ ИЗ СПИСКА КАТАЛОГОВ. Образец `BARE_PATH_RE`
+    выше знает ровно три каталога — `.rules`, `.github`, `changelog.d`, — и
+    корневые настройки мимо него проходят целиком: `.pipeline.yml`,
+    `CONTRACT_VERSION`, `CHANGELOG.md`, `README.md`. Замер 18.09.2026: якорь
+    объявляет 23 адреса, из них **шесть** корневых, и вписанный рядом
+    `"CONTRACT_VERSION"` не покраснел бы нигде — то есть правило исполнялось и
+    держалось привычкой
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    Угаданный список каталогов заменён замером по самому якорю: он и есть
+    канонический перечень настроек, и расходиться с собой не может
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
+    [068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
+    """
+    written = sorted(written_as_a_path(path, anchor_files()))
+    assert not written, (
+        f"{path.name} вписывает адрес настройки строкой: {written} — "
+        f"он объявлен в {ANCHOR_NAME}, и вписанная копия расходится с ним молча"
+    )
+
+
+def written_as_a_path(path: Path, wanted: frozenset[str] | set[str]) -> set[str]:
+    """Имена из `wanted`, написанные в файле КАК ПУТЬ, а не как слово.
 
     СУДИТСЯ УПОТРЕБЛЕНИЕ, А НЕ СТРОКА, и это не педантизм: «scripts» — ещё и
-    ключ в витрине фактов, и запретить слово значило бы красить исправный код.
-    Путь узнаётся по тому, что с ним делают: делят через `/`, кладут в `Path()`
-    или ищут по нему начало пути. Первая редакция сверяла строки и покраснела на
-    ключе JSON — поймано первым же прогоном (051).
+    ключ в витрине фактов, а «README.md» — имя в сравнении `path.name == …`;
+    запретить слово значило бы красить исправный код. Путь узнаётся по тому, что
+    с ним делают: делят через `/`, кладут в `Path()` или ищут по нему начало
+    пути. Первая редакция сверяла строки и покраснела на ключе JSON — поймано
+    первым же прогоном (051); вторая, уже по адресам якоря, покраснела на четырёх
+    сравнениях по имени файла — поймано откатом в тот же день.
+
+    ХОДОК ЗДЕСЬ ОДИН НА ДВА ПРЕДМЕТА. Каталоги кода и файлы настроек судятся по
+    одному признаку, и второй такой разбор разошёлся бы с первым молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found: set[str] = set()
@@ -125,7 +171,7 @@ def source_dirs_in(path: Path) -> set[str]:
     def named(node: ast.AST) -> str | None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             said = node.value.rstrip("/")
-            return said if said in SOURCE_DIRS else None
+            return said if said in wanted else None
         return None
 
     for node in ast.walk(tree):
@@ -149,6 +195,11 @@ def source_dirs_in(path: Path) -> set[str]:
         ):
             found.add(said)
     return found
+
+
+def source_dirs_in(path: Path) -> set[str]:
+    """Каталоги кода, написанные в файле как путь."""
+    return written_as_a_path(path, SOURCE_DIRS)
 
 
 @pytest.mark.parametrize("path", scripts(), ids=lambda p: p.name)
