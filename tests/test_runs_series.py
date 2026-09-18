@@ -380,16 +380,44 @@ def test_the_report_names_an_empty_coverage_series() -> None:
 
 
 def test_a_dry_walk_writes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Сухой заход считает и не пишет: запись — отдельное разрешение."""
-    platform(monkeypatch, [run("ci", "2026-09-15")])
+    """Сухой заход считает и не пишет: запись — отдельное разрешение.
+
+    ДАТА ПОДДЕЛКИ ВЫВОДИТСЯ ОТ СЕГОДНЯ, А НЕ ВПИСЫВАЕТСЯ РУКОЙ. Заход через
+    `main()` идёт по ЖИВОМУ окну пересчёта — три последних дня, — и рукописная
+    дата выходит из него сама, без всякой правки в дереве. Здесь стояло
+    «2026-09-15»: проверка была зелёной три дня и покраснела на четвёртый,
+    ничего не сломав. Так рукописное число и устаревает
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+    ПРОЧИЕ ДАТЫ В ЭТОМ ФАЙЛЕ ОСТАЮТСЯ РУКОПИСНЫМИ ЗАКОННО: они идут в разбор с
+    ЯВНЫМ `since`, то есть живого окна не касаются. Заминирован календарём был
+    ровно этот заход — единственный, который зовёт `main()` с настоящими
+    границами.
+    """
+    сегодня = date.today().isoformat()
+    platform(monkeypatch, [run("ci", сегодня)])
     monkeypatch.setenv("GH_TOKEN", "токен")
     store = tmp_path / "runs.json"
     assert module.main(["--repo", "o/r", "--store", str(store)]) == module.EXIT_OK
     assert not store.exists(), "сухой заход не оставляет файла"
     assert module.main(["--repo", "o/r", "--store", str(store), "--apply"]) == module.EXIT_OK
     said = json.loads(store.read_text(encoding="utf-8"))
-    assert said["days"]["2026-09-15"]["runs"]["ci"]["runs"] == 1
+    assert said["days"][сегодня]["runs"]["ci"]["runs"] == 1
     assert said["window_days"] == module.Bounds.read(BOUNDS).window_days
+
+
+def test_a_hand_written_date_would_leave_the_recount_window() -> None:
+    """Довод починки замерен, а не объявлен: окно пересчёта КОРОЧЕ истории дерева.
+
+    Проверка выше была зелёной три дня и покраснела на четвёртый. Здесь названо,
+    почему это неизбежно: окно пересчёта — три дня, и любая дата, вписанная
+    рукой, выходит из него через столько же. Если окно однажды расширят, довод
+    ослабнет — и это станет видно здесь, а не в упавшем наборе.
+    """
+    границы = module.Bounds.read(BOUNDS)
+    assert границы.recount_days <= 7, (
+        f"окно пересчёта {границы.recount_days} дней — довод про рукописную дату надо перемерить"
+    )
 
 
 def test_a_walk_without_a_repo_is_the_second_outcome(
