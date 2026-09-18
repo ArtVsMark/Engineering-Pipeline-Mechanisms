@@ -408,14 +408,27 @@ def head() -> tuple[str, str]:
     return said.stdout.strip(), ""
 
 
+def branch_of(target: str) -> str:
+    """Имя ветки, которое получит площадка, из записи цели толчка.
+
+    У формы `откуда:куда` предмет — ПРАВАЯ часть: именно её имя получит
+    площадка, и именно по нему конвейер откроет изменение. Приставка
+    `refs/heads/` снимается там же.
+
+    ОДНО МЕСТО НА ВСЕХ СПРАШИВАЮЩИХ. Разбор был вписан дважды — в проверке
+    запретов и в проверке воскрешения, — и второе понимание той же формы
+    разошлось бы с первым молча; нашёл внешний взгляд
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    if ":" in target:
+        target = target.split(":", 1)[1]
+    return target.removeprefix(REF_PREFIX)
+
+
 def refused(targets: list[str], current: str) -> str:
     """Причина отказа; пусто — толчок разрешён."""
-    for target in targets:
-        # У формы `откуда:куда` предмет — правая часть: именно её имя получит
-        # площадка, и именно по нему конвейер откроет изменение.
-        if ":" in target:
-            target = target.split(":", 1)[1]
-        target = target.removeprefix(REF_PREFIX)
+    for raw in targets:
+        target = branch_of(raw)
         if target == SHARED:
             return (
                 f"«{SHARED}» — общая ветка: писать в неё напрямую нельзя, только изменением "
@@ -475,13 +488,32 @@ def merged_away(branch: str) -> str:
         text=True,
         encoding="utf-8",
     )
-    if tracked.returncode == 0 and tracked.stdout.strip() and gone.returncode != 0:
+    # UPSTREAM ОБЯЗАН УКАЗЫВАТЬ НА САМУ ЭТУ ВЕТКУ, А НЕ ПРОСТО СУЩЕСТВОВАТЬ.
+    # `git checkout -b <новая> origin/main` — процедура свода — оставляет
+    # `branch.<новая>.merge = refs/heads/main`: git настраивает слежение за той
+    # веткой, ОТ КОТОРОЙ отрезали. Ссылки `origin/<новая>` при этом нет, потому
+    # что ветки на площадке ещё нет вовсе, и первая редакция отвергала ПЕРВЫЙ
+    # толчок новой ветки как воскрешение слитой. Признак «удалили после
+    # слияния» другой: слежение стоит за ОДНОИМЁННОЙ веткой — так его ставит
+    # `push -u`, — а ссылки больше нет.
+    # ОБА ПРИЗНАКА ТРЕБУЮТ, ЧТОБЫ ВЕТКУ УЖЕ ТОЛКАЛИ, и это не осторожность, а
+    # предмет: воскресить можно лишь то, что на площадке было. Слежение за
+    # ОДНОИМЁННОЙ веткой ставит `push -u` — значит оно и есть след толчка.
+    pushed = tracked.returncode == 0 and tracked.stdout.strip() == f"{REF_PREFIX}{branch}"
+    if not pushed:
+        return ""
+    if gone.returncode != 0:
         return (
             f"ветку «{branch}» площадка удалила — так она поступает при слиянии. Толчок "
             "воскресит её вместе с коммитами, которых нет в общей ветке (202). Продолжение "
             f"идёт с НОВОЙ ветки: git fetch origin {SHARED} && git checkout -b <новая> "
             f"origin/{SHARED}"
         )
+    # ВТОРОЙ ПРИЗНАК БЕЗ ПЕРВОГО ОТВЕРГАЛ БЫ ЛЮБУЮ СВЕЖУЮ ВЕТКУ. Ветка, только
+    # что отрезанная от `origin/main` и не несущая ещё ни одного своего
+    # коммита, достижима из неё ПО ПОСТРОЕНИЮ — она ею и является. Нашёл это
+    # живой репозиторий в проверке, а не подделка: подделке «достижимость»
+    # объявляли мы сами (170).
     merged = subprocess.run(
         ["git", "merge-base", "--is-ancestor", "HEAD", f"refs/remotes/origin/{SHARED}"],
         capture_output=True,
@@ -529,7 +561,7 @@ def main() -> int:
         print(f"Толчок отвергнут до вызова git: {shared}", file=sys.stderr)
         return 2
     for target in targets:
-        revived = merged_away(target.split(":", 1)[-1].removeprefix(REF_PREFIX))
+        revived = merged_away(branch_of(target))
         if revived:
             print(f"Толчок отвергнут до вызова git: {revived}", file=sys.stderr)
             return 2
