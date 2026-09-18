@@ -28,6 +28,7 @@ from typing import Any, Final
 
 import ghrest
 import labels
+import report
 
 EXIT_CLEAN: Final = 0
 EXIT_BROKEN: Final = 2
@@ -98,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="показать разницу, не применяя её")
     args = parser.parse_args(argv)
+    report.announce(args.dry_run)
 
     try:
         token = ghrest.token_from_env()

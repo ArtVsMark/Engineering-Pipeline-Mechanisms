@@ -1003,7 +1003,7 @@ def save(repo: str, token: str, found: list[Drift], silent: list[str], *, apply:
     body = render_body(found, silent)
     number, current = findings.live_issue(repo, token, MARKER)
     if not apply:
-        print(f"(пробный заход) {'обновил бы' if number else 'завёл бы'} задачу дрейфа")
+        print(f"{report.DRY} {'обновил бы' if number else 'завёл бы'} задачу дрейфа")
         return
     try:
         if number is None:

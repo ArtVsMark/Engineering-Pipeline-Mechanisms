@@ -54,6 +54,7 @@ from typing import Any, Final
 import changerefs
 import findings
 import ghrest
+import report
 
 MARKER: Final = findings.MARKER
 TITLE: Final = findings.TITLE
@@ -656,6 +657,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--apply", action="store_true", help="записывать, а не показывать")
     args = parser.parse_args(argv)
+    report.announce(not args.apply)
 
     try:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""

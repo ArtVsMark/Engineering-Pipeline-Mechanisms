@@ -335,7 +335,7 @@ def mark(
         print(f"  {f'#{origin}: ' if origin else ''}{NO_ADDRESS}")
         return Outcome([], [], list(items))
     if dry_run:
-        print(f"  (пробный заход) отметил бы пунктов: {len(items)} в задачах {numbers}")
+        print(f"  {report.DRY} отметил бы пунктов: {len(items)} в задачах {numbers}")
         return Outcome([], [], [])
 
     left = list(items)

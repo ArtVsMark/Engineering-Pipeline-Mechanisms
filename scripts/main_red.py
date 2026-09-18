@@ -1026,6 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branch", default=paths.TRUNK, help="общая ветка")
     parser.add_argument("--apply", action="store_true", help="записать и перезапустить")
     args = parser.parse_args(argv)
+    report.announce(not args.apply)
 
     holds: list[str] = []
     rest: list[str] = []
