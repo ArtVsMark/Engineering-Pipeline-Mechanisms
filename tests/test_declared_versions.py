@@ -118,3 +118,42 @@ def test_one_tool_is_bounded_the_same_way_everywhere() -> None:
     except env.NotRun as отказ:  # pragma: no cover — ветка прогоняется откатом
         pytest.fail(f"границы инструментов разошлись между прогонами (035, 022): {отказ}")
     assert found, "в прогонах нет ни одной строки установки — предмет сверки не найден (075)"
+
+
+def test_every_tool_declares_an_upper_bound() -> None:
+    """У каждой объявленной границы есть ВЕРХ: иначе местный вердикт ничего не значит.
+
+    Правило 073 требует верхнего предела у инструмента, чей вердикт сравнивают
+    между машинами: без него `ruff` мажорной версией вперёд находит другое, и «у
+    меня локально чисто» перестаёт предсказывать сборку
+    ([073](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/073-tool-version-from-one-source-with-an-upper-bound.md)).
+
+    ЗАМЕР 18.09.2026: верх есть у всех пяти объявленных требований — то есть
+    требование исполнялось и не держалось ничем. Добавленное шестым «requests>=2»
+    не покраснело бы нигде
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    ГРАНИЦА НАЗВАНА ЗАМЕРОМ, А НЕ ОБОЙДЕНА. Само правило исключает библиотеки
+    времени выполнения: там верхний предел мешает получать исправления
+    безопасности. Таких у нас **ноль** — все пять либо зовутся командой в прогоне
+    (`ruff`, `mypy`, `pytest`), либо меняют вердикт набора (`pytest-randomly`
+    задаёт порядок сбора), либо читают объявления самих механизмов (`pyyaml`).
+    Поэтому предикат здесь ОДИН на всех, а не список избранных: появится первая
+    библиотека времени выполнения — предикат придётся разделить, и отказ гейта
+    говорит об этом сам, вместо того чтобы звать снять проверку
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md),
+    [104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)).
+    """
+    open_ended = [
+        f"{need.name} объявлен как «{need.bounds or '—'}» в {need.where}"
+        for need in env.needs(ROOT).values()
+        if "<" not in need.bounds
+    ]
+    assert not open_ended, (
+        "объявленная версия без верхней границы (073):\n  "
+        + "\n  ".join(open_ended)
+        + "\n  Инструменту, чей вердикт сравнивают между машинами, верх обязателен."
+        + "\n  Если это библиотека времени выполнения — верх мешает ей получать"
+        + " исправления безопасности:\n  разделите предикат и назовите исключение,"
+        + " а не снимайте проверку."
+    )
