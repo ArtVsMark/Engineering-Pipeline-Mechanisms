@@ -25,11 +25,28 @@ module = load_script("finding_kinds.py")
 
 #: Отпечаток находки: короткий хеш коммита, каким его печатает реестр.
 FINGERPRINT: Final = re.compile(r"^[0-9a-f]{7}$")
-#: Адрес того, что род породил: путь к механизму либо номер правила или ответа.
-#: Список закрытый: «улучшили подход» адресом не является и проверке не видно.
-ADDRESS: Final = re.compile(
-    r"(?:scripts|tests|packages|docs|\.claude)/[\w./-]+|(?:правил|ответ)\w*\s+\d{3}"
-)
+#: Что похоже на адрес: путь с косой чертой либо имя файла с расширением, а
+#: также номер правила или ответа. ЖИВОСТЬ ПРОВЕРЯЕТСЯ ОТНОШЕНИЕМ — существует
+#: ли такой путь в дереве, — а не перечнем каталогов: перечень пропускал
+#: корневые файлы, и встреча, названная `pyproject.toml`, объявлялась безадресной
+#: (18.09.2026)
+#: ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+LOOKS_LIKE_A_PATH: Final = re.compile(r"[\w.-]+(?:/[\w./-]+)*\.[a-z]{2,5}\b|[\w.-]+/[\w./-]+")
+#: Номер правила каталога или нашего ответа — адрес не в дереве, а в договоре.
+A_NUMBER: Final = re.compile(r"(?:правил|ответ)\w*\s+\d{3}")
+
+
+def addressed(said: str) -> bool:
+    """Назван ли в строке ЖИВОЙ адрес — путь дерева либо номер правила.
+
+    Путь проверяется существованием, а не написанием: список каталогов угадал бы
+    предмет и уже угадал — корневые файлы в него не попадали.
+    """
+    if A_NUMBER.search(said):
+        return True
+    return any((ROOT / one.split("::")[0]).exists() for one in LOOKS_LIKE_A_PATH.findall(said))
+
+
 #: Короче этого признак рода — отписка, а не признак. Число то же, что у причин
 #: витрины и пробелов: там оно взято у каталога, здесь берётся у них (022).
 SIGN_AT_LEAST: Final = 60
@@ -79,7 +96,7 @@ def test_a_kind_counts_by_fingerprints_not_by_a_number(name: str) -> None:
         if FINGERPRINT.match(one):
             continue
         if one.startswith(module.IN_WINDOW):
-            if not ADDRESS.search(one[len(module.IN_WINDOW) :]):
+            if not addressed(one[len(module.IN_WINDOW) :]):
                 wrong.append(f"«{one}» — встреча в окне без адреса")
             continue
         wrong.append(f"«{one}» — ни отпечаток, ни «{module.IN_WINDOW}<адрес>»")
@@ -142,7 +159,7 @@ def test_what_the_kind_gave_birth_to_is_addressable(name: str) -> None:
     if born is None:
         return
     assert isinstance(born, list) and born, f"{name}: «породил» объявлен пустым"
-    mute = [str(one) for one in born if not re.search(ADDRESS, str(one))]
+    mute = [str(one) for one in born if not addressed(str(one))]
     assert not mute, (
         f"{name}: «породил» без адреса — {'; '.join(one[:60] for one in mute)}."
         " Назовите механизм путём, а правило — номером."
