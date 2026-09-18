@@ -486,6 +486,39 @@ def refused(code: int) -> urllib.error.HTTPError:
     return urllib.error.HTTPError("u", code, "отказ", email.message.Message(), None)
 
 
+def test_an_exhausted_resource_is_never_retried() -> None:
+    """Код исчерпания не попадает в список повторяемых.
+
+    Повтор — это ОЖИДАНИЕ: между попытками транспорт спит. Ждать на исчерпанном
+    ресурсе значит тратить ту же квоту на то, чтобы узнать, что её нет, — а
+    правило требует наметить обход ДО того, как ресурс кончится
+    ([059](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/059-map-the-detour-before-the-resource-runs-out.md)).
+
+    ЗАМЕР 18.09.2026, ИЗ-ЗА КОТОРОГО ПРОВЕРКА И НАПИСАНА: пересечение пусто, то
+    есть требование исполнялось и держалось внимательностью. Допиши 429 в
+    `TRANSIENT` — и транспорт начал бы спать по два, четыре, шесть секунд на
+    каждом исчерпанном запросе, и не покраснело бы НИЧТО
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    assert transport.EXHAUSTED, "коды исчерпания не объявлены — предмет проверки не найден (075)"
+    both = sorted(transport.TRANSIENT & transport.EXHAUSTED)
+    assert not both, (
+        f"код исчерпания объявлен переживаемым: {both}. Повтор здесь — ожидание на"
+        " ресурсе, которого нет; транспорт обязан отказать и назвать срок сброса."
+    )
+
+
+@pytest.mark.parametrize("code", sorted(transport.EXHAUSTED))
+def test_a_code_of_exhaustion_is_not_survivable(code: int) -> None:
+    """Вторая половина: разбор действительно НЕ переживает такой отказ.
+
+    Пустое пересечение списков — ещё не поведение: списки могли разойтись с
+    разбором. Здесь спрашивается сам `_survivable`
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+    assert transport._survivable("GET", "repos/o/r", refused(code)) is False
+
+
 @pytest.mark.parametrize("code", sorted(transport.TRANSIENT))
 def test_a_creating_request_is_not_retried_on_a_gateway_error(code: int) -> None:
     """`POST` не повторяется ни при каком 5xx: повтор удвоил бы созданное.
