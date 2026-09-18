@@ -420,16 +420,67 @@ def test_a_push_into_a_branch_the_platform_deleted_is_refused() -> None:
     assert "checkout -b" in done.stderr, "отказ обязан назвать, что делать вместо толчка (104)"
 
 
-def test_a_push_into_an_already_merged_branch_is_refused() -> None:
-    """Работа слита — дописывать в эту ветку нечего.
+def test_a_squash_merge_leaves_the_branch_unreachable(tmp_path: Path) -> None:
+    """Довод снятия второго признака ЗАМЕРЕН, а не объявлен.
 
-    Второй признак нужен отдельно: ветку могли не удалить (настройка площадки),
-    а история всё равно уже в общей. Тогда продолжение даёт конфликт ИСТОРИИ,
-    который выглядит конфликтом содержимого — диф в четыре файла вместо одного.
+    Второй признак спрашивал «голова достижима из origin/main» и говорил «работа
+    слита». При слиянии УПЛОТНЕНИЕМ — способ этого проекта, решение 006 — она из
+    общей НЕ достижима: уплотнение рождает новый коммит, а коммиты ветки в общую
+    не едут. Признак не срабатывал почти никогда, и снят он по замеру; здесь
+    замер повторяется живым git, иначе довод держался бы словом
+    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    done = ask("git push origin agent/here", merged="1", tracked="1")
-    assert done.returncode == 2, done.stdout
-    assert "уже достижима" in done.stderr, done.stderr
+
+    def run(*args: str) -> str:
+        done = subprocess.run(
+            ["git", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return done.stdout.strip()
+
+    subprocess.run(["git", "init", "--quiet", "-b", "main", str(tmp_path)], check=True)
+    run("config", "user.email", "кто@то")
+    run("config", "user.name", "кто-то")
+    (tmp_path / "файл").write_text("раз", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "первый")
+    run("checkout", "--quiet", "-b", "agent/work")
+    (tmp_path / "файл").write_text("два", encoding="utf-8")
+    run("commit", "--quiet", "-am", "работа")
+    голова = run("rev-parse", "agent/work")
+    # Площадка сливает УПЛОТНЕНИЕМ: содержимое едет, коммит рождается новый.
+    run("checkout", "--quiet", "main")
+    run("merge", "--squash", "agent/work")
+    run("commit", "--quiet", "-m", "уплотнение")
+    run("update-ref", "refs/remotes/origin/main", "refs/heads/main")
+
+    достижима = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", голова, "refs/remotes/origin/main"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    assert достижима.returncode != 0, (
+        "после уплотнения голова ветки оказалась достижима из общей — довод снятия"
+        " второго признака перестал быть верным, и признак надо вернуть"
+    )
+
+
+def test_a_branch_pushed_without_upstream_is_a_named_gap() -> None:
+    """Названный предел: ветку, толкнутую без `-u`, сторож не увидит.
+
+    Слежения за собой у неё нет — значит следа толчка, по которому запрет и
+    узнаёт предмет, тоже нет. Предел назван числом (одна ветка из 147 в этом
+    окне) и проверяется здесь, чтобы не выдавать его за полноту (046).
+    """
+    done = ask("git push origin agent/here", merged="1")
+    assert done.returncode == 0, (
+        "сторож отверг толчок в ветку без следа толчка — предел, названный в коде,"
+        f" разошёлся с поведением: {done.stderr}"
+    )
 
 
 def test_a_live_branch_still_passes() -> None:
@@ -469,60 +520,40 @@ def test_the_revival_check_runs_against_a_real_repository(tmp_path: Path) -> Non
     Подделка отвечает то, что мы ей велели, и потому подтверждает согласие кода
     с нашим представлением о git, а не с git
     ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
-    Здесь заводится живой репозиторий, работа сливается в общую ветку — и
-    признак «уже достижима» обязан сработать на нём.
+    Здесь заводится живой клон, ветку толкают, площадка её удаляет — и признак
+    «слежение за собой, а ссылки нет» обязан сработать на нём.
     """
+    import os
+
+    bare = tmp_path / "площадка"
+    clone = tmp_path / "клон"
 
     def run(*args: str) -> None:
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", *args], cwd=clone, check=True, capture_output=True)
 
-    run("init", "--quiet", "-b", "main")
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    subprocess.run(["git", "clone", "-q", str(bare), str(clone)], check=True, capture_output=True)
     run("config", "user.email", "кто@то")
     run("config", "user.name", "кто-то")
-    (tmp_path / "файл").write_text("раз", encoding="utf-8")
+    (clone / "файл").write_text("раз", encoding="utf-8")
     run("add", "-A")
     run("commit", "--quiet", "-m", "первый")
+    run("push", "--quiet", "-u", "origin", "main")
     run("checkout", "--quiet", "-b", "agent/work")
-    (tmp_path / "файл").write_text("два", encoding="utf-8")
+    (clone / "файл").write_text("два", encoding="utf-8")
     run("commit", "--quiet", "-am", "работа")
-    # ВЕТКУ ТОЛКАЛИ, и это часть предмета: воскресить можно лишь то, что на
-    # площадке было. Слежение за одноимённой веткой ставит `push -u` — здесь
-    # оно записывается прямо, потому что площадки у временного клона нет.
-    run("config", "branch.agent/work.merge", "refs/heads/agent/work")
-    run("config", "branch.agent/work.remote", "origin")
-    # «Площадка» приняла толчок ветки, слила работу и общую ветку опубликовала.
-    # ВЕТКУ ПРИ ЭТОМ НЕ УДАЛИЛА — это отдельный случай, и предмет здесь именно
-    # он: первый признак («ссылки нет») молчит, второй («уже достижима») обязан
-    # сработать. Настройка площадки удалять ветку при слиянии есть не везде.
-    run("update-ref", "refs/remotes/origin/agent/work", "refs/heads/agent/work")
-    run("checkout", "--quiet", "main")
-    run("merge", "--quiet", "--ff-only", "agent/work")
-    run("update-ref", "refs/remotes/origin/main", "refs/heads/main")
-    run("checkout", "--quiet", "agent/work")
+    run("push", "--quiet", "-u", "origin", "agent/work")
+    # Площадка удаляет ветку при слиянии — так она и поступает.
+    subprocess.run(["git", "branch", "-D", "agent/work"], cwd=bare, capture_output=True)
+    run("fetch", "--prune", "--quiet", "origin")
 
     here = Path.cwd()
     try:
-        import os
-
-        os.chdir(tmp_path)
+        os.chdir(clone)
         said = module.merged_away("agent/work")
     finally:
         os.chdir(here)
-    assert "уже достижима" in said, said or "живой репозиторий не дал признака слияния"
-
-
-def test_a_first_push_of_a_fresh_branch_passes() -> None:
-    """Первый толчок НОВОЙ ветки проходит: воскрешать ещё нечего.
-
-    `git checkout -b <новая> origin/main` — процедура свода — оставляет
-    `branch.<новая>.merge = refs/heads/main`: git настраивает слежение за той
-    веткой, ОТ КОТОРОЙ отрезали. Ссылки `origin/<новая>` при этом нет, потому
-    что ветки на площадке нет вовсе. Первая редакция запрета считала это
-    воскрешением слитой и отвергала первый же толчок — то есть ломала ровно ту
-    процедуру, которой сама и учит в тексте отказа. Нашёл внешний взгляд.
-    """
-    done = ask("git push -u origin agent/here", gone="1", elsewhere="1")
-    assert done.returncode == 0, done.stderr
+    assert "площадка удалила" in said, said or "живой репозиторий не дал признака удаления"
 
 
 def test_the_revival_check_survives_the_real_auto_tracking(tmp_path: Path) -> None:
