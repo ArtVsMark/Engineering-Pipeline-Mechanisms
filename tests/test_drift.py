@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import os
@@ -264,6 +265,10 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(module, "fetch", broken)
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
+    # Источник версий чужих действий читает ДЕРЕВО, а не сеть: `broken` его не
+    # останавливает, и настоящее расхождение в прогонах проекта сделало бы этот
+    # прогон красным по чужому поводу. Предмет здесь — молчание источников.
+    monkeypatch.setattr(module, "actions_disagree", lambda *a, **k: [])
     # Источник защиты ветки ходит к площадке своим запросом, а не через
     # `fetch`: в подделке его гасят отдельно, иначе проверка молчания одних
     # источников пошла бы в сеть за другим.
@@ -322,6 +327,11 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(module, "manifest", lambda url: [{}])
     monkeypatch.setattr(module, "declared_versions", lambda: ([], ""))
     monkeypatch.setattr(module, "language_moved", lambda *a, **k: [])
+    # ВЕРСИИ ЧУЖИХ ДЕЙСТВИЙ ЧИТАЮТ ДЕРЕВО, А НЕ СЕТЬ, и подделываются поэтому
+    # иначе: отравленный транспорт их не остановит, а настоящее расхождение в
+    # прогонах проекта сделало бы этот прогон красным по чужому поводу. Предмет
+    # здесь — как `look` ведёт себя с молчащим источником, а не состав прогонов.
+    monkeypatch.setattr(module, "actions_disagree", lambda *a, **k: [])
     monkeypatch.setattr(module, "showcase_questions_moved", lambda *_: [])
     monkeypatch.setattr(module, "gap_tasks_closed", lambda *a: [])
     found, silent = module.look("o/r", "token", {})
@@ -350,6 +360,119 @@ TODAY = [
     {"version": "3.14.7", "stable": True},
     {"version": "3.15.0-rc.2", "stable": False},
 ]
+
+
+def sources_of_drift() -> tuple[set[str], set[str]]:
+    """Источники дрейфа модуля и те из них, до которых доходит обход.
+
+    ИСТОЧНИК УЗНАЁТСЯ ПО ТОМУ, ЧТО ОН ВОЗВРАЩАЕТ, а не по имени: `list[Drift]` —
+    это и есть «источник дрейфа», а имя бывает любым
+    ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+    Достижимость считается ПО ВЫЗОВАМ, а не по прямому упоминанию в `look`: три
+    источника семьи зовутся через `family_summary`, и требовать от них прямого
+    вызова значило бы чинить исправное (044).
+    """
+    tree = ast.parse((ROOT / "scripts" / "drift.py").read_text(encoding="utf-8"))
+    bodies = {one.name: one for one in tree.body if isinstance(one, ast.FunctionDef)}
+    said = {
+        name
+        for name, one in bodies.items()
+        if one.returns and ast.unparse(one.returns).replace(" ", "") == "list[Drift]"
+    }
+    seen: set[str] = set()
+    queue = ["look"]
+    while queue:
+        name = queue.pop()
+        if name in seen or name not in bodies:
+            continue
+        seen.add(name)
+        for node in ast.walk(bodies[name]):
+            if isinstance(node, ast.Call):
+                head = node.func
+                called = head.attr if isinstance(head, ast.Attribute) else getattr(head, "id", "")
+                if called in bodies:
+                    queue.append(called)
+    return said - {"look"}, seen
+
+
+def test_every_source_of_drift_is_reached_by_the_pass() -> None:
+    """Источник, до которого обход не доходит, — работа в никуда.
+
+    ПРЕЖДЕ ПОЛНОТУ ДЕРЖАЛ ОТРАВЛЕННЫЙ ТРАНСПОРТ: забытый источник упирался в
+    него и говорил о себе сам. Это работает, пока каждый источник ходит в СЕТЬ.
+    18.09.2026 появился первый, который читает только дерево, — версии чужих
+    действий, — и отравить его нечем: забудь его в списке, и он промолчал бы
+    зелёным
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+    Замер 18.09.2026: источников тринадцать, обход доходит до всех.
+    """
+    said, reached = sources_of_drift()
+    assert said, "функций, возвращающих список дрейфа, не нашлось — предмет не найден (075)"
+    lost = sorted(said - reached)
+    assert not lost, (
+        "источник дрейфа объявлен, а обход до него не доходит:\n  "
+        + "\n  ".join(lost)
+        + "\n  Допишите его в список `asks` у `look` — иначе он не отработает ни разу,"
+        " а снаружи это выглядит как «дрейфа нет»."
+    )
+
+
+def workflow(tmp_path: Path, name: str, body: str) -> Path:
+    """Кладёт прогон в поддельное дерево: свой каталог, а не общий (149)."""
+    where = tmp_path / "workflows"
+    where.mkdir(exist_ok=True)
+    (where / name).write_text(body, encoding="utf-8")
+    return where
+
+
+def test_one_version_of_a_foreign_action_is_not_a_drift(tmp_path: Path) -> None:
+    """Одна версия у действия во всех прогонах — расхождения нет."""
+    where = workflow(tmp_path, "a.yml", "      - uses: actions/checkout@v4\n")
+    workflow(tmp_path, "b.yml", "      - uses: actions/checkout@abc123 # v4\n")
+    assert module.actions_disagree(module.action_versions(where)) == []
+
+
+def test_two_versions_of_one_foreign_action_are_named(tmp_path: Path) -> None:
+    """Одно действие названо двумя версиями — это дрейф, и обе названы числами.
+
+    Форму пина разводит триггер (152): где вызывающий берётся с общей ветки,
+    нужен хеш. Версию не разводит ничто, и два мажора чужого кода в одном
+    конвейере живут молча. Замер 18.09.2026: `actions/checkout` — `v4` в семи
+    прогонах и хеш с пометкой `v7.0.1` в тринадцати.
+    """
+    where = workflow(tmp_path, "a.yml", "      - uses: actions/checkout@v4\n")
+    workflow(tmp_path, "b.yml", "      - uses: actions/checkout@abc123 # v7.0.1\n")
+    found = module.actions_disagree(module.action_versions(where))
+    assert [one.source for one in found] == ["action-version"]
+    assert "v4" in found[0].said and "v7.0.1" in found[0].said
+
+
+def test_a_pinned_hash_is_read_by_its_marked_version(tmp_path: Path) -> None:
+    """Хеш с пометкой считается ТОЙ версией, а не собой.
+
+    Иначе каждый хеш — своя «версия», и два прогона на одном и том же хеше без
+    пометки выглядели бы расхождением. Пометка и есть объявление
+    ([035](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/035-version-is-never-edited-by-hand.md)).
+    """
+    where = workflow(tmp_path, "a.yml", "      - uses: actions/setup-python@abc # v5\n")
+    said = module.action_versions(where)
+    assert said["actions/setup-python"] == {"v5": ["a.yml"]}
+
+
+def test_our_own_action_is_not_judged_here(tmp_path: Path) -> None:
+    """Своё и семейное судит гейт заготовки, а не этот источник (022, 090).
+
+    Второй судья тому же предмету разошёлся бы с первым молча: у механизма семьи
+    свои правила закрепления, и они уже проверяются `tests/test_family_pinning.py`.
+    """
+    where = workflow(
+        tmp_path,
+        "a.yml",
+        "      - uses: ArtVsMark/Engineering-Incidents-Playbook@v1.2.0\n"
+        "      - uses: ArtVsMark/Engineering-Incidents-Playbook@v1.3.0\n",
+    )
+    assert module.actions_disagree(module.action_versions(where)) == []
 
 
 def test_todays_matrix_is_not_a_drift() -> None:
