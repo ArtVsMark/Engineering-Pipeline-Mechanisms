@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tests.conftest import ROOT, load_script
@@ -93,3 +95,50 @@ def test_paths_are_read_by_nul_not_by_newline() -> None:
     source = (ROOT / "scripts" / "change_parts.py").read_text(encoding="utf-8")
     assert '"-z"' in source, "перечисление путей идёт без -z"
     assert 'split("\\0")' in source, "вывод разбирается не по NUL"
+
+
+def test_a_merge_commit_does_not_hide_its_files(tmp_path, run_script) -> None:  # type: ignore[no-untyped-def]
+    """Файлы merge-коммита в счёт попадают, а не прячутся комбинированным диффом.
+
+    `git show` у слияния печатает КОМБИНИРОВАННЫЙ дифф — только то, что отлично
+    от ОБОИХ родителей, — и файлы, совпавшие с одним из них, выпадают молча.
+    Замер 18.09.2026 по трём слияниям дерева: комбинированный дал НОЛЬ файлов
+    там, где против первого родителя их четыре и два. Счёт частей на таком
+    списке отвечает правдоподобным числом (045). Нашёл внешний взгляд.
+    """
+    import subprocess
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    subprocess.run(["git", "init", "--quiet", "-b", "main", str(tmp_path)], check=True)
+    run("config", "user.email", "кто@то")
+    run("config", "user.name", "кто-то")
+    (tmp_path / "общий").write_text("раз", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "первый")
+    run("checkout", "--quiet", "-b", "сосед")
+    (tmp_path / "соседский").write_text("два", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "у соседа")
+    run("checkout", "--quiet", "main")
+    (tmp_path / "свой").write_text("три", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "у себя")
+    run("merge", "--no-ff", "--quiet", "-m", "слияние", "сосед")
+    # ПРЕДМЕТ ИЗОЛИРОВАН ДО ОДНОГО КОММИТА. Первая редакция брала диапазон, но
+    # `A..B` несёт и коммит соседа — он достижим через ВТОРОГО родителя, — и
+    # файл был виден оттуда: проверка говорила о слиянии, не проверяя слияния
+    # ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
+    here = Path.cwd()
+    try:
+        import os
+
+        os.chdir(tmp_path)
+        видно = set(module.files_of("HEAD"))
+    finally:
+        os.chdir(here)
+    assert "соседский" in видно, (
+        "файл слияния выпал из счёта: комбинированный дифф прячет то, что совпало"
+        f" с родителем — видно только {sorted(видно)}"
+    )
