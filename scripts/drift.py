@@ -656,6 +656,73 @@ def declared_versions() -> tuple[list[str], str]:
     return matrix, ahead
 
 
+#: Обращение к чужому действию: `uses: владелец/имя@ссылка` и, если ссылка —
+#: хеш, пометка версии рядом. Пометка и есть объявленная версия: хеш сам по себе
+#: не говорит, какая это версия, и сравнивать хеши между собой бессмысленно.
+ACTION_USE: Final = re.compile(
+    r"uses:\s*(?P<repo>[\w.-]+/[\w.-]+)@(?P<ref>[\w.-]+)(?:\s*#\s*(?P<said>v[\w.-]+))?"
+)
+#: Чьи действия НЕ считаются чужими: свои и семьи. Их версию держит гейт
+#: заготовки (155, tests/test_family_pinning.py), и второй судья тому же
+#: разошёлся бы с первым молча (022, 090).
+OUR_OWN: Final = ("ArtVsMark/",)
+
+
+def action_versions(where: Path | None = None) -> dict[str, dict[str, list[str]]]:
+    """Чужие действия прогонов: имя → объявленная версия → где названа.
+
+    ВЕРСИЯ ЧИТАЕТСЯ КАК ВЕРСИЯ, А НЕ КАК ССЫЛКА. Прибитый хеш и плавающий тег —
+    две законные ФОРМЫ одного пина, и выбор между ними задаёт правило 152: где
+    вызывающий берётся с общей ветки, нужен хеш. Но версия у действия при этом
+    одна, и узнаётся она у тега либо у пометки рядом с хешем.
+    """
+    found: dict[str, dict[str, list[str]]] = {}
+    for path in sorted((where or paths.WORKFLOWS).glob("*.y*ml")):
+        for match in ACTION_USE.finditer(path.read_text(encoding="utf-8")):
+            repo = match["repo"]
+            if repo.startswith(OUR_OWN):
+                continue
+            said = match["said"] or match["ref"]
+            found.setdefault(repo, {}).setdefault(said, []).append(path.name)
+    return found
+
+
+def actions_disagree(said: dict[str, dict[str, list[str]]]) -> list[Drift]:
+    """Одно чужое действие названо ДВУМЯ версиями в одном дереве.
+
+    ПОЧЕМУ ЭТО ДРЕЙФ, А НЕ ГЕЙТ. Расхождение чинится не правкой изменения, а
+    решением о переезде: поднять версию в прогоне, который толкает выпуск,
+    значит поменять поведение чужого кода в нашем самом опасном месте, и
+    красное, которое нечем погасить здесь и сейчас, учат обходить
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Заход дрейфа называет величину и оставляет решение человеку.
+
+    ЗАМЕР 18.09.2026, ИЗ-ЗА КОТОРОГО ИСТОЧНИК И НАПИСАН. `actions/checkout`
+    назван в дереве ДВАЖДЫ: `v4` в семи прогонах и хеш с пометкой `v7.0.1` в
+    тринадцати; `actions/setup-python` — `v5` в семи и хеш в одиннадцати. Форму
+    разводит правило 152 по триггеру, и это верно; версию не разводит ничто, и
+    два мажора чужого кода жили в одном конвейере молча
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
+    [035](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/035-version-is-never-edited-by-hand.md)).
+    """
+    found: list[Drift] = []
+    for repo, versions in sorted(said.items()):
+        if len(versions) < 2:
+            continue
+        parts = "; ".join(
+            f"{version} в {len(where)} прогонах" for version, where in sorted(versions.items())
+        )
+        found.append(
+            Drift(
+                "action-version",
+                f"{repo} назван разными версиями: {parts}",
+                f"свести {repo} к одной версии либо назвать причину расхождения: "
+                f"форму пина разводит триггер (152), версию — ничто",
+            )
+        )
+    return found
+
+
 def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[Drift]:
     """Язык выпустил версию, а прогон об этом не знает.
 
@@ -1081,6 +1148,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
         ("защита общей ветки", lambda: protection_moved(repo, token)),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
+        ("версии чужих действий", lambda: actions_disagree(action_versions())),
         (
             "вердикты по предложениям",
             lambda: proposals_answered(
