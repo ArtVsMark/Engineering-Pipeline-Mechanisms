@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import os
 import re
@@ -171,6 +172,54 @@ BADGE_IN_SHOWCASE: Final = re.compile(r"!\[[^\]]*\]\([^)\s]*badges/(?P<name>[\w.
 def badges_shown(readme: str) -> set[str]:
     """Значки, которые витрина ПОКАЗЫВАЕТ: имена в цели картинки, а не в прозе."""
     return set(BADGE_IN_SHOWCASE.findall(readme))
+
+
+def names_used(path: Path) -> set[str]:
+    """Имена, которые исходник УПОТРЕБЛЯЕТ, — обе формы записи разом.
+
+    `token_from_env(...)`, `env.token_from_env(...)`, `from x import
+    token_from_env` — одно употребление, записанное по-разному. Поиск подстроки
+    видит их все одинаково и потому видит ещё и слово в докстроке; разбор видит
+    ровно употребление
+    ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+
+    ОТБОР ФАЙЛОВ ПОДСТРОКОЙ ОПАСНЕЕ ПРЕДИКАТА. Промах предиката краснеет;
+    промах отбора выбрасывает файл из проверки МОЛЧА, и гейт остаётся зелёным,
+    ничего не проверив
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Name):
+            found.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            found.add(node.attr)
+        elif isinstance(node, ast.ImportFrom):
+            found.update(alias.asname or alias.name for alias in node.names)
+    return found
+
+
+def string_args_of(path: Path, called: str) -> list[str]:
+    """Строковые доводы каждого вызова `called` — обе формы имени.
+
+    Заменяет образец по тексту: `load_script("paths.py")` и
+    `helpers.load_script('paths.py')` — один вызов, а кавычка и точка к делу не
+    относятся.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if not isinstance(node, ast.Call):
+            continue
+        head = node.func
+        name = head.attr if isinstance(head, ast.Attribute) else getattr(head, "id", "")
+        if name != called:
+            continue
+        found += [
+            one.value
+            for one in node.args
+            if isinstance(one, ast.Constant) and isinstance(one.value, str)
+        ]
+    return found
 
 
 def code_files(*, with_tests: bool = False) -> list[Path]:

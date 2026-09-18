@@ -20,25 +20,32 @@
 
 from __future__ import annotations
 
-import re
 from types import ModuleType
 from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, string_args_of
 
-#: Как тест зовёт скрипт. Форма одна на весь набор, и это её и держит.
-CALL_RE: Final = re.compile(r'load_script\(\s*"(?P<name>[a-z_0-9]+\.py)"\s*\)')
+#: Как тест зовёт скрипт.
+CALL: Final = "load_script"
 
 
 def asked_by_tests() -> list[str]:
-    """Скрипты, которые набор загружает как модули: предмет этой проверки."""
+    """Скрипты, которые набор загружает как модули: предмет этой проверки.
+
+    ОТБОР ИДЁТ РАЗБОРОМ, А НЕ ОБРАЗЦОМ ПО ТЕКСТУ. Прежний образец требовал
+    двойных кавычек и голого имени: `load_script('paths.py')` и
+    `helpers.load_script("paths.py")` он не видел — и скрипт молча выпадал из
+    предмета, а гейт оставался зелёным, ничего о нём не проверив. Промах ОТБОРА
+    опаснее промаха предиката: предикат краснеет, отбор — нет
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
     names: set[str] = set()
     for path in (ROOT / "tests").glob("test_*.py"):
-        for match in CALL_RE.finditer(path.read_text(encoding="utf-8")):
-            if (ROOT / "scripts" / match["name"]).is_file():
-                names.add(match["name"])
+        for said in string_args_of(path, CALL):
+            if said.endswith(".py") and (ROOT / "scripts" / said).is_file():
+                names.add(said)
     return sorted(names)
 
 
