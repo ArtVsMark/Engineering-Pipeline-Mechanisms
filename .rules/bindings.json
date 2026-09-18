@@ -168,7 +168,8 @@
     "027": {
       "status": "active",
       "mechanism": "gate",
-      "where": "scripts/review_findings.py — render_body печатает «Пусто», а не оставляет пустой раздел; .rules/proposals.json объявляет пустой список законным состоянием; tests/test_review_findings.py::test_empty_body_says_so_explicitly"
+      "where": "tests/test_empty_states.py::test_an_empty_state_says_when_it_was_looked_at — у КАЖДОГО тела живой задачи (модуль объявляет MARKER и переписывает тело поверх прежнего) пустота стоит рядом с днём обхода. Замер 18.09.2026: таких механизмов шесть, день называли три — review_findings строкой «Убрано до», schedules_seen и stuck строкой «Обход». Молчали drift, main_red и unlooked; первым двум день дописан, третий называл КУРСОР («Просмотрено до: #N») — ответ на другой вопрос, и остановившийся механизм держит курсор неизменным сколько угодно. Граница предмета названа замером, а не вкусом: пустой раздел журнала (build_changelog.py) датирован выпуском, под которым лежит, и вне предмета намеренно; слово «Пусто» в докстроке (check_shipped.apart, check_reread.lonely) объявлением пустоты не является и отсекается разбором, а не подстрокой",
+      "analysed": "2026-09-18"
     },
     "028": {
       "status": "active",
