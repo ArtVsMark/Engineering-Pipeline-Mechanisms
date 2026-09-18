@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Final
@@ -100,6 +101,18 @@ def origins(body: dict[str, Any]) -> tuple[int, int]:
     return len(met) - in_window, in_window
 
 
+def said_no(held: str) -> bool:
+    """Говорит ли поле «закрыт» слово «нет» — ЦЕЛЫМ словом, а не приставкой.
+
+    `startswith("нет")` читает «нетронутый», «нетривиально» и «нет-нет» как
+    объявление отсутствия механизма: род с живым механизмом ушёл бы в долг по
+    первой букве
+    ([141](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/141-a-marker-is-matched-whole-not-by-prefix.md)).
+    """
+    first = re.split(r"[^\w]+", held.strip().lower(), maxsplit=1)[0]
+    return first == NO_MECHANISM
+
+
 def repeated(kinds: dict[str, Any]) -> list[tuple[str, int]]:
     """Роды, встреченные не реже :data:`REPEATED_AT` раз, — от частых к редким."""
     counted = [(name, len(body.get("встречен") or [])) for name, body in kinds.items()]
@@ -114,7 +127,7 @@ def unheld(kinds: dict[str, Any]) -> list[tuple[str, int]]:
     return [
         (name, times)
         for name, times in repeated(kinds)
-        if str(kinds[name].get("закрыт", "")).strip().lower().startswith(NO_MECHANISM)
+        if said_no(str(kinds[name].get("закрыт", "")))
     ]
 
 
@@ -137,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, body in sorted(kinds.items(), key=lambda one: -len(one[1].get("встречен") or [])):
         times = len(body.get("встречен") or [])
         held = str(body.get("закрыт", "")).strip()
-        mark = "—" if held.lower().startswith(NO_MECHANISM) else "держится"
+        mark = "—" if said_no(held) else "держится"
         born = [str(one) for one in (body.get(BORN) or [])]
         seen, caught = origins(body)
         split = f" (взгляд {seen}, окно {caught})" if caught else ""

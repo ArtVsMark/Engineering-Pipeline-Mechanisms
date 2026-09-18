@@ -504,6 +504,28 @@ def test_a_refuted_premise_is_not_a_resolution() -> None:
     assert "#348" in after.checked, "причина опровержения не доехала до записи"
 
 
+def test_the_verifier_word_is_matched_whole_not_by_prefix() -> None:
+    """Слово верификатора сверяется целиком, а не по началу.
+
+    Прежде здесь стояло `said.startswith("не")`. Пока шкалу держит образец
+    `PREMISE_RE`, это безопасно, — но связь невидима у самого сравнения, а
+    функция открыта и принимает любую строку: «нейтрально», «независимо»,
+    «нельзя» прочлись бы как ОПРОВЕРЖЕНИЕ премисы, то есть находка была бы
+    объявлена ложной по первым двум буквам чужого слова
+    ([141](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/141-a-marker-is-matched-whole-not-by-prefix.md)).
+    """
+    было = module.Entry(1, "дефект", "что-то")
+    опровергнуто = module.verified(было, module.SAYS_NO, "починено раньше", "18.09.2026")
+    assert опровергнуто.checked.startswith(findings_module.REFUTED), опровергнуто.checked
+    подтверждено = module.verified(было, module.SAYS_YES, "", "18.09.2026")
+    assert подтверждено.checked.startswith(findings_module.CONFIRMED), подтверждено.checked
+    for чужое in ("нейтрально", "независимо", "нельзя", "не знаю"):
+        ответ = module.verified(было, чужое, "", "18.09.2026")
+        assert ответ.checked.startswith(findings_module.CONFIRMED), (
+            f"«{чужое}» прочитано как опровержение премисы по приставке: {ответ.checked}"
+        )
+
+
 def test_the_verifier_answer_survives_a_round_trip() -> None:
     """Хвост проверки разбирается обратно вместе с записью.
 
