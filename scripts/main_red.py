@@ -999,6 +999,10 @@ def render_body(
         lines += [item.said() for item in flakes]
     else:
         lines.append("Пусто — повторных зелёных не было.")
+    # ДЕНЬ ОБХОДА СТОИТ ДАЖЕ КОГДА ПУСТО, И ОСОБЕННО КОГДА ПУСТО: «пусто» без
+    # даты неотличимо от «не смотрели», и обе записи выглядят одинаково спокойно
+    # ([027](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/027-empty-state-is-a-state.md)).
+    lines += ["", f"Обход: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC."]
     return "\n".join(lines) + "\n"
 
 
