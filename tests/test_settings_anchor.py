@@ -24,7 +24,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import load_script, string_args_of
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -33,8 +33,9 @@ paths = load_script("paths.py")
 
 #: Якорь объявляет адреса; все остальные их импортируют.
 ANCHOR_NAME = ANCHOR.name
-#: Построение пути литералом: `Path("что-то")`.
-LITERAL_PATH_RE = re.compile(r'Path\(\s*["\']([^"\']+)["\']')
+#: Как строят путь литералом: `Path("что-то")`. Имя зовомого, а не образец:
+#: `pathlib.Path(...)` и `Path (...)` — тот же вызов, записанный иначе.
+PATH_CALL = "Path"
 #: Адрес настройки, написанный ГОЛОЙ строкой: `".rules/bindings.json"`. Второй
 #: якорь заводится и так — обёртка в `Path` тут ни при чём, а прежний образец
 #: видел только её. Замер 11.09.2026: три адреса каталога правил жили в
@@ -42,8 +43,13 @@ LITERAL_PATH_RE = re.compile(r'Path\(\s*["\']([^"\']+)["\']')
 #: Нашёл внешний взгляд на #170.
 SETTING_DIRS = ("\\.rules", "\\.github", "changelog\\.d")
 BARE_PATH_RE = re.compile(r'["\']((?:' + "|".join(SETTING_DIRS) + r')/[\w./-]+\.[a-z]{2,5})["\']')
-#: Поиск вверх по дереву в любом виде.
-SEARCH_RE = re.compile(r"\.parents\b|\.parent\.parent\b|rglob\(|os\.getcwd\(")
+#: Поиск вверх по дереву ВЫЗОВОМ: `rglob(...)`, `os.getcwd()`, `Path.cwd()`.
+#: Судится вызов, а не имя: `cwd` — ещё и довод `subprocess.run(cwd=…)`, то есть
+#: обычная переменная. Первая редакция брала имя и покраснела на трёх исправных
+#: механизмах; поймано первым же прогоном.
+SEARCHING_CALLS = frozenset({"rglob", "getcwd", "cwd"})
+#: Поиск вверх по дереву ОБРАЩЕНИЕМ: `.parents` и цепочка `.parent.parent`.
+SEARCHING_ATTR = "parents"
 
 #: Пути, которые механизм вправе построить сам: они не настройки, а его
 #: собственный вывод или временный файл. Список разрешительный (068).
@@ -100,8 +106,8 @@ def test_no_second_anchor_is_declared(path: Path) -> None:
 
     Замер 09.09.2026: у `CONTRACT_VERSION` было три независимых адреса.
     """
+    built = {found for found in string_args_of(path, PATH_CALL) if found not in NOT_SETTINGS}
     said = path.read_text(encoding="utf-8")
-    built = {found for found in LITERAL_PATH_RE.findall(said) if found not in NOT_SETTINGS}
     # ГОЛАЯ СТРОКА — ТОТ ЖЕ ВТОРОЙ ЯКОРЬ. Обёртка в `Path` к делу не относится:
     # расходятся адреса, а не их типы.
     built |= {found for found in BARE_PATH_RE.findall(said) if found not in NOT_SETTINGS}
@@ -193,6 +199,35 @@ def test_no_declared_address_is_written_out_by_hand(path: Path) -> None:
     )
 
 
+def searching_in(path: Path) -> list[str]:
+    """Чем модуль ведёт поиск вверх по дереву — по разбору, а не по написанию.
+
+    Признаков три, и каждый читается своим узлом: обращение к `.parents`, вызов
+    `rglob`/`getcwd`/`cwd` и цепочка `.parent.parent` — последняя ОТНОШЕНИЕ, а
+    не строка: один `.parent` законен и означает «каталог рядом», два подряд уже
+    уводят выше дерева проекта. Образец по тексту не видел ни `from os import
+    getcwd`, ни записи с пробелами вокруг точки
+    ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Call):
+            head = node.func
+            name = head.attr if isinstance(head, ast.Attribute) else getattr(head, "id", "")
+            if name in SEARCHING_CALLS:
+                found.append(f"{name}() на строке {node.lineno}")
+        elif isinstance(node, ast.Attribute):
+            if node.attr == SEARCHING_ATTR:
+                found.append(f".{node.attr} на строке {node.lineno}")
+            elif (
+                node.attr == "parent"
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "parent"
+            ):
+                found.append(f".parent.parent на строке {node.lineno}")
+    return sorted(set(found))
+
+
 def written_as_a_path(path: Path, wanted: frozenset[str] | set[str]) -> set[str]:
     """Имена из `wanted`, написанные в файле КАК ПУТЬ, а не как слово.
 
@@ -269,5 +304,5 @@ def test_no_mechanism_searches_up_the_tree(path: Path) -> None:
     Поиск нашёл бы файл соседнего проекта и принял бы его за свой — молча,
     потому что снаружи «нашёл чужой» и «нашёл свой» выглядят одинаково.
     """
-    found = SEARCH_RE.findall(path.read_text(encoding="utf-8"))
-    assert not found, f"{path.name} ищет настройку вверх по дереву: {sorted(set(found))}"
+    found = searching_in(path)
+    assert not found, f"{path.name} ищет настройку вверх по дереву: {found}"

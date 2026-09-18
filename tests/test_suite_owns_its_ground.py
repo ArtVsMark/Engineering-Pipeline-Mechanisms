@@ -14,19 +14,28 @@
 машине, где этот порт занят
 ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
-ПОЧЕМУ ЗДЕСЬ ПОДСТРОКА ЗАКОННА. Обычно проверка отношения через присутствие
-подстроки зеленеет там, где отношения нет (166). Здесь предмет — само НАЛИЧИЕ
-литерала общей площадки в тексте набора, а не отношение между двумя вещами:
-искомое и есть строка. Список литералов закрытый и лежит рядом; признак,
-написанный иначе, пройдёт — и это названный предел, а не полнота
-([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
-Порт при этом меряется РАЗБОРОМ, а не текстом: число в строке бывает чем угодно.
+ЛИТЕРАЛ И ВЫЗОВ РАЗВЕДЕНЫ, И ЭТО НЕ ПЕДАНТИЗМ. Общую площадку называют двумя
+разными способами, и проверять их одинаково нельзя:
+
+* `"/tmp/…"` — ЛИТЕРАЛ. Предмет здесь и есть строка, отношения между двумя
+  вещами нет, и сверять её текстом честно. Список литералов закрытый;
+* `Path.home()`, `expanduser("~")`, `tempfile.gettempdir()` — ВЫЗОВЫ. Тут
+  подстрока проверяет отношение по написанию и промахивается в обе стороны:
+  `pathlib.Path . home()` с пробелами не видна, а `Path.home()` в докстроке
+  засчитывается как обращение
+  ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
+
+Прежняя редакция сверяла всё построчно одним набором образцов и отсеивала
+комментарии по решётке — то есть докстроку отсеять не могла вовсе: проза о
+`/tmp` покраснела бы наравне с обращением. Теперь ВСЁ читается разбором, а
+докстрока исключается как докстрока, а не как строка, начинающаяся с решётки.
+
+Порт меряется разбором с самого начала: число в строке бывает чем угодно.
 """
 
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 from typing import Final
 
@@ -36,13 +45,14 @@ from tests.conftest import ROOT
 
 SUITE: Final = ROOT / "tests"
 
-#: Общая площадка, названная в тексте прямо. Список закрытый и объявлен здесь.
-SHARED_GROUND: Final = (
-    re.compile(r'"/tmp\b|\x27/tmp\b'),
-    re.compile(r"tempfile\.(gettempdir|mkdtemp|NamedTemporaryFile)"),
-    re.compile(r'environ\[["\']HOME["\']\]|Path\.home\(\)'),
-    re.compile(r'expanduser\(["\']~'),
+#: Общая площадка, названная ЛИТЕРАЛОМ. Предмет здесь и есть строка.
+SHARED_LITERAL: Final = "/tmp"
+#: Общая площадка, полученная ВЫЗОВОМ: имя зовомого — обе формы записи разом.
+SHARED_CALLS: Final = frozenset(
+    {"gettempdir", "mkdtemp", "NamedTemporaryFile", "TemporaryDirectory", "home", "expanduser"}
 )
+#: Общая площадка, взятая из окружения: `os.environ["HOME"]`.
+SHARED_ENV: Final = frozenset({"HOME", "TMPDIR", "TEMP"})
 
 #: Чем поднимают свой сервер: порт у него обязан быть выбран площадкой, а не нами.
 SERVERS: Final = frozenset({"HTTPServer", "ThreadingHTTPServer", "TCPServer"})
@@ -101,16 +111,58 @@ def test_the_subject_of_this_gate_exists() -> None:
     assert suite_files(), f"в {SUITE} не нашлось модулей набора — сверять нечего"
 
 
+def docstrings_of(tree: ast.AST) -> set[int]:
+    """Узлы-докстроки по их месту: проза о площадке обращением не является."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        first = node.body[0] if node.body else None
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            found.add(id(first.value))
+    return found
+
+
+def shared_ground_in(path: Path) -> list[str]:
+    """Обращения модуля к ОБЩЕЙ площадке — разбором, а не построчным образцом.
+
+    Три способа назвать её читаются тремя разными узлами, и смешивать их в один
+    образец значило бы проверять написание вместо отношения: литерал `"/tmp/x"`,
+    вызов `Path.home()` или `expanduser(...)`, чтение `environ["HOME"]`.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    prose = docstrings_of(tree)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) not in prose and node.value.startswith(SHARED_LITERAL):
+                found.append(f"{path.relative_to(ROOT)}:{node.lineno} — литерал «{node.value}»")
+        elif isinstance(node, ast.Call):
+            head = node.func
+            name = head.attr if isinstance(head, ast.Attribute) else getattr(head, "id", "")
+            if name in SHARED_CALLS:
+                found.append(f"{path.relative_to(ROOT)}:{node.lineno} — вызов {name}()")
+        elif isinstance(node, ast.Subscript):
+            asked = node.slice
+            holder = node.value
+            where = holder.attr if isinstance(holder, ast.Attribute) else getattr(holder, "id", "")
+            # ИМЯ БЕРЁТСЯ СТРОКОЙ ЯВНО. `ast.Constant.value` бывает чем угодно,
+            # включая байты, и подстановка их в сообщение дала бы «b'HOME'» —
+            # запись, по которой место не найдёшь поиском (176).
+            if where == "environ" and isinstance(asked, ast.Constant):
+                said = asked.value
+                if isinstance(said, str) and said in SHARED_ENV:
+                    found.append(f"{path.relative_to(ROOT)}:{node.lineno} — environ[«{said}»]")
+    return found
+
+
 def test_the_suite_never_names_the_shared_ground() -> None:
     """Набор не называет общую площадку: он забирает свою через `tmp_path`."""
-    named: list[str] = []
-    for path in suite_files():
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if line.lstrip().startswith("#") or line.lstrip().startswith("*"):
-                continue
-            for pattern in SHARED_GROUND:
-                if pattern.search(line):
-                    named.append(f"{path.relative_to(ROOT)}:{number} — {line.strip()[:70]}")
+    named = [one for path in suite_files() for one in shared_ground_in(path)]
     assert not named, (
         "набор берёт ОБЩУЮ площадку вместо своей (149):\n  "
         + "\n  ".join(named)
