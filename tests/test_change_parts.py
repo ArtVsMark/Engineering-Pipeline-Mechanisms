@@ -142,3 +142,108 @@ def test_a_merge_commit_does_not_hide_its_files(tmp_path, run_script) -> None:  
         "файл слияния выпал из счёта: комбинированный дифф прячет то, что совпало"
         f" с родителем — видно только {sorted(видно)}"
     )
+
+
+def test_work_that_arrived_by_a_merge_is_not_counted_as_ours(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Граница считается по СВОИМ коммитам, а не по всему, что видно из головы.
+
+    `base..HEAD` берёт и то, что пришло в ветку СЛИЯНИЕМ общей: коммиты второго
+    родителя, если база отстала, и сам merge-коммит, чей дифф против первого
+    родителя есть ровно чужая работа. Тогда граница изменения считается по
+    чужим файлам, и «одна часть» звучит там, где тем изменения две
+    ([133](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/133-file-overlap-sets-the-boundary.md)).
+
+    ЗАМЕР 19.09.2026, на живом изменении: после слияния общей ветки счёт назвал
+    шесть файлов, из которых два автор не трогал вовсе. Нашёл внешний взгляд
+    (`5954abc`), и в тот же день это подтвердилось своей работой.
+
+    БАЗА ЗДЕСЬ СВЕЖАЯ — ровно та, на которую механизм и рассчитан. Чужие
+    коммиты она отсекает сама; остаётся ОДИН путь, которым чужое всё равно
+    доезжает, — сам merge-коммит, чей дифф против первого родителя есть вся
+    принесённая работа. Его и проверяем: без `--no-merges` файл соседа попадёт
+    в границу через слияние, хотя автор его не писал.
+    """
+    import os
+    import subprocess
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    subprocess.run(["git", "init", "--quiet", "-b", "main", str(tmp_path)], check=True)
+    run("config", "user.email", "кто@то")
+    run("config", "user.name", "кто-то")
+    (tmp_path / "начало").write_text("раз", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "начало")
+
+    run("checkout", "--quiet", "-b", "своя")
+    (tmp_path / "своё").write_text("два", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "своя работа")
+
+    run("checkout", "--quiet", "main")
+    (tmp_path / "чужое").write_text("три", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "чужая работа")
+
+    # База берётся ПОСЛЕ чужого коммита: так выглядит свежая общая ветка,
+    # которую окно подтянуло перед счётом.
+    база = subprocess.run(
+        ["git", "rev-parse", "main"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+
+    run("checkout", "--quiet", "своя")
+    run("merge", "--no-ff", "--quiet", "-m", "слияние общей в свою", "main")
+
+    here = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        видно = {name for commit in module.touched(база) for name in commit}
+    finally:
+        os.chdir(here)
+
+    assert видно == {"своё"}, (
+        f"в границу изменения попало чужое: {sorted(видно)} — слияние общей ветки"
+        " привело коммиты, которых автор не писал"
+    )
+
+
+def test_a_commit_without_a_parent_is_read_not_refused(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Коммит без родителя читается: `sha^` у него не разрешается вовсе.
+
+    Такой коммит бывает не только корнем дерева — в МЕЛКОМ клоне граничный
+    выглядит так же, а мелким клонирует облачное окно и чужой прогон. Отказ
+    входа там, где предмет есть и читается, — это отказ не по существу
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    Нашёл внешний взгляд (`95ec4bc`).
+    """
+    import os
+    import subprocess
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    subprocess.run(["git", "init", "--quiet", "-b", "main", str(tmp_path)], check=True)
+    run("config", "user.email", "кто@то")
+    run("config", "user.name", "кто-то")
+    (tmp_path / "первый").write_text("раз", encoding="utf-8")
+    (tmp_path / "второй").write_text("два", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "корень")
+
+    here = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        видно = set(module.files_of("HEAD"))
+    finally:
+        os.chdir(here)
+
+    assert видно == {"первый", "второй"}, (
+        f"корневой коммит прочитан неверно: {sorted(видно)} — у него нет родителя,"
+        " и дифф против него не разрешается"
+    )
