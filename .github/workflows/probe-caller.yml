@@ -1,0 +1,12 @@
+# Вызывающая половина замера — см. пояснение в `probe-callee.yml`.
+name: probe-caller
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  outer:
+    uses: ./.github/workflows/probe-callee.yml
