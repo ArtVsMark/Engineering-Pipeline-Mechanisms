@@ -97,7 +97,7 @@ def test_paths_are_read_by_nul_not_by_newline() -> None:
     assert 'split("\\0")' in source, "вывод разбирается не по NUL"
 
 
-def test_a_merge_commit_does_not_hide_its_files(tmp_path, run_script) -> None:  # type: ignore[no-untyped-def]
+def test_a_merge_commit_does_not_hide_its_files(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Файлы merge-коммита в счёт попадают, а не прячутся комбинированным диффом.
 
     `git show` у слияния печатает КОМБИНИРОВАННЫЙ дифф — только то, что отлично

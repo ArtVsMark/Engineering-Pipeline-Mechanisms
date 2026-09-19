@@ -29,7 +29,11 @@ FINGERPRINT: Final = re.compile(r"^[0-9a-f]{7}$")
 #: также номер правила или ответа. ЖИВОСТЬ ПРОВЕРЯЕТСЯ ОТНОШЕНИЕМ — существует
 #: ли такой путь в дереве, — а не перечнем каталогов: перечень пропускал
 #: корневые файлы, и встреча, названная `pyproject.toml`, объявлялась безадресной
-#: (18.09.2026)
+#: (18.09.2026).
+#:
+#: НАЗНАЧЕНИЙ ДВА, И ВТОРОЕ НАЗВАНО ЗДЕСЬ, А НЕ ТОЛЬКО В МЕСТЕ ВЫЗОВА: этим же
+#: образцом проверяется адрес встречи, пойманной ОКНОМ, — запись «окно: <адрес>»
+#: обязана назвать живое место дерева, иначе она неотличима от воспоминания
 #: ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
 LOOKS_LIKE_A_PATH: Final = re.compile(r"[\w.-]+(?:/[\w./-]+)*\.[a-z]{2,5}\b|[\w.-]+/[\w./-]+")
 #: Номер правила каталога или нашего ответа — адрес не в дереве, а в договоре.
@@ -119,14 +123,49 @@ def test_the_word_no_is_matched_whole_not_by_prefix() -> None:
     assert not wrong, f"живой механизм прочитан как «нет» по приставке: {wrong}"
 
 
-@pytest.mark.parametrize("name", sorted(kinds()), ids=lambda one: one)
-def test_the_split_of_origins_adds_up(name: str) -> None:
-    """Состав встреч печатается сложением, а не вторым счётом.
+#: Куда отнести встречу: запись и сторона, на которой она обязана оказаться.
+#: Таблица, а не сложение: сумма сходится у ЛЮБОГО разбиения, включая неверное.
+ORIGINS = (
+    ("отпечаток взгляда", "dbf186b", "взгляд"),
+    ("отпечаток длиннее", "a1b2c3d4e5", "взгляд"),
+    ("запись окна", "окно: tests/test_x.py — признак был шире", "окно"),
+    # СЛОВО «ОКНО» ВНУТРИ ОПИСАНИЯ ВСТРЕЧЕЙ ОКНА НЕ ДЕЛАЕТ: приставка читается
+    # с начала строки, а не где угодно в ней (141).
+    ("слово «окно» в середине", "9661544 — окно перечитало свой же разбор", "взгляд"),
+    ("похожее слово", "оконный гейт не видел формы", "взгляд"),
+    # ФОРМА СТРОГАЯ, И ЭТО ПРОВЕРЕНО РЯДОМ: запись без пробела после двоеточия к
+    # окну НЕ относится — и потому обязана быть отвергнута как встреча вовсе.
+    # Тихо уехать в «взгляд» она не должна: там её приняли бы за отпечаток.
+    ("окно без пробела — не эта форма", "окно:tests/test_x.py", "взгляд"),
+)
 
-    «Взгляд» и «окно» — разные совокупности, и читателю долга видно, дошёл ли
-    род до общей ветки. Второй список того же разошёлся бы с первым молча
-    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)),
-    поэтому происхождение живёт в самой записи встречи, а состав вычисляется.
+
+@pytest.mark.parametrize(("case", "met", "side"), ORIGINS, ids=[one[0] for one in ORIGINS])
+def test_each_meeting_lands_on_the_side_it_belongs_to(case: str, met: str, side: str) -> None:
+    """Встреча относится к своей стороне: «взгляд» или «окно».
+
+    ЗДЕСЬ БЫЛА ТАВТОЛОГИЯ, И НАШЁЛ ЕЁ ВЗГЛЯД. Прежняя редакция сверяла, что
+    `взгляд + окно == len(встречен)` — а `origins` считает первое слагаемое
+    ВЫЧИТАНИЕМ второго из длины, то есть равенство держалось по построению и не
+    могло не сойтись. Проверка говорила о разбиении, ничего о нём не утверждая
+    ([150](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/150-a-test-asks-the-mechanism-not-its-condition.md)).
+    """
+    seen, caught = module.origins({"встречен": [met]})
+    got = "окно" if caught else "взгляд"
+    assert (seen, caught) == ((0, 1) if side == "окно" else (1, 0)), (
+        f"«{case}» отнесено к «{got}», а это {side}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(kinds()), ids=lambda one: one)
+def test_the_split_of_origins_covers_every_meeting(name: str) -> None:
+    """Ни одна встреча не теряется при разбиении: состав печатается сложением.
+
+    Половина слабая, и сказано это вслух: сумма сходится у любого разбиения.
+    Держит она другое — что `origins` не второй СПИСОК рядом с записью, а счёт
+    по ней самой
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Отнесение проверяет таблица выше.
     """
     body = kinds()[name]
     seen, caught = module.origins(body)
@@ -220,3 +259,17 @@ def test_a_missing_record_is_the_third_outcome(tmp_path, run_script) -> None:  #
     done = run_script("finding_kinds.py", "--kinds", str(tmp_path / "нет.json"))
     assert done.code == module.EXIT_BROKEN
     assert "взять неоткуда" in done.err, done.err
+
+
+def test_a_window_record_written_loosely_is_refused_not_recounted() -> None:
+    """Запись «окно:» без пробела — не встреча вовсе, а не встреча взгляда.
+
+    Разбиение относит её к «взгляду», потому что приставки там нет; если бы на
+    этом всё и кончалось, кривая запись считалась бы отпечатком находки, которой
+    не было. Поэтому форму держит отдельная проверка, и здесь прогоняется
+    именно она — отказ, а не пересчёт
+    ([141](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/141-a-marker-is-matched-whole-not-by-prefix.md)).
+    """
+    said = "окно:tests/test_finding_kinds.py"
+    assert not FINGERPRINT.match(said), "кривая запись прошла бы за отпечаток"
+    assert not said.startswith(module.IN_WINDOW), "форма встречи в окне требует пробела"

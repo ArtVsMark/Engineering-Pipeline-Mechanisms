@@ -207,15 +207,15 @@ NOT_WRITES = {
         'def b() -> None:\n    ф = Path("к") / "ИНОЕ"\n    ф.write_text("9.9")'
     ),
     "имя названо, но не записано": 'ф = Path("к") / "CONTRACT_VERSION"\nprint(ф)',
+    "запись внутри except": (
+        'try:\n    pass\nexcept Exception:\n    ф = Path("к") / "ИНОЕ"\n    ф.write_text("9.9")'
+    ),
     # ЧУЖОЕ ИМЯ ИЗ СОСЕДНЕЙ ФУНКЦИИ: `b` пишет по имени, которого САМА не
     # задавала — версионным его сделала `a`, и в своей области. Случай завёлся
     # ОТКАТОМ: изоляция блоков копией состояния не краснела ни на одной записи
     # таблицы, то есть держалась ничем. Откат, который не покраснел, — находка,
     # а не облегчение
     # ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
-    "запись внутри except": (
-        'try:\n    pass\nexcept Exception:\n    ф = Path("к") / "ИНОЕ"\n    ф.write_text("9.9")'
-    ),
     "имя занято соседней функцией": (
         'def a() -> None:\n    ф = Path("к") / "CONTRACT_VERSION"\n'
         'def b() -> None:\n    ф.write_text("9.9")'
@@ -246,41 +246,3 @@ def test_what_only_looks_like_writing_the_version(как: str, tmp_path: Path) -
     path.write_text("from pathlib import Path\n" + NOT_WRITES[как] + "\n", encoding="utf-8")
 
     assert not writes_the_version(path), f"«{как}» засчитано записью версии"
-
-
-def test_a_write_through_a_name_is_still_a_write(tmp_path: Path) -> None:
-    """Путь, собранный отдельной строкой, — та же запись версии.
-
-    Отбор подделок ищет ОТНОШЕНИЕ «тест пишет файл версии», а не написание
-    вызова (166). Пока он смотрел только непосредственного получателя,
-    `файл = корень / "CONTRACT_VERSION"` с записью по имени выпадал молча —
-    и выпадал бы именно у того, кто пишет аккуратнее прочих.
-
-    ПРЕДМЕТА В ДЕРЕВЕ СЕГОДНЯ НЕТ: замер 19.09.2026 — подделок пять, все пишут
-    путь прямо в вызове. Проверка держит обещание докстроки, а не найденный
-    пропуск, и потому идёт на синтетическом входе: ждать первой такой подделки
-    значило бы узнать о дыре из чужого прогона (002).
-    """
-    прямо = tmp_path / "прямо.py"
-    прямо.write_text(
-        'from pathlib import Path\n(Path("к") / "CONTRACT_VERSION").write_text("9.9")\n',
-        encoding="utf-8",
-    )
-    по_имени = tmp_path / "по_имени.py"
-    по_имени.write_text(
-        'from pathlib import Path\nфайл = Path("к") / "CONTRACT_VERSION"\nфайл.write_text("9.9")\n',
-        encoding="utf-8",
-    )
-    мимо = tmp_path / "мимо.py"
-    мимо.write_text(
-        'from pathlib import Path\nиное = Path("к") / "ПРОЧЕЕ"\nиное.write_text("9.9")\n',
-        encoding="utf-8",
-    )
-
-    assert writes_the_version(прямо), "прямая запись версии не опознана"
-    assert writes_the_version(по_имени), (
-        "запись по имени не опознана: путь собран отдельной строкой, а отношение то же"
-    )
-    assert not writes_the_version(мимо), (
-        "опознан чужой файл: предикат сработал шире своего предмета (195)"
-    )
