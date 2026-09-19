@@ -24,7 +24,7 @@ from typing import Any, ClassVar, Final
 import ghrest as transport
 import pytest
 
-from tests.conftest import code_files
+from tests.conftest import code_files, names_used
 
 
 class Fake(BaseHTTPRequestHandler):
@@ -198,9 +198,44 @@ def test_no_mechanism_parses_the_label_config_itself(path: Path) -> None:
     assert "labels.yml" not in text or "labels.load" in text or "import labels" in text, (
         f"{path.name} обращается к составу меток мимо общего модуля"
     )
-    assert "yaml.safe_load" not in text or path.name in YAML_READERS, (
+    # УПОТРЕБЛЕНИЕ, А НЕ ПОДСТРОКА. Поиск текстом видит имя и в комментарии,
+    # который это самое правило ОБЪЯСНЯЕТ, — и отвергает исправный модуль.
+    # Поймано на себе 19.09.2026: `consumers.py` сослался на разбор в пояснении
+    # к тому, почему он его не делает, и гейт покраснел
+    # ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md),
+    # [051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    assert "safe_load" not in names_used(path) or path.name in YAML_READERS, (
         f"{path.name} разбирает YAML сам, а его нет среди тех, кому это положено: "
         f"{', '.join(sorted(YAML_READERS))}"
+    )
+
+
+def test_a_name_only_in_prose_is_not_a_use(tmp_path: Path) -> None:
+    """Имя, встреченное только в ПРОЗЕ, употреблением не считается.
+
+    Гейт выше судит употребление, а не подстроку, — и держится это здесь, а не
+    тем, что в дереве сегодня нет такого комментария. Первая редакция судила
+    текст и отвергла исправный модуль за пояснение к тому, почему он разбора НЕ
+    делает: отвергать верную работу дороже, чем пропустить неверную
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    ОТКАТ ЭТОТ СЛУЧАЙ И ЗАВЁЛ. Возврат предиката к подстроке не покраснел —
+    потому что предмет убрали переписыванием того самого комментария. Откат, не
+    покрасивший проверку, есть находка, а не облегчение
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    """
+    said = tmp_path / "прозаик.py"
+    said.write_text(
+        '"""Модуль, который разбор YAML НЕ делает."""\n'
+        "# Чужой разбор зовётся yaml.safe_load, и звать его здесь незачем.\n"
+        "import json\n\n"
+        "def читать(текст: str) -> object:\n"
+        "    return json.loads(текст)\n",
+        encoding="utf-8",
+    )
+    assert "safe_load" not in names_used(said), "имя из комментария принято за употребление"
+    assert "yaml.safe_load" in said.read_text(encoding="utf-8"), (
+        "предмет исчез: в образце больше нет имени в прозе, и проверка держит пустоту (075)"
     )
 
 
