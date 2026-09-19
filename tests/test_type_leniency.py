@@ -44,14 +44,16 @@
 from __future__ import annotations
 
 import ast
+import subprocess
 import sys
 import tomllib
+from pathlib import Path
 from typing import Final
 
 import pytest
 import yaml
 
-from tests.conftest import ROOT, found_by, walk_deep
+from tests.conftest import ROOT, found_by
 
 SETTINGS: Final = ROOT / "pyproject.toml"
 #: Откуда берётся, ЧТО разбирает шаг. Список каталогов здесь не пишется второй
@@ -97,6 +99,44 @@ def leniencies() -> list[str]:
     return found
 
 
+def carried(where: Path) -> list[Path]:
+    """Модули каталога, которые ВЕЗЁТ ЧЕКАУТ, — вглубь и без произведённого.
+
+    ПРОИЗВЕДЁННОЕ ОТСЕКАЕТСЯ ИСТОЧНИКОМ, А НЕ СПИСКОМ ИМЁН. Рекурсивный обход
+    подхватывал бы копии модулей из `build/`, `dist/` и `*.egg-info`, которые
+    заводит сборка пакета, — у окна они есть, у прогона на свежем чекауте их
+    нет, и гейт отвечал бы о ДРУГОМ дереве, чем то, на котором краснеет
+    площадка. Нашёл внешний взгляд (`54955e7`).
+
+    Запретительный список таких имён пропускал бы неугаданное — ровно то, за
+    что их и отвергают
+    ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
+    Источник здесь один и он же у прогона: `git ls-files`, то есть в точности
+    содержимое чекаута
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+    ГРАНИЦА НАЗВАНА: произведённое, которое прогон делает САМ и до шага типов,
+    сюда не попадёт — сегодня такого нет, а появится, и гейт о нём промолчит
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    said = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", str(where)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if said.returncode != 0:
+        raise AssertionError(f"список файлов чекаута не получен: {said.stderr.strip()}")
+    found = [ROOT / name for name in said.stdout.split("\0") if name.endswith(".py")]
+    if not found:
+        raise AssertionError(
+            f"в «{where}» чекаут не везёт ни одного модуля — предмет проверки исчез,"
+            " и зелёное здесь ничего не значит (075)"
+        )
+    return sorted(found)
+
+
 def imported() -> dict[str, set[str]]:
     """Полные пути модулей, которые импортирует дерево, → где именно.
 
@@ -105,13 +145,11 @@ def imported() -> dict[str, set[str]]:
     """
     found: dict[str, set[str]] = {}
     for where in judged():
-        # ВГЛУБЬ, ПОТОМУ ЧТО ШАГ ИДЁТ ВГЛУБЬ. `mypy scripts/` разбирает и
-        # подкаталоги; нерекурсивный обход отвечал бы о МЕНЬШЕМ дереве, чем то,
-        # на котором краснеет площадка, — и первый же модуль в подкаталоге
-        # уехал бы мимо гейта молча (045). Нашёл внешний взгляд (`d58e2b3`).
-        for path in walk_deep(ROOT / where, "*.py"):
-            if "__pycache__" in path.parts:
-                continue
+        # ВГЛУБЬ, ПОТОМУ ЧТО ШАГ ИДЁТ ВГЛУБЬ, И ПО ЧЕКАУТУ, ПОТОМУ ЧТО ИМ ЖЕ
+        # живёт прогон. `mypy scripts/` разбирает подкаталоги, но видит там
+        # ровно то, что приехало с чекаутом, — не сборочные копии у окна.
+        # Нашли оба внешним взглядом: `d58e2b3` и `54955e7`.
+        for path in carried(ROOT / where):
             said = str(path.relative_to(ROOT))
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 if isinstance(node, ast.Import):
@@ -142,14 +180,14 @@ def own_names() -> set[str]:
     for where in judged():
         root = ROOT / where
         found.add(root.name)
-        found |= {path.stem for path in walk_deep(root, "*.py") if path.parent == root}
+        found |= {path.stem for path in carried(root) if path.parent == root}
         found |= {path.parent.name for path in found_by(root, "*/__init__.py")}
     for where in str(doc["tool"]["mypy"].get("mypy_path", "")).split(":"):
         if not where:
             continue
-        # ОБХОД-ПРЕДМЕТ: каталог из `mypy_path`, в котором нет ни одного модуля,
-        # — обрыв, а не ответ: разбор типов тогда ищет общий низ и не находит.
-        found |= {path.stem for path in walk_deep(ROOT / where, "*.py")}
+        # ПУСТОЙ КАТАЛОГ ИЗ `mypy_path` — ОБРЫВ, а не ответ: разбор типов тогда
+        # ищет общий низ и не находит. Отказ на пустоте даёт сам `carried`.
+        found |= {path.stem for path in carried(ROOT / where)}
         # ОБХОД-ВОПРОС: пакетов рядом может не быть вовсе, и это законный ответ.
         found |= {path.parent.name for path in found_by(ROOT / where, "*/__init__.py")}
     return found
@@ -310,8 +348,8 @@ def test_the_walk_goes_as_deep_as_the_step_does() -> None:
     deeper = [
         path.relative_to(ROOT)
         for where in judged()
-        for path in walk_deep(ROOT / where, "*.py")
-        if path.parent != ROOT / where and "__pycache__" not in path.parts
+        for path in carried(ROOT / where)
+        if path.parent != ROOT / where
     ]
     assert deeper, (
         "в разбираемых каталогах нет ни одного модуля глубже первого уровня —"
@@ -320,3 +358,37 @@ def test_the_walk_goes_as_deep_as_the_step_does() -> None:
     known = own_names() | {name.split(".")[0] for name in foreign(imported())}
     missed = [path for path in deeper if path.stem not in known and path.name != "__init__.py"]
     assert not missed, f"модуль из подкаталога не попал в предмет гейта: {missed}"
+
+
+def test_a_build_copy_in_the_tree_is_not_the_subject() -> None:
+    """Сборочная копия модуля в предмет не попадает — её нет у прогона.
+
+    `pip install -e` и `python -m build` кладут копии модулей в `build/`,
+    `dist/` и `*.egg-info`. У окна они есть, у прогона на свежем чекауте — нет,
+    и гейт, читающий их, отвечал бы о ДРУГОМ дереве, чем то, на котором
+    краснеет площадка
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд (`54955e7`).
+
+    ПРОВЕРЯЕТСЯ НА НАСТОЯЩЕЙ КОПИИ, А НЕ НА ИМЕНИ КАТАЛОГА. Копия заводится в
+    дереве под тем же `git`, которым живёт чекаут: подделка подтверждала бы
+    согласие кода с нашим представлением об игнорировании, а не с ним самим
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    """
+    where = judged()[0]
+    made = ROOT / where / "build" / "lib" / "поддельный_модуль.py"
+    made.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        made.write_text("import такого_имени_нет_нигде\n", encoding="utf-8")
+        seen = {path.name for path in carried(ROOT / where)}
+        assert made.name not in seen, (
+            f"сборочная копия попала в предмет: {made.relative_to(ROOT)} — гейт судит"
+            " дерево окна, а не то, что приезжает с чекаутом"
+        )
+        assert "такого_имени_нет_нигде" not in imported(), (
+            "импорт из сборочной копии засчитан чужим — гейт покраснеет там, где площадка зелена"
+        )
+    finally:
+        made.unlink(missing_ok=True)
+        made.parent.rmdir()
+        made.parent.parent.rmdir()
