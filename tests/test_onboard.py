@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, needs_history
 
 module = load_script("onboard.py")
 policy = load_script("pipeline_checks.py")
@@ -138,8 +138,15 @@ def test_a_tree_without_runs_does_not_run(tmp_path: Path) -> None:
     assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN
 
 
+@needs_history
 def test_the_kit_is_built_on_the_live_tree(run_script: RunScript) -> None:
-    """Живое дерево: заход собирает заготовку и называет наши шаги (139)."""
+    """Живое дерево: заход собирает заготовку и называет наши шаги (139).
+
+    ИДЁТ ПО ЖИВОЙ ИСТОРИИ и потому помечен: прибивка читается из тега ВЫПУСКА,
+    а в мелком чекауте теги не приезжают. Без маркера прогон падал бы там, где
+    предмета нет вовсе, — то есть красное говорило бы о глубине клона, а не о
+    дереве (045). Нашёл внешний взгляд (`f02d34e`).
+    """
     done = run_script("onboard.py")
     assert done.code == module.EXIT_OK, done.err or done.out
     assert "uses:" in done.out and "checks:" in done.out
