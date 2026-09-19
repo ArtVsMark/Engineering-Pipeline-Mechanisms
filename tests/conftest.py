@@ -195,7 +195,18 @@ def names_used(path: Path) -> set[str]:
         elif isinstance(node, ast.Attribute):
             found.add(node.attr)
         elif isinstance(node, ast.ImportFrom):
-            found.update(alias.asname or alias.name for alias in node.names)
+            # ОБА ИМЕНИ, А НЕ ОДНО ИЗ ДВУХ. `from x import имя as другое`
+            # употребляет ОБА: `имя` — у соседа, `другое` — здесь. Прежде
+            # бралось `asname or name`, и настоящее имя терялось: файл,
+            # импортирующий механизм под псевдонимом, выпадал из отбора МОЛЧА, а
+            # промах отбора опаснее промаха предиката — гейт остаётся зелёным,
+            # ничего не проверив (045). Нашёл внешний взгляд (`71621f8`).
+            # Замер 19.09.2026: таких импортов в дереве ноль, то есть правится
+            # расхождение обещания с механизмом, а не найденный пропуск (002).
+            for alias in node.names:
+                found.add(alias.name)
+                if alias.asname:
+                    found.add(alias.asname)
     return found
 
 
