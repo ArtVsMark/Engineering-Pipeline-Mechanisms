@@ -14,6 +14,7 @@ import ast
 import inspect
 import json
 import os
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -1269,6 +1270,50 @@ def test_every_named_source_is_actually_asked() -> None:
     unasked = [one for one in module.SOURCES if f'"{one}"' not in said]
     assert not unasked, f"источник назван, а вопроса к нему нет: {unasked}"
     assert len(module.SOURCES) == len(set(module.SOURCES)), "имя источника названо дважды"
+
+    # ОБРАТНАЯ СТОРОНА — ТА, РАДИ КОТОРОЙ ПРОВЕРКА И НУЖНА. Докстрока обещала её
+    # с самого начала, а предикат выше смотрел только в одну: «названное
+    # спрошено» держит знаменатель, «спрошенное названо» — числитель. Замер
+    # 19.09.2026: спрашивалось девять источников, названо восемь, и «версии
+    # чужих действий» не значились в списке вовсе — порог «молчат все» сработал
+    # бы, когда ответил один, и промолчал бы, когда не ответил никто. Нашёл
+    # внешний взгляд (`9661544`), а проза о нём здесь уже стояла
+    # ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    #
+    # Имена берутся РАЗБОРОМ, а не подстрокой: подстрока нашлась бы и в
+    # пояснении рядом, и предикат снова оказался бы шире предмета.
+    tree = ast.parse(textwrap.dedent(said))
+    # Присваивание берётся В ОБОИХ видах: у `asks` стоит аннотация типа, то есть
+    # это `AnnAssign`, а не `Assign`. Разбор, знавший один вид, нашёл пустой
+    # список — и проверка честно отказала третьим исходом вместо того, чтобы
+    # зазеленеть на пустоте (075).
+    asked: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            named = any(getattr(target, "id", "") == "asks" for target in node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            named = getattr(node.target, "id", "") == "asks"
+        else:
+            continue
+        if not named:
+            continue
+        for pair in getattr(node.value, "elts", []):
+            if (
+                isinstance(pair, ast.Tuple)
+                and pair.elts
+                and isinstance(pair.elts[0], ast.Constant)
+                and isinstance(pair.elts[0].value, str)
+            ):
+                asked.append(pair.elts[0].value)
+    assert asked, "список вопросов не разобрался — предмета у проверки нет (075)"
+    unnamed = [one for one in asked if one not in module.SOURCES]
+    assert not unnamed, (
+        f"источник спрашивается, а в списке не назван: {unnamed} — порог «молчат все»"
+        f" считается по {len(module.SOURCES)} именам против {len(asked)} вопросов"
+    )
+    assert tuple(asked) == module.SOURCES, (
+        f"порядок разошёлся: спрашиваются {asked}, объявлены {list(module.SOURCES)}"
+    )
 
 
 def test_an_unread_protection_is_the_third_outcome_of_the_source(
