@@ -277,3 +277,29 @@ def test_the_catalogue_address_is_shared(monkeypatch: Any) -> None:
     """Адрес выгрузки берётся из общего объявления, а не пишется заново."""
     shared = load_script("catalogue.py")
     assert module.EXPORT_URL is shared.EXPORT_URL
+
+
+def test_a_new_document_not_yet_in_the_index_is_judged(tmp_path: Path) -> None:
+    """Перечень и чтение берут ОДНО дерево — то, что окно отправит.
+
+    Перечень шёл по индексу, а текст читался с диска: новый документ не судился
+    вовсе, хотя уедет вместе с остальными, а правленный после внесения судился
+    по правке. Два дерева в одном ответе расходятся молча
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд (`63c5843`).
+
+    ВЫРОВНЕНО В СТОРОНУ ДИСКА, потому что гейт советует окну ПЕРЕД толчком.
+    У соседа с договором «предскажи площадку» выровнено наоборот, и это сказано
+    там же (`tests/test_type_leniency.py::carried_text`).
+    """
+    subprocess.run(["git", "init", "--quiet", "-b", "main"], cwd=tmp_path, check=True)
+    (tmp_path / "внесён.md").write_text("внесённый\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "новый.md").write_text("ещё не внесён\n", encoding="utf-8")
+
+    found = {path.name for path in module.documents(tmp_path)}
+    assert "новый.md" in found, (
+        "новый документ не судится: перечень идёт по индексу, а уедет он вместе"
+        f" с остальными — видно только {sorted(found)}"
+    )
+    assert "внесён.md" in found, "внесённый документ выпал из перечня"

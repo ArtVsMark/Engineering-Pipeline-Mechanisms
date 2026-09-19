@@ -109,9 +109,20 @@ def claims() -> dict[str, str]:
 
 
 def documents(root: Path) -> list[Path]:
-    """Отслеживаемые документы дерева: предмет проверки."""
+    """Отслеживаемые документы дерева: предмет проверки.
+
+    ПЕРЕЧЕНЬ И ЧТЕНИЕ БЕРУТ ОДНО ДЕРЕВО. Прежде перечень шёл по индексу, а текст
+    читался с диска: документ, внесённый в индекс и правленный после, судился бы
+    по правке, а новый — не судился вовсе, хотя уедет он вместе с остальными.
+    Два дерева в одном ответе расходятся молча
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Здесь выровнено В СТОРОНУ ДИСКА — `--others`, — потому что гейт советует
+    окну ПЕРЕД толчком: судить надо то, что окно и отправит. У соседа с другим
+    договором выровнено наоборот, и это сказано у него
+    (`tests/test_type_leniency.py::carried_text`).
+    """
     listed = subprocess.run(
-        ["git", "ls-files", "-z", "*.md"],
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.md"],
         capture_output=True,
         text=True,
         encoding="utf-8",
