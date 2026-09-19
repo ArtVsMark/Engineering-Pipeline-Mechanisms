@@ -614,3 +614,19 @@ def test_the_allowed_list_equals_the_measurement() -> None:
         "разрешено впрок то, чего рисовалки не зовут: " + ", ".join(spare) + "\n  Разрешение"
         " дописывают вместе с вызовом, а не заранее."
     )
+
+
+def test_an_empty_answer_is_refused_before_the_count(tmp_path: Path) -> None:
+    """Пустой ответ каталогу отвергается РАЗБОРОМ, а не счётчиком нулей.
+
+    В списке `counted` у сборки стояло и `rules.total` — запись недостижимая:
+    до неё `rules_facts` уже отказал входу. Два места, отвергающие одно,
+    расходятся молча, и починив одно, про второе забывают
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Запись убрана, а отказ обязан остаться ровно один — этот
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    empty = tmp_path / "bindings.json"
+    empty.write_text('{"rules": {}}', encoding="utf-8")
+    with pytest.raises(facts.NotRun):
+        facts.rules_facts(empty)

@@ -622,3 +622,61 @@ def test_the_target_branch_is_read_the_same_way_everywhere(target: str, expect: 
     взгляд (090).
     """
     assert module.branch_of(target) == expect
+
+
+def test_the_reachability_sign_is_not_back(tmp_path: Path) -> None:
+    """Признак «голова достижима из общей» снят — и снят ПОВЕДЕНИЕМ, а не прозой.
+
+    СНЯТИЕ БЫЛО ПОДТВЕРЖДЕНО ЗАМЕРОМ ВКЛАДА, НО НЕ ПРОГОНОМ. Замер 18.09.2026
+    по 147 живым веткам показал, что при слиянии уплотнением голова из общей не
+    достижима почти никогда, и вклад второго признака сверх первого — ноль
+    находок. Довод был верен, но держался он комментарием: верни признак — и
+    ничего не покраснеет. Нашёл это внешний взгляд (`acc6d71`).
+
+    ПРЕДМЕТ ЗАВЕДЁН ЖИВЫМ GIT: ветка сброшена на общую, то есть её голова из
+    `origin/main` достижима, слежение за собой стоит, и ссылка `origin/<имя>`
+    НА МЕСТЕ — площадка ничего не удаляла. Прежний второй признак сказал бы
+    «работа слита» и отверг бы законный толчок
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    import os
+
+    bare = tmp_path / "площадка"
+    clone = tmp_path / "клон"
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=clone, check=True, capture_output=True)
+
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    subprocess.run(["git", "clone", "-q", str(bare), str(clone)], check=True, capture_output=True)
+    run("config", "user.email", "кто@то")
+    run("config", "user.name", "кто-то")
+    (clone / "файл").write_text("раз", encoding="utf-8")
+    run("add", "-A")
+    run("commit", "--quiet", "-m", "первый")
+    run("push", "--quiet", "-u", "origin", "main")
+    # ВЕТКА БЕЗ СВОИХ КОММИТОВ: голова та же, что у общей, — то есть достижима.
+    run("checkout", "--quiet", "-b", "agent/сброшена")
+    run("push", "--quiet", "-u", "origin", "agent/сброшена")
+    run("fetch", "--prune", "--quiet", "origin")
+
+    reachable = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+        cwd=clone,
+        capture_output=True,
+    )
+    assert reachable.returncode == 0, (
+        "предмет не воспроизвёлся: голова ветки из origin/main не достижима,"
+        " а прежний признак срабатывал именно на достижимости"
+    )
+
+    here = Path.cwd()
+    try:
+        os.chdir(clone)
+        said = module.merged_away("agent/сброшена")
+    finally:
+        os.chdir(here)
+    assert not said, (
+        "достижимость из общей снова читается как «работа слита» — признак,"
+        f" снятый по замеру, вернулся и отвергает законный толчок: {said}"
+    )
