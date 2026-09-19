@@ -61,17 +61,19 @@ def test_a_survey_names_what_it_saw_and_what_diverged(tmp_path: Path) -> None:
     assert any("интерпретатор" in one for one in said.seen)
 
 
-def test_the_survey_answers_three_questions_not_one(tmp_path: Path) -> None:
-    """У сверки три поля, и каждое отвечает своему читателю.
+def test_the_survey_answers_four_questions_not_one(tmp_path: Path) -> None:
+    """У сверки четыре поля, и каждое отвечает своему читателю.
 
     `seen` — человеку: что вообще увидено, включая сошедшееся. `problems` —
     зовущему механизму: расходится ли, и ему всё равно, чем это ставится.
-    `gaps` — команде установки. Слить их в одно значило бы заставить каждого
-    читателя разбирать чужой формат обратно
+    `gaps` — команде установки. `floor` — тому, кто печатает совет: граница уже
+    прочитана сверкой, и читать её второй раз значило бы утверждать, что дерево
+    между двумя чтениями не изменилось (005). Слить их в одно значило бы
+    заставить каждого читателя разбирать чужой формат обратно
     ([021](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/021-split-docs-by-reader.md)).
     """
-    empty = env.Survey(seen=[], problems=[], gaps=[])
-    assert (empty.seen, empty.problems, empty.gaps) == ([], [], []), (
+    empty = env.Survey(seen=[], problems=[], gaps=[], floor=(3, 12))
+    assert (empty.seen, empty.problems, empty.gaps, empty.floor) == ([], [], [], (3, 12)), (
         "поля сверки перепутаны местами: три списка с разными читателями легко"
         " переставить, и снаружи подмена не видна"
     )
@@ -117,6 +119,41 @@ def test_a_tool_outside_the_declared_bounds_is_named(tmp_path: Path) -> None:
 def test_the_floor_comes_from_the_tree(tmp_path: Path) -> None:
     """Требование к интерпретатору читается из `pyproject.toml`, а не из кода."""
     assert env.python_floor(tree(tmp_path)) == (3, 12)
+
+
+def test_the_floor_is_read_once_per_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Граница читается ОДИН раз за заход, а не отдельно каждым читателем.
+
+    Сверка спрашивает её у дерева сама — без неё она не отличит годный
+    интерпретатор от старого, — и отдаёт полем. Пока поля не было, точка входа
+    читала ту же границу повторно ради совета в конце: одно число, полученное
+    дважды за прогон, и второе чтение молчаливо утверждало, что дерево между
+    двумя вызовами не изменилось
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+    ДЕРЕВО ТРЕБУЕТ ЗАВЕДОМО НЕДОСТИЖИМОЙ ВЕРСИИ — чтобы заход дошёл до совета
+    при любом окружении запустившего. Иначе проверка судила бы чужую машину
+    вместо своего предмета (044).
+    """
+    root = tree(tmp_path, '[project]\nname = "x"\nrequires-python = ">=99.0"\n')
+    counted: list[Path] = []
+    real = env.python_floor
+
+    def counting(where: Path = Path()) -> tuple[int, int]:
+        """Считает обращения к границе и отвечает настоящим значением."""
+        counted.append(where)
+        # Разбор с приведением, а не возврат как есть: механизм приходит из
+        # `load_script`, то есть нетипизированным, и строгий разбор типов не
+        # принял бы `Any` там, где объявлена пара чисел.
+        major, minor = real(where)
+        return int(major), int(minor)
+
+    monkeypatch.setattr(env, "python_floor", counting)
+    assert env.main(["--root", str(root)]) == env.EXIT_MISMATCH
+    assert "что делать" in capsys.readouterr().out, "заход не дошёл до совета — предмета нет (075)"
+    assert len(counted) == 1, f"граница прочитана {len(counted)} раз(а) за один заход: {counted}"
 
 
 def test_a_tree_without_requirements_is_an_input_error(tmp_path: Path) -> None:
