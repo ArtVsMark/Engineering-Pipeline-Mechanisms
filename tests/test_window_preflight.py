@@ -599,6 +599,52 @@ def test_without_the_flag_nothing_is_pushed(monkeypatch: pytest.MonkeyPatch) -> 
     assert not pushed, "проверка толкнула без просьбы"
 
 
+def test_an_environment_gap_runs_nothing_at_all(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Расхождение окружения останавливает заход ДО первого шага.
+
+    «Предполётная НЕ ЗАПУЩЕНА» — утверждение из ДВУХ половин, и код возврата
+    несёт только первую. Вторая — что ни один шаг не побежал: зелёное на чужих
+    версиях предсказывает площадку хуже, чем молчание, и потому его не должно
+    существовать вовсе
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ПОЧЕМУ ЭТО УРОВЕНЬ `main()`, А НЕ ЮНИТ. Сама `environment_gap` проверена
+    рядом, но она лишь ОТВЕЧАЕТ; отношение «ответила непусто → ничего не
+    запущено → толчка нет» живёт в точке входа, и юнит его не видит. Соседние
+    проверки `main()` подменяют сверку ПУСТЫМ списком — то есть ходят мимо
+    этого пути все до одной, и он держался чтением
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    Взято с `--push`: так проверяются обе половины разом, и заодно третья —
+    что расхождение не доходит до толчка.
+    """
+    ran: list[object] = []
+    pushed: list[object] = []
+
+    def noted(step: object, root: object) -> tuple[int, str]:
+        """Подделка прогона шага: запоминает вызов и отвечает зелёным."""
+        ran.append(step)
+        return 0, ""
+
+    monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
+    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
+    monkeypatch.setattr(preflight, "run", noted)
+    monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    # Непустой список — вот и вся разница с соседями: они подменяют сверку
+    # ПУСТЫМ, и потому этот путь ни один из них не проходит.
+    monkeypatch.setattr(
+        preflight, "environment_gap", lambda root: ["mypy: 2.3.1, дерево требует >=1.11,<2"]
+    )
+
+    assert preflight.main(["--push"]) == preflight.EXIT_BROKEN
+    assert not ran, f"шаги побежали при расхождении окружения: {ran}"
+    assert not pushed, "толчок случился при несверенном окружении"
+    assert "НЕ ЗАПУЩЕНА" in capsys.readouterr().out
+
+
 def test_the_shared_branch_is_never_pushed_by_the_check(tmp_path: Path) -> None:
     """Общую ветку проверка не толкает: работа идёт в `agent/<задача>` (003)."""
     import subprocess
