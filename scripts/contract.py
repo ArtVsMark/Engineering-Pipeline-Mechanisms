@@ -95,12 +95,16 @@ def checks_surface(path: Path = paths.PIPELINE) -> dict[str, Any]:
     if not isinstance(document, dict):
         return {}
     checks = document.get("checks") or {}
-    classes: dict[str, str] = {}
-    for name, answer in checks.items():
-        value = answer.get("class") if isinstance(answer, dict) else answer
-        # `off` в YAML 1.1 приходит булевым — приводим к тому, как это читает
-        # человек, иначе снимок «менялся» бы от способа записи.
-        classes[str(name)] = "off" if value is False else str(value)
+    # ЗАПИСЬ РАЗБИРАЕТ ТОТ, КТО ВЛАДЕЕТ ФОРМОЙ. Здесь стоял ТРЕТИЙ разбор той же
+    # формы «голый класс либо словарь с `class`», и `off` в YAML 1.1 он приводил
+    # своим способом. Три понимания одной формы расходятся молча, а снимок
+    # поверхности — то, по чему судят «контракт тронут»: разойдись он с ответом,
+    # правка проходила бы незамеченной ровно там, где её и стерегут
+    # ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md),
+    # [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    # Нашёл внешний взгляд (`f4dd62e`) — на утверждении «разбор стал один»,
+    # сделанном, когда их оставалось два из трёх (195).
+    classes = {str(name): policy.entry_of(answer)[0] for name, answer in checks.items()}
     return {"schema": document.get("schema"), "checks": classes}
 
 
