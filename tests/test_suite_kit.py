@@ -188,6 +188,37 @@ def test_the_predicate_names_the_suite_and_not_its_permission() -> None:
     assert not calls_the_suite({"with": {"allowed_tools": "Bash(python -m pytest:*)"}})
 
 
+def test_an_empty_parametrisation_is_a_refusal_not_a_skip() -> None:
+    """Гейт по пустому списку из дерева ОТКАЗЫВАЕТ, а не собирает ноль случаев.
+
+    Проверка, идущая по списку из дерева, при пустом списке собирает НОЛЬ
+    случаев и зеленеет — снаружи она неотличима от прошедшей. Умолчание pytest
+    помечает такой набор ПРОПУСКОМ, то есть тем же молчанием
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md),
+    [045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ЗАМЕР 18.09.2026, ИЗ-ЗА КОТОРОГО ПРОВЕРКА И НАПИСАНА: пояснение над
+    `addopts` требовало этого с самого начала — «гейт, не нашедший предмета,
+    обязан падать», — а ключа, который держит требование, в настройках не было.
+    Обходов дерева в наборе 51, и любой из них мог опустеть молча
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    ЗНАЧЕНИЕ СВЕРЯЕТСЯ С ЖИВОЙ НАСТРОЙКОЙ, а не с текстом файла: `pytest` мог бы
+    прочесть его иначе, и тогда проверка утверждала бы написанное вместо
+    действующего
+    ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
+    """
+    import _pytest.config
+
+    config = _pytest.config.get_config([str(ROOT)])
+    config.parse([str(ROOT / "tests")])
+    said = config.getini("empty_parameter_set_mark")
+    assert said == "fail_at_collect", (
+        f"пустая параметризация помечена «{said}»: гейт по пустому списку из дерева"
+        " собрал бы ноль случаев и был бы зелёным. Нужно «fail_at_collect»"
+    )
+
+
 def test_the_measuring_runner_is_among_them() -> None:
     """Шаг значков, считающий покрытие, — прогонщик набора, а не сосед.
 
