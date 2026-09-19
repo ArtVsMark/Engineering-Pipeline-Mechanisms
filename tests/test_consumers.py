@@ -17,7 +17,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -118,3 +118,39 @@ def test_the_live_registry_is_readable() -> None:
     assert module.CONNECTED in said, "в реестре нет раздела подключённых"
     assert not said[module.CONNECTED], "подключённые появились — перемерьте этот прогон"
     assert any("пуст" in key for key in said), "пустота реестра не названа причиной (154)"
+
+
+#: Реестры не той формы: каждый обязан дойти до объявленного исхода, а не
+#: уронить заход. Снаружи `AttributeError` неотличим от поломки механизма.
+MALFORMED: Final = (
+    ("реестр — список", "[]"),
+    ("реестр — строка", '"ничего"'),
+    ("раздел — словарь", '{"connected": {"o/r": "да"}}'),
+    ("запись — строка", '{"connected": ["o/r"]}'),
+    ("запись — число", '{"connected": [7]}'),
+)
+
+
+@pytest.mark.parametrize(("case", "said"), MALFORMED, ids=[one[0] for one in MALFORMED])
+def test_a_malformed_registry_reaches_its_outcome(tmp_path: Path, case: str, said: str) -> None:
+    """Реестр не той формы доходит до ОБЪЯВЛЕННОГО исхода, а не роняет заход.
+
+    Модуль объявляет исходы в своей докстроке (039), и `AttributeError` мимо
+    них — не один из них: снаружи он читается как поломка механизма, а не как
+    ошибка входа (075). Нашёл внешний взгляд (`0612be4`).
+    """
+    (tmp_path / ".rules").mkdir(parents=True)
+    (tmp_path / ".rules" / "consumers.json").write_text(said, encoding="utf-8")
+    assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN, case
+
+
+def test_the_entry_is_parsed_by_the_owner_of_the_form() -> None:
+    """Запись ответа разбирает тот, кто владеет формой, — обе её формы.
+
+    Форм две: голый класс и словарь. Выемка класса делалась в двух местах, и
+    общим было сделано только приведение к строке: поменяйся форма у владельца,
+    здесь она осталась бы прежней, и объявленный обход стал бы невидим (090).
+    """
+    assert policy.entry_of({"class": "off", "why": "своё"}) == (policy.OFF, "своё", "")
+    assert policy.entry_of(False) == (policy.OFF, "", "")
+    assert policy.entry_of("required") == (policy.REQUIRED, "", "")

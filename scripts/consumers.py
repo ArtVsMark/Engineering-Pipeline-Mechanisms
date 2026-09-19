@@ -70,11 +70,21 @@ def registry(root: Path) -> list[dict[str, Any]]:
         said = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise NotRun(f"{path} не разбирается: {exc}") from exc
+    # ФОРМА ПРОВЕРЯЕТСЯ СВЕРХУ ВНИЗ, И КАЖДЫЙ ПРОМАХ — ОБЪЯВЛЕННЫЙ ИСХОД.
+    # Прежде верх реестра и его записи принимались на веру: список вместо
+    # словаря или строка вместо записи роняли `AttributeError` МИМО `NotRun` —
+    # то есть мимо исхода, который модуль сам и объявляет (039). Снаружи такой
+    # сбой неотличим от поломки механизма, а не от ошибки входа (075).
+    # Нашёл внешний взгляд (`0612be4`).
+    if not isinstance(said, dict):
+        raise NotRun(f"{path}: реестр не словарь — читать нечего")
     rows = said.get(CONNECTED)
     if not isinstance(rows, list):
         raise NotRun(f"{path}: раздел «{CONNECTED}» не список — читать нечего")
     for one in rows:
-        missing = [field for field in REQUIRED if not str((one or {}).get(field, "")).strip()]
+        if not isinstance(one, dict):
+            raise NotRun(f"{path}: запись «{one}» не словарь — адрес из неё не прочесть")
+        missing = [field for field in REQUIRED if not str(one.get(field, "")).strip()]
         if missing:
             raise NotRun(f"{path}: запись {one} не называет {', '.join(missing)}")
     return [dict(one) for one in rows]
@@ -107,15 +117,13 @@ def bypassed(answer: dict[str, Any]) -> list[str]:
     """
     found: list[str] = []
     for name, said in (answer.get("checks") or {}).items():
-        # КЛАСС ПРИВОДИТСЯ К СТРОКЕ ЧУЖИМ РАЗБОРОМ, А НЕ СВОИМ. YAML 1.1 читает
-        # `off` БУЛЕВЫМ — та же ловушка, что с `on:` в прогонах, — и свой разбор
-        # был бы вторым её пониманием: разошлись бы они молча, а «обход» стал бы
-        # невидимым ровно там, где он и объявлен
-        # ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
-        raw = said if not isinstance(said, dict) else (said or {}).get("class")
-        if policy.text_of(raw) != policy.OFF:
+        # ЗАПИСЬ РАЗБИРАЕТ ТОТ, КТО ВЛАДЕЕТ ФОРМОЙ. Форм у неё две — голый класс
+        # и словарь, — а YAML 1.1 вдобавок читает `off` БУЛЕВЫМ. Свой разбор был
+        # бы вторым пониманием: разошлись бы они молча, а объявленный обход стал
+        # бы невидимым ровно там, где он и объявлен (090, 022).
+        klass, why, _ = policy.entry_of(said)
+        if klass != policy.OFF:
             continue
-        why = str(said.get("why", "")).strip() if isinstance(said, dict) else ""
         found.append(f"{name}" + ("" if why else " — БЕЗ ПРИЧИНЫ"))
     return sorted(found)
 
