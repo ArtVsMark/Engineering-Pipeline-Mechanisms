@@ -127,20 +127,25 @@ def paired(targets: list[ast.AST], source: ast.AST) -> list[tuple[str, ast.AST]]
     """
     made: list[tuple[str, ast.AST]] = []
     for target in targets:
+        if isinstance(target, ast.Name):
+            made.append((target.id, source))
+            continue
         if not isinstance(target, UNPACKED):
-            if isinstance(target, ast.Name):
-                made.append((target.id, source))
             continue
         elts = target.elts
         starred = any(isinstance(one, ast.Starred) for one in elts)
         if isinstance(source, UNPACKED) and not starred and len(source.elts) == len(elts):
-            made += [
-                (one.id, from_what)
-                for one, from_what in zip(elts, source.elts, strict=True)
-                if isinstance(one, ast.Name)
-            ]
+            # ВГЛУБЬ, ПОТОМУ ЧТО РАСПАКОВКА БЫВАЕТ ВЛОЖЕННОЙ. `a, (b, c) = …`
+            # даёт внутри цели снова кортеж, и плоский разбор терял `b` и `c`
+            # ЦЕЛИКОМ: ни поэлементно, ни откатом на всё выражение. Нашёл
+            # внешний взгляд (`4709f9c`).
+            for one, from_what in zip(elts, source.elts, strict=True):
+                made += paired([one], from_what)
             continue
-        made += [(one.id, source) for one in elts if isinstance(one, ast.Name)]
+        # ПОЭЛЕМЕНТНО НЕ ВЫХОДИТ — источником считается всё выражение, и это
+        # тоже идёт вглубь: `a, (b, c) = что_то()` связывает корнем все три.
+        for one in elts:
+            made += paired([one], source) if not isinstance(one, ast.Name) else [(one.id, source)]
     return made
 
 
@@ -230,12 +235,18 @@ def test_no_test_walks_the_real_tree_bare() -> None:
     )
 
 
-#: Пять способов связать имя с настоящим деревом и два — со своим. Список
-#: закрытый и закреплён прогоном: первая редакция признака знала ТОЛЬКО
-#: присваивание верхнего уровня, и три из четырёх форм проходили мимо (нашёл
-#: внешний взгляд на #510, назвав два живых примера). Пятую — распаковку —
-#: назвал взгляд на #512 (`f8abcb3`): цель там одна и это КОРТЕЖ, а не имя,
-#: и прежний разбор не размечал НИ ОДНОГО из распакованных.
+#: Способы связать имя с настоящим деревом и способы связать его со своим —
+#: одной таблицей, обе стороны разом. Числа здесь не называются: таблица
+#: пополняется каждым разобранным случаем, и вписанное число рассыхается первой
+#: же записью — оно уже рассохлось однажды, «пять» при шести истинных
+#: ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+#:
+#: Список закрытый и закреплён прогоном: первая редакция признака знала ТОЛЬКО
+#: присваивание верхнего уровня, и три формы проходили мимо (нашёл внешний
+#: взгляд на #510, назвав два живых примера). Распаковку назвал взгляд на #512
+#: (`f8abcb3`): цель там одна и это КОРТЕЖ, а не имя, и прежний разбор не
+#: размечал НИ ОДНОГО из распакованных. Вложенную — взгляд на #539
+#: (`4709f9c`): плоский разбор терял её имена целиком.
 WAYS_IN: Final = (
     ("присваиванием модуля", "СВОЙ = ROOT / 'scripts'\nСВОЙ.glob('*.py')\n", True),
     ("локальной переменной", "def f():\n    x = ROOT / 'scripts'\n    x.glob('*.py')\n", True),
@@ -255,7 +266,24 @@ WAYS_IN: Final = (
         "def f():\n    a, b = (ROOT / 'scripts').parts\n    b.glob('*.py')\n",
         True,
     ),
+    (
+        "вложенной распаковкой",
+        "def f():\n    a, (b, c) = ROOT / 's', (ROOT / 't', ROOT / 'u')\n    c.glob('*.py')\n",
+        True,
+    ),
+    (
+        "вложенной распаковкой из одного выражения",
+        "def f():\n    a, (b, c) = (ROOT / 's').что_то()\n    c.glob('*.py')\n",
+        True,
+    ),
     ("своим корнем", "def f(tmp_path):\n    x = tmp_path / 'x'\n    x.glob('*.py')\n", False),
+    (
+        "чужая ветвь вложенной распаковки",
+        "def f(tmp_path):\n"
+        "    a, (b, c) = ROOT / 's', (tmp_path / 't', tmp_path / 'u')\n"
+        "    c.glob('*.py')\n",
+        False,
+    ),
     # РАСПАКОВКА РАЗБИРАЕТСЯ ПОЭЛЕМЕНТНО: чужая половина остаётся чужой.
     # Пометить оба имени значило бы отвергать верную работу (051).
     (
