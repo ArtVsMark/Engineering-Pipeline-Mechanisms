@@ -140,13 +140,27 @@ def bare_walks() -> list[str]:
     return found
 
 
+def _called_name(head: ast.expr) -> str:
+    """Имя вызываемого — голое или последнее через точку.
+
+    Обходчик зовут обеими записями: `walk(...)` у того, кто его импортировал, и
+    `conftest.walk(...)` у того, кто взял модулем. Разбор, знающий только
+    голое имя, вторую запись не видит, и проверка предмета зеленела бы, не
+    найдя половины
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд (`7aa4bac`) — и нашёл потому, что гейт форм вызова эту
+    функцию НЕ СУДИЛ: разбор через `getattr` в его предмет не попадал.
+    """
+    return str(getattr(head, "id", "") or getattr(head, "attr", ""))
+
+
 def test_the_subject_of_this_gate_exists() -> None:
     """Предмета нет — отказ, а не «чисто» (075)."""
     shared = [
         one
         for path in walk(ROOT / "tests", "*.py")
         for one in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        if isinstance(one, ast.Call) and getattr(one.func, "id", "") in SHARED
+        if isinstance(one, ast.Call) and _called_name(one.func) in SHARED
     ]
     assert shared, "общими обходчиками в наборе не пользуется никто — сверять нечего"
 
