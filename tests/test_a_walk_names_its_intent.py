@@ -144,8 +144,11 @@ def paired(targets: list[ast.AST], source: ast.AST) -> list[tuple[str, ast.AST]]
             continue
         # ПОЭЛЕМЕНТНО НЕ ВЫХОДИТ — источником считается всё выражение, и это
         # тоже идёт вглубь: `a, (b, c) = что_то()` связывает корнем все три.
+        # Голое имя отдельной ветвью не разбирается: его берёт первая же
+        # проверка этой функции, и вторая такая же читалась бы как РАЗНЫЙ
+        # разбор для одного случая (`5006e05`).
         for one in elts:
-            made += paired([one], source) if not isinstance(one, ast.Name) else [(one.id, source)]
+            made += paired([one], source)
     return made
 
 
