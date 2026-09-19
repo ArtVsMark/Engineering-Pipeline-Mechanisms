@@ -148,7 +148,7 @@ def test_every_file_of_the_storage_is_declared() -> None:
         assert directory.is_dir(), f"хранилища {where} нет — предмет проверки не найден (075)"
         stray += [
             f"{where}/{item.name}"
-            for item in sorted(directory.iterdir())
+            for item in walk(directory)
             if item.is_file() and f"{where}/{item.name}" not in declared
         ]
     assert not stray, (

@@ -61,7 +61,20 @@ MINE: Final = "test_a_walk_names_its_intent.py"
 
 
 def leftmost(node: ast.AST) -> str:
-    """Самое левое имя выражения пути: `ROOT`, `tmp_path`, `WORKFLOWS`…"""
+    """Самое левое имя выражения пути: `ROOT`, `tmp_path`, `WORKFLOWS`…
+
+    ОБЩИЙ ОБХОДЧИК ПРОЗРАЧЕН: `walk(ROOT, …)` отдаёт пути НАСТОЯЩЕГО дерева, и
+    имя, связанное его результатом, тоже настоящее. Без этого `package` из
+    включения по `walk(ROOT, …)` считался чужим корнем, и голый обход от него
+    оставался невидимым (нашёл внешний взгляд на #510).
+    """
+    if isinstance(node, ast.Call) and getattr(node.func, "id", "") in SHARED and node.args:
+        return leftmost(node.args[0])
+    # СПИСОК ПУТЕЙ — ТОТ ЖЕ ПУТЬ. `for one in [ROOT / "scripts"]` прячет корень
+    # внутрь литерала, и без этого имя цикла считалось чужим (найдено откатом,
+    # третьей формой из четырёх).
+    if isinstance(node, ast.List | ast.Tuple | ast.Set) and node.elts:
+        return leftmost(node.elts[0])
     while isinstance(node, ast.BinOp | ast.Attribute | ast.Subscript | ast.Call):
         node = (
             node.left
@@ -71,17 +84,43 @@ def leftmost(node: ast.AST) -> str:
     return getattr(node, "id", "?")
 
 
-def rooted_names(tree: ast.Module) -> set[str]:
-    """Имена модуля, выведенные из корня дерева, — по присваиваниям."""
+def bound_by(node: ast.AST) -> tuple[list[ast.AST], ast.AST | None]:
+    """Что связывает узел: какие имена он даёт и из чего они выведены."""
+    if isinstance(node, ast.AnnAssign):
+        return [node.target], node.value
+    if isinstance(node, ast.Assign):
+        return list(node.targets), node.value
+    if isinstance(node, ast.For | ast.AsyncFor | ast.comprehension):
+        return [node.target], node.iter
+    return [], None
+
+
+def rooted_names(tree: ast.AST) -> set[str]:
+    """Имена, выведенные из корня дерева, — ГДЕ БЫ ОНИ НИ СВЯЗАЛИСЬ.
+
+    ПЕРВАЯ РЕДАКЦИЯ СМОТРЕЛА ТОЛЬКО ВЕРХНИЙ УРОВЕНЬ МОДУЛЯ, и голый обход через
+    локальную переменную оставался невидимым — при том что гейт объявлял себя
+    ловящим «любой голый обход настоящего дерева». Два живых примера назвал
+    внешний взгляд на #510: `package.parent.glob(…)`, где `package` приходит из
+    включения по `walk(ROOT, …)`, и `directory.iterdir()`, где `directory` —
+    переменная цикла по `ROOT / where`
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+
+    ОБХОД ИДЁТ ДО НЕПОДВИЖНОЙ ТОЧКИ: имя, выведенное из уже известного, само
+    становится известным, и порядок связывания значения не имеет — включение
+    может стоять раньше присваивания, которое его кормит.
+    """
     found = {THE_TREE}
-    for node in tree.body:
-        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
-            continue
-        if leftmost(node.value) not in found:
-            continue
-        targets = [node.target] if isinstance(node, ast.AnnAssign) else node.targets
-        found |= {one.id for one in targets if isinstance(one, ast.Name)}
-    return found
+    while True:
+        grown = set(found)
+        for node in ast.walk(tree):
+            targets, source = bound_by(node)
+            if source is None or leftmost(source) not in grown:
+                continue
+            grown |= {one.id for one in targets if isinstance(one, ast.Name)}
+        if grown == found:
+            return found
+        found = grown
 
 
 def bare_walks() -> list[str]:
@@ -124,6 +163,49 @@ def test_no_test_walks_the_real_tree_bare() -> None:
         "\n  Пустота, законная по существу, объявляется причиной:"
         " walk(..., may_be_empty=«…»)."
     )
+
+
+#: Четыре способа связать имя с настоящим деревом и один — со своим. Список
+#: закрытый и закреплён прогоном: первая редакция признака знала ТОЛЬКО
+#: присваивание верхнего уровня, и три из четырёх форм проходили мимо (нашёл
+#: внешний взгляд на #510, назвав два живых примера).
+WAYS_IN: Final = (
+    ("присваиванием модуля", "СВОЙ = ROOT / 'scripts'\nСВОЙ.glob('*.py')\n", True),
+    ("локальной переменной", "def f():\n    x = ROOT / 'scripts'\n    x.glob('*.py')\n", True),
+    ("переменной цикла", "def f():\n    for d in [ROOT / 'scripts']:\n        d.iterdir()\n", True),
+    (
+        "целью включения",
+        "def f():\n    [y for d in walk(ROOT, 's') for y in d.glob('*.py')]\n",
+        True,
+    ),
+    ("своим корнем", "def f(tmp_path):\n    x = tmp_path / 'x'\n    x.glob('*.py')\n", False),
+)
+
+
+def test_every_way_of_binding_a_rooted_name_is_seen() -> None:
+    """Имя настоящего дерева опознаётся, КАК БЫ оно ни связалось.
+
+    Формы перечислены списком, а не выведены, и каждая держится своим случаем:
+    признак, знающий одну форму из четырёх, зеленеет на трёх остальных, ничего
+    не проверив
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Пятый случай — отрицательный: свой корень остаётся чужим, иначе гейт красил
+    бы исправное (044).
+    """
+    wrong: list[str] = []
+    for what, source, rooted in WAYS_IN:
+        tree = ast.parse(source)
+        names = rooted_names(tree)
+        seen = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in BARE
+            and leftmost(node.func.value) in names
+            for node in ast.walk(tree)
+        )
+        if seen is not rooted:
+            wrong.append(f"«{what}»: опознано={seen}, ожидалось={rooted}")
+    assert not wrong, "признак корня разошёлся с формами связывания:\n  " + "\n  ".join(wrong)
 
 
 def test_a_walk_over_a_built_tree_is_not_judged(tmp_path: Path) -> None:
