@@ -41,7 +41,15 @@ warn_unused_ignores = true
 mypy_path = "packages/transport"
 
 [[tool.mypy.overrides]]
-module = ["yaml", "pytest"]
+# `_pytest` назван рядом с `pytest` НЕ про запас: это та же библиотека, и в
+# окружении шага `типы` её нет ни под одним из имён — он ставит ruff, mypy и
+# pyyaml, а pytest не ставит. Послабление по списку имён видит только те формы,
+# которые в списке записаны: `pytest` тут стоял, `_pytest.config` — нет, и
+# первый же тест, прочитавший живую настройку через внутренний модуль, покрасил
+# шаг именем, которого в списке не оказалось
+# ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
+# Имён два, потому что `_pytest.*` не покрывает сам `_pytest`, а mypy требует оба.
+module = ["yaml", "pytest", "_pytest", "_pytest.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
