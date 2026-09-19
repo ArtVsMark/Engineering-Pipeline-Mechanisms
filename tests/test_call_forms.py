@@ -35,8 +35,16 @@ from tests.conftest import ROOT, walk
 #: Где ищем разборы: набор, механизмы и перехваты перед git.
 WHERE: Final = ("tests", "scripts", ".claude/hooks")
 #: Обе формы имени у вызова: `имя(...)` и `что.имя(...)`.
-BARE: Final = "ast.Name"
-THROUGH_DOT: Final = "ast.Attribute"
+#: Голое имя вызова — ОБЕИМИ записями разбора: через класс узла и через поле.
+#:
+#: `getattr(node.func, "id", ...)` разбирает ровно то же, что
+#: `isinstance(node.func, ast.Name)`, только без имени класса в тексте. Пока
+#: признак знал одну запись, функции со второй не попадали в предмет ВОВСЕ:
+#: гейт их не судил и молчал об этом. Замер 19.09.2026: разборщиков вызова 22,
+#: написаны через `getattr` двое, и один из них знал только голое имя. Нашёл
+#: внешний взгляд (`7aa4bac`).
+BARE: Final = ("ast.Name", '"id"', "'id'")
+THROUGH_DOT: Final = ("ast.Attribute", '"attr"', "'attr'")
 #: По чему узнаётся, что функция вообще разбирает вызов.
 PARSES_A_CALL: Final = ".func"
 
@@ -57,6 +65,11 @@ def parsers() -> list[tuple[Path, ast.FunctionDef]]:
     return found
 
 
+def _knows(body: str, forms: tuple[str, ...]) -> bool:
+    """Знает ли разбор эту форму имени — любой из записей, какими её пишут."""
+    return any(one in body for one in forms)
+
+
 def test_the_subject_of_this_gate_exists() -> None:
     """Разборов вызова нет — отказ, а не «все знают обе формы» (075)."""
     assert parsers(), (
@@ -75,10 +88,37 @@ def test_a_call_parser_knows_both_forms_of_the_name() -> None:
     blind = [
         f"{path.relative_to(ROOT)}:{node.lineno} — {node.name}"
         for path, node in parsers()
-        if BARE in (body := ast.unparse(node)) and THROUGH_DOT not in body
+        if _knows(body := ast.unparse(node), BARE) and not _knows(body, THROUGH_DOT)
     ]
     assert not blind, (
         "разбор знает вызов только голым именем — запись через точку пройдёт молча"
         " (045):\n  " + "\n  ".join(blind) + "\n  Добавьте ветку ast.Attribute либо"
         " возьмите общий разбор у соседа."
     )
+
+
+def test_the_subject_covers_both_ways_of_writing_the_parse() -> None:
+    """Предмет гейта — ОБЕ записи разбора, а не только через класс узла.
+
+    `getattr(node.func, "id", ...)` разбирает то же, что
+    `isinstance(node.func, ast.Name)`. Пока признак знал одну запись, функции со
+    второй не попадали в предмет ВОВСЕ — гейт их не судил и молчал об этом, то
+    есть сужение предмета выглядело зелёным вердиктом
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ПРОВЕРКА ЗАВЕЛАСЬ ОТКАТОМ. Сужение признака обратно до одного написания не
+    краснело ни на чём: слепая функция просто уходила из предмета, и вердикт
+    оставался зелёным. Откат, который не покраснел, — находка, а не облегчение.
+
+    ЗАМЕР 19.09.2026: разборщиков вызова 22, написаны через `getattr` двое, и
+    один из них знал только голое имя. Нашёл внешний взгляд (`7aa4bac`).
+    """
+    assert _knows('getattr(node.func, "id", "")', BARE), (
+        "голое имя через getattr не считается разбором — такая функция уйдёт из предмета"
+    )
+    assert _knows('getattr(node.func, "attr", "")', THROUGH_DOT), (
+        "имя через точку в записи getattr не считается — слепота станет невидимой"
+    )
+    assert _knows("isinstance(node.func, ast.Name)", BARE)
+    assert _knows("isinstance(node.func, ast.Attribute)", THROUGH_DOT)
+    assert not _knows("node.func.value", BARE), "признак шире предмета: годится любая проза (195)"
