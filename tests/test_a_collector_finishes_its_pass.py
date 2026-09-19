@@ -34,8 +34,11 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Final
+
+import pytest
 
 from tests.conftest import ROOT, walk
 
@@ -43,6 +46,32 @@ from tests.conftest import ROOT, walk
 WHERE: Final = ("scripts", "packages/transport", ".claude/hooks")
 #: Чем копят находки.
 COLLECTS: Final = frozenset({"append", "extend"})
+
+
+#: Что заводит СВОЮ область имён: внутрь этого признак не идёт.
+OWN_SCOPE: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+def inside(node: ast.AST) -> Iterator[ast.AST]:
+    """Узлы тела функции БЕЗ вложенных областей имён.
+
+    `ast.walk` спускается и во вложенную функцию — а её `x.append(…)` к имени
+    `x` снаружи отношения не имеет. Признак, считающий иначе, записал бы в
+    собиратели функцию, которая копит не тем именем, каким возвращает, и гейт
+    упал бы на НЕСВЯЗАННОМ `return` — то есть отверг бы верную работу
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md),
+    [195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Нашёл внешний взгляд (`93e73e0`).
+
+    ГРАНИЦА НАЗВАНА: имя, объявленное `global` или `nonlocal`, признак всё равно
+    считает своим — различать это значит вести таблицу связываний, а её тут нет
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, OWN_SCOPE):
+            continue
+        yield child
+        yield from inside(child)
 
 
 def collectors() -> list[tuple[Path, ast.FunctionDef]]:
@@ -56,7 +85,7 @@ def collectors() -> list[tuple[Path, ast.FunctionDef]]:
                     continue
                 piles = {
                     one.func.value.id
-                    for one in ast.walk(node)
+                    for one in inside(node)
                     if isinstance(one, ast.Call)
                     and isinstance(one.func, ast.Attribute)
                     and one.func.attr in COLLECTS
@@ -124,3 +153,72 @@ def test_a_break_is_not_judged_here_and_the_neighbour_exists() -> None:
         if isinstance(one, ast.Break)
     ]
     assert breaks, "у собирателей нет ни одного `break` — довод о границе пуст"
+
+
+#: Записи, на которых признак «копит этим именем» обязан ответить да и нет.
+#: Таблица, а не довод: область видимости на глаз неотличима от её отсутствия.
+SCOPES: Final = (
+    (
+        "копит своим именем",
+        "def сам():\n    куча = []\n    куча.append(1)\n    return куча",
+        True,
+    ),
+    (
+        "копит в цикле",
+        "def сам():\n    куча = []\n    for x in y:\n        куча.append(x)\n    return куча",
+        True,
+    ),
+    (
+        "копит во вложенной функции ЧУЖУЮ кучу того же имени",
+        "def сам():\n"
+        "    куча = []\n"
+        "    def сосед():\n"
+        "        куча = []\n"
+        "        куча.append(1)\n"
+        "    return куча",
+        False,
+    ),
+    (
+        "копит в лямбде",
+        "def сам():\n    куча = []\n    f = lambda: куча.append(1)\n    return куча",
+        False,
+    ),
+    (
+        "копит в теле вложенного класса",
+        "def сам():\n"
+        "    куча = []\n"
+        "    class Внутри:\n"
+        "        куча = []\n"
+        "        куча.append(1)\n"
+        "    return куча",
+        False,
+    ),
+)
+
+
+def piles_of(source: str) -> set[str]:
+    """Имена, которыми копит САМА функция, — тем же признаком, что у гейта."""
+    fn = ast.parse(source).body[0]
+    assert isinstance(fn, ast.FunctionDef)
+    return {
+        one.func.value.id
+        for one in inside(fn)
+        if isinstance(one, ast.Call)
+        and isinstance(one.func, ast.Attribute)
+        and one.func.attr in COLLECTS
+        and isinstance(one.func.value, ast.Name)
+    }
+
+
+@pytest.mark.parametrize(("case", "source", "own"), SCOPES, ids=[one[0] for one in SCOPES])
+def test_a_pile_is_counted_only_where_it_is_filled(case: str, source: str, own: bool) -> None:
+    """Куча засчитывается только там, где её и наполняют, — по области имён.
+
+    `ast.walk` спускается во вложенную функцию, и её `куча.append(…)`
+    записывался внешней: та объявлялась собирателем, не будучи им, а гейт цикла
+    падал бы на её НЕСВЯЗАННОМ `return`. Отвергать верную работу дороже, чем
+    пропустить неверную
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Нашёл внешний взгляд (`93e73e0`).
+    """
+    assert ("куча" in piles_of(source)) is own, case

@@ -95,6 +95,44 @@ def bound_by(node: ast.AST) -> tuple[list[ast.AST], ast.AST | None]:
     return [], None
 
 
+#: Чем записывают распаковку: `a, b = …` и `[a, b] = …` — одна и та же форма.
+UNPACKED: Final = (ast.Tuple, ast.List)
+
+
+def paired(targets: list[ast.AST], source: ast.AST) -> list[tuple[str, ast.AST]]:
+    """Связывания «имя ← из чего», ПЯТАЯ форма записи в том числе.
+
+    `a, b = ROOT / x, ROOT / y` даёт одну цель-кортеж, а не два имени, и разбор,
+    читающий только `ast.Name`, не размечал НИ ОДНОГО из них: голый обход от
+    `a` оставался невидимым. Нашёл внешний взгляд (`f8abcb3`).
+
+    РАСПАКОВКА РАЗБИРАЕТСЯ ПОЭЛЕМЕНТНО, А НЕ СПЛОШЬ. `a, b = ROOT / x, чужое`
+    связывает корнем только `a`: пометить оба значило бы расширить предмет на
+    законное имя и отвергать верную работу
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Когда длины не совпадают или в цели есть звёздочка, поэлементно не выходит,
+    и источником для каждого имени считается всё выражение целиком — так же,
+    как у `a, b = что_то()`.
+    """
+    made: list[tuple[str, ast.AST]] = []
+    for target in targets:
+        if not isinstance(target, UNPACKED):
+            if isinstance(target, ast.Name):
+                made.append((target.id, source))
+            continue
+        elts = target.elts
+        starred = any(isinstance(one, ast.Starred) for one in elts)
+        if isinstance(source, UNPACKED) and not starred and len(source.elts) == len(elts):
+            made += [
+                (one.id, from_what)
+                for one, from_what in zip(elts, source.elts, strict=True)
+                if isinstance(one, ast.Name)
+            ]
+            continue
+        made += [(one.id, source) for one in elts if isinstance(one, ast.Name)]
+    return made
+
+
 def rooted_names(tree: ast.AST) -> set[str]:
     """Имена, выведенные из корня дерева, — ГДЕ БЫ ОНИ НИ СВЯЗАЛИСЬ.
 
@@ -115,9 +153,11 @@ def rooted_names(tree: ast.AST) -> set[str]:
         grown = set(found)
         for node in ast.walk(tree):
             targets, source = bound_by(node)
-            if source is None or leftmost(source) not in grown:
+            if source is None:
                 continue
-            grown |= {one.id for one in targets if isinstance(one, ast.Name)}
+            for name, from_what in paired(targets, source):
+                if leftmost(from_what) in grown:
+                    grown.add(name)
         if grown == found:
             return found
         found = grown
@@ -179,10 +219,12 @@ def test_no_test_walks_the_real_tree_bare() -> None:
     )
 
 
-#: Четыре способа связать имя с настоящим деревом и один — со своим. Список
+#: Пять способов связать имя с настоящим деревом и два — со своим. Список
 #: закрытый и закреплён прогоном: первая редакция признака знала ТОЛЬКО
 #: присваивание верхнего уровня, и три из четырёх форм проходили мимо (нашёл
-#: внешний взгляд на #510, назвав два живых примера).
+#: внешний взгляд на #510, назвав два живых примера). Пятую — распаковку —
+#: назвал взгляд на #512 (`f8abcb3`): цель там одна и это КОРТЕЖ, а не имя,
+#: и прежний разбор не размечал НИ ОДНОГО из распакованных.
 WAYS_IN: Final = (
     ("присваиванием модуля", "СВОЙ = ROOT / 'scripts'\nСВОЙ.glob('*.py')\n", True),
     ("локальной переменной", "def f():\n    x = ROOT / 'scripts'\n    x.glob('*.py')\n", True),
@@ -192,7 +234,24 @@ WAYS_IN: Final = (
         "def f():\n    [y for d in walk(ROOT, 's') for y in d.glob('*.py')]\n",
         True,
     ),
+    (
+        "распаковкой кортежа",
+        "def f():\n    a, b = ROOT / 'scripts', ROOT / 'tests'\n    b.glob('*.py')\n",
+        True,
+    ),
+    (
+        "распаковкой из одного выражения",
+        "def f():\n    a, b = (ROOT / 'scripts').parts\n    b.glob('*.py')\n",
+        True,
+    ),
     ("своим корнем", "def f(tmp_path):\n    x = tmp_path / 'x'\n    x.glob('*.py')\n", False),
+    # РАСПАКОВКА РАЗБИРАЕТСЯ ПОЭЛЕМЕНТНО: чужая половина остаётся чужой.
+    # Пометить оба имени значило бы отвергать верную работу (051).
+    (
+        "чужая половина распаковки",
+        "def f(tmp_path):\n    a, b = ROOT / 'scripts', tmp_path / 'x'\n    b.glob('*.py')\n",
+        False,
+    ),
 )
 
 

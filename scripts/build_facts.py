@@ -555,11 +555,17 @@ def main(argv: list[str] | None = None) -> int:
     # означает обрыв обхода, а не состояние проекта. `coverage` сюда не входит —
     # у него свой третий исход (`read: false`), и ноль там уже разведён с
     # незнанием.
+    #
+    # ЧИСЛА ПРАВИЛ ЗДЕСЬ НЕТ, И ЭТО НЕ ПРОПУСК. Пустой ответ каталогу отвергает
+    # `rules_facts` ЗАРАНЬШЕ, своим отказом входа, — то есть до этой строки
+    # `rules.total` нулём быть не может, и запись о нём была недостижима. Два
+    # места, отвергающие одно, расходятся молча: починив одно, второе забывают
+    # (022, 195). Сосед назван: проверку держит
+    # `tests/test_facts.py::test_an_empty_answer_is_refused_before_the_count`.
     counted = {
         "tests.total": facts["tests"]["total"],
         "tests.modules": facts["tests"]["modules"],
         "scripts.runnable": facts["scripts"]["runnable"],
-        "rules.total": facts["rules"]["total"],
     }
     empty = sorted(name for name, value in counted.items() if not value)
     if empty:
