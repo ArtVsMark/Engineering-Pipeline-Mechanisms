@@ -541,6 +541,35 @@ def main(argv: list[str] | None = None) -> int:
         print(f"факты не собраны: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
+    # ПУБЛИКОВАТЬ НОЛЬ НЕЛЬЗЯ, И ГРАНИЦА ПРОХОДИТ ЗДЕСЬ, А НЕ У СЧЁТЧИКА.
+    # Счётчику ноль отдавать честно: его зовут и с синтетическим корнем, где
+    # пусто законно (`tests/test_counting.py::test_a_missing_tree_is_not_a_zero`).
+    # А вот ОПУБЛИКОВАННЫЙ ноль — уже утверждение о проекте: значок покажет
+    # «тестов 0» так же уверенно, как показал бы 1743, и читатель не отличит
+    # «посчитали» от «не нашли, где считать». Переименуй каталог набора — и
+    # витрина соврёт, не покраснев нигде
+    # ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md),
+    # [005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+    #
+    # СПИСОК СЧИТАННЫХ ЧИСЕЛ ЗАКРЫТЫЙ И НАЗВАН ЗДЕСЬ (068): это те, чей ноль
+    # означает обрыв обхода, а не состояние проекта. `coverage` сюда не входит —
+    # у него свой третий исход (`read: false`), и ноль там уже разведён с
+    # незнанием.
+    counted = {
+        "tests.total": facts["tests"]["total"],
+        "tests.modules": facts["tests"]["modules"],
+        "scripts.runnable": facts["scripts"]["runnable"],
+        "rules.total": facts["rules"]["total"],
+    }
+    empty = sorted(name for name, value in counted.items() if not value)
+    if empty:
+        print(
+            f"факты не опубликованы: {', '.join(empty)} сосчитаны в ноль — это обрыв "
+            f"обхода, а не состояние проекта (075). Корень: {args.root}",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
+
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
