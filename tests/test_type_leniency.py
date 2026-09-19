@@ -130,22 +130,62 @@ def carried(where: Path) -> list[Path]:
     промолчит
     ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
     """
-    said = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--", str(where)],
+    return sorted(carried_text(where))
+
+
+def carried_text(where: Path) -> dict[Path, str]:
+    """То же, но СОДЕРЖИМОЕ тоже из индекса, а не с диска.
+
+    ПУТЬ ИЗ ИНДЕКСА, А ТЕКСТ С ДИСКА — ЭТО ДВА РАЗНЫХ ДЕРЕВА В ОДНОМ ОТВЕТЕ.
+    Модуль, внесённый в индекс с одним содержимым и правленный после в рабочем
+    дереве, разбирался бы по правке, которой на площадке нет: гейт отвечал бы о
+    том, чего не поедет. Разойдётся это ровно там, где окно и работает —
+    посреди правки, — и разойдётся молча
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд (`834a95b`).
+
+    ЧИТАЕТСЯ ОДНИМ ЗАХОДОМ: `ls-files -s` даёт отпечатки содержимого, а
+    `cat-file --batch` отдаёт их разом. Заход на файл стоил бы полутора сотен
+    вызовов git на каждый прогон.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-s", "-z", "--cached", "--", str(where)],
         cwd=ROOT,
         capture_output=True,
         text=True,
         encoding="utf-8",
     )
-    if said.returncode != 0:
-        raise AssertionError(f"список файлов чекаута не получен: {said.stderr.strip()}")
-    found = [ROOT / name for name in said.stdout.split("\0") if name.endswith(".py")]
-    if not found:
+    if listed.returncode != 0:
+        raise AssertionError(f"список файлов чекаута не получен: {listed.stderr.strip()}")
+    blobs: dict[Path, str] = {}
+    for row in listed.stdout.split("\0"):
+        if not row:
+            continue
+        head, _, name = row.partition("\t")
+        if not name.endswith(".py"):
+            continue
+        blobs[ROOT / name] = head.split()[1]
+    if not blobs:
         raise AssertionError(
             f"в «{where}» чекаут не везёт ни одного модуля — предмет проверки исчез,"
             " и зелёное здесь ничего не значит (075)"
         )
-    return sorted(found)
+    got = subprocess.run(
+        ["git", "cat-file", "--batch"],
+        cwd=ROOT,
+        input=("\n".join(blobs.values()) + "\n").encode(),
+        capture_output=True,
+    )
+    if got.returncode != 0:
+        raise AssertionError(f"содержимое из индекса не прочитано: {got.stderr!r}")
+    found: dict[Path, str] = {}
+    rest = got.stdout
+    for path in blobs:
+        line, _, rest = rest.partition(b"\n")
+        size = int(line.split()[2])
+        found[path] = rest[:size].decode("utf-8")
+        rest = rest[size + 1 :]
+    return found
 
 
 def imported() -> dict[str, set[str]]:
@@ -156,13 +196,14 @@ def imported() -> dict[str, set[str]]:
     """
     found: dict[str, set[str]] = {}
     for where in judged():
-        # ВГЛУБЬ, ПОТОМУ ЧТО ШАГ ИДЁТ ВГЛУБЬ, И ПО ЧЕКАУТУ, ПОТОМУ ЧТО ИМ ЖЕ
-        # живёт прогон. `mypy scripts/` разбирает подкаталоги, но видит там
-        # ровно то, что приехало с чекаутом, — не сборочные копии у окна.
-        # Нашли оба внешним взглядом: `d58e2b3` и `54955e7`.
-        for path in carried(ROOT / where):
+        # ВГЛУБЬ, ПОТОМУ ЧТО ШАГ ИДЁТ ВГЛУБЬ, И ПО ЧЕКАУТУ — ПУТЬ И ТЕКСТ, —
+        # ПОТОМУ ЧТО ИМ ЖЕ живёт прогон. `mypy scripts/` разбирает подкаталоги,
+        # но видит там ровно то, что приехало с чекаутом: не сборочные копии у
+        # окна и не правку, ещё не внесённую в индекс. Нашли внешним взглядом:
+        # `d58e2b3`, `54955e7`, `834a95b`.
+        for path, text in sorted(carried_text(ROOT / where).items()):
             said = str(path.relative_to(ROOT))
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            for node in ast.walk(ast.parse(text)):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         found.setdefault(alias.name, set()).add(said)
@@ -446,3 +487,36 @@ def test_an_untracked_draft_is_not_the_subject() -> None:
         )
     finally:
         draft.unlink(missing_ok=True)
+
+
+def test_an_edit_not_yet_in_the_index_is_not_read() -> None:
+    """Содержимое берётся из индекса: правка на диске площадке ещё не видна.
+
+    Путь из индекса, а текст с диска — это два разных дерева в одном ответе.
+    Модуль, внесённый с одним содержимым и правленный после, разбирался бы по
+    правке, которой на площадке нет, и гейт отвечал бы о том, чего не поедет
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд (`834a95b`).
+
+    ПРАВКА НАСТОЯЩАЯ И В ОТСЛЕЖИВАЕМОМ ФАЙЛЕ: своё содержимое дописывается на
+    диск и снимается обратно. Подделка подтверждала бы наше представление об
+    индексе, а не сам индекс (170).
+    """
+    # ИМЯ СОБИРАЕТСЯ, А НЕ ПИШЕТСЯ ЦЕЛИКОМ: написанное целиком лежало бы в этом
+    # же файле, и проверка нашла бы САМУ СЕБЯ в содержимом из индекса — зелёное
+    # или красное там говорило бы о литерале, а не об источнике чтения.
+    mark = "не" + "внесённая" + "_правка"
+    mine = Path(__file__).resolve()
+    was = mine.read_bytes()
+    try:
+        mine.write_bytes(was + f"\nimport {mark}\n".encode())
+        text = carried_text(ROOT / "tests").get(mine)
+        assert text is not None, f"{mine.name} не найден в индексе — предмет не тот"
+        assert mark not in text, (
+            "содержимое прочитано с диска: гейт судит правку, которой на площадке нет"
+        )
+        assert mark not in imported(), (
+            "импорт из невнесённой правки засчитан — гейт покраснеет там, где площадка зелена"
+        )
+    finally:
+        mine.write_bytes(was)
