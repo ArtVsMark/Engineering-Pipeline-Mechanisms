@@ -38,7 +38,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 paths = load_script("paths.py")
 
@@ -59,7 +59,7 @@ def publishers() -> list[Path]:
     """Механизмы, переписывающие тело живой задачи поверх прежнего."""
     return [
         path
-        for path in sorted(SCRIPTS.glob("*.py"))
+        for path in walk(SCRIPTS, "*.py")
         if re.search(rf"^{MARKER}\b", path.read_text(encoding="utf-8"), re.M)
     ]
 

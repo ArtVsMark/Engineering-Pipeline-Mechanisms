@@ -29,7 +29,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import names_used
+from tests.conftest import names_used, walk
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -48,7 +48,7 @@ NEEDS_TOKEN: Final = "token_from_env"
 def reads_the_platform() -> set[str]:
     """Скрипты, которым нужен токен прогона, — по коду, а не по списку руками."""
     found = set()
-    for path in SCRIPTS.glob("*.py"):
+    for path in walk(SCRIPTS, "*.py"):
         if path.name == "ghrest.py":
             continue
         # УПОТРЕБЛЕНИЕ, а не подстрока: `env.token_from_env(...)` и импорт под
@@ -62,7 +62,7 @@ def reads_the_platform() -> set[str]:
 def steps() -> list[tuple[str, str, dict[str, Any]]]:
     """Все шаги всех прогонов: файл, имя шага и его тело."""
     collected: list[tuple[str, str, dict[str, Any]]] = []
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+    for path in walk(WORKFLOWS, "*.y*ml"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             continue

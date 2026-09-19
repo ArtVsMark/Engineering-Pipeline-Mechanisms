@@ -20,13 +20,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk_deep
 
 #: Действующие документы: те, что описывают устройство СЕЙЧАС. Журнал и
 #: фрагменты сюда не входят — они и есть летопись по построению.
 LIVE_DOCS = sorted(
     [
-        *(ROOT / "docs").rglob("*.md"),
+        *walk_deep(ROOT / "docs", "*.md"),
         ROOT / "AGENTS.md",
         ROOT / "CLAUDE.md",
         ROOT / "README.md",

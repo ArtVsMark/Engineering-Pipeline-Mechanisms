@@ -15,7 +15,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import load_script
+from tests.conftest import load_script, walk
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -31,7 +31,7 @@ def load(path: Path) -> dict[Any, Any]:
     return document
 
 
-@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_no_workflow_uses_pull_request_target(path: Path) -> None:
     """`pull_request_target` не используется НИГДЕ.
 
@@ -338,7 +338,7 @@ def test_the_install_gate_is_red_on_a_broken_job(tmp_path: Path) -> None:
     скрипт с разбором YAML и не ставит его. Нашёл внешний взгляд на #100.
     """
     broken = tmp_path / "broken.yml"
-    hungry = next(name for name in ROOT.glob("scripts/*.py") if reads_yaml(name.name))
+    hungry = next(name for name in walk(ROOT, "scripts/*.py") if reads_yaml(name.name))
     broken.write_text(
         "name: x\non:\n  push:\n    branches: [main]\n"
         "jobs:\n  голодный:\n    steps:\n"
@@ -353,7 +353,7 @@ def test_the_install_gate_is_red_on_a_broken_job(tmp_path: Path) -> None:
 def test_the_install_gate_is_green_when_the_job_installs(tmp_path: Path) -> None:
     """И зелёный, когда джоб ставит разбор сам — иначе гейт красен всегда."""
     whole = tmp_path / "whole.yml"
-    hungry = next(name for name in ROOT.glob("scripts/*.py") if reads_yaml(name.name))
+    hungry = next(name for name in walk(ROOT, "scripts/*.py") if reads_yaml(name.name))
     whole.write_text(
         "name: x\non:\n  push:\n    branches: [main]\n"
         "jobs:\n  сытый:\n    steps:\n"
@@ -364,7 +364,7 @@ def test_the_install_gate_is_green_when_the_job_installs(tmp_path: Path) -> None
     test_workflow_installs_what_its_scripts_import(whole)
 
 
-@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_workflow_installs_what_its_scripts_import(path: Path) -> None:
     """ДЖОБ ставит то, что нужно зовомому им скрипту — не файл, а джоб.
 
@@ -390,7 +390,7 @@ def test_workflow_installs_what_its_scripts_import(path: Path) -> None:
             )
 
 
-@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_exit_codes_are_read_as_an_allowlist(path: Path) -> None:
     """Зелёными считаются только объявленные коды, всё прочее — отказ.
 
@@ -426,7 +426,7 @@ def shared_caller(document: dict[Any, Any]) -> bool:
     return bool(names & set(SHARED_CALLER))
 
 
-@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
     """Где вызывающий берётся с общей ветки, вызываемое закреплено по SHA.
 
@@ -463,7 +463,7 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
 
 def test_the_pinning_gate_found_its_subject() -> None:
     """Предмет проверки найден: прогоны от общей ветки в дереве есть (075)."""
-    from_shared = [path.name for path in WORKFLOWS.glob("*.yml") if shared_caller(load(path))]
+    from_shared = [path.name for path in walk(WORKFLOWS, "*.yml") if shared_caller(load(path))]
     assert from_shared, "ни один прогон не идёт от общей ветки — проверять нечего"
 
 
@@ -511,7 +511,7 @@ def test_the_prompt_does_not_keep_its_own_list_of_rules() -> None:
     первым (090).
     """
     said: dict[str, set[str]] = {}
-    for path in WORKFLOWS.glob("*.yml"):
+    for path in walk(WORKFLOWS, "*.yml"):
         for prompt in prompts_of(path):
             if "steps.map.outputs" not in prompt:
                 continue
@@ -689,7 +689,7 @@ def executed_lines(text: str) -> list[tuple[int, str]]:
     return found
 
 
-@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_untrusted_input_never_lands_in_a_command(path: Path) -> None:
     """Чужой ввод приходит ОКРУЖЕНИЕМ, а не подстановкой в текст команды.
 
@@ -942,7 +942,7 @@ def test_a_neighbours_mark_is_not_counted_as_ours(tmp_path: Path) -> None:
     assert model_calls(run) == [(2, False), (5, True)]
 
 
-@pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_every_model_call_declares_its_input_as_data(path: Path) -> None:
     """Шаг, кладущий чужой текст в запрос к модели, объявляет его ДАННЫМИ (085).
 
@@ -969,7 +969,7 @@ def test_the_model_calls_are_found_at_all() -> None:
     Без этого соседняя проверка зеленела бы на дереве, где разбор перестал их
     узнавать — например, после переименования действия.
     """
-    found = [one for path in WORKFLOWS.glob("*.yml") for one in model_calls(path)]
+    found = [one for path in walk(WORKFLOWS, "*.yml") for one in model_calls(path)]
     assert found, "вызовов модели не найдено — разбор не узнаёт предмета"
 
 

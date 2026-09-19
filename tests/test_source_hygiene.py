@@ -21,7 +21,7 @@ from typing import Final
 import pytest
 import yaml
 
-from tests.conftest import code_files
+from tests.conftest import code_files, walk
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Источники проекта: механизмы, общий низ пакетом и набор. Список НЕ строится
@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 #: переноса транспорта в пакет сюда его вписали, а в гейт живых ссылок забыли
 #: (022, 090).
 SOURCES = code_files(with_tests=True)
-WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+WORKFLOWS = walk(ROOT / ".github" / "workflows", "*.yml")
 
 #: Команды git, отдающие СПИСОК ПУТЕЙ для последующего чтения.
 PATH_LISTING = ("--name-only", "--name-status", "ls-files", "diff-tree")

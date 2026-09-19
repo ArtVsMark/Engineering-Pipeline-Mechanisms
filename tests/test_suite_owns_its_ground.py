@@ -41,7 +41,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk_deep
 
 SUITE: Final = ROOT / "tests"
 
@@ -71,7 +71,7 @@ def suite_files() -> list[Path]:
     here = Path(__file__).resolve()
     return sorted(
         path
-        for path in SUITE.rglob("*.py")
+        for path in walk_deep(SUITE, "*.py")
         if "__pycache__" not in path.parts and path.resolve() != here
     )
 

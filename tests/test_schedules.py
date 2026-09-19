@@ -22,7 +22,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 SCHEDULES = ROOT / ".rules" / "schedules.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -40,7 +40,7 @@ def declared() -> dict[str, Any]:
 def in_tree() -> dict[str, list[str]]:
     """Расписания, реально стоящие в прогонах: файл → список cron."""
     found: dict[str, list[str]] = {}
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in walk(WORKFLOWS, "*.yml"):
         text = path.read_text(encoding="utf-8")
         document = yaml.safe_load(text)
         events = document.get(True) or document.get("on") or {}

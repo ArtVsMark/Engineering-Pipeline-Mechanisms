@@ -31,9 +31,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
-WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+WORKFLOWS = walk(ROOT / ".github" / "workflows", "*.yml")
 #: Владелец семьи: проекты, между которыми и идёт подключение версией.
 FAMILY = "ArtVsMark/"
 #: Обращение к чужому механизму: `uses: <владелец>/<имя>[/путь]@<ссылка>`.

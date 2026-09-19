@@ -39,7 +39,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 env = load_script("check_env.py")
 paths = load_script("paths.py")
@@ -58,7 +58,7 @@ def declared_versions() -> list[tuple[str, str, str]]:
     ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
     """
     found: list[tuple[str, str, str]] = []
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+    for path in walk(WORKFLOWS, "*.y*ml"):
         document: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for job, body in (document.get("jobs") or {}).items():
             for step in (body or {}).get("steps") or []:

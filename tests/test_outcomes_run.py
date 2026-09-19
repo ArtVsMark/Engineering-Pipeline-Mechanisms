@@ -29,7 +29,7 @@ import json
 from typing import Final
 
 from tests import outcomes
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 REGISTRY: Final = ROOT / ".rules" / "outcomes.json"
 
@@ -120,7 +120,7 @@ def narrowed_to_functions() -> dict[str, set[int]]:
     """
     said = outcomes.with_outcomes()
     found: dict[str, set[int]] = {name: set() for name in said}
-    for path in sorted((ROOT / "tests").glob("test_*.py")):
+    for path in walk(ROOT / "tests", "test_*.py"):
         for node in ast.walk(outcomes.tree_of(path)):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

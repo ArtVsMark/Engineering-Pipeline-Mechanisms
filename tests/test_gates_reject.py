@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from tests import outcomes
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script, walk
 
 BROKEN = 2
 REJECTED = 1
@@ -769,7 +769,7 @@ def test_scripts_are_where_the_contract_says() -> None:
         "ci_complete.py",
         "agent_pr.py",
     }
-    assert expected <= {path.name for path in (ROOT / "scripts").glob("*.py")}
+    assert expected <= {path.name for path in walk(ROOT / "scripts", "*.py")}
 
 
 def test_zones_are_applied_even_when_the_change_is_already_open(
@@ -1052,7 +1052,7 @@ def test_a_dry_run_accepts_a_branch_that_names_its_task(tmp_path: Path) -> None:
 #: второй список того же разошёлся бы с ним молча (022). Граница названа: шаги,
 #: не начинающиеся с `check_`, сюда не попадают, и если такой появится, его
 #: придётся внести — молча он не пройдёт (068).
-GATES = sorted(path.name for path in (ROOT / "scripts").glob("check_*.py"))
+GATES = sorted(path.name for path in walk(ROOT / "scripts", "check_*.py"))
 
 #: Как в этом дереве выражается ОТКАЗ гейта. Список разрешительный: новое имя
 #: исхода дописывается сюда, а не проходит само.
@@ -1088,7 +1088,7 @@ def gates_with_a_refusal_run() -> set[str]:
     ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
     """
     found: set[str] = set()
-    for path in sorted((ROOT / "tests").glob("test_*.py")):
+    for path in walk(ROOT / "tests", "test_*.py"):
         tree = outcomes.tree_of(path)
         numbers, names = outcomes.asserted(tree)
         for gate in outcomes.started_by(tree):

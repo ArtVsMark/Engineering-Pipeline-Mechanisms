@@ -27,7 +27,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Пути, которые есть у НАС и которых нет у получателя. Список назван, а не
 #: выведен: у получателя нет ровно этих каталогов, и угадывать их по дереву
@@ -43,7 +43,7 @@ def modules() -> list[Path]:
     """Модули пакетов дерева — по объявлению, а не по списку имён (005)."""
     return sorted(
         one
-        for package in ROOT.glob("packages/*/pyproject.toml")
+        for package in walk(ROOT, "packages/*/pyproject.toml")
         for one in package.parent.glob("*.py")
     )
 

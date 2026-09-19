@@ -41,7 +41,7 @@ from __future__ import annotations
 from typing import Final
 
 from tests import outcomes
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 from tests.test_gates_reject import GATES
 
 #: Как в этом дереве называют ЧИСТЫЙ исход. Список разрешительный: новое имя
@@ -64,7 +64,7 @@ def clean_of(gate: str) -> set[int]:
 def gates_with_a_clean_run() -> set[str]:
     """Гейты, у которых в наборе есть прогон их ЧИСТОГО входа."""
     found: set[str] = set()
-    for path in sorted((ROOT / "tests").glob("test_*.py")):
+    for path in walk(ROOT / "tests", "test_*.py"):
         tree = outcomes.tree_of(path)
         numbers, names = outcomes.asserted(tree)
         for gate in outcomes.started_by(tree):

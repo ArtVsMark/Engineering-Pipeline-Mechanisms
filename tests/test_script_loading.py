@@ -25,7 +25,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script, string_args_of
+from tests.conftest import ROOT, load_script, string_args_of, walk
 
 #: Как тест зовёт скрипт.
 CALL: Final = "load_script"
@@ -42,7 +42,7 @@ def asked_by_tests() -> list[str]:
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     """
     names: set[str] = set()
-    for path in (ROOT / "tests").glob("test_*.py"):
+    for path in walk(ROOT / "tests", "test_*.py"):
         for said in string_args_of(path, CALL):
             if said.endswith(".py") and (ROOT / "scripts" / said).is_file():
                 names.add(said)

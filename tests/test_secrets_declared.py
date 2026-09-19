@@ -15,7 +15,7 @@ import re
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 WORKFLOWS = ROOT / ".github" / "workflows"
 AGENTS = ROOT / "AGENTS.md"
@@ -33,7 +33,7 @@ EXAMPLES = {"X"}
 def used() -> set[str]:
     """Секреты, к которым обращаются прогоны."""
     found: set[str] = set()
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in walk(WORKFLOWS, "*.yml"):
         said = path.read_text(encoding="utf-8")
         found.update(match["name"] for match in SECRET_RE.finditer(said))
     return found - EXAMPLES

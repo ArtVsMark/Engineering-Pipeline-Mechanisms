@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 changerefs = load_script("changerefs.py")
 agent_pr = load_script("agent_pr.py")
@@ -64,7 +64,7 @@ def test_no_mechanism_reads_the_link_itself() -> None:
     Две регулярки на один вход — это не дублирование кода, а два разных
     понимания одной строки, и расходятся они молча.
     """
-    for path in sorted(SCRIPTS.glob("*.py")):
+    for path in walk(SCRIPTS, "*.py"):
         if path.name == "changerefs.py":
             continue
         # Смотрятся именно образцы `re.compile`, а не текст файла: слова

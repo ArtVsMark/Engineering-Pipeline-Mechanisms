@@ -34,7 +34,7 @@ from __future__ import annotations
 import ast
 from typing import Final
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 #: Ключи, которыми механизм объявляет пробный режим.
 DRY_FLAGS: Final = ('"--apply"', '"--dry-run"')
@@ -46,7 +46,7 @@ SCRIPTS: Final = ROOT / "scripts"
 def with_a_dry_run() -> list[str]:
     """Механизмы, объявившие пробный режим ключом входа."""
     found = []
-    for path in sorted(SCRIPTS.glob("*.py")):
+    for path in walk(SCRIPTS, "*.py"):
         text = path.read_text(encoding="utf-8")
         if any(flag in text for flag in DRY_FLAGS):
             found.append(path.name)
@@ -102,9 +102,7 @@ def test_the_mark_lives_in_one_place() -> None:
     """
     mark = load_script("../packages/transport/report.py").DRY
     written = [
-        path.name
-        for path in sorted(SCRIPTS.glob("*.py"))
-        if mark in path.read_text(encoding="utf-8")
+        path.name for path in walk(SCRIPTS, "*.py") if mark in path.read_text(encoding="utf-8")
     ]
     assert not written, (
         f"признак режима «{mark}» вписан строкой, а не взят из общего низа (022, 090): "

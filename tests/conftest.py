@@ -222,6 +222,83 @@ def string_args_of(path: Path, called: str) -> list[str]:
     return found
 
 
+def walk(where: Path, pattern: str = "*", *, may_be_empty: str = "") -> list[Path]:
+    """Обход дерева, который ОТКАЗЫВАЕТ на пустоте, — или принимает её с причиной.
+
+    ПУСТОЙ ОБХОД — САМАЯ ТИХАЯ ИЗ ПОЛОМОК. Проверка, идущая по списку из дерева,
+    при пустом списке проходит все свои утверждения ноль раз и зеленеет: снаружи
+    она неотличима от прошедшей. Переименуй каталог, смени расширение, перенеси
+    механизмы — и гейт перестанет проверять что-либо, не сказав ни слова
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+    ПОЧЕМУ ОБЩИЙ ОБХОДЧИК, А НЕ ПРЕДИКАТ ПО ТЕКСТУ. Признак «непустота где-то
+    утверждается» пробовался и ОТВЕРГНУТ замером 19.09.2026: он назвал семь
+    подозрительных, из которых три были ложными — непустота там утверждается
+    ПРОИЗВОДНЫМ именем, а не самим обходом. Отличить одно от другого предикатом
+    значит повторить суждение о смысле
+    ([057](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/057-unmechanizable-rules-are-named-explicitly.md)).
+    Обходчик же не судит текст: он просто не отдаёт пустоту молча.
+
+    ПУСТОТА БЫВАЕТ ЗАКОННОЙ, И ТОГДА У НЕЁ ЕСТЬ ПРИЧИНА. `may_be_empty` — не
+    выключатель, а место, где причина записана рядом с обходом: «выпусков ещё не
+    было», «расширение .yaml в дереве не встречается». Молчаливое исключение
+    неотличимо от недосмотра
+    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+    """
+    if not where.is_dir():
+        raise AssertionError(
+            f"обход {where}/{pattern}: такого каталога нет — предмет проверки не найден (075)"
+        )
+    found = sorted(where.glob(pattern))
+    if not found and not may_be_empty:
+        raise AssertionError(
+            f"обход {where}/{pattern} не нашёл ничего — проверка прошла бы ноль раз и"
+            " зеленела (075).\n  Каталог переименован или образец устарел — поправьте"
+            " обход.\n  Если пустота ЗАКОННА, назовите причину: walk(..., may_be_empty=«…»)"
+        )
+    return found
+
+
+def walk_deep(where: Path, pattern: str = "*", *, may_be_empty: str = "") -> list[Path]:
+    """То же, но вглубь: `rglob` вместо `glob`.
+
+    Заведён отдельным именем, а не доводом: «вглубь или нет» — это ДРУГОЙ обход,
+    и читатель вызова должен видеть его, не заглядывая в доводы.
+    """
+    if not where.is_dir():
+        raise AssertionError(
+            f"обход {where}/**/{pattern}: такого каталога нет — предмет не найден (075)"
+        )
+    found = sorted(where.rglob(pattern))
+    if not found and not may_be_empty:
+        raise AssertionError(
+            f"обход {where}/**/{pattern} не нашёл ничего — проверка прошла бы ноль раз"
+            " и зеленела (075).\n  Если пустота ЗАКОННА, назовите причину:"
+            " walk_deep(..., may_be_empty=«…»)"
+        )
+    return found
+
+
+def found_by(where: Path, pattern: str) -> list[Path]:
+    """Обход-ВОПРОС: «есть ли такое?» — и пустота здесь есть ОТВЕТ, а не поломка.
+
+    Третье имя рядом с :func:`walk` и :func:`walk_deep` заведено замером, а не
+    для удобства. Обходы в наборе двух пород, и различает их не форма, а то,
+    ЧЕМ для вызывающего является пустой ответ:
+
+    * у :func:`walk` пустота — обрыв: предмет проверки исчез, и проверка прошла
+      бы ноль раз;
+    * здесь пустота — сам результат: «адрес, названный ответом, в дереве не
+      разрешается», «производного в общей ветке нет». Требовать от такого обхода
+      непустоты значило бы требовать, чтобы ответ всегда был «да».
+
+    Порода объявляется В ТОЧКЕ ВЫЗОВА и потому видна читателю; разбирать её по
+    тексту предикатом нельзя — это суждение о смысле
+    ([057](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/057-unmechanizable-rules-are-named-explicitly.md)).
+    """
+    return sorted(where.glob(pattern)) if where.is_dir() else []
+
+
 def code_files(*, with_tests: bool = False) -> list[Path]:
     """Файлы кода проекта — из ОБЪЯВЛЕННОГО списка, а не из глоба по каталогу.
 
@@ -239,9 +316,9 @@ def code_files(*, with_tests: bool = False) -> list[Path]:
     paths = load_script("paths.py")
     found: list[Path] = []
     for where in paths.SOURCES:
-        found += sorted((ROOT / where).glob("*.py"))
+        found += walk(ROOT / where, "*.py")
     if with_tests:
-        found += sorted((ROOT / "tests").glob("*.py"))
+        found += walk(ROOT / "tests", "*.py")
     return found
 
 

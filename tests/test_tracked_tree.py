@@ -25,7 +25,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Что установка и сборка пишут рядом с `pyproject.toml` локального пакета.
 #: Список ОБЪЯВЛЕН, а не выведен: имена задаёт setuptools и `python -m build`, и
@@ -47,7 +47,7 @@ BUILD_OUTPUTS: Final = (
 def packages() -> list[str]:
     """Локальные пакеты дерева — по объявлению, а не по списку имён (005)."""
     return sorted(
-        str(one.parent.relative_to(ROOT)) for one in ROOT.glob("packages/*/pyproject.toml")
+        str(one.parent.relative_to(ROOT)) for one in walk(ROOT, "packages/*/pyproject.toml")
     )
 
 

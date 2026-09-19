@@ -15,7 +15,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, found_by, load_script
 
 facts = load_script("build_facts.py")
 
@@ -245,7 +245,7 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
     когда число в нём разойдётся с источником.
     """
     for name in derived_names():
-        assert not list(ROOT.glob(f"**/{name}")), f"{name} лежит в общей ветке рядом с источником"
+        assert not found_by(ROOT, f"**/{name}"), f"{name} лежит в общей ветке рядом с источником"
 
 
 def shown_badges() -> list[str]:

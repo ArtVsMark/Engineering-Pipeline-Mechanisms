@@ -29,7 +29,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 module = load_script("review_findings.py")
 paths = load_script("paths.py")
@@ -108,7 +108,7 @@ def similarity_sites() -> list[tuple[str, str]]:
     ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
     """
     found: list[tuple[str, str]] = []
-    for path in sorted((ROOT / "scripts").glob("*.py")):
+    for path in walk(ROOT / "scripts", "*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):

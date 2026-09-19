@@ -33,7 +33,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 PACKAGE: Final = ROOT / "packages" / "transport"
 SCRIPTS: Final = ROOT / "scripts"
@@ -71,7 +71,7 @@ def scripts_needing_the_package() -> set[str]:
     но зовёт `findings`, который знает. Список, написанный рукой, отстал бы от
     первого же нового импорта (005).
     """
-    graph = {path.stem: imports_of(path) for path in sorted(SCRIPTS.glob("*.py"))}
+    graph = {path.stem: imports_of(path) for path in walk(SCRIPTS, "*.py")}
     need = {name for name, deps in graph.items() if deps & set(SHARED)}
     while True:
         grown = {name for name, deps in graph.items() if deps & need} | need
@@ -175,7 +175,7 @@ def all_calls() -> list[Call]:
     """Все вызовы механизмов во всех прогонах дерева."""
     need = scripts_needing_the_package()
     found: list[Call] = []
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+    for path in walk(WORKFLOWS, "*.y*ml"):
         found += calls_in(yaml.safe_load(path.read_text(encoding="utf-8")), path.name, need)
     return found
 

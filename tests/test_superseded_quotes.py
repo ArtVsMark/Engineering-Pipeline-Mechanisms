@@ -23,7 +23,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk_deep
 
 #: Снимок причин, как они стояли. Собран механически из истории — рукописный
 #: повторил бы ровно ту ошибку, против которой заведён.
@@ -61,7 +61,7 @@ def quoting_files() -> list[Path]:
     """Файлы прозы, где такие цитаты есть. Пустой список — предмета нет (075)."""
     found = [
         path
-        for path in sorted((ROOT / "changelog.d").rglob("*.md"))
+        for path in walk_deep(ROOT / "changelog.d", "*.md")
         if QUOTED_ROW.search(path.read_text(encoding="utf-8"))
     ]
     assert found, "цитат снятых причин в журнале нет — предмет проверки не найден"

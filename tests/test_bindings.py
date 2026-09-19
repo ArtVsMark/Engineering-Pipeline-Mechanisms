@@ -22,7 +22,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import found_by, load_script, walk
 
 kinds = load_script("kinds.py")
 
@@ -172,7 +172,7 @@ def test_declared_address_resolves(number: str) -> None:
         f"проверять нечего, и это отказ, а не «зелено»: {where!r}"
     )
     resolved = [
-        address for address in candidates if (ROOT / address).exists() or list(ROOT.glob(address))
+        address for address in candidates if (ROOT / address).exists() or found_by(ROOT, address)
     ]
     assert resolved, f"{number}: ни один адрес не разрешается: {candidates}"
 
@@ -726,7 +726,7 @@ RULE_IN_SKILL: Final = re.compile(r"rules/ru/(\d{3})")
 def skills_citing() -> list[tuple[str, str]]:
     """Пары «адрес навыка — номер правила, которое он цитирует»."""
     found: list[tuple[str, str]] = []
-    for skill in sorted(SKILLS_DIR.iterdir()):
+    for skill in walk(SKILLS_DIR):
         card = skill / "SKILL.md"
         if not card.is_file():
             continue

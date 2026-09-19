@@ -34,7 +34,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 CLAIMS = ROOT / load_script("paths.py").CLAIMS
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -57,7 +57,7 @@ def workflows_with_permission(arg: str) -> int:
     """
     name, _, value = (part.strip() for part in arg.partition(":"))
     found = 0
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+    for path in walk(WORKFLOWS, "*.y*ml"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             continue
@@ -76,7 +76,7 @@ def branch_filters_with(arg: str) -> int:
     слушается, и считать её значило бы краснеть на объяснении причины (051, 044).
     """
     found = 0
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+    for path in walk(WORKFLOWS, "*.y*ml"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             continue

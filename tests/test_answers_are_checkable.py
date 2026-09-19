@@ -29,7 +29,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk_deep
 
 BINDINGS = ROOT / ".rules" / "bindings.json"
 #: Полный путь механизма: с каталогом, а не одно имя файла. Имя без каталога
@@ -76,7 +76,7 @@ def prose(answer: dict[str, str]) -> str:
 
 def file_stems() -> set[str]:
     """Имена файлов дерева без расширения: они не понятия, а адреса."""
-    return {path.stem for path in ROOT.rglob("*") if path.is_file()}
+    return {path.stem for path in walk_deep(ROOT, "*") if path.is_file()}
 
 
 def test_there_are_answers_with_addresses() -> None:
