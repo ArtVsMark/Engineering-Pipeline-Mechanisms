@@ -60,6 +60,17 @@ THE_TREE: Final = "ROOT"
 MINE: Final = "test_a_walk_names_its_intent.py"
 
 
+def _called(node: ast.Call) -> str:
+    """Имя вызванного — ОБЕИМИ формами записи: `walk(…)` и `помощник.walk(…)`.
+
+    Голое имя знала только первая. Разбор через точку уходил молча: общий
+    обходчик, вызванный из модуля, прозрачным не считался, имя от него
+    записывалось в чужой корень, и голый обход от этого имени оставался
+    невидимым (045).
+    """
+    return getattr(node.func, "id", "") or getattr(node.func, "attr", "")
+
+
 def leftmost(node: ast.AST) -> str:
     """Самое левое имя выражения пути: `ROOT`, `tmp_path`, `WORKFLOWS`…
 
@@ -68,7 +79,7 @@ def leftmost(node: ast.AST) -> str:
     включения по `walk(ROOT, …)` считался чужим корнем, и голый обход от него
     оставался невидимым (нашёл внешний взгляд на #510).
     """
-    if isinstance(node, ast.Call) and getattr(node.func, "id", "") in SHARED and node.args:
+    if isinstance(node, ast.Call) and _called(node) in SHARED and node.args:
         return leftmost(node.args[0])
     # СПИСОК ПУТЕЙ — ТОТ ЖЕ ПУТЬ. `for one in [ROOT / "scripts"]` прячет корень
     # внутрь литерала, и без этого имя цикла считалось чужим (найдено откатом,
