@@ -738,3 +738,75 @@ def test_the_prefix_comes_from_the_one_who_decides_by_it() -> None:
         preflight.agent_pr.PREFIXES == agent_pr.PREFIXES
     ), "проверка толчка ведёт свой список приставок"
     assert agent_pr.PREFIXES, "приставок не объявлено — предмета у проверки нет (075)"
+
+
+def branch_tree(tmp_path: Path, name: str) -> Path:
+    """Дерево под git на названной ветке с одним коммитом."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", "-b", name], cwd=tmp_path, check=True)
+    (tmp_path / "файл").write_text("предмет", encoding="utf-8")
+    for args in (
+        ["config", "user.email", "t@example.invalid"],
+        ["config", "user.name", "набор"],
+        ["add", "-A"],
+        ["commit", "-qm", "предмет"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    return tmp_path
+
+
+def watch_push(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Записывает вызовы git, не подменяя их: судится СОСТАВ, а не код возврата."""
+    import subprocess
+
+    said: list[list[str]] = []
+    original = subprocess.run
+
+    def watched(args, **rest):  # type: ignore[no-untyped-def]
+        said.append(list(args))
+        return original(args, **rest)
+
+    monkeypatch.setattr(preflight.subprocess, "run", watched)
+    return said
+
+
+def test_a_merged_branch_is_refused_before_the_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Толчок в ветку со слитым изменением не случается вовсе (202).
+
+    ГЕЙТ ПОСТРОЕН И НЕ ПОЗВАН — РОВНО ТО ЖЕ, ЧТО ЕГО ОТСУТСТВИЕ. Вшивка
+    проверяется составом вызовов: `git push` не должен прозвучать. Судить по
+    коду возврата здесь нельзя — в дереве без `origin` толчок падает и сам.
+    """
+    root = branch_tree(tmp_path, "agent/работа")
+    monkeypatch.setattr(
+        preflight.check_branch_revival,
+        "look",
+        lambda *_: (preflight.check_branch_revival.EXIT_REVIVED, "слито #509"),
+    )
+    said = watch_push(monkeypatch)
+    assert preflight.push_branch(root) == preflight.EXIT_BROKEN
+    assert not any("push" in one for one in said), f"толчок в слитую ветку случился: {said}"
+
+
+def test_a_platform_refusal_does_not_hold_the_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ канала толчок не держит, но и не молчит (051).
+
+    Красное, которое чинится ожиданием, учат обходить: запрет ставится на
+    достоверном, а недоступная площадка достоверностью не является. Но и уйти
+    в тихое «проверено» это не должно — отказ называется вслух.
+    """
+    root = branch_tree(tmp_path, "agent/работа")
+
+    def broken(*_: object) -> tuple[int, str]:
+        raise preflight.ghrest.TransportError("площадка не ответила")
+
+    monkeypatch.setattr(preflight.check_branch_revival, "look", broken)
+    said = watch_push(monkeypatch)
+    preflight.push_branch(root)
+    assert any("push" in one for one in said), "толчок задержан отказом канала"
+    assert "не проверено" in capsys.readouterr().err
