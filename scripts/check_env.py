@@ -181,6 +181,16 @@ class Survey:
     problems: list[str]
     #: Куски команды установки, которыми расхождения закрываются.
     gaps: list[str]
+    #: Нижняя граница интерпретатора, прочитанная из дерева.
+    #:
+    #: ОТДАЁТСЯ, А НЕ ЧИТАЕТСЯ ЗОВУЩИМ ВТОРОЙ РАЗ. Сверка уже спросила её у
+    #: дерева — без неё она не отличит годный интерпретатор от старого, — и
+    #: зовущему остаётся взять готовое. Пока поля не было, точка входа считала
+    #: ту же границу повторно ради совета в конце: одно число, прочитанное
+    #: дважды за прогон, и второе чтение молчаливо утверждало, что дерево между
+    #: двумя вызовами не изменилось
+    #: ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+    floor: tuple[int, int]
 
 
 def survey(root: Path = Path()) -> Survey:
@@ -219,7 +229,7 @@ def survey(root: Path = Path()) -> Survey:
         if version is None:
             problems.append(f"{name}: не установлен, а без него механизмы не запускаются")
             gaps.append(f"-e ./{where.as_posix()}")
-    return Survey(seen, problems, gaps)
+    return Survey(seen, problems, gaps, floor)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -229,7 +239,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        floor = python_floor(args.root)
         said = survey(args.root)
     except (NotRun, tomllib.TOMLDecodeError) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
@@ -246,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     print("\nокружение расходится с деревом:")
     for problem in problems:
         print(f"  {problem}")
-    advise(floor, gaps)
+    advise(said.floor, gaps)
     return EXIT_MISMATCH
 
 
