@@ -413,6 +413,11 @@ def test_exit_codes_are_read_as_an_allowlist(path: Path) -> None:
 #: ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
 #: Список разрешительный и с причиной: тихого исключения здесь нет (068).
 BY_CONTRACT_TAG = ("ArtVsMark/Engineering-Incidents-Playbook@",)
+#: Вызов СВОЕГО из этого же дерева: `uses: ./.github/actions/<имя>`. Закрепить
+#: его по SHA нельзя — своей версии у него нет, — и не нужно: он приезжает тем
+#: же ref, что и файл прогона, то есть с общей ветки. Подвижной метки, которая
+#: меняла бы исполняемый код без нашего ведома, здесь не существует (152).
+OUR_OWN_TREE = "./"
 
 #: События, на которых площадка берёт файл прогона с ОБЩЕЙ ветки, а не из
 #: изменения. Ровно там закрепление вызываемого что-то значит.
@@ -443,21 +448,96 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
     как в прогоне ревью те же действия давно закреплены по SHA. Правило
     держалось там, где о нём помнили, и не держалось там, где оно как раз
     и работает.
+
+    СВОЁ ИЗ ЭТОГО ЖЕ ДЕРЕВА (`uses: ./…`) ЗАКРЕПЛЕНИЯ НЕ ТРЕБУЕТ, и это сужение,
+    а не послабление. У локального вызова нет своей версии и нет подвижной
+    метки: он приезжает тем же ref, что и файл прогона, — то есть с общей ветки.
+    Менять его код, не меняя общей ветки, нечем
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+
+    СОСЕД НАЗВАН, И У СУЖЕНИЯ ЕСТЬ УСЛОВИЕ ИСТЕЧЕНИЯ. Рассуждение выше держится
+    ровно до тех пор, пока прогон от общей ветки не заберёт ЧУЖОЙ ref: тогда
+    `./` укажет на чужой код, и локальность перестанет быть доводом. Замер
+    19.09.2026: прогонов от общей ветки девять, джобов в них четырнадцать, и
+    чужой ref не забирает НИ ОДИН. Условие держит
+    :func:`test_a_shared_caller_checks_out_its_own_ref` — сужение умрёт вместе
+    со своей премисой, а не переживёт её
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
     """
     document = load(path)
     if not shared_caller(document):
         return
     unpinned = [
-        step["uses"]
+        said
         for job in document["jobs"].values()
-        for step in job.get("steps") or []
-        if step.get("uses")
-        and not SHA_PIN.search(step["uses"])
-        and not step["uses"].startswith(BY_CONTRACT_TAG)
+        for said in [job.get("uses"), *[one.get("uses") for one in job.get("steps") or []]]
+        if said
+        and not SHA_PIN.search(said)
+        and not said.startswith(BY_CONTRACT_TAG)
+        and not said.startswith(OUR_OWN_TREE)
     ]
     assert not unpinned, (
         f"{path.name} идёт от общей ветки, а вызывает незакреплённое: {unpinned} — "
         "подвижная метка здесь меняет исполняемый код без нашего ведома (152)"
+    )
+
+
+def test_a_shared_caller_checks_out_its_own_ref() -> None:
+    """Прогон от общей ветки забирает СВОЙ ref — условие, на котором стоит сужение.
+
+    Локальный вызов `uses: ./…` не требует закрепления ровно потому, что
+    приезжает тем же ref, что и файл прогона. Стоит прогону от общей ветки
+    забрать ЧУЖОЙ ref — `ref: ${{ github.event.pull_request.head.sha }}` и
+    подобное, — и `./` укажет на код, которого никто не смотрел: локальность
+    перестанет быть доводом, а сужение превратится в дыру
+    ([152](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/152-pinning-callee-without-caller.md)).
+
+    ПОЭТОМУ ПРОВЕРКА СТОИТ ЗДЕСЬ, А НЕ В ПРОЗЕ. Послабление, чья премиса живёт
+    только на словах, переживает свою премису молча — и узнают об этом с той
+    стороны, с которой не хотелось бы
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+
+    ЗАМЕР 19.09.2026: прогонов от общей ветки девять, джобов в них четырнадцать,
+    чужой ref не забирает ни один.
+    """
+    foreign = [
+        f"{path.name}:{job_id}"
+        for path in walk(WORKFLOWS, "*.yml")
+        if shared_caller(document := load(path))
+        for job_id, job in document["jobs"].items()
+        for step in job.get("steps") or []
+        if "checkout" in str(step.get("uses") or "") and (step.get("with") or {}).get("ref")
+    ]
+    assert not foreign, (
+        "прогон от общей ветки забирает ЧУЖОЙ ref: " + ", ".join(foreign) + ".\n"
+        "  Пока это так, локальный вызов «uses: ./…» закрепления не заменяет —"
+        " он укажет на несмотренный код (152). Либо уберите чужой ref, либо"
+        " снимите послабление OUR_OWN_TREE у гейта закрепления."
+    )
+
+
+def test_the_local_callee_exemption_has_a_subject() -> None:
+    """У послабления есть предмет: локальные вызовы в дереве ЕСТЬ.
+
+    Послабление, которому нечего послаблять, доказывает только себя (075), и
+    отличить его от забытого нечем. Пусто — значит либо локальные вызовы ушли,
+    либо их ещё не завели; и то и другое разбирается, а не молчит.
+    """
+    # ВЫЗОВ БЫВАЕТ ДВУХ УРОВНЕЙ, И ОБА — ПРЕДМЕТ. Действие зовут ШАГОМ
+    # (`steps: - uses: ./…`), переиспользуемый прогон — ДЖОБОМ
+    # (`jobs.x.uses: ./…`). Первая редакция смотрела только шаги и объявила
+    # предмет исчезнувшим на дереве, где вызов уже был: признак был уже своего
+    # предмета (195).
+    local = [
+        f"{path.name}: {said}"
+        for path in walk(WORKFLOWS, "*.yml")
+        for job in load(path)["jobs"].values()
+        for said in [job.get("uses"), *[one.get("uses") for one in job.get("steps") or []]]
+        if str(said or "").startswith(OUR_OWN_TREE)
+    ]
+    assert local, (
+        "локальных вызовов «uses: ./…» в дереве нет — послабление OUR_OWN_TREE у"
+        " гейта закрепления ничего не послабляет и неотличимо от забытого (075)"
     )
 
 

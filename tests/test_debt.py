@@ -149,7 +149,7 @@ def test_the_charter_cites_the_rule_behind_the_order() -> None:
 def test_the_step_is_declared_advisory() -> None:
     """Класс шага объявлен данными: долг не держит слияние, но виден."""
     answer = (ROOT / ".pipeline.yml").read_text(encoding="utf-8")
-    assert "debt:" in answer and "advisory" in answer
+    assert '"debt / debt":' in answer and "advisory" in answer
 
 
 # --- третье число: слитое без внешнего взгляда --------------------------------

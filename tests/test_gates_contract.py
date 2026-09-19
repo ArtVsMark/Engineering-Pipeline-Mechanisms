@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from tests.conftest import walk
+from tests.conftest import load_script, walk
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -91,23 +91,54 @@ def contract_rows() -> list[tuple[str, str]]:
     return found
 
 
+#: Разбор состава прогонов ОДИН на всех читателей, и берётся он у механизма.
+#: Здесь стоял свой, и он разошёлся с общим на первом же вызываемом прогоне:
+#: имя проверки у вызванного джоба СОСТАВНОЕ, а этот разбор отдавал голое —
+#: то есть договор сверялся с именем, которого площадка не выдаст. Второй
+#: разбор одной формы — это второе её понимание, и расходятся они молча
+#: ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md),
+#: [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+policy = load_script("pipeline_checks.py")
+
+
 def tree_jobs() -> dict[str, str]:
-    """Джобы ВСЕХ прогонов дерева: имя джоба → файл, который его несёт."""
+    """Проверки ВСЕХ прогонов дерева: имя записи → файл, который её несёт.
+
+    Имя берётся у общего разбора: у обычного джоба это его собственное имя, у
+    джоба, зовущего переиспользуемый прогон, — составное «вызывающий /
+    вызванный». Сам вызываемый прогон записей не даёт и сюда не попадает.
+    """
     found: dict[str, str] = {}
     for path in walk(WORKFLOWS, "*.y*ml"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             continue
+        if policy.CALLED in [str(one) for one in (document.get("on", document.get(True)) or {})]:
+            continue
         for job_id, job in (document.get("jobs") or {}).items():
-            found[str((job or {}).get("name") or job_id)] = path.name
+            for name in policy.check_names(job_id, job or {}, WORKFLOWS):
+                found[name] = path.name
     return found
+
+
+def gate_checks() -> set[str]:
+    """Имена ЗАПИСЕЙ, которые даёт прогон гейтов, — тем же разбором, что у всех.
+
+    Идентификатор джоба именем записи быть перестал: джоб, зовущий
+    переиспользуемый прогон, даёт составное имя. Сверять договор и ответ по
+    идентификатору значило бы сверять их с тем, чего площадка не выдаёт (045).
+    """
+    document = load_gates()
+    return {
+        name
+        for job_id, job in (document.get("jobs") or {}).items()
+        for name in policy.check_names(job_id, job or {}, WORKFLOWS)
+    }
 
 
 def test_jobs_match_the_contract() -> None:
     """Джобы гейтов и джобы договора совпадают, а не «примерно соответствуют»."""
-    assert set(load_gates()["jobs"]) == {
-        job for workflow, job in contract_rows() if workflow == GATES.name
-    }
+    assert gate_checks() == {job for workflow, job in contract_rows() if workflow == GATES.name}
 
 
 def test_every_job_in_the_tree_is_described_by_the_contract() -> None:
@@ -200,7 +231,7 @@ def test_summary_takes_its_subject_from_data() -> None:
 def test_every_job_of_the_tree_is_answered() -> None:
     """По каждому джобу дерева есть ответ, а не только по обязательным."""
     checks = yaml.safe_load((ROOT / ".pipeline.yml").read_text(encoding="utf-8"))["checks"]
-    assert set(load_gates()["jobs"]) - {SUMMARY} <= set(checks)
+    assert gate_checks() - {SUMMARY} <= set(checks)
 
 
 def test_summary_does_not_answer_for_itself() -> None:
