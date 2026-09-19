@@ -460,7 +460,7 @@ def test_no_target_when_it_is_not_one_fall() -> None:
     """Два падения — предмета нет, и перезапускать нечего."""
     red = [
         {"name": "test", "details_url": "https://x/actions/runs/777/job/1"},
-        {"name": "lint", "details_url": "https://x/actions/runs/777/job/3"},
+        {"name": "lint / lint", "details_url": "https://x/actions/runs/777/job/3"},
     ]
     assert module.target_run(["test"], ["lint"], red, FEEDS) == 0
 
@@ -746,8 +746,13 @@ def test_a_cancelled_record_is_not_a_fall() -> None:
     отмены, — а это штатное событие, а не находка (124).
     """
     runs = [
-        {"name": "lint", "status": "completed", "conclusion": "cancelled", "started_at": "01"},
-        {"name": "lint", "status": "completed", "conclusion": "success", "started_at": "02"},
+        {
+            "name": "lint / lint",
+            "status": "completed",
+            "conclusion": "cancelled",
+            "started_at": "01",
+        },
+        {"name": "lint / lint", "status": "completed", "conclusion": "success", "started_at": "02"},
         {"name": "pr-meta", "status": "completed", "conclusion": "skipped", "started_at": "01"},
         {"name": "pr-meta", "status": "completed", "conclusion": "success", "started_at": "02"},
     ]
@@ -888,13 +893,13 @@ def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     blinked: list[dict[str, object]] = [
         {
-            "name": "lint",
+            "name": "lint / lint",
             "status": "completed",
             "conclusion": "failure",
             "started_at": "01",
             "details_url": "https://github.com/o/r/actions/runs/88/job/1",
         },
-        {"name": "lint", "status": "completed", "conclusion": "success", "started_at": "02"},
+        {"name": "lint / lint", "status": "completed", "conclusion": "success", "started_at": "02"},
     ]
 
     def paginate(path: str, *_: object, **__: object) -> list[dict[str, object]]:
@@ -903,7 +908,7 @@ def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "merged_changes", lambda *a, **k: [])
     found = module.seen_on_changes("o/r", "token", [], "13.09.2026", live((9, "ddd"))).flakes
-    assert [(one.name, one.where) for one in found] == [("lint", "#9")]
+    assert [(one.name, one.where) for one in found] == [("lint / lint", "#9")]
 
 
 # --- объявленные исходы захода -----------------------------------------------
@@ -956,14 +961,14 @@ def test_a_green_shared_branch_is_its_own_outcome(
     посмотрел»
     ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
     """
-    platform(monkeypatch, [{"name": "lint", "status": "completed", "conclusion": "success"}])
+    platform(monkeypatch, [{"name": "lint / lint", "status": "completed", "conclusion": "success"}])
     assert module.main(["--repo", "o/r"]) == module.EXIT_GREEN
 
 
 def test_a_red_required_check_is_the_red_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
     """Красная проверка на голове — исход «красно», и запись об этом ложится."""
     written = platform(
-        monkeypatch, [{"name": "lint", "status": "completed", "conclusion": "failure"}]
+        monkeypatch, [{"name": "lint / lint", "status": "completed", "conclusion": "failure"}]
     )
     assert module.main(["--repo", "o/r"]) == module.EXIT_RED
     assert written and "lint" in written[0], "о красной проверке не записано"
@@ -1080,7 +1085,7 @@ def test_the_record_carries_the_counter_when_the_queue_is_frozen(
     """При заморозке счётчик попыток стоит в записи, а не в выводе шага (142)."""
     written = platform(
         monkeypatch,
-        [{"name": "lint", "status": "completed", "conclusion": "failure"}],
+        [{"name": "lint / lint", "status": "completed", "conclusion": "failure"}],
         proofs=[{"conclusion": "failure"}, {"conclusion": "success"}],
     )
     assert module.main(["--repo", "o/r"]) == module.EXIT_RED

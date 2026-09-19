@@ -699,7 +699,12 @@ def test_the_run_does_not_assemble_the_journal_on_a_change() -> None:
     Иначе правило 030 держалось бы внимательностью автора, а стоило бы это
     конфликта на каждом втором изменении.
     """
-    gates = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    # ПО ВСЕМУ КАТАЛОГУ: файл — адрес шага, а не его личность (168). Прибитая к
+    # `ci.yml` проверка сломалась на выносе шага журнала в переиспользуемый
+    # прогон — при том что сам шаг остался ровно тем же.
+    gates = "\n".join(
+        path.read_text(encoding="utf-8") for path in walk(ROOT / ".github" / "workflows", "*.yml")
+    )
     assert "build_changelog.py --fragments" in gates
     assert "build_changelog.py --check" not in gates
 

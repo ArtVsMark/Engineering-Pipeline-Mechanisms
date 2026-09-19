@@ -33,7 +33,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import agent_pr
 import check_branch_revival
@@ -44,6 +44,8 @@ import report
 import yaml
 
 CI: Final = paths.WORKFLOWS / "ci.yml"
+#: Вызов прогона ИЗ ЭТОГО ЖЕ ДЕРЕВА.
+OUR_CALL: Final = "./"
 
 #: Команда шага прогона: строка, начинающаяся с зовомого инструмента. Читается
 #: список РАЗРЕШЁННОГО (068): что не узнано, то не запускается, а называется.
@@ -120,6 +122,45 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «всё зелено»."""
 
 
+def _steps_of(job: dict[str, Any], caller: Path) -> list[dict[str, Any]]:
+    """Шаги джоба — свои либо шаги прогона, который он зовёт.
+
+    Адрес вызова отсчитывается от корня дерева, а не от каталога прогонов, и
+    остаётся СТРОКОЙ: `Path("./x")` нормализует ведущее `./` прочь, и признак
+    «свой вызов» переставал бы срабатывать. Чужой вызов раскрыть нечем — его
+    прогона в дереве нет, — и он называется невыполнимым, а не пропускается
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    said = str(job.get("uses") or "")
+    if not said:
+        return list(job.get("steps") or [])
+    if not said.startswith(OUR_CALL):
+        UNRUNNABLE[said] = "вызов чужого прогона: его шагов в дереве нет"
+        return []
+    # КОРЕНЬ ВЫВОДИТСЯ ИЗ ОБЪЯВЛЕННОГО ПУТИ, А НЕ ПОДЪЁМОМ ПО ДЕРЕВУ: подъём
+    # угадывал бы глубину, на которой лежат прогоны, и соврал бы молча, изменись
+    # она. Запрет держит `tests/test_settings_anchor.py`, он же это и назвал —
+    # второй раз за смену, тем же приёмом, что у разбора состава проверок.
+    tail = str(paths.WORKFLOWS)
+    said_caller = str(caller.parent)
+    if not said_caller.endswith(tail):
+        raise NotRun(
+            f"каталог прогонов «{said_caller}» не оканчивается объявленным «{tail}» — "
+            "корень дерева из него не выводится (075)"
+        )
+    where = Path(said_caller[: -len(tail)] or ".") / said[len(OUR_CALL) :].split("@")[0]
+    if not where.is_file():
+        raise NotRun(f"вызов «{said}» указывает на прогон, которого в дереве нет (075)")
+    called = yaml.safe_load(where.read_text(encoding="utf-8"))
+    if not isinstance(called, dict):
+        raise NotRun(f"{where}: вызываемый прогон не разбирается")
+    return [
+        step
+        for inner in (called.get("jobs") or {}).values()
+        for step in ((inner or {}).get("steps") or [])
+    ]
+
+
 def steps(path: Path = CI) -> list[Step]:
     """Команды прогона, выполнимые без площадки, — в порядке объявления.
 
@@ -132,6 +173,14 @@ def steps(path: Path = CI) -> list[Step]:
     Замер — находка ревью по #94.
 
     Поэтому берётся ВЕСЬ блок шага, и берётся он целиком либо не берётся вовсе.
+
+    ВЫЗОВ РАСКРЫВАЕТСЯ, А НЕ ПРОПУСКАЕТСЯ. Джоб, зовущий переиспользуемый прогон
+    (`uses: ./…`), своих шагов не имеет — они лежат в вызываемом. Разбор,
+    читающий один файл, потерял бы их МОЛЧА: предполётная обещает «площадка
+    скажет то же», и тихо уменьшившийся список превращает обещание в ложь
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Первый же вынос восьми шагов это и показал: зелёное осталось зелёным,
+    проверив вдвое меньше.
     """
     if not path.is_file():
         raise NotRun(f"нет {path}: список проверок взять неоткуда (075)")
@@ -148,7 +197,7 @@ def steps(path: Path = CI) -> list[Step]:
     found: list[Step] = []
     seen: set[str] = set()
     for job in (document.get("jobs") or {}).values():
-        for step in (job or {}).get("steps") or []:
+        for step in _steps_of(job or {}, path):
             command = str((step or {}).get("run") or "").strip()
             name = str((step or {}).get("name") or "").strip()
             if not command or command in seen:

@@ -56,23 +56,13 @@ concurrency:
 jobs:
   lint:
     name: lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: поставить проверки
-        # Верхние границы обязательны (правило 073): без них несовместимая
-        # версия применяется молча.
-        run: python -m pip install --quiet "ruff>=0.6,<1" "mypy>=1.11,<2" "pyyaml>=6,<7"
-      - name: линтер
-        run: ruff check scripts/ tests/ packages/
-      - name: формат
-        run: ruff format --check scripts/ tests/ packages/
-      - name: типы
-        run: mypy scripts/ tests/ packages/
+    uses: ./.github/workflows/step-lint.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
 
   # МАТРИЦА ВЕРСИЙ ДЕРЖИТ ОБЕЩАНИЕ, А НЕ ПОВТОРЯЕТ ПРОГОН. `pyproject.toml`
   # объявляет `requires-python = ">=3.12"` — то есть проект утверждает, что
@@ -209,233 +199,46 @@ jobs:
 
   pr-meta:
     name: pr-meta
-    # На общей ветке шаг не идёт: предмет — разметка изменения, а не общей ветки.
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
-      - name: тронутые файлы
-        env:
-          BASE: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin "$BASE:refs/remotes/origin/$BASE"
-          base_sha="$(git merge-base "origin/$BASE" HEAD)"
-          # `-z` обязателен: без него git экранирует имена с пробелами и
-          # не-ASCII, и такой путь молча выпадает из отбора зон (165). Список
-          # передаётся ФАЙЛОМ, а не подстановкой: оболочка вырезает NUL.
-          git diff --name-only -z "$base_sha...HEAD" > /tmp/changed.txt
-          echo "тронуто файлов: $(tr -cd '\0' < /tmp/changed.txt | wc -c)"
-      - name: метки и связь с задачей
-        # ТОКЕН ЗДЕСЬ НЕ УКРАШЕНИЕ. Гейт перечитывает состояние изменения у
-        # площадки, потому что снимок события — это состояние на момент
-        # срабатывания: метки проставляет шаг открытия долями секунды позже, и
-        # на снимке их нет. Без токена перечитать нечем, и гейт молча
-        # возвращается к снимку — то есть выносит вердикт по прошлому (049).
-        # Замер 09.09: изменение #55 отвергнуто за «тронуты файлы зон, которых
-        # нет на изменении», когда все четыре зоны на нём уже стояли.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/check_pr_meta.py --files-from /tmp/changed.txt
+    uses: ./.github/workflows/step-pr-meta.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
 
   journal:
     name: journal
-    # На общей ветке шаг не идёт: предмет — фрагмент, приехавший с изменением.
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      # Общий низ конвейера ставится пакетом (024).
-      - run: python -m pip install --quiet ./packages/transport
-      # БАЗА ПОДТЯГИВАЕТСЯ ОТДЕЛЬНЫМ ШАГОМ, а не внутри блока проверки. Свой
-      # прогон перед толчком берёт команды блоками целиком и блок с `git fetch`
-      # запустить не может: локально это не проверка, а правка чужого дерева.
-      # Пока фетч жил внутри, гейт журнала был виден только площадке — и ловил
-      # то, что видно на дереве, уже после толчка.
-      - name: подтянуть базу
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-          base="${GITHUB_BASE_REF:-main}"
-          git fetch --no-tags origin "$base:refs/remotes/origin/$base"
-      - name: фрагмент журнала
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: python scripts/check_journal.py
-      # Собранный журнал здесь НЕ сверяется: он собирается при выпуске (030).
-      # Общий файл, который трогает каждая ветка, даёт конфликт на каждом
-      # втором изменении — ровно тот инцидент, из-за которого правило и есть.
-      - name: фрагменты журнала разбираются
-        env:
-          # База нужна: шаг разбирает то, что принесло ИЗМЕНЕНИЕ, а не всё
-          # состояние каталога. Иначе он валится третьим исходом сразу после
-          # выпуска, когда фрагменты уехали в `released/` и каталог пуст.
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: python scripts/build_changelog.py --fragments
-      - name: версия не правлена руками
-        run: python scripts/check_version.py
-      # Полнота истории — предмет прогона, а не проверок. Две проверки версии
-      # идут по живому дереву и на обрезанном чекауте пропускаются (у них там
-      # нет предмета); чтобы пропуск не стал молчаливой дырой, здесь стоит
-      # гейт: тегов не пришло — третий исход вслух (045).
-      - name: история пришла целиком
-        run: python scripts/version.py --check
-      # СВОЁ ИМЯ БЕРЁТСЯ У ПЛОЩАДКИ, А НЕ ИЗ ПАМЯТИ ДЕРЕВА (172). Токен нужен:
-      # переименованное ловится ответом площадки, а не сравнением имён — старое
-      # имя не похоже на новое, и площадка держит по нему редирект.
-      - name: имена репозиториев не устарели
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python scripts/check_own_name.py
-      # ПОДПИСЬ ПОД ПЕРЕЧИТЫВАНИЕМ НЕ ЕДЕТ ОДНА. Поднятый номер прочитанной
-      # выгрузки говорит «ответы перечитаны под неё»; поднятый в одиночку — это
-      # подпись под несделанным, и она гасит сигнал дрейфа, ради которого номер
-      # и заведён (157).
-      - name: подпись под перечитыванием
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: python scripts/check_reread.py
+    uses: ./.github/workflows/step-journal.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
 
-      # Ссылками на правила проект обосновывает решения, и битая ссылка
-      # обесценивает довод: проверить его нельзя. Имена берутся у каталога, а
-      # не из памяти — по памяти их и написали 29 раз.
-      - name: ссылки на правила разрешаются
-        run: |
-          set -uo pipefail
-          rc=0
-          python scripts/check_rule_links.py || rc=$?
-          case "$rc" in
-            0) ;;
-            # МОЛЧАНИЕ КАТАЛОГА НЕ КРАСИТ, НО И НЕ ИСЧЕЗАЕТ. Предупреждение
-            # видно автору изменения прямо на нём: адресат у отказа канала есть,
-            # и это не лог, в который никто не смотрит (084, 154).
-            4) echo "::warning::Каталог не ответил — имена правил не сверены. Это отказ канала, а не находка о дереве. Если повторяется, чинить у каталога, а не здесь." ;;
-            *) exit "$rc" ;;
-          esac
-      # Разбор правила живёт в каталоге, и мы на него ССЫЛАЕМСЯ. Переписанный к
-      # себе, он расходится с источником при первой же правке каталога — и
-      # расходится молча: копия выглядит прежней, а правило под ней уже другое
-      # (153). Цитата при этом законна: гейт судит потерю адреса, а не
-      # заимствование.
-      - name: чужой разбор приведён ссылкой, а не копией
-        run: |
-          set -uo pipefail
-          rc=0
-          python scripts/check_foreign_why.py || rc=$?
-          case "$rc" in
-            0) ;;
-            # МОЛЧАНИЕ КАТАЛОГА НЕ КРАСИТ, НО И НЕ ИСЧЕЗАЕТ. Предупреждение
-            # видно автору изменения прямо на нём: адресат у отказа канала есть,
-            # и это не лог, в который никто не смотрит (084, 154).
-            4) echo "::warning::Каталог не ответил — копии чужого разбора не сверены. Это отказ канала, а не находка о дереве. Если повторяется, чинить у каталога, а не здесь." ;;
-            *) exit "$rc" ;;
-          esac
-      # Инструмент, отданный наружу, называют на входе, а не в журнале
-      # изменений: неназванное берут копированием, потому что другого пути
-      # читателю не оставили (163). Помеченных сегодня ноль — поэтому гейт
-      # судит вход: пока отдавать нечего, README обязан говорить это словом, а
-      # появится первый помеченный — обязан назвать его и замолчать про пустоту.
-      - name: отданное наружу названо на входе
-        run: python scripts/check_shipped.py
-      # Решение пересматривают НОВОЙ записью, а не правкой старой: переписанное
-      # задним числом решение выдаёт сегодняшний выбор за вчерашний, и следа от
-      # этого не остаётся. Предмет — что ИЗМЕНЕНИЕ делает с принятой записью,
-      # поэтому прошлое гейт не судит: его правкой изменения не починить (051).
-      - name: принятое решение не переписано задним числом
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: python scripts/check_decisions_edit.py
-
-      # ВОПРОС О ПРАВИЛЕ ЗАДАЁТСЯ ЗДЕСЬ, ПОТОМУ ЧТО ЗДЕСЬ ЕГО ЕЩЁ ЕСТЬ КОМУ
-      # ОТВЕТИТЬ. После слияния окно ушло, и разбирать за него значило бы
-      # угадывать. Гейт не решает, правило это или нет, — он не даёт промолчать.
-      - name: новая запись решения называет судьбу правила
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-          base="${GITHUB_BASE_REF:-main}"
-          python scripts/check_rule_birth.py --base "origin/$base"
-
-      # Ссылка на производное — значок, картинку, отчёт — не уезжает в общую
-      # ветку раньше, чем прогон его нарисовал. Проверкой «файл есть в дереве»
-      # это не лечится: производного в дереве и не должно быть, — спрашивается
-      # площадка.
-      - name: ссылка на производное не раньше самого производного
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: python scripts/check_derived_refs.py
-      # НОВОЕ ПРИЕЗЖАЕТ СО СВОИМ ПРОГОНОМ. Замер 12.09.2026 по одиннадцати
-      # настоящим дефектам смены: покрытие поймало бы два, и оба одного класса
-      # — «новая функция, у которой тестов нет вообще». Остальные девять —
-      # верно работающий покрытый код с неверной премисой, и процентами они не
-      # видны. Судится только ДОБАВЛЕННОЕ: в дереве 75 имён из 327 не названы
-      # ни одним прогоном, и краснеть на них значило бы судить чужую работу.
-      - name: новое приезжает со своим прогоном
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: python scripts/check_new_is_tested.py
 
   attribution:
     name: attribution
-    # На общей ветке шаг не идёт: предмет — коммиты изменения относительно базы.
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      # Гейт не переписан здесь: каталог отдаёт его действием, и подключение
-      # идёт ссылкой на версию, а не копией (правило 090). Копия разъехалась бы
-      # с оригиналом на первой же правке — и разъехались бы при этом гейты.
-      - name: сверить атрибуцию
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0
-        with:
-          authors: .github/authors.txt
-          # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
-          # варианты — docs/decisions/001-attribution-of-merged-1.md.
-          #
-          # Отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть
-          # однозначным, и отметка тогда указывает не туда. Соседний прогон
-          # `attribution-history.yml` требует того же от своей отметки, а здесь
-          # семь знаков жили с первого дня — одно правило, два прочтения (090).
-          # Нашёл внешний взгляд на #147.
-          baseline: cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b
-          require-declared-author: "true"
-          require-coauthor: "true"
-          range: origin/${{ github.event.pull_request.base.ref || 'main' }}..HEAD
-          catalogue-ref: v1.2.0
+    uses: ./.github/workflows/step-attribution.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
 
   pipeline:
     name: pipeline
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m pip install --quiet "pyyaml>=6,<7"
-      - name: ответ по классам проверок полон и сходится с деревом
-        run: python scripts/check_pipeline.py
+    uses: ./.github/workflows/step-pipeline.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
 
   # ПЕРВЫЙ ШАГ, ВЫНЕСЕННЫЙ В ПЕРЕИСПОЛЬЗУЕМЫЙ ПРОГОН (этап 4, #547). Тело
   # шага уехало в `step-debt.yml` целиком и без правок; здесь остался ВЫЗОВ.
@@ -453,103 +256,35 @@ jobs:
       contents: read
       issues: read
 
-  # ГЛАВНЫЙ ГЕЙТ СВЯЗИ С ПОТРЕБИТЕЛЕМ (#15). Имена джобов уезжают в чужую
-  # защиту ветки ДОСЛОВНО и вне дерева, входы кнопки — в чужие вызовы, классы
-  # проверок — в чужой ответ. Правка этого, прошедшая молча, ломает потребителя,
-  # и узнаётся об этом от него, а не отсюда.
-  #
-  # На общей ветке шаг не идёт: предмет — что ИЗМЕНЕНИЕ делает с поверхностью
-  # относительно базы, а на `main` сравнивать не с чем.
   contract:
     name: contract
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Снимок «до» берётся из дерева базы целиком: поверхность собирается
-          # из всех прогонов разом, и по одному файлу её не восстановить.
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
-      - name: поверхность контракта не тронута молча
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-          base="${GITHUB_BASE_REF:-main}"
-          git fetch --no-tags origin "$base:refs/remotes/origin/$base"
-          python scripts/check_contract.py
+    uses: ./.github/workflows/step-contract.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
 
-  # СРОК ЖИЗНИ ОКНА — ВЕЛИЧИНА, А НЕ ПАМЯТЬ ЧЕЛОВЕКА. Правило 006 держалось у
-  # нас документом, и причиной стоял замер, утверждавший, что следа окна в дереве
-  # нет вовсе. Дерево этого не подтверждает: трейлер `Claude-Session` несёт номер
-  # окна, и срок его жизни из истории читается. Разбор — находка `51a6454` (#23).
-  #
-  # ШАГ НЕ РЕШАЕТ ЗА ЧЕЛОВЕКА. Свод говорит прямо: срок держится строкой и
-  # решает его человек. Поэтому проверка называет величину, а не отменяет работу,
-  # и класс её в `.pipeline.yml` — `unreviewed`: слияния она не держит. Сделать
-  # её обязательной значило бы гнать окно чинить неисправимое — красное, которое
-  # правкой изменения не чинится, идёт источником 2 (051).
-  #
-  # На общей ветке шаг не идёт: предмет — коммиты ИЗМЕНЕНИЯ относительно базы.
+
   window-lifetime:
     name: window-lifetime
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Начало окна лежит в истории общей ветки, а не в ветке изменения. В
-          # мелком клоне шаг не зеленеет, а объявляет, что считать не из чего:
-          # обрезка неотличима от начала окна (045).
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: срок жизни окна, открывшего изменение
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-          base="${GITHUB_BASE_REF:-main}"
-          # Ветку базы приносит `fetch-depth: 0` выше — тем же приёмом, что у
-          # шага атрибуции, и дотягивать её здесь нечем. Блок, который тянет
-          # базу сам, целиком считается требующим площадки: свой прогон
-          # перестал бы его спрашивать, и проверка ловила бы уже после толчка.
-          python scripts/check_window_lifetime.py --base "origin/$base" --history "origin/$base"
+    uses: ./.github/workflows/step-window-lifetime.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
 
-  # СВЕЖЕСТЬ СВОДА — СВОЙ ПРЕДМЕТ И СВОЁ ИМЯ. Сосед выше мерит СРОК жизни окна
-  # (правило 006), этот шаг — смену правил под уже работающим окном (правило
-  # 047). Сложить их в один джоб значило бы отдать два предмета под одно имя: у
-  # `window-lifetime` класс ждёт ПЕРВОГО СВОЕГО красного (решение 020), и чужое
-  # красное под его именем это ожидание бы сорвало (046).
-  #
-  # Выкладка полная и по той же причине: начало окна лежит в истории общей
-  # ветки, и в мелком клоне правки свода вышли бы неполными (045).
-  #
-  # На общей ветке шаг не идёт: предмет — коммиты ИЗМЕНЕНИЯ относительно базы.
+
   rulebook-fresh:
     name: rulebook-fresh
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: свод не менялся под окном изменения
-        env:
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-          base="${GITHUB_BASE_REF:-main}"
-          # Базу приносит `fetch-depth: 0` выше — тем же приёмом, что у соседа.
-          python scripts/check_rulebook_fresh.py --base "origin/$base" --history "origin/$base"
+    uses: ./.github/workflows/step-rulebook-fresh.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
