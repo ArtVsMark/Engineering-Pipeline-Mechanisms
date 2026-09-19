@@ -93,6 +93,24 @@ GLOB_MARKS: Final = "*?["
 #: расписанию и по толчку сюда не входят: у них другой предмет и другой
 #: адресат, и слияния они не касаются.
 ON_CHANGE: Final = "pull_request"
+#: Событие ВЫЗЫВАЕМОГО прогона: он не запускается сам, его зовут по `uses:`.
+#: Третий род рядом с «на изменении» и «вне изменения», и заведён он замером, а
+#: не про запас: прежде дерево делилось надвое, и вызываемый не попадал никуда —
+#: его джоб регистрировался как отдельная проверка, а вызывающий как вторая с
+#: тем же именем. Разбор объявлял это неоднозначностью и был прав по своим
+#: правилам и неправ по существу: проверка тут одна.
+CALLED: Final = "workflow_call"
+#: Как площадка НАЗЫВАЕТ запись проверки у вызванного джоба. Замер 19.09.2026,
+#: прогоном на живой площадке (изменение #549): вызывающий `outer`, вызванный
+#: `inner` — запись пришла с именем «outer / inner». Голого имени не бывает:
+#: приставка добавляется всегда. Документация площадки из окна недоступна,
+#: поэтому ответ взят прогоном
+#: ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+COMPOSED: Final = " / "
+#: Вызов прогона ИЗ ЭТОГО ЖЕ ДЕРЕВА. Чужой вызов (`owner/repo/.github/…@ref`)
+#: сюда не попадает намеренно: его джобов в дереве нет, и прочитать их нечем —
+#: имя такой проверки остаётся неизвестным, и это названо, а не угадано (046).
+OUR_CALL: Final = "./"
 
 #: Раздел ответа по прогонам за пределами изменения.
 BEYOND: Final = "beyond_the_change"
@@ -400,6 +418,70 @@ def run_of(path: Path) -> dict[Any, Any]:
     return document
 
 
+def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
+    """Имена джобов ВЫЗЫВАЕМОГО прогона по адресу из `uses:`; ``None`` — не наш.
+
+    Чужой вызов читать нечем: его прогона в дереве нет. Возвращается ``None``,
+    и вызывающий остаётся со своим собственным именем — неполно, но честно
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+
+    АДРЕС ОСТАЁТСЯ СТРОКОЙ, И ЭТО НЕ МЕЛОЧЬ. `Path("./x")` НОРМАЛИЗУЕТ ведущее
+    `./` прочь, и признак «свой вызов» переставал срабатывать: составное имя
+    не собиралось, а проверка молча числилась под старым именем — то есть под
+    тем, которого площадка не выдаст
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Поймано первым же прогоном разбора по дереву.
+    """
+    if not said.startswith(OUR_CALL):
+        return None
+    # КОРЕНЬ ВЫВОДИТСЯ ИЗ ОБЪЯВЛЕННОГО ПУТИ, А НЕ ПОДЪЁМОМ ПО ДЕРЕВУ. Адрес
+    # вызова отсчитывается от корня, а подъём `.parent.parent` угадывал бы, на
+    # какой глубине лежат прогоны, — и соврал бы молча, если бы она изменилась.
+    # Запрет на такой подъём держит `tests/test_settings_anchor.py`, и он же
+    # это место и назвал.
+    tail = str(WORKFLOWS)
+    if not str(directory).endswith(tail):
+        raise BadPolicy(
+            f"каталог прогонов «{directory}» не оканчивается объявленным «{tail}» — "
+            "корень дерева из него не выводится, а угадывать его нечем (075)"
+        )
+    root = Path(str(directory)[: -len(tail)] or ".")
+    where = root / said[len(OUR_CALL) :].split("@")[0]
+    if not where.is_file():
+        raise BadPolicy(
+            f"вызов «{said}» указывает на прогон, которого в дереве нет — "
+            "проверка по нему не появится, а красного об этом не будет (045)"
+        )
+    document = run_of(where)
+    if CALLED not in _triggers_of(document):
+        raise BadPolicy(
+            f"прогон {where.name} вызывают по `uses:`, а события «{CALLED}» у него нет — "
+            "площадка такой вызов отвергнет"
+        )
+    return [
+        str((body or {}).get("name") or job_id)
+        for job_id, body in (document.get("jobs") or {}).items()
+    ]
+
+
+def check_names(job_id: str, body: dict[str, Any], directory: Path = WORKFLOWS) -> list[str]:
+    """Имена записей проверки, которые даст этот джоб.
+
+    Обычный джоб даёт ОДНО имя — своё. Джоб, вызывающий переиспользуемый
+    прогон, даёт по имени на КАЖДЫЙ джоб вызванного, и каждое составное:
+    ``<имя вызывающего> / <имя вызванного>``. Замер, которым это узнано, — в
+    :data:`COMPOSED`.
+    """
+    mine = str(body.get("name") or job_id)
+    uses = body.get("uses")
+    if not uses:
+        return [mine]
+    inner = called_jobs(str(uses), directory)
+    if inner is None:
+        return [mine]
+    return [f"{mine}{COMPOSED}{one}" for one in inner]
+
+
 def feeds(directory: Path = WORKFLOWS) -> dict[str, set[str]]:
     """Кто чей вердикт несёт: имя джоба → имена, чьи вердикты в него доезжают.
 
@@ -441,6 +523,11 @@ def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
     событий прогона событие изменения. Вместе они покрывают дерево прогонов
     целиком: джоб попадает ровно в один раздел, и «не спросили» перестаёт быть
     возможным состоянием.
+
+    РОДОВ, ОДНАКО, ТРИ, А НЕ ДВА. Вызываемый прогон (`workflow_call`) не идёт
+    ни на изменении, ни вне его: он не идёт сам вовсе. Его джобы дают запись
+    через вызывающего и составным именем, поэтому оба раздела его пропускают —
+    иначе одна проверка числилась бы двумя.
     """
     if not directory.is_dir():
         raise BadPolicy(f"нет описания прогонов: {directory} — предмет сверки не найден (075)")
@@ -448,18 +535,19 @@ def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
     jobs: dict[str, Job] = {}
     for path in sorted(directory.glob("*.y*ml")):
         document = run_of(path)
-        if ON_CHANGE in _triggers_of(document):
+        triggers = _triggers_of(document)
+        if CALLED in triggers or ON_CHANGE in triggers:
             continue
         for job_id, body in (document.get("jobs") or {}).items():
             job = body or {}
-            name = str(job.get("name") or job_id)
             matrix = bool((job.get("strategy") or {}).get("matrix"))
-            if name in jobs:
-                raise BadPolicy(
-                    f"имя проверки «{name}» выдают двое: {jobs[name].workflow} и {path.name} — "
-                    "вердикт по такому имени неоднозначен"
-                )
-            jobs[name] = Job(name, path.name, matrix)
+            for name in check_names(job_id, job, directory):
+                if name in jobs:
+                    raise BadPolicy(
+                        f"имя проверки «{name}» выдают двое: {jobs[name].workflow} и "
+                        f"{path.name} — вердикт по такому имени неоднозначен"
+                    )
+                jobs[name] = Job(name, path.name, matrix)
 
     # ПУСТО — ЗАКОННОЕ СОСТОЯНИЕ, и здесь оно отличается от первого раздела.
     # Без проверок на изменении конвейера нет вовсе, и молчать об этом нельзя
@@ -476,6 +564,13 @@ def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, J
     запись на голове появляется только от них, и только по ним есть что
     отвечать. Имя проверки — имя джоба (`name:`, а при его отсутствии
     идентификатор), потому что именно оно попадает в контекст.
+
+    ВЫЗЫВАЕМЫЙ ПРОГОН СЮДА НЕ ПОПАДАЕТ, И ЭТО НЕ ПРОПУСК. Его события —
+    только `workflow_call`, сам он не запускается, а его джобы дают запись
+    ТОЛЬКО через вызывающего и ТОЛЬКО составным именем (:data:`COMPOSED`).
+    Считать их отдельными проверками значило бы объявить две проверки там, где
+    она одна, — и разбор ровно так и делал, пока вызываемых прогонов в дереве
+    не было.
     """
     if not directory.is_dir():
         raise BadPolicy(f"нет описания прогонов: {directory} — предмет сверки не найден (075)")
@@ -487,21 +582,22 @@ def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, J
         # взгляд на #150: `run_of` завели ровно ради этого, а здесь остался
         # прежний разбор.
         document = run_of(path)
-        if ON_CHANGE not in _triggers_of(document):
+        triggers = _triggers_of(document)
+        if CALLED in triggers or ON_CHANGE not in triggers:
             continue
 
         for job_id, body in (document.get("jobs") or {}).items():
             job = body or {}
-            name = str(job.get("name") or job_id)
-            if name == skip:
-                continue
             matrix = bool((job.get("strategy") or {}).get("matrix"))
-            if name in jobs:
-                raise BadPolicy(
-                    f"имя проверки «{name}» выдают двое: {jobs[name].workflow} и {path.name} — "
-                    "вердикт по такому имени неоднозначен"
-                )
-            jobs[name] = Job(name, path.name, matrix)
+            for name in check_names(job_id, job, directory):
+                if name == skip:
+                    continue
+                if name in jobs:
+                    raise BadPolicy(
+                        f"имя проверки «{name}» выдают двое: {jobs[name].workflow} и "
+                        f"{path.name} — вердикт по такому имени неоднозначен"
+                    )
+                jobs[name] = Job(name, path.name, matrix)
 
     if not jobs:
         raise BadPolicy(

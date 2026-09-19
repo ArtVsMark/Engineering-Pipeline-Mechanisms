@@ -572,3 +572,122 @@ def test_an_unnamed_span_is_a_refusal_not_a_blank() -> None:
         with pytest.raises(policy.BadPolicy) as caught:
             policy.span_of(raw)
         assert "диапазон" in str(caught.value).lower()
+
+
+# --- вызываемый прогон: третий род ------------------------------------------
+
+#: Вызывающий: обычный прогон на изменении, чей джоб не делает шагов, а зовёт.
+CALLER = """name: caller
+on: [pull_request]
+jobs:
+  debt:
+    name: debt
+    uses: ./.github/workflows/step-debt.yml
+"""
+#: Вызываемый: событие у него ОДНО, и сам он не идёт никогда.
+CALLEE = """name: step-debt
+on:
+  workflow_call:
+jobs:
+  debt:
+    name: debt
+    runs-on: ubuntu-latest
+    steps: []
+"""
+
+
+def called_tree(tmp_path: Path, caller: str = CALLER, callee: str = CALLEE) -> Path:
+    """Дерево прогонов, где один зовёт другого — по настоящим путям.
+
+    Путь `./.github/workflows/…` разрешается относительно КОРНЯ дерева, а не
+    каталога прогонов, поэтому тут воспроизводится вся раскладка: разбор,
+    проверенный на плоском каталоге, соврал бы о настоящем (170).
+    """
+    directory = tmp_path / ".github" / "workflows"
+    directory.mkdir(parents=True)
+    (directory / "caller.yml").write_text(caller, encoding="utf-8")
+    (directory / "step-debt.yml").write_text(callee, encoding="utf-8")
+    return directory
+
+
+def test_a_called_job_gets_a_composed_name(tmp_path: Path) -> None:
+    """Имя проверки у вызванного джоба составное: «вызывающий / вызванный».
+
+    ЗАМЕР ПРОГОНОМ НА ЖИВОЙ ПЛОЩАДКЕ, а не догадка: изменение #549, вызывающий
+    `outer`, вызванный `inner` — запись пришла именем «outer / inner». Голого
+    имени не бывает. Документация площадки из окна недоступна, поэтому ответ
+    взят прогоном
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    Вписать сюда прежнее имя значило бы объявить проверку под именем, которого
+    площадка не выдаст, — и сводный гейт ждал бы её вечно (045).
+    """
+    directory = called_tree(tmp_path)
+    assert set(policy.declared_jobs(directory)) == {"debt / debt"}
+
+
+def test_a_called_run_is_not_a_check_of_its_own(tmp_path: Path) -> None:
+    """Вызываемый прогон не числится ни на изменении, ни вне его.
+
+    Родов три, а не два. Пока их было два, джоб вызываемого попадал в раздел
+    «вне изменения», а вызывающий — в «на изменении», и разбор объявлял одно и
+    то же имя неоднозначным: две проверки там, где она одна.
+    """
+    directory = called_tree(tmp_path)
+    assert policy.beyond_jobs(directory) == {}
+
+
+def test_a_foreign_call_keeps_its_own_name(tmp_path: Path) -> None:
+    """Чужой вызов читать нечем — вызывающий остаётся со своим именем.
+
+    Прогона чужого проекта в дереве нет, и имена его джобов неизвестны.
+    Придумать их значило бы объявить проверку, которой может не быть; поэтому
+    имя остаётся неполным и это названо, а не угадано
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    directory = called_tree(
+        tmp_path,
+        caller="name: c\non: [pull_request]\njobs:\n  debt:\n"
+        "    name: debt\n    uses: someone/else/.github/workflows/x.yml@v1\n",
+    )
+    assert set(policy.declared_jobs(directory)) == {"debt"}
+
+
+def test_a_call_that_points_nowhere_is_refused(tmp_path: Path) -> None:
+    """Вызов своего прогона, которого нет, — отказ, а не тихое старое имя.
+
+    Проверка по такому вызову не появится вовсе, и красного об этом не будет:
+    площадка просто не запустит несуществующее
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    directory = called_tree(
+        tmp_path,
+        caller="name: c\non: [pull_request]\njobs:\n  debt:\n"
+        "    name: debt\n    uses: ./.github/workflows/нет-такого.yml\n",
+    )
+    with pytest.raises(policy.BadPolicy, match="которого в дереве нет"):
+        policy.declared_jobs(directory)
+
+
+def test_a_callee_without_its_event_is_refused(tmp_path: Path) -> None:
+    """Вызываемый без `workflow_call` — отказ: площадка такой вызов отвергнет."""
+    directory = called_tree(
+        tmp_path,
+        callee="name: step-debt\non: [push]\njobs:\n  debt:\n    name: debt\n    steps: []\n",
+    )
+    with pytest.raises(policy.BadPolicy, match="workflow_call"):
+        policy.declared_jobs(directory)
+
+
+def test_the_leading_dot_slash_is_not_normalised_away(tmp_path: Path) -> None:
+    """Адрес вызова остаётся СТРОКОЙ, и ведущее «./» не теряется.
+
+    `Path("./x")` нормализует «./» прочь, и признак «свой вызов» переставал
+    срабатывать: составное имя не собиралось, а проверка молча числилась под
+    старым именем — под тем, которого площадка не выдаст. Поймано первым же
+    прогоном разбора по дереву, и закреплено здесь, чтобы не вернулось
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    directory = called_tree(tmp_path)
+    assert policy.called_jobs("./.github/workflows/step-debt.yml", directory) == ["debt"]
+    assert policy.called_jobs(".github/workflows/step-debt.yml", directory) is None
