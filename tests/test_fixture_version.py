@@ -14,63 +14,106 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from tests.conftest import FAKE_VERSION, ROOT, walk
 
 #: Имя файла версии: по нему узнают получателя записи.
 VERSION_FILE = "CONTRACT_VERSION"
 
 
-def named_version_paths(tree: ast.Module) -> set[str]:
-    """Имена, которым присвоен путь с файлом версии.
+def _points_at_version(node: ast.expr | None, known: dict[str, bool]) -> bool:
+    """Указывает ли выражение на файл версии — прямо или через известное имя."""
+    if node is None:
+        return False
+    if isinstance(node, ast.Name):
+        return known.get(node.id, False)
+    return VERSION_FILE in ast.unparse(node)
 
-    Путь к подделке чаще собирают отдельной строкой, а пишут уже по имени:
-    ``файл = корень / "CONTRACT_VERSION"`` и следом ``файл.write_text(...)``.
-    Для отношения «тест пишет версию» это одна и та же запись, и различает их
-    только НАПИСАНИЕ
+
+def _writes_in(body: list[ast.stmt], known: dict[str, bool]) -> bool:
+    """Пишет ли этот блок файл версии; `known` — что имена значат ЗДЕСЬ.
+
+    Блок читается ПО ПОРЯДКУ, и состояние имён меняется по ходу: присваивание
+    либо делает имя версионным, либо снимает эту метку. Вложенный блок получает
+    КОПИЮ состояния — соседняя функция не должна учить это имя своему значению
     ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
     """
-    named: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            targets: list[ast.expr] = list(node.targets)
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        else:
+    for stmt in body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if _writes_in(stmt.body, dict(known)):
+                return True
             continue
-        if node.value is None or VERSION_FILE not in ast.unparse(node.value):
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            targets = list(stmt.targets) if isinstance(stmt, ast.Assign) else [stmt.target]
+            points = _points_at_version(stmt.value, known)
+            for one in targets:
+                if isinstance(one, ast.Name):
+                    # Снятие так же важно, как установка: переприсвоенное имя
+                    # версию больше не пишет, и «помним первое» было бы ложным
+                    # срабатыванием — гейт отвергал бы верную работу (051).
+                    known[one.id] = points
+            if stmt.value is not None and _has_version_write(stmt.value, known):
+                return True
             continue
-        named.update(one.id for one in targets if isinstance(one, ast.Name))
-    return named
+        # Ветки `if`/`for`/`with`/`try` идут тем же состоянием: они часть того
+        # же порядка, а не отдельная область.
+        for part in _branches_of(stmt):
+            if _writes_in(part, known):
+                return True
+        for node in ast.iter_child_nodes(stmt):
+            if isinstance(node, ast.expr) and _has_version_write(node, known):
+                return True
+    return False
+
+
+def _branches_of(stmt: ast.stmt) -> list[list[ast.stmt]]:
+    """Вложенные блоки оператора — ветви условия, тела циклов, обработчики."""
+    found: list[list[ast.stmt]] = []
+    for field in ("body", "orelse", "finalbody", "handlers"):
+        part = getattr(stmt, field, None)
+        if isinstance(part, list) and part and isinstance(part[0], ast.stmt):
+            found.append(part)
+    return found
+
+
+def _has_version_write(node: ast.AST, known: dict[str, bool]) -> bool:
+    """Есть ли внутри выражения вызов `.write_text` по пути версии."""
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        head = inner.func
+        if not isinstance(head, ast.Attribute) or head.attr != "write_text":
+            continue
+        if _points_at_version(head.value, known):
+            return True
+    return False
 
 
 def writes_the_version(path: Path) -> bool:
     """Записывает ли тест файл версии в подделанное дерево — по разбору.
 
-    Отношение здесь составное: вызов `.write_text`, а получатель — либо сам
-    путь с именем файла версии, либо ИМЯ, которому такой путь присвоен. Обе
-    половины читаются из дерева разбора, а не из написания (166).
+    Отношение составное: вызов `.write_text`, а получатель — либо сам путь с
+    именем файла версии, либо имя, которому такой путь присвоен ЗДЕСЬ И
+    РАНЬШЕ. Обе половины читаются из дерева разбора, а не из написания (166).
 
-    ЗАПИСЬ ПО ИМЕНИ РАНЬШЕ ВЫПАДАЛА. Предикат смотрел только непосредственного
-    получателя вызова, то есть проверял написание там, где докстрока обещала
-    отношение, — нашёл внешний взгляд (`2ccec1a`). Замер 19.09.2026: подделок в
-    дереве пять, все пишут путь прямо в вызове, пропущенных НЕТ. Предмета у
-    пропуска сегодня нет, и правится не он, а расхождение обещания с
-    механизмом: пока они врозь, первая же подделка, собранная по имени, выпадет
-    из отбора молча
-    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    ИМЯ РАЗРЕШАЕТСЯ ТАМ, ГДЕ НАПИСАНО, И В ТОМ ПОРЯДКЕ. Первая редакция
+    собирала версионные имена по ВСЕМУ файлу и не снимала их: имя, занятое под
+    версию в одной функции и переприсвоенное в другой, засчитывалось записью;
+    переприсвоенное тут же — тоже. Взгляд назвал это тремя рисками
+    (`d27903b`, `79204bd`, `3286efa`), и предмет в дереве уже есть — замер
+    19.09.2026: версионное имя присваивается дважды в `test_contract_surface.py`
+    (`current`) и здесь же (`real`).
+
+    Цепочка имён разрешается транзитивно: `другой = файл` наследует значение,
+    потому что для отношения это та же запись.
+
+    ГРАНИЦА НАЗВАНА: разбор не следит за областью видимости дальше блоков —
+    `global`, замыкания и присваивание через распаковку он не читает. Подделка,
+    написанная так, выпадет из отбора, и это предел, а не полнота (046, 195).
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    named = named_version_paths(tree)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        head = node.func
-        if not (isinstance(head, ast.Attribute) and head.attr == "write_text"):
-            continue
-        said = ast.unparse(head.value)
-        if VERSION_FILE in said or said in named:
-            return True
-    return False
+    return _writes_in(tree.body, {})
 
 
 def test_the_fake_version_is_not_the_real_one() -> None:
@@ -125,6 +168,67 @@ def test_the_checklists_of_the_project_use_it() -> None:
         assert "FAKE_VERSION" in source or "9.9" in source, (
             f"{name} подделывает версию своим литералом вместо общей константы"
         )
+
+
+#: Записи, которые для отношения «тест пишет файл версии» ОДНО И ТО ЖЕ, и
+#: записи, которые им только кажутся. Таблица, а не отдельные проверки: у
+#: предиката две ошибки — пропустить своё и засчитать чужое, — и вторая дороже,
+#: потому что гейт начинает отвергать верную работу (051, 195).
+WRITES = {
+    "прямо в вызове": '(Path("к") / "CONTRACT_VERSION").write_text("9.9")',
+    "по имени": 'ф = Path("к") / "CONTRACT_VERSION"\nф.write_text("9.9")',
+    "цепочкой имён": 'ф = Path("к") / "CONTRACT_VERSION"\nдругой = ф\nдругой.write_text("9.9")',
+    "внутри функции": (
+        'def t() -> None:\n    ф = Path("к") / "CONTRACT_VERSION"\n    ф.write_text("9.9")'
+    ),
+}
+
+NOT_WRITES = {
+    "чужой файл": 'иное = Path("к") / "ПРОЧЕЕ"\nиное.write_text("9.9")',
+    "имя снято переприсвоением": (
+        'ф = Path("к") / "CONTRACT_VERSION"\nф = Path("к") / "ИНОЕ"\nф.write_text("9.9")'
+    ),
+    "занято в СОСЕДНЕЙ функции": (
+        'def a() -> None:\n    ф = Path("к") / "CONTRACT_VERSION"\n'
+        'def b() -> None:\n    ф = Path("к") / "ИНОЕ"\n    ф.write_text("9.9")'
+    ),
+    "имя названо, но не записано": 'ф = Path("к") / "CONTRACT_VERSION"\nprint(ф)',
+    # ЧУЖОЕ ИМЯ ИЗ СОСЕДНЕЙ ФУНКЦИИ: `b` пишет по имени, которого САМА не
+    # задавала — версионным его сделала `a`, и в своей области. Случай завёлся
+    # ОТКАТОМ: изоляция блоков копией состояния не краснела ни на одной записи
+    # таблицы, то есть держалась ничем. Откат, который не покраснел, — находка,
+    # а не облегчение
+    # ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    "имя занято соседней функцией": (
+        'def a() -> None:\n    ф = Path("к") / "CONTRACT_VERSION"\n'
+        'def b() -> None:\n    ф.write_text("9.9")'
+    ),
+}
+
+
+@pytest.mark.parametrize("как", sorted(WRITES))
+def test_every_form_of_writing_the_version_is_seen(как: str, tmp_path: Path) -> None:
+    """Все записи версии опознаны: отношение одно, написаний много (166)."""
+    path = tmp_path / "образец.py"
+    path.write_text("from pathlib import Path\n" + WRITES[как] + "\n", encoding="utf-8")
+
+    assert writes_the_version(path), f"запись «{как}» не опознана"
+
+
+@pytest.mark.parametrize("как", sorted(NOT_WRITES))
+def test_what_only_looks_like_writing_the_version(как: str, tmp_path: Path) -> None:
+    """Похожее на запись записью не считается.
+
+    ЗАМЕР 19.09.2026, ради которого таблица и заведена: первая редакция
+    собирала версионные имена по ВСЕМУ файлу и не снимала их при
+    переприсвоении. Взгляд назвал это тремя рисками (`d27903b`, `79204bd`,
+    `3286efa`), и предмет в дереве уже был: версионное имя присваивается дважды
+    в `test_contract_surface.py` (`current`) и в этом файле (`real`).
+    """
+    path = tmp_path / "образец.py"
+    path.write_text("from pathlib import Path\n" + NOT_WRITES[как] + "\n", encoding="utf-8")
+
+    assert not writes_the_version(path), f"«{как}» засчитано записью версии"
 
 
 def test_a_write_through_a_name_is_still_a_write(tmp_path: Path) -> None:
