@@ -44,7 +44,7 @@ def modules() -> list[Path]:
     return sorted(
         one
         for package in walk(ROOT, "packages/*/pyproject.toml")
-        for one in package.parent.glob("*.py")
+        for one in walk(package.parent, "*.py")
     )
 
 
