@@ -229,3 +229,33 @@ def test_the_measuring_runner_is_among_them() -> None:
     Без этой проверки он снова окажется вне сверки — от одной правки строки.
     """
     assert ("badges.yml", "badges") in [(where, name) for where, name, _ in runners()]
+
+
+def test_an_import_under_another_name_keeps_both(tmp_path: Path) -> None:
+    """`from x import имя as другое` употребляет ОБА имени, а не одно из двух.
+
+    Разборчик `names_used` отбирает файлы, которые механизм действительно
+    употребляют. Прежде он брал `asname or name`, и настоящее имя терялось:
+    файл, импортирующий механизм под псевдонимом, выпадал из отбора МОЛЧА.
+    Промах отбора опаснее промаха предиката — гейт остаётся зелёным, ничего не
+    проверив
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд (`71621f8`).
+
+    ЗАМЕР 19.09.2026: импортов под другим именем в дереве НОЛЬ. Правится
+    расхождение обещания с механизмом — докстрока разборчика называет эту форму
+    прямо, — а не найденный пропуск
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    """
+    from tests.conftest import names_used
+
+    образец = tmp_path / "образец.py"
+    образец.write_text(
+        "from соседний import механизм as псевдоним\nпсевдоним()\n",
+        encoding="utf-8",
+    )
+
+    видно = names_used(образец)
+
+    assert "механизм" in видно, "настоящее имя потеряно — файл выпадет из отбора молча"
+    assert "псевдоним" in видно, "имя, под которым механизм зовут здесь, тоже употребление"
