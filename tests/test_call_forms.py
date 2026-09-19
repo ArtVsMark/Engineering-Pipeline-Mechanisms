@@ -6,12 +6,28 @@
 ничего не проверив
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
-ЗАЧЕМ ГЕЙТ ПРИ ПУСТОМ ДОЛГЕ. Слепых разборов в дереве НОЛЬ — замер 18.09.2026 по
-десяти функциям, разбирающим вызов. Гейт стоит не ради починки, а чтобы не
-появилась одиннадцатая: род «форма записи не разобрана» встречен трижды
-(`.rules/finding-kinds.json`), и все три раза его находил внешний взгляд, а не
-набор. Форма обязана держаться и на пустом множестве — иначе первый же слепой
-разбор приедет молча
+ПРИЗНАК ПРИВЯЗАН К САМОМУ `.func`, А НЕ К ТЕЛУ ФУНКЦИИ. Разница не
+теоретическая: пока `ast.Attribute` и `"attr"` искались строкой по всему телу,
+разбор `getattr(node.func, "id", "")` в `test_a_walk_names_its_intent.leftmost`
+считался знающим обе формы — потому что `ast.Attribute` встречался в той же
+функции по другому поводу, в спуске по выражению пути. Слепота была настоящей и
+невидимой, и нашёл её не гейт, а сужение признака
+([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md),
+[195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+
+ЧИСЕЛ ЗДЕСЬ НЕТ, И ЭТО НАМЕРЕННО. Вписанный замер разборщиков рассыхался
+дважды за двое суток — «десять» становилось «22», «22» становилось «23» от
+самого изменения, которое это число писало
+([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+Величину даёт команда, а не память::
+
+    python -m pytest tests/test_call_forms.py -q -s --no-header \
+        -k the_subject_of_this_gate_exists
+
+ЗАЧЕМ ГЕЙТ ПРИ ПУСТОМ ДОЛГЕ. Род «форма записи не разобрана» встречался в
+проекте не раз (`.rules/finding-kinds.json`), и каждый раз его находил внешний
+взгляд, а не набор. Форма обязана держаться и на пустом множестве — иначе
+первый же слепой разбор приедет молча
 ([057](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/057-unmechanizable-rules-are-named-explicitly.md)).
 
 ПРЕДМЕТ ПРОВЕРЯЕТСЯ ОТДЕЛЬНО, А НЕ ПОДРАЗУМЕВАЕТСЯ. Гейт, у которого предмет
@@ -19,8 +35,10 @@
 ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
 
 ЧЕГО ГЕЙТ НЕ ЛОВИТ, и это названо, а не выровнено: разбор, знающий обе формы, но
-путающий их местами, и разбор через чужой помощник, чьё тело лежит в другой
-функции. Признак смотрит ТЕЛО функции, и вынесенный разбор ему невидим
+путающий их местами; разбор через чужой помощник, чьё тело лежит в другой
+функции; и форма имени, добытая обходом `ast.walk` без чтения `.func` у
+конкретного узла. Признак смотрит ТЕЛО функции на предмет чтений `.func`, и
+вынесенный разбор ему невидим
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 """
 
@@ -34,47 +52,87 @@ from tests.conftest import ROOT, walk
 
 #: Где ищем разборы: набор, механизмы и перехваты перед git.
 WHERE: Final = ("tests", "scripts", ".claude/hooks")
-#: Обе формы имени у вызова: `имя(...)` и `что.имя(...)`.
-#: Голое имя вызова — ОБЕИМИ записями разбора: через класс узла и через поле.
-#:
-#: `getattr(node.func, "id", ...)` разбирает ровно то же, что
-#: `isinstance(node.func, ast.Name)`, только без имени класса в тексте. Пока
-#: признак знал одну запись, функции со второй не попадали в предмет ВОВСЕ:
-#: гейт их не судил и молчал об этом. Замер 19.09.2026: разборщиков вызова 22,
-#: написаны через `getattr` двое, и один из них знал только голое имя. Нашёл
-#: внешний взгляд (`7aa4bac`).
-BARE: Final = ("ast.Name", '"id"', "'id'")
-THROUGH_DOT: Final = ("ast.Attribute", '"attr"', "'attr'")
-#: По чему узнаётся, что функция вообще разбирает вызов.
-PARSES_A_CALL: Final = ".func"
+#: Поле вызова, чтение которого и делает функцию разборщиком.
+THE_CALL: Final = "func"
+#: Голое имя вызова: класс узла и поле, которым его читают.
+BARE: Final = ("Name", "id")
+#: Имя через точку: класс узла и поле, которым его читают.
+THROUGH_DOT: Final = ("Attribute", "attr")
+
+
+def _reads_the_call(node: ast.AST) -> bool:
+    """Узел вида `<что-то>.func` — чтение имени вызова у конкретного узла."""
+    return isinstance(node, ast.Attribute) and node.attr == THE_CALL
+
+
+def _mentions(expr: ast.AST, node_name: str) -> bool:
+    """Назван ли класс узла в выражении — `ast.Name`, `Name`, `ast.Name | ...`."""
+    return any(
+        (isinstance(n, ast.Attribute) and n.attr == node_name)
+        or (isinstance(n, ast.Name) and n.id == node_name)
+        for n in ast.walk(expr)
+    )
+
+
+def forms_of(fn: ast.FunctionDef) -> tuple[bool, bool]:
+    """Какие формы имени разбираются ИМЕННО у `.func`: (голое, через точку).
+
+    Три записи разбора, и все три — про один и тот же узел:
+    `<X.func>.id`, `isinstance(<X.func>, ast.Name)`, `getattr(<X.func>, "id")`.
+    Четвёртая, `match <X.func>: case ast.Name()`, читается тоже.
+    """
+    bare = dot = False
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Attribute) and _reads_the_call(n.value):
+            bare |= n.attr == BARE[1]
+            dot |= n.attr == THROUGH_DOT[1]
+        if isinstance(n, ast.Call):
+            called = getattr(n.func, "id", "") or getattr(n.func, "attr", "")
+            if called == "isinstance" and len(n.args) == 2 and _reads_the_call(n.args[0]):
+                bare |= _mentions(n.args[1], BARE[0])
+                dot |= _mentions(n.args[1], THROUGH_DOT[0])
+            if called == "getattr" and len(n.args) > 1 and _reads_the_call(n.args[0]):
+                got = n.args[1]
+                if isinstance(got, ast.Constant):
+                    bare |= got.value == BARE[1]
+                    dot |= got.value == THROUGH_DOT[1]
+        if isinstance(n, ast.Match) and _reads_the_call(n.subject):
+            for case in n.cases:
+                bare |= _mentions(case.pattern, BARE[0])
+                dot |= _mentions(case.pattern, THROUGH_DOT[0])
+    return bare, dot
 
 
 def parsers() -> list[tuple[Path, ast.FunctionDef]]:
-    """Функции дерева, которые разбирают вызов, — предмет этой проверки."""
+    """Функции, разбирающие ИМЯ вызова, — предмет этой проверки.
+
+    Чтения `.func` мало: спуск по выражению (`node = node.func`) вызов не
+    разбирает, а сокращает. Предмет — те, кто у `.func` спрашивает хотя бы одну
+    форму имени.
+    """
     found: list[tuple[Path, ast.FunctionDef]] = []
     for where in WHERE:
         for path in walk(ROOT / where, "*.py"):
             if "__pycache__" in path.parts:
                 continue
-            text = path.read_text(encoding="utf-8")
-            if "ast.Call" not in text:
-                continue
-            for node in ast.walk(ast.parse(text)):
-                if isinstance(node, ast.FunctionDef) and PARSES_A_CALL in ast.unparse(node):
-                    found.append((path, node))
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for fn in ast.walk(tree):
+                if isinstance(fn, ast.FunctionDef) and any(forms_of(fn)):
+                    found.append((path, fn))
     return found
 
 
-def _knows(body: str, forms: tuple[str, ...]) -> bool:
-    """Знает ли разбор эту форму имени — любой из записей, какими её пишут."""
-    return any(one in body for one in forms)
-
-
 def test_the_subject_of_this_gate_exists() -> None:
-    """Разборов вызова нет — отказ, а не «все знают обе формы» (075)."""
-    assert parsers(), (
-        "в дереве не нашлось ни одной функции, разбирающей вызов — предмет проверки"
-        " исчез, и зелёное здесь ничего не значит"
+    """Разборов имени вызова нет — отказ, а не «все знают обе формы» (075)."""
+    found = parsers()
+    print(f"\nразборщиков имени вызова: {len(found)}")
+    for path, fn in found:
+        bare, dot = forms_of(fn)
+        mark = ("голое" if bare else "  —  ") + " " + ("точка" if dot else "  —  ")
+        print(f"  {path.relative_to(ROOT)}:{fn.lineno} {mark} {fn.name}")
+    assert found, (
+        "в дереве не нашлось ни одной функции, разбирающей имя вызова — предмет"
+        " проверки исчез, и зелёное здесь ничего не значит"
     )
 
 
@@ -82,13 +140,13 @@ def test_a_call_parser_knows_both_forms_of_the_name() -> None:
     """Разбор, знающий голое имя, знает и вызов через точку.
 
     Обратное молчаливо: `server.HTTPServer(…)` проходит мимо, проверка зелена, и
-    отличить её от работающей нечем. Род «форма записи не разобрана» встречен
-    трижды — и все три раза его находил внешний взгляд, а не набор.
+    отличить её от работающей нечем. Род «форма записи не разобрана» находил в
+    этом проекте внешний взгляд, а не набор.
     """
     blind = [
-        f"{path.relative_to(ROOT)}:{node.lineno} — {node.name}"
-        for path, node in parsers()
-        if _knows(body := ast.unparse(node), BARE) and not _knows(body, THROUGH_DOT)
+        f"{path.relative_to(ROOT)}:{fn.lineno} — {fn.name}"
+        for path, fn in parsers()
+        if forms_of(fn) == (True, False)
     ]
     assert not blind, (
         "разбор знает вызов только голым именем — запись через точку пройдёт молча"
@@ -97,28 +155,62 @@ def test_a_call_parser_knows_both_forms_of_the_name() -> None:
     )
 
 
-def test_the_subject_covers_both_ways_of_writing_the_parse() -> None:
-    """Предмет гейта — ОБЕ записи разбора, а не только через класс узла.
+#: Записи, которые РАЗБИРАЮТ имя вызова — у самого `.func`, все четыре формы.
+PARSES: Final = (
+    ("класс узла", "isinstance(node.func, ast.Name)", (True, False)),
+    ("класс через точку", "isinstance(node.func, ast.Attribute)", (False, True)),
+    ("оба класса разом", "isinstance(node.func, ast.Name | ast.Attribute)", (True, True)),
+    ("поле голым", 'getattr(node.func, "id", "")', (True, False)),
+    ("поле через точку", 'getattr(node.func, "attr", "")', (False, True)),
+    ("чтение напрямую", "x = node.func.id", (True, False)),
+    ("чтение через точку", "x = node.func.attr", (False, True)),
+    (
+        "сопоставление",
+        "match node.func:\n        case ast.Name():\n            pass",
+        (True, False),
+    ),
+)
 
-    `getattr(node.func, "id", ...)` разбирает то же, что
-    `isinstance(node.func, ast.Name)`. Пока признак знал одну запись, функции со
-    второй не попадали в предмет ВОВСЕ — гейт их не судил и молчал об этом, то
-    есть сужение предмета выглядело зелёным вердиктом
+#: Записи, в которых те же слова стоят НЕ у `.func`. Каждая — ложное
+#: срабатывание прежнего признака, искавшего их строкой по всему телу.
+NOT_PARSES: Final = (
+    ("чужой узел", "isinstance(node, ast.Name)"),
+    ("чужое поле", 'getattr(node, "id", "")'),
+    ("спуск по выражению", "node = node.func"),
+    ("литерал в прозе", 'msg = "ast.Attribute и attr"'),
+    ("поле у соседа", "x = node.value.attr"),
+    ("своё имя поля", "x = other.func.name"),
+)
+
+
+def _one(source: str) -> ast.FunctionDef:
+    """Функция из написанного руками текста — вход, которого механизм не строит."""
+    body = "\n".join("    " + line if line else line for line in source.splitlines())
+    fn = ast.parse(f"def сам(node):\n{body}\n").body[0]
+    assert isinstance(fn, ast.FunctionDef)
+    return fn
+
+
+def test_every_way_of_writing_the_parse_is_seen() -> None:
+    """Все четыре записи разбора видны — иначе функция уходит из предмета ВОВСЕ.
+
+    Сужение предмета выглядит зелёным вердиктом: гейт не судит того, кого не
+    видит, и молчит об этом
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
-
-    ПРОВЕРКА ЗАВЕЛАСЬ ОТКАТОМ. Сужение признака обратно до одного написания не
-    краснело ни на чём: слепая функция просто уходила из предмета, и вердикт
-    оставался зелёным. Откат, который не покраснел, — находка, а не облегчение.
-
-    ЗАМЕР 19.09.2026: разборщиков вызова 22, написаны через `getattr` двое, и
-    один из них знал только голое имя. Нашёл внешний взгляд (`7aa4bac`).
     """
-    assert _knows('getattr(node.func, "id", "")', BARE), (
-        "голое имя через getattr не считается разбором — такая функция уйдёт из предмета"
-    )
-    assert _knows('getattr(node.func, "attr", "")', THROUGH_DOT), (
-        "имя через точку в записи getattr не считается — слепота станет невидимой"
-    )
-    assert _knows("isinstance(node.func, ast.Name)", BARE)
-    assert _knows("isinstance(node.func, ast.Attribute)", THROUGH_DOT)
-    assert not _knows("node.func.value", BARE), "признак шире предмета: годится любая проза (195)"
+    for name, source, want in PARSES:
+        assert forms_of(_one(source)) == want, f"запись «{name}» разобрана неверно: {source}"
+
+
+def test_the_same_words_away_from_the_call_are_not_a_parse() -> None:
+    """Те же слова НЕ у `.func` разбором не считаются — вторая половина (051).
+
+    Без неё признак неотличим от «в теле упомянуто слово»: такой засчитывает
+    прозу, спуск по выражению и разбор соседнего узла. Ровно так слепота
+    `leftmost` и оставалась невидимой
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    for name, source in NOT_PARSES:
+        assert forms_of(_one(source)) == (False, False), (
+            f"«{name}» принято за разбор имени вызова: {source}"
+        )
