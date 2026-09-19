@@ -34,57 +34,37 @@
 Заготовки для того, кому механизмы недоступны, лежат у каталога — в
 [`templates/`](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/tree/main/templates).
 
-## Что можно взять: девять шагов конвейера
+## Что можно взять
 
-Шаг берётся **вызовом по адресу с версией**, а не копией файла к себе. Копия —
-ровно та беда, из-за которой передача и затевалась: замер 09.09.2026 по пяти
-проектам нашёл десять повторяющихся имён прогонов, и **ни одна пара копий не
-совпала**.
+Девять шагов конвейера — вызовом по адресу с версией, а не копией файла к себе.
+Копия — ровно та беда, из-за которой передача и затевалась: замер 09.09.2026 по
+пяти проектам нашёл десять повторяющихся имён прогонов, и **ни одна пара копий
+не совпала**.
 
-```yaml
-jobs:
-  lint:
-    name: lint
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.1.0
-```
+`.github/workflows/`: [`step-lint.yml`](.github/workflows/step-lint.yml) ·
+[`step-pr-meta.yml`](.github/workflows/step-pr-meta.yml) ·
+[`step-journal.yml`](.github/workflows/step-journal.yml) ·
+[`step-attribution.yml`](.github/workflows/step-attribution.yml) ·
+[`step-pipeline.yml`](.github/workflows/step-pipeline.yml) ·
+[`step-contract.yml`](.github/workflows/step-contract.yml) ·
+[`step-debt.yml`](.github/workflows/step-debt.yml) ·
+[`step-window-lifetime.yml`](.github/workflows/step-window-lifetime.yml) ·
+[`step-rulebook-fresh.yml`](.github/workflows/step-rulebook-fresh.yml)
 
-| шаг | что делает |
-|---|---|
-| [`step-lint.yml`](.github/workflows/step-lint.yml) | линтер, формат и типы одним джобом |
-| [`step-pr-meta.yml`](.github/workflows/step-pr-meta.yml) | метки изменения и связь с задачей |
-| [`step-journal.yml`](.github/workflows/step-journal.yml) | фрагмент журнала, версия, разбор фрагментов |
-| [`step-attribution.yml`](.github/workflows/step-attribution.yml) | автор коммитов — человек, агент соавтор |
-| [`step-pipeline.yml`](.github/workflows/step-pipeline.yml) | ответ по классам проверок полон и сходится с деревом |
-| [`step-contract.yml`](.github/workflows/step-contract.yml) | поверхность контракта не тронута молча |
-| [`step-debt.yml`](.github/workflows/step-debt.yml) | остаток долга виден на каждом изменении |
-| [`step-window-lifetime.yml`](.github/workflows/step-window-lifetime.yml) | срок жизни окна, открывшего изменение |
-| [`step-rulebook-fresh.yml`](.github/workflows/step-rulebook-fresh.yml) | свод не менялся под окном изменения |
+**Заготовку вызова собирает заход `scripts/onboard.py`**, а не вы руками:
+он печатает готовые джобы с прибивкой к последнему выпуску и заготовку ответа
+по каждой проверке.
 
-**Заготовку собирает заход, а не вы руками:**
+**Как подключиться, что делает каждый шаг и куда идти, если что-то пошло не
+так, — [`docs/onboarding.md`](docs/onboarding.md).** Здесь этого нет намеренно:
+витрину читает пришедший решить, стоит ли брать, а подключение читает уже
+взявший, и это разные читатели
+([021](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/021-split-docs-by-reader.md)).
 
-```
-python scripts/onboard.py
-```
-
-Он печатает готовые джобы вызова с прибивкой к последнему выпуску и заготовку
-ответа по каждой проверке. Состав берётся из пометок дерева, а не из списка в
-этом файле: список отстал бы на первом же вынесенном шаге, и отстал бы молча
-([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
-**Класс проверки заход не решает** — это свойство потребителя
-(174),
-и все шаги выходят «в очереди разбора»: объявленным состоянием, а не молчанием.
-
-**Имя записи проверки у вызванного шага СОСТАВНОЕ** — `<имя вашего джоба> / <имя
-шага>`. В примере выше запись придёт именем `lint / lint`, и именно его называют
-в своём `.pipeline.yml` и в защите ветки. Это замер прогоном на живой площадке,
-а не чтение документации
-([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
-
-**Чего ещё нет, и это названо, а не умолчано:** канала обратной связи от
-потребителей и потребительской половины контракта связи. Семейство `test` (матрица версий и агрегат) и сводный гейт
-`ci-complete` не вынесены намеренно: имена первых несут ячейку матрицы, а второй
-— единственный обязательный контекст защиты, живущей вне дерева. Порядок работ —
-эпик [#547](../../issues/547).
+**Чего ещё нет, и это названо, а не умолчано:** потребительской половины
+контракта связи и сверки потребителей — кто на какой версии стоит и у кого что
+обойдено. Второе не построено не по лени: потребителей, кроме нас самих, пока
+нет, и реестр был бы механизмом без предмета (075).
 
 Названо это здесь потому, что отсутствующий механизм и молчащий механизм
 снаружи неотличимы

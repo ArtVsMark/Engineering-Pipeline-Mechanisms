@@ -1,0 +1,51 @@
+name: "Потребитель · пробел"
+description: "Случился инцидент, которого конвейер не ловит."
+title: "[пробел] "
+labels: ["consumer/gap"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Пробел живёт как гипотеза до подтверждения.** Он не становится шагом
+        от того, что случился однажды: обобщение идёт по третьему случаю, а шов
+        вводится рано (093). Одно событие — запись, не правка общего механизма.
+
+        **Пробел сначала спрашивает соседей** (162): возможно, механизм уже
+        есть у другого потребителя, и нужен не новый шаг, а перенос.
+  - type: input
+    id: repo
+    attributes:
+      label: Чей проект
+      placeholder: "owner/repo"
+    validations:
+      required: true
+  - type: textarea
+    id: incident
+    attributes:
+      label: Что случилось
+      description: |
+        Событие, а не пожелание: «у нас произошло вот это, и ни один шаг не
+        покраснел». Дата и адрес — чтобы это можно было перемерить.
+    validations:
+      required: true
+  - type: textarea
+    id: silent
+    attributes:
+      label: Почему это прошло молча
+      description: "Какой шаг должен был бы поймать — и что он смотрит вместо этого."
+    validations:
+      required: true
+  - type: textarea
+    id: measured
+    attributes:
+      label: Сколько раз это уже случалось у вас
+      description: |
+        Число со способом замера, а не «бывает регулярно»: вписанное число без
+        команды проверить может только тот, кто повторит замер с нуля (005).
+    validations:
+      required: true
+  - type: input
+    id: trail
+    attributes:
+      label: След в вашем дереве
+      description: "Ссылка на вашу задачу или разбор. Здесь лежит адрес, а не копия (185)."

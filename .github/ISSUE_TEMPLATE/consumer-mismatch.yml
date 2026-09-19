@@ -1,0 +1,44 @@
+name: "Потребитель · расхождение"
+description: "Механизм есть, но у вас не подходит — и приходится обходить."
+title: "[расхождение] "
+labels: ["consumer/mismatch"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Обход обязан быть объявлен.** Снаружи он неотличим от «шаг не
+        подключён», и пока он не назван, общий модуль слепнет: он узнаёт о
+        своих пробелах последним (154).
+
+        **Одно расхождение — не повод править общий механизм.** Модуль, впитавший
+        особый случай каждого потребителя, перестаёт быть общим (093).
+  - type: input
+    id: repo
+    attributes:
+      label: Чей проект
+      placeholder: "owner/repo"
+    validations:
+      required: true
+  - type: input
+    id: step
+    attributes:
+      label: Какой шаг не подходит
+      placeholder: "step-journal.yml"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Что именно не выражается входами
+      description: "Наполнение, которое у вас своё, а шаг его не принимает."
+    validations:
+      required: true
+  - type: textarea
+    id: bypass
+    attributes:
+      label: Чем обходите и объявлен ли обход
+      description: |
+        Строка вашего `.pipeline.yml` с причиной. «Обойдён» и «не нужен» обязаны
+        назвать причину — иначе это не состояние, а молчание (154).
+    validations:
+      required: true
