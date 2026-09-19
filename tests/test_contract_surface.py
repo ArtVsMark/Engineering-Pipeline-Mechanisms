@@ -14,7 +14,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, walk
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, names_used, walk
 
 contract = load_script("contract.py")
 policy = load_script("pipeline_checks.py")
@@ -629,3 +629,47 @@ def test_the_growth_section_tells_adding_from_removing() -> None:
     said = growth_section().lower()
     assert "добавить" in said, "как добавляют новое — не сказано"
     assert "несовместимо" in said, "что ломает потребителя — не сказано"
+
+
+def test_the_class_in_the_snapshot_is_read_by_the_owner_of_the_form() -> None:
+    """Снимок читает класс ОБЩИМ разбором — не третьим своим.
+
+    Форм у записи две — голый класс и словарь, — и `off` в YAML 1.1 приходит
+    булевым. Здесь стоял ТРЕТИЙ разбор той же формы, и три понимания расходятся
+    молча. Цена у расхождения именно здесь наибольшая: снимок — то, по чему
+    судят «контракт тронут», и разойдись он с ответом, правка поверхности
+    проходила бы незамеченной ровно там, где её и стерегут
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    Нашёл внешний взгляд — на утверждении «разбор стал один», сделанном, когда
+    их оставалось два из трёх
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    assert "safe_load" in names_used(ROOT / "scripts" / "contract.py"), (
+        "снимок больше не читает ответ сам — перемерьте этот прогон"
+    )
+    assert "entry_of" in names_used(ROOT / "scripts" / "contract.py"), (
+        "снимок разбирает запись ответа своим разбором, а не общим (090)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("case", "written", "want"),
+    [
+        ("голый класс", "checks:\n  a: required\n", "required"),
+        ("словарём", "checks:\n  a:\n    class: advisory\n    why: п\n", "advisory"),
+        ("булев off", "checks:\n  a: off\n", "off"),
+        ("off словарём", "checks:\n  a:\n    class: off\n    why: п\n", "off"),
+    ],
+)
+def test_the_snapshot_reads_every_form_of_the_entry(
+    tmp_path: Path, case: str, written: str, want: str
+) -> None:
+    """Обе формы записи попадают в снимок одинаково, включая булев `off`.
+
+    Снимок, «меняющийся» от способа записи, объявлял бы поверхность тронутой на
+    правке, которая её не трогала, — и приучал бы обходить гейт (051).
+    """
+    path = tmp_path / ".pipeline.yml"
+    path.write_text(written, encoding="utf-8")
+    assert contract.checks_surface(path)["checks"]["a"] == want, case
