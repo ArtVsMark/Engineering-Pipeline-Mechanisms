@@ -42,7 +42,7 @@ import ast
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Приставка, которой этот проект называет объявленный исход механизма.
 OUTCOME_PREFIX: Final = "EXIT_"
@@ -99,7 +99,7 @@ def declared(script: str) -> dict[str, int]:
 def with_outcomes() -> dict[str, dict[str, int]]:
     """Механизмы дерева, объявившие хоть один исход, — предмет реестра."""
     found: dict[str, dict[str, int]] = {}
-    for path in sorted((ROOT / "scripts").glob("*.py")):
+    for path in walk(ROOT / "scripts", "*.py"):
         said = declared(path.name)
         if said:
             found[path.name] = said
@@ -190,7 +190,7 @@ def run_by_the_suite() -> dict[str, set[int]]:
     """Какие объявленные исходы каждого механизма набор действительно прогнал."""
     said = with_outcomes()
     found: dict[str, set[int]] = {name: set() for name in said}
-    for path in sorted((ROOT / "tests").glob("test_*.py")):
+    for path in walk(ROOT / "tests", "test_*.py"):
         tree = tree_of(path)
         numbers, names = asserted(tree)
         for script in started_by(tree) & set(said):

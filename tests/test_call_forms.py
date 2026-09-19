@@ -30,7 +30,7 @@ import ast
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Где ищем разборы: набор, механизмы и перехваты перед git.
 WHERE: Final = ("tests", "scripts", ".claude/hooks")
@@ -45,7 +45,7 @@ def parsers() -> list[tuple[Path, ast.FunctionDef]]:
     """Функции дерева, которые разбирают вызов, — предмет этой проверки."""
     found: list[tuple[Path, ast.FunctionDef]] = []
     for where in WHERE:
-        for path in sorted((ROOT / where).glob("*.py")):
+        for path in walk(ROOT / where, "*.py"):
             if "__pycache__" in path.parts:
                 continue
             text = path.read_text(encoding="utf-8")

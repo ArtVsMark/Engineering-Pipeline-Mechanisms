@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from tests.conftest import walk
+
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 GATES = WORKFLOWS / "ci.yml"
@@ -43,7 +45,7 @@ def summary_lives_in() -> tuple[Path, dict[Any, Any]]:
     """
     found = [
         (path, document)
-        for path in sorted(WORKFLOWS.glob("*.yml"))
+        for path in walk(WORKFLOWS, "*.yml")
         if SUMMARY
         in ((document := yaml.safe_load(path.read_text(encoding="utf-8"))) or {}).get("jobs", {})
     ]
@@ -92,7 +94,7 @@ def contract_rows() -> list[tuple[str, str]]:
 def tree_jobs() -> dict[str, str]:
     """Джобы ВСЕХ прогонов дерева: имя джоба → файл, который его несёт."""
     found: dict[str, str] = {}
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+    for path in walk(WORKFLOWS, "*.y*ml"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             continue
@@ -321,7 +323,7 @@ def test_workflows_do_not_embed_code() -> None:
     """
     embedded = [
         path.name
-        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        for path in walk(ROOT / ".github" / "workflows", "*.yml")
         if EMBEDDED_CODE_RE.search(path.read_text(encoding="utf-8"))
     ]
     assert not embedded, f"код встроен в прогон, а не вызван файлом: {embedded}"
@@ -387,7 +389,7 @@ def test_every_file_named_by_the_contract_exists() -> None:
     вовсе нигде, кроме обещания (046, 175).
     """
     doc = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
-    live = {path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")}
+    live = {path.name for path in walk(ROOT / ".github" / "workflows", "*.yml")}
     missing: list[str] = []
     for row in doc.splitlines():
         if not row.startswith("|"):
@@ -493,7 +495,7 @@ def test_a_cancelling_group_names_the_head_or_declares_why_not() -> None:
     один головы не имел, а другой не отменял вовсе.
     """
     cancelling = {}
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in walk(WORKFLOWS, "*.yml"):
         group = yaml.safe_load(path.read_text(encoding="utf-8")).get("concurrency")
         if isinstance(group, dict) and group.get("cancel-in-progress") is True:
             cancelling[path.name] = str(group.get("group") or "")

@@ -26,7 +26,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 WORKFLOWS: Final = ROOT / ".github" / "workflows"
 #: Ключ ручного запуска у площадки.
@@ -49,7 +49,7 @@ def runs() -> list[tuple[str, dict[Any, Any]]]:
     Объявить `dict[str, Any]` значило бы описать не то, что читается (045).
     """
     found: list[tuple[str, dict[Any, Any]]] = []
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
+    for path in walk(WORKFLOWS, "*.y*ml"):
         said = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         found.append((path.name, said))
     return found

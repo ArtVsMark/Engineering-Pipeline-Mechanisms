@@ -27,7 +27,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk_deep
 
 labels = load_script("labels.py")
 paths = load_script("paths.py")
@@ -39,7 +39,7 @@ def tree_files() -> list[str]:
     """Файлы дерева в том виде, в каком разметка получает их от площадки."""
     return [
         one.relative_to(ROOT).as_posix()
-        for one in ROOT.rglob("*")
+        for one in walk_deep(ROOT, "*")
         if one.is_file() and ".git/" not in one.as_posix()
     ]
 

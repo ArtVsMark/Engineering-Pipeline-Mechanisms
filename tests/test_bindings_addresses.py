@@ -27,6 +27,8 @@ from typing import Any, Final
 
 import pytest
 
+from tests.conftest import walk_deep
+
 ROOT = Path(__file__).resolve().parent.parent
 BINDINGS = ROOT / ".rules" / "bindings.json"
 
@@ -85,7 +87,7 @@ def answers() -> dict[str, dict[str, str]]:
 
 def tree_names() -> set[str]:
     """Имена файлов дерева — по ним и ищет читатель ответа."""
-    return {path.name for path in ROOT.rglob("*") if path.is_file()}
+    return {path.name for path in walk_deep(ROOT, "*") if path.is_file()}
 
 
 def named_files() -> list[tuple[str, str]]:

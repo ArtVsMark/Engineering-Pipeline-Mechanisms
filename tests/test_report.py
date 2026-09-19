@@ -11,7 +11,7 @@ import ast
 
 import report
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 SCRIPTS = ROOT / "scripts"
 
@@ -39,7 +39,7 @@ def test_no_mechanism_cuts_output_silently() -> None:
     Копий было четыре — шаг открытия, гейт журнала, транспорт и сборка тела
     уплотнения, — и каждая обрезала молча. Разошлись бы они так же молча.
     """
-    for path in sorted(SCRIPTS.glob("*.py")):
+    for path in walk(SCRIPTS, "*.py"):
         if path.name == "report.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

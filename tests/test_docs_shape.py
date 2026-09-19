@@ -13,13 +13,26 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import walk, walk_deep
+
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = sorted(
     [
-        *ROOT.glob("*.md"),
-        *(ROOT / "docs").rglob("*.md"),
-        *(ROOT / ".github").rglob("*.md"),
-        *(ROOT / "changelog.d").rglob("*.md"),
+        *walk(ROOT, "*.md"),
+        *walk_deep(ROOT / "docs", "*.md"),
+        # ЗАМЕР 19.09.2026: этот обход не находил НИЧЕГО и не находил с самого
+        # начала — разметки в `.github/` у проекта нет. Шаблон изменения и шаблоны
+        # задач не заведены: разметку изменения проект спрашивает гейтом
+        # (`scripts/check_pr_meta.py`), а не просьбой в шаблоне, и заводить второй
+        # источник того же значило бы получить два ответа на один вопрос (022).
+        # Обход оставлен, а не снят: заведётся шаблон — он сразу попадёт под все
+        # правила прозы, а не окажется вне их по недосмотру.
+        *walk_deep(
+            ROOT / ".github",
+            "*.md",
+            may_be_empty="шаблонов изменения и задач у проекта нет: разметку спрашивает гейт",
+        ),
+        *walk_deep(ROOT / "changelog.d", "*.md"),
     ]
 )
 

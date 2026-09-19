@@ -37,7 +37,7 @@ import ast
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Где живут механизмы, чьи находки читает человек.
 WHERE: Final = ("scripts", "packages/transport", ".claude/hooks")
@@ -49,7 +49,7 @@ def collectors() -> list[tuple[Path, ast.FunctionDef]]:
     """Функции, которые КОПЯТ находки в список и им же заканчиваются."""
     found: list[tuple[Path, ast.FunctionDef]] = []
     for where in WHERE:
-        for path in sorted((ROOT / where).glob("*.py")):
+        for path in walk(ROOT / where, "*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.FunctionDef) or not node.body:

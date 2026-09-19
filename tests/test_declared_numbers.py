@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 from typing import Any, Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 RULES: Final = ROOT / ".rules"
 #: Ключи, которыми запись несёт номер формата.
@@ -46,8 +46,7 @@ NO_NUMBER: Final = "_версии_нет"
 def declarations() -> list[tuple[str, dict[str, Any]]]:
     """Записи `.rules/` и их содержимое."""
     return [
-        (path.name, json.loads(path.read_text(encoding="utf-8")))
-        for path in sorted(RULES.glob("*.json"))
+        (path.name, json.loads(path.read_text(encoding="utf-8"))) for path in walk(RULES, "*.json")
     ]
 
 

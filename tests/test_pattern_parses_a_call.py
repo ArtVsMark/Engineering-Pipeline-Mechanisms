@@ -41,7 +41,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Где ищем образцы: набор, механизмы, перехваты и общий низ.
 WHERE: Final = ("tests", "scripts", ".claude/hooks", "packages/transport")
@@ -71,7 +71,7 @@ def patterns() -> list[tuple[Path, int, str]]:
     """Все образцы дерева, отданные разбору: файл, строка, сам образец."""
     found: list[tuple[Path, int, str]] = []
     for where in WHERE:
-        for path in sorted((ROOT / where).glob("*.py")):
+        for path in walk(ROOT / where, "*.py"):
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 if not isinstance(node, ast.Call) or not node.args:
                     continue

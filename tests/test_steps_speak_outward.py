@@ -32,7 +32,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Прогоны, чей вывод — разбор решения, а не отметка «прошло».
 SPEAKS_OUT: Final = ("automerge.yml", "ci-complete.yml")
@@ -149,7 +149,7 @@ THE_CODE: Final = re.compile(r"\(код \$\{?rc\}?\)")
 def annotated() -> list[tuple[str, int, str]]:
     """Все аннотации прогонов дерева: файл, строка, текст."""
     found: list[tuple[str, int, str]] = []
-    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+    for path in walk(ROOT / ".github" / "workflows", "*.yml"):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             said = ANNOTATES.match(line)
             if said:
@@ -172,7 +172,7 @@ def blocks() -> list[tuple[str, int, list[str]]]:
     проверки этого файла.
     """
     found: list[tuple[str, int, list[str]]] = []
-    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+    for path in walk(ROOT / ".github" / "workflows", "*.yml"):
         lines = path.read_text(encoding="utf-8").splitlines()
         for number, line in enumerate(lines, 1):
             head = re.match(r"^(\s*)-?\s*run:\s*\|", line)
@@ -446,7 +446,7 @@ def test_the_pattern_sees_every_annotation_in_the_tree() -> None:
     """
     raw = [
         f"{path.name}:{number}"
-        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        for path in walk(ROOT / ".github" / "workflows", "*.yml")
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if RAW_ANNOTATION.search(line)
     ]

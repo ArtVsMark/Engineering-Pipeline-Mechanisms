@@ -23,7 +23,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk_deep
 
 #: Строка счёта в записи. Дата обязательна: без неё это число в прозе,
 #: которое устареет молча (005, 127).
@@ -53,7 +53,9 @@ def fragments() -> list[Path]:
     выпуска: 13.09.2026 все 280 записей уехали разом, и проверка объявила, что
     записей со счётом нет вовсе.
     """
-    return sorted(path for path in (ROOT / "changelog.d").rglob("*.md") if path.name != "README.md")
+    return sorted(
+        path for path in walk_deep(ROOT / "changelog.d", "*.md") if path.name != "README.md"
+    )
 
 
 def prose(path: Path) -> str:

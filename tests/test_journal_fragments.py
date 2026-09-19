@@ -25,7 +25,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 module = load_script("build_changelog.py")
 journal = load_script("journal.py")
@@ -52,7 +52,7 @@ def files() -> list[Path]:
     """
     assert FRAGMENTS.is_dir(), "папки фрагментов нет вовсе — это поломка дерева, а не пустота"
     assert (FRAGMENTS / "README.md").is_file(), "описание папки фрагментов пропало"
-    return sorted(p for p in FRAGMENTS.glob("*.md") if p.name != "README.md")
+    return sorted(p for p in walk(FRAGMENTS, "*.md") if p.name != "README.md")
 
 
 def test_an_emptied_folder_is_a_state_not_a_failure() -> None:

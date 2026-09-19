@@ -26,7 +26,7 @@ import collections
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Сколько операторов в теле делают функцию предметом сравнения. Короче — это
 #: не «одна реализация», а один и тот же оборот речи: проверка входа, ранний
@@ -46,7 +46,7 @@ KEPT_APART: Final[dict[str, str]] = {}
 
 def measured() -> list[Path]:
     """Механизмы и прогоны проекта — предмет замера."""
-    return sorted([*(ROOT / "scripts").glob("*.py"), *(ROOT / "tests").glob("*.py")])
+    return sorted([*walk(ROOT / "scripts", "*.py"), *walk(ROOT / "tests", "*.py")])
 
 
 def shape(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:

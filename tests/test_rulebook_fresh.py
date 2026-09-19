@@ -20,7 +20,7 @@ from typing import Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, WINDOW_A, WINDOW_B, commit, git, load_script
+from tests.conftest import ROOT, WINDOW_A, WINDOW_B, commit, git, load_script, walk
 
 module = load_script("check_rulebook_fresh.py")
 
@@ -224,7 +224,7 @@ def test_changed_under_bounds_the_window_on_both_sides(tree: Path) -> None:
 
 def skills() -> list[Path]:
     """Навыки дерева — по объявлению, а не по списку имён (005)."""
-    return sorted(SKILL_DIR.glob("*/SKILL.md"))
+    return walk(SKILL_DIR, "*/SKILL.md")
 
 
 def test_the_tree_declares_a_skill_at_all() -> None:

@@ -37,7 +37,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Где живут механизмы: их сообщения читает окно и владелец.
 WHERE: Final = ("scripts", "packages/transport", ".claude/hooks")
@@ -82,7 +82,7 @@ def paths_in_messages() -> list[tuple[Path, int, str]]:
     """Пути, названные сообщениями механизмов: файл, строка, адрес."""
     found: list[tuple[Path, int, str]] = []
     for where in WHERE:
-        for path in sorted((ROOT / where).glob("*.py")):
+        for path in walk(ROOT / where, "*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             prose = prose_of(tree)
             for node in ast.walk(tree):
@@ -132,7 +132,7 @@ def test_a_dead_path_in_prose_is_not_judged() -> None:
     """
     prose_paths: list[str] = []
     for where in WHERE:
-        for path in sorted((ROOT / where).glob("*.py")):
+        for path in walk(ROOT / where, "*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             prose = prose_of(tree)
             for node in ast.walk(tree):

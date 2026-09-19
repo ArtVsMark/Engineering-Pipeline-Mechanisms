@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 DECISIONS = ROOT / "docs" / "decisions"
 TITLE_RE = re.compile(r"^# (\d{3})\. \S")
@@ -25,7 +25,7 @@ READER_RE = re.compile(r"^> \*\*Читатель:\*\* \S")
 
 def records() -> list[Path]:
     """Записи решений, кроме служебных файлов каталога."""
-    found = sorted(p for p in DECISIONS.glob("*.md") if p.name != "README.md")
+    found = sorted(p for p in walk(DECISIONS, "*.md") if p.name != "README.md")
     assert found, "записей решений нет — предмет проверки не найден (075)"
     return found
 

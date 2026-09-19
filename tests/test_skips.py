@@ -22,7 +22,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 TESTS: Final = ROOT / "tests"
 
@@ -108,7 +108,7 @@ def muted_in(source: str, where: str = "<подделка>") -> list[Muted]:
 def live() -> list[Muted]:
     """Выключения живого дерева проверок."""
     found: list[Muted] = []
-    for path in sorted(TESTS.glob("*.py")):
+    for path in walk(TESTS, "*.py"):
         found.extend(muted_in(path.read_text(encoding="utf-8"), path.name))
     return found
 

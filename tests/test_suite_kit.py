@@ -31,7 +31,7 @@ from typing import Any, Final
 
 import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 WORKFLOWS: Final = ROOT / ".github" / "workflows"
 #: Прогонщик набора на изменении: его строка установки и есть канон состава.
@@ -46,7 +46,7 @@ NEED_RE: Final = re.compile(r'"([A-Za-z][\w.-]*)(?:[<>=!~][^"]*)?"')
 
 def workflows() -> list[Path]:
     """Прогоны дерева — все, а не перечисленные: новый попадает сам."""
-    return sorted(WORKFLOWS.glob("*.y*ml"))
+    return walk(WORKFLOWS, "*.y*ml")
 
 
 def steps_of(job: dict[str, Any]) -> list[dict[str, Any]]:

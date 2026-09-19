@@ -37,7 +37,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk_deep
 
 der = load_script("check_derived_refs.py")
 paths = load_script("paths.py")
@@ -54,7 +54,7 @@ OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
 
 def documents() -> list[Path]:
     """Отслеживаемые документы дерева."""
-    return sorted(path for path in ROOT.rglob("*.md") if ".git" not in path.parts)
+    return sorted(path for path in walk_deep(ROOT, "*.md") if ".git" not in path.parts)
 
 
 def addresses() -> list[tuple[Path, int, str, bool]]:

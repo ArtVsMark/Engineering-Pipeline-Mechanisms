@@ -24,7 +24,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import load_script, string_args_of
+from tests.conftest import load_script, string_args_of, walk
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -68,7 +68,7 @@ SOURCE_DIRS = frozenset(one.as_posix() for one in paths.SOURCES)
 
 def scripts() -> list[Path]:
     """Механизмы проекта, кроме самого якоря."""
-    return sorted(p for p in SCRIPTS.glob("*.py") if p.name != ANCHOR_NAME)
+    return sorted(p for p in walk(SCRIPTS, "*.py") if p.name != ANCHOR_NAME)
 
 
 def declared_in_the_anchor() -> set[Path]:

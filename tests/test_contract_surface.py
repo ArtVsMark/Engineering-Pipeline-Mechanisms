@@ -14,7 +14,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, walk
 
 contract = load_script("contract.py")
 policy = load_script("pipeline_checks.py")
@@ -216,7 +216,7 @@ def test_a_pending_surface_fragment_fits_the_declared_window() -> None:
     сказал об этом сухой заход выпуска, а не набор
     ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
     """
-    waiting = sorted((ROOT / "changelog.d").glob("*.contract.md"))
+    waiting = walk(ROOT / "changelog.d", "*.contract.md")
     current = (ROOT / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
     after = release.next_contract(current, touched=bool(waiting))
     span = policy.span()

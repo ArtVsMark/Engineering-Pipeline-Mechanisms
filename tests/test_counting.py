@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import MEASURING, ROOT, load_script, under_counter
+from tests.conftest import MEASURING, ROOT, load_script, under_counter, walk
 
 facts = load_script("build_facts.py")
 
@@ -53,7 +53,7 @@ def test_the_runnable_are_the_denominator() -> None:
     counts = facts.script_runs(ROOT)
     assert counts["runnable"] > 0, "запускаемых механизмов не нашлось — предмет не найден (075)"
     assert 0 < counts["started"] <= counts["runnable"]
-    modules = len(list((ROOT / "scripts").glob("*.py")))
+    modules = len(list(walk(ROOT / "scripts", "*.py")))
     assert counts["runnable"] < modules, "все модули объявлены запускаемыми — разбор не разбирает"
 
 

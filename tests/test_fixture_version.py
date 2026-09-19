@@ -14,7 +14,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tests.conftest import FAKE_VERSION, ROOT
+from tests.conftest import FAKE_VERSION, ROOT, walk
 
 #: Имя файла версии: по нему узнают получателя записи.
 VERSION_FILE = "CONTRACT_VERSION"
@@ -81,7 +81,7 @@ def test_the_checklists_of_the_project_use_it() -> None:
     """
     users = [
         path.name
-        for path in (ROOT / "tests").glob("test_*.py")
+        for path in walk(ROOT / "tests", "test_*.py")
         if path.name != "test_fixture_version.py" and writes_the_version(path)
     ]
     assert users, "ни один тест не подделывает версию — предмет не найден (075)"
