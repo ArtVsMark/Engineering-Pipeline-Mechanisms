@@ -1,0 +1,58 @@
+name: "Потребитель · затор"
+description: "Конвейер встал, слить нельзя. Это тревога, а не место в бэклоге."
+title: "[затор] "
+labels: ["consumer/jam", "blocker"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Затор — это тревога, и у неё адресат-человек** (142). Слить нельзя,
+        работа стоит, и ждать очередного разбора бэклога она не будет.
+
+        Если слить МОЖНО, а мешает что-то другое, — это не затор:
+        возьмите «пробел» (случилось то, чего конвейер не ловит) или
+        «расхождение» (механизм есть, но у вас не подходит). Путать их нельзя:
+        у трёх видов разные адресаты, разная срочность и разный исход.
+  - type: input
+    id: repo
+    attributes:
+      label: Чей конвейер встал
+      description: "Адрес вашего проекта — след живёт адресом, а не копией разбора (185)."
+      placeholder: "owner/repo"
+    validations:
+      required: true
+  - type: input
+    id: pin
+    attributes:
+      label: На какой версии вы стоите
+      description: "Тег выпуска из `uses: …@<тег>`. Без него неизвестно, о каком коде речь."
+      placeholder: "v1.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: stuck
+    attributes:
+      label: Что именно не проходит
+      description: |
+        Имя проверки и её состояние. Имя записи у вызванного шага СОСТАВНОЕ —
+        «<имя вашего джоба> / <имя шага>»: голое имя здесь чаще всего и есть
+        причина затора.
+      placeholder: "lint / lint — записи на голове нет вовсе; защита ждёт её и не пускает"
+    validations:
+      required: true
+  - type: textarea
+    id: since
+    attributes:
+      label: С какого момента и что менялось перед этим
+      description: "Подъём версии, правка своего `.pipeline.yml`, смена защиты ветки."
+    validations:
+      required: true
+  - type: textarea
+    id: bypass
+    attributes:
+      label: Чем вы обходитесь сейчас
+      description: |
+        Обход — сильнейшее свидетельство пробела, и он невидим, пока не назван.
+        «Ничем, стоим» — тоже ответ.
+    validations:
+      required: true
