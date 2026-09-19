@@ -171,13 +171,42 @@ class Job:
     matrix: bool
 
 
-def _text_of(value: Any) -> str:
-    """Приводит значение класса к строке, разбирая булевы YAML 1.1."""
+def text_of(value: Any) -> str:
+    """Приводит значение класса к строке, разбирая булевы YAML 1.1.
+
+    ИМЯ ПУБЛИЧНОЕ, И ЭТО НЕ ОФОРМЛЕНИЕ. Ловушка `off` → `False` одна на всех,
+    кто читает ответ по проверкам, — в том числе на ЧУЖОЙ ответ у сверки
+    потребителей. Пока имя было приватным, второй читатель либо тянулся к нему
+    через подчёркивание, либо заводил своё понимание той же формы — и расходятся
+    такие молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
     if value is False:
         return OFF
     if value is True:
         return "on"
     return str(value if value is not None else "").strip()
+
+
+def answer_text(said: str, where: str) -> dict[str, Any]:
+    """Ответ по проверкам, прочитанный из ТЕКСТА, — для чужого дерева.
+
+    Соседний :func:`load` читает файл СВОЕГО дерева; ответ потребителя приходит
+    строкой из площадки, и файла у нас нет. Разбор при этом один: второй разбор
+    той же формы — это второе её понимание, и расходятся они молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    ЧУЖОЙ ОТВЕТ НЕ СУДИТСЯ НАШИМИ ПРАВИЛАМИ. Здесь только разбор формы: классы,
+    причины и адресаты — дело потребителя, и краснеть на его выборе значило бы
+    считать факты о его проекте за него (174).
+    """
+    try:
+        found = yaml.safe_load(said)
+    except yaml.YAMLError as exc:
+        raise BadPolicy(f"{where}: ответ по проверкам не разбирается: {exc}") from exc
+    if not isinstance(found, dict):
+        raise BadPolicy(f"{where}: ответ по проверкам не словарь — читать нечего")
+    return found
 
 
 def events_raw(document: dict[Any, Any]) -> Any:
@@ -335,11 +364,11 @@ def _read_section(
     for key, item in declared.items():
         name = str(key).strip()
         if isinstance(item, dict):
-            klass = _text_of(item.get("class"))
+            klass = text_of(item.get("class"))
             why = str(item.get("why") or "").strip()
             addressee = str(item.get("addressee") or "").strip()
         else:
-            klass = _text_of(item)
+            klass = text_of(item)
             why = ""
             addressee = ""
 

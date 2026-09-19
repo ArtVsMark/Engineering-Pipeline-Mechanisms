@@ -691,3 +691,49 @@ def test_the_leading_dot_slash_is_not_normalised_away(tmp_path: Path) -> None:
     directory = called_tree(tmp_path)
     assert policy.called_jobs("./.github/workflows/step-debt.yml", directory) == ["debt"]
     assert policy.called_jobs(".github/workflows/step-debt.yml", directory) is None
+
+
+# --- разбор ответа: один на своё дерево и на чужое ---------------------------
+
+
+def test_the_off_class_survives_the_yaml_boolean() -> None:
+    """`off` в YAML 1.1 читается БУЛЕВЫМ, и разбор это знает.
+
+    Та же ловушка, что с `on:` в прогонах, и цена у неё та же: класс, ставший
+    `False`, не равен строке «off» ни при каком сравнении, и объявленный обход
+    стал бы невидимым ровно там, где он объявлен
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ИМЯ ПУБЛИЧНОЕ ПОТОМУ, ЧТО ЧИТАТЕЛЕЙ ДВОЕ: свой ответ и ответ потребителя у
+    сверки. Приватное имя заставило бы второго завести своё понимание той же
+    формы (090).
+    """
+    assert policy.text_of(False) == policy.OFF
+    assert policy.text_of(True) == "on"
+    assert policy.text_of("advisory") == policy.ADVISORY
+    assert policy.text_of(None) == ""
+    assert policy.text_of("  required  ") == policy.REQUIRED
+
+
+def test_a_foreign_answer_is_parsed_from_text() -> None:
+    """Ответ ЧУЖОГО дерева приходит строкой, и разбирается тем же разбором.
+
+    Соседний `load` читает файл своего дерева; ответ потребителя приходит из
+    площадки, и файла у нас нет. Второй разбор той же формы разошёлся бы с
+    первым молча (090).
+    """
+    said = policy.answer_text('checks:\n  "lint / lint": off\n', "o/r")
+    assert policy.text_of(said["checks"]["lint / lint"]) == policy.OFF
+
+
+def test_a_foreign_answer_that_is_not_a_mapping_is_refused() -> None:
+    """Не словарь — отказ входа, а не пустой ответ: «нет обходов» и «не
+    прочитали» снаружи неотличимы (045)."""
+    with pytest.raises(policy.BadPolicy, match="не словарь"):
+        policy.answer_text("- просто список\n", "o/r")
+
+
+def test_a_foreign_answer_that_does_not_parse_is_refused() -> None:
+    """Сломанный YAML чужого дерева — отказ с адресом, а не тихая пустота."""
+    with pytest.raises(policy.BadPolicy, match="o/r"):
+        policy.answer_text("checks:\n  - [непарная\n", "o/r")
