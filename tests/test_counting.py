@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -94,6 +95,40 @@ def test_a_missing_tree_is_not_a_zero(tmp_path: Path) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     assert facts.script_runs(tmp_path) == {"runnable": 0, "started": 0}
+
+
+def test_a_counted_zero_is_never_published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сосчитанный ноль НЕ публикуется: граница между счётом и витриной.
+
+    Счётчику ноль отдавать честно — его зовут и с синтетическим корнем, где
+    пусто законно (соседняя проверка выше). А вот ОПУБЛИКОВАННЫЙ ноль уже
+    утверждение о проекте: значок покажет «тестов 0» так же уверенно, как показал
+    бы 1743, и читатель не отличит «посчитали» от «не нашли, где считать».
+    Переименуй каталог набора — и витрина соврёт, не покраснев нигде
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+    ЗАМЕР 19.09.2026, ИЗ-ЗА КОТОРОГО ПРОВЕРКА И НАПИСАНА: на дереве без каталога
+    набора `test_counts` отдавал `{'total': 0, 'modules': 0}`, и витрина
+    опубликовала бы это как факт. Найдено не чтением, а ЗАПУСКОМ механизмов на
+    пустом корне.
+    """
+    настоящие = facts.collect(ROOT, "голова")
+    подделка = json.loads(json.dumps(настоящие))
+    подделка["tests"]["total"] = 0
+    monkeypatch.setattr(facts, "collect", lambda *a, **k: подделка)
+    код = facts.main(["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова"])
+    assert код == facts.EXIT_BROKEN, "витрина опубликовала сосчитанный ноль"
+    assert not list(tmp_path.glob("*.svg")), "значки нарисованы при обрыве обхода"
+
+
+def test_a_real_tree_still_publishes(tmp_path: Path) -> None:
+    """Вторая половина: на настоящем дереве витрина собирается.
+
+    Без неё «ноль не публикуется» держалось бы тем, что не публикуется НИЧЕГО
+    ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
+    """
+    assert facts.main(["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова"]) == 0
+    assert (tmp_path / "facts.json").is_file(), "фактов нет при здоровом дереве"
 
 
 def test_coverage_without_a_report_is_not_a_zero(tmp_path: Path) -> None:

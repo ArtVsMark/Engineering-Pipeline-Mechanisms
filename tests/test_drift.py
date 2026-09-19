@@ -426,6 +426,25 @@ def workflow(tmp_path: Path, name: str, body: str) -> Path:
     return where
 
 
+def test_a_pass_without_runs_is_a_refusal_not_agreement(tmp_path: Path) -> None:
+    """Прогонов нет — источник ОТКАЗЫВАЕТ, а не сообщает «сошлось».
+
+    Пустой обход здесь читается как схождение: источник отдал бы пустой список
+    находок, заход напечатал бы «внешние входы сошлись с деревом», и снаружи это
+    неотличимо от настоящего схождения
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    У дрейфа для этого есть свой исход: молчащий источник называется по имени, и
+    `look` перечисляет его отдельно от находок.
+
+    ЗАМЕР 19.09.2026: найдено ЗАПУСКОМ механизмов на пустом корне, а не чтением
+    кода — форма у обхода была та же, что у здоровых соседей.
+    """
+    where = tmp_path / "workflows"
+    where.mkdir()
+    with pytest.raises(module.NotRun):
+        module.action_versions(where)
+
+
 def test_one_version_of_a_foreign_action_is_not_a_drift(tmp_path: Path) -> None:
     """Одна версия у действия во всех прогонах — расхождения нет."""
     where = workflow(tmp_path, "a.yml", "      - uses: actions/checkout@v4\n")

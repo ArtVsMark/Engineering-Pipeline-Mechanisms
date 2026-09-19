@@ -677,7 +677,14 @@ def action_versions(where: Path | None = None) -> dict[str, dict[str, list[str]]
     одна, и узнаётся она у тега либо у пометки рядом с хешем.
     """
     found: dict[str, dict[str, list[str]]] = {}
-    for path in sorted((where or paths.WORKFLOWS).glob("*.y*ml")):
+    runs = sorted((where or paths.WORKFLOWS).glob("*.y*ml"))
+    if not runs:
+        # ПУСТОЙ ОБХОД ЗДЕСЬ ЧИТАЕТСЯ КАК «СОШЛОСЬ». Источник отдал бы пустой
+        # список находок, заход напечатал бы «внешние входы сошлись с деревом», и
+        # снаружи это неотличимо от настоящего схождения. У дрейфа для этого есть
+        # свой исход: молчащий источник называется по имени (075, 045).
+        raise NotRun(f"в {where or paths.WORKFLOWS} нет ни одного прогона — сверять нечего")
+    for path in runs:
         for match in ACTION_USE.finditer(path.read_text(encoding="utf-8")):
             repo = match["repo"]
             if repo.startswith(OUR_OWN):
