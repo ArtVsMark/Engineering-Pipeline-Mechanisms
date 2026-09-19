@@ -147,6 +147,19 @@ def carried_text(where: Path) -> dict[Path, str]:
     ЧИТАЕТСЯ ОДНИМ ЗАХОДОМ: `ls-files -s` даёт отпечатки содержимого, а
     `cat-file --batch` отдаёт их разом. Заход на файл стоил бы полутора сотен
     вызовов git на каждый прогон.
+
+    СОСЕДИ ПО РОДУ НАЗВАНЫ, И ЗАМЕР ПРИВЕДЁН
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Список путей от `git ls-files` с последующим чтением текста стоит в дереве
+    ещё в шести местах — замер 19.09.2026, `grep -rn "ls-files" scripts/ tests/`
+    с чтением каждого. Пять из них перечисляют `--cached --others
+    --exclude-standard`, то есть ВМЕСТЕ с рабочим деревом, и чтение с диска там
+    согласовано: `scripts/check_rule_links.py`, `scripts/check_own_name.py`,
+    `scripts/check_version.py`, `tests/test_citation_applicability.py`,
+    `tests/test_doc_links.py`. Расходилось одно — `scripts/check_foreign_why.py`,
+    — и оно починено тем же изменением, только в ДРУГУЮ сторону: гейт советует
+    окну перед толчком, и судить ему надо то, что окно отправит. Здесь наоборот,
+    потому что договор здесь — «предскажи площадку».
     """
     listed = subprocess.run(
         ["git", "ls-files", "-s", "-z", "--cached", "--", str(where)],
