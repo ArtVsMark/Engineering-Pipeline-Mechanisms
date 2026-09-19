@@ -252,8 +252,14 @@ def test_the_gate_shows_the_surface(run_script: RunScript) -> None:
 
 def test_the_gate_is_declared_required() -> None:
     """Гейт объявлен держащим слияние: правка поверхности ломает потребителя молча."""
+    # Имя проверки берётся у РАЗБОРА, а не пишется здесь: шаг вынесен в
+    # переиспользуемый прогон, и имя записи стало составным. Вписанное имя
+    # разошлось бы с деревом молча (022).
     checks = policy.load()
-    assert checks["contract"].klass == policy.REQUIRED
+    named = [name for name in checks if name.split(" / ")[0] == "contract"]
+    assert named, "гейта поверхности нет в ответе конвейера вовсе"
+    for name in named:
+        assert checks[name].klass == policy.REQUIRED, f"{name} не держит слияние"
 
 
 #: Что документ обязан назвать, говоря о поверхности, — по одному слову на род

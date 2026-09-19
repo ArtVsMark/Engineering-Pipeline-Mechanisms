@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script, walk
 
 module = load_script("check_foreign_why.py")
 
@@ -263,9 +263,20 @@ def test_a_tree_without_documents_is_the_third_outcome(
 
 
 def test_the_gate_runs_on_the_live_tree(run_script: RunScript) -> None:
-    """Гейт объявлен в прогоне: механизм без шага остаётся обещанием (139)."""
-    text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "check_foreign_why.py" in text, "гейт не подключён ни к одному прогону"
+    """Гейт объявлен в прогоне: механизм без шага остаётся обещанием (139).
+
+    ИЩЕТСЯ ПО ВСЕМУ КАТАЛОГУ, А НЕ В `ci.yml`. Файл — АДРЕС шага, а не его
+    личность, и адрес вправе меняться: вынос шага в переиспользуемый прогон
+    сломал бы проверку, прибитую к одному имени, хотя шаг остался на месте
+    ([168](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/168-one-aggregating-required-check.md)).
+    Тот же приём уже применён у сверки обязательного контекста.
+    """
+    where = [
+        path.name
+        for path in walk(ROOT / ".github" / "workflows", "*.yml")
+        if "check_foreign_why.py" in path.read_text(encoding="utf-8")
+    ]
+    assert where, "гейт не подключён ни к одному прогону"
 
 
 def test_the_window_is_declared_not_guessed() -> None:

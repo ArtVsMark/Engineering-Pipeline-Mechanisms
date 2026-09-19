@@ -344,10 +344,14 @@ def test_no_records_on_the_head_refuses_to_merge(monkeypatch: pytest.MonkeyPatch
 
 def test_a_green_head_passes_the_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
     """Здоровый вход обязан пройти: гейт проверяется обеими ошибками (097)."""
-    green = [
-        record(name)
-        for name in ("lint", "test", "pr-meta", "journal", "attribution", "pipeline", "contract")
-    ]
+    # ИМЕНА БЕРУТСЯ У ОТВЕТА, А НЕ ПИШУТСЯ ЗДЕСЬ СПИСКОМ. Список руками — вторая
+    # копия того же, и разошлась она молча на первом же выносе шага в
+    # переиспользуемый прогон: имя стало составным, а здесь осталось голым, и
+    # «здоровый вход» перестал быть здоровым
+    # ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    required = module.policy.names_of(module.policy.load(), module.policy.REQUIRED)
+    assert required, "обязательных проверок в ответе нет — здоровый вход не собрать (075)"
+    green = [record(name) for name in required]
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, key=None: iter(green))
     problems, waiting = module.head_verdict("o/r", change(1, "automerge"), "token")
     assert (problems, waiting) == ([], False)
@@ -875,8 +879,13 @@ def test_a_skipped_check_on_a_candidate_head_is_still_a_refusal(
     Послабление сделано для общей ветки и только для неё: иначе выключение
     шага снова стало бы способом обойти гейт.
     """
-    runs = [record(name) for name in ("lint", "test", "journal", "attribution", "pipeline")]
-    runs.append(record("pr-meta", conclusion="skipped"))
+    # Имена берутся у ответа по той же причине, что и у здорового входа выше:
+    # второй список разошёлся бы молча. Пропускается ОДИН из обязательных —
+    # какой именно, значения не имеет, важен сам пропуск.
+    required = module.policy.names_of(module.policy.load(), module.policy.REQUIRED)
+    assert len(required) > 1, "обязательных меньше двух — пропуск одного не проверить (075)"
+    runs = [record(name) for name in required[1:]]
+    runs.append(record(required[0], conclusion="skipped"))
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, key=None: iter(runs))
     problems, _ = module.head_verdict("o/r", change(1, "automerge"), "token")
     assert problems and any("пропущен" in problem for problem in problems)

@@ -69,7 +69,7 @@ contract: ">=0.3,<0.5"
 
 checks:
   # Держат слияние.
-  lint: required
+  "lint / lint": required
   test: required
 
   # Матрица обязательных версий. Сама она обязательной быть не может: её имена
@@ -88,13 +88,13 @@ checks:
     class: advisory
     why: предрелизная версия, обещания работать на ней проект не давал
     addressee: scripts/main_red.py
-  pr-meta: required
-  journal: required
-  attribution: required
-  pipeline: required
+  "pr-meta / pr-meta": required
+  "journal / journal": required
+  "attribution / attribution": required
+  "pipeline / pipeline": required
   # Правка поверхности контракта ломает потребителя молча — значит держит
   # слияние. Это единственный настоящий гейт связи с ним (#15).
-  contract: required
+  "contract / contract": required
 
   # ИМЯ СОСТАВНОЕ, ПОТОМУ ЧТО ШАГ ВЫНЕСЕН В ПЕРЕИСПОЛЬЗУЕМЫЙ ПРОГОН (#547).
   # Площадка называет запись вызванного джоба «<имя вызывающего> / <имя
@@ -201,7 +201,7 @@ checks:
   # Замер 14.09.2026: три окна прожили 2 ч, 7 ч и 4 сут 13 ч при пределе пять
   # суток, то есть шаг не краснел ни разу и выбирать класс пришлось бы на нулевом
   # ряде. Первое срабатывание даст прочитанное состояние — по нему и решать.
-  window-lifetime: unreviewed
+  "window-lifetime / window-lifetime": unreviewed
 
   # СВЕЖЕСТЬ СВОДА: правка `AGENTS.md`/`CLAUDE.md`, случившаяся ПОД уже
   # работающим окном. Класс тот же и по той же причине, что у соседа: слияния
@@ -217,7 +217,7 @@ checks:
   # КЛАСС ЖДЁТ ПЕРВОГО НАСТОЯЩЕГО КРАСНОГО — как и у соседа: выбирать между
   # `advisory` и `off` на нулевом ряде срабатываний значило бы решать наугад.
   # Первое срабатывание даст прочитанное состояние, по нему и решать.
-  rulebook-fresh: unreviewed
+  "rulebook-fresh / rulebook-fresh": unreviewed
 
 # ПРОГОНЫ ЗА ПРЕДЕЛАМИ ИЗМЕНЕНИЯ, И ОНИ СПРАШИВАЮТСЯ НАРАВНЕ.
 #

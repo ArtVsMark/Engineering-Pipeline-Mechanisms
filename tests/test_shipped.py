@@ -172,7 +172,25 @@ def test_nowhere_to_look_is_the_third_outcome(tmp_path: Path) -> None:
 
 
 def test_the_live_tree_agrees_with_its_entrance(run_script: RunScript) -> None:
-    """Живое дерево: замер 13.09.2026 — помечено ноль, и вход это говорит."""
+    """Живое дерево: вход называет ровно то, что помечено, — и ничего сверх.
+
+    ЗАМЕР БОЛЬШЕ НЕ ВПИСАН СЮДА ЧИСЛОМ. До 19.09.2026 здесь стояло «помечено
+    ноль, и вход это говорит»: передача была отложена, и проверка держала
+    объявленную пустоту. Пустота кончилась — девять шагов вынесены в
+    переиспользуемые прогоны и помечены, — и вписанное число стало бы неверным
+    на следующем же вынесенном шаге
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+    Проверяется теперь ОТНОШЕНИЕ: помеченное и названное на входе совпадают, а
+    какое из двух состояний нынешнее — решает дерево, а не этот файл.
+    """
     done = run_script("check_shipped.py")
     assert done.code == module.EXIT_OK, done.err or done.out
-    assert module.SAYS_EMPTY in (ROOT / paths.ENTRANCE).read_text(encoding="utf-8")
+    entrance = module.entrance(ROOT)
+    marked = module.shipped(ROOT)
+    if marked:
+        assert module.SAYS_EMPTY not in entrance, (
+            "вход объявляет пустоту, а помеченное есть — отстающий вход читают как дерево"
+        )
+        assert not module.apart(entrance, marked), "вход не называет всё помеченное"
+    else:
+        assert module.SAYS_EMPTY in entrance, "пустота законна, но обязана быть названа (154)"

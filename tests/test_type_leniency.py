@@ -54,13 +54,17 @@ from typing import Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, found_by
+from tests.conftest import ROOT, found_by, walk_deep
 
 SETTINGS: Final = ROOT / "pyproject.toml"
 #: Откуда берётся, ЧТО разбирает шаг. Список каталогов здесь не пишется второй
 #: копией: разъехавшись с прогоном, он судил бы не то дерево, и разъехался бы
 #: молча ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
-STEP: Final = ROOT / ".github" / "workflows" / "ci.yml"
+#:
+#: ШАГ ИЩЕТСЯ ПО ВСЕМУ КАТАЛОГУ ПРОГОНОВ, А НЕ В ОДНОМ ФАЙЛЕ. Прибитый к
+#: `ci.yml` поиск сломался на первом же выносе шага в переиспользуемый прогон:
+#: файл — адрес шага, а не его личность, и адрес вправе меняться (168).
+STEPS: Final = ROOT / ".github" / "workflows"
 #: Имя шага, чьи доводы и есть предмет.
 STEP_NAME: Final = "типы"
 #: Хвост образца mypy: `X.*` покрывает потомков `X`, но НЕ сам `X`. Различие не
@@ -78,14 +82,15 @@ def judged() -> tuple[str, ...]:
     каталогов разошёлся бы с прогоном молча, и гейт судил бы не то дерево
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
     """
-    doc = yaml.safe_load(STEP.read_text(encoding="utf-8"))
-    for job in (doc.get("jobs") or {}).values():
-        for step in job.get("steps") or []:
-            if str(step.get("name", "")).strip() != STEP_NAME:
-                continue
-            said = str(step.get("run", "")).split()
-            return tuple(one.rstrip("/") for one in said[1:] if not one.startswith("-"))
-    raise AssertionError(f"в {STEP} нет шага «{STEP_NAME}» — предмет гейта не найден (075)")
+    for path in walk_deep(STEPS, "*.yml"):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in ((doc or {}).get("jobs") or {}).values():
+            for step in (job or {}).get("steps") or []:
+                if str(step.get("name", "")).strip() != STEP_NAME:
+                    continue
+                said = str(step.get("run", "")).split()
+                return tuple(one.rstrip("/") for one in said[1:] if not one.startswith("-"))
+    raise AssertionError(f"в {STEPS} нет шага «{STEP_NAME}» — предмет гейта не найден (075)")
 
 
 def leniencies() -> list[str]:
@@ -373,11 +378,13 @@ def test_the_subject_is_taken_from_the_step_not_written_beside_it() -> None:
     """
     said = judged()
     assert said, "шаг «типы» не назвал ни одного каталога — предмет гейта исчез (075)"
-    step = yaml.safe_load(STEP.read_text(encoding="utf-8"))
     runs = [
         str(one.get("run", ""))
-        for job in (step.get("jobs") or {}).values()
-        for one in (job.get("steps") or [])
+        for path in walk_deep(STEPS, "*.yml")
+        for job in (
+            (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
+        ).values()
+        for one in ((job or {}).get("steps") or [])
         if str(one.get("name", "")).strip() == STEP_NAME
     ]
     assert len(runs) == 1, f"шаг «{STEP_NAME}» объявлен не один раз: {len(runs)}"
