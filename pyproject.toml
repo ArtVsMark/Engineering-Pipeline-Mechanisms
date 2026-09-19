@@ -48,8 +48,13 @@ mypy_path = "packages/transport"
 # первый же тест, прочитавший живую настройку через внутренний модуль, покрасил
 # шаг именем, которого в списке не оказалось
 # ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
-# Имён два, потому что `_pytest.*` не покрывает сам `_pytest`, а mypy требует оба.
-module = ["yaml", "pytest", "_pytest", "_pytest.*"]
+# ОБРАЗЕЦ `X.*` ПОКРЫВАЕТ ПОТОМКОВ X, НО НЕ САМ X — и голое имя `_pytest` здесь
+# стояло рядом с ним по доводу «mypy требует оба». Довод не подтвердился:
+# снятие каждой записи порознь с прогоном `mypy` в окружении шага дало без
+# `yaml` три ошибки, без `pytest` шесть, без `_pytest.*` две, а без голого
+# `_pytest` — чисто, потому что сам `_pytest` дерево не импортирует нигде.
+# Запись убрана, соответствие держит `tests/test_type_leniency.py` (139).
+module = ["yaml", "pytest", "_pytest.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
