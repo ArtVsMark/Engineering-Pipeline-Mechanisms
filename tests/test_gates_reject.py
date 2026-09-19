@@ -1056,7 +1056,16 @@ GATES = sorted(path.name for path in walk(ROOT / "scripts", "check_*.py"))
 
 #: Как в этом дереве выражается ОТКАЗ гейта. Список разрешительный: новое имя
 #: исхода дописывается сюда, а не проходит само.
-REFUSAL_NAMES = ("EXIT_REJECTED", "EXIT_FOUND", "EXIT_FINDINGS", "EXIT_MISMATCH", "REJECTED")
+REFUSAL_NAMES = (
+    "EXIT_REJECTED",
+    "EXIT_FOUND",
+    "EXIT_FINDINGS",
+    "EXIT_MISMATCH",
+    "REJECTED",
+    # Отказ гейта воскрешения назван по тому, ЧТО случится от толчка, а не по
+    # слову «отказ»: сообщение об этом и говорит («толчок воскресит ветку»).
+    "EXIT_REVIVED",
+)
 
 
 def refusal_of(gate: str) -> set[int]:
