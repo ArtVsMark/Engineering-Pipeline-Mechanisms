@@ -68,12 +68,22 @@ def _writes_in(body: list[ast.stmt], known: dict[str, bool]) -> bool:
 
 
 def _branches_of(stmt: ast.stmt) -> list[list[ast.stmt]]:
-    """Вложенные блоки оператора — ветви условия, тела циклов, обработчики."""
+    """Вложенные блоки оператора — ветви условия, тела циклов, обработчики.
+
+    ОБРАБОТЧИК НЕ ОПЕРАТОР, И ЭТО НЕ МЕЛОЧЬ РАЗБОРА. `handlers` у `try` — это
+    список `ExceptHandler`, который классу `ast.stmt` НЕ принадлежит, и первая
+    редакция отсеивала его вместе с не-блоками: запись версии внутри `except`
+    выпадала из отбора вопреки заявленному «ветви идут тем же состоянием».
+    Нашёл внешний взгляд (`35d4bf6`). Тело обработчика берётся у него самого.
+    """
     found: list[list[ast.stmt]] = []
-    for field in ("body", "orelse", "finalbody", "handlers"):
+    for field in ("body", "orelse", "finalbody"):
         part = getattr(stmt, field, None)
         if isinstance(part, list) and part and isinstance(part[0], ast.stmt):
             found.append(part)
+    for handler in getattr(stmt, "handlers", []) or []:
+        if isinstance(handler, ast.ExceptHandler) and handler.body:
+            found.append(handler.body)
     return found
 
 
@@ -178,6 +188,10 @@ WRITES = {
     "прямо в вызове": '(Path("к") / "CONTRACT_VERSION").write_text("9.9")',
     "по имени": 'ф = Path("к") / "CONTRACT_VERSION"\nф.write_text("9.9")',
     "цепочкой имён": 'ф = Path("к") / "CONTRACT_VERSION"\nдругой = ф\nдругой.write_text("9.9")',
+    "запись версии внутри except": (
+        'try:\n    pass\nexcept Exception:\n    ф = Path("к") / "CONTRACT_VERSION"\n'
+        '    ф.write_text("9.9")'
+    ),
     "внутри функции": (
         'def t() -> None:\n    ф = Path("к") / "CONTRACT_VERSION"\n    ф.write_text("9.9")'
     ),
@@ -199,6 +213,9 @@ NOT_WRITES = {
     # таблицы, то есть держалась ничем. Откат, который не покраснел, — находка,
     # а не облегчение
     # ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+    "запись внутри except": (
+        'try:\n    pass\nexcept Exception:\n    ф = Path("к") / "ИНОЕ"\n    ф.write_text("9.9")'
+    ),
     "имя занято соседней функцией": (
         'def a() -> None:\n    ф = Path("к") / "CONTRACT_VERSION"\n'
         'def b() -> None:\n    ф.write_text("9.9")'
