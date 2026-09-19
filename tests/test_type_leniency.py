@@ -44,6 +44,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import subprocess
 import sys
 import tomllib
@@ -111,16 +112,26 @@ def carried(where: Path) -> list[Path]:
     Запретительный список таких имён пропускал бы неугаданное — ровно то, за
     что их и отвергают
     ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
-    Источник здесь один и он же у прогона: `git ls-files`, то есть в точности
-    содержимое чекаута
+    Источник здесь один и он же у прогона: `git ls-files --cached`, то есть в
+    точности содержимое чекаута
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
 
-    ГРАНИЦА НАЗВАНА: произведённое, которое прогон делает САМ и до шага типов,
-    сюда не попадёт — сегодня такого нет, а появится, и гейт о нём промолчит
+    СПРАШИВАЕТСЯ ИНДЕКС, А НЕ ДЕРЕВО, И `--others` ЗДЕСЬ БЫЛ ЛИШНИМ. С ним в
+    предмет попадали файлы, которых в чекауте нет вовсе: неотслеживаемый черновик
+    у окна краснил бы гейт там, где площадка зелена, — то есть проверка отвергала
+    бы верную работу
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Нашёл внешний взгляд (`beb5427`).
+
+    ГРАНИЦЫ НАЗВАНЫ, ОБЕ. Модуль, ещё не внесённый в индекс, гейт не судит — и
+    это верно: до площадки он тоже не доедет, а внесут его тем же `git add`, что
+    и всё остальное перед толчком. И произведённое, которое прогон делает САМ и
+    до шага типов, сюда не попадёт: сегодня такого нет, а появится — гейт о нём
+    промолчит
     ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
     """
     said = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", str(where)],
+        ["git", "ls-files", "-z", "--cached", "--", str(where)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -377,6 +388,11 @@ def test_a_build_copy_in_the_tree_is_not_the_subject() -> None:
     """
     where = judged()[0]
     made = ROOT / where / "build" / "lib" / "поддельный_модуль.py"
+    # УБОРКА СНОСИТ РОВНО ТО, ЧТО ЗАВЕЛА. `rmdir` каталога, который уже был у
+    # окна, отказывает — и отказ уборки читался бы как красный гейт, хотя
+    # проверяемое сошлось. Поэтому запоминается, какие каталоги создала эта
+    # проверка, и сносятся только они. Нашёл внешний взгляд (`81ffda3`).
+    mine = [one for one in (made.parent, made.parent.parent) if not one.is_dir()]
     made.parent.mkdir(parents=True, exist_ok=True)
     try:
         made.write_text("import такого_имени_нет_нигде\n", encoding="utf-8")
@@ -390,5 +406,43 @@ def test_a_build_copy_in_the_tree_is_not_the_subject() -> None:
         )
     finally:
         made.unlink(missing_ok=True)
-        made.parent.rmdir()
-        made.parent.parent.rmdir()
+        for one in mine:
+            # Чужое содержимое не трогаем: каталог, ставший непустым от соседа,
+            # оставляем как есть — уборка не вправе сносить чужое.
+            with contextlib.suppress(OSError):
+                one.rmdir()
+
+
+def test_an_untracked_draft_is_not_the_subject() -> None:
+    """Неотслеживаемый черновик у окна предметом не является — его нет в чекауте.
+
+    С `--others` он попадал в предмет, и гейт краснел бы там, где площадка
+    зелена: отвергать верную работу дороже, чем пропустить неверную
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Нашёл внешний взгляд (`beb5427`).
+
+    ЧЕРНОВИК ЗАВОДИТСЯ НАСТОЯЩИЙ — в дереве, под тем же `git`, каким живёт
+    чекаут, и в каталоге, который НЕ игнорируется: иначе проверка спрашивала бы
+    про игнорирование, а не про индекс
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    """
+    where = judged()[0]
+    draft = ROOT / where / "черновик_окна.py"
+    assert not draft.exists(), f"имя занято: {draft}"
+    try:
+        draft.write_text("import такого_имени_нет_нигде\n", encoding="utf-8")
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", str(draft.relative_to(ROOT))],
+            cwd=ROOT,
+            capture_output=True,
+        )
+        assert ignored.returncode != 0, (
+            "черновик оказался в игнорируемом каталоге — проверка спросила бы про"
+            " игнорирование, а не про индекс"
+        )
+        assert draft.name not in {path.name for path in carried(ROOT / where)}, (
+            "неотслеживаемый черновик попал в предмет: гейт судит дерево окна, а не"
+            " то, что приезжает с чекаутом"
+        )
+    finally:
+        draft.unlink(missing_ok=True)
