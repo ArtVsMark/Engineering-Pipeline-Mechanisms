@@ -36,7 +36,9 @@ from pathlib import Path
 from typing import Final
 
 import agent_pr
+import check_branch_revival
 import check_env
+import ghrest
 import paths
 import report
 import yaml
@@ -248,6 +250,14 @@ def push_branch(root: Path) -> int:
     ЗДЕСЬ ПРОВЕРКА И ДЕЙСТВИЕ СТАЛИ ОДНИМ ЗАХОДОМ. Красное просто не доходит до
     этой строки: толкать нечем, а не «не следует».
 
+    ВТОРОЙ ЗАПРЕТ ЗДЕСЬ — ВОСКРЕШЕНИЕ СЛИТОЙ ВЕТКИ, и он спрашивает ПЛОЩАДКУ.
+    Сторож перед git ловит тот же случай локальными ссылками и потому устаревает
+    до первого фетча; 19.09.2026 он ровно поэтому и не сработал. Отказ ставится
+    на ДОСТОВЕРНОМ — слитое изменение по этой же голове, — а отказ канала и
+    отсутствие токена толчок не держат: блокировать на вероятном значит учить
+    обходить проверку
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
     ЧЕГО ЭТО НЕ ДЕЛАЕТ: не мешает толкнуть руками. Запретить `git push` проект
     не может и не должен — обход законен, когда он назван (154), а неназванный
     обход стоил ровно тех трёх раз.
@@ -270,6 +280,16 @@ def push_branch(root: Path) -> int:
             file=sys.stderr,
         )
         return EXIT_BROKEN
+    try:
+        verdict, about = check_branch_revival.look(root, branch)
+    except (check_branch_revival.NotRun, ghrest.TransportError, OSError) as exc:
+        # ОТКАЗ КАНАЛА ТОЛЧОК НЕ ДЕРЖИТ, НО И НЕ МОЛЧИТ. Площадка бывает
+        # недоступна, а красное, которое чинится ожиданием, учат обходить (051).
+        print(f"воскрешение ветки не проверено: {report.cut(str(exc))}", file=sys.stderr)
+    else:
+        print(about, file=sys.stderr if verdict else sys.stdout)
+        if verdict == check_branch_revival.EXIT_REVIVED:
+            return EXIT_BROKEN
     said = subprocess.run(
         ["git", "push", "-u", "origin", branch],
         capture_output=True,
