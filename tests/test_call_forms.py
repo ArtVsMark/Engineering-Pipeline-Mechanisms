@@ -19,7 +19,7 @@
 дважды за двое суток — «десять» становилось «22», «22» становилось «23» от
 самого изменения, которое это число писало
 ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
-Величину даёт команда, а не память::
+Величину даёт команда, а не память:
 
     python -m pytest tests/test_call_forms.py -q -s --no-header \
         -k the_subject_of_this_gate_exists

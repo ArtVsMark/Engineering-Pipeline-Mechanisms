@@ -9,7 +9,7 @@
 
 ИНЦИДЕНТ 19.09.2026, изменение #509. Проверка живой настройки стала спрашивать
 её через `import _pytest.config`. В послаблении стояло `["yaml", "pytest"]`;
-формы `_pytest.config` там не было, и шаг покраснел уже на площадке::
+формы `_pytest.config` там не было, и шаг покраснел уже на площадке:
 
     tests/test_suite_kit.py: Cannot find implementation or library stub
     for module named "_pytest.config"  [import-not-found]
@@ -49,15 +49,40 @@ import tomllib
 from typing import Final
 
 import pytest
+import yaml
 
-from tests.conftest import ROOT, found_by, walk
+from tests.conftest import ROOT, found_by, walk_deep
 
 SETTINGS: Final = ROOT / "pyproject.toml"
-#: Где живут импорты, которые разбирает шаг: ровно его собственные доводы.
-JUDGED: Final = ("scripts", "tests", "packages/transport")
-#: Хвост образца mypy: `X.*` покрывает потомков `X`, но НЕ сам `X`. Ровно на
-#: этом различии и держатся две записи `_pytest` в настройке.
+#: Откуда берётся, ЧТО разбирает шаг. Список каталогов здесь не пишется второй
+#: копией: разъехавшись с прогоном, он судил бы не то дерево, и разъехался бы
+#: молча ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+STEP: Final = ROOT / ".github" / "workflows" / "ci.yml"
+#: Имя шага, чьи доводы и есть предмет.
+STEP_NAME: Final = "типы"
+#: Хвост образца mypy: `X.*` покрывает потомков `X`, но НЕ сам `X`. Различие не
+#: косметическое: `pytest` в списке не покрывает `_pytest.config`, и ровно этим
+#: инцидент 19.09.2026 и кончился. Голая запись `_pytest` рядом со звёздчатой
+#: СТОЯЛА и оказалась лишней — снятие её порознь с прогоном в окружении шага
+#: ничего не покрасило, и запись убрана (139).
 DESCENDANTS: Final = ".*"
+
+
+def judged() -> tuple[str, ...]:
+    """Каталоги, которые разбирает шаг «типы», — ИЗ САМОГО ПРОГОНА.
+
+    Читается строка шага, а не пишется список рядом. Второй список тех же
+    каталогов разошёлся бы с прогоном молча, и гейт судил бы не то дерево
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    """
+    doc = yaml.safe_load(STEP.read_text(encoding="utf-8"))
+    for job in (doc.get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            if str(step.get("name", "")).strip() != STEP_NAME:
+                continue
+            said = str(step.get("run", "")).split()
+            return tuple(one.rstrip("/") for one in said[1:] if not one.startswith("-"))
+    raise AssertionError(f"в {STEP} нет шага «{STEP_NAME}» — предмет гейта не найден (075)")
 
 
 def leniencies() -> list[str]:
@@ -79,8 +104,12 @@ def imported() -> dict[str, set[str]]:
     для mypy разные вопросы, и вся беда инцидента была ровно в этой разнице.
     """
     found: dict[str, set[str]] = {}
-    for where in JUDGED:
-        for path in walk(ROOT / where, "*.py"):
+    for where in judged():
+        # ВГЛУБЬ, ПОТОМУ ЧТО ШАГ ИДЁТ ВГЛУБЬ. `mypy scripts/` разбирает и
+        # подкаталоги; нерекурсивный обход отвечал бы о МЕНЬШЕМ дереве, чем то,
+        # на котором краснеет площадка, — и первый же модуль в подкаталоге
+        # уехал бы мимо гейта молча (045). Нашёл внешний взгляд (`d58e2b3`).
+        for path in walk_deep(ROOT / where, "*.py"):
             if "__pycache__" in path.parts:
                 continue
             said = str(path.relative_to(ROOT))
@@ -107,14 +136,20 @@ def own_names() -> set[str]:
     как модули), каталоги из `mypy_path`, и собственные пакеты набора.
     """
     doc = tomllib.loads(SETTINGS.read_text(encoding="utf-8"))
-    found = {path.stem for path in walk(ROOT / "scripts", "*.py")}
-    found |= {"tests", "conftest"}
+    # ИМЯ МОДУЛЯ — ВЕРХНЕЕ ОТНОСИТЕЛЬНО РАЗБИРАЕМОГО КОРНЯ. Для `scripts/x.py`
+    # это `x` (ключ `scripts_are_modules`), для `tests/…` — сам `tests`.
+    found: set[str] = {"conftest"}
+    for where in judged():
+        root = ROOT / where
+        found.add(root.name)
+        found |= {path.stem for path in walk_deep(root, "*.py") if path.parent == root}
+        found |= {path.parent.name for path in found_by(root, "*/__init__.py")}
     for where in str(doc["tool"]["mypy"].get("mypy_path", "")).split(":"):
         if not where:
             continue
         # ОБХОД-ПРЕДМЕТ: каталог из `mypy_path`, в котором нет ни одного модуля,
         # — обрыв, а не ответ: разбор типов тогда ищет общий низ и не находит.
-        found |= {path.stem for path in walk(ROOT / where, "*.py")}
+        found |= {path.stem for path in walk_deep(ROOT / where, "*.py")}
         # ОБХОД-ВОПРОС: пакетов рядом может не быть вовсе, и это законный ответ.
         found |= {path.parent.name for path in found_by(ROOT / where, "*/__init__.py")}
     return found
@@ -223,3 +258,65 @@ def test_the_mypy_pattern_semantics_are_held_by_a_run(
     ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
     """
     assert covers(pattern, name) is want, case
+
+
+def test_the_subject_is_taken_from_the_step_not_written_beside_it() -> None:
+    """Разбираемые каталоги читаются у прогона — второй список разошёлся бы молча.
+
+    Здесь они были написаны рядом константой, и один из трёх — `packages/transport`
+    вместо `packages` — уже расходился с прогоном: гейт судил ДРУГОЕ дерево, чем
+    то, на котором краснеет площадка
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    """
+    said = judged()
+    assert said, "шаг «типы» не назвал ни одного каталога — предмет гейта исчез (075)"
+    step = yaml.safe_load(STEP.read_text(encoding="utf-8"))
+    runs = [
+        str(one.get("run", ""))
+        for job in (step.get("jobs") or {}).values()
+        for one in (job.get("steps") or [])
+        if str(one.get("name", "")).strip() == STEP_NAME
+    ]
+    assert len(runs) == 1, f"шаг «{STEP_NAME}» объявлен не один раз: {len(runs)}"
+    for where in said:
+        assert f"{where}/" in runs[0], f"каталог «{where}» шагу не отдаётся: {runs[0]}"
+        assert (ROOT / where).is_dir(), f"каталог «{where}» шагу отдаётся, а в дереве его нет"
+
+
+def test_the_walk_goes_as_deep_as_the_step_does() -> None:
+    """Обход идёт ВГЛУБЬ, потому что вглубь идёт и сам шаг.
+
+    `mypy scripts/` разбирает подкаталоги тоже. Нерекурсивный обход отвечал бы о
+    МЕНЬШЕМ дереве, чем то, на котором краснеет площадка, и первый же модуль,
+    уехавший в подкаталог, прошёл бы мимо гейта молча
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд (`d58e2b3`).
+
+    ПРЕДМЕТ У ПРОВЕРКИ ЕСТЬ: модули в подкаталогах разбираемых корней в дереве
+    сегодня живут — `packages/transport/*.py`, два штуки. Была бы их пустота,
+    проверка сторожила бы то, чего нет (075).
+
+    ЧТО ИМЕННО ДЕРЖИТ ЭТА ПРОВЕРКА, СКАЗАНО ТОЧНО, А НЕ ШИРОКО. Она держит, что
+    модуль из подкаталога ИЗВЕСТЕН предмету: убери ветку `mypy_path` из
+    `own_names` — и краснеет соседняя половина, «форма не покрыта». Чего она НЕ
+    держит и что проверено откатом: сделай `imported` нерекурсивным — и НИЧЕГО
+    не покраснеет, потому что оба здешних подкаталожных модуля чужого не
+    импортируют вовсе. То есть рекурсия здесь — названная защита БЕЗ предмета
+    сегодня, а не проверенное поведение; выдать её за проверенную значило бы
+    поставить слово там, где нет прогона
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md),
+    [139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+    """
+    deeper = [
+        path.relative_to(ROOT)
+        for where in judged()
+        for path in walk_deep(ROOT / where, "*.py")
+        if path.parent != ROOT / where and "__pycache__" not in path.parts
+    ]
+    assert deeper, (
+        "в разбираемых каталогах нет ни одного модуля глубже первого уровня —"
+        " разницу между обходом вглубь и обычным здесь не на чем проверить (075)"
+    )
+    known = own_names() | {name.split(".")[0] for name in foreign(imported())}
+    missed = [path for path in deeper if path.stem not in known and path.name != "__init__.py"]
+    assert not missed, f"модуль из подкаталога не попал в предмет гейта: {missed}"
