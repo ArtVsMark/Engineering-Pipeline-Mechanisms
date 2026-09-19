@@ -188,6 +188,28 @@ def text_of(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
+def entry_of(item: Any) -> tuple[str, str, str]:
+    """Запись ответа по одной проверке: класс, причина, адресат.
+
+    ФОРМА У ЗАПИСИ ДВЕ, И РАЗБОР ОБЕИХ ОДИН. Проверка объявляется либо голым
+    классом (`lint: required`), либо словарём с полем `class` и пояснениями.
+    Выемка класса из этих двух форм делалась в ДВУХ местах — здесь и у сверки
+    потребителей, — и общим было сделано только приведение к строке. Второе
+    понимание той же формы расходится с первым молча: поменяйся форма записи
+    тут, у сверки она осталась бы прежней, и объявленный обход стал бы невидим
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md),
+    [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Нашёл внешний взгляд (`7f48cc5`).
+    """
+    if isinstance(item, dict):
+        return (
+            text_of(item.get("class")),
+            str(item.get("why") or "").strip(),
+            str(item.get("addressee") or "").strip(),
+        )
+    return text_of(item), "", ""
+
+
 def answer_text(said: str, where: str) -> dict[str, Any]:
     """Ответ по проверкам, прочитанный из ТЕКСТА, — для чужого дерева.
 
@@ -363,14 +385,7 @@ def _read_section(
     problems: list[str] = []
     for key, item in declared.items():
         name = str(key).strip()
-        if isinstance(item, dict):
-            klass = text_of(item.get("class"))
-            why = str(item.get("why") or "").strip()
-            addressee = str(item.get("addressee") or "").strip()
-        else:
-            klass = text_of(item)
-            why = ""
-            addressee = ""
+        klass, why, addressee = entry_of(item)
 
         if "(" in name or ")" in name:
             problems.append(
