@@ -8,7 +8,11 @@
 
 from __future__ import annotations
 
+import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from tests.conftest import ROOT, RunScript, load_script
 
@@ -194,3 +198,75 @@ def test_the_live_tree_agrees_with_its_entrance(run_script: RunScript) -> None:
         assert not module.apart(entrance, marked), "вход не называет всё помеченное"
     else:
         assert module.SAYS_EMPTY in entrance, "пустота законна, но обязана быть названа (154)"
+
+
+def history(root: Path, *, tag_first: bool) -> Path:
+    """Дерево с настоящей историей: помеченный файл ДО или ПОСЛЕ тега.
+
+    История настоящая, а не подделанный ответ git: на подделке проверка
+    подтверждала бы согласие кода с нашим представлением о тегах, а не с git
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    """
+    (root / "scripts").mkdir(exist_ok=True)
+    (root / "README.md").write_text("# вход\n", encoding="utf-8")
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "init", "--quiet", "-b", "main"], check=True)
+    subprocess.run([*run, "config", "user.email", "т@т"], check=True)
+    subprocess.run([*run, "config", "user.name", "т"], check=True)
+
+    def commit(message: str) -> None:
+        subprocess.run([*run, "add", "-A"], check=True, capture_output=True)
+        subprocess.run([*run, "commit", "--quiet", "-m", message], check=True)
+
+    if tag_first:
+        commit("до выпуска")
+        subprocess.run([*run, "tag", "v1.0.0"], check=True)
+    (root / "scripts" / "раздача.py").write_text(MARKED, encoding="utf-8")
+    commit("помеченный инструмент")
+    if not tag_first:
+        subprocess.run([*run, "tag", "v1.0.0"], check=True)
+    return root
+
+
+def test_at_ref_reads_history_not_the_tree(tmp_path: Path) -> None:
+    """Спрашивается, что несёт ССЫЛКА, а не что лежит в рабочем дереве.
+
+    Между этими двумя ответами и живёт предмет: у нас файл есть, у
+    потребителя по названному тегу — нет.
+    """
+    root = history(tmp_path, tag_first=True)
+    assert "scripts/раздача.py" not in (module.at_ref("v1.0.0", root) or set())
+    assert "scripts/раздача.py" in (module.at_ref("HEAD", root) or set())
+
+
+def test_at_ref_does_not_escape_non_ascii_names(tmp_path: Path) -> None:
+    """Имя с не-ASCII знаками приходит как есть, а не в кавычках с escape-ами.
+
+    Иначе сверка молча решила бы, что выпуск не несёт НИЧЕГО с русским
+    именем, — то есть отказывала бы зря и объясняла бы это правдоподобно.
+    """
+    carried = module.at_ref("HEAD", history(tmp_path, tag_first=False)) or set()
+    assert "scripts/раздача.py" in carried
+    assert not any(one.startswith('"') for one in carried), carried
+
+
+def test_an_unknown_ref_is_not_an_empty_release(tmp_path: Path) -> None:
+    """Ссылки не видно — это незнание, а не «выпуск пуст» (045)."""
+    root = history(tmp_path, tag_first=False)
+    assert module.at_ref("v9.9.9", root) is None
+    with pytest.raises(module.NotRun, match=re.escape("v9.9.9")):
+        module.unreleased("v9.9.9", root)
+
+
+def test_unreleased_names_what_the_pin_does_not_carry(tmp_path: Path) -> None:
+    """Помеченное, которого тег не несёт, названо поимённо (046)."""
+    assert module.unreleased("v1.0.0", history(tmp_path, tag_first=True)) == ["scripts/раздача.py"]
+
+
+def test_unreleased_is_empty_when_the_pin_carries_everything(tmp_path: Path) -> None:
+    """Вторая половина: тег несёт помеченное — находок нет.
+
+    Без неё предикат был бы неотличим от «всегда отказывать», а такой учат
+    обходить (051).
+    """
+    assert module.unreleased("v1.0.0", history(tmp_path, tag_first=False)) == []

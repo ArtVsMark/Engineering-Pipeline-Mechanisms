@@ -138,16 +138,65 @@ def test_a_tree_without_runs_does_not_run(tmp_path: Path) -> None:
     assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN
 
 
+def tagged_before(tmp_path: Path, *, tag: str = "v2.5.0") -> Path:
+    """Дерево, где тег нарезан РАНЬШЕ помеченного файла.
+
+    Это и есть предмет: у нас файл лежит, по названной потребителю ссылке —
+    нет. Дерево строится настоящим git, а не подделкой ответа: на подделке
+    проверка подтверждала бы согласие кода с нашим представлением о тегах,
+    а не с git (170).
+    """
+    root = tree(tmp_path, tagged=tag, **{"step-молчун": PLAIN})
+    (root / ".github" / "workflows" / "step-пример.yml").write_text(MARKED, encoding="utf-8")
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "add", "-A"], check=True, capture_output=True)
+    subprocess.run([*run, "commit", "--quiet", "-m", "шаг после выпуска"], check=True)
+    return root
+
+
+def test_a_pin_that_does_not_carry_the_step_is_refused(tmp_path: Path) -> None:
+    """Прибивка есть, шага в ней нет — отказ, а не заготовка (045).
+
+    Напечатанную заготовку забирают целиком, и вызов по тегу, которого этот
+    файл не несёт, отказал бы У ПОТРЕБИТЕЛЯ: чинить его там некому.
+    """
+    root = tagged_before(tmp_path)
+    assert module.main(["--root", str(root)]) == module.EXIT_UNREACHABLE
+
+
+def test_a_pin_that_carries_the_step_prints_the_kit(tmp_path: Path) -> None:
+    """Вторая половина: тег несёт помеченное — заготовка печатается.
+
+    Без неё предикат был бы неотличим от «всегда отказывать», а такой учат
+    обходить (051).
+    """
+    root = tree(tmp_path, tagged="v2.5.0", **{"step-пример": MARKED})
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+
+
 @needs_history
-def test_the_kit_is_built_on_the_live_tree(run_script: RunScript) -> None:
-    """Живое дерево: заход собирает заготовку и называет наши шаги (139).
+def test_the_kit_agrees_with_the_live_release(run_script: RunScript) -> None:
+    """Живое дерево: исход захода СХОДИТСЯ с тем, что несёт живой выпуск (139).
+
+    ЦВЕТ ЗДЕСЬ НЕ ЗАКРЕПЛЁН, И ЭТО НЕ ПОБЛАЖКА. «Выпуск отстаёт от дерева» —
+    законное состояние проекта между слиянием и нарезкой тега, и требовать от
+    набора зелёного именно в нём значило бы держать красное, которое снимает
+    не правка, а выпуск (051). Проверяется другое и более сильное: заход
+    говорит ровно то, что есть на самом деле, — обе ветки названы.
 
     ИДЁТ ПО ЖИВОЙ ИСТОРИИ и потому помечен: прибивка читается из тега ВЫПУСКА,
     а в мелком чекауте теги не приезжают. Без маркера прогон падал бы там, где
     предмета нет вовсе, — то есть красное говорило бы о глубине клона, а не о
     дереве (045). Нашёл внешний взгляд (`f02d34e`).
     """
+    shipped = load_script("check_shipped.py")
+    behind = shipped.unreleased(module.pin_of(ROOT), ROOT)
     done = run_script("onboard.py")
+    if behind:
+        assert done.code == module.EXIT_UNREACHABLE, done.err or done.out
+        for one in behind:
+            assert one in done.err, f"отказ не назвал «{one}» поимённо (046)"
+        return
     assert done.code == module.EXIT_OK, done.err or done.out
     assert "uses:" in done.out and "checks:" in done.out
     for name in module.steps(ROOT):

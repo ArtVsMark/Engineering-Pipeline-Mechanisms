@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import catalogue
+import check_shipped
 import family
 import findings
 import ghrest
@@ -53,6 +54,7 @@ import paths
 import pipeline_checks
 import protection
 import report
+import version
 
 MARKER: Final = findings.marker("drift")
 TITLE: Final = "Дрейф: внешнее состояние сдвинулось"
@@ -730,6 +732,54 @@ def actions_disagree(said: dict[str, dict[str, list[str]]]) -> list[Drift]:
     return found
 
 
+def release_behind_tree(root: Path | None = None) -> list[Drift]:
+    """Отдаваемое наружу есть в дереве, но не в выпуске, к которому прибивают.
+
+    ПОЧЕМУ ЭТО ДРЕЙФ, А НЕ ГЕЙТ. Ни одна правка изменения этого не чинит:
+    расхождение снимает ВЫПУСК, а выпуск — отдельное необратимое действие
+    владельца. Красное на изменении, которое нечем погасить здесь и сейчас,
+    учат обходить
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Заход называет величину и оставляет решение человеку — ровно как у
+    расхождения версий чужих действий.
+
+    ПОЧЕМУ ЭТО ВСЁ ЖЕ ВНЕШНИЙ ВХОД. Смотрит источник не на наш файл, а на то,
+    что видит ПОТРЕБИТЕЛЬ по названной ему ссылке. Между этими двумя ответами
+    и живёт весь предмет: у нас файл лежит, у него по тегу — нет.
+
+    ЗАМЕР 20.09.2026, ИЗ-ЗА КОТОРОГО ИСТОЧНИК И НАПИСАН. Помечено наружу
+    одиннадцать файлов, выпуск `v1.1.0` не несёт НИ ОДНОГО: девять
+    переиспользуемых шагов, команда подключения и сверка потребителей слиты
+    после того, как тег был нарезан. Порядок подключения, который проект
+    печатает сам о себе, был нерабочим целиком, и узнал бы об этом первый
+    потребитель на своём красном
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ПОНИМАНИЕ «ОТДАНО НАРУЖУ» БЕРЁТСЯ ГОТОВЫМ у того, кто его держит
+    (`check_shipped`), а не пишется здесь второй раз (090).
+    """
+    where = root if root is not None else Path()
+    pin = version.release_tag(where or None)
+    if pin is None:
+        raise NotRun(
+            "выпусков не видно: к чему прибивается потребитель — неизвестно. "
+            "На обрезанном клоне теги не выкачиваются, и «всё в выпуске» было бы "
+            "выводом из незнания (045)"
+        )
+    missing = check_shipped.unreleased(pin, where)
+    if not missing:
+        return []
+    return [
+        Drift(
+            "release-behind",
+            f"выпуск {pin} не несёт помеченного наружу: {len(missing)} из "
+            f"{len(check_shipped.shipped(where))} — {', '.join(missing)}",
+            f"нарезать выпуск с этими файлами: до него `scripts/onboard.py` "
+            f"отказывает, а вызов по {pin} отказал бы у потребителя (158)",
+        )
+    ]
+
+
 def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[Drift]:
     """Язык выпустил версию, а прогон об этом не знает.
 
@@ -1146,6 +1196,7 @@ SOURCES: Final = (
     "вердикты по предложениям",
     "набор вопросов витрины",
     "пробелы, названные задачей",
+    "выпуск против дерева",
 )
 
 
@@ -1178,6 +1229,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
             lambda: showcase_questions_moved(fetch(CATALOGUE_SHOWCASE), ours_showcase()),
         ),
         ("пробелы, названные задачей", lambda: gap_tasks_closed(repo, token, mine)),
+        ("выпуск против дерева", lambda: release_behind_tree()),
     )
     # Гейт, не нашедший предмета, обязан падать (075): список имён, по которому
     # СЧИТАЮТ молчание, обязан равняться списку, который РЕАЛЬНО спрашивают.
