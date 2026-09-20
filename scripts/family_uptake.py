@@ -156,12 +156,27 @@ def shallow_clone(repo: str, where: Path, host: str = HOST) -> Path:
     )
     if done.returncode:
         raise NotRun(f"{repo}: клон не взят — {report.cut(done.stderr.strip() or 'отказ git')}")
-    subprocess.run(
+    # ОТКАЗ СУЖЕНИЯ НЕ ГЛОТАЕТСЯ. Здесь стояло `check=False`, и это было тихим
+    # запасным путём: не сработало сужение — каталога прогонов в клоне нет, а
+    # `took` отвечает «не взял ничего». Настоящий ноль и отказ инструмента
+    # снаружи одинаковы, и первый читался бы как второй
+    # ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    # Нашёл внешний взгляд на #569.
+    narrowed = subprocess.run(
         ["git", "-C", str(into), "sparse-checkout", "set", WANT],
         capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         timeout=TIMEOUT,
     )
+    if narrowed.returncode:
+        raise NotRun(
+            f"{repo}: клон взят, но сузить до «{WANT}» не вышло — "
+            f"{report.cut(narrowed.stderr.strip() or 'отказ git')}. "
+            "Без сужения «не взял ничего» неотличимо от отказа инструмента (045)"
+        )
     return into
 
 

@@ -246,3 +246,43 @@ def test_a_clone_that_refuses_is_named(tmp_path: Path) -> None:
     """Источника нет — отказ с причиной, а не пустой клон (075)."""
     with pytest.raises(module.NotRun, match="клон не взят"):
         module.shallow_clone("нет-такого", tmp_path, host=str(tmp_path))
+
+
+def test_a_refused_narrowing_is_not_an_empty_neighbour(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Сужение отказало — сосед «не прочитан», а не «не взял ничего».
+
+    Без сужения каталога прогонов в клоне нет, и обход ответил бы нулём: отказ
+    инструмента выглядел бы состоянием соседа (045). Нашёл внешний взгляд на
+    #569.
+
+    ИСХОД ЧУЖОГО ИНСТРУМЕНТА ЗДЕСЬ ПОДДЕЛАН, И ЭТО ГРАНИЦА, А НЕ ПОБЛАЖКА.
+    `sparse-checkout set` отказывает у git без поддержки частичных клонов —
+    такой версии в окне нет, а на здешней команда принимает даже заведомо
+    негодный довод. Подделывается ровно исход внешней команды; всё, что
+    проверяется, — как обход его ЧИТАЕТ
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    """
+    real = subprocess.run
+
+    def refuse_narrowing(args, **kwargs):  # type: ignore[no-untyped-def]
+        if "sparse-checkout" in args:
+            return subprocess.CompletedProcess(args, 1, "", "fatal: сужение не поддержано")
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(module.subprocess, "run", refuse_narrowing)
+    source = tmp_path / "сосед"
+    (source / ".github" / "workflows").mkdir(parents=True)
+    (source / ".github" / "workflows" / "ci.yml").write_text(CALL, encoding="utf-8")
+    run = ["git", "-C", str(source)]
+    real(["git", "init", "--quiet", "-b", "main", str(source)], check=True)
+    real([*run, "config", "user.email", "т@т"], check=True)
+    real([*run, "config", "user.name", "т"], check=True)
+    real([*run, "add", "-A"], check=True, capture_output=True)
+    real([*run, "commit", "--quiet", "-m", "прогоны"], check=True)
+
+    into = tmp_path / "клоны"
+    into.mkdir()
+    with pytest.raises(module.NotRun, match="сузить"):
+        module.shallow_clone("сосед", into, host=str(tmp_path))
