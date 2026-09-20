@@ -26,6 +26,6 @@
 совпадение: условию, которого нет, наступить нечем. Строка починена здесь же.
 
 Разбор и таблица — запись
-[`032`](../docs/decisions/032-the-handover-is-unblocked-by-measurement.md).
+[`032`](../../../docs/decisions/032-the-handover-is-unblocked-by-measurement.md).
 
 #243

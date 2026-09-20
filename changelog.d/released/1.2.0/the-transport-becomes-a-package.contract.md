@@ -30,7 +30,7 @@ pip install "engineering-pipeline-transport @ git+https://github.com/ArtVsMark/E
   установки: окно узнаёт о нём до работы, а не падением импорта.
 
 **Разбор, отвергнутые варианты и условие пересмотра** — решение
-[`024`](../docs/decisions/024-the-transport-is-a-package-pinned-by-a-tag.md). Там же
+[`024`](../../../docs/decisions/024-the-transport-is-a-package-pinned-by-a-tag.md). Там же
 названа цена переноса числами (10 путей в ответах, 3 тестовых модуля, 23 джоба, два
 глоба) и второй исход: если общий модуль не окупится, работы останавливаются с
 записанной причиной.
