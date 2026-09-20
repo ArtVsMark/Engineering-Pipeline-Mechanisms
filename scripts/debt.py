@@ -43,6 +43,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 import ci_complete
+import coverage_floor
 import findings
 import ghrest
 import items
@@ -605,6 +606,18 @@ def main(argv: list[str] | None = None) -> int:
     # работы, а не невыполненная работа, и решение по ним за человеком (154).
     for line in shape_report(by_prose, still_live):
         print(line)
+
+    # ПОРОГ ПОКРЫТИЯ ЧИТАЕТСЯ ОТДЕЛЬНО, И ЕГО МОЛЧАНИЕ НЕ УНОСИТ ОТЧЁТ. Ряд
+    # живёт в своей ветке, а не в задачах площадки: её отсутствие — законное
+    # состояние мелкого клона и свежего репозитория, и ронять на этом весь
+    # долг значило бы делать отчёт заложником производного (084).
+    #
+    # СТРОКА ПЕЧАТАЕТСЯ ВСЕГДА, А НЕ ТОЛЬКО ПРИ ПАДЕНИИ. Строка, появляющаяся
+    # лишь при находке, неотличима от невключённого механизма (142).
+    try:
+        print(f"{coverage_floor.look(args.repo, token).said()}")
+    except coverage_floor.NotRun as exc:
+        print(f"порог покрытия не прочитан: {exc}")
 
     print(f"слито без внешнего взгляда: {len(unlooked_left)}")
     for entry in sorted(unlooked_left, key=lambda item: -item.number):
