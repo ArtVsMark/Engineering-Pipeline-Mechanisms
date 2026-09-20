@@ -245,3 +245,33 @@ def test_the_tally_line_has_no_dangling_comma_when_nothing_is_denied(
     said = capsys.readouterr().out
     assert ",  " not in said and ", →" not in said, f"висящая запятая в итоге: {said!r}"
     assert "машиной 1, глазами 1 →" in said
+
+
+def test_a_git_refusal_does_not_silence_the_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git отказал — карта считается тронутой, а не нетронутой (045).
+
+    Пустой `stdout` при отказе давал «не тронут», и взгляд НЕ получал указания
+    сверить карту с дифом. Цена пропуска названа в самом механизме: ревью,
+    которому подделали карту (085). Лишняя строка «сверь с дифом» дешевле
+    молчания.
+    """
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_a, **_k: module.subprocess.CompletedProcess([], 128, "", "fatal: bad revision"),
+    )
+    assert module.touches_the_answer("origin/main") is True
+
+
+def test_an_untouched_answer_is_still_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вторая половина: git ответил пусто и успешно — ответ не тронут.
+
+    Без неё «всегда тронут» добавляло бы строку к каждому взгляду, а указание,
+    звучащее всегда, перестаёт что-либо значить (051).
+    """
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_a, **_k: module.subprocess.CompletedProcess([], 0, "", ""),
+    )
+    assert module.touches_the_answer("origin/main") is False

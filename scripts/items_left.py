@@ -116,6 +116,16 @@ def shallow(root: Path | None = None) -> bool:
         encoding="utf-8",
         check=False,
     )
+    # ОТКАЗ GIT — НЕ ОТВЕТ «НЕ МЕЛКИЙ». Здесь исход не читался вовсе, и пустой
+    # `stdout` при отказе давал `False`: «клон полный» вместо «спросить не
+    # удалось». Дальше `born` шла по обрезанной истории и возвращала
+    # правдоподобную, но неверную дату — ровно тот ложноположительный случай,
+    # о котором предупреждает докстрока выше
+    # ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    # Незнание трактуется как «мелкий»: сторону выбираем ту, где механизм
+    # МОЛЧИТ, а не врёт уверенно. Нашёл внешний взгляд на #572.
+    if done.returncode:
+        return True
     return done.stdout.strip() == "true"
 
 
