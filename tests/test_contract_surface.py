@@ -216,7 +216,18 @@ def test_a_pending_surface_fragment_fits_the_declared_window() -> None:
     сказал об этом сухой заход выпуска, а не набор
     ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
     """
-    waiting = walk(ROOT / "changelog.d", "*.contract.md")
+    waiting = walk(
+        ROOT / "changelog.d",
+        "*.contract.md",
+        # ПУСТОТА ЗАКОННА РОВНО ПОСЛЕ ВЫПУСКА: он уносит фрагменты в
+        # `changelog.d/released/<номер>/`, и очередь поверхности честно пуста
+        # до следующей правки контракта. Замер 20.09.2026: выпуск 1.2.0 унёс
+        # семь таких фрагментов, и общая ветка покраснела на обходе, а не на
+        # предмете — то есть проверка сказала «предмета нет» там, где его нет
+        # ПО ДЕЛУ. Вторую половину это не ослабляет: ветка `if not waiting`
+        # ниже утверждает, что без фрагмента версия контракта не двигается.
+        may_be_empty="сразу после выпуска очередь поверхности пуста: фрагменты уехали в released/",
+    )
     current = (ROOT / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
     after = release.next_contract(current, touched=bool(waiting))
     span = policy.span()
