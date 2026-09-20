@@ -681,3 +681,35 @@ def test_a_suffixed_state_is_re_read_on_the_next_pass() -> None:
     entries = {7: module.Entry(7, f"{module.STATE_ODD}: neutral", "2026-09-11")}
     left, _ = module.scan([], entries, 0, lambda number: None)
     assert 7 not in left, "запись не перечитана — снять её было бы нечем"
+
+
+def test_the_queue_answer_is_one_line_on_stdout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ответ `--queue` — РОВНО одна строка: его читает оболочка, а не человек.
+
+    Шаг взгляда берёт очередь как ``numbers=$(python scripts/unlooked.py
+    --queue)`` и кладёт результат в `$GITHUB_OUTPUT`. Любая вторая строка
+    уезжает туда же без ``ключ=``, и площадка роняет джоб на
+    ``Invalid format``. Так заход позднего взгляда падал 18 и 19.09.2026:
+    второй строкой была приставка пробного режима.
+    """
+    monkeypatch.setenv("GH_TOKEN", "т")
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (7, ""))
+    assert module.main(["--repo", "o/r", "--queue"]) == module.EXIT_NOTHING
+    said = capsys.readouterr()
+    assert said.out.splitlines() == ["[]"], f"на stdout не один машинный ответ: {said.out!r}"
+
+
+def test_the_queue_still_names_its_mode(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вторая половина: режим назван — просто в другом потоке (045).
+
+    Без неё «одна строка на stdout» достигалось бы и молчанием о режиме, а
+    молчание — ровно то ослабление, ради запрета которого приставка и заведена.
+    """
+    monkeypatch.setenv("GH_TOKEN", "т")
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (7, ""))
+    module.main(["--repo", "o/r", "--queue"])
+    assert module.report.DRY in capsys.readouterr().err

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 
+import pytest
 import report
 
 from tests.conftest import ROOT, walk
@@ -52,3 +53,33 @@ def test_no_mechanism_cuts_output_silently() -> None:
                 and upper.value >= 100
             ):
                 raise AssertionError(f"{path.name}: вывод режется на месте, а не общим механизмом")
+
+
+def test_the_mode_prefix_speaks_in_the_diagnostic_stream(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Приставка режима идёт в `stderr`, а не в ответ механизма.
+
+    ЭТО ПРО ПОТОК, А НЕ ПРО ТЕКСТ. У части механизмов `stdout` читает не
+    человек, а оболочка: шаг взгляда берёт очередь как
+    ``numbers=$(python scripts/unlooked.py --queue)``. Приставка на том же
+    потоке давала ВТОРУЮ строку, обе уезжали в `$GITHUB_OUTPUT`, площадка
+    отвечала ``Invalid format '[]'`` и роняла джоб — 18 и 19.09.2026.
+    """
+    report.announce(True)
+    said = capsys.readouterr()
+    assert report.DRY in said.err, "приставка режима не названа вовсе (045)"
+    assert said.out == "", f"приставка режима попала в ответ механизма: {said.out!r}"
+
+
+def test_a_live_run_names_nothing_in_either_stream(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Вторая половина: боевой заход молчит в ОБОИХ потоках.
+
+    Без неё проверка прошла бы и у приставки, стоящей всегда, — а такая ничего
+    не различает (051).
+    """
+    report.announce(False)
+    said = capsys.readouterr()
+    assert said.out == "" and said.err == ""
