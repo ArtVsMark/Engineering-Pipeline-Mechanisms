@@ -60,15 +60,41 @@ def test_an_empty_change_is_the_third_outcome() -> None:
         module.parts([])
 
 
-def test_commits_that_touched_nothing_are_the_third_outcome() -> None:
-    """Коммиты есть, а файлов не тронуто — тоже отказ, а не пустой вердикт."""
-    with pytest.raises(module.NotRun, match="считать нечего"):
-        module.parts([[], []])
+def test_commits_that_touched_nothing_are_a_state_not_a_refusal() -> None:
+    """Коммиты есть, а файлов не тронуто — СОСТОЯНИЕ, и у него своё имя.
+
+    Так выглядит коммит с `--allow-empty`, которым отмечают пункт задачи
+    трейлером. Прежде он давал отказ, и проверка живого дерева краснела по
+    причине, к работе отношения не имеющей: механизм краснел на законном
+    (051). Нашёл внешний взгляд на #562.
+    """
+    assert module.parts([[], []]) == []
 
 
-def test_the_walk_names_its_parts_on_a_live_branch(tmp_path, run_script) -> None:  # type: ignore[no-untyped-def]
-    """Заход процессом называет части и выходит нулём — исход прогоняется, а не объявляется."""
+def test_an_empty_result_is_told_apart_from_an_empty_input() -> None:
+    """Вторая половина: пустой ВХОД по-прежнему отказ.
+
+    Без неё починка съела бы и настоящий отказ: «коммитов ветки не видно» и
+    «коммиты были, файлов не тронули» — разные ответы, и выход из них разный
+    (045).
+    """
+    with pytest.raises(module.NotRun):
+        module.parts([])
+    assert module.parts([[], []]) == []
+
+
+def test_the_walk_agrees_with_the_live_branch(run_script) -> None:  # type: ignore[no-untyped-def]
+    """Заход процессом сходится с тем, что в ветке на самом деле (139).
+
+    ЦВЕТ НЕ ЗАКРЕПЛЁН, И ЭТО УСИЛЕНИЕ. Последний коммит ветки бывает пустым —
+    так отмечают пункт задачи, — и требовать нуля именно тогда значило бы
+    держать красное на законном приёме. Проверяется большее: исход СХОДИТСЯ с
+    тем, тронул ли последний коммит файлы, и названы обе ветки.
+    """
     done = run_script("change_parts.py", "--base", "HEAD~1")
+    if done.code == module.EXIT_NOTHING:
+        assert "не тронуло файлов" in done.out, done.out
+        return
     assert done.code == module.EXIT_OK, done.err
     assert "частей" in done.out, done.out
 
@@ -247,3 +273,17 @@ def test_a_commit_without_a_parent_is_read_not_refused(tmp_path) -> None:  # typ
         f"корневой коммит прочитан неверно: {sorted(видно)} — у него нет родителя,"
         " и дифф против него не разрешается"
     )
+
+
+def test_an_empty_commit_reaches_its_own_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Исход «файлов не тронуто» ПРОГОНЯЕТСЯ, а не только объявлен (039, 145).
+
+    Он и был тем красным: обязательная проверка `test` падала на изменении,
+    чей последний коммит пуст, — а пустым его делает отметка пункта задачи
+    трейлером.
+    """
+    monkeypatch.setattr(module, "touched", lambda _base: [[], []])
+    assert module.main(["--base", "HEAD~1"]) == module.EXIT_NOTHING
+    assert "не тронуло файлов" in capsys.readouterr().out

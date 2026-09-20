@@ -1406,3 +1406,28 @@ def test_without_a_release_the_source_does_not_read_as_settled(tmp_path: Path) -
     subprocess.run(["git", "-C", str(tmp_path), "init", "--quiet", "-b", "main"], check=True)
     with pytest.raises(module.NotRun, match="выпусков не видно"):
         module.release_behind_tree(tmp_path)
+
+
+def test_a_source_refusal_is_recorded_as_silence_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Отказ источника «выпуск против дерева» записывается, а не роняет обход.
+
+    Предикат достижимости живёт у `check_shipped` и кидает СВОЁ исключение.
+    `look` ловит `drift.NotRun`, и чужая форма прошла бы мимо `except`: один
+    отказ этого источника уносил бы весь заход, вместо строки «источник не
+    ответил». Нашёл внешний взгляд на #562 и проверил тем же приёмом, что
+    здесь, — подменой `at_ref` на «ссылки не видно».
+    """
+    monkeypatch.setattr(module.check_shipped, "at_ref", lambda *_a, **_k: None)
+    with pytest.raises(module.NotRun):
+        module.release_behind_tree(released_tree(tmp_path, marked_before_tag=False))
+
+
+def test_a_readable_release_is_not_a_refusal(tmp_path: Path) -> None:
+    """Вторая половина: ссылка читается — отказа нет.
+
+    Без неё «всегда отказывать» прошло бы проверку, а источник, который всегда
+    молчит, снаружи неотличим от сошедшегося (045).
+    """
+    assert module.release_behind_tree(released_tree(tmp_path, marked_before_tag=True)) == []

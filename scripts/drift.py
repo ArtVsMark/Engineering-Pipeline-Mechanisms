@@ -766,7 +766,15 @@ def release_behind_tree(root: Path | None = None) -> list[Drift]:
             "На обрезанном клоне теги не выкачиваются, и «всё в выпуске» было бы "
             "выводом из незнания (045)"
         )
-    missing = check_shipped.unreleased(pin, where)
+    # ЧУЖОЕ ИСКЛЮЧЕНИЕ ОБОРАЧИВАЕТСЯ В СВОЁ, как у соседей по обходу. Отказ
+    # одного источника обязан записаться строкой «источник не ответил», а не
+    # ронять заход целиком: `look` ловит `drift.NotRun`, и `check_shipped.NotRun`
+    # прошёл бы мимо него. Нашёл внешний взгляд на #562 и проверил прогоном —
+    # подмена `at_ref` на `None` давала необработанное исключение.
+    try:
+        missing = check_shipped.unreleased(pin, where)
+    except check_shipped.NotRun as exc:
+        raise NotRun(f"достижимость помеченного не прочитана: {exc}") from exc
     if not missing:
         return []
     return [
