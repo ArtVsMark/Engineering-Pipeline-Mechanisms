@@ -740,5 +740,25 @@ def test_a_fully_read_debt_is_clean(
     monkeypatch.setattr(debt.task_shape, "closed_with_live_units", lambda closed: [])
     monkeypatch.setattr(debt, "rules_debt", lambda inbox: (0, 0, 0))
     monkeypatch.setattr(debt, "contract_note", lambda inbox: "")
+    # ПОРОГ ПОКРЫТИЯ ТОЖЕ ПОДДЕЛЫВАЕТСЯ, И ЭТО НЕ ФОРМАЛЬНОСТЬ. Он читает ряд
+    # прогонов у площадки, и без подделки проверка уходила бы в СЕТЬ. Нашёл
+    # внешний взгляд на #568.
+    monkeypatch.setattr(
+        debt.coverage_floor,
+        "look",
+        lambda repo, token: debt.coverage_floor.Floor(
+            day="2026-09-20", now=88.6, floor=88.6, days=4
+        ),
+    )
+
+    # СТРАЖ СУДИТ ПОХОД В СЕТЬ, А НЕ ЦВЕТ. Отказ порога `debt` ловит и печатает
+    # «не прочитан», оставляя исход зелёным: снятие подделки цвета НЕ меняет, и
+    # проверка «исход зелёный» о сети не говорит ничего. Предмет здесь — сам
+    # вызов, и поймано это откатом, который не покраснел
+    # ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
+    def no_network(*_a: object, **_k: object) -> None:
+        raise AssertionError("изолированный прогон ушёл в сеть")
+
+    monkeypatch.setattr(debt.coverage_floor.ghrest, "request", no_network)
     assert debt.main(["--repo", "o/r"]) == debt.EXIT_OK
     assert "слито без внешнего взгляда: 0" in capsys.readouterr().out
