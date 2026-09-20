@@ -19,7 +19,20 @@
 помнить, а не числом, которое видно
 ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
-Исходы (правило 039): ``0`` части названы · ``2`` не отработал.
+ПУСТОЙ КОММИТ — СОСТОЯНИЕ, А НЕ ОТКАЗ, и разница стоила красного на
+обязательной проверке. Коммит с `--allow-empty` законен: им отмечают пункт
+задачи трейлером, не трогая файлов. Прежде такой коммит давал «считать
+нечего» вторым исходом, и проверка живого дерева краснела по причине, к
+работе отношения не имеющей — то есть механизм краснел на законном
+([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+Нашёл внешний взгляд на #562.
+
+ОТКАЗ ПРИ ЭТОМ ОСТАЁТСЯ ОТКАЗОМ: коммитов нет вовсе — вход не найден, и
+«ноль частей» звучало бы вердиктом о работе, которой не видно (045, 075).
+Разница именно в этом: пустой вход и пустой РЕЗУЛЬТАТ — разные ответы.
+
+Исходы (правило 039): ``0`` части названы · ``2`` не отработал ·
+``3`` изменение не тронуло файлов: считать нечего, и это сказано.
 """
 
 from __future__ import annotations
@@ -32,6 +45,9 @@ from typing import Final
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
+#: Файлов не тронуто ни одного. Своё имя, а не «не отработал»: предмета нет
+#: по законной причине, и выход из этого другой (039).
+EXIT_NOTHING: Final = 3
 
 
 class NotRun(RuntimeError):
@@ -120,11 +136,13 @@ def parts(commits: list[list[str]]) -> list[list[str]]:
             root(name)
         for name in files[1:]:
             parent[root(files[0])] = root(name)
+    if not commits:
+        raise NotRun("коммитов на входе нет — считать нечего (075)")
     grouped: dict[str, list[str]] = defaultdict(list)
     for name in parent:
         grouped[root(name)].append(name)
-    if not grouped:
-        raise NotRun("ни один коммит ветки не тронул файлов — считать нечего (075)")
+    # Пустой СПИСОК — не отказ: коммиты были, файлов не тронули. Отвечает за
+    # разницу зовущий, а здесь она просто не стирается.
     return sorted((sorted(names) for names in grouped.values()), key=lambda one: (-len(one), one))
 
 
@@ -138,6 +156,13 @@ def main(argv: list[str] | None = None) -> int:
     except NotRun as refusal:
         print(f"части не сосчитаны: {refusal}", file=sys.stderr)
         return EXIT_BROKEN
+
+    if not found:
+        print(
+            "изменение не тронуло файлов: считать нечего. Так выглядит пустой коммит —"
+            " например, отмечающий пункт задачи трейлером, — и это состояние, а не отказ"
+        )
+        return EXIT_NOTHING
 
     print(f"файлов {sum(len(one) for one in found)}, частей {len(found)}")
     for number, names in enumerate(found, 1):
