@@ -51,7 +51,7 @@ jobs:
     timeout-minutes: 10
     steps:
       # Заголовок и тело собираются из коммитов ветки — нужна история.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
