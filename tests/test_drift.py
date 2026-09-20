@@ -14,6 +14,7 @@ import ast
 import inspect
 import json
 import os
+import subprocess
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -270,6 +271,10 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # останавливает, и настоящее расхождение в прогонах проекта сделало бы этот
     # прогон красным по чужому поводу. Предмет здесь — молчание источников.
     monkeypatch.setattr(module, "actions_disagree", lambda *a, **k: [])
+    # Источник «выпуск против дерева» тоже читает дерево и историю, а не
+    # сеть: отравленный транспорт его не останавливает, а настоящее
+    # отставание выпуска сделало бы этот прогон красным по чужому поводу.
+    monkeypatch.setattr(module, "release_behind_tree", lambda *a, **k: [])
     # Источник защиты ветки ходит к площадке своим запросом, а не через
     # `fetch`: в подделке его гасят отдельно, иначе проверка молчания одних
     # источников пошла бы в сеть за другим.
@@ -333,6 +338,10 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     # прогонах проекта сделало бы этот прогон красным по чужому поводу. Предмет
     # здесь — как `look` ведёт себя с молчащим источником, а не состав прогонов.
     monkeypatch.setattr(module, "actions_disagree", lambda *a, **k: [])
+    # Источник «выпуск против дерева» тоже читает дерево и историю, а не
+    # сеть: отравленный транспорт его не останавливает, а настоящее
+    # отставание выпуска сделало бы этот прогон красным по чужому поводу.
+    monkeypatch.setattr(module, "release_behind_tree", lambda *a, **k: [])
     monkeypatch.setattr(module, "showcase_questions_moved", lambda *_: [])
     monkeypatch.setattr(module, "gap_tasks_closed", lambda *a: [])
     found, silent = module.look("o/r", "token", {})
@@ -1332,3 +1341,68 @@ def test_an_unread_protection_is_the_third_outcome_of_the_source(
     monkeypatch.setattr(module, "declared_protection", lambda *a, **k: PROTECTED)
     with pytest.raises(module.NotRun, match="не ответила"):
         module.protection_moved("o/r", "токен")
+
+
+def released_tree(tmp_path: Path, *, marked_before_tag: bool) -> Path:
+    """Дерево с настоящим тегом выпуска и помеченным файлом до или после него.
+
+    История настоящая: подделанный ответ git подтверждал бы согласие кода с
+    нашим представлением о тегах, а не с git (170).
+    """
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    run = ["git", "-C", str(tmp_path)]
+    subprocess.run([*run, "init", "--quiet", "-b", "main"], check=True)
+    subprocess.run([*run, "config", "user.email", "т@т"], check=True)
+    subprocess.run([*run, "config", "user.name", "т"], check=True)
+    marked = tmp_path / "scripts" / "shipped_tool.py"
+
+    def commit(message: str) -> None:
+        subprocess.run([*run, "add", "-A"], check=True, capture_output=True)
+        subprocess.run([*run, "commit", "--quiet", "-m", message], check=True)
+
+    if marked_before_tag:
+        marked.write_text('"""ОТДАЁТСЯ НАРУЖУ: пример."""\n', encoding="utf-8")
+        commit("инструмент")
+        subprocess.run([*run, "tag", "v1.0.0"], check=True)
+        return tmp_path
+    (tmp_path / "scripts" / "свой.py").write_text('"""свой."""\n', encoding="utf-8")
+    commit("до выпуска")
+    subprocess.run([*run, "tag", "v1.0.0"], check=True)
+    marked.write_text('"""ОТДАЁТСЯ НАРУЖУ: пример."""\n', encoding="utf-8")
+    commit("инструмент после выпуска")
+    return tmp_path
+
+
+def test_a_release_behind_the_tree_is_a_drift(tmp_path: Path) -> None:
+    """Помеченное есть в дереве, а выпуск его не несёт — это находка.
+
+    Предмет не «файла нет у нас», а «потребитель по названной ему ссылке его
+    не достанет»: между этими ответами и живёт весь источник.
+    """
+    found = module.release_behind_tree(released_tree(tmp_path, marked_before_tag=False))
+    assert len(found) == 1
+    assert found[0].source == "release-behind"
+    assert "scripts/shipped_tool.py" in found[0].said, "запись не назвала файл поимённо (046)"
+    assert "выпуск" in found[0].next_step, "запись без следующего шага — сообщение о погоде (142)"
+
+
+def test_a_release_that_carries_everything_is_not_a_drift(tmp_path: Path) -> None:
+    """Вторая половина: выпуск несёт помеченное — находок нет.
+
+    Без неё источник был бы неотличим от «всегда находит», а такой учат
+    обходить (051).
+    """
+    assert module.release_behind_tree(released_tree(tmp_path, marked_before_tag=True)) == []
+
+
+def test_without_a_release_the_source_does_not_read_as_settled(tmp_path: Path) -> None:
+    """Выпусков нет — третий исход, а не «всё в выпуске» (045).
+
+    На обрезанном клоне теги не выкачиваются, и молчание источника снаружи
+    неотличимо от схождения.
+    """
+    (tmp_path / "scripts").mkdir()
+    subprocess.run(["git", "-C", str(tmp_path), "init", "--quiet", "-b", "main"], check=True)
+    with pytest.raises(module.NotRun, match="выпусков не видно"):
+        module.release_behind_tree(tmp_path)

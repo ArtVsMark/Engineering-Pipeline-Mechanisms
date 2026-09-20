@@ -11,8 +11,9 @@
 ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
 СОСТАВ ВЫВОДИТСЯ ИЗ ДЕРЕВА, А НЕ ПЕРЕЧИСЛЯЕТСЯ ЗДЕСЬ. Шаги берутся те, что
-помечены маркером «отдаётся наружу» (`scripts/check_shipped.py`), версия — из
-`CONTRACT_VERSION`. Второй список тех же имён отстал бы на первом же вынесенном
+помечены маркером «отдаётся наружу» (`scripts/check_shipped.py`), прибивка —
+тег ВЫПУСКА из истории (`pin_of` ниже говорит, почему не `CONTRACT_VERSION`).
+Второй список тех же имён отстал бы на первом же вынесенном
 шаге, и отстал бы молча
 ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
 [049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
@@ -30,13 +31,24 @@
 Поэтому все шаги выходят с классом «в очереди разбора» — объявленным
 состоянием, а не молчанием, — и потребитель отвечает по каждому сам.
 
+ЗАГОТОВКА НЕ ПЕЧАТАЕТСЯ, ПОКА ПРИБИВКА ЕЁ НЕ НЕСЁТ. Вызов по адресу с
+версией работает ровно тогда, когда названный тег этот файл содержит, и это
+НЕ следует из того, что файл лежит у нас: работа слита, выпуск не нарезан —
+самый обычный день. Замер 20.09.2026: помечено наружу одиннадцать файлов, в
+выпуске `v1.1.0` их ноль, то есть заготовка была нерабочей целиком, и узнал
+бы об этом потребитель на СВОЁМ красном
+([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+Третий исход называет предмет: нарезать выпуск
+([158](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/158-the-third-outcome-names-its-subject.md)).
+
 ЧЕГО ЗАХОД НЕ ДЕЛАЕТ: не пишет в чужое дерево и не трогает защиту ветки.
 Первое — чужая работа, второе живёт вне дерева вовсе. Заход печатает, а
 потребитель кладёт; иначе «подключено» и «подправлено на ходу» стали бы
 неотличимы.
 
 Исходы (правило 039): ``0`` заготовка собрана · ``2`` не отработал ·
-``3`` отдавать нечего: ни один шаг не помечен.
+``3`` отдавать нечего: ни один шаг не помечен · ``4`` прибивка не несёт
+помеченного: выпуск отстал от дерева.
 """
 
 from __future__ import annotations
@@ -54,6 +66,9 @@ import version
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
 EXIT_NOTHING: Final = 3
+#: Прибивка есть, а помеченного в ней нет. Отдельный исход, а не «нечего
+#: отдавать»: предмет тот же, причина и выход РАЗНЫЕ (039, 104).
+EXIT_UNREACHABLE: Final = 4
 
 #: Приставка вынесенного шага. Помеченным бывает и не шаг — пакет, действие, —
 #: а заготовку вызова собирают только из прогонов, которые ЗОВУТ.
@@ -157,6 +172,24 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_NOTHING
+
+    # СВЕРКА ИДЁТ ДО ПЕЧАТИ, А НЕ ПОСЛЕ. Напечатанную заготовку забирают
+    # целиком; предупреждение под ней читают не все, а вызов по адресу,
+    # которого по названному тегу нет, отказывает у потребителя.
+    try:
+        missing = check_shipped.unreleased(pin, args.root)
+    except (NotRun, check_shipped.NotRun) as exc:
+        print(f"заход не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    if missing:
+        print(
+            f"прибивка «{pin}» не несёт помеченного наружу: {len(missing)} из "
+            f"{len(check_shipped.shipped(args.root))} — {', '.join(missing)}.\n"
+            "Заготовка с такой прибивкой отказала бы у потребителя, а не у нас (045).\n"
+            f"Выход: нарезать выпуск, содержащий эти файлы, и позвать заход заново (158).",
+            file=sys.stderr,
+        )
+        return EXIT_UNREACHABLE
 
     print(f"# шагов к подключению: {len(names)} · прибивка: {pin}\n")
     print(f"# 1. В свой `{paths.WORKFLOWS}/ci.yml` — джобы вызова:\n")
