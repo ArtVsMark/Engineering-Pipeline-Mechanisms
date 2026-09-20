@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           # Начало окна лежит в истории общей ветки, а не в ветке изменения. В
           # мелком клоне шаг не зеленеет, а объявляет, что считать не из чего:
