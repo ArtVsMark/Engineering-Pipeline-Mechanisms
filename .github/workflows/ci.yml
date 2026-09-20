@@ -87,7 +87,7 @@ jobs:
       matrix:
         python: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           # Тесты гейтов ходят по истории — нужна вся.
           fetch-depth: 0
@@ -181,7 +181,7 @@ jobs:
       matrix:
         python: ["3.15"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5

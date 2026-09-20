@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           # Счёт по пунктам спрашивает, КОГДА имя появилось в истории. В мелком
           # клоне она обрезана до одного коммита, и все файлы выглядят
