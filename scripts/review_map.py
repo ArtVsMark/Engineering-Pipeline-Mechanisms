@@ -159,7 +159,17 @@ def touches_the_answer(base: str) -> bool:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        check=False,
     )
+    # ОТКАЗ GIT ЧИТАЕТСЯ КАК «ТРОНУТ», А НЕ КАК «НЕ ТРОНУТ». Исход здесь не
+    # читался, и пустой `stdout` при отказе давал `False` — то есть взгляд НЕ
+    # получал указания сверить карту с дифом. Цена пропуска названа выше:
+    # ревью, которому подделали карту (085). Сторона выбрана та, где лишняя
+    # строка «сверь с дифом» дешевле молчания
+    # ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    # Нашёл замер по дереву вслед за находкой на #572.
+    if shown.returncode:
+        return True
     return bool(shown.stdout.strip())
 
 

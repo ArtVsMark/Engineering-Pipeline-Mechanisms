@@ -20,6 +20,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tests.conftest import load_script
 
 module = load_script("items_left.py")
@@ -200,3 +202,33 @@ def test_a_shallow_clone_answers_unknown_not_a_date(tmp_path: Path) -> None:
         )
         == []
     )
+
+
+def test_a_git_refusal_is_not_a_full_clone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """git отказал — читаем «мелкий», а не «полный» (045).
+
+    Пустой `stdout` при отказе давал «клон полный», и `born` шла по обрезанной
+    истории, возвращая правдоподобную, но неверную дату — ровно тот случай,
+    от которого предостерегает докстрока самой `shallow`. Незнание трактуется
+    той стороной, где механизм МОЛЧИТ, а не врёт уверенно.
+    """
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_a, **_k: module.subprocess.CompletedProcess([], 128, "", "fatal: not a git repo"),
+    )
+    assert module.shallow() is True
+
+
+def test_a_full_clone_is_still_read_as_full(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вторая половина: git ответил «false» — клон полный.
+
+    Без неё починка съела бы весь предикат: «всегда мелкий» выключило бы
+    сильный признак насовсем, и снаружи это выглядело бы как работающий счёт.
+    """
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_a, **_k: module.subprocess.CompletedProcess([], 0, "false\n", ""),
+    )
+    assert module.shallow() is False
