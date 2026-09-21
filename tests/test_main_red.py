@@ -222,9 +222,19 @@ def test_the_gap_line_is_gone_once_the_mechanism_exists(tmp_path: Path) -> None:
 # то есть не проверять вовсе.
 
 
+#: Разрешённый список из одного имени — им проверяются исходы решения.
+ALLOWED_ONE: Final = {"ci-complete": "замер: 17 миганий из 29"}
+
+
 def test_one_red_on_the_first_attempt_is_rerun() -> None:
-    """Упал ровно один и попытка первая — перезапуск. Это весь случай мигания."""
-    assert module.rerun_reason(["test"], [], run=100, tries=1) == ""
+    """Упал ровно один, попытка первая, имя В СПИСКЕ — перезапуск.
+
+    ИМЯ ЗДЕСЬ СМЕНИЛОСЬ С `test` НА `ci-complete`, и это не подгонка под код, а
+    смена договора (#607). Прежде одиночное обязательное перезапускалось любое:
+    оно проходило `one_fall` ВАКУУМНО. Теперь решает история мигания, а решение
+    013 снова соблюдается — `test` судит дерево и в списке его нет.
+    """
+    assert module.rerun_reason(["ci-complete"], [], run=100, tries=1, allowed=ALLOWED_ONE) == ""
 
 
 def test_a_second_attempt_is_not_rerun_again() -> None:
@@ -233,7 +243,8 @@ def test_a_second_attempt_is_not_rerun_again() -> None:
     Такой цикл не сходится никогда: то, что чинится перезапуском, — мигание, и
     его надо записать, а не повторять.
     """
-    assert module.rerun_reason(["test"], [], run=100, tries=2) == module.ALREADY
+    said = module.rerun_reason(["ci-complete"], [], run=100, tries=2, allowed=ALLOWED_ONE)
+    assert said == module.ALREADY
 
 
 def test_several_reds_are_not_rerun() -> None:
@@ -258,7 +269,8 @@ def test_an_unreadable_address_is_its_own_reason() -> None:
     второе — состояние работы. Одно сообщение на оба отправило бы разбирать
     дефект, которого нет (154).
     """
-    assert module.rerun_reason(["test"], [], run=0, tries=1) == module.NO_ADDRESS
+    said = module.rerun_reason(["ci-complete"], [], run=0, tries=1, allowed=ALLOWED_ONE)
+    assert said == module.NO_ADDRESS
     assert module.NO_ADDRESS != module.ALREADY
 
 
@@ -327,11 +339,17 @@ def test_an_unlisted_advisory_red_is_not_rerun() -> None:
 def test_a_required_red_is_still_judged_by_its_own_rule() -> None:
     """Обязательное красное разбирается прежним правилом, а не списком.
 
-    Список — про совещательные, чьё красное дерева не судит. Обязательное
-    красное считает дерево, и подмешивать его сюда значило бы прятать дефект
-    (013, 014).
+    ЗДЕСЬ СТОЯЛО «список — про совещательные, обязательное разбирается прежним
+    правилом», и прежнее правило перезапускало ЛЮБОЕ одиночное обязательное,
+    включая `test`. Решение 013 запрещает ровно это: семь обязательных считают
+    дерево, и зелёное со второго раза скрыло бы находку (#607).
+
+    Теперь обязательное вне списка не перезапускается, а «упал не один»
+    остаётся прежним — и проверяется здесь же.
     """
-    assert module.rerun_reason(["test"], [], run=100, tries=1, allowed={}) == ""
+    assert module.rerun_reason(["test"], [], run=100, tries=1, allowed={}) == (
+        module.REQUIRED_UNLISTED
+    )
     assert (
         module.rerun_reason(["test"], ["other"], run=100, tries=1, allowed={}) == module.NOT_ALONE
     )
@@ -382,16 +400,33 @@ def test_every_allowed_name_carries_its_measurement() -> None:
         )
 
 
-def test_every_allowed_name_is_an_advisory_check() -> None:
-    """В списке только совещательные имена, и каждое объявлено в ответе проекта.
+#: Сводный гейт: единственное имя, которого нет в ответе проекта по построению
+#: — он не проверка дерева, а ЧИТАТЕЛЬ чужих записей на голове. Выдаётся
+#: файлом `.github/workflows/ci-complete.yml`, и защита ветки знает ровно его.
+AGGREGATE: Final = "ci-complete"
 
-    Обязательное имя здесь означало бы перезапуск дефекта, а незнакомое —
-    список, разошедшийся с деревом (022, 075).
+
+def test_every_allowed_name_is_known_and_does_not_judge_the_tree() -> None:
+    """Имя списка объявлено в ответе проекта — или это сводный гейт.
+
+    ЗДЕСЬ СТОЯЛО «в списке только СОВЕЩАТЕЛЬНЫЕ», и это кодировало прежнее
+    правило: решать по классу. Решает история мигания (#607): `ci-complete`
+    обязателен, но дерево не судит — он опрашивает записи ДРУГИХ проверок, и
+    его одиночное красное при зелёных соседях по построению значит «не
+    дочитал». Семнадцать миганий из двадцати девяти это показали, а отчёт
+    назвал причину — 16 из 16 несут «ждём соседей на голове».
+
+    Что осталось прежним и важнее прежнего: имя, которого в ответе нет и
+    которое не сводный гейт, — это список, разошедшийся с деревом (022, 075).
     """
     checks = policy.load()
     for name in module.rerunnable():
+        if name == AGGREGATE:
+            continue
         assert name in checks, f"«{name}» не объявлен в .pipeline.yml"
-        assert not checks[name].holds_merge, f"«{name}» держит слияние — его перезапускать нельзя"
+        assert not checks[name].holds_merge, (
+            f"«{name}» держит слияние и судит дерево — его перезапускать нельзя (013)"
+        )
 
 
 # --- одно падение, отражённое двумя именами -----------------------------------
@@ -1519,7 +1554,7 @@ def rerun_said(
     hit: list[int] = []
     monkeypatch.setattr(module, "attempt", lambda repo, run, token: tries)
     monkeypatch.setattr(module, "rerun_failed", lambda repo, run, token: hit.append(run))
-    said = module.rerun_on_change("o/r", "токен", 7, runs, REQUIRED, {}, apply=apply)
+    said = module.rerun_on_change("o/r", "токен", 7, runs, [*REQUIRED, AGGREGATE], {}, apply=apply)
     return said, hit
 
 
@@ -1533,8 +1568,14 @@ def test_a_lone_red_on_a_change_is_rerun(monkeypatch: pytest.MonkeyPatch) -> Non
     Отсрочка была объявлена с условием пересмотра — «пока эти записи не назовут
     первое имя», — и имя названо: `ci-complete`, семнадцать раз
     ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+
+    ИМЯ ЗДЕСЬ СМЕНИЛОСЬ С `lint` НА `ci-complete` (#607). Прежняя редакция
+    ставила одиночным `lint` и ждала перезапуска — то есть требовала от
+    механизма ровно того, что решение 013 запрещает: перезапуска обязательного,
+    которое СУДИТ ДЕРЕВО. Приёмка была зелёной потому, что код тогда
+    перезапускал все семь; исправился код — исправилась и она.
     """
-    said, hit = rerun_said(monkeypatch, [record("lint", "failure", run=42)], apply=True)
+    said, hit = rerun_said(monkeypatch, [record(AGGREGATE, "failure", run=42)], apply=True)
     assert "перезапущен" in said, said
     assert hit == [42], "прогон не перезапущен вовсе"
 
@@ -1559,9 +1600,15 @@ def test_a_second_attempt_on_a_change_is_not_rerun_again(monkeypatch: pytest.Mon
 
     Без этой половины механизм перезапускал бы вечно, и мигание, уже
     записанное, гасилось бы снова и снова вместо разбора.
+
+    ПРИЧИНА ПРОВЕРЯЕТСЯ ПОИМЁННО, А НЕ ПО «перезапуска не будет». Прежняя
+    редакция ставила здесь `lint` и смотрела только на общую часть сообщения —
+    и после #607 осталась бы зелёной по ДРУГОЙ причине: «обязательное вне
+    списка». Бездействие совпало бы, предмет — нет, и проверка сторожила бы не
+    то ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
     """
-    said, hit = rerun_said(monkeypatch, [record("lint", "failure", run=42)], tries=2, apply=True)
-    assert "перезапуска не будет" in said, said
+    said, hit = rerun_said(monkeypatch, [record(AGGREGATE, "failure", run=42)], tries=2, apply=True)
+    assert module.ALREADY in said, said
     assert hit == [], "перезапущено во второй раз"
 
 
@@ -1620,10 +1667,68 @@ def test_the_decision_is_the_same_one_as_the_shared_branch() -> None:
     совпасть с тем, что отдаёт `rerun_reason` — тот же, по которому живёт общая
     ветка. Разъедутся — здесь покраснеет.
     """
-    holds, rest = module.split(module.red_of([record("lint", "failure", run=42)]), REQUIRED)
+    required = [*REQUIRED, AGGREGATE]
+    holds, rest = module.split(module.red_of([record(AGGREGATE, "failure", run=42)]), required)
     assert module.rerun_reason(holds, rest, 42, 1, {}, module.rerunnable()) == ""
     holds, rest = module.split(
         module.red_of([record("lint", "failure", run=42), record("test", "failure", run=42)]),
-        REQUIRED,
+        required,
     )
     assert module.rerun_reason(holds, rest, 42, 1, {}, module.rerunnable()) != ""
+
+
+# --- перезапуск решается историей мигания, а не классом (#607) ----------------
+
+
+def test_a_lone_required_red_outside_the_list_is_not_rerun() -> None:
+    """Обязательное вне разрешённого списка НЕ перезапускается.
+
+    ЗАМЕР, РАДИ КОТОРОГО ПРОВЕРКА ЗАВЕДЕНА (21.09.2026). Код перезапускал ВСЕ
+    СЕМЬ обязательных: одиночное красное доходило до `one_fall` и проходило его
+    ВАКУУМНО — `all(...)` по пустому списку истинно. То есть `lint`
+    перезапустился бы наравне с `ci-complete`, а решение 013 говорит прямо:
+    семь обязательных СЧИТАЮТ ДЕРЕВО, их красное означает дефект, и зелёное со
+    второго раза скрыло бы находку
+    ([124](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/124-rerun-the-minimum-and-record-the-flake.md)).
+
+    Комментарий над тем же кодом обещал обратное — «обязательные не
+    перезапускаются никогда», — и проза расходилась с кодом.
+    """
+    said = module.rerun_reason(["lint"], [], 1, 1, {}, module.rerunnable())
+    assert said == module.REQUIRED_UNLISTED, said
+
+
+def test_a_listed_check_is_rerun_whatever_its_class() -> None:
+    """Имя из списка перезапускается независимо от класса.
+
+    Вторая половина: без неё «обязательное не перезапускается» вернулось бы
+    запретом по КЛАССУ, а решает история мигания. `ci-complete` обязателен и
+    дерева не судит — он читатель чужих записей, и семнадцать его миганий из
+    двадцати девяти это показали.
+    """
+    assert module.rerun_reason(["ci-complete"], [], 1, 1, {}, module.rerunnable()) == ""
+
+
+def test_the_aggregate_with_its_matrix_is_still_one_fall() -> None:
+    """Агрегат вместе со своей матрицей — ОДНО падение под разными именами.
+
+    Ради этого случая `one_fall` и заведён, и список имён здесь ни при чём:
+    агрегат краснеет ровно потому, что красна ячейка. Спрашивать у списка
+    каждое из двух имён значило бы разрушить его смысл.
+    """
+    said = module.rerun_reason(
+        ["test"], ["test-matrix (3.12)"], 1, 1, {"test": {"test-matrix"}}, module.rerunnable()
+    )
+    assert said == "", said
+
+
+def test_the_listed_names_carry_a_measurement() -> None:
+    """У каждого имени списка названы причина И замер (014, 154).
+
+    Имя без замера — догадка, а список заведён ровно затем, чтобы догадок в нём
+    не было: «перезапускать всё красное» прячет дефект.
+    """
+    said = module.rerunnable()
+    assert "ci-complete" in said, "имя с семнадцатью миганиями в список не попало"
+    for name, why in said.items():
+        assert why.strip(), f"{name}: имя без причины"
