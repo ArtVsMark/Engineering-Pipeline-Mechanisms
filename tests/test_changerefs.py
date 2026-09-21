@@ -551,3 +551,39 @@ def test_the_mask_keeps_the_positions_of_the_line() -> None:
     """
     for mask, line in changerefs.masked_lines("обычная строка\n`код` и текст\n```\nвнутри\n```"):
         assert len(mask) == len(line), f"маска и строка разошлись длиной: {mask!r} / {line!r}"
+
+
+def test_a_hold_trailer_is_read_by_name() -> None:
+    """`held_in` читает причину задержки и отдаёт её КАК НАПИСАНА.
+
+    Причина едет в тело изменения человеку на глаза: нормализуются только
+    пробелы, слова — нет.
+    """
+    assert changerefs.held_in("Hold:   замер,  эти прогоны\tне сливаются") == (
+        "замер, эти прогоны не сливаются"
+    )
+    assert changerefs.held_in("hold: строчными — тот же трейлер") == "строчными — тот же трейлер"
+
+
+def test_a_hold_without_a_reason_is_not_a_hold() -> None:
+    """Задержка без причины неотличима от забытой метки и потому не читается (154)."""
+    assert changerefs.held_in("Hold:") is None
+    assert changerefs.held_in("Hold:    ") is None
+    assert changerefs.held_in("обычное тело без трейлера") is None
+
+
+def test_a_hold_inside_code_is_an_example_not_a_hold() -> None:
+    """Пример трейлера в документации задержкой не становится — как у соседей."""
+    assert changerefs.held_in("пишут так: `Hold: пример из свода`") is None
+    assert changerefs.held_in("```\nHold: пример из блока\n```") is None
+
+
+def test_the_first_named_reason_wins_across_bodies() -> None:
+    """`held_in_all` берёт ПЕРВУЮ названную причину: задержка — состояние, не список.
+
+    Второй трейлер в соседнем коммите ту же задержку не усиливает, и складывать
+    причины значило бы выдавать одно решение за несколько.
+    """
+    assert changerefs.held_in_all(["Refs #1", "Hold: первая", "Hold: вторая"]) == "первая"
+    assert changerefs.held_in_all(["Refs #1", "Closes #2"]) is None
+    assert changerefs.held_in_all([]) is None

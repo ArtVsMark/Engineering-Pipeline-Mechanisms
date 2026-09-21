@@ -285,3 +285,30 @@ def test_a_dry_run_does_not_hold_either(platform: list[tuple[str, str, Any]]) ->
     """Сухой заход ничего не ставит — ни согласия, ни стоп-метки."""
     module.apply_hold("о/р", 7, "токен", "временные прогоны", dry_run=True)
     assert platform == []
+
+
+def test_the_described_answer_is_named_not_a_pair() -> None:
+    """Состав ответа `describe` именован: третье значение не теряется в распаковке.
+
+    Проверяется ровно то, ради чего заведён `Described`: добавь третье значение
+    к паре — и оно либо сломает каждого зовущего `title, body = …`, либо, что
+    хуже, уедет тише
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Поэтому у задержки ИМЯ, а не место в кортеже.
+    """
+    said = module.Described(title="заголовок", body="тело", hold="замер")
+    assert (said.title, said.body, said.hold) == ("заголовок", "тело", "замер")
+
+    # Пары здесь нет и быть не должно: распаковка на двоих обязана отказать,
+    # а не тихо отдать два поля из трёх.
+    with pytest.raises(TypeError):
+        _title, _body = said
+
+
+def test_a_change_without_a_trailer_is_described_unheld() -> None:
+    """Обычное изменение приезжает НЕзадержанным: `hold` пуст, а не пустая строка.
+
+    Половина предиката, которую забывают: гейт, объявляющий задержку всегда,
+    неотличим от исправного по одной только первой проверке.
+    """
+    assert module.Described(title="з", body="т", hold=None).hold is None
