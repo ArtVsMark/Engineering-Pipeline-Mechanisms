@@ -465,3 +465,154 @@ def test_the_storefront_limit_rejects_what_it_must() -> None:
         "перенос строки объёма не меняет"
     )
     assert prose_words(один) == 3, "адрес ссылки словами не считается, а её текст — считается"
+
+
+# --- у живого документа есть путь от свода к читателю (#580) -------------------
+
+#: Своды-корни: по одному на читателя (021). Документ, достижимый только от
+#: витрины, достижим для человека со стороны, и это законно — так живёт
+#: `docs/onboarding.md`. Требовать пути ИМЕННО от ядра значило бы гнать в свод
+#: агента то, что агенту не адресовано.
+RULEBOOKS = ("AGENTS.md", "CLAUDE.md", "README.md")
+
+#: Ссылка markdown. Берётся адрес, а не текст: путь к читателю — это адрес.
+MD_LINK_RE = re.compile(r"\]\(([^)\s]+)")
+
+#: Живой документ, у которого пути от свода нет ПО ПОСТРОЕНИЮ. Список закрытый,
+#: каждый назван с причиной — иначе он станет местом, куда сваливают всё, до
+#: чего не дошли ссылкой (154).
+WITHOUT_PATH = {
+    "CHANGELOG.md": "производный файл: его собирает выпуск, и хранилищем он не "
+    "является — ссылаться на него из свода значило бы звать читателя в сборку (125)",
+}
+
+
+def link_targets(path: Path) -> set[Path]:
+    """Документы, на которые ссылается этот: только внутридеревные `.md`.
+
+    Якорь отрезается: `docs/roles.md#делаем` ведёт в тот же файл. Внешние
+    адреса и ссылки наружу дерева (`../../issues/N` у площадки) отбрасываются —
+    путь к читателю ищется в дереве, а не на площадке.
+    """
+    out: set[Path] = set()
+    for match in MD_LINK_RE.finditer(path.read_text(encoding="utf-8")):
+        target = match.group(1).split("#")[0].strip()
+        if not target or target.startswith(("http://", "https://", "mailto:")):
+            continue
+        try:
+            here = (path.parent / target).resolve().relative_to(ROOT)
+        except ValueError:
+            continue
+        if here.suffix == ".md" and (ROOT / here).is_file():
+            out.add(here)
+    return out
+
+
+def reachable_from(roots: tuple[str, ...]) -> set[Path]:
+    """Всё, до чего доходят ссылки от сводов, — обходом вширь.
+
+    ПУТЬ СЧИТАЕТСЯ ТРАНЗИТИВНЫМ, И ЭТО НАЗВАННАЯ ГРАНИЦА. Документ, до которого
+    добираются через запись решения, достижим — так сегодня живёт
+    `docs/release.md`. Гейт утверждает «путь ЕСТЬ», а не «путь короток»: длину
+    пути машине не судить, и требовать ссылки прямо из свода значило бы
+    набивать свод адресами, то есть ломать 029
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    seen: set[Path] = set()
+    front = [Path(name) for name in roots]
+    while front:
+        current = front.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        front.extend(nxt for nxt in link_targets(ROOT / current) if nxt not in seen)
+    return seen
+
+
+#: Предмет: своды и канон. Решения и навыки СЮДА НЕ ВХОДЯТ, и обе границы
+#: названы замером, а не вкусом (195).
+#:
+#: `docs/decisions/*.md` — архив: к решению приходят ПО НОМЕРУ из задачи,
+#: коммита или ответа в `.rules/bindings.json`, а не по ссылке из свода. Замер
+#: 21.09.2026: из 32 решений от сводов недостижимы 10, и все десять законны.
+#: Свою форму они держат `tests/test_decisions_format.py`.
+#:
+#: `.claude/skills/*/SKILL.md` — путь к читателю у навыка не ссылка, а
+#: площадка: она грузит навык по его `description`. Ссылкой это не проверяется
+#: вовсе, и объявить их достижимыми значило бы завысить ответ.
+LIVE_DOCS = sorted(
+    [
+        *walk(ROOT, "*.md"),
+        *walk(ROOT / "docs", "*.md"),
+    ]
+)
+
+
+def test_the_path_gate_found_its_subject() -> None:
+    """Предмет найден, и исключения его не съели (075).
+
+    Гейт, у которого весь предмет ушёл в список исключений, зелен на пустоте и
+    снаружи неотличим от исправного.
+    """
+    judged = [p for p in LIVE_DOCS if p.name not in WITHOUT_PATH]
+    assert len(judged) > len(RULEBOOKS), "предмет проверки — одни своды: канона в обходе не нашлось"
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(p for p in LIVE_DOCS if p.name not in WITHOUT_PATH),
+    ids=lambda p: str(p.relative_to(ROOT)),
+)
+def test_every_live_document_has_a_path_from_a_rulebook(path: Path) -> None:
+    """От свода к документу ведёт цепочка ссылок — иначе читатель до него не дойдёт.
+
+    ЗАМЕР, РАДИ КОТОРОГО ГЕЙТ ЗАВЕДЁН (21.09.2026, #580). Владелец спросил, зовёт
+    ли что-нибудь агента в `docs/roles.md`. Прогон по девяти живым документам
+    нашёл ровно один недостижимый — и это оказалась карта направлений правила
+    082, та самая, где стоят шесть пометок «роли нет». Документ объявлял
+    читателем «владелец и окно», и ни `AGENTS.md`, ни `CLAUDE.md` его не звали:
+    единственным путём к карте был навык `role-coverage`, а навык не краснеет —
+    невызванный неотличим от вызванного
+    ([155](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/155-a-template-you-dont-use-drifts.md),
+    [002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    ЭТО ЗЕРКАЛО ГЕЙТА ЧИТАТЕЛЯ, И ПОТОМУ ОН ЖИВЁТ ЗДЕСЬ. Сосед выше требует,
+    чтобы документ назвал своего читателя; этот — чтобы у читателя был путь к
+    документу. Половины одного вопроса, и разводить их по модулям значило бы
+    отвечать на него в двух местах (090).
+    """
+    reached = reachable_from(RULEBOOKS)
+    here = path.relative_to(ROOT)
+    assert here in reached, (
+        f"{here}: от сводов ({', '.join(RULEBOOKS)}) сюда не ведёт ни одна цепочка ссылок — "
+        "документ объявляет читателя, а читатель о документе не узнает (155)"
+    )
+
+
+def test_the_path_gate_rejects_an_unlinked_document() -> None:
+    """Гейт краснеет на подделанном дереве, где ссылки нет (140).
+
+    Проверяется САМ ПРЕДИКАТ, а не дерево: обход идёт от подложного свода, и
+    документ, на который тот не ссылается, обязан остаться недостижимым.
+    """
+    reached = reachable_from(("docs/roles.md",))
+    assert Path("AGENTS.md") not in reached, (
+        "обход объявил достижимым то, на что никто не ссылался — предикат мнимый"
+    )
+    assert Path("docs/roles.md") in reached, "обход потерял собственный корень"
+
+
+def test_an_excluded_document_names_its_reason_and_still_exists() -> None:
+    """У исключения есть причина — и есть предмет.
+
+    Пустой причины не бывает (154), а исключение, чей файл из дерева исчез или
+    стал достижимым, — это заготовка, которая разошлась с деревом (155): её
+    снимают, а не носят дальше.
+    """
+    reached = reachable_from(RULEBOOKS)
+    for name, why in WITHOUT_PATH.items():
+        assert why.strip(), f"{name}: исключение без причины неотличимо от недосмотра"
+        assert (ROOT / name).is_file(), f"{name}: исключение названо, а файла в дереве нет"
+        assert Path(name) not in reached, (
+            f"{name}: исключение держат, а путь от свода уже есть — строку снимают"
+        )
