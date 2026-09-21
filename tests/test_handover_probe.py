@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, needs_history
 
 onboard = load_script("onboard.py")
 family_uptake = load_script("family_uptake.py")
@@ -74,6 +74,7 @@ def test_the_probe_goes_the_outward_way() -> None:
         assert "@" in said, f"{name}: вызов без версии"
 
 
+@needs_history
 def test_the_probe_says_what_the_kit_prints() -> None:
     """Адрес и прибивка — те же, что печатает заход подключения.
 
@@ -107,6 +108,7 @@ def test_the_probe_runs_on_the_release_and_by_hand() -> None:
     assert "release" in said and "workflow_dispatch" in said, said
 
 
+@needs_history
 def test_a_probe_pinned_to_the_release_is_not_a_drift(tmp_path: Path) -> None:
     """Прибивка совпала с выпуском — находки нет.
 

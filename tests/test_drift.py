@@ -275,6 +275,11 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # сеть: отравленный транспорт его не останавливает, а настоящее
     # отставание выпуска сделало бы этот прогон красным по чужому поводу.
     monkeypatch.setattr(module, "release_behind_tree", lambda *a, **k: [])
+    # Проба против выпуска — того же рода: читает дерево и историю. Её
+    # отставание наступит при ПЕРВОМ ЖЕ выпуске, и без подделки этот прогон
+    # покраснел бы по поводу, к молчанию источников отношения не имеющему.
+    # Нашёл внешний взгляд на #574.
+    monkeypatch.setattr(module, "probe_behind_release", lambda *a, **k: [])
     # Источник защиты ветки ходит к площадке своим запросом, а не через
     # `fetch`: в подделке его гасят отдельно, иначе проверка молчания одних
     # источников пошла бы в сеть за другим.
@@ -342,6 +347,11 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     # сеть: отравленный транспорт его не останавливает, а настоящее
     # отставание выпуска сделало бы этот прогон красным по чужому поводу.
     monkeypatch.setattr(module, "release_behind_tree", lambda *a, **k: [])
+    # Проба против выпуска — того же рода: читает дерево и историю. Её
+    # отставание наступит при ПЕРВОМ ЖЕ выпуске, и без подделки этот прогон
+    # покраснел бы по поводу, к молчанию источников отношения не имеющему.
+    # Нашёл внешний взгляд на #574.
+    monkeypatch.setattr(module, "probe_behind_release", lambda *a, **k: [])
     monkeypatch.setattr(module, "showcase_questions_moved", lambda *_: [])
     monkeypatch.setattr(module, "gap_tasks_closed", lambda *a: [])
     found, silent = module.look("o/r", "token", {})
