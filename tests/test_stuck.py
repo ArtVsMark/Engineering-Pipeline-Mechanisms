@@ -522,3 +522,27 @@ def test_a_platform_refusal_is_the_third_outcome_of_the_sweep(
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
     said = capsys.readouterr().err
     assert "не отработал" in said and "repos/o/r/pulls" in said
+
+
+def test_an_example_in_a_fenced_block_is_not_a_condition() -> None:
+    """Пример «Ждёт:» в блоке кода условием не считается (#587).
+
+    РАЗБОР ОБЩИЙ, И ЭТО ПРОВЕРЯЕМАЯ РАЗНИЦА, А НЕ ОФОРМЛЕНИЕ. Здесь жила своя
+    регулярка `^Ждёт:`, и в заборе она читала пример как настоящее условие:
+    документация, цитирующая форму строки, снимала бы жалобу с забытой
+    стоп-метки. Общий разбор `changerefs` маскирует забор, кавычки и отступ —
+    тем же механизмом, которым это уже решено для `Refs`, `Closes`,
+    `Разобрано:` и `Закрывает пункт:`
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    ЭТО ОТКАТ, КОТОРЫЙ СНАЧАЛА НЕ ПОКРАСНЕЛ. Первый заход проверял пример с
+    ОТСТУПОМ — а его своя регулярка и так не находила, потому что привязана к
+    первой колонке. Разница между разборами видна только на заборе, и навык
+    предупреждает ровно об этом: откат, который не покраснел, — находка.
+    """
+    said = verdict(held("```\nЖдёт: пример из документации\n```"), [])
+    assert said.stuck, "пример в заборе снял жалобу с забытой стоп-метки"
+    assert said.why == module.STUCK_HOLD_MUTE
+
+    # Вторая половина: настоящее условие в первой колонке читается по-прежнему.
+    assert not verdict(held("Ждёт: #262"), []).stuck
