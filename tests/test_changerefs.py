@@ -659,3 +659,37 @@ def test_the_block_survives_its_own_second_line() -> None:
     бы как настоящие. Это половина, которую легче всего потерять.
     """
     assert changerefs.links_in("пример:\n\n    Closes #1\n    Refs #2") == []
+
+
+# --- объявление починки общей ветки (#585) ------------------------------------
+
+
+def test_a_fix_main_trailer_names_the_red_step() -> None:
+    """`Чинит main: <имя>` читается как объявление предмета починки.
+
+    Имя отдаётся КАК НАПИСАНО: его сверяют с именем записи проверки у площадки,
+    и нормализуются только пробелы.
+    """
+    assert changerefs.fixes_main_in("Чинит main:  ci-complete ") == "ci-complete"
+    assert changerefs.fixes_main_in("чинит main: test-matrix (3.12)") == "test-matrix (3.12)"
+
+
+def test_a_fix_main_without_a_name_is_not_a_declaration() -> None:
+    """Объявление без имени шага предметом не является (154)."""
+    assert changerefs.fixes_main_in("Чинит main:") is None
+    assert changerefs.fixes_main_in("обычное тело") is None
+
+
+def test_a_fix_main_example_in_code_is_not_a_declaration() -> None:
+    """Пример в блоке кода объявлением не становится — как у всех ключей."""
+    assert changerefs.fixes_main_in("пишут так: `Чинит main: ci-complete`") is None
+    assert changerefs.fixes_main_in("```\nЧинит main: ci-complete\n```") is None
+    assert changerefs.fixes_main_in("пример:\n\n    Чинит main: ci-complete") is None
+
+
+def test_the_first_declared_fix_wins() -> None:
+    """Из нескольких тел берётся первое имя: починка — состояние, а не список."""
+    assert changerefs.fixes_main_in_all(["Refs #1", "Чинит main: lint", "Чинит main: test"]) == (
+        "lint"
+    )
+    assert changerefs.fixes_main_in_all(["Refs #1"]) is None

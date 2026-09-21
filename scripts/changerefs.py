@@ -145,6 +145,26 @@ CLOSED_ITEM_RE: Final = re.compile(
 #: вещи разошлись ровно там, где их стык
 #: ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
 #: Теперь строка одна от тела коммита до реестра, и переводить нечего.
+#: Какой красный шаг общей ветки чинит изменение — строкой в теле коммита.
+#: Ключ по-русски, как и соседи: чужие здесь только `Refs`/`Closes`, которые
+#: разбирает площадка.
+#:
+#: ЗАЧЕМ ЭТО ЕСТЬ (#585). Красная общая ветка замораживает очередь, и выход из
+#: заморозки — метка `fix-main`. Ставит её ЧЕЛОВЕК, и пока его нет, починка не
+#: уезжает: замер 20.09.2026 — #565 простояла зелёной и неслитой; замер
+#: 21.09.2026 — #583 не уехала бы вовсе без двух вмешательств владельца.
+#: Выход был заперт на того, кого может не быть
+#: ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+#:
+#: ОКНО НЕ РЕШАЕТ, ЧТО СЧИТАТЬ ПОЧИНКОЙ, — ОНО ПРЕДЪЯВЛЯЕТ ПРЕДМЕТ. Строка
+#: называет ИМЯ шага, и шаг открытия спрашивает у площадки, красен ли он на
+#: голове общей ветки. Не красен — метки нет, и отказ называет, чего не хватило
+#: ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md),
+#: [051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+FIXES_MAIN_RE: Final = re.compile(
+    r"^\s*(?P<mark>Чинит main:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
+)
+
 WAITS_RE: Final = re.compile(
     r"^\s*(?P<mark>Ждёт:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
 )
@@ -467,6 +487,33 @@ def held_in(text: str) -> str | None:
     """
     for match in marked_lines(text, WAITS_RE):
         said = " ".join(match.group("text").split())
+        if said:
+            return said
+    return None
+
+
+def fixes_main_in(text: str) -> str | None:
+    """Имя красного шага, который изменение объявляет чинимым, или ``None``.
+
+    Разбор общий с прочими ключами — тем же `marked_lines`: пример в блоке кода
+    объявлением не становится
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    for match in marked_lines(text, FIXES_MAIN_RE):
+        said = " ".join(match.group("text").split())
+        if said:
+            return said
+    return None
+
+
+def fixes_main_in_all(texts: Iterable[str]) -> str | None:
+    """Объявление из нескольких тел: ПЕРВОЕ названное имя.
+
+    Хватает одного: изменение чинит красноту общей ветки или нет, и второе имя
+    в соседнем коммите того же не усиливает.
+    """
+    for text in texts:
+        said = fixes_main_in(text)
         if said:
             return said
     return None
