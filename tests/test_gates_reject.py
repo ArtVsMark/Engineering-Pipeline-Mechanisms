@@ -1046,7 +1046,7 @@ def test_a_dry_run_accepts_a_branch_that_names_its_task(tmp_path: Path) -> None:
     agent_pr = load_script("agent_pr.py")
     root = branch_with(tmp_path, "feat: работа со связью\n\nRefs #1")
     with inside(root):
-        title, _ = agent_pr.describe("agent/x", "main")
+        title = agent_pr.describe("agent/x", "main").title
     assert "работа со связью" in title
 
 

@@ -155,7 +155,8 @@ def test_a_branch_with_a_real_diff_is_opened(monkeypatch: pytest.MonkeyPatch) ->
         return "fix: настоящая работа\n\nRefs #224\n"
 
     monkeypatch.setattr(module, "git", git)
-    title, body = module.describe("agent/окно", "main")
+    said = module.describe("agent/окно", "main")
+    title, body = said.title, said.body
     # Подделка отдаёт один и тот же текст на любую команду, поэтому строк
     # «предмета» в нём выходит две и заголовок получает «(+1)». Проверяется
     # здесь другое: заход НЕ отказал и собрал описание.
@@ -204,3 +205,83 @@ def test_the_platform_may_normalise_whitespace() -> None:
     """
     sent = "тело\n\nРазобрано: abc1234\n"
     assert module.kept_the_marks(sent.replace("\n", "\r\n"), sent) == []
+
+
+# --- задержка объявляется ДО открытия (#551) ----------------------------------
+
+
+def held_branch(monkeypatch: pytest.MonkeyPatch, body: str) -> Any:
+    """Разбор ветки, чьи коммиты несут заданное тело."""
+
+    def git(*args: str) -> str:
+        if args[0] == "merge-base":
+            return "базаbaseSHA"
+        if args[0] == "diff":
+            return "scripts/x.py\0"
+        return body
+
+    monkeypatch.setattr(module, "git", git)
+    return module.describe("agent/окно", "main")
+
+
+def test_a_hold_trailer_is_read_before_the_change_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Причина задержки читается из КОММИТА, то есть раньше открытия.
+
+    Стоп-метку можно поставить только после открытия, а согласие ставится
+    сразу — между этими мгновениями изменение полностью готово к слиянию.
+    Замер по живой ленте #549: `automerge` в 19:40:09, снят в 19:40:40,
+    `hold` в 19:40:41 — тридцать одна секунда.
+    """
+    said = held_branch(monkeypatch, "ЗАМЕР: две минуты\n\nHold: временные прогоны\n\nRefs #224\n")
+    assert said.hold == "временные прогоны"
+    assert "Задержано автором" in said.body
+    assert "временные прогоны" in said.body
+
+
+def test_a_change_without_the_trailer_is_not_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вторая половина: обычное изменение задержанным не объявляется.
+
+    Без неё «всегда задержано» остановило бы конвейер целиком, а такой
+    механизм обходят первым же ручным слиянием (051).
+    """
+    said = held_branch(monkeypatch, "fix: обычная работа\n\nRefs #224\n")
+    assert said.hold is None
+    assert "Задержано автором" not in said.body
+
+
+def test_a_held_change_gets_the_stop_label(platform: list[tuple[str, str, Any]]) -> None:
+    """Объявленная задержка ставит стоп-метку."""
+    module.apply_hold("о/р", 7, "токен", "временные прогоны", dry_run=False)
+    assert platform == [("POST", "repos/о/р/issues/7/labels", {"labels": [module.HOLD]})]
+
+
+def test_a_held_change_never_gets_consent(platform: list[tuple[str, str, Any]]) -> None:
+    """Согласия задержанное изменение не получает НИ НА МИНУТУ — приёмка #551.
+
+    Проверяется не проза, а состав обращений к площадке: стоп-метка уже в
+    руках, и `apply_consent` про согласие даже не спрашивает.
+    """
+    module.apply_consent("о/р", 7, "токен", {module.HOLD}, dry_run=False)
+    assert platform == [], f"задержанное изменение трогало метки: {platform}"
+
+
+def test_a_refused_stop_label_is_said_out_loud(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ разметки шаг не роняет, но и не молчит (084, 045).
+
+    Без метки задержанное изменение уйдёт в очередь, и автор узнает об этом от
+    слияния — то есть тишина здесь дороже красного.
+    """
+
+    def broken(*_a: object, **_k: object) -> None:
+        raise module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.ghrest, "request", broken)
+    module.apply_hold("о/р", 7, "токен", "временные прогоны", dry_run=False)
+
+
+def test_a_dry_run_does_not_hold_either(platform: list[tuple[str, str, Any]]) -> None:
+    """Сухой заход ничего не ставит — ни согласия, ни стоп-метки."""
+    module.apply_hold("о/р", 7, "токен", "временные прогоны", dry_run=True)
+    assert platform == []

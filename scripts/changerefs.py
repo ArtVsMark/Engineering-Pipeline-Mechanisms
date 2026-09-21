@@ -91,6 +91,24 @@ CLOSED_ITEM_RE: Final = re.compile(
     r"^\s*(?P<mark>Закрывает пункт:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
 )
 
+#: ЗАДЕРЖКА, ОБЪЯВЛЕННАЯ ДО ОТКРЫТИЯ. Стоп-метку `hold` можно поставить только
+#: ПОСЛЕ того, как изменение открыто, а согласие очереди шаг открытия ставит
+#: сразу — между этими мгновениями изменение полностью готово к слиянию.
+#:
+#: ЗАМЕР 19.09.2026 ПО ЖИВОЙ ЛЕНТЕ СОБЫТИЙ #549: `automerge` в 19:40:09,
+#: снят в 19:40:40, `hold` в 19:40:41 — согласие простояло 31 секунду на
+#: изменении, которое сливать было нельзя. Спасло только то, что обязательная
+#: проверка была в ту минуту красной; внешний взгляд назвал это риском и был
+#: прав — сливал бы `automerge`, а не проза в комментарии файла
+#: ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+#:
+#: Трейлер едет В КОММИТЕ, то есть существует раньше изменения, и шаг открытия
+#: читает его до того, как поставит согласие. Причина обязательна: задержка без
+#: причины неотличима от забытой метки (154).
+HOLD_RE: Final = re.compile(
+    r"^\s*(?P<mark>Hold:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Link:
@@ -389,6 +407,33 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
             seen.update(fresh)
             found.append(str(Resolution(tuple(fresh), record.why)))
     return found
+
+
+def held_in(text: str) -> str | None:
+    """Причина задержки, объявленной трейлером, или ``None``.
+
+    Причина отдаётся КАК НАПИСАНА: она едет в тело изменения и попадается на
+    глаза человеку — тому же читателю, что и у снятых находок.
+    """
+    for match in marked_lines(text, HOLD_RE):
+        said = " ".join(match.group("text").split())
+        if said:
+            return said
+    return None
+
+
+def held_in_all(texts: Iterable[str]) -> str | None:
+    """Задержка из нескольких тел: ПЕРВАЯ названная причина.
+
+    Хватает одной: задержка — состояние изменения, а не список. Второй трейлер
+    в соседнем коммите ту же задержку не усиливает, и складывать причины
+    значило бы выдавать одно решение за несколько.
+    """
+    for text in texts:
+        said = held_in(text)
+        if said:
+            return said
+    return None
 
 
 def resolved_in_all(texts: Iterable[str]) -> list[str]:
