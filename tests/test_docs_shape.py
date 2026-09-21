@@ -690,3 +690,55 @@ def test_a_rulebook_explains_by_rules_not_by_tasks(name: str) -> None:
         f"{name}: раздел объясняет задачами, а не правилами — похоже на состояние проекта, "
         "а не на «как работать». Состоянию место в канон:\n  " + "\n  ".join(guilty)
     )
+
+
+# --- шов после правки не оставляет пустоты (#604) -----------------------------
+
+#: Три и более переводов строки подряд — след правки, а не разметка: markdown
+#: разделяет абзацы ОДНОЙ пустой строкой, и лишние появляются там, где текст
+#: вынули, а шов не стянули.
+BLANK_RUN_RE: Final = re.compile(r"\n{3,}")
+
+#: Производные файлы: их собирает механизм, и разрывы в них — его дело, а не
+#: авторская небрежность. Хранилищем такой файл не является (125).
+BUILT_DOCS: Final = {"CHANGELOG.md": "собирается выпуском из фрагментов"}
+#: Каталог выпущенных фрагментов: их текст заморожен выпуском.
+RELEASED: Final = "released"
+
+
+def test_a_seam_leaves_no_empty_gap() -> None:
+    """После правки в документе не остаётся тройного пустого разрыва.
+
+    ЗАМЕР, РАДИ КОТОРОГО ПРОВЕРКА ЗАВЕДЕНА (21.09.2026, #604). Это ШЕСТАЯ за
+    смену находка одного рода: текст переносят, а шов на новом месте не
+    перечитывают. Здесь дубль абзаца вынули из `docs/gaps.md`, а три пустые
+    строки за ним остались — нашёл внешний взгляд находкой `dd90f0e`.
+
+    ПРЕДИКАТ БЫЛ ШИРЕ ПРЕДМЕТА ВТРОЕ, пока соседа не назвали: из четырёх
+    найденных мест три оказались в `changelog.d/released/` — выпущенных
+    фрагментах, которые переезжают ДОСЛОВНО и правке не подлежат
+    ([108](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/108-a-living-document-keeps-a-fixed-window.md),
+    [195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Настоящий случай остался один.
+
+    Предикат точный, а не вероятный, поэтому он блокирует, а не предупреждает
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    guilty: list[str] = []
+    for path in DOCS:
+        if path.name in BUILT_DOCS or RELEASED in path.parts:
+            continue
+        found = len(BLANK_RUN_RE.findall(path.read_text(encoding="utf-8")))
+        if found:
+            guilty.append(f"{path.relative_to(ROOT)} — разрывов {found}")
+    assert not guilty, (
+        "пустой шов после правки — абзацы разделяет ОДНА пустая строка:\n  "
+        + "\n  ".join(sorted(guilty))
+    )
+
+
+def test_an_exempt_built_document_names_its_reason() -> None:
+    """У производного документа названа причина, и он вправду в дереве (154, 155)."""
+    for name, why in BUILT_DOCS.items():
+        assert why.strip(), f"{name}: исключение без причины"
+        assert (ROOT / name).is_file(), f"{name}: исключение названо, а файла нет"
