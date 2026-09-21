@@ -312,3 +312,54 @@ def test_a_change_without_a_trailer_is_described_unheld() -> None:
     неотличим от исправного по одной только первой проверке.
     """
     assert module.Described(title="з", body="т", hold=None).hold is None
+
+
+# --- тема коммита не несёт номера (#582) --------------------------------------
+
+
+def test_a_subject_carrying_a_number_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Шаг открытия отказывает теме с номером — до толчка, а не после слияния.
+
+    ЗАМЕР (21.09.2026, #582): номер в теме пишет автор, а площадка приписывает
+    свой при уплотнении. Тема #579 вышла «… (#551) (+2) (#579)», счёт принятых
+    изменений разошёлся, и покраснела ОБЩАЯ ветка — там тему уже не переписать
+    ([123](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/123-attribution-is-verified-on-the-final-history.md)).
+
+    Отказ стоит там, где тема рождается: предполётная зовёт этот шаг сухим
+    прогоном ПЕРЕД толчком.
+    """
+
+    def git(*args: str) -> str:
+        if args[0] == "merge-base":
+            return "base-sha\n"
+        if args[0] == "diff":
+            return "scripts/x.py\0"
+        if args[0] == "log" and "--format=%s" in args:
+            return "Работа и её предмет (#551)\n"
+        return "тело\n\nRefs #551\n"
+
+    monkeypatch.setattr(module, "git", git)
+    with pytest.raises(module.NotRun) as refused:
+        module.describe("agent/окно", "main")
+    assert "номер" in str(refused.value), "отказ не называет свой предмет (154)"
+
+
+def test_a_clean_subject_is_not_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вторая половина: обычная тема проходит.
+
+    Без неё отказ неотличим от «не открывать ничего»: первая половина зеленеет
+    и на предикате, который отвергает всё подряд.
+    """
+
+    def git(*args: str) -> str:
+        if args[0] == "merge-base":
+            return "base-sha\n"
+        if args[0] == "diff":
+            return "scripts/x.py\0"
+        if args[0] == "log" and "--format=%s" in args:
+            return "Работа и её предмет без номера\n"
+        return "тело\n\nRefs #551\n"
+
+    monkeypatch.setattr(module, "git", git)
+    said = module.describe("agent/окно", "main")
+    assert said.title.startswith("Работа и её предмет без номера")
