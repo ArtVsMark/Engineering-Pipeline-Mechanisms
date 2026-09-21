@@ -35,7 +35,12 @@ VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
 MARKER_RE: Final = re.compile(r"<!--m:contract-->(?P<value>[^<]*)<!--/m:contract-->")
 
 # Производные и служебные файлы: версия попадает в них сборкой, а не руками.
-ALLOWED: Final = frozenset({"CONTRACT_VERSION", "CHANGELOG.md"})
+#
+# ОБА ИМЕНИ БЕРУТСЯ У КАНОНА (#591). Здесь стояли литералы — и `VERSION_FILE`
+# четырьмя строками выше уже брал то же самое у `paths.VERSION`. Два написания
+# одного имени в одном файле, в четырёх строках друг от друга: разъехаться им
+# ничто не мешало (022, 090).
+ALLOWED: Final = frozenset({str(paths.VERSION), str(paths.CHANGELOG)})
 ALLOWED_PREFIXES: Final = ("changelog.d/released/",)
 BINARY_SUFFIXES: Final = frozenset({".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip"})
 

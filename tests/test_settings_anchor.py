@@ -306,3 +306,115 @@ def test_no_mechanism_searches_up_the_tree(path: Path) -> None:
     """
     found = searching_in(path)
     assert not found, f"{path.name} ищет настройку вверх по дереву: {found}"
+
+
+# --- каноническое имя не пишется вторым литералом (#591) ----------------------
+
+#: Имена из якоря, у которых СОВПАДЕНИЕ ПИСЬМА ничего не значит: строка с тем же
+#: текстом в дереве законна и путём не является. Список закрытый, каждый назван
+#: с причиной — иначе он станет местом, куда сваливают неудобное (154).
+#:
+#: ЗАМЕР 21.09.2026, ИЗ-ЗА КОТОРОГО СПИСОК И ПОЯВИЛСЯ. Предикат «каноническое
+#: имя написано в дереве строкой» назвал одиннадцать мест, и ДЕВЯТЬ из них
+#: оказались законными: `"README.md"` — сравнение по имени файла внутри каталога
+#: фрагментов, `"scripts"` — ключ словаря фактов, `"main"` — имя функции Python
+#: и точка входа модуля. Число этого не показывало; показал список имён
+#: ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+SPELLING_MEANS_NOTHING: Final = {
+    "README.md": "сравнение по имени файла в каталоге фрагментов, а не путь от корня",
+    "scripts": "ключ словаря фактов и имя каталога в чужих смыслах, а не путь",
+    "main": "имя функции Python и точка входа модуля, а не имя общей ветки",
+}
+
+
+def canonical_names() -> dict[str, str]:
+    """Имя константы якоря → её строковое значение."""
+    said = load_script("paths.py")
+    found: dict[str, str] = {}
+    for name in dir(said):
+        if not name.isupper():
+            continue
+        value = getattr(said, name)
+        text = value.as_posix() if isinstance(value, Path) else value
+        if isinstance(text, str) and text:
+            found[name] = text
+    return found
+
+
+def literals_in(path: Path) -> set[str]:
+    """Строки, написанные В КОДЕ модуля: проза и докстроки сюда не входят.
+
+    ПРЕДИКАТ ПО ТЕКСТУ ФАЙЛА ТУТ НЕ ГОДИТСЯ, И ЭТО ЗАМЕРЕНО НА СЕБЕ. Первый
+    заход искал `"<имя>"` во всём файле и покраснел на ПОЯСНЕНИИ, которое само
+    же объясняет дефект: назвать имя в комментарии — не то же, что завести
+    второй источник. Комментарий кода не задаёт
+    ([057](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/057-unmechanizable-rules-are-named-explicitly.md)).
+
+    Докстрока — тоже проза: она объясняет, а не участвует в сравнении.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    prose: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            first = node.body[0] if node.body else None
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                prose.add(id(first.value))
+    return {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in prose
+    }
+
+
+def test_the_anchor_declares_names_to_check() -> None:
+    """Предмет найден: якорь называет имена, которые можно сверять (075)."""
+    assert len(canonical_names()) > 5, "в якоре не нашлось канонических имён"
+
+
+def test_a_canonical_name_is_not_spelled_a_second_time() -> None:
+    """Имя, объявленное якорем, не пишется в механизмах вторым литералом.
+
+    ЗАМЕР, РАДИ КОТОРОГО ГЕЙТ ЗАВЕДЁН (21.09.2026, #591). Внешний взгляд нашёл
+    находкой `10ca99d` третий по счёту литерал `"CHANGELOG.md"` — при том, что
+    канон объявлен и модуль `paths` уже импортировал. Рядом нашёлся второй
+    случай: `check_version.py` брал `paths.VERSION` для одной константы и писал
+    `"CONTRACT_VERSION"` строкой для соседней, четырьмя строками ниже.
+
+    Сам `paths.py` документирует этот класс на примере `TRUNK`: три независимых
+    написания имени общей ветки разъехались молча
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
+    [090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    ПРЕДИКАТ СУЖЕН, И СОСЕД НАЗВАН: имена, у которых совпадение письма ничего не
+    значит, перечислены выше с причиной у каждого (195).
+    """
+    wanted = {
+        value: name
+        for name, value in canonical_names().items()
+        if value not in SPELLING_MEANS_NOTHING
+    }
+    found: list[str] = []
+    for path in walk(ROOT / "scripts", "*.py"):
+        if path.name == "paths.py":
+            continue
+        for value in literals_in(path):
+            name = wanted.get(value)
+            if name:
+                found.append(f"{path.relative_to(ROOT)} — «{value}» вместо paths.{name}")
+    assert not found, "каноническое имя написано вторым литералом:\n  " + "\n  ".join(sorted(found))
+
+
+def test_an_exempt_name_names_its_reason() -> None:
+    """У исключения есть причина, и оно вправду объявлено якорем.
+
+    Исключение без причины неотличимо от недосмотра (154), а исключение на имя,
+    которого якорь не объявляет, — заготовка, разошедшаяся с деревом (155).
+    """
+    declared = set(canonical_names().values())
+    for value, why in SPELLING_MEANS_NOTHING.items():
+        assert why.strip(), f"«{value}»: исключение без причины"
+        assert value in declared, f"«{value}»: исключение на имя, которого в якоре нет"
