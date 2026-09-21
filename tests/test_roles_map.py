@@ -318,9 +318,18 @@ def test_a_named_owner_is_a_role_that_exists() -> None:
         owner = said["owner"]
         if owner in outside:
             continue
-        # Имя в исходе стоит в родительном падеже; сверяется корень до окончания.
-        stem = owner.split()[0][:-1]
-        if not any(stem in one for one in known):
+        # СВЕРЯЕТСЯ ИМЯ ЦЕЛИКОМ, А НЕ ПЕРВОЕ СЛОВО (#602). Прежде брался корень
+        # ПЕРВОГО слова, и остаток многословного имени не проверялся вовсе:
+        # «профиль Инженера чего-угодно» проходил, потому что в составе есть
+        # «Инженер площадки». Предикат был шире предмета ровно на хвост имени
+        # ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+        # Нашёл внешний взгляд, и дважды — находками `50c1a49` и `3dc69fa`.
+        #
+        # Падеж снимается по СЛОВАМ: каждое слово имени сверяется корнем без
+        # последней буквы, и совпасть обязаны ВСЕ. Морфологии здесь нет и не
+        # нужно — имена ролей короткие и заданы самим составом.
+        said_words = [one[:-1] for one in owner.split() if len(one) > 2]
+        if not said_words or not any(all(word in role for word in said_words) for role in known):
             unknown.append(f"{name} → «{owner}»")
     assert not unknown, (
         "исход называет владельца, которого нет ни в составе, ни снаружи: " + ", ".join(unknown)
