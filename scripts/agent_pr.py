@@ -35,6 +35,7 @@ import os
 import subprocess
 import sys
 import urllib.parse
+from dataclasses import dataclass
 from typing import Final
 
 import changerefs
@@ -47,6 +48,8 @@ PREFIXES: Final = ("agent/",)
 #: Отметка, по которой видно, что тело собрано механизмом. Тело, правленное
 #: человеком, шаг не переписывает: он источник заголовка, а не хозяин страницы.
 MARK: Final = "Изменение открыто конвейером от лица владельца"
+
+
 #: Согласие отдать изменение очереди. Ставит его МЕХАНИЗМ, а не человек: ветка
 #: с приставкой конвейера и есть заявленное согласие — окно резало её под
 #: задачу, а не для того, чтобы изменение стояло зелёным и ждало.
@@ -54,6 +57,22 @@ MARK: Final = "Изменение открыто конвейером от ли�
 #: Приём взят у соседа по семье, где он обкатан: там согласие ставится сразу
 #: при открытии, а не ждёт обхода по расписанию, и метка работает не только
 #: включателем, но и СЛЕДОМ — по ней видно, что изменение отдано автоматике.
+@dataclass(frozen=True, slots=True)
+class Described:
+    """Что шаг открытия узнал из коммитов ветки: заголовок, тело и задержка.
+
+    ИМЕНОВАННЫЙ СОСТАВ, А НЕ ПАРА. Третье значение, добавленное к кортежу,
+    молча уехало бы в распаковку `title, body = …` и сломало бы каждого
+    зовущего; а если бы не сломало — потерялось бы ещё тише
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+
+    title: str
+    body: str
+    #: Причина задержки, объявленная трейлером `Hold:`, или ``None``.
+    hold: str | None
+
+
 CONSENT: Final = "automerge"
 #: Отзыв согласия человеком. Сильнее согласия и переживает повторный заход:
 #: «метку ещё не ставили» и «поставили и сняли» по состоянию изменения
@@ -104,7 +123,7 @@ def current_branch() -> str:
     return git("rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
-def describe(branch: str, base: str) -> tuple[str, str]:
+def describe(branch: str, base: str) -> Described:
     """Собирает заголовок и тело изменения из коммитов ветки."""
     merge_base = git("merge-base", f"origin/{base}", branch).strip()
     log = git("log", "--reverse", "--format=%s", f"{merge_base}..{branch}")
@@ -170,6 +189,22 @@ def describe(branch: str, base: str) -> tuple[str, str]:
     # хотя механизмы близнецы. Два слияния подряд объявили пункт закрытым и не
     # отметили ничего; механизм честно сказал «пункт не найден», потому что в
     # теле изменения его действительно не было.
+    # ЗАДЕРЖКА ЧИТАЕТСЯ ИЗ ТЕХ ЖЕ ТЕЛ, что и связи со снятиями: второе чтение
+    # того же разошлось бы с первым молча (022, 090).
+    hold = changerefs.held_in_all(bodies)
+    if hold:
+        lines += [
+            "",
+            "## Задержано автором",
+            "",
+            f"**Это изменение не для слияния:** {hold}",
+            "",
+            f"Согласие очереди не ставилось ни на минуту — вместо него стоит «{HOLD}».",
+            "Объявлено трейлером `Hold:` в теле коммита, то есть ДО открытия: метку",
+            "можно поставить только после, а между этими мгновениями изменение",
+            "полностью готово к слиянию (замер по #549 — согласие простояло 31 секунду).",
+        ]
+
     closed = changerefs.closed_items_in_all(bodies)
     if closed:
         lines += ["", "## Закрытые пункты задач", ""]
@@ -193,7 +228,7 @@ def describe(branch: str, base: str) -> tuple[str, str]:
         f"{MARK}: операция, несущая",
         "личность человека, из агентского окна не выполняется (правило 131).",
     ]
-    return title, "\n".join(lines)
+    return Described(title=title, body="\n".join(lines), hold=hold)
 
 
 def say_lost_marks(published: str, sent: str) -> None:
@@ -298,6 +333,36 @@ def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_
     print(f"проставлены зоны: {', '.join(zones)}")
 
 
+def apply_hold(repo: str, number: int, token: str, why: str, dry_run: bool) -> None:
+    """Ставит стоп-метку по объявленной автором задержке — ВМЕСТО согласия.
+
+    ПОРЯДОК ЗДЕСЬ И ЕСТЬ ПОЧИНКА. Прежде согласие ставилось всегда, а метку
+    вешала рука — уже после открытия; замер по живой ленте #549: `automerge`
+    в 19:40:09, снят в 19:40:40, `hold` в 19:40:41, то есть тридцать одна
+    секунда, в которую изменение было полностью готово к слиянию. Спасло
+    только красное на обязательной проверке
+    ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)
+    наоборот: выход был открыт, а вход не закрыт).
+
+    Отказ разметки шаг не роняет — изменение уже открыто, и терять открытие
+    из-за метки худший размен (084). Но МОЛЧАТЬ об этом нельзя: без метки
+    изменение уйдёт в очередь, и автор об этом узнает от слияния.
+    """
+    if dry_run:
+        print(f"стоп-метку поставило бы: {HOLD} — {why}")
+        return
+    try:
+        ghrest.request("POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": [HOLD]})
+        print(f"поставлена стоп-метка «{HOLD}»: {why}")
+    except ghrest.TransportError as exc:
+        print(
+            f"::warning::стоп-метка «{HOLD}» НЕ поставлена: {exc}. "
+            f"Изменение #{number} объявлено задержанным ({why}), а очередь об этом "
+            "не знает — поставьте метку рукой",
+            file=sys.stderr,
+        )
+
+
 def apply_consent(repo: str, number: int, token: str, marks: set[str], dry_run: bool) -> None:
     """Отдаёт изменение очереди — или снимает согласие, если стоит стоп-метка.
 
@@ -381,7 +446,10 @@ def main(argv: list[str] | None = None) -> int:
         # отказом `agent-pr` — то есть после толчка. Замер 10.09.2026: три
         # ветки подряд ушли без связи, и каждая вернулась красной.
         if args.dry_run:
-            title, body = describe(args.branch, args.base)
+            said = describe(args.branch, args.base)
+            title, body = said.title, said.body
+            if said.hold:
+                print(f"объявлена задержка: {said.hold} — согласие не ставилось бы")
             print(f"открыло бы: {title}\n\n{body}")
             return EXIT_OK
 
@@ -402,7 +470,8 @@ def main(argv: list[str] | None = None) -> int:
         # уже изменение», ветка без связи сначала опрашивала площадку и только
         # потом отказывала — то есть шаг трогал чужую систему, зная заранее,
         # что работать не будет (110). Нашла ревизия механизмов 11.09.2026.
-        title, body = describe(args.branch, args.base)
+        said = describe(args.branch, args.base)
+        title, body = said.title, said.body
 
         owner = args.repo.split("/")[0]
         head = f"{owner}:{args.branch}"
@@ -417,7 +486,12 @@ def main(argv: list[str] | None = None) -> int:
             # попытавшись доставить метки, — а гейт разметки продолжает его
             # отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
             apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
-            marks = {str(item.get("name", "")) for item in existing[0].get("labels") or []}
+            marks: set[str] = {
+                str(item.get("name", "")) for item in existing[0].get("labels") or []
+            }
+            if said.hold:
+                apply_hold(args.repo, number, token, said.hold, args.dry_run)
+                marks = marks | {HOLD}
             apply_consent(args.repo, number, token, marks, args.dry_run)
             sync_description(args.repo, number, token, title, body, args.dry_run)
             return EXIT_OK
@@ -432,9 +506,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"открыто изменение #{number}: {created['html_url']}")
         say_lost_marks(str(created.get("body") or ""), body)
         apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
-        # Только что открытое изменение стоп-метки нести не может: её ставит
-        # человек, а он его ещё не видел.
-        apply_consent(args.repo, number, token, set(), args.dry_run)
+        # ЗАДЕРЖКА СИЛЬНЕЕ СОГЛАСИЯ И ЕДЕТ РАНЬШЕ НЕГО. Здесь стояло «только что
+        # открытое изменение стоп-метки нести не может: её ставит человек, а он
+        # его ещё не видел» — верно про метку и неверно про решение: решение
+        # автор принимает ДО открытия и объявляет трейлером `Hold:` в коммите.
+        marks = set()
+        if said.hold:
+            apply_hold(args.repo, number, token, said.hold, args.dry_run)
+            marks = {HOLD}
+        apply_consent(args.repo, number, token, marks, args.dry_run)
         print(
             "Проба, а не доверие (135): автор в общей ветке после слияния обязан\n"
             "стать человеком. Не стал — механизм неверен, и видно это сразу."

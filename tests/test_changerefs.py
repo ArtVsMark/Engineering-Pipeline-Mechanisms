@@ -97,7 +97,7 @@ def test_opening_refuses_a_branch_without_a_task(monkeypatch: pytest.MonkeyPatch
 def test_description_puts_one_task_per_line(monkeypatch: pytest.MonkeyPatch) -> None:
     """Каждая задача получает свою строку: ключевое слово читается у каждой."""
     monkeypatch.setattr(agent_pr, "git", lambda *args: "feat: что-то\n\nRefs #2, #29\n")
-    _, body = agent_pr.describe("agent/окно", "main")
+    body = agent_pr.describe("agent/окно", "main").body
     assert "Refs #2\nRefs #29" in body
 
 
@@ -154,7 +154,7 @@ def test_resolution_travels_with_the_work(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         agent_pr, "git", lambda *args: "fix: правка\n\nРазобрано: abc1234\nRefs #7\n"
     )
-    _, body = agent_pr.describe("agent/окно", "main")
+    body = agent_pr.describe("agent/окно", "main").body
     assert "Разобрано: abc1234" in body
 
 
@@ -417,7 +417,7 @@ def test_description_is_built_from_separate_bodies(monkeypatch: pytest.MonkeyPat
         return "основание\n"
 
     monkeypatch.setattr(agent_pr, "git", git)
-    _, body = agent_pr.describe("agent/окно", "main")
+    body = agent_pr.describe("agent/окно", "main").body
     assert "Refs #12" in body and "Refs #7" in body
 
 
@@ -551,3 +551,111 @@ def test_the_mask_keeps_the_positions_of_the_line() -> None:
     """
     for mask, line in changerefs.masked_lines("обычная строка\n`код` и текст\n```\nвнутри\n```"):
         assert len(mask) == len(line), f"маска и строка разошлись длиной: {mask!r} / {line!r}"
+
+
+def test_a_hold_trailer_is_read_by_name() -> None:
+    """`held_in` читает причину задержки и отдаёт её КАК НАПИСАНА.
+
+    Причина едет в тело изменения человеку на глаза: нормализуются только
+    пробелы, слова — нет.
+    """
+    assert changerefs.held_in("Hold:   замер,  эти прогоны\tне сливаются") == (
+        "замер, эти прогоны не сливаются"
+    )
+    assert changerefs.held_in("hold: строчными — тот же трейлер") == "строчными — тот же трейлер"
+
+
+def test_a_hold_without_a_reason_is_not_a_hold() -> None:
+    """Задержка без причины неотличима от забытой метки и потому не читается (154)."""
+    assert changerefs.held_in("Hold:") is None
+    assert changerefs.held_in("Hold:    ") is None
+    assert changerefs.held_in("обычное тело без трейлера") is None
+
+
+def test_a_hold_inside_code_is_an_example_not_a_hold() -> None:
+    """Пример трейлера в документации задержкой не становится — как у соседей."""
+    assert changerefs.held_in("пишут так: `Hold: пример из свода`") is None
+    assert changerefs.held_in("```\nHold: пример из блока\n```") is None
+
+
+def test_the_first_named_reason_wins_across_bodies() -> None:
+    """`held_in_all` берёт ПЕРВУЮ названную причину: задержка — состояние, не список.
+
+    Второй трейлер в соседнем коммите ту же задержку не усиливает, и складывать
+    причины значило бы выдавать одно решение за несколько.
+    """
+    assert changerefs.held_in_all(["Refs #1", "Hold: первая", "Hold: вторая"]) == "первая"
+    assert changerefs.held_in_all(["Refs #1", "Closes #2"]) is None
+    assert changerefs.held_in_all([]) is None
+
+
+# --- пример в ОТСТУПНОМ блоке кода — не ключ (#581) ---------------------------
+
+#: Все пять ключей, которые читаются из тела коммита, и то, чем их читают.
+#: Проверяются ВМЕСТЕ и одним предикатом: дыра была общая — у маскировки, — и
+#: чинить её по одному значило бы вернуться сюда ещё четыре раза.
+KEYS_AND_READERS = [
+    ("Hold: пример", lambda t: changerefs.held_in(t)),
+    ("Refs #999", lambda t: changerefs.links_in(t)),
+    ("Closes #999", lambda t: changerefs.links_in(t)),
+    ("Разобрано: aaaaaaa причина", lambda t: changerefs.resolved_in(t)),
+    ("Закрывает пункт: текст", lambda t: changerefs.closed_items_in(t)),
+]
+
+
+@pytest.mark.parametrize(
+    "key, read", KEYS_AND_READERS, ids=lambda x: x if isinstance(x, str) else ""
+)
+def test_a_key_in_an_indented_block_is_an_example(key: str, read: Any) -> None:
+    """Пример, написанный отступным блоком, ключом не становится — ни один из пяти.
+
+    ЗАМЕР, РАДИ КОТОРОГО ЭТО ЗАВЕДЕНО (21.09.2026, #581). Нашёл владелец, а не
+    набор: изменение #579 открылось со стоп-меткой `hold`, которой никто не
+    ставил, и причиной в его теле стоял ПРИМЕР из тела коммита — строка
+    `    Hold: замер, эти прогоны не сливаются` с отступом в четыре пробела.
+    Маскировка снимала обратные кавычки и заборы, а отступные блоки — нет.
+
+    Дороже всех платил бы не `Hold:`, а `Closes #N`: пример в прозе закрыл бы
+    настоящую задачу при слиянии.
+    """
+    assert not read(f"пишут так:\n\n    {key}\n"), (
+        f"{key!r} в отступном блоке прочитан как настоящий ключ"
+    )
+    assert not read(f"или табуляцией:\n\n\t{key}\n"), (
+        f"{key!r} после табуляции прочитан как настоящий ключ"
+    )
+
+
+@pytest.mark.parametrize(
+    "key, read", KEYS_AND_READERS, ids=lambda x: x if isinstance(x, str) else ""
+)
+def test_a_key_in_the_first_column_is_still_read(key: str, read: Any) -> None:
+    """Вторая половина: настоящий ключ в первой колонке читается по-прежнему.
+
+    Её забывают, и тогда гейт неотличим от «не читать ничего»: первая половина
+    зеленеет и на предикате, который не находит вообще ничего.
+    """
+    assert read(f"{key}\n"), f"{key!r} в первой колонке перестал читаться"
+
+
+def test_the_indented_block_opens_only_after_a_blank_line() -> None:
+    """Отступный блок открывается после ПУСТОЙ строки — как его видит разметка.
+
+    Без этого условия маскировалась бы любая отбитая строка, включая перенос
+    абзаца, и предикат стал бы шире предмета
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    # Строка продолжает абзац, а не открывает блок: пустой строки перед ней нет.
+    assert changerefs.links_in("абзац идёт\n    Refs #7") == [changerefs.Link("Refs", 7)]
+    # А здесь пустая строка есть — это блок.
+    assert changerefs.links_in("абзац идёт\n\n    Refs #7") == []
+
+
+def test_the_block_survives_its_own_second_line() -> None:
+    """Блок не закрывается на второй своей строке: пустой строки перед ней нет.
+
+    Условие «после пустой» проверяется на ОТКРЫТИИ, а не на каждой строке —
+    иначе замаскировалась бы ровно первая строка примера, а остальные уехали
+    бы как настоящие. Это половина, которую легче всего потерять.
+    """
+    assert changerefs.links_in("пример:\n\n    Closes #1\n    Refs #2") == []
