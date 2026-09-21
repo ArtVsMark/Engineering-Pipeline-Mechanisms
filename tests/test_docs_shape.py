@@ -595,11 +595,20 @@ def test_the_path_gate_rejects_an_unlinked_document() -> None:
     Проверяется САМ ПРЕДИКАТ, а не дерево: обход идёт от подложного свода, и
     документ, на который тот не ссылается, обязан остаться недостижимым.
     """
-    reached = reachable_from(("docs/roles.md",))
-    assert Path("AGENTS.md") not in reached, (
-        "обход объявил достижимым то, на что никто не ссылался — предикат мнимый"
+    # КОРЕНЬ БЕРЁТСЯ БЕЗ ИСХОДЯЩИХ ССЫЛОК, И ЭТО ПРЕДМЕТ, А НЕ ПРИДИРКА.
+    # Здесь стоял `docs/roles.md`, и проверка работала ровно до того дня, когда
+    # карта ролей обзавелась ссылкой на свод: через него стал достижим ВЕСЬ
+    # граф, и откат предиката перестал бы краснеть. Опора на «этот файл ни на
+    # что не ссылается» — опора на сегодняшнее состояние дерева, а не на
+    # предикат (049).
+    lonely = "docs/decisions/001-attribution-of-merged-1.md"
+    assert not link_targets(ROOT / lonely), (
+        f"{lonely} обзавёлся ссылками — предмет этой проверки надо перевыбрать"
     )
-    assert Path("docs/roles.md") in reached, "обход потерял собственный корень"
+    reached = reachable_from((lonely,))
+    assert reached == {Path(lonely)}, (
+        f"обход объявил достижимым то, на что никто не ссылался: {sorted(reached)}"
+    )
 
 
 def test_an_excluded_document_names_its_reason_and_still_exists() -> None:

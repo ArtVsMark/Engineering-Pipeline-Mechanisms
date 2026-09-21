@@ -325,3 +325,62 @@ def test_a_named_owner_is_a_role_that_exists() -> None:
     assert not unknown, (
         "исход называет владельца, которого нет ни в составе, ни снаружи: " + ", ".join(unknown)
     )
+
+
+# --- у роли есть профиль, а не только строка (#599) ---------------------------
+
+#: Поля профиля, без которых роль неотличима от строки таблицы. «Вопрос» —
+#: зачем она есть, «Запрещено» — чем она не становится, «Предел» — чего не
+#: видит по построению. Последнее важнее прочего: роль, чей предел не назван,
+#: кажется всесильной, и её молчание читают как «там чисто»
+#: ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+PROFILE_FIELDS: Final = ("**Вопрос:**", "**Запрещено:**")
+#: Предел называется одним из двух: просто названный или ИЗМЕРЕННЫЙ.
+LIMIT_FIELDS: Final = ("**Предел:**", "**Предел ИЗМЕРЕН:**")
+
+
+def profiles() -> dict[str, str]:
+    """Профиль каждой роли: заголовок третьего уровня → тело."""
+    said = MAP.read_text(encoding="utf-8")
+    after = said.partition("## Профили")[2]
+    found: dict[str, str] = {}
+    for part in re.split(r"^### ", after, flags=re.M)[1:]:
+        head = part.splitlines()[0]
+        name = re.sub(r"[^\w\s-]", "", head).strip()
+        found[name] = part.split("\n## ", 1)[0]
+    return found
+
+
+def test_there_are_profiles_to_judge() -> None:
+    """Предмет найден: профили в карте есть (075)."""
+    assert len(profiles()) >= 10, f"профилей разобрано {len(profiles())} — раздела не видно"
+
+
+def test_every_role_of_the_roster_has_a_profile() -> None:
+    """У каждой роли состава есть профиль, а не только строка таблицы.
+
+    ЗАМЕР, РАДИ КОТОРОГО ПРОВЕРКА ЗАВЕДЕНА (21.09.2026, #599). Состав был
+    написан таблицей — имя, вход, возражение, — и владелец назвал это
+    неполным: «не увидел описание и взаимодействие ролей». Строка отвечает
+    «кто спрашивает», профиль — «как он спрашивает», а это и есть то, ради
+    чего роль существует.
+    """
+    missing = sorted(roster() - set(profiles()))
+    assert not missing, "роль в составе есть, а профиля у неё нет: " + ", ".join(missing)
+
+
+@pytest.mark.parametrize("name", sorted(profiles()), ids=lambda one: str(one))
+def test_a_profile_names_its_limit_and_its_ban(name: str) -> None:
+    """Профиль называет запрет и предел, а не только достоинства.
+
+    Роль, которой можно всё, поглощает соседнюю, и вход перестаёт их
+    различать. Роль, чей предел не назван, кажется всесильной — и тогда её
+    молчание читают как «там чисто», а не как «она туда не смотрит» (046).
+    """
+    body = profiles()[name]
+    for field in PROFILE_FIELDS:
+        assert field in body, f"{name}: в профиле нет поля {field}"
+    assert any(one in body for one in LIMIT_FIELDS), (
+        f"{name}: предел не назван — роль выглядит всесильной, "
+        "и её молчание прочтут как «там чисто»"
+    )
