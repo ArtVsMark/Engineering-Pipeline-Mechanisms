@@ -73,6 +73,10 @@ CHANGELOG: Final = Path("CHANGELOG.md")
 VERSION: Final = Path("CONTRACT_VERSION")
 #: Описания прогонов.
 WORKFLOWS: Final = Path(".github/workflows")
+#: Проба передачи: зовёт наши же шаги ВНЕШНИМ путём, по адресу с тегом, —
+#: так, как их позовёт потребитель. Адрес здесь, а не у читателя: второй
+#: якорь заводится ровно тем, что кто-то однажды собрал путь сам.
+HANDOVER_PROBE: Final = WORKFLOWS / "handover-probe.yml"
 #: Механизмы проекта — каталог, а не отдельный файл: его читают те, кто судит о
 #: дереве целиком, а не об одном скрипте.
 SCRIPTS: Final = Path("scripts")
@@ -138,6 +142,7 @@ ALL: Final = (
     CHANGELOG,
     VERSION,
     WORKFLOWS,
+    HANDOVER_PROBE,
     SKILLS,
     DECISIONS,
     SCRIPTS,
