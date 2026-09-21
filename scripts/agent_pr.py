@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Final
 
 import changerefs
+import ci_complete
 import ghrest
 import labels
 import paths
@@ -72,6 +73,10 @@ class Described:
     body: str
     #: Чего ждёт задержка — трейлер `Ждёт:` в теле коммита, или ``None``.
     hold: str | None
+    #: Имя красного шага общей ветки, который изменение объявляет чинимым, —
+    #: трейлер `Чинит main:`, или ``None``. Объявление, а не приговор: красноту
+    #: шага проверяет `apply_fix_main` у площадки (#585).
+    fixes: str | None = None
 
 
 #: Номер в ТЕМЕ коммита. Писать его туда нельзя: приписку `(#N)` делает сама
@@ -98,6 +103,12 @@ CONSENT: Final = "automerge"
 #: неразличимы, поэтому снятое согласие вернулось бы следующим же толчком.
 #: Увидев эту метку, шаг согласия не ставит, а стоящее — снимает.
 HOLD: Final = "hold"
+#: Метка починки красной общей ветки: её несущее изменение заморозка не
+#: останавливает — оно и есть выход из неё (`scripts/main_red.py`).
+#: Имя писано здесь буквой — как и соседние `automerge`/`hold`. Что оно
+#: объявлено в составе дерева, держит `automerge.check_labels_declared`: там у
+#: этой сверки один канонический читатель, и второй разошёлся бы с ним молча.
+FIX_MAIN: Final = "fix-main"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -221,6 +232,7 @@ def describe(branch: str, base: str) -> Described:
     # теле изменения его действительно не было.
     # ЗАДЕРЖКА ЧИТАЕТСЯ ИЗ ТЕХ ЖЕ ТЕЛ, что и связи со снятиями: второе чтение
     # того же разошлось бы с первым молча (022, 090).
+    fixes = changerefs.fixes_main_in_all(bodies)
     hold = changerefs.held_in_all(bodies)
     if hold:
         lines += [
@@ -266,7 +278,7 @@ def describe(branch: str, base: str) -> Described:
         f"{MARK}: операция, несущая",
         "личность человека, из агентского окна не выполняется (правило 131).",
     ]
-    return Described(title=title, body="\n".join(lines), hold=hold)
+    return Described(title=title, body="\n".join(lines), hold=hold, fixes=fixes)
 
 
 def say_lost_marks(published: str, sent: str) -> None:
@@ -369,6 +381,84 @@ def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_
         return
     ghrest.request("POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": zones})
     print(f"проставлены зоны: {', '.join(zones)}")
+
+
+def red_on_trunk(repo: str, token: str, name: str, base: str) -> bool:
+    """Красен ли НАЗВАННЫЙ шаг на голове общей ветки — спрашивается у площадки.
+
+    ЭТО И ЕСТЬ ПРЕДМЕТ, КОТОРЫЙ ОКНО ПРЕДЪЯВЛЯЕТ. Окно объявляет имя, а решает
+    проверяемый признак: красно ли оно там сейчас. Догадки здесь нет — есть
+    вопрос к площадке и ответ на него
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    Разбор «что считать красным» берётся у сводного гейта (`ci_complete`), а не
+    пишется заново: второе понимание того же разошлось бы с первым молча
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    head = ghrest.request("GET", f"repos/{repo}/commits/{base}", token) or {}
+    sha = str(head.get("sha") or "")
+    if not sha:
+        raise NotRun(f"голова ветки «{base}» не прочитана — предмет починки не проверить")
+    got = ghrest.request("GET", f"repos/{repo}/commits/{sha}/check-runs?per_page=100", token) or {}
+    runs = [one for one in (got.get("check_runs") or []) if str(one.get("name") or "") == name]
+    if not runs:
+        return False
+    return any(
+        ci_complete.has_verdict(one)
+        and one.get("status") == "completed"
+        and one.get("conclusion") not in ("success", None)
+        for one in ci_complete.worst_per_name(runs)
+    )
+
+
+def apply_fix_main(repo: str, number: int, token: str, name: str, base: str, dry_run: bool) -> bool:
+    """Ставит метку починки, ЕСЛИ названный шаг и правда красен; отдаёт, поставил ли.
+
+    ЗАЧЕМ ОКНУ ЭТО ПРАВО (#585). Красная общая ветка замораживает очередь, а
+    выход из заморозки — метка `fix-main`, которую ставил только человек. Цена
+    платилась дважды: 20.09.2026 починка #565 простояла зелёной и неслитой,
+    21.09.2026 починка #583 не уехала бы вовсе без двух вмешательств владельца.
+    Выход был заперт на того, кого может не быть
+    ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+
+    ЧТО ИМЕННО ПРОВЕРЯЕТСЯ, А ЧТО НЕТ — НАЗВАНО, А НЕ СГЛАЖЕНО. Проверяется
+    одно: названный шаг красен на голове общей ветки. Второе условие —
+    «изменение трогает предмет этого шага» — машине сегодня НЕДОСТУПНО:
+    соответствия «проверка → что она судит» в данных проекта нет вовсе, ни в
+    `.pipeline.yml`, ни рядом. Объявить его проверенным значило бы завысить
+    ответ
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md),
+    [057](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/057-unmechanizable-rules-are-named-explicitly.md)).
+
+    СЛОВО ЧЕЛОВЕКА ОСТАЁТСЯ СИЛЬНЕЕ: `hold` снимает согласие и останавливает
+    очередь независимо от этой метки, и ставит его по-прежнему только человек.
+
+    Отказ разметки шаг не роняет (084), но и не молчит: без метки починка
+    встанет в заморозку вместе со всеми, и автор узнает об этом от тишины.
+    """
+    try:
+        red = red_on_trunk(repo, token, name, base)
+    except (NotRun, ghrest.TransportError) as exc:
+        print(f"метка «{FIX_MAIN}» не поставлена: предмет не проверен — {report.cut(str(exc))}")
+        return False
+    if not red:
+        print(
+            f"метка «{FIX_MAIN}» не поставлена: шаг «{name}» на голове «{base}» не красен — "
+            "починке нечего чинить, и объявление предмета не заменяет (154)"
+        )
+        return False
+    if dry_run:
+        print(f"метку починки поставило бы: {FIX_MAIN} — «{name}» красен на «{base}»")
+        return True
+    try:
+        ghrest.request(
+            "POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": [FIX_MAIN]}
+        )
+        print(f"поставлена метка починки «{FIX_MAIN}»: «{name}» красен на «{base}»")
+        return True
+    except ghrest.TransportError as exc:
+        print(f"метка «{FIX_MAIN}» не поставлена: {report.cut(str(exc))}")
+        return False
 
 
 def apply_hold(repo: str, number: int, token: str, why: str, dry_run: bool) -> None:
@@ -488,6 +578,11 @@ def main(argv: list[str] | None = None) -> int:
             title, body = said.title, said.body
             if said.hold:
                 print(f"объявлена задержка: {said.hold} — согласие не ставилось бы")
+            if said.fixes:
+                print(
+                    f"объявлена починка общей ветки: «{said.fixes}» — метка «{FIX_MAIN}» "
+                    "встала бы, ЕСЛИ этот шаг красен на голове общей ветки"
+                )
             print(f"открыло бы: {title}\n\n{body}")
             return EXIT_OK
 
@@ -530,6 +625,10 @@ def main(argv: list[str] | None = None) -> int:
             if said.hold:
                 apply_hold(args.repo, number, token, said.hold, args.dry_run)
                 marks = marks | {HOLD}
+            if said.fixes and apply_fix_main(
+                args.repo, number, token, said.fixes, args.base, args.dry_run
+            ):
+                marks = marks | {FIX_MAIN}
             apply_consent(args.repo, number, token, marks, args.dry_run)
             sync_description(args.repo, number, token, title, body, args.dry_run)
             return EXIT_OK
@@ -552,6 +651,10 @@ def main(argv: list[str] | None = None) -> int:
         if said.hold:
             apply_hold(args.repo, number, token, said.hold, args.dry_run)
             marks = {HOLD}
+        if said.fixes and apply_fix_main(
+            args.repo, number, token, said.fixes, args.base, args.dry_run
+        ):
+            marks = marks | {FIX_MAIN}
         apply_consent(args.repo, number, token, marks, args.dry_run)
         print(
             "Проба, а не доверие (135): автор в общей ветке после слияния обязан\n"

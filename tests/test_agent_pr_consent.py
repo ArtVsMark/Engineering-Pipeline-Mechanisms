@@ -410,3 +410,135 @@ def test_a_held_change_is_not_called_a_forgotten_label(monkeypatch: pytest.Monke
     assert verdict.why != stuck.STUCK_HOLD_MUTE, (
         "задержка с названным условием всё ещё зовётся забытой меткой"
     )
+
+
+# --- окно вправе отпереть заморозку при названном предмете (#585) -------------
+
+
+def trunk(monkeypatch: pytest.MonkeyPatch, runs: list[dict[str, Any]]) -> list[str]:
+    """Подделывает голову общей ветки и отдаёт список того, что шаг записал."""
+    wrote: list[str] = []
+
+    def asked(method: str, path: str, *rest: Any, **kw: Any) -> Any:
+        if method == "GET" and "check-runs" in path:
+            return {"check_runs": runs}
+        if method == "GET" and "/commits/" in path:
+            return {"sha": "0123456789abcdef"}
+        if method == "POST" and "/labels" in path:
+            wrote.append(str((rest[1] if len(rest) > 1 else kw.get("body", {})).get("labels")))
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", asked)
+    return wrote
+
+
+def red_run(name: str) -> dict[str, Any]:
+    return {"name": name, "status": "completed", "conclusion": "failure"}
+
+
+def test_the_window_may_unlock_the_freeze_when_the_subject_is_real(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Метка починки ставится, когда названный шаг И ПРАВДА красен на общей ветке.
+
+    ЗАМЕР, РАДИ КОТОРОГО ПРАВО И ПОЯВИЛОСЬ (#585): выход из заморозки был
+    заперт на человека, и цена платилась дважды — 20.09.2026 починка #565
+    простояла зелёной и неслитой, 21.09.2026 починка #583 не уехала бы вовсе
+    без двух вмешательств владельца.
+    """
+    wrote = trunk(monkeypatch, [red_run("ci-complete")])
+    assert module.apply_fix_main("o/r", 7, "токен", "ci-complete", "main", False)
+    assert any(module.FIX_MAIN in one for one in wrote), f"метка не поставлена: {wrote}"
+
+
+def test_a_declared_fix_of_a_green_step_gets_no_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Названный шаг зелен — метки нет: объявление предмета не заменяет.
+
+    Вторая половина, без которой право «ставить при названном предмете»
+    неотличимо от «ставить всегда»: окно не РЕШАЕТ, что считать починкой, оно
+    предъявляет проверяемый предмет.
+    """
+    wrote = trunk(
+        monkeypatch, [{"name": "ci-complete", "status": "completed", "conclusion": "success"}]
+    )
+    assert not module.apply_fix_main("o/r", 7, "токен", "ci-complete", "main", False)
+    assert not any(module.FIX_MAIN in one for one in wrote), f"метка поставлена зря: {wrote}"
+
+
+def test_a_fix_naming_a_step_that_is_not_there_gets_no_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Имени нет среди записей головы — метки нет: предмет не найден (075)."""
+    wrote = trunk(monkeypatch, [red_run("lint")])
+    assert not module.apply_fix_main("o/r", 7, "токен", "ci-complete", "main", False)
+    assert not any(module.FIX_MAIN in one for one in wrote), f"метка поставлена зря: {wrote}"
+
+
+def test_an_unreadable_trunk_does_not_get_the_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка не ответила — метки нет, и отказ назван вслух (045).
+
+    «Предмет проверен и чист» и «предмет не проверен» снаружи одинаковы, и
+    молчание здесь выпускало бы починку из заморозки без основания.
+    """
+
+    wrote: list[str] = []
+
+    def falls(method: str, path: str, *rest: Any, **kw: Any) -> Any:
+        # ОТКАЗ ТОЛЬКО НА ЧТЕНИИ, А ЗАПИСЬ ИСПРАВНА — и это не деталь подделки.
+        # Первый заход этой проверки ронял ВСЁ, включая постановку метки, и
+        # тогда откат «отказ читается как „предмет есть“» не краснел: метка не
+        # вставала по другой причине. Навык предупреждает ровно об этом —
+        # откат, который не покраснел, говорит, что проверка смотрит не туда.
+        if method == "GET":
+            raise module.ghrest.TransportError("площадка молчит")
+        if "/labels" in path:
+            wrote.append(path)
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", falls)
+    assert not module.apply_fix_main("o/r", 7, "токен", "ci-complete", "main", False)
+    assert wrote == [], f"метка поставлена на непроверенном предмете: {wrote}"
+
+
+def test_a_dry_run_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сухой прогон предмет проверяет, а метку не ставит."""
+    wrote = trunk(monkeypatch, [red_run("ci-complete")])
+    assert module.apply_fix_main("o/r", 7, "токен", "ci-complete", "main", True)
+    assert wrote == [], f"сухой прогон записал: {wrote}"
+
+
+def test_the_trunk_is_read_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`red_on_trunk` спрашивает голову общей ветки и отвечает по её записям.
+
+    Проверяется САМ ВОПРОС, а не только его последствие: `apply_fix_main` берёт
+    ответ отсюда, и зелёное там при красном здесь означало бы метку, выданную
+    на пустом предмете.
+
+    Три состояния разведены поимённо, потому что снаружи они похожи: шаг красен,
+    шаг зелен, имени среди записей головы нет вовсе
+    ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
+    """
+    trunk(monkeypatch, [red_run("ci-complete")])
+    assert module.red_on_trunk("o/r", "токен", "ci-complete", "main") is True
+
+    trunk(monkeypatch, [{"name": "ci-complete", "status": "completed", "conclusion": "success"}])
+    assert module.red_on_trunk("o/r", "токен", "ci-complete", "main") is False
+
+    trunk(monkeypatch, [red_run("lint")])
+    assert module.red_on_trunk("o/r", "токен", "ci-complete", "main") is False
+
+
+def test_a_headless_trunk_is_a_refusal_not_an_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Голова не прочитана — третий исход, а не «шаг зелен».
+
+    «Предмет проверен и чист» и «предмет не проверить» снаружи одинаковы, и
+    второе, выданное за первое, — тихий запасной путь
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+
+    def headless(method: str, path: str, *rest: Any, **kw: Any) -> Any:
+        return {} if "/commits/" in path else {"check_runs": []}
+
+    monkeypatch.setattr(module.ghrest, "request", headless)
+    with pytest.raises(module.NotRun):
+        module.red_on_trunk("o/r", "токен", "ci-complete", "main")
