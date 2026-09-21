@@ -732,6 +732,58 @@ def actions_disagree(said: dict[str, dict[str, list[str]]]) -> list[Drift]:
     return found
 
 
+#: Как в пробе узнаётся вызов по тегу. Сам её адрес объявлен в `paths`:
+#: второй якорь заводится ровно тем, что путь собирают на месте.
+PROBE: Final = paths.HANDOVER_PROBE
+PROBE_PIN_RE: Final = re.compile(r"uses:\s*[\w.-]+/[\w.-]+/[^@\s]+@(?P<ref>[\w.-]+)")
+
+
+def probe_behind_release(root: Path | None = None) -> list[Drift]:
+    """Проба передачи прибита к тегу старше последнего выпуска.
+
+    ПОЧЕМУ ЛИТЕРАЛ, А НЕ ВЫЧИСЛЕНИЕ. Площадка не принимает выражений в `uses:`:
+    ссылка обязана быть написана буквой. Ровно то же пишет у себя потребитель,
+    и проба стоит в его положении буквально — но вместе с ним наследует и его
+    беду: рукописное число устаревает молча
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+
+    ПОЧЕМУ ДРЕЙФ, А НЕ ГЕЙТ. Расхождение заводит ВЫПУСК, а не правка
+    изменения: после нарезки тега проба отстаёт, и красное на общей ветке
+    нечем погасить до следующей правки файла. Красное, которое нечем погасить
+    здесь и сейчас, учат обходить
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    ЧТО ЗНАЧИТ ОТСТАВАНИЕ. Проба проверяет внешний путь для СТАРОГО выпуска —
+    то есть отвечает на вопрос, который потребителю уже не задают. Свежий
+    выпуск при этом не проверен никем.
+    """
+    where = root if root is not None else Path()
+    pin = version.release_tag(where or None)
+    if pin is None:
+        raise NotRun("выпусков не видно: с чем сверять прибивку пробы — неизвестно (045)")
+    path = where / PROBE
+    if not path.is_file():
+        raise NotRun(f"нет {PROBE}: проба передачи не заведена — сверять нечего (075)")
+    said = sorted(
+        {found["ref"] for found in PROBE_PIN_RE.finditer(path.read_text(encoding="utf-8"))}
+    )
+    if not said:
+        raise NotRun(
+            f"в {PROBE} нет ни одного вызова по тегу: проба не ходит внешним путём вовсе (075)"
+        )
+    stale = [one for one in said if one != pin]
+    if not stale:
+        return []
+    return [
+        Drift(
+            "probe-behind",
+            f"проба передачи прибита к {', '.join(stale)}, а последний выпуск — {pin}",
+            f"обновить прибивку в {PROBE} до {pin} и позвать пробу: до этого внешний "
+            f"путь свежего выпуска не проверен никем (139)",
+        )
+    ]
+
+
 def release_behind_tree(root: Path | None = None) -> list[Drift]:
     """Отдаваемое наружу есть в дереве, но не в выпуске, к которому прибивают.
 
@@ -1205,6 +1257,7 @@ SOURCES: Final = (
     "набор вопросов витрины",
     "пробелы, названные задачей",
     "выпуск против дерева",
+    "проба против выпуска",
 )
 
 
@@ -1238,6 +1291,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ),
         ("пробелы, названные задачей", lambda: gap_tasks_closed(repo, token, mine)),
         ("выпуск против дерева", lambda: release_behind_tree()),
+        ("проба против выпуска", lambda: probe_behind_release()),
     )
     # Гейт, не нашедший предмета, обязан падать (075): список имён, по которому
     # СЧИТАЮТ молчание, обязан равняться списку, который РЕАЛЬНО спрашивают.

@@ -1,0 +1,136 @@
+# Проба передачи: зовём СВОИ ЖЕ шаги ТАК, КАК их позовёт потребитель.
+#
+# ПОЧЕМУ ЭТО НЕ ПОВТОРЕНИЕ `ci`. Там шаги зовутся внутренним путём —
+# `uses: ./.github/workflows/step-*.yml`, — и он приезжает ТЕМ ЖЕ ref, что и
+# файл прогона: дерево уже на диске, версия та же, права те же. Потребитель
+# ходит другим путём: `uses: <владелец>/<репозиторий>/...@<тег>`, и площадка
+# разрешает его иначе. То, что работает первый, второго не доказывает
+# ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+#
+# ЗАМЕР 21.09.2026, ИЗ-ЗА КОТОРОГО ПРОБА И ЗАВЕДЕНА: внутренних вызовов в
+# дереве девять, внешних — НОЛЬ, и ни один внешний не исполнялся ни разу.
+# Проект звал себя своим первым потребителем (155), а внешним путём не ходил:
+# первым по нему прошёл бы чужой проект, и его поломку увидел бы он, а не мы
+# ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+#
+# ТЕГ ЗДЕСЬ ЛИТЕРАЛОМ, И ЭТО НЕ НЕДОСМОТР. Площадка не принимает выражений в
+# `uses:` — ссылка обязана быть написана буквой. Ровно то же пишет у себя
+# потребитель, и проба стоит в его положении буквально. Отставание литерала от
+# выпуска ловит источник дрейфа `probe-behind`: красное на общей ветке снимает
+# не правка изменения, а новый выпуск, и держать его здесь значило бы красить
+# главную после каждого выпуска (051).
+#
+# АДРЕС И ПРИБИВКА БЕРУТСЯ У ЗАХОДА `scripts/onboard.py`, а не пишутся
+# руками: проба обязана звать ровно то, что заход печатает потребителю,
+# иначе проверяется не то, что отдаётся (090, 022). Держит это
+# `tests/test_handover_probe.py`.
+#
+# ИМЕНА ДЖОБОВ ЗДЕСЬ СВОИ, С ПРИСТАВКОЙ `probe-`, И ЭТО НЕ УКРАШЕНИЕ. Без
+# неё джоб пробы звался бы `lint` — как джоб `ci`, — и на площадке две
+# РАЗНЫЕ проверки дали бы записи с одним именем. Сводный гейт такое уже
+# ловил: «на голове 2 живых записей с одним именем — вердикт неоднозначен».
+name: handover-probe
+
+on:
+  # Выпуск — единственный миг, когда меняется то, что видит потребитель.
+  release:
+    types: [published]
+  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  workflow_dispatch:
+
+# Проба читает и только читает: наружу отданы проверки, а не записи.
+permissions:
+  contents: read
+
+concurrency:
+  # Один заход на репозиторий: две пробы разом не расскажут больше одной, а
+  # платит за них общая квота (058).
+  #
+  # ВЫТЕСНЕНИЯ НЕТ НАМЕРЕННО. Отменяющая группа обязана называть голову, иначе
+  # заход на свежем коммите гасится заходом на устаревшем и красного нигде не
+  # остаётся (179). Головы у пробы нет: она идёт по ВЫПУСКУ, а выпуски подряд
+  # не нарезают. Ждущий заход здесь дешевле потерянного ответа.
+  group: handover-probe
+  cancel-in-progress: false
+
+jobs:
+  probe-attribution:
+    name: probe-attribution
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-contract:
+    name: probe-contract
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-debt:
+    name: probe-debt
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-journal:
+    name: probe-journal
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-journal.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-lint:
+    name: probe-lint
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-pipeline:
+    name: probe-pipeline
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-pr-meta:
+    name: probe-pr-meta
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pr-meta.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-rulebook-fresh:
+    name: probe-rulebook-fresh
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-rulebook-fresh.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
+
+  probe-window-lifetime:
+    name: probe-window-lifetime
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-window-lifetime.yml@v1.2.0
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: read
+      issues: read
