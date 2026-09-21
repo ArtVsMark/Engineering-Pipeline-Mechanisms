@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -625,3 +626,67 @@ def test_an_excluded_document_names_its_reason_and_still_exists() -> None:
         assert Path(name) not in reached, (
             f"{name}: исключение держат, а путь от свода уже есть — строку снимают"
         )
+
+
+# --- свод объясняет правилами, а не задачами (#597) ---------------------------
+
+#: Своды: их читает окно при каждом старте, и они отвечают на ОДИН вопрос —
+#: как работать. Состояние проекта, планы и история отвечают на другой и живут
+#: в каноне ([029], [021]).
+RULEBOOKS_TO_JUDGE: Final = ("AGENTS.md", "CLAUDE.md")
+
+#: Ссылка на задачу площадки: `../../issues/N`, `(#N)` или `#N` в прозе.
+TASK_LINK_RE: Final = re.compile(r"\.\./\.\./issues/\d+|\(#\d+\)|#\d{2,4}\b")
+#: Ссылка на правило каталога: адрес файла правила или номер в скобках.
+RULE_LINK_RE: Final = re.compile(r"rules/ru/\d+-|\(\d{3}[,)]|\(\d{3} ")
+
+
+def sections_of(path: Path) -> list[tuple[str, str]]:
+    """Разделы документа: заголовок и тело."""
+    said = path.read_text(encoding="utf-8")
+    return [(one.splitlines()[0], one) for one in re.split(r"^## ", said, flags=re.M)[1:]]
+
+
+def test_there_are_rulebook_sections_to_judge() -> None:
+    """Предмет найден: разделы у сводов есть (075)."""
+    found = sum(len(sections_of(ROOT / name)) for name in RULEBOOKS_TO_JUDGE)
+    assert found > 10, f"разделов сводов разобрано {found} — судить нечего"
+
+
+@pytest.mark.parametrize("name", RULEBOOKS_TO_JUDGE)
+def test_a_rulebook_explains_by_rules_not_by_tasks(name: str) -> None:
+    """Раздел свода ссылается на задачи не чаще, чем на правила каталога.
+
+    ЗАМЕР, РАДИ КОТОРОГО ГЕЙТ ЗАВЕДЁН (21.09.2026, #597). В ядре жил раздел
+    «Чего в проекте ещё нет» — **748 слов из 2204**, треть документа и втрое
+    больше любого соседа. Он отвечал не на «как работать», а на «что у нас не
+    доделано», и половина его строк к тому дню ПРОТУХЛА: четыре из восьми
+    объявляли отсутствующим то, что уже построено.
+
+    Нашёл владелец: «там должно быть как работать, а не планы работ».
+
+    ТРИ ПРАВИЛА ЭТО УЖЕ ЗАПРЕЩАЛИ, И ВСЕ ТРИ ПРОПУСТИЛИ. 029 держит ОБЪЁМ
+    (2204 < 2300 — зелено), 024 держит отсутствие ЛЕТОПИСИ (это не летопись),
+    021 держит объявленного ЧИТАТЕЛЯ (объявлен). Ни один не спрашивал, О ЧЁМ
+    раздел.
+
+    ПРИЗНАК БЕЗ РУКОПИСНОГО ЧИСЛА, и это предмет, а не изящество. Порог вида
+    «не больше трёх ссылок» разошёлся бы с документом первой же правкой
+    ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
+    Здесь сравниваются две величины ОДНОГО документа: свод объясняет, как
+    работать, и опирается на ПРАВИЛО; состояние проекта опирается на ЗАДАЧУ.
+
+    Замер по всем семнадцати разделам обоих сводов: задач 0–2 при правилах
+    0–10, и ровно один отвергнутый — тот самый вынесенный раздел (23 против 8).
+    Предикат не шире предмета (195).
+    """
+    guilty: list[str] = []
+    for head, body in sections_of(ROOT / name):
+        tasks = len(TASK_LINK_RE.findall(body))
+        rules = len(RULE_LINK_RE.findall(body))
+        if tasks > rules:
+            guilty.append(f"«{head}» — задач {tasks} при правилах {rules}")
+    assert not guilty, (
+        f"{name}: раздел объясняет задачами, а не правилами — похоже на состояние проекта, "
+        "а не на «как работать». Состоянию место в канон:\n  " + "\n  ".join(guilty)
+    )
