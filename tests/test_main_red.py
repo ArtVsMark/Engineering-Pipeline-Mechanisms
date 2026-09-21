@@ -944,7 +944,9 @@ def platform(
     monkeypatch.setattr(
         module,
         "seen_on_changes",
-        lambda repo, token, known, day, live, answer=None: module.Seen(flakes=known, unfixed=[]),
+        lambda repo, token, known, day, live, answer=None, **kw: module.Seen(
+            flakes=known, unfixed=[]
+        ),
     )
     monkeypatch.setattr(module, "queue_now", lambda live: module.Queue(0, 0))
     monkeypatch.setattr(module, "pause", lambda repo, token, live, *, frozen, apply: ([], []))
@@ -1501,3 +1503,127 @@ def test_a_refused_write_names_the_change(
     marked, freed = module.pause("o/r", "токен", [change(1), change(2)], frozen=True, apply=True)
     assert (marked, freed) == ([2], [])
     assert "#1: метка заморозки не поставлена" in capsys.readouterr().out
+
+
+# --- мигание на голове ИЗМЕНЕНИЯ перезапускается тоже (#584) ------------------
+
+
+def rerun_said(
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[dict[str, Any]],
+    *,
+    tries: int = 1,
+    apply: bool = False,
+) -> tuple[str, list[int]]:
+    """Что решил перезапуск на голове изменения и что он тронул у площадки."""
+    hit: list[int] = []
+    monkeypatch.setattr(module, "attempt", lambda repo, run, token: tries)
+    monkeypatch.setattr(module, "rerun_failed", lambda repo, run, token: hit.append(run))
+    said = module.rerun_on_change("o/r", "токен", 7, runs, REQUIRED, {}, apply=apply)
+    return said, hit
+
+
+def test_a_lone_red_on_a_change_is_rerun(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Одиночное красное на голове ИЗМЕНЕНИЯ перезапускается — как на общей ветке.
+
+    ЗАМЕР, РАДИ КОТОРОГО ЭТО ЗАВЕДЕНО (#584): в реестре #99 двадцать девять
+    миганий, и ДВАДЦАТЬ из них — на голове изменения, где перезапуска не было
+    вовсе. Каждое гасил человек рукой либо оно гасло следующим толчком.
+
+    Отсрочка была объявлена с условием пересмотра — «пока эти записи не назовут
+    первое имя», — и имя названо: `ci-complete`, семнадцать раз
+    ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+    """
+    said, hit = rerun_said(monkeypatch, [record("lint", "failure", run=42)], apply=True)
+    assert "перезапущен" in said, said
+    assert hit == [42], "прогон не перезапущен вовсе"
+
+
+def test_two_reds_on_a_change_are_a_defect_not_a_flake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Два красных — дефект, а не осечка: перезапуска нет.
+
+    Половина, без которой механизм неотличим от «перезапускать всё красное» —
+    а такой прячет настоящий дефект за зелёным со второго раза (124).
+    """
+    said, hit = rerun_said(
+        monkeypatch,
+        [record("lint", "failure", run=42), record("test", "failure", run=42)],
+        apply=True,
+    )
+    assert "перезапуска не будет" in said, said
+    assert hit == [], "перезапущено то, что перезапускать нельзя"
+
+
+def test_a_second_attempt_on_a_change_is_not_rerun_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Перезапуск ОДИН: вторая попытка уже была, и третьей не будет.
+
+    Без этой половины механизм перезапускал бы вечно, и мигание, уже
+    записанное, гасилось бы снова и снова вместо разбора.
+    """
+    said, hit = rerun_said(monkeypatch, [record("lint", "failure", run=42)], tries=2, apply=True)
+    assert "перезапуска не будет" in said, said
+    assert hit == [], "перезапущено во второй раз"
+
+
+def test_a_green_change_head_asks_the_platform_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Зелёная голова не стоит НИ ОДНОГО вызова: спрашивать нечего.
+
+    Голов столько, сколько живых изменений, и вызов на каждой платится из общей
+    квоты
+    ([058](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/058-when-the-quota-is-out-stop.md)).
+    """
+    asked: list[int] = []
+
+    def counted(repo: str, run: int, token: str) -> int:
+        asked.append(run)
+        return 1
+
+    monkeypatch.setattr(module, "attempt", counted)
+    monkeypatch.setattr(module, "rerun_failed", lambda repo, run, token: None)
+    said = module.rerun_on_change("o/r", "токен", 7, [record("lint")], REQUIRED, {}, apply=True)
+    assert said == "", said
+    assert asked == [], "у зелёной головы спрашивали номер попытки"
+
+
+def test_the_platform_is_asked_only_after_the_cheap_conditions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Номер попытки спрашивается ПОСЛЕ условий, выводимых из прочитанного.
+
+    Два красных — это видно из уже прочитанных записей, и платить за ответ
+    площадки, который ничего не изменит, незачем (058).
+    """
+    asked: list[int] = []
+
+    def counted(repo: str, run: int, token: str) -> int:
+        asked.append(run)
+        return 1
+
+    monkeypatch.setattr(module, "attempt", counted)
+    monkeypatch.setattr(module, "rerun_failed", lambda repo, run, token: None)
+    module.rerun_on_change(
+        "o/r",
+        "токен",
+        7,
+        [record("lint", "failure", run=42), record("test", "failure", run=42)],
+        REQUIRED,
+        {},
+        apply=True,
+    )
+    assert asked == [], "площадку спросили там, где ответ ничего не решал"
+
+
+def test_the_decision_is_the_same_one_as_the_shared_branch() -> None:
+    """Условия у изменения и у общей ветки ОДНИ, а не две копии (022, 090).
+
+    Проверяется не текст, а поведение: решение на голове изменения обязано
+    совпасть с тем, что отдаёт `rerun_reason` — тот же, по которому живёт общая
+    ветка. Разъедутся — здесь покраснеет.
+    """
+    holds, rest = module.split(module.red_of([record("lint", "failure", run=42)]), REQUIRED)
+    assert module.rerun_reason(holds, rest, 42, 1, {}, module.rerunnable()) == ""
+    holds, rest = module.split(
+        module.red_of([record("lint", "failure", run=42), record("test", "failure", run=42)]),
+        REQUIRED,
+    )
+    assert module.rerun_reason(holds, rest, 42, 1, {}, module.rerunnable()) != ""
