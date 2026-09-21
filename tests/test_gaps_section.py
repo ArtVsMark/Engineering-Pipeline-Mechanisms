@@ -27,9 +27,17 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CHARTER = ROOT / "AGENTS.md"
+#: ТАБЛИЦА ПРОБЕЛОВ ПЕРЕЕХАЛА 21.09.2026 (#597). Она жила в ядре и занимала
+#: 748 слов из 2204 — треть документа, который отвечает на «как работать», а не
+#: «что не доделано». Ядро сохранило врезку со ссылкой, список получил свой
+#: документ и своего читателя (021, 029).
+#: Документ пробелов и ЯДРО — теперь разные файлы, и читателя у них два.
+#: Таблица секретов осталась в ядре: она отвечает на «как работать» (чем
+#: держится доступ и когда истекает), а список пробелов — на «чего нет» (021).
+CHARTER = ROOT / "docs" / "gaps.md"
+CORE = ROOT / "AGENTS.md"
 BINDINGS = ROOT / ".rules" / "bindings.json"
-HEADING = "## 🕳 Чего в проекте ещё нет"
+HEADING = "## Пробелы"
 SECRETS_HEADING = "## 🔑 Секреты"
 # Имя секрета в прозе: заглавные латиницей с подчёркиваниями, в обратных кавычках.
 SECRET_RE = re.compile(r"`([A-Z][A-Z0-9_]{5,})`")
@@ -39,7 +47,7 @@ def gaps_rows() -> list[str]:
     """Строки таблицы пробелов — без шапки и разделителя."""
     text = CHARTER.read_text(encoding="utf-8")
     start = text.index(HEADING)
-    section = text[start:].split("\n## ", 1)[0]
+    section = text[start:]
     rows = [line for line in section.splitlines() if line.startswith("|")]
     return rows[2:]
 
@@ -87,9 +95,9 @@ def test_the_catalogue_gap_matches_the_answer() -> None:
 
 def secrets_rows() -> list[str]:
     """Строки таблицы секретов — того, что у проекта ЕСТЬ и кем продлевается."""
-    text = CHARTER.read_text(encoding="utf-8")
+    text = CORE.read_text(encoding="utf-8")
     start = text.index(SECRETS_HEADING)
-    section = text[start:].split("\n## ", 1)[0]
+    section = text[start:]
     rows = [line for line in section.splitlines() if line.startswith("|")]
     return rows[2:]
 

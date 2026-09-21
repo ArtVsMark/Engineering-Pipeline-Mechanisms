@@ -22,9 +22,12 @@
 
 ## 🧠 Навыки окна
 
-**Семь навыков лежат в [`.claude/skills/`](.claude/skills/), и окно обязано их
-звать** — когда какой, сказано в его `SKILL.md`. Ими держатся одиннадцать правил
-каталога ([`.rules/bindings.json`](.rules/bindings.json)), у 195 — единственным.
+**Навыки лежат в [`.claude/skills/`](.claude/skills/), и окно обязано их
+звать** — когда какой, сказано в его `SKILL.md`. Ими держатся правила каталога
+([`.rules/bindings.json`](.rules/bindings.json)), у 195 — единственным.
+**Сколько их — считать по каталогу и ответу, а не по этой строке:** здесь
+стояло «семь навыков», пока их стало восемь
+([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
 **Но навык не краснеет:** невызванный неотличим от вызванного. Чем держится
 вызов — решение [`031`](docs/decisions/031-the-rulebook-names-the-skills.md).
 
