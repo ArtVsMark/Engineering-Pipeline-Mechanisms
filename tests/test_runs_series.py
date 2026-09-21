@@ -162,6 +162,10 @@ def test_the_average_counts_only_what_was_timed(monkeypatch: pytest.MonkeyPatch)
         "seconds": 120,
         "timed": 1,
         "red_jobs": {},
+        # ОТЧЁТ ПО КРАСНЫМ КОПИТСЯ РЯДОМ СО СЧЁТОМ (#606): у зелёного дня он
+        # пуст, и это состояние, а не отсутствие поля.
+        "red_steps": {},
+        "red_marks": {},
     }
     assert module.minutes_of({"2026-09-14": {"runs": days["2026-09-14"]}}, "ci", "2026-09-14") == (
         2.0
@@ -427,3 +431,111 @@ def test_a_walk_without_a_repo_is_the_second_outcome(
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
     assert module.main(["--store", str(tmp_path / "runs.json")]) == module.EXIT_BROKEN
     assert "предмет не найден" in capsys.readouterr().err
+
+
+REPORT_MARKS = module.REPORT_MARKS
+
+
+# --- отчёт по красным копится, чтобы теорию можно было проверить (#606) -------
+
+
+def job(name: str, *, step: str = "", conclusion: str = "failure") -> dict[str, Any]:
+    """Ответ площадки об одном джобе — с шагами, как она их отдаёт."""
+    steps = [{"name": "Set up job", "conclusion": "success"}]
+    if step:
+        steps.append({"name": step, "conclusion": conclusion})
+    return {"id": 42, "name": name, "conclusion": conclusion, "steps": steps}
+
+
+def test_the_failed_step_is_named_not_guessed() -> None:
+    """Шаг падения читается у площадки: по имени ДЖОБА его не узнать.
+
+    ЗАМЕР, РАДИ КОТОРОГО СБОР ЗАВЕДЁН (21.09.2026, #606). Владелец назвал
+    предмет: «нужен отчёт по красным, и на основе него принимать решение —
+    перезапускать ли этот джоб, его вместе с суммирующим или все сразу».
+
+    Имя джоба на этот вопрос не отвечает: оно одно и то же и у дефекта, и у
+    осечки. Отвечает ШАГ — служебный против своего.
+    """
+    assert module.failed_step(job("test", step="тесты")) == "тесты"
+    assert module.failed_step(job("test")) == "", "шагов нет — это пусто, а не выдумка"
+
+
+def test_a_report_mark_is_read_from_annotations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Признак осечки берётся из аннотаций, а не из логов.
+
+    Логи окну недоступны — площадка отвечает 403 через прокси, — а аннотации
+    приходят обычным чтением. Признак «ждём соседей» ИЗМЕРЕН: 16 красных
+    `ci-complete` из 16 несут его, то есть он стопроцентный на нашей истории.
+    """
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda *a, **k: [{"message": "сводный гейт: красно\nждём соседей на голове abc…"}],
+    )
+    assert module.report_mark("o/r", 42, "токен") == REPORT_MARKS["ждём соседей"]
+
+
+def test_an_unknown_failure_has_no_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Признака нет — пусто, а не догадка.
+
+    Половина, без которой сбор превращается в приписывание: «Process completed
+    with exit code 1» не говорит НИЧЕГО, и выдать его за осечку значило бы
+    построить статистику на выдумке (005).
+    """
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda *a, **k: [{"message": "Process completed with exit code 1."}],
+    )
+    assert module.report_mark("o/r", 42, "токен") == ""
+
+
+def test_a_refused_read_is_not_absence_of_a_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ чтения не превращается в «признака нет» молча (045)."""
+
+    def falls(*a: Any, **k: Any) -> Any:
+        raise module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.ghrest, "request", falls)
+    assert module.report_mark("o/r", 42, "токен") == ""
+
+
+def test_the_marks_are_named_with_their_reason() -> None:
+    """У каждого признака названа причина, и список не пуст (075, 154).
+
+    Пустой список означал бы сбор, который ничего не различает, — и снаружи он
+    неотличим от работающего.
+    """
+    assert REPORT_MARKS, "признаков осечки не объявлено — собирать нечего"
+    for mark, why in REPORT_MARKS.items():
+        assert mark.strip() and why.strip(), f"«{mark}»: признак без причины"
+
+
+def test_the_details_of_a_red_run_come_in_one_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`red_details` отдаёт имя, шаг и признак ОДНИМ обходом ответа площадки.
+
+    Три обхода того же стоили бы вызовов из общей квоты и разошлись бы между
+    собой молча (058, 022). Проверяется и отбор: зелёные джобы в отчёт не
+    попадают — иначе статистика красных считала бы зелёное.
+    """
+    asked: list[str] = []
+
+    def answer(method: str, path: str, *rest: Any, **kw: Any) -> Any:
+        asked.append(path)
+        if "/jobs" in path:
+            return {
+                "jobs": [
+                    job("test", step="тесты"),
+                    job("lint", step="стиль", conclusion="success"),
+                ]
+            }
+        return [{"message": "ждём соседей на голове abc…"}]
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    said = module.red_details("o/r", 7, "токен")
+
+    assert [one["name"] for one in said] == ["test"], "зелёный джоб попал в отчёт красных"
+    assert said[0]["step"] == "тесты"
+    assert said[0]["mark"] == REPORT_MARKS["ждём соседей"]
+    assert sum(1 for one in asked if "/jobs" in one) == 1, "список джобов спрошен не один раз"
