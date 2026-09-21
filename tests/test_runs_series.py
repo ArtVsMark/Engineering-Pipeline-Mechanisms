@@ -166,6 +166,7 @@ def test_the_average_counts_only_what_was_timed(monkeypatch: pytest.MonkeyPatch)
         # пуст, и это состояние, а не отсутствие поля.
         "red_steps": {},
         "red_marks": {},
+        "red_whose": {},
     }
     assert module.minutes_of({"2026-09-14": {"runs": days["2026-09-14"]}}, "ci", "2026-09-14") == (
         2.0
@@ -492,13 +493,112 @@ def test_an_unknown_failure_has_no_mark(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_a_refused_read_is_not_absence_of_a_mark(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Отказ чтения не превращается в «признака нет» молча (045)."""
+    """Отказ чтения не превращается в «признака нет» молча (045).
+
+    ПРОВЕРКА САМА БЫЛА ТРЕТЬИМ ЛИЦОМ ДЕФЕКТА. Имя её говорило «отказ — не
+    отсутствие», докстрока ссылалась на 045, а сравнение стояло ровно то же,
+    что у соседки про отсутствие: `== ""`. Зелёной она была потому, что код
+    склеивал оба исхода, — и подтверждала не договор, а склейку. Нашёл внешний
+    взгляд находкой `24fd8f7`.
+
+    Цена склейки счётная: непрочитанные отчёты попадали бы в долю «осечек не
+    найдено» и разбавляли бы её тем, чего никто не смотрел, — то есть портили
+    бы ровно ту статистику, ради которой сбор и заведён (005, 049).
+    """
 
     def falls(*a: Any, **k: Any) -> Any:
         raise module.ghrest.TransportError("площадка молчит")
 
     monkeypatch.setattr(module.ghrest, "request", falls)
-    assert module.report_mark("o/r", 42, "токен") == ""
+    said = module.report_mark("o/r", 42, "токен")
+    assert said == module.MARK_UNREAD, said
+    assert said != "", "отказ снова неотличим от «признака нет»"
+
+
+def test_whose_step_fell_is_counted_not_assumed() -> None:
+    """Служебный шаг отличается от своего — и это СЧИТАЕТСЯ, а не подразумевается.
+
+    `SERVICE_STEPS` был объявлен и не вызывался ниоткуда: различение, ради
+    которого собирается весь отчёт, не происходило вовсе, а докстроки соседей
+    его обещали. Список, который ничего не находит, доказывает только себя
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    Нашёл внешний взгляд находкой `f7b99be`.
+
+    Три исхода, а не два: у «шагов площадка не отдала» своё значение, иначе оно
+    слиплось бы со «своим» и завысило бы долю дефектов
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    assert module.whose_step("Set up job") == module.WHOSE_SERVICE
+    assert module.whose_step("Post Run actions/checkout@v7") == module.WHOSE_SERVICE
+    assert module.whose_step("тесты") == module.WHOSE_OWN
+    assert module.whose_step("") == module.WHOSE_UNKNOWN
+
+
+def test_the_series_counts_whose_steps_fell() -> None:
+    """Счёт «свои против площадкиных» доходит до РЯДА, а не оседает в записи.
+
+    Различение, посчитанное и не сведённое, отвечает ровно так же, как
+    несчитанное: владелец спрашивает про ряд — «у всех джобов одна ошибка
+    платформы?», — а не про один джоб.
+
+    ЗАМЕР НА НАШЕЙ ИСТОРИИ (21.09.2026): 130 упавших джобов из 130 упали на
+    СВОЁМ шаге, то есть счёт площадкиных сегодня НОЛЬ. Это запись наблюдения, а
+    не пробел (046).
+    """
+    days = {
+        "2026-09-21": {
+            "runs": {
+                "ci": {"red_whose": {module.WHOSE_OWN: 3}},
+                "review": {"red_whose": {module.WHOSE_OWN: 1, module.WHOSE_SERVICE: 2}},
+            }
+        }
+    }
+    assert module.whose(days) == {module.WHOSE_OWN: 4, module.WHOSE_SERVICE: 2}
+    empty: dict[str, Any] = {"2026-09-21": {"runs": {"ci": {}}}}
+    assert module.whose(empty) == {}, "пустой день — пустой счёт, а не выдумка"
+
+
+def test_the_day_row_carries_whose_step_fell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Различение доходит от ОТВЕТА ПЛОЩАДКИ до строки дня, а не только до записи.
+
+    ПОЧЕМУ ЭТА ПРОВЕРКА ЗАВЕДЕНА ОТДЕЛЬНО ОТ СОСЕДКИ. Соседка строит ряд рукой
+    и спрашивает только читателя — `whose`. Откат накопления её НЕ покрасил: у
+    поддельной площадки красные джобы приходили без шагов, и счёт оставался
+    пустым при любом коде. Откат, который не краснеет, — находка, а не
+    облегчение
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    Поэтому здесь площадка отдаёт джоб С ШАГАМИ — тем входом, которого
+    подделка соседки не строит.
+    """
+
+    def paginate(path: str, token: str, key: str | None = None) -> Any:
+        return iter([run("ci", "2026-09-21", end="failure", number=7)])
+
+    def request(method: str, path: str, token: str, *rest: Any, **kw: Any) -> Any:
+        if path.endswith("/annotations"):
+            return []
+        return {
+            "jobs": [
+                {
+                    "id": 1,
+                    "name": "test",
+                    "conclusion": "failure",
+                    "steps": [{"name": "тесты", "conclusion": "failure"}],
+                },
+                {
+                    "id": 2,
+                    "name": "lint",
+                    "conclusion": "failure",
+                    "steps": [{"name": "Set up job", "conclusion": "failure"}],
+                },
+            ]
+        }
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "request", request)
+    row = module.swept("o/r", "токен", "2026-09-21")["2026-09-21"]["ci"]
+    assert row["red_whose"] == {module.WHOSE_OWN: 1, module.WHOSE_SERVICE: 1}, row["red_whose"]
 
 
 def test_the_marks_are_named_with_their_reason() -> None:
