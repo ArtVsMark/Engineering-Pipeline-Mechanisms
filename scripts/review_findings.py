@@ -59,10 +59,78 @@ import report
 MARKER: Final = findings.MARKER
 TITLE: Final = findings.TITLE
 
-VERDICT_RE: Final = re.compile(r"^ВЕРДИКТ:\s*находок\s+(\d+)\s*$", re.I | re.M)
+#: РАЗМЕТКА ВОКРУГ КЛЮЧА, КОТОРУЮ РАЗБОР ПЕРЕЖИВАЕТ. Ревьюер отвечает в
+#: markdown, и строка ключа у него регулярно оказывается выделенной. Разбор,
+#: ищущий предмет ПО ФОРМЕ ЗАПИСИ, обязан читать все формы, которыми этот
+#: предмет пишут, и набор форм берётся ЗАМЕРОМ
+#: ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
+#: Правило 206 отправлено каталогу ЭТИМ проектом, а здесь не держалось.
+#:
+#: ЗАМЕР 21.09.2026 ПО ШЕСТИДЕСЯТИ ИЗМЕНЕНИЯМ: строк ключа разбор видел 166 и
+#: СЕМЬ терял молча — `**НАХОДКА[дефект]:** …` на #538, #548, #550 (две), #577,
+#: #598, #611. Восемь находок так и не доехали до реестра; они сведены в #612.
+#:
+#: ПРИЁМ ВЗЯТ У СОСЕДА, А НЕ ПРИДУМАН ЗАНОВО. Каталог держит свою реализацию
+#: того же механизма и эту беду уже прошёл — дважды, на #413 и #415. Первая
+#: здешняя редакция разрешала разметку прямо в образце и ломалась ровно там,
+#: где сосед споткнулся вторым заходом: `* **НАХОДКА: …**` — буллет ВМЕСТЕ с
+#: жирным. Своя третья форма того же разошлась бы с соседской молча (022, 090).
+#:
+#: ЦИТАТА `>` СЮДА НЕ ВХОДИТ, И ЭТО РАСХОЖДЕНИЕ С СОСЕДОМ НАМЕРЕННОЕ. У него
+#: `>` в префиксе; здесь его нет: пересказ чужой находки — не находка, а `>`
+#: ровно им и пишут. Цена ошибки несимметрична: пропущенная своя находка
+#: теряется, а принятая чужая заводит запись, снять которую нечем — работы, её
+#: чинящей, не существует (051). В замере цитат не встретилось ни одной; если
+#: встретятся — это отдельный предмет, а не повод расширить образец наугад
+#: ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+#:
+#: ЗВЁЗДОЧКА — БУЛЛЕТ, ТОЛЬКО ЕСЛИ ЗА НЕЙ ПРОБЕЛ, и этим она отличается от
+#: жирного. Довод соседа, проверенный им запуском: убрать `*` из префикса
+#: совсем — и `* НАХОДКА: …` перестаёт читаться вовсе.
+PREFIX_RE: Final = re.compile(r"^(?:[ \t#-]|\*(?=\s))*")
+
+#: ПАРНАЯ обёртка вокруг ВСЕЙ строки: `**жирным**`, `*курсивом*`, `__так же__`.
+#: СНИМАЕТСЯ ПАРА, А НЕ ЗНАКИ ПО КРАЯМ, И ЭТО РАЗНЫЕ ВЕЩИ. Срезание с концов
+#: съедает знаки там, где они принадлежат ТЕКСТУ: «**kwargs игнорируется»
+#: становится «kwargs игнорируется», «называется id_» — «называется id». Сосед
+#: заплатил за этот урок внешним взглядом на #413.
+WRAP_RE: Final = re.compile(r"^(\*{1,2}|_{1,2})(.+?)\1$")
+
+#: Выделение, оставшееся ВНУТРИ строки после снятия парной обёртки: ревьюер
+#: выделяет один маркер, а заголовок оставляет снаружи — `**НАХОДКА[вес]:** …`.
+#: Парной обёрткой такая строка не является, и без этого её не прочесть.
+MARK: Final = r"[*_]{0,3}"
+
+
+def bare(line: str) -> str:
+    """Строка без разметки ВОКРУГ ключа. Одиночный знак — текст, а не обёртка."""
+    said = PREFIX_RE.sub("", line.strip()).strip()
+    pair = WRAP_RE.match(said)
+    return pair.group(2).strip() if pair else said
+
+
+def bare_lines(text: str) -> list[str]:
+    """Строки текста, с каждой из которых снята разметка вокруг ключа.
+
+    РАЗБОР ПОСТРОЧНЫЙ, А НЕ ПО ВСЕМУ ТЕЛУ С `re.M`. Снятие обёртки — свойство
+    СТРОКИ: пара `**…**` ищется от начала до конца одной строки, и на теле
+    целиком «конец строки» ей дал бы не тот хвост.
+    """
+    return [bare(line) for line in (text or "").splitlines()]
+
+
+VERDICT_RE: Final = re.compile(rf"^{MARK}\s*ВЕРДИКТ\s*:\s*находок\s+(\d+)\s*{MARK}\s*$", re.I)
 #: Вес — в самой строке находки: `НАХОДКА[дефект]: …`. Скобки необязательны,
 #: и отсутствие веса не подставляет самый лёгкий, а объявляется отдельно.
-FINDING_RE: Final = re.compile(r"^НАХОДКА(?:\[\s*([^\]]+?)\s*\])?:\s*(\S.*?)\s*$", re.I | re.M)
+#:
+#: ЗАГОЛОВОК ОБЯЗАН БЫТЬ НЕПУСТЫМ, и это отделяет ключ от ПРОЗЫ. В том же
+#: замере нашлось пятнадцать строк вида «### Находка», «**Находка:**»,
+#: «Находка одна:» — заголовков раздела, за которыми предмет идёт СЛЕДУЮЩЕЙ
+#: строкой. Принять их значило бы завести запись с пустым или служебным
+#: заголовком — ровно призрак «нет» из разбора #414 ниже (051, 140).
+FINDING_RE: Final = re.compile(
+    rf"^{MARK}\s*НАХОДКА(?:\[\s*([^\]]+?)\s*\])?\s*:{MARK}\s*(\S.*?)\s*$", re.I
+)
 WEIGHTS: Final = findings.WEIGHTS
 UNWEIGHED: Final = findings.UNWEIGHED
 Entry = findings.Entry
@@ -219,8 +287,16 @@ def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
     found: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     for comment in comments:
-        for raw_weight, title in FINDING_RE.findall(comment.get("body") or ""):
-            cleaned = " ".join(title.strip("*_` ").split())
+        for line in bare_lines(comment.get("body") or ""):
+            said = FINDING_RE.match(line)
+            if said is None:
+                continue
+            raw_weight, title = said.group(1) or "", said.group(2)
+            # ЗАГОЛОВОК НЕ СРЕЗАЕТСЯ ПО ЗНАКАМ: обёртка уже снята со строки
+            # целиком, а `strip` по набору съедал бы знаки, принадлежащие
+            # ТЕКСТУ. Так в реестре и лежит сегодня «SERVICE_STEPS` объявлен» —
+            # с висящей кавычкой вместо парной (022, 016).
+            cleaned = " ".join(bare(title).split())
             if cleaned.casefold().rstrip(ENDINGS).strip() in ABSENCE:
                 continue
             if cleaned and cleaned not in seen:
@@ -237,8 +313,10 @@ def verdict_of(comments: list[dict[str, Any]]) -> int | None:
     """Число из последней строки вердикта; None — вердикта нет вовсе."""
     verdict: int | None = None
     for comment in comments:
-        for number in VERDICT_RE.findall(comment.get("body") or ""):
-            verdict = int(number)
+        for line in bare_lines(comment.get("body") or ""):
+            said = VERDICT_RE.match(line)
+            if said is not None:
+                verdict = int(said.group(1))
     return verdict
 
 
@@ -273,7 +351,7 @@ def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ends = [
         place
         for place, comment in enumerate(comments)
-        if VERDICT_RE.search(comment.get("body") or "")
+        if any(VERDICT_RE.match(line) for line in bare_lines(comment.get("body") or ""))
     ]
     if len(ends) < 2:
         return list(comments)
@@ -390,9 +468,17 @@ SAYS_NO: Final = "не подтвердилась"
 #: Ответ верификатора в комментарии захода. Слово из закрытой шкалы, причина —
 #: необязательна у подтверждения и обязательна у опровержения: «не
 #: подтвердилась» без причины не даёт разбирающему ничего (154).
+#: РАЗМЕТКУ ЭТОТ ОБРАЗЕЦ ПЕРЕЖИВАЕТ ПО ПОСТРОЕНИЮ, А НЕ ПО ЗАМЕРУ, и это сказано
+#: вслух. Верификатор — тот же ревьюер и тот же markdown, но за шестьдесят
+#: изменений он не ответил НИ РАЗУ: строк «ПРЕМИСА:» в ленте ноль, и потерь
+#: измерить не на чем. Ноль здесь — не «беды нет», а «предмета ещё не было»
+#: ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+#: Форма у него общая с соседями по модулю, и чинить её порознь значило бы
+#: ждать, пока та же потеря случится третий раз (206).
 PREMISE_RE: Final = re.compile(
-    rf"^ПРЕМИСА:\s*(?P<said>{SAYS_YES}|{SAYS_NO})\s*(?:—\s*(?P<why>\S.*?))?\s*$",
-    re.I | re.M,
+    rf"^{MARK}\s*ПРЕМИСА\s*:\s*(?P<said>{SAYS_YES}|{SAYS_NO})\s*"
+    rf"(?:—\s*(?P<why>\S.*?))?\s*{MARK}\s*$",
+    re.I,
 )
 
 
@@ -404,8 +490,10 @@ def premise_of(comments: list[dict[str, Any]]) -> tuple[str, str] | None:
     """
     found: tuple[str, str] | None = None
     for comment in comments:
-        for one in PREMISE_RE.finditer(comment.get("body") or ""):
-            found = (one["said"].lower(), (one["why"] or "").strip())
+        for line in bare_lines(comment.get("body") or ""):
+            one = PREMISE_RE.match(line)
+            if one is not None:
+                found = (one["said"].lower(), (one["why"] or "").strip())
     return found
 
 
