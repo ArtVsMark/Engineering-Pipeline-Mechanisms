@@ -159,17 +159,57 @@ REPORT_MARKS: Final = {
 }
 
 
+#: Отказ чтения аннотаций. Он НЕ «признака нет»: у отказа и у пустоты одинаковое
+#: значение сделало бы счёт признаков ложным — отказы попадали бы в долю «осечек
+#: не найдено» и разбавляли её тем, чего никто не смотрел
+#: ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+#: Нашёл внешний взгляд находкой `24fd8f7`: докстрока обещала третий исход у
+#: зовущего, а зовущий писал ту же пустую строку.
+MARK_UNREAD: Final = "отчёт не прочитан"
+
+#: Шаг падения свой — то есть о дереве. Пишется словом, а не пустотой: пустота
+#: у `whose` значила бы «шагов площадка не отдала», и два разных наблюдения
+#: слиплись бы в одно.
+WHOSE_OWN: Final = "свой"
+#: Шаг падения служебный — то есть о площадке.
+WHOSE_SERVICE: Final = "площадки"
+#: Шагов в ответе нет — сказать о падении нечего.
+WHOSE_UNKNOWN: Final = ""
+
+
+def whose_step(step: str) -> str:
+    """Чей шаг упал: площадки или наш. Пусто — шага площадка не отдала.
+
+    ЗАЧЕМ ОТДЕЛЬНОЙ ФУНКЦИЕЙ. `SERVICE_STEPS` был объявлен и не вызывался
+    ниоткуда — то есть различение, ради которого собирается отчёт, не
+    происходило вовсе, а докстрока соседа его обещала. Нашёл внешний взгляд
+    находкой `f7b99be`; список, который ничего не находит, доказывает только
+    себя ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+    СЕГОДНЯ ОН НЕ НАХОДИТ НИЧЕГО, И ЭТО ЗАПИСЬ, А НЕ ПРОБЕЛ. Замер 21.09.2026:
+    130 упавших джобов из 130 упали на СВОЁМ шаге. Пока это так, у теории «у
+    всех одна ошибка площадки» подтверждения нет — и сказать это можно только
+    потому, что различение считается, а не подразумевается
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    if not step:
+        return WHOSE_UNKNOWN
+    said = step.strip().lower()
+    return WHOSE_SERVICE if said.startswith(SERVICE_STEPS) else WHOSE_OWN
+
+
 def report_mark(repo: str, job: int, token: str) -> str:
     """Признак осечки из отчёта джоба; пусто — признака нет.
 
     Читаются АННОТАЦИИ, а не логи: логи окну недоступны (площадка отвечает 403
-    через прокси), а аннотации приходят обычным чтением. Отказ чтения — не
-    «признака нет»: об этом говорит третий исход у зовущего (045).
+    через прокси), а аннотации приходят обычным чтением. Отказ чтения даёт
+    `MARK_UNREAD` — отдельное значение, а не ту же пустоту: иначе непрочитанное
+    попало бы в счёт «признака нет» (045).
     """
     try:
         found = ghrest.request("GET", f"repos/{repo}/check-runs/{job}/annotations", token)
     except ghrest.TransportError:
-        return ""
+        return MARK_UNREAD
     text = " ".join(str((one or {}).get("message") or "") for one in (found or []))
     for mark, why in REPORT_MARKS.items():
         if mark in text:
@@ -210,11 +250,18 @@ def red_details(repo: str, run: int, token: str) -> list[dict[str, str]]:
         if job.get("conclusion") not in REAL_RED:
             continue
         number = int(job.get("id") or 0)
+        step = failed_step(job)
         found.append(
             {
                 "name": str(job.get("name") or ""),
-                "step": failed_step(job),
-                "mark": report_mark(repo, number, token) if number else "",
+                "step": step,
+                # ЧЕЙ ШАГ — ПИШЕТСЯ, А НЕ ВЫВОДИТСЯ ЧИТАТЕЛЕМ. Ровно этот
+                # вопрос назвал владелец: «у всех джобов одна ошибка платформы
+                # — перезапустить все?» Ответ на него считается здесь один раз
+                # и ложится в запись; второе понимание «служебный ли шаг»
+                # разошлось бы с первым молча (022).
+                "whose": whose_step(step),
+                "mark": report_mark(repo, number, token) if number else MARK_UNREAD,
             }
         )
     return sorted(found, key=lambda one: one["name"])
@@ -266,6 +313,11 @@ def swept(repo: str, token: str, since: str) -> dict[str, dict[str, dict[str, An
                 # увидеть зависимость можно только на собранных числах (049).
                 "red_steps": {},
                 "red_marks": {},
+                # ЧЕЙ ШАГ УПАЛ — СЧЁТ, А НЕ ПОЛЕ В ЗАПИСИ. Различение,
+                # посчитанное и не сведённое, отвечает ровно так же, как
+                # несчитанное: вопрос «у всех одна ошибка площадки?» задаётся
+                # ряду, а не одному джобу.
+                "red_whose": {},
             },
         )
         row["runs"] += 1
@@ -283,6 +335,9 @@ def swept(repo: str, token: str, since: str) -> dict[str, dict[str, dict[str, An
                     if job["mark"]:
                         key = f"{label} · {job['mark']}"
                         row["red_marks"][key] = int(row["red_marks"].get(key, 0)) + 1
+                    side = job["whose"]
+                    if side:
+                        row["red_whose"][side] = int(row["red_whose"].get(side, 0)) + 1
         elif end == "cancelled":
             row["cancelled"] += 1
         spent = elapsed(run)
@@ -388,6 +443,25 @@ def reds(days: dict[str, Any]) -> Counter[str]:
     return found
 
 
+def whose(days: dict[str, Any]) -> Counter[str]:
+    """Чьи шаги роняли прогоны за весь ряд: свои против площадкиных.
+
+    ЭТО И ЕСТЬ ТОТ ВТОРОЙ ШАГ, РАДИ КОТОРОГО ОТЧЁТ СОБИРАЕТСЯ. Владелец назвал
+    его прямо: «у других проектов такие случаи были, просто у данного не
+    происходило — нужно собирать статистику, и тогда возможно что-то увидим».
+    Пока счёт говорит «площадки: 0», теория подтверждения не имеет, и это
+    наблюдение, а не пробел
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md),
+    [049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+    """
+    found: Counter[str] = Counter()
+    for day in days:
+        for row in runs_of(days, day).values():
+            for name, count in (row.get("red_whose") or {}).items():
+                found[name] += int(count)
+    return found
+
+
 def minutes_of(days: dict[str, Any], name: str, day: str) -> float:
     """Среднее время захода прогона `name` в минутах за один день; ноль — не было."""
     row = runs_of(days, day).get(name) or {}
@@ -447,6 +521,31 @@ def report(days: dict[str, Any], bounds: Bounds, today: str) -> str:
             " площадка отдаёт джобы только пока хранит заход.",
             "",
         ]
+    lines += ["## Дефект это или осечка площадки", ""]
+    чьи = whose(days)
+    if not чьи:
+        lines += [
+            "Ни одного разобранного падения: у красных джобов за окно площадка не"
+            " отдала шагов, и сказать, чей шаг упал, не из чего. Пусто здесь значит"
+            " «не прочитано», а не «площадка не виновата» (045).",
+            "",
+        ]
+    else:
+        свои, площадки = чьи.get(WHOSE_OWN, 0), чьи.get(WHOSE_SERVICE, 0)
+        lines += [
+            f"Разобрано падений {свои + площадки}: на СВОЁМ шаге — {свои}, на служебном"
+            f" шаге площадки (чекаут, установка, окружение) — {площадки}.",
+            "",
+        ]
+        if not площадки:
+            lines += [
+                "**Служебных падений за окно ноль.** Значит теория «у всех джобов одна"
+                " ошибка платформы, и перезапускать надо все» на нашем ряду"
+                " подтверждения НЕ имеет: каждое красное считало дерево. У соседей по"
+                " семье такие отказы бывают — потому счёт и ведётся, а не выводится"
+                " из памяти (044, 049).",
+                "",
+            ]
     lines += ["## Растёт ли время прогона", ""]
     if len(known) >= 2:
         first, last = known[0], known[-1]

@@ -1543,6 +1543,12 @@ def test_a_refused_write_names_the_change(
 # --- мигание на голове ИЗМЕНЕНИЯ перезапускается тоже (#584) ------------------
 
 
+def as_the_run_does() -> list[str]:
+    """Состав обязательных в том виде, в каком его строит `main()` (022)."""
+    said: list[str] = module.policy.names_of(module.policy.load(), module.policy.REQUIRED)
+    return said
+
+
 def rerun_said(
     monkeypatch: pytest.MonkeyPatch,
     runs: list[dict[str, Any]],
@@ -1554,7 +1560,12 @@ def rerun_said(
     hit: list[int] = []
     monkeypatch.setattr(module, "attempt", lambda repo, run, token: tries)
     monkeypatch.setattr(module, "rerun_failed", lambda repo, run, token: hit.append(run))
-    said = module.rerun_on_change("o/r", "токен", 7, runs, [*REQUIRED, AGGREGATE], {}, apply=apply)
+    # СОСТАВ ОБЯЗАТЕЛЬНЫХ — ТОТ ЖЕ, ЧТО СТРОИТ ЗАХОД, а не список из головы.
+    # Здесь стояло `[*REQUIRED, AGGREGATE]`, и это была ВЫДУМКА: `main()` берёт
+    # состав у ответа проекта, где сводного гейта нет намеренно, — значит
+    # проверялся путь, которого в настоящем вызове не бывает. Нашёл внешний
+    # взгляд находкой `83a0071` (022, 049).
+    said = module.rerun_on_change("o/r", "токен", 7, runs, as_the_run_does(), {}, apply=apply)
     return said, hit
 
 
@@ -1574,6 +1585,12 @@ def test_a_lone_red_on_a_change_is_rerun(monkeypatch: pytest.MonkeyPatch) -> Non
     механизма ровно того, что решение 013 запрещает: перезапуска обязательного,
     которое СУДИТ ДЕРЕВО. Приёмка была зелёной потому, что код тогда
     перезапускал все семь; исправился код — исправилась и она.
+
+    КАКОЙ ВЕТКОЙ ЭТО РЕШАЕТСЯ — СКАЗАНО ТОЧНО. Сводного гейта в ответе проекта
+    нет намеренно, поэтому `split` кладёт его в `rest`, и решает ветка
+    совещательных, спрашивающая тот же разрешённый список. Обязательность у
+    него перед ЗАЩИТОЙ ВЕТКИ, а не перед этим разбором. Раньше здесь стояло
+    обратное, и держалось оно выдуманным составом обязательных.
     """
     said, hit = rerun_said(monkeypatch, [record(AGGREGATE, "failure", run=42)], apply=True)
     assert "перезапущен" in said, said
@@ -1667,7 +1684,7 @@ def test_the_decision_is_the_same_one_as_the_shared_branch() -> None:
     совпасть с тем, что отдаёт `rerun_reason` — тот же, по которому живёт общая
     ветка. Разъедутся — здесь покраснеет.
     """
-    required = [*REQUIRED, AGGREGATE]
+    required = as_the_run_does()
     holds, rest = module.split(module.red_of([record(AGGREGATE, "failure", run=42)]), required)
     assert module.rerun_reason(holds, rest, 42, 1, {}, module.rerunnable()) == ""
     holds, rest = module.split(
@@ -1707,6 +1724,38 @@ def test_a_listed_check_is_rerun_whatever_its_class() -> None:
     двадцати девяти это показали.
     """
     assert module.rerun_reason(["ci-complete"], [], 1, 1, {}, module.rerunnable()) == ""
+
+
+def test_the_real_answer_decides_every_listed_name() -> None:
+    """Под НАСТОЯЩИМ ответом проекта: список перезапускается, семёрка — нет.
+
+    ГЕЙТ ПРОТИВ ТОГО, ЧТО ТОЛЬКО ЧТО СЛУЧИЛОСЬ. Все соседние проверки собирают
+    состав обязательных РУКОЙ, и одна из них собрала его неверно: положила в
+    него `ci-complete`, которого ответ проекта не объявляет. Проза пошла за
+    приёмкой, и обе описали ветку, которой код не ходит — нашёл внешний взгляд
+    находкой `83a0071`.
+
+    Здесь рука не участвует: состав берётся у `.pipeline.yml`, список — у
+    `.rules/rerun.json`, и проверяется ровно то, что произойдёт на площадке
+    ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md),
+    [139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    Обе половины нужны. Без первой список мог бы содержать имя, которое никогда
+    не перезапускается, — запись без последствий. Без второй в список можно было
+    бы внести `lint`, и дефект дерева гасился бы вторым заходом (124).
+    """
+    required = as_the_run_does()
+    allowed = module.rerunnable()
+    fed = module.policy.feeds()
+    for name in allowed:
+        holds, rest = module.split(module.red_of([record(name, "failure", run=42)]), required)
+        said = module.rerun_reason(holds, rest, 42, 1, fed, allowed)
+        assert said == "", f"«{name}» в списке, а одиночным не перезапускается: {said}"
+    for name in required:
+        assert name not in allowed, f"«{name}» судит дерево — в списке ему не место (013)"
+        holds, rest = module.split(module.red_of([record(name, "failure", run=42)]), required)
+        said = module.rerun_reason(holds, rest, 42, 1, fed, allowed)
+        assert said == module.REQUIRED_UNLISTED, f"«{name}» перезапускается, а судит дерево: {said}"
 
 
 def test_the_aggregate_with_its_matrix_is_still_one_fall() -> None:
