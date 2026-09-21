@@ -34,7 +34,24 @@ FRAGMENT_RE: Final = journal.PATH_RE
 
 # Тронув только это, изменение журналу ничего не сообщает.
 EXEMPT_PREFIXES: Final = ("changelog.d/",)
-EXEMPT_FILES: Final = frozenset({"CHANGELOG.md"})
+
+#: СОБРАННЫЙ ЖУРНАЛ НА ИЗМЕНЕНИИ НЕ ТРОГАЮТ, И ЗДЕСЬ ОН БЫЛ ОСВОБОЖДЁН.
+#: `CHANGELOG.md` стоял в списке «тронув только это, изменение журналу ничего
+#: не сообщает» — то есть гейт РАЗРЕШАЛ ровно то, что запрещает правило 030:
+#: сборку делает выпуск, а общий файл, который трогает каждая ветка, даёт
+#: конфликт на каждом втором изменении.
+#:
+#: Замер 21.09.2026 по 90 коммитам общей ветки: `CHANGELOG.md` тронут в
+#: шестнадцати — один раз коммитом выпуска (законно, он его и собирает) и
+#: пятнадцать раз изменениями одного окна за две смены; до них — ни разу. Один
+#: конфликт уже стоил перебазы (#561) — тот самый инцидент, ради которого
+#: фрагменты и заведены.
+#:
+#: ИСКЛЮЧЕНИЯ ДЛЯ ВЫПУСКА ЗДЕСЬ НЕ НУЖНО, и это проверено: коммит `release:
+#: 1.2.0` через изменение не проходил — площадка не знает ни одного изменения,
+#: его содержащего. Выпуск коммитит в общую ветку напрямую, а гейт идёт на
+#: `pull_request`.
+BUILT_JOURNAL: Final = "CHANGELOG.md"
 #: Где живут механизмы: правка здесь меняет поведение, а не текст. Состав
 #: источников ЧИТАЕТСЯ из объявления и не перечисляется тут: третье написание
 #: того же нашлось внешним взглядом (`675d64c`), а здесь оно уже стоило дыры —
@@ -280,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Охват называется до вердикта: проверка, читающая список путей, без числа
     # неотличима от чистого результата (165).
-    exempt = [name for name in files if name in EXEMPT_FILES or name.startswith(EXEMPT_PREFIXES)]
+    exempt = [name for name in files if name.startswith(EXEMPT_PREFIXES)]
     print(f"тронутых путей прочитано: {len(files)}, из них журнальных: {len(exempt)}")
 
     # ФРАГМЕНТОМ СЧИТАЕТСЯ ТОЛЬКО ВЫЖИВШИЙ ПУТЬ. Удалённого файла в голове нет:
@@ -356,14 +373,27 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_REJECTED
 
+    if BUILT_JOURNAL in files:
+        print(
+            f"отвергнуто: изменение трогает {BUILT_JOURNAL}.\n\n"
+            "Собранный журнал — производный файл, и собирает его ВЫПУСК: "
+            "`scripts/release.py` уносит фрагменты в `changelog.d/released/` и "
+            "пересобирает журнал сам.\n"
+            "На изменении его не трогают (030): общий файл, который правит каждая "
+            "ветка, даёт конфликт на каждом втором изменении — ровно тот инцидент, "
+            "из-за которого фрагменты и заведены.\n\n"
+            f"Уберите {BUILT_JOURNAL} из состава: `git checkout origin/<база> -- "
+            f"{BUILT_JOURNAL}`. Фрагмент в `changelog.d/` остаётся — он и есть запись.",
+            file=sys.stderr,
+        )
+        return EXIT_REJECTED
+
     if fragments:
         print(f"фрагмент журнала есть: {', '.join(fragments)}")
         say_if_compound(fragments)
         return EXIT_OK
 
-    substantive = [
-        name for name in files if name not in EXEMPT_FILES and not name.startswith(EXEMPT_PREFIXES)
-    ]
+    substantive = [name for name in files if not name.startswith(EXEMPT_PREFIXES)]
     if not substantive:
         print("изменение тронуло только журнал и производные файлы — фрагмент не нужен")
         return EXIT_OK

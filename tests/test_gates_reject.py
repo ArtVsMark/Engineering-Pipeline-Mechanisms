@@ -1300,3 +1300,51 @@ def test_without_a_given_ancestor_git_is_still_asked(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(journal, "git", remembering)
     journal.changed_files("origin/main")
     assert any("merge-base" in args for args in asked), "предок не спрошен вовсе"
+
+
+def test_a_change_that_touches_the_built_journal_is_rejected(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Изменение, тронувшее собранный `CHANGELOG.md`, отвергается (030).
+
+    Собранный журнал производный: его пересобирает ВЫПУСК. Общий файл, который
+    правит каждая ветка, даёт конфликт на каждом втором изменении — ровно тот
+    инцидент, из-за которого фрагменты и заведены.
+
+    Замер 21.09.2026 по 90 коммитам общей ветки: `CHANGELOG.md` тронут в
+    шестнадцати — один раз коммитом выпуска (он идёт мимо изменений) и
+    пятнадцать раз изменениями одного окна за две смены. Прежде гейт держал
+    этот файл в СПИСКЕ ОСВОБОЖДЁННЫХ, то есть разрешал ровно запрещённое.
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "CHANGELOG.md").write_text("# Журнал\n\nсобрано рукой\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "the-journal-is-built-by-the-release.added.md").write_text(
+        "запись\n\n#7\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "собрал журнал руками")
+    result = run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo)
+    assert result.code == REJECTED
+    assert "CHANGELOG.md" in result.text
+    assert "выпуск" in result.text.lower(), result.text
+
+
+def test_a_fragment_alone_still_passes(run_script: RunScript, tmp_path: Path) -> None:
+    """Вторая половина: фрагмент без собранного журнала проходит.
+
+    Без неё отказ был бы неотличим от «журнал трогать нельзя никак», и окно
+    перестало бы класть фрагменты — то есть гейт сломал бы то, что защищает
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    repo = prepare_repo(tmp_path)
+    git(repo, "checkout", "-qb", "work")
+    (repo / "code.py").write_text("x = 2\n", encoding="utf-8")
+    (repo / "changelog.d").mkdir(exist_ok=True)
+    (repo / "changelog.d" / "only-a-fragment-travels.added.md").write_text(
+        "запись\n\n#7\n", encoding="utf-8"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "только фрагмент")
+    assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN

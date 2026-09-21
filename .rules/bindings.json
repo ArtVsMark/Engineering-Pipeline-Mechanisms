@@ -813,8 +813,8 @@
     "119": {
       "status": "active",
       "mechanism": "gate",
-      "where": "scripts/journal.py — маска входа PATH_RE берёт ровно changelog.d/<слаг>.<род>.md и НЕ рекурсивна, поэтому производное самого инструмента под неё не попадает: переехавшие при выпуске фрагменты лежат в changelog.d/released/<версия>/, собранный CHANGELOG.md — в корне и в EXEMPT_FILES гейта scripts/check_journal.py, а facts.json и значок вообще живут в ветке badges, вне дерева. Держит tests/test_gates_reject.py",
-      "analysed": "2026-09-17"
+      "where": "scripts/journal.py — маска входа PATH_RE берёт ровно changelog.d/<слаг>.<род>.md и НЕ рекурсивна, поэтому производное самого инструмента под неё не попадает: переехавшие при выпуске фрагменты лежат в changelog.d/released/<версия>/, а facts.json и значок вообще живут в ветке badges, вне дерева. Собранный CHANGELOG.md — предмет ОТКАЗА, а не освобождения: константа BUILT_JOURNAL в scripts/check_journal.py, и изменение, тронувшее производный журнал, отвергается — собирает его выпуск (030). Держит tests/test_gates_reject.py",
+      "analysed": "2026-09-21"
     },
     "120": {
       "status": "not-applicable",
