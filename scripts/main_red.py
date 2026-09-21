@@ -619,6 +619,10 @@ def seen_on_changes(
     day: str,
     live: list[automerge.Change] | None,
     answer: dict[str, policy.Check] | None = None,
+    *,
+    required: list[str] | None = None,
+    fed: dict[str, set[str]] | None = None,
+    apply: bool = False,
 ) -> Seen:
     """Один обход голов изменений — и мигания, и красное, пережившее слияние.
 
@@ -634,12 +638,24 @@ def seen_on_changes(
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)),
     а второй список того же — ровно то, ради чего реестр и заведён один.
 
-    ПЕРЕЗАПУСКА ЗДЕСЬ НЕТ НАМЕРЕННО. Правило 124 требует двух вещей, и записать
-    можно то, чего ещё не перезапускали; обратное — нет. Разрешённый список
-    автоперезапуска остаётся пустым, пока эти записи не назовут первое имя.
+    ПЕРЕЗАПУСК ЗДЕСЬ ПОЯВИЛСЯ 21.09.2026, И ЭТО СНЯТИЕ ОБЪЯВЛЕННОЙ ОТСРОЧКИ.
+    Здесь стояло: «перезапуска нет намеренно... разрешённый список остаётся
+    пустым, пока эти записи не назовут первое имя» — то есть у отсрочки было
+    названо УСЛОВИЕ пересмотра, а не срок
+    ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+
+    Условие наступило и проверено числом: в реестре #99 двадцать девять
+    миганий, `ci-complete` среди них семнадцать, и двадцать из двадцати девяти
+    — на голове ИЗМЕНЕНИЯ. Решение принимает `rerun_on_change` тем же
+    `rerun_reason`, что и общая ветка.
     """
     found = list(known)
     unfixed: list[Unfixed] = []
+    # ОТВЕТ ПРОЕКТА И СВЯЗИ ПРОГОНОВ ПРИХОДЯТ СВЕРХУ, А НЕ ЧИТАЮТСЯ ЗДЕСЬ: их
+    # уже прочитал заход, и второе чтение того же разошлось бы с первым молча
+    # (022, 058).
+    required = required if required is not None else []
+    fed = fed if fed is not None else {}
     # ЖИВЫЕ ПРИХОДЯТ СПИСКОМ, А НЕ ЧИТАЮТСЯ ЗДЕСЬ: их читает `live_changes`, один
     # раз на заход (058, 022). Слитые читаются здесь — они свой источник, и
     # список открытых их не содержит.
@@ -695,6 +711,12 @@ def seen_on_changes(
             if len(found) > before:
                 print(f"  #{number}: мигание «{name}» на прогоне {run} — зелёное после красного")
         if number not in merged:
+            # ПЕРЕЗАПУСКАЕТСЯ ТОЛЬКО ЖИВОЕ. На голове слитого перезапускать
+            # нечего: слияние уже состоялось, и зелёное со второго раза там
+            # ничего не решает — оно только тратит квоту (058).
+            told = rerun_on_change(repo, token, number, runs, required, fed, apply=apply)
+            if told:
+                print(f"  {told}")
             continue
         for name, run in sorted(unfixed_names(runs).items()):
             said = answer.get(name) if answer else None
@@ -703,6 +725,72 @@ def seen_on_changes(
             )
             print(f"  #{number}: «{name}» осталась красной после слияния — прогон {run}")
     return Seen(flakes=found, unfixed=unfixed)
+
+
+def rerun_on_change(
+    repo: str,
+    token: str,
+    number: int,
+    runs: list[dict[str, Any]],
+    required: list[str],
+    fed: dict[str, set[str]],
+    *,
+    apply: bool,
+) -> str:
+    """Перезапускает одиночное красное на голове ИЗМЕНЕНИЯ; отдаёт, что вышло.
+
+    РЕШЕНИЕ ЗДЕСЬ НЕ СВОЁ, А ТО ЖЕ. Условия берутся у `rerun_reason` и
+    `target_run` — тех же, по которым живёт общая ветка. Вторая копия «когда
+    перезапускать» разошлась бы с первой молча, и разошлась бы в сторону, где
+    механизм прячет дефект
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
+    [090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    ПОЧЕМУ ЭТО ПОЯВИЛОСЬ ТОЛЬКО СЕЙЧАС, И ЭТО НЕ НЕДОСМОТР. Соседняя докстрока
+    `seen_on_changes` объявляла отсрочку с УСЛОВИЕМ ПЕРЕСМОТРА: «записать можно
+    то, чего ещё не перезапускали; обратное — нет. Разрешённый список остаётся
+    пустым, пока эти записи не назовут первое имя»
+    ([126](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/126-a-freeze-needs-a-thaw-path.md)).
+
+    ЗАМЕР 21.09.2026, ПО КОТОРОМУ УСЛОВИЕ НАСТУПИЛО (#584): в реестре #99
+    двадцать девять миганий, и `ci-complete` среди них **семнадцать** — больше,
+    чем все остальные двенадцать имён вместе. Где: **двадцать из двадцати
+    девяти — на голове ИЗМЕНЕНИЯ**, девять — на общей ветке. То есть
+    большинство случалось там, где перезапуска не было вовсе, и каждое гасил
+    человек рукой либо оно гасло следующим толчком.
+
+    ЗАПИСЬ ИНЦИДЕНТА ОТДЕЛЬНО НЕ ВЕДЁТСЯ, И ЭТО НЕ ПРОБЕЛ. Удавшийся перезапуск
+    даёт «зелёное после красного» — ровно то, что ловит `flaky_names` на
+    следующем заходе, и запись ляжет в тот же реестр #99 с пометкой места.
+    Второй список того же разошёлся бы с первым молча (022). Не удался —
+    записи не будет, и окно разбудит оклик (`scripts/hail.py`): это настоящий
+    дефект, а не осечка.
+    """
+    red = red_of(runs)
+    if not red:
+        return ""
+    holds, rest = split(red, required)
+    target = target_run(holds, rest, red, fed)
+
+    # ПЛОЩАДКУ СПРАШИВАЕМ ПОСЛЕДНЕЙ, А НЕ ПЕРВОЙ. Номер попытки — единственное,
+    # что нельзя вывести из уже прочитанного, и стоит он вызова из ОБЩЕЙ квоты
+    # ([058](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/058-when-the-quota-is-out-stop.md)).
+    # На общей ветке голова одна и цена незаметна; здесь голов столько, сколько
+    # живых изменений, и спрашивать у каждой значило бы платить за ответ,
+    # который в большинстве случаев ничего не меняет. Поэтому сначала
+    # проверяются условия, выводимые ИЗ ПРОЧИТАННОГО, и только если они прошли
+    # — спрашивается попытка.
+    said = rerun_reason(holds, rest, target, 1, fed, rerunnable())
+    if said:
+        return f"#{number}: перезапуска не будет: {said}"
+    tries = attempt(repo, target, token) if target else 1
+    why = rerun_reason(holds, rest, target, tries, fed, rerunnable())
+    if why:
+        return f"#{number}: перезапуска не будет: {why}"
+    if apply:
+        rerun_failed(repo, target, token)
+    did = "перезапущен" if apply else "перезапустил бы"
+    return f"#{number}: упал ровно один — «{(holds or rest)[0]}»: {did} прогон {target} (124)"
 
 
 #: Метка заморозки. Имя читает очередь (`scripts/automerge.py`), объявлено оно в
@@ -1127,7 +1215,17 @@ def main(argv: list[str] | None = None) -> int:
         # одного источника за заход стоят вызовов из общей квоты (058) и
         # расходятся между собой молча (022, 090).
         live = live_changes(args.repo, token)
-        seen = seen_on_changes(args.repo, token, flakes, day, live, answer)
+        seen = seen_on_changes(
+            args.repo,
+            token,
+            flakes,
+            day,
+            live,
+            answer,
+            required=required,
+            fed=policy.feeds(),
+            apply=args.apply,
+        )
         flakes = seen.flakes
 
         # Очередь СЧИТАЕТСЯ только при заморозке: без неё этот счёт ничего не
