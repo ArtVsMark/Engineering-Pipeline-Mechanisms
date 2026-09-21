@@ -127,6 +127,56 @@ def elapsed(run: dict[str, Any]) -> int | None:
     return max(0, int((done - began).total_seconds()))
 
 
+#: Служебные шаги джоба: их ставит площадка, и падение на них говорит о ней, а
+#: не о дереве. Список разрешительный (068) и сегодня НИЧЕГО не находит — замер
+#: 21.09.2026 по 130 упавшим джобам: все до одного упали на СВОЁМ шаге. Он
+#: заведён не про «сейчас», а про «копить»: у соседей по семье такие отказы
+#: бывают, и распознать их можно только по собранной статистике.
+SERVICE_STEPS: Final = (
+    "set up job",
+    "checkout",
+    "set up python",
+    "post ",
+    "complete job",
+)
+
+#: Признаки осечки в тексте отчёта. Каждый назван с причиной, и каждый ИЗМЕРЕН
+#: на нашей истории 21.09.2026 — иначе это была бы догадка (044):
+#:
+#: * «ждём соседей» — собственное сообщение сводного гейта: он опросил голову
+#:   раньше, чем соседи зарегистрировались. Замер: 16 красных `ci-complete` из
+#:   16 несут его, то есть признак стопроцентный;
+#: * «exit code 128» — отказ git: сеть или доступ. Замер: 1 случай;
+#: * осечка обвязки площадки. Замер: 4 случая на `late-queue`.
+#:
+#: Список ничего не решает сам: он КОПИТ наблюдение, чтобы зависимость стала
+#: видна на числах, а не на памяти (005, 049).
+REPORT_MARKS: Final = {
+    "ждём соседей": "сводный гейт опросил голову раньше соседей",
+    "exit code 128": "отказ git — сеть или доступ",
+    "Unable to process file command": "осечка обвязки площадки",
+    "Invalid format": "осечка обвязки площадки",
+}
+
+
+def report_mark(repo: str, job: int, token: str) -> str:
+    """Признак осечки из отчёта джоба; пусто — признака нет.
+
+    Читаются АННОТАЦИИ, а не логи: логи окну недоступны (площадка отвечает 403
+    через прокси), а аннотации приходят обычным чтением. Отказ чтения — не
+    «признака нет»: об этом говорит третий исход у зовущего (045).
+    """
+    try:
+        found = ghrest.request("GET", f"repos/{repo}/check-runs/{job}/annotations", token)
+    except ghrest.TransportError:
+        return ""
+    text = " ".join(str((one or {}).get("message") or "") for one in (found or []))
+    for mark, why in REPORT_MARKS.items():
+        if mark in text:
+            return why
+    return ""
+
+
 def red_jobs(repo: str, run: int, token: str) -> list[str]:
     """Имена упавших джобов захода — спрашиваются ТОЛЬКО у красных.
 
@@ -140,6 +190,50 @@ def red_jobs(repo: str, run: int, token: str) -> list[str]:
         for job in payload.get("jobs") or []
         if job.get("conclusion") in REAL_RED
     )
+
+
+def red_details(repo: str, run: int, token: str) -> list[dict[str, str]]:
+    """Упавшие джобы захода: имя, шаг падения и признак осечки из отчёта.
+
+    ОДИН ОБХОД, А НЕ ТРИ. Имя, шаг и признак спрашиваются у одного и того же
+    ответа площадки: три обхода того же стоили бы вызовов из общей квоты и
+    разошлись бы между собой молча
+    ([058](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/058-when-the-quota-is-out-stop.md),
+    [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+    Признак стоит ВТОРЫМ вызовом и только для красных: аннотации спрашиваются у
+    каждого упавшего джоба, а их за сутки единицы.
+    """
+    payload = ghrest.request("GET", f"repos/{repo}/actions/runs/{run}/jobs", token) or {}
+    found: list[dict[str, str]] = []
+    for job in payload.get("jobs") or []:
+        if job.get("conclusion") not in REAL_RED:
+            continue
+        number = int(job.get("id") or 0)
+        found.append(
+            {
+                "name": str(job.get("name") or ""),
+                "step": failed_step(job),
+                "mark": report_mark(repo, number, token) if number else "",
+            }
+        )
+    return sorted(found, key=lambda one: one["name"])
+
+
+def failed_step(job: dict[str, Any]) -> str:
+    """Имя шага, на котором джоб упал; пусто — шагов площадка не отдала.
+
+    ЗАЧЕМ ЭТО СОБИРАЕТСЯ. Вопрос «дефект это или осечка площадки» по имени
+    ДЖОБА не решается: имя одно и то же в обоих случаях. Решает его ШАГ —
+    служебный (чекаут, установка) против своего (тесты, типы). Замер
+    21.09.2026: у нас 130 из 130 упали на своём шаге, то есть предмета для
+    такого разбора сегодня НЕТ — и это тоже наблюдение, которое стоит копить
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    for step in job.get("steps") or []:
+        if step.get("conclusion") in REAL_RED:
+            return str(step.get("name") or "")
+    return ""
 
 
 def swept(repo: str, token: str, since: str) -> dict[str, dict[str, dict[str, Any]]]:
@@ -156,7 +250,23 @@ def swept(repo: str, token: str, since: str) -> dict[str, dict[str, dict[str, An
             continue
         seen += 1
         row = days.setdefault(day, {}).setdefault(
-            name, {"runs": 0, "red": 0, "cancelled": 0, "seconds": 0, "timed": 0, "red_jobs": {}}
+            name,
+            {
+                "runs": 0,
+                "red": 0,
+                "cancelled": 0,
+                "seconds": 0,
+                "timed": 0,
+                "red_jobs": {},
+                # ОТЧЁТ ПО КРАСНЫМ КОПИТСЯ, А НЕ РЕШАЕТ (#606). Владелец назвал
+                # предмет: «нужен отчёт по красным, и на основе него принимать
+                # решение». Сегодня решает история мигания — в отчёте нашей
+                # истории платформенных отказов нет (замер: 130 из 130 упали на
+                # СВОЁМ шаге). Но у соседей по семье такие отказы бывают, и
+                # увидеть зависимость можно только на собранных числах (049).
+                "red_steps": {},
+                "red_marks": {},
+            },
         )
         row["runs"] += 1
         end = str(run.get("conclusion") or "")
@@ -164,8 +274,15 @@ def swept(repo: str, token: str, since: str) -> dict[str, dict[str, dict[str, An
             row["red"] += 1
             number = int(run.get("id") or 0)
             if number:
-                for job in red_jobs(repo, number, token):
-                    row["red_jobs"][job] = int(row["red_jobs"].get(job, 0)) + 1
+                for job in red_details(repo, number, token):
+                    label = job["name"]
+                    row["red_jobs"][label] = int(row["red_jobs"].get(label, 0)) + 1
+                    if job["step"]:
+                        key = f"{label} · {job['step']}"
+                        row["red_steps"][key] = int(row["red_steps"].get(key, 0)) + 1
+                    if job["mark"]:
+                        key = f"{label} · {job['mark']}"
+                        row["red_marks"][key] = int(row["red_marks"].get(key, 0)) + 1
         elif end == "cancelled":
             row["cancelled"] += 1
         spent = elapsed(run)
