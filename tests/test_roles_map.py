@@ -58,10 +58,43 @@ RULE_ROW_RE: Final = re.compile(
 RULE_HEAD: Final = "Направление"
 
 
+#: Разделы карты, где живут НАПРАВЛЕНИЯ. Разбор идёт только по ним, а не по
+#: всему файлу, и это предмет, а не аккуратность: в документе появились таблицы
+#: о другом — состав ролей, матрица подключения, — и трёхстолбцовая строка
+#: любой из них разобралась бы как направление с неизвестным исходом. Гейт
+#: покраснел бы на исправном документе, а починка выглядела бы как «поправить
+#: таблицу», то есть предикат был бы шире предмета
+#: ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+SECTIONS: Final = (
+    "## Делаем",
+    "## Проверяем",
+    "## Понимаем и ведём",
+    "## Объясняем",
+    "## Про саму работу",
+)
+
+
+def coverage_text() -> str:
+    """Текст карты без чужих таблиц: только разделы направлений.
+
+    Раздел кончается следующим заголовком того же уровня — границу задаёт сам
+    документ, а не список исключений, который разошёлся бы с ним молча (022).
+    """
+    said = MAP.read_text(encoding="utf-8")
+    kept: list[str] = []
+    inside = False
+    for line in said.splitlines():
+        if line.startswith("## "):
+            inside = line in SECTIONS
+        if inside:
+            kept.append(line)
+    return "\n".join(kept)
+
+
 def rows() -> dict[str, tuple[str, str]]:
     """Наша карта: направление → (исход, обоснование)."""
     found: dict[str, tuple[str, str]] = {}
-    for one in ROW_RE.finditer(MAP.read_text(encoding="utf-8")):
+    for one in ROW_RE.finditer(coverage_text()):
         name = one["name"]
         if name == "Направление" or set(name) <= set("- "):
             continue
@@ -209,3 +242,86 @@ def test_the_known_misses_are_actually_refused() -> None:
         assert any(one in said for one in NOT_A_WHOSE), f"промах не отвергнут: «{said}»"
     for said in ("профиль каталога", "профиль внешнего взгляда", "профиль владельца"):
         assert not any(one in said for one in NOT_A_WHOSE), f"законный хвост отвергнут: «{said}»"
+
+
+# --- состав ролей выводится из карты, а не живёт рядом (#595) -----------------
+
+#: Заголовок таблицы состава: по нему она и находится.
+ROSTER_HEAD: Final = "| Роль | Вход | Возражает |"
+#: Исход, называющий владельца профиля. Голое «профиль» означает «владелец с
+#: окном» — то есть кто-нибудь из двоих, а вопрос, который задаёт кто-нибудь,
+#: не задаёт никто в тот день, когда оба заняты другим.
+NAMED_RE: Final = re.compile(r"^профиль (?P<owner>.+)$")
+
+
+def roster() -> set[str]:
+    """Имена ролей из таблицы состава — как они в ней написаны."""
+    said = MAP.read_text(encoding="utf-8")
+    after = said.partition(ROSTER_HEAD)[2]
+    found: set[str] = set()
+    for line in after.splitlines():
+        if not line.strip():
+            # Пустая строка сразу после заголовка — это его собственный перевод
+            # строки, а не конец таблицы. Обрыв на ней давал НОЛЬ ролей, и гейт
+            # зеленел бы на пустом предмете, если бы не проверка непустоты (075).
+            continue
+        if not line.startswith("|"):
+            break
+        cells = [one.strip() for one in line.strip("|").split("|")]
+        if len(cells) != 3 or set(cells[0]) <= set("- "):
+            continue
+        name = re.sub(r"[^\w\s-]", "", cells[0]).replace("**", "").strip()
+        if name:
+            found.add(name)
+    return found
+
+
+def test_the_roster_has_roles_to_judge() -> None:
+    """Предмет найден: состав ролей в карте есть и не пуст (075)."""
+    assert len(roster()) >= 10, f"ролей разобрано {len(roster())} — таблицы состава не видно"
+
+
+def test_every_profile_names_its_owner() -> None:
+    """У профиля назван ВЛАДЕЛЕЦ, а не «владелец с окном» по умолчанию.
+
+    ЗАМЕР, РАДИ КОТОРОГО ГЕЙТ ЗАВЕДЁН (21.09.2026, #595). Из двадцати шести
+    профилей карты владелец был назван у СЕМИ. У девятнадцати стояло голое
+    «профиль» — и карта честно говорила, что вопрос задаётся, не говоря кем.
+    Владелец подвёл итог точно: «вывод есть, а самих ролей нет».
+
+    Это дыра, которая НЕ помечена «роли нет»: вопрос задаётся, спрашивающий не
+    назван
+    ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+    """
+    bare = [name for name, (outcome, _) in rows().items() if outcome == "профиль"]
+    assert not bare, (
+        "исход «профиль» не называет владельца у: "
+        + ", ".join(sorted(bare))
+        + " — вопрос задаётся, а спрашивающий не назван"
+    )
+
+
+def test_a_named_owner_is_a_role_that_exists() -> None:
+    """Названный владелец — это роль из состава, внешний исполнитель или человек.
+
+    Вторая половина: без неё «профиль Кого-Угодно» проходил бы первую проверку,
+    и состав разошёлся бы с картой молча — ровно то, ради чего он из неё и
+    выводится (049).
+    """
+    outside = {"внешнего взгляда", "окна", "владельца", "каталога"}
+    known = {name.split()[-1] for name in roster()} | roster()
+    unknown: list[str] = []
+    for name, (outcome, _) in rows().items():
+        said = NAMED_RE.match(outcome)
+        if not said:
+            continue
+        owner = said["owner"]
+        if owner in outside:
+            continue
+        # Имя в исходе стоит в родительном падеже; сверяется корень до окончания.
+        stem = owner.split()[0][:-1]
+        if not any(stem in one for one in known):
+            unknown.append(f"{name} → «{owner}»")
+    assert not unknown, (
+        "исход называет владельца, которого нет ни в составе, ни снаружи: " + ", ".join(unknown)
+    )
