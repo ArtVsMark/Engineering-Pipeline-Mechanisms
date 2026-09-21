@@ -558,6 +558,40 @@ def test_the_series_counts_whose_steps_fell() -> None:
     assert module.whose(empty) == {}, "пустой день — пустой счёт, а не выдумка"
 
 
+def test_the_report_names_whose_step_fell() -> None:
+    """Счёт доходит до ОТЧЁТА, который читает человек, а не оседает в функции.
+
+    ТРЕТЬЕ ЛИЦО ОДНОГО ДЕФЕКТА, и нашёл его внешний взгляд на #611. Сначала
+    `SERVICE_STEPS` был объявлен и не вызывался; потом различение считалось и не
+    сводилось по ряду; потом свелось — и не печаталось. Каждый раз починка
+    двигала границу на шаг и останавливалась перед последним
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+    Отчёт и есть предмет: логи прогонов читаются не из всякого окна, а файл ряда
+    читается по прямой ссылке. Число, не дошедшее до него, отвечает ровно так
+    же, как несчитанное.
+    """
+    days = {
+        "2026-09-21": {"runs": {"ci": {"runs": 4, "red": 2, "red_whose": {module.WHOSE_OWN: 2}}}}
+    }
+    said = module.report(days, module.Bounds.read(BOUNDS), "2026-09-21")
+    assert "на СВОЁМ шаге — 2" in said, said
+    assert "подтверждения НЕ имеет" in said, "нулевой счёт площадкиных не назван вслух (046)"
+
+
+def test_the_report_says_unread_not_innocent() -> None:
+    """Пустой счёт печатается как «не прочитано», а не как «площадка не виновата».
+
+    Половина, без которой раздел врёт в самую дорогую сторону: «служебных падений
+    ноль» при НЕразобранных падениях — вывод из незнания
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    days = {"2026-09-21": {"runs": {"ci": {"runs": 4, "red": 2, "red_whose": {}}}}}
+    said = module.report(days, module.Bounds.read(BOUNDS), "2026-09-21")
+    assert "не из чего" in said, said
+    assert "подтверждения НЕ имеет" not in said, "незнание выдано за оправдание площадки"
+
+
 def test_the_day_row_carries_whose_step_fell(monkeypatch: pytest.MonkeyPatch) -> None:
     """Различение доходит от ОТВЕТА ПЛОЩАДКИ до строки дня, а не только до записи.
 
