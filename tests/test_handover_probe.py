@@ -21,6 +21,14 @@ module = load_script("drift.py")
 PROBE = ROOT / ".github" / "workflows" / "handover-probe.yml"
 PREFIX = "probe-"
 
+#: Шаги, которых проба НЕ зовёт, и причина у списка одна: они считают
+#: относительно БАЗЫ изменения, а вне изменения её нет. Замер прогоном
+#: 21.09.2026 (35569411331): все девять стартовали внешним путём, эти четыре
+#: отказали третьим исходом ВНУТРИ себя. Список здесь, а не в памяти: иначе
+#: сужение пробы читается как забывчивость
+#: ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+NEEDS_A_CHANGE = ("journal", "pr-meta", "window-lifetime", "rulebook-fresh")
+
 
 def probe() -> dict[Any, Any]:
     """Разобранная проба: предмет берётся из дерева, а не из памяти."""
@@ -28,14 +36,30 @@ def probe() -> dict[Any, Any]:
     return said
 
 
-def test_the_probe_calls_every_shipped_step() -> None:
-    """Зовётся КАЖДЫЙ отдаваемый шаг, а не первый попавшийся.
+def test_the_probe_calls_every_step_it_can() -> None:
+    """Зовётся КАЖДЫЙ отдаваемый шаг, кроме названных неподъёмными вне изменения.
 
     Проба по одному шагу говорила бы только о нём: вызов по тегу площадка
-    разрешает для каждого файла отдельно, и молчание о восьми — это молчание.
+    разрешает для каждого файла отдельно, и молчание о прочих — это молчание.
+    Сосед у сужения назван списком выше, а не оставлен читателю (195).
     """
     called = {name.removeprefix(PREFIX) for name in probe()["jobs"]}
-    assert called == set(onboard.steps(ROOT)), "проба зовёт не тот состав, что отдаётся наружу"
+    want = set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE)
+    assert called == want, "проба зовёт не тот состав, что отдаётся наружу"
+
+
+def test_the_gap_of_the_probe_is_named_not_silent() -> None:
+    """Пробел назван В САМОЙ пробе, а не только здесь.
+
+    Читатель прогона должен видеть, чего проба НЕ проверяет, не открывая
+    набора: умолчание о четырёх шагах снаружи неотличимо от их проверки (046).
+    """
+    said = PROBE.read_text(encoding="utf-8")
+    for one in NEEDS_A_CHANGE:
+        assert one in said, f"пробел про «{one}» в пробе не назван"
+    # Регистр не судится: шапки механизмов пишут признак прописными, и
+    # требовать строчных значило бы проверять стиль, а не наличие.
+    assert "не проверяет" in said.lower()
 
 
 def test_the_probe_goes_the_outward_way() -> None:
@@ -58,7 +82,7 @@ def test_the_probe_says_what_the_kit_prints() -> None:
     которого никто не проверял.
     """
     pin = onboard.pin_of(ROOT)
-    for step in onboard.steps(ROOT):
+    for step in set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE):
         want = onboard.caller(step, family_uptake.OURS, pin).splitlines()
         said = str(probe()["jobs"][f"{PREFIX}{step}"]["uses"])
         assert any(said in line for line in want), f"{step}: проба зовёт не тот адрес"

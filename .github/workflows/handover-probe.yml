@@ -25,6 +25,21 @@
 # иначе проверяется не то, что отдаётся (090, 022). Держит это
 # `tests/test_handover_probe.py`.
 #
+# ЗОВУТСЯ НЕ ВСЕ ДЕВЯТЬ, И ГРАНИЦА ЗАМЕРЕНА ПРОГОНОМ, А НЕ УГАДАНА. Первый же
+# заход пробы (21.09.2026, прогон 35569411331) прошёл внешним путём для всех
+# девяти — джобы стартовали, составные имена подтвердились, — но четыре
+# отказали ТРЕТЬИМ ИСХОДОМ внутри себя: `journal`, `pr-meta`,
+# `window-lifetime`, `rulebook-fresh` считают относительно БАЗЫ изменения
+# (`github.event.pull_request.base.ref`), а вне изменения её нет. Это их
+# честное поведение, а не поломка передачи.
+#
+# ЧЕГО ПРОБА НЕ ПРОВЕРЯЕТ, И ЭТО ОБЪЯВЛЕННЫЙ ПРОБЕЛ, а не забытый: работу этих
+# четырёх внешним путём. Позвать их здесь значило бы держать пробу красной
+# всегда, а красное, которое нечем погасить, учат обходить (051). Подтвердит
+# их только настоящее подключение — у потребителя они пойдут на
+# `pull_request`, где база есть
+# ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+#
 # ИМЕНА ДЖОБОВ ЗДЕСЬ СВОИ, С ПРИСТАВКОЙ `probe-`, И ЭТО НЕ УКРАШЕНИЕ. Без
 # неё джоб пробы звался бы `lint` — как джоб `ci`, — и на площадке две
 # РАЗНЫЕ проверки дали бы записи с одним именем. Сводный гейт такое уже
@@ -81,15 +96,6 @@ jobs:
       pull-requests: read
       issues: read
 
-  probe-journal:
-    name: probe-journal
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-journal.yml@v1.2.0
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-      issues: read
-
   probe-lint:
     name: probe-lint
     uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.2.0
@@ -102,33 +108,6 @@ jobs:
   probe-pipeline:
     name: probe-pipeline
     uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.2.0
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-      issues: read
-
-  probe-pr-meta:
-    name: probe-pr-meta
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pr-meta.yml@v1.2.0
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-      issues: read
-
-  probe-rulebook-fresh:
-    name: probe-rulebook-fresh
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-rulebook-fresh.yml@v1.2.0
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-      issues: read
-
-  probe-window-lifetime:
-    name: probe-window-lifetime
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-window-lifetime.yml@v1.2.0
     permissions:
       contents: read
       checks: read
