@@ -559,23 +559,23 @@ def test_a_hold_trailer_is_read_by_name() -> None:
     Причина едет в тело изменения человеку на глаза: нормализуются только
     пробелы, слова — нет.
     """
-    assert changerefs.held_in("Hold:   замер,  эти прогоны\tне сливаются") == (
+    assert changerefs.held_in("Ждёт:   замер,  эти прогоны\tне сливаются") == (
         "замер, эти прогоны не сливаются"
     )
-    assert changerefs.held_in("hold: строчными — тот же трейлер") == "строчными — тот же трейлер"
+    assert changerefs.held_in("ждёт: строчными — тот же трейлер") == "строчными — тот же трейлер"
 
 
 def test_a_hold_without_a_reason_is_not_a_hold() -> None:
     """Задержка без причины неотличима от забытой метки и потому не читается (154)."""
-    assert changerefs.held_in("Hold:") is None
-    assert changerefs.held_in("Hold:    ") is None
+    assert changerefs.held_in("Ждёт:") is None
+    assert changerefs.held_in("Ждёт:    ") is None
     assert changerefs.held_in("обычное тело без трейлера") is None
 
 
 def test_a_hold_inside_code_is_an_example_not_a_hold() -> None:
     """Пример трейлера в документации задержкой не становится — как у соседей."""
-    assert changerefs.held_in("пишут так: `Hold: пример из свода`") is None
-    assert changerefs.held_in("```\nHold: пример из блока\n```") is None
+    assert changerefs.held_in("пишут так: `Ждёт: пример из свода`") is None
+    assert changerefs.held_in("```\nЖдёт: пример из блока\n```") is None
 
 
 def test_the_first_named_reason_wins_across_bodies() -> None:
@@ -584,7 +584,7 @@ def test_the_first_named_reason_wins_across_bodies() -> None:
     Второй трейлер в соседнем коммите ту же задержку не усиливает, и складывать
     причины значило бы выдавать одно решение за несколько.
     """
-    assert changerefs.held_in_all(["Refs #1", "Hold: первая", "Hold: вторая"]) == "первая"
+    assert changerefs.held_in_all(["Refs #1", "Ждёт: первая", "Ждёт: вторая"]) == "первая"
     assert changerefs.held_in_all(["Refs #1", "Closes #2"]) is None
     assert changerefs.held_in_all([]) is None
 
@@ -595,7 +595,7 @@ def test_the_first_named_reason_wins_across_bodies() -> None:
 #: Проверяются ВМЕСТЕ и одним предикатом: дыра была общая — у маскировки, — и
 #: чинить её по одному значило бы вернуться сюда ещё четыре раза.
 KEYS_AND_READERS = [
-    ("Hold: пример", lambda t: changerefs.held_in(t)),
+    ("Ждёт: пример", lambda t: changerefs.held_in(t)),
     ("Refs #999", lambda t: changerefs.links_in(t)),
     ("Closes #999", lambda t: changerefs.links_in(t)),
     ("Разобрано: aaaaaaa причина", lambda t: changerefs.resolved_in(t)),

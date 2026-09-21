@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+import changerefs
 import findings
 import ghrest
 import pipeline_checks as policy
@@ -106,9 +107,17 @@ STUCK_UNARMED: Final = "зелено и согласие есть, а значо
 STUCK_ARMED: Final = "значок выдан, всё зелено, а слияния нет"
 STUCK_HOLD_MUTE: Final = "стоп-метка не называет, чего ждёт — отменяющий переключатель без адресата"
 
-#: Чего ждёт стоп-метка — строкой в теле изменения (решение 018). Номер,
-#: а не свободный текст: спрашивать у площадки можно только разрешимый адрес.
-WAITS_RE: Final = re.compile(r"^Ждёт:\s*(?P<said>.+?)\s*$", re.MULTILINE)
+#: ОБРАЗЕЦ ЗДЕСЬ БОЛЬШЕ НЕ ЖИВЁТ, И ЭТО ПРЕДМЕТ (#587). Строку «Ждёт:» пишут в
+#: теле КОММИТА и читают в теле ИЗМЕНЕНИЯ — ключ один, значит и разбор один:
+#: `changerefs.held_in`. Своя регулярка здесь расходилась бы с чужой молча, а
+#: модуль-разборщик заведён ровно после такого случая — «дефект был не в
+#: регулярке, а в том, что регулярок было две»
+#: ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md),
+#: [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+#:
+#: ОБЩИЙ РАЗБОР ПРИНОСИТ С СОБОЙ МАСКИРОВКУ: пример «Ждёт:» в блоке кода —
+#: обратными кавычками, забором или отступом — условием не считается. Своя
+#: регулярка этого не умела вовсе.
 #: Разрешимая форма названного: «#262».
 SUBJECT_RE: Final = re.compile(r"^#(?P<number>\d+)$")
 
@@ -146,9 +155,12 @@ def waits_for(body: str) -> str:
     ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
     Читается ПЕРВАЯ строка: две означали бы два условия, а снятие по одному из
     них было бы снятием по половине.
+
+    РАЗБОР ОБЩИЙ, А НЕ СВОЙ: ту же строку пишут трейлером в теле коммита, и
+    читать её двумя образцами значило бы завести две правды об одном ключе
+    (090). Отсюда же маскировка: пример в блоке кода условием не считается.
     """
-    found = WAITS_RE.search(body or "")
-    return found.group("said") if found else ""
+    return changerefs.held_in(body or "") or ""
 
 
 def named_subject(said: str) -> int:

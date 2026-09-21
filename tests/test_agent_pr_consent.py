@@ -234,7 +234,7 @@ def test_a_hold_trailer_is_read_before_the_change_exists(
     Замер по живой ленте #549: `automerge` в 19:40:09, снят в 19:40:40,
     `hold` в 19:40:41 — тридцать одна секунда.
     """
-    said = held_branch(monkeypatch, "ЗАМЕР: две минуты\n\nHold: временные прогоны\n\nRefs #224\n")
+    said = held_branch(monkeypatch, "ЗАМЕР: две минуты\n\nЖдёт: временные прогоны\n\nRefs #224\n")
     assert said.hold == "временные прогоны"
     assert "Задержано автором" in said.body
     assert "временные прогоны" in said.body
@@ -363,3 +363,50 @@ def test_a_clean_subject_is_not_refused(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(module, "git", git)
     said = module.describe("agent/окно", "main")
     assert said.title.startswith("Работа и её предмет без номера")
+
+
+# --- задержка, названная трейлером, не считается забытой меткой (#587) --------
+
+
+def test_a_held_change_is_not_called_a_forgotten_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тело, собранное по трейлеру, читается реестром застрявших как названное.
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА (`fb95a71` на #579), и она была верна. Автор писал
+    `Hold:`, шаг открытия клал в тело прозу «Это изменение не для слияния: …»,
+    а `stuck.py` искал `Ждёт:` — и не находил. Вердикт выходил
+    `STUCK_HOLD_MUTE`: «стоп-метка не называет, чего ждёт». То есть задержка с
+    ЯВНО названной причиной попадала в реестр застрявших как ЗАБЫТАЯ.
+
+    Смысл задачи #551 — «причина обязательна: задержка без причины неотличима
+    от забытой метки» — выполнялся ровно наполовину: причину требовали, а в
+    формат, который умеет отличать названное от забытого, не переносили.
+
+    Проверяется СТЫК, а не один механизм: тело строит `agent_pr`, читает его
+    `stuck`, и утверждение верно только если оба согласны про одну строку.
+    """
+    stuck = load_script("stuck.py")
+    said = held_branch(monkeypatch, "ЗАМЕР\n\nЖдёт: временные прогоны\n\nRefs #224\n")
+
+    assert said.hold == "временные прогоны"
+    assert stuck.waits_for(said.body) == "временные прогоны", (
+        "реестр застрявших не нашёл условия в теле, которое собрал шаг открытия — "
+        "задержка с названной причиной будет названа забытой меткой"
+    )
+
+    verdict = stuck.judge(
+        {
+            "number": 1,
+            "draft": False,
+            "mergeable_state": "clean",
+            "labels": [{"name": "hold"}],
+            "body": said.body,
+            "head": {"sha": "deadbee"},
+        },
+        [],
+        (),
+        armed=False,
+        fresh=False,
+    )
+    assert verdict.why != stuck.STUCK_HOLD_MUTE, (
+        "задержка с названным условием всё ещё зовётся забытой меткой"
+    )
