@@ -33,13 +33,6 @@
 Три из четырёх закрыты в тот же день, когда обнаружилось расхождение.
 
 
-Раздел существует, чтобы окно не предполагало механизмов, которых здесь нет:
-отсутствующий гейт и молчащий гейт снаружи неотличимы, и **пробел называется, а
-не выравнивается**
-([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
-Строка уходит отсюда, когда механизм появился и **подтверждён прогоном**, а не
-когда написан
-([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
 
 ## Пробелы
 

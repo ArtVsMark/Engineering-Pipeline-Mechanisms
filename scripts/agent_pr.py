@@ -403,9 +403,14 @@ def red_on_trunk(repo: str, token: str, name: str, base: str) -> bool:
     runs = [one for one in (got.get("check_runs") or []) if str(one.get("name") or "") == name]
     if not runs:
         return False
+    # «ИДЁТ» СПРАШИВАЕТСЯ У СОСЕДА, А НЕ ПО ПОЛЮ status (#602). Своё условие
+    # `status == "completed"` расходилось с `ci_complete.pending`, который
+    # разводит незавершённое и зомби-запись, — и второе понимание одного
+    # состояния разошлось бы с первым молча (022, 090). Нашёл внешний взгляд
+    # находкой `5203526`.
     return any(
-        ci_complete.has_verdict(one)
-        and one.get("status") == "completed"
+        not ci_complete.pending(one)
+        and ci_complete.has_verdict(one)
         and one.get("conclusion") not in ("success", None)
         for one in ci_complete.worst_per_name(runs)
     )
