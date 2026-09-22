@@ -560,13 +560,51 @@ def feeds(directory: Path = WORKFLOWS) -> dict[str, set[str]]:
     return fed
 
 
+def _one_world_only(path: Path, triggers: list[str]) -> None:
+    """Отвергает прогон, который И вызываемый, И идёт сам.
+
+    ПОЧЕМУ ЭТО ОТКАЗ, А НЕ ВЫБОР РАЗДЕЛА. Джобы такого прогона дают запись
+    ДВУМЯ именами сразу: простым — когда он идёт по своему событию, и составным
+    «<вызывающий> / <вызванный>» — когда его зовут. Разбор умеет описать
+    проверку одним именем, и какое из двух назвать, из документа не следует.
+    Молчаливый выбор здесь хуже отказа: он объявил бы проверку там, где их две,
+    либо не объявил бы ни одной
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ЧТО БЫЛО ДО НЕГО. Оба раздела читали `CALLED in triggers` как повод
+    пропустить документ ЦЕЛИКОМ, и джобы такого прогона выпадали из обоих —
+    без единого красного. Соседняя докстрока при этом обещала обратное:
+    «джоб попадает ровно в один раздел, и „не спросили" перестаёт быть
+    возможным состоянием». Обещание было шире кода.
+
+    ПРЕДМЕТА В ДЕРЕВЕ СЕГОДНЯ НЕТ, и это замер, а не догадка: 22.09.2026 из
+    тридцати прогонов ни один не несёт обоих событий — девять вызываемых несут
+    только `workflow_call`. Площадка такую связку не запрещает, а её цена —
+    джоб без проверки, о котором не краснеет ничто
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+    Нашёл внешний взгляд на #550; до реестра находка не доехала — её потерял
+    разбор обзора (#612).
+    """
+    if CALLED not in triggers:
+        return
+    другие = sorted(one for one in triggers if one != CALLED)
+    if другие:
+        raise BadPolicy(
+            f"{path.name} объявляет «{CALLED}» вместе с {', '.join(другие)} — такой прогон "
+            "идёт и сам, и по вызову, а значит его джобы дают запись двумя именами сразу: "
+            "простым и составным. Какое из них считать проверкой, из документа не следует"
+        )
+
+
 def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
     """Джобы прогонов, которые на изменении не идут вовсе.
 
     Дополнение к `declared_jobs` ровно по одному признаку — есть ли среди
     событий прогона событие изменения. Вместе они покрывают дерево прогонов
     целиком: джоб попадает ровно в один раздел, и «не спросили» перестаёт быть
-    возможным состоянием.
+    возможным состоянием. Держится это не обещанием, а отказом
+    `_one_world_only`: документ, который не лёг бы ни в один раздел, краснеет,
+    а не пропускается.
 
     РОДОВ, ОДНАКО, ТРИ, А НЕ ДВА. Вызываемый прогон (`workflow_call`) не идёт
     ни на изменении, ни вне его: он не идёт сам вовсе. Его джобы дают запись
@@ -580,6 +618,7 @@ def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
     for path in sorted(directory.glob("*.y*ml")):
         document = run_of(path)
         triggers = _triggers_of(document)
+        _one_world_only(path, triggers)
         if CALLED in triggers or ON_CHANGE in triggers:
             continue
         for job_id, body in (document.get("jobs") or {}).items():
@@ -627,6 +666,7 @@ def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, J
         # прежний разбор.
         document = run_of(path)
         triggers = _triggers_of(document)
+        _one_world_only(path, triggers)
         if CALLED in triggers or ON_CHANGE not in triggers:
             continue
 
