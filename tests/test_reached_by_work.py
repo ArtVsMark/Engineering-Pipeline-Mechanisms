@@ -37,7 +37,8 @@ def repo(tmp_path: Path) -> Path:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "them@example.com")
     _git(tmp_path, "config", "user.name", "Кто-то")
-    (tmp_path / "scripts").mkdir()
+    for root in module.WORK:
+        (tmp_path / root).mkdir(parents=True)
     (tmp_path / "scripts" / "thing.py").write_text(
         "def main() -> int:\n    return 0\n", encoding="utf-8"
     )
@@ -165,6 +166,35 @@ def test_the_platform_runs_are_read_from_the_anchor(
     runs.mkdir(parents=True)
     (runs / "ci.yml").write_text("шаг: тут\n", encoding="utf-8")
     assert "шаг: тут" in module.runs_text()
+
+
+def test_every_declared_source_is_walked(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Достижимость считается по ВСЕМ источникам, а не по одним скриптам.
+
+    ЗДЕСЬ БЫЛ ДЕФЕКТ, И НАШЁЛ ЕГО ВНЕШНИЙ ВЗГЛЯД (#623). Судится всё, что
+    отбирает `touched`, а он идёт по `paths.SOURCES` — скрипты И пакет
+    транспорта. Достижимость же считалась по одним скриптам, и имя,
+    добавленное в `packages/transport` и вызванное ТАМ ЖЕ, объявлялось сиротой
+    ложно. Замер пробой: две добавленные в транспорт функции, одна зовёт
+    другую, — гейт назвал сиротами обеих
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    ТОТ ЖЕ ПЕРЕНОС ОДНАЖДЫ УЖЕ ОСЛЕПИЛ СОСЕДА: `paths.SOURCES` заведён ровно
+    потому, что после выноса транспорта наружу свой глоб у каждого читателя
+    молча переставал его видеть (090).
+    """
+    monkeypatch.chdir(repo)
+    assert module.WORK == module.paths.SOURCES, "источники написаны вторым разом"
+    (repo / "packages" / "transport" / "низ.py").write_text(
+        "def зовущая() -> int:\n    return сиротой_не_является()\n\n\n"
+        "def сиротой_не_является() -> int:\n    return 1\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "добавлено в транспорт")
+    assert module.findings("main") == ["packages/transport/низ.py:зовущая"], (
+        "вызванное внутри транспорта объявлено сиротой — обход идёт не по всем источникам"
+    )
 
 
 def test_a_tree_that_does_not_parse_is_the_third_outcome(

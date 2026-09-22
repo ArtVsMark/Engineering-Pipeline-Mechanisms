@@ -78,7 +78,17 @@ EXIT_BROKEN: Final = 2
 #: пишутся здесь вторым написанием. Набор в рабочий код не входит по построению:
 #: в этом весь предмет — прогон набора достижимостью НЕ является.
 #: Гейт второго якоря поймал здесь ровно это (022, 090).
-WORK: Final = paths.SCRIPTS
+#:
+#: ИСТОЧНИКОВ ДВА, А НЕ ОДИН, И ЗДЕСЬ СТОЯЛ `SCRIPTS`. Судится всё, что отбирает
+#: `neighbour.touched`, а он идёт по `paths.SOURCES` — скрипты И пакет
+#: транспорта. Достижимость же считалась по одним скриптам: имя, добавленное в
+#: `packages/transport` и вызванное там же, объявлялось сиротой ЛОЖНО. Замер
+#: пробой 22.09.2026: две добавленные в транспорт функции, одна зовёт другую, —
+#: гейт назвал сиротами ОБЕИХ. Гейт, краснеющий на исправном, учит себя обходить
+#: ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+#: Нашёл внешний взгляд на #623; тот же перенос транспорта наружу однажды уже
+#: ослепил соседний гейт, и `paths.SOURCES` заведён ровно поэтому (090).
+WORK: Final = paths.SOURCES
 RUNS: Final = paths.WORKFLOWS
 
 #: Имя точки входа. Её зовёт площадка строкой запуска модуля, и искать её
@@ -88,7 +98,7 @@ ENTRY: Final = "main"
 NotRun = neighbour.NotRun
 
 
-def mentioned(root: Path = WORK) -> Counter[str]:
+def mentioned(roots: tuple[Path, ...] = WORK) -> Counter[str]:
     """Сколько раз рабочий код ОБРАЩАЕТСЯ к каждому имени. Объявление не в счёт.
 
     РАЗБОР ЗДЕСЬ ПО ДЕРЕВУ КОДА, А НЕ ПО ТЕКСТУ, И ЭТО НЕ ВТОРОЕ ПОНИМАНИЕ
@@ -106,7 +116,7 @@ def mentioned(root: Path = WORK) -> Counter[str]:
     ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
     """
     seen: Counter[str] = Counter()
-    for path in sorted(root.glob("*.py")):
+    for path in sorted(one for root in roots for one in root.glob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError as exc:
