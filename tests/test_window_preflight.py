@@ -810,3 +810,95 @@ def test_a_platform_refusal_does_not_hold_the_push(
     preflight.push_branch(root)
     assert any("push" in one for one in said), "толчок задержан отказом канала"
     assert "не проверено" in capsys.readouterr().err
+
+
+# --- тишина взгляда называется на КАЖДОМ заходе (#616) ------------------------
+
+
+def test_the_silenced_look_is_named_on_a_plain_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Предупреждение о тишине взгляда достижимо БЕЗ `--push`.
+
+    ЗДЕСЬ БЫЛ ДЕФЕКТ, И НАШЁЛ ЕГО ВНЕШНИЙ ВЗГЛЯД (`8fb329e`, #616). Вызов
+    стоял внутри `push_branch` — то есть срабатывал только при `--push`. А
+    предполётную зовут и без него, и именно в этом заходе предупреждение
+    нужнее: до толчка ещё можно решить, разводить ли правку файла прогона
+    отдельным изменением. Достижимое одним путём из двух для второго пути не
+    существует
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    ВЫЗОВ ПРОВЕРЯЕТСЯ ЗДЕСЬ, А НЕ ТОЛЬКО САМ РАЗБОР. Вторая находка того же
+    обзора (`ca7667f`) именно об этом: `tests/test_agent_silenced.py`
+    проверяет `look`, а то, что предполётная его ЗОВЁТ, не проверял никто.
+    """
+    said: list[str] = []
+
+    def heard(root: Path, base: str) -> tuple[int, str]:
+        said.append(base)
+        return preflight.check_agent_silenced.EXIT_SILENCED, "взгляда НЕ БУДЕТ"
+
+    monkeypatch.setattr(preflight.check_agent_silenced, "look", heard)
+    preflight.say_the_look_is_silenced(tmp_path)
+    assert "взгляда НЕ БУДЕТ" in capsys.readouterr().err
+    assert said == [f"origin/{preflight.paths.TRUNK}"], "база спрошена не у общего источника"
+
+
+def test_the_plain_run_actually_calls_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Заход БЕЗ `--push` действительно зовёт предупреждение — прогоном, не чтением.
+
+    ОТКАТ, КОТОРЫЙ НЕ ПОКРАСНЕЛ, — НАХОДКА, А НЕ ОБЛЕГЧЕНИЕ. Соседка выше
+    зовёт `say_the_look_is_silenced` НАПРЯМУЮ и осталась зелёной, когда вызов
+    из `main` сняли: она проверяла функцию, а не её достижимость — тем же
+    изъяном, который этим изменением и чинится
+    ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+    Здесь предмет — ЗАХОД. `--list` выбран потому, что он доходит до вывода, не
+    гоняя проверок дерева: предупреждение стоит раньше них.
+    """
+    root = branch_tree(tmp_path, "agent/работа")
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "ci.yml").write_text(WORKFLOW, encoding="utf-8")
+    monkeypatch.setattr(preflight, "environment_gap", lambda _: [])
+    monkeypatch.setattr(
+        preflight.check_agent_silenced,
+        "look",
+        lambda root, base: (preflight.check_agent_silenced.EXIT_SILENCED, "взгляда НЕ БУДЕТ"),
+    )
+    preflight.main(["--list", "--root", str(root)])
+    assert "взгляда НЕ БУДЕТ" in capsys.readouterr().err, (
+        "заход без --push предупреждения не напечатал — оно опять достижимо одним путём"
+    )
+
+
+def test_a_quiet_tree_says_nothing_about_the_look(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вторая половина: прогоны с действием не тронуты — заход молчит.
+
+    Без неё предупреждение печаталось бы всегда, и его научились бы
+    пролистывать ровно там, где оно что-то значит
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    monkeypatch.setattr(
+        preflight.check_agent_silenced,
+        "look",
+        lambda root, base: (preflight.check_agent_silenced.EXIT_OK, "не тронуты"),
+    )
+    preflight.say_the_look_is_silenced(tmp_path)
+    assert capsys.readouterr().err == ""
+
+
+def test_a_refused_look_is_named_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ разбора называется непроверенным, а не «чисто» (045)."""
+
+    def broken(*_: object) -> tuple[int, str]:
+        raise preflight.check_agent_silenced.NotRun("git не ответил")
+
+    monkeypatch.setattr(preflight.check_agent_silenced, "look", broken)
+    preflight.say_the_look_is_silenced(tmp_path)
+    assert "не проверена" in capsys.readouterr().err
