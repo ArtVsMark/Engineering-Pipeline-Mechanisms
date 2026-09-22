@@ -125,23 +125,32 @@ def test_only_the_failed_jobs_of_a_run_are_named(monkeypatch: pytest.MonkeyPatch
     """У красного захода называются упавшие джобы, а не все его джобы.
 
     Красный заход почти всегда красен ОДНИМ джобом из десяти, и записать все
-    значило бы обвинить девять зелёных (068).
+    значило бы обвинить девять зелёных (068). `timed_out` при этом красное, а
+    `cancelled` — нет: отменённая запись не пройдена, но и отказом не является.
+
+    ПРЕДМЕТ ПЕРЕЕХАЛ С `red_jobs` НА `red_details`, И СВОЙСТВО С НИМ. Первая
+    отдавала одни имена и осиротела, когда вторая стала отдавать имя, шаг,
+    признак и чей шаг упал. Снять сироту вместе с её проверкой значило бы
+    потерять утверждение, которое к замене относится ровно так же (022).
     """
 
-    def request(
-        method: str, path: str, token: str, *rest: object, **kw: object
-    ) -> dict[str, object]:
+    def request(method: str, path: str, token: str, *rest: object, **kw: object) -> object:
+        # Аннотации спрашиваются вторым вызовом и по другому адресу: общий
+        # ответ на оба сделал бы разбор признака бессмысленным.
+        if path.endswith("/annotations"):
+            return []
         return {
             "jobs": [
-                {"name": "lint", "conclusion": "success"},
-                {"name": "test", "conclusion": "failure"},
-                {"name": "debt", "conclusion": "timed_out"},
-                {"name": "pr-meta", "conclusion": "cancelled"},
+                {"id": 1, "name": "lint", "conclusion": "success"},
+                {"id": 2, "name": "test", "conclusion": "failure"},
+                {"id": 3, "name": "debt", "conclusion": "timed_out"},
+                {"id": 4, "name": "pr-meta", "conclusion": "cancelled"},
             ]
         }
 
     monkeypatch.setattr(module.ghrest, "request", request)
-    assert module.red_jobs("o/r", 7, "токен") == ["debt", "test"]
+    said = [one["name"] for one in module.red_details("o/r", 7, "токен")]
+    assert said == ["debt", "test"], said
 
 
 def test_the_average_counts_only_what_was_timed(monkeypatch: pytest.MonkeyPatch) -> None:
