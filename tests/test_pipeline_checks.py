@@ -577,11 +577,19 @@ def test_an_unnamed_span_is_a_refusal_not_a_blank() -> None:
 # --- вызываемый прогон: третий род ------------------------------------------
 
 #: Вызывающий: обычный прогон на изменении, чей джоб не делает шагов, а зовёт.
+#: ИМЕНА У ДЖОБОВ РАЗНЫЕ НАМЕРЕННО. Прежде оба звались `debt`, и составное имя
+#: выходило «debt / debt» — по нему ПОРЯДОК неразличим: перестановка доводов в
+#: `check_names` оставила бы приёмку зелёной. Замер порядка был только один,
+#: внешним прогоном на #549 (`outer`/`inner`), а набор его не держал — то есть
+#: проверено было на выборке, где разницы не видно
+#: ([107](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/107-it-works-for-the-author-means-tested-on-the-authors-sample.md)).
+#: Нашёл внешний взгляд на #550; до реестра находка не доехала — её потерял
+#: разбор обзора (#612).
 CALLER = """name: caller
 on: [pull_request]
 jobs:
-  debt:
-    name: debt
+  снаружи:
+    name: снаружи
     uses: ./.github/workflows/step-debt.yml
 """
 #: Вызываемый: событие у него ОДНО, и сам он не идёт никогда.
@@ -589,8 +597,8 @@ CALLEE = """name: step-debt
 on:
   workflow_call:
 jobs:
-  debt:
-    name: debt
+  внутри:
+    name: внутри
     runs-on: ubuntu-latest
     steps: []
 """
@@ -621,9 +629,16 @@ def test_a_called_job_gets_a_composed_name(tmp_path: Path) -> None:
 
     Вписать сюда прежнее имя значило бы объявить проверку под именем, которого
     площадка не выдаст, — и сводный гейт ждал бы её вечно (045).
+
+    ПОРЯДОК ПРОВЕРЯЕТСЯ, А НЕ ПОДРАЗУМЕВАЕТСЯ. Образцы зовут свои джобы РАЗНО —
+    «снаружи» и «внутри», — поэтому обратный порядок здесь краснеет. Пока оба
+    звались `debt`, ожидание «debt / debt» держалось при любой перестановке.
     """
     directory = called_tree(tmp_path)
-    assert set(policy.declared_jobs(directory)) == {"debt / debt"}
+    assert set(policy.declared_jobs(directory)) == {f"снаружи{policy.COMPOSED}внутри"}
+    assert "внутри / снаружи" not in set(policy.declared_jobs(directory)), (
+        "обратный порядок прошёл бы незамеченным"
+    )
 
 
 def test_a_called_run_is_not_a_check_of_its_own(tmp_path: Path) -> None:
@@ -651,6 +666,60 @@ def test_a_foreign_call_keeps_its_own_name(tmp_path: Path) -> None:
         "    name: debt\n    uses: someone/else/.github/workflows/x.yml@v1\n",
     )
     assert set(policy.declared_jobs(directory)) == {"debt"}
+
+
+#: Прогон, который И вызываемый, И идёт сам. Площадка такое не запрещает, а
+#: разбор до #612 пропускал его ЦЕЛИКОМ — оба раздела читали `workflow_call`
+#: как повод не смотреть дальше.
+BOTH_WORLDS = """name: и-туда-и-сюда
+on:
+  workflow_call:
+  pull_request:
+jobs:
+  двойной:
+    name: двойной
+    steps: []
+"""
+
+
+def test_a_run_that_is_both_called_and_self_starting_is_refused(tmp_path: Path) -> None:
+    """Прогон с обоими событиями — отказ, а не тихий пропуск обоими разделами.
+
+    ЧТО БЫЛО. `declared_jobs` и `beyond_jobs` оба читали `workflow_call` как
+    повод пропустить документ целиком, и джобы такого прогона не попадали
+    НИКУДА — без единого красного. Докстрока соседа при этом обещала, что
+    «джоб попадает ровно в один раздел, и „не спросили" перестаёт быть
+    возможным состоянием»: обещание было шире кода
+    ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+    ПОЧЕМУ ОТКАЗ, А НЕ ВЫБОР РАЗДЕЛА. Джобы такого прогона дают запись ДВУМЯ
+    именами сразу — простым и составным, — и какое считать проверкой, из
+    документа не следует. Молчаливый выбор объявил бы проверку там, где их две,
+    либо не объявил бы ни одной (045).
+
+    ПРЕДМЕТА В ДЕРЕВЕ НЕТ, и это замер: 22.09.2026 из тридцати прогонов ни один
+    не несёт обоих событий. Находка внешнего взгляда на #550 верно взвешена
+    риском; до реестра она не доехала — её потерял разбор обзора (#612).
+    """
+    directory = tmp_path / "workflows"
+    directory.mkdir()
+    (directory / "оба.yml").write_text(BOTH_WORLDS, encoding="utf-8")
+    (directory / "ci.yml").write_text(WORKFLOW, encoding="utf-8")
+    for читатель in (policy.declared_jobs, policy.beyond_jobs):
+        with pytest.raises(policy.BadPolicy, match="двумя именами сразу"):
+            читатель(directory)
+
+
+def test_a_plain_callee_is_still_skipped_quietly(tmp_path: Path) -> None:
+    """Вторая половина: вызываемый С ОДНИМ событием отказа НЕ даёт.
+
+    Без неё отказ превращается в «упомянут `workflow_call`» — и девять
+    вызываемых прогонов дерева покраснели бы разом, хотя каждый из них исправен
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    directory = called_tree(tmp_path)
+    assert set(policy.declared_jobs(directory)) == {f"снаружи{policy.COMPOSED}внутри"}
+    assert policy.beyond_jobs(directory) == {}
 
 
 def test_a_call_that_points_nowhere_is_refused(tmp_path: Path) -> None:
@@ -689,7 +758,7 @@ def test_the_leading_dot_slash_is_not_normalised_away(tmp_path: Path) -> None:
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     """
     directory = called_tree(tmp_path)
-    assert policy.called_jobs("./.github/workflows/step-debt.yml", directory) == ["debt"]
+    assert policy.called_jobs("./.github/workflows/step-debt.yml", directory) == ["внутри"]
     assert policy.called_jobs(".github/workflows/step-debt.yml", directory) is None
 
 
