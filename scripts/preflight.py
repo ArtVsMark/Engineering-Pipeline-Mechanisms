@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import agent_pr
+import check_agent_silenced
 import check_branch_revival
 import check_env
 import ghrest
@@ -339,6 +340,18 @@ def push_branch(root: Path) -> int:
         print(about, file=sys.stderr if verdict else sys.stdout)
         if verdict == check_branch_revival.EXIT_REVIVED:
             return EXIT_BROKEN
+    # ТИШИНУ ВЗГЛЯДА НАЗЫВАЮТ ДО ТОЛЧКА, А НЕ ПОСЛЕ СЛИЯНИЯ. Правка файла
+    # прогона глушит агента на этой же голове, и узнаётся это сегодня из
+    # реестра #89 — то есть когда работа уже в общей ветке. Предупреждение
+    # ТОЛЧОК НЕ ДЕРЖИТ: правка такого файла законна, и запрет здесь запрещал бы
+    # работу, а не ошибку (051, 154).
+    try:
+        verdict, about = check_agent_silenced.look(root, "origin/main")
+    except (check_agent_silenced.NotRun, OSError) as exc:
+        print(f"тишина взгляда не проверена: {report.cut(str(exc))}", file=sys.stderr)
+    else:
+        if verdict == check_agent_silenced.EXIT_SILENCED:
+            print(about, file=sys.stderr)
     said = subprocess.run(
         ["git", "push", "-u", "origin", branch],
         capture_output=True,
