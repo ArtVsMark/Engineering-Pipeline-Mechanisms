@@ -418,3 +418,78 @@ def test_an_exempt_name_names_its_reason() -> None:
     for value, why in SPELLING_MEANS_NOTHING.items():
         assert why.strip(), f"«{value}»: исключение без причины"
         assert value in declared, f"«{value}»: исключение на имя, которого в якоре нет"
+
+
+#: Составы источников, собранные рукой ЗАКОННО, — с причиной у каждого. Список
+#: разрешительный (068): новое такое место обязано появиться здесь осознанно, а
+#: не проскользнуть молча. Пусто — законное состояние.
+COMPOSED_BY_HAND: Final[dict[str, str]] = {}
+
+
+def source_sets_built_by_hand() -> list[str]:
+    """Объявления, которые СОБИРАЮТ состав источников вместо `paths.SOURCES`.
+
+    Предмет — значение модуля, в котором названы `paths.SCRIPTS` или
+    `paths.TRANSPORT` и НЕ назван `paths.SOURCES`. Именно так выглядит рука:
+    автор перечисляет каталоги, которые помнит, и второй забывается.
+    """
+    found: list[str] = []
+    for path in [*walk(ROOT / "scripts", "*.py"), *walk(ROOT / "tests", "*.py")]:
+        if path.name == ANCHOR_NAME:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                name, value = node.target.id, node.value
+            elif (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+            ):
+                name, value = node.targets[0].id, node.value
+            else:
+                continue
+            if value is None:
+                continue
+            said = {one.attr for one in ast.walk(value) if isinstance(one, ast.Attribute)}
+            if "SOURCES" in said or not ({"SCRIPTS", "TRANSPORT"} & said):
+                continue
+            where = f"{path.relative_to(ROOT)}:{name}"
+            if where not in COMPOSED_BY_HAND:
+                found.append(where)
+    return found
+
+
+def test_the_source_set_comes_from_the_anchor() -> None:
+    """Состав источников берётся у якоря, а не перечисляется заново.
+
+    ЯКОРЬ `paths.SOURCES` ЗАВЕДЁН РОВНО ПРОТИВ ЭТОГО: после выноса транспорта в
+    `packages/` свой глоб у каждого читателя молча переставал его видеть, и
+    общий низ выпадал из проверок, заведённых ради него же
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    Якорь существовал — и дважды за сутки его обошли рукой.
+
+    ЗАМЕР 22.09.2026 ПО ВСЕМУ ДЕРЕВУ: собранных рукой составов ОДИН
+    (`check_shipped.LOOK_AT`, пропущен транспорт — а он буквально то, что
+    отдают наружу), взятых у якоря — четыре. Плюс промах в
+    `check_reached_by_work.WORK` часом раньше: тот судил транспорт и не считал
+    в нём достижимости. Оба нашёл внешний взгляд, ни одного — чтение.
+
+    ПОЧЕМУ ЭТО ОТДЕЛЬНО ОТ СОСЕДА ПО ФАЙЛУ. Тот ловит второе НАПИСАНИЕ
+    канонического пути — литерал вместо имени. Здесь написания нет вовсе: имена
+    берутся у якоря, а рукой собирается СОСТАВ. Предикат соседа такое не видит
+    (022, 195).
+    """
+    found = source_sets_built_by_hand()
+    assert not found, (
+        "состав источников собран рукой — второй источник забудется молча:\n  "
+        + "\n  ".join(sorted(found))
+        + "\n\nБерите `paths.SOURCES`. Законное исключение вносится в"
+        " COMPOSED_BY_HAND с причиной."
+    )
+
+
+def test_an_exempt_source_set_names_its_reason() -> None:
+    """У исключения есть причина: молчащее неотличимо от недосмотра (154)."""
+    for where, why in COMPOSED_BY_HAND.items():
+        assert why.strip(), f"«{where}»: исключение без причины"
