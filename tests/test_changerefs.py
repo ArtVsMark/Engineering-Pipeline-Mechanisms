@@ -239,11 +239,11 @@ def test_a_resolution_keeps_what_the_author_wrote_after_the_marks() -> None:
     одинаково (039).
     """
     сказано = "Разобрано: a70f8f5 — премиса не подтвердилась: у 136 механизм уже был"
-    assert changerefs.resolutions_in(сказано) == [сказано]
-    assert changerefs.resolutions_in("Разобрано: `abc1234`") == ["Разобрано: abc1234"], (
+    assert changerefs.resolutions_in_all([сказано]) == [сказано]
+    assert changerefs.resolutions_in_all(["Разобрано: `abc1234`"]) == ["Разобрано: abc1234"], (
         "оформление кодом — дело автора, а запись нормализуется"
     )
-    assert changerefs.resolutions_in("Разобрано: замер") == []
+    assert changerefs.resolutions_in_all(["Разобрано: замер"]) == []
 
 
 def test_one_line_of_marks_is_kept_once() -> None:
@@ -308,11 +308,18 @@ def test_a_reason_does_not_lend_its_words_to_the_marks() -> None:
 
 
 def test_one_mark_named_twice_in_one_line_is_printed_once() -> None:
-    """Правило повтора одно на текст и на ветку: один отпечаток — одна запись."""
-    assert changerefs.resolutions_in("Разобрано: abc1234 abc1234") == ["Разобрано: abc1234"]
-    assert changerefs.resolutions_in("Разобрано: abc1234") == changerefs.resolutions_in_all(
-        ["Разобрано: abc1234"]
-    ), "один текст — частный случай ветки, а не второе правило"
+    """Правило повтора одно на текст и на ветку: один отпечаток — одна запись.
+
+    ОБЁРТКА `resolutions_in` СНЯТА (#630), А СВОЙСТВО ОСТАЛОСЬ. Она была
+    `resolutions_in_all([text])` в одну строку и осиротела, когда рабочий путь
+    пошёл через `_all`. Утверждение же про обёртку и не было: «один текст —
+    частный случай ветки» держится тем, что правило повтора ОДНО, и проверяется
+    оно теперь прямо на замене — одним телом против двух (022).
+    """
+    assert changerefs.resolutions_in_all(["Разобрано: abc1234 abc1234"]) == ["Разобрано: abc1234"]
+    assert changerefs.resolutions_in_all(["Разобрано: abc1234"]) == changerefs.resolutions_in_all(
+        ["Разобрано: abc1234", "Разобрано: abc1234"]
+    ), "одно тело — частный случай ветки, а не второе правило"
 
 
 def test_a_resolution_is_parsed_once_for_every_reader() -> None:
