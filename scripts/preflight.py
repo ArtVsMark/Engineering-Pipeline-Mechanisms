@@ -272,6 +272,34 @@ def report_gaps() -> None:
         print(f"  {check} — {why}")
 
 
+def say_the_look_is_silenced(root: Path) -> None:
+    """Называет тишину взгляда — НА КАЖДОМ заходе, а не только перед толчком.
+
+    ЗДЕСЬ БЫЛ ДЕФЕКТ, И НАШЁЛ ЕГО ВНЕШНИЙ ВЗГЛЯД (`8fb329e`, #616). Вызов
+    стоял внутри `push_branch`, то есть срабатывал ТОЛЬКО при `--push`. А
+    предполётную зовут и без него — посмотреть, что скажет площадка, — и
+    именно в этом заходе предупреждение нужнее всего: до толчка ещё можно
+    решить, разводить ли правку файла прогона отдельным изменением.
+    Предупреждение, достижимое одним путём из двух, для второго пути не
+    существует
+    ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
+
+    ОТКАЗ КАНАЛА НЕ ДЕРЖИТ ЗАХОД, НО И НЕ МОЛЧИТ: непроверенное называется
+    непроверенным, а не «чисто»
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    try:
+        # ОБЩАЯ ВЕТКА НАЗВАНА ОДНИМ ИСТОЧНИКОМ, а не строкой здесь: с чем
+        # сравнивает площадка, знает `paths.TRUNK`, и второе написание того же
+        # разошлось бы с первым молча (022).
+        verdict, about = check_agent_silenced.look(root, f"origin/{paths.TRUNK}")
+    except (check_agent_silenced.NotRun, OSError) as exc:
+        print(f"тишина взгляда не проверена: {report.cut(str(exc))}", file=sys.stderr)
+        return
+    if verdict == check_agent_silenced.EXIT_SILENCED:
+        print(about, file=sys.stderr)
+
+
 def branch_now(root: Path) -> str:
     """Имя текущей ветки — из дерева, а не из памяти зовущего."""
     said = subprocess.run(
@@ -340,18 +368,6 @@ def push_branch(root: Path) -> int:
         print(about, file=sys.stderr if verdict else sys.stdout)
         if verdict == check_branch_revival.EXIT_REVIVED:
             return EXIT_BROKEN
-    # ТИШИНУ ВЗГЛЯДА НАЗЫВАЮТ ДО ТОЛЧКА, А НЕ ПОСЛЕ СЛИЯНИЯ. Правка файла
-    # прогона глушит агента на этой же голове, и узнаётся это сегодня из
-    # реестра #89 — то есть когда работа уже в общей ветке. Предупреждение
-    # ТОЛЧОК НЕ ДЕРЖИТ: правка такого файла законна, и запрет здесь запрещал бы
-    # работу, а не ошибку (051, 154).
-    try:
-        verdict, about = check_agent_silenced.look(root, "origin/main")
-    except (check_agent_silenced.NotRun, OSError) as exc:
-        print(f"тишина взгляда не проверена: {report.cut(str(exc))}", file=sys.stderr)
-    else:
-        if verdict == check_agent_silenced.EXIT_SILENCED:
-            print(about, file=sys.stderr)
     said = subprocess.run(
         ["git", "push", "-u", "origin", branch],
         capture_output=True,
@@ -452,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
                 " печатает команду — и повторите."
             )
             return EXIT_BROKEN
+
+    say_the_look_is_silenced(args.root)
 
     try:
         # Проверки ветки идут ПЕРВЫМИ: их предмет — то, откроется ли изменение
