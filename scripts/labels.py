@@ -80,6 +80,11 @@ def load(path: Path = DEFAULT_PATH) -> list[Label]:
         if not isinstance(kind, bool):
             problems.append(f"{name or index}: kind — не да/нет, а «{kind}»")
             kind = False
+        # ЗОНА РОДОМ БЫТЬ НЕ МОЖЕТ. Метка `area/*` с `kind: true` закрыла бы у
+        # задачи обе нехватки одной меткой — и счёт голых задач молчал бы о
+        # задаче без рода. Нашёл внешний взгляд на #688 (`a4d414a`).
+        if kind and name.startswith(ZONE_PREFIX):
+            problems.append(f"{name}: зона не может быть родом — kind у метки area/* запрещён")
         if not name:
             problems.append(f"запись {index}: пустое имя")
         if not COLOR_RE.match(color):
