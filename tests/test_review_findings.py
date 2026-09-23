@@ -732,7 +732,7 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
     monkey.setattr(
         module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами", "код")]
     )
-    monkey.setattr(module, "existing_mark", lambda *_, **__: "abc1234")
+    monkey.setattr(module, "pair_up", lambda *_, **__: ["abc1234"])
     monkey.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
     written: dict[str, Any] = {}
     monkey.setattr(
@@ -1262,15 +1262,10 @@ TWO_AT_ONE_PLACE: Final = (
 
 
 def harvest(entries: dict[str, Any], pr: int, titles: tuple[str, ...]) -> dict[str, Any]:
-    """Жатва одного захода тем же приёмом, что в `main`: занятое не отдаётся дважды."""
-    taken: set[str] = set()
-    for title in titles:
-        mark = module.existing_mark(entries, pr, title, taken=taken)
-        if mark is not None:
-            taken.add(mark)
-            continue
-        entries[module.fingerprint(title)] = module.findings.Entry(pr, "риск", title)
-        taken.add(module.fingerprint(title))
+    """Жатва одного захода тем же приёмом, что в `main`: пары решаются целиком."""
+    for title, mark in zip(titles, module.pair_up(entries, pr, list(titles)), strict=True):
+        if mark is None:
+            entries[module.fingerprint(title)] = module.findings.Entry(pr, "риск", title)
     return entries
 
 
@@ -1321,3 +1316,51 @@ def test_a_retelling_lands_on_the_closest_of_its_neighbours() -> None:
     )
     mark = module.existing_mark(entries, 635, retold[0])
     assert mark == module.fingerprint(TWO_AT_ONE_PLACE[1]), "пересказ сел на чужую запись"
+
+
+OLD_AT_TEN: Final = (
+    "scripts/x.py:10 — разбор роняет пустую строку и молча теряет последнюю запись реестра"
+)
+NEW_AT_TEN: Final = "scripts/x.py:10 — имя переменной вводит в заблуждение: `left` хранит правое"
+RETOLD_AT_TEN: Final = (
+    "scripts/x.py:10 — разбор теряет последнюю запись реестра, роняя пустую строку"
+)
+
+
+def test_the_order_of_lines_does_not_decide_who_retells() -> None:
+    """Пересказ находится, где бы в ответе ни стояла соседняя новая находка.
+
+    Проверено прогоном до починки: новая находка по адресу, стоящая РАНЬШЕ
+    пересказа старой, забирала старую запись себе — запись хранит прежний
+    заголовок, и новая находка пропадала молча, а пересказ заводил дубль. Счёт
+    записей при этом сходился, расходилось содержимое
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    old = module.fingerprint(OLD_AT_TEN)
+    for order in ((NEW_AT_TEN, RETOLD_AT_TEN), (RETOLD_AT_TEN, NEW_AT_TEN)):
+        entries = {old: module.findings.Entry(1, "риск", OLD_AT_TEN)}
+        said = dict(zip(order, module.pair_up(entries, 1, list(order)), strict=True))
+        assert said[RETOLD_AT_TEN] == old, f"пересказ не нашёл свою запись при порядке {order}"
+        assert said[NEW_AT_TEN] is None, f"новая находка села на чужую запись при порядке {order}"
+
+
+def test_two_retellings_pair_up_as_a_whole() -> None:
+    """Два пересказа по одному адресу разбираются вместе, а не жадно по очереди.
+
+    Случай внешнего взгляда на #662: ранний пересказ отбирал запись, которая
+    ближе позднему, и тому доставалась дальняя. Сильнейшие пары занимаются
+    первыми, поэтому каждый пересказ садится на свою запись.
+    """
+    first, second = TWO_AT_ONE_PLACE
+    entries = {
+        module.fingerprint(first): module.findings.Entry(635, "риск", first),
+        module.fingerprint(second): module.findings.Entry(635, "риск", second),
+    }
+    retold = [
+        "scripts/runs_series.py:194 — подстрочный поиск `pip install` классифицирует строку "
+        "как installer-only, хотя через `&&` она ещё и выполняет работу.",
+        "scripts/runs_series.py:194 — множество `ours` строится по имени шага без привязки "
+        "к джобу; одноимённый шаг унаследует чужую классификацию.",
+    ]
+    said = module.pair_up(entries, 635, retold)
+    assert said == [module.fingerprint(second), module.fingerprint(first)], said
