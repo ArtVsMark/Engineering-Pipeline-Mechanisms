@@ -1250,3 +1250,62 @@ def test_all_agent_calls_name_one_model() -> None:
     said = declared_models()
     assert said, "в дереве нет ни одного вызова агента — проверять нечего (075)"
     assert len(said) == 1, f"вызовы агента названы разными моделями: {said}"
+
+
+#: Шаг, называющий модель и отказ захода (#673).
+AGENT_RUN: Final = "scripts/agent_run.py"
+
+
+def unnamed_runs() -> list[str]:
+    """Вызовы агента, за которыми не стоит шаг «модель и отказ захода».
+
+    Ищется по ЗАДАНИЮ, а не по файлу: файл захода живёт в `RUNNER_TEMP`
+    своего задания, и шаг в соседнем задании прочесть его не может.
+    """
+    missing: list[str] = []
+    for path in walk(WORKFLOWS, "*.yml"):
+        for job_name, job in load(path)["jobs"].items():
+            steps = job.get("steps") or []
+            for place, step in enumerate(steps):
+                uses = str(step.get("uses") or "")
+                if not uses.startswith(CALLS_A_MODEL):
+                    continue
+                where = f"{path.name}:{job_name} «{step.get('name') or 'без имени'}»"
+                sid = step.get("id")
+                if not sid:
+                    missing.append(f"{where}: у вызова нет id — файл захода не назвать")
+                    continue
+                said = f"steps.{sid}.outputs.execution_file"
+                follows = [
+                    one
+                    for one in steps[place + 1 :]
+                    if AGENT_RUN in str(one.get("run") or "")
+                    and said in yaml.dump(one, allow_unicode=True)
+                ]
+                if not follows:
+                    missing.append(f"{where}: за вызовом нет шага {AGENT_RUN} по его файлу")
+                elif "always()" not in str(follows[0].get("if") or ""):
+                    missing.append(
+                        f"{where}: шаг {AGENT_RUN} идёт без always() — после отказа "
+                        "агента он не запустится, а отказ и есть его предмет"
+                    )
+    return missing
+
+
+def test_every_agent_call_names_its_model_and_its_failure() -> None:
+    """За каждым вызовом агента стоит шаг, печатающий модель и отказ захода.
+
+    ЗАМЕР 23.09.2026 (#673): объявленную модель закреплённый CLI не знал, и
+    каждый заход кончался за 0–1 с — зелёным, потому что вызов объявлен
+    `continue-on-error`. Причину знал только лог, закрытый окну; изменения
+    сливались без взгляда. Шаг `agent_run.py` выносит модель и текст отказа в
+    аннотации проверки, а этот гейт не даёт вызову приехать без него.
+
+    `always()` обязателен: без него шаг не запустится ровно после отказа
+    агента — то есть тогда, когда он и нужен.
+    """
+    assert any(agent_steps(path) for path in walk(WORKFLOWS, "*.yml")), (
+        "вызовов агента в дереве нет — проверять нечего (075)"
+    )
+    missing = unnamed_runs()
+    assert not missing, "; ".join(missing)

@@ -29,12 +29,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
+import agent_run
 import ghrest
 import report
 import unlooked
@@ -43,7 +43,7 @@ EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
 
 #: Тип последнего сообщения прогона: в нём лежит текст ответа.
-RESULT: Final = "result"
+RESULT: Final = agent_run.RESULT
 
 
 class NotRun(RuntimeError):
@@ -57,14 +57,15 @@ def answer_of(raw: str) -> str:
     текст. Разбирается именно он, а не «последнее сообщение вообще»: прогон
     может оборваться, и тогда ответа нет — это состояние, а не пустая строка.
     """
+    # ФОРМУ ФАЙЛА РАЗБИРАЕТ ОДИН МОДУЛЬ — `agent_run`: он же называет модель и
+    # отказ захода, и второе понимание «что такое файл захода» разошлось бы с
+    # первым молча (090).
     try:
-        document: Any = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise NotRun(f"файл прогона не разобрался: {exc}") from exc
-    if not isinstance(document, list):
-        raise NotRun("файл прогона не список сообщений — форма ответа изменилась")
+        document = agent_run.messages_of(raw)
+    except agent_run.NotRun as exc:
+        raise NotRun(str(exc)) from exc
     for message in reversed(document):
-        if isinstance(message, dict) and message.get("type") == RESULT:
+        if message.get("type") == RESULT:
             text = str(message.get(RESULT) or "").strip()
             if not text:
                 raise NotRun("прогон завершился без текста ответа")
