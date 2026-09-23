@@ -294,3 +294,32 @@ def test_the_registry_is_read_once_per_pass(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(module.debt, "findings_debt", counted)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
     assert len(asked) == 1, f"реестр прочитан {len(asked)} раза за один заход"
+
+
+def test_a_silent_registry_does_not_erase_what_was_already_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Непрочитанный канал не вытесняет прочитанный — и в эту сторону тоже.
+
+    Дефект был симметричным, и первая починка закрыла только одну его половину:
+    сперва непрочитанное выдавалось за пустоту, а в обратную сторону
+    непрочитанное ВЫТЕСНЯЛО уже прочитанное — ветка отказа заводила раздел
+    заново и выбрасывала строки соседнего канала. Нашёл внешний взгляд на #652.
+
+    Ровно тот инвариант, который объявляет докстрока `Source`: отказ одного
+    канала не делает пустым другой
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    quiet_platform(monkeypatch)
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("реестр молчит")
+
+    monkeypatch.setattr(module.debt, "branch_debt", lambda *_: ([], ["test-next (3.15)"]))
+    monkeypatch.setattr(module.debt, "findings_debt", refuse)
+    built, broken, marks = module.sources("o/r", "t")
+    said = "\n".join(module.render(3, built[3], "01.01.2026"))
+    assert "test-next (3.15)" in said, "прочитанная половина источника выброшена"
+    assert "Не спрошено" in said, "молчание реестра не названо"
+    assert "3" in broken
+    assert marks == set(), "отпечатки взялись ниоткуда при молчащем реестре"
