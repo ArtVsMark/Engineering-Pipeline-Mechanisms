@@ -248,7 +248,7 @@ jobs:
         id: review
         if: steps.subject.outputs.ready == 'yes'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d75b94d5ad426cb8546e6628b6f5f19b84e5cce1 # v1.0.216
+        uses: anthropics/claude-code-action@46a42b43239748e5b25771606bf1f551c3b1b517 # v1.0.232
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Чтение и история — записи нет ни в каком виде.
@@ -294,6 +294,17 @@ jobs:
             Про пункты, которые изменение НЕ закрыло, скажи прозой: чего не
             хватает и почему. Не выдумывай работу, которой в коде нет, и не
             называй закрытым пункт, закрытый «почти».
+
+      # МОДЕЛЬ И ОТКАЗ ЗАХОДА — АННОТАЦИЕЙ, А НЕ ТОЛЬКО ЛОГОМ (#673). Шаг агента
+      # объявлен `continue-on-error`, и его отказ зеленеет; лог окну закрыт.
+      # Файл захода действие отдаёт и при отказе: модель — в `system/init`,
+      # текст отказа — в итоге. Совещательный, как и сам вызов (084).
+      - name: назвать модель и отказ захода (разбор пунктов)
+        if: always() && steps.review.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          SAID: ${{ steps.review.outputs.execution_file }}
+        run: python scripts/agent_run.py --from "$SAID" --call "разбор пунктов"
 
       # Ответ прогона живёт в файле и умирает вместе с прогоном. Механизм
       # разбирает его, кладёт разбор в задачу и отмечает пункты — но только

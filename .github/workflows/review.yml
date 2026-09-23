@@ -185,9 +185,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: внешний взгляд
+        id: look
         if: steps.token.outputs.present == 'yes'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d75b94d5ad426cb8546e6628b6f5f19b84e5cce1 # v1.0.216
+        uses: anthropics/claude-code-action@46a42b43239748e5b25771606bf1f551c3b1b517 # v1.0.232
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # У находки должен быть адресат, иначе её нет (142): ключ ведёт
@@ -334,6 +335,17 @@ jobs:
             А ПОСЛЕДНЕЙ СТРОКОЙ ответа поставь ровно это, своим числом:
 
                 ВЕРДИКТ: находок N
+
+      # МОДЕЛЬ И ОТКАЗ ЗАХОДА — АННОТАЦИЕЙ, А НЕ ТОЛЬКО ЛОГОМ (#673). Шаг агента
+      # объявлен `continue-on-error`, и его отказ зеленеет; лог окну закрыт.
+      # Файл захода действие отдаёт и при отказе: модель — в `system/init`,
+      # текст отказа — в итоге. Совещательный, как и сам вызов (084).
+      - name: назвать модель и отказ захода (взгляд)
+        if: always() && steps.look.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          SAID: ${{ steps.look.outputs.execution_file }}
+        run: python scripts/agent_run.py --from "$SAID" --call "взгляд"
 
   # ЗАПИСЬ В ЖИВУЮ ЗАДАЧУ — ОБЩИЙ РЕСУРС, И У НЕГО ОДИН ВЛАДЕЛЕЦ (149).
   #
@@ -511,7 +523,7 @@ jobs:
         id: refute
         if: steps.token.outputs.present == 'yes'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d75b94d5ad426cb8546e6628b6f5f19b84e5cce1 # v1.0.216
+        uses: anthropics/claude-code-action@46a42b43239748e5b25771606bf1f551c3b1b517 # v1.0.232
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Тот же закрытый список, что у остальных заходов, и по той же
@@ -582,6 +594,17 @@ jobs:
             Причина у второго обязательна: без неё разбирающий узнает, что
             премиса не подтвердилась, и не узнает почему — то есть будет
             проверять заново.
+
+      # МОДЕЛЬ И ОТКАЗ ЗАХОДА — АННОТАЦИЕЙ, А НЕ ТОЛЬКО ЛОГОМ (#673). Шаг агента
+      # объявлен `continue-on-error`, и его отказ зеленеет; лог окну закрыт.
+      # Файл захода действие отдаёт и при отказе: модель — в `system/init`,
+      # текст отказа — в итоге. Совещательный, как и сам вызов (084).
+      - name: назвать модель и отказ захода (верификатор)
+        if: always() && steps.refute.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          SAID: ${{ steps.refute.outputs.execution_file }}
+        run: python scripts/agent_run.py --from "$SAID" --call "верификатор"
 
       - name: перенести ответ в изменение и в реестр
         if: steps.token.outputs.present == 'yes'
@@ -781,7 +804,7 @@ jobs:
         id: late
         if: steps.token.outputs.present == 'yes'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d75b94d5ad426cb8546e6628b6f5f19b84e5cce1 # v1.0.216
+        uses: anthropics/claude-code-action@46a42b43239748e5b25771606bf1f551c3b1b517 # v1.0.232
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Тот же закрытый список, что и у ревью изменения, и по той же
@@ -885,6 +908,17 @@ jobs:
             А ПОСЛЕДНЕЙ СТРОКОЙ ответа поставь ровно это, своим числом:
 
                 ВЕРДИКТ: находок N
+
+      # МОДЕЛЬ И ОТКАЗ ЗАХОДА — АННОТАЦИЕЙ, А НЕ ТОЛЬКО ЛОГОМ (#673). Шаг агента
+      # объявлен `continue-on-error`, и его отказ зеленеет; лог окну закрыт.
+      # Файл захода действие отдаёт и при отказе: модель — в `system/init`,
+      # текст отказа — в итоге. Совещательный, как и сам вызов (084).
+      - name: назвать модель и отказ захода (поздний взгляд)
+        if: always() && steps.late.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          SAID: ${{ steps.late.outputs.execution_file }}
+        run: python scripts/agent_run.py --from "$SAID" --call "поздний взгляд"
 
       # Ответ прогона живёт в файле и умирает вместе с прогоном. Механизм
       # переносит его в само изменение — туда же, куда кладёт ответ обычное
