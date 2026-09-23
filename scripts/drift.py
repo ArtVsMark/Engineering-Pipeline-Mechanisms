@@ -823,6 +823,156 @@ def actions_behind(
     return found
 
 
+#: Закрепление по хешу: сорок шестнадцатеричных знаков. Короче площадка хеш в
+#: `uses:` не принимает, так что короткий хеш здесь не форма, а опечатка.
+HASH_RE: Final = re.compile(r"^[0-9a-f]{40}$")
+
+
+def pinned_hashes(where: Path | None = None) -> dict[str, dict[str, set[str]]]:
+    """Закрепления по хешу с пометкой версии: действие → пометка → хеши.
+
+    Берётся ТОЛЬКО пара «хеш + пометка». Хеш без пометки сверять не с чем — его
+    называет `actions_behind` («наш пин не номер»), а тег без хеша ни с чем не
+    расходится: он сам и есть версия.
+    """
+    found: dict[str, dict[str, set[str]]] = {}
+    for path in sorted((where or paths.WORKFLOWS).glob("*.y*ml")):
+        for match in ACTION_USE.finditer(path.read_text(encoding="utf-8")):
+            if match["repo"].startswith(OUR_OWN) or not match["said"]:
+                continue
+            if HASH_RE.match(match["ref"]):
+                found.setdefault(match["repo"], {}).setdefault(match["said"], set()).add(
+                    match["ref"]
+                )
+    return found
+
+
+def pin_mislabelled(
+    pins: dict[str, dict[str, set[str]]], token: str, ask: Any = None
+) -> list[Drift]:
+    """Хеш закрепления и пометка версии рядом с ним называют РАЗНОЕ.
+
+    ПОМЕТКА — ЕДИНСТВЕННОЕ, ЧТО ЧИТАЕТ ЧЕЛОВЕК. `@3d3c42e… # v7.0.1`: исполняется
+    хеш, а версию человек узнаёт по пометке — и по ней же её узнаёт дрейф
+    (`action_versions`, `actions_behind`). Поднял хеш и забыл пометку — дрейф
+    сверяет с журналом не ту версию, и отставание либо выдумывается, либо
+    пропадает молча. Замер 23.09.2026 через `git ls-remote`: закреплений по хешу
+    три, все сегодня согласны — `checkout` v7.0.1, `setup-python` v5 (= v5.6.0),
+    `claude-code-action` v1.0.216 (тег аннотированный: сверяется разыменованный
+    коммит, а не объект тега).
+
+    СВЕРКА ИДЁТ СРАВНЕНИЕМ, А НЕ РАВЕНСТВОМ. Спрашивается `compare/<хеш>...<тег>`:
+    площадка сама разыменует аннотированный тег и скажет, где тег относительно
+    хеша. «Совпали» — согласие. «Тег впереди» — согласие только у ПОДВИЖНОЙ
+    пометки (`v5`): она уходит вперёд с каждым выпуском, а хеш остаётся на её же
+    линии; отставание от неё — дело `actions_behind`. У пометки полного выпуска
+    (`v7.0.1`) тег не движется, и «впереди» значит, что хеш с пометкой разошёлся
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    «Позади» и «разошлись» — расхождение всегда: хеш не на линии пометки.
+
+    Тега с таким именем нет — тоже расхождение: пометка называет то, чего нет.
+    Отказ транспорта — третий исход источника целиком (045).
+    """
+    request = ask or ghrest.request
+    found: list[Drift] = []
+    for repo, labels in sorted(pins.items()):
+        for said, hashes in sorted(labels.items()):
+            floating = len(version_of(said) or ()) < 3
+            for pinned in sorted(hashes):
+                try:
+                    answer = request("GET", f"repos/{repo}/compare/{pinned}...{said}", token) or {}
+                except ghrest.NotFound:
+                    status = "тега нет"
+                else:
+                    status = str(answer.get("status") or "не сказано")
+                if status == "identical" or (status == "ahead" and floating):
+                    continue
+                found.append(
+                    Drift(
+                        "action-pin-mislabelled",
+                        f"{repo}: хеш {pinned[:7]} помечен {said}, а площадка о теге "
+                        f"{said} относительно хеша отвечает «{status}»",
+                        "поставить хеш, на который указывает тег, либо пометку, которой "
+                        "этот хеш соответствует: исполняется хеш, а читают пометку",
+                    )
+                )
+    return found
+
+
+#: Уровни аннотаций, которые несут предупреждение, а не отказ. Отказ проверки
+#: называет её собственный красный цвет; здесь — то, что зелёный прогон прячет.
+WARNING_LEVELS: Final = ("warning", "notice")
+
+#: Кириллица в тексте аннотации — признак, что её написали МЫ.
+OURS_RE: Final = re.compile(r"[а-яё]", re.IGNORECASE)
+
+
+def platform_warnings(repo: str, token: str, ask: Any = None) -> list[Drift]:
+    """Предупреждения площадки с головы общей ветки — те, что не видит никто.
+
+    ЗАМЕР 23.09.2026, РАДИ КОТОРОГО ИСТОЧНИК НАПИСАН. На 518 проверках шести
+    голов общей ветки площадка ставила ДВА предупреждения — оба с датой, после
+    которой поведение сменится без правки дерева:
+
+    * «Node.js 20 is deprecated … forced to run on Node.js 24:
+      actions/setup-python» — 297 раз;
+    * «The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19,
+      2026» — 302 раза.
+
+    Оба лежали в аннотациях зелёных проверок, и узнать о них можно было только
+    открыв лог. Здесь они получают адресата — запись дрейфа (#665).
+
+    ЧУЖОЕ ОТ НАШЕГО ОТЛИЧАЕТ ЯЗЫК, и это замер, а не догадка. Свои
+    предупреждения проект пишет по-русски (правило языка артефактов), площадка
+    — по-английски; на том же замере аннотаций уровня warning и notice без
+    кириллицы нашлось ровно два текста, и оба — площадки. Поле `path` не
+    различает: у обеих сторон там `.github`.
+
+    ГРАНИЦА НАЗВАНА. Английское предупреждение ЧУЖОГО ДЕЙСТВИЯ пройдёт сюда же
+    — и это желательно: оно тоже приходит извне и тоже без адресата. Наше
+    английское — ошибка в дешёвую сторону: оно станет записью и будет видно
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    ЦЕНА — ЗАПРОС НА ИМЯ ПРОВЕРКИ. Аннотации отдаются по одной проверке, а на
+    голове их под девяносто; спрашиваются только те, у кого аннотации есть, и
+    по одной на имя — одно и то же предупреждение повторяется в каждом
+    задании. Заход ночной, это около полусотни запросов.
+
+    Проверок на голове нет — отказ источника, а не «площадка молчит»: спросить
+    было не у кого (075).
+    """
+    request = ask or ghrest.request
+    head = (request("GET", f"repos/{repo}/commits/{paths.TRUNK}", token) or {}).get("sha")
+    if not head:
+        raise NotRun(f"голова {paths.TRUNK} не прочитана — спросить проверки не у кого")
+    runs = (
+        request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token) or {}
+    ).get("check_runs") or []
+    if not runs:
+        raise NotRun(
+            f"на голове {head[:7]} нет ни одной проверки — предупреждений спросить не у кого"
+        )
+    asked: dict[str, int] = {}
+    for run in runs:
+        if (run.get("output") or {}).get("annotations_count"):
+            asked.setdefault(str(run.get("name")), int(run["id"]))
+    said: dict[str, set[str]] = {}
+    for name, number in sorted(asked.items()):
+        for note in request("GET", f"repos/{repo}/check-runs/{number}/annotations", token) or []:
+            text = " ".join(str(note.get("message") or "").split())
+            if note.get("annotation_level") in WARNING_LEVELS and text and not OURS_RE.search(text):
+                said.setdefault(text, set()).add(name)
+    return [
+        Drift(
+            "platform-warning",
+            f"площадка предупреждает ({len(names)} проверок на {head[:7]}): {report.cut(text)}",
+            "прочитать объявление и решить до названной в нём даты: поднять действие, "
+            "образ раннера или версию среды — поведение сменится без правки дерева",
+        )
+        for text, names in sorted(said.items())
+    ]
+
+
 #: Как в пробе узнаётся вызов по тегу. Сам её адрес объявлен в `paths`:
 #: второй якорь заводится ровно тем, что путь собирают на месте.
 PROBE: Final = paths.HANDOVER_PROBE
@@ -1345,6 +1495,8 @@ SOURCES: Final = (
     "версии языка",
     "версии чужих действий",
     "выпуски чужих действий",
+    "пометки закреплений",
+    "предупреждения площадки",
     "вердикты по предложениям",
     "набор вопросов витрины",
     "пробелы, названные задачей",
@@ -1372,6 +1524,8 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
         ("версии чужих действий", lambda: actions_disagree(action_versions())),
         ("выпуски чужих действий", lambda: actions_behind(action_versions(), token)),
+        ("пометки закреплений", lambda: pin_mislabelled(pinned_hashes(), token)),
+        ("предупреждения площадки", lambda: platform_warnings(repo, token)),
         (
             "вердикты по предложениям",
             lambda: proposals_answered(
