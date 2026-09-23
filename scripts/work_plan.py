@@ -379,6 +379,55 @@ def assemble(body: str, built: dict[int, Source], held: dict[int, list[str]], wh
     return "\n".join(one.rstrip() for one in lines).rstrip() + "\n"
 
 
+#: Сколько раз сборка повторяется, если рука правит план во время захода.
+#: Правка человека занимает секунды, заход между чтением и записью — тоже; три
+#: подряд совпадения означали бы, что план правят непрерывно, и тогда писать
+#: поверх — хуже, чем отказаться и сказать об этом.
+TRIES: Final = 3
+
+
+def hand_part(body: str) -> list[str]:
+    """То, что в плане пишет рука: шапка и строки ручных разделов."""
+    return [
+        body.split("\n## ", 1)[0],
+        *(line for one in HELD for line in rows_of(body, HEADS[one])),
+    ]
+
+
+def fresh_build(
+    repo: str, token: str, built: dict[int, Source], marks: set[str], when: str, apply: bool
+) -> tuple[int, str, dict[int, list[str]], str]:
+    """Собирает план по свежему телу и перед записью сверяет, не правила ли его рука.
+
+    ПОТЕРЯННАЯ ПРАВКА ЧЕЛОВЕКА ХУЖЕ ОТКАЗА СБОРКИ. Сборщик переписывает тело
+    целиком, а разделы 4 и 6 и шапку ведёт владелец: всё, что он поменял между
+    чтением тела и записью, затиралось бы без следа. Поэтому перед записью тело
+    перечитывается, и если рука успела поправить шапку или ручные разделы,
+    сборка повторяется на свежем теле. Разделы механизма сверять не нужно:
+    параллельных заходов сборщика нет — у прогона одна группа.
+
+    ГРАНИЦА. Окно между перечитыванием и записью остаётся — площадка не даёт
+    записи «если тело не менялось». Оно сужено с минуты опроса источников до
+    одного запроса.
+    """
+    for _ in range(TRIES):
+        number, body = findings.live_issue(repo, token, MARKER)
+        if number is None:
+            raise NotRun("живой задачи плана нет — заводить её механизм не берётся (154)")
+        held = {one: held_rows(body, one, repo, token, marks) for one in HELD}
+        said = assemble(body, built, held, when)
+        if not apply:
+            return number, body, held, said
+        _, current = findings.live_issue(repo, token, MARKER)
+        if hand_part(current) == hand_part(body):
+            return number, body, held, said
+        print("рука правила план во время захода — собираю заново по свежему телу")
+    raise NotRun(
+        f"план правили во время каждого из {TRIES} заходов — писать поверх правки "
+        "человека сборщик не берётся"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает план и кладёт его в живую задачу."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -393,15 +442,13 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_PARTIAL
 
     try:
-        number, body = findings.live_issue(args.repo, token, MARKER)
-        if number is None:
-            raise NotRun("живой задачи плана нет — заводить её механизм не берётся (154)")
+        # ИСТОЧНИКИ СПРАШИВАЮТСЯ ДО ТЕЛА, а не после: опрос идёт минуту, и
+        # тело, прочитанное в начале, к записи устаревает. Замер 23.09.2026:
+        # владелец поставил #673 первым в раздел 4, а заход, прочитавший тело
+        # до правки, записал его после — и указание владельца пропало молча.
         built, broken, marks = sources(args.repo, token)
-        held: dict[int, list[str]] = {
-            one: held_rows(body, one, args.repo, token, marks) for one in HELD
-        }
         when = datetime.now(UTC).strftime("%d.%m.%Y")
-        said = assemble(body, built, held, when)
+        number, body, held, said = fresh_build(args.repo, token, built, marks, when, args.apply)
     except (NotRun, ghrest.TransportError) as exc:
         print(f"сборщик не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
