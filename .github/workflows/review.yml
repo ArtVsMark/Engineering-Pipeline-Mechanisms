@@ -209,7 +209,6 @@ jobs:
           # `python3 -m pytest` — другая строка, чем `python -m pytest`: на ней
           # ревью и осталось без прогона, разрешение имея.
           claude_args: >-
-            --model claude-opus-5-5
             --allowedTools
             "Read,Grep,Glob,Bash(python -m pytest:*),Bash(python3 -m pytest:*),Bash(python scripts/check_version.py:*),Bash(python3 scripts/check_version.py:*),Bash(python scripts/check_pipeline.py:*),Bash(python3 scripts/check_pipeline.py:*),Bash(git diff:*),Bash(git log:*)"
           prompt: |
@@ -518,7 +517,6 @@ jobs:
           # Тот же закрытый список, что у остальных заходов, и по той же
           # причине: вход собран из проверяемого текста (085).
           claude_args: >-
-            --model claude-opus-5-5
             --allowedTools
             "Read,Grep,Glob,Bash(python -m pytest:*),Bash(python3 -m pytest:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
           prompt: |
@@ -790,7 +788,6 @@ jobs:
           # причине: вход собран из проверяемого текста. Записи нет ни в каком
           # виде — комментарий пишет механизм следующим шагом.
           claude_args: >-
-            --model claude-opus-5-5
             --allowedTools
             "Read,Grep,Glob,Bash(python -m pytest:*),Bash(python3 -m pytest:*),Bash(python scripts/check_version.py:*),Bash(python3 scripts/check_version.py:*),Bash(python scripts/check_pipeline.py:*),Bash(python3 scripts/check_pipeline.py:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
           prompt: |

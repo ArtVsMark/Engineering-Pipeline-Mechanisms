@@ -619,11 +619,12 @@ def test_a_comment_is_found_where_the_shell_finds_it() -> None:
     адрес: `shlex` с `comments=True` резал его до `pip install pkg@git+URL`,
     чего настоящий `bash` не делает (#657).
     """
-    assert module.bare_of("pytest  # не забыть pip install") == "pytest"
-    assert module.bare_of("# только пояснение") == ""
-    assert module.bare_of('echo "ответ записан в #196"') == 'echo "ответ записан в #196"'
-    assert module.bare_of("pip install pkg#egg=x") == "pip install pkg#egg=x"
-    assert module.bare_of('echo "не закрыл') == 'echo "не закрыл'
+    assert module.commands("pytest  # не забыть pip install") == ["pytest"]
+    assert module.commands("# только пояснение") == []
+    assert module.commands('echo "ответ записан в #196"') == ['echo "ответ записан в #196"']
+    assert module.commands("pip install pkg#egg=x") == ["pip install pkg#egg=x"]
+    assert module.commands('echo "не закрыл') == ['echo "не закрыл']
+    assert module.commands("echo $# аргументов") == ["echo $# аргументов"]
 
     assert not module.only_installs("pytest  # не забыть pip install")
     assert module.only_installs("pip install ruff  # верхняя граница ниже")
@@ -641,12 +642,56 @@ def test_a_joiner_inside_quotes_does_not_split_a_command() -> None:
     резать вовсе»
     ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
     """
-    assert module.apart('echo "a | b"') == ['echo "a | b"']
-    assert module.apart('echo "a && b"') == ['echo "a && b"']
-    assert module.apart("pip install a && pytest") == ["pip install a", "pytest"]
-    assert module.apart("pip install a || pip install b") == ["pip install a", "pip install b"]
-    assert module.apart("ruff check; mypy") == ["ruff check", "mypy"]
-    assert module.apart("") == []
+    assert module.commands('echo "a | b"') == ['echo "a | b"']
+    assert module.commands('echo "a && b"') == ['echo "a && b"']
+    assert module.commands("pip install a && pytest") == ["pip install a", "pytest"]
+    assert module.commands("pip install a || pip install b") == ["pip install a", "pip install b"]
+    assert module.commands("ruff check; mypy") == ["ruff check", "mypy"]
+    assert module.commands("") == []
+
+
+def test_an_escaped_sign_is_not_a_boundary() -> None:
+    """Экранированный знак границей не служит — кроме как внутри одинарных кавычек.
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #660 (`ca0c2ec`). Разбор знал кавычки, но не
+    `\\`: `echo a\\|b` резался на две команды, а `\\"` внутри двойных кавычек
+    закрывал строку раньше времени — и связка за ним снова резала.
+
+    Вторая половина — одинарные кавычки: там `\\` буквален, как и всё прочее,
+    и `'a\\'` закрыт второй кавычкой. Разбор, толкующий `\\` везде, склеил бы
+    соседнюю команду в строку.
+
+    Замер 23.09.2026: в блоках `run:` дерева `\\` внутри строки несут
+    семнадцать шагов — все внутри одинарных кавычек (`tr '\\n' ' '`), то есть
+    сегодня разбор на дереве не ошибался; это форма, которую он не видел (206).
+    """
+    assert module.commands("echo a\\|b") == ["echo a\\|b"]
+    assert module.commands('echo "a \\" | b"') == ['echo "a \\" | b"']
+    assert module.commands('echo "a \\\\" | b') == ['echo "a \\\\"', "b"]
+    assert module.commands("echo 'a\\' | b") == ["echo 'a\\'", "b"]
+    assert module.commands("tr '\\n' ' ' <said") == ["tr '\\n' ' ' <said"]
+
+
+def test_a_trailing_backslash_carries_the_command_to_the_next_line() -> None:
+    """Хвостовой `\\` продолжает команду, и пару «`\\` + перевод строки» вынимают.
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #660 (`97d1186`). Блок резался по строкам
+    раньше, чем кто-либо смотрел на `\\` перед переводом строки, и многострочная
+    установка читалась установкой и неизвестной командой — шаг выпадал из
+    служебных.
+
+    Замер 23.09.2026: продолжение строки несут десять шагов дерева; после
+    починки их команды склеились, а состав служебных не сдвинулся ни на один —
+    все десять и без того что-то делают.
+
+    Вторая половина: в комментарии хвостовой `\\` ничего не продолжает —
+    комментарий кончается переводом строки, и следующая строка остаётся
+    командой.
+    """
+    assert module.commands("pip install \\\n  ruff") == ["pip install   ruff"]
+    assert module.only_installs("pip install --quiet \\\n  ruff \\\n  mypy")
+    assert not module.only_installs("pip install ruff \\\n  && pytest")
+    assert module.commands("echo a # пояснение \\\necho b") == ["echo a", "echo b"]
 
 
 def test_a_comment_inside_the_block_does_not_unmake_a_service_step(tmp_path: Path) -> None:
