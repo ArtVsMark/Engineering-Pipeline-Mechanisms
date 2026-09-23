@@ -51,11 +51,17 @@ def platform(
 
     def paginate(path: str, token: str, key: str | None = None) -> Any:
         asked.append(path)
+        # Джобы и аннотации читаются тем же постраничным обходом, что и заходы
+        # (#675): подделка различает их по адресу, как площадка.
+        if path.endswith("/jobs"):
+            return iter({"name": name, "conclusion": "failure"} for name in jobs or [])
+        if path.endswith("/annotations"):
+            return iter([])
         return iter(runs)
 
     def request(method: str, path: str, token: str, *rest: Any, **kw: Any) -> dict[str, Any]:
         asked.append(path)
-        return {"jobs": [{"name": name, "conclusion": "failure"} for name in jobs or []]}
+        return {}
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "request", request)
@@ -137,7 +143,7 @@ def test_only_the_failed_jobs_of_a_run_are_named(monkeypatch: pytest.MonkeyPatch
     def request(method: str, path: str, token: str, *rest: object, **kw: object) -> object:
         # Аннотации спрашиваются вторым вызовом и по другому адресу: общий
         # ответ на оба сделал бы разбор признака бессмысленным.
-        if path.endswith("/annotations"):
+        if "/annotations" in path:
             return []
         return {
             "jobs": [
@@ -897,28 +903,31 @@ def test_the_day_row_carries_whose_step_fell(monkeypatch: pytest.MonkeyPatch) ->
     подделка соседки не строит.
     """
 
+    jobs = [
+        {
+            "id": 1,
+            "name": "test",
+            "conclusion": "failure",
+            "steps": [{"name": "тесты", "conclusion": "failure"}],
+        },
+        {
+            "id": 2,
+            "name": "lint",
+            "conclusion": "failure",
+            "steps": [{"name": "Set up job", "conclusion": "failure"}],
+        },
+    ]
+
     def paginate(path: str, token: str, key: str | None = None) -> Any:
+        # Джобы и аннотации идут тем же постраничным обходом, что и заходы (#675).
+        if path.endswith("/jobs"):
+            return iter(jobs)
+        if path.endswith("/annotations"):
+            return iter([])
         return iter([run("ci", "2026-09-21", end="failure", number=7)])
 
     def request(method: str, path: str, token: str, *rest: Any, **kw: Any) -> Any:
-        if path.endswith("/annotations"):
-            return []
-        return {
-            "jobs": [
-                {
-                    "id": 1,
-                    "name": "test",
-                    "conclusion": "failure",
-                    "steps": [{"name": "тесты", "conclusion": "failure"}],
-                },
-                {
-                    "id": 2,
-                    "name": "lint",
-                    "conclusion": "failure",
-                    "steps": [{"name": "Set up job", "conclusion": "failure"}],
-                },
-            ]
-        }
+        return {}
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "request", request)
