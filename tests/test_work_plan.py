@@ -461,3 +461,21 @@ def test_a_dry_run_reads_the_body_once(monkeypatch: pytest.MonkeyPatch) -> None:
     number, body, _held, said = module.fresh_build("o/r", "t", built, set(), "01.01.2026", False)
     assert (number, body) == (639, BODY) and "## 4" in said
     assert len(reads) == 1
+
+
+automerge = load_script("automerge.py")
+
+
+def test_the_plan_and_the_queue_count_sources_alike() -> None:
+    """Разделы плана и ступени очереди нумеруются одним счётом источников 0–6.
+
+    Ответ каталогу по 053 называет это «одним словарём на оба контура», а
+    держалось оно дисциплиной: два литерала в двух файлах. Нашёл внешний
+    взгляд на #681 (`b4d549d`). Подписи у разделов и ступеней свои — по
+    предмету, — а номер один: работа до изменения и изменение в очереди
+    стоят на одной ступени.
+    """
+    assert sorted(module.HEADS) == sorted(automerge.RANK_NAMES) == list(range(7))
+    for number in module.HEADS:
+        assert module.HEADS[number].startswith(f"{number} ·"), module.HEADS[number]
+        assert automerge.RANK_NAMES[number].startswith(f"{number} ·"), automerge.RANK_NAMES[number]
