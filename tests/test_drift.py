@@ -1505,3 +1505,19 @@ def test_a_tag_that_is_not_a_number_is_named_not_called_fresh() -> None:
     found = module.actions_behind(said, "t", released({"someone/odd": "nightly"}))
     assert [one.source for one in found] == ["action-unchecked"], found
     assert "someone/no-releases" in found[0].said and "someone/odd" in found[0].said
+
+
+def test_the_issue_body_reads_back_into_the_same_records() -> None:
+    """Тело живой задачи читается обратно в те же записи — форму держит один модуль.
+
+    Читатель — сборщик плана (источник 5, #665). Разбор проверяется на теле,
+    которое строит сам дрейф, включая разделитель «·» внутри текста записи:
+    граница — ключ «что делать» целиком, а не любая точка. Разбор делением по
+    «·» разрезал бы такую запись надвое.
+    """
+    found = [
+        module.Drift("action-behind", "a/b: v5 · 3 прогона, выпущен v7", "поднять пин"),
+        module.Drift("platform-warning", "Node.js 20 is deprecated", "решить до даты"),
+    ]
+    assert module.read_back(module.render_body(found, ["каталог"])) == (found, ["каталог"])
+    assert module.read_back(module.render_body([], [])) == ([], [])
