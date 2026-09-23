@@ -1686,3 +1686,19 @@ def test_a_warning_past_the_first_page_is_still_heard(monkeypatch: pytest.Monkey
     found = module.platform_warnings("o/r", "t")
     assert [one.source for one in found] == ["platform-warning"], found
     assert "Ubuntu 26" in found[0].said
+
+
+def test_the_issue_body_reads_back_into_the_same_records() -> None:
+    """Тело живой задачи читается обратно в те же записи — форму держит один модуль.
+
+    Читатель — сборщик плана (источник 5, #665). Разбор проверяется на теле,
+    которое строит сам дрейф, включая разделитель «·» внутри текста записи:
+    граница — ключ «что делать» целиком, а не любая точка. Разбор делением по
+    «·» разрезал бы такую запись надвое.
+    """
+    found = [
+        module.Drift("action-behind", "a/b: v5 · 3 прогона, выпущен v7", "поднять пин"),
+        module.Drift("platform-warning", "Node.js 20 is deprecated", "решить до даты"),
+    ]
+    assert module.read_back(module.render_body(found, ["каталог"])) == (found, ["каталог"])
+    assert module.read_back(module.render_body([], [])) == ([], [])

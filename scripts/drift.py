@@ -100,6 +100,14 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «дрейфа нет»."""
 
 
+#: Ключ «что делать» в строке записи. Объявлен один раз: его пишет `Drift`, а
+#: читает `read_back`, и два написания одного ключа разошлись бы молча (022).
+NEXT_MARK: Final = "**что делать:**"
+#: Заголовки тела живой задачи — по ним же тело читается обратно.
+MOVED_HEAD: Final = "## Сдвинулось"
+SILENT_HEAD: Final = "## Не спрошено на последнем заходе"
+
+
 @dataclass(frozen=True, slots=True)
 class Drift:
     """Одна находка дрейфа: чей вход сдвинулся, что видно и что делать."""
@@ -113,7 +121,35 @@ class Drift:
 
     def __str__(self) -> str:
         """Строка записи ровно того вида, который читает разбор тела задачи."""
-        return f"- `{self.source}` — {self.said} · **что делать:** {self.next_step}"
+        return f"- `{self.source}` — {self.said} · {NEXT_MARK} {self.next_step}"
+
+
+#: Строка записи, разобранная обратно: обратная форма `Drift.__str__`.
+ENTRY_RE: Final = re.compile(
+    rf"^- `(?P<source>[^`]+)` — (?P<said>.+?) · {re.escape(NEXT_MARK)} (?P<next>.+)$"
+)
+
+
+def read_back(body: str) -> tuple[list[Drift], list[str]]:
+    """Записи и неопрошенные источники из тела живой задачи — обратно `render_body`.
+
+    ФОРМУ ЧИТАЕТ ТОТ ЖЕ МОДУЛЬ, ЧТО ЕЁ ПИШЕТ. Тело задачи читает сборщик плана
+    (источник 5, #665); держи он свой разбор, первая же правка строки записи
+    здесь молча обнулила бы раздел плана
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    """
+    found: list[Drift] = []
+    silent: list[str] = []
+    part = ""
+    for line in body.splitlines():
+        if line.startswith("## "):
+            part = line.strip()
+            continue
+        if part == MOVED_HEAD and (entry := ENTRY_RE.match(line.strip())):
+            found.append(Drift(entry["source"], entry["said"], entry["next"]))
+        elif part == SILENT_HEAD and line.startswith("- "):
+            silent.append(line[2:].strip())
+    return found, silent
 
 
 #: Чтение чужого снимка — общим транспортом, а не своим. Второй транспорт
@@ -1409,7 +1445,7 @@ def render_body(found: list[Drift], silent: list[str] | None = None) -> str:
         # ([027](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/027-empty-state-is-a-state.md)).
         f"Обход: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC.",
         "",
-        "## Сдвинулось",
+        MOVED_HEAD,
         "",
     ]
     if found:
@@ -1421,7 +1457,7 @@ def render_body(found: list[Drift], silent: list[str] | None = None) -> str:
         # читался бы как «всё сошлось», а он значит «половину не спросили».
         lines += [
             "",
-            "## Не спрошено на последнем заходе",
+            SILENT_HEAD,
             "",
             *(f"- {name}" for name in silent),
         ]

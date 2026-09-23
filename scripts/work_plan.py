@@ -4,7 +4,8 @@
 ЗАЧЕМ ОН, ЕСЛИ ИСТОЧНИКИ И ТАК ЕСТЬ. Источников работы семь
 ([091](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/091-work-sources-are-ordered-first-non-empty-wins.md)),
 и каждый живёт в своём месте: краснота — в задаче шага 9, находки — в реестре
-адресата, числа правил — во «входящих» каталога, своё открытое — у площадки.
+адресата, числа правил — во «входящих» каталога, дрейф — в своей живой
+задаче, своё открытое — у площадки.
 Складывало их до сих пор ОКНО, в голове и заново на каждом заходе. Порядок,
 который держится памятью, держится до конца окна
 ([134](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/134-a-window-reopens-only-after-the-rulebook-exists.md)).
@@ -48,11 +49,13 @@
 показывал находки, снятые трейлерами. Заметил владелец, а не механизм.
 
 ПРОГОН КОНВЕЙЕРА — НЕ РАСПИСАНИЕ: это момент, в который источники МЕНЯЮТСЯ, и
-моментов таких два. Слияние меняет источники 3 и 5: задача закрывается,
+моментов таких три. Слияние меняет источники 3 и 5: задача закрывается,
 находка снимается трейлером, общая ветка меняет цвет. Проверка на голове
 ИЗМЕНЕНИЯ меняет источники 1 и 2 — конфликт и красное на своём открытом; они
 живут и гаснут между слияниями, и заход только по слиянию их бы не видел.
 Поэтому будит сборщик завершение `ci` на любой голове, а не только на общей.
+Третий момент — ночной заход дрейфа: он переписывает задачу дрейфа, а это
+половина источника 5 (#665).
 
 Ручная кнопка остаётся рядом и нужна отдельно
 ([104](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/104-event-driven-automation-needs-a-manual-button.md)):
@@ -74,6 +77,7 @@ from datetime import UTC, datetime
 from typing import Final
 
 import debt
+import drift
 import findings
 import ghrest
 from report import announce
@@ -229,34 +233,82 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[st
         built[3] = Source(rows=stayed, unread=f"реестр находок не прочитан: {exc}")
         broken.append("3")
 
-    try:
-        closed = debt.closed_issues(repo, token)
-        inbox, inbox_note, seen = debt.inbox_body(repo, token, closed)
-        numbers = debt.rules_debt(inbox)
-        note = debt.contract_note(inbox)
-        if numbers is None:
-            built[5] = Source(unread="числа каталога не найдены во «входящих»")
-            broken.append("5")
-        else:
-            tasks, queue, unheld = numbers
-            rows = []
-            if queue:
-                rows.append(f"правил без ответа: **{queue}**")
-            if unheld:
-                rows.append(f"правил «действует, но не держится ничем»: **{unheld}**")
-            if note:
-                rows.append(f"контракт разошёлся: {note}")
-            said = debt.said_age(debt.age_of(seen))
-            built[5] = Source(
-                rows=rows,
-                note=f"задач по правилам заведено {tasks}; числа {said}"
-                + (f"; {inbox_note}" if inbox_note else ""),
-            )
-    except ghrest.TransportError as exc:
-        built[5] = Source(unread=f"«входящие» каталога не прочитаны: {exc}")
+    # ИСТОЧНИК 5 СКЛАДЫВАЕТСЯ ИЗ ДВУХ КАНАЛОВ, как и источник 3: «входящие»
+    # каталога и задача дрейфа. Договор называет дрейф частью источника 5
+    # (`docs/behaviour.md`, контур 1), а сборщик его не читал — раздел
+    # выглядел полным, когда дрейф назвал бы работу (#665). Каналы читаются
+    # порознь: отказ одного не стирает прочитанное у другого — тот же урок,
+    # что у источника 3 (#651).
+    rules = rules_part(repo, token)
+    moved = drift_part(repo, token)
+    built[5] = Source(
+        rows=rules.rows + moved.rows,
+        note="; ".join(one for one in (rules.note, moved.note) if one),
+        unread="; ".join(one for one in (rules.unread, moved.unread) if one),
+    )
+    if built[5].unread:
         broken.append("5")
 
     return built, broken, marks
+
+
+def rules_part(repo: str, token: str) -> Source:
+    """Половина источника 5 о правилах каталога — из «входящих»."""
+    try:
+        closed = debt.closed_issues(repo, token)
+        inbox, inbox_note, seen = debt.inbox_body(repo, token, closed)
+    except ghrest.TransportError as exc:
+        return Source(unread=f"«входящие» каталога не прочитаны: {exc}")
+    numbers = debt.rules_debt(inbox)
+    if numbers is None:
+        return Source(unread="числа каталога не найдены во «входящих»")
+    tasks, queue, unheld = numbers
+    rows = []
+    if queue:
+        rows.append(f"правил без ответа: **{queue}**")
+    if unheld:
+        rows.append(f"правил «действует, но не держится ничем»: **{unheld}**")
+    note = debt.contract_note(inbox)
+    if note:
+        rows.append(f"контракт разошёлся: {note}")
+    said = debt.said_age(debt.age_of(seen))
+    return Source(
+        rows=rows,
+        note=f"задач по правилам заведено {tasks}; числа {said}"
+        + (f"; {inbox_note}" if inbox_note else ""),
+    )
+
+
+#: Что сказать о задаче дрейфа, которую давно не переписывали. Срок у ночных
+#: заходов один (`debt.STALE_AFTER`), а пропущенный заход — свой.
+DRIFT_LATE: Final = "ночной заход дрейфа, похоже, пропущен"
+
+
+def drift_part(repo: str, token: str) -> Source:
+    """Половина источника 5 о дрейфе — записи живой задачи дрейфа.
+
+    Строка плана несёт номер задачи дрейфа: он и есть адрес — снимается запись
+    там, а не здесь, когда расхождения больше нет.
+
+    ЗАДАЧИ ДРЕЙФА НЕТ — ЭТО «ПУСТО», А НЕ ОТКАЗ. Дрейф не заводит пустую задачу
+    (`drift.save`), и её отсутствие значит «записей не было ни разу». А вот
+    источники, которые дрейф не спросил, называются: без них пустой список
+    читался бы как «всё сошлось» (045).
+    """
+    try:
+        number, body, seen = findings.live_issue_seen(repo, token, drift.MARKER)
+    except ghrest.TransportError as exc:
+        return Source(unread=f"задача дрейфа не прочитана: {exc}")
+    if number is None:
+        return Source()
+    found, silent = drift.read_back(body)
+    notes = [f"обход дрейфа {debt.said_age(debt.age_of(seen), DRIFT_LATE)}"]
+    if silent:
+        notes.append("дрейф не спросил: " + ", ".join(silent))
+    return Source(
+        rows=[f"#{number} · `{one.source}` — {one.said}" for one in found],
+        note="; ".join(notes),
+    )
 
 
 def render(number: int, source: Source, when: str = "") -> list[str]:
