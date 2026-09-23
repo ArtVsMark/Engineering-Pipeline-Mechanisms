@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import itertools
 import re
 from typing import Any, Final
 
@@ -1365,6 +1366,66 @@ def test_two_retellings_pair_up_as_a_whole() -> None:
     ]
     said = module.pair_up(entries, 635, retold)
     assert said == [module.fingerprint(second), module.fingerprint(first)], said
+
+
+#: Две находки по одному адресу, РАВНО далёкие от прежней записи: по два общих
+#: слова из трёх у каждой, и сходство у обеих одно и то же до последнего знака.
+TIED_OLD: Final = "scripts/a.py:5 — старое"
+TIED: Final = ("scripts/a.py:5 — первая беда", "scripts/a.py:5 — вторая беда")
+
+
+def test_a_tie_between_two_lines_gives_the_record_to_neither() -> None:
+    """Две строки с РАВНЫМ сходством к одной записи — запись не достаётся никому.
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #666 (`939c19b`). Сортировка «сильнейшие
+    первыми» при точном равенстве сходства решала по месту строки в ответе —
+    то есть ровно тем порядком, от которого разбор обещал не зависеть. Какая из
+    двух строк пересказ, в ничьей не знает никто; угадав не ту, разбор
+    поглотил бы новую находку молча. Поэтому обе заводятся новыми: цена —
+    дубль в реестре, а не потеря (та же асимметрия, что у `same_finding`).
+    """
+    first, second = TIED
+    old = module.fingerprint(TIED_OLD)
+    entries = {old: module.findings.Entry(5, "риск", TIED_OLD)}
+    assert module.pair_up(entries, 5, [first, second]) == [None, None]
+    assert module.pair_up(entries, 5, [second, first]) == [None, None]
+
+
+def test_a_line_between_two_equal_records_is_decided_by_the_fingerprint() -> None:
+    """Одна строка, равно близкая к двум записям, садится на одну — и не по порядку.
+
+    Такая ничья потерь не несёт: строка пересказывает одну из записей, обе
+    остаются в реестре. Поэтому здесь выбор делается, но его решает отпечаток
+    записи, а не порядок, в котором реестр их отдал.
+    """
+    one, other = "scripts/a.py:5 — первая беда", "scripts/a.py:5 — вторая беда"
+    line = "scripts/a.py:5 — беда"
+    marks = sorted(module.fingerprint(title) for title in (one, other))
+    forward = {module.fingerprint(t): module.findings.Entry(5, "риск", t) for t in (one, other)}
+    backward = dict(reversed(list(forward.items())))
+    assert module.pair_up(forward, 5, [line]) == [marks[0]]
+    assert module.pair_up(backward, 5, [line]) == [marks[0]]
+
+
+def test_no_order_of_lines_changes_who_retells_whom() -> None:
+    """Любая перестановка строк ответа даёт те же пары «строка — запись».
+
+    Проверка по всем перестановкам, а не по двум подобранным: ничья внутри
+    одного уровня сходства бывает не только «две строки на одну запись», но и
+    цепочкой — строка равно близка к двум записям, а одну из них делит с
+    соседом. Разбор, решающий уровень по очереди, отдавал бы записи
+    по-разному в зависимости от того, чья пара встретилась первой.
+    """
+    records = ("scripts/a.py:5 — первая беда", "scripts/a.py:5 — вторая беда")
+    # Первая строка равно близка к обеим записям (6/7), вторая — к первой
+    # записи с тем же сходством (6/7) и дальше от второй (4/7).
+    lines = ["scripts/a.py:5 — беда", "scripts/a.py:5 — первая"]
+    entries = {module.fingerprint(t): module.findings.Entry(5, "риск", t) for t in records}
+    seen = {
+        tuple(sorted(zip(order, module.pair_up(entries, 5, list(order)), strict=True)))
+        for order in itertools.permutations(lines)
+    }
+    assert len(seen) == 1, f"пары зависят от порядка строк: {seen}"
 
 
 #: Образец ключа, как его показывает промпт: строка с отступом, начинающаяся
