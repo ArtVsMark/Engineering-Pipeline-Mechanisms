@@ -399,8 +399,13 @@ def red_on_trunk(repo: str, token: str, name: str, base: str) -> bool:
     sha = str(head.get("sha") or "")
     if not sha:
         raise NotRun(f"голова ветки «{base}» не прочитана — предмет починки не проверить")
-    got = ghrest.request("GET", f"repos/{repo}/commits/{sha}/check-runs?per_page=100", token) or {}
-    runs = [one for one in (got.get("check_runs") or []) if str(one.get("name") or "") == name]
+    runs = [
+        one
+        for one in ghrest.paginate(
+            f"repos/{repo}/commits/{sha}/check-runs", token, key="check_runs"
+        )
+        if str(one.get("name") or "") == name
+    ]
     if not runs:
         return False
     # «ИДЁТ» СПРАШИВАЕТСЯ У СОСЕДА, А НЕ ПО ПОЛЮ status (#602). Своё условие

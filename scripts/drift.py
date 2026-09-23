@@ -907,7 +907,7 @@ WARNING_LEVELS: Final = ("warning", "notice")
 OURS_RE: Final = re.compile(r"[а-яё]", re.IGNORECASE)
 
 
-def platform_warnings(repo: str, token: str, ask: Any = None) -> list[Drift]:
+def platform_warnings(repo: str, token: str) -> list[Drift]:
     """Предупреждения площадки с головы общей ветки — те, что не видит никто.
 
     ЗАМЕР 23.09.2026, РАДИ КОТОРОГО ИСТОЧНИК НАПИСАН. На 518 проверках шести
@@ -941,13 +941,14 @@ def platform_warnings(repo: str, token: str, ask: Any = None) -> list[Drift]:
     Проверок на голове нет — отказ источника, а не «площадка молчит»: спросить
     было не у кого (075).
     """
-    request = ask or ghrest.request
-    head = (request("GET", f"repos/{repo}/commits/{paths.TRUNK}", token) or {}).get("sha")
+    head = (ghrest.request("GET", f"repos/{repo}/commits/{paths.TRUNK}", token) or {}).get("sha")
     if not head:
         raise NotRun(f"голова {paths.TRUNK} не прочитана — спросить проверки не у кого")
-    runs = (
-        request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token) or {}
-    ).get("check_runs") or []
+    # ОБА СПИСКА ЧИТАЮТСЯ ДО КОНЦА, а не первой страницей. Проверок на голове
+    # под девяносто при странице в сто, аннотаций у проверки — страница по
+    # умолчанию в тридцать; предупреждение за краем пропало бы молча — ровно
+    # то, ради чего источник написан. Нашёл внешний взгляд на #675.
+    runs = list(ghrest.paginate(f"repos/{repo}/commits/{head}/check-runs", token, key="check_runs"))
     if not runs:
         raise NotRun(
             f"на голове {head[:7]} нет ни одной проверки — предупреждений спросить не у кого"
@@ -958,7 +959,7 @@ def platform_warnings(repo: str, token: str, ask: Any = None) -> list[Drift]:
             asked.setdefault(str(run.get("name")), int(run["id"]))
     said: dict[str, set[str]] = {}
     for name, number in sorted(asked.items()):
-        for note in request("GET", f"repos/{repo}/check-runs/{number}/annotations", token) or []:
+        for note in ghrest.paginate(f"repos/{repo}/check-runs/{number}/annotations", token):
             text = " ".join(str(note.get("message") or "").split())
             if note.get("annotation_level") in WARNING_LEVELS and text and not OURS_RE.search(text):
                 said.setdefault(text, set()).add(name)

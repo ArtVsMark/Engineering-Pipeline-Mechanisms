@@ -1582,20 +1582,33 @@ def test_a_floating_label_may_run_ahead_of_its_hash_a_release_label_may_not() ->
 
 
 def annotated_head(
-    runs: list[dict[str, Any]], notes: dict[int, list[dict[str, Any]]], asked: list[str]
-) -> Any:
-    """Подделка площадки для предупреждений: голова, её проверки, их аннотации."""
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[dict[str, Any]],
+    notes: dict[int, list[dict[str, Any]]],
+) -> list[str]:
+    """Подделка площадки для предупреждений: голова, её проверки, их аннотации.
+
+    Отдаёт СТРАНИЦАМИ, как площадка: `page=N` получает N-й кусок по
+    `PER_PAGE`. Иначе проверка не различала бы чтение первой страницы и чтение
+    до конца — ровно то, что нашёл внешний взгляд на #675.
+    """
+    asked: list[str] = []
+    size = module.ghrest.PER_PAGE
+
+    def page_of(items: list[Any], path: str) -> list[Any]:
+        number = int(path.rsplit("page=", 1)[1]) if "page=" in path else 1
+        return items[(number - 1) * size : number * size]
 
     def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> Any:
         asked.append(path)
         if path.endswith("/commits/main"):
             return {"sha": "c" * 40}
-        if "/check-runs?" in path:
-            return {"check_runs": runs}
-        number = int(path.split("/check-runs/")[1].split("/")[0])
-        return notes[number]
+        if "/annotations" in path:
+            return page_of(notes[int(path.split("/check-runs/")[1].split("/")[0])], path)
+        return {"check_runs": page_of(runs, path)}
 
-    return request
+    monkeypatch.setattr(module.ghrest, "request", request)
+    return asked
 
 
 def note(level: str, message: str) -> dict[str, Any]:
@@ -1607,7 +1620,9 @@ NODE: Final = "Node.js 20 is deprecated. The following actions target Node.js 20
 UBUNTU: Final = "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."
 
 
-def test_a_platform_warning_reaches_an_addressee_and_ours_does_not() -> None:
+def test_a_platform_warning_reaches_an_addressee_and_ours_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Английское предупреждение площадки становится записью; наше русское — нет.
 
     ЗАМЕР 23.09.2026: на 518 проверках шести голов общей ветки аннотаций
@@ -1618,7 +1633,6 @@ def test_a_platform_warning_reaches_an_addressee_and_ours_does_not() -> None:
     Вторая половина — уровень: отказ проверки называет её собственный красный
     цвет, и в предупреждения он не идёт.
     """
-    asked: list[str] = []
     runs = [
         {"id": 1, "name": "lint", "output": {"annotations_count": 3}},
         {"id": 2, "name": "lint", "output": {"annotations_count": 3}},
@@ -1633,7 +1647,8 @@ def test_a_platform_warning_reaches_an_addressee_and_ours_does_not() -> None:
         ],
         3: [note("notice", UBUNTU), note("warning", NODE)],
     }
-    found = module.platform_warnings("o/r", "t", annotated_head(runs, notes, asked))
+    asked = annotated_head(monkeypatch, runs, notes)
+    found = module.platform_warnings("o/r", "t")
     assert [one.source for one in found] == ["platform-warning", "platform-warning"]
     said = " ".join(one.said for one in found)
     assert "Node.js 20" in said and "Ubuntu 26" in said
@@ -1641,11 +1656,33 @@ def test_a_platform_warning_reaches_an_addressee_and_ours_does_not() -> None:
     assert "(2 проверок" in next(one.said for one in found if "Node.js" in one.said)
     # По одной проверке на имя и только с аннотациями: предупреждение одно и то
     # же в каждом задании, а ночной заход не обязан спрашивать девяносто раз.
-    annotated = [path for path in asked if path.endswith("/annotations")]
+    annotated = sorted({path.split("?")[0] for path in asked if "/annotations" in path})
     assert annotated == ["repos/o/r/check-runs/1/annotations", "repos/o/r/check-runs/3/annotations"]
 
 
-def test_a_head_without_checks_is_a_refusal_not_silence() -> None:
+def test_a_head_without_checks_is_a_refusal_not_silence(monkeypatch: pytest.MonkeyPatch) -> None:
     """Проверок на голове нет — источник отказывает, а не докладывает «тишину»."""
+    annotated_head(monkeypatch, [], {})
     with pytest.raises(module.NotRun, match="нет ни одной проверки"):
-        module.platform_warnings("o/r", "t", annotated_head([], {}, []))
+        module.platform_warnings("o/r", "t")
+
+
+def test_a_warning_past_the_first_page_is_still_heard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проверка за краем первой страницы и аннотация за краем своей — услышаны.
+
+    НАХОДКИ ВНЕШНЕГО ВЗГЛЯДА НА #675 (`771da9b`, `4b70f97`). Проверок на голове
+    общей ветки под девяносто при странице в сто, аннотаций у проверки —
+    страница по умолчанию в тридцать. Предупреждение за краем пропадало бы
+    молча — ровно то, ради чего источник написан.
+    """
+    size = module.ghrest.PER_PAGE
+    quiet = [
+        {"id": 10 + one, "name": f"q{one}", "output": {"annotations_count": 0}}
+        for one in range(size)
+    ]
+    late = {"id": 7, "name": "late", "output": {"annotations_count": size + 1}}
+    filler = [note("warning", f"наше пояснение {one}") for one in range(size)]
+    annotated_head(monkeypatch, [*quiet, late], {7: [*filler, note("notice", UBUNTU)]})
+    found = module.platform_warnings("o/r", "t")
+    assert [one.source for one in found] == ["platform-warning"], found
+    assert "Ubuntu 26" in found[0].said
