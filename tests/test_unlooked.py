@@ -715,6 +715,66 @@ def test_the_queue_still_names_its_mode(
     assert module.report.DRY in capsys.readouterr().err
 
 
+def test_a_refusal_named_on_the_check_outranks_plain_silence() -> None:
+    """Зелёная проверка с аннотацией отказа — «действие отказало», а не «тишина».
+
+    ЗАМЕР 23.09.2026 (#673): объявленную модель CLI не знал, каждый заход
+    кончался за 0–1 с, а реестр мог сказать только «прошёл, а ответа нет».
+    Теперь причина названа на проверке шагом `agent_run.py`, и реестр её
+    различает. Вторая половина: без пометки зелёная тишина остаётся тишиной.
+    """
+    marked = {"name": "review", "conclusion": "success", module.REFUSED_KEY: True}
+    assert module.why_quiet([marked]) == module.STATE_REFUSED
+    assert module.why_quiet([{"name": "review", "conclusion": "success"}]) == module.STATE_SILENT
+
+
+def test_only_the_refusal_words_make_a_refusal() -> None:
+    """Отказом считается аннотация со словами `agent_run.REFUSED`, а не любая ошибка.
+
+    Уровень ошибки ставит и площадка («Process completed with exit code 1»),
+    а модель захода — отдельная аннотация; ни то, ни другое отказом не является.
+    """
+    words = module.agent_run.REFUSED
+    assert module.refused([{"annotation_level": "failure", "message": f"взгляд: {words} — 404"}])
+    assert not module.refused(
+        [{"annotation_level": "notice", "message": "взгляд: модель захода — x"}]
+    )
+    assert not module.refused(
+        [{"annotation_level": "failure", "message": "Process completed with exit code 1."}]
+    )
+
+
+def test_head_runs_asks_annotations_only_of_the_review_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Аннотации спрашиваются у проверки взгляда с аннотациями — и больше ни у кого."""
+    asked: list[str] = []
+    runs = [
+        {"id": 1, "name": "review", "conclusion": "success", "output": {"annotations_count": 2}},
+        {"id": 2, "name": "lint", "conclusion": "success", "output": {"annotations_count": 5}},
+        {"id": 3, "name": "review", "conclusion": "success", "output": {"annotations_count": 0}},
+    ]
+
+    def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> Any:
+        return {"head": {"sha": "c" * 40}}
+
+    def paginate(path: str, *_rest: Any, **_kw: Any) -> Any:
+        asked.append(path)
+        if path.endswith("/annotations"):
+            return iter(
+                [{"annotation_level": "failure", "message": f"x: {module.agent_run.REFUSED} — y"}]
+            )
+        return iter([dict(one) for one in runs])
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    found = module.head_runs("o/r", 5, "t")
+    assert [path for path in asked if path.endswith("/annotations")] == [
+        "repos/o/r/check-runs/1/annotations"
+    ]
+    assert found[0][module.REFUSED_KEY] is True and module.REFUSED_KEY not in found[1]
+
+
 def test_a_step_without_a_token_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
     """Токена нет — исход «шаг не отработал», а не «реестр пуст».
 
