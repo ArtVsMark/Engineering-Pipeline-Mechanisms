@@ -284,6 +284,9 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # `fetch`: в подделке его гасят отдельно, иначе проверка молчания одних
     # источников пошла бы в сеть за другим.
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
+    # Выпуски чужих действий тоже ходят к площадке своим запросом — гасятся
+    # так же, по той же причине.
+    monkeypatch.setattr(module, "actions_behind", lambda *a, **k: [])
     found, silent = module.look("o/r", "token", {"rules": {}})
     assert found == []
     assert silent == [
@@ -343,6 +346,10 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     # прогонах проекта сделало бы этот прогон красным по чужому поводу. Предмет
     # здесь — как `look` ведёт себя с молчащим источником, а не состав прогонов.
     monkeypatch.setattr(module, "actions_disagree", lambda *a, **k: [])
+    # ВЫПУСКИ ЧУЖИХ ДЕЙСТВИЙ ХОДЯТ В СЕТЬ — и отравленный транспорт это поймал
+    # на первом же прогоне: источник, о котором здесь забыли, сказал о себе
+    # сам, ровно как задумано (075).
+    monkeypatch.setattr(module, "actions_behind", lambda *a, **k: [])
     # Источник «выпуск против дерева» тоже читает дерево и историю, а не
     # сеть: отравленный транспорт его не останавливает, а настоящее
     # отставание выпуска сделало бы этот прогон красным по чужому поводу.
@@ -1441,3 +1448,60 @@ def test_a_readable_release_is_not_a_refusal(tmp_path: Path) -> None:
     молчит, снаружи неотличим от сошедшегося (045).
     """
     assert module.release_behind_tree(released_tree(tmp_path, marked_before_tag=True)) == []
+
+
+def released(tags: dict[str, str]) -> Any:
+    """Площадка, отвечающая последним выпуском по имени действия."""
+
+    def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> dict[str, Any]:
+        repo = path.removeprefix("repos/").removesuffix("/releases/latest")
+        if repo not in tags:
+            raise module.ghrest.NotFound(f"{repo}: выпусков нет")
+        return {"tag_name": tags[repo]}
+
+    return request
+
+
+def test_a_pinned_action_says_when_it_falls_behind() -> None:
+    """Вышел выпуск новее нашего пина — дрейф называет его со ссылкой на журнал.
+
+    ЗАМЕР 23.09.2026: чужих действий в дереве три, все закреплены, и о новой
+    версии проект не узнавал никак — спросил владелец. Для действия каталога
+    вопрос задавался давно; здесь он расширен на все закреплённые
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    """
+    said = {"anthropics/claude-code-action": {"v1.0.216": ["review.yml"]}}
+    newer = released({"anthropics/claude-code-action": "v1.0.231"})
+    found = module.actions_behind(said, "t", newer)
+    assert len(found) == 1
+    assert "v1.0.216" in found[0].said and "v1.0.231" in found[0].said
+    assert "releases/tag/v1.0.231" in found[0].next_step
+
+
+def test_a_major_pin_does_not_fall_behind_on_a_patch() -> None:
+    """Пин по мажору отстаёт только тогда, когда вышел новый мажор.
+
+    Вторая половина: без неё мажорный пин `v5` краснел бы на каждой заплатке
+    `v5.x`, и дрейф учили бы пролистывать
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    said = {"actions/setup-python": {"v5": ["ci.yml"]}}
+    assert module.actions_behind(said, "t", released({"actions/setup-python": "v5.6.0"})) == []
+    assert len(module.actions_behind(said, "t", released({"actions/setup-python": "v6.0.0"}))) == 1
+
+
+def test_a_tag_that_is_not_a_number_is_named_not_called_fresh() -> None:
+    """Тег, который не номер, и действие без выпусков НАЗЫВАЮТСЯ, а не роняются.
+
+    Сравнить такой пин не с чем. Первая редакция его молча пропускала — и
+    откат «выдать за свежий» не покраснел: снаружи оба исхода были пустотой.
+    Ответить «не отстало» там, где ответа нет, — тихий запасной путь
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    assert module.version_of("latest") is None
+    assert module.version_of("v2-beta") is None
+    assert module.version_of("v7.0.1") == (7, 0, 1)
+    said = {"someone/no-releases": {"v1": ["x.yml"]}, "someone/odd": {"v1": ["x.yml"]}}
+    found = module.actions_behind(said, "t", released({"someone/odd": "nightly"}))
+    assert [one.source for one in found] == ["action-unchecked"], found
+    assert "someone/no-releases" in found[0].said and "someone/odd" in found[0].said
