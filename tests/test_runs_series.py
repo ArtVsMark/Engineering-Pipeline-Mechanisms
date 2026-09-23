@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -606,46 +605,48 @@ def test_a_block_is_read_as_the_shell_would_run_it() -> None:
     assert not module.only_installs("")
 
 
-def test_a_trailing_comment_is_not_a_command() -> None:
-    """Хвостовой комментарий командой не считается, а кавычки уважаются.
+def test_a_comment_is_found_where_the_shell_finds_it() -> None:
+    """Комментарий начинается там же, где его видит оболочка, — и только там.
 
-    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #641 (`34cec89`). Прежняя редакция отбрасывала
-    строку, НАЧИНАЮЩУЮСЯ с решётки, а комментарий в хвосте оставляла — и
-    `pytest  # не забыть pip install` читался установкой: маркер находился в
-    пояснении, а не в команде.
+    ТРИ ПРАВИЛА, И КАЖДОЕ ИЗМЕРЕНО. Решётка в начале строки — комментарий;
+    решётка после пробела — комментарий; решётка ВНУТРИ слова и решётка в
+    кавычках — нет.
 
-    ВТОРАЯ ПОЛОВИНА ВАЖНЕЕ ПЕРВОЙ. Резать по первой решётке нельзя: в дереве
-    ЧЕТЫРЕ строки `run:` несут её внутри кавычек (`echo "…записан в #196"` и
-    соседние), и наивная обрезка искалечила бы все четыре. Предикат « #» назвал
-    их поимённо — поэтому имена и читаются, а не только счёт
-    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Каждое из них родилось находкой. `pytest  # не забыть pip install` читался
+    установкой, потому что хвост не срезался (#641). `echo "…записан в #196"` и
+    три соседних строки дерева несут решётку в кавычках — наивная обрезка
+    искалечила бы все четыре. А `pip install pkg@git+URL#egg=x` — обычный
+    адрес: `shlex` с `comments=True` резал его до `pip install pkg@git+URL`,
+    чего настоящий `bash` не делает (#657).
     """
     assert module.bare_of("pytest  # не забыть pip install") == "pytest"
     assert module.bare_of("# только пояснение") == ""
-    assert "#196" in module.bare_of('echo "ответ записан в #196"')
-    assert "#$ASKED" in module.bare_of('echo "смотрим названное: #$ASKED"')
-    # Незакрытая кавычка разбору не по зубам: строка отдаётся как есть, и шаг
-    # посчитается работающим — ошибка уходит в дешёвую сторону (051).
+    assert module.bare_of('echo "ответ записан в #196"') == 'echo "ответ записан в #196"'
+    assert module.bare_of("pip install pkg#egg=x") == "pip install pkg#egg=x"
     assert module.bare_of('echo "не закрыл') == 'echo "не закрыл'
 
     assert not module.only_installs("pytest  # не забыть pip install")
     assert module.only_installs("pip install ruff  # верхняя граница ниже")
 
 
-def test_the_order_of_the_joiners_does_not_change_the_split() -> None:
-    """Порядок альтернатив в разборе связок на результат НЕ влияет.
+def test_a_joiner_inside_quotes_does_not_split_a_command() -> None:
+    """Связка в кавычках команды не разделяет, а снаружи — разделяет.
 
-    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #641 (`73ea8c9`). Рядом с `JOINERS` стоял
-    довод «порядок значим: `||` обязан проверяться раньше `|`». Довод звучал
-    правдоподобно и был выдуман: пустые куски отсеиваются ниже, и оба порядка
-    дают одно и то же. Проверяется прогоном, а не чтением
-    ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #657. Прежний разбор звал `shlex` и собирал
+    строку обратно из токенов — кавычки при этом терялись, и `echo "a | b"`
+    превращался в `echo a | b`, то есть в две команды вместо одной. Теперь
+    строка не пересобирается: разбор находит границу и отдаёт исходный кусок.
+
+    Вторая половина нужна не меньше первой: без неё приём неотличим от «не
+    резать вовсе»
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
     """
-    обратный = re.compile(r"&&|\||;|\|\|")
-    for said in ("pip install a || pip install b", "a && b", "a | b", "a; b"):
-        прямой = [one.strip() for one in module.JOINERS.split(said) if one.strip()]
-        иначе = [one.strip() for one in обратный.split(said) if one.strip()]
-        assert прямой == иначе, said
+    assert module.apart('echo "a | b"') == ['echo "a | b"']
+    assert module.apart('echo "a && b"') == ['echo "a && b"']
+    assert module.apart("pip install a && pytest") == ["pip install a", "pytest"]
+    assert module.apart("pip install a || pip install b") == ["pip install a", "pip install b"]
+    assert module.apart("ruff check; mypy") == ["ruff check", "mypy"]
+    assert module.apart("") == []
 
 
 def test_a_comment_inside_the_block_does_not_unmake_a_service_step(tmp_path: Path) -> None:
