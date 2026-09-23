@@ -497,3 +497,56 @@ def test_the_two_names_of_an_item_are_its_own_text() -> None:
     assert items.names_of("пункт без заголовка") == (
         items.changerefs.normalise("пункт без заголовка"),
     )
+
+
+def test_an_owner_edit_of_the_epic_during_the_pass_survives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Владелец правит эпик, пока идёт заход, — отметка ложится на СВЕЖЕЕ тело.
+
+    Список эпиков читается в начале захода, а между чтением и записью идут
+    запросы состояния задач. Прежде запись шла по телу из списка, и правка
+    владельца за эти секунды затиралась молча — тот же дефект, что у сборщика
+    плана (#684); здесь он найден как сосед по признаку (195). И впервые
+    прогнан путь ЗАПИСИ: прежние проверки шли сухим заходом.
+    """
+    listed = "- [ ] #7 первая\n"
+    edited = "Добавил владелец.\n\n- [ ] #7 первая\n- [ ] #9 новая\n"
+    written: list[str] = []
+
+    def request(method: str, path: str, token: str, data: Any = None) -> Any:
+        if "labels=" in path:
+            return [{"number": 2, "body": listed}]
+        if method == "PATCH":
+            written.append(str((data or {}).get("body")))
+            return {}
+        if path.endswith("/issues/2"):
+            return {"number": 2, "body": edited}
+        return {"state": "closed" if path.endswith("/issues/7") else "open"}
+
+    monkeypatch.setattr(items.ghrest, "request", request)
+    items.follow("o/r", "token")
+    assert len(written) == 1
+    assert "Добавил владелец." in written[0] and "- [ ] #9 новая" in written[0]
+    assert "- [x] #7 первая" in written[0]
+
+
+def test_an_item_ticked_by_hand_meanwhile_is_not_written_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Пункт отметил человек, пока шёл заход, — записывать нечего, и запись не идёт."""
+    written: list[str] = []
+
+    def request(method: str, path: str, token: str, data: Any = None) -> Any:
+        if "labels=" in path:
+            return [{"number": 2, "body": "- [ ] #7 первая\n"}]
+        if method == "PATCH":
+            written.append(path)
+            return {}
+        if path.endswith("/issues/2"):
+            return {"number": 2, "body": "- [x] #7 первая\n"}
+        return {"state": "closed"}
+
+    monkeypatch.setattr(items.ghrest, "request", request)
+    items.follow("o/r", "token")
+    assert written == []
