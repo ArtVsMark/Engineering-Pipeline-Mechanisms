@@ -520,3 +520,13 @@ def test_a_kind_at_the_threshold_without_an_answer_is_plan_work(tmp_path: Any) -
 def test_no_kinds_file_is_emptiness_not_a_refusal(tmp_path: Any) -> None:
     """Словаря родов нет — роды не ведутся: пустота, а не молчание источника."""
     assert module.birth_part(tmp_path / "нет.json") == module.Source()
+
+
+def test_a_dry_run_names_the_plan_number(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Сухой заход печатает номер плана: навык отсылает за ним сюда (`5a0aac6`)."""
+    written = quiet_platform(monkeypatch)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+    assert written == []
+    assert "план #639 — собрал бы так:" in capsys.readouterr().out
