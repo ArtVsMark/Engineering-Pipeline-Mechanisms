@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Final
 
 import pytest
@@ -1364,3 +1365,47 @@ def test_two_retellings_pair_up_as_a_whole() -> None:
     ]
     said = module.pair_up(entries, 635, retold)
     assert said == [module.fingerprint(second), module.fingerprint(first)], said
+
+
+#: Образец ключа, как его показывает промпт: строка с отступом, начинающаяся
+#: `НАХОДКА[<вес>]:`. Отступ обязателен — так образец отличается от прозы
+#: вокруг него, где ключ упомянут словами.
+PROMPT_KEY_RE: Final = re.compile(r"^\s+НАХОДКА\[<вес>\]:\s*(?P<form>.+?)\s*$", re.M)
+
+
+def prompt_forms() -> list[str]:
+    """Формы ключа из всех промптов, выдающих находки (#668)."""
+    text = (ROOT / ".github" / "workflows" / "review.yml").read_text(encoding="utf-8")
+    return PROMPT_KEY_RE.findall(text)
+
+
+def test_the_form_the_prompt_asks_for_is_harvested_with_its_address() -> None:
+    """Ключ, заполненный ровно по образцу промпта, жатва читает — и с адресом.
+
+    Промпт и разбор живут в разных файлах, и расходятся молча: промпт попросит
+    форму, которую жатва не узнает, и находки начнут пропадать без единой
+    красной строки. Поэтому образец берётся ИЗ ПРОМПТА, а не переписывается
+    сюда — и адрес обязан стоять первым, как того требует #668.
+    """
+    forms = prompt_forms()
+    # Взгляд и поздний взгляд: оба выдают находки, и оба обязаны просить
+    # одну форму (#668, пункт «во ВСЕХ промптах»).
+    assert len(forms) == 2, f"образцов ключа в промптах {len(forms)}, ждали два: {forms}"
+    assert len(set(forms)) == 1, f"промпты просят разную форму ключа: {forms}"
+    form = forms[0]
+    assert form.startswith("<путь/от/корня.py:12> — "), f"адрес не первым: «{form}»"
+    filled = form.replace("<путь/от/корня.py:12>", "scripts/work_plan.py:12").replace(
+        "<что не так, одной строкой>", "строка без адреса роняет план"
+    )
+    found = module.findings_of([comment(f"НАХОДКА[риск]: {filled}")])
+    assert [weight for weight, _, _ in found] == ["риск"]
+    assert module.addresses(found[0][1]) == frozenset({"scripts/work_plan.py:12"})
+
+
+def test_a_finding_without_a_place_is_harvested_without_an_address() -> None:
+    """`(без места)` — находка, а не адрес: запись заводится, место не выдумывается."""
+    found = module.findings_of(
+        [comment("НАХОДКА[дефект]: (без места) — тело изменения называет не то число")]
+    )
+    assert [weight for weight, _, _ in found] == ["дефект"]
+    assert module.addresses(found[0][1]) == frozenset()
