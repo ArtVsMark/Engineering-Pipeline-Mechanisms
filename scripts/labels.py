@@ -25,11 +25,6 @@ import yaml
 DEFAULT_PATH: Final = paths.LABELS
 COLOR_RE: Final = re.compile(r"^[0-9a-fA-F]{6}$")
 ZONE_PREFIX: Final = "area/"
-#: Род задачи — «что это за работа». Имена объявлены разделом «род задачи»
-#: `.github/labels.yml`; перечислены здесь, потому что поля раздела у записи
-#: метки нет, а судить комментарии файла значило бы судить оформление. Что
-#: каждое имя в файле объявлено, держит `tests/test_task_shape.py` (#655).
-KINDS: Final = ("epic", "bug", "enhancement", "documentation", "tech-debt")
 
 
 class BadConfig(RuntimeError):
@@ -49,6 +44,8 @@ class Label:
     color: str
     description: str
     paths: tuple[str, ...] = ()
+    #: Метка называет РОД задачи — «что это за работа» (`kind: true` в файле).
+    kind: bool = False
 
     @property
     def is_zone(self) -> bool:
@@ -79,6 +76,10 @@ def load(path: Path = DEFAULT_PATH) -> list[Label]:
         color = str(item.get("color", "")).strip().lstrip("#")
         description = str(item.get("description", "")).strip()
         paths = item.get("paths", []) or []
+        kind = item.get("kind", False)
+        if not isinstance(kind, bool):
+            problems.append(f"{name or index}: kind — не да/нет, а «{kind}»")
+            kind = False
         if not name:
             problems.append(f"запись {index}: пустое имя")
         if not COLOR_RE.match(color):
@@ -89,7 +90,7 @@ def load(path: Path = DEFAULT_PATH) -> list[Label]:
             problems.append(f"{name or index}: paths — не список строк")
             paths = []
         if not problems:
-            labels.append(Label(name, color, description, tuple(paths)))
+            labels.append(Label(name, color, description, tuple(paths), kind))
 
     if problems:
         raise BadConfig("состав меток не проходит проверку:\n  " + "\n  ".join(problems))
@@ -100,6 +101,16 @@ def load(path: Path = DEFAULT_PATH) -> list[Label]:
         raise BadConfig(f"имя метки объявлено дважды: {', '.join(duplicates)}")
 
     return labels
+
+
+def kinds_of(labels: list[Label]) -> frozenset[str]:
+    """Имена меток рода — из объявления, а не из второго списка в коде.
+
+    Прежде род перечислялся литералом рядом с разбором, и держалось это в одну
+    сторону: новый род в файле в список не попадал, и задачи с ним молча
+    считались бы голыми. Нашёл внешний взгляд на #685 (`a226398`).
+    """
+    return frozenset(label.name for label in labels if label.kind)
 
 
 def zones_for(labels: list[Label], files: list[str]) -> set[str]:
