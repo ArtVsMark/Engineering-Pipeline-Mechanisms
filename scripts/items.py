@@ -256,6 +256,18 @@ def follow(repo: str, token: str, *, dry_run: bool = False) -> int:
         if dry_run:
             continue
         try:
+            # ТЕЛО ЭПИКА ПЕРЕЧИТЫВАЕТСЯ ПЕРЕД ЗАПИСЬЮ. Его пишет человек, а
+            # список эпиков читается в начале захода, и между чтением и записью
+            # идут запросы состояния задач — правка владельца за эти секунды
+            # затёрлась бы молча. Тот же дефект чинился у сборщика плана (#684);
+            # здесь он найден как сосед по признаку (195). Состояния задач
+            # закешированы, и пересчёт по свежему телу запросов не множит.
+            fresh = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+            current = str(fresh.get("body") or "")
+            if current != body:
+                updated, done = followed(current, closed)
+                if not done:
+                    continue
             ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": updated})
         except ghrest.TransportError as exc:
             print(f"  пункты #{number} не записаны: {report.cut(str(exc))}")
