@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -145,6 +146,49 @@ PLATFORM_STEPS: Final = (
 INSTALLERS: Final = ("pip install", "npm install", "npm ci")
 
 
+#: Чем строка `run:` делится на отдельные команды. Оболочка исполняет их
+#: подряд, и служебной строка считается, только когда служебна КАЖДАЯ. Порядок
+#: в разборе значим: `||` обязан проверяться раньше `|`, иначе двойная черта
+#: разошлась бы на две пустых команды.
+JOINERS: Final = re.compile(r"&&|\|\||;|\|")
+
+
+def commands(run: str) -> list[str]:
+    """Команды блока `run:` — по одной, без комментариев и пустых строк.
+
+    КОММЕНТАРИЙ КОМАНДОЙ НЕ СЧИТАЕТСЯ, и это не мелочь. Прежняя редакция
+    требовала признака установки от КАЖДОЙ непустой строки — а проект объясняет
+    границы версий пакетов именно строчным комментарием внутри `run: |`
+    (`step-lint.yml`, `labels-sync.yml`). Такая строка признака не несла и
+    молча вышибала шаг из состава служебных, то есть воспроизводила беду #634
+    на новом месте. Нашёл внешний взгляд на #635.
+
+    СТРОКА ДЕЛИТСЯ ПО СВЯЗКАМ ОБОЛОЧКИ. `pip install X && pytest` — это две
+    команды, и вторая делает работу. Поиск подстроки видел в такой строке
+    установку и объявлял шаг служебным целиком; падение настоящей работы
+    пряталось бы за площадкой. Нашёл внешний взгляд там же.
+    """
+    found: list[str] = []
+    for line in run.splitlines():
+        said = line.strip()
+        if not said or said.startswith("#"):
+            continue
+        found += [one.strip() for one in JOINERS.split(said) if one.strip()]
+    return found
+
+
+def only_installs(run: str) -> bool:
+    """Делает ли блок ТОЛЬКО установку зависимостей.
+
+    Пустой блок установкой не считается: «команд нет» и «все команды ставят» —
+    разные состояния, и сливать их значило бы объявить служебным шаг, о котором
+    не известно ничего
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    said = commands(run)
+    return bool(said) and all(any(mark in one for mark in INSTALLERS) for one in said)
+
+
 def installing_steps(directory: Path = paths.WORKFLOWS) -> frozenset[str]:
     """Имена шагов дерева, которые ТОЛЬКО ставят зависимости.
 
@@ -178,22 +222,38 @@ def installing_steps(directory: Path = paths.WORKFLOWS) -> frozenset[str]:
 
     БЕЗЫМЯННЫЕ ШАГИ СЮДА НЕ ПОПАДАЮТ, и это тоже граница: площадка зовёт такой
     шаг текстом его команды, и сопоставить его по имени нечем.
+
+    ИМЯ, КОТОРОЕ ГДЕ-ТО ДЕЛАЕТ РАБОТУ, СЛУЖЕБНЫМ НЕ СТАНОВИТСЯ НИГДЕ. Площадка
+    отдаёт упавший шаг ОДНИМ ИМЕНЕМ, без файла и джоба, — и пока состав
+    собирался по первому же совпадению, одноимённый сосед, который ставит И
+    делает, наследовал чужую отметку «площадка», и его настоящее падение
+    пряталось. Поэтому имя вычитается: попало хоть раз в работающие — выбыло из
+    служебных. Ошибка тогда идёт в дешёвую сторону: служебное падение назовут
+    своим, и его увидят, а не наоборот
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Нашёл внешний взгляд на #635.
+
+    ПОЧЕМУ НЕ ПАРА «ДЖОБ И ШАГ», хотя имя джоба у отчёта есть. У вынесенного
+    шага площадка пишет составное имя вызывающего и вызванного (`debt / debt`),
+    и сопоставить его с джобом дерева нечем без второго разбора вызовов. Пара
+    была бы точнее, но держалась бы на совпадении, которого механизм не
+    проверяет; вычитание точнее не станет, зато не соврёт
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
     if not directory.is_dir():
         return frozenset()
-    found: set[str] = set()
+    installs: set[str] = set()
+    works: set[str] = set()
     for path in sorted(directory.glob("*.y*ml")):
         document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for job in (document.get("jobs") or {}).values():
             for step in (job or {}).get("steps") or []:
                 said = str((step or {}).get("name") or "").strip()
                 run = str((step or {}).get("run") or "")
-                lines = [one for one in run.splitlines() if one.strip()]
-                if not said or not lines:
+                if not said or not run.strip():
                     continue
-                if all(any(mark in one for mark in INSTALLERS) for one in lines):
-                    found.add(said.lower())
-    return frozenset(found)
+                (installs if only_installs(run) else works).add(said.lower())
+    return frozenset(installs - works)
 
 
 #: Признаки осечки в тексте отчёта. Каждый назван с причиной, и каждый ИЗМЕРЕН

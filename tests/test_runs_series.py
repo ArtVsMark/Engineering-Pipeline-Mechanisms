@@ -585,6 +585,133 @@ def test_a_step_that_installs_and_does_is_not_service(tmp_path: Path) -> None:
     assert module.whose_step("сосчитать покрытие", наши) == module.WHOSE_OWN
 
 
+def test_a_block_is_read_as_the_shell_would_run_it() -> None:
+    """Блок `run:` разбирается на команды так, как их исполнит оболочка.
+
+    Обе половины названы здесь: что командой СЧИТАЕТСЯ (строка, часть строки за
+    связкой) и что не считается (пустая строка, комментарий). Без второй
+    половины признак неотличим от «в блоке встретилось слово install».
+    """
+    assert module.commands("pip install ruff") == ["pip install ruff"]
+    assert module.commands("pip install pytest && pytest") == ["pip install pytest", "pytest"]
+    assert module.commands("pip install a || pip install b") == ["pip install a", "pip install b"]
+    assert module.commands("  # только пояснение\n") == []
+    assert module.commands("") == []
+
+    assert module.only_installs("pip install ruff")
+    assert module.only_installs("# почему такая граница\npip install ruff")
+    assert not module.only_installs("pip install pytest && pytest")
+    assert not module.only_installs("# только пояснение")
+    assert not module.only_installs("")
+
+
+def test_a_comment_inside_the_block_does_not_unmake_a_service_step(tmp_path: Path) -> None:
+    """Комментарий внутри `run: |` командой не считается.
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #635 (`64308c8`). Прежняя редакция требовала
+    признака установки от КАЖДОЙ непустой строки — а проект объясняет границы
+    версий пакетов именно строчным комментарием внутри блока (`step-lint.yml`,
+    `labels-sync.yml`). Такая строка признака не несла и молча вышибала шаг из
+    состава служебных, воспроизводя беду #634 на новом месте.
+
+    Предмета в дереве на день починки НЕТ — ни один install-вызов не оформлен
+    многострочным блоком с комментарием. Поэтому дерево здесь строится руками:
+    находка о ФОРМЕ, а не о сегодняшнем совпадении стиля
+    ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
+    """
+    runs = tmp_path / "прогоны"
+    runs.mkdir()
+    (runs / "ci.yml").write_text(
+        "jobs:\n"
+        "  lint:\n"
+        "    steps:\n"
+        "      - name: поставить проверки\n"
+        "        run: |\n"
+        "          # Верхняя граница нужна, чтобы мажор не приехал сам.\n"
+        '          python -m pip install --quiet "ruff>=0.6,<1"\n',
+        encoding="utf-8",
+    )
+    assert module.installing_steps(runs) == {"поставить проверки"}
+
+
+def test_a_line_that_installs_and_then_works_is_not_service(tmp_path: Path) -> None:
+    """Строка, которая ставит И работает, служебной не делает.
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #635 (`794993a`). Поиск подстроки видел в
+    `pip install X && pytest` установку и объявлял шаг служебным целиком —
+    падение настоящей работы пряталось бы за площадкой. Граница «ставит И
+    делает» была названа, но держалась только на блоке `run: |`: соединение
+    команд в одну строку её обходило.
+    """
+    runs = tmp_path / "прогоны"
+    runs.mkdir()
+    (runs / "ci.yml").write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: поставить и прогнать\n"
+        "        run: pip install pytest && pytest\n",
+        encoding="utf-8",
+    )
+    assert module.installing_steps(runs) == frozenset()
+
+
+def test_a_name_that_works_anywhere_is_service_nowhere(tmp_path: Path) -> None:
+    """Имя, которое где-то делает работу, служебным не считается нигде.
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #635 (`fb3f7c4`). Площадка отдаёт упавший шаг
+    ОДНИМ именем, без файла и джоба. Пока состав собирался по первому же
+    совпадению, одноимённый сосед, который ставит И делает, наследовал чужую
+    отметку «площадка» — и его настоящее падение пряталось.
+
+    Вычитание уводит ошибку в дешёвую сторону: служебное падение назовут своим,
+    и его увидят
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    runs = tmp_path / "прогоны"
+    runs.mkdir()
+    (runs / "ci.yml").write_text(
+        "jobs:\n"
+        "  lint:\n"
+        "    steps:\n"
+        "      - name: поставить проверки\n"
+        "        run: pip install ruff\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: поставить проверки\n"
+        "        run: |\n"
+        "          pip install pytest\n"
+        "          pytest\n"
+        "      - name: поставить разбор\n"
+        "        run: pip install pyyaml\n",
+        encoding="utf-8",
+    )
+    наши = module.installing_steps(runs)
+    assert наши == {"поставить разбор"}, наши
+    assert module.whose_step("поставить проверки", наши) == module.WHOSE_OWN
+
+
+def test_a_block_of_only_comments_is_not_service(tmp_path: Path) -> None:
+    """Блок без команд вовсе служебным не считается.
+
+    «Команд нет» и «все команды ставят» — разные состояния, и сливать их
+    значило бы объявить служебным шаг, о котором не известно ничего
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    runs = tmp_path / "прогоны"
+    runs.mkdir()
+    (runs / "ci.yml").write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: пусто\n"
+        "        run: |\n"
+        "          # здесь только пояснение\n",
+        encoding="utf-8",
+    )
+    assert module.installing_steps(runs) == frozenset()
+
+
 def test_a_tree_without_runs_is_an_empty_set(tmp_path: Path) -> None:
     """Прогонов нет — пустой состав, а не отказ: у потребителя их может не быть."""
     assert module.installing_steps(tmp_path / "нет") == frozenset()
