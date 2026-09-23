@@ -46,6 +46,7 @@ import hashlib
 import os
 import re
 import sys
+from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
@@ -248,11 +249,27 @@ def pair_up(
     сортируются по сходству слов, и сильнейшие занимаются первыми. Строка, чья
     запись уже занята более сильной парой, остаётся новой.
 
-    ГРАНИЦА НАЗВАНА. Сильнейшие-первыми — не полный перебор назначений: в
-    нарочно подобранном случае сумма сходства может выйти не наибольшей. На
-    живых ответах пересказов по одному адресу бывает от силы два-три, и там
-    приём даёт то же, что перебор; полный перебор стоил бы непрозрачности ради
-    случая, которого не замерено
+    НИЧЬЯ НЕ РЕШАЕТСЯ ПОРЯДКОМ. Пока равные по сходству пары шли по месту
+    строки в ответе, порядок строк возвращался через ничью — нашёл внешний
+    взгляд на #666 (`939c19b`). Теперь уровень сходства решается ЦЕЛИКОМ:
+
+    * запись, на которую с равным сходством претендуют ДВЕ строки, не
+      достаётся ни одной — какая из них пересказ, в ничьей не знает никто, а
+      угадав не ту, разбор поглотил бы новую находку молча. Обе заводятся
+      новыми: цена — дубль в реестре, а не потеря (та же асимметрия, что у
+      `same_finding`);
+    * строка, равно близкая к двум записям, садится на одну — такая ничья
+      потерь не несёт, обе записи остаются, — и выбирает отпечаток, а не
+      порядок, в котором реестр их отдал.
+
+    ГРАНИЦА НАЗВАНА, И ОНА ЗАМЕРЕНА. Сильнейшие-первыми — не полный перебор
+    назначений: в нарочно подобранном случае сумма сходства может выйти не
+    наибольшей. Касается это только ответов, где на один адрес приходится
+    больше одной строки. Замер 23.09.2026 по всем комментариям изменений с
+    ключом `НАХОДКА[` с 09.09.2026 — 567 ответов, 360 адресов в пределах
+    одного ответа: на 357 одна строка, на трёх две, трёх и больше не
+    встречалось ни разу. Полный перебор стоил бы непрозрачности ради трёх
+    случаев из 360
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
     pairs: list[tuple[float, int, str]] = []
@@ -264,10 +281,18 @@ def pair_up(
                 pairs.append((close, place, mark))
     found: list[str | None] = [None] * len(titles)
     taken: set[str] = set()
-    for _, place, mark in sorted(pairs, key=lambda one: (-one[0], one[1])):
-        if found[place] is None and mark not in taken:
-            found[place] = mark
-            taken.add(mark)
+    for close in sorted({weight for weight, _, _ in pairs}, reverse=True):
+        level = [
+            (place, mark)
+            for weight, place, mark in pairs
+            if weight == close and found[place] is None and mark not in taken
+        ]
+        claims = Counter(mark for _, mark in level)
+        taken.update(mark for mark, count in claims.items() if count > 1)
+        for place, mark in sorted(level, key=lambda one: one[1]):
+            if found[place] is None and mark not in taken:
+                found[place] = mark
+                taken.add(mark)
     return found
 
 
