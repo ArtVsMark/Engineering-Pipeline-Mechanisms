@@ -246,3 +246,51 @@ def test_an_empty_section_says_the_day_it_was_looked_at() -> None:
     """Пустой раздел несёт день обхода, иначе застывший план от пустого неотличим."""
     said = "\n".join(module.render(0, module.Source(), "01.01.2026"))
     assert "**Пусто** на 01.01.2026." in said
+
+
+def test_a_silent_neighbour_does_not_make_a_section_look_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ одного канала источника не выдаётся за прочитанный источник.
+
+    Источник 3 складывается из ДВУХ каналов: реестра находок и задачи о
+    красноте (совещательное, пережившее слияние). Пока отказ второго доходил
+    только до источника 0, третий получал пустой список и выглядел полным —
+    механизм нарушал инвариант, который объявляет о себе сам
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд на #651.
+    """
+    quiet_platform(monkeypatch)
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("задача о красноте молчит")
+
+    monkeypatch.setattr(module.debt, "branch_debt", refuse)
+    monkeypatch.setattr(module.debt, "findings_debt", lambda *_: [("abc1234", 635, "находка")])
+    built, broken, _ = module.sources("o/r", "t")
+    said = "\n".join(module.render(3, built[3], "01.01.2026"))
+    assert "abc1234" in said, "прочитанная половина источника пропала"
+    assert "Не спрошено" in said, "непрочитанная половина выдана за прочитанную"
+    assert "3" in broken, "молчащий источник не назван в исходе"
+
+
+def test_the_registry_is_read_once_per_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Реестр находок читается ОДИН раз за заход.
+
+    Отпечатки нужны и разделу 3, и снятию строк ручных разделов. Второе чтение
+    того же стоило бы вызова из общей квоты и разошлось бы с первым молча,
+    изменись реестр между ними
+    ([058](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/058-when-the-quota-is-out-stop.md),
+    [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Нашёл внешний взгляд на #651.
+    """
+    quiet_platform(monkeypatch)
+    asked: list[int] = []
+
+    def counted(*_: Any, **__: Any) -> list[tuple[str, int, str]]:
+        asked.append(1)
+        return []
+
+    monkeypatch.setattr(module.debt, "findings_debt", counted)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    assert len(asked) == 1, f"реестр прочитан {len(asked)} раза за один заход"
