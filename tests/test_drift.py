@@ -17,7 +17,7 @@ import os
 import subprocess
 import textwrap
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -287,6 +287,10 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # Выпуски чужих действий тоже ходят к площадке своим запросом — гасятся
     # так же, по той же причине.
     monkeypatch.setattr(module, "actions_behind", lambda *a, **k: [])
+    # Пометки закреплений и предупреждения площадки — того же рода: свой
+    # запрос к площадке, гасятся так же (#665).
+    monkeypatch.setattr(module, "pin_mislabelled", lambda *a, **k: [])
+    monkeypatch.setattr(module, "platform_warnings", lambda *a, **k: [])
     found, silent = module.look("o/r", "token", {"rules": {}})
     assert found == []
     assert silent == [
@@ -350,6 +354,10 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     # на первом же прогоне: источник, о котором здесь забыли, сказал о себе
     # сам, ровно как задумано (075).
     monkeypatch.setattr(module, "actions_behind", lambda *a, **k: [])
+    # Пометки закреплений и предупреждения площадки поймал тот же приём
+    # на их первом прогоне (#665) — гасятся так же.
+    monkeypatch.setattr(module, "pin_mislabelled", lambda *a, **k: [])
+    monkeypatch.setattr(module, "platform_warnings", lambda *a, **k: [])
     # Источник «выпуск против дерева» тоже читает дерево и историю, а не
     # сеть: отравленный транспорт его не останавливает, а настоящее
     # отставание выпуска сделало бы этот прогон красным по чужому поводу.
@@ -1505,3 +1513,139 @@ def test_a_tag_that_is_not_a_number_is_named_not_called_fresh() -> None:
     found = module.actions_behind(said, "t", released({"someone/odd": "nightly"}))
     assert [one.source for one in found] == ["action-unchecked"], found
     assert "someone/no-releases" in found[0].said and "someone/odd" in found[0].said
+
+
+#: Хеши закреплений в подделках: сорок знаков, как их принимает площадка.
+HASH_A: Final = "a" * 40
+HASH_B: Final = "b" * 40
+
+
+def test_only_a_hash_with_a_label_is_taken_for_the_label_check(tmp_path: Path) -> None:
+    """Сверке пометки отдаётся только пара «хеш + пометка».
+
+    Хеш без пометки сверять не с чем — его называет `actions_behind`; тег без
+    хеша сам и есть версия; своё действие судит гейт заготовки.
+    """
+    runs = tmp_path / "workflows"
+    runs.mkdir()
+    (runs / "one.yml").write_text(
+        f"      - uses: actions/checkout@{HASH_A} # v7.0.1\n"
+        f"      - uses: actions/setup-python@{HASH_B}\n"
+        "      - uses: actions/setup-python@v5\n"
+        f"      - uses: ArtVsMark/Engineering-Incidents-Playbook@{HASH_B} # v1.2.0\n",
+        encoding="utf-8",
+    )
+    assert module.pinned_hashes(runs) == {"actions/checkout": {"v7.0.1": {HASH_A}}}
+
+
+def compared(statuses: dict[str, str]) -> Any:
+    """Подделка сравнения «хеш...тег»: пометка → что отвечает площадка."""
+
+    def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> dict[str, Any]:
+        label = path.rsplit("...", 1)[1]
+        if label not in statuses:
+            raise module.ghrest.NotFound(f"тега {label} нет")
+        return {"status": statuses[label]}
+
+    return request
+
+
+def test_a_hash_that_left_its_label_is_named() -> None:
+    """Хеш и пометка разошлись — дрейф называет пару; совпали — молчит.
+
+    ЗАМЕР 23.09.2026: закреплений по хешу три, все согласны. Предмет — день,
+    когда хеш поднимут, а пометку забудут: исполняется хеш, а версию по пометке
+    читает и человек, и сам дрейф.
+    """
+    pins = {"actions/checkout": {"v7.0.1": {HASH_A}}}
+    assert module.pin_mislabelled(pins, "t", compared({"v7.0.1": "identical"})) == []
+    for status in ("behind", "diverged"):
+        found = module.pin_mislabelled(pins, "t", compared({"v7.0.1": status}))
+        assert [one.source for one in found] == ["action-pin-mislabelled"], status
+        assert HASH_A[:7] in found[0].said and status in found[0].said
+    missing = module.pin_mislabelled(pins, "t", compared({}))
+    assert len(missing) == 1 and "тега нет" in missing[0].said
+
+
+def test_a_floating_label_may_run_ahead_of_its_hash_a_release_label_may_not() -> None:
+    """Подвижная пометка (`v5`) уходит вперёд законно; пометка выпуска — нет.
+
+    Обе половины нужны: без первой каждый выпуск `v5.x` краснел бы у пина
+    `# v5` — хотя хеш на той же линии, а отставание называет `actions_behind`;
+    без второй тег полного выпуска, ушедший от хеша, выдавался бы за согласие
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    floating = {"actions/setup-python": {"v5": {HASH_B}}}
+    assert module.pin_mislabelled(floating, "t", compared({"v5": "ahead"})) == []
+    release = {"actions/checkout": {"v7.0.1": {HASH_A}}}
+    assert len(module.pin_mislabelled(release, "t", compared({"v7.0.1": "ahead"}))) == 1
+
+
+def annotated_head(
+    runs: list[dict[str, Any]], notes: dict[int, list[dict[str, Any]]], asked: list[str]
+) -> Any:
+    """Подделка площадки для предупреждений: голова, её проверки, их аннотации."""
+
+    def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> Any:
+        asked.append(path)
+        if path.endswith("/commits/main"):
+            return {"sha": "c" * 40}
+        if "/check-runs?" in path:
+            return {"check_runs": runs}
+        number = int(path.split("/check-runs/")[1].split("/")[0])
+        return notes[number]
+
+    return request
+
+
+def note(level: str, message: str) -> dict[str, Any]:
+    """Аннотация в том виде, в каком её отдаёт площадка."""
+    return {"annotation_level": level, "message": message, "path": ".github", "title": ""}
+
+
+NODE: Final = "Node.js 20 is deprecated. The following actions target Node.js 20"
+UBUNTU: Final = "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."
+
+
+def test_a_platform_warning_reaches_an_addressee_and_ours_does_not() -> None:
+    """Английское предупреждение площадки становится записью; наше русское — нет.
+
+    ЗАМЕР 23.09.2026: на 518 проверках шести голов общей ветки аннотаций
+    уровня warning и notice без кириллицы нашлось ровно два текста, оба
+    площадки; все прочие — наши. Поле `path` у обеих сторон `.github` и не
+    различает ничего.
+
+    Вторая половина — уровень: отказ проверки называет её собственный красный
+    цвет, и в предупреждения он не идёт.
+    """
+    asked: list[str] = []
+    runs = [
+        {"id": 1, "name": "lint", "output": {"annotations_count": 3}},
+        {"id": 2, "name": "lint", "output": {"annotations_count": 3}},
+        {"id": 3, "name": "types", "output": {"annotations_count": 1}},
+        {"id": 4, "name": "quiet", "output": {"annotations_count": 0}},
+    ]
+    notes = {
+        1: [
+            note("warning", NODE),
+            note("warning", "окно обхода заполнено (30)"),
+            note("failure", "Process completed with exit code 1."),
+        ],
+        3: [note("notice", UBUNTU), note("warning", NODE)],
+    }
+    found = module.platform_warnings("o/r", "t", annotated_head(runs, notes, asked))
+    assert [one.source for one in found] == ["platform-warning", "platform-warning"]
+    said = " ".join(one.said for one in found)
+    assert "Node.js 20" in said and "Ubuntu 26" in said
+    assert "окно обхода" not in said and "exit code" not in said
+    assert "(2 проверок" in next(one.said for one in found if "Node.js" in one.said)
+    # По одной проверке на имя и только с аннотациями: предупреждение одно и то
+    # же в каждом задании, а ночной заход не обязан спрашивать девяносто раз.
+    annotated = [path for path in asked if path.endswith("/annotations")]
+    assert annotated == ["repos/o/r/check-runs/1/annotations", "repos/o/r/check-runs/3/annotations"]
+
+
+def test_a_head_without_checks_is_a_refusal_not_silence() -> None:
+    """Проверок на голове нет — источник отказывает, а не докладывает «тишину»."""
+    with pytest.raises(module.NotRun, match="нет ни одной проверки"):
+        module.platform_warnings("o/r", "t", annotated_head([], {}, []))
