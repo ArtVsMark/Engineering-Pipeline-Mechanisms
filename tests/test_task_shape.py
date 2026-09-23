@@ -233,13 +233,13 @@ def test_the_kinds_are_read_from_the_label_set_both_ways(tmp_path: Any) -> None:
     # проверку (`eb31734`). Держится отношение: род эпика, по которому
     # `items.follow` находит эпики, обязан быть родом.
     assert module.items.EPIC_LABEL in declared, declared
-    declared = tmp_path / "labels.yml"
-    declared.write_text(
+    written = tmp_path / "labels.yml"
+    written.write_text(
         '- name: "chore"\n  color: "cccccc"\n  description: "Уборка"\n  kind: true\n'
         '- name: "area/x"\n  color: "cccccc"\n  description: "Зона"\n',
         encoding="utf-8",
     )
-    assert module.labels.kinds_of(module.labels.load(declared)) == {"chore"}
+    assert module.labels.kinds_of(module.labels.load(written)) == {"chore"}
 
 
 def test_a_zone_cannot_be_a_kind(tmp_path: Any) -> None:
@@ -251,3 +251,11 @@ def test_a_zone_cannot_be_a_kind(tmp_path: Any) -> None:
     )
     with pytest.raises(module.labels.BadConfig, match="зона не может быть родом"):
         module.labels.load(declared)
+
+
+def test_one_zone_predicate_answers_for_every_reader() -> None:
+    """Зона узнаётся одной функцией: у свойства метки и у голого имени ответ один (`9218c72`)."""
+    zone = module.labels.Label("area/x", "cccccc", "Зона")
+    kind = module.labels.Label("bug", "cccccc", "Дефект", kind=True)
+    assert zone.is_zone and module.labels.zone_named("area/x")
+    assert not kind.is_zone and not module.labels.zone_named("bug")
