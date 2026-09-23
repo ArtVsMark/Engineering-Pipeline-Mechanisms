@@ -193,7 +193,7 @@ class Bare:
     missing: tuple[str, ...]
 
 
-def unlabelled(issues: list[dict[str, Any]]) -> list[Bare]:
+def unlabelled(issues: list[dict[str, Any]], kinds: frozenset[str]) -> list[Bare]:
     """Открытые задачи, которым не хватает зоны (`area/*`) или рода (#655).
 
     У ИЗМЕНЕНИЯ МЕТКИ СТАВИТ МЕХАНИЗМ, У ЗАДАЧИ — РУКА. `agent_pr.py` выводит
@@ -222,7 +222,7 @@ def unlabelled(issues: list[dict[str, Any]]) -> list[Bare]:
             said
             for said, present in (
                 ("зона", any(name.startswith(labels.ZONE_PREFIX) for name in names)),
-                ("род", bool(names & set(labels.KINDS))),
+                ("род", bool(names & kinds)),
             )
             if not present
         )
