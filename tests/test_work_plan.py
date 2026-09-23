@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -186,6 +187,9 @@ def quiet_platform(monkeypatch: pytest.MonkeyPatch, *, body: str = BODY) -> list
     monkeypatch.setattr(module.debt, "inbox_body", lambda *_: ("", "", ""))
     monkeypatch.setattr(module.debt, "rules_debt", lambda _: (0, 0, 0))
     monkeypatch.setattr(module.debt, "contract_note", lambda _: None)
+    # Поводы для правила читаются из дерева, а не с площадки: гасятся здесь,
+    # чтобы проверки источников не зависели от сегодняшнего словаря родов.
+    monkeypatch.setattr(module, "birth_part", lambda *_: module.Source())
     return written
 
 
@@ -479,3 +483,40 @@ def test_the_plan_and_the_queue_count_sources_alike() -> None:
     for number in module.HEADS:
         assert module.HEADS[number].startswith(f"{number} ·"), module.HEADS[number]
         assert automerge.RANK_NAMES[number].startswith(f"{number} ·"), automerge.RANK_NAMES[number]
+
+
+def kinds_file(tmp_path: Any, kinds: dict[str, Any]) -> Any:
+    """Словарь родов находок в той форме, в какой его ведёт дерево."""
+    path = tmp_path / "finding-kinds.json"
+    path.write_text(json.dumps({"kinds": kinds}, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_a_kind_at_the_threshold_without_an_answer_is_plan_work(tmp_path: Any) -> None:
+    """Род у порога без ответа каталогу — строка раздела 5; с ответом или ниже порога — нет.
+
+    Замер 23.09.2026 (#650): родов у порога восемь, все держатся механизмами,
+    и ни у одного нет ответа каталогу — поводы для правила оставались без
+    вопроса.
+    """
+    met = ["a", "b", "c"]
+    path = kinds_file(
+        tmp_path,
+        {
+            "без ответа": {"признак": "x", "встречен": met, "закрыт": "гейт"},
+            "с ответом": {
+                "признак": "x",
+                "встречен": met,
+                "закрыт": "гейт",
+                "каталогу": "есть — 206",
+            },
+            "ниже порога": {"признак": "x", "встречен": ["a"], "закрыт": "нет — один случай"},
+        },
+    )
+    said = module.birth_part(path)
+    assert said.rows == ["род находок у порога без ответа каталогу: «без ответа» — встреч 3"]
+
+
+def test_no_kinds_file_is_emptiness_not_a_refusal(tmp_path: Any) -> None:
+    """Словаря родов нет — роды не ведутся: пустота, а не молчание источника."""
+    assert module.birth_part(tmp_path / "нет.json") == module.Source()

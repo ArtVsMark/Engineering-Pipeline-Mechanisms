@@ -273,3 +273,15 @@ def test_a_window_record_written_loosely_is_refused_not_recounted() -> None:
     said = "окно:tests/test_finding_kinds.py"
     assert not FINGERPRINT.match(said), "кривая запись прошла бы за отпечаток"
     assert not said.startswith(module.IN_WINDOW), "форма встречи в окне требует пробела"
+
+
+def test_a_repeated_kind_without_a_catalogue_answer_is_named() -> None:
+    """Род у порога без ответа каталогу называется; с ответом или ниже порога — нет (#650)."""
+    met = ["a", "b", "c"]
+    kinds = {
+        "молчит": {"встречен": met},
+        "ответил": {"встречен": met, "каталогу": "своё — у каталога этого нет"},
+        "не по форме": {"встречен": met, "каталогу": "потом посмотрим"},
+        "редкий": {"встречен": ["a"]},
+    }
+    assert module.unanswered(kinds) == [("молчит", 3), ("не по форме", 3)]
