@@ -327,6 +327,16 @@ def look_of(comments: list[dict[str, Any]], runs: list[dict[str, Any]] | None = 
 def refused(notes: list[dict[str, Any]]) -> bool:
     """Называет ли какая-то аннотация проверки отказ захода агента.
 
+    ЧИТАЕТСЯ ТОЛЬКО ПРОВЕРКА ВЗГЛЯДА НА ИЗМЕНЕНИИ, и соседи названы (195). Те
+    же слова отказа пишут ещё четыре вызова агента: верификатор, поздний
+    взгляд, ответ по обращению и разбор пунктов. Реестр отвечает на один
+    вопрос — «смотрел ли кто-нибудь на изменение, пока оно было изменением», —
+    и на него отвечает только взгляд. Отказ позднего взгляда виден здесь же:
+    отметка «поздний взгляд был» ставится только после удачного переноса
+    ответа, и запись остаётся открытой. Остальные трое о взгляде на изменение
+    не говорят; их отказ виден аннотацией на их собственной проверке.
+    Нашёл внешний взгляд на #686 (`1c7f037`).
+
     Узнаётся по словам `agent_run.REFUSED`, а не по уровню: уровень ошибки
     ставит и площадка («Process completed with exit code 1»), а слова отказа
     пишет только шаг `agent_run.py` — одна фраза на пишущего и читающего.
@@ -428,18 +438,29 @@ def head_runs(repo: str, number: int, token: str) -> list[dict[str, Any]]:
         runs = list(
             ghrest.paginate(f"repos/{repo}/commits/{head}/check-runs", token, key="check_runs")
         )
-        for run in runs:
-            # Аннотации спрашиваются только у проверки взгляда и только если
-            # они есть: остальным записям причина тишины не нужна.
-            if str(run.get("name") or "") == REVIEW_CHECK and (run.get("output") or {}).get(
-                "annotations_count"
-            ):
-                notes = ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", token)
-                run[REFUSED_KEY] = refused(list(notes))
-        return runs
     except ghrest.TransportError as exc:
         print(f"  причина по #{number} не выяснена: {report.cut(str(exc))}")
         return []
+    for run in runs:
+        # Аннотации спрашиваются только у проверки взгляда и только если они
+        # есть: остальным записям причина тишины не нужна.
+        #
+        # У ЗАПРОСА АННОТАЦИЙ СВОЙ ПЕРЕХВАТ. Прежде он стоял в одном `try` с
+        # чтением проверок, и его отказ уносил уже прочитанные записи: реестр
+        # писал бы «записи нет» там, где было «прошёл, а ответа нет» или
+        # «упал», — размен факта на подробность, от которого предостерегает
+        # эта же докстрока. Нашёл внешний взгляд на #686 (`3d25893`).
+        if str(run.get("name") or "") != REVIEW_CHECK or not (run.get("output") or {}).get(
+            "annotations_count"
+        ):
+            continue
+        try:
+            notes = list(ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", token))
+        except ghrest.TransportError as exc:
+            print(f"  аннотации взгляда по #{number} не прочитаны: {report.cut(str(exc))}")
+            continue
+        run[REFUSED_KEY] = refused(notes)
+    return runs
 
 
 def scan(
