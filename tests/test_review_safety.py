@@ -113,11 +113,15 @@ def test_actions_that_receive_the_token_are_pinned_by_sha(path: Path) -> None:
 
 
 def agent_steps(path: Path) -> list[dict[str, Any]]:
-    """Шаги, запускающие агента: у них есть `claude_args`."""
+    """Шаги, запускающие агента: у них есть `claude_args`.
+
+    У джоба, зовущего переиспользуемый прогон (`uses:`), шагов нет вовсе — и
+    обход всего дерева на нём падал бы, не дойдя до шагов агента.
+    """
     return [
         step
         for job in load(path)["jobs"].values()
-        for step in job["steps"]
+        for step in job.get("steps") or []
         if "claude_args" in (step.get("with") or {})
     ]
 
@@ -1203,3 +1207,50 @@ def test_the_task_carries_its_numbers(path: Path) -> None:
                 f"{path.name}, «{name}»: срок захода в задании не назван либо разошёлся с "
                 f"`timeout-minutes: {deadline}` — исполнитель планировал бы по неверному числу"
             )
+
+
+#: Модель агента в строке аргументов: `--model <имя>`.
+MODEL_ARG: Final = re.compile(r"--model\s+(?P<name>\S+)")
+
+
+def declared_models() -> dict[str, list[str]]:
+    """Модели вызовов агента по всему дереву: имя модели → где названа.
+
+    Вызов без `--model` попадает под пустое имя: он идёт на умолчании чужого
+    действия, и это тоже ответ — только не наш.
+    """
+    found: dict[str, list[str]] = {}
+    for path in walk(WORKFLOWS, "*.yml"):
+        for step in agent_steps(path):
+            said = MODEL_ARG.search(step["with"]["claude_args"])
+            where = f"{path.name} · {step.get('name') or 'без имени'}"
+            found.setdefault(said.group("name") if said else "", []).append(where)
+    return found
+
+
+def test_every_agent_call_names_its_model() -> None:
+    """Каждый вызов агента объявляет модель сам, а не берёт умолчание действия.
+
+    ЗАМЕР 23.09.2026: все четыре вызова `claude-code-action` — взгляд, поздний
+    взгляд, верификатор, ответ по обращению — шли на умолчании действия, и на
+    вопрос владельца «на какой модели ревью?» проект отвечал «не знаю».
+    Умолчание меняется молча: сменилась бы модель — сменился бы ревьюер, и
+    никто бы этого не увидел
+    ([174](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/174-facts-about-a-project-are-published-by-it.md)).
+    """
+    said = declared_models()
+    assert said, "в дереве нет ни одного вызова агента — проверять нечего (075)"
+    assert "" not in said, f"вызовы агента без объявленной модели: {said.get('')}"
+
+
+def test_all_agent_calls_name_one_model() -> None:
+    """Модель у всех вызовов агента одна — иначе ряд находок смешивает ревьюеров.
+
+    Два вызова на разных моделях — два разных ревьюера под одним именем:
+    сравнивать находки во времени и между заходами становится нечем. Единство
+    держит этот гейт, а не ссылка на общую переменную: файлов прогонов два, и
+    общей переменной между ними площадка не даёт
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    """
+    said = declared_models()
+    assert len(said) == 1, f"вызовы агента названы разными моделями: {said}"
