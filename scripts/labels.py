@@ -25,6 +25,11 @@ import yaml
 DEFAULT_PATH: Final = paths.LABELS
 COLOR_RE: Final = re.compile(r"^[0-9a-fA-F]{6}$")
 ZONE_PREFIX: Final = "area/"
+#: Род задачи — «что это за работа». Имена объявлены разделом «род задачи»
+#: `.github/labels.yml`; перечислены здесь, потому что поля раздела у записи
+#: метки нет, а судить комментарии файла значило бы судить оформление. Что
+#: каждое имя в файле объявлено, держит `tests/test_task_shape.py` (#655).
+KINDS: Final = ("epic", "bug", "enhancement", "documentation", "tech-debt")
 
 
 class BadConfig(RuntimeError):
