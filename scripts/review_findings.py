@@ -214,48 +214,61 @@ def same_finding(one: str, other: str, *, strict: bool = False) -> bool:
 
 
 def existing_mark(
-    entries: dict[str, Entry],
-    pr: int,
-    title: str,
-    *,
-    strict: bool = False,
-    taken: frozenset[str] | set[str] = frozenset(),
+    entries: dict[str, Entry], pr: int, title: str, *, strict: bool = False
 ) -> str | None:
     """Отпечаток уже лежащей записи о ТОЙ ЖЕ находке, если она есть.
 
     Ищется только среди находок ТОГО ЖЕ изменения: одна и та же беда в двух
     разных изменениях — это две находки, и снимать их надо по отдельности.
 
-    ЗАНЯТОЕ ЭТИМ ЖЕ ЗАХОДОМ ВТОРОЙ РАЗ НЕ ОТДАЁТСЯ. Совпавший адрес считался
-    точным признаком «та же находка» — и для пересказа он точный, а для
-    соседства нет: у одной строки бывает две разные беды. Ревьюер не называет
-    одну находку дважды в одном ответе, поэтому запись, уже взятую заходом,
-    вторая строка того же ответа получить не может и заводит свою.
+    ЭТО ЧАСТНЫЙ СЛУЧАЙ `pair_up` ДЛЯ ОДНОЙ СТРОКИ, а не второй выбор рядом. Жатва
+    зовёт `pair_up` для захода целиком; здесь тот же выбор отдаётся по одной
+    строке. Две реализации одного выбора разошлись бы молча
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    """
+    return pair_up(entries, pr, [title], strict=strict)[0]
 
-    Замер 23.09.2026 по ста изменениям: внутри одного ответа слиплось ДВЕ
-    находки, обе в тот же день — `scripts/runs_series.py:194` на #635 и
-    `:181` на #657. Прочитаны поимённо: каждая — другая беда, чем соседка по
-    адресу. Реестр терял их молча, и источник 3 плана показывал меньше, чем
-    назвал взгляд
+
+def pair_up(
+    entries: dict[str, Entry], pr: int, titles: list[str], *, strict: bool = False
+) -> list[str | None]:
+    """Какую прежнюю запись пересказывает каждая строка захода; ``None`` — новая.
+
+    ЗАХОД РАЗБИРАЕТСЯ ЦЕЛИКОМ, А НЕ ПОСТРОЧНО. Пока строки шли по порядку и
+    каждая забирала ближайшую запись себе, исход зависел от ПОРЯДКА строк в
+    ответе. Проверено прогоном: новая находка по адресу, стоящая РАНЬШЕ
+    пересказа старой, забирала старую запись — запись хранит прежний заголовок,
+    и новая находка пропадала молча, а пересказ заводил дубль. Счёт записей при
+    этом сходился, расходилось содержимое
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Второй случай того же рода нашёл внешний взгляд на #662: два пересказа по
+    одному адресу, и ранний отбирает запись, которая ближе позднему.
 
-    ЕСЛИ ЗАПИСЕЙ ПО АДРЕСУ НЕСКОЛЬКО, берётся ближайшая по словам. Иначе
-    пересказ одной из них на позднем заходе садился бы на первую попавшуюся — и
-    та, о которой говорили, висела бы неразобранной навсегда
+    Поэтому пары решаются вместе: все допустимые пары «строка — запись»
+    сортируются по сходству слов, и сильнейшие занимаются первыми. Строка, чья
+    запись уже занята более сильной парой, остаётся новой.
+
+    ГРАНИЦА НАЗВАНА. Сильнейшие-первыми — не полный перебор назначений: в
+    нарочно подобранном случае сумма сходства может выйти не наибольшей. На
+    живых ответах пересказов по одному адресу бывает от силы два-три, и там
+    приём даёт то же, что перебор; полный перебор стоил бы непрозрачности ради
+    случая, которого не замерено
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
-    found = [
-        mark
-        for mark, entry in entries.items()
-        if mark not in taken and entry.pr == pr and same_finding(entry.title, title, strict=strict)
-    ]
-    if len(found) < 2:
-        return found[0] if found else None
-    words = title.lower().split()
-    return max(
-        found,
-        key=lambda mark: SequenceMatcher(None, entries[mark].title.lower().split(), words).ratio(),
-    )
+    pairs: list[tuple[float, int, str]] = []
+    for place, title in enumerate(titles):
+        words = title.lower().split()
+        for mark, entry in entries.items():
+            if entry.pr == pr and same_finding(entry.title, title, strict=strict):
+                close = SequenceMatcher(None, entry.title.lower().split(), words).ratio()
+                pairs.append((close, place, mark))
+    found: list[str | None] = [None] * len(titles)
+    taken: set[str] = set()
+    for _, place, mark in sorted(pairs, key=lambda one: (-one[0], one[1])):
+        if found[place] is None and mark not in taken:
+            found[place] = mark
+            taken.add(mark)
+    return found
 
 
 def marks_in(raw: str) -> list[str]:
@@ -857,10 +870,12 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
             renamed = 0
-            # Записи, которые этот заход уже завёл или пересказал. Вторая строка
-            # того же ответа их не получит: см. `existing_mark`.
-            taken: set[str] = set()
-            for weight, title, род in titles:
+            # Пары «строка — прежняя запись» решаются для захода ЦЕЛИКОМ, до
+            # записи: см. `pair_up`. Построчный выбор зависел от порядка строк.
+            retold = pair_up(
+                entries, args.pr, [title for _, title, _ in titles], strict=args.strict
+            )
+            for (weight, title, род), mark in zip(titles, retold, strict=True):
                 # ЗАПИСЬ ИЩЕТСЯ ПРЕЖДЕ, ЧЕМ ЗАВОДИТСЯ. Отпечаток берётся от
                 # заголовка, а заголовок ревьюер на новом заходе пересказывает
                 # — и та же находка ложилась второй записью. Замер 10.09.2026:
@@ -869,9 +884,7 @@ def main(argv: list[str] | None = None) -> int:
                 # Прежний отпечаток при этом СОХРАНЯЕТСЯ: по нему находку уже
                 # могли назвать разобранной в теле изменения, и смена отпечатка
                 # обессмыслила бы снятие.
-                mark = existing_mark(entries, args.pr, title, strict=args.strict, taken=taken)
                 if mark is not None:
-                    taken.add(mark)
                     renamed += 1
                     # Ответ верификатора ПЕРЕЖИВАЕТ пересказ находки: он о
                     # премисе, а не о формулировке, и переписывать запись
@@ -881,7 +894,6 @@ def main(argv: list[str] | None = None) -> int:
                     entries[mark] = replace(entries[mark], pr=args.pr, weight=weight, kind=род)
                     continue
                 entries[fingerprint(title)] = findings.Entry(args.pr, weight, title, kind=род)
-                taken.add(fingerprint(title))
             said = f"из #{args.pr}: вердикт {verdict}, строк находок {len(titles)}"
             if renamed:
                 said += f", из них уже лежат под своим отпечатком {renamed}"
