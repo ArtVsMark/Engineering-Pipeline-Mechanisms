@@ -732,6 +732,97 @@ def actions_disagree(said: dict[str, dict[str, list[str]]]) -> list[Drift]:
     return found
 
 
+#: Номер версии из тега: `v7.0.1` → (7, 0, 1), `v5` → (5,). Что сверх чисел
+#: (`-beta`, `rc1`) номером не считается: такой тег сравнивать не с чем.
+VERSION_RE: Final = re.compile(r"^v?(\d+(?:\.\d+)*)$")
+
+
+def version_of(tag: str) -> tuple[int, ...] | None:
+    """Числа версии из тега либо ``None``, если тег не номер."""
+    found = VERSION_RE.match(tag.strip())
+    return tuple(int(one) for one in found.group(1).split(".")) if found else None
+
+
+def actions_behind(
+    said: dict[str, dict[str, list[str]]], token: str, ask: Any = None
+) -> list[Drift]:
+    """У закреплённого чужого действия вышел выпуск новее нашего.
+
+    ЗАМЕР 23.09.2026, ИЗ-ЗА КОТОРОГО ИСТОЧНИК НАПИСАН. Чужих действий в дереве
+    три — `actions/checkout` (36 вызовов), `actions/setup-python` (33),
+    `anthropics/claude-code-action` (5), — и все закреплены. Закрепление само по
+    себе верно (152): версия не плывёт. Но о новой версии проект не узнавал
+    НИКАК — ни гейт, ни дрейф, ни журнал. Спросил владелец, и ответ был «да, не
+    узнаём». Для действия КАТАЛОГА такой вопрос задаётся давно
+    (`pinned_tag_moved`); здесь он расширен на все закреплённые, а не заведён
+    вторым механизмом рядом
+    ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+
+    НАЗЫВАЕТ, А НЕ ПОДНИМАЕТ. Переезд на новую версию чужого кода — решение
+    человека: в прогоне, который толкает выпуск, он меняет поведение в самом
+    опасном месте, и сделать его молча значило бы не прочитать журнал выпуска
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Поэтому здесь нет ни dependabot, ни правки дерева — только запись со
+    ссылкой на журнал.
+
+    СРАВНЕНИЕ ИДЁТ С ТОЧНОСТЬЮ НАШЕГО ПИНА. Пометка `v5` объявляет мажор, и
+    выпуск `v5.6.0` отставанием не считается — отстали только тогда, когда
+    вышел `v6`. Пометка `v7.0.1` объявляет выпуск целиком, и `v7.1.0` уже
+    отставание. Иначе мажорный пин краснел бы на каждой заплатке
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+
+    НЕСРАВНИМОЕ НАЗЫВАЕТСЯ, А НЕ РОНЯЕТСЯ. Тег, который не номер (`latest`,
+    `v2-beta`), и действие без выпусков сравнить не с чем. Первая редакция их
+    молча пропускала и обещала в докстроке «пропускается, а не выдаётся за
+    свежий» — а снаружи это одно и то же: записи нет. Откат «выдать за свежий»
+    поэтому не покраснел, и это была находка, а не облегчение (075). Теперь
+    такое действие — отдельная запись: «проверить нечем».
+
+    Отказ транспорта — третий исход источника целиком: «не спрошено» и «не
+    отстало» снаружи неотличимы (045).
+    """
+    request = ask or ghrest.request
+    found: list[Drift] = []
+    blind: list[str] = []
+    for repo, versions in sorted(said.items()):
+        try:
+            answer = request("GET", f"repos/{repo}/releases/latest", token) or {}
+        except ghrest.NotFound:
+            blind.append(f"{repo} — выпусков нет")
+            continue
+        latest = str(answer.get("tag_name") or "")
+        newest = version_of(latest)
+        if newest is None:
+            blind.append(f"{repo} — последний выпуск «{latest}» не номер")
+            continue
+        for pinned in sorted(versions):
+            ours = version_of(pinned)
+            if ours is None:
+                blind.append(f"{repo} — наш пин «{pinned}» не номер")
+                continue
+            if newest[: len(ours)] <= ours:
+                continue
+            found.append(
+                Drift(
+                    "action-behind",
+                    f"{repo}: закреплено {pinned} ({len(versions[pinned])} прогонов), "
+                    f"у действия выпущен {latest}",
+                    f"прочитать журнал выпуска и поднять пин, если он нас касается: "
+                    f"https://github.com/{repo}/releases/tag/{latest}; у пина по хешу "
+                    f"меняются оба — хеш и пометка версии, иначе пометка соврёт",
+                )
+            )
+    if blind:
+        found.append(
+            Drift(
+                "action-unchecked",
+                f"отставание не проверить: {'; '.join(blind)}",
+                "закрепить действие версией-номером или назвать, почему оно без номера",
+            )
+        )
+    return found
+
+
 #: Как в пробе узнаётся вызов по тегу. Сам её адрес объявлен в `paths`:
 #: второй якорь заводится ровно тем, что путь собирают на месте.
 PROBE: Final = paths.HANDOVER_PROBE
@@ -1253,6 +1344,7 @@ SOURCES: Final = (
     "защита общей ветки",
     "версии языка",
     "версии чужих действий",
+    "выпуски чужих действий",
     "вердикты по предложениям",
     "набор вопросов витрины",
     "пробелы, названные задачей",
@@ -1279,6 +1371,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ("защита общей ветки", lambda: protection_moved(repo, token)),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
         ("версии чужих действий", lambda: actions_disagree(action_versions())),
+        ("выпуски чужих действий", lambda: actions_behind(action_versions(), token)),
         (
             "вердикты по предложениям",
             lambda: proposals_answered(
