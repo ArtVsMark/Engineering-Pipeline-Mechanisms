@@ -796,3 +796,28 @@ def test_a_silent_platform_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(module.ghrest, "request", refuse)
     monkeypatch.setattr(module.ghrest, "paginate", refuse)
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+
+
+def test_an_unread_annotation_keeps_the_runs_already_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ на аннотациях не уносит записи проверок: «прошёл» остаётся «прошёл» (`3d25893`).
+
+    Причина — уточнение к записи; потерять из-за неё саму запись значило бы
+    разменять факт на подробность (084).
+    """
+    runs = [
+        {"id": 1, "name": "review", "conclusion": "success", "output": {"annotations_count": 1}}
+    ]
+
+    def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> Any:
+        return {"head": {"sha": "c" * 40}}
+
+    def paginate(path: str, *_rest: Any, **_kw: Any) -> Any:
+        if path.endswith("/annotations"):
+            raise module.ghrest.TransportError("502")
+        return iter([dict(one) for one in runs])
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    found = module.head_runs("o/r", 5, "t")
+    assert [one["id"] for one in found] == [1]
+    assert module.why_quiet(found) == module.STATE_SILENT
