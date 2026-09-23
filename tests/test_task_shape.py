@@ -228,7 +228,11 @@ def test_the_kinds_are_read_from_the_label_set_both_ways(tmp_path: Any) -> None:
     Прежний литерал в коде держался в одну сторону: новый род в файле в список
     не попадал, и задачи с ним молча считались бы голыми.
     """
-    assert module.labels.kinds_of(module.labels.load()) == KINDS
+    declared = module.labels.kinds_of(module.labels.load())
+    # Не равенство с литералом — иначе второй список переехал бы из кода в
+    # проверку (`eb31734`). Держится отношение: род эпика, по которому
+    # `items.follow` находит эпики, обязан быть родом.
+    assert module.items.EPIC_LABEL in declared, declared
     declared = tmp_path / "labels.yml"
     declared.write_text(
         '- name: "chore"\n  color: "cccccc"\n  description: "Уборка"\n  kind: true\n'
@@ -236,3 +240,14 @@ def test_the_kinds_are_read_from_the_label_set_both_ways(tmp_path: Any) -> None:
         encoding="utf-8",
     )
     assert module.labels.kinds_of(module.labels.load(declared)) == {"chore"}
+
+
+def test_a_zone_cannot_be_a_kind(tmp_path: Any) -> None:
+    """`kind: true` у метки `area/*` — отказ разбора: одна метка закрыла бы обе нехватки."""
+    declared = tmp_path / "labels.yml"
+    declared.write_text(
+        '- name: "area/x"\n  color: "cccccc"\n  description: "Зона"\n  kind: true\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(module.labels.BadConfig, match="зона не может быть родом"):
+        module.labels.load(declared)
