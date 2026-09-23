@@ -89,8 +89,14 @@ def read(path: Path | None = None) -> dict[str, Any]:
     where = path or paths.FINDING_KINDS
     if not where.is_file():
         raise NotRun(f"нет {where}: роды находок взять неоткуда (075)")
-    said = json.loads(where.read_text(encoding="utf-8"))
-    kinds = said.get("kinds")
+    try:
+        said = json.loads(where.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # Битый словарь — третий исход, а не падение читателя: гейт рождения
+        # правила и план ловят `NotRun`, а сырой `JSONDecodeError` прошёл бы
+        # мимо обоих. Нашёл внешний взгляд на #692 (`ff0aeef`).
+        raise NotRun(f"{where} не разбирается: {exc}") from exc
+    kinds = said.get("kinds") if isinstance(said, dict) else None
     if not kinds:
         raise NotRun(f"{where}: раздел kinds пуст — предмет счёта не найден (075)")
     return dict(kinds)
@@ -145,7 +151,58 @@ def fate(body: dict[str, Any]) -> tuple[str, str] | None:
     return (found["kind"], found["said"].strip()) if found else None
 
 
-def unanswered(kinds: dict[str, Any]) -> list[tuple[str, int]]:
+#: Оформление вокруг слага: обратные кавычки, кавычки-ёлочки и знак конца
+#: предложения. Снимается ДО сверки с очередью.
+AROUND_SLUG: Final = "`\"'«».,;:()[]"
+#: Номер правила каталога в ответе «есть»: три цифры первым словом.
+RULE_NUMBER_RE: Final = re.compile(r"^\d{3}\b")
+
+
+def slug_of(said: str) -> str:
+    """Слаг из строки ответа — без оформления вокруг него.
+
+    Живёт здесь, а не у гейта рождения правила: его зовут и записи решений, и
+    роды находок, и план, — одна разборка на всех (022). История —
+    прежней редакции гейта:
+
+    ГЕЙТ СУДИТ СУЩЕСТВО, А НЕ РАЗМЕТКУ. Первое слово строки бралось целиком, и
+    слаг, записанный в обратных кавычках — то есть ровно так, как имя пишут в
+    документе этого проекта повсюду, — не сходился с очередью: гейт видел
+    «`имя`.» и честного ответа не признавал. Красное на законном учит обходить
+    красное
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    Поймано 17.09.2026 на ПЕРВОЙ же записи с ответом «предложено» — до неё у
+    этой ветки разбора не было живого предмета вовсе.
+    """
+    first = said.split()[0] if said.split() else ""
+    return first.strip(AROUND_SLUG)
+
+
+def answer_problem(body: dict[str, Any], queue: str) -> str | None:
+    """Чем ответ рода каталогу не годится; ``None`` — годится.
+
+    ОДНА ПРОВЕРКА ОТВЕТА НА ГЕЙТ И НА ПЛАН. Прежде гейт сверял слаг с очередью
+    и номер правила, а план принимал любой ответ по форме — и род с
+    неотправленным предложением из плана исчезал. Нашёл внешний взгляд на #692
+    (`72397b3`).
+    """
+    said = fate(body)
+    if said is None:
+        return (
+            f"поля «{CATALOGUE}» нет или оно не по форме: «предложено — <слаг>», "
+            "«своё — <причина>» или «есть — <номер правила>»"
+        )
+    kind, what = said
+    if kind == "предложено":
+        slug = slug_of(what)
+        if not slug or slug not in queue:
+            return f"назван слаг «{slug}», а в очереди предложений ({paths.PROPOSALS}) его нет"
+    if kind == "есть" and not RULE_NUMBER_RE.match(what):
+        return "ответ «есть», а номера правила первым словом нет"
+    return None
+
+
+def unanswered(kinds: dict[str, Any], queue: str) -> list[tuple[str, int]]:
     """Повторяющиеся роды без ответа каталогу — поводы для правила без решения.
 
     ПОВОД ДЛЯ ПРАВИЛА РОЖДАЕТСЯ В ИНЦИДЕНТАХ, А ВОПРОС ЗАДАВАЛСЯ НАИТИЕМ (#650).
@@ -154,7 +211,11 @@ def unanswered(kinds: dict[str, Any]) -> list[tuple[str, int]]:
     механизмом — и на этом всё. Замер 23.09.2026: родов у порога восемь, все
     держатся механизмами, и ни у одного нет ответа каталогу.
     """
-    return [(name, times) for name, times in repeated(kinds) if fate(kinds[name]) is None]
+    return [
+        (name, times)
+        for name, times in repeated(kinds)
+        if answer_problem(kinds[name], queue) is not None
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
