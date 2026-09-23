@@ -214,17 +214,48 @@ def same_finding(one: str, other: str, *, strict: bool = False) -> bool:
 
 
 def existing_mark(
-    entries: dict[str, Entry], pr: int, title: str, *, strict: bool = False
+    entries: dict[str, Entry],
+    pr: int,
+    title: str,
+    *,
+    strict: bool = False,
+    taken: frozenset[str] | set[str] = frozenset(),
 ) -> str | None:
     """Отпечаток уже лежащей записи о ТОЙ ЖЕ находке, если она есть.
 
     Ищется только среди находок ТОГО ЖЕ изменения: одна и та же беда в двух
     разных изменениях — это две находки, и снимать их надо по отдельности.
+
+    ЗАНЯТОЕ ЭТИМ ЖЕ ЗАХОДОМ ВТОРОЙ РАЗ НЕ ОТДАЁТСЯ. Совпавший адрес считался
+    точным признаком «та же находка» — и для пересказа он точный, а для
+    соседства нет: у одной строки бывает две разные беды. Ревьюер не называет
+    одну находку дважды в одном ответе, поэтому запись, уже взятую заходом,
+    вторая строка того же ответа получить не может и заводит свою.
+
+    Замер 23.09.2026 по ста изменениям: внутри одного ответа слиплось ДВЕ
+    находки, обе в тот же день — `scripts/runs_series.py:194` на #635 и
+    `:181` на #657. Прочитаны поимённо: каждая — другая беда, чем соседка по
+    адресу. Реестр терял их молча, и источник 3 плана показывал меньше, чем
+    назвал взгляд
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+
+    ЕСЛИ ЗАПИСЕЙ ПО АДРЕСУ НЕСКОЛЬКО, берётся ближайшая по словам. Иначе
+    пересказ одной из них на позднем заходе садился бы на первую попавшуюся — и
+    та, о которой говорили, висела бы неразобранной навсегда
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
     """
-    for mark, entry in entries.items():
-        if entry.pr == pr and same_finding(entry.title, title, strict=strict):
-            return mark
-    return None
+    found = [
+        mark
+        for mark, entry in entries.items()
+        if mark not in taken and entry.pr == pr and same_finding(entry.title, title, strict=strict)
+    ]
+    if len(found) < 2:
+        return found[0] if found else None
+    words = title.lower().split()
+    return max(
+        found,
+        key=lambda mark: SequenceMatcher(None, entries[mark].title.lower().split(), words).ratio(),
+    )
 
 
 def marks_in(raw: str) -> list[str]:
@@ -826,6 +857,9 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
             renamed = 0
+            # Записи, которые этот заход уже завёл или пересказал. Вторая строка
+            # того же ответа их не получит: см. `existing_mark`.
+            taken: set[str] = set()
             for weight, title, род in titles:
                 # ЗАПИСЬ ИЩЕТСЯ ПРЕЖДЕ, ЧЕМ ЗАВОДИТСЯ. Отпечаток берётся от
                 # заголовка, а заголовок ревьюер на новом заходе пересказывает
@@ -835,8 +869,9 @@ def main(argv: list[str] | None = None) -> int:
                 # Прежний отпечаток при этом СОХРАНЯЕТСЯ: по нему находку уже
                 # могли назвать разобранной в теле изменения, и смена отпечатка
                 # обессмыслила бы снятие.
-                mark = existing_mark(entries, args.pr, title, strict=args.strict)
+                mark = existing_mark(entries, args.pr, title, strict=args.strict, taken=taken)
                 if mark is not None:
+                    taken.add(mark)
                     renamed += 1
                     # Ответ верификатора ПЕРЕЖИВАЕТ пересказ находки: он о
                     # премисе, а не о формулировке, и переписывать запись
@@ -846,6 +881,7 @@ def main(argv: list[str] | None = None) -> int:
                     entries[mark] = replace(entries[mark], pr=args.pr, weight=weight, kind=род)
                     continue
                 entries[fingerprint(title)] = findings.Entry(args.pr, weight, title, kind=род)
+                taken.add(fingerprint(title))
             said = f"из #{args.pr}: вердикт {verdict}, строк находок {len(titles)}"
             if renamed:
                 said += f", из них уже лежат под своим отпечатком {renamed}"

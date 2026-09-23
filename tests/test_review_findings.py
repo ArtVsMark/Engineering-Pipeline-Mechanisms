@@ -732,7 +732,7 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
     monkey.setattr(
         module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами", "код")]
     )
-    monkey.setattr(module, "existing_mark", lambda entries, pr, title, strict=False: "abc1234")
+    monkey.setattr(module, "existing_mark", lambda *_, **__: "abc1234")
     monkey.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
     written: dict[str, Any] = {}
     monkey.setattr(
@@ -1250,3 +1250,74 @@ def test_the_reader_passes_a_real_answer_through(monkeypatch: pytest.MonkeyPatch
         module.ghrest, "files_of", lambda repo, number, token: frozenset({"scripts/x.py"})
     )
     assert module.touched("o/r", "токен", 7) == {"scripts/x.py"}
+
+
+#: Две РАЗНЫЕ находки по одному адресу — ровно те, что слиплись на #635.
+TWO_AT_ONE_PLACE: Final = (
+    "scripts/runs_series.py:194 — множество `ours` строится по имени шага без привязки "
+    "к файлу/джобу; одноимённый шаг «ставит И делает» унаследует чужую классификацию.",
+    "scripts/runs_series.py:194 — подстрочный поиск `pip install` в строке классифицирует "
+    "её как installer-only, даже если та же строка через `&&` ещё и выполняет работу.",
+)
+
+
+def harvest(entries: dict[str, Any], pr: int, titles: tuple[str, ...]) -> dict[str, Any]:
+    """Жатва одного захода тем же приёмом, что в `main`: занятое не отдаётся дважды."""
+    taken: set[str] = set()
+    for title in titles:
+        mark = module.existing_mark(entries, pr, title, taken=taken)
+        if mark is not None:
+            taken.add(mark)
+            continue
+        entries[module.fingerprint(title)] = module.findings.Entry(pr, "риск", title)
+        taken.add(module.fingerprint(title))
+    return entries
+
+
+def test_two_findings_of_one_look_at_one_place_stay_two() -> None:
+    """Две находки одного ответа по одному адресу дают ДВЕ записи.
+
+    Совпавший адрес считался точным признаком «та же находка». Для пересказа он
+    точный, для соседства — нет: у одной строки бывает две разные беды, а
+    ревьюер не называет одну находку дважды в одном ответе.
+
+    Замер 23.09.2026 по ста изменениям: внутри одного ответа слиплось две
+    находки — на #635 и #657, обе в тот же день, и реестр терял их молча
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    """
+    said = harvest({}, 635, TWO_AT_ONE_PLACE)
+    assert len(said) == 2, f"две находки по одному адресу слиплись: {list(said)}"
+
+
+def test_a_later_look_still_retells_instead_of_duplicating() -> None:
+    """Пересказ ПОЗДНИМ заходом по-прежнему садится на прежнюю запись.
+
+    Вторая половина: без неё починка неотличима от «никогда не склеивать», и
+    каждый новый заход размножал бы записи о той же беде — ровно то, ради чего
+    признак адреса и заведён (замер 10.09.2026: четыре записи об одной беде на
+    #149)
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    entries = harvest({}, 635, TWO_AT_ONE_PLACE)
+    retold = (
+        "scripts/runs_series.py:194 — поиск подстроки `pip install` объявляет служебной "
+        "строку, которая через `&&` дальше делает работу.",
+    )
+    harvest(entries, 635, retold)
+    assert len(entries) == 2, f"пересказ завёл лишнюю запись: {list(entries)}"
+
+
+def test_a_retelling_lands_on_the_closest_of_its_neighbours() -> None:
+    """Если записей по адресу несколько, пересказ садится на ближайшую по словам.
+
+    Иначе пересказ второй находки на позднем заходе садился бы на ПЕРВУЮ
+    попавшуюся — и та, о которой говорили, висела бы неразобранной навсегда
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    """
+    entries = harvest({}, 635, TWO_AT_ONE_PLACE)
+    retold = (
+        "scripts/runs_series.py:194 — подстрочный поиск `pip install` классифицирует строку "
+        "как installer-only, хотя через `&&` она ещё и выполняет работу.",
+    )
+    mark = module.existing_mark(entries, 635, retold[0])
+    assert mark == module.fingerprint(TWO_AT_ONE_PLACE[1]), "пересказ сел на чужую запись"
