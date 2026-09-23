@@ -330,10 +330,9 @@ def sweep(repo: str, token: str, now: datetime, minutes: int = FRESH_MINUTES) ->
         head = str((full.get("head") or {}).get("sha") or "")
         if not head:
             raise NotRun(f"#{number}: головы нет — читать нечего (075)")
-        runs = (
-            ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
-            or {}
-        ).get("check_runs") or []
+        runs = list(
+            ghrest.paginate(f"repos/{repo}/commits/{head}/check-runs", token, key="check_runs")
+        )
         # ЧЕРНОВИК ОТСЕИВАЕТСЯ ДО ВОПРОСА ПЛОЩАДКЕ. `judge` отбросит его
         # первым же условием, и спрашивать состояние названного стоп-меткой
         # значило бы платить запросом за ответ, который никто не прочтёт.
