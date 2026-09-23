@@ -444,6 +444,37 @@ def rerunnable(where: Path | None = None) -> dict[str, str]:
     return found
 
 
+#: Чем запись проверки отделена от параметра матрицы. Площадка называет ячейку
+#: `<имя джоба> (<значение>)`, и это ОДИН разделитель на весь модуль: пока он
+#: стоял подстрокой в одном месте, второй читатель сравнивал имя записи целиком
+#: — и матричная проверка не совпадала ни с чем (022).
+CELL: Final = " ("
+
+
+def job_of(name: str) -> str:
+    """Имя ДЖОБА по имени записи: матричный параметр отрезается.
+
+    ЭТО НЕ КОСМЕТИКА, А УСЛОВИЕ СОВПАДЕНИЯ. Ответ проекта и разрешительный
+    список называют ДЖОБ (`test-next`), а площадка кладёт на голову запись
+    ЯЧЕЙКИ (`test-next (3.15)`). Сравнение имени записи целиком не совпадало с
+    ними никогда, и молча: имя просто не находилось в списке, и это выглядело
+    как «перезапускать незачем».
+
+    Замер 23.09.2026: из сорока объявленных проверок матричных ТРИ —
+    `test-matrix`, `test-next`, `late-look`. Ни одна из них не могла попасть в
+    разрешительный список работающей записью: гейт списка требует имени,
+    объявленного в `.pipeline.yml`, то есть БЕЗ параметра, а сравнение шло с
+    параметром. Форма, которой механизм не видит, и есть обход
+    ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
+    """
+    return name.split(CELL)[0]
+
+
+def listed(name: str, allowed: dict[str, str] | None) -> bool:
+    """Разрешено ли перезапускать проверку с таким именем записи."""
+    return job_of(name) in (allowed or {})
+
+
 def one_fall(holds: list[str], rest: list[str], fed: dict[str, set[str]]) -> bool:
     """Одно ли это падение, отражённое несколькими именами.
 
@@ -463,7 +494,7 @@ def one_fall(holds: list[str], rest: list[str], fed: dict[str, set[str]]) -> boo
     if len(holds) != 1:
         return False
     feeding = fed.get(holds[0], set())
-    return all(name.split(" (")[0] in feeding for name in rest)
+    return all(job_of(name) in feeding for name in rest)
 
 
 def target_run(
@@ -539,7 +570,7 @@ def rerun_reason(
     if not holds:
         if len(rest) != 1:
             return ADVISORY_NOT_ALONE if rest else ADVISORY_ONLY
-        if rest[0] not in (allowed or {}):
+        if not listed(rest[0], allowed):
             return ADVISORY_ONLY
         if not run:
             return NO_ADDRESS
@@ -551,7 +582,7 @@ def rerun_reason(
     # потому, что красна его матричная ячейка, и перезапускать их порознь
     # нечего. А обязательное БЕЗ соседей — это само по себе красное, и решает
     # по нему история мигания, а не класс (#607).
-    if not rest and holds[0] not in (allowed or {}):
+    if not rest and not listed(holds[0], allowed):
         return REQUIRED_UNLISTED
     if not run:
         return NO_ADDRESS
