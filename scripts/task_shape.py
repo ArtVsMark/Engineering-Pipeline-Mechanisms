@@ -36,6 +36,7 @@ from typing import Any, Final
 
 import findings
 import items
+import labels
 
 #: Пункт перечисления, который НЕ является галочкой. Три знака списка, потому
 #: что все три законны в Markdown и все три встречаются в живых задачах.
@@ -181,3 +182,50 @@ def closed_with_live_units(issues: list[dict[str, Any]]) -> list[Live]:
             )
         )
     return sorted(found, key=lambda task: -task.number)
+
+
+@dataclass(frozen=True, slots=True)
+class Bare:
+    """Открытая задача без зоны или без рода — и чего именно ей не хватает."""
+
+    number: int
+    title: str
+    missing: tuple[str, ...]
+
+
+def unlabelled(issues: list[dict[str, Any]]) -> list[Bare]:
+    """Открытые задачи, которым не хватает зоны (`area/*`) или рода (#655).
+
+    У ИЗМЕНЕНИЯ МЕТКИ СТАВИТ МЕХАНИЗМ, У ЗАДАЧИ — РУКА. `agent_pr.py` выводит
+    зоны из тронутых файлов; у задачи файлов ещё нет, и ничто не краснело.
+    Замер 23.09.2026: за смену окно завело тринадцать задач без единой метки —
+    по событиям площадки пять из них провисели голыми с 08:43–10:43 до 13:17,
+    пока владелец не заметил. Задачи, заведённые после замечания, метились
+    сразу.
+
+    ЖИВАЯ ЗАДАЧА-АДРЕСАТ КАНДИДАТОМ НЕ ЯВЛЯЕТСЯ — реестры и план ведёт
+    механизм, и меток им не нужно. Узнаётся она тем же маркером, которым её
+    находит `findings.live_issue`, а не списком номеров
+    ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+
+    СЛОЖНОСТЬ (`difficulty/*`) НЕ СПРАШИВАЕТСЯ, и это граница: её метки в
+    составе объявлены подсказкой разбирающему, а не входом механизма. Зона и
+    род — входы: по роду `items.follow` находит эпики, по зоне читает фильтр
+    владельца.
+    """
+    found: list[Bare] = []
+    for issue in issues:
+        if findings.is_kept_by_a_mechanism(str(issue.get("body") or "")):
+            continue
+        names = {str(label.get("name") or "") for label in issue.get("labels") or []}
+        missing = tuple(
+            said
+            for said, present in (
+                ("зона", any(name.startswith(labels.ZONE_PREFIX) for name in names)),
+                ("род", bool(names & set(labels.KINDS))),
+            )
+            if not present
+        )
+        if missing:
+            found.append(Bare(int(issue["number"]), str(issue.get("title") or ""), missing))
+    return sorted(found, key=lambda task: task.number)

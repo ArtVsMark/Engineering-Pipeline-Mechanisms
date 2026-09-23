@@ -172,3 +172,51 @@ def test_a_task_closed_without_a_date_is_counted_as_fresh() -> None:
     """
     said = module.closed_with_live_units([issue(50, BOXES)])
     assert said[0].before_the_counter is False
+
+
+def labelled(number: int, *names: str, body: str = "Предмет.") -> dict[str, Any]:
+    """Задача с метками в том виде, в каком их отдаёт площадка."""
+    return issue(number, body, labels=[{"name": name} for name in names])
+
+
+def test_a_task_without_zone_or_kind_is_named_with_what_it_lacks() -> None:
+    """Задаче без зоны или рода называется, ЧЕГО именно не хватает (#655).
+
+    Замер 23.09.2026: пять задач смены провисели без меток с утра до 13:17 —
+    заметил владелец, а не механизм.
+    """
+    found = module.unlabelled(
+        [
+            labelled(1),
+            labelled(2, "area/gates"),
+            labelled(3, "bug"),
+            labelled(4, "area/core", "enhancement", "difficulty/easy"),
+            labelled(5, "area/docs", "epic"),
+        ]
+    )
+    assert [(task.number, task.missing) for task in found] == [
+        (1, ("зона", "род")),
+        (2, ("род",)),
+        (3, ("зона",)),
+    ]
+
+
+def test_a_live_issue_kept_by_a_mechanism_is_not_a_bare_task() -> None:
+    """Реестр и план ведёт механизм — меток им не нужно, и узнаются они маркером.
+
+    Вторая половина предиката: без неё все семь живых задач-адресатов
+    называлась бы голыми, и счёт учили бы пролистывать (051).
+    """
+    kept = labelled(23, body=module.findings.marker("review-findings") + "\n\nреестр")
+    assert module.unlabelled([kept]) == []
+
+
+def test_difficulty_is_not_asked() -> None:
+    """Сложность — подсказка разбирающему, а не вход механизма: её отсутствие не долг."""
+    assert module.unlabelled([labelled(7, "area/merge", "tech-debt")]) == []
+
+
+def test_every_kind_is_declared_in_the_label_set() -> None:
+    """Каждое имя рода объявлено в `.github/labels.yml` — список не разошёлся с файлом."""
+    declared = {label.name for label in module.labels.load()}
+    assert set(module.labels.KINDS) <= declared, set(module.labels.KINDS) - declared

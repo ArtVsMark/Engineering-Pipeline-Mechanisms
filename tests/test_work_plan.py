@@ -400,3 +400,64 @@ def test_rules_half_without_numbers_is_named_unread(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(module.debt, "rules_debt", lambda _: None)
     said = module.rules_part("o/r", "t")
     assert said.rows == [] and "числа каталога не найдены" in said.unread
+
+
+def test_an_owner_edit_during_the_pass_is_not_overwritten(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Владелец правит раздел 4, пока идёт заход, — его правка доходит до записи.
+
+    ЗАМЕР 23.09.2026: владелец поставил #673 первым в раздел 4, а заход,
+    прочитавший тело ДО правки, записал его ПОСЛЕ — и указание пропало молча.
+    Здесь первое чтение отдаёт прежнее тело, а все следующие — поправленное:
+    сборщик обязан заметить расхождение и собрать заново.
+    """
+    edited = BODY.replace(
+        "- **#640** — сборщик плана\n",
+        "- **#673** — первым, по слову владельца\n- **#640** — сборщик плана\n",
+    )
+    written = quiet_platform(monkeypatch)
+    reads = iter([BODY])
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (639, next(reads, edited)))
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    assert len(written) == 1
+    section = written[0].split("## 4", 1)[1].split("## 5", 1)[0]
+    assert section.index("#673") < section.index("#640"), section
+
+
+def test_a_plan_edited_all_the_time_is_not_written_over(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Рука правит план на каждом заходе — сборщик отказывает, а не пишет поверх."""
+    written = quiet_platform(monkeypatch)
+    counter = iter(range(100))
+    monkeypatch.setattr(
+        module.findings,
+        "live_issue",
+        lambda *_, **__: (
+            639,
+            BODY.replace("сборщик плана", f"сборщик плана, правка {next(counter)}"),
+        ),
+    )
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_BROKEN
+    assert written == []
+
+
+def test_the_hand_part_is_the_head_and_the_owner_sections() -> None:
+    """Рукой пишутся шапка и разделы 4 и 6; собранные разделы в сверку не входят."""
+    said = module.hand_part(BODY)
+    assert said[0].startswith("<!-- work-plan")
+    assert "- **#640** — сборщик плана" in said and "- **#642** — инвентарь переносимого" in said
+    assert "**Пусто.**" not in said
+
+
+def test_a_dry_run_reads_the_body_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без записи сверять нечего: `fresh_build` читает тело один раз и отдаёт сборку."""
+    quiet_platform(monkeypatch)
+    reads: list[int] = []
+
+    def counted(*_: Any, **__: Any) -> tuple[int, str]:
+        reads.append(1)
+        return 639, BODY
+
+    monkeypatch.setattr(module.findings, "live_issue", counted)
+    built = {one: module.Source() for one in module.BUILT}
+    number, body, _held, said = module.fresh_build("o/r", "t", built, set(), "01.01.2026", False)
+    assert (number, body) == (639, BODY) and "## 4" in said
+    assert len(reads) == 1

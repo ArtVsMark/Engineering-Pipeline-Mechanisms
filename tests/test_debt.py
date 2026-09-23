@@ -762,3 +762,13 @@ def test_a_fully_read_debt_is_clean(
     monkeypatch.setattr(debt.coverage_floor.ghrest, "request", no_network)
     assert debt.main(["--repo", "o/r"]) == debt.EXIT_OK
     assert "слито без внешнего взгляда: 0" in capsys.readouterr().out
+
+
+def test_the_bare_tasks_are_counted_even_at_zero() -> None:
+    """Счёт задач без меток печатается и нулём: пустая строка неотличима от выключенного (142)."""
+    lines = debt.shape_report([], [], [])
+    assert any(line.startswith("задач без зоны или рода: 0") for line in lines)
+    bare = [debt.task_shape.Bare(642, "инвентарь", ("зона",))]
+    lines = debt.shape_report([], [], bare)
+    assert "задач без зоны или рода: 1 — метки ставит автор (#655)" in lines
+    assert "  #642 — инвентарь · нет: зона" in lines
