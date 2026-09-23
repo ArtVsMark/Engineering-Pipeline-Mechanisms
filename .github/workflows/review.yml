@@ -511,9 +511,16 @@ jobs:
           set -uo pipefail
           rc=0
           said="${RUNNER_TEMP}/subject.txt"
-          python scripts/review_findings.py --tell "$MARK" >"$said" 2>&1 || rc=$?
-          cat "$said"
-          reason="$(tr '\n' ' ' <"$said")"
+          told="${RUNNER_TEMP}/subject.err"
+          # ПОТОКИ НЕ СЛИВАЮТСЯ: ответ механизма уходит в `$GITHUB_OUTPUT`, а
+          # пояснения — в лог. Слитые `2>&1`, они увозили туда же приставку
+          # пробного захода, площадка отвечала «Invalid format», и верификатор
+          # не доходил до агента ни разу с тех пор, как приставка появилась
+          # (#468). Найдено проверкой всех вызовов агента после перехода на
+          # v1.0.232 (#673).
+          python scripts/review_findings.py --tell "$MARK" >"$said" 2>"$told" || rc=$?
+          cat "$told" "$said"
+          reason="$(cat "$told" "$said" | tr '\n' ' ')"
           if [ "$rc" != 3 ]; then
             echo "::error::предмет проверки не прочитан (код $rc): ${reason}"
             exit 1
