@@ -773,3 +773,26 @@ def test_head_runs_asks_annotations_only_of_the_review_check(
         "repos/o/r/check-runs/1/annotations"
     ]
     assert found[0][module.REFUSED_KEY] is True and module.REFUSED_KEY not in found[1]
+
+
+def test_a_step_without_a_token_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Токена нет — исход «шаг не отработал», а не «реестр пуст».
+
+    Прежде этот исход засчитывался прогнанным по чужому `assert … == 2` в
+    соседнем наборе: распознаватель исходов узнаёт код по числу. Здесь он
+    прогнан по имени.
+    """
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+
+
+def test_a_silent_platform_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка молчит — исход «шаг не отработал», а не «нечего записывать» (045)."""
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    monkeypatch.setattr(module.ghrest, "paginate", refuse)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN

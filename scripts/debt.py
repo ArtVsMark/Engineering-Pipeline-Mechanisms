@@ -48,6 +48,7 @@ import findings
 import ghrest
 import items
 import items_left
+import labels
 import main_red
 import report
 import task_shape
@@ -474,11 +475,11 @@ def items_report(
 def shape_report(
     by_prose: list[task_shape.Prose],
     live: list[task_shape.Live],
-    bare: list[task_shape.Bare] | None = None,
+    bare: list[task_shape.Bare],
 ) -> list[str]:
     """Строки о форме задач — отдельно от печати, чтобы их можно было спросить.
 
-    ОБА ЧИСЛА ПЕЧАТАЮТСЯ ВСЕГДА, а не только когда нашлось. Строка,
+    ВСЕ ТРИ ЧИСЛА ПЕЧАТАЮТСЯ ВСЕГДА, а не только когда нашлось. Строка,
     появляющаяся лишь при находке, снаружи неотличима от невключённого
     механизма (142): ноль здесь — ответ, а не молчание.
     """
@@ -506,11 +507,14 @@ def shape_report(
     # условие работы, и гейт, держащий слияние за метку на задаче, учат
     # обходить (051). Механизм называет, а не проставляет: зону у задачи из
     # тронутых файлов не вывести — файлов ещё нет.
-    if bare is not None:
-        lines.append(f"задач без зоны или рода: {len(bare)} — метки ставит автор (#655)")
-        lines.extend(
-            f"  #{task.number} — {task.title} · нет: {', '.join(task.missing)}" for task in bare
-        )
+    #
+    # Список обязателен, а не «по умолчанию None»: умолчание глушило бы строку
+    # целиком — ровно то молчание, против которого числа печатаются всегда.
+    # Нашёл внешний взгляд на #685 (`5d837cf`).
+    lines.append(f"задач без зоны или рода: {len(bare)} — метки ставит автор (#655)")
+    lines.extend(
+        f"  #{task.number} — {task.title} · нет: {', '.join(task.missing)}" for task in bare
+    )
     return lines
 
 
@@ -559,8 +563,8 @@ def main(argv: list[str] | None = None) -> int:
         built, quiet = items_left.look(issues, items.open_items)
         by_prose = task_shape.without_a_checklist(issues)
         still_live = task_shape.closed_with_live_units(closed)
-        bare = task_shape.unlabelled(issues)
-    except ghrest.TransportError as exc:
+        bare = task_shape.unlabelled(issues, labels.kinds_of(labels.load()))
+    except (ghrest.TransportError, labels.BadConfig) as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
@@ -620,7 +624,7 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
 
     # ФОРМА ЗАДАЧИ ПЕЧАТАЕТСЯ РЯДОМ СО СЧЁТОМ ПО ПУНКТАМ, А НЕ ВМЕСТО НЕГО.
-    # Оба числа про одно: состояние задачи читается счётчиком, а не
+    # Все её числа про одно: состояние задачи читается счётчиком, а не
     # вычитыванием. Долгом перед планом ни одно не является — это форма
     # работы, а не невыполненная работа, и решение по ним за человеком (154).
     for line in shape_report(by_prose, still_live, bare):
