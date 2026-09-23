@@ -44,8 +44,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import shlex
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -147,40 +145,83 @@ PLATFORM_STEPS: Final = (
 INSTALLERS: Final = ("pip install", "npm install", "npm ci")
 
 
-#: Чем строка `run:` делится на отдельные команды. Оболочка исполняет их
-#: подряд, и служебной строка считается, только когда служебна КАЖДАЯ.
-#:
-#: ЗДЕСЬ СТОЯЛ НЕВЕРНЫЙ ДОВОД — «порядок значим: `||` обязан проверяться раньше
-#: `|`». Проверено прогоном на обоих порядках: пустые куски отсеиваются ниже, и
-#: `a || b` даёт одно и то же. Довод звучал правдоподобно и был выдуман; нашёл
-#: внешний взгляд на #641
-#: ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
-JOINERS: Final = re.compile(r"&&|\|\||;|\|")
+#: Знаки кавычек, внутри которых оболочка не видит ни связок, ни комментария.
+QUOTES: Final = "'\""
+
+#: Связки оболочки, по которым строка делится на команды. Двухзнаковые стоят
+#: первыми: разбор идёт слева направо и берёт первое совпадение, иначе `||`
+#: прочиталось бы как две одиночные черты.
+JOINERS: Final = ("&&", "||", ";", "|")
 
 
 def bare_of(line: str) -> str:
-    """Строка без комментария оболочки; кавычки при этом уважаются.
+    """Строка без комментария оболочки — так, как его видит сама оболочка.
 
-    РЕЗАТЬ ПО ПЕРВОЙ РЕШЁТКЕ НЕЛЬЗЯ, и это замер, а не осторожность. В дереве
-    ЧЕТЫРЕ строки `run:` несут решётку не комментарием, а внутри кавычек:
-    `echo "…записан в #196"`, `echo "смотрим названное: #$ASKED"` и два
-    соседних. Наивная обрезка искалечила бы все четыре, и предикат « #» назвал
-    бы их поимённо — потому имена и читаются, а не только счёт
-    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    ДВА ПРАВИЛА, И ОБА ИЗМЕРЕНЫ, А НЕ ВЗЯТЫ ИЗ ГОЛОВЫ.
 
-    Поэтому разбор ведёт `shlex` — он знает кавычки. Незакрытая кавычка ему не
-    по зубам, и тогда строка отдаётся КАК ЕСТЬ: комментарий в ней останется, шаг
-    посчитается работающим, и ошибка уйдёт в дешёвую сторону — служебное
-    падение назовут своим, а не наоборот
-    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    **Решётка в кавычках комментария не начинает.** В дереве ЧЕТЫРЕ строки
+    `run:` несут её именно так: `echo "…записан в #196"`, `echo "смотрим
+    названное: #$ASKED"` и две соседних. Наивная обрезка искалечила бы все
+    четыре.
+
+    **Решётка внутри слова комментария тоже не начинает.** `pip install
+    pkg@git+URL#egg=x` — обычный адрес, и оболочка режет по решётке, только
+    когда та стоит первым знаком слова. Прежняя редакция звала `shlex` с
+    `comments=True`, а его правило ШИРЕ оболочкиного: `echo foo#bar` он
+    обрезал до `echo foo`, чего `bash` не делает. Нашёл внешний взгляд на #657.
+
+    ПОЧЕМУ РАЗБОР СВОЙ, А НЕ `shlex`. Тот же заход выявил вторую беду: `shlex`
+    отдаёт ТОКЕНЫ, и собрать из них строку обратно нельзя — кавычки теряются, и
+    `echo "a | b"` превращался в `echo a | b`, то есть в две команды вместо
+    одной. Здесь строка не пересобирается вовсе: разбор только НАХОДИТ границу
+    и отдаёт исходный кусок
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     """
     said = line.strip()
-    if not said or said.startswith("#"):
-        return ""
-    try:
-        return " ".join(shlex.split(said, comments=True))
-    except ValueError:
-        return said
+    quote = ""
+    for place, sign in enumerate(said):
+        if quote:
+            if sign == quote:
+                quote = ""
+            continue
+        if sign in QUOTES:
+            quote = sign
+            continue
+        if sign == "#" and (place == 0 or said[place - 1].isspace()):
+            return said[:place].strip()
+    return said
+
+
+def apart(said: str) -> list[str]:
+    """Команды одной строки: связки оболочки режут, кавычки — нет.
+
+    СВЯЗКА В КАВЫЧКАХ КОМАНДЫ НЕ РАЗДЕЛЯЕТ. `echo "a | b"` — одна команда с
+    чертой внутри строки, и разбор, не знающий кавычек, дробил её надвое.
+    Нашёл внешний взгляд на #657.
+    """
+    found: list[str] = []
+    start = place = 0
+    quote = ""
+    while place < len(said):
+        sign = said[place]
+        if quote:
+            if sign == quote:
+                quote = ""
+            place += 1
+            continue
+        if sign in QUOTES:
+            quote = sign
+            place += 1
+            continue
+        hit = next((one for one in JOINERS if said.startswith(one, place)), "")
+        if hit:
+            found.append(said[start:place])
+            place += len(hit)
+            start = place
+            continue
+        place += 1
+    found.append(said[start:])
+    return [one.strip() for one in found if one.strip()]
 
 
 def commands(run: str) -> list[str]:
@@ -198,18 +239,11 @@ def commands(run: str) -> list[str]:
     установку и объявлял шаг служебным целиком; падение настоящей работы
     пряталось бы за площадкой. Нашёл внешний взгляд там же.
 
-    ХВОСТОВОЙ КОММЕНТАРИЙ СРЕЗАЕТСЯ ТОЖЕ, и это третий конец той же беды.
-    Прежняя редакция отбрасывала строку, НАЧИНАЮЩУЮСЯ с решётки, а комментарий
-    в хвосте оставляла — и `pytest  # не забыть pip install` читался установкой:
-    маркер находился в пояснении. Нашёл внешний взгляд на #641.
+    ХВОСТОВОЙ КОММЕНТАРИЙ СРЕЗАЕТСЯ ТОЖЕ, и это третий конец той же беды:
+    `pytest  # не забыть pip install` читался установкой, потому что маркер
+    находился в пояснении. Нашёл внешний взгляд на #641.
     """
-    found: list[str] = []
-    for line in run.splitlines():
-        said = bare_of(line)
-        if not said:
-            continue
-        found += [one.strip() for one in JOINERS.split(said) if one.strip()]
-    return found
+    return [one for line in run.splitlines() for one in apart(bare_of(line))]
 
 
 def only_installs(run: str) -> bool:
