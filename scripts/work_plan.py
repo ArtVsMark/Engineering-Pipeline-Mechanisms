@@ -509,6 +509,10 @@ def main(argv: list[str] | None = None) -> int:
         ghrest.request("PATCH", f"repos/{args.repo}/issues/{number}", token, {"body": said})
         print(f"план #{number} собран" + (f"; снято сделанных строк: {gone}" if gone else ""))
     else:
+        # НОМЕР ПЛАНА ПЕЧАТАЕТСЯ И СУХИМ ЗАХОДОМ: навык `work-the-plan` не
+        # прибивает номер живой задачи и отсылает за ним сюда, а в самом теле
+        # номера нет. Нашёл внешний взгляд на #689 (`5a0aac6`).
+        print(f"план #{number} — собрал бы так:")
         print(said)
     if broken:
         print(

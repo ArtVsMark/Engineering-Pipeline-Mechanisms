@@ -221,7 +221,7 @@ def unlabelled(issues: list[dict[str, Any]], kinds: frozenset[str]) -> list[Bare
         missing = tuple(
             said
             for said, present in (
-                ("зона", any(name.startswith(labels.ZONE_PREFIX) for name in names)),
+                ("зона", any(labels.zone_named(name) for name in names)),
                 ("род", bool(names & kinds)),
             )
             if not present

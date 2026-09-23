@@ -31,7 +31,6 @@ import changerefs
 import ghrest
 import labels
 
-ZONE_PREFIX: Final = labels.ZONE_PREFIX
 #: Незакрытый пункт чек-листа задачи в её теле.
 OPEN_ITEM_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(\S.*?)\s*$", re.MULTILINE)
 
@@ -184,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             + " — список разрешительный (068)"
         )
 
-    zones_on_pr = {name for name in on_pr if name.startswith(ZONE_PREFIX)}
+    zones_on_pr = {name for name in on_pr if labels.zone_named(name)}
     if not zones_on_pr:
         problems.append("не поставлена ни одна зона (area/*) — изменение не разобрано")
 

@@ -517,6 +517,16 @@ def test_a_kind_at_the_threshold_without_an_answer_is_plan_work(tmp_path: Any) -
     assert said.rows == ["род находок у порога без ответа каталогу: «без ответа» — встреч 3"]
 
 
+def test_a_dry_run_names_the_plan_number(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Сухой заход печатает номер плана: навык отсылает за ним сюда (`5a0aac6`)."""
+    written = quiet_platform(monkeypatch)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+    assert written == []
+    assert "план #639 — собрал бы так:" in capsys.readouterr().out
+
+
 def test_no_kinds_file_is_named_silence_not_emptiness(tmp_path: Any) -> None:
     """Словаря родов нет — раздел называет молчание, а не «поводов нет» (`13f3a9d`).
 

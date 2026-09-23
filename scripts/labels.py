@@ -27,6 +27,16 @@ COLOR_RE: Final = re.compile(r"^[0-9a-fA-F]{6}$")
 ZONE_PREFIX: Final = "area/"
 
 
+def zone_named(name: str) -> bool:
+    """Зона ли метка с этим именем — по приставке.
+
+    ОДИН ПРЕДИКАТ НА ВСЕХ. Он был записан четырьмя копиями — свойство метки,
+    проверка разбора, счёт голых задач, гейт разметки изменения, — и копии
+    расходятся молча (022). Нашёл внешний взгляд на #695 (`9218c72`).
+    """
+    return name.startswith(ZONE_PREFIX)
+
+
 class BadConfig(RuntimeError):
     """Состав меток не разбирается или не проходит проверку.
 
@@ -50,7 +60,7 @@ class Label:
     @property
     def is_zone(self) -> bool:
         """Зона ли это — по приставке имени."""
-        return self.name.startswith(ZONE_PREFIX)
+        return zone_named(self.name)
 
 
 def load(path: Path = DEFAULT_PATH) -> list[Label]:
@@ -83,7 +93,13 @@ def load(path: Path = DEFAULT_PATH) -> list[Label]:
         # ЗОНА РОДОМ БЫТЬ НЕ МОЖЕТ. Метка `area/*` с `kind: true` закрыла бы у
         # задачи обе нехватки одной меткой — и счёт голых задач молчал бы о
         # задаче без рода. Нашёл внешний взгляд на #688 (`a4d414a`).
-        if kind and name.startswith(ZONE_PREFIX):
+        #
+        # Остальные метки с `kind: true` родом СТАНОВЯТСЯ — это и есть
+        # объявление, и запрещать его по списку имён значило бы угадывать
+        # (`d11b75c`). Метки, которые ставит механизм (`source/*`, `automerge`),
+        # живут на изменениях, а не на задачах, и счёт голых задач их не видит.
+        # Зона — особый случай: она вторая половина того же счёта.
+        if kind and zone_named(name):
             problems.append(f"{name}: зона не может быть родом — kind у метки area/* запрещён")
         if not name:
             problems.append(f"запись {index}: пустое имя")

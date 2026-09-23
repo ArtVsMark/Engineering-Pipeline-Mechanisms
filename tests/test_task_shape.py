@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
+import ast
 import subprocess
 from typing import Any
 
 import pytest
 
-from tests.conftest import load_script, needs_history
+from tests.conftest import ROOT, load_script, needs_history, walk
 
 module = load_script("task_shape.py")
 
@@ -233,13 +234,13 @@ def test_the_kinds_are_read_from_the_label_set_both_ways(tmp_path: Any) -> None:
     # проверку (`eb31734`). Держится отношение: род эпика, по которому
     # `items.follow` находит эпики, обязан быть родом.
     assert module.items.EPIC_LABEL in declared, declared
-    declared = tmp_path / "labels.yml"
-    declared.write_text(
+    written = tmp_path / "labels.yml"
+    written.write_text(
         '- name: "chore"\n  color: "cccccc"\n  description: "Уборка"\n  kind: true\n'
         '- name: "area/x"\n  color: "cccccc"\n  description: "Зона"\n',
         encoding="utf-8",
     )
-    assert module.labels.kinds_of(module.labels.load(declared)) == {"chore"}
+    assert module.labels.kinds_of(module.labels.load(written)) == {"chore"}
 
 
 def test_a_zone_cannot_be_a_kind(tmp_path: Any) -> None:
@@ -251,3 +252,41 @@ def test_a_zone_cannot_be_a_kind(tmp_path: Any) -> None:
     )
     with pytest.raises(module.labels.BadConfig, match="зона не может быть родом"):
         module.labels.load(declared)
+
+
+def test_the_label_and_the_bare_name_agree_on_a_zone() -> None:
+    """У свойства метки и у голого имени ответ о зоне один (`9218c72`)."""
+    zone = module.labels.Label("area/x", "cccccc", "Зона")
+    kind = module.labels.Label("bug", "cccccc", "Дефект", kind=True)
+    assert zone.is_zone and module.labels.zone_named("area/x")
+    assert not kind.is_zone and not module.labels.zone_named("bug")
+
+
+def zone_copy(node: ast.AST) -> bool:
+    """Вызов `x.startswith(<приставка зоны>)` — константой `ZONE_PREFIX` или литералом."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+        return False
+    if node.func.attr != "startswith" or not node.args:
+        return False
+    said = node.args[0]
+    named = getattr(said, "id", None) or getattr(said, "attr", None)
+    literal = isinstance(said, ast.Constant) and said.value == module.labels.ZONE_PREFIX
+    return named == "ZONE_PREFIX" or literal
+
+
+def test_no_reader_keeps_its_own_zone_predicate() -> None:
+    """Вне `labels.zone_named` зону не узнаёт никто — ни константой, ни литералом.
+
+    Прежняя проверка обещала «один ответ у каждого читателя», а звала двух из
+    четырёх; копию в счёте голых задач или в гейте разметки она бы не поймала
+    (`700e329`). Здесь держится дерево: замер 23.09.2026 до починки — четыре
+    копии, после — одна, в самой функции.
+    """
+    found = [
+        f"{path.name}:{getattr(node, 'lineno', 0)}"
+        for path in walk(ROOT / "scripts", "*.py")
+        if path.name != "labels.py"
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if zone_copy(node)
+    ]
+    assert not found, "свой предикат зоны вместо labels.zone_named: " + ", ".join(found)
