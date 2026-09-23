@@ -401,10 +401,9 @@ def subjects(repo: str, token: str, now: datetime) -> list[Subject]:
             said = "бюджет ожидания на этом заходе израсходован" if spent else "после ожидания"
             print(f"  #{number}: состояние слияния не посчитано, {said} — окликать рано")
             continue
-        runs = (
-            ghrest.request("GET", f"repos/{repo}/commits/{head}/check-runs?per_page=100", token)
-            or {}
-        ).get("check_runs") or []
+        runs = list(
+            ghrest.paginate(f"repos/{repo}/commits/{head}/check-runs", token, key="check_runs")
+        )
         red = own_red(list(runs), required)
         # НЕЗНАНИЕ НАЗЫВАЕТСЯ ВСЛУХ. Имя без вердикта красным больше не считается,
         # и без этой строки «вердикта пока нет» выглядело бы как «всё прошло» (045).

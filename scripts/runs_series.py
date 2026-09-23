@@ -389,7 +389,7 @@ def report_mark(repo: str, job: int, token: str) -> str:
     попало бы в счёт «признака нет» (045).
     """
     try:
-        found = ghrest.request("GET", f"repos/{repo}/check-runs/{job}/annotations", token)
+        found = list(ghrest.paginate(f"repos/{repo}/check-runs/{job}/annotations", token))
     except ghrest.TransportError:
         return MARK_UNREAD
     text = " ".join(str((one or {}).get("message") or "") for one in (found or []))
@@ -420,13 +420,14 @@ def red_details(repo: str, run: int, token: str) -> list[dict[str, str]]:
     на котором проект уже спотыкался, поэтому числа названы здесь целиком, а не
     пересказаны (022).
     """
-    payload = ghrest.request("GET", f"repos/{repo}/actions/runs/{run}/jobs", token) or {}
     # СОСТАВ ЧИТАЕТСЯ ОДИН РАЗ НА ЗАХОД, а не на джоб: он выводится из дерева и
     # за время захода не меняется, а тридцать файлов на каждый упавший джоб —
     # цена без предмета (058).
     ours = installing_steps()
     found: list[dict[str, str]] = []
-    for job in payload.get("jobs") or []:
+    # Джобы читаются до конца: страница по умолчанию — тридцать, у `ci` их
+    # сейчас четырнадцать, и упавший за краем пропал бы молча (#675).
+    for job in ghrest.paginate(f"repos/{repo}/actions/runs/{run}/jobs", token, key="jobs"):
         if job.get("conclusion") not in REAL_RED:
             continue
         number = int(job.get("id") or 0)
