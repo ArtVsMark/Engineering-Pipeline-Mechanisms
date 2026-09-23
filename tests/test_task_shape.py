@@ -192,7 +192,8 @@ def test_a_task_without_zone_or_kind_is_named_with_what_it_lacks() -> None:
             labelled(3, "bug"),
             labelled(4, "area/core", "enhancement", "difficulty/easy"),
             labelled(5, "area/docs", "epic"),
-        ]
+        ],
+        KINDS,
     )
     assert [(task.number, task.missing) for task in found] == [
         (1, ("зона", "род")),
@@ -208,15 +209,30 @@ def test_a_live_issue_kept_by_a_mechanism_is_not_a_bare_task() -> None:
     называлась бы голыми, и счёт учили бы пролистывать (051).
     """
     kept = labelled(23, body=module.findings.marker("review-findings") + "\n\nреестр")
-    assert module.unlabelled([kept]) == []
+    assert module.unlabelled([kept], KINDS) == []
 
 
 def test_difficulty_is_not_asked() -> None:
     """Сложность — подсказка разбирающему, а не вход механизма: её отсутствие не долг."""
-    assert module.unlabelled([labelled(7, "area/merge", "tech-debt")]) == []
+    assert module.unlabelled([labelled(7, "area/merge", "tech-debt")], KINDS) == []
 
 
-def test_every_kind_is_declared_in_the_label_set() -> None:
-    """Каждое имя рода объявлено в `.github/labels.yml` — список не разошёлся с файлом."""
-    declared = {label.name for label in module.labels.load()}
-    assert set(module.labels.KINDS) <= declared, set(module.labels.KINDS) - declared
+#: Роды в подделке — те же имена, что объявлены в файле сегодня.
+KINDS = frozenset({"epic", "bug", "enhancement", "documentation", "tech-debt"})
+
+
+def test_the_kinds_are_read_from_the_label_set_both_ways(tmp_path: Any) -> None:
+    """Род — это метка с `kind: true` в объявлении, и только она (#655, `a226398`).
+
+    Обе стороны: новая метка с полем попадает в род сама, метка без поля — нет.
+    Прежний литерал в коде держался в одну сторону: новый род в файле в список
+    не попадал, и задачи с ним молча считались бы голыми.
+    """
+    assert module.labels.kinds_of(module.labels.load()) == KINDS
+    declared = tmp_path / "labels.yml"
+    declared.write_text(
+        '- name: "chore"\n  color: "cccccc"\n  description: "Уборка"\n  kind: true\n'
+        '- name: "area/x"\n  color: "cccccc"\n  description: "Зона"\n',
+        encoding="utf-8",
+    )
+    assert module.labels.kinds_of(module.labels.load(declared)) == {"chore"}

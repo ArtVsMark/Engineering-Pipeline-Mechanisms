@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -542,12 +543,13 @@ def test_a_seeing_count_says_the_number() -> None:
 # --- форма задачи: чек-лист вместо прозы и ревизия закрытого -----------------
 
 
-def test_the_shape_report_speaks_both_numbers_at_zero() -> None:
-    """Оба счёта печатаются и на нуле: молчащая строка выглядит выключенной (142)."""
-    lines = debt.shape_report([], [])
-    assert len(lines) == 2
+def test_the_shape_report_speaks_every_number_at_zero() -> None:
+    """Все три счёта печатаются и на нуле: молчащая строка выглядит выключенной (142)."""
+    lines = debt.shape_report([], [], [])
+    assert len(lines) == 3
     assert lines[0].startswith("задач с пунктами прозой, а не галочками: 0")
     assert lines[1].startswith("закрыто при живых единицах: 0")
+    assert lines[2].startswith("задач без зоны или рода: 0")
 
 
 def test_the_shape_report_names_every_candidate() -> None:
@@ -555,6 +557,7 @@ def test_the_shape_report_names_every_candidate() -> None:
     lines = debt.shape_report(
         [task_shape.Prose(23, "реестр находок", 33)],
         [task_shape.Live(7, "эпик", 0, 2)],
+        [],
     )
     assert any("#23" in line and "пунктов 33" in line for line in lines), lines
     assert any("#7" in line and "подзадач открыто 2" in line for line in lines), lines
@@ -562,7 +565,7 @@ def test_the_shape_report_names_every_candidate() -> None:
 
 def test_the_revision_window_is_named_in_the_line() -> None:
     """Строка называет границу утверждения: живого нет ИМЕННО среди этих задач."""
-    assert str(debt.CLOSED_WINDOW) in debt.shape_report([], [])[1]
+    assert str(debt.CLOSED_WINDOW) in debt.shape_report([], [], [])[1]
 
 
 # --- что нашёл внешний взгляд: каждая находка проверена отказом ---------------
@@ -707,7 +710,7 @@ def test_the_revision_counts_before_and_after_the_counter_apart() -> None:
         task_shape.Live(3, "первый день", 5, 0, before_the_counter=True),
         task_shape.Live(99, "свежая", 2, 0),
     ]
-    lines = debt.shape_report([], live)
+    lines = debt.shape_report([], live, [])
     head = next(line for line in lines if line.startswith("закрыто при живых"))
     assert head.startswith("закрыто при живых единицах: 1"), head
     said = " ".join(lines)
@@ -772,3 +775,44 @@ def test_the_bare_tasks_are_counted_even_at_zero() -> None:
     lines = debt.shape_report([], [], bare)
     assert "задач без зоны или рода: 1 — метки ставит автор (#655)" in lines
     assert "  #642 — инвентарь · нет: зона" in lines
+
+
+def test_a_silent_platform_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка молчит на чтении задач — исход «шаг не отработал», а не «долга нет».
+
+    Прежде этот исход засчитывался прогнанным по чужому `assert len(lines) == 2`
+    в этом же наборе: распознаватель исходов узнаёт код по ЧИСЛУ. Как только
+    строк стало три, выяснилось, что по имени его не прогонял никто.
+    """
+
+    def refuse(*_: object, **__: object) -> None:
+        raise debt.ghrest.TransportError("502")
+
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(debt, "findings_debt", lambda repo, token: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: ([], {}))
+    monkeypatch.setattr(debt, "branch_debt", lambda repo, token: ([], []))
+    monkeypatch.setattr(debt, "closed_issues", refuse)
+    assert debt.main(["--repo", "o/r"]) == debt.EXIT_BROKEN
+
+
+def test_a_broken_label_set_is_the_broken_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Объявление меток не разбирается — роды взять неоткуда, и это отказ шага, а не «голых нет»."""
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    for name in ("findings_debt", "closed_issues", "open_issues"):
+        monkeypatch.setattr(debt, name, lambda repo, token: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: ([], {}))
+    monkeypatch.setattr(debt, "branch_debt", lambda repo, token: ([], []))
+    monkeypatch.setattr(debt, "inbox_body", lambda repo, token, closed: ("", "", None))
+    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
+    broken = tmp_path / "labels.yml"
+    broken.write_text("не список меток\n", encoding="utf-8")
+    real_load = debt.labels.load
+
+    def load_broken(path: Path = broken) -> list[object]:
+        return list(real_load(path))
+
+    monkeypatch.setattr(debt.labels, "load", load_broken)
+    assert debt.main(["--repo", "o/r"]) == debt.EXIT_BROKEN

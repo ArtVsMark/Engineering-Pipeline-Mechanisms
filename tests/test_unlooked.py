@@ -713,3 +713,26 @@ def test_the_queue_still_names_its_mode(
     monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (7, ""))
     module.main(["--repo", "o/r", "--queue"])
     assert module.report.DRY in capsys.readouterr().err
+
+
+def test_a_step_without_a_token_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Токена нет — исход «шаг не отработал», а не «реестр пуст».
+
+    Прежде этот исход засчитывался прогнанным по чужому `assert … == 2` в
+    соседнем наборе: распознаватель исходов узнаёт код по числу. Здесь он
+    прогнан по имени.
+    """
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+
+
+def test_a_silent_platform_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка молчит — исход «шаг не отработал», а не «нечего записывать» (045)."""
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    monkeypatch.setattr(module.ghrest, "paginate", refuse)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
