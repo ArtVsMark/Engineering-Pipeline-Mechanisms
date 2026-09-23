@@ -45,6 +45,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -147,10 +148,39 @@ INSTALLERS: Final = ("pip install", "npm install", "npm ci")
 
 
 #: Чем строка `run:` делится на отдельные команды. Оболочка исполняет их
-#: подряд, и служебной строка считается, только когда служебна КАЖДАЯ. Порядок
-#: в разборе значим: `||` обязан проверяться раньше `|`, иначе двойная черта
-#: разошлась бы на две пустых команды.
+#: подряд, и служебной строка считается, только когда служебна КАЖДАЯ.
+#:
+#: ЗДЕСЬ СТОЯЛ НЕВЕРНЫЙ ДОВОД — «порядок значим: `||` обязан проверяться раньше
+#: `|`». Проверено прогоном на обоих порядках: пустые куски отсеиваются ниже, и
+#: `a || b` даёт одно и то же. Довод звучал правдоподобно и был выдуман; нашёл
+#: внешний взгляд на #641
+#: ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 JOINERS: Final = re.compile(r"&&|\|\||;|\|")
+
+
+def bare_of(line: str) -> str:
+    """Строка без комментария оболочки; кавычки при этом уважаются.
+
+    РЕЗАТЬ ПО ПЕРВОЙ РЕШЁТКЕ НЕЛЬЗЯ, и это замер, а не осторожность. В дереве
+    ЧЕТЫРЕ строки `run:` несут решётку не комментарием, а внутри кавычек:
+    `echo "…записан в #196"`, `echo "смотрим названное: #$ASKED"` и два
+    соседних. Наивная обрезка искалечила бы все четыре, и предикат « #» назвал
+    бы их поимённо — потому имена и читаются, а не только счёт
+    ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+
+    Поэтому разбор ведёт `shlex` — он знает кавычки. Незакрытая кавычка ему не
+    по зубам, и тогда строка отдаётся КАК ЕСТЬ: комментарий в ней останется, шаг
+    посчитается работающим, и ошибка уйдёт в дешёвую сторону — служебное
+    падение назовут своим, а не наоборот
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    said = line.strip()
+    if not said or said.startswith("#"):
+        return ""
+    try:
+        return " ".join(shlex.split(said, comments=True))
+    except ValueError:
+        return said
 
 
 def commands(run: str) -> list[str]:
@@ -167,11 +197,16 @@ def commands(run: str) -> list[str]:
     команды, и вторая делает работу. Поиск подстроки видел в такой строке
     установку и объявлял шаг служебным целиком; падение настоящей работы
     пряталось бы за площадкой. Нашёл внешний взгляд там же.
+
+    ХВОСТОВОЙ КОММЕНТАРИЙ СРЕЗАЕТСЯ ТОЖЕ, и это третий конец той же беды.
+    Прежняя редакция отбрасывала строку, НАЧИНАЮЩУЮСЯ с решётки, а комментарий
+    в хвосте оставляла — и `pytest  # не забыть pip install` читался установкой:
+    маркер находился в пояснении. Нашёл внешний взгляд на #641.
     """
     found: list[str] = []
     for line in run.splitlines():
-        said = line.strip()
-        if not said or said.startswith("#"):
+        said = bare_of(line)
+        if not said:
             continue
         found += [one.strip() for one in JOINERS.split(said) if one.strip()]
     return found
