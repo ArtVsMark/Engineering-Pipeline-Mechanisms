@@ -471,7 +471,11 @@ def items_report(
     return lines
 
 
-def shape_report(by_prose: list[task_shape.Prose], live: list[task_shape.Live]) -> list[str]:
+def shape_report(
+    by_prose: list[task_shape.Prose],
+    live: list[task_shape.Live],
+    bare: list[task_shape.Bare] | None = None,
+) -> list[str]:
     """Строки о форме задач — отдельно от печати, чтобы их можно было спросить.
 
     ОБА ЧИСЛА ПЕЧАТАЮТСЯ ВСЕГДА, а не только когда нашлось. Строка,
@@ -497,6 +501,15 @@ def shape_report(by_prose: list[task_shape.Prose], live: list[task_shape.Live]) 
             f"  из них до счётчика пунктов ({task_shape.ITEMS_SINCE}): {len(old_ones)} — "
             f"{', '.join(f'#{task.number}' for task in old_ones)}. Отмечать их было нечем: "
             "механизм заведён позже, и решение по ним за человеком (154)"
+        )
+    # ЗАДАЧА БЕЗ МЕТОК — СОВЕЩАТЕЛЬНЫЙ СЧЁТ, А НЕ КРАСНОЕ (#655). Метка — не
+    # условие работы, и гейт, держащий слияние за метку на задаче, учат
+    # обходить (051). Механизм называет, а не проставляет: зону у задачи из
+    # тронутых файлов не вывести — файлов ещё нет.
+    if bare is not None:
+        lines.append(f"задач без зоны или рода: {len(bare)} — метки ставит автор (#655)")
+        lines.extend(
+            f"  #{task.number} — {task.title} · нет: {', '.join(task.missing)}" for task in bare
         )
     return lines
 
@@ -546,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
         built, quiet = items_left.look(issues, items.open_items)
         by_prose = task_shape.without_a_checklist(issues)
         still_live = task_shape.closed_with_live_units(closed)
+        bare = task_shape.unlabelled(issues)
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -609,7 +623,7 @@ def main(argv: list[str] | None = None) -> int:
     # Оба числа про одно: состояние задачи читается счётчиком, а не
     # вычитыванием. Долгом перед планом ни одно не является — это форма
     # работы, а не невыполненная работа, и решение по ним за человеком (154).
-    for line in shape_report(by_prose, still_live):
+    for line in shape_report(by_prose, still_live, bare):
         print(line)
 
     # ПОРОГ ПОКРЫТИЯ ЧИТАЕТСЯ ОТДЕЛЬНО, И ЕГО МОЛЧАНИЕ НЕ УНОСИТ ОТЧЁТ. Ряд
