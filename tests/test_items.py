@@ -550,3 +550,84 @@ def test_an_item_ticked_by_hand_meanwhile_is_not_written_again(
     monkeypatch.setattr(items.ghrest, "request", request)
     items.follow("o/r", "token")
     assert written == []
+
+
+def test_an_edit_during_the_recount_repeats_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тело поменялось между пересчётом и записью — заход повторяется по новому телу.
+
+    Пересчёт спрашивает задачи, которых нет в кеше, если владелец добавил
+    пункты, — окно между первым чтением и записью шире одного запроса. Поэтому
+    тело читается ещё раз перед записью (`5e74f38`, `475ed98`).
+    """
+    first = "- [ ] #7 первая\n"
+    second = "- [ ] #7 первая\n- [ ] #8 вторая\n"
+    reads = iter([first, second, second, second])
+    written: list[str] = []
+
+    def request(method: str, path: str, token: str, data: Any = None) -> Any:
+        if "labels=" in path:
+            return [{"number": 2, "body": first}]
+        if method == "PATCH":
+            written.append(str((data or {}).get("body")))
+            return {}
+        if path.endswith("/issues/2"):
+            return {"body": next(reads)}
+        return {"state": "closed"}
+
+    monkeypatch.setattr(items.ghrest, "request", request)
+    items.follow("o/r", "token")
+    assert [one.rstrip("\n") for one in written] == ["- [x] #7 первая\n- [x] #8 вторая"]
+
+
+def test_an_epic_edited_on_every_pass_is_not_written_over(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Эпик правят на каждом заходе — записи нет, и это сказано."""
+    counter = iter(range(100))
+    written: list[str] = []
+
+    def request(method: str, path: str, token: str, data: Any = None) -> Any:
+        if "labels=" in path:
+            return [{"number": 2, "body": "- [ ] #7 первая\n"}]
+        if method == "PATCH":
+            written.append(path)
+            return {}
+        if path.endswith("/issues/2"):
+            return {"body": f"правка {next(counter)}\n- [ ] #7 первая\n"}
+        return {"state": "closed"}
+
+    monkeypatch.setattr(items.ghrest, "request", request)
+    items.follow("o/r", "token")
+    assert written == []
+    assert "писать поверх не берусь" in capsys.readouterr().out
+
+
+def test_the_basis_names_what_was_written(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Основание называет записанные пункты, а не пункты из тела в списке (`12e51fb`)."""
+
+    def request(method: str, path: str, token: str, data: Any = None) -> Any:
+        if "labels=" in path:
+            return [{"number": 2, "body": "- [ ] #7 первая\n- [ ] #8 вторая\n"}]
+        if method == "PATCH":
+            return {}
+        if path.endswith("/issues/2"):
+            return {"body": "- [x] #7 первая\n- [ ] #8 вторая\n"}
+        return {"state": "closed"}
+
+    monkeypatch.setattr(items.ghrest, "request", request)
+    items.follow("o/r", "token")
+    said = capsys.readouterr().out
+    assert "пунктов вслед за закрытыми задачами 1 — #8" in said, said
+
+
+def test_write_fresh_and_basis_answer_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`write_fresh` пишет по свежему телу и отдаёт отмеченное; `basis` называет его."""
+
+    def request(method: str, path: str, token: str, data: Any = None) -> Any:
+        return {} if method == "PATCH" else {"body": "- [ ] #7 первая\n"}
+
+    monkeypatch.setattr(items.ghrest, "request", request)
+    assert items.write_fresh("o/r", "t", 2, lambda number: True) == [7]
+    assert items.basis([7, 9]) == "пунктов вслед за закрытыми задачами 2 — #7, #9"
