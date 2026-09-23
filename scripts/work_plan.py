@@ -102,7 +102,16 @@ class NotRun(RuntimeError):
 
 @dataclass(frozen=True)
 class Source:
-    """Один источник: строки работы либо названная причина молчания."""
+    """Один источник: строки работы и, если часть его молчит, — причина.
+
+    МОЛЧАНИЕ И СТРОКИ УЖИВАЮТСЯ В ОДНОМ РАЗДЕЛЕ, и поле поэтому не «либо-либо».
+    Источник 3 складывается из ДВУХ каналов — реестра находок и задачи о
+    красноте, — и отказ одного не делает пустым другой. Пока молчание было
+    альтернативой строкам, прочитанная половина вытесняла непрочитанную: раздел
+    показывал строки и выглядел полным
+    ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    Нашёл внешний взгляд на #651.
+    """
 
     rows: list[str] = field(default_factory=list)
     note: str = ""
@@ -143,7 +152,7 @@ def rows_of(body: str, head: str) -> list[str]:
     return found
 
 
-def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str]]:
+def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[str]]:
     """Источники 0–3 и 5, прочитанные у тех, кто их ведёт.
 
     Отказ ОДНОГО источника не роняет весь план: остальные разделы собираются, а
@@ -154,6 +163,11 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str]]:
     built: dict[int, Source] = {}
     broken: list[str] = []
 
+    # ОТКАЗ ЭТОГО КАНАЛА КАСАЕТСЯ ДВУХ ИСТОЧНИКОВ, а не одного: задача о
+    # красноте несёт и держащее слияние (0), и совещательное, пережившее его
+    # (3). Пока отказ доходил только до нулевого, третий получал пустой список
+    # и выглядел полным (045).
+    lagging_silent = ""
     try:
         holding, lagging = debt.branch_debt(repo, token)
         built[0] = Source(rows=[f"**{one}** — держит слияние" for one in holding])
@@ -161,6 +175,7 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str]]:
         built[0] = Source(unread=f"задача о красноте не прочитана: {exc}")
         broken.append("0")
         lagging = []
+        lagging_silent = f"совещательное красное не спрошено: {exc}"
 
     try:
         conflicting, unknown, red = debt.stuck_changes(repo, token)
@@ -175,11 +190,21 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str]]:
         built[1] = built[2] = Source(unread=f"свои открытые изменения не спрошены: {exc}")
         broken += ["1", "2"]
 
+    # РЕЕСТР ЧИТАЕТСЯ ОДИН РАЗ НА ЗАХОД. Отпечатки нужны и разделу 3, и снятию
+    # строк ручных разделов; второе чтение того же стоило бы вызова из общей
+    # квоты и разошлось бы с первым молча, изменись реестр между ними
+    # ([058](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/058-when-the-quota-is-out-stop.md),
+    # [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    # Нашёл внешний взгляд на #651.
+    marks: set[str] = set()
     try:
         left = debt.findings_debt(repo, token)
+        marks = {mark for mark, _, _ in left}
         rows = [f"`{mark}` · #{pr} — {said}" for mark, pr, said in left]
         rows += [f"**{one}** — совещательное красное пережило слияние" for one in lagging]
-        built[3] = Source(rows=rows)
+        built[3] = Source(rows=rows, unread=lagging_silent)
+        if lagging_silent:
+            broken.append("3")
     except ghrest.TransportError as exc:
         built[3] = Source(unread=f"реестр находок не прочитан: {exc}")
         broken.append("3")
@@ -211,7 +236,7 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str]]:
         built[5] = Source(unread=f"«входящие» каталога не прочитаны: {exc}")
         broken.append("5")
 
-    return built, broken
+    return built, broken, marks
 
 
 def render(number: int, source: Source, when: str = "") -> list[str]:
@@ -224,15 +249,14 @@ def render(number: int, source: Source, when: str = "") -> list[str]:
     ([027](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/027-empty-state-is-a-state.md)).
     """
     lines = [f"## {HEADS[number]}", ""]
+    if source.rows:
+        lines += [f"- {one}" for one in source.rows]
+    elif not source.unread:
+        lines.append(f"**Пусто** на {when or datetime.now(UTC).strftime('%d.%m.%Y')}.")
+    lines.append("")
     if source.unread:
         lines += [f"⚠️ **Не спрошено:** {source.unread}", ""]
         lines += ["Это НЕ «пусто»: пустота и молчание снаружи неотличимы (045).", ""]
-        return lines
-    if source.rows:
-        lines += [f"- {one}" for one in source.rows]
-    else:
-        lines.append(f"**Пусто** на {when or datetime.now(UTC).strftime('%d.%m.%Y')}.")
-    lines.append("")
     if source.note:
         lines += [f"ℹ️ {source.note}", ""]
     return lines
@@ -300,8 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         number, body = findings.live_issue(args.repo, token, MARKER)
         if number is None:
             raise NotRun("живой задачи плана нет — заводить её механизм не берётся (154)")
-        built, broken = sources(args.repo, token)
-        marks = {mark for mark, _, _ in debt.findings_debt(args.repo, token)}
+        built, broken, marks = sources(args.repo, token)
         held: dict[int, list[str]] = {
             one: held_rows(body, one, args.repo, token, marks) for one in HELD
         }
