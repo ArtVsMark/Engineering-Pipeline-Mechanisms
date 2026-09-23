@@ -187,7 +187,7 @@ def age_of(seen: str, now: datetime | None = None) -> timedelta | None:
     return (now or datetime.now(UTC)) - stamp
 
 
-def said_age(age: timedelta | None) -> str:
+def said_age(age: timedelta | None, late: str = STALE_NOTE) -> str:
     """Возраст снимка словами — рядом с числами, а не в задаче.
 
     ЗАЧЕМ ВСЛУХ. Числа правила 177 считает чужой прогон, и читаются они как
@@ -200,6 +200,11 @@ def said_age(age: timedelta | None) -> str:
     «снято -1 ч назад» читается как исправная работа. Неизвестность
     называется, а не подменяется бодрым числом (045). Нашёл внешний взгляд
     на #126.
+
+    ``late`` — что сказать о просроченном снимке. Срок у всех ночных заходов
+    один, а пропущенный заход у каждого свой: «входящие» пишет каталог, задачу
+    дрейфа — наш прогон, и чужое имя в предупреждении отправило бы читателя
+    искать не тот сбой.
     """
     if age is None:
         return "возраст снимка неизвестен: дата не разобралась"
@@ -207,7 +212,7 @@ def said_age(age: timedelta | None) -> str:
         return "возраст снимка неизвестен: дата снимка в будущем — разошлись часы"
     hours = int(age.total_seconds() // 3600)
     said = f"снято {hours} ч назад" if hours else "снято меньше часа назад"
-    return f"{said} · {STALE_NOTE}" if age > STALE_AFTER else said
+    return f"{said} · {late}" if age > STALE_AFTER else said
 
 
 def inbox_body(repo: str, token: str, closed: list[dict[str, Any]]) -> tuple[str, str, str]:

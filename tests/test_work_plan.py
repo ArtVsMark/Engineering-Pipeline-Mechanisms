@@ -177,6 +177,8 @@ def quiet_platform(monkeypatch: pytest.MonkeyPatch, *, body: str = BODY) -> list
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
     monkeypatch.setattr(module.ghrest, "request", patched)
     monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (639, body))
+    # Задачи дрейфа нет: дрейф не заводит пустую, и это «пусто», а не отказ.
+    monkeypatch.setattr(module.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
     monkeypatch.setattr(module.debt, "branch_debt", lambda *_: ([], []))
     monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], [], []))
     monkeypatch.setattr(module.debt, "findings_debt", lambda *_: [])
@@ -323,3 +325,78 @@ def test_a_silent_registry_does_not_erase_what_was_already_read(
     assert "Не спрошено" in said, "молчание реестра не названо"
     assert "3" in broken
     assert marks == set(), "отпечатки взялись ниоткуда при молчащем реестре"
+
+
+def drift_issue(found: list[Any], silent: list[str], seen: str = "2026-09-23T07:43:00Z") -> Any:
+    """Живая задача дрейфа в том виде, в каком её пишет сам дрейф."""
+    body = module.drift.render_body(found, silent)
+    return lambda *_, **__: (193, body, seen)
+
+
+def test_drift_records_land_in_section_five(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Записи дрейфа — строки раздела 5 с адресом задачи дрейфа.
+
+    Договор называет дрейф частью источника 5 (`docs/behaviour.md`, контур
+    1), а сборщик его не читал: раздел выглядел полным, когда дрейф называл бы
+    работу. Нашёл владелец вопросом по #665.
+
+    Тело задачи строит ЗДЕСЬ сам дрейф (`render_body`): разбор проверяется на
+    форме, которую пишет механизм, а не на переписанной рукой копии.
+    """
+    quiet_platform(monkeypatch)
+    moved = module.drift.Drift("action-behind", "actions/setup-python: v5, выпущен v7", "поднять")
+    monkeypatch.setattr(module.findings, "live_issue_seen", drift_issue([moved], ["сводка семьи"]))
+    built, broken, _ = module.sources("o/r", "t")
+    assert broken == []
+    assert built[5].rows == ["#193 · `action-behind` — actions/setup-python: v5, выпущен v7"]
+    assert "дрейф не спросил: сводка семьи" in built[5].note
+
+
+def test_a_silent_drift_does_not_erase_the_rules_half(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задача дрейфа не прочиталась — половина о правилах остаётся, отказ назван.
+
+    Тот же урок, что у источника 3 (#651): прочитанная половина не вытесняет
+    непрочитанную, а непрочитанная — прочитанную.
+    """
+    quiet_platform(monkeypatch)
+    monkeypatch.setattr(module.debt, "rules_debt", lambda _: (0, 4, 0))
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.findings, "live_issue_seen", refuse)
+    built, broken, _ = module.sources("o/r", "t")
+    assert built[5].rows == ["правил без ответа: **4**"]
+    assert "задача дрейфа не прочитана" in built[5].unread
+    assert "5" in broken
+
+
+def test_a_late_drift_names_its_own_night_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задачу дрейфа давно не переписывали — называется пропуск ДРЕЙФА, а не каталога."""
+    quiet_platform(monkeypatch)
+    monkeypatch.setattr(
+        module.findings, "live_issue_seen", drift_issue([], [], seen="2020-01-01T00:00:00Z")
+    )
+    built, _, _ = module.sources("o/r", "t")
+    assert module.DRIFT_LATE in built[5].note
+    assert "каталога" not in built[5].note.split("обход дрейфа", 1)[1]
+
+
+def test_no_drift_issue_is_emptiness_not_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задачи дрейфа нет — половина источника 5 пуста, а не молчит.
+
+    Дрейф не заводит пустую задачу (`drift.save`): её отсутствие значит
+    «записей не было ни разу», и называть это отказом значило бы красить
+    исход сборщика по состоянию, которое исправно.
+    """
+    monkeypatch.setattr(module.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
+    assert module.drift_part("o/r", "t") == module.Source()
+
+
+def test_rules_half_without_numbers_is_named_unread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """«Входящие» прочитаны, а чисел в них нет — половина называет это, а не пустоту."""
+    monkeypatch.setattr(module.debt, "closed_issues", lambda *_: [])
+    monkeypatch.setattr(module.debt, "inbox_body", lambda *_: ("", "", ""))
+    monkeypatch.setattr(module.debt, "rules_debt", lambda _: None)
+    said = module.rules_part("o/r", "t")
+    assert said.rows == [] and "числа каталога не найдены" in said.unread
