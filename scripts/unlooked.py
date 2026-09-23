@@ -64,6 +64,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Final
 
+import agent_run
 import findings
 import ghrest
 import report
@@ -89,6 +90,13 @@ STATE_BROKEN: Final = "прогон взгляда упал — смотреть
 #: у #120 причина была своя — оно правило сам файл прогона, и действие ревью
 #: отказалось работать по расхождению с общей веткой (152).
 STATE_SILENT: Final = "прогон взгляда прошёл, а ответа нет"
+#: Прогон зелёный, а действие взгляда ОТКАЗАЛО, не начав работы: шаг
+#: `agent_run.py` поставил на проверке аннотацию с текстом отказа. Это частный
+#: случай тишины, и различать его стоит: причина здесь не догадка — она названа
+#: на проверке. Замер 23.09.2026 (#673): объявленную модель закреплённый CLI не
+#: знал, и каждый заход кончался за 0–1 с, а реестр мог сказать лишь «прошёл, а
+#: ответа нет».
+STATE_REFUSED: Final = "действие взгляда отказало — текст отказа в аннотации проверки"
 #: Прогон взгляда ещё ИДЁТ. Вердикта нет и не должно быть: спрашивать рано.
 #: Прежде это падало в «вердикта нет» — то есть механизм объявлял отсутствующим
 #: то, что ещё не наступило, а перечитать реестр было нечем, кроме следующего
@@ -123,6 +131,7 @@ STATES: Final = (
     STATE_LATE,
     STATE_BROKEN,
     STATE_SILENT,
+    STATE_REFUSED,
     STATE_RUNNING,
     STATE_CANCELLED,
     STATE_SKIPPED,
@@ -136,6 +145,7 @@ OPEN_STATES: Final = (
     STATE_CUT,
     STATE_BROKEN,
     STATE_SILENT,
+    STATE_REFUSED,
     STATE_RUNNING,
     STATE_CANCELLED,
     STATE_SKIPPED,
@@ -161,6 +171,10 @@ def is_open(state: str) -> bool:
 #: Имя проверки, по записи которой на голове различаются причины. Берётся из
 #: договора, а не из памяти: имя джоба и есть имя контекста (`docs/pipeline.md`).
 REVIEW_CHECK: Final = "review"
+#: Поле, которым `head_runs` помечает запись проверки взгляда, на которой
+#: аннотация называет отказ захода. Своё имя, а не поле площадки: его ставит
+#: механизм, прочитав аннотации.
+REFUSED_KEY: Final = "_refused"
 
 #: Скрытая строка, которой поздний взгляд называет себя поздним. Его вердикт
 #: тоже строка «ВЕРДИКТ: находок N», и без этой отметки он снял бы запись
@@ -310,6 +324,16 @@ def look_of(comments: list[dict[str, Any]], runs: list[dict[str, Any]] | None = 
     return why_quiet(runs or [])
 
 
+def refused(notes: list[dict[str, Any]]) -> bool:
+    """Называет ли какая-то аннотация проверки отказ захода агента.
+
+    Узнаётся по словам `agent_run.REFUSED`, а не по уровню: уровень ошибки
+    ставит и площадка («Process completed with exit code 1»), а слова отказа
+    пишет только шаг `agent_run.py` — одна фраза на пишущего и читающего.
+    """
+    return any(agent_run.REFUSED in str(note.get("message") or "") for note in notes)
+
+
 def why_quiet(runs: list[dict[str, Any]]) -> str:
     """Почему ответа нет — по записи проверки взгляда на голове изменения.
 
@@ -347,7 +371,9 @@ def why_quiet(runs: list[dict[str, Any]]) -> str:
     if any(str(run.get("conclusion") or "") == "failure" for run in ours):
         return STATE_BROKEN
     if any(str(run.get("conclusion") or "") == "success" for run in ours):
-        return STATE_SILENT
+        # Отказ, названный на проверке, сильнее общей «тишины»: у него есть
+        # причина, и она видна без лога (#673).
+        return STATE_REFUSED if any(run.get(REFUSED_KEY) for run in ours) else STATE_SILENT
     # ЗАПИСЬ ЕСТЬ, А ВЕРДИКТА НЕТ — ЭТО НЕСКОЛЬКО РАЗНЫХ СОСТОЯНИЙ, А НЕ ОДНО.
     # Прежде все они назывались «вердикта нет» — тем же словом, каким
     # называется отсутствие записи ВООБЩЕ. А зовут они к разному: отменённый
@@ -399,9 +425,18 @@ def head_runs(repo: str, number: int, token: str) -> list[dict[str, Any]]:
         head = str((change.get("head") or {}).get("sha") or "")
         if not head:
             return []
-        return list(
+        runs = list(
             ghrest.paginate(f"repos/{repo}/commits/{head}/check-runs", token, key="check_runs")
         )
+        for run in runs:
+            # Аннотации спрашиваются только у проверки взгляда и только если
+            # они есть: остальным записям причина тишины не нужна.
+            if str(run.get("name") or "") == REVIEW_CHECK and (run.get("output") or {}).get(
+                "annotations_count"
+            ):
+                notes = ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", token)
+                run[REFUSED_KEY] = refused(list(notes))
+        return runs
     except ghrest.TransportError as exc:
         print(f"  причина по #{number} не выяснена: {report.cut(str(exc))}")
         return []
@@ -556,6 +591,10 @@ def render_body(
         "  расхождению с общей веткой (152) — джоб при этом стартует, а шаг",
         "  объявлен `continue-on-error`, поэтому запись выходит зелёной.",
         "  Смотреть надо лог прогона — но искать в нём уже есть что (154);",
+        f"* «{STATE_REFUSED}» — частный случай предыдущего, у которого причина",
+        "  НАЗВАНА: шаг `agent_run.py` поставил на проверке взгляда аннотацию",
+        "  «заход отказал — <текст>». Лог не нужен — текст отказа в списке",
+        "  аннотаций проверки (#673);",
         f"* «{STATE_SKIPPED}» — условие джоба вычислено и оказалось",
         "  ложным. Условие у него ровно одно: голова изменения лежит в этом же",
         "  репозитории, — значит это форк, и больше ничего. Это НЕ «прогон не",
