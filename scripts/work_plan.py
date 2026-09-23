@@ -197,16 +197,21 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[st
     # [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
     # Нашёл внешний взгляд на #651.
     marks: set[str] = set()
+    # СТРОКИ СОСЕДНЕГО КАНАЛА СОБИРАЮТСЯ ОДИН РАЗ И НА ОБА ИСХОДА. Прежде
+    # ветка отказа заводила раздел заново и выбрасывала уже прочитанное —
+    # тот же дефект, что чинился здесь же, но в обратную сторону: сперва
+    # непрочитанное выдавалось за пустоту, теперь непрочитанное вытесняло
+    # прочитанное. Симметрию нашёл внешний взгляд на #652.
+    stayed = [f"**{one}** — совещательное красное пережило слияние" for one in lagging]
     try:
         left = debt.findings_debt(repo, token)
         marks = {mark for mark, _, _ in left}
         rows = [f"`{mark}` · #{pr} — {said}" for mark, pr, said in left]
-        rows += [f"**{one}** — совещательное красное пережило слияние" for one in lagging]
-        built[3] = Source(rows=rows, unread=lagging_silent)
+        built[3] = Source(rows=rows + stayed, unread=lagging_silent)
         if lagging_silent:
             broken.append("3")
     except ghrest.TransportError as exc:
-        built[3] = Source(unread=f"реестр находок не прочитан: {exc}")
+        built[3] = Source(rows=stayed, unread=f"реестр находок не прочитан: {exc}")
         broken.append("3")
 
     try:
