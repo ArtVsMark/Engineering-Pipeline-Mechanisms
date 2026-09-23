@@ -198,6 +198,53 @@ def followed(body: str, closed: Callable[[int], bool]) -> tuple[str, list[int]]:
     return "\n".join(lines), followed_now
 
 
+#: Сколько раз запись эпика повторяется, если владелец правит его во время
+#: захода. Тот же предел и по той же причине, что у сборщика плана.
+TRIES: Final = 3
+
+
+def basis(done: list[int]) -> str:
+    """Основание отметки: выведена она, а не объявлена, и человеку видно из чего."""
+    return f"пунктов вслед за закрытыми задачами {len(done)} — " + ", ".join(
+        f"#{one}" for one in done
+    )
+
+
+def write_fresh(
+    repo: str, token: str, number: int, closed: Callable[[int], bool]
+) -> list[int] | None:
+    """Отмечает пункты эпика по СВЕЖЕМУ телу и пишет, только если его не правили.
+
+    ТЕЛО ЭПИКА ПИШЕТ ЧЕЛОВЕК, а список эпиков читается в начале захода. Между
+    чтением и записью идут запросы состояния задач — и их больше, если владелец
+    добавил пункты: каждая новая задача спрашивается впервые. Поэтому тело
+    перечитывается ДО пересчёта и ЕЩЁ РАЗ перед записью: если его поправили за
+    время пересчёта, заход повторяется. Окно сужено до одного запроса — как у
+    сборщика плана (#684). Прежняя редакция перечитывала один раз и обещала,
+    что «пересчёт запросов не множит», — неверно, как только пунктов стало
+    больше. Нашёл внешний взгляд на #690 (`5e74f38`, `475ed98`).
+
+    ``None`` — писать нечего или владелец правил тело на каждом заходе.
+    """
+    for _ in range(TRIES):
+        current = str(
+            (ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}).get("body") or ""
+        )
+        updated, done = followed(current, closed)
+        if not done:
+            return None
+        check = str(
+            (ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}).get("body") or ""
+        )
+        if check == current:
+            ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": updated})
+            return done
+    print(
+        f"  #{number}: эпик правили во время каждого из {TRIES} заходов — писать поверх не берусь"
+    )
+    return None
+
+
 def follow(repo: str, token: str, *, dry_run: bool = False) -> int:
     """Пункт эпика следует состоянию названной им задачи.
 
@@ -246,32 +293,25 @@ def follow(repo: str, token: str, *, dry_run: bool = False) -> int:
         # оставшаяся от прежнего поведения, недостижима — а недостижимая
         # обработка выглядит защитой и молча ею быть перестаёт. Нашёл внешний
         # взгляд на #159.
-        updated, done = followed(body, closed)
+        _, done = followed(body, closed)
         if not done:
             continue
-        # Основание печатается всегда: отметка выведена, а не объявлена
-        # автором, и человеку должно быть видно, из чего.
-        said = ", ".join(f"#{one}" for one in done)
-        print(f"  #{number}: пунктов вслед за закрытыми задачами {len(done)} — {said}")
         if dry_run:
+            print(f"  #{number}: {basis(done)}")
             continue
         try:
-            # ТЕЛО ЭПИКА ПЕРЕЧИТЫВАЕТСЯ ПЕРЕД ЗАПИСЬЮ. Его пишет человек, а
-            # список эпиков читается в начале захода, и между чтением и записью
-            # идут запросы состояния задач — правка владельца за эти секунды
-            # затёрлась бы молча. Тот же дефект чинился у сборщика плана (#684);
-            # здесь он найден как сосед по признаку (195). Состояния задач
-            # закешированы, и пересчёт по свежему телу запросов не множит.
-            fresh = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
-            current = str(fresh.get("body") or "")
-            if current != body:
-                updated, done = followed(current, closed)
-                if not done:
-                    continue
-            ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": updated})
+            written = write_fresh(repo, token, number, closed)
         except ghrest.TransportError as exc:
             print(f"  пункты #{number} не записаны: {report.cut(str(exc))}")
             continue
+        if written is None:
+            continue
+        # Основание печатается по ЗАПИСАННОМУ телу, а не по телу из списка:
+        # пункт, который владелец отметил сам за время захода, в запись не
+        # попадает, и называть его значило бы соврать о записанном. Нашёл
+        # внешний взгляд на #690 (`12e51fb`).
+        done = written
+        print(f"  #{number}: {basis(done)}")
         touched += len(done)
     return touched
 
