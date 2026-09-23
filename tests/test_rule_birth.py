@@ -268,3 +268,53 @@ def test_an_empty_slug_is_not_a_match(tmp_path: Path) -> None:
     git(root, "checkout", "-b", "work")
     born(root, "002-пусто.md", "# 002\n\n**Каталогу:** предложено — ``\n")
     assert run(root) == FOUND
+
+
+def kind(times: int, answer: str = "") -> dict[str, object]:
+    """Род находок с числом встреч и, если задан, ответом каталогу."""
+    body: dict[str, object] = {"признак": "x", "встречен": [f"m{one}" for one in range(times)]}
+    if answer:
+        body["каталогу"] = answer
+    return body
+
+
+def test_a_kind_crossing_the_threshold_here_is_asked(tmp_path: Path) -> None:
+    """Род, дошедший до порога ЭТИМ изменением, спрашивается; дошедший раньше — нет (#650).
+
+    Момент вопроса — прирост, как у записей решений: род, перешедший порог
+    прежде, требовать ответа задним числом не заставляет — его называет план.
+    """
+    before = {"прежний": kind(3), "растущий": kind(2)}
+    after = {"прежний": kind(4), "растущий": kind(3), "новый": kind(3), "редкий": kind(1)}
+    assert module.crossed(before, after) == ["новый", "растущий"]
+
+
+def test_a_kind_at_the_threshold_must_answer_the_catalogue() -> None:
+    """Молчание, слаг вне очереди и «есть» без номера — отказ; три вида ответа — нет."""
+    after = {
+        "молчит": kind(3),
+        "своё": kind(3, "своё — у каталога этого нет"),
+        "есть": kind(3, "есть — 206: форма, которую гейт не видит"),
+        "есть без номера": kind(3, "есть — где-то было"),
+        "предложено": kind(3, "предложено — a-list-is-read-to-the-end"),
+        "мимо очереди": kind(3, "предложено — no-such-slug"),
+    }
+    told = module.kinds_missing(sorted(after), after, "a-list-is-read-to-the-end")
+    named = " ".join(told)
+    assert "«молчит»" in named and "«есть без номера»" in named and "«мимо очереди»" in named
+    assert "«своё»" not in named and "«есть»:" not in named and "«предложено»" not in named
+    assert len(told) == 3
+
+
+def test_the_kinds_at_the_base_are_read_from_git(tmp_path: Path) -> None:
+    """Роды на базе читаются из истории; файла на базе нет — родов не было."""
+    root = tree(tmp_path)
+    assert module.kinds_at("main", root) == {}
+    (root / ".rules" / "finding-kinds.json").write_text(
+        json.dumps({"kinds": {"род": kind(2)}}, ensure_ascii=False), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "роды")
+    assert module.kinds_at("HEAD", root) == {"род": kind(2)}
+    with pytest.raises(module.NotRun):
+        module.kinds_at("не-существующая-база", root)

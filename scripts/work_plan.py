@@ -74,12 +74,15 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Final
 
 import debt
 import drift
+import finding_kinds
 import findings
 import ghrest
+import paths
 from report import announce
 
 #: По этой строке план находится снова. Тем же приёмом, что у прочих живых
@@ -241,10 +244,12 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[st
     # что у источника 3 (#651).
     rules = rules_part(repo, token)
     moved = drift_part(repo, token)
+    born = birth_part()
+    parts = (rules, moved, born)
     built[5] = Source(
-        rows=rules.rows + moved.rows,
-        note="; ".join(one for one in (rules.note, moved.note) if one),
-        unread="; ".join(one for one in (rules.unread, moved.unread) if one),
+        rows=[row for part in parts for row in part.rows],
+        note="; ".join(part.note for part in parts if part.note),
+        unread="; ".join(part.unread for part in parts if part.unread),
     )
     if built[5].unread:
         broken.append("5")
@@ -276,6 +281,31 @@ def rules_part(repo: str, token: str) -> Source:
         rows=rows,
         note=f"задач по правилам заведено {tasks}; числа {said}"
         + (f"; {inbox_note}" if inbox_note else ""),
+    )
+
+
+def birth_part(where: Path | None = None) -> Source:
+    """Третья часть источника 5 — поводы для правила из инцидентов (#650).
+
+    Род находки, встреченный не реже порога и без ответа каталогу, — это
+    незакрытая работа по правилам: либо предложение, либо «своё», либо «правило
+    есть». Новый род такой ответ несёт с момента, когда дошёл до порога (гейт
+    `check_rule_birth`); прежние, дошедшие раньше, называет здесь план.
+
+    Словаря родов нет — роды не ведутся, и это пустота, а не отказ.
+    """
+    declared = where or paths.FINDING_KINDS
+    if not declared.is_file():
+        return Source()
+    try:
+        left = finding_kinds.unanswered(finding_kinds.read(declared))
+    except (finding_kinds.NotRun, ValueError) as exc:
+        return Source(unread=f"роды находок не прочитаны: {exc}")
+    return Source(
+        rows=[
+            f"род находок у порога без ответа каталогу: «{name}» — встреч {times}"
+            for name, times in left
+        ]
     )
 
 
@@ -417,7 +447,8 @@ def fresh_build(
     ведут тело целиком сами, ручной части в нём нет, и потерять правку
     человека им нечем. Седьмой — `items.follow` — пишет в тела ЭПИКОВ, которые
     ведёт человек, и между чтением и записью спрашивает состояния задач: тот
-    же дефект, и он починен тем же приёмом. `items.mark` читает задачу и пишет
+    же дефект, и он починен тем же приёмом — чтение до пересчёта и ещё раз
+    перед записью. `items.mark` читает задачу и пишет
     её сразу, без работы между — окно в один запрос, как здесь. Нашёл внешний
     взгляд на #684 (`55d530e`).
     """

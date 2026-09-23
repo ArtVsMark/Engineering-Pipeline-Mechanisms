@@ -37,12 +37,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
+import finding_kinds
 import paths
 
 EXIT_OK: Final = 0
@@ -164,6 +166,79 @@ def missing(paths_: list[str], queue: str, root: Path = Path()) -> list[str]:
     return told
 
 
+def kinds_at(base: str, root: Path = Path()) -> dict[str, Any]:
+    """Роды находок на базе изменения; файла там нет — родов ещё не было."""
+    where = paths.FINDING_KINDS.as_posix()
+    try:
+        done = subprocess.run(
+            ["git", "show", f"{base}:{where}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except OSError as exc:
+        raise NotRun(f"роды на базе не прочитаны ({base}): {exc}") from exc
+    if done.returncode != 0:
+        # ФАЙЛА НЕТ НА БАЗЕ — ЭТО «РОДОВ НЕ БЫЛО», А НЕ ОТКАЗ. Всё прочее —
+        # неизвестная база, битый клон — отказ: молча принять пустую базу
+        # значило бы объявить новыми все роды разом.
+        if "does not exist" in done.stderr or "exists on disk, but not in" in done.stderr:
+            return {}
+        raise NotRun(f"роды на базе не прочитаны ({base}): {done.stderr.strip()}")
+    try:
+        return dict(json.loads(done.stdout).get("kinds") or {})
+    except (json.JSONDecodeError, AttributeError) as exc:
+        raise NotRun(f"роды на базе не разбираются ({base}): {exc}") from exc
+
+
+def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """Роды, которые дошли до порога повтора ЭТИМ изменением.
+
+    ВТОРОЙ МОМЕНТ ВОПРОСА, И ОН О ИНЦИДЕНТАХ (#650). Запись решения спрашивали
+    о правиле с 16.09.2026, а класс ошибки, повторившийся трижды, — никогда:
+    род чинили, закрывали механизмом, и на этом всё. Замер 23.09.2026: родов у
+    порога восемь, ответа каталогу нет ни у одного. Спрашивается ПРИРОСТ, как и
+    у решений: род, дошедший до порога раньше, требовать ответа задним числом
+    не заставляет — его называет план, разделом 5.
+    """
+    at = finding_kinds.REPEATED_AT
+
+    def times(kinds: dict[str, Any], name: str) -> int:
+        return len((kinds.get(name) or {}).get("встречен") or [])
+
+    return sorted(name for name in after if times(after, name) >= at > times(before, name))
+
+
+#: Номер правила каталога в ответе «есть»: три цифры первым словом.
+RULE_NUMBER_RE: Final = re.compile(r"^\d{3}\b")
+
+
+def kinds_missing(names: list[str], after: dict[str, Any], queue: str) -> list[str]:
+    """Роды у порога, чей ответ каталогу отсутствует или не сходится."""
+    told: list[str] = []
+    for name in names:
+        said = finding_kinds.fate(after[name])
+        if said is None:
+            told.append(
+                f"  род «{name}» дошёл до порога, а поля «{finding_kinds.CATALOGUE}» нет: "
+                "«предложено — <слаг>», «своё — <причина>» или «есть — <номер правила>»"
+            )
+            continue
+        kind, what = said
+        if kind == "предложено":
+            slug = slug_of(what)
+            if not slug or slug not in queue:
+                told.append(
+                    f"  род «{name}»: назван слаг «{slug}», а в очереди предложений "
+                    f"({paths.PROPOSALS}) его нет"
+                )
+        elif kind == "есть" and not RULE_NUMBER_RE.match(what):
+            told.append(f"  род «{name}»: ответ «есть», а номера правила первым словом нет")
+    return told
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: у каждой новой записи решения назван ответ каталогу."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -174,8 +249,16 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         new = added(args.base, args.head)
-        told = missing(new, queued(args.root / paths.PROPOSALS), args.root)
-    except NotRun as exc:
+        queue = queued(args.root / paths.PROPOSALS)
+        told = missing(new, queue, args.root)
+        # СЛОВАРЯ РОДОВ НЕТ — РОДЫ НЕ ВЕДУТСЯ, И ЭТО НЕ ОТКАЗ. Шаг журнала
+        # переносим, и у потребителя словаря может не быть вовсе; требовать его
+        # значило бы красить чужой проект за то, чего он не заводил.
+        declared = args.root / paths.FINDING_KINDS
+        after = finding_kinds.read(declared) if declared.is_file() else {}
+        grown = crossed(kinds_at(args.base, args.root), after) if after else []
+        told += kinds_missing(grown, after, queue)
+    except (NotRun, finding_kinds.NotRun) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
@@ -183,12 +266,14 @@ def main(argv: list[str] | None = None) -> int:
     # решения этому правилу не подчиняется; требовать предмета от него значило бы
     # красить исправную работу. Это НЕ тот случай, где пустота подозрительна: у
     # гейта есть свой прогон на подделках, и он держит оба отказа.
-    if not new:
-        print("записей решений не добавлено — вопрос о правиле не встаёт")
+    if not new and not grown:
+        print("записей решений не добавлено и порога род не перешёл — вопрос о правиле не встаёт")
         return EXIT_OK
     if told:
         print(
-            f"новых записей решений: {len(new)}, без ответа каталогу: {len(told)}", file=sys.stderr
+            f"новых записей решений: {len(new)}, родов у порога: {len(grown)}, "
+            f"без ответа каталогу: {len(told)}",
+            file=sys.stderr,
         )
         for one in told:
             print(one, file=sys.stderr)
