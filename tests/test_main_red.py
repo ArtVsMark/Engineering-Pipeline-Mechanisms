@@ -336,6 +336,61 @@ def test_an_unlisted_advisory_red_is_not_rerun() -> None:
     assert said == module.ADVISORY_ONLY
 
 
+def test_the_cell_parameter_is_cut_and_nothing_else_is() -> None:
+    """`job_of` отрезает параметр ячейки — и только его.
+
+    Обе половины названы здесь, потому что односторонний приём был бы хуже
+    прежнего: имя БЕЗ параметра он обязан отдать неизменным, иначе составное
+    имя площадки (`debt / debt`) перестало бы совпадать со списком.
+    """
+    assert module.job_of("test-next (3.15)") == "test-next"
+    assert module.job_of("test-matrix (3.12)") == "test-matrix"
+    assert module.job_of("debt / debt") == "debt / debt"
+    assert module.job_of("ci-complete") == "ci-complete"
+    assert module.job_of("") == ""
+
+
+def test_a_matrix_cell_is_matched_by_the_job_name_the_list_carries() -> None:
+    """Запись ячейки совпадает со списком по имени ДЖОБА, а не целиком.
+
+    ФОРМА, КОТОРОЙ МЕХАНИЗМ НЕ ВИДЕЛ. Список и ответ проекта называют джоб
+    (`test-next`), а площадка кладёт на голову запись ячейки
+    (`test-next (3.15)`). Сравнение имени записи целиком не совпадало с ними
+    НИКОГДА — и молча: имя просто не находилось, и это выглядело как
+    «перезапускать незачем», а не как расхождение.
+
+    Замер 23.09.2026: из сорока объявленных проверок матричных три —
+    `test-matrix`, `test-next`, `late-look`. Ни одна не могла попасть в
+    разрешительный список работающей записью, потому что гейт списка требует
+    имени БЕЗ параметра, а сравнение шло С параметром
+    ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
+
+    Замер, с которого запись и появилась: 22.09.2026 на общей ветке
+    `test-next (3.15)` упал на шаге «поставить проверки» — на `pip install`, до
+    единого теста, — и вторая попытка зелена без правок (прогон 35714755550).
+    """
+    allowed = module.rerunnable()
+    assert allowed.get("test-next"), "имя с замером 22.09.2026 в список не попало"
+    cell = "test-next (3.15)"
+    assert cell not in allowed, "образец должен быть именно ЗАПИСЬЮ ячейки, а не джобом"
+    assert module.rerun_reason([], [cell], run=100, tries=1, allowed=allowed) == ""
+    assert module.rerun_reason([], [cell], run=100, tries=2, allowed=allowed) == module.ALREADY
+
+
+def test_a_matrix_cell_outside_the_list_is_still_not_rerun() -> None:
+    """Отрезание параметра не делает разрешённым то, чего в списке нет.
+
+    Вторая половина предиката, и без неё первая неотличима от «перезапускать
+    всё матричное». Образец — `test-matrix`: он объявлен, он матричный, замера
+    у него нет, и в списке его нет
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    """
+    allowed = module.rerunnable()
+    assert "test-matrix" not in allowed, "образцу «не в списке» нужно другое имя"
+    said = module.rerun_reason([], ["test-matrix (3.12)"], run=100, tries=1, allowed=allowed)
+    assert said == module.ADVISORY_ONLY
+
+
 def test_a_required_red_is_still_judged_by_its_own_rule() -> None:
     """Обязательное красное разбирается прежним правилом, а не списком.
 
