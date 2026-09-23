@@ -524,6 +524,72 @@ def test_a_refused_read_is_not_absence_of_a_mark(monkeypatch: pytest.MonkeyPatch
     assert said != "", "отказ снова неотличим от «признака нет»"
 
 
+def test_our_install_steps_are_service_too(tmp_path: Path) -> None:
+    """Наш шаг установки — служебный, и состав таких имён читается ИЗ ДЕРЕВА.
+
+    ЗАМЕР 22.09.2026, РАДИ КОТОРОГО ЭТО ЗАВЕДЕНО. Шагов, ставящих зависимости,
+    в дереве ПЯТНАДЦАТЬ, и список площадочных умолчаний не видел служебным ни
+    одного: он знает только английские имена от GitHub, а наши названы
+    по-русски. Отчёт при этом утверждал «130 из 130 упали на своём шаге» — и
+    число было АРТЕФАКТОМ СПИСКА, а не фактом о дереве
+    ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
+
+    Живой случай: `test-next (3.15)` упал на «поставить проверки» — на
+    `pip install`, до единого теста, на предрелизном интерпретаторе.
+    """
+    runs = tmp_path / "прогоны"
+    runs.mkdir()
+    (runs / "ci.yml").write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - name: поставить проверки\n"
+        '        run: python -m pip install --quiet "pytest>=8,<10"\n'
+        "      - name: тесты\n"
+        "        run: pytest\n",
+        encoding="utf-8",
+    )
+    наши = module.installing_steps(runs)
+    assert наши == {"поставить проверки"}, наши
+    assert module.whose_step("поставить проверки", наши) == module.WHOSE_SERVICE
+    assert module.whose_step("тесты", наши) == module.WHOSE_OWN
+
+
+def test_a_step_that_installs_and_does_is_not_service(tmp_path: Path) -> None:
+    """Вторая половина: шаг, который ставит И делает, служебным не считается.
+
+    Его падение может быть о чём угодно, и относить его к площадке значило бы
+    ПРЯТАТЬ настоящий отказ — ошибка в ту сторону, которой здесь нельзя
+    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+    В дереве такой ровно один — «сосчитать покрытие»: он ставит набор и тут же
+    считает покрытие (195).
+
+    БЕЗЫМЯННЫЙ ШАГ СЮДА НЕ ПОПАДАЕТ ТОЖЕ: площадка зовёт его текстом команды, и
+    сопоставить по имени нечем.
+    """
+    runs = tmp_path / "прогоны"
+    runs.mkdir()
+    (runs / "ci.yml").write_text(
+        "jobs:\n"
+        "  cover:\n"
+        "    steps:\n"
+        "      - name: сосчитать покрытие\n"
+        "        run: |\n"
+        "          python -m pip install --quiet coverage\n"
+        "          coverage run -m pytest\n"
+        "      - run: python -m pip install --quiet нечто\n",
+        encoding="utf-8",
+    )
+    наши = module.installing_steps(runs)
+    assert наши == frozenset(), наши
+    assert module.whose_step("сосчитать покрытие", наши) == module.WHOSE_OWN
+
+
+def test_a_tree_without_runs_is_an_empty_set(tmp_path: Path) -> None:
+    """Прогонов нет — пустой состав, а не отказ: у потребителя их может не быть."""
+    assert module.installing_steps(tmp_path / "нет") == frozenset()
+
+
 def test_whose_step_fell_is_counted_not_assumed() -> None:
     """Служебный шаг отличается от своего — и это СЧИТАЕТСЯ, а не подразумевается.
 
