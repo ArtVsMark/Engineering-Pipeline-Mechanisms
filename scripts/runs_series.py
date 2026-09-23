@@ -425,8 +425,9 @@ def red_details(repo: str, run: int, token: str) -> list[dict[str, str]]:
     # цена без предмета (058).
     ours = installing_steps()
     found: list[dict[str, str]] = []
-    # Джобы читаются до конца: страница по умолчанию — тридцать, у `ci` их
-    # сейчас четырнадцать, и упавший за краем пропал бы молча (#675).
+    # Джобы читаются до конца: страница по умолчанию — тридцать, а упавший за
+    # краем пропал бы молча (#675). Замер 23.09.2026: у прогона `ci`
+    # четырнадцать джобов — до края далеко, но растёт он без предупреждения.
     for job in ghrest.paginate(f"repos/{repo}/actions/runs/{run}/jobs", token, key="jobs"):
         if job.get("conclusion") not in REAL_RED:
             continue
