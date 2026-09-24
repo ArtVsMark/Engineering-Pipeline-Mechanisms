@@ -241,10 +241,17 @@ def born_symbol(name: str, root: Path | None = None) -> datetime | None:
     )
     if done.returncode != 0:
         return None
-    lines = [line.strip() for line in done.stdout.splitlines() if line.strip()]
-    if not lines:
-        return None
-    return datetime.fromisoformat(lines[0]).astimezone(UTC)
+    # Наименьшая дата, а не первая в порядке `--reverse` — как у `born` и
+    # `tests_born`: после rebase и cherry-pick даты идут не по порядку истории
+    # (`8c3fad9`).
+    return min(
+        (
+            datetime.fromisoformat(line.strip()).astimezone(UTC)
+            for line in done.stdout.splitlines()
+            if line.strip()
+        ),
+        default=None,
+    )
 
 
 def evidence(item: str, since: datetime, files: set[str], root: Path | None = None) -> list[str]:
