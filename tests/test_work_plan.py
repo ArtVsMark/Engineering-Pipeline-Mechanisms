@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -190,6 +190,8 @@ def quiet_platform(monkeypatch: pytest.MonkeyPatch, *, body: str = BODY) -> list
     # Поводы для правила читаются из дерева, а не с площадки: гасятся здесь,
     # чтобы проверки источников не зависели от сегодняшнего словаря родов.
     monkeypatch.setattr(module, "birth_part", lambda *_: module.Source())
+    # Рождённых работой задач нет: пополнение раздела 4 проверяется отдельно.
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([]))
     return written
 
 
@@ -569,3 +571,108 @@ def test_an_unsent_proposal_keeps_the_kind_in_the_plan(tmp_path: Any) -> None:
         '{"proposals": [{"slug": "not-sent-yet"}]}', encoding="utf-8"
     )
     assert module.birth_part(path).rows == []
+
+
+def born_platform(
+    issues: list[dict[str, Any]], subs: dict[int, list[dict[str, Any]]]
+) -> tuple[Any, list[str]]:
+    """Площадка со списком открытых задач и подзадачами — и лист запросов."""
+    asked: list[str] = []
+
+    def paginate(path: str, *_rest: Any, **_kw: Any) -> Any:
+        asked.append(path)
+        if path.endswith("/sub_issues"):
+            return iter(subs.get(int(path.split("/")[-2]), []))
+        return iter(issues)
+
+    return paginate, asked
+
+
+#: Хранилище стенда и чужое — подзадача несёт адрес своего хранилища.
+HOME: Final = "https://api.github.com/repos/o/r"
+ELSEWHERE: Final = "https://api.github.com/repos/other/r"
+
+
+HELD_ROWS: dict[int, list[str]] = {
+    4: ["*У него есть предмет.*", "", "- **#640** — сборщик плана"],
+    6: ["- **#642** — инвентарь переносимого", "- `abc1234` · #635 — находка"],
+}
+
+
+def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задача, связанная со строкой раздела 4 или 6, встаёт в раздел 4 (#747).
+
+    Связь — телом (`Refs #642`) или подзадачей (#640). Не встают: уже стоящая
+    в плане (в том числе в собранном разделе), ссылающаяся только на план или
+    реестр, изменение, закрытая подзадача, подзадача чужого хранилища, живая
+    задача механизма со связью в теле и ссылка на номер из строки-находки
+    (взгляд на #750).
+    """
+    paginate, _ = born_platform(
+        [
+            {"number": 750, "title": "дыра инвентаря", "body": "Нашлось.\n\nRefs #642"},
+            {"number": 642, "title": "инвентарь", "body": "Refs #640"},
+            {"number": 752, "title": "чужая", "body": "Refs #639\nRefs #23"},
+            {"number": 753, "title": "изменение", "body": "Refs #642", "pull_request": {}},
+            {"number": 755, "title": "реестр", "body": f"{module.findings.marker('x')}\nrefs #642"},
+            {"number": 756, "title": "план", "body": f"{module.MARKER}\nRefs #642"},
+            {"number": 757, "title": "по находке", "body": "Refs #635"},
+            {"number": 758, "title": "уже в разделе 5", "body": "Refs #642"},
+        ],
+        {
+            640: [
+                {
+                    "number": 751,
+                    "title": "подзадача сборщика",
+                    "state": "open",
+                    "repository_url": HOME,
+                },
+                {"number": 754, "title": "сделанная", "state": "closed", "repository_url": HOME},
+                {"number": 759, "title": "чужая", "state": "open", "repository_url": ELSEWHERE},
+                {
+                    "number": 758,
+                    "title": "уже в разделе 5",
+                    "state": "open",
+                    "repository_url": HOME,
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert module.born_rows("o/r", "t", HELD_ROWS, frozenset({758})) == [
+        f"- **#750** — дыра инвентаря *({module.BORN_TAIL} #642)*",
+        f"- **#751** — подзадача сборщика *({module.BORN_TAIL} #640)*",
+    ]
+
+
+def test_without_rows_nothing_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пустые ручные разделы — родителей нет, и площадку не спрашивают."""
+    paginate, asked = born_platform([{"number": 750, "title": "x", "body": "Refs #642"}], {})
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert module.born_rows("o/r", "t", {4: ["*курсив*"], 6: []}) == []
+    assert asked == []
+
+
+def test_a_born_task_lands_at_the_end_of_section_four(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сквозь сборку: рождённая задача — последней строкой раздела 4, раздел 6 цел."""
+    written = quiet_platform(monkeypatch)
+    paginate, _ = born_platform([{"number": 750, "title": "дыра", "body": "Refs #642"}], {})
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    four = module.rows_of(written[0], module.HEADS[4])
+    assert four[-1] == f"- **#750** — дыра *({module.BORN_TAIL} #642)*"
+    assert "#750" not in "\n".join(module.rows_of(written[0], module.HEADS[6]))
+
+
+def test_a_task_already_in_a_built_section_is_not_born_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Задача, стоящая в собранном разделе, в раздел 4 не встаёт (`365d40a`)."""
+    written = quiet_platform(monkeypatch)
+    built = {one: module.Source() for one in module.BUILT}
+    built[5] = module.Source(rows=["**#750** — задача по правилу"])
+    monkeypatch.setattr(module, "sources", lambda *_: (built, [], set()))
+    paginate, _ = born_platform([{"number": 750, "title": "дыра", "body": "Refs #642"}], {})
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    assert "#750" not in "\n".join(module.rows_of(written[0], module.HEADS[4]))
