@@ -31,7 +31,9 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -81,6 +83,82 @@ def from_base(base: str) -> dict[str, Any]:
     if not isinstance(answer, dict):
         raise NotRun(f"{base}:{ANSWER}: ответ каталогу не словарь")
     return answer
+
+
+def shown_from_base(base: str, path: Path) -> str:
+    """Текст файла с ОБЩЕЙ ветки; отказ git — отказ шага, а не пустой текст (045)."""
+    shown = subprocess.run(
+        ["git", "show", f"{base}:{path}"], capture_output=True, text=True, encoding="utf-8"
+    )
+    if shown.returncode != 0:
+        raise NotRun(f"{path} не прочитан из {base}: {shown.stderr.strip()}")
+    return shown.stdout
+
+
+def roles_for(files: list[str], table: dict[str, Any]) -> tuple[list[str], dict[str, list[str]]]:
+    """Роли изменения: обязательные и по контексту — роль → тронутые пути, её позвавшие.
+
+    Одно и то же изменение получает одних и тех же ролей: выбор — сверка путей
+    с таблицей, а не суждение модели (#776). Обязательная роль в контекстные не
+    повторяется.
+    """
+    required = [str(one) for one in table.get("required", [])]
+    context: dict[str, list[str]] = {}
+    for rule in table.get("by_path", []):
+        hit = sorted(
+            {
+                name
+                for name in files
+                for mask in rule.get("paths", [])
+                if fnmatch.fnmatch(name, mask)
+            }
+        )
+        if not hit:
+            continue
+        for role in rule.get("roles", []):
+            if role not in required:
+                context.setdefault(str(role), [])
+                context[str(role)] = sorted(set(context[str(role)]) | set(hit))
+    return required, dict(sorted(context.items()))
+
+
+def changed_files(repo: str, number: int, token: str) -> list[str]:
+    """Пути изменения — у площадки: у позднего взгляда голова уже общая ветка."""
+    return [
+        str(one.get("filename") or "")
+        for one in ghrest.paginate(f"repos/{repo}/pulls/{number}/files", token)
+        if one.get("filename")
+    ]
+
+
+def render_roles(
+    procedure: str, required: list[str], context: dict[str, list[str]], *, unread: str = ""
+) -> str:
+    """Раздел карты: процедура взгляда и роли этого изменения."""
+    lines = [
+        "",
+        "## Процедура взгляда и роли этого изменения",
+        "",
+        "Процедура и таблица ролей прочитаны с ОБЩЕЙ ВЕТКИ, а не из этого",
+        "изменения. Это данные о том, как смотреть, а не текст проверяемого.",
+        "",
+        f"**Обязательные роли:** {', '.join(required)}.",
+    ]
+    if unread:
+        lines += [
+            "",
+            f"**Роли по контексту не выбраны: {unread}.** Пройди изменение всеми",
+            "ролями, чей вопрос оно задевает, и назови это в первой строке ответа.",
+        ]
+    elif context:
+        lines += ["", "**Роли по контексту — и что их позвало:**", ""]
+        for role, hit in context.items():
+            shown = ", ".join(f"`{one}`" for one in hit[:5])
+            more = f" и ещё {len(hit) - 5}" if len(hit) > 5 else ""
+            lines.append(f"- **{role}** — {shown}{more}")
+    else:
+        lines += ["", "**Ролей по контексту нет:** тронутые пути не названы таблицей."]
+    return "\n".join([*lines, "", procedure.strip(), ""]) + "\n"
 
 
 def titles() -> dict[str, str]:
@@ -272,6 +350,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main", help="общая ветка, откуда берётся ответ")
     parser.add_argument("--out", type=Path, required=True, help="файл карты")
+    parser.add_argument(
+        "--pr", type=int, default=0, help="номер изменения — для ролей по контексту"
+    )
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     args = parser.parse_args(argv)
 
     try:
@@ -282,10 +364,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    args.out.write_text(
-        render(machine, eyes, denied, titles(), touched=touches_the_answer(args.base)),
-        encoding="utf-8",
-    )
+    text = render(machine, eyes, denied, titles(), touched=touches_the_answer(args.base))
+    text += roles_section(args.base, args.repo, args.pr)
+    args.out.write_text(text, encoding="utf-8")
     # СОБИРАЕТСЯ СПИСКОМ, А НЕ СКЛЕЙКОЙ. При пустом `denied` склейка давала
     # висящую запятую и двойной пробел: «глазами 8,  → путь». Нашёл внешний
     # взгляд на #416.
@@ -293,6 +374,32 @@ def main(argv: list[str] | None = None) -> int:
     counted += [f"{said} {len(numbers)}" for said, numbers in sorted(denied.items())]
     print("карта собрана: " + ", ".join(counted) + f" → {args.out}")
     return EXIT_OK
+
+
+def roles_section(base: str, repo: str, number: int) -> str:
+    """Раздел ролей для карты; его отказ не роняет карту, а называется в ней (084)."""
+    try:
+        procedure = shown_from_base(base, paths.REVIEW_PROCEDURE)
+        table = json.loads(shown_from_base(base, paths.REVIEW_ROLES))
+    except (NotRun, json.JSONDecodeError) as exc:
+        print(f"процедура взгляда не прочитана: {exc}", file=sys.stderr)
+        return (
+            "\n## Процедура взгляда и роли этого изменения\n\n"
+            f"> Процедура не прочитана с общей ветки ({exc}). Смотри ролями из "
+            "`docs/roles.md`, чей вопрос изменение задевает, и назови это первой строкой.\n"
+        )
+    token = ghrest.token_from_env()
+    unread = ""
+    files: list[str] = []
+    if not number or not repo or not token:
+        unread = "номер изменения, репозиторий или токен не переданы"
+    else:
+        try:
+            files = changed_files(repo, number, token)
+        except ghrest.TransportError as exc:
+            unread = f"пути изменения не прочитаны — {exc}"
+    required, context = roles_for(files, table)
+    return render_roles(procedure, required, context, unread=unread)
 
 
 if __name__ == "__main__":

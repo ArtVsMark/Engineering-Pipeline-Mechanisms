@@ -240,6 +240,12 @@
         ".rules/rerun.json"
       ]
     },
+    ".rules/review-roles.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/review-roles.json"
+      ]
+    },
     ".rules/schedules.json": {
       "answer": "configured",
       "where": [
