@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -262,31 +263,65 @@ def test_the_label_and_the_bare_name_agree_on_a_zone() -> None:
     assert not kind.is_zone and not module.labels.zone_named("bug")
 
 
-def zone_copy(node: ast.AST) -> bool:
-    """Вызов `x.startswith(<приставка зоны>)` — константой `ZONE_PREFIX` или литералом."""
-    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-        return False
-    if node.func.attr != "startswith" or not node.args:
-        return False
-    said = node.args[0]
-    named = getattr(said, "id", None) or getattr(said, "attr", None)
-    literal = isinstance(said, ast.Constant) and said.value == module.labels.ZONE_PREFIX
-    return named == "ZONE_PREFIX" or literal
+def zone_carriers() -> tuple[set[str], str]:
+    """Чем в коде можно назвать приставку зоны: имена её констант и сама приставка.
+
+    Имя константы берётся у модуля ПО ЗНАЧЕНИЮ, а не пишется строкой:
+    переименуй её — и гейт узнает новое имя сам (`48ba174`). Литерал — слово
+    зоны без черты (`split("/")[0] == "area"`) и всё, что начинается с
+    приставки (`fnmatch(…, "area/*")`): оба — копия.
+    """
+    prefix = module.labels.ZONE_PREFIX
+    names = {name for name, value in vars(module.labels).items() if value == prefix}
+    return names, prefix
+
+
+def zone_literal(value: object, prefix: str) -> bool:
+    """Строка называет зону: её слово без черты или всё, что начинается с приставки."""
+    return isinstance(value, str) and (value == prefix.rstrip("/") or value.startswith(prefix))
+
+
+def zone_mentions(path: Path) -> list[tuple[str, int]]:
+    """Упоминания приставки зоны в модуле: функция, где стоит, и строка."""
+    names, prefix = zone_carriers()
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: list[tuple[str, int]] = []
+    for top in tree.body:
+        owner = top.name if isinstance(top, (ast.FunctionDef, ast.ClassDef)) else ""
+        for node in ast.walk(top):
+            named = getattr(node, "id", None) or (
+                node.attr if isinstance(node, ast.Attribute) else None
+            )
+            literal = isinstance(node, ast.Constant) and zone_literal(node.value, prefix)
+            if named in names or literal:
+                found.append((owner, getattr(node, "lineno", 0)))
+    return found
 
 
 def test_no_reader_keeps_its_own_zone_predicate() -> None:
-    """Вне `labels.zone_named` зону не узнаёт никто — ни константой, ни литералом.
+    """Приставку зоны называет только определение и `labels.zone_named` — в любой форме.
 
-    Прежняя проверка обещала «один ответ у каждого читателя», а звала двух из
-    четырёх; копию в счёте голых задач или в гейте разметки она бы не поймала
-    (`700e329`). Здесь держится дерево: замер 23.09.2026 до починки — четыре
-    копии, после — одна, в самой функции.
+    Прежняя редакция ловила одну форму — `startswith(<приставка>)` первым
+    доводом — и исключала `labels.py` целиком: кортеж, `in`, срез, `fnmatch`,
+    `removeprefix` и вторая копия внутри самого `labels.py` проходили
+    (`d4df347`, `4ddf650`, `e184f12`, `161710b`). Здесь судится НОСИТЕЛЬ
+    приставки, а не форма вызова: без константы или литерала приставку не
+    назвать ничем. Замер 23.09.2026 по дереву: константа упомянута дважды —
+    определение и `zone_named`, литерал — один раз, в определении.
+
+    ГРАНИЦА: приставку, собранную из частей (`"ar" + "ea/"`), гейт не видит —
+    такую запись пишут, чтобы обойти, и её ловит взгляд, а не машина (057).
     """
-    found = [
-        f"{path.name}:{getattr(node, 'lineno', 0)}"
+    names, _ = zone_carriers()
+    assert names, "константы приставки зоны у labels нет — предмет гейта исчез (075)"
+    outside = [
+        f"{path.name}:{line}"
         for path in walk(ROOT / "scripts", "*.py")
-        if path.name != "labels.py"
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        if zone_copy(node)
+        for owner, line in zone_mentions(path)
+        if path.name != "labels.py" or owner not in ("", "zone_named")
     ]
-    assert not found, "свой предикат зоны вместо labels.zone_named: " + ", ".join(found)
+    assert not outside, "приставка зоны названа вне labels.zone_named: " + ", ".join(outside)
+    # ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: гейт обязан узнать и саму функцию — иначе он
+    # зелен и тогда, когда не видит ничего (`e2f6d9c`, 075).
+    own = [owner for owner, _ in zone_mentions(ROOT / "scripts" / "labels.py") if owner]
+    assert own == ["zone_named"], own
