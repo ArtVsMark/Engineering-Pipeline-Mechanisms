@@ -67,10 +67,11 @@ BOUNDS_FILE: Final = paths.SERIES
 #: отменённая не пройдена, но и не отказ, а «идёт» вердикта не несёт вовсе.
 REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
 
-#: Витрина проекта: факты, опубликованные шагом значков в ветку-сироту `badges`.
-#: Адрес тот же, что этот шаг печатает по окончании; читается по прямой ссылке,
-#: без клона — ради этого производное туда и уезжает (125).
-FACTS_URL: Final = "https://raw.githubusercontent.com/{repo}/badges/facts.json"
+#: Витрина проекта: факты, опубликованные шагом значков в ветку-сироту `badges`
+#: по адресу контракта семьи, `.github/badges/facts.json` (#759). Адрес тот же,
+#: что этот шаг печатает по окончании; читается по прямой ссылке, без клона —
+#: ради этого производное туда и уезжает (125).
+FACTS_URL: Final = "https://raw.githubusercontent.com/{repo}/badges/.github/badges/facts.json"
 
 
 class NotRun(RuntimeError):
@@ -616,17 +617,19 @@ def coverage_now(repo: str) -> float | None:
     «НЕ ПРОЧИТАНО» ОСТАЁТСЯ СОСТОЯНИЕМ, А НЕ НУЛЁМ. Витрина отвечает об этом
     полем `read`, и подставить ноль вместо незнания значило бы записать в ряд
     обвал покрытия там, где его не было (045). День без покрытия остаётся днём
-    без покрытия, и отчёт это называет.
+    без покрытия, и отчёт это называет. По контракту фактов семьи «не
+    прочитано» — это отсутствие ключа `coverage_percent`.
     """
     try:
         facts = ghrest.raw_json(FACTS_URL.format(repo=repo))
     except (ghrest.TransportError, OSError, ValueError):
         return None
-    said = facts.get("coverage") or {}
-    if not said.get("read"):
+    # Доля — ключом контракта `coverage_percent` (#759); его нет — покрытие не
+    # прочитано, и это «не прочитано», а не ноль.
+    if "coverage_percent" not in facts:
         return None
     try:
-        return round(float(said.get("percent") or 0.0), 1)
+        return round(float(facts["coverage_percent"]), 1)
     except (TypeError, ValueError):
         return None
 

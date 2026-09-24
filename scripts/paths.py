@@ -107,6 +107,9 @@ SKILLS: Final = Path(".claude/skills")
 ENTRANCE: Final = Path("README.md")
 #: Согласованные имена атрибуции.
 AUTHORS: Final = Path(".github/authors.txt")
+#: Где факты и значки лежат в ветке `badges` — по контракту фактов семьи (#759).
+#: Это адрес ПРОИЗВОДНОГО в ветке-сироте, а не файл общей ветки.
+BADGES_DIR: Final = Path(".github/badges")
 #: Карта ролей: профили, глазами которых смотрит взгляд (#763).
 ROLES: Final = Path("docs/roles.md")
 
@@ -154,5 +157,6 @@ ALL: Final = (
     TRANSPORT,
     ENTRANCE,
     AUTHORS,
+    BADGES_DIR,
     ROLES,
 )

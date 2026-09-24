@@ -55,8 +55,10 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     assert collected["rules"]["total"] == 4
     assert collected["rules"]["answered"] == 3
     assert collected["rules"]["by_mechanism"] == {"document": 1, "gate": 1}
-    assert collected["checks"]["required"] == 1
-    assert collected["generated"]["sha"] == "голова"
+    assert collected["checks_per_pr"]["by_class"]["required"] == 1
+    assert collected["commit"] == "голова"
+    assert collected["schema"] == "1.0"
+    assert collected["generated_at"].endswith("+00:00")
 
 
 def test_unknown_status_is_refused(tmp_path: Path) -> None:
@@ -121,7 +123,7 @@ def test_badge_colour_follows_the_share() -> None:
 #: Список разрешительный (068): доля, которой здесь нет, гейтом отвергается —
 #: она обязана приехать со своими слагаемыми либо быть объявлена тут с ними.
 A_SHARE_AND_ITS_NUMBERS: dict[str, tuple[str, str]] = {
-    "coverage.percent": ("coverage.covered", "coverage.lines"),
+    "coverage_percent": ("coverage.covered", "coverage.lines"),
     "family.share": ("family.closed_by_shared", "family.held_by_machine"),
 }
 
@@ -206,7 +208,9 @@ def test_the_declared_pairs_are_not_a_promise(tmp_path: Path) -> None:
     for share, pair in A_SHARE_AND_ITS_NUMBERS.items():
         if share not in numbers:
             continue
-        section = share.split(".")[0]
+        # Доля покрытия — ключ контракта наверху (#759), а признак прочитанности
+        # — в разделе её слагаемых.
+        section = pair[0].split(".")[0]
         if not (collected.get(section) or {}).get("read"):
             continue
         checked += 1
@@ -365,26 +369,27 @@ def test_the_badge_run_fetches_the_tags() -> None:
     assert "fetch-tags: true" in text
 
 
-def test_checks_facts_count_both_sections(tmp_path: Path) -> None:
-    """Факты считают проверки обоих разделов, а не половину на изменении.
+def test_checks_per_pr_count_only_the_change(tmp_path: Path) -> None:
+    """Проверки на изменении — только первый раздел, с именами (#759).
 
-    Умолчание у `names_of` — первый раздел, и без явного «из любого» число
-    совещательных занизилось бы ровно на те прогоны, которые второй раздел и
-    завёл. Факты публикуются наружу и говорят о конвейере целиком. Нашёл
-    внешний взгляд на #155 — на том же изменении, которое умолчание ввело.
+    Контракт фактов семьи спрашивает, сколько проверок стоит на ИЗМЕНЕНИИ.
+    Прежний ключ `checks` считал оба раздела, и прогон вне изменения попадал в
+    ответ на этот вопрос. Имена едут рядом, чтобы число проверяли.
     """
     answer = tmp_path / ".pipeline.yml"
     answer.write_text(
         'schema: 4\ncontract: ">=9.9,<9.10"\n'
-        "checks:\n  lint: required\n"
+        "checks:\n  lint: required\n  review:\n    class: advisory\n"
+        "    why: совещательный взгляд\n    addressee: none\n"
         "beyond_the_change:\n  nightly:\n    class: advisory\n"
         "    why: идёт по толчку в общую ветку\n    addressee: none\n",
         encoding="utf-8",
     )
     (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
     counted = facts.checks_facts(answer)
-    assert counted["required"] == 1
-    assert counted["advisory"] == 1, "прогон вне изменения не попал в счёт"
+    assert counted["count"] == 2
+    assert counted["names"] == ["lint", "review"]
+    assert counted["by_class"]["advisory"] == 1, "прогон вне изменения попал в счёт"
 
 
 # --- отставание от семьи: непосчитанное называется ---------------------------

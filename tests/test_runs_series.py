@@ -319,19 +319,17 @@ def test_the_sums_of_the_series_are_counted_across_days() -> None:
 
 def test_the_coverage_is_taken_from_the_storefront(monkeypatch: pytest.MonkeyPatch) -> None:
     """Число берётся у витрины, а не считается заново: счёт один (022)."""
-    monkeypatch.setattr(
-        module.ghrest, "raw_json", lambda url: {"coverage": {"read": True, "percent": 87.34}}
-    )
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: {"coverage_percent": 87.34})
     assert module.coverage_now("o/r") == 87.3
 
 
 @pytest.mark.parametrize(
     "facts",
     [
-        pytest.param({"coverage": {"read": False, "percent": 0.0}}, id="витрина не прочитала"),
+        pytest.param({"coverage": {"read": False}}, id="витрина не прочитала"),
         pytest.param({"coverage": {}}, id="поля read нет"),
         pytest.param({}, id="покрытия в фактах нет вовсе"),
-        pytest.param({"coverage": {"read": True, "percent": "почти всё"}}, id="не число"),
+        pytest.param({"coverage_percent": "почти всё"}, id="не число"),
     ],
 )
 def test_an_unread_coverage_is_not_a_zero(
