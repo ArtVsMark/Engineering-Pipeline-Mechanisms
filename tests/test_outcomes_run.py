@@ -162,8 +162,21 @@ def test_narrowing_the_parser_would_hide_runs_that_exist() -> None:
         ("assert done.code == 1", {1}),
         ("assert result.returncode == 2", {2}),
         ("CLEAN = 0\nassert run(tree, '--head', 'w') == CLEAN", {0}),
+        ("assert 2 == main([])", {2}),
+        ("assert 2 == len(lines)", set()),
     ],
-    ids=["len", "поле", "count", "main", "module.main", "code", "returncode", "помощник"],
+    ids=[
+        "len",
+        "поле",
+        "count",
+        "main",
+        "module.main",
+        "code",
+        "returncode",
+        "помощник",
+        "main справа",
+        "len справа",
+    ],
 )
 def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) -> None:
     """Число засчитывается прогоном только рядом с исходом (#687).
