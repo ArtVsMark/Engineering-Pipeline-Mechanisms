@@ -12,7 +12,8 @@
 # ЭТО КАНАЛ НАРУЖУ, А НЕ УКРАШЕНИЕ. Соседям по семье и каталогу правил нужно
 # знать, на какой версии контракта стоит проект и сколько правил он держит.
 # Факты о проекте публикует сам проект (174), а не тот, кто о нём пишет:
-# `facts.json` читается по адресу raw ветки `badges` без клона дерева.
+# `facts.json` лежит по адресу контракта фактов семьи — ветка `badges`, путь
+# `.github/badges/facts.json`, как у соседей (#759), — и читается без клона.
 name: badges
 
 on:
@@ -131,4 +132,4 @@ jobs:
           git commit -q -m "факты и значок на ${GITHUB_SHA}"
           git push -q --force \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" badges
-          echo "опубликовано: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/badges/facts.json"
+          echo "опубликовано: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/badges/.github/badges/facts.json"

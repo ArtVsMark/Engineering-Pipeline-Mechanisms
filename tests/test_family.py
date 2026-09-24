@@ -179,7 +179,7 @@ def test_a_diverged_schema_is_said_out_loud(
     path = written(
         tmp_path, summary(consumer("o/a", **{"001": ("gate", "scripts/x.py")}), schema="9.9")
     )
-    code = facts.main(["--family", str(path), "--out", str(tmp_path / "out")])
+    code = facts.main(["--family", str(path), "--out", str(tmp_path / "out"), "--repo", "o/r"])
     said = capsys.readouterr()
     assert code == facts.EXIT_OK
     assert "9.9" in said.err and family.READS_SCHEMA in said.err, (
@@ -190,7 +190,7 @@ def test_a_diverged_schema_is_said_out_loud(
 def test_a_matching_schema_says_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Форма сошлась — про неё молчат: строка о сходящемся учит не читать строк."""
     path = written(tmp_path, summary(consumer("o/a", **{"001": ("gate", "scripts/x.py")})))
-    facts.main(["--family", str(path), "--out", str(tmp_path / "out")])
+    facts.main(["--family", str(path), "--out", str(tmp_path / "out"), "--repo", "o/r"])
     assert "форма сводки" not in capsys.readouterr().err
 
 

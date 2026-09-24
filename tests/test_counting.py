@@ -114,9 +114,11 @@ def test_a_counted_zero_is_never_published(tmp_path: Path, monkeypatch: pytest.M
     """
     настоящие = facts.collect(ROOT, "голова")
     подделка = json.loads(json.dumps(настоящие))
-    подделка["tests"]["total"] = 0
+    подделка["tests"]["functions"] = 0
     monkeypatch.setattr(facts, "collect", lambda *a, **k: подделка)
-    код = facts.main(["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова"])
+    код = facts.main(
+        ["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова", "--repo", "o/r"]
+    )
     assert код == facts.EXIT_BROKEN, "витрина опубликовала сосчитанный ноль"
     assert not list(tmp_path.glob("*.svg")), "значки нарисованы при обрыве обхода"
 
@@ -127,14 +129,22 @@ def test_a_real_tree_still_publishes(tmp_path: Path) -> None:
     Без неё «ноль не публикуется» держалось бы тем, что не публикуется НИЧЕГО
     ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
     """
-    assert facts.main(["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова"]) == 0
-    assert (tmp_path / "facts.json").is_file(), "фактов нет при здоровом дереве"
+    assert (
+        facts.main(
+            ["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова", "--repo", "o/r"]
+        )
+        == 0
+    )
+    assert (tmp_path / facts.PUBLISHED_DIR / "facts.json").is_file(), (
+        "фактов нет при здоровом дереве"
+    )
 
 
 def test_coverage_without_a_report_is_not_a_zero(tmp_path: Path) -> None:
     """Отчёта нет — так и говорится; ноль читался бы как «ничего не покрыто» (045)."""
-    assert facts.coverage_facts(None) == {"read": False, "percent": 0.0}
-    assert facts.coverage_facts(tmp_path / "нет.json") == {"read": False, "percent": 0.0}
+    assert facts.coverage_facts(None) == {"read": False}
+    assert facts.coverage_facts(tmp_path / "нет.json") == {"read": False}
+    assert "coverage_percent" not in facts.contract_coverage({"read": False})
     assert "не прочитано" in facts.coverage_badge({})
 
 
@@ -157,5 +167,14 @@ def test_a_broken_report_is_a_refusal(tmp_path: Path) -> None:
 
 def test_the_coverage_badge_shows_the_share() -> None:
     """Значок покрытия показывает долю числом, а не цветом наугад."""
-    said = facts.coverage_badge({"coverage": {"read": True, "percent": 77.0}})
+    said = facts.coverage_badge({"coverage_percent": 77.0})
     assert "77%" in said
+
+
+def test_facts_without_a_repo_are_not_published(tmp_path: Path) -> None:
+    """Без имени проекта минимум контракта не собран — публикации нет (#759)."""
+    code = facts.main(
+        ["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова", "--repo", ""]
+    )
+    assert code == facts.EXIT_BROKEN
+    assert not (tmp_path / facts.PUBLISHED_DIR / "facts.json").exists()
