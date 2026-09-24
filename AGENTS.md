@@ -12,7 +12,7 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 [`docs/pipeline.md`](docs/pipeline.md), поведение — в
 [`docs/behaviour.md`](docs/behaviour.md), порядок работ — в
 [`docs/roadmap.md`](docs/roadmap.md), а какие вопросы о продукте здесь вообще
-задают и каких не задаёт никто — в [`docs/roles.md`](docs/roles.md). Здесь ни
+задают и каких не задаёт никто — в [`docs/directions.md`](docs/directions.md). Здесь ни
 одно их утверждение не повторяется: пересказ заводит второй источник, и
 первая же правка разводит их
 ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
