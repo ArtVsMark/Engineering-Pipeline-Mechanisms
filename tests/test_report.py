@@ -8,13 +8,15 @@
 from __future__ import annotations
 
 import ast
-import re
+from typing import Final
 
 import pytest
 import report
 import yaml
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
+
+runs_series = load_script("runs_series.py")
 
 SCRIPTS = ROOT / "scripts"
 
@@ -87,31 +89,57 @@ def test_a_live_run_names_nothing_in_either_stream(
     assert said.out == "" and said.err == ""
 
 
-#: Файл, собранный из ОБОИХ потоков: `>"$ИМЯ" 2>&1`.
-MERGED_RE = re.compile(r'>\s*"\$\{?(?P<name>[A-Za-z_]+)\}?"\s*2>&1')
-#: Файл, отправленный в выходы шага: `cat "$ИМЯ" >> "$GITHUB_OUTPUT"`.
-TO_OUTPUT_RE = re.compile(r'cat\s+"\$\{?(?P<name>[A-Za-z_]+)\}?"\s*>>\s*"\$GITHUB_OUTPUT"')
+#: Как оболочка сливает `stderr` в `stdout`: `2>&1`, `&>` и `|&`. Последний
+#: разбор команд режет по черте, и от него остаётся команда, начатая с `&`.
+MERGES: Final = ("2>&1", "&>")
 
 
-def test_a_file_sent_to_the_step_outputs_carries_only_the_answer() -> None:
-    """Файл, уходящий в `$GITHUB_OUTPUT`, не собирается из обоих потоков.
+def merges_streams(command: str) -> bool:
+    """Сливает ли команда оба потока в один."""
+    return any(one in command for one in MERGES) or command.startswith("&")
 
-    Механизм разводит потоки сам (`report.announce` пишет в `stderr`), и
-    шаг прогона не вправе слить их обратно. Замер 23.09.2026: ровно так
-    верификатор взгляда отвечал «Invalid format» на каждом запуске — `2>&1`
-    увозил приставку пробного захода в выходы шага (#673). В дереве такое
-    место было одно.
-    """
-    found: list[str] = []
+
+def run_steps() -> list[tuple[str, list[str]]]:
+    """Все шаги прогонов с их командами — комментарии вынуты."""
+    found: list[tuple[str, list[str]]] = []
     for path in walk(ROOT / ".github" / "workflows", "*.yml"):
         for job, body in (
             yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}
         ).items():
             for step in body.get("steps") or []:
-                run = str(step.get("run") or "")
-                merged = {m["name"] for m in MERGED_RE.finditer(run)}
-                sent = {m["name"] for m in TO_OUTPUT_RE.finditer(run)}
-                if merged & sent:
-                    names = ", ".join(sorted(merged & sent))
-                    found.append(f"{path.name}:{job} «{step.get('name')}»: {names}")
-    assert not found, "в выходы шага уходит файл из обоих потоков: " + "; ".join(found)
+                said = runs_series.commands(str(step.get("run") or ""))
+                where = f"{path.name}:{job} «{step.get('name')}»"
+                found.append((where, said))
+    return found
+
+
+def test_a_step_writing_its_outputs_never_merges_the_streams() -> None:
+    """Шаг, пишущий в `$GITHUB_OUTPUT`, не сливает потоки ни в одной команде.
+
+    Механизм разводит потоки сам (`report.announce` пишет в `stderr`), и
+    шаг прогона не вправе слить их обратно. Замер 23.09.2026: ровно так
+    верификатор взгляда отвечал «Invalid format» на каждом запуске — `2>&1`
+    увозил приставку пробного захода в выходы шага (#673).
+
+    СУДИТСЯ ШАГ, А НЕ ФОРМА ЗАПИСИ. Прежняя редакция ловила одну — файл
+    `>"$ИМЯ" 2>&1` и затем `cat "$ИМЯ" >> "$GITHUB_OUTPUT"`; переменная
+    `x=$(cmd 2>&1)` с `echo "k=$x"`, скобки `{ …; } 2>&1`, `|& tee` и
+    прямое `cmd >> "$GITHUB_OUTPUT" 2>&1` проходили (`9a59aa8`). Проследить
+    поток до выходов по всем формам оболочки нельзя, а шаг, пишущий выходы,
+    сливать потоки не обязан ни для чего — поэтому запрет на весь шаг.
+    Комментарии вынуты тем же разбором, что у счёта цены прогонов.
+
+    Замер 24.09.2026: шагов в прогонах 187, пишущих выходы — 12, сливающих
+    потоки — 15, и оба сразу — ни одного. Слова `2>&1` и `GITHUB_OUTPUT`
+    вместе стоят в одном шаге, и `2>&1` там — только в комментарии.
+
+    ГРАНИЦА: слияние, собранное из частей (`exec 2>&1` в начале шага тоже
+    ловится, а переменная с текстом `2>&1` — нет), машина не видит (057).
+    """
+    steps = run_steps()
+    writing = [(where, said) for where, said in steps if any("GITHUB_OUTPUT" in c for c in said)]
+    assert writing, "шагов, пишущих $GITHUB_OUTPUT, нет — предмет проверки исчез (075)"
+    merging = [where for where, said in steps if any(merges_streams(c) for c in said)]
+    assert merging, "шагов со слиянием потоков нет вовсе — вторая половина проверки пуста (075)"
+    found = [where for where, said in writing if any(merges_streams(c) for c in said)]
+    assert not found, "шаг пишет выходы и сливает потоки: " + "; ".join(found)
