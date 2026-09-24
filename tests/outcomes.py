@@ -163,18 +163,23 @@ def started_by(tree: ast.AST) -> set[str]:
 #: Вызовы, чей результат — счёт или форма, а не исход механизма: число рядом
 #: с ними говорит о длине списка, а не о коде выхода (#687).
 #:
-#: Сюда же — ЧТЕНИЕ ОБЪЯВЛЕНИЙ: `declared(…)`, `.values()`, `.keys()`. Сверка
+#: Сюда же — ВИДЫ СЛОВАРЯ `.values()` и `.keys()`: сверка
 #: `m.EXIT_SILENT not in declared(g).values()` сравнивает имена между собой,
 #: как и перечнем (`abd8efa`), но через вызов шла за прогон (`ea8b1fc`).
-#: Граница названа: помощник модуля теста с другим именем, возвращающий
-#: объявления, по-прежнему сойдёт за исход — отличить его от `run(…)` по
-#: одному имени нельзя, а замер 24.09.2026 таких сверок в наборе не нашёл.
 COUNTERS: Final = frozenset(
     {"len", "sum", "min", "max", "sorted", "list", "set", "tuple", "dict", "frozenset"}
     | {"str", "int", "abs", "round", "any", "all", "type", "bool", "getattr", "isinstance"}
     | {"count", "index", "find", "get"}
-    | {"values", "keys", "declared"}
+    | {"values", "keys"}
 )
+
+#: Помощник ЭТОГО модуля, читающий объявления: исходом его вызов не является.
+#: Только голым именем — `m.declared(…)` у механизма (`check_contract`,
+#: `protection`, …) — его собственная функция, и её вызов остаётся исходом
+#: (взгляд на #744). Граница названа: помощник теста с другим именем,
+#: возвращающий объявления, сойдёт за исход — отличить его от `run(…)` по
+#: имени нельзя, а замер 24.09.2026 таких сверок в наборе не нашёл.
+READER: Final = "declared"
 
 #: Имена, которыми тест называет код выхода, когда он уже взят из прогона.
 CODE_NAMES: Final = frozenset({"code", "returncode", "rc", "exit_code", "код"})
@@ -192,6 +197,8 @@ def speaks_of_an_outcome(side: ast.expr) -> bool:
     """
     if isinstance(side, ast.Call):
         func = side.func
+        if isinstance(func, ast.Name) and func.id == READER:
+            return False
         name = getattr(func, "id", None) or getattr(func, "attr", None)
         return name not in COUNTERS
     if isinstance(side, ast.Attribute):
