@@ -1783,18 +1783,39 @@ def test_a_rerun_of_the_head_look_keeps_its_first_start(monkeypatch: pytest.Monk
 def test_calling_the_owed_look_reruns_its_run_and_names_a_refusal(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`call_the_owed_look` перезапускает прогон; отказ площадки назван, а не проглочен."""
+    """`call_the_owed_look` перезапускает прогон ОДИН раз; отказ площадки назван (045)."""
     asked: list[tuple[str, str]] = []
+    attempts = {"777": 1, "888": 1, "refused": 1, "twice": 2}
 
-    def request(method: str, path: str, tok: str, body: Any = None) -> None:
+    def request(method: str, path: str, tok: str, body: Any = None) -> Any:
         asked.append((method, path))
-        if "refused" in path:
+        run = path.split("/")[5]
+        if method == "GET":
+            return {"run_attempt": attempts[run]}
+        if run == "refused":
             raise module.ghrest.TransportError("403")
+        return None
 
     monkeypatch.setattr(module.ghrest, "request", request)
     assert module.call_the_owed_look("o/r", "777", "t", dry_run=False) is True
-    assert asked == [("POST", "repos/o/r/actions/runs/777/rerun")]
+    assert ("POST", "repos/o/r/actions/runs/777/rerun") in asked
     assert module.call_the_owed_look("o/r", "refused", "t", dry_run=False) is False
     assert "не перезапущен" in capsys.readouterr().out
+    posts = len([one for one in asked if one[0] == "POST"])
     assert module.call_the_owed_look("o/r", "888", "t", dry_run=True) is True
-    assert len(asked) == 2, "пробный заход перезапустил прогон"
+    assert len([one for one in asked if one[0] == "POST"]) == posts, (
+        "пробный заход перезапустил прогон"
+    )
+    # Прогон, уже перезапущенный очередью, второй раз не зовётся (находка на #771).
+    assert module.call_the_owed_look("o/r", "twice", "t", dry_run=False) is False
+    assert ("POST", "repos/o/r/actions/runs/twice/rerun") not in asked
+    assert "второй перезапуск" in capsys.readouterr().out
+
+
+def test_an_owed_look_is_not_asked_before_the_head_is_green(platform: dict[str, Any]) -> None:
+    """Голова с идущими проверками пропущенный взгляд не перезапускает (находка на #771)."""
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    platform["owed"] = {1: "777"}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["rerun"] == [], "взгляд перезапущен раньше вердикта проверок"
