@@ -49,6 +49,20 @@ import version
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
+#: ГДЕ ЛЕЖАТ ФАКТЫ И ЗНАЧКИ — ПО КОНТРАКТУ СЕМЬИ, а не по своей раскладке:
+#: ветка `badges`, путь `.github/badges/` — как у грейдера, каталога, токенов и
+#: глоссария (контракт фактов витрины, `ArtVsMark/ArtVsMark` ·
+#: `.rules/facts-contract.md`; решение владельца 24.09.2026, #759). До этого
+#: файл лежал в корне ветки, и витрина считала, что фактов у проекта нет.
+PUBLISHED_DIR: Final = paths.BADGES_DIR
+#: Версия формата — СТРОКОЙ, как требует контракт: число не различает `1.0` и
+#: `1.10`. Мажор — контракта семьи, а не наш: наши собственные разделы едут
+#: рядом незнакомыми ему ключами, и их он игнорирует.
+SCHEMA: Final = "1.0"
+SCHEMA_OF: Final = (
+    "контракт фактов витрины семьи: "
+    "https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md"
+)
 
 #: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
 #: а не новая тонкость, о которой механизм обязан догадаться.
@@ -112,20 +126,27 @@ def rules_facts(path: Path = BINDINGS) -> dict[str, Any]:
     }
 
 
-def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, int]:
-    """Считает классы проверок из ответа проекта — по ОБОИМ разделам.
+def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, Any]:
+    """Проверки на изменении: число, имена и разбивка по классам.
 
-    Факты публикуются наружу и говорят о конвейере целиком, а не о его половине
-    на изменении. Умолчание у `names_of` — первый раздел, и без явного «из
-    любого» число совещательных здесь молча занизилось бы на десять: ровно на
-    те прогоны, которые второй раздел и завёл. Нашёл внешний взгляд на #155 —
-    на том же изменении, которое умолчание и ввело.
+    ОТВЕЧАЕТ НА ВОПРОС КОНТРАКТА — «сколько проверок стоит на изменении»
+    (`checks_per_pr`, #759), и потому считает ПЕРВЫЙ раздел `.pipeline.yml`,
+    а не весь конвейер. Прежний ключ `checks` считал оба раздела — прогоны вне
+    изменения туда входили, и витрина получала на свой вопрос не то число.
+    Имена едут рядом с числом: контракт даёт их, чтобы число проверяли, а не
+    принимали на веру.
     """
     try:
         checks = policy.load(path)
     except policy.BadPolicy as exc:
         raise NotRun(str(exc)) from exc
-    return {klass: len(policy.names_of(checks, klass, beyond=None)) for klass in policy.CLASSES}
+    by_class = {klass: policy.names_of(checks, klass) for klass in policy.CLASSES}
+    names = sorted(name for found in by_class.values() for name in found)
+    return {
+        "count": len(names),
+        "names": names,
+        "by_class": {klass: len(found) for klass, found in by_class.items()},
+    }
 
 
 def family_facts(
@@ -202,14 +223,15 @@ def test_counts(root: Path) -> dict[str, int]:
 
     Считается ПО ДЕРЕВУ, а не прогоном: прогон даёт то же число дороже и не в
     том месте. Тест узнаётся по объявлению `def test_`; второго счётчика той же
-    территории не заводится (022).
+    территории не заводится (022). Имена ключей — контракта семьи:
+    `functions` и `modules` (#759).
     """
     modules = sorted((root / "tests").glob("test_*.py"))
     total = 0
     for path in modules:
         lines = path.read_text(encoding="utf-8").splitlines()
         total += sum(1 for line in lines if line.startswith("def test_"))
-    return {"total": total, "modules": len(modules)}
+    return {"functions": total, "modules": len(modules)}
 
 
 def script_runs(root: Path) -> dict[str, int]:
@@ -294,7 +316,7 @@ def coverage_facts(path: Path | None) -> dict[str, Any]:
     вернуться к тому, что здесь и чинится (045).
     """
     if path is None or not path.is_file():
-        return {"read": False, "percent": 0.0}
+        return {"read": False}
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -314,6 +336,20 @@ def coverage_facts(path: Path | None) -> dict[str, Any]:
         "covered": int(covered),
         "lines": int(lines),
     }
+
+
+def contract_coverage(said: dict[str, Any]) -> dict[str, Any]:
+    """Покрытие в форме контракта: доля — наверху, слагаемые — в `coverage`.
+
+    ДОЛЯ ОДНА, А НЕ ДВЕ: `coverage_percent` контракта заменяет прежнее
+    `coverage.percent`, а не дублирует его (#759). Не прочитано — ключа
+    `coverage_percent` нет вовсе: по контракту отсутствие значит «не мерили»,
+    а ноль читался бы как ответ.
+    """
+    parts = {key: value for key, value in said.items() if key != "percent"}
+    if not said.get("read"):
+        return {"coverage": parts}
+    return {"coverage": parts, "coverage_percent": said["percent"]}
 
 
 def collect(
@@ -336,7 +372,14 @@ def collect(
     # каждое изменение (035).
     number, whole = version.version(root)
     return {
-        "schema": 1,
+        # МИНИМУМ КОНТРАКТА СЕМЬИ: версия формата строкой, о ком файл и когда
+        # собран — с поясом, чтобы витрина могла сказать «факты устарели»
+        # вместо того, чтобы показывать прошлое как настоящее (#759).
+        "schema": SCHEMA,
+        "schema_of": SCHEMA_OF,
+        "repo": mine,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "commit": sha,
         "contract": contract_version(root / VERSION_FILE),
         "version": number,
         # Неполнота названа рядом с числом, а не выброшена: клон без тегов даёт
@@ -354,14 +397,10 @@ def collect(
         # исход процесса — то, ради чего гейт существует.
         "scripts": script_runs(root),
         # Покрытие строк приходит из прогона: по дереву его не сосчитать.
-        "coverage": coverage_facts(coverage),
+        **contract_coverage(coverage_facts(coverage)),
         "rules": rules_facts(root / BINDINGS),
-        "checks": checks_facts(root / policy.DEFAULT_PATH),
+        "checks_per_pr": checks_facts(root / policy.DEFAULT_PATH),
         "family": family_facts(summary, mine=mine, answers=root / BINDINGS),
-        "generated": {
-            "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "sha": sha,
-        },
     }
 
 
@@ -454,10 +493,9 @@ def scripts_badge(facts: dict[str, Any]) -> str:
 
 def coverage_badge(facts: dict[str, Any]) -> str:
     """Доля покрытых строк — или прямое «не прочитано»."""
-    said = facts.get("coverage") or {}
-    if not said.get("read"):
+    if "coverage_percent" not in facts:
         return badge("покрытие", "не прочитано", "#9f9f9f")
-    percent = float(said.get("percent") or 0.0)
+    percent = float(facts["coverage_percent"])
     color = "#4c1" if percent >= 85 else "#dfb317" if percent >= 70 else "#e05d44"
     return badge("покрытие", f"{percent:g}%", color)
 
@@ -562,8 +600,17 @@ def main(argv: list[str] | None = None) -> int:
     # места, отвергающие одно, расходятся молча: починив одно, второе забывают
     # (022, 195). Сосед назван: проверку держит
     # `tests/test_facts.py::test_an_empty_answer_is_refused_before_the_count`.
+    # МИНИМУМ КОНТРАКТА БЕЗ ИМЕНИ НЕ ПУБЛИКУЕТСЯ: файл «ни о ком» витрина не
+    # прочтёт, а выглядит он как ответ (#759).
+    if not facts["repo"]:
+        print(
+            "факты не опубликованы: не названо имя проекта (--repo) — это обязательный "
+            "минимум контракта фактов семьи",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
     counted = {
-        "tests.total": facts["tests"]["total"],
+        "tests.functions": facts["tests"]["functions"],
         "tests.modules": facts["tests"]["modules"],
         "scripts.runnable": facts["scripts"]["runnable"],
     }
@@ -576,7 +623,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_BROKEN
 
-    out = Path(args.out_dir)
+    out = Path(args.out_dir) / PUBLISHED_DIR
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
     for name, draw in BADGES.items():
@@ -586,7 +633,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"собрано: контракт {facts['contract']}, "
         f"правил {rules['answered']} из {rules['total']}, "
-        f"проверок обязательных {facts['checks']['required']}"
+        f"проверок на изменении {facts['checks_per_pr']['count']}"
     )
     kin = facts["family"]
     if kin.get("read"):

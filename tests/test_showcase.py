@@ -70,7 +70,7 @@ def test_an_absent_answer_explains_itself(question: dict[str, Any]) -> None:
 
 
 #: Адрес опубликованного числа: файл витрины и путь к ключу внутри него.
-PUBLISHED: Final = re.compile(r"^[\w.-]+\.json#[\w.]+$")
+PUBLISHED: Final = re.compile(r"^(?:\.github/badges/)?[\w.-]+\.json#[\w.]+$")
 
 
 @cache
@@ -111,7 +111,7 @@ def test_a_maintainer_answer_points_at_the_published_number(question: dict[str, 
     said = str(question["where"])
     assert PUBLISHED.match(said), (
         f"{question['id']}: адрес «{said}» — путь в дереве, а не опубликованное число."
-        " Форма: facts.json#путь.к.ключу"
+        " Форма: .github/badges/facts.json#путь.к.ключу"
     )
     assert question.get("branch"), f"{question['id']}: не названа ветка, где лежит опубликованное"
     _, _, path = said.partition("#")
