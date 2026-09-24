@@ -936,3 +936,18 @@ def test_late_on_reads_the_feed_of_the_change(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     assert module.late_on("o/r", 761, "t") == "2026-09-23"
+
+
+def test_the_late_queue_runs_after_every_ci_on_the_trunk() -> None:
+    """Очередь позднего взгляда идёт и после `ci` на общей ветке, а не только ночью (#89).
+
+    Слитое без взгляда ждало ночи, а ночная очередь берёт три за заход: за
+    день таких набралось пять.
+    """
+    import yaml
+
+    flow = yaml.safe_load((ROOT / ".github/workflows/review.yml").read_text(encoding="utf-8"))
+    condition = str(flow["jobs"]["late-queue"]["if"])
+    for event in ("schedule", "workflow_dispatch", "workflow_run"):
+        assert f"github.event_name == '{event}'" in condition, f"очередь не идёт по {event}"
+    assert "workflow_run" in (flow.get(True) or flow.get("on") or {}), "прогон не слушает ci"
