@@ -1414,13 +1414,24 @@ ANSWER_RUN: Final = "35984970999"
 
 
 def verdict(
-    when: str, count: int, *, late: bool = False, human: bool = False, run: str = LOOK_RUN
+    when: str,
+    count: int,
+    *,
+    late: bool = False,
+    human: bool = False,
+    run: str = LOOK_RUN,
+    created: str = "",
 ) -> dict[str, Any]:
-    """Комментарий взгляда с вердиктом — как его пишет бот (или цитирует человек)."""
+    """Комментарий взгляда с вердиктом — как его пишет бот (или цитирует человек).
+
+    `when` — когда вердикт вписан; `created` — когда комментарий создан:
+    действие создаёт его в начале захода, а вердикт вписывает в конце.
+    """
     marker = f"{module.unlooked.LATE_MARKER}\n" if late else ""
     head = f"**Claude finished** —— [View job](https://github.com/o/r/actions/runs/{run})\n"
     return {
-        "created_at": when,
+        "created_at": created or when,
+        "updated_at": when,
         "user": {"type": "User" if human else "Bot"},
         "body": f"{marker}{head}разбор\nВЕРДИКТ: находок {count}",
     }
@@ -1457,6 +1468,17 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
             ],
             True,
         ),
+        (
+            [
+                verdict("2026-09-24T10:06:00Z", 2, created="2026-09-24T09:59:00Z"),
+                verdict("2026-09-24T10:08:00Z", 2),
+            ],
+            True,
+        ),
+        (
+            [verdict("2026-09-24T10:06:00Z", 2, created="2026-09-24T09:59:00Z")],
+            True,
+        ),
     ],
     ids=[
         "первый с находками",
@@ -1469,6 +1491,8 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
         "цитата человека",
         "цитата ответчика",
         "цитата ответчика до головы",
+        "вердикт прежней головы вписан после подтяжки",
+        "прежняя голова после подтяжки, взгляд новой молчит",
     ],
 )
 def test_only_the_first_verdict_with_findings_holds(
@@ -1481,7 +1505,7 @@ def test_only_the_first_verdict_with_findings_holds(
     «держать, пока есть находки» стало бы вечным циклом. Вердикт по старой
     голове новую не держит (взгляд промолчал), поздний взгляд — не о голове.
     """
-    looks = frozenset({LOOK_RUN})
+    looks = {LOOK_RUN: ""}
     assert module.holds_for_findings(module.verdicts_on(comments, looks), HEAD_AT) is holds
 
 
@@ -1498,9 +1522,20 @@ def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.Monke
         "head-sha": [
             {"name": "review", "started_at": HEAD_AT, "details_url": job.format(LOOK_RUN)}
         ],
-        "old-sha": [{"name": "review", "details_url": job.format("111")}],
+        "old-sha": [
+            {
+                "name": "review",
+                "details_url": job.format("111"),
+                "completed_at": "2026-09-24T09:00:00Z",
+            }
+        ],
     }
-    said = [verdict("2026-09-24T09:00:00Z", 1, run="111"), verdict("2026-09-24T10:05:00Z", 1)]
+    # Вердикт прежней головы поправлен рукой после начала нового взгляда: его
+    # время — завершение прогона, а не правка (взгляд на #752).
+    said = [
+        verdict("2026-09-24T10:30:00Z", 1, run="111", created="2026-09-24T08:59:00Z"),
+        verdict("2026-09-24T10:05:00Z", 1),
+    ]
 
     events: list[dict[str, Any]] = []
 
@@ -1568,3 +1603,29 @@ def test_a_repair_of_a_red_branch_is_not_held_by_findings(platform: dict[str, An
     platform["holding"] = {9}
     module.advance("o/r", "token", "main", dry_run=False)
     assert platform["merged"] == [9]
+
+
+def test_a_verdict_is_timed_by_its_run_not_by_an_edit() -> None:
+    """Время вердикта — завершение его прогона: правка рукой его не сдвигает (#752).
+
+    Вердикт с находками по прежней голове держал её; человек поправил
+    разметку комментария после начала взгляда по новой голове. По времени
+    правки вердикт уехал бы «после головы», и голову держали бы второй раз.
+    """
+    old = verdict("2026-09-24T10:30:00Z", 2, run="111", created="2026-09-24T09:00:00Z")
+    new = verdict("2026-09-24T10:10:00Z", 3)
+    looks = {"111": "2026-09-24T09:05:00Z", LOOK_RUN: "2026-09-24T10:10:00Z"}
+    assert module.verdict_time(old, looks) == "2026-09-24T09:05:00Z"
+    assert module.holds_for_findings(module.verdicts_on([old, new], looks), HEAD_AT) is False
+
+
+def test_the_last_verdict_is_the_last_said_not_the_last_created() -> None:
+    """Последний вердикт — по времени вердикта, а не по порядку комментариев (#752).
+
+    Долгий заход, начатый раньше, говорит позже: его комментарий создан
+    первым, а вердикт — последним.
+    """
+    slow = verdict("2026-09-24T10:20:00Z", 0, created="2026-09-24T10:01:00Z")
+    fast = verdict("2026-09-24T10:10:00Z", 3, created="2026-09-24T10:02:00Z")
+    said = module.verdicts_on([slow, fast], {LOOK_RUN: ""})
+    assert module.holds_for_findings(said, HEAD_AT) is False
