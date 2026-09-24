@@ -17,8 +17,12 @@
 граница без другой читала бы всю историю молча. Отрезок повторяет ИЗМЕНЕНИЯ, но
 не числа: поздний взгляд дописывает находки в ленты уже закрытых изменений, и
 тот же отрезок завтра даст больше. Числа повторяет `--at`: в счёт идут только
-комментарии, написанные до этого момента (взгляд на #769). Отрезок без
-изменений — не нулевой замер, а отказ: пустое и измеренное неотличимы (045).
+комментарии, последняя правка которых сделана до этого момента (взгляд на #769).
+ГРАНИЦА ПОВТОРА НАЗВАНА: правка комментария рукой после `--at` уносит его из
+счёта целиком, и тот же `--at` после такой правки даст меньше. Отрезок без
+изменений и момент раньше всех комментариев — не нулевой замер, а отказ:
+пустое и измеренное неотличимы (045). Лента, прочитанная до момента, но без
+находок, — настоящий ноль.
 
 АРХИВ ДЛЯ ЭТОГО НЕ НУЖЕН. Находки уходят из реестра #23 после разбора, но
 остаются в лентах изменений — в комментариях взгляда. Замер читает их там тем
@@ -146,16 +150,27 @@ def moment(said: str) -> datetime:
     return parsed
 
 
+class Undated(RuntimeError):
+    """У комментария нет метки времени — отсекать по моменту нечем."""
+
+
 def said_at(comment: dict[str, Any]) -> datetime:
     """Когда находки комментария СКАЗАНЫ: время последней правки, а не создания.
 
     Действие взгляда создаёт комментарий со спиннером и дописывает находки
     правкой в конце захода: по времени создания заход, начатый до `--at`,
     приносил находки, записанные после (взгляд на #781). Граница названа:
-    правка рукой после `--at` уносит комментарий из счёта целиком.
+    правка рукой после `--at` уносит комментарий из счёта целиком, и тот же
+    `--at` после такой правки даст меньше. Меток нет вовсе — отказ с
+    причиной, а не падение разбора.
     """
     raw = str(comment.get("updated_at") or comment.get("created_at") or "")
-    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if not raw:
+        raise Undated("у комментария нет метки времени — отсекать по моменту нечем")
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise Undated(f"метка времени комментария не разбирается: {raw}") from exc
 
 
 def read_counted(
@@ -165,7 +180,7 @@ def read_counted(
     first: int = 0,
     final: int = 0,
     at: datetime | None = None,
-) -> tuple[list[tuple[int, str]], int]:
+) -> tuple[list[tuple[int, str]], int, int]:
     """Находки взгляда из лент закрытых изменений и число прочитанных изменений.
 
     Отрезок `first..final` (номера включительно) выбирает изменения; без него
@@ -177,6 +192,7 @@ def read_counted(
     said: list[tuple[int, str]] = []
     pulls = ghrest.paginate(f"repos/{repo}/pulls?state=closed&sort=created&direction=desc", token)
     taken = 0
+    kept = 0
     for pull in pulls:
         number = int(pull["number"])
         if first or final:
@@ -192,8 +208,13 @@ def read_counted(
             for one in ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token)
             if at is None or said_at(one) <= at
         ]
+        # В счёт «прочитано до момента» идут только ОТВЕТЫ ВЗГЛЯДА — комментарии
+        # с вердиктом. Реплика человека или конвейера до `--at` засчитала бы
+        # ленту, где взгляд сказал позже, и пустое отсечение снова выдавалось бы
+        # за ноль (взгляд на #787, соседний случай 195).
+        kept += sum(1 for one in comments if review_findings.verdict_of([one]) is not None)
         said += [(number, found[1]) for found in review_findings.findings_of(comments)]
-    return said, taken
+    return said, taken, kept
 
 
 def report(measured: Chains) -> list[str]:
@@ -240,9 +261,12 @@ def main(argv: list[str] | None = None) -> int:
         print("замер не снят: нет токена или репозитория (045)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        said, seen = read_counted(args.repo, token, args.last, args.first, args.final, cut)
+        said, seen, kept = read_counted(args.repo, token, args.last, args.first, args.final, cut)
     except ghrest.TransportError as exc:
         print(f"замер не снят: площадка не ответила — {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    except Undated as exc:
+        print(f"замер не снят: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if not seen:
         print("замер не снят: в отрезке нет ни одного закрытого изменения (045)", file=sys.stderr)
@@ -250,8 +274,13 @@ def main(argv: list[str] | None = None) -> int:
     # МОМЕНТ РАНЬШЕ ВСЕХ ЛЕНТ — ТОТ ЖЕ ПУСТОЙ ЗАМЕР. Отрезок не пуст, но всё в
     # нём сказано позже `--at`, и ноль находок выдавался бы за замер (взгляд
     # на #781, соседний случай пустого отрезка, 195).
-    if cut is not None and not said:
-        print("замер не снят: ни одной находки не сказано до момента --at (045)", file=sys.stderr)
+    # Отказ — по нулю ПРОЧИТАННЫХ до момента комментариев, а не по нулю
+    # находок: отрезок, где взгляд честно ничего не нашёл, — настоящий ноль, и
+    # с `--at` он обязан отвечать так же, как без него (взгляд на #781).
+    if cut is not None and not kept:
+        print(
+            "замер не снят: ни одного комментария не сказано до момента --at (045)", file=sys.stderr
+        )
         return EXIT_BROKEN
     print("\n".join(report(chains(said))))
     return EXIT_OK
