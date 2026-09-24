@@ -18,7 +18,7 @@ from __future__ import annotations
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -232,3 +232,64 @@ def test_a_full_clone_is_still_read_as_full(monkeypatch: pytest.MonkeyPatch) -> 
         lambda *_a, **_k: module.subprocess.CompletedProcess([], 0, "false\n", ""),
     )
     assert module.shallow() is False
+
+
+#: Проверка, чья докстрока называет приёмку пункта свойством (#648).
+GATE_TEST: Final = '''
+def test_a_row_without_an_address_refuses_the_build() -> None:
+    """Строка плана без адреса — отказ сборки, а не строка."""
+'''
+#: Пункт, сформулированный свойством: пути и имени теста в нём нет.
+PROPERTY_ITEM: Final = "Строка плана без адреса — отказ сборки, а не молчаливая строка"
+
+
+def test_a_test_born_after_the_task_names_a_property_item(tmp_path: Path) -> None:
+    """Проверка, родившаяся после постановки и называющая приёмку, — находка по свойству.
+
+    Пункт без пути первым признаком не ловится вовсе, а таких большинство:
+    147 из 166 закрытых пунктов за историю (#648).
+    """
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
+    pool = module.subjects(root)
+    assert [one.name for one in pool] == [
+        "test_plan.py::test_a_row_without_an_address_refuses_the_build"
+    ]
+    said = module.subject_evidence(PROPERTY_ITEM, DAY_ONE, pool)
+    assert len(said) == 1 and "по свойству" in said[0], said
+
+
+def test_a_property_signal_stays_silent_where_it_cannot_tell(tmp_path: Path) -> None:
+    """Вторая половина: проверка старше задачи, чужой предмет и короткий пункт — молчание.
+
+    Проверка, существовавшая на день постановки, не доказывает ничего — как и
+    файл у первого признака; чужой предмет ниже порога сходства; пункт из
+    двух слов совпал бы с любой проверкой.
+    """
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_ONE, GATE_TEST)
+    pool = module.subjects(root)
+    assert module.subject_evidence(PROPERTY_ITEM, DAY_TEN, pool) == []
+    assert (
+        module.subject_evidence(
+            "Шаблон обращения трёх видов для соседей", DAY_ONE - timedelta(1), pool
+        )
+        == []
+    )
+    assert module.subject_evidence("отказ сборки", DAY_ONE - timedelta(1), pool) == []
+
+
+def test_the_birth_of_tests_is_read_once_from_history(tmp_path: Path) -> None:
+    """Дата рождения проверки — из истории одним обходом; стоп-слова основ не дают."""
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
+    born = module.tests_born(root)
+    assert born == {"test_a_row_without_an_address_refuses_the_build": DAY_TEN}
+    assert module.stems("проверка строки плана") == frozenset({"строки"[:6], "плана"})
+
+
+def test_the_path_signal_speaks_first(tmp_path: Path) -> None:
+    """Сработал признак по пути — признак по свойству молчит: один долг, одно имя (022)."""
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
+    body = f"- [ ] {PROPERTY_ITEM}, держит tests/test_plan.py\n"
+    built, _ = module.look(
+        [issue(7, body, DAY_ONE, DAY_TEN)], items.open_items, now=DAY_TEN, root=root
+    )
+    assert [one.evidence for one in built] == [["tests/test_plan.py"]]
