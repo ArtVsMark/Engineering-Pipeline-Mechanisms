@@ -67,6 +67,8 @@ concurrency:
 
 permissions:
   contents: read
+  # Взгляд ждёт вердикта сводного гейта на голове (#762) — его запись читается.
+  checks: read
   pull-requests: write
   # Живая задача-адресат находок заводится и обновляется этим прогоном.
   issues: write
@@ -77,8 +79,9 @@ jobs:
     name: review
     runs-on: ubuntu-24.04
     # Без предела зависший агент держал бы слот до умолчания площадки — шесть
-    # часов молчания вместо отказа.
-    timeout-minutes: 20
+    # часов молчания вместо отказа. Предел вмещает и ожидание зелёной головы
+    # (#762): до 25 минут на гейт и прежние 20 на сам взгляд.
+    timeout-minutes: 45
     # Форк пропускается ЯВНО: иначе шаг агента ломался бы молча, а красное без
     # причины читается как поломка изменения. Пустое состояние объявляется
     # (правило 027).
@@ -128,8 +131,27 @@ jobs:
         if: steps.token.outputs.present == 'yes'
         with:
           python-version: "3.12"
-      - name: поставить проверки ревьюеру
+      # ВЗГЛЯД — ПОСЛЕДНИМ (#762, решение владельца 24.09.2026). Запись `review`
+      # появляется на голове толчком, как прежде, — очередь ждёт её с первой
+      # секунды (#654). Но сам взгляд идёт, только когда сводный гейт
+      # обязательных проверок зелёный: на красной голове изменение не сольётся,
+      # а после починки следующий толчок позовёт взгляд заново. Вердикта не
+      # дождались — взгляд идёт, как до #762: молчание гейта его не отменяет.
+      - name: дождаться зелёной головы — взгляд последним
+        id: gate
         if: steps.token.outputs.present == 'yes'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          python -m pip install --quiet ./packages/transport
+          python scripts/look_waits.py --sha "${{ github.event.pull_request.head.sha }}" \
+            || echo "run=yes" >> "$GITHUB_OUTPUT"
+
+      - name: поставить проверки ревьюеру
+        if: steps.gate.outputs.run == 'yes'
         # Те же границы версий, что и в гейтах изменения: ревьюер обязан
         # видеть ровно то, что видит прогон.
         run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7" ./packages/transport
@@ -149,7 +171,7 @@ jobs:
       # которому некуда смотреть (085).
       - name: собрать карту для взгляда
         id: map
-        if: steps.token.outputs.present == 'yes'
+        if: steps.gate.outputs.run == 'yes'
         continue-on-error: true
         env:
           BASE: ${{ github.event.pull_request.base.ref || 'main' }}
@@ -186,7 +208,10 @@ jobs:
 
       - name: внешний взгляд
         id: look
-        if: steps.token.outputs.present == 'yes'
+        if: steps.gate.outputs.run == 'yes'
+        # Срок захода агента — свой, а не задания: задание держит ещё и
+        # ожидание зелёной головы (#762). Это число названо в задании агенту.
+        timeout-minutes: 20
         continue-on-error: true
         uses: anthropics/claude-code-action@46a42b43239748e5b25771606bf1f551c3b1b517 # v1.0.232
         with:

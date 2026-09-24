@@ -1201,7 +1201,10 @@ def test_the_task_carries_its_numbers(path: Path) -> None:
                 f"{path.name}, «{name}»: предел размера ответа в задании не назван — "
                 f"канон `findings.SAID_LIMIT` = {FINDING_LIMIT}"
             )
-            deadline = body.get("timeout-minutes")
+            # Предел ШАГА агента, если он задан, точнее предела задания: задание
+            # взгляда держит ещё и ожидание зелёной головы (#762), а заход
+            # агента получает свой срок.
+            deadline = step.get("timeout-minutes") or body.get("timeout-minutes")
             assert deadline, f"{path.name}, джоб «{job}»: у шага агента нет срока — назвать нечего"
             assert str(deadline) in task, (
                 f"{path.name}, «{name}»: срок захода в задании не назван либо разошёлся с "
