@@ -105,6 +105,8 @@ SKILLS: Final = Path(".claude/skills")
 ENTRANCE: Final = Path("README.md")
 #: Согласованные имена атрибуции.
 AUTHORS: Final = Path(".github/authors.txt")
+#: Карта ролей: профили, глазами которых смотрит взгляд (#763).
+ROLES: Final = Path("docs/roles.md")
 
 #: Всё, что объявлено здесь. Список разрешительный (068): путь, которого в нём
 #: нет, механизм строить не должен. Полноту держит
@@ -149,4 +151,5 @@ ALL: Final = (
     TRANSPORT,
     ENTRANCE,
     AUTHORS,
+    ROLES,
 )

@@ -16,6 +16,8 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 from typing import Final
 
 import ghrest
@@ -108,6 +110,7 @@ UNWEIGHED: Final = "без веса"
 ENTRY_RE: Final = re.compile(
     r"^- `(?P<mark>[0-9a-f]{7})` · #(?P<pr>\d+) · (?P<weight>[^·—]+?)"
     r"(?: · (?P<kind>об ответе))?"
+    r"(?: · глазами (?P<role>[^·—]+?))?"
     r"(?: · (?P<checked>премиса[^—]*?))? — (?P<title>.+?)\s*$",
     re.M,
 )
@@ -157,12 +160,15 @@ class Entry:
     title: str
     checked: str = ""
     kind: str = CODE
+    #: Роль, глазами которой находка увидена (#763); пусто — не названа.
+    role: str = ""
 
     def said(self) -> str:
         """Строка записи. Хвост появляется, только если проверка была."""
         род = f" · {KIND_SAID}" if self.kind == ANSWER_KIND else ""
+        глазами = f" · {ROLE_SAID} {self.role}" if self.role else ""
         tail = f" · {self.checked}" if self.checked else ""
-        return f"· #{self.pr} · {self.weight}{род}{tail} — {self.title}"
+        return f"· #{self.pr} · {self.weight}{род}{глазами}{tail} — {self.title}"
 
 
 #: Задача-«входящие» каталога правил: её ведёт ночной прогон действия каталога,
@@ -263,6 +269,34 @@ def kind_of(title: str, said: str = "") -> str:
     return ANSWER_KIND if ANSWER_FILE in title else CODE
 
 
+#: Как роль пишется в строке записи: «глазами <роль>».
+ROLE_SAID: Final = "глазами"
+#: Заголовок профиля роли в карте ролей: `### <знак> <Имя>`.
+ROLE_RE: Final = re.compile(r"^### \S+ (?P<name>\S.*?)\s*$", re.M)
+#: Раздел карты, где лежат профили.
+PROFILES_HEAD: Final = "## Профили"
+
+
+@cache
+def roles(path: Path = paths.ROLES) -> frozenset[str]:
+    """Роли, глазами которых смотрит взгляд, — из профилей карты ролей (#763).
+
+    СПИСОК НЕ ПИШЕТСЯ ВТОРОЙ РАЗ. Состав ролей живёт в `docs/roles.md`, и
+    подсказка взгляда отсылает туда же: второй список разошёлся бы с картой
+    молча (022). Карты нет — ролей нет, и пометка в скобке находки просто не
+    узнаётся: запись ляжет без роли, а не упадёт.
+    """
+    if not path.is_file():
+        return frozenset()
+    text = path.read_text(encoding="utf-8")
+    start = text.find(PROFILES_HEAD)
+    if start < 0:
+        return frozenset()
+    end = text.find("\n## ", start + len(PROFILES_HEAD))
+    part = text[start : end if end > 0 else len(text)]
+    return frozenset(" ".join(found.split()).lower() for found in ROLE_RE.findall(part))
+
+
 def parse_entries(body: str | None) -> dict[str, Entry]:
     """Разбирает записи живой задачи: отпечаток → запись."""
     return {
@@ -272,6 +306,7 @@ def parse_entries(body: str | None) -> dict[str, Entry]:
             match.group("title"),
             (match.group("checked") or "").strip(),
             kind_of(match.group("title"), match.group("kind") or ""),
+            (match.group("role") or "").strip(),
         )
         for match in ENTRY_RE.finditer(body or "")
     }

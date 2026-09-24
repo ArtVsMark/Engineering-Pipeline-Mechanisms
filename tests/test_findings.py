@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tests.conftest import load_script
@@ -114,3 +116,27 @@ def test_a_plain_body_is_not_kept_by_a_mechanism() -> None:
     """Обычная задача машинной не считается: признак — метка, а не догадка."""
     assert not module.is_kept_by_a_mechanism("задача человека с прозой\n- раз\n- два")
     assert not module.is_kept_by_a_mechanism("")
+
+
+def test_the_role_survives_a_round_trip_through_the_entry_line() -> None:
+    """Строка записи несёт роль `· глазами <роль>` и разбирается обратно (#763)."""
+    entry = module.Entry(7, "риск", "предмет находки", role="архитектор")
+    line = entry.said()
+    assert f"· {module.ROLE_SAID} архитектор" in line
+    back = module.parse_entries(f"- `abc1234` {line}")
+    assert [one.role for one in back.values()] == ["архитектор"]
+    bare = module.Entry(7, "риск", "без роли").said()
+    plain = module.parse_entries(f"- `abc1234` {bare}")
+    assert [one.role for one in plain.values()] == [""]
+
+
+def test_roles_are_read_from_the_profiles_of_the_role_map(tmp_path: Path) -> None:
+    """Роли — заголовки профилей карты, и только из раздела «Профили»."""
+    card = tmp_path / "roles.md"
+    card.write_text(
+        "# Карта\n\n### 🧭 Не профиль\n\n## Профили\n\n### 🏛 Архитектор\n\n"
+        "### 🧪 Тестировщик\n\n## Стыки\n\n### 🔌 Тоже не профиль\n",
+        encoding="utf-8",
+    )
+    assert module.roles(card) == frozenset({"архитектор", "тестировщик"})
+    assert module.roles(tmp_path / "нет.md") == frozenset()
