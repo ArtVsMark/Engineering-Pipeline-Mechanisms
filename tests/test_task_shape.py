@@ -9,7 +9,7 @@ from __future__ import annotations
 import ast
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -281,20 +281,60 @@ def zone_literal(value: object, prefix: str) -> bool:
     return isinstance(value, str) and (value == prefix.rstrip("/") or value.startswith(prefix))
 
 
+#: Владелец упоминания, стоящего в самом определении константы: `=<имя>`.
+DEFINES: Final = "="
+
+
+def zone_owner(top: ast.stmt, names: set[str], prefix: str) -> str:
+    """Чьё упоминание: имя функции или класса, `=<имя>` у определения, `""` — модуль.
+
+    Определение — это ровно присваивание литерала приставки имени-носителю;
+    всё прочее на уровне модуля (`is_zone = lambda n: …`) — уровень модуля, и
+    прощать его значило бы прощать копию (`d459e0f`).
+    """
+    if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return top.name
+    target: ast.expr | None = top.target if isinstance(top, ast.AnnAssign) else None
+    if isinstance(top, ast.Assign) and len(top.targets) == 1:
+        target = top.targets[0]
+    value = getattr(top, "value", None)
+    if (
+        isinstance(target, ast.Name)
+        and target.id in names
+        and isinstance(value, ast.Constant)
+        and value.value == prefix
+    ):
+        return DEFINES + target.id
+    return ""
+
+
 def zone_mentions(path: Path) -> list[tuple[str, int]]:
-    """Упоминания приставки зоны в модуле: функция, где стоит, и строка."""
+    """Упоминания приставки зоны в модуле: чьё оно и на какой строке.
+
+    Носитель узнаётся и под другим именем: `from labels import ZONE_PREFIX as Z`
+    добавляет `Z` к носителям этого модуля, а сам импорт — тоже упоминание
+    (`f820159`).
+    """
     names, prefix = zone_carriers()
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    here = set(names) | {
+        one.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for one in node.names
+        if one.name in names and one.asname
+    }
     found: list[tuple[str, int]] = []
     for top in tree.body:
-        owner = top.name if isinstance(top, (ast.FunctionDef, ast.ClassDef)) else ""
+        owner = zone_owner(top, names, prefix)
         for node in ast.walk(top):
             named = getattr(node, "id", None) or (
                 node.attr if isinstance(node, ast.Attribute) else None
             )
+            imported = isinstance(node, ast.alias) and node.name in names
             literal = isinstance(node, ast.Constant) and zone_literal(node.value, prefix)
-            if named in names or literal:
-                found.append((owner, getattr(node, "lineno", 0)))
+            if named in here or imported or literal:
+                found.append((owner, getattr(node, "lineno", 0) or top.lineno))
     return found
 
 
@@ -309,19 +349,26 @@ def test_no_reader_keeps_its_own_zone_predicate() -> None:
     назвать ничем. Замер 23.09.2026 по дереву: константа упомянута дважды —
     определение и `zone_named`, литерал — один раз, в определении.
 
+    Прощается ровно определение — присваивание литерала имени-носителю, — а
+    не весь уровень модуля `labels.py`: модульная `lambda` или `async def` с
+    приставкой — такая же копия (`d459e0f`). Носитель под другим именем
+    (`from labels import ZONE_PREFIX as Z`) узнаётся по импорту (`f820159`).
+
     ГРАНИЦА: приставку, собранную из частей (`"ar" + "ea/"`), гейт не видит —
     такую запись пишут, чтобы обойти, и её ловит взгляд, а не машина (057).
     """
     names, _ = zone_carriers()
     assert names, "константы приставки зоны у labels нет — предмет гейта исчез (075)"
+    allowed = {DEFINES + name for name in names} | {"zone_named"}
     outside = [
         f"{path.name}:{line}"
         for path in walk(ROOT / "scripts", "*.py")
         for owner, line in zone_mentions(path)
-        if path.name != "labels.py" or owner not in ("", "zone_named")
+        if path.name != "labels.py" or owner not in allowed
     ]
     assert not outside, "приставка зоны названа вне labels.zone_named: " + ", ".join(outside)
-    # ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: гейт обязан узнать и саму функцию — иначе он
-    # зелен и тогда, когда не видит ничего (`e2f6d9c`, 075).
-    own = [owner for owner, _ in zone_mentions(ROOT / "scripts" / "labels.py") if owner]
-    assert own == ["zone_named"], own
+    # ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: гейт обязан узнать и определение, и саму
+    # функцию — иначе он зелен и тогда, когда не видит ничего (`e2f6d9c`, 075).
+    own = [owner for owner, _ in zone_mentions(ROOT / "scripts" / "labels.py")]
+    assert any(owner.startswith(DEFINES) for owner in own), own
+    assert [owner for owner in own if not owner.startswith(DEFINES)] == ["zone_named"], own
