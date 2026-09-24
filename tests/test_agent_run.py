@@ -88,6 +88,18 @@ def test_an_unreadable_file_is_the_second_outcome(tmp_path: Path, raw: str | Non
     assert module.main(["--from", str(path)]) == module.EXIT_BROKEN
 
 
+def test_an_action_without_a_file_is_named_a_refusal(capsys: pytest.CaptureFixture[str]) -> None:
+    """Пустой `--from` — действие упало раньше агента: отказ назван, исход 0 (`2e92154`).
+
+    Шаг зовётся так только после провала вызова (условие «файл или провал»):
+    успех без файла — законный пропуск, и тогда шаг не зовут. Названный
+    несуществующий файл — другое дело: это поломка шага, исход 2.
+    """
+    assert module.main(["--from", "", "--call", "взгляд"]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert said.startswith(f"::error::взгляд: {module.REFUSED} — действие не отдало файла"), said
+
+
 def test_the_file_form_is_read_once_for_every_reader() -> None:
     """Список сообщений разбирает `messages_of`, и не-словари в нём отбрасываются.
 

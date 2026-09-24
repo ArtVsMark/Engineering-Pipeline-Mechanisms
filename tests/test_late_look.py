@@ -66,6 +66,18 @@ def test_no_answer_is_a_state_not_an_empty_comment(raw: str, why: str) -> None:
     assert why
 
 
+def test_a_refused_run_is_not_an_answer() -> None:
+    """Итог с `is_error` — отказ, а не ответ: текст отказа в изменение не едет (`dde5c62`).
+
+    Судит тот же `agent_run.failure_of`, что печатает отказ аннотацией:
+    прежде здесь итог отказа принимался за ответ, и перенос ответа
+    верификатора понёс бы «model not found» в изменение как вердикт.
+    """
+    with pytest.raises(module.NotRun, match="заход отказал — model not found"):
+        module.answer_of(run("model not found", is_error=True))
+    assert module.answer_of(run(ANSWER, is_error=False)) == ANSWER
+
+
 def test_the_comment_calls_itself_late() -> None:
     """Комментарий несёт отметку позднего взгляда — по ней его узнаёт реестр.
 

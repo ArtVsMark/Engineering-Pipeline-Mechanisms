@@ -489,6 +489,7 @@ def kinds_file(tmp_path: Any, kinds: dict[str, Any]) -> Any:
     """Словарь родов находок в той форме, в какой его ведёт дерево."""
     path = tmp_path / "finding-kinds.json"
     path.write_text(json.dumps({"kinds": kinds}, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "proposals.json").write_text('{"proposals": []}', encoding="utf-8")
     return path
 
 
@@ -535,6 +536,25 @@ def test_no_kinds_file_is_named_silence_not_emptiness(tmp_path: Any) -> None:
     """
     said = module.birth_part(tmp_path / "нет.json")
     assert said.rows == [] and "роды находок не прочитаны" in said.unread
+
+
+def test_no_queue_is_named_silence_not_unanswered_kinds(tmp_path: Any) -> None:
+    """Очереди нет — молчание, а не «без ответа» у каждого «предложено» (`dd1da87`)."""
+    path = kinds_file(
+        tmp_path,
+        {"род": {"встречен": ["a", "b", "c"], "каталогу": "предложено — sent"}},
+    )
+    (tmp_path / "proposals.json").unlink()
+    said = module.birth_part(path)
+    assert said.rows == [] and "очередь предложений не прочитана" in said.unread
+
+
+def test_kinds_of_a_foreign_shape_are_named_silence(tmp_path: Any) -> None:
+    """Раздел kinds строкой — молчание раздела, а не трасса сборщика (`19fe125`)."""
+    path = tmp_path / "finding-kinds.json"
+    path.write_text('{"kinds": "x"}', encoding="utf-8")
+    said = module.birth_part(path)
+    assert said.rows == [] and "раздел kinds не словарь" in said.unread
 
 
 def test_an_unsent_proposal_keeps_the_kind_in_the_plan(tmp_path: Any) -> None:
