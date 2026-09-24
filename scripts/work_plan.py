@@ -424,7 +424,9 @@ def may_be_born(issue: dict[str, Any], repo: str, taken: frozenset[int] | set[in
     text = str(issue.get("body") or "")
     if not number or "pull_request" in issue or number in taken:
         return False
-    if str(issue.get("state") or "open") != "open":
+    # Состояние — ТОЛЬКО явное: ответ без поля не делает задачу открытой
+    # молча (взгляд на #756).
+    if issue.get("state") != "open":
         return False
     if MARKER in text or findings.is_kept_by_a_mechanism(text):
         return False
