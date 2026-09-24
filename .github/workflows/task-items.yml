@@ -301,13 +301,16 @@ jobs:
       # Файл захода действие отдаёт и при отказе агента: модель — в
       # `system/init`, текст отказа — в итоге. Упавшее раньше агента файла не
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
+      # Снятое задание (`cancelled`: тайм-аут задания, замена новым прогоном)
+      # — не отказ: шаг получает исход и называет снятие (`6af0b2a`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (разбор пунктов)
         if: always() && (steps.review.outputs.execution_file != '' || steps.review.outcome == 'failure' || steps.review.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.review.outputs.execution_file }}
-        run: python scripts/agent_run.py --from "$SAID" --call "разбор пунктов"
+          OUTCOME: ${{ steps.review.outcome }}
+        run: python scripts/agent_run.py --from "$SAID" --call "разбор пунктов" --outcome "$OUTCOME"
 
       # Ответ прогона живёт в файле и умирает вместе с прогоном. Механизм
       # разбирает его, кладёт разбор в задачу и отмечает пункты — но только

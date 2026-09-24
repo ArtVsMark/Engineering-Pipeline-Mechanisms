@@ -341,13 +341,16 @@ jobs:
       # Файл захода действие отдаёт и при отказе агента: модель — в
       # `system/init`, текст отказа — в итоге. Упавшее раньше агента файла не
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
+      # Снятое задание (`cancelled`: тайм-аут задания, замена новым прогоном)
+      # — не отказ: шаг получает исход и называет снятие (`6af0b2a`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (взгляд)
         if: always() && (steps.look.outputs.execution_file != '' || steps.look.outcome == 'failure' || steps.look.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.look.outputs.execution_file }}
-        run: python scripts/agent_run.py --from "$SAID" --call "взгляд"
+          OUTCOME: ${{ steps.look.outcome }}
+        run: python scripts/agent_run.py --from "$SAID" --call "взгляд" --outcome "$OUTCOME"
 
   # ЗАПИСЬ В ЖИВУЮ ЗАДАЧУ — ОБЩИЙ РЕСУРС, И У НЕГО ОДИН ВЛАДЕЛЕЦ (149).
   #
@@ -610,13 +613,16 @@ jobs:
       # Файл захода действие отдаёт и при отказе агента: модель — в
       # `system/init`, текст отказа — в итоге. Упавшее раньше агента файла не
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
+      # Снятое задание (`cancelled`: тайм-аут задания, замена новым прогоном)
+      # — не отказ: шаг получает исход и называет снятие (`6af0b2a`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (верификатор)
         if: always() && (steps.refute.outputs.execution_file != '' || steps.refute.outcome == 'failure' || steps.refute.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.refute.outputs.execution_file }}
-        run: python scripts/agent_run.py --from "$SAID" --call "верификатор"
+          OUTCOME: ${{ steps.refute.outcome }}
+        run: python scripts/agent_run.py --from "$SAID" --call "верификатор" --outcome "$OUTCOME"
 
       - name: перенести ответ в изменение и в реестр
         if: steps.token.outputs.present == 'yes'
@@ -928,13 +934,16 @@ jobs:
       # Файл захода действие отдаёт и при отказе агента: модель — в
       # `system/init`, текст отказа — в итоге. Упавшее раньше агента файла не
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
+      # Снятое задание (`cancelled`: тайм-аут задания, замена новым прогоном)
+      # — не отказ: шаг получает исход и называет снятие (`6af0b2a`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (поздний взгляд)
         if: always() && (steps.late.outputs.execution_file != '' || steps.late.outcome == 'failure' || steps.late.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.late.outputs.execution_file }}
-        run: python scripts/agent_run.py --from "$SAID" --call "поздний взгляд"
+          OUTCOME: ${{ steps.late.outcome }}
+        run: python scripts/agent_run.py --from "$SAID" --call "поздний взгляд" --outcome "$OUTCOME"
 
       # Ответ прогона живёт в файле и умирает вместе с прогоном. Механизм
       # переносит его в само изменение — туда же, куда кладёт ответ обычное
