@@ -38,8 +38,8 @@ RUNNING = [{"status": "in_progress", "conclusion": None}]
         (
             [
                 [
-                    {**DONE_GREEN[0], "completed_at": "2026-09-24T10:00:00Z"},
-                    {**DONE_RED[0], "completed_at": "2026-09-24T11:00:00Z"},
+                    {**DONE_GREEN[0], "started_at": "2026-09-24T10:00:00Z"},
+                    {**DONE_RED[0], "started_at": "2026-09-24T11:00:00Z"},
                 ]
             ],
             module.RED,
@@ -65,8 +65,8 @@ def test_the_gate_verdict_waits_while_any_record_runs(monkeypatch: pytest.Monkey
 
 
 def record(conclusion: str, at: str) -> dict[str, Any]:
-    """Завершённая запись гейта с исходом и временем завершения."""
-    return {"status": "completed", "conclusion": conclusion, "completed_at": at}
+    """Завершённая запись гейта с исходом; время захода — начало и конец."""
+    return {"status": "completed", "conclusion": conclusion, "started_at": at, "completed_at": at}
 
 
 @pytest.mark.parametrize(
@@ -171,3 +171,37 @@ def test_the_look_step_waits_for_the_gate() -> None:
     assert job.index("scripts/look_waits.py") < job.index("- name: внешний взгляд")
     look = job[job.index("- name: внешний взгляд") :]
     assert look.split("\n")[2].strip() == "if: steps.gate.outputs.run == 'yes'"
+
+
+def test_a_zombie_record_is_not_a_running_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Запись `in_progress` с уже проставленным исходом — завершённая (замер #73).
+
+    Её держит тот же разбор, что у очереди (`ci_complete.pending`): своя копия
+    ждала бы её до срока и пускала взгляд на красную голову (взгляд на #775).
+    """
+    # Как в замере #73: зомби несёт исход `success`, и он свежее красной записи.
+    zombie = {
+        "status": "in_progress",
+        "conclusion": "success",
+        "started_at": "2026-09-24T12:00:00Z",
+    }
+    red = record("failure", "2026-09-24T11:00:00Z")
+    monkeypatch.setattr(module.ghrest, "paginate", gate([zombie, red]))
+    assert module.gate_verdict("o/r", "abc", "t") == module.GREEN, "зомби принят за идущую запись"
+
+
+def test_the_gate_reads_records_as_the_queue_does(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Перекрытые заходы: вердикт тот же, что у очереди — `ci_complete.worst_per_name`."""
+    early_red = {
+        **record("failure", "2026-09-24T10:00:00Z"),
+        "completed_at": "2026-09-24T12:00:00Z",
+    }
+    late_green = {
+        **record("success", "2026-09-24T11:00:00Z"),
+        "completed_at": "2026-09-24T11:30:00Z",
+    }
+    monkeypatch.setattr(module.ghrest, "paginate", gate([early_red, late_green]))
+    said = module.gate_verdict("o/r", "abc", "t")
+    queue = module.ci_complete.worst_per_name([early_red, late_green])[0]
+    assert said == (module.GREEN if queue["conclusion"] == "success" else module.RED)
+    assert said == module.GREEN, "свежесть взята по концу захода, а не по началу, как у очереди"

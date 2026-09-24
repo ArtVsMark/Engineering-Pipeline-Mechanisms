@@ -33,6 +33,7 @@ import sys
 import time
 from typing import Final
 
+import ci_complete
 import ghrest
 
 EXIT_OK: Final = 0
@@ -52,10 +53,6 @@ SILENT: Final = "silent"
 SKIPPED: Final = "взгляд пропущен: голова красная"
 
 
-#: Исходы записи, которые вердиктом не являются: заход сменён или не шёл.
-NOT_A_VERDICT: Final = frozenset({"cancelled", "skipped"})
-
-
 def gate_verdict(repo: str, sha: str, token: str) -> str | None:
     """Вердикт сводного гейта на голове; ``None`` — вердикта ещё нет.
 
@@ -66,10 +63,13 @@ def gate_verdict(repo: str, sha: str, token: str) -> str | None:
     починки взгляд не прошёл ни на одном изменении, записей `ci-complete` на
     голове #773 было четыре, из них две отменены.
 
-    Пока идёт хоть одна запись — вердикта нет: идущий заход скажет позже и
-    новее. Решает ПОСЛЕДНЯЯ завершённая по времени завершения, а не «все
-    зелёные»: прежний красный заход, после которого перезапуск позеленел,
-    вердиктом головы уже не является.
+    ЗАПИСЬ ЧИТАЕТСЯ ТЕМ ЖЕ РАЗБОРОМ, ЧТО У ОЧЕРЕДИ, а не своим (022, 090):
+    `ci_complete.worst_per_name` выбирает одну запись на имя — живая выше
+    безвердиктной, свежесть по началу захода, тяжесть третьим ключом, —
+    `ci_complete.pending` отличает идущую от зомби `in_progress` с уже
+    проставленным исходом (замер #73), `ci_complete.has_verdict` — отмену и
+    пропуск от вердикта. Своя копия этих правил расходилась с очередью: взгляд
+    видел бы голову красной там, где очередь видит её зелёной (взгляд на #775).
     """
     runs = list(
         ghrest.paginate(
@@ -78,13 +78,13 @@ def gate_verdict(repo: str, sha: str, token: str) -> str | None:
             key="check_runs",
         )
     )
-    if any(run.get("status") != "completed" for run in runs):
+    chosen = ci_complete.worst_per_name([run for run in runs if run.get("name", GATE) == GATE])
+    if not chosen:
         return None
-    said = [run for run in runs if run.get("conclusion") not in NOT_A_VERDICT]
-    if not said:
+    one = chosen[0]
+    if ci_complete.pending(one) or not ci_complete.has_verdict(one):
         return None
-    last = max(said, key=lambda run: str(run.get("completed_at") or ""))
-    return GREEN if last.get("conclusion") == "success" else RED
+    return GREEN if one.get("conclusion") == "success" else RED
 
 
 def wait(repo: str, sha: str, token: str, timeout: float, interval: float) -> str:
