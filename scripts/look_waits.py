@@ -52,8 +52,25 @@ SILENT: Final = "silent"
 SKIPPED: Final = "взгляд пропущен: голова красная"
 
 
+#: Исходы записи, которые вердиктом не являются: заход сменён или не шёл.
+NOT_A_VERDICT: Final = frozenset({"cancelled", "skipped"})
+
+
 def gate_verdict(repo: str, sha: str, token: str) -> str | None:
-    """Вердикт сводного гейта на голове; ``None`` — ещё не завершён или записи нет."""
+    """Вердикт сводного гейта на голове; ``None`` — вердикта ещё нет.
+
+    ОТМЕНЁННАЯ ЗАПИСЬ — НЕ КРАСНАЯ. Гейт на одной голове заходит несколько раз,
+    и новый заход отменяет прежний: на голове лежат записи `cancelled` рядом с
+    настоящим вердиктом. Прежде завершённой считалась и отменённая, и взгляд
+    пропускался как на красной голове — замер 24.09.2026: с #765 до этой
+    починки взгляд не прошёл ни на одном изменении, записей `ci-complete` на
+    голове #773 было четыре, из них две отменены.
+
+    Пока идёт хоть одна запись — вердикта нет: идущий заход скажет позже и
+    новее. Решает ПОСЛЕДНЯЯ завершённая по времени завершения, а не «все
+    зелёные»: прежний красный заход, после которого перезапуск позеленел,
+    вердиктом головы уже не является.
+    """
     runs = list(
         ghrest.paginate(
             f"repos/{repo}/commits/{sha}/check-runs?check_name={GATE}&filter=latest",
@@ -61,10 +78,13 @@ def gate_verdict(repo: str, sha: str, token: str) -> str | None:
             key="check_runs",
         )
     )
-    done = [run for run in runs if run.get("status") == "completed"]
-    if not done:
+    if any(run.get("status") != "completed" for run in runs):
         return None
-    return GREEN if all(run.get("conclusion") == "success" for run in done) else RED
+    said = [run for run in runs if run.get("conclusion") not in NOT_A_VERDICT]
+    if not said:
+        return None
+    last = max(said, key=lambda run: str(run.get("completed_at") or ""))
+    return GREEN if last.get("conclusion") == "success" else RED
 
 
 def wait(repo: str, sha: str, token: str, timeout: float, interval: float) -> str:
