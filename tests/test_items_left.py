@@ -382,3 +382,46 @@ def test_a_namesake_born_later_takes_the_older_date(tmp_path: Path) -> None:
         },
     )
     assert module.tests_born(root) == {"test_a_row_without_an_address_refuses_the_build": DAY_ONE}
+
+
+def commit_at(root: Path, when: datetime, message: str) -> None:
+    """Коммит всего изменённого с назначенной авторской датой."""
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", message],
+        cwd=root,
+        check=True,
+        env={
+            "GIT_AUTHOR_DATE": when.isoformat(),
+            "GIT_COMMITTER_DATE": when.isoformat(),
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(root),
+        },
+    )
+
+
+def test_a_file_renamed_after_the_task_is_not_new(tmp_path: Path) -> None:
+    """Файл, переименованный после постановки, не «появился» после неё (`fbe345c`).
+
+    Без `--follow` датой рождения становилась дата переименования, и сильный
+    признак счёл бы пункт с новым путём сделанным.
+    """
+    root = repo_with(tmp_path, "scripts/old.py", DAY_ONE)
+    subprocess.run(["git", "mv", "scripts/old.py", "scripts/new.py"], cwd=root, check=True)
+    commit_at(root, DAY_TEN, "переименование")
+    since = DAY_ONE + timedelta(days=1)
+    assert module.born("scripts/new.py", root) == DAY_ONE
+    assert module.evidence("правка в scripts/new.py", since, {"scripts/new.py"}, root) == []
+
+
+def test_the_earliest_author_date_wins_over_the_history_order(tmp_path: Path) -> None:
+    """Дата рождения — наименьшая, а не первая в порядке истории (`c37440f`).
+
+    После rebase или cherry-pick поздний по истории коммит может нести более
+    раннюю авторскую дату; «самая ранняя» докстроки — это именно она.
+    """
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
+    (root / "tests" / "test_other.py").write_text(GATE_TEST, encoding="utf-8")
+    commit_at(root, DAY_ONE, "перенесённое с ранней датой")
+    name = "test_a_row_without_an_address_refuses_the_build"
+    assert module.tests_born(root) == {name: DAY_ONE}
