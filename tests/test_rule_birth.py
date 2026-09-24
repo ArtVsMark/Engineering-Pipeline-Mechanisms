@@ -396,3 +396,17 @@ def test_kinds_of_a_foreign_shape_are_the_third_outcome(tmp_path: Path) -> None:
     born(root, "002-своё.md", f"# 002\n\n{SAID_OWN}\n")
     with contextlib.chdir(root):
         assert module.main(["--base", "main", "--root", str(root)]) == BROKEN
+
+
+def test_the_list_of_records_comes_from_the_root_tree(tmp_path: Path) -> None:
+    """Список добавленных записей берётся у `--root`, а не у текущего каталога (`5204a74`).
+
+    Заход идёт из корня проекта, а судит соседнее дерево: прежде `git diff`
+    звался в текущем каталоге, и список записей шёл из одного репозитория,
+    а их тексты — из другого.
+    """
+    root = tree(tmp_path)
+    git(root, "checkout", "-b", "work")
+    born(root, "002-молчит.md", "# 002\n\nрешение без ответа\n")
+    assert module.added("main", "HEAD", root) == ["docs/decisions/002-молчит.md"]
+    assert module.main(["--base", "main", "--root", str(root)]) == FOUND

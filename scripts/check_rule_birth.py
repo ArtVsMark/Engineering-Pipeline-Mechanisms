@@ -73,16 +73,22 @@ class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «ответ есть»."""
 
 
-def added(base: str, head: str = "HEAD") -> list[str]:
+def added(base: str, head: str = "HEAD", root: Path = Path()) -> list[str]:
     """Записи решений, ДОБАВЛЕННЫЕ этим изменением.
 
     Список путей читается по NUL: без него git экранирует имена с не-ASCII, и
     такой путь молча выпадает из отбора
     ([165](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/165-git-file-list-needs-nul.md)).
+
+    Список берётся у того же дерева, что и тексты записей (`text_at` с
+    `cwd=root`): прежде git звался в текущем каталоге, и при `--root`, отличном
+    от него, список записей шёл из одного репозитория, а их тексты — из другого
+    (`5204a74`).
     """
     try:
         done = subprocess.run(
             ["git", "diff", "--diff-filter=A", "--name-only", "-z", f"{base}..{head}"],
+            cwd=root,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -241,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        new = added(args.base, args.head)
+        new = added(args.base, args.head, args.root)
         queue = queued(args.head, args.root)
         told = missing(new, queue, args.head, args.root)
         # РОДЫ ЧИТАЮТСЯ У ТОГО ЖЕ СОСТОЯНИЯ, ЧТО ЗАПИСИ И ОЧЕРЕДЬ: «до» — у

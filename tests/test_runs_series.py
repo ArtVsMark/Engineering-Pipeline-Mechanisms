@@ -698,6 +698,18 @@ def test_an_ansi_c_string_keeps_its_escaped_quote() -> None:
     assert module.commands("echo 'a\\' | b") == ["echo 'a\\'", "b"]
 
 
+def test_a_pid_before_a_quote_is_not_an_ansi_c_string() -> None:
+    """`$$'…'` — номер процесса и простые одинарные кавычки (`a3b8d12`).
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #709. Второй `$` пары вместе с кавычкой
+    открывал `$'`, и `\\'` в простых кавычках переставал их закрывать:
+    `echo $$'a\\' | b` оболочка делит на две команды, а разбор выдавал одну.
+    Вторая половина: одиночный `$'` по-прежнему строка ANSI-C.
+    """
+    assert module.commands("echo $$'a\\' | b") == ["echo $$'a\\'", "b"]
+    assert module.commands("echo $'a\\' | b'") == ["echo $'a\\' | b'"]
+
+
 def test_a_trailing_backslash_carries_the_command_to_the_next_line() -> None:
     """Хвостовой `\\` продолжает команду, и пару «`\\` + перевод строки» вынимают.
 
