@@ -724,7 +724,9 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
     сделанная проверка: она о ПРЕМИСЕ, а не о формулировке (022).
     """
     kept = f"{findings_module.REFUTED} 16.09.2026: уже чинено"
-    entries = {"abc1234": findings_module.Entry(333, "дефект", "старый заголовок", kept)}
+    entries = {
+        "abc1234": findings_module.Entry(333, "дефект", "старый заголовок", kept, role="архитектор")
+    }
     monkey = pytest.MonkeyPatch()
     monkey.setenv("GH_TOKEN", "токен")
     monkey.setattr(module, "live_issue", lambda repo, token: (1, ""))
@@ -743,6 +745,7 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
     module.main(["--repo", "o/r", "--pr", "333"])
     monkey.undo()
     assert written["abc1234"].checked == kept, "ответ верификатора стёрт пересказом находки"
+    assert written["abc1234"].role == "архитектор", "роль стёрта пересказом без роли (#763)"
 
 
 def test_the_subject_of_a_check_comes_from_the_registry(
@@ -1486,3 +1489,41 @@ def test_a_finding_without_a_place_is_harvested_without_an_address() -> None:
     )
     assert [weight for weight, _, _ in found] == ["дефект"]
     assert found[0][1] == "(без места) — тело изменения называет не то число", found
+
+
+def test_the_role_that_saw_a_finding_is_read_from_its_bracket() -> None:
+    """Роль — слово скобки из карты ролей: `[риск · архитектор]` (#763).
+
+    Незнакомое слово ролью не считается и к ближайшей роли не приводится —
+    как и вес (154): запись ляжет без роли, а не с выдуманной.
+    """
+    known = sorted(module.findings.roles())
+    assert known, "карта ролей не прочитана — пометке нечем узнаваться"
+    role = known[0]
+    got = module.found_in([comment(f"НАХОДКА[риск · {role}]: смотрено ролью")])
+    assert got == [("риск", "смотрено ролью", "код", role)]
+    assert module.findings_of([comment(f"НАХОДКА[риск · {role}]: смотрено ролью")]) == [
+        ("риск", "смотрено ролью", "код")
+    ]
+    stranger = module.found_in([comment("НАХОДКА[риск · прохожий]: чужое слово")])
+    assert stranger == [("риск", "чужое слово", "код", "")]
+
+
+def test_a_new_entry_keeps_the_role_that_saw_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Запись в реестре несёт роль взгляда: роль не теряется между разбором и записью (#763)."""
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module, "parse_entries", lambda body: {})
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter([]))
+    monkeypatch.setattr(module, "verdict_of", lambda look: 1)
+    monkeypatch.setattr(
+        module, "found_in", lambda look: [("риск", "увидено архитектором", "код", "архитектор")]
+    )
+    monkeypatch.setattr(module, "pair_up", lambda *_, **__: [None])
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
+    written: dict[str, Any] = {}
+    monkeypatch.setattr(
+        module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
+    )
+    module.main(["--repo", "o/r", "--pr", "333"])
+    assert [one.role for one in written.values()] == ["архитектор"]
