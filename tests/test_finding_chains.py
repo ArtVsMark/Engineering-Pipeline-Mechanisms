@@ -293,3 +293,28 @@ def test_an_unparsable_time_is_undated_not_any_value_error() -> None:
         module.said_at({"updated_at": "вчера"})
     with pytest.raises(module.Undated):
         module.said_at({})
+
+
+def test_findings_before_the_moment_count_even_if_the_verdict_came_later(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Находки сказаны до `--at`, вердикт — отдельной записью после: это счёт, а не отказ.
+
+    Ответ взгляда бывает двумя записями (`review_findings.last_look`): находки
+    пишет комментарий действия, число — механизм. Отказ по одному `kept`
+    выдавал прочитанные находки за пустоту (взгляд на #787, 195).
+    """
+    lines = {
+        "user": {"type": "Bot"},
+        "body": "НАХОДКА[риск]: a.py:1 — раз",
+        "created_at": "2026-09-24T10:00:00Z",
+    }
+    verdict = {
+        "user": {"type": "Bot"},
+        "body": "ВЕРДИКТ: находок 1",
+        "created_at": "2026-09-24T20:00:00Z",
+    }
+    platform(monkeypatch, {9: [lines, verdict]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_OK
+    assert "уникальных находок: 1" in capsys.readouterr().out
