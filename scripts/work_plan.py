@@ -295,14 +295,15 @@ def birth_part(where: Path | None = None) -> Source:
     СЛОВАРЯ НЕТ — ЭТО НАЗВАННОЕ МОЛЧАНИЕ, А НЕ ПУСТОТА. Пути в проекте
     относительно корня, как у всех механизмов; запуск не из корня прежде давал
     пустой раздел, неотличимый от «поводов нет» (`13f3a9d`). У плана словарь
-    есть всегда, и его отсутствие — поломка захода.
+    есть всегда, и его отсутствие — поломка захода. То же с очередью
+    предложений: без неё ответ «предложено» не сверить, и это молчание, а не
+    «без ответа» у каждого такого рода (`dd1da87`).
     """
     declared = where or paths.FINDING_KINDS
     queue_path = declared.parent / paths.PROPOSALS.name
     try:
         kinds = finding_kinds.read(declared)
-        queue = queue_path.read_text(encoding="utf-8") if queue_path.is_file() else ""
-        left = finding_kinds.unanswered(kinds, queue)
+        left = finding_kinds.unanswered(kinds, finding_kinds.queued(queue_path))
     except finding_kinds.NotRun as exc:
         return Source(unread=f"роды находок не прочитаны: {exc}")
     return Source(
