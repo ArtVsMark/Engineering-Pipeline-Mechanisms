@@ -50,11 +50,11 @@ jobs:
     # Имя джоба совпадает с идентификатором намеренно: расхождение между ними
     # оставило бы в защите имя, которого никто не выдаёт.
     name: ci-complete
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
       - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
