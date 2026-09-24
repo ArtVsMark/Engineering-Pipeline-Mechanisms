@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script, walk
 
 module = load_script("agent_run.py")
 
@@ -129,3 +129,28 @@ def test_a_cancelled_call_is_named_a_cancellation_not_a_refusal(
     assert "ручная отмена" in said and "где группа прогона это объявляет" in said, said
     assert module.main(["--from", "", "--call", "взгляд", "--outcome", "failure"]) == 0
     assert module.REFUSED in capsys.readouterr().out
+
+
+def test_every_copy_of_the_cancellation_note_names_every_cause() -> None:
+    """Комментарий о снятии у КАЖДОГО вызова называет ручную отмену и подписан дублем.
+
+    Первая починка тронула две копии из пяти, и три оставшиеся нашёл поздний
+    взгляд на #770 (195). Копии законны только подписанными (071), а причины
+    снятия — ручная отмена у всех, замена новым прогоном — где группа её
+    объявляет — обязаны быть названы в каждой.
+    """
+    flows = walk(ROOT / ".github" / "workflows", "*.yml")
+    notes = [
+        (flow.name, block)
+        for flow in flows
+        for block in flow.read_text(encoding="utf-8").split("# Снятое задание")[1:]
+    ]
+    calls = sum(
+        flow.read_text(encoding="utf-8").count("python scripts/agent_run.py") for flow in flows
+    )
+    assert calls, "вызовов agent_run.py не найдено — предмета нет (075)"
+    assert len(notes) == calls, f"комментарий о снятии у {len(notes)} вызовов из {calls}"
+    for name, block in notes:
+        head = block[: block.index("(071)") + 5] if "(071)" in block else block[:600]
+        assert "ручная отмена" in head, f"{name}: копия не называет ручную отмену"
+        assert "ПОДПИСАННЫЙ ДУБЛЬ" in head, f"{name}: копия не подписана как дубль (071)"

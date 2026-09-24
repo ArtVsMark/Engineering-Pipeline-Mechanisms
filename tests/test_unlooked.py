@@ -873,3 +873,11 @@ def test_the_late_tail_is_read_and_quoted_by_its_constant() -> None:
     line = module.Entry(5, module.STATE_SILENT, "2026-09-24", "2026-09-25").said()
     found = module.ENTRY_RE.match(line)
     assert found is not None and found[4] == "2026-09-25", line
+
+
+def test_a_look_skipped_on_a_red_head_is_named_not_silent() -> None:
+    """Пропуск воротами на красной голове — своё состояние, а не «тишина» (195, #771)."""
+    run = {"name": "review", "conclusion": "success", module.SKIPPED_RED_KEY: True}
+    assert module.why_quiet([run]) == module.STATE_SKIPPED_RED
+    refused = {**run, module.REFUSED_KEY: True}
+    assert module.why_quiet([refused]) == module.STATE_REFUSED, "названный отказ сильнее пропуска"
