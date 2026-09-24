@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-09-23T09:11:33+00:00",
+  "updated": "2026-09-24T09:09:33+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -999,6 +999,179 @@
         }
       },
       "coverage": 89.1
+    },
+    "2026-09-24": {
+      "runs": {
+        "automerge": {
+          "runs": 205,
+          "red": 0,
+          "cancelled": 103,
+          "seconds": 3179,
+          "timed": 205,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 111,
+          "red": 0,
+          "cancelled": 7,
+          "seconds": 987,
+          "timed": 111,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 104,
+          "red": 0,
+          "cancelled": 25,
+          "seconds": 2653,
+          "timed": 104,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 104,
+          "red": 0,
+          "cancelled": 18,
+          "seconds": 1982,
+          "timed": 104,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 104,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 515,
+          "timed": 104,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 104,
+          "red": 0,
+          "cancelled": 18,
+          "seconds": 1984,
+          "timed": 104,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 101,
+          "red": 1,
+          "cancelled": 68,
+          "seconds": 8152,
+          "timed": 101,
+          "red_jobs": {
+            "contract / contract": 1
+          },
+          "red_steps": {
+            "contract / contract · поверхность контракта не тронута молча": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "ci-complete": {
+          "runs": 94,
+          "red": 1,
+          "cancelled": 71,
+          "seconds": 5557,
+          "timed": 94,
+          "red_jobs": {
+            "ci-complete": 1
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 1
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 1
+          },
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "claude": {
+          "runs": 17,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 61,
+          "timed": 17,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 21,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 5850,
+          "timed": 21,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 13,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 241,
+          "timed": 13,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 82,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1609,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 8,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 215,
+          "timed": 8,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 90.4
     }
   }
 }
