@@ -72,6 +72,7 @@ import changerefs
 import ci_complete
 import ghrest
 import labels
+import look_waits
 import paths
 import pipeline_checks as policy
 import report
@@ -534,6 +535,43 @@ def awaits_look(repo: str, change: Change, owner_token: str) -> bool:
         )
     )
     return look_pending(runs)
+
+
+def owed_look(repo: str, change: Change, owner_token: str) -> str:
+    """Номер прогона взгляда, пропущенного на этой голове, пока она была красной.
+
+    ВЗГЛЯД — ПОСЛЕДНИМ (#762): на красной голове он пропускается, и его запись
+    завершается. Позеленей голова ТОЛЧКОМ — новый взгляд позовёт сам толчок.
+    Но упавшее перезапускают и без толчка, и тогда голова зелёная, записи
+    взгляда незавершённой нет — `awaits_look` молчит, и голова слилась бы без
+    взгляда. Пропуск помечен аннотацией `look_waits.SKIPPED` на записи; очередь
+    читает её у ПОСЛЕДНЕЙ записи взгляда головы. Пусто — взгляд не должен.
+    """
+    runs = ghrest.paginate(
+        f"repos/{repo}/commits/{change.head}/check-runs?check_name={REVIEW_CHECK}&filter=latest",
+        owner_token,
+        key="check_runs",
+    )
+    for run in runs:
+        if run.get("status") != "completed" or not run.get("id"):
+            continue
+        notes = ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", owner_token)
+        if any(str(note.get("title") or "") == look_waits.SKIPPED for note in notes):
+            return run_of(str(run.get("details_url") or ""))
+    return ""
+
+
+def call_the_owed_look(repo: str, run: str, owner_token: str, *, dry_run: bool) -> bool:
+    """Перезапускает пропущенный взгляд; отказ площадки назван, а не проглочен (045)."""
+    if dry_run:
+        print(f"  {report.DRY} перезапустил бы прогон взгляда {run}")
+        return True
+    try:
+        ghrest.request("POST", f"repos/{repo}/actions/runs/{run}/rerun", owner_token)
+    except ghrest.TransportError as exc:
+        print(f"::warning::прогон взгляда {run} не перезапущен: {exc}")
+        return False
+    return True
 
 
 #: Прогон, из которого написан комментарий действия: шапка «View job» ведёт
@@ -1224,6 +1262,32 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 ]
             print(f"#{change.number}: ждёт вердикта взгляда — не взвожу (#654)")
             skipped["ждут вердикта взгляда"] += 1
+            continue
+        # ВЗГЛЯД, ПРОПУЩЕННЫЙ НА КРАСНОЙ ГОЛОВЕ, ГОЛОВА ЕЩЁ ДОЛЖНА (#762). Сюда
+        # доходит только зелёная голова: красную очередь пропустила выше. Взгляд
+        # перезапускается, а голова ждёт его вердикта, как любого идущего
+        # взгляда; не перезапустился — ждёт всё равно, и это названо: слить её
+        # без взгляда значило бы вернуть щель, которую закрывал #654.
+        owed = "" if repair else owed_look(repo, change, owner_token)
+        if owed:
+            if change.armed:
+                take_back(
+                    repo, change, "взгляд пропущен на красной голове", owner_token, dry_run=dry_run
+                )
+                queue = [
+                    replace(one, armed=False) if one.number == change.number else one
+                    for one in queue
+                ]
+            called = call_the_owed_look(repo, owed, owner_token, dry_run=dry_run)
+            print(
+                f"#{change.number}: взгляд пропущен, пока голова была красной — "
+                + (
+                    "перезапущен, не взвожу (#762)"
+                    if called
+                    else "перезапуск отказал, не взвожу (#762)"
+                )
+            )
+            skipped["ждут пропущенного взгляда"] += 1
             continue
         if state == STATE_ARMABLE:
             # СЛИТЬ НЕЛЬЗЯ СЕЙЧАС — не значит «нельзя». Проверки идут либо не

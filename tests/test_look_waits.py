@@ -86,6 +86,25 @@ def test_the_answer_lands_in_the_step_output(
     assert out.read_text(encoding="utf-8") == f"run={run}\n"
 
 
+def test_a_skip_on_a_red_head_is_noted_on_the_look_record(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пропуск на красной голове — аннотацией с заголовком `SKIPPED`, а не строкой лога.
+
+    По этой пометке очередь узнаёт, что взгляд голова ещё должна (#762):
+    позеленей она перезапуском без толчка — слилась бы без взгляда.
+    """
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    for conclusion, noted in (("failure", True), ("success", False)):
+        monkeypatch.setattr(
+            module.ghrest, "paginate", gate([{"status": "completed", "conclusion": conclusion}])
+        )
+        module.main(["--repo", "o/r", "--sha", "abc", "--timeout", "0", "--interval", "0"])
+        said = capsys.readouterr().out
+        assert (f"::notice title={module.SKIPPED}::" in said) is noted, said
+
+
 def test_without_a_head_the_wait_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """Нет головы — ожидание не отработало, а не «зелено» (045)."""
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
