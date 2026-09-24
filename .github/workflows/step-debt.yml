@@ -37,7 +37,7 @@ jobs:
     # Его дело — не пускать долг в невидимое: находки и неотвеченные правила
     # идут перед планом, и это должно быть видно, а не вспоминаться.
     name: debt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
@@ -46,7 +46,7 @@ jobs:
           # клоне она обрезана до одного коммита, и все файлы выглядят
           # добавленными в нём — признак срабатывал бы на каждом названном.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
       # Шаг читает краснотy общей ветки через `main_red`, а тот — ответ по

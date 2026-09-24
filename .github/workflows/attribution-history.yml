@@ -52,7 +52,7 @@ concurrency:
 jobs:
   first-parents:
     name: attribution-history
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       # Закреплено по SHA: прогон идёт с ОБЩЕЙ ветки, и подвижная метка здесь
