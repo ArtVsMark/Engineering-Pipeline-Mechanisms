@@ -10,6 +10,11 @@
 Теперь число — команда:
 
     python scripts/finding_chains.py --repo <владелец/имя> --last 100
+    python scripts/finding_chains.py --repo <владелец/имя> --from 616 --to 743
+
+Отрезок `--from/--to` — номера изменений включительно: числа, снятые однажды по
+отрезку, повторяются тем же отрезком, а не «последними N», которые с каждым
+слиянием сдвигаются.
 
 АРХИВ ДЛЯ ЭТОГО НЕ НУЖЕН. Находки уходят из реестра #23 после разбора, но
 остаются в лентах изменений — в комментариях взгляда. Замер читает их там тем
@@ -20,8 +25,17 @@
 
 МЕСТО — ПУТЬ ДО ДВОЕТОЧИЯ. Взгляд называет место одним способом —
 `путь/от/корня.py:12` (так требует его подсказка), и путь берётся из начала
-заголовка находки. Находка без пути в месте не считается и названа числом.
-Одна находка, пересказанная дважды, считается по отпечатку один раз.
+заголовка находки. Формы пути перечислены разом, а не по одной (195): с
+расширением (`scripts/x.py:12`), без него (`Makefile:3`, `.github/CODEOWNERS:1`)
+и с точкой в начале (`.gitignore:3`). Путь пишется латиницей: слово кириллицей
+перед двоеточием — проза, а не место. Находка без пути в месте не считается и
+названа числом.
+
+ПЕРЕСКАЗ СНИМАЕТСЯ В ПРЕДЕЛАХ ИЗМЕНЕНИЯ, А НЕ ПОПЕРЁК. Одна находка, повторённая
+на том же изменении, считается один раз. Та же находка на ДРУГОМ изменении —
+это новое звено цепочки: место снова получило находку, и снять её значило бы
+занизить глубину и потерять изменение, где находка родилась. В счёте
+уникальных находок отпечаток по-прежнему один.
 
 ГРАНИЦА. «Цепочка» здесь — место с находками на нескольких изменениях, а не
 «одна цепочка форм»: считать ли их одним предикатом, решает чтение поимённо,
@@ -52,8 +66,11 @@ EXIT_BROKEN: Final = 2
 #: Сколько последних закрытых изменений читать, если не сказано иначе.
 LAST: Final = 100
 
-#: Место в начале заголовка находки: путь с расширением, затем двоеточие.
-PLACE_RE: Final = re.compile(r"^\s*`?(?P<path>[\w./-]+\.\w+)`?:\d")
+#: Место в начале заголовка находки: путь латиницей, затем двоеточие и номер
+#: строки. Формы — в докстроке модуля: с расширением, без него, с точкой в начале.
+PLACE_RE: Final = re.compile(
+    r"^\s*`?(?P<path>(?:[A-Za-z0-9_.-]+/)*\.?[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)`?:\d"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,38 +95,56 @@ def place_of(title: str) -> str:
 
 
 def chains(said: list[tuple[int, str]]) -> Chains:
-    """Цепочки по парам «изменение, заголовок находки» — повтор по отпечатку снят."""
+    """Цепочки по парам «изменение, заголовок находки».
+
+    Повтор снимается в пределах изменения; на другом изменении та же находка —
+    новое звено цепочки места (докстрока модуля).
+    """
     seen: set[str] = set()
+    counted: set[tuple[int, str]] = set()
     places: dict[str, set[int]] = defaultdict(set)
     changes: set[int] = set()
-    unplaced = 0
+    unplaced: set[str] = set()
     for number, title in said:
         mark = review_findings.fingerprint(title)
-        if mark in seen:
+        if (number, mark) in counted:
             continue
+        counted.add((number, mark))
         seen.add(mark)
         changes.add(number)
         path = place_of(title)
         if not path:
-            unplaced += 1
+            unplaced.add(mark)
             continue
         places[path].add(number)
     return Chains(
         findings=len(seen),
         changes=len(changes),
-        unplaced=unplaced,
+        unplaced=len(unplaced),
         places={path: sorted(prs) for path, prs in places.items()},
     )
 
 
-def read(repo: str, token: str, last: int) -> list[tuple[int, str]]:
-    """Находки взгляда из лент последних `last` закрытых изменений."""
+def read(repo: str, token: str, last: int, first: int = 0, final: int = 0) -> list[tuple[int, str]]:
+    """Находки взгляда из лент закрытых изменений.
+
+    Отрезок `first..final` (номера включительно) задаёт замер повторимо; без него
+    читаются последние `last`. Ленты идут от новых к старым, поэтому за нижней
+    границей отрезка чтение останавливается, а не листает историю до конца.
+    """
     said: list[tuple[int, str]] = []
     pulls = ghrest.paginate(f"repos/{repo}/pulls?state=closed&sort=created&direction=desc", token)
-    for count, pull in enumerate(pulls):
-        if count >= last:
-            break
+    taken = 0
+    for pull in pulls:
         number = int(pull["number"])
+        if first or final:
+            if final and number > final:
+                continue
+            if number < first:
+                break
+        elif taken >= last:
+            break
+        taken += 1
         comments = list(ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token))
         said += [(number, found[1]) for found in review_findings.findings_of(comments)]
     return said
@@ -138,13 +173,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--last", type=int, default=LAST, help="сколько закрытых изменений читать")
+    parser.add_argument("--from", dest="first", type=int, default=0, help="первый номер отрезка")
+    parser.add_argument("--to", dest="final", type=int, default=0, help="последний номер отрезка")
     args = parser.parse_args(argv)
     token = ghrest.token_from_env()
     if not token or not args.repo:
         print("замер не снят: нет токена или репозитория (045)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        said = read(args.repo, token, args.last)
+        said = read(args.repo, token, args.last, args.first, args.final)
     except ghrest.TransportError as exc:
         print(f"замер не снят: площадка не ответила — {exc}", file=sys.stderr)
         return EXIT_BROKEN
