@@ -281,8 +281,31 @@ def test_the_birth_of_tests_is_read_once_from_history(tmp_path: Path) -> None:
     """Дата рождения проверки — из истории одним обходом; стоп-слова основ не дают."""
     root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
     born = module.tests_born(root)
-    assert born == {"test_a_row_without_an_address_refuses_the_build": DAY_TEN}
+    assert born == {"test_plan.py::test_a_row_without_an_address_refuses_the_build": DAY_TEN}
     assert module.stems("проверка строки плана") == frozenset({"строки"[:6], "плана"})
+    # Стоп-слово сверяется основой: «проверку» и «проверяет» — та же основа (`62fae56`).
+    assert module.stems("проверку проверяет строки") == frozenset({"строки"})
+
+
+def test_a_namesake_in_another_file_keeps_its_own_birth(tmp_path: Path) -> None:
+    """Одноимённая проверка в другом файле, заведённая позже, получает свою дату (`1ca2bb6`)."""
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_ONE, GATE_TEST)
+    (root / "tests" / "test_other.py").write_text(GATE_TEST, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "второй"],
+        cwd=root,
+        check=True,
+        env={
+            "GIT_AUTHOR_DATE": DAY_TEN.isoformat(),
+            "GIT_COMMITTER_DATE": DAY_TEN.isoformat(),
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(root),
+        },
+    )
+    born = module.tests_born(root)
+    name = "test_a_row_without_an_address_refuses_the_build"
+    assert born == {f"test_plan.py::{name}": DAY_ONE, f"test_other.py::{name}": DAY_TEN}
 
 
 def test_the_path_signal_speaks_first(tmp_path: Path) -> None:
@@ -293,3 +316,37 @@ def test_the_path_signal_speaks_first(tmp_path: Path) -> None:
         [issue(7, body, DAY_ONE, DAY_TEN)], items.open_items, now=DAY_TEN, root=root
     )
     assert [one.evidence for one in built] == [["tests/test_plan.py"]]
+
+
+def test_the_measure_counts_what_the_threshold_was_chosen_on(tmp_path: Path) -> None:
+    """Замер признака воспроизводится функцией: закрытые, названные, узнанные, ложные.
+
+    Числа порога вписывались руками в трёх местах, и перемерить их было нечем
+    (`6751f18`). Задачу, которую ведёт механизм, замер не читает.
+    """
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
+    body = (
+        f"- [x] {PROPERTY_ITEM}\n- [x] держит tests/test_plan.py\n"
+        "- [ ] Шаблон обращения трёх видов для соседей\n"
+    )
+    kept = {**issue(8, f"{module.findings.MARKER}\n- [x] {PROPERTY_ITEM}", DAY_ONE, DAY_TEN)}
+    said = module.measure([{**issue(7, body, DAY_ONE, DAY_TEN), "state": "open"}, kept], root)
+    assert said == module.Measure(2, 1, 1, 1, 0), said
+
+
+def test_the_measure_entry_names_its_outcomes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Точка входа замера: прочитано — исход 0 с числами; площадка молчит — исход 2."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter([]))
+    monkeypatch.setattr(module, "subjects", lambda root=None: [])
+    assert module.main(["--measure", "--repo", "o/r"]) == module.EXIT_OK
+    assert "закрытых пунктов 0" in capsys.readouterr().out
+
+    def silent(*_a: object, **_k: object) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "paginate", silent)
+    assert module.main(["--measure", "--repo", "o/r"]) == module.EXIT_BROKEN
+    assert "замер не отработал" in capsys.readouterr().err
