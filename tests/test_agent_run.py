@@ -110,3 +110,19 @@ def test_the_file_form_is_read_once_for_every_reader() -> None:
     assert module.messages_of(raw) == [INIT, {"type": "result"}]
     with pytest.raises(module.NotRun, match="не список"):
         module.messages_of(json.dumps({"type": "result"}))
+
+
+def test_a_cancelled_call_is_named_a_cancellation_not_a_refusal(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Снятый заход — не отказ агента: слов отказа нет, снятие названо (`6af0b2a`).
+
+    `cancelled` дают тайм-аут задания и отмена группой `cancel-in-progress`,
+    когда по той же голове пошёл новый прогон. Слова отказа узнаёт реестр
+    слитого без взгляда — и записал бы отказ, которого не было.
+    """
+    assert module.main(["--from", "", "--call", "взгляд", "--outcome", "cancelled"]) == 0
+    said = capsys.readouterr().out
+    assert module.REFUSED not in said and "заход снят" in said, said
+    assert module.main(["--from", "", "--call", "взгляд", "--outcome", "failure"]) == 0
+    assert module.REFUSED in capsys.readouterr().out

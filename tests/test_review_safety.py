@@ -1299,6 +1299,13 @@ def unnamed_runs() -> list[str]:
                 ]
                 if not follows:
                     missing.append(f"{where}: за вызовом нет шага {AGENT_RUN} по его файлу")
+                elif str((follows[0].get("env") or {}).get("OUTCOME") or "") != (
+                    "${{ steps." + sid + ".outcome }}"
+                ) or '--outcome "$OUTCOME"' not in str(follows[0].get("run") or ""):
+                    missing.append(
+                        f"{where}: шаг {AGENT_RUN} не получает исход вызова — снятый "
+                        "заход он назвал бы отказом агента (`6af0b2a`)"
+                    )
                 elif " ".join(str(follows[0].get("if") or "").split()) != follow_condition(sid):
                     missing.append(
                         f"{where}: шаг {AGENT_RUN} зовётся не условием "
