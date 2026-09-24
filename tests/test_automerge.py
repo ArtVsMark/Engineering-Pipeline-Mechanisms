@@ -243,6 +243,10 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "looking": set(),
         # Изменения, которые держит первый вердикт с находками (#734).
         "holding": set(),
+        # Взгляд, пропущенный на красной голове: номер изменения → прогон (#762).
+        "owed": {},
+        # Перезапущенные прогоны взгляда.
+        "rerun": [],
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -254,6 +258,10 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def platform_call(method: str, path: str, tok: str, body: Any = None) -> dict[str, str]:
         if method == "DELETE" and "/labels/" in path:
             state["dropped"].append(path.rsplit("/", 1)[-1].replace("%2F", "/"))
+        if method == "POST" and path.endswith("/rerun"):
+            if "rerun-refused" in state:
+                raise module.ghrest.TransportError("403")
+            state["rerun"].append(path.split("/")[-2])
         return {"sha": "base-sha"}
 
     monkeypatch.setattr(module.ghrest, "request", platform_call)
@@ -285,6 +293,9 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     )
     monkeypatch.setattr(
         module, "findings_hold", lambda repo, item, tok: item.number in state["holding"]
+    )
+    monkeypatch.setattr(
+        module, "owed_look", lambda repo, item, tok: state["owed"].get(item.number, "")
     )
     # Взведение подменяется НА УРОВНЕ МУТАЦИИ, а не целым шагом: между «очередь
     # отдала последнее действие» и «очередь позвала свою функцию» разница ровно
@@ -1279,6 +1290,73 @@ def test_a_head_waits_for_the_look_before_it_is_armed(platform: dict[str, Any]) 
     assert platform["merged"] == [2], "голова, ждущая взгляда, слита или держит очередь"
 
 
+def test_a_look_skipped_on_a_red_head_is_called_before_the_head_goes(
+    platform: dict[str, Any],
+) -> None:
+    """Взгляд, пропущенный на красной голове, голова ещё должна (#762).
+
+    Упавшее перезапустили без толчка — голова зелёная, записи идущего взгляда
+    нет. Без этой ветки она слилась бы без взгляда. Взведённую голову пропуск
+    снимает, прогон взгляда перезапускается, очередь идёт к соседу.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True), change(2, "automerge")]
+    platform["owed"] = {1: "777"}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["rerun"] == ["777"], "пропущенный взгляд не перезапущен"
+    assert platform["disarmed"] == ["PR_1"]
+    assert platform["merged"] == [2], "голова без взгляда слита или держит очередь"
+
+
+def test_a_refused_rerun_still_does_not_let_the_head_go(platform: dict[str, Any]) -> None:
+    """Перезапуск отказал — голова всё равно не сливается без взгляда (045)."""
+    platform["changes"] = [change(1, "automerge", armed=True)]
+    platform["owed"] = {1: "777"}
+    platform["rerun-refused"] = True
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["merged"] == []
+    # Соседа нет: взведение снимает сам пропуск, а не слияние соседа ниже —
+    # иначе площадка слила бы голову, как только позеленеют обязательные.
+    assert platform["disarmed"] == ["PR_1"], "взведённая голова без взгляда оставлена площадке"
+
+
+def test_the_repair_of_a_red_trunk_does_not_wait_for_an_owed_look(
+    platform: dict[str, Any],
+) -> None:
+    """Починку красной общей ветки пропущенный взгляд не держит, как и идущий."""
+    platform["changes"] = [change(1, "automerge", "fix-main")]
+    platform["health"] = ["test: failure"]
+    platform["owed"] = {1: "777"}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["rerun"] == []
+
+
+def test_the_owed_look_is_read_from_the_skip_note_of_the_latest_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Пропуск узнаётся по пометке `look_waits.SKIPPED` на последней записи взгляда."""
+    notes: dict[str, list[dict[str, Any]]] = {
+        "1": [{"title": module.look_waits.SKIPPED}],
+        "2": [{"title": "другое"}],
+    }
+    records: list[dict[str, Any]] = []
+
+    def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        if path.endswith("/annotations"):
+            return iter(notes[path.split("/")[-2]])
+        assert "filter=latest" in path
+        return iter(records)
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    item = change(1, "automerge")
+    url = "https://github.com/o/r/actions/runs/{run}/job/9"
+    records[:] = [{"id": 1, "status": "completed", "details_url": url.format(run=555)}]
+    assert module.owed_look("o/r", item, "token") == "555"
+    records[:] = [{"id": 2, "status": "completed", "details_url": url.format(run=556)}]
+    assert module.owed_look("o/r", item, "token") == "", "взгляд без пометки назван должным"
+    records[:] = [{"id": 1, "status": "in_progress", "details_url": url.format(run=557)}]
+    assert module.owed_look("o/r", item, "token") == "", "идущий взгляд назван пропущенным"
+
+
 def test_a_finished_look_lets_the_head_go(platform: dict[str, Any]) -> None:
     """Вторая половина: взгляд завершился — голова сливается как прежде."""
     platform["changes"] = [change(1, "automerge")]
@@ -1700,3 +1778,23 @@ def test_a_rerun_of_the_head_look_keeps_its_first_start(monkeypatch: pytest.Monk
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     head = replace(change(1, "automerge"), head="head-sha")
     assert module.findings_hold("o/r", head, "token") is True
+
+
+def test_calling_the_owed_look_reruns_its_run_and_names_a_refusal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`call_the_owed_look` перезапускает прогон; отказ площадки назван, а не проглочен."""
+    asked: list[tuple[str, str]] = []
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> None:
+        asked.append((method, path))
+        if "refused" in path:
+            raise module.ghrest.TransportError("403")
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.call_the_owed_look("o/r", "777", "t", dry_run=False) is True
+    assert asked == [("POST", "repos/o/r/actions/runs/777/rerun")]
+    assert module.call_the_owed_look("o/r", "refused", "t", dry_run=False) is False
+    assert "не перезапущен" in capsys.readouterr().out
+    assert module.call_the_owed_look("o/r", "888", "t", dry_run=True) is True
+    assert len(asked) == 2, "пробный заход перезапустил прогон"
