@@ -583,7 +583,9 @@ def born_platform(
         asked.append(path)
         if path.endswith("/sub_issues"):
             return iter(subs.get(int(path.split("/")[-2]), []))
-        return iter(issues)
+        # Список `?state=open` несёт поле состояния у каждой задачи — как
+        # площадка: без него задача теперь не рождается (взгляд на #756).
+        return iter({"state": "open", **one} for one in issues)
 
     return paginate, asked
 
@@ -699,3 +701,13 @@ def test_both_ways_of_birth_share_one_gate() -> None:
     assert module.may_be_born({**own, "body": module.MARKER}, "o/r", set()) is False
     assert module.may_be_born({**own, "state": "closed"}, "o/r", set()) is False
     assert module.may_be_born(own, "o/r", {761}) is False
+
+
+def test_a_born_row_needs_an_explicit_open_state(capsys: pytest.CaptureFixture[str]) -> None:
+    """Без явного `state` задача не рождается, чужое хранилище названо вслух (#756)."""
+    own = {"number": 762, "state": "open", "repository_url": "https://api.github.com/repos/o/r"}
+    assert module.may_be_born({**own, "state": None}, "o/r", set()) is False
+    assert module.may_be_born({k: v for k, v in own.items() if k != "state"}, "o/r", set()) is False
+    elsewhere = {**own, "repository_url": "https://api.github.com/repos/other/r"}
+    assert module.may_be_born(elsewhere, "o/r", set()) is False
+    assert "#762 из другого хранилища" in capsys.readouterr().out

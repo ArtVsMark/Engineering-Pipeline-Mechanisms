@@ -377,6 +377,12 @@ def still_open(address: str, repo: str, token: str, marks: set[str]) -> bool:
     ЗАКРЫТИЕ СПРАШИВАЕТСЯ У ПЛОЩАДКИ, А НЕ У ТЕЛА ПЛАНА. Тело плана пишет тот
     же механизм, и спрашивать его о судьбе работы значило бы спрашивать себя
     ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
+
+    МОЛЧАНИЕ ПЛОЩАДКИ СТРОКУ НЕ СНИМАЕТ — умолчание «открыта» здесь намеренно.
+    Это обратная сторона `may_be_born`, где молчание строку НЕ добавляет: в
+    обоих случаях без явного ответа план не меняется. Снять строку по пустому
+    ответу значило бы потерять указание владельца молча (045); лишняя строка
+    уйдёт следующей сборкой, потерянную не вернёт никто (взгляд на #758).
     """
     if not address.startswith("#"):
         return address in marks
@@ -424,7 +430,9 @@ def may_be_born(issue: dict[str, Any], repo: str, taken: frozenset[int] | set[in
     text = str(issue.get("body") or "")
     if not number or "pull_request" in issue or number in taken:
         return False
-    if str(issue.get("state") or "open") != "open":
+    # Состояние — ТОЛЬКО явное: ответ без поля не делает задачу открытой
+    # молча (взгляд на #756).
+    if issue.get("state") != "open":
         return False
     if MARKER in text or findings.is_kept_by_a_mechanism(text):
         return False
