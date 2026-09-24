@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -284,4 +285,27 @@ def test_a_repeated_kind_without_a_catalogue_answer_is_named() -> None:
         "не по форме": {"встречен": met, "каталогу": "потом посмотрим"},
         "редкий": {"встречен": ["a"]},
     }
-    assert module.unanswered(kinds) == [("молчит", 3), ("не по форме", 3)]
+    assert module.unanswered(kinds, "") == [("молчит", 3), ("не по форме", 3)]
+
+
+def test_a_broken_kinds_file_is_a_refusal_not_a_crash(tmp_path: Path) -> None:
+    """Битый словарь — `NotRun` для гейта и плана, а не сырой `JSONDecodeError` (`ff0aeef`)."""
+    broken = tmp_path / "kinds.json"
+    broken.write_text("{не json", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="не разбирается"):
+        module.read(broken)
+
+
+def test_an_answer_is_judged_by_one_function() -> None:
+    """`answer_problem` судит ответ рода: форма, слаг в очереди, номер правила (`72397b3`)."""
+    queue = '{"proposals": [{"slug": "a-list-is-read-to-the-end"}]}'
+    assert module.answer_problem({"каталогу": "своё — у каталога такого нет"}, queue) is None
+    assert module.answer_problem({"каталогу": "есть — 206"}, queue) is None
+    assert (
+        module.answer_problem({"каталогу": "предложено — `a-list-is-read-to-the-end`."}, queue)
+        is None
+    )
+    assert "в очереди" in str(module.answer_problem({"каталогу": "предложено — other"}, queue))
+    assert "номера" in str(module.answer_problem({"каталогу": "есть — где-то"}, queue))
+    assert "нет или оно не по форме" in str(module.answer_problem({}, queue))
+    assert module.slug_of("`имя`.") == "имя"

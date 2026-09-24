@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 from pathlib import Path
@@ -318,3 +319,29 @@ def test_the_kinds_at_the_base_are_read_from_git(tmp_path: Path) -> None:
     assert module.kinds_at("HEAD", root) == {"род": kind(2)}
     with pytest.raises(module.NotRun):
         module.kinds_at("не-существующая-база", root)
+
+
+def test_the_gate_asks_a_kind_crossing_the_threshold_end_to_end(tmp_path: Path) -> None:
+    """Проводка родов в `main`: переход порога без ответа — отказ, с ответом — чисто (`2c98b77`).
+
+    Роды читаются у базы и у ГОЛОВЫ через git — тем же диапазоном, что и
+    записи решений (`c9a1c47`).
+    """
+    root = tree(tmp_path)
+    kinds = root / ".rules" / "finding-kinds.json"
+    kinds.write_text(json.dumps({"kinds": {"род": kind(2)}}, ensure_ascii=False), encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "роды до порога")
+    git(root, "checkout", "-b", "work")
+    kinds.write_text(json.dumps({"kinds": {"род": kind(3)}}, ensure_ascii=False), encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "род дошёл до порога")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND
+    kinds.write_text(
+        json.dumps({"kinds": {"род": kind(3, "есть — 206")}}, ensure_ascii=False), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "ответ каталогу")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
