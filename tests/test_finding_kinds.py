@@ -296,6 +296,48 @@ def test_a_broken_kinds_file_is_a_refusal_not_a_crash(tmp_path: Path) -> None:
         module.read(broken)
 
 
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ('{"kinds": "x"}', "раздел kinds не словарь, а str"),
+        ('{"kinds": ["a"]}', "раздел kinds не словарь, а list"),
+        ('["kinds"]', "не объект JSON"),
+    ],
+)
+def test_kinds_of_a_foreign_shape_are_a_refusal_for_every_reader(text: str, said: str) -> None:
+    """Не та форма словаря — `NotRun`, а не `ValueError` из `dict()` (`19fe125`, `948f893`).
+
+    Разбор один на диск и на историю: план, гейт рождения правила и сам
+    счёт родов ловят одно и то же исключение.
+    """
+    with pytest.raises(module.NotRun, match=said):
+        module.kinds_in(text, "словарь")
+
+
+def test_kinds_absent_from_the_text_are_empty_not_a_refusal() -> None:
+    """Раздела kinds нет — пусто: у базы родов ещё могло не быть, а решает читающий."""
+    assert module.kinds_in("{}", "словарь") == {}
+    assert module.kinds_in('{"kinds": {"род": {}}}', "словарь") == {"род": {}}
+
+
+def test_a_foreign_shape_reaches_the_entry_point(tmp_path, run_script) -> None:  # type: ignore[no-untyped-def]
+    """Раздел kinds строкой доезжает до исхода «не отработал» точкой входа (145)."""
+    broken = tmp_path / "kinds.json"
+    broken.write_text('{"kinds": "x"}', encoding="utf-8")
+    done = run_script("finding_kinds.py", "--kinds", str(broken))
+    assert done.code == module.EXIT_BROKEN
+    assert "раздел kinds не словарь" in done.err, done.err
+
+
+def test_a_missing_queue_is_a_refusal_not_an_empty_queue(tmp_path: Path) -> None:
+    """Очереди предложений нет — `NotRun`, а не `""` (`dd1da87`); есть — её текст."""
+    with pytest.raises(module.NotRun, match="очередь предложений не прочитана"):
+        module.queued(tmp_path / "нет.json")
+    queue = tmp_path / "proposals.json"
+    queue.write_text('{"proposals": [{"slug": "a"}]}', encoding="utf-8")
+    assert '"a"' in module.queued(queue)
+
+
 def test_an_answer_is_judged_by_one_function() -> None:
     """`answer_problem` судит ответ рода: форма, слаг в очереди, номер правила (`72397b3`)."""
     queue = '{"proposals": [{"slug": "a-list-is-read-to-the-end"}]}'

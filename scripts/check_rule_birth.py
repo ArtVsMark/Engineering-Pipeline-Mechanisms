@@ -47,7 +47,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -104,19 +103,48 @@ def fate(text: str) -> tuple[str, str] | None:
     return (found["kind"], found["said"].strip()) if found else None
 
 
-def queued(where: Path | None = None) -> str:
-    """Очередь предложений одной строкой — в ней и ищется слаг.
+def text_at(ref: str, path: str, root: Path = Path()) -> str | None:
+    """Текст файла у состояния `ref`; ``None`` — файла у этого состояния нет.
 
-    Ищется ВХОЖДЕНИЕМ, а не разбором поля: форму записи задаёт контракт
-    КАТАЛОГА (`export/README.md`), а не мы, и свой разбор его полей разошёлся бы
-    с ним молча — это уже случалось, когда набор искал вердикты под чужим ключом
-    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+    ВСЁ, ЧТО СУДИТ ГЕЙТ, ЧИТАЕТСЯ У ОДНОГО СОСТОЯНИЯ. Роды, записи решений и
+    очередь предложений прежде брались кто откуда: роды — у головы через git,
+    записи и очередь — с диска корня. При голове, отличной от выгруженного
+    дерева, род с неотправленным предложением проходил по чужой очереди, а
+    закоммиченная правка записи не судилась вовсе (`bd9fa54`, `d5151c5`).
+
+    ФАЙЛА НЕТ — ЭТО ОТВЕТ, А НЕ ОТКАЗ; всё прочее — неизвестное состояние,
+    битый клон — отказ. Формы отказа git берутся у шага журнала, а не пишутся
+    второй раз (`493815f`, `783fb08`).
     """
-    path = where or paths.PROPOSALS
     try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise NotRun(f"очередь предложений не прочитана ({path}): {exc}") from exc
+        done = subprocess.run(
+            ["git", "show", f"{ref}:{path}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except (OSError, UnicodeDecodeError) as exc:
+        raise NotRun(f"{path} у {ref} не прочитан: {exc}") from exc
+    if done.returncode == 0:
+        return done.stdout
+    if any(said in done.stderr for said in check_journal.NO_SUCH_PATH):
+        return None
+    raise NotRun(f"{path} у {ref} не прочитан: {done.stderr.strip()}")
+
+
+def queued(head: str, root: Path = Path()) -> str:
+    """Очередь предложений у головы изменения; её нет — отказ, как у плана.
+
+    Как ищется слаг — у словаря родов (`finding_kinds.queued`): ищется
+    вхождением, а очереди нет — отказ, а не пустая очередь.
+    """
+    where = paths.PROPOSALS.as_posix()
+    text = text_at(head, where, root)
+    if text is None:
+        raise NotRun(f"очередь предложений не прочитана: {where} у {head} нет")
+    return text
 
 
 #: Слаг ответа разбирает словарь родов — одна разборка на решения и роды (022).
@@ -124,14 +152,13 @@ def queued(where: Path | None = None) -> str:
 slug_of = finding_kinds.slug_of
 
 
-def missing(paths_: list[str], queue: str, root: Path = Path()) -> list[str]:
-    """Записи, чей ответ отсутствует или не сходится с очередью."""
+def missing(paths_: list[str], queue: str, head: str = "HEAD", root: Path = Path()) -> list[str]:
+    """Записи, чей ответ отсутствует или не сходится с очередью; читаются у головы."""
     told: list[str] = []
     for one in paths_:
-        try:
-            text = (root / one).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise NotRun(f"{one} не прочитан: {exc}") from exc
+        text = text_at(head, one, root)
+        if text is None:
+            raise NotRun(f"{one} добавлен изменением, а у {head} его нет")
         said = fate(text)
         if said is None:
             told.append(
@@ -161,32 +188,20 @@ def missing(paths_: list[str], queue: str, root: Path = Path()) -> list[str]:
     return told
 
 
-def kinds_at(base: str, root: Path = Path()) -> dict[str, Any]:
-    """Роды находок на базе изменения; файла там нет — родов ещё не было."""
+def kinds_at(ref: str, root: Path = Path()) -> dict[str, Any]:
+    """Роды находок у состояния `ref` — базы или головы; файла нет — родов не было.
+
+    Разбор общий со словарём родов (`finding_kinds.kinds_in`): не та форма —
+    отказ у любого читателя, а не трасса у одного (`948f893`).
+    """
     where = paths.FINDING_KINDS.as_posix()
-    try:
-        done = subprocess.run(
-            ["git", "show", f"{base}:{where}"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-    except OSError as exc:
-        raise NotRun(f"роды на базе не прочитаны ({base}): {exc}") from exc
-    if done.returncode != 0:
-        # ФАЙЛА НЕТ НА БАЗЕ — ЭТО «РОДОВ НЕ БЫЛО», А НЕ ОТКАЗ. Всё прочее —
-        # неизвестная база, битый клон — отказ: молча принять пустую базу
-        # значило бы объявить новыми все роды разом. Формы отказа git берутся
-        # у шага журнала, а не пишутся второй раз (`493815f`, `783fb08`).
-        if any(said in done.stderr for said in check_journal.NO_SUCH_PATH):
-            return {}
-        raise NotRun(f"роды на базе не прочитаны ({base}): {done.stderr.strip()}")
-    try:
-        return dict(json.loads(done.stdout).get("kinds") or {})
-    except (json.JSONDecodeError, AttributeError) as exc:
-        raise NotRun(f"роды на базе не разбираются ({base}): {exc}") from exc
+    text = text_at(ref, where, root)
+    # ФАЙЛА НЕТ У СОСТОЯНИЯ — ЭТО «РОДОВ НЕ БЫЛО», А НЕ ОТКАЗ: молча принять
+    # пустоту при битом клоне значило бы объявить новыми все роды разом, и
+    # этот случай отличает `text_at`.
+    if text is None:
+        return {}
+    return finding_kinds.kinds_in(text, f"{where} у {ref}")
 
 
 def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
@@ -227,10 +242,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         new = added(args.base, args.head)
-        queue = queued(args.root / paths.PROPOSALS)
-        told = missing(new, queue, args.root)
-        # РОДЫ ЧИТАЮТСЯ У ТОГО ЖЕ СОСТОЯНИЯ, ЧТО И ЗАПИСИ РЕШЕНИЙ: «до» — у
-        # базы, «после» — у головы, обе через git. Прежде «после» читалось с
+        queue = queued(args.head, args.root)
+        told = missing(new, queue, args.head, args.root)
+        # РОДЫ ЧИТАЮТСЯ У ТОГО ЖЕ СОСТОЯНИЯ, ЧТО ЗАПИСИ И ОЧЕРЕДЬ: «до» — у
+        # базы, «после» — у головы, все через git. Прежде «после» читалось с
         # диска корня, а записи — диапазоном коммитов, и незакоммиченная правка
         # словаря судилась, а закоммиченная в другом коммите — нет (`c9a1c47`).
         # Словаря нет у головы — роды не ведутся, и это не отказ: шаг журнала

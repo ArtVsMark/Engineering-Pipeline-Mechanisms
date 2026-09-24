@@ -68,7 +68,7 @@ def run(root: Path) -> int:
         for path in done.stdout.split("\0")
         if path.startswith("docs/decisions/") and path.endswith(".md")
     ]
-    told = module.missing(new, module.queued(root / ".rules" / "proposals.json"), root)
+    told = module.missing(new, module.queued("HEAD", root), "HEAD", root)
     return FOUND if told else CLEAN
 
 
@@ -155,9 +155,12 @@ def test_a_change_without_a_decision_is_clean(tmp_path: Path) -> None:
 
 
 def test_an_unreadable_queue_is_the_third_outcome(tmp_path: Path) -> None:
-    """Очередь предложений не прочитана — «не отработал», а не «ответ есть» (039)."""
-    with pytest.raises(module.NotRun, match="очередь предложений не прочитана"):
-        module.queued(tmp_path / "нет-такого.json")
+    """Очереди у головы нет — «не отработал», а не «ответ есть» (039)."""
+    root = tree(tmp_path)
+    git(root, "rm", "-q", ".rules/proposals.json")
+    git(root, "commit", "-m", "очередь убрана")
+    with pytest.raises(module.NotRun, match=r"очередь предложений не прочитана.* у HEAD нет"):
+        module.queued("HEAD", root)
 
 
 def test_a_missing_base_is_the_third_outcome(capsys: pytest.CaptureFixture[str]) -> None:
@@ -178,10 +181,11 @@ def test_an_unreadable_queue_reaches_the_entry_point(
     """Нечитаемая очередь тоже доезжает до исхода «не отработал», а не до зелёного."""
     root = tree(tmp_path)
     git(root, "checkout", "-b", "work")
+    git(root, "rm", "-q", ".rules/proposals.json")
     born(root, "002-своё.md", f"# 002\n\n{SAID_OWN}\n")
-    (root / ".rules" / "proposals.json").unlink()
-    assert module.main(["--base", "main", "--root", str(root)]) == BROKEN
-    assert "гейт не отработал" in capsys.readouterr().err
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == BROKEN
+    assert "очередь предложений не прочитана" in capsys.readouterr().err
 
 
 def test_the_gate_reads_its_own_record() -> None:
@@ -345,3 +349,50 @@ def test_the_gate_asks_a_kind_crossing_the_threshold_end_to_end(tmp_path: Path) 
     git(root, "commit", "-m", "ответ каталогу")
     with contextlib.chdir(root):
         assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
+
+
+def test_a_file_is_read_at_the_state_not_from_the_disk(tmp_path: Path) -> None:
+    """`text_at` отдаёт текст у состояния; файла там нет — `None`; нет состояния — отказ."""
+    root = tree(tmp_path)
+    (root / ".rules" / "proposals.json").write_text("на диске, не в истории", encoding="utf-8")
+    said = module.text_at("HEAD", ".rules/proposals.json", root)
+    assert said is not None and "на диске" not in said and '"proposals"' in said
+    assert module.text_at("HEAD", "нет/такого.md", root) is None
+    with pytest.raises(module.NotRun, match="у не-существующая-база не прочитан"):
+        module.text_at("не-существующая-база", ".rules/proposals.json", root)
+
+
+def test_a_record_is_judged_at_the_head_not_on_the_disk(tmp_path: Path) -> None:
+    """Запись решения судится у головы: ответ, дописанный только на диске, не в счёт (`d5151c5`)."""
+    root = tree(tmp_path)
+    git(root, "checkout", "-b", "work")
+    born(root, "002-молчит.md", "# 002\n\nрешение без ответа\n")
+    (root / "docs" / "decisions" / "002-молчит.md").write_text(
+        f"# 002\n\n{SAID_OWN}\n", encoding="utf-8"
+    )
+    assert run(root) == FOUND
+
+
+def test_the_queue_is_read_at_the_head_not_on_the_disk(tmp_path: Path) -> None:
+    """Слаг сверяется с очередью у головы: отправлен только на диске — не отправлен (`bd9fa54`)."""
+    root = tree(tmp_path)
+    git(root, "checkout", "-b", "work")
+    born(root, "002-предложено.md", f"# 002\n\n{SAID_SENT}\n")
+    (root / ".rules" / "proposals.json").write_text(
+        json.dumps({"proposals": [{"slug": "a-red-that-survived-the-merge"}]}), encoding="utf-8"
+    )
+    assert run(root) == FOUND
+
+
+def test_kinds_of_a_foreign_shape_are_the_third_outcome(tmp_path: Path) -> None:
+    """Раздел kinds строкой у головы — отказ с именем состояния (`948f893`, `d5c2fb0`)."""
+    root = tree(tmp_path)
+    (root / ".rules" / "finding-kinds.json").write_text('{"kinds": "x"}', encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "роды не той формы")
+    with pytest.raises(module.finding_kinds.NotRun, match="у HEAD: раздел kinds не словарь"):
+        module.kinds_at("HEAD", root)
+    git(root, "checkout", "-q", "-b", "work")
+    born(root, "002-своё.md", f"# 002\n\n{SAID_OWN}\n")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == BROKEN

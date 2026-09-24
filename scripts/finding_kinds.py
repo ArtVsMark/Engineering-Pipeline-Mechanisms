@@ -84,22 +84,63 @@ class NotRun(RuntimeError):
     """Механизм не отработал: третий исход, а не «родов нет»."""
 
 
+def kinds_in(text: str, where: str) -> dict[str, Any]:
+    """Роды находок из текста словаря; раздела нет — пусто, не та форма — отказ.
+
+    ОДИН РАЗБОР НА ДИСК И НА ИСТОРИЮ. План читает словарь с диска, гейт
+    рождения правила — у базы и у головы через git, и прежде каждый разбирал
+    сам: `dict(kinds)` над строкой или списком бросал `ValueError`, который
+    ловил только один читатель из трёх (`19fe125`, `948f893`). Здесь любая
+    чужая форма — `NotRun`, и её ловят все.
+    """
+    try:
+        said = json.loads(text)
+    except json.JSONDecodeError as exc:
+        # Битый словарь — третий исход, а не падение читателя: гейт рождения
+        # правила и план ловят `NotRun`, а сырой `JSONDecodeError` прошёл бы
+        # мимо обоих. Нашёл внешний взгляд на #692 (`ff0aeef`).
+        raise NotRun(f"{where} не разбирается: {exc}") from exc
+    if not isinstance(said, dict):
+        raise NotRun(f"{where}: словарь родов не объект JSON")
+    kinds = said.get("kinds") or {}
+    if not isinstance(kinds, dict):
+        raise NotRun(f"{where}: раздел kinds не словарь, а {type(kinds).__name__}")
+    return dict(kinds)
+
+
 def read(path: Path | None = None) -> dict[str, Any]:
     """Объявленные роды находок."""
     where = path or paths.FINDING_KINDS
     if not where.is_file():
         raise NotRun(f"нет {where}: роды находок взять неоткуда (075)")
     try:
-        said = json.loads(where.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        # Битый словарь — третий исход, а не падение читателя: гейт рождения
-        # правила и план ловят `NotRun`, а сырой `JSONDecodeError` прошёл бы
-        # мимо обоих. Нашёл внешний взгляд на #692 (`ff0aeef`).
+        text = where.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
         raise NotRun(f"{where} не разбирается: {exc}") from exc
-    kinds = said.get("kinds") if isinstance(said, dict) else None
+    kinds = kinds_in(text, str(where))
     if not kinds:
         raise NotRun(f"{where}: раздел kinds пуст — предмет счёта не найден (075)")
-    return dict(kinds)
+    return kinds
+
+
+def queued(path: Path | None = None) -> str:
+    """Очередь предложений одной строкой — в ней и ищется слаг.
+
+    Ищется ВХОЖДЕНИЕМ, а не разбором поля: форму записи задаёт контракт
+    КАТАЛОГА (`export/README.md`), а не мы, и свой разбор его полей разошёлся бы
+    с ним молча — это уже случалось, когда набор искал вердикты под чужим ключом
+    ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
+
+    ОЧЕРЕДИ НЕТ — ОТКАЗ, А НЕ ПУСТАЯ ОЧЕРЕДЬ, у гейта и у плана одинаково.
+    План прежде читал отсутствующий файл как `""`, и каждый род с ответом
+    «предложено» вставал строкой «без ответа», пока гейт в том же случае
+    отказывал (`dd1da87`).
+    """
+    where = path or paths.PROPOSALS
+    try:
+        return where.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise NotRun(f"очередь предложений не прочитана ({where}): {exc}") from exc
 
 
 def origins(body: dict[str, Any]) -> tuple[int, int]:
@@ -227,9 +268,6 @@ def main(argv: list[str] | None = None) -> int:
         kinds = read(Path(args.kinds) if args.kinds else None)
     except NotRun as refusal:
         print(f"роды не сосчитаны: {refusal}", file=sys.stderr)
-        return EXIT_BROKEN
-    except ValueError as refusal:
-        print(f"роды не сосчитаны: {refusal} (075)", file=sys.stderr)
         return EXIT_BROKEN
 
     meetings = sum(len(body.get("встречен") or []) for body in kinds.values())
