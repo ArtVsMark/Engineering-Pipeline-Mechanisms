@@ -387,3 +387,39 @@ def test_no_reader_keeps_its_own_zone_predicate() -> None:
     own = [owner for owner, _ in zone_mentions(ROOT / "scripts" / "labels.py")]
     assert any(owner.startswith(DEFINES) for owner in own), own
     assert [owner for owner in own if not owner.startswith(DEFINES)] == ["zone_named"], own
+
+
+@pytest.mark.parametrize(
+    ("source", "owners"),
+    [
+        ('ZONE_PREFIX: Final = "area/"\n', ["=ZONE_PREFIX", "=ZONE_PREFIX"]),
+        (
+            'ZONE_PREFIX: (lambda n: n.startswith("area/")) = "area/"\n',
+            ["=ZONE_PREFIX", "=ZONE_PREFIX", ""],
+        ),
+        ("is_zone = lambda n: n.startswith(ZONE_PREFIX)\n", [""]),
+        ("async def z(n):\n    return n.startswith(ZONE_PREFIX)\n", ["z"]),
+        ('def z(n):\n    return n.startswith(getattr(labels, "ZONE_PREFIX"))\n', ["z"]),
+        (
+            "from labels import ZONE_PREFIX as Z\n\ndef z(n):\n    return n.startswith(Z)\n",
+            ["", "z"],
+        ),
+        ('def z(n):\n    return n.split("/")[0] == "area"\n', ["z"]),
+        ("def z(n):\n    return n.startswith(labels.zone_named)\n", []),
+    ],
+    ids=["определение", "аннотация", "lambda", "async", "getattr", "псевдоним", "слово", "мимо"],
+)
+def test_zone_mentions_name_every_form_and_its_owner(
+    tmp_path: Path, source: str, owners: list[str]
+) -> None:
+    """Каждая форма носителя узнаётся и приписывается своему владельцу (`f3d66b7`).
+
+    Обходы `d648f8a` и `b099b65` были подтверждены только откатом по живому
+    дереву: убери разбор аннотации или имени строкой — гейт по дереву остался
+    бы зелёным, потому что в дереве таких форм нет. Здесь каждая форма стоит
+    в синтетическом модуле, а последний случай — упоминание функции, а не
+    носителя, — держит вторую половину.
+    """
+    module_file = tmp_path / "some.py"
+    module_file.write_text(source, encoding="utf-8")
+    assert [owner for owner, _ in zone_mentions(module_file)] == owners
