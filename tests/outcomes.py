@@ -46,6 +46,7 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -174,28 +175,56 @@ COUNTERS: Final = frozenset(
 )
 
 #: Помощник ЭТОГО модуля, читающий объявления: исходом его вызов не является.
-#: Узнаётся в обеих формах, которыми его зовёт набор (замер 24.09.2026):
-#: голым именем `declared(…)` внутри модуля и `outcomes.declared(…)` у
-#: читателей — все четыре импортируют `from tests import outcomes` (взгляд на
-#: #744, второй заход). `m.declared(…)` у механизма (`check_contract`,
-#: `protection`, …) — его собственная функция, и её вызов остаётся исходом.
-#: Граница названа: импорт под другим именем (`as o`, `from tests.outcomes
-#: import declared as d`) и помощник теста с другим именем, возвращающий
+#: УЗНАЁТСЯ ПО ИМПОРТУ, А НЕ ПО ИМЕНИ. Замер 24.09.2026, прочитанный
+#: поимённо: помощник модули тестов получают только `from tests import
+#: outcomes` (четыре файла) и зовут `outcomes.declared(…)`; все 17 голых
+#: `declared(…)` в `test_*.py` — СВОИ функции `test_claims`,
+#: `test_consumer_channel` и `test_schedules`, к помощнику отношения не
+#: имеющие (взгляд на #745). Узнавание по одному имени отсекало их, узнавание
+#: по `outcomes.` пропускало псевдоним — связь берётся из импортов модуля.
+#: `m.declared(…)` у механизма — его собственная функция, и её вызов остаётся
+#: исходом. Граница названа: `import tests.outcomes` в любой форме (вызов
+#: `tests.outcomes.declared` или через псевдоним) и помощник теста с другим именем, возвращающий
 #: объявления, сойдут за исход — в наборе сегодня нет ни того, ни другого.
 READER: Final = "declared"
-#: Имя, под которым читатели импортируют этот модуль.
+#: Модуль помощника — как его импортируют читатели.
+READER_PACKAGE: Final = "tests"
 READER_HOME: Final = "outcomes"
 
 
-def reads_declarations(func: ast.expr) -> bool:
-    """Зовёт ли вызов помощник `declared` этого модуля — в любой из двух форм."""
+@dataclass(frozen=True, slots=True)
+class Readers:
+    """Под какими именами модуль теста знает помощник: его модуль и его самого."""
+
+    homes: frozenset[str] = frozenset()
+    names: frozenset[str] = frozenset()
+
+
+#: Модуль, не импортировавший помощник: узнавать нечего.
+NO_READERS: Final = Readers()
+
+
+def readers_of(tree: ast.AST) -> Readers:
+    """Имена, под которыми модуль импортировал помощник `declared` — с псевдонимами."""
+    homes: set[str] = set()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == READER_PACKAGE:
+            homes |= {one.asname or one.name for one in node.names if one.name == READER_HOME}
+        elif isinstance(node, ast.ImportFrom) and node.module == f"{READER_PACKAGE}.{READER_HOME}":
+            names |= {one.asname or one.name for one in node.names if one.name == READER}
+    return Readers(frozenset(homes), frozenset(names))
+
+
+def reads_declarations(func: ast.expr, readers: Readers) -> bool:
+    """Зовёт ли вызов помощник `declared` этого модуля — под тем именем, что импортировано."""
     if isinstance(func, ast.Name):
-        return func.id == READER
+        return func.id in readers.names
     return (
         isinstance(func, ast.Attribute)
         and func.attr == READER
         and isinstance(func.value, ast.Name)
-        and func.value.id == READER_HOME
+        and func.value.id in readers.homes
     )
 
 
@@ -203,7 +232,7 @@ def reads_declarations(func: ast.expr) -> bool:
 CODE_NAMES: Final = frozenset({"code", "returncode", "rc", "exit_code", "код"})
 
 
-def speaks_of_an_outcome(side: ast.expr) -> bool:
+def speaks_of_an_outcome(side: ast.expr, readers: Readers = NO_READERS) -> bool:
     """Говорит ли сторона сравнения — любая — об исходе механизма.
 
     ЧИСЛО ЗАСЧИТЫВАЕТСЯ ТОЛЬКО РЯДОМ С ИСХОДОМ. Прежде годилось любое
@@ -215,7 +244,7 @@ def speaks_of_an_outcome(side: ast.expr) -> bool:
     """
     if isinstance(side, ast.Call):
         func = side.func
-        if reads_declarations(func):
+        if reads_declarations(func, readers):
             return False
         name = getattr(func, "id", None) or getattr(func, "attr", None)
         return name not in COUNTERS
@@ -280,6 +309,7 @@ def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
     сравнении (`"EXIT_BROKEN" in out`) — проза вывода, а не прогон (`bcc5db5`).
     """
     local = whole_numbers(tree)
+    readers = readers_of(tree)
     numbers: set[int] = set()
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -289,7 +319,7 @@ def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
         # `assert main([]) == 2`. Судилась одна левая часть, и обратный порядок
         # давал ложный долг (`397be6f`).
         sides = [node.left, *node.comparators]
-        near = any(speaks_of_an_outcome(one) for one in sides)
+        near = any(speaks_of_an_outcome(one, readers) for one in sides)
         # ИМЯ ТОЖЕ ЗАСЧИТЫВАЕТСЯ ТОЛЬКО РЯДОМ С ИСХОДОМ. Сверка объявлений
         # `m.EXIT_SILENT not in (m.EXIT_OK, …)` — не прогон, а сравнение имён
         # между собой, и она шла за прогон (`abd8efa`); перечень имён рядом с
