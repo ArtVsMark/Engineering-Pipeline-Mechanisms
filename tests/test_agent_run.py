@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 module = load_script("agent_run.py")
 
@@ -139,7 +139,7 @@ def test_every_copy_of_the_cancellation_note_names_every_cause() -> None:
     снятия — ручная отмена у всех, замена новым прогоном — где группа её
     объявляет — обязаны быть названы в каждой.
     """
-    flows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    flows = walk(ROOT / ".github" / "workflows", "*.yml")
     notes = [
         (flow.name, block)
         for flow in flows
