@@ -94,6 +94,10 @@ def test_a_live_run_names_nothing_in_either_stream(
 #: `2>&1` (и с пробелом, `2>& 1`), `&>`/`&>>` и `>&слово` без номера потока
 #: впереди (`cmd >& "$F"`). `>&2` и `1>&2` — обратное направление, в выходы
 #: оно ничего не несёт, и цифра после `>&` из счёта выводит (`85ec323`).
+#: ГРАНИЦА: номер потока в переменной (`>&$fd`, `>&"$FD"`) от файла в
+#: переменной (`>& "$F"`) не отличить, и оба считаются слиянием — ложная
+#: тревога на шаге, пишущем выходы, дешевле пропуска, и в дереве таких нет
+#: (`69b9bcf`).
 MERGE_RE: Final = re.compile(r"2>&\s*1(?!\d)|&>|(?<![\d&])>&\s*(?![\d\s-])\S")
 
 
@@ -150,3 +154,29 @@ def test_a_step_writing_its_outputs_never_merges_the_streams() -> None:
     assert merging, "шагов со слиянием потоков нет вовсе — вторая половина проверки пуста (075)"
     found = [where for where, said in writing if any(merges_streams(c) for c in said)]
     assert not found, "шаг пишет выходы и сливает потоки: " + "; ".join(found)
+
+
+@pytest.mark.parametrize(
+    ("command", "merges"),
+    [
+        ("cmd 2>&1", True),
+        ("cmd 2>& 1", True),
+        ('cmd &> "$F"', True),
+        ('cmd &>> "$F"', True),
+        ('cmd >& "$F"', True),
+        ('cmd >&"$F"', True),
+        ("& tee -a out", True),
+        ("cmd >&2", False),
+        ("cmd 1>&2", False),
+        ("cmd 2>&12", False),
+        ("cmd >&-", False),
+        ('echo "a && b"', False),
+    ],
+)
+def test_the_merge_form_is_pinned_by_examples(command: str, merges: bool) -> None:
+    """Выражение слияния закреплено примерами обеих сторон (`ab75ecc`).
+
+    В дереве совпадений ноль, и порча выражения оставалась бы зелёной на
+    гейте по дереву; здесь каждая форма и каждое исключение названы.
+    """
+    assert merges_streams(command) is merges
