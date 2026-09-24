@@ -327,14 +327,27 @@ def zone_mentions(path: Path) -> list[tuple[str, int]]:
     found: list[tuple[str, int]] = []
     for top in tree.body:
         owner = zone_owner(top, names, prefix)
+        # АННОТАЦИЯ ОПРЕДЕЛЕНИЯ — НЕ ОПРЕДЕЛЕНИЕ: она исполняется на уровне
+        # модуля, и `ZONE_PREFIX: (lambda n: n.startswith("area/")) = "area/"`
+        # прощалась бы целиком (`d648f8a`).
+        aside = (
+            set(ast.walk(top.annotation))
+            if isinstance(top, ast.AnnAssign) and owner.startswith(DEFINES)
+            else set()
+        )
         for node in ast.walk(top):
             named = getattr(node, "id", None) or (
                 node.attr if isinstance(node, ast.Attribute) else None
             )
             imported = isinstance(node, ast.alias) and node.name in names
-            literal = isinstance(node, ast.Constant) and zone_literal(node.value, prefix)
-            if named in here or imported or literal:
-                found.append((owner, getattr(node, "lineno", 0) or top.lineno))
+            value = node.value if isinstance(node, ast.Constant) else None
+            literal = zone_literal(value, prefix)
+            # Имя носителя строкой — `getattr(labels, "ZONE_PREFIX")` — тот же
+            # носитель, только взятый по имени (`b099b65`).
+            by_name = isinstance(value, str) and value in names
+            if named in here or imported or literal or by_name:
+                where = "" if node in aside else owner
+                found.append((where, getattr(node, "lineno", 0) or top.lineno))
     return found
 
 
@@ -352,7 +365,9 @@ def test_no_reader_keeps_its_own_zone_predicate() -> None:
     Прощается ровно определение — присваивание литерала имени-носителю, — а
     не весь уровень модуля `labels.py`: модульная `lambda` или `async def` с
     приставкой — такая же копия (`d459e0f`). Носитель под другим именем
-    (`from labels import ZONE_PREFIX as Z`) узнаётся по импорту (`f820159`).
+    (`from labels import ZONE_PREFIX as Z`) узнаётся по импорту (`f820159`),
+    а взятый по имени строкой (`getattr(labels, "ZONE_PREFIX")`) — по строке
+    (`b099b65`). Аннотация определения определением не считается (`d648f8a`).
 
     ГРАНИЦА: приставку, собранную из частей (`"ar" + "ea/"`), гейт не видит —
     такую запись пишут, чтобы обойти, и её ловит взгляд, а не машина (057).
