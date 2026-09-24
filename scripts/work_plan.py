@@ -76,7 +76,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import changerefs
 import debt
@@ -407,6 +407,34 @@ BORN_INTO: Final = 4
 BORN_TAIL: Final = "родилась в работе по"
 
 
+def may_be_born(issue: dict[str, Any], repo: str, taken: frozenset[int] | set[int]) -> bool:
+    """Может ли задача встать рождённой строкой — ОДНА проверка на оба пути.
+
+    Путь по связи в теле и путь по подзадаче раньше отсекали разное: живая
+    задача механизма со связью в теле отсекалась, та же задача подзадачей —
+    нет (взгляд на #754). Условия собраны здесь, и обоим путям других нет:
+    открытая задача, а не изменение; не стоит в плане; не живая задача
+    механизма (план, реестры); своего хранилища.
+
+    ХРАНИЛИЩЕ СВЕРЯЕТСЯ БЕЗ УЧЁТА РЕГИСТРА: имена владельца и хранилища у
+    площадки регистронезависимы, и `--repo` в другом регистре уводил все свои
+    подзадачи в чужие молча. Чужое хранилище называется вслух (045).
+    """
+    number = int(issue.get("number") or 0)
+    text = str(issue.get("body") or "")
+    if not number or "pull_request" in issue or number in taken:
+        return False
+    if str(issue.get("state") or "open") != "open":
+        return False
+    if MARKER in text or findings.is_kept_by_a_mechanism(text):
+        return False
+    home = str(issue.get("repository_url") or "")
+    if home and not home.lower().endswith(f"/repos/{repo}".lower()):
+        print(f"#{number} из другого хранилища ({home}) — в план не встаёт")
+        return False
+    return True
+
+
 def born_rows(
     repo: str, token: str, held: dict[int, list[str]], taken: frozenset[int] = frozenset()
 ) -> list[str]:
@@ -449,24 +477,16 @@ def born_rows(
         return []
     found: dict[int, tuple[str, int]] = {}
     for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
-        number = int(issue.get("number") or 0)
-        text = str(issue.get("body") or "")
-        if "pull_request" in issue or number in parents or number in taken:
+        if not may_be_born(issue, repo, parents | taken):
             continue
-        if MARKER in text or findings.is_kept_by_a_mechanism(text):
-            continue
-        links = changerefs.links_in(text)
+        links = changerefs.links_in(str(issue.get("body") or ""))
         linked = [link.number for link in links if link.number in parents]
         if linked:
-            found.setdefault(number, (str(issue.get("title") or ""), linked[0]))
+            found.setdefault(int(issue["number"]), (str(issue.get("title") or ""), linked[0]))
     for parent in sorted(parents):
         for issue in ghrest.paginate(f"repos/{repo}/issues/{parent}/sub_issues", token):
-            number = int(issue.get("number") or 0)
-            home = str(issue.get("repository_url") or "")
-            if home and not home.endswith(f"/repos/{repo}"):
-                continue
-            if issue.get("state") == "open" and number not in parents | taken:
-                found.setdefault(number, (str(issue.get("title") or ""), parent))
+            if may_be_born(issue, repo, parents | taken):
+                found.setdefault(int(issue["number"]), (str(issue.get("title") or ""), parent))
     return [
         f"- **#{number}** — {title} *({BORN_TAIL} #{parent})*"
         for number, (title, parent) in sorted(found.items())
