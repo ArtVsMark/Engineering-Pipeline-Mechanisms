@@ -238,6 +238,8 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         # Сколько файлов трогает изменение. По умолчанию — один: пустая голова
         # это отдельный случай, и объявлять его умолчанием нельзя.
         "files_changed": {},
+        # Изменения, на голове которых взгляд ещё идёт (#654).
+        "looking": set(),
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -275,6 +277,9 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return list(problems), bool(waiting)
 
     monkeypatch.setattr(module, "head_verdict", head_verdict)
+    monkeypatch.setattr(
+        module, "awaits_look", lambda repo, item, tok: item.number in state["looking"]
+    )
     # Взведение подменяется НА УРОВНЕ МУТАЦИИ, а не целым шагом: между «очередь
     # отдала последнее действие» и «очередь позвала свою функцию» разница ровно
     # в том, доходит ли до площадки НАШЕ тело уплотнения.
@@ -1252,3 +1257,62 @@ def test_a_red_outcome_is_explained_on_both_paths(
     said = capsys.readouterr().out
     assert "исход красный" in said, said
     assert [node for node, _, _ in platform["asked"]] == ["PR_1", "PR_2"], platform["asked"]
+
+
+def test_a_head_waits_for_the_look_before_it_is_armed(platform: dict[str, Any]) -> None:
+    """Голова, на которой идёт взгляд, не сливается и не взводится (#654, вариант 3).
+
+    Замер смены 23–24.09.2026: 30 из 32 слитых изменений догоняли находки
+    взгляда на уже слитом. Взведённую голову ожидание снимает — иначе
+    площадка слила бы её сама; очередь идёт дальше к следующему кандидату.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True), change(2, "automerge")]
+    platform["looking"] = {1}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["disarmed"] == ["PR_1"]
+    assert platform["merged"] == [2], "голова, ждущая взгляда, слита или держит очередь"
+
+
+def test_a_finished_look_lets_the_head_go(platform: dict[str, Any]) -> None:
+    """Вторая половина: взгляд завершился — голова сливается как прежде."""
+    platform["changes"] = [change(1, "automerge")]
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["merged"] == [1]
+
+
+@pytest.mark.parametrize(
+    ("runs", "pending"),
+    [
+        ([{"name": "review", "status": "in_progress"}], True),
+        ([{"name": "review", "status": "queued"}], True),
+        ([{"name": "review", "status": "completed", "conclusion": "failure"}], False),
+        ([{"name": "review", "status": "completed", "conclusion": "skipped"}], False),
+        ([{"name": "test", "status": "in_progress"}], False),
+        ([], False),
+    ],
+    ids=["идёт", "в очереди", "упал", "пропущен", "чужая запись", "записи нет"],
+)
+def test_the_look_is_awaited_only_while_it_runs(runs: list[dict[str, Any]], pending: bool) -> None:
+    """Ждётся только идущий взгляд: исход не судится, отсутствие записи не держит.
+
+    Взгляд совещательный (051) — упавший или пропущенный слияние не держит.
+    Записи нет — взгляд не запускался, и ждать некого: молчание называет
+    реестр слитого без взгляда, а не очередь.
+    """
+    assert module.look_pending(runs) is pending
+
+
+def test_awaiting_the_look_asks_the_review_record_of_the_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`awaits_look` спрашивает запись проверки взгляда на голове изменения."""
+    asked: list[str] = []
+
+    def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        asked.append(path)
+        return iter([{"name": "review", "status": "in_progress"}])
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    item = change(1, "automerge")
+    assert module.awaits_look("o/r", item, "token") is True
+    assert asked == [f"repos/o/r/commits/{item.head}/check-runs?check_name=review"]

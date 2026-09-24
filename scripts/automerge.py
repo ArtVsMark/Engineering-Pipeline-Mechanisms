@@ -489,6 +489,49 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
     return ci_complete.verdict(ci_complete.worst_per_name(runs), required, "", strict_missing=True)
 
 
+#: Имя записи проверки взгляда на голове: имя джоба и есть имя контекста
+#: (`docs/pipeline.md`), как и у реестра слитого без взгляда.
+REVIEW_CHECK: Final = "review"
+
+
+def look_pending(runs: list[dict[str, Any]]) -> bool:
+    """Идёт ли на голове взгляд: запись проверки взгляда есть и не завершена.
+
+    СОГЛАСИЕ ЖДЁТ ВЕРДИКТА ВЗГЛЯДА, А НЕ ЕГО ЗЕЛЕНИ (#654, решение владельца
+    24.09.2026, вариант 3). Замер смены 23–24.09.2026: слито 32 изменения, 30
+    из них догоняли находки взгляда на уже слитом — голова сливалась раньше,
+    чем взгляд успевал сказать, и каждая находка уезжала отдельным изменением.
+    Теперь голова не взводится и не сливается, пока взгляд идёт; находка,
+    пришедшая до слияния, чинится в той же ветке.
+
+    Исход взгляда при этом не судится: он совещательный, и красное или
+    зелёное его записи слияния не держит (051). Записи нет вовсе — взгляд не
+    запускался (правка файла прогона, форк), и ждать некого: молчание взгляда
+    не становится затором, его называет реестр слитого без взгляда.
+    """
+    return any(
+        str(run.get("name") or "") == REVIEW_CHECK and run.get("status") != "completed"
+        for run in runs
+    )
+
+
+def awaits_look(repo: str, change: Change, owner_token: str) -> bool:
+    """Ждёт ли голова вердикта взгляда — по записям проверок её головы.
+
+    Спрашивается отдельно от вердикта проверок и только у головы, которую
+    сейчас взводят или сливают: вопрос другой (взгляд в вердикт не входит), и
+    читать его надо в миг решения, а не в начале захода.
+    """
+    runs = list(
+        ghrest.paginate(
+            f"repos/{repo}/commits/{change.head}/check-runs?check_name={REVIEW_CHECK}",
+            owner_token,
+            key="check_runs",
+        )
+    )
+    return look_pending(runs)
+
+
 @dataclass(frozen=True, slots=True)
 class Head:
     """Что площадка говорит о голове очереди: чем слить и сколько там работы.
@@ -913,6 +956,22 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             skipped["красны"] += 1
             continue
 
+        if awaits_look(repo, change, owner_token):
+            # ВЗВЕДЁННУЮ ГОЛОВУ ОЖИДАНИЕ СНИМАЕТ: площадка слила бы её сама, как
+            # только позеленеют обязательные, — то есть ожидание, которое только
+            # молчит, ничего не держит (126). Очередь снова позовёт завершение
+            # прогона взгляда (`workflow_run` по `review`).
+            if change.armed:
+                take_back(repo, change, "ждёт вердикта взгляда", owner_token, dry_run=dry_run)
+                # Снятое помечается в самой очереди: иначе слияние соседа ниже
+                # сняло бы то же взведение второй раз по устаревшему снимку.
+                queue = [
+                    replace(one, armed=False) if one.number == change.number else one
+                    for one in queue
+                ]
+            print(f"#{change.number}: ждёт вердикта взгляда — не взвожу (#654)")
+            skipped["ждут вердикта взгляда"] += 1
+            continue
         look = head_look(repo, change.number, owner_token)
         state = look.state
         if look.changed == 0:
