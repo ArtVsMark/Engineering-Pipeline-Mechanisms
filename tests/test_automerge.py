@@ -1357,3 +1357,31 @@ def test_a_push_wakes_the_queue() -> None:
     events = said[True] if True in said else said["on"]
     assert "synchronize" in events["pull_request"]["types"]
     assert "review" in events["workflow_run"]["workflows"]
+
+
+def test_a_forgotten_repair_label_on_a_green_branch_still_waits(
+    platform: dict[str, Any],
+) -> None:
+    """Метка `fix-main` на ЗЕЛЁНОЙ общей ветке ожидания взгляда не снимает.
+
+    Общую ветку починило другое изменение, а метка осталась: обход по одной
+    метке слил бы голову без взгляда (взгляд на #735).
+    """
+    platform["changes"] = [change(9, "automerge", "fix-main")]
+    platform["looking"] = {9}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["merged"] == []
+
+
+def test_syncing_a_head_takes_back_an_armed_neighbour(platform: dict[str, Any]) -> None:
+    """Подтяжка отставшей головы снимает взведение соседа до выхода (взгляд на #735).
+
+    Толчок во взведённое изменение ниже зовёт заход; подтянув чужую голову и
+    выйдя, заход оставил бы соседа взведённым — и площадка слила бы его раньше
+    нового взгляда.
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge", armed=True)]
+    platform["states"] = {1: module.STATE_BEHIND}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == [1]
+    assert platform["disarmed"] == ["PR_2"]
