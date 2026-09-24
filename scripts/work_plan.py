@@ -292,14 +292,18 @@ def birth_part(where: Path | None = None) -> Source:
     есть». Новый род такой ответ несёт с момента, когда дошёл до порога (гейт
     `check_rule_birth`); прежние, дошедшие раньше, называет здесь план.
 
-    Словаря родов нет — роды не ведутся, и это пустота, а не отказ.
+    СЛОВАРЯ НЕТ — ЭТО НАЗВАННОЕ МОЛЧАНИЕ, А НЕ ПУСТОТА. Пути в проекте
+    относительно корня, как у всех механизмов; запуск не из корня прежде давал
+    пустой раздел, неотличимый от «поводов нет» (`13f3a9d`). У плана словарь
+    есть всегда, и его отсутствие — поломка захода.
     """
     declared = where or paths.FINDING_KINDS
-    if not declared.is_file():
-        return Source()
+    queue_path = declared.parent / paths.PROPOSALS.name
     try:
-        left = finding_kinds.unanswered(finding_kinds.read(declared))
-    except (finding_kinds.NotRun, ValueError) as exc:
+        kinds = finding_kinds.read(declared)
+        queue = queue_path.read_text(encoding="utf-8") if queue_path.is_file() else ""
+        left = finding_kinds.unanswered(kinds, queue)
+    except finding_kinds.NotRun as exc:
         return Source(unread=f"роды находок не прочитаны: {exc}")
     return Source(
         rows=[

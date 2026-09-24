@@ -30,8 +30,18 @@
 Тот же приём у гейта «новое приезжает со своим прогоном»: предмет — прирост, а не
 дерево целиком.
 
-Исходы (правило 039): ``0`` ответ есть у каждой новой записи · ``1`` запись
-молчит · ``2`` гейт не отработал.
+ВТОРОЙ ПРЕДМЕТ — РОД НАХОДКИ У ПОРОГА ПОВТОРА (#650). Класс ошибки,
+встреченный трижды, спрашивается о правиле в том изменении, которым дошёл до
+порога; ответ живёт в самом роде (`.rules/finding-kinds.json`, поле
+`каталогу`). ГРАНИЦА: инциденты источников 0–2 — краснота общей ветки,
+конфликт и красное на своём изменении — живут в реестре красноты, а у его
+записей нет рода: повтор там узнаётся по имени задания, и мигающее задание
+уходит в список перезапуска со своей причиной (`.rules/rerun.json`).
+Спрашивать правило у мигания площадки — не про то, и гейт этого не делает
+(`d4ae968`).
+
+Исходы (правило 039): ``0`` ответ есть у каждой новой записи и у каждого рода,
+дошедшего до порога · ``1`` запись или род молчит · ``2`` гейт не отработал.
 """
 
 from __future__ import annotations
@@ -44,6 +54,7 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+import check_journal
 import finding_kinds
 import paths
 
@@ -108,25 +119,9 @@ def queued(where: Path | None = None) -> str:
         raise NotRun(f"очередь предложений не прочитана ({path}): {exc}") from exc
 
 
-#: Оформление вокруг слага: обратные кавычки, кавычки-ёлочки и знак конца
-#: предложения. Снимается ДО сверки с очередью.
-AROUND_SLUG: Final = "`\"'«».,;:()[]"
-
-
-def slug_of(said: str) -> str:
-    """Слаг из строки ответа — без оформления вокруг него.
-
-    ГЕЙТ СУДИТ СУЩЕСТВО, А НЕ РАЗМЕТКУ. Первое слово строки бралось целиком, и
-    слаг, записанный в обратных кавычках — то есть ровно так, как имя пишут в
-    документе этого проекта повсюду, — не сходился с очередью: гейт видел
-    «`имя`.» и честного ответа не признавал. Красное на законном учит обходить
-    красное
-    ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
-    Поймано 17.09.2026 на ПЕРВОЙ же записи с ответом «предложено» — до неё у
-    этой ветки разбора не было живого предмета вовсе.
-    """
-    first = said.split()[0] if said.split() else ""
-    return first.strip(AROUND_SLUG)
+#: Слаг ответа разбирает словарь родов — одна разборка на решения и роды (022).
+#: История разборки переехала вместе с функцией: `finding_kinds.slug_of`.
+slug_of = finding_kinds.slug_of
 
 
 def missing(paths_: list[str], queue: str, root: Path = Path()) -> list[str]:
@@ -183,8 +178,9 @@ def kinds_at(base: str, root: Path = Path()) -> dict[str, Any]:
     if done.returncode != 0:
         # ФАЙЛА НЕТ НА БАЗЕ — ЭТО «РОДОВ НЕ БЫЛО», А НЕ ОТКАЗ. Всё прочее —
         # неизвестная база, битый клон — отказ: молча принять пустую базу
-        # значило бы объявить новыми все роды разом.
-        if "does not exist" in done.stderr or "exists on disk, but not in" in done.stderr:
+        # значило бы объявить новыми все роды разом. Формы отказа git берутся
+        # у шага журнала, а не пишутся второй раз (`493815f`, `783fb08`).
+        if any(said in done.stderr for said in check_journal.NO_SUCH_PATH):
             return {}
         raise NotRun(f"роды на базе не прочитаны ({base}): {done.stderr.strip()}")
     try:
@@ -211,31 +207,13 @@ def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     return sorted(name for name in after if times(after, name) >= at > times(before, name))
 
 
-#: Номер правила каталога в ответе «есть»: три цифры первым словом.
-RULE_NUMBER_RE: Final = re.compile(r"^\d{3}\b")
-
-
 def kinds_missing(names: list[str], after: dict[str, Any], queue: str) -> list[str]:
     """Роды у порога, чей ответ каталогу отсутствует или не сходится."""
     told: list[str] = []
     for name in names:
-        said = finding_kinds.fate(after[name])
-        if said is None:
-            told.append(
-                f"  род «{name}» дошёл до порога, а поля «{finding_kinds.CATALOGUE}» нет: "
-                "«предложено — <слаг>», «своё — <причина>» или «есть — <номер правила>»"
-            )
-            continue
-        kind, what = said
-        if kind == "предложено":
-            slug = slug_of(what)
-            if not slug or slug not in queue:
-                told.append(
-                    f"  род «{name}»: назван слаг «{slug}», а в очереди предложений "
-                    f"({paths.PROPOSALS}) его нет"
-                )
-        elif kind == "есть" and not RULE_NUMBER_RE.match(what):
-            told.append(f"  род «{name}»: ответ «есть», а номера правила первым словом нет")
+        problem = finding_kinds.answer_problem(after[name], queue)
+        if problem is not None:
+            told.append(f"  род «{name}» дошёл до порога: {problem}")
     return told
 
 
@@ -251,11 +229,13 @@ def main(argv: list[str] | None = None) -> int:
         new = added(args.base, args.head)
         queue = queued(args.root / paths.PROPOSALS)
         told = missing(new, queue, args.root)
-        # СЛОВАРЯ РОДОВ НЕТ — РОДЫ НЕ ВЕДУТСЯ, И ЭТО НЕ ОТКАЗ. Шаг журнала
-        # переносим, и у потребителя словаря может не быть вовсе; требовать его
-        # значило бы красить чужой проект за то, чего он не заводил.
-        declared = args.root / paths.FINDING_KINDS
-        after = finding_kinds.read(declared) if declared.is_file() else {}
+        # РОДЫ ЧИТАЮТСЯ У ТОГО ЖЕ СОСТОЯНИЯ, ЧТО И ЗАПИСИ РЕШЕНИЙ: «до» — у
+        # базы, «после» — у головы, обе через git. Прежде «после» читалось с
+        # диска корня, а записи — диапазоном коммитов, и незакоммиченная правка
+        # словаря судилась, а закоммиченная в другом коммите — нет (`c9a1c47`).
+        # Словаря нет у головы — роды не ведутся, и это не отказ: шаг журнала
+        # переносим, и у потребителя словаря может не быть вовсе.
+        after = kinds_at(args.head, args.root)
         grown = crossed(kinds_at(args.base, args.root), after) if after else []
         told += kinds_missing(grown, after, queue)
     except (NotRun, finding_kinds.NotRun) as exc:

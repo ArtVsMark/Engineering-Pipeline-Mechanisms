@@ -517,11 +517,6 @@ def test_a_kind_at_the_threshold_without_an_answer_is_plan_work(tmp_path: Any) -
     assert said.rows == ["род находок у порога без ответа каталогу: «без ответа» — встреч 3"]
 
 
-def test_no_kinds_file_is_emptiness_not_a_refusal(tmp_path: Any) -> None:
-    """Словаря родов нет — роды не ведутся: пустота, а не молчание источника."""
-    assert module.birth_part(tmp_path / "нет.json") == module.Source()
-
-
 def test_a_dry_run_names_the_plan_number(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -530,3 +525,27 @@ def test_a_dry_run_names_the_plan_number(
     assert module.main(["--repo", "o/r"]) == module.EXIT_OK
     assert written == []
     assert "план #639 — собрал бы так:" in capsys.readouterr().out
+
+
+def test_no_kinds_file_is_named_silence_not_emptiness(tmp_path: Any) -> None:
+    """Словаря родов нет — раздел называет молчание, а не «поводов нет» (`13f3a9d`).
+
+    У плана словарь есть всегда; запуск не из корня прежде давал пустой
+    раздел, неотличимый от настоящей пустоты.
+    """
+    said = module.birth_part(tmp_path / "нет.json")
+    assert said.rows == [] and "роды находок не прочитаны" in said.unread
+
+
+def test_an_unsent_proposal_keeps_the_kind_in_the_plan(tmp_path: Any) -> None:
+    """Ответ «предложено» со слагом вне очереди — не ответ: род остаётся в плане (`72397b3`)."""
+    path = kinds_file(
+        tmp_path,
+        {"род": {"встречен": ["a", "b", "c"], "каталогу": "предложено — not-sent-yet"}},
+    )
+    (tmp_path / "proposals.json").write_text('{"proposals": []}', encoding="utf-8")
+    assert len(module.birth_part(path).rows) == 1
+    (tmp_path / "proposals.json").write_text(
+        '{"proposals": [{"slug": "not-sent-yet"}]}', encoding="utf-8"
+    )
+    assert module.birth_part(path).rows == []
