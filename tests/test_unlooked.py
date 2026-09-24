@@ -881,3 +881,58 @@ def test_a_look_skipped_on_a_red_head_is_named_not_silent() -> None:
     assert module.why_quiet([run]) == module.STATE_SKIPPED_RED
     refused = {**run, module.REFUSED_KEY: True}
     assert module.why_quiet([refused]) == module.STATE_REFUSED, "названный отказ сильнее пропуска"
+
+
+def late_answer(day: str) -> dict[str, Any]:
+    """Ответ позднего взгляда в ленте: отметка и вердикт."""
+    return {"body": f"{module.LATE_MARKER}\nВЕРДИКТ: находок 2", "created_at": f"{day}T12:00:00Z"}
+
+
+def test_a_late_look_is_seen_in_the_feed_with_its_verdict() -> None:
+    """Поздний взгляд узнаётся по ответу в ленте; отметка без вердикта — не ответ."""
+    assert module.late_seen([late_answer("2026-09-24")]) == "2026-09-24"
+    unanswered = {"body": module.LATE_MARKER, "created_at": "2026-09-24T12:00:00Z"}
+    assert module.late_seen([unanswered]) == ""
+    assert (
+        module.late_seen([{"body": "ВЕРДИКТ: находок 0", "created_at": "2026-09-24T12:00:00Z"}])
+        == ""
+    )
+
+
+def test_a_late_look_lost_by_a_racing_write_is_restored_from_the_feed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отметка позднего взгляда, стёртая чужой записью, восстанавливается по ленте (#89).
+
+    Реестр пишут два прогона, и заход очереди, начатый до отметки позднего
+    взгляда, стирал её своим снимком: #761, #768, #769 висели «без взгляда»,
+    хотя ответ позднего взгляда лежал в их лентах.
+    """
+    body = (
+        f"{module.MARKER}\n"
+        "- #761 · прогон взгляда прошёл, а ответа нет · 2026-09-24\n"
+        "- #773 · вердикта нет · 2026-09-24\n"
+    )
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, marker: (89, body))
+    monkeypatch.setattr(module, "merged_changes", lambda repo, token, limit: [])
+    monkeypatch.setattr(module, "look_at", lambda repo, number, token: module.STATE_SILENT)
+    feeds = {761: [late_answer("2026-09-24")], 773: []}
+    monkeypatch.setattr(
+        module, "late_on", lambda repo, number, token: module.late_seen(feeds[number])
+    )
+    module.main(["--repo", "o/r"])
+    said = capsys.readouterr().out
+    assert "сняты: #761" in said, said
+    assert "#773" in said and "сняты: #761, #773" not in said
+
+
+def test_late_on_reads_the_feed_of_the_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`late_on` спрашивает ленту изменения у площадки."""
+
+    def paginate(path: str, token: str, **_: Any) -> Any:
+        assert path == "repos/o/r/issues/761/comments"
+        return iter([late_answer("2026-09-23")])
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert module.late_on("o/r", 761, "t") == "2026-09-23"
