@@ -183,22 +183,26 @@ COUNTERS: Final = frozenset(
 #: имеющие (взгляд на #745). `m.declared(…)` у механизма — его собственная
 #: функция, и её вызов остаётся исходом.
 #:
-#: ФОРМЫ ИМПОРТА ПЕРЕЧИСЛЕНЫ ВСЕ, а не по одной за заход взгляда: каждая
+#: ФОРМЫ ИМПОРТА ПЕРЕЧИСЛЕНЫ РАЗОМ, а не по одной за заход взгляда: каждая
 #: прежняя починка называла следующую форму границей, и следующий заход
-#: находил ещё одну (род «каскад по одному месту», #746). Формы — абсолютная
-#: и относительная (`tests` · `.`), модуль или сама функция, с псевдонимом и
-#: без, `import tests.outcomes` с псевдонимом и без, и звёздочка. Каждую
-#: держит свой случай в `test_outcomes_run.py`. Граница одна: помощник теста
-#: с ДРУГИМ именем, возвращающий объявления, сойдёт за исход — отличить его
-#: от `run(…)` по имени нельзя, и в наборе его нет.
+#: находил ещё одну (род «каскад по одному месту», #746). Узнаются: `from`
+#: пакета (`tests` · `.`) — модуль, `from` модуля помощника (`tests.outcomes`
+#: · `.outcomes`) — функция или звёздочка, простой `import` пакета или
+#: модуля помощника — с псевдонимом и без. Каждую форму держит свой случай в
+#: `test_outcomes_run.py`, и счёт форм — там, а не здесь. Границы: помощник
+#: теста с ДРУГИМ именем, возвращающий объявления, и импорт в обход
+#: оператора (`importlib.import_module`) сойдут за исход — отличить их по
+#: разбору нельзя, и в наборе их нет.
 READER: Final = "declared"
 READER_HOME: Final = "outcomes"
 #: Откуда берут модуль помощника: пакет абсолютно и относительно.
 READER_PACKAGES: Final = frozenset({"tests", "."})
 #: Откуда берут саму функцию: модуль помощника абсолютно и относительно.
 READER_MODULES: Final = frozenset({f"tests.{READER_HOME}", f".{READER_HOME}"})
-#: `import tests.outcomes` — единственная форма простого импорта.
+#: Простой импорт: пакета (`import tests` — путь до модуля тогда
+#: `tests.outcomes`) и самого модуля помощника.
 READER_IMPORT: Final = f"tests.{READER_HOME}"
+READER_PACKAGE_IMPORT: Final = "tests"
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +236,9 @@ def readers_of(tree: ast.AST) -> Readers:
             for one in node.names:
                 if one.name == READER_IMPORT:
                     homes.add(one.asname or one.name)
+                # `import tests` — модуль помощника тогда `tests.outcomes`.
+                if one.name == READER_PACKAGE_IMPORT:
+                    homes.add(f"{one.asname or one.name}.{READER_HOME}")
             continue
         if not isinstance(node, ast.ImportFrom):
             continue
