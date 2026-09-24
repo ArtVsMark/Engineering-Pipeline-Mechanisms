@@ -171,6 +171,10 @@ def test_a_step_writing_its_outputs_never_merges_the_streams() -> None:
         ("cmd 2>&12", False),
         ("cmd >&-", False),
         ('echo "a && b"', False),
+        # ГРАНИЦА, закреплённая примером (`4d85855`): номер потока в переменной
+        # считается слиянием — от файла в переменной его не отличить.
+        ("cmd >&$fd", True),
+        ('cmd >&"$FD"', True),
     ],
 )
 def test_the_merge_form_is_pinned_by_examples(command: str, merges: bool) -> None:
@@ -180,3 +184,14 @@ def test_the_merge_form_is_pinned_by_examples(command: str, merges: bool) -> Non
     гейте по дереву; здесь каждая форма и каждое исключение названы.
     """
     assert merges_streams(command) is merges
+
+
+def test_a_pipe_with_stderr_leaves_the_mark_merges_streams_reads() -> None:
+    """`|&` узнаётся связкой двух функций: разбор команд и предикат слияния (`bba2855`).
+
+    Пример `"& tee -a out"` проверял только остаток, написанный руками; что
+    `commands` отдаёт от `cmd |& tee` ровно такой остаток — не закреплял никто.
+    """
+    said = runs_series.commands('cmd |& tee -a "$GITHUB_OUTPUT"')
+    assert said == ["cmd", '& tee -a "$GITHUB_OUTPUT"'], said
+    assert any(merges_streams(one) for one in said)
