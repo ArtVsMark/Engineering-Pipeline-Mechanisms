@@ -22,18 +22,19 @@
 
 **Приёмку пункта называет проверка, появившаяся ПОСЛЕ постановки.** Пункт,
 сформулированный свойствами («строка без адреса — отказ сборки»), первым
-признаком не ловится вовсе, а таких большинство: замер 24.09.2026 по всей
-истории — из 166 закрытых пунктов путь или имя теста называют 19, свойствами
-сформулированы 147 (#648). Признак сверяет основы слов пункта с первой
-строкой докстроки и именем проверок набора, родившихся после постановки
-задачи. На том же замере при пороге `SAME_SUBJECT` он узнаёт 53 закрытых
-пункта из 147 (36%) и срабатывает на одном открытом пункте открытых задач из
-23 (4%) — на широкой строке эпика. Без опоры на дату рождения проверки
-ложных было бы четыре из 23, и опора оставлена. Это слабее первого признака и
-потому стоит под ним: он называет проверку, а не файл, и говорит «похоже».
+признаком не ловится вовсе, а таких большинство (#648). Признак сверяет
+основы слов пункта с первым абзацем докстроки и именем проверок набора,
+родившихся после постановки задачи. Это слабее первого признака и потому
+стоит под ним: он называет проверку, а не файл, и говорит «похоже».
 
-ГРАНИЦА: открытые пункты ЗАКРЫТЫХ задач (80 на замере) в мерку не брались —
-задачу закрыли, а галочки не поставили, и сделан ли пункт, по ним не узнать.
+ЗАМЕР ВОСПРОИЗВОДИТСЯ, А НЕ ПЕРЕПИСЫВАЕТСЯ: `python scripts/items_left.py
+--measure` читает все задачи и печатает, сколько пунктов называют путь,
+сколько сформулированы свойствами и сколько из них признак узнаёт — среди
+закрытых пунктов и среди открытых пунктов открытых задач. Числа, на которых
+выбран порог, записаны один раз — у `SAME_SUBJECT`.
+
+ГРАНИЦА: открытые пункты ЗАКРЫТЫХ задач в мерку не берутся — задачу закрыли,
+а галочки не поставили, и сделан ли пункт, по ним не узнать.
 
 ВТОРОЙ МОЛЧИТ ТАМ, ГДЕ СРАБОТАЛ ПЕРВЫЙ. Один долг, названный дважды, читается
 как два, а списки того же самого расходятся молча
@@ -51,12 +52,19 @@
 
 from __future__ import annotations
 
+import argparse
 import ast
+import os
 import re
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, NamedTuple
+
+import findings
+import ghrest
+import items
 
 #: Путь внутри дерева, названный прозой пункта. Расширение обязательно: без
 #: него в улов попадает всякое слово с точкой, а `scripts/` без имени файла
@@ -82,17 +90,25 @@ STOP: Final = frozenset(
     {"который", "которые", "чтобы", "потому", "только", "теперь", "всегда", "нужно"}
     | {"проверка", "проверки", "задача", "пункт", "пункта", "изменение", "изменения"}
     | {"механизм", "механизма", "должен", "может", "между", "после", "перед", "через"}
-    | {"каждый", "каждая", "одного", "своего", "этого", "того"}
+    | {"каждый", "каждая", "одного", "своего", "этого"}
 )
 
+#: Стоп-слова сверяются ОСНОВОЙ, как и само сходство: словоформа «проверку»
+#: иначе проходила бы мимо «проверка» и завышала долю (`62fae56`).
+STOP_STEMS: Final = frozenset(word[:STEM] for word in STOP)
+
 #: Какая доля основ пункта должна найтись у проверки. Не подобрана на глаз:
-#: замер 24.09.2026 по всей истории (#648) — 0.4 даёт 36% закрытых пунктов при
-#: одном ложном из 23 открытых; 0.3 — 54% при четырёх ложных, 0.5 — 16% при том
-#: же одном.
+#: `python scripts/items_left.py --measure`, 24.09.2026 — закрытых пунктов 125,
+#: свойствами 108; при 0.4 признак узнаёт 33 из 108 и ложно срабатывает на
+#: одном открытом пункте открытых задач из 13; при 0.3 — 45 и два ложных, при
+#: 0.5 — 17 и ни одного (#648).
 SAME_SUBJECT: Final = 0.4
 
 #: Пункт короче трёх основ сравнивать не с чем: любая проверка совпадёт.
 MIN_STEMS: Final = 3
+
+EXIT_OK: Final = 0
+EXIT_BROKEN: Final = 2
 
 #: Сколько дней без событий делает задачу с открытыми пунктами кандидатом на
 #: взгляд. Величина объявлена здесь, а не выведена: она про внимание человека,
@@ -247,11 +263,17 @@ def evidence(item: str, since: datetime, files: set[str], root: Path | None = No
 
 def stems(text: str) -> frozenset[str]:
     """Основы значимых слов текста."""
-    return frozenset(word[:STEM] for word in WORD_RE.findall(text.lower()) if word not in STOP)
+    found = {word[:STEM] for word in WORD_RE.findall(text.lower())}
+    return frozenset(found - STOP_STEMS)
 
 
 #: Строка диффа, добавляющая проверку.
 DEF_RE: Final = re.compile(r"^\+\s*def (test_\w+)")
+
+#: Заголовок файла в диффе: дата рождения ключуется ФАЙЛОМ и именем, а не
+#: одним именем — одноимённая проверка в другом файле получала бы чужую дату
+#: (`1ca2bb6`).
+FILE_RE: Final = re.compile(r"^\+\+\+ b/(?:.*/)?(test_[\w]+\.py)$")
 
 
 def tests_born(root: Path | None = None) -> dict[str, datetime]:
@@ -274,18 +296,24 @@ def tests_born(root: Path | None = None) -> dict[str, datetime]:
         return {}
     found: dict[str, datetime] = {}
     when: datetime | None = None
+    file = ""
     for line in done.stdout.splitlines():
         if line.startswith("@") and line[1:2].isdigit():
             when = datetime.fromisoformat(line[1:].strip()).astimezone(UTC)
             continue
+        header = FILE_RE.match(line)
+        if header:
+            file = header[1]
+            continue
         said = DEF_RE.match(line)
-        if said and when and said[1] not in found:
-            found[said[1]] = when
+        key = f"{file}::{said[1]}" if said else ""
+        if said and file and when and key not in found:
+            found[key] = when
     return found
 
 
 def subjects(root: Path | None = None) -> list[Subject]:
-    """Проверки набора с основами первой строки докстроки и имени."""
+    """Проверки набора с основами первого абзаца докстроки и имени."""
     born = tests_born(root)
     if not born:
         return []
@@ -296,11 +324,12 @@ def subjects(root: Path | None = None) -> list[Subject]:
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef) or node.name not in born:
+            key = f"{path.name}::{getattr(node, 'name', '')}"
+            if not isinstance(node, ast.FunctionDef) or key not in born:
                 continue
             first = (ast.get_docstring(node) or "").split("\n\n")[0]
             said = stems(f"{first} {node.name.replace('_', ' ')}")
-            found.append(Subject(f"{path.name}::{node.name}", said, born[node.name]))
+            found.append(Subject(key, said, born[key]))
     return found
 
 
@@ -363,3 +392,79 @@ def look(
         if days >= quiet_after:
             quiet.append(Quiet(number, str(issue.get("title") or ""), days, left))
     return built, quiet
+
+
+class Measure(NamedTuple):
+    """Замер признака по свойству: на чём выбран порог `SAME_SUBJECT`."""
+
+    closed: int
+    closed_named: int
+    closed_found: int
+    open_left: int
+    open_found: int
+
+
+def measure(issues: list[dict[str, Any]], root: Path | None = None) -> Measure:
+    """Сколько пунктов называют путь и сколько узнаёт признак по свойству.
+
+    Закрытые пункты — сделанная работа, открытые пункты ОТКРЫТЫХ задач — в
+    основном несделанная; первое — доля узнанного, второе — ложные. Задачи,
+    которые ведёт механизм (реестры, план), в счёт не идут: их тело
+    пересобирается, и галочки там не о работе.
+    """
+    pool = subjects(root)
+    closed = named = found = left = wrong = 0
+    for issue in issues:
+        body = str(issue.get("body") or "")
+        if "pull_request" in issue or findings.is_kept_by_a_mechanism(body):
+            continue
+        if body.startswith("<!-- work-plan"):
+            continue
+        since = when_of(issue, "created_at")
+        for item in items.done_items(body):
+            closed += 1
+            if PATH_RE.search(item) or TEST_RE.search(item):
+                named += 1
+            elif subject_evidence(item, since, pool):
+                found += 1
+        if issue.get("state") != "open":
+            continue
+        for item in items.open_items(body):
+            if PATH_RE.search(item) or TEST_RE.search(item):
+                continue
+            left += 1
+            wrong += bool(subject_evidence(item, since, pool))
+    return Measure(closed, named, found, left, wrong)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Точка входа: замер признака по свойству по всем задачам."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--measure", action="store_true", help="замер признака по свойству")
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
+    args = parser.parse_args(argv)
+    if not args.measure:
+        parser.error("назовите --measure: другого захода у модуля нет")
+    try:
+        if not args.repo:
+            raise ghrest.TransportError("репозиторий не назван: --repo или GITHUB_REPOSITORY")
+        token = ghrest.token_from_env()
+        issues = list(ghrest.paginate(f"repos/{args.repo}/issues?state=all", token))
+    except ghrest.TransportError as exc:
+        print(f"замер не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    said = measure(issues)
+    props = said.closed - said.closed_named
+    print(
+        f"закрытых пунктов {said.closed}: называют путь или тест {said.closed_named}, "
+        f"свойствами {props}, из них признак по свойству узнаёт {said.closed_found}"
+    )
+    print(
+        f"открытых пунктов открытых задач свойствами {said.open_left}, "
+        f"признак срабатывает на {said.open_found}"
+    )
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
