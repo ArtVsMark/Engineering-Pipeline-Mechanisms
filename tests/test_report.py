@@ -8,9 +8,11 @@
 from __future__ import annotations
 
 import ast
+import re
 
 import pytest
 import report
+import yaml
 
 from tests.conftest import ROOT, walk
 
@@ -83,3 +85,33 @@ def test_a_live_run_names_nothing_in_either_stream(
     report.announce(False)
     said = capsys.readouterr()
     assert said.out == "" and said.err == ""
+
+
+#: Файл, собранный из ОБОИХ потоков: `>"$ИМЯ" 2>&1`.
+MERGED_RE = re.compile(r'>\s*"\$\{?(?P<name>[A-Za-z_]+)\}?"\s*2>&1')
+#: Файл, отправленный в выходы шага: `cat "$ИМЯ" >> "$GITHUB_OUTPUT"`.
+TO_OUTPUT_RE = re.compile(r'cat\s+"\$\{?(?P<name>[A-Za-z_]+)\}?"\s*>>\s*"\$GITHUB_OUTPUT"')
+
+
+def test_a_file_sent_to_the_step_outputs_carries_only_the_answer() -> None:
+    """Файл, уходящий в `$GITHUB_OUTPUT`, не собирается из обоих потоков.
+
+    Механизм разводит потоки сам (`report.announce` пишет в `stderr`), и
+    шаг прогона не вправе слить их обратно. Замер 23.09.2026: ровно так
+    верификатор взгляда отвечал «Invalid format» на каждом запуске — `2>&1`
+    увозил приставку пробного захода в выходы шага (#673). В дереве такое
+    место было одно.
+    """
+    found: list[str] = []
+    for path in walk(ROOT / ".github" / "workflows", "*.yml"):
+        for job, body in (
+            yaml.safe_load(path.read_text(encoding="utf-8")).get("jobs") or {}
+        ).items():
+            for step in body.get("steps") or []:
+                run = str(step.get("run") or "")
+                merged = {m["name"] for m in MERGED_RE.finditer(run)}
+                sent = {m["name"] for m in TO_OUTPUT_RE.finditer(run)}
+                if merged & sent:
+                    names = ", ".join(sorted(merged & sent))
+                    found.append(f"{path.name}:{job} «{step.get('name')}»: {names}")
+    assert not found, "в выходы шага уходит файл из обоих потоков: " + "; ".join(found)
