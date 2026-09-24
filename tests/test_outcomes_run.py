@@ -203,6 +203,9 @@ def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) 
         ("assert m.EXIT_SILENT not in (m.EXIT_OK, m.EXIT_FOUND)", set()),
         ("EXIT_X = 2\nassert len(lines) == EXIT_X", set()),
         ("код = main([])\nassert код == facts.EXIT_BROKEN", {"EXIT_BROKEN"}),
+        ('assert m.EXIT_SILENT not in declared("g.py").values()', set()),
+        ('assert m.EXIT_SILENT not in declared("g.py").keys()', set()),
+        ('assert m.EXIT_SILENT in declared("g.py")', set()),
     ],
     ids=[
         "ключ подписки",
@@ -212,6 +215,9 @@ def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) 
         "сверка объявлений",
         "своя константа у счёта",
         "русский код",
+        "сверка через values",
+        "сверка через keys",
+        "сверка через declared",
     ],
 )
 def test_an_outcome_name_counts_as_a_key_not_as_prose(source: str, names: set[str]) -> None:
