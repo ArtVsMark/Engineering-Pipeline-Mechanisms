@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -240,6 +240,8 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "files_changed": {},
         # Изменения, на голове которых взгляд ещё идёт (#654).
         "looking": set(),
+        # Изменения, которые держит первый вердикт с находками (#734).
+        "holding": set(),
     }
 
     monkeypatch.setattr(module, "open_changes", lambda repo, tok: state["changes"])
@@ -279,6 +281,9 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(module, "head_verdict", head_verdict)
     monkeypatch.setattr(
         module, "awaits_look", lambda repo, item, tok: item.number in state["looking"]
+    )
+    monkeypatch.setattr(
+        module, "findings_hold", lambda repo, item, tok: item.number in state["holding"]
     )
     # Взведение подменяется НА УРОВНЕ МУТАЦИИ, а не целым шагом: между «очередь
     # отдала последнее действие» и «очередь позвала свою функцию» разница ровно
@@ -1385,3 +1390,77 @@ def test_syncing_a_head_takes_back_an_armed_neighbour(platform: dict[str, Any]) 
     module.advance("o/r", "token", "main", dry_run=False)
     assert platform["synced"] == [1]
     assert platform["disarmed"] == ["PR_2"]
+
+
+def test_the_first_verdict_with_findings_holds_the_head(platform: dict[str, Any]) -> None:
+    """Первый вердикт с находками держит голову до толчка с починкой (#734).
+
+    Решение владельца 24.09.2026, «держать одну голову»: окно, чтобы починка
+    ехала в ту же ветку, а не новым изменением. Взведённую голову держание
+    снимает; очередь идёт к следующему.
+    """
+    platform["changes"] = [change(1, "automerge", armed=True), change(2, "automerge")]
+    platform["holding"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["disarmed"] == ["PR_1"]
+    assert platform["merged"] == [2]
+
+
+def verdict(when: str, count: int, *, late: bool = False) -> dict[str, str]:
+    """Комментарий взгляда с вердиктом — как его пишет ревьюер."""
+    marker = f"{module.unlooked.LATE_MARKER}\n" if late else ""
+    return {"created_at": when, "body": f"{marker}разбор\nВЕРДИКТ: находок {count}"}
+
+
+HEAD_AT: Final = "2026-09-24T10:00:00Z"
+
+
+@pytest.mark.parametrize(
+    ("comments", "holds"),
+    [
+        ([verdict("2026-09-24T10:05:00Z", 2)], True),
+        ([verdict("2026-09-24T09:00:00Z", 1), verdict("2026-09-24T10:05:00Z", 2)], False),
+        ([verdict("2026-09-24T09:00:00Z", 0), verdict("2026-09-24T10:05:00Z", 3)], True),
+        ([verdict("2026-09-24T10:05:00Z", 0)], False),
+        ([verdict("2026-09-24T09:00:00Z", 2)], False),
+        ([verdict("2026-09-24T10:05:00Z", 2, late=True)], False),
+        ([], False),
+    ],
+    ids=[
+        "первый с находками",
+        "второй с находками",
+        "первый после чистого",
+        "чисто",
+        "вердикт старой головы",
+        "поздний взгляд",
+        "вердиктов нет",
+    ],
+)
+def test_only_the_first_verdict_with_findings_holds(
+    comments: list[dict[str, str]], holds: bool
+) -> None:
+    """Держит ровно первый вердикт с находками по этой голове — цикла нет (#734).
+
+    Вердикт с находками по прежней голове уже держал её: второго держания нет,
+    сколько бы находок ни пришло — ревьюер повторяет неснятые дословно, и
+    «держать, пока есть находки» стало бы вечным циклом. Вердикт по старой
+    голове новую не держит (взгляд промолчал), поздний взгляд — не о голове.
+    """
+    assert module.holds_for_findings(module.verdicts_on(comments), HEAD_AT) is holds
+
+
+def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`findings_hold` берёт время коммита головы и ленту изменения."""
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda method, path, tok, body=None: {"commit": {"committer": {"date": HEAD_AT}}},
+    )
+    monkeypatch.setattr(
+        module.ghrest,
+        "paginate",
+        lambda path, tok, key=None: iter([verdict("2026-09-24T10:05:00Z", 1)]),
+    )
+    assert module.findings_hold("o/r", change(1, "automerge"), "token") is True
+    monkeypatch.setattr(module.ghrest, "request", lambda method, path, tok, body=None: {})
+    assert module.findings_hold("o/r", change(1, "automerge"), "token") is False
