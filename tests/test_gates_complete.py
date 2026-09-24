@@ -940,3 +940,16 @@ def test_a_deadline_on_the_waiting_path_still_explains_itself(
     assert "не найден" in said
     assert "вердикт вынесен на таком состоянии" in said
     assert "lint: записей нет" in said
+
+
+def test_an_entry_without_a_token_is_the_third_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Нет токена — исход «не отработал» точкой входа, а не «красное» (#687).
+
+    Прежде этот исход засчитывался по `len(problems) == 2`: число находок
+    совпадало с кодом, а `main` с отказом не звал никто.
+    """
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
+    assert module.main(["--repo", "o/r", "--sha", "c" * 40]) == module.EXIT_BROKEN
+    assert "нет токена" in capsys.readouterr().err
