@@ -199,8 +199,20 @@ def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) 
         ('assert main([]) == declared("g.py")["EXIT_BROKEN"]', {"EXIT_BROKEN"}),
         ('assert "EXIT_BROKEN" in out', set()),
         ("assert main([]) == module.EXIT_FOUND", {"EXIT_FOUND"}),
+        ("assert main([]) in (m.EXIT_OK, m.EXIT_FOUND)", {"EXIT_OK", "EXIT_FOUND"}),
+        ("assert m.EXIT_SILENT not in (m.EXIT_OK, m.EXIT_FOUND)", set()),
+        ("EXIT_X = 2\nassert len(lines) == EXIT_X", set()),
+        ("код = main([])\nassert код == facts.EXIT_BROKEN", {"EXIT_BROKEN"}),
     ],
-    ids=["ключ подписки", "проза вывода", "константа"],
+    ids=[
+        "ключ подписки",
+        "проза вывода",
+        "константа",
+        "перечень имён",
+        "сверка объявлений",
+        "своя константа у счёта",
+        "русский код",
+    ],
 )
 def test_an_outcome_name_counts_as_a_key_not_as_prose(source: str, names: set[str]) -> None:
     """Строка `EXIT_…` засчитывается ключом подписки, а не голой строкой (`bcc5db5`)."""
