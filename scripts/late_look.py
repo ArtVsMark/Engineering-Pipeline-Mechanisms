@@ -56,6 +56,11 @@ def answer_of(raw: str) -> str:
     Файл — список сообщений, последнее из которых с типом ``result`` несёт
     текст. Разбирается именно он, а не «последнее сообщение вообще»: прогон
     может оборваться, и тогда ответа нет — это состояние, а не пустая строка.
+
+    ИТОГ С ОТКАЗОМ — НЕ ОТВЕТ. Отказ судит `agent_run.failure_of`, тот же, что
+    печатает его аннотацией: прежде здесь итог с `is_error` принимался за
+    ответ, и перенос ответа верификатора, который смотрит только на наличие
+    токена, понёс бы в изменение текст отказа (`dde5c62`).
     """
     # ФОРМУ ФАЙЛА РАЗБИРАЕТ ОДИН МОДУЛЬ — `agent_run`: он же называет модель и
     # отказ захода, и второе понимание «что такое файл захода» разошлось бы с
@@ -64,8 +69,11 @@ def answer_of(raw: str) -> str:
         document = agent_run.messages_of(raw)
     except agent_run.NotRun as exc:
         raise NotRun(str(exc)) from exc
+    failure = agent_run.failure_of(document)
     for message in reversed(document):
         if message.get("type") == RESULT:
+            if failure is not None:
+                raise NotRun(f"{agent_run.REFUSED} — {failure}")
             text = str(message.get(RESULT) or "").strip()
             if not text:
                 raise NotRun("прогон завершился без текста ответа")
