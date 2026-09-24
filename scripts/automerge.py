@@ -63,6 +63,7 @@ import os
 import re
 import sys
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
@@ -552,9 +553,11 @@ def run_of(text: str) -> str:
 
 
 def verdicts_on(
-    comments: list[dict[str, Any]], looks: frozenset[str] | None
+    comments: list[dict[str, Any]], looks: Mapping[str, str] | None
 ) -> list[tuple[str, int]]:
-    """Вердикты взгляда по изменению: время комментария и число находок.
+    """Вердикты взгляда по изменению: время вердикта и число находок.
+
+    `looks` — прогоны взгляда голов изменения: номер → когда завершён.
 
     Поздний взгляд по общей ветке сюда не входит: он о слитом, а не о голове
     изменения, и отмечен своей скрытой строкой. Вердикт — только из
@@ -584,16 +587,29 @@ def verdicts_on(
             continue
         said = review_findings.verdict_of([comment])
         if said is not None:
-            # ВРЕМЯ — КОГДА ВЕРДИКТ ВПИСАН, а не когда создан комментарий:
-            # действие создаёт его в начале захода и вписывает вердикт правкой
-            # в конце. По времени создания вердикт прежней головы, вписанный
-            # уже после подтяжки, ложился «до головы» и считался державшим —
-            # и голова не держалась ни разу (#751, на #748). Граница: правка
-            # старого комментария задним числом сдвинет его время; бот своих
-            # прошлых вердиктов не правит.
-            written = comment.get("updated_at") or comment.get("created_at") or ""
-            found.append((str(written), said))
+            found.append((verdict_time(comment, looks), said))
     return found
+
+
+def verdict_time(comment: dict[str, Any], looks: Mapping[str, str] | None) -> str:
+    """Когда вердикт сказан: завершение его прогона взгляда, а не время комментария.
+
+    НЕ ВРЕМЯ СОЗДАНИЯ. Действие создаёт комментарий в начале захода и
+    вписывает вердикт правкой в конце; по времени создания вердикт прежней
+    головы, вписанный после подтяжки, ложился «до головы» и считался
+    державшим — и голова не держалась ни разу (#751, на #748).
+
+    И НЕ ВРЕМЯ ПОСЛЕДНЕЙ ПРАВКИ. Правка комментария человеком (разметка,
+    опечатка) сдвигает `updated_at`: старый вердикт уезжал «после головы», и
+    голову держали второй раз (взгляд на #752). Завершение прогона правкой не
+    сдвинуть. Время правки остаётся запасным: прогон ещё не завершён либо не
+    найден среди голов (перезапись истории, `looks is None`) — и там граница
+    с правкой рукой названа, а не закрыта.
+    """
+    written = str(comment.get("updated_at") or comment.get("created_at") or "")
+    if looks is None:
+        return written
+    return looks.get(run_of(str(comment.get("body") or "")), "") or written
 
 
 def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
@@ -606,11 +622,17 @@ def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
     неснятые находки дословно, и держание «пока есть находки» стало бы вечным
     циклом.
 
-    Вердикт принадлежит голове, если написан после начала взгляда по ней.
-    Вердикта по голове нет (взгляд промолчал) — держать нечем.
+    Вердикт принадлежит голове, если сказан после начала взгляда по ней
+    (`verdict_time`). Сюда входит и вердикт ПРЕЖНЕЙ головы, сказанный после
+    подтяжки: окна на починку его находок ещё не было, и держит он новую
+    голову, даже если её собственный взгляд промолчал (взгляд на #752).
+    Вердиктов после начала взгляда нет — держать нечем. Последний — по времени
+    вердикта, а не по порядку комментариев: комментарий создаётся в начале
+    захода, и долгий заход, начатый раньше, говорит позже.
     """
-    before = [count for when, count in verdicts if when < head_time]
-    after = [count for when, count in verdicts if when >= head_time]
+    ordered = sorted(verdicts, key=lambda one: one[0])
+    before = [count for when, count in ordered if when < head_time]
+    after = [count for when, count in ordered if when >= head_time]
     return bool(after) and after[-1] > 0 and not any(count > 0 for count in before)
 
 
@@ -649,7 +671,11 @@ def findings_hold(repo: str, change: Change, owner_token: str) -> bool:
         sha = str(commit.get("sha") or "")
         if sha and sha != change.head:
             runs += look_runs(repo, sha, owner_token)
-    looks = frozenset(filter(None, (run_of(str(run.get("details_url") or "")) for run in runs)))
+    looks = {
+        run_of(str(run.get("details_url") or "")): str(run.get("completed_at") or "")
+        for run in runs
+        if run_of(str(run.get("details_url") or ""))
+    }
     comments = list(ghrest.paginate(f"repos/{repo}/issues/{change.number}/comments", owner_token))
     if not holds_for_findings(verdicts_on(comments, looks), when):
         return False
@@ -659,7 +685,9 @@ def findings_hold(repo: str, change: Change, owner_token: str) -> bool:
     # до головы, чей прогон не найден, засчитывается прежним — но только если
     # перезапись была: иначе цитата ответчика снова решала бы за взгляд.
     # Граница: на перезаписанном изменении такая цитата до головы держание
-    # снимет — это одно окно для починки, а не слияние без взгляда.
+    # снимет — это одно окно для починки, а не слияние без взгляда. Время
+    # здесь — время правки комментария: прогона потерянной головы не найти, и
+    # правка рукой его сдвинет (названо у `verdict_time`).
     lost = [count for at, count in verdicts_on(comments, None) if at < when and count > 0]
     return not (lost and force_pushed(repo, change, owner_token))
 
