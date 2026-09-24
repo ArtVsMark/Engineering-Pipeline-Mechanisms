@@ -1,0 +1,524 @@
+{
+  "_ответ": "Инвентарь переносимого (#642): ответ по КАЖДОМУ механизму дерева — scripts/*.py, .github/workflows/*.yml, .claude/skills/*, .rules/*.json, packages/* — а не по тем, о которых вспомнили (129). Молчание состоянием не является: механизм без ответа краснеет, ответ о несуществующем — тоже (154). Держит tests/test_portable.py. Ответы: `as-is` — у соседа работает без правки; `configured` — нужен свой ответ, и `where` называет файлы, где сосед его даёт; `ours` — предмет только этого проекта, `why` называет причину; `unreviewed` — ответа ещё нет, и это видно. РЕШЕНИЕ ВЛАДЕЛЬЦА 24.09.2026 (комментарий в #642): проект — сам конвейер, переносится почти весь, различается НАПОЛНЕНИЕ; поэтому по умолчанию `as-is`, а доказывать надо остальное. `seam` у ответа `configured` значит, что наполнение сегодня прибито к коду, а не лежит в данных, — это работа, а не ответ. ПРИБИТОЕ К ЭТОМУ РЕПОЗИТОРИЮ меряется, а не перечисляется: `own` — имена, которые у соседа другие, и механизм, в строках которого они стоят буквами, ответом `as-is` быть не может. `family` — имена, общие для семьи (адрес каталога правил): у соседа по семье они те же, у чужого проекта — нет, и это граница инвентаря, а не его пробел.",
+  "schema": 1,
+  "_schema": "версия формы этого файла: ключи own, family, filling, verified_by, answers и шкала ответов; читает tests/test_portable.py",
+  "own": [
+    "ArtVsMark/Engineering-Pipeline-Mechanisms",
+    "ArtVsMark/"
+  ],
+  "family": [
+    "ArtVsMark/Engineering-Incidents-Playbook"
+  ],
+  "filling": {
+    "_": "Три шва наполнения из решения владельца: где сосед даёт свой ответ. `none` — файла данных нет, наполнение прибито к коду, и `why` называет где.",
+    "what-is-checked": {
+      "where": "none",
+      "why": "что проверяется, названо шагами .github/workflows/ci.yml; файла данных под это нет"
+    },
+    "inner-approaches": {
+      "where": "none",
+      "why": "подходы проверок — это scripts/check_*.py и tests/; наполнением они не отделены от механизма"
+    },
+    "required-and-advisory": {
+      "where": ".pipeline.yml",
+      "why": "класс каждой проверки — ответ проекта в данных, его держит scripts/check_pipeline.py"
+    }
+  },
+  "verified_by": {
+    "_": "Чем перенос проверяется. Инвентарь без прогона — обещание (139).",
+    "consumer-path": {
+      "where": ".github/workflows/handover-probe.yml",
+      "why": "внешний путь вызова шагов прогоняется так, как его позовёт потребитель"
+    },
+    "whole-port": {
+      "where": "none",
+      "why": "переноса конвейера целиком не было ни разу; путь назван, но не прогнан: пустой репозиторий → копия дерева → свои ответы в файлах `configured` → scripts/preflight.py зелёный → первое изменение сливается очередью. Сам перенос — отдельная работа (#642, границы)"
+    }
+  },
+  "answers": {
+    "scripts/agent_pr.py": {
+      "answer": "as-is"
+    },
+    "scripts/agent_run.py": {
+      "answer": "as-is"
+    },
+    "scripts/arm.py": {
+      "answer": "as-is"
+    },
+    "scripts/audit_profile.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    "scripts/automerge.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    "scripts/build_changelog.py": {
+      "answer": "as-is"
+    },
+    "scripts/build_facts.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    "scripts/catalogue.py": {
+      "answer": "as-is"
+    },
+    "scripts/change_parts.py": {
+      "answer": "as-is"
+    },
+    "scripts/changerefs.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_agent_silenced.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_branch_revival.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_contract.py": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    "scripts/check_decisions_edit.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_derived_refs.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_env.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_foreign_why.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_journal.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_new_is_tested.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_own_name.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_pipeline.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_pr_meta.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_reached_by_work.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_required_context.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_reread.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    "scripts/check_rule_birth.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/finding-kinds.json",
+        ".rules/proposals.json"
+      ]
+    },
+    "scripts/check_rule_links.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_rulebook_fresh.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_shipped.py": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    "scripts/check_version.py": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    "scripts/check_window_lifetime.py": {
+      "answer": "as-is"
+    },
+    "scripts/ci_complete.py": {
+      "answer": "as-is"
+    },
+    "scripts/consumers.py": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    "scripts/contract.py": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    "scripts/coverage_floor.py": {
+      "answer": "as-is"
+    },
+    "scripts/debt.py": {
+      "answer": "as-is"
+    },
+    "scripts/drift.py": {
+      "answer": "configured",
+      "where": [
+        "scripts/drift.py",
+        ".rules/bindings.json",
+        ".rules/proposals.json",
+        ".rules/showcase.json"
+      ],
+      "seam": "приставка своего владельца (`OUR_OWN`) прибита в коде, а не в данных"
+    },
+    "scripts/family.py": {
+      "answer": "ours",
+      "why": "мерило семьи: считается у одного поставщика по клонам соседей, у каждого соседа оно дало бы то же число вторым источником"
+    },
+    "scripts/family_uptake.py": {
+      "answer": "ours",
+      "why": "мерило семьи: считается у одного поставщика по клонам соседей, у каждого соседа оно дало бы то же число вторым источником"
+    },
+    "scripts/finding_chains.py": {
+      "answer": "as-is"
+    },
+    "scripts/finding_kinds.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/finding-kinds.json",
+        ".rules/proposals.json"
+      ]
+    },
+    "scripts/findings.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    "scripts/hail.py": {
+      "answer": "as-is"
+    },
+    "scripts/items.py": {
+      "answer": "as-is"
+    },
+    "scripts/items_left.py": {
+      "answer": "as-is"
+    },
+    "scripts/journal.py": {
+      "answer": "as-is"
+    },
+    "scripts/kinds.py": {
+      "answer": "as-is"
+    },
+    "scripts/labels.py": {
+      "answer": "configured",
+      "where": [
+        ".github/labels.yml"
+      ]
+    },
+    "scripts/late_look.py": {
+      "answer": "as-is"
+    },
+    "scripts/look_waits.py": {
+      "answer": "as-is"
+    },
+    "scripts/main_red.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/rerun.json"
+      ]
+    },
+    "scripts/onboard.py": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    "scripts/paths.py": {
+      "answer": "as-is"
+    },
+    "scripts/pipeline_checks.py": {
+      "answer": "configured",
+      "where": [
+        ".pipeline.yml"
+      ]
+    },
+    "scripts/preflight.py": {
+      "answer": "as-is"
+    },
+    "scripts/protection.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/protection.json"
+      ]
+    },
+    "scripts/release.py": {
+      "answer": "as-is"
+    },
+    "scripts/review_findings.py": {
+      "answer": "as-is"
+    },
+    "scripts/review_map.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    "scripts/rule_link.py": {
+      "answer": "as-is"
+    },
+    "scripts/runs_series.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/series.json"
+      ]
+    },
+    "scripts/schedules_seen.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/schedules.json"
+      ]
+    },
+    "scripts/squash_body.py": {
+      "answer": "as-is"
+    },
+    "scripts/stuck.py": {
+      "answer": "as-is"
+    },
+    "scripts/sync_labels.py": {
+      "answer": "as-is"
+    },
+    "scripts/task_items.py": {
+      "answer": "as-is"
+    },
+    "scripts/task_shape.py": {
+      "answer": "as-is"
+    },
+    "scripts/unlooked.py": {
+      "answer": "as-is"
+    },
+    "scripts/version.py": {
+      "answer": "as-is"
+    },
+    "scripts/window.py": {
+      "answer": "as-is"
+    },
+    "scripts/work_plan.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/finding-kinds.json",
+        ".rules/proposals.json"
+      ]
+    },
+    ".github/workflows/agent-pr.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/arm.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/attribution-history.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/automerge.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/badges.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/ci-complete.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/ci.yml": {
+      "answer": "configured",
+      "where": [
+        ".github/workflows/ci.yml"
+      ],
+      "seam": "ЧТО проверяется, названо шагами прогона: у соседа свой набор шагов, и данных под это нет"
+    },
+    ".github/workflows/claude.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/drift.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/hail.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/handover-probe.yml": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    ".github/workflows/labels-sync.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/main-red.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/release.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/required-context.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/review.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/rules-inbox.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/runs-series.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/schedules-seen.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-attribution.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-contract.yml": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    ".github/workflows/step-debt.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-journal.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-lint.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-pipeline.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-pr-meta.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-rulebook-fresh.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-window-lifetime.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/stuck.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/task-items.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/work-plan.yml": {
+      "answer": "as-is"
+    },
+    ".claude/skills/a-task-before-the-work": {
+      "answer": "as-is"
+    },
+    ".claude/skills/answer-a-rule": {
+      "answer": "as-is"
+    },
+    ".claude/skills/audit-the-answers": {
+      "answer": "as-is"
+    },
+    ".claude/skills/build-a-gate": {
+      "answer": "as-is"
+    },
+    ".claude/skills/close-a-finding": {
+      "answer": "as-is"
+    },
+    ".claude/skills/propose-a-rule": {
+      "answer": "as-is"
+    },
+    ".claude/skills/role-coverage": {
+      "answer": "as-is"
+    },
+    ".claude/skills/rulebook-keeps-how-to-work": {
+      "answer": "as-is"
+    },
+    ".claude/skills/rulebook-reread": {
+      "answer": "as-is"
+    },
+    ".claude/skills/work-the-plan": {
+      "answer": "as-is"
+    },
+    ".rules/bindings.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    ".rules/claims.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/claims.json"
+      ]
+    },
+    ".rules/consumers.json": {
+      "answer": "ours",
+      "why": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет"
+    },
+    ".rules/finding-kinds.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/finding-kinds.json"
+      ]
+    },
+    ".rules/leniency.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/leniency.json"
+      ]
+    },
+    ".rules/outcomes.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/outcomes.json"
+      ]
+    },
+    ".rules/proposals.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/proposals.json"
+      ]
+    },
+    ".rules/protection.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/protection.json"
+      ]
+    },
+    ".rules/rerun.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/rerun.json"
+      ]
+    },
+    ".rules/schedules.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/schedules.json"
+      ]
+    },
+    ".rules/series.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/series.json"
+      ]
+    },
+    ".rules/showcase.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/showcase.json"
+      ]
+    },
+    ".rules/portable.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/portable.json"
+      ]
+    },
+    "packages/transport": {
+      "answer": "as-is"
+    }
+  }
+}
