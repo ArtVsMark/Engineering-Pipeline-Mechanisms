@@ -73,7 +73,9 @@ import labels
 import paths
 import pipeline_checks as policy
 import report
+import review_findings
 import squash_body
+import unlooked
 
 #: Метки — вход механизма, а не украшение (064). Имена здесь — то, что читает
 #: очередь; ОБЪЯВЛЕНЫ они в составе, и совпадение сверяется перед заходом.
@@ -530,6 +532,50 @@ def awaits_look(repo: str, change: Change, owner_token: str) -> bool:
         )
     )
     return look_pending(runs)
+
+
+def verdicts_on(comments: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    """Вердикты взгляда по изменению: время комментария и число находок.
+
+    Поздний взгляд по общей ветке сюда не входит: он о слитом, а не о голове
+    изменения, и отмечен своей скрытой строкой.
+    """
+    found: list[tuple[str, int]] = []
+    for comment in comments:
+        if unlooked.LATE_MARKER in str(comment.get("body") or ""):
+            continue
+        said = review_findings.verdict_of([comment])
+        if said is not None:
+            found.append((str(comment.get("created_at") or ""), said))
+    return found
+
+
+def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
+    """Держит ли вердикт голову: первый вердикт с находками — да, всё прочее — нет.
+
+    ДЕРЖАНИЕ ОДНО НА ИЗМЕНЕНИЕ (#734, решение владельца 24.09.2026). После
+    ПЕРВОГО вердикта с находками согласие ждёт следующего толчка — это окно,
+    чтобы починка ехала в ту же ветку, а не новым изменением. На следующей
+    голове держания уже нет, сколько бы находок ни пришло: ревьюер повторяет
+    неснятые находки дословно, и держание «пока есть находки» стало бы вечным
+    циклом.
+
+    Вердикт принадлежит голове, если написан после её коммита. Вердикта по
+    голове нет (взгляд промолчал) — держать нечем.
+    """
+    before = [count for when, count in verdicts if when < head_time]
+    after = [count for when, count in verdicts if when >= head_time]
+    return bool(after) and after[-1] > 0 and not any(count > 0 for count in before)
+
+
+def findings_hold(repo: str, change: Change, owner_token: str) -> bool:
+    """Держат ли находки вердикта эту голову — по ленте изменения и времени головы."""
+    head = ghrest.request("GET", f"repos/{repo}/commits/{change.head}", owner_token) or {}
+    when = str(((head.get("commit") or {}).get("committer") or {}).get("date") or "")
+    if not when:
+        return False
+    comments = list(ghrest.paginate(f"repos/{repo}/issues/{change.number}/comments", owner_token))
+    return holds_for_findings(verdicts_on(comments), when)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1008,6 +1054,21 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 ]
             print(f"#{change.number}: ждёт вердикта взгляда — не взвожу (#654)")
             skipped["ждут вердикта взгляда"] += 1
+            continue
+        if not repair and findings_hold(repo, change, owner_token):
+            # Окно для починки в той же ветке: следующий толчок снимет
+            # держание — вердикт по новой голове держать уже не будет (#734).
+            if change.armed:
+                take_back(repo, change, "ждёт починки находок", owner_token, dry_run=dry_run)
+                queue = [
+                    replace(one, armed=False) if one.number == change.number else one
+                    for one in queue
+                ]
+            print(
+                f"#{change.number}: первый вердикт с находками — жду толчка с починкой "
+                "в ту же ветку (#734)"
+            )
+            skipped["ждут починки находок"] += 1
             continue
         if state == STATE_ARMABLE:
             # СЛИТЬ НЕЛЬЗЯ СЕЙЧАС — не значит «нельзя». Проверки идут либо не
