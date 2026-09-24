@@ -186,7 +186,7 @@ COUNTERS: Final = frozenset(
 #: ФОРМЫ ИМПОРТА ПЕРЕЧИСЛЕНЫ РАЗОМ, а не по одной за заход взгляда: каждая
 #: прежняя починка называла следующую форму границей, и следующий заход
 #: находил ещё одну (род «каскад по одному месту», #746). Узнаются: `from`
-#: пакета (`tests` · `.`) — модуль, `from` модуля помощника (`tests.outcomes`
+#: пакета (`tests` · `.`) — модуль или звёздочка, `from` модуля помощника (`tests.outcomes`
 #: · `.outcomes`) — функция или звёздочка, простой `import` пакета или
 #: модуля помощника — с псевдонимом и без. Каждую форму держит свой случай в
 #: `test_outcomes_run.py`, и счёт форм — там, а не здесь. Границы: помощник
@@ -243,9 +243,11 @@ def readers_of(tree: ast.AST) -> Readers:
         if not isinstance(node, ast.ImportFrom):
             continue
         source = "." * node.level + (node.module or "")
-        # `from tests import outcomes`, `from . import outcomes`
+        # `from tests import outcomes`, `from . import outcomes`, `… import *`
         if source in READER_PACKAGES:
-            homes |= {one.asname or one.name for one in node.names if one.name == READER_HOME}
+            homes |= {
+                one.asname or READER_HOME for one in node.names if one.name in (READER_HOME, "*")
+            }
         # `from tests.outcomes import declared`, `from .outcomes import declared`, `… import *`
         if source in READER_MODULES:
             names |= {one.asname or READER for one in node.names if one.name in (READER, "*")}
