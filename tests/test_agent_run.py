@@ -124,5 +124,8 @@ def test_a_cancelled_call_is_named_a_cancellation_not_a_refusal(
     assert module.main(["--from", "", "--call", "взгляд", "--outcome", "cancelled"]) == 0
     said = capsys.readouterr().out
     assert module.REFUSED not in said and "заход снят" in said, said
+    # Причину шаг не знает: замена новым прогоном бывает не у всех групп, а
+    # ручную отмену прежний текст не называл вовсе (взгляд на #742).
+    assert "ручная отмена" in said and "где группа прогона это объявляет" in said, said
     assert module.main(["--from", "", "--call", "взгляд", "--outcome", "failure"]) == 0
     assert module.REFUSED in capsys.readouterr().out
