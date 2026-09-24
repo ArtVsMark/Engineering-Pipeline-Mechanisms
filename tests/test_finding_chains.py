@@ -187,9 +187,10 @@ def test_a_moment_repeats_the_numbers_after_a_late_look(
 def test_reading_counts_the_changes_it_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """`read_counted` отдаёт и находки, и число прочитанных изменений — по нему пустое отличимо."""
     platform(monkeypatch, {9: [look("a.py:1 — раз")], 8: [look("a.py:2 — два")]})
-    said, seen = module.read_counted("o/r", "t", 10, 8, 9)
+    said, seen, kept = module.read_counted("o/r", "t", 10, 8, 9)
     assert seen == 2 and len(said) == 2
-    assert module.read_counted("o/r", "t", 10, 100, 200) == ([], 0)
+    assert kept == 2
+    assert module.read_counted("o/r", "t", 10, 100, 200) == ([], 0, 0)
 
 
 @pytest.mark.parametrize(
@@ -247,3 +248,25 @@ def test_said_at_is_the_last_edit_and_falls_back_to_creation() -> None:
     assert module.said_at({"created_at": "2026-09-24T10:00:00Z"}) == module.moment(
         "2026-09-24T10:00:00Z"
     )
+
+
+def test_a_moment_over_honest_empty_feeds_is_a_zero_not_a_refusal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ленты прочитаны до момента, находок в них нет — это ноль, а не отказ (взгляд на #781)."""
+    quiet = {
+        "user": {"type": "Bot"},
+        "body": "ВЕРДИКТ: находок 0",
+        "created_at": "2026-09-24T10:00:00Z",
+    }
+    platform(monkeypatch, {9: [quiet]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_OK
+    assert "уникальных находок: 0" in capsys.readouterr().out
+
+
+def test_a_comment_without_time_is_a_named_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Меток времени нет — отказ с причиной, а не трейсбек разбора (взгляд на #781)."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_BROKEN
