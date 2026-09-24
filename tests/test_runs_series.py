@@ -678,6 +678,26 @@ def test_an_escaped_sign_is_not_a_boundary() -> None:
     assert module.commands("tr '\\n' ' ' <said") == ["tr '\\n' ' ' <said"]
 
 
+def test_an_ansi_c_string_keeps_its_escaped_quote() -> None:
+    """В `$'…'` экранированная кавычка строку не закрывает (`0eed8ff`).
+
+    НАХОДКА ВНЕШНЕГО ВЗГЛЯДА НА #671. Разбор знал `'…'`, где `\\` буквален, и
+    не знал `$'…'`, где он толкуется: `\\'` закрывал строку, следующая
+    кавычка открывала новую до конца блока — и `pip install $'a\\'b' && pytest`
+    читался одной установкой, шаг уходил в служебные.
+
+    Вторая половина — соседние формы: `$"…"` остаётся двойными кавычками, а
+    простые одинарные по-прежнему закрываются кавычкой после `\\`.
+    Замер 24.09.2026: `$'` в блоках `run:` дерева — ноль; это форма, которую
+    разбор не видел (206).
+    """
+    said = "pip install $'a\\'b' && pytest"
+    assert module.commands(said) == ["pip install $'a\\'b'", "pytest"]
+    assert not module.only_installs(said)
+    assert module.commands('echo $"a | b"') == ['echo $"a | b"']
+    assert module.commands("echo 'a\\' | b") == ["echo 'a\\'", "b"]
+
+
 def test_a_trailing_backslash_carries_the_command_to_the_next_line() -> None:
     """Хвостовой `\\` продолжает команду, и пару «`\\` + перевод строки» вынимают.
 
