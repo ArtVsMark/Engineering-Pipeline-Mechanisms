@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -796,6 +797,33 @@ def test_a_silent_platform_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(module.ghrest, "request", refuse)
     monkeypatch.setattr(module.ghrest, "paginate", refuse)
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+
+
+def test_the_body_quotes_the_line_the_run_prints(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Цитата тела реестра — дословно та строка, что печатает заход (`14c2553`).
+
+    Тело велит искать в логе строку «аннотации взгляда не прочитаны», а заход
+    печатал «аннотации взгляда по #N не прочитаны» — поиск по цитате не
+    находил ничего.
+    """
+    runs = [
+        {"id": 1, "name": "review", "conclusion": "success", "output": {"annotations_count": 1}}
+    ]
+
+    def paginate(path: str, *_rest: Any, **_kw: Any) -> Any:
+        if path.endswith("/annotations"):
+            raise module.ghrest.TransportError("502")
+        return iter([dict(one) for one in runs])
+
+    monkeypatch.setattr(module.ghrest, "request", lambda *_a, **_k: {"head": {"sha": "c" * 40}})
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    module.head_runs("o/r", 5, "t")
+    printed = capsys.readouterr().out
+    quoted = re.search(r"строкой «([^»]+)»", module.render_body({}, 0))
+    assert quoted is not None, "тело реестра больше не цитирует строку захода"
+    assert quoted[1] in printed, f"цитата «{quoted[1]}» не находится в печати: {printed!r}"
 
 
 def test_an_unread_annotation_keeps_the_runs_already_read(monkeypatch: pytest.MonkeyPatch) -> None:
