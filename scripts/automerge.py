@@ -584,7 +584,15 @@ def verdicts_on(
             continue
         said = review_findings.verdict_of([comment])
         if said is not None:
-            found.append((str(comment.get("created_at") or ""), said))
+            # ВРЕМЯ — КОГДА ВЕРДИКТ ВПИСАН, а не когда создан комментарий:
+            # действие создаёт его в начале захода и вписывает вердикт правкой
+            # в конце. По времени создания вердикт прежней головы, вписанный
+            # уже после подтяжки, ложился «до головы» и считался державшим —
+            # и голова не держалась ни разу (#751, на #748). Граница: правка
+            # старого комментария задним числом сдвинет его время; бот своих
+            # прошлых вердиктов не правит.
+            written = comment.get("updated_at") or comment.get("created_at") or ""
+            found.append((str(written), said))
     return found
 
 

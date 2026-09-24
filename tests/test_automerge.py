@@ -1414,13 +1414,24 @@ ANSWER_RUN: Final = "35984970999"
 
 
 def verdict(
-    when: str, count: int, *, late: bool = False, human: bool = False, run: str = LOOK_RUN
+    when: str,
+    count: int,
+    *,
+    late: bool = False,
+    human: bool = False,
+    run: str = LOOK_RUN,
+    created: str = "",
 ) -> dict[str, Any]:
-    """Комментарий взгляда с вердиктом — как его пишет бот (или цитирует человек)."""
+    """Комментарий взгляда с вердиктом — как его пишет бот (или цитирует человек).
+
+    `when` — когда вердикт вписан; `created` — когда комментарий создан:
+    действие создаёт его в начале захода, а вердикт вписывает в конце.
+    """
     marker = f"{module.unlooked.LATE_MARKER}\n" if late else ""
     head = f"**Claude finished** —— [View job](https://github.com/o/r/actions/runs/{run})\n"
     return {
-        "created_at": when,
+        "created_at": created or when,
+        "updated_at": when,
         "user": {"type": "User" if human else "Bot"},
         "body": f"{marker}{head}разбор\nВЕРДИКТ: находок {count}",
     }
@@ -1457,6 +1468,13 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
             ],
             True,
         ),
+        (
+            [
+                verdict("2026-09-24T10:06:00Z", 2, created="2026-09-24T09:59:00Z"),
+                verdict("2026-09-24T10:08:00Z", 2),
+            ],
+            True,
+        ),
     ],
     ids=[
         "первый с находками",
@@ -1469,6 +1487,7 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
         "цитата человека",
         "цитата ответчика",
         "цитата ответчика до головы",
+        "вердикт прежней головы вписан после подтяжки",
     ],
 )
 def test_only_the_first_verdict_with_findings_holds(
