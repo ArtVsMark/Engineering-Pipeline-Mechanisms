@@ -859,3 +859,17 @@ def test_the_body_quotes_the_refusal_in_the_words_agent_run_writes() -> None:
     """
     body = module.render_body({}, 0)
     assert f"«{module.agent_run.REFUSED} — <текст>»" in body
+
+
+def test_the_late_tail_is_read_and_quoted_by_its_constant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Хвост позднего взгляда пишется, читается и цитируется одной константой.
+
+    Прежде `ENTRY_RE` и тело реестра несли слова хвоста вписанными рукой:
+    правка `LATE_TAIL` развела бы записи с разбором молча (`5bd5689`,
+    `17273d5`). Запись с хвостом переживает круг «записать — прочитать».
+    """
+    assert re.escape(module.LATE_TAIL) in module.ENTRY_RE.pattern
+    assert f"«{module.LATE_TAIL} ДАТА»" in module.render_body({}, 0)
+    line = module.Entry(5, module.STATE_SILENT, "2026-09-24", "2026-09-25").said()
+    found = module.ENTRY_RE.match(line)
+    assert found is not None and found[4] == "2026-09-25", line
