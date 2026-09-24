@@ -635,6 +635,19 @@ def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPa
                     "state": "open",
                     "repository_url": HOME,
                 },
+                {
+                    "number": 760,
+                    "title": "реестр подзадачей",
+                    "state": "open",
+                    "repository_url": HOME,
+                    "body": module.findings.marker("x"),
+                },
+                {
+                    "number": 761,
+                    "title": "своя в другом регистре",
+                    "state": "open",
+                    "repository_url": "https://api.github.com/repos/O/R",
+                },
             ]
         },
     )
@@ -642,6 +655,7 @@ def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPa
     assert module.born_rows("o/r", "t", HELD_ROWS, frozenset({758})) == [
         f"- **#750** — дыра инвентаря *({module.BORN_TAIL} #642)*",
         f"- **#751** — подзадача сборщика *({module.BORN_TAIL} #640)*",
+        f"- **#761** — своя в другом регистре *({module.BORN_TAIL} #640)*",
     ]
 
 
@@ -676,3 +690,12 @@ def test_a_task_already_in_a_built_section_is_not_born_twice(
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
     assert "#750" not in "\n".join(module.rows_of(written[0], module.HEADS[4]))
+
+
+def test_both_ways_of_birth_share_one_gate() -> None:
+    """Связь телом и подзадача проходят одну проверку кандидата (взгляд на #754)."""
+    own = {"number": 761, "state": "open", "repository_url": "https://api.github.com/repos/O/R"}
+    assert module.may_be_born(own, "o/r", set()) is True
+    assert module.may_be_born({**own, "body": module.MARKER}, "o/r", set()) is False
+    assert module.may_be_born({**own, "state": "closed"}, "o/r", set()) is False
+    assert module.may_be_born(own, "o/r", {761}) is False
