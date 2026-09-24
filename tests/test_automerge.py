@@ -1406,10 +1406,14 @@ def test_the_first_verdict_with_findings_holds_the_head(platform: dict[str, Any]
     assert platform["merged"] == [2]
 
 
-def verdict(when: str, count: int, *, late: bool = False) -> dict[str, str]:
-    """Комментарий взгляда с вердиктом — как его пишет ревьюер."""
+def verdict(when: str, count: int, *, late: bool = False, human: bool = False) -> dict[str, Any]:
+    """Комментарий взгляда с вердиктом — как его пишет бот (или цитирует человек)."""
     marker = f"{module.unlooked.LATE_MARKER}\n" if late else ""
-    return {"created_at": when, "body": f"{marker}разбор\nВЕРДИКТ: находок {count}"}
+    return {
+        "created_at": when,
+        "user": {"type": "User" if human else "Bot"},
+        "body": f"{marker}разбор\nВЕРДИКТ: находок {count}",
+    }
 
 
 HEAD_AT: Final = "2026-09-24T10:00:00Z"
@@ -1425,6 +1429,10 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
         ([verdict("2026-09-24T09:00:00Z", 2)], False),
         ([verdict("2026-09-24T10:05:00Z", 2, late=True)], False),
         ([], False),
+        (
+            [verdict("2026-09-24T10:05:00Z", 2), verdict("2026-09-24T10:06:00Z", 0, human=True)],
+            True,
+        ),
     ],
     ids=[
         "первый с находками",
@@ -1434,10 +1442,11 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
         "вердикт старой головы",
         "поздний взгляд",
         "вердиктов нет",
+        "цитата человека",
     ],
 )
 def test_only_the_first_verdict_with_findings_holds(
-    comments: list[dict[str, str]], holds: bool
+    comments: list[dict[str, Any]], holds: bool
 ) -> None:
     """Держит ровно первый вердикт с находками по этой голове — цикла нет (#734).
 
@@ -1450,17 +1459,43 @@ def test_only_the_first_verdict_with_findings_holds(
 
 
 def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`findings_hold` берёт время коммита головы и ленту изменения."""
-    monkeypatch.setattr(
-        module.ghrest,
-        "request",
-        lambda method, path, tok, body=None: {"commit": {"committer": {"date": HEAD_AT}}},
-    )
-    monkeypatch.setattr(
-        module.ghrest,
-        "paginate",
-        lambda path, tok, key=None: iter([verdict("2026-09-24T10:05:00Z", 1)]),
-    )
+    """Время головы — начало взгляда по ней, а не дата коммита (`e09a581`).
+
+    Коммит, сделанный до вердикта и толкнутый после, по дате коммитера
+    выглядел старше вердикта; начало взгляда по голове — время толчка.
+    Записи взгляда нет — держать нечем.
+    """
+    runs = [{"name": "review", "started_at": HEAD_AT}]
+
+    def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        if "check-runs" in path:
+            return iter(runs)
+        return iter([verdict("2026-09-24T10:05:00Z", 1)])
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
     assert module.findings_hold("o/r", change(1, "automerge"), "token") is True
-    monkeypatch.setattr(module.ghrest, "request", lambda method, path, tok, body=None: {})
+    runs.clear()
     assert module.findings_hold("o/r", change(1, "automerge"), "token") is False
+
+
+def test_a_held_head_behind_the_base_is_not_synced(platform: dict[str, Any]) -> None:
+    """Держимая голова не подтягивается: коммит слияния очереди — не починка (`f1b9f3f`).
+
+    Подтяжка шла раньше держания, и новый коммит слияния снимал держание без
+    починки: вердикт по подтянутой голове был уже вторым.
+    """
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: module.STATE_BEHIND}
+    platform["holding"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == []
+    assert platform["merged"] == []
+
+
+def test_a_repair_of_a_red_branch_is_not_held_by_findings(platform: dict[str, Any]) -> None:
+    """Починку красной общей ветки держание находками не задерживает (#734)."""
+    platform["changes"] = [change(9, "automerge", "fix-main")]
+    platform["health"] = ["test: failure"]
+    platform["holding"] = {9}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["merged"] == [9]

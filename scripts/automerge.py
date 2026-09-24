@@ -538,11 +538,16 @@ def verdicts_on(comments: list[dict[str, Any]]) -> list[tuple[str, int]]:
     """Вердикты взгляда по изменению: время комментария и число находок.
 
     Поздний взгляд по общей ветке сюда не входит: он о слитом, а не о голове
-    изменения, и отмечен своей скрытой строкой.
+    изменения, и отмечен своей скрытой строкой. Вердикт — только из
+    комментария бота: человек может процитировать строку вердикта.
     """
     found: list[tuple[str, int]] = []
     for comment in comments:
         if unlooked.LATE_MARKER in str(comment.get("body") or ""):
+            continue
+        # Вердикт пишет ревьюер-бот; процитированная человеком строка
+        # «ВЕРДИКТ: находок 0» держание не снимает (`8b549e5`).
+        if (comment.get("user") or {}).get("type") != "Bot":
             continue
         said = review_findings.verdict_of([comment])
         if said is not None:
@@ -560,8 +565,8 @@ def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
     неснятые находки дословно, и держание «пока есть находки» стало бы вечным
     циклом.
 
-    Вердикт принадлежит голове, если написан после её коммита. Вердикта по
-    голове нет (взгляд промолчал) — держать нечем.
+    Вердикт принадлежит голове, если написан после начала взгляда по ней.
+    Вердикта по голове нет (взгляд промолчал) — держать нечем.
     """
     before = [count for when, count in verdicts if when < head_time]
     after = [count for when, count in verdicts if when >= head_time]
@@ -569,9 +574,21 @@ def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
 
 
 def findings_hold(repo: str, change: Change, owner_token: str) -> bool:
-    """Держат ли находки вердикта эту голову — по ленте изменения и времени головы."""
-    head = ghrest.request("GET", f"repos/{repo}/commits/{change.head}", owner_token) or {}
-    when = str(((head.get("commit") or {}).get("committer") or {}).get("date") or "")
+    """Держат ли находки вердикта эту голову — по ленте изменения и времени головы.
+
+    ВРЕМЯ ГОЛОВЫ — НАЧАЛО ВЗГЛЯДА ПО НЕЙ, а не дата коммита. Коммит, сделанный
+    до вердикта по прежней голове и толкнутый после, по дате коммитера выглядел
+    старше вердикта — и тот держал его второй раз (`e09a581`). Взгляд по голове
+    стартует толчком, и его начало — время толчка. Записи взгляда нет —
+    держать нечем.
+    """
+    runs = ghrest.paginate(
+        f"repos/{repo}/commits/{change.head}/check-runs?check_name={REVIEW_CHECK}",
+        owner_token,
+        key="check_runs",
+    )
+    starts = [str(run.get("started_at") or "") for run in runs if run.get("started_at")]
+    when = min(starts, default="")
     if not when:
         return False
     comments = list(ghrest.paginate(f"repos/{repo}/issues/{change.number}/comments", owner_token))
@@ -1014,6 +1031,27 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             )
             skipped["пусты"] += 1
             continue
+        # Починка идёт мимо ожидания только при КРАСНОЙ общей ветке: забытая
+        # метка `fix-main` на зелёной ветке сливала бы голову без взгляда.
+        repair = change.fixes_main and bool(troubles)
+        if not repair and findings_hold(repo, change, owner_token):
+            # Окно для починки в той же ветке: следующий толчок снимет
+            # держание — вердикт по новой голове держать уже не будет (#734).
+            # Держание стоит ДО подтяжки: коммит слияния очереди — не толчок
+            # с починкой, и подтянутая голова держание снимала без починки
+            # (`f1b9f3f`).
+            if change.armed:
+                take_back(repo, change, "ждёт починки находок", owner_token, dry_run=dry_run)
+                queue = [
+                    replace(one, armed=False) if one.number == change.number else one
+                    for one in queue
+                ]
+            print(
+                f"#{change.number}: первый вердикт с находками — жду толчка с починкой "
+                "в ту же ветку (#734)"
+            )
+            skipped["ждут починки находок"] += 1
+            continue
         if state == STATE_BEHIND:
             print(f"#{change.number}: голова очереди отстала от базы — подтягиваю только её (052)")
             # Взведение соседей снимается и на этом выходе: толчок во
@@ -1035,9 +1073,6 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         # бы ждать дважды (`14207cf`). Починку КРАСНОЙ общей ветки ожидание не
         # держит: заморозка стоит на ней, и каждая минута ожидания — минута
         # красной общей ветки для всех (`f3c79a7`).
-        # Починка идёт мимо ожидания только при КРАСНОЙ общей ветке: забытая
-        # метка `fix-main` на зелёной ветке сливала бы голову без взгляда.
-        repair = change.fixes_main and bool(troubles)
         if not repair and awaits_look(repo, change, owner_token):
             # ВЗВЕДЁННУЮ ГОЛОВУ ОЖИДАНИЕ СНИМАЕТ: площадка слила бы её сама, как
             # только позеленеют обязательные, — то есть ожидание, которое только
@@ -1054,21 +1089,6 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 ]
             print(f"#{change.number}: ждёт вердикта взгляда — не взвожу (#654)")
             skipped["ждут вердикта взгляда"] += 1
-            continue
-        if not repair and findings_hold(repo, change, owner_token):
-            # Окно для починки в той же ветке: следующий толчок снимет
-            # держание — вердикт по новой голове держать уже не будет (#734).
-            if change.armed:
-                take_back(repo, change, "ждёт починки находок", owner_token, dry_run=dry_run)
-                queue = [
-                    replace(one, armed=False) if one.number == change.number else one
-                    for one in queue
-                ]
-            print(
-                f"#{change.number}: первый вердикт с находками — жду толчка с починкой "
-                "в ту же ветку (#734)"
-            )
-            skipped["ждут починки находок"] += 1
             continue
         if state == STATE_ARMABLE:
             # СЛИТЬ НЕЛЬЗЯ СЕЙЧАС — не значит «нельзя». Проверки идут либо не
