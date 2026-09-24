@@ -169,7 +169,7 @@ COUNTERS: Final = frozenset(
 )
 
 #: Имена, которыми тест называет код выхода, когда он уже взят из прогона.
-CODE_NAMES: Final = frozenset({"code", "returncode", "rc", "exit_code"})
+CODE_NAMES: Final = frozenset({"code", "returncode", "rc", "exit_code", "код"})
 
 
 def speaks_of_an_outcome(side: ast.expr) -> bool:
@@ -208,12 +208,41 @@ def spelled_numbers(side: ast.expr, local: dict[str, int]) -> set[int]:
     return found
 
 
+def spelled_names(side: ast.expr) -> set[str]:
+    """Имена исходов, которые сторона называет: сама, перечнем или ключом подписки.
+
+    Своя константа модуля теста (`EXIT_X = 2`) у сравнения счёта
+    (`len(lines) == EXIT_X`) не засчитывается — его отсекает правило «только
+    рядом с исходом» в `asserted` (`a646521`). Отдельного условия на неё здесь
+    было заведено — и откат его не покраснел: оно ничего не держало и снято.
+    """
+    parts = side.elts if isinstance(side, (ast.Tuple, ast.List, ast.Set)) else [side]
+    found: set[str] = set()
+    for one in parts:
+        if isinstance(one, ast.Name) and one.id.startswith(OUTCOME_PREFIX):
+            found.add(one.id)
+        elif isinstance(one, ast.Attribute) and one.attr.startswith(OUTCOME_PREFIX):
+            found.add(one.attr)
+        # Исход берут и по имени из разбора самого механизма:
+        # `declared(gate)["EXIT_BROKEN"]`. Строка живёт ключом подписки, и не
+        # назвать это прогоном значило бы держать в долге строку, которую уже
+        # прогоняют (075).
+        found |= {
+            str(said.slice.value)
+            for said in ast.walk(one)
+            if isinstance(said, ast.Subscript)
+            and isinstance(said.slice, ast.Constant)
+            and isinstance(said.slice.value, str)
+            and said.slice.value.startswith(OUTCOME_PREFIX)
+        }
+    return found
+
+
 def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
     """С чем модуль сравнивает исход: числа рядом с исходом и имена констант.
 
-    Имя объявленной константы засчитывается при любой другой стороне:
-    сравнение с `EXIT_FOUND` называет исход само. Число — только рядом с
-    исходом (`speaks_of_an_outcome`), одно или перечнем. Строка `"EXIT_…"` —
+    И число, и имя объявленной константы засчитываются только рядом с исходом
+    (`speaks_of_an_outcome`), по одному или перечнем. Строка `"EXIT_…"` —
     только ключом подписки, `declared(gate)["EXIT_BROKEN"]`: голая строка в
     сравнении (`"EXIT_BROKEN" in out`) — проза вывода, а не прогон (`bcc5db5`).
     """
@@ -228,25 +257,16 @@ def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
         # давал ложный долг (`397be6f`).
         sides = [node.left, *node.comparators]
         near = any(speaks_of_an_outcome(one) for one in sides)
+        # ИМЯ ТОЖЕ ЗАСЧИТЫВАЕТСЯ ТОЛЬКО РЯДОМ С ИСХОДОМ. Сверка объявлений
+        # `m.EXIT_SILENT not in (m.EXIT_OK, …)` — не прогон, а сравнение имён
+        # между собой, и она шла за прогон (`abd8efa`); перечень имён рядом с
+        # исходом (`main([]) in (m.EXIT_OK, m.EXIT_FOUND)`) — прогон обоих
+        # (`fb22afd`).
+        if not near:
+            continue
         for one in sides:
-            if near:
-                numbers |= spelled_numbers(one, local)
-            if isinstance(one, ast.Name) and one.id.startswith(OUTCOME_PREFIX):
-                names.add(one.id)
-            elif isinstance(one, ast.Attribute) and one.attr.startswith(OUTCOME_PREFIX):
-                names.add(one.attr)
-            # Исход берут и по имени из разбора самого механизма:
-            # `declared(gate)["EXIT_BROKEN"]`. Строка живёт ключом подписки
-            # внутри сравнения, и не назвать это прогоном значило бы держать в
-            # долге строку, которую уже прогоняют (075).
-            names |= {
-                str(said.slice.value)
-                for said in ast.walk(one)
-                if isinstance(said, ast.Subscript)
-                and isinstance(said.slice, ast.Constant)
-                and isinstance(said.slice.value, str)
-                and said.slice.value.startswith(OUTCOME_PREFIX)
-            }
+            numbers |= spelled_numbers(one, local)
+            names |= spelled_names(one)
     return numbers, names
 
 
