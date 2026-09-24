@@ -303,7 +303,7 @@ jobs:
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (разбор пунктов)
-        if: always() && (steps.review.outputs.execution_file != '' || steps.review.outcome == 'failure')
+        if: always() && (steps.review.outputs.execution_file != '' || steps.review.outcome == 'failure' || steps.review.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.review.outputs.execution_file }}

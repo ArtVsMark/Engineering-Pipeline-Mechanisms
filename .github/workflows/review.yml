@@ -343,7 +343,7 @@ jobs:
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (взгляд)
-        if: always() && (steps.look.outputs.execution_file != '' || steps.look.outcome == 'failure')
+        if: always() && (steps.look.outputs.execution_file != '' || steps.look.outcome == 'failure' || steps.look.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.look.outputs.execution_file }}
@@ -612,7 +612,7 @@ jobs:
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (верификатор)
-        if: always() && (steps.refute.outputs.execution_file != '' || steps.refute.outcome == 'failure')
+        if: always() && (steps.refute.outputs.execution_file != '' || steps.refute.outcome == 'failure' || steps.refute.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.refute.outputs.execution_file }}
@@ -930,7 +930,7 @@ jobs:
       # отдаёт, и шаг зовётся без него — отказ называется и тогда (`2e92154`).
       # Совещательный, как и сам вызов (084).
       - name: назвать модель и отказ захода (поздний взгляд)
-        if: always() && (steps.late.outputs.execution_file != '' || steps.late.outcome == 'failure')
+        if: always() && (steps.late.outputs.execution_file != '' || steps.late.outcome == 'failure' || steps.late.outcome == 'cancelled')
         continue-on-error: true
         env:
           SAID: ${{ steps.late.outputs.execution_file }}

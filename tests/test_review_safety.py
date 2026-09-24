@@ -1303,7 +1303,7 @@ def unnamed_runs() -> list[str]:
                     missing.append(
                         f"{where}: шаг {AGENT_RUN} зовётся не условием "
                         f"«{follow_condition(sid)}» — без always() он не запустится после "
-                        "отказа агента, а без «outcome == 'failure'» — после отказа "
+                        "отказа агента, а без «outcome == 'failure'/'cancelled'» — после отказа "
                         "действия, не отдавшего файла"
                     )
     return missing
@@ -1314,11 +1314,13 @@ def follow_condition(sid: str) -> str:
 
     `always()` — чтобы шаг шёл после отказа; файл ИЛИ провал — чтобы он шёл и
     тогда, когда действие упало раньше агента и файла не отдало (`2e92154`).
+    Провал — это и `failure`, и `cancelled`: заход, снятый по `timeout-minutes`
+    или отменой прогона, файла тоже не отдаёт (`3d8d82e`).
     Успех без файла — законный пропуск действия, и шаг тогда молчит.
     """
     return (
         f"always() && (steps.{sid}.outputs.execution_file != '' "
-        f"|| steps.{sid}.outcome == 'failure')"
+        f"|| steps.{sid}.outcome == 'failure' || steps.{sid}.outcome == 'cancelled')"
     )
 
 
