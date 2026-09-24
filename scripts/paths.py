@@ -112,6 +112,9 @@ AUTHORS: Final = Path(".github/authors.txt")
 BADGES_DIR: Final = Path(".github/badges")
 #: Карта ролей: профили, глазами которых смотрит взгляд (#763).
 ROLES: Final = Path("docs/roles.md")
+#: Карта направлений правила 082: какие вопросы о продукте задаёт кто-то, а какие
+#: никто (#767). Роли, которые их задают, — в `ROLES`.
+DIRECTIONS: Final = Path("docs/directions.md")
 
 #: Всё, что объявлено здесь. Список разрешительный (068): путь, которого в нём
 #: нет, механизм строить не должен. Полноту держит
@@ -159,4 +162,5 @@ ALL: Final = (
     AUTHORS,
     BADGES_DIR,
     ROLES,
+    DIRECTIONS,
 )
