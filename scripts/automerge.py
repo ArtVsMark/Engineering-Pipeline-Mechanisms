@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass, field, replace
@@ -534,20 +535,52 @@ def awaits_look(repo: str, change: Change, owner_token: str) -> bool:
     return look_pending(runs)
 
 
-def verdicts_on(comments: list[dict[str, Any]]) -> list[tuple[str, int]]:
+#: Прогон, из которого написан комментарий действия: шапка «View job» ведёт
+#: на `…/actions/runs/<id>`, и адрес записи проверки несёт тот же номер.
+RUN_ID_RE: Final = re.compile(r"/actions/runs/(\d+)")
+
+
+def run_of(text: str) -> str:
+    """Номер прогона по ПЕРВОЙ ссылке на прогон в тексте; пусто — ссылки нет.
+
+    Первая — потому что шапку «View job» действие ставит в начало своего
+    комментария. Ссылка, процитированная ниже, прогоном комментария не
+    становится.
+    """
+    found = RUN_ID_RE.search(text)
+    return found.group(1) if found else ""
+
+
+def verdicts_on(
+    comments: list[dict[str, Any]], looks: frozenset[str] | None
+) -> list[tuple[str, int]]:
     """Вердикты взгляда по изменению: время комментария и число находок.
 
     Поздний взгляд по общей ветке сюда не входит: он о слитом, а не о голове
     изменения, и отмечен своей скрытой строкой. Вердикт — только из
     комментария бота: человек может процитировать строку вердикта.
+
+    ВЕРДИКТ — ТОЛЬКО ИЗ ПРОГОНА ВЗГЛЯДА (`looks`), а не от любого бота.
+    Ответчик по обращению (`claude.yml`) пишет тем же `claude[bot]`, и его
+    цитата «ВЕРДИКТ: находок 0» снимала держание без починки (`1d79af0`).
+    Различает их не автор, а прогон: шапка комментария ведёт на прогон, и
+    засчитывается лишь прогон проверки `review` одной из голов изменения.
+    Граница названа: держится это на том, что шапку ставит действие, а не
+    модель. Комментарий, написанный мимо действия, со ссылкой на прогон
+    взгляда первой строкой прошёл бы.
     """
     found: list[tuple[str, int]] = []
     for comment in comments:
-        if unlooked.LATE_MARKER in str(comment.get("body") or ""):
+        body = str(comment.get("body") or "")
+        if unlooked.LATE_MARKER in body:
             continue
         # Вердикт пишет ревьюер-бот; процитированная человеком строка
         # «ВЕРДИКТ: находок 0» держание не снимает (`8b549e5`).
         if (comment.get("user") or {}).get("type") != "Bot":
+            continue
+        # `None` — прогон не сверяется: так читаются вердикты голов, которых
+        # среди коммитов изменения уже нет (перезапись истории).
+        if looks is not None and run_of(body) not in looks:
             continue
         said = review_findings.verdict_of([comment])
         if said is not None:
@@ -573,26 +606,62 @@ def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
     return bool(after) and after[-1] > 0 and not any(count > 0 for count in before)
 
 
+def look_runs(repo: str, sha: str, owner_token: str) -> list[dict[str, Any]]:
+    """Записи проверки взгляда на коммите — все заходы, а не последний."""
+    return list(
+        ghrest.paginate(
+            f"repos/{repo}/commits/{sha}/check-runs?check_name={REVIEW_CHECK}",
+            owner_token,
+            key="check_runs",
+        )
+    )
+
+
 def findings_hold(repo: str, change: Change, owner_token: str) -> bool:
     """Держат ли находки вердикта эту голову — по ленте изменения и времени головы.
 
     ВРЕМЯ ГОЛОВЫ — НАЧАЛО ВЗГЛЯДА ПО НЕЙ, а не дата коммита. Коммит, сделанный
-    до вердикта по прежней голове и толкнутый после, по дате коммитера выглядел
-    старше вердикта — и тот держал его второй раз (`e09a581`). Взгляд по голове
-    стартует толчком, и его начало — время толчка. Записи взгляда нет —
-    держать нечем.
+    до вердикта по прежней голове и толкнутый после, по дате коммитера
+    выглядел старше вердикта — и тот держал его второй раз (`e09a581`). Взгляд
+    по голове стартует толчком, и его начало — время толчка. Записи взгляда
+    нет — держать нечем.
+
+    Прогоны взгляда читаются по ВСЕМ коммитам изменения: вердикт прежней
+    головы решает, держали ли уже, и он тоже обязан быть из прогона взгляда
+    (`1d79af0`). Права те же, что у записей проверок головы: API прогонов
+    токену владельца не объявлено. Цена — запрос на коммит изменения, и только
+    у зелёной непустой головы.
     """
-    runs = ghrest.paginate(
-        f"repos/{repo}/commits/{change.head}/check-runs?check_name={REVIEW_CHECK}",
-        owner_token,
-        key="check_runs",
-    )
+    runs = look_runs(repo, change.head, owner_token)
     starts = [str(run.get("started_at") or "") for run in runs if run.get("started_at")]
     when = min(starts, default="")
     if not when:
         return False
+    for commit in ghrest.paginate(f"repos/{repo}/pulls/{change.number}/commits", owner_token):
+        sha = str(commit.get("sha") or "")
+        if sha and sha != change.head:
+            runs += look_runs(repo, sha, owner_token)
+    looks = frozenset(filter(None, (run_of(str(run.get("details_url") or "")) for run in runs)))
     comments = list(ghrest.paginate(f"repos/{repo}/issues/{change.number}/comments", owner_token))
-    return holds_for_findings(verdicts_on(comments), when)
+    if not holds_for_findings(verdicts_on(comments, looks), when):
+        return False
+    # ПЕРЕЗАПИСЬ ИСТОРИИ УНОСИТ ПРЕЖНИЕ ГОЛОВЫ из `pulls/{n}/commits`, и с ними
+    # — прогоны их взгляда: вердикт с находками по такой голове отбрасывался,
+    # и новую голову держали второй раз (взгляд на #743). Вердикт с находками
+    # до головы, чей прогон не найден, засчитывается прежним — но только если
+    # перезапись была: иначе цитата ответчика снова решала бы за взгляд.
+    # Граница: на перезаписанном изменении такая цитата до головы держание
+    # снимет — это одно окно для починки, а не слияние без взгляда.
+    lost = [count for at, count in verdicts_on(comments, None) if at < when and count > 0]
+    return not (lost and force_pushed(repo, change, owner_token))
+
+
+def force_pushed(repo: str, change: Change, owner_token: str) -> bool:
+    """Перезаписывали ли историю ветки изменения — по событиям изменения."""
+    return any(
+        str(event.get("event") or "") == "head_ref_force_pushed"
+        for event in ghrest.paginate(f"repos/{repo}/issues/{change.number}/events", owner_token)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1034,6 +1103,19 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         # Починка идёт мимо ожидания только при КРАСНОЙ общей ветке: забытая
         # метка `fix-main` на зелёной ветке сливала бы голову без взгляда.
         repair = change.fixes_main and bool(troubles)
+        # КОНФЛИКТ СТОИТ ВЫШЕ ДЕРЖАНИЯ: держимая голова в конфликте иначе не
+        # публиковалась источником работы (004) до толчка, а чинить её в той
+        # же ветке надо и от конфликта (`999d49b`). Слить конфликтную голову
+        # площадка не может, так что держать её здесь нечего: разрешит её
+        # толчок окна, и он же — толчок с починкой.
+        if state == STATE_CONFLICT:
+            print(
+                f"#{change.number} [{RANK_NAMES[RANK_CONFLICT]}]: штатный источник работы "
+                "(004), очередь идёт дальше"
+            )
+            publish_source(repo, change, RANK_CONFLICT, owner_token, dry_run=dry_run)
+            skipped["конфликтуют"] += 1
+            continue
         if not repair and findings_hold(repo, change, owner_token):
             # Окно для починки в той же ветке: следующий толчок снимет
             # держание — вердикт по новой голове держать уже не будет (#734).
@@ -1060,14 +1142,6 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             keep_only(repo, change, queue, owner_token, dry_run=dry_run)
             sync_head(repo, change.number, owner_token, dry_run=dry_run)
             return EXIT_OK
-        if state == STATE_CONFLICT:
-            print(
-                f"#{change.number} [{RANK_NAMES[RANK_CONFLICT]}]: штатный источник работы "
-                "(004), очередь идёт дальше"
-            )
-            publish_source(repo, change, RANK_CONFLICT, owner_token, dry_run=dry_run)
-            skipped["конфликтуют"] += 1
-            continue
         # ОЖИДАНИЕ ВЗГЛЯДА СТОИТ ПОСЛЕ ПОДТЯЖКИ И КОНФЛИКТА: отставшую голову
         # подтяжка всё равно отправит на новый взгляд, и ждать старого значило
         # бы ждать дважды (`14207cf`). Починку КРАСНОЙ общей ветки ожидание не

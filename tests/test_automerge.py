@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Final
 
 import pytest
@@ -1406,13 +1407,22 @@ def test_the_first_verdict_with_findings_holds_the_head(platform: dict[str, Any]
     assert platform["merged"] == [2]
 
 
-def verdict(when: str, count: int, *, late: bool = False, human: bool = False) -> dict[str, Any]:
+#: Прогон взгляда по изменению и прогон ответчика `claude.yml` — оба пишет
+#: `claude[bot]`, различает их только шапка «View job».
+LOOK_RUN: Final = "35976997147"
+ANSWER_RUN: Final = "35984970999"
+
+
+def verdict(
+    when: str, count: int, *, late: bool = False, human: bool = False, run: str = LOOK_RUN
+) -> dict[str, Any]:
     """Комментарий взгляда с вердиктом — как его пишет бот (или цитирует человек)."""
     marker = f"{module.unlooked.LATE_MARKER}\n" if late else ""
+    head = f"**Claude finished** —— [View job](https://github.com/o/r/actions/runs/{run})\n"
     return {
         "created_at": when,
         "user": {"type": "User" if human else "Bot"},
-        "body": f"{marker}разбор\nВЕРДИКТ: находок {count}",
+        "body": f"{marker}{head}разбор\nВЕРДИКТ: находок {count}",
     }
 
 
@@ -1433,6 +1443,20 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
             [verdict("2026-09-24T10:05:00Z", 2), verdict("2026-09-24T10:06:00Z", 0, human=True)],
             True,
         ),
+        (
+            [
+                verdict("2026-09-24T10:05:00Z", 2),
+                verdict("2026-09-24T10:06:00Z", 0, run=ANSWER_RUN),
+            ],
+            True,
+        ),
+        (
+            [
+                verdict("2026-09-24T09:00:00Z", 1, run=ANSWER_RUN),
+                verdict("2026-09-24T10:05:00Z", 2),
+            ],
+            True,
+        ),
     ],
     ids=[
         "первый с находками",
@@ -1443,6 +1467,8 @@ HEAD_AT: Final = "2026-09-24T10:00:00Z"
         "поздний взгляд",
         "вердиктов нет",
         "цитата человека",
+        "цитата ответчика",
+        "цитата ответчика до головы",
     ],
 )
 def test_only_the_first_verdict_with_findings_holds(
@@ -1455,7 +1481,8 @@ def test_only_the_first_verdict_with_findings_holds(
     «держать, пока есть находки» стало бы вечным циклом. Вердикт по старой
     голове новую не держит (взгляд промолчал), поздний взгляд — не о голове.
     """
-    assert module.holds_for_findings(module.verdicts_on(comments), HEAD_AT) is holds
+    looks = frozenset({LOOK_RUN})
+    assert module.holds_for_findings(module.verdicts_on(comments, looks), HEAD_AT) is holds
 
 
 def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1463,19 +1490,61 @@ def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.Monke
 
     Коммит, сделанный до вердикта и толкнутый после, по дате коммитера
     выглядел старше вердикта; начало взгляда по голове — время толчка.
-    Записи взгляда нет — держать нечем.
+    Записи взгляда нет — держать нечем. Прогоны взгляда читаются и с прежних
+    голов изменения: вердикт прежней головы решает, держали ли уже (`1d79af0`).
     """
-    runs = [{"name": "review", "started_at": HEAD_AT}]
+    job = "https://github.com/o/r/actions/runs/{}/job/1"
+    runs = {
+        "head-sha": [
+            {"name": "review", "started_at": HEAD_AT, "details_url": job.format(LOOK_RUN)}
+        ],
+        "old-sha": [{"name": "review", "details_url": job.format("111")}],
+    }
+    said = [verdict("2026-09-24T09:00:00Z", 1, run="111"), verdict("2026-09-24T10:05:00Z", 1)]
+
+    events: list[dict[str, Any]] = []
 
     def paginate(path: str, tok: str, key: str | None = None) -> Any:
         if "check-runs" in path:
-            return iter(runs)
-        return iter([verdict("2026-09-24T10:05:00Z", 1)])
+            return iter(list(runs[path.split("/commits/")[1].split("/")[0]]))
+        if path.endswith("/commits"):
+            return iter([{"sha": "old-sha"}, {"sha": "head-sha"}])
+        if path.endswith("/events"):
+            return iter(events)
+        return iter(said)
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
-    assert module.findings_hold("o/r", change(1, "automerge"), "token") is True
-    runs.clear()
-    assert module.findings_hold("o/r", change(1, "automerge"), "token") is False
+    head = replace(change(1, "automerge"), head="head-sha")
+    assert module.look_runs("o/r", "old-sha", "token") == runs["old-sha"]
+    assert module.findings_hold("o/r", head, "token") is False
+    said.pop(0)
+    assert module.findings_hold("o/r", head, "token") is True
+    # Прежняя голова ушла перезаписью: её прогона среди коммитов нет, и
+    # вердикт с находками по ней засчитывается прежним (взгляд на #743) —
+    # но только когда перезапись была.
+    said.insert(0, verdict("2026-09-24T09:00:00Z", 1, run="222"))
+    assert module.findings_hold("o/r", head, "token") is True
+    events.append({"event": "head_ref_force_pushed"})
+    assert module.force_pushed("o/r", head, "token") is True
+    assert module.findings_hold("o/r", head, "token") is False
+    said.pop(0)
+    assert module.findings_hold("o/r", head, "token") is True
+    runs["head-sha"].clear()
+    assert module.findings_hold("o/r", head, "token") is False
+
+
+def test_a_held_head_in_conflict_is_published_as_a_source(platform: dict[str, Any]) -> None:
+    """Держимая голова в конфликте публикуется источником работы (`999d49b`).
+
+    Держание стояло выше конфликта, и конфликтная голова до толчка не
+    называлась источником 004: окно не знало, что чинить надо и конфликт.
+    """
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: module.STATE_CONFLICT}
+    platform["holding"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["sources"][-1] == (1, module.RANK_CONFLICT)
+    assert platform["merged"] == []
 
 
 def test_a_held_head_behind_the_base_is_not_synced(platform: dict[str, Any]) -> None:
