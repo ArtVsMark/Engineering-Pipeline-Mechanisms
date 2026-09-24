@@ -354,6 +354,21 @@ def test_the_install_gate_is_red_on_a_broken_job(tmp_path: Path) -> None:
         test_workflow_installs_what_its_scripts_import(broken)
 
 
+def test_the_install_gate_is_red_when_the_install_comes_late(tmp_path: Path) -> None:
+    """Установка разбора ПОСЛЕ вызова — тоже красное: шаг упадёт на импорте (#775)."""
+    late = tmp_path / "late.yml"
+    hungry = next(name for name in walk(ROOT, "scripts/*.py") if reads_yaml(name.name))
+    late.write_text(
+        "name: x\non:\n  push:\n    branches: [main]\n"
+        "jobs:\n  поздний:\n    steps:\n"
+        f"      - name: работа\n        run: python scripts/{hungry.name}\n"
+        '      - name: поставить\n        run: python -m pip install --quiet "pyyaml>=6,<7"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError, match="РАНЬШЕ"):
+        test_workflow_installs_what_its_scripts_import(late)
+
+
 def test_the_install_gate_is_green_when_the_job_installs(tmp_path: Path) -> None:
     """И зелёный, когда джоб ставит разбор сам — иначе гейт красен всегда."""
     whole = tmp_path / "whole.yml"
@@ -392,6 +407,22 @@ def test_workflow_installs_what_its_scripts_import(path: Path) -> None:
                 f"{path.name}, джоб «{name}» зовёт скрипт с разбором YAML, "
                 f"но не ставит его: {sorted(set(hungry))}"
             )
+        # УСТАНОВКА ОБЯЗАНА СТОЯТЬ РАНЬШЕ ВЫЗОВА, а не где-то в джобе. Замер
+        # 24.09.2026: ворота взгляда (#775) стали звать `look_waits`, тот тянет
+        # разбор YAML через `ci_complete`, а `pyyaml` в джобе взгляда ставился
+        # ПОЗЖЕ, шагом для ревьюера. Гейт смотрел джоб целиком и был зелёным;
+        # ворота падали на импорте, и запасное `run=yes` молча выключало «взгляд
+        # последним» на каждом изменении.
+        # Ищется УСТАНОВКА, а не упоминание: слово в комментарии над вызовом
+        # не ставит ничего (откат этой починки остался зелёным именно так).
+        install = re.search(r"pip install[^\n]*pyyaml", text, flags=re.IGNORECASE)
+        installed = install.start() if install else -1
+        for call in re.finditer(r"python scripts/(\w+\.py)", text):
+            if reads_yaml(call.group(1)):
+                assert 0 <= installed < call.start(), (
+                    f"{path.name}, джоб «{name}»: {call.group(1)} зовётся РАНЬШЕ, "
+                    "чем ставится разбор YAML, — шаг упадёт на импорте"
+                )
 
 
 @pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
