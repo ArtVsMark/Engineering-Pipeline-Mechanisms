@@ -35,6 +35,7 @@ from typing import Final
 
 import ci_complete
 import ghrest
+import unlooked
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -50,7 +51,7 @@ SILENT: Final = "silent"
 #: Заголовок пометки на записи взгляда: взгляд пропущен, потому что голова
 #: красная. По ней очередь узнаёт, что взгляд ещё ДОЛЖЕН (`automerge.owed_look`):
 #: голова, позеленевшая перезапуском без толчка, иначе слилась бы без взгляда.
-SKIPPED: Final = "взгляд пропущен: голова красная"
+SKIPPED: Final = unlooked.SKIPPED_RED_TITLE
 
 
 def gate_verdict(repo: str, sha: str, token: str) -> str | None:
