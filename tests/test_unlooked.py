@@ -861,7 +861,7 @@ def test_the_body_quotes_the_refusal_in_the_words_agent_run_writes() -> None:
     assert f"«{module.agent_run.REFUSED} — <текст>»" in body
 
 
-def test_the_late_tail_is_read_and_quoted_by_its_constant(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_late_tail_is_read_and_quoted_by_its_constant() -> None:
     """Хвост позднего взгляда пишется, читается и цитируется одной константой.
 
     Прежде `ENTRY_RE` и тело реестра несли слова хвоста вписанными рукой:
