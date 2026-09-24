@@ -151,3 +151,42 @@ def test_a_range_repeats_the_same_numbers(
     assert module.main(["--repo", "o/r", "--from", "8", "--to", "9"]) == module.EXIT_OK
     out = capsys.readouterr().out
     assert "уникальных находок: 2 на 2 изменениях" in out, out
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [["--to", "9"], ["--from", "8"], ["--from", "9", "--to", "8"]],
+    ids=["только верхняя", "только нижняя", "перевёрнутый отрезок"],
+)
+def test_a_range_needs_both_bounds_in_order(
+    monkeypatch: pytest.MonkeyPatch, bounds: list[str]
+) -> None:
+    """Одна граница без другой читала бы всю историю молча — это отказ (взгляд на #769)."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")], 8: [look("a.py:2 — два")]})
+    assert module.main(["--repo", "o/r", *bounds]) == module.EXIT_BROKEN
+
+
+def test_an_empty_range_is_not_a_zero_measurement(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отрезок без изменений — отказ, а не нулевой замер (045)."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")]})
+    assert module.main(["--repo", "o/r", "--from", "100", "--to", "200"]) == module.EXIT_BROKEN
+
+
+def test_a_moment_repeats_the_numbers_after_a_late_look(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--at` отсекает находки, дописанные поздним взглядом после замера."""
+    early = {**look("a.py:1 — раз"), "created_at": "2026-09-24T10:00:00Z"}
+    late = {**look("b.py:1 — дописано позже"), "created_at": "2026-09-24T20:00:00Z"}
+    platform(monkeypatch, {9: [early, late]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_OK
+    assert "уникальных находок: 1 на 1 изменениях" in capsys.readouterr().out
+
+
+def test_reading_counts_the_changes_it_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`read_counted` отдаёт и находки, и число прочитанных изменений — по нему пустое отличимо."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")], 8: [look("a.py:2 — два")]})
+    said, seen = module.read_counted("o/r", "t", 10, 8, 9)
+    assert seen == 2 and len(said) == 2
+    assert module.read_counted("o/r", "t", 10, 100, 200) == ([], 0)
