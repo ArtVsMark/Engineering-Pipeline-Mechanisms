@@ -1286,53 +1286,69 @@ def test_two_findings_of_one_look_at_one_place_stay_two() -> None:
     assert len(said) == 2, f"две находки по одному адресу слиплись: {list(said)}"
 
 
-def test_a_later_look_still_retells_instead_of_duplicating() -> None:
-    """Пересказ ПОЗДНИМ заходом по-прежнему садится на прежнюю запись.
+def test_a_later_look_retells_by_words_and_a_new_word_is_a_new_record() -> None:
+    """Пересказ близкими словами садится на прежнюю запись, другими словами — новая запись.
 
-    Вторая половина: без неё починка неотличима от «никогда не склеивать», и
-    каждый новый заход размножал бы записи о той же беде — ровно то, ради чего
-    признак адреса и заведён (замер 10.09.2026: четыре записи об одной беде на
-    #149)
+    Первая половина: без неё починка неотличима от «никогда не склеивать», и
+    каждый новый заход размножал бы записи о той же беде (замер 10.09.2026:
+    четыре записи об одной беде на #149)
     ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+
+    Вторая половина — находка внешнего взгляда на #669 (`7b62e1a`): совпавший
+    адрес решал сам, при любых словах, и новая беда по месту прежней ложилась
+    на её запись — а снятие прежней уносило обе. Теперь другие слова по тому же
+    адресу — вторая запись: цена — дубль, а не потеря.
     """
     entries = harvest({}, 635, TWO_AT_ONE_PLACE)
-    retold = (
+    close = (TWO_AT_ONE_PLACE[1].replace("классифицирует", "относит"),)
+    harvest(entries, 635, close)
+    assert len(entries) == 2, f"близкий пересказ завёл лишнюю запись: {list(entries)}"
+    other = (
         "scripts/runs_series.py:194 — поиск подстроки `pip install` объявляет служебной "
         "строку, которая через `&&` дальше делает работу.",
     )
-    harvest(entries, 635, retold)
-    assert len(entries) == 2, f"пересказ завёл лишнюю запись: {list(entries)}"
+    harvest(entries, 635, other)
+    assert len(entries) == 3, f"другие слова по адресу легли на чужую запись: {list(entries)}"
+
+
+#: Две записи, различимые одним словом, — и строка, близкая к обеим (#662).
+NEIGHBOUR_A: Final = (
+    "scripts/r.py:194 — множество ours строится по имени шага без привязки к файлу и джобу"
+)
+NEIGHBOUR_B: Final = NEIGHBOUR_A.replace("джобу", "матрице")
 
 
 def test_a_retelling_lands_on_the_closest_of_its_neighbours() -> None:
-    """Если записей по адресу несколько, пересказ садится на ближайшую по словам.
+    """Если близких записей несколько, пересказ садится на ближайшую по словам.
 
     Иначе пересказ второй находки на позднем заходе садился бы на ПЕРВУЮ
     попавшуюся — и та, о которой говорили, висела бы неразобранной навсегда
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Сходство строки — 0.93 к одной записи и 0.86 к другой: обе выше порога.
     """
-    entries = harvest({}, 635, TWO_AT_ONE_PLACE)
-    retold = (
-        "scripts/runs_series.py:194 — подстрочный поиск `pip install` классифицирует строку "
-        "как installer-only, хотя через `&&` она ещё и выполняет работу.",
-    )
-    mark = module.existing_mark(entries, 635, retold[0])
-    assert mark == module.fingerprint(TWO_AT_ONE_PLACE[1]), "пересказ сел на чужую запись"
+    entries = {
+        module.fingerprint(t): module.findings.Entry(635, "риск", t)
+        for t in (NEIGHBOUR_A, NEIGHBOUR_B)
+    }
+    retold = NEIGHBOUR_B.replace("файлу", "пути")
+    mark = module.existing_mark(entries, 635, retold)
+    assert mark == module.fingerprint(NEIGHBOUR_B), "пересказ сел на чужую запись"
 
 
+#: Прежняя запись, её пересказ одним словом и строка, отличная двумя, — обе
+#: выше порога, и обе претендуют на запись: 0.93 и 0.86.
 OLD_AT_TEN: Final = (
-    "scripts/x.py:10 — разбор роняет пустую строку и молча теряет последнюю запись реестра"
+    "scripts/x.py:10 — разбор роняет пустую строку и молча теряет последнюю запись "
+    "реестра при переносе"
 )
-NEW_AT_TEN: Final = "scripts/x.py:10 — имя переменной вводит в заблуждение: `left` хранит правое"
-RETOLD_AT_TEN: Final = (
-    "scripts/x.py:10 — разбор теряет последнюю запись реестра, роняя пустую строку"
-)
+RETOLD_AT_TEN: Final = OLD_AT_TEN.replace("переносе", "переносах")
+NEW_AT_TEN: Final = OLD_AT_TEN.replace("последнюю", "первую").replace("реестра", "журнала")
 
 
 def test_the_order_of_lines_does_not_decide_who_retells() -> None:
     """Пересказ находится, где бы в ответе ни стояла соседняя новая находка.
 
-    Проверено прогоном до починки: новая находка по адресу, стоящая РАНЬШЕ
+    Проверено прогоном до починки: новая находка, стоящая РАНЬШЕ
     пересказа старой, забирала старую запись себе — запись хранит прежний
     заголовок, и новая находка пропадала молча, а пересказ заводил дубль. Счёт
     записей при этом сходился, расходилось содержимое
@@ -1347,31 +1363,31 @@ def test_the_order_of_lines_does_not_decide_who_retells() -> None:
 
 
 def test_two_retellings_pair_up_as_a_whole() -> None:
-    """Два пересказа по одному адресу разбираются вместе, а не жадно по очереди.
+    """Два пересказа двух близких записей разбираются вместе, а не жадно по очереди.
 
     Случай внешнего взгляда на #662: ранний пересказ отбирал запись, которая
-    ближе позднему, и тому доставалась дальняя. Сильнейшие пары занимаются
-    первыми, поэтому каждый пересказ садится на свою запись.
+    ближе позднему, и тому доставалась дальняя. Здесь ранняя строка ближе к
+    первой записи (0.93 против 0.86), а поздняя совпадает с первой дословно:
+    жадный разбор отдал бы первую запись ранней строке. Сильнейшие пары
+    занимаются первыми, поэтому каждый пересказ садится на свою запись.
     """
-    first, second = TWO_AT_ONE_PLACE
     entries = {
-        module.fingerprint(first): module.findings.Entry(635, "риск", first),
-        module.fingerprint(second): module.findings.Entry(635, "риск", second),
+        module.fingerprint(t): module.findings.Entry(635, "риск", t)
+        for t in (NEIGHBOUR_A, NEIGHBOUR_B)
     }
-    retold = [
-        "scripts/runs_series.py:194 — подстрочный поиск `pip install` классифицирует строку "
-        "как installer-only, хотя через `&&` она ещё и выполняет работу.",
-        "scripts/runs_series.py:194 — множество `ours` строится по имени шага без привязки "
-        "к джобу; одноимённый шаг унаследует чужую классификацию.",
-    ]
-    said = module.pair_up(entries, 635, retold)
-    assert said == [module.fingerprint(second), module.fingerprint(first)], said
+    early = NEIGHBOUR_A.replace("файлу", "пути")
+    said = module.pair_up(entries, 635, [early, NEIGHBOUR_A])
+    assert said == [module.fingerprint(NEIGHBOUR_B), module.fingerprint(NEIGHBOUR_A)], said
 
 
-#: Две находки по одному адресу, РАВНО далёкие от прежней записи: по два общих
-#: слова из трёх у каждой, и сходство у обеих одно и то же до последнего знака.
-TIED_OLD: Final = "scripts/a.py:5 — старое"
-TIED: Final = ("scripts/a.py:5 — первая беда", "scripts/a.py:5 — вторая беда")
+#: Две строки, РАВНО близкие к прежней записи: у каждой одно слово из
+#: одиннадцати другое, и сходство у обеих одно и то же до последнего знака —
+#: 0.91, выше порога. Друг к другу они ближе порога не подходят (0.82).
+TIED_OLD: Final = "scripts/a.py:5 — разбор роняет пустую строку и теряет запись реестра молча"
+TIED: Final = (
+    TIED_OLD.replace("реестра", "журнала"),
+    TIED_OLD.replace("запись", "строку"),
+)
 
 
 def test_a_tie_between_two_lines_gives_the_record_to_neither() -> None:
@@ -1460,7 +1476,7 @@ def test_the_form_the_prompt_asks_for_is_harvested_with_its_address() -> None:
     )
     found = module.findings_of([comment(f"НАХОДКА[риск]: {filled}")])
     assert [weight for weight, _, _ in found] == ["риск"]
-    assert module.addresses(found[0][1]) == frozenset({"scripts/work_plan.py:12"})
+    assert found[0][1] == "scripts/work_plan.py:12 — строка без адреса роняет план", found
 
 
 def test_a_finding_without_a_place_is_harvested_without_an_address() -> None:
@@ -1469,4 +1485,4 @@ def test_a_finding_without_a_place_is_harvested_without_an_address() -> None:
         [comment("НАХОДКА[дефект]: (без места) — тело изменения называет не то число")]
     )
     assert [weight for weight, _, _ in found] == ["дефект"]
-    assert module.addresses(found[0][1]) == frozenset()
+    assert found[0][1] == "(без места) — тело изменения называет не то число", found
