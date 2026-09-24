@@ -94,6 +94,8 @@ SOURCES: Final = (SCRIPTS, TRANSPORT)
 #: Послабления при сравнении: что прощается, где и почему. Один адрес на всех
 #: читателей, как у остальных таблиц `.rules/` (115).
 LENIENCY: Final = Path(".rules/leniency.json")
+#: Инвентарь переносимого: ответ по каждому механизму о переносе к соседу (#642).
+PORTABLE: Final = Path(".rules/portable.json")
 #: Записи решений: почему выбрано так, а не иначе. Адрес объявлен здесь, а не
 #: строится читателем: второй якорь заводится именно так (115).
 DECISIONS: Final = Path("docs/decisions")
@@ -135,6 +137,7 @@ ALL: Final = (
     SERIES,
     RERUN,
     LENIENCY,
+    PORTABLE,
     PROTECTION,
     OUTCOMES,
     CONSUMERS,
