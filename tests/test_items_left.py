@@ -31,23 +31,28 @@ DAY_ONE = datetime(2026, 9, 1, tzinfo=UTC)
 DAY_TEN = datetime(2026, 9, 10, tzinfo=UTC)
 
 
-def repo_with(tmp_path: Path, name: str, when: datetime, body: str = "x = 1\n") -> Path:
-    """Дерево под git с одним файлом, добавленным в назначенный день."""
-    subprocess.run(["git", "init", "--quiet", "-b", "main"], cwd=tmp_path, check=True)
-    (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / name).write_text(body, encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+def commit_at(root: Path, when: datetime, message: str) -> None:
+    """Коммит всего изменённого с назначенной авторской датой."""
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "первый"],
-        cwd=tmp_path,
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", message],
+        cwd=root,
         check=True,
         env={
             "GIT_AUTHOR_DATE": when.isoformat(),
             "GIT_COMMITTER_DATE": when.isoformat(),
             "PATH": "/usr/bin:/bin",
-            "HOME": str(tmp_path),
+            "HOME": str(root),
         },
     )
+
+
+def repo_with(tmp_path: Path, name: str, when: datetime, body: str = "x = 1\n") -> Path:
+    """Дерево под git с одним файлом, добавленным в назначенный день."""
+    subprocess.run(["git", "init", "--quiet", "-b", "main"], cwd=tmp_path, check=True)
+    (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / name).write_text(body, encoding="utf-8")
+    commit_at(tmp_path, when, "первый")
     return tmp_path
 
 
@@ -174,18 +179,7 @@ def test_a_shallow_clone_answers_unknown_not_a_date(tmp_path: Path) -> None:
     origin.mkdir()
     repo_with(origin, "scripts/check_thing.py", DAY_ONE)
     (origin / "second.py").write_text("y = 2\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=origin, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "второй"],
-        cwd=origin,
-        check=True,
-        env={
-            "GIT_AUTHOR_DATE": DAY_TEN.isoformat(),
-            "GIT_COMMITTER_DATE": DAY_TEN.isoformat(),
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(tmp_path),
-        },
-    )
+    commit_at(origin, DAY_TEN, "второй")
     shallow = tmp_path / "shallow"
     subprocess.run(
         ["git", "clone", "--quiet", "--depth", "1", f"file://{origin}", str(shallow)],
@@ -297,17 +291,7 @@ def test_a_moved_or_renamed_test_keeps_its_first_birth(tmp_path: Path) -> None:
     """
     root = repo_with(tmp_path, "tests/test_plan.py", DAY_ONE, GATE_TEST)
     subprocess.run(["git", "mv", "tests/test_plan.py", "tests/test_moved.py"], cwd=root, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "перенос"],
-        cwd=root,
-        check=True,
-        env={
-            "GIT_AUTHOR_DATE": DAY_TEN.isoformat(),
-            "GIT_COMMITTER_DATE": DAY_TEN.isoformat(),
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(root),
-        },
-    )
+    commit_at(root, DAY_TEN, "перенос")
     name = "test_a_row_without_an_address_refuses_the_build"
     assert module.tests_born(root) == {name: DAY_ONE}
     assert [(one.name, one.born) for one in module.subjects(root)] == [
@@ -369,35 +353,8 @@ def test_a_namesake_born_later_takes_the_older_date(tmp_path: Path) -> None:
     (root / "tests" / "test_other.py").write_text(
         "import os\n\n\ndef helper() -> None:\n    pass\n" + GATE_TEST, encoding="utf-8"
     )
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "второй"],
-        cwd=root,
-        check=True,
-        env={
-            "GIT_AUTHOR_DATE": DAY_TEN.isoformat(),
-            "GIT_COMMITTER_DATE": DAY_TEN.isoformat(),
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(root),
-        },
-    )
+    commit_at(root, DAY_TEN, "второй")
     assert module.tests_born(root) == {"test_a_row_without_an_address_refuses_the_build": DAY_ONE}
-
-
-def commit_at(root: Path, when: datetime, message: str) -> None:
-    """Коммит всего изменённого с назначенной авторской датой."""
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", message],
-        cwd=root,
-        check=True,
-        env={
-            "GIT_AUTHOR_DATE": when.isoformat(),
-            "GIT_COMMITTER_DATE": when.isoformat(),
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(root),
-        },
-    )
 
 
 def test_a_file_renamed_after_the_task_is_not_new(tmp_path: Path) -> None:
@@ -425,3 +382,28 @@ def test_the_earliest_author_date_wins_over_the_history_order(tmp_path: Path) ->
     commit_at(root, DAY_ONE, "перенесённое с ранней датой")
     name = "test_a_row_without_an_address_refuses_the_build"
     assert module.tests_born(root) == {name: DAY_ONE}
+
+
+def test_a_file_readded_with_an_earlier_date_is_born_at_the_earliest(tmp_path: Path) -> None:
+    """Файл, удалённый и добавленный заново с более ранней датой, рождён по наименьшей.
+
+    Одна строка добавления не отличает «последнюю строку» от «наименьшей
+    даты» — откат оставался зелёным (`0b1afc3`). Здесь строк две, и порядок
+    истории с датами расходится, как после cherry-pick.
+    """
+    root = repo_with(tmp_path, "scripts/thing.py", DAY_TEN)
+    (root / "scripts" / "thing.py").unlink()
+    commit_at(root, DAY_TEN + timedelta(days=1), "снят")
+    (root / "scripts" / "thing.py").write_text("x = 2\n", encoding="utf-8")
+    commit_at(root, DAY_ONE, "возвращён с ранней датой")
+    assert module.born("scripts/thing.py", root) == DAY_ONE
+
+
+def test_a_test_readded_with_an_earlier_date_is_born_at_the_earliest(tmp_path: Path) -> None:
+    """Имя теста рождено по наименьшей дате, а не по первой в порядке истории (`8c3fad9`)."""
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
+    (root / "tests" / "test_plan.py").write_text("x = 1\n", encoding="utf-8")
+    commit_at(root, DAY_TEN + timedelta(days=1), "снят")
+    (root / "tests" / "test_plan.py").write_text(GATE_TEST, encoding="utf-8")
+    commit_at(root, DAY_ONE, "возвращён с ранней датой")
+    assert module.born_symbol("test_a_row_without_an_address_refuses_the_build", root) == DAY_ONE
