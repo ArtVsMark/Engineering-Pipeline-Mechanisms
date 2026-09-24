@@ -151,3 +151,99 @@ def test_a_range_repeats_the_same_numbers(
     assert module.main(["--repo", "o/r", "--from", "8", "--to", "9"]) == module.EXIT_OK
     out = capsys.readouterr().out
     assert "уникальных находок: 2 на 2 изменениях" in out, out
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [["--to", "9"], ["--from", "8"], ["--from", "9", "--to", "8"]],
+    ids=["только верхняя", "только нижняя", "перевёрнутый отрезок"],
+)
+def test_a_range_needs_both_bounds_in_order(
+    monkeypatch: pytest.MonkeyPatch, bounds: list[str]
+) -> None:
+    """Одна граница без другой читала бы всю историю молча — это отказ (взгляд на #769)."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")], 8: [look("a.py:2 — два")]})
+    assert module.main(["--repo", "o/r", *bounds]) == module.EXIT_BROKEN
+
+
+def test_an_empty_range_is_not_a_zero_measurement(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отрезок без изменений — отказ, а не нулевой замер (045)."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")]})
+    assert module.main(["--repo", "o/r", "--from", "100", "--to", "200"]) == module.EXIT_BROKEN
+
+
+def test_a_moment_repeats_the_numbers_after_a_late_look(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--at` отсекает находки, дописанные поздним взглядом после замера."""
+    early = {**look("a.py:1 — раз"), "created_at": "2026-09-24T10:00:00Z"}
+    late = {**look("b.py:1 — дописано позже"), "created_at": "2026-09-24T20:00:00Z"}
+    platform(monkeypatch, {9: [early, late]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_OK
+    assert "уникальных находок: 1 на 1 изменениях" in capsys.readouterr().out
+
+
+def test_reading_counts_the_changes_it_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`read_counted` отдаёт и находки, и число прочитанных изменений — по нему пустое отличимо."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")], 8: [look("a.py:2 — два")]})
+    said, seen = module.read_counted("o/r", "t", 10, 8, 9)
+    assert seen == 2 and len(said) == 2
+    assert module.read_counted("o/r", "t", 10, 100, 200) == ([], 0)
+
+
+@pytest.mark.parametrize(
+    "said", ["2026-09-24", "2026-09-24T19:00:00", "вчера"], ids=["дата", "без пояса", "не ISO"]
+)
+def test_a_moment_without_time_and_zone_is_refused(
+    monkeypatch: pytest.MonkeyPatch, said: str
+) -> None:
+    """`--at` без времени или пояса резал бы не там и молча — это отказ (взгляд на #781)."""
+    platform(monkeypatch, {9: [look("a.py:1 — раз")]})
+    assert (
+        module.main(["--repo", "o/r", "--from", "9", "--to", "9", "--at", said])
+        == module.EXIT_BROKEN
+    )
+
+
+def test_a_moment_with_an_offset_is_the_same_instant() -> None:
+    """Смещение пояса — тот же момент, а не сдвиг на смещение."""
+    assert module.moment("2026-09-24T22:00:00+03:00") == module.moment("2026-09-24T19:00:00Z")
+
+
+def test_findings_written_by_an_edit_after_the_moment_are_not_counted(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Находки дописаны правкой после `--at` — их нет в замере на `--at` (взгляд на #781)."""
+    kept = {
+        **look("a.py:1 — раз"),
+        "created_at": "2026-09-24T10:00:00Z",
+        "updated_at": "2026-09-24T10:05:00Z",
+    }
+    late = {
+        **look("b.py:1 — дописано правкой"),
+        "created_at": "2026-09-24T18:00:00Z",
+        "updated_at": "2026-09-24T20:00:00Z",
+    }
+    platform(monkeypatch, {9: [kept, late]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_OK
+    assert "уникальных находок: 1 на 1 изменениях" in capsys.readouterr().out
+
+
+def test_a_moment_before_every_finding_is_not_a_zero_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Момент раньше всех лент — пустой замер, а значит отказ (045, 195)."""
+    platform(monkeypatch, {9: [{**look("a.py:1 — раз"), "created_at": "2026-09-24T10:00:00Z"}]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2020-01-01T00:00:00Z"]
+    assert module.main(args) == module.EXIT_BROKEN
+
+
+def test_said_at_is_the_last_edit_and_falls_back_to_creation() -> None:
+    """`said_at` — время правки; нет правки — время создания."""
+    edited = {"created_at": "2026-09-24T10:00:00Z", "updated_at": "2026-09-24T11:00:00Z"}
+    assert module.said_at(edited) == module.moment("2026-09-24T11:00:00Z")
+    assert module.said_at({"created_at": "2026-09-24T10:00:00Z"}) == module.moment(
+        "2026-09-24T10:00:00Z"
+    )
