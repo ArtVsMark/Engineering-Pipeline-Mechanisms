@@ -78,7 +78,7 @@ jobs:
   # её вердикт доезжает до него через `needs`.
   test-matrix:
     name: test-matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       # Одна упавшая версия не отменяет остальных: узнать надо про все, а не
@@ -91,7 +91,7 @@ jobs:
         with:
           # Тесты гейтов ходят по истории — нужна вся.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - name: поставить проверки
@@ -134,7 +134,7 @@ jobs:
     #
     # Вердикта у отменённого прогона нет, и выдавать за вердикт нечего.
     if: always() && needs.test-matrix.result != 'cancelled'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: вердикт матрицы
@@ -158,7 +158,7 @@ jobs:
   # это, и разбирается оно так же: причина видна в логе шага, а не додумывается.
   test-next:
     name: test-next
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # МАТРИЦА ИЗ ОДНОЙ ВЕРСИИ — РАДИ ИМЕНИ, И ЭТО НЕ УКРАШЕНИЕ. Площадка
     # приписывает значения матрицы к имени джоба, поэтому запись проверки
@@ -184,7 +184,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python }}
           allow-prereleases: true
