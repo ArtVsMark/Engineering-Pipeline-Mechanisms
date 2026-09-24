@@ -1316,3 +1316,44 @@ def test_awaiting_the_look_asks_the_review_record_of_the_head(
     item = change(1, "automerge")
     assert module.awaits_look("o/r", item, "token") is True
     assert asked == [f"repos/o/r/commits/{item.head}/check-runs?check_name=review"]
+
+
+def test_a_head_behind_the_base_is_synced_before_the_look_is_awaited(
+    platform: dict[str, Any],
+) -> None:
+    """Отставшую голову подтягивают, не дожидаясь старого взгляда (`14207cf`).
+
+    Подтяжка всё равно отправит голову на новый взгляд: ждать старого значило
+    бы ждать дважды, а при подвижной общей ветке — голодать.
+    """
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: module.STATE_BEHIND}
+    platform["looking"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == [1]
+
+
+def test_a_repair_of_the_shared_branch_does_not_wait_for_the_look(
+    platform: dict[str, Any],
+) -> None:
+    """Починка общей ветки взгляда не ждёт: заморозка стоит на ней (`f3c79a7`)."""
+    platform["changes"] = [change(9, "automerge", "fix-main")]
+    platform["health"] = ["test: failure"]
+    platform["looking"] = {9}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["merged"] == [9]
+
+
+def test_a_push_wakes_the_queue() -> None:
+    """Толчок в изменение зовёт очередь — иначе взведение переживёт новый взгляд (`865341e`).
+
+    Площадка слила бы взведённую голову по зелёному `ci` раньше, чем взгляд
+    по новой голове скажет; снять взведение успевает только заход по самому
+    толчку.
+    """
+    import yaml
+
+    said = yaml.safe_load((ROOT / ".github" / "workflows" / "automerge.yml").read_text("utf-8"))
+    events = said[True] if True in said else said["on"]
+    assert "synchronize" in events["pull_request"]["types"]
+    assert "review" in events["workflow_run"]["workflows"]

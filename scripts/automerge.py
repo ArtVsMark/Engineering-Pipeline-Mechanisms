@@ -956,22 +956,6 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             skipped["красны"] += 1
             continue
 
-        if awaits_look(repo, change, owner_token):
-            # ВЗВЕДЁННУЮ ГОЛОВУ ОЖИДАНИЕ СНИМАЕТ: площадка слила бы её сама, как
-            # только позеленеют обязательные, — то есть ожидание, которое только
-            # молчит, ничего не держит (126). Очередь снова позовёт завершение
-            # прогона взгляда (`workflow_run` по `review`).
-            if change.armed:
-                take_back(repo, change, "ждёт вердикта взгляда", owner_token, dry_run=dry_run)
-                # Снятое помечается в самой очереди: иначе слияние соседа ниже
-                # сняло бы то же взведение второй раз по устаревшему снимку.
-                queue = [
-                    replace(one, armed=False) if one.number == change.number else one
-                    for one in queue
-                ]
-            print(f"#{change.number}: ждёт вердикта взгляда — не взвожу (#654)")
-            skipped["ждут вердикта взгляда"] += 1
-            continue
         look = head_look(repo, change.number, owner_token)
         state = look.state
         if look.changed == 0:
@@ -995,6 +979,28 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             )
             publish_source(repo, change, RANK_CONFLICT, owner_token, dry_run=dry_run)
             skipped["конфликтуют"] += 1
+            continue
+        # ОЖИДАНИЕ ВЗГЛЯДА СТОИТ ПОСЛЕ ПОДТЯЖКИ И КОНФЛИКТА: отставшую голову
+        # подтяжка всё равно отправит на новый взгляд, и ждать старого значило
+        # бы ждать дважды (`14207cf`). Починку общей ветки ожидание не держит:
+        # заморозка стоит на ней, и каждая минута ожидания — минута красной
+        # общей ветки для всех (`f3c79a7`).
+        if not change.fixes_main and awaits_look(repo, change, owner_token):
+            # ВЗВЕДЁННУЮ ГОЛОВУ ОЖИДАНИЕ СНИМАЕТ: площадка слила бы её сама, как
+            # только позеленеют обязательные, — то есть ожидание, которое только
+            # молчит, ничего не держит (126). Очередь снова позовёт завершение
+            # прогона взгляда (`workflow_run` по `review`), а снимет взведение
+            # после толчка — сам толчок (`synchronize`, `865341e`).
+            if change.armed:
+                take_back(repo, change, "ждёт вердикта взгляда", owner_token, dry_run=dry_run)
+                # Снятое помечается в самой очереди: иначе слияние соседа ниже
+                # сняло бы то же взведение второй раз по устаревшему снимку.
+                queue = [
+                    replace(one, armed=False) if one.number == change.number else one
+                    for one in queue
+                ]
+            print(f"#{change.number}: ждёт вердикта взгляда — не взвожу (#654)")
+            skipped["ждут вердикта взгляда"] += 1
             continue
         if state == STATE_ARMABLE:
             # СЛИТЬ НЕЛЬЗЯ СЕЙЧАС — не значит «нельзя». Проверки идут либо не
