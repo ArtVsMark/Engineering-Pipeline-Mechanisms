@@ -1505,7 +1505,7 @@ def test_only_the_first_verdict_with_findings_holds(
     «держать, пока есть находки» стало бы вечным циклом. Вердикт по старой
     голове новую не держит (взгляд промолчал), поздний взгляд — не о голове.
     """
-    looks = {LOOK_RUN: ""}
+    looks: dict[str, list[str]] = {LOOK_RUN: []}
     assert module.holds_for_findings(module.verdicts_on(comments, looks), HEAD_AT) is holds
 
 
@@ -1539,7 +1539,10 @@ def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.Monke
 
     events: list[dict[str, Any]] = []
 
+    asked: list[str] = []
+
     def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        asked.append(path)
         if "check-runs" in path:
             return iter(list(runs[path.split("/commits/")[1].split("/")[0]]))
         if path.endswith("/commits"):
@@ -1551,6 +1554,8 @@ def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.Monke
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     head = replace(change(1, "automerge"), head="head-sha")
     assert module.look_runs("o/r", "old-sha", "token") == runs["old-sha"]
+    # Все попытки прогона, а не последняя: у попыток общий номер (#752).
+    assert asked and asked[-1].endswith("&filter=all")
     assert module.findings_hold("o/r", head, "token") is False
     said.pop(0)
     assert module.findings_hold("o/r", head, "token") is True
@@ -1614,7 +1619,7 @@ def test_a_verdict_is_timed_by_its_run_not_by_an_edit() -> None:
     """
     old = verdict("2026-09-24T10:30:00Z", 2, run="111", created="2026-09-24T09:00:00Z")
     new = verdict("2026-09-24T10:10:00Z", 3)
-    looks = {"111": "2026-09-24T09:05:00Z", LOOK_RUN: "2026-09-24T10:10:00Z"}
+    looks = {"111": ["2026-09-24T09:05:00Z"], LOOK_RUN: ["2026-09-24T10:10:00Z"]}
     assert module.verdict_time(old, looks) == "2026-09-24T09:05:00Z"
     assert module.holds_for_findings(module.verdicts_on([old, new], looks), HEAD_AT) is False
 
@@ -1627,5 +1632,71 @@ def test_the_last_verdict_is_the_last_said_not_the_last_created() -> None:
     """
     slow = verdict("2026-09-24T10:20:00Z", 0, created="2026-09-24T10:01:00Z")
     fast = verdict("2026-09-24T10:10:00Z", 3, created="2026-09-24T10:02:00Z")
-    said = module.verdicts_on([slow, fast], {LOOK_RUN: ""})
+    said = module.verdicts_on([slow, fast], {LOOK_RUN: []})
     assert module.holds_for_findings(said, HEAD_AT) is False
+
+
+def test_a_verdict_of_the_old_head_said_after_a_sync_holds_by_its_run() -> None:
+    """Сценарий #748 через завершение прогона, а не через запасное время (#752).
+
+    Взгляд прежней головы начат до подтяжки, а завершён после начала взгляда
+    по новой: его вердикт принадлежит новой голове и держит её. Комментарий
+    без времени правки — иначе держало бы и запасное время.
+    """
+    old = verdict("2026-09-24T09:59:00Z", 2, run="111")
+    del old["updated_at"]
+    looks = {"111": ["2026-09-24T10:06:00Z"], LOOK_RUN: []}
+    assert module.holds_for_findings(module.verdicts_on([old], looks), HEAD_AT) is True
+
+
+def test_a_rerun_of_the_old_look_does_not_move_its_first_verdict() -> None:
+    """Перезапуск взгляда прежней головы не сдвигает её первый вердикт (#752).
+
+    Номер прогона у попыток общий: вердикт первой попытки получал завершение
+    последней, уезжал «после головы», и новую голову держали второй раз.
+    Вердикту принадлежит самое раннее завершение не раньше его комментария.
+    """
+    first = verdict("2026-09-24T09:05:00Z", 2, run="111", created="2026-09-24T09:00:00Z")
+    new = verdict("2026-09-24T10:10:00Z", 3, created="2026-09-24T10:01:00Z")
+    looks = {"111": ["2026-09-24T09:05:00Z", "2026-09-24T10:20:00Z"], LOOK_RUN: []}
+    assert module.verdict_time(first, looks) == "2026-09-24T09:05:00Z"
+    # Вторая попытка пишет свой комментарий — ему её собственное завершение.
+    second = verdict("2026-09-24T10:20:00Z", 1, run="111", created="2026-09-24T10:12:00Z")
+    assert module.verdict_time(second, looks) == "2026-09-24T10:20:00Z"
+    assert module.holds_for_findings(module.verdicts_on([first, new], looks), HEAD_AT) is False
+
+
+def test_a_rerun_of_the_head_look_keeps_its_first_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Время головы — начало первой попытки её взгляда, а не перезапуска (#755).
+
+    По последней попытке перезапуск взгляда самой головы делал её первый
+    вердикт с находками «прежним», и держания не было вовсе.
+    """
+    job = f"https://github.com/o/r/actions/runs/{LOOK_RUN}/job/{{}}"
+    attempts = [
+        {
+            "started_at": HEAD_AT,
+            "completed_at": "2026-09-24T10:05:00Z",
+            "details_url": job.format(1),
+        },
+        {
+            "started_at": "2026-09-24T10:20:00Z",
+            "completed_at": "2026-09-24T10:25:00Z",
+            "details_url": job.format(2),
+        },
+    ]
+    said = [
+        verdict("2026-09-24T10:05:00Z", 2, created="2026-09-24T10:00:30Z"),
+        verdict("2026-09-24T10:25:00Z", 2, created="2026-09-24T10:20:30Z"),
+    ]
+
+    def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        if "check-runs" in path:
+            return iter(list(attempts))
+        if path.endswith("/commits"):
+            return iter([{"sha": "head-sha"}])
+        return iter(said)
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    head = replace(change(1, "automerge"), head="head-sha")
+    assert module.findings_hold("o/r", head, "token") is True

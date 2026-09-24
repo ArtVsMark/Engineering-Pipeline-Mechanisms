@@ -553,11 +553,12 @@ def run_of(text: str) -> str:
 
 
 def verdicts_on(
-    comments: list[dict[str, Any]], looks: Mapping[str, str] | None
+    comments: list[dict[str, Any]], looks: Mapping[str, list[str]] | None
 ) -> list[tuple[str, int]]:
     """Вердикты взгляда по изменению: время вердикта и число находок.
 
-    `looks` — прогоны взгляда голов изменения: номер → когда завершён.
+    `looks` — прогоны взгляда голов изменения: номер → когда завершалась
+    каждая его попытка.
 
     Поздний взгляд по общей ветке сюда не входит: он о слитом, а не о голове
     изменения, и отмечен своей скрытой строкой. Вердикт — только из
@@ -591,7 +592,7 @@ def verdicts_on(
     return found
 
 
-def verdict_time(comment: dict[str, Any], looks: Mapping[str, str] | None) -> str:
+def verdict_time(comment: dict[str, Any], looks: Mapping[str, list[str]] | None) -> str:
     """Когда вердикт сказан: завершение его прогона взгляда, а не время комментария.
 
     НЕ ВРЕМЯ СОЗДАНИЯ. Действие создаёт комментарий в начале захода и
@@ -605,11 +606,21 @@ def verdict_time(comment: dict[str, Any], looks: Mapping[str, str] | None) -> st
     сдвинуть. Время правки остаётся запасным: прогон ещё не завершён либо не
     найден среди голов (перезапись истории, `looks is None`) — и там граница
     с правкой рукой названа, а не закрыта.
+
+    ПОПЫТОК У ПРОГОНА БЫВАЕТ НЕСКОЛЬКО, а номер в адресе у них один:
+    перезапуск взгляда прежней головы давал её старому вердикту завершение
+    НОВОЙ попытки, и голову держали второй раз (взгляд на #752). Каждая
+    попытка пишет свой комментарий, поэтому вердикту принадлежит самое раннее
+    завершение, случившееся не раньше создания его комментария.
     """
     written = str(comment.get("updated_at") or comment.get("created_at") or "")
     if looks is None:
         return written
-    return looks.get(run_of(str(comment.get("body") or "")), "") or written
+    created = str(comment.get("created_at") or "")
+    ends = sorted(
+        end for end in looks.get(run_of(str(comment.get("body") or "")), []) if end >= created
+    )
+    return ends[0] if ends else written
 
 
 def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
@@ -637,10 +648,19 @@ def holds_for_findings(verdicts: list[tuple[str, int]], head_time: str) -> bool:
 
 
 def look_runs(repo: str, sha: str, owner_token: str) -> list[dict[str, Any]]:
-    """Записи проверки взгляда на коммите — все заходы, а не последний."""
+    """Записи проверки взгляда на коммите — все заходы и все попытки, а не последняя.
+
+    По умолчанию площадка отдаёт только последнюю попытку (`filter=latest`),
+    и время ранней попытки терялось (взгляд на #752).
+
+    Сосед по тому же чтению — ВРЕМЯ ГОЛОВЫ: теперь это начало ПЕРВОЙ попытки
+    её взгляда, а не последней (взгляд на #755). Так и должно быть: взгляд по
+    голове начался толчком. По последней попытке перезапуск взгляда самой
+    головы делал её первый вердикт с находками «прежним», и держания не было.
+    """
     return list(
         ghrest.paginate(
-            f"repos/{repo}/commits/{sha}/check-runs?check_name={REVIEW_CHECK}",
+            f"repos/{repo}/commits/{sha}/check-runs?check_name={REVIEW_CHECK}&filter=all",
             owner_token,
             key="check_runs",
         )
@@ -671,11 +691,16 @@ def findings_hold(repo: str, change: Change, owner_token: str) -> bool:
         sha = str(commit.get("sha") or "")
         if sha and sha != change.head:
             runs += look_runs(repo, sha, owner_token)
-    looks = {
-        run_of(str(run.get("details_url") or "")): str(run.get("completed_at") or "")
-        for run in runs
-        if run_of(str(run.get("details_url") or ""))
-    }
+    looks: dict[str, list[str]] = {}
+    for run in runs:
+        number = run_of(str(run.get("details_url") or ""))
+        if not number:
+            continue
+        # Ключ — у КАЖДОГО прогона взгляда: по нему `verdicts_on` решает, из
+        # прогона ли взгляда комментарий. Незавершённый прогон — без времени.
+        ends = looks.setdefault(number, [])
+        if run.get("completed_at"):
+            ends.append(str(run["completed_at"]))
     comments = list(ghrest.paginate(f"repos/{repo}/issues/{change.number}/comments", owner_token))
     if not holds_for_findings(verdicts_on(comments, looks), when):
         return False
