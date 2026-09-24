@@ -29,6 +29,9 @@ permissions:
   # исключительное утверждение, переставшее быть верным в день появления второго
   # (181).
   contents: write
+  # Архив находок (#778) читает ленты слитых изменений и тела их слияний.
+  pull-requests: read
+  issues: read
 
 concurrency:
   # Голова здесь не нужна: ветка перезаписывается целиком, и последний прогон
@@ -52,7 +55,7 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
-      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
 
       # СВОДКА СЕМЬИ БЕРЁТСЯ У КАТАЛОГА, А НЕ СОБИРАЕТСЯ ЗАНОВО. Она уже
       # собрана его ночным прогоном и лежит в его ветке значков; второй сборщик
@@ -117,6 +120,45 @@ jobs:
             --sha "${GITHUB_SHA}" \
             --family "${RUNNER_TEMP}/where.json" \
             --coverage "${RUNNER_TEMP}/coverage.json"
+      # АРХИВ НАХОДОК ВЗГЛЯДА (#778) — в ту же ветку и тем же адресом семьи.
+      # Он ДОПИСЫВАЕТСЯ: прежний файл берётся git-ом с ветки `badges` (не API
+      # содержимого: тот не отдаёт файлы больше мегабайта), и к нему
+      # добавляется слитое, которого в нём ещё нет.
+      #
+      # ИСТОРИЮ ОТКАЗОМ НЕ ТЕРЯЕМ. Ветка перезаписывается целиком, и упавший
+      # шаг снял бы архив с неё, а ответы верификатора у ушедших из реестра
+      # записей не восстановить. Поэтому: шаг отказал — прежний файл
+      # переносится как есть; ветку не прочитать вовсе — прогон не публикует
+      # её, а краснеет (взгляд на #788, 045).
+      - name: дописать архив находок
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          out="${RUNNER_TEMP}/badges/.github/badges/findings.json"
+          prev="${RUNNER_TEMP}/findings-prev.json"
+          args=()
+          if git fetch --quiet --depth=1 origin badges; then
+            if git show FETCH_HEAD:.github/badges/findings.json > "$prev" 2>/dev/null; then
+              args=(--previous "$prev")
+            else
+              echo "архива на ветке ещё нет — наполнение с начала"
+              rm -f "$prev"
+            fi
+          elif git ls-remote --exit-code --heads origin badges >/dev/null; then
+            echo "::error::ветка badges есть, но не прочитана — архив не перенести, публикацию останавливаю"
+            exit 1
+          fi
+          rc=0
+          python scripts/findings_archive.py --repo "${GITHUB_REPOSITORY}" --out "$out" \
+            "${args[@]}" || rc=$?
+          case "$rc" in
+            0) ;;
+            *)
+              echo "::warning::архив находок не дописан (код $rc) — переношу прежний как есть."
+              if [ -f "$prev" ]; then cp "$prev" "$out"; fi
+              ;;
+          esac
       - name: опубликовать в ветку badges
         env:
           GITHUB_TOKEN: ${{ github.token }}
