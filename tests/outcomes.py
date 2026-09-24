@@ -25,12 +25,14 @@
   разбором нельзя.
 
 Оба сужения объявили бы непокрытым то, что прогоняется, — то есть позвали бы
-писать прогоны там, где они есть. ТОЧЕЧНОЕ СУЖЕНИЕ ВСЁ ЖЕ СДЕЛАНО 24.09.2026
-(#687), и замер показал другое: с левой частью «вызов, кроме счёта, или
-код выхода» совпадением числа держались ровно ПЯТЬ исходов у четырёх
-механизмов — `len(problems) == 1`, `seen.missed == 0`, `said.count(…) == 1`
-и `len(problems) == 2`. Все пять прогнаны теперь по имени точкой входа.
-Сужение до функции по-прежнему не делается. Поэтому предел оставлен и назван числом:
+писать прогоны там, где они есть. Для ТОЧЕЧНОГО этот довод 24.09.2026 перестал
+быть верным (#687): замер с другой меркой исхода — «вызов, кроме счёта, или
+код выхода», а не только `main` и `code` — нашёл совпадением числа ровно ПЯТЬ
+исходов у четырёх механизмов (`len(problems) == 1`, `seen.missed == 0`,
+`said.count(…) == 1`, `len(problems) == 2`), и все пять прогнаны теперь по
+имени. Число 27 выше — цена прежней, более узкой мерки, и она сохранена как
+история. Точечное сужение сделано; довод остаётся в силе для сужения ДО
+ФУНКЦИИ, и потому предел по модулю оставлен и назван числом:
 реестр ловит механизм, у которого исхода не касались НИГДЕ, и не притворяется,
 что ловит больше
 ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
@@ -202,8 +204,12 @@ def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Compare):
             continue
-        near = speaks_of_an_outcome(node.left)
-        for one in node.comparators:
+        # СТОРОНА НЕ ВАЖНА: `assert 2 == main([])` — тот же прогон, что и
+        # `assert main([]) == 2`. Судилась одна левая часть, и обратный порядок
+        # давал ложный долг (`397be6f`).
+        sides = [node.left, *node.comparators]
+        near = any(speaks_of_an_outcome(one) for one in sides)
+        for one in sides:
             if isinstance(one, ast.Constant) and isinstance(one.value, int):
                 if near and not isinstance(one.value, bool):
                     numbers.add(one.value)
