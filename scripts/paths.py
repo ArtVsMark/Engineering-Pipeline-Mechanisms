@@ -115,6 +115,10 @@ ROLES: Final = Path("docs/roles.md")
 #: Карта направлений правила 082: какие вопросы о продукте задаёт кто-то, а какие
 #: никто (#767). Роли, которые их задают, — в `ROLES`.
 DIRECTIONS: Final = Path("docs/directions.md")
+#: Процедура внешнего взгляда: кем смотреть на изменение (#776).
+REVIEW_PROCEDURE: Final = Path("docs/review.md")
+#: Кем смотреть: обязательные роли и роли по тронутым путям (#776).
+REVIEW_ROLES: Final = Path(".rules/review-roles.json")
 
 #: Всё, что объявлено здесь. Список разрешительный (068): путь, которого в нём
 #: нет, механизм строить не должен. Полноту держит
@@ -163,4 +167,6 @@ ALL: Final = (
     BADGES_DIR,
     ROLES,
     DIRECTIONS,
+    REVIEW_PROCEDURE,
+    REVIEW_ROLES,
 )
