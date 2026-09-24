@@ -1502,16 +1502,30 @@ def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.Monke
     }
     said = [verdict("2026-09-24T09:00:00Z", 1, run="111"), verdict("2026-09-24T10:05:00Z", 1)]
 
+    events: list[dict[str, Any]] = []
+
     def paginate(path: str, tok: str, key: str | None = None) -> Any:
         if "check-runs" in path:
             return iter(list(runs[path.split("/commits/")[1].split("/")[0]]))
         if path.endswith("/commits"):
             return iter([{"sha": "old-sha"}, {"sha": "head-sha"}])
+        if path.endswith("/events"):
+            return iter(events)
         return iter(said)
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     head = replace(change(1, "automerge"), head="head-sha")
     assert module.look_runs("o/r", "old-sha", "token") == runs["old-sha"]
+    assert module.findings_hold("o/r", head, "token") is False
+    said.pop(0)
+    assert module.findings_hold("o/r", head, "token") is True
+    # Прежняя голова ушла перезаписью: её прогона среди коммитов нет, и
+    # вердикт с находками по ней засчитывается прежним (взгляд на #743) —
+    # но только когда перезапись была.
+    said.insert(0, verdict("2026-09-24T09:00:00Z", 1, run="222"))
+    assert module.findings_hold("o/r", head, "token") is True
+    events.append({"event": "head_ref_force_pushed"})
+    assert module.force_pushed("o/r", head, "token") is True
     assert module.findings_hold("o/r", head, "token") is False
     said.pop(0)
     assert module.findings_hold("o/r", head, "token") is True

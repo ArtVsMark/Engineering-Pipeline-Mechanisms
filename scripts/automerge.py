@@ -551,7 +551,9 @@ def run_of(text: str) -> str:
     return found.group(1) if found else ""
 
 
-def verdicts_on(comments: list[dict[str, Any]], looks: frozenset[str]) -> list[tuple[str, int]]:
+def verdicts_on(
+    comments: list[dict[str, Any]], looks: frozenset[str] | None
+) -> list[tuple[str, int]]:
     """Вердикты взгляда по изменению: время комментария и число находок.
 
     Поздний взгляд по общей ветке сюда не входит: он о слитом, а не о голове
@@ -576,7 +578,9 @@ def verdicts_on(comments: list[dict[str, Any]], looks: frozenset[str]) -> list[t
         # «ВЕРДИКТ: находок 0» держание не снимает (`8b549e5`).
         if (comment.get("user") or {}).get("type") != "Bot":
             continue
-        if run_of(body) not in looks:
+        # `None` — прогон не сверяется: так читаются вердикты голов, которых
+        # среди коммитов изменения уже нет (перезапись истории).
+        if looks is not None and run_of(body) not in looks:
             continue
         said = review_findings.verdict_of([comment])
         if said is not None:
@@ -639,7 +643,25 @@ def findings_hold(repo: str, change: Change, owner_token: str) -> bool:
             runs += look_runs(repo, sha, owner_token)
     looks = frozenset(filter(None, (run_of(str(run.get("details_url") or "")) for run in runs)))
     comments = list(ghrest.paginate(f"repos/{repo}/issues/{change.number}/comments", owner_token))
-    return holds_for_findings(verdicts_on(comments, looks), when)
+    if not holds_for_findings(verdicts_on(comments, looks), when):
+        return False
+    # ПЕРЕЗАПИСЬ ИСТОРИИ УНОСИТ ПРЕЖНИЕ ГОЛОВЫ из `pulls/{n}/commits`, и с ними
+    # — прогоны их взгляда: вердикт с находками по такой голове отбрасывался,
+    # и новую голову держали второй раз (взгляд на #743). Вердикт с находками
+    # до головы, чей прогон не найден, засчитывается прежним — но только если
+    # перезапись была: иначе цитата ответчика снова решала бы за взгляд.
+    # Граница: на перезаписанном изменении такая цитата до головы держание
+    # снимет — это одно окно для починки, а не слияние без взгляда.
+    lost = [count for at, count in verdicts_on(comments, None) if at < when and count > 0]
+    return not (lost and force_pushed(repo, change, owner_token))
+
+
+def force_pushed(repo: str, change: Change, owner_token: str) -> bool:
+    """Перезаписывали ли историю ветки изменения — по событиям изменения."""
+    return any(
+        str(event.get("event") or "") == "head_ref_force_pushed"
+        for event in ghrest.paginate(f"repos/{repo}/issues/{change.number}/events", owner_token)
+    )
 
 
 @dataclass(frozen=True, slots=True)
