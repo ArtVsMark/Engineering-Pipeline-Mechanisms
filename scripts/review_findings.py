@@ -333,13 +333,19 @@ ENDINGS: Final = ".!?…"
 
 
 def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    """Находки: вес, заголовок и род — без роли (прежний вид для всех читателей)."""
+    return [(weight, title, род) for weight, title, род, _ in found_in(comments)]
+
+
+def found_in(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str]]:
     """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов.
 
     Третьим в паре идёт РОД предмета: «код» либо «ответ» (`findings.KINDS`).
     Строка отрицания находкой не считается: см. `ABSENCE`.
     """
-    found: list[tuple[str, str, str]] = []
+    found: list[tuple[str, str, str, str]] = []
     seen: set[str] = set()
+    known = findings.roles()
     for comment in comments:
         for line in bare_lines(comment.get("body") or ""):
             said = FINDING_RE.match(line)
@@ -359,7 +365,11 @@ def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
                     (one for one in marks_in(raw_weight) if one in findings.KINDS),
                     "",
                 )
-                found.append((weight_of(raw_weight), cleaned, findings.kind_of(cleaned, род)))
+                # РОЛЬ — ТРЕТЬЕ СЛОВО СКОБКИ, из закрытого списка карты ролей
+                # (#763): `[риск · архитектор]`. Незнакомое слово ролью не
+                # считается и не приводится к ближайшему — как и вес (154).
+                роль = next((one for one in marks_in(raw_weight) if one in known), "")
+                found.append((weight_of(raw_weight), cleaned, findings.kind_of(cleaned, род), роль))
     return found
 
 
@@ -871,6 +881,7 @@ def main(argv: list[str] | None = None) -> int:
                     "или не отработал вовсе; это не «находок нет» (075)"
                 )
             titles = findings_of(look)
+            seen_by = {title: роль for _, title, _, роль in found_in(look)}
             if len(titles) != verdict:
                 # Расхождение названо, а не сглажено: вердикт и строки находок
                 # пишет один и тот же ответ, и если они спорят, доверять нечему.
@@ -901,9 +912,17 @@ def main(argv: list[str] | None = None) -> int:
                     # заново значило бы терять уже сделанную работу — тот же
                     # класс, что потеря хвоста позднего взгляда в реестре
                     # непросмотренного (022).
-                    entries[mark] = replace(entries[mark], pr=args.pr, weight=weight, kind=род)
+                    entries[mark] = replace(
+                        entries[mark],
+                        pr=args.pr,
+                        weight=weight,
+                        kind=род,
+                        role=seen_by.get(title) or entries[mark].role,
+                    )
                     continue
-                entries[fingerprint(title)] = findings.Entry(args.pr, weight, title, kind=род)
+                entries[fingerprint(title)] = findings.Entry(
+                    args.pr, weight, title, kind=род, role=seen_by.get(title, "")
+                )
             said = f"из #{args.pr}: вердикт {verdict}, строк находок {len(titles)}"
             if renamed:
                 said += f", из них уже лежат под своим отпечатком {renamed}"
