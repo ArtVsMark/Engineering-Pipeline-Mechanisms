@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -588,9 +588,14 @@ def born_platform(
     return paginate, asked
 
 
+#: Хранилище стенда и чужое — подзадача несёт адрес своего хранилища.
+HOME: Final = "https://api.github.com/repos/o/r"
+ELSEWHERE: Final = "https://api.github.com/repos/other/r"
+
+
 HELD_ROWS: dict[int, list[str]] = {
     4: ["*У него есть предмет.*", "", "- **#640** — сборщик плана"],
-    6: ["- **#642** — инвентарь переносимого"],
+    6: ["- **#642** — инвентарь переносимого", "- `abc1234` · #635 — находка"],
 }
 
 
@@ -598,8 +603,10 @@ def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPa
     """Задача, связанная со строкой раздела 4 или 6, встаёт в раздел 4 (#747).
 
     Связь — телом (`Refs #642`) или подзадачей (#640). Не встают: уже стоящая
-    в плане, ссылающаяся только на план или реестр, изменение и закрытая
-    подзадача.
+    в плане (в том числе в собранном разделе), ссылающаяся только на план или
+    реестр, изменение, закрытая подзадача, подзадача чужого хранилища, живая
+    задача механизма со связью в теле и ссылка на номер из строки-находки
+    (взгляд на #750).
     """
     paginate, _ = born_platform(
         [
@@ -607,16 +614,32 @@ def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPa
             {"number": 642, "title": "инвентарь", "body": "Refs #640"},
             {"number": 752, "title": "чужая", "body": "Refs #639\nRefs #23"},
             {"number": 753, "title": "изменение", "body": "Refs #642", "pull_request": {}},
+            {"number": 755, "title": "реестр", "body": f"{module.findings.marker('x')}\nrefs #642"},
+            {"number": 756, "title": "план", "body": f"{module.MARKER}\nRefs #642"},
+            {"number": 757, "title": "по находке", "body": "Refs #635"},
+            {"number": 758, "title": "уже в разделе 5", "body": "Refs #642"},
         ],
         {
             640: [
-                {"number": 751, "title": "подзадача сборщика", "state": "open"},
-                {"number": 754, "title": "сделанная", "state": "closed"},
+                {
+                    "number": 751,
+                    "title": "подзадача сборщика",
+                    "state": "open",
+                    "repository_url": HOME,
+                },
+                {"number": 754, "title": "сделанная", "state": "closed", "repository_url": HOME},
+                {"number": 759, "title": "чужая", "state": "open", "repository_url": ELSEWHERE},
+                {
+                    "number": 758,
+                    "title": "уже в разделе 5",
+                    "state": "open",
+                    "repository_url": HOME,
+                },
             ]
         },
     )
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
-    assert module.born_rows("o/r", "t", HELD_ROWS) == [
+    assert module.born_rows("o/r", "t", HELD_ROWS, frozenset({758})) == [
         f"- **#750** — дыра инвентаря *({module.BORN_TAIL} #642)*",
         f"- **#751** — подзадача сборщика *({module.BORN_TAIL} #640)*",
     ]
@@ -639,3 +662,17 @@ def test_a_born_task_lands_at_the_end_of_section_four(monkeypatch: pytest.Monkey
     four = module.rows_of(written[0], module.HEADS[4])
     assert four[-1] == f"- **#750** — дыра *({module.BORN_TAIL} #642)*"
     assert "#750" not in "\n".join(module.rows_of(written[0], module.HEADS[6]))
+
+
+def test_a_task_already_in_a_built_section_is_not_born_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Задача, стоящая в собранном разделе, в раздел 4 не встаёт (`365d40a`)."""
+    written = quiet_platform(monkeypatch)
+    built = {one: module.Source() for one in module.BUILT}
+    built[5] = module.Source(rows=["**#750** — задача по правилу"])
+    monkeypatch.setattr(module, "sources", lambda *_: (built, [], set()))
+    paginate, _ = born_platform([{"number": 750, "title": "дыра", "body": "Refs #642"}], {})
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    assert "#750" not in "\n".join(module.rows_of(written[0], module.HEADS[4]))

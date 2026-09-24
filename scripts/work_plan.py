@@ -407,7 +407,9 @@ BORN_INTO: Final = 4
 BORN_TAIL: Final = "родилась в работе по"
 
 
-def born_rows(repo: str, token: str, held: dict[int, list[str]]) -> list[str]:
+def born_rows(
+    repo: str, token: str, held: dict[int, list[str]], taken: frozenset[int] = frozenset()
+) -> list[str]:
     """Строки раздела 4 для задач, рождённых работой по строкам разделов 4 и 6.
 
     РЕШЕНИЕ ВЛАДЕЛЬЦА 24.09.2026 (#747): задача, заведённая по ходу работы над
@@ -423,6 +425,19 @@ def born_rows(repo: str, token: str, held: dict[int, list[str]]) -> list[str]:
     сохраняет и снимает тот же порядок, что руку, а её дети встают следом.
 
     Порядок внутри раздела ставит владелец: механизм добавляет в конец.
+
+    ЧТО РОЖДЕНИЕМ НЕ СЧИТАЕТСЯ (взгляд на #750). Живая задача механизма —
+    план и реестры — не рождена работой, даже если её тело несёт `refs #X`
+    (`d21a0b9`). Подзадача из ДРУГОГО хранилища не встаёт строкой `**#N**`:
+    адрес строки читается как задача этого проекта (`446c2fe`). Задача, уже
+    стоящая в ЛЮБОМ разделе плана (`taken`: и собранные 0–3 и 5), второй раз
+    не добавляется (`365d40a`).
+
+    УДАЛЁННАЯ РУКОЙ РОЖДЁННАЯ СТРОКА ВЕРНЁТСЯ, пока задача открыта и связана
+    (`1bff680`, `729e813`): памяти о прошлых заходах у сборщика нет, и
+    отличить «удалил, потому что не в план» от «ещё не добавлял» нечем. Отказ
+    выражается тем, что сборщик читает: строку переносят в раздел 6 (повтор
+    отсекается и там), закрывают задачу либо снимают связь в её теле.
     """
     parents = {
         int(address[1:])
@@ -435,16 +450,22 @@ def born_rows(repo: str, token: str, held: dict[int, list[str]]) -> list[str]:
     found: dict[int, tuple[str, int]] = {}
     for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
         number = int(issue.get("number") or 0)
-        if "pull_request" in issue or number in parents:
+        text = str(issue.get("body") or "")
+        if "pull_request" in issue or number in parents or number in taken:
             continue
-        links = changerefs.links_in(str(issue.get("body") or ""))
+        if MARKER in text or findings.is_kept_by_a_mechanism(text):
+            continue
+        links = changerefs.links_in(text)
         linked = [link.number for link in links if link.number in parents]
         if linked:
             found.setdefault(number, (str(issue.get("title") or ""), linked[0]))
     for parent in sorted(parents):
         for issue in ghrest.paginate(f"repos/{repo}/issues/{parent}/sub_issues", token):
             number = int(issue.get("number") or 0)
-            if issue.get("state") == "open" and number not in parents:
+            home = str(issue.get("repository_url") or "")
+            if home and not home.endswith(f"/repos/{repo}"):
+                continue
+            if issue.get("state") == "open" and number not in parents | taken:
                 found.setdefault(number, (str(issue.get("title") or ""), parent))
     return [
         f"- **#{number}** — {title} *({BORN_TAIL} #{parent})*"
@@ -515,7 +536,13 @@ def fresh_build(
         if number is None:
             raise NotRun("живой задачи плана нет — заводить её механизм не берётся (154)")
         held = {one: held_rows(body, one, repo, token, marks) for one in HELD}
-        held[BORN_INTO] = held[BORN_INTO] + born_rows(repo, token, held)
+        taken = frozenset(
+            int(address[1:])
+            for source in built.values()
+            for row in source.rows
+            if (address := address_of(row)).startswith("#")
+        )
+        held[BORN_INTO] = held[BORN_INTO] + born_rows(repo, token, held, taken)
         said = assemble(body, built, held, when)
         if not apply:
             return number, body, held, said
