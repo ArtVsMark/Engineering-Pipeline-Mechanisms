@@ -121,22 +121,43 @@ jobs:
             --family "${RUNNER_TEMP}/where.json" \
             --coverage "${RUNNER_TEMP}/coverage.json"
       # АРХИВ НАХОДОК ВЗГЛЯДА (#778) — в ту же ветку и тем же адресом семьи.
-      # Он ДОПИСЫВАЕТСЯ: прежний файл читается с ветки `badges`, и к нему
-      # добавляется слитое после его отметки. Отказ шага не роняет значки, но
-      # и не публикует пустоту вместо истории: архива в этом заходе нет, и это
-      # названо предупреждением; ленты изменений на месте, и следующий заход
-      # восстановит его наполнением (045).
+      # Он ДОПИСЫВАЕТСЯ: прежний файл берётся git-ом с ветки `badges` (не API
+      # содержимого: тот не отдаёт файлы больше мегабайта), и к нему
+      # добавляется слитое, которого в нём ещё нет.
+      #
+      # ИСТОРИЮ ОТКАЗОМ НЕ ТЕРЯЕМ. Ветка перезаписывается целиком, и упавший
+      # шаг снял бы архив с неё, а ответы верификатора у ушедших из реестра
+      # записей не восстановить. Поэтому: шаг отказал — прежний файл
+      # переносится как есть; ветку не прочитать вовсе — прогон не публикует
+      # её, а краснеет (взгляд на #788, 045).
       - name: дописать архив находок
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          out="${RUNNER_TEMP}/badges/.github/badges/findings.json"
+          prev="${RUNNER_TEMP}/findings-prev.json"
+          args=()
+          if git fetch --quiet --depth=1 origin badges; then
+            if git show FETCH_HEAD:.github/badges/findings.json > "$prev" 2>/dev/null; then
+              args=(--previous "$prev")
+            else
+              echo "архива на ветке ещё нет — наполнение с начала"
+              rm -f "$prev"
+            fi
+          elif git ls-remote --exit-code --heads origin badges >/dev/null; then
+            echo "::error::ветка badges есть, но не прочитана — архив не перенести, публикацию останавливаю"
+            exit 1
+          fi
           rc=0
-          python scripts/findings_archive.py --repo "${GITHUB_REPOSITORY}" \
-            --out "${RUNNER_TEMP}/badges/.github/badges/findings.json" || rc=$?
+          python scripts/findings_archive.py --repo "${GITHUB_REPOSITORY}" --out "$out" \
+            "${args[@]}" || rc=$?
           case "$rc" in
             0) ;;
-            *) echo "::warning::архив находок не дописан (код $rc) — в этом заходе его на ветке не будет." ;;
+            *)
+              echo "::warning::архив находок не дописан (код $rc) — переношу прежний как есть."
+              if [ -f "$prev" ]; then cp "$prev" "$out"; fi
+              ;;
           esac
       - name: опубликовать в ветку badges
         env:
