@@ -164,6 +164,8 @@ def test_narrowing_the_parser_would_hide_runs_that_exist() -> None:
         ("CLEAN = 0\nassert run(tree, '--head', 'w') == CLEAN", {0}),
         ("assert 2 == main([])", {2}),
         ("assert 2 == len(lines)", set()),
+        ("assert main([]) in (0, 2)", {0, 2}),
+        ("assert len(lines) in (1, 2)", set()),
     ],
     ids=[
         "len",
@@ -176,6 +178,8 @@ def test_narrowing_the_parser_would_hide_runs_that_exist() -> None:
         "помощник",
         "main справа",
         "len справа",
+        "перечень",
+        "перечень счёта",
     ],
 )
 def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) -> None:
@@ -187,3 +191,17 @@ def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) 
     засчитываются — иначе сужение позвало бы писать прогоны, которые есть.
     """
     assert outcomes.asserted(ast.parse(source))[0] == numbers
+
+
+@pytest.mark.parametrize(
+    ("source", "names"),
+    [
+        ('assert main([]) == declared("g.py")["EXIT_BROKEN"]', {"EXIT_BROKEN"}),
+        ('assert "EXIT_BROKEN" in out', set()),
+        ("assert main([]) == module.EXIT_FOUND", {"EXIT_FOUND"}),
+    ],
+    ids=["ключ подписки", "проза вывода", "константа"],
+)
+def test_an_outcome_name_counts_as_a_key_not_as_prose(source: str, names: set[str]) -> None:
+    """Строка `EXIT_…` засчитывается ключом подписки, а не голой строкой (`bcc5db5`)."""
+    assert outcomes.asserted(ast.parse(source))[1] == names

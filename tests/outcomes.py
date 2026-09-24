@@ -172,8 +172,8 @@ COUNTERS: Final = frozenset(
 CODE_NAMES: Final = frozenset({"code", "returncode", "rc", "exit_code"})
 
 
-def speaks_of_an_outcome(left: ast.expr) -> bool:
-    """Говорит ли левая часть сравнения об исходе механизма.
+def speaks_of_an_outcome(side: ast.expr) -> bool:
+    """Говорит ли сторона сравнения — любая — об исходе механизма.
 
     ЧИСЛО ЗАСЧИТЫВАЕТСЯ ТОЛЬКО РЯДОМ С ИСХОДОМ. Прежде годилось любое
     сравнение: `assert len(lines) == 2` засчитывалось за прогон `EXIT_BROKEN
@@ -182,21 +182,40 @@ def speaks_of_an_outcome(left: ast.expr) -> bool:
     помощник модуля `run(…)`), кроме вызовов счёта (`COUNTERS`), либо код,
     уже взятый из прогона (`done.code`, `result.returncode`, `rc`).
     """
-    if isinstance(left, ast.Call):
-        func = left.func
+    if isinstance(side, ast.Call):
+        func = side.func
         name = getattr(func, "id", None) or getattr(func, "attr", None)
         return name not in COUNTERS
-    if isinstance(left, ast.Attribute):
-        return left.attr in CODE_NAMES
-    return isinstance(left, ast.Name) and left.id in CODE_NAMES
+    if isinstance(side, ast.Attribute):
+        return side.attr in CODE_NAMES
+    return isinstance(side, ast.Name) and side.id in CODE_NAMES
+
+
+def spelled_numbers(side: ast.expr, local: dict[str, int]) -> set[int]:
+    """Числа, которые сторона сравнения называет: сама или перечнем.
+
+    `assert main([]) in (0, 2)` называет оба исхода — кортеж, список и
+    множество чисел читаются так же, как одно число (`877542e`).
+    """
+    parts = side.elts if isinstance(side, (ast.Tuple, ast.List, ast.Set)) else [side]
+    found: set[int] = set()
+    for one in parts:
+        if isinstance(one, ast.Constant) and isinstance(one.value, int):
+            if not isinstance(one.value, bool):
+                found.add(one.value)
+        elif isinstance(one, ast.Name) and one.id in local:
+            found.add(local[one.id])
+    return found
 
 
 def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
     """С чем модуль сравнивает исход: числа рядом с исходом и имена констант.
 
-    Имя объявленной константы засчитывается при любой левой части: сравнение
-    с `EXIT_FOUND` называет исход само. Число — только рядом с исходом
-    (`speaks_of_an_outcome`).
+    Имя объявленной константы засчитывается при любой другой стороне:
+    сравнение с `EXIT_FOUND` называет исход само. Число — только рядом с
+    исходом (`speaks_of_an_outcome`), одно или перечнем. Строка `"EXIT_…"` —
+    только ключом подписки, `declared(gate)["EXIT_BROKEN"]`: голая строка в
+    сравнении (`"EXIT_BROKEN" in out`) — проза вывода, а не прогон (`bcc5db5`).
     """
     local = whole_numbers(tree)
     numbers: set[int] = set()
@@ -210,27 +229,23 @@ def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
         sides = [node.left, *node.comparators]
         near = any(speaks_of_an_outcome(one) for one in sides)
         for one in sides:
-            if isinstance(one, ast.Constant) and isinstance(one.value, int):
-                if near and not isinstance(one.value, bool):
-                    numbers.add(one.value)
-            elif isinstance(one, ast.Name):
-                if one.id in local:
-                    if near:
-                        numbers.add(local[one.id])
-                elif one.id.startswith(OUTCOME_PREFIX):
-                    names.add(one.id)
+            if near:
+                numbers |= spelled_numbers(one, local)
+            if isinstance(one, ast.Name) and one.id.startswith(OUTCOME_PREFIX):
+                names.add(one.id)
             elif isinstance(one, ast.Attribute) and one.attr.startswith(OUTCOME_PREFIX):
                 names.add(one.attr)
             # Исход берут и по имени из разбора самого механизма:
-            # `declared(gate)["EXIT_BROKEN"]`. Строка живёт внутри сравнения, а
-            # не в прозе, и не назвать это прогоном значило бы держать в долге
-            # строку, которую уже прогоняют (075).
+            # `declared(gate)["EXIT_BROKEN"]`. Строка живёт ключом подписки
+            # внутри сравнения, и не назвать это прогоном значило бы держать в
+            # долге строку, которую уже прогоняют (075).
             names |= {
-                str(said.value)
+                str(said.slice.value)
                 for said in ast.walk(one)
-                if isinstance(said, ast.Constant)
-                and isinstance(said.value, str)
-                and said.value.startswith(OUTCOME_PREFIX)
+                if isinstance(said, ast.Subscript)
+                and isinstance(said.slice, ast.Constant)
+                and isinstance(said.slice.value, str)
+                and said.slice.value.startswith(OUTCOME_PREFIX)
             }
     return numbers, names
 
