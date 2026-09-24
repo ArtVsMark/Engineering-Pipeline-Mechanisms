@@ -849,3 +849,13 @@ def test_an_unread_annotation_keeps_the_runs_already_read(monkeypatch: pytest.Mo
     found = module.head_runs("o/r", 5, "t")
     assert [one["id"] for one in found] == [1]
     assert module.why_quiet(found) == module.STATE_SILENT
+
+
+def test_the_body_quotes_the_refusal_in_the_words_agent_run_writes() -> None:
+    """Слова отказа в теле реестра — те, что пишет `agent_run` (`359f9c5`).
+
+    Цитата стояла вписанной рукой: правка фразы в `agent_run.py` развела бы
+    тело с аннотацией, и искать по телу стало бы нечего.
+    """
+    body = module.render_body({}, 0)
+    assert f"«{module.agent_run.REFUSED} — <текст>»" in body
