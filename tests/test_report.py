@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from typing import Final
 
 import pytest
@@ -89,14 +90,20 @@ def test_a_live_run_names_nothing_in_either_stream(
     assert said.out == "" and said.err == ""
 
 
-#: Как оболочка сливает `stderr` в `stdout`: `2>&1`, `&>` и `|&`. Последний
-#: разбор команд режет по черте, и от него остаётся команда, начатая с `&`.
-MERGES: Final = ("2>&1", "&>")
+#: Как оболочка сливает `stderr` в `stdout` или оба потока в один файл:
+#: `2>&1` (и с пробелом, `2>& 1`), `&>`/`&>>` и `>&слово` без номера потока
+#: впереди (`cmd >& "$F"`). `>&2` и `1>&2` — обратное направление, в выходы
+#: оно ничего не несёт, и цифра после `>&` из счёта выводит (`85ec323`).
+MERGE_RE: Final = re.compile(r"2>&\s*1(?!\d)|&>|(?<![\d&])>&\s*(?![\d\s-])\S")
 
 
 def merges_streams(command: str) -> bool:
-    """Сливает ли команда оба потока в один."""
-    return any(one in command for one in MERGES) or command.startswith("&")
+    """Сливает ли команда оба потока в один.
+
+    `|&` разбор команд режет по черте, и от него остаётся команда, начатая с
+    `&`; её и узнаём по первому знаку.
+    """
+    return bool(MERGE_RE.search(command)) or command.startswith("&")
 
 
 def run_steps() -> list[tuple[str, list[str]]]:
