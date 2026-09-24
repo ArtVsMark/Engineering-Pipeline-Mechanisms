@@ -34,7 +34,7 @@ jobs:
   attribution:
     name: attribution
     # На общей ветке шаг не идёт: предмет — коммиты изменения относительно базы.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1

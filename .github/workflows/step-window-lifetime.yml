@@ -45,7 +45,7 @@ jobs:
   # На общей ветке шаг не идёт: предмет — коммиты ИЗМЕНЕНИЯ относительно базы.
   window-lifetime:
     name: window-lifetime
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
@@ -54,7 +54,7 @@ jobs:
           # мелком клоне шаг не зеленеет, а объявляет, что считать не из чего:
           # обрезка неотличима от начала окна (045).
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
       - name: срок жизни окна, открывшего изменение
