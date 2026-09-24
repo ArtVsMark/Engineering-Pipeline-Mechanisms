@@ -207,6 +207,8 @@ def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) 
         ('assert m.EXIT_SILENT not in declared("g.py").keys()', set()),
         ('assert m.EXIT_SILENT in declared("g.py")', set()),
         ("assert m.declared(tree) == m.EXIT_FOUND", {"EXIT_FOUND"}),
+        ('assert m.EXIT_X in outcomes.declared("g.py")', set()),
+        ("assert other.declared(tree) == m.EXIT_FOUND", {"EXIT_FOUND"}),
     ],
     ids=[
         "ключ подписки",
@@ -220,6 +222,8 @@ def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) 
         "сверка через keys",
         "сверка через declared",
         "declared механизма",
+        "помощник через модуль",
+        "declared чужого модуля",
     ],
 )
 def test_an_outcome_name_counts_as_a_key_not_as_prose(source: str, names: set[str]) -> None:

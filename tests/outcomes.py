@@ -174,12 +174,30 @@ COUNTERS: Final = frozenset(
 )
 
 #: Помощник ЭТОГО модуля, читающий объявления: исходом его вызов не является.
-#: Только голым именем — `m.declared(…)` у механизма (`check_contract`,
-#: `protection`, …) — его собственная функция, и её вызов остаётся исходом
-#: (взгляд на #744). Граница названа: помощник теста с другим именем,
-#: возвращающий объявления, сойдёт за исход — отличить его от `run(…)` по
-#: имени нельзя, а замер 24.09.2026 таких сверок в наборе не нашёл.
+#: Узнаётся в обеих формах, которыми его зовёт набор (замер 24.09.2026):
+#: голым именем `declared(…)` внутри модуля и `outcomes.declared(…)` у
+#: читателей — все четыре импортируют `from tests import outcomes` (взгляд на
+#: #744, второй заход). `m.declared(…)` у механизма (`check_contract`,
+#: `protection`, …) — его собственная функция, и её вызов остаётся исходом.
+#: Граница названа: импорт под другим именем (`as o`, `from tests.outcomes
+#: import declared as d`) и помощник теста с другим именем, возвращающий
+#: объявления, сойдут за исход — в наборе сегодня нет ни того, ни другого.
 READER: Final = "declared"
+#: Имя, под которым читатели импортируют этот модуль.
+READER_HOME: Final = "outcomes"
+
+
+def reads_declarations(func: ast.expr) -> bool:
+    """Зовёт ли вызов помощник `declared` этого модуля — в любой из двух форм."""
+    if isinstance(func, ast.Name):
+        return func.id == READER
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == READER
+        and isinstance(func.value, ast.Name)
+        and func.value.id == READER_HOME
+    )
+
 
 #: Имена, которыми тест называет код выхода, когда он уже взят из прогона.
 CODE_NAMES: Final = frozenset({"code", "returncode", "rc", "exit_code", "код"})
@@ -197,7 +215,7 @@ def speaks_of_an_outcome(side: ast.expr) -> bool:
     """
     if isinstance(side, ast.Call):
         func = side.func
-        if isinstance(func, ast.Name) and func.id == READER:
+        if reads_declarations(func):
             return False
         name = getattr(func, "id", None) or getattr(func, "attr", None)
         return name not in COUNTERS
