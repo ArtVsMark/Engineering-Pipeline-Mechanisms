@@ -20,6 +20,21 @@
 дольше срока. Признак покрывает всё и не отвечает ни на что: он не «сделано»,
 а «посмотрите». Тем и полезен там, где первый слеп.
 
+**Приёмку пункта называет проверка, появившаяся ПОСЛЕ постановки.** Пункт,
+сформулированный свойствами («строка без адреса — отказ сборки»), первым
+признаком не ловится вовсе, а таких большинство: замер 24.09.2026 по всей
+истории — из 166 закрытых пунктов путь или имя теста называют 19, свойствами
+сформулированы 147 (#648). Признак сверяет основы слов пункта с первой
+строкой докстроки и именем проверок набора, родившихся после постановки
+задачи. На том же замере при пороге `SAME_SUBJECT` он узнаёт 53 закрытых
+пункта из 147 (36%) и срабатывает на одном открытом пункте открытых задач из
+23 (4%) — на широкой строке эпика. Без опоры на дату рождения проверки
+ложных было бы четыре из 23, и опора оставлена. Это слабее первого признака и
+потому стоит под ним: он называет проверку, а не файл, и говорит «похоже».
+
+ГРАНИЦА: открытые пункты ЗАКРЫТЫХ задач (80 на замере) в мерку не брались —
+задачу закрыли, а галочки не поставили, и сделан ли пункт, по ним не узнать.
+
 ВТОРОЙ МОЛЧИТ ТАМ, ГДЕ СРАБОТАЛ ПЕРВЫЙ. Один долг, названный дважды, читается
 как два, а списки того же самого расходятся молча
 ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
@@ -36,6 +51,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 from datetime import UTC, datetime
@@ -52,6 +68,32 @@ PATH_RE: Final = re.compile(r"[\w][\w./-]*\.(?:py|yml|yaml|json|md|toml|cfg|txt)
 #: обычным словом, и совпадений было бы больше, чем находок.
 TEST_RE: Final = re.compile(r"\btest_[a-z0-9_]+\b")
 
+#: Слово прозы, из которого берётся основа: короче пяти букв — предлоги и
+#: связки, они совпадают у любых двух пунктов.
+WORD_RE: Final = re.compile(r"[а-яёa-z]{5,}")
+
+#: Длина основы: русское слово меняет окончание, а «проверка» и «проверки»
+#: — одно слово.
+STEM: Final = 6
+
+#: Слова, которые есть почти в любом пункте и любой докстроке и потому
+#: ничего не сближают.
+STOP: Final = frozenset(
+    {"который", "которые", "чтобы", "потому", "только", "теперь", "всегда", "нужно"}
+    | {"проверка", "проверки", "задача", "пункт", "пункта", "изменение", "изменения"}
+    | {"механизм", "механизма", "должен", "может", "между", "после", "перед", "через"}
+    | {"каждый", "каждая", "одного", "своего", "этого", "того"}
+)
+
+#: Какая доля основ пункта должна найтись у проверки. Не подобрана на глаз:
+#: замер 24.09.2026 по всей истории (#648) — 0.4 даёт 36% закрытых пунктов при
+#: одном ложном из 23 открытых; 0.3 — 54% при четырёх ложных, 0.5 — 16% при том
+#: же одном.
+SAME_SUBJECT: Final = 0.4
+
+#: Пункт короче трёх основ сравнивать не с чем: любая проверка совпадёт.
+MIN_STEMS: Final = 3
+
 #: Сколько дней без событий делает задачу с открытыми пунктами кандидатом на
 #: взгляд. Величина объявлена здесь, а не выведена: она про внимание человека,
 #: и меряется его смены, а не данными.
@@ -65,6 +107,14 @@ class Candidate(NamedTuple):
     title: str
     item: str
     evidence: list[str]
+
+
+class Subject(NamedTuple):
+    """Проверка набора как предмет: имя, основы её слов и дата рождения."""
+
+    name: str
+    stems: frozenset[str]
+    born: datetime
 
 
 class Quiet(NamedTuple):
@@ -195,6 +245,77 @@ def evidence(item: str, since: datetime, files: set[str], root: Path | None = No
     return found
 
 
+def stems(text: str) -> frozenset[str]:
+    """Основы значимых слов текста."""
+    return frozenset(word[:STEM] for word in WORD_RE.findall(text.lower()) if word not in STOP)
+
+
+#: Строка диффа, добавляющая проверку.
+DEF_RE: Final = re.compile(r"^\+\s*def (test_\w+)")
+
+
+def tests_born(root: Path | None = None) -> dict[str, datetime]:
+    """Когда каждая проверка набора впервые вошла в дерево — одним обходом истории.
+
+    Мелкий клон — пусто: дата рождения там у всех одна, и признак молчал бы
+    не хуже, чем врал бы (см. `shallow`).
+    """
+    if shallow(root):
+        return {}
+    done = subprocess.run(
+        ["git", "log", "--reverse", "--format=@%aI", "-p", "--no-color", "--", "tests/"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if done.returncode != 0:
+        return {}
+    found: dict[str, datetime] = {}
+    when: datetime | None = None
+    for line in done.stdout.splitlines():
+        if line.startswith("@") and line[1:2].isdigit():
+            when = datetime.fromisoformat(line[1:].strip()).astimezone(UTC)
+            continue
+        said = DEF_RE.match(line)
+        if said and when and said[1] not in found:
+            found[said[1]] = when
+    return found
+
+
+def subjects(root: Path | None = None) -> list[Subject]:
+    """Проверки набора с основами первой строки докстроки и имени."""
+    born = tests_born(root)
+    if not born:
+        return []
+    found: list[Subject] = []
+    for path in sorted((root or Path()).joinpath("tests").glob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or node.name not in born:
+                continue
+            first = (ast.get_docstring(node) or "").split("\n\n")[0]
+            said = stems(f"{first} {node.name.replace('_', ' ')}")
+            found.append(Subject(f"{path.name}::{node.name}", said, born[node.name]))
+    return found
+
+
+def subject_evidence(item: str, since: datetime, pool: list[Subject]) -> list[str]:
+    """Проверка, родившаяся после постановки и называющая приёмку пункта, — если есть."""
+    mine = stems(item)
+    if len(mine) < MIN_STEMS:
+        return []
+    close = [(len(mine & one.stems) / len(mine), one.name) for one in pool if one.born > since]
+    best = max(close, default=(0.0, ""))
+    if best[0] < SAME_SUBJECT:
+        return []
+    return [f"{best[1]} — по свойству, сходство {best[0]:.2f}"]
+
+
 def when_of(issue: dict[str, Any], key: str) -> datetime:
     """Отметка времени задачи в UTC."""
     return datetime.fromisoformat(str(issue[key]).replace("Z", "+00:00")).astimezone(UTC)
@@ -214,6 +335,7 @@ def look(
     названный дважды, читается как два (022).
     """
     files = tracked(root)
+    pool = subjects(root)
     at = now or datetime.now(UTC)
     built: list[Candidate] = []
     named: set[int] = set()
@@ -222,7 +344,9 @@ def look(
         title = str(issue.get("title") or "")
         since = when_of(issue, "created_at")
         for item in open_items(str(issue.get("body") or "")):
-            found = evidence(item, since, files, root)
+            # Признак по свойству — ПОД признаком по пути: говорит, только
+            # когда сильный промолчал (#648).
+            found = evidence(item, since, files, root) or subject_evidence(item, since, pool)
             if found:
                 built.append(Candidate(number, title, item, found))
                 named.add(number)
