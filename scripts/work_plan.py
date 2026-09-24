@@ -18,9 +18,10 @@
 
 ЧТО СБОРЩИК ПИШЕТ, А ЧТО НЕТ. Разделы 0–3 и 5 он собирает целиком: их предмет
 знает механизм. Разделы 4 и 6 — указание владельца и его план — механизм не
-знает и не сочиняет; их текст переносится дословно. Единственное, что сборщик
-делает с ними, — СНИМАЕТ строку, чей адрес закрыт: это чтение источника, а не
-сочинение.
+знает и не сочиняет; их текст переносится дословно. Со строками этих разделов
+сборщик делает две вещи, и обе — чтение источника, а не сочинение: СНИМАЕТ
+строку, чей адрес закрыт, и ДОБАВЛЯЕТ в конец раздела 4 открытую задачу,
+рождённую работой по строке раздела 4 или 6 (`born_rows`, #747).
 
 СДЕЛАННОЕ ИСЧЕЗАЕТ, А НЕ ЛЕЖИТ ЗАЧЁРКНУТЫМ — тем же приёмом, что у реестра
 находок. Галочка копит историю там, где нужен ОСТАТОК: план из двадцати строк,
@@ -77,6 +78,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+import changerefs
 import debt
 import drift
 import finding_kinds
@@ -399,6 +401,57 @@ def held_rows(body: str, number: int, repo: str, token: str, marks: set[str]) ->
     return kept
 
 
+#: Раздел, в который встаёт задача, рождённая работой по ручным разделам.
+BORN_INTO: Final = 4
+#: Хвост строки рождённой задачи: чья работа её родила.
+BORN_TAIL: Final = "родилась в работе по"
+
+
+def born_rows(repo: str, token: str, held: dict[int, list[str]]) -> list[str]:
+    """Строки раздела 4 для задач, рождённых работой по строкам разделов 4 и 6.
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 24.09.2026 (#747): задача, заведённая по ходу работы над
+    строкой ручного раздела, встаёт в раздел 4 сама. Иначе её не видит
+    порядок работ (091), пока владелец не внесёт её рукой.
+
+    РОДИЛАСЬ — ЗНАЧИТ СВЯЗАНА СО СТРОКОЙ: связью (`Refs`/`Closes`/`Part of
+    #X` в теле — тем же разбором, что у изменений) или подзадачей X, где X —
+    адрес строки раздела 4 или 6. Ссылка на живые задачи-адресаты (план,
+    реестры) рождением не считается: их в этих разделах нет, а `Refs #639`
+    несёт почти каждая задача. Задача, уже стоящая в разделе 4 или 6, второй
+    раз не добавляется; добавленная становится обычной строкой — дальше её
+    сохраняет и снимает тот же порядок, что руку, а её дети встают следом.
+
+    Порядок внутри раздела ставит владелец: механизм добавляет в конец.
+    """
+    parents = {
+        int(address[1:])
+        for one in HELD
+        for line in held.get(one, [])
+        if line.startswith("- ") and (address := address_of(line)).startswith("#")
+    }
+    if not parents:
+        return []
+    found: dict[int, tuple[str, int]] = {}
+    for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
+        number = int(issue.get("number") or 0)
+        if "pull_request" in issue or number in parents:
+            continue
+        links = changerefs.links_in(str(issue.get("body") or ""))
+        linked = [link.number for link in links if link.number in parents]
+        if linked:
+            found.setdefault(number, (str(issue.get("title") or ""), linked[0]))
+    for parent in sorted(parents):
+        for issue in ghrest.paginate(f"repos/{repo}/issues/{parent}/sub_issues", token):
+            number = int(issue.get("number") or 0)
+            if issue.get("state") == "open" and number not in parents:
+                found.setdefault(number, (str(issue.get("title") or ""), parent))
+    return [
+        f"- **#{number}** — {title} *({BORN_TAIL} #{parent})*"
+        for number, (title, parent) in sorted(found.items())
+    ]
+
+
 def assemble(body: str, built: dict[int, Source], held: dict[int, list[str]], when: str) -> str:
     """Тело плана: шапка прежняя, разделы — свои собранные и чужие сохранённые."""
     head = body.split("\n## ", 1)[0].rstrip()
@@ -462,6 +515,7 @@ def fresh_build(
         if number is None:
             raise NotRun("живой задачи плана нет — заводить её механизм не берётся (154)")
         held = {one: held_rows(body, one, repo, token, marks) for one in HELD}
+        held[BORN_INTO] = held[BORN_INTO] + born_rows(repo, token, held)
         said = assemble(body, built, held, when)
         if not apply:
             return number, body, held, said
@@ -506,9 +560,12 @@ def main(argv: list[str] | None = None) -> int:
         for line in rows_of(body, HEADS[one])
         if line.startswith("- ") and line not in held[one]
     )
+    born = [line for line in held[BORN_INTO] if BORN_TAIL in line and line not in body]
     if args.apply:
         ghrest.request("PATCH", f"repos/{args.repo}/issues/{number}", token, {"body": said})
         print(f"план #{number} собран" + (f"; снято сделанных строк: {gone}" if gone else ""))
+        if born:
+            print(f"в раздел {BORN_INTO} встало рождённых работой задач: {len(born)}")
     else:
         # НОМЕР ПЛАНА ПЕЧАТАЕТСЯ И СУХИМ ЗАХОДОМ: навык `work-the-plan` не
         # прибивает номер живой задачи и отсылает за ним сюда, а в самом теле
