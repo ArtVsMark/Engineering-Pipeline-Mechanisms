@@ -110,3 +110,17 @@ def test_links_that_resolve_are_clean(
     )
     assert module.main([]) == module.EXIT_OK
     assert "проверено 1" in capsys.readouterr().out
+
+
+def test_a_link_leading_nowhere_is_the_found_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ссылка на имя, которого у номера нет, — исход «найдено» точкой входа (#687).
+
+    Прежде этот исход засчитывался прогнанным по `len(problems) == 1`: число
+    совпадало с кодом, а точку входа с находкой не звал никто.
+    """
+    monkeypatch.setattr(module, "known", lambda: {"044": "check-the-premise-before-fixing"})
+    monkeypatch.setattr(module, "links", lambda root: [("AGENTS.md", 1, "044", "not-that-name")])
+    assert module.main([]) == module.EXIT_FOUND
+    assert "ведущих не туда: 1 из 1" in capsys.readouterr().out

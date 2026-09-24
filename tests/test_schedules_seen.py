@@ -242,3 +242,23 @@ def test_a_refused_write_is_the_third_outcome_not_a_miss(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(module, "save", refuse)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_BROKEN
+
+
+def test_the_sweep_names_its_outcome_at_the_entry_point(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Оба исхода обхода прогоняются точкой входа, а не числом пропусков (#687).
+
+    Прежде они засчитывались по `seen.missed == 0` и `seen.missed == 1`:
+    число пропусков совпадало с кодом, а `main` до исхода не доводил никто.
+    """
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    whole = module.Seen("a.yml", "17 6 * * *", 7, 7, 0)
+    monkeypatch.setattr(module, "sweep", lambda *a, **k: [whole])
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+    assert "все объявленные заходы" in capsys.readouterr().out
+    missed = module.Seen("a.yml", "17 6 * * *", 7, 2, 0)
+    monkeypatch.setattr(module, "sweep", lambda *a, **k: [missed])
+    assert module.main(["--repo", "o/r"]) == module.EXIT_MISSED
+    assert "требуют взгляда" in capsys.readouterr().out

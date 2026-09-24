@@ -25,7 +25,12 @@
   разбором нельзя.
 
 Оба сужения объявили бы непокрытым то, что прогоняется, — то есть позвали бы
-писать прогоны там, где они есть. Поэтому предел оставлен и назван числом:
+писать прогоны там, где они есть. ТОЧЕЧНОЕ СУЖЕНИЕ ВСЁ ЖЕ СДЕЛАНО 24.09.2026
+(#687), и замер показал другое: с левой частью «вызов, кроме счёта, или
+код выхода» совпадением числа держались ровно ПЯТЬ исходов у четырёх
+механизмов — `len(problems) == 1`, `seen.missed == 0`, `said.count(…) == 1`
+и `len(problems) == 2`. Все пять прогнаны теперь по имени точкой входа.
+Сужение до функции по-прежнему не делается. Поэтому предел оставлен и назван числом:
 реестр ловит механизм, у которого исхода не касались НИГДЕ, и не притворяется,
 что ловит больше
 ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
@@ -153,21 +158,59 @@ def started_by(tree: ast.AST) -> set[str]:
     return found
 
 
+#: Вызовы, чей результат — счёт или форма, а не исход механизма: число рядом
+#: с ними говорит о длине списка, а не о коде выхода (#687).
+COUNTERS: Final = frozenset(
+    {"len", "sum", "min", "max", "sorted", "list", "set", "tuple", "dict", "frozenset"}
+    | {"str", "int", "abs", "round", "any", "all", "type", "bool", "getattr", "isinstance"}
+    | {"count", "index", "find", "get"}
+)
+
+#: Имена, которыми тест называет код выхода, когда он уже взят из прогона.
+CODE_NAMES: Final = frozenset({"code", "returncode", "rc", "exit_code"})
+
+
+def speaks_of_an_outcome(left: ast.expr) -> bool:
+    """Говорит ли левая часть сравнения об исходе механизма.
+
+    ЧИСЛО ЗАСЧИТЫВАЕТСЯ ТОЛЬКО РЯДОМ С ИСХОДОМ. Прежде годилось любое
+    сравнение: `assert len(lines) == 2` засчитывалось за прогон `EXIT_BROKEN
+    = 2` у двух механизмов разом, и когда строк стало три, выяснилось, что по
+    имени эти исходы не прогонял никто (#687). Исход — это вызов (`main(…)`,
+    помощник модуля `run(…)`), кроме вызовов счёта (`COUNTERS`), либо код,
+    уже взятый из прогона (`done.code`, `result.returncode`, `rc`).
+    """
+    if isinstance(left, ast.Call):
+        func = left.func
+        name = getattr(func, "id", None) or getattr(func, "attr", None)
+        return name not in COUNTERS
+    if isinstance(left, ast.Attribute):
+        return left.attr in CODE_NAMES
+    return isinstance(left, ast.Name) and left.id in CODE_NAMES
+
+
 def asserted(tree: ast.AST) -> tuple[set[int], set[str]]:
-    """С чем модуль сравнивает исход: числа и имена объявленных констант."""
+    """С чем модуль сравнивает исход: числа рядом с исходом и имена констант.
+
+    Имя объявленной константы засчитывается при любой левой части: сравнение
+    с `EXIT_FOUND` называет исход само. Число — только рядом с исходом
+    (`speaks_of_an_outcome`).
+    """
     local = whole_numbers(tree)
     numbers: set[int] = set()
     names: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Compare):
             continue
+        near = speaks_of_an_outcome(node.left)
         for one in node.comparators:
             if isinstance(one, ast.Constant) and isinstance(one.value, int):
-                if not isinstance(one.value, bool):
+                if near and not isinstance(one.value, bool):
                     numbers.add(one.value)
             elif isinstance(one, ast.Name):
                 if one.id in local:
-                    numbers.add(local[one.id])
+                    if near:
+                        numbers.add(local[one.id])
                 elif one.id.startswith(OUTCOME_PREFIX):
                     names.add(one.id)
             elif isinstance(one, ast.Attribute) and one.attr.startswith(OUTCOME_PREFIX):

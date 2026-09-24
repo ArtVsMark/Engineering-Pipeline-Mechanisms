@@ -28,6 +28,8 @@ import ast
 import json
 from typing import Final
 
+import pytest
+
 from tests import outcomes
 from tests.conftest import ROOT, walk
 
@@ -147,3 +149,28 @@ def test_narrowing_the_parser_would_hide_runs_that_exist() -> None:
         f"сужение до функции отняло бы всего {lost} исходов — цена предела упала, "
         "и решение его оставить надо пересмотреть"
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "numbers"),
+    [
+        ("assert len(lines) == 2", set()),
+        ("assert seen.missed == 0", set()),
+        ("assert said.count('x') == 1", set()),
+        ("assert main([]) == 2", {2}),
+        ("assert module.main(['--x']) == 1", {1}),
+        ("assert done.code == 1", {1}),
+        ("assert result.returncode == 2", {2}),
+        ("CLEAN = 0\nassert run(tree, '--head', 'w') == CLEAN", {0}),
+    ],
+    ids=["len", "поле", "count", "main", "module.main", "code", "returncode", "помощник"],
+)
+def test_a_number_counts_only_beside_an_outcome(source: str, numbers: set[int]) -> None:
+    """Число засчитывается прогоном только рядом с исходом (#687).
+
+    Первая половина: счёт строк, поле объекта и `count` исходом не являются, и
+    `len(lines) == 2` больше не сходит за прогон `EXIT_BROKEN`. Вторая:
+    вызов точки входа, помощника модуля и код, взятый из прогона, по-прежнему
+    засчитываются — иначе сужение позвало бы писать прогоны, которые есть.
+    """
+    assert outcomes.asserted(ast.parse(source))[0] == numbers

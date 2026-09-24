@@ -684,3 +684,25 @@ def test_the_snapshot_reads_every_form_of_the_entry(
     path = tmp_path / ".pipeline.yml"
     path.write_text(written, encoding="utf-8")
     assert contract.checks_surface(path)["checks"]["a"] == want, case
+
+
+def test_a_breaking_change_without_a_transition_is_the_findings_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Несовместимая правка с фрагментом без перехода — исход «находки» точкой входа (#687).
+
+    Прежде этот исход засчитывался прогнанным по `said.count(…) == 1`: число
+    совпадало с кодом, а точку входа до находки не доводил никто. Разбор
+    поверхности и фрагментов подменён: предмет здесь — развилка в `main`.
+    """
+    fragment = tmp_path / "gone.contract.md"
+    fragment.write_text("### Джоб снят\n\n#1\n", encoding="utf-8")
+    monkeypatch.setattr(gate.journal, "base_from_env", lambda: "база")
+    monkeypatch.setattr(gate, "base_tree", lambda base, into: into)
+    monkeypatch.setattr(gate.contract, "surface", lambda root=None: {})
+    monkeypatch.setattr(
+        gate.contract, "differences", lambda before, after: ["ci.yml: джобов не стало — ['lint']"]
+    )
+    monkeypatch.setattr(gate, "declared", lambda base: [fragment])
+    assert gate.main([]) == gate.EXIT_FINDINGS
+    assert "НЕСОВМЕСТИМАЯ" in capsys.readouterr().out
