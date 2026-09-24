@@ -200,7 +200,11 @@ def born(path: str, root: Path | None = None) -> datetime | None:
     if shallow(root):
         return None
     done = subprocess.run(
-        ["git", "log", "--diff-filter=A", "--format=%aI", "--", path],
+        # `--follow`: файл, переименованный после постановки задачи, иначе
+        # получал дату переименования — и сильный признак счёл бы пункт с этим
+        # путём сделанным (`fbe345c`). С `--follow` добавлением остаётся
+        # только первое появление содержимого под любым прежним именем.
+        ["git", "log", "--follow", "--diff-filter=A", "--format=%aI", "--", path],
         cwd=root,
         capture_output=True,
         text=True,
@@ -209,10 +213,14 @@ def born(path: str, root: Path | None = None) -> datetime | None:
     )
     if done.returncode != 0:
         return None
-    lines = [line.strip() for line in done.stdout.splitlines() if line.strip()]
-    if not lines:
-        return None
-    return datetime.fromisoformat(lines[-1]).astimezone(UTC)
+    dates = [
+        datetime.fromisoformat(line.strip()).astimezone(UTC)
+        for line in done.stdout.splitlines()
+        if line.strip()
+    ]
+    # Наименьшая дата, а не последняя строка: после rebase и cherry-pick
+    # авторские даты идут не по порядку истории (`c37440f`).
+    return min(dates, default=None)
 
 
 def born_symbol(name: str, root: Path | None = None) -> datetime | None:
@@ -305,7 +313,9 @@ def tests_born(root: Path | None = None) -> dict[str, datetime]:
             when = datetime.fromisoformat(line[1:].strip()).astimezone(UTC)
             continue
         said = DEF_RE.match(line)
-        if said and when and said[1] not in found:
+        # Наименьшая дата, а не первая в порядке `--reverse`: после rebase и
+        # cherry-pick авторские даты идут не по порядку истории (`c37440f`).
+        if said and when and (said[1] not in found or when < found[said[1]]):
             found[said[1]] = when
     return found
 
