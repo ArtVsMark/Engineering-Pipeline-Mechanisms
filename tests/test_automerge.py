@@ -1664,3 +1664,39 @@ def test_a_rerun_of_the_old_look_does_not_move_its_first_verdict() -> None:
     second = verdict("2026-09-24T10:20:00Z", 1, run="111", created="2026-09-24T10:12:00Z")
     assert module.verdict_time(second, looks) == "2026-09-24T10:20:00Z"
     assert module.holds_for_findings(module.verdicts_on([first, new], looks), HEAD_AT) is False
+
+
+def test_a_rerun_of_the_head_look_keeps_its_first_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Время головы — начало первой попытки её взгляда, а не перезапуска (#755).
+
+    По последней попытке перезапуск взгляда самой головы делал её первый
+    вердикт с находками «прежним», и держания не было вовсе.
+    """
+    job = f"https://github.com/o/r/actions/runs/{LOOK_RUN}/job/{{}}"
+    attempts = [
+        {
+            "started_at": HEAD_AT,
+            "completed_at": "2026-09-24T10:05:00Z",
+            "details_url": job.format(1),
+        },
+        {
+            "started_at": "2026-09-24T10:20:00Z",
+            "completed_at": "2026-09-24T10:25:00Z",
+            "details_url": job.format(2),
+        },
+    ]
+    said = [
+        verdict("2026-09-24T10:05:00Z", 2, created="2026-09-24T10:00:30Z"),
+        verdict("2026-09-24T10:25:00Z", 2, created="2026-09-24T10:20:30Z"),
+    ]
+
+    def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        if "check-runs" in path:
+            return iter(list(attempts))
+        if path.endswith("/commits"):
+            return iter([{"sha": "head-sha"}])
+        return iter(said)
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    head = replace(change(1, "automerge"), head="head-sha")
+    assert module.findings_hold("o/r", head, "token") is True
