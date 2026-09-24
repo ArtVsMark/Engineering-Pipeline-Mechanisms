@@ -270,14 +270,18 @@ def stems(text: str) -> frozenset[str]:
 #: Строка диффа, добавляющая проверку.
 DEF_RE: Final = re.compile(r"^\+\s*def (test_\w+)")
 
-#: Заголовок файла в диффе: дата рождения ключуется ФАЙЛОМ и именем, а не
-#: одним именем — одноимённая проверка в другом файле получала бы чужую дату
-#: (`1ca2bb6`).
-FILE_RE: Final = re.compile(r"^\+\+\+ b/(?:.*/)?(test_[\w]+\.py)$")
-
 
 def tests_born(root: Path | None = None) -> dict[str, datetime]:
-    """Когда каждая проверка набора впервые вошла в дерево — одним обходом истории.
+    """Когда каждое имя проверки впервые вошло в дерево — одним обходом истории.
+
+    КЛЮЧ — ИМЯ, И ЭТО ВЫБОР СТОРОНЫ ОШИБКИ. Ключ «файл::имя» (`1ca2bb6`)
+    принёс два дефекта: переименованный без правок файл терял все даты (дифф
+    переименования не несёт строк `+def`), а проверка, перенесённая в другой
+    файл, получала дату переноса и ложно выглядела рождённой после задачи
+    (`b8cd638`, `58140c6`). Ключ по имени с САМОЙ РАННЕЙ датой ошибается в одну
+    сторону: одноимённая проверка в другом файле получает более старую дату —
+    и признак МОЛЧИТ, а не говорит неверно (051). Переименование и перенос он
+    переживает: имя то же, дата первая.
 
     Мелкий клон — пусто: дата рождения там у всех одна, и признак молчал бы
     не хуже, чем врал бы (см. `shallow`).
@@ -296,19 +300,13 @@ def tests_born(root: Path | None = None) -> dict[str, datetime]:
         return {}
     found: dict[str, datetime] = {}
     when: datetime | None = None
-    file = ""
     for line in done.stdout.splitlines():
         if line.startswith("@") and line[1:2].isdigit():
             when = datetime.fromisoformat(line[1:].strip()).astimezone(UTC)
             continue
-        header = FILE_RE.match(line)
-        if header:
-            file = header[1]
-            continue
         said = DEF_RE.match(line)
-        key = f"{file}::{said[1]}" if said else ""
-        if said and file and when and key not in found:
-            found[key] = when
+        if said and when and said[1] not in found:
+            found[said[1]] = when
     return found
 
 
@@ -324,12 +322,11 @@ def subjects(root: Path | None = None) -> list[Subject]:
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
-            key = f"{path.name}::{getattr(node, 'name', '')}"
-            if not isinstance(node, ast.FunctionDef) or key not in born:
+            if not isinstance(node, ast.FunctionDef) or node.name not in born:
                 continue
             first = (ast.get_docstring(node) or "").split("\n\n")[0]
             said = stems(f"{first} {node.name.replace('_', ' ')}")
-            found.append(Subject(key, said, born[key]))
+            found.append(Subject(f"{path.name}::{node.name}", said, born[node.name]))
     return found
 
 
