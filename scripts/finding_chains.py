@@ -150,6 +150,10 @@ def moment(said: str) -> datetime:
     return parsed
 
 
+class Undated(RuntimeError):
+    """У комментария нет метки времени — отсекать по моменту нечем."""
+
+
 def said_at(comment: dict[str, Any]) -> datetime:
     """Когда находки комментария СКАЗАНЫ: время последней правки, а не создания.
 
@@ -162,8 +166,11 @@ def said_at(comment: dict[str, Any]) -> datetime:
     """
     raw = str(comment.get("updated_at") or comment.get("created_at") or "")
     if not raw:
-        raise ValueError("у комментария нет метки времени — отсекать по моменту нечем")
-    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        raise Undated("у комментария нет метки времени — отсекать по моменту нечем")
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise Undated(f"метка времени комментария не разбирается: {raw}") from exc
 
 
 def read_counted(
@@ -201,7 +208,11 @@ def read_counted(
             for one in ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token)
             if at is None or said_at(one) <= at
         ]
-        kept += len(comments)
+        # В счёт «прочитано до момента» идут только ОТВЕТЫ ВЗГЛЯДА — комментарии
+        # с вердиктом. Реплика человека или конвейера до `--at` засчитала бы
+        # ленту, где взгляд сказал позже, и пустое отсечение снова выдавалось бы
+        # за ноль (взгляд на #787, соседний случай 195).
+        kept += sum(1 for one in comments if review_findings.verdict_of([one]) is not None)
         said += [(number, found[1]) for found in review_findings.findings_of(comments)]
     return said, taken, kept
 
@@ -254,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     except ghrest.TransportError as exc:
         print(f"замер не снят: площадка не ответила — {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    except ValueError as exc:
+    except Undated as exc:
         print(f"замер не снят: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if not seen:

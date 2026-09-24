@@ -270,3 +270,26 @@ def test_a_comment_without_time_is_a_named_refusal(monkeypatch: pytest.MonkeyPat
     platform(monkeypatch, {9: [look("a.py:1 — раз")]})
     args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
     assert module.main(args) == module.EXIT_BROKEN
+
+
+def test_a_human_remark_before_the_moment_does_not_count_as_a_read_feed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """До `--at` только реплика человека, взгляд сказал позже — это пустое отсечение (#787)."""
+    remark = {
+        "user": {"type": "User"},
+        "body": "@claude посмотри",
+        "created_at": "2026-09-24T10:00:00Z",
+    }
+    verdict = {**look("a.py:1 — раз"), "created_at": "2026-09-24T20:00:00Z"}
+    platform(monkeypatch, {9: [remark, verdict]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_BROKEN
+
+
+def test_an_unparsable_time_is_undated_not_any_value_error() -> None:
+    """Неразборная метка — `Undated`; прочие ошибки разбора не выдаются за «замер не снят»."""
+    with pytest.raises(module.Undated):
+        module.said_at({"updated_at": "вчера"})
+    with pytest.raises(module.Undated):
+        module.said_at({})
