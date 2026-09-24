@@ -1299,12 +1299,27 @@ def unnamed_runs() -> list[str]:
                 ]
                 if not follows:
                     missing.append(f"{where}: за вызовом нет шага {AGENT_RUN} по его файлу")
-                elif "always()" not in str(follows[0].get("if") or ""):
+                elif " ".join(str(follows[0].get("if") or "").split()) != follow_condition(sid):
                     missing.append(
-                        f"{where}: шаг {AGENT_RUN} идёт без always() — после отказа "
-                        "агента он не запустится, а отказ и есть его предмет"
+                        f"{where}: шаг {AGENT_RUN} зовётся не условием "
+                        f"«{follow_condition(sid)}» — без always() он не запустится после "
+                        "отказа агента, а без «outcome == 'failure'» — после отказа "
+                        "действия, не отдавшего файла"
                     )
     return missing
+
+
+def follow_condition(sid: str) -> str:
+    """Условие шага «модель и отказ захода» за вызовом `sid` — одно на все вызовы.
+
+    `always()` — чтобы шаг шёл после отказа; файл ИЛИ провал — чтобы он шёл и
+    тогда, когда действие упало раньше агента и файла не отдало (`2e92154`).
+    Успех без файла — законный пропуск действия, и шаг тогда молчит.
+    """
+    return (
+        f"always() && (steps.{sid}.outputs.execution_file != '' "
+        f"|| steps.{sid}.outcome == 'failure')"
+    )
 
 
 def test_every_agent_call_names_its_model_and_its_failure() -> None:
@@ -1317,7 +1332,9 @@ def test_every_agent_call_names_its_model_and_its_failure() -> None:
     аннотации проверки, а этот гейт не даёт вызову приехать без него.
 
     `always()` обязателен: без него шаг не запустится ровно после отказа
-    агента — то есть тогда, когда он и нужен.
+    агента — то есть тогда, когда он и нужен. И условие не сужается наличием
+    файла: действие, упавшее раньше агента, файла не отдаёт, и прежнее «файл не
+    пуст» пропускало такой отказ молча (`2e92154`).
     """
     assert any(agent_steps(path) for path in walk(WORKFLOWS, "*.yml")), (
         "вызовов агента в дереве нет — проверять нечего (075)"
