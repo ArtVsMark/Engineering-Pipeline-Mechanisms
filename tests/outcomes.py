@@ -180,21 +180,34 @@ COUNTERS: Final = frozenset(
 #: outcomes` (четыре файла) и зовут `outcomes.declared(…)`; все 17 голых
 #: `declared(…)` в `test_*.py` — СВОИ функции `test_claims`,
 #: `test_consumer_channel` и `test_schedules`, к помощнику отношения не
-#: имеющие (взгляд на #745). Узнавание по одному имени отсекало их, узнавание
-#: по `outcomes.` пропускало псевдоним — связь берётся из импортов модуля.
-#: `m.declared(…)` у механизма — его собственная функция, и её вызов остаётся
-#: исходом. Граница названа: `import tests.outcomes` в любой форме (вызов
-#: `tests.outcomes.declared` или через псевдоним) и помощник теста с другим именем, возвращающий
-#: объявления, сойдут за исход — в наборе сегодня нет ни того, ни другого.
+#: имеющие (взгляд на #745). `m.declared(…)` у механизма — его собственная
+#: функция, и её вызов остаётся исходом.
+#:
+#: ФОРМЫ ИМПОРТА ПЕРЕЧИСЛЕНЫ РАЗОМ, а не по одной за заход взгляда: каждая
+#: прежняя починка называла следующую форму границей, и следующий заход
+#: находил ещё одну (род «каскад по одному месту», #746). Узнаются: `from`
+#: пакета (`tests` · `.`) — модуль или звёздочка, `from` модуля помощника (`tests.outcomes`
+#: · `.outcomes`) — функция или звёздочка, простой `import` пакета или
+#: модуля помощника — с псевдонимом и без. Каждую форму держит свой случай в
+#: `test_outcomes_run.py`, и счёт форм — там, а не здесь. Границы: помощник
+#: теста с ДРУГИМ именем, возвращающий объявления, и импорт в обход
+#: оператора (`importlib.import_module`) сойдут за исход — отличить их по
+#: разбору нельзя, и в наборе их нет.
 READER: Final = "declared"
-#: Модуль помощника — как его импортируют читатели.
-READER_PACKAGE: Final = "tests"
 READER_HOME: Final = "outcomes"
+#: Откуда берут модуль помощника: пакет абсолютно и относительно.
+READER_PACKAGES: Final = frozenset({"tests", "."})
+#: Откуда берут саму функцию: модуль помощника абсолютно и относительно.
+READER_MODULES: Final = frozenset({f"tests.{READER_HOME}", f".{READER_HOME}"})
+#: Простой импорт: пакета (`import tests` — путь до модуля тогда
+#: `tests.outcomes`) и самого модуля помощника.
+READER_IMPORT: Final = f"tests.{READER_HOME}"
+READER_PACKAGE_IMPORT: Final = "tests"
 
 
 @dataclass(frozen=True, slots=True)
 class Readers:
-    """Под какими именами модуль теста знает помощник: его модуль и его самого."""
+    """Под какими именами модуль теста знает помощник: путь к его модулю и его самого."""
 
     homes: frozenset[str] = frozenset()
     names: frozenset[str] = frozenset()
@@ -204,15 +217,40 @@ class Readers:
 NO_READERS: Final = Readers()
 
 
+def dotted(node: ast.expr) -> str:
+    """Путь через точки (`tests.outcomes`) — пусто, если это не цепочка имён."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        head = dotted(node.value)
+        return f"{head}.{node.attr}" if head else ""
+    return ""
+
+
 def readers_of(tree: ast.AST) -> Readers:
-    """Имена, под которыми модуль импортировал помощник `declared` — с псевдонимами."""
+    """Имена, под которыми модуль импортировал помощник `declared`, — во всех формах."""
     homes: set[str] = set()
     names: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == READER_PACKAGE:
-            homes |= {one.asname or one.name for one in node.names if one.name == READER_HOME}
-        elif isinstance(node, ast.ImportFrom) and node.module == f"{READER_PACKAGE}.{READER_HOME}":
-            names |= {one.asname or one.name for one in node.names if one.name == READER}
+        if isinstance(node, ast.Import):
+            for one in node.names:
+                if one.name == READER_IMPORT:
+                    homes.add(one.asname or one.name)
+                # `import tests` — модуль помощника тогда `tests.outcomes`.
+                if one.name == READER_PACKAGE_IMPORT:
+                    homes.add(f"{one.asname or one.name}.{READER_HOME}")
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        source = "." * node.level + (node.module or "")
+        # `from tests import outcomes`, `from . import outcomes`, `… import *`
+        if source in READER_PACKAGES:
+            homes |= {
+                one.asname or READER_HOME for one in node.names if one.name in (READER_HOME, "*")
+            }
+        # `from tests.outcomes import declared`, `from .outcomes import declared`, `… import *`
+        if source in READER_MODULES:
+            names |= {one.asname or READER for one in node.names if one.name in (READER, "*")}
     return Readers(frozenset(homes), frozenset(names))
 
 
@@ -223,8 +261,7 @@ def reads_declarations(func: ast.expr, readers: Readers) -> bool:
     return (
         isinstance(func, ast.Attribute)
         and func.attr == READER
-        and isinstance(func.value, ast.Name)
-        and func.value.id in readers.homes
+        and dotted(func.value) in readers.homes
     )
 
 
