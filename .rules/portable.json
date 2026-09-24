@@ -430,6 +430,12 @@
         ".rules/bindings.json"
       ]
     },
+    "scripts/findings_archive.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/finding-kinds.json"
+      ]
+    },
     "scripts/hail.py": {
       "answer": "as-is"
     },

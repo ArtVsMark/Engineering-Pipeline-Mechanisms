@@ -29,6 +29,9 @@ permissions:
   # исключительное утверждение, переставшее быть верным в день появления второго
   # (181).
   contents: write
+  # Архив находок (#778) читает ленты слитых изменений и тела их слияний.
+  pull-requests: read
+  issues: read
 
 concurrency:
   # Голова здесь не нужна: ветка перезаписывается целиком, и последний прогон
@@ -52,7 +55,7 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
-      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
 
       # СВОДКА СЕМЬИ БЕРЁТСЯ У КАТАЛОГА, А НЕ СОБИРАЕТСЯ ЗАНОВО. Она уже
       # собрана его ночным прогоном и лежит в его ветке значков; второй сборщик
@@ -117,6 +120,24 @@ jobs:
             --sha "${GITHUB_SHA}" \
             --family "${RUNNER_TEMP}/where.json" \
             --coverage "${RUNNER_TEMP}/coverage.json"
+      # АРХИВ НАХОДОК ВЗГЛЯДА (#778) — в ту же ветку и тем же адресом семьи.
+      # Он ДОПИСЫВАЕТСЯ: прежний файл читается с ветки `badges`, и к нему
+      # добавляется слитое после его отметки. Отказ шага не роняет значки, но
+      # и не публикует пустоту вместо истории: архива в этом заходе нет, и это
+      # названо предупреждением; ленты изменений на месте, и следующий заход
+      # восстановит его наполнением (045).
+      - name: дописать архив находок
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/findings_archive.py --repo "${GITHUB_REPOSITORY}" \
+            --out "${RUNNER_TEMP}/badges/.github/badges/findings.json" || rc=$?
+          case "$rc" in
+            0) ;;
+            *) echo "::warning::архив находок не дописан (код $rc) — в этом заходе его на ветке не будет." ;;
+          esac
       - name: опубликовать в ветку badges
         env:
           GITHUB_TOKEN: ${{ github.token }}
