@@ -325,6 +325,13 @@ def test_the_measure_counts_what_the_threshold_was_chosen_on(tmp_path: Path) -> 
     assert said == module.Measure(2, 1, 1, 1, 0), said
 
 
+def test_the_plan_is_skipped_by_its_imported_marker(tmp_path: Path) -> None:
+    """План узнаётся меткой из `findings.PLAN_MARKER`, а не переписанными буквами (209)."""
+    root = repo_with(tmp_path, "tests/test_plan.py", DAY_TEN, GATE_TEST)
+    plan = issue(9, f"{module.findings.PLAN_MARKER}\n- [x] {PROPERTY_ITEM}", DAY_ONE, DAY_TEN)
+    assert module.measure([plan], root) == module.Measure(0, 0, 0, 0, 0)
+
+
 def test_the_measure_entry_names_its_outcomes(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
