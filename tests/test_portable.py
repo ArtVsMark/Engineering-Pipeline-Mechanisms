@@ -47,12 +47,14 @@ def subjects(root: Path = ROOT) -> set[str]:
 
 
 def issue_re(issues: list[int]) -> re.Pattern[str]:
-    """Номер живой задачи буквами: `#23` и `issues/23`, но не `#230` и не `##23`.
+    """Номер живой задачи буквами: `#23` и `../issues/23`, но не `#230` и не `##23`.
 
     Форма адресом (`../../issues/23`) в проекте есть, и номер в ней прибит так
-    же, как с решёткой (взгляд на #783, 195).
+    же, как с решёткой (взгляд на #783, 195). Своя — только ОТНОСИТЕЛЬНАЯ:
+    `…/Engineering-Incidents-Playbook/issues/23` — задача соседа, а полный
+    адрес своего репозитория ловится по имени проекта (взгляд на #795).
     """
-    return re.compile(r"(?:(?<![\w#])#|\bissues/)(?:" + "|".join(map(str, issues)) + r")\b")
+    return re.compile(r"(?:(?<![\w#])#|\.\./issues/)(?:" + "|".join(map(str, issues)) + r")\b")
 
 
 #: Метка плана пишется строкой, а не через `findings.marker`.
@@ -71,7 +73,7 @@ def registry_markers(root: Path = ROOT) -> set[str]:
 
 def own_issue_numbers(data: dict[str, Any]) -> list[int]:
     """Номера живых задач, уже заведённых у площадки."""
-    return sorted(number for number in data["own_issues"].values() if number)
+    return sorted(number for number in data["own_issues"].values() if isinstance(number, int))
 
 
 def pinned_in(
@@ -281,3 +283,14 @@ def test_the_measure_sees_an_issue_number_in_an_address() -> None:
     assert number.search("см. ../../issues/23")
     assert not number.search("../../issues/230")
     assert not number.search("tissues/23")
+    assert not number.search("Engineering-Incidents-Playbook/issues/23"), "задача соседа — не своя"
+
+
+def test_a_registry_without_a_number_names_why() -> None:
+    """Не номер — причина словами: «номера не бывает» и «ещё нет» различимы (взгляд на #795)."""
+    wrong = {
+        mark: value
+        for mark, value in inventory()["own_issues"].items()
+        if not isinstance(value, int) and not (isinstance(value, str) and value.strip())
+    }
+    assert not wrong, f"реестр без номера и без причины: {wrong}"
