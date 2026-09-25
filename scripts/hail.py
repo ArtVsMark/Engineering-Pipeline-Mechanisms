@@ -87,8 +87,17 @@ MARKER: Final = findings.marker("hail")
 #: срока жизни окна, а второй образец того же разошёлся бы с первым молча (090).
 SESSION_RE: Final = window.SESSION_RE
 
-#: Отпечаток состояния внутри оклика: по нему заход узнаёт свой прежний.
-STAMP_RE: Final = re.compile(r"<!--\s*hail-stamp:\s*(?P<stamp>[\w.:-]+)\s*-->")
+#: Отпечаток состояния внутри оклика: по нему заход узнаёт свой прежний. Имя
+#: метки одно на печать и узнавание: образец строится из него экранированием,
+#: а не второй раз буквами (правило 209, взгляд на #828).
+STAMP_KEY: Final = "hail-stamp"
+STAMP_RE: Final = re.compile(rf"<!--\s*{re.escape(STAMP_KEY)}:\s*(?P<stamp>[\w.:-]+)\s*-->")
+
+
+def stamp_line(stamp: str) -> str:
+    """Скрытая строка отпечатка состояния — та, что узнаёт `STAMP_RE`."""
+    return f"<!-- {STAMP_KEY}: {stamp} -->"
+
 
 #: Роды состояния, про которые окликают. Закрытый список: род вне его — не
 #: «неизвестный оклик», а то, про что окликать не договаривались.
@@ -350,7 +359,7 @@ def render(subject: Subject) -> str:
     return "\n".join(
         (
             MARKER,
-            f"<!-- hail-stamp: {subject.stamp} -->",
+            stamp_line(subject.stamp),
             "",
             f"## Оклик: {KIND_SAID[subject.kind]}",
             "",
