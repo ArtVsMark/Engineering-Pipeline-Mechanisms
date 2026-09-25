@@ -1128,3 +1128,10 @@ def test_a_verifier_answer_is_not_a_look_before_the_merge(monkeypatch: pytest.Mo
 def test_is_run_answer_needs_the_run_and_a_marker(login: str, body: str, answer: bool) -> None:
     """Ответ прогона — автор-прогон и одна из двух меток первой строкой."""
     assert module.is_run_answer({"user": {"login": login}, "body": body}) is answer
+
+
+def test_is_verification_tells_the_verifier_from_the_late_look() -> None:
+    """Верификатор — ответ прогона с меткой верификатора, поздний взгляд им не считается."""
+    run = {"login": module.LATE_AUTHOR}
+    assert module.is_verification({"user": run, "body": f"{module.VERIFY_MARKER}\nда"})
+    assert not module.is_verification({"user": run, "body": f"{module.LATE_MARKER}\nда"})
