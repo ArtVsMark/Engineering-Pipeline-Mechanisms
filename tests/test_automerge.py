@@ -2002,10 +2002,10 @@ def test_the_queue_log_does_not_guess_why_a_rerun_was_not_called(
     assert "перезапуск отказал" not in said and "пока голова была красной" not in said
 
 
-def test_the_queue_log_names_a_refused_rerun_the_same_way(
+def test_the_queue_log_names_an_unread_attempt_the_same_way(
     platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Отказ площадки — вторая причина `False` — назван тем же ::warning о прогоне (#812)."""
+    """Попытка прогона не прочитана — причина `False` названа тем же ::warning (#812)."""
     platform["changes"] = [replace(change(1, "automerge", armed=True), head="abcdef1234567890")]
     platform["owed"] = {1: "777"}
 
@@ -2019,5 +2019,33 @@ def test_the_queue_log_names_a_refused_rerun_the_same_way(
     module.advance("o/r", "token", "main", dry_run=False)
     said = capsys.readouterr().out
     assert "попытка прогона взгляда 777 не прочитана" in said
+    assert "не перезапущен — причина в ::warning о прогоне 777" in said
+    assert platform["disarmed"] == ["PR_1"] and "пропущен на красной" not in said
+
+
+def test_the_queue_log_names_a_refused_rerun_post_the_same_way(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ площадки перезапустить — причина `False` — назван тем же ::warning.
+
+    Причин `False` три, в порядке кода: попытка не прочитана, предел попыток,
+    отказ POST `/rerun`. Тесты держали две (взгляд на #812). Причины названы
+    словами, а не номерами: номер расходился с порядком кода (взгляд на #821).
+    """
+    platform["changes"] = [replace(change(1, "automerge", armed=True), head="abcdef1234567890")]
+    platform["owed"] = {1: "777"}
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET" and "/actions/runs/" in path:
+            return {"run_attempt": 1}
+        if method == "POST" and path.endswith("/rerun"):
+            raise module.ghrest.TransportError("403")
+        return {"sha": "base-sha"}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, **_: iter([]))
+    module.advance("o/r", "token", "main", dry_run=False)
+    said = capsys.readouterr().out
+    assert "прогон взгляда 777 не перезапущен: 403" in said
     assert "не перезапущен — причина в ::warning о прогоне 777" in said
     assert platform["disarmed"] == ["PR_1"] and "пропущен на красной" not in said
