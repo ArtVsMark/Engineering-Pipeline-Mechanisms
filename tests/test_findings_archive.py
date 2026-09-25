@@ -366,3 +366,45 @@ def test_real_git_names_an_absent_branch_by_code_two(tmp_path: Path) -> None:
         check=False,
     )
     assert missing.returncode not in (0, 2), "недоступный адрес дал бы «ветки нет»"
+
+
+def test_real_git_names_an_absent_file_by_an_empty_listing(tmp_path: Path) -> None:
+    """Вторая посылка — тоже у настоящего git: нет файла — пустой вывод и код 0.
+
+    Подмена `FAKE_GIT` отдаёт этот ответ сама, и без сверки развилка «архива
+    нет» держалась бы на выводе, который назначил тест (второй взгляд на #791).
+    """
+    repo = tmp_path / "r"
+
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    run(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "пусто",
+    )
+    path = ".github/badges/findings.json"
+    empty = run("ls-tree", "-z", "--name-only", "HEAD", "--", path)
+    assert (empty.returncode, empty.stdout) == (0, ""), "отсутствие файла не пустой ответ"
+    (repo / ".github/badges").mkdir(parents=True)
+    (repo / path).write_text("{}", encoding="utf-8")
+    run("add", path)
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "архив")
+    listed = run("ls-tree", "-z", "--name-only", "HEAD", "--", path)
+    assert listed.returncode == 0 and listed.stdout.rstrip("\0") == path
+    broken = run("ls-tree", "-z", "--name-only", "нет-такой-ревизии", "--", path)
+    assert broken.returncode != 0, "сбой ls-tree неотличим от отсутствия файла"
