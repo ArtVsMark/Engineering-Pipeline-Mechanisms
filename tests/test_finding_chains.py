@@ -426,3 +426,13 @@ def test_archive_heading_names_the_input_and_the_gap() -> None:
     gap = f"{module.findings.UNFILLED}: не учтено слитых изменений — 2"
     lines = module.archive_heading({"gaps": ["другое", gap]}, 3)
     assert lines[0].startswith("вход: архив находок, 3 слитых") and gap in lines[1]
+
+
+def test_named_places_follow_the_constant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Глубина поимённого списка — `NAMED_FROM`, а не цифра в отчёте (взгляд на #834, 209)."""
+    measured = module.Chains(3, 2, 0, {"a.py": [1, 2], "b.py": [1]})
+    assert "  a.py: #1, #2" not in module.report(measured)
+    monkeypatch.setattr(module, "NAMED_FROM", 2)
+    lines = module.report(measured)
+    assert "места на 2 и более изменениях — читать поимённо:" in lines
+    assert "  a.py: #1, #2" in lines
