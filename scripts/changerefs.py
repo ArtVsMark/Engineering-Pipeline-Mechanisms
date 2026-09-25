@@ -504,7 +504,17 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
             if not fresh:
                 continue
             seen.update(fresh)
-            found.append(str(Resolution(tuple(fresh), record.why)))
+            # ГРУППЫ «ДУБЛЬ» ЕДУТ ВМЕСТЕ С ОТПЕЧАТКАМИ. Тело уплотнения собирается
+            # здесь, и строка без групп приезжала в общую ветку списком: архив
+            # терял связь дублей по дороге (взгляд на #809). Группа, чьи
+            # отпечатки все уже сняты раньше, выпадает — связь с ними записана
+            # той, прежней строкой.
+            groups = tuple(
+                kept for group in record.groups if (kept := tuple(m for m in group if m in fresh))
+            )
+            found.append(
+                str(Resolution(tuple(fresh), record.why, groups if len(groups) > 1 else ()))
+            )
     return found
 
 

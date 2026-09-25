@@ -757,3 +757,19 @@ def test_a_twin_line_travels_to_the_change_body_in_its_own_form() -> None:
     assert str(record) == "Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так"
     (again,) = changerefs.resolutions_parsed(str(record))
     assert again.marks == record.marks and again.twin_of == record.twin_of
+
+
+def test_the_squash_body_keeps_the_twin_form() -> None:
+    """Тело уплотнения несёт «дубль»: архив на общей ветке читает связь оттуда (#809)."""
+    said = changerefs.resolutions_in_all(
+        ["Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так", "Разобрано: aaaaaaa — повтор"]
+    )
+    assert said == ["Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так"]
+    (record,) = changerefs.resolutions_parsed(said[0])
+    assert record.twin_of == {"aaaaaaa": "bbbbbbb", "ccccccc": "bbbbbbb"}
+
+
+def test_a_twin_already_resolved_drops_its_group_not_the_rest() -> None:
+    """Группа, чьи отпечатки уже сняты раньше, выпадает, а новые снимаются."""
+    said = changerefs.resolutions_in_all(["Разобрано: bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"])
+    assert said == ["Разобрано: bbbbbbb", "Разобрано: aaaaaaa"]
