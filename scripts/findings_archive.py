@@ -133,7 +133,12 @@ def resolved_in(message: str) -> dict[str, str]:
         twins = record.twin_of
         for mark in record.marks:
             twin = twins.get(mark, "")
-            if not found.get(mark) and not loops_back(twin, mark, found):
+            # КРУГ ОТКАЗЫВАЕТ СВЯЗИ, А НЕ СНЯТИЮ: «A дубль A» и «A дубль B дубль A»
+            # снимают все свои отпечатки, как у реестра, — без связи, что замкнула
+            # бы круг (взгляд на #824).
+            if loops_back(twin, mark, found):
+                twin = ""
+            if not found.get(mark):
                 found[mark] = twin
     return found
 
@@ -198,11 +203,16 @@ def add_change(
             entry["seen_on"] = sorted({*entry["seen_on"], number})
             entry["pr"] = min(entry["seen_on"])
     for mark, twin in resolved_in(message).items():
+        # Круг сверяется и для нового отпечатка, а не только для дописывания:
+        # в архиве до #809 лежат связи A→B без записи B, и «B дубль A» замкнула
+        # бы круг на первой же записи (взгляд на #824).
+        links = {one: str(link.get("twin_of") or "") for one, link in resolutions.items()}
+        if loops_back(twin, mark, links):
+            twin = ""
         said = resolutions.setdefault(mark, {"by": number, "twin_of": twin})
         # Снял первый, а связь — первая названная: поздняя строка «дубль»
         # дописывает её к раннему снятию, не перенося само снятие (#814).
-        links = {one: str(link.get("twin_of") or "") for one, link in resolutions.items()}
-        if twin and not said["twin_of"] and not loops_back(twin, mark, links):
+        if twin and not said["twin_of"]:
             said["twin_of"] = twin
 
 
