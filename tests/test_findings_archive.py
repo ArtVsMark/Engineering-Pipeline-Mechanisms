@@ -226,7 +226,13 @@ def test_a_run_writes_the_archive(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 FAKE_GIT = """#!/bin/bash
 case "$1" in
   fetch) exit "${FAKE_FETCH:-0}" ;;
-  show) [ -n "${FAKE_PREV:-}" ] && printf '%s' "$FAKE_PREV" && exit 0; exit 128 ;;
+  ls-tree)
+    [ "${FAKE_TREE:-0}" -ne 0 ] && exit "$FAKE_TREE"
+    [ -n "${FAKE_PREV:-}" ] && echo ".github/badges/findings.json"
+    exit 0 ;;
+  show)
+    [ "${FAKE_SHOW:-0}" -ne 0 ] && exit "$FAKE_SHOW"
+    printf '%s' "$FAKE_PREV"; exit 0 ;;
   ls-remote) exit "${FAKE_REMOTE:-0}" ;;
 esac
 exit 99
@@ -247,7 +253,7 @@ def run_archive_step(tmp_path: Path, **fake: str) -> tuple[int, str, str, str]:
     flow = yaml.safe_load(
         (Path(__file__).parents[1] / ".github/workflows/badges.yml").read_text(encoding="utf-8")
     )
-    steps = next(iter(flow["jobs"].values()))["steps"]
+    steps = flow["jobs"]["badges"]["steps"]
     run = next(step["run"] for step in steps if step.get("id") == "archive")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -312,9 +318,51 @@ def test_a_carried_archive_turns_the_run_red_after_publishing() -> None:
     flow = yaml.safe_load(
         (Path(__file__).parents[1] / ".github/workflows/badges.yml").read_text(encoding="utf-8")
     )
-    steps = next(iter(flow["jobs"].values()))["steps"]
+    steps = flow["jobs"]["badges"]["steps"]
     names = [step.get("name") for step in steps]
-    guard = steps[-1]
-    assert names.index("опубликовать в ветку badges") < len(steps) - 1
+    # Шаги берутся по имени, а не по месту: «последний шаг» ломался бы от
+    # любого шага, добавленного после (взгляд на #791).
+    guard = steps[names.index("архив не замер")]
+    assert names.index("опубликовать в ветку badges") < names.index("архив не замер")
     assert guard.get("if") == "steps.archive.outputs.carried != ''"
     assert "exit 1" in guard["run"], "замерший архив зеленел бы вместе с прогоном"
+
+
+@pytest.mark.parametrize(
+    ("fake", "why"), [({"FAKE_TREE": "128"}, "ls-tree"), ({"FAKE_SHOW": "128"}, "show")]
+)
+def test_an_unread_archive_on_a_read_branch_stops_publishing(
+    tmp_path: Path, fake: dict[str, str], why: str
+) -> None:
+    """Ветка прочитана, а архив в ней — нет: стоп, а не сборка с нуля (взгляд на #791)."""
+    code, _, said, _ = run_archive_step(tmp_path, FAKE_PREV="{}", **fake)
+    assert code == 1, f"отказ {why} собрал бы архив с нуля поверх истории"
+    assert not said, "скрипт архива не должен был запускаться"
+
+
+def test_an_absent_archive_on_a_read_branch_starts_from_zero(tmp_path: Path) -> None:
+    """Файла на ветке нет (пустой ответ `ls-tree`) — наполнение с начала."""
+    code, _, said, _ = run_archive_step(tmp_path)
+    assert code == 0 and said and "--previous" not in said
+
+
+def test_real_git_names_an_absent_branch_by_code_two(tmp_path: Path) -> None:
+    """Посылка развилки — у настоящего git, а не у подмены: нет ветки — код 2.
+
+    Подмена в тестах шага отдаёт коды сама, и без этой сверки вся починка
+    держалась бы на коде, который тест назначил (взгляд на #791).
+    """
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--quiet", "--bare", str(bare)], check=True)
+    done = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--heads", str(bare), "badges"],
+        capture_output=True,
+        check=False,
+    )
+    assert done.returncode == 2
+    missing = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--heads", str(tmp_path / "нет.git"), "badges"],
+        capture_output=True,
+        check=False,
+    )
+    assert missing.returncode not in (0, 2), "недоступный адрес дал бы «ветки нет»"

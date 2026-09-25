@@ -149,11 +149,26 @@ jobs:
           prev="${RUNNER_TEMP}/findings-prev.json"
           args=()
           if git fetch --quiet --depth=1 origin badges; then
-            if git show FETCH_HEAD:.github/badges/findings.json > "$prev" 2>/dev/null; then
-              args=(--previous "$prev")
-            else
+            # «ФАЙЛА НЕТ» И «ФАЙЛ НЕ ПРОЧИТАН» — ТА ЖЕ РАЗВИЛКА, ЧТО У ВЕТКИ НИЖЕ.
+            # Отказ `git show` не говорит, какой из двух: прежняя редакция
+            # читала любой как «архива нет» и собирала его с нуля поверх
+            # истории (взгляд на #791). Отсутствие называет `ls-tree` пустым
+            # ответом, а сбой — кодом.
+            listed=0
+            found=$(git ls-tree -z --name-only FETCH_HEAD -- .github/badges/findings.json | tr -d "\0") || listed=$?
+            if [ "$listed" -ne 0 ]; then
+              echo "::error::дерево ветки badges не прочитано (ls-tree код $listed) — архив не перенести, публикацию останавливаю"
+              exit 1
+            elif [ -z "$found" ]; then
               echo "архива на ветке ещё нет — наполнение с начала"
-              rm -f "$prev"
+            else
+              shown=0
+              git show FETCH_HEAD:.github/badges/findings.json > "$prev" || shown=$?
+              if [ "$shown" -ne 0 ]; then
+                echo "::error::архив на ветке есть, но не прочитан (show код $shown) — публикацию останавливаю"
+                exit 1
+              fi
+              args=(--previous "$prev")
             fi
           else
             remote=0
