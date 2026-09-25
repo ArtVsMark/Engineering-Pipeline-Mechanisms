@@ -1590,6 +1590,18 @@ def test_only_the_first_verdict_with_findings_holds(
     assert module.holds_for_findings(module.verdicts_on(comments, looks), HEAD_AT) is holds
 
 
+def test_a_verifier_answer_is_no_verdict_without_run_check() -> None:
+    """Ответ верификатора с `ВЕРДИКТ:` не вердикт, даже когда прогон не сверяется (#827)."""
+    late_look = load_script("late_look.py")
+    answer = {
+        "created_at": "2026-09-24T10:05:00Z",
+        "updated_at": "2026-09-24T10:05:00Z",
+        "user": {"type": "Bot", "login": module.unlooked.LATE_AUTHOR},
+        "body": late_look.compose_verification("ПРЕМИСА: да\nВЕРДИКТ: находок 2"),
+    }
+    assert module.verdicts_on([answer], None) == []
+
+
 def test_a_verdict_quoting_the_late_marker_still_holds() -> None:
     """Взгляд до слияния, процитировавший метку позднего, держит голову (взгляд на #815).
 

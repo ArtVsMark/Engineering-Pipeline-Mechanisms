@@ -708,7 +708,10 @@ def verdicts_on(
     found: list[tuple[str, int]] = []
     for comment in comments:
         body = str(comment.get("body") or "")
-        if unlooked.is_late_look(comment):
+        # Ответы прогона после слияния — поздний взгляд и верификатор — не
+        # вердикт по голове: при `looks is None` сверки прогона нет, и строка
+        # `ВЕРДИКТ:` из ответа верификатора сошла бы за вердикт (взгляд на #827).
+        if unlooked.is_run_answer(comment):
             continue
         # Вердикт пишет ревьюер-бот; процитированная человеком строка
         # «ВЕРДИКТ: находок 0» держание не снимает (`8b549e5`).
