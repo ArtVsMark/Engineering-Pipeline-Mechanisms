@@ -1981,6 +1981,27 @@ def test_the_queue_log_does_not_guess_why_a_rerun_was_not_called(
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, **_: iter([]))
     module.advance("o/r", "token", "main", dry_run=False)
     said = capsys.readouterr().out
-    assert "не перезапущен — причина строкой выше" in said
+    assert "не перезапущен — причина в ::warning о прогоне 777" in said
     assert "уже перезапускался (попыток: 2)" in said
     assert "перезапуск отказал" not in said and "пока голова была красной" not in said
+
+
+def test_the_queue_log_names_a_refused_rerun_the_same_way(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ площадки — вторая причина `False` — назван тем же ::warning о прогоне (#812)."""
+    platform["changes"] = [replace(change(1, "automerge", armed=True), head="abcdef1234567890")]
+    platform["owed"] = {1: "777"}
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET" and "/actions/runs/" in path:
+            raise module.ghrest.TransportError("502")
+        return {"sha": "base-sha"}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, **_: iter([]))
+    module.advance("o/r", "token", "main", dry_run=False)
+    said = capsys.readouterr().out
+    assert "попытка прогона взгляда 777 не прочитана" in said
+    assert "не перезапущен — причина в ::warning о прогоне 777" in said
+    assert platform["disarmed"] == ["PR_1"] and "пропущен на красной" not in said

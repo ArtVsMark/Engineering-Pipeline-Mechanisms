@@ -1372,9 +1372,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         owed = owed_look(repo, change, owner_token) if not repair else ""
         if owed:
             if change.armed:
-                take_back(
-                    repo, change, "взгляд пропущен на красной голове", owner_token, dry_run=dry_run
-                )
+                take_back(repo, change, "взгляд пропущен воротами", owner_token, dry_run=dry_run)
                 queue = [
                     replace(one, armed=False) if one.number == change.number else one
                     for one in queue
@@ -1385,9 +1383,10 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                     "перезапущен, не взвожу (#762)"
                     if called
                     # `False` значит и предел перезапусков, и отказ площадки:
-                    # какой из двух, сказано строкой выше (`::warning`), здесь
-                    # причина не угадывается (взгляд на #806, 195).
-                    else "не перезапущен — причина строкой выше, не взвожу (#762)"
+                    # какой из двух, сказано `::warning` этого захода о том же
+                    # прогоне — не обязательно соседней строкой, — и здесь
+                    # причина не угадывается (взгляды на #806, #812).
+                    else f"не перезапущен — причина в ::warning о прогоне {owed}, не взвожу (#762)"
                 )
             else:
                 said = "перезапуск — когда голова позеленеет, не взвожу (#762)"
