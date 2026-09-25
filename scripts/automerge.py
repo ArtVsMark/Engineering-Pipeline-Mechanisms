@@ -567,13 +567,19 @@ def owed_look(repo: str, change: Change, owner_token: str) -> str:
 OWED_RERUNS: Final = 1
 
 
-def call_the_owed_look(repo: str, run: str, owner_token: str, *, dry_run: bool) -> bool:
+def call_the_owed_look(
+    repo: str, run: str, owner_token: str, *, dry_run: bool, change: Change | None = None
+) -> bool:
     """Перезапускает пропущенный взгляд; отказ площадки назван, а не проглочен (045).
 
     ПЕРЕЗАПУСК ОДИН. Попытка прогона видна у площадки (`run_attempt`), и
     прогон, уже перезапущенный очередью, второй раз не зовётся: голова ждёт, а
     расхождение названо. Держится это номером попытки, а не памятью очереди:
     заход очереди короткий, и свой счётчик разошёлся бы с площадкой (049).
+
+    Упёршуюся в предел голову очередь НАЗЫВАЕТ НА САМОМ ИЗМЕНЕНИИ
+    (`name_the_stuck_head`): иначе причина жила бы только в логе захода, а
+    реестр слитого без взгляда видит лишь слитое (#805).
     """
     try:
         attempt = int(
@@ -587,10 +593,12 @@ def call_the_owed_look(repo: str, run: str, owner_token: str, *, dry_run: bool) 
         return False
     if attempt > OWED_RERUNS:
         print(
-            f"::warning::прогон взгляда {run} уже перезапускался ({attempt} попытки) и снова "
+            f"::warning::прогон взгляда {run} уже перезапускался (попыток: {attempt}) и снова "
             "пропущен: ворота взгляда и очередь судят голову по-разному — второй перезапуск "
             "не зовётся, голова ждёт"
         )
+        if change is not None:
+            name_the_stuck_head(repo, change, run, attempt, owner_token, dry_run=dry_run)
         return False
     if dry_run:
         print(f"  {report.DRY} перезапустил бы прогон взгляда {run}")
@@ -601,6 +609,62 @@ def call_the_owed_look(repo: str, run: str, owner_token: str, *, dry_run: bool) 
         print(f"::warning::прогон взгляда {run} не перезапущен: {exc}")
         return False
     return True
+
+
+#: Метка оклика о застрявшей голове. Несёт голову: повторный заход по той же
+#: голове второй оклик не пишет, а новая голова, упёршаяся в предел, — свою.
+STUCK_MARKER: Final = "<!-- owed-look-stuck: {head} -->"
+
+
+def name_the_stuck_head(
+    repo: str, change: Change, run: str, attempt: int, owner_token: str, *, dry_run: bool
+) -> None:
+    """Один раз называет на изменении голову, которой перезапуск взгляда больше не зовётся.
+
+    ЗАЧЕМ ОКЛИК. Упёршись в предел перезапусков, голова ждёт без срока, а
+    причина — строка `::warning` в логе захода, куда никто не смотрит. Реестр
+    #89 видит только слитое. Прогон мог перезапустить и человек, пока голова
+    была красной: тогда очередь не позовёт перезапуск ни разу. Оклик ставит
+    причину туда, где на изменение смотрят (#805, находки на #784).
+
+    Отказ площадки не роняет заход: оклик — канал совещательный (084).
+    """
+    mark = STUCK_MARKER.format(head=change.head)
+    try:
+        said = [
+            str(one.get("body") or "")
+            for one in ghrest.paginate(f"repos/{repo}/issues/{change.number}/comments", owner_token)
+        ]
+    except ghrest.TransportError as exc:
+        print(f"::warning::#{change.number}: ленту не прочитать, оклик о голове не написан: {exc}")
+        return
+    if any(mark in body for body in said):
+        return
+    body = "\n".join(
+        (
+            mark,
+            "## Взгляд пропущен, а перезапуск больше не зовётся",
+            "",
+            f"Прогон взгляда [{run}](https://github.com/{repo}/actions/runs/{run}) на голове "
+            f"`{change.head[:12]}` пропущен воротами и уже перезапускался (попыток: {attempt}). "
+            f"Очередь перезапускает пропущенный взгляд не больше {OWED_RERUNS} раза (#762), "
+            "поэтому голова ждёт без срока и сама не сольётся.",
+            "",
+            "**Что сделать — надёжно:** толкнуть новую голову, и взгляд позовёт сам толчок. "
+            "Перезапуск этого прогона руками поможет, только если прошлые попытки шли на "
+            "красной голове. Если их пропустили на зелёной, ворота взгляда и очередь судят "
+            "голову по-разному, и перезапуск пропустят снова.",
+        )
+    )
+    if dry_run:
+        print(f"  {report.DRY} назвал бы на #{change.number} голову без взгляда")
+        return
+    try:
+        ghrest.request(
+            "POST", f"repos/{repo}/issues/{change.number}/comments", owner_token, {"body": body}
+        )
+    except ghrest.TransportError as exc:
+        print(f"::warning::#{change.number}: оклик о голове без взгляда не записан: {exc}")
 
 
 #: Прогон, из которого написан комментарий действия: шапка «View job» ведёт
@@ -1315,7 +1379,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                     for one in queue
                 ]
             if state in STATE_MERGEABLE:
-                called = call_the_owed_look(repo, owed, owner_token, dry_run=dry_run)
+                called = call_the_owed_look(repo, owed, owner_token, dry_run=dry_run, change=change)
                 said = (
                     "перезапущен, не взвожу (#762)"
                     if called
