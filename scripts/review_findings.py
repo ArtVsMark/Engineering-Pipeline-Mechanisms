@@ -726,6 +726,10 @@ def drop_resolved(
     return twins
 
 
+#: Снявший, у слитого которого нет номера: известно, что сняли, но не кто.
+UNKNOWN_CLOSER: Final = 0
+
+
 def resolved_marks(
     repo: str, token: str, since: str = "", limit: int = ghrest.MERGED_WINDOW
 ) -> tuple[dict[str, set[int]], str]:
@@ -788,15 +792,13 @@ def resolved_marks(
         mark = max(mark, when)
         if when <= since:
             continue
-        # СЛИТОЕ БЕЗ НОМЕРА СНЯВШИМ НЕ ПИШЕТСЯ: «#0» спросил бы площадку о
-        # несуществующем изменении, получил бы отказ, и пустой ответ принял бы
-        # снятие как «площадка молчит» (взгляд на #838). Отпечаток остаётся
-        # снятым без снявших: находку о коде это не держит, об ответе — держит.
-        number = int(item.get("number") or 0)
+        # СЛИТОЕ БЕЗ НОМЕРА ПИШЕТСЯ СНЯВШИМ `UNKNOWN_CLOSER`, И ПЛОЩАДКУ О НЁМ НЕ
+        # СПРАШИВАЮТ: вопрос о «#0» получил бы отказ, и пустой ответ принял бы
+        # снятие как «площадка молчит» (взгляд на #838). Находку о коде это не
+        # держит, об ответе — держит, и отказ называет неизвестного (#843).
+        number = int(item.get("number") or UNKNOWN_CLOSER)
         for one in changerefs.resolved_in(item.get("body") or ""):
-            closers = marks.setdefault(one, set())
-            if number:
-                closers.add(number)
+            marks.setdefault(one, set()).add(number)
     # ПОЛНОТА СТРАНИЦЫ МЕРЯЕТСЯ СТРАНИЦЕЙ, А НЕ СЛИТЫМИ НА НЕЙ. Запрос идёт за
     # закрытыми, и слитых на полной странице бывает горстка: счёт по слитым
     # молчал бы ровно тогда, когда закрытых без слияния много, — то есть в том
@@ -873,26 +875,27 @@ def closable(
         if entry.kind != findings.ANSWER_KIND:
             берём.add(mark)
             continue
-        снявшие = sorted(by.get(mark) or ())
+        снявшие = sorted(n for n in by.get(mark) or () if n != UNKNOWN_CLOSER)
+        неизвестный = UNKNOWN_CLOSER in (by.get(mark) or ())
         for number in снявшие:
             if number not in файлы:
                 файлы[number] = touched(repo, token, number)
         if any(not файлы[n] or ANSWER_FILE in файлы[n] for n in снявшие):
             берём.add(mark)
             continue
+        # СНЯВШИЙ НЕИЗВЕСТЕН — ЭТО НЕ «НЕ ТРОГАЛ»: файлы у него не спрашивались,
+        # и причина называется как есть, в том числе рядом с известными (#838, #843).
+        unknown = f"снявший без номера неизвестен — тронул ли он {ANSWER_FILE}, спросить не у кого"
         if not снявшие:
-            # СНЯВШИЙ НЕИЗВЕСТЕН — ЭТО НЕ «НЕ ТРОГАЛ»: файлы не спрашивались, и
-            # причина называется как есть (взгляд на #838).
-            держим[mark] = (
-                "находка об ОТВЕТЕ, а снявший неизвестен: у слитого нет номера, "
-                f"и тронуло ли оно {ANSWER_FILE}, спросить не у кого"
-            )
+            держим[mark] = f"находка об ОТВЕТЕ, а {unknown}"
             continue
         names = ", ".join(f"#{n}" for n in снявшие)
         verb = "не трогало" if len(снявшие) == 1 else "не трогали"
+        said = f"находка об ОТВЕТЕ, а {names} {verb} {ANSWER_FILE}"
+        if неизвестный:
+            said += f"; {unknown}"
         держим[mark] = (
-            f"находка об ОТВЕТЕ, а {names} {verb} {ANSWER_FILE}. "
-            "Ответ каталогу чинится правкой ответа: снятие говорит о работе, которой нет"
+            f"{said}. Ответ каталогу чинится правкой ответа: снятие говорит о работе, которой нет"
         )
     return берём, держим
 

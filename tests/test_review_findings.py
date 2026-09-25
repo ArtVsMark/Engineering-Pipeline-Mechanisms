@@ -1234,7 +1234,7 @@ def test_a_merged_change_without_a_number_is_no_closer(monkeypatch: pytest.Monke
     ]
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     marks, _ = module.resolved_marks("o/r", "t", "2026-09-25T11:00:00Z")
-    assert marks == {"abc1234": set()}
+    assert marks == {"abc1234": {module.UNKNOWN_CLOSER}}
 
     def нельзя(repo: str, token: str, number: int) -> set[str]:
         raise AssertionError(f"площадку спросили о #{number}")
@@ -1242,7 +1242,7 @@ def test_a_merged_change_without_a_number_is_no_closer(monkeypatch: pytest.Monke
     monkeypatch.setattr(module, "touched", нельзя)
     entries = отметка(10, findings_module.ANSWER_KIND)
     берём, держим = module.closable("o/r", "t", entries, marks)
-    assert not берём and "снявший неизвестен" in держим["abc1234"]
+    assert not берём and "снявший без номера неизвестен" in держим["abc1234"]
 
 
 def test_a_code_finding_is_closed_without_asking_the_platform(
@@ -1674,7 +1674,19 @@ def test_is_verification_needs_the_run_author_and_the_first_line() -> None:
     assert not module.is_verification({"user": run, "body": f"{late}\nда"})
 
 
-def test_the_sweep_hands_the_closers_to_the_answer_check(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_mixed_refusal_names_the_unknown_closer_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Известный снявший ответа не правил, второй без номера — отказ называет обоих (#843)."""
+    entries = отметка(10, findings_module.ANSWER_KIND)
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
+    by = {"abc1234": {20, module.UNKNOWN_CLOSER}}
+    берём, держим = module.closable("o/r", "t", entries, by)
+    assert not берём
+    assert "#20 не трогало" in держим["abc1234"] and "без номера" in держим["abc1234"]
+
+
+def test_the_sweep_hands_the_closers_to_the_answer_check(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`main` отдаёт в проверку снявших из `resolved_marks`, а не пустоту (взгляд на #838).
 
     Находку об ответе нашли на #10, сняло её #20, правившее ответ: запись уходит.
@@ -1698,3 +1710,5 @@ def test_the_sweep_hands_the_closers_to_the_answer_check(monkeypatch: pytest.Mon
         )
         module.main(["--sweep", "--repo", "o/r"])
         assert set(saved[-1]) == set(left), f"снявший #{closer}: реестр не тот"
+        said = capsys.readouterr().err
+        assert ("не принято" in said) == bool(left), f"снявший #{closer}: отказ не назван"
