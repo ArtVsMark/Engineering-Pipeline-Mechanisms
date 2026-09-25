@@ -44,6 +44,10 @@ EXIT_BROKEN: Final = 2
 
 #: Тип последнего сообщения прогона: в нём лежит текст ответа.
 RESULT: Final = agent_run.RESULT
+#: Метка ответа верификатора. СВОЯ, а не метка позднего взгляда: оба ответа
+#: переносит этот шаг токеном прогона, и под общей меткой ответ верификатора
+#: засчитывался поздним взглядом по изменению (взгляд на #815).
+VERIFY_MARKER: Final = "<!-- verify: проверка премисы одной находки, а не взгляд на изменение -->"
 
 
 class NotRun(RuntimeError):
@@ -99,6 +103,22 @@ def compose(number: int, answer: str) -> str:
     )
 
 
+def compose_verification(answer: str) -> str:
+    """Собирает ответ верификатора: своя метка и своя граница, потом ответ."""
+    return "\n".join(
+        [
+            VERIFY_MARKER,
+            "### Проверка премисы находки",
+            "",
+            "Это ответ верификатора об одной находке из реестра, а не взгляд на",
+            "изменение: позднего взгляда он не заменяет.",
+            "",
+            answer,
+            "",
+        ]
+    )
+
+
 def post(repo: str, number: int, token: str, body: str) -> None:
     """Кладёт ответ в само изменение — туда же, куда кладёт его обычное ревью."""
     ghrest.request("POST", f"repos/{repo}/issues/{number}/comments", token, {"body": body})
@@ -111,6 +131,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pr", type=int, required=True, help="номер слитого изменения")
     parser.add_argument("--from", dest="source", required=True, help="файл прогона действия")
     parser.add_argument("--apply", action="store_true", help="записать, а не показать")
+    parser.add_argument(
+        "--verify", action="store_true", help="ответ верификатора, а не позднего взгляда"
+    )
     args = parser.parse_args(argv)
     report.announce(not args.apply)
 
@@ -124,12 +147,14 @@ def main(argv: list[str] | None = None) -> int:
         if not source.is_file():
             raise NotRun(f"файла прогона нет: {args.source}")
 
-        body = compose(args.pr, answer_of(source.read_text(encoding="utf-8")))
+        answer = answer_of(source.read_text(encoding="utf-8"))
+        body = compose_verification(answer) if args.verify else compose(args.pr, answer)
         if not args.apply:
             print(f"записал бы в #{args.pr}:\n{body}")
             return EXIT_OK
         post(args.repo, args.pr, token, body)
-        print(f"ответ позднего взгляда записан в #{args.pr}")
+        said = "верификатора" if args.verify else "позднего взгляда"
+        print(f"ответ {said} записан в #{args.pr}")
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

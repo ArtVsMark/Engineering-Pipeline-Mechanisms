@@ -1632,3 +1632,20 @@ def test_a_full_fetch_is_not_shallow() -> None:
     """Выборка без флагов мелкости — не мелкая; комментарий — не команда."""
     run = "# git fetch --depth=1 — так нельзя\ngit fetch --no-tags origin main\n"
     assert not any(SHALLOW_FETCH.search(one) for one in commands_of(run))
+
+
+def test_only_the_verifier_posts_under_its_own_marker() -> None:
+    """Верификатор переносит ответ с `--verify`, поздний взгляд — без (взгляд на #815).
+
+    Оба зовут `late_look.py` тем же токеном; без флага ответ верификатора лёг
+    бы под метку позднего взгляда и засчитался бы им.
+    """
+    jobs = load(WORKFLOWS / "review.yml").get("jobs") or {}
+    calls: dict[str, list[str]] = {}
+    for name, job in jobs.items():
+        for step in job.get("steps") or []:
+            for command in commands_of(str(step.get("run") or "")):
+                if "late_look.py" in command:
+                    calls.setdefault(name, []).append(command)
+    assert calls.get("verify") and all("--verify" in one for one in calls["verify"])
+    assert calls.get("late-look") and not any("--verify" in one for one in calls["late-look"])
