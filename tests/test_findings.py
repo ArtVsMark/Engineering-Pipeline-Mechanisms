@@ -184,3 +184,9 @@ def test_read_archive_refuses_a_false_scalar(tmp_path: Path, said: str) -> None:
     path.write_text(said, encoding="utf-8")
     with pytest.raises(ValueError):
         module.read_archive(path)
+
+
+def test_is_plan_reads_the_imported_marker() -> None:
+    """Признак плана — вхождение метки плана, у обоих её читателей один (#828)."""
+    assert module.is_plan(f"шапка\n{module.PLAN_MARKER}\nтело")
+    assert not module.is_plan("<!-- work-plan -->")

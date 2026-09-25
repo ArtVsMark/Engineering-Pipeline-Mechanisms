@@ -24,7 +24,9 @@ from tests.conftest import load_script
 module = load_script("work_plan.py")
 
 
-BODY = """<!-- work-plan: не удаляйте -->
+BODY = (
+    module.MARKER
+    + """
 
 > **Читатель:** окно.
 
@@ -50,6 +52,7 @@ BODY = """<!-- work-plan: не удаляйте -->
 
 **Собрано:** вчера, рукой.
 """
+)
 
 
 def open_issues(closed: set[int]) -> Any:
@@ -448,7 +451,7 @@ def test_a_plan_edited_all_the_time_is_not_written_over(monkeypatch: pytest.Monk
 def test_the_hand_part_is_the_head_and_the_owner_sections() -> None:
     """Рукой пишутся шапка и разделы 4 и 6; собранные разделы в сверку не входят."""
     said = module.hand_part(BODY)
-    assert said[0].startswith(BODY.splitlines()[0])
+    assert said[0].startswith(module.MARKER)
     assert "- **#640** — сборщик плана" in said and "- **#642** — инвентарь переносимого" in said
     assert "**Пусто.**" not in said
 
