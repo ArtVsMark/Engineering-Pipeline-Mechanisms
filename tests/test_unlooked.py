@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -888,11 +889,15 @@ def late_answer(day: str) -> dict[str, Any]:
     return {"body": f"{module.LATE_MARKER}\nВЕРДИКТ: находок 2", "created_at": f"{day}T12:00:00Z"}
 
 
-def test_a_late_look_is_seen_in_the_feed_with_its_verdict() -> None:
-    """Поздний взгляд узнаётся по ответу в ленте; отметка без вердикта — не ответ."""
+def test_a_late_look_is_seen_in_the_feed_by_its_marker() -> None:
+    """Поздний взгляд узнаётся по отметке переноса — тот же признак, что у `--late` (#790).
+
+    Ответ без строки `ВЕРДИКТ` — тоже перенесённый ответ: шаг отметил бы его в
+    реестре, и лента обязана вернуть ту же отметку, если её стёрла гонка.
+    """
     assert module.late_seen([late_answer("2026-09-24")]) == "2026-09-24"
     unanswered = {"body": module.LATE_MARKER, "created_at": "2026-09-24T12:00:00Z"}
-    assert module.late_seen([unanswered]) == ""
+    assert module.late_seen([unanswered]) == "2026-09-24"
     assert (
         module.late_seen([{"body": "ВЕРДИКТ: находок 0", "created_at": "2026-09-24T12:00:00Z"}])
         == ""
@@ -916,15 +921,19 @@ def test_a_late_look_lost_by_a_racing_write_is_restored_from_the_feed(
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
     monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, marker: (89, body))
     monkeypatch.setattr(module, "merged_changes", lambda repo, token, limit: [])
-    monkeypatch.setattr(module, "look_at", lambda repo, number, token: module.STATE_SILENT)
+    monkeypatch.setattr(module, "look_at", lambda repo, number, token, *_: module.STATE_SILENT)
     feeds = {761: [late_answer("2026-09-24")], 773: []}
     monkeypatch.setattr(
-        module, "late_on", lambda repo, number, token: module.late_seen(feeds[number])
+        module, "late_on", lambda repo, number, token, *_: module.late_seen(feeds[number])
     )
     module.main(["--repo", "o/r"])
     said = capsys.readouterr().out
     assert "сняты: #761" in said, said
-    assert "#773" in said and "сняты: #761, #773" not in said
+    # #773 ОСТАЁТСЯ ОТКРЫТЫМ — проверяется его строкой в списке и счётом, а не
+    # упоминанием: номер печатается при любом исходе (взгляд на #790).
+    assert "сняты: #761\n" in said, said
+    assert "слито без взгляда: 1," in said
+    assert any(line.strip().startswith("#773 ·") for line in said.splitlines()), said
 
 
 def test_late_on_reads_the_feed_of_the_change(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -951,3 +960,62 @@ def test_the_late_queue_runs_after_every_ci_on_the_trunk() -> None:
     for event in ("schedule", "workflow_dispatch", "workflow_run"):
         assert f"github.event_name == '{event}'" in condition, f"очередь не идёт по {event}"
     assert "workflow_run" in (flow.get(True) or flow.get("on") or {}), "прогон не слушает ci"
+
+
+def test_the_feed_is_read_once_per_change_in_a_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Лента изменения читается один раз за заход, хоть её спрашивают двое (#790)."""
+    asked: list[str] = []
+
+    def paginate(path: str, token: str, **_: Any) -> Any:
+        asked.append(path)
+        return iter([])
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    feed = module.feed_reader("o/r", "t")
+    module.late_on("o/r", 761, "t", feed)
+    module.late_on("o/r", 761, "t", feed)
+    assert asked == ["repos/o/r/issues/761/comments"]
+
+
+def test_an_unread_feed_does_not_break_the_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ленту одной записи не прочитать — отметка пуста, заход идёт, отказ назван (084)."""
+
+    def refused(path: str, token: str, **_: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "paginate", refused)
+    assert module.late_on("o/r", 761, "t") == ""
+    assert "не сверен с лентой" in capsys.readouterr().out
+
+
+def test_the_queue_skips_what_the_feed_says_was_looked_at(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Очередь сверяется с лентой: посмотренное не ставится второй раз, место берёт следующий."""
+    entries = {
+        number: module.Entry(number, module.STATE_SILENT, f"2026-09-2{i}")
+        for i, number in enumerate((761, 768, 769, 773))
+    }
+    seen = {761: "2026-09-24"}
+    queue = module.queue_checked(entries, lambda number: seen.get(number, ""), limit=3)
+    assert queue == [768, 769, 773], "посмотренный стоял бы в очереди на платный прогон"
+    assert "#761: поздний взгляд был 2026-09-24" in capsys.readouterr().err
+
+
+def test_the_queue_run_checks_the_feed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Заход `--queue` сверяет очередь с лентой, а не верит телу реестра (#790)."""
+    body = (
+        f"{module.MARKER}\n- #761 · вердикта нет · 2026-09-20\n- #768 · вердикта нет · 2026-09-21\n"
+    )
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, marker: (89, body))
+    feeds = {761: [late_answer("2026-09-24")], 768: []}
+    monkeypatch.setattr(
+        module, "late_on", lambda repo, number, token, *_: module.late_seen(feeds[number])
+    )
+    module.main(["--repo", "o/r", "--queue"])
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == [768]
