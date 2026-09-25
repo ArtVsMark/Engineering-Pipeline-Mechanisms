@@ -320,7 +320,11 @@ def test_publication_writes_only_to_the_derived_branch() -> None:
     механизм, способный переписать источник своим же выводом.
     """
     document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    command = push_command(document["jobs"]["badges"]["steps"][-1]["run"])
+    # Шаг берётся по имени, а не по месту: после публикации идёт проверка
+    # переноса архива (#788), и «последний шаг» публикацией больше не является.
+    steps = document["jobs"]["badges"]["steps"]
+    publish = next(step for step in steps if step.get("name") == "опубликовать в ветку badges")
+    command = push_command(publish["run"])
     assert command.rstrip().endswith("badges"), f"толчок идёт не в производную ветку: {command}"
     assert "main" not in command, "шаг публикации называет общую ветку"
 
