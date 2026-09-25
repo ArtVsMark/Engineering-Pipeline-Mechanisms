@@ -584,18 +584,43 @@ def test_a_skill_named_in_prose_is_named_by_the_field() -> None:
     )
 
 
+#: Голое имя навыка сразу после слова «навык»: `навык role-coverage`,
+#: навыка `role-coverage`. Имя через дефис в прозе в общем случае не навык —
+#: так пишутся шаги (`late-look`), ключи (`runs-on`) и слаги правил, — поэтому
+#: ловится только форма, в которой прозу читают как имя навыка (взгляд на #794).
+BARE_SKILL_RE: Final = re.compile(r"навык[а-я]*\s+`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`?(?![\w/.-])")
+
+
+def skills_in_prose(text: str) -> list[str]:
+    """Адреса навыков, названных прозой: полным адресом и голым именем после «навык»."""
+    found = SKILL_ADDRESS_RE.findall(text)
+    found += [f".claude/skills/{name}" for name in BARE_SKILL_RE.findall(text)]
+    return found
+
+
+def test_a_bare_skill_name_after_the_word_is_read() -> None:
+    """Голое имя после «навык» читается адресом; имя шага без этого слова — нет."""
+    assert skills_in_prose("держит её навык `role-coverage`, а не") == [
+        ".claude/skills/role-coverage"
+    ]
+    assert skills_in_prose("навыка role-coverage нет") == [".claude/skills/role-coverage"]
+    assert skills_in_prose("навык .claude/skills/role-profile") == [".claude/skills/role-profile"]
+    assert skills_in_prose("шаг late-look и ключ runs-on") == []
+
+
 def test_a_skill_named_in_prose_resolves() -> None:
     """Навык, названный прозой ответа, есть в дереве — как и названный полем.
 
     Гейт выше разрешает только ПОЛЕ `skill`. Ответ 082 после разведения навыка
     (#767) сменил поле на direction-coverage, а в `where` остался удалённый
     role-coverage — и стоял зелёным (взгляд на #773). Проза читается тем же
-    предикатом, что у соседнего гейта: три прозаических поля (195).
+    предикатом, что у соседнего гейта: три прозаических поля (195). Голое имя
+    ловится только после слова «навык» — предел назван у `BARE_SKILL_RE`.
     """
     missing = sorted(
         (number, address)
         for number, one in answers().items()
-        for address in SKILL_ADDRESS_RE.findall(
+        for address in skills_in_prose(
             " ".join(str(one.get(key) or "") for key in ("where", "why", "machine_half"))
         )
         if not (ROOT / address / "SKILL.md").is_file()
