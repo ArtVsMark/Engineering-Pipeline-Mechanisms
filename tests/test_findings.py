@@ -159,3 +159,16 @@ def test_unfilled_finds_only_the_fill_gap() -> None:
     gap = f"{module.UNFILLED}: не учтено слитых изменений — 3"
     assert module.unfilled({"gaps": ["ответы верификатора …", gap]}) == gap
     assert module.unfilled({"gaps": ["ответы верификатора …"]}) == ""
+
+
+def test_read_archive_refuses_a_scalar_where_a_list_is(tmp_path: Path) -> None:
+    """Скаляр вместо списка — отказ с причиной, а не трасса или обход по символам (#817)."""
+    path = tmp_path / "findings.json"
+    for said in (
+        '{"counted": 5}',
+        '{"gaps": "наполнение не дошло"}',
+        '{"findings": {"a": {"seen_on": 3}}}',
+    ):
+        path.write_text(said, encoding="utf-8")
+        with pytest.raises(ValueError, match="не список"):
+            module.read_archive(path)

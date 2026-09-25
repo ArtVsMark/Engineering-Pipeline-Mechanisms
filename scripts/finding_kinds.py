@@ -320,6 +320,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {times:>2}  {name}{split}  [{mark}]{stored}")
         if born:
             print(f"      породил: {'; '.join(born)}")
+    # РОД АРХИВА ВНЕ СЛОВАРЯ НЕ ВЫПАДАЕТ МОЛЧА: переименованный, снятый или
+    # чужой по `--kinds` род иначе уменьшал бы сумму архива без слова (взгляд
+    # на #817).
+    for name in sorted(set(archived) - set(kinds)):
+        total, worked, twinned = archived[name]
+        print(
+            f"  род архива вне словаря: {name} — архив: {total},"
+            f" снято работой {worked}, дублем {twinned}"
+        )
 
     debt = unheld(kinds)
     if not debt:
