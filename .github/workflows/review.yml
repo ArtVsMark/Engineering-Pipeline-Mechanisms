@@ -190,16 +190,26 @@ jobs:
           # правила машинными, получив взгляд, которому некуда смотреть (085).
           # Сбой сети превращался в ту самую подмену, от которой шаг и заведён.
           # Нашёл внешний взгляд на #120.
-          if git fetch --no-tags --depth=1 origin "$BASE"; then
+          # КОД КАРТЫ — ТОЖЕ С БАЗЫ, А НЕ ТОЛЬКО ЕЁ ДАННЫЕ. Ответ каталогу,
+          # процедура и таблица ролей читаются `git show FETCH_HEAD:…`, но
+          # исполнялся их читатель из головы: изменение, правящее
+          # `review_map.py`, само писало раздел ролей и ответ для своей
+          # проверки (поздний взгляд на #785). Поэтому база разворачивается
+          # рядом отдельным деревом, и скрипт с транспортом берутся из него;
+          # рабочим каталогом остаётся голова — `git diff` карты сравнивает её
+          # с базой. Не развернулась база — карты нет, а не карта из головы.
+          if git fetch --no-tags --depth=1 origin "$BASE" \
+            && git worktree add --detach --quiet "$RUNNER_TEMP/base" FETCH_HEAD; then
             rc=0
-            python scripts/review_map.py --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" \
+            PYTHONPATH="$RUNNER_TEMP/base/packages/transport" \
+              python "$RUNNER_TEMP/base/scripts/review_map.py" --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" \
               --pr "${{ github.event.pull_request.number }}" || rc=$?
             if [ "$rc" -ne 0 ]; then
               echo "::warning::Карта не собрана (код $rc): взгляд пойдёт без неё."
               : > "$RUNNER_TEMP/map.md"
             fi
           else
-            echo "::warning::Общая ветка «$BASE» не получена: карта не собирается. Брать её с головы изменения нельзя — ответ каталогу пишет тот, кого проверяют (085)."
+            echo "::warning::Общая ветка «$BASE» не получена или не развёрнута: карта не собирается. Брать её с головы изменения нельзя — ответ каталогу пишет тот, кого проверяют (085)."
           fi
           # РАЗДЕЛИТЕЛЬ СЛУЧАЕН, А НЕ ПОСТОЯНЕН. В карту попадают заголовки
           # правил, приходящие ПО СЕТИ из выгрузки соседнего репозитория; строка
@@ -865,16 +875,26 @@ jobs:
           # ни одного изменения, кроме головы. Так было у поздних взглядов на
           # #773, #777 и #785. Мелкую выборку в полном клоне ловит гейт
           # `test_a_full_history_is_not_cut_back`.
-          if git fetch --no-tags origin "$BASE"; then
+          # КОД КАРТЫ — ТОЖЕ С БАЗЫ, А НЕ ТОЛЬКО ЕЁ ДАННЫЕ. Ответ каталогу,
+          # процедура и таблица ролей читаются `git show FETCH_HEAD:…`, но
+          # исполнялся их читатель из головы: изменение, правящее
+          # `review_map.py`, само писало раздел ролей и ответ для своей
+          # проверки (поздний взгляд на #785). Поэтому база разворачивается
+          # рядом отдельным деревом, и скрипт с транспортом берутся из него;
+          # рабочим каталогом остаётся голова — `git diff` карты сравнивает её
+          # с базой. Не развернулась база — карты нет, а не карта из головы.
+          if git fetch --no-tags origin "$BASE" \
+            && git worktree add --detach --quiet "$RUNNER_TEMP/base" FETCH_HEAD; then
             rc=0
-            python scripts/review_map.py --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" \
+            PYTHONPATH="$RUNNER_TEMP/base/packages/transport" \
+              python "$RUNNER_TEMP/base/scripts/review_map.py" --base FETCH_HEAD --out "$RUNNER_TEMP/map.md" \
               --pr "${{ matrix.pr }}" || rc=$?
             if [ "$rc" -ne 0 ]; then
               echo "::warning::Карта не собрана (код $rc): взгляд пойдёт без неё."
               : > "$RUNNER_TEMP/map.md"
             fi
           else
-            echo "::warning::Общая ветка «$BASE» не получена: карта не собирается."
+            echo "::warning::Общая ветка «$BASE» не получена или не развёрнута: карта не собирается."
           fi
           eof="CLAUDE_MAP_EOF_$(openssl rand -hex 16)"
           {
