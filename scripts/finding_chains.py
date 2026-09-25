@@ -24,14 +24,14 @@
 пустое и измеренное неотличимы (045). Лента, прочитанная до момента, но без
 находок, — настоящий ноль.
 
-АРХИВ ДЛЯ ЭТОГО НЕ НУЖЕН. Находки уходят из реестра #23 после разбора, но
-остаются в лентах изменений — в комментариях взгляда. Замер читает их там тем
-же разбором СТРОКИ, что и сборщик реестра (`review_findings.findings_of`,
-`review_findings.fingerprint`): второй разбор той же строки разошёлся бы с
-первым молча. ВХОД У НИХ РАЗНЫЙ, И ЭТО НАЗВАНО: замер читает только
-комментарии бота — с `--at` и без него, — а сборщик реестра автора не
-смотрит. Строка `НАХОДКА[…]`, процитированная человеком, в реестр ляжет, а в
-замер — нет (взгляд на #789)
+ЛЕНТЫ — ОСНОВНОЙ ВХОД, АРХИВ — ВТОРОЙ (`--archive`, ниже). Находки уходят из
+реестра #23 после разбора, но остаются в лентах изменений — в комментариях
+взгляда. Замер читает их там тем же разбором СТРОКИ, что и сборщик реестра
+(`review_findings.findings_of`, `review_findings.fingerprint`): второй разбор
+той же строки разошёлся бы с первым молча. ВХОД У НИХ РАЗНЫЙ, И ЭТО НАЗВАНО:
+ленты замер читает только от бота — с `--at` и без него, — а сборщик реестра
+и архив автора не смотрят. Строка `НАХОДКА[…]`, процитированная человеком, в
+реестр и архив ляжет, а в замер по лентам — нет (взгляд на #789)
 ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
 
 МЕСТО — ПУТЬ ДО ДВОЕТОЧИЯ. Взгляд называет место одним способом —
@@ -52,6 +52,19 @@
 «одна цепочка форм»: считать ли их одним предикатом, решает чтение поимённо,
 и замер его не заменяет — он печатает места, чтобы было что читать.
 
+ИЗ АРХИВА, А НЕ ИЗ ЛЕНТ (`--archive`, #778). Архив находок на ветке `badges`
+хранит каждую находку с изменениями, где она звучала (`seen_on`), и читать
+ленты заново ради того же не нужно: сотни запросов к площадке против одного
+файла. ЧИСЛА ДВУХ ВХОДОВ НЕ РАВНЫ, И ОТЧЁТ ГОВОРИТ, ЧЕМ СНЯТ (взгляд на #817):
+- автор: архив собран, как реестр, по всем комментариям, ленты — только от
+  бота; цитата человека в архиве есть;
+- отрезок: архив знает только СЛИТЫЕ изменения, ленты — все закрытые; `--last`
+  берёт последние N своих;
+- полнота: не дошло наполнение до головы — архив говорит это в `gaps`, и отчёт
+  печатает эту строку, а не выдаёт отрезок учтённых за последние слитые.
+Момента в архиве нет, поэтому `--at` с ним — отказ, а не молча игнорируемый
+ключ (045). Чужая форма архива — тоже отказ с причиной, а не трасса.
+
 Исходы (правило 039): ``0`` замер снят · ``2`` не снят (нет токена, площадка
 не ответила). Третьего — «снят с находками» — нет: это счёт, а не гейт, и
 судить по нему не о чем
@@ -67,8 +80,10 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 
+import findings
 import ghrest
 import review_findings
 
@@ -222,6 +237,42 @@ def read_counted(
     return said, taken, kept
 
 
+def from_archive(
+    archive: dict[str, Any], last: int, first: int = 0, final: int = 0
+) -> tuple[list[tuple[int, str]], int]:
+    """Находки из архива: (изменение, заголовок) на каждое изменение, где звучала.
+
+    Отрезок задаётся так же, как у лент, но берёт другое: `--from/--to` по
+    номеру, иначе последние `last` УЧТЁННЫХ архивом, то есть слитых, изменений.
+    Ленты берут последние закрытые, неслитые тоже. Второе в ответе — сколько
+    изменений отрезок взял.
+    """
+    counted = sorted({int(one) for one in archive.get("counted") or []}, reverse=True)
+    if first or final:
+        taken = {number for number in counted if first <= number <= final}
+    else:
+        taken = set(counted[:last])
+    said = [
+        (int(number), str(entry.get("title") or ""))
+        for entry in (archive.get("findings") or {}).values()
+        for number in entry.get("seen_on") or []
+        if int(number) in taken
+    ]
+    return said, len(taken)
+
+
+def archive_heading(archive: dict[str, Any], taken: int) -> list[str]:
+    """Чем снят замер по архиву: вход, отрезок и неполнота — строками отчёта."""
+    lines = [
+        f"вход: архив находок, {taken} слитых изменений; находки всех авторов, как у"
+        " реестра (ленты считают только бота)"
+    ]
+    gap = findings.unfilled(archive)
+    if gap:
+        lines.append(f"АРХИВ НЕПОЛОН: {gap} — отрезок взят из учтённых, а не из последних слитых")
+    return lines
+
+
 def report(measured: Chains) -> list[str]:
     """Строки отчёта: числа замера и места, дошедшие до третьего изменения."""
     lines = [
@@ -244,10 +295,18 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: читает ленты изменений и печатает замер цепочек."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--last", type=int, default=LAST, help="сколько закрытых изменений читать")
+    parser.add_argument(
+        "--last",
+        type=int,
+        default=LAST,
+        help="сколько последних изменений читать: закрытых по лентам, слитых по архиву",
+    )
     parser.add_argument("--from", dest="first", type=int, default=0, help="первый номер отрезка")
     parser.add_argument("--to", dest="final", type=int, default=0, help="последний номер отрезка")
     parser.add_argument("--at", default="", help="момент ISO: комментарии позже него не считаются")
+    parser.add_argument(
+        "--archive", default="", help="архив находок (findings.json) вместо лент изменений"
+    )
     args = parser.parse_args(argv)
     try:
         cut = moment(args.at) if args.at else None
@@ -261,6 +320,26 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_BROKEN
+    if args.archive:
+        if cut is not None:
+            print(
+                "замер не снят: в архиве нет моментов, --at с --archive не сочетается",
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
+        try:
+            archive = findings.read_archive(Path(args.archive))
+        except ValueError as exc:
+            print(f"замер не снят: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        said, seen = from_archive(archive, args.last, args.first, args.final)
+        if not seen:
+            print(
+                "замер не снят: в отрезке нет ни одного учтённого изменения (045)", file=sys.stderr
+            )
+            return EXIT_BROKEN
+        print("\n".join(archive_heading(archive, seen) + report(chains(said))))
+        return EXIT_OK
     token = ghrest.token_from_env()
     if not token or not args.repo:
         print("замер не снят: нет токена или репозитория (045)", file=sys.stderr)
