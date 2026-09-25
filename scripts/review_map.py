@@ -95,23 +95,76 @@ def shown_from_base(base: str, path: Path) -> str:
     return shown.stdout
 
 
+def strings(value: Any) -> bool:
+    """Список строк — единственная форма списков в таблице ролей."""
+    return isinstance(value, list) and all(isinstance(one, str) for one in value)
+
+
+def table_shape(table: Any) -> dict[str, Any]:
+    """Таблица ролей той формы, что читает `roles_for`; иная — отказ, а не падение.
+
+    Таблица приходит с общей ветки, но форму её держит только гейт дерева. Без
+    этой сверки `roles` строкой или `by_path` словарём роняли весь `main`, и
+    пропадала вся карта, а не один её раздел (взгляд на #785, 084).
+    """
+    if not isinstance(table, dict):
+        raise NotRun(f"таблица ролей — не словарь, а {type(table).__name__}")
+    if not strings(table.get("required", [])):
+        raise NotRun("`required` — не список имён ролей")
+    ignored = table.get("ignored", {})
+    if not (
+        isinstance(ignored, dict)
+        and strings(ignored.get("paths", []))
+        and strings(ignored.get("except", []))
+    ):
+        raise NotRun("`ignored.paths` или `ignored.except` — не список образцов")
+    rules = table.get("by_path", [])
+    if not isinstance(rules, list):
+        raise NotRun("`by_path` — не список правил")
+    for at, rule in enumerate(rules):
+        if not (
+            isinstance(rule, dict)
+            and strings(rule.get("paths", []))
+            and strings(rule.get("roles", []))
+        ):
+            raise NotRun(f"`by_path[{at}]` — не правило с `paths` и `roles` списками строк")
+    return table
+
+
+def matches(name: str, mask: str) -> bool:
+    """Путь совпадает с образцом; образец без `/` — только путь в корне.
+
+    `*` у `fnmatch` проходит и через `/`, и `*.md` звал техписателя на любой
+    `.md` в любой папке — образцы тестов тоже (взгляд на #796). Образец с `/`
+    читается как прежде: `docs/*` берёт и вложенные пути.
+    """
+    if "/" not in mask and "/" in name:
+        return False
+    return fnmatch.fnmatch(name, mask)
+
+
 def roles_for(files: list[str], table: dict[str, Any]) -> tuple[list[str], dict[str, list[str]]]:
     """Роли изменения: обязательные и по контексту — роль → тронутые пути, её позвавшие.
 
     Одно и то же изменение получает одних и тех же ролей: выбор — сверка путей
     с таблицей, а не суждение модели (#776). Обязательная роль в контекстные не
-    повторяется.
+    повторяется. Пути из `ignored` ролей не зовут: фрагмент журнала приносит
+    почти каждое изменение, и роли, которые он звал, становились обязательными
+    по факту (взгляд на #785). Кроме `ignored.except`: фрагмент, двигающий
+    контракт, релиз-инженера зовёт (взгляд на #796).
     """
     required = [str(one) for one in table.get("required", [])]
+    ignored = table.get("ignored", {})
+    files = [
+        name
+        for name in files
+        if not any(matches(name, m) for m in ignored.get("paths", []))
+        or any(matches(name, m) for m in ignored.get("except", []))
+    ]
     context: dict[str, list[str]] = {}
     for rule in table.get("by_path", []):
         hit = sorted(
-            {
-                name
-                for name in files
-                for mask in rule.get("paths", [])
-                if fnmatch.fnmatch(name, mask)
-            }
+            {name for name in files for mask in rule.get("paths", []) if matches(name, mask)}
         )
         if not hit:
             continue
@@ -380,7 +433,7 @@ def roles_section(base: str, repo: str, number: int) -> str:
     """Раздел ролей для карты; его отказ не роняет карту, а называется в ней (084)."""
     try:
         procedure = shown_from_base(base, paths.REVIEW_PROCEDURE)
-        table = json.loads(shown_from_base(base, paths.REVIEW_ROLES))
+        table = table_shape(json.loads(shown_from_base(base, paths.REVIEW_ROLES)))
     except (NotRun, json.JSONDecodeError) as exc:
         print(f"процедура взгляда не прочитана: {exc}", file=sys.stderr)
         return (

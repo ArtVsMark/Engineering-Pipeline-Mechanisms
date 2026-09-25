@@ -20,6 +20,7 @@ from tests.conftest import ROOT, load_script
 review_map = load_script("review_map.py")
 findings = load_script("findings.py")
 paths = load_script("paths.py")
+release = load_script("release.py")
 
 TABLE: Final = json.loads((ROOT / paths.REVIEW_ROLES).read_text(encoding="utf-8"))
 
@@ -44,10 +45,28 @@ def test_required_roles_are_the_checking_kind() -> None:
         (["docs/pipeline.md"], {"техписатель", "редактор", "архитектор"}),
         ([".github/workflows/ci.yml"], {"инженер площадки", "безопасность", "эконом прогонов"}),
         (["scripts/automerge.py"], {"механик", "диспетчер"}),
-        (["changelog.d/x.fixed.md"], {"релиз-инженер", "техписатель", "редактор"}),
+        (["changelog.d/x.fixed.md"], set()),
+        (["scripts/x.py", "changelog.d/x.fixed.md"], {"механик"}),
+        (["scripts/release.py"], {"механик", "релиз-инженер"}),
+        (["changelog.d/x.contract.md"], {"релиз-инженер"}),
+        (["tests/fixtures/x.md"], {"механик"}),
+        (["docs/decisions/001-x.md"], {"техписатель", "редактор", "архитектор"}),
+        (["README.md"], {"техписатель", "редактор"}),
         (["никуда/не/ведёт.txt"], set()),
     ],
-    ids=["договор", "прогон", "очередь", "журнал", "чужой путь"],
+    ids=[
+        "договор",
+        "прогон",
+        "очередь",
+        "журнал",
+        "обычное изменение",
+        "выпуск",
+        "контракт",
+        "образец теста",
+        "вложенный документ",
+        "корневой документ",
+        "чужой путь",
+    ],
 )
 def test_context_roles_follow_the_touched_paths(files: list[str], expected: set[str]) -> None:
     """Одно изменение — одни и те же роли: выбор по путям, а не на глаз."""
@@ -139,3 +158,62 @@ def test_shown_from_base_reads_git_and_refuses_loudly(monkeypatch: pytest.Monkey
     assert calls[-1] == ["git", "show", "B:docs/review.md"]
     with pytest.raises(review_map.NotRun):
         review_map.shown_from_base("X", Path("docs/review.md"))
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        [],
+        {"required": "ревизор"},
+        {"by_path": {"paths": ["*"]}},
+        {"by_path": [{"paths": ["*"], "roles": "механик"}]},
+        {"ignored": {"paths": "changelog.d/*"}},
+        {"ignored": ["changelog.d/*"]},
+    ],
+    ids=[
+        "не словарь",
+        "required строкой",
+        "by_path словарём",
+        "roles строкой",
+        "ignored строкой",
+        "ignored списком",
+    ],
+)
+def test_a_table_of_another_shape_is_named_not_fatal(
+    monkeypatch: pytest.MonkeyPatch, table: Any
+) -> None:
+    """Таблица иной формы — раздел это называет, а карта не падает (взгляд на #785, 084)."""
+    monkeypatch.setattr(review_map, "shown_from_base", lambda base, path: json.dumps(table))
+    assert "не прочитана с общей ветки" in review_map.roles_section("B", "o/r", 7)
+
+
+def test_the_live_table_has_its_shape() -> None:
+    """Живая таблица проходит ту же сверку формы, что и прочитанная с базы."""
+    assert review_map.table_shape(TABLE) is TABLE
+
+
+def test_only_a_list_of_strings_is_a_list_of_the_table() -> None:
+    """Список таблицы — список строк: строка, словарь и список с числом — нет."""
+    assert review_map.strings([]) and review_map.strings(["a", "b"])
+    assert not review_map.strings("a")
+    assert not review_map.strings({"a": 1})
+    assert not review_map.strings(["a", 1])
+
+
+def test_the_contract_fragment_mask_follows_the_release_kind() -> None:
+    """Исключение из `ignored` и строка релиз-инженера называют род контракта выпуска.
+
+    Род фрагмента, двигающего контракт, объявлен у выпуска (`CONTRACT_KIND`);
+    переименуй его там — и таблица молча перестала бы звать релиз-инженера.
+    """
+    mask = f"changelog.d/*{release.CONTRACT_KIND}"
+    assert mask in TABLE["ignored"]["except"]
+    release_rows = [rule for rule in TABLE["by_path"] if "релиз-инженер" in rule["roles"]]
+    assert any(mask in rule["paths"] for rule in release_rows)
+
+
+def test_a_mask_without_a_slash_matches_only_the_root() -> None:
+    """Образец без `/` — только корень; с `/` — и вложенные пути, как у `fnmatch`."""
+    assert review_map.matches("README.md", "*.md")
+    assert not review_map.matches("tests/fixtures/x.md", "*.md")
+    assert review_map.matches("docs/decisions/001-x.md", "docs/*")
