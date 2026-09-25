@@ -584,6 +584,27 @@ def test_a_skill_named_in_prose_is_named_by_the_field() -> None:
     )
 
 
+def test_a_skill_named_in_prose_resolves() -> None:
+    """Навык, названный прозой ответа, есть в дереве — как и названный полем.
+
+    Гейт выше разрешает только ПОЛЕ `skill`. Ответ 082 после разведения навыка
+    (#767) сменил поле на direction-coverage, а в `where` остался удалённый
+    role-coverage — и стоял зелёным (взгляд на #773). Проза читается тем же
+    предикатом, что у соседнего гейта: три прозаических поля (195).
+    """
+    missing = sorted(
+        (number, address)
+        for number, one in answers().items()
+        for address in SKILL_ADDRESS_RE.findall(
+            " ".join(str(one.get(key) or "") for key in ("where", "why", "machine_half"))
+        )
+        if not (ROOT / address / "SKILL.md").is_file()
+    )
+    assert not missing, "ответ называет прозой навык, которого в дереве нет: " + "; ".join(
+        f"{number} → {address}" for number, address in missing
+    )
+
+
 def test_a_skill_mechanism_names_its_skill() -> None:
     """`mechanism: skill` без поля `skill` — механизм без адреса.
 
