@@ -987,7 +987,7 @@ def test_an_unread_feed_does_not_break_the_run(
 
     monkeypatch.setattr(module.ghrest, "paginate", refused)
     assert module.late_on("o/r", 761, "t") == ""
-    assert "не сверен с лентой" in capsys.readouterr().out
+    assert "не сверен с лентой" in capsys.readouterr().err
 
 
 def test_the_queue_skips_what_the_feed_says_was_looked_at(
@@ -1018,4 +1018,24 @@ def test_the_queue_run_checks_the_feed(
         module, "late_on", lambda repo, number, token, *_: module.late_seen(feeds[number])
     )
     module.main(["--repo", "o/r", "--queue"])
-    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == [768]
+    out = capsys.readouterr().out
+    # stdout идёт в `$GITHUB_OUTPUT`: ровно одна строка JSON, без соседей (#810).
+    assert out.strip().splitlines() == [json.dumps([768])], out
+
+
+def test_the_queue_output_stays_one_line_when_a_feed_is_refused(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ ленты кандидата не добавляет строк в stdout `--queue` (взгляд на #810)."""
+    body = f"{module.MARKER}\n- #761 · вердикта нет · 2026-09-20\n"
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, marker: (89, body))
+
+    def refused(path: str, token: str, **_: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "paginate", refused)
+    module.main(["--repo", "o/r", "--queue"])
+    said = capsys.readouterr()
+    assert said.out.strip().splitlines() == [json.dumps([761])], said.out
+    assert "не сверен с лентой" in said.err

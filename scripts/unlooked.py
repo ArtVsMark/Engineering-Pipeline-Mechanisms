@@ -451,6 +451,11 @@ def look_at(repo: str, number: int, token: str, feed: Feed | None = None) -> str
     коде в общей ветке, а вопрос здесь — смотрел ли кто-нибудь на изменение,
     пока оно было изменением.
     """
+    # ОТКАЗ ЛЕНТЫ ЗДЕСЬ РОНЯЕТ ЗАХОД НАМЕРЕННО — в отличие от `late_on` и
+    # `head_runs`. Там лента даёт уточнение к записи, здесь — сам факт «был ли
+    # взгляд»: угадав его, заход снял бы запись без взгляда или завёл лишнюю, и
+    # реестр солгал бы о главном. Честнее не писать реестр вовсе (045, взгляд
+    # на #810).
     said = (feed or feed_reader(repo, token))(number)
     comments = [comment for comment in said if LATE_MARKER not in (comment.get("body") or "")]
     if review_findings.verdict_of(comments) is not None or review_findings.findings_of(comments):
@@ -488,7 +493,13 @@ def late_on(repo: str, number: int, token: str, feed: Feed | None = None) -> str
     try:
         said = (feed or feed_reader(repo, token))(number)
     except ghrest.TransportError as exc:
-        print(f"  поздний взгляд по #{number} не сверен с лентой: {report.cut(str(exc))}")
+        # В stderr, а не в stdout: заход `--queue` отдаёт stdout в
+        # `$GITHUB_OUTPUT` одной строкой JSON, и лишняя строка уронила бы
+        # очередь позднего взгляда на разборе вывода (взгляд на #810).
+        print(
+            f"  поздний взгляд по #{number} не сверен с лентой: {report.cut(str(exc))}",
+            file=sys.stderr,
+        )
         return ""
     return late_seen(said)
 
@@ -831,8 +842,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.queue:
             # ОЧЕРЕДЬ ЧИТАЕТСЯ, А НЕ ПЕРЕСЧИТЫВАЕТСЯ. Реестр уже ведёт свой
-            # механизм; заход сюда только выбирает из него, ничего не трогая,
-            # и потому не спрашивает площадку об изменениях вовсе (022).
+            # механизм; заход сюда только выбирает из него, ничего не трогая
+            # (022). Площадку он спрашивает об одном — ленте кандидатов, чтобы
+            # не поставить посмотренное на платный прогон второй раз (#790).
             _, said = findings.live_issue(args.repo, token, MARKER)
             feed = feed_reader(args.repo, token)
             print(
