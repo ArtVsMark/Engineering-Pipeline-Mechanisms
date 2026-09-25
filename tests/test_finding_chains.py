@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -343,3 +345,42 @@ def test_a_human_finding_line_is_not_counted_without_a_moment_either(
     platform(monkeypatch, {9: [quoted, look("a.py:1 — раз")]})
     assert module.main(["--repo", "o/r", "--from", "9", "--to", "9"]) == module.EXIT_OK
     assert "уникальных находок: 1" in capsys.readouterr().out
+
+
+def archive_file(tmp_path: Path) -> Path:
+    """Архив находок: две находки одного места на двух изменениях и одна вне отрезка."""
+    archive = {
+        "counted": [7, 8, 9],
+        "findings": {
+            "aaaaaaa": {"seen_on": [8, 9], "title": "scripts/x.py:1 — раз"},
+            "bbbbbbb": {"seen_on": [7], "title": "scripts/y.py:2 — два"},
+        },
+    }
+    path = tmp_path / "findings.json"
+    path.write_text(json.dumps(archive), encoding="utf-8")
+    return path
+
+
+def test_chains_are_read_from_the_archive(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--archive` считает цепочки по архиву, без лент и без токена (#778)."""
+    path = archive_file(tmp_path)
+    args = ["--archive", str(path), "--from", "8", "--to", "9"]
+    assert module.main(args) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "уникальных находок: 1 на 2 изменениях" in said
+    assert "мест с находками: 1" in said and "на 2 и более изменениях: 1" in said
+
+
+def test_the_archive_has_no_moment(tmp_path: Path) -> None:
+    """В архиве нет моментов: `--at` с `--archive` — отказ, а не молча пропущенный ключ."""
+    args = ["--archive", str(archive_file(tmp_path)), "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_BROKEN
+
+
+def test_from_archive_takes_the_last_counted(tmp_path: Path) -> None:
+    """Без отрезка берутся последние `last` учтённых изменений."""
+    archive = json.loads(archive_file(tmp_path).read_text(encoding="utf-8"))
+    said, seen = module.from_archive(archive, last=1)
+    assert seen == 1 and said == [(9, "scripts/x.py:1 — раз")]

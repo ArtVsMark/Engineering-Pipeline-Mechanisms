@@ -259,13 +259,38 @@ def unanswered(kinds: dict[str, Any], queue: str) -> list[tuple[str, int]]:
     ]
 
 
+def in_archive(path: Path) -> dict[str, tuple[int, int]]:
+    """Род → (находок рода в архиве, из них снято) — чтение архива, а не лент (#778).
+
+    Род у находки архив берёт из этого же словаря (`встречен`), так что число
+    здесь не второй счёт встреч, а их СУДЬБА: сколько из них в истории и
+    сколько снято работой.
+    """
+    try:
+        archive = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NotRun(f"архив не прочитан — {exc}") from exc
+    found: dict[str, tuple[int, int]] = {}
+    for entry in (archive.get("findings") or {}).values():
+        name = str(entry.get("род") or "")
+        if not name:
+            continue
+        total, resolved = found.get(name, (0, 0))
+        found[name] = (total + 1, resolved + (1 if entry.get("resolved_by") else 0))
+    return found
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает роды, повторы и долг."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kinds", default=None, help="объявление родов вместо дерева")
+    parser.add_argument(
+        "--archive", default=None, help="архив находок (findings.json): встречи рода в нём"
+    )
     args = parser.parse_args(argv)
     try:
         kinds = read(Path(args.kinds) if args.kinds else None)
+        archived = in_archive(Path(args.archive)) if args.archive else {}
     except NotRun as refusal:
         print(f"роды не сосчитаны: {refusal}", file=sys.stderr)
         return EXIT_BROKEN
@@ -279,7 +304,9 @@ def main(argv: list[str] | None = None) -> int:
         born = [str(one) for one in (body.get(BORN) or [])]
         seen, caught = origins(body)
         split = f" (взгляд {seen}, окно {caught})" if caught else ""
-        print(f"  {times:>2}  {name}{split}  [{mark}]")
+        kept = archived.get(name)
+        stored = f"  архив: {kept[0]}, снято {kept[1]}" if kept else ""
+        print(f"  {times:>2}  {name}{split}  [{mark}]{stored}")
         if born:
             print(f"      породил: {'; '.join(born)}")
 
