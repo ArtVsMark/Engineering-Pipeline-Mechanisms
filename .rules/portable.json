@@ -503,7 +503,9 @@
     "scripts/review_map.py": {
       "answer": "configured",
       "where": [
-        ".rules/bindings.json"
+        ".rules/bindings.json",
+        ".rules/review-roles.json",
+        "docs/review.md"
       ]
     },
     "scripts/rule_link.py": {
