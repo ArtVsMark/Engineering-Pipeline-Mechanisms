@@ -665,6 +665,66 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
         assert base != "HEAD", f"карта взята из головы изменения: {line.strip()}"
 
 
+def commands_of(run: str) -> list[str]:
+    """Логические команды блока `run`: продолжения `\\` склеены, комментарии отброшены.
+
+    Гейты читали shell по строкам файла, и одна и та же команда, записанная с
+    переносом, проходила мимо: `git fetch \\` и `--depth=1` строкой ниже, путь
+    импорта строкой выше вызова (взгляды на #793 и #800). Команда — предмет, а
+    строка — только способ её записать.
+    """
+    found: list[str] = []
+    pending = ""
+    for line in run.splitlines():
+        stripped = line.strip()
+        if not pending and (not stripped or stripped.startswith("#")):
+            continue
+        if stripped.endswith("\\"):
+            pending += stripped[:-1] + " "
+            continue
+        found.append(pending + stripped)
+        pending = ""
+    if pending:
+        found.append(pending)
+    return found
+
+
+#: Присваивание `PYTHONPATH` префиксом команды или `export` в шаге.
+PYTHONPATH_SET = re.compile(r"(?:^|\s)(?:export\s+)?PYTHONPATH=(\"[^\"]*\"|\S+)")
+
+
+def effective_pythonpath(commands: list[str], at: int) -> str:
+    """Какой `PYTHONPATH` действует у команды `at` в её шаге: префикс, иначе последний `export`.
+
+    Шаг — отдельная оболочка: `export` из другого шага или джоба сюда не
+    доходит, а префикс самой команды и поздний `export` перекрывают ранний
+    (взгляд на #800).
+    """
+    own = re.match(r"^((?:\w+=(?:\"[^\"]*\"|\S+)\s+)*)", commands[at])
+    prefix = PYTHONPATH_SET.search(own.group(1)) if own else None
+    if prefix:
+        return prefix.group(1)
+    value = ""
+    for command in commands[:at]:
+        if command.startswith("export "):
+            found = PYTHONPATH_SET.search(command)
+            if found:
+                value = found.group(1)
+    return value
+
+
+def test_the_effective_pythonpath_is_read_per_step() -> None:
+    """Префикс команды побеждает `export`, поздний `export` — ранний, чужого шага нет."""
+    base = '"$RUNNER_TEMP/base/packages/transport"'
+    run = f"export PYTHONPATH={base}\nPYTHONPATH=packages/transport python x.py\n"
+    assert effective_pythonpath(commands_of(run), 1) == "packages/transport"
+    run = f"export PYTHONPATH={base}\nexport PYTHONPATH=packages/transport\npython x.py\n"
+    assert effective_pythonpath(commands_of(run), 2) == "packages/transport"
+    run = f"export PYTHONPATH={base}\npython \\\n  x.py\n"
+    assert effective_pythonpath(commands_of(run), 1) == base
+    assert effective_pythonpath(commands_of("python x.py\n"), 0) == ""
+
+
 def test_the_map_code_runs_from_the_shared_branch() -> None:
     """Читатель карты исполняется из развёрнутой базы, а не из головы изменения.
 
@@ -675,29 +735,24 @@ def test_the_map_code_runs_from_the_shared_branch() -> None:
     """
     text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
     lines = text.splitlines()
-    calls = [
-        at
-        for at, line in enumerate(lines)
-        if "review_map.py" in line and not line.strip().startswith("#")
-    ]
-    assert len(calls) == 2, f"вызовов карты не два (ревью и поздний взгляд): {len(calls)}"
-    for at in calls:
-        line = lines[at]
-        assert '"$RUNNER_TEMP/base/scripts/review_map.py"' in line, (
-            f"карта исполняется не из базы: {line.strip()}"
-        )
-        # Путь импорта ищется во ВСЕЙ команде — от строки вызова назад по
-        # продолжениям `\` — и в `export` до неё, а не строго строкой выше:
-        # та же защита, записанная иначе, не должна краснеть (взгляд на #797).
-        start = at
-        while start > 0 and lines[start - 1].rstrip().endswith("\\"):
-            start -= 1
-        command = " ".join(lines[start : at + 1])
-        exported = [one for one in lines[:at] if one.strip().startswith("export PYTHONPATH=")]
-        base_path = 'PYTHONPATH="$RUNNER_TEMP/base/packages/transport"'
-        assert base_path in command or any(base_path in one for one in exported), (
-            "транспорт карты берётся из головы изменения"
-        )
+    base_path = '"$RUNNER_TEMP/base/packages/transport"'
+    calls = 0
+    for job in (load(WORKFLOWS / "review.yml").get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            commands = commands_of(str(step.get("run") or ""))
+            for at, command in enumerate(commands):
+                if "review_map.py" not in command:
+                    continue
+                calls += 1
+                assert '"$RUNNER_TEMP/base/scripts/review_map.py"' in command, (
+                    f"карта исполняется не из базы: {command}"
+                )
+                # Действующий путь импорта — в ОБОЛОЧКЕ ЭТОГО ШАГА: префикс
+                # команды или последний `export` перед ней (взгляды на #797, #800).
+                assert effective_pythonpath(commands, at) == base_path, (
+                    "транспорт карты берётся из головы изменения"
+                )
+    assert calls == 2, f"вызовов карты не два (ревью и поздний взгляд): {calls}"
     worktrees = [line for line in lines if "git worktree add" in line]
     assert len(worktrees) == 2 and all('"$RUNNER_TEMP/base" FETCH_HEAD' in w for w in worktrees), (
         "база не разворачивается рядом из подтянутой ветки"
@@ -1438,7 +1493,24 @@ SHALLOW_FETCH_EXEMPT: dict[tuple[str, str], str] = {
     ),
 }
 
-SHALLOW_FETCH = re.compile(r"\bgit\s+fetch\b[^#\n]*--depth")
+#: Вся семья флагов, делающих клон мелким, а не один `--depth` (взгляд на #793).
+SHALLOW_FETCH = re.compile(r"\bgit\s+fetch\b.*--(?:depth|deepen|shallow-since|shallow-exclude)\b")
+
+
+def asks_full_history(steps: list[dict[str, Any]]) -> bool:
+    """Просит ли джоб полную историю: `fetch-depth` равен нулю в ЛЮБОЙ записи.
+
+    `0`, `'0'` и `"0"` — одно значение для площадки; сравнение с числом
+    пропускало два последних (взгляд на #793).
+    """
+    return any(str((step.get("with") or {}).get("fetch-depth")).strip() == "0" for step in steps)
+
+
+@pytest.mark.parametrize("depth", [0, "0", " 0 "])
+def test_full_history_is_read_in_any_spelling(depth: Any) -> None:
+    """Полная история узнаётся и числом, и строкой."""
+    assert asks_full_history([{"with": {"fetch-depth": depth}}])
+    assert not asks_full_history([{"with": {"fetch-depth": 1}}, {"run": "true"}])
 
 
 def shallow_fetches_in_full_clones() -> list[tuple[str, str, str]]:
@@ -1447,12 +1519,14 @@ def shallow_fetches_in_full_clones() -> list[tuple[str, str, str]]:
     for path in walk(WORKFLOWS, "*.yml"):
         for name, job in (load(path).get("jobs") or {}).items():
             steps = job.get("steps") or []
-            if not any((step.get("with") or {}).get("fetch-depth") == 0 for step in steps):
+            # `fetch-depth` читается В ЛЮБОЙ ЗАПИСИ: `0`, `'0'` и `"0"` — одно
+            # значение для площадки (взгляд на #793).
+            if not asks_full_history(steps):
                 continue
             for step in steps:
-                for line in str(step.get("run") or "").splitlines():
-                    if not line.strip().startswith("#") and SHALLOW_FETCH.search(line):
-                        found.append((path.name, str(name), line.strip()))
+                for command in commands_of(str(step.get("run") or "")):
+                    if SHALLOW_FETCH.search(command):
+                        found.append((path.name, str(name), command))
     return found
 
 
@@ -1477,3 +1551,25 @@ def test_the_shallow_fetch_gate_has_a_subject() -> None:
     assert set(SHALLOW_FETCH_EXEMPT) <= seen, (
         f"исключения без предмета: {set(SHALLOW_FETCH_EXEMPT) - seen}"
     )
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "git fetch --depth=1 origin main\n",
+        "git fetch --no-tags \\\n  --depth=1 origin main\n",
+        "git fetch --deepen=1 origin main\n",
+        "git fetch --shallow-since=2026-01-01 origin main\n",
+        "git fetch --shallow-exclude=v1 origin main\n",
+    ],
+    ids=["depth", "перенос", "deepen", "shallow-since", "shallow-exclude"],
+)
+def test_every_shallow_form_is_seen(run: str) -> None:
+    """Мелкую выборку видно в любой записи команды и любым флагом семьи (взгляд на #793)."""
+    assert any(SHALLOW_FETCH.search(one) for one in commands_of(run))
+
+
+def test_a_full_fetch_is_not_shallow() -> None:
+    """Выборка без флагов мелкости — не мелкая; комментарий — не команда."""
+    run = "# git fetch --depth=1 — так нельзя\ngit fetch --no-tags origin main\n"
+    assert not any(SHALLOW_FETCH.search(one) for one in commands_of(run))
