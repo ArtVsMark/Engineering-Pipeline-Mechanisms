@@ -647,7 +647,8 @@ def name_the_stuck_head(
             "",
             f"Прогон взгляда [{run}](https://github.com/{repo}/actions/runs/{run}) на голове "
             f"`{change.head[:12]}` пропущен воротами и уже перезапускался (попыток: {attempt}). "
-            f"Очередь перезапускает пропущенный взгляд не больше {OWED_RERUNS} раза (#762), "
+            f"Перезапусков пропущенного взгляда от очереди на голову — не больше {OWED_RERUNS} "
+            "(#762), "
             "поэтому голова ждёт без срока и сама не сольётся.",
             "",
             "**Что сделать — надёжно:** толкнуть новую голову, и взгляд позовёт сам толчок. "
@@ -1371,9 +1372,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         owed = owed_look(repo, change, owner_token) if not repair else ""
         if owed:
             if change.armed:
-                take_back(
-                    repo, change, "взгляд пропущен на красной голове", owner_token, dry_run=dry_run
-                )
+                take_back(repo, change, "взгляд пропущен воротами", owner_token, dry_run=dry_run)
                 queue = [
                     replace(one, armed=False) if one.number == change.number else one
                     for one in queue
@@ -1383,11 +1382,15 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 said = (
                     "перезапущен, не взвожу (#762)"
                     if called
-                    else "перезапуск отказал, не взвожу (#762)"
+                    # `False` значит и предел перезапусков, и отказ площадки:
+                    # какой из двух, сказано `::warning` этого захода о том же
+                    # прогоне — не обязательно соседней строкой, — и здесь
+                    # причина не угадывается (взгляды на #806, #812).
+                    else f"не перезапущен — причина в ::warning о прогоне {owed}, не взвожу (#762)"
                 )
             else:
                 said = "перезапуск — когда голова позеленеет, не взвожу (#762)"
-            print(f"#{change.number}: взгляд пропущен, пока голова была красной — {said}")
+            print(f"#{change.number}: взгляд пропущен воротами — {said}")
             skipped["ждут пропущенного взгляда"] += 1
             continue
         if state == STATE_ARMABLE:
