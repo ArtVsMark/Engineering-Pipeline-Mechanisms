@@ -1867,7 +1867,10 @@ def test_a_head_at_the_rerun_limit_is_named_on_the_change_once(
     assert [path for _, path, _ in posts] == ["repos/o/r/issues/1/comments"]
     body = posts[0][2]["body"]
     assert module.STUCK_MARKER.format(head=head.head) in body
-    assert "777" in body and "перезапустить" in body
+    assert "https://github.com/o/r/actions/runs/777" in body, (
+        "ссылка не должна зависеть от страницы"
+    )
+    assert "толкнуть новую голову" in body and "попыток: 2" in body
 
 
 def test_a_named_head_is_not_named_again(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1944,3 +1947,19 @@ def test_a_dry_run_names_the_head_without_writing(
     module.name_the_stuck_head("o/r", head, "777", 2, "t", dry_run=True)
     assert [one for one in asked if one[0] == "POST"] == []
     assert "назвал бы на #1" in capsys.readouterr().out
+
+
+def test_an_unread_feed_is_named_and_nothing_is_written(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ленту не прочитать — оклик не пишется вслепую, и это названо (084)."""
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+    asked = stuck_platform(monkeypatch, [])
+
+    def refused(path: str, tok: str, **_: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "paginate", refused)
+    module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head)
+    assert [one for one in asked if one[0] == "POST"] == [], "оклик вслепую мог бы повториться"
+    assert "ленту не прочитать" in capsys.readouterr().out
