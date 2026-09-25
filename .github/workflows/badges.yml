@@ -21,6 +21,11 @@ on:
     branches: [main]
   # У события всегда есть ручная кнопка: события теряются (правило 104).
   workflow_dispatch:
+    inputs:
+      reread:
+        description: "перечитать снятия учтённых изменений из истории main (#820)"
+        type: boolean
+        default: false
 
 permissions:
   # Право на запись нужно ровно на толчок в производную ветку. Таких прогонов в
@@ -143,11 +148,16 @@ jobs:
         id: archive
         env:
           GH_TOKEN: ${{ github.token }}
+          # Кнопка перечитки идёт окружением, а не подстановкой в текст команды (085).
+          REREAD: ${{ inputs.reread }}
         run: |
           set -uo pipefail
           out="${RUNNER_TEMP}/badges/.github/badges/findings.json"
           prev="${RUNNER_TEMP}/findings-prev.json"
           args=()
+          # Перечитка — только по кнопке: история читается целиком, и на каждом
+          # толчке в main она не нужна (#820).
+          if [ "${REREAD:-}" = "true" ]; then args+=(--reread); fi
           if git fetch --quiet --depth=1 origin badges; then
             # «ФАЙЛА НЕТ» И «ФАЙЛ НЕ ПРОЧИТАН» — ТА ЖЕ РАЗВИЛКА, ЧТО У ВЕТКИ НИЖЕ.
             # Отказ `git show` не говорит, какой из двух: прежняя редакция
