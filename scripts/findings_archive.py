@@ -313,7 +313,7 @@ def merged_messages(log: str) -> list[tuple[int, str]]:
 
 
 def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: set[int]) -> int:
-    """Дописывает снятия из тел уже учтённых изменений; отдаёт число новых.
+    """Дописывает снятия из тел уже учтённых изменений; отдаёт число новых и дополненных.
 
     ЗАЧЕМ. До #809 архив разбирал строку снятия своим образцом и брал один
     отпечаток: у «Разобрано: A, C» и «A дубль C» отпечаток C терялся, а
@@ -322,11 +322,17 @@ def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: se
     Находки не перечитываются — только снятия, и снятие ставится
     `setdefault`: повторная перечитка ничего не меняет.
     """
-    before = len(archive["resolutions"])
+    before = {mark: said["twin_of"] for mark, said in archive["resolutions"].items()}
     for number, message in messages:
         if number in counted:
             add_change(archive, number, [], message)
-    return len(archive["resolutions"]) - before
+    # Считается и связь, дописанная к старому снятию: иначе «второй проход —
+    # ни одного» доказывал бы неизменность ключей, а не архива (взгляд на #849).
+    return sum(
+        1
+        for mark, said in archive["resolutions"].items()
+        if mark not in before or before[mark] != said["twin_of"]
+    )
 
 
 def git_log(where: Path | None = None) -> str:
