@@ -172,3 +172,15 @@ def test_read_archive_refuses_a_scalar_where_a_list_is(tmp_path: Path) -> None:
         path.write_text(said, encoding="utf-8")
         with pytest.raises(ValueError, match="не список"):
             module.read_archive(path)
+
+
+@pytest.mark.parametrize(
+    "said",
+    ['{"findings": []}', '{"findings": ""}', '{"findings": 0}', '{"counted": 0}', '{"gaps": ""}'],
+)
+def test_read_archive_refuses_a_false_scalar(tmp_path: Path, said: str) -> None:
+    """Ложный скаляр — тоже чужая форма, а не пустой архив (взгляд на #822)."""
+    path = tmp_path / "findings.json"
+    path.write_text(said, encoding="utf-8")
+    with pytest.raises(ValueError):
+        module.read_archive(path)

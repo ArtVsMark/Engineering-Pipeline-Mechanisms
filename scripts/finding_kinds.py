@@ -260,6 +260,10 @@ def unanswered(kinds: dict[str, Any], queue: str) -> list[tuple[str, int]]:
     ]
 
 
+#: Имя, под которым считаются записи архива без рода.
+NO_KIND: Final = "без рода"
+
+
 def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
     """Род → (находок рода в архиве, снято работой, снято дублем) и строка неполноты (#778).
 
@@ -275,9 +279,9 @@ def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
         raise NotRun(str(exc)) from exc
     found: dict[str, tuple[int, int, int]] = {}
     for entry in (archive.get("findings") or {}).values():
-        name = str(entry.get("род") or "")
-        if not name:
-            continue
+        # Запись без рода не выпадает молча, а считается своей строкой —
+        # тем же путём, что род вне словаря (взгляд на #822).
+        name = str(entry.get("род") or "") or NO_KIND
         total, worked, twinned = found.get(name, (0, 0, 0))
         resolved = bool(entry.get("resolved_by"))
         twin = resolved and bool(entry.get("twin_of"))

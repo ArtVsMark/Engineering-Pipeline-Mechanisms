@@ -373,9 +373,13 @@ def test_a_kind_shows_its_fate_in_the_archive(
     path = tmp_path / "findings.json"
     path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
     # Дубль снят связью, а не работой — отдельным числом (взгляд на #817).
-    assert module.in_archive(path) == ({"подстрока вместо отношения": (3, 1, 1)}, "")
+    # Запись без рода считается своей строкой, а не выпадает (взгляд на #822).
+    found = ({"подстрока вместо отношения": (3, 1, 1), module.NO_KIND: (1, 0, 0)}, "")
+    assert module.in_archive(path) == found
     assert module.main(["--archive", str(path)]) == module.EXIT_OK
-    assert "архив: 3, снято работой 1, дублем 1" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "архив: 3, снято работой 1, дублем 1" in said
+    assert f"род архива вне словаря: {module.NO_KIND} — архив: 1" in said
 
 
 def test_an_unfilled_archive_says_so_in_the_kinds(
