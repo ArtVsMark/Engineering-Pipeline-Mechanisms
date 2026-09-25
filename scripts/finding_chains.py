@@ -94,6 +94,14 @@ EXIT_BROKEN: Final = 2
 
 #: Сколько последних закрытых изменений читать, если не сказано иначе.
 LAST: Final = 100
+#: С какой глубины место называется поимённо: число изменений, на которых оно
+#: получало находки. Навык `build-a-gate` и ответ на 210 ссылаются на это имя,
+#: а не на цифру (209).
+NAMED_FROM: Final = 3
+#: С какой глубины место входит в сводку числом: вторая находка по месту —
+#: порог правила 210. Сводка идёт от неё на ступень глубже `NAMED_FROM`, чтобы
+#: у поимённого списка всегда была своя строка счёта (взгляд на #834).
+COUNTED_FROM: Final = 2
 
 #: Место в начале заголовка находки: путь латиницей, затем двоеточие и номер
 #: строки. Формы — в докстроке модуля: с расширением, без него, с точкой в начале.
@@ -294,19 +302,20 @@ def archive_heading(archive: dict[str, Any], taken: int) -> list[str]:
 
 
 def report(measured: Chains) -> list[str]:
-    """Строки отчёта: числа замера и места, дошедшие до третьего изменения."""
+    """Строки отчёта: числа замера и места, дошедшие до `NAMED_FROM` изменений."""
     lines = [
         f"уникальных находок: {measured.findings} на {measured.changes} изменениях"
         f" (без места: {measured.unplaced})",
         f"мест с находками: {len(measured.places)}",
     ]
     lines += [
-        f"  на {depth} и более изменениях: {len(measured.reached(depth))}" for depth in (2, 3, 4)
+        f"  на {depth} и более изменениях: {len(measured.reached(depth))}"
+        for depth in range(COUNTED_FROM, NAMED_FROM + 2)
     ]
-    lines.append("места на трёх и более изменениях — читать поимённо:")
+    lines.append(f"места на {NAMED_FROM} и более изменениях — читать поимённо:")
     lines += [
         f"  {path}: {', '.join(f'#{pr}' for pr in measured.places[path])}"
-        for path in measured.reached(3)
+        for path in measured.reached(NAMED_FROM)
     ]
     return lines
 

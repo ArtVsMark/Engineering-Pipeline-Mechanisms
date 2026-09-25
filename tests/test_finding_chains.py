@@ -428,6 +428,23 @@ def test_archive_heading_names_the_input_and_the_gap() -> None:
     assert lines[0].startswith("вход: архив находок, 3 слитых") and gap in lines[1]
 
 
+def test_named_places_follow_the_constant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Глубина поимённого списка — `NAMED_FROM`, а не цифра в отчёте (взгляд на #834, 209)."""
+    measured = module.Chains(3, 2, 0, {"a.py": [1, 2], "b.py": [1]})
+    assert "  a.py: #1, #2" not in module.report(measured)
+    monkeypatch.setattr(module, "NAMED_FROM", 2)
+    lines = module.report(measured)
+    assert "места на 2 и более изменениях — читать поимённо:" in lines
+    assert "  a.py: #1, #2" in lines
+    # Сводка идёт за константами: строка счёта есть у каждой глубины поимённого
+    # списка, как бы его ни сдвинули.
+    monkeypatch.setattr(module, "NAMED_FROM", 5)
+    monkeypatch.setattr(module, "COUNTED_FROM", 1)
+    lines = module.report(measured)
+    assert "  на 1 и более изменениях: 2" in lines
+    assert "  на 5 и более изменениях: 0" in lines
+
+
 def test_a_verifier_answer_is_not_counted_as_a_look(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
