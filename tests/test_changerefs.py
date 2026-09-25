@@ -757,3 +757,43 @@ def test_a_twin_line_travels_to_the_change_body_in_its_own_form() -> None:
     assert str(record) == "Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так"
     (again,) = changerefs.resolutions_parsed(str(record))
     assert again.marks == record.marks and again.twin_of == record.twin_of
+
+
+def test_the_squash_body_keeps_the_twin_form() -> None:
+    """Тело уплотнения несёт «дубль»: архив на общей ветке читает связь оттуда (#809)."""
+    said = changerefs.resolutions_in_all(
+        ["Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так", "Разобрано: aaaaaaa — повтор"]
+    )
+    assert said == ["Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так"]
+    (record,) = changerefs.resolutions_parsed(said[0])
+    assert record.twin_of == {"aaaaaaa": "bbbbbbb", "ccccccc": "bbbbbbb"}
+
+
+def test_a_twin_already_resolved_keeps_its_link() -> None:
+    """Цель «дубль», снятая раньше голой строкой, остаётся в строке (взгляд на #814).
+
+    Выпади она — «Разобрано: A» приехала бы без связи, и архив записал бы A
+    без `twin_of`.
+    """
+    said = changerefs.resolutions_in_all(["Разобрано: bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"])
+    assert said == ["Разобрано: bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"]
+    (record,) = changerefs.resolutions_parsed(said[1])
+    assert record.twin_of == {"aaaaaaa": "bbbbbbb"}
+
+
+def test_a_resolved_middle_of_a_chain_does_not_rewrite_it() -> None:
+    """Снятое звено посреди цепочки не сводит её в связь, которой не писали."""
+    said = changerefs.resolutions_in_all(
+        ["Разобрано: bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb дубль ccccccc"]
+    )
+    (record,) = changerefs.resolutions_parsed(said[1])
+    assert record.twin_of.get("aaaaaaa") != "ccccccc", said
+    assert "bbbbbbb" in record.marks
+
+
+def test_a_fully_repeated_twin_line_is_dropped() -> None:
+    """Строка, где сняты уже все отпечатки, не едет повтором."""
+    said = changerefs.resolutions_in_all(
+        ["Разобрано: aaaaaaa дубль bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"]
+    )
+    assert said == ["Разобрано: aaaaaaa дубль bbbbbbb"]
