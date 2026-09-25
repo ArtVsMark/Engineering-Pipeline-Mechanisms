@@ -886,7 +886,11 @@ def test_a_look_skipped_on_a_red_head_is_named_not_silent() -> None:
 
 def late_answer(day: str) -> dict[str, Any]:
     """Ответ позднего взгляда в ленте: отметка и вердикт."""
-    return {"body": f"{module.LATE_MARKER}\nВЕРДИКТ: находок 2", "created_at": f"{day}T12:00:00Z"}
+    return {
+        "user": {"type": "Bot"},
+        "body": f"{module.LATE_MARKER}\nВЕРДИКТ: находок 2",
+        "created_at": f"{day}T12:00:00Z",
+    }
 
 
 def test_a_late_look_is_seen_in_the_feed_by_its_marker() -> None:
@@ -896,8 +900,15 @@ def test_a_late_look_is_seen_in_the_feed_by_its_marker() -> None:
     реестре, и лента обязана вернуть ту же отметку, если её стёрла гонка.
     """
     assert module.late_seen([late_answer("2026-09-24")]) == "2026-09-24"
-    unanswered = {"body": module.LATE_MARKER, "created_at": "2026-09-24T12:00:00Z"}
+    unanswered = {
+        "user": {"type": "Bot"},
+        "body": module.LATE_MARKER,
+        "created_at": "2026-09-24T12:00:00Z",
+    }
     assert module.late_seen([unanswered]) == "2026-09-24"
+    # Цитата метки человеком — не поздний взгляд (взгляд на #810).
+    quoted = {**unanswered, "user": {"type": "User"}}
+    assert module.late_seen([quoted]) == ""
     assert (
         module.late_seen([{"body": "ВЕРДИКТ: находок 0", "created_at": "2026-09-24T12:00:00Z"}])
         == ""

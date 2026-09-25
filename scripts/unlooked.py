@@ -475,10 +475,15 @@ def late_seen(comments: list[dict[str, Any]]) -> str:
     гонке, из ленты не восстанавливался (взгляд на #790). Два понимания одного
     события расходились бы молча (090).
     """
+    # ТОЛЬКО КОММЕНТАРИЙ БОТА: метку пишет `late_look.py` прогоном, а строку
+    # константы может процитировать и человек — тогда запись снялась бы без
+    # взгляда (взгляд на #810). Признак тот же, что у очереди слияний и у
+    # замера цепочек (090).
     days = [
         str(comment.get("created_at") or "")[:10]
         for comment in comments
         if LATE_MARKER in (comment.get("body") or "")
+        and (comment.get("user") or {}).get("type") == "Bot"
     ]
     return max(days, default="")
 
