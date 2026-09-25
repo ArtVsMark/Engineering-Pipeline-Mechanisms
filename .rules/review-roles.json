@@ -5,7 +5,7 @@
   "required": ["тестировщик", "аудитор", "ревизор", "критик метода"],
   "ignored": {"paths": ["changelog.d/*"], "except": ["changelog.d/*.contract.md", "changelog.d/README.md"], "why": "фрагмент журнала приносит почти каждое изменение: роли, которые он звал бы, стали бы обязательными по факту, и граница «обязательные — по контексту» стёрлась бы (взгляд на #785). Релиз-инженера зовут файлы выпуска и фрагмент, двигающий контракт (`except`), а не любой фрагмент"},
   "by_path": [
-    {"paths": ["docs/*", "*.md", ".claude/skills/*"], "roles": ["техписатель", "редактор"]},
+    {"paths": ["docs/*", "*.md", ".claude/skills/*", "changelog.d/README.md"], "roles": ["техписатель", "редактор"]},
     {"paths": ["docs/behaviour.md", "docs/pipeline.md", "docs/decisions/*", ".rules/*", ".pipeline.yml"], "roles": ["архитектор"]},
     {"paths": [".github/workflows/*", ".github/actions/*"], "roles": ["инженер площадки", "безопасность", "эконом прогонов"]},
     {"paths": ["scripts/*", "packages/*", "tests/*"], "roles": ["механик"]},

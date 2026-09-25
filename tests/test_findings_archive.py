@@ -376,13 +376,13 @@ def test_real_git_names_an_absent_file_by_an_empty_listing(tmp_path: Path) -> No
     """
     repo = tmp_path / "r"
 
-    def run(*args: str) -> subprocess.CompletedProcess[str]:
+    def run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
-            check=False,
+            check=check,
         )
 
     subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
@@ -396,14 +396,15 @@ def test_real_git_names_an_absent_file_by_an_empty_listing(tmp_path: Path) -> No
         "--allow-empty",
         "-m",
         "пусто",
+        check=True,
     )
     path = ".github/badges/findings.json"
     empty = run("ls-tree", "-z", "--name-only", "HEAD", "--", path)
     assert (empty.returncode, empty.stdout) == (0, ""), "отсутствие файла не пустой ответ"
     (repo / ".github/badges").mkdir(parents=True)
     (repo / path).write_text("{}", encoding="utf-8")
-    run("add", path)
-    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "архив")
+    run("add", path, check=True)
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "архив", check=True)
     listed = run("ls-tree", "-z", "--name-only", "HEAD", "--", path)
     assert listed.returncode == 0 and listed.stdout.rstrip("\0") == path
     broken = run("ls-tree", "-z", "--name-only", "нет-такой-ревизии", "--", path)

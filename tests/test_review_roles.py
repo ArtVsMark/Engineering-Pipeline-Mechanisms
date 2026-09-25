@@ -49,7 +49,9 @@ def test_required_roles_are_the_checking_kind() -> None:
         (["scripts/x.py", "changelog.d/x.fixed.md"], {"механик"}),
         (["scripts/release.py"], {"механик", "релиз-инженер"}),
         (["changelog.d/x.contract.md"], {"релиз-инженер"}),
-        (["changelog.d/README.md"], {"релиз-инженер"}),
+        # Правила записи фрагментов — документ о выпуске: зовёт и тех, кто
+        # смотрит документы, и релиз-инженера (взгляд на #801).
+        (["changelog.d/README.md"], {"релиз-инженер", "техписатель", "редактор"}),
         (["tests/fixtures/x.md"], {"механик"}),
         (["docs/decisions/001-x.md"], {"техписатель", "редактор", "архитектор"}),
         (["README.md"], {"техписатель", "редактор"}),
