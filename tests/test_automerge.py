@@ -1837,3 +1837,129 @@ def test_an_armed_head_that_owes_a_look_is_taken_back_before_its_verdict(
     # Отличает держание не снятие, а то, что голову не взвели снова.
     assert platform["asked"] == [], "голова без взгляда взведена заново"
     assert platform["rerun"] == []
+
+
+def stuck_platform(
+    monkeypatch: pytest.MonkeyPatch, said: list[dict[str, Any]], attempt: int = 2
+) -> list[tuple[str, str, Any]]:
+    """Площадка для оклика: лента изменения и запись запросов."""
+    asked: list[tuple[str, str, Any]] = []
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> Any:
+        asked.append((method, path, body))
+        if method == "GET":
+            return {"run_attempt": attempt}
+        return None
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, **_: iter(said))
+    return asked
+
+
+def test_a_head_at_the_rerun_limit_is_named_on_the_change_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Голова в пределе перезапусков получает один оклик на изменении (#805)."""
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+    asked = stuck_platform(monkeypatch, [])
+    assert module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head) is False
+    posts = [one for one in asked if one[0] == "POST"]
+    assert [path for _, path, _ in posts] == ["repos/o/r/issues/1/comments"]
+    body = posts[0][2]["body"]
+    assert module.STUCK_MARKER.format(head=head.head) in body
+    assert "https://github.com/o/r/actions/runs/777" in body, (
+        "ссылка не должна зависеть от страницы"
+    )
+    assert "толкнуть новую голову" in body and "попыток: 2" in body
+
+
+def test_a_named_head_is_not_named_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Повторный заход по той же голове второй оклик не пишет."""
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+    said = [{"body": module.STUCK_MARKER.format(head=head.head) + "\nуже названа"}]
+    asked = stuck_platform(monkeypatch, said)
+    module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head)
+    assert [one for one in asked if one[0] == "POST"] == []
+
+
+def test_a_new_head_at_the_limit_gets_its_own_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Оклик прежней головы новую не глушит: метка несёт голову."""
+    old = module.STUCK_MARKER.format(head="0000000old")
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+    asked = stuck_platform(monkeypatch, [{"body": old}])
+    module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head)
+    assert len([one for one in asked if one[0] == "POST"]) == 1
+
+
+def test_a_refused_call_is_named_and_does_not_break_the_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ площадки при записи назван в логе, заход идёт дальше (084)."""
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET":
+            return {"run_attempt": 2}
+        raise module.ghrest.TransportError("403")
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, **_: iter([]))
+    assert module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head) is False
+    assert "оклик о голове без взгляда не записан" in capsys.readouterr().out
+
+
+def test_a_head_below_the_limit_is_not_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пока перезапуск зовётся, оклика нет: он — про предел, а не про пропуск."""
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+    asked = stuck_platform(monkeypatch, [], attempt=1)
+    assert module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head) is True
+    assert [path for m, path, _ in asked if m == "POST"] == ["repos/o/r/actions/runs/777/rerun"]
+
+
+def test_the_queue_names_a_head_at_the_limit(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Заход очереди передаёт голову до оклика: зелёная голова в пределе названа (#805)."""
+    platform["changes"] = [replace(change(1, "automerge"), head="abcdef1234567890")]
+    platform["owed"] = {1: "777"}
+    posted: list[str] = []
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET" and "/actions/runs/" in path:
+            return {"run_attempt": 2}
+        if method == "POST" and path.endswith("/comments"):
+            posted.append(path)
+        return {"sha": "base-sha"}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, **_: iter([]))
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert posted == ["repos/o/r/issues/1/comments"], "голова в пределе не названа на изменении"
+    assert platform["asked"] == [], "голова без взгляда взведена"
+
+
+def test_a_dry_run_names_the_head_without_writing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пробный заход говорит, что назвал бы голову, и ничего не пишет."""
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+    asked = stuck_platform(monkeypatch, [])
+    module.name_the_stuck_head("o/r", head, "777", 2, "t", dry_run=True)
+    assert [one for one in asked if one[0] == "POST"] == []
+    assert "назвал бы на #1" in capsys.readouterr().out
+
+
+def test_an_unread_feed_is_named_and_nothing_is_written(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ленту не прочитать — оклик не пишется вслепую, и это названо (084)."""
+    head = replace(change(1, "automerge"), head="abcdef1234567890")
+    asked = stuck_platform(monkeypatch, [])
+
+    def refused(path: str, tok: str, **_: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "paginate", refused)
+    module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head)
+    assert [one for one in asked if one[0] == "POST"] == [], "оклик вслепую мог бы повториться"
+    assert "ленту не прочитать" in capsys.readouterr().out
