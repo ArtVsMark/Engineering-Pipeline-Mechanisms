@@ -1819,3 +1819,21 @@ def test_an_owed_look_is_not_asked_before_the_head_is_green(platform: dict[str, 
     platform["owed"] = {1: "777"}
     module.advance("o/r", "token", "main", dry_run=False)
     assert platform["rerun"] == [], "взгляд перезапущен раньше вердикта проверок"
+    # Голова, которая должна взгляд, не взводится и до вердикта: иначе площадка
+    # сольёт её без взгляда, как только проверки позеленеют (взгляд на #784).
+    assert platform["asked"] == [], "голова без взгляда взведена"
+
+
+def test_an_armed_head_that_owes_a_look_is_taken_back_before_its_verdict(
+    platform: dict[str, Any],
+) -> None:
+    """Взведённая голова с идущими проверками, которая должна взгляд, снимается (#654)."""
+    platform["changes"] = [change(1, "automerge", armed=True)]
+    platform["states"] = {1: module.STATE_ARMABLE}
+    platform["owed"] = {1: "777"}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["disarmed"] == ["PR_1"], "взведённая голова без взгляда оставлена площадке"
+    # `hand_over` тоже снимает взведение — чтобы взвести заново свежим телом.
+    # Отличает держание не снятие, а то, что голову не взвели снова.
+    assert platform["asked"] == [], "голова без взгляда взведена заново"
+    assert platform["rerun"] == []
