@@ -55,6 +55,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+import changerefs
 import finding_chains
 import finding_kinds
 import findings as registry
@@ -82,12 +83,6 @@ VERIFIER_GAP: Final = (
     "ответы верификатора у находок, ушедших из реестра до первого захода архива, неизвестны"
 )
 
-#: Строка снятия находки в теле слитого изменения — тот же ключ, что у реестра.
-RESOLVED_RE: Final = re.compile(
-    r"^\s*Разобрано:\s*`?(?P<mark>[0-9a-f]{7})`?(?:\s+дубль\s+`?(?P<twin>[0-9a-f]{7})`?)?",
-    re.M,
-)
-
 
 class NotRun(RuntimeError):
     """Архив не собран: третий исход, а не «находок нет»."""
@@ -105,8 +100,19 @@ def previous(path: Path | None) -> dict[str, Any]:
 
 
 def resolved_in(message: str) -> dict[str, str]:
-    """Отпечаток → дубль из строк `Разобрано:`; у самостоятельной находки дубль пуст."""
-    return {found["mark"]: found["twin"] or "" for found in RESOLVED_RE.finditer(message)}
+    """Отпечаток → дубль из строк `Разобрано:`; у самостоятельной находки дубль пуст.
+
+    РАЗБОР ОДИН НА ВСЕХ ЧИТАТЕЛЕЙ СТРОКИ — `changerefs`. Свой образец архива
+    брал перед «дубль» ровно один отпечаток, не знал регистра и цепочек, и
+    реестр с архивом читали одну строку по-разному: реестр снимал B, архив —
+    нет (взгляд на #809, 090). Снята каждая находка строки, дубль — связь.
+    """
+    found: dict[str, str] = {}
+    for record in changerefs.resolutions_parsed(message):
+        twins = record.twin_of
+        for mark in record.marks:
+            found.setdefault(mark, twins.get(mark, ""))
+    return found
 
 
 def kinds_by_mark(kinds: dict[str, Any]) -> dict[str, str]:
