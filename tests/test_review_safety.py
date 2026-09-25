@@ -649,7 +649,12 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
     смотреть (085).
     """
     text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
-    calls = [line for line in text.splitlines() if "review_map.py" in line]
+    # Комментарий, называющий скрипт, вызовом не является.
+    calls = [
+        line
+        for line in text.splitlines()
+        if "review_map.py" in line and not line.strip().startswith("#")
+    ]
     assert calls, "карта не собирается вовсе"
     for line in calls:
         words = line.split()
@@ -658,6 +663,36 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
         # `FETCH_HEAD` — это база, подтянутая шагом; `HEAD` — голова изменения.
         # Разница здесь и есть весь смысл проверки, поэтому сравнение точное.
         assert base != "HEAD", f"карта взята из головы изменения: {line.strip()}"
+
+
+def test_the_map_code_runs_from_the_shared_branch() -> None:
+    """Читатель карты исполняется из развёрнутой базы, а не из головы изменения.
+
+    Данные с базы не спасают, если их читает код головы: изменение, правящее
+    `review_map.py`, само писало раздел ролей для своей проверки (поздний
+    взгляд на #785). Соседний случай — ответ каталогу тем же кодом, и гейт
+    держит оба вызова разом (195).
+    """
+    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    calls = [
+        at
+        for at, line in enumerate(lines)
+        if "review_map.py" in line and not line.strip().startswith("#")
+    ]
+    assert len(calls) == 2, f"вызовов карты не два (ревью и поздний взгляд): {len(calls)}"
+    for at in calls:
+        line = lines[at]
+        assert '"$RUNNER_TEMP/base/scripts/review_map.py"' in line, (
+            f"карта исполняется не из базы: {line.strip()}"
+        )
+        assert 'PYTHONPATH="$RUNNER_TEMP/base/packages/transport"' in lines[at - 1], (
+            "транспорт карты берётся из головы изменения"
+        )
+    worktrees = [line for line in lines if "git worktree add" in line]
+    assert len(worktrees) == 2 and all('"$RUNNER_TEMP/base" FETCH_HEAD' in w for w in worktrees), (
+        "база не разворачивается рядом из подтянутой ветки"
+    )
 
 
 def test_the_registry_is_swept_outside_a_review() -> None:
