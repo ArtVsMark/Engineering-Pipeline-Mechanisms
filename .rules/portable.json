@@ -362,7 +362,8 @@
       "answer": "configured",
       "where": [
         ".rules/finding-kinds.json",
-        ".rules/proposals.json"
+        ".rules/proposals.json",
+        "docs/decisions"
       ]
     },
     "scripts/check_rule_links.py": {
@@ -430,7 +431,8 @@
     "scripts/findings.py": {
       "answer": "configured",
       "where": [
-        ".rules/bindings.json"
+        ".rules/bindings.json",
+        "docs/roles.md"
       ]
     },
     "scripts/findings_archive.py": {
