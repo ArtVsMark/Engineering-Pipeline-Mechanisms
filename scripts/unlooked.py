@@ -240,6 +240,15 @@ def is_run_answer(comment: dict[str, Any]) -> bool:
     return is_late_look(comment) or (author == LATE_AUTHOR and body.startswith(VERIFY_MARKER))
 
 
+def is_verification(comment: dict[str, Any]) -> bool:
+    """Это ответ верификатора: автор-прогон и метка верификатора первой строкой.
+
+    Отдельно от `is_run_answer` для читателя, который поздний взгляд считает
+    намеренно, а верификатора — нет: замер цепочек (взгляд на #827).
+    """
+    return is_run_answer(comment) and not is_late_look(comment)
+
+
 #: Хвост записи, которым поздний взгляд ДОПИСЫВАЕТСЯ к состоянию, а не заменяет
 #: его. Пока он заменял, после позднего взгляда узнать, ПОЧЕМУ изменение попало
 #: в реестр, было нечем — а это и есть мера надёжности канала.

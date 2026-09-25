@@ -426,3 +426,17 @@ def test_archive_heading_names_the_input_and_the_gap() -> None:
     gap = f"{module.findings.UNFILLED}: не учтено слитых изменений — 2"
     lines = module.archive_heading({"gaps": ["другое", gap]}, 3)
     assert lines[0].startswith("вход: архив находок, 3 слитых") and gap in lines[1]
+
+
+def test_a_verifier_answer_is_not_counted_as_a_look(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ответ верификатора с процитированной находкой в замер не идёт (взгляд на #827)."""
+    late_look = load_script("late_look.py")
+    answer = {
+        "user": {"type": "Bot", "login": module.unlooked.LATE_AUTHOR},
+        "body": late_look.compose_verification("ПРЕМИСА: да\nНАХОДКА[риск]: b.py:1 — цитата"),
+    }
+    platform(monkeypatch, {9: [answer, look("a.py:1 — раз")]})
+    assert module.main(["--repo", "o/r", "--from", "9", "--to", "9"]) == module.EXIT_OK
+    assert "уникальных находок: 1" in capsys.readouterr().out
