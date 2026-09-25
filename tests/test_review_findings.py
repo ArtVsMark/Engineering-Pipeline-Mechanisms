@@ -1592,12 +1592,3 @@ def test_an_answer_finding_is_no_twin_of_a_code_finding() -> None:
         module.fingerprint(TWIN_B): module.findings.Entry(1, "риск", TWIN_B, kind=answer),
     }
     assert module.twins_of_resolved({module.fingerprint(TWIN_A)}, entries) == {}
-
-
-def test_a_held_finding_is_no_twin() -> None:
-    """Запись с отвергнутым снятием не уходит дублем того же захода (#818)."""
-    entries = {
-        module.fingerprint(one): module.findings.Entry(1, "риск", one) for one in (TWIN_A, TWIN_B)
-    }
-    held = frozenset({module.fingerprint(TWIN_B)})
-    assert module.drop_resolved(dict(entries), {module.fingerprint(TWIN_A)}, held=held) == {}

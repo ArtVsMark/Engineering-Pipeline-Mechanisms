@@ -646,7 +646,6 @@ def twins_of_resolved(
     entries: dict[str, findings.Entry],
     *,
     strict: bool = False,
-    held: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     """Открытые записи, которые — дубли снятых: отпечаток → снятый, чей он дубль.
 
@@ -661,8 +660,10 @@ def twins_of_resolved(
       файл тождеством сам не считается (#657), а без него сходство слов свело
       бы беды разных файлов;
     - тот же род записи: находку об ОТВЕТЕ снимает только правка ответа
-      (`closable`), и дублем находки о коде она не уходит. Запись, чьё снятие
-      отвергнуто (`held`), не уходит дублем вовсе (взгляд на #818).
+      (`closable`), и дублем находки о коде она не уходит (взгляд на #818).
+      Этого хватает и для записи с отвергнутым снятием: она всегда об ответе,
+      а снятая запись того же изменения и рода была бы отвергнута тем же
+      `closable`. Отдельное исключение для неё недостижимо (взгляд на #823).
     """
     # Импорт здесь, а не наверху: `finding_chains` сам читает этот модуль.
     import finding_chains
@@ -670,7 +671,7 @@ def twins_of_resolved(
     found: dict[str, str] = {}
     gone = {mark: entries[mark] for mark in swept if mark in entries}
     for mark, entry in entries.items():
-        if mark in gone or mark in held:
+        if mark in gone:
             continue
         place = finding_chains.place_of(entry.title)
         for was, other in gone.items():
@@ -691,10 +692,9 @@ def drop_resolved(
     swept: set[str],
     *,
     strict: bool = False,
-    held: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     """Убирает снятые записи и их дубли; отдаёт дубли, чтобы их назвать (#807)."""
-    twins = twins_of_resolved(swept, entries, strict=strict, held=held)
+    twins = twins_of_resolved(swept, entries, strict=strict)
     for mark in [*swept, *twins]:
         entries.pop(mark, None)
     return twins
@@ -991,7 +991,7 @@ def main(argv: list[str] | None = None) -> int:
         # заметку, снятую и заново найденную одним заходом.
         marks, swept_to = resolved_marks(args.repo, token, parse_swept(body))
         swept, held = closable(args.repo, token, marks & set(entries), entries)
-        twins = drop_resolved(entries, set(swept), strict=args.strict, held=frozenset(held))
+        twins = drop_resolved(entries, set(swept), strict=args.strict)
         if swept:
             print(f"снято как разобранное: {', '.join(sorted(swept))}")
         for mark, was in sorted(twins.items()):
