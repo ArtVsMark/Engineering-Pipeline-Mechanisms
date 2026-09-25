@@ -91,8 +91,12 @@ def issue_re(issues: list[int]) -> re.Pattern[str]:
     ПРЕДЕЛ НАЗВАН: номер, прибитый СВОЕЙ константой, замер не видит. У
     `WORK_PLAN: Final = 639` и `f"…/issues/{WORK_PLAN}"` номера в строке нет, а
     целые константы замер не читает: их слишком много, и `23` в коде чаще
-    всего не номер задачи. То же у `$ISSUE` в прогоне. Такой механизм держит
-    ответ человека, а не замер (второй взгляд на #799).
+    всего не номер задачи. То же у `$ISSUE` в прогоне и у номера, склеенного
+    из двух констант (`"/issues/" + "639"`): каждая константа по отдельности
+    номера-адреса не несёт. Такой механизм держит ответ человека, а не замер
+    (второй взгляд на #799, взгляд на #802). Пределы закреплены тестом
+    `test_the_named_limits_are_what_the_measure_misses`: расширят замер — тест
+    покраснеет, и эта докстрока не устареет молча.
     """
     return re.compile(
         r"(?:(?<![\w#])#|(?:^|(?<=[\s\"'(])|\.\.|\}|\$\w+|[\"']|%s)/issues/)(?:"
@@ -379,3 +383,21 @@ def test_a_registry_without_a_number_names_why() -> None:
         if not isinstance(value, int) and not (isinstance(value, str) and value.strip())
     }
     assert not wrong, f"реестр без номера и без причины: {wrong}"
+
+
+@pytest.mark.parametrize(
+    ("text", "suffix"),
+    [
+        ('WORK_PLAN: Final = 639\nURL = f"repos/{repo}/issues/{WORK_PLAN}"\n', ".py"),
+        ('URL = "/issues/" + "639"\n', ".py"),
+        ('run: gh api "repos/$REPO/issues/$ISSUE"\n', ".yml"),
+    ],
+    ids=["целая константа", "склейка номера", "переменная номера"],
+)
+def test_the_named_limits_are_what_the_measure_misses(text: str, suffix: str) -> None:
+    """Названные в `issue_re` пределы — ровно то, чего замер не видит (взгляд на #802).
+
+    Тест закрепляет предел, а не требует его: расширят замер — он покраснеет,
+    и докстроку с пределом придётся поправить, а не оставить устаревшей.
+    """
+    assert pinned_in(text, suffix, ["Me/Project"], [], [639]) == []
