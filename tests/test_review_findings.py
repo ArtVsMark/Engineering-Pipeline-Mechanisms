@@ -1209,7 +1209,7 @@ def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {10}})
-    assert not берём and "#10" in держим["abc1234"]
+    assert not берём and f"#10 {module.UNTOUCHED_ONE}" in держим["abc1234"]
 
 
 def test_one_closer_that_edited_the_answer_is_enough(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1220,29 +1220,28 @@ def test_one_closer_that_edited_the_answer_is_enough(monkeypatch: pytest.MonkeyP
     берём, _ = module.closable("o/r", "t", entries, {"abc1234": {20, 30}})
     assert берём == {"abc1234"}
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20, 40}})
-    assert not берём and "#20, #40 не трогали" in держим["abc1234"]
+    assert not берём and f"#20, #40 {module.UNTOUCHED_MANY}" in держим["abc1234"]
 
 
-def test_a_merged_change_without_a_number_is_no_closer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Слитое без номера снявшим не пишется: находку об ответе оно не снимает (#838)."""
+def test_a_merged_change_without_a_number_is_unread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слитое без номера не читается вовсе — как слитое без времени (#838, #843, 210)."""
     page = [
         {
             "merged_at": "2026-09-25T12:00:00Z",
             "closed_at": "2026-09-25T12:00:00Z",
             "body": "Разобрано: abc1234",
-        }
+        },
+        {
+            "number": 7,
+            "merged_at": "2026-09-25T11:30:00Z",
+            "closed_at": "2026-09-25T11:30:00Z",
+            "body": "Разобрано: def5678",
+        },
     ]
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
-    marks, _ = module.resolved_marks("o/r", "t", "2026-09-25T11:00:00Z")
-    assert marks == {"abc1234": {module.UNKNOWN_CLOSER}}
-
-    def нельзя(repo: str, token: str, number: int) -> set[str]:
-        raise AssertionError(f"площадку спросили о #{number}")
-
-    monkeypatch.setattr(module, "touched", нельзя)
-    entries = отметка(10, findings_module.ANSWER_KIND)
-    берём, держим = module.closable("o/r", "t", entries, marks)
-    assert not берём and "снявший без номера неизвестен" in держим["abc1234"]
+    marks, mark = module.resolved_marks("o/r", "t", "2026-09-25T11:00:00Z")
+    assert marks == {"def5678": {7}}
+    assert mark == "2026-09-25T11:30:00Z", "отметка шагнула через слитое без номера"
 
 
 def test_a_code_finding_is_closed_without_asking_the_platform(
@@ -1672,16 +1671,6 @@ def test_is_verification_needs_the_run_author_and_the_first_line() -> None:
     assert not module.is_verification({"user": run, "body": f"цитата {module.VERIFY_MARKER}"})
     late = load_script("unlooked.py").LATE_MARKER
     assert not module.is_verification({"user": run, "body": f"{late}\nда"})
-
-
-def test_a_mixed_refusal_names_the_unknown_closer_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Известный снявший ответа не правил, второй без номера — отказ называет обоих (#843)."""
-    entries = отметка(10, findings_module.ANSWER_KIND)
-    monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
-    by = {"abc1234": {20, module.UNKNOWN_CLOSER}}
-    берём, держим = module.closable("o/r", "t", entries, by)
-    assert not берём
-    assert "#20 не трогало" in держим["abc1234"] and "без номера" in держим["abc1234"]
 
 
 def test_the_sweep_hands_the_closers_to_the_answer_check(
