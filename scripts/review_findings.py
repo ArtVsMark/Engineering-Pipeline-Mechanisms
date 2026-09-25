@@ -837,7 +837,6 @@ def touched(repo: str, token: str, number: int) -> set[str]:
 def closable(
     repo: str,
     token: str,
-    marks: set[str],
     entries: dict[str, findings.Entry],
     by: dict[str, set[int]],
 ) -> tuple[set[str], dict[str, str]]:
@@ -867,7 +866,9 @@ def closable(
     берём: set[str] = set()
     держим: dict[str, str] = {}
     файлы: dict[int, set[str]] = {}
-    for mark in marks:
+    # СНЯТОЕ И СНЯВШИЕ — ОДИН ВХОД: отпечатки выводятся из `by`, и разойтись
+    # двум параметрам больше нечем (взгляд на #838).
+    for mark in sorted(set(by) & set(entries)):
         entry = entries[mark]
         if entry.kind != findings.ANSWER_KIND:
             берём.add(mark)
@@ -879,9 +880,18 @@ def closable(
         if any(not файлы[n] or ANSWER_FILE in файлы[n] for n in снявшие):
             берём.add(mark)
             continue
-        names = ", ".join(f"#{n}" for n in снявшие) or "снявшее изменение"
+        if not снявшие:
+            # СНЯВШИЙ НЕИЗВЕСТЕН — ЭТО НЕ «НЕ ТРОГАЛ»: файлы не спрашивались, и
+            # причина называется как есть (взгляд на #838).
+            держим[mark] = (
+                "находка об ОТВЕТЕ, а снявший неизвестен: у слитого нет номера, "
+                f"и тронуло ли оно {ANSWER_FILE}, спросить не у кого"
+            )
+            continue
+        names = ", ".join(f"#{n}" for n in снявшие)
+        verb = "не трогало" if len(снявшие) == 1 else "не трогали"
         держим[mark] = (
-            f"находка об ОТВЕТЕ, а {names} не трогало {ANSWER_FILE}. "
+            f"находка об ОТВЕТЕ, а {names} {verb} {ANSWER_FILE}. "
             "Ответ каталогу чинится правкой ответа: снятие говорит о работе, которой нет"
         )
     return берём, держим
@@ -1040,7 +1050,7 @@ def main(argv: list[str] | None = None) -> int:
         # Уборка идёт ПОСЛЕ записи, а не вместо: обратный порядок терял бы
         # заметку, снятую и заново найденную одним заходом.
         marks, swept_to = resolved_marks(args.repo, token, parse_swept(body))
-        swept, held = closable(args.repo, token, set(marks) & set(entries), entries, marks)
+        swept, held = closable(args.repo, token, entries, marks)
         twins = drop_resolved(entries, set(swept), strict=args.strict)
         if swept:
             print(f"снято как разобранное: {', '.join(sorted(swept))}")

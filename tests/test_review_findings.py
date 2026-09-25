@@ -1174,7 +1174,7 @@ def test_an_answer_finding_is_not_closed_without_touching_the_answer(
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == set(), "снятие принято при нетронутом ответе"
     assert "abc1234" in держим and module.ANSWER_FILE in держим["abc1234"]
 
@@ -1191,7 +1191,7 @@ def test_an_answer_finding_is_closed_when_the_answer_was_edited(
     monkeypatch.setattr(
         module, "touched", lambda repo, token, number: {module.ANSWER_FILE, "scripts/arm.py"}
     )
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
 
 
@@ -1206,9 +1206,9 @@ def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
     entries = отметка(10, findings_module.ANSWER_KIND)
     files = {10: {"scripts/arm.py"}, 20: {module.ANSWER_FILE}}
     monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {10}})
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {10}})
     assert not берём and "#10" in держим["abc1234"]
 
 
@@ -1217,10 +1217,10 @@ def test_one_closer_that_edited_the_answer_is_enough(monkeypatch: pytest.MonkeyP
     entries = отметка(10, findings_module.ANSWER_KIND)
     files = {20: {"scripts/arm.py"}, 30: {module.ANSWER_FILE}, 40: {"docs/x.md"}}
     monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
-    берём, _ = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20, 30}})
+    берём, _ = module.closable("o/r", "t", entries, {"abc1234": {20, 30}})
     assert берём == {"abc1234"}
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20, 40}})
-    assert not берём and "#20, #40" in держим["abc1234"]
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20, 40}})
+    assert not берём and "#20, #40 не трогали" in держим["abc1234"]
 
 
 def test_a_merged_change_without_a_number_is_no_closer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1241,8 +1241,8 @@ def test_a_merged_change_without_a_number_is_no_closer(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(module, "touched", нельзя)
     entries = отметка(10, findings_module.ANSWER_KIND)
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, marks)
-    assert not берём and "abc1234" in держим
+    берём, держим = module.closable("o/r", "t", entries, marks)
+    assert not берём and "снявший неизвестен" in держим["abc1234"]
 
 
 def test_a_code_finding_is_closed_without_asking_the_platform(
@@ -1259,7 +1259,7 @@ def test_a_code_finding_is_closed_without_asking_the_platform(
         raise AssertionError("файлы спрошены у находки о коде")
 
     monkeypatch.setattr(module, "touched", нельзя)
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
 
 
@@ -1275,7 +1275,7 @@ def test_a_silent_platform_lets_the_resolution_through(
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(module, "touched", lambda repo, token, number: set())
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
 
 
@@ -1672,3 +1672,29 @@ def test_is_verification_needs_the_run_author_and_the_first_line() -> None:
     assert not module.is_verification({"user": run, "body": f"цитата {module.VERIFY_MARKER}"})
     late = load_script("unlooked.py").LATE_MARKER
     assert not module.is_verification({"user": run, "body": f"{late}\nда"})
+
+
+def test_the_sweep_hands_the_closers_to_the_answer_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`main` отдаёт в проверку снявших из `resolved_marks`, а не пустоту (взгляд на #838).
+
+    Находку об ответе нашли на #10, сняло её #20, правившее ответ: запись уходит.
+    Сняло #30, ответа не правившее: запись остаётся и отказ назван.
+    """
+    kept = {
+        "abc1234": findings_module.Entry(10, "дефект", "находка", kind=findings_module.ANSWER_KIND)
+    }
+    files = {20: {module.ANSWER_FILE}, 30: {"scripts/arm.py"}}
+    saved: list[dict[str, Any]] = []
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
+    monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
+    monkeypatch.setattr(module, "save", lambda repo, token, entries, *a, **k: saved.append(entries))
+    for closer, left in ((20, {}), (30, kept)):
+        monkeypatch.setattr(
+            module,
+            "resolved_marks",
+            lambda repo, token, since="", c=closer: ({"abc1234": {c}}, since),
+        )
+        module.main(["--sweep", "--repo", "o/r"])
+        assert set(saved[-1]) == set(left), f"снявший #{closer}: реестр не тот"
