@@ -689,40 +689,77 @@ def commands_of(run: str) -> list[str]:
     return found
 
 
-#: Присваивание `PYTHONPATH` префиксом команды или `export` в шаге.
-PYTHONPATH_SET = re.compile(r"(?:^|\s)(?:export\s+)?PYTHONPATH=(\"[^\"]*\"|\S+)")
+#: Путь импорта карты: база, развёрнутая рядом.
+BASE_TRANSPORT: Final = '"$RUNNER_TEMP/base/packages/transport"'
+#: Вызов карты из базы — общий хвост тестовых случаев.
+MAP_CALL: Final = 'python "$RUNNER_TEMP/base/scripts/review_map.py"'
 
 
-def effective_pythonpath(commands: list[str], at: int) -> str:
-    """Какой `PYTHONPATH` действует у команды `at` в её шаге: префикс, иначе последний `export`.
+def map_path_is_pinned(commands: list[str], at: int) -> str:
+    """Причина, по которой путь импорта карты не закреплён; пусто — закреплён.
 
-    Шаг — отдельная оболочка: `export` из другого шага или джоба сюда не
-    доходит, а префикс самой команды и поздний `export` перекрывают ранний
-    (взгляд на #800).
+    ПРАВИЛО СТРОГОЕ, А НЕ РАЗБОР SHELL. Прежний гейт вычислял «действующий»
+    `PYTHONPATH` и на каждом заходе взгляда пропускал новую форму записи:
+    `export` в другом шаге, перенос строки, затем `;`, `&&`, `env`, `unset`
+    (взгляды на #797 и #800). Каждое расширение разбора рождало следующую
+    дыру. Теперь в шаге карты `PYTHONPATH` упоминается РОВНО ОДИН РАЗ —
+    префиксом самой команды вызова, со значением базы. Любое другое упоминание
+    краснеет, как бы оно ни было записано.
     """
-    own = re.match(r"^((?:\w+=(?:\"[^\"]*\"|\S+)\s+)*)", commands[at])
-    prefix = PYTHONPATH_SET.search(own.group(1)) if own else None
-    if prefix:
-        return prefix.group(1)
-    value = ""
-    for command in commands[:at]:
-        if command.startswith("export "):
-            found = PYTHONPATH_SET.search(command)
-            if found:
-                value = found.group(1)
-    return value
+    said = [command for command in commands if "PYTHONPATH" in command]
+    if said != [commands[at]]:
+        return f"PYTHONPATH упомянут в шаге не только префиксом вызова: {said}"
+    command = commands[at]
+    if not command.startswith(f"PYTHONPATH={BASE_TRANSPORT} "):
+        return f"вызов не начинается с пути импорта базы: {command}"
+    if command.count("PYTHONPATH") != 1:
+        return f"PYTHONPATH упомянут в команде вызова дважды: {command}"
+    return ""
 
 
-def test_the_effective_pythonpath_is_read_per_step() -> None:
-    """Префикс команды побеждает `export`, поздний `export` — ранний, чужого шага нет."""
-    base = '"$RUNNER_TEMP/base/packages/transport"'
-    run = f"export PYTHONPATH={base}\nPYTHONPATH=packages/transport python x.py\n"
-    assert effective_pythonpath(commands_of(run), 1) == "packages/transport"
-    run = f"export PYTHONPATH={base}\nexport PYTHONPATH=packages/transport\npython x.py\n"
-    assert effective_pythonpath(commands_of(run), 2) == "packages/transport"
-    run = f"export PYTHONPATH={base}\npython \\\n  x.py\n"
-    assert effective_pythonpath(commands_of(run), 1) == base
-    assert effective_pythonpath(commands_of("python x.py\n"), 0) == ""
+@pytest.mark.parametrize(
+    ("run", "pinned"),
+    [
+        (f'PYTHONPATH={BASE_TRANSPORT} python "$RUNNER_TEMP/base/scripts/review_map.py"\n', True),
+        (
+            f'PYTHONPATH={BASE_TRANSPORT} \\\n  python "$RUNNER_TEMP/base/scripts/review_map.py"\n',
+            True,
+        ),
+        (
+            f"export PYTHONPATH={BASE_TRANSPORT}\n{MAP_CALL}\n",
+            False,
+        ),
+        (f"PYTHONPATH={BASE_TRANSPORT} unset PYTHONPATH; python x/review_map.py\n", False),
+        (
+            f"unset PYTHONPATH\nPYTHONPATH={BASE_TRANSPORT} {MAP_CALL}\n",
+            False,
+        ),
+        (
+            f"cd . && PYTHONPATH=packages/transport {MAP_CALL}\n",
+            False,
+        ),
+        (
+            f"env PYTHONPATH=packages/transport {MAP_CALL}\n",
+            False,
+        ),
+        ('python "$RUNNER_TEMP/base/scripts/review_map.py"\n', False),
+    ],
+    ids=[
+        "префикс",
+        "префикс с переносом",
+        "export",
+        "unset в команде",
+        "unset в шаге",
+        "&&",
+        "env",
+        "без пути",
+    ],
+)
+def test_the_map_path_is_pinned_only_by_its_own_prefix(run: str, pinned: bool) -> None:
+    """Закреплено только префиксом вызова; любая иная запись краснеет (взгляды на #797, #800)."""
+    commands = commands_of(run)
+    at = next(i for i, one in enumerate(commands) if "review_map.py" in one)
+    assert (map_path_is_pinned(commands, at) == "") is pinned
 
 
 def test_the_map_code_runs_from_the_shared_branch() -> None:
@@ -735,7 +772,6 @@ def test_the_map_code_runs_from_the_shared_branch() -> None:
     """
     text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
     lines = text.splitlines()
-    base_path = '"$RUNNER_TEMP/base/packages/transport"'
     calls = 0
     for job in (load(WORKFLOWS / "review.yml").get("jobs") or {}).values():
         for step in job.get("steps") or []:
@@ -747,11 +783,8 @@ def test_the_map_code_runs_from_the_shared_branch() -> None:
                 assert '"$RUNNER_TEMP/base/scripts/review_map.py"' in command, (
                     f"карта исполняется не из базы: {command}"
                 )
-                # Действующий путь импорта — в ОБОЛОЧКЕ ЭТОГО ШАГА: префикс
-                # команды или последний `export` перед ней (взгляды на #797, #800).
-                assert effective_pythonpath(commands, at) == base_path, (
-                    "транспорт карты берётся из головы изменения"
-                )
+                why = map_path_is_pinned(commands, at)
+                assert not why, f"транспорт карты может браться из головы изменения: {why}"
     assert calls == 2, f"вызовов карты не два (ревью и поздний взгляд): {calls}"
     worktrees = [line for line in lines if "git worktree add" in line]
     assert len(worktrees) == 2 and all('"$RUNNER_TEMP/base" FETCH_HEAD' in w for w in worktrees), (
