@@ -1637,3 +1637,5 @@ def test_is_verification_needs_the_run_author_and_the_first_line() -> None:
         {"user": {"login": "claude[bot]"}, "body": module.VERIFY_MARKER}
     )
     assert not module.is_verification({"user": run, "body": f"цитата {module.VERIFY_MARKER}"})
+    late = load_script("unlooked.py").LATE_MARKER
+    assert not module.is_verification({"user": run, "body": f"{late}\nда"})
