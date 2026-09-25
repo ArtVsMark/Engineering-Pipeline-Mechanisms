@@ -215,7 +215,7 @@ def test_a_map_that_assembled_is_clean(
         module, "split", lambda said: (["001"], ["002"], {"not-applicable": ["003"]})
     )
     monkeypatch.setattr(module, "titles", dict)
-    monkeypatch.setattr(module, "touches_the_answer", lambda base: False)
+    monkeypatch.setattr(module, "touches_the_answer", lambda base, head="HEAD": False)
     monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
     assert module.main(["--out", str(where)]) == module.EXIT_OK
     assert where.is_file(), "карта не легла в файл"
@@ -238,7 +238,7 @@ def test_the_tally_line_has_no_dangling_comma_when_nothing_is_denied(
     """
     monkeypatch.setattr(module, "split", lambda answer: (["001"], ["002"], {}))
     monkeypatch.setattr(module, "titles", lambda: {})
-    monkeypatch.setattr(module, "touches_the_answer", lambda base: False)
+    monkeypatch.setattr(module, "touches_the_answer", lambda base, head="HEAD": False)
     monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
     monkeypatch.setattr(module, "from_base", lambda base: {"rules": {}})
     module.main(["--base", "HEAD", "--out", str(tmp_path / "map.md")])
@@ -275,3 +275,45 @@ def test_an_untouched_answer_is_still_untouched(monkeypatch: pytest.MonkeyPatch)
         lambda *_a, **_k: module.subprocess.CompletedProcess([], 0, "", ""),
     )
     assert module.touches_the_answer("origin/main") is False
+
+
+def test_the_head_is_compared_as_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Голова сравнивается та, что названа, а не рабочее дерево.
+
+    В джобе карты (#804) рабочее дерево — общая ветка, а голова изменения
+    приходит выборкой. Сравни скрипт «базу с HEAD», он сравнил бы базу саму с
+    собой, и тронутый ответ каталогу читался бы нетронутым — ровно та подделка
+    карты, от которой взгляд держится (085).
+    """
+    seen: list[list[str]] = []
+
+    def fake(cmd: list[str], **_k: Any) -> Any:
+        seen.append(cmd)
+        return module.subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(module.subprocess, "run", fake)
+    module.touches_the_answer("HEAD", "FETCH_HEAD")
+    assert seen and seen[0][seen[0].index("-z") + 1 : seen[0].index("-z") + 3] == [
+        "HEAD",
+        "FETCH_HEAD",
+    ], seen
+
+
+def test_the_head_argument_reaches_the_comparison(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--head` из командной строки доходит до сравнения, а не теряется в разборе."""
+    got: list[str] = []
+    monkeypatch.setattr(module, "split", lambda answer: (["001"], [], {}))
+    monkeypatch.setattr(module, "titles", dict)
+    monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
+    monkeypatch.setattr(module, "from_base", lambda base: {"rules": {}})
+    monkeypatch.setattr(module, "roles_section", lambda *a, **k: "")
+
+    def touches(base: str, head: str = "HEAD") -> bool:
+        got.append(head)
+        return False
+
+    monkeypatch.setattr(module, "touches_the_answer", touches)
+    module.main(["--base", "HEAD", "--head", "FETCH_HEAD", "--out", str(tmp_path / "m.md")])
+    assert got == ["FETCH_HEAD"]

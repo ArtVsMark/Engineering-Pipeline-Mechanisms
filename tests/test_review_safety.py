@@ -457,6 +457,8 @@ OUR_OWN_TREE = "./"
 #: События, на которых площадка берёт файл прогона с ОБЩЕЙ ветки, а не из
 #: изменения. Ровно там закрепление вызываемого что-то значит.
 SHARED_CALLER = ("workflow_run", "pull_request_target", "schedule")
+# Единственный ref, который прогон от общей ветки забирает не чужим: сама база.
+OUR_BASE_REF: Final = "${{ github.event.pull_request.base.ref }}"
 
 
 def shared_caller(document: dict[Any, Any]) -> bool:
@@ -534,6 +536,11 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
 
     ЗАМЕР 19.09.2026: прогонов от общей ветки девять, джобов в них четырнадцать,
     чужой ref не забирает ни один.
+
+    ОБЩАЯ ВЕТКА ЧУЖИМ REF НЕ СЧИТАЕТСЯ. Джоб карты (#804) разворачивает
+    `base.ref` — ровно тот код, который уже смотрели; локальность `./` от
+    этого только крепче. Послабление названо одной строкой `OUR_BASE_REF`, а
+    не шаблоном: любой другой ref по-прежнему красный.
     """
     foreign = [
         f"{path.name}:{job_id}"
@@ -541,7 +548,9 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
         if shared_caller(document := load(path))
         for job_id, job in document["jobs"].items()
         for step in job.get("steps") or []
-        if "checkout" in str(step.get("uses") or "") and (step.get("with") or {}).get("ref")
+        if "checkout" in str(step.get("uses") or "")
+        and (ref := (step.get("with") or {}).get("ref"))
+        and ref != OUR_BASE_REF
     ]
     assert not foreign, (
         "прогон от общей ветки забирает ЧУЖОЙ ref: " + ", ".join(foreign) + ".\n"
@@ -646,23 +655,28 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
 
     Голову пишет тот, кого проверяют: изменение, правящее ответ каталогу, могло
     бы объявить все правила машинными и получить взгляд, которому некуда
-    смотреть (085).
+    смотреть (085). База вызова — `FETCH_HEAD` подтянутой ветки, либо `HEAD`
+    ТОЛЬКО в джобе, чей чекаут и есть общая ветка (`map`, #804).
     """
-    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
-    # Комментарий, называющий скрипт, вызовом не является.
-    calls = [
-        line
-        for line in text.splitlines()
-        if "review_map.py" in line and not line.strip().startswith("#")
-    ]
+    jobs = load(WORKFLOWS / "review.yml").get("jobs") or {}
+    calls = 0
+    for name, job in jobs.items():
+        base_checkout = any(
+            "pull_request.base.ref" in str((step.get("with") or {}).get("ref") or "")
+            for step in job.get("steps") or []
+        )
+        for step in job.get("steps") or []:
+            for command in commands_of(str(step.get("run") or "")):
+                if "review_map.py" not in command:
+                    continue
+                calls += 1
+                words = command.split()
+                assert "--base" in words, f"{name}: карта собрана без базы: {command}"
+                base = words[words.index("--base") + 1]
+                assert base == "FETCH_HEAD" or (base == "HEAD" and base_checkout), (
+                    f"{name}: карта взята из головы изменения: {command}"
+                )
     assert calls, "карта не собирается вовсе"
-    for line in calls:
-        words = line.split()
-        assert "--base" in words, f"карта собрана без базы: {line.strip()}"
-        base = words[words.index("--base") + 1]
-        # `FETCH_HEAD` — это база, подтянутая шагом; `HEAD` — голова изменения.
-        # Разница здесь и есть весь смысл проверки, поэтому сравнение точное.
-        assert base != "HEAD", f"карта взята из головы изменения: {line.strip()}"
 
 
 def commands_of(run: str) -> list[str]:
@@ -690,6 +704,10 @@ def commands_of(run: str) -> list[str]:
 
 
 #: Разделители, склеивающие команды в одной строке.
+# Команды, которые кладут в рабочее дерево чужой код (голову изменения).
+UNPACKS_A_TREE: Final = re.compile(
+    r"\bgit\s+(?:checkout|switch|worktree|restore|reset|read-tree)\b"
+)
 SHELL_JOIN: Final = re.compile(r";|&&|\|\||(?<!\|)\|(?!\|)")
 #: Подмена интерпретатора в шаге: свой `PATH`, псевдоним или функция.
 INTERPRETER_SWAP: Final = re.compile(r"(?:^|\s)PATH=|\balias\s|\b\w+\s*\(\)\s*\{|\bfunction\s")
@@ -789,33 +807,39 @@ def test_the_map_path_is_pinned_only_by_its_own_prefix(run: str, pinned: bool) -
 
 
 def test_the_map_code_runs_from_the_shared_branch() -> None:
-    """Читатель карты исполняется из развёрнутой базы, а не из головы изменения.
+    """Читатель карты исполняется кодом общей ветки, а не головы изменения.
 
     Данные с базы не спасают, если их читает код головы: изменение, правящее
     `review_map.py`, само писало раздел ролей для своей проверки (поздний
-    взгляд на #785). Соседний случай — ответ каталогу тем же кодом, и гейт
-    держит оба вызова разом (195).
+    взгляд на #785). С #804 карта для изменения собирается ОТДЕЛЬНЫМ джобом
+    `map`: его единственный чекаут — общая ветка, и голова в него приходит
+    только выборкой. Джоб взгляда карту не собирает, а берёт из `needs.map`.
+    Поздний взгляд клонирует общую ветку и держит путь импорта префиксом.
     """
-    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
-    lines = text.splitlines()
-    calls = 0
-    for job in (load(WORKFLOWS / "review.yml").get("jobs") or {}).values():
-        for step in job.get("steps") or []:
-            commands = commands_of(str(step.get("run") or ""))
-            for at, command in enumerate(commands):
-                if "review_map.py" not in command:
-                    continue
-                calls += 1
-                assert '"$RUNNER_TEMP/base/scripts/review_map.py"' in command, (
-                    f"карта исполняется не из базы: {command}"
-                )
-                why = map_path_is_pinned(commands, at)
-                assert not why, f"транспорт карты может браться из головы изменения: {why}"
-    assert calls == 2, f"вызовов карты не два (ревью и поздний взгляд): {calls}"
-    worktrees = [line for line in lines if "git worktree add" in line]
-    assert len(worktrees) == 2 and all('"$RUNNER_TEMP/base" FETCH_HEAD' in w for w in worktrees), (
-        "база не разворачивается рядом из подтянутой ветки"
+    jobs = load(WORKFLOWS / "review.yml").get("jobs") or {}
+    steps = jobs["map"].get("steps") or []
+    checkouts = [one for one in steps if str(one.get("uses") or "").startswith("actions/checkout")]
+    assert len(checkouts) == 1, "у джоба карты чекаутов не один"
+    assert (checkouts[0].get("with") or {}).get("ref") == OUR_BASE_REF, (
+        "джоб карты разворачивает не общую ветку"
     )
+    unpacks = [
+        command
+        for one in steps
+        for command in commands_of(str(one.get("run") or ""))
+        if UNPACKS_A_TREE.search(command)
+    ]
+    assert not unpacks, f"джоб карты разворачивает что-то ещё: {unpacks}"
+    review = " ".join(str(one.get("run") or "") for one in jobs["review"].get("steps") or [])
+    assert "review_map.py" not in review, "джоб взгляда снова собирает карту сам"
+    assert "map" in (jobs["review"].get("needs") or []) or jobs["review"].get("needs") == "map"
+    late = jobs["late-look"].get("steps") or []
+    for step in late:
+        commands = commands_of(str(step.get("run") or ""))
+        for at, command in enumerate(commands):
+            if "review_map.py" in command:
+                why = map_path_is_pinned(commands, at)
+                assert not why, f"late-look: транспорт карты может браться не с базы: {why}"
 
 
 def test_the_registry_is_swept_outside_a_review() -> None:
@@ -873,8 +897,11 @@ def test_a_failed_fetch_never_falls_back_to_the_head() -> None:
     fetches = [line for line in text.splitlines() if "git fetch" in line and "origin" in line]
     assert fetches, "общая ветка не подтягивается вовсе — предмет проверки не найден (075)"
     for line in fetches:
-        assert line.strip().startswith("if git fetch"), (
-            f"код возврата фетча не проверяется, и сбой подменит базу головой: {line.strip()}"
+        # Код возврата ловится `if` либо `|| rc=$?` с разбором дальше (#804):
+        # в обоих случаях сбой выборки — отказ карты, а не подмена базы.
+        said = line.strip()
+        assert said.startswith("if git fetch") or said.endswith("|| rc=$?"), (
+            f"код возврата фетча не проверяется, и сбой подменит базу головой: {said}"
         )
 
 
@@ -1632,3 +1659,20 @@ def test_a_full_fetch_is_not_shallow() -> None:
     """Выборка без флагов мелкости — не мелкая; комментарий — не команда."""
     run = "# git fetch --depth=1 — так нельзя\ngit fetch --no-tags origin main\n"
     assert not any(SHALLOW_FETCH.search(one) for one in commands_of(run))
+
+
+def test_only_the_verifier_posts_under_its_own_marker() -> None:
+    """Верификатор переносит ответ с `--verify`, поздний взгляд — без (взгляд на #815).
+
+    Оба зовут `late_look.py` тем же токеном; без флага ответ верификатора лёг
+    бы под метку позднего взгляда и засчитался бы им.
+    """
+    jobs = load(WORKFLOWS / "review.yml").get("jobs") or {}
+    calls: dict[str, list[str]] = {}
+    for name, job in jobs.items():
+        for step in job.get("steps") or []:
+            for command in commands_of(str(step.get("run") or "")):
+                if "late_look.py" in command:
+                    calls.setdefault(name, []).append(command)
+    assert calls.get("verify") and all("--verify" in one for one in calls["verify"])
+    assert calls.get("late-look") and not any("--verify" in one for one in calls["late-look"])

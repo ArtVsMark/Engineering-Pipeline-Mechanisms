@@ -143,3 +143,27 @@ def test_a_dry_look_writes_nothing_and_is_clean(
     assert module.main(["--repo", "o/r", "--pr", "7", "--from", str(said)]) == module.EXIT_OK
     assert written == [], "пробный заход записал в изменение"
     assert "записал бы в #7" in capsys.readouterr().out
+
+
+def test_a_verifier_answer_carries_its_own_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """С `--verify` ответ ложится под метку верификатора, а не позднего взгляда (#815)."""
+    said = tmp_path / "прогон.json"
+    said.write_text(
+        json.dumps([{"type": "result", "result": "ПРЕМИСА: подтверждена — так"}]), encoding="utf-8"
+    )
+    written: list[str] = []
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "post", lambda repo, pr, token, body: written.append(body))
+    args = ["--repo", "o/r", "--pr", "7", "--from", str(said), "--apply", "--verify"]
+    assert module.main(args) == module.EXIT_OK
+    assert written[0].startswith(module.VERIFY_MARKER)
+    assert module.unlooked.LATE_MARKER not in written[0]
+    assert "ответ верификатора записан в #7" in capsys.readouterr().out
+
+
+def test_compose_verification_starts_with_its_marker() -> None:
+    """Метка верификатора стоит первой строкой, а ответ — целиком."""
+    body = module.compose_verification("ПРЕМИСА: не подтвердилась — нет")
+    assert body.splitlines()[0] == module.VERIFY_MARKER and "не подтвердилась — нет" in body
