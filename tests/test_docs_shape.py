@@ -746,32 +746,62 @@ def test_an_exempt_built_document_names_its_reason() -> None:
 
 #: Указатель документов по читателю: в нём каждый документ `docs/`.
 POINTER = ROOT / "docs" / "README.md"
+#: Подкаталоги `docs/`, которые указатель называет ЦЕЛИКОМ, а не по файлу, — с
+#: причиной у каждого. Список закрытый: подкаталог, заведённый по #840, сюда
+#: не попадает сам и обязан назвать в указателе каждый свой документ.
+LISTED_WHOLE: Final[dict[str, str]] = {
+    "decisions": "архив решений: к решению приходят по номеру из задачи, коммита или ответа",
+}
 
 
-def unlisted(listed: set[Path], docs: list[Path]) -> list[str]:
-    """Документы `docs/` (кроме самого указателя), которых нет среди ссылок указателя."""
-    return sorted(
-        str(here)
-        for one in docs
-        if one != POINTER and (here := one.relative_to(ROOT)) not in listed
-    )
+def unlisted(listed: set[Path], docs: list[Path], pointer_text: str) -> list[str]:
+    """Документы `docs/` (кроме указателя), которых нет среди его ссылок.
+
+    Документ подкаталога из `LISTED_WHOLE` считается названным, если указатель
+    ведёт на сам подкаталог.
+    """
+    missing = []
+    for one in docs:
+        if one == POINTER:
+            continue
+        here = one.relative_to(ROOT)
+        top = here.parts[1] if len(here.parts) > 2 else ""
+        if top in LISTED_WHOLE and f"]({top}/)" in pointer_text:
+            continue
+        if here not in listed:
+            missing.append(str(here))
+    return sorted(missing)
 
 
 def test_the_pointer_lists_every_document() -> None:
-    """Каждый документ `docs/` стоит в указателе по читателю (взгляд на #841).
+    """Каждый документ `docs/`, и во вложенных каталогах тоже, стоит в указателе (#841).
 
     Указатель — ручной перечень, и новый документ разошёлся бы с ним молча.
-    Сверяется СОСТАВ, а не раздел: совпадение раздела с объявленным читателем
-    машина не сравнивает, и этот предел назван в самом указателе (195).
+    Обход глубокий: документ, перенесённый в подкаталог (#840), не выпадает из
+    сверки. Сверяется СОСТАВ, а не раздел: совпадение раздела с объявленным
+    читателем машина не сравнивает, и этот предел назван в самом указателе (195).
     """
-    docs = sorted(walk(ROOT / "docs", "*.md"))
+    docs = sorted(walk_deep(ROOT / "docs", "*.md"))
     assert len(docs) > 1, "в docs/ не нашлось документов, кроме указателя — сверять нечего"
-    missing = unlisted(link_targets(POINTER), docs)
+    text = POINTER.read_text(encoding="utf-8")
+    missing = unlisted(link_targets(POINTER), docs, text)
     assert not missing, f"указатель docs/README.md не называет: {', '.join(missing)}"
 
 
 def test_the_pointer_gate_rejects_an_unlisted_document() -> None:
     """Предикат краснеет, когда документа нет среди ссылок указателя (140)."""
-    docs = [ROOT / "docs" / "roles.md", ROOT / "docs" / "gaps.md", POINTER]
-    assert unlisted({Path("docs/roles.md")}, docs) == ["docs/gaps.md"]
-    assert unlisted({Path("docs/roles.md"), Path("docs/gaps.md")}, docs) == []
+    decision = ROOT / "docs" / "decisions" / "001.md"
+    nested = ROOT / "docs" / "agent" / "x.md"
+    docs = [ROOT / "docs" / "roles.md", ROOT / "docs" / "gaps.md", decision, nested, POINTER]
+    listed = {Path("docs/roles.md")}
+    assert unlisted(listed, docs, "") == [
+        "docs/agent/x.md",
+        "docs/decisions/001.md",
+        "docs/gaps.md",
+    ]
+    listed |= {Path("docs/gaps.md")}
+    assert unlisted(listed, docs, "[`decisions/`](decisions/)") == ["docs/agent/x.md"]
+    assert unlisted(listed, docs, "[`agent/`](agent/)") == [
+        "docs/agent/x.md",
+        "docs/decisions/001.md",
+    ]
