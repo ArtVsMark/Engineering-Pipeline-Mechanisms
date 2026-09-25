@@ -276,7 +276,7 @@ def split(answer: dict[str, Any]) -> tuple[list[str], list[str], dict[str, list[
     return machine, eyes, denied
 
 
-def touches_the_answer(base: str) -> bool:
+def touches_the_answer(base: str, head: str = "HEAD") -> bool:
     """Отличается ли ответ каталогу у головы от базового — то есть карта этого ревью.
 
     Сравнение ДВУХТОЧЕЧНОЕ намеренно: чекаут ревью мелкий (`fetch-depth: 1`),
@@ -288,7 +288,7 @@ def touches_the_answer(base: str) -> bool:
     shown = subprocess.run(
         # `-z` здесь не про удобство: без него имя с пробелом или кириллицей
         # приходит экранированным, и путь не разрешается молча (165).
-        ["git", "diff", "--name-only", "-z", base, "HEAD", "--", str(ANSWER)],
+        ["git", "diff", "--name-only", "-z", base, head, "--", str(ANSWER)],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -404,6 +404,11 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает карту в файл, который прогон подставит в промпт."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main", help="общая ветка, откуда берётся ответ")
+    parser.add_argument(
+        "--head",
+        default="HEAD",
+        help="голова изменения — данными: в джобе карты рабочее дерево это база (#804)",
+    )
     parser.add_argument("--out", type=Path, required=True, help="файл карты")
     parser.add_argument(
         "--pr", type=int, default=0, help="номер изменения — для ролей по контексту"
@@ -419,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    text = render(machine, eyes, denied, titles(), touched=touches_the_answer(args.base))
+    text = render(machine, eyes, denied, titles(), touched=touches_the_answer(args.base, args.head))
     text += roles_section(args.base, args.repo, args.pr)
     args.out.write_text(text, encoding="utf-8")
     # СОБИРАЕТСЯ СПИСКОМ, А НЕ СКЛЕЙКОЙ. При пустом `denied` склейка давала
