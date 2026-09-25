@@ -434,7 +434,7 @@ def test_a_verifier_answer_is_not_counted_as_a_look(
     """Ответ верификатора с процитированной находкой в замер не идёт (взгляд на #827)."""
     late_look = load_script("late_look.py")
     answer = {
-        "user": {"type": "Bot", "login": module.unlooked.LATE_AUTHOR},
+        "user": {"type": "Bot", "login": module.review_findings.LATE_AUTHOR},
         "body": late_look.compose_verification(
             "ПРЕМИСА: да\nНАХОДКА[риск]: b.py:1 — цитата\nВЕРДИКТ: находок 1"
         ),
