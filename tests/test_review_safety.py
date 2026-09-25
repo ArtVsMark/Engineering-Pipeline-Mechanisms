@@ -686,7 +686,16 @@ def test_the_map_code_runs_from_the_shared_branch() -> None:
         assert '"$RUNNER_TEMP/base/scripts/review_map.py"' in line, (
             f"карта исполняется не из базы: {line.strip()}"
         )
-        assert 'PYTHONPATH="$RUNNER_TEMP/base/packages/transport"' in lines[at - 1], (
+        # Путь импорта ищется во ВСЕЙ команде — от строки вызова назад по
+        # продолжениям `\` — и в `export` до неё, а не строго строкой выше:
+        # та же защита, записанная иначе, не должна краснеть (взгляд на #797).
+        start = at
+        while start > 0 and lines[start - 1].rstrip().endswith("\\"):
+            start -= 1
+        command = " ".join(lines[start : at + 1])
+        exported = [one for one in lines[:at] if one.strip().startswith("export PYTHONPATH=")]
+        base_path = 'PYTHONPATH="$RUNNER_TEMP/base/packages/transport"'
+        assert base_path in command or any(base_path in one for one in exported), (
             "транспорт карты берётся из головы изменения"
         )
     worktrees = [line for line in lines if "git worktree add" in line]
