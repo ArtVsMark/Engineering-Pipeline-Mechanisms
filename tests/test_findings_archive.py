@@ -186,6 +186,25 @@ def test_reread_goes_before_the_new_merges(monkeypatch: pytest.MonkeyPatch) -> N
     assert archive["resolutions"][one]["by"] == 5, "снявшим записано позднее изменение #8"
 
 
+def test_reread_goes_before_the_new_merges_for_the_link_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """И связь «дубль» — первая названная: учтённое раньше, а не новое слитое (взгляд на #852)."""
+    platform(monkeypatch)
+    one = mark("a.py:1 — раз")
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda method, path, *_, **__: {
+            "commit": {"message": f"Разобрано: {one} дубль cccccc8" if path.endswith("s8") else ""}
+        },
+    )
+    archive = module.build(
+        "o/r", "t", 10, KINDS, {"counted": [5]}, history=[(5, f"Разобрано: {one} дубль bbbbbb5")]
+    )
+    assert archive["resolutions"][one] == {"by": 5, "twin_of": "bbbbbb5"}, "связь взята у #8"
+
+
 def test_the_verifier_answer_is_kept_once_seen(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ответ верификатора берётся из реестра и не теряется, когда запись снята."""
     platform(monkeypatch)
