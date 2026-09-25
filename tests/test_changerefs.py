@@ -769,7 +769,31 @@ def test_the_squash_body_keeps_the_twin_form() -> None:
     assert record.twin_of == {"aaaaaaa": "bbbbbbb", "ccccccc": "bbbbbbb"}
 
 
-def test_a_twin_already_resolved_drops_its_group_not_the_rest() -> None:
-    """Группа, чьи отпечатки уже сняты раньше, выпадает, а новые снимаются."""
+def test_a_twin_already_resolved_keeps_its_link() -> None:
+    """Цель «дубль», снятая раньше голой строкой, остаётся в строке (взгляд на #814).
+
+    Выпади она — «Разобрано: A» приехала бы без связи, и архив записал бы A
+    без `twin_of`.
+    """
     said = changerefs.resolutions_in_all(["Разобрано: bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"])
-    assert said == ["Разобрано: bbbbbbb", "Разобрано: aaaaaaa"]
+    assert said == ["Разобрано: bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"]
+    (record,) = changerefs.resolutions_parsed(said[1])
+    assert record.twin_of == {"aaaaaaa": "bbbbbbb"}
+
+
+def test_a_resolved_middle_of_a_chain_does_not_rewrite_it() -> None:
+    """Снятое звено посреди цепочки не сводит её в связь, которой не писали."""
+    said = changerefs.resolutions_in_all(
+        ["Разобрано: bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb дубль ccccccc"]
+    )
+    (record,) = changerefs.resolutions_parsed(said[1])
+    assert record.twin_of.get("aaaaaaa") != "ccccccc", said
+    assert "bbbbbbb" in record.marks
+
+
+def test_a_fully_repeated_twin_line_is_dropped() -> None:
+    """Строка, где сняты уже все отпечатки, не едет повтором."""
+    said = changerefs.resolutions_in_all(
+        ["Разобрано: aaaaaaa дубль bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"]
+    )
+    assert said == ["Разобрано: aaaaaaa дубль bbbbbbb"]

@@ -504,17 +504,17 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
             if not fresh:
                 continue
             seen.update(fresh)
-            # ГРУППЫ «ДУБЛЬ» ЕДУТ ВМЕСТЕ С ОТПЕЧАТКАМИ. Тело уплотнения собирается
-            # здесь, и строка без групп приезжала в общую ветку списком: архив
-            # терял связь дублей по дороге (взгляд на #809). Группа, чьи
-            # отпечатки все уже сняты раньше, выпадает — связь с ними записана
-            # той, прежней строкой.
-            groups = tuple(
-                kept for group in record.groups if (kept := tuple(m for m in group if m in fresh))
-            )
-            found.append(
-                str(Resolution(tuple(fresh), record.why, groups if len(groups) > 1 else ()))
-            )
+            # СТРОКА С «ДУБЛЬ» ЕДЕТ ЦЕЛИКОМ. Тело уплотнения собирается здесь, и
+            # строка без групп приезжала в общую ветку списком: архив терял связь
+            # дублей по дороге (взгляд на #809). Резать группы по уже снятому
+            # нельзя: «Разобрано: B», затем «A дубль B» дали бы «Разобрано: A» —
+            # связи нет, а у «A дубль B дубль C» при снятом B — выдуманную A→C
+            # (взгляд на #814). Повтор снятого безвреден: архив и реестр ставят
+            # снятие через `setdefault`.
+            if len(record.groups) > 1:
+                found.append(str(record))
+                continue
+            found.append(str(Resolution(tuple(fresh), record.why)))
     return found
 
 
