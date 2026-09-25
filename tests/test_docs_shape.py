@@ -544,17 +544,24 @@ def reachable_from(roots: tuple[str, ...]) -> set[Path]:
 #:
 #: Обход `docs/` ГЛУБОКИЙ: документ, перенесённый в подкаталог читателя (#840),
 #: не выпадает из сверки молча (взгляд на #845). Решения исключаются по той же
-#: причине, что выше, — каталогом, а не глубиной обхода.
-LIVE_DOCS = sorted(
-    [
-        *walk(ROOT, "*.md"),
-        *(
-            one
-            for one in walk_deep(ROOT / "docs", "*.md")
-            if "decisions" not in one.relative_to(ROOT / "docs").parts
-        ),
-    ]
-)
+#: причине, что выше, — тем же списком `LISTED_WHOLE`, что у указателя, и только
+#: на верхнем уровне `docs/`: `docs/<читатель>/decisions/` решениями не является.
+#: Подкаталоги `docs/`, которые указатель называет ЦЕЛИКОМ, а не по файлу, — с
+#: причиной у каждого. Список закрытый: подкаталог, заведённый по #840, сюда
+#: не попадает сам и обязан назвать в указателе каждый свой документ.
+LISTED_WHOLE: Final[dict[str, str]] = {
+    "decisions": "архив решений: к решению приходят по номеру из задачи, коммита или ответа",
+}
+
+
+def docs_below(root: Path, whole: dict[str, str] | tuple[()] = ()) -> list[Path]:
+    """Документы под `root` на любой глубине, кроме подкаталогов верхнего уровня из `whole`."""
+    return sorted(
+        one for one in walk_deep(root, "*.md") if one.relative_to(root).parts[0] not in whole
+    )
+
+
+LIVE_DOCS = sorted([*walk(ROOT, "*.md"), *docs_below(ROOT / "docs", LISTED_WHOLE)])
 
 
 def test_the_path_gate_found_its_subject() -> None:
@@ -754,12 +761,6 @@ def test_an_exempt_built_document_names_its_reason() -> None:
 
 #: Указатель документов по читателю: в нём каждый документ `docs/`.
 POINTER = ROOT / "docs" / "README.md"
-#: Подкаталоги `docs/`, которые указатель называет ЦЕЛИКОМ, а не по файлу, — с
-#: причиной у каждого. Список закрытый: подкаталог, заведённый по #840, сюда
-#: не попадает сам и обязан назвать в указателе каждый свой документ.
-LISTED_WHOLE: Final[dict[str, str]] = {
-    "decisions": "архив решений: к решению приходят по номеру из задачи, коммита или ответа",
-}
 
 
 def unlisted(listed: set[Path], docs: list[Path], pointer_text: str) -> list[str]:
@@ -800,7 +801,7 @@ def test_the_pointer_lists_every_document() -> None:
     сверки. Сверяется СОСТАВ, а не раздел: совпадение раздела с объявленным
     читателем машина не сравнивает, и этот предел назван в самом указателе (195).
     """
-    docs = sorted(walk_deep(ROOT / "docs", "*.md"))
+    docs = docs_below(ROOT / "docs")
     assert len(docs) > 1, "в docs/ не нашлось документов, кроме указателя — сверять нечего"
     text = POINTER.read_text(encoding="utf-8")
     missing = unlisted(link_targets(POINTER), docs, text)
@@ -824,3 +825,13 @@ def test_the_pointer_gate_rejects_an_unlisted_document() -> None:
         "docs/agent/x.md",
         "docs/decisions/001.md",
     ]
+
+
+def test_docs_below_walks_deep_and_skips_only_the_top_whole(tmp_path: Path) -> None:
+    """Обход идёт вглубь, а исключает только подкаталог верхнего уровня (#845)."""
+    for name in ("a.md", "agent/x.md", "decisions/1.md", "agent/decisions/y.md"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("x\n", encoding="utf-8")
+    seen = [str(one.relative_to(tmp_path)) for one in docs_below(tmp_path, LISTED_WHOLE)]
+    assert seen == ["a.md", "agent/decisions/y.md", "agent/x.md"]
+    assert len(docs_below(tmp_path)) == 4, "без исключений обход обязан видеть всё"
