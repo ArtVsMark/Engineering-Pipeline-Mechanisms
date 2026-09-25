@@ -434,7 +434,7 @@ def may_be_born(issue: dict[str, Any], repo: str, taken: frozenset[int] | set[in
     # молча (взгляд на #756).
     if issue.get("state") != "open":
         return False
-    if MARKER in text or findings.is_kept_by_a_mechanism(text):
+    if findings.is_plan(text) or findings.is_kept_by_a_mechanism(text):
         return False
     home = str(issue.get("repository_url") or "")
     if home and not home.lower().endswith(f"/repos/{repo}".lower()):
