@@ -708,7 +708,7 @@ def verdicts_on(
     found: list[tuple[str, int]] = []
     for comment in comments:
         body = str(comment.get("body") or "")
-        if unlooked.LATE_MARKER in body:
+        if unlooked.is_late_look(comment):
             continue
         # Вердикт пишет ревьюер-бот; процитированная человеком строка
         # «ВЕРДИКТ: находок 0» держание не снимает (`8b549e5`).
