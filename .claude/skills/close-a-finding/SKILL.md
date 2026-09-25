@@ -165,7 +165,14 @@ python scripts/change_parts.py
 
 ```bash
 python scripts/finding_kinds.py          # какие роды уже есть и что повторяется
+git show origin/badges:.github/badges/findings.json > findings.json
+python scripts/finding_kinds.py --archive findings.json   # и сколько встреч в архиве
 ```
+
+**Ушедшая из реестра находка не пропадает:** архив `findings.json` на ветке
+`badges` хранит каждую — с весом, ролью, которая её увидела, родом, снятием,
+связью дубля и рождённым правилом (`scripts/findings_archive.py`). Прошлые
+встречи рода и повторы по одному месту (шаг 2а) ищут там, а не по памяти.
 
 Нашли свой род — допишите отпечаток в `встречен`. Не нашли — заведите род в
 `.rules/finding-kinds.json`: **признак** (по чему его узнают в следующий раз),
