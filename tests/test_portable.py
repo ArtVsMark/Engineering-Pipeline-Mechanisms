@@ -20,6 +20,8 @@ import re
 from pathlib import Path
 from typing import Any, Final
 
+import pytest
+
 from tests.conftest import ROOT, load_script, string_args_of
 
 paths = load_script("paths.py")
@@ -27,10 +29,27 @@ paths = load_script("paths.py")
 ANSWERS: Final = frozenset({"as-is", "configured", "ours", "unreviewed"})
 
 
+#: Версия формы инвентаря, которую читает этот гейт. Сменил форму — подними
+#: её и здесь, и в файле: расхождение краснеет (взгляд на #798).
+SCHEMA: Final = 2
+
+
 def inventory() -> dict[str, Any]:
     """Инвентарь как он лежит в дереве."""
     data: dict[str, Any] = json.loads((ROOT / paths.PORTABLE).read_text(encoding="utf-8"))
     return data
+
+
+def test_the_inventory_has_the_form_this_gate_reads() -> None:
+    """Версия формы в файле совпадает с той, что читает гейт; форма `own_issues` — словарь.
+
+    Прежде `schema` не читал никто, и смена формы в #795 прошла без поднятия
+    версии (взгляд на #798). Тот же приём у `pipeline_checks`: он сверяет версию
+    своего файла, а не этого.
+    """
+    data = inventory()
+    assert data.get("schema") == SCHEMA, f"форма {data.get('schema')}, гейт читает {SCHEMA}"
+    assert isinstance(data["own_issues"], dict), "own_issues второй версии — словарь"
 
 
 def subjects(root: Path = ROOT) -> set[str]:
@@ -56,9 +75,21 @@ def issue_re(issues: list[int]) -> re.Pattern[str]:
     адрес через переменную репозитория — `${{ github.repository }}/issues/23`,
     `${GITHUB_REPOSITORY}/issues/23`, `f"{repo}/issues/23"`: имени проекта в
     нём нет, а номер прибит тот же (второй взгляд на #795, 195).
+
+    ФОРМЫ ПЕРЕМЕННОЙ СИММЕТРИЧНЫ: `$X/`, `${X}/`, `${{ … }}/`, `{x}/` — любое
+    имя. Чей репозиторий стоит за переменной, образец не знает, и
+    `f"{playbook}/issues/23"` тоже засчитается своим. Предел выбран в сторону
+    лишнего намеренно: ложное срабатывание краснеет и требует ответа, а
+    пропуск молчит (взгляд на #798).
+
+    ПРАВИЛО ОДНО: своё — адрес, у которого перед `/issues/` НЕ стоит
+    литеральное имя репозитория. Это начало строки (в коде замер читает
+    константы по отдельности, и от `f"{repo}/issues/23"` доходит `"/issues/23"`),
+    `..`, `}`, `$NAME`, кавычка (`"$REPO"/issues/23`) и `%s`. Склейка
+    `REPO + "/issues/23"` и `.format` сводятся к тем же формам (взгляд на #799).
     """
     return re.compile(
-        r"(?:(?<![\w#])#|(?:\.\./|\}/|\$GITHUB_REPOSITORY/)issues/)(?:"
+        r"(?:(?<![\w#])#|(?:^|(?<=[\s\"'(])|\.\.|\}|\$\w+|[\"']|%s)/issues/)(?:"
         + "|".join(map(str, issues))
         + r")\b"
     )
@@ -296,8 +327,42 @@ def test_the_measure_sees_an_issue_number_in_an_address() -> None:
         "repos/${GITHUB_REPOSITORY}/issues/23",
         "repos/$GITHUB_REPOSITORY/issues/23",
         'f"repos/{repo}/issues/23"',
+        "repos/$REPO/issues/23",
+        "repos/${repo}/issues/23",
+        # Чей репозиторий за переменной, образец не знает — и считает своим (#798).
+        'f"{playbook}/issues/23"',
+        '"$REPO"/issues/23',
+        '"${REPO}"/issues/23',
+        '"%s/issues/23" % repo',
     ):
         assert number.search(call), f"адрес через переменную репозитория не пойман: {call}"
+
+
+@pytest.mark.parametrize(
+    ("text", "suffix"),
+    [
+        ('URL = f"repos/{repo}/issues/23"\n', ".py"),
+        ('URL = REPO + "/issues/23"\n', ".py"),
+        ('URL = "%s/issues/23" % REPO\n', ".py"),
+        ('URL = "{}/issues/23".format(REPO)\n', ".py"),
+        ("run: gh api repos/${{ github.repository }}/issues/23\n", ".yml"),
+        ('run: curl "$API/repos/"$REPO"/issues/23"\n', ".yml"),
+    ],
+    ids=["f-строка", "склейка", "процент", "format", "прогон-выражение", "прогон-кавычки"],
+)
+def test_the_measure_itself_sees_every_address_form(text: str, suffix: str) -> None:
+    """Формы адреса проверены через `pinned_in` — то, что видит замер, а не голый образец.
+
+    В коде замер читает константы по отдельности, и образец, верный на сыром
+    тексте, там промахивался (взгляд на #799).
+    """
+    assert pinned_in(text, suffix, ["Me/Project"], [], [23]) == [1]
+
+
+def test_a_neighbour_address_in_code_is_not_ours() -> None:
+    """Литеральный адрес соседа в константе кода своим не считается."""
+    text = 'URL = "https://github.com/Me/Catalogue/issues/23"\n'
+    assert pinned_in(text, ".py", ["Me/Project"], ["Me/Catalogue"], [23]) == []
 
 
 def test_a_registry_without_a_number_names_why() -> None:
