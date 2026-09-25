@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from typing import Any, Final
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, string_args_of
 
 paths = load_script("paths.py")
 
@@ -57,8 +57,6 @@ def issue_re(issues: list[int]) -> re.Pattern[str]:
 
 #: Метка плана пишется строкой, а не через `findings.marker`.
 PLAN_MARKER_RE: Final = re.compile(r"<!-- (work-plan): ")
-#: Метка реестра, объявленная механизмом.
-REGISTRY_MARKER_RE: Final = re.compile(r"\bmarker\(\"([a-z-]+)\"\)")
 
 
 def registry_markers(root: Path = ROOT) -> set[str]:
@@ -66,7 +64,8 @@ def registry_markers(root: Path = ROOT) -> set[str]:
     found: set[str] = set()
     for one in (root / paths.SCRIPTS).glob("*.py"):
         text = one.read_text(encoding="utf-8")
-        found |= set(REGISTRY_MARKER_RE.findall(text)) | set(PLAN_MARKER_RE.findall(text))
+        # Метку реестра читает разбор вызова, а не образец по тексту (166).
+        found |= set(string_args_of(one, "marker")) | set(PLAN_MARKER_RE.findall(text))
     return found
 
 
