@@ -328,6 +328,25 @@ def test_a_carried_archive_turns_the_run_red_after_publishing() -> None:
     assert "exit 1" in guard["run"], "замерший архив зеленел бы вместе с прогоном"
 
 
+@pytest.mark.parametrize("prev", ["{}", ""], ids=["архив есть", "архива нет"])
+def test_the_reread_button_reaches_the_script(tmp_path: Path, prev: str) -> None:
+    """Кнопка перечитки доходит до скрипта и тогда, когда архив на ветке есть (взгляд на #849)."""
+    fake = {"FAKE_PREV": prev} if prev else {"FAKE_FETCH": "1", "FAKE_REMOTE": "2"}
+    code, _, said, _ = run_archive_step(
+        tmp_path, REREAD="true", GITHUB_REF="refs/heads/main", **fake
+    )
+    assert code == 0 and "--reread" in said.split(), f"кнопка затёрта: {said!r}"
+
+
+def test_the_reread_button_off_main_stops(tmp_path: Path) -> None:
+    """Перечитка с чужой ветки читала бы её историю, а обещана история main (взгляд на #849)."""
+    code, _, said, _ = run_archive_step(
+        tmp_path, FAKE_PREV="{}", REREAD="true", GITHUB_REF="refs/heads/agent/x"
+    )
+    assert code == 1, "перечитка чужой истории прошла"
+    assert not said, "скрипт архива не должен был запускаться"
+
+
 @pytest.mark.parametrize(
     ("fake", "why"), [({"FAKE_TREE": "128"}, "ls-tree"), ({"FAKE_SHOW": "128"}, "show")]
 )
@@ -546,3 +565,63 @@ def test_a_new_mark_does_not_close_a_loop_in_the_archive() -> None:
     }
     module.add_change(archive, 2, [], "Разобрано: bbbbbbb дубль aaaaaaa")
     assert archive["resolutions"]["bbbbbbb"] == {"by": 2, "twin_of": ""}
+
+
+def test_merged_messages_take_the_number_from_the_subject() -> None:
+    """Номер берётся из «(#N)» темы; коммит без номера — не слияние изменения (#820)."""
+    log = "Тема (#12)\x1fТема (#12)\n\nРазобрано: aaaaaaa\x00прямая правка\x1fтело\x00"
+    assert module.merged_messages(log) == [(12, "Тема (#12)\n\nРазобрано: aaaaaaa")]
+
+
+def test_reread_adds_the_missed_twin_and_changes_nothing_twice() -> None:
+    """Перечитка дописывает C из «A дубль C», повторная — ничего (#820)."""
+    archive: dict[str, Any] = {"findings": {}, "resolutions": {"aaaaaaa": {"by": 5, "twin_of": ""}}}
+    history = [(5, "Разобрано: aaaaaaa дубль ccccccc"), (9, "Разобрано: ddddddd")]
+    # Две перемены: новое снятие C и связь A→C, дописанная к старому снятию A.
+    assert module.reread(archive, history, {5}) == 2
+    assert archive["resolutions"]["ccccccc"] == {"by": 5, "twin_of": ""}
+    assert "ddddddd" not in archive["resolutions"], "неучтённое изменение перечитано"
+    assert module.reread(archive, history, {5}) == 0
+
+
+def test_reread_counts_a_link_added_to_an_old_resolution() -> None:
+    """Связь, дописанная к стоящему снятию, — тоже перемена архива (взгляд на #849)."""
+    archive: dict[str, Any] = {
+        "findings": {},
+        "resolutions": {
+            "aaaaaaa": {"by": 5, "twin_of": ""},
+            "bbbbbbb": {"by": 4, "twin_of": ""},
+        },
+    }
+    history = [(5, "Разобрано: aaaaaaa дубль bbbbbbb")]
+    assert module.reread(archive, history, {5}) == 1, "новых ключей нет, а архив изменился"
+    assert archive["resolutions"]["aaaaaaa"]["twin_of"] == "bbbbbbb"
+    assert module.reread(archive, history, {5}) == 0
+
+
+def test_git_log_reads_the_history_oldest_first(tmp_path: Path) -> None:
+    """Вход перечитки — история от старых к новым, в разборной форме."""
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    for number in (3, 7):
+        git(
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            f"Тема (#{number})",
+            "-m",
+            f"Разобрано: {number:07d}",
+        )
+    assert module.merged_messages(module.git_log(tmp_path)) == [
+        (3, "Тема (#3)\n\nРазобрано: 0000003"),
+        (7, "Тема (#7)\n\nРазобрано: 0000007"),
+    ]
