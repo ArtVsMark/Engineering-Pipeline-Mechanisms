@@ -1384,3 +1384,52 @@ def test_every_agent_call_names_its_model_and_its_failure() -> None:
     )
     missing = unnamed_runs()
     assert not missing, "; ".join(missing)
+
+
+#: Джобы с полной историей, чья мелкая выборка её не режет, — с причиной.
+SHALLOW_FETCH_EXEMPT: dict[tuple[str, str], str] = {
+    ("badges.yml", "badges"): (
+        "выборка берёт ветку `badges` — сироту из одного коммита, перезаписываемую "
+        "целиком: граница мелкости ложится на её коммит, а не на историю общей ветки"
+    ),
+}
+
+SHALLOW_FETCH = re.compile(r"\bgit\s+fetch\b[^#\n]*--depth")
+
+
+def shallow_fetches_in_full_clones() -> list[tuple[str, str, str]]:
+    """(файл, джоб, строка) — мелкие выборки в джобах, просивших полную историю."""
+    found: list[tuple[str, str, str]] = []
+    for path in walk(WORKFLOWS, "*.yml"):
+        for name, job in (load(path).get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            if not any((step.get("with") or {}).get("fetch-depth") == 0 for step in steps):
+                continue
+            for step in steps:
+                for line in str(step.get("run") or "").splitlines():
+                    if not line.strip().startswith("#") and SHALLOW_FETCH.search(line):
+                        found.append((path.name, str(name), line.strip()))
+    return found
+
+
+def test_a_full_history_is_not_cut_back() -> None:
+    """Джоб, просивший полную историю, не делает клон снова мелким.
+
+    `git fetch --depth=1` ветки, уже лежащей в полном клоне, ставит на её голову
+    границу мелкости: голова становится коммитом без родителя. Поздний взгляд
+    так терял историю общей ветки и не находил уплотнённый коммит изменения
+    (поздние взгляды на #773, #777, #785). Гейт общий, а не про один шаг:
+    шаг карты скопирован из джоба с мелким клоном, и соседний случай — любой
+    такой перенос (195).
+    """
+    found = shallow_fetches_in_full_clones()
+    cut = [one for one in found if one[:2] not in SHALLOW_FETCH_EXEMPT]
+    assert not cut, f"полная история обрезается мелкой выборкой: {cut}"
+
+
+def test_the_shallow_fetch_gate_has_a_subject() -> None:
+    """Каждое исключение действительно встречено — иначе оно стоит без предмета (075)."""
+    seen = {one[:2] for one in shallow_fetches_in_full_clones()}
+    assert set(SHALLOW_FETCH_EXEMPT) <= seen, (
+        f"исключения без предмета: {set(SHALLOW_FETCH_EXEMPT) - seen}"
+    )
