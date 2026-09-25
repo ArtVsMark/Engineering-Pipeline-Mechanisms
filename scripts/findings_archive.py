@@ -88,6 +88,32 @@ class NotRun(RuntimeError):
     """Архив не собран: третий исход, а не «находок нет»."""
 
 
+#: Поля записи находки, которые сборщик ЧИТАЕТ из прежнего архива, и их типы.
+#: Остальные поля он пишет сам, и прежние значения ему не нужны.
+FINDING_SHAPE: Final[dict[str, type]] = {"seen_on": list}
+#: Поля снятия, которые читают `add_change` и `settle`.
+RESOLUTION_SHAPE: Final[dict[str, type]] = {"by": int, "twin_of": str}
+
+
+def misshapen(one: Any, shape: dict[str, type]) -> str:
+    """Чем запись расходится с формой; пустая строка — не расходится.
+
+    Логическое значение целым не считается, хотя `bool` — подкласс `int`:
+    `true` в номере изменения — порча, а не номер.
+    """
+    if not isinstance(one, dict):
+        return "запись не словарь"
+    for field, kind in shape.items():
+        value = one.get(field)
+        if not isinstance(value, kind) or isinstance(value, bool):
+            return f"`{field}` не {kind.__name__}"
+    if "seen_on" in shape and not all(
+        isinstance(n, int) and not isinstance(n, bool) for n in one["seen_on"]
+    ):
+        return "`seen_on` не список номеров"
+    return ""
+
+
 def previous(path: Path | None) -> dict[str, Any]:
     """Прежний архив из файла, взятого прогоном с ветки; нет файла — начало с нуля."""
     if path is None:
@@ -101,18 +127,24 @@ def previous(path: Path | None) -> dict[str, Any]:
     except ValueError as exc:
         raise NotRun(f"прежний архив не разбирается — {exc}") from exc
     # СБОРЩИК ТРЕБУЕТ БОЛЬШЕ, ЧЕМ ЗАМЕРЫ: он дописывает записи и прикладывает
-    # снятия, поэтому ему нужны `seen_on` у каждой находки и `by` у каждого
-    # снятия. Без них сборка падала трассой в `add_change` и `settle` (взгляд
-    # на #830). Отсутствие поля и `null` читаются одинаково — пустым, как у
-    # `findings` в `read_archive`.
+    # снятия. Форма проверяется ЦЕЛИКОМ, по перечню полей, которые читают
+    # `add_change` и `settle`, с их типами: по одному полю за заход она
+    # чинилась трижды — тип `resolutions`, `by`, `seen_on` (взгляды на #830,
+    # 210). Отсутствие `resolutions` и `null` читаются пустым, как `findings`
+    # в `read_archive`; отсутствие поля ВНУТРИ записи — отказ.
     raw = data.get("resolutions")
     resolutions = {} if raw is None else raw
-    if not isinstance(resolutions, dict) or not all(
-        isinstance(one, dict) and "by" in one for one in resolutions.values()
-    ):
-        raise NotRun("прежний архив не разбирается — `resolutions` не словарь снятий с `by`")
-    if not all("seen_on" in one for one in (data.get("findings") or {}).values()):
-        raise NotRun("прежний архив не разбирается — у записи находки нет `seen_on`")
+    if not isinstance(resolutions, dict):
+        raise NotRun("прежний архив не разбирается — `resolutions` не словарь")
+    parts = (
+        ("findings", data.get("findings") or {}, FINDING_SHAPE),
+        ("resolutions", resolutions, RESOLUTION_SHAPE),
+    )
+    for part, records, shape in parts:
+        for mark, one in records.items():
+            broken = misshapen(one, shape)
+            if broken:
+                raise NotRun(f"прежний архив не разбирается — `{part}.{mark}`: {broken}")
     return data
 
 
