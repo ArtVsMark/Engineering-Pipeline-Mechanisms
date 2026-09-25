@@ -47,8 +47,32 @@ def subjects(root: Path = ROOT) -> set[str]:
 
 
 def issue_re(issues: list[int]) -> re.Pattern[str]:
-    """Номер живой задачи буквами: `#23`, но не `#230` и не `##23`."""
-    return re.compile(r"(?<![\w#])#(?:" + "|".join(map(str, issues)) + r")\b")
+    """Номер живой задачи буквами: `#23` и `issues/23`, но не `#230` и не `##23`.
+
+    Форма адресом (`../../issues/23`) в проекте есть, и номер в ней прибит так
+    же, как с решёткой (взгляд на #783, 195).
+    """
+    return re.compile(r"(?:(?<![\w#])#|\bissues/)(?:" + "|".join(map(str, issues)) + r")\b")
+
+
+#: Метка плана пишется строкой, а не через `findings.marker`.
+PLAN_MARKER_RE: Final = re.compile(r"<!-- (work-plan): ")
+#: Метка реестра, объявленная механизмом.
+REGISTRY_MARKER_RE: Final = re.compile(r"\bmarker\(\"([a-z-]+)\"\)")
+
+
+def registry_markers(root: Path = ROOT) -> set[str]:
+    """Метки живых задач, которые механизмы дерева ведут."""
+    found: set[str] = set()
+    for one in (root / paths.SCRIPTS).glob("*.py"):
+        text = one.read_text(encoding="utf-8")
+        found |= set(REGISTRY_MARKER_RE.findall(text)) | set(PLAN_MARKER_RE.findall(text))
+    return found
+
+
+def own_issue_numbers(data: dict[str, Any]) -> list[int]:
+    """Номера живых задач, уже заведённых у площадки."""
+    return sorted(number for number in data["own_issues"].values() if number)
 
 
 def pinned_in(
@@ -141,7 +165,7 @@ def test_every_answer_has_its_form() -> None:
 def test_a_mechanism_with_our_own_name_in_it_is_not_as_is() -> None:
     """Своё имя буквами — у соседа оно другое, и «как есть» было бы неправдой."""
     data = inventory()
-    own, family, issues = data["own"], data["family"], data["own_issues"]
+    own, family, issues = data["own"], data["family"], own_issue_numbers(data)
     assert own and issues, "своих имён или номеров не объявлено — мерить прибитое нечем"
     wrong = []
     for name, said in data["answers"].items():
@@ -232,3 +256,29 @@ def test_a_directory_is_measured_by_its_files(tmp_path: Path) -> None:
         if pinned_in(one.read_text(encoding="utf-8"), one.suffix, ["Me/P"], [], [23])
     ]
     assert [one.name for one in hits] == ["note.md"]
+
+
+def test_every_registry_of_the_tree_has_its_number_line() -> None:
+    """Реестр, объявленный меткой в scripts/, стоит в `own_issues` — с номером или `null`.
+
+    Список номеров писался от руки: реестров с метками в scripts/ было девять
+    (с планом), номеров в списке — шесть, и живой реестр дрейфа #193 выпал из
+    замера (взгляд на #783). Теперь ключ — метка, и набор меток сверяется с
+    деревом в обе стороны (005).
+    """
+    declared = set(inventory()["own_issues"])
+    tree = registry_markers()
+    assert tree, "меток в дереве не найдено — гейт доказывал бы только себя (075)"
+    assert not tree - declared, f"реестры без строки в own_issues: {sorted(tree - declared)}"
+    assert not declared - tree, (
+        f"строки о реестрах, которых в дереве нет: {sorted(declared - tree)}"
+    )
+
+
+def test_the_measure_sees_an_issue_number_in_an_address() -> None:
+    """Номер в адресе `issues/23` прибит так же, как `#23`; `issues/230` — нет."""
+    number = issue_re([23])
+    assert number.search("[#23](../../issues/23)")
+    assert number.search("см. ../../issues/23")
+    assert not number.search("../../issues/230")
+    assert not number.search("tissues/23")
