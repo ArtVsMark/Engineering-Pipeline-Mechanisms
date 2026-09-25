@@ -428,6 +428,11 @@ def test_the_archive_reads_a_twin_line_as_the_registry_does() -> None:
         '{"resolutions": {"abc1234": 5}}',
         '{"resolutions": {"abc1234": {"twin_of": ""}}}',
         '{"findings": {"abc1234": {"title": "x"}}}',
+        '{"resolutions": {"abc1234": {"by": 1}}}',
+        '{"findings": {"abc1234": {"seen_on": null}}}',
+        '{"findings": {"abc1234": "seen_on"}}',
+        '{"findings": {"abc1234": {"seen_on": ["1"]}}}',
+        '{"resolutions": {"abc1234": {"by": true, "twin_of": ""}}}',
     ],
     ids=[
         "скаляр в counted",
@@ -436,6 +441,11 @@ def test_the_archive_reads_a_twin_line_as_the_registry_does() -> None:
         "снятие числом",
         "снятие без by",
         "находка без seen_on",
+        "снятие без twin_of",
+        "seen_on пустое",
+        "находка строкой — отказ read_archive",
+        "seen_on со строкой — отказ read_archive",
+        "by логическим",
     ],
 )
 def test_a_foreign_previous_archive_is_a_refusal(tmp_path: Path, said: str) -> None:
@@ -444,6 +454,33 @@ def test_a_foreign_previous_archive_is_a_refusal(tmp_path: Path, said: str) -> N
     path.write_text(said, encoding="utf-8")
     with pytest.raises(module.NotRun):
         module.previous(path)
+
+
+@pytest.mark.parametrize(
+    ("part", "shape"),
+    [("findings", module.FINDING_SHAPE), ("resolutions", module.RESOLUTION_SHAPE)],
+)
+def test_every_read_field_is_required(tmp_path: Path, part: str, shape: dict[str, type]) -> None:
+    """Каждое поле перечня формы обязательно: дописанное в перечень проверено сразу (210)."""
+    whole = {"seen_on": [1], "by": 1, "twin_of": ""}
+    path = tmp_path / "findings.json"
+    for field in shape:
+        record = {key: whole[key] for key in shape if key != field}
+        path.write_text(json.dumps({part: {"abc1234": record}}), encoding="utf-8")
+        with pytest.raises(module.NotRun, match=field):
+            module.previous(path)
+    path.write_text(json.dumps({part: {"abc1234": {key: whole[key] for key in shape}}}), "utf-8")
+    assert module.previous(path)[part]
+
+
+def test_misshapen_names_what_is_wrong() -> None:
+    """`misshapen` называет расхождение, у целой записи — пустая строка (210)."""
+    shape = module.RESOLUTION_SHAPE
+    assert module.misshapen({"by": 3, "twin_of": ""}, shape) == ""
+    assert module.misshapen("by", shape) == "запись не словарь"
+    assert "twin_of" in module.misshapen({"by": 3}, shape)
+    assert "by" in module.misshapen({"by": False, "twin_of": ""}, shape)
+    assert "seen_on" in module.misshapen({"seen_on": None}, module.FINDING_SHAPE)
 
 
 def test_a_null_resolutions_reads_as_empty(tmp_path: Path) -> None:
