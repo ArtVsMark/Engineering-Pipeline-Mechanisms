@@ -641,6 +641,53 @@ def parse_swept(body: str | None) -> str:
     return LEGACY_MEANS if LEGACY_SWEPT_RE.match(last) else last
 
 
+def twins_of_resolved(
+    swept: set[str], entries: dict[str, findings.Entry], *, strict: bool = False
+) -> dict[str, str]:
+    """Открытые записи, которые — дубли снятых: отпечаток → снятый, чей он дубль.
+
+    СВЕРКА ДУБЛЕЙ (решение владельца 25.09.2026, #807). Дубль — один дефект,
+    названный дважды, и работа, снявшая одно имя, починила оба; висящий дубль
+    снятого выдаёт закрытое за работу. Признак — ТОТ ЖЕ, что у реестра при
+    записи (`pair_up`), целиком, а не один его порог (взгляд на #818):
+    - то же изменение — беды разных изменений реестр держит раздельно;
+    - `same_finding` с тем же `strict`: строгий заход (102) держит недословные
+      заголовки отдельно, и уборка того же захода их не сводит;
+    - тот же ФАЙЛ (`finding_chains.place_of` берёт путь без строки): совпавший
+      файл тождеством сам не считается (#657), а без него сходство слов свело
+      бы беды разных файлов.
+    """
+    # Импорт здесь, а не наверху: `finding_chains` сам читает этот модуль.
+    import finding_chains
+
+    found: dict[str, str] = {}
+    gone = {mark: entries[mark] for mark in swept if mark in entries}
+    for mark, entry in entries.items():
+        if mark in gone:
+            continue
+        place = finding_chains.place_of(entry.title)
+        for was, other in gone.items():
+            if (
+                place
+                and entry.pr == other.pr
+                and place == finding_chains.place_of(other.title)
+                and same_finding(entry.title, other.title, strict=strict)
+            ):
+                found[mark] = was
+                break
+    return found
+
+
+def drop_resolved(
+    entries: dict[str, findings.Entry], swept: set[str], *, strict: bool = False
+) -> dict[str, str]:
+    """Убирает снятые записи и их дубли; отдаёт дубли, чтобы их назвать (#807)."""
+    twins = twins_of_resolved(swept, entries, strict=strict)
+    for mark in [*swept, *twins]:
+        entries.pop(mark, None)
+    return twins
+
+
 def resolved_marks(
     repo: str, token: str, since: str = "", limit: int = ghrest.MERGED_WINDOW
 ) -> tuple[set[str], str]:
@@ -932,10 +979,13 @@ def main(argv: list[str] | None = None) -> int:
         # заметку, снятую и заново найденную одним заходом.
         marks, swept_to = resolved_marks(args.repo, token, parse_swept(body))
         swept, held = closable(args.repo, token, marks & set(entries), entries)
-        for mark in swept:
-            entries.pop(mark, None)
+        twins = drop_resolved(entries, set(swept), strict=args.strict)
         if swept:
             print(f"снято как разобранное: {', '.join(sorted(swept))}")
+        for mark, was in sorted(twins.items()):
+            # Дубль снятого уходит ВСЛУХ: иначе запись пропала бы без строки
+            # «Разобрано» и без следа, почему (045).
+            print(f"снято как дубль снятого: {mark} — дубль {was}")
         for mark, why in sorted(held.items()):
             # ОТКАЗ СНЯТИЯ НАЗЫВАЕТСЯ ВСЛУХ, А НЕ МОЛЧА ОСТАВЛЯЕТ ЗАПИСЬ.
             # Иначе разбирающий видит «отметку поставил, а запись висит» и
