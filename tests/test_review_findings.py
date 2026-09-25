@@ -1563,3 +1563,22 @@ def test_dropping_a_resolved_finding_drops_its_twin_too() -> None:
     twins = module.drop_resolved(entries, {module.fingerprint(TWIN_A)})
     assert list(twins) == [module.fingerprint(TWIN_B)]
     assert list(entries) == [module.fingerprint(OTHER_PLACE)]
+
+
+def test_a_look_alike_on_another_change_is_not_a_twin() -> None:
+    """Похожие слова на ДРУГОМ изменении — не дубль: реестр держит их раздельно (#818)."""
+    entries = {
+        module.fingerprint(TWIN_A): module.findings.Entry(1, "риск", TWIN_A),
+        module.fingerprint(TWIN_B): module.findings.Entry(2, "риск", TWIN_B),
+    }
+    assert module.twins_of_resolved({module.fingerprint(TWIN_A)}, entries) == {}
+
+
+def test_a_strict_sweep_keeps_retold_titles_apart() -> None:
+    """Под `--strict` уборка не сводит недословные заголовки — как и запись (102, #818)."""
+    entries = {
+        module.fingerprint(one): module.findings.Entry(1, "риск", one) for one in (TWIN_A, TWIN_B)
+    }
+    swept = {module.fingerprint(TWIN_A)}
+    assert module.twins_of_resolved(swept, entries, strict=True) == {}
+    assert module.drop_resolved(dict(entries), swept, strict=True) == {}
