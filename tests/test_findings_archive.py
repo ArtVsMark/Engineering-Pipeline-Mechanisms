@@ -417,3 +417,22 @@ def test_the_archive_reads_a_twin_line_as_the_registry_does() -> None:
     said = module.resolved_in(line)
     assert said == {"aaaaaaa": "bbbbbbb", "ccccccc": "bbbbbbb", "bbbbbbb": "", "1111111": ""}
     assert set(said) == set(module.changerefs.resolved_in(line))
+
+
+def test_a_later_twin_line_keeps_the_link() -> None:
+    """«Разобрано: A», затем «A дубль B» — связь A→B не теряется (взгляд на #814)."""
+    body = "\n".join(
+        module.changerefs.resolutions_in_all(
+            ["Разобрано: aaaaaaa", "Разобрано: aaaaaaa дубль bbbbbbb"]
+        )
+    )
+    assert module.resolved_in(body) == {"aaaaaaa": "bbbbbbb", "bbbbbbb": ""}
+
+
+def test_a_twin_named_by_a_later_change_joins_the_earlier_resolution() -> None:
+    """Связь, названная следующим изменением, дописывается к раннему снятию, а снял — первый."""
+    archive: dict[str, Any] = {"findings": {}, "resolutions": {}}
+    module.add_change(archive, 1, [], "Разобрано: aaaaaaa")
+    module.add_change(archive, 2, [], "Разобрано: aaaaaaa дубль bbbbbbb")
+    assert archive["resolutions"]["aaaaaaa"] == {"by": 1, "twin_of": "bbbbbbb"}
+    assert archive["resolutions"]["bbbbbbb"] == {"by": 2, "twin_of": ""}

@@ -106,12 +106,17 @@ def resolved_in(message: str) -> dict[str, str]:
     брал перед «дубль» ровно один отпечаток, не знал регистра и цепочек, и
     реестр с архивом читали одну строку по-разному: реестр снимал B, архив —
     нет (взгляд на #809, 090). Снята каждая находка строки, дубль — связь.
+
+    СВЯЗЬ БЕРЁТСЯ ПЕРВАЯ НЕПУСТАЯ, а не первая запись: «Разобрано: A», затем
+    «A дубль B» — это одно снятие A и связь A→B, и пустая первая строка связь
+    не стирает (взгляд на #814).
     """
     found: dict[str, str] = {}
     for record in changerefs.resolutions_parsed(message):
         twins = record.twin_of
         for mark in record.marks:
-            found.setdefault(mark, twins.get(mark, ""))
+            if not found.get(mark):
+                found[mark] = twins.get(mark, "")
     return found
 
 
@@ -159,7 +164,11 @@ def add_change(
             entry["seen_on"] = sorted({*entry["seen_on"], number})
             entry["pr"] = min(entry["seen_on"])
     for mark, twin in resolved_in(message).items():
-        resolutions.setdefault(mark, {"by": number, "twin_of": twin})
+        said = resolutions.setdefault(mark, {"by": number, "twin_of": twin})
+        # Снял первый, а связь — первая названная: поздняя строка «дубль»
+        # дописывает её к раннему снятию, не перенося само снятие (#814).
+        if twin and not said["twin_of"]:
+            said["twin_of"] = twin
 
 
 def settle(archive: dict[str, Any]) -> None:
