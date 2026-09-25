@@ -88,11 +88,16 @@ def issue_re(issues: list[int]) -> re.Pattern[str]:
     `..`, `}`, `$NAME`, кавычка (`"$REPO"/issues/23`) и `%s`. Склейка
     `REPO + "/issues/23"` и `.format` сводятся к тем же формам (взгляд на #799).
 
-    ПРЕДЕЛ НАЗВАН: номер, прибитый СВОЕЙ константой, замер не видит. У
-    `WORK_PLAN: Final = 639` и `f"…/issues/{WORK_PLAN}"` номера в строке нет, а
-    целые константы замер не читает: их слишком много, и `23` в коде чаще
-    всего не номер задачи. То же у `$ISSUE` в прогоне. Такой механизм держит
-    ответ человека, а не замер (второй взгляд на #799).
+    ПРЕДЕЛ — ОДИН КЛАСС, А НЕ ПЕРЕЧЕНЬ. Замер видит номер, только если он
+    стоит буквами в ТОЙ ЖЕ строке, что и адрес (`/issues/`, `#`). Номер,
+    пришедший в адрес из любого другого выражения, не виден: целое число
+    (`f"/issues/{639}"`, `"%d" % 639`), другая константа
+    (`WORK_PLAN: Final = 639`, `"/issues/" + "639"`, `.format("639")`),
+    переменная прогона (`$ISSUE`, `${{ env.ISSUE }}`). Перечень форм
+    устаревал с каждым заходом взгляда (#799, #802, #811), класс — нет. Такой
+    механизм держит ответ человека, а не замер. Предел закреплён тестом
+    `test_the_named_limits_are_what_the_measure_misses`: расширят замер —
+    тест покраснеет.
     """
     return re.compile(
         r"(?:(?<![\w#])#|(?:^|(?<=[\s\"'(])|\.\.|\}|\$\w+|[\"']|%s)/issues/)(?:"
@@ -379,3 +384,43 @@ def test_a_registry_without_a_number_names_why() -> None:
         if not isinstance(value, int) and not (isinstance(value, str) and value.strip())
     }
     assert not wrong, f"реестр без номера и без причины: {wrong}"
+
+
+@pytest.mark.parametrize(
+    ("text", "suffix"),
+    [
+        ('WORK_PLAN: Final = 639\nURL = f"repos/{repo}/issues/{WORK_PLAN}"\n', ".py"),
+        ('URL = f"/issues/{639}"\n', ".py"),
+        ('URL = "/issues/%d" % 639\n', ".py"),
+        ('URL = "/issues/" + "639"\n', ".py"),
+        ('URL = "/issues/{}".format("639")\n', ".py"),
+        ('env:\n  ISSUE: 639\nrun: gh api "repos/$REPO/issues/$ISSUE"\n', ".yml"),
+        ("run: gh api repos/o/r/issues/${{ env.ISSUE }}\n", ".yml"),
+    ],
+    ids=[
+        "своя константа",
+        "число в f-строке",
+        "число через %",
+        "склейка строк",
+        "format",
+        "переменная прогона",
+        "выражение прогона",
+    ],
+)
+def test_the_named_limits_are_what_the_measure_misses(text: str, suffix: str) -> None:
+    """Предел класса — номер не в строке адреса — замер не видит (взгляды на #802, #811).
+
+    Тест закрепляет предел, а не требует его: расширят замер — он покраснеет,
+    и докстроку с пределом придётся поправить, а не оставить устаревшей.
+    """
+    assert pinned_in(text, suffix, ["Me/Project"], [], [639]) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "suffix"),
+    [('URL = "/issues/639"\n', ".py"), ("run: gh api repos/$REPO/issues/639\n", ".yml")],
+    ids=["код", "прогон"],
+)
+def test_the_limit_has_a_positive_control(text: str, suffix: str) -> None:
+    """Тот же номер буквами в строке адреса замер видит: предел — не слепота образца."""
+    assert pinned_in(text, suffix, ["Me/Project"], [], [639]) == [1]
