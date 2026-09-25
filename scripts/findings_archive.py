@@ -92,10 +92,27 @@ def previous(path: Path | None) -> dict[str, Any]:
     """Прежний архив из файла, взятого прогоном с ветки; нет файла — начало с нуля."""
     if path is None:
         return {}
+    # ФОРМУ ПРОВЕРЯЕТ ТО ЖЕ ЧТЕНИЕ, ЧТО У ЗАМЕРОВ (`findings.read_archive`): сборщик
+    # читал прежний архив голым `json.loads`, и скаляр в `counted` ронял сборку
+    # трассой, а ложная `findings` проходила пустым архивом и перезаписывала
+    # прежний (взгляд на #822).
     try:
-        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = registry.read_archive(path)
+    except ValueError as exc:
         raise NotRun(f"прежний архив не разбирается — {exc}") from exc
+    # СБОРЩИК ТРЕБУЕТ БОЛЬШЕ, ЧЕМ ЗАМЕРЫ: он дописывает записи и прикладывает
+    # снятия, поэтому ему нужны `seen_on` у каждой находки и `by` у каждого
+    # снятия. Без них сборка падала трассой в `add_change` и `settle` (взгляд
+    # на #830). Отсутствие поля и `null` читаются одинаково — пустым, как у
+    # `findings` в `read_archive`.
+    raw = data.get("resolutions")
+    resolutions = {} if raw is None else raw
+    if not isinstance(resolutions, dict) or not all(
+        isinstance(one, dict) and "by" in one for one in resolutions.values()
+    ):
+        raise NotRun("прежний архив не разбирается — `resolutions` не словарь снятий с `by`")
+    if not all("seen_on" in one for one in (data.get("findings") or {}).values()):
+        raise NotRun("прежний архив не разбирается — у записи находки нет `seen_on`")
     return data
 
 
