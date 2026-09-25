@@ -409,3 +409,11 @@ def test_real_git_names_an_absent_file_by_an_empty_listing(tmp_path: Path) -> No
     assert listed.returncode == 0 and listed.stdout.rstrip("\0") == path
     broken = run("ls-tree", "-z", "--name-only", "нет-такой-ревизии", "--", path)
     assert broken.returncode != 0, "сбой ls-tree неотличим от отсутствия файла"
+
+
+def test_the_archive_reads_a_twin_line_as_the_registry_does() -> None:
+    """Архив снимает всю цепочку дублей тем же разбором, что реестр (взгляд на #809, 090)."""
+    line = "Разобрано: aaaaaaa, ccccccc дубль bbbbbbb\nРазобрано: 1111111 дубль 22222223\n"
+    said = module.resolved_in(line)
+    assert said == {"aaaaaaa": "bbbbbbb", "ccccccc": "bbbbbbb", "bbbbbbb": "", "1111111": ""}
+    assert set(said) == set(module.changerefs.resolved_in(line))

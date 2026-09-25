@@ -700,3 +700,60 @@ def test_the_first_declared_fix_wins() -> None:
         "lint"
     )
     assert changerefs.fixes_main_in_all(["Refs #1"]) is None
+
+
+def test_a_twin_after_the_word_is_resolved_too() -> None:
+    """`Разобрано: A дубль B` снимает обе записи, а не одну A (#807)."""
+    (record,) = changerefs.resolutions_parsed("Разобрано: 456de48 дубль 259442a")
+    assert record.marks == ("456de48", "259442a")
+    (quoted,) = changerefs.resolutions_parsed("Разобрано: `456de48` дубль `259442a` — почему")
+    assert quoted.marks == ("456de48", "259442a") and quoted.why == "— почему"
+    assert changerefs.resolved_in("Разобрано: 456de48 дубль 259442a") == ["456de48", "259442a"]
+
+
+def test_a_word_that_is_not_a_twin_stays_a_reason() -> None:
+    """Иное слово после отпечатка — пояснение, и отпечаток в нём не снимается (068)."""
+    (record,) = changerefs.resolutions_parsed("Разобрано: 1111111 — сосед deadbeef рядом")
+    assert record.marks == ("1111111",)
+    (long,) = changerefs.resolutions_parsed("Разобрано: 1111111 дубль 22222223")
+    assert long.marks == ("1111111",), "восемь знаков — не отпечаток"
+
+
+@pytest.mark.parametrize(
+    ("line", "marks", "twins"),
+    [
+        ("Разобрано: 456de48 дубль 259442a", ("456de48", "259442a"), {"456de48": "259442a"}),
+        (
+            "Разобрано: aaaaaaa, ccccccc дубль bbbbbbb",
+            ("aaaaaaa", "ccccccc", "bbbbbbb"),
+            {"aaaaaaa": "bbbbbbb", "ccccccc": "bbbbbbb"},
+        ),
+        (
+            "Разобрано: aaaaaaa дубль bbbbbbb, ccccccc",
+            ("aaaaaaa", "bbbbbbb", "ccccccc"),
+            {"aaaaaaa": "bbbbbbb"},
+        ),
+        (
+            "Разобрано: aaaaaaa дубль bbbbbbb дубль ccccccc — почему",
+            ("aaaaaaa", "bbbbbbb", "ccccccc"),
+            {"aaaaaaa": "bbbbbbb", "bbbbbbb": "ccccccc"},
+        ),
+        ("Разобрано: AAAAAAA ДУБЛЬ BBBBBBB", ("aaaaaaa", "bbbbbbb"), {"aaaaaaa": "bbbbbbb"}),
+    ],
+    ids=["пара", "список до", "список после", "цепочка", "регистр"],
+)
+def test_every_twin_in_a_chain_is_resolved(
+    line: str, marks: tuple[str, ...], twins: dict[str, str]
+) -> None:
+    """Вся цепочка дублей снимается, и связь дублей видна (взгляд на #809)."""
+    (record,) = changerefs.resolutions_parsed(line)
+    assert record.marks == marks
+    assert record.twin_of == twins
+
+
+def test_a_twin_line_travels_to_the_change_body_in_its_own_form() -> None:
+    """Строка доезжает до тела изменения с «дубль»: архив читает связь оттуда (#807)."""
+    (record,) = changerefs.resolutions_parsed("Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так")
+    assert str(record) == "Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так"
+    (again,) = changerefs.resolutions_parsed(str(record))
+    assert again.marks == record.marks and again.twin_of == record.twin_of
