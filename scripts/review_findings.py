@@ -642,7 +642,10 @@ def parse_swept(body: str | None) -> str:
 
 
 def twins_of_resolved(
-    swept: set[str], entries: dict[str, findings.Entry], *, strict: bool = False
+    swept: set[str],
+    entries: dict[str, findings.Entry],
+    *,
+    strict: bool = False,
 ) -> dict[str, str]:
     """Открытые записи, которые — дубли снятых: отпечаток → снятый, чей он дубль.
 
@@ -655,7 +658,12 @@ def twins_of_resolved(
       заголовки отдельно, и уборка того же захода их не сводит;
     - тот же ФАЙЛ (`finding_chains.place_of` берёт путь без строки): совпавший
       файл тождеством сам не считается (#657), а без него сходство слов свело
-      бы беды разных файлов.
+      бы беды разных файлов;
+    - тот же род записи: находку об ОТВЕТЕ снимает только правка ответа
+      (`closable`), и дублем находки о коде она не уходит (взгляд на #818).
+      Этого хватает и для записи с отвергнутым снятием: она всегда об ответе,
+      а снятая запись того же изменения и рода была бы отвергнута тем же
+      `closable`. Отдельное исключение для неё недостижимо (взгляд на #823).
     """
     # Импорт здесь, а не наверху: `finding_chains` сам читает этот модуль.
     import finding_chains
@@ -670,6 +678,7 @@ def twins_of_resolved(
             if (
                 place
                 and entry.pr == other.pr
+                and entry.kind == other.kind
                 and place == finding_chains.place_of(other.title)
                 and same_finding(entry.title, other.title, strict=strict)
             ):
@@ -679,7 +688,10 @@ def twins_of_resolved(
 
 
 def drop_resolved(
-    entries: dict[str, findings.Entry], swept: set[str], *, strict: bool = False
+    entries: dict[str, findings.Entry],
+    swept: set[str],
+    *,
+    strict: bool = False,
 ) -> dict[str, str]:
     """Убирает снятые записи и их дубли; отдаёт дубли, чтобы их назвать (#807)."""
     twins = twins_of_resolved(swept, entries, strict=strict)

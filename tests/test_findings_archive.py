@@ -451,3 +451,39 @@ def test_a_null_resolutions_reads_as_empty(tmp_path: Path) -> None:
     path = tmp_path / "findings.json"
     path.write_text('{"findings": null, "resolutions": null}', encoding="utf-8")
     assert module.previous(path)["resolutions"] is None
+
+
+def test_a_later_twin_line_keeps_the_link() -> None:
+    """«Разобрано: A», затем «A дубль B» — связь A→B не теряется (взгляд на #814)."""
+    body = "\n".join(
+        module.changerefs.resolutions_in_all(
+            ["Разобрано: aaaaaaa", "Разобрано: aaaaaaa дубль bbbbbbb"]
+        )
+    )
+    assert module.resolved_in(body) == {"aaaaaaa": "bbbbbbb", "bbbbbbb": ""}
+
+
+def test_a_twin_named_by_a_later_change_joins_the_earlier_resolution() -> None:
+    """Связь, названная следующим изменением, дописывается к раннему снятию, а снял — первый."""
+    archive: dict[str, Any] = {"findings": {}, "resolutions": {}}
+    module.add_change(archive, 1, [], "Разобрано: aaaaaaa")
+    module.add_change(archive, 2, [], "Разобрано: aaaaaaa дубль bbbbbbb")
+    assert archive["resolutions"]["aaaaaaa"] == {"by": 1, "twin_of": "bbbbbbb"}
+    assert archive["resolutions"]["bbbbbbb"] == {"by": 2, "twin_of": ""}
+
+
+def test_opposite_twin_lines_do_not_make_a_loop() -> None:
+    """«A дубль B», затем «B дубль A» — связь остаётся первой, круга нет (взгляд на #824)."""
+    body = "Разобрано: aaaaaaa дубль bbbbbbb\nРазобрано: bbbbbbb дубль aaaaaaa"
+    assert module.resolved_in(body) == {"aaaaaaa": "bbbbbbb", "bbbbbbb": ""}
+    archive: dict[str, Any] = {"findings": {}, "resolutions": {}}
+    module.add_change(archive, 1, [], "Разобрано: aaaaaaa дубль bbbbbbb")
+    module.add_change(archive, 2, [], "Разобрано: bbbbbbb дубль aaaaaaa")
+    assert archive["resolutions"]["bbbbbbb"]["twin_of"] == ""
+
+
+def test_loops_back_follows_the_chain() -> None:
+    """Круг узнаётся и через звено посередине: C → A при A → B → C."""
+    links = {"aaaaaaa": "bbbbbbb", "bbbbbbb": "ccccccc"}
+    assert module.loops_back("aaaaaaa", "ccccccc", links) is True
+    assert module.loops_back("ddddddd", "ccccccc", links) is False
