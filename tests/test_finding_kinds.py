@@ -379,8 +379,8 @@ def test_a_kind_shows_its_fate_in_the_archive(
     assert module.main(["--archive", str(path)]) == module.EXIT_OK
     said = capsys.readouterr().out
     assert "архив: 3, снято работой 1, дублем 1" in said
-    assert "записей архива без рода: 1 — снято работой 0, дублем 0" in said
-    assert "род архива вне словаря:" not in said
+    assert f"{module.KINDLESS} 1 — снято работой 0, дублем 0" in said
+    assert module.OUTSIDE not in said
 
 
 def test_an_unfilled_archive_says_so_in_the_kinds(
