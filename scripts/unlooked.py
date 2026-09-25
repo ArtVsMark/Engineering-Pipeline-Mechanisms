@@ -236,18 +236,10 @@ def is_run_answer(comment: dict[str, Any]) -> bool:
     это безразлично — отсеиваются оба, а `late_seen` засчитает такой ответ
     поздним взглядом.
     """
-    body = str(comment.get("body") or "").lstrip()
-    author = str((comment.get("user") or {}).get("login") or "")
-    return is_late_look(comment) or (author == LATE_AUTHOR and body.startswith(VERIFY_MARKER))
-
-
-def is_verification(comment: dict[str, Any]) -> bool:
-    """Это ответ верификатора — признак один, `review_findings.is_verification`.
-
-    Отдельно от `is_run_answer` для читателя, который поздний взгляд считает
-    намеренно, а верификатора — нет: замер цепочек (взгляд на #827).
-    """
-    return review_findings.is_verification(comment)
+    # ПРИЗНАК ВЕРИФИКАТОРА ОДИН — `review_findings.is_verification`: вторая
+    # его копия здесь развела бы очередь слияний со сборщиком реестра молча
+    # (взгляд на #833).
+    return is_late_look(comment) or review_findings.is_verification(comment)
 
 
 #: Хвост записи, которым поздний взгляд ДОПИСЫВАЕТСЯ к состоянию, а не заменяет

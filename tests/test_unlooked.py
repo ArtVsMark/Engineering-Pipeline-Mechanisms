@@ -1130,8 +1130,9 @@ def test_is_run_answer_needs_the_run_and_a_marker(login: str, body: str, answer:
     assert module.is_run_answer({"user": {"login": login}, "body": body}) is answer
 
 
-def test_is_verification_tells_the_verifier_from_the_late_look() -> None:
-    """Верификатор — ответ прогона с меткой верификатора, поздний взгляд им не считается."""
-    run = {"login": module.LATE_AUTHOR}
-    assert module.is_verification({"user": run, "body": f"{module.VERIFY_MARKER}\nда"})
-    assert not module.is_verification({"user": run, "body": f"{module.LATE_MARKER}\nда"})
+def test_is_run_answer_reads_the_one_verifier_sign(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Верификатора `is_run_answer` узнаёт общим признаком, а не своей копией (#833)."""
+    comment = {"user": {"login": "кто-то"}, "body": "что угодно"}
+    assert not module.is_run_answer(comment)
+    monkeypatch.setattr(module.review_findings, "is_verification", lambda _one: True)
+    assert module.is_run_answer(comment)

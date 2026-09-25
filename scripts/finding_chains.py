@@ -87,7 +87,6 @@ from typing import Any, Final
 import findings
 import ghrest
 import review_findings
-import unlooked
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -253,12 +252,13 @@ def read_counted(
         #
         # ВТОРОЙ ЦИТАТЧИК НЕ ОТСЕВАЕТСЯ: ответчик по обращению (`claude.yml`)
         # пишет от `claude[bot]`, как и взгляд, и метки у него нет — по «это
-        # бот» их не различить (`unlooked.LATE_AUTHOR`). Процитированная им
+        # бот» их не различить (`review_findings.LATE_AUTHOR`). Процитированная им
         # находка идёт в замер.
         looks = [
             one
             for one in comments
-            if (one.get("user") or {}).get("type") == "Bot" and not unlooked.is_verification(one)
+            if (one.get("user") or {}).get("type") == "Bot"
+            and not review_findings.is_verification(one)
         ]
         kept += sum(1 for one in looks if review_findings.verdict_of([one]) is not None)
         said += [(number, found[1]) for found in review_findings.findings_of(looks)]
