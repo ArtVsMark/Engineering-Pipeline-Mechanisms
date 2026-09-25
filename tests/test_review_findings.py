@@ -360,7 +360,7 @@ def test_the_registry_does_not_get_the_earlier_look_back(
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter(feed))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     monkeypatch.setattr(
         module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
     )
@@ -604,7 +604,7 @@ def test_a_resolution_is_read_from_the_sweep_mark_not_a_fixed_window(
     # меряется её размером (находка #418).
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     marks, mark = module.resolved_marks("o/r", "токен", "2026-09-16T11:00:00Z")
-    assert marks == {"aaaaaaa"}, "прочитано не от отметки уборки"
+    assert marks == {"aaaaaaa": {50}}, "прочитано не от отметки уборки (или не названо, кем)"
     assert mark == "2026-09-16T12:00:00Z", "отметка не сдвинулась на прочитанное"
 
 
@@ -737,7 +737,7 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
         module, "findings_of", lambda look: [("дефект", "тот же дефект другими словами", "код")]
     )
     monkey.setattr(module, "pair_up", lambda *_, **__: ["abc1234"])
-    monkey.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
+    monkey.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     written: dict[str, Any] = {}
     monkey.setattr(
         module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
@@ -792,7 +792,7 @@ def test_an_empty_registry_is_its_own_outcome(
     """
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_NOTHING
 
@@ -803,7 +803,7 @@ def test_a_registry_with_entries_stays_pending(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_PENDING
 
@@ -829,7 +829,7 @@ def test_a_verdict_that_disagrees_with_its_list_is_announced(
     monkeypatch.setattr(
         module, "findings_of", lambda comments: [("дефект", "очередь читает не то", "код")]
     )
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     module.main(["--repo", "o/r", "--pr", "131"])
     said = capsys.readouterr().err
@@ -908,7 +908,7 @@ def test_a_full_page_with_nothing_merged_still_warns(
     said = capsys.readouterr().err
     assert "страница закрытых заполнена" in said, "механизм молчит в своём предельном случае"
     assert "2026-09-12T10:00:00Z" in said, "край страницы взят не со страницы, а со слитых"
-    assert marks == set(), "прочитано то, чего на странице нет"
+    assert marks == {}, "прочитано то, чего на странице нет"
     assert mark == "2026-09-01T00:00:00Z", "отметка двинулась по непрочитанному"
 
 
@@ -950,7 +950,7 @@ def test_a_change_merged_late_with_a_lower_number_is_still_read(
     ]
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     marks, mark = module.resolved_marks("o/r", "токен", "2026-09-17T13:51:00Z")
-    assert marks == {"aaaaaaa", "ccccccc"}, (
+    assert set(marks) == {"aaaaaaa", "ccccccc"}, (
         "снятие изменения с МЕНЬШИМ номером, слитого позже, не прочитано — "
         "отметка идёт по номеру, а не по времени слияния"
     )
@@ -971,7 +971,7 @@ def test_a_merge_without_a_time_does_not_move_the_mark(
     ]
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     marks, mark = module.resolved_marks("o/r", "токен", "2026-09-17T14:00:00Z")
-    assert marks == {"eeeeeee"}, "прочитано слитое без времени"
+    assert set(marks) == {"eeeeeee"}, "прочитано слитое без времени"
     assert mark == "2026-09-17T15:00:00Z", "отметка сдвинулась по записи без времени"
 
 
@@ -1174,7 +1174,7 @@ def test_an_answer_finding_is_not_closed_without_touching_the_answer(
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
     assert берём == set(), "снятие принято при нетронутом ответе"
     assert "abc1234" in держим and module.ANSWER_FILE in держим["abc1234"]
 
@@ -1191,8 +1191,25 @@ def test_an_answer_finding_is_closed_when_the_answer_was_edited(
     monkeypatch.setattr(
         module, "touched", lambda repo, token, number: {module.ANSWER_FILE, "scripts/arm.py"}
     )
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
+
+
+def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Файлы спрашиваются у СНЯВШЕГО изменения, а не у того, где нашли (#834).
+
+    Находку об ответе нашли на #10, где ответ не правили; сняло её #20, которое
+    ответ правило. Прежде проверялось #10, и такую находку не снимало ничто.
+    """
+    entries = отметка(10, findings_module.ANSWER_KIND)
+    files = {10: {"scripts/arm.py"}, 20: {module.ANSWER_FILE}}
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
+    assert берём == {"abc1234"} and not держим
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {10}})
+    assert not берём and "#10" in держим["abc1234"]
 
 
 def test_a_code_finding_is_closed_without_asking_the_platform(
@@ -1209,7 +1226,7 @@ def test_a_code_finding_is_closed_without_asking_the_platform(
         raise AssertionError("файлы спрошены у находки о коде")
 
     monkeypatch.setattr(module, "touched", нельзя)
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
 
 
@@ -1225,7 +1242,7 @@ def test_a_silent_platform_lets_the_resolution_through(
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(module, "touched", lambda repo, token, number: set())
-    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries)
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
 
 
@@ -1520,7 +1537,7 @@ def test_a_new_entry_keeps_the_role_that_saw_it(monkeypatch: pytest.MonkeyPatch)
         module, "found_in", lambda look: [("риск", "увидено архитектором", "код", "архитектор")]
     )
     monkeypatch.setattr(module, "pair_up", lambda *_, **__: [None])
-    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": (set(), since))
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     written: dict[str, Any] = {}
     monkeypatch.setattr(
         module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)

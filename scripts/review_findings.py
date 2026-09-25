@@ -727,8 +727,12 @@ def drop_resolved(
 
 def resolved_marks(
     repo: str, token: str, since: str = "", limit: int = ghrest.MERGED_WINDOW
-) -> tuple[set[str], str]:
-    """Отпечатки, названные разобранными в слитом ПОСЛЕ отметки уборки.
+) -> tuple[dict[str, set[int]], str]:
+    """Отпечатки, названные разобранными в слитом ПОСЛЕ отметки уборки, и кем.
+
+    У отпечатка — номера СНЯВШИХ изменений: находку об ответе принимает только
+    снятие изменением, тронувшим ответ, и спрашивать надо его, а не изменение,
+    на котором находку нашли (взгляд на #834, `f73648a`).
 
     СРОК ЖИЗНИ СНЯТИЯ СЧИТАЕТСЯ ОТ ТОГО, КОГДА ЕГО ПРОЧЛИ, А НЕ КОГДА ОПУБЛИКОВАЛИ
     ([079](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/079-ttl-counts-from-completion.md)).
@@ -752,7 +756,7 @@ def resolved_marks(
     слито больше, чем помещается на странице, отметка перешагнёт неувиденное — и
     об этом говорится вслух, как у реестра непросмотренного (045).
     """
-    marks: set[str] = set()
+    marks: dict[str, set[int]] = {}
     mark = since
     merged, page = ghrest.merged_page(repo, token, limit)
     # САМЫЙ СТАРЫЙ НОМЕР БЕРЁТСЯ СО СТРАНИЦЫ, А НЕ СО СЛИТЫХ НА НЕЙ. При нуле
@@ -783,7 +787,8 @@ def resolved_marks(
         mark = max(mark, when)
         if when <= since:
             continue
-        marks.update(changerefs.resolved_in(item.get("body") or ""))
+        for one in changerefs.resolved_in(item.get("body") or ""):
+            marks.setdefault(one, set()).add(int(item.get("number") or 0))
     # ПОЛНОТА СТРАНИЦЫ МЕРЯЕТСЯ СТРАНИЦЕЙ, А НЕ СЛИТЫМИ НА НЕЙ. Запрос идёт за
     # закрытыми, и слитых на полной странице бывает горстка: счёт по слитым
     # молчал бы ровно тогда, когда закрытых без слияния много, — то есть в том
@@ -822,9 +827,19 @@ def touched(repo: str, token: str, number: int) -> set[str]:
 
 
 def closable(
-    repo: str, token: str, marks: set[str], entries: dict[str, findings.Entry]
+    repo: str,
+    token: str,
+    marks: set[str],
+    entries: dict[str, findings.Entry],
+    by: dict[str, set[int]],
 ) -> tuple[set[str], dict[str, str]]:
     """Какие снятия принимаются, а какие — нет, и почему.
+
+    ФАЙЛЫ СПРАШИВАЮТСЯ У СНЯВШЕГО ИЗМЕНЕНИЯ (`by`), а не у того, где находку
+    нашли. Прежде проверялось `entry.pr`, и находку об ответе, поднятую на
+    изменении без правки ответа, не снимало никакое изменение — даже правившее
+    ответ (взгляд на #834, `f73648a`). Снявших несколько — хватает одного,
+    тронувшего ответ.
 
     НАХОДКА ОБ ОТВЕТЕ ЧИНИТСЯ ПРАВКОЙ ОТВЕТА, И ЭТО ПРОВЕРЯЕМО. У находки о коде
     предмет размыт — починить её можно где угодно в дереве, — а у находки об
@@ -849,14 +864,16 @@ def closable(
         if entry.kind != findings.ANSWER_KIND:
             берём.add(mark)
             continue
-        if entry.pr not in файлы:
-            файлы[entry.pr] = touched(repo, token, entry.pr)
-        тронуто = файлы[entry.pr]
-        if not тронуто or ANSWER_FILE in тронуто:
+        снявшие = sorted(by.get(mark) or ())
+        for number in снявшие:
+            if number not in файлы:
+                файлы[number] = touched(repo, token, number)
+        if any(not файлы[n] or ANSWER_FILE in файлы[n] for n in снявшие):
             берём.add(mark)
             continue
+        names = ", ".join(f"#{n}" for n in снявшие) or "снявшее изменение"
         держим[mark] = (
-            f"находка об ОТВЕТЕ, а изменение #{entry.pr} не трогало {ANSWER_FILE}. "
+            f"находка об ОТВЕТЕ, а {names} не трогало {ANSWER_FILE}. "
             "Ответ каталогу чинится правкой ответа: снятие говорит о работе, которой нет"
         )
     return берём, держим
@@ -1015,7 +1032,7 @@ def main(argv: list[str] | None = None) -> int:
         # Уборка идёт ПОСЛЕ записи, а не вместо: обратный порядок терял бы
         # заметку, снятую и заново найденную одним заходом.
         marks, swept_to = resolved_marks(args.repo, token, parse_swept(body))
-        swept, held = closable(args.repo, token, marks & set(entries), entries)
+        swept, held = closable(args.repo, token, set(marks) & set(entries), entries, marks)
         twins = drop_resolved(entries, set(swept), strict=args.strict)
         if swept:
             print(f"снято как разобранное: {', '.join(sorted(swept))}")
