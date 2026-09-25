@@ -92,10 +92,16 @@ def previous(path: Path | None) -> dict[str, Any]:
     """Прежний архив из файла, взятого прогоном с ветки; нет файла — начало с нуля."""
     if path is None:
         return {}
+    # ФОРМУ ПРОВЕРЯЕТ ТО ЖЕ ЧТЕНИЕ, ЧТО У ЗАМЕРОВ (`findings.read_archive`): сборщик
+    # читал прежний архив голым `json.loads`, и скаляр в `counted` ронял сборку
+    # трассой, а ложная `findings` проходила пустым архивом и перезаписывала
+    # прежний (взгляд на #822).
     try:
-        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = registry.read_archive(path)
+    except ValueError as exc:
         raise NotRun(f"прежний архив не разбирается — {exc}") from exc
+    if not isinstance(data.get("resolutions", {}), dict):
+        raise NotRun("прежний архив не разбирается — `resolutions` не словарь")
     return data
 
 

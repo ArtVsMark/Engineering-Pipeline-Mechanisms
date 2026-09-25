@@ -417,3 +417,16 @@ def test_the_archive_reads_a_twin_line_as_the_registry_does() -> None:
     said = module.resolved_in(line)
     assert said == {"aaaaaaa": "bbbbbbb", "ccccccc": "bbbbbbb", "bbbbbbb": "", "1111111": ""}
     assert set(said) == set(module.changerefs.resolved_in(line))
+
+
+@pytest.mark.parametrize(
+    "said",
+    ['{"counted": 5}', '{"findings": []}', '{"resolutions": []}'],
+    ids=["скаляр в counted", "ложная findings", "resolutions списком"],
+)
+def test_a_foreign_previous_archive_is_a_refusal(tmp_path: Path, said: str) -> None:
+    """Прежний архив чужой формы — отказ сборки, а не трасса и не пустой архив (#822)."""
+    path = tmp_path / "findings.json"
+    path.write_text(said, encoding="utf-8")
+    with pytest.raises(module.NotRun):
+        module.previous(path)

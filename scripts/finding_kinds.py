@@ -260,8 +260,10 @@ def unanswered(kinds: dict[str, Any], queue: str) -> list[tuple[str, int]]:
     ]
 
 
-#: Имя, под которым считаются записи архива без рода.
-NO_KIND: Final = "без рода"
+#: Ключ записей архива без рода. Пустой намеренно: пустое имя родом словаря
+#: быть не может, и записи без рода не сольются с настоящим родом, как слились
+#: бы под словами «без рода» (взгляд на #822).
+NO_KIND: Final = ""
 
 
 def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
@@ -327,12 +329,17 @@ def main(argv: list[str] | None = None) -> int:
     # РОД АРХИВА ВНЕ СЛОВАРЯ НЕ ВЫПАДАЕТ МОЛЧА: переименованный, снятый или
     # чужой по `--kinds` род иначе уменьшал бы сумму архива без слова (взгляд
     # на #817).
-    for name in sorted(set(archived) - set(kinds)):
+    for name in sorted(set(archived) - set(kinds) - {NO_KIND}):
         total, worked, twinned = archived[name]
         print(
             f"  род архива вне словаря: {name} — архив: {total},"
             f" снято работой {worked}, дублем {twinned}"
         )
+    # ЗАПИСИ БЕЗ РОДА — СВОЕЙ СТРОКОЙ: рода у них нет вовсе, и «вне словаря»
+    # назвало бы другую причину — переименованный или снятый род.
+    if NO_KIND in archived:
+        total, worked, twinned = archived[NO_KIND]
+        print(f"  записей архива без рода: {total} — снято работой {worked}, дублем {twinned}")
 
     debt = unheld(kinds)
     if not debt:
