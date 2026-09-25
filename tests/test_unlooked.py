@@ -1102,3 +1102,29 @@ def test_a_verifier_answer_is_not_a_late_look() -> None:
     }
     assert not module.is_late_look(posted)
     assert module.late_seen([posted]) == ""
+
+
+def test_a_verifier_answer_is_not_a_look_before_the_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ответ верификатора с `ВЕРДИКТ:` не делает изменение просмотренным (взгляд на #825)."""
+    late_look = load_script("late_look.py")
+    posted = {
+        "user": {"type": "Bot", "login": module.LATE_AUTHOR},
+        "body": late_look.compose_verification("ПРЕМИСА: подтверждена — так\nВЕРДИКТ: находок 0"),
+    }
+    monkeypatch.setattr(module, "head_runs", lambda *_a, **_k: [])
+    assert module.look_at("o/r", 7, "t", lambda _n: [posted]) == module.STATE_NONE
+
+
+@pytest.mark.parametrize(
+    ("login", "body", "answer"),
+    [
+        (module.LATE_AUTHOR, f"{module.VERIFY_MARKER}\nПРЕМИСА: да", True),
+        (module.LATE_AUTHOR, f"{module.LATE_MARKER}\nответ", True),
+        ("claude[bot]", f"{module.VERIFY_MARKER}\nВЕРДИКТ: находок 0", False),
+        (module.LATE_AUTHOR, "ВЕРДИКТ: находок 0", False),
+    ],
+    ids=["верификатор", "поздний взгляд", "цитата ревьюера", "без метки"],
+)
+def test_is_run_answer_needs_the_run_and_a_marker(login: str, body: str, answer: bool) -> None:
+    """Ответ прогона — автор-прогон и одна из двух меток первой строкой."""
+    assert module.is_run_answer({"user": {"login": login}, "body": body}) is answer
