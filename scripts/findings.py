@@ -334,9 +334,19 @@ def read_archive(path: Path) -> dict[str, Any]:
         raise ValueError(f"архив не прочитан — {exc}") from exc
     if not isinstance(archive, dict):
         raise ValueError("архив не словарь")
-    entries = archive.get("findings") or {}
+    # ОТСУТСТВИЕ — ПУСТОЙ АРХИВ, ЛОЖНОЕ ЗНАЧЕНИЕ — ЧУЖАЯ ФОРМА: `[]`, `""` или `0`
+    # под `or {}` проходили пустым архивом (взгляд на #822).
+    raw = archive.get("findings")
+    entries = {} if raw is None else raw
     if not isinstance(entries, dict) or not all(isinstance(one, dict) for one in entries.values()):
         raise ValueError("`findings` в архиве — не словарь записей")
+    # СПИСОК ПРОВЕРЯЕТСЯ ДО ОБХОДА: скаляр в `counted` ронял обход трассой, а
+    # строка в `gaps` обходилась по символам, и неполный архив читался полным
+    # (взгляд на #817).
+    lists = [archive.get("counted"), archive.get("gaps")]
+    lists += [one.get("seen_on") for one in entries.values()]
+    if not all(isinstance(one, list) for one in lists if one is not None):
+        raise ValueError("`counted`, `gaps` или `seen_on` в архиве — не список")
     numbers = [*(archive.get("counted") or [])]
     numbers += [number for one in entries.values() for number in one.get("seen_on") or []]
     if not all(isinstance(number, int) and not isinstance(number, bool) for number in numbers):
