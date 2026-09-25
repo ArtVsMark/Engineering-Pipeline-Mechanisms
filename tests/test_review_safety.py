@@ -689,6 +689,10 @@ def commands_of(run: str) -> list[str]:
     return found
 
 
+#: Разделители, склеивающие команды в одной строке.
+SHELL_JOIN: Final = re.compile(r";|&&|\|\||(?<!\|)\|(?!\|)")
+#: Подмена интерпретатора в шаге: свой `PATH`, псевдоним или функция.
+INTERPRETER_SWAP: Final = re.compile(r"(?:^|\s)PATH=|\balias\s|\b\w+\s*\(\)\s*\{|\bfunction\s")
 #: Путь импорта карты: база, развёрнутая рядом.
 BASE_TRANSPORT: Final = '"$RUNNER_TEMP/base/packages/transport"'
 #: Вызов карты из базы — общий хвост тестовых случаев.
@@ -714,6 +718,18 @@ def map_path_is_pinned(commands: list[str], at: int) -> str:
         return f"вызов не начинается с пути импорта базы: {command}"
     if command.count("PYTHONPATH") != 1:
         return f"PYTHONPATH упомянут в команде вызова дважды: {command}"
+    # ВЫЗОВ — ПЕРВАЯ ПРОСТАЯ КОМАНДА СТРОКИ. Префикс, отделённый от вызова
+    # `;`, `&&`, `||` или `|`, действует на другую команду (`PYTHONPATH=база
+    # true; python …`), и путь базы у самого вызова пропадает (взгляд на #813).
+    # То, что стоит ПОСЛЕ вызова (`|| rc=$?`), путь импорта не меняет.
+    head = SHELL_JOIN.split(command, maxsplit=1)[0]
+    if "review_map.py" not in head:
+        return f"префикс отделён от вызова карты другой командой: {command}"
+    # Интерпретатор в шаге не подменяется: `PATH=`, `alias` и функция делают
+    # `python` чужим, и путь импорта базы уже ничего не держит (взгляд на #813).
+    swapped = [one for one in commands if INTERPRETER_SWAP.search(one)]
+    if swapped:
+        return f"шаг подменяет интерпретатор: {swapped}"
     return ""
 
 
@@ -743,6 +759,11 @@ def map_path_is_pinned(commands: list[str], at: int) -> str:
             False,
         ),
         ('python "$RUNNER_TEMP/base/scripts/review_map.py"\n', False),
+        (f"PYTHONPATH={BASE_TRANSPORT} true; {MAP_CALL}\n", False),
+        (f"PYTHONPATH={BASE_TRANSPORT} {MAP_CALL} || rc=$?\n", True),
+        (f"PATH=/tmp/x:$PATH\nPYTHONPATH={BASE_TRANSPORT} {MAP_CALL}\n", False),
+        (f"python() {{ :; }}\nPYTHONPATH={BASE_TRANSPORT} {MAP_CALL}\n", False),
+        (f"alias python=true\nPYTHONPATH={BASE_TRANSPORT} {MAP_CALL}\n", False),
     ],
     ids=[
         "префикс",
@@ -753,6 +774,11 @@ def map_path_is_pinned(commands: list[str], at: int) -> str:
         "&&",
         "env",
         "без пути",
+        "префикс у другой команды",
+        "страховка кода после вызова",
+        "свой PATH",
+        "функция python",
+        "псевдоним",
     ],
 )
 def test_the_map_path_is_pinned_only_by_its_own_prefix(run: str, pinned: bool) -> None:
