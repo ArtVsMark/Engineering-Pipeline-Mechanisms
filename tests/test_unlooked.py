@@ -1090,3 +1090,15 @@ def test_the_queue_output_stays_one_line_when_a_feed_is_refused(
 def test_is_late_look_needs_the_run_and_the_first_line(login: str, body: str, late: bool) -> None:
     """Поздний взгляд — автор-прогон и метка первой строкой, а не любое вхождение."""
     assert module.is_late_look({"user": {"login": login}, "body": body}) is late
+
+
+def test_a_verifier_answer_is_not_a_late_look() -> None:
+    """Ответ верификатора пишет тот же шаг тем же токеном, но это не поздний взгляд (#815)."""
+    late_look = load_script("late_look.py")
+    posted = {
+        "user": {"type": "Bot", "login": module.LATE_AUTHOR},
+        "body": late_look.compose_verification("ПРЕМИСА: подтверждена — так"),
+        "created_at": "2026-09-25T12:00:00Z",
+    }
+    assert not module.is_late_look(posted)
+    assert module.late_seen([posted]) == ""
