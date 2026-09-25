@@ -700,3 +700,20 @@ def test_the_first_declared_fix_wins() -> None:
         "lint"
     )
     assert changerefs.fixes_main_in_all(["Refs #1"]) is None
+
+
+def test_a_twin_after_the_word_is_resolved_too() -> None:
+    """`Разобрано: A дубль B` снимает обе записи, а не одну A (#807)."""
+    (record,) = changerefs.resolutions_parsed("Разобрано: 456de48 дубль 259442a")
+    assert record.marks == ("456de48", "259442a")
+    (quoted,) = changerefs.resolutions_parsed("Разобрано: `456de48` дубль `259442a` — почему")
+    assert quoted.marks == ("456de48", "259442a") and quoted.why == "— почему"
+    assert changerefs.resolved_in("Разобрано: 456de48 дубль 259442a") == ["456de48", "259442a"]
+
+
+def test_a_word_that_is_not_a_twin_stays_a_reason() -> None:
+    """Иное слово после отпечатка — пояснение, и отпечаток в нём не снимается (068)."""
+    (record,) = changerefs.resolutions_parsed("Разобрано: 1111111 — сосед deadbeef рядом")
+    assert record.marks == ("1111111",)
+    (long,) = changerefs.resolutions_parsed("Разобрано: 1111111 дубль 22222223")
+    assert long.marks == ("1111111",), "восемь знаков — не отпечаток"

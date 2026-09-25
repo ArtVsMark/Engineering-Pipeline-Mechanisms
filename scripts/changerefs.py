@@ -96,6 +96,11 @@ RESOLVED_RE: Final = re.compile(
 #: ветке огрызком.
 MARK_RUN_RE: Final = re.compile(r"\A(?:[\s,;`]*[0-9a-f]{7}(?![0-9a-f]))+[\s,;`]*")
 MARK_RE: Final = re.compile(r"[0-9a-f]{7}")
+#: Дубль после отпечатков: `Разобрано: A дубль B`. Снимаются ОБА — строку так
+#: пишут, и архив (`findings_archive`) читает её парой. Пока разбор брал
+#: отпечатки только до первого слова, B уходила в пояснение и висела в реестре
+#: исправленной: четыре такие записи на 25.09.2026 (#807).
+TWIN_RE: Final = re.compile(r"\A\s*дубль\s+`?([0-9a-f]{7})(?![0-9a-f])`?", re.IGNORECASE)
 #: ЗАКРЫТЫЙ ПУНКТ ЧЕК-ЛИСТА. Площадка умеет только полное закрытие: `Closes #N`
 #: закрывает задачу целиком, и задача из нескольких этапов закрывается
 #: преждевременно вместе с несделанными. `Refs #N` не отмечает ничего, и после
@@ -353,7 +358,13 @@ def resolutions_parsed(text: str) -> list[Resolution]:
         run = MARK_RUN_RE.match(tail.lower())
         if not run:
             continue
-        found.append(Resolution(tuple(MARK_RE.findall(run.group(0))), tail[run.end() :].strip()))
+        marks = tuple(MARK_RE.findall(run.group(0)))
+        rest = tail[run.end() :]
+        twin = TWIN_RE.match(rest)
+        if twin:
+            marks += (twin.group(1).lower(),)
+            rest = rest[twin.end() :]
+        found.append(Resolution(marks, rest.strip()))
     return found
 
 
