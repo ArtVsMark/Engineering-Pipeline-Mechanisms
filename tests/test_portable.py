@@ -22,7 +22,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script, string_args_of
+from tests.conftest import ROOT, load_script, string_args_of, walk
 
 paths = load_script("paths.py")
 
@@ -431,3 +431,65 @@ def test_the_named_limits_are_what_the_measure_misses(text: str, suffix: str) ->
 def test_the_limit_has_a_positive_control(text: str, suffix: str) -> None:
     """Тот же номер буквами в строке адреса замер видит: предел — не слепота образца."""
     assert pinned_in(text, suffix, ["Me/Project"], [], [639]) == [1]
+
+
+#: Что скрипт читает через `paths.*`, но наполнением механизма не является, —
+#: с причиной у каждого. Список закрытый (154): остальное, что лежит в
+#: `.rules/`, `docs/` или в сводах, — наполнение, и ответ его называет.
+NOT_FILLING: Final[dict[str, str]] = {
+    "changelog.d": "журнал самого проекта: механизм его собирает, а не настраивается им",
+    "changelog.d/released": "журнал самого проекта: выпущенные фрагменты",
+    ".github/badges": "выход скрипта, а не вход",
+}
+#: Где лежит наполнение проекта: настройки, договор и своды.
+FILLING_ROOTS: Final = (".rules/", "docs/", "AGENTS.md", "CLAUDE.md", "README.md")
+
+
+def filling_read_by(source: str, constants: dict[str, str]) -> set[str]:
+    """Пути наполнения, которые код читает через константы `paths.*`."""
+    used = set(re.findall(r"paths\.([A-Z_]+)", source))
+    found = {constants[name] for name in used if name in constants}
+    return {one for one in found if one.startswith(FILLING_ROOTS) and one not in NOT_FILLING}
+
+
+def path_constants() -> dict[str, str]:
+    """Константы `paths.*`, указывающие внутрь дерева, — как пути от корня."""
+    out: dict[str, str] = {}
+    for name in dir(paths):
+        value = getattr(paths, name)
+        if name.isupper() and isinstance(value, Path):
+            try:
+                out[name] = str(value.resolve().relative_to(ROOT))
+            except ValueError:
+                continue
+    return out
+
+
+def test_a_configured_answer_names_every_filling_it_reads() -> None:
+    """Ответ «настроено» или «как есть» называет всё наполнение, которое скрипт читает.
+
+    ЗАМЕР 25.09.2026 (взгляды на #844): `review_map.py` и `findings.py`
+    читали `docs/review.md`, `.rules/review-roles.json` и `docs/roles.md`, а
+    ответ называл один `.rules/bindings.json`. Сосед, перенёсший механизм без
+    этого наполнения, молча терял бы роли. Чинилось по строке за заход, и по
+    правилу 210 сверка стала гейтом по всему инвентарю.
+    """
+    constants = path_constants()
+    answers = inventory()["answers"]
+    silent = {}
+    for path in sorted(walk(ROOT / "scripts", "*.py")):
+        answer = answers.get(f"scripts/{path.name}", {})
+        if answer.get("answer") not in ("configured", "as-is"):
+            continue
+        missing = filling_read_by(path.read_text(encoding="utf-8"), constants) - set(
+            answer.get("where", [])
+        )
+        if missing:
+            silent[path.name] = sorted(missing)
+    assert not silent, f"ответ не называет прочитанное наполнение: {silent}"
+
+
+def test_the_filling_gate_rejects_an_unnamed_read() -> None:
+    """Предикат видит чтение наполнения и пропускает названный выход (140)."""
+    constants = {"ROLES": "docs/roles.md", "BADGES": ".github/badges", "X": "scripts/x.py"}
+    assert filling_read_by("paths.ROLES; paths.BADGES; paths.X", constants) == {"docs/roles.md"}
