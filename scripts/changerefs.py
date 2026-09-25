@@ -96,6 +96,13 @@ RESOLVED_RE: Final = re.compile(
 #: ветке огрызком.
 MARK_RUN_RE: Final = re.compile(r"\A(?:[\s,;`]*[0-9a-f]{7}(?![0-9a-f]))+[\s,;`]*")
 MARK_RE: Final = re.compile(r"[0-9a-f]{7}")
+#: Дубль после отпечатков: `Разобрано: A дубль B`. Снимаются ОБА — строку так
+#: пишут, и архив (`findings_archive`) читает её парой. Пока разбор брал
+#: отпечатки только до первого слова, B уходила в пояснение и висела в реестре
+#: исправленной: четыре такие записи на 25.09.2026 (#807).
+TWIN_RE: Final = re.compile(
+    r"\A\s*дубль(?=[\s`])((?:[\s,;`]*[0-9a-f]{7}(?![0-9a-f]))+)[\s,;`]*", re.IGNORECASE
+)
 #: ЗАКРЫТЫЙ ПУНКТ ЧЕК-ЛИСТА. Площадка умеет только полное закрытие: `Closes #N`
 #: закрывает задачу целиком, и задача из нескольких этапов закрывается
 #: преждевременно вместе с несделанными. `Refs #N` не отмечает ничего, и после
@@ -199,10 +206,24 @@ class Resolution:
 
     marks: tuple[str, ...]
     why: str
+    #: Группы отпечатков, разделённые словом «дубль», как написал автор. Пусто —
+    #: одна группа, `marks`. Хранятся затем, чтобы строка доехала до тела
+    #: изменения В ТОЙ ЖЕ ФОРМЕ: архив читает связь дублей оттуда (#807).
+    groups: tuple[tuple[str, ...], ...] = ()
+
+    @property
+    def twin_of(self) -> dict[str, str]:
+        """Отпечаток → первый отпечаток следующей группы: «A дубль B» — A дубль B."""
+        found: dict[str, str] = {}
+        for here, there in zip(self.groups, self.groups[1:], strict=False):
+            for mark in here:
+                found[mark] = there[0]
+        return found
 
     def __str__(self) -> str:
         """Строка того вида, который едет в тело изменения и читает человек."""
-        return f"Разобрано: {', '.join(self.marks)} {self.why}".rstrip()
+        said = " дубль ".join(", ".join(group) for group in self.groups or (self.marks,))
+        return f"Разобрано: {said} {self.why}".rstrip()
 
 
 def blank(match: re.Match[str]) -> str:
@@ -353,7 +374,18 @@ def resolutions_parsed(text: str) -> list[Resolution]:
         run = MARK_RUN_RE.match(tail.lower())
         if not run:
             continue
-        found.append(Resolution(tuple(MARK_RE.findall(run.group(0))), tail[run.end() :].strip()))
+        groups = [tuple(MARK_RE.findall(run.group(0)))]
+        rest = tail[run.end() :]
+        # ЦЕПОЧКА ДУБЛЕЙ, А НЕ ОДИН: `A, C дубль B, D дубль E`. Всё, что стоит в
+        # цепочке, снимается — это один дефект, названный несколько раз, и
+        # работа, починившая одно имя, починила все (решение владельца
+        # 25.09.2026, #807). Дубль, взятый одним, оставлял C и D пояснением
+        # (взгляд на #809, та же беда, что #325 у списка).
+        while twin := TWIN_RE.match(rest):
+            groups.append(tuple(MARK_RE.findall(twin.group(1).lower())))
+            rest = rest[twin.end() :]
+        marks = tuple(mark for group in groups for mark in group)
+        found.append(Resolution(marks, rest.strip(), tuple(groups) if len(groups) > 1 else ()))
     return found
 
 
