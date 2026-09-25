@@ -421,8 +421,22 @@ def test_the_archive_reads_a_twin_line_as_the_registry_does() -> None:
 
 @pytest.mark.parametrize(
     "said",
-    ['{"counted": 5}', '{"findings": []}', '{"resolutions": []}'],
-    ids=["скаляр в counted", "ложная findings", "resolutions списком"],
+    [
+        '{"counted": 5}',
+        '{"findings": []}',
+        '{"resolutions": []}',
+        '{"resolutions": {"abc1234": 5}}',
+        '{"resolutions": {"abc1234": {"twin_of": ""}}}',
+        '{"findings": {"abc1234": {"title": "x"}}}',
+    ],
+    ids=[
+        "скаляр в counted",
+        "ложная findings",
+        "resolutions списком",
+        "снятие числом",
+        "снятие без by",
+        "находка без seen_on",
+    ],
 )
 def test_a_foreign_previous_archive_is_a_refusal(tmp_path: Path, said: str) -> None:
     """Прежний архив чужой формы — отказ сборки, а не трасса и не пустой архив (#822)."""
@@ -430,3 +444,10 @@ def test_a_foreign_previous_archive_is_a_refusal(tmp_path: Path, said: str) -> N
     path.write_text(said, encoding="utf-8")
     with pytest.raises(module.NotRun):
         module.previous(path)
+
+
+def test_a_null_resolutions_reads_as_empty(tmp_path: Path) -> None:
+    """`resolutions: null` читается пустым, как `findings: null`: одна форма — один исход (#830)."""
+    path = tmp_path / "findings.json"
+    path.write_text('{"findings": null, "resolutions": null}', encoding="utf-8")
+    assert module.previous(path)["resolutions"] is None

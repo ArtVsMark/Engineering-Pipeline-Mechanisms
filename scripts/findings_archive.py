@@ -100,8 +100,19 @@ def previous(path: Path | None) -> dict[str, Any]:
         data = registry.read_archive(path)
     except ValueError as exc:
         raise NotRun(f"прежний архив не разбирается — {exc}") from exc
-    if not isinstance(data.get("resolutions", {}), dict):
-        raise NotRun("прежний архив не разбирается — `resolutions` не словарь")
+    # СБОРЩИК ТРЕБУЕТ БОЛЬШЕ, ЧЕМ ЗАМЕРЫ: он дописывает записи и прикладывает
+    # снятия, поэтому ему нужны `seen_on` у каждой находки и `by` у каждого
+    # снятия. Без них сборка падала трассой в `add_change` и `settle` (взгляд
+    # на #830). Отсутствие поля и `null` читаются одинаково — пустым, как у
+    # `findings` в `read_archive`.
+    raw = data.get("resolutions")
+    resolutions = {} if raw is None else raw
+    if not isinstance(resolutions, dict) or not all(
+        isinstance(one, dict) and "by" in one for one in resolutions.values()
+    ):
+        raise NotRun("прежний архив не разбирается — `resolutions` не словарь снятий с `by`")
+    if not all("seen_on" in one for one in (data.get("findings") or {}).values()):
+        raise NotRun("прежний архив не разбирается — у записи находки нет `seen_on`")
     return data
 
 

@@ -106,6 +106,10 @@ def kinds_in(text: str, where: str) -> dict[str, Any]:
     kinds = said.get("kinds") or {}
     if not isinstance(kinds, dict):
         raise NotRun(f"{where}: раздел kinds не словарь, а {type(kinds).__name__}")
+    # Пустое имя — ключ записей архива без рода (`NO_KIND`), и родом словаря
+    # быть не может: иначе записи без рода печатались бы дважды (взгляд на #830).
+    if NO_KIND in kinds:
+        raise NotRun(f"{where}: у рода пустое имя")
     return dict(kinds)
 
 
@@ -281,8 +285,8 @@ def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
         raise NotRun(str(exc)) from exc
     found: dict[str, tuple[int, int, int]] = {}
     for entry in (archive.get("findings") or {}).values():
-        # Запись без рода не выпадает молча, а считается своей строкой —
-        # тем же путём, что род вне словаря (взгляд на #822).
+        # Запись без рода не выпадает молча, а считается под пустым ключом и
+        # печатается своей строкой (взгляд на #822).
         name = str(entry.get("род") or "") or NO_KIND
         total, worked, twinned = found.get(name, (0, 0, 0))
         resolved = bool(entry.get("resolved_by"))

@@ -425,3 +425,9 @@ def test_a_kind_outside_the_dictionary_is_named(
     assert (
         "род архива вне словаря: снятый род — архив: 1, снято работой 1" in capsys.readouterr().out
     )
+
+
+def test_an_empty_kind_name_is_a_refusal() -> None:
+    """Пустое имя рода — отказ: оно занято записями без рода (#830)."""
+    with pytest.raises(module.NotRun, match="пустое имя"):
+        module.kinds_in('{"kinds": {"": {"встречен": []}}}', "словарь")
