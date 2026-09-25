@@ -726,8 +726,9 @@ def drop_resolved(
     return twins
 
 
-#: Снявший, у слитого которого нет номера: известно, что сняли, но не кто.
-UNKNOWN_CLOSER: Final = 0
+#: Как отказ снятия называет снявших, не правивших ответ: одного и нескольких.
+UNTOUCHED_ONE: Final = "не трогало"
+UNTOUCHED_MANY: Final = "не трогали"
 
 
 def resolved_marks(
@@ -788,15 +789,22 @@ def resolved_marks(
         # что он не держит ничего: без него поведение то же. Откат, оставшийся
         # зелёным, — находка, а не облегчение
         # ([014](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/014-red-before-fix-needs-partial-revert.md)).
+        # СЛИТОЕ БЕЗ НОМЕРА НЕ ЧИТАЕТСЯ И ОТМЕТКУ НЕ ДВИГАЕТ — как слитое без
+        # времени: «не знаю, что это» значит «не прочитано», а не «снято
+        # кем-то», и прочитанным его не объявляет и курсор (взгляд на #846).
+        # Прежде его снятия принимались с неизвестным снявшим, и три захода
+        # взгляда подряд (#838, #843) спорили, в какую сторону решать незнание;
+        # держать запись или снимать — выбор без предмета, спросить не у кого
+        # (210). Не снимаются из него и находки о коде. «Площадка молчит о
+        # файлах» в `closable` — другой случай: снявший там известен, и
+        # незнание о его файлах идёт в сторону снятия (039).
+        number = int(item.get("number") or 0)
+        if not number:
+            continue
         when = str(item.get("merged_at") or "")
         mark = max(mark, when)
         if when <= since:
             continue
-        # СЛИТОЕ БЕЗ НОМЕРА ПИШЕТСЯ СНЯВШИМ `UNKNOWN_CLOSER`, И ПЛОЩАДКУ О НЁМ НЕ
-        # СПРАШИВАЮТ: вопрос о «#0» получил бы отказ, и пустой ответ принял бы
-        # снятие как «площадка молчит» (взгляд на #838). Находку о коде это не
-        # держит, об ответе — держит, и отказ называет неизвестного (#843).
-        number = int(item.get("number") or UNKNOWN_CLOSER)
         for one in changerefs.resolved_in(item.get("body") or ""):
             marks.setdefault(one, set()).add(number)
     # ПОЛНОТА СТРАНИЦЫ МЕРЯЕТСЯ СТРАНИЦЕЙ, А НЕ СЛИТЫМИ НА НЕЙ. Запрос идёт за
@@ -875,27 +883,18 @@ def closable(
         if entry.kind != findings.ANSWER_KIND:
             берём.add(mark)
             continue
-        снявшие = sorted(n for n in by.get(mark) or () if n != UNKNOWN_CLOSER)
-        неизвестный = UNKNOWN_CLOSER in (by.get(mark) or ())
+        снявшие = sorted(by[mark])
         for number in снявшие:
             if number not in файлы:
                 файлы[number] = touched(repo, token, number)
         if any(not файлы[n] or ANSWER_FILE in файлы[n] for n in снявшие):
             берём.add(mark)
             continue
-        # СНЯВШИЙ НЕИЗВЕСТЕН — ЭТО НЕ «НЕ ТРОГАЛ»: файлы у него не спрашивались,
-        # и причина называется как есть, в том числе рядом с известными (#838, #843).
-        unknown = f"снявший без номера неизвестен — тронул ли он {ANSWER_FILE}, спросить не у кого"
-        if not снявшие:
-            держим[mark] = f"находка об ОТВЕТЕ, а {unknown}"
-            continue
         names = ", ".join(f"#{n}" for n in снявшие)
-        verb = "не трогало" if len(снявшие) == 1 else "не трогали"
-        said = f"находка об ОТВЕТЕ, а {names} {verb} {ANSWER_FILE}"
-        if неизвестный:
-            said += f"; {unknown}"
+        verb = UNTOUCHED_ONE if len(снявшие) == 1 else UNTOUCHED_MANY
         держим[mark] = (
-            f"{said}. Ответ каталогу чинится правкой ответа: снятие говорит о работе, которой нет"
+            f"находка об ОТВЕТЕ, а {names} {verb} {ANSWER_FILE}. "
+            "Ответ каталогу чинится правкой ответа: снятие говорит о работе, которой нет"
         )
     return берём, держим
 
