@@ -1582,3 +1582,22 @@ def test_a_strict_sweep_keeps_retold_titles_apart() -> None:
     swept = {module.fingerprint(TWIN_A)}
     assert module.twins_of_resolved(swept, entries, strict=True) == {}
     assert module.drop_resolved(dict(entries), swept, strict=True) == {}
+
+
+def test_an_answer_finding_is_no_twin_of_a_code_finding() -> None:
+    """Находка об ответе не уходит дублем находки о коде: её снимает правка ответа (#818)."""
+    answer = module.findings.ANSWER_KIND
+    entries = {
+        module.fingerprint(TWIN_A): module.findings.Entry(1, "риск", TWIN_A),
+        module.fingerprint(TWIN_B): module.findings.Entry(1, "риск", TWIN_B, kind=answer),
+    }
+    assert module.twins_of_resolved({module.fingerprint(TWIN_A)}, entries) == {}
+
+
+def test_a_held_finding_is_no_twin() -> None:
+    """Запись с отвергнутым снятием не уходит дублем того же захода (#818)."""
+    entries = {
+        module.fingerprint(one): module.findings.Entry(1, "риск", one) for one in (TWIN_A, TWIN_B)
+    }
+    held = frozenset({module.fingerprint(TWIN_B)})
+    assert module.drop_resolved(dict(entries), {module.fingerprint(TWIN_A)}, held=held) == {}
