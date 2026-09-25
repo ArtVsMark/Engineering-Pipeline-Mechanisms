@@ -52,9 +52,16 @@ def issue_re(issues: list[int]) -> re.Pattern[str]:
     Форма адресом (`../../issues/23`) в проекте есть, и номер в ней прибит так
     же, как с решёткой (взгляд на #783, 195). Своя — только ОТНОСИТЕЛЬНАЯ:
     `…/Engineering-Incidents-Playbook/issues/23` — задача соседа, а полный
-    адрес своего репозитория ловится по имени проекта (взгляд на #795).
+    адрес своего репозитория ловится по имени проекта (взгляд на #795). И
+    адрес через переменную репозитория — `${{ github.repository }}/issues/23`,
+    `${GITHUB_REPOSITORY}/issues/23`, `f"{repo}/issues/23"`: имени проекта в
+    нём нет, а номер прибит тот же (второй взгляд на #795, 195).
     """
-    return re.compile(r"(?:(?<![\w#])#|\.\./issues/)(?:" + "|".join(map(str, issues)) + r")\b")
+    return re.compile(
+        r"(?:(?<![\w#])#|(?:\.\./|\}/|\$GITHUB_REPOSITORY/)issues/)(?:"
+        + "|".join(map(str, issues))
+        + r")\b"
+    )
 
 
 #: Метка плана пишется строкой, а не через `findings.marker`.
@@ -284,6 +291,13 @@ def test_the_measure_sees_an_issue_number_in_an_address() -> None:
     assert not number.search("../../issues/230")
     assert not number.search("tissues/23")
     assert not number.search("Engineering-Incidents-Playbook/issues/23"), "задача соседа — не своя"
+    for call in (
+        "repos/${{ github.repository }}/issues/23/comments",
+        "repos/${GITHUB_REPOSITORY}/issues/23",
+        "repos/$GITHUB_REPOSITORY/issues/23",
+        'f"repos/{repo}/issues/23"',
+    ):
+        assert number.search(call), f"адрес через переменную репозитория не пойман: {call}"
 
 
 def test_a_registry_without_a_number_names_why() -> None:
