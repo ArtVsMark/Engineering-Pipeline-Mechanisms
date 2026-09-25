@@ -649,7 +649,12 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
     смотреть (085).
     """
     text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
-    calls = [line for line in text.splitlines() if "review_map.py" in line]
+    # Комментарий, называющий скрипт, вызовом не является.
+    calls = [
+        line
+        for line in text.splitlines()
+        if "review_map.py" in line and not line.strip().startswith("#")
+    ]
     assert calls, "карта не собирается вовсе"
     for line in calls:
         words = line.split()
@@ -658,6 +663,36 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
         # `FETCH_HEAD` — это база, подтянутая шагом; `HEAD` — голова изменения.
         # Разница здесь и есть весь смысл проверки, поэтому сравнение точное.
         assert base != "HEAD", f"карта взята из головы изменения: {line.strip()}"
+
+
+def test_the_map_code_runs_from_the_shared_branch() -> None:
+    """Читатель карты исполняется из развёрнутой базы, а не из головы изменения.
+
+    Данные с базы не спасают, если их читает код головы: изменение, правящее
+    `review_map.py`, само писало раздел ролей для своей проверки (поздний
+    взгляд на #785). Соседний случай — ответ каталогу тем же кодом, и гейт
+    держит оба вызова разом (195).
+    """
+    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    calls = [
+        at
+        for at, line in enumerate(lines)
+        if "review_map.py" in line and not line.strip().startswith("#")
+    ]
+    assert len(calls) == 2, f"вызовов карты не два (ревью и поздний взгляд): {len(calls)}"
+    for at in calls:
+        line = lines[at]
+        assert '"$RUNNER_TEMP/base/scripts/review_map.py"' in line, (
+            f"карта исполняется не из базы: {line.strip()}"
+        )
+        assert 'PYTHONPATH="$RUNNER_TEMP/base/packages/transport"' in lines[at - 1], (
+            "транспорт карты берётся из головы изменения"
+        )
+    worktrees = [line for line in lines if "git worktree add" in line]
+    assert len(worktrees) == 2 and all('"$RUNNER_TEMP/base" FETCH_HEAD' in w for w in worktrees), (
+        "база не разворачивается рядом из подтянутой ветки"
+    )
 
 
 def test_the_registry_is_swept_outside_a_review() -> None:
@@ -1384,3 +1419,52 @@ def test_every_agent_call_names_its_model_and_its_failure() -> None:
     )
     missing = unnamed_runs()
     assert not missing, "; ".join(missing)
+
+
+#: Джобы с полной историей, чья мелкая выборка её не режет, — с причиной.
+SHALLOW_FETCH_EXEMPT: dict[tuple[str, str], str] = {
+    ("badges.yml", "badges"): (
+        "выборка берёт ветку `badges` — сироту из одного коммита, перезаписываемую "
+        "целиком: граница мелкости ложится на её коммит, а не на историю общей ветки"
+    ),
+}
+
+SHALLOW_FETCH = re.compile(r"\bgit\s+fetch\b[^#\n]*--depth")
+
+
+def shallow_fetches_in_full_clones() -> list[tuple[str, str, str]]:
+    """(файл, джоб, строка) — мелкие выборки в джобах, просивших полную историю."""
+    found: list[tuple[str, str, str]] = []
+    for path in walk(WORKFLOWS, "*.yml"):
+        for name, job in (load(path).get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            if not any((step.get("with") or {}).get("fetch-depth") == 0 for step in steps):
+                continue
+            for step in steps:
+                for line in str(step.get("run") or "").splitlines():
+                    if not line.strip().startswith("#") and SHALLOW_FETCH.search(line):
+                        found.append((path.name, str(name), line.strip()))
+    return found
+
+
+def test_a_full_history_is_not_cut_back() -> None:
+    """Джоб, просивший полную историю, не делает клон снова мелким.
+
+    `git fetch --depth=1` ветки, уже лежащей в полном клоне, ставит на её голову
+    границу мелкости: голова становится коммитом без родителя. Поздний взгляд
+    так терял историю общей ветки и не находил уплотнённый коммит изменения
+    (поздние взгляды на #773, #777, #785). Гейт общий, а не про один шаг:
+    шаг карты скопирован из джоба с мелким клоном, и соседний случай — любой
+    такой перенос (195).
+    """
+    found = shallow_fetches_in_full_clones()
+    cut = [one for one in found if one[:2] not in SHALLOW_FETCH_EXEMPT]
+    assert not cut, f"полная история обрезается мелкой выборкой: {cut}"
+
+
+def test_the_shallow_fetch_gate_has_a_subject() -> None:
+    """Каждое исключение действительно встречено — иначе оно стоит без предмета (075)."""
+    seen = {one[:2] for one in shallow_fetches_in_full_clones()}
+    assert set(SHALLOW_FETCH_EXEMPT) <= seen, (
+        f"исключения без предмета: {set(SHALLOW_FETCH_EXEMPT) - seen}"
+    )
