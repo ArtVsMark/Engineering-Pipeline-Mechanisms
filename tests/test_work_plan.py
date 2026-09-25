@@ -706,6 +706,18 @@ def test_both_ways_of_birth_share_one_gate() -> None:
     assert module.may_be_born(own, "o/r", {761}) is False
 
 
+def test_birth_reads_the_plan_mark_by_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Кандидат судится меткой `findings.PLAN_MARKER`, а не её буквами (взгляд на #831).
+
+    Подмена метки — единственное, что отличает ссылку от переписанных букв:
+    вернись в `may_be_born` строка «<!-- work-plan», прежний тест не покраснел бы.
+    """
+    own = {"number": 763, "state": "open", "repository_url": "https://api.github.com/repos/o/r"}
+    monkeypatch.setattr(module.findings, "PLAN_MARKER", "<!-- another-plan -->")
+    assert module.may_be_born({**own, "body": "<!-- another-plan -->"}, "o/r", set()) is False
+    assert module.may_be_born({**own, "body": "<!-- work-plan -->"}, "o/r", set()) is True
+
+
 def test_a_born_row_needs_an_explicit_open_state(capsys: pytest.CaptureFixture[str]) -> None:
     """Без явного `state` задача не рождается, чужое хранилище названо вслух (#756)."""
     own = {"number": 762, "state": "open", "repository_url": "https://api.github.com/repos/o/r"}
