@@ -1592,3 +1592,31 @@ def test_an_answer_finding_is_no_twin_of_a_code_finding() -> None:
         module.fingerprint(TWIN_B): module.findings.Entry(1, "риск", TWIN_B, kind=answer),
     }
     assert module.twins_of_resolved({module.fingerprint(TWIN_A)}, entries) == {}
+
+
+def test_a_verifier_answer_is_not_a_look_for_the_registry() -> None:
+    """Ответ верификатора не режет отрезок и не несёт находку в реестр (взгляд на #833)."""
+    late_look = load_script("late_look.py")
+    look = {
+        "user": {"login": "claude[bot]"},
+        "body": "НАХОДКА[риск]: a.py:1 — своя\nВЕРДИКТ: находок 1",
+    }
+    answer = {
+        "user": {"login": module.LATE_AUTHOR},
+        "body": late_look.compose_verification(
+            "ПРЕМИСА: да\nНАХОДКА[риск]: b.py:1 — цитата\nВЕРДИКТ: находок 1"
+        ),
+    }
+    titles = [title for _, title, _ in module.findings_of(module.last_look([look, answer]))]
+    assert titles == ["a.py:1 — своя"]
+    assert module.verdict_of(module.last_look([look, answer])) == 1
+
+
+def test_is_verification_needs_the_run_author_and_the_first_line() -> None:
+    """Метка верификатора узнаётся только от прогона и только первой строкой."""
+    run = {"login": module.LATE_AUTHOR}
+    assert module.is_verification({"user": run, "body": f"\n {module.VERIFY_MARKER}\nда"})
+    assert not module.is_verification(
+        {"user": {"login": "claude[bot]"}, "body": module.VERIFY_MARKER}
+    )
+    assert not module.is_verification({"user": run, "body": f"цитата {module.VERIFY_MARKER}"})

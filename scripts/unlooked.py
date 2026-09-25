@@ -196,12 +196,13 @@ ANNOTATIONS_UNREAD: Final = "аннотации взгляда не прочит
 LATE_MARKER: Final = "<!-- late-look: этот взгляд по общей ветке, а не по изменению -->"
 #: Автор комментария позднего взгляда: `late_look.py` пишет его токеном
 #: прогона. Ответчик по обращению (`claude.yml`) пишет от `claude[bot]`, и по
-#: одному «это бот» их не различить (взгляд на #815, `1d79af0`).
-LATE_AUTHOR: Final = "github-actions[bot]"
+#: одному «это бот» их не различить (взгляд на #815, `1d79af0`). Константа
+#: живёт в `review_findings`: её читает и сборщик реестра (взгляд на #833).
+LATE_AUTHOR: Final = review_findings.LATE_AUTHOR
 #: Метка ответа верификатора. СВОЯ, а не метка позднего взгляда: оба ответа
 #: переносит `late_look.py` токеном прогона, и под общей меткой ответ
 #: верификатора засчитывался поздним взглядом по изменению (взгляд на #815).
-VERIFY_MARKER: Final = "<!-- verify: проверка премисы одной находки, а не взгляд на изменение -->"
+VERIFY_MARKER: Final = review_findings.VERIFY_MARKER
 
 
 def is_late_look(comment: dict[str, Any]) -> bool:
@@ -238,6 +239,15 @@ def is_run_answer(comment: dict[str, Any]) -> bool:
     body = str(comment.get("body") or "").lstrip()
     author = str((comment.get("user") or {}).get("login") or "")
     return is_late_look(comment) or (author == LATE_AUTHOR and body.startswith(VERIFY_MARKER))
+
+
+def is_verification(comment: dict[str, Any]) -> bool:
+    """Это ответ верификатора — признак один, `review_findings.is_verification`.
+
+    Отдельно от `is_run_answer` для читателя, который поздний взгляд считает
+    намеренно, а верификатора — нет: замер цепочек (взгляд на #827).
+    """
+    return review_findings.is_verification(comment)
 
 
 #: Хвост записи, которым поздний взгляд ДОПИСЫВАЕТСЯ к состоянию, а не заменяет
