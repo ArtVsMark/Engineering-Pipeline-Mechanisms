@@ -318,3 +318,18 @@ def test_findings_before_the_moment_count_even_if_the_verdict_came_later(
     args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
     assert module.main(args) == module.EXIT_OK
     assert "уникальных находок: 1" in capsys.readouterr().out
+
+
+def test_a_human_finding_line_before_the_moment_is_not_a_finding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Строка `НАХОДКА[…]` в реплике человека до `--at` отказ не снимает (взгляд на #789)."""
+    quoted = {
+        "user": {"type": "User"},
+        "body": "НАХОДКА[риск]: a.py:1 — процитировано человеком",
+        "created_at": "2026-09-24T10:00:00Z",
+    }
+    verdict = {**look("a.py:1 — раз"), "created_at": "2026-09-24T20:00:00Z"}
+    platform(monkeypatch, {9: [quoted, verdict]})
+    args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_BROKEN

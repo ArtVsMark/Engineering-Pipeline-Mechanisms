@@ -208,12 +208,14 @@ def read_counted(
             for one in ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token)
             if at is None or said_at(one) <= at
         ]
-        # В счёт «прочитано до момента» идут только ОТВЕТЫ ВЗГЛЯДА — комментарии
-        # с вердиктом. Реплика человека или конвейера до `--at` засчитала бы
-        # ленту, где взгляд сказал позже, и пустое отсечение снова выдавалось бы
-        # за ноль (взгляд на #787, соседний случай 195).
-        kept += sum(1 for one in comments if review_findings.verdict_of([one]) is not None)
-        said += [(number, found[1]) for found in review_findings.findings_of(comments)]
+        # СЧИТАЕТСЯ ТОЛЬКО СКАЗАННОЕ БОТОМ — и вердикты, и находки. Реплика
+        # человека до `--at` засчитала бы ленту, где взгляд сказал позже (взгляд
+        # на #787), а строка `НАХОДКА[…]` в ней — находку, которой взгляд не
+        # говорил, и снимала бы отказ снова (взгляд на #789). Признак тот же,
+        # что у очереди слияний (`automerge.verdicts_on`): автор — бот.
+        looks = [one for one in comments if (one.get("user") or {}).get("type") == "Bot"]
+        kept += sum(1 for one in looks if review_findings.verdict_of([one]) is not None)
+        said += [(number, found[1]) for found in review_findings.findings_of(looks)]
     return said, taken, kept
 
 
@@ -274,12 +276,13 @@ def main(argv: list[str] | None = None) -> int:
     # МОМЕНТ РАНЬШЕ ВСЕХ ЛЕНТ — ТОТ ЖЕ ПУСТОЙ ЗАМЕР. Отрезок не пуст, но всё в
     # нём сказано позже `--at`, и ноль находок выдавался бы за замер (взгляд
     # на #781, соседний случай пустого отрезка, 195).
-    # Отказ — по нулю ПРОЧИТАННЫХ до момента комментариев, а не по нулю
-    # находок: отрезок, где взгляд честно ничего не нашёл, — настоящий ноль, и
+    # Отказ — когда до момента взгляд не сказал НИЧЕГО: ни вердикта, ни
+    # находки. Отрезок, где взгляд честно ничего не нашёл, — настоящий ноль, и
     # с `--at` он обязан отвечать так же, как без него (взгляд на #781).
     if cut is not None and not kept and not said:
         print(
-            "замер не снят: ни одного комментария не сказано до момента --at (045)", file=sys.stderr
+            "замер не снят: до момента --at взгляд не сказал ни вердикта, ни находки (045)",
+            file=sys.stderr,
         )
         return EXIT_BROKEN
     print("\n".join(report(chains(said))))
