@@ -50,6 +50,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,6 +78,11 @@ SCHEMA_SAID: Final = (
 #: и запрос коммита слияния на изменение — около двухсот запросов на заход при
 #: квоте прогона в тысячу в час.
 BUDGET: Final = 100
+#: Номер изменения в теме уплотнённого коммита: «Тема (#N)».
+MERGED_SUBJECT_RE: Final = re.compile(r"\(#(\d+)\)$")
+#: Разделители полей и записей в выводе `git log` для перечитки.
+FIELD: Final = "\x1f"
+RECORD: Final = "\x00"
 #: Граница, которую архив знает о себе всегда: ответ верификатора подхватывается
 #: из живого реестра, пока запись в нём, и у ушедших раньше первого захода его нет.
 VERIFIER_GAP: Final = (
@@ -291,8 +297,63 @@ def merged_pending(repo: str, token: str, counted: set[int]) -> list[dict[str, A
     return sorted(pending, key=lambda pull: (str(pull["merged_at"]), int(pull["number"])))
 
 
+def merged_messages(log: str) -> list[tuple[int, str]]:
+    """Номер изменения и тело его уплотнённого коммита — из вывода `git log`.
+
+    Коммит без «(#N)» в теме слиянием изменения не считается и пропускается:
+    снятие из него принадлежит не изменению, а прямой правке ветки.
+    """
+    out = []
+    for record in log.split(RECORD):
+        subject, _, body = record.strip("\n").partition(FIELD)
+        said = MERGED_SUBJECT_RE.search(subject.strip())
+        if said:
+            out.append((int(said.group(1)), body))
+    return out
+
+
+def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: set[int]) -> int:
+    """Дописывает снятия из тел уже учтённых изменений; отдаёт число новых и дополненных.
+
+    ЗАЧЕМ. До #809 архив разбирал строку снятия своим образцом и брал один
+    отпечаток: у «Разобрано: A, C» и «A дубль C» отпечаток C терялся, а
+    учтённые изменения не перечитываются (#820). Замер 25.09.2026: 95
+    отпечатков стояли в теле слитого изменения, а в архиве сняты не были.
+    Находки не перечитываются — только снятия, и снятие ставится
+    `setdefault`: повторная перечитка ничего не меняет.
+    """
+    before = {mark: said["twin_of"] for mark, said in archive["resolutions"].items()}
+    for number, message in messages:
+        if number in counted:
+            add_change(archive, number, [], message)
+    # Считается и связь, дописанная к старому снятию: иначе «второй проход —
+    # ни одного» доказывал бы неизменность ключей, а не архива (взгляд на #849).
+    return sum(
+        1
+        for mark, said in archive["resolutions"].items()
+        if mark not in before or before[mark] != said["twin_of"]
+    )
+
+
+def git_log(where: Path | None = None) -> str:
+    """Темы и тела коммитов от старых к новым — вход перечитки; по умолчанию — дерево прогона."""
+    return subprocess.run(
+        ["git", "log", "--reverse", "--format=%s%x1f%B%x00"],
+        cwd=where,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+
+
 def build(
-    repo: str, token: str, budget: int, kinds: dict[str, Any], before: dict[str, Any]
+    repo: str,
+    token: str,
+    budget: int,
+    kinds: dict[str, Any],
+    before: dict[str, Any],
+    history: list[tuple[int, str]] | None = None,
 ) -> dict[str, Any]:
     """Архив: прежний плюс слитое, которого в нём ещё нет, — не больше бюджета."""
     archive: dict[str, Any] = {
@@ -311,6 +372,9 @@ def build(
             message = str((commit.get("commit") or {}).get("message") or "")
         add_change(archive, number, comments, message)
         counted.add(number)
+    if history is not None:
+        added = reread(archive, history, counted)
+        print(f"перечитка учтённых изменений: новых снятий — {added}")
     for sign, said in verdicts(repo, token).items():
         entry = archive["findings"].get(sign)
         if entry is not None and not entry.get("checked"):
@@ -341,16 +405,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="куда положить архив")
     parser.add_argument("--previous", type=Path, default=None, help="прежний архив с ветки")
     parser.add_argument("--budget", type=int, default=BUDGET, help="слитых изменений за заход")
+    parser.add_argument(
+        "--reread",
+        action="store_true",
+        help="перечитать снятия учтённых изменений из истории общей ветки (#820)",
+    )
     args = parser.parse_args(argv)
     token = ghrest.token_from_env()
     if not token or not args.repo:
         print("архив не собран: нет токена или репозитория (045)", file=sys.stderr)
         return EXIT_BROKEN
     try:
+        history = merged_messages(git_log()) if args.reread else None
         archive = build(
-            args.repo, token, args.budget, finding_kinds.read(), previous(args.previous)
+            args.repo, token, args.budget, finding_kinds.read(), previous(args.previous), history
         )
-    except (NotRun, ghrest.TransportError, finding_kinds.NotRun) as exc:
+    except (
+        NotRun,
+        ghrest.TransportError,
+        finding_kinds.NotRun,
+        subprocess.CalledProcessError,
+    ) as exc:
         print(f"архив не собран: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     args.out.parent.mkdir(parents=True, exist_ok=True)
