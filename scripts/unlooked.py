@@ -423,18 +423,41 @@ def why_quiet(runs: list[dict[str, Any]]) -> str:
     return STATE_NONE
 
 
-def look_at(repo: str, number: int, token: str) -> str | None:
+Feed = Callable[[int], list[dict[str, Any]]]
+
+
+def feed_reader(repo: str, token: str) -> Feed:
+    """Лента изменения, прочитанная ОДИН раз за заход.
+
+    Её читают двое — вопрос «был ли взгляд» (`look_at`) и восстановление
+    отметки позднего взгляда (`late_on`). Пока каждый читал сам, каждая
+    открытая запись стоила два постраничных запроса на каждом событии очереди
+    (взгляд на #790).
+    """
+    read: dict[int, list[dict[str, Any]]] = {}
+
+    def feed(number: int) -> list[dict[str, Any]]:
+        if number not in read:
+            read[number] = list(ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token))
+        return read[number]
+
+    return feed
+
+
+def look_at(repo: str, number: int, token: str, feed: Feed | None = None) -> str | None:
     """То же по живому изменению: спрашивает площадку и разбирает ответ.
 
     Комментарии позднего взгляда исключаются по его отметке: они говорят о
     коде в общей ветке, а вопрос здесь — смотрел ли кто-нибудь на изменение,
     пока оно было изменением.
     """
-    comments = [
-        comment
-        for comment in ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token)
-        if LATE_MARKER not in (comment.get("body") or "")
-    ]
+    # ОТКАЗ ЛЕНТЫ ЗДЕСЬ РОНЯЕТ ЗАХОД НАМЕРЕННО — в отличие от `late_on` и
+    # `head_runs`. Там лента даёт уточнение к записи, здесь — сам факт «был ли
+    # взгляд»: угадав его, заход снял бы запись без взгляда или завёл лишнюю, и
+    # реестр солгал бы о главном. Честнее не писать реестр вовсе (045, взгляд
+    # на #810).
+    said = (feed or feed_reader(repo, token))(number)
+    comments = [comment for comment in said if LATE_MARKER not in (comment.get("body") or "")]
     if review_findings.verdict_of(comments) is not None or review_findings.findings_of(comments):
         # Второй запрос делается ТОЛЬКО ради причины тишины: у изменения с
         # ответом причина уже видна, и платить за неё лишним обращением незачем.
@@ -445,21 +468,40 @@ def look_at(repo: str, number: int, token: str) -> str | None:
 def late_seen(comments: list[dict[str, Any]]) -> str:
     """День позднего взгляда по ЛЕНТЕ изменения; пусто — ответа позднего взгляда нет.
 
-    Засчитывается комментарий с отметкой позднего взгляда и вердиктом: ответ,
-    перенесённый шагом `late_look.py`, а не заход, оборвавшийся без ответа.
+    ПРИЗНАК ТОТ ЖЕ, ЧТО У ОТМЕТКИ `--late`. Шаг позднего взгляда отмечает
+    реестр после удачного переноса ответа, а перенос — это и есть комментарий
+    с отметкой `LATE_MARKER`: его пишет только `late_look.py`. Прежде лента
+    требовала ещё и вердикт, и ответ без строки `ВЕРДИКТ`, потеряв отметку в
+    гонке, из ленты не восстанавливался (взгляд на #790). Два понимания одного
+    события расходились бы молча (090).
     """
     days = [
         str(comment.get("created_at") or "")[:10]
         for comment in comments
         if LATE_MARKER in (comment.get("body") or "")
-        and review_findings.verdict_of([comment]) is not None
     ]
     return max(days, default="")
 
 
-def late_on(repo: str, number: int, token: str) -> str:
-    """То же по живому изменению: спрашивает его ленту у площадки."""
-    return late_seen(list(ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token)))
+def late_on(repo: str, number: int, token: str, feed: Feed | None = None) -> str:
+    """То же по живому изменению; ленту не прочитать — пусто, а не падение.
+
+    Отметка позднего взгляда — уточнение к записи, и терять из-за неё весь
+    заход реестра значило бы разменять факт на подробность о нём — тот же
+    ответ, что у `head_runs` (084, взгляд на #790).
+    """
+    try:
+        said = (feed or feed_reader(repo, token))(number)
+    except ghrest.TransportError as exc:
+        # В stderr, а не в stdout: заход `--queue` отдаёт stdout в
+        # `$GITHUB_OUTPUT` одной строкой JSON, и лишняя строка уронила бы
+        # очередь позднего взгляда на разборе вывода (взгляд на #810).
+        print(
+            f"  поздний взгляд по #{number} не сверен с лентой: {report.cut(str(exc))}",
+            file=sys.stderr,
+        )
+        return ""
+    return late_seen(said)
 
 
 def head_runs(repo: str, number: int, token: str) -> list[dict[str, Any]]:
@@ -628,6 +670,29 @@ def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
     return [entry.number for entry in ordered[:limit]]
 
 
+def queue_checked(
+    entries: dict[int, Entry], seen: Callable[[int], str], limit: int = LOOK_AT_ONCE
+) -> list[int]:
+    """Очередь на поздний взгляд, сверенная с лентой: посмотренное не ставится снова.
+
+    ОЧЕРЕДЬ ЧИТАЕТ РЕЕСТР, А РЕЕСТР БЫВАЕТ СТАРШЕ ЛЕНТЫ. Отметку позднего
+    взгляда стирает гонка записей, и до следующего полного захода запись
+    выглядит непросмотренной. Очередь, поверив телу, поставила бы её снова, а
+    поздний взгляд — платный прогон агента (взгляд на #790). Поэтому кандидат
+    сверяется с лентой, и посмотренный пропускается с объявлением.
+    """
+    chosen: list[int] = []
+    for number in queue_of(entries, limit=len(entries)):
+        day = seen(number)
+        if day:
+            print(f"  #{number}: поздний взгляд был {day} — в очередь не ставлю", file=sys.stderr)
+            continue
+        chosen.append(number)
+        if len(chosen) >= limit:
+            break
+    return chosen
+
+
 def render_body(
     entries: dict[int, Entry], watermark: int, tally: dict[str, int] | None = None
 ) -> str:
@@ -777,20 +842,29 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.queue:
             # ОЧЕРЕДЬ ЧИТАЕТСЯ, А НЕ ПЕРЕСЧИТЫВАЕТСЯ. Реестр уже ведёт свой
-            # механизм; заход сюда только выбирает из него, ничего не трогая,
-            # и потому не спрашивает площадку об изменениях вовсе (022).
+            # механизм; заход сюда только выбирает из него, ничего не трогая
+            # (022). Площадку он спрашивает об одном — ленте кандидатов, чтобы
+            # не поставить посмотренное на платный прогон второй раз (#790).
             _, said = findings.live_issue(args.repo, token, MARKER)
-            print(json.dumps(queue_of(parse_entries(said))))
+            feed = feed_reader(args.repo, token)
+            print(
+                json.dumps(
+                    queue_checked(
+                        parse_entries(said), lambda number: late_on(args.repo, number, token, feed)
+                    )
+                )
+            )
             return EXIT_NOTHING
 
         _, body = findings.live_issue(args.repo, token, MARKER)
+        feed = feed_reader(args.repo, token)
         merged = merged_changes(args.repo, token, args.limit)
         known = parse_entries(body)
         entries, watermark = scan(
             merged,
             known,
             parse_watermark(body),
-            lambda number: look_at(args.repo, number, token),
+            lambda number: look_at(args.repo, number, token, feed),
         )
         answered = sorted(set(known) - set(entries))
         if args.late is not None:
@@ -804,7 +878,7 @@ def main(argv: list[str] | None = None) -> int:
         # отметка восстанавливается на каждом заходе (049).
         for number, entry in list(entries.items()):
             if not entry.late:
-                day = late_on(args.repo, number, token)
+                day = late_on(args.repo, number, token, feed)
                 if day:
                     entries = mark_late(entries, number, day)
 
