@@ -178,8 +178,25 @@ def test_a_late_comment_is_not_a_verdict(monkeypatch: pytest.MonkeyPatch) -> Non
     сказал бы, что взгляд был вовремя (154).
     """
     late = f"{module.LATE_MARKER}\nразбор по общей ветке\nВЕРДИКТ: находок 0"
-    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([{"body": late}]))
+    posted = {"body": late, "user": {"type": "Bot", "login": module.LATE_AUTHOR}}
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([posted]))
     assert module.look_at("owner/repo", 77, "token") == module.STATE_NONE
+
+
+def test_a_verdict_quoting_the_late_marker_is_still_a_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Взгляд до слияния, процитировавший метку, не теряет вердикт (взгляд на #815).
+
+    Прежде из ленты выпадал любой комментарий со строкой метки, и ревьюер,
+    разбиравший сам механизм позднего взгляда, оставлял изменение «без взгляда».
+    """
+    quoting = {
+        "body": f"разбор: метка `{module.LATE_MARKER}` читается реестром\nВЕРДИКТ: находок 0",
+        "user": {"type": "Bot", "login": "claude[bot]"},
+    }
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([quoting]))
+    assert module.look_at("owner/repo", 77, "token") is None
 
 
 def test_a_timely_comment_is_a_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -885,8 +902,12 @@ def test_a_look_skipped_on_a_red_head_is_named_not_silent() -> None:
 
 
 def late_answer(day: str) -> dict[str, Any]:
-    """Ответ позднего взгляда в ленте: отметка и вердикт."""
-    return {"body": f"{module.LATE_MARKER}\nВЕРДИКТ: находок 2", "created_at": f"{day}T12:00:00Z"}
+    """Ответ позднего взгляда в ленте: отметка и вердикт, от имени прогона."""
+    return {
+        "user": {"type": "Bot", "login": module.LATE_AUTHOR},
+        "body": f"{module.LATE_MARKER}\nВЕРДИКТ: находок 2",
+        "created_at": f"{day}T12:00:00Z",
+    }
 
 
 def test_a_late_look_is_seen_in_the_feed_by_its_marker() -> None:
@@ -896,8 +917,22 @@ def test_a_late_look_is_seen_in_the_feed_by_its_marker() -> None:
     реестре, и лента обязана вернуть ту же отметку, если её стёрла гонка.
     """
     assert module.late_seen([late_answer("2026-09-24")]) == "2026-09-24"
-    unanswered = {"body": module.LATE_MARKER, "created_at": "2026-09-24T12:00:00Z"}
+    unanswered = {
+        "user": {"type": "Bot", "login": module.LATE_AUTHOR},
+        "body": module.LATE_MARKER,
+        "created_at": "2026-09-24T12:00:00Z",
+    }
     assert module.late_seen([unanswered]) == "2026-09-24"
+    # Цитата метки человеком — не поздний взгляд (взгляд на #810).
+    quoted = {**unanswered, "user": {"type": "User", "login": "someone"}}
+    assert module.late_seen([quoted]) == ""
+    # Ответчик по обращению пишет тем же `claude[bot]`, что и ревьюер: «бот»
+    # его не отсекает, отсекает автор прогона (взгляд на #815, `1d79af0`).
+    responder = {**unanswered, "user": {"type": "Bot", "login": "claude[bot]"}}
+    assert module.late_seen([responder]) == ""
+    # Метка не первой строкой — цитата, даже от имени прогона.
+    inside = {**unanswered, "body": f"сказано:\n{module.LATE_MARKER}"}
+    assert module.late_seen([inside]) == ""
     assert (
         module.late_seen([{"body": "ВЕРДИКТ: находок 0", "created_at": "2026-09-24T12:00:00Z"}])
         == ""
@@ -1039,3 +1074,19 @@ def test_the_queue_output_stays_one_line_when_a_feed_is_refused(
     said = capsys.readouterr()
     assert said.out.strip().splitlines() == [json.dumps([761])], said.out
     assert "не сверен с лентой" in said.err
+
+
+@pytest.mark.parametrize(
+    ("login", "body", "late"),
+    [
+        (module.LATE_AUTHOR, f"{module.LATE_MARKER}\nответ", True),
+        (module.LATE_AUTHOR, f"\n  {module.LATE_MARKER}\nответ", True),
+        ("claude[bot]", f"{module.LATE_MARKER}\nответ", False),
+        (module.LATE_AUTHOR, f"цитата {module.LATE_MARKER}", False),
+        ("", module.LATE_MARKER, False),
+    ],
+    ids=["прогон", "пробел впереди", "ответчик", "не первой строкой", "без автора"],
+)
+def test_is_late_look_needs_the_run_and_the_first_line(login: str, body: str, late: bool) -> None:
+    """Поздний взгляд — автор-прогон и метка первой строкой, а не любое вхождение."""
+    assert module.is_late_look({"user": {"login": login}, "body": body}) is late
