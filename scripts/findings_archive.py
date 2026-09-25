@@ -100,6 +100,10 @@ def misshapen(one: Any, shape: dict[str, type]) -> str:
 
     Логическое значение целым не считается, хотя `bool` — подкласс `int`:
     `true` в номере изменения — порча, а не номер.
+
+    ЭЛЕМЕНТЫ СПИСКОВ ЗДЕСЬ НЕ ПРОВЕРЯЮТСЯ: номера в `seen_on` держит
+    `findings.read_archive`, и вторая копия той же проверки разошлась бы с ней
+    молча (071, взгляд на #835).
     """
     if not isinstance(one, dict):
         return "запись не словарь"
@@ -107,10 +111,6 @@ def misshapen(one: Any, shape: dict[str, type]) -> str:
         value = one.get(field)
         if not isinstance(value, kind) or isinstance(value, bool):
             return f"`{field}` не {kind.__name__}"
-    if "seen_on" in shape and not all(
-        isinstance(n, int) and not isinstance(n, bool) for n in one["seen_on"]
-    ):
-        return "`seen_on` не список номеров"
     return ""
 
 
@@ -238,7 +238,7 @@ def add_change(
         # Круг сверяется и для нового отпечатка, а не только для дописывания:
         # в архиве до #809 лежат связи A→B без записи B, и «B дубль A» замкнула
         # бы круг на первой же записи (взгляд на #824).
-        links = {one: str(link.get("twin_of") or "") for one, link in resolutions.items()}
+        links = {one: link["twin_of"] for one, link in resolutions.items()}
         if loops_back(twin, mark, links):
             twin = ""
         said = resolutions.setdefault(mark, {"by": number, "twin_of": twin})

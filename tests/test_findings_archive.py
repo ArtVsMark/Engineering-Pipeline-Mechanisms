@@ -443,8 +443,8 @@ def test_the_archive_reads_a_twin_line_as_the_registry_does() -> None:
         "находка без seen_on",
         "снятие без twin_of",
         "seen_on пустое",
-        "находка строкой с именем поля",
-        "seen_on со строкой",
+        "находка строкой — отказ read_archive",
+        "seen_on со строкой — отказ read_archive",
         "by логическим",
     ],
 )
@@ -480,7 +480,7 @@ def test_misshapen_names_what_is_wrong() -> None:
     assert module.misshapen("by", shape) == "запись не словарь"
     assert "twin_of" in module.misshapen({"by": 3}, shape)
     assert "by" in module.misshapen({"by": False, "twin_of": ""}, shape)
-    assert "номеров" in module.misshapen({"seen_on": [1, "2"]}, module.FINDING_SHAPE)
+    assert "seen_on" in module.misshapen({"seen_on": None}, module.FINDING_SHAPE)
 
 
 def test_a_null_resolutions_reads_as_empty(tmp_path: Path) -> None:
