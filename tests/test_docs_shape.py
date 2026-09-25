@@ -541,10 +541,18 @@ def reachable_from(roots: tuple[str, ...]) -> set[Path]:
 #: `.claude/skills/*/SKILL.md` — путь к читателю у навыка не ссылка, а
 #: площадка: она грузит навык по его `description`. Ссылкой это не проверяется
 #: вовсе, и объявить их достижимыми значило бы завысить ответ.
+#:
+#: Обход `docs/` ГЛУБОКИЙ: документ, перенесённый в подкаталог читателя (#840),
+#: не выпадает из сверки молча (взгляд на #845). Решения исключаются по той же
+#: причине, что выше, — каталогом, а не глубиной обхода.
 LIVE_DOCS = sorted(
     [
         *walk(ROOT, "*.md"),
-        *walk(ROOT / "docs", "*.md"),
+        *(
+            one
+            for one in walk_deep(ROOT / "docs", "*.md")
+            if "decisions" not in one.relative_to(ROOT / "docs").parts
+        ),
     ]
 )
 
@@ -758,7 +766,9 @@ def unlisted(listed: set[Path], docs: list[Path], pointer_text: str) -> list[str
     """Документы `docs/` (кроме указателя), которых нет среди его ссылок.
 
     Документ подкаталога из `LISTED_WHOLE` считается названным, если указатель
-    ведёт на сам подкаталог.
+    ведёт на сам подкаталог. **Предел назван:** ссылка ищется подстрокой по
+    всему тексту указателя, и раздел, в котором она стоит, не проверяется —
+    для сверки СОСТАВА этого достаточно.
     """
     missing = []
     for one in docs:
@@ -771,6 +781,15 @@ def unlisted(listed: set[Path], docs: list[Path], pointer_text: str) -> list[str
         if here not in listed:
             missing.append(str(here))
     return sorted(missing)
+
+
+def test_every_listed_whole_directory_names_its_reason() -> None:
+    """У подкаталога, названного целиком, причина не пуста и сам он есть (154)."""
+    for name, why in LISTED_WHOLE.items():
+        assert why.strip(), f"docs/{name}: названо целиком без причины"
+        assert (ROOT / "docs" / name).is_dir(), (
+            f"docs/{name}: каталога нет — исключение пережило предмет"
+        )
 
 
 def test_the_pointer_lists_every_document() -> None:
