@@ -176,6 +176,16 @@ def test_a_first_run_counts_everything_and_settles_resolutions(
     assert not any("не учтено" in one for one in archive["gaps"])
 
 
+def test_reread_goes_before_the_new_merges(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Снявшим встаёт учтённое раньше, а не новое слитое с тем же отпечатком (взгляд на #849)."""
+    platform(monkeypatch)
+    one = mark("a.py:1 — раз")
+    archive = module.build(
+        "o/r", "t", 10, KINDS, {"counted": [5]}, history=[(5, f"Разобрано: {one}")]
+    )
+    assert archive["resolutions"][one]["by"] == 5, "снявшим записано позднее изменение #8"
+
+
 def test_the_verifier_answer_is_kept_once_seen(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ответ верификатора берётся из реестра и не теряется, когда запись снята."""
     platform(monkeypatch)

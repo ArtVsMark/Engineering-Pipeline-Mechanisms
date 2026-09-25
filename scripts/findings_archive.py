@@ -361,6 +361,13 @@ def build(
         "resolutions": dict(before.get("resolutions") or {}),
     }
     counted: set[int] = {int(one) for one in before.get("counted") or []}
+    # ПЕРЕЧИТКА ИДЁТ ДО НОВОГО СЛИТОГО. Снятие ставится `setdefault`, и первым
+    # должен встать тот, кто снял первым (#814): новое изменение, назвавшее
+    # отпечаток, потерянный архивом у раннего, иначе записалось бы снявшим
+    # (взгляд на #849).
+    if history is not None:
+        added = reread(archive, history, counted)
+        print(f"перечитка учтённых изменений: новых снятий и связей — {added}")
     pending = merged_pending(repo, token, counted)
     for pull in pending[:budget]:
         number = int(pull["number"])
@@ -372,9 +379,6 @@ def build(
             message = str((commit.get("commit") or {}).get("message") or "")
         add_change(archive, number, comments, message)
         counted.add(number)
-    if history is not None:
-        added = reread(archive, history, counted)
-        print(f"перечитка учтённых изменений: новых снятий — {added}")
     for sign, said in verdicts(repo, token).items():
         entry = archive["findings"].get(sign)
         if entry is not None and not entry.get("checked"):
