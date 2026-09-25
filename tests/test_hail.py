@@ -378,3 +378,9 @@ def test_the_wait_budget_covers_more_than_the_measured_peak() -> None:
     на_изменение = (module.WAIT_TRIES - 1) * module.WAIT_PAUSE
     assert на_изменение * пик < module.WAIT_BUDGET, "бюджет не покрывает измеренный пик"
     assert module.WAIT_BUDGET < 10 * 60, "бюджет подошёл к пределу шага"
+
+
+def test_the_stamp_line_is_read_back_by_its_pattern() -> None:
+    """Печать отпечатка и его узнавание — одно имя метки, а не две копии букв (209)."""
+    found = module.STAMP_RE.search(module.stamp_line("819.own-red.137c04d3"))
+    assert found is not None and found["stamp"] == "819.own-red.137c04d3"

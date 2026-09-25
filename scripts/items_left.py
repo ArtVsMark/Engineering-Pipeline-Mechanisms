@@ -432,7 +432,7 @@ def measure(issues: list[dict[str, Any]], root: Path | None = None) -> Measure:
         body = str(issue.get("body") or "")
         if "pull_request" in issue or findings.is_kept_by_a_mechanism(body):
             continue
-        if body.startswith(findings.PLAN_MARKER):
+        if findings.is_plan(body):
             continue
         since = when_of(issue, "created_at")
         for item in items.done_items(body):
