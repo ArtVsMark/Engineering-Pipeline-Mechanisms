@@ -115,9 +115,26 @@ def resolved_in(message: str) -> dict[str, str]:
     for record in changerefs.resolutions_parsed(message):
         twins = record.twin_of
         for mark in record.marks:
-            if not found.get(mark):
-                found[mark] = twins.get(mark, "")
+            twin = twins.get(mark, "")
+            if not found.get(mark) and not loops_back(twin, mark, found):
+                found[mark] = twin
     return found
+
+
+def loops_back(twin: str, mark: str, links: dict[str, str]) -> bool:
+    """Замкнёт ли связь ``mark → twin`` цепочку дублей в круг.
+
+    «A дубль B», затем «B дубль A» дали бы A↔B: обе записи — дубли, и снятой
+    работой не осталось бы ни одной (взгляд на #824). Первая названная связь
+    остаётся, встречная — нет.
+    """
+    seen: set[str] = set()
+    while twin and twin not in seen:
+        if twin == mark:
+            return True
+        seen.add(twin)
+        twin = links.get(twin, "")
+    return False
 
 
 def kinds_by_mark(kinds: dict[str, Any]) -> dict[str, str]:
@@ -167,7 +184,8 @@ def add_change(
         said = resolutions.setdefault(mark, {"by": number, "twin_of": twin})
         # Снял первый, а связь — первая названная: поздняя строка «дубль»
         # дописывает её к раннему снятию, не перенося само снятие (#814).
-        if twin and not said["twin_of"]:
+        links = {one: str(link.get("twin_of") or "") for one, link in resolutions.items()}
+        if twin and not said["twin_of"] and not loops_back(twin, mark, links):
             said["twin_of"] = twin
 
 
