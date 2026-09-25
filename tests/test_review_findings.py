@@ -1527,3 +1527,58 @@ def test_a_new_entry_keeps_the_role_that_saw_it(monkeypatch: pytest.MonkeyPatch)
     )
     module.main(["--repo", "o/r", "--pr", "333"])
     assert [one.role for one in written.values()] == ["архитектор"]
+
+
+TWIN_A = "scripts/x.py:12 — отказ площадки не перехвачен и роняет весь заход реестра"
+TWIN_B = "scripts/x.py:12 — отказ площадки не перехвачен и роняет весь заход реестра целиком"
+OTHER_PLACE = "scripts/y.py:12 — отказ площадки не перехвачен и роняет весь заход реестра"
+OTHER_WORDS = "scripts/x.py:40 — число в докстроке вписано рукой и отстаёт от замера"
+
+
+def test_a_twin_of_a_resolved_finding_leaves_with_it() -> None:
+    """Дубль снятой — то же место и то же сходство слов, что у реестра — уходит с ней (#807)."""
+    entries = {
+        module.fingerprint(one): module.findings.Entry(1, "риск", one)
+        for one in (TWIN_A, TWIN_B, OTHER_PLACE, OTHER_WORDS)
+    }
+    twins = module.twins_of_resolved({module.fingerprint(TWIN_A)}, entries)
+    assert twins == {module.fingerprint(TWIN_B): module.fingerprint(TWIN_A)}
+
+
+def test_the_same_place_alone_is_not_a_twin() -> None:
+    """Совпавшее место без сходства слов — другая беда, она не уходит (#657)."""
+    entries = {
+        module.fingerprint(one): module.findings.Entry(1, "риск", one)
+        for one in (TWIN_A, "scripts/x.py:12 — имя переменной вводит в заблуждение")
+    }
+    assert module.twins_of_resolved({module.fingerprint(TWIN_A)}, entries) == {}
+
+
+def test_dropping_a_resolved_finding_drops_its_twin_too() -> None:
+    """Уборка уносит снятую и её дубль, чужое место оставляет (#807)."""
+    entries = {
+        module.fingerprint(one): module.findings.Entry(1, "риск", one)
+        for one in (TWIN_A, TWIN_B, OTHER_PLACE)
+    }
+    twins = module.drop_resolved(entries, {module.fingerprint(TWIN_A)})
+    assert list(twins) == [module.fingerprint(TWIN_B)]
+    assert list(entries) == [module.fingerprint(OTHER_PLACE)]
+
+
+def test_a_look_alike_on_another_change_is_not_a_twin() -> None:
+    """Похожие слова на ДРУГОМ изменении — не дубль: реестр держит их раздельно (#818)."""
+    entries = {
+        module.fingerprint(TWIN_A): module.findings.Entry(1, "риск", TWIN_A),
+        module.fingerprint(TWIN_B): module.findings.Entry(2, "риск", TWIN_B),
+    }
+    assert module.twins_of_resolved({module.fingerprint(TWIN_A)}, entries) == {}
+
+
+def test_a_strict_sweep_keeps_retold_titles_apart() -> None:
+    """Под `--strict` уборка не сводит недословные заголовки — как и запись (102, #818)."""
+    entries = {
+        module.fingerprint(one): module.findings.Entry(1, "риск", one) for one in (TWIN_A, TWIN_B)
+    }
+    swept = {module.fingerprint(TWIN_A)}
+    assert module.twins_of_resolved(swept, entries, strict=True) == {}
+    assert module.drop_resolved(dict(entries), swept, strict=True) == {}
