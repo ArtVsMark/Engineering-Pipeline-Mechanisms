@@ -333,3 +333,13 @@ def test_a_human_finding_line_before_the_moment_is_not_a_finding(
     platform(monkeypatch, {9: [quoted, verdict]})
     args = ["--repo", "o/r", "--from", "9", "--to", "9", "--at", "2026-09-24T19:00:00Z"]
     assert module.main(args) == module.EXIT_BROKEN
+
+
+def test_a_human_finding_line_is_not_counted_without_a_moment_either(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Без `--at` фильтр по боту тот же: процитированная человеком находка не в счёте (#789)."""
+    quoted = {"user": {"type": "User"}, "body": "НАХОДКА[риск]: b.py:1 — процитировано"}
+    platform(monkeypatch, {9: [quoted, look("a.py:1 — раз")]})
+    assert module.main(["--repo", "o/r", "--from", "9", "--to", "9"]) == module.EXIT_OK
+    assert "уникальных находок: 1" in capsys.readouterr().out
