@@ -524,3 +524,25 @@ def test_loops_back_follows_the_chain() -> None:
     links = {"aaaaaaa": "bbbbbbb", "bbbbbbb": "ccccccc"}
     assert module.loops_back("aaaaaaa", "ccccccc", links) is True
     assert module.loops_back("ddddddd", "ccccccc", links) is False
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["Разобрано: aaaaaaa дубль aaaaaaa", "Разобрано: aaaaaaa дубль bbbbbbb дубль aaaaaaa"],
+    ids=["на себя", "через звено"],
+)
+def test_a_loop_drops_the_link_not_the_mark(line: str) -> None:
+    """Круг отказывает связи, а не снятию: отпечатки те же, что у реестра (#824)."""
+    said = module.resolved_in(line)
+    assert set(said) == set(module.changerefs.resolved_in(line))
+    assert not any(module.loops_back(twin, mark, said) for mark, twin in said.items())
+
+
+def test_a_new_mark_does_not_close_a_loop_in_the_archive() -> None:
+    """В архиве A→B без записи B: «B дубль A» снимает B без связи (#824)."""
+    archive: dict[str, Any] = {
+        "findings": {},
+        "resolutions": {"aaaaaaa": {"by": 1, "twin_of": "bbbbbbb"}},
+    }
+    module.add_change(archive, 2, [], "Разобрано: bbbbbbb дубль aaaaaaa")
+    assert archive["resolutions"]["bbbbbbb"] == {"by": 2, "twin_of": ""}
