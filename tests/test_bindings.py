@@ -559,7 +559,7 @@ def test_a_skill_named_in_prose_is_named_by_the_field() -> None:
     leaning = {
         number: sorted(
             set(
-                SKILL_ADDRESS_RE.findall(
+                skills_in_prose(
                     # ТРИ ПРОЗАИЧЕСКИХ ПОЛЯ ОТВЕТА, А НЕ ОДНО. `machine_half`
                     # здесь не про запас: у ответа «не держится ничем» адрес
                     # навыка в прозе — прямое противоречие, потому что контракт
@@ -588,7 +588,11 @@ def test_a_skill_named_in_prose_is_named_by_the_field() -> None:
 #: навыка `role-coverage`. Имя через дефис в прозе в общем случае не навык —
 #: так пишутся шаги (`late-look`), ключи (`runs-on`) и слаги правил, — поэтому
 #: ловится только форма, в которой прозу читают как имя навыка (взгляд на #794).
-BARE_SKILL_RE: Final = re.compile(r"навык[а-я]*\s+`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`?(?![\w/.-])")
+#: В любом регистре слова и в конце фразы: «Навык…», «НАВЫК…», «…навыка
+#: role-coverage.» — точка конца фразы именем не является (второй взгляд).
+BARE_SKILL_RE: Final = re.compile(
+    r"(?i:навык[а-я]*)\s+`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`?(?![\w/-]|\.[\w/])"
+)
 
 
 def skills_in_prose(text: str) -> list[str]:
@@ -606,6 +610,11 @@ def test_a_bare_skill_name_after_the_word_is_read() -> None:
     assert skills_in_prose("навыка role-coverage нет") == [".claude/skills/role-coverage"]
     assert skills_in_prose("навык .claude/skills/role-profile") == [".claude/skills/role-profile"]
     assert skills_in_prose("шаг late-look и ключ runs-on") == []
+    assert skills_in_prose("держит навыка role-coverage.") == [".claude/skills/role-coverage"]
+    assert skills_in_prose("Навык role-coverage держит") == [".claude/skills/role-coverage"]
+    assert skills_in_prose("держит НАВЫК role-coverage") == [".claude/skills/role-coverage"]
+    assert skills_in_prose("навык Role-Coverage") == [], "имя навыка — строчными"
+    assert skills_in_prose("навык role-coverage.md") == [], "имя файла — не имя навыка"
 
 
 def test_a_skill_named_in_prose_resolves() -> None:
