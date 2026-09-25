@@ -260,7 +260,7 @@ def test_a_directory_is_measured_by_its_files(tmp_path: Path) -> None:
 
 
 def test_every_registry_of_the_tree_has_its_number_line() -> None:
-    """Реестр, объявленный меткой в scripts/, стоит в `own_issues` — с номером или `null`.
+    """Реестр, объявленный меткой в scripts/, стоит в `own_issues` — с номером или причиной словами.
 
     Список номеров писался от руки: реестров с метками в scripts/ было девять
     (с планом), номеров в списке — шесть, и живой реестр дрейфа #193 выпал из
