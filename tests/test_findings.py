@@ -140,3 +140,22 @@ def test_roles_are_read_from_the_profiles_of_the_role_map(tmp_path: Path) -> Non
     )
     assert module.roles(card) == frozenset({"архитектор", "тестировщик"})
     assert module.roles(tmp_path / "нет.md") == frozenset()
+
+
+def test_read_archive_checks_the_shape(tmp_path: Path) -> None:
+    """Архив читается одним чтением с проверкой формы; чужая форма — `ValueError`."""
+    path = tmp_path / "module.json"
+    path.write_text('{"counted": [1], "findings": {"a": {"seen_on": [1]}}}', encoding="utf-8")
+    assert module.read_archive(path)["counted"] == [1]
+    path.write_text('{"counted": [true]}', encoding="utf-8")
+    with pytest.raises(ValueError, match="не число"):
+        module.read_archive(path)
+    with pytest.raises(ValueError, match="не прочитан"):
+        module.read_archive(tmp_path / "нет.json")
+
+
+def test_unfilled_finds_only_the_fill_gap() -> None:
+    """Неполнота — только строка наполнения; граница верификатора ею не считается."""
+    gap = f"{module.UNFILLED}: не учтено слитых изменений — 3"
+    assert module.unfilled({"gaps": ["ответы верификатора …", gap]}) == gap
+    assert module.unfilled({"gaps": ["ответы верификатора …"]}) == ""

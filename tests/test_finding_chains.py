@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -343,3 +345,84 @@ def test_a_human_finding_line_is_not_counted_without_a_moment_either(
     platform(monkeypatch, {9: [quoted, look("a.py:1 — раз")]})
     assert module.main(["--repo", "o/r", "--from", "9", "--to", "9"]) == module.EXIT_OK
     assert "уникальных находок: 1" in capsys.readouterr().out
+
+
+def archive_file(tmp_path: Path) -> Path:
+    """Архив находок: две находки одного места на двух изменениях и одна вне отрезка."""
+    archive = {
+        "counted": [7, 8, 9],
+        "findings": {
+            "aaaaaaa": {"seen_on": [8, 9], "title": "scripts/x.py:1 — раз"},
+            "bbbbbbb": {"seen_on": [7], "title": "scripts/y.py:2 — два"},
+        },
+    }
+    path = tmp_path / "findings.json"
+    path.write_text(json.dumps(archive), encoding="utf-8")
+    return path
+
+
+def test_chains_are_read_from_the_archive(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--archive` считает цепочки по архиву, без лент и без токена (#778)."""
+    path = archive_file(tmp_path)
+    args = ["--archive", str(path), "--from", "8", "--to", "9"]
+    assert module.main(args) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "уникальных находок: 1 на 2 изменениях" in said
+    assert "мест с находками: 1" in said and "на 2 и более изменениях: 1" in said
+
+
+def test_the_archive_has_no_moment(tmp_path: Path) -> None:
+    """В архиве нет моментов: `--at` с `--archive` — отказ, а не молча пропущенный ключ."""
+    args = ["--archive", str(archive_file(tmp_path)), "--at", "2026-09-24T19:00:00Z"]
+    assert module.main(args) == module.EXIT_BROKEN
+
+
+def test_from_archive_takes_the_last_counted(tmp_path: Path) -> None:
+    """Без отрезка берутся последние `last` учтённых изменений."""
+    archive = json.loads(archive_file(tmp_path).read_text(encoding="utf-8"))
+    said, seen = module.from_archive(archive, last=1)
+    assert seen == 1 and said == [(9, "scripts/x.py:1 — раз")]
+
+
+def test_the_archive_report_names_its_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отчёт по архиву говорит, чем снят: слитые изменения и все авторы (взгляд на #817)."""
+    module.main(["--archive", str(archive_file(tmp_path)), "--from", "8", "--to", "9"])
+    said = capsys.readouterr().out
+    assert "вход: архив находок, 2 слитых изменений" in said
+    assert "всех авторов" in said and "АРХИВ НЕПОЛОН" not in said
+
+
+def test_an_unfilled_archive_is_named_in_the_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Наполнение не дошло до головы — отчёт это печатает, а не выдаёт отрезок за полный (045)."""
+    path = archive_file(tmp_path)
+    archive = json.loads(path.read_text(encoding="utf-8"))
+    archive["gaps"] = ["наполнение не дошло до головы: не учтено слитых изменений — 4"]
+    path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
+    assert module.main(["--archive", str(path)]) == module.EXIT_OK
+    assert "АРХИВ НЕПОЛОН: наполнение не дошло" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "archive",
+    [[1, 2], {"findings": [1]}, {"counted": ["9"]}, {"findings": {"a": {"seen_on": ["x"]}}}],
+    ids=["не словарь", "записи списком", "номер строкой", "номер в seen_on"],
+)
+def test_a_foreign_archive_shape_is_a_refusal(tmp_path: Path, archive: Any) -> None:
+    """Чужая форма архива — исход 2 с причиной, а не трасса (039, взгляд на #817)."""
+    path = tmp_path / "findings.json"
+    path.write_text(json.dumps(archive), encoding="utf-8")
+    assert module.main(["--archive", str(path)]) == module.EXIT_BROKEN
+
+
+def test_archive_heading_names_the_input_and_the_gap() -> None:
+    """Заголовок отчёта по архиву: вход всегда, неполнота — только когда она есть."""
+    assert len(module.archive_heading({}, 3)) == 1
+    gap = f"{module.findings.UNFILLED}: не учтено слитых изменений — 2"
+    lines = module.archive_heading({"gaps": ["другое", gap]}, 3)
+    assert lines[0].startswith("вход: архив находок, 3 слитых") and gap in lines[1]

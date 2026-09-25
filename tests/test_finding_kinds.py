@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Final
@@ -351,3 +352,58 @@ def test_an_answer_is_judged_by_one_function() -> None:
     assert "номера" in str(module.answer_problem({"каталогу": "есть — где-то"}, queue))
     assert "нет или оно не по форме" in str(module.answer_problem({}, queue))
     assert module.slug_of("`имя`.") == "имя"
+
+
+def test_a_kind_shows_its_fate_in_the_archive(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--archive` читает судьбу встреч рода из архива: сколько в нём и сколько снято (#778)."""
+    archive = {
+        "findings": {
+            "aaaaaaa": {"род": "подстрока вместо отношения", "resolved_by": 790},
+            "bbbbbbb": {"род": "подстрока вместо отношения", "resolved_by": None},
+            "ddddddd": {
+                "род": "подстрока вместо отношения",
+                "resolved_by": 791,
+                "twin_of": "aaaaaaa",
+            },
+            "ccccccc": {"род": None},
+        }
+    }
+    path = tmp_path / "findings.json"
+    path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
+    # Дубль снят связью, а не работой — отдельным числом (взгляд на #817).
+    assert module.in_archive(path) == ({"подстрока вместо отношения": (3, 1, 1)}, "")
+    assert module.main(["--archive", str(path)]) == module.EXIT_OK
+    assert "архив: 3, снято работой 1, дублем 1" in capsys.readouterr().out
+
+
+def test_an_unfilled_archive_says_so_in_the_kinds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Неполный архив называет себя, а счёт родов по нему не выдаётся за полный (045)."""
+    gap = "наполнение не дошло до головы: не учтено слитых изменений — 5"
+    archive = {"gaps": [gap], "findings": {"a": {"род": "р", "resolved_by": None}}}
+    path = tmp_path / "findings.json"
+    path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
+    assert module.in_archive(path)[1] == gap
+    module.main(["--archive", str(path)])
+    assert "АРХИВ НЕПОЛОН" in capsys.readouterr().out
+
+
+def test_kinds_from_another_dictionary_are_named(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """С `--kinds` сказано, что роды архива заморожены на момент его сборки."""
+    kinds = module.paths.FINDING_KINDS
+    archive = tmp_path / "findings.json"
+    archive.write_text(
+        json.dumps({"findings": {"a": {"род": "р"}}}, ensure_ascii=False), encoding="utf-8"
+    )
+    module.main(["--kinds", str(kinds), "--archive", str(archive)])
+    assert "не по --kinds" in capsys.readouterr().out
+
+
+def test_an_unreadable_archive_is_a_refusal(tmp_path: Path) -> None:
+    """Архив не читается — отказ с причиной, а не роды без судьбы."""
+    assert module.main(["--archive", str(tmp_path / "нет.json")]) == module.EXIT_BROKEN
