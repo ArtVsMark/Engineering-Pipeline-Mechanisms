@@ -742,3 +742,36 @@ def test_an_exempt_built_document_names_its_reason() -> None:
     for name, why in BUILT_DOCS.items():
         assert why.strip(), f"{name}: исключение без причины"
         assert (ROOT / name).is_file(), f"{name}: исключение названо, а файла нет"
+
+
+#: Указатель документов по читателю: в нём каждый документ `docs/`.
+POINTER = ROOT / "docs" / "README.md"
+
+
+def unlisted(listed: set[Path], docs: list[Path]) -> list[str]:
+    """Документы `docs/` (кроме самого указателя), которых нет среди ссылок указателя."""
+    return sorted(
+        str(here)
+        for one in docs
+        if one != POINTER and (here := one.relative_to(ROOT)) not in listed
+    )
+
+
+def test_the_pointer_lists_every_document() -> None:
+    """Каждый документ `docs/` стоит в указателе по читателю (взгляд на #841).
+
+    Указатель — ручной перечень, и новый документ разошёлся бы с ним молча.
+    Сверяется СОСТАВ, а не раздел: совпадение раздела с объявленным читателем
+    машина не сравнивает, и этот предел назван в самом указателе (195).
+    """
+    docs = sorted(walk(ROOT / "docs", "*.md"))
+    assert len(docs) > 1, "в docs/ не нашлось документов, кроме указателя — сверять нечего"
+    missing = unlisted(link_targets(POINTER), docs)
+    assert not missing, f"указатель docs/README.md не называет: {', '.join(missing)}"
+
+
+def test_the_pointer_gate_rejects_an_unlisted_document() -> None:
+    """Предикат краснеет, когда документа нет среди ссылок указателя (140)."""
+    docs = [ROOT / "docs" / "roles.md", ROOT / "docs" / "gaps.md", POINTER]
+    assert unlisted({Path("docs/roles.md")}, docs) == ["docs/gaps.md"]
+    assert unlisted({Path("docs/roles.md"), Path("docs/gaps.md")}, docs) == []
