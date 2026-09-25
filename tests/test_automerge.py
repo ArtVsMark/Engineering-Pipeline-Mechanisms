@@ -1963,3 +1963,24 @@ def test_an_unread_feed_is_named_and_nothing_is_written(
     module.call_the_owed_look("o/r", "777", "t", dry_run=False, change=head)
     assert [one for one in asked if one[0] == "POST"] == [], "оклик вслепую мог бы повториться"
     assert "ленту не прочитать" in capsys.readouterr().out
+
+
+def test_the_queue_log_does_not_guess_why_a_rerun_was_not_called(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Лог захода не называет «отказом» предел: причина — строкой `::warning` выше (#806)."""
+    platform["changes"] = [replace(change(1, "automerge"), head="abcdef1234567890")]
+    platform["owed"] = {1: "777"}
+
+    def request(method: str, path: str, tok: str, body: Any = None) -> Any:
+        if method == "GET" and "/actions/runs/" in path:
+            return {"run_attempt": 2}
+        return {"sha": "base-sha"}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, tok, **_: iter([]))
+    module.advance("o/r", "token", "main", dry_run=False)
+    said = capsys.readouterr().out
+    assert "не перезапущен — причина строкой выше" in said
+    assert "уже перезапускался (попыток: 2)" in said
+    assert "перезапуск отказал" not in said and "пока голова была красной" not in said
