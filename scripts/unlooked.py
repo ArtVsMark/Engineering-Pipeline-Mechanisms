@@ -442,6 +442,26 @@ def look_at(repo: str, number: int, token: str) -> str | None:
     return look_of(comments, head_runs(repo, number, token))
 
 
+def late_seen(comments: list[dict[str, Any]]) -> str:
+    """День позднего взгляда по ЛЕНТЕ изменения; пусто — ответа позднего взгляда нет.
+
+    Засчитывается комментарий с отметкой позднего взгляда и вердиктом: ответ,
+    перенесённый шагом `late_look.py`, а не заход, оборвавшийся без ответа.
+    """
+    days = [
+        str(comment.get("created_at") or "")[:10]
+        for comment in comments
+        if LATE_MARKER in (comment.get("body") or "")
+        and review_findings.verdict_of([comment]) is not None
+    ]
+    return max(days, default="")
+
+
+def late_on(repo: str, number: int, token: str) -> str:
+    """То же по живому изменению: спрашивает его ленту у площадки."""
+    return late_seen(list(ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token)))
+
+
 def head_runs(repo: str, number: int, token: str) -> list[dict[str, Any]]:
     """Записи проверок на голове изменения; отказ — пустой список, а не падение.
 
@@ -775,6 +795,18 @@ def main(argv: list[str] | None = None) -> int:
         answered = sorted(set(known) - set(entries))
         if args.late is not None:
             entries = mark_late(entries, args.late, datetime.now(UTC).strftime("%Y-%m-%d"))
+        # ПОЗДНИЙ ВЗГЛЯД УЗНАЁТСЯ ПО ЛЕНТЕ, А НЕ ТОЛЬКО ПО ОТМЕТКЕ ЕГО ШАГА. Реестр
+        # пишут два прогона, и каждый записывает тело целиком из своего снимка:
+        # заход очереди, начатый до отметки позднего взгляда, стирал её, и
+        # запись возвращалась в список «без взгляда» навсегда. Замер 24.09.2026:
+        # #761, #768, #769 — поздний взгляд состоялся, ответ лежит в ленте, а
+        # реестр держал их открытыми. Ответ в ленте — живой источник, и из него
+        # отметка восстанавливается на каждом заходе (049).
+        for number, entry in list(entries.items()):
+            if not entry.late:
+                day = late_on(args.repo, number, token)
+                if day:
+                    entries = mark_late(entries, number, day)
 
         # СНЯТИЕ ИДЁТ ПОСЛЕ ОТМЕТКИ, а не вместо: обратный порядок оставлял бы
         # в списке запись, чей поздний взгляд состоялся этим же заходом, — то
