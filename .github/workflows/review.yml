@@ -716,7 +716,16 @@ jobs:
     # запрещённого: стоило завести третье событие — и поздний взгляд поехал бы
     # на нём молча, ровно так и случилось бы с уборкой ниже
     # ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    #
+    # И ПОСЛЕ КАЖДОГО `ci` НА ОБЩЕЙ ВЕТКЕ (`workflow_run`), а не только ночью.
+    # Замер 24.09.2026 (#89): за день слито пять изменений без взгляда — четыре
+    # правили файл прогона взгляда (он гасит взгляд на своей голове), одно
+    # слито в окно сломанных ворот. Ночная очередь берёт три за заход, и
+    # слитое без взгляда ждало сутками. Очередь та же — из реестра, тот же
+    # предел за заход; пустая очередь стоит один короткий джоб.
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      || github.event_name == 'workflow_run'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
