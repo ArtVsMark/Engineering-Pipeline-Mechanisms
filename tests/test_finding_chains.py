@@ -384,3 +384,45 @@ def test_from_archive_takes_the_last_counted(tmp_path: Path) -> None:
     archive = json.loads(archive_file(tmp_path).read_text(encoding="utf-8"))
     said, seen = module.from_archive(archive, last=1)
     assert seen == 1 and said == [(9, "scripts/x.py:1 — раз")]
+
+
+def test_the_archive_report_names_its_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отчёт по архиву говорит, чем снят: слитые изменения и все авторы (взгляд на #817)."""
+    module.main(["--archive", str(archive_file(tmp_path)), "--from", "8", "--to", "9"])
+    said = capsys.readouterr().out
+    assert "вход: архив находок, 2 слитых изменений" in said
+    assert "всех авторов" in said and "АРХИВ НЕПОЛОН" not in said
+
+
+def test_an_unfilled_archive_is_named_in_the_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Наполнение не дошло до головы — отчёт это печатает, а не выдаёт отрезок за полный (045)."""
+    path = archive_file(tmp_path)
+    archive = json.loads(path.read_text(encoding="utf-8"))
+    archive["gaps"] = ["наполнение не дошло до головы: не учтено слитых изменений — 4"]
+    path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
+    assert module.main(["--archive", str(path)]) == module.EXIT_OK
+    assert "АРХИВ НЕПОЛОН: наполнение не дошло" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "archive",
+    [[1, 2], {"findings": [1]}, {"counted": ["9"]}, {"findings": {"a": {"seen_on": ["x"]}}}],
+    ids=["не словарь", "записи списком", "номер строкой", "номер в seen_on"],
+)
+def test_a_foreign_archive_shape_is_a_refusal(tmp_path: Path, archive: Any) -> None:
+    """Чужая форма архива — исход 2 с причиной, а не трасса (039, взгляд на #817)."""
+    path = tmp_path / "findings.json"
+    path.write_text(json.dumps(archive), encoding="utf-8")
+    assert module.main(["--archive", str(path)]) == module.EXIT_BROKEN
+
+
+def test_archive_heading_names_the_input_and_the_gap() -> None:
+    """Заголовок отчёта по архиву: вход всегда, неполнота — только когда она есть."""
+    assert len(module.archive_heading({}, 3)) == 1
+    gap = f"{module.findings.UNFILLED}: не учтено слитых изменений — 2"
+    lines = module.archive_heading({"gaps": ["другое", gap]}, 3)
+    assert lines[0].startswith("вход: архив находок, 3 слитых") and gap in lines[1]

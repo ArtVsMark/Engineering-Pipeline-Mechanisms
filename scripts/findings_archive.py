@@ -234,7 +234,7 @@ def build(
     left = max(0, len(pending) - budget)
     gaps = [VERIFIER_GAP]
     if left:
-        gaps.insert(0, f"наполнение не дошло до головы: не учтено слитых изменений — {left}")
+        gaps.insert(0, f"{registry.UNFILLED}: не учтено слитых изменений — {left}")
     return {
         "schema": SCHEMA,
         "_schema": SCHEMA_SAID,

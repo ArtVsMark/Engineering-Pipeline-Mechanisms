@@ -52,6 +52,7 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+import findings
 import paths
 
 EXIT_OK: Final = 0
@@ -259,25 +260,29 @@ def unanswered(kinds: dict[str, Any], queue: str) -> list[tuple[str, int]]:
     ]
 
 
-def in_archive(path: Path) -> dict[str, tuple[int, int]]:
-    """Род → (находок рода в архиве, из них снято) — чтение архива, а не лент (#778).
+def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
+    """Род → (находок рода в архиве, снято работой, снято дублем) и строка неполноты (#778).
 
     Род у находки архив берёт из этого же словаря (`встречен`), так что число
-    здесь не второй счёт встреч, а их СУДЬБА: сколько из них в истории и
-    сколько снято работой.
+    здесь не второй счёт встреч, а их СУДЬБА: сколько из них в истории и чем
+    они сняты. Дубль закрыт связью с другой находкой, а не работой, и в «снято
+    работой» не входит (взгляд на #817). Вторым отдаётся строка архива о
+    неполном наполнении: без неё счёт печатался бы как полный (045).
     """
     try:
-        archive = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise NotRun(f"архив не прочитан — {exc}") from exc
-    found: dict[str, tuple[int, int]] = {}
+        archive = findings.read_archive(path)
+    except ValueError as exc:
+        raise NotRun(str(exc)) from exc
+    found: dict[str, tuple[int, int, int]] = {}
     for entry in (archive.get("findings") or {}).values():
         name = str(entry.get("род") or "")
         if not name:
             continue
-        total, resolved = found.get(name, (0, 0))
-        found[name] = (total + 1, resolved + (1 if entry.get("resolved_by") else 0))
-    return found
+        total, worked, twinned = found.get(name, (0, 0, 0))
+        resolved = bool(entry.get("resolved_by"))
+        twin = resolved and bool(entry.get("twin_of"))
+        found[name] = (total + 1, worked + (resolved and not twin), twinned + twin)
+    return found, findings.unfilled(archive)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -290,13 +295,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         kinds = read(Path(args.kinds) if args.kinds else None)
-        archived = in_archive(Path(args.archive)) if args.archive else {}
+        archived, gap = in_archive(Path(args.archive)) if args.archive else ({}, "")
     except NotRun as refusal:
         print(f"роды не сосчитаны: {refusal}", file=sys.stderr)
         return EXIT_BROKEN
 
     meetings = sum(len(body.get("встречен") or []) for body in kinds.values())
     print(f"родов {len(kinds)}, встреч {meetings}")
+    if gap:
+        print(f"АРХИВ НЕПОЛОН: {gap} — числа архива ниже неполные")
+    if archived and args.kinds:
+        # Род в записи архива заморожен на момент сборки: другой словарь
+        # родов сводит встречи иначе, и счёт с архивом расходится (взгляд на #817).
+        print("роды архива — по словарю на момент его сборки, не по --kinds")
     for name, body in sorted(kinds.items(), key=lambda one: -len(one[1].get("встречен") or [])):
         times = len(body.get("встречен") or [])
         held = str(body.get("закрыт", "")).strip()
@@ -305,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
         seen, caught = origins(body)
         split = f" (взгляд {seen}, окно {caught})" if caught else ""
         kept = archived.get(name)
-        stored = f"  архив: {kept[0]}, снято {kept[1]}" if kept else ""
+        stored = f"  архив: {kept[0]}, снято работой {kept[1]}, дублем {kept[2]}" if kept else ""
         print(f"  {times:>2}  {name}{split}  [{mark}]{stored}")
         if born:
             print(f"      породил: {'; '.join(born)}")
