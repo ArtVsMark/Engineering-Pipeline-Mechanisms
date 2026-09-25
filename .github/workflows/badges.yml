@@ -130,7 +130,17 @@ jobs:
       # записей не восстановить. Поэтому: шаг отказал — прежний файл
       # переносится как есть; ветку не прочитать вовсе — прогон не публикует
       # её, а краснеет (взгляд на #788, 045).
+      #
+      # «ВЕТКИ НЕТ» И «ВЕТКУ НЕ ПРОЧЕСТЬ» РАЗЛИЧАЕТ КОД, А НЕ УСПЕХ. `ls-remote
+      # --exit-code` отвечает 2 только на отсутствие ветки; сеть и права дают
+      # 128. Прежняя редакция читала любой ненулевой код как «ветки нет», и
+      # двойной отказ сети собирал архив с нуля поверх истории (взгляд на #788).
+      #
+      # ПЕРЕНОС НЕ МОЛЧИТ. Прежний файл спасает историю, но не дописывается: без
+      # сигнала архив замер бы на месте, а прогон зеленел. Поэтому перенос
+      # помечается выходом шага, и после публикации прогон краснеет (045).
       - name: дописать архив находок
+        id: archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -145,9 +155,16 @@ jobs:
               echo "архива на ветке ещё нет — наполнение с начала"
               rm -f "$prev"
             fi
-          elif git ls-remote --exit-code --heads origin badges >/dev/null; then
-            echo "::error::ветка badges есть, но не прочитана — архив не перенести, публикацию останавливаю"
-            exit 1
+          else
+            remote=0
+            git ls-remote --exit-code --heads origin badges >/dev/null || remote=$?
+            case "$remote" in
+              2) echo "ветки badges ещё нет — наполнение с начала" ;;
+              *)
+                echo "::error::ветка badges не прочитана (ls-remote код $remote) — архив не перенести, публикацию останавливаю"
+                exit 1
+                ;;
+            esac
           fi
           rc=0
           python scripts/findings_archive.py --repo "${GITHUB_REPOSITORY}" --out "$out" \
@@ -157,6 +174,7 @@ jobs:
             *)
               echo "::warning::архив находок не дописан (код $rc) — переношу прежний как есть."
               if [ -f "$prev" ]; then cp "$prev" "$out"; fi
+              echo "carried=$rc" >> "$GITHUB_OUTPUT"
               ;;
           esac
       - name: опубликовать в ветку badges
@@ -175,3 +193,10 @@ jobs:
           git push -q --force \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}" badges
           echo "опубликовано: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/badges/.github/badges/facts.json"
+      - name: архив не замер
+        if: steps.archive.outputs.carried != ''
+        env:
+          CARRIED: ${{ steps.archive.outputs.carried }}
+        run: |
+          echo "::error::архив находок перенесён без дописывания (код $CARRIED) — факты опубликованы, архив стоит на месте"
+          exit 1
