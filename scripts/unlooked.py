@@ -194,6 +194,29 @@ ANNOTATIONS_UNREAD: Final = "аннотации взгляда не прочит
 #: «взгляда не было»: реестр сказал бы, что взгляд был вовремя, — ровно та
 #: подмена, ради которой состояния и разведены (154).
 LATE_MARKER: Final = "<!-- late-look: этот взгляд по общей ветке, а не по изменению -->"
+#: Автор комментария позднего взгляда: `late_look.py` пишет его токеном
+#: прогона. Ответчик по обращению (`claude.yml`) пишет от `claude[bot]`, и по
+#: одному «это бот» их не различить (взгляд на #815, `1d79af0`).
+LATE_AUTHOR: Final = "github-actions[bot]"
+
+
+def is_late_look(comment: dict[str, Any]) -> bool:
+    """Это комментарий позднего взгляда, а не цитата его метки.
+
+    Один признак на всех читателей метки (090): автор — прогон
+    (`LATE_AUTHOR`), и метка стоит ПЕРВОЙ строкой, как её кладёт
+    `late_look.compose`. Процитировать метку может человек, ревьюер или
+    ответчик по обращению, но не от имени прогона и не первой строкой.
+    Ответ верификатора переносит тот же `late_look.py` тем же токеном, но со
+    СВОЕЙ меткой (`late_look.VERIFY_MARKER`, флаг `--verify`): под общей он
+    засчитывался поздним взглядом (взгляд на #815). Граница названа: другой
+    шаг, который пишет токеном прогона и начинает комментарий с этой метки,
+    прошёл бы. Метку позднего взгляда кладёт только `late_look.compose`.
+    """
+    body = str(comment.get("body") or "")
+    author = str((comment.get("user") or {}).get("login") or "")
+    return author == LATE_AUTHOR and body.lstrip().startswith(LATE_MARKER)
+
 
 #: Хвост записи, которым поздний взгляд ДОПИСЫВАЕТСЯ к состоянию, а не заменяет
 #: его. Пока он заменял, после позднего взгляда узнать, ПОЧЕМУ изменение попало
@@ -457,7 +480,7 @@ def look_at(repo: str, number: int, token: str, feed: Feed | None = None) -> str
     # реестр солгал бы о главном. Честнее не писать реестр вовсе (045, взгляд
     # на #810).
     said = (feed or feed_reader(repo, token))(number)
-    comments = [comment for comment in said if LATE_MARKER not in (comment.get("body") or "")]
+    comments = [comment for comment in said if not is_late_look(comment)]
     if review_findings.verdict_of(comments) is not None or review_findings.findings_of(comments):
         # Второй запрос делается ТОЛЬКО ради причины тишины: у изменения с
         # ответом причина уже видна, и платить за неё лишним обращением незачем.
@@ -475,10 +498,11 @@ def late_seen(comments: list[dict[str, Any]]) -> str:
     гонке, из ленты не восстанавливался (взгляд на #790). Два понимания одного
     события расходились бы молча (090).
     """
+    # ТОЛЬКО КОММЕНТАРИЙ ПРОГОНА: строку метки может процитировать и человек,
+    # и ответчик по обращению тем же `claude[bot]` — тогда запись снялась бы без
+    # взгляда (взгляды на #810 и #815). Признак один на всех читателей метки.
     days = [
-        str(comment.get("created_at") or "")[:10]
-        for comment in comments
-        if LATE_MARKER in (comment.get("body") or "")
+        str(comment.get("created_at") or "")[:10] for comment in comments if is_late_look(comment)
     ]
     return max(days, default="")
 

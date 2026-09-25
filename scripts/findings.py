@@ -13,12 +13,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import ghrest
 import paths
@@ -310,3 +311,41 @@ def parse_entries(body: str | None) -> dict[str, Entry]:
         )
         for match in ENTRY_RE.finditer(body or "")
     }
+
+
+# --- архив находок: одно чтение формы на всех читателей -----------------------
+
+#: Начало строки `gaps`, которой архив говорит, что наполнение не дошло до
+#: головы. Пишет её `findings_archive`, читают замеры — одна константа на обе
+#: стороны, иначе переформулировка молча сделала бы архив «полным» (090).
+UNFILLED: Final = "наполнение не дошло до головы"
+
+
+def read_archive(path: Path) -> dict[str, Any]:
+    """Архив находок с диска, проверенный по форме; отказ — `ValueError` с причиной.
+
+    Замеры читали архив как придётся, и чужая форма роняла их трассой вместо
+    исхода 2 с причиной (039, взгляд на #817). Проверяется ровно то, чем они
+    пользуются: словарь записей и номера изменений числами.
+    """
+    try:
+        archive = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"архив не прочитан — {exc}") from exc
+    if not isinstance(archive, dict):
+        raise ValueError("архив не словарь")
+    entries = archive.get("findings") or {}
+    if not isinstance(entries, dict) or not all(isinstance(one, dict) for one in entries.values()):
+        raise ValueError("`findings` в архиве — не словарь записей")
+    numbers = [*(archive.get("counted") or [])]
+    numbers += [number for one in entries.values() for number in one.get("seen_on") or []]
+    if not all(isinstance(number, int) and not isinstance(number, bool) for number in numbers):
+        raise ValueError("номер изменения в архиве — не число")
+    return archive
+
+
+def unfilled(archive: dict[str, Any]) -> str:
+    """Строка архива о неполном наполнении или пусто, если архив дошёл до головы."""
+    return next(
+        (str(one) for one in archive.get("gaps") or [] if str(one).startswith(UNFILLED)), ""
+    )

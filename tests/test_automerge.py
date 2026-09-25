@@ -1510,7 +1510,10 @@ def verdict(
     return {
         "created_at": created or when,
         "updated_at": when,
-        "user": {"type": "User" if human else "Bot"},
+        "user": {
+            "type": "User" if human else "Bot",
+            "login": module.unlooked.LATE_AUTHOR if late else "claude[bot]",
+        },
         "body": f"{marker}{head}разбор\nВЕРДИКТ: находок {count}",
     }
 
@@ -1585,6 +1588,19 @@ def test_only_the_first_verdict_with_findings_holds(
     """
     looks: dict[str, list[str]] = {LOOK_RUN: []}
     assert module.holds_for_findings(module.verdicts_on(comments, looks), HEAD_AT) is holds
+
+
+def test_a_verdict_quoting_the_late_marker_still_holds() -> None:
+    """Взгляд до слияния, процитировавший метку позднего, держит голову (взгляд на #815).
+
+    Поздний взгляд отличается автором прогона и меткой первой строкой, а не
+    любым вхождением метки: иначе ревьюер, разбиравший сам поздний взгляд,
+    молча снимал бы держание своих находок.
+    """
+    said = verdict("2026-09-24T10:05:00Z", 2)
+    said["body"] = said["body"].replace("разбор", f"разбор метки `{module.unlooked.LATE_MARKER}`")
+    looks: dict[str, list[str]] = {LOOK_RUN: []}
+    assert module.holds_for_findings(module.verdicts_on([said], looks), HEAD_AT) is True
 
 
 def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -698,7 +698,9 @@ jobs:
           set -uo pipefail
           rc=0
           said="${RUNNER_TEMP}/verify.txt"
-          python scripts/late_look.py --pr "$SUBJECT" \
+          # `--verify` — своя метка: под меткой позднего взгляда ответ
+          # верификатора засчитывался поздним взглядом (взгляд на #815).
+          python scripts/late_look.py --pr "$SUBJECT" --verify \
             --from "${{ steps.refute.outputs.execution_file }}" --apply >"$said" 2>&1 || rc=$?
           cat "$said"
           reason="$(tr '\n' ' ' <"$said")"
