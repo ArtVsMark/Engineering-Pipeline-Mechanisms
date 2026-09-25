@@ -87,6 +87,7 @@ from typing import Any, Final
 import findings
 import ghrest
 import review_findings
+import unlooked
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -232,7 +233,25 @@ def read_counted(
         # на #787), а строка `НАХОДКА[…]` в ней — находку, которой взгляд не
         # говорил, и снимала бы отказ снова (взгляд на #789). Признак тот же,
         # что у очереди слияний (`automerge.verdicts_on`): автор — бот.
-        looks = [one for one in comments if (one.get("user") or {}).get("type") == "Bot"]
+        #
+        # ОТВЕТ ВЕРИФИКАТОРА — НЕ ВЗГЛЯД. Он пишет от бота и может процитировать
+        # `ВЕРДИКТ:` и `НАХОДКА[` из находки, которую проверяет; поздний взгляд
+        # при этом считается намеренно — он дописывает находки задним числом
+        # (взгляд на #827).
+        #
+        # СОСЕД ЧИНЕН ТЕМ ЖЕ ПРИЗНАКОМ: `review_findings.last_look` отсеивает
+        # ответ верификатора, и процитированная им находка в реестр не идёт
+        # (взгляд на #833).
+        #
+        # ВТОРОЙ ЦИТАТЧИК НЕ ОТСЕВАЕТСЯ: ответчик по обращению (`claude.yml`)
+        # пишет от `claude[bot]`, как и взгляд, и метки у него нет — по «это
+        # бот» их не различить (`unlooked.LATE_AUTHOR`). Процитированная им
+        # находка идёт в замер.
+        looks = [
+            one
+            for one in comments
+            if (one.get("user") or {}).get("type") == "Bot" and not unlooked.is_verification(one)
+        ]
         kept += sum(1 for one in looks if review_findings.verdict_of([one]) is not None)
         said += [(number, found[1]) for found in review_findings.findings_of(looks)]
     return said, taken, kept
