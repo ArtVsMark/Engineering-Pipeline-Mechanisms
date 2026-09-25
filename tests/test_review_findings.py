@@ -1212,6 +1212,39 @@ def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
     assert not берём and "#10" in держим["abc1234"]
 
 
+def test_one_closer_that_edited_the_answer_is_enough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Из нескольких снявших хватает одного, правившего ответ; ни одного — отказ (#838)."""
+    entries = отметка(10, findings_module.ANSWER_KIND)
+    files = {20: {"scripts/arm.py"}, 30: {module.ANSWER_FILE}, 40: {"docs/x.md"}}
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
+    берём, _ = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20, 30}})
+    assert берём == {"abc1234"}
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, {"abc1234": {20, 40}})
+    assert not берём and "#20, #40" in держим["abc1234"]
+
+
+def test_a_merged_change_without_a_number_is_no_closer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слитое без номера снявшим не пишется: находку об ответе оно не снимает (#838)."""
+    page = [
+        {
+            "merged_at": "2026-09-25T12:00:00Z",
+            "closed_at": "2026-09-25T12:00:00Z",
+            "body": "Разобрано: abc1234",
+        }
+    ]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
+    marks, _ = module.resolved_marks("o/r", "t", "2026-09-25T11:00:00Z")
+    assert marks == {"abc1234": set()}
+
+    def нельзя(repo: str, token: str, number: int) -> set[str]:
+        raise AssertionError(f"площадку спросили о #{number}")
+
+    monkeypatch.setattr(module, "touched", нельзя)
+    entries = отметка(10, findings_module.ANSWER_KIND)
+    берём, держим = module.closable("o/r", "t", {"abc1234"}, entries, marks)
+    assert not берём and "abc1234" in держим
+
+
 def test_a_code_finding_is_closed_without_asking_the_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
