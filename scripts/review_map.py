@@ -112,8 +112,12 @@ def table_shape(table: Any) -> dict[str, Any]:
     if not strings(table.get("required", [])):
         raise NotRun("`required` — не список имён ролей")
     ignored = table.get("ignored", {})
-    if not (isinstance(ignored, dict) and strings(ignored.get("paths", []))):
-        raise NotRun("`ignored.paths` — не список образцов")
+    if not (
+        isinstance(ignored, dict)
+        and strings(ignored.get("paths", []))
+        and strings(ignored.get("except", []))
+    ):
+        raise NotRun("`ignored.paths` или `ignored.except` — не список образцов")
     rules = table.get("by_path", [])
     if not isinstance(rules, list):
         raise NotRun("`by_path` — не список правил")
@@ -127,6 +131,18 @@ def table_shape(table: Any) -> dict[str, Any]:
     return table
 
 
+def matches(name: str, mask: str) -> bool:
+    """Путь совпадает с образцом; образец без `/` — только путь в корне.
+
+    `*` у `fnmatch` проходит и через `/`, и `*.md` звал техписателя на любой
+    `.md` в любой папке — образцы тестов тоже (взгляд на #796). Образец с `/`
+    читается как прежде: `docs/*` берёт и вложенные пути.
+    """
+    if "/" not in mask and "/" in name:
+        return False
+    return fnmatch.fnmatch(name, mask)
+
+
 def roles_for(files: list[str], table: dict[str, Any]) -> tuple[list[str], dict[str, list[str]]]:
     """Роли изменения: обязательные и по контексту — роль → тронутые пути, её позвавшие.
 
@@ -134,20 +150,21 @@ def roles_for(files: list[str], table: dict[str, Any]) -> tuple[list[str], dict[
     с таблицей, а не суждение модели (#776). Обязательная роль в контекстные не
     повторяется. Пути из `ignored` ролей не зовут: фрагмент журнала приносит
     почти каждое изменение, и роли, которые он звал, становились обязательными
-    по факту (взгляд на #785).
+    по факту (взгляд на #785). Кроме `ignored.except`: фрагмент, двигающий
+    контракт, релиз-инженера зовёт (взгляд на #796).
     """
     required = [str(one) for one in table.get("required", [])]
-    ignored = table.get("ignored", {}).get("paths", [])
-    files = [name for name in files if not any(fnmatch.fnmatch(name, m) for m in ignored)]
+    ignored = table.get("ignored", {})
+    files = [
+        name
+        for name in files
+        if not any(matches(name, m) for m in ignored.get("paths", []))
+        or any(matches(name, m) for m in ignored.get("except", []))
+    ]
     context: dict[str, list[str]] = {}
     for rule in table.get("by_path", []):
         hit = sorted(
-            {
-                name
-                for name in files
-                for mask in rule.get("paths", [])
-                if fnmatch.fnmatch(name, mask)
-            }
+            {name for name in files for mask in rule.get("paths", []) if matches(name, mask)}
         )
         if not hit:
             continue
