@@ -59,6 +59,12 @@ import report
 
 MARKER: Final = findings.MARKER
 TITLE: Final = findings.TITLE
+#: Автор ответов, которые прогон переносит в изменение после слияния: поздний
+#: взгляд и верификатор. Живёт здесь, а не в `unlooked`: читать его нужно и
+#: сборщику реестра, а `unlooked` сам импортирует этот модуль (взгляд на #833).
+LATE_AUTHOR: Final = "github-actions[bot]"
+#: Метка ответа верификатора — первой строкой, от `LATE_AUTHOR`.
+VERIFY_MARKER: Final = "<!-- verify: проверка премисы одной находки, а не взгляд на изменение -->"
 
 #: РАЗМЕТКА ВОКРУГ КЛЮЧА, КОТОРУЮ РАЗБОР ПЕРЕЖИВАЕТ. Ревьюер отвечает в
 #: markdown, и строка ключа у него регулярно оказывается выделенной. Разбор,
@@ -384,6 +390,21 @@ def verdict_of(comments: list[dict[str, Any]]) -> int | None:
     return verdict
 
 
+def is_verification(comment: dict[str, Any]) -> bool:
+    """Это ответ верификатора: автор-прогон и метка верификатора первой строкой.
+
+    Ответ верификатора — не заход взгляда. Он может процитировать `ВЕРДИКТ:` и
+    `НАХОДКА[` из находки, которую проверяет, и читатели заходов его
+    отсеивают: замер цепочек и `last_look` (взгляды на #827, #833).
+
+    ПРЕДЕЛ НАЗВАН: ответ верификатора, перенесённый до #825, лежит под меткой
+    позднего взгляда и здесь не узнаётся.
+    """
+    body = str(comment.get("body") or "").lstrip()
+    author = str((comment.get("user") or {}).get("login") or "")
+    return author == LATE_AUTHOR and body.startswith(VERIFY_MARKER)
+
+
 def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Лента ПОСЛЕДНЕГО захода взгляда, а не всё изменение целиком.
 
@@ -412,6 +433,10 @@ def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     «находок нет»
     ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
     """
+    # ОТВЕТ ВЕРИФИКАТОРА ЗАХОДОМ НЕ СЧИТАЕТСЯ: процитированный им `ВЕРДИКТ:`
+    # резал бы отрезок, а процитированная находка шла бы в реестр новой
+    # записью (взгляд на #833).
+    comments = [comment for comment in comments if not is_verification(comment)]
     ends = [
         place
         for place, comment in enumerate(comments)
