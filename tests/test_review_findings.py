@@ -1233,14 +1233,15 @@ def test_a_merged_change_without_a_number_is_unread(monkeypatch: pytest.MonkeyPa
         },
         {
             "number": 7,
-            "merged_at": "2026-09-25T12:30:00Z",
-            "closed_at": "2026-09-25T12:30:00Z",
+            "merged_at": "2026-09-25T11:30:00Z",
+            "closed_at": "2026-09-25T11:30:00Z",
             "body": "Разобрано: def5678",
         },
     ]
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
-    marks, _ = module.resolved_marks("o/r", "t", "2026-09-25T11:00:00Z")
+    marks, mark = module.resolved_marks("o/r", "t", "2026-09-25T11:00:00Z")
     assert marks == {"def5678": {7}}
+    assert mark == "2026-09-25T11:30:00Z", "отметка шагнула через слитое без номера"
 
 
 def test_a_code_finding_is_closed_without_asking_the_platform(
