@@ -215,6 +215,43 @@ PROPOSAL_FIELDS = ("slug", "claim", "incident", "trail")
 #: С КОНКРЕТИКОЙ» — требование контракта, а строка короче этого конкретики не
 #: несёт и заставит каталог спрашивать заново.
 INCIDENT_AT_LEAST = 200
+#: Поля предложения НАВЫКА по форме 1.2: вместо инцидента — замер в работе,
+#: вместо следа — путь к `SKILL.md` и полный sha коммита (взгляд на #885).
+SKILL_FIELDS = ("slug", "path", "sha", "holds", "measurement")
+#: Полный sha коммита: каталог читает навык на нём, а не на ветке.
+FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
+    """Чем предложение не годится каталогу; пусто — годится.
+
+    Род решает форму: без `kind` — правило (инцидент и след), `kind: skill` —
+    навык (замер, путь к `SKILL.md`, sha, правила, которые навык держит).
+    Прежде проверка знала только правило и отвергла бы первый же навык
+    (взгляд на #885).
+    """
+    slug = item.get("slug", "?")
+    if item.get("kind") == "skill":
+        found = [f"{slug}: поля «{one}» нет" for one in SKILL_FIELDS if not item.get(one)]
+        if len(str(item.get("measurement") or "")) < INCIDENT_AT_LEAST:
+            found.append(f"{slug}: замер без конкретики — каталогу придётся спрашивать заново")
+        path = str(item.get("path") or "")
+        if not path.endswith("SKILL.md") or not (root / path).is_file():
+            found.append(f"{slug}: путь «{path}» не ведёт к SKILL.md в дереве")
+        if not FULL_SHA_RE.match(str(item.get("sha") or "")):
+            found.append(f"{slug}: sha не полный — каталог читает навык на коммите")
+        holds = item.get("holds")
+        if not isinstance(holds, list) or not all(
+            re.fullmatch(r"\d{3}", str(one)) for one in holds
+        ):
+            found.append(f"{slug}: holds — список номеров правил каталога")
+        return found
+    found = [f"{slug}: поля «{one}» нет" for one in PROPOSAL_FIELDS if not item.get(one)]
+    if len(str(item.get("incident") or "")) < INCIDENT_AT_LEAST:
+        found.append(f"{slug}: инцидент без конкретики — каталогу придётся спрашивать заново")
+    if not (root / str(item.get("trail") or "")).exists():
+        found.append(f"{slug}: след «{item.get('trail')}» не разрешается")
+    return found
 
 
 def proposals() -> list[dict[str, Any]]:
@@ -306,22 +343,31 @@ def test_a_proposal_carries_what_the_catalogue_asks(item: dict[str, Any]) -> Non
     — ему придётся спрашивать заново, и правило, родившееся здесь, останется
     здесь (080).
     """
-    for field in PROPOSAL_FIELDS:
-        assert item.get(field), f"{item.get('slug', '?')}: поля «{field}» нет"
-    assert len(str(item["incident"])) >= INCIDENT_AT_LEAST, (
-        f"{item['slug']}: инцидент без конкретики — каталогу придётся спрашивать заново"
+    problems = proposal_problems(item)
+    assert not problems, "; ".join(problems)
+
+
+def test_a_skill_proposal_is_judged_by_its_own_form(tmp_path: Path) -> None:
+    """Навык формы 1.2 проходит без инцидента и следа, а без своих полей — нет (#885)."""
+    (tmp_path / ".claude" / "skills" / "x").mkdir(parents=True)
+    (tmp_path / ".claude" / "skills" / "x" / "SKILL.md").write_text("---\n", encoding="utf-8")
+    good = {
+        "kind": "skill",
+        "slug": "x",
+        "path": ".claude/skills/x/SKILL.md",
+        "sha": "0" * 40,
+        "holds": ["157"],
+        "measurement": "м" * INCIDENT_AT_LEAST,
+    }
+    assert proposal_problems(good, tmp_path) == []
+    assert (
+        len(
+            proposal_problems({**good, "path": "нет/SKILL.md", "sha": "abc", "holds": []}, tmp_path)
+        )
+        == 3
     )
-
-
-@pytest.mark.parametrize("item", queued(), ids=lambda one: str(one.get("slug", "пусто")))
-def test_a_proposal_trail_resolves_in_the_tree(item: dict[str, Any]) -> None:
-    """След предложения — артефакт ЭТОГО дерева, где поломка видна (044).
-
-    Ссылка на то, чего нет, превращает инцидент в рассказ: проверить его
-    каталог не сможет, а поверить ему — не должен.
-    """
-    said = str(item.get("trail") or "")
-    assert (ROOT / said).exists(), f"{item.get('slug', '?')}: след «{said}» не разрешается"
+    rule = {"slug": "y", "claim": "к", "incident": "и" * INCIDENT_AT_LEAST, "trail": "нет.py"}
+    assert proposal_problems(rule, tmp_path) == ["y: след «нет.py» не разрешается"]
 
 
 def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:
