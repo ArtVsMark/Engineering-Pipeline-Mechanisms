@@ -339,7 +339,7 @@ def merged_messages(log: str) -> list[tuple[int, str]]:
 
 
 def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: set[int]) -> int:
-    """Дописывает снятия из тел уже учтённых изменений; отдаёт число новых и дополненных.
+    """Дописывает снятия и пересчитывает связи учтённых изменений; отдаёт число изменённых.
 
     ЗАЧЕМ. До #809 архив разбирал строку снятия своим образцом и брал один
     отпечаток: у «Разобрано: A, C» и «A дубль C» отпечаток C терялся, а
@@ -354,13 +354,17 @@ def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: se
     # записанная прежним разбором, пережила бы любую перечитку. Перечитка
     # проходит ВСЮ историю по порядку и заново ставит каждую связь тем же
     # правилом «первая названная»; снятия при этом не теряются.
-    for said in archive["resolutions"].values():
-        said["twin_of"] = ""
-    for number, message in messages:
-        if number in counted:
-            add_change(archive, number, [], message)
-    # Считается и связь, дописанная к старому снятию: иначе «второй проход —
-    # ни одного» доказывал бы неизменность ключей, а не архива (взгляд на #849).
+    # СБРАСЫВАЕТСЯ ТОЛЬКО ТО, ЧТО ИСТОРИЯ ПОСТАВИТ ЗАНОВО (взгляд на #876):
+    # отпечаток, которого не называет ни одно тело из `messages`, держит связь,
+    # пришедшую иначе, — и перечитка её не стирает безвозвратно.
+    replayed = [(number, message) for number, message in messages if number in counted]
+    named = {mark for _, message in replayed for mark in resolved_in(message)}
+    for mark in named & archive["resolutions"].keys():
+        archive["resolutions"][mark]["twin_of"] = ""
+    for number, message in replayed:
+        add_change(archive, number, [], message)
+    # Считается и связь, дописанная или снятая у старого снятия: иначе «второй
+    # проход — ни одного» доказывал бы неизменность ключей, а не архива (#849).
     return sum(
         1
         for mark, said in archive["resolutions"].items()
@@ -400,7 +404,7 @@ def build(
     # (взгляд на #849).
     if history is not None:
         added = reread(archive, history, counted)
-        print(f"перечитка учтённых изменений: новых снятий и связей — {added}")
+        print(f"перечитка учтённых изменений: снятий и связей новых или изменённых — {added}")
     pending = merged_pending(repo, token, counted)
     for pull in pending[:budget]:
         number = int(pull["number"])

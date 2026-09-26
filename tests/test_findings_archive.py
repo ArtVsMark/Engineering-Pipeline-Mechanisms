@@ -744,3 +744,11 @@ def test_reread_recomputes_a_wrong_link() -> None:
     said = archive["resolutions"]
     assert said["bbbbbbb"]["twin_of"] == "", "цель пары получила двойника"
     assert said["aaaaaaa"]["twin_of"] == "bbbbbbb" and said["ccccccc"]["twin_of"] == "ddddddd"
+
+
+def test_reread_keeps_a_link_the_history_does_not_name() -> None:
+    """Связь отпечатка, которого история не называет, перечитка не стирает (взгляд на #876)."""
+    archive = empty()
+    archive["resolutions"] = {"eeeeeee": {"by": 9, "twin_of": "fffffff"}}
+    module.reread(archive, [(10, "Разобрано: aaaaaaa дубль bbbbbbb")], {9, 10})
+    assert archive["resolutions"]["eeeeeee"]["twin_of"] == "fffffff", "связь стёрта"
