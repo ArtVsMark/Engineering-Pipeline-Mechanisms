@@ -1841,3 +1841,65 @@ def test_catch_up_leaves_a_change_without_looks_alone(monkeypatch: pytest.Monkey
     recorded: dict[int, int] = {}
     module.catch_up("o/r", "t", entries, recorded, strict=False)
     assert entries == {} and recorded == {}
+
+
+# --- проверка починки (#848) ---------------------------------------------------
+
+
+def fix_look(*lines: str, author: str = module.REVIEWER_AUTHOR) -> list[dict[str, Any]]:
+    """Заход проверки починки: метка первой строкой, вердикт последней."""
+    return [
+        {"id": 5, "user": {"login": author}, "body": "\n".join([module.FIXCHECK_MARKER, *lines])}
+    ]
+
+
+def test_a_fix_check_closes_only_this_changes_findings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Названная закрытой снимается; не закрытая и чужая остаются; новых записей нет."""
+    entries = {
+        "aaa1111": findings_module.Entry(7, "дефект", "раз"),
+        "bbb2222": findings_module.Entry(7, "риск", "два"),
+        "ccc3333": findings_module.Entry(8, "риск", "чужая"),
+    }
+    look = fix_look(
+        "ПОЧИНКА[aaa1111]: закрыта — поправлено",
+        "ПОЧИНКА[bbb2222]: не закрыта — осталось",
+        "ПОЧИНКА[ccc3333]: закрыта — не наша",
+        "НАХОДКА[риск]: новая — её здесь не пишут",
+        "ВЕРДИКТ: находок 1",
+    )
+    module.record_look(entries, 7, look, strict=False)
+    assert sorted(entries) == ["bbb2222", "ccc3333"]
+    assert "закрыто 1, не закрыто 1" in capsys.readouterr().out
+
+
+def test_a_fix_check_from_someone_else_is_read_as_a_look() -> None:
+    """Чужой комментарий с меткой не снимает записей: он читается обычным заходом."""
+    entries = {"aaa1111": findings_module.Entry(7, "дефект", "раз")}
+    look = fix_look("ПОЧИНКА[aaa1111]: закрыта — да", "ВЕРДИКТ: находок 0", author="someone")
+    module.record_look(entries, 7, look, strict=False)
+    assert "aaa1111" in entries
+
+
+def test_a_fix_check_without_a_verdict_is_refused() -> None:
+    """Проверка починки без вердикта — отказ, а не «всё закрыто» (075)."""
+    with pytest.raises(module.NotRun):
+        module.record_fix_check({}, 7, fix_look("ПОЧИНКА[aaa1111]: закрыта — да"))
+
+
+def test_a_fix_check_that_disagrees_with_its_verdict_is_announced(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Вердикт спорит с числом не закрытых — это сказано предупреждением."""
+    module.record_fix_check(
+        {}, 7, fix_look("ПОЧИНКА[aaa1111]: не закрыта — нет", "ВЕРДИКТ: находок 0")
+    )
+    assert "::warning::проверка починки #7" in capsys.readouterr().err
+
+
+def test_fix_answers_read_the_word_whole() -> None:
+    """«не закрыта» не читается как «закрыта», и чужие строки не считаются."""
+    look = fix_look("ПОЧИНКА[aaa1111]: не закрыта — нет", "ПОЧИНКА[bbb2222]: закрыта — да")
+    assert module.fix_answers(look) == {"aaa1111": False, "bbb2222": True}
+    assert module.fix_answers(fix_look("ПОЧИНКА[aaa1111]: закрыта", author="x")) == {}

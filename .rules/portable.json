@@ -468,6 +468,9 @@
     "scripts/look_waits.py": {
       "answer": "as-is"
     },
+    "scripts/look_mode.py": {
+      "answer": "as-is"
+    },
     "scripts/main_red.py": {
       "answer": "configured",
       "where": [
