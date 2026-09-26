@@ -205,3 +205,37 @@ def test_the_gate_reads_records_as_the_queue_does(monkeypatch: pytest.MonkeyPatc
     queue = module.ci_complete.worst_per_name([early_red, late_green])[0]
     assert said == (module.GREEN if queue["conclusion"] == "success" else module.RED)
     assert said == module.GREEN, "свежесть взята по концу захода, а не по началу, как у очереди"
+
+
+@pytest.mark.parametrize(
+    ("head", "run", "noted"),
+    [("new", "no", True), ("abc", "yes", False), (None, "yes", False)],
+    ids=["голова устарела", "голова та же", "голова не прочитана"],
+)
+def test_a_stale_head_does_not_call_the_look(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    head: str | None,
+    run: str,
+    noted: bool,
+) -> None:
+    """Прогон устаревшей головы агента не зовёт; не узнали — взгляд идёт (#848, 179)."""
+    out = tmp_path / "out"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "paginate", gate(DONE_GREEN))
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+
+    def request(method: str, path: str, token: str) -> Any:
+        assert path == "repos/o/r/pulls/7"
+        if head is None:
+            raise module.ghrest.TransportError("503")
+        return {"head": {"sha": head}}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    argv = ["--repo", "o/r", "--sha", "abc", "--pr", "7", "--timeout", "0", "--interval", "0"]
+    assert module.main(argv) == module.EXIT_OK
+    assert out.read_text(encoding="utf-8") == f"run={run}\n"
+    assert (f"::notice title={module.STALE}::" in capsys.readouterr().out) is noted
+    assert module.STALE != module.SKIPPED, "устаревшую голову очередь перезапускала бы как должную"

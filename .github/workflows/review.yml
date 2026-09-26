@@ -244,6 +244,7 @@ jobs:
           # импорте, и запасное `run=yes` молча выключало «взгляд последним».
           python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
           python scripts/look_waits.py --sha "${{ github.event.pull_request.head.sha }}" \
+            --pr "${{ github.event.pull_request.number }}" \
             || echo "run=yes" >> "$GITHUB_OUTPUT"
 
       - name: поставить проверки ревьюеру
