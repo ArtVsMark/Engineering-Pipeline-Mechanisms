@@ -83,20 +83,37 @@ def test_an_empty_result_is_told_apart_from_an_empty_input() -> None:
     assert module.parts([[], []]) == []
 
 
-def test_the_walk_agrees_with_the_live_branch(run_script) -> None:  # type: ignore[no-untyped-def]
+def test_the_walk_agrees_with_the_live_branch(run_script, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     """Заход процессом сходится с тем, что в ветке на самом деле (139).
 
-    ЦВЕТ НЕ ЗАКРЕПЛЁН, И ЭТО УСИЛЕНИЕ. Последний коммит ветки бывает пустым —
-    так отмечают пункт задачи, — и требовать нуля именно тогда значило бы
-    держать красное на законном приёме. Проверяется большее: исход СХОДИТСЯ с
-    тем, тронул ли последний коммит файлы, и названы обе ветки.
+    Своё дерево, а не `HEAD~1` прогона: в мелком клоне глубиной 1 его нет, и
+    заход дал бы отказ не из-за кода (взгляд на #878). Проверяются обе ветви:
+    коммит, тронувший файл, — одна часть; пустой коммит — «файлов не тронуто».
     """
-    done = run_script("change_parts.py", "--base", "HEAD~1")
-    if done.code == module.EXIT_NOTHING:
-        assert "не тронуло файлов" in done.out, done.out
-        return
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+    git("init", "-q", "-b", "main")
+    git("commit", "-q", "--allow-empty", "-m", "база")
+    git("checkout", "-q", "-b", "work")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    git("add", "a.py")
+    git("commit", "-q", "-m", "правка")
+    done = run_script("change_parts.py", "--base", "main", cwd=tmp_path)
     assert done.code == module.EXIT_OK, done.err
-    assert "частей" in done.out, done.out
+    assert "частей 1" in done.out, done.out
+    git("checkout", "-q", "-b", "empty", "main")
+    git("commit", "-q", "--allow-empty", "-m", "отметка пункта")
+    done = run_script("change_parts.py", "--base", "main", cwd=tmp_path)
+    assert done.code == module.EXIT_NOTHING, done.err
+    assert "не тронуло файлов" in done.out, done.out
 
 
 def test_a_base_that_is_not_a_commit_is_the_third_outcome(run_script) -> None:  # type: ignore[no-untyped-def]
@@ -351,7 +368,7 @@ def test_a_named_mixing_does_not_ask_again(
     monkeypatch.setattr(module, "bodies_of", lambda base: "Смешение: хвост правок")
     assert module.main(["--warn"]) == module.EXIT_OK
     said = capsys.readouterr().out
-    assert "названо" in said and "НАЗОВИТЕ" not in said, said
+    assert "названо" in said and module.PLEA not in said, said
 
 
 def test_a_git_refusal_on_bodies_is_the_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -395,4 +412,4 @@ def test_a_named_mixing_is_heard_without_the_warn_key(
     monkeypatch.setattr(module, "bodies_of", lambda base: "Смешение: хвост правок")
     assert module.main([]) == module.EXIT_OK
     said = capsys.readouterr().out
-    assert "названо" in said and "НАЗОВИТЕ" not in said, said
+    assert "названо" in said and module.PLEA not in said, said
