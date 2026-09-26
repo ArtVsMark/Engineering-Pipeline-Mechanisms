@@ -22,6 +22,14 @@
 отсекала бы такие изменения навсегда (взгляд на #788). Поэтому архив помнит,
 какие изменения уже учтены, и берёт слитые по времени слияния, пропуская учтённые.
 
+СЛИТОЕ БЕРЁТСЯ ИЗ ИСТОРИИ ОБЩЕЙ ВЕТКИ, А НЕ ЛИСТИНГОМ ПЛОЩАДКИ. Номер — из
+темы уплотнённого коммита «Тема (#N)», тело слияния — оттуда же. Прежде архив
+на каждом заходе листал все закрытые изменения и спрашивал коммит слияния:
+листинг рос с номером (девять страниц на #874), а заход идёт на каждое
+слияние, и цена часа ничем не ограничивалась (взгляд на #874). Теперь на
+площадку ходит только лента изменения и чтение живого реестра. ПРЕДЕЛ НАЗВАН
+(195): изменение, слитое без «(#N)» в теме, архив не видит — как и перечитка.
+
 СНЯТИЕ МОЖЕТ ПРИЙТИ РАНЬШЕ НАХОДКИ. Строка `Разобрано:` лежит в теле слияния,
 а находка — в ленте своего изменения, и учтены они бывают в любом порядке.
 Поэтому снятия копятся отдельно (`resolutions`) и прикладываются к находке,
@@ -75,16 +83,27 @@ SCHEMA_SAID: Final = (
     "слияния), counted (учтённые изменения), kinds (род → встречи и судьба), gaps "
     "(чего архив не знает), unconfirmed (что сверка с историей не подтвердила)"
 )
-#: Сколько слитых изменений дописывать за заход. Замер 24.09.2026: запрос ленты
-#: и запрос коммита слияния на изменение — около двухсот запросов на заход при
-#: квоте прогона в тысячу в час. Арифметику держит гейт, а не этот абзац:
-#: волна `BUDGET * CALLS_PER_CHANGE` вместе с худшим часом расписаний обязана
-#: укладываться в долю лимита, которую проект разрешает себе, — лимит и доля
-#: берутся из `.rules/schedules.json`, одного места (tests/test_findings_archive.py,
-#: 033). Что `CALLS_PER_CHANGE` верно, сверяет счёт запросов `build` на стенде.
+#: Сколько слитых изменений дописывать за заход. Арифметику держит гейт, а не
+#: этот абзац: час архива — волна `BUDGET * CALLS_PER_CHANGE` плюс постоянная
+#: часть `CALLS_PER_RUN` у каждого из `MERGES_PER_HOUR` заходов — вместе с
+#: худшим часом расписаний обязан укладываться в долю лимита, которую проект
+#: разрешает себе; лимит и доля берутся из `.rules/schedules.json`, одного места
+#: (tests/test_findings_archive.py, 033). Что обе цены верны, сверяет счёт ВСЕХ
+#: запросов `build` на стенде, а не их части (взгляд на #874).
 BUDGET: Final = 100
-#: Запросов к площадке на одно дописанное изменение: лента и коммит слияния.
-CALLS_PER_CHANGE: Final = 2
+#: Запросов к площадке на одно дописанное изменение: его лента. Тело слияния
+#: берётся из истории общей ветки и запроса не стоит.
+CALLS_PER_CHANGE: Final = 1
+#: Запросов на заход сверх изменений — чтение живого реестра: список открытых
+#: задач страницами по сто. Верхняя оценка — три страницы; открытых задач и
+#: изменений больше трёхсот — оценка устарела, и гейт этого не увидит (195).
+CALLS_PER_RUN: Final = 3
+#: Сколько заходов архива бывает в час: `badges.yml` идёт на каждый толчок в
+#: общую ветку, и отмена прогона не возвращает уже потраченного. Замер по
+#: истории общей ветки 26.09.2026: больше всего — 11 слияний за час
+#: (09.09.2026, 22 ч UTC). Замер держит тест: история, превысившая число,
+#: краснеет, и число поднимается вместе с арифметикой часа (005).
+MERGES_PER_HOUR: Final = 12
 #: Номер изменения в теме уплотнённого коммита: «Тема (#N)».
 MERGED_SUBJECT_RE: Final = re.compile(r"\(#(\d+)\)$")
 #: Разделители полей и записей в выводе `git log` для перечитки.
@@ -314,13 +333,19 @@ def verdicts(repo: str, token: str) -> dict[str, str]:
     }
 
 
-def merged_pending(repo: str, token: str, counted: set[int]) -> list[dict[str, Any]]:
-    """Слитые, но ещё не учтённые изменения — по времени слияния, а не по номеру."""
-    listed = ghrest.paginate(f"repos/{repo}/pulls?state=closed&sort=created&direction=asc", token)
-    pending = [
-        pull for pull in listed if pull.get("merged_at") and int(pull["number"]) not in counted
-    ]
-    return sorted(pending, key=lambda pull: (str(pull["merged_at"]), int(pull["number"])))
+def merged_pending(merged: list[tuple[int, str]], counted: set[int]) -> list[tuple[int, str]]:
+    """Слитые, но ещё не учтённые изменения — в порядке истории, то есть слияния, а не номера.
+
+    Номер, встреченный в истории дважды, берётся первым телом: второе — чужой
+    коммит с той же темой, а не второе слияние.
+    """
+    seen = set(counted)
+    pending = []
+    for number, body in merged:
+        if number not in seen:
+            seen.add(number)
+            pending.append((number, body))
+    return pending
 
 
 def merged_messages(log: str) -> list[tuple[int, str]]:
@@ -379,9 +404,10 @@ def build(
     budget: int,
     kinds: dict[str, Any],
     before: dict[str, Any],
-    history: list[tuple[int, str]] | None = None,
+    history: list[tuple[int, str]],
+    reread_counted: bool = False,
 ) -> dict[str, Any]:
-    """Архив: прежний плюс слитое, которого в нём ещё нет, — не больше бюджета."""
+    """Архив: прежний плюс слитое из `history`, которого в нём ещё нет, — не больше бюджета."""
     archive: dict[str, Any] = {
         "findings": dict(before.get("findings") or {}),
         "resolutions": dict(before.get("resolutions") or {}),
@@ -391,18 +417,12 @@ def build(
     # должен встать тот, кто снял первым (#814): новое изменение, назвавшее
     # отпечаток, потерянный архивом у раннего, иначе записалось бы снявшим
     # (взгляд на #849).
-    if history is not None:
+    if reread_counted:
         added = reread(archive, history, counted)
         print(f"перечитка учтённых изменений: новых снятий и связей — {added}")
-    pending = merged_pending(repo, token, counted)
-    for pull in pending[:budget]:
-        number = int(pull["number"])
+    pending = merged_pending(history, counted)
+    for number, message in pending[:budget]:
         comments = list(ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token))
-        sha = str(pull.get("merge_commit_sha") or "")
-        message = ""
-        if sha:
-            commit = ghrest.request("GET", f"repos/{repo}/commits/{sha}", token) or {}
-            message = str((commit.get("commit") or {}).get("message") or "")
         add_change(archive, number, comments, message)
         counted.add(number)
     for sign, said in verdicts(repo, token).items():
@@ -446,9 +466,15 @@ def main(argv: list[str] | None = None) -> int:
         print("архив не собран: нет токена или репозитория (045)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        history = merged_messages(git_log()) if args.reread else None
+        history = merged_messages(git_log())
         archive = build(
-            args.repo, token, args.budget, finding_kinds.read(), previous(args.previous), history
+            args.repo,
+            token,
+            args.budget,
+            finding_kinds.read(),
+            previous(args.previous),
+            history,
+            args.reread,
         )
     except (
         NotRun,
