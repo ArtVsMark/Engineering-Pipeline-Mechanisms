@@ -13,6 +13,12 @@
 ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
 Поэтому здесь ЧИСЛО, которое видно, а решение остаётся за автором.
 
+ПРЕДУПРЕЖДЕНИЕ В КОНВЕЙЕРЕ — СТУПЕНЬ 051, КОТОРУЮ ГЕЙТ ПЕРЕСКОЧИЛ БЫ (#860).
+Отказались от красного, а не от сигнала: с ключом `--warn` счёт идёт джобом
+`parts` на каждом изменении и печатает `::warning::`, когда частей больше
+одной. Слияние он не держит; предупреждение называет решение 008, чтобы
+законное смешение отличалось от слепленного по счёту находок.
+
 ЗАМЕР 18.09.2026, РАДИ КОТОРОГО МЕХАНИЗМ И НАПИСАН: окно закрыло восемь находок
 одним изменением, и дифф распался бы на ЧЕТЫРЕ компоненты. Навык, велящий резать
 по пересечению, лежал в дереве и говорил ровно это — но словами, которые надо
@@ -146,10 +152,50 @@ def parts(commits: list[list[str]]) -> list[list[str]]:
     return sorted((sorted(names) for names in grouped.values()), key=lambda one: (-len(one), one))
 
 
+#: Решение, разрешающее везти хвост мелких правок одним изменением.
+DECISION_008: Final = "docs/decisions/008-a-batch-of-corrections-is-one-subject.md"
+
+
+#: Строка, которой автор НАЗЫВАЕТ смешение в коммите ветки: вторая половина 133.
+#: Счёт частей держит первую половину; есть ли у смешения названная причина —
+#: вторую, и без неё предупреждение молчало бы о том, о чём правило (взгляд на #871).
+MIXED_MARK: Final = "Смешение:"
+#: Что предупреждение говорит о слиянии: одной фразой, на неё ссылается проверка.
+DOES_NOT_HOLD: Final = "Слияние это не держит."
+
+
+def declared(bodies: str) -> str:
+    """Причина смешения, названная строкой `Смешение:` в коммитах ветки; нет — пусто."""
+    for line in bodies.splitlines():
+        said = line.strip()
+        if said.startswith(MIXED_MARK) and said.removeprefix(MIXED_MARK).strip():
+            return said.removeprefix(MIXED_MARK).strip()
+    return ""
+
+
+def warning(count: int) -> str:
+    """Аннотация площадки: изменение распалось, и чем законное отличается от ошибки."""
+    return (
+        f"::warning title=изменение из {count} частей (133)::"
+        f"дифф распался на части: {count} (файлы связаны, если тронуты одним коммитом). "
+        f"Законно, если это хвост мелких правок (решение 008, {DECISION_008}) или неделимая "
+        f"широкая тема (132) — тогда назовите это строкой «{MIXED_MARK} <причина>» в коммите; "
+        f"иначе разрежьте изменение по пересечению файлов. {DOES_NOT_HOLD}"
+    )
+
+
+def bodies_of(base: str) -> str:
+    """Тела коммитов ветки: там автор называет смешение."""
+    return _git("log", "--format=%B", "--no-merges", f"{base}..HEAD")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает части изменения и что с ними делать."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main", help="с чем сравнивать")
+    parser.add_argument(
+        "--warn", action="store_true", help="частей больше одной — аннотация ::warning:: (#860)"
+    )
     args = parser.parse_args(argv)
     try:
         found = parts(touched(args.base))
@@ -170,6 +216,12 @@ def main(argv: list[str] | None = None) -> int:
     if len(found) == 1:
         print("\nодна часть — граница по пересечению файлов соблюдена (133)")
         return EXIT_OK
+    if args.warn:
+        reason = declared(bodies_of(args.base))
+        if reason:
+            print(f"смешение названо в записи: {reason} — предупреждения нет (133)")
+        else:
+            print(warning(len(found)))
     print(
         "\nчастей больше одной. Либо разрежьте изменение, либо НАЗОВИТЕ В ЗАПИСИ,"
         " почему везёте одним:\nрешение 008 разрешает хвост мелких правок, правило 132 —"
