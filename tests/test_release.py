@@ -926,3 +926,16 @@ def test_an_unreachable_platform_reads_as_unasked(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(module.ghrest, "request", refuse)
     assert module.may_push("o/r", "main", "t") == ""
+
+
+def test_a_ruleset_past_the_first_page_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Набор за краем первой страницы спрашивается: отказ толчка им не прячется (212)."""
+    full = [{"ruleset_id": 1}] * module.ghrest.PER_PAGE
+
+    def request(method: str, path: str, token: str, *rest: object, **kw: object) -> object:
+        if "/rules/branches/" in path:
+            return [{"ruleset_id": 2}] if path.endswith("page=2") else full
+        return {"current_user_can_bypass": "never" if path.endswith("/2") else "always"}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.may_push("o/r", "main", "t") == "never"

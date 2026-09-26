@@ -53,7 +53,17 @@ import paths
 #: Релизный тег: строго `vX.Y.Z`. Маска для git и образец здесь — форма
 #: проверяется дважды, потому что glob не отличает `v1.10.0` от `v1.10.0-rc`.
 RELEASE_TAG_GLOB: Final = "v[0-9]*.[0-9]*.[0-9]*"
-RELEASE_TAG_RE: Final = re.compile(r"^v\d+\.\d+\.\d+$")
+#: Форма номера — общая, `paths.VERSION_RE` (214): тег это номер с приставкой
+#: `v`, и своя запись формата разошлась бы с общей молча (взгляд на #869).
+RELEASE_TAG_PREFIX: Final = "v"
+
+
+def is_release_tag(tag: str) -> bool:
+    """Строго `vX.Y.Z`: приставка и номер в общей форме."""
+    return tag.startswith(RELEASE_TAG_PREFIX) and bool(
+        paths.VERSION_RE.match(tag.removeprefix(RELEASE_TAG_PREFIX))
+    )
+
 
 #: Номер изменения в теме коммита. Две формы: уплотнение площадки дописывает
 #: `(#N)` в конец темы, слияние мержем даёт `Merge pull request #N`. Обе ведут
@@ -189,7 +199,7 @@ def release_tag(root: Path | None = None) -> str | None:
     является, и считать от него было бы неверно.
     """
     out = git("tag", "--merged", "HEAD", "--list", RELEASE_TAG_GLOB, root=root)
-    released = [line for line in (out or "").split("\n") if RELEASE_TAG_RE.match(line)]
+    released = [line for line in (out or "").split("\n") if is_release_tag(line)]
     if not released:
         return None
     return max(released, key=lambda tag: tuple(int(part) for part in tag.lstrip("v").split(".")))
@@ -201,7 +211,7 @@ def declared(root: Path | None = None) -> str:
     if not path.is_file():
         raise NotRun(f"нет {path}: объявленную версию взять неоткуда (075)")
     value = path.read_text(encoding="utf-8").strip()
-    if not RELEASE_TAG_RE.match(f"v{value}"):
+    if not paths.VERSION_RE.match(value):
         raise NotRun(f"{path}: «{value}» не версия вида X.Y.Z")
     return value
 
