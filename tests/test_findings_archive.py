@@ -828,3 +828,16 @@ def test_the_history_is_the_trunks_not_the_runs(tmp_path: Path) -> None:
     git("checkout", "-q", "-b", "other")
     git("commit", "-q", "--allow-empty", "-m", "Чужое (#2)", "-m", "Разобрано: aaaaaaa")
     assert [one for one, _ in module.merged_messages(module.git_log(tmp_path))] == [1]
+
+
+def test_unsquashed_merges_are_named_in_gaps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Слияние «Merge pull request #N» архив не учитывает, но называет числом (#879)."""
+    log = (
+        f"Merge pull request #48 from o/agent/x{module.FIELD}тело{module.RECORD}"
+        f"Тема (#5){module.FIELD}Тема (#5){module.RECORD}"
+    )
+    assert module.unsquashed(log) == 1
+    assert [one for one, _ in module.merged_messages(log)] == [5]
+    platform(monkeypatch)
+    archive = module.build("o/r", "t", 10, KINDS, {}, history(), unseen=1)
+    assert f"{module.UNSEEN_GAP} — 1" in archive["gaps"]

@@ -29,6 +29,10 @@
 слияние, и цена часа ничем не ограничивалась (взгляд на #874). Теперь на
 площадку ходит только лента изменения и чтение живого реестра. ПРЕДЕЛ НАЗВАН
 (195): изменение, слитое без «(#N)» в теме, архив не видит — как и перечитка.
+Такие в истории есть: 17 слияний вида «Merge pull request #N from …» (#1…#154,
+до уплотнения). Их снятия лежат в коммитах ветки, а не в теле слияния, и
+угадывать их архив не берётся; сколько их, он говорит сам в `gaps` (взгляд
+на #879).
 
 СНЯТИЕ МОЖЕТ ПРИЙТИ РАНЬШЕ НАХОДКИ. Строка `Разобрано:` лежит в теле слияния,
 а находка — в ленте своего изменения, и учтены они бывают в любом порядке.
@@ -89,11 +93,16 @@ SCHEMA_SAID: Final = (
 #: часть `CALLS_PER_RUN` у каждого из `MERGES_PER_HOUR` заходов — вместе с
 #: худшим часом расписаний обязан укладываться в долю лимита, которую проект
 #: разрешает себе; лимит и доля берутся из `.rules/schedules.json`, одного места
-#: (tests/test_findings_archive.py, 033). Что обе цены верны, сверяет счёт ВСЕХ
-#: запросов `build` на стенде, а не их части (взгляд на #874).
+#: (tests/test_findings_archive.py, 033). Цену изменения сверяет счёт запросов
+#: `build` на стенде; `CALLS_PER_RUN` — объявленная верхняя оценка: чтение
+#: реестра стенд подменяет (взгляд на #882). Волна одна на час, пока заход
+#: доходит до публикации; заход, упавший посреди волны, переносит прежний
+#: архив, и следующий платит волну заново — это названный предел (195).
 BUDGET: Final = 100
 #: Запросов к площадке на одно дописанное изменение: его лента. Тело слияния
-#: берётся из истории общей ветки и запроса не стоит.
+#: берётся из истории общей ветки и запроса не стоит. ПРЕДЕЛ НАЗВАН (195):
+#: лента длиннее страницы (`ghrest.PER_PAGE`, сто комментариев) стоит больше
+#: запросов, а стенд считает вызовы обхода, а не страницы (взгляд на #879).
 CALLS_PER_CHANGE: Final = 1
 #: Запросов на заход сверх изменений — чтение живого реестра: список открытых
 #: задач страницами по сто. Верхняя оценка — три страницы; открытых задач и
@@ -107,6 +116,11 @@ CALLS_PER_RUN: Final = 3
 #: арифметикой часа (005).
 MERGES_PER_HOUR: Final = 15
 #: Номер изменения в теме уплотнённого коммита: «Тема (#N)».
+#: Слияние площадки без уплотнения: «Merge pull request #N from …». Архив его
+#: не учитывает, а считает — для строки в `gaps`.
+UNSQUASHED_RE: Final = re.compile(r"^Merge pull request #\d+ from ")
+#: Строка `gaps` о них: снятия у таких слияний в коммитах ветки, и архив их не знает.
+UNSEEN_GAP: Final = "слияний без уплотнения, которых архив не видит"
 MERGED_SUBJECT_RE: Final = re.compile(r"\(#(\d+)\)$")
 #: Разделители полей и записей в выводе `git log` для перечитки.
 FIELD: Final = "\x1f"
@@ -365,6 +379,15 @@ def merged_messages(log: str) -> list[tuple[int, str]]:
     return out
 
 
+def unsquashed(log: str) -> int:
+    """Сколько слияний площадки без уплотнения в истории — их архив не видит (#879)."""
+    return sum(
+        1
+        for record in log.split(RECORD)
+        if UNSQUASHED_RE.search(record.strip("\n").partition(FIELD)[0].strip())
+    )
+
+
 def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: set[int]) -> int:
     """Дописывает снятия и пересчитывает связи учтённых изменений; отдаёт число изменённых.
 
@@ -430,6 +453,7 @@ def build(
     before: dict[str, Any],
     history: list[tuple[int, str]],
     reread_counted: bool = False,
+    unseen: int = 0,
 ) -> dict[str, Any]:
     """Архив: прежний плюс слитое из `history`, которого в нём ещё нет, — не больше бюджета."""
     archive: dict[str, Any] = {
@@ -459,6 +483,8 @@ def build(
     gaps = [VERIFIER_GAP]
     if left:
         gaps.insert(0, f"{registry.UNFILLED}: не учтено слитых изменений — {left}")
+    if unseen:
+        gaps.append(f"{UNSEEN_GAP} — {unseen}")
     return {
         "schema": SCHEMA,
         "_schema": SCHEMA_SAID,
@@ -490,7 +516,8 @@ def main(argv: list[str] | None = None) -> int:
         print("архив не собран: нет токена или репозитория (045)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        history = merged_messages(git_log())
+        log = git_log()
+        history = merged_messages(log)
         archive = build(
             args.repo,
             token,
@@ -499,6 +526,7 @@ def main(argv: list[str] | None = None) -> int:
             previous(args.previous),
             history,
             args.reread,
+            unsquashed(log),
         )
     except (
         NotRun,
