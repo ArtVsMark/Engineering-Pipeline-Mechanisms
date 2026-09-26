@@ -28,7 +28,7 @@
     },
     {
       "id": "no-claude-prefix",
-      "where": "docs/behaviour.md",
+      "where": "docs/agent/behaviour.md",
       "quote": "Приставки `claude/**` в конвейере больше нет",
       "count": {
         "what": "branch_filters_with",

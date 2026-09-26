@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Выпуск: необратимый шаг проверяется ДО прогона, а не прогоном.
 
-Порядок выпуска записан в `docs/release.md` с самого начала, а механизма под ним
+Порядок выпуска записан в `docs/dev/release.md` с самого начала, а механизма под ним
 не было: путь ни разу не проходили целиком, и «работает» держалось тем, что его
 никто не пробовал
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
@@ -177,7 +177,7 @@ ACCEPTANCE_NOT_A_NUMBER: Final = "not-a-number"
 #: месте печати, ради одного: договор о выпуске обязан называть все состояния,
 #: которые механизм различает, и сверить это можно только по перечислимому
 #: списку. Договор и механизм уже расходились — новое правило мажора жило в
-#: `docs/release.md`, пока механизм исполнял старое (#198).
+#: `docs/dev/release.md`, пока механизм исполнял старое (#198).
 ACCEPTANCE_SAID: Final = {
     ACCEPTANCE_CLOSED: "закрыта",
     ACCEPTANCE_OPEN: "ОТКРЫТА",
@@ -344,7 +344,7 @@ def refusals(
     if major_wanted > major_now and not acceptance:
         problems.append(
             f"мажор {major_now} → {major_wanted} поднимает не выпуск, а ЗАКРЫТАЯ приёмка: "
-            "«0.x» значит «ещё не доделано здесь» (docs/release.md, decisions/009). "
+            f"«0.x» значит «ещё не доделано здесь» ({paths.RELEASE_DOC}, decisions/009). "
             "Назовите её: --acceptance <номер задачи>"
         )
     elif major_wanted > major_now and state == ACCEPTANCE_NOT_A_NUMBER:
@@ -448,7 +448,7 @@ def announce(
 def do_release(wanted: str, *, breaking: bool = False) -> None:
     """Необратимая часть: журнал, версия, коммит, тег.
 
-    Порядок ровно тот, что записан в `docs/release.md`, и он часть проверки, а
+    Порядок ровно тот, что записан в `docs/dev/release.md`, и он часть проверки, а
     не соглашение: тег ставится последним, когда всё остальное уже в коммите.
     """
     # ПОВЕРХНОСТЬ СПРАШИВАЕТСЯ ДО ПЕРЕЕЗДА ФРАГМЕНТОВ, а не после. Сборка
@@ -556,7 +556,7 @@ def page_body(version: str, repo: str) -> str:
         f"[`changelog.d/released/{version}/`]({tree}/changelog.d/released/{version}).",
         "",
         f"Версия контракта на момент выпуска — `{at_tag}`; "
-        f"что означают её разряды, говорит [`docs/release.md`]({tree}/docs/release.md).",
+        f"что означают её разряды, говорит [`{paths.RELEASE_DOC}`]({tree}/{paths.RELEASE_DOC}).",
     ]
     return "\n".join(lines)
 

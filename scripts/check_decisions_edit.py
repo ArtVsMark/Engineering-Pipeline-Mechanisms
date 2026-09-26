@@ -54,6 +54,12 @@ HEADING_RE: Final = re.compile(r"^## (?P<name>.+?)\s*$")
 #: Разделы, которые изменение трогать не вправе. Это состав самого решения
 #: (042) — остальное записи дописывают по ходу.
 FROZEN_RE: Final = re.compile(r"^(?:Контекст|Решение|Отвергнут(?:ые|ый)\b)", re.IGNORECASE)
+#: Цель ссылки markdown: `](адрес)`. АДРЕС — НЕ СОДЕРЖАНИЕ РЕШЕНИЯ. Когда
+#: документ, на который решение ссылается, переезжает (#840), ссылку в записи
+#: надо перевести, иначе она ведёт в никуда (022). Слова решения при этом не
+#: меняются, и сравнивать их гейт продолжает. Текст ссылки и упоминания путей в
+#: прозе остаются частью содержания: переписать их значит переписать решение.
+LINK_TARGET_RE: Final = re.compile(r"\]\([^)\s]+\)")
 
 
 class NotRun(RuntimeError):
@@ -114,7 +120,9 @@ def frozen(text: str) -> dict[str, str]:
             continue
         if current:
             sections[current].append(line.rstrip())
-    return {name: "\n".join(body).strip() for name, body in sections.items()}
+    return {
+        name: LINK_TARGET_RE.sub("]()", "\n".join(body).strip()) for name, body in sections.items()
+    }
 
 
 def at(ref: str, path: str) -> str:

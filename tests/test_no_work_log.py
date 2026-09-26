@@ -75,7 +75,7 @@ def test_the_answer_about_the_skeleton_matches_the_tree() -> None:
     """
     answer = json.loads((ROOT / ".rules" / "bindings.json").read_text(encoding="utf-8"))
     said = str(answer["rules"]["019"].get("where") or "")
-    doc = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
+    doc = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     heading = next(line for line in doc.splitlines() if line.startswith("## Скелет:"))
     steps = {
         found.group()

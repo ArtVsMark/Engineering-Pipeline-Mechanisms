@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import RunScript, load_script
+from tests.conftest import Run, RunScript, load_script
 
 edit = load_script("check_decisions_edit.py")
 
@@ -25,7 +25,7 @@ RECORD = """# 007. Заголовок записи
 
 ## Контекст
 
-Было два пути, и оба с ценой.
+Было два пути, и оба с ценой. Договор — [`pipeline.md`](../pipeline.md).
 
 ## Решение
 
@@ -74,27 +74,28 @@ def commit(repo: Path, said: str) -> None:
     _git(repo, "commit", "-qm", said)
 
 
+def replaced(repo: Path, run_script: RunScript, old: str, new: str, said: str) -> Run:
+    """Заменяет текст в записи, закрепляет правку и прогоняет гейт (093: третий случай)."""
+    path = only(repo)
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"в записи нет «{old}» — правка ничего бы не проверила"
+    path.write_text(text.replace(old, new), "utf-8")
+    commit(repo, said)
+    return run_script("check_decisions_edit.py", "--base", "main", cwd=repo)
+
+
 def test_rewritten_decision_is_caught(repo: Path, run_script: RunScript) -> None:
     """Переписанный раздел «Решение» — находка, а не молчание."""
-    path = only(repo)
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("Взят первый.", "Взят второй."), "utf-8"
-    )
-    commit(repo, "актуализировал решение")
-    done = run_script("check_decisions_edit.py", "--base", "main", cwd=repo)
+    done = replaced(repo, run_script, "Взят первый.", "Взят второй.", "актуализировал решение")
     assert done.code == edit.EXIT_FOUND, done.text
     assert "«Решение» переписан" in done.text, done.text
 
 
 def test_rewritten_alternatives_are_caught(repo: Path, run_script: RunScript) -> None:
     """Отвергнутые варианты — часть решения: их правка задним числом тоже находка."""
-    path = only(repo)
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("дороже переключение", "проще, но медленнее"),
-        "utf-8",
+    done = replaced(
+        repo, run_script, "дороже переключение", "проще, но медленнее", "поправил формулировку"
     )
-    commit(repo, "поправил формулировку")
-    done = run_script("check_decisions_edit.py", "--base", "main", cwd=repo)
     assert done.code == edit.EXIT_FOUND, done.text
 
 
@@ -111,15 +112,13 @@ def test_appended_consequences_are_allowed(repo: Path, run_script: RunScript) ->
 
 def test_marking_superseded_is_allowed(repo: Path, run_script: RunScript) -> None:
     """Строка статуса меняется: ею запись и помечается заменённой."""
-    path = only(repo)
-    path.write_text(
-        path.read_text(encoding="utf-8").replace(
-            "**Статус:** принято", "**Статус:** заменено записью 008"
-        ),
-        "utf-8",
+    done = replaced(
+        repo,
+        run_script,
+        "**Статус:** принято",
+        "**Статус:** заменено записью 008",
+        "запись заменена новой",
     )
-    commit(repo, "запись заменена новой")
-    done = run_script("check_decisions_edit.py", "--base", "main", cwd=repo)
     assert done.code == edit.EXIT_OK, done.text
 
 
@@ -153,3 +152,19 @@ def test_frozen_sections_are_named_not_guessed() -> None:
     """Заморожен состав решения, а не весь документ: последствия сюда не входят."""
     parts = edit.frozen(RECORD)
     assert set(parts) == {"Контекст", "Решение", "Отвергнутые варианты"}, parts
+
+
+def test_a_moved_link_target_is_not_a_rewrite(repo: Path, run_script: RunScript) -> None:
+    """Перевести цель ссылки на переехавший документ — не переписать решение (#840)."""
+    done = replaced(
+        repo, run_script, "](../pipeline.md)", "](../use/pipeline.md)", "ссылка на новом месте"
+    )
+    assert done.code == edit.EXIT_OK, done.text
+
+
+def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> None:
+    """Текст ссылки остаётся содержанием: его правка — переписывание."""
+    done = replaced(
+        repo, run_script, "[`pipeline.md`]", "[`use/pipeline.md`]", "текст ссылки переписан"
+    )
+    assert done.code == edit.EXIT_FOUND, done.text

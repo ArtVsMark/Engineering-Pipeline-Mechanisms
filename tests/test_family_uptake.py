@@ -39,7 +39,7 @@ def test_a_mention_is_not_a_call() -> None:
     """
     said = (
         "# берём шаги из ArtVsMark/Engineering-Pipeline-Mechanisms, когда дойдут руки\n"
-        "# см. https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/blob/main/docs/onboarding.md\n"
+        "# см. https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/blob/main/docs/use/onboarding.md\n"
     )
     assert module.calls_in(said) == ((), ())
 
