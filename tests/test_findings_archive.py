@@ -841,3 +841,11 @@ def test_unsquashed_merges_are_named_in_gaps(monkeypatch: pytest.MonkeyPatch) ->
     platform(monkeypatch)
     archive = module.build("o/r", "t", 10, KINDS, {}, history(), unseen=1)
     assert f"{module.UNSEEN_GAP} — 1" in archive["gaps"]
+
+
+def test_reread_keeps_a_link_of_a_mark_named_without_a_twin() -> None:
+    """Отпечаток, названный историей без «дубль», свою связь не теряет (взгляд на #876)."""
+    archive = empty()
+    archive["resolutions"] = {"eeeeeee": {"by": 9, "twin_of": "fffffff"}}
+    module.reread(archive, [(10, "Разобрано: eeeeeee — ещё раз")], {9, 10})
+    assert archive["resolutions"]["eeeeeee"]["twin_of"] == "fffffff", "связь стёрта"

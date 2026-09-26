@@ -121,10 +121,10 @@ def next_after(current: str) -> str:
     МАЖОР ЗДЕСЬ НЕ РАСТЁТ НИКОГДА: его поднимает закрытая приёмка, и состояние
     приёмки механизм спрашивает у площадки.
     """
-    found = VERSION_RE.match(current)
-    if found is None:
-        raise NotRun(f"версия «{current}» не вида МАЖОР.МИНОР.ПАТЧ")
-    major, minor = (int(found.group(one)) for one in (1, 2))
+    try:
+        major, minor, _ = project_version.digits(current)
+    except project_version.NotRun as exc:
+        raise NotRun(f"версия «{current}» не вида МАЖОР.МИНОР.ПАТЧ") from exc
     return f"{major}.{minor + 1}.0"
 
 
@@ -153,12 +153,13 @@ def next_contract(current: str, *, touched: bool, breaking: bool = False) -> str
     Первая редакция пути к мажору не имела вовсе — несовместимость ушла бы
     минором, то есть обещанием «можно не читать». Нашёл внешний взгляд на #253.
     """
-    found = VERSION_RE.match(current)
-    if found is None:
-        raise NotRun(f"версия контракта «{current}» не вида МАЖОР.МИНОР.ПАТЧ")
+    # Разряды — общим разбором `version.digits`, а не своим `group(1)` (взгляд на #877).
+    try:
+        major, minor, _ = project_version.digits(current)
+    except project_version.NotRun as exc:
+        raise NotRun(f"версия контракта «{current}» не вида МАЖОР.МИНОР.ПАТЧ") from exc
     if not touched:
         return current
-    major, minor = (int(found.group(one)) for one in (1, 2))
     return f"{major + 1}.0.0" if breaking else f"{major}.{minor + 1}.0"
 
 
