@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from pathlib import Path
 from typing import Final
 
@@ -539,7 +540,7 @@ LISTED_WHOLE: Final[dict[str, str]] = {
 }
 
 
-def docs_below(root: Path, whole: dict[str, str] | tuple[()] = ()) -> list[Path]:
+def docs_below(root: Path, whole: Collection[str] = ()) -> list[Path]:
     """Документы под `root` на любой глубине, кроме подкаталогов верхнего уровня из `whole`."""
     return sorted(
         one for one in walk_deep(root, "*.md") if one.relative_to(root).parts[0] not in whole
