@@ -89,14 +89,8 @@ def test_a_schedule_names_its_role_and_price(name: str) -> None:
         assert len(str(said.get(field) or "")) > 20, f"{name}: поле «{field}» ничего не объясняет"
 
 
-def test_the_hourly_price_fits_the_declared_share() -> None:
-    """Цена расписаний в худший час укладывается в объявленную долю лимита.
-
-    Считается по худшему часу, а не по суткам: лимит часовой, и три прогона,
-    сошедшиеся в один час, тратят его одновременно.
-    """
-    said = declared()
-    limit = int(said["limits"]["gh_api_per_hour"]) * float(said["share"])
+def worst_hour(said: dict[str, Any]) -> int:
+    """Вызовов наружу в худший час расписаний: фиксированные часы плюс идущие каждый час."""
     by_hour: dict[int, int] = {}
     # ЗАХОД, ИДУЩИЙ КАЖДЫЙ ЧАС, ПОПАДАЕТ В КАЖДЫЙ ЧАС. Прежде он считался
     # отдельной корзиной по строке «*», и худший час выходил заниженным: три
@@ -113,7 +107,18 @@ def test_the_hourly_price_fits_the_declared_share() -> None:
         # идущим КАЖДЫЙ час: ошибаться здесь можно только в сторону строгости
         # ([050](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/050-limits-move-down-only.md)).
         every_hour += price
-    worst = (max(by_hour.values()) if by_hour else 0) + every_hour
+    return (max(by_hour.values()) if by_hour else 0) + every_hour
+
+
+def test_the_hourly_price_fits_the_declared_share() -> None:
+    """Цена расписаний в худший час укладывается в объявленную долю лимита.
+
+    Считается по худшему часу, а не по суткам: лимит часовой, и три прогона,
+    сошедшиеся в один час, тратят его одновременно.
+    """
+    said = declared()
+    limit = int(said["limits"]["gh_api_per_hour"]) * float(said["share"])
+    worst = worst_hour(said)
     assert worst <= limit, f"худший час стоит {worst} вызовов при доле {limit:.0f}"
 
 
