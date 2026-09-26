@@ -156,6 +156,11 @@ def parts(commits: list[list[str]]) -> list[list[str]]:
 DECISION_008: Final = "docs/decisions/008-a-batch-of-corrections-is-one-subject.md"
 
 
+#: ПРЕДЕЛ НАЗВАН (195): тела и файлы берутся из `база..HEAD`. Ветка, срезанная
+#: не от свежей общей ветки, а поверх чужой, уже слитой уплотнением, несёт её
+#: коммиты: их части попадут в счёт, а их «Смешение:» заглушит предупреждение.
+#: Отличить чужой коммит от своего по одному дереву нечем; договор окна режет
+#: ветку от свежей общей ветки (CLAUDE.md, «Ветка в облачном окне»).
 #: Строка, которой автор НАЗЫВАЕТ смешение в коммите ветки: вторая половина 133.
 #: Счёт частей держит первую половину; есть ли у смешения названная причина —
 #: вторую, и без неё предупреждение молчало бы о том, о чём правило (взгляд на #871).
@@ -199,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         found = parts(touched(args.base))
+        # Тела читаются здесь же, под тем же отказом: отказ git — третий исход,
+        # а не трассировка мимо объявленных (039, взгляд на #871).
+        reason = declared(bodies_of(args.base)) if args.warn and len(found) > 1 else ""
     except NotRun as refusal:
         print(f"части не сосчитаны: {refusal}", file=sys.stderr)
         return EXIT_BROKEN
@@ -216,12 +224,12 @@ def main(argv: list[str] | None = None) -> int:
     if len(found) == 1:
         print("\nодна часть — граница по пересечению файлов соблюдена (133)")
         return EXIT_OK
+    if reason:
+        # Причина названа — просить назвать её ещё раз незачем (взгляд на #871).
+        print(f"\nсмешение названо в записи: {reason} — предупреждения нет (133)")
+        return EXIT_OK
     if args.warn:
-        reason = declared(bodies_of(args.base))
-        if reason:
-            print(f"смешение названо в записи: {reason} — предупреждения нет (133)")
-        else:
-            print(warning(len(found)))
+        print(warning(len(found)))
     print(
         "\nчастей больше одной. Либо разрежьте изменение, либо НАЗОВИТЕ В ЗАПИСИ,"
         " почему везёте одним:\nрешение 008 разрешает хвост мелких правок, правило 132 —"
