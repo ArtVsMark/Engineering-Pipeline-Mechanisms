@@ -63,6 +63,13 @@ TITLE: Final = findings.TITLE
 #: взгляд и верификатор. Живёт здесь, а не в `unlooked`: читать его нужно и
 #: сборщику реестра, а `unlooked` сам импортирует этот модуль (взгляд на #833).
 LATE_AUTHOR: Final = "github-actions[bot]"
+#: Автор ответа внешнего взгляда на изменении: действие пишет от этого имени.
+#: Ответ проверки починки читается только от него — он СНИМАЕТ записи, и
+#: снимать их чужим комментарием было бы нельзя (#848).
+REVIEWER_AUTHOR: Final = "claude[bot]"
+#: Первая строка ответа проверки починки (#848): заход не полный, находок не
+#: ищет и отвечает только о прошлых.
+FIXCHECK_MARKER: Final = "ЗАХОД: проверка починки"
 #: Метка ответа верификатора — первой строкой, от `LATE_AUTHOR`.
 VERIFY_MARKER: Final = "<!-- verify: проверка премисы одной находки, а не взгляд на изменение -->"
 
@@ -137,6 +144,10 @@ VERDICT_RE: Final = re.compile(rf"^{MARK}\s*ВЕРДИКТ\s*:\s*находок\
 #: заголовком — ровно призрак «нет» из разбора #414 ниже (051, 140).
 FINDING_RE: Final = re.compile(
     rf"^{MARK}\s*НАХОДКА(?:\[\s*([^\]]+?)\s*\])?\s*:{MARK}\s*(\S.*?)\s*$", re.I
+)
+#: Строка ответа проверки починки: отпечаток прошлой находки и закрыта ли она.
+FIX_RE: Final = re.compile(
+    rf"^{MARK}\s*ПОЧИНКА\[\s*([0-9a-f]{{7}})\s*\]\s*:{MARK}\s*(не\s+закрыта|закрыта)(?!\w)", re.I
 )
 WEIGHTS: Final = findings.WEIGHTS
 UNWEIGHED: Final = findings.UNWEIGHED
@@ -476,6 +487,28 @@ def looks(comments: list[dict[str, Any]]) -> list[tuple[int, list[dict[str, Any]
         stop = end + 1 if step + 1 < len(ends) else len(comments)
         out.append((int(comments[end].get("id") or 0), list(comments[start:stop])))
     return out
+
+
+def is_fix_check(look: list[dict[str, Any]]) -> bool:
+    """Заход — проверка починки: ревьюер объявил это первой строкой ответа (#848)."""
+    return any(
+        str((comment.get("user") or {}).get("login") or "") == REVIEWER_AUTHOR
+        and FIXCHECK_MARKER in bare_lines(comment.get("body") or "")
+        for comment in look
+    )
+
+
+def fix_answers(look: list[dict[str, Any]]) -> dict[str, bool]:
+    """Ответы проверки починки: отпечаток → закрыта ли. Только от ревьюера."""
+    said: dict[str, bool] = {}
+    for comment in look:
+        if str((comment.get("user") or {}).get("login") or "") != REVIEWER_AUTHOR:
+            continue
+        for line in bare_lines(comment.get("body") or ""):
+            one = FIX_RE.match(line)
+            if one is not None:
+                said[one.group(1)] = not one.group(2).lower().startswith("не")
+    return said
 
 
 def unrecorded(
@@ -995,10 +1028,43 @@ def save(
     print(f"живая задача #{number} обновлена: заметок {len(entries)}")
 
 
+def record_fix_check(
+    entries: dict[str, findings.Entry], pr: int, look: list[dict[str, Any]]
+) -> None:
+    """Снимает находки изменения, которые проверка починки назвала закрытыми."""
+    verdict = verdict_of(look)
+    if verdict is None:
+        raise NotRun(f"в проверке починки #{pr} нет строки вердикта — это не «всё закрыто» (075)")
+    answers = fix_answers(look)
+    closed = sorted(
+        mark for mark, ok in answers.items() if ok and mark in entries and entries[mark].pr == pr
+    )
+    for mark in closed:
+        del entries[mark]
+    still = sum(1 for ok in answers.values() if not ok)
+    if still != verdict:
+        print(
+            f"::warning::проверка починки #{pr} говорит «находок {verdict}», а не закрытых {still}",
+            file=sys.stderr,
+        )
+    print(
+        f"из #{pr}: проверка починки — закрыто {len(closed)}, не закрыто {still}"
+        + (f": снято {', '.join(closed)}" if closed else "")
+    )
+
+
 def record_look(
     entries: dict[str, findings.Entry], pr: int, look: list[dict[str, Any]], strict: bool
 ) -> None:
-    """Записывает находки одного захода взгляда в реестр; вердикта нет — отказ."""
+    """Записывает находки одного захода взгляда в реестр; вердикта нет — отказ.
+
+    ПРОВЕРКА ПОЧИНКИ НОВЫХ ЗАПИСЕЙ НЕ ЗАВОДИТ (#848): она отвечает только о
+    прошлых находках этого изменения, и названную закрытой снимает. Чужие
+    изменения она не трогает: снимается лишь запись с тем же номером.
+    """
+    if is_fix_check(look):
+        record_fix_check(entries, pr, look)
+        return
     # ВЕРДИКТ И СТРОКИ НАХОДОК ЧИТАЮТСЯ С ОДНОГО ОТРЕЗКА. Прежде число
     # брали с последнего захода, а строки — со всей ленты, и спорили
     # они по устройству, а не по вине ревьюера (022).
