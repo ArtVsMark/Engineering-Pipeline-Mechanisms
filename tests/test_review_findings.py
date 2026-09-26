@@ -1967,3 +1967,21 @@ def test_an_unread_list_of_open_changes_skips_the_catch_up(
     module.catch_up("o/r", "t", {}, recorded, strict=False)
     assert recorded == {7: 10}
     assert "догон записи пропущен" in capsys.readouterr().err
+
+
+def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
+    """Агент верификатора и перенос его ответа — один джоб в группе записи (#857).
+
+    Выполняемый прогон группа не снимает, вытесняется только ожидающий, ещё
+    до старта агента. Разнеси их по двум джобам — и ответ, уже оплаченный
+    прогоном агента, мог бы остаться без переноса.
+    """
+    import yaml
+
+    flow = yaml.safe_load((ROOT / ".github/workflows/review.yml").read_text(encoding="utf-8"))
+    job = flow["jobs"]["verify"]
+    assert job["concurrency"] == {"group": "findings-write", "cancel-in-progress": False}
+    runs = [str(step.get("run") or "") for step in job["steps"]]
+    agent = [str(step.get("uses") or "") for step in job["steps"] if step.get("id") == "refute"]
+    assert agent and "claude-code-action" in agent[0], "агент верификатора ушёл из джоба записи"
+    assert any("review_findings.py --verify" in run for run in runs), "перенос ушёл из джоба"
