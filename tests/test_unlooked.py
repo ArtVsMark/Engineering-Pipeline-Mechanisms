@@ -1149,7 +1149,7 @@ def test_due_records_live_apart_from_the_misses() -> None:
         78: module.Entry(78, module.STATE_NONE, "2026-09-11"),
     }
     body = module.render_body(entries, 78)
-    missed, due = body.split("## Ждёт позднего взгляда")
+    missed, due = body.split(f"## {module.DUE_HEADING}")
     assert "- #78 ·" in missed and "- #77 ·" not in missed
     assert "- #77 ·" in due and "- #78 ·" not in due
     assert module.parse_entries(body) == entries, "раздел сломал разбор записей"
