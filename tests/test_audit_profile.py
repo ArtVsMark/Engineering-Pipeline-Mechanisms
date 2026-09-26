@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -123,6 +124,35 @@ def test_the_live_tree_profiles_without_a_platform(tmp_path: Path, run_script: R
     )
     assert done.code == module.EXIT_OK, done.err
     assert "осталось 1" in done.out, done.out
+
+
+def test_since_reaches_the_count_through_main(tmp_path: Path, run_script: RunScript) -> None:
+    """Ключ `--since` доходит от входа до счёта, а не только до `profile()` (#829)."""
+    export = tmp_path / "export.json"
+    export.write_text(json.dumps({"rules": [rule("001", "что-нибудь")]}), encoding="utf-8")
+    answers = tmp_path / "answers.json"
+    answers.write_text(
+        json.dumps({"rules": {"001": {"status": "active", "analysed": "2026-09-18"}}}),
+        encoding="utf-8",
+    )
+    base = ("audit_profile.py", "--export", str(export), "--answers", str(answers))
+    assert "осталось 0" in run_script(*base).out
+    assert "осталось 1" in run_script(*base, "--since", "2026-09-26").out
+
+
+@pytest.mark.parametrize("said", ["2026/09/20", "2026-9-20", "26.09.2026", "вчера"])
+def test_since_refuses_what_is_not_an_iso_day(said: str) -> None:
+    """Дата не в форме ГГГГ-ММ-ДД — отказ на входе, а не молча неверный счёт."""
+    with pytest.raises(SystemExit) as refused:
+        module.main(["--since", said])
+    assert refused.value.code == 2
+
+
+def test_iso_day_keeps_the_form_it_compares_by() -> None:
+    """`iso_day` отдаёт ту же строку, по которой идёт сравнение, и не нормализует её."""
+    assert module.iso_day("2026-09-26") == "2026-09-26"
+    with pytest.raises(argparse.ArgumentTypeError):
+        module.iso_day("2026-9-26")
 
 
 def test_a_missing_answers_file_is_the_third_outcome(tmp_path: Path, run_script: RunScript) -> None:

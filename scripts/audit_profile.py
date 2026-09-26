@@ -41,6 +41,7 @@ import json
 import re
 import sys
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Any, Final
 
@@ -124,6 +125,21 @@ def bands(rows: list[dict[str, Any]]) -> Counter[int]:
     return Counter(min(int(row["share"] * 10), 9) for row in rows)
 
 
+def iso_day(said: str) -> str:
+    """Дата ключа `--since` строго ГГГГ-ММ-ДД: сравнивается она строкой.
+
+    `2026/09/20` или `2026-9-20` строкой сравнились бы с `analysed` молча и
+    дали неверный счёт сверенного — поэтому форма проверяется на входе.
+    """
+    try:
+        day = date.fromisoformat(said)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"не дата ГГГГ-ММ-ДД: {said!r}") from None
+    if day.isoformat() != said:
+        raise argparse.ArgumentTypeError(f"не дата ГГГГ-ММ-ДД: {said!r}")
+    return said
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает полосы и следующую пачку к разбору."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -131,7 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--export", default=None, help="снятая выгрузка каталога вместо живой")
     parser.add_argument("--take", type=int, default=8, help="сколько несверенных показать")
     parser.add_argument(
-        "--since", default="", help="ГГГГ-ММ-ДД: сверено только прочитанное не раньше этой даты"
+        "--since",
+        type=iso_day,
+        default=None,
+        help="ГГГГ-ММ-ДД: сверено только прочитанное не раньше этой даты",
     )
     args = parser.parse_args(argv)
 
@@ -145,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.export
             else catalogue.read(catalogue.EXPORT_URL)
         )
-        rows = profile(export, mine, args.since)
+        rows = profile(export, mine, args.since or "")
     except NotRun as refusal:
         print(f"профиль не построен: {refusal}", file=sys.stderr)
         return EXIT_BROKEN
