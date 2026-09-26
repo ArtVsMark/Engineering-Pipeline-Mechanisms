@@ -176,48 +176,87 @@ def test_an_aliased_or_imported_re_is_still_seen(tmp_path: Path) -> None:
 
 #: Вызовы, делящие строку по разделителю.
 CUTTERS: Final = frozenset({"split", "rsplit", "partition", "rpartition"})
+#: Образцы `re.split`, делящие по точке: та же нарезка другим инструментом.
+DOT_PATTERNS: Final = frozenset({r"\.", "[.]"})
 
 
 def knows_the_version_form(tree: ast.AST) -> bool:
-    """Берёт ли модуль форму номера у `paths` — атрибутом или импортом имени."""
+    """Знает ли модуль общую форму номера: атрибут `.VERSION_RE` или её импорт.
+
+    База атрибута не важна: `paths.VERSION_RE`, `import paths as p; p.VERSION_RE`
+    и форма, взятая у соседа (`release.VERSION_RE`), — одна и та же форма
+    (взгляд на #884). ПРЕДЕЛ НАЗВАН (195): модуль со СВОЕЙ формой под тем же
+    именем (`drift.VERSION_RE` — теги внешних действий любой глубины) атрибутом
+    её не берёт и гейтом не судится — предмет у него другой.
+    """
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Attribute)
-            and node.attr == "VERSION_RE"
-            and getattr(node.value, "id", "") == "paths"
-        ):
+        if isinstance(node, ast.Attribute) and node.attr == "VERSION_RE":
             return True
-        if (
-            isinstance(node, ast.ImportFrom)
-            and node.module == "paths"
-            and any(one.name == "VERSION_RE" for one in node.names)
-        ):
+        if isinstance(node, ast.ImportFrom) and any(one.name == "VERSION_RE" for one in node.names):
             return True
     return False
 
 
+def dot(node: ast.AST, allowed: frozenset[str] = frozenset({"."})) -> bool:
+    """Строковая константа из разрешённых."""
+    return isinstance(node, ast.Constant) and node.value in allowed
+
+
 def cuts_by_dot(tree: ast.AST) -> list[int]:
-    """Строки, где строка делится по точке — позиционно или ключом `sep`."""
+    """Строки, где строка делится по точке.
+
+    Видит методы строки позиционно и ключом `sep`, вызов через класс
+    (`str.split(v, ".")`) и `re.split` по точке (взгляд на #884). ПРЕДЕЛ
+    НАЗВАН (195): нарезку циклом по символам или срезами по `find(".")` гейт
+    не видит — это уже не «способ резать», а своя реализация разбора.
+    """
     found = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or getattr(node.func, "attr", "") not in CUTTERS:
+        if not isinstance(node, ast.Call):
             continue
-        said = [*node.args[:1], *(one.value for one in node.keywords if one.arg == "sep")]
-        if any(isinstance(one, ast.Constant) and one.value == "." for one in said):
+        name = getattr(node.func, "attr", "")
+        owner = getattr(getattr(node.func, "value", None), "id", "")
+        if owner == "re" and name == "split":
+            said = [*node.args[:1], *(one.value for one in node.keywords if one.arg == "pattern")]
+            if any(dot(one, DOT_PATTERNS) for one in said):
+                found.append(node.lineno)
+            continue
+        if name not in CUTTERS:
+            continue
+        place = 1 if owner == "str" else 0
+        said = [
+            *node.args[place : place + 1],
+            *(one.value for one in node.keywords if one.arg == "sep"),
+        ]
+        if any(dot(one) for one in said):
             found.append(node.lineno)
     return found
 
 
 def test_every_way_to_cut_by_dot_is_seen() -> None:
-    """`rsplit`, `partition` и `split(sep=".")` режут так же, как `split(".")` (#877)."""
+    """Все формы нарезки и оба пути к форме видны гейту (#877, #884)."""
     source = (
         "from paths import VERSION_RE\n"
         'a = v.split(".")\nb = v.rsplit(".")\nc = v.partition(".")\n'
-        'd = v.split(sep=".")\ne = v.split("-")\n'
+        'd = v.split(sep=".")\ne = v.split("-")\nf = v.rpartition(".")\n'
+        'g = str.split(v, ".")\nh = re.split(r"\\.", v)\n'
     )
     tree = ast.parse(source)
     assert knows_the_version_form(tree)
-    assert cuts_by_dot(tree) == [2, 3, 4, 5]
+    assert cuts_by_dot(tree) == [2, 3, 4, 5, 7, 8, 9]
+
+
+def test_the_form_is_known_by_any_way_it_is_taken() -> None:
+    """Атрибут у `paths`, у псевдонима и у соседа, и импорт имени — форма известна (#884)."""
+    for source in (
+        "import paths\nx = paths.VERSION_RE\n",
+        "import paths as p\nx = p.VERSION_RE\n",
+        "import release\nx = release.VERSION_RE\n",
+        "from paths import VERSION_RE\n",
+    ):
+        assert knows_the_version_form(ast.parse(source)), source
+    own = 'import re\nVERSION_RE = re.compile(r"^v?(\\d+)$")\n'
+    assert not knows_the_version_form(ast.parse(own)), "своя форма под тем же именем"
 
 
 def test_a_module_that_knows_the_version_form_does_not_cut_it() -> None:
