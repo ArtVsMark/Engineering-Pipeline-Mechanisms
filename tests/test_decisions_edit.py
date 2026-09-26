@@ -170,6 +170,13 @@ def test_a_link_sent_to_another_document_is_a_rewrite(repo: Path, run_script: Ru
     assert done.code == edit.EXIT_FOUND, done.text
 
 
+def test_a_platform_link_keeps_its_kind() -> None:
+    """Задача и изменение с одним номером — разные цели: каталог у них не снимается (#880)."""
+    was = edit.frozen("## Решение\n\nСм. [#12](../../issues/12).\n")
+    now = edit.frozen("## Решение\n\nСм. [#12](../../pull/12).\n")
+    assert was != now
+
+
 def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> None:
     """Текст ссылки остаётся содержанием: его правка — переписывание."""
     done = replaced(

@@ -155,11 +155,18 @@ def test_the_journal_as_the_release_builds_it_resolves() -> None:
 #: ставший неверным, роняет сам тест.
 NAMED_IN: Final = (".py", ".yml", ".yaml", ".json", ".toml", ".sh")
 #: Путь к документу, написанный буквами.
-DOC_PATH_RE: Final = re.compile(r"docs/[\w./-]+\.md")
+#: Слева — граница пути: `mydocs/…` и `.claude/docs/…` — не `docs/` от корня (#880).
+DOC_PATH_RE: Final = re.compile(r"(?<![\w./-])docs/[\w./-]+\.md")
 #: Вымышленные пути в примерах — с причиной у каждого (071).
 EXAMPLES: Final = {
     "docs/x.md": "пример переезда ссылки в описании `build_changelog.relink`",
 }
+
+
+def test_a_doc_path_is_read_from_its_own_start() -> None:
+    """Путь внутри чужого пути — не путь от корня (взгляд на #880)."""
+    line = "см. mydocs/x.md, .claude/docs/y.md и docs/agent/roles.md"
+    assert DOC_PATH_RE.findall(line) == ["docs/agent/roles.md"]
 
 
 def test_paths_named_outside_documents_exist() -> None:
