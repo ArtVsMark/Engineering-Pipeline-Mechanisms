@@ -240,6 +240,14 @@ def add_change(
         elif number not in entry["seen_on"]:
             entry["seen_on"] = sorted({*entry["seen_on"], number})
             entry["pr"] = min(entry["seen_on"])
+    # ПРОВЕРКА ПОЧИНКИ СНИМАЕТ ЗАПИСЬ БЕЗ СТРОКИ `Разобрано:` (#848). Реестр
+    # снимает её по ответу ревьюера на изменении, и тело слияния о ней молчит:
+    # без этого чтения закрытая починкой находка висела бы в архиве неснятой,
+    # и замер дублей, на котором стоит #848, врал бы (195). Снимается только
+    # находка этой же ленты — как и в реестре.
+    for mark in fixed_in(comments):
+        if number in findings.get(mark, {}).get("seen_on", []):
+            resolutions.setdefault(mark, {"by": number, "twin_of": ""})
     for mark, twin in resolved_in(message).items():
         # Круг сверяется и для нового отпечатка, а не только для дописывания:
         # в архиве до #809 лежат связи A→B без записи B, и «B дубль A» замкнула
@@ -252,6 +260,17 @@ def add_change(
         # дописывает её к раннему снятию, не перенося само снятие (#814).
         if twin and not said["twin_of"]:
             said["twin_of"] = twin
+
+
+def fixed_in(comments: list[dict[str, Any]]) -> list[str]:
+    """Отпечатки, которые проверка починки ревьюера назвала закрытыми."""
+    return sorted(
+        mark
+        for _, look in review_findings.looks(comments)
+        if review_findings.is_fix_check(look)
+        for mark, ok in review_findings.fix_answers(look).items()
+        if ok
+    )
 
 
 def settle(archive: dict[str, Any]) -> None:
