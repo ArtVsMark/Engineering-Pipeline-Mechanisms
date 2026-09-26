@@ -71,6 +71,10 @@ FENCE_RE: Final = re.compile(r"^\s*```")
 #: отступом НОЛЬ при 1179 в первой колонке, и в 300 изменениях на площадке
 #: столько же ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 INDENTED_RE: Final = re.compile(r"^(?: {4}|\t)")
+#: Слова строки снятия. Разбор ниже и независимая сверка архива с историей
+#: (`archive_against_history`) берут их отсюда, а не переписывают (209).
+RESOLVED_WORD: Final = "Разобрано:"
+TWIN_WORD: Final = "дубль"
 #: Отпечаток находки — семь шестнадцатеричных знаков, как короткий хэш.
 #: Кавычки вокруг отпечатка допускаются: строку пишет человек, и оформить хэш
 #: как код — первое, что он делает. Без этого отпечаток в кавычках терялся
@@ -83,10 +87,6 @@ INDENTED_RE: Final = re.compile(r"^(?: {4}|\t)")
 #: не выдумана — ею же читаются связи с задачами (`Refs #1, #2`), и автор
 #: вправе ждать того же здесь
 #: ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
-#: Слова строки снятия. Разбор ниже и независимая сверка архива с историей
-#: (`archive_against_history`) берут их отсюда, а не переписывают (209).
-RESOLVED_WORD: Final = "Разобрано:"
-TWIN_WORD: Final = "дубль"
 RESOLVED_RE: Final = re.compile(
     rf"^\s*(?P<mark>{RESOLVED_WORD})\s*(?P<text>[0-9a-f`][^\n]*)", re.IGNORECASE | re.MULTILINE
 )

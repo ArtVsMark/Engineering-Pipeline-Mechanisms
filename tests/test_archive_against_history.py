@@ -20,6 +20,7 @@ LOG = """Тема (#10)
 Тема (#11)
 
 Разобрано: `fff6666` дубль `aaa1111`
+Разобрано: 1111111, 2222222 дубль 3333333 — список к одной цели (#807)
 """
 
 
@@ -33,13 +34,24 @@ def archive(resolutions: dict[str, str]) -> dict[str, Any]:
 def test_a_faithful_archive_has_no_difference() -> None:
     """Снятия и пары, стоящие рядом в строке, подтверждены."""
     said = archive(
-        {"aaa1111": "", "bbb2222": "ccc3333", "ddd4444": "eee5555", "fff6666": "aaa1111"}
+        {
+            "aaa1111": "",
+            "bbb2222": "ccc3333",
+            "ddd4444": "eee5555",
+            "fff6666": "aaa1111",
+            "1111111": "3333333",
+            "2222222": "3333333",
+        }
     )
     assert module.check(said, LOG) == {"без строки": [], "связь без пары": []}
 
 
 def test_a_chain_across_a_comma_is_not_a_pair() -> None:
-    """«B дубль C, D дубль E» не значит «C дубль D»: цепочка через запятую — расхождение."""
+    """Связь, которой строка не называет, — расхождение: «B дубль C, D дубль E» не даёт C→D.
+
+    Прежний разбор читал такую строку цепочкой и давал C→E и D→E (#872); сверка
+    держит обратное: связи C→D в строке нет ни в какой грамматике.
+    """
     said = archive({"ccc3333": "ddd4444"})
     assert module.check(said, LOG)["связь без пары"] == ["ccc3333 дубль ddd4444"]
 
@@ -88,7 +100,7 @@ def test_trunk_log_reads_the_live_history() -> None:
 
 def test_resolution_lines_take_only_resolution_lines() -> None:
     """Строкой снятия считается слово с двоеточием в начале строки, как у разбора."""
-    assert len(module.resolution_lines(LOG)) == 3
+    assert len(module.resolution_lines(LOG)) == 4
     assert module.resolution_lines("- разобрано — в прозе\nразобрано без двоеточия") == []
 
 
