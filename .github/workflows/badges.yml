@@ -210,6 +210,21 @@ jobs:
               echo "carried=$rc" >> "$GITHUB_OUTPUT"
               ;;
           esac
+      # ПРИЁМКА СТРОЖЕ ЧИНИМОГО (193, #864): архив сверяется с историей общей
+      # ветки независимым чтением, а не тем же разбором, что его собрал.
+      # Расхождение — предупреждение: публикацию оно не держит, но называется
+      # числом на каждой сборке.
+      - name: сверить архив с историей
+        env:
+          ARCHIVE: ${{ runner.temp }}/badges/.github/badges/findings.json
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/archive_against_history.py --archive "$ARCHIVE" --ref HEAD || rc=$?
+          case "$rc" in
+            0|3) ;;
+            *) echo "::warning::архив с историей не сверен (код $rc) — приёмка перечитки не проверена" ;;
+          esac
       - name: опубликовать в ветку badges
         env:
           GITHUB_TOKEN: ${{ github.token }}
