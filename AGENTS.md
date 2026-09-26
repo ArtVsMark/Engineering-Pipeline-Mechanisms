@@ -124,6 +124,7 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 ([132](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/132-one-change-carries-one-topic.md)),
 границу задаёт пересечение файлов, а не число задач
 ([133](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/133-file-overlap-sets-the-boundary.md)).
+Договор — [`docs/agent/behaviour.md`](docs/agent/behaviour.md#граница-одного-изменения).
 
 **Автор коммита — человек, агент — соавтор.** Трейлеры живут в хвостовом
 блоке, а не в любой строке сообщения
