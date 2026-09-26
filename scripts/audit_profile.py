@@ -26,6 +26,11 @@
 который надо не забыть обновить
 ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
 
+ПРОХОД БЫВАЕТ НЕ ПЕРВЫМ. Когда поднят контракт или назначен аудит (#829),
+перечитать надо и уже сверенное: ответ, прочитанный 18.09.2026, не прочитан
+под правила, принятые позже. Поэтому `--since ДАТА` считает сверенным только
+ответ, чей `analysed` не раньше этой даты (157); без ключа — любой с датой.
+
 Исходы (правило 039): ``0`` профиль построен · ``2`` не отработал.
 """
 
@@ -36,6 +41,7 @@ import json
 import re
 import sys
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Any, Final
 
@@ -85,8 +91,11 @@ def suspicion(rule: dict[str, Any], answer: dict[str, Any]) -> float:
     return len(claim & said) / len(claim)
 
 
-def profile(export: dict[str, Any], mine: dict[str, Any]) -> list[dict[str, Any]]:
-    """Ответы, упорядоченные подозрением: самый дальний от своего правила первым."""
+def profile(export: dict[str, Any], mine: dict[str, Any], since: str = "") -> list[dict[str, Any]]:
+    """Ответы, упорядоченные подозрением: самый дальний от своего правила первым.
+
+    `since` — дата ISO: сверенным считается ответ, прочитанный не раньше неё.
+    """
     rules = {str(one["id"]): one for one in export.get("rules") or []}
     if not rules:
         raise NotRun("в выгрузке каталога нет правил — предмет профиля не найден (075)")
@@ -99,7 +108,7 @@ def profile(export: dict[str, Any], mine: dict[str, Any]) -> list[dict[str, Any]
             "share": suspicion(rules[number], answer),
             "status": answer.get("status", ""),
             "mechanism": answer.get("mechanism") or "—",
-            "looked": bool(answer.get("analysed")),
+            "looked": bool(answer.get("analysed")) and str(answer.get("analysed")) >= since,
             "slug": rules[number]["slug"],
         }
         for number, answer in mine.items()
@@ -116,12 +125,33 @@ def bands(rows: list[dict[str, Any]]) -> Counter[int]:
     return Counter(min(int(row["share"] * 10), 9) for row in rows)
 
 
+def iso_day(said: str) -> str:
+    """Дата ключа `--since` строго ГГГГ-ММ-ДД: сравнивается она строкой.
+
+    `2026/09/20` или `2026-9-20` строкой сравнились бы с `analysed` молча и
+    дали неверный счёт сверенного — поэтому форма проверяется на входе.
+    """
+    try:
+        day = date.fromisoformat(said)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"не дата ГГГГ-ММ-ДД: {said!r}") from None
+    if day.isoformat() != said:
+        raise argparse.ArgumentTypeError(f"не дата ГГГГ-ММ-ДД: {said!r}")
+    return said
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает полосы и следующую пачку к разбору."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--answers", default=None, help="ответы проекта; по умолчанию из дерева")
     parser.add_argument("--export", default=None, help="снятая выгрузка каталога вместо живой")
     parser.add_argument("--take", type=int, default=8, help="сколько несверенных показать")
+    parser.add_argument(
+        "--since",
+        type=iso_day,
+        default=None,
+        help="ГГГГ-ММ-ДД: сверено только прочитанное не раньше этой даты",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -134,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.export
             else catalogue.read(catalogue.EXPORT_URL)
         )
-        rows = profile(export, mine)
+        rows = profile(export, mine, args.since or "")
     except NotRun as refusal:
         print(f"профиль не построен: {refusal}", file=sys.stderr)
         return EXIT_BROKEN
