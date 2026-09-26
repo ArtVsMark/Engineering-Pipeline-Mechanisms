@@ -5,7 +5,7 @@
 > ([021](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/021-split-docs-by-reader.md)).
 
 Шаг берётся **вызовом по адресу с версией**, а не копией файла к себе. Почему,
-с замером, — во входе, [«Что можно взять»](../../README.md#что-можно-взять).
+с замером копий, — в [договоре](pipeline.md).
 
 ```yaml
 jobs:
