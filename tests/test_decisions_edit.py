@@ -183,3 +183,25 @@ def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> No
         repo, run_script, "[`pipeline.md`]", "[`use/pipeline.md`]", "текст ссылки переписан"
     )
     assert done.code == edit.EXIT_FOUND, done.text
+
+
+@pytest.mark.parametrize(
+    ("was", "now"),
+    [
+        (
+            "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
+            "https://github.com/someone/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
+        ),
+        (
+            "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
+            "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/042-decision-records-its-alternatives.md",
+        ),
+        ("../../.pipeline.yml", "../../other/.pipeline.yml"),
+    ],
+    ids=["хозяин", "язык каталога", "не документ"],
+)
+def test_only_a_relative_document_may_move(was: str, now: str) -> None:
+    """Каталог снимается только у относительного `.md`: прочие формы — целиком (#880)."""
+    before = edit.frozen(f"## Решение\n\nСм. [x]({was}).\n")
+    after = edit.frozen(f"## Решение\n\nСм. [x]({now}).\n")
+    assert before != after

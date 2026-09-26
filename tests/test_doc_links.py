@@ -149,11 +149,16 @@ def test_the_journal_as_the_release_builds_it_resolves() -> None:
 
 
 #: Где путь к документу пишется не ссылкой, а буквами: код, прогоны, таблицы
-#: правил. Проверка ссылок их не видит, а переезд документа (#840) оставлял в
-#: них старые пути — промпт взгляда, таблица ролей (взгляд на #875). Тесты вне
-#: предмета: их фикстуры строят вымышленные пути намеренно, а настоящий путь,
-#: ставший неверным, роняет сам тест.
-NAMED_IN: Final = (".py", ".yml", ".yaml", ".json", ".toml", ".sh")
+#: правил — и проза документов в обратных кавычках: свод, ядро, навыки,
+#: которые читают окна (взгляд на #880). Проверка ссылок их не видит, а переезд
+#: документа (#840) оставлял в них старые пути. Тесты вне предмета: их фикстуры
+#: строят вымышленные пути намеренно, а настоящий путь, ставший неверным,
+#: роняет сам тест.
+NAMED_IN: Final = (".py", ".yml", ".yaml", ".json", ".toml", ".sh", ".md")
+#: ИСТОРИЯ — ВНЕ ПРЕДМЕТА, с причиной (154): проза записей решений заморожена
+#: (043), фрагменты и собранный журнал говорят о том, что было, и старый путь в
+#: них — факт, а не ссылка.
+HISTORY: Final = ("tests/", "docs/decisions/", "changelog.d/", "CHANGELOG.md")
 #: Путь к документу, написанный буквами.
 #: Слева — граница пути: `mydocs/…` и `.claude/docs/…` — не `docs/` от корня (#880).
 DOC_PATH_RE: Final = re.compile(r"(?<![\w./-])docs/[\w./-]+\.md")
@@ -186,7 +191,7 @@ def test_paths_named_outside_documents_exist() -> None:
     stale = [
         f"{name}:{number} — {said}"
         for name in listed
-        if name.endswith(NAMED_IN) and not name.startswith("tests/")
+        if name.endswith(NAMED_IN) and not name.startswith(HISTORY)
         for number, line in enumerate(
             (ROOT / name).read_text(encoding="utf-8").splitlines(), start=1
         )
@@ -194,6 +199,20 @@ def test_paths_named_outside_documents_exist() -> None:
         if said not in EXAMPLES and not (ROOT / said).exists()
     ]
     assert not stale, "путь к документу, которого нет:\n  " + "\n  ".join(stale)
+
+
+def test_every_example_is_still_in_the_tree() -> None:
+    """Исключение живёт, пока жив пример: иначе оно молча пропускает путь где угодно (#880)."""
+    for said in EXAMPLES:
+        found = subprocess.run(
+            ["git", "grep", "-l", "-F", said, "--", "scripts", ".github", ".rules"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=ROOT,
+            check=False,
+        ).stdout.split()
+        assert found, f"пример «{said}» больше нигде не стоит — исключение снять"
 
 
 def test_the_check_sees_links_at_all() -> None:
