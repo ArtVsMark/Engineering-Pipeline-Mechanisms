@@ -507,6 +507,43 @@ STATE_NOT_A_COMMIT: dict[str, str] = {
 }
 
 
+#: ДЖОБЫ, чья группа отменяет прежний заход и голову не называет намеренно.
+#: Цена 179 — «на актуальной голове нет ОБЯЗАТЕЛЬНОЙ проверки» — у совещательного
+#: джоба не наступает: снятый взгляд слияние не держит, а слитое без взгляда
+#: догоняет поздний взгляд. Устаревшая голова, пришедшая последней, агента не
+#: зовёт: ворота взгляда сверяют её с головой изменения (`look_waits.stale`).
+ADVISORY_JOBS: dict[str, str] = {
+    "review.yml:review": "новый толчок снимает взгляд прежней головы (#848); взгляд совещательный",
+}
+
+
+def cancelling_groups() -> dict[str, str]:
+    """Отменяющие группы прогонов и ДЖОБОВ: `прогон` или `прогон:джоб` → группа.
+
+    ГРУППЫ ДЖОБОВ ГЕЙТ ПРЕЖДЕ НЕ ВИДЕЛ. Он читал только группу прогона, и
+    группа джоба `review` без головы (#855) прошла мимо него — нашёл аудит
+    ответа на 179 26.09.2026 (#829).
+    """
+    found: dict[str, str] = {}
+    for path in walk(WORKFLOWS, "*.yml"):
+        flow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        places = [(path.name, flow.get("concurrency"))]
+        places += [
+            (f"{path.name}:{name}", job.get("concurrency"))
+            for name, job in (flow.get("jobs") or {}).items()
+            if isinstance(job, dict)
+        ]
+        for name, group in places:
+            if isinstance(group, dict) and group.get("cancel-in-progress") is True:
+                found[name] = str(group.get("group") or "")
+    return found
+
+
+def test_a_job_group_is_seen_by_the_head_gate() -> None:
+    """Группа джоба входит в предмет гейта: без неё `review` не был бы виден (#829)."""
+    assert "review.yml:review" in cancelling_groups()
+
+
 def test_a_cancelling_group_names_the_head_or_declares_why_not() -> None:
     """Каждый отменяющий прогон называет голову — либо объявлен состоянием.
 
@@ -525,16 +562,12 @@ def test_a_cancelling_group_names_the_head_or_declares_why_not() -> None:
     Нашёл внешний взгляд на #427: ответ по 179 называл три прогона, и из них
     один головы не имел, а другой не отменял вовсе.
     """
-    cancelling = {}
-    for path in walk(WORKFLOWS, "*.yml"):
-        group = yaml.safe_load(path.read_text(encoding="utf-8")).get("concurrency")
-        if isinstance(group, dict) and group.get("cancel-in-progress") is True:
-            cancelling[path.name] = str(group.get("group") or "")
+    cancelling = cancelling_groups()
     assert cancelling, "отменяющих прогонов в дереве нет — предмета у проверки нет (075)"
     headless = {
         name: said
         for name, said in cancelling.items()
-        if "sha" not in said and name not in STATE_NOT_A_COMMIT
+        if "sha" not in said and name not in STATE_NOT_A_COMMIT and name not in ADVISORY_JOBS
     }
     assert not headless, (
         "прогон отменяет предыдущий, а голову в группе не называет: "
@@ -548,3 +581,7 @@ def test_the_state_list_has_no_dead_or_silent_entries() -> None:
     for name, why in STATE_NOT_A_COMMIT.items():
         assert why.strip(), f"{name}: объявлен состоянием без причины (154)"
         assert (WORKFLOWS / name).is_file(), f"{name}: объявлен состоянием, а прогона нет"
+    live = cancelling_groups()
+    for name, why in ADVISORY_JOBS.items():
+        assert why.strip(), f"{name}: объявлен совещательным без причины (154)"
+        assert name in live, f"{name}: объявлен совещательным, а отменяющей группы у него нет"

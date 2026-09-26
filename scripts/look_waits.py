@@ -105,11 +105,38 @@ def wait(repo: str, sha: str, token: str, timeout: float, interval: float) -> st
         time.sleep(interval)
 
 
+#: Заголовок пометки: взгляд пропущен, потому что голова уже не та. Свой, а не
+#: `SKIPPED`: пропуск на красной голове очередь считает долгом взгляда и
+#: перезапускает его, а устаревшую голову перезапускать незачем.
+STALE: Final = "взгляд пропущен: голова устарела"
+
+
+def stale(repo: str, pr: int, sha: str, token: str) -> bool | None:
+    """Устарела ли голова: у изменения уже другая. ``None`` — не узнали.
+
+    ЗАХОД ПО УСТАРЕВШЕЙ ГОЛОВЕ ВЕРДИКТА НЕ ПИШЕТ (#848). Группа взгляда снимает
+    прежний заход новым толчком, но события площадки приходят не по порядку
+    (179): прогон старой головы может прийти последним. Тогда он не смотрит —
+    вердикт по исправленному коду лёг бы пересказом. Не узнали — взгляд идёт:
+    молчание площадки его не отменяет (045).
+    """
+    try:
+        change = ghrest.request("GET", f"repos/{repo}/pulls/{pr}", token) or {}
+    except ghrest.TransportError as exc:
+        print(f"::warning::голова изменения #{pr} не прочитана: {exc} — взгляд идёт")
+        return None
+    head = str((change.get("head") or {}).get("sha") or "")
+    return bool(head) and head != sha
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: ждёт гейт и пишет, идти ли взгляду."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--sha", default="", help="голова изменения")
+    parser.add_argument(
+        "--pr", type=int, default=0, help="номер изменения: сверить, не устарела ли голова"
+    )
     parser.add_argument("--timeout", type=float, default=1500.0, help="сколько ждать, секунд")
     parser.add_argument("--interval", type=float, default=20.0, help="шаг опроса, секунд")
     args = parser.parse_args(argv)
@@ -119,7 +146,13 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
     said = wait(args.repo, args.sha, token, args.timeout, args.interval)
     run = "no" if said == RED else "yes"
-    if said == RED:
+    if said != RED and args.pr and stale(args.repo, args.pr, args.sha, token):
+        run = "no"
+        print(
+            f"::notice title={STALE}::голова {args.sha[:8]} уже не голова #{args.pr} — "
+            "взгляд по ней не нужен, новая голова позовёт свой (#848, 179)"
+        )
+    elif said == RED:
         # Пометка — аннотацией на записи взгляда, а не только строкой лога:
         # запись завершится, и без пометки очередь не отличит пропуск от
         # сказанного взгляда. Перезапуск упавшего без толчка сделает голову
