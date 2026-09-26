@@ -17,7 +17,8 @@ Stepik-Python-Grader.
 Путь каждого документа читается из одной константы `scripts/paths.py`
 (`BEHAVIOUR`, `ROADMAP`, `GAPS`, `RELEASE_DOC`, `PIPELINE_DOC`,
 `ONBOARDING`, `DOCS_INDEX` рядом с прежними `ROLES`, `DIRECTIONS`,
-`REVIEW_PROCEDURE`). Повторный поиск старых путей по дереву даёт ноль.
+`REVIEW_PROCEDURE`). Старые пути остались только там, где их не правят:
+в собранном журнале до выпуска и в прозе записей решений.
 Ответы о переносе (`.rules/portable.json`) называют документы, на которые
 ссылаются `build_changelog`, `debt`, `release` и `review_map`. Свод
 (`AGENTS.md`, `CLAUDE.md`) поменял только пути, но живые окна его не
