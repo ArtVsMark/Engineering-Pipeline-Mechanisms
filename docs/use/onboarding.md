@@ -1,7 +1,7 @@
 # Подключение конвейера к своему проекту
 
 > **Читатель:** тот, кто УЖЕ решил брать. Что это такое и стоит ли — во
-> входе ([`README.md`](../README.md)); здесь только порядок подключения
+> входе ([`README.md`](../../README.md)); здесь только порядок подключения
 > ([021](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/021-split-docs-by-reader.md)).
 
 Шаг берётся **вызовом по адресу с версией**, а не копией файла к себе. Копия —
@@ -24,15 +24,15 @@ jobs:
 
 | шаг | что делает |
 |---|---|
-| [`step-lint.yml`](../.github/workflows/step-lint.yml) | линтер, формат и типы одним джобом |
-| [`step-pr-meta.yml`](../.github/workflows/step-pr-meta.yml) | метки изменения и связь с задачей |
-| [`step-journal.yml`](../.github/workflows/step-journal.yml) | фрагмент журнала, версия, разбор фрагментов |
-| [`step-attribution.yml`](../.github/workflows/step-attribution.yml) | автор коммитов — человек, агент соавтор |
-| [`step-pipeline.yml`](../.github/workflows/step-pipeline.yml) | ответ по классам проверок полон и сходится с деревом |
-| [`step-contract.yml`](../.github/workflows/step-contract.yml) | поверхность контракта не тронута молча |
-| [`step-debt.yml`](../.github/workflows/step-debt.yml) | остаток долга виден на каждом изменении |
-| [`step-window-lifetime.yml`](../.github/workflows/step-window-lifetime.yml) | срок жизни окна, открывшего изменение |
-| [`step-rulebook-fresh.yml`](../.github/workflows/step-rulebook-fresh.yml) | свод не менялся под окном изменения |
+| [`step-lint.yml`](../../.github/workflows/step-lint.yml) | линтер, формат и типы одним джобом |
+| [`step-pr-meta.yml`](../../.github/workflows/step-pr-meta.yml) | метки изменения и связь с задачей |
+| [`step-journal.yml`](../../.github/workflows/step-journal.yml) | фрагмент журнала, версия, разбор фрагментов |
+| [`step-attribution.yml`](../../.github/workflows/step-attribution.yml) | автор коммитов — человек, агент соавтор |
+| [`step-pipeline.yml`](../../.github/workflows/step-pipeline.yml) | ответ по классам проверок полон и сходится с деревом |
+| [`step-contract.yml`](../../.github/workflows/step-contract.yml) | поверхность контракта не тронута молча |
+| [`step-debt.yml`](../../.github/workflows/step-debt.yml) | остаток долга виден на каждом изменении |
+| [`step-window-lifetime.yml`](../../.github/workflows/step-window-lifetime.yml) | срок жизни окна, открывшего изменение |
+| [`step-rulebook-fresh.yml`](../../.github/workflows/step-rulebook-fresh.yml) | свод не менялся под окном изменения |
 
 **Заготовку собирает заход, а не вы руками:**
 
@@ -64,7 +64,7 @@ python scripts/onboard.py
 ## Объявитесь: иначе оповещения не будет
 
 Подключились — **скажите об этом**. Адреса подключённых лежат в
-[`.rules/consumers.json`](../.rules/consumers.json), и только адреса: что у вас
+[`.rules/consumers.json`](../../.rules/consumers.json), и только адреса: что у вас
 подключено, обойдено и на какой вы версии, публикуете вы сами в своём
 `.pipeline.yml`, а мы это читаем (174).
 
@@ -89,9 +89,9 @@ python scripts/consumers.py
 
 | вид | когда | что с ним будет |
 |---|---|---|
-| [**затор**](../../issues/new?template=consumer-jam.yml) | конвейер встал, слить нельзя | тревога с адресатом-человеком, а не место в бэклоге (142) |
-| [**пробел**](../../issues/new?template=consumer-gap.yml) | случился инцидент, которого конвейер не ловит | гипотеза до третьего случая: шов рано, обобщение поздно (093) |
-| [**расхождение**](../../issues/new?template=consumer-mismatch.yml) | механизм есть, но у вас не подходит | объявленный обход — без него модуль слепнет (154) |
+| [**затор**](../../../issues/new?template=consumer-jam.yml) | конвейер встал, слить нельзя | тревога с адресатом-человеком, а не место в бэклоге (142) |
+| [**пробел**](../../../issues/new?template=consumer-gap.yml) | случился инцидент, которого конвейер не ловит | гипотеза до третьего случая: шов рано, обобщение поздно (093) |
+| [**расхождение**](../../../issues/new?template=consumer-mismatch.yml) | механизм есть, но у вас не подходит | объявленный обход — без него модуль слепнет (154) |
 
 **Обход — сильнейшее свидетельство пробела, и он невидим, пока не объявлен:**
 снаружи обход неотличим от «шаг не подключён». Поэтому в своём `.pipeline.yml`
@@ -110,4 +110,4 @@ python scripts/consumers.py
 **Семейство `test` (матрица версий и агрегат) и сводный гейт `ci-complete` не
 вынесены намеренно:** имена первых несут ячейку матрицы, а второй — единственный
 обязательный контекст защиты, живущей вне дерева. Порядок работ — эпик
-[#547](../../issues/547).
+[#547](../../../issues/547).

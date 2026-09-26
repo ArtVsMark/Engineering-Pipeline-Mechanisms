@@ -9,10 +9,10 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 ([021](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/021-split-docs-by-reader.md)).
 
 **Договор — канон, свод — триггеры.** Устройство конвейера описано в
-[`docs/pipeline.md`](docs/pipeline.md), поведение — в
-[`docs/behaviour.md`](docs/behaviour.md), порядок работ — в
-[`docs/roadmap.md`](docs/roadmap.md), а какие вопросы о продукте здесь вообще
-задают и каких не задаёт никто — в [`docs/directions.md`](docs/directions.md). Здесь ни
+[`docs/use/pipeline.md`](docs/use/pipeline.md), поведение — в
+[`docs/agent/behaviour.md`](docs/agent/behaviour.md), порядок работ — в
+[`docs/dev/roadmap.md`](docs/dev/roadmap.md), а какие вопросы о продукте здесь вообще
+задают и каких не задаёт никто — в [`docs/dev/directions.md`](docs/dev/directions.md). Здесь ни
 одно их утверждение не повторяется: пересказ заводит второй источник, и
 первая же правка разводит их
 ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
@@ -39,7 +39,7 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 ❌ НЕ переносить механизм сюда до того, как принято решение, от которого он
    зависит, — перенос до решения фиксирует в общем модуле текущий разнобой
 ❌ НЕ класть сюда файл про предмет одного проекта: мерка не «похоже», а
-   «реализует общее правило» (граница — docs/pipeline.md)
+   «реализует общее правило» (граница — docs/use/pipeline.md)
 ❌ НЕ пересказывать договор в своде и в README — только ссылка (022)
 ❌ НЕ вписывать числа в прозу без маркера и сборки, которая их переписывает
    (005, 127); замер с названной датой числом в прозе не считается
@@ -57,7 +57,7 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 
 ## 🕳 Чего в проекте ещё нет
 
-**Объявленные пробелы — [`docs/gaps.md`](docs/gaps.md).** Отсутствующий гейт и
+**Объявленные пробелы — [`docs/dev/gaps.md`](docs/dev/gaps.md).** Отсутствующий гейт и
 молчащий снаружи неотличимы, поэтому пробел называется, а не выравнивается
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 Здесь этого списка нет намеренно: ядро отвечает на «как работать», а состояние
@@ -103,7 +103,7 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 ## 🌿 Ветка, изменение, коммит
 
 **Ветка режется от последнего зелёного коммита общей ветки**, а не от головы.
-Почему — [`docs/behaviour.md`](docs/behaviour.md), контур 1.
+Почему — [`docs/agent/behaviour.md`](docs/agent/behaviour.md), контур 1.
 
 **Имя ветки — по задаче, а не по окну**
 ([189](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/189-a-branch-is-named-by-its-task-not-its-window.md)),
@@ -138,7 +138,7 @@ Code — [`CLAUDE.md`](CLAUDE.md); человеку со стороны — [`RE
 есть план**
 ([091](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/091-work-sources-are-ordered-first-non-empty-wins.md)).
 
-**Сам порядок — в [`docs/behaviour.md`](docs/behaviour.md), контур 1, и здесь
+**Сам порядок — в [`docs/agent/behaviour.md`](docs/agent/behaviour.md), контур 1, и здесь
 он не повторяется.** Какой источник выше какого, что считается долгом и почему
 указание владельца стоит там, где стоит, — договор отвечает целиком. Пересказ
 завёл бы второй источник тех же утверждений, и первая же правка развела бы их

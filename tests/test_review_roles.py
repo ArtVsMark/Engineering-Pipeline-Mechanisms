@@ -3,7 +3,7 @@
 Решение владельца 24.09.2026: обязательные роли — проверяющего рода, остальные
 зависят от контекста изменения. Выбор — сверка путей с таблицей
 `.rules/review-roles.json`, а не суждение модели, и таблица с процедурой
-`docs/review.md` читаются с ОБЩЕЙ ветки (085).
+`docs/agent/review.md` читаются с ОБЩЕЙ ветки (085).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ TABLE: Final = json.loads((ROOT / paths.REVIEW_ROLES).read_text(encoding="utf-8"
 
 
 def test_every_role_of_the_table_is_a_profile() -> None:
-    """Роль таблицы — заголовок профиля `docs/roles.md`, а не выдуманное имя (022)."""
+    """Роль таблицы — заголовок профиля `docs/agent/roles.md`, а не выдуманное имя (022)."""
     known = findings.roles(ROOT / paths.ROLES)
     assert known, "профили не прочитаны — сверять не с чем (075)"
     named = set(TABLE["required"]) | {role for rule in TABLE["by_path"] for role in rule["roles"]}
@@ -42,7 +42,7 @@ def test_required_roles_are_the_checking_kind() -> None:
 @pytest.mark.parametrize(
     ("files", "expected"),
     [
-        (["docs/pipeline.md"], {"техписатель", "редактор", "архитектор"}),
+        (["docs/use/pipeline.md"], {"техписатель", "редактор", "архитектор"}),
         ([".github/workflows/ci.yml"], {"инженер площадки", "безопасность", "эконом прогонов"}),
         (["scripts/automerge.py"], {"механик", "диспетчер"}),
         (["changelog.d/x.fixed.md"], set()),
@@ -158,10 +158,10 @@ def test_shown_from_base_reads_git_and_refuses_loudly(monkeypatch: pytest.Monkey
         return subprocess.CompletedProcess(args, 0 if ok else 128, "текст" if ok else "", "нет")
 
     monkeypatch.setattr(review_map.subprocess, "run", run)
-    assert review_map.shown_from_base("B", Path("docs/review.md")) == "текст"
-    assert calls[-1] == ["git", "show", "B:docs/review.md"]
+    assert review_map.shown_from_base("B", Path("docs/agent/review.md")) == "текст"
+    assert calls[-1] == ["git", "show", "B:docs/agent/review.md"]
     with pytest.raises(review_map.NotRun):
-        review_map.shown_from_base("X", Path("docs/review.md"))
+        review_map.shown_from_base("X", Path("docs/agent/review.md"))
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-# Шаг 8 скелета: очередь и слияние (docs/pipeline.md).
+# Шаг 8 скелета: очередь и слияние (docs/use/pipeline.md).
 #
 # ИМЯ ФАЙЛА И КОНТЕКСТА — `automerge`, и это окончательно, а не «до решения»:
 # решение #3 принято 09.09 (docs/decisions/003-own-automerge-not-native-queue.md).

@@ -27,7 +27,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import walk_deep
+from tests.conftest import load_script, walk_deep
 
 ROOT = Path(__file__).resolve().parent.parent
 BINDINGS = ROOT / ".rules" / "bindings.json"
@@ -210,15 +210,17 @@ def test_a_gate_names_something_runnable(answer: tuple[str, dict[str, Any]]) -> 
 #: ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
 #:
 #: ПЕРВАЯ РЕДАКЦИЯ ОБРАЗЦА БЫЛА СОБРАНА ПО ТРЁМ НАЙДЕННЫМ СЛУЧАЯМ и потому
-#: пропустила два лежавших рядом: «шаг 8 или 9 ИЗ docs/roadmap.md» (другой
-#: предлог и два номера) и «шаги в docs/roadmap.md» (без номера вовсе). Гейт
+#: пропустила два лежавших рядом: «шаг 8 или 9 ИЗ docs/dev/roadmap.md» (другой
+#: предлог и два номера) и «шаги в docs/dev/roadmap.md» (без номера вовсе). Гейт
 #: заводился с заявлением «признак назван целиком» — и заявление было неверным.
 #: Нашёл внешний взгляд, трижды об одном, на #380.
 #:
 #: Теперь предмет назван прямо: слово «шаг» рядом с адресом карты. Окно в
 #: шестьдесят знаков держит границу — «шаг» и карта, упомянутые в разных
 #: предложениях, ссылкой не являются (195).
-ROADMAP_STEP: Final = re.compile(r"шаг\w*[^.\"]{0,60}?docs/roadmap")
+ROADMAP_STEP: Final = re.compile(
+    r"шаг\w*[^.\"]{0,60}?" + re.escape(str(load_script("paths.py").ROADMAP.with_suffix("")))
+)
 
 
 def test_no_answer_points_at_a_roadmap_step() -> None:
@@ -230,8 +232,8 @@ def test_no_answer_points_at_a_roadmap_step() -> None:
     вовсе. Нашёл владелец вопросом о неприменимых.
 
     Потом первая редакция этого гейта, собранная по трём найденным случаям,
-    пропустила ещё ДВА, лежавших рядом: 184 («шаг 8 или 9 из docs/roadmap.md» —
-    другой предлог и два номера) и 025 («шаги в docs/roadmap.md» — без номера).
+    пропустила ещё ДВА, лежавших рядом: 184 («шаг 8 или 9 из docs/dev/roadmap.md» —
+    другой предлог и два номера) и 025 («шаги в docs/dev/roadmap.md» — без номера).
     Заявление «признак назван целиком» было неверным, и нашёл это внешний взгляд.
     Урок дешевле правила: гейт меряется по ВСЕМУ дереву до того, как починены
     найденные случаи, — иначе он проверяет только их (075).
@@ -259,19 +261,19 @@ def test_no_answer_points_at_a_roadmap_step() -> None:
 #: * «шаг N из» (184) и «шаги в» без номера (025) — пропущены второй редакцией,
 #:   собранной по трём найденным случаям; нашёл внешний взгляд на #386.
 ROADMAP_SAID: Final = (
-    "условие: шаг 9 в `docs/roadmap.md`",
-    "условие: шагом 9 по `docs/roadmap.md`",
-    "условие: шаг 8 или 9 из `docs/roadmap.md`",
-    "условие: шаги в `docs/roadmap.md`",
+    "условие: шаг 9 в `docs/dev/roadmap.md`",
+    "условие: шагом 9 по `docs/dev/roadmap.md`",
+    "условие: шаг 8 или 9 из `docs/dev/roadmap.md`",
+    "условие: шаги в `docs/dev/roadmap.md`",
 )
 
 #: Соседство, ссылкой НЕ являющееся: «шаг» и карта в разных предложениях или
 #: просто далеко друг от друга. Без этой половины гейт нельзя отличить от
 #: образца «упомянуты оба слова» (195).
 ROADMAP_NEARBY: Final = (
-    "шаг сделан. Порядок работ описан в `docs/roadmap.md`",
+    "шаг сделан. Порядок работ описан в `docs/dev/roadmap.md`",
     "шаг механизма ждёт события, которое видно в дереве; порядок работ, этапы "
-    "и их приёмка описаны отдельно — см. `docs/roadmap.md`",
+    "и их приёмка описаны отдельно — см. `docs/dev/roadmap.md`",
 )
 
 

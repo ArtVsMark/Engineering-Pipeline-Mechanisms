@@ -425,8 +425,8 @@ def test_a_fix_of_prose_needs_no_test(run_script: RunScript, tmp_path: Path) -> 
     """
     repo = prepare_repo(tmp_path)
     git(repo, "checkout", "-qb", "work")
-    (repo / "docs").mkdir(exist_ok=True)
-    (repo / "docs" / "pipeline.md").write_text("текст\n", encoding="utf-8")
+    (repo / "docs" / "use").mkdir(parents=True, exist_ok=True)
+    (repo / "docs" / "use" / "pipeline.md").write_text("текст\n", encoding="utf-8")
     (repo / "changelog.d").mkdir(exist_ok=True)
     (repo / "changelog.d" / "wording-says-what-happens.fixed.md").write_text(
         "починка текста\n\n#1\n", encoding="utf-8"

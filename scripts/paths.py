@@ -116,14 +116,31 @@ AUTHORS: Final = Path(".github/authors.txt")
 #: Это адрес ПРОИЗВОДНОГО в ветке-сироте, а не файл общей ветки.
 BADGES_DIR: Final = Path(".github/badges")
 #: Карта ролей: профили, глазами которых смотрит взгляд (#763).
-ROLES: Final = Path("docs/roles.md")
+ROLES: Final = Path("docs/agent/roles.md")
 #: Карта направлений правила 082: какие вопросы о продукте задаёт кто-то, а какие
 #: никто (#767). Роли, которые их задают, — в `ROLES`.
-DIRECTIONS: Final = Path("docs/directions.md")
+DIRECTIONS: Final = Path("docs/dev/directions.md")
 #: Процедура внешнего взгляда: кем смотреть на изменение (#776).
-REVIEW_PROCEDURE: Final = Path("docs/review.md")
+REVIEW_PROCEDURE: Final = Path("docs/agent/review.md")
 #: Кем смотреть: обязательные роли и роли по тронутым путям (#776).
 REVIEW_ROLES: Final = Path(".rules/review-roles.json")
+#: ДОКУМЕНТЫ ЛЕЖАТ ПО ПОДКАТАЛОГАМ ЧИТАТЕЛЯ (#840): `agent/` — окну и взгляду,
+#: `dev/` — тому, кто ведёт и выпускает проект, `use/` — подключающему. Путь
+#: каждого читается отсюда: при переносе правится одна строка, а не сотня мест.
+#: Указатель по читателю — `docs/README.md`.
+DOCS_INDEX: Final = Path("docs/README.md")
+#: Как ведёт себя конвейер: контуры, состояния, путь взгляда.
+BEHAVIOUR: Final = Path("docs/agent/behaviour.md")
+#: Порядок работ и признаки готовности.
+ROADMAP: Final = Path("docs/dev/roadmap.md")
+#: Что ещё не доказано прогоном.
+GAPS: Final = Path("docs/dev/gaps.md")
+#: Выпуск и что означают разряды версии.
+RELEASE_DOC: Final = Path("docs/dev/release.md")
+#: Договор с подключающим: шаги, файлы, правила формы.
+PIPELINE_DOC: Final = Path("docs/use/pipeline.md")
+#: Первое знакомство подключающего.
+ONBOARDING: Final = Path("docs/use/onboarding.md")
 
 #: Всё, что объявлено здесь. Список разрешительный (068): путь, которого в нём
 #: нет, механизм строить не должен. Полноту держит
@@ -174,4 +191,11 @@ ALL: Final = (
     DIRECTIONS,
     REVIEW_PROCEDURE,
     REVIEW_ROLES,
+    DOCS_INDEX,
+    BEHAVIOUR,
+    ROADMAP,
+    GAPS,
+    RELEASE_DOC,
+    PIPELINE_DOC,
+    ONBOARDING,
 )

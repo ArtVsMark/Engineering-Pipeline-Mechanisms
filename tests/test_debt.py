@@ -134,7 +134,7 @@ def test_the_order_puts_debts_before_the_plan() -> None:
     Гейт на согласованность документа: по этому порядку окно выбирает работу,
     и перестановка строк меняет поведение проекта.
     """
-    text = (ROOT / "docs" / "behaviour.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "agent" / "behaviour.md").read_text(encoding="utf-8")
     findings_at = text.index("неразобранные находки внешнего взгляда")
     rules_at = text.index("незакрытая работа по правилам каталога")
     plan_at = text.index("задача из трекера и план автора")
@@ -143,7 +143,7 @@ def test_the_order_puts_debts_before_the_plan() -> None:
 
 def test_the_charter_cites_the_rule_behind_the_order() -> None:
     """Приоритет правил — требование каталога, а не местное изобретение."""
-    text = (ROOT / "docs" / "behaviour.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "agent" / "behaviour.md").read_text(encoding="utf-8")
     assert "177-unfinished-rule-work-comes-first" in text
 
 

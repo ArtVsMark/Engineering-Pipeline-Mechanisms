@@ -292,7 +292,7 @@ def test_the_release_doc_names_the_same_surface_as_the_mechanism() -> None:
     а снимок берёт джобы — то есть документ противоречил и себе, и
     `contract.py`. Нашёл разбор на #108.
     """
-    text = (ROOT / "docs" / "release.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "dev" / "release.md").read_text(encoding="utf-8")
     head = text.index("В снимок входит")
     said = text[head : text.index("\n\n", text.index("- ", head) + 200)]
     for field, word in SURFACE_WORDS.items():
@@ -609,7 +609,7 @@ GROWTH_HEADING = "## Как поверхность растёт"
 
 def growth_section() -> str:
     """Раздел договора о том, как поверхность растёт."""
-    text = (ROOT / "docs" / "release.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "dev" / "release.md").read_text(encoding="utf-8")
     head = text.find(GROWTH_HEADING)
     if head == -1:
         raise AssertionError(f"в договоре нет раздела «{GROWTH_HEADING}» — читать нечего (075)")

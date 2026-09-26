@@ -50,6 +50,13 @@ PLATFORM = (
     "milestone",
     "projects",
 )
+#: Производные документы, которые здесь не проверяются, — с причиной (154).
+#: Собранный журнал пересобирает только ВЫПУСК (030), и на изменении его трогать
+#: нельзя: переезд документа (#840) оставил бы в нём ссылку на старое место до
+#: ближайшего выпуска, и чинить её было бы нечем. Его ссылки проверяются в
+#: источниках: фрагменты и выпущенные фрагменты — в этом же наборе, а адрес
+#: шапки сборщик берёт константой `paths.RELEASE_DOC`.
+DERIVED = frozenset({"CHANGELOG.md"})
 #: Схемы, которые проверяются не здесь: внешние адреса ловит взгляд, а не гейт.
 OUTSIDE = ("http://", "https://", "mailto:", "tel:")
 
@@ -64,7 +71,11 @@ def documents() -> list[Path]:
         cwd=ROOT,
         check=True,
     )
-    found = sorted(ROOT / name for name in listed.stdout.split("\0") if name.endswith(".md"))
+    found = sorted(
+        ROOT / name
+        for name in listed.stdout.split("\0")
+        if name.endswith(".md") and name not in DERIVED
+    )
     assert found, "в дереве нет ни одного документа — проверять нечего (075)"
     return found
 
