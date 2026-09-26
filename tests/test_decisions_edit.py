@@ -162,6 +162,14 @@ def test_a_moved_link_target_is_not_a_rewrite(repo: Path, run_script: RunScript)
     assert done.code == edit.EXIT_OK, done.text
 
 
+def test_a_link_sent_to_another_document_is_a_rewrite(repo: Path, run_script: RunScript) -> None:
+    """Ссылка на другой документ — переписанное решение, даже с тем же текстом (#875)."""
+    done = replaced(
+        repo, run_script, "](../pipeline.md)", "](../use/onboarding.md)", "ссылка на другое"
+    )
+    assert done.code == edit.EXIT_FOUND, done.text
+
+
 def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> None:
     """Текст ссылки остаётся содержанием: его правка — переписывание."""
     done = replaced(
