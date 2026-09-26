@@ -190,8 +190,19 @@ def test_read_refuses_a_missing_archive(tmp_path: Path) -> None:
             {("aaaaaaa", "bbbbbbb"), ("ccccccc", "bbbbbbb")},
         ),
         ("Разобрано: aaaaaaa — ccccccc дубль ddddddd", set()),
+        ("разобрано: aaaaaaa дубль bbbbbbb", {("aaaaaaa", "bbbbbbb")}),
     ],
-    ids=["пара", "список", "пары", "цепочка", "хвост", "точка с запятой", "пробел", "пояснение"],
+    ids=[
+        "пара",
+        "список",
+        "пары",
+        "цепочка",
+        "хвост",
+        "точка с запятой",
+        "пробел",
+        "пояснение",
+        "строчный маркер",
+    ],
 )
 def test_pairs_in_reads_the_grammar_directly(line: str, pairs: set[tuple[str, str]]) -> None:
     """Независимый читатель различает пары, списки и цепочки так же, как грамматика (#872)."""

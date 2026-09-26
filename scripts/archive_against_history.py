@@ -104,9 +104,13 @@ def pairs_in(line: str) -> set[tuple[str, str]]:
     """
     word = changerefs.TWIN_WORD
     found: set[tuple[str, str]] = set()
-    _, marker, tail = line.partition(changerefs.RESOLVED_WORD)
+    # Маркер ищется без различия регистра, как у разбора и `resolution_lines`:
+    # «разобрано:» со строчной — та же строка снятия (взгляд на #883).
+    marker = re.search(re.escape(changerefs.RESOLVED_WORD), line, re.IGNORECASE)
     head = re.match(
-        rf"(?:[\s,;]*(?:{MARK}|{word}(?=[\s`])))+", tail if marker else line, re.IGNORECASE
+        rf"(?:[\s,;]*(?:{MARK}|{word}(?=[\s`])))+",
+        line[marker.end() :] if marker else line,
+        re.IGNORECASE,
     )
     line = head.group(0) if head else ""
     pattern = re.compile(
