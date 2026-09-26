@@ -42,14 +42,21 @@
 Названо это здесь, а не сглажено умолчанием
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 
-ЗАПИСЬ СНИМАЕТСЯ ОПОЗДАВШИМ ВЕРДИКТОМ, А НЕ ЖИВЁТ ВЕЧНО. Вердикт бывает
-позже слияния — у соседа замерено опоздание на 2,3 минуты. Поэтому открытые
-состояния перечитываются каждым заходом: появился вердикт — запись уходит сама.
-«Поздний взгляд» не перечитывается: его ставит человек, и вердикта на самом
-изменении от этого не появится.
+ОПОЗДАВШИЙ ВЕРДИКТ ПЕРЕВОДИТ ЗАПИСЬ, А НЕ СНИМАЕТ ЕЁ. Вердикт бывает позже
+слияния — у соседа замерено опоздание на 2,3 минуты. Поэтому открытые
+состояния перечитываются каждым заходом: появился вердикт — запись уходит из
+осечек канала в ожидание позднего взгляда (`STATE_DUE`), который положен
+каждому слитому (#848). «Поздний взгляд» не перечитывается: его ставит
+человек, и вердикта на самом изменении от этого не появится.
 
-Исходы (правило 039): ``0`` слитого без взгляда нет · ``2`` шаг не отработал ·
-``3`` запись есть, и она записана.
+РЕЕСТР ДЕРЖИТ ДВА РАЗНЫХ СПИСКА, И ОНИ НЕ СМЕШИВАЮТСЯ. Осечка канала — «взгляда
+не было»; ожидание позднего взгляда — «взгляд был, после слияния положен ещё
+один». Под одним заголовком вторые топили бы первые: слитого со взглядом
+большинство. Поэтому у каждого свой раздел тела, а код выхода и счёт говорят
+только об осечках.
+
+Исходы (правило 039): ``0`` осечек канала нет — ожидание позднего взгляда не в
+счёт · ``2`` шаг не отработал · ``3`` осечка есть, и она записана.
 """
 
 from __future__ import annotations
@@ -609,7 +616,7 @@ def scan(
     watermark: int,
     look: Callable[[int], str | None],
 ) -> tuple[dict[int, Entry], int]:
-    """Ведёт реестр по окну слитого: новое записывает, просмотренное снимает.
+    """Ведёт реестр по окну слитого: новое записывает, опоздавший вердикт переводит в ожидание.
 
     Площадки здесь нет намеренно: она приходит одним `look`, и подделать её в
     проверке можно, не подделывая транспорт
@@ -617,8 +624,8 @@ def scan(
     """
     entries = dict(known)
     # Сначала перечитывается уже записанное: вердикт мог опоздать к слиянию, и
-    # запись обязана уйти сама, а не ждать, пока её снимут рукой. Состояние при
-    # этом тоже уточняется: оборванный ответ бывает дописан.
+    # запись обязана уйти из осечек сама, а не ждать, пока её переведут рукой.
+    # Состояние при этом тоже уточняется: оборванный ответ бывает дописан.
     for number, entry in list(entries.items()):
         if not is_open(entry.state):
             continue
@@ -680,6 +687,12 @@ def mark_late(entries: dict[int, Entry], number: int, day: str) -> dict[int, Ent
 #: площадки, а про цену: каждый поздний взгляд — прогон агента. Три за заход
 #: рассасывают очередь за дни, а не за месяцы, и не съедают смену целиком (051).
 LOOK_AT_ONCE: Final = 3
+#: Сколько дней ожидание позднего взгляда законно. Очередь идёт после каждого
+#: `ci` на общей ветке и ночью, по `LOOK_AT_ONCE` за заход; запись, ждущая
+#: дольше, значит, что поздний взгляд стоит (нет ключа, отказ действия), и об
+#: этом говорится вслух, а не копится молча (045). Записи при этом не
+#: выбрасываются: выброшенное ожидание — это слитое, которое никто не посмотрит.
+DUE_STALL_DAYS: Final = 3
 
 
 def queue_of(entries: dict[int, Entry], limit: int = LOOK_AT_ONCE) -> list[int]:
@@ -758,6 +771,18 @@ def queue_checked(
     return chosen
 
 
+def stalled(entries: dict[int, Entry], today: str, days: int = DUE_STALL_DAYS) -> list[int]:
+    """Ожидания позднего взгляда старше `days` дней: признак того, что очередь стоит."""
+    edge = datetime.fromisoformat(today).date().toordinal() - days
+    return sorted(
+        number
+        for number, entry in entries.items()
+        if entry.state == STATE_DUE
+        and entry.merged
+        and datetime.fromisoformat(entry.merged).date().toordinal() < edge
+    )
+
+
 def render_body(
     entries: dict[int, Entry], watermark: int, tally: dict[str, int] | None = None
 ) -> str:
@@ -766,7 +791,8 @@ def render_body(
         MARKER,
         "",
         "> **Читатель:** окно и владелец. Здесь то, что уехало в общую ветку,",
-        "> **не получив внешнего взгляда**, — факт отсутствия, а не находка.",
+        "> **не получив внешнего взгляда**, — факт отсутствия, а не находка, — и,",
+        "> отдельным разделом, слитое, которое ещё ждёт позднего взгляда.",
         "",
         "Ревью совещательное намеренно: красное у ревьюера говорит о ревьюере, а",
         "не о работе. Цена этого одна — «взгляд был и находок нет» и «взгляда не",
@@ -847,12 +873,15 @@ def render_body(
         "## Не просмотрено",
         "",
     ]
-    if not entries:
+    missed = [number for number in entries if entries[number].state != STATE_DUE]
+    due = [number for number in entries if entries[number].state == STATE_DUE]
+    if not missed:
         lines.append("Пусто — у всего слитого в окне обхода взгляд был.")
-        return "\n".join(lines) + "\n"
-    for number in sorted(entries, reverse=True):
-        entry = entries[number]
-        lines.append(entry.said())
+    lines += [entries[number].said() for number in sorted(missed, reverse=True)]
+    lines += ["", "## Ждёт позднего взгляда", ""]
+    if not due:
+        lines.append("Пусто — поздний взгляд дошёл до всего слитого со взглядом.")
+    lines += [entries[number].said() for number in sorted(due, reverse=True)]
     return "\n".join(lines) + "\n"
 
 
@@ -975,6 +1004,15 @@ def main(argv: list[str] | None = None) -> int:
 
         without = [item for item in entries.values() if is_open(item.state)]
         print(f"слито без взгляда: {len(without)}, снятых осечек всего: {sum(tally.values())}")
+        due = [item for item in entries.values() if item.state == STATE_DUE]
+        print(f"ждут позднего взгляда: {len(due)}")
+        late_stuck = stalled(entries, datetime.now(UTC).strftime("%Y-%m-%d"))
+        if late_stuck:
+            said = ", ".join(f"#{number}" for number in late_stuck)
+            print(
+                f"::warning::поздний взгляд стоит: ждут дольше {DUE_STALL_DAYS} дн. — {said}",
+                file=sys.stderr,
+            )
         # УХОД ЗАПИСИ НАЗЫВАЕТСЯ, А НЕ ПРОИСХОДИТ МОЛЧА, и путей у него два:
         # вердикт всё-таки появился — запись уходит НЕ снятой и в счёт не идёт;
         # остаток посмотрели — уходит снятой и в счёт идёт. Снаружи оба
@@ -997,7 +1035,9 @@ def main(argv: list[str] | None = None) -> int:
     except ghrest.TransportError as exc:
         print(f"шаг не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
-    return EXIT_RECORDED if entries else EXIT_NOTHING
+    return (
+        EXIT_RECORDED if any(is_open(entry.state) for entry in entries.values()) else EXIT_NOTHING
+    )
 
 
 if __name__ == "__main__":

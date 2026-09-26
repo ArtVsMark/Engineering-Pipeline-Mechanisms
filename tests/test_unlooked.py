@@ -55,8 +55,8 @@ def test_a_merge_with_a_verdict_waits_only_for_the_late_look() -> None:
     assert module.queue_of(entries) == [77]
 
 
-def test_a_late_verdict_removes_the_record() -> None:
-    """Вердикт, опоздавший к слиянию, снимает запись из «слито без взгляда» сам (#848).
+def test_a_late_verdict_turns_a_miss_into_a_due_record() -> None:
+    """Вердикт, опоздавший к слиянию, переводит запись из осечек в ожидание позднего взгляда (#848).
 
     Замер соседа: вердикт опаздывал на 2,3 минуты. Запись, которую в таком
     случае снимают рукой, не снимают вовсе.
@@ -1140,3 +1140,45 @@ def test_is_run_answer_reads_the_one_verifier_sign(monkeypatch: pytest.MonkeyPat
     assert not module.is_run_answer(comment)
     monkeypatch.setattr(module.review_findings, "is_verification", lambda _one: True)
     assert module.is_run_answer(comment)
+
+
+def test_due_records_live_apart_from_the_misses() -> None:
+    """Ожидание позднего взгляда — своим разделом: осечки канала не тонут среди него."""
+    entries = {
+        77: module.Entry(77, module.STATE_DUE, "2026-09-10"),
+        78: module.Entry(78, module.STATE_NONE, "2026-09-11"),
+    }
+    body = module.render_body(entries, 78)
+    missed, due = body.split("## Ждёт позднего взгляда")
+    assert "- #78 ·" in missed and "- #77 ·" not in missed
+    assert "- #77 ·" in due and "- #78 ·" not in due
+    assert module.parse_entries(body) == entries, "раздел сломал разбор записей"
+    only_due = module.render_body({77: entries[77]}, 78)
+    assert "Пусто — у всего слитого в окне обхода взгляд был." in only_due
+
+
+def test_only_due_records_mean_no_miss_in_the_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Код 3 — только об осечке: реестр из одних ожиданий выходит нулём (#855)."""
+    body = f"{module.MARKER}\n- #77 · {module.STATE_DUE} · 2026-09-10\n"
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, marker: (89, body))
+    monkeypatch.setattr(module, "merged_changes", lambda repo, token, limit: [])
+    monkeypatch.setattr(module, "look_at", lambda repo, number, token, *_: None)
+    monkeypatch.setattr(module, "late_on", lambda repo, number, token, *_: "")
+    monkeypatch.setattr(module, "save", lambda *args, **kwargs: None)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_NOTHING
+    body = f"{module.MARKER}\n- #78 · {module.STATE_NONE} · 2026-09-10\n"
+    monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, marker: (89, body))
+    monkeypatch.setattr(module, "look_at", lambda repo, number, token, *_: module.STATE_NONE)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_RECORDED
+
+
+def test_a_stalled_late_look_is_named() -> None:
+    """Ожидание дольше предела называется: очередь позднего взгляда стоит."""
+    entries = {
+        77: module.Entry(77, module.STATE_DUE, "2026-09-10"),
+        78: module.Entry(78, module.STATE_DUE, "2026-09-25"),
+        79: module.Entry(79, module.STATE_NONE, "2026-09-01"),
+    }
+    assert module.stalled(entries, "2026-09-26") == [77]
+    assert module.stalled(entries, "2026-09-11") == []
