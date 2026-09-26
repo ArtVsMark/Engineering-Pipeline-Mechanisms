@@ -274,3 +274,11 @@ def test_a_merge_subject_still_names_its_change() -> None:
     вторую форму, у которой скобок нет вовсе.
     """
     assert module.numbers_in(["Merge pull request #42 from ArtVsMark/x"]) == {"42"}
+
+
+def test_digits_read_the_number_by_the_shared_form() -> None:
+    """Разряды берутся общим разбором; не номер — отказ, а не нарезка (214)."""
+    assert module.digits("1.10.3") == (1, 10, 3)
+    assert module.bare("v1.10.3") == "1.10.3"
+    with pytest.raises(module.NotRun):
+        module.digits("1.10")
