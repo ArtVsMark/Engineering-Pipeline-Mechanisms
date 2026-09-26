@@ -1,0 +1,159 @@
+{
+  "schema": "1.0",
+  "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
+  "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+  "generated_at": "2026-09-26T22:19:09+00:00",
+  "commit": "fee6ecf7f970320ed65f9c58ee477ed4be926c0d",
+  "contract": "0.4.0",
+  "version": "1.2.243",
+  "version_whole": true,
+  "release": "v1.2.0",
+  "tests": {
+    "functions": 2529,
+    "modules": 132
+  },
+  "scripts": {
+    "runnable": 59,
+    "started": 24
+  },
+  "coverage": {
+    "read": true,
+    "covered": 9318,
+    "lines": 10153
+  },
+  "coverage_percent": 91.8,
+  "rules": {
+    "total": 213,
+    "answered": 213,
+    "by_status": {
+      "active": 204,
+      "rejected": 0,
+      "not-applicable": 9,
+      "unreviewed": 0
+    },
+    "by_mechanism": {
+      "document": 8,
+      "gate": 171,
+      "pipeline": 23,
+      "skill": 2
+    }
+  },
+  "checks_per_pr": {
+    "count": 22,
+    "names": [
+      "attribution / attribution",
+      "automerge",
+      "contract / contract",
+      "debt / debt",
+      "findings",
+      "journal / journal",
+      "late-look",
+      "late-queue",
+      "lint / lint",
+      "map",
+      "parts",
+      "pipeline / pipeline",
+      "pr-meta / pr-meta",
+      "review",
+      "rulebook-fresh / rulebook-fresh",
+      "sweep",
+      "task-items",
+      "test",
+      "test-matrix",
+      "test-next",
+      "verify",
+      "window-lifetime / window-lifetime"
+    ],
+    "by_class": {
+      "required": 7,
+      "advisory": 13,
+      "off": 0,
+      "unreviewed": 2
+    }
+  },
+  "family": {
+    "schema_read": "1.5",
+    "snapshot_at": "2026-09-25T20:24:30+00:00",
+    "consumers": 6,
+    "mechanisms": 264,
+    "shared": 29,
+    "held_by_machine": 761,
+    "closed_by_shared": 218,
+    "share": 0.286,
+    "top": [
+      {
+        "name": "ci.yml",
+        "projects": 5,
+        "rules": 21
+      },
+      {
+        "name": "preflight.py",
+        "projects": 3,
+        "rules": 20
+      },
+      {
+        "name": "check_bindings.py",
+        "projects": 2,
+        "rules": 18
+      },
+      {
+        "name": "agent-pr.yml",
+        "projects": 4,
+        "rules": 16
+      },
+      {
+        "name": "rules-inbox.yml",
+        "projects": 4,
+        "rules": 16
+      },
+      {
+        "name": "automerge.yml",
+        "projects": 3,
+        "rules": 11
+      },
+      {
+        "name": "gh_rest.py",
+        "projects": 2,
+        "rules": 8
+      },
+      {
+        "name": "review.yml",
+        "projects": 2,
+        "rules": 8
+      },
+      {
+        "name": "review_findings.py",
+        "projects": 2,
+        "rules": 8
+      },
+      {
+        "name": "automerge.py",
+        "projects": 2,
+        "rules": 7
+      }
+    ],
+    "read": true,
+    "schema_expected": "1.4",
+    "schema_agrees": false,
+    "behind_read": true,
+    "behind": 16,
+    "behind_rules": [
+      "044",
+      "048",
+      "062",
+      "065",
+      "066",
+      "071",
+      "077",
+      "095",
+      "099",
+      "103",
+      "107",
+      "120",
+      "134",
+      "194",
+      "195",
+      "201"
+    ]
+  }
+}
