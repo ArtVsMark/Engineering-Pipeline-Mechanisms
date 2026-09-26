@@ -1985,3 +1985,9 @@ def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
     agent = [str(step.get("uses") or "") for step in job["steps"] if step.get("id") == "refute"]
     assert agent and "claude-code-action" in agent[0], "агент верификатора ушёл из джоба записи"
     assert any("review_findings.py --verify" in run for run in runs), "перенос ушёл из джоба"
+    # Верхняя группа снимающая: у проверки премисы она своя на каждый запуск.
+    top = str(flow["concurrency"]["group"])
+    assert "inputs.mark" in top and "github.run_id" in top, "повторное нажатие снимет идущий verify"
+    # Предел агента меньше предела джоба: перенос успевает.
+    refute = next(step for step in job["steps"] if step.get("id") == "refute")
+    assert int(refute["timeout-minutes"]) < int(job["timeout-minutes"])
