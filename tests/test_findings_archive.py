@@ -654,3 +654,15 @@ def test_git_log_reads_the_history_oldest_first(tmp_path: Path) -> None:
         (3, "Тема (#3)\n\nРазобрано: 0000003"),
         (7, "Тема (#7)\n\nРазобрано: 0000007"),
     ]
+
+
+def test_the_wave_fits_the_quota_share() -> None:
+    """Волна архива укладывается в долю квоты прогона: темп выведен из бюджета (033)."""
+    share = json.loads(
+        (Path(__file__).parents[1] / ".rules/schedules.json").read_text(encoding="utf-8")
+    )["share"]
+    price = module.BUDGET * module.CALLS_PER_CHANGE
+    assert price <= module.RUN_QUOTA_PER_HOUR * share, (
+        f"заход архива стоит {price} запросов — больше доли {share} квоты "
+        f"{module.RUN_QUOTA_PER_HOUR} в час"
+    )
