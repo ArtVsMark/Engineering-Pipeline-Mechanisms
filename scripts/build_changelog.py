@@ -237,7 +237,7 @@ def render(version: str) -> str:
         "> сборке (правило 125).",
         "",
         f"Версия контракта — `{version}`, источник `CONTRACT_VERSION`. Что означают",
-        "разряды и что делает потребитель — [`docs/release.md`](docs/release.md).",
+        f"разряды и что делает потребитель — [`{paths.RELEASE_DOC}`]({paths.RELEASE_DOC}).",
         "",
         render_section("Не выпущено", read_fragments(FRAGMENTS)),
     ]

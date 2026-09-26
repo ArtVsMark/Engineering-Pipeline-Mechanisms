@@ -360,7 +360,7 @@ def test_a_heading_does_not_hide_the_subject() -> None:
     assert items.names_a_task("**1. Решения** — #3 (родная очередь)")
     assert items.names_a_task("#14 — обратная связь")
     assert not items.names_a_task("Пересмотр решения #3")
-    assert not items.names_a_task("**0. Цели.** Свести `docs/roadmap.md`")
+    assert not items.names_a_task("**0. Цели.** Свести `docs/dev/roadmap.md`")
 
 
 def test_a_reference_inside_code_is_not_a_link() -> None:

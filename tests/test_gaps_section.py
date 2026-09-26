@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 #: Документ пробелов и ЯДРО — теперь разные файлы, и читателя у них два.
 #: Таблица секретов осталась в ядре: она отвечает на «как работать» (чем
 #: держится доступ и когда истекает), а список пробелов — на «чего нет» (021).
-CHARTER = ROOT / "docs" / "gaps.md"
+CHARTER = ROOT / "docs" / "dev" / "gaps.md"
 CORE = ROOT / "AGENTS.md"
 BINDINGS = ROOT / ".rules" / "bindings.json"
 HEADING = "## Пробелы"

@@ -15,7 +15,7 @@
 Пять проектов одной семьи держат конвейер копиями. Копии разошлись — не в
 деталях, а полностью: одноимённые файлы отличаются кратно, и ни одна сверенная
 пара не совпала. Замер, из которого это взято, — в
-[`docs/pipeline.md`](docs/pipeline.md); он с датой, и второй раз здесь не
+[`docs/use/pipeline.md`](docs/use/pipeline.md); он с датой, и второй раз здесь не
 приводится, чтобы не разойтись с первым
 ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
 
@@ -57,7 +57,7 @@
 `scripts/consumers.py`, читая это в их деревьях, а не ведя реестр за них.
 
 **Как подключиться, что делает каждый шаг и куда идти, если что-то пошло не
-так, — [`docs/onboarding.md`](docs/onboarding.md).** Здесь этого нет намеренно:
+так, — [`docs/use/onboarding.md`](docs/use/onboarding.md).** Здесь этого нет намеренно:
 витрину читает пришедший решить, стоит ли брать, а подключение читает уже
 взявший, и это разные читатели
 ([021](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/021-split-docs-by-reader.md)).
@@ -71,7 +71,7 @@
 Названо это здесь потому, что отсутствующий механизм и молчащий механизм
 снаружи неотличимы
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
-Что именно ещё не доказано прогоном — таблицей в [`docs/gaps.md`](docs/gaps.md).
+Что именно ещё не доказано прогоном — таблицей в [`docs/dev/gaps.md`](docs/dev/gaps.md).
 
 Значки ниже собраны прогоном, а не вписаны руками: `badges.yml` пересчитывает
 `facts.json` и весь набор значков на каждое слияние и толкает их в отдельную
@@ -91,15 +91,15 @@
 ([174](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/174-facts-about-a-project-are-published-by-it.md)).
 
 Порядок подключения потребителей и признаки готовности каждого этапа —
-[`docs/roadmap.md`](docs/roadmap.md).
+[`docs/dev/roadmap.md`](docs/dev/roadmap.md).
 
 ## Что читать
 
 | Документ | Отвечает на вопрос |
 |---|---|
-| [`docs/pipeline.md`](docs/pipeline.md) | **из чего** конвейер состоит: шаги, файлы, правила формы |
-| [`docs/behaviour.md`](docs/behaviour.md) | **что происходит, когда**: три контура, заморозка, предел попыток |
-| [`docs/roadmap.md`](docs/roadmap.md) | **в каком порядке** это строится и по чему видно готовность |
+| [`docs/use/pipeline.md`](docs/use/pipeline.md) | **из чего** конвейер состоит: шаги, файлы, правила формы |
+| [`docs/agent/behaviour.md`](docs/agent/behaviour.md) | **что происходит, когда**: три контура, заморозка, предел попыток |
+| [`docs/dev/roadmap.md`](docs/dev/roadmap.md) | **в каком порядке** это строится и по чему видно готовность |
 | [`AGENTS.md`](AGENTS.md) | что проект требует от агента — ядро |
 | [`CLAUDE.md`](CLAUDE.md) | чем агентское окно отличается от любого другого агента |
 | [`docs/README.md`](docs/README.md) | **кому что читать**: все документы по читателю |

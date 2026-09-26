@@ -160,9 +160,9 @@ def test_an_outside_address_and_an_anchor_keep_their_shape() -> None:
     """Внешний адрес не трогается, а якорь переезжает вместе со своим файлом."""
     outside = "[каталог](https://github.com/ArtVsMark/Engineering-Incidents-Playbook)"
     assert module.relink(outside, was=Path("changelog.d"), now=Path(".")) == outside
-    anchored = "[порядок](../docs/release.md#порядок-выпуска)"
+    anchored = "[порядок](../docs/dev/release.md#порядок-выпуска)"
     assert module.relink(anchored, was=Path("changelog.d"), now=Path(".")) == (
-        "[порядок](docs/release.md#порядок-выпуска)"
+        "[порядок](docs/dev/release.md#порядок-выпуска)"
     )
 
 
