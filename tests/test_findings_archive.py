@@ -689,3 +689,15 @@ def test_fixed_in_reads_only_the_reviewers_closed_answers() -> None:
     )
     assert module.fixed_in([{"user": {"login": rf.REVIEWER_AUTHOR}, "body": body}]) == ["aaa1111"]
     assert module.fixed_in([{"user": {"login": "someone"}, "body": body}]) == []
+
+
+def test_the_wave_fits_the_quota_share() -> None:
+    """Волна архива укладывается в долю квоты прогона: темп выведен из бюджета (033)."""
+    share = json.loads(
+        (Path(__file__).parents[1] / ".rules/schedules.json").read_text(encoding="utf-8")
+    )["share"]
+    price = module.BUDGET * module.CALLS_PER_CHANGE
+    assert price <= module.RUN_QUOTA_PER_HOUR * share, (
+        f"заход архива стоит {price} запросов — больше доли {share} квоты "
+        f"{module.RUN_QUOTA_PER_HOUR} в час"
+    )
