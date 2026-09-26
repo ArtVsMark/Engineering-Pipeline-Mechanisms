@@ -58,6 +58,20 @@ RELEASE_TAG_GLOB: Final = "v[0-9]*.[0-9]*.[0-9]*"
 RELEASE_TAG_PREFIX: Final = "v"
 
 
+def digits(number: str) -> tuple[int, int, int]:
+    """Разряды номера `X.Y.Z` — разбором `paths.VERSION_RE`, а не нарезкой по точке (214)."""
+    found = paths.VERSION_RE.match(number)
+    if found is None:
+        raise NotRun(f"«{number}» не версия вида X.Y.Z")
+    major, minor, patch = (int(part) for part in found.groups())
+    return major, minor, patch
+
+
+def bare(tag: str) -> str:
+    """Номер выпуска без приставки тега."""
+    return tag.removeprefix(RELEASE_TAG_PREFIX)
+
+
 def is_release_tag(tag: str) -> bool:
     """Строго `vX.Y.Z`: приставка и номер в общей форме."""
     return tag.startswith(RELEASE_TAG_PREFIX) and bool(
@@ -202,7 +216,7 @@ def release_tag(root: Path | None = None) -> str | None:
     released = [line for line in (out or "").split("\n") if is_release_tag(line)]
     if not released:
         return None
-    return max(released, key=lambda tag: tuple(int(part) for part in tag.lstrip("v").split(".")))
+    return max(released, key=lambda tag: digits(bare(tag)))
 
 
 def declared(root: Path | None = None) -> str:
@@ -225,9 +239,9 @@ def version(root: Path | None = None) -> tuple[str, bool]:
     """
     tag = release_tag(root)
     if tag is not None:
-        major, minor, _ = tag.lstrip("v").split(".")
+        major, minor, _ = digits(bare(tag))
         return f"{major}.{minor}.{changes_in(f'{tag}..HEAD', root)}", True
-    major, minor, _ = declared(root).split(".")
+    major, minor, _ = digits(declared(root))
     return f"{major}.{minor}.{changes_in('HEAD', root)}", False
 
 

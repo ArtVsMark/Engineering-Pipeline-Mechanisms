@@ -335,7 +335,7 @@ def refusals(
     # ЛИНИЯ ВЫПУСКОВ СЧИТАЕТСЯ ОТ ТЕГА, А НЕ ОТ ВЕРСИИ КОНТРАКТА: числа
     # развязаны (решение 017), и версия контракта больше не говорит, какой тег
     # ожидается следующим. Тега нет вовсе — линия начинается с нуля.
-    line = (project_version.release_tag() or "v0.0.0").lstrip("v")
+    line = project_version.bare(project_version.release_tag() or "v0.0.0")
     expected = next_after(line)
     current = declared_version()
     major_now = int(VERSION_RE.match(line).group(1))  # type: ignore[union-attr]
@@ -660,7 +660,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     try:
-        wanted = args.version or next_after((project_version.release_tag() or "v0.0.0").lstrip("v"))
+        wanted = args.version or next_after(
+            project_version.bare(project_version.release_tag() or "v0.0.0")
+        )
         # Состояние приёмки спрашивается ОДИН раз и передаётся обоим: разбор и
         # печать обязаны говорить об одном состоянии, а два запроса на одном
         # заходе могли бы разойтись.

@@ -55,15 +55,38 @@ TAKES_A_PATTERN: Final = frozenset(
 )
 
 
+def re_names(tree: ast.AST) -> tuple[set[str], dict[str, str]]:
+    """Как модуль называет `re`: имена самого модуля и функций, взятых из него.
+
+    `import re as rx` и `from re import findall` — та же операция под другим
+    именем; гейт, видевший только `re.<имя>`, пропускал их молча (взгляд на #869).
+    """
+    modules = {"re"}
+    functions: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {one.asname or one.name for one in node.names if one.name == "re"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "re":
+            functions |= {one.asname or one.name: one.name for one in node.names}
+    return modules, functions
+
+
 def patterns(path: Path) -> list[tuple[str, int]]:
-    """Образцы строкой в вызовах `re.*` модуля: текст и строка."""
+    """Образцы строкой в вызовах `re.*` модуля — под любым именем: текст и строка."""
     found: list[tuple[str, int]] = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    modules, functions = re_names(tree)
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
         func = node.func
-        name = getattr(func, "attr", getattr(func, "id", None))
-        of_re = isinstance(func, ast.Attribute) and getattr(func.value, "id", None) == "re"
+        called = str(getattr(func, "id", ""))
+        if isinstance(func, ast.Attribute):
+            name = func.attr
+            of_re = getattr(func.value, "id", None) in modules
+        else:
+            name = functions.get(called, called)
+            of_re = called in functions
         first = node.args[0]
         if not (name == "compile" or (of_re and name in TAKES_A_PATTERN)):
             continue
@@ -131,3 +154,19 @@ def test_a_signature_covers_its_pair_and_no_third_module() -> None:
     pair = ["scripts/check_env.py:1", "scripts/check_reread.py:2"]
     assert signed(r"\d+", pair)
     assert not signed(r"\d+", [*pair, "scripts/automerge.py:3"])
+
+
+def test_an_aliased_or_imported_re_is_still_seen(tmp_path: Path) -> None:
+    """`import re as rx` и `from re import findall` судятся так же, как `re.findall` (#869)."""
+    first = tmp_path / "first.py"
+    first.write_text('import re\nRUN = re.compile(r"/runs/(\\d+)")\n', encoding="utf-8")
+    aliased = tmp_path / "aliased.py"
+    aliased.write_text(
+        'import re as rx\nfound = rx.findall(r"/runs/(\\d+)", "")\n', encoding="utf-8"
+    )
+    imported = tmp_path / "imported.py"
+    imported.write_text(
+        'from re import findall\nfound = findall(r"/runs/(\\d+)", "")\n', encoding="utf-8"
+    )
+    assert list(repeated([first, aliased], tmp_path)) == [r"/runs/(\d+)"], "псевдоним не судится"
+    assert list(repeated([first, imported], tmp_path)) == [r"/runs/(\d+)"], "импорт не судится"
