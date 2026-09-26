@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import check_version
 import journal
 import paths
 
@@ -43,7 +44,8 @@ FRAGMENTS: Final = paths.FRAGMENTS
 RELEASED: Final = paths.RELEASED
 OUTPUT: Final = paths.CHANGELOG
 VERSION_FILE: Final = paths.VERSION
-VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
+#: Формат номера версии разбирает гейт версии, здесь его спрашивают (214).
+VERSION_RE: Final = check_version.VERSION_RE
 LINK_LINE_RE: Final = journal.LINK_LINE_RE
 
 KINDS: Final = journal.KINDS
