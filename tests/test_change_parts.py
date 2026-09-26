@@ -287,3 +287,39 @@ def test_an_empty_commit_reaches_its_own_outcome(
     monkeypatch.setattr(module, "touched", lambda _base: [[], []])
     assert module.main(["--base", "HEAD~1"]) == module.EXIT_NOTHING
     assert "не тронуло файлов" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("commits", "warned"),
+    [([["a.py"], ["b.py"]], True), ([["a.py", "b.py"], ["b.py"]], False)],
+    ids=["две несвязанные части", "одна часть"],
+)
+def test_warn_marks_a_split_change_only(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    commits: list[list[str]],
+    warned: bool,
+) -> None:
+    """С `--warn` распавшееся изменение даёт `::warning::`, цельное — нет (#860)."""
+    monkeypatch.setattr(module, "touched", lambda base: commits)
+    assert module.main(["--warn"]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert ("::warning" in said) is warned, said
+
+
+def test_the_warning_names_the_decision_that_makes_mixing_legal() -> None:
+    """Предупреждение отличает законное смешение от ошибки ссылкой на решение 008."""
+    said = module.warning(2)
+    assert "008" in said and module.DECISION_008 in said and "не держит" in said
+    assert (ROOT / module.DECISION_008).is_file(), "решение 008 названо мёртвым адресом"
+
+
+def test_the_parts_job_runs_on_every_change() -> None:
+    """Джоб `parts` идёт на изменении и зовёт счёт с `--warn` (#860)."""
+    import yaml
+
+    job = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"][
+        "parts"
+    ]
+    runs = " ".join(str(step.get("run") or "") for step in job["steps"])
+    assert "change_parts.py" in runs and "--warn" in runs
