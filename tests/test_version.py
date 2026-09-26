@@ -86,21 +86,21 @@ def test_a_release_tag_is_strictly_shaped() -> None:
     `v*`, оказывался ближе релизного и ронял разбор версии вместе со сборкой
     значка.
     """
-    assert module.RELEASE_TAG_RE.match("v1.10.0")
-    assert not module.RELEASE_TAG_RE.match("v-checkpoint-2026-06-24")
-    assert not module.RELEASE_TAG_RE.match("v1.10.0-rc")
+    assert module.is_release_tag("v1.10.0")
+    assert not module.is_release_tag("v-checkpoint-2026-06-24")
+    assert not module.is_release_tag("v1.10.0-rc")
 
 
 def test_the_declared_version_is_read_from_its_single_source() -> None:
     """MAJOR.MINOR до тега берутся из объявленного контракта, а не из воздуха."""
-    assert module.RELEASE_TAG_RE.match(f"v{module.declared()}")
+    assert module.is_release_tag(f"v{module.declared()}")
 
 
 @needs_history
 def test_the_project_version_is_computed_not_written() -> None:
     """Версия проекта считается механизмом и имеет вид X.Y.N."""
     number, whole = module.version()
-    assert module.RELEASE_TAG_RE.match(f"v{number}"), number
+    assert module.is_release_tag(f"v{number}"), number
     assert whole is True, "релизных тегов не видно — в дереве с историей это дефект входа"
 
 
