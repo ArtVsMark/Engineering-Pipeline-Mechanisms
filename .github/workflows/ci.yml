@@ -206,7 +206,9 @@ jobs:
   # того `change_parts.py` может не быть.
   parts:
     name: parts
-    if: github.event_name != 'push'
+    # Только на изменении: у ручного прогона нет базы (`pull_request.base.ref`
+    # пуст), и счёт давал бы ложное «не сосчитаны».
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

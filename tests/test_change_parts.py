@@ -290,36 +290,59 @@ def test_an_empty_commit_reaches_its_own_outcome(
 
 
 @pytest.mark.parametrize(
-    ("commits", "warned"),
-    [([["a.py"], ["b.py"]], True), ([["a.py", "b.py"], ["b.py"]], False)],
-    ids=["две несвязанные части", "одна часть"],
+    ("commits", "bodies", "warned"),
+    [
+        ([["a.py"], ["b.py"]], "тема\n", True),
+        ([["a.py"], ["b.py"]], "тема\n\nСмешение: хвост мелких правок (008)\n", False),
+        ([["a.py", "b.py"], ["b.py"]], "тема\n", False),
+    ],
+    ids=["две части, смешение не названо", "две части, смешение названо", "одна часть"],
 )
-def test_warn_marks_a_split_change_only(
+def test_warn_marks_an_unnamed_split_only(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     commits: list[list[str]],
+    bodies: str,
     warned: bool,
 ) -> None:
-    """С `--warn` распавшееся изменение даёт `::warning::`, цельное — нет (#860)."""
+    """С `--warn` предупреждение — только у распавшегося без названной причины (#871)."""
     monkeypatch.setattr(module, "touched", lambda base: commits)
+    monkeypatch.setattr(module, "bodies_of", lambda base: bodies)
     assert module.main(["--warn"]) == module.EXIT_OK
     said = capsys.readouterr().out
     assert ("::warning" in said) is warned, said
 
 
-def test_the_warning_names_the_decision_that_makes_mixing_legal() -> None:
-    """Предупреждение отличает законное смешение от ошибки ссылкой на решение 008."""
+def test_declared_needs_a_reason_after_the_mark() -> None:
+    """Пустая строка `Смешение:` причиной не считается."""
+    assert module.declared(f"{module.MIXED_MARK} хвост правок") == "хвост правок"
+    assert module.declared(f"{module.MIXED_MARK}   \n") == ""
+    assert module.declared("проза о смешении") == ""
+
+
+def test_bodies_of_reads_the_branch() -> None:
+    """Тела коммитов читаются процессом git; несуществующая база — отказ."""
+    assert isinstance(module.bodies_of("HEAD~1"), str)
+    with pytest.raises(module.NotRun):
+        module.bodies_of("нет-такой-базы")
+
+
+def test_the_warning_names_the_decision_and_the_mark() -> None:
+    """Предупреждение называет решение 008, строку смешения и что слияние не держится."""
     said = module.warning(2)
-    assert "008" in said and module.DECISION_008 in said and "не держит" in said
+    assert module.DECISION_008 in said and module.MIXED_MARK in said
+    assert module.DOES_NOT_HOLD in said
     assert (ROOT / module.DECISION_008).is_file(), "решение 008 названо мёртвым адресом"
 
 
-def test_the_parts_job_runs_on_every_change() -> None:
-    """Джоб `parts` идёт на изменении и зовёт счёт с `--warn` (#860)."""
+def test_the_parts_job_runs_on_pull_requests_and_reads_the_exit() -> None:
+    """Джоб `parts` идёт только на изменении, зовёт счёт с `--warn` и разбирает код (#860, #871)."""
     import yaml
 
     job = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"][
         "parts"
     ]
+    assert job["if"] == "github.event_name == 'pull_request'", "у ручного прогона нет базы"
     runs = " ".join(str(step.get("run") or "") for step in job["steps"])
     assert "change_parts.py" in runs and "--warn" in runs
+    assert "0|3) ;;" in runs and "::warning::" in runs, "код отказа не разбирается"
