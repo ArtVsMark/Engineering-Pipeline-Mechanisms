@@ -197,6 +197,37 @@ jobs:
           set -euo pipefail
           pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED}
 
+  # ИЗМЕНЕНИЕ ИЗ НЕСКОЛЬКИХ ЧАСТЕЙ — ПРЕДУПРЕЖДЕНИЕ, А НЕ КРАСНОЕ (133, #860).
+  # Граница изменения задаётся пересечением файлов. Красный гейт отвергнут
+  # замером: из 25 слитых распались 6, и решение 008 разрешает хвост мелких
+  # правок одним изменением. Но от сигнала не отказывались (051): число частей
+  # видно на каждом изменении, а решение остаётся за автором. Свой джоб, а не
+  # шаг общего `step-*.yml`: общий шаг исполняет `scripts/` потребителя, и у
+  # того `change_parts.py` может не быть.
+  parts:
+    name: parts
+    # Только на изменении: у ручного прогона нет базы (`pull_request.base.ref`
+    # пуст), и счёт давал бы ложное «не сосчитаны».
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: на сколько частей распадается изменение
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -uo pipefail
+          git fetch --no-tags origin "$BASE:refs/remotes/origin/$BASE"
+          rc=0
+          python3 scripts/change_parts.py --base "origin/$BASE" --warn || rc=$?
+          case "$rc" in
+            0|3) ;;
+            *) echo "::warning::части изменения не сосчитаны (код $rc) — граница по 133 не проверена" ;;
+          esac
+
   pr-meta:
     name: pr-meta
     if: github.event_name != 'push'

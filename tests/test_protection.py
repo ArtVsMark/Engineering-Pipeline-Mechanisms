@@ -60,7 +60,8 @@ def test_the_live_rules_are_read_from_the_ruleset_surface(
     """Спрашивается набор правил, и только он: классическая защита — не этот адрес."""
     seen = asked(monkeypatch, LIVE)
     rules = module.live("o/r", "main", "токен")
-    assert seen == ["repos/o/r/rules/branches/main"]
+    assert [path.split("?")[0] for path in seen] == ["repos/o/r/rules/branches/main"]
+    assert "page=1" in seen[0], "список правил читается не постранично (212)"
     assert module.kinds(rules) == ["deletion", "non_fast_forward", "required_status_checks"]
     assert module.contexts(rules) == ["ci-complete"]
     assert module.strict(rules) is True
