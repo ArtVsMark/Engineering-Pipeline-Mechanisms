@@ -71,6 +71,10 @@ FENCE_RE: Final = re.compile(r"^\s*```")
 #: отступом НОЛЬ при 1179 в первой колонке, и в 300 изменениях на площадке
 #: столько же ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 INDENTED_RE: Final = re.compile(r"^(?: {4}|\t)")
+#: Слова строки снятия. Разбор ниже и независимая сверка архива с историей
+#: (`archive_against_history`) берут их отсюда, а не переписывают (209).
+RESOLVED_WORD: Final = "Разобрано:"
+TWIN_WORD: Final = "дубль"
 #: Отпечаток находки — семь шестнадцатеричных знаков, как короткий хэш.
 #: Кавычки вокруг отпечатка допускаются: строку пишет человек, и оформить хэш
 #: как код — первое, что он делает. Без этого отпечаток в кавычках терялся
@@ -83,10 +87,6 @@ INDENTED_RE: Final = re.compile(r"^(?: {4}|\t)")
 #: не выдумана — ею же читаются связи с задачами (`Refs #1, #2`), и автор
 #: вправе ждать того же здесь
 #: ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
-#: Слова строки снятия. Разбор ниже и независимая сверка архива с историей
-#: (`archive_against_history`) берут их отсюда, а не переписывают (209).
-RESOLVED_WORD: Final = "Разобрано:"
-TWIN_WORD: Final = "дубль"
 RESOLVED_RE: Final = re.compile(
     rf"^\s*(?P<mark>{RESOLVED_WORD})\s*(?P<text>[0-9a-f`][^\n]*)", re.IGNORECASE | re.MULTILINE
 )
@@ -217,11 +217,31 @@ class Resolution:
 
     @property
     def twin_of(self) -> dict[str, str]:
-        """Отпечаток → первый отпечаток следующей группы: «A дубль B» — A дубль B."""
+        """Отпечаток → его двойник, по грамматике строки снятия (#872).
+
+        ГРАММАТИКА, А НЕ ПОЗИЦИЯ ГРУППЫ. После «дубль» стоит ОДНА цель; всё, что
+        идёт за ней через запятую, — новый список источников для следующего
+        «дубль». Без запятой цель сама становится источником: так пишется
+        цепочка. Все отпечатки до первого «дубль» — источники.
+
+        * «A дубль B» — A→B;
+        * «A, C дубль B» — A→B и C→B (список к одной цели);
+        * «A дубль B, C дубль D» — A→B и C→D (пары через запятую);
+        * «A дубль B дубль C» — A→B и B→C (цепочка);
+        * «A дубль B, C» — A→B, C снята сама.
+
+        Прежде каждый отпечаток группы брал первую цель следующей, и пары через
+        запятую читались цепочкой: B, стоявший целью, получал двойника D. Замер
+        26.09.2026 сверкой архива с историей: 11 ложных связей из 107 (#872).
+        """
         found: dict[str, str] = {}
-        for here, there in zip(self.groups, self.groups[1:], strict=False):
-            for mark in here:
-                found[mark] = there[0]
+        if not self.groups:
+            return found
+        sources: tuple[str, ...] = self.groups[0]
+        for group in self.groups[1:]:
+            for mark in sources:
+                found[mark] = group[0]
+            sources = group[1:] or group[:1]
         return found
 
     def __str__(self) -> str:
