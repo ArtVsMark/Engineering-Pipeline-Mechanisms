@@ -739,8 +739,18 @@ def test_a_word_that_is_not_a_twin_stays_a_reason() -> None:
             {"aaaaaaa": "bbbbbbb", "bbbbbbb": "ccccccc"},
         ),
         ("Разобрано: AAAAAAA ДУБЛЬ BBBBBBB", ("aaaaaaa", "bbbbbbb"), {"aaaaaaa": "bbbbbbb"}),
+        (
+            "Разобрано: aaaaaaa дубль bbbbbbb, ccccccc дубль ddddddd — два повтора",
+            ("aaaaaaa", "bbbbbbb", "ccccccc", "ddddddd"),
+            {"aaaaaaa": "bbbbbbb", "ccccccc": "ddddddd"},
+        ),
+        (
+            "Разобрано: aaaaaaa дубль bbbbbbb, ccccccc, eeeeeee дубль ddddddd",
+            ("aaaaaaa", "bbbbbbb", "ccccccc", "eeeeeee", "ddddddd"),
+            {"aaaaaaa": "bbbbbbb", "ccccccc": "ddddddd", "eeeeeee": "ddddddd"},
+        ),
     ],
-    ids=["пара", "список до", "список после", "цепочка", "регистр"],
+    ids=["пара", "список до", "список после", "цепочка", "регистр", "пары", "пара и список"],
 )
 def test_every_twin_in_a_chain_is_resolved(
     line: str, marks: tuple[str, ...], twins: dict[str, str]
