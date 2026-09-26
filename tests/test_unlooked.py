@@ -42,25 +42,29 @@ def test_a_merge_without_a_verdict_is_recorded() -> None:
     assert entries[77].merged == "2026-09-10"
 
 
-def test_a_merge_with_a_verdict_is_not_recorded() -> None:
-    """Слитое с вердиктом в реестр НЕ попадает.
+def test_a_merge_with_a_verdict_waits_only_for_the_late_look() -> None:
+    """Слитое с вердиктом ждёт позднего взгляда, но слитым без взгляда не числится (#848).
 
-    Без этой половины реестр перечислял бы всё слитое подряд и не значил бы
-    ничего: список, совпадающий с историей, читателю не сообщает.
+    Поздний взгляд положен каждому слитому. Но «взгляд был» — не осечка
+    канала: в долг «слито без взгляда» такая запись не идёт, иначе список
+    совпал бы с историей и не значил бы ничего.
     """
     entries, _ = module.scan([merged(77)], {}, 0, looked_at(77))
-    assert entries == {}
+    assert entries[77].state == module.STATE_DUE
+    assert not module.is_open(entries[77].state), "взгляд был — осечкой канала это не считается"
+    assert module.queue_of(entries) == [77]
 
 
 def test_a_late_verdict_removes_the_record() -> None:
-    """Вердикт, опоздавший к слиянию, снимает запись сам.
+    """Вердикт, опоздавший к слиянию, снимает запись из «слито без взгляда» сам (#848).
 
     Замер соседа: вердикт опаздывал на 2,3 минуты. Запись, которую в таком
     случае снимают рукой, не снимают вовсе.
     """
     known = {77: module.Entry(77, module.STATE_NONE, "2026-09-10")}
     entries, _ = module.scan([], known, 77, looked_at(77))
-    assert entries == {}
+    assert entries[77].state == module.STATE_DUE, "опоздавший вердикт не перевёл запись в ожидание"
+    assert entries[77].merged == "2026-09-10"
 
 
 def test_a_late_look_is_not_re_read_as_a_verdict() -> None:
@@ -699,7 +703,7 @@ def test_a_suffixed_state_is_re_read_on_the_next_pass() -> None:
     """
     entries = {7: module.Entry(7, f"{module.STATE_ODD}: neutral", "2026-09-11")}
     left, _ = module.scan([], entries, 0, lambda number: None)
-    assert 7 not in left, "запись не перечитана — снять её было бы нечем"
+    assert left[7].state == module.STATE_DUE, "запись не перечитана — снять её было бы нечем"
 
 
 def test_the_queue_answer_is_one_line_on_stdout(

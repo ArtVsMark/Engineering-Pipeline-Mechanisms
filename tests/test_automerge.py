@@ -2061,3 +2061,20 @@ def test_the_queue_log_names_a_refused_rerun_post_the_same_way(
     assert "прогон взгляда 777 не перезапущен: 403" in said
     assert "не перезапущен — причина в ::warning о прогоне 777" in said
     assert platform["disarmed"] == ["PR_1"] and "пропущен на красной" not in said
+
+
+def test_a_fix_check_verdict_is_read_by_the_gate() -> None:
+    """Ворота читают вердикт проверки починки так же, как полного захода (#848).
+
+    Проверка починки пишет тем же действием и тем же прогоном взгляда; её
+    вердикт — число не закрытых находок. Держание одно на изменение, поэтому
+    после полного захода с находками проверка починки голову не держит.
+    """
+    fix = verdict("2026-09-24T10:05:00Z", 1)
+    fix["body"] = fix["body"].replace(
+        "разбор", f"{module.review_findings.FIXCHECK_MARKER}\nПОЧИНКА[abc1234]: не закрыта — нет"
+    )
+    looks: dict[str, list[str]] = {LOOK_RUN: []}
+    assert module.verdicts_on([fix], looks) == [("2026-09-24T10:05:00Z", 1)]
+    full = verdict("2026-09-24T09:55:00Z", 2)
+    assert module.holds_for_findings(module.verdicts_on([full, fix], looks), HEAD_AT) is False

@@ -112,3 +112,17 @@ def test_write_output_keeps_the_task_whole_between_random_fences(tmp_path: Path)
     fence = written[1].removeprefix("task<<")
     assert written[0] == "mode=fix" and fence.startswith("LOOK_MODE_EOF_") and len(fence) > 20
     assert written[2:] == ["строка", "LOOK_MODE_EOF_", "ещё", fence]
+
+
+def test_a_new_head_cancels_the_look_of_the_old_one() -> None:
+    """Заход взгляда снимается новым толчком: группа по изменению, с отменой (#848)."""
+    import yaml
+
+    flow = yaml.safe_load(
+        (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
+    )
+    group = flow["jobs"]["review"]["concurrency"]
+    assert group["cancel-in-progress"] is True
+    assert "pull_request.number" in group["group"] and "head.sha" not in group["group"]
+    task = flow["jobs"]["map"]["outputs"]["task"]
+    assert task == "${{ steps.mode.outputs.task }}", "задание проверки починки не выходит из карты"
