@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("findings_archive.py")
 
@@ -118,38 +118,35 @@ def test_the_previous_archive_is_a_file_or_a_start(tmp_path: Path) -> None:
 
 
 def platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Площадка: закрытые изменения в порядке номеров, слиты — не по порядку."""
-    pulls = [
-        {"number": 5, "merged_at": "2026-09-24T10:00:00Z", "merge_commit_sha": "s5"},
-        {"number": 6, "merged_at": None},
-        {"number": 7, "merged_at": "2026-09-24T12:00:00Z", "merge_commit_sha": "s7"},
-        {"number": 8, "merged_at": "2026-09-24T11:00:00Z", "merge_commit_sha": "s8"},
-    ]
+    """Площадка: ленты изменений; ходить за чем-то ещё ей незачем."""
     feeds = {5: [look("a.py:1 — раз")], 7: [look("b.py:2 — два")], 8: []}
-    bodies = {"s5": "", "s7": "", "s8": "Разобрано: " + mark("a.py:1 — раз")}
 
     def paginate(path: str, *_: Any, **__: Any) -> Any:
-        if "/pulls?" in path:
-            return iter(pulls)
         return iter(feeds[int(path.split("/")[-2])])
 
     def request(method: str, path: str, *_: Any, **__: Any) -> Any:
-        return {"commit": {"message": bodies[path.rsplit("/", 1)[-1]]}}
+        raise AssertionError(f"архиву незачем спрашивать {path}: тело слияния — в истории")
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "request", request)
     monkeypatch.setattr(module, "verdicts", lambda repo, token: dict(VERIFIED))
 
 
+def history() -> list[tuple[int, str]]:
+    """История общей ветки: слиты #5, #8, #7 — не по порядку номеров."""
+    return [(5, ""), (8, "Разобрано: " + mark("a.py:1 — раз")), (7, "")]
+
+
 def test_pending_changes_are_taken_by_merge_time_and_skip_the_counted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Учтённое — множество, а не отметка: слитое позже с меньшим номером не теряется (#788)."""
-    platform(monkeypatch)
-    assert [one["number"] for one in module.merged_pending("o/r", "t", set())] == [5, 8, 7]
-    assert [one["number"] for one in module.merged_pending("o/r", "t", {5, 7})] == [8]
+    said = history()
+    assert [one for one, _ in module.merged_pending(said, set())] == [5, 8, 7]
+    assert [one for one, _ in module.merged_pending(said, {5, 7})] == [8]
     # Учтён больший номер, а меньший слит позже и ещё нет — отметка его бы потеряла.
-    assert [one["number"] for one in module.merged_pending("o/r", "t", {7})] == [5, 8]
+    assert [one for one, _ in module.merged_pending(said, {7})] == [5, 8]
+    assert module.merged_pending([(5, "первое"), (5, "второе")], set()) == [(5, "первое")]
 
 
 def test_the_archive_is_appended_within_budget_and_names_what_is_left(
@@ -158,7 +155,7 @@ def test_the_archive_is_appended_within_budget_and_names_what_is_left(
     """Дописывается не больше бюджета; недошедшее до головы названо в `gaps`."""
     platform(monkeypatch)
     kept = {"zzzzzzz": {"pr": 1, "seen_on": [1], "title": "старая", "checked": ""}}
-    archive = module.build("o/r", "t", 1, KINDS, {"counted": [5], "findings": kept})
+    archive = module.build("o/r", "t", 1, KINDS, {"counted": [5], "findings": kept}, history())
     assert archive["counted"] == [5, 8]
     assert "zzzzzzz" in archive["findings"], "прежняя история потеряна"
     assert any("не учтено слитых изменений — 1" in one for one in archive["gaps"])
@@ -170,7 +167,7 @@ def test_a_first_run_counts_everything_and_settles_resolutions(
 ) -> None:
     """Архива нет — учитывается всё слитое, снятия прикладываются к находкам."""
     platform(monkeypatch)
-    archive = module.build("o/r", "t", 10, KINDS, {})
+    archive = module.build("o/r", "t", 10, KINDS, {}, history())
     assert archive["counted"] == [5, 7, 8] and archive["schema"] == module.SCHEMA
     assert archive["findings"][mark("a.py:1 — раз")]["resolved_by"] == 8
     assert not any("не учтено" in one for one in archive["gaps"])
@@ -180,9 +177,8 @@ def test_reread_goes_before_the_new_merges(monkeypatch: pytest.MonkeyPatch) -> N
     """Снявшим встаёт учтённое раньше, а не новое слитое с тем же отпечатком (взгляд на #849)."""
     platform(monkeypatch)
     one = mark("a.py:1 — раз")
-    archive = module.build(
-        "o/r", "t", 10, KINDS, {"counted": [5]}, history=[(5, f"Разобрано: {one}")]
-    )
+    said = [(5, f"Разобрано: {one}"), *history()[1:]]
+    archive = module.build("o/r", "t", 10, KINDS, {"counted": [5]}, said, reread_counted=True)
     assert archive["resolutions"][one]["by"] == 5, "снявшим записано позднее изменение #8"
 
 
@@ -192,16 +188,8 @@ def test_reread_goes_before_the_new_merges_for_the_link_too(
     """И связь «дубль» — первая названная: учтённое раньше, а не новое слитое (взгляд на #852)."""
     platform(monkeypatch)
     one = mark("a.py:1 — раз")
-    monkeypatch.setattr(
-        module.ghrest,
-        "request",
-        lambda method, path, *_, **__: {
-            "commit": {"message": f"Разобрано: {one} дубль cccccc8" if path.endswith("s8") else ""}
-        },
-    )
-    archive = module.build(
-        "o/r", "t", 10, KINDS, {"counted": [5]}, history=[(5, f"Разобрано: {one} дубль bbbbbb5")]
-    )
+    said = [(5, f"Разобрано: {one} дубль bbbbbb5"), (8, f"Разобрано: {one} дубль cccccc8"), (7, "")]
+    archive = module.build("o/r", "t", 10, KINDS, {"counted": [5]}, said, reread_counted=True)
     assert archive["resolutions"][one] == {"by": 5, "twin_of": "bbbbbb5"}, "связь взята у #8"
 
 
@@ -211,10 +199,10 @@ def test_the_verifier_answer_is_kept_once_seen(monkeypatch: pytest.MonkeyPatch) 
     one = mark("b.py:2 — два")
     VERIFIED.clear()
     VERIFIED[one] = "премиса подтверждена 24.09.2026"
-    archive = module.build("o/r", "t", 10, KINDS, {})
+    archive = module.build("o/r", "t", 10, KINDS, {}, history())
     assert archive["findings"][one]["checked"] == "премиса подтверждена 24.09.2026"
     VERIFIED.clear()
-    again = module.build("o/r", "t", 10, KINDS, archive)
+    again = module.build("o/r", "t", 10, KINDS, archive, history())
     assert again["findings"][one]["checked"] == "премиса подтверждена 24.09.2026", "ответ потерян"
 
 
@@ -246,6 +234,7 @@ def test_an_unreadable_history_writes_nothing(
 def test_a_run_writes_the_archive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Заход кладёт архив по названному адресу."""
     platform(monkeypatch)
+    monkeypatch.setattr(module, "git_log", lambda where=None: "")
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
     out = tmp_path / "deep" / "findings.json"
     assert module.main(["--repo", "o/r", "--out", str(out)]) == module.EXIT_OK
@@ -692,34 +681,71 @@ def test_fixed_in_reads_only_the_reviewers_closed_answers() -> None:
     assert module.fixed_in([{"user": {"login": "someone"}, "body": body}]) == []
 
 
-def test_the_wave_fits_the_quota_share() -> None:
-    """Волна архива вместе с худшим часом расписаний укладывается в долю лимита (033).
+def test_the_archive_hour_fits_the_quota_share() -> None:
+    """Час архива вместе с худшим часом расписаний укладывается в долю лимита (033).
 
     Лимит и доля — из одного места, `.rules/schedules.json`: своя константа
     лимита расходилась с ним впятеро (взгляд на #874). Доля уже занята
-    расписаниями, поэтому волна складывается с их худшим часом, а не
-    сравнивается с долей целиком. Волна полной бывает только на накопленном
-    долге: после догона каждое слияние дописывает одно изменение.
+    расписаниями, поэтому час архива складывается с их худшим часом. Час
+    архива — не один заход, а `MERGES_PER_HOUR`: прогон идёт на каждое
+    слияние, и каждый платит свою постоянную часть; волна изменений — одна на
+    всех, потому что учтённое второй раз не пишется (взгляд на #874).
     """
     from tests.test_schedules import declared, worst_hour
 
     said = declared()
     limit = int(said["limits"]["gh_api_per_hour"]) * float(said["share"])
-    price = module.BUDGET * module.CALLS_PER_CHANGE + worst_hour(said)
-    assert price <= limit, f"волна архива с расписаниями стоит {price} при доле {limit:.0f}"
+    archive_hour = (
+        module.BUDGET * module.CALLS_PER_CHANGE + module.MERGES_PER_HOUR * module.CALLS_PER_RUN
+    )
+    price = archive_hour + worst_hour(said)
+    assert price <= limit, f"час архива с расписаниями стоит {price} при доле {limit:.0f}"
+
+
+def test_merges_per_hour_is_not_below_the_history() -> None:
+    """Замер `MERGES_PER_HOUR` держится историей общей ветки, а не словом (005).
+
+    Мелкий клон видит меньше слияний, и тест тогда слабее, но не ложно красен:
+    число может только недосчитаться.
+    """
+    import subprocess
+    from collections import Counter
+
+    log = subprocess.run(
+        ["git", "log", "--format=%ct%x1f%s"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+    hours = Counter(
+        int(when) // 3600
+        for when, _, subject in (line.partition("\x1f") for line in log.splitlines())
+        if module.MERGED_SUBJECT_RE.search(subject)
+    )
+    worst = max(hours.values(), default=0)
+    assert worst <= module.MERGES_PER_HOUR, (
+        f"за час слито {worst} изменений, а объявлено {module.MERGES_PER_HOUR}: "
+        "подними число и пересчитай час архива"
+    )
 
 
 def test_the_declared_price_per_change_is_what_build_spends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`CALLS_PER_CHANGE` — не объявление, а замер: столько запросов `build` делает на изменение."""
+    """`CALLS_PER_CHANGE` — не объявление, а замер: столько запросов `build` делает на изменение.
+
+    Считается КАЖДЫЙ запрос, без исключений: счёт, пропускавший листинг, держал
+    цену изменения и молчал о цене захода (взгляд на #874). Чтение реестра
+    (`verdicts`) на стенде подменено и входит в `CALLS_PER_RUN`.
+    """
     platform(monkeypatch)
     spent: list[str] = []
     paginate, request = module.ghrest.paginate, module.ghrest.request
 
     def counting_paginate(path: str, *rest: Any, **kw: Any) -> Any:
-        if "/pulls?" not in path:
-            spent.append(path)
+        spent.append(path)
         return paginate(path, *rest, **kw)
 
     def counting_request(method: str, path: str, *rest: Any, **kw: Any) -> Any:
@@ -728,7 +754,7 @@ def test_the_declared_price_per_change_is_what_build_spends(
 
     monkeypatch.setattr(module.ghrest, "paginate", counting_paginate)
     monkeypatch.setattr(module.ghrest, "request", counting_request)
-    archive = module.build("o/r", "t", 10, KINDS, {})
+    archive = module.build("o/r", "t", 10, KINDS, {}, history())
     assert len(spent) == module.CALLS_PER_CHANGE * len(archive["counted"]), spent
 
 
