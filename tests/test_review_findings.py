@@ -1745,6 +1745,28 @@ def test_unrecorded_takes_the_looks_after_the_mark(since: int | None, ids: list[
     assert [one for one, _ in module.unrecorded(THREE_LOOKS, since)] == ids
 
 
+def test_unrecorded_without_a_mark_starts_at_the_last_full_look() -> None:
+    """Без отметки пишется всё от последнего полного захода, а не одна проверка починки (#867).
+
+    Иначе отметка встала бы на проверке починки, а находки полного захода в
+    реестр не легли бы никогда.
+    """
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    feed = [
+        {**said(1, "НАХОДКА[риск]: первая\nВЕРДИКТ: находок 1"), "user": reviewer},
+        {
+            **said(
+                2,
+                f"{module.FIXCHECK_MARKER}\n{module.fix_form('abc1234', False, 'нет')}\n"
+                "ВЕРДИКТ: находок 1",
+            ),
+            "user": reviewer,
+        },
+    ]
+    assert [one for one, _ in module.unrecorded(feed, None)] == [1, 2]
+    assert [one for one, _ in module.unrecorded(feed, 1)] == [2]
+
+
 def test_the_recorded_mark_reads_back_what_the_body_writes() -> None:
     """Отметка записанных заходов переживает круг тела реестра; пусто — пусто."""
     body = module.render_body({}, "", {852: 5841351850, 7: 11})

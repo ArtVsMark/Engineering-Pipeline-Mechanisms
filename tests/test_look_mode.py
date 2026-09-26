@@ -131,23 +131,28 @@ def test_a_new_head_cancels_the_look_of_the_old_one() -> None:
     assert task == "${{ steps.mode.outputs.task }}", "задание проверки починки не выходит из карты"
 
 
-def test_an_unrecorded_full_look_gives_its_findings_from_the_feed() -> None:
-    """Полный заход ещё не записан в реестр — прошлые находки берутся из ленты (#842)."""
-    mark = module.review_findings.fingerprint("a.py:1 — раз")
-    got = module.prior_of({}, 7, [FULL_LOOK], recorded={})
-    assert [one for one, _ in got] == [mark], "находка полного захода не дошла до задания"
-    assert module.prior_of({}, 7, [FULL_LOOK], recorded={7: 1}) == [], (
-        "записанный заход читан из ленты"
-    )
+def test_an_unrecorded_full_look_keeps_the_look_full() -> None:
+    """Полный заход ещё не в реестре — заход снова полный, а не «находок 0» (#842)."""
+    assert module.settled(module.FIX, 7, {}) == module.FULL
+    assert module.settled(module.FIX, 7, {8: 1}) == module.FULL, "чужая отметка засчитана"
+    assert module.settled(module.FIX, 7, {7: 1}) == module.FIX
+    assert module.settled(module.FULL, 7, {7: 1}) == module.FULL
 
 
-def test_a_finding_closed_by_a_fix_check_does_not_come_back_from_the_feed() -> None:
-    """Из ленты не возвращается находка, которую проверка починки уже назвала закрытой."""
-    mark = module.review_findings.fingerprint("a.py:1 — раз")
-    closing = said(
-        5, f"{MARKER}\n{module.review_findings.fix_form(mark, True, 'да')}\nВЕРДИКТ: находок 0"
-    )
-    assert module.prior_of({}, 7, [FULL_LOOK, closing], recorded={}) == []
+def test_prior_findings_come_from_the_registry_only() -> None:
+    """Лента в прошлые находки не подмешивается: отпечаток пересказа живёт в реестре (210)."""
+    entries = {"aaa1111": Entry(7, "риск", "пересказ")}
+    assert module.prior_of(entries, 7) == [("aaa1111", entries["aaa1111"])]
+
+
+def test_main_without_a_recorded_full_look_runs_full(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Реестр без отметки изменения — режим полный, задания нет."""
+    out = tmp_path / "output"
+    platform(monkeypatch, [FULL_LOOK], "- `aaa1111` · #7 · дефект — a.py:1 — раз")
+    assert module.main(["--repo", "o/r", "--pr", "7", "--output", str(out)]) == module.EXIT_OK
+    assert "mode=full\n" in out.read_text(encoding="utf-8")
 
 
 def test_the_task_line_form_is_the_one_the_parser_reads() -> None:

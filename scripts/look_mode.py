@@ -2,9 +2,11 @@
 """Какой заход взгляда идёт на этой голове: полный или проверка починки (#848).
 
 РЕШЕНИЕ ВЛАДЕЛЬЦА 25.09.2026: у взгляда две плоскости. До слияния полный
-взгляд идёт ОДИН раз — на первой зелёной голове; дальше каждый толчок получает
-только проверку починки: закрыта ли каждая прошлая находка. Новое, что
-появилось в починке, ловит поздний взгляд после слияния.
+взгляд идёт ОДИН раз — пока на изменении нет вердикта полного захода от
+ревьюера (`mode_of`) и пока этот заход не записан в реестр (`settled`); обычно
+это первая зелёная голова. Дальше каждый толчок получает только проверку
+починки: закрыта ли каждая прошлая находка. Новое, что появилось в починке, до
+слияния не ловится — его ищет поздний взгляд, если он пойдёт.
 
 ЗАМЕР, ИЗ-ЗА КОТОРОГО ЭТО РЕШЕНО (архив находок, 25.09.2026): с #800 записано
 296 находок, 66 из них (22 %) сняты как дубли, и все 66 — дубли внутри ОДНОГО
@@ -73,45 +75,31 @@ def own(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def prior_of(
-    entries: dict[str, findings.Entry],
-    pr: int,
-    comments: list[dict[str, Any]] | None = None,
-    recorded: dict[int, int] | None = None,
-) -> list[tuple[str, findings.Entry]]:
-    """Прошлые находки этого изменения: из реестра, а пока заход не записан — из ленты.
+def prior_of(entries: dict[str, findings.Entry], pr: int) -> list[tuple[str, findings.Entry]]:
+    """Прошлые находки этого изменения из реестра — по отпечатку.
+
+    ИСТОЧНИК ОДИН — РЕЕСТР, И ЛЕНТА СЮДА НЕ ПОДМЕШИВАЕТСЯ. Отпечаток из ленты
+    берётся по дословному заголовку, а реестр кладёт пересказ под прежний
+    отпечаток: ответ «закрыта» на отпечаток из ленты реестр бы не нашёл, а
+    архив по нему снял бы находку, и они разошлись бы (взгляд на #867, 210).
+    Что полный заход ещё не записан, решает `settled`, а не этот список.
+    """
+    return sorted((mark, entry) for mark, entry in entries.items() if entry.pr == pr)
+
+
+def settled(mode: str, pr: int, recorded: dict[int, int]) -> str:
+    """Проверка починки — только когда полный заход изменения уже в реестре.
 
     РЕЕСТР ПИШЕТСЯ ПОЗЖЕ ЛЕНТЫ. Находки полного захода попадают в #23 джобом
-    `findings` в очереди `findings-write`, где записи вытесняются (#842). Толчок
-    сразу после полного захода читал реестр без них и получал «прошлых находок
-    нет» — проверка починки отвечала «находок 0» при живых находках.
-
-    ЗАПИСАН ЛИ ЗАХОД, ГОВОРИТ ОТМЕТКА, А НЕ ДОГАДКА. Реестр помнит, какой
-    вердикт каждого изменения уже записан (`Записано:`, #842). Нет отметки для
-    этого изменения — находки берутся из ленты, живого источника (049), кроме
-    названных закрытыми проверкой починки. Есть — только из реестра: запись
-    пересказанной находки лежит там под ПРЕЖНИМ отпечатком, и слияние с лентой
-    задвоило бы её.
+    `findings` в очереди `findings-write`, где записи вытесняются (#842).
+    Толчок сразу после полного захода прочёл бы реестр без них, и проверка
+    починки ответила бы «находок 0» при живых находках. Отметка `Записано:`
+    для изменения значит, что его полный заход записан: без отметки догон
+    пишет всё от последнего полного захода (`review_findings.unrecorded`).
+    Нет отметки — заход идёт ПОЛНЫМ: лишний полный заход стоит повтора
+    находок, а облегчённый при незаписанных — их потери (045).
     """
-    if recorded is None or pr in recorded:
-        return sorted((mark, entry) for mark, entry in entries.items() if entry.pr == pr)
-    looks = review_findings.looks(own(comments or []))
-    closed = {
-        mark
-        for _, look in looks
-        if review_findings.is_fix_check(look)
-        for mark, ok in review_findings.fix_answers(look).items()
-        if ok
-    }
-    prior: dict[str, findings.Entry] = {}
-    for _, look in looks:
-        if review_findings.is_fix_check(look):
-            continue
-        for weight, title, _, _ in review_findings.found_in(look):
-            mark = review_findings.fingerprint(title)
-            if mark not in closed:
-                prior[mark] = findings.Entry(pr, weight, title)
-    return sorted(prior.items())
+    return FIX if mode == FIX and pr in recorded else FULL
 
 
 def task_text(mode: str, prior: list[tuple[str, findings.Entry]]) -> str:
@@ -173,12 +161,10 @@ def main(argv: list[str] | None = None) -> int:
         prior: list[tuple[str, findings.Entry]] = []
         if mode == FIX:
             _, body = review_findings.live_issue(args.repo, token)
-            prior = prior_of(
-                review_findings.parse_entries(body),
-                args.pr,
-                comments,
-                review_findings.parse_recorded(body),
-            )
+            mode = settled(mode, args.pr, review_findings.parse_recorded(body))
+            if mode == FULL:
+                print(f"полный заход #{args.pr} ещё не записан в реестр — заход снова полный")
+            prior = prior_of(review_findings.parse_entries(body), args.pr) if mode == FIX else []
     except (review_findings.NotRun, ghrest.TransportError) as exc:
         print(f"режим захода не выбран: {exc} — взгляд пойдёт полным", file=sys.stderr)
         return EXIT_BROKEN
