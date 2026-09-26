@@ -320,11 +320,49 @@ def test_declared_needs_a_reason_after_the_mark() -> None:
     assert module.declared("проза о смешении") == ""
 
 
-def test_bodies_of_reads_the_branch() -> None:
-    """Тела коммитов читаются процессом git; несуществующая база — отказ."""
-    assert isinstance(module.bodies_of("HEAD~1"), str)
+def test_bodies_of_reads_the_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Тела коммитов своей ветки читаются процессом git; несуществующая база — отказ.
+
+    Своё дерево, а не дерево прогона: мелкий клон глубиной 1 не имеет `HEAD~1`,
+    и тест краснел бы не из-за кода (взгляд на #871).
+    """
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "a@example.com")
+    git("config", "user.name", "Кто-то")
+    git("commit", "-q", "--allow-empty", "-m", "база")
+    git("checkout", "-q", "-b", "work")
+    git("commit", "-q", "--allow-empty", "-m", "тема\n\nСмешение: хвост правок")
+    monkeypatch.chdir(tmp_path)
+    assert module.declared(module.bodies_of("main")) == "хвост правок"
     with pytest.raises(module.NotRun):
         module.bodies_of("нет-такой-базы")
+
+
+def test_a_named_mixing_does_not_ask_again(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Смешение названо — просьбы назвать причину нет (#871)."""
+    monkeypatch.setattr(module, "touched", lambda base: [["a.py"], ["b.py"]])
+    monkeypatch.setattr(module, "bodies_of", lambda base: "Смешение: хвост правок")
+    assert module.main(["--warn"]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "названо" in said and "НАЗОВИТЕ" not in said, said
+
+
+def test_a_git_refusal_on_bodies_is_the_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ git при чтении тел — код EXIT_BROKEN, а не трассировка (039)."""
+    monkeypatch.setattr(module, "touched", lambda base: [["a.py"], ["b.py"]])
+
+    def refuse(base: str) -> str:
+        raise module.NotRun("git отказал")
+
+    monkeypatch.setattr(module, "bodies_of", refuse)
+    assert module.main(["--warn"]) == module.EXIT_BROKEN
 
 
 def test_the_warning_names_the_decision_and_the_mark() -> None:
@@ -345,4 +383,16 @@ def test_the_parts_job_runs_on_pull_requests_and_reads_the_exit() -> None:
     assert job["if"] == "github.event_name == 'pull_request'", "у ручного прогона нет базы"
     runs = " ".join(str(step.get("run") or "") for step in job["steps"])
     assert "change_parts.py" in runs and "--warn" in runs
-    assert "0|3) ;;" in runs and "::warning::" in runs, "код отказа не разбирается"
+    quiet = f"{module.EXIT_OK}|{module.EXIT_NOTHING}) ;;"
+    assert quiet in runs and "::warning::" in runs, "коды шага разошлись с исходами механизма"
+
+
+def test_a_named_mixing_is_heard_without_the_warn_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Счёт без `--warn` — как зовёт навык — тоже не просит названную причину (#878)."""
+    monkeypatch.setattr(module, "touched", lambda base: [["a.py"], ["b.py"]])
+    monkeypatch.setattr(module, "bodies_of", lambda base: "Смешение: хвост правок")
+    assert module.main([]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "названо" in said and "НАЗОВИТЕ" not in said, said
