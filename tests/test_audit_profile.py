@@ -175,3 +175,12 @@ def test_suspicion_is_one_when_the_answer_repeats_the_claim() -> None:
     assert same == pytest.approx(1.0), "ответ, повторивший притязание дословно, даёт единицу"
     other = module.suspicion(rule, {"where": "совсем посторонний текст"})
     assert other == pytest.approx(0.0), "ответ без общих корней даёт ноль"
+
+
+def test_since_counts_only_a_fresh_reading() -> None:
+    """Под новый аудит сверенным считается только ответ, прочитанный не раньше даты (#829)."""
+    export = {"rules": [rule("001", "что-нибудь")]}
+    mine = {"001": {"status": "active", "analysed": "2026-09-18"}}
+    assert module.profile(export, mine)[0]["looked"] is True
+    assert module.profile(export, mine, "2026-09-26")[0]["looked"] is False
+    assert module.profile(export, mine, "2026-09-18")[0]["looked"] is True
