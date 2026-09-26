@@ -194,10 +194,10 @@ def test_the_exit_codes_are_read_as_an_allowlist() -> None:
 def test_the_contract_describes_this_loop() -> None:
     """Механизм отвечает договору, а не заводит свой порядок (029).
 
-    Контур 3 описан в `docs/behaviour.md` давно; здесь проверяется, что
+    Контур 3 описан в `docs/agent/behaviour.md` давно; здесь проверяется, что
     механизм строится под него, а не рядом с ним.
     """
-    text = (ROOT / "docs" / "behaviour.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "agent" / "behaviour.md").read_text(encoding="utf-8")
     assert "Контур 3" in text
     assert "перезапускает его **один раз**" in text
 

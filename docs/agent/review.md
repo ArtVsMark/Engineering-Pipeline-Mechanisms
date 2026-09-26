@@ -108,4 +108,4 @@
 Заход на роль стоил бы столько заходов, сколько ролей позвано. Один заход
 со списком ролей дешевле кратно, а список держит его от «общего чтения».
 Замер цены до и после ролей — решение
-[033](decisions/033-one-look-with-roles-is-priced-by-measurement.md).
+[033](../decisions/033-one-look-with-roles-is-priced-by-measurement.md).

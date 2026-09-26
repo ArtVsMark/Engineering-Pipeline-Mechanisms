@@ -345,7 +345,7 @@ def drift_issue(found: list[Any], silent: list[str], seen: str = "2026-09-23T07:
 def test_drift_records_land_in_section_five(monkeypatch: pytest.MonkeyPatch) -> None:
     """Записи дрейфа — строки раздела 5 с адресом задачи дрейфа.
 
-    Договор называет дрейф частью источника 5 (`docs/behaviour.md`, контур
+    Договор называет дрейф частью источника 5 (`docs/agent/behaviour.md`, контур
     1), а сборщик его не читал: раздел выглядел полным, когда дрейф называл бы
     работу. Нашёл владелец вопросом по #665.
 

@@ -6,7 +6,7 @@
   `coverage`, и значок витрины) и дата замера
   ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md));
 - **свод не пересказывает обещание выпуска**, а ссылается на
-  [`docs/release.md`](../../../docs/release.md) и решение `015`: два текста об одном
+  [`docs/release.md`](../../../docs/dev/release.md) и решение `015`: два текста об одном
   расходятся молча
   ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md));
 - **неточность в контексте решения 010 названа, а не переписана.** Следование

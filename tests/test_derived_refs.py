@@ -27,7 +27,7 @@ def test_a_badge_on_its_own_branch_is_the_subject() -> None:
 
 def test_a_link_into_the_trunk_is_not_the_subject() -> None:
     """Ссылка в общую ветку — обычная ссылка дерева, её держит гейт 022."""
-    line = f"[договор](https://github.com/{OURS}/blob/main/docs/pipeline.md)"
+    line = f"[договор](https://github.com/{OURS}/blob/main/docs/use/pipeline.md)"
     assert module.ours([line], OURS) == []
 
 

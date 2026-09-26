@@ -295,7 +295,10 @@
       ]
     },
     "scripts/build_changelog.py": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        "docs/dev/release.md"
+      ]
     },
     "scripts/build_facts.py": {
       "answer": "configured",
@@ -401,7 +404,10 @@
       "answer": "as-is"
     },
     "scripts/debt.py": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        "docs/agent/behaviour.md"
+      ]
     },
     "scripts/drift.py": {
       "answer": "configured",
@@ -435,7 +441,7 @@
       "answer": "configured",
       "where": [
         ".rules/bindings.json",
-        "docs/roles.md"
+        "docs/agent/roles.md"
       ]
     },
     "scripts/findings_archive.py": {
@@ -503,7 +509,10 @@
       ]
     },
     "scripts/release.py": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        "docs/dev/release.md"
+      ]
     },
     "scripts/review_findings.py": {
       "answer": "as-is"
@@ -513,7 +522,8 @@
       "where": [
         ".rules/bindings.json",
         ".rules/review-roles.json",
-        "docs/review.md"
+        "docs/agent/review.md",
+        "docs/agent/roles.md"
       ]
     },
     "scripts/rule_link.py": {

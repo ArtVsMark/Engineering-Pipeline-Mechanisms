@@ -19,7 +19,7 @@ from tests.conftest import load_script, walk
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 GATES = WORKFLOWS / "ci.yml"
-CONTRACT = ROOT / "docs" / "pipeline.md"
+CONTRACT = ROOT / "docs" / "use" / "pipeline.md"
 SUMMARY = "ci-complete"
 
 
@@ -419,7 +419,7 @@ def test_every_file_named_by_the_contract_exists() -> None:
     причём второй не был назван и в таблице пробелов — то есть не существовал
     вовсе нигде, кроме обещания (046, 175).
     """
-    doc = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
+    doc = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     live = {path.name for path in walk(ROOT / ".github" / "workflows", "*.yml")}
     missing: list[str] = []
     for row in doc.splitlines():
@@ -449,7 +449,7 @@ def test_an_unbuilt_step_is_named_among_the_gaps() -> None:
     (005, 175), и номер пришлось писать словом. Имя прогона цифр не содержит,
     уникально и не зависит от того, как в своде записаны числа.
     """
-    doc = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
+    doc = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     gaps = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     for row in doc.splitlines():
         if not row.startswith("|") or NOT_BUILT not in row:

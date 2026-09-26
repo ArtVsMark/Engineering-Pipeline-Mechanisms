@@ -469,7 +469,7 @@ def test_a_configured_answer_names_every_filling_it_reads() -> None:
     """Ответ «настроено» или «как есть» называет всё наполнение, которое скрипт читает.
 
     ЗАМЕР 25.09.2026 (взгляды на #844): `review_map.py` и `findings.py`
-    читали `docs/review.md`, `.rules/review-roles.json` и `docs/roles.md`, а
+    читали `docs/agent/review.md`, `.rules/review-roles.json` и `docs/agent/roles.md`, а
     ответ называл один `.rules/bindings.json`. Сосед, перенёсший механизм без
     этого наполнения, молча терял бы роли. Чинилось по строке за заход, и по
     правилу 210 сверка стала гейтом по всему инвентарю.
@@ -491,5 +491,7 @@ def test_a_configured_answer_names_every_filling_it_reads() -> None:
 
 def test_the_filling_gate_rejects_an_unnamed_read() -> None:
     """Предикат видит чтение наполнения и пропускает названный выход (140)."""
-    constants = {"ROLES": "docs/roles.md", "BADGES": ".github/badges", "X": "scripts/x.py"}
-    assert filling_read_by("paths.ROLES; paths.BADGES; paths.X", constants) == {"docs/roles.md"}
+    constants = {"ROLES": "docs/agent/roles.md", "BADGES": ".github/badges", "X": "scripts/x.py"}
+    assert filling_read_by("paths.ROLES; paths.BADGES; paths.X", constants) == {
+        "docs/agent/roles.md"
+    }

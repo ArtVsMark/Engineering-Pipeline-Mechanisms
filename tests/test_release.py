@@ -655,7 +655,7 @@ def test_the_procedure_matches_the_contract() -> None:
     Договор описывает порядок с самого начала; механизм обязан ему отвечать, а
     не заводить свой.
     """
-    text = (ROOT / "docs" / "release.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "dev" / "release.md").read_text(encoding="utf-8")
     assert "## Порядок выпуска" in text
     assert "тег не переставляется" in text.lower()
 
@@ -680,12 +680,12 @@ def test_the_contract_names_every_state_the_mechanism_tells_apart() -> None:
     """Договор о выпуске называет ВСЕ состояния приёмки, что различает механизм.
 
     Расхождение договора и механизма здесь уже было и стоило дороже прочего:
-    новое правило мажора жило в `docs/release.md`, пока `release.py` исполнял
+    новое правило мажора жило в `docs/dev/release.md`, пока `release.py` исполнял
     старое (#198). Пять состояний — пять строк таблицы, и сверяет их машина, а
     не внимание автора
     ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
     """
-    contract = (ROOT / "docs" / "release.md").read_text(encoding="utf-8").lower()
+    contract = (ROOT / "docs" / "dev" / "release.md").read_text(encoding="utf-8").lower()
     missing = [said for said in module.ACCEPTANCE_SAID.values() if said.lower() not in contract]
     assert not missing, f"механизм различает, а договор не называет: {missing}"
 

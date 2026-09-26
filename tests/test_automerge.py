@@ -183,7 +183,7 @@ def test_a_shared_file_decides_inside_a_step_not_across_them() -> None:
     ВНУТРИ ступени: изменение из плана, трогающее общий файл, не обгоняет
     снятие находки.
     """
-    debt = change(1, "automerge", body="Разобрано: abc1234", files=("docs/pipeline.md",))
+    debt = change(1, "automerge", body="Разобрано: abc1234", files=("docs/use/pipeline.md",))
     plan = change(9, "automerge", files=("scripts/ghrest.py",))
     other = change(10, "automerge", files=("scripts/ghrest.py",))
     shared = module.shared_paths([debt, plan, other])
@@ -194,7 +194,7 @@ def test_a_shared_file_outruns_the_rest() -> None:
     """Трогающее общий с соседом файл идёт раньше остальных."""
     first = change(5, "automerge", files=("scripts/ghrest.py",))
     second = change(6, "automerge", files=("scripts/ghrest.py",))
-    lonely = change(2, "automerge", files=("docs/pipeline.md",))
+    lonely = change(2, "automerge", files=("docs/use/pipeline.md",))
     shared = module.shared_paths([first, second, lonely])
     assert shared == frozenset({"scripts/ghrest.py"})
     ordered = module.order([lonely, first, second], shared)

@@ -110,7 +110,7 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
     когда в таблице было шестнадцать в тринадцати. Число, вписанное в прозу
     руками, устаревает молча (005) — поэтому его сверяет гейт, а не читатель.
     """
-    text = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     steps: set[int] = set()
     files: set[str] = set()
     for line in text.splitlines():
@@ -140,7 +140,7 @@ def test_an_unnumbered_row_is_named_under_the_heading() -> None:
     так на #199 — «четырнадцать не совпадает с пятнадцатью файлами дерева».
     Разницу называет проза под заголовком, а не догадка (046).
     """
-    text = (ROOT / "docs" / "pipeline.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     lines = text.splitlines()
     place = next(n for n, line in enumerate(lines) if line.startswith("## Скелет:"))
     table = lines[place:]
@@ -300,8 +300,8 @@ WINDOW_FILE_WORDS = 900
 #: Регресс канона держит другое: деление по читателю (021) и один канонический
 #: документ на вопрос (022). У записей решений предела нет по прямому запрету:
 #: запись — датированный факт, и сокращать её нельзя вовсе (043). Замер
-#: 14.09.2026 называет цену этой границы: `docs/pipeline.md` 2062 → 3178 слов за
-#: шесть дней, `docs/release.md` 855 → 2290, и ни один документ проекта ни разу
+#: 14.09.2026 называет цену этой границы: `docs/use/pipeline.md` 2062 → 3178 слов за
+#: шесть дней, `docs/dev/release.md` 855 → 2290, и ни один документ проекта ни разу
 #: не убыл. То есть граница названа, а не выдана за отсутствие предмета (046).
 UNCAPPED = ("docs/", "docs/decisions/")
 
@@ -473,7 +473,7 @@ def test_the_storefront_limit_rejects_what_it_must() -> None:
 
 #: Своды-корни: по одному на читателя (021). Документ, достижимый только от
 #: витрины, достижим для человека со стороны, и это законно — так живёт
-#: `docs/onboarding.md`. Требовать пути ИМЕННО от ядра значило бы гнать в свод
+#: `docs/use/onboarding.md`. Требовать пути ИМЕННО от ядра значило бы гнать в свод
 #: агента то, что агенту не адресовано.
 RULEBOOKS = ("AGENTS.md", "CLAUDE.md", "README.md")
 
@@ -492,7 +492,7 @@ WITHOUT_PATH = {
 def link_targets(path: Path) -> set[Path]:
     """Документы, на которые ссылается этот: только внутридеревные `.md`.
 
-    Якорь отрезается: `docs/roles.md#делаем` ведёт в тот же файл. Внешние
+    Якорь отрезается: `docs/agent/roles.md#делаем` ведёт в тот же файл. Внешние
     адреса и ссылки наружу дерева (`../../issues/N` у площадки) отбрасываются —
     путь к читателю ищется в дереве, а не на площадке.
     """
@@ -515,7 +515,7 @@ def reachable_from(roots: tuple[str, ...]) -> set[Path]:
 
     ПУТЬ СЧИТАЕТСЯ ТРАНЗИТИВНЫМ, И ЭТО НАЗВАННАЯ ГРАНИЦА. Документ, до которого
     добираются через запись решения, достижим — так сегодня живёт
-    `docs/release.md`. Гейт утверждает «путь ЕСТЬ», а не «путь короток»: длину
+    `docs/dev/release.md`. Гейт утверждает «путь ЕСТЬ», а не «путь короток»: длину
     пути машине не судить, и требовать ссылки прямо из свода значило бы
     набивать свод адресами, то есть ломать 029
     ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
@@ -595,7 +595,7 @@ def test_every_live_document_has_a_path_from_a_rulebook(path: Path) -> None:
     """От свода к документу ведёт цепочка ссылок — иначе читатель до него не дойдёт.
 
     ЗАМЕР, РАДИ КОТОРОГО ГЕЙТ ЗАВЕДЁН (21.09.2026, #580). Владелец спросил, зовёт
-    ли что-нибудь агента в `docs/roles.md`. Прогон по девяти живым документам
+    ли что-нибудь агента в `docs/agent/roles.md`. Прогон по девяти живым документам
     нашёл ровно один недостижимый — и это оказалась карта направлений правила
     082, та самая, где стоят шесть пометок «роли нет». Документ объявлял
     читателем «владелец и окно», и ни `AGENTS.md`, ни `CLAUDE.md` его не звали:
@@ -624,7 +624,7 @@ def test_the_path_gate_rejects_an_unlinked_document() -> None:
     документ, на который тот не ссылается, обязан остаться недостижимым.
     """
     # КОРЕНЬ БЕРЁТСЯ БЕЗ ИСХОДЯЩИХ ССЫЛОК, И ЭТО ПРЕДМЕТ, А НЕ ПРИДИРКА.
-    # Здесь стоял `docs/roles.md`, и проверка работала ровно до того дня, когда
+    # Здесь стоял `docs/agent/roles.md`, и проверка работала ровно до того дня, когда
     # карта ролей обзавелась ссылкой на свод: через него стал достижим ВЕСЬ
     # граф, и откат предиката перестал бы краснеть. Опора на «этот файл ни на
     # что не ссылается» — опора на сегодняшнее состояние дерева, а не на
@@ -738,7 +738,7 @@ def test_a_seam_leaves_no_empty_gap() -> None:
 
     ЗАМЕР, РАДИ КОТОРОГО ПРОВЕРКА ЗАВЕДЕНА (21.09.2026, #604). Это ШЕСТАЯ за
     смену находка одного рода: текст переносят, а шов на новом месте не
-    перечитывают. Здесь дубль абзаца вынули из `docs/gaps.md`, а три пустые
+    перечитывают. Здесь дубль абзаца вынули из `docs/dev/gaps.md`, а три пустые
     строки за ним остались — нашёл внешний взгляд находкой `dd90f0e`.
 
     ПРЕДИКАТ БЫЛ ШИРЕ ПРЕДМЕТА ВТРОЕ, пока соседа не назвали: из четырёх
@@ -824,14 +824,20 @@ def test_the_pointer_gate_rejects_an_unlisted_document() -> None:
     """Предикат краснеет, когда документа нет среди ссылок указателя (140)."""
     decision = ROOT / "docs" / "decisions" / "001.md"
     nested = ROOT / "docs" / "agent" / "x.md"
-    docs = [ROOT / "docs" / "roles.md", ROOT / "docs" / "gaps.md", decision, nested, POINTER]
-    listed = {Path("docs/roles.md")}
+    docs = [
+        ROOT / "docs" / "agent" / "roles.md",
+        ROOT / "docs" / "dev" / "gaps.md",
+        decision,
+        nested,
+        POINTER,
+    ]
+    listed = {Path("docs/agent/roles.md")}
     assert unlisted(listed, docs, "") == [
         "docs/agent/x.md",
         "docs/decisions/001.md",
-        "docs/gaps.md",
+        "docs/dev/gaps.md",
     ]
-    listed |= {Path("docs/gaps.md")}
+    listed |= {Path("docs/dev/gaps.md")}
     assert unlisted(listed, docs, "[`decisions/`](decisions/)") == ["docs/agent/x.md"]
     assert unlisted(listed, docs, "[`agent/`](agent/)") == [
         "docs/agent/x.md",
