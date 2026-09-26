@@ -83,8 +83,12 @@ INDENTED_RE: Final = re.compile(r"^(?: {4}|\t)")
 #: не выдумана — ею же читаются связи с задачами (`Refs #1, #2`), и автор
 #: вправе ждать того же здесь
 #: ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+#: Слова строки снятия. Разбор ниже и независимая сверка архива с историей
+#: (`archive_against_history`) берут их отсюда, а не переписывают (209).
+RESOLVED_WORD: Final = "Разобрано:"
+TWIN_WORD: Final = "дубль"
 RESOLVED_RE: Final = re.compile(
-    r"^\s*(?P<mark>Разобрано:)\s*(?P<text>[0-9a-f`][^\n]*)", re.IGNORECASE | re.MULTILINE
+    rf"^\s*(?P<mark>{RESOLVED_WORD})\s*(?P<text>[0-9a-f`][^\n]*)", re.IGNORECASE | re.MULTILINE
 )
 
 #: Отпечатки ИЗ ГОЛОВЫ хвоста: подряд, через запятую, пробел или кавычку.
@@ -101,7 +105,7 @@ MARK_RE: Final = re.compile(r"[0-9a-f]{7}")
 #: отпечатки только до первого слова, B уходила в пояснение и висела в реестре
 #: исправленной: четыре такие записи на 25.09.2026 (#807).
 TWIN_RE: Final = re.compile(
-    r"\A\s*дубль(?=[\s`])((?:[\s,;`]*[0-9a-f]{7}(?![0-9a-f]))+)[\s,;`]*", re.IGNORECASE
+    rf"\A\s*{TWIN_WORD}(?=[\s`])((?:[\s,;`]*[0-9a-f]{{7}}(?![0-9a-f]))+)[\s,;`]*", re.IGNORECASE
 )
 #: ЗАКРЫТЫЙ ПУНКТ ЧЕК-ЛИСТА. Площадка умеет только полное закрытие: `Closes #N`
 #: закрывает задачу целиком, и задача из нескольких этапов закрывается

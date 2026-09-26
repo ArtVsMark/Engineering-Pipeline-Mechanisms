@@ -675,6 +675,7 @@ def test_a_fix_check_resolves_the_finding_of_its_own_change() -> None:
     module.add_change(archive, 10, [full, fixed], "")
     module.settle(archive)
     assert archive["findings"][one]["resolved_by"] == 10
+    assert archive["resolutions"][one]["fix_check"] is True, "источник снятия не помечен"
     other = empty()
     module.add_change(other, 11, [fixed], "")
     assert one not in other["resolutions"], "снята находка чужой ленты"

@@ -276,6 +276,9 @@
     "scripts/agent_run.py": {
       "answer": "as-is"
     },
+    "scripts/archive_against_history.py": {
+      "answer": "as-is"
+    },
     "scripts/arm.py": {
       "answer": "as-is"
     },
