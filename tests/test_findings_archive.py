@@ -778,3 +778,11 @@ def test_reread_keeps_a_link_the_history_does_not_name() -> None:
     archive["resolutions"] = {"eeeeeee": {"by": 9, "twin_of": "fffffff"}}
     module.reread(archive, [(10, "Разобрано: aaaaaaa дубль bbbbbbb")], {9, 10})
     assert archive["resolutions"]["eeeeeee"]["twin_of"] == "fffffff", "связь стёрта"
+
+
+def test_reread_keeps_a_link_of_a_mark_named_without_a_twin() -> None:
+    """Отпечаток, названный историей без «дубль», свою связь не теряет (взгляд на #876)."""
+    archive = empty()
+    archive["resolutions"] = {"eeeeeee": {"by": 9, "twin_of": "fffffff"}}
+    module.reread(archive, [(10, "Разобрано: eeeeeee — ещё раз")], {9, 10})
+    assert archive["resolutions"]["eeeeeee"]["twin_of"] == "fffffff", "связь стёрта"

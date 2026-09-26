@@ -384,10 +384,17 @@ def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: se
     # проходит ВСЮ историю по порядку и заново ставит каждую связь тем же
     # правилом «первая названная»; снятия при этом не теряются.
     # СБРАСЫВАЕТСЯ ТОЛЬКО ТО, ЧТО ИСТОРИЯ ПОСТАВИТ ЗАНОВО (взгляд на #876):
-    # отпечаток, которого не называет ни одно тело из `messages`, держит связь,
-    # пришедшую иначе, — и перечитка её не стирает безвозвратно.
+    # отпечаток, который тела из `messages` называют В СТРОКЕ С «дубль», — там
+    # связь и рождается, и там её ставит перечитка. Названный без «дубль»
+    # связи из истории не получит, и его связь, пришедшая иначе, остаётся.
     replayed = [(number, message) for number, message in messages if number in counted]
-    named = {mark for _, message in replayed for mark in resolved_in(message)}
+    named = {
+        mark
+        for _, message in replayed
+        for said in changerefs.resolutions_parsed(message)
+        if said.groups
+        for mark in said.marks
+    }
     for mark in named & archive["resolutions"].keys():
         archive["resolutions"][mark]["twin_of"] = ""
     for number, message in replayed:
