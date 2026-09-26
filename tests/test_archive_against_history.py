@@ -150,3 +150,28 @@ def test_read_refuses_a_missing_archive(tmp_path: Path) -> None:
     """Нет файла архива — отказ."""
     with pytest.raises(module.NotRun):
         module.read(tmp_path / "нет.json")
+
+
+@pytest.mark.parametrize(
+    ("line", "pairs"),
+    [
+        ("Разобрано: aaaaaaa дубль bbbbbbb", {("aaaaaaa", "bbbbbbb")}),
+        (
+            "Разобрано: aaaaaaa, ccccccc дубль bbbbbbb",
+            {("aaaaaaa", "bbbbbbb"), ("ccccccc", "bbbbbbb")},
+        ),
+        (
+            "Разобрано: aaaaaaa дубль bbbbbbb, ccccccc дубль ddddddd",
+            {("aaaaaaa", "bbbbbbb"), ("ccccccc", "ddddddd")},
+        ),
+        (
+            "Разобрано: aaaaaaa дубль bbbbbbb дубль ccccccc",
+            {("aaaaaaa", "bbbbbbb"), ("bbbbbbb", "ccccccc")},
+        ),
+        ("Разобрано: aaaaaaa дубль bbbbbbb, ccccccc", {("aaaaaaa", "bbbbbbb")}),
+    ],
+    ids=["пара", "список", "пары", "цепочка", "хвост"],
+)
+def test_pairs_in_reads_the_grammar_directly(line: str, pairs: set[tuple[str, str]]) -> None:
+    """Независимый читатель различает пары, списки и цепочки так же, как грамматика (#872)."""
+    assert module.pairs_in(line) == pairs

@@ -349,6 +349,13 @@ def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: se
     `setdefault`: повторная перечитка ничего не меняет.
     """
     before = {mark: said["twin_of"] for mark, said in archive["resolutions"].items()}
+    # СВЯЗИ ПЕРЕСЧИТЫВАЮТСЯ, А НЕ ДОПИСЫВАЮТСЯ (#872). Связь ставится первой
+    # названной и потом не переписывается (#814), поэтому ложная связь,
+    # записанная прежним разбором, пережила бы любую перечитку. Перечитка
+    # проходит ВСЮ историю по порядку и заново ставит каждую связь тем же
+    # правилом «первая названная»; снятия при этом не теряются.
+    for said in archive["resolutions"].values():
+        said["twin_of"] = ""
     for number, message in messages:
         if number in counted:
             add_change(archive, number, [], message)

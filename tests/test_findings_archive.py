@@ -730,3 +730,17 @@ def test_the_declared_price_per_change_is_what_build_spends(
     monkeypatch.setattr(module.ghrest, "request", counting_request)
     archive = module.build("o/r", "t", 10, KINDS, {})
     assert len(spent) == module.CALLS_PER_CHANGE * len(archive["counted"]), spent
+
+
+def test_reread_recomputes_a_wrong_link() -> None:
+    """Перечитка ставит связи заново: ложная связь прежнего разбора не переживает её (#872)."""
+    archive = empty()
+    archive["resolutions"] = {
+        "bbbbbbb": {"by": 10, "twin_of": "ddddddd"},
+        "aaaaaaa": {"by": 10, "twin_of": "bbbbbbb"},
+    }
+    line = "Разобрано: aaaaaaa дубль bbbbbbb, ccccccc дубль ddddddd"
+    module.reread(archive, [(10, line)], {10})
+    said = archive["resolutions"]
+    assert said["bbbbbbb"]["twin_of"] == "", "цель пары получила двойника"
+    assert said["aaaaaaa"]["twin_of"] == "bbbbbbb" and said["ccccccc"]["twin_of"] == "ddddddd"

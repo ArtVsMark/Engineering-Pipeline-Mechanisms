@@ -79,11 +79,36 @@ def mark_said(lines: str, mark: str) -> bool:
     return re.search(rf"(?<![0-9a-f]){mark}(?![0-9a-f])", lines) is not None
 
 
-def twin_said(lines: str, mark: str, twin: str) -> bool:
-    """Стоят ли «mark дубль twin» рядом в строке снятия."""
+#: Отпечаток строки снятия, как его пишут: семь знаков, возможно в кавычках.
+MARK: Final = r"`?[0-9a-f]{7}(?![0-9a-f])`?"
+
+
+def pairs_in(line: str) -> set[tuple[str, str]]:
+    """Связи «источник → цель», которые строка называет, — прямым чтением.
+
+    Цель — отпечаток сразу после слова «дубль». Источники — список через запятую
+    сразу перед ним. Если список сам начинается сразу после «дубль», его первый
+    отпечаток — цель предыдущей связи, а не источник; но одиночный отпечаток
+    там источник цепочки («A дубль B дубль C»).
+    """
     word = changerefs.TWIN_WORD
-    pattern = rf"(?<![0-9a-f]){mark}`?\s+{word}\s+`?{twin}(?![0-9a-f])"
-    return re.search(pattern, lines, re.IGNORECASE) is not None
+    found: set[tuple[str, str]] = set()
+    pattern = re.compile(
+        rf"(?P<pre>{word}\s+)?(?P<src>{MARK}(?:\s*,\s*{MARK})*)(?=\s+{word}\s+(?P<dst>{MARK}))",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(line):
+        sources = changerefs.MARK_RE.findall(match["src"].lower())
+        if match["pre"] and len(sources) > 1:
+            sources = sources[1:]
+        target = changerefs.MARK_RE.findall(match["dst"].lower())[0]
+        found |= {(source, target) for source in sources}
+    return found
+
+
+def twin_said(lines: str, mark: str, twin: str) -> bool:
+    """Называет ли какая-либо строка снятия связь «mark дубль twin»."""
+    return any((mark, twin) in pairs_in(line) for line in lines.splitlines())
 
 
 def check(archive: dict[str, Any], log: str) -> dict[str, list[str]]:
