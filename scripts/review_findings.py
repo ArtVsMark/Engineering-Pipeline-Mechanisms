@@ -452,10 +452,57 @@ def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(comments[ends[-2] + 1 :])
 
 
+def looks(comments: list[dict[str, Any]]) -> list[tuple[int, list[dict[str, Any]]]]:
+    """Все заходы взгляда по порядку: id комментария с вердиктом и лента захода.
+
+    Границы те же, что у `last_look`: заход кончается вердиктом, последний
+    тянется до конца ленты, ответ верификатора заходом не считается. Последний
+    элемент — ровно `last_look`, пока вердиктов больше одного.
+
+    ЗАЧЕМ ВСЕ, А НЕ ПОСЛЕДНИЙ. Запись находок вытесняется в группе
+    `findings-write` (#842): отменённый заход не записан, а следующий читает
+    только себя, и находки, которых он не повторил, терялись без следа.
+    Догону нужен каждый заход после записанного.
+    """
+    comments = [comment for comment in comments if not is_verification(comment)]
+    ends = [
+        place
+        for place, comment in enumerate(comments)
+        if any(VERDICT_RE.match(line) for line in bare_lines(comment.get("body") or ""))
+    ]
+    out: list[tuple[int, list[dict[str, Any]]]] = []
+    for step, end in enumerate(ends):
+        start = ends[step - 1] + 1 if step else 0
+        stop = end + 1 if step + 1 < len(ends) else len(comments)
+        out.append((int(comments[end].get("id") or 0), list(comments[start:stop])))
+    return out
+
+
+def unrecorded(
+    comments: list[dict[str, Any]], since: int | None
+) -> list[tuple[int, list[dict[str, Any]]]]:
+    """Заходы после записанного; отметки нет или она не найдена — только последний.
+
+    ПОЧЕМУ БЕЗ ОТМЕТКИ НЕ ВСЁ. Изменение без отметки записывалось ещё до неё,
+    и перечитка всей ленты вернула бы в реестр находки, снятые с тех пор, —
+    ровно то, от чего `last_look` и заведён (замер на #333). Предел назван: у
+    изменения без отметки, чей последний заход вытеснен, пропавшее не догнать.
+    """
+    seen = looks(comments)
+    ids = [one for one, _ in seen]
+    if since is None or since not in ids:
+        return seen[-1:]
+    return seen[ids.index(since) + 1 :]
+
+
 parse_entries = findings.parse_entries
 
 
-def render_body(entries: dict[str, findings.Entry], swept_to: str = "") -> str:
+def render_body(
+    entries: dict[str, findings.Entry],
+    swept_to: str = "",
+    recorded: dict[int, int] | None = None,
+) -> str:
     """Собирает тело живой задачи: заметки, а не счётчики.
 
     Записывается заголовок находки, а не число: «находок 2» не отвечает на
@@ -492,6 +539,8 @@ def render_body(entries: dict[str, findings.Entry], swept_to: str = "") -> str:
     # было бы «последние тридцать закрытых», то есть отсчёт шёл бы от публикации
     # снятия и тем короче, чем быстрее мержатся соседи (079).
     lines += [f"Убрано до: {swept_to or NEVER_SWEPT}", ""]
+    # ОТМЕТКА ЗАПИСАННЫХ ЗАХОДОВ — ПО НЕЙ ДОГОНЯЕТСЯ ВЫТЕСНЕННАЯ ЗАПИСЬ (#842).
+    lines += [f"Записано: {render_recorded(recorded or {})}", ""]
     if entries:
         lines.append("## Не разобрано")
         lines.append("")
@@ -665,6 +714,27 @@ def parse_swept(body: str | None) -> str:
     if last == NEVER_SWEPT:
         return ""
     return LEGACY_MEANS if LEGACY_SWEPT_RE.match(last) else last
+
+
+#: Какой заход взгляда записан у каждого изменения: номер и id комментария с
+#: вердиктом. По ней запись и уборка догоняют заходы, чья запись вытеснена в
+#: группе `findings-write` (#842). Хранится там же, где отметка уборки: тело
+#: реестра — единственное место, которое обе записи читают и пишут.
+RECORDED_RE: Final = re.compile(r"^Записано: (.*)$", re.M)
+RECORDED_ONE_RE: Final = re.compile(r"#(\d+)@(\d+)")
+
+
+def parse_recorded(body: str | None) -> dict[int, int]:
+    """Отметка записанных заходов: номер изменения → id комментария с вердиктом."""
+    found = RECORDED_RE.findall(body or "")
+    if not found:
+        return {}
+    return {int(pr): int(look) for pr, look in RECORDED_ONE_RE.findall(found[-1])}
+
+
+def render_recorded(recorded: dict[int, int]) -> str:
+    """Отметка записанных заходов строкой; пусто пишется тем же знаком, что у уборки."""
+    return " ".join(f"#{pr}@{look}" for pr, look in sorted(recorded.items())) or NEVER_SWEPT
 
 
 def twins_of_resolved(
@@ -905,10 +975,11 @@ def save(
     entries: dict[str, findings.Entry],
     apply: bool,
     swept_to: str = "",
+    recorded: dict[int, int] | None = None,
 ) -> None:
     """Записывает живую задачу: обновляет по месту или заводит одну."""
     number, _ = live_issue(repo, token)
-    body = render_body(entries, swept_to)
+    body = render_body(entries, swept_to, recorded)
     if not apply:
         print(
             f"записал бы {len(entries)} заметок " + (f"в #{number}" if number else "в новую задачу")
@@ -922,6 +993,102 @@ def save(
         return
     ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": body})
     print(f"живая задача #{number} обновлена: заметок {len(entries)}")
+
+
+def record_look(
+    entries: dict[str, findings.Entry], pr: int, look: list[dict[str, Any]], strict: bool
+) -> None:
+    """Записывает находки одного захода взгляда в реестр; вердикта нет — отказ."""
+    # ВЕРДИКТ И СТРОКИ НАХОДОК ЧИТАЮТСЯ С ОДНОГО ОТРЕЗКА. Прежде число
+    # брали с последнего захода, а строки — со всей ленты, и спорили
+    # они по устройству, а не по вине ревьюера (022).
+    verdict = verdict_of(look)
+    if verdict is None:
+        raise NotRun(
+            f"в изменении #{pr} нет строки вердикта — ревьюер не дописал ответ "
+            "или не отработал вовсе; это не «находок нет» (075)"
+        )
+    titles = findings_of(look)
+    seen_by = {title: роль for _, title, _, роль in found_in(look)}
+    if len(titles) != verdict:
+        # Расхождение названо, а не сглажено: вердикт и строки находок
+        # пишет один и тот же ответ, и если они спорят, доверять нечему.
+        print(
+            f"::warning::вердикт по #{pr} говорит «находок {verdict}», "
+            f"а строк находок {len(titles)} — записаны строки",
+            file=sys.stderr,
+        )
+    renamed = 0
+    # Пары «строка — прежняя запись» решаются для захода ЦЕЛИКОМ, до
+    # записи: см. `pair_up`. Построчный выбор зависел от порядка строк.
+    retold = pair_up(entries, pr, [title for _, title, _ in titles], strict=strict)
+    for (weight, title, род), mark in zip(titles, retold, strict=True):
+        # ЗАПИСЬ ИЩЕТСЯ ПРЕЖДЕ, ЧЕМ ЗАВОДИТСЯ. Отпечаток берётся от
+        # заголовка, а заголовок ревьюер на новом заходе пересказывает
+        # — и та же находка ложилась второй записью. Замер 10.09.2026:
+        # четыре записи об одной беде на #149 и две на #148.
+        #
+        # Прежний отпечаток при этом СОХРАНЯЕТСЯ: по нему находку уже
+        # могли назвать разобранной в теле изменения, и смена отпечатка
+        # обессмыслила бы снятие.
+        if mark is not None:
+            renamed += 1
+            # Ответ верификатора ПЕРЕЖИВАЕТ пересказ находки: он о
+            # премисе, а не о формулировке, и переписывать запись
+            # заново значило бы терять уже сделанную работу — тот же
+            # класс, что потеря хвоста позднего взгляда в реестре
+            # непросмотренного (022).
+            entries[mark] = replace(
+                entries[mark],
+                pr=pr,
+                weight=weight,
+                kind=род,
+                role=seen_by.get(title) or entries[mark].role,
+            )
+            continue
+        entries[fingerprint(title)] = findings.Entry(
+            pr, weight, title, kind=род, role=seen_by.get(title, "")
+        )
+    said = f"из #{pr}: вердикт {verdict}, строк находок {len(titles)}"
+    if renamed:
+        said += f", из них уже лежат под своим отпечатком {renamed}"
+    print(said)
+
+
+def open_changes(repo: str, token: str) -> set[int]:
+    """Номера открытых изменений."""
+    return {int(one["number"]) for one in ghrest.paginate(f"repos/{repo}/pulls?state=open", token)}
+
+
+def catch_up(
+    repo: str,
+    token: str,
+    entries: dict[str, findings.Entry],
+    recorded: dict[int, int],
+    strict: bool,
+) -> None:
+    """Дописывает заходы, чья запись вытеснена: у открытых и у отмеченных изменений.
+
+    ЗАЧЕМ (#842). Запись находок идёт через группу `findings-write`, и
+    площадка держит в ней один ожидающий прогон: новый вытесняет прежний.
+    Замер 25.09.2026 по 1000 прогонам: отменено 7 записей из 662. Следующая
+    запись читала только свой заход, и находки вытесненного, которых она не
+    повторила, пропадали без следа.
+
+    Изменение, которое уже не открыто, но стоит в отметке, догоняется в
+    последний раз, и отметка с него снимается: так ловится запись,
+    вытесненная прямо перед слиянием.
+    """
+    live = open_changes(repo, token)
+    for pr in sorted(live | set(recorded)):
+        comments = list(ghrest.paginate(f"repos/{repo}/issues/{pr}/comments", token))
+        if looks(comments):
+            for look_id, look in unrecorded(comments, recorded.get(pr)):
+                print(f"догон записи: #{pr}, заход {look_id}")
+                record_look(entries, pr, look, strict)
+                recorded[pr] = look_id
+        if pr not in live:
+            recorded.pop(pr, None)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -954,6 +1121,7 @@ def main(argv: list[str] | None = None) -> int:
 
         _, body = live_issue(args.repo, token)
         entries = parse_entries(body)
+        recorded = parse_recorded(body)
 
         if args.tell:
             # ПРЕДМЕТ ВЕРИФИКАТОРА ЧИТАЕТСЯ ИЗ РЕЕСТРА, а не передаётся кнопкой
@@ -991,63 +1159,24 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.pr is not None:
             comments = list(ghrest.paginate(f"repos/{args.repo}/issues/{args.pr}/comments", token))
-            # ВЕРДИКТ И СТРОКИ НАХОДОК ЧИТАЮТСЯ С ОДНОГО ОТРЕЗКА. Прежде число
-            # брали с последнего захода, а строки — со всей ленты, и спорили
-            # они по устройству, а не по вине ревьюера (022).
-            look = last_look(comments)
-            verdict = verdict_of(look)
-            if verdict is None:
-                raise NotRun(
-                    f"в изменении #{args.pr} нет строки вердикта — ревьюер не дописал ответ "
-                    "или не отработал вовсе; это не «находок нет» (075)"
-                )
-            titles = findings_of(look)
-            seen_by = {title: роль for _, title, _, роль in found_in(look)}
-            if len(titles) != verdict:
-                # Расхождение названо, а не сглажено: вердикт и строки находок
-                # пишет один и тот же ответ, и если они спорят, доверять нечему.
-                print(
-                    f"::warning::вердикт по #{args.pr} говорит «находок {verdict}», "
-                    f"а строк находок {len(titles)} — записаны строки",
-                    file=sys.stderr,
-                )
-            renamed = 0
-            # Пары «строка — прежняя запись» решаются для захода ЦЕЛИКОМ, до
-            # записи: см. `pair_up`. Построчный выбор зависел от порядка строк.
-            retold = pair_up(
-                entries, args.pr, [title for _, title, _ in titles], strict=args.strict
+            # ДОПИСЫВАЮТСЯ ВСЕ ЗАХОДЫ ПОСЛЕ ЗАПИСАННОГО, а не последний: прежняя
+            # запись могла быть вытеснена в группе `findings-write` (#842).
+            # Заходов нет вовсе — читается вся лента, и отказ «нет вердикта»
+            # звучит, как прежде (075).
+            pending = (
+                unrecorded(comments, recorded.get(args.pr))
+                if looks(comments)
+                else [(0, list(comments))]
             )
-            for (weight, title, род), mark in zip(titles, retold, strict=True):
-                # ЗАПИСЬ ИЩЕТСЯ ПРЕЖДЕ, ЧЕМ ЗАВОДИТСЯ. Отпечаток берётся от
-                # заголовка, а заголовок ревьюер на новом заходе пересказывает
-                # — и та же находка ложилась второй записью. Замер 10.09.2026:
-                # четыре записи об одной беде на #149 и две на #148.
-                #
-                # Прежний отпечаток при этом СОХРАНЯЕТСЯ: по нему находку уже
-                # могли назвать разобранной в теле изменения, и смена отпечатка
-                # обессмыслила бы снятие.
-                if mark is not None:
-                    renamed += 1
-                    # Ответ верификатора ПЕРЕЖИВАЕТ пересказ находки: он о
-                    # премисе, а не о формулировке, и переписывать запись
-                    # заново значило бы терять уже сделанную работу — тот же
-                    # класс, что потеря хвоста позднего взгляда в реестре
-                    # непросмотренного (022).
-                    entries[mark] = replace(
-                        entries[mark],
-                        pr=args.pr,
-                        weight=weight,
-                        kind=род,
-                        role=seen_by.get(title) or entries[mark].role,
-                    )
-                    continue
-                entries[fingerprint(title)] = findings.Entry(
-                    args.pr, weight, title, kind=род, role=seen_by.get(title, "")
-                )
-            said = f"из #{args.pr}: вердикт {verdict}, строк находок {len(titles)}"
-            if renamed:
-                said += f", из них уже лежат под своим отпечатком {renamed}"
-            print(said)
+            if not pending:
+                print(f"из #{args.pr}: последний заход уже записан")
+            for look_id, look in pending:
+                record_look(entries, args.pr, look, args.strict)
+                if look_id:
+                    recorded[args.pr] = look_id
+
+        if args.sweep:
+            catch_up(args.repo, token, entries, recorded, args.strict)
 
         # Уборка идёт ПОСЛЕ записи, а не вместо: обратный порядок терял бы
         # заметку, снятую и заново найденную одним заходом.
@@ -1066,7 +1195,7 @@ def main(argv: list[str] | None = None) -> int:
             # решает, что сломалась уборка (045).
             print(f"::warning::снятие `{mark}` не принято: {why}", file=sys.stderr)
 
-        save(args.repo, token, entries, args.apply, swept_to)
+        save(args.repo, token, entries, args.apply, swept_to, recorded)
     except (NotRun, ghrest.TransportError) as exc:
         print(f"механизм не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
