@@ -72,11 +72,23 @@ def test_refused_token_names_the_expiry(refusing_server: str) -> None:
     assert "401" in message
 
 
-def test_missing_token_is_a_different_outcome() -> None:
+def test_missing_token_is_a_different_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
     """Отсутствие секрета — «не настроено», и это другой исход, а не отказ.
 
     Спрашивается НЕ сухой прогон: он на площадку не ходит вовсе, и токен ему
     не нужен — предмет у него дерево, а не изменение.
+
+    ТРАНСПОРТ ЗАКРЫТ: исход «не настроено» обязан прийти ДО первого обращения
+    к площадке. Сверка одного кода выхода осталась бы зелёной и тогда, когда
+    запрос ушёл бы раньше проверки токена (взгляд на #865).
     """
+
+    def no_platform(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("обращение к площадке до проверки токена")
+
+    for env in ("GH_TOKEN", "GITHUB_TOKEN", "MERGE_QUEUE_TOKEN"):
+        monkeypatch.delenv(env, raising=False)
+    for name in ("request", "paginate", "graphql"):
+        monkeypatch.setattr(agent_pr.ghrest, name, no_platform)
     code = agent_pr.main(["--repo", "o/r", "--branch", "agent/x"])
     assert code == agent_pr.EXIT_NOT_CONFIGURED

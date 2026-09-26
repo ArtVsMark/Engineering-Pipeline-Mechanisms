@@ -690,3 +690,43 @@ def test_fixed_in_reads_only_the_reviewers_closed_answers() -> None:
     )
     assert module.fixed_in([{"user": {"login": rf.REVIEWER_AUTHOR}, "body": body}]) == ["aaa1111"]
     assert module.fixed_in([{"user": {"login": "someone"}, "body": body}]) == []
+
+
+def test_the_wave_fits_the_quota_share() -> None:
+    """Волна архива вместе с худшим часом расписаний укладывается в долю лимита (033).
+
+    Лимит и доля — из одного места, `.rules/schedules.json`: своя константа
+    лимита расходилась с ним впятеро (взгляд на #874). Доля уже занята
+    расписаниями, поэтому волна складывается с их худшим часом, а не
+    сравнивается с долей целиком. Волна полной бывает только на накопленном
+    долге: после догона каждое слияние дописывает одно изменение.
+    """
+    from tests.test_schedules import declared, worst_hour
+
+    said = declared()
+    limit = int(said["limits"]["gh_api_per_hour"]) * float(said["share"])
+    price = module.BUDGET * module.CALLS_PER_CHANGE + worst_hour(said)
+    assert price <= limit, f"волна архива с расписаниями стоит {price} при доле {limit:.0f}"
+
+
+def test_the_declared_price_per_change_is_what_build_spends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`CALLS_PER_CHANGE` — не объявление, а замер: столько запросов `build` делает на изменение."""
+    platform(monkeypatch)
+    spent: list[str] = []
+    paginate, request = module.ghrest.paginate, module.ghrest.request
+
+    def counting_paginate(path: str, *rest: Any, **kw: Any) -> Any:
+        if "/pulls?" not in path:
+            spent.append(path)
+        return paginate(path, *rest, **kw)
+
+    def counting_request(method: str, path: str, *rest: Any, **kw: Any) -> Any:
+        spent.append(path)
+        return request(method, path, *rest, **kw)
+
+    monkeypatch.setattr(module.ghrest, "paginate", counting_paginate)
+    monkeypatch.setattr(module.ghrest, "request", counting_request)
+    archive = module.build("o/r", "t", 10, KINDS, {})
+    assert len(spent) == module.CALLS_PER_CHANGE * len(archive["counted"]), spent
