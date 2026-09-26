@@ -1803,7 +1803,7 @@ def test_a_recorded_look_is_not_written_twice(
 
 
 def test_the_sweep_catches_up_open_and_marked_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Уборка догоняет отмеченные; без отметки только отмечает; слитое снимается."""
+    """Уборка догоняет открытые и отмеченные; без отметки пишет последний; слитое снимается."""
     monkeypatch.setattr(module, "open_changes", lambda repo, token: {5})
     feeds = {
         5: THREE_LOOKS,
@@ -1814,7 +1814,7 @@ def test_the_sweep_catches_up_open_and_marked_changes(monkeypatch: pytest.Monkey
     }
     written, marks = run_record(monkeypatch, "Записано: #7@10", feeds, ["--sweep"])
     titles = sorted(entry.title for entry in written.values())
-    assert titles == ["перед слиянием"], "уборка записала изменение без отметки (класс #333)"
+    assert titles == ["перед слиянием", "третья"], "первый заход нового изменения потерян"
     assert marks == {5: 3}, "отметка слитого #7 не снята"
 
 
@@ -1928,6 +1928,7 @@ def test_a_platform_refusal_on_one_change_does_not_stop_the_sweep(
     recorded = {5: 1, 6: 1}
     module.catch_up("o/r", "t", entries, recorded, strict=False)
     assert recorded == {5: 1, 6: 3}
+    assert sorted(entry.title for entry in entries.values()) == ["только во втором", "третья"]
     assert "догон записи #5 пропущен" in capsys.readouterr().err
 
 
