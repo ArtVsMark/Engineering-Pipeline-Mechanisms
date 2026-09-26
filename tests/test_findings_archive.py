@@ -234,7 +234,7 @@ def test_an_unreadable_history_writes_nothing(
 def test_a_run_writes_the_archive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Заход кладёт архив по названному адресу."""
     platform(monkeypatch)
-    monkeypatch.setattr(module, "git_log", lambda where=None: "")
+    monkeypatch.setattr(module, "git_log", lambda where=None, ref="": "")
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
     out = tmp_path / "deep" / "findings.json"
     assert module.main(["--repo", "o/r", "--out", str(out)]) == module.EXIT_OK
@@ -639,7 +639,7 @@ def test_git_log_reads_the_history_oldest_first(tmp_path: Path) -> None:
             "-m",
             f"Разобрано: {number:07d}",
         )
-    assert module.merged_messages(module.git_log(tmp_path)) == [
+    assert module.merged_messages(module.git_log(tmp_path, "HEAD")) == [
         (3, "Тема (#3)\n\nРазобрано: 0000003"),
         (7, "Тема (#7)\n\nРазобрано: 0000007"),
     ]
@@ -689,7 +689,9 @@ def test_the_archive_hour_fits_the_quota_share() -> None:
     расписаниями, поэтому час архива складывается с их худшим часом. Час
     архива — не один заход, а `MERGES_PER_HOUR`: прогон идёт на каждое
     слияние, и каждый платит свою постоянную часть; волна изменений — одна на
-    всех, потому что учтённое второй раз не пишется (взгляд на #874).
+    всех, потому что учтённое второй раз не пишется (взгляд на #874). Одна она
+    только пока идущий заход не снимают: снятый потратил бы волну впустую, и
+    это держит `test_a_running_archive_is_not_cancelled` (взгляд на #879).
     """
     from tests.test_schedules import declared, worst_hour
 
@@ -702,14 +704,42 @@ def test_the_archive_hour_fits_the_quota_share() -> None:
     assert price <= limit, f"час архива с расписаниями стоит {price} при доле {limit:.0f}"
 
 
+def sliding_hour_max(times: list[int]) -> int:
+    """Больше всего отметок времени в любом окне шестидесяти минут."""
+    worst, start = 0, 0
+    for end, moment in enumerate(times):
+        while moment - times[start] >= 3600:
+            start += 1
+        worst = max(worst, end - start + 1)
+    return worst
+
+
+def test_the_hour_slides_across_the_utc_boundary() -> None:
+    """Семь и семь слияний через границу часа по UTC — это четырнадцать, а не семь (#879)."""
+    edge = 3600 * 100
+    times = [edge - 60 * k for k in range(1, 8)] + [edge + 60 * k for k in range(7)]
+    assert sliding_hour_max(sorted(times)) == 14
+
+
+def test_a_running_archive_is_not_cancelled() -> None:
+    """Идущий заход архива не снимается: волна платится один раз (взгляд на #879)."""
+    import yaml
+
+    said = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
+    )
+    assert said["concurrency"]["cancel-in-progress"] is False
+
+
 def test_merges_per_hour_is_not_below_the_history() -> None:
     """Замер `MERGES_PER_HOUR` держится историей общей ветки, а не словом (005).
 
-    Мелкий клон видит меньше слияний, и тест тогда слабее, но не ложно красен:
-    число может только недосчитаться.
+    Час — СКОЛЬЗЯЩИЙ: окно лимита площадки к часам UTC не привязано, и всплеск
+    через границу часа по UTC делился бы надвое (взгляд на #879). Мелкий клон
+    видит меньше слияний, и тест тогда слабее, но не ложно красен: число может
+    только недосчитаться.
     """
     import subprocess
-    from collections import Counter
 
     log = subprocess.run(
         ["git", "log", "--format=%ct%x1f%s"],
@@ -719,12 +749,12 @@ def test_merges_per_hour_is_not_below_the_history() -> None:
         encoding="utf-8",
         check=True,
     ).stdout
-    hours = Counter(
-        int(when) // 3600
+    times = sorted(
+        int(when)
         for when, _, subject in (line.partition("\x1f") for line in log.splitlines())
         if module.MERGED_SUBJECT_RE.search(subject)
     )
-    worst = max(hours.values(), default=0)
+    worst = sliding_hour_max(times)
     assert worst <= module.MERGES_PER_HOUR, (
         f"за час слито {worst} изменений, а объявлено {module.MERGES_PER_HOUR}: "
         "подними число и пересчитай час архива"
@@ -778,3 +808,23 @@ def test_reread_keeps_a_link_the_history_does_not_name() -> None:
     archive["resolutions"] = {"eeeeeee": {"by": 9, "twin_of": "fffffff"}}
     module.reread(archive, [(10, "Разобрано: aaaaaaa дубль bbbbbbb")], {9, 10})
     assert archive["resolutions"]["eeeeeee"]["twin_of"] == "fffffff", "связь стёрта"
+
+
+def test_the_history_is_the_trunks_not_the_runs(tmp_path: Path) -> None:
+    """Архив читает историю общей ветки, а не головы прогона (взгляд на #879)."""
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+    git("init", "-q", "-b", "main")
+    git("commit", "-q", "--allow-empty", "-m", "Своё (#1)")
+    git("update-ref", f"refs/remotes/{module.TRUNK_REF}", "HEAD")
+    git("checkout", "-q", "-b", "other")
+    git("commit", "-q", "--allow-empty", "-m", "Чужое (#2)", "-m", "Разобрано: aaaaaaa")
+    assert [one for one, _ in module.merged_messages(module.git_log(tmp_path))] == [1]
