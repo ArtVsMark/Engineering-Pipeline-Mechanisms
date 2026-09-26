@@ -1816,3 +1816,28 @@ def test_the_sweep_catches_up_open_and_marked_changes(monkeypatch: pytest.Monkey
     titles = sorted(entry.title for entry in written.values())
     assert titles == ["перед слиянием", "третья"], titles
     assert marks == {5: 3}, "отметка слитого #7 не снята"
+
+
+def test_render_recorded_writes_empty_as_the_sweep_does() -> None:
+    """Пустая отметка пишется тем же знаком, что у уборки, и читается пустой."""
+    assert module.render_recorded({}) == module.NEVER_SWEPT
+    assert module.parse_recorded(f"Записано: {module.render_recorded({})}") == {}
+
+
+def test_record_look_refuses_a_look_without_a_verdict() -> None:
+    """Заход без вердикта — отказ, а не «находок нет» (075)."""
+    entries: dict[str, Any] = {}
+    with pytest.raises(module.NotRun):
+        module.record_look(entries, 5, [said(1, "НАХОДКА[риск]: без числа")], strict=False)
+    module.record_look(entries, 5, THREE_LOOKS[1:2], strict=False)
+    assert [entry.title for entry in entries.values()] == ["только во втором"]
+
+
+def test_catch_up_leaves_a_change_without_looks_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Открытое изменение без вердикта не отмечается и не пишется."""
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: {5})
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter([said(1, "идёт")]))
+    entries: dict[str, Any] = {}
+    recorded: dict[int, int] = {}
+    module.catch_up("o/r", "t", entries, recorded, strict=False)
+    assert entries == {} and recorded == {}
