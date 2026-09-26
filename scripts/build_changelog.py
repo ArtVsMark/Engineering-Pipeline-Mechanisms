@@ -38,6 +38,7 @@ from typing import Final
 
 import journal
 import paths
+import version as project_version
 
 FRAGMENTS: Final = paths.FRAGMENTS
 RELEASED: Final = paths.RELEASED
@@ -259,7 +260,7 @@ def releases() -> list[Path]:
         return []
     return sorted(
         (p for p in RELEASED.iterdir() if p.is_dir()),
-        key=lambda p: [int(x) for x in p.name.split(".")] if VERSION_RE.match(p.name) else [0],
+        key=lambda p: project_version.digits(p.name) if VERSION_RE.match(p.name) else (0, 0, 0),
         reverse=True,
     )
 
