@@ -362,7 +362,9 @@ def test_the_registry_does_not_get_the_earlier_look_back(
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter(feed))
     monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     monkeypatch.setattr(
-        module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
+        module,
+        "save",
+        lambda repo, token, entries, apply, swept_to=0, recorded=None: written.update(entries),
     )
     module.main(["--repo", "o/r", "--pr", "333"])
     titles = sorted(entry.title for entry in written.values())
@@ -740,7 +742,9 @@ def test_the_verifier_answer_survives_a_retelling() -> None:
     monkey.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     written: dict[str, Any] = {}
     monkey.setattr(
-        module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
+        module,
+        "save",
+        lambda repo, token, entries, apply, swept_to=0, recorded=None: written.update(entries),
     )
     module.main(["--repo", "o/r", "--pr", "333"])
     monkey.undo()
@@ -790,6 +794,7 @@ def test_an_empty_registry_is_its_own_outcome(
     одинаковы, и различает их только отдельный исход
     ([039](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/039-three-outcomes-not-two.md)).
     """
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: set())
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
@@ -800,6 +805,7 @@ def test_an_empty_registry_is_its_own_outcome(
 def test_a_registry_with_entries_stays_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     """Неразобранное осталось — исход «ждёт», и он не тот же, что пустой реестр."""
     kept = {"abc1234": findings_module.Entry(131, "дефект", "очередь читает не то")}
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: set())
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
@@ -1572,7 +1578,9 @@ def test_a_new_entry_keeps_the_role_that_saw_it(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     written: dict[str, Any] = {}
     monkeypatch.setattr(
-        module, "save", lambda repo, token, entries, apply, swept_to=0: written.update(entries)
+        module,
+        "save",
+        lambda repo, token, entries, apply, swept_to=0, recorded=None: written.update(entries),
     )
     module.main(["--repo", "o/r", "--pr", "333"])
     assert [one.role for one in written.values()] == ["архитектор"]
@@ -1686,6 +1694,7 @@ def test_the_sweep_hands_the_closers_to_the_answer_check(
     }
     files = {20: {module.ANSWER_FILE}, 30: {"scripts/arm.py"}}
     saved: list[dict[str, Any]] = []
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: set())
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, ""))
     monkeypatch.setattr(module, "parse_entries", lambda body: dict(kept))
@@ -1701,3 +1710,134 @@ def test_the_sweep_hands_the_closers_to_the_answer_check(
         assert set(saved[-1]) == set(left), f"снявший #{closer}: реестр не тот"
         said = capsys.readouterr().err
         assert ("не принято" in said) == bool(left), f"снявший #{closer}: отказ не назван"
+
+
+# --- догон вытесненной записи (#842) -----------------------------------------
+
+
+def said(look_id: int, body: str) -> dict[str, Any]:
+    """Комментарий с id, как его отдаёт площадка."""
+    return {"id": look_id, "body": body}
+
+
+THREE_LOOKS = [
+    said(1, "НАХОДКА[риск]: первая\nВЕРДИКТ: находок 1"),
+    said(2, "НАХОДКА[риск]: только во втором\nВЕРДИКТ: находок 1"),
+    said(3, "НАХОДКА[риск]: третья\nВЕРДИКТ: находок 1"),
+]
+
+
+def test_looks_split_the_feed_at_each_verdict() -> None:
+    """Заходы режутся по вердикту, а последний — ровно `last_look` (#842)."""
+    seen = module.looks(THREE_LOOKS)
+    assert [one for one, _ in seen] == [1, 2, 3]
+    assert seen[-1][1] == module.last_look(THREE_LOOKS)
+    assert module.looks([said(9, "без вердикта")]) == []
+
+
+@pytest.mark.parametrize(
+    ("since", "ids"),
+    [(None, [3]), (1, [2, 3]), (3, []), (42, [3])],
+    ids=["без отметки", "после первого", "всё записано", "отметка не найдена"],
+)
+def test_unrecorded_takes_the_looks_after_the_mark(since: int | None, ids: list[int]) -> None:
+    """После отметки — все; без отметки или с потерянной — только последний."""
+    assert [one for one, _ in module.unrecorded(THREE_LOOKS, since)] == ids
+
+
+def test_the_recorded_mark_reads_back_what_the_body_writes() -> None:
+    """Отметка записанных заходов переживает круг тела реестра; пусто — пусто."""
+    body = module.render_body({}, "", {852: 5841351850, 7: 11})
+    assert "Записано: #7@11 #852@5841351850" in body
+    assert module.parse_recorded(body) == {7: 11, 852: 5841351850}
+    assert module.parse_recorded(module.render_body({}, "")) == {}
+
+
+def run_record(
+    monkeypatch: pytest.MonkeyPatch,
+    body: str,
+    feeds: dict[int, list[dict[str, Any]]],
+    argv: list[str],
+) -> tuple[dict[str, Any], dict[int, int]]:
+    """Прогон `main` с подменённой площадкой: что записано и какая отметка ушла."""
+    written: dict[str, Any] = {}
+    marks: dict[int, int] = {}
+
+    def paginate(path: str, token: str) -> Any:
+        return iter(feeds[int(path.split("/")[-2])])
+
+    def save(
+        repo: str, token: str, entries: Any, apply: bool, swept_to: str = "", recorded: Any = None
+    ) -> None:
+        written.update(entries)
+        marks.update(recorded or {})
+
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module, "live_issue", lambda repo, token: (1, body))
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
+    monkeypatch.setattr(module, "save", save)
+    module.main(["--repo", "o/r", *argv])
+    return written, marks
+
+
+def test_the_record_catches_up_a_displaced_look(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Записан первый заход, второй вытеснен: запись третьего дописывает и второй (#842)."""
+    written, marks = run_record(
+        monkeypatch, "Записано: #333@1", {333: THREE_LOOKS}, ["--pr", "333"]
+    )
+    titles = sorted(entry.title for entry in written.values())
+    assert titles == ["только во втором", "третья"], "находка вытесненного захода потеряна"
+    assert marks == {333: 3}
+
+
+def test_a_recorded_look_is_not_written_twice(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Последний заход уже записан — повторная запись ничего не дописывает."""
+    written, marks = run_record(
+        monkeypatch, "Записано: #333@3", {333: THREE_LOOKS}, ["--pr", "333"]
+    )
+    assert written == {} and marks == {333: 3}
+    assert "уже записан" in capsys.readouterr().out
+
+
+def test_the_sweep_catches_up_open_and_marked_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Уборка догоняет открытые и отмеченные; слитое догоняется последний раз и снимается."""
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: {5})
+    feeds = {
+        5: THREE_LOOKS,
+        7: [
+            said(10, "ВЕРДИКТ: находок 0"),
+            said(11, "НАХОДКА[риск]: перед слиянием\nВЕРДИКТ: находок 1"),
+        ],
+    }
+    written, marks = run_record(monkeypatch, "Записано: #7@10", feeds, ["--sweep"])
+    titles = sorted(entry.title for entry in written.values())
+    assert titles == ["перед слиянием", "третья"], titles
+    assert marks == {5: 3}, "отметка слитого #7 не снята"
+
+
+def test_render_recorded_writes_empty_as_the_sweep_does() -> None:
+    """Пустая отметка пишется тем же знаком, что у уборки, и читается пустой."""
+    assert module.render_recorded({}) == module.NEVER_SWEPT
+    assert module.parse_recorded(f"Записано: {module.render_recorded({})}") == {}
+
+
+def test_record_look_refuses_a_look_without_a_verdict() -> None:
+    """Заход без вердикта — отказ, а не «находок нет» (075)."""
+    entries: dict[str, Any] = {}
+    with pytest.raises(module.NotRun):
+        module.record_look(entries, 5, [said(1, "НАХОДКА[риск]: без числа")], strict=False)
+    module.record_look(entries, 5, THREE_LOOKS[1:2], strict=False)
+    assert [entry.title for entry in entries.values()] == ["только во втором"]
+
+
+def test_catch_up_leaves_a_change_without_looks_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Открытое изменение без вердикта не отмечается и не пишется."""
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: {5})
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token: iter([said(1, "идёт")]))
+    entries: dict[str, Any] = {}
+    recorded: dict[int, int] = {}
+    module.catch_up("o/r", "t", entries, recorded, strict=False)
+    assert entries == {} and recorded == {}
