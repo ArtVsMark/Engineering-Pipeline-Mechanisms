@@ -11,6 +11,11 @@
 (`check_version`, `build_changelog`). После починки второй модуль спрашивает
 первый, и повторов ноль.
 
+С 26.09.2026 СУДИТСЯ И ОБРАЗЕЦ СТРОКОЙ В ВЫЗОВЕ `re.*`, а не только в
+`re.compile` (взгляд на #861): при расширении нашлось два повтора — отпечаток
+находки (`changerefs`, `findings_archive`, один предмет, сведён) и «числа
+подряд» (общая грамматика, в `SIGNED`).
+
 ГРАНИЦА НАЗВАНА (195). Судится буква образца, а не смысл: две разные записи
 одного предмета гейт не видит, и это держит чтение. Общая грамматика, не
 принадлежащая предмету, — заголовок markdown, разделитель таблицы, — повтором
@@ -29,19 +34,36 @@ from tests.conftest import ROOT, walk
 #: Где живёт рабочий код, который разбирает предметы конвейера.
 PLACES: Final = (ROOT / "scripts", ROOT / "packages" / "transport")
 
-#: Намеренные копии образца — с причиной у каждой (071). Пусто на 26.09.2026.
-SIGNED: Final[dict[str, str]] = {}
+#: Намеренные копии образца — с причиной у каждой (071).
+SIGNED: Final[dict[str, str]] = {
+    r"\d+": (
+        "грамматика «числа подряд», а не предмет: check_env режет версию пакета, "
+        "check_reread — номер выгрузки каталога; источники и правила версий разные"
+    ),
+}
+
+
+#: Вызовы модуля `re`, чей первый довод — образец. Образец строкой прямо в
+#: `re.findall` или `re.search` — тот же разбор предмета, что и в `re.compile`,
+#: и гейт, видевший только второй, пропускал первый (взгляд на #861).
+TAKES_A_PATTERN: Final = frozenset(
+    {"compile", "match", "search", "fullmatch", "findall", "finditer", "sub", "subn", "split"}
+)
 
 
 def patterns(path: Path) -> list[tuple[str, int]]:
-    """Образцы `re.compile(<строка>)` модуля: текст и строка."""
+    """Образцы строкой в вызовах `re.*` модуля: текст и строка."""
     found: list[tuple[str, int]] = []
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if not isinstance(node, ast.Call) or not node.args:
             continue
-        name = getattr(node.func, "attr", getattr(node.func, "id", None))
+        func = node.func
+        name = getattr(func, "attr", getattr(func, "id", None))
+        of_re = isinstance(func, ast.Attribute) and getattr(func.value, "id", None) == "re"
         first = node.args[0]
-        if name == "compile" and isinstance(first, ast.Constant) and isinstance(first.value, str):
+        if not (name == "compile" or (of_re and name in TAKES_A_PATTERN)):
+            continue
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
             found.append((first.value, node.lineno))
     return found
 
@@ -86,4 +108,9 @@ def test_the_predicate_tells_a_copy_from_a_reference(tmp_path: Path) -> None:
     asks = tmp_path / "asks.py"
     asks.write_text("import first\nRUN = first.RUN\n", encoding="utf-8")
     assert list(repeated([first, copy], tmp_path)) == [r"/runs/(\d+)"]
+    inline = tmp_path / "inline.py"
+    inline.write_text('import re\nfound = re.findall(r"/runs/(\\d+)", "")\n', encoding="utf-8")
+    assert list(repeated([first, inline], tmp_path)) == [r"/runs/(\d+)"], (
+        "образец в findall не судится"
+    )
     assert repeated([first, asks], tmp_path) == {}

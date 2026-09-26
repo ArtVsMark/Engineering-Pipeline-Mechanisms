@@ -56,10 +56,12 @@ def declared(where: Path | None = None) -> dict[str, Any]:
 def live(repo: str, branch: str, token: str) -> list[dict[str, Any]]:
     """Правила, действующие на ветке, — из набора правил площадки."""
     try:
-        said = ghrest.request("GET", f"repos/{repo}/rules/branches/{branch}", token)
+        # СПИСОК ЧИТАЕТСЯ ДО КОНЦА (212): правило за краем первой страницы
+        # иначе не сравнилось бы с объявленным.
+        said = list(ghrest.paginate(f"repos/{repo}/rules/branches/{branch}", token))
     except ghrest.TransportError as exc:
         raise NotRead(f"правила ветки «{branch}» не прочитаны: {exc}") from exc
-    return [one for one in (said or []) if isinstance(one, dict)]
+    return [one for one in said if isinstance(one, dict)]
 
 
 def guarded(repo: str, branch: str, token: str) -> bool:

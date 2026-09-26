@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 from collections import Counter
@@ -63,7 +62,9 @@ import pipeline_checks as policy
 import report
 import version as project_version
 
-VERSION_RE: Final = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+#: Формат номера — общий с гейтом версии и сборщиком журнала (214): третья
+#: копия с другими буквами гейт повторов не видела.
+VERSION_RE: Final = paths.VERSION_RE
 #: Род фрагмента, объявляющий правку поверхности контракта.
 CONTRACT_KIND: Final = ".contract.md"
 
@@ -266,7 +267,9 @@ def may_push(repo: str, branch: str, token: str) -> str:
     выпуска это токен владельца — тот самый, которым он потом толкает.
     """
     try:
-        rules = ghrest.request("GET", f"repos/{repo}/rules/branches/{branch}", token) or []
+        # СПИСОК ЧИТАЕТСЯ ДО КОНЦА (212): набор за краем первой страницы не был
+        # бы спрошен никогда, и отказ толчка не предсказался бы.
+        rules = list(ghrest.paginate(f"repos/{repo}/rules/branches/{branch}", token))
     except ghrest.TransportError:
         return ""
     # СПРАШИВАЮТСЯ ВСЕ НАБОРЫ, А НЕ ПЕРВЫЙ, И РЕШАЕТ САМЫЙ СТРОГИЙ. Наборов на

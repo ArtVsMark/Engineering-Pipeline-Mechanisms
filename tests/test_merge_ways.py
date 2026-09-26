@@ -164,7 +164,7 @@ def test_the_gate_reads_the_ruleset_surface_itself(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(module.protection.ghrest, "request", request)
     assert module.live_contexts("o/r", "main", "токен") == (["ci-complete"], False)
-    assert seen == ["repos/o/r/rules/branches/main"]
+    assert [path.split("?")[0] for path in seen] == ["repos/o/r/rules/branches/main"]
     assert not any("/protection" in path for path in seen)
 
 

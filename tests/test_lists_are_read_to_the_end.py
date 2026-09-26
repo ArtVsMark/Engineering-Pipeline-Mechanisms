@@ -33,7 +33,12 @@ from tests.conftest import ROOT, walk
 #: Списки, которые обязаны читаться до конца: проверки коммита, аннотации
 #: проверки, задания прогона. Путь сверяется по концу — до `?` или конца строки:
 #: одиночная проверка `check-runs/<id>` списком не является.
-LIST_RE: Final = re.compile(r"/check-runs(?:\?|$)|/annotations(?:\?|$)|/jobs(?:\?|$)")
+#: Правила ветки (`rules/branches/<ветка>`) — тоже список, хоть строки запроса у
+#: адреса нет, и по виду он объект: замер 212 его пропустил, а выпуск и сверка
+#: защиты читали его первой страницей (взгляд на #861).
+LIST_RE: Final = re.compile(
+    r"/check-runs(?:\?|$)|/annotations(?:\?|$)|/jobs(?:\?|$)|/rules/branches/[^/?]+(?:\?|$)"
+)
 
 #: Где живут механизмы, ходящие к площадке.
 PLACES: Final = (ROOT / "scripts", ROOT / "packages" / "transport")
@@ -76,6 +81,8 @@ def single_reads(path: Path) -> list[str]:
         ("repos/{}/commits/{}/check-runs", True),
         ("repos/{}/check-runs/{}/annotations", True),
         ("repos/{}/actions/runs/{}/jobs", True),
+        ("repos/{}/rules/branches/{}", True),
+        ("repos/{}/rulesets/{}", False),
         ("repos/{}/check-runs/{}", False),
         ("repos/{}/actions/jobs/{}", False),
         ("repos/{}/issues/{}/comments", False),

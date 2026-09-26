@@ -203,7 +203,7 @@ def kinds_by_mark(kinds: dict[str, Any]) -> dict[str, str]:
     for name, body in kinds.items():
         for met in body.get("встречен", []):
             mark = str(met).strip("`")
-            if re.fullmatch(r"[0-9a-f]{7}", mark):
+            if changerefs.MARK_RE.fullmatch(mark):
                 found.setdefault(mark, name)
     return found
 
