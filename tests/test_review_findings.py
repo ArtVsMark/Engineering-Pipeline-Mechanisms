@@ -1803,7 +1803,7 @@ def test_a_recorded_look_is_not_written_twice(
 
 
 def test_the_sweep_catches_up_open_and_marked_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Уборка догоняет открытые и отмеченные; слитое догоняется последний раз и снимается."""
+    """Уборка догоняет открытые и отмеченные; без отметки пишет последний; слитое снимается."""
     monkeypatch.setattr(module, "open_changes", lambda repo, token: {5})
     feeds = {
         5: THREE_LOOKS,
@@ -1814,7 +1814,7 @@ def test_the_sweep_catches_up_open_and_marked_changes(monkeypatch: pytest.Monkey
     }
     written, marks = run_record(monkeypatch, "Записано: #7@10", feeds, ["--sweep"])
     titles = sorted(entry.title for entry in written.values())
-    assert titles == ["перед слиянием", "третья"], titles
+    assert titles == ["перед слиянием", "третья"], "первый заход нового изменения потерян"
     assert marks == {5: 3}, "отметка слитого #7 не снята"
 
 
@@ -1903,3 +1903,45 @@ def test_fix_answers_read_the_word_whole() -> None:
     look = fix_look("ПОЧИНКА[aaa1111]: не закрыта — нет", "ПОЧИНКА[bbb2222]: закрыта — да")
     assert module.fix_answers(look) == {"aaa1111": False, "bbb2222": True}
     assert module.fix_answers(fix_look("ПОЧИНКА[aaa1111]: закрыта", author="x")) == {}
+
+
+def test_the_sweep_marks_a_lost_mark_without_writing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Записанный заход удалён — уборка переставляет отметку, а не пишет последний (#853)."""
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: {5})
+    written, marks = run_record(monkeypatch, "Записано: #5@42", {5: THREE_LOOKS}, ["--sweep"])
+    assert written == {} and marks == {5: 3}
+
+
+def test_a_platform_refusal_on_one_change_does_not_stop_the_sweep(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Лента одного изменения не отдана — остальные догоняются, отказ назван (#853)."""
+    monkeypatch.setattr(module, "open_changes", lambda repo, token: {5, 6})
+
+    def paginate(path: str, token: str) -> Any:
+        if "/5/" in path:
+            raise module.ghrest.TransportError("503")
+        return iter(THREE_LOOKS)
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    entries: dict[str, Any] = {}
+    recorded = {5: 1, 6: 1}
+    module.catch_up("o/r", "t", entries, recorded, strict=False)
+    assert recorded == {5: 1, 6: 3}
+    assert sorted(entry.title for entry in entries.values()) == ["только во втором", "третья"]
+    assert "догон записи #5 пропущен" in capsys.readouterr().err
+
+
+def test_an_unread_list_of_open_changes_skips_the_catch_up(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Список открытых не прочитан — догон пропущен целиком, отметки не тронуты."""
+
+    def refuse(repo: str, token: str) -> set[int]:
+        raise module.ghrest.TransportError("503")
+
+    monkeypatch.setattr(module, "open_changes", refuse)
+    recorded = {7: 10}
+    module.catch_up("o/r", "t", {}, recorded, strict=False)
+    assert recorded == {7: 10}
+    assert "догон записи пропущен" in capsys.readouterr().err
