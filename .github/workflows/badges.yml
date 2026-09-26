@@ -214,13 +214,18 @@ jobs:
       # ветки независимым чтением, а не тем же разбором, что его собрал.
       # Расхождение — предупреждение: публикацию оно не держит, но называется
       # числом на каждой сборке.
+      # Сверка идёт против ОБЩЕЙ ветки явно, а не против HEAD: запуск кнопкой с
+      # другой ветки сравнил бы архив с чужой историей (взгляд на #873). Прежний
+      # архив нужен, чтобы предупреждать только о новом расхождении.
       - name: сверить архив с историей
         env:
           ARCHIVE: ${{ runner.temp }}/badges/.github/badges/findings.json
+          PREVIOUS: ${{ runner.temp }}/findings-prev.json
         run: |
           set -uo pipefail
           rc=0
-          python scripts/archive_against_history.py --archive "$ARCHIVE" --ref HEAD || rc=$?
+          python scripts/archive_against_history.py --archive "$ARCHIVE" \
+            --previous "$PREVIOUS" --ref origin/main || rc=$?
           case "$rc" in
             0|3) ;;
             *) echo "::warning::архив с историей не сверен (код $rc) — приёмка перечитки не проверена" ;;

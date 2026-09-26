@@ -19,7 +19,7 @@ LOG = """Тема (#10)
 
 Тема (#11)
 
-- Разобрано: `fff6666` дубль `aaa1111`
+Разобрано: `fff6666` дубль `aaa1111`
 """
 
 
@@ -64,6 +64,8 @@ def test_main_names_the_difference_with_a_warning(
     path.write_text(json.dumps(archive({"ccc3333": "ddd4444"})), encoding="utf-8")
     assert module.main(["--archive", str(path)]) == module.EXIT_DIFFERS
     assert "::warning" in capsys.readouterr().out
+    written = json.loads(path.read_text(encoding="utf-8"))
+    assert written[module.UNCONFIRMED] == ["ccc3333 дубль ddd4444"], "список не лёг в архив"
     path.write_text(json.dumps(archive({"aaa1111": ""})), encoding="utf-8")
     assert module.main(["--archive", str(path)]) == module.EXIT_OK
 
@@ -85,8 +87,9 @@ def test_trunk_log_reads_the_live_history() -> None:
 
 
 def test_resolution_lines_take_only_resolution_lines() -> None:
-    """Строки снятия берутся по началу строки, с маркером списка и кавычками."""
+    """Строкой снятия считается слово с двоеточием в начале строки, как у разбора."""
     assert len(module.resolution_lines(LOG)) == 3
+    assert module.resolution_lines("- разобрано — в прозе\nразобрано без двоеточия") == []
 
 
 def test_the_badges_run_checks_the_archive() -> None:
@@ -100,3 +103,50 @@ def test_twin_said_needs_the_pair_side_by_side() -> None:
     """Пара подтверждается соседством через «дубль», а не присутствием обоих."""
     assert module.twin_said("Разобрано: `aaa1111` дубль `bbb2222`", "aaa1111", "bbb2222")
     assert not module.twin_said("Разобрано: aaa1111, bbb2222 дубль ccc3333", "aaa1111", "bbb2222")
+
+
+def test_a_known_difference_is_not_warned_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Расхождение, уже названное прежним архивом, предупреждения не даёт; новое — даёт."""
+    monkeypatch.setattr(module, "trunk_log", lambda ref: LOG)
+    previous = tmp_path / "prev.json"
+    previous.write_text(
+        json.dumps({module.UNCONFIRMED: ["ccc3333 дубль ddd4444"]}), encoding="utf-8"
+    )
+    path = tmp_path / "findings.json"
+    path.write_text(json.dumps(archive({"ccc3333": "ddd4444"})), encoding="utf-8")
+    assert module.main(["--archive", str(path), "--previous", str(previous)]) == module.EXIT_OK
+    assert "::warning" not in capsys.readouterr().out
+    path.write_text(json.dumps(archive({"ccc3333": "ddd4444", "9999999": ""})), encoding="utf-8")
+    assert module.main(["--archive", str(path), "--previous", str(previous)]) == module.EXIT_DIFFERS
+
+
+def test_a_mark_inside_a_longer_hash_does_not_confirm() -> None:
+    """Отпечаток внутри длинного хеша снятие не подтверждает: граница — целое слово."""
+    log = "Разобрано: aaa1111bcd — хеш коммита, а не отпечаток\n"
+    assert module.check(archive({"aaa1111": ""}), log)["без строки"] == ["aaa1111"]
+
+
+def test_a_fix_check_resolution_is_counted_apart() -> None:
+    """Снятие проверкой починки строки не имеет и расхождением не считается (#848)."""
+    said = {"resolutions": {"1234567": {"by": 10, "twin_of": "", "fix_check": True}}}
+    assert module.check(said, LOG) == {"без строки": [], "связь без пары": []}
+
+
+def test_fresh_names_only_the_new() -> None:
+    """Новое — то, чего не было в прежнем списке."""
+    found = {"без строки": ["a"], "связь без пары": ["b дубль c"]}
+    assert module.fresh(found, ["a"]) == ["b дубль c"]
+
+
+def test_mark_said_needs_a_whole_word() -> None:
+    """Отпечаток — целое слово из семи знаков."""
+    assert module.mark_said("Разобрано: aaa1111 — да", "aaa1111")
+    assert not module.mark_said("Разобрано: aaa11112 — нет", "aaa1111")
+
+
+def test_read_refuses_a_missing_archive(tmp_path: Path) -> None:
+    """Нет файла архива — отказ."""
+    with pytest.raises(module.NotRun):
+        module.read(tmp_path / "нет.json")
