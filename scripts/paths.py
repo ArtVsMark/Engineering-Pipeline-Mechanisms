@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Final
 
@@ -71,6 +72,9 @@ RELEASED: Final = FRAGMENTS / "released"
 CHANGELOG: Final = Path("CHANGELOG.md")
 #: Единственный источник версии контракта (035).
 VERSION: Final = Path("CONTRACT_VERSION")
+#: Формат номера в нём. Разбирают его гейт версии и сборщик журнала, и разбор
+#: один (214) — здесь, уровнем выше обоих, а не у одного из соседей (090).
+VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
 #: Описания прогонов.
 WORKFLOWS: Final = Path(".github/workflows")
 #: Проба передачи: зовёт наши же шаги ВНЕШНИМ путём, по адресу с тегом, —

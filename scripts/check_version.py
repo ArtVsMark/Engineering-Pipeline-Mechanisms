@@ -31,7 +31,7 @@ from typing import Final
 import paths
 
 VERSION_FILE: Final = paths.VERSION
-VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
+VERSION_RE: Final = paths.VERSION_RE
 MARKER_RE: Final = re.compile(r"<!--m:contract-->(?P<value>[^<]*)<!--/m:contract-->")
 
 # Производные и служебные файлы: версия попадает в них сборкой, а не руками.

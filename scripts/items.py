@@ -280,10 +280,10 @@ def follow(repo: str, token: str, *, dry_run: bool = False) -> int:
         return state[number]
 
     touched = 0
-    epics = ghrest.request(
-        "GET", f"repos/{repo}/issues?state=open&labels={EPIC_LABEL}&per_page=100", token
-    )
-    for epic in epics or []:
+    # ЭПИКИ ЧИТАЮТСЯ ДО КОНЦА, а не первой страницей (212): сто первый
+    # открытый эпик пропал бы без единой строки, а с ним и отметка его пунктов.
+    epics = ghrest.paginate(f"repos/{repo}/issues?state=open&labels={EPIC_LABEL}", token)
+    for epic in epics:
         if "pull_request" in epic:
             continue
         body = str(epic.get("body") or "")
