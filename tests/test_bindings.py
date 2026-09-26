@@ -224,6 +224,24 @@ def proposals() -> list[dict[str, Any]]:
     return list(said) if isinstance(said, list) else []
 
 
+def queued() -> list[Any]:
+    """Предложения параметрами; пустая очередь — объявленный пропуск, а не сбор с отказом.
+
+    Пустая очередь законна: её объявляет строка `_пусто` файла, и держит это
+    `test_an_empty_queue_is_a_declared_state_not_a_missing_one`. Без пропуска
+    набор падал на сборке (`empty_parameter_set_mark`) ровно в тот день, когда
+    каталог принял всё предложенное (26.09.2026, 209–213).
+    """
+    said = proposals()
+    if said:
+        return said
+    return [
+        pytest.param(
+            {}, marks=pytest.mark.skip(reason="очередь предложений пуста — объявлено `_пусто`")
+        )
+    ]
+
+
 #: Шов, оставшийся от дописывания: предложение приклеили к строке, которая уже
 #: кончалась точкой. Признак узкий и НЕ «две точки где угодно»: точка, пробел
 #: или его отсутствие — этого мало, чтобы отличить шов от адреса.
@@ -279,7 +297,7 @@ def test_an_empty_queue_is_a_declared_state_not_a_missing_one() -> None:
     )
 
 
-@pytest.mark.parametrize("item", proposals(), ids=lambda one: str(one.get("slug", "?")))
+@pytest.mark.parametrize("item", queued(), ids=lambda one: str(one.get("slug", "пусто")))
 def test_a_proposal_carries_what_the_catalogue_asks(item: dict[str, Any]) -> None:
     """У предложения есть все поля контракта, и инцидент — с конкретикой.
 
@@ -295,7 +313,7 @@ def test_a_proposal_carries_what_the_catalogue_asks(item: dict[str, Any]) -> Non
     )
 
 
-@pytest.mark.parametrize("item", proposals(), ids=lambda one: str(one.get("slug", "?")))
+@pytest.mark.parametrize("item", queued(), ids=lambda one: str(one.get("slug", "пусто")))
 def test_a_proposal_trail_resolves_in_the_tree(item: dict[str, Any]) -> None:
     """След предложения — артефакт ЭТОГО дерева, где поломка видна (044).
 
@@ -324,13 +342,20 @@ COUNTED_RE: Final = re.compile(
 )
 
 
-#: Слова предела — ЗАКРЫТЫЙ словарь каталога, контракт 1.5. Счётчику доли
+#: Слова предела — ЗАКРЫТЫЙ словарь каталога, контракт 1.6. Счётчику доли
 #: машинного соблюдения знаменатель надо РАЗДЕЛИТЬ, а прозу сложить нельзя.
 #:   no          — машинной половины нет вовсе, текст и есть предел;
 #:   not-yet     — половина есть и не построена, стройка возможна сегодня;
 #:   conditional — станет возможна, когда появится названный ПРЕДМЕТ; до него
 #:                 гейт зеленел бы вокруг пустоты (146), и предмет называется
 #:                 полем `awaiting`.
+#:   refused     — половина есть, ЗАМЕРЕНА, и строить её отказались даже
+#:                 предупреждением (213, контракт 1.6). Законно только с замером
+#:                 в `machine_half` и только после 051.
+#:
+#: ЧЕТВЁРТОЕ СЛОВО ПРИШЛО ОТ КАТАЛОГА, ПО НАШЕМУ ЖЕ ПРЕДЛОЖЕНИЮ. Абзац ниже —
+#: история своего слова, которое каталог принял с условием 051; единственный
+#: кандидат, 133, под это условие не подошёл и остался долгом (#860).
 #:
 #: НАШЕ ЧЕТВЁРТОЕ СЛОВО СНЯТО, И ЭТО ЗАМЕР, А НЕ УСТУПКА. С 13.09.2026 здесь
 #: жило собственное `measured-refusal` — «половина есть и ОТВЕРГНУТА замером», —
@@ -346,7 +371,7 @@ COUNTED_RE: Final = re.compile(
 #: вопрос
 #: ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
 #: [157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
-LIMITS: Final = ("no", "not-yet", "conditional")
+LIMITS: Final = ("no", "not-yet", "conditional", "refused")
 
 #: Механизмы, которые КРАСНЕЮТ. У прочих — `document`, `none`, `skill` —
 #: исполнение не проверяется ничем, и вопрос «а можно ли держать машиной» у всех
@@ -411,6 +436,32 @@ def test_a_conditional_limit_names_the_subject_it_waits_for() -> None:
         and not COUNTED_RE.search(str(one.get("awaiting") or ""))
     ]
     assert not silent, "«при условии» без замеренного предмета: " + ", ".join(sorted(silent))
+
+
+def refusals_without_a_count(answers: dict[str, Any] | None = None) -> list[str]:
+    """Ответы `refused` без замера в `machine_half`: отказ без числа — «не смотрели» (213)."""
+    return sorted(
+        rule
+        for rule, one in unheld(answers)
+        if one.get("holdable") == "refused"
+        and not COUNTED_RE.search(str(one.get("machine_half") or ""))
+    )
+
+
+def test_a_refusal_carries_its_measurement() -> None:
+    """`refused` законно только с замером в `machine_half` (213, контракт 1.6)."""
+    silent = refusals_without_a_count()
+    assert not silent, "отказ без замера в machine_half: " + ", ".join(silent)
+
+
+def test_the_refusal_predicate_rejects_a_refusal_without_a_number() -> None:
+    """Обе половины предиката: отказ без числа краснеет, с числом — нет (140)."""
+    base = {"status": "active", "mechanism": "document", "holdable": "refused"}
+    answers = {
+        "001": {**base, "machine_half": "сигнал бил бы по законному"},
+        "002": {**base, "machine_half": "из 25 слитых распались 6"},
+    }
+    assert refusals_without_a_count(answers) == ["001"]
 
 
 def test_awaiting_is_absent_where_the_mechanism_reddens() -> None:

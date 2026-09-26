@@ -43,7 +43,8 @@ FRAGMENTS: Final = paths.FRAGMENTS
 RELEASED: Final = paths.RELEASED
 OUTPUT: Final = paths.CHANGELOG
 VERSION_FILE: Final = paths.VERSION
-VERSION_RE: Final = re.compile(r"^\d+\.\d+\.\d+$")
+#: Формат номера версии один на гейт и сборщик (214), и живёт уровнем выше (090).
+VERSION_RE: Final = paths.VERSION_RE
 LINK_LINE_RE: Final = journal.LINK_LINE_RE
 
 KINDS: Final = journal.KINDS

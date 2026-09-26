@@ -619,6 +619,9 @@ def main(argv: list[str] | None = None) -> int:
         owner = args.repo.split("/")[0]
         head = f"{owner}:{args.branch}"
         query = urllib.parse.urlencode({"head": head, "state": "open"})
+        # ПЕРВАЯ СТРАНИЦА — ПРЕДЕЛ ПО ПОСТРОЕНИЮ, А НЕ ЗАБЫТЫЙ КРАЙ (212). Открытых
+        # изменений с одной головы площадка держит по одному на базу, и вопрос
+        # здесь «есть ли хоть одно»: хвоста, который пропал бы, у ответа нет.
         existing = ghrest.request("GET", f"repos/{args.repo}/pulls?{query}", token) or []
         if existing:
             number = existing[0]["number"]
