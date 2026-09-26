@@ -1144,11 +1144,46 @@ def catch_up(
     Изменение, которое уже не открыто, но стоит в отметке, догоняется в
     последний раз, и отметка с него снимается: так ловится запись,
     вытесненная прямо перед слиянием.
+
+    БЕЗ ОТМЕТКИ УБОРКА НЕ ПИШЕТ, А ТОЛЬКО СТАВИТ ОТМЕТКУ. Отметки нет у
+    изменения, ни разу не записанного после выкладки #842, и у того, чей
+    записанный заход удалён. Писать его последний заход значило бы вернуть в
+    реестр находки, снятые с тех пор чужим слитым изменением, — класс #333
+    (поздний взгляд на #853). Последний заход такого изменения пишет его
+    собственная запись находок; уборка лишь запоминает, откуда догонять дальше.
+
+    СБОЙ ПЛОЩАДКИ ПО ОДНОМУ ИЗМЕНЕНИЮ НЕ ОБРЫВАЕТ УБОРКУ. Догон — довесок к
+    снятию разобранного, и чужая лента, не отданная площадкой, не должна
+    останавливать снятие (поздний взгляд на #853). Отказ назван
+    предупреждением, отметка изменения остаётся как была.
+
+    ЦЕНА НАЗВАНА: запрос списка открытых изменений и по странице ленты (до 100
+    комментариев) на каждое открытое и отмеченное изменение — на каждой
+    уборке. Замер 26.09.2026: открыто 1, отмечено 1, то есть 3 запроса.
     """
-    live = open_changes(repo, token)
+    try:
+        live = open_changes(repo, token)
+    except ghrest.TransportError as exc:
+        print(
+            f"::warning::догон записи пропущен: список открытых не прочитан — {exc}",
+            file=sys.stderr,
+        )
+        return
     for pr in sorted(live | set(recorded)):
-        comments = list(ghrest.paginate(f"repos/{repo}/issues/{pr}/comments", token))
-        if looks(comments):
+        try:
+            comments = list(ghrest.paginate(f"repos/{repo}/issues/{pr}/comments", token))
+        except ghrest.TransportError as exc:
+            print(
+                f"::warning::догон записи #{pr} пропущен: лента не прочитана — {exc}",
+                file=sys.stderr,
+            )
+            continue
+        seen = looks(comments)
+        ids = [one for one, _ in seen]
+        if seen and recorded.get(pr) not in ids:
+            recorded[pr] = ids[-1]
+            print(f"догон записи: #{pr} без отметки — отметка поставлена на заход {ids[-1]}")
+        elif seen:
             for look_id, look in unrecorded(comments, recorded.get(pr)):
                 print(f"догон записи: #{pr}, заход {look_id}")
                 record_look(entries, pr, look, strict)
