@@ -60,7 +60,7 @@ def test_the_task_lists_the_prior_findings_and_the_answer_form() -> None:
     task = module.task_text(module.FIX, [("aaa1111", Entry(7, "дефект", "a.py:1 — раз"))])
     assert MARKER in task and "ПОЧИНКА[<отпечаток>]" in task
     assert "`aaa1111` · дефект · a.py:1 — раз" in task
-    assert "прошлых находок в реестре нет" in module.task_text(module.FIX, [])
+    assert "прошлых находок нет" in module.task_text(module.FIX, [])
     assert module.task_text(module.FULL, []) == ""
 
 
@@ -74,7 +74,10 @@ def platform(monkeypatch: pytest.MonkeyPatch, comments: list[dict[str, Any]], bo
 def test_main_writes_the_mode_and_the_task(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Исход «записан»: режим и задание уходят в `$GITHUB_OUTPUT`."""
     out = tmp_path / "output"
-    body = "- `aaa1111` · #7 · дефект — a.py:1 — раз"
+    body = (
+        "- `aaa1111` · #7 · дефект — a.py:1 — раз\nЗаписано: "
+        + module.review_findings.render_recorded({7: 1})
+    )
     platform(monkeypatch, [FULL_LOOK], body)
     assert module.main(["--repo", "o/r", "--pr", "7", "--output", str(out)]) == module.EXIT_OK
     written = out.read_text(encoding="utf-8")
@@ -126,3 +129,37 @@ def test_a_new_head_cancels_the_look_of_the_old_one() -> None:
     assert "pull_request.number" in group["group"] and "head.sha" not in group["group"]
     task = flow["jobs"]["map"]["outputs"]["task"]
     assert task == "${{ steps.mode.outputs.task }}", "задание проверки починки не выходит из карты"
+
+
+def test_an_unrecorded_full_look_keeps_the_look_full() -> None:
+    """Полный заход ещё не в реестре — заход снова полный, а не «находок 0» (#842)."""
+    assert module.settled(module.FIX, 7, {}) == module.FULL
+    assert module.settled(module.FIX, 7, {8: 1}) == module.FULL, "чужая отметка засчитана"
+    assert module.settled(module.FIX, 7, {7: 1}) == module.FIX
+    assert module.settled(module.FULL, 7, {7: 1}) == module.FULL
+
+
+def test_prior_findings_come_from_the_registry_only() -> None:
+    """Лента в прошлые находки не подмешивается: отпечаток пересказа живёт в реестре (210)."""
+    entries = {"aaa1111": Entry(7, "риск", "пересказ")}
+    assert module.prior_of(entries, 7) == [("aaa1111", entries["aaa1111"])]
+
+
+def test_main_without_a_recorded_full_look_runs_full(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Реестр без отметки изменения — режим полный, задания нет."""
+    out = tmp_path / "output"
+    platform(monkeypatch, [FULL_LOOK], "- `aaa1111` · #7 · дефект — a.py:1 — раз")
+    assert module.main(["--repo", "o/r", "--pr", "7", "--output", str(out)]) == module.EXIT_OK
+    assert "mode=full\n" in out.read_text(encoding="utf-8")
+
+
+def test_the_task_line_form_is_the_one_the_parser_reads() -> None:
+    """Строка из задания разбирается `FIX_RE`: форма одна, букв в двух местах нет (209)."""
+    rf = module.review_findings
+    for closed in (True, False):
+        line = rf.fix_form("abc1234", closed, "почему")
+        assert rf.fix_answers([said(1, line)]) == {"abc1234": closed}
+    task = module.task_text(module.FIX, [])
+    assert rf.fix_form("<отпечаток>", True, "<чем закрыта, одной фразой>") in task
