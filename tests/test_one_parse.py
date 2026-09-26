@@ -60,6 +60,8 @@ def re_names(tree: ast.AST) -> tuple[set[str], dict[str, str]]:
 
     `import re as rx` и `from re import findall` — та же операция под другим
     именем; гейт, видевший только `re.<имя>`, пропускал их молча (взгляд на #869).
+    ПРЕДЕЛ НАЗВАН (195): `from re import *` и присваивание `rx = re` гейт не
+    видит — имён он не выводит, а читает только импорты (взгляд на #877).
     """
     modules = {"re"}
     functions: dict[str, str] = {}
@@ -170,3 +172,30 @@ def test_an_aliased_or_imported_re_is_still_seen(tmp_path: Path) -> None:
     )
     assert list(repeated([first, aliased], tmp_path)) == [r"/runs/(\d+)"], "псевдоним не судится"
     assert list(repeated([first, imported], tmp_path)) == [r"/runs/(\d+)"], "импорт не судится"
+
+
+def test_a_module_that_knows_the_version_form_does_not_cut_it() -> None:
+    """Модуль, спрашивающий `paths.VERSION_RE`, не режет номер по точке сам (#877).
+
+    Ответ 214 обещает: разряды номера читаются `version.digits`. Обещание без
+    гейта держалось чтением, и нарезка `split(".")` пережила починку в
+    сортировке выпусков. Предмет — модули, которые форму номера уже знают:
+    нарезка там — второе чтение того же. ПРЕДЕЛ НАЗВАН (195): модуль, не
+    спрашивающий `paths.VERSION_RE`, гейт не судит — `pipeline_checks.compatible`
+    читает MAJOR.MINOR входа потребителя, который бывает короче X.Y.Z.
+    """
+    cut = []
+    for path in walk(ROOT / "scripts", "*.py"):
+        source = path.read_text(encoding="utf-8")
+        if "paths.VERSION_RE" not in source:
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", "") == "split"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "."
+            ):
+                cut.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert not cut, "номер режется по точке мимо version.digits (214): " + ", ".join(cut)

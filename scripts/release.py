@@ -338,8 +338,8 @@ def refusals(
     line = project_version.bare(project_version.release_tag() or "v0.0.0")
     expected = next_after(line)
     current = declared_version()
-    major_now = int(VERSION_RE.match(line).group(1))  # type: ignore[union-attr]
-    major_wanted = int(VERSION_RE.match(wanted).group(1))  # type: ignore[union-attr]
+    major_now = project_version.digits(line)[0]
+    major_wanted = project_version.digits(wanted)[0]
 
     if major_wanted > major_now and not acceptance:
         problems.append(
