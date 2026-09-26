@@ -60,7 +60,7 @@ def test_the_task_lists_the_prior_findings_and_the_answer_form() -> None:
     task = module.task_text(module.FIX, [("aaa1111", Entry(7, "дефект", "a.py:1 — раз"))])
     assert MARKER in task and "ПОЧИНКА[<отпечаток>]" in task
     assert "`aaa1111` · дефект · a.py:1 — раз" in task
-    assert "прошлых находок в реестре нет" in module.task_text(module.FIX, [])
+    assert "прошлых находок нет" in module.task_text(module.FIX, [])
     assert module.task_text(module.FULL, []) == ""
 
 
@@ -74,7 +74,10 @@ def platform(monkeypatch: pytest.MonkeyPatch, comments: list[dict[str, Any]], bo
 def test_main_writes_the_mode_and_the_task(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Исход «записан»: режим и задание уходят в `$GITHUB_OUTPUT`."""
     out = tmp_path / "output"
-    body = "- `aaa1111` · #7 · дефект — a.py:1 — раз"
+    body = (
+        "- `aaa1111` · #7 · дефект — a.py:1 — раз\nЗаписано: "
+        + module.review_findings.render_recorded({7: 1})
+    )
     platform(monkeypatch, [FULL_LOOK], body)
     assert module.main(["--repo", "o/r", "--pr", "7", "--output", str(out)]) == module.EXIT_OK
     written = out.read_text(encoding="utf-8")
@@ -126,3 +129,32 @@ def test_a_new_head_cancels_the_look_of_the_old_one() -> None:
     assert "pull_request.number" in group["group"] and "head.sha" not in group["group"]
     task = flow["jobs"]["map"]["outputs"]["task"]
     assert task == "${{ steps.mode.outputs.task }}", "задание проверки починки не выходит из карты"
+
+
+def test_an_unrecorded_full_look_gives_its_findings_from_the_feed() -> None:
+    """Полный заход ещё не записан в реестр — прошлые находки берутся из ленты (#842)."""
+    mark = module.review_findings.fingerprint("a.py:1 — раз")
+    got = module.prior_of({}, 7, [FULL_LOOK], recorded={})
+    assert [one for one, _ in got] == [mark], "находка полного захода не дошла до задания"
+    assert module.prior_of({}, 7, [FULL_LOOK], recorded={7: 1}) == [], (
+        "записанный заход читан из ленты"
+    )
+
+
+def test_a_finding_closed_by_a_fix_check_does_not_come_back_from_the_feed() -> None:
+    """Из ленты не возвращается находка, которую проверка починки уже назвала закрытой."""
+    mark = module.review_findings.fingerprint("a.py:1 — раз")
+    closing = said(
+        5, f"{MARKER}\n{module.review_findings.fix_form(mark, True, 'да')}\nВЕРДИКТ: находок 0"
+    )
+    assert module.prior_of({}, 7, [FULL_LOOK, closing], recorded={}) == []
+
+
+def test_the_task_line_form_is_the_one_the_parser_reads() -> None:
+    """Строка из задания разбирается `FIX_RE`: форма одна, букв в двух местах нет (209)."""
+    rf = module.review_findings
+    for closed in (True, False):
+        line = rf.fix_form("abc1234", closed, "почему")
+        assert rf.fix_answers([said(1, line)]) == {"abc1234": closed}
+    task = module.task_text(module.FIX, [])
+    assert rf.fix_form("<отпечаток>", True, "<чем закрыта, одной фразой>") in task

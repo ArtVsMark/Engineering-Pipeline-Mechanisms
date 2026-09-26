@@ -654,3 +654,38 @@ def test_git_log_reads_the_history_oldest_first(tmp_path: Path) -> None:
         (3, "Тема (#3)\n\nРазобрано: 0000003"),
         (7, "Тема (#7)\n\nРазобрано: 0000007"),
     ]
+
+
+def test_a_fix_check_resolves_the_finding_of_its_own_change() -> None:
+    """Закрытая проверкой починки находка снята и в архиве, без строки `Разобрано:` (#848)."""
+    reviewer = module.review_findings.REVIEWER_AUTHOR
+    marker = module.review_findings.FIXCHECK_MARKER
+    one = mark("a.py:1 — первая")
+    full = look("a.py:1 — первая")
+    full["user"] = {"login": reviewer}
+    fixed = {
+        "user": {"login": reviewer},
+        "body": f"{marker}\n{module.review_findings.fix_form(one, True, 'да')}\nВЕРДИКТ: находок 0",
+    }
+    forged = {**fixed, "user": {"login": "someone"}}
+    archive = empty()
+    module.add_change(archive, 10, [full, forged], "")
+    module.settle(archive)
+    assert archive["findings"][one]["resolved_by"] is None, "чужая проверка починки сняла находку"
+    module.add_change(archive, 10, [full, fixed], "")
+    module.settle(archive)
+    assert archive["findings"][one]["resolved_by"] == 10
+    other = empty()
+    module.add_change(other, 11, [fixed], "")
+    assert one not in other["resolutions"], "снята находка чужой ленты"
+
+
+def test_fixed_in_reads_only_the_reviewers_closed_answers() -> None:
+    """`fixed_in` отдаёт отпечатки, названные закрытыми, и только от ревьюера."""
+    rf = module.review_findings
+    body = (
+        f"{rf.FIXCHECK_MARKER}\n{rf.fix_form('aaa1111', True, 'да')}\n"
+        f"{rf.fix_form('bbb2222', False, 'нет')}\nВЕРДИКТ: находок 1"
+    )
+    assert module.fixed_in([{"user": {"login": rf.REVIEWER_AUTHOR}, "body": body}]) == ["aaa1111"]
+    assert module.fixed_in([{"user": {"login": "someone"}, "body": body}]) == []

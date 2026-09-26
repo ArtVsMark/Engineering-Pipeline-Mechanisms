@@ -49,19 +49,69 @@ def mode_of(comments: list[dict[str, Any]]) -> str:
     иначе засчитался бы полным заходом, и все следующие головы получили бы
     лишь проверку починки: облегчить себе взгляд мог бы любой, кто пишет на
     изменении.
+
+    ПРЕДЕЛ НАЗВАН: ПОДПИСЬ `claude[bot]` ДАЮТ ДВА ПРОГОНА. Кроме взгляда её
+    ставит ответ на обращение `@claude` (`.github/workflows/claude.yml`), и
+    ответ, повторивший форму вердикта, засчитался бы заходом. Звать его вправе
+    только OWNER, MEMBER и COLLABORATOR — те же, кто может править реестр #23
+    рукой, так что новой двери это не открывает. Окно под это имя не попадает:
+    его записи на площадке идут от учётной записи владельца (замер 26.09.2026,
+    комментарии на #829).
     """
-    own = [
+    done = any(
+        not review_findings.is_fix_check(look) for _, look in review_findings.looks(own(comments))
+    )
+    return FIX if done else FULL
+
+
+def own(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Комментарии ревьюера — только они заходы."""
+    return [
         comment
         for comment in comments
         if str((comment.get("user") or {}).get("login") or "") == review_findings.REVIEWER_AUTHOR
     ]
-    done = any(not review_findings.is_fix_check(look) for _, look in review_findings.looks(own))
-    return FIX if done else FULL
 
 
-def prior_of(entries: dict[str, findings.Entry], pr: int) -> list[tuple[str, findings.Entry]]:
-    """Прошлые находки этого изменения из реестра — по отпечатку."""
-    return sorted((mark, entry) for mark, entry in entries.items() if entry.pr == pr)
+def prior_of(
+    entries: dict[str, findings.Entry],
+    pr: int,
+    comments: list[dict[str, Any]] | None = None,
+    recorded: dict[int, int] | None = None,
+) -> list[tuple[str, findings.Entry]]:
+    """Прошлые находки этого изменения: из реестра, а пока заход не записан — из ленты.
+
+    РЕЕСТР ПИШЕТСЯ ПОЗЖЕ ЛЕНТЫ. Находки полного захода попадают в #23 джобом
+    `findings` в очереди `findings-write`, где записи вытесняются (#842). Толчок
+    сразу после полного захода читал реестр без них и получал «прошлых находок
+    нет» — проверка починки отвечала «находок 0» при живых находках.
+
+    ЗАПИСАН ЛИ ЗАХОД, ГОВОРИТ ОТМЕТКА, А НЕ ДОГАДКА. Реестр помнит, какой
+    вердикт каждого изменения уже записан (`Записано:`, #842). Нет отметки для
+    этого изменения — находки берутся из ленты, живого источника (049), кроме
+    названных закрытыми проверкой починки. Есть — только из реестра: запись
+    пересказанной находки лежит там под ПРЕЖНИМ отпечатком, и слияние с лентой
+    задвоило бы её.
+    """
+    if recorded is None or pr in recorded:
+        return sorted((mark, entry) for mark, entry in entries.items() if entry.pr == pr)
+    looks = review_findings.looks(own(comments or []))
+    closed = {
+        mark
+        for _, look in looks
+        if review_findings.is_fix_check(look)
+        for mark, ok in review_findings.fix_answers(look).items()
+        if ok
+    }
+    prior: dict[str, findings.Entry] = {}
+    for _, look in looks:
+        if review_findings.is_fix_check(look):
+            continue
+        for weight, title, _, _ in review_findings.found_in(look):
+            mark = review_findings.fingerprint(title)
+            if mark not in closed:
+                prior[mark] = findings.Entry(pr, weight, title)
+    return sorted(prior.items())
 
 
 def task_text(mode: str, prior: list[tuple[str, findings.Entry]]) -> str:
@@ -70,7 +120,7 @@ def task_text(mode: str, prior: list[tuple[str, findings.Entry]]) -> str:
         return ""
     listed = (
         "\n".join(f"    `{mark}` · {entry.weight} · {entry.title}" for mark, entry in prior)
-        or "    (прошлых находок в реестре нет — ответь только первой и последней строкой)"
+        or "    (прошлых находок нет — ответь только первой и последней строкой)"
     )
     return f"""ЭТОТ ЗАХОД — ПРОВЕРКА ПОЧИНКИ, А НЕ ПОЛНЫЙ ВЗГЛЯД (#848). Полный взгляд
 на этом изменении уже был. Твой вопрос один: закрыта ли на нынешней голове
@@ -85,8 +135,8 @@ def task_text(mode: str, prior: list[tuple[str, findings.Entry]]) -> str:
 
 По каждой находке — одна строка, отпечаток из списка:
 
-    ПОЧИНКА[<отпечаток>]: закрыта — <чем закрыта, одной фразой>
-    ПОЧИНКА[<отпечаток>]: не закрыта — <что осталось>
+    {review_findings.fix_form("<отпечаток>", True, "<чем закрыта, одной фразой>")}
+    {review_findings.fix_form("<отпечаток>", False, "<что осталось>")}
 
 Последней строкой — число НЕ закрытых:
 
@@ -123,7 +173,12 @@ def main(argv: list[str] | None = None) -> int:
         prior: list[tuple[str, findings.Entry]] = []
         if mode == FIX:
             _, body = review_findings.live_issue(args.repo, token)
-            prior = prior_of(review_findings.parse_entries(body), args.pr)
+            prior = prior_of(
+                review_findings.parse_entries(body),
+                args.pr,
+                comments,
+                review_findings.parse_recorded(body),
+            )
     except (review_findings.NotRun, ghrest.TransportError) as exc:
         print(f"режим захода не выбран: {exc} — взгляд пойдёт полным", file=sys.stderr)
         return EXIT_BROKEN

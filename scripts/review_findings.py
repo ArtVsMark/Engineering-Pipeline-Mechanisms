@@ -145,9 +145,16 @@ VERDICT_RE: Final = re.compile(rf"^{MARK}\s*ВЕРДИКТ\s*:\s*находок\
 FINDING_RE: Final = re.compile(
     rf"^{MARK}\s*НАХОДКА(?:\[\s*([^\]]+?)\s*\])?\s*:{MARK}\s*(\S.*?)\s*$", re.I
 )
+#: Слова строки проверки починки. Задание пишет строку `fix_form`, разбор
+#: читает `FIX_RE` — оба из этих констант, а не буквами в двух местах (209).
+FIX_HEAD: Final = "ПОЧИНКА"
+FIX_CLOSED: Final = "закрыта"
+FIX_OPEN: Final = "не закрыта"
 #: Строка ответа проверки починки: отпечаток прошлой находки и закрыта ли она.
 FIX_RE: Final = re.compile(
-    rf"^{MARK}\s*ПОЧИНКА\[\s*([0-9a-f]{{7}})\s*\]\s*:{MARK}\s*(не\s+закрыта|закрыта)(?!\w)", re.I
+    rf"^{MARK}\s*{FIX_HEAD}\[\s*([0-9a-f]{{7}})\s*\]\s*:{MARK}\s*"
+    rf"({FIX_OPEN.replace(' ', r'\s+')}|{FIX_CLOSED})(?!\w)",
+    re.I,
 )
 WEIGHTS: Final = findings.WEIGHTS
 UNWEIGHED: Final = findings.UNWEIGHED
@@ -498,6 +505,11 @@ def is_fix_check(look: list[dict[str, Any]]) -> bool:
     )
 
 
+def fix_form(mark: str, closed: bool, said: str) -> str:
+    """Строка ответа проверки починки — та, которую читает `FIX_RE`."""
+    return f"{FIX_HEAD}[{mark}]: {FIX_CLOSED if closed else FIX_OPEN} — {said}"
+
+
 def fix_answers(look: list[dict[str, Any]]) -> dict[str, bool]:
     """Ответы проверки починки: отпечаток → закрыта ли. Только от ревьюера."""
     said: dict[str, bool] = {}
@@ -507,7 +519,7 @@ def fix_answers(look: list[dict[str, Any]]) -> dict[str, bool]:
         for line in bare_lines(comment.get("body") or ""):
             one = FIX_RE.match(line)
             if one is not None:
-                said[one.group(1)] = not one.group(2).lower().startswith("не")
+                said[one.group(1)] = " ".join(one.group(2).lower().split()) == FIX_CLOSED
     return said
 
 
