@@ -102,3 +102,13 @@ def test_main_on_a_platform_refusal_is_broken(
     monkeypatch.setattr(module.ghrest, "paginate", refuse)
     out = tmp_path / "output"
     assert module.main(["--repo", "o/r", "--pr", "7", "--output", str(out)]) == module.EXIT_BROKEN
+
+
+def test_write_output_keeps_the_task_whole_between_random_fences(tmp_path: Path) -> None:
+    """Задание со строкой, похожей на разделитель, не закрывает блок раньше."""
+    out = tmp_path / "output"
+    module.write_output(out, module.FIX, "строка\nLOOK_MODE_EOF_\nещё\n")
+    written = out.read_text(encoding="utf-8").splitlines()
+    fence = written[1].removeprefix("task<<")
+    assert written[0] == "mode=fix" and fence.startswith("LOOK_MODE_EOF_") and len(fence) > 20
+    assert written[2:] == ["строка", "LOOK_MODE_EOF_", "ещё", fence]
