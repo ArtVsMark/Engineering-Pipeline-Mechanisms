@@ -34,11 +34,15 @@ from tests.conftest import ROOT, walk
 #: Где живёт рабочий код, который разбирает предметы конвейера.
 PLACES: Final = (ROOT / "scripts", ROOT / "packages" / "transport")
 
-#: Намеренные копии образца — с причиной у каждой (071).
-SIGNED: Final[dict[str, str]] = {
+#: Намеренные копии образца — с причиной у каждой (071). Подпись ставится на
+#: ПАРУ МОДУЛЕЙ, а не на образец целиком: общий образец вроде «числа подряд»
+#: иначе освобождался бы в любом числе модулей, и третий, разобравший им
+#: настоящий предмет, прошёл бы молча (взгляд на #869).
+SIGNED: Final[dict[str, tuple[frozenset[str], str]]] = {
     r"\d+": (
+        frozenset({"scripts/check_env.py", "scripts/check_reread.py"}),
         "грамматика «числа подряд», а не предмет: check_env режет версию пакета, "
-        "check_reread — номер выгрузки каталога; источники и правила версий разные"
+        "check_reread — номер выгрузки каталога; источники и правила версий разные",
     ),
 }
 
@@ -77,8 +81,14 @@ def repeated(files: list[Path], root: Path = ROOT) -> dict[str, list[str]]:
     return {
         said: places
         for said, places in seen.items()
-        if len({one.split(":")[0] for one in places}) > 1 and said not in SIGNED
+        if len({one.split(":")[0] for one in places}) > 1 and not signed(said, places)
     }
+
+
+def signed(said: str, places: list[str]) -> bool:
+    """Повтор подписан, только если все его модули названы подписью."""
+    allowed, _ = SIGNED.get(said, (frozenset(), ""))
+    return {one.split(":")[0] for one in places} <= allowed
 
 
 def modules() -> list[Path]:
@@ -114,3 +124,10 @@ def test_the_predicate_tells_a_copy_from_a_reference(tmp_path: Path) -> None:
         "образец в findall не судится"
     )
     assert repeated([first, asks], tmp_path) == {}
+
+
+def test_a_signature_covers_its_pair_and_no_third_module() -> None:
+    """Подписанный образец в третьем модуле краснеет: подпись — на пару, а не на образец."""
+    pair = ["scripts/check_env.py:1", "scripts/check_reread.py:2"]
+    assert signed(r"\d+", pair)
+    assert not signed(r"\d+", [*pair, "scripts/automerge.py:3"])
