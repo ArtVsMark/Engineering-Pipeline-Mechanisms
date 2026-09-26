@@ -385,3 +385,14 @@ def test_the_parts_job_runs_on_pull_requests_and_reads_the_exit() -> None:
     assert "change_parts.py" in runs and "--warn" in runs
     quiet = f"{module.EXIT_OK}|{module.EXIT_NOTHING}) ;;"
     assert quiet in runs and "::warning::" in runs, "коды шага разошлись с исходами механизма"
+
+
+def test_a_named_mixing_is_heard_without_the_warn_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Счёт без `--warn` — как зовёт навык — тоже не просит названную причину (#878)."""
+    monkeypatch.setattr(module, "touched", lambda base: [["a.py"], ["b.py"]])
+    monkeypatch.setattr(module, "bodies_of", lambda base: "Смешение: хвост правок")
+    assert module.main([]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "названо" in said and "НАЗОВИТЕ" not in said, said
