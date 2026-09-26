@@ -174,28 +174,71 @@ def test_an_aliased_or_imported_re_is_still_seen(tmp_path: Path) -> None:
     assert list(repeated([first, imported], tmp_path)) == [r"/runs/(\d+)"], "импорт не судится"
 
 
+#: Вызовы, делящие строку по разделителю.
+CUTTERS: Final = frozenset({"split", "rsplit", "partition", "rpartition"})
+
+
+def knows_the_version_form(tree: ast.AST) -> bool:
+    """Берёт ли модуль форму номера у `paths` — атрибутом или импортом имени."""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "VERSION_RE"
+            and getattr(node.value, "id", "") == "paths"
+        ):
+            return True
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "paths"
+            and any(one.name == "VERSION_RE" for one in node.names)
+        ):
+            return True
+    return False
+
+
+def cuts_by_dot(tree: ast.AST) -> list[int]:
+    """Строки, где строка делится по точке — позиционно или ключом `sep`."""
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or getattr(node.func, "attr", "") not in CUTTERS:
+            continue
+        said = [*node.args[:1], *(one.value for one in node.keywords if one.arg == "sep")]
+        if any(isinstance(one, ast.Constant) and one.value == "." for one in said):
+            found.append(node.lineno)
+    return found
+
+
+def test_every_way_to_cut_by_dot_is_seen() -> None:
+    """`rsplit`, `partition` и `split(sep=".")` режут так же, как `split(".")` (#877)."""
+    source = (
+        "from paths import VERSION_RE\n"
+        'a = v.split(".")\nb = v.rsplit(".")\nc = v.partition(".")\n'
+        'd = v.split(sep=".")\ne = v.split("-")\n'
+    )
+    tree = ast.parse(source)
+    assert knows_the_version_form(tree)
+    assert cuts_by_dot(tree) == [2, 3, 4, 5]
+
+
 def test_a_module_that_knows_the_version_form_does_not_cut_it() -> None:
     """Модуль, спрашивающий `paths.VERSION_RE`, не режет номер по точке сам (#877).
 
     Ответ 214 обещает: разряды номера читаются `version.digits`. Обещание без
     гейта держалось чтением, и нарезка `split(".")` пережила починку в
     сортировке выпусков. Предмет — модули, которые форму номера уже знают:
-    нарезка там — второе чтение того же. ПРЕДЕЛ НАЗВАН (195): модуль, не
-    спрашивающий `paths.VERSION_RE`, гейт не судит — `pipeline_checks.compatible`
-    читает MAJOR.MINOR входа потребителя, который бывает короче X.Y.Z.
+    нарезка там — второе чтение того же. Форму знает модуль, который берёт её
+    у `paths` любым путём: `paths.VERSION_RE` или `from paths import VERSION_RE`.
+    Режет — любой вызов, делящий строку по точке: `split`, `rsplit`,
+    `partition`, `rpartition`, позиционно или ключом `sep` (взгляд на #877).
+    ПРЕДЕЛ НАЗВАН (195): модуль, не берущий форму у `paths`, гейт не судит —
+    `pipeline_checks.compatible` читает MAJOR.MINOR входа потребителя, который
+    бывает короче X.Y.Z; чтение разрядов группами `match(...).group(n)` гейт
+    тоже не видит.
     """
     cut = []
     for path in walk(ROOT / "scripts", "*.py"):
-        source = path.read_text(encoding="utf-8")
-        if "paths.VERSION_RE" not in source:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if not knows_the_version_form(tree):
             continue
-        for node in ast.walk(ast.parse(source)):
-            if (
-                isinstance(node, ast.Call)
-                and getattr(node.func, "attr", "") == "split"
-                and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and node.args[0].value == "."
-            ):
-                cut.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+        cut += [f"{path.relative_to(ROOT)}:{line}" for line in cuts_by_dot(tree)]
     assert not cut, "номер режется по точке мимо version.digits (214): " + ", ".join(cut)
