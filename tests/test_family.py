@@ -324,3 +324,49 @@ def test_an_unanswered_rule_counts_as_behind() -> None:
     """Ответа у нас нет вовсе — отставание тоже: молчание не механизм (154)."""
     document = summary(consumer("ArtVsMark/ArtVsMark", **{"112": ("gate", "scripts/x.py")}))
     assert family.behind(document, mine=MINE, ours={}) == ["112"]
+
+
+def test_a_record_of_form_1_5_is_read_as_before() -> None:
+    """Запись формы 1.5 с полем `skill`: навык в разрез не входит, машина — входит (#886).
+
+    Вывод «разрез не меняется» держит тест с записью новой формы, а не чтение кода.
+    """
+    said = summary(
+        {
+            "repo": "o/a",
+            "holds": {
+                "157": {"mechanism": "skill", "skill": ".claude/skills/x", "where": "x"},
+                "042": {
+                    "mechanism": "gate",
+                    "where": "scripts/check.py — гейт",
+                    "skill": "catalogue:propose-a-rule",
+                },
+            },
+        }
+    )
+    assert family.held_by_machine(said) == 1
+    assert set(family.mechanisms(said)) == {"check.py"}
+
+
+def test_every_summary_reader_is_declared() -> None:
+    """Кто читает сводку семьи, выводится из дерева и совпадает с `SUMMARY_READERS` (#888).
+
+    Читатель узнаётся по обращению к `family.load` или `WHERE_URL`. ПРЕДЕЛ
+    НАЗВАН (195): модуль, взявший адрес сводки буквами, мимо констант, не
+    узнаётся — но и тогда он нарушает правило 209, и это видно чтением.
+    """
+    from tests.conftest import ROOT, walk
+
+    found = {
+        path.stem
+        for path in walk(ROOT / "scripts", "*.py")
+        if path.stem != "catalogue"
+        and (
+            "WHERE_URL" in (text := path.read_text(encoding="utf-8"))
+            or "family.load(" in text
+            or ("def load(" in text and path.stem == "family")
+        )
+    }
+    assert found == family.SUMMARY_READERS, (
+        f"читатели сводки в дереве {sorted(found)}, объявлено {sorted(family.SUMMARY_READERS)}"
+    )

@@ -495,6 +495,7 @@ def kinds_file(tmp_path: Any, kinds: dict[str, Any]) -> Any:
     path = tmp_path / "finding-kinds.json"
     path.write_text(json.dumps({"kinds": kinds}, ensure_ascii=False), encoding="utf-8")
     (tmp_path / "proposals.json").write_text('{"proposals": []}', encoding="utf-8")
+    (tmp_path / "bindings.json").write_text('{"rules": {"206": {}}}', encoding="utf-8")
     return path
 
 
