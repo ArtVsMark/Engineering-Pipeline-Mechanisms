@@ -1174,6 +1174,10 @@ def test_kind_of_reads_the_mark_and_falls_back_to_the_address() -> None:
         ("ответ в `.rules/bindings.json:375` врёт о числе", True),
         ("перечень py/yaml/json не путь, а .rules/bindings.json:9 — место", True),
         ("гейт test_quotes.py не проверяет цитаты в .rules/bindings.json", False),
+        ("с версии 1.2 ответ в .rules/bindings.json врёт", True),
+        ("число 3.5 в .rules/bindings.json неверно", True),
+        ("константа paths.BINDINGS и .rules/bindings.json:9 расходятся", True),
+        ("review_findings.closable читает .rules/bindings.json", True),
     ],
     ids=[
         "код упоминает ответы",
@@ -1183,6 +1187,10 @@ def test_kind_of_reads_the_mark_and_falls_back_to_the_address() -> None:
         "проза, ответы с номером строки",
         "перечень без расширения — не путь",
         "проза, первым путём — тест",
+        "версия — не путь",
+        "число — не путь",
+        "константа — не путь",
+        "функция модуля — не путь",
     ],
 )
 def test_the_answer_kind_is_read_from_the_place_not_a_mention(title: str, answer: bool) -> None:
