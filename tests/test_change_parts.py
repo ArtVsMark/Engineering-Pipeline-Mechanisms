@@ -444,7 +444,18 @@ def test_a_copied_placeholder_is_not_a_reason(copied: str) -> None:
 
 @pytest.mark.parametrize(
     "reason",
-    ["<Причина>", "<ПРИЧИНА>", "< причина >", "причина", "Причина.", "«причина»", "[причина]"],
+    [
+        "<Причина>",
+        "<ПРИЧИНА>",
+        "< причина >",
+        "причина",
+        "Причина.",
+        "«причина»",
+        "[причина]",
+        "_причина_",
+        "__причина__",
+        "*причина*",
+    ],
     ids=[
         "регистр",
         "заглавными",
@@ -453,6 +464,9 @@ def test_a_copied_placeholder_is_not_a_reason(copied: str) -> None:
         "с точкой",
         "в кавычках",
         "в скобках",
+        "курсив подчёркиванием",
+        "жирный подчёркиванием",
+        "курсив звёздочкой",
     ],
 )
 def test_the_placeholder_word_in_any_form_is_not_a_reason(reason: str) -> None:
@@ -471,7 +485,10 @@ def test_a_reason_starting_with_the_word_is_heard() -> None:
 def test_the_skill_writes_the_sample_the_count_hears() -> None:
     """Образец строки в навыке — ровно `MIXED_MARK PLACEHOLDER`: правка константы краснеет (209)."""
     skill = (ROOT / ".claude/skills/close-a-finding/SKILL.md").read_text(encoding="utf-8")
-    samples = re.findall(r"`([^`]*" + re.escape(module.MIXED_MARK) + r"[^`]*)`", skill)
+    # Вставки кода берутся ПАРАМИ слева направо, а не поиском метки между любыми
+    # двумя кавычками: иначе проза между вставками сошла бы за образец (#898).
+    spans = re.findall(r"`([^`\n]*)`", skill)
+    samples = [one for one in spans if module.MIXED_MARK in one]
     assert samples, "навык перестал называть форму строки смешения"
     sample = f"{module.MIXED_MARK} {module.PLACEHOLDER}"
     assert all(one in (sample, module.MIXED_MARK) for one in samples), samples
