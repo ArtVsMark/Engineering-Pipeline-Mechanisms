@@ -1118,7 +1118,11 @@ def test_the_registry_puts_answer_findings_first_and_names_the_section() -> None
     entries = {
         "aaaaaaa": findings_module.Entry(10, "дефект", "о коде, и тяжёлая"),
         "bbbbbbb": findings_module.Entry(
-            11, "замечание", "об ответе, и лёгкая", kind=findings_module.ANSWER_KIND
+            11,
+            "замечание",
+            "об ответе, и лёгкая",
+            kind=findings_module.ANSWER_KIND,
+            declared=True,
         ),
     }
     body = module.render_body(entries)
@@ -2073,7 +2077,11 @@ def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> Non
     entry = findings_module.Entry(887, "замечание", title, kind=kind)
     back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
     assert back.kind == kind, entry.said()
-    assert (findings_module.KIND_SAID in entry.said()) is (kind == findings_module.ANSWER_KIND)
+    reviewer_only = (
+        kind == findings_module.ANSWER_KIND
+        and findings_module.kind_of(title) != findings_module.ANSWER_KIND
+    )
+    assert (findings_module.KIND_SAID in entry.said()) is reviewer_only
 
 
 @pytest.mark.parametrize(
@@ -2084,13 +2092,45 @@ def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> Non
     ],
     ids=["без места", "с местом"],
 )
-def test_a_derived_mark_is_derived_again(title: str) -> None:
-    """Пометка, выведенная по адресу, при перечтении выводится тем же правилом (#903).
+def test_a_derived_kind_follows_a_changed_rule(title: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Род, выведенный адресом, в строку не пишется и следует за сменой правила (#905).
 
-    Расхождение рода дают лишь пометки прежнего правила по упоминанию, а не
-    пометки нынешнего `first_path` — и без места, и с местом.
+    Строка записана при нынешнем правиле; правило адреса сузили так, что этот
+    заголовок больше не «об ответе», — перечитанная строка идёт кодом, а не
+    держит липкую пометку, как `da1a2e0`.
     """
-    kind = findings_module.kind_of(title)
-    entry = findings_module.Entry(903, "замечание", title, kind=kind)
-    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
-    assert back.kind == kind == findings_module.kind_of(back.title)
+    entry = findings_module.Entry(905, "замечание", title, kind=findings_module.kind_of(title))
+    assert entry.kind == findings_module.ANSWER_KIND
+    line = f"- `abc1234` {entry.said()}\n"
+    assert findings_module.KIND_SAID not in line
+    monkeypatch.setattr(findings_module, "first_path", lambda _title: "")
+    back = findings_module.parse_entries(line)["abc1234"]
+    assert back.kind == findings_module.CODE
+
+
+@pytest.mark.parametrize("declared", [True, False], ids=["объявлен", "выведен"])
+def test_a_declared_kind_survives_a_narrowed_rule(
+    declared: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Род, объявленный ревьюером, пишется и тогда, когда адрес выводит тот же (#906).
+
+    Прежде пометка ставилась по несовпадению с выводом, и объявленное ревьюером
+    «об ответе» при совпавшем адресе в строку не попадало: сузят правило — и
+    находка тихо стала бы кодом. Выведенное адресом по-прежнему не пишется.
+    """
+    title = f"{findings_module.ANSWER_FILE}:9 — ответ врёт"
+    mark = "[риск · ответ]" if declared else "[риск]"
+    entries: dict[str, Any] = {}
+    look = [comment(f"НАХОДКА{mark}: {title}\nВЕРДИКТ: находок 1")]
+    ((*_, source),) = module.found_said(look)
+    assert source is declared, "источник рода потерян при разборе"
+    module.record_look(entries, 906, look, False)
+    (entry,) = entries.values()
+    assert entry.kind == findings_module.ANSWER_KIND and entry.declared is declared
+    line = f"- `abc1234` {entry.said()}\n"
+    assert (findings_module.KIND_SAID in line) is declared
+    monkeypatch.setattr(findings_module, "first_path", lambda _title: "")
+    back = findings_module.parse_entries(line)["abc1234"]
+    expected = findings_module.ANSWER_KIND if declared else findings_module.CODE
+    assert back.kind == expected and back.declared is declared
+    assert (findings_module.KIND_SAID in f"- `abc1234` {back.said()}\n") is declared
