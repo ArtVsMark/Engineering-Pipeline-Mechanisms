@@ -224,6 +224,16 @@ def slug_of(said: str) -> str:
     return first.strip(AROUND_SLUG)
 
 
+def rule_numbers(text: str) -> frozenset[str]:
+    """Номера правил из текста `.rules/bindings.json` — один разбор на всех читателей.
+
+    Его зовут и план (с диска), и гейт рождения правила (у головы): два разбора
+    одной формы разошлись бы при первой её смене (взгляд на #887, 214). Текст не
+    разбирается — `ValueError`, отказ называет зовущий.
+    """
+    return frozenset(str(number) for number in json.loads(text).get("rules") or {})
+
+
 def known_rules(path: Path | None = None) -> frozenset[str]:
     """Номера правил каталога, на которые проект отвечает, — из `.rules/bindings.json`.
 
@@ -232,10 +242,9 @@ def known_rules(path: Path | None = None) -> frozenset[str]:
     """
     where = path or paths.BINDINGS
     try:
-        rules = json.loads(where.read_text(encoding="utf-8")).get("rules") or {}
+        return rule_numbers(where.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise NotRun(f"ответы каталогу не прочитаны ({where}): {exc}") from exc
-    return frozenset(str(number) for number in rules)
 
 
 def answer_problem(
@@ -263,7 +272,9 @@ def answer_problem(
         return "ответ «есть», а номера правила первым словом нет"
     # Номер сверяется с ответами каталогу: опечатка «211» вместо «212» иначе
     # прошла бы зелёной — три цифры есть, правила нет (взгляд на #887).
-    number = what[:3]
+    # Номер — из совпадения образца, а не срезом его ширины (взгляд на #887).
+    found = RULE_NUMBER_RE.match(what)
+    number = found.group(0) if found else ""
     if kind == "есть" and known is not None and number not in known:
         return f"ответ «есть — {number}», а правила {number} в {paths.BINDINGS} нет"
     return None

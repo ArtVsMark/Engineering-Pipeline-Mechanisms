@@ -472,3 +472,11 @@ def test_twins_are_counted_over_resolved_findings(
     assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
     assert "33% от разобранных" in capsys.readouterr().out
     assert module.main(["--twins", "10-12"]) == module.EXIT_BROKEN
+
+
+def test_rule_numbers_are_read_by_one_parser() -> None:
+    """Номера правил — ключи раздела `rules`; неразборный текст — `ValueError` (#887)."""
+    assert module.rule_numbers('{"rules": {"212": {}, "033": {}}}') == frozenset({"212", "033"})
+    assert module.rule_numbers("{}") == frozenset()
+    with pytest.raises(ValueError):
+        module.rule_numbers("{")
