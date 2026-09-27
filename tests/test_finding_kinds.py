@@ -440,8 +440,11 @@ def test_a_rule_answer_names_a_rule_the_project_answers(tmp_path: Path) -> None:
     known = module.known_rules(bindings)
     assert module.answer_problem({"каталогу": "есть — 212"}, "", known) is None
     assert "211" in str(module.answer_problem({"каталогу": "есть — 211"}, "", known))
-    with pytest.raises(module.NotRun):
+    with pytest.raises(module.NotRun, match=f"^{module.ANSWERS_UNREAD}"):
         module.known_rules(tmp_path / "нет.json")
+    bindings.write_text("{}", encoding="utf-8")
+    with pytest.raises(module.NotRun, match=f"^{module.ANSWERS_UNREAD}"):
+        module.known_rules(bindings)
 
 
 def test_twins_are_counted_over_resolved_findings(
@@ -572,8 +575,8 @@ def test_a_span_the_archive_did_not_count_is_refused(
 def test_rule_numbers_are_read_by_one_parser() -> None:
     """Номера правил — ключи раздела `rules`; неразборный текст — `ValueError` (#887)."""
     assert module.rule_numbers('{"rules": {"212": {}, "033": {}}}') == frozenset({"212", "033"})
-    assert module.rule_numbers("{}") == frozenset()
-    for broken in ("{", "[]", '"x"', '{"rules": []}'):
+    assert module.rule_numbers('{"rules": {}}') == frozenset(), "пустой раздел — сказанное «нет»"
+    for broken in ("{", "[]", '"x"', '{"rules": []}', "{}", '{"rules": null}'):
         with pytest.raises(ValueError):
             module.rule_numbers(broken)
 

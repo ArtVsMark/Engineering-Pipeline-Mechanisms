@@ -236,11 +236,16 @@ def rule_numbers(text: str) -> frozenset[str]:
     одной формы разошлись бы при первой её смене (взгляд на #887, 214). Соседи,
     которым нужны сами ОТВЕТЫ, а не номера, — `audit_profile`, `drift`,
     `review_map` — читают раздел `rules` своим путём, и этот разбор им не
-    нужен (взгляд на #893, 195). Текст не разбирается или не объект —
-    `ValueError`, отказ называет зовущий.
+    нужен (взгляд на #893, 195). Текст не разбирается, не объект, раздела
+    `rules` нет или он не объект — `ValueError`, отказ называет зовущий.
+
+    РАЗДЕЛА НЕТ — ОТКАЗ, А НЕ «НОМЕРОВ НЕТ» (045, взгляд на #899): `{}` иначе
+    молча давал пустое множество, и опечатка номера в ответе «есть» не
+    краснела бы ни в гейте, ни в плане. Пустой раздел `{"rules": {}}` —
+    сказанное состояние «ответов нет», и он читается пустым.
     """
     said = json.loads(text)
-    rules = said.get("rules", {}) if isinstance(said, dict) else None
+    rules = said.get("rules") if isinstance(said, dict) else None
     if not isinstance(rules, dict):
         raise ValueError("ожидался объект с разделом rules")
     return frozenset(str(number) for number in rules)
