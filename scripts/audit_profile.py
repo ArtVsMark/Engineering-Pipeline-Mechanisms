@@ -82,7 +82,9 @@ class NotRun(RuntimeError):
 #: месту: #900, #902 и поздний взгляд на #902). Из правила выгрузки: `id`
 #: (любой, берётся строкой), `slug`, `claim.ru`, `title.ru` — строки. Из
 #: ответа проекта: `status` — строка или его нет, `mechanism` — строка, пусто
-#: или его нет, `analysed` — любое (берётся строкой). Остальные поля ответа
+#: или его нет, `analysed` — дата ГГГГ-ММ-ДД, пусто или его нет: сравнивается
+#: она строкой с `--since`, и чужая форма («2026/09/01», число) засчитывалась бы
+#: сверенной молча (поздний взгляд на #908). Остальные поля ответа
 #: профиль читает лишь строками (`suspicion`) и форме их не подчиняет.
 RULE_TEXT_FIELDS: Final = ("claim", "title")
 #: Начала отказов по форме: тесты узнают их по константам, а не по буквам (209).
@@ -146,6 +148,9 @@ def answers_whole(mine: dict[str, Any]) -> None:
         mechanism = answer.get("mechanism")
         if not isinstance(status, str) or not (mechanism is None or isinstance(mechanism, str)):
             raise NotRun(f"{ANSWER_SHAPE_SAID}: {number} — status/mechanism не строкой (075)")
+        analysed = answer.get("analysed") or ""
+        if not (isinstance(analysed, str) and (not analysed or is_iso_day(analysed))):
+            raise NotRun(f"{ANSWER_SHAPE_SAID}: {number} — analysed не дата ГГГГ-ММ-ДД (075)")
 
 
 def profile(export: dict[str, Any], mine: dict[str, Any], since: str = "") -> list[dict[str, Any]]:
@@ -183,17 +188,22 @@ def bands(rows: list[dict[str, Any]]) -> Counter[int]:
     return Counter(min(int(row["share"] * 10), 9) for row in rows)
 
 
+def is_iso_day(said: str) -> bool:
+    """Строка — дата строго ГГГГ-ММ-ДД. Одна проверка на обе стороны сравнения."""
+    try:
+        return date.fromisoformat(said).isoformat() == said
+    except ValueError:
+        return False
+
+
 def iso_day(said: str) -> str:
     """Дата ключа `--since` строго ГГГГ-ММ-ДД: сравнивается она строкой.
 
     `2026/09/20` или `2026-9-20` строкой сравнились бы с `analysed` молча и
-    дали неверный счёт сверенного — поэтому форма проверяется на входе.
+    дали неверный счёт сверенного — поэтому форма проверяется на входе. Та же
+    проверка держит и `analysed` в ответе (`answers_whole`).
     """
-    try:
-        day = date.fromisoformat(said)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"не дата ГГГГ-ММ-ДД: {said!r}") from None
-    if day.isoformat() != said:
+    if not is_iso_day(said):
         raise argparse.ArgumentTypeError(f"не дата ГГГГ-ММ-ДД: {said!r}")
     return said
 
