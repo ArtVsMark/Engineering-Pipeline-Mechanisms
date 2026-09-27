@@ -229,7 +229,11 @@ def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
 
 
 def known_at(head: str, root: Path = Path()) -> frozenset[str]:
-    """Номера правил, на которые дерево отвечает у головы, — чем сверять ответ «есть» (#887)."""
+    """Номера правил, на которые дерево отвечает у головы, — чем сверять ответ «есть» (#887).
+
+    Оба отказа — файла нет и файл не разбирается — начинаются с
+    `finding_kinds.ANSWERS_UNREAD`, как у `known_rules` (взгляд на #893).
+    """
     where = str(paths.BINDINGS)
     text = text_at(head, where, root)
     if text is None:
@@ -237,7 +241,9 @@ def known_at(head: str, root: Path = Path()) -> frozenset[str]:
     try:
         return finding_kinds.rule_numbers(text)
     except ValueError as exc:
-        raise NotRun(f"{where} у {head} не разбирается: {exc}") from exc
+        raise NotRun(
+            f"{finding_kinds.ANSWERS_UNREAD}: {where} у {head} не разбирается: {exc}"
+        ) from exc
 
 
 def kinds_missing(
