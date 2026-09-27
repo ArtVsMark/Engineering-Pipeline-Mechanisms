@@ -2046,8 +2046,22 @@ def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
         ),
         (f"`{findings_module.ANSWER_FILE}:9` — ответ врёт", findings_module.ANSWER_KIND),
         ("scripts/x.py:3 — ревьюер сам пометил род этой находки", findings_module.ANSWER_KIND),
+        (
+            f"без места — правка `{findings_module.ANSWER_FILE}` склеила строки",
+            findings_module.ANSWER_KIND,
+        ),
+        (
+            f"без места — `scripts/x.py` читает `{findings_module.ANSWER_FILE}`",
+            findings_module.CODE,
+        ),
     ],
-    ids=["код, упомянувший ответы", "место — ответы", "пометка ревьюера на коде"],
+    ids=[
+        "код, упомянувший ответы",
+        "место — ответы",
+        "пометка ревьюера на коде",
+        "без места, первым путём — ответы",
+        "без места, первым путём — код",
+    ],
 )
 def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> None:
     """Строка реестра `Entry.said` → `parse_entries` отдаёт тот же род (взгляд на #901).
@@ -2060,3 +2074,23 @@ def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> Non
     back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
     assert back.kind == kind, entry.said()
     assert (findings_module.KIND_SAID in entry.said()) is (kind == findings_module.ANSWER_KIND)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        f"без места — правка `{findings_module.ANSWER_FILE}` склеила строки",
+        f"`{findings_module.ANSWER_FILE}:9` — ответ врёт",
+    ],
+    ids=["без места", "с местом"],
+)
+def test_a_derived_mark_is_derived_again(title: str) -> None:
+    """Пометка, выведенная по адресу, при перечтении выводится тем же правилом (#903).
+
+    Расхождение рода дают лишь пометки прежнего правила по упоминанию, а не
+    пометки нынешнего `first_path` — и без места, и с местом.
+    """
+    kind = findings_module.kind_of(title)
+    entry = findings_module.Entry(903, "замечание", title, kind=kind)
+    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
+    assert back.kind == kind == findings_module.kind_of(back.title)
