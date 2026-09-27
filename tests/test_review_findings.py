@@ -2384,3 +2384,45 @@ def test_a_declared_answer_is_withdrawn_only_by_a_word(
     assert entry.kind == kind and entry.declared is (kind == findings_module.ANSWER_KIND)
     back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
     assert (back.kind, back.declared) == (entry.kind, entry.declared)
+
+
+#: Начало абзаца задания взгляда о находке об ответе — по нему абзац и ищется.
+ANSWER_PARAGRAPH: Final = "ЕСЛИ НАХОДКА ОБ ОТВЕТЕ ПРОЕКТА КАТАЛОГУ ПРАВИЛ"
+
+
+def answer_paragraphs(text: str) -> list[str]:
+    """Абзацы задания об ответе: от начала до пустой строки, отступ снят."""
+    found: list[str] = []
+    lines = text.splitlines()
+    for place, line in enumerate(lines):
+        if ANSWER_PARAGRAPH not in line:
+            continue
+        block: list[str] = []
+        for one in lines[place:]:
+            if not one.strip():
+                break
+            block.append(one.strip())
+        found.append(" ".join(block))
+    return found
+
+
+def test_the_answer_paragraph_is_one_twin_of_the_kinds() -> None:
+    """Абзац об ответе — подписанный дубль двух заданий, и его слова — константы рода (#913).
+
+    Ревьюеру сказано, что пометку ставит скобка `· ответ`, а снимает `· код`.
+    Слова набраны буквами в задании, а читает их `found_said` по
+    `findings.KINDS`: переименование константы или правка одной копии абзаца
+    прошли бы молча (071, 209).
+    """
+    text = (ROOT / ".github" / "workflows" / "review.yml").read_text(encoding="utf-8")
+    twins = answer_paragraphs(text)
+    assert len(twins) == 2, f"абзац об ответе ожидался в двух заданиях, найдено {len(twins)}"
+    assert twins[0] == twins[1], "копии абзаца об ответе разъехались"
+    for kind in (findings_module.ANSWER_KIND, findings_module.CODE):
+        assert f"· {kind}]" in twins[0], f"скобка рода «{kind}» не названа ревьюеру"
+
+
+def test_answer_paragraphs_are_cut_at_the_blank_line() -> None:
+    """Абзац кончается пустой строкой, и соседний абзац в него не попадает."""
+    text = f"  {ANSWER_PARAGRAPH} — раз\n  два\n\n  чужое\n"
+    assert answer_paragraphs(text) == [f"{ANSWER_PARAGRAPH} — раз два"]
