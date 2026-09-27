@@ -77,7 +77,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -103,11 +102,9 @@ NAMED_FROM: Final = 3
 #: у поимённого списка всегда была своя строка счёта (взгляд на #834).
 COUNTED_FROM: Final = 2
 
-#: Место в начале заголовка находки: путь латиницей, затем двоеточие и номер
-#: строки. Формы — в докстроке модуля: с расширением, без него, с точкой в начале.
-PLACE_RE: Final = re.compile(
-    r"^\s*`?(?P<path>(?:[A-Za-z0-9_.-]+/)*\.?[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)`?:\d"
-)
+#: Место в начале заголовка находки — разбор общий с родом находки
+#: (`findings.PLACE_RE`, #896). Формы — в докстроке модуля.
+PLACE_RE: Final = findings.PLACE_RE
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,8 +124,7 @@ class Chains:
 
 def place_of(title: str) -> str:
     """Путь, с которого начинается заголовок находки; пусто — места нет."""
-    found = PLACE_RE.match(title)
-    return found.group("path") if found else ""
+    return findings.place_of(title)
 
 
 def chains(said: list[tuple[int, str]]) -> Chains:
