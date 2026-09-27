@@ -393,7 +393,7 @@ def test_an_unfilled_archive_says_so_in_the_kinds(
     path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
     assert module.in_archive(path)[1] == gap
     module.main(["--archive", str(path)])
-    assert "АРХИВ НЕПОЛОН" in capsys.readouterr().out
+    assert module.findings.UNFILLED_SAID in capsys.readouterr().out
 
 
 def test_kinds_from_another_dictionary_are_named(
@@ -464,11 +464,12 @@ def test_twins_are_counted_over_resolved_findings(
                     "b": {"by": 10, "twin_of": ""},
                     "c": {"by": 11, "twin_of": "", "fix_check": True},
                 },
+                "counted": [10, 11, 12, 99],
             }
         ),
         encoding="utf-8",
     )
-    assert module.twins_between(archive, 10, 12) == ((4, 3, 1, 1), "")
+    assert module.twins_between(archive, 10, 12) == ((3, 4, 3, 1, 1), "")
     assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
     assert f"33% {module.TWIN_SHARE}" in capsys.readouterr().out
     assert module.main(["--twins", "10-12"]) == module.EXIT_BROKEN
@@ -511,8 +512,11 @@ def test_twins_name_an_unfilled_archive(tmp_path: Path, capsys: pytest.CaptureFi
     """Неполный архив замер называет, как и счёт родов: ноль не выглядит полным (045, #891)."""
     archive = tmp_path / "findings.json"
     gap = f"{module.findings.UNFILLED} до #12"
-    archive.write_text(json.dumps({"findings": {"a": {"pr": 10}}, "gaps": [gap]}), encoding="utf-8")
-    assert module.twins_between(archive, 10, 12) == ((1, 0, 0, 0), gap)
+    archive.write_text(
+        json.dumps({"findings": {"a": {"pr": 10}}, "gaps": [gap], "counted": [10]}),
+        encoding="utf-8",
+    )
+    assert module.twins_between(archive, 10, 12) == ((1, 1, 0, 0, 0), gap)
     assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
     assert gap in capsys.readouterr().out
 
@@ -538,7 +542,31 @@ def test_a_span_of_another_form_is_refused(
     said = capsys.readouterr().err
     assert getattr(module, named) in said
     assert getattr(module, unnamed) not in said
-    assert module.span("855-890") == (855, 890)
+
+
+@pytest.mark.parametrize(
+    ("text", "read"), [("855-890", (855, 890)), ("7-7", (7, 7))], ids=["отрезок", "одно изменение"]
+)
+def test_a_span_of_the_form_is_read(text: str, read: tuple[int, int]) -> None:
+    """Отрезок по форме читается числами; его провал не прячется среди отказов (взгляд на #895)."""
+    assert module.span(text) == read
+
+
+@pytest.mark.parametrize(
+    "counted", [[], [9, 13]], ids=["архив ничего не учёл", "учтено только вне отрезка"]
+)
+def test_a_span_the_archive_did_not_count_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], counted: list[int]
+) -> None:
+    """Отрезок без учтённых изменений — отказ, как у `finding_chains`, а не «находок 0» (045)."""
+    archive = tmp_path / "findings.json"
+    archive.write_text(
+        json.dumps({"findings": {"a": {"pr": 11}}, "counted": counted}), encoding="utf-8"
+    )
+    with pytest.raises(module.NotRun, match=re.escape(module.findings.NONE_COUNTED)):
+        module.twins_between(archive, 10, 12)
+    assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_BROKEN
+    assert module.findings.NONE_COUNTED in capsys.readouterr().err
 
 
 def test_rule_numbers_are_read_by_one_parser() -> None:
@@ -548,3 +576,16 @@ def test_rule_numbers_are_read_by_one_parser() -> None:
     for broken in ("{", "[]", '"x"', '{"rules": []}'):
         with pytest.raises(ValueError):
             module.rule_numbers(broken)
+
+
+def test_a_partly_counted_span_names_what_the_archive_saw(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отрезок, покрытый частично, печатает число учтённых изменений (взгляд на #897)."""
+    archive = tmp_path / "findings.json"
+    archive.write_text(
+        json.dumps({"findings": {"a": {"pr": 11}}, "counted": [10, 11]}), encoding="utf-8"
+    )
+    assert module.twins_between(archive, 10, 8900)[0][0] == 2
+    assert module.main(["--archive", str(archive), "--twins", "10-8900"]) == module.EXIT_OK
+    assert f"{module.SPAN_SEEN} 2," in capsys.readouterr().out

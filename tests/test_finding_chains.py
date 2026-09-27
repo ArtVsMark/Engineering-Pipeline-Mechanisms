@@ -393,7 +393,7 @@ def test_the_archive_report_names_its_input(
     module.main(["--archive", str(archive_file(tmp_path)), "--from", "8", "--to", "9"])
     said = capsys.readouterr().out
     assert "вход: архив находок, 2 слитых изменений" in said
-    assert "всех авторов" in said and "АРХИВ НЕПОЛОН" not in said
+    assert "всех авторов" in said and module.findings.UNFILLED_SAID not in said
 
 
 def test_an_unfilled_archive_is_named_in_the_report(
@@ -405,7 +405,7 @@ def test_an_unfilled_archive_is_named_in_the_report(
     archive["gaps"] = ["наполнение не дошло до головы: не учтено слитых изменений — 4"]
     path.write_text(json.dumps(archive, ensure_ascii=False), encoding="utf-8")
     assert module.main(["--archive", str(path)]) == module.EXIT_OK
-    assert "АРХИВ НЕПОЛОН: наполнение не дошло" in capsys.readouterr().out
+    assert f"{module.findings.UNFILLED_SAID} {module.findings.UNFILLED}" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -462,3 +462,12 @@ def test_a_verifier_answer_is_not_counted_as_a_look(
     # Счёт вердиктов — второй выход отсева: цитата `ВЕРДИКТ:` его не множит.
     _, _, kept = module.read_counted("o/r", "t", 0, 9, 9)
     assert kept == 1
+
+
+def test_an_archive_span_without_counted_changes_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отрезок, которого архив не учёл, — отказ общим текстом с `--twins` (045, взгляд на #895)."""
+    args = ["--archive", str(archive_file(tmp_path)), "--from", "100", "--to", "200"]
+    assert module.main(args) == module.EXIT_BROKEN
+    assert module.findings.NONE_COUNTED in capsys.readouterr().err
