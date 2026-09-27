@@ -2308,8 +2308,14 @@ CODE_TITLE = "scripts/arm.py:9 — ответ врёт"
         (ANSWER_TITLE, CODE_TITLE, "[риск]", "ответ"),
         (CODE_TITLE, ANSWER_TITLE, "[риск]", "код"),
         (CODE_TITLE, CODE_TITLE + " и дальше", "[риск · ответ]", "ответ"),
+        (CODE_TITLE, CODE_TITLE + " и дальше", "[риск · код]", "код"),
     ],
-    ids=["пересказ уводит в код", "пересказ уводит в ответ", "объявлено ревьюером"],
+    ids=[
+        "пересказ уводит в код",
+        "пересказ уводит в ответ",
+        "объявлено ревьюером",
+        "объявлен код",
+    ],
 )
 def test_a_retold_finding_keeps_the_kind_its_line_reads_back(
     kept: str, retold: str, mark: str, kind: str, monkeypatch: pytest.MonkeyPatch
@@ -2328,3 +2334,10 @@ def test_a_retold_finding_keeps_the_kind_its_line_reads_back(
     assert entry.title == kept and entry.kind == kind
     back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
     assert (back.kind, back.declared) == (entry.kind, entry.declared)
+
+
+def test_a_declared_code_is_not_a_declared_answer() -> None:
+    """Флаг источника — только у объявленного «об ответе» (взгляд на #909)."""
+    look = [comment("НАХОДКА[риск · код]: scripts/arm.py:9 — ломается\nВЕРДИКТ: находок 1")]
+    ((_, _, kind, _, declared),) = module.found_said(look)
+    assert (kind, declared) == (findings_module.CODE, False)
