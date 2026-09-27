@@ -328,6 +328,10 @@ def test_warn_marks_an_unnamed_split_only(
     assert module.main(["--warn"]) == module.EXIT_OK
     said = capsys.readouterr().out
     assert ("::warning" in said) is warned, said
+    # Парная проверка: просьба печатается ровно там, где предупреждение, иначе
+    # «просьбы нет» в соседних тестах была бы зелёной ни о чём (взгляд на #889).
+    assert (module.PLEA in said) is warned, said
+    assert module.MIXED_MARK in module.PLEA
 
 
 def test_declared_needs_a_reason_after_the_mark() -> None:
