@@ -149,11 +149,12 @@ def test_the_journal_as_the_release_builds_it_resolves() -> None:
 
 
 #: Где путь к документу пишется не ссылкой, а буквами: код, прогоны, таблицы
-#: правил — и проза документов в обратных кавычках: свод, ядро, навыки,
-#: которые читают окна (взгляд на #880). Проверка ссылок их не видит, а переезд
-#: документа (#840) оставлял в них старые пути. Тесты вне предмета: их фикстуры
-#: строят вымышленные пути намеренно, а настоящий путь, ставший неверным,
-#: роняет сам тест.
+#: правил — и проза документов: свод, ядро, навыки, которые читают окна
+#: (взгляд на #880). Образец кавычек не требует: он берёт и голый путь, и путь
+#: в обратных кавычках, и цель ссылки `](docs/….md)` (#890). Проверка ссылок
+#: прозу не видит, а переезд документа (#840) оставлял в ней старые пути. Тесты
+#: вне предмета: их фикстуры строят вымышленные пути намеренно, а настоящий
+#: путь, ставший неверным, роняет сам тест.
 NAMED_IN: Final = (".py", ".yml", ".yaml", ".json", ".toml", ".sh", ".md")
 #: ИСТОРИЯ — ВНЕ ПРЕДМЕТА, с причиной (154): проза записей решений заморожена
 #: (043), фрагменты и собранный журнал говорят о том, что было, и старый путь в
@@ -162,10 +163,31 @@ HISTORY: Final = ("tests/", "docs/decisions/", "changelog.d/", "CHANGELOG.md")
 #: Путь к документу, написанный буквами.
 #: Слева — граница пути: `mydocs/…` и `.claude/docs/…` — не `docs/` от корня (#880).
 DOC_PATH_RE: Final = re.compile(r"(?<![\w./-])docs/[\w./-]+\.md")
-#: Вымышленные пути в примерах — с причиной у каждого (071).
-EXAMPLES: Final = {
-    "docs/x.md": "пример переезда ссылки в описании `build_changelog.relink`",
-}
+#: Вымышленные пути в примерах — с причиной у каждого (071). Сейчас пусто:
+#: единственный пример, `../docs/x.md` в описании `build_changelog.relink`,
+#: образец не берёт — слева у него `/`, и исключение было мёртвым (#890).
+EXAMPLES: Final[dict[str, str]] = {}
+
+
+def named_paths() -> list[tuple[str, int, str]]:
+    """Пути `docs/….md`, написанные буквами в предмете гейта: файл, строка, путь."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=ROOT,
+        check=True,
+    ).stdout.split("\0")
+    return [
+        (name, number, said)
+        for name in listed
+        if name.endswith(NAMED_IN) and not name.startswith(HISTORY)
+        for number, line in enumerate(
+            (ROOT / name).read_text(encoding="utf-8").splitlines(), start=1
+        )
+        for said in DOC_PATH_RE.findall(line)
+    ]
 
 
 def test_a_doc_path_is_read_from_its_own_start() -> None:
@@ -175,44 +197,30 @@ def test_a_doc_path_is_read_from_its_own_start() -> None:
 
 
 def test_paths_named_outside_documents_exist() -> None:
-    """Путь `docs/….md`, названный буквами в коде и прогонах, ведёт к файлу (взгляд на #875).
+    """Путь `docs/….md`, названный буквами в коде, прогонах и прозе, ведёт к файлу (#875).
 
     Константы `scripts/paths.py` держат только те места, что их читают; прочие
     упоминания при следующем переезде нашлись бы глазами — или не нашлись.
     """
-    listed = subprocess.run(
-        ["git", "ls-files", "-z"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=ROOT,
-        check=True,
-    ).stdout.split("\0")
+    found = named_paths()
+    assert found, "путей к документам буквами не найдено — гейт ничего не проверяет (075)"
     stale = [
         f"{name}:{number} — {said}"
-        for name in listed
-        if name.endswith(NAMED_IN) and not name.startswith(HISTORY)
-        for number, line in enumerate(
-            (ROOT / name).read_text(encoding="utf-8").splitlines(), start=1
-        )
-        for said in DOC_PATH_RE.findall(line)
+        for name, number, said in found
         if said not in EXAMPLES and not (ROOT / said).exists()
     ]
     assert not stale, "путь к документу, которого нет:\n  " + "\n  ".join(stale)
 
 
 def test_every_example_is_still_in_the_tree() -> None:
-    """Исключение живёт, пока жив пример: иначе оно молча пропускает путь где угодно (#880)."""
-    for said in EXAMPLES:
-        found = subprocess.run(
-            ["git", "grep", "-l", "-F", said, "--", "scripts", ".github", ".rules"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=ROOT,
-            check=False,
-        ).stdout.split()
-        assert found, f"пример «{said}» больше нигде не стоит — исключение снять"
+    """Исключение живёт, пока его пример берёт ТОТ ЖЕ разбор ТОГО ЖЕ охвата (#880, #890).
+
+    Прежде живость искалась подстрокой в трёх каталогах, а гейт — образцом во
+    всём охвате: мёртвое исключение проходило проверку живости.
+    """
+    seen = {said for _, _, said in named_paths()}
+    dead = sorted(set(EXAMPLES) - seen)
+    assert not dead, f"примеры больше нигде не стоят — исключения снять: {dead}"
 
 
 def test_the_check_sees_links_at_all() -> None:
