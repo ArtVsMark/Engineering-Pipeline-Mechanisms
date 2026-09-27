@@ -162,6 +162,24 @@ def test_a_missing_answers_file_is_the_third_outcome(tmp_path: Path, run_script:
     assert "взять неоткуда" in done.err, done.err
 
 
+@pytest.mark.parametrize(
+    "said",
+    ["{", "[]", "{}", '{"rules": []}', '{"rules": null}'],
+    ids=["обрыв", "список", "без раздела rules", "rules списком", "rules пусто"],
+)
+def test_answers_of_another_shape_are_the_third_outcome(
+    tmp_path: Path, run_script: RunScript, said: str
+) -> None:
+    """Файл `--answers` чужой формы — отказ, а не молча пустой профиль (взгляд на #900)."""
+    answers = tmp_path / "answers.json"
+    answers.write_text(said, encoding="utf-8")
+    export = tmp_path / "export.json"
+    export.write_text('{"rules": []}', encoding="utf-8")
+    done = run_script("audit_profile.py", "--answers", str(answers), "--export", str(export))
+    assert done.code == module.EXIT_BROKEN, done.out
+    assert "не разбирается" in done.err, done.err
+
+
 def test_the_gate_and_the_skill_name_each_other() -> None:
     """Механизм зовётся навыком, а навык — этим именем: иначе один из двух мёртв.
 
@@ -214,3 +232,34 @@ def test_since_counts_only_a_fresh_reading() -> None:
     assert module.profile(export, mine)[0]["looked"] is True
     assert module.profile(export, mine, "2026-09-26")[0]["looked"] is False
     assert module.profile(export, mine, "2026-09-18")[0]["looked"] is True
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "[]",
+        '{"rules": {}}',
+        '{"rules": [1]}',
+        '{"rules": [{"slug": "x"}]}',
+        '{"rules": [{"id": 1, "slug": "x", "claim": "текст", "title": {"ru": "т"}}]}',
+    ],
+    ids=["список", "rules объектом", "правило числом", "правило без id", "claim строкой"],
+)
+def test_an_export_of_another_shape_is_the_third_outcome(
+    tmp_path: Path, run_script: RunScript, said: str
+) -> None:
+    """Выгрузка `--export` чужой формы — отказ с причиной, а не трасса (взгляд на #902)."""
+    answers = tmp_path / "answers.json"
+    answers.write_text('{"rules": {"1": {"status": "x"}}}', encoding="utf-8")
+    export = tmp_path / "export.json"
+    export.write_text(said, encoding="utf-8")
+    done = run_script("audit_profile.py", "--answers", str(answers), "--export", str(export))
+    assert done.code == module.EXIT_BROKEN, done.out
+    assert "не той формы" in done.err, done.err
+    assert "Traceback" not in done.err
+
+
+def test_export_rules_keeps_a_whole_rule() -> None:
+    """Правило нужной формы читается по номеру-строке (#902)."""
+    rule = {"id": 7, "slug": "s", "claim": {"ru": "а"}, "title": {"ru": "б"}}
+    assert module.export_rules({"rules": [rule]}) == {"7": rule}
