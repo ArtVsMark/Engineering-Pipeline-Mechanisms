@@ -174,6 +174,17 @@ def test_read_archive_refuses_a_scalar_where_a_list_is(tmp_path: Path) -> None:
             module.read_archive(path)
 
 
+@pytest.mark.parametrize("pr", ["[10]", '{"x": 1}', '"10"', "true", "1.5"])
+def test_read_archive_refuses_a_change_number_of_another_shape(tmp_path: Path, pr: str) -> None:
+    """Номер изменения записи — число; иная форма — отказ, а не трасса у замера (взгляд на #895)."""
+    path = tmp_path / "findings.json"
+    path.write_text(f'{{"findings": {{"a": {{"pr": {pr}}}}}}}', encoding="utf-8")
+    with pytest.raises(ValueError, match="не число"):
+        module.read_archive(path)
+    path.write_text('{"findings": {"a": {"pr": 10}, "b": {}}}', encoding="utf-8")
+    assert set(module.read_archive(path)["findings"]) == {"a", "b"}
+
+
 @pytest.mark.parametrize(
     "said",
     ['{"findings": []}', '{"findings": ""}', '{"findings": 0}', '{"counted": 0}', '{"gaps": ""}'],
