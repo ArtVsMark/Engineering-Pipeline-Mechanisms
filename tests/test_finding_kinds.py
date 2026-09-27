@@ -442,3 +442,33 @@ def test_a_rule_answer_names_a_rule_the_project_answers(tmp_path: Path) -> None:
     assert "211" in str(module.answer_problem({"каталогу": "есть — 211"}, "", known))
     with pytest.raises(module.NotRun):
         module.known_rules(tmp_path / "нет.json")
+
+
+def test_twins_are_counted_over_resolved_findings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Доля дублей отрезка — от разобранных; неразобранное дублем не считается (#859, #891)."""
+    archive = tmp_path / "findings.json"
+    archive.write_text(
+        json.dumps(
+            {
+                "findings": {
+                    "a": {"pr": 10},
+                    "b": {"pr": 10},
+                    "c": {"pr": 11},
+                    "d": {"pr": 12},
+                    "e": {"pr": 99},
+                },
+                "resolutions": {
+                    "a": {"by": 10, "twin_of": "b"},
+                    "b": {"by": 10, "twin_of": ""},
+                    "c": {"by": 11, "twin_of": "", "fix_check": True},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert module.twins_between(archive, 10, 12) == (4, 3, 1, 1)
+    assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
+    assert "33% от разобранных" in capsys.readouterr().out
+    assert module.main(["--twins", "10-12"]) == module.EXIT_BROKEN

@@ -322,6 +322,26 @@ def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
     return found, findings.unfilled(archive)
 
 
+def twins_between(path: Path, first: int, final: int) -> tuple[int, int, int, int]:
+    """Находки изменений `first`–`final` в архиве: всего, разобрано, проверкой починки, дублем.
+
+    Замер #859 командой, а не разовым сценарием окна (005): доля дублей
+    считается от РАЗОБРАННЫХ — неразобранная находка дублем ещё не снята и
+    нулём не свидетельствует (взгляд на #891).
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise NotRun(f"архив не прочитан ({path}): {exc}") from exc
+    found = data.get("findings") or {}
+    solved = data.get("resolutions") or {}
+    marks = [mark for mark, one in found.items() if first <= int(one.get("pr") or 0) <= final]
+    done = [mark for mark in marks if mark in solved]
+    checked = sum(1 for mark in done if solved[mark].get("fix_check"))
+    twins = sum(1 for mark in done if solved[mark].get("twin_of"))
+    return len(marks), len(done), checked, twins
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает роды, повторы и долг."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -329,7 +349,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--archive", default=None, help="архив находок (findings.json): встречи рода в нём"
     )
+    parser.add_argument(
+        "--twins",
+        default="",
+        metavar="ПЕРВЫЙ-ПОСЛЕДНИЙ",
+        help="доля дублей среди находок отрезка изменений по архиву (#859)",
+    )
     args = parser.parse_args(argv)
+    if args.twins:
+        if not args.archive:
+            print("доля дублей считается по архиву: нужен --archive", file=sys.stderr)
+            return EXIT_BROKEN
+        first, _, final = args.twins.partition("-")
+        try:
+            total, done, checked, twins = twins_between(Path(args.archive), int(first), int(final))
+        except (NotRun, ValueError) as refusal:
+            print(f"доля дублей не сосчитана: {refusal}", file=sys.stderr)
+            return EXIT_BROKEN
+        share = f"{twins / done:.0%}" if done else "—"
+        print(
+            f"#{first}–#{final}: находок {total}, разобрано {done} "
+            f"(проверкой починки {checked}), дублем {twins} — {share} от разобранных"
+        )
+        return EXIT_OK
     try:
         kinds = read(Path(args.kinds) if args.kinds else None)
         archived, gap = in_archive(Path(args.archive)) if args.archive else ({}, "")
