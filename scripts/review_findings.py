@@ -380,8 +380,10 @@ def found_said(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str,
     """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов.
 
     Третьим в паре идёт РОД предмета: «код» либо «ответ» (`findings.KINDS`),
-    последним — объявил ли его ревьюер: пометка в реестр пишется по источнику,
-    а не по совпадению с выводом адресом (взгляд на #906).
+    последним — объявил ли ревьюер род «об ответе»: пометка в реестр пишется по
+    источнику, а не по совпадению с выводом адресом (взгляд на #906).
+    Объявленный «код» флага не ставит: пересказ `[риск · код]` иначе получал
+    род «ответ» и липкую пометку (взгляд на #909).
     Строка отрицания находкой не считается: см. `ABSENCE`.
     """
     found: list[tuple[str, str, str, str, bool]] = []
@@ -416,7 +418,7 @@ def found_said(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str,
                         cleaned,
                         findings.kind_of(cleaned, род),
                         роль,
-                        bool(род),
+                        род == findings.ANSWER_KIND,
                     )
                 )
     return found
@@ -1310,13 +1312,22 @@ def record_look(
             # заново значило бы терять уже сделанную работу — тот же
             # класс, что потеря хвоста позднего взгляда в реестре
             # непросмотренного (022).
+            # РОД ВЫВОДИТСЯ ИЗ ХРАНИМОГО ЗАГОЛОВКА, а не из пересказа (поздний
+            # взгляд на #906): заголовок записи остаётся прежним, и род,
+            # выведенный из нового, при перечтении строки разошёлся бы с ним —
+            # в одну сторону липкой пометкой класса `da1a2e0`, в другую тихой
+            # сменой рода. Объявление ревьюера берётся из пересказа: оно о
+            # находке, а не о словах.
+            by_reviewer = title in declared
             entries[mark] = replace(
                 entries[mark],
                 pr=pr,
                 weight=weight,
-                kind=род,
+                kind=findings.kind_of(
+                    entries[mark].title, findings.ANSWER_KIND if by_reviewer else ""
+                ),
                 role=seen_by.get(title) or entries[mark].role,
-                declared=title in declared,
+                declared=by_reviewer,
             )
             continue
         entries[fingerprint(title)] = findings.Entry(
