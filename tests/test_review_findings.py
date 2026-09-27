@@ -2123,7 +2123,7 @@ def test_a_declared_kind_survives_a_narrowed_rule(
     entries: dict[str, Any] = {}
     look = [comment(f"НАХОДКА{mark}: {title}\nВЕРДИКТ: находок 1")]
     ((*_, source),) = module.found_said(look)
-    assert source is declared, "источник рода потерян при разборе"
+    assert (source == findings_module.ANSWER_KIND) is declared, "источник рода потерян при разборе"
     module.record_look(entries, 906, look, False)
     (entry,) = entries.values()
     assert entry.kind == findings_module.ANSWER_KIND and entry.declared is declared
@@ -2337,7 +2337,50 @@ def test_a_retold_finding_keeps_the_kind_its_line_reads_back(
 
 
 def test_a_declared_code_is_not_a_declared_answer() -> None:
-    """Флаг источника — только у объявленного «об ответе» (взгляд на #909)."""
+    """Объявленный «код» — своё состояние, а не «об ответе» (взгляды на #909, #911)."""
     look = [comment("НАХОДКА[риск · код]: scripts/arm.py:9 — ломается\nВЕРДИКТ: находок 1")]
     ((_, _, kind, _, declared),) = module.found_said(look)
-    assert (kind, declared) == (findings_module.CODE, False)
+    assert (kind, declared) == (findings_module.CODE, findings_module.CODE)
+
+
+def test_a_declared_answer_survives_a_retell_without_the_mark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Объявленное прошлым заходом «об ответе» не теряется пересказом без пометки (#909).
+
+    Роль при пересказе сохраняется, и объявление — тоже: ревьюер не обязан
+    повторять род на каждом заходе, а снимает находку работа, а не молчание.
+    """
+    kept = findings_module.Entry(
+        905, "риск", CODE_TITLE, kind=findings_module.ANSWER_KIND, declared=True
+    )
+    entries: dict[str, Any] = {"abc1234": kept}
+    monkeypatch.setattr(module, "pair_up", lambda *_, **__: ["abc1234"])
+    look = [comment(f"НАХОДКА[риск]: {CODE_TITLE} и дальше\nВЕРДИКТ: находок 1")]
+    module.record_look(entries, 909, look, False)
+    entry = entries["abc1234"]
+    assert (entry.kind, entry.declared) == (findings_module.ANSWER_KIND, True)
+    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
+    assert (back.kind, back.declared) == (entry.kind, entry.declared)
+
+
+@pytest.mark.parametrize(
+    ("mark", "kind"),
+    [("[риск]", "ответ"), ("[риск · код]", "код")],
+    ids=["молчание держит", "явный код снимает"],
+)
+def test_a_declared_answer_is_withdrawn_only_by_a_word(
+    mark: str, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Объявление ведёт себя как роль: молчание не снимает, явный «код» снимает (#911)."""
+    kept = findings_module.Entry(
+        905, "риск", CODE_TITLE, kind=findings_module.ANSWER_KIND, declared=True
+    )
+    entries: dict[str, Any] = {"abc1234": kept}
+    monkeypatch.setattr(module, "pair_up", lambda *_, **__: ["abc1234"])
+    look = [comment(f"НАХОДКА{mark}: {CODE_TITLE} и дальше\nВЕРДИКТ: находок 1")]
+    module.record_look(entries, 911, look, False)
+    entry = entries["abc1234"]
+    assert entry.kind == kind and entry.declared is (kind == findings_module.ANSWER_KIND)
+    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
+    assert (back.kind, back.declared) == (entry.kind, entry.declared)
