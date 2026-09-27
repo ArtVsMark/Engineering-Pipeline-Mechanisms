@@ -322,6 +322,9 @@ OUTSIDE: Final = "род архива вне словаря:"
 KINDLESS: Final = "записей архива без рода:"
 #: Хвост строки замера дублей: тест узнаёт её по нему, а не по буквам (209).
 TWIN_SHARE: Final = "от разобранных"
+#: Сколько изменений отрезка архив учёл — первым числом строки замера: отрезок,
+#: покрытый частично (`855-8900`), иначе читался бы целиком (взгляд на #897).
+SPAN_SEEN: Final = "учтено изменений"
 #: Форма отрезка `--twins`: её называет отказ на чужой записи.
 SPAN_FORM: Final = "ПЕРВЫЙ-ПОСЛЕДНИЙ"
 #: Отказ на перевёрнутом отрезке: тест отличает его от отказа по форме (209).
@@ -367,8 +370,10 @@ def span(text: str) -> tuple[int, int]:
     return int(first), int(final)
 
 
-def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, int, int], str]:
-    """Находки изменений `first`–`final`: (всего, разобрано, проверкой починки, дублем) и неполнота.
+def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, int, int, int], str]:
+    """Отрезок `first`–`final`: (учтено изменений, находок, разобрано, проверкой починки, дублем).
+
+    Вторым отдаётся строка о неполноте архива.
 
     Замер #859 командой, а не разовым сценарием окна (005): доля дублей
     считается от РАЗОБРАННЫХ — неразобранная находка дублем ещё не снята и
@@ -380,6 +385,8 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     ОТРЕЗОК, КОТОРОГО АРХИВ НЕ УЧЁЛ, — ОТКАЗ, а не «находок 0»: опечатка
     `8550-8900` или ещё не слитый отрезок иначе печатали бы ноль замером.
     Так же отказывает соседний `finding_chains` (045, взгляд на #895).
+    Отрезок, покрытый ЧАСТИЧНО, не отказ — но число учтённых в нём изменений
+    отдаётся первым и печатается, как у `finding_chains` (взгляд на #897).
     """
     try:
         archive = findings.read_archive(path)
@@ -389,7 +396,8 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     solved = {} if solved is None else solved
     if not isinstance(solved, dict) or not all(isinstance(one, dict) for one in solved.values()):
         raise NotRun("`resolutions` в архиве — не словарь записей")
-    if not any(first <= number <= final for number in archive.get("counted") or []):
+    seen = len({number for number in archive.get("counted") or [] if first <= number <= final})
+    if not seen:
         raise NotRun(findings.NONE_COUNTED)
     marks = [
         mark
@@ -399,7 +407,7 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     done = [mark for mark in marks if mark in solved]
     checked = sum(1 for mark in done if solved[mark].get("fix_check"))
     twins = sum(1 for mark in done if solved[mark].get("twin_of"))
-    return (len(marks), len(done), checked, twins), findings.unfilled(archive)
+    return (seen, len(marks), len(done), checked, twins), findings.unfilled(archive)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -422,15 +430,16 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_BROKEN
         try:
             first, final = span(args.twins)
-            (total, done, checked, twins), gap = twins_between(Path(args.archive), first, final)
+            counts, gap = twins_between(Path(args.archive), first, final)
         except (NotRun, ValueError) as refusal:
             print(f"доля дублей не сосчитана: {refusal}", file=sys.stderr)
             return EXIT_BROKEN
         if gap:
             print(f"{findings.UNFILLED_SAID} {gap} — числа архива ниже неполные")
+        seen, total, done, checked, twins = counts
         share = f"{twins / done:.0%}" if done else "—"
         print(
-            f"#{first}–#{final}: находок {total}, разобрано {done} "
+            f"#{first}–#{final}: {SPAN_SEEN} {seen}, находок {total}, разобрано {done} "
             f"(проверкой починки {checked}), дублем {twins} — {share} {TWIN_SHARE}"
         )
         return EXIT_OK

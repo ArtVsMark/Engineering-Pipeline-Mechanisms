@@ -469,7 +469,7 @@ def test_twins_are_counted_over_resolved_findings(
         ),
         encoding="utf-8",
     )
-    assert module.twins_between(archive, 10, 12) == ((4, 3, 1, 1), "")
+    assert module.twins_between(archive, 10, 12) == ((3, 4, 3, 1, 1), "")
     assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
     assert f"33% {module.TWIN_SHARE}" in capsys.readouterr().out
     assert module.main(["--twins", "10-12"]) == module.EXIT_BROKEN
@@ -516,7 +516,7 @@ def test_twins_name_an_unfilled_archive(tmp_path: Path, capsys: pytest.CaptureFi
         json.dumps({"findings": {"a": {"pr": 10}}, "gaps": [gap], "counted": [10]}),
         encoding="utf-8",
     )
-    assert module.twins_between(archive, 10, 12) == ((1, 0, 0, 0), gap)
+    assert module.twins_between(archive, 10, 12) == ((1, 1, 0, 0, 0), gap)
     assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
     assert gap in capsys.readouterr().out
 
@@ -563,7 +563,7 @@ def test_a_span_the_archive_did_not_count_is_refused(
     archive.write_text(
         json.dumps({"findings": {"a": {"pr": 11}}, "counted": counted}), encoding="utf-8"
     )
-    with pytest.raises(module.NotRun, match=r"\(045\)"):
+    with pytest.raises(module.NotRun, match=re.escape(module.findings.NONE_COUNTED)):
         module.twins_between(archive, 10, 12)
     assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_BROKEN
     assert module.findings.NONE_COUNTED in capsys.readouterr().err
@@ -576,3 +576,16 @@ def test_rule_numbers_are_read_by_one_parser() -> None:
     for broken in ("{", "[]", '"x"', '{"rules": []}'):
         with pytest.raises(ValueError):
             module.rule_numbers(broken)
+
+
+def test_a_partly_counted_span_names_what_the_archive_saw(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отрезок, покрытый частично, печатает число учтённых изменений (взгляд на #897)."""
+    archive = tmp_path / "findings.json"
+    archive.write_text(
+        json.dumps({"findings": {"a": {"pr": 11}}, "counted": [10, 11]}), encoding="utf-8"
+    )
+    assert module.twins_between(archive, 10, 8900)[0][0] == 2
+    assert module.main(["--archive", str(archive), "--twins", "10-8900"]) == module.EXIT_OK
+    assert f"{module.SPAN_SEEN} 2," in capsys.readouterr().out
