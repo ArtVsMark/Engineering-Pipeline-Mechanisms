@@ -464,6 +464,44 @@ def name_aborted(pr: int, comments: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+#: Сколько закрытых спрашивает замер оборванных заходов: предел площадки на
+#: страницу. Замер — разовый взгляд назад, а не окно уборки (`MERGED_WINDOW`).
+ABORTED_WINDOW: Final = 100
+
+
+def aborted_since(
+    repo: str, token: str, since: str, limit: int = ABORTED_WINDOW
+) -> tuple[dict[int, list[int]], int]:
+    """Замер #904: оборванные заходы на слитых с `since` и сколько слитых прочитано.
+
+    ЗАМЕР КОМАНДОЙ, А НЕ ПЕРЕСКАЗОМ. «Два случая за смену» в задаче собраны
+    глазами, и такой счёт не повторить. Читатель тот же, что у записи
+    (`is_aborted`): два понимания «заход оборван» разошлись бы молча (022).
+
+    Страница заполнена, а самое раннее закрытие на ней позже `since` — за ней
+    осталось непрочитанное, и это говорится вслух (045).
+    """
+    merged, page = ghrest.merged_page(repo, token, limit)
+    found: dict[int, list[int]] = {}
+    read = 0
+    for item in merged:
+        number = int(item.get("number") or 0)
+        if not number or str(item.get("merged_at") or "") < since:
+            continue
+        read += 1
+        comments = list(ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token))
+        if ids := aborted_looks(comments):
+            found[number] = ids
+    oldest = min((str(one.get("closed_at") or "") for one in page), default="")
+    if len(page) >= limit and oldest > since:
+        print(
+            f"::warning::страница закрытых заполнена ({limit}): замер читал от "
+            f"{oldest}, а не от {since} — раньше не прочитано",
+            file=sys.stderr,
+        )
+    return found, read
+
+
 def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Лента ПОСЛЕДНЕГО захода взгляда, а не всё изменение целиком.
 
@@ -1276,6 +1314,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="сверять заголовки дословно: без сходства слов (102)",
     )
+    parser.add_argument(
+        "--aborted-since",
+        metavar="ДАТА",
+        help="замер #904: заходы без вердикта на слитых с ДАТЫ (ISO); реестр не трогает",
+    )
     parser.add_argument("--apply", action="store_true", help="записывать, а не показывать")
     args = parser.parse_args(argv)
     report.announce(not args.apply)
@@ -1286,6 +1329,16 @@ def main(argv: list[str] | None = None) -> int:
             raise NotRun("нет токена: GH_TOKEN или GITHUB_TOKEN")
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
+        if args.aborted_since:
+            found, read = aborted_since(args.repo, token, args.aborted_since)
+            for number, ids in sorted(found.items()):
+                print(f"#{number}: без вердикта — {', '.join(map(str, ids))}")
+            total = sum(map(len, found.values()))
+            print(
+                f"замер: заходов без вердикта {total} на {len(found)} из {read} "
+                f"слитых с {args.aborted_since}"
+            )
+            return EXIT_NOTHING
         if not args.sweep and args.pr is None and not args.verify and not args.tell:
             raise NotRun("не назван предмет разбора: --pr, --sweep, --verify или --tell")
 

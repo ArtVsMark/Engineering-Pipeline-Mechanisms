@@ -2133,3 +2133,42 @@ def test_a_look_in_progress_is_not_aborted() -> None:
     assert not module.is_aborted(
         {**said(7, f"{module.FINISHED_MARK}"), "user": {"login": "человек"}}
     )
+
+
+def test_aborted_looks_are_measured_by_a_command(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Замер #904 командой: слитое до даты не читается, оборванные сочтены по ленте."""
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    aborted = {**said(9, f"**{module.FINISHED_MARK} task** —\nжду итога"), "user": reviewer}
+    whole = {**said(8, "ВЕРДИКТ: находок 0"), "user": reviewer}
+    feeds = {902: [whole, aborted], 901: [whole]}
+    page = [
+        {"number": 902, "merged_at": "2026-09-27T07:38:31Z", "closed_at": "2026-09-27T07:38:31Z"},
+        {"number": 901, "merged_at": "2026-09-27T07:10:41Z", "closed_at": "2026-09-27T07:10:41Z"},
+        {"number": 800, "merged_at": "2026-09-20T00:00:00Z", "closed_at": "2026-09-20T00:00:00Z"},
+    ]
+    asked: list[str] = []
+
+    def feed(path: str, token: str) -> Any:
+        asked.append(path)
+        return iter(feeds[int(path.split("/")[-2])])
+
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
+    monkeypatch.setattr(module.ghrest, "paginate", feed)
+    code = module.main(["--repo", "o/r", "--aborted-since", "2026-09-27"])
+    out = capsys.readouterr()
+    assert code == module.EXIT_NOTHING
+    assert "#902: без вердикта — 9" in out.out
+    assert "заходов без вердикта 1 на 1 из 2 слитых" in out.out
+    assert not any("/800/" in one for one in asked), "слитое до даты прочитано"
+    assert "заполнена" not in out.err
+
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page * 50))
+    module.aborted_since("o/r", "токен", "2026-09-27", limit=3)
+    assert "заполнена" not in capsys.readouterr().err, "раннее закрытие есть на странице"
+    late = [dict(one, closed_at="2026-09-28T00:00:00Z") for one in page]
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], late))
+    module.aborted_since("o/r", "токен", "2026-09-27", limit=3)
+    assert "заполнена" in capsys.readouterr().err, "непрочитанное за страницей не названо"
