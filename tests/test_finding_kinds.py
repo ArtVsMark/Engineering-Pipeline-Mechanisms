@@ -468,10 +468,56 @@ def test_twins_are_counted_over_resolved_findings(
         ),
         encoding="utf-8",
     )
-    assert module.twins_between(archive, 10, 12) == (4, 3, 1, 1)
+    assert module.twins_between(archive, 10, 12) == ((4, 3, 1, 1), "")
     assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
-    assert "33% от разобранных" in capsys.readouterr().out
+    assert f"33% {module.TWIN_SHARE}" in capsys.readouterr().out
     assert module.main(["--twins", "10-12"]) == module.EXIT_BROKEN
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        [],
+        {"findings": []},
+        {"findings": {"a": "x"}},
+        {"findings": {"a": {"pr": 10}}, "resolutions": []},
+        {"findings": {"a": {"pr": 10}}, "resolutions": {"a": "x"}},
+    ],
+    ids=["архив списком", "записи списком", "запись строкой", "разборы списком", "разбор строкой"],
+)
+def test_twins_refuse_an_archive_of_another_shape(tmp_path: Path, said: object) -> None:
+    """Архив чужой формы — отказ `NotRun`, а не пустой счёт или трасса (039, #891)."""
+    archive = tmp_path / "findings.json"
+    archive.write_text(json.dumps(said), encoding="utf-8")
+    with pytest.raises(module.NotRun):
+        module.twins_between(archive, 10, 12)
+
+
+def test_twins_name_an_unfilled_archive(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Неполный архив замер называет, как и счёт родов: ноль не выглядит полным (045, #891)."""
+    archive = tmp_path / "findings.json"
+    gap = f"{module.findings.UNFILLED} до #12"
+    archive.write_text(json.dumps({"findings": {"a": {"pr": 10}}, "gaps": [gap]}), encoding="utf-8")
+    assert module.twins_between(archive, 10, 12) == ((1, 0, 0, 0), gap)
+    assert module.main(["--archive", str(archive), "--twins", "10-12"]) == module.EXIT_OK
+    assert gap in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["855", "855-", "-890", "a-b", "890-855"],
+    ids=["без дефиса", "без конца", "без начала", "не числа", "перевёрнут"],
+)
+def test_a_span_of_another_form_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str
+) -> None:
+    """Чужая запись отрезка — отказ с формой или причиной, а не `int()` и не «находок 0»."""
+    archive = tmp_path / "findings.json"
+    archive.write_text("{}", encoding="utf-8")
+    assert module.main(["--archive", str(archive), "--twins", text]) == module.EXIT_BROKEN
+    said = capsys.readouterr().err
+    assert module.SPAN_FORM in said or "перевёрнут" in said
+    assert module.span("855-890") == (855, 890)
 
 
 def test_rule_numbers_are_read_by_one_parser() -> None:

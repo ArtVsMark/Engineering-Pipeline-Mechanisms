@@ -320,6 +320,10 @@ NO_KIND: Final = ""
 #: словаря по ним, а не по переписанным буквам (взгляд на #830, 209).
 OUTSIDE: Final = "род архива вне словаря:"
 KINDLESS: Final = "записей архива без рода:"
+#: Хвост строки замера дублей: тест узнаёт её по нему, а не по буквам (209).
+TWIN_SHARE: Final = "от разобранных"
+#: Форма отрезка `--twins`: её называет отказ на чужой записи.
+SPAN_FORM: Final = "ПЕРВЫЙ-ПОСЛЕДНИЙ"
 
 
 def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
@@ -347,24 +351,47 @@ def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
     return found, findings.unfilled(archive)
 
 
-def twins_between(path: Path, first: int, final: int) -> tuple[int, int, int, int]:
-    """Находки изменений `first`–`final` в архиве: всего, разобрано, проверкой починки, дублем.
+def span(text: str) -> tuple[int, int]:
+    """Отрезок `--twins` из записи `ПЕРВЫЙ-ПОСЛЕДНИЙ`; чужая форма — `ValueError` с формой.
+
+    Перевёрнутый отрезок — отказ, а не «находок 0»: пустой ответ на опечатку
+    читался бы замером (взгляд на #891).
+    """
+    first, dash, final = text.partition("-")
+    if not (dash and first.isdecimal() and final.isdecimal()):
+        raise ValueError(f"отрезок «{text}» не по форме {SPAN_FORM}, например 855-890")
+    if int(first) > int(final):
+        raise ValueError(f"отрезок «{text}» перевёрнут: первый номер больше последнего")
+    return int(first), int(final)
+
+
+def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, int, int], str]:
+    """Находки изменений `first`–`final`: (всего, разобрано, проверкой починки, дублем) и неполнота.
 
     Замер #859 командой, а не разовым сценарием окна (005): доля дублей
     считается от РАЗОБРАННЫХ — неразобранная находка дублем ещё не снята и
-    нулём не свидетельствует (взгляд на #891).
+    нулём не свидетельствует (взгляд на #891). Архив читается тем же
+    `findings.read_archive`, что у `in_archive`, и строка о неполном
+    наполнении отдаётся так же: без неё ноль дублей выглядел бы полным
+    счётом (045, взгляд на #891).
     """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise NotRun(f"архив не прочитан ({path}): {exc}") from exc
-    found = data.get("findings") or {}
-    solved = data.get("resolutions") or {}
-    marks = [mark for mark, one in found.items() if first <= int(one.get("pr") or 0) <= final]
+        archive = findings.read_archive(path)
+    except ValueError as exc:
+        raise NotRun(str(exc)) from exc
+    solved = archive.get("resolutions")
+    solved = {} if solved is None else solved
+    if not isinstance(solved, dict) or not all(isinstance(one, dict) for one in solved.values()):
+        raise NotRun("`resolutions` в архиве — не словарь записей")
+    marks = [
+        mark
+        for mark, one in (archive.get("findings") or {}).items()
+        if first <= int(one.get("pr") or 0) <= final
+    ]
     done = [mark for mark in marks if mark in solved]
     checked = sum(1 for mark in done if solved[mark].get("fix_check"))
     twins = sum(1 for mark in done if solved[mark].get("twin_of"))
-    return len(marks), len(done), checked, twins
+    return (len(marks), len(done), checked, twins), findings.unfilled(archive)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -377,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--twins",
         default="",
-        metavar="ПЕРВЫЙ-ПОСЛЕДНИЙ",
+        metavar=SPAN_FORM,
         help="доля дублей среди находок отрезка изменений по архиву (#859)",
     )
     args = parser.parse_args(argv)
@@ -385,16 +412,18 @@ def main(argv: list[str] | None = None) -> int:
         if not args.archive:
             print("доля дублей считается по архиву: нужен --archive", file=sys.stderr)
             return EXIT_BROKEN
-        first, _, final = args.twins.partition("-")
         try:
-            total, done, checked, twins = twins_between(Path(args.archive), int(first), int(final))
+            first, final = span(args.twins)
+            (total, done, checked, twins), gap = twins_between(Path(args.archive), first, final)
         except (NotRun, ValueError) as refusal:
             print(f"доля дублей не сосчитана: {refusal}", file=sys.stderr)
             return EXIT_BROKEN
+        if gap:
+            print(f"АРХИВ НЕПОЛОН: {gap} — числа архива ниже неполные")
         share = f"{twins / done:.0%}" if done else "—"
         print(
             f"#{first}–#{final}: находок {total}, разобрано {done} "
-            f"(проверкой починки {checked}), дублем {twins} — {share} от разобранных"
+            f"(проверкой починки {checked}), дублем {twins} — {share} {TWIN_SHARE}"
         )
         return EXIT_OK
     try:
