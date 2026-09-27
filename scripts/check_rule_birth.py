@@ -231,11 +231,15 @@ def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
 def known_at(head: str, root: Path = Path()) -> frozenset[str]:
     """Номера правил, на которые дерево отвечает у головы, — чем сверять ответ «есть» (#887).
 
-    Оба отказа — файла нет и файл не разбирается — начинаются с
-    `finding_kinds.ANSWERS_UNREAD`, как у `known_rules` (взгляд на #893).
+    ВСЕ ОТКАЗЫ НАЧИНАЮТСЯ С `finding_kinds.ANSWERS_UNREAD`, как у `known_rules`
+    (взгляды на #893, #899, 210): файла нет, git его не прочёл (`text_at`) и
+    файл не разбирается или не той формы (`rule_numbers`).
     """
     where = str(paths.BINDINGS)
-    text = text_at(head, where, root)
+    try:
+        text = text_at(head, where, root)
+    except NotRun as exc:
+        raise NotRun(f"{finding_kinds.ANSWERS_UNREAD}: {exc}") from exc
     if text is None:
         raise NotRun(f"{finding_kinds.ANSWERS_UNREAD}: {where} у {head} нет")
     try:
