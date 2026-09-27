@@ -598,6 +598,6 @@ def test_rule_answers_read_the_section_or_refuse() -> None:
     """Ответы — раздел `rules` целиком; без него или не объектом — `ValueError` (#900)."""
     assert module.rule_answers('{"rules": {"212": {"x": 1}}}') == {"212": {"x": 1}}
     assert module.rule_answers('{"rules": {}}') == {}
-    for broken in ("{}", "[]", '{"rules": []}'):
+    for broken in ("{}", "[]", '{"rules": []}', '{"rules": {"1": "x"}}', '{"rules": {"1": []}}'):
         with pytest.raises(ValueError):
             module.rule_answers(broken)

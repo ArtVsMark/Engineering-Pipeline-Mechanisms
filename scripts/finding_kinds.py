@@ -269,6 +269,10 @@ def rule_answers(text: str) -> dict[str, Any]:
     rules = said.get("rules") if isinstance(said, dict) else None
     if not isinstance(rules, dict):
         raise ValueError("ожидался объект с разделом rules")
+    # Ответ читатели разбирают как объект (`answer.get`), и запись другой формы
+    # падала у них трассой (взгляд на #902).
+    if not all(isinstance(one, dict) for one in rules.values()):
+        raise ValueError("ответ в разделе rules — не объект")
     return rules
 
 

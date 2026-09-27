@@ -92,12 +92,38 @@ def suspicion(rule: dict[str, Any], answer: dict[str, Any]) -> float:
     return len(claim & said) / len(claim)
 
 
+def export_rules(export: object) -> dict[str, dict[str, Any]]:
+    """Правила выгрузки каталога по номеру; чужая форма — отказ `NotRun`, а не трасса.
+
+    Путь выгрузки любой (`--export`), и форма проверяется ровно та, которой
+    пользуется профиль, разом (210, взгляд на #902): выгрузка — объект,
+    `rules` — список, правило — объект с `id`, `slug`, `claim.ru` и `title.ru`.
+    """
+    rules = export.get("rules") if isinstance(export, dict) else None
+    if not isinstance(rules, list):
+        raise NotRun("выгрузка каталога не той формы: ожидался объект со списком rules (075)")
+    found: dict[str, dict[str, Any]] = {}
+    for one in rules:
+        whole = (
+            isinstance(one, dict)
+            and "id" in one
+            and isinstance(one.get("slug"), str)
+            and all(
+                isinstance(one.get(part), dict) and "ru" in one[part] for part in ("claim", "title")
+            )
+        )
+        if not whole:
+            raise NotRun(f"правило выгрузки не той формы: {str(one)[:80]} (075)")
+        found[str(one["id"])] = one
+    return found
+
+
 def profile(export: dict[str, Any], mine: dict[str, Any], since: str = "") -> list[dict[str, Any]]:
     """Ответы, упорядоченные подозрением: самый дальний от своего правила первым.
 
     `since` — дата ISO: сверенным считается ответ, прочитанный не раньше неё.
     """
-    rules = {str(one["id"]): one for one in export.get("rules") or []}
+    rules = export_rules(export)
     if not rules:
         raise NotRun("в выгрузке каталога нет правил — предмет профиля не найден (075)")
     if not mine:
@@ -160,7 +186,9 @@ def main(argv: list[str] | None = None) -> int:
         if not path.is_file():
             raise NotRun(f"нет {path}: ответы проекта взять неоткуда (075)")
         # ПУТЬ ЛЮБОЙ, ПОЭТОМУ ФОРМА ПРОВЕРЯЕТСЯ: файл не из дерева `tests/test_bindings.py`
-        # не держит, и `{}` дал бы молча пустой профиль (взгляд на #900).
+        # не держит, и на файле не той формы (`[]`, `rules` списком, запись не
+        # объектом) профиль падал трассой, а не отказом (взгляды на #900, #902).
+        # Пустой раздел отказом был и раньше — «нет записей» в `profile`.
         try:
             mine = finding_kinds.rule_answers(path.read_text(encoding="utf-8"))
         except ValueError as exc:
