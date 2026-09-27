@@ -244,20 +244,36 @@ def rule_numbers(text: str) -> frozenset[str]:
     краснела бы ни в гейте, ни в плане. Пустой раздел `{"rules": {}}` —
     сказанное состояние «ответов нет», и он читается пустым.
 
-    ПРЕДЕЛ НАЗВАН (195, взгляд на #900): соседи `review_map.py:268`,
-    `drift.py:270, 416, 1373` и `audit_profile.py:161` по-прежнему читают
-    отсутствие раздела пустотой (`get("rules") or {}`). Оставлено намеренно:
-    они читают файл ДЕРЕВА, а его форму держит `tests/test_bindings.py` —
-    `load()["rules"]` падает на файле без раздела, и такое дерево не сольётся.
-    Этот разбор строже потому, что его читатели дерево не ждут: гейт читает
-    файл у головы изменения — до того, как набор тестов её отвергнет, — а план
-    по пути рядом с объявлением родов (`--kinds`).
+    Разбор формы — `rule_answers`, общий с теми, кому нужны сами ответы.
+    """
+    return frozenset(str(number) for number in rule_answers(text))
+
+
+def rule_answers(text: str) -> dict[str, Any]:
+    """Раздел `rules` текста `.rules/bindings.json`; чужая форма — `ValueError`.
+
+    Один разбор формы на всех, кто читает ответы НЕ из дерева: номера
+    (`rule_numbers` — гейт у головы изменения и план по пути рядом с
+    `--kinds`) и сами ответы (`audit_profile --answers` с любым путём, взгляд
+    на #900). Раздела нет или он не объект — отказ, а не «ответов нет» (045).
+
+    ПРЕДЕЛ НАЗВАН (195): `review_map.split`, `drift.catalogue_moved`,
+    `drift.snapshot_is_stale` и `drift.gaps_naming_a_task` читают отсутствие
+    раздела пустотой (`get("rules") or {}`). Оставлено намеренно: путь у них
+    один — `paths.BINDINGS` дерева, а его форму держит `tests/test_bindings.py`
+    (`load()["rules"]` падает на файле без раздела, и такое дерево не
+    сольётся). Соседи названы функциями, а не номерами строк: номера сбились
+    бы при первой правке (005, взгляд на #900).
     """
     said = json.loads(text)
     rules = said.get("rules") if isinstance(said, dict) else None
     if not isinstance(rules, dict):
         raise ValueError("ожидался объект с разделом rules")
-    return frozenset(str(number) for number in rules)
+    # Ответ читатели разбирают как объект (`answer.get`), и запись другой формы
+    # падала у них трассой (взгляд на #902).
+    if not all(isinstance(one, dict) for one in rules.values()):
+        raise ValueError("ответ в разделе rules — не объект")
+    return rules
 
 
 def known_rules(path: Path | None = None) -> frozenset[str]:
