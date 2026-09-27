@@ -372,12 +372,19 @@ def findings_of(comments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
 
 
 def found_in(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str]]:
+    """Находки ревьюера: вес, заголовок, род и роль — без источника рода."""
+    return [(weight, title, род, роль) for weight, title, род, роль, _ in found_said(comments)]
+
+
+def found_said(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str, bool]]:
     """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов.
 
-    Третьим в паре идёт РОД предмета: «код» либо «ответ» (`findings.KINDS`).
+    Третьим в паре идёт РОД предмета: «код» либо «ответ» (`findings.KINDS`),
+    последним — объявил ли его ревьюер: пометка в реестр пишется по источнику,
+    а не по совпадению с выводом адресом (взгляд на #906).
     Строка отрицания находкой не считается: см. `ABSENCE`.
     """
-    found: list[tuple[str, str, str, str]] = []
+    found: list[tuple[str, str, str, str, bool]] = []
     seen: set[str] = set()
     known = findings.roles()
     for comment in comments:
@@ -403,7 +410,15 @@ def found_in(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str]]:
                 # (#763): `[риск · архитектор]`. Незнакомое слово ролью не
                 # считается и не приводится к ближайшему — как и вес (154).
                 роль = next((one for one in marks_in(raw_weight) if one in known), "")
-                found.append((weight_of(raw_weight), cleaned, findings.kind_of(cleaned, род), роль))
+                found.append(
+                    (
+                        weight_of(raw_weight),
+                        cleaned,
+                        findings.kind_of(cleaned, род),
+                        роль,
+                        bool(род),
+                    )
+                )
     return found
 
 
@@ -1266,6 +1281,7 @@ def record_look(
         )
     titles = findings_of(look)
     seen_by = {title: роль for _, title, _, роль in found_in(look)}
+    declared = {title for _, title, _, _, said in found_said(look) if said}
     if len(titles) != verdict:
         # Расхождение названо, а не сглажено: вердикт и строки находок
         # пишет один и тот же ответ, и если они спорят, доверять нечему.
@@ -1300,10 +1316,11 @@ def record_look(
                 weight=weight,
                 kind=род,
                 role=seen_by.get(title) or entries[mark].role,
+                declared=title in declared,
             )
             continue
         entries[fingerprint(title)] = findings.Entry(
-            pr, weight, title, kind=род, role=seen_by.get(title, "")
+            pr, weight, title, kind=род, role=seen_by.get(title, ""), declared=title in declared
         )
     said = f"из #{pr}: вердикт {verdict}, строк находок {len(titles)}"
     if renamed:
