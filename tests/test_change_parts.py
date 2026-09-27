@@ -389,6 +389,7 @@ def test_a_git_refusal_on_bodies_is_the_third_outcome(monkeypatch: pytest.Monkey
 def test_the_warning_names_the_decision_and_the_mark() -> None:
     """Предупреждение называет решение 008, строку смешения и что слияние не держится."""
     said = module.warning(2)
+    assert f"{module.MIXED_MARK} {module.PLACEHOLDER}" in said
     assert module.DECISION_008 in said and module.MIXED_MARK in said
     assert module.DOES_NOT_HOLD in said
     assert (ROOT / module.DECISION_008).is_file(), "решение 008 названо мёртвым адресом"
@@ -429,7 +430,17 @@ def test_the_plea_is_printed_without_the_warn_key_too(
     assert module.PLEA in capsys.readouterr().out
 
 
-def test_a_copied_placeholder_is_not_a_reason() -> None:
-    """Дословная копия образца из просьбы — не названная причина (#889)."""
-    assert module.declared(f"{module.MIXED_MARK} {module.PLACEHOLDER}") == ""
+@pytest.mark.parametrize(
+    "copied",
+    ["{p}", "{p}»", "«{p}»", "{p}.", "`{p}`", "{p} — потом допишу"],
+    ids=["дословно", "с кавычкой", "в кавычках", "с точкой", "в обратных кавычках", "с хвостом"],
+)
+def test_a_copied_placeholder_is_not_a_reason(copied: str) -> None:
+    """Копия образца из просьбы в любом обрамлении — не названная причина (#889, #894)."""
+    reason = copied.format(p=module.PLACEHOLDER)
+    assert module.declared(f"{module.MIXED_MARK} {reason}") == ""
+
+
+def test_a_real_reason_is_heard() -> None:
+    """Настоящая причина слышна: отказ заглушке её не глушит."""
     assert module.declared(f"{module.MIXED_MARK} хвост правок") == "хвост правок"
