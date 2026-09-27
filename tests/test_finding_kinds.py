@@ -592,3 +592,12 @@ def test_a_partly_counted_span_names_what_the_archive_saw(
     assert module.twins_between(archive, 10, 8900)[0][0] == 2
     assert module.main(["--archive", str(archive), "--twins", "10-8900"]) == module.EXIT_OK
     assert f"{module.SPAN_SEEN} 2," in capsys.readouterr().out
+
+
+def test_rule_answers_read_the_section_or_refuse() -> None:
+    """Ответы — раздел `rules` целиком; без него или не объектом — `ValueError` (#900)."""
+    assert module.rule_answers('{"rules": {"212": {"x": 1}}}') == {"212": {"x": 1}}
+    assert module.rule_answers('{"rules": {}}') == {}
+    for broken in ("{}", "[]", '{"rules": []}', '{"rules": {"1": "x"}}', '{"rules": {"1": []}}'):
+        with pytest.raises(ValueError):
+            module.rule_answers(broken)
