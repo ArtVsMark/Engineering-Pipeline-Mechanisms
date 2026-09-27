@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -76,10 +77,16 @@ FROZEN_RE: Final = re.compile(r"^(?:Контекст|Решение|Отверг
 #: Остальные сравниваются целиком: смена хозяина, репозитория или языка
 #: каталога (`rules/ru` → `rules/en`) в абсолютном адресе, задача вместо
 #: изменения — переписывание решения.
+#: Относительный путь, который поднимается `../` выше корня дерева — к площадке
+#: (`../../../../../<хозяин>/<репо>/blob/main/rules/ru/x.md`), — документом
+#: дерева не является и тоже сравнивается целиком (взгляд на #892). Выход за
+#: корень меряется нормализацией пути от каталога записей, а не счётом `../`
+#: подряд: `./../…` и `a/../../…` — та же форма.
 #: ПРЕДЕЛ НАЗВАН (195): два разных документа с одним именем в разных каталогах
 #: дерева — `README.md` — гейт не различит.
 LINK_TARGET_RE: Final = re.compile(
-    r"\]\((?i:(?![a-z][a-z0-9+.-]*:))(?![#/])(?:[^)\s]*/)?(?P<document>[^)/\s]+\.md(?:#[^)\s]*)?)\)"
+    r"\]\((?i:(?![a-z][a-z0-9+.-]*:))(?![#/])(?P<folder>[^)\s]*/)?"
+    r"(?P<document>[^)/\s]+\.md(?:#[^)\s]*)?)\)"
 )
 
 
@@ -142,9 +149,17 @@ def frozen(text: str) -> dict[str, str]:
         if current:
             sections[current].append(line.rstrip())
     return {
-        name: LINK_TARGET_RE.sub(r"](\g<document>)", "\n".join(body).strip())
+        name: LINK_TARGET_RE.sub(without_folder, "\n".join(body).strip())
         for name, body in sections.items()
     }
+
+
+def without_folder(link: re.Match[str]) -> str:
+    """Цель ссылки без каталога, если документ лежит в дереве; иначе — целиком."""
+    folder = link.group("folder") or ""
+    if posixpath.normpath(RECORDS + folder).split("/")[0] == "..":
+        return link.group(0)
+    return f"]({link.group('document')})"
 
 
 def at(ref: str, path: str) -> str:

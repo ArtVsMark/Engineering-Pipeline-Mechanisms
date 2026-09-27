@@ -202,11 +202,33 @@ def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> No
             "HTTPS://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
             "HTTPS://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/042-decision-records-its-alternatives.md",
         ),
+        (
+            "../../../../../ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/x.md",
+            "../../../../../ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/x.md",
+        ),
+        ("./../../../a/x.md", "./../../../b/x.md"),
+        ("docs/../../../../a/x.md", "docs/../../../../b/x.md"),
     ],
-    ids=["хозяин", "язык каталога", "путь от корня", "адрес без схемы", "схема заглавными"],
+    ids=[
+        "хозяин",
+        "язык каталога",
+        "путь от корня",
+        "адрес без схемы",
+        "схема заглавными",
+        "подъём выше дерева",
+        "подъём через точку",
+        "подъём через каталог",
+    ],
 )
 def test_only_a_relative_document_may_move(was: str, now: str) -> None:
     """Каталог снимается только у относительного `.md`: прочие формы — целиком (#880)."""
     before = edit.frozen(f"## Решение\n\nСм. [x]({was}).\n")
     after = edit.frozen(f"## Решение\n\nСм. [x]({now}).\n")
     assert before != after
+
+
+def test_a_climb_to_the_root_is_still_the_tree() -> None:
+    """Подъём ровно до корня дерева — ещё переезд документа, а не выход наружу (#892)."""
+    before = edit.frozen("## Решение\n\nСм. [x](../../README.md).\n")
+    after = edit.frozen("## Решение\n\nСм. [x](../../docs/README.md).\n")
+    assert before == after
