@@ -2094,3 +2094,42 @@ def test_a_derived_mark_is_derived_again(title: str) -> None:
     entry = findings_module.Entry(903, "замечание", title, kind=kind)
     back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
     assert back.kind == kind == findings_module.kind_of(back.title)
+
+
+def test_an_aborted_look_neither_glues_nor_brings_back_swept_findings() -> None:
+    """Заход ревьюера без вердикта из разметки выпадает и назван вслух (#904).
+
+    Лента #902: полный заход с вердиктом, проверка починки, оборванная без
+    вердикта, и поздний взгляд. Прежде два последних клеились в один отрезок,
+    читались проверкой починки, и без отметки запись шла от полного захода —
+    возвращая снятые слиянием находки. Теперь пишется только поздний взгляд.
+    """
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    late = {"login": module.LATE_AUTHOR}
+    feed = [
+        {**said(1, "НАХОДКА[риск]: снята слиянием\nВЕРДИКТ: находок 1"), "user": reviewer},
+        {
+            **said(
+                2, f"**{module.FINISHED_MARK} task in 2m** —\n{module.FIXCHECK_MARKER}\nжду итога"
+            ),
+            "user": reviewer,
+        },
+        {**said(3, "НАХОДКА[риск]: позднего взгляда\nВЕРДИКТ: находок 1"), "user": late},
+    ]
+    assert module.aborted_looks(feed) == [2]
+    assert [one for one, _ in module.looks(feed)] == [1, 3]
+    assert [one for one, _ in module.unrecorded(feed, None)] == [3]
+    assert not module.is_fix_check(module.looks(feed)[-1][1])
+    said_aloud = module.name_aborted(902, feed)
+    assert len(said_aloud) == 1 and module.ABORTED_SAID in said_aloud[0]
+
+
+def test_a_look_in_progress_is_not_aborted() -> None:
+    """Идущий заход (шапки завершения нет) оборванным не считается (#904)."""
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    assert not module.is_aborted({**said(5, "Claude Code is working…"), "user": reviewer})
+    finished = f"**{module.FINISHED_MARK} task** —\nВЕРДИКТ: находок 0"
+    assert not module.is_aborted({**said(6, finished), "user": reviewer})
+    assert not module.is_aborted(
+        {**said(7, f"{module.FINISHED_MARK}"), "user": {"login": "человек"}}
+    )

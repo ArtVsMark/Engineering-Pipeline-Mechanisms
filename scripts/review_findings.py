@@ -70,6 +70,10 @@ REVIEWER_AUTHOR: Final = "claude[bot]"
 #: Первая строка ответа проверки починки (#848): заход не полный, находок не
 #: ищет и отвечает только о прошлых.
 FIXCHECK_MARKER: Final = "ЗАХОД: проверка починки"
+#: Шапка завершённого захода ревьюера: действие вписывает её в свой
+#: комментарий, когда прогон кончился. По ней отличают ОБОРВАННЫЙ заход —
+#: кончился, а строки вердикта нет — от идущего (#904).
+FINISHED_MARK: Final = "Claude finished"
 #: Метка ответа верификатора — первой строкой, от `LATE_AUTHOR`.
 VERIFY_MARKER: Final = "<!-- verify: проверка премисы одной находки, а не взгляд на изменение -->"
 
@@ -424,6 +428,42 @@ def is_verification(comment: dict[str, Any]) -> bool:
     return author == LATE_AUTHOR and body.startswith(VERIFY_MARKER)
 
 
+def is_aborted(comment: dict[str, Any]) -> bool:
+    """Заход ревьюера кончился, а строки вердикта в нём нет (#904).
+
+    ОБОРВАННЫЙ ЗАХОД — НЕ ЗАХОД. Заходы режутся по вердикту, и заход без него
+    приклеивался к СЛЕДУЮЩЕМУ: на #902 проверка починки без вердикта и поздний
+    взгляд легли одним отрезком, отрезок прочитался проверкой починки —
+    находки позднего взгляда не записались, а запись от «последнего полного
+    захода» вернула в реестр находки, уже снятые слиянием. Решение владельца
+    27.09.2026 (#904, вариант 1): такой заход называется вслух и в реестр ничего
+    не пишет; слияние он не держит (#654).
+    """
+    if str((comment.get("user") or {}).get("login") or "") != REVIEWER_AUTHOR:
+        return False
+    lines = bare_lines(comment.get("body") or "")
+    return any(FINISHED_MARK in line for line in lines[:3]) and not any(
+        VERDICT_RE.match(line) for line in lines
+    )
+
+
+def aborted_looks(comments: list[dict[str, Any]]) -> list[int]:
+    """Id оборванных заходов ленты — чтобы назвать их вслух (#904)."""
+    return [int(one.get("id") or 0) for one in comments if is_aborted(one)]
+
+
+#: Как запись называет оборванный заход: тест узнаёт строку по ней (209).
+ABORTED_SAID: Final = "кончился без вердикта — проверка не состоялась, в реестр он не пишется"
+
+
+def name_aborted(pr: int, comments: list[dict[str, Any]]) -> list[str]:
+    """Строки-предупреждения об оборванных заходах изменения (#904)."""
+    return [
+        f"::warning::заход взгляда на #{pr} (комментарий {one}) {ABORTED_SAID} (#904)"
+        for one in aborted_looks(comments)
+    ]
+
+
 def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Лента ПОСЛЕДНЕГО захода взгляда, а не всё изменение целиком.
 
@@ -454,8 +494,10 @@ def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     # ОТВЕТ ВЕРИФИКАТОРА ЗАХОДОМ НЕ СЧИТАЕТСЯ: процитированный им `ВЕРДИКТ:`
     # резал бы отрезок, а процитированная находка шла бы в реестр новой
-    # записью (взгляд на #833).
-    comments = [comment for comment in comments if not is_verification(comment)]
+    # записью (взгляд на #833). Оборванный заход — тоже (#904).
+    comments = [
+        comment for comment in comments if not is_verification(comment) and not is_aborted(comment)
+    ]
     ends = [
         place
         for place, comment in enumerate(comments)
@@ -480,9 +522,12 @@ def looks(comments: list[dict[str, Any]]) -> list[tuple[int, list[dict[str, Any]
     ЗАЧЕМ ВСЕ, А НЕ ПОСЛЕДНИЙ. Запись находок вытесняется в группе
     `findings-write` (#842): отменённый заход не записан, а следующий читает
     только себя, и находки, которых он не повторил, терялись без следа.
-    Догону нужен каждый заход после записанного.
+    Догону нужен каждый заход после записанного. Оборванный заход (`is_aborted`)
+    из разметки выпадает, как ответ верификатора, и к соседу не клеится (#904).
     """
-    comments = [comment for comment in comments if not is_verification(comment)]
+    comments = [
+        comment for comment in comments if not is_verification(comment) and not is_aborted(comment)
+    ]
     ends = [
         place
         for place, comment in enumerate(comments)
@@ -1293,6 +1338,10 @@ def main(argv: list[str] | None = None) -> int:
                 if looks(comments)
                 else [(0, list(comments))]
             )
+            # ОБОРВАННЫЙ ЗАХОД НАЗЫВАЕТСЯ ВСЛУХ, а не молча выпадает (#904):
+            # проверка починки без вердикта снаружи неотличима от состоявшейся.
+            for line in name_aborted(args.pr, comments):
+                print(line, file=sys.stderr)
             if not pending:
                 print(f"из #{args.pr}: последний заход уже записан")
             for look_id, look in pending:
