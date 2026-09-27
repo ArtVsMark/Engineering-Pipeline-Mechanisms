@@ -224,7 +224,23 @@ def slug_of(said: str) -> str:
     return first.strip(AROUND_SLUG)
 
 
-def answer_problem(body: dict[str, Any], queue: str) -> str | None:
+def known_rules(path: Path | None = None) -> frozenset[str]:
+    """Номера правил каталога, на которые проект отвечает, — из `.rules/bindings.json`.
+
+    Файла нет или он не читается — пустое множество не выдаётся за «номеров
+    нет»: это отказ (045).
+    """
+    where = path or paths.BINDINGS
+    try:
+        rules = json.loads(where.read_text(encoding="utf-8")).get("rules") or {}
+    except (OSError, ValueError) as exc:
+        raise NotRun(f"ответы каталогу не прочитаны ({where}): {exc}") from exc
+    return frozenset(str(number) for number in rules)
+
+
+def answer_problem(
+    body: dict[str, Any], queue: str, known: frozenset[str] | None = None
+) -> str | None:
     """Чем ответ рода каталогу не годится; ``None`` — годится.
 
     ОДНА ПРОВЕРКА ОТВЕТА НА ГЕЙТ И НА ПЛАН. Прежде гейт сверял слаг с очередью
@@ -245,10 +261,17 @@ def answer_problem(body: dict[str, Any], queue: str) -> str | None:
             return f"назван слаг «{slug}», а в очереди предложений ({paths.PROPOSALS}) его нет"
     if kind == "есть" and not RULE_NUMBER_RE.match(what):
         return "ответ «есть», а номера правила первым словом нет"
+    # Номер сверяется с ответами каталогу: опечатка «211» вместо «212» иначе
+    # прошла бы зелёной — три цифры есть, правила нет (взгляд на #887).
+    number = what[:3]
+    if kind == "есть" and known is not None and number not in known:
+        return f"ответ «есть — {number}», а правила {number} в {paths.BINDINGS} нет"
     return None
 
 
-def unanswered(kinds: dict[str, Any], queue: str) -> list[tuple[str, int]]:
+def unanswered(
+    kinds: dict[str, Any], queue: str, known: frozenset[str] | None = None
+) -> list[tuple[str, int]]:
     """Повторяющиеся роды без ответа каталогу — поводы для правила без решения.
 
     ПОВОД ДЛЯ ПРАВИЛА РОЖДАЕТСЯ В ИНЦИДЕНТАХ, А ВОПРОС ЗАДАВАЛСЯ НАИТИЕМ (#650).
@@ -260,7 +283,7 @@ def unanswered(kinds: dict[str, Any], queue: str) -> list[tuple[str, int]]:
     return [
         (name, times)
         for name, times in repeated(kinds)
-        if answer_problem(kinds[name], queue) is not None
+        if answer_problem(kinds[name], queue, known) is not None
     ]
 
 

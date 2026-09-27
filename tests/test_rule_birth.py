@@ -42,6 +42,7 @@ def tree(tmp_path: Path, *, queue: tuple[str, ...] = ()) -> Path:
         ),
         encoding="utf-8",
     )
+    (root / ".rules" / "bindings.json").write_text('{"rules": {"206": {}}}', encoding="utf-8")
     (root / "docs" / "decisions" / "001-старое.md").write_text(
         "прежнее решение\n", encoding="utf-8"
     )
@@ -410,3 +411,13 @@ def test_the_list_of_records_comes_from_the_root_tree(tmp_path: Path) -> None:
     born(root, "002-молчит.md", "# 002\n\nрешение без ответа\n")
     assert module.added("main", "HEAD", root) == ["docs/decisions/002-молчит.md"]
     assert module.main(["--base", "main", "--root", str(root)]) == FOUND
+
+
+def test_rule_numbers_are_read_at_the_head(tmp_path: Path) -> None:
+    """Номера ответов каталогу читаются у головы, а не с диска; нет файла — отказ (#887)."""
+    root = tree(tmp_path)
+    assert module.known_at("HEAD", root) == frozenset({"206"})
+    git(root, "rm", "-q", ".rules/bindings.json")
+    git(root, "commit", "-q", "-m", "без ответов")
+    with pytest.raises(module.NotRun):
+        module.known_at("HEAD", root)
