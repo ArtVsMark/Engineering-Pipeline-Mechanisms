@@ -25,6 +25,7 @@ import pytest
 from tests.conftest import found_by, load_script, walk
 
 kinds = load_script("kinds.py")
+audit_profile = load_script("audit_profile.py")
 
 ROOT = Path(__file__).resolve().parent.parent
 BINDINGS = ROOT / ".rules" / "bindings.json"
@@ -526,19 +527,22 @@ def test_a_date_in_an_answer_is_iso_and_not_in_the_future() -> None:
 
     Отсутствие даты — законный ответ «не сверяли». Неверная дата законной не
     бывает: её нельзя ни сравнить, ни отличить от опечатки (039).
+
+    ФОРМА — ТОЙ ЖЕ ПРОВЕРКОЙ, ЧТО У `audit_profile` (поздний взгляд на #910):
+    `fromisoformat` принимает и «20260901», а `or ""` пропускал `false` как
+    отсутствие. Гейт дерева и профиль судили форму по-разному.
     """
     today = date.today()
     broken: list[str] = []
     for rule, one in load()["rules"].items():
         for field in ("analysed", "decided"):
-            raw = str(one.get(field) or "")
-            if not raw:
+            raw = one.get(field)
+            if raw in (None, ""):
                 continue
-            try:
-                when = date.fromisoformat(raw)
-            except ValueError:
-                broken.append(f"{rule}.{field}=«{raw[:20]}»")
+            if not (isinstance(raw, str) and audit_profile.is_iso_day(raw)):
+                broken.append(f"{rule}.{field}=«{str(raw)[:20]}»")
                 continue
+            when = date.fromisoformat(raw)
             if when > today:
                 broken.append(f"{rule}.{field} в будущем: {raw}")
     assert not broken, "дата ответа негодна: " + ", ".join(broken)

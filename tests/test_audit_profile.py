@@ -358,7 +358,13 @@ def test_answers_whole_accepts_the_read_form() -> None:
 
 @pytest.mark.parametrize(
     ("said", "whole"),
-    [("2026-09-01", True), ("2026/09/01", False), ("2026-9-01", False), ("вчера", False)],
+    [
+        ("2026-09-01", True),
+        ("2026/09/01", False),
+        ("2026-9-01", False),
+        ("вчера", False),
+        ("20260901", False),
+    ],
 )
 def test_is_iso_day_is_one_check_for_both_sides(said: str, whole: bool) -> None:
     """Одна проверка формы даты — у ключа `--since` и у `analysed` (поздний взгляд на #908)."""
