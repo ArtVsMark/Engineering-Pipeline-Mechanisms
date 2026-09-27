@@ -317,3 +317,14 @@ def test_the_head_argument_reaches_the_comparison(
     monkeypatch.setattr(module, "touches_the_answer", touches)
     module.main(["--base", "HEAD", "--head", "FETCH_HEAD", "--out", str(tmp_path / "m.md")])
     assert got == ["FETCH_HEAD"]
+
+
+def test_the_map_names_the_mark_words_from_the_kind_constants() -> None:
+    """Карта учит ставить `· ответ` и снимать `· код` словами констант рода (#914).
+
+    Третья копия указания после двух заданий `review.yml`: слова набирались
+    буквами, и переименование константы оставило бы карту учить старому.
+    """
+    said = "\n".join(module.ASKED["not-applicable"])
+    for kind in (module.findings.ANSWER_KIND, module.findings.CODE):
+        assert f"· {kind}]" in said, f"скобка рода «{kind}» не названа в карте"
