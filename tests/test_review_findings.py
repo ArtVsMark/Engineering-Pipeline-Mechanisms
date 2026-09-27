@@ -1118,7 +1118,11 @@ def test_the_registry_puts_answer_findings_first_and_names_the_section() -> None
     entries = {
         "aaaaaaa": findings_module.Entry(10, "дефект", "о коде, и тяжёлая"),
         "bbbbbbb": findings_module.Entry(
-            11, "замечание", "об ответе, и лёгкая", kind=findings_module.ANSWER_KIND
+            11,
+            "замечание",
+            "об ответе, и лёгкая",
+            kind=findings_module.ANSWER_KIND,
+            declared=True,
         ),
     }
     body = module.render_body(entries)
@@ -2102,3 +2106,30 @@ def test_a_derived_kind_follows_a_changed_rule(title: str, monkeypatch: pytest.M
     monkeypatch.setattr(findings_module, "first_path", lambda _title: "")
     back = findings_module.parse_entries(line)["abc1234"]
     assert back.kind == findings_module.CODE
+
+
+@pytest.mark.parametrize("declared", [True, False], ids=["объявлен", "выведен"])
+def test_a_declared_kind_survives_a_narrowed_rule(
+    declared: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Род, объявленный ревьюером, пишется и тогда, когда адрес выводит тот же (#906).
+
+    Прежде пометка ставилась по несовпадению с выводом, и объявленное ревьюером
+    «об ответе» при совпавшем адресе в строку не попадало: сузят правило — и
+    находка тихо стала бы кодом. Выведенное адресом по-прежнему не пишется.
+    """
+    title = f"{findings_module.ANSWER_FILE}:9 — ответ врёт"
+    mark = "[риск · ответ]" if declared else "[риск]"
+    entries: dict[str, findings_module.Entry] = {}
+    module.record_look(
+        entries, 906, [comment(f"НАХОДКА{mark}: {title}\nВЕРДИКТ: находок 1")], False
+    )
+    (entry,) = entries.values()
+    assert entry.kind == findings_module.ANSWER_KIND and entry.declared is declared
+    line = f"- `abc1234` {entry.said()}\n"
+    assert (findings_module.KIND_SAID in line) is declared
+    monkeypatch.setattr(findings_module, "first_path", lambda _title: "")
+    back = findings_module.parse_entries(line)["abc1234"]
+    expected = findings_module.ANSWER_KIND if declared else findings_module.CODE
+    assert back.kind == expected and back.declared is declared
+    assert (findings_module.KIND_SAID in f"- `abc1234` {back.said()}\n") is declared
