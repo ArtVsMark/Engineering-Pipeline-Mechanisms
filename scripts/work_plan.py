@@ -305,7 +305,11 @@ def birth_part(where: Path | None = None) -> Source:
     queue_path = declared.parent / paths.PROPOSALS.name
     try:
         kinds = finding_kinds.read(declared)
-        left = finding_kinds.unanswered(kinds, finding_kinds.queued(queue_path))
+        left = finding_kinds.unanswered(
+            kinds,
+            finding_kinds.queued(queue_path),
+            finding_kinds.known_rules(declared.parent / paths.BINDINGS.name),
+        )
     except finding_kinds.NotRun as exc:
         return Source(unread=f"роды находок не прочитаны: {exc}")
     return Source(

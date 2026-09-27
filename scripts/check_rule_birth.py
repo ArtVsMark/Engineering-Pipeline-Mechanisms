@@ -47,6 +47,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -228,11 +229,26 @@ def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     return sorted(name for name in after if times(after, name) >= at > times(before, name))
 
 
-def kinds_missing(names: list[str], after: dict[str, Any], queue: str) -> list[str]:
+def known_at(head: str, root: Path = Path()) -> frozenset[str]:
+    """Номера правил, на которые дерево отвечает у головы, — чем сверять ответ «есть» (#887)."""
+    where = str(paths.BINDINGS)
+    text = text_at(head, where, root)
+    if text is None:
+        raise NotRun(f"ответы каталогу не прочитаны: {where} у {head} нет")
+    try:
+        rules = json.loads(text).get("rules") or {}
+    except ValueError as exc:
+        raise NotRun(f"{where} у {head} не разбирается: {exc}") from exc
+    return frozenset(str(number) for number in rules)
+
+
+def kinds_missing(
+    names: list[str], after: dict[str, Any], queue: str, known: frozenset[str] | None = None
+) -> list[str]:
     """Роды у порога, чей ответ каталогу отсутствует или не сходится."""
     told: list[str] = []
     for name in names:
-        problem = finding_kinds.answer_problem(after[name], queue)
+        problem = finding_kinds.answer_problem(after[name], queue, known)
         if problem is not None:
             told.append(f"  род «{name}» дошёл до порога: {problem}")
     return told
@@ -258,7 +274,9 @@ def main(argv: list[str] | None = None) -> int:
         # переносим, и у потребителя словаря может не быть вовсе.
         after = kinds_at(args.head, args.root)
         grown = crossed(kinds_at(args.base, args.root), after) if after else []
-        told += kinds_missing(grown, after, queue)
+        told += kinds_missing(
+            grown, after, queue, known_at(args.head, args.root) if grown else None
+        )
     except (NotRun, finding_kinds.NotRun) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
