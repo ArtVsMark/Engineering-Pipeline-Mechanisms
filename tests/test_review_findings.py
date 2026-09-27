@@ -2073,7 +2073,11 @@ def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> Non
     entry = findings_module.Entry(887, "замечание", title, kind=kind)
     back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
     assert back.kind == kind, entry.said()
-    assert (findings_module.KIND_SAID in entry.said()) is (kind == findings_module.ANSWER_KIND)
+    reviewer_only = (
+        kind == findings_module.ANSWER_KIND
+        and findings_module.kind_of(title) != findings_module.ANSWER_KIND
+    )
+    assert (findings_module.KIND_SAID in entry.said()) is reviewer_only
 
 
 @pytest.mark.parametrize(
@@ -2084,13 +2088,17 @@ def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> Non
     ],
     ids=["без места", "с местом"],
 )
-def test_a_derived_mark_is_derived_again(title: str) -> None:
-    """Пометка, выведенная по адресу, при перечтении выводится тем же правилом (#903).
+def test_a_derived_kind_follows_a_changed_rule(title: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Род, выведенный адресом, в строку не пишется и следует за сменой правила (#905).
 
-    Расхождение рода дают лишь пометки прежнего правила по упоминанию, а не
-    пометки нынешнего `first_path` — и без места, и с местом.
+    Строка записана при нынешнем правиле; правило адреса сузили так, что этот
+    заголовок больше не «об ответе», — перечитанная строка идёт кодом, а не
+    держит липкую пометку, как `da1a2e0`.
     """
-    kind = findings_module.kind_of(title)
-    entry = findings_module.Entry(903, "замечание", title, kind=kind)
-    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
-    assert back.kind == kind == findings_module.kind_of(back.title)
+    entry = findings_module.Entry(905, "замечание", title, kind=findings_module.kind_of(title))
+    assert entry.kind == findings_module.ANSWER_KIND
+    line = f"- `abc1234` {entry.said()}\n"
+    assert findings_module.KIND_SAID not in line
+    monkeypatch.setattr(findings_module, "first_path", lambda _title: "")
+    back = findings_module.parse_entries(line)["abc1234"]
+    assert back.kind == findings_module.CODE
