@@ -2120,10 +2120,11 @@ def test_a_declared_kind_survives_a_narrowed_rule(
     """
     title = f"{findings_module.ANSWER_FILE}:9 — ответ врёт"
     mark = "[риск · ответ]" if declared else "[риск]"
-    entries: dict[str, findings_module.Entry] = {}
-    module.record_look(
-        entries, 906, [comment(f"НАХОДКА{mark}: {title}\nВЕРДИКТ: находок 1")], False
-    )
+    entries: dict[str, Any] = {}
+    look = [comment(f"НАХОДКА{mark}: {title}\nВЕРДИКТ: находок 1")]
+    ((*_, source),) = module.found_said(look)
+    assert source is declared, "источник рода потерян при разборе"
+    module.record_look(entries, 906, look, False)
     (entry,) = entries.values()
     assert entry.kind == findings_module.ANSWER_KIND and entry.declared is declared
     line = f"- `abc1234` {entry.said()}\n"
