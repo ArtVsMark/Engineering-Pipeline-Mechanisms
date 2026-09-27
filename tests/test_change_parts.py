@@ -83,7 +83,7 @@ def test_an_empty_result_is_told_apart_from_an_empty_input() -> None:
     assert module.parts([[], []]) == []
 
 
-def test_the_walk_agrees_with_the_live_branch(run_script, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_a_walk_by_process_agrees_with_its_own_tree(run_script, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     """Заход процессом сходится с тем, что в ветке на самом деле (139).
 
     Своё дерево, а не `HEAD~1` прогона: в мелком клоне глубиной 1 его нет, и
@@ -389,6 +389,7 @@ def test_a_git_refusal_on_bodies_is_the_third_outcome(monkeypatch: pytest.Monkey
 def test_the_warning_names_the_decision_and_the_mark() -> None:
     """Предупреждение называет решение 008, строку смешения и что слияние не держится."""
     said = module.warning(2)
+    assert f"{module.MIXED_MARK} {module.PLACEHOLDER}" in said
     assert module.DECISION_008 in said and module.MIXED_MARK in said
     assert module.DOES_NOT_HOLD in said
     assert (ROOT / module.DECISION_008).is_file(), "решение 008 названо мёртвым адресом"
@@ -417,3 +418,29 @@ def test_a_named_mixing_is_heard_without_the_warn_key(
     assert module.main([]) == module.EXIT_OK
     said = capsys.readouterr().out
     assert "названо" in said and module.PLEA not in said, said
+
+
+def test_the_plea_is_printed_without_the_warn_key_too(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Без `--warn` — как зовёт навык — при неназванном смешении просьба печатается (#889)."""
+    monkeypatch.setattr(module, "touched", lambda base: [["a.py"], ["b.py"]])
+    monkeypatch.setattr(module, "bodies_of", lambda base: "тема\n")
+    assert module.main([]) == module.EXIT_OK
+    assert module.PLEA in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "copied",
+    ["{p}", "{p}»", "«{p}»", "{p}.", "`{p}`", "{p} — потом допишу"],
+    ids=["дословно", "с кавычкой", "в кавычках", "с точкой", "в обратных кавычках", "с хвостом"],
+)
+def test_a_copied_placeholder_is_not_a_reason(copied: str) -> None:
+    """Копия образца из просьбы в любом обрамлении — не названная причина (#889, #894)."""
+    reason = copied.format(p=module.PLACEHOLDER)
+    assert module.declared(f"{module.MIXED_MARK} {reason}") == ""
+
+
+def test_a_real_reason_is_heard() -> None:
+    """Настоящая причина слышна: отказ заглушке её не глушит."""
+    assert module.declared(f"{module.MIXED_MARK} хвост правок") == "хвост правок"
