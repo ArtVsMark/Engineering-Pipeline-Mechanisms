@@ -78,6 +78,20 @@ class NotRun(RuntimeError):
     """Механизм не отработал: третий исход, а не пустой профиль."""
 
 
+#: ЧТО ПРОФИЛЬ ЧИТАЕТ — ЦЕЛИКОМ, А НЕ ПО ФОРМЕ ЗА РАЗ (210, третий заход по
+#: месту: #900, #902 и поздний взгляд на #902). Из правила выгрузки: `id`
+#: (любой, берётся строкой), `slug`, `claim.ru`, `title.ru` — строки. Из
+#: ответа проекта: `status` — строка или его нет, `mechanism` — строка, пусто
+#: или его нет, `analysed` — любое (берётся строкой). Остальные поля ответа
+#: профиль читает лишь строками (`suspicion`) и форме их не подчиняет.
+RULE_TEXT_FIELDS: Final = ("claim", "title")
+#: Начала отказов по форме: тесты узнают их по константам, а не по буквам (209).
+EXPORT_SHAPE_SAID: Final = "выгрузка каталога не той формы"
+RULE_SHAPE_SAID: Final = "правило выгрузки не той формы"
+ANSWER_SHAPE_SAID: Final = "ответ проекта не той формы"
+UNPARSED_SAID: Final = "не разбирается"
+
+
 def stems(text: str) -> set[str]:
     """Корни значимых слов текста — грубо, обрезкой до :data:`STEM` знаков."""
     return {word[:STEM] for word in WORD.findall(text.lower()) if word not in STOPWORDS}
@@ -96,12 +110,13 @@ def export_rules(export: object) -> dict[str, dict[str, Any]]:
     """Правила выгрузки каталога по номеру; чужая форма — отказ `NotRun`, а не трасса.
 
     Путь выгрузки любой (`--export`), и форма проверяется ровно та, которой
-    пользуется профиль, разом (210, взгляд на #902): выгрузка — объект,
-    `rules` — список, правило — объект с `id`, `slug`, `claim.ru` и `title.ru`.
+    пользуется профиль (перечень — у `RULE_TEXT_FIELDS`): выгрузка — объект,
+    `rules` — список, правило — объект с `id` и строками `slug`, `claim.ru`,
+    `title.ru` (взгляды на #902 и поздний на #902: `"ru": null` ронял `stems`).
     """
     rules = export.get("rules") if isinstance(export, dict) else None
     if not isinstance(rules, list):
-        raise NotRun("выгрузка каталога не той формы: ожидался объект со списком rules (075)")
+        raise NotRun(f"{EXPORT_SHAPE_SAID}: ожидался объект со списком rules (075)")
     found: dict[str, dict[str, Any]] = {}
     for one in rules:
         whole = (
@@ -109,13 +124,27 @@ def export_rules(export: object) -> dict[str, dict[str, Any]]:
             and "id" in one
             and isinstance(one.get("slug"), str)
             and all(
-                isinstance(one.get(part), dict) and "ru" in one[part] for part in ("claim", "title")
+                isinstance(one.get(part), dict) and isinstance(one[part].get("ru"), str)
+                for part in RULE_TEXT_FIELDS
             )
         )
         if not whole:
-            raise NotRun(f"правило выгрузки не той формы: {str(one)[:80]} (075)")
+            raise NotRun(f"{RULE_SHAPE_SAID}: {str(one)[:80]} (075)")
         found[str(one["id"])] = one
     return found
+
+
+def answers_whole(mine: dict[str, Any]) -> None:
+    """Поля ответа, которые профиль печатает, — нужной формы; иначе отказ (поздний взгляд на #902).
+
+    `status` печатается шириной и обязан быть строкой, `mechanism` — строкой или
+    пустым: `None` в `status` ронял печать пачки трассой `TypeError`.
+    """
+    for number, answer in mine.items():
+        status = answer.get("status", "")
+        mechanism = answer.get("mechanism")
+        if not isinstance(status, str) or not (mechanism is None or isinstance(mechanism, str)):
+            raise NotRun(f"{ANSWER_SHAPE_SAID}: {number} — status/mechanism не строкой (075)")
 
 
 def profile(export: dict[str, Any], mine: dict[str, Any], since: str = "") -> list[dict[str, Any]]:
@@ -128,6 +157,7 @@ def profile(export: dict[str, Any], mine: dict[str, Any], since: str = "") -> li
         raise NotRun("в выгрузке каталога нет правил — предмет профиля не найден (075)")
     if not mine:
         raise NotRun("в ответах проекта нет записей — предмет профиля не найден (075)")
+    answers_whole(mine)
 
     rows = [
         {
@@ -192,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             mine = finding_kinds.rule_answers(path.read_text(encoding="utf-8"))
         except ValueError as exc:
-            raise NotRun(f"{path} не разбирается: {exc}") from exc
+            raise NotRun(f"{path} {UNPARSED_SAID}: {exc}") from exc
         export = (
             json.loads(Path(args.export).read_text(encoding="utf-8"))
             if args.export

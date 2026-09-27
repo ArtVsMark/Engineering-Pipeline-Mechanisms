@@ -177,7 +177,7 @@ def test_answers_of_another_shape_are_the_third_outcome(
     export.write_text('{"rules": []}', encoding="utf-8")
     done = run_script("audit_profile.py", "--answers", str(answers), "--export", str(export))
     assert done.code == module.EXIT_BROKEN, done.out
-    assert "не разбирается" in done.err, done.err
+    assert module.UNPARSED_SAID in done.err, done.err
 
 
 def test_the_gate_and_the_skill_name_each_other() -> None:
@@ -242,8 +242,18 @@ def test_since_counts_only_a_fresh_reading() -> None:
         '{"rules": [1]}',
         '{"rules": [{"slug": "x"}]}',
         '{"rules": [{"id": 1, "slug": "x", "claim": "текст", "title": {"ru": "т"}}]}',
+        '{"rules": [{"id": 1, "slug": "x", "claim": {"ru": null}, "title": {"ru": "т"}}]}',
+        '{"rules": [{"id": 1, "slug": "x", "claim": {"ru": "а"}, "title": {"ru": 5}}]}',
     ],
-    ids=["список", "rules объектом", "правило числом", "правило без id", "claim строкой"],
+    ids=[
+        "список",
+        "rules объектом",
+        "правило числом",
+        "правило без id",
+        "claim строкой",
+        "claim.ru пусто",
+        "title.ru числом",
+    ],
 )
 def test_an_export_of_another_shape_is_the_third_outcome(
     tmp_path: Path, run_script: RunScript, said: str
@@ -255,7 +265,7 @@ def test_an_export_of_another_shape_is_the_third_outcome(
     export.write_text(said, encoding="utf-8")
     done = run_script("audit_profile.py", "--answers", str(answers), "--export", str(export))
     assert done.code == module.EXIT_BROKEN, done.out
-    assert "не той формы" in done.err, done.err
+    assert module.RULE_SHAPE_SAID in done.err or module.EXPORT_SHAPE_SAID in done.err, done.err
     assert "Traceback" not in done.err
 
 
@@ -263,3 +273,30 @@ def test_export_rules_keeps_a_whole_rule() -> None:
     """Правило нужной формы читается по номеру-строке (#902)."""
     rule = {"id": 7, "slug": "s", "claim": {"ru": "а"}, "title": {"ru": "б"}}
     assert module.export_rules({"rules": [rule]}) == {"7": rule}
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ['{"status": null}', '{"status": 5}', '{"mechanism": ["x"]}', '{"mechanism": 1}'],
+    ids=["status пусто", "status числом", "mechanism списком", "mechanism числом"],
+)
+def test_answer_fields_of_another_shape_are_the_third_outcome(
+    tmp_path: Path, run_script: RunScript, answer: str
+) -> None:
+    """Печатаемое поле ответа не той формы — отказ, а не трасса (поздний взгляд на #902)."""
+    answers = tmp_path / "answers.json"
+    answers.write_text(f'{{"rules": {{"1": {answer}}}}}', encoding="utf-8")
+    export = tmp_path / "export.json"
+    export.write_text(
+        '{"rules": [{"id": 1, "slug": "s", "claim": {"ru": "а"}, "title": {"ru": "б"}}]}',
+        encoding="utf-8",
+    )
+    done = run_script("audit_profile.py", "--answers", str(answers), "--export", str(export))
+    assert done.code == module.EXIT_BROKEN, done.out
+    assert module.ANSWER_SHAPE_SAID in done.err, done.err
+    assert "Traceback" not in done.err
+
+
+def test_answers_whole_accepts_the_read_form() -> None:
+    """Строки и отсутствие полей — нужная форма; пустой `mechanism` тоже (#902)."""
+    module.answers_whole({"1": {"status": "x", "mechanism": None}, "2": {}})
