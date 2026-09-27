@@ -350,6 +350,14 @@ def test_the_gate_asks_a_kind_crossing_the_threshold_end_to_end(tmp_path: Path) 
     git(root, "commit", "-m", "ответ каталогу")
     with contextlib.chdir(root):
         assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
+    # Опечатка номера краснеет всем путём гейта, а не только в `known_at` (#887).
+    kinds.write_text(
+        json.dumps({"kinds": {"род": kind(3, "есть — 211")}}, ensure_ascii=False), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "опечатка номера")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND
 
 
 def test_a_file_is_read_at_the_state_not_from_the_disk(tmp_path: Path) -> None:
