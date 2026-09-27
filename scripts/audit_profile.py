@@ -148,8 +148,10 @@ def answers_whole(mine: dict[str, Any]) -> None:
         mechanism = answer.get("mechanism")
         if not isinstance(status, str) or not (mechanism is None or isinstance(mechanism, str)):
             raise NotRun(f"{ANSWER_SHAPE_SAID}: {number} — status/mechanism не строкой (075)")
-        analysed = answer.get("analysed") or ""
-        if not (isinstance(analysed, str) and (not analysed or is_iso_day(analysed))):
+        # НЕТ ПОЛЯ — ЭТО None ИЛИ "", а не любое ложное: `0`, `false` и `[]`
+        # через `or ""` прошли бы без отказа (взгляд на #910).
+        analysed = answer.get("analysed")
+        if not (analysed in (None, "") or (isinstance(analysed, str) and is_iso_day(analysed))):
             raise NotRun(f"{ANSWER_SHAPE_SAID}: {number} — analysed не дата ГГГГ-ММ-ДД (075)")
 
 

@@ -309,6 +309,9 @@ def test_export_rules_keeps_a_whole_rule() -> None:
         '{"analysed": "2026/09/01"}',
         '{"analysed": 5}',
         '{"analysed": "2026-9-01"}',
+        '{"analysed": 0}',
+        '{"analysed": false}',
+        '{"analysed": []}',
     ],
     ids=[
         "status пусто",
@@ -318,6 +321,9 @@ def test_export_rules_keeps_a_whole_rule() -> None:
         "analysed через косую",
         "analysed числом",
         "analysed без нуля",
+        "analysed нулём",
+        "analysed ложью",
+        "analysed пустым списком",
     ],
 )
 def test_answer_fields_of_another_shape_are_the_third_outcome(
@@ -345,6 +351,7 @@ def test_answers_whole_accepts_the_read_form() -> None:
             "2": {},
             "3": {"analysed": "2026-09-01"},
             "4": {"analysed": ""},
+            "5": {"analysed": None},
         }
     )
 
