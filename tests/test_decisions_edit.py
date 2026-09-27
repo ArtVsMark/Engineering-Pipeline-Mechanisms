@@ -232,3 +232,12 @@ def test_a_climb_to_the_root_is_still_the_tree() -> None:
     before = edit.frozen("## Решение\n\nСм. [x](../../README.md).\n")
     after = edit.frozen("## Решение\n\nСм. [x](../../docs/README.md).\n")
     assert before == after
+
+
+def test_without_folder_drops_the_folder_only_inside_the_tree() -> None:
+    """Каталог снимается у документа дерева; выход за корень остаётся целиком (#892)."""
+    inside = edit.LINK_TARGET_RE.search("](../use/x.md)")
+    outside = edit.LINK_TARGET_RE.search("](../../../a/x.md)")
+    assert inside is not None and outside is not None
+    assert edit.without_folder(inside) == "](x.md)"
+    assert edit.without_folder(outside) == "](../../../a/x.md)"
