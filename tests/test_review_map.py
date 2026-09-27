@@ -326,5 +326,18 @@ def test_the_map_names_the_mark_words_from_the_kind_constants() -> None:
     буквами, и переименование константы оставило бы карту учить старому.
     """
     said = "\n".join(module.ASKED["not-applicable"])
-    for kind in (module.findings.ANSWER_KIND, module.findings.CODE):
+    kinds = module.findings
+    for kind in (kinds.ANSWER_KIND, kinds.CODE):
         assert f"· {kind}]" in said, f"скобка рода «{kind}» не названа в карте"
+    assert f"[{kinds.DEFECT} · {kinds.ANSWER_KIND}]" in said, "вес примера не из констант"
+
+
+def test_the_words_the_map_teaches_are_the_words_the_parser_reads() -> None:
+    """Слова рода и веса, которым учит карта, — ключи словарей разбора (взгляд на #915).
+
+    Карта пишет слова по константам, а разбор читает скобку по `KINDS` и
+    `WEIGHTS`: смена одной стороны развела бы их молча.
+    """
+    kinds = module.findings
+    assert set(kinds.KINDS) == {kinds.CODE, kinds.ANSWER_KIND}
+    assert kinds.DEFECT in kinds.WEIGHTS
