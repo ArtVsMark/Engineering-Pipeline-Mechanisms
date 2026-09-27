@@ -384,10 +384,20 @@ def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: se
     # проходит ВСЮ историю по порядку и заново ставит каждую связь тем же
     # правилом «первая названная»; снятия при этом не теряются.
     # СБРАСЫВАЕТСЯ ТОЛЬКО ТО, ЧТО ИСТОРИЯ ПОСТАВИТ ЗАНОВО (взгляд на #876):
-    # отпечаток, которого не называет ни одно тело из `messages`, держит связь,
-    # пришедшую иначе, — и перечитка её не стирает безвозвратно.
+    # отпечаток, который тела из `messages` называют В СТРОКЕ С «дубль». Это
+    # не только источники: сбрасываются и цель, и хвост строки, которым строка
+    # связи не даёт, — именно целям #872 приписал ложного двойника, и
+    # пересчитать это можно, только сбросив. Названный без «дубль» остаётся
+    # как был. ПРЕДЕЛ НАЗВАН (195, взгляд на #883): связь цели или хвоста,
+    # пришедшая из изменения вне `counted`, перечиткой стирается.
     replayed = [(number, message) for number, message in messages if number in counted]
-    named = {mark for _, message in replayed for mark in resolved_in(message)}
+    named = {
+        mark
+        for _, message in replayed
+        for said in changerefs.resolutions_parsed(message)
+        if said.groups
+        for mark in said.marks
+    }
     for mark in named & archive["resolutions"].keys():
         archive["resolutions"][mark]["twin_of"] = ""
     for number, message in replayed:
