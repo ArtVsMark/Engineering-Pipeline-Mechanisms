@@ -324,6 +324,8 @@ KINDLESS: Final = "записей архива без рода:"
 TWIN_SHARE: Final = "от разобранных"
 #: Форма отрезка `--twins`: её называет отказ на чужой записи.
 SPAN_FORM: Final = "ПЕРВЫЙ-ПОСЛЕДНИЙ"
+#: Отказ на перевёрнутом отрезке: тест отличает его от отказа по форме (209).
+SPAN_INVERTED: Final = "первый номер больше последнего"
 
 
 def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
@@ -361,7 +363,7 @@ def span(text: str) -> tuple[int, int]:
     if not (dash and first.isdecimal() and final.isdecimal()):
         raise ValueError(f"отрезок «{text}» не по форме {SPAN_FORM}, например 855-890")
     if int(first) > int(final):
-        raise ValueError(f"отрезок «{text}» перевёрнут: первый номер больше последнего")
+        raise ValueError(f"отрезок «{text}» перевёрнут: {SPAN_INVERTED}")
     return int(first), int(final)
 
 

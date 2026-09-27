@@ -365,6 +365,9 @@ def read_archive(path: Path) -> dict[str, Any]:
         raise ValueError("`counted`, `gaps` или `seen_on` в архиве — не список")
     numbers = [*(archive.get("counted") or [])]
     numbers += [number for one in entries.values() for number in one.get("seen_on") or []]
+    # Номер изменения записи — тоже число: замер отрезка сравнивает его, и
+    # `[10]` ронял его трассой мимо отказа (взгляд на #895).
+    numbers += [one["pr"] for one in entries.values() if one.get("pr") is not None]
     if not all(isinstance(number, int) and not isinstance(number, bool) for number in numbers):
         raise ValueError("номер изменения в архиве — не число")
     return archive

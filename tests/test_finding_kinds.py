@@ -482,8 +482,22 @@ def test_twins_are_counted_over_resolved_findings(
         {"findings": {"a": "x"}},
         {"findings": {"a": {"pr": 10}}, "resolutions": []},
         {"findings": {"a": {"pr": 10}}, "resolutions": {"a": "x"}},
+        {"findings": {"a": {"pr": [10]}}},
+        {"findings": {"a": {"pr": {"x": 1}}}},
+        {"findings": {"a": {"pr": "10"}}},
+        {"findings": {"a": {"pr": True}}},
     ],
-    ids=["архив списком", "записи списком", "запись строкой", "разборы списком", "разбор строкой"],
+    ids=[
+        "архив списком",
+        "записи списком",
+        "запись строкой",
+        "разборы списком",
+        "разбор строкой",
+        "номер списком",
+        "номер словарём",
+        "номер строкой",
+        "номер логическим",
+    ],
 )
 def test_twins_refuse_an_archive_of_another_shape(tmp_path: Path, said: object) -> None:
     """Архив чужой формы — отказ `NotRun`, а не пустой счёт или трасса (039, #891)."""
@@ -504,19 +518,26 @@ def test_twins_name_an_unfilled_archive(tmp_path: Path, capsys: pytest.CaptureFi
 
 
 @pytest.mark.parametrize(
-    "text",
-    ["855", "855-", "-890", "a-b", "890-855"],
+    ("text", "named", "unnamed"),
+    [
+        ("855", "SPAN_FORM", "SPAN_INVERTED"),
+        ("855-", "SPAN_FORM", "SPAN_INVERTED"),
+        ("-890", "SPAN_FORM", "SPAN_INVERTED"),
+        ("a-b", "SPAN_FORM", "SPAN_INVERTED"),
+        ("890-855", "SPAN_INVERTED", "SPAN_FORM"),
+    ],
     ids=["без дефиса", "без конца", "без начала", "не числа", "перевёрнут"],
 )
 def test_a_span_of_another_form_is_refused(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str, named: str, unnamed: str
 ) -> None:
-    """Чужая запись отрезка — отказ с формой или причиной, а не `int()` и не «находок 0»."""
+    """Чужая запись отрезка — отказ со СВОЕЙ причиной, а не `int()` и не «находок 0»."""
     archive = tmp_path / "findings.json"
     archive.write_text("{}", encoding="utf-8")
     assert module.main(["--archive", str(archive), "--twins", text]) == module.EXIT_BROKEN
     said = capsys.readouterr().err
-    assert module.SPAN_FORM in said or "перевёрнут" in said
+    assert getattr(module, named) in said
+    assert getattr(module, unnamed) not in said
     assert module.span("855-890") == (855, 890)
 
 
