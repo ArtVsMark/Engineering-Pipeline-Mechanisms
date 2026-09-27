@@ -376,6 +376,10 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     `findings.read_archive`, что у `in_archive`, и строка о неполном
     наполнении отдаётся так же: без неё ноль дублей выглядел бы полным
     счётом (045, взгляд на #891).
+
+    ОТРЕЗОК, КОТОРОГО АРХИВ НЕ УЧЁЛ, — ОТКАЗ, а не «находок 0»: опечатка
+    `8550-8900` или ещё не слитый отрезок иначе печатали бы ноль замером.
+    Так же отказывает соседний `finding_chains` (045, взгляд на #895).
     """
     try:
         archive = findings.read_archive(path)
@@ -385,6 +389,8 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     solved = {} if solved is None else solved
     if not isinstance(solved, dict) or not all(isinstance(one, dict) for one in solved.values()):
         raise NotRun("`resolutions` в архиве — не словарь записей")
+    if not any(first <= number <= final for number in archive.get("counted") or []):
+        raise NotRun(findings.NONE_COUNTED)
     marks = [
         mark
         for mark, one in (archive.get("findings") or {}).items()
@@ -421,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"доля дублей не сосчитана: {refusal}", file=sys.stderr)
             return EXIT_BROKEN
         if gap:
-            print(f"АРХИВ НЕПОЛОН: {gap} — числа архива ниже неполные")
+            print(f"{findings.UNFILLED_SAID} {gap} — числа архива ниже неполные")
         share = f"{twins / done:.0%}" if done else "—"
         print(
             f"#{first}–#{final}: находок {total}, разобрано {done} "
@@ -438,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     meetings = sum(len(body.get("встречен") or []) for body in kinds.values())
     print(f"родов {len(kinds)}, встреч {meetings}")
     if gap:
-        print(f"АРХИВ НЕПОЛОН: {gap} — числа архива ниже неполные")
+        print(f"{findings.UNFILLED_SAID} {gap} — числа архива ниже неполные")
     if archived and args.kinds:
         # Род в записи архива заморожен на момент сборки: другой словарь
         # родов сводит встречи иначе, и счёт с архивом расходится (взгляд на #817).
