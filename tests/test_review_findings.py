@@ -2035,3 +2035,24 @@ def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
     # Предел агента меньше предела джоба: перенос успевает.
     refute = next(step for step in job["steps"] if step.get("id") == "refute")
     assert int(refute["timeout-minutes"]) < int(job["timeout-minutes"])
+
+
+@pytest.mark.parametrize(
+    ("title", "kind"),
+    [
+        ("scripts/x.py:3 — заново разбирает `.rules/bindings.json`", "код"),
+        ("`.rules/bindings.json:9` — ответ врёт", "ответ"),
+        ("scripts/x.py:3 — ревьюер сам сказал «ответ»", "ответ"),
+    ],
+    ids=["код, упомянувший ответы", "место — ответы", "пометка ревьюера на коде"],
+)
+def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> None:
+    """Строка реестра `Entry.said` → `parse_entries` отдаёт тот же род (взгляд на #901).
+
+    Находка о коде, упомянувшая файл ответов, пометки не получает и читается
+    обратно кодом; пометка ревьюера на коде переживает круг как пол.
+    """
+    entry = findings_module.Entry(887, "замечание", title, kind=kind)
+    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
+    assert back.kind == kind, entry.said()
+    assert (findings_module.KIND_SAID in entry.said()) is (kind == findings_module.ANSWER_KIND)
