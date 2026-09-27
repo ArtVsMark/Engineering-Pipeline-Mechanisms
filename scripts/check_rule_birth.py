@@ -47,7 +47,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -234,12 +233,11 @@ def known_at(head: str, root: Path = Path()) -> frozenset[str]:
     where = str(paths.BINDINGS)
     text = text_at(head, where, root)
     if text is None:
-        raise NotRun(f"ответы каталогу не прочитаны: {where} у {head} нет")
+        raise NotRun(f"{finding_kinds.ANSWERS_UNREAD}: {where} у {head} нет")
     try:
-        rules = json.loads(text).get("rules") or {}
+        return finding_kinds.rule_numbers(text)
     except ValueError as exc:
         raise NotRun(f"{where} у {head} не разбирается: {exc}") from exc
-    return frozenset(str(number) for number in rules)
 
 
 def kinds_missing(

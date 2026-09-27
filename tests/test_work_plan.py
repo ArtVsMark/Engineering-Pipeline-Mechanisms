@@ -727,3 +727,12 @@ def test_a_born_row_needs_an_explicit_open_state(capsys: pytest.CaptureFixture[s
     elsewhere = {**own, "repository_url": "https://api.github.com/repos/other/r"}
     assert module.may_be_born(elsewhere, "o/r", set()) is False
     assert "#762 из другого хранилища" in capsys.readouterr().out
+
+
+def test_the_plan_names_missing_answers_and_a_mistyped_rule(tmp_path: Any) -> None:
+    """Без `bindings.json` раздел — отказ, а не пустота; опечатка номера видна в плане (#887)."""
+    path = kinds_file(tmp_path, {"род": {"встречен": ["a", "b", "c"], "каталогу": "есть — 211"}})
+    assert len(module.birth_part(path).rows) == 1, "опечатка номера не видна в плане"
+    (tmp_path / "bindings.json").unlink()
+    said = module.birth_part(path)
+    assert said.rows == [] and module.finding_kinds.ANSWERS_UNREAD in said.unread, said
