@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import catalogue
+import finding_kinds
 import paths
 
 EXIT_OK: Final = 0
@@ -158,7 +159,12 @@ def main(argv: list[str] | None = None) -> int:
         path = Path(args.answers) if args.answers else paths.BINDINGS
         if not path.is_file():
             raise NotRun(f"нет {path}: ответы проекта взять неоткуда (075)")
-        mine = json.loads(path.read_text(encoding="utf-8")).get("rules") or {}
+        # ПУТЬ ЛЮБОЙ, ПОЭТОМУ ФОРМА ПРОВЕРЯЕТСЯ: файл не из дерева `tests/test_bindings.py`
+        # не держит, и `{}` дал бы молча пустой профиль (взгляд на #900).
+        try:
+            mine = finding_kinds.rule_answers(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise NotRun(f"{path} не разбирается: {exc}") from exc
         export = (
             json.loads(Path(args.export).read_text(encoding="utf-8"))
             if args.export

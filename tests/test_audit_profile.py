@@ -162,6 +162,24 @@ def test_a_missing_answers_file_is_the_third_outcome(tmp_path: Path, run_script:
     assert "взять неоткуда" in done.err, done.err
 
 
+@pytest.mark.parametrize(
+    "said",
+    ["{", "[]", "{}", '{"rules": []}', '{"rules": null}'],
+    ids=["обрыв", "список", "без раздела rules", "rules списком", "rules пусто"],
+)
+def test_answers_of_another_shape_are_the_third_outcome(
+    tmp_path: Path, run_script: RunScript, said: str
+) -> None:
+    """Файл `--answers` чужой формы — отказ, а не молча пустой профиль (взгляд на #900)."""
+    answers = tmp_path / "answers.json"
+    answers.write_text(said, encoding="utf-8")
+    export = tmp_path / "export.json"
+    export.write_text('{"rules": []}', encoding="utf-8")
+    done = run_script("audit_profile.py", "--answers", str(answers), "--export", str(export))
+    assert done.code == module.EXIT_BROKEN, done.out
+    assert "не разбирается" in done.err, done.err
+
+
 def test_the_gate_and_the_skill_name_each_other() -> None:
     """Механизм зовётся навыком, а навык — этим именем: иначе один из двух мёртв.
 
