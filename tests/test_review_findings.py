@@ -1164,6 +1164,50 @@ def test_kind_of_reads_the_mark_and_falls_back_to_the_address() -> None:
     assert findings_module.kind_of("обычная находка о коде") == findings_module.CODE
 
 
+@pytest.mark.parametrize(
+    ("title", "answer"),
+    [
+        ("scripts/check_rule_birth.py:232 — заново разбирает `.rules/bindings.json`", False),
+        ("`.github/workflows/review.yml:131` — шаг читает .rules/bindings.json", False),
+        ("`.rules/bindings.json:375` — пропущена точка", True),
+        ("правка `.rules/bindings.json` склеивает два предложения", True),
+        ("ответ в `.rules/bindings.json:375` врёт о числе", True),
+        ("перечень py/yaml/json не путь, а .rules/bindings.json:9 — место", True),
+        ("гейт test_quotes.py не проверяет цитаты в .rules/bindings.json", False),
+        ("с версии 1.2 ответ в .rules/bindings.json врёт", True),
+        ("число 3.5 в .rules/bindings.json неверно", True),
+        ("константа paths.BINDINGS и .rules/bindings.json:9 расходятся", True),
+        ("review_findings.closable читает .rules/bindings.json", True),
+    ],
+    ids=[
+        "код упоминает ответы",
+        "место в кавычках",
+        "место — ответы",
+        "проза, первым путём — ответы",
+        "проза, ответы с номером строки",
+        "перечень без расширения — не путь",
+        "проза, первым путём — тест",
+        "версия — не путь",
+        "число — не путь",
+        "константа — не путь",
+        "функция модуля — не путь",
+    ],
+)
+def test_the_answer_kind_is_read_from_the_place_not_a_mention(title: str, answer: bool) -> None:
+    """Род «об ответе» по адресу — по месту находки, а не по любому упоминанию (#896)."""
+    kind = findings_module.kind_of(title)
+    assert (kind == findings_module.ANSWER_KIND) is answer, (title, kind)
+    assert findings_module.kind_of(title, "ответ") == findings_module.ANSWER_KIND, "пол потерян"
+
+
+def test_the_first_path_prefers_the_place() -> None:
+    """Место в начале заголовка берётся раньше пути в прозе; пути нет — пусто (#896)."""
+    assert findings_module.place_of("tests/x.py:3 — про `.rules/bindings.json`") == "tests/x.py"
+    assert findings_module.first_path("tests/x.py:3 — про `.rules/bindings.json`") == "tests/x.py"
+    assert findings_module.first_path("проза про `docs/a.md` и b.py") == "docs/a.md"
+    assert findings_module.first_path("проза без пути") == ""
+
+
 def отметка(pr: int, kind: str) -> dict[str, Any]:
     """Реестр из одной записи заданного рода — общий вход для проверок снятия."""
     return {"abc1234": findings_module.Entry(pr, "дефект", "находка", kind=kind)}
