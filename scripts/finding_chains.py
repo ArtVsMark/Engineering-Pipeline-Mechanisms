@@ -294,7 +294,9 @@ def archive_heading(archive: dict[str, Any], taken: int) -> list[str]:
     ]
     gap = findings.unfilled(archive)
     if gap:
-        lines.append(f"АРХИВ НЕПОЛОН: {gap} — отрезок взят из учтённых, а не из последних слитых")
+        lines.append(
+            f"{findings.UNFILLED_SAID} {gap} — отрезок взят из учтённых, а не из последних слитых"
+        )
     return lines
 
 
@@ -360,9 +362,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_BROKEN
         said, seen = from_archive(archive, args.last, args.first, args.final)
         if not seen:
-            print(
-                "замер не снят: в отрезке нет ни одного учтённого изменения (045)", file=sys.stderr
-            )
+            print(f"замер не снят: {findings.NONE_COUNTED}", file=sys.stderr)
             return EXIT_BROKEN
         print("\n".join(archive_heading(archive, seen) + report(chains(said))))
         return EXIT_OK

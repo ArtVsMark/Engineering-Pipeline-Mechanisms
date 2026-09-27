@@ -432,7 +432,9 @@ def test_rule_numbers_are_read_at_the_head(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "said", ["[]", '"x"', '{"rules": []}', "{"], ids=["список", "строка", "rules списком", "обрыв"]
+    "said",
+    ["[]", '"x"', '{"rules": []}', "{", "{}"],
+    ids=["список", "строка", "rules списком", "обрыв", "без раздела rules"],
 )
 def test_answers_of_another_shape_at_the_head_are_refused(tmp_path: Path, said: str) -> None:
     """Файл ответов чужого вида у головы — отказ гейта с общим началом, а не трасса (#893)."""
@@ -441,3 +443,10 @@ def test_answers_of_another_shape_at_the_head_are_refused(tmp_path: Path, said: 
     git(root, "commit", "-qam", "ответы чужого вида")
     with pytest.raises(module.NotRun, match=f"^{module.finding_kinds.ANSWERS_UNREAD}"):
         module.known_at("HEAD", root)
+
+
+def test_an_unreadable_head_is_refused_with_the_same_start(tmp_path: Path) -> None:
+    """Git не прочёл файл ответов у головы — отказ с тем же началом, что у прочих (#899, 210)."""
+    root = tree(tmp_path)
+    with pytest.raises(module.NotRun, match=f"^{module.finding_kinds.ANSWERS_UNREAD}"):
+        module.known_at("нет-такой-головы", root)

@@ -236,11 +236,25 @@ def rule_numbers(text: str) -> frozenset[str]:
     одной формы разошлись бы при первой её смене (взгляд на #887, 214). Соседи,
     которым нужны сами ОТВЕТЫ, а не номера, — `audit_profile`, `drift`,
     `review_map` — читают раздел `rules` своим путём, и этот разбор им не
-    нужен (взгляд на #893, 195). Текст не разбирается или не объект —
-    `ValueError`, отказ называет зовущий.
+    нужен (взгляд на #893, 195). Текст не разбирается, не объект, раздела
+    `rules` нет или он не объект — `ValueError`, отказ называет зовущий.
+
+    РАЗДЕЛА НЕТ — ОТКАЗ, А НЕ «НОМЕРОВ НЕТ» (045, взгляд на #899): `{}` иначе
+    молча давал пустое множество, и опечатка номера в ответе «есть» не
+    краснела бы ни в гейте, ни в плане. Пустой раздел `{"rules": {}}` —
+    сказанное состояние «ответов нет», и он читается пустым.
+
+    ПРЕДЕЛ НАЗВАН (195, взгляд на #900): соседи `review_map.py:268`,
+    `drift.py:270, 416, 1373` и `audit_profile.py:161` по-прежнему читают
+    отсутствие раздела пустотой (`get("rules") or {}`). Оставлено намеренно:
+    они читают файл ДЕРЕВА, а его форму держит `tests/test_bindings.py` —
+    `load()["rules"]` падает на файле без раздела, и такое дерево не сольётся.
+    Этот разбор строже потому, что его читатели дерево не ждут: гейт читает
+    файл у головы изменения — до того, как набор тестов её отвергнет, — а план
+    по пути рядом с объявлением родов (`--kinds`).
     """
     said = json.loads(text)
-    rules = said.get("rules", {}) if isinstance(said, dict) else None
+    rules = said.get("rules") if isinstance(said, dict) else None
     if not isinstance(rules, dict):
         raise ValueError("ожидался объект с разделом rules")
     return frozenset(str(number) for number in rules)
@@ -322,6 +336,9 @@ OUTSIDE: Final = "род архива вне словаря:"
 KINDLESS: Final = "записей архива без рода:"
 #: Хвост строки замера дублей: тест узнаёт её по нему, а не по буквам (209).
 TWIN_SHARE: Final = "от разобранных"
+#: Сколько изменений отрезка архив учёл — первым числом строки замера: отрезок,
+#: покрытый частично (`855-8900`), иначе читался бы целиком (взгляд на #897).
+SPAN_SEEN: Final = "учтено изменений"
 #: Форма отрезка `--twins`: её называет отказ на чужой записи.
 SPAN_FORM: Final = "ПЕРВЫЙ-ПОСЛЕДНИЙ"
 #: Отказ на перевёрнутом отрезке: тест отличает его от отказа по форме (209).
@@ -367,8 +384,10 @@ def span(text: str) -> tuple[int, int]:
     return int(first), int(final)
 
 
-def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, int, int], str]:
-    """Находки изменений `first`–`final`: (всего, разобрано, проверкой починки, дублем) и неполнота.
+def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, int, int, int], str]:
+    """Отрезок `first`–`final`: (учтено изменений, находок, разобрано, проверкой починки, дублем).
+
+    Вторым отдаётся строка о неполноте архива.
 
     Замер #859 командой, а не разовым сценарием окна (005): доля дублей
     считается от РАЗОБРАННЫХ — неразобранная находка дублем ещё не снята и
@@ -376,6 +395,12 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     `findings.read_archive`, что у `in_archive`, и строка о неполном
     наполнении отдаётся так же: без неё ноль дублей выглядел бы полным
     счётом (045, взгляд на #891).
+
+    ОТРЕЗОК, КОТОРОГО АРХИВ НЕ УЧЁЛ, — ОТКАЗ, а не «находок 0»: опечатка
+    `8550-8900` или ещё не слитый отрезок иначе печатали бы ноль замером.
+    Так же отказывает соседний `finding_chains` (045, взгляд на #895).
+    Отрезок, покрытый ЧАСТИЧНО, не отказ — но число учтённых в нём изменений
+    отдаётся первым и печатается, как у `finding_chains` (взгляд на #897).
     """
     try:
         archive = findings.read_archive(path)
@@ -385,6 +410,9 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     solved = {} if solved is None else solved
     if not isinstance(solved, dict) or not all(isinstance(one, dict) for one in solved.values()):
         raise NotRun("`resolutions` в архиве — не словарь записей")
+    seen = len({number for number in archive.get("counted") or [] if first <= number <= final})
+    if not seen:
+        raise NotRun(findings.NONE_COUNTED)
     marks = [
         mark
         for mark, one in (archive.get("findings") or {}).items()
@@ -393,7 +421,7 @@ def twins_between(path: Path, first: int, final: int) -> tuple[tuple[int, int, i
     done = [mark for mark in marks if mark in solved]
     checked = sum(1 for mark in done if solved[mark].get("fix_check"))
     twins = sum(1 for mark in done if solved[mark].get("twin_of"))
-    return (len(marks), len(done), checked, twins), findings.unfilled(archive)
+    return (seen, len(marks), len(done), checked, twins), findings.unfilled(archive)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -416,15 +444,16 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_BROKEN
         try:
             first, final = span(args.twins)
-            (total, done, checked, twins), gap = twins_between(Path(args.archive), first, final)
+            counts, gap = twins_between(Path(args.archive), first, final)
         except (NotRun, ValueError) as refusal:
             print(f"доля дублей не сосчитана: {refusal}", file=sys.stderr)
             return EXIT_BROKEN
         if gap:
-            print(f"АРХИВ НЕПОЛОН: {gap} — числа архива ниже неполные")
+            print(f"{findings.UNFILLED_SAID} {gap} — числа архива ниже неполные")
+        seen, total, done, checked, twins = counts
         share = f"{twins / done:.0%}" if done else "—"
         print(
-            f"#{first}–#{final}: находок {total}, разобрано {done} "
+            f"#{first}–#{final}: {SPAN_SEEN} {seen}, находок {total}, разобрано {done} "
             f"(проверкой починки {checked}), дублем {twins} — {share} {TWIN_SHARE}"
         )
         return EXIT_OK
@@ -438,7 +467,7 @@ def main(argv: list[str] | None = None) -> int:
     meetings = sum(len(body.get("встречен") or []) for body in kinds.values())
     print(f"родов {len(kinds)}, встреч {meetings}")
     if gap:
-        print(f"АРХИВ НЕПОЛОН: {gap} — числа архива ниже неполные")
+        print(f"{findings.UNFILLED_SAID} {gap} — числа архива ниже неполные")
     if archived and args.kinds:
         # Род в записи архива заморожен на момент сборки: другой словарь
         # родов сводит встречи иначе, и счёт с архивом расходится (взгляд на #817).
