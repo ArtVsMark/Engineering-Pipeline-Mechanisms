@@ -235,15 +235,24 @@ def test_since_counts_only_a_fresh_reading() -> None:
 
 
 @pytest.mark.parametrize(
-    "said",
+    ("said", "refusal"),
     [
-        "[]",
-        '{"rules": {}}',
-        '{"rules": [1]}',
-        '{"rules": [{"slug": "x"}]}',
-        '{"rules": [{"id": 1, "slug": "x", "claim": "текст", "title": {"ru": "т"}}]}',
-        '{"rules": [{"id": 1, "slug": "x", "claim": {"ru": null}, "title": {"ru": "т"}}]}',
-        '{"rules": [{"id": 1, "slug": "x", "claim": {"ru": "а"}, "title": {"ru": 5}}]}',
+        ("[]", module.EXPORT_SHAPE_SAID),
+        ('{"rules": {}}', module.EXPORT_SHAPE_SAID),
+        ('{"rules": [1]}', module.RULE_SHAPE_SAID),
+        ('{"rules": [{"slug": "x"}]}', module.RULE_SHAPE_SAID),
+        (
+            '{"rules": [{"id": 1, "slug": "x", "claim": "текст", "title": {"ru": "т"}}]}',
+            module.RULE_SHAPE_SAID,
+        ),
+        (
+            '{"rules": [{"id": 1, "slug": "x", "claim": {"ru": null}, "title": {"ru": "т"}}]}',
+            module.RULE_SHAPE_SAID,
+        ),
+        (
+            '{"rules": [{"id": 1, "slug": "x", "claim": {"ru": "а"}, "title": {"ru": 5}}]}',
+            module.RULE_SHAPE_SAID,
+        ),
     ],
     ids=[
         "список",
@@ -256,7 +265,7 @@ def test_since_counts_only_a_fresh_reading() -> None:
     ],
 )
 def test_an_export_of_another_shape_is_the_third_outcome(
-    tmp_path: Path, run_script: RunScript, said: str
+    tmp_path: Path, run_script: RunScript, said: str, refusal: str
 ) -> None:
     """Выгрузка `--export` чужой формы — отказ с причиной, а не трасса (взгляд на #902)."""
     answers = tmp_path / "answers.json"
@@ -265,8 +274,23 @@ def test_an_export_of_another_shape_is_the_third_outcome(
     export.write_text(said, encoding="utf-8")
     done = run_script("audit_profile.py", "--answers", str(answers), "--export", str(export))
     assert done.code == module.EXIT_BROKEN, done.out
-    assert module.RULE_SHAPE_SAID in done.err or module.EXPORT_SHAPE_SAID in done.err, done.err
+    assert refusal in done.err, done.err
     assert "Traceback" not in done.err
+
+
+def test_a_silent_catalogue_is_the_third_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Каталог молчит — отказ с кодом 2 и причиной, а не трасса (взгляд на #908)."""
+    answers = tmp_path / "answers.json"
+    answers.write_text('{"rules": {"1": {"status": "x"}}}', encoding="utf-8")
+
+    def silent(url: str) -> dict[str, object]:
+        raise module.catalogue.Silent(f"{url}: нет ответа")
+
+    monkeypatch.setattr(module.catalogue, "read", silent)
+    assert module.main(["--answers", str(answers)]) == module.EXIT_BROKEN
+    assert module.SILENT_SAID in capsys.readouterr().err
 
 
 def test_export_rules_keeps_a_whole_rule() -> None:

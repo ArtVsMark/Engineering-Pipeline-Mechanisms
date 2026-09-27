@@ -90,6 +90,7 @@ EXPORT_SHAPE_SAID: Final = "выгрузка каталога не той фор
 RULE_SHAPE_SAID: Final = "правило выгрузки не той формы"
 ANSWER_SHAPE_SAID: Final = "ответ проекта не той формы"
 UNPARSED_SAID: Final = "не разбирается"
+SILENT_SAID: Final = "каталог молчит — выгрузку взять неоткуда"
 
 
 def stems(text: str) -> set[str]:
@@ -223,11 +224,17 @@ def main(argv: list[str] | None = None) -> int:
             mine = finding_kinds.rule_answers(path.read_text(encoding="utf-8"))
         except ValueError as exc:
             raise NotRun(f"{path} {UNPARSED_SAID}: {exc}") from exc
-        export = (
-            json.loads(Path(args.export).read_text(encoding="utf-8"))
-            if args.export
-            else catalogue.read(catalogue.EXPORT_URL)
-        )
+        # МОЛЧАНИЕ КАТАЛОГА — ОТКАЗ, А НЕ ТРАССА (взгляд на #908): `catalogue.read`
+        # поднимает `Silent` от `RuntimeError`, и мимо `OSError`/`ValueError` он
+        # падал трассой — тем же путём чтения, что и выгрузка чужой формы.
+        try:
+            export = (
+                json.loads(Path(args.export).read_text(encoding="utf-8"))
+                if args.export
+                else catalogue.read(catalogue.EXPORT_URL)
+            )
+        except catalogue.Silent as exc:
+            raise NotRun(f"{SILENT_SAID}: {exc}") from exc
         rows = profile(export, mine, args.since or "")
     except NotRun as refusal:
         print(f"профиль не построен: {refusal}", file=sys.stderr)
