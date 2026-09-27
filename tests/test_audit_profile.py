@@ -301,8 +301,30 @@ def test_export_rules_keeps_a_whole_rule() -> None:
 
 @pytest.mark.parametrize(
     "answer",
-    ['{"status": null}', '{"status": 5}', '{"mechanism": ["x"]}', '{"mechanism": 1}'],
-    ids=["status пусто", "status числом", "mechanism списком", "mechanism числом"],
+    [
+        '{"status": null}',
+        '{"status": 5}',
+        '{"mechanism": ["x"]}',
+        '{"mechanism": 1}',
+        '{"analysed": "2026/09/01"}',
+        '{"analysed": 5}',
+        '{"analysed": "2026-9-01"}',
+        '{"analysed": 0}',
+        '{"analysed": false}',
+        '{"analysed": []}',
+    ],
+    ids=[
+        "status пусто",
+        "status числом",
+        "mechanism списком",
+        "mechanism числом",
+        "analysed через косую",
+        "analysed числом",
+        "analysed без нуля",
+        "analysed нулём",
+        "analysed ложью",
+        "analysed пустым списком",
+    ],
 )
 def test_answer_fields_of_another_shape_are_the_third_outcome(
     tmp_path: Path, run_script: RunScript, answer: str
@@ -323,4 +345,21 @@ def test_answer_fields_of_another_shape_are_the_third_outcome(
 
 def test_answers_whole_accepts_the_read_form() -> None:
     """Строки и отсутствие полей — нужная форма; пустой `mechanism` тоже (#902)."""
-    module.answers_whole({"1": {"status": "x", "mechanism": None}, "2": {}})
+    module.answers_whole(
+        {
+            "1": {"status": "x", "mechanism": None},
+            "2": {},
+            "3": {"analysed": "2026-09-01"},
+            "4": {"analysed": ""},
+            "5": {"analysed": None},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("said", "whole"),
+    [("2026-09-01", True), ("2026/09/01", False), ("2026-9-01", False), ("вчера", False)],
+)
+def test_is_iso_day_is_one_check_for_both_sides(said: str, whole: bool) -> None:
+    """Одна проверка формы даты — у ключа `--since` и у `analysed` (поздний взгляд на #908)."""
+    assert module.is_iso_day(said) is whole
