@@ -2135,14 +2135,44 @@ def test_a_look_in_progress_is_not_aborted() -> None:
     )
 
 
+def test_a_cut_or_failed_look_is_aborted_too() -> None:
+    """Снятый заход без шапки и заход с ошибкой — тоже оборваны (поздние взгляды на #907).
+
+    Снятый по пределу или толчком заход шапки не получает и выглядит идущим;
+    конец виден по следующему ответу ревьюера. Последний ответ без шапки —
+    идущий, пока лента не законченная (`settled`).
+    """
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    failed = f"**{module.ERROR_MARK} after 3m** —\nжду итога"
+    assert module.is_aborted({**said(1, failed), "user": reviewer})
+    feed = [
+        {**said(1, "НАХОДКА[риск]: первая\nВЕРДИКТ: находок 1"), "user": reviewer},
+        {**said(2, "Смотрю изменение\n- [ ] Вердикт"), "user": reviewer},
+        {**said(3, "НАХОДКА[риск]: вторая\nВЕРДИКТ: находок 1"), "user": reviewer},
+        {**said(4, "Смотрю изменение"), "user": reviewer},
+    ]
+    assert module.aborted_looks(feed) == [2]
+    assert module.aborted_looks(feed, settled=True) == [2, 4]
+    assert [one for one, _ in module.looks(feed)] == [1, 3]
+    assert [c["id"] for c in module.looks(feed)[-1][1]] == [3, 4]
+
+
 def test_aborted_looks_are_measured_by_a_command(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Замер #904 командой: слитое до даты не читается, оборванные сочтены по ленте."""
+    """Замер #904 командой: слитое до даты не читается, заход отделён от ответа на @claude."""
     reviewer = {"login": module.REVIEWER_AUTHOR}
-    aborted = {**said(9, f"**{module.FINISHED_MARK} task** —\nжду итога"), "user": reviewer}
+
+    def ended(one: int, run: int | None) -> dict[str, Any]:
+        link = f" [View job](https://x/actions/runs/{run})" if run else ""
+        return {
+            **said(one, f"**{module.FINISHED_MARK} task**{link} —\nжду итога"),
+            "user": reviewer,
+        }
+
     whole = {**said(8, "ВЕРДИКТ: находок 0"), "user": reviewer}
-    feeds = {902: [whole, aborted], 901: [whole]}
+    feeds = {902: [whole, ended(9, 70), ended(10, 71), ended(11, None)], 901: [whole]}
+    runs = {"70": module.LOOK_WORKFLOW, "71": ".github/workflows/claude.yml"}
     page = [
         {"number": 902, "merged_at": "2026-09-27T07:38:31Z", "closed_at": "2026-09-27T07:38:31Z"},
         {"number": 901, "merged_at": "2026-09-27T07:10:41Z", "closed_at": "2026-09-27T07:10:41Z"},
@@ -2157,18 +2187,33 @@ def test_aborted_looks_are_measured_by_a_command(
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
     monkeypatch.setattr(module.ghrest, "paginate", feed)
+    monkeypatch.setattr(
+        module.ghrest, "request", lambda method, path, token: {"path": runs[path.split("/")[-1]]}
+    )
     code = module.main(["--repo", "o/r", "--aborted-since", "2026-09-27"])
     out = capsys.readouterr()
     assert code == module.EXIT_NOTHING
-    assert "#902: без вердикта — 9" in out.out
-    assert "заходов без вердикта 1 на 1 из 2 слитых" in out.out
+    assert "#902: без вердикта — комментарий 9, " + module.LOOK_WORKFLOW in out.out
+    assert "заходов взгляда без вердикта 1 из 2 слитых" in out.out
+    assert ".github/workflows/claude.yml 1" in out.out and f"{module.UNKNOWN_RUN} 1" in out.out
     assert not any("/800/" in one for one in asked), "слитое до даты прочитано"
     assert "заполнена" not in out.err
 
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page * 50))
+
+@pytest.mark.parametrize(
+    ("closed", "warned"),
+    [
+        ("2026-09-26T00:00:00Z", False),
+        ("2026-09-28T00:00:00Z", True),
+        ("", True),
+    ],
+    ids=["граница видна", "граница позже", "времени нет"],
+)
+def test_a_full_page_names_what_the_measure_did_not_read(
+    closed: str, warned: bool, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Полная страница без видимой границы называет непрочитанное вслух (поздний взгляд на #907)."""
+    page = [{"number": 0, "closed_at": closed}] * 3
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], page))
     module.aborted_since("o/r", "токен", "2026-09-27", limit=3)
-    assert "заполнена" not in capsys.readouterr().err, "раннее закрытие есть на странице"
-    late = [dict(one, closed_at="2026-09-28T00:00:00Z") for one in page]
-    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], late))
-    module.aborted_since("o/r", "токен", "2026-09-27", limit=3)
-    assert "заполнена" in capsys.readouterr().err, "непрочитанное за страницей не названо"
+    assert ("заполнена" in capsys.readouterr().err) is warned
