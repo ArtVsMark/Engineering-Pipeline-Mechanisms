@@ -431,3 +431,14 @@ def test_an_empty_kind_name_is_a_refusal() -> None:
     """Пустое имя рода — отказ: оно занято записями без рода (#830)."""
     with pytest.raises(module.NotRun, match="пустое имя"):
         module.kinds_in('{"kinds": {"": {"встречен": []}}}', "словарь")
+
+
+def test_a_rule_answer_names_a_rule_the_project_answers(tmp_path: Path) -> None:
+    """Ответ «есть — N» сверяется с `.rules/bindings.json`: опечатка номера краснеет (#887)."""
+    bindings = tmp_path / "bindings.json"
+    bindings.write_text('{"rules": {"212": {}}}', encoding="utf-8")
+    known = module.known_rules(bindings)
+    assert module.answer_problem({"каталогу": "есть — 212"}, "", known) is None
+    assert "211" in str(module.answer_problem({"каталогу": "есть — 211"}, "", known))
+    with pytest.raises(module.NotRun):
+        module.known_rules(tmp_path / "нет.json")
