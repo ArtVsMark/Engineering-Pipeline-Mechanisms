@@ -2134,3 +2134,165 @@ def test_a_declared_kind_survives_a_narrowed_rule(
     expected = findings_module.ANSWER_KIND if declared else findings_module.CODE
     assert back.kind == expected and back.declared is declared
     assert (findings_module.KIND_SAID in f"- `abc1234` {back.said()}\n") is declared
+
+
+def test_an_aborted_look_neither_glues_nor_brings_back_swept_findings() -> None:
+    """Заход ревьюера без вердикта из разметки выпадает и назван вслух (#904).
+
+    Лента #902: полный заход с вердиктом, проверка починки, оборванная без
+    вердикта, и поздний взгляд. Прежде два последних клеились в один отрезок,
+    читались проверкой починки, и без отметки запись шла от полного захода —
+    возвращая снятые слиянием находки. Теперь пишется только поздний взгляд.
+    """
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    late = {"login": module.LATE_AUTHOR}
+    feed = [
+        {**said(1, "НАХОДКА[риск]: снята слиянием\nВЕРДИКТ: находок 1"), "user": reviewer},
+        {
+            **said(
+                2, f"**{module.FINISHED_MARK} task in 2m** —\n{module.FIXCHECK_MARKER}\nжду итога"
+            ),
+            "user": reviewer,
+        },
+        {**said(3, "НАХОДКА[риск]: позднего взгляда\nВЕРДИКТ: находок 1"), "user": late},
+    ]
+    assert module.aborted_looks(feed) == [2]
+    assert [one for one, _ in module.looks(feed)] == [1, 3]
+    assert [one for one, _ in module.unrecorded(feed, None)] == [3]
+    assert not module.is_fix_check(module.looks(feed)[-1][1])
+    said_aloud = module.name_aborted(902, feed)
+    assert len(said_aloud) == 1 and module.ABORTED_SAID in said_aloud[0]
+
+
+def test_a_look_in_progress_is_not_aborted() -> None:
+    """Идущий заход (шапки завершения нет) оборванным не считается (#904)."""
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    assert not module.is_aborted({**said(5, "Claude Code is working…"), "user": reviewer})
+    finished = f"**{module.FINISHED_MARK} task** —\nВЕРДИКТ: находок 0"
+    assert not module.is_aborted({**said(6, finished), "user": reviewer})
+    assert not module.is_aborted(
+        {**said(7, f"{module.FINISHED_MARK}"), "user": {"login": "человек"}}
+    )
+
+
+def test_a_cut_or_failed_look_is_aborted_too() -> None:
+    """Снятый заход без шапки и заход с ошибкой — тоже оборваны (поздние взгляды на #907).
+
+    Снятый по пределу или толчком заход шапки не получает и выглядит идущим;
+    конец виден по следующему ответу ревьюера. Последний ответ без шапки —
+    идущий, пока лента не законченная (`settled`).
+    """
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    failed = f"**{module.ERROR_MARK} after 3m** —\nжду итога"
+    assert module.is_aborted({**said(1, failed), "user": reviewer})
+    feed = [
+        {**said(1, "НАХОДКА[риск]: первая\nВЕРДИКТ: находок 1"), "user": reviewer},
+        {**said(2, "Смотрю изменение\n- [ ] Вердикт"), "user": reviewer},
+        {**said(3, "НАХОДКА[риск]: вторая\nВЕРДИКТ: находок 1"), "user": reviewer},
+        {**said(4, "Смотрю изменение"), "user": reviewer},
+    ]
+    assert module.aborted_looks(feed) == [2]
+    assert module.aborted_looks(feed, settled=True) == [2, 4]
+    assert [one for one, _ in module.looks(feed)] == [1, 3]
+    assert [c["id"] for c in module.looks(feed)[-1][1]] == [3, 4]
+
+
+def test_aborted_looks_are_measured_by_a_command(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Замер #904 командой: слитое до даты не читается, заход отделён от ответа на @claude."""
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+
+    def ended(one: int, run: int | None) -> dict[str, Any]:
+        link = f" [View job](https://x/actions/runs/{run})" if run else ""
+        return {
+            **said(one, f"**{module.FINISHED_MARK} task**{link} —\nжду итога"),
+            "user": reviewer,
+        }
+
+    whole = {**said(8, "ВЕРДИКТ: находок 0"), "user": reviewer}
+    feeds = {902: [whole, ended(9, 70), ended(10, 71), ended(11, None)], 901: [whole]}
+    runs = {"70": module.LOOK_WORKFLOW, "71": ".github/workflows/claude.yml"}
+    page = [
+        {"number": 902, "merged_at": "2026-09-27T07:38:31Z", "closed_at": "2026-09-27T07:38:31Z"},
+        {"number": 901, "merged_at": "2026-09-27T07:10:41Z", "closed_at": "2026-09-27T07:10:41Z"},
+        {"number": 800, "merged_at": "2026-09-20T00:00:00Z", "closed_at": "2026-09-20T00:00:00Z"},
+    ]
+    asked: list[str] = []
+
+    def feed(path: str, token: str) -> Any:
+        asked.append(path)
+        return iter(feeds[int(path.split("/")[-2])])
+
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: (page, page))
+    monkeypatch.setattr(module.ghrest, "paginate", feed)
+    monkeypatch.setattr(
+        module.ghrest, "request", lambda method, path, token: {"path": runs[path.split("/")[-1]]}
+    )
+    code = module.main(["--repo", "o/r", "--aborted-since", "2026-09-27"])
+    out = capsys.readouterr()
+    assert code == module.EXIT_NOTHING
+    assert "#902: без вердикта — комментарий 9, " + module.LOOK_WORKFLOW in out.out
+    assert "заходов взгляда без вердикта 1 из 2 слитых" in out.out
+    assert ".github/workflows/claude.yml 1" in out.out and f"{module.UNKNOWN_RUN} 1" in out.out
+    assert not any("/800/" in one for one in asked), "слитое до даты прочитано"
+    assert "заполнена" not in out.err
+
+
+@pytest.mark.parametrize(
+    ("closed", "warned"),
+    [
+        ("2026-09-26T00:00:00Z", False),
+        ("2026-09-28T00:00:00Z", True),
+        ("", True),
+    ],
+    ids=["граница видна", "граница позже", "времени нет"],
+)
+def test_a_full_page_names_what_the_measure_did_not_read(
+    closed: str, warned: bool, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Полная страница без видимой границы называет непрочитанное вслух (поздний взгляд на #907)."""
+    page = [{"number": 0, "closed_at": closed}] * 3
+    monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], page))
+    module.aborted_since("o/r", "токен", "2026-09-27", limit=3)
+    assert ("заполнена" in capsys.readouterr().err) is warned
+
+
+def test_the_aborted_readers_agree_on_one_feed() -> None:
+    """`aborted_at`, `without_aborted` и `author_of` читают одну ленту одинаково (#904)."""
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    feed = [
+        {**said(1, "Смотрю изменение"), "user": reviewer},
+        {**said(2, "человек пишет"), "user": {"login": "человек"}},
+        {**said(3, "ВЕРДИКТ: находок 0"), "user": reviewer},
+    ]
+    assert [module.author_of(one) for one in feed] == [
+        module.REVIEWER_AUTHOR,
+        "человек",
+        module.REVIEWER_AUTHOR,
+    ]
+    assert module.author_of({}) == ""
+    assert module.aborted_at(feed) == [0]
+    assert [one["id"] for one in module.without_aborted(feed)] == [2, 3]
+
+
+def test_workflow_of_reads_the_run_or_says_it_did_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Файл прогона по «View job»; нет ссылки или площадка молчит — `UNKNOWN_RUN` (#907)."""
+    assert module.workflow_of("o/r", "т", said(1, "без ссылки")) == module.UNKNOWN_RUN
+    linked = said(2, "[View job](https://x/actions/runs/70) и ниже /actions/runs/71")
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str) -> dict[str, str]:
+        asked.append(path)
+        return {"path": module.LOOK_WORKFLOW}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    assert module.workflow_of("o/r", "т", linked) == module.LOOK_WORKFLOW
+    assert asked == ["repos/o/r/actions/runs/70"], "прогон взят не из первой ссылки"
+
+    def silent(method: str, path: str, token: str) -> None:
+        raise module.ghrest.TransportError("нет ответа")
+
+    monkeypatch.setattr(module.ghrest, "request", silent)
+    assert module.workflow_of("o/r", "т", linked) == module.UNKNOWN_RUN

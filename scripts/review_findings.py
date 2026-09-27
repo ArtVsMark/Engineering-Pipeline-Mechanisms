@@ -55,6 +55,7 @@ from typing import Any, Final
 import changerefs
 import findings
 import ghrest
+import paths
 import report
 
 MARKER: Final = findings.MARKER
@@ -70,6 +71,15 @@ REVIEWER_AUTHOR: Final = "claude[bot]"
 #: Первая строка ответа проверки починки (#848): заход не полный, находок не
 #: ищет и отвечает только о прошлых.
 FIXCHECK_MARKER: Final = "ЗАХОД: проверка починки"
+#: Шапка завершённого захода ревьюера: действие вписывает её в свой
+#: комментарий, когда прогон кончился. По ней отличают ОБОРВАННЫЙ заход —
+#: кончился, а строки вердикта нет — от идущего (#904).
+FINISHED_MARK: Final = "Claude finished"
+#: Шапка захода, кончившегося ошибкой, — тоже конец, а не ход (поздний взгляд
+#: на #907).
+ERROR_MARK: Final = "Claude encountered an error"
+#: Шапки, которыми ответ ревьюера объявляет себя законченным.
+ENDED_MARKS: Final = (FINISHED_MARK, ERROR_MARK)
 #: Метка ответа верификатора — первой строкой, от `LATE_AUTHOR`.
 VERIFY_MARKER: Final = "<!-- verify: проверка премисы одной находки, а не взгляд на изменение -->"
 
@@ -439,6 +449,167 @@ def is_verification(comment: dict[str, Any]) -> bool:
     return author == LATE_AUTHOR and body.startswith(VERIFY_MARKER)
 
 
+def is_aborted(comment: dict[str, Any]) -> bool:
+    """Ответ ревьюера объявил себя законченным, а строки вердикта в нём нет (#904).
+
+    ОБОРВАННЫЙ ЗАХОД — НЕ ЗАХОД. Заходы режутся по вердикту, и заход без него
+    приклеивался к СЛЕДУЮЩЕМУ: на #902 проверка починки без вердикта и поздний
+    взгляд легли одним отрезком, отрезок прочитался проверкой починки —
+    находки позднего взгляда не записались, а запись от «последнего полного
+    захода» вернула в реестр находки, уже снятые слиянием. Решение владельца
+    27.09.2026 (#904, вариант 1): такой заход называется вслух и в реестр ничего
+    не пишет; слияние он не держит (#654).
+
+    Здесь — только то, что видно по одному комментарию: шапка завершения или
+    ошибки. Снятый заход шапки не получает вовсе; его узнаёт `aborted_at` по
+    ленте.
+    """
+    if author_of(comment) != REVIEWER_AUTHOR:
+        return False
+    lines = bare_lines(comment.get("body") or "")
+    return any(mark in line for line in lines[:3] for mark in ENDED_MARKS) and not has_verdict(
+        comment
+    )
+
+
+def author_of(comment: dict[str, Any]) -> str:
+    """Имя автора комментария; пусто — площадка его не отдала."""
+    return str((comment.get("user") or {}).get("login") or "")
+
+
+def has_verdict(comment: dict[str, Any]) -> bool:
+    """В комментарии есть строка вердикта."""
+    return any(VERDICT_RE.match(line) for line in bare_lines(comment.get("body") or ""))
+
+
+def aborted_at(comments: list[dict[str, Any]], *, settled: bool = False) -> list[int]:
+    """Места в ленте ответов ревьюера, кончившихся без вердикта (#904).
+
+    КОНЕЦ ВИДЕН ПО ЛЕНТЕ, А НЕ ТОЛЬКО ПО ШАПКЕ (поздние взгляды на #907). Снятый
+    по пределу времени или новым толчком заход шапки не получает и выглядит
+    идущим, а заход с ошибкой несёт свою шапку. Но комментарий `claude[bot]` у
+    прогона один, и следующий ответ ревьюера значит, что прежний прогон уже
+    кончен: без вердикта он оборван, каким бы ни был его конец.
+
+    `settled` — лента законченного изменения (замер по слитым): последний ответ
+    без вердикта там тоже оборван, идущим он быть не может.
+    """
+    reviewer = [place for place, one in enumerate(comments) if author_of(one) == REVIEWER_AUTHOR]
+    followed = set(reviewer if settled else reviewer[:-1])
+    return [
+        place
+        for place in reviewer
+        if not has_verdict(comments[place]) and (place in followed or is_aborted(comments[place]))
+    ]
+
+
+def without_aborted(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Лента без ответов верификатора и оборванных ответов ревьюера — для разметки."""
+    dead = set(aborted_at(comments))
+    return [
+        one for place, one in enumerate(comments) if place not in dead and not is_verification(one)
+    ]
+
+
+def aborted_looks(comments: list[dict[str, Any]], *, settled: bool = False) -> list[int]:
+    """Id оборванных ответов ревьюера — чтобы назвать их вслух (#904)."""
+    return [int(comments[place].get("id") or 0) for place in aborted_at(comments, settled=settled)]
+
+
+#: Как запись называет оборванный ответ: тест узнаёт строку по ней (209). Ответ
+#: на `@claude` (claude.yml) несёт ту же подпись и шапку, и по ленте его от
+#: захода не отличить: название говорит об обоих (поздний взгляд на #907).
+ABORTED_SAID: Final = (
+    "кончился без вердикта — заход взгляда или ответ на @claude; в реестр он не пишется"
+)
+
+
+def name_aborted(pr: int, comments: list[dict[str, Any]]) -> list[str]:
+    """Строки-предупреждения об оборванных ответах ревьюера на изменении (#904)."""
+    return [
+        f"::warning::ответ `{REVIEWER_AUTHOR}` на #{pr} (комментарий {one}) {ABORTED_SAID} (#904)"
+        for one in aborted_looks(comments)
+    ]
+
+
+#: Сколько закрытых спрашивает замер оборванных заходов: предел площадки на
+#: страницу. Замер — разовый взгляд назад, а не окно уборки (`MERGED_WINDOW`).
+ABORTED_WINDOW: Final = 100
+#: Прогон захода взгляда: замер отделяет им заходы от ответов на `@claude`.
+LOOK_WORKFLOW: Final = paths.REVIEW_RUN.as_posix()
+#: Прогон, из которого написан комментарий действия: шапка «View job» ведёт
+#: на `…/actions/runs/<id>`, и адрес записи проверки несёт тот же номер.
+#: Живёт здесь, а не в `automerge`: читают его и замер оборванных заходов, и
+#: очередь слияний, а очередь сама импортирует этот модуль (090, 214).
+RUN_ID_RE: Final = re.compile(r"/actions/runs/(\d+)")
+#: Род ответа, чей прогон не прочитан: ссылки нет или площадка не ответила.
+UNKNOWN_RUN: Final = "прогон не определён"
+
+
+def run_id_of(text: str) -> str:
+    """Номер прогона по ПЕРВОЙ ссылке на прогон в тексте; пусто — ссылки нет.
+
+    Первая — потому что шапку «View job» действие ставит в начало своего
+    комментария. Ссылка, процитированная ниже, прогоном комментария не
+    становится.
+    """
+    found = RUN_ID_RE.search(text)
+    return found.group(1) if found else ""
+
+
+def workflow_of(repo: str, token: str, comment: dict[str, Any]) -> str:
+    """Файл прогона, написавшего ответ ревьюера; `UNKNOWN_RUN` — не прочитан."""
+    run_id = run_id_of(str(comment.get("body") or ""))
+    if not run_id:
+        return UNKNOWN_RUN
+    try:
+        run = ghrest.request("GET", f"repos/{repo}/actions/runs/{run_id}", token)
+    except ghrest.TransportError:
+        return UNKNOWN_RUN
+    return str((run or {}).get("path") or "") or UNKNOWN_RUN
+
+
+def aborted_since(
+    repo: str, token: str, since: str, limit: int = ABORTED_WINDOW
+) -> tuple[dict[int, list[tuple[int, str]]], int]:
+    """Замер #904: оборванные ответы ревьюера на слитых с `since` и сколько слитых прочитано.
+
+    ЗАМЕР КОМАНДОЙ, А НЕ ПЕРЕСКАЗОМ. «Два случая за смену» в задаче собраны
+    глазами, и такой счёт не повторить. Читатель тот же, что у записи
+    (`aborted_at`): два понимания «заход оборван» разошлись бы молча (022).
+    У каждого ответа — файл его прогона: заход взгляда (`LOOK_WORKFLOW`)
+    отделяется от ответа на `@claude`, которого по ленте не отличить
+    (поздний взгляд на #907).
+
+    Страница заполнена, а самое раннее закрытие на ней позже `since` — за ней
+    осталось непрочитанное, и это говорится вслух (045). Закрытие без времени
+    границы не знает и в счёт не идёт; не знает её ни одно — тоже вслух.
+    """
+    merged, page = ghrest.merged_page(repo, token, limit)
+    found: dict[int, list[tuple[int, str]]] = {}
+    read = 0
+    for item in merged:
+        number = int(item.get("number") or 0)
+        if not number or str(item.get("merged_at") or "") < since:
+            continue
+        read += 1
+        comments = list(ghrest.paginate(f"repos/{repo}/issues/{number}/comments", token))
+        if places := aborted_at(comments, settled=True):
+            found[number] = [
+                (int(comments[one].get("id") or 0), workflow_of(repo, token, comments[one]))
+                for one in places
+            ]
+    closed = [when for one in page if (when := str(one.get("closed_at") or ""))]
+    oldest = min(closed, default="")
+    if len(page) >= limit and (not closed or oldest > since):
+        print(
+            f"::warning::страница закрытых заполнена ({limit}): замер читал от "
+            f"{oldest or 'неизвестного'}, а не от {since} — раньше не прочитано",
+            file=sys.stderr,
+        )
+    return found, read
+
+
 def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Лента ПОСЛЕДНЕГО захода взгляда, а не всё изменение целиком.
 
@@ -469,8 +640,8 @@ def last_look(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     # ОТВЕТ ВЕРИФИКАТОРА ЗАХОДОМ НЕ СЧИТАЕТСЯ: процитированный им `ВЕРДИКТ:`
     # резал бы отрезок, а процитированная находка шла бы в реестр новой
-    # записью (взгляд на #833).
-    comments = [comment for comment in comments if not is_verification(comment)]
+    # записью (взгляд на #833). Оборванный заход — тоже (#904).
+    comments = without_aborted(comments)
     ends = [
         place
         for place, comment in enumerate(comments)
@@ -495,9 +666,10 @@ def looks(comments: list[dict[str, Any]]) -> list[tuple[int, list[dict[str, Any]
     ЗАЧЕМ ВСЕ, А НЕ ПОСЛЕДНИЙ. Запись находок вытесняется в группе
     `findings-write` (#842): отменённый заход не записан, а следующий читает
     только себя, и находки, которых он не повторил, терялись без следа.
-    Догону нужен каждый заход после записанного.
+    Догону нужен каждый заход после записанного. Оборванный заход (`is_aborted`)
+    из разметки выпадает, как ответ верификатора, и к соседу не клеится (#904).
     """
-    comments = [comment for comment in comments if not is_verification(comment)]
+    comments = without_aborted(comments)
     ends = [
         place
         for place, comment in enumerate(comments)
@@ -1248,6 +1420,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="сверять заголовки дословно: без сходства слов (102)",
     )
+    parser.add_argument(
+        "--aborted-since",
+        metavar="ДАТА",
+        help="замер #904: заходы без вердикта на слитых с ДАТЫ (ISO); реестр не трогает",
+    )
     parser.add_argument("--apply", action="store_true", help="записывать, а не показывать")
     args = parser.parse_args(argv)
     report.announce(not args.apply)
@@ -1258,6 +1435,21 @@ def main(argv: list[str] | None = None) -> int:
             raise NotRun("нет токена: GH_TOKEN или GITHUB_TOKEN")
         if not args.repo:
             raise NotRun("репозиторий не назван: --repo или GITHUB_REPOSITORY")
+        if args.aborted_since:
+            found, read = aborted_since(args.repo, token, args.aborted_since)
+            kinds: Counter[str] = Counter()
+            for number, said in sorted(found.items()):
+                for comment_id, run in said:
+                    kinds[run] += 1
+                    print(f"#{number}: без вердикта — комментарий {comment_id}, {run}")
+            looked = kinds.pop(LOOK_WORKFLOW, 0)
+            others = ", ".join(f"{run} {count}" for run, count in sorted(kinds.items()))
+            print(
+                f"замер: заходов взгляда без вердикта {looked} "
+                f"из {read} слитых с {args.aborted_since}"
+                + (f"; прочие ответы без вердикта: {others}" if kinds else "")
+            )
+            return EXIT_NOTHING
         if not args.sweep and args.pr is None and not args.verify and not args.tell:
             raise NotRun("не назван предмет разбора: --pr, --sweep, --verify или --tell")
 
@@ -1310,6 +1502,10 @@ def main(argv: list[str] | None = None) -> int:
                 if looks(comments)
                 else [(0, list(comments))]
             )
+            # ОБОРВАННЫЙ ЗАХОД НАЗЫВАЕТСЯ ВСЛУХ, а не молча выпадает (#904):
+            # проверка починки без вердикта снаружи неотличима от состоявшейся.
+            for line in name_aborted(args.pr, comments):
+                print(line, file=sys.stderr)
             if not pending:
                 print(f"из #{args.pr}: последний заход уже записан")
             for look_id, look in pending:

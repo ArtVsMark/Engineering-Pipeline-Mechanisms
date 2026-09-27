@@ -82,6 +82,9 @@ WORKFLOWS: Final = Path(".github/workflows")
 #: так, как их позовёт потребитель. Адрес здесь, а не у читателя: второй
 #: якорь заводится ровно тем, что кто-то однажды собрал путь сам.
 HANDOVER_PROBE: Final = WORKFLOWS / "handover-probe.yml"
+#: Прогон внешнего взгляда: замер оборванных заходов отделяет им заход от
+#: ответа на `@claude`, у которого та же подпись (поздний взгляд на #907).
+REVIEW_RUN: Final = WORKFLOWS / "review.yml"
 #: Механизмы проекта — каталог, а не отдельный файл: его читают те, кто судит о
 #: дереве целиком, а не об одном скрипте.
 SCRIPTS: Final = Path("scripts")
@@ -184,6 +187,7 @@ ALL: Final = (
     VERSION,
     WORKFLOWS,
     HANDOVER_PROBE,
+    REVIEW_RUN,
     SKILLS,
     DECISIONS,
     SCRIPTS,

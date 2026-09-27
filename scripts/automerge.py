@@ -60,7 +60,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from collections import Counter
 from collections.abc import Mapping
@@ -668,20 +667,10 @@ def name_the_stuck_head(
         print(f"::warning::#{change.number}: оклик о голове без взгляда не записан: {exc}")
 
 
-#: Прогон, из которого написан комментарий действия: шапка «View job» ведёт
-#: на `…/actions/runs/<id>`, и адрес записи проверки несёт тот же номер.
-RUN_ID_RE: Final = re.compile(r"/actions/runs/(\d+)")
-
-
-def run_of(text: str) -> str:
-    """Номер прогона по ПЕРВОЙ ссылке на прогон в тексте; пусто — ссылки нет.
-
-    Первая — потому что шапку «View job» действие ставит в начало своего
-    комментария. Ссылка, процитированная ниже, прогоном комментария не
-    становится.
-    """
-    found = RUN_ID_RE.search(text)
-    return found.group(1) if found else ""
+#: Номер прогона в тексте комментария — один разбор на дерево (214), живёт
+#: в `review_findings`: его читает и замер оборванных заходов.
+RUN_ID_RE: Final = review_findings.RUN_ID_RE
+run_of = review_findings.run_id_of
 
 
 def verdicts_on(
