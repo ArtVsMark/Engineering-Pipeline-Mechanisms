@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -331,7 +332,7 @@ def test_warn_marks_an_unnamed_split_only(
     # Парная проверка: просьба печатается ровно там, где предупреждение, иначе
     # «просьбы нет» в соседних тестах была бы зелёной ни о чём (взгляд на #889).
     assert (module.PLEA in said) is warned, said
-    assert module.MIXED_MARK in module.PLEA
+    assert f"{module.MIXED_MARK} {module.PLACEHOLDER}" in module.PLEA
 
 
 def test_declared_needs_a_reason_after_the_mark() -> None:
@@ -441,6 +442,36 @@ def test_a_copied_placeholder_is_not_a_reason(copied: str) -> None:
     assert module.declared(f"{module.MIXED_MARK} {reason}") == ""
 
 
-def test_a_real_reason_is_heard() -> None:
-    """Настоящая причина слышна: отказ заглушке её не глушит."""
-    assert module.declared(f"{module.MIXED_MARK} хвост правок") == "хвост правок"
+@pytest.mark.parametrize(
+    "reason",
+    ["<Причина>", "<ПРИЧИНА>", "< причина >", "причина", "Причина.", "«причина»", "[причина]"],
+    ids=[
+        "регистр",
+        "заглавными",
+        "с пробелами",
+        "без скобок",
+        "с точкой",
+        "в кавычках",
+        "в скобках",
+    ],
+)
+def test_the_placeholder_word_in_any_form_is_not_a_reason(reason: str) -> None:
+    """Заглушка в другом регистре, без скобок или в иных скобках — тоже копия (210, #895)."""
+    assert module.copied(reason)
+    assert module.declared(f"{module.MIXED_MARK} {reason}") == ""
+
+
+def test_a_reason_starting_with_the_word_is_heard() -> None:
+    """Причина, начатая словом заглушки, но им не исчерпанная, — настоящая причина."""
+    said = "причина — хвост правок по одному месту"
+    assert not module.copied(said)
+    assert module.declared(f"{module.MIXED_MARK} {said}") == said
+
+
+def test_the_skill_writes_the_sample_the_count_hears() -> None:
+    """Образец строки в навыке — ровно `MIXED_MARK PLACEHOLDER`: правка константы краснеет (209)."""
+    skill = (ROOT / ".claude/skills/close-a-finding/SKILL.md").read_text(encoding="utf-8")
+    samples = re.findall(r"`([^`]*" + re.escape(module.MIXED_MARK) + r"[^`]*)`", skill)
+    assert samples, "навык перестал называть форму строки смешения"
+    sample = f"{module.MIXED_MARK} {module.PLACEHOLDER}"
+    assert all(one in (sample, module.MIXED_MARK) for one in samples), samples
