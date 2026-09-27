@@ -376,17 +376,17 @@ def found_in(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str]]:
     return [(weight, title, род, роль) for weight, title, род, роль, _ in found_said(comments)]
 
 
-def found_said(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str, bool]]:
+def found_said(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str, str]]:
     """Находки ревьюера парами «вес, заголовок» — по порядку и без повторов.
 
     Третьим в паре идёт РОД предмета: «код» либо «ответ» (`findings.KINDS`),
-    последним — объявил ли ревьюер род «об ответе»: пометка в реестр пишется по
-    источнику, а не по совпадению с выводом адресом (взгляд на #906).
-    Объявленный «код» флага не ставит: пересказ `[риск · код]` иначе получал
-    род «ответ» и липкую пометку (взгляд на #909).
+    последним — род, ОБЪЯВЛЕННЫЙ ревьюером в скобке, или пусто: пометка в
+    реестр пишется по источнику, а не по совпадению с выводом адресом (взгляд
+    на #906). Три состояния, а не флаг: объявленный «код» снимает прежнее
+    объявление «ответ» на пересказе, а молчание — нет (взгляды на #909, #911).
     Строка отрицания находкой не считается: см. `ABSENCE`.
     """
-    found: list[tuple[str, str, str, str, bool]] = []
+    found: list[tuple[str, str, str, str, str]] = []
     seen: set[str] = set()
     known = findings.roles()
     for comment in comments:
@@ -418,7 +418,7 @@ def found_said(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str,
                         cleaned,
                         findings.kind_of(cleaned, род),
                         роль,
-                        род == findings.ANSWER_KIND,
+                        род,
                     )
                 )
     return found
@@ -1283,7 +1283,8 @@ def record_look(
         )
     titles = findings_of(look)
     seen_by = {title: роль for _, title, _, роль in found_in(look)}
-    declared = {title for _, title, _, _, said in found_said(look) if said}
+    said_kind = {title: said for _, title, _, _, said in found_said(look)}
+    declared = {title for title, said in said_kind.items() if said == findings.ANSWER_KIND}
     if len(titles) != verdict:
         # Расхождение названо, а не сглажено: вердикт и строки находок
         # пишет один и тот же ответ, и если они спорят, доверять нечему.
@@ -1317,10 +1318,12 @@ def record_look(
             # выведенный из нового, при перечтении строки разошёлся бы с ним —
             # в одну сторону липкой пометкой класса `da1a2e0`, в другую тихой
             # сменой рода. Объявление ревьюера — о находке, а не о словах, и
-            # ПЕРЕЖИВАЕТ пересказ без пометки, как роль (поздний взгляд на
-            # #909): ревьюер не обязан повторять «ответ» на каждом заходе, а
-            # снять объявленное может только работа, а не молчание.
-            by_reviewer = title in declared or entries[mark].declared
+            # ведёт себя как роль (поздние взгляды на #909, #911): молчание
+            # пересказа его не снимает, а новое явное слово заменяет — «код»
+            # в скобке снимает прежнее «ответ».
+            by_reviewer = title in declared or (
+                entries[mark].declared and said_kind.get(title) != findings.CODE
+            )
             entries[mark] = replace(
                 entries[mark],
                 pr=pr,
