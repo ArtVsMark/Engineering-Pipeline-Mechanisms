@@ -1310,13 +1310,22 @@ def record_look(
             # заново значило бы терять уже сделанную работу — тот же
             # класс, что потеря хвоста позднего взгляда в реестре
             # непросмотренного (022).
+            # РОД ВЫВОДИТСЯ ИЗ ХРАНИМОГО ЗАГОЛОВКА, а не из пересказа (поздний
+            # взгляд на #906): заголовок записи остаётся прежним, и род,
+            # выведенный из нового, при перечтении строки разошёлся бы с ним —
+            # в одну сторону липкой пометкой класса `da1a2e0`, в другую тихой
+            # сменой рода. Объявление ревьюера берётся из пересказа: оно о
+            # находке, а не о словах.
+            by_reviewer = title in declared
             entries[mark] = replace(
                 entries[mark],
                 pr=pr,
                 weight=weight,
-                kind=род,
+                kind=findings.kind_of(
+                    entries[mark].title, findings.ANSWER_KIND if by_reviewer else ""
+                ),
                 role=seen_by.get(title) or entries[mark].role,
-                declared=title in declared,
+                declared=by_reviewer,
             )
             continue
         entries[fingerprint(title)] = findings.Entry(
