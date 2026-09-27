@@ -478,5 +478,6 @@ def test_rule_numbers_are_read_by_one_parser() -> None:
     """Номера правил — ключи раздела `rules`; неразборный текст — `ValueError` (#887)."""
     assert module.rule_numbers('{"rules": {"212": {}, "033": {}}}') == frozenset({"212", "033"})
     assert module.rule_numbers("{}") == frozenset()
-    with pytest.raises(ValueError):
-        module.rule_numbers("{")
+    for broken in ("{", "[]", '"x"', '{"rules": []}'):
+        with pytest.raises(ValueError):
+            module.rule_numbers(broken)

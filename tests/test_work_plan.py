@@ -735,4 +735,4 @@ def test_the_plan_names_missing_answers_and_a_mistyped_rule(tmp_path: Any) -> No
     assert len(module.birth_part(path).rows) == 1, "опечатка номера не видна в плане"
     (tmp_path / "bindings.json").unlink()
     said = module.birth_part(path)
-    assert said.rows == [] and "не прочитаны" in said.unread, said
+    assert said.rows == [] and module.finding_kinds.ANSWERS_UNREAD in said.unread, said

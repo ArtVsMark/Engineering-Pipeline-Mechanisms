@@ -224,14 +224,26 @@ def slug_of(said: str) -> str:
     return first.strip(AROUND_SLUG)
 
 
-def rule_numbers(text: str) -> frozenset[str]:
-    """Номера правил из текста `.rules/bindings.json` — один разбор на всех читателей.
+#: Начало отказа «ответы каталогу не прочитаны» — одной константой: тесты
+#: сверяются с ней, а не с переписанными буквами (209, взгляд на #893).
+ANSWERS_UNREAD: Final = "ответы каталогу не прочитаны"
 
-    Его зовут и план (с диска), и гейт рождения правила (у головы): два разбора
-    одной формы разошлись бы при первой её смене (взгляд на #887, 214). Текст не
-    разбирается — `ValueError`, отказ называет зовущий.
+
+def rule_numbers(text: str) -> frozenset[str]:
+    """Номера правил из текста `.rules/bindings.json` — один разбор для тех, кому нужны номера.
+
+    Его зовут план (с диска) и гейт рождения правила (у головы): два разбора
+    одной формы разошлись бы при первой её смене (взгляд на #887, 214). Соседи,
+    которым нужны сами ОТВЕТЫ, а не номера, — `audit_profile`, `drift`,
+    `review_map` — читают раздел `rules` своим путём, и этот разбор им не
+    нужен (взгляд на #893, 195). Текст не разбирается или не объект —
+    `ValueError`, отказ называет зовущий.
     """
-    return frozenset(str(number) for number in json.loads(text).get("rules") or {})
+    said = json.loads(text)
+    rules = said.get("rules", {}) if isinstance(said, dict) else None
+    if not isinstance(rules, dict):
+        raise ValueError("ожидался объект с разделом rules")
+    return frozenset(str(number) for number in rules)
 
 
 def known_rules(path: Path | None = None) -> frozenset[str]:
@@ -244,7 +256,7 @@ def known_rules(path: Path | None = None) -> frozenset[str]:
     try:
         return rule_numbers(where.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise NotRun(f"ответы каталогу не прочитаны ({where}): {exc}") from exc
+        raise NotRun(f"{ANSWERS_UNREAD} ({where}): {exc}") from exc
 
 
 def answer_problem(
@@ -268,14 +280,16 @@ def answer_problem(
         slug = slug_of(what)
         if not slug or slug not in queue:
             return f"назван слаг «{slug}», а в очереди предложений ({paths.PROPOSALS}) его нет"
-    if kind == "есть" and not RULE_NUMBER_RE.match(what):
-        return "ответ «есть», а номера правила первым словом нет"
-    # Номер сверяется с ответами каталогу: опечатка «211» вместо «212» иначе
-    # прошла бы зелёной — три цифры есть, правила нет (взгляд на #887).
-    # Номер — из совпадения образца, а не срезом его ширины (взгляд на #887).
+    if kind != "есть":
+        return None
     found = RULE_NUMBER_RE.match(what)
-    number = found.group(0) if found else ""
-    if kind == "есть" and known is not None and number not in known:
+    if found is None:
+        return "ответ «есть», а номера правила первым словом нет"
+    # Номер — из совпадения образца, а не срезом его ширины, и сверяется с
+    # ответами каталогу: опечатка «211» вместо «212» иначе прошла бы зелёной
+    # (взгляд на #887).
+    number = found.group(0)
+    if known is not None and number not in known:
         return f"ответ «есть — {number}», а правила {number} в {paths.BINDINGS} нет"
     return None
 

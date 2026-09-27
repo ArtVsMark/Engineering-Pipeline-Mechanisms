@@ -233,7 +233,7 @@ def known_at(head: str, root: Path = Path()) -> frozenset[str]:
     where = str(paths.BINDINGS)
     text = text_at(head, where, root)
     if text is None:
-        raise NotRun(f"ответы каталогу не прочитаны: {where} у {head} нет")
+        raise NotRun(f"{finding_kinds.ANSWERS_UNREAD}: {where} у {head} нет")
     try:
         return finding_kinds.rule_numbers(text)
     except ValueError as exc:
