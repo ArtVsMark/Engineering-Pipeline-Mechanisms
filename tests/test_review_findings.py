@@ -2341,3 +2341,24 @@ def test_a_declared_code_is_not_a_declared_answer() -> None:
     look = [comment("НАХОДКА[риск · код]: scripts/arm.py:9 — ломается\nВЕРДИКТ: находок 1")]
     ((_, _, kind, _, declared),) = module.found_said(look)
     assert (kind, declared) == (findings_module.CODE, False)
+
+
+def test_a_declared_answer_survives_a_retell_without_the_mark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Объявленное прошлым заходом «об ответе» не теряется пересказом без пометки (#909).
+
+    Роль при пересказе сохраняется, и объявление — тоже: ревьюер не обязан
+    повторять род на каждом заходе, а снимает находку работа, а не молчание.
+    """
+    kept = findings_module.Entry(
+        905, "риск", CODE_TITLE, kind=findings_module.ANSWER_KIND, declared=True
+    )
+    entries: dict[str, Any] = {"abc1234": kept}
+    monkeypatch.setattr(module, "pair_up", lambda *_, **__: ["abc1234"])
+    look = [comment(f"НАХОДКА[риск]: {CODE_TITLE} и дальше\nВЕРДИКТ: находок 1")]
+    module.record_look(entries, 909, look, False)
+    entry = entries["abc1234"]
+    assert (entry.kind, entry.declared) == (findings_module.ANSWER_KIND, True)
+    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
+    assert (back.kind, back.declared) == (entry.kind, entry.declared)
