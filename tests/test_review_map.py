@@ -317,3 +317,27 @@ def test_the_head_argument_reaches_the_comparison(
     monkeypatch.setattr(module, "touches_the_answer", touches)
     module.main(["--base", "HEAD", "--head", "FETCH_HEAD", "--out", str(tmp_path / "m.md")])
     assert got == ["FETCH_HEAD"]
+
+
+def test_the_map_names_the_mark_words_from_the_kind_constants() -> None:
+    """Карта учит ставить `· ответ` и снимать `· код` словами констант рода (#914).
+
+    Третья копия указания после двух заданий `review.yml`: слова набирались
+    буквами, и переименование константы оставило бы карту учить старому.
+    """
+    said = "\n".join(module.ASKED["not-applicable"])
+    kinds = module.findings
+    for kind in (kinds.ANSWER_KIND, kinds.CODE):
+        assert f"· {kind}]" in said, f"скобка рода «{kind}» не названа в карте"
+    assert f"[{kinds.DEFECT} · {kinds.ANSWER_KIND}]" in said, "вес примера не из констант"
+
+
+def test_the_words_the_map_teaches_are_the_words_the_parser_reads() -> None:
+    """Слова рода и веса, которым учит карта, — ключи словарей разбора (взгляд на #915).
+
+    Карта пишет слова по константам, а разбор читает скобку по `KINDS` и
+    `WEIGHTS`: смена одной стороны развела бы их молча.
+    """
+    kinds = module.findings
+    assert set(kinds.KINDS) == {kinds.CODE, kinds.ANSWER_KIND}
+    assert kinds.DEFECT in kinds.WEIGHTS
