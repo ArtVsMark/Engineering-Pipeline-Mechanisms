@@ -427,5 +427,17 @@ def test_rule_numbers_are_read_at_the_head(tmp_path: Path) -> None:
     assert module.known_at("HEAD", root) == frozenset({"206"})
     git(root, "rm", "-q", ".rules/bindings.json")
     git(root, "commit", "-q", "-m", "без ответов")
-    with pytest.raises(module.NotRun):
+    with pytest.raises(module.NotRun, match=f"^{module.finding_kinds.ANSWERS_UNREAD}"):
+        module.known_at("HEAD", root)
+
+
+@pytest.mark.parametrize(
+    "said", ["[]", '"x"', '{"rules": []}', "{"], ids=["список", "строка", "rules списком", "обрыв"]
+)
+def test_answers_of_another_shape_at_the_head_are_refused(tmp_path: Path, said: str) -> None:
+    """Файл ответов чужого вида у головы — отказ гейта с общим началом, а не трасса (#893)."""
+    root = tree(tmp_path)
+    (root / ".rules/bindings.json").write_text(said, encoding="utf-8")
+    git(root, "commit", "-qam", "ответы чужого вида")
+    with pytest.raises(module.NotRun, match=f"^{module.finding_kinds.ANSWERS_UNREAD}"):
         module.known_at("HEAD", root)
