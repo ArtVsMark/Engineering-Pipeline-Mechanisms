@@ -2296,3 +2296,48 @@ def test_workflow_of_reads_the_run_or_says_it_did_not(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(module.ghrest, "request", silent)
     assert module.workflow_of("o/r", "т", linked) == module.UNKNOWN_RUN
+
+
+ANSWER_TITLE = f"{findings_module.ANSWER_FILE}:9 — ответ врёт"
+CODE_TITLE = "scripts/arm.py:9 — ответ врёт"
+
+
+@pytest.mark.parametrize(
+    ("kept", "retold", "mark", "kind"),
+    [
+        (ANSWER_TITLE, CODE_TITLE, "[риск]", "ответ"),
+        (CODE_TITLE, ANSWER_TITLE, "[риск]", "код"),
+        (CODE_TITLE, CODE_TITLE + " и дальше", "[риск · ответ]", "ответ"),
+        (CODE_TITLE, CODE_TITLE + " и дальше", "[риск · код]", "код"),
+    ],
+    ids=[
+        "пересказ уводит в код",
+        "пересказ уводит в ответ",
+        "объявлено ревьюером",
+        "объявлен код",
+    ],
+)
+def test_a_retold_finding_keeps_the_kind_its_line_reads_back(
+    kept: str, retold: str, mark: str, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Пересказ хранит прежний заголовок — и род выводится из него (поздний взгляд на #906).
+
+    Прежде род брался из пересказа: строка записи читалась обратно другим
+    родом — липкой пометкой в одну сторону и тихой сменой рода в другую.
+    """
+    entries: dict[str, Any] = {"abc1234": findings_module.Entry(905, "риск", kept)}
+    monkeypatch.setattr(module, "pair_up", lambda *_, **__: ["abc1234"])
+    module.record_look(
+        entries, 906, [comment(f"НАХОДКА{mark}: {retold}\nВЕРДИКТ: находок 1")], False
+    )
+    entry = entries["abc1234"]
+    assert entry.title == kept and entry.kind == kind
+    back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
+    assert (back.kind, back.declared) == (entry.kind, entry.declared)
+
+
+def test_a_declared_code_is_not_a_declared_answer() -> None:
+    """Флаг источника — только у объявленного «об ответе» (взгляд на #909)."""
+    look = [comment("НАХОДКА[риск · код]: scripts/arm.py:9 — ломается\nВЕРДИКТ: находок 1")]
+    ((_, _, kind, _, declared),) = module.found_said(look)
+    assert (kind, declared) == (findings_module.CODE, False)
