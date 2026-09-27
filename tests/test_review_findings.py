@@ -2040,9 +2040,12 @@ def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
 @pytest.mark.parametrize(
     ("title", "kind"),
     [
-        ("scripts/x.py:3 — заново разбирает `.rules/bindings.json`", "код"),
-        ("`.rules/bindings.json:9` — ответ врёт", "ответ"),
-        ("scripts/x.py:3 — ревьюер сам сказал «ответ»", "ответ"),
+        (
+            f"scripts/x.py:3 — заново разбирает `{findings_module.ANSWER_FILE}`",
+            findings_module.CODE,
+        ),
+        (f"`{findings_module.ANSWER_FILE}:9` — ответ врёт", findings_module.ANSWER_KIND),
+        ("scripts/x.py:3 — поведение расходится с ответом", findings_module.ANSWER_KIND),
     ],
     ids=["код, упомянувший ответы", "место — ответы", "пометка ревьюера на коде"],
 )
@@ -2050,7 +2053,8 @@ def test_the_kind_survives_the_registry_round_trip(title: str, kind: str) -> Non
     """Строка реестра `Entry.said` → `parse_entries` отдаёт тот же род (взгляд на #901).
 
     Находка о коде, упомянувшая файл ответов, пометки не получает и читается
-    обратно кодом; пометка ревьюера на коде переживает круг как пол.
+    обратно кодом; пометка ревьюера на коде — род «ответ», заданный `kind=`, а
+    не словами заголовка, — переживает круг как пол.
     """
     entry = findings_module.Entry(887, "замечание", title, kind=kind)
     back = findings_module.parse_entries(f"- `abc1234` {entry.said()}\n")["abc1234"]
