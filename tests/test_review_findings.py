@@ -2217,3 +2217,42 @@ def test_a_full_page_names_what_the_measure_did_not_read(
     monkeypatch.setattr(module.ghrest, "merged_page", lambda repo, token, limit: ([], page))
     module.aborted_since("o/r", "токен", "2026-09-27", limit=3)
     assert ("заполнена" in capsys.readouterr().err) is warned
+
+
+def test_the_aborted_readers_agree_on_one_feed() -> None:
+    """`aborted_at`, `without_aborted` и `author_of` читают одну ленту одинаково (#904)."""
+    reviewer = {"login": module.REVIEWER_AUTHOR}
+    feed = [
+        {**said(1, "Смотрю изменение"), "user": reviewer},
+        {**said(2, "человек пишет"), "user": {"login": "человек"}},
+        {**said(3, "ВЕРДИКТ: находок 0"), "user": reviewer},
+    ]
+    assert [module.author_of(one) for one in feed] == [
+        module.REVIEWER_AUTHOR,
+        "человек",
+        module.REVIEWER_AUTHOR,
+    ]
+    assert module.author_of({}) == ""
+    assert module.aborted_at(feed) == [0]
+    assert [one["id"] for one in module.without_aborted(feed)] == [2, 3]
+
+
+def test_workflow_of_reads_the_run_or_says_it_did_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Файл прогона по «View job»; нет ссылки или площадка молчит — `UNKNOWN_RUN` (#907)."""
+    assert module.workflow_of("o/r", "т", said(1, "без ссылки")) == module.UNKNOWN_RUN
+    linked = said(2, "[View job](https://x/actions/runs/70) и ниже /actions/runs/71")
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str) -> dict[str, str]:
+        asked.append(path)
+        return {"path": module.LOOK_WORKFLOW}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    assert module.workflow_of("o/r", "т", linked) == module.LOOK_WORKFLOW
+    assert asked == ["repos/o/r/actions/runs/70"], "прогон взят не из первой ссылки"
+
+    def silent(method: str, path: str, token: str) -> None:
+        raise module.ghrest.TransportError("нет ответа")
+
+    monkeypatch.setattr(module.ghrest, "request", silent)
+    assert module.workflow_of("o/r", "т", linked) == module.UNKNOWN_RUN
