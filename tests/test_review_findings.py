@@ -2045,7 +2045,7 @@ def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
             findings_module.CODE,
         ),
         (f"`{findings_module.ANSWER_FILE}:9` — ответ врёт", findings_module.ANSWER_KIND),
-        ("scripts/x.py:3 — поведение расходится с ответом", findings_module.ANSWER_KIND),
+        ("scripts/x.py:3 — ревьюер сам пометил род этой находки", findings_module.ANSWER_KIND),
     ],
     ids=["код, упомянувший ответы", "место — ответы", "пометка ревьюера на коде"],
 )
