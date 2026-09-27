@@ -196,16 +196,48 @@ def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> No
             "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
             "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/042-decision-records-its-alternatives.md",
         ),
-        ("../../.pipeline.yml", "../../other/.pipeline.yml"),
+        ("/docs/x.md", "/other/x.md"),
+        ("//host/a/x.md", "//other/a/x.md"),
         (
             "HTTPS://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
             "HTTPS://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/042-decision-records-its-alternatives.md",
         ),
+        (
+            "../../../../../ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/x.md",
+            "../../../../../ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/x.md",
+        ),
+        ("./../../../a/x.md", "./../../../b/x.md"),
+        ("docs/../../../../a/x.md", "docs/../../../../b/x.md"),
     ],
-    ids=["хозяин", "язык каталога", "не документ", "схема заглавными"],
+    ids=[
+        "хозяин",
+        "язык каталога",
+        "путь от корня",
+        "адрес без схемы",
+        "схема заглавными",
+        "подъём выше дерева",
+        "подъём через точку",
+        "подъём через каталог",
+    ],
 )
 def test_only_a_relative_document_may_move(was: str, now: str) -> None:
     """Каталог снимается только у относительного `.md`: прочие формы — целиком (#880)."""
     before = edit.frozen(f"## Решение\n\nСм. [x]({was}).\n")
     after = edit.frozen(f"## Решение\n\nСм. [x]({now}).\n")
     assert before != after
+
+
+def test_a_climb_to_the_root_is_still_the_tree() -> None:
+    """Подъём ровно до корня дерева — ещё переезд документа, а не выход наружу (#892)."""
+    before = edit.frozen("## Решение\n\nСм. [x](../../README.md).\n")
+    after = edit.frozen("## Решение\n\nСм. [x](../../docs/README.md).\n")
+    assert before == after
+
+
+def test_without_folder_drops_the_folder_only_inside_the_tree() -> None:
+    """Каталог снимается у документа дерева; выход за корень остаётся целиком (#892)."""
+    inside = edit.LINK_TARGET_RE.search("](../use/x.md)")
+    outside = edit.LINK_TARGET_RE.search("](../../../a/x.md)")
+    assert inside is not None and outside is not None
+    assert edit.without_folder(inside) == "](x.md)"
+    assert edit.without_folder(outside) == "](../../../a/x.md)"
