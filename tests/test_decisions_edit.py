@@ -196,13 +196,14 @@ def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> No
             "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
             "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/042-decision-records-its-alternatives.md",
         ),
-        ("../../.pipeline.yml", "../../other/.pipeline.yml"),
+        ("/docs/x.md", "/other/x.md"),
+        ("//host/a/x.md", "//other/a/x.md"),
         (
             "HTTPS://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/042-decision-records-its-alternatives.md",
             "HTTPS://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/en/042-decision-records-its-alternatives.md",
         ),
     ],
-    ids=["хозяин", "язык каталога", "не документ", "схема заглавными"],
+    ids=["хозяин", "язык каталога", "путь от корня", "адрес без схемы", "схема заглавными"],
 )
 def test_only_a_relative_document_may_move(was: str, now: str) -> None:
     """Каталог снимается только у относительного `.md`: прочие формы — целиком (#880)."""
