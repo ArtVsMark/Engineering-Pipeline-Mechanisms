@@ -549,15 +549,22 @@ def test_a_date_in_an_answer_is_iso_and_not_in_the_future() -> None:
 
 
 def test_a_verdict_is_not_newer_than_the_look_that_produced_it() -> None:
-    """Решают, посмотрев: `decided` не может быть позже `analysed`, и не бывает без него."""
+    """Решают, посмотрев: `decided` не может быть позже `analysed`, и не бывает без него.
+
+    «Нет поля» — только `None` или пусто, как у гейта формы выше: `false` через
+    `or ""` читался бы отсутствием (поздний взгляд на #912). Форму даты судит
+    гейт выше; здесь сравниваются лишь даты, которые он пропускает.
+    """
     wrong: list[str] = []
     for rule, one in load()["rules"].items():
-        decided, analysed = str(one.get("decided") or ""), str(one.get("analysed") or "")
-        if not decided:
+        decided, analysed = one.get("decided"), one.get("analysed")
+        if decided in (None, ""):
             continue
-        if not analysed:
+        if analysed in (None, ""):
             wrong.append(f"{rule}: вердикт датирован, а сверка — нет")
-        elif date.fromisoformat(decided) > date.fromisoformat(analysed):
+        elif all(
+            isinstance(day, str) and audit_profile.is_iso_day(day) for day in (decided, analysed)
+        ) and date.fromisoformat(decided) > date.fromisoformat(analysed):
             wrong.append(f"{rule}: вердикт {decided} новее сверки {analysed}")
     assert not wrong, "; ".join(wrong)
 
