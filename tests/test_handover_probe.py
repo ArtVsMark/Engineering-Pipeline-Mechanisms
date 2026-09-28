@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from tests.conftest import ROOT, load_script, needs_history
+from tests.conftest import ROOT, load_script
 
 onboard = load_script("onboard.py")
 family_uptake = load_script("family_uptake.py")
@@ -74,18 +74,23 @@ def test_the_probe_goes_the_outward_way() -> None:
         assert "@" in said, f"{name}: вызов без версии"
 
 
-@needs_history
 def test_the_probe_says_what_the_kit_prints() -> None:
-    """Адрес и прибивка — те же, что печатает заход подключения.
+    """Адрес — тот же, что печатает заход подключения.
 
     Иначе проверяется не то, что отдаётся: заготовка потребителя и проба
     разошлись бы молча, и зелёная проба обещала бы работу чужому вызову,
     которого никто не проверял.
+
+    ТЕГ БЕРЁТСЯ ИЗ САМОЙ ПРОБЫ, А НЕ ИЗ ЖИВОЙ ИСТОРИИ. Прежде заготовка
+    печаталась под последним тегом (`onboard.pin_of`), и тест краснел в миг
+    каждого выпуска — тем же путём, что сосед про прибивку (#926). Свежесть
+    прибивки — предмет дрейфа (`probe_behind_release`), а здесь сверяется
+    форма адреса при той прибивке, что стоит.
     """
-    pin = onboard.pin_of(ROOT)
     for step in set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE):
-        want = onboard.caller(step, family_uptake.OURS, pin).splitlines()
         said = str(probe()["jobs"][f"{PREFIX}{step}"]["uses"])
+        pin = said.rsplit("@", 1)[1]
+        want = onboard.caller(step, family_uptake.OURS, pin).splitlines()
         assert any(said in line for line in want), f"{step}: проба зовёт не тот адрес"
 
 
@@ -108,14 +113,31 @@ def test_the_probe_runs_on_the_release_and_by_hand() -> None:
     assert "release" in said and "workflow_dispatch" in said, said
 
 
-@needs_history
 def test_a_probe_pinned_to_the_release_is_not_a_drift(tmp_path: Path) -> None:
     """Прибивка совпала с выпуском — находки нет.
 
     Без этой половины источник был бы неотличим от «всегда находит», а такой
     учат пропускать (051).
+
+    ДЕРЕВО ЗДЕСЬ НЕ ЧИТАЕТСЯ, И ЭТО СТОИЛО КРАСНОЙ ОБЩЕЙ ВЕТКИ. Прежде тест
+    сверял живую пробу с живым тегом — и краснел в миг каждого выпуска: тег
+    уже новый, а прибивку поднимают следующим изменением. Выпуск `1.3.0`
+    28.09.2026 так и покрасил общую ветку. Отставание после выпуска —
+    предмет ДРЕЙФА, а не гейта (docstring `probe_behind_release`, 051), и
+    держать его тестом по дереву значило делать гейтом то, что гейтом быть
+    не должно. Здесь проверяется функция, а не состояние дерева.
     """
-    assert module.probe_behind_release(ROOT) == []
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / PROBE.relative_to(ROOT)).write_text(
+        "jobs:\n  probe-lint:\n    uses: o/r/.github/workflows/step-lint.yml@v9.9.9\n",
+        encoding="utf-8",
+    )
+    keep = module.version.release_tag
+    module.version.release_tag = lambda *_a, **_k: "v9.9.9"
+    try:
+        assert module.probe_behind_release(tmp_path) == []
+    finally:
+        module.version.release_tag = keep
 
 
 def test_a_probe_behind_the_release_is_a_drift(monkeypatch: object, tmp_path: Path) -> None:
