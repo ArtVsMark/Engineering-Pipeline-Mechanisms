@@ -30,6 +30,7 @@ from typing import Any, Final
 import changerefs
 import ghrest
 import labels
+import squash_body
 
 #: Незакрытый пункт чек-листа задачи в её теле.
 OPEN_ITEM_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(\S.*?)\s*$", re.MULTILINE)
@@ -203,12 +204,26 @@ def main(argv: list[str] | None = None) -> int:
 
     problems: list[str] = []
 
-    # СЛОВО ЗАКРЫТИЯ ВНЕ СТРОКИ СВЯЗИ (#928). Площадка закрывает задачу по нему
-    # в заголовке и описании изменения и в любом месте сообщений коммитов, из
-    # которых собирается тело слияния (`squash_body.compose`). Читается всё это.
+    # СЛОВО ЗАКРЫТИЯ ВНЕ СТРОКИ СВЯЗИ (#928). Судится ТОТ ТЕКСТ, что доедет до
+    # общей ветки или будет прочитан площадкой при слиянии, — и ничего сверх:
+    #
+    # * заголовок изменения — БЕЗ исключения для строки связи. Он становится
+    #   заголовком коммита слияния (`automerge.py`), и `Fixes #5` там закроет
+    #   задачу, которой в описании может не быть;
+    # * описание изменения — площадка читает его целиком;
+    # * из коммитов — только то, что отберёт `squash_body.compose_from`:
+    #   заголовки, строки связи, «Разобрано», трейлеры. Проза тела коммита в
+    #   общую ветку не едет, и отвергать её значило бы требовать переписать
+    #   историю ветки ради слова, которое никуда не попадёт.
+    #
+    # Заголовки коммитов берутся первыми строками сообщений, и среди них есть
+    # подтягивания базы, которые `compose` отбрасывает (`--no-merges`). Это
+    # строже площадки только на заголовке слияния базы — его пишет git.
     messages = read_messages(args.messages_from)
-    said = "\n".join([title, body, *messages])
-    for line in changerefs.stray_closing_words(said):
+    landing = squash_body.compose_from([one.strip().splitlines()[0] for one in messages], messages)
+    if changerefs.CLOSING_KEYWORD_RE.search(title):
+        problems.append(f"в заголовке «{title}» {STRAY_CLOSING}")
+    for line in changerefs.stray_closing_words(f"{body}\n{landing}"):
         problems.append(f"в строке «{line}» {STRAY_CLOSING}")
 
     undeclared = sorted(on_pr - {label.name for label in declared})

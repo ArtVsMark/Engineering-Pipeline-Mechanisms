@@ -125,6 +125,17 @@ def compose(branch: str, base: str) -> str:
         raise NotRun(f"в ветке {branch} нет коммитов сверх {base} — собирать нечего (075)")
 
     bodies = git("log", "--reverse", "--format=%B%x00", f"{merge_base}..{branch}").split("\0")
+    return compose_from(subjects, bodies)
+
+
+def compose_from(subjects: list[str], bodies: list[str]) -> str:
+    """Тело уплотнения из заголовков и сообщений — без git, одной функцией.
+
+    Отдельно от `compose` потому, что этот же текст судит гейт разметки
+    (`check_pr_meta`): слово закрытия опасно ровно там, где оно доедет до
+    общей ветки, и отбор строк обязан быть одним на двоих, а не пересказом
+    (022).
+    """
     links = changerefs.links_in_all(bodies)
     # СТРОКИ СНЯТИЯ ПЕРЕНОСЯТСЯ, А НЕ СОБИРАЮТСЯ ЗАНОВО. Прежде тело строилось
     # из одних отпечатков, и причина — «премиса не подтвердилась, потому что…» —

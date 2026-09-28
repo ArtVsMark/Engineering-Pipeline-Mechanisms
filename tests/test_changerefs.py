@@ -819,6 +819,9 @@ def test_a_fully_repeated_twin_line_is_dropped() -> None:
         # Заголовок коммита и строка тела — тоже не строка связи.
         ("Fixes #5 в гейте", True),
         ("Это closes #5, как и договорились", True),
+        # Полная ссылка на задачу — третья форма, по которой площадка закрывает.
+        ("Разобрано: abc1234 — closes https://github.com/o/r/issues/5", True),
+        ("Closes https://github.com/o/r/issues/5", True),
         # Строка связи — её предмет и есть закрытие.
         ("Closes #922", False),
         ("  fixes #3  ", False),

@@ -1435,10 +1435,53 @@ def test_a_stray_closing_word_is_rejected(run_script: RunScript, tmp_path: Path)
 
 
 @pytest.mark.parametrize(
+    ("message", "caught"),
+    [
+        # Заголовок коммита едет в тело слияния строкой списка.
+        ("Fixes #5 в гейте\n", True),
+        # Проза тела коммита в общую ветку не едет — судить её нечего.
+        ("тема\n\nКогда-то это fixes #5, но строка остаётся в ветке.\n", False),
+    ],
+)
+def test_only_what_lands_is_judged(
+    run_script: RunScript, tmp_path: Path, message: str, caught: bool
+) -> None:
+    """Из коммитов судится только отобранное `squash_body.compose_from`.
+
+    Иначе слово в прозе, которая никуда не доедет, требовало бы переписать
+    историю ветки — отказ без вреда, который он предотвращает.
+    """
+    check = load_script("check_pr_meta.py")
+    env = write_event(tmp_path, ["area/docs"], "Refs #1")
+    said = tmp_path / "messages.txt"
+    said.write_bytes(f"{message}\0".encode())
+    result = run_script(
+        "check_pr_meta.py", "--files", "README.md", "--messages-from", str(said), env=env
+    )
+    assert (check.STRAY_CLOSING in result.text) is caught, result.text
+
+
+def test_the_step_hands_the_messages_to_the_gate() -> None:
+    """Прогон передаёт гейту сообщения коммитов — иначе проверка выключена молча.
+
+    Без `--messages-from` гейт пишет MESSAGES_UNREAD в журнал прогона и
+    пропускает изменение: зелёный прогон неотличим от проверенного (045).
+    """
+    step = (ROOT / ".github" / "workflows" / "step-pr-meta.yml").read_text(encoding="utf-8")
+    gate = next(line for line in step.splitlines() if "check_pr_meta.py" in line)
+    source = gate.split("--messages-from", 1)[1].split()[0] if "--messages-from" in gate else ""
+    assert source, "прогон зовёт гейт без --messages-from"
+    assert f"> {source}" in step, f"{source}: прогон не пишет файл, который передаёт"
+
+
+@pytest.mark.parametrize(
     ("title", "body"),
     [
         # Заголовок становится заголовком коммита слияния (`automerge.py`).
         ("Fixes #5 в гейте", "Refs #1"),
+        # Заголовок судится БЕЗ исключения строки связи: `Fixes #5 (#N)` в
+        # заголовке коммита слияния закроет #5, даже если описание молчит.
+        ("Fixes #5", "Refs #1"),
         # Описание площадка читает целиком, не только строку связи.
         ("t", "Refs #1\n\nЗаодно это resolves #5."),
     ],
