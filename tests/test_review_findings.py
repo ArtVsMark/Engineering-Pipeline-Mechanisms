@@ -2396,3 +2396,7 @@ def test_the_tasks_carry_no_copy_of_the_mark_instruction() -> None:
     text = (ROOT / ".github" / "workflows" / "review.yml").read_text(encoding="utf-8")
     for kind in (findings_module.ANSWER_KIND, findings_module.CODE):
         assert f"· {kind}]" not in text, f"в задании снова копия скобки «{kind}»"
+        # Слово рода в обратных кавычках — вторая форма, которой указание
+        # пишется (поздний взгляд на #916). ПРЕДЕЛ НАЗВАН: пересказ прозой без
+        # скобки и кавычек гейт не ловит — его держит решение в #896 и взгляд.
+        assert f"`{kind}`" not in text, f"в задании снова слово рода «{kind}» из указания"

@@ -326,6 +326,17 @@ def test_the_map_always_says_how_to_mark_an_answer_finding() -> None:
     assert "\n".join(module.MARK_SAID) in said
 
 
+def test_the_mark_condition_is_the_definition_of_the_kind() -> None:
+    """Условие пометки — определение рода «ответ», а не один его случай (#916).
+
+    Прежде карта называла лишь «предмет есть, а ответ утверждает обратное», и
+    устаревшая причина отвержения под условие не подходила.
+    """
+    said = " ".join(module.MARK_SAID)
+    assert module.findings.KINDS[module.findings.ANSWER_KIND] in said
+    assert "отвержения" in said, "случай отвергнутого правила не назван"
+
+
 def test_the_marks_the_map_teaches_are_read_back_by_the_parser() -> None:
     """Скобки из раздела карты разбирает сам `found_said` — тем родом, которому учат (#915).
 
