@@ -468,7 +468,7 @@ def test_explicit_base_is_not_rewritten_by_the_environment(
 # --- разметка изменения ------------------------------------------------------
 
 
-def write_event(tmp_path: Path, labels: list[str], body: str) -> dict[str, str]:
+def write_event(tmp_path: Path, labels: list[str], body: str, title: str = "t") -> dict[str, str]:
     """Кладёт событие площадки об изменении и отдаёт окружение для гейта.
 
     Учётные данные площадки СНИМАЮТСЯ. В прогоне они в окружении есть, и гейт
@@ -477,7 +477,11 @@ def write_event(tmp_path: Path, labels: list[str], body: str) -> dict[str, str]:
     проверяет транспорт у себя.
     """
     event = {
-        "pull_request": {"labels": [{"name": name} for name in labels], "title": "t", "body": body}
+        "pull_request": {
+            "labels": [{"name": name} for name in labels],
+            "title": title,
+            "body": body,
+        }
     }
     path = tmp_path / "event.json"
     path.write_text(json.dumps(event), encoding="utf-8")
@@ -1355,12 +1359,13 @@ def test_a_fragment_alone_still_passes(run_script: RunScript, tmp_path: Path) ->
     assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
 
 
-def test_a_closing_word_in_a_trailer_is_rejected(run_script: RunScript, tmp_path: Path) -> None:
-    """Слово закрытия в пояснении трейлера отвергается (#928).
+def test_a_stray_closing_word_is_rejected(run_script: RunScript, tmp_path: Path) -> None:
+    """Слово закрытия с номером вне строки связи отвергается — в сообщениях (#928).
 
-    Площадка закрыла бы задачу при слиянии: так #925 закрыло #922. Соседняя
-    половина — чистые сообщения проходят — держится вторым вызовом.
+    Площадка закрыла бы задачу при слиянии: так #925 закрыло #922 пояснением
+    строки «Разобрано». Соседняя половина — строка связи в сообщении проходит.
     """
+    check = load_script("check_pr_meta.py")
     env = write_event(tmp_path, ["area/docs"], "Refs #1")
     bad = tmp_path / "bad.txt"
     bad.write_bytes("тема\n\nРазобрано: 13cf07f — `Closes #922` не пройдёт\n\0".encode())
@@ -1368,13 +1373,33 @@ def test_a_closing_word_in_a_trailer_is_rejected(run_script: RunScript, tmp_path
         "check_pr_meta.py", "--files", "README.md", "--messages-from", str(bad), env=env
     )
     assert result.code == REJECTED
-    assert "слово закрытия" in result.text
+    assert check.STRAY_CLOSING in result.text
     good = tmp_path / "good.txt"
     good.write_bytes("тема\n\nCloses #1\nРазобрано: 13cf07f — ответ переписан\n\0".encode())
     result = run_script(
         "check_pr_meta.py", "--files", "README.md", "--messages-from", str(good), env=env
     )
-    assert "слово закрытия" not in result.text
+    assert check.STRAY_CLOSING not in result.text
+
+
+@pytest.mark.parametrize(
+    ("title", "body"),
+    [
+        # Заголовок становится заголовком коммита слияния (`automerge.py`).
+        ("Fixes #5 в гейте", "Refs #1"),
+        # Описание площадка читает целиком, не только строку связи.
+        ("t", "Refs #1\n\nЗаодно это resolves #5."),
+    ],
+)
+def test_a_stray_closing_word_in_the_change_is_rejected(
+    run_script: RunScript, tmp_path: Path, title: str, body: str
+) -> None:
+    """Заголовок и описание изменения судятся тем же правилом, что сообщения (#928)."""
+    check = load_script("check_pr_meta.py")
+    env = write_event(tmp_path, ["area/docs"], body, title=title)
+    result = run_script("check_pr_meta.py", "--files", "README.md", env=env)
+    assert result.code == REJECTED
+    assert check.STRAY_CLOSING in result.text
 
 
 def test_messages_are_read_whole_and_their_absence_is_said(
@@ -1387,4 +1412,4 @@ def test_messages_are_read_whole_and_their_absence_is_said(
     text = check.read_messages(str(said))
     assert "первый" in text and "второй" in text
     assert check.read_messages("") == ""
-    assert "не проверено" in capsys.readouterr().err
+    assert check.MESSAGES_UNREAD in capsys.readouterr().err
