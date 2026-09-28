@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -319,17 +320,28 @@ def test_the_head_argument_reaches_the_comparison(
     assert got == ["FETCH_HEAD"]
 
 
-def test_the_map_names_the_mark_words_from_the_kind_constants() -> None:
-    """Карта учит ставить `· ответ` и снимать `· код` словами констант рода (#914).
+def test_the_map_always_says_how_to_mark_an_answer_finding() -> None:
+    """Раздел о пометке печатается в любой карте — он единственный источник (#896)."""
+    said = module.render([], [], {}, {}, touched=False)
+    assert "\n".join(module.MARK_SAID) in said
 
-    Третья копия указания после двух заданий `review.yml`: слова набирались
-    буквами, и переименование константы оставило бы карту учить старому.
+
+def test_the_marks_the_map_teaches_are_read_back_by_the_parser() -> None:
+    """Скобки из раздела карты разбирает сам `found_said` — тем родом, которому учат (#915).
+
+    Сверка слов с константами верна по построению; держит карту только разбор:
+    перестань он читать скобку — тест покраснеет.
     """
-    said = "\n".join(module.ASKED["not-applicable"])
+    parser = load_script("review_findings.py")
     kinds = module.findings
-    for kind in (kinds.ANSWER_KIND, kinds.CODE):
-        assert f"· {kind}]" in said, f"скобка рода «{kind}» не названа в карте"
-    assert f"[{kinds.DEFECT} · {kinds.ANSWER_KIND}]" in said, "вес примера не из констант"
+    brackets = re.findall(r"НАХОДКА\[[^\]]*\]", "\n".join(module.MARK_SAID))
+    assert len(brackets) == 2, brackets
+    said = []
+    for number, bracket in enumerate(brackets):
+        line = bracket.replace("<вес>", kinds.DEFECT) + f": находка {number}"
+        ((weight, _, _, _, declared),) = parser.found_said([{"body": line}])
+        said.append((weight, declared))
+    assert said == [(kinds.DEFECT, kinds.ANSWER_KIND), (kinds.DEFECT, kinds.CODE)]
 
 
 def test_the_words_the_map_teaches_are_the_words_the_parser_reads() -> None:
