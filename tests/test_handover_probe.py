@@ -108,14 +108,31 @@ def test_the_probe_runs_on_the_release_and_by_hand() -> None:
     assert "release" in said and "workflow_dispatch" in said, said
 
 
-@needs_history
 def test_a_probe_pinned_to_the_release_is_not_a_drift(tmp_path: Path) -> None:
     """Прибивка совпала с выпуском — находки нет.
 
     Без этой половины источник был бы неотличим от «всегда находит», а такой
     учат пропускать (051).
+
+    ДЕРЕВО ЗДЕСЬ НЕ ЧИТАЕТСЯ, И ЭТО СТОИЛО КРАСНОЙ ОБЩЕЙ ВЕТКИ. Прежде тест
+    сверял живую пробу с живым тегом — и краснел в миг каждого выпуска: тег
+    уже новый, а прибивку поднимают следующим изменением. Выпуск `1.3.0`
+    28.09.2026 так и покрасил общую ветку. Отставание после выпуска —
+    предмет ДРЕЙФА, а не гейта (docstring `probe_behind_release`, 051), и
+    держать его тестом по дереву значило делать гейтом то, что гейтом быть
+    не должно. Здесь проверяется функция, а не состояние дерева.
     """
-    assert module.probe_behind_release(ROOT) == []
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / PROBE.relative_to(ROOT)).write_text(
+        "jobs:\n  probe-lint:\n    uses: o/r/.github/workflows/step-lint.yml@v9.9.9\n",
+        encoding="utf-8",
+    )
+    keep = module.version.release_tag
+    module.version.release_tag = lambda *_a, **_k: "v9.9.9"
+    try:
+        assert module.probe_behind_release(tmp_path) == []
+    finally:
+        module.version.release_tag = keep
 
 
 def test_a_probe_behind_the_release_is_a_drift(monkeypatch: object, tmp_path: Path) -> None:
