@@ -481,29 +481,34 @@ def by_contract_tag(said: str) -> bool:
 #: меняла бы исполняемый код без нашего ведома, здесь не существует (152).
 OUR_OWN_TREE = "./"
 
-#: События, на которых площадка берёт файл прогона НЕ из изменения. Там
-#: закрепление вызываемого что-то значит.
+#: События, на которых площадка берёт файл прогона ИЗ ИЗМЕНЕНИЯ: кто правит
+#: изменение, правит и шаг целиком, и закрепление там ничего не добавляет.
+#: ВСЕ ПРОЧИЕ события — общие: файл берётся с общей ветки (`workflow_run`,
+#: `pull_request_target`, `schedule`, `issues`, `issue_comment` …), с коммита
+#: под тегом (`release`) или с ветки, на которой нажали кнопку
+#: (`workflow_dispatch` — решение владельца в #922: закрепить с запасом
+#: дешевле, чем гадать о ref запуска).
 #:
-#: * `workflow_run`, `pull_request_target`, `schedule`, `push` — с общей ветки
-#:   (`push` — только в неё: толчок в ветку изменения берёт файл из самого
-#:   изменения, см. :data:`OUR_BRANCH`; `branches` площадки — ШАБЛОНЫ, и
-#:   `**` задевает общую ветку так же, как её имя);
-#: * `release` — с коммита под тегом выпуска;
-#: * `workflow_dispatch` — с ветки, на которой нажали кнопку. Из файла она не
-#:   видна, и кнопка считается общей ВСЕГДА — решение владельца в #922:
-#:   закрепить с запасом дешевле, чем гадать о ref запуска.
+#: СПИСОК ПЕРЕВЁРНУТ НАМЕРЕННО. Прежде перечислялись общие события, и любое
+#: неназванное молча считалось «из изменения»: так мимо гейта шёл `claude.yml`
+#: на `issues` и `issue_comment` — запуск токеном владельца по чужому тексту.
+#: Площадка заводит события чаще, чем гейт их учит; забытое здесь обязано
+#: ошибаться в сторону лишнего закрепления, а не пропуска
+#: ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 #:
-#: Вызываемый переиспользуемый прогон (`workflow_call`) своих событий не имеет:
-#: он приезжает с ref вызывающего и общий тогда, когда общий вызывающий — на
-#: любой глубине вложенности (:func:`shared_callees`).
-SHARED_CALLER = (
-    "workflow_run",
-    "pull_request_target",
-    "schedule",
-    "push",
-    "release",
-    "workflow_dispatch",
+#: `push` здесь нет: он из изменения, только если НЕ задевает общую ветку
+#: (:data:`OUR_BRANCH`; `branches` площадки — ШАБЛОНЫ, и `**` задевает общую
+#: ветку так же, как её имя). Это решает :func:`shared_events`.
+FROM_THE_CHANGE = (
+    "pull_request",
+    "pull_request_review",
+    "pull_request_review_comment",
+    "merge_group",
 )
+#: Своих событий нет: вызываемый переиспользуемый прогон приезжает с ref
+#: вызывающего и общий тогда, когда общий вызывающий — на любой глубине
+#: вложенности (:func:`shared_callees`).
+INHERITED = ("workflow_call",)
 #: Общая ветка — единственная, толчок в которую берёт файл не из изменения.
 OUR_BRANCH: Final = "main"
 # Единственный ref, который прогон от общей ветки забирает не чужим: сама база.
@@ -512,13 +517,23 @@ OUR_BASE_REF: Final = "${{ github.event.pull_request.base.ref }}"
 LOCAL_WORKFLOW: Final = "./.github/workflows/"
 
 
+def event_names(events: Any) -> set[str]:
+    """Имена событий из `on:` в любой из трёх записей площадки.
+
+    Скаляр (`on: push`) — ОДНО событие: `set()` от строки разобрал бы его на
+    буквы, и прогон выпал бы из гейта молча.
+    """
+    if isinstance(events, str):
+        return {events}
+    return {str(name) for name in events or []}
+
+
 def shared_events(document: dict[Any, Any]) -> set[str]:
     """События этого файла, на которых он берётся не из изменения."""
     events = document[True]
-    names = set(events) if isinstance(events, dict) else set(events or [])
-    shared = names & set(SHARED_CALLER)
-    if "push" in shared and isinstance(events, dict):
-        push = events.get("push") or {}
+    shared = event_names(events) - set(FROM_THE_CHANGE) - set(INHERITED)
+    if "push" in shared:
+        push = events.get("push") if isinstance(events, dict) else None
         push = push if isinstance(push, dict) else {}
         if not pushes_our_branch(push.get("branches"), push.get("branches-ignore")):
             shared.discard("push")
@@ -574,7 +589,7 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
     ставит вопрос не «закреплять ли вообще», а «где это что-то значит». На
     `pull_request` площадка берёт файл прогона ИЗ ИЗМЕНЕНИЯ: кто правит
     изменение, правит и шаг целиком, и закрепление ничего не добавляет. На
-    событиях из :data:`SHARED_CALLER` рассуждение переворачивается — файл
+    прочих событиях (всё, кроме :data:`FROM_THE_CHANGE`) рассуждение переворачивается — файл
     берётся не из изменения, и подвижная метка меняет исполняемый код без
     нашего ведома. Какие это события, говорит сам список, а не этот текст (022).
 
@@ -698,9 +713,19 @@ def test_the_local_callee_exemption_has_a_subject() -> None:
         ({"push": {"branches": ["ma*"]}}, True),
         ({"push": {"branches-ignore": ["main"]}}, False),
         ({"push": {"branches-ignore": ["agent/**"]}}, True),
+        # Список перевёрнут: общими считаются все события, кроме названных.
+        ({"issues": None, "issue_comment": None}, True),
+        ({"pull_request_review": None, "merge_group": None}, False),
+        ({"event_the_gate_never_heard_of": None}, True),
+        ({"workflow_call": None}, False),
+        # Скаляр и список — те же события, а не буквы и не пусто.
+        ("push", True),
+        ("release", True),
+        ("pull_request", False),
+        (["pull_request", "issues"], True),
     ],
 )
-def test_shared_events_are_told_from_the_changes_own(on: dict[str, Any], shared: bool) -> None:
+def test_shared_events_are_told_from_the_changes_own(on: Any, shared: bool) -> None:
     """Вторая половина гейта: файл ИЗ ИЗМЕНЕНИЯ он не судит.
 
     Толчок в ветку изменения и `pull_request` берут файл из самого изменения —
