@@ -1353,3 +1353,38 @@ def test_a_fragment_alone_still_passes(run_script: RunScript, tmp_path: Path) ->
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "только фрагмент")
     assert run_script("check_journal.py", "--base", BASE_BRANCH, cwd=repo).code == CLEAN
+
+
+def test_a_closing_word_in_a_trailer_is_rejected(run_script: RunScript, tmp_path: Path) -> None:
+    """Слово закрытия в пояснении трейлера отвергается (#928).
+
+    Площадка закрыла бы задачу при слиянии: так #925 закрыло #922. Соседняя
+    половина — чистые сообщения проходят — держится вторым вызовом.
+    """
+    env = write_event(tmp_path, ["area/docs"], "Refs #1")
+    bad = tmp_path / "bad.txt"
+    bad.write_bytes("тема\n\nРазобрано: 13cf07f — `Closes #922` не пройдёт\n\0".encode())
+    result = run_script(
+        "check_pr_meta.py", "--files", "README.md", "--messages-from", str(bad), env=env
+    )
+    assert result.code == REJECTED
+    assert "слово закрытия" in result.text
+    good = tmp_path / "good.txt"
+    good.write_bytes("тема\n\nCloses #1\nРазобрано: 13cf07f — ответ переписан\n\0".encode())
+    result = run_script(
+        "check_pr_meta.py", "--files", "README.md", "--messages-from", str(good), env=env
+    )
+    assert "слово закрытия" not in result.text
+
+
+def test_messages_are_read_whole_and_their_absence_is_said(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Сообщения коммитов читаются все, а без файла пропуск назван (045)."""
+    check = load_script("check_pr_meta.py")
+    said = tmp_path / "messages.txt"
+    said.write_bytes("первый\n\0второй\n\0".encode())
+    text = check.read_messages(str(said))
+    assert "первый" in text and "второй" in text
+    assert check.read_messages("") == ""
+    assert "не проверено" in capsys.readouterr().err

@@ -143,6 +143,17 @@ def read_files(inline: str, from_path: str) -> list[str]:
     return [line.strip() for line in inline.splitlines() if line.strip()]
 
 
+def read_messages(from_path: str) -> str:
+    """Сообщения коммитов изменения одним текстом; без файла — пусто, и это сказано."""
+    if not from_path:
+        print(
+            "сообщения коммитов не переданы — слово закрытия в трейлерах не проверено",
+            file=sys.stderr,
+        )
+        return ""
+    return "\n".join(Path(from_path).read_bytes().decode("utf-8").split("\0"))
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -151,6 +162,11 @@ def main(argv: list[str] | None = None) -> int:
         "--files-from",
         default="",
         help="файл со списком тронутых путей, разделённых NUL (git diff -z)",
+    )
+    parser.add_argument(
+        "--messages-from",
+        default="",
+        help="файл с сообщениями коммитов изменения, разделёнными NUL (git log %%B%%x00)",
     )
     args = parser.parse_args(argv)
 
@@ -174,6 +190,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"тронутых путей прочитано: {len(files)}")
 
     problems: list[str] = []
+
+    # СЛОВО ЗАКРЫТИЯ В ПОЯСНЕНИИ ТРЕЙЛЕРА (#928). Тело коммита слияния
+    # собирается из сообщений коммитов ветки, а не из тела изменения, — там у
+    # строк «Разобрано» пояснений нет. Поэтому читаются коммиты: площадка
+    # закроет задачу по слову в любом месте их сообщения.
+    for line in changerefs.closing_in_trailers(read_messages(args.messages_from)):
+        problems.append(
+            f"в пояснении строки «{line}» стоит слово закрытия с номером задачи — "
+            "при слиянии площадка молча закроет эту задачу. Перепишите пояснение без "
+            "этого слова; связь с задачей пишется своей строкой"
+        )
 
     undeclared = sorted(on_pr - {label.name for label in declared})
     if undeclared:

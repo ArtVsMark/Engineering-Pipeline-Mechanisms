@@ -807,3 +807,29 @@ def test_a_fully_repeated_twin_line_is_dropped() -> None:
         ["Разобрано: aaaaaaa дубль bbbbbbb", "Разобрано: aaaaaaa дубль bbbbbbb"]
     )
     assert said == ["Разобрано: aaaaaaa дубль bbbbbbb"]
+
+
+@pytest.mark.parametrize(
+    ("text", "caught"),
+    [
+        # Случай #925: цитата в кавычках кода — сообщение коммита не разметка.
+        ("Разобрано: 13cf07f — ответ: `Closes #922` не пройдёт pr-meta", True),
+        ("Закрывает пункт: fixes owner/repo#5 заодно", True),
+        ("разобрано: abc1234 — resolved: #7", True),
+        # Строка связи — её предмет и есть закрытие.
+        ("Closes #922", False),
+        # Слово без номера и номер без слова задачу не закрывают.
+        ("Разобрано: abc1234 — закрытие задачи названо", False),
+        ("Разобрано: abc1234 — fixes the gate", False),
+        ("Разобрано: abc1234 — как в #922", False),
+        # Слово внутри другого слова — не слово закрытия.
+        ("Разобрано: abc1234 — prefixes #3", False),
+    ],
+)
+def test_a_closing_word_in_a_trailer_is_named(text: str, caught: bool) -> None:
+    """Слово закрытия с номером в пояснении трейлера называется; связь — нет (#928).
+
+    Площадка закрывает задачу по такому слову в любом месте сообщения коммита,
+    и пояснение строки «Разобрано» закрыло #922 при слиянии #925.
+    """
+    assert bool(changerefs.closing_in_trailers(text)) is caught
