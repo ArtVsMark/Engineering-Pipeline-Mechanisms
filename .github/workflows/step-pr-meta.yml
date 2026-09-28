@@ -55,6 +55,9 @@ jobs:
           # передаётся ФАЙЛОМ, а не подстановкой: оболочка вырезает NUL.
           git diff --name-only -z "$base_sha...HEAD" > /tmp/changed.txt
           echo "тронуто файлов: $(tr -cd '\0' < /tmp/changed.txt | wc -c)"
+          # Сообщения коммитов — из них собирается тело коммита слияния, и
+          # слово закрытия в пояснении трейлера закрыло бы задачу молча (#928).
+          git log --format='%B%x00' "$base_sha..HEAD" > /tmp/messages.txt
       - name: метки и связь с задачей
         # ТОКЕН ЗДЕСЬ НЕ УКРАШЕНИЕ. Гейт перечитывает состояние изменения у
         # площадки, потому что снимок события — это состояние на момент
@@ -66,4 +69,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/check_pr_meta.py --files-from /tmp/changed.txt
+        run: python scripts/check_pr_meta.py --files-from /tmp/changed.txt --messages-from /tmp/messages.txt

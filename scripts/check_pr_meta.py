@@ -34,6 +34,16 @@ import labels
 #: Незакрытый пункт чек-листа задачи в её теле.
 OPEN_ITEM_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(\S.*?)\s*$", re.MULTILINE)
 
+#: Отказ по слову закрытия вне строки связи — константой: на него ссылаются
+#: тесты, а переписанные буквы разошлись бы с ним молча (209).
+STRAY_CLOSING: Final = (
+    "стоит слово закрытия с номером задачи вне строки связи — при слиянии площадка "
+    "молча закроет эту задачу. Перепишите строку без этого слова; связь с задачей "
+    "пишется отдельной строкой вида «Closes #N»"
+)
+#: Пропуск проверки сообщений коммитов называется вслух (045).
+MESSAGES_UNREAD: Final = "сообщения коммитов не переданы — слово закрытия в них не проверено"
+
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
 EXIT_BROKEN: Final = 2
@@ -143,6 +153,14 @@ def read_files(inline: str, from_path: str) -> list[str]:
     return [line.strip() for line in inline.splitlines() if line.strip()]
 
 
+def read_messages(from_path: str) -> str:
+    """Сообщения коммитов изменения одним текстом; без файла — пусто, и это сказано."""
+    if not from_path:
+        print(MESSAGES_UNREAD, file=sys.stderr)
+        return ""
+    return "\n".join(Path(from_path).read_bytes().decode("utf-8").split("\0"))
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -151,6 +169,11 @@ def main(argv: list[str] | None = None) -> int:
         "--files-from",
         default="",
         help="файл со списком тронутых путей, разделённых NUL (git diff -z)",
+    )
+    parser.add_argument(
+        "--messages-from",
+        default="",
+        help="файл с сообщениями коммитов изменения, разделёнными NUL (git log %%B%%x00)",
     )
     args = parser.parse_args(argv)
 
@@ -174,6 +197,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"тронутых путей прочитано: {len(files)}")
 
     problems: list[str] = []
+
+    # СЛОВО ЗАКРЫТИЯ ВНЕ СТРОКИ СВЯЗИ (#928). Площадка закрывает задачу по нему
+    # в заголовке и описании изменения и в любом месте сообщений коммитов, из
+    # которых собирается тело слияния (`squash_body.compose`). Читается всё это.
+    said = "\n".join([title, body, read_messages(args.messages_from)])
+    for line in changerefs.stray_closing_words(said):
+        problems.append(f"в строке «{line}» {STRAY_CLOSING}")
 
     undeclared = sorted(on_pr - {label.name for label in declared})
     if undeclared:
