@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -197,3 +198,34 @@ def test_the_landing_text_is_composed_without_git() -> None:
     assert said.splitlines()[0] == "- тема"
     assert "Refs #7" in said and "Разобрано: abc1234" in said
     assert "Проза" not in said
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "одна строка",
+        "\n  \nпосле пустых\nстрок\n",
+        "Починка гейта\nfixes #5\n\nтело",
+        "  отступ \n  и хвост  \n\nтело\n\nещё",
+    ],
+)
+def test_the_subject_is_what_git_gives(tmp_path: Path, message: str) -> None:
+    """`subject_of` отдаёт ровно `%s` git — первый абзац в строку, а не первую строку.
+
+    Гейт разметки судит заголовки через неё; расхождение с git пропустило бы
+    слово закрытия во второй строке первого абзаца (взгляд на #933).
+    """
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout
+
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "--cleanup=verbatim", "-m", message)
+    assert body.subject_of(message) == git("log", "-1", "--format=%s").rstrip("\n")

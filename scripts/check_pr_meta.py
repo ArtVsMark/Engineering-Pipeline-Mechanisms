@@ -216,11 +216,11 @@ def main(argv: list[str] | None = None) -> int:
     #   общую ветку не едет, и отвергать её значило бы требовать переписать
     #   историю ветки ради слова, которое никуда не попадёт.
     #
-    # Заголовки коммитов берутся первыми строками сообщений, и среди них есть
+    # Заголовки коммитов берутся так же, как их отдаёт git (`subject_of`), и среди них есть
     # подтягивания базы, которые `compose` отбрасывает (`--no-merges`). Это
     # строже площадки только на заголовке слияния базы — его пишет git.
     messages = read_messages(args.messages_from)
-    landing = squash_body.compose_from([one.strip().splitlines()[0] for one in messages], messages)
+    landing = squash_body.compose_from([squash_body.subject_of(one) for one in messages], messages)
     if changerefs.CLOSING_KEYWORD_RE.search(title):
         problems.append(f"в заголовке «{title}» {STRAY_CLOSING}")
     for line in changerefs.stray_closing_words(f"{body}\n{landing}"):

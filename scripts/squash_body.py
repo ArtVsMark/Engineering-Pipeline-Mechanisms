@@ -128,6 +128,27 @@ def compose(branch: str, base: str) -> str:
     return compose_from(subjects, bodies)
 
 
+def subject_of(message: str) -> str:
+    """Заголовок сообщения так, как его отдаёт git `%s`: ПЕРВЫЙ АБЗАЦ в строку.
+
+    Не первая строка: git склеивает весь первый абзац пробелом, и строка
+    `Починка\nfixes #5` уезжает в тело уплотнения одним заголовком
+    `Починка fixes #5`. Гейт разметки, судивший первую строку, пропустил бы
+    слово закрытия, которое доедет до общей ветки. Совпадение с git держит
+    тест на настоящем репозитории.
+    """
+    paragraph: list[str] = []
+    for line in message.splitlines():
+        if not line.strip():
+            # Пустые строки ДО абзаца git пропускает, после — абзац кончен.
+            if paragraph:
+                break
+            continue
+        # Хвост строки git срезает, начало оставляет — как и здесь.
+        paragraph.append(line.rstrip())
+    return " ".join(paragraph)
+
+
 def compose_from(subjects: list[str], bodies: list[str]) -> str:
     """Тело уплотнения из заголовков и сообщений — без git, одной функцией.
 
