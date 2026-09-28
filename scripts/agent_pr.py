@@ -189,7 +189,6 @@ def describe(branch: str, base: str) -> Described:
             "которой не делает"
         )
 
-    title = subjects[0] if len(subjects) == 1 else f"{subjects[0]} (+{len(subjects) - 1})"
     # Тела разделяются НУЛЕВЫМ байтом, а не строкой «---»: разделитель обязан
     # быть таким, какого в теле коммита не бывает, иначе граница подделывается
     # текстом. Разбор идёт по одному телу — склеенные документы неразличимы для
@@ -199,13 +198,26 @@ def describe(branch: str, base: str) -> Described:
 
     # Связь читается общим модулем, а не своей регуляркой: у гейта разметки она
     # была другой, и строка «Refs #2, #29» для шага открытия не существовала.
-    links = changerefs.links_in_all(bodies)
-    if not links:
+    if not changerefs.links_in_all(bodies):
         raise NotRun(
             "ни один коммит ветки не называет задачу: ни «Closes #N», ни «Refs #N». "
             "Изменение без связи гейт разметки отвергнет, и открывать его молча — "
             "значит отдать красное туда, где предмет виден уже здесь (075)"
         )
+    return describe_from(subjects, bodies)
+
+
+def describe_from(subjects: list[str], bodies: list[str]) -> Described:
+    """Заголовок и тело изменения из заголовков и сообщений коммитов — без git.
+
+    Отдельно от `describe` потому, что этот же текст судит гейт разметки
+    (`check_pr_meta`): тело дописывается ПОСЛЕ его прогона, и слово закрытия в
+    перенесённой строке («Закрывает пункт», «Ждёт:») площадка прочла бы при
+    слиянии мимо гейта. Сборка обязана быть одной на двоих, а не пересказом
+    (022).
+    """
+    title = subjects[0] if len(subjects) == 1 else f"{subjects[0]} (+{len(subjects) - 1})"
+    links = changerefs.links_in_all(bodies)
 
     lines = ["## Что в изменении", ""]
     lines += [f"- {subject}" for subject in subjects]

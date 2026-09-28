@@ -101,6 +101,21 @@ def test_description_puts_one_task_per_line(monkeypatch: pytest.MonkeyPatch) -> 
     assert "Refs #2\nRefs #29" in body
 
 
+def test_the_description_is_composed_without_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`describe_from` отдаёт то же, что `describe`, — гейт разметки судит её.
+
+    Описание дописывается после прогона гейта, и гейт судит его заранее этой
+    функцией. Разойдись она с `describe` — судилось бы не то, что уедет.
+    """
+    message = "feat: что-то\n\nRefs #2\nЗакрывает пункт: первый\nЖдёт: #9\n"
+    monkeypatch.setattr(
+        agent_pr, "git", lambda *args: "feat: что-то\n" if "--format=%s" in args else message
+    )
+    said = agent_pr.describe_from(["feat: что-то"], [message])
+    assert said == agent_pr.describe("agent/окно", "main")
+    assert "Закрывает пункт: первый" in said.body and "Ждёт: #9" in said.body
+
+
 def fake_transport(monkeypatch: pytest.MonkeyPatch, current: dict[str, Any]) -> list[Any]:
     """Подменяет транспорт и собирает то, что механизм отправил бы площадке."""
     sent: list[Any] = []

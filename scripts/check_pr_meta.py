@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any, Final
 
+import agent_pr
 import changerefs
 import ghrest
 import labels
@@ -219,11 +220,21 @@ def main(argv: list[str] | None = None) -> int:
     # Заголовки коммитов берутся так же, как их отдаёт git (`subject_of`), и среди них есть
     # подтягивания базы, которые `compose` отбрасывает (`--no-merges`). Это
     # строже площадки только на заголовке слияния базы — его пишет git.
+    #
+    # ОПИСАНИЕ СУДИТСЯ И БУДУЩЕЕ. Его дописывает `agent_pr` после толчка — уже
+    # после этого прогона (#929), — и строки, которые он переносит из коммитов
+    # («Закрывает пункт», «Ждёт:»), площадка прочтёт при слиянии, а гейт на
+    # нынешнем описании их ещё не видит. Поэтому судится и то описание, которое
+    # соберёт `agent_pr.describe_from`, — той же функцией, что его соберёт.
     messages = read_messages(args.messages_from)
-    landing = squash_body.compose_from([squash_body.subject_of(one) for one in messages], messages)
-    if changerefs.CLOSING_KEYWORD_RE.search(title):
-        problems.append(f"в заголовке «{title}» {STRAY_CLOSING}")
-    for line in changerefs.stray_closing_words(f"{body}\n{landing}"):
+    subjects = [squash_body.subject_of(one) for one in messages]
+    landing = squash_body.compose_from(subjects, messages)
+    coming = agent_pr.describe_from(subjects, messages) if messages else None
+    for heading in dict.fromkeys([title, *([coming.title] if coming else [])]):
+        if changerefs.CLOSING_KEYWORD_RE.search(heading):
+            problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")
+    said = "\n".join([body, landing, coming.body if coming else ""])
+    for line in dict.fromkeys(changerefs.stray_closing_words(said)):
         problems.append(f"в строке «{line}» {STRAY_CLOSING}")
 
     undeclared = sorted(on_pr - {label.name for label in declared})
