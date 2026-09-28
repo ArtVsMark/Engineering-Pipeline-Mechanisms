@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from tests.conftest import ROOT, load_script, needs_history
+from tests.conftest import ROOT, load_script
 
 onboard = load_script("onboard.py")
 family_uptake = load_script("family_uptake.py")
@@ -74,18 +74,23 @@ def test_the_probe_goes_the_outward_way() -> None:
         assert "@" in said, f"{name}: вызов без версии"
 
 
-@needs_history
 def test_the_probe_says_what_the_kit_prints() -> None:
-    """Адрес и прибивка — те же, что печатает заход подключения.
+    """Адрес — тот же, что печатает заход подключения.
 
     Иначе проверяется не то, что отдаётся: заготовка потребителя и проба
     разошлись бы молча, и зелёная проба обещала бы работу чужому вызову,
     которого никто не проверял.
+
+    ТЕГ БЕРЁТСЯ ИЗ САМОЙ ПРОБЫ, А НЕ ИЗ ЖИВОЙ ИСТОРИИ. Прежде заготовка
+    печаталась под последним тегом (`onboard.pin_of`), и тест краснел в миг
+    каждого выпуска — тем же путём, что сосед про прибивку (#926). Свежесть
+    прибивки — предмет дрейфа (`probe_behind_release`), а здесь сверяется
+    форма адреса при той прибивке, что стоит.
     """
-    pin = onboard.pin_of(ROOT)
     for step in set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE):
-        want = onboard.caller(step, family_uptake.OURS, pin).splitlines()
         said = str(probe()["jobs"][f"{PREFIX}{step}"]["uses"])
+        pin = said.rsplit("@", 1)[1]
+        want = onboard.caller(step, family_uptake.OURS, pin).splitlines()
         assert any(said in line for line in want), f"{step}: проба зовёт не тот адрес"
 
 
