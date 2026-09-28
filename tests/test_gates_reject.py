@@ -985,6 +985,58 @@ def test_findings_survive_an_unreadable_task(
     assert "выдуманная" in printed, "находка разметки исчезла вместе с отказом"
 
 
+@pytest.mark.parametrize(
+    ("body", "message", "verdict"),
+    [
+        # Случай #927: тело ещё старое, строка пункта уже в коммите.
+        ("Closes #8", "тема\n\nЗакрывает пункт: второй\n", CLEAN),
+        # Та же гонка со связью: тело без неё, коммит её несёт.
+        ("", "тема\n\nCloses #8\nЗакрывает пункт: второй\n", CLEAN),
+        # Путь человека: пункт закрыт правкой тела, коммиты молчат.
+        ("Closes #8\nЗакрывает пункт: второй", "тема\n", CLEAN),
+        # Вторая половина: пункт не закрыт нигде — отказ, а не «сошлось».
+        ("Closes #8", "тема\n", REJECTED),
+    ],
+)
+def test_links_and_closed_items_are_read_from_commits_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str, message: str, verdict: int
+) -> None:
+    """Вердикт не зависит от того, успел ли `agent-pr` дописать тело (#929).
+
+    Тело дописывается токеном прогона после толчка, и нового захода проверок
+    это не запускает: гейт, читавший одно тело, отверг #927 за пункт, который
+    строка коммита уже закрыла.
+    """
+    check = load_script("check_pr_meta.py")
+    event = tmp_path / "event.json"
+    event.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "number": 7,
+                    "labels": [{"name": "area/docs"}],
+                    "title": "t",
+                    "body": body,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    messages = tmp_path / "messages.txt"
+    messages.write_bytes(f"{message}\0".encode())
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "о/р")
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(
+        check.ghrest,
+        "request",
+        lambda method, path, token, body=None: issue_with("- [x] первый\n- [ ] второй\n"),
+    )
+    monkeypatch.setattr(check, "fresh", lambda pull, repo, token: pull)
+    said = ["--files", "README.md", "--messages-from", str(messages)]
+    assert check.main(said) == verdict
+
+
 def test_the_version_gate_sees_a_file_not_yet_committed(
     run_script: RunScript, tmp_path: Path
 ) -> None:
@@ -1383,10 +1435,56 @@ def test_a_stray_closing_word_is_rejected(run_script: RunScript, tmp_path: Path)
 
 
 @pytest.mark.parametrize(
+    ("message", "caught"),
+    [
+        # Заголовок коммита едет в тело слияния строкой списка.
+        ("Fixes #5 в гейте\n", True),
+        # Первый абзац git склеивает в один заголовок — слово во второй его
+        # строке едет в тело слияния (взгляд на #933).
+        ("Починка гейта\nfixes #5\n\nтело\n", True),
+        # Проза тела коммита в общую ветку не едет — судить её нечего.
+        ("тема\n\nКогда-то это fixes #5, но строка остаётся в ветке.\n", False),
+    ],
+)
+def test_only_what_lands_is_judged(
+    run_script: RunScript, tmp_path: Path, message: str, caught: bool
+) -> None:
+    """Из коммитов судится только отобранное `squash_body.compose_from`.
+
+    Иначе слово в прозе, которая никуда не доедет, требовало бы переписать
+    историю ветки — отказ без вреда, который он предотвращает.
+    """
+    check = load_script("check_pr_meta.py")
+    env = write_event(tmp_path, ["area/docs"], "Refs #1")
+    said = tmp_path / "messages.txt"
+    said.write_bytes(f"{message}\0".encode())
+    result = run_script(
+        "check_pr_meta.py", "--files", "README.md", "--messages-from", str(said), env=env
+    )
+    assert (check.STRAY_CLOSING in result.text) is caught, result.text
+
+
+def test_the_step_hands_the_messages_to_the_gate() -> None:
+    """Прогон передаёт гейту сообщения коммитов — иначе проверка выключена молча.
+
+    Без `--messages-from` гейт пишет MESSAGES_UNREAD в журнал прогона и
+    пропускает изменение: зелёный прогон неотличим от проверенного (045).
+    """
+    step = (ROOT / ".github" / "workflows" / "step-pr-meta.yml").read_text(encoding="utf-8")
+    gate = next(line for line in step.splitlines() if "check_pr_meta.py" in line)
+    source = gate.split("--messages-from", 1)[1].split()[0] if "--messages-from" in gate else ""
+    assert source, "прогон зовёт гейт без --messages-from"
+    assert f"> {source}" in step, f"{source}: прогон не пишет файл, который передаёт"
+
+
+@pytest.mark.parametrize(
     ("title", "body"),
     [
         # Заголовок становится заголовком коммита слияния (`automerge.py`).
         ("Fixes #5 в гейте", "Refs #1"),
+        # Заголовок судится БЕЗ исключения строки связи: `Fixes #5 (#N)` в
+        # заголовке коммита слияния закроет #5, даже если описание молчит.
+        ("Fixes #5", "Refs #1"),
         # Описание площадка читает целиком, не только строку связи.
         ("t", "Refs #1\n\nЗаодно это resolves #5."),
     ],
@@ -1409,7 +1507,6 @@ def test_messages_are_read_whole_and_their_absence_is_said(
     check = load_script("check_pr_meta.py")
     said = tmp_path / "messages.txt"
     said.write_bytes("первый\n\0второй\n\0".encode())
-    text = check.read_messages(str(said))
-    assert "первый" in text and "второй" in text
-    assert check.read_messages("") == ""
+    assert check.read_messages(str(said)) == ["первый\n", "второй\n"]
+    assert check.read_messages("") == []
     assert check.MESSAGES_UNREAD in capsys.readouterr().err

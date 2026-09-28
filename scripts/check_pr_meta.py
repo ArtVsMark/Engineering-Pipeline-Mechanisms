@@ -30,6 +30,7 @@ from typing import Any, Final
 import changerefs
 import ghrest
 import labels
+import squash_body
 
 #: Незакрытый пункт чек-листа задачи в её теле.
 OPEN_ITEM_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(\S.*?)\s*$", re.MULTILINE)
@@ -153,12 +154,17 @@ def read_files(inline: str, from_path: str) -> list[str]:
     return [line.strip() for line in inline.splitlines() if line.strip()]
 
 
-def read_messages(from_path: str) -> str:
-    """Сообщения коммитов изменения одним текстом; без файла — пусто, и это сказано."""
+def read_messages(from_path: str) -> list[str]:
+    """Сообщения коммитов изменения, каждое отдельно; без файла — пусто, и это сказано.
+
+    Отдельно, а не склейкой: у каждого сообщения своя разметка, и склеенные
+    заборы кода разбор счёл бы парой (`changerefs.links_in_all`).
+    """
     if not from_path:
         print(MESSAGES_UNREAD, file=sys.stderr)
-        return ""
-    return "\n".join(Path(from_path).read_bytes().decode("utf-8").split("\0"))
+        return []
+    raw = Path(from_path).read_bytes().decode("utf-8")
+    return [one for one in raw.split("\0") if one.strip()]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -198,11 +204,26 @@ def main(argv: list[str] | None = None) -> int:
 
     problems: list[str] = []
 
-    # СЛОВО ЗАКРЫТИЯ ВНЕ СТРОКИ СВЯЗИ (#928). Площадка закрывает задачу по нему
-    # в заголовке и описании изменения и в любом месте сообщений коммитов, из
-    # которых собирается тело слияния (`squash_body.compose`). Читается всё это.
-    said = "\n".join([title, body, read_messages(args.messages_from)])
-    for line in changerefs.stray_closing_words(said):
+    # СЛОВО ЗАКРЫТИЯ ВНЕ СТРОКИ СВЯЗИ (#928). Судится ТОТ ТЕКСТ, что доедет до
+    # общей ветки или будет прочитан площадкой при слиянии, — и ничего сверх:
+    #
+    # * заголовок изменения — БЕЗ исключения для строки связи. Он становится
+    #   заголовком коммита слияния (`automerge.py`), и `Fixes #5` там закроет
+    #   задачу, которой в описании может не быть;
+    # * описание изменения — площадка читает его целиком;
+    # * из коммитов — только то, что отберёт `squash_body.compose_from`:
+    #   заголовки, строки связи, «Разобрано», трейлеры. Проза тела коммита в
+    #   общую ветку не едет, и отвергать её значило бы требовать переписать
+    #   историю ветки ради слова, которое никуда не попадёт.
+    #
+    # Заголовки коммитов берутся так же, как их отдаёт git (`subject_of`), и среди них есть
+    # подтягивания базы, которые `compose` отбрасывает (`--no-merges`). Это
+    # строже площадки только на заголовке слияния базы — его пишет git.
+    messages = read_messages(args.messages_from)
+    landing = squash_body.compose_from([squash_body.subject_of(one) for one in messages], messages)
+    if changerefs.CLOSING_KEYWORD_RE.search(title):
+        problems.append(f"в заголовке «{title}» {STRAY_CLOSING}")
+    for line in changerefs.stray_closing_words(f"{body}\n{landing}"):
         problems.append(f"в строке «{line}» {STRAY_CLOSING}")
 
     undeclared = sorted(on_pr - {label.name for label in declared})
@@ -226,7 +247,14 @@ def main(argv: list[str] | None = None) -> int:
             + " — зона выведена из путей состава, а не угадана"
         )
 
-    text = f"{title}\n{body}"
+    # СВЯЗЬ И ЗАКРЫТЫЕ ПУНКТЫ ЧИТАЮТСЯ И ИЗ КОММИТОВ (#929). Тело изменения
+    # дописывает `agent-pr` токеном прогона — после толчка и без нового захода
+    # проверок, — и гейт, читавший одно тело, судил по прошлому: #927 отвергнут
+    # за незакрытые пункты, которые строки коммита уже закрыли. Коммиты — тот
+    # же источник, из которого тело собирается, и они едут в тело слияния
+    # (`squash_body.compose`). Тело читается по-прежнему: его правит человек.
+    texts = [f"{title}\n{body}", *messages]
+    links = changerefs.links_in_all(texts)
     token = ghrest.token_from_env()
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if token and repo:
@@ -234,8 +262,8 @@ def main(argv: list[str] | None = None) -> int:
             problems += premature(
                 repo,
                 token,
-                changerefs.links_in(text),
-                [changerefs.normalise(item) for item in changerefs.closed_items_in(text)],
+                links,
+                [changerefs.normalise(item) for item in changerefs.closed_items_in_all(texts)],
             )
         except NotRun as exc:
             # Отказ чтения задачи — объявленный третий исход, а не трассировка:
@@ -266,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    if not changerefs.has_link(text):
+    if not links:
         problems.append(
             "нет связи с задачей: ни «Closes #N», ни «Refs #N» — "
             "без неё задача не закроется при слиянии, а приоритет очереди наследовать неоткуда"
