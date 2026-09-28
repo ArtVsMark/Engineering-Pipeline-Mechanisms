@@ -517,15 +517,21 @@ OUR_BASE_REF: Final = "${{ github.event.pull_request.base.ref }}"
 LOCAL_WORKFLOW: Final = "./.github/workflows/"
 
 
-def event_names(events: Any) -> set[str]:
-    """Имена событий из `on:` в любой из трёх записей площадки.
+def listed(value: Any) -> list[str]:
+    """Значение, которое площадка принимает скаляром ИЛИ списком, — списком.
 
-    Скаляр (`on: push`) — ОДНО событие: `set()` от строки разобрал бы его на
-    буквы, и прогон выпал бы из гейта молча.
+    Скаляр (`on: push`, `branches: main`) — ОДИН элемент: перебор строки
+    разобрал бы его на буквы, и прогон выпал бы из гейта молча. Разбор один на
+    все такие поля: у события он уже был, а фильтр веток его не знал.
     """
-    if isinstance(events, str):
-        return {events}
-    return {str(name) for name in events or []}
+    if isinstance(value, str):
+        return [value]
+    return [str(one) for one in value or []]
+
+
+def event_names(events: Any) -> set[str]:
+    """Имена событий из `on:` в любой из трёх записей площадки."""
+    return set(listed(events))
 
 
 def shared_events(document: dict[Any, Any]) -> set[str]:
@@ -544,7 +550,7 @@ def pushes_our_branch(branches: Any, ignored: Any) -> bool:
     """Задевает ли толчок с этими фильтрами общую ветку — фильтры площадки шаблоны."""
 
     def hits(patterns: Any) -> bool:
-        return any(fnmatch.fnmatchcase(OUR_BRANCH, str(one)) for one in patterns or [])
+        return any(fnmatch.fnmatchcase(OUR_BRANCH, one) for one in listed(patterns))
 
     if branches is not None:
         return hits(branches)
@@ -713,6 +719,10 @@ def test_the_local_callee_exemption_has_a_subject() -> None:
         ({"push": {"branches": ["ma*"]}}, True),
         ({"push": {"branches-ignore": ["main"]}}, False),
         ({"push": {"branches-ignore": ["agent/**"]}}, True),
+        # Фильтр веток скаляром — одно имя, а не буквы.
+        ({"push": {"branches": "main"}}, True),
+        ({"push": {"branches": "agent/x"}}, False),
+        ({"push": {"branches-ignore": "main"}}, False),
         # Список перевёрнут: общими считаются все события, кроме названных.
         ({"issues": None, "issue_comment": None}, True),
         ({"pull_request_review": None, "merge_group": None}, False),
