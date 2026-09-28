@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from pathlib import Path
 from typing import Any, Final
@@ -16,6 +17,7 @@ import pytest
 import yaml
 
 from tests.conftest import load_script, walk
+from tests.test_family_pinning import FAMILY, PINNED_RE
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -441,48 +443,127 @@ def test_exit_codes_are_read_as_an_allowlist(path: Path) -> None:
     )
 
 
-#: Действие соседа, к ВЕРСИИ КОНТРАКТА которого проект прибит сознательно:
-#: потребитель прибивается к тегу, а не к общей ветке, и подъём версии обязан
-#: быть перечитыванием ответов, а не тихой подменой кода
+#: Вызов СЕМЬИ — каталога и нашего же выпуска — идёт по тегу версии, а не по
+#: SHA, и это решение, а не пропуск: семья подключается версией-тегом, и
+#: держит это свой гейт (`tests/test_family_pinning.py`, образец `ArtVsMark/`).
+#: Подъём версии обязан быть перечитыванием ответов, а не тихой подменой кода
 #: ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
 #:
-#: ТЕГ ПРИ ЭТОМ ПОДВИЖЕН — технически владелец каталога может его передвинуть.
-#: Исключение держится не на неизменности, а на обещании каталога не делать
-#: этого: номера выпусков не переиспользуются, отправленный тег не переставляют
-#: ([`docs/VERSIONING.md`](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/docs/VERSIONING.md)).
-#: Цена названа: нарушенное обещание подменит исполняемый код прогона по
-#: расписанию без нашего ведома, и ЭТУ ПОДМЕНУ НЕ ЛОВИТ НИЧТО — ни этот гейт,
-#: ни дрейф: `scripts/drift.py::pinned_tag_moved` называет только выход НОВОГО
-#: выпуска, а переставленный старый тег для него неотличим от прежнего. SHA
-#: здесь не взят, потому что семья подключается версией-тегом
-#: (`tests/test_family_pinning.py`).
+#: ТЕГ ПРИ ЭТОМ ПОДВИЖЕН. Исключение держится на обещании издателя не
+#: переставлять отправленный тег — у каталога это его правила выпуска
+#: ([`docs/VERSIONING.md`](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/docs/VERSIONING.md)),
+#: у нас — `release.yml`, который отправленный тег не трогает. Цена названа:
+#: нарушенное обещание подменит исполняемый код без нашего ведома, и ЭТУ
+#: ПОДМЕНУ НЕ ЛОВИТ НИЧТО — дрейф (`pinned_tag_moved`, `probe_behind_release`)
+#: видит только выход НОВОГО выпуска.
 #:
-#: СОСЕД НАЗВАН (195). Префикс покрывает подключение корнем (`…Playbook@`), но
-#: не подпутём (`…Playbook/.github/actions/attribution@`). Сегодня гейт этих
-#: строк не видит; увидит ли и при каком решении — вопрос расширения, #922.
+#: Префикс — владелец семьи целиком, а не корень одного хранилища: каталог
+#: зовут и корнем (`rules-inbox.yml`), и подпутём действия (`step-attribution.yml`,
+#: `attribution-history.yml`), а проба передачи зовёт наши шаги тегом выпуска
+#: (`handover-probe.yml`). Префикс и форма тега берутся у гейта семьи, а не
+#: переписываются буквами: одно понимание, а не два (090, 209).
+#:
+#: ИСКЛЮЧЕНИЕ ТРЕБУЕТ ТЕГА ВЕРСИИ САМО, а не надеется на соседа: гейт семьи
+#: читает `uses:` построчным образцом и запись в кавычках не узнаёт — через
+#: такую `ArtVsMark/x@main` прошла бы оба гейта (:func:`by_contract_tag`).
 #: Список разрешительный и с причиной: тихого исключения здесь нет (068).
-BY_CONTRACT_TAG = ("ArtVsMark/Engineering-Incidents-Playbook@",)
+BY_CONTRACT_TAG = (FAMILY,)
+
+
+def by_contract_tag(said: str) -> bool:
+    """Вызов семьи тегом ВЫПУСКА — единственная форма, которую исключение снимает."""
+    return said.startswith(BY_CONTRACT_TAG) and bool(PINNED_RE.match(said.rsplit("@", 1)[-1]))
+
+
 #: Вызов СВОЕГО из этого же дерева: `uses: ./.github/actions/<имя>`. Закрепить
 #: его по SHA нельзя — своей версии у него нет, — и не нужно: он приезжает тем
 #: же ref, что и файл прогона, то есть с общей ветки. Подвижной метки, которая
 #: меняла бы исполняемый код без нашего ведома, здесь не существует (152).
 OUR_OWN_TREE = "./"
 
-#: События, на которых площадка берёт файл прогона с ОБЩЕЙ ветки, а не из
-#: изменения. Там закрепление вызываемого что-то значит. Список НЕПОЛОН, и это
-#: названо: файл прогона приезжает не из изменения и на других событиях. Какие
-#: они, замер и решения до расширения — #922; подробности держит задача, а не
-#: этот комментарий, чтобы не расходиться с ней (022).
-SHARED_CALLER = ("workflow_run", "pull_request_target", "schedule")
+#: События, на которых площадка берёт файл прогона НЕ из изменения. Там
+#: закрепление вызываемого что-то значит.
+#:
+#: * `workflow_run`, `pull_request_target`, `schedule`, `push` — с общей ветки
+#:   (`push` — только в неё: толчок в ветку изменения берёт файл из самого
+#:   изменения, см. :data:`OUR_BRANCH`; `branches` площадки — ШАБЛОНЫ, и
+#:   `**` задевает общую ветку так же, как её имя);
+#: * `release` — с коммита под тегом выпуска;
+#: * `workflow_dispatch` — с ветки, на которой нажали кнопку. Из файла она не
+#:   видна, и кнопка считается общей ВСЕГДА — решение владельца в #922:
+#:   закрепить с запасом дешевле, чем гадать о ref запуска.
+#:
+#: Вызываемый переиспользуемый прогон (`workflow_call`) своих событий не имеет:
+#: он приезжает с ref вызывающего и общий тогда, когда общий вызывающий — на
+#: любой глубине вложенности (:func:`shared_callees`).
+SHARED_CALLER = (
+    "workflow_run",
+    "pull_request_target",
+    "schedule",
+    "push",
+    "release",
+    "workflow_dispatch",
+)
+#: Общая ветка — единственная, толчок в которую берёт файл не из изменения.
+OUR_BRANCH: Final = "main"
 # Единственный ref, который прогон от общей ветки забирает не чужим: сама база.
 OUR_BASE_REF: Final = "${{ github.event.pull_request.base.ref }}"
+#: Префикс вызова переиспользуемого прогона из этого же дерева.
+LOCAL_WORKFLOW: Final = "./.github/workflows/"
 
 
-def shared_caller(document: dict[Any, Any]) -> bool:
-    """Берётся ли файл этого прогона с общей ветки."""
+def shared_events(document: dict[Any, Any]) -> set[str]:
+    """События этого файла, на которых он берётся не из изменения."""
     events = document[True]
     names = set(events) if isinstance(events, dict) else set(events or [])
-    return bool(names & set(SHARED_CALLER))
+    shared = names & set(SHARED_CALLER)
+    if "push" in shared and isinstance(events, dict):
+        push = events.get("push") or {}
+        push = push if isinstance(push, dict) else {}
+        if not pushes_our_branch(push.get("branches"), push.get("branches-ignore")):
+            shared.discard("push")
+    return shared
+
+
+def pushes_our_branch(branches: Any, ignored: Any) -> bool:
+    """Задевает ли толчок с этими фильтрами общую ветку — фильтры площадки шаблоны."""
+
+    def hits(patterns: Any) -> bool:
+        return any(fnmatch.fnmatchcase(OUR_BRANCH, str(one)) for one in patterns or [])
+
+    if branches is not None:
+        return hits(branches)
+    return not hits(ignored)
+
+
+def shared_callees(documents: dict[str, dict[Any, Any]] | None = None) -> set[str]:
+    """Имена переиспользуемых прогонов, которые зовёт прогон не из изменения.
+
+    Обход ТРАНЗИТИВНЫЙ: вызываемый, который сам зовёт следующего, передаёт ему
+    ту же общность. Один уровень пропустил бы вложенный вызов молча (195).
+    """
+    if documents is None:
+        documents = {path.name: load(path) for path in walk(WORKFLOWS, "*.yml")}
+    callees = {
+        name: {
+            str(job["uses"]).removeprefix(LOCAL_WORKFLOW)
+            for job in document["jobs"].values()
+            if str(job.get("uses") or "").startswith(LOCAL_WORKFLOW)
+        }
+        for name, document in documents.items()
+    }
+    reached: set[str] = set()
+    frontier = {name for name, document in documents.items() if shared_events(document)}
+    while frontier:
+        fresh = set().union(*(callees.get(name, set()) for name in frontier)) - reached
+        reached |= fresh
+        frontier = fresh
+    return reached
+
+
+def shared_caller(document: dict[Any, Any], name: str = "") -> bool:
+    """Берётся ли файл этого прогона не из изменения — своим событием или вызывающим."""
+    return bool(shared_events(document)) or (bool(name) and name in shared_callees())
 
 
 @pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
@@ -494,9 +575,8 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
     `pull_request` площадка берёт файл прогона ИЗ ИЗМЕНЕНИЯ: кто правит
     изменение, правит и шаг целиком, и закрепление ничего не добавляет. На
     событиях из :data:`SHARED_CALLER` рассуждение переворачивается — файл
-    берётся с общей ветки, и подвижная метка меняет исполняемый код без нашего
-    ведома. Список неполон, и это названо у самого списка, а не пересказано
-    здесь (022).
+    берётся не из изменения, и подвижная метка меняет исполняемый код без
+    нашего ведома. Какие это события, говорит сам список, а не этот текст (022).
 
     ЗАМЕР 10.09.2026, найден разбором соседей: у `automerge` и `main-red` —
     обоих на `workflow_run` — действия стояли на метках `@v4` и `@v5`, тогда
@@ -520,7 +600,7 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
     ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
     """
     document = load(path)
-    if not shared_caller(document):
+    if not shared_caller(document, path.name):
         return
     unpinned = [
         said
@@ -528,7 +608,7 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
         for said in [job.get("uses"), *[one.get("uses") for one in job.get("steps") or []]]
         if said
         and not SHA_PIN.search(said)
-        and not said.startswith(BY_CONTRACT_TAG)
+        and not by_contract_tag(said)
         and not said.startswith(OUR_OWN_TREE)
     ]
     assert not unpinned, (
@@ -563,7 +643,7 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
     foreign = [
         f"{path.name}:{job_id}"
         for path in walk(WORKFLOWS, "*.yml")
-        if shared_caller(document := load(path))
+        if shared_caller(document := load(path), path.name)
         for job_id, job in document["jobs"].items()
         for step in job.get("steps") or []
         if "checkout" in str(step.get("uses") or "")
@@ -603,9 +683,67 @@ def test_the_local_callee_exemption_has_a_subject() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("on", "shared"),
+    [
+        ({"pull_request": None}, False),
+        ({"push": {"branches": ["agent/**"]}}, False),
+        ({"push": {"branches": ["main"]}}, True),
+        ({"push": None}, True),
+        ({"release": None}, True),
+        ({"workflow_dispatch": None}, True),
+        ({"pull_request": None, "schedule": [{"cron": "0 0 * * *"}]}, True),
+        # Фильтры площадки — шаблоны, а не имена.
+        ({"push": {"branches": ["**"]}}, True),
+        ({"push": {"branches": ["ma*"]}}, True),
+        ({"push": {"branches-ignore": ["main"]}}, False),
+        ({"push": {"branches-ignore": ["agent/**"]}}, True),
+    ],
+)
+def test_shared_events_are_told_from_the_changes_own(on: dict[str, Any], shared: bool) -> None:
+    """Вторая половина гейта: файл ИЗ ИЗМЕНЕНИЯ он не судит.
+
+    Толчок в ветку изменения и `pull_request` берут файл из самого изменения —
+    кто правит изменение, правит и шаг, и закрепление там ничего не добавляет.
+    Без этой половины гейт был бы неотличим от «закрепляй всё везде» (051).
+    """
+    assert bool(shared_events({True: on})) is shared
+
+
+@pytest.mark.parametrize(
+    ("said", "exempt"),
+    [
+        ("ArtVsMark/Engineering-Incidents-Playbook@v1.3.0", True),
+        ("ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.3.0", True),
+        # Подвижная ветка и мажорный алиас — не тег выпуска: запись в кавычках
+        # гейт семьи не узнаёт, и держать её обязан этот гейт.
+        ("ArtVsMark/x@main", False),
+        ("ArtVsMark/x@v1", False),
+        ("actions/checkout@v7.0.1", False),
+    ],
+)
+def test_the_family_is_exempt_only_by_a_release_tag(said: str, exempt: bool) -> None:
+    """Исключение семьи снимает только вызов тегом выпуска."""
+    assert by_contract_tag(said) is exempt
+
+
+def test_a_nested_callee_inherits_the_shared_caller() -> None:
+    """Общность передаётся по цепочке вызовов, а не на один уровень (195)."""
+    call = {"uses": f"{LOCAL_WORKFLOW}b.yml"}
+    documents = {
+        "top.yml": {True: {"push": None}, "jobs": {"x": {"uses": f"{LOCAL_WORKFLOW}a.yml"}}},
+        "a.yml": {True: {"workflow_call": None}, "jobs": {"y": call}},
+        "b.yml": {True: {"workflow_call": None}, "jobs": {"z": {"runs-on": "u"}}},
+        "pr.yml": {True: {"pull_request": None}, "jobs": {"w": {"uses": f"{LOCAL_WORKFLOW}c.yml"}}},
+    }
+    assert shared_callees(documents) == {"a.yml", "b.yml"}
+
+
 def test_the_pinning_gate_found_its_subject() -> None:
     """Предмет проверки найден: прогоны от общей ветки в дереве есть (075)."""
-    from_shared = [path.name for path in walk(WORKFLOWS, "*.yml") if shared_caller(load(path))]
+    from_shared = [
+        path.name for path in walk(WORKFLOWS, "*.yml") if shared_caller(load(path), path.name)
+    ]
     assert from_shared, "ни один прогон не идёт от общей ветки — проверять нечего"
 
 
