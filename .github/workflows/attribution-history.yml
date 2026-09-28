@@ -63,8 +63,10 @@ jobs:
           fetch-depth: 0
       # Гейт не переписан здесь: каталог отдаёт его действием, и подключение
       # идёт ссылкой на версию, а не копией (090).
+      # Что держит тег в `uses:` и почему нет `catalogue-ref` — у того же
+      # подключения в `step-attribution.yml`; пояснение одно на оба.
       - name: сверить атрибуцию первопредков
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0
+        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.3.0
         with:
           authors: .github/authors.txt
           mode: first-parents
@@ -100,4 +102,3 @@ jobs:
           since: "77a5c720acdf2dc501d5cb56a3b6c8f0564519ca"
           require-declared-author: "true"
           require-coauthor: "true"
-          catalogue-ref: v1.2.0
