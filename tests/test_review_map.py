@@ -332,9 +332,11 @@ def test_the_mark_condition_is_the_definition_of_the_kind() -> None:
     Прежде карта называла лишь «предмет есть, а ответ утверждает обратное», и
     устаревшая причина отвержения под условие не подходила.
     """
-    said = " ".join(module.MARK_SAID)
+    said = "\n".join(module.MARK_SAID)
     assert module.findings.KINDS[module.findings.ANSWER_KIND] in said
-    assert "отвержения" in said, "случай отвергнутого правила не назван"
+    assert len(module.MARK_CASES) == 3
+    for case in module.MARK_CASES:
+        assert f"- {case};" in said, f"случай «{case}» не назван в карте"
 
 
 def test_the_marks_the_map_teaches_are_read_back_by_the_parser() -> None:
