@@ -33,6 +33,11 @@ jobs:
       # Закреплено по SHA: расписание идёт с ОБЩЕЙ ветки, и подвижная метка
       # здесь меняет исполняемый код без нашего ведома (152).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ArtVsMark/Engineering-Incidents-Playbook@v1.2.0
+      # Код действия называет тег в `uses:`: с v1.3.0 каталог исполняет
+      # `sync_inbox` из того же тега, а не из подвижной `main` вторым
+      # `checkout@v4` (#193). Тег — не SHA, как у checkout выше: владелец
+      # каталога может его передвинуть, и держит его договор контракта
+      # (`BY_CONTRACT_TAG`, 157), а не неизменность.
+      - uses: ArtVsMark/Engineering-Incidents-Playbook@v1.3.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
