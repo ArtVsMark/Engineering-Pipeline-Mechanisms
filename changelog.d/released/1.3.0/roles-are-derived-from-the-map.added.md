@@ -61,7 +61,7 @@
 **3153 слова при потолке 3150**. Гейт объёма сказал прямо — «выносите
 равнозначное в канон, а не поднимайте потолок», — и история про снятие
 переходной приставки `claude/**` переехала из свода в
-[`docs/agent/behaviour.md`](../docs/agent/behaviour.md). Свод объявляет, что делать, канон
+[`docs/agent/behaviour.md`](../../../docs/agent/behaviour.md). Свод объявляет, что делать, канон
 — почему
 ([029](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/029-triggers-and-canon.md)).
 
