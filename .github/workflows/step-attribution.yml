@@ -42,8 +42,12 @@ jobs:
       # Гейт не переписан здесь: каталог отдаёт его действием, и подключение
       # идёт ссылкой на версию, а не копией (правило 090). Копия разъехалась бы
       # с оригиналом на первой же правке — и разъехались бы при этом гейты.
+      # ВЕРСИЮ ГЕЙТА ЗАКРЕПЛЯЕТ ТЕГ В `uses:`. С v1.3.0 каталог исполняет гейт из
+      # того же тега и вход `catalogue-ref` не читает: прежде тег закреплял лишь
+      # файл действия, а код гейта выкачивался вторым `checkout@v4` по этому
+      # входу. Подъём снял и предупреждение площадки о Node 20 (#193).
       - name: сверить атрибуцию
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.2.0
+        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.3.0
         with:
           authors: .github/authors.txt
           # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
@@ -58,4 +62,3 @@ jobs:
           require-declared-author: "true"
           require-coauthor: "true"
           range: origin/${{ github.event.pull_request.base.ref || 'main' }}..HEAD
-          catalogue-ref: v1.2.0
