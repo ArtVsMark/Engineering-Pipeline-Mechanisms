@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import catalogue
+import check_required_context
 import check_shipped
 import family
 import findings
@@ -503,6 +504,32 @@ def declared_protection(where: Path | None = None) -> dict[str, Any]:
         return protection.declared(where)
     except protection.NotRead as exc:
         raise NotRun(str(exc)) from exc
+
+
+def merge_ways_moved(repo: str, token: str) -> list[Drift]:
+    """Лишние способы слияния, включённые у площадки, — против решения 006.
+
+    ЭТО ВТОРАЯ ПОЛОВИНА СВЕРКИ `required-context`, И ЗДЕСЬ ОНА ИДЁТ ПО
+    РАСПИСАНИЮ. Обязательные контексты дрейф сверяет в «защите общей ветки»;
+    способ слияния оставался только у сверки, а та идёт кнопкой — прогонов у
+    неё за две недели два (пробел #945, задача #948). Чтение одно на двоих —
+    `check_required_context.merge_ways`: второе понимание той же настройки
+    разошлось бы с первым молча (090).
+    """
+    try:
+        extra = check_required_context.merge_ways(repo, token)
+    except check_required_context.NotRun as exc:
+        raise NotRun(str(exc)) from exc
+    if not extra:
+        return []
+    return [
+        Drift(
+            "способ слияния",
+            "у площадки включены способы слияния сверх уплотнения: " + ", ".join(extra),
+            "снять лишние кнопки в настройках репозитория (решение 006) — "
+            "это может только владелец",
+        )
+    ]
 
 
 def protection_moved(repo: str, token: str) -> list[Drift]:
@@ -1530,6 +1557,7 @@ SOURCES: Final = (
     "сводка семьи",
     "выпуск каталога",
     "защита общей ветки",
+    "способ слияния",
     "версии языка",
     "версии чужих действий",
     "выпуски чужих действий",
@@ -1559,6 +1587,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
         ("защита общей ветки", lambda: protection_moved(repo, token)),
+        ("способ слияния", lambda: merge_ways_moved(repo, token)),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
         ("версии чужих действий", lambda: actions_disagree(action_versions())),
         ("выпуски чужих действий", lambda: actions_behind(action_versions(), token)),
