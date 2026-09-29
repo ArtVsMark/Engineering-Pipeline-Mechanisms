@@ -135,6 +135,14 @@ MERGE_WAYS: Final = {
 }
 
 
+#: Почему площадка молчит о настройках слияния. Токен здесь не известен —
+#: кнопка передаёт токен владельца первым, дрейф — токен прогона, — поэтому
+#: причина названа через права, а не через то, чей токен (взгляд на #957).
+UNSAID_REASON: Final = (
+    "у этого токена нет прав на настройки репозитория; токену прогона их не отдают никогда (#953)"
+)
+
+
 def merge_ways(repo: str, token: str) -> list[str]:
     """Лишние способы слияния, оставшиеся включёнными у площадки."""
     try:
@@ -146,7 +154,10 @@ def merge_ways(repo: str, token: str) -> list[str]:
     # непрочитанное «сошлось» каждую ночь (045). Нашёл внешний взгляд на #951.
     unsaid = [key for key in MERGE_WAYS if not isinstance(answer.get(key), bool)]
     if unsaid:
-        raise NotRun(f"настройки репозитория не прочитаны: площадка не сказала {', '.join(unsaid)}")
+        raise NotRun(
+            f"настройки репозитория не прочитаны: площадка не сказала {', '.join(unsaid)} — "
+            + UNSAID_REASON
+        )
     return [said for key, said in MERGE_WAYS.items() if answer[key]]
 
 
