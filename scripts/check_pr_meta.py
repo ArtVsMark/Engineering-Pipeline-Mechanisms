@@ -30,6 +30,7 @@ from typing import Any, Final
 import agent_pr
 import changerefs
 import ghrest
+import items
 import labels
 import squash_body
 
@@ -103,7 +104,13 @@ def open_items(body: str) -> list[str]:
     return [item.strip() for item in OPEN_ITEM_RE.findall(body or "")]
 
 
-def premature(repo: str, token: str, links: list[Any], declared: list[str]) -> list[str]:
+def premature(
+    repo: str,
+    token: str,
+    links: list[Any],
+    declared: list[str],
+    marked_in: set[int] | None = None,
+) -> list[str]:
     """Задачи, которые изменение закрывает целиком, не доделав.
 
     ПОЧЕМУ ЭТО ГЕЙТ, А НЕ ВНИМАНИЕ АВТОРА. Площадка умеет только полное
@@ -118,11 +125,17 @@ def premature(repo: str, token: str, links: list[Any], declared: list[str]) -> l
     Задача БЕЗ чек-листа проходит: отмечать в ней нечего, и требовать список
     там, где этап один, значило бы заводить ритуал (154). Требование к
     заведению задачи с этапами записано в AGENTS.md.
+
+    `marked_in` — задачи, в которых пункты ОТМЕТЯТ: `items.py` отмечает их
+    только в задачах, названных в итоговом теле изменения. Задаче вне этого
+    набора объявленный пункт не засчитывается — закрыта она будет, а отмечен
+    пункт не будет (взгляд на #937). ``None`` — набор не сужен.
     """
     problems: list[str] = []
     for link in links:
         if not link.closes:
             continue
+        counted = declared if marked_in is None or link.number in marked_in else []
         try:
             issue = ghrest.request("GET", f"repos/{repo}/issues/{link.number}", token) or {}
         except ghrest.TransportError as exc:
@@ -130,7 +143,7 @@ def premature(repo: str, token: str, links: list[Any], declared: list[str]) -> l
         left = [
             item
             for item in open_items(str(issue.get("body") or ""))
-            if changerefs.normalise(item) not in declared
+            if changerefs.normalise(item) not in counted
         ]
         if left:
             problems.append(
@@ -286,9 +299,18 @@ def main(argv: list[str] | None = None) -> int:
     # `agent_pr` — там, где он тело пишет. В чужом теле пункт из коммита не
     # отметится никем, и засчитывать его значило бы пропустить закрытие задачи
     # с неотмеченным пунктом.
+    #
+    # ПУНКТЫ СЧИТАЮТСЯ ПО ИТОГОВОМУ ТЕЛУ И ТЕМ ЖЕ ЧТЕНИЕМ, что у `items.py`
+    # (`items.declared_in`). Итоговое тело — то, что соберёт `agent_pr`, где он
+    # пишет, и нынешнее — где нет. Не заголовок: его `items.py` не читает. Не
+    # склейка нынешнего с будущим: `agent_pr` нынешнее ЗАМЕНИТ, и пункт, убранный
+    # из коммитов перезаписью ветки, засчитался бы по устаревшему тексту.
     texts = [f"{title}\n{body}", *messages]
     links = changerefs.links_in_all(texts)
-    marking = texts if rewritten else [f"{title}\n{body}"]
+    final = coming.body if coming else body
+    # Номера задач тоже из итогового тела: `items.py` отмечает пункты только в
+    # названных там задачах, и пункт засчитывается лишь им.
+    numbers, marked = items.declared_in(final)
     token = ghrest.token_from_env()
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if token and repo:
@@ -297,7 +319,8 @@ def main(argv: list[str] | None = None) -> int:
                 repo,
                 token,
                 links,
-                [changerefs.normalise(item) for item in changerefs.closed_items_in_all(marking)],
+                [changerefs.normalise(item) for item in marked],
+                set(numbers),
             )
         except NotRun as exc:
             # Отказ чтения задачи — объявленный третий исход, а не трассировка:
