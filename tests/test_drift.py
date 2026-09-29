@@ -14,6 +14,7 @@ import ast
 import inspect
 import json
 import os
+import re
 import subprocess
 import textwrap
 from pathlib import Path
@@ -1746,5 +1747,5 @@ def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.Monke
     """Площадка не отдала ключей `allow_*` — источник молчит, а не «сошлось» (045, #951)."""
     said = {"allow_squash_merge": True}
     monkeypatch.setattr(module.check_required_context.ghrest, "request", lambda *a, **k: said)
-    with pytest.raises(module.NotRun, match="не сказала"):
+    with pytest.raises(module.NotRun, match=re.escape(module.check_required_context.UNSAID_REASON)):
         module.merge_ways_moved("о/р", "токен")
