@@ -257,7 +257,7 @@ def describe_from(subjects: list[str], bodies: list[str]) -> Described:
             # …», а `stuck` искал «Ждёт:» — и выносил вердикт «стоп-метка не
             # называет, чего ждёт», то есть звал ЗАБЫТОЙ метку с явно
             # названной причиной. Нашёл внешний взгляд (`fb95a71` на #579).
-            f"Ждёт: {hold}",
+            f"{changerefs.WAITS_KEY} {hold}",
             "",
             "**Это изменение не для слияния.** Объявлено трейлером `Ждёт:` в теле",
             "коммита, то есть ДО открытия: метку можно поставить только после, а",
@@ -281,7 +281,7 @@ def describe_from(subjects: list[str], bodies: list[str]) -> Described:
             "поэтому обрывается там же, где пункт перенесён.",
             "",
         ]
-        lines += [f"Закрывает пункт: {item}" for item in closed]
+        lines += [f"{changerefs.CLOSED_ITEM_KEY} {item}" for item in closed]
 
     lines += [
         "",

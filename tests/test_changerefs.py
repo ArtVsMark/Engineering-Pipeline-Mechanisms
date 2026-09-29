@@ -106,14 +106,23 @@ def test_the_description_is_composed_without_git(monkeypatch: pytest.MonkeyPatch
 
     Описание дописывается после прогона гейта, и гейт судит его заранее этой
     функцией. Разойдись она с `describe` — судилось бы не то, что уедет.
+    Коммитов ДВА и задержки две: первая задержка и заголовок берутся у первого
+    коммита, и на одном коммите порядок не виден (взгляд на #934).
     """
-    message = "feat: что-то\n\nRefs #2\nЗакрывает пункт: первый\nЖдёт: #9\n"
-    monkeypatch.setattr(
-        agent_pr, "git", lambda *args: "feat: что-то\n" if "--format=%s" in args else message
-    )
-    said = agent_pr.describe_from(["feat: что-то"], [message])
+    wait, item = changerefs.WAITS_KEY, changerefs.CLOSED_ITEM_KEY
+    older = f"feat: старый\n\nRefs #2\n{item} первый\n{wait} #9\n"
+    newer = f"fix: новый\n\n{wait} #7\n"
+
+    def git(*args: str) -> str:
+        if "--format=%s" in args:
+            return "feat: старый\nfix: новый\n"
+        return f"{older}\0{newer}\0"
+
+    monkeypatch.setattr(agent_pr, "git", git)
+    said = agent_pr.describe_from(["feat: старый", "fix: новый"], [older, newer])
     assert said == agent_pr.describe("agent/окно", "main")
-    assert "Закрывает пункт: первый" in said.body and "Ждёт: #9" in said.body
+    assert said.hold == "#9" and said.title.startswith("feat: старый")
+    assert f"{item} первый" in said.body and f"{wait} #9" in said.body
 
 
 def fake_transport(monkeypatch: pytest.MonkeyPatch, current: dict[str, Any]) -> list[Any]:

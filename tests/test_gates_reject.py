@@ -1468,6 +1468,25 @@ def test_only_what_lands_is_judged(
     assert (check.STRAY_CLOSING in result.text) is caught, result.text
 
 
+def test_the_first_commits_hold_is_judged(run_script: RunScript, tmp_path: Path) -> None:
+    """Задержка, которую перенесёт `agent_pr`, — первого коммита, и её судят.
+
+    Сообщения идут от старых к новым; слово закрытия в «Ждёт:» старого коммита
+    уедет в описание, и гейт обязан увидеть именно его (взгляд на #934).
+    """
+    check = load_script("check_pr_meta.py")
+    env = write_event(tmp_path, ["area/docs"], "Refs #1")
+    said = tmp_path / "messages.txt"
+    older = "старый\n\nRefs #1\nЖдёт: пока fixes #5 не выйдет\n"
+    newer = "новый\n\nЖдёт: #9\n"
+    said.write_bytes(f"{older}\0{newer}\0".encode())
+    result = run_script(
+        "check_pr_meta.py", "--files", "README.md", "--messages-from", str(said), env=env
+    )
+    assert result.code == REJECTED
+    assert check.STRAY_CLOSING in result.text
+
+
 def test_the_step_hands_the_messages_to_the_gate() -> None:
     """Прогон передаёт гейту сообщения коммитов — иначе проверка выключена молча.
 
@@ -1478,7 +1497,9 @@ def test_the_step_hands_the_messages_to_the_gate() -> None:
     gate = next(line for line in step.splitlines() if "check_pr_meta.py" in line)
     source = gate.split("--messages-from", 1)[1].split()[0] if "--messages-from" in gate else ""
     assert source, "прогон зовёт гейт без --messages-from"
-    assert f"> {source}" in step, f"{source}: прогон не пишет файл, который передаёт"
+    writer = next(line for line in step.splitlines() if f"> {source}" in line)
+    # От старых к новым, как читают `agent_pr` и `squash_body` (взгляд на #934).
+    assert "--reverse" in writer, "сообщения переданы от новых к старым"
 
 
 @pytest.mark.parametrize(
