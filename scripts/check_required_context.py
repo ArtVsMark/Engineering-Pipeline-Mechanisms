@@ -146,7 +146,10 @@ def merge_ways(repo: str, token: str) -> list[str]:
     # непрочитанное «сошлось» каждую ночь (045). Нашёл внешний взгляд на #951.
     unsaid = [key for key in MERGE_WAYS if not isinstance(answer.get(key), bool)]
     if unsaid:
-        raise NotRun(f"настройки репозитория не прочитаны: площадка не сказала {', '.join(unsaid)}")
+        raise NotRun(
+            f"настройки репозитория не прочитаны: площадка не сказала {', '.join(unsaid)} — "
+            "этому токену их не отдают, нужен токен владельца (#953)"
+        )
     return [said for key, said in MERGE_WAYS.items() if answer[key]]
 
 
