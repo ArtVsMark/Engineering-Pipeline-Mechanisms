@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-09-28T10:43:01+00:00",
+  "updated": "2026-09-29T10:30:53+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -1800,6 +1800,176 @@
           "red": 0,
           "cancelled": 0,
           "seconds": 20,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 92.0
+    },
+    "2026-09-29": {
+      "runs": {
+        "schedules-seen": {
+          "runs": 104,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 489,
+          "timed": 104,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 111,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 991,
+          "timed": 111,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 102,
+          "red": 0,
+          "cancelled": 12,
+          "seconds": 1850,
+          "timed": 102,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 103,
+          "red": 0,
+          "cancelled": 12,
+          "seconds": 2727,
+          "timed": 103,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 203,
+          "red": 0,
+          "cancelled": 97,
+          "seconds": 3402,
+          "timed": 203,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 103,
+          "red": 0,
+          "cancelled": 14,
+          "seconds": 1950,
+          "timed": 103,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 100,
+          "red": 0,
+          "cancelled": 68,
+          "seconds": 9558,
+          "timed": 100,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 94,
+          "red": 0,
+          "cancelled": 69,
+          "seconds": 6042,
+          "timed": 94,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 305,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 24,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 58,
+          "timed": 24,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 19,
+          "red": 0,
+          "cancelled": 2,
+          "seconds": 11091,
+          "timed": 19,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1689,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 9,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 315,
+          "timed": 9,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 75,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "drift": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 22,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
