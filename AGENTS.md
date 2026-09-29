@@ -246,7 +246,8 @@ python3 scripts/preflight.py
 
 Осталось руками — и **только это**. Механизма у этих четырёх не будет: каждая
 судит смысл, а не признак; почему и что держит их вместо гейта — решение
-[`034`](docs/decisions/034-five-duties-held-by-judgment-get-no-mechanism.md):
+[`034`](docs/decisions/034-five-duties-held-by-judgment-get-no-mechanism.md)
+(поправка — [`035`](docs/decisions/035-the-boundary-is-held-by-a-warning-034-corrected.md)):
 
 - [ ] изменение несёт **одну** тему, и она названа в заголовке;
 - [ ] ни одно утверждение не продублировало договор — только ссылка;
