@@ -906,6 +906,39 @@ def test_an_item_closed_by_this_change_does_not_count(monkeypatch: pytest.Monkey
     assert problems == []
 
 
+def test_one_declared_item_is_marked_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Один объявленный пункт отмечается в ОДНОЙ задаче — как в `items.mark`.
+
+    `Closes #8` и `Closes #9`, в обеих открыт «второй», объявлен он один раз:
+    `items.py` отметит его только в первой, и #9 закроется с неотмеченным
+    пунктом. Гейт прогоняет ту же отметку и это видит (взгляд на #937).
+    """
+    check = load_script("check_pr_meta.py")
+    monkeypatch.setattr(
+        check.ghrest,
+        "request",
+        lambda method, path, token, body=None: issue_with("- [x] первый\n- [ ] второй\n"),
+    )
+    text = "Closes #8\nCloses #9\nЗакрывает пункт: второй"
+    problems = check.premature("о/р", "токен", check.changerefs.links_in(text), ["второй"], [8, 9])
+    assert len(problems) == 1 and problems[0].startswith("#9"), problems
+
+
+def test_an_item_is_known_by_its_heading(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пункт-абзац узнаётся по жирному заголовку — как в `items.marked`.
+
+    Иначе гейт отверг бы то, что `items.py` отметит (взгляд на #937).
+    """
+    check = load_script("check_pr_meta.py")
+    monkeypatch.setattr(
+        check.ghrest,
+        "request",
+        lambda method, path, token, body=None: issue_with("- [ ] **1. Решения** — проза\n"),
+    )
+    links = check.changerefs.links_in("Closes #8")
+    assert check.premature("о/р", "токен", links, ["1. Решения"], [8]) == []
+
+
 def test_a_task_without_a_checklist_closes_freely(monkeypatch: pytest.MonkeyPatch) -> None:
     """Задача без чек-листа закрывается: отмечать в ней нечего.
 
