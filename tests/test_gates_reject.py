@@ -989,28 +989,40 @@ def test_findings_survive_an_unreadable_task(
 
 
 @pytest.mark.parametrize(
-    ("body", "message", "verdict"),
+    ("body", "message", "rewritten", "verdict"),
     [
         # Случай #927: тело ещё старое, строка пункта уже в коммите.
-        ("Closes #8", "тема\n\nЗакрывает пункт: второй\n", CLEAN),
+        ("Closes #8", "тема\n\nЗакрывает пункт: второй\n", True, CLEAN),
         # Та же гонка со связью: тело без неё, коммит её несёт.
-        ("", "тема\n\nCloses #8\nЗакрывает пункт: второй\n", CLEAN),
+        ("", "тема\n\nCloses #8\nЗакрывает пункт: второй\n", True, CLEAN),
         # Путь человека: пункт закрыт правкой тела, коммиты молчат.
-        ("Closes #8\nЗакрывает пункт: второй", "тема\n", CLEAN),
+        ("Closes #8\nЗакрывает пункт: второй", "тема\n", False, CLEAN),
         # Вторая половина: пункт не закрыт нигде — отказ, а не «сошлось».
-        ("Closes #8", "тема\n", REJECTED),
+        ("Closes #8", "тема\n", True, REJECTED),
+        # Тело пишет человек: пункт из коммита в него не доедет, и `items.py`
+        # его не отметит — засчитывать нельзя (взгляд на #935).
+        ("Closes #8", "тема\n\nЗакрывает пункт: второй\n", False, REJECTED),
     ],
 )
 def test_links_and_closed_items_are_read_from_commits_too(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str, message: str, verdict: int
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    body: str,
+    message: str,
+    rewritten: bool,
+    verdict: int,
 ) -> None:
     """Вердикт не зависит от того, успел ли `agent-pr` дописать тело (#929).
 
     Тело дописывается токеном прогона после толчка, и нового захода проверок
     это не запускает: гейт, читавший одно тело, отверг #927 за пункт, который
-    строка коммита уже закрыла.
+    строка коммита уже закрыла. Пункт из коммита засчитывается там, где тело
+    допишет `agent_pr`: отмечает пункты `items.py` только по телу.
     """
     check = load_script("check_pr_meta.py")
+    agent_pr = load_script("agent_pr.py")
+    head = "agent/x" if rewritten else "feature/x"
+    body = f"{body}\n\n{agent_pr.MARK}" if rewritten else body
     event = tmp_path / "event.json"
     event.write_text(
         json.dumps(
@@ -1020,6 +1032,7 @@ def test_links_and_closed_items_are_read_from_commits_too(
                     "labels": [{"name": "area/docs"}],
                     "title": "t",
                     "body": body,
+                    "head": {"ref": head},
                 }
             }
         ),

@@ -278,8 +278,17 @@ def main(argv: list[str] | None = None) -> int:
     # за незакрытые пункты, которые строки коммита уже закрыли. Коммиты — тот
     # же источник, из которого тело собирается, и они едут в тело слияния
     # (`squash_body.compose`). Тело читается по-прежнему: его правит человек.
+    #
+    # У СВЯЗИ И У ПУНКТОВ РАЗНЫЕ ЧИТАТЕЛИ, и граница у них разная — сосед
+    # условия `rewritten` выше (195). Связь из коммита доедет до общей ветки
+    # всегда: её переносит тело слияния. Закрытый пункт отмечает `items.py`
+    # только по ТЕЛУ изменения, а туда строку из коммита переносит лишь
+    # `agent_pr` — там, где он тело пишет. В чужом теле пункт из коммита не
+    # отметится никем, и засчитывать его значило бы пропустить закрытие задачи
+    # с неотмеченным пунктом.
     texts = [f"{title}\n{body}", *messages]
     links = changerefs.links_in_all(texts)
+    marking = texts if rewritten else [f"{title}\n{body}"]
     token = ghrest.token_from_env()
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if token and repo:
@@ -288,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                 repo,
                 token,
                 links,
-                [changerefs.normalise(item) for item in changerefs.closed_items_in_all(texts)],
+                [changerefs.normalise(item) for item in changerefs.closed_items_in_all(marking)],
             )
         except NotRun as exc:
             # Отказ чтения задачи — объявленный третий исход, а не трассировка:
