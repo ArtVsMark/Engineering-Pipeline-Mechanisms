@@ -136,7 +136,7 @@ def premature(repo: str, token: str, links: list[Any], declared: list[str]) -> l
             problems.append(
                 f"#{link.number} закрывается целиком, а в ней осталось незакрытых пунктов: "
                 f"{len(left)} — первый «{left[0]}». Либо связь «Refs», либо строка "
-                "«Закрывает пункт: <текст>» на каждый доделанный"
+                f"«{changerefs.CLOSED_ITEM_KEY} <текст>» на каждый доделанный"
             )
     return problems
 
@@ -219,9 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     #   общую ветку не едет, и отвергать её значило бы требовать переписать
     #   историю ветки ради слова, которое никуда не попадёт.
     #
-    # Заголовки коммитов берутся так же, как их отдаёт git (`subject_of`), и среди них есть
-    # подтягивания базы, которые `compose` отбрасывает (`--no-merges`). Это
-    # строже площадки только на заголовке слияния базы — его пишет git.
+    # Заголовки коммитов берутся так же, как их отдаёт git (`subject_of`), и
+    # среди них есть подтягивания базы, которые `compose` отбрасывает
+    # (`--no-merges`). Это строже площадки на заголовке слияния базы — его
+    # пишет git — и ни на чём больше: будущее описание ниже судится только
+    # там, где его действительно допишут.
     #
     # ОПИСАНИЕ СУДИТСЯ И БУДУЩЕЕ. Его дописывает `agent_pr` после толчка, и
     # строки, которые он переносит из коммитов («Закрывает пункт», «Ждёт:»),
@@ -231,10 +233,17 @@ def main(argv: list[str] | None = None) -> int:
     # `agent_pr.describe_from`, что его соберёт, и в том же порядке коммитов,
     # от старых к новым (`--reverse` в прогоне). Это более ранний отказ, а не
     # единственный: перезаход, если он будет, решит то же самое.
+    #
+    # Судится оно ТОЛЬКО там, где `agent_pr` его допишет: на ветке с его
+    # приставкой и в описании с его отметкой. Человеческое описание он не
+    # трогает, и строка из коммита туда не доедет — отвергать её значило бы
+    # судить то, чего не будет.
     messages = read_messages(args.messages_from)
     subjects = [squash_body.subject_of(one) for one in messages]
     landing = squash_body.compose_from(subjects, messages)
-    coming = agent_pr.describe_from(subjects, messages) if messages else None
+    head = str((pull.get("head") or {}).get("ref") or "")
+    rewritten = head.startswith(agent_pr.PREFIXES) and agent_pr.MARK in body
+    coming = agent_pr.describe_from(subjects, messages) if messages and rewritten else None
     for heading in dict.fromkeys([title, *([coming.title] if coming else [])]):
         if changerefs.CLOSING_KEYWORD_RE.search(heading):
             problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")

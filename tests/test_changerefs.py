@@ -101,6 +101,17 @@ def test_description_puts_one_task_per_line(monkeypatch: pytest.MonkeyPatch) -> 
     assert "Refs #2\nRefs #29" in body
 
 
+def test_the_written_keys_are_the_read_keys() -> None:
+    """Ключ, который пишет шаг открытия, узнаёт разбор — из одной константы.
+
+    В #587 шаг открытия писал один ключ, а разбор искал другой; образцы теперь
+    строятся из тех же констант, что и строки (взгляд на #934).
+    """
+    assert changerefs.closed_items_in(f"{changerefs.CLOSED_ITEM_KEY} пункт") == ["пункт"]
+    assert changerefs.held_in_all([f"{changerefs.WAITS_KEY} #9"]) == "#9"
+    assert changerefs.held_in_all(["Ждет: #9"]) == "#9", "«е» вместо «ё» — тот же ключ"
+
+
 def test_the_description_is_composed_without_git(monkeypatch: pytest.MonkeyPatch) -> None:
     """`describe_from` отдаёт то же, что `describe`, — гейт разметки судит её.
 
