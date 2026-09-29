@@ -136,7 +136,7 @@ def premature(repo: str, token: str, links: list[Any], declared: list[str]) -> l
             problems.append(
                 f"#{link.number} закрывается целиком, а в ней осталось незакрытых пунктов: "
                 f"{len(left)} — первый «{left[0]}». Либо связь «Refs», либо строка "
-                "«Закрывает пункт: <текст>» на каждый доделанный"
+                f"«{changerefs.CLOSED_ITEM_KEY} <текст>» на каждый доделанный"
             )
     return problems
 
