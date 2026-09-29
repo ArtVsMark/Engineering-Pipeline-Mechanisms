@@ -284,6 +284,7 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # `fetch`: в подделке его гасят отдельно, иначе проверка молчания одних
     # источников пошла бы в сеть за другим.
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
+    monkeypatch.setattr(module, "merge_ways_moved", lambda *a, **k: [])
     # Выпуски чужих действий тоже ходят к площадке своим запросом — гасятся
     # так же, по той же причине.
     monkeypatch.setattr(module, "actions_behind", lambda *a, **k: [])
@@ -337,6 +338,7 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(module, "snapshot_is_stale", lambda *_: [drift])
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
+    monkeypatch.setattr(module, "merge_ways_moved", lambda *a, **k: [])
     monkeypatch.setattr(module, "proposals_answered", lambda *a, **k: [])
     # ВЕРСИИ ЯЗЫКА ХОДИЛИ В СЕТЬ, И ПЕРВАЯ ПОЧИНКА ЭТОГО НЕ ЗАКРЫЛА. Подделан
     # был `language_moved`, а сеть дёргает `manifest(...)`: он стоит АРГУМЕНТОМ
@@ -1702,3 +1704,39 @@ def test_the_issue_body_reads_back_into_the_same_records() -> None:
     ]
     assert module.read_back(module.render_body(found, ["каталог"])) == (found, ["каталог"])
     assert module.read_back(module.render_body([], [])) == ([], [])
+
+
+@pytest.mark.parametrize(
+    ("settings", "named"),
+    [
+        ({"allow_squash_merge": True}, []),
+        ({"allow_merge_commit": True, "allow_rebase_merge": False}, ["merge-коммит"]),
+        (
+            {"allow_merge_commit": True, "allow_rebase_merge": True},
+            ["merge-коммит", "перестановка"],
+        ),
+    ],
+)
+def test_extra_merge_ways_are_named(
+    monkeypatch: pytest.MonkeyPatch, settings: dict[str, bool], named: list[str]
+) -> None:
+    """Способ слияния сверх уплотнения — находка; одно уплотнение — тишина (006, #948)."""
+    monkeypatch.setattr(module.check_required_context.ghrest, "request", lambda *a, **k: settings)
+    found = module.merge_ways_moved("о/р", "токен")
+    if not named:
+        assert found == []
+        return
+    assert len(found) == 1 and found[0].source == "способ слияния"
+    assert all(way in found[0].said for way in named), found[0].said
+    assert found[0].next_step
+
+
+def test_unread_merge_settings_are_the_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Настройки не прочитаны — источник молчит с причиной, а не «сошлось» (045)."""
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise module.ghrest.TransportError("площадка недоступна")
+
+    monkeypatch.setattr(module.check_required_context.ghrest, "request", refuse)
+    with pytest.raises(module.NotRun, match="не прочитаны"):
+        module.merge_ways_moved("о/р", "токен")
