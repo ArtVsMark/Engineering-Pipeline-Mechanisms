@@ -27,7 +27,12 @@ DECISION = ROOT / "docs" / "decisions" / "007-merge-method-is-held-by-the-platfo
 
 def answer(**flags: bool) -> dict[str, Any]:
     """Ответ площадки о репозитории — только те поля, что читает сверка."""
-    return {"allow_squash_merge": True, **flags}
+    return {
+        "allow_squash_merge": True,
+        "allow_merge_commit": False,
+        "allow_rebase_merge": False,
+        **flags,
+    }
 
 
 def test_an_extra_merge_way_is_found(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,6 +79,16 @@ def test_an_unread_setting_is_the_third_outcome(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(module.ghrest, "request", broken)
     with pytest.raises(module.NotRun):
+        module.merge_ways("o/r", "token")
+
+
+@pytest.mark.parametrize("unsaid", ["allow_merge_commit", "allow_rebase_merge"])
+def test_an_unsaid_setting_is_not_read_as_off(monkeypatch: pytest.MonkeyPatch, unsaid: str) -> None:
+    """Ключа нет в ответе — «не отработало», а не «выключено» (045, взгляд на #951)."""
+    said = answer()
+    del said[unsaid]
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: said)
+    with pytest.raises(module.NotRun, match=unsaid):
         module.merge_ways("o/r", "token")
 
 

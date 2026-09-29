@@ -139,7 +139,13 @@ def merge_ways(repo: str, token: str) -> list[str]:
         answer = ghrest.request("GET", f"repos/{repo}", token) or {}
     except ghrest.TransportError as exc:
         raise NotRun(f"настройки репозитория не прочитаны: {exc}") from exc
-    return [said for key, said in MERGE_WAYS.items() if answer.get(key)]
+    # НЕ СКАЗАНО — НЕ ЗНАЧИТ ВЫКЛЮЧЕНО. Поля `allow_*` площадка отдаёт не всякому
+    # вызывающему, и отсутствующий ключ, прочитанный как `False`, делал бы
+    # непрочитанное «сошлось» каждую ночь (045). Нашёл внешний взгляд на #951.
+    unsaid = [key for key in MERGE_WAYS if not isinstance(answer.get(key), bool)]
+    if unsaid:
+        raise NotRun(f"настройки репозитория не прочитаны: площадка не сказала {', '.join(unsaid)}")
+    return [said for key, said in MERGE_WAYS.items() if answer[key]]
 
 
 def main(argv: list[str] | None = None) -> int:

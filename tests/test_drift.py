@@ -1709,7 +1709,7 @@ def test_the_issue_body_reads_back_into_the_same_records() -> None:
 @pytest.mark.parametrize(
     ("settings", "named"),
     [
-        ({"allow_squash_merge": True}, []),
+        ({"allow_merge_commit": False, "allow_rebase_merge": False}, []),
         ({"allow_merge_commit": True, "allow_rebase_merge": False}, ["merge-коммит"]),
         (
             {"allow_merge_commit": True, "allow_rebase_merge": True},
@@ -1739,4 +1739,12 @@ def test_unread_merge_settings_are_the_third_outcome(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(module.check_required_context.ghrest, "request", refuse)
     with pytest.raises(module.NotRun, match="не прочитаны"):
+        module.merge_ways_moved("о/р", "токен")
+
+
+def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка не отдала ключей `allow_*` — источник молчит, а не «сошлось» (045, #951)."""
+    said = {"allow_squash_merge": True}
+    monkeypatch.setattr(module.check_required_context.ghrest, "request", lambda *a, **k: said)
+    with pytest.raises(module.NotRun, match="не сказала"):
         module.merge_ways_moved("о/р", "токен")
