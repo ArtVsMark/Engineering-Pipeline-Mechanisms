@@ -1002,6 +1002,9 @@ def test_findings_survive_an_unreadable_task(
         # Тело пишет человек: пункт из коммита в него не доедет, и `items.py`
         # его не отметит — засчитывать нельзя (взгляд на #935).
         ("Closes #8", "тема\n\nЗакрывает пункт: второй\n", False, REJECTED),
+        # Тело пишет `agent_pr`: нынешнее он ЗАМЕНИТ, и пункт, которого нет в
+        # коммитах, из устаревшего тела не засчитывается (взгляд на #936).
+        ("Closes #8\nЗакрывает пункт: второй", "тема\n\nCloses #8\n", True, REJECTED),
     ],
 )
 def test_links_and_closed_items_are_read_from_commits_too(
@@ -1011,6 +1014,7 @@ def test_links_and_closed_items_are_read_from_commits_too(
     message: str,
     rewritten: bool,
     verdict: int,
+    title: str = "t",
 ) -> None:
     """Вердикт не зависит от того, успел ли `agent-pr` дописать тело (#929).
 
@@ -1030,7 +1034,7 @@ def test_links_and_closed_items_are_read_from_commits_too(
                 "pull_request": {
                     "number": 7,
                     "labels": [{"name": "area/docs"}],
-                    "title": "t",
+                    "title": title,
                     "body": body,
                     "head": {"ref": head},
                 }
@@ -1051,6 +1055,25 @@ def test_links_and_closed_items_are_read_from_commits_too(
     monkeypatch.setattr(check, "fresh", lambda pull, repo, token: pull)
     said = ["--files", "README.md", "--messages-from", str(messages)]
     assert check.main(said) == verdict
+
+
+def test_a_closed_item_in_the_title_does_not_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Пункт в заголовке не засчитывается: `items.py` читает только описание.
+
+    Строка «Закрывает пункт» в заголовке засчиталась бы, но не отметилась бы
+    никем — задача закрылась бы с неотмеченным пунктом (взгляд на #936).
+    """
+    test_links_and_closed_items_are_read_from_commits_too(
+        tmp_path,
+        monkeypatch,
+        "Closes #8",
+        "тема\n",
+        False,
+        REJECTED,
+        title="Закрывает пункт: второй",
+    )
 
 
 def test_the_version_gate_sees_a_file_not_yet_committed(

@@ -30,6 +30,7 @@ from typing import Any, Final
 import agent_pr
 import changerefs
 import ghrest
+import items
 import labels
 import squash_body
 
@@ -286,9 +287,16 @@ def main(argv: list[str] | None = None) -> int:
     # `agent_pr` — там, где он тело пишет. В чужом теле пункт из коммита не
     # отметится никем, и засчитывать его значило бы пропустить закрытие задачи
     # с неотмеченным пунктом.
+    #
+    # ПУНКТЫ СЧИТАЮТСЯ ПО ИТОГОВОМУ ТЕЛУ И ТЕМ ЖЕ ЧТЕНИЕМ, что у `items.py`
+    # (`items.declared_in`). Итоговое тело — то, что соберёт `agent_pr`, где он
+    # пишет, и нынешнее — где нет. Не заголовок: его `items.py` не читает. Не
+    # склейка нынешнего с будущим: `agent_pr` нынешнее ЗАМЕНИТ, и пункт, убранный
+    # из коммитов перезаписью ветки, засчитался бы по устаревшему тексту.
     texts = [f"{title}\n{body}", *messages]
     links = changerefs.links_in_all(texts)
-    marking = texts if rewritten else [f"{title}\n{body}"]
+    final = coming.body if coming else body
+    _, marked = items.declared_in(final)
     token = ghrest.token_from_env()
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if token and repo:
@@ -297,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 repo,
                 token,
                 links,
-                [changerefs.normalise(item) for item in changerefs.closed_items_in_all(marking)],
+                [changerefs.normalise(item) for item in marked],
             )
         except NotRun as exc:
             # Отказ чтения задачи — объявленный третий исход, а не трассировка:
