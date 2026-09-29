@@ -631,3 +631,14 @@ def test_write_fresh_and_basis_answer_directly(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(items.ghrest, "request", request)
     assert items.write_fresh("o/r", "t", 2, lambda number: True) == [7]
     assert items.basis([7, 9]) == "пунктов вслед за закрытыми задачами 2 — #7, #9"
+
+
+def test_marking_one_body_says_what_was_found() -> None:
+    """`mark_in` отличает отмеченное сейчас от отмеченного раньше и не пишет ничего.
+
+    Её же прогоняет гейт разметки заранее: цикл отметки один на двоих (#937).
+    """
+    body = "- [ ] **1. Решения** — проза\n- [x] второй\n- [ ] третий"
+    updated, newly, already = items.mark_in(body, ["1. Решения", "второй", "нет такого"])
+    assert newly == ["1. Решения"] and already == ["второй"]
+    assert "- [x] **1. Решения**" in updated and "- [ ] третий" in updated

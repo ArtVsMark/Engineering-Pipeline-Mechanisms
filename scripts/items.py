@@ -97,6 +97,28 @@ def marked(body: str, item: str) -> tuple[str, bool]:
     return body, False
 
 
+def mark_in(body: str, items: list[str]) -> tuple[str, list[str], list[str]]:
+    """Отмечает в ОДНОМ теле задачи те пункты, что в нём нашлись, — без записи.
+
+    Отдаёт новое тело, пункты, отмеченные сейчас, и пункты, отмеченные
+    раньше. Отдельно от `mark` потому, что ту же отметку заранее прогоняет
+    гейт разметки (`check_pr_meta.premature`): пересказ этого цикла там
+    расходился с ним трижды — пункт засчитывался задаче, где его не отметят;
+    один пункт засчитывался двум задачам, а отмечается в первой; пункт не
+    узнавался по заголовку (взгляды на #936 и #937). Цикл один на двоих (022).
+    """
+    updated = body
+    newly: list[str] = []
+    already: list[str] = []
+    for item in items:
+        after, found = marked(updated, item)
+        if not found:
+            continue
+        (newly if after != updated else already).append(item)
+        updated = after
+    return updated, newly, already
+
+
 def open_items(body: str) -> list[str]:
     """Незакрытые пункты задачи — как написаны, в порядке появления."""
     return [found.group("text") for found in map(CHECKLIST_RE.match, body.splitlines()) if found]
@@ -400,16 +422,9 @@ def mark(
         try:
             issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
             body = str(issue.get("body") or "")
-            updated = body
-            already: list[str] = []
-            for item in list(left):
-                after, found = marked(updated, item)
-                if not found:
-                    continue
-                # Пункт, УЖЕ отмеченный раньше, записи не требует, и отказ
-                # записи по соседнему пункту той же задачи его не касается.
-                (pending if after != updated else already).append(item)
-                updated = after
+            # Пункт, УЖЕ отмеченный раньше, записи не требует, и отказ записи
+            # по соседнему пункту той же задачи его не касается.
+            updated, pending, already = mark_in(body, list(left))
             for item in already:
                 left.remove(item)
                 done.append(item)

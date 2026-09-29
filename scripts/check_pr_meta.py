@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any, Final
@@ -33,9 +32,6 @@ import ghrest
 import items
 import labels
 import squash_body
-
-#: Незакрытый пункт чек-листа задачи в её теле.
-OPEN_ITEM_RE: Final = re.compile(r"^\s*[-*]\s*\[ \]\s*(\S.*?)\s*$", re.MULTILINE)
 
 #: Отказ по слову закрытия вне строки связи — константой: на него ссылаются
 #: тесты, а переписанные буквы разошлись бы с ним молча (209).
@@ -99,17 +95,12 @@ def fresh(pull: dict[str, Any], repo: str, token: str) -> dict[str, Any]:
     return current if isinstance(current, dict) else pull
 
 
-def open_items(body: str) -> list[str]:
-    """Незакрытые пункты чек-листа задачи, как они в ней записаны."""
-    return [item.strip() for item in OPEN_ITEM_RE.findall(body or "")]
-
-
 def premature(
     repo: str,
     token: str,
     links: list[Any],
     declared: list[str],
-    marked_in: set[int] | None = None,
+    marked_in: list[int] | None = None,
 ) -> list[str]:
     """Задачи, которые изменение закрывает целиком, не доделав.
 
@@ -126,29 +117,41 @@ def premature(
     там, где этап один, значило бы заводить ритуал (154). Требование к
     заведению задачи с этапами записано в AGENTS.md.
 
-    `marked_in` — задачи, в которых пункты ОТМЕТЯТ: `items.py` отмечает их
-    только в задачах, названных в итоговом теле изменения. Задаче вне этого
-    набора объявленный пункт не засчитывается — закрыта она будет, а отмечен
-    пункт не будет (взгляд на #937). ``None`` — набор не сужен.
+    ОТМЕТКА ПРОГОНЯЕТСЯ, А НЕ ПЕРЕСКАЗЫВАЕТСЯ. `marked_in` — задачи, в которых
+    `items.py` будет отмечать, в его порядке; по ним гейт прогоняет ту же
+    `items.mark_in` и смотрит, что останется открытым в закрываемых задачах.
+    Пересказ отметки расходился с ней трижды: пункт засчитывался задаче, где
+    его не отметят, одному пункту засчитывались две задачи, пункт по заголовку
+    не узнавался (взгляды на #936 и #937). ``None`` — отмечается в самих
+    закрываемых задачах.
     """
+    bodies: dict[int, str] = {}
+
+    def body_of(number: int) -> str:
+        if number not in bodies:
+            try:
+                issue = ghrest.request("GET", f"repos/{repo}/issues/{number}", token) or {}
+            except ghrest.TransportError as exc:
+                raise NotRun(f"задача #{number} не прочитана: {exc}") from exc
+            bodies[number] = str(issue.get("body") or "")
+        return bodies[number]
+
+    closing = [link.number for link in links if link.closes]
+    left = list(declared)
+    after: dict[int, str] = {}
+    for number in closing if marked_in is None else marked_in:
+        updated, newly, already = items.mark_in(body_of(number), left)
+        for item in [*newly, *already]:
+            left.remove(item)
+        after[number] = updated
+
     problems: list[str] = []
-    for link in links:
-        if not link.closes:
-            continue
-        counted = declared if marked_in is None or link.number in marked_in else []
-        try:
-            issue = ghrest.request("GET", f"repos/{repo}/issues/{link.number}", token) or {}
-        except ghrest.TransportError as exc:
-            raise NotRun(f"задача #{link.number} не прочитана: {exc}") from exc
-        left = [
-            item
-            for item in open_items(str(issue.get("body") or ""))
-            if changerefs.normalise(item) not in counted
-        ]
-        if left:
+    for number in closing:
+        still = items.open_items(after.get(number, body_of(number)))
+        if still:
             problems.append(
-                f"#{link.number} закрывается целиком, а в ней осталось незакрытых пунктов: "
-                f"{len(left)} — первый «{left[0]}». Либо связь «Refs», либо строка "
+                f"#{number} закрывается целиком, а в ней осталось незакрытых пунктов: "
+                f"{len(still)} — первый «{still[0]}». Либо связь «Refs», либо строка "
                 f"«{changerefs.CLOSED_ITEM_KEY} <текст>» на каждый доделанный"
             )
     return problems
@@ -319,8 +322,8 @@ def main(argv: list[str] | None = None) -> int:
                 repo,
                 token,
                 links,
-                [changerefs.normalise(item) for item in marked],
-                set(numbers),
+                marked,
+                numbers,
             )
         except NotRun as exc:
             # Отказ чтения задачи — объявленный третий исход, а не трассировка:
