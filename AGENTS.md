@@ -254,6 +254,7 @@ python3 scripts/preflight.py
 - [ ] пробел, который изменение создало или закрыло, отражён в разделе «чего
       ещё нет».
 
-Гейт, не нашедший предмета проверки, обязан падать, а не зеленеть
-([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)) —
-это относится и к списку выше, когда он станет прогоном.
+Если у пункта списка найдётся признак, проверяемый без угадывания, — это
+пересмотр по `034`, а гейт на него, как любой, обязан падать, не найдя
+предмета, а не зеленеть
+([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
