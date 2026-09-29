@@ -244,7 +244,9 @@ python3 scripts/preflight.py
 | счёт «правил на документах» в прозе не устарел | `tests/test_counted_numbers.py` |
 | ответ каталогу называет адреса, которые есть | `tests/test_bindings_addresses.py`, `tests/test_answers_are_checkable.py` |
 
-Осталось руками — и **только это**, до [#945](../../issues/945):
+Осталось руками — и **только это**. Механизма у этих четырёх не будет: каждая
+судит смысл, а не признак; почему и что держит их вместо гейта — решение
+[`034`](docs/decisions/034-five-duties-held-by-judgment-get-no-mechanism.md):
 
 - [ ] изменение несёт **одну** тему, и она названа в заголовке;
 - [ ] ни одно утверждение не продублировало договор — только ссылка;
@@ -252,6 +254,7 @@ python3 scripts/preflight.py
 - [ ] пробел, который изменение создало или закрыло, отражён в разделе «чего
       ещё нет».
 
-Гейт, не нашедший предмета проверки, обязан падать, а не зеленеть
-([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)) —
-это относится и к списку выше, когда он станет прогоном.
+Если у пункта списка найдётся признак, проверяемый без угадывания, — это
+пересмотр по `034`, а гейт на него, как любой, обязан падать, не найдя
+предмета, а не зеленеть
+([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
