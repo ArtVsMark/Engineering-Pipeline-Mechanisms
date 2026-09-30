@@ -2443,3 +2443,8 @@ def test_the_tasks_carry_no_copy_of_the_mark_instruction() -> None:
         # пишется (поздний взгляд на #916). ПРЕДЕЛ НАЗВАН: пересказ прозой без
         # скобки и кавычек гейт не ловит — его держит решение в #896 и взгляд.
         assert f"`{kind}`" not in text, f"в задании снова слово рода «{kind}» из указания"
+
+
+def test_the_registry_header_names_the_canon_by_the_function() -> None:
+    """Шапка реестра называет канон по имени функции, а не набором букв (взгляд на #979)."""
+    assert f"::{module.closable.__name__}`" in module.render_body({})
