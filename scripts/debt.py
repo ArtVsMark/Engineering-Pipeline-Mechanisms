@@ -217,6 +217,25 @@ def said_age(age: timedelta | None, late: str = STALE_NOTE) -> str:
     return f"{said} · {late}" if age > STALE_AFTER else said
 
 
+#: Что сказать о старом снимке ЗАКРЫТЫХ «входящих». Заход каталога закрытую
+#: задачу не пишет: правил без ответа нет — писать нечего. Её дата стоит с
+#: закрытия и о пропуске не говорит ничего, а `STALE_NOTE` объявил бы пропуск
+#: там, где заходы шли каждый день (30.09.2026: «81 ч назад» при зелёных
+#: прогонах `rules-inbox` 27–30.09, #980).
+CLOSED_LATE: Final = (
+    "заход каталога закрытые «входящие» не пишет, и пропуска их возраст не показывает"
+)
+
+
+def inbox_age(seen: str, closed_note: str, now: datetime | None = None) -> str:
+    """Возраст «входящих» словами; у закрытых — без объявления пропуска (#980).
+
+    ``closed_note`` — пометка `inbox_body`: непустая, когда числа взяты из
+    закрытой задачи.
+    """
+    return said_age(age_of(seen, now), CLOSED_LATE if closed_note else STALE_NOTE)
+
+
 def inbox_body(repo: str, token: str, closed: list[dict[str, Any]]) -> tuple[str, str, str]:
     """Тело задачи-«входящие» и пометка о её состоянии.
 
@@ -672,7 +691,7 @@ def main(argv: list[str] | None = None) -> int:
         # ВОЗРАСТ ПЕЧАТАЕТСЯ ВСЕГДА, А НЕ ТОЛЬКО КОГДА ОН ПЛОХОЙ. Строка,
         # появляющаяся лишь при беде, читается как беда; строка, стоящая
         # всегда, делает свежесть видимой величиной, а не предположением.
-        print(f"  {said_age(age_of(inbox_seen))}")
+        print(f"  {inbox_age(inbox_seen, inbox_note)}")
         if inbox_note:
             print(f"  {inbox_note}")
     # Расхождение контракта печатается и тогда, когда счёта нет: это отдельный
