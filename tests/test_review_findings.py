@@ -1734,7 +1734,7 @@ def test_a_strict_sweep_keeps_retold_titles_apart() -> None:
 
 
 def test_an_answer_finding_is_no_twin_of_a_code_finding() -> None:
-    """Находка об ответе не уходит дублем находки о коде: её снимает правка ответа (#818)."""
+    """Находка об ответе не уходит дублем находки о коде: снимают по `closable` (#818)."""
     answer = module.findings.ANSWER_KIND
     entries = {
         module.fingerprint(TWIN_A): module.findings.Entry(1, "риск", TWIN_A),
