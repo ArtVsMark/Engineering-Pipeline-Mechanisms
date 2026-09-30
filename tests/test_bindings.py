@@ -232,23 +232,50 @@ def led_to(item: dict[str, Any]) -> Path:
     return ROOT / str(item.get("path") if item.get("kind") == "skill" else item.get("trail"))
 
 
-def read_by_catalogue() -> list[Path]:
-    """Файлы, которые читает каталог правил: ответы, очередь предложений и их следы.
+#: Файлы, куда след предложения уже вёл хотя бы раз. Принятое каталог убирает
+#: из очереди (`_принятое` в `.rules/proposals.json`), а след у него остаётся
+#: — поэтому состав не выводится из одной очереди: при пустой очереди файл
+#: молча выпал бы из гейта (взгляд на #975). Список рукописный, но не угадан:
+#: след каждого предложения в очереди обязан в нём стоять, иначе краснеет
+#: `test_every_queued_trail_is_kept_after_acceptance`.
+LED_TRAILS: Final = (ROOT / ".rules" / "finding-kinds.json",)
 
-    СОСТАВ ВЫВЕДЕН, а не перечислен (поздний взгляд на #970): след
-    предложения и путь навыка могут вести в любой файл дерева, и рукописный
-    список пропустил бы новый молча. Голый номер там каталог разрешит в свою
-    задачу — буква 185 требует адреса ``владелец/репозиторий#номер`` (#971).
+
+def read_by_catalogue(queued: list[dict[str, Any]] | None = None) -> list[Path]:
+    """Файлы, которые читает каталог правил: ответы, очередь и все отданные следы.
+
+    СЛЕДЫ НЕ ПЕРЕЧИСЛЕНЫ ТОЛЬКО РУКОЙ (поздний взгляд на #970): к уже отданным
+    (`LED_TRAILS`) добавляется след каждого предложения в очереди, куда бы он
+    ни вёл. Голый номер там каталог разрешит в свою задачу — буква 185
+    требует адреса ``владелец/репозиторий#номер`` (#971).
     """
-    return sorted({BINDINGS, PROPOSALS, *(led_to(item) for item in proposals())})
+    items = proposals() if queued is None else queued
+    return sorted({BINDINGS, PROPOSALS, *LED_TRAILS, *(led_to(item) for item in items)})
 
 
-def test_the_catalogue_is_read_where_the_proposals_lead() -> None:
-    """Состав читаемого каталогом идёт за следом предложения, а не за списком."""
-    read = read_by_catalogue()
-    assert BINDINGS in read and PROPOSALS in read
-    for item in proposals():
-        assert led_to(item) in read, f"{item.get('slug')}: след не читается гейтом"
+def test_the_catalogue_is_read_where_a_proposal_leads() -> None:
+    """Сборка состава идёт за следом предложения и не теряет отданного при пустой очереди."""
+    rule = {"slug": "x", "trail": "docs/где-то.md"}
+    skill = {"slug": "y", "kind": "skill", "path": ".claude/skills/z/SKILL.md"}
+    read = read_by_catalogue([rule, skill])
+    assert ROOT / "docs/где-то.md" in read
+    assert ROOT / ".claude/skills/z/SKILL.md" in read
+    assert ROOT / "x" not in read
+    assert read_by_catalogue([]) == sorted({BINDINGS, PROPOSALS, *LED_TRAILS})
+
+
+def test_every_queued_trail_is_kept_after_acceptance() -> None:
+    """След каждого предложения в очереди записан в `LED_TRAILS` (взгляд на #975).
+
+    Иначе после приёма предложение уйдёт из очереди, а его след — из гейта,
+    хотя каталог продолжит его читать.
+    """
+    missing = [
+        f"{item.get('slug')}: {led_to(item).relative_to(ROOT)}"
+        for item in proposals()
+        if led_to(item) not in LED_TRAILS
+    ]
+    assert not missing, "след предложения не записан в LED_TRAILS: " + "; ".join(missing)
 
 
 def test_files_read_by_the_catalogue_carry_no_bare_change_numbers() -> None:
