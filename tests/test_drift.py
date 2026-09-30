@@ -1826,8 +1826,10 @@ def test_the_owner_token_reaches_drift_only_from_the_shared_branch() -> None:
         if module.OWNER_TOKEN_ENV in step.get("env", {})
     ]
     assert given, "секрет владельца шагу дрейфа не передан"
-    for value in given:
-        assert value.startswith("${{ github.ref == 'refs/heads/main' && secrets."), value
+    # Выражение сверяется ЦЕЛИКОМ: по началу проходит и `… && secrets.X ||
+    # secrets.X`, отдающее секрет на любой ветке (взгляд на #974).
+    whole = "${{ github.ref == 'refs/heads/main' && secrets.MERGE_QUEUE_TOKEN || '' }}"
+    assert given == [whole] * len(given), given
 
 
 def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.MonkeyPatch) -> None:
