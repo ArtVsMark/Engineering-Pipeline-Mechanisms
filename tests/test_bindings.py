@@ -178,19 +178,29 @@ def test_declared_address_resolves(number: str) -> None:
     assert resolved, f"{number}: ни один адрес не разрешается: {candidates}"
 
 
-#: Файлы, которые читает каталог правил: очередь предложений, ответы и реестр
-#: родов находок (туда ведёт след предложения). Голый номер изменения в них
-#: каталог разрешит в свою задачу, а не в нашу — буква 185 требует адреса
-#: ``владелец/репозиторий#номер`` (#971).
-READ_BY_CATALOGUE: Final = (BINDINGS, PROPOSALS, ROOT / ".rules" / "finding-kinds.json")
 #: Голый номер: ``#`` с цифрами, перед которым нет имени репозитория, слова или
 #: второй решётки. ``владелец/репозиторий#12`` и ``C#12`` не голые.
 BARE_CHANGE_NUMBER: Final = re.compile(r"(?<![\w/#])#\d+\b")
+#: Автоссылка площадки ``GH-12``: она, как и ``#12``, разрешается в дерево того,
+#: кто читает.
+PLATFORM_AUTOLINK: Final = re.compile(r"(?<![\w-])GH-\d+\b")
+#: Путь к изменению или задаче: ``pull/12``, ``issues/12`` и всё, что стоит
+#: перед ними без пробела, — чтобы отличить полный адрес от относительного.
+CHANGE_PATH: Final = re.compile(r"[^\s()\[\]<>\"'`]*\b(?:pull|issues)/\d+\b")
+#: Полный адрес изменения: площадка, владелец и репозиторий названы.
+FULL_CHANGE_URL: Final = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+")
 
 
 def bare_numbers(text: str) -> list[str]:
-    """Голые номера изменений в тексте — те, что разрешатся не в наше дерево."""
-    return BARE_CHANGE_NUMBER.findall(text)
+    """Номера изменений в тексте, которые разрешатся не в наше дерево.
+
+    ПЕРЕЧЕНЬ ФОРМ, а не одна (210, поздний взгляд на #970): голый ``#12``,
+    автоссылка ``GH-12`` и относительная ссылка ``../../pull/12`` — все три
+    читающий разрешает в своё дерево. Полной формой считаются только
+    ``владелец/репозиторий#12`` и адрес ``https://github.com/владелец/репозиторий/…``.
+    """
+    relative = [path for path in CHANGE_PATH.findall(text) if not FULL_CHANGE_URL.fullmatch(path)]
+    return BARE_CHANGE_NUMBER.findall(text) + PLATFORM_AUTOLINK.findall(text) + relative
 
 
 @pytest.mark.parametrize(
@@ -203,11 +213,69 @@ def bare_numbers(text: str) -> list[str]:
         ("owner/repo#12 и ещё #13", ["#13"]),
         ("C#12 и ##3", []),
         ("раздел #anchor без цифр", []),
+        ("снято в GH-961", ["GH-961"]),
+        ("ABC-GH-12 и GH-x", []),
+        ("[#1](../../pull/1)", ["#1", "../../pull/1"]),
+        ("задача ../../issues/12", ["../../issues/12"]),
+        ("https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/pull/961", []),
+        ("(https://github.com/o/r/issues/12)", []),
+        ("https://example.com/pull/12", ["https://example.com/pull/12"]),
     ],
 )
 def test_a_bare_change_number_is_told_from_a_full_address(text: str, bare: list[str]) -> None:
-    """Предикат различает голый номер и полный адрес — обе стороны таблицей (140)."""
+    """Предикат различает каждую форму номера и полный адрес — обе стороны таблицей (140)."""
     assert bare_numbers(text) == bare
+
+
+def led_to(item: dict[str, Any]) -> Path:
+    """Куда ведёт предложение: навык — к `path`, правило — к следу `trail`."""
+    return ROOT / str(item.get("path") if item.get("kind") == "skill" else item.get("trail"))
+
+
+#: Файлы, куда след предложения уже вёл хотя бы раз. Принятое каталог убирает
+#: из очереди (`_принятое` в `.rules/proposals.json`), а след у него остаётся
+#: — поэтому состав не выводится из одной очереди: при пустой очереди файл
+#: молча выпал бы из гейта (взгляд на #975). Список рукописный, но не угадан:
+#: след каждого предложения в очереди обязан в нём стоять, иначе краснеет
+#: `test_every_queued_trail_is_kept_after_acceptance`.
+LED_TRAILS: Final = (ROOT / ".rules" / "finding-kinds.json",)
+
+
+def read_by_catalogue(queued: list[dict[str, Any]] | None = None) -> list[Path]:
+    """Файлы, которые читает каталог правил: ответы, очередь и все отданные следы.
+
+    СЛЕДЫ НЕ ПЕРЕЧИСЛЕНЫ ТОЛЬКО РУКОЙ (поздний взгляд на #970): к уже отданным
+    (`LED_TRAILS`) добавляется след каждого предложения в очереди, куда бы он
+    ни вёл. Голый номер там каталог разрешит в свою задачу — буква 185
+    требует адреса ``владелец/репозиторий#номер`` (#971).
+    """
+    items = proposals() if queued is None else queued
+    return sorted({BINDINGS, PROPOSALS, *LED_TRAILS, *(led_to(item) for item in items)})
+
+
+def test_the_catalogue_is_read_where_a_proposal_leads() -> None:
+    """Сборка состава идёт за следом предложения и не теряет отданного при пустой очереди."""
+    rule = {"slug": "x", "trail": "docs/где-то.md"}
+    skill = {"slug": "y", "kind": "skill", "path": ".claude/skills/z/SKILL.md"}
+    read = read_by_catalogue([rule, skill])
+    assert ROOT / "docs/где-то.md" in read
+    assert ROOT / ".claude/skills/z/SKILL.md" in read
+    assert ROOT / "x" not in read
+    assert read_by_catalogue([]) == sorted({BINDINGS, PROPOSALS, *LED_TRAILS})
+
+
+def test_every_queued_trail_is_kept_after_acceptance() -> None:
+    """След каждого предложения в очереди записан в `LED_TRAILS` (взгляд на #975).
+
+    Иначе после приёма предложение уйдёт из очереди, а его след — из гейта,
+    хотя каталог продолжит его читать.
+    """
+    missing = [
+        f"{item.get('slug')}: {led_to(item).relative_to(ROOT)}"
+        for item in proposals()
+        if led_to(item) not in LED_TRAILS
+    ]
+    assert not missing, "след предложения не записан в LED_TRAILS: " + "; ".join(missing)
 
 
 def test_files_read_by_the_catalogue_carry_no_bare_change_numbers() -> None:
@@ -218,14 +286,15 @@ def test_files_read_by_the_catalogue_carry_no_bare_change_numbers() -> None:
     реестре родов, куда ведёт след. Файла нет — отказ, а не зелёное (075).
     """
     found: list[str] = []
-    for path in READ_BY_CATALOGUE:
+    for path in read_by_catalogue():
         assert path.exists(), f"{path.name}: файла, который читает каталог, нет"
         bare = bare_numbers(path.read_text(encoding="utf-8"))
         if bare:
             found.append(f"{path.relative_to(ROOT)}: {', '.join(sorted(set(bare)))}")
     assert not found, (
-        "голый номер изменения в файле, который читает каталог, — там он разрешится "
-        "в задачу каталога; пишите ArtVsMark/Engineering-Pipeline-Mechanisms#N: " + "; ".join(found)
+        "номер изменения не полной формой в файле, который читает каталог, — там он "
+        "разрешится в задачу каталога; пишите ArtVsMark/Engineering-Pipeline-Mechanisms#N: "
+        + "; ".join(found)
     )
 
 
