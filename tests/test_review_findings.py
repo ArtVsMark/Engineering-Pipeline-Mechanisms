@@ -1270,7 +1270,7 @@ def test_an_answer_finding_is_closed_by_editing_its_own_place(
     assert берём == {"abc1234"} and not держим, "правка места находки её не сняла"
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {30}})
     assert not берём, "снятие принято без правки ответа и места"
-    assert module.ANSWER_FILE in держим["abc1234"] and ".rules/proposals.json" in держим["abc1234"]
+    assert f"ни {module.ANSWER_FILE}, ни .rules/proposals.json" in держим["abc1234"]
 
 
 def test_an_answer_finding_placed_in_the_answer_file_still_needs_the_answer(
