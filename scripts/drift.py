@@ -506,7 +506,12 @@ def declared_protection(where: Path | None = None) -> dict[str, Any]:
         raise NotRun(str(exc)) from exc
 
 
-def merge_ways_moved(repo: str, token: str) -> list[Drift]:
+#: Секрет, которым источник «способ слияния» читает настройки репозитория. Его
+#: же читают открытие изменения и очередь слияния — имя одно на всё дерево.
+OWNER_TOKEN_ENV: Final = "MERGE_QUEUE_TOKEN"
+
+
+def merge_ways_moved(repo: str, owner_token: str) -> list[Drift]:
     """Лишние способы слияния, включённые у площадки, — против решения 006.
 
     ЭТО ВТОРАЯ ПОЛОВИНА СВЕРКИ `required-context`, ПОСТАВЛЕННАЯ НА РАСПИСАНИЕ
@@ -515,13 +520,20 @@ def merge_ways_moved(repo: str, token: str) -> list[Drift]:
     на двоих — `check_required_context.merge_ways`: второе понимание той же
     настройки разошлось бы с первым молча (090).
 
-    НОЧЬЮ ИСТОЧНИК МОЛЧИТ С ПРИЧИНОЙ. Токену прогона площадка полей `allow_*`
-    не отдаёт (замер 29.09.2026, ручной прогон дрейфа), и `merge_ways`
-    говорит «не прочитано», а не «сошлось». Давать ли дрейфу токен владельца —
-    решение владельца (#953).
+    ЧИТАЕТСЯ ТОКЕНОМ ВЛАДЕЛЬЦА, И ТОЛЬКО ИМ. Токену прогона площадка полей
+    `allow_*` не отдаёт никогда (замер 29.09.2026, ручной прогон дрейфа), и
+    запасной ход на него дал бы ту же немоту, только позже. Решение владельца
+    30.09.2026 (#953): дать дрейфу `MERGE_QUEUE_TOKEN`. Секрета нет —
+    источник молчит с причиной, не обращаясь к площадке: «не настроено»
+    приходит раньше запроса, как у открытия изменения (взгляд на #865).
     """
+    if not owner_token:
+        raise NotRun(
+            f"{OWNER_TOKEN_ENV} не задан — настройки слияния читает только токен владельца, "
+            "токену прогона площадка полей allow_* не отдаёт (#953)"
+        )
     try:
-        extra = check_required_context.merge_ways(repo, token)
+        extra = check_required_context.merge_ways(repo, owner_token)
     except check_required_context.NotRun as exc:
         raise NotRun(str(exc)) from exc
     if not extra:
@@ -1591,7 +1603,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
         ("защита общей ветки", lambda: protection_moved(repo, token)),
-        ("способ слияния", lambda: merge_ways_moved(repo, token)),
+        ("способ слияния", lambda: merge_ways_moved(repo, os.environ.get(OWNER_TOKEN_ENV, ""))),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
         ("версии чужих действий", lambda: actions_disagree(action_versions())),
         ("выпуски чужих действий", lambda: actions_behind(action_versions(), token)),

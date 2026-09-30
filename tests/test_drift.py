@@ -1743,6 +1743,38 @@ def test_unread_merge_settings_are_the_third_outcome(monkeypatch: pytest.MonkeyP
         module.merge_ways_moved("о/р", "токен")
 
 
+def test_merge_ways_without_the_owner_token_are_silent_before_the_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Секрета владельца нет — источник молчит с причиной, не обращаясь к площадке (#953).
+
+    Проверяется именно НЕВЫЗОВ: «не настроено» обязано прийти раньше запроса,
+    иначе с пустым токеном источник спросил бы площадку и получил ту же немоту.
+    """
+
+    def no_platform(*args: object, **kwargs: object) -> None:
+        raise AssertionError("обращение к площадке без токена владельца")
+
+    monkeypatch.setattr(module.check_required_context.ghrest, "request", no_platform)
+    with pytest.raises(module.NotRun, match=module.OWNER_TOKEN_ENV):
+        module.merge_ways_moved("о/р", "")
+
+
+def test_merge_ways_are_read_with_the_owner_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Настройки слияния спрашиваются токеном владельца — тем, что передан (#953)."""
+    seen: list[str] = []
+
+    def answer(
+        method: str, path: str, token: str, *args: object, **kwargs: object
+    ) -> dict[str, bool]:
+        seen.append(token)
+        return {"allow_merge_commit": False, "allow_rebase_merge": False}
+
+    monkeypatch.setattr(module.check_required_context.ghrest, "request", answer)
+    assert module.merge_ways_moved("о/р", "токен-владельца") == []
+    assert seen == ["токен-владельца"]
+
+
 def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Площадка не отдала ключей `allow_*` — источник молчит, а не «сошлось» (045, #951)."""
     said = {"allow_squash_merge": True}
