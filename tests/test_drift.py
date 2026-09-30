@@ -1812,6 +1812,24 @@ def test_look_hands_the_merge_ways_source_the_owner_token(
     assert seen == ["токен-владельца"]
 
 
+def test_the_owner_token_reaches_drift_only_from_the_shared_branch() -> None:
+    """Секрет владельца дрейф получает только на общей ветке (поздний взгляд на #972).
+
+    Кнопка прогона принимает любую ветку и исполняет её код. Без условия на
+    `github.ref` пишущий `MERGE_QUEUE_TOKEN` получил бы `drift.py` с ветки
+    изменения — непросмотренный код.
+    """
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "drift.yml").read_text())
+    given = [
+        step["env"][module.OWNER_TOKEN_ENV]
+        for step in flow["jobs"]["drift"]["steps"]
+        if module.OWNER_TOKEN_ENV in step.get("env", {})
+    ]
+    assert given, "секрет владельца шагу дрейфа не передан"
+    for value in given:
+        assert value.startswith("${{ github.ref == 'refs/heads/main' && secrets."), value
+
+
 def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Площадка не отдала ключей `allow_*` — источник молчит, а не «сошлось» (045, #951)."""
     said = {"allow_squash_merge": True}
