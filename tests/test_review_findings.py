@@ -1238,7 +1238,7 @@ def test_an_answer_finding_is_closed_when_the_answer_was_edited(
     """Вторая половина: ответ правили — снятие принимается.
 
     Без неё проверка была бы неотличима от «находки об ответе не снимаются
-    никогда» (051).
+    никогда» (051). Исходы — в каноне `closable`.
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(
@@ -1257,7 +1257,7 @@ def test_an_answer_finding_is_closed_by_editing_its_own_place(
     `.rules/proposals.json` и пометкой «об ответе» починили в #961, а реестр
     держал её, потому что `bindings.json` не трогали. Вторая половина — правка
     чужого файла по-прежнему не снимает: иначе проверка стала бы «снимается
-    всегда».
+    всегда». Исходы — в каноне `closable`.
     """
     title = ".rules/proposals.json:13 — довод ссылается на коммит, которого нет"
     entries = {
@@ -1301,6 +1301,7 @@ def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
 
     Находку об ответе нашли на #10, где ответ не правили; сняло её #20, которое
     ответ правило. Прежде проверялось #10, и такую находку не снимало ничто.
+    Исходы — в каноне `closable`.
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     files = {10: {"scripts/arm.py"}, 20: {module.ANSWER_FILE}}
