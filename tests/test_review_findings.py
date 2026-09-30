@@ -1365,12 +1365,10 @@ def test_a_code_finding_is_closed_without_asking_the_platform(
 def test_a_silent_platform_lets_the_resolution_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ТРЕТИЙ ИСХОД ИДЁТ В СТОРОНУ СНЯТИЯ, и это выбор с названной ценой.
+    """ТРЕТИЙ ИСХОД ИДЁТ В СТОРОНУ СНЯТИЯ: площадка не ответила о файлах.
 
-    Площадка не ответила о файлах — мы не знаем, правили ответ или нет. Держать
-    запись по НЕЗНАНИЮ значило бы наказывать за отказ сети того, кто работу
-    сделал: отметка уже стоит в теле слитого, то есть утверждение сделано
-    человеком (039, 084).
+    Довод и цена этого выбора — в каноне правила, докстроке `closable`; здесь
+    они не пересказываются (#964).
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(module, "touched", lambda repo, token, number: set())
