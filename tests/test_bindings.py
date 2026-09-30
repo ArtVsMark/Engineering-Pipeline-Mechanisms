@@ -232,50 +232,34 @@ def led_to(item: dict[str, Any]) -> Path:
     return ROOT / str(item.get("path") if item.get("kind") == "skill" else item.get("trail"))
 
 
-#: Файлы, куда след предложения уже вёл хотя бы раз. Принятое каталог убирает
-#: из очереди (`_принятое` в `.rules/proposals.json`), а след у него остаётся
-#: — поэтому состав не выводится из одной очереди: при пустой очереди файл
-#: молча выпал бы из гейта (взгляд на #975). Список рукописный, но не угадан:
-#: след каждого предложения в очереди обязан в нём стоять, иначе краснеет
-#: `test_every_queued_trail_is_kept_after_acceptance`.
-LED_TRAILS: Final = (ROOT / ".rules" / "finding-kinds.json",)
-
-
 def read_by_catalogue(queued: list[dict[str, Any]] | None = None) -> list[Path]:
-    """Файлы, которые читает каталог правил: ответы, очередь и все отданные следы.
+    """Файлы, которые каталог правил читает сейчас: ответы, очередь и следы живых предложений.
 
-    СЛЕДЫ НЕ ПЕРЕЧИСЛЕНЫ ТОЛЬКО РУКОЙ (поздний взгляд на #970): к уже отданным
-    (`LED_TRAILS`) добавляется след каждого предложения в очереди, куда бы он
-    ни вёл. Голый номер там каталог разрешит в свою задачу — буква 185
-    требует адреса ``владелец/репозиторий#номер`` (#971).
+    СЛЕД ДЕРЖИТСЯ, ПОКА ПРЕДЛОЖЕНИЕ В ОЧЕРЕДИ. Номер разрешается в дереве, где
+    текст читают. Инцидент и ответ каталог забирает К СЕБЕ, и там голый номер
+    станет его задачей — буква 185 требует адреса ``владелец/репозиторий#номер``
+    (#971). След каталог хранит ССЫЛКОЙ на наш файл (`_что_слать` в
+    `.rules/proposals.json`), и по ней файл открывается в НАШЕМ дереве, где
+    номер — наша задача. Поэтому следы принятых гейт не держит — решение
+    владельца 30.09.2026 (взгляды на #975 и #977): их по истории 13, из них 11
+    вне `.rules/`, от `CLAUDE.md` до `scripts/automerge.py` (замер 30.09.2026:
+    ``git log -p --format= -- .rules/proposals.json | grep -oE '"(trail|path)":
+    "[^"]+"' | sort -u``). След живого предложения держится с запасом: каталог
+    разбирает его при приёме.
     """
     items = proposals() if queued is None else queued
-    return sorted({BINDINGS, PROPOSALS, *LED_TRAILS, *(led_to(item) for item in items)})
+    return sorted({BINDINGS, PROPOSALS, *(led_to(item) for item in items)})
 
 
 def test_the_catalogue_is_read_where_a_proposal_leads() -> None:
-    """Сборка состава идёт за следом предложения и не теряет отданного при пустой очереди."""
+    """Сборка состава идёт за следом живого предложения, а без очереди — ответы и очередь."""
     rule = {"slug": "x", "trail": "docs/где-то.md"}
     skill = {"slug": "y", "kind": "skill", "path": ".claude/skills/z/SKILL.md"}
     read = read_by_catalogue([rule, skill])
     assert ROOT / "docs/где-то.md" in read
     assert ROOT / ".claude/skills/z/SKILL.md" in read
     assert ROOT / "x" not in read
-    assert read_by_catalogue([]) == sorted({BINDINGS, PROPOSALS, *LED_TRAILS})
-
-
-def test_every_queued_trail_is_kept_after_acceptance() -> None:
-    """След каждого предложения в очереди записан в `LED_TRAILS` (взгляд на #975).
-
-    Иначе после приёма предложение уйдёт из очереди, а его след — из гейта,
-    хотя каталог продолжит его читать.
-    """
-    missing = [
-        f"{item.get('slug')}: {led_to(item).relative_to(ROOT)}"
-        for item in proposals()
-        if led_to(item) not in LED_TRAILS
-    ]
-    assert not missing, "след предложения не записан в LED_TRAILS: " + "; ".join(missing)
+    assert read_by_catalogue([]) == sorted({BINDINGS, PROPOSALS})
 
 
 def test_files_read_by_the_catalogue_carry_no_bare_change_numbers() -> None:
