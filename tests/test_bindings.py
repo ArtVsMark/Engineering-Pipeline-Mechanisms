@@ -178,6 +178,57 @@ def test_declared_address_resolves(number: str) -> None:
     assert resolved, f"{number}: ни один адрес не разрешается: {candidates}"
 
 
+#: Файлы, которые читает каталог правил: очередь предложений, ответы и реестр
+#: родов находок (туда ведёт след предложения). Голый номер изменения в них
+#: каталог разрешит в свою задачу, а не в нашу — буква 185 требует адреса
+#: ``владелец/репозиторий#номер`` (#971).
+READ_BY_CATALOGUE: Final = (BINDINGS, PROPOSALS, ROOT / ".rules" / "finding-kinds.json")
+#: Голый номер: ``#`` с цифрами, перед которым нет имени репозитория, слова или
+#: второй решётки. ``владелец/репозиторий#12`` и ``C#12`` не голые.
+BARE_CHANGE_NUMBER: Final = re.compile(r"(?<![\w/#])#\d+\b")
+
+
+def bare_numbers(text: str) -> list[str]:
+    """Голые номера изменений в тексте — те, что разрешатся не в наше дерево."""
+    return BARE_CHANGE_NUMBER.findall(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "bare"),
+    [
+        ("снято в #961", ["#961"]),
+        ("(#860, решение 035)", ["#860"]),
+        ("«#659 — 1»", ["#659"]),
+        ("ArtVsMark/Engineering-Pipeline-Mechanisms#961", []),
+        ("owner/repo#12 и ещё #13", ["#13"]),
+        ("C#12 и ##3", []),
+        ("раздел #anchor без цифр", []),
+    ],
+)
+def test_a_bare_change_number_is_told_from_a_full_address(text: str, bare: list[str]) -> None:
+    """Предикат различает голый номер и полный адрес — обе стороны таблицей (140)."""
+    assert bare_numbers(text) == bare
+
+
+def test_files_read_by_the_catalogue_carry_no_bare_change_numbers() -> None:
+    """В файлах, которые читает каталог, номер изменения — только полной формой (185, #971).
+
+    Держалось приёмом, и за 30.09.2026 поздние взгляды нашли класс четыре раза
+    подряд: голые номера в инциденте предложения, в 80 местах ответов и в
+    реестре родов, куда ведёт след. Файла нет — отказ, а не зелёное (075).
+    """
+    found: list[str] = []
+    for path in READ_BY_CATALOGUE:
+        assert path.exists(), f"{path.name}: файла, который читает каталог, нет"
+        bare = bare_numbers(path.read_text(encoding="utf-8"))
+        if bare:
+            found.append(f"{path.relative_to(ROOT)}: {', '.join(sorted(set(bare)))}")
+    assert not found, (
+        "голый номер изменения в файле, который читает каталог, — там он разрешится "
+        "в задачу каталога; пишите ArtVsMark/Engineering-Pipeline-Mechanisms#N: " + "; ".join(found)
+    )
+
+
 def test_proposals_assign_no_numbers() -> None:
     """Номер правилу присваивает каталог при приёме, а не проект (185).
 
