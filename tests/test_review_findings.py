@@ -1220,11 +1220,10 @@ def отметка(pr: int, kind: str) -> dict[str, Any]:
 def test_an_answer_finding_is_not_closed_without_touching_the_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Снятие находки ОБ ОТВЕТЕ не принимается, если ответ не правили.
+    """Второй исход: снявшее не тронуло ни ответа, ни места — снятие отвергается.
 
-    У находки о коде предмет размыт — починить её можно где угодно в дереве, — а
-    у находки об ответе он ровно один файл. Изменение, объявившее её разобранной
-    и не тронувшее этот файл, говорит о работе, которой не делало.
+    Исходы и их довод — в каноне правила, докстроке `closable`; здесь они не
+    пересказываются (#964).
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
