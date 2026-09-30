@@ -1249,6 +1249,52 @@ def test_an_answer_finding_is_closed_when_the_answer_was_edited(
     assert берём == {"abc1234"} and not держим
 
 
+def test_an_answer_finding_is_closed_by_editing_its_own_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Место названо и это не файл ответов — правка места снимает находку (#964).
+
+    Случай, из-за которого правило сужено: `58c904e` с местом
+    `.rules/proposals.json` и пометкой «об ответе» починили в #961, а реестр
+    держал её, потому что `bindings.json` не трогали. Вторая половина — правка
+    чужого файла по-прежнему не снимает: иначе проверка стала бы «снимается
+    всегда».
+    """
+    title = ".rules/proposals.json:13 — довод ссылается на коммит, которого нет"
+    entries = {
+        "abc1234": findings_module.Entry(10, "риск", title, kind=findings_module.ANSWER_KIND)
+    }
+    files = {20: {".rules/proposals.json", "changelog.d/x.internal.md"}, 30: {"scripts/arm.py"}}
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
+    assert берём == {"abc1234"} and not держим, "правка места находки её не сняла"
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {30}})
+    assert not берём, "снятие принято без правки ответа и места"
+    assert f"ни {module.ANSWER_FILE}, ни .rules/proposals.json" in держим["abc1234"]
+
+
+def test_an_answer_finding_placed_in_the_answer_file_still_needs_the_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Место — сам файл ответов или места нет: требование прежнее (#964).
+
+    Сужение касается только находок с местом ВНЕ файла ответов. Находку с
+    местом в `bindings.json` не снимает правка соседнего файла, упомянутого в
+    заголовке, — место берётся из начала заголовка, а не из упоминания (#896).
+    """
+    title = f"{module.ANSWER_FILE}:40 — ответ 045 расходится с `scripts/arm.py`"
+    entries = {
+        "abc1234": findings_module.Entry(10, "дефект", title, kind=findings_module.ANSWER_KIND)
+    }
+    monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
+    берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
+    assert not берём and "abc1234" in держим
+    assert module.subject_of(entries["abc1234"]) == {module.ANSWER_FILE}
+    assert module.subject_of(отметка(10, findings_module.ANSWER_KIND)["abc1234"]) == {
+        module.ANSWER_FILE
+    }
+
+
 def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
