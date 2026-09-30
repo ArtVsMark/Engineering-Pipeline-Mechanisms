@@ -1775,6 +1775,43 @@ def test_merge_ways_are_read_with_the_owner_token(monkeypatch: pytest.MonkeyPatc
     assert seen == ["токен-владельца"]
 
 
+def test_look_hands_the_merge_ways_source_the_owner_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`look` отдаёт источнику «способ слияния» секрет владельца, а не токен прогона (#953).
+
+    Без этой связки оба теста выше зелены и тогда, когда `look` зовёт источник
+    токеном прогона: источник снова спрашивал бы площадку тем, кому она полей
+    `allow_*` не отдаёт. Нашёл внешний взгляд на #972.
+    """
+    seen: list[str] = []
+
+    def broken(*_: Any, **__: Any) -> Any:
+        raise module.NotRun("снимок не прочитан")
+
+    def merge_ways(repo: str, owner_token: str) -> list[Any]:
+        seen.append(owner_token)
+        return []
+
+    monkeypatch.setenv(module.OWNER_TOKEN_ENV, "токен-владельца")
+    monkeypatch.setattr(module, "fetch", broken)
+    for name in (
+        "pinned_tag_moved",
+        "actions_disagree",
+        "release_behind_tree",
+        "probe_behind_release",
+        "protection_moved",
+        "actions_behind",
+        "pin_mislabelled",
+        "platform_warnings",
+        "gap_tasks_closed",
+    ):
+        monkeypatch.setattr(module, name, lambda *a, **k: [])
+    monkeypatch.setattr(module, "merge_ways_moved", merge_ways)
+    module.look("o/r", "токен-прогона", {"rules": {}})
+    assert seen == ["токен-владельца"]
+
+
 def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Площадка не отдала ключей `allow_*` — источник молчит, а не «сошлось» (045, #951)."""
     said = {"allow_squash_merge": True}
