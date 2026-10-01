@@ -278,7 +278,7 @@ def rules_part(repo: str, token: str) -> Source:
     note = debt.contract_note(inbox)
     if note:
         rows.append(f"контракт разошёлся: {note}")
-    said = debt.said_age(debt.age_of(seen))
+    said = debt.inbox_age(seen, inbox_note)
     return Source(
         rows=rows,
         note=f"задач по правилам заведено {tasks}; числа {said}"
