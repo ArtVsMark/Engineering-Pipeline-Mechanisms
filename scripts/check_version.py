@@ -96,7 +96,7 @@ def check(version: str, files: list[Path]) -> list[str]:
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except OSError, UnicodeDecodeError:
             skipped += 1
             continue
         scanned += 1
