@@ -200,4 +200,5 @@ def test_read_archive_refuses_a_false_scalar(tmp_path: Path, said: str) -> None:
 def test_is_plan_reads_the_imported_marker() -> None:
     """Признак плана — вхождение метки плана, у обоих её читателей один (#828)."""
     assert module.is_plan(f"шапка\n{module.PLAN_MARKER}\nтело")
-    assert not module.is_plan("<!-- work-plan -->")
+    # Начало метки без её хвоста — не метка: выводится из константы, а не буквами (209).
+    assert not module.is_plan(module.PLAN_MARKER.split(":")[0] + " -->")

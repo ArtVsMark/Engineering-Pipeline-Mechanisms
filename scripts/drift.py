@@ -747,13 +747,30 @@ def declared_versions() -> tuple[list[str], str]:
 ACTION_USE: Final = re.compile(
     r"uses:\s*(?P<repo>[\w.-]+/[\w.-]+)@(?P<ref>[\w.-]+)(?:\s*#\s*(?P<said>v[\w.-]+))?"
 )
-#: Чьи действия НЕ считаются чужими: свои и семьи. Их версию держит гейт
-#: заготовки (155, tests/test_family_pinning.py), и второй судья тому же
-#: разошёлся бы с первым молча (022, 090).
-OUR_OWN: Final = ("ArtVsMark/",)
 
 
-def action_versions(where: Path | None = None) -> dict[str, dict[str, list[str]]]:
+def own_prefixes() -> tuple[str, ...]:
+    """Чьи действия НЕ судятся здесь: только семьи, `catalogue.FAMILY_PREFIX`.
+
+    Их версию держит гейт заготовки (155, tests/test_family_pinning.py), и
+    второй судья тому же разошёлся бы с первым молча (022, 090). Приставка
+    выводится, а не пишется буквами (#992).
+
+    СВОИ ДЕЙСТВИЯ ПОТРЕБИТЕЛЯ СУДЯТСЯ КАК ЧУЖИЕ, И ЭТО НАМЕРЕННО. Довод «второго
+    судьи» верен, только пока первый есть, а гейт 155 держит одну приставку
+    семьи. Первая редакция (#1006) исключала ещё и владельца спрашиваемого
+    репозитория: у потребителя из другой организации его действия `Other/…` не
+    судил тогда никто (взгляд на #1006).
+
+    СОСЕД НАЗВАН (195): ссылки семьи у ПОТРЕБИТЕЛЯ гейт 155 не видит — он судит
+    наше дерево. Их перенос — работа #993 и #995.
+    """
+    return (catalogue.FAMILY_PREFIX,)
+
+
+def action_versions(
+    where: Path | None = None, own: tuple[str, ...] | None = None
+) -> dict[str, dict[str, list[str]]]:
     """Чужие действия прогонов: имя → объявленная версия → где названа.
 
     ВЕРСИЯ ЧИТАЕТСЯ КАК ВЕРСИЯ, А НЕ КАК ССЫЛКА. Прибитый хеш и плавающий тег —
@@ -762,6 +779,7 @@ def action_versions(where: Path | None = None) -> dict[str, dict[str, list[str]]
     одна, и узнаётся она у тега либо у пометки рядом с хешем.
     """
     found: dict[str, dict[str, list[str]]] = {}
+    mine = own if own is not None else own_prefixes()
     runs = sorted((where or paths.WORKFLOWS).glob("*.y*ml"))
     if not runs:
         # ПУСТОЙ ОБХОД ЗДЕСЬ ЧИТАЕТСЯ КАК «СОШЛОСЬ». Источник отдал бы пустой
@@ -772,7 +790,7 @@ def action_versions(where: Path | None = None) -> dict[str, dict[str, list[str]]
     for path in runs:
         for match in ACTION_USE.finditer(path.read_text(encoding="utf-8")):
             repo = match["repo"]
-            if repo.startswith(OUR_OWN):
+            if repo.startswith(mine):
                 continue
             said = match["said"] or match["ref"]
             found.setdefault(repo, {}).setdefault(said, []).append(path.name)
@@ -911,7 +929,9 @@ def actions_behind(
 HASH_RE: Final = re.compile(r"^[0-9a-f]{40}$")
 
 
-def pinned_hashes(where: Path | None = None) -> dict[str, dict[str, set[str]]]:
+def pinned_hashes(
+    where: Path | None = None, own: tuple[str, ...] | None = None
+) -> dict[str, dict[str, set[str]]]:
     """Закрепления по хешу с пометкой версии: действие → пометка → хеши.
 
     Берётся ТОЛЬКО пара «хеш + пометка». Хеш без пометки сверять не с чем — его
@@ -919,9 +939,10 @@ def pinned_hashes(where: Path | None = None) -> dict[str, dict[str, set[str]]]:
     расходится: он сам и есть версия.
     """
     found: dict[str, dict[str, set[str]]] = {}
+    mine = own if own is not None else own_prefixes()
     for path in sorted((where or paths.WORKFLOWS).glob("*.y*ml")):
         for match in ACTION_USE.finditer(path.read_text(encoding="utf-8")):
-            if match["repo"].startswith(OUR_OWN) or not match["said"]:
+            if match["repo"].startswith(mine) or not match["said"]:
                 continue
             if HASH_RE.match(match["ref"]):
                 found.setdefault(match["repo"], {}).setdefault(match["said"], set()).add(
@@ -1595,6 +1616,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
     """Спрашивает все источники; отдаёт находки и имена тех, кто не ответил."""
     found: list[Drift] = []
     silent: list[str] = []
+    own = own_prefixes()
     asks: tuple[tuple[str, Any], ...] = (
         ("каталог", lambda: catalogue_moved(fetch(EXPORT_URL), mine)),
         (
@@ -1609,9 +1631,9 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ("защита общей ветки", lambda: protection_moved(repo, token)),
         ("способ слияния", lambda: merge_ways_moved(repo, os.environ.get(OWNER_TOKEN_ENV, ""))),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
-        ("версии чужих действий", lambda: actions_disagree(action_versions())),
-        ("выпуски чужих действий", lambda: actions_behind(action_versions(), token)),
-        ("пометки закреплений", lambda: pin_mislabelled(pinned_hashes(), token)),
+        ("версии чужих действий", lambda: actions_disagree(action_versions(own=own))),
+        ("выпуски чужих действий", lambda: actions_behind(action_versions(own=own), token)),
+        ("пометки закреплений", lambda: pin_mislabelled(pinned_hashes(own=own), token)),
         ("предупреждения площадки", lambda: platform_warnings(repo, token)),
         (
             "вердикты по предложениям",
