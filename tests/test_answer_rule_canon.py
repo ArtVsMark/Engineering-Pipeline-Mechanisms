@@ -67,9 +67,15 @@ SUBJECT: Final = "об ответе"
 REMOVAL: Final = re.compile(r"\b(сним\w*|снят\w*|отверг\w*|принима\w*)")
 #: Канон и его адрес — у самой функции, а не буквами: переименование увело бы
 #: гейт в пустоту молча (209, взгляд на #983).
-CANONICAL: Final = load_script("review_findings.py").closable
+REGISTRY: Final = load_script("review_findings.py")
+CANONICAL: Final = REGISTRY.closable
 CANON: Final = CANONICAL.__name__
 CANON_AT: Final = f"{Path(CANONICAL.__code__.co_filename).relative_to(ROOT)}::{CANON}"
+#: Модуль канона — для формы через точку (`review_findings.closable`).
+CANON_MODULE: Final = Path(CANONICAL.__code__.co_filename).stem
+#: Функция, которая ПЕЧАТАЕТ адрес канона. Абзац, где её зовут, канон называет:
+#: в выводе стоит адрес, а в исходнике — вызов (взгляд на #988, `ebd3754`).
+CANON_CALL: Final = f"{REGISTRY.canon_at.__name__}("
 #: Этот файл: таблица ниже держит пересказы без канона — это красные случаи.
 SELF: Final = Path(__file__).resolve()
 #: Пустой строковый литерал — граница абзаца в списке строк.
@@ -82,7 +88,8 @@ SPACING: Final = (tokenize.NL, tokenize.INDENT, tokenize.DEDENT)
 def retold(text: str) -> bool:
     """Абзац говорит о снятии находки об ответе и не называет канона."""
     folded = " ".join(text.split()).casefold()
-    return SUBJECT in folded and bool(REMOVAL.search(folded)) and CANON not in folded
+    named = CANON in folded or CANON_CALL in folded
+    return SUBJECT in folded and bool(REMOVAL.search(folded)) and not named
 
 
 def py_paragraphs(source: str) -> list[tuple[int, str]]:
@@ -179,6 +186,7 @@ def retellings(path: Path) -> list[str]:
         ("Находку ОБ ОТВЕТЕ снимает только правка ответа.", True),
         ("снятие находки об ответе отвергается вслух", True),
         ("снятие находки об ответе — по канону `closable`", False),
+        ("снятие находки об ответе — по адресу f'{canon_at()}'", False),
         ("Пометку «об ответе» ставит ревьюер.", False),
         ("Находку о коде снимает любая правка.", False),
     ],
@@ -219,6 +227,21 @@ def test_a_blank_line_ends_a_paragraph(source: str) -> None:
 
 #: Адрес канона, набранный буквами: путь к модулю и имя через `::`.
 WRITTEN_AT: Final = re.compile(rf"([\w./-]+\.py)::{CANON}\b")
+#: Вторая форма того же адреса — через точку (взгляд на #988, `a67d296`).
+#: СТРОГО: берётся ВСЯ цепочка имён до `.closable`, и судится её последнее
+#: звено — модуль. Так одной формой держатся и `review_findings.closable`, и
+#: пакетная `scripts.review_findings.closable`, которую прежний образец с
+#: одним звеном не видел (взгляд на #1000, `b3c2306`). Ищется только в прозе:
+#: в коде `module.closable` — переменная, а не адрес.
+DOTTED_AT: Final = re.compile(rf"(?<![\w./])((?:[A-Za-z_]\w*\.)+){CANON}\b")
+#: Поле подстановки f-строки — код, а не проза: `{module.closable.__name__}`
+#: адресом чужого модуля не является (взгляд на #1000, `86fe75b`).
+REPLACEMENT_FIELD: Final = re.compile(r"\{[^{}]*\}")
+
+
+def dotted_module(found: re.Match[str]) -> str:
+    """Модуль точечного адреса — последнее звено цепочки перед именем канона."""
+    return found.group(1).rstrip(".").rsplit(".", 1)[-1]
 
 
 def test_a_written_canon_address_leads_to_the_canon() -> None:
@@ -238,6 +261,71 @@ def test_a_written_canon_address_leads_to_the_canon() -> None:
     assert written, "адрес канона буквами не найден нигде — обход не туда"
     stale = [f"{p.relative_to(ROOT)}: {at}" for p, at in written if f"{at}::{CANON}" != CANON_AT]
     assert not stale, f"адрес канона разошёлся с `{CANON_AT}`: " + "; ".join(stale)
+
+
+def prose_of(path: Path) -> list[str]:
+    """Проза файла: абзацы строк и комментариев модуля либо текст документа.
+
+    У модуля поля подстановки f-строк вырезаются: их содержимое — выражение,
+    а не адрес, написанный словами.
+    """
+    source = path.read_text(encoding="utf-8")
+    if path.suffix != ".py":
+        return [source]
+    return [REPLACEMENT_FIELD.sub("", text) for _, text in py_paragraphs(source)]
+
+
+@pytest.mark.parametrize(
+    ("text", "module"),
+    [
+        ("канон — `review_findings.closable`.", "review_findings"),
+        ("канон — findings.closable, без кавычек.", "findings"),
+        ("канон — `scripts.review_findings.closable`.", "review_findings"),
+        ("канон — `scripts.findings.closable`.", "findings"),
+        ("путь `scripts/review_findings.py::closable`", None),
+    ],
+    ids=["верный модуль", "чужой модуль", "пакетная форма", "пакетная с чужим", "форма через ::"],
+)
+def test_a_dotted_canon_address_is_told(text: str, module: str | None) -> None:
+    """Форма через точку узнаётся целой цепочкой, а форма через `::` ей не мешает."""
+    found = DOTTED_AT.search(text)
+    assert (dotted_module(found) if found else None) == module
+
+
+def test_a_replacement_field_is_not_prose(tmp_path: Path) -> None:
+    """Выражение в f-строке — код: адресом чужого модуля оно не читается (#1000)."""
+    module = tmp_path / "mod.py"
+    module.write_text('LINE = f"канон — {module.closable.__name__}"\n', encoding="utf-8")
+    assert not any(DOTTED_AT.search(text) for text in prose_of(module))
+
+
+def test_a_dotted_canon_address_leads_to_the_canon() -> None:
+    """Адрес канона через точку называет модуль самого канона (взгляд на #988).
+
+    ПЕРЕЧЕНЬ ФОРМ — ЦЕЛИКОМ (210), после трёх заходов взгляда по этому месту:
+
+    * голое имя `closable` — требует гейт пересказа;
+    * вызов `canon_at(` — гейт пересказа принимает за названный канон, и это
+      держит строка таблицы `test_a_retelling_is_told_from_a_reference`;
+    * путь и имя через `::` — соседний тест `WRITTEN_AT`;
+    * цепочка через точку любой длины — этот тест: судится последнее звено;
+    * поле подстановки f-строки — код, вырезается из прозы (`prose_of`).
+
+    За границей (195): путь через `/` с точкой перед именем
+    (`scripts/review_findings.closable`) формой адреса не является — так канон
+    не пишут, и предикат её не ищет.
+    """
+    written = [
+        (path, dotted_module(match))
+        # Сам этот файл не обходится: его таблица держит неверные формы
+        # намеренно — это красные случаи.
+        for path in texts()
+        for text in prose_of(path)
+        for match in DOTTED_AT.finditer(text)
+    ]
+    assert written, "адрес канона через точку не найден нигде — обход не туда"
+    stale = [f"{p.relative_to(ROOT)}: {at}" for p, at in written if at != CANON_MODULE]
+    assert not stale, f"адрес канона через точку называет не `{CANON_MODULE}`: " + "; ".join(stale)
 
 
 def test_the_answer_removal_rule_is_retold_only_by_its_canon() -> None:
