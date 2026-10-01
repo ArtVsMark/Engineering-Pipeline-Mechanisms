@@ -97,7 +97,7 @@ def links(root: Path) -> list[tuple[Path, int, str, str]]:
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except OSError, UnicodeDecodeError:
             continue
         for line_number, line in enumerate(text.splitlines(), 1):
             for match in LINK_RE.finditer(line):

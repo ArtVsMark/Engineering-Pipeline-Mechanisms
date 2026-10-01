@@ -27,7 +27,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "engineering-pipeline-transport"
 description = "Транспорт к площадке и обрезка вывода — общий низ конвейера семьи"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = []
 dynamic = ["version"]
 

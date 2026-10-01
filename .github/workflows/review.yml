@@ -104,7 +104,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: собрать карту по общей ветке
         id: map
         continue-on-error: true
@@ -234,7 +234,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: steps.token.outputs.present == 'yes'
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       # ВЗГЛЯД — ПОСЛЕДНИМ (#762, решение владельца 24.09.2026). Запись `review`
       # появляется на голове толчком, как прежде, — очередь ждёт её с первой
       # секунды (#654). Но сам взгляд идёт, только когда сводный гейт
@@ -481,7 +481,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       # Общий низ конвейера ставится пакетом (024).
       - run: python -m pip install --quiet ./packages/transport
@@ -532,7 +532,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       # Общий низ конвейера ставится пакетом (024).
       - run: python -m pip install --quiet ./packages/transport
       - name: снять разобранное с реестра
@@ -593,7 +593,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: steps.token.outputs.present == 'yes'
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: поставить разбор реестра
         if: steps.token.outputs.present == 'yes'
         run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
@@ -799,7 +799,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       # Общий низ конвейера ставится пакетом (024).
       - run: python -m pip install --quiet ./packages/transport
       - name: выбрать, на что смотреть
@@ -891,7 +891,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: steps.token.outputs.present == 'yes'
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: поставить проверки ревьюеру
         if: steps.token.outputs.present == 'yes'
         run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7" ./packages/transport
