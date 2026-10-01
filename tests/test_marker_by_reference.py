@@ -28,7 +28,11 @@
 Пересборка из имени — три в `tests/test_task_shape.py`. Контрпримеры теперь
 выводятся из константы, цитаты называют её имя, пересборка заменена ссылкой.
 
-ГРАНИЦА НАЗВАНА (195). Метка, разобранная по частям (`"<!-" + "- имя"`),
+ГРАНИЦА НАЗВАНА (195). Обход — всё, что читает машина: `scripts/`, `tests/`,
+весь `.github/` и `.pipeline.yml`. Проза для людей — `docs/`, `.claude/`,
+корневые документы — в обход не входит: там метку называют именем константы,
+а буквы цитаты законны в истории. Замер 01.10.2026 по ним: начала меток — 0.
+Метка, разобранная по частям (`"<!-" + "- имя"`),
 и метка, которую константа не объявляет, гейтом не видны; прочие
 константы-тексты (`FIXCHECK_MARKER`, пометки прогонов) держит чтение, как и
 говорит само правило: «общего гейта нет и не будет».
@@ -46,11 +50,20 @@ from tests.conftest import ROOT, walk, walk_deep
 #: Где объявляются метки — рабочий код.
 DECLARED_IN: Final = ROOT / "scripts"
 
-#: Где метку могли бы переписать: код, проверки и прогоны.
+#: Где метку могли бы переписать: код, проверки, прогоны и прочее, что читает
+#: машина, — весь `.github/` (не только `*.yml`) и `.pipeline.yml` (взгляд на
+#: #1009).
 JUDGED: Final = (ROOT / "scripts", ROOT / "tests", ROOT / ".github")
+JUDGED_FILES: Final = (ROOT / ".pipeline.yml",)
 
 #: Открытие комментария разметки: с него начинается каждая метка.
 OPENING: Final = "<!-- "
+
+#: Имя метки сразу за открытием комментария. Начало метки — открытие и имя,
+#: а не «всё до двоеточия»: метка без двоеточия иначе стала бы своим началом
+#: целиком, и читатель буквами `"<!-- имя" in body` прошёл бы мимо гейта
+#: (взгляд на #1009).
+NAME_AFTER_OPENING: Final = re.compile(rf"^{re.escape(OPENING)}([\w-]+)")
 
 #: Имя функции, собирающей метку из имени (`findings.marker`).
 BUILDER: Final = "marker"
@@ -81,8 +94,10 @@ def declared(path: Path) -> dict[str, int]:
         name = builder_name(value)
         if name is not None:
             found[OPENING + name] = node.lineno
-        elif isinstance(value, ast.Constant) and str(value.value).startswith(OPENING):
-            found[str(value.value).split(":")[0]] = node.lineno
+        elif isinstance(value, ast.Constant) and (
+            named := NAME_AFTER_OPENING.match(str(value.value))
+        ):
+            found[OPENING + named.group(1)] = node.lineno
     return found
 
 
@@ -123,14 +138,14 @@ def respelled_in(path: Path, known: dict[str, tuple[str, int]], root: Path = ROO
 
 
 def judged() -> list[Path]:
-    """Файлы, где метку могли переписать: модули, проверки, прогоны."""
-    return [
+    """Файлы, где метку могли переписать: модули, проверки, прогоны, настройки."""
+    found = [
         path
         for place in JUDGED
-        for pattern in ("*.py", "*.yml")
-        for path in walk_deep(place, pattern, may_be_empty="прогонов нет вне .github")
-        if "__pycache__" not in path.parts
+        for path in walk_deep(place, "*")
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
     ]
+    return [*found, *JUDGED_FILES]
 
 
 def test_the_gate_found_its_subject() -> None:
@@ -177,3 +192,9 @@ def test_a_marker_is_found_by_either_declaration(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert declared(tmp_path / "mod.py") == {"<!-- a": 2, "<!-- b": 3}
+
+
+def test_a_marker_without_a_colon_has_its_name_for_a_head(tmp_path: Path) -> None:
+    """Начало метки — открытие и имя, а не вся строка без двоеточия (#1009)."""
+    (tmp_path / "mod.py").write_text('C_MARKER = "<!-- c держит механизм -->"\n', encoding="utf-8")
+    assert declared(tmp_path / "mod.py") == {"<!-- c": 1}
