@@ -240,6 +240,23 @@ def test_a_foreign_record_still_counts_when_own_run_has_none() -> None:
     assert any("failure" in problem for problem in problems)
 
 
+def test_own_job_on_its_way_is_waited_for_not_judged_by_foreign_records() -> None:
+    """Свой джоб в пути — ожидание, даже если у имени есть чужие живые записи (#1031).
+
+    Замер 01.10.2026 на #1013: две успешные записи `test` от отменённых
+    прогонов, свой прогон идёт — гейт объявил «неоднозначно» вместо ожидания.
+    """
+    runs = [
+        run("lint", run_id="mine"),
+        run("test", run_id="old1"),
+        run("test", run_id="old2"),
+    ]
+    problems, waiting = module.verdict(
+        runs, REQUIRED, "ci-complete", "mine", mine={"test": "queued"}, run_live=True
+    )
+    assert (problems, waiting) == ([], True)
+
+
 def test_two_records_of_the_same_run_are_still_ambiguous() -> None:
     """Внутри одного прогона два одинаковых имени — по-прежнему неоднозначность."""
     runs = [run("lint", run_id="mine"), run("test", run_id="mine"), run("test", run_id="mine")]
