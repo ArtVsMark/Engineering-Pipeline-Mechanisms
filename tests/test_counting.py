@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -215,3 +216,18 @@ def test_one_badge_record_renders_both_outputs() -> None:
         "message": "1.4.0",
         "color": "4c1",
     }
+
+
+def test_no_badge_name_clashes_with_another_published_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Имена вывода не сталкиваются ни между собой, ни с соседями по каталогу (#1002).
+
+    Соседи — JSON, которые в тот же каталог пишут другие шаги `badges.yml`
+    (архив находок): их имена читаются из самого прогона, а не буквами.
+    """
+    flow = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
+    neighbours = set(re.findall(r"badges/\.github/badges/([\w.-]+\.json)", flow)) - {facts.FACTS}
+    assert neighbours, "соседей по каталогу публикации не нашлось — образец не туда (075)"
+    assert facts.clashing_names() == []
+    assert not neighbours & set(facts.published_names()), "значок затёр бы файл соседа"
+    monkeypatch.setitem(facts.BADGES, "facts.svg", facts.version_badge)
+    assert facts.clashing_names() == ["facts.json"], "столкновение с фактами не названо"

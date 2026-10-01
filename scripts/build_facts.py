@@ -469,6 +469,22 @@ def endpoint_name(name: str) -> str:
     return str(Path(name).with_suffix(".json"))
 
 
+def published_names() -> list[str]:
+    """Всё, что сборка кладёт в каталог публикации: факты, значки и их endpoint."""
+    return [FACTS, *BADGES, *map(endpoint_name, BADGES)]
+
+
+def clashing_names() -> list[str]:
+    """Имена вывода, которые встречаются дважды (взгляд на #1002).
+
+    Endpoint выводится из имени значка, а каталог публикации общий с фактами:
+    значок `facts.svg` дал бы `facts.json` и молча затёр бы контракт фактов
+    семьи. Столкновение — отказ сборки, а не перезапись.
+    """
+    names = published_names()
+    return sorted({name for name in names if names.count(name) > 1})
+
+
 #: Роды ответа, означающие «держит машина». Тот же состав, что у разреза семьи
 #: и у дрейфа: три понимания одного слова разошлись бы молча (090).
 #: Виды механизма — из общего места (`scripts/kinds.py`), а не своей копией.
@@ -664,6 +680,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_BROKEN
 
+    clash = clashing_names()
+    if clash:
+        print(
+            f"факты не опубликованы: имена вывода совпадают — {', '.join(clash)}", file=sys.stderr
+        )
+        return EXIT_BROKEN
     out = Path(args.out_dir) / PUBLISHED_DIR
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
