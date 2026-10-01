@@ -58,7 +58,7 @@ PUBLISHED_DIR: Final = paths.BADGES_DIR
 #: Версия формата — СТРОКОЙ, как требует контракт: число не различает `1.0` и
 #: `1.10`. Мажор — контракта семьи, а не наш: наши собственные разделы едут
 #: рядом незнакомыми ему ключами, и их он игнорирует.
-SCHEMA: Final = "1.0"
+SCHEMA: Final = "1.2"
 SCHEMA_OF: Final = (
     "контракт фактов витрины семьи: "
     "https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md"
@@ -343,13 +343,38 @@ def contract_coverage(said: dict[str, Any]) -> dict[str, Any]:
 
     ДОЛЯ ОДНА, А НЕ ДВЕ: `coverage_percent` контракта заменяет прежнее
     `coverage.percent`, а не дублирует его (#759). Не прочитано — ключа
-    `coverage_percent` нет вовсе: по контракту отсутствие значит «не мерили»,
-    а ноль читался бы как ответ.
+    `coverage_percent` нет вовсе, а причина стоит в `none.coverage_percent`:
+    договор фактов 1.2 требует по каждому показателю значение или причину, и
+    молчание третьим исходом не считается (#1001). Ноль читался бы как ответ.
     """
     parts = {key: value for key, value in said.items() if key != "percent"}
     if not said.get("read"):
-        return {"coverage": parts}
+        why = "отчёт покрытия этого прогона не прочитан — доля не мерилась, а не равна нулю"
+        return {"coverage": parts, "none": {"coverage_percent": why}}
     return {"coverage": parts, "coverage_percent": said["percent"]}
+
+
+#: Прогон CI, чей статус витрина спрашивает у площадки по имени файла: свой
+#: красный файл фактов честно сказать не может (договор фактов 1.2, #1001).
+CI_FLOW: Final = paths.WORKFLOWS / "ci.yml"
+#: Джобы матрицы версий: поддерживаемые и пробные. Версии берутся из самой
+#: матрицы, а не пишутся второй раз (005).
+SUPPORTED_JOB: Final = "test-matrix"
+EXPERIMENTAL_JOB: Final = "test-next"
+
+
+def python_facts(path: Path = CI_FLOW) -> dict[str, list[str]]:
+    """Версии Python, на которых проект гоняется, — из матрицы CI, а не по памяти.
+
+    `supported` — матрица `test-matrix`, `experimental` — `test-next`, `os` —
+    образы, на которых они идут. Договор фактов витрины 1.2 требует раздел
+    `python` либо причину в `none.python` (#1001): матрица у нас есть, поэтому
+    раздел, а не причина. Матрицу читает `pipeline_checks` — читатель прогонов
+    один; не прочитана — `policy.BadPolicy` с причиной.
+    """
+    supported, first = policy.matrix_axis(path, SUPPORTED_JOB, "python")
+    experimental, second = policy.matrix_axis(path, EXPERIMENTAL_JOB, "python")
+    return {"supported": supported, "experimental": experimental, "os": sorted({first, second})}
 
 
 def collect(
@@ -371,7 +396,16 @@ def collect(
     # Свести их в одно значило бы либо скрыть работу, либо объявить выпуском
     # каждое изменение (035).
     number, whole = version.version(root)
-    return {
+    # ЗНАЧЕНИЕ ИЛИ ПРИЧИНА, ТРЕТЬЕГО НЕТ (договор фактов 1.2, #1001): показатель,
+    # который не прочитан, уходит причиной в `none`, а не пропадает молча.
+    none: dict[str, str] = {}
+    try:
+        python: dict[str, list[str]] | None = python_facts(root / CI_FLOW)
+    except policy.BadPolicy as exc:
+        python, none["python"] = None, str(exc)
+    covered = contract_coverage(coverage_facts(coverage))
+    none.update(covered.pop("none", {}))
+    said = {
         # МИНИМУМ КОНТРАКТА СЕМЬИ: версия формата строкой, о ком файл и когда
         # собран — с поясом, чтобы витрина могла сказать «факты устарели»
         # вместо того, чтобы показывать прошлое как настоящее (#759).
@@ -380,6 +414,9 @@ def collect(
         "repo": mine,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": sha,
+        # Статус CI витрина спрашивает у площадки по имени файла (договор 1.2).
+        "ci": {"workflow": CI_FLOW.name},
+        **({"python": python} if python is not None else {}),
         "contract": contract_version(root / VERSION_FILE),
         "version": number,
         # Неполнота названа рядом с числом, а не выброшена: клон без тегов даёт
@@ -397,11 +434,14 @@ def collect(
         # исход процесса — то, ради чего гейт существует.
         "scripts": script_runs(root),
         # Покрытие строк приходит из прогона: по дереву его не сосчитать.
-        **contract_coverage(coverage_facts(coverage)),
+        **covered,
         "rules": rules_facts(root / BINDINGS),
         "checks_per_pr": checks_facts(root / policy.DEFAULT_PATH),
         "family": family_facts(summary, mine=mine, answers=root / BINDINGS),
     }
+    if none:
+        said["none"] = none
+    return said
 
 
 class Badge(NamedTuple):

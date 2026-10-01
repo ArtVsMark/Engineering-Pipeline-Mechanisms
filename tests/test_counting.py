@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.conftest import MEASURING, ROOT, load_script, under_counter, walk
 
@@ -231,3 +232,26 @@ def test_no_badge_name_clashes_with_another_published_file(monkeypatch: pytest.M
     assert not neighbours & set(facts.published_names()), "значок затёр бы файл соседа"
     monkeypatch.setitem(facts.BADGES, "facts.svg", facts.version_badge)
     assert facts.clashing_names() == ["facts.json"], "столкновение с фактами не названо"
+
+
+def test_coverage_not_read_names_its_reason() -> None:
+    """Покрытие не прочитано — причина в `none`, а не молчание (договор фактов 1.2, #1001)."""
+    said = facts.contract_coverage({"read": False})
+    assert said["none"]["coverage_percent"].strip()
+
+
+def test_python_versions_come_from_the_ci_matrix() -> None:
+    """Версии Python — из матрицы CI, а не по памяти: те же, на которых гоняется набор."""
+    said = facts.python_facts(ROOT / facts.CI_FLOW)
+    flow = yaml.safe_load((ROOT / facts.CI_FLOW).read_text(encoding="utf-8"))
+    matrix = flow["jobs"][facts.SUPPORTED_JOB]["strategy"]["matrix"]["python"]
+    assert said["supported"] == [str(one) for one in matrix]
+    assert said["experimental"], "пробных версий не нашлось — матрица test-next не прочитана"
+
+
+def test_a_missing_matrix_is_not_an_empty_list(tmp_path: Path) -> None:
+    """Матрицы нет — отказ с причиной, а не пустой список версий (045)."""
+    flow = tmp_path / "ci.yml"
+    flow.write_text("jobs: {}\n", encoding="utf-8")
+    with pytest.raises(facts.policy.BadPolicy, match="не прочитана"):
+        facts.python_facts(flow)

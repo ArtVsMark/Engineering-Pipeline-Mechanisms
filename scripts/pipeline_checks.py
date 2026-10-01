@@ -640,6 +640,21 @@ def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
     return jobs
 
 
+def matrix_axis(path: Path, job: str, axis: str) -> tuple[list[str], str]:
+    """Значения оси матрицы джоба и его образ — читатель прогонов один (#1001).
+
+    Нужна сборке фактов: версии Python витрине называет та же матрица, на
+    которой гоняется набор, а не память. Не прочитано — отказ с причиной (045).
+    """
+    try:
+        said = (yaml.safe_load(path.read_text(encoding="utf-8")) or {})["jobs"][job]
+        values = [str(one) for one in said["strategy"]["matrix"][axis]]
+        image = str(said["runs-on"])
+    except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise BadPolicy(f"{path}: ось «{axis}» джоба «{job}» не прочитана ({exc!r})") from exc
+    return values, image
+
+
 def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, Job]:
     """Собирает проверки, выдающие запись на голове изменения.
 
