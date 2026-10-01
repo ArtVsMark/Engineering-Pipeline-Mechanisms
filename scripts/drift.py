@@ -226,7 +226,7 @@ def ours_by_contract(mine: dict[str, Any], root: Path | None = None) -> list[tup
             continue
         try:
             answer = json.loads((base / path).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except OSError, ValueError:
             continue
         said.append((name, path, str(answer.get("schema") or "")))
     return said

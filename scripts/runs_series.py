@@ -622,7 +622,7 @@ def coverage_now(repo: str) -> float | None:
     """
     try:
         facts = ghrest.raw_json(FACTS_URL.format(repo=repo))
-    except (ghrest.TransportError, OSError, ValueError):
+    except ghrest.TransportError, OSError, ValueError:
         return None
     # Доля — ключом контракта `coverage_percent` (#759); его нет — покрытие не
     # прочитано, и это «не прочитано», а не ноль.
@@ -630,7 +630,7 @@ def coverage_now(repo: str) -> float | None:
         return None
     try:
         return round(float(facts["coverage_percent"]), 1)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

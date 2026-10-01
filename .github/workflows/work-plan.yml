@@ -63,7 +63,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       # РАЗБОР YAML НУЖЕН, ХОТЯ САМ СБОРЩИК YAML НЕ ЧИТАЕТ. Цепочка импортов,
       # проверенная прогоном: work_plan → debt → main_red → pipeline_checks →
       # yaml. Последнее звено разбирает состав проверок, и без установки шаг
