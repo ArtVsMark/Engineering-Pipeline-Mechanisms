@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import itertools
 import re
+from pathlib import Path
 from typing import Any, Final
 
 import pytest
@@ -2447,5 +2448,7 @@ def test_the_tasks_carry_no_copy_of_the_mark_instruction() -> None:
 
 
 def test_the_registry_header_names_the_canon_by_the_function() -> None:
-    """Шапка реестра называет канон по имени функции, а не набором букв (взгляд на #979)."""
-    assert f"::{module.closable.__name__}`" in module.render_body({})
+    """Шапка называет канон путём и именем самой функции, а не буквами (#979, #987)."""
+    where = Path(module.closable.__code__.co_filename).resolve().relative_to(ROOT).as_posix()
+    assert module.canon_at() == f"{where}::{module.closable.__name__}"
+    assert f"`{module.canon_at()}`" in module.render_body({})
