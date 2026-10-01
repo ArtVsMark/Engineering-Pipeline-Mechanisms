@@ -129,14 +129,24 @@ def test_fresh_marker_passes(run_script: RunScript, tmp_path: Path) -> None:
     assert run_script("check_version.py", cwd=repo).code == CLEAN
 
 
-def test_missing_version_source_is_third_outcome(run_script: RunScript, tmp_path: Path) -> None:
-    """Нет источника версии — гейт не отработал, а не «чисто» (075)."""
+def test_missing_version_source_is_third_outcome(
+    run_script: RunScript, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Нет источника версии — гейт не отработал, а не «чисто» (075).
+
+    Отказ сверяется с тем, что говорит сам `version.declared` на том же дереве,
+    а не с переписанными буквами (209): переформулировка отказа не краснит.
+    """
     git(tmp_path, "init", "-q", "-b", BASE_BRANCH)
     (tmp_path / "a.md").write_text("текст\n", encoding="utf-8")
     git(tmp_path, "add", "-A")
     result = run_script("check_version.py", cwd=tmp_path)
     assert result.code == BROKEN
-    assert "объявленную версию взять неоткуда" in result.text
+    version = load_script("version.py")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(version.NotRun) as refusal:
+        version.declared()
+    assert str(refusal.value) in result.text
 
 
 # --- журнал ------------------------------------------------------------------
