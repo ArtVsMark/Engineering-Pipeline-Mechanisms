@@ -452,6 +452,9 @@
         ".rules/finding-kinds.json"
       ]
     },
+    "scripts/gitcall.py": {
+      "answer": "as-is"
+    },
     "scripts/hail.py": {
       "answer": "as-is"
     },
