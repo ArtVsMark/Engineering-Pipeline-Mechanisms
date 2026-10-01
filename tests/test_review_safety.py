@@ -513,6 +513,10 @@ INHERITED = ("workflow_call",)
 OUR_BRANCH: Final = "main"
 # Единственный ref, который прогон от общей ветки забирает не чужим: сама база.
 OUR_BASE_REF: Final = "${{ github.event.pull_request.base.ref }}"
+#: Коммит, по которому позван сам файл прогона (#990): общий шаг берёт им НАШ
+#: код — тот же, что лежит в вызванном файле, а не чужую голову. Для
+#: локального `./` это коммит вызывающего, то есть уже смотренный код.
+OUR_CALL_REF: Final = "${{ job.workflow_sha }}"
 #: Префикс вызова переиспользуемого прогона из этого же дерева.
 LOCAL_WORKFLOW: Final = "./.github/workflows/"
 
@@ -669,7 +673,7 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
         for step in job.get("steps") or []
         if "checkout" in str(step.get("uses") or "")
         and (ref := (step.get("with") or {}).get("ref"))
-        and ref != OUR_BASE_REF
+        and ref not in (OUR_BASE_REF, OUR_CALL_REF)
     ]
     assert not foreign, (
         "прогон от общей ветки забирает ЧУЖОЙ ref: " + ", ".join(foreign) + ".\n"
