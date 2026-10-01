@@ -110,8 +110,8 @@ def test_badge_shows_the_number_it_measured() -> None:
     drawn = facts.rules_badge(
         {"rules": {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}}
     )
-    assert "66/195" in drawn
-    assert "держится машиной" in drawn
+    assert drawn.message == "66/195"
+    assert drawn.label == "держится машиной"
 
 
 def test_badge_colour_follows_the_share() -> None:
@@ -119,7 +119,7 @@ def test_badge_colour_follows_the_share() -> None:
     low = facts.rules_badge({"rules": {"by_mechanism": {"gate": 10, "document": 90}}})
     mid = facts.rules_badge({"rules": {"by_mechanism": {"gate": 50, "document": 50}}})
     high = facts.rules_badge({"rules": {"by_mechanism": {"gate": 90, "document": 10}}})
-    assert len({low.split('fill="')[2], mid.split('fill="')[2], high.split('fill="')[2]}) == 3
+    assert len({low.color, mid.color, high.color}) == 3
 
 
 #: Разрезы витрины, публикующие ДОЛЮ, и два числа, из которых она сделана.
@@ -239,7 +239,7 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, facts.FACTS})
+    found = sorted({*facts.BADGES, *map(facts.endpoint_name, facts.BADGES), facts.FACTS})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
