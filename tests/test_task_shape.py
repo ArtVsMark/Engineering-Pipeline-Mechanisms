@@ -103,8 +103,7 @@ def test_a_task_kept_by_a_mechanism_is_not_a_candidate() -> None:
     уходят сами; требовать сверх этого чек-лист значит требовать второй счёт
     того же (022).
     """
-    findings = load_script("findings.py")
-    registry = issue(89, findings.marker("unlooked") + "\n" + PROSE)
+    registry = issue(89, load_script("unlooked.py").MARKER + "\n" + PROSE)
     assert module.without_a_checklist([registry]) == []
 
 
@@ -116,8 +115,7 @@ def test_the_verdict_does_not_depend_on_how_full_the_registry_is() -> None:
     «пунктами прозой», а к вечеру перестал — не изменившись ни формой, ни
     назначением.
     """
-    findings = load_script("findings.py")
-    mark = findings.marker("review-findings")
+    mark = load_script("findings.py").MARKER
     full = issue(23, mark + "\n" + PROSE + "\n".join(f"- запись {n}" for n in range(30)))
     empty = issue(23, mark + "\nПусто — все находки названы разобранными.")
     assert module.without_a_checklist([full]) == module.without_a_checklist([empty]) == []
@@ -210,7 +208,7 @@ def test_a_live_issue_kept_by_a_mechanism_is_not_a_bare_task() -> None:
     Вторая половина предиката: без неё все семь живых задач-адресатов
     называлась бы голыми, и счёт учили бы пролистывать (051).
     """
-    kept = labelled(23, body=module.findings.marker("review-findings") + "\n\nреестр")
+    kept = labelled(23, body=module.findings.MARKER + "\n\nреестр")
     assert module.unlabelled([kept], KINDS) == []
 
 
