@@ -86,8 +86,8 @@ def test_a_same_named_mechanism_is_named_not_collapsed(
 def test_the_badge_shows_both_numbers() -> None:
     """Значок показывает долю, а не голое число: одно без другого ничего не значит."""
     said = facts.scripts_badge({"scripts": {"runnable": 31, "started": 17}})
-    assert "17/31" in said
-    assert "нет данных" in facts.scripts_badge({}), "пустой ответ выдан за число"
+    assert said.message == "17/31"
+    assert facts.scripts_badge({}).message == "нет данных", "пустой ответ выдан за число"
 
 
 def test_a_missing_tree_is_not_a_zero(tmp_path: Path) -> None:
@@ -145,7 +145,7 @@ def test_coverage_without_a_report_is_not_a_zero(tmp_path: Path) -> None:
     assert facts.coverage_facts(None) == {"read": False}
     assert facts.coverage_facts(tmp_path / "нет.json") == {"read": False}
     assert "coverage_percent" not in facts.contract_coverage({"read": False})
-    assert "не прочитано" in facts.coverage_badge({})
+    assert facts.coverage_badge({}).message == "не прочитано"
 
 
 def test_a_broken_report_is_a_refusal(tmp_path: Path) -> None:
@@ -178,3 +178,40 @@ def test_facts_without_a_repo_are_not_published(tmp_path: Path) -> None:
     )
     assert code == facts.EXIT_BROKEN
     assert not (tmp_path / facts.PUBLISHED_DIR / "facts.json").exists()
+
+
+def test_every_badge_is_published_as_a_shields_endpoint(tmp_path: Path) -> None:
+    """Рядом с каждым значком лежит его shields-endpoint с теми же числами (#998).
+
+    Так значки показывает вся семья: витрина берёт `…/badges/<имя>.json` через
+    `img.shields.io/endpoint`. Число одно — подпись и значение берутся из той же
+    записи, что и SVG, а не считаются второй раз.
+    """
+    code = facts.main(
+        ["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова", "--repo", "o/r"]
+    )
+    assert code == 0
+    out = tmp_path / facts.PUBLISHED_DIR
+    said = json.loads((out / facts.FACTS).read_text(encoding="utf-8"))
+    for name, draw in facts.BADGES.items():
+        shown = json.loads((out / facts.endpoint_name(name)).read_text(encoding="utf-8"))
+        drawn = draw(said)
+        assert shown == {
+            "schemaVersion": facts.ENDPOINT_SCHEMA,
+            "label": drawn.label,
+            "message": drawn.message,
+            "color": drawn.color.lstrip("#"),
+        }, f"{name}: shields-endpoint разошёлся со значком"
+
+
+def test_one_badge_record_renders_both_outputs() -> None:
+    """Одна запись `Badge` даёт и SVG, и shields-endpoint с теми же словами."""
+    drawn = facts.Badge("версия", "1.4.0", "#4c1")
+    picture = facts.svg(drawn)
+    assert "версия" in picture and "1.4.0" in picture and 'fill="#4c1"' in picture
+    assert facts.endpoint(drawn) == {
+        "schemaVersion": facts.ENDPOINT_SCHEMA,
+        "label": "версия",
+        "message": "1.4.0",
+        "color": "4c1",
+    }

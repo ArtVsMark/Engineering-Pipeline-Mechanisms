@@ -38,7 +38,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 import family
 import kinds
@@ -404,13 +404,27 @@ def collect(
     }
 
 
-def badge(label: str, value: str, color: str) -> str:
+class Badge(NamedTuple):
+    """Значок как данные: подпись, значение и цвет — одна запись на два вывода."""
+
+    label: str
+    message: str
+    color: str
+
+
+def badge(label: str, value: str, color: str) -> Badge:
+    """Значок из своих чисел; как его показать, решает вывод, а не рисовалка."""
+    return Badge(label, value, color)
+
+
+def svg(drawn: Badge) -> str:
     """Рисует значок сам, без обращения к чужой службе.
 
     Значок с чужого сервиса — это внешняя зависимость витрины: она отвалится
     молча и оставит вместо числа пустое место, которое читается как «всё в
     порядке». Здесь SVG собирается из своих же чисел и лежит рядом с ними.
     """
+    label, value, color = drawn
     # Ширина считается по числу знаков: точной метрики шрифта у нас нет, а
     # приблизительная лучше, чем обрезанный текст.
     left = 8 * len(label) + 12
@@ -430,13 +444,38 @@ def badge(label: str, value: str, color: str) -> str:
     )
 
 
+#: Форма значка, которую читает shields.io по адресу `endpoint?url=…`.
+ENDPOINT_SCHEMA: Final = 1
+
+
+def endpoint(drawn: Badge) -> dict[str, Any]:
+    """Значок формой shields-endpoint: так значки показывает вся семья (#998).
+
+    ЧУЖАЯ СЛУЖБА — ЦЕНА, И ОНА ПРИНЯТА (владелец, 01.10.2026). Довод `svg`
+    против неё в силе, но отказ здесь не молчит: не ответившая служба
+    показывает подпись картинки или «inaccessible», а не правдоподобное число.
+    Числа по-прежнему наши: служба лишь рисует то, что лежит в этом файле.
+    """
+    return {
+        "schemaVersion": ENDPOINT_SCHEMA,
+        "label": drawn.label,
+        "message": drawn.message,
+        "color": drawn.color.lstrip("#"),
+    }
+
+
+def endpoint_name(name: str) -> str:
+    """Имя файла shields-endpoint рядом со значком: то же имя, расширение `.json`."""
+    return str(Path(name).with_suffix(".json"))
+
+
 #: Роды ответа, означающие «держит машина». Тот же состав, что у разреза семьи
 #: и у дрейфа: три понимания одного слова разошлись бы молча (090).
 #: Виды механизма — из общего места (`scripts/kinds.py`), а не своей копией.
 MACHINE: Final = kinds.MACHINE
 
 
-def rules_badge(facts: dict[str, Any]) -> str:
+def rules_badge(facts: dict[str, Any]) -> Badge:
     """Сколько ДЕЙСТВУЮЩИХ правил держится машиной, а не документом.
 
     ПОЧЕМУ НЕ «ОТВЕЧЕНО». Прежняя редакция показывала `answered/total` и
@@ -458,7 +497,7 @@ def rules_badge(facts: dict[str, Any]) -> str:
     return badge("держится машиной", f"{machine}/{active}", color)
 
 
-def family_badge(facts: dict[str, Any]) -> str:
+def family_badge(facts: dict[str, Any]) -> Badge:
     """Доля машинного соблюдения семьи, которую закрывают ОБЩИЕ механизмы.
 
     Это прямое мерило «второго исхода» эпика #2: если общий модуль окупается,
@@ -474,7 +513,7 @@ def family_badge(facts: dict[str, Any]) -> str:
     return badge("общие механизмы", f"{percent}% семьи", color)
 
 
-def scripts_badge(facts: dict[str, Any]) -> str:
+def scripts_badge(facts: dict[str, Any]) -> Badge:
     """Сколько запускаемых механизмов набор гоняет процессом.
 
     Порог здесь не назначен, а взят у того же правила, что и прочие значки:
@@ -491,7 +530,7 @@ def scripts_badge(facts: dict[str, Any]) -> str:
     return badge("гейты прогоном", f"{started}/{runnable}", color)
 
 
-def coverage_badge(facts: dict[str, Any]) -> str:
+def coverage_badge(facts: dict[str, Any]) -> Badge:
     """Доля покрытых строк — или прямое «не прочитано»."""
     if "coverage_percent" not in facts:
         return badge("покрытие", "не прочитано", "#9f9f9f")
@@ -500,7 +539,7 @@ def coverage_badge(facts: dict[str, Any]) -> str:
     return badge("покрытие", f"{percent:g}%", color)
 
 
-def release_badge(facts: dict[str, Any]) -> str:
+def release_badge(facts: dict[str, Any]) -> Badge:
     """Последний выпуск: то, к чему потребитель прибивается тегом.
 
     Версия головы и выпуск — РАЗНЫЕ числа, и оба нужны: голова уходит вперёд
@@ -514,7 +553,7 @@ def release_badge(facts: dict[str, Any]) -> str:
     return badge("выпуск", said, "#4c1") if said else badge("выпуск", "не выпускался", "#9f9f9f")
 
 
-def version_badge(facts: dict[str, Any]) -> str:
+def version_badge(facts: dict[str, Any]) -> Badge:
     """Версия проекта: она СЧИТАЕТСЯ по истории, и значок показывает счёт.
 
     Неполнота названа цветом и словом: клон без тегов даёт правдоподобное
@@ -527,6 +566,8 @@ def version_badge(facts: dict[str, Any]) -> str:
 
 
 #: ЧТО СБОРКА РИСУЕТ — ОБЪЯВЛЕНО ЗДЕСЬ ОДИН РАЗ: имя файла → чем его рисуют.
+#: Рядом с каждым SVG публикуется его shields-endpoint (`endpoint_name`): витрина
+#: переходит на него вторым изменением, после первого прогона публикации (196).
 #: Порядок записей — порядок сборки.
 #:
 #: ПОЧЕМУ ЭТО ДАННЫЕ, А НЕ ШЕСТЬ КОНСТАНТ И КОРТЕЖ ВНУТРИ `main`. Список нужен
@@ -539,7 +580,7 @@ def version_badge(facts: dict[str, Any]) -> str:
 #: второй список как таковой: добавить значок — правка этих строк, и обе
 #: стороны узнают о нём в тот же миг
 #: ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
-BADGES: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
+BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
     "rules.svg": rules_badge,
     "family.svg": family_badge,
     "version.svg": version_badge,
@@ -627,7 +668,10 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
     for name, draw in BADGES.items():
-        (out / name).write_text(draw(facts) + "\n", encoding="utf-8")
+        drawn = draw(facts)
+        (out / name).write_text(svg(drawn) + "\n", encoding="utf-8")
+        said = json.dumps(endpoint(drawn), ensure_ascii=False, indent=2) + "\n"
+        (out / endpoint_name(name)).write_text(said, encoding="utf-8")
 
     rules = facts["rules"]
     print(

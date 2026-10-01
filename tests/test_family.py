@@ -252,28 +252,28 @@ def test_the_rules_badge_counts_machines_not_answers() -> None:
     said = facts.rules_badge(
         {"rules": {"by_mechanism": {"gate": 10, "pipeline": 2, "document": 8, "none": 1}}}
     )
-    assert "12/21" in said
-    assert "держится машиной" in said
+    assert said.message == "12/21"
+    assert said.label == "держится машиной"
 
 
 def test_the_family_badge_says_when_it_has_no_data() -> None:
     """Снимок семьи не пришёл — значок говорит это, а не рисует ноль (045)."""
-    assert "нет данных" in facts.family_badge({"family": {"read": False}})
-    assert "нет данных" in facts.family_badge({})
+    assert facts.family_badge({"family": {"read": False}}).message == "нет данных"
+    assert facts.family_badge({}).message == "нет данных"
 
 
 def test_the_family_badge_shows_the_measure_of_the_epic() -> None:
     """Доля общих механизмов — прямое мерило «второго исхода» эпика #2."""
     said = facts.family_badge({"family": {"share": 0.276, "consumers": 6}})
-    assert "28% семьи" in said
+    assert said.message == "28% семьи"
 
 
 def test_the_version_badge_names_incompleteness() -> None:
     """Версия посчитана неполно — сказано словом и цветом, а не скрыто."""
     whole = facts.version_badge({"version": "0.1.91", "version_whole": True})
     partial = facts.version_badge({"version": "0.1.91", "version_whole": False})
-    assert "неполно" not in whole
-    assert "неполно" in partial
+    assert "неполно" not in whole.message
+    assert "неполно" in partial.message
 
 
 # --- отставание от семьи -----------------------------------------------------
