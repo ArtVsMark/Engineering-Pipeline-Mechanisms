@@ -50,7 +50,16 @@ OUR_CALL: Final = "./"
 
 #: Команда шага прогона: строка, начинающаяся с зовомого инструмента. Читается
 #: список РАЗРЕШЁННОГО (068): что не узнано, то не запускается, а называется.
+#:
 RUNNABLE: Final = ("ruff ", "mypy ", "pytest", "python scripts/")
+#: Вызов нашего кода из checkout общего шага (#990). Перед сверкой со списками
+#: разрешённого и требующего площадки он приводится к прямому `python scripts/`:
+#: иначе предполётная молча потеряла бы вынесенные проверки, а отложенные
+#: площадкой — запускала бы (045).
+#: Переменная окружения с каталогом кода конвейера у общего шага (#990): её
+#: ставит общий шаг, её же ставит предполётная и читает гейт шагов.
+MECHANISMS: Final = "MECHANISMS"
+FROM_CHECKOUT: Final = f"python ${MECHANISMS}/scripts/"
 #: Подстановка площадки. Блок с ней локально не раскрывается, и запускать его
 #: значит проверять не ту команду.
 PLATFORM_MARK: Final = "${{"
@@ -203,16 +212,13 @@ def steps(path: Path = CI) -> list[Step]:
             name = str((step or {}).get("name") or "").strip()
             if not command or command in seen:
                 continue
-            if not any(line.strip().startswith(RUNNABLE) for line in command.splitlines()):
+            lines = [plain(line) for line in command.splitlines()]
+            if not any(line.startswith(RUNNABLE) for line in lines):
                 continue
             # Площадка нужна блоку целиком, если её требует ХОТЯ БЫ одна его
             # строка: запустить остальное без неё значит проверить половину и
             # назвать это проверкой.
-            if any(
-                line.strip().startswith(prefix)
-                for line in command.splitlines()
-                for prefix in NEEDS_PLATFORM
-            ):
+            if any(line.startswith(prefix) for line in lines for prefix in NEEDS_PLATFORM):
                 continue
             if PLATFORM_MARK in command:
                 # Подстановка площадки локально не раскрывается: запустить блок
@@ -226,6 +232,14 @@ def steps(path: Path = CI) -> list[Step]:
     if not found:
         raise NotRun(f"{path}: ни одной выполнимой команды не нашлось — предмет не найден (075)")
     return found
+
+
+def plain(line: str) -> str:
+    """Строка команды без отступа, вызов из checkout — как прямой (#990)."""
+    line = line.strip()
+    return (
+        "python scripts/" + line[len(FROM_CHECKOUT) :] if line.startswith(FROM_CHECKOUT) else line
+    )
 
 
 def environment() -> dict[str, str]:
@@ -256,7 +270,10 @@ def run(step: Step, root: Path) -> tuple[int, str]:
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=environment(),
+        # КОД КОНВЕЙЕРА ЛОКАЛЬНО — ЭТО ДЕРЕВО. На площадке общий шаг берёт его
+        # своим checkout на коммите вызова (#990); здесь проверяется дерево, в
+        # котором лежит и код.
+        env={**environment(), MECHANISMS: str(root.resolve())},
     )
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 

@@ -45,6 +45,39 @@ jobs:
           # клоне она обрезана до одного коммита, и все файлы выглядят
           # добавленными в нём — признак срабатывал бы на каждом названном.
           fetch-depth: 0
+      # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
+      # потребителя нашего `scripts/` нет: дерево вызывающего — ЕГО, и в нём
+      # только данные. Репозиторий и коммит — того файла, который позвали
+      # (`job.workflow_repository`, `job.workflow_sha`), поэтому прибивка
+      # вызова к тегу прибивает и код, а адрес поставщика буквами не пишется.
+      # Замер прогоном 01.10.2026 (#997): `github.job_workflow_sha` у
+      # вызванного шага пуст, `job.workflow_sha` — коммит вызванного файла.
+      # Пустой коммит не подменяется веткой по умолчанию молча (045).
+      # ДУБЛЬ ЭТОГО БЛОКА НАМЕРЕННЫЙ (071): площадка не подключает шаги внутрь
+      # шага, и блок стоит в каждом общем шаге, зовущем наш код. Совпадение
+      # блоков держит `tests/test_reusable_steps.py::test_the_code_block_is_one_in_every_step`.
+      - name: коммит вызова назван
+        env:
+          AT: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$AT" ]; then
+            echo "::error::коммит вызова шага не назван — код конвейера не взят (045)"
+            exit 1
+          fi
+      - name: код конвейера — на коммите вызова
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pipeline-mechanisms
+          persist-credentials: false
+      # Из рабочего дерева код уносится: обходы по дереву потребителя видят
+      # только его файлы, а не наши.
+      - name: унести код конвейера из дерева потребителя
+        run: |
+          set -euo pipefail
+          mv .pipeline-mechanisms "$RUNNER_TEMP/mechanisms"
+          echo "MECHANISMS=$RUNNER_TEMP/mechanisms" >>"$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -53,7 +86,7 @@ jobs:
       # на импорте, ДО входа в скрипт: свой третий исход выдать он не мог бы,
       # и прогон читал бы сбой как отказ механизма.
       - name: поставить разбор состава
-        run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
+        run: python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport
       - name: остаток долга — находки и неотвеченные правила
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,7 +98,7 @@ jobs:
           # прочитана», и он не зеленит шаг молча.
           said="${RUNNER_TEMP}/debt.txt"
           set +e
-          python scripts/debt.py >"$said" 2>&1
+          python $MECHANISMS/scripts/debt.py >"$said" 2>&1
           code=$?
           set -e
           cat "$said"
