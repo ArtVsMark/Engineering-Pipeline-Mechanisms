@@ -2449,6 +2449,9 @@ def test_the_tasks_carry_no_copy_of_the_mark_instruction() -> None:
 
 def test_the_registry_header_names_the_canon_by_the_function() -> None:
     """Шапка называет канон путём и именем самой функции, а не буквами (#979, #987)."""
-    where = Path(module.closable.__code__.co_filename).resolve().relative_to(ROOT).as_posix()
-    assert module.canon_at() == f"{where}::{module.closable.__name__}"
+    where, _, name = module.canon_at().partition("::")
+    # Путь утверждается от корня дерева, а не от рабочего каталога: адрес
+    # обязан вести в тот самый файл, где лежит функция (взгляд на #988).
+    assert (ROOT / where).resolve() == Path(module.closable.__code__.co_filename).resolve()
+    assert name == module.closable.__name__
     assert f"`{module.canon_at()}`" in module.render_body({})

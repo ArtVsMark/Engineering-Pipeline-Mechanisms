@@ -217,6 +217,29 @@ def test_a_blank_line_ends_a_paragraph(source: str) -> None:
     assert any(retold(text) for _, text in py_paragraphs(source))
 
 
+#: Адрес канона, набранный буквами: путь к модулю и имя через `::`.
+WRITTEN_AT: Final = re.compile(rf"([\w./-]+\.py)::{CANON}\b")
+
+
+def test_a_written_canon_address_leads_to_the_canon() -> None:
+    """Адрес канона, набранный буквами в тексте, ведёт в сам канон (взгляд на #988).
+
+    В документе адрес иначе как буквами не записать, и это не дефект — дефект,
+    когда буквы разошлись с функцией. Соседи шапки по адресу названы (195):
+    `docs/agent/review.md`, докстрока этого файла и любой новый — обход тот же,
+    что у пересказов, плюс сам этот файл.
+    """
+    files = [*texts(), SELF]
+    written = [
+        (path, match.group(1))
+        for path in files
+        for match in WRITTEN_AT.finditer(path.read_text(encoding="utf-8"))
+    ]
+    assert written, "адрес канона буквами не найден нигде — обход не туда"
+    stale = [f"{p.relative_to(ROOT)}: {at}" for p, at in written if f"{at}::{CANON}" != CANON_AT]
+    assert not stale, f"адрес канона разошёлся с `{CANON_AT}`: " + "; ".join(stale)
+
+
 def test_the_answer_removal_rule_is_retold_only_by_its_canon() -> None:
     """Абзац о снятии находки об ответе называет канон `closable` (#978)."""
     files = texts()
