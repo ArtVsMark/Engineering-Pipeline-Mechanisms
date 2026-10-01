@@ -902,3 +902,21 @@ def test_a_refused_look_is_named_not_swallowed(
     monkeypatch.setattr(preflight.check_agent_silenced, "look", broken)
     preflight.say_the_look_is_silenced(tmp_path)
     assert "не проверена" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("line", "seen_as"),
+    [
+        ("  python $MECHANISMS/scripts/debt.py >x", "python scripts/debt.py >x"),
+        ("python scripts/check_journal.py", "python scripts/check_journal.py"),
+        ("  ruff check scripts/", "ruff check scripts/"),
+    ],
+    ids=["из checkout шага", "прямой вызов", "чужой инструмент"],
+)
+def test_a_call_from_the_steps_checkout_reads_as_a_direct_one(line: str, seen_as: str) -> None:
+    """Вызов из checkout общего шага сверяется как прямой (#990).
+
+    Иначе предполётная молча потеряла бы вынесенные проверки, а отложенные
+    площадкой — запускала бы: оба списка написаны прямой формой.
+    """
+    assert preflight.plain(line) == seen_as
