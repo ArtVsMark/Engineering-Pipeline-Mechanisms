@@ -129,7 +129,7 @@ def _quota_from(headers: Any) -> tuple[int | None, int, str]:
     def number(name: str) -> int:
         try:
             return int(headers.get(name) or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0
 
     raw = headers.get("x-ratelimit-remaining")
@@ -297,7 +297,7 @@ def request(
             if not reset_at and retry_after:
                 try:
                     reset_at = int(time.time()) + int(retry_after)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     reset_at = 0
             raise RateLimited(
                 f"{method} {path} → лимит исчерпан", reset_at=reset_at, resource=resource
