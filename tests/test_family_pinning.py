@@ -31,11 +31,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
 WORKFLOWS = walk(ROOT / ".github" / "workflows", "*.yml")
-#: Владелец семьи: проекты, между которыми и идёт подключение версией.
-FAMILY = "ArtVsMark/"
+#: Владелец семьи: проекты, между которыми и идёт подключение версией. Берётся
+#: у `catalogue.FAMILY_PREFIX` — того же места, что у дрейфа, второго судьи
+#: версий действий, а не буквами (взгляд на #1006, 022).
+FAMILY = load_script("catalogue.py").FAMILY_PREFIX
 #: Обращение к чужому механизму: `uses: <владелец>/<имя>[/путь]@<ссылка>`.
 USES_RE = re.compile(r"uses:\s*(?P<repo>[\w.-]+/[\w.-]+)(?P<path>/[\w./-]+)?@(?P<ref>\S+)")
 #: Закреплённая версия: тег вида `vN.N.N`. Мажорный алиас (`@v1`) сюда не
