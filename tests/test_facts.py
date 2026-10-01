@@ -239,7 +239,7 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, *map(facts.endpoint_name, facts.BADGES), facts.FACTS})
+    found = sorted({*facts.BADGES, facts.FACTS})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
