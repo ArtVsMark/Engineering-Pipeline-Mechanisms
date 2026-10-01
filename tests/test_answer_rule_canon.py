@@ -23,9 +23,16 @@
 режется на токены, и имя внутри не видно) — починен разбор. Семь — история,
 пометка рода и докстроки тестов `closable` — дополнены адресом канона.
 
-ГРАНИЦЫ НАЗВАНЫ (195). Не проверяются: тело самой `closable` (это канон),
-журнал (`CHANGELOG.md`, `changelog.d/`) — выпущенное не правится, и сам этот
-файл — его таблица держит пересказы без канона намеренно.
+ГРАНИЦЫ НАЗВАНЫ (195). Не проверяются: тело самой `closable` (это канон);
+журнал (`CHANGELOG.md`, `changelog.d/`) — выпущенное не правится; сам этот файл —
+его таблица держит пересказы без канона намеренно; `.github/` — прозы о снятии
+там нет, задание ревьюеру о пометке ведёт карта взгляда в `scripts/review_map.py`,
+которую обход видит; `.rules/` — данные ответов и родов, а не текст о правиле
+снятия. Замер 30.09.2026: «об ответе» в `.github/` и `.rules/` не встречается.
+
+ГРАНИЦА АБЗАЦА — ПУСТАЯ СТРОКА И КОНЕЦ ОПЕРАТОРА (взгляд на #983). Два блока
+комментариев через пустую строку и докстрока с комментарием под ней — разные
+абзацы: иначе канон, названный в одном, прикрыл бы пересказ в соседнем.
 """
 
 from __future__ import annotations
@@ -39,7 +46,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, walk_deep
+from tests.conftest import ROOT, load_script, walk_deep
 
 #: Где живут тексты, которые читают окно и ревьюер, и в каких расширениях.
 #: Пара названа явно: обход пустой пары — обрыв проверки, а не «нарушений нет»
@@ -53,19 +60,23 @@ DIRS: Final = (
     ("docs", "*.md"),
 )
 #: Документы свода в корне.
-FILES: Final = ("AGENTS.md", "CLAUDE.md")
+FILES: Final = ("AGENTS.md", "CLAUDE.md", "README.md")
 #: Предмет правила — находка об ответе; сравнение после `casefold`.
 SUBJECT: Final = "об ответе"
 #: Глаголы снятия: снимает, снятие, отвергается, принимается и их формы.
 REMOVAL: Final = re.compile(r"\b(сним\w*|снят\w*|отверг\w*|принима\w*)")
-#: Имя канона.
-CANON: Final = "closable"
+#: Канон и его адрес — у самой функции, а не буквами: переименование увело бы
+#: гейт в пустоту молча (209, взгляд на #983).
+CANONICAL: Final = load_script("review_findings.py").closable
+CANON: Final = CANONICAL.__name__
+CANON_AT: Final = f"{Path(CANONICAL.__code__.co_filename).relative_to(ROOT)}::{CANON}"
 #: Этот файл: таблица ниже держит пересказы без канона — это красные случаи.
 SELF: Final = Path(__file__).resolve()
 #: Пустой строковый литерал — граница абзаца в списке строк.
 EMPTY_LITERAL: Final = re.compile(r"[rbuRBU]*(\"\"|'')")
-#: Токены, которые абзаца не прерывают: переносы и отступы внутри выражения.
-SPACING: Final = (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT)
+#: Токены, которые абзаца не прерывают: перенос внутри выражения и отступы.
+#: Пустая строка (`NL` на пустой строке) и конец оператора (`NEWLINE`) — прерывают.
+SPACING: Final = (tokenize.NL, tokenize.INDENT, tokenize.DEDENT)
 
 
 def retold(text: str) -> bool:
@@ -122,6 +133,8 @@ def py_paragraphs(source: str) -> list[tuple[int, str]]:
                 take(line, tok.string)
         elif tok.type == tokenize.COMMENT:
             take(line, tok.string.lstrip("#:").strip())
+        elif tok.type == tokenize.NEWLINE or (tok.type == tokenize.NL and not tok.line.strip()):
+            flush()
         elif tok.type in SPACING or tok.string == ",":
             continue
         else:
@@ -191,6 +204,19 @@ def test_a_paragraph_is_bounded_by_an_empty_literal_and_the_canon_is_skipped() -
     assert found == [5]
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "# канон — closable\n\n# Находку об ответе снимает только правка ответа.\n",
+        '"""Модуль: канон — closable."""\n\n# Находку об ответе снимает правка ответа.\n',
+    ],
+    ids=["два блока комментариев", "докстрока и комментарий"],
+)
+def test_a_blank_line_ends_a_paragraph(source: str) -> None:
+    """Пустая строка разделяет абзацы: канон в одном не прикрывает пересказ в другом (#983)."""
+    assert any(retold(text) for _, text in py_paragraphs(source))
+
+
 def test_the_answer_removal_rule_is_retold_only_by_its_canon() -> None:
     """Абзац о снятии находки об ответе называет канон `closable` (#978)."""
     files = texts()
@@ -198,5 +224,5 @@ def test_the_answer_removal_rule_is_retold_only_by_its_canon() -> None:
     found = [where for path in files for where in retellings(path)]
     assert not found, (
         "абзац говорит о снятии находки «об ответе» и не называет канона — "
-        "сошлитесь на `scripts/review_findings.py::closable` вместо пересказа: " + "; ".join(found)
+        f"сошлитесь на `{CANON_AT}` вместо пересказа: " + "; ".join(found)
     )
