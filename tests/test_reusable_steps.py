@@ -275,8 +275,13 @@ def test_the_code_block_is_one_in_every_step() -> None:
     assert not apart, f"блок кода конвейера разошёлся с «{first}»: {apart}"
     block = blocks[first]
     assert BLOCK_DECLARED in block, "дубль блока не объявлен намеренным (071)"
-    guard, checkout = block.index('if [ -z "$AT" ]'), block.index("uses: actions/checkout@")
-    assert guard < checkout, "охрана пустого коммита вызова стоит не перед checkout (045)"
+    checkout = block.index("uses: actions/checkout@")
+    # Охраны две, по обоим доводам checkout: пустой коммит не берёт код, а
+    # пустой репозиторий молча берёт дерево вызывающего (взгляд на #997).
+    for variable, said in (("AT", OUR_SHA), ("FROM", OUR_REPO)):
+        assert f"{variable}: {said}" in block, f"охране не передан {said}"
+        guard = block.index(f'if [ -z "${variable}" ]')
+        assert guard < checkout, f"охрана пустого {said} стоит не перед checkout (045)"
     assert 'mv .pipeline-mechanisms "$RUNNER_TEMP/mechanisms"' in block, "код не уносится из дерева"
     assert f'echo "{preflight.MECHANISMS}=' in block, (
         "шаг ставит не ту переменную, что предполётная"
