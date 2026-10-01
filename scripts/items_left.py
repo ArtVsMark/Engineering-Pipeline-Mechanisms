@@ -317,7 +317,7 @@ def subjects(root: Path | None = None) -> list[Subject]:
     for path in sorted((root or Path()).joinpath("tests").glob("test_*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError, UnicodeDecodeError):
+        except OSError, SyntaxError, UnicodeDecodeError:
             continue
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef) or node.name not in born:
