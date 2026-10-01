@@ -45,10 +45,11 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from collections import defaultdict
 from typing import Final
+
+import gitcall
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -63,10 +64,7 @@ class NotRun(RuntimeError):
 
 def _git(*args: str) -> str:
     """Запуск git; отказ — третий исход, а не пустой ответ (075)."""
-    done = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
-    if done.returncode != 0:
-        raise NotRun(f"git {' '.join(args)}: {done.stderr.strip()}")
-    return done.stdout
+    return gitcall.output(args, NotRun)
 
 
 def files_of(sha: str) -> list[str]:

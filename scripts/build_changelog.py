@@ -43,8 +43,7 @@ import version as project_version
 FRAGMENTS: Final = paths.FRAGMENTS
 RELEASED: Final = paths.RELEASED
 OUTPUT: Final = paths.CHANGELOG
-VERSION_FILE: Final = paths.VERSION
-#: Формат номера версии один на гейт и сборщик (214), и живёт уровнем выше (090).
+#: Формат номера версии общий (214) и живёт уровнем выше (090).
 VERSION_RE: Final = paths.VERSION_RE
 LINK_LINE_RE: Final = journal.LINK_LINE_RE
 
@@ -287,16 +286,6 @@ def render_folded(directories: list[Path]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def read_version() -> str:
-    """Читает версию контракта из единственного источника."""
-    if not VERSION_FILE.is_file():
-        raise NotRun(f"нет источника версии: {VERSION_FILE}")
-    version = VERSION_FILE.read_text(encoding="utf-8").strip()
-    if not VERSION_RE.match(version):
-        raise NotRun(f"версия «{version}» не вида МАЖОР.МИНОР.ПАТЧ")
-    return version
-
-
 def do_release(version: str) -> None:
     """Переносит текущие фрагменты в каталог выпуска, оставляя их источником."""
     if not VERSION_RE.match(version):
@@ -355,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.release:
             do_release(args.release)
-        version = read_version()
+        version = project_version.declared()
         assembled = render(version)
 
         if args.check:
@@ -373,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
         OUTPUT.write_text(assembled, encoding="utf-8")
         print(f"{OUTPUT} собран, версия контракта {version}")
         return EXIT_OK
-    except (NotRun, journal.NotRun) as exc:
+    except (NotRun, journal.NotRun, project_version.NotRun) as exc:
         print(f"сборка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

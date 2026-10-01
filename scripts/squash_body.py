@@ -34,14 +34,13 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from collections.abc import Iterable
 from typing import Final
 
 import changerefs
+import gitcall
 import paths
-import report
 
 #: Трейлеры, которые тело уплотнения переносит: соавторство и адрес окна.
 TRAILER_RE: Final = re.compile(r"^(?:Co-Authored-By|Claude-Session):\s*\S", re.IGNORECASE)
@@ -58,13 +57,7 @@ class NotRun(RuntimeError):
 
 def git(*args: str) -> str:
     """Зовёт git, обращая отказ в третий исход."""
-    try:
-        return subprocess.run(
-            ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8"
-        ).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
-        detail = getattr(exc, "stderr", "") or exc
-        raise NotRun(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
+    return gitcall.output(args, NotRun)
 
 
 def tail_block(text: str) -> list[str]:
