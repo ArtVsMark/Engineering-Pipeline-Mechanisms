@@ -417,8 +417,7 @@
         ".rules/bindings.json",
         ".rules/proposals.json",
         ".rules/showcase.json"
-      ],
-      "seam": "приставка своего владельца (`OUR_OWN`) прибита в коде, а не в данных"
+      ]
     },
     "scripts/family.py": {
       "answer": "ours",

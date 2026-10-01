@@ -1838,3 +1838,17 @@ def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.Monke
     monkeypatch.setattr(module.check_required_context.ghrest, "request", lambda *a, **k: said)
     with pytest.raises(module.NotRun, match=re.escape(module.check_required_context.UNSAID_REASON)):
         module.merge_ways_moved("о/р", "токен")
+
+
+@pytest.mark.parametrize(
+    ("repo", "own"),
+    [
+        ("ArtVsMark/Glossary-Python", ("ArtVsMark/",)),
+        ("Other/Project", ("Other/", "ArtVsMark/")),
+        ("", ("ArtVsMark/",)),
+    ],
+    ids=["сосед по семье", "чужой владелец", "имя не названо"],
+)
+def test_own_actions_are_told_by_the_asked_repo(repo: str, own: tuple[str, ...]) -> None:
+    """Свои действия — у владельца спрашиваемого репозитория и семьи, а не буквами (#992)."""
+    assert module.own_prefixes(repo) == own
