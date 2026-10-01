@@ -568,20 +568,6 @@ def coverage_badge(facts: dict[str, Any]) -> Badge:
     return badge("покрытие", f"{percent:g}%", color)
 
 
-def release_badge(facts: dict[str, Any]) -> Badge:
-    """Последний выпуск: то, к чему потребитель прибивается тегом.
-
-    Версия головы и выпуск — РАЗНЫЕ числа, и оба нужны: голова уходит вперёд
-    каждым изменением, а потребитель живёт на выпущенном. Показывать одно
-    вместо другого значило бы обещать ему то, чего он не получал.
-
-    Выпусков ещё не было — сказано словом: пустой значок и «не выпускался»
-    снаружи одинаковы (045).
-    """
-    said = str(facts.get("release") or "")
-    return badge("выпуск", said, "#4c1") if said else badge("выпуск", "не выпускался", "#9f9f9f")
-
-
 def version_badge(facts: dict[str, Any]) -> Badge:
     """Версия проекта: она СЧИТАЕТСЯ по истории, и значок показывает счёт.
 
@@ -614,10 +600,22 @@ BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
     "rules.json": rules_badge,
     "family.json": family_badge,
     "version.json": version_badge,
-    "release.json": release_badge,
     "scripts.json": scripts_badge,
     "coverage.json": coverage_badge,
 }
+
+#: ЕДИНЫЙ ЗНАЧОК РИСУЕТ НЕ СБОРКА, А ДЕЙСТВИЕ КАТАЛОГА (#1019): «Python │ ОС │
+#: coverage │ release / PyPI │ version» собирает `python-badge` шагом
+#: `badges.yml`, а код его исполняется с тега каталога, а не копией здесь (022).
+#: Имя объявлено тут, рядом с инвентарём, потому что гейт витрины спрашивает
+#: «всё ли нарисованное названо» у одного места, а не у двух.
+UNIFIED: Final = "python.svg"
+#: Файлы инвентаря, из которых единый значок берёт свои зоны: покрытие и версию
+#: он не меряет второй раз (214). Отдельно в витрине они больше не показываются —
+#: стали бы дублями зон. Выпуск зона «release / PyPI» спрашивает у площадки
+#: сама, поэтому `release.json` снят: его не показывал и не читал бы никто.
+#: Что эти имена совпадают со входами шага, держит `tests/test_showcase.py`.
+ZONE_INPUTS: Final = ("coverage.json", "version.json")
 
 
 def main(argv: list[str] | None = None) -> int:

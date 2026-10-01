@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+import yaml
 
 from tests.conftest import ROOT, badges_shown, load_script
 
@@ -167,7 +168,9 @@ def drawn() -> set[str]:
     """
     names = set(facts.BADGES)
     assert len(names) >= 5, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
-    return names
+    # Единый значок рисует шаг `badges.yml`, а не сборка; имя у них одно —
+    # `build_facts.UNIFIED`, и со шагом его сверяет проверка ниже (#1019).
+    return names | {facts.UNIFIED}
 
 
 def test_every_badge_the_build_draws_is_named_by_the_showcase() -> None:
@@ -185,6 +188,10 @@ def test_every_badge_the_build_draws_is_named_by_the_showcase() -> None:
     """
     named = {Path(str(q["badge"])).name for q in answers() if q.get("badge")}
     named |= {Path(str(one["badge"])).name for one in own()}
+    # Входы единого значка названы его зонами: вопрос отвечает зоной, а файл
+    # её питает. Без единого значка в ответах они ничьи — и молчат честно.
+    if facts.UNIFIED in named:
+        named |= set(facts.ZONE_INPUTS)
     silent = sorted(drawn() - named)
     assert not silent, (
         f"сборка рисует {silent}, и витрина о них молчит: назвать вопросом набора "
@@ -262,10 +269,9 @@ def test_every_badge_declares_what_moves_it() -> None:
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     said = moves()
-    assert facts.BADGES, "инвентарь значков пуст — предмет проверки не найден (075)"
     mute = [
         f"{name}: {'нет записи' if name not in said else 'событие не названо'}"
-        for name in sorted(facts.BADGES)
+        for name in sorted(drawn())
         if len(said.get(name, "").strip()) < REASON_AT_LEAST
     ]
     assert not mute, (
@@ -282,7 +288,45 @@ def test_no_declaration_outlives_its_badge() -> None:
     обещание показать число, которого никто не рисует
     ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
     """
-    orphan = sorted(set(moves()) - set(facts.BADGES))
+    orphan = sorted(set(moves()) - drawn())
     assert not orphan, (
         f"объявлено, что сдвинет значок, которого сборка не рисует: {', '.join(orphan)}"
+    )
+
+
+#: Действие каталога, которое рисует единый значок (#1019).
+UNIFIED_ACTION: Final = "/.github/actions/python-badge@"
+BADGES_FLOW: Final = ROOT / ".github" / "workflows" / "badges.yml"
+
+
+def unified_step() -> dict[str, Any]:
+    """Шаг `badges.yml`, который зовёт действие единого значка, — ровно один."""
+    document = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
+    found = [
+        step
+        for job in (document.get("jobs") or {}).values()
+        for step in (job or {}).get("steps") or []
+        if UNIFIED_ACTION in str((step or {}).get("uses") or "")
+    ]
+    assert len(found) == 1, f"шагов единого значка в badges.yml не один, а {len(found)} (075)"
+    return found[0]
+
+
+def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
+    """Шаг рисует ТОТ значок и из ТЕХ файлов, что объявлены рядом с инвентарём.
+
+    Гейты витрины судят имена `build_facts.UNIFIED` и `ZONE_INPUTS`, а рисует
+    значок шаг прогона: без сверки объявление и шаг разошлись бы молча — витрина
+    ждала бы одно имя, а прогон клал другое (022). Сравниваются имена файлов:
+    каталог публикации у шага свой, и путь к нему — дело прогона.
+    """
+    said = unified_step().get("with") or {}
+    assert Path(str(said.get("out") or "")).name == facts.UNIFIED, (
+        f"шаг кладёт {said.get('out')!r}, а витрина ждёт {facts.UNIFIED}"
+    )
+    inputs = {
+        Path(str(said[key])).name for key in ("coverage-json", "version-json") if said.get(key)
+    }
+    assert inputs == set(facts.ZONE_INPUTS), (
+        f"зоны питаются {sorted(inputs)}, а объявлены {sorted(facts.ZONE_INPUTS)}"
     )

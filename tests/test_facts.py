@@ -239,7 +239,7 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, facts.FACTS})
+    found = sorted({*facts.BADGES, facts.FACTS, facts.UNIFIED})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
@@ -302,8 +302,11 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     """
     drawn = set(facts.BADGES)
     assert len(drawn) >= 5, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
-    assert drawn == set(shown_badges()), (
-        f"сборка рисует {sorted(drawn)}, витрина показывает {shown_badges()}"
+    # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
+    # ним они были бы дублями. Сам единый значок рисует шаг `badges.yml`.
+    expected = (drawn - set(facts.ZONE_INPUTS)) | {facts.UNIFIED}
+    assert expected == set(shown_badges()), (
+        f"витрине положено показать {sorted(expected)}, а показано {shown_badges()}"
     )
 
 
