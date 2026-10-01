@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -57,6 +56,7 @@ from typing import Final
 
 import build_changelog
 import ghrest
+import gitcall
 import paths
 import pipeline_checks as policy
 import report
@@ -78,13 +78,8 @@ class NotRun(RuntimeError):
 
 
 def git(*args: str) -> str:
-    """Ответ git; отказ — это отказ входа, а не пустая строка."""
-    done = subprocess.run(
-        ["git", *args], capture_output=True, text=True, encoding="utf-8", check=False
-    )
-    if done.returncode != 0:
-        raise NotRun(f"git {' '.join(args)}: {report.cut(done.stderr.strip())}")
-    return done.stdout.strip()
+    """Ответ git; отказ и отсутствие git — отказ входа, а не пустая строка или трасса."""
+    return gitcall.output(args, NotRun).strip()
 
 
 def fragments() -> list[Path]:
