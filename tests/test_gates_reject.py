@@ -136,7 +136,7 @@ def test_missing_version_source_is_third_outcome(run_script: RunScript, tmp_path
     git(tmp_path, "add", "-A")
     result = run_script("check_version.py", cwd=tmp_path)
     assert result.code == BROKEN
-    assert "нет источника версии" in result.text
+    assert "объявленную версию взять неоткуда" in result.text
 
 
 # --- журнал ------------------------------------------------------------------
