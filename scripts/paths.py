@@ -82,6 +82,9 @@ WORKFLOWS: Final = Path(".github/workflows")
 #: так, как их позовёт потребитель. Адрес здесь, а не у читателя: второй
 #: якорь заводится ровно тем, что кто-то однажды собрал путь сам.
 HANDOVER_PROBE: Final = WORKFLOWS / "handover-probe.yml"
+#: Прогон предрелизной версии языка — отдельным файлом, чтобы его исход и был
+#: ответом значку (#1018). Его матрицу читают дрейф и факты витрины.
+PYTHON_NEXT: Final = WORKFLOWS / "python-next.yml"
 #: Прогон внешнего взгляда: замер оборванных заходов отделяет им заход от
 #: ответа на `@claude`, у которого та же подпись (поздний взгляд на #907).
 REVIEW_RUN: Final = WORKFLOWS / "review.yml"
@@ -187,6 +190,7 @@ ALL: Final = (
     VERSION,
     WORKFLOWS,
     HANDOVER_PROBE,
+    PYTHON_NEXT,
     REVIEW_RUN,
     SKILLS,
     DECISIONS,

@@ -130,6 +130,13 @@
     ".github/workflows/main-red.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/python-next.yml": {
+      "answer": "configured",
+      "where": [
+        ".github/workflows/python-next.yml"
+      ],
+      "seam": "как у ci.yml: что проверяется на предрелизной версии и какая она, названо шагами и матрицей прогона, данных под это нет"
+    },
     ".github/workflows/release.yml": {
       "answer": "as-is"
     },
