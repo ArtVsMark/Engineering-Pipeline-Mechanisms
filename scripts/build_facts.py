@@ -366,14 +366,18 @@ EXPERIMENTAL_JOB: Final = "test-next"
 def python_facts(path: Path = CI_FLOW) -> dict[str, list[str]]:
     """Версии Python, на которых проект гоняется, — из матрицы CI, а не по памяти.
 
-    `supported` — матрица `test-matrix`, `experimental` — `test-next`, `os` —
+    `supported` — матрица `test-matrix`, `experimental` — `test-next` из
+    `python-next.yml`, `os` —
     образы, на которых они идут. Договор фактов витрины 1.2 требует раздел
     `python` либо причину в `none.python` (#1001): матрица у нас есть, поэтому
     раздел, а не причина. Матрицу читает `pipeline_checks` — читатель прогонов
     один; не прочитана — `policy.BadPolicy` с причиной.
     """
     supported, first = policy.matrix_axis(path, SUPPORTED_JOB, "python")
-    experimental, second = policy.matrix_axis(path, EXPERIMENTAL_JOB, "python")
+    # Предрелизная — своим прогоном рядом с `ci.yml` (#1018).
+    experimental, second = policy.matrix_axis(
+        path.with_name(paths.PYTHON_NEXT.name), EXPERIMENTAL_JOB, "python"
+    )
     return {"supported": supported, "experimental": experimental, "os": sorted({first, second})}
 
 
