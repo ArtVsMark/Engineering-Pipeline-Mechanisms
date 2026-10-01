@@ -517,6 +517,17 @@ OUR_BASE_REF: Final = "${{ github.event.pull_request.base.ref }}"
 #: код — тот же, что лежит в вызванном файле, а не чужую голову. Для
 #: локального `./` это коммит вызывающего, то есть уже смотренный код.
 OUR_CALL_REF: Final = "${{ job.workflow_sha }}"
+#: Репозиторий, в паре с которым коммит вызова свой: сам вызванный файл.
+OUR_CALL_REPO: Final = "${{ job.workflow_repository }}"
+
+
+def own_ref(ref: str, repository: object) -> bool:
+    """Checkout забирает смотренный код: базу своего дерева или коммит вызова у себя."""
+    if ref == OUR_BASE_REF:
+        return repository is None
+    return ref == OUR_CALL_REF and repository == OUR_CALL_REPO
+
+
 #: Префикс вызова переиспользуемого прогона из этого же дерева.
 LOCAL_WORKFLOW: Final = "./.github/workflows/"
 
@@ -662,8 +673,13 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
 
     ОБЩАЯ ВЕТКА ЧУЖИМ REF НЕ СЧИТАЕТСЯ. Джоб карты (#804) разворачивает
     `base.ref` — ровно тот код, который уже смотрели; локальность `./` от
-    этого только крепче. Послабление названо одной строкой `OUR_BASE_REF`, а
-    не шаблоном: любой другой ref по-прежнему красный.
+    этого только крепче.
+
+    ПОСЛАБЛЕНИЙ ДВА, И КАЖДОЕ — ПАРА, А НЕ ОДИН REF. `OUR_BASE_REF` — база без
+    чужого `repository:`; `OUR_CALL_REF` (#990) — коммит вызова только вместе с
+    `repository: OUR_CALL_REPO`, то есть с самим вызванным файлом. Коммит вызова
+    при чужом репозитории (`head.repo.full_name`) — чужой код, и он красный
+    (взгляд на #997). Любой другой ref красный тоже.
     """
     foreign = [
         f"{path.name}:{job_id}"
@@ -673,7 +689,7 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
         for step in job.get("steps") or []
         if "checkout" in str(step.get("uses") or "")
         and (ref := (step.get("with") or {}).get("ref"))
-        and ref not in (OUR_BASE_REF, OUR_CALL_REF)
+        and not own_ref(ref, (step.get("with") or {}).get("repository"))
     ]
     assert not foreign, (
         "прогон от общей ветки забирает ЧУЖОЙ ref: " + ", ".join(foreign) + ".\n"
@@ -681,6 +697,30 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
         " он укажет на несмотренный код (152). Либо уберите чужой ref, либо"
         " снимите послабление OUR_OWN_TREE у гейта закрепления."
     )
+
+
+@pytest.mark.parametrize(
+    ("ref", "repository", "is_own"),
+    [
+        (OUR_BASE_REF, None, True),
+        (OUR_BASE_REF, "${{ github.event.pull_request.head.repo.full_name }}", False),
+        (OUR_CALL_REF, OUR_CALL_REPO, True),
+        (OUR_CALL_REF, "${{ github.event.pull_request.head.repo.full_name }}", False),
+        (OUR_CALL_REF, None, False),
+        ("${{ github.event.pull_request.head.sha }}", None, False),
+    ],
+    ids=[
+        "база у себя",
+        "база у чужого",
+        "вызов у себя",
+        "вызов у чужого",
+        "вызов без репозитория",
+        "голова",
+    ],
+)
+def test_an_own_ref_is_a_pair_not_a_ref(ref: str, repository: str | None, is_own: bool) -> None:
+    """Свой ref — пара «ref + репозиторий», а не один ref (взгляд на #997)."""
+    assert own_ref(ref, repository) is is_own
 
 
 def test_the_local_callee_exemption_has_a_subject() -> None:
