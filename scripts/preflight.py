@@ -40,6 +40,7 @@ import check_agent_silenced
 import check_branch_revival
 import check_env
 import ghrest
+import gitcall
 import paths
 import report
 import yaml
@@ -324,16 +325,13 @@ def say_the_look_is_silenced(root: Path) -> None:
 
 def branch_now(root: Path) -> str:
     """Имя текущей ветки — из дерева, а не из памяти зовущего."""
-    said = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=root or None,
-    )
-    if said.returncode != 0:
-        raise NotRun(f"ветка не прочитана: {report.cut(said.stderr.strip())}")
-    return said.stdout.strip()
+    try:
+        said = gitcall.output(
+            ["rev-parse", "--abbrev-ref", "HEAD"], NotRun, cwd=str(root) if root else None
+        )
+    except NotRun as exc:
+        raise NotRun(f"ветка не прочитана: {exc}") from exc
+    return said.strip()
 
 
 def push_branch(root: Path) -> int:

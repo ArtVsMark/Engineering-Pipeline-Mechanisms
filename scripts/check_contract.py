@@ -63,11 +63,16 @@ def base_tree(base: str, into: Path) -> Path:
     Читается ДЕРЕВО базы, а не только изменённые файлы: поверхность собирается
     из всех прогонов разом, и по одному файлу её не восстановить.
     """
-    done = subprocess.run(
-        ["git", "archive", "--format=tar", base],
-        capture_output=True,
-        check=False,
-    )
+    # СВОЯ ФОРМА, А НЕ `gitcall`: вывод — байты архива, а не текст. Отсутствие
+    # git ловится здесь же (#1027).
+    try:
+        done = subprocess.run(
+            ["git", "archive", "--format=tar", base],
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise NotRun(f"дерево базы «{base}» не прочитано: git не запустился — {exc}") from exc
     if done.returncode != 0:
         raise NotRun(f"дерево базы «{base}» не прочитано: {report.cut(done.stderr.decode())}")
     unpack = subprocess.run(
@@ -88,13 +93,18 @@ def untracked() -> list[str]:
     ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
     На площадке дерево чисто, и список пуст — поведение там не меняется.
     """
-    done = subprocess.run(
-        ["git", "status", "--porcelain", "-uall"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
+    # СВОЯ ФОРМА: отказ здесь — «неотслеженных нет», как и прежде, а не отказ
+    # шага; без git — то же (#1027).
+    try:
+        done = subprocess.run(
+            ["git", "status", "--porcelain", "-uall"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except OSError:
+        return []
     if done.returncode != 0:
         return []
     return [line[3:].strip() for line in done.stdout.splitlines() if line[3:].strip()]
