@@ -806,3 +806,16 @@ def test_a_foreign_answer_that_does_not_parse_is_refused() -> None:
     """Сломанный YAML чужого дерева — отказ с адресом, а не тихая пустота."""
     with pytest.raises(policy.BadPolicy, match="o/r"):
         policy.answer_text("checks:\n  - [непарная\n", "o/r")
+
+
+def test_a_matrix_axis_is_read_or_refused(tmp_path: Path) -> None:
+    """Ось матрицы читается со своим образом, а отсутствие — отказ с причиной (#1001)."""
+    flow = tmp_path / "ci.yml"
+    flow.write_text(
+        "jobs:\n  t:\n    runs-on: img\n    strategy:\n"
+        "      matrix:\n        python: ['3.12', 3.13]\n",
+        encoding="utf-8",
+    )
+    assert policy.matrix_axis(flow, "t", "python") == (["3.12", "3.13"], "img")
+    with pytest.raises(policy.BadPolicy, match="не прочитана"):
+        policy.matrix_axis(flow, "нет", "python")
