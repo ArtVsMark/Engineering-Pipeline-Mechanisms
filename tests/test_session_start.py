@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Final
+
+import pytest
 
 from tests.conftest import ROOT, load_script
 
@@ -56,3 +60,53 @@ def test_the_hook_is_registered_beside_the_push_guard() -> None:
     assert any(HOOK.name in command for command in started)
     guarded = [one["command"] for entry in hooks["PreToolUse"] for one in entry["hooks"]]
     assert any("push_guard.py" in command for command in guarded), "сторож толчка пропал"
+
+
+#: Встроенный в хук код на Python — между `python3 -c "` и `" "$1"`.
+SNIPPET: Final = re.compile(r'python3 -c "\n(.*?)\n" "\$1"', re.S)
+
+
+def snippet_says(mode: str) -> str:
+    """Что печатает встроенный в хук разбор дерева на этом дереве."""
+    found = SNIPPET.search(HOOK.read_text(encoding="utf-8"))
+    assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
+    done = subprocess.run(
+        [sys.executable, "-c", found[1], mode],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+@pytest.mark.parametrize("mode", ["floor", "needs", "local"])
+def test_the_hooks_snippet_answers_what_check_env_answers(mode: str) -> None:
+    """Встроенный разбор ИСПОЛНЯЕТСЯ и говорит то же, что `check_env` (взгляд на #1024, 107).
+
+    Подстрока `c.<имя>(` не ловит смену формы `Need` или `local_packages`:
+    хук ушёл бы в предупреждение, а набор остался бы зелёным.
+    """
+    check_env = load_script("check_env.py")
+    expected = {
+        "floor": "{}.{}".format(*check_env.python_floor()),
+        "needs": " ".join(f"{one.name}{one.bounds}" for one in check_env.needs().values()),
+        "local": " ".join(str(where) for _, where in check_env.local_packages()),
+    }[mode]
+    assert expected, f"{mode}: check_env ответил пусто — сверять не с чем (075)"
+    assert snippet_says(mode) == expected
+
+
+def test_the_hook_installs_local_packages_editable_and_skips_a_fit_env() -> None:
+    """Пакеты дерева — `-e`, годное окружение не переставляется (взгляд на #1024)."""
+    code = "\n".join(
+        line
+        for line in HOOK.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert 'editable+=(-e "$local")' in code, "пакеты дерева ставятся копией, а не -e"
+    assert re.search(r"if ! \.venv/bin/python scripts/check_env\.py", code), (
+        "годное окружение переставляется на каждом старте"
+    )

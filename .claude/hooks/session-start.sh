@@ -22,7 +22,7 @@
 #
 # СБОЙ СЕТИ НЕ РОНЯЕТ СТАРТ. Всякий отказ — предупреждение с названным шагом
 # и выход 0: окно открывается всегда, а не готово только то, что названо.
-# `.venv` попадает в PATH, только если собран целиком.
+# `.venv` попадает в PATH, только если собран целиком — или уже годен.
 set -uo pipefail
 
 warn() {
@@ -56,22 +56,35 @@ if sys.argv[1] == 'floor':
 elif sys.argv[1] == 'local':
     print(' '.join(str(p) for _, p in c.local_packages()))
 else:
-    print(' '.join([f'{n.name}{n.bounds}' for n in c.needs().values()] + [str(p) for _, p in c.local_packages()]))
+    print(' '.join(f'{n.name}{n.bounds}' for n in c.needs().values()))
 " "$1"
 }
 floor=$(read_tree floor) || { warn "планка интерпретатора не прочитана"; exit 0; }
-wanted=$(read_tree needs) || { warn "строки установки прогонов не прочитаны"; exit 0; }
+tools=$(read_tree needs) || { warn "строки установки прогонов не прочитаны"; exit 0; }
+locals=$(read_tree local) || { warn "пакеты дерева не прочитаны"; exit 0; }
 
 if [ ! -x .venv/bin/python ] || [ "$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])')" != "$floor" ]; then
   rm -rf .venv
   "python$floor" -m venv .venv || { warn "окружение на $floor не собрано"; exit 0; }
 fi
-# shellcheck disable=SC2086  # список — отдельные аргументы pip, а не одна строка
-.venv/bin/pip install -q $wanted || { warn "инструменты проверки не поставлены"; exit 0; }
+# ГОДНОЕ ОКРУЖЕНИЕ НЕ ПЕРЕСТАВЛЯЕТСЯ. Сверку делает тот же `check_env`, что
+# зовёт предполётная: совпало — установки нет, и окно без сети получает уже
+# собранное окружение, а не предупреждение (взгляд на #1024).
+if ! .venv/bin/python scripts/check_env.py >/dev/null 2>&1; then
+  # Пакеты дерева — РЕДАКТИРУЕМОЙ установкой, как советует `check_env`: копия
+  # прятала бы от тестов правку пакета до следующего старта окна (взгляд на
+  # #1024).
+  editable=()
+  for local in $locals; do
+    editable+=(-e "$local")
+  done
+  # shellcheck disable=SC2086  # список — отдельные аргументы pip, а не одна строка
+  .venv/bin/pip install -q $tools "${editable[@]}" || { warn "инструменты проверки не поставлены"; exit 0; }
+fi
 # Установка из исходников оставляет в дереве `build/` пакета, и проверка
 # типов видит модуль дважды: тот, что в пакете, и его копию в сборке. Сборка
 # — след установки, а не дерево проекта, и убирается тем же заходом.
-for local in $(read_tree local); do
+for local in $locals; do
   rm -rf "$local/build"
 done
 
