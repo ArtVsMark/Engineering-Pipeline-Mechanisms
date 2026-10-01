@@ -1,0 +1,71 @@
+# Предрелизная версия языка — отдельным прогоном, а не джобом внутри `ci`.
+#
+# ЗАЧЕМ ОТДЕЛЬНЫЙ ФАЙЛ (решение владельца 01.10.2026, #1018). Значок
+# `workflow/status` показывает исход ВСЕГО прогона. Джоб 3.15 внутри `ci.yml`
+# красным значок `ci` не красил бы, и ответа «заработает ли на 3.15» значок не
+# давал. Здесь исход прогона и есть ответ: красное честное, без
+# `continue-on-error`.
+#
+# НА ИЗМЕНЕНИИ НЕ ПРОСЫПАЕТСЯ. Обещания работать на невышедшей версии проект не
+# давал, и необязательный канал слияния не держит (084). Толчок в общую ветку,
+# раз в неделю и кнопка — этого хватает, чтобы узнать о несовместимости до
+# выпуска языка, а не после.
+#
+# ИМЯ ДЖОБА ПРЕЖНЕЕ — `test-next`, и это не забывчивость. Запись проверки
+# по-прежнему `test-next (3.15)`: её знают ответ по классам (`.pipeline.yml`),
+# список перезапуска (`.rules/rerun.json`) и дежурный (`job_of`). Сменилось
+# место, а не имя: переименование тронуло бы трёх читателей ради украшения.
+name: python-next
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Раз в неделю, в понедельник: предрелиз меняется медленно, а каждый заход
+    # платит общей квотой (058).
+    - cron: "37 5 * * 1"
+  # У события всегда есть ручная кнопка: события теряются (104).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Голова в имени группы: заход на свежем коммите не должен гаситься заходом
+  # на устаревшем (179).
+  group: python-next-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test-next:
+    name: test-next
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # МАТРИЦА ИЗ ОДНОЙ ВЕРСИИ — РАДИ ИМЕНИ. Площадка приписывает значения
+    # матрицы к имени джоба: запись называется `test-next (3.15)`, и по списку
+    # проверок видно, НА ЧЁМ прогнали (046). Источник версии один — матрица;
+    # дрейф (`scripts/drift.py`, `declared_versions`) и факты витрины
+    # (`scripts/build_facts.py`, `python_facts`) читают её отсюда же.
+    strategy:
+      # Ячейка одна, но `fail-fast` объявлен: добавят вторую предрелизную ветку —
+      # и узнать надо про обе, а не про первую упавшую.
+      fail-fast: false
+      matrix:
+        python: ["3.15"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          # Без него setup-python предрелиз не ставит.
+          allow-prereleases: true
+      - name: поставить проверки
+        run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7" "pytest-randomly>=3,<4" ./packages/transport
+      - name: тесты на предрелизной
+        env:
+          RANDOM_SEED: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED}
