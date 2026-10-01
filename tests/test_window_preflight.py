@@ -907,7 +907,7 @@ def test_a_refused_look_is_named_not_swallowed(
 @pytest.mark.parametrize(
     ("line", "seen_as"),
     [
-        ("  python $MECHANISMS/scripts/debt.py >x", "python scripts/debt.py >x"),
+        (f"  {preflight.FROM_CHECKOUT}debt.py >x", "python scripts/debt.py >x"),
         ("python scripts/check_journal.py", "python scripts/check_journal.py"),
         ("  ruff check scripts/", "ruff check scripts/"),
     ],
