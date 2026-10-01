@@ -142,23 +142,32 @@ class Quiet(NamedTuple):
     left: int
 
 
+def git(args: list[str], root: Path | None) -> str | None:
+    """Вывод `git <args>`; отказ git или его отсутствие на пути — `None`.
+
+    У признака это одно состояние — «спросить не удалось», и вызывающий
+    трактует его в сторону молчания, как и раньше. Без git на пути прежняя
+    форма падала трассой (взгляд на #1021).
+    """
+    try:
+        done = subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
+        )
+    except OSError:
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
 def tracked(root: Path | None = None) -> set[str]:
     """Отслеживаемые файлы дерева.
 
     Берётся `git ls-files`, а не обход каталога: в кешах и виртуальных
     окружениях лежат тысячи чужих имён, и ни одного из них проект не правит.
     """
-    done = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if done.returncode != 0:
+    said = git(["ls-files", "-z"], root)
+    if said is None:
         return set()
-    return {name for name in done.stdout.split("\0") if name}
+    return {name for name in said.split("\0") if name}
 
 
 def shallow(root: Path | None = None) -> bool:
@@ -174,14 +183,7 @@ def shallow(root: Path | None = None) -> bool:
     умолчание — единица. Нашёл внешний взгляд на #149; на дереве окна клон
     полный, и локально это не воспроизводилось.
     """
-    done = subprocess.run(
-        ["git", "rev-parse", "--is-shallow-repository"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
+    said = git(["rev-parse", "--is-shallow-repository"], root)
     # ОТКАЗ GIT — НЕ ОТВЕТ «НЕ МЕЛКИЙ». Здесь исход не читался вовсе, и пустой
     # `stdout` при отказе давал `False`: «клон полный» вместо «спросить не
     # удалось». Дальше `born` шла по обрезанной истории и возвращала
@@ -190,32 +192,25 @@ def shallow(root: Path | None = None) -> bool:
     # ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     # Незнание трактуется как «мелкий»: сторону выбираем ту, где механизм
     # МОЛЧИТ, а не врёт уверенно. Нашёл внешний взгляд на #572.
-    if done.returncode:
+    if said is None:
         return True
-    return done.stdout.strip() == "true"
+    return said.strip() == "true"
 
 
 def born(path: str, root: Path | None = None) -> datetime | None:
     """Когда имя впервые появилось в истории. ``None`` — история недоступна."""
     if shallow(root):
         return None
-    done = subprocess.run(
-        # `--follow`: файл, переименованный после постановки задачи, иначе
-        # получал дату переименования — и сильный признак счёл бы пункт с этим
-        # путём сделанным (`fbe345c`). С `--follow` добавлением остаётся
-        # только первое появление содержимого под любым прежним именем.
-        ["git", "log", "--follow", "--diff-filter=A", "--format=%aI", "--", path],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if done.returncode != 0:
+    # `--follow`: файл, переименованный после постановки задачи, иначе
+    # получал дату переименования — и сильный признак счёл бы пункт с этим
+    # путём сделанным (`fbe345c`). С `--follow` добавлением остаётся
+    # только первое появление содержимого под любым прежним именем.
+    said = git(["log", "--follow", "--diff-filter=A", "--format=%aI", "--", path], root)
+    if said is None:
         return None
     dates = [
         datetime.fromisoformat(line.strip()).astimezone(UTC)
-        for line in done.stdout.splitlines()
+        for line in said.splitlines()
         if line.strip()
     ]
     # Наименьшая дата, а не последняя строка: после rebase и cherry-pick
@@ -231,15 +226,8 @@ def born_symbol(name: str, root: Path | None = None) -> datetime | None:
     """
     if shallow(root):
         return None
-    done = subprocess.run(
-        ["git", "log", "-S", f"def {name}", "--format=%aI", "--reverse"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if done.returncode != 0:
+    said = git(["log", "-S", f"def {name}", "--format=%aI", "--reverse"], root)
+    if said is None:
         return None
     # Наименьшая дата, а не первая в порядке `--reverse` — как у `born` и
     # `tests_born`: после rebase и cherry-pick даты идут не по порядку истории
@@ -247,7 +235,7 @@ def born_symbol(name: str, root: Path | None = None) -> datetime | None:
     return min(
         (
             datetime.fromisoformat(line.strip()).astimezone(UTC)
-            for line in done.stdout.splitlines()
+            for line in said.splitlines()
             if line.strip()
         ),
         default=None,
@@ -303,19 +291,12 @@ def tests_born(root: Path | None = None) -> dict[str, datetime]:
     """
     if shallow(root):
         return {}
-    done = subprocess.run(
-        ["git", "log", "--reverse", "--format=@%aI", "-p", "--no-color", "--", "tests/"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if done.returncode != 0:
+    history = git(["log", "--reverse", "--format=@%aI", "-p", "--no-color", "--", "tests/"], root)
+    if history is None:
         return {}
     found: dict[str, datetime] = {}
     when: datetime | None = None
-    for line in done.stdout.splitlines():
+    for line in history.splitlines():
         if line.startswith("@") and line[1:2].isdigit():
             when = datetime.fromisoformat(line[1:].strip()).astimezone(UTC)
             continue
