@@ -129,7 +129,7 @@ def mentions(root: Path) -> dict[str, list[tuple[Path, int]]]:
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except OSError, UnicodeDecodeError:
             continue
         for number, line in enumerate(text.splitlines(), 1):
             for match in NAME_RE.finditer(line):
