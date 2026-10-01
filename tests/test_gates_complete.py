@@ -257,6 +257,20 @@ def test_own_job_on_its_way_is_waited_for_not_judged_by_foreign_records() -> Non
     assert (problems, waiting) == ([], True)
 
 
+def test_a_foreign_name_waits_for_a_live_own_run_and_is_judged_after_it() -> None:
+    """Имя не из своего прогона: пока прогон идёт — ожидание, после — суд по чужим (#1031).
+
+    Сосед случая выше (195): своя запись не появится никогда, а судить её по
+    чужому `failure` до конца своего прогона гейт не может — список его джобов
+    ещё неполон. Задержка, а не потеря: по завершении прогона чужой отказ красный.
+    """
+    runs = [run("lint", run_id="mine"), run("test", conclusion="failure", run_id="other")]
+    live = module.verdict(runs, REQUIRED, "ci-complete", "mine", mine={}, run_live=True)
+    assert live == ([], True), "при живом своём прогоне чужое имя судится до срока"
+    done, waiting = module.verdict(runs, REQUIRED, "ci-complete", "mine", mine={}, run_live=False)
+    assert not waiting and any("failure" in problem for problem in done)
+
+
 def test_two_records_of_the_same_run_are_still_ambiguous() -> None:
     """Внутри одного прогона два одинаковых имени — по-прежнему неоднозначность."""
     runs = [run("lint", run_id="mine"), run("test", run_id="mine"), run("test", run_id="mine")]
