@@ -138,6 +138,21 @@ def test_an_unreadable_summary_is_not_zero(tmp_path: Path) -> None:
     assert "share" not in answer, "непрочитанное выдано числом"
 
 
+def test_an_unparsed_summary_gives_the_reader_a_reason_not_a_trace(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Неразобранная сводка — та же причина для читателя, а подробность в stderr.
+
+    `str(exc)` нёс в публичный файл путь раннера и `repr` ошибки разбора — ту
+    же трассу, что `none.python` до #1014 (взгляд на #1014, 195).
+    """
+    path = tmp_path / "summary.json"
+    path.write_text("{не json", encoding="utf-8")
+    answer = facts.family_facts(path)
+    assert answer == {"read": False, "why": facts.NO_FAMILY}
+    assert str(path) in capsys.readouterr().err, "подробность отказа потеряна"
+
+
 def test_a_read_summary_names_the_schema_it_expects(tmp_path: Path) -> None:
     """Разрез называет, под какую форму сводки он написан, и сходится ли она.
 

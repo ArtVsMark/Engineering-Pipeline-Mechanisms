@@ -149,6 +149,12 @@ def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, Any]:
     }
 
 
+#: Причина у непрочитанной сводки семьи — одна для любого отказа: файла нет,
+#: не скачался, не разобрался. Подробность отказа уходит в поток диагностики,
+#: а не к читателю витрины (взгляд на #1014, 195).
+NO_FAMILY: Final = "сводка семьи не прочитана — числа неизвестны, а не нулевые"
+
+
 def family_facts(
     path: Path | None, *, mine: str = "", answers: Path | None = None
 ) -> dict[str, Any]:
@@ -166,7 +172,7 @@ def family_facts(
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     """
     if path is None or not path.is_file():
-        return {"read": False, "why": "сводка семьи не прочитана — числа неизвестны, а не нулевые"}
+        return {"read": False, "why": NO_FAMILY}
     try:
         # Разбор ОДИН: `family.load` читал файл дважды за вызов — для разреза и
         # для отставания, — и второе чтение могло прийти уже другим (022).
@@ -174,7 +180,10 @@ def family_facts(
         summary_read = family.load(path)
         picture = family.picture(summary_read)
     except family.NotRun as exc:
-        return {"read": False, "why": str(exc)}
+        # Причина — для читателя витрины, как у `none.python`: путь раннера и
+        # `repr` ошибки разбора уходят в поток диагностики (взгляд на #1014).
+        print(f"warning: {exc}", file=sys.stderr)
+        return {"read": False, "why": NO_FAMILY}
     # Форма чужая: её подъём — повод перечитать разрез, а не подвинуть число
     # (157). Расхождение называется рядом с числами, а не прячется.
     picture["read"] = True
@@ -425,7 +434,8 @@ def collect(
     # ДОГОВОРА, который не прочитан, уходит причиной в `none`, а не пропадает
     # молча. Ключи `none` схема витрины перечисляет закрытым списком, и разреза
     # семьи в нём нет: `family` — раздел сверх договора, и причину он несёт
-    # своей формой `{"read": false, "why": …}` (взгляд на #1004, 195).
+    # своей формой `{"read": false, "why": NO_FAMILY}` — причиной для читателя,
+    # а не текстом отказа (взгляды на #1004 и #1014, 195).
     # Ответ каталогу и проверки читаются раньше прогона CI: их отказ — о входе
     # самого проекта, и назвать его надо первым, а не за чужой причиной.
     rules = rules_facts(root / BINDINGS)
