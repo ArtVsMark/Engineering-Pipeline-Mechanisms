@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+import yaml
 
 from tests.conftest import ROOT, load_script, string_args_of, walk
 
@@ -263,6 +264,62 @@ def test_the_seams_of_the_filling_and_the_port_check_are_named() -> None:
         "inner-approaches",
         "required-and-advisory",
     }
+
+
+#: Прогоны с ответом `as-is`, которые ВЫЗВАТЬ нельзя — у них нет
+#: `on: workflow_call`, и `as-is` у них значит «скопируй». Это противоречие
+#: записи 037 (слой 1 — вызов по тегу), и список здесь — его остаток, а не
+#: допуск: он только убывает, и снимает его #993. Замер 01.10.2026 — 20.
+STILL_COPIED: Final = frozenset(
+    {
+        "agent-pr.yml",
+        "arm.yml",
+        "attribution-history.yml",
+        "automerge.yml",
+        "badges.yml",
+        "ci-complete.yml",
+        "claude.yml",
+        "drift.yml",
+        "hail.yml",
+        "labels-sync.yml",
+        "main-red.yml",
+        "release.yml",
+        "required-context.yml",
+        "review.yml",
+        "rules-inbox.yml",
+        "runs-series.yml",
+        "schedules-seen.yml",
+        "stuck.yml",
+        "task-items.yml",
+        "work-plan.yml",
+    }
+)
+
+
+def test_an_as_is_flow_is_called_not_copied() -> None:
+    """Прогон с ответом `as-is` вызывается по тегу, а не копируется (запись 037).
+
+    Слой механизма выводится из дерева, а не пишется второй колонкой: прогон с
+    `on: workflow_call` — вызов, без него — копия. Копия с ответом `as-is` —
+    противоречие записи 037; пока оно есть, его остаток назван списком
+    `STILL_COPIED`, и список сверяется с деревом в обе стороны: новый
+    некопируемый прогон краснеет, вынесенный — тоже, пока его не снимут из
+    списка (005).
+    """
+    copied = set()
+    for name, said in inventory()["answers"].items():
+        if not name.startswith(".github/workflows/") or said["answer"] != "as-is":
+            continue
+        flow = yaml.safe_load((ROOT / name).read_text(encoding="utf-8"))
+        events = flow.get("on", flow.get(True)) or {}
+        names = set(events) if isinstance(events, (dict, list)) else {events}
+        if "workflow_call" not in {str(one) for one in names}:
+            copied.add(Path(name).name)
+    extra = sorted(copied - STILL_COPIED)
+    assert not extra, f"прогон `as-is` без `workflow_call` — копия, а не вызов (037): {extra}"
+    assert STILL_COPIED - copied == set(), (
+        f"вынесен и вызывается, а список остатка его держит: {sorted(STILL_COPIED - copied)}"
+    )
 
 
 def test_a_shared_reason_is_written_once() -> None:
