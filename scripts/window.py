@@ -39,10 +39,11 @@
 from __future__ import annotations
 
 import re
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final
+
+import gitcall
 
 #: Адрес окна в трейлере коммита. Читается номер, а не ссылка целиком: ссылка —
 #: способ открыть, номер — то, чем окно называется.
@@ -73,17 +74,8 @@ class NotRun(RuntimeError):
 
 
 def git(*args: str, cwd: str | None = None) -> str:
-    """Зовёт git и отдаёт вывод; отказ — третий исход, а не пустая строка."""
-    found = subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=cwd,
-    )
-    if found.returncode != 0:
-        raise NotRun(f"git {' '.join(args)}: {found.stderr.strip()}")
-    return found.stdout
+    """Зовёт git и отдаёт вывод; отказ и отсутствие git — третий исход, а не трасса."""
+    return gitcall.output(args, NotRun, cwd=cwd)
 
 
 def session_of(message: str) -> str | None:

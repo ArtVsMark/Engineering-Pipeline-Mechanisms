@@ -33,7 +33,9 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
+
+preflight = load_script("preflight.py")
 
 PACKAGE: Final = ROOT / "packages" / "transport"
 SCRIPTS: Final = ROOT / "scripts"
@@ -45,6 +47,11 @@ SHARED: Final = ("ghrest", "report")
 #: Как джоб ставит пакет. Строка одна на все прогоны: второй способ разошёлся бы
 #: с первым молча (090).
 INSTALL: Final = "./packages/transport"
+#: Тот же пакет из checkout общего шага (#990): общий шаг ставит его из кода
+#: конвейера, а не из дерева вызывающего. Без этой формы гейт не видел ни
+#: одной установки в `step-*.yml` (взгляд на #1021).
+INSTALL_FROM_CHECKOUT: Final = f"${preflight.MECHANISMS}/packages/transport"
+INSTALLS: Final = (INSTALL, INSTALL_FROM_CHECKOUT)
 
 
 def manifest() -> dict[str, Any]:
@@ -98,7 +105,11 @@ IMPLIED: Final = {
 BY_GUARD: Final = "установка стоит под условием"
 
 #: Как шаг зовёт механизм. Имя механизма — вторая группа.
-CALLS: Final = re.compile(r"python[0-9.]*\s+(scripts/([\w_]+)\.py)")
+#: Обе формы: из дерева (`python scripts/x.py`) и из checkout общего шага
+#: (`python $MECHANISMS/scripts/x.py`, одна форма — `preflight.FROM_CHECKOUT`).
+#: Прежний образец знал только первую, и вызовы общих шагов гейт не видел
+#: вовсе: шаг, зовущий механизм без пакета, зеленел (взгляд на #1021).
+CALLS: Final = re.compile(rf"python[0-9.]*\s+(?:\${preflight.MECHANISMS}/)?(scripts/([\w_]+)\.py)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,8 +160,9 @@ def calls_in(document: Any, name: str, need: set[str]) -> list[Call]:
             # объявлена и оставлена наблюдением; внешний взгляд назвал её
             # находкой `ca78822` на #369, и закрывается она дешевле, чем
             # объясняется.
-            if called and INSTALL in runs and "pip install" in runs:
-                at_install = runs.index(INSTALL)
+            given = next((one for one in INSTALLS if one in runs), None)
+            if called and given and "pip install" in runs:
+                at_install = runs.index(given)
                 if all(m.start() > at_install for m in CALLS.finditer(runs) if m.group(2) in need):
                     put = str(step.get("if") or "")
             if called:
@@ -166,7 +178,7 @@ def calls_in(document: Any, name: str, need: set[str]) -> list[Call]:
             # Установка учитывается ПОСЛЕ разбора вызовов того же шага: шаг,
             # который ставит пакет и тут же зовёт механизм, — законный случай,
             # но своим вызовам он предшествовать не может.
-            if INSTALL in runs and "pip install" in runs:
+            if any(one in runs for one in INSTALLS) and "pip install" in runs:
                 put = str(step.get("if") or "")
     return found
 
