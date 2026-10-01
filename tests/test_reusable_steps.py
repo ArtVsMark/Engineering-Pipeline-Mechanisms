@@ -155,6 +155,66 @@ def test_our_code_from_the_callers_tree_is_told(line: str, is_ours: bool) -> Non
     assert bool(OUR_CODE.search(line)) is is_ours
 
 
+#: Наш скрипт из checkout в ЛЮБОЙ записи переменной: `$MECHANISMS`, `${MECHANISMS}`,
+#: `"$MECHANISMS"` — перед `/scripts/`.
+SCRIPT_FROM_CHECKOUT: Final = re.compile(rf"\$\{{?{preflight.MECHANISMS}\}}?\"?/scripts/")
+
+
+def odd_calls(said: str) -> list[str]:
+    """Вызовы нашего скрипта из checkout не той формой, что читает предполётная.
+
+    Правило строгое, а не разбор форм (навык `build-a-gate`, шаг 3а): в строке
+    команды ОДНО упоминание, и оно — её начало. Второй вызов после
+    каноничного `plain` не приведёт, а `NEEDS_PLATFORM` сверяет только начало
+    строки (взгляд на #1015).
+    """
+    return [
+        line.strip()
+        for line in commands_of(said)
+        if (found := len(SCRIPT_FROM_CHECKOUT.findall(line)))
+        and (found > 1 or not line.strip().startswith(preflight.FROM_CHECKOUT))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("line", "is_odd"),
+    [
+        (f"{preflight.FROM_CHECKOUT}debt.py || rc=$?", False),
+        ('python "$MECHANISMS"/scripts/debt.py', True),
+        ("python ${MECHANISMS}/scripts/debt.py", True),
+        ("python3 $MECHANISMS/scripts/debt.py", True),
+        (f"rc=0; {preflight.FROM_CHECKOUT}debt.py", True),
+        ("python -m pip install $MECHANISMS/packages/transport", False),
+        (f"{preflight.FROM_CHECKOUT}debt.py && {preflight.FROM_CHECKOUT}x.py", True),
+    ],
+    ids=[
+        "каноничная",
+        "в кавычках",
+        "в скобках",
+        "python3",
+        "не в начале",
+        "пакет",
+        "второй вызов после каноничного",
+    ],
+)
+def test_an_odd_call_form_is_told(line: str, is_odd: bool) -> None:
+    """Обе половины: иная форма вызова краснеет, каноничная и установка пакета — нет."""
+    said = yaml.safe_dump({"jobs": {"a": {"steps": [{"run": line}]}}}, allow_unicode=True)
+    assert bool(odd_calls(said)) is is_odd
+
+
+@pytest.mark.parametrize("name", sorted(steps()), ids=lambda one: one)
+def test_our_script_is_called_in_the_one_form(name: str) -> None:
+    """Скрипт из checkout зовётся ровно формой `preflight.FROM_CHECKOUT` (взгляд на #997).
+
+    Предполётная приводит к прямому вызову только её; иную форму она потеряла
+    бы молча — та самая потеря (045), от которой заведён `plain`. Замер
+    01.10.2026 (`SCRIPT_FROM_CHECKOUT` по `commands_of` всех шагов): вызовов
+    скриптов из checkout 20, иной формы — ноль.
+    """
+    assert not odd_calls(steps()[name]), f"{name}: вызов не той формой — {odd_calls(steps()[name])}"
+
+
 @pytest.mark.parametrize("name", sorted(steps()), ids=lambda one: one)
 def test_a_step_takes_our_code_by_its_own_checkout(name: str) -> None:
     """Общий шаг берёт наш код своим checkout на коммите вызова, а не из дерева (#990).
