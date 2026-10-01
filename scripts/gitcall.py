@@ -9,10 +9,14 @@
 `except NotRun` ловит ровно то, что ловил раньше: общим становится вызов, а не
 смысл отказа.
 
-СОСЕДИ ЗА ГРАНИЦЕЙ (195) — тела у них другие, и гейт `tests/test_one_body.py`
-их не видит: `version.git` отвечает `None` вместо отказа, `journal.git` берёт
-команду целиком, `release.git` срезает вывод, `window.git` и
-`check_agent_silenced._git` зовут git в названном каталоге.
+ТЕМ ЖЕ ВЫЗОВОМ ИДУТ `release.git` (срезает вывод) и `window.git` (зовёт git в
+названном каталоге): тела у них были другие, но беда та же — `OSError` не
+ловился, и без git они падали трассой (взгляд на #1008).
+
+СОСЕДИ ЗА ГРАНИЦЕЙ (195), и у каждого свой ответ на отсутствие git:
+`version.git` отвечает `None` — версия без git законно неизвестна;
+`journal.git` берёт команду целиком и ловит `OSError` сам;
+`check_agent_silenced._git` ловит его сам и различает «пусто» по коду выхода.
 """
 
 from __future__ import annotations
@@ -23,11 +27,13 @@ from collections.abc import Callable, Sequence
 import report
 
 
-def output(args: Sequence[str], refusal: Callable[[str], Exception]) -> str:
-    """Вывод `git <args>`; отказ git или его отсутствие — `refusal`, а не пустой ответ (075)."""
+def output(
+    args: Sequence[str], refusal: Callable[[str], Exception], *, cwd: str | None = None
+) -> str:
+    """Вывод `git <args>` в `cwd`; отказ git или его отсутствие — `refusal` (075)."""
     try:
         return subprocess.run(
-            ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8"
+            ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8", cwd=cwd
         ).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
