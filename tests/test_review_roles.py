@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+import yaml
 
 from tests.conftest import ROOT, load_script
 
@@ -89,6 +90,79 @@ def test_the_section_names_roles_and_what_called_them() -> None:
     assert "ПРОЦЕДУРА" in said
     unread = review_map.render_roles("П", ["ревизор"], {}, unread="токена нет")
     assert "не выбраны: токена нет" in unread, "неизвестный контекст выдан за «ролей нет»"
+
+
+def subject_of(procedure: str) -> str:
+    """Текст раздела `review_map.SUBJECT` процедуры — до следующего заголовка."""
+    _, found, rest = procedure.partition(review_map.SUBJECT + "\n")
+    return rest.split("\n## ", 1)[0].strip() if found else ""
+
+
+#: Подстановка карты в задание: джобом карты (`needs.map`) у взгляда до слияния
+#: и своим шагом (`steps.map`) у позднего.
+MAP_TEXT: Final = re.compile(r"\$\{\{\s*(?:needs|steps)\.map\.outputs\.text\s*\}\}")
+
+
+def prompts() -> dict[str, str]:
+    """Задания взгляда в `review.yml`, по джобам: только те, что получают карту."""
+    said = yaml.safe_load((ROOT / paths.REVIEW_RUN).read_text(encoding="utf-8"))
+    return {
+        job_id: step["with"]["prompt"]
+        for job_id, job in said["jobs"].items()
+        for step in job.get("steps") or []
+        if MAP_TEXT.search(str((step.get("with") or {}).get("prompt") or ""))
+    }
+
+
+def sentences(text: str) -> list[str]:
+    """Предложения текста без разметки и переносов — то, что могло уйти в задание."""
+    flat = re.sub(r"[`*]", "", " ".join(text.split()))
+    return [one.strip() for one in re.split(r"(?<=[.:])\s+", flat) if len(one.strip()) >= 20]
+
+
+def test_the_procedure_names_the_projects_subject() -> None:
+    """Предмет и договор проекта — раздел его процедуры, то есть данные (#992, 037)."""
+    procedure = (ROOT / paths.REVIEW_PROCEDURE).read_text(encoding="utf-8")
+    assert subject_of(procedure), (
+        f"в {paths.REVIEW_PROCEDURE} нет раздела «{review_map.SUBJECT}» — "
+        "взгляду не сказано, что держит проект"
+    )
+
+
+def test_the_review_task_says_nothing_of_the_project() -> None:
+    """Задание взгляда общее: предмет проекта оно берёт из карты, а не пишет само.
+
+    Обе половины: каждое задание с картой называет раздел буквально, и ни одно
+    не несёт предложения из самого раздела — второй экземпляр наполнения
+    разошёлся бы с первым молча (022). Замер 01.10.2026: заданий с картой два,
+    `review` и `late-look`, и проверяются оба.
+    """
+    procedure = (ROOT / paths.REVIEW_PROCEDURE).read_text(encoding="utf-8")
+    body = sentences(subject_of(procedure).split("\n\n*", 1)[0])
+    found = prompts()
+    assert found, "заданий с картой в review.yml нет — проверять нечего (075)"
+    title = review_map.SUBJECT.removeprefix("## ")
+    unnamed = [job_id for job_id, prompt in found.items() if title not in prompt]
+    copied = {
+        job_id: hit
+        for job_id, prompt in found.items()
+        if (hit := [one for one in body if one in re.sub(r"[`*]", "", " ".join(prompt.split()))])
+    }
+    assert not copied, f"задание несёт наполнение проекта: {copied}"
+    assert not unnamed, f"задание не называет раздел карты «{title}»: {unnamed}"
+
+
+def test_an_unread_procedure_still_names_where_the_subject_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Процедура не прочитана — раздел карты говорит, где взять предмет проекта."""
+
+    def refuse(base: str, path: Path) -> str:
+        raise review_map.NotRun("нет на базе")
+
+    monkeypatch.setattr(review_map, "shown_from_base", refuse)
+    said = review_map.roles_section("B", "o/r", 7)
+    assert review_map.SUBJECT.removeprefix("## ") in said and "AGENTS.md" in said
 
 
 def test_the_procedure_and_table_come_from_the_base(monkeypatch: pytest.MonkeyPatch) -> None:
