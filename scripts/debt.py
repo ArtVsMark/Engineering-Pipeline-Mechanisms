@@ -184,7 +184,7 @@ def age_of(seen: str, now: datetime | None = None) -> timedelta | None:
     """
     try:
         stamp = datetime.fromisoformat(seen.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         return None
     return (now or datetime.now(UTC)) - stamp
 
