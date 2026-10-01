@@ -23,7 +23,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 module = load_script("main_red.py")
 policy = load_script("pipeline_checks.py")
@@ -1836,3 +1836,34 @@ def test_the_listed_names_carry_a_measurement() -> None:
     assert "ci-complete" in said, "имя с семнадцатью миганиями в список не попало"
     for name, why in said.items():
         assert why.strip(), f"{name}: имя без причины"
+
+
+def test_every_run_addressed_to_the_duty_wakes_it() -> None:
+    """Прогон, чьё красное адресовано дежурному, будит его завершением (взгляд на #1029).
+
+    Дежурный читает записи головы в миг захода. Прогон, который закончился
+    позже и его не разбудил, остаётся невидим до следующего слияния, а по
+    расписанию — вовсе, и адрес `scripts/main_red.py` в ответе ничего не
+    держит. Список будящих выводится из ответа, а не пишется отдельно (005,
+    022). Замер 01.10.2026: адресованы дежурному джобы четырёх прогонов, а будили
+    его два — `ci` и `badges`.
+    """
+    policy = load_script("pipeline_checks.py")
+    mine = {
+        name
+        for name, said in policy.load(ROOT / ".pipeline.yml").items()
+        if said.addressee == "scripts/main_red.py"
+    }
+    flows = ROOT / ".github" / "workflows"
+    addressed = set()
+    for path in walk(flows, "*.yml"):
+        run = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        names = {str(job.get("name", job_id)) for job_id, job in (run.get("jobs") or {}).items()}
+        if names & mine:
+            addressed.add(str(run.get("name", path.stem)))
+    assert addressed, "дежурному не адресован ни один прогон — проверять нечего (075)"
+    duty = yaml.safe_load((flows / "main-red.yml").read_text(encoding="utf-8"))
+    woken = set((duty.get("on", duty.get(True)) or {})["workflow_run"]["workflows"])
+    assert not addressed - woken, (
+        f"красное адресовано дежурному, а его не будит: {sorted(addressed - woken)}"
+    )
