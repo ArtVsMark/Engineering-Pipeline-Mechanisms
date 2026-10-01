@@ -614,9 +614,11 @@ def test_both_version_lists_come_from_a_matrix() -> None:
     читается в списке проверок изменения, а версия внутри шага — нет. Владелец
     прочёл именно так: «3.15 в проверках не видно» (046).
     """
-    path = ROOT / ".github" / "workflows" / "ci.yml"
-    jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
-    for job in ("test-matrix", "test-next"):
+    flows = ROOT / ".github" / "workflows"
+    # Предрелизная — своим прогоном (#1018), обязательная — в `ci.yml`.
+    for job, flow in (("test-matrix", "ci.yml"), ("test-next", "python-next.yml")):
+        path = flows / flow
+        jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
         cells = module.matrix_of(jobs, job, path)
         assert cells, f"{job}: версии не в матрице — из имени записи они пропадут"
         step = [
