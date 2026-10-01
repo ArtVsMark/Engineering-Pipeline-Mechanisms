@@ -1840,15 +1840,35 @@ def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.Monke
         module.merge_ways_moved("о/р", "токен")
 
 
-@pytest.mark.parametrize(
-    ("repo", "own"),
-    [
-        ("ArtVsMark/Glossary-Python", ("ArtVsMark/",)),
-        ("Other/Project", ("Other/", "ArtVsMark/")),
-        ("", ("ArtVsMark/",)),
-    ],
-    ids=["сосед по семье", "чужой владелец", "имя не названо"],
-)
-def test_own_actions_are_told_by_the_asked_repo(repo: str, own: tuple[str, ...]) -> None:
-    """Свои действия — у владельца спрашиваемого репозитория и семьи, а не буквами (#992)."""
-    assert module.own_prefixes(repo) == own
+def test_only_the_family_is_left_to_its_own_judge() -> None:
+    """Не судится только приставка семьи — та, что держит гейт 155, и из того же места."""
+    assert module.own_prefixes() == (module.catalogue.FAMILY_PREFIX,)
+    assert module.catalogue.REPO.startswith(module.catalogue.FAMILY_PREFIX)
+
+
+USES: Final = """
+jobs:
+  a:
+    steps:
+      - uses: {family}Engineering-Pipeline-Mechanisms/.github/workflows/step-x.yml@v1.4.0
+      - uses: Other/own-action@{sha} # v2.0.0
+      - uses: actions/checkout@{sha} # v7.0.1
+"""
+
+
+def test_a_consumers_own_action_is_judged_and_the_family_is_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """У потребителя чужой организации его действия судятся, ссылки семьи — нет (#1006).
+
+    Проверяется не приставка, а сами судьи: `action_versions` и `pinned_hashes`
+    по умолчанию, при имени потребителя в `GITHUB_REPOSITORY`.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "Other/Project")
+    flow = USES.format(family=module.catalogue.FAMILY_PREFIX, sha="a" * 40)
+    (tmp_path / "ci.yml").write_text(flow, encoding="utf-8")
+    seen = module.action_versions(tmp_path)
+    assert {"Other/own-action", "actions/checkout"} <= set(seen)
+    assert not any(name.startswith(module.catalogue.FAMILY_PREFIX) for name in seen)
+    pinned = module.pinned_hashes(tmp_path)
+    assert set(pinned) == {"Other/own-action", "actions/checkout"}

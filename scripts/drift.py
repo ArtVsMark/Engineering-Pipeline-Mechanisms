@@ -749,19 +749,23 @@ ACTION_USE: Final = re.compile(
 )
 
 
-def own_prefixes(repo: str) -> tuple[str, ...]:
-    """Чьи действия НЕ считаются чужими: своего владельца и семьи.
+def own_prefixes() -> tuple[str, ...]:
+    """Чьи действия НЕ судятся здесь: только семьи, `catalogue.FAMILY_PREFIX`.
 
     Их версию держит гейт заготовки (155, tests/test_family_pinning.py), и
-    второй судья тому же разошёлся бы с первым молча (022, 090). Приставки
-    выводятся, а не пишутся буквами (#992): своя — у владельца репозитория,
-    который спрашивают, семейная — у адреса каталога. Прежде здесь стояло
-    `("ArtVsMark/",)`, и у потребителя из другой организации его собственные
-    действия считались бы чужими, а наши — своими.
+    второй судья тому же разошёлся бы с первым молча (022, 090). Приставка
+    выводится, а не пишется буквами (#992).
+
+    СВОИ ДЕЙСТВИЯ ПОТРЕБИТЕЛЯ СУДЯТСЯ КАК ЧУЖИЕ, И ЭТО НАМЕРЕННО. Довод «второго
+    судьи» верен, только пока первый есть, а гейт 155 держит одну приставку
+    семьи. Первая редакция (#1006) исключала ещё и владельца спрашиваемого
+    репозитория: у потребителя из другой организации его действия `Other/…` не
+    судил тогда никто (взгляд на #1006).
+
+    СОСЕД НАЗВАН (195): ссылки семьи у ПОТРЕБИТЕЛЯ гейт 155 не видит — он судит
+    наше дерево. Их перенос — работа #993 и #995.
     """
-    mine = f"{repo.split('/')[0]}/" if "/" in repo else ""
-    kin = f"{catalogue.REPO.split('/')[0]}/"
-    return tuple(dict.fromkeys(one for one in (mine, kin) if one))
+    return (catalogue.FAMILY_PREFIX,)
 
 
 def action_versions(
@@ -775,7 +779,7 @@ def action_versions(
     одна, и узнаётся она у тега либо у пометки рядом с хешем.
     """
     found: dict[str, dict[str, list[str]]] = {}
-    mine = own if own is not None else own_prefixes(os.environ.get("GITHUB_REPOSITORY", ""))
+    mine = own if own is not None else own_prefixes()
     runs = sorted((where or paths.WORKFLOWS).glob("*.y*ml"))
     if not runs:
         # ПУСТОЙ ОБХОД ЗДЕСЬ ЧИТАЕТСЯ КАК «СОШЛОСЬ». Источник отдал бы пустой
@@ -935,7 +939,7 @@ def pinned_hashes(
     расходится: он сам и есть версия.
     """
     found: dict[str, dict[str, set[str]]] = {}
-    mine = own if own is not None else own_prefixes(os.environ.get("GITHUB_REPOSITORY", ""))
+    mine = own if own is not None else own_prefixes()
     for path in sorted((where or paths.WORKFLOWS).glob("*.y*ml")):
         for match in ACTION_USE.finditer(path.read_text(encoding="utf-8")):
             if match["repo"].startswith(mine) or not match["said"]:
@@ -1612,7 +1616,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
     """Спрашивает все источники; отдаёт находки и имена тех, кто не ответил."""
     found: list[Drift] = []
     silent: list[str] = []
-    own = own_prefixes(repo)
+    own = own_prefixes()
     asks: tuple[tuple[str, Any], ...] = (
         ("каталог", lambda: catalogue_moved(fetch(EXPORT_URL), mine)),
         (
