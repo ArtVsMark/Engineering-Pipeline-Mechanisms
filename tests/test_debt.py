@@ -816,3 +816,19 @@ def test_a_broken_label_set_is_the_broken_outcome(
 
     monkeypatch.setattr(debt.labels, "load", load_broken)
     assert debt.main(["--repo", "o/r"]) == debt.EXIT_BROKEN
+
+
+def test_a_closed_inbox_does_not_claim_a_missed_run() -> None:
+    """Старые закрытые «входящие» — не пропуск, старые открытые — пропуск (#980).
+
+    Заход каталога закрытую задачу не пишет, и её дата стоит с закрытия:
+    30.09.2026 план называл заход пропущенным при зелёных прогонах подряд.
+    """
+    now = datetime(2026, 9, 30, 21, 0, tzinfo=UTC)
+    old = "2026-09-27T12:05:00Z"
+    closed = debt.inbox_age(old, debt.CLOSED_INBOX, now)
+    opened = debt.inbox_age(old, "", now)
+    assert debt.STALE_NOTE not in closed and debt.CLOSED_LATE in closed
+    assert debt.STALE_NOTE in opened and debt.CLOSED_LATE not in opened
+    fresh = debt.inbox_age("2026-09-30T20:00:00Z", debt.CLOSED_INBOX, now)
+    assert debt.CLOSED_LATE not in fresh
