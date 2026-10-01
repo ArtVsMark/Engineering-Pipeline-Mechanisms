@@ -144,7 +144,7 @@ def test_the_journal_as_the_release_builds_it_resolves() -> None:
     """
     builder = load_script("build_changelog.py")
     journal = ROOT / next(iter(DERIVED))
-    problems = unresolved(journal, builder.render(builder.read_version()))
+    problems = unresolved(journal, builder.render(builder.project_version.declared()))
     assert not problems, "собранный журнал ведёт в никуда:\n  " + "\n  ".join(problems)
 
 
