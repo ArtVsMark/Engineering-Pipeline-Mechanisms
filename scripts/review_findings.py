@@ -50,6 +50,7 @@ from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any, Final
 
 import changerefs
@@ -763,12 +764,12 @@ def render_body(
         "жестом, который забудут. Задачу закрывает человек: механизм не знает,",
         "разобрана находка или просто надоела.",
         "",
-        "Снятие находки **об ОТВЕТЕ** принимается не всегда: когда оно",
-        "принимается, когда отвергается вслух и какова цена, записано в одном",
-        # Имя канона берётся у функции, а не набирается буквами: шапка держится
-        # только на этом адресе, и переименование иначе увело бы её в пустоту
-        # молча (209, взгляд на #979).
-        f"месте — в докстроке `scripts/review_findings.py::{closable.__name__}`.",
+        # ТОЛЬКО АДРЕС, БЕЗ ПЕРЕСКАЗА (210, поздний взгляд на #987): абзац о
+        # снятии заход за заходом ловил находки по своей прозе — перенос
+        # строк, предлог, имя и путь, набранные буквами. Формы разные, причина
+        # одна: абзац пересказывал канон `closable`, а адрес пересказывать
+        # нечего. Адрес собирает `canon_at` — у функции и якоря (209, 115).
+        f"Правило снятия находки **об ОТВЕТЕ** — докстрока `{canon_at()}`.",
         "",
         f"Хвост «{findings.REFUTED}» ставит ВЕРИФИКАТОР — отдельный заход,",
         "входящий от ОДНОЙ находки и пытающийся её опровергнуть. Это НЕ снятие:",
@@ -1179,6 +1180,18 @@ def subject_of(entry: findings.Entry) -> set[str]:
     """
     place = findings.place_of(entry.title)
     return {ANSWER_FILE, place} if place else {ANSWER_FILE}
+
+
+def canon_at() -> str:
+    """Адрес `closable`, канона снятия находки об ответе: путь от корня дерева и имя.
+
+    Каталог — объявленный якорь `paths.SCRIPTS`, файл и имя — у самой функции.
+    Не от рабочего каталога: позванный не из корня механизм напечатал бы
+    `../scripts/…` молча (взгляд на #988); и не подъёмом `.parent.parent` —
+    его запрещает правило 115 (`tests/test_settings_anchor.py`).
+    """
+    where = paths.SCRIPTS / Path(closable.__code__.co_filename).name
+    return f"{where.as_posix()}::{closable.__name__}"
 
 
 def closable(
