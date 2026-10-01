@@ -122,7 +122,8 @@ def test_a_counted_zero_is_never_published(tmp_path: Path, monkeypatch: pytest.M
         ["--root", str(ROOT), "--out-dir", str(tmp_path), "--sha", "голова", "--repo", "o/r"]
     )
     assert код == facts.EXIT_BROKEN, "витрина опубликовала сосчитанный ноль"
-    assert not list(tmp_path.glob("*.svg")), "значки нарисованы при обрыве обхода"
+    drawn = [name for name in facts.BADGES if (tmp_path / facts.PUBLISHED_DIR / name).exists()]
+    assert not drawn, f"значки опубликованы при обрыве обхода: {drawn}"
 
 
 def test_a_real_tree_still_publishes(tmp_path: Path) -> None:
@@ -196,7 +197,7 @@ def test_every_badge_is_published_as_a_shields_endpoint(tmp_path: Path) -> None:
     out = tmp_path / facts.PUBLISHED_DIR
     said = json.loads((out / facts.FACTS).read_text(encoding="utf-8"))
     for name, draw in facts.BADGES.items():
-        shown = json.loads((out / facts.endpoint_name(name)).read_text(encoding="utf-8"))
+        shown = json.loads((out / name).read_text(encoding="utf-8"))
         drawn = draw(said)
         assert shown == {
             "schemaVersion": facts.ENDPOINT_SCHEMA,
@@ -206,11 +207,9 @@ def test_every_badge_is_published_as_a_shields_endpoint(tmp_path: Path) -> None:
         }, f"{name}: shields-endpoint разошёлся со значком"
 
 
-def test_one_badge_record_renders_both_outputs() -> None:
-    """Одна запись `Badge` даёт и SVG, и shields-endpoint с теми же словами."""
+def test_a_badge_record_renders_a_shields_endpoint() -> None:
+    """Запись `Badge` даёт shields-endpoint с теми же словами; цвет — без решётки."""
     drawn = facts.Badge("версия", "1.4.0", "#4c1")
-    picture = facts.svg(drawn)
-    assert "версия" in picture and "1.4.0" in picture and 'fill="#4c1"' in picture
     assert facts.endpoint(drawn) == {
         "schemaVersion": facts.ENDPOINT_SCHEMA,
         "label": "версия",
@@ -230,7 +229,7 @@ def test_no_badge_name_clashes_with_another_published_file(monkeypatch: pytest.M
     assert neighbours, "соседей по каталогу публикации не нашлось — образец не туда (075)"
     assert facts.clashing_names() == []
     assert not neighbours & set(facts.published_names()), "значок затёр бы файл соседа"
-    monkeypatch.setitem(facts.BADGES, "facts.svg", facts.version_badge)
+    monkeypatch.setitem(facts.BADGES, facts.FACTS, facts.version_badge)
     assert facts.clashing_names() == ["facts.json"], "столкновение с фактами не названо"
 
 

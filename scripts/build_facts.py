@@ -445,7 +445,7 @@ def collect(
 
 
 class Badge(NamedTuple):
-    """Значок как данные: подпись, значение и цвет — одна запись на два вывода."""
+    """Значок как данные: подпись, значение и цвет — то, что публикует shields-endpoint."""
 
     label: str
     message: str
@@ -457,33 +457,6 @@ def badge(label: str, value: str, color: str) -> Badge:
     return Badge(label, value, color)
 
 
-def svg(drawn: Badge) -> str:
-    """Рисует значок сам, без обращения к чужой службе.
-
-    Значок с чужого сервиса — это внешняя зависимость витрины: она отвалится
-    молча и оставит вместо числа пустое место, которое читается как «всё в
-    порядке». Здесь SVG собирается из своих же чисел и лежит рядом с ними.
-    """
-    label, value, color = drawn
-    # Ширина считается по числу знаков: точной метрики шрифта у нас нет, а
-    # приблизительная лучше, чем обрезанный текст.
-    left = 8 * len(label) + 12
-    right = 8 * len(value) + 12
-    width = left + right
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="20" '
-        f'role="img" aria-label="{label}: {value}">'
-        f"<title>{label}: {value}</title>"
-        f'<rect width="{left}" height="20" fill="#555"/>'
-        f'<rect x="{left}" width="{right}" height="20" fill="{color}"/>'
-        f'<g fill="#fff" text-anchor="middle" '
-        f'font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">'
-        f'<text x="{left / 2}" y="14">{label}</text>'
-        f'<text x="{left + right / 2}" y="14">{value}</text>'
-        f"</g></svg>"
-    )
-
-
 #: Форма значка, которую читает shields.io по адресу `endpoint?url=…`.
 ENDPOINT_SCHEMA: Final = 1
 
@@ -491,8 +464,9 @@ ENDPOINT_SCHEMA: Final = 1
 def endpoint(drawn: Badge) -> dict[str, Any]:
     """Значок формой shields-endpoint: так значки показывает вся семья (#998).
 
-    ЧУЖАЯ СЛУЖБА — ЦЕНА, И ОНА ПРИНЯТА (владелец, 01.10.2026). Довод `svg`
-    против неё в силе, но отказ здесь не молчит: не ответившая служба
+    ЧУЖАЯ СЛУЖБА — ЦЕНА, И ОНА ПРИНЯТА (владелец, 01.10.2026). Прежде значки
+    рисовались своими SVG ради независимости от чужой службы; владелец снял их:
+    один источник числа, а не два. Отказ здесь не молчит: не ответившая служба
     показывает подпись картинки или «inaccessible», а не правдоподобное число.
     Числа по-прежнему наши: служба лишь рисует то, что лежит в этом файле.
     """
@@ -504,22 +478,17 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
     }
 
 
-def endpoint_name(name: str) -> str:
-    """Имя файла shields-endpoint рядом со значком: то же имя, расширение `.json`."""
-    return str(Path(name).with_suffix(".json"))
-
-
 def published_names() -> list[str]:
-    """Всё, что сборка кладёт в каталог публикации: факты, значки и их endpoint."""
-    return [FACTS, *BADGES, *map(endpoint_name, BADGES)]
+    """Всё, что сборка кладёт в каталог публикации: факты и значки."""
+    return [FACTS, *BADGES]
 
 
 def clashing_names() -> list[str]:
     """Имена вывода, которые встречаются дважды (взгляд на #1002).
 
-    Endpoint выводится из имени значка, а каталог публикации общий с фактами:
-    значок `facts.svg` дал бы `facts.json` и молча затёр бы контракт фактов
-    семьи. Столкновение — отказ сборки, а не перезапись.
+    Каталог публикации общий с фактами: значок под именем `facts.json` молча
+    затёр бы контракт фактов семьи. Столкновение — отказ сборки, а не
+    перезапись.
     """
     names = published_names()
     return sorted({name for name in names if names.count(name) > 1})
@@ -622,8 +591,9 @@ def version_badge(facts: dict[str, Any]) -> Badge:
 
 
 #: ЧТО СБОРКА РИСУЕТ — ОБЪЯВЛЕНО ЗДЕСЬ ОДИН РАЗ: имя файла → чем его рисуют.
-#: Рядом с каждым SVG публикуется его shields-endpoint (`endpoint_name`): витрина
-#: переходит на него вторым изменением, после первого прогона публикации (196).
+#: Каждый значок публикуется формой shields-endpoint (#998): витрина показывает
+#: его через `img.shields.io/endpoint`, как вся семья. Свои SVG сняты решением
+#: владельца 01.10.2026 — один источник числа, а не два.
 #: Порядок записей — порядок сборки.
 #:
 #: ПОЧЕМУ ЭТО ДАННЫЕ, А НЕ ШЕСТЬ КОНСТАНТ И КОРТЕЖ ВНУТРИ `main`. Список нужен
@@ -637,12 +607,12 @@ def version_badge(facts: dict[str, Any]) -> Badge:
 #: стороны узнают о нём в тот же миг
 #: ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
 BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
-    "rules.svg": rules_badge,
-    "family.svg": family_badge,
-    "version.svg": version_badge,
-    "release.svg": release_badge,
-    "scripts.svg": scripts_badge,
-    "coverage.svg": coverage_badge,
+    "rules.json": rules_badge,
+    "family.json": family_badge,
+    "version.json": version_badge,
+    "release.json": release_badge,
+    "scripts.json": scripts_badge,
+    "coverage.json": coverage_badge,
 }
 
 
@@ -730,10 +700,8 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
     for name, draw in BADGES.items():
-        drawn = draw(facts)
-        (out / name).write_text(svg(drawn) + "\n", encoding="utf-8")
-        said = json.dumps(endpoint(drawn), ensure_ascii=False, indent=2) + "\n"
-        (out / endpoint_name(name)).write_text(said, encoding="utf-8")
+        said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
+        (out / name).write_text(said, encoding="utf-8")
 
     rules = facts["rules"]
     print(
