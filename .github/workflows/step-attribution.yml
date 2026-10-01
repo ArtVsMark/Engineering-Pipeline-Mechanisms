@@ -53,7 +53,7 @@ jobs:
       # Это пояснение — одно на оба подключения гейта: `attribution-history.yml`
       # ссылается сюда.
       - name: сверить атрибуцию
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.3.0
+        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.4.0
         with:
           authors: .github/authors.txt
           # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
