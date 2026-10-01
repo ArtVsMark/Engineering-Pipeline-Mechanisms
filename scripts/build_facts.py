@@ -357,6 +357,10 @@ def contract_coverage(said: dict[str, Any]) -> dict[str, Any]:
 #: Прогон CI, чей статус витрина спрашивает у площадки по имени файла: свой
 #: красный файл фактов честно сказать не может (договор фактов 1.2, #1001).
 CI_FLOW: Final = paths.WORKFLOWS / "ci.yml"
+#: Причина в `none.python` — для читателя витрины, а не трасса: путь раннера
+#: и `repr` исключения ему ничего не говорят. Подробность уходит в поток
+#: диагностики прогона (взгляд на #1004).
+NO_PYTHON: Final = "матрица версий Python в ci.yml не прочитана — версии не названы, а не пусты"
 #: Джобы матрицы версий: поддерживаемые и пробные. Версии берутся из самой
 #: матрицы, а не пишутся второй раз (005).
 SUPPORTED_JOB: Final = "test-matrix"
@@ -375,6 +379,27 @@ def python_facts(path: Path = CI_FLOW) -> dict[str, list[str]]:
     supported, first = policy.matrix_axis(path, SUPPORTED_JOB, "python")
     experimental, second = policy.matrix_axis(path, EXPERIMENTAL_JOB, "python")
     return {"supported": supported, "experimental": experimental, "os": sorted({first, second})}
+
+
+def ci_facts(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
+    """Разделы `ci` и `python` договора — и причины в `none` для непрочитанного.
+
+    `ci` договор требует всегда, а в `none` его не положить: прогона, которого
+    нет в дереве, файл фактов не называет, и сборка отказывает (045). Матрица
+    не прочитана — раздела `python` нет, причина для читателя витрины стоит в
+    `none.python`, а подробность уходит в поток диагностики (взгляд на #1004).
+    """
+    if not (root / CI_FLOW).is_file():
+        raise NotRun(
+            f"нет прогона CI {CI_FLOW}: договор фактов требует ci.workflow, а назвать нечего"
+        )
+    run: dict[str, Any] = {"ci": {"workflow": CI_FLOW.name}}
+    try:
+        run["python"] = python_facts(root / CI_FLOW)
+    except policy.BadPolicy as exc:
+        print(f"warning: {exc}", file=sys.stderr)
+        return run, {"python": NO_PYTHON}
+    return run, {}
 
 
 def collect(
@@ -396,13 +421,16 @@ def collect(
     # Свести их в одно значило бы либо скрыть работу, либо объявить выпуском
     # каждое изменение (035).
     number, whole = version.version(root)
-    # ЗНАЧЕНИЕ ИЛИ ПРИЧИНА, ТРЕТЬЕГО НЕТ (договор фактов 1.2, #1001): показатель,
-    # который не прочитан, уходит причиной в `none`, а не пропадает молча.
-    none: dict[str, str] = {}
-    try:
-        python: dict[str, list[str]] | None = python_facts(root / CI_FLOW)
-    except policy.BadPolicy as exc:
-        python, none["python"] = None, str(exc)
+    # ЗНАЧЕНИЕ ИЛИ ПРИЧИНА, ТРЕТЬЕГО НЕТ (договор фактов 1.2, #1001): показатель
+    # ДОГОВОРА, который не прочитан, уходит причиной в `none`, а не пропадает
+    # молча. Ключи `none` схема витрины перечисляет закрытым списком, и разреза
+    # семьи в нём нет: `family` — раздел сверх договора, и причину он несёт
+    # своей формой `{"read": false, "why": …}` (взгляд на #1004, 195).
+    # Ответ каталогу и проверки читаются раньше прогона CI: их отказ — о входе
+    # самого проекта, и назвать его надо первым, а не за чужой причиной.
+    rules = rules_facts(root / BINDINGS)
+    checks = checks_facts(root / policy.DEFAULT_PATH)
+    run, none = ci_facts(root)
     covered = contract_coverage(coverage_facts(coverage))
     none.update(covered.pop("none", {}))
     said = {
@@ -415,8 +443,7 @@ def collect(
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": sha,
         # Статус CI витрина спрашивает у площадки по имени файла (договор 1.2).
-        "ci": {"workflow": CI_FLOW.name},
-        **({"python": python} if python is not None else {}),
+        **run,
         "contract": contract_version(root / VERSION_FILE),
         "version": number,
         # Неполнота названа рядом с числом, а не выброшена: клон без тегов даёт
@@ -435,8 +462,8 @@ def collect(
         "scripts": script_runs(root),
         # Покрытие строк приходит из прогона: по дереву его не сосчитать.
         **covered,
-        "rules": rules_facts(root / BINDINGS),
-        "checks_per_pr": checks_facts(root / policy.DEFAULT_PATH),
+        "rules": rules,
+        "checks_per_pr": checks,
         "family": family_facts(summary, mine=mine, answers=root / BINDINGS),
     }
     if none:

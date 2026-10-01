@@ -193,7 +193,38 @@ def test_python_versions_come_from_the_ci_matrix() -> None:
     flow = yaml.safe_load((ROOT / facts.CI_FLOW).read_text(encoding="utf-8"))
     matrix = flow["jobs"][facts.SUPPORTED_JOB]["strategy"]["matrix"]["python"]
     assert said["supported"] == [str(one) for one in matrix]
-    assert said["experimental"], "пробных версий не нашлось — матрица test-next не прочитана"
+    # Перепутанный джоб или потерянный образ видны только сверкой целиком, а не
+    # непустотой (взгляд на #1004).
+    trial = flow["jobs"][facts.EXPERIMENTAL_JOB]
+    assert said["experimental"] == [str(one) for one in trial["strategy"]["matrix"]["python"]]
+    images = {
+        str(flow["jobs"][job]["runs-on"]) for job in (facts.SUPPORTED_JOB, facts.EXPERIMENTAL_JOB)
+    }
+    assert said["os"] == sorted(images)
+
+
+def test_an_unread_matrix_names_a_reason_for_the_reader(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Матрица не прочитана — в `none.python` причина для читателя, а не трасса (#1004)."""
+    (tmp_path / facts.CI_FLOW).parent.mkdir(parents=True)
+    (tmp_path / facts.CI_FLOW).write_text("jobs: {}\n", encoding="utf-8")
+    run, none = facts.ci_facts(tmp_path)
+    assert run == {"ci": {"workflow": facts.CI_FLOW.name}}
+    assert none == {"python": facts.NO_PYTHON}
+    assert "не прочитана" in capsys.readouterr().err, "подробность отказа пропала"
+
+
+def test_a_read_matrix_leaves_no_reason() -> None:
+    """Матрица прочитана — раздел `python` есть, причины нет: третьего исхода нет."""
+    run, none = facts.ci_facts(ROOT)
+    assert set(run) == {"ci", "python"} and none == {}
+
+
+def test_facts_without_a_ci_flow_are_refused(tmp_path: Path) -> None:
+    """Прогона CI нет — сборка отказывает, а не называет несуществующий файл (#1004)."""
+    with pytest.raises(facts.NotRun, match="нет прогона CI"):
+        facts.ci_facts(tmp_path)
 
 
 def test_a_missing_matrix_is_not_an_empty_list(tmp_path: Path) -> None:
