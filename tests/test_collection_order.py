@@ -28,15 +28,16 @@ import yaml
 
 from tests.conftest import ROOT, load_script
 
-CI: Final = ROOT / ".github" / "workflows" / "ci.yml"
-#: Джобы, которые гоняют набор. Перечислены, а не выведены: список
-#: разрешённого, и новый прогонщик набора обязан попасть сюда осознанно (068).
-RUNNERS: Final = ("test-matrix", "test-next")
+WORKFLOWS: Final = ROOT / ".github" / "workflows"
+#: Джобы, которые гоняют набор, и прогон каждого. Перечислены, а не выведены:
+#: список разрешённого, и новый прогонщик набора обязан попасть сюда
+#: осознанно (068). Предрелизная — своим прогоном (#1018).
+RUNNERS: Final = {"test-matrix": "ci.yml", "test-next": "python-next.yml"}
 
 
 def steps_of(job: str) -> list[dict[str, object]]:
-    """Шаги названного джоба прогона гейтов."""
-    document = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    """Шаги названного джоба в его прогоне."""
+    document = yaml.safe_load((WORKFLOWS / RUNNERS[job]).read_text(encoding="utf-8"))
     jobs = document.get("jobs") or {}
     assert job in jobs, f"в прогоне нет джоба {job} — предмет проверки не найден (075)"
     steps = (jobs[job] or {}).get("steps") or []
