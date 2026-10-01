@@ -161,12 +161,18 @@ SCRIPT_FROM_CHECKOUT: Final = re.compile(rf"\$\{{?{preflight.MECHANISMS}\}}?\"?/
 
 
 def odd_calls(said: str) -> list[str]:
-    """Вызовы нашего скрипта из checkout не той формой, что читает предполётная."""
+    """Вызовы нашего скрипта из checkout не той формой, что читает предполётная.
+
+    Правило строгое, а не разбор форм (навык `build-a-gate`, шаг 3а): в строке
+    команды ОДНО упоминание, и оно — её начало. Второй вызов после
+    каноничного `plain` не приведёт, а `NEEDS_PLATFORM` сверяет только начало
+    строки (взгляд на #1015).
+    """
     return [
         line.strip()
         for line in commands_of(said)
-        if SCRIPT_FROM_CHECKOUT.search(line)
-        and not line.strip().startswith(preflight.FROM_CHECKOUT)
+        if (found := len(SCRIPT_FROM_CHECKOUT.findall(line)))
+        and (found > 1 or not line.strip().startswith(preflight.FROM_CHECKOUT))
     ]
 
 
@@ -179,8 +185,17 @@ def odd_calls(said: str) -> list[str]:
         ("python3 $MECHANISMS/scripts/debt.py", True),
         (f"rc=0; {preflight.FROM_CHECKOUT}debt.py", True),
         ("python -m pip install $MECHANISMS/packages/transport", False),
+        (f"{preflight.FROM_CHECKOUT}debt.py && {preflight.FROM_CHECKOUT}x.py", True),
     ],
-    ids=["каноничная", "в кавычках", "в скобках", "python3", "не в начале", "пакет"],
+    ids=[
+        "каноничная",
+        "в кавычках",
+        "в скобках",
+        "python3",
+        "не в начале",
+        "пакет",
+        "второй вызов после каноничного",
+    ],
 )
 def test_an_odd_call_form_is_told(line: str, is_odd: bool) -> None:
     """Обе половины: иная форма вызова краснеет, каноничная и установка пакета — нет."""
