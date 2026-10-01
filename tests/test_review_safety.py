@@ -521,9 +521,14 @@ OUR_CALL_REF: Final = "${{ job.workflow_sha }}"
 OUR_CALL_REPO: Final = "${{ job.workflow_repository }}"
 
 
-def own_ref(ref: str, repository: object) -> bool:
-    """Checkout забирает смотренный код: базу своего дерева или коммит вызова у себя."""
-    if ref == OUR_BASE_REF:
+def own_ref(ref: object, repository: object) -> bool:
+    """Checkout забирает смотренный код: базу своего дерева или коммит вызова у себя.
+
+    Без `ref:` checkout берёт событие своего же дерева — свой код, только пока
+    и `repository:` не назван. С чужим репозиторием и без `ref:` он берёт чужую
+    ветку по умолчанию, то есть несмотренный код (взгляд на #1016, 195).
+    """
+    if ref is None or ref == OUR_BASE_REF:
         return repository is None
     return ref == OUR_CALL_REF and repository == OUR_CALL_REPO
 
@@ -688,8 +693,7 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
         for job_id, job in document["jobs"].items()
         for step in job.get("steps") or []
         if "checkout" in str(step.get("uses") or "")
-        and (ref := (step.get("with") or {}).get("ref"))
-        and not own_ref(ref, (step.get("with") or {}).get("repository"))
+        and not own_ref((said := step.get("with") or {}).get("ref"), said.get("repository"))
     ]
     assert not foreign, (
         "прогон от общей ветки забирает ЧУЖОЙ ref: " + ", ".join(foreign) + ".\n"
@@ -708,6 +712,9 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
         (OUR_CALL_REF, "${{ github.event.pull_request.head.repo.full_name }}", False),
         (OUR_CALL_REF, None, False),
         ("${{ github.event.pull_request.head.sha }}", None, False),
+        (None, None, True),
+        (None, "${{ github.event.pull_request.head.repo.full_name }}", False),
+        (None, OUR_CALL_REPO, False),
     ],
     ids=[
         "база у себя",
@@ -716,9 +723,14 @@ def test_a_shared_caller_checks_out_its_own_ref() -> None:
         "вызов у чужого",
         "вызов без репозитория",
         "голова",
+        "без ref у себя",
+        "без ref у чужого",
+        "без ref у вызова",
     ],
 )
-def test_an_own_ref_is_a_pair_not_a_ref(ref: str, repository: str | None, is_own: bool) -> None:
+def test_an_own_ref_is_a_pair_not_a_ref(
+    ref: str | None, repository: str | None, is_own: bool
+) -> None:
     """Свой ref — пара «ref + репозиторий», а не один ref (взгляд на #997)."""
     assert own_ref(ref, repository) is is_own
 
