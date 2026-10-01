@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import subprocess
 import sys
 import urllib.parse
 from dataclasses import dataclass
@@ -42,6 +41,7 @@ from typing import Final
 import changerefs
 import ci_complete
 import ghrest
+import gitcall
 import labels
 import paths
 import report
@@ -127,13 +127,7 @@ class NotRun(RuntimeError):
 
 def git(*args: str) -> str:
     """Зовёт git, обращая отказ в третий исход."""
-    try:
-        return subprocess.run(
-            ["git", *args], capture_output=True, check=True, text=True, encoding="utf-8"
-        ).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
-        detail = getattr(exc, "stderr", "") or exc
-        raise NotRun(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
+    return gitcall.output(args, NotRun)
 
 
 def changed_files(branch: str, base: str) -> list[str]:
