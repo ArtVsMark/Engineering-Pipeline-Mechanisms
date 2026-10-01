@@ -2,6 +2,8 @@
 
 > **Читатель:** посетитель — что это такое и стоит ли брать.
 
+[![версия проекта, посчитанная по истории](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/version.json&cacheSeconds=300)](docs/dev/release.md) [![последний выпуск: к нему прибивается потребитель](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/release.json&cacheSeconds=300)](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/releases) [![правил каталога держится машиной](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/rules.json&cacheSeconds=300)](.rules/bindings.json) [![доля машинного соблюдения семьи, закрытая общими механизмами](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/family.json&cacheSeconds=300)](docs/decisions/016-family-completeness-outranks-the-release-number.md) [![запускаемых механизмов гоняется процессом](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/scripts.json&cacheSeconds=300)](scripts/) [![доля покрытых строк: мерило охвата, а не верности механизма](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/coverage.json&cacheSeconds=300)](.github/workflows/ci.yml)
+
 **Механизмы конвейера: скелет один для всех проектов, наполнение своё.**
 Открытие изменения, гейты, очередь и слияние, здоровье общей ветки, выпуск —
 одними и теми же файлами с одними и теми же именами шагов. Своё у проекта —
@@ -72,7 +74,7 @@
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 Что именно ещё не доказано прогоном — таблицей в [`docs/dev/gaps.md`](docs/dev/gaps.md).
 
-Значки ниже собраны прогоном, а не вписаны руками: `badges.yml` пересчитывает
+Значки в шапке собраны прогоном, а не вписаны руками: `badges.yml` пересчитывает
 `facts.json` и весь набор значков на каждое слияние и толкает их в отдельную
 ветку `badges` — производное не коммитится туда, где живёт источник, и не
 конфликтует на каждом слиянии
@@ -80,8 +82,6 @@
 Строка о нём ушла из таблицы пробелов после первого прогона публикации, а не
 после написания кода
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
-
-![правил каталога держится машиной](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/rules.svg) ![доля машинного соблюдения семьи, закрытая общими механизмами](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/family.svg) ![версия проекта, посчитанная по истории](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/version.svg) ![последний выпуск: к нему прибивается потребитель](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/release.svg) ![запускаемых механизмов гоняется процессом](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/scripts.svg) ![доля покрытых строк: мерило охвата, а не верности механизма](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/coverage.svg)
 
 Тем же файлом открыт канал соседям и каталогу правил: версия контракта,
 сколько правил каталога проект держит и чем именно, состав классов проверок —
