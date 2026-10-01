@@ -1,0 +1,112 @@
+"""Хук старта облачного окна: вне облака молчит, планку берёт у `check_env` (#1017)."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Final
+
+import pytest
+
+from tests.conftest import ROOT, load_script
+
+HOOK: Final = ROOT / ".claude" / "hooks" / "session-start.sh"
+SETTINGS: Final = ROOT / ".claude" / "settings.json"
+
+
+def test_outside_the_cloud_the_hook_does_nothing(tmp_path: Path) -> None:
+    """Без `CLAUDE_CODE_REMOTE=true` — выход 0 и ни строки в файл окружения окна."""
+    env_file = tmp_path / "env"
+    environment = {
+        **os.environ,
+        "CLAUDE_CODE_REMOTE": "",
+        "CLAUDE_PROJECT_DIR": str(ROOT),
+        "CLAUDE_ENV_FILE": str(env_file),
+    }
+    done = subprocess.run(
+        [str(HOOK)], env=environment, capture_output=True, text=True, encoding="utf-8"
+    )
+    assert done.returncode == 0, done.stderr
+    assert not env_file.exists(), "вне облака хук тронул окружение окна"
+
+
+def test_the_hook_reads_the_floor_and_tools_from_check_env() -> None:
+    """Планку и строки установки хук спрашивает у `check_env`, а не разбирает сам (214)."""
+    check_env = load_script("check_env.py")
+    text = HOOK.read_text(encoding="utf-8")
+    for name in (
+        check_env.python_floor.__name__,
+        check_env.needs.__name__,
+        check_env.local_packages.__name__,
+    ):
+        assert f"c.{name}(" in text, f"хук не спрашивает `check_env.{name}`"
+    # Судятся исполняемые строки: в комментариях-пояснениях имя файла законно.
+    code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    own = [line for line in code if "requires-python" in line or "tomllib" in line]
+    assert own == [], f"хук разбирает планку сам: {own}"
+    # Сборка пакета из исходников — след установки: без уборки проверка типов
+    # видит модуль дважды (замер окна 01.10.2026, `packages/transport/build`).
+    assert 'rm -rf "$local/build"' in text, "хук не убирает сборку локальных пакетов"
+
+
+def test_the_hook_is_registered_beside_the_push_guard() -> None:
+    """`SessionStart` добавлен рядом со сторожем толчка, а не вместо него."""
+    hooks = json.loads(SETTINGS.read_text(encoding="utf-8"))["hooks"]
+    started = [one["command"] for entry in hooks["SessionStart"] for one in entry["hooks"]]
+    assert any(HOOK.name in command for command in started)
+    guarded = [one["command"] for entry in hooks["PreToolUse"] for one in entry["hooks"]]
+    assert any("push_guard.py" in command for command in guarded), "сторож толчка пропал"
+
+
+#: Встроенный в хук код на Python — между `python3 -c "` и `" "$1"`.
+SNIPPET: Final = re.compile(r'python3 -c "\n(.*?)\n" "\$1"', re.S)
+
+
+def snippet_says(mode: str) -> str:
+    """Что печатает встроенный в хук разбор дерева на этом дереве."""
+    found = SNIPPET.search(HOOK.read_text(encoding="utf-8"))
+    assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
+    done = subprocess.run(
+        [sys.executable, "-c", found[1], mode],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+@pytest.mark.parametrize("mode", ["floor", "needs", "local"])
+def test_the_hooks_snippet_answers_what_check_env_answers(mode: str) -> None:
+    """Встроенный разбор ИСПОЛНЯЕТСЯ и говорит то же, что `check_env` (взгляд на #1024, 107).
+
+    Подстрока `c.<имя>(` не ловит смену формы `Need` или `local_packages`:
+    хук ушёл бы в предупреждение, а набор остался бы зелёным.
+    """
+    check_env = load_script("check_env.py")
+    expected = {
+        "floor": "{}.{}".format(*check_env.python_floor()),
+        "needs": " ".join(f"{one.name}{one.bounds}" for one in check_env.needs().values()),
+        "local": " ".join(str(where) for _, where in check_env.local_packages()),
+    }[mode]
+    assert expected, f"{mode}: check_env ответил пусто — сверять не с чем (075)"
+    assert snippet_says(mode) == expected
+
+
+def test_the_hook_installs_local_packages_editable_and_skips_a_fit_env() -> None:
+    """Пакеты дерева — `-e`, годное окружение не переставляется (взгляд на #1024)."""
+    code = "\n".join(
+        line
+        for line in HOOK.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert 'editable+=(-e "$local")' in code, "пакеты дерева ставятся копией, а не -e"
+    assert re.search(r"if ! \.venv/bin/python scripts/check_env\.py", code), (
+        "годное окружение переставляется на каждом старте"
+    )
