@@ -38,10 +38,10 @@ import argparse
 import os
 import posixpath
 import re
-import subprocess
 import sys
 from typing import Final
 
+import gitcall
 import paths
 
 EXIT_OK: Final = 0
@@ -101,10 +101,7 @@ def base_ref() -> str:
 
 def _git(*args: str) -> str:
     """Запуск git; отказ — третий исход, а не пустой ответ."""
-    done = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
-    if done.returncode != 0:
-        raise NotRun(f"git {' '.join(args)}: {done.stderr.strip()}")
-    return done.stdout
+    return gitcall.output(args, NotRun)
 
 
 def touched(base: str) -> list[tuple[str, str]]:
