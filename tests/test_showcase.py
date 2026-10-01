@@ -309,7 +309,8 @@ def unified_step() -> dict[str, Any]:
         if UNIFIED_ACTION in str((step or {}).get("uses") or "")
     ]
     assert len(found) == 1, f"шагов единого значка в badges.yml не один, а {len(found)} (075)"
-    return found[0]
+    step: dict[str, Any] = found[0]
+    return step
 
 
 def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
