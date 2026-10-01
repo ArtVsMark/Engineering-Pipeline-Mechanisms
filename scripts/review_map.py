@@ -63,18 +63,27 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не пустая карта."""
 
 
+def git(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """`git <args>` с кодом выхода; git нет на пути — `NotRun`, а не трасса.
+
+    Код выхода вызывающий читает сам: отказ у каждого свой — отказ шага или
+    «тронут» (взгляд на #1021).
+    """
+    try:
+        return subprocess.run(
+            ["git", *args], capture_output=True, text=True, encoding="utf-8", check=False
+        )
+    except OSError as exc:
+        raise NotRun(f"git {' '.join(args)} → {exc}") from exc
+
+
 def from_base(base: str) -> dict[str, Any]:
     """Ответ проекта каталогу, прочитанный из ОБЩЕЙ ветки.
 
     Не из рабочего дерева: дерево здесь — это голова изменения, то есть текст
     того, кого проверяют (085).
     """
-    shown = subprocess.run(
-        ["git", "show", f"{base}:{ANSWER}"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    shown = git(["show", f"{base}:{ANSWER}"])
     if shown.returncode != 0:
         raise NotRun(f"ответ каталогу не прочитан из {base}: {shown.stderr.strip()}")
     try:
@@ -88,9 +97,7 @@ def from_base(base: str) -> dict[str, Any]:
 
 def shown_from_base(base: str, path: Path) -> str:
     """Текст файла с ОБЩЕЙ ветки; отказ git — отказ шага, а не пустой текст (045)."""
-    shown = subprocess.run(
-        ["git", "show", f"{base}:{path}"], capture_output=True, text=True, encoding="utf-8"
-    )
+    shown = git(["show", f"{base}:{path}"])
     if shown.returncode != 0:
         raise NotRun(f"{path} не прочитан из {base}: {shown.stderr.strip()}")
     return shown.stdout
@@ -286,15 +293,13 @@ def touches_the_answer(base: str, head: str = "HEAD") -> bool:
     этого одна лишняя строка «сверь с дифом», а цена пропуска — ревью, которому
     подделали карту (085).
     """
-    shown = subprocess.run(
+    try:
         # `-z` здесь не про удобство: без него имя с пробелом или кириллицей
         # приходит экранированным, и путь не разрешается молча (165).
-        ["git", "diff", "--name-only", "-z", base, head, "--", str(ANSWER)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
+        shown = git(["diff", "--name-only", "-z", base, head, "--", str(ANSWER)])
+    except NotRun:
+        # Без git — та же сторона, что при отказе: «тронут» (ниже).
+        return True
     # ОТКАЗ GIT ЧИТАЕТСЯ КАК «ТРОНУТ», А НЕ КАК «НЕ ТРОНУТ». Исход здесь не
     # читался, и пустой `stdout` при отказе давал `False` — то есть взгляд НЕ
     # получал указания сверить карту с дифом. Цена пропуска названа выше:
