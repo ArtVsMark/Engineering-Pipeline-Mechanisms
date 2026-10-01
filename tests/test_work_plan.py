@@ -711,12 +711,15 @@ def test_birth_reads_the_plan_mark_by_reference(monkeypatch: pytest.MonkeyPatch)
     """Кандидат судится меткой `findings.PLAN_MARKER`, а не её буквами (взгляд на #831).
 
     Подмена метки — единственное, что отличает ссылку от переписанных букв:
-    вернись в `may_be_born` строка «<!-- work-plan», прежний тест не покраснел бы.
+    вернись в `may_be_born` буквы начала метки, прежний тест не покраснел бы.
     """
     own = {"number": 763, "state": "open", "repository_url": "https://api.github.com/repos/o/r"}
+    was = module.findings.PLAN_MARKER
     monkeypatch.setattr(module.findings, "PLAN_MARKER", "<!-- another-plan -->")
     assert module.may_be_born({**own, "body": "<!-- another-plan -->"}, "o/r", set()) is False
-    assert module.may_be_born({**own, "body": "<!-- work-plan -->"}, "o/r", set()) is True
+    # Прежняя метка, укороченная до начала, — уже не метка плана: выводится из
+    # константы до подмены, а не буквами (209).
+    assert module.may_be_born({**own, "body": was.split(":")[0] + " -->"}, "o/r", set()) is True
 
 
 def test_a_born_row_needs_an_explicit_open_state(capsys: pytest.CaptureFixture[str]) -> None:
