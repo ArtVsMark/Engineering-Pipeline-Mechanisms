@@ -101,7 +101,7 @@
   «Контексте» снят до #997, и одно число в нём неверно. Прогонов 31, без
   `on: workflow_call` — 22, ответ `as-is` из них у 20, а не у 21. Это тот же
   список, что `tests/test_portable.py::STILL_COPIED`; два оставшихся — `ci.yml`
-  (`ours`) и `handover-probe.yml` (`configured`). Команда
+  (`configured`) и `handover-probe.yml` (`ours`), по `.rules/portable.json`. Команда
   `grep -l "repository:" .github/workflows/step-*.yml` пуста только до #997,
   после него она находит семь шагов. Решение от уточнения не меняется: оно
   стоит на расхождении голосов, а не на числе.
