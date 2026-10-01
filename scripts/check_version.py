@@ -29,17 +29,14 @@ from pathlib import Path
 from typing import Final
 
 import paths
+import version as project_version
 
-VERSION_FILE: Final = paths.VERSION
-VERSION_RE: Final = paths.VERSION_RE
 MARKER_RE: Final = re.compile(r"<!--m:contract-->(?P<value>[^<]*)<!--/m:contract-->")
 
 # Производные и служебные файлы: версия попадает в них сборкой, а не руками.
 #
-# ОБА ИМЕНИ БЕРУТСЯ У КАНОНА (#591). Здесь стояли литералы — и `VERSION_FILE`
-# четырьмя строками выше уже брал то же самое у `paths.VERSION`. Два написания
-# одного имени в одном файле, в четырёх строках друг от друга: разъехаться им
-# ничто не мешало (022, 090).
+# ОБА ИМЕНИ БЕРУТСЯ У КАНОНА (#591). Здесь стояли литералы рядом со вторым
+# написанием того же `paths.VERSION`: разъехаться им ничто не мешало (022, 090).
 ALLOWED: Final = frozenset({str(paths.VERSION), str(paths.CHANGELOG)})
 ALLOWED_PREFIXES: Final = ("changelog.d/released/",)
 BINARY_SUFFIXES: Final = frozenset({".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip"})
@@ -79,16 +76,6 @@ def tracked_files() -> list[Path]:
     if not files:
         raise NotRun("под учётом нет ни одного файла — это ошибка входа, а не «чисто»")
     return files
-
-
-def read_version() -> str:
-    """Читает версию контракта из единственного источника."""
-    if not VERSION_FILE.is_file():
-        raise NotRun(f"нет источника версии: {VERSION_FILE}")
-    version = VERSION_FILE.read_text(encoding="utf-8").strip()
-    if not VERSION_RE.match(version):
-        raise NotRun(f"версия «{version}» не вида МАЖОР.МИНОР.ПАТЧ")
-    return version
 
 
 def check(version: str, files: list[Path]) -> list[str]:
@@ -141,9 +128,9 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     try:
-        version = read_version()
+        version = project_version.declared()
         findings = check(version, tracked_files())
-    except NotRun as exc:
+    except (NotRun, project_version.NotRun) as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
