@@ -24,8 +24,6 @@
 Исходы (правило 039): ``0`` режим записан · ``2`` не отработал.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import secrets

@@ -9,8 +9,6 @@
 * заголовки не пришли — сказано вслух, а не подменено молчанием.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import re

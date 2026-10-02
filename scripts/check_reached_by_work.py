@@ -63,8 +63,6 @@
 Исходы (правило 039): ``0`` чисто · ``1`` есть находки · ``2`` не отработал.
 """
 
-from __future__ import annotations
-
 import argparse
 import ast
 import re

@@ -1,7 +1,5 @@
 """Замер цепочек находок: число — команда, а не память окна (#746)."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

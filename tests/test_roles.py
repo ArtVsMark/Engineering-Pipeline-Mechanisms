@@ -7,8 +7,6 @@
 `tests/test_directions_map.py`, и второй копии той проверки здесь нет (022).
 """
 
-from __future__ import annotations
-
 import re
 from typing import Final
 

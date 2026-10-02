@@ -28,8 +28,6 @@
 нет · ``2`` шаг не отработал · ``4`` каталог молчит.
 """
 
-from __future__ import annotations
-
 import argparse
 import sys
 from typing import Final

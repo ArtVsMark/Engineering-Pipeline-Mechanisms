@@ -38,8 +38,6 @@
 говорит само правило: «общего гейта нет и не будет».
 """
 
-from __future__ import annotations
-
 import ast
 import re
 from pathlib import Path

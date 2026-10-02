@@ -35,8 +35,6 @@
 ``3`` часть клонов не прочитана — сказано, а не выдано за «не взяли».
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import subprocess

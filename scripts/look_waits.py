@@ -25,8 +25,6 @@
 ``run=yes|no``) · ``2`` не отработал — нет токена, головы или репозитория.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import sys

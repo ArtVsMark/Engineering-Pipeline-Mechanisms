@@ -21,8 +21,6 @@
 поломка. Теперь у отказа один разбор и один текст.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import re

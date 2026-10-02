@@ -1,7 +1,5 @@
 """Общий вызов git отдаёт вывод, а отказ — классом вызывающего (071, #999)."""
 
-from __future__ import annotations
-
 import subprocess
 from pathlib import Path
 

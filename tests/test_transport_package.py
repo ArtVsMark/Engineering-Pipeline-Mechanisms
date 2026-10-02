@@ -21,8 +21,6 @@
   установленный пакет обязан называть свою версию честно (164).
 """
 
-from __future__ import annotations
-
 import ast
 import re
 import tomllib

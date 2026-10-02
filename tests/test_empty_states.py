@@ -31,8 +31,6 @@
 фрагментов, — это видно клоном, а не только телом.
 """
 
-from __future__ import annotations
-
 import ast
 import re
 from pathlib import Path

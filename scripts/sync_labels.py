@@ -18,8 +18,6 @@
 Транспорт — REST, самый дешёвый из доступных для этой операции (правило 001).
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import sys

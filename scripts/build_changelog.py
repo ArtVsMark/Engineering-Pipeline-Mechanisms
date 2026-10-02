@@ -25,8 +25,6 @@
 диске при ``--check`` · ``2`` собрать не удалось.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re

@@ -7,8 +7,6 @@
 ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, Final
 

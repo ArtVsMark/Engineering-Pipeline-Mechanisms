@@ -31,8 +31,6 @@
 предмет одного проекта.
 """
 
-from __future__ import annotations
-
 import json
 import re
 from collections import defaultdict

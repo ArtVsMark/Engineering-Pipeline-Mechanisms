@@ -9,8 +9,6 @@
 данных следует, — совпадение состава, а не содержание сроков.
 """
 
-from __future__ import annotations
-
 import re
 
 import pytest

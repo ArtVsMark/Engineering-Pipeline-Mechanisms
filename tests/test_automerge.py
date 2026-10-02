@@ -10,8 +10,6 @@
 (`tests/test_ghrest.py`, `tests/test_token_paths.py`).
 """
 
-from __future__ import annotations
-
 from dataclasses import replace
 from typing import Any, Final
 

@@ -5,8 +5,6 @@
 каждого механизма своя; здесь проверяется и поведение, и то, что копия одна.
 """
 
-from __future__ import annotations
-
 import ast
 import re
 from typing import Final

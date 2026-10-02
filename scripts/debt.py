@@ -33,8 +33,6 @@
 ``3`` источник не прочитан — сказано, а не выдано за «долга нет».
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re

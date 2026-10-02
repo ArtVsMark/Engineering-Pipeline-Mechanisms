@@ -20,8 +20,6 @@
 [090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
 """
 
-from __future__ import annotations
-
 import sys
 from typing import Final
 

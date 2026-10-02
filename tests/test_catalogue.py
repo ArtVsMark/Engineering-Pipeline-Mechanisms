@@ -10,8 +10,6 @@
 три минуты не двигалась. Разбор — `docs/decisions/027-a-silent-catalogue-is-its-own-outcome.md`.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from tests.conftest import load_script

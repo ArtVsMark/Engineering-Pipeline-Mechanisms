@@ -32,8 +32,6 @@
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 """
 
-from __future__ import annotations
-
 from typing import Any, Final
 
 import pytest

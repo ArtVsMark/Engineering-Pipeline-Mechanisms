@@ -25,8 +25,6 @@
 ``3`` есть красное, толкать рано.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import subprocess

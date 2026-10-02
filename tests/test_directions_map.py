@@ -24,8 +24,6 @@
 ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
 """
 
-from __future__ import annotations
-
 import re
 from typing import Final
 

@@ -10,8 +10,6 @@
 здесь можно решение, а не транспорт.
 """
 
-from __future__ import annotations
-
 import json
 import re
 from typing import Any

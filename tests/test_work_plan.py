@@ -12,8 +12,6 @@
 * **молчание источника не выдаётся за пустоту** (045).
 """
 
-from __future__ import annotations
-
 import json
 from typing import Any, Final
 

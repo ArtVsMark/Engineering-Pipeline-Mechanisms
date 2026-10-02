@@ -34,8 +34,6 @@
 Исходы (правило 039): ``0`` профиль построен · ``2`` не отработал.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import re

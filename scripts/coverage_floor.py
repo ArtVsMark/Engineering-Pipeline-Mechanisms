@@ -38,8 +38,6 @@
 сползание видно с первого дня, а не через месяц накопления.
 """
 
-from __future__ import annotations
-
 import base64
 import json
 from typing import Any, Final, NamedTuple

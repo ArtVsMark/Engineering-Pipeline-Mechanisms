@@ -6,8 +6,6 @@
 такое правило обязано иметь механизм (002), иначе оно обещание.
 """
 
-from __future__ import annotations
-
 import fnmatch
 import re
 from pathlib import Path

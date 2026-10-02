@@ -10,8 +10,6 @@
 обязано быть видно отдельно, а не тонуть в «изменено».
 """
 
-from __future__ import annotations
-
 import os
 import re
 import subprocess

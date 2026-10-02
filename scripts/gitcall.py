@@ -25,8 +25,6 @@
 без поимки было 19 в 11 модулях; восемь сняты в #1021, одиннадцать — в #1027.
 """
 
-from __future__ import annotations
-
 import subprocess
 from collections.abc import Callable, Sequence
 

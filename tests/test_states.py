@@ -29,8 +29,6 @@
 [154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 """
 
-from __future__ import annotations
-
 import re
 
 import pytest

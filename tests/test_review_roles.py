@@ -6,8 +6,6 @@
 `docs/agent/review.md` читаются с ОБЩЕЙ ветки (085).
 """
 
-from __future__ import annotations
-
 import json
 import re
 from pathlib import Path

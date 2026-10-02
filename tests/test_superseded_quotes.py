@@ -14,8 +14,6 @@
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
 """
 
-from __future__ import annotations
-
 import json
 import re
 from pathlib import Path

@@ -4,8 +4,6 @@
 Поэтому здесь и находка, и граница: что именно правило считать НЕ велит.
 """
 
-from __future__ import annotations
-
 import ast
 import subprocess
 from pathlib import Path

@@ -1,7 +1,5 @@
 """Полный взгляд один раз, дальше проверка починки (#848)."""
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 

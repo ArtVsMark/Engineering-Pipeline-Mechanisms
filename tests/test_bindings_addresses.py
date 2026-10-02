@@ -18,8 +18,6 @@
 ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
 """
 
-from __future__ import annotations
-
 import json
 import re
 from pathlib import Path

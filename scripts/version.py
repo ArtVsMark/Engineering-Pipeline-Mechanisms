@@ -39,8 +39,6 @@
 ``3`` посчитана неполно либо разошлась с объявленной — сказано, а не скрыто.
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import subprocess

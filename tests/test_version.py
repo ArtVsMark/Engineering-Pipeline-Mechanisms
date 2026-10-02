@@ -16,8 +16,6 @@
 гейт `version.py --check` в прогоне, а не падение проверки о чужой причине.
 """
 
-from __future__ import annotations
-
 import subprocess
 from functools import partial
 from pathlib import Path

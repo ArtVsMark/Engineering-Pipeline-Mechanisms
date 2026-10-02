@@ -1,7 +1,5 @@
 """Хук старта облачного окна: вне облака молчит, планку берёт у `check_env` (#1017)."""
 
-from __future__ import annotations
-
 import json
 import os
 import re

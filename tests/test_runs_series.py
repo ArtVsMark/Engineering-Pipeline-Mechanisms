@@ -11,8 +11,6 @@
   ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 """
 
-from __future__ import annotations
-
 import json
 from datetime import date, timedelta
 from pathlib import Path

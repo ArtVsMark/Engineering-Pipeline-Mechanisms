@@ -28,8 +28,6 @@
 по-разному; здесь она сведена к одному чтению.
 """
 
-from __future__ import annotations
-
 from typing import Any, Final
 
 import ghrest

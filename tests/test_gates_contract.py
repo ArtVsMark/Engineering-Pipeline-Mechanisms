@@ -6,8 +6,6 @@
 к одному имени, а не к поиску по всем файлам.
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 from typing import Any

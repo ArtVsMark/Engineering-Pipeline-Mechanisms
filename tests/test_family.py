@@ -9,8 +9,6 @@
 (тогда «сводка недоступна» читается как «общие механизмы ничего не закрывают»).
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

@@ -12,8 +12,6 @@
 у остального, машина не знает: это чтение, и оно за человеком.
 """
 
-from __future__ import annotations
-
 import ast
 import json
 import re

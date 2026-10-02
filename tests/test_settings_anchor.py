@@ -15,8 +15,6 @@
 принимает его за свой. Поэтому пути строятся ОТ якоря, а не разыскиваются.
 """
 
-from __future__ import annotations
-
 import ast
 import re
 from pathlib import Path

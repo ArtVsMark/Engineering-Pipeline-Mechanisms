@@ -12,8 +12,6 @@
 * непрочитанный ответ — третий исход, а не «все на свежей версии» (045).
 """
 
-from __future__ import annotations
-
 import base64
 import json
 from pathlib import Path

@@ -40,8 +40,6 @@
 Отличается он ОТНОШЕНИЕМ — корнем выражения пути, — а не именем переменной.
 """
 
-from __future__ import annotations
-
 import ast
 from pathlib import Path
 from typing import Final

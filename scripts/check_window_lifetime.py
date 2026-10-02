@@ -54,8 +54,6 @@
 ``1`` окно пережило предел · ``2`` не отработал: нет входа или истории.
 """
 
-from __future__ import annotations
-
 import argparse
 import sys
 from pathlib import Path

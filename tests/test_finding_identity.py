@@ -23,8 +23,6 @@
 НЕ склеивает.
 """
 
-from __future__ import annotations
-
 from typing import Final
 
 from tests.conftest import load_script

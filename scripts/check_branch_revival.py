@@ -41,8 +41,6 @@
 ``3`` не спросить: токена нет.
 """
 
-from __future__ import annotations
-
 import argparse
 import sys
 from pathlib import Path

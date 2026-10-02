@@ -26,8 +26,6 @@
 падения · ``2`` заход не отработал.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

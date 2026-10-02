@@ -8,8 +8,6 @@
 верным, а имя файла писалось по памяти, близко к смыслу.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 

@@ -1,7 +1,5 @@
 """Общее для тестов: корень репозитория и запуск скриптов как процессов."""
 
-from __future__ import annotations
-
 import ast
 import importlib.util
 import os
@@ -378,9 +376,10 @@ def load_script(name: str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     # Модуль кладётся в sys.modules ДО исполнения — ровно так же, как это делает
     # сам интерпретатор. Без этого dataclass со `slots=True` не собирается:
-    # `dataclasses` ищет модуль класса по имени, чтобы разобрать отложенные
-    # аннотации (`from __future__ import annotations`), не находит его и падает
-    # на пустом месте. Тест обязан видеть модуль так же, как прогон.
+    # `dataclasses` ищет модуль класса по имени, не находит его и падает на
+    # пустом месте. От отложенных аннотаций это не зависит — замер 02.10.2026 на
+    # 3.14: падает и с `from __future__ import annotations`, и без него (#1018).
+    # Тест обязан видеть модуль так же, как прогон.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module

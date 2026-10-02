@@ -1,7 +1,5 @@
 """Архив находок взгляда в ветке `badges`: дописывается, связывает находку с родом (#778)."""
 
-from __future__ import annotations
-
 import json
 import os
 import subprocess

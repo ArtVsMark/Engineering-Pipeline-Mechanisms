@@ -46,8 +46,6 @@
 ``3`` есть краснота, и она записана.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

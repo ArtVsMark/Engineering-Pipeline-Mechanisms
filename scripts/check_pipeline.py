@@ -26,8 +26,6 @@
 Исходы (правило 039): ``0`` совпадает · ``2`` не отработало · ``3`` находки.
 """
 
-from __future__ import annotations
-
 import argparse
 import sys
 from pathlib import Path

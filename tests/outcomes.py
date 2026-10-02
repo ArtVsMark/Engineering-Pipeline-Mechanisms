@@ -43,8 +43,6 @@
 ([093](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/093-seam-early-generalisation-late.md)).
 """
 
-from __future__ import annotations
-
 import ast
 from dataclasses import dataclass
 from pathlib import Path

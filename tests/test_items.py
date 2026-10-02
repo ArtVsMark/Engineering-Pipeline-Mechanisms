@@ -10,8 +10,6 @@
 записался». Оба состояния дают одинаковое бездействие и требуют разного.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 import pytest

@@ -31,8 +31,6 @@
 ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any, Final
