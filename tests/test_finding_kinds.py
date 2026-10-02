@@ -599,3 +599,27 @@ def test_rule_answers_read_the_section_or_refuse() -> None:
     for broken in ("{}", "[]", '{"rules": []}', '{"rules": {"1": "x"}}', '{"rules": {"1": []}}'):
         with pytest.raises(ValueError):
             module.rule_answers(broken)
+
+
+def test_every_written_catalogue_answer_is_still_true() -> None:
+    """Записанный ответ каталогу сходится с ЖИВОЙ очередью и номерами — у каждого рода.
+
+    Гейт `check_rule_birth` судит ответ только у рода, дошедшего до порога в
+    изменении (взгляд на #1044, `4e853a0`). Ответ стареет и без этого: когда
+    предложение уходит из очереди — принято или снято, — род, который на него
+    ссылается, продолжает отвечать «предложено — <слаг>», и ни одно изменение
+    этого рода не трогает. Так #1020 снял предложение 215, а род «пересказ
+    своей работы» до #1044 отвечал на него. Здесь сверяются все роды, у
+    которых ответ записан; рода без ответа это не касается — его требует порог.
+    """
+    kinds = module.read(ROOT / ".rules" / "finding-kinds.json")
+    queue = module.queued(ROOT / ".rules" / "proposals.json")
+    known = module.known_rules(ROOT / ".rules" / "bindings.json")
+    written = {name: body for name, body in kinds.items() if module.CATALOGUE in body}
+    assert written, "ни у одного рода ответ каталогу не записан — сверять нечего (075)"
+    stale = {
+        name: problem
+        for name, body in written.items()
+        if (problem := module.answer_problem(body, queue, known)) is not None
+    }
+    assert not stale, f"ответ каталогу разошёлся с очередью или номерами: {stale}"
