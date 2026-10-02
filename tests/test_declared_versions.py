@@ -27,9 +27,11 @@
 
 ГРАНИЦА НАЗВАНА, А НЕ ВЫРОВНЕНА. Ячейки матрицы и предрелизного прогона —
 НЕ дубли пола: матрица гоняет набор на своих версиях нарочно. С выпусками
-языка её сверяет `tests/test_drift.py`, а с планкой `requires-python` — пока
-ничто, это пробел с адресом #1038 (046). Предмет здесь другой —
-версия, вписанная в ОДИНОЧНЫЙ шаг, где выбора нет и подразумевается пол
+языка её сверяет `tests/test_drift.py`. С планкой `requires-python` матрицу
+сверяет `test_the_lowest_matrix_cell_is_the_floor` ниже (#1038) — по НИЖНЕЙ
+ячейке, а не по каждой: остальные ячейки — версии выше пола, и их держит
+дрейф. Предмет остальных проверок здесь — версия, вписанная в ОДИНОЧНЫЙ шаг,
+где выбора нет и подразумевается пол
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 """
 
@@ -42,11 +44,35 @@ from tests.conftest import ROOT, load_script, walk
 
 env = load_script("check_env.py")
 paths = load_script("paths.py")
+policy = load_script("pipeline_checks.py")
 
 WORKFLOWS: Final = ROOT / paths.WORKFLOWS
 
 #: Значение, взятое из матрицы, а не вписанное: `${{ matrix.python }}`.
 FROM_MATRIX: Final = "matrix."
+#: Прогон, джоб и ось матрицы, которая держит обещание `requires-python`.
+MATRIX_FLOW: Final = WORKFLOWS / "ci.yml"
+MATRIX_JOB: Final = "test-matrix"
+MATRIX_AXIS: Final = "python"
+
+
+def floor_gap(cells: list[str], floor: tuple[int, int]) -> str:
+    """Расхождение матрицы с планкой словами; пустая строка — сходится.
+
+    Нижняя ячейка обязана РАВНЯТЬСЯ планке. Ниже — набор гоняется на версии,
+    которой проект не обещает, и её отказ красил бы чужое обещание. Выше —
+    обещание планки не проверяет ни одна ячейка (002): синтаксис, убранный
+    после неё, нашёл бы сосед, а не набор.
+    """
+    if not cells:
+        return "в матрице нет ни одной ячейки — обещание не проверяет ничто (075)"
+    lowest = min(tuple(int(part) for part in cell.split(".")[:2]) for cell in cells)
+    wanted = "{}.{}".format(*floor)
+    if lowest < floor:
+        return f"нижняя ячейка {lowest[0]}.{lowest[1]} ниже планки {wanted}"
+    if lowest > floor:
+        return f"планку {wanted} не проверяет ни одна ячейка: нижняя — {lowest[0]}.{lowest[1]}"
+    return ""
 
 
 def declared_versions() -> list[tuple[str, str, str]]:
@@ -65,6 +91,36 @@ def declared_versions() -> list[tuple[str, str, str]]:
                 if said is not None:
                     found.append((path.name, str(job), str(said)))
     return found
+
+
+@pytest.mark.parametrize(
+    ("cells", "gap"),
+    [
+        (["3.14"], ""),
+        (["3.14", "3.15"], ""),
+        (["3.13", "3.14"], "ниже планки"),
+        (["3.15"], "не проверяет ни одна"),
+        (["3.15", "3.16"], "не проверяет ни одна"),
+        ([], "нет ни одной ячейки"),
+    ],
+)
+def test_the_floor_gap_tells_both_halves(cells: list[str], gap: str) -> None:
+    """Обе половины предиката: ячейка ниже планки и планка выше всех ячеек (#1038)."""
+    said = floor_gap(cells, (3, 14))
+    assert (gap in said) if gap else not said, f"{cells}: «{said}»"
+
+
+def test_the_lowest_matrix_cell_is_the_floor() -> None:
+    """Живое дерево: нижняя ячейка `test-matrix` равна планке `requires-python` (#1038).
+
+    Поднятая планка при старой матрице — или наоборот — до этого гейта не
+    краснела нигде: одиночные шаги сверялись с планкой, матрица — только с
+    выпусками языка (`tests/test_drift.py`). Разбор общий: ячейки читает
+    `pipeline_checks.matrix_axis`, планку — `check_env.python_floor` (090).
+    """
+    cells, _ = policy.matrix_axis(MATRIX_FLOW, MATRIX_JOB, MATRIX_AXIS)
+    gap = floor_gap(cells, env.python_floor(ROOT))
+    assert not gap, f"{MATRIX_FLOW.name}::{MATRIX_JOB}: {gap}"
 
 
 def test_the_subject_of_this_gate_exists() -> None:
