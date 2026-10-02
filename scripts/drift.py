@@ -735,8 +735,9 @@ def declared_versions() -> tuple[list[str], str]:
     # второе её понимание разошлось бы с первым молча (090).
     jobs = pipeline_checks.run_of(path).get("jobs") or {}
     matrix = matrix_of(jobs, "test-matrix", path)
-    # ПРЕДРЕЛИЗНАЯ ЖИВЁТ СВОИМ ПРОГОНОМ (#1018): её исход — ответ значку, и
-    # внутри `ci.yml` он не был бы виден. Читается тем же разбором.
+    # ПРЕДРЕЛИЗНАЯ ЖИВЁТ СВОИМ ПРОГОНОМ (#1018): её красное на общей ветке
+    # дежурный кладёт долгом в план, а зоны 3.15 на едином значке пока нет (#1019).
+    # Читается тем же разбором.
     upcoming = pipeline_checks.run_of(paths.PYTHON_NEXT).get("jobs") or {}
     ahead = sorted(matrix_of(upcoming, "test-next", paths.PYTHON_NEXT), key=order)[-1]
     return matrix, ahead

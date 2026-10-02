@@ -60,8 +60,10 @@ def test_the_hook_is_registered_beside_the_push_guard() -> None:
     assert any("push_guard.py" in command for command in guarded), "сторож толчка пропал"
 
 
-#: Встроенный в хук код на Python — между `python3 -c "` и `" "$1"`.
-SNIPPET: Final = re.compile(r'python3 -c "\n(.*?)\n" "\$1"', re.S)
+#: Встроенный в хук код на Python — между `<интерпретатор> -c "` и `" "$1"`.
+SNIPPET: Final = re.compile(r'(\S+) -c "\n(.*?)\n" "\$1"', re.S)
+#: Число планки в хуке: одна строка `want=<X.Y>` (взгляд на #1049).
+WANT: Final = re.compile(r"^want=(\S+)$", re.M)
 
 
 def snippet_says(mode: str) -> str:
@@ -69,7 +71,7 @@ def snippet_says(mode: str) -> str:
     found = SNIPPET.search(HOOK.read_text(encoding="utf-8"))
     assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
     done = subprocess.run(
-        [sys.executable, "-c", found[1], mode],
+        [sys.executable, "-c", found[2], mode],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -95,6 +97,42 @@ def test_the_hooks_snippet_answers_what_check_env_answers(mode: str) -> None:
     }[mode]
     assert expected, f"{mode}: check_env ответил пусто — сверять не с чем (075)"
     assert snippet_says(mode) == expected
+
+
+def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
+    """Разбор дерева в хуке идёт интерпретатором планки — тем, что исполняет набор.
+
+    Взгляд на #1036: набор исполнял разбор `sys.executable` (планка), а хук —
+    системным `python3` окна (3.11). Синтаксис выше 3.11 в `check_env` или
+    `paths` набор пропустил бы, а хук ушёл бы в предупреждение (107).
+
+    Взгляд на #1049: число планки стояло в хуке рукой в трёх местах, а тест
+    сверял одно. Теперь оно одно — `want`, — и проверяется здесь: `want`
+    равен планке, ставит и читает дерево именно `python$want`, и установка
+    стоит РАНЬШЕ разбора, а не просто где-то в файле.
+    """
+    said = HOOK.read_text(encoding="utf-8")
+    code = "\n".join(line for line in said.splitlines() if not line.lstrip().startswith("#"))
+    floor = "{}.{}".format(*load_script("check_env.py").python_floor())
+    wanted = WANT.findall(code)
+    assert wanted == [floor], f"want в хуке {wanted}, а планка {floor}"
+    assert code.count(floor) == 1, f"число планки {floor} вписано в код хука не один раз"
+    found = SNIPPET.search(code)
+    assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
+    assert found[1] == '"python$want"', f"хук читает дерево {found[1]}, а не python$want"
+    install = code.index('uv python install "$want"')
+    read = code.index("$(read_tree floor)")
+    assert install < read, "интерпретатор ставится после разбора дерева"
+    # Обе ветки хука, которые называют настоящую причину (взгляд на #1057):
+    # нет интерпретатора — до разбора, расхождение `want` с планкой — после.
+    guard = code.index('command -v "python$want" >/dev/null 2>&1 || { warn "нет python$want')
+    assert install < guard < read, "охрана «нет python$want» стоит не между установкой и разбором"
+    mismatch = code.index('if [ "$floor" != "$want" ]; then')
+    assert read < mismatch, "сверка want с планкой стоит не после чтения планки"
+    assert "поправьте want в хуке" in code[mismatch:], "расхождение want с планкой не названо"
+    head = said.splitlines()[1]
+    assert floor not in head, "шапка хука вписывает число планки рукой — разойдётся с want молча"
+    assert 'ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"' in code
 
 
 def test_the_hook_installs_local_packages_editable_and_skips_a_fit_env() -> None:
