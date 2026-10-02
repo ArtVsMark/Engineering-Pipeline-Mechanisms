@@ -82,10 +82,10 @@ jobs:
     # на изменении из форка с веткой `main` тоже несёт `head_branch: main` и
     # будил бы сборку с правом записи. Код при этом наш, с общей ветки, но
     # публикация вышла бы лишней. Поэтому `workflow_run` идёт только от
-    # прогонов общей ветки — толчка, расписания и кнопки (взгляд на #1033).
+    # прогонов общей ветки — толчка и кнопки; расписания у `ci` нет (взгляд на #1033).
     if: >-
       github.event_name != 'workflow_run'
-      || contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event.workflow_run.event)
+      || contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -211,12 +211,41 @@ jobs:
             exit 0
           fi
           echo "::warning::единый значок не собран — на ветке остаётся прежний"
-          if git fetch --quiet --depth=1 origin badges \
-            && git cat-file -e FETCH_HEAD:.github/badges/python.svg; then
-            git show FETCH_HEAD:.github/badges/python.svg > "$out"
-          else
-            echo "::warning::прежнего единого значка на ветке нет — до следующей сборки витрина покажет пустую картинку"
+          # «ВЕТКИ НЕТ» И «ВЕТКУ НЕ ПРОЧЕСТЬ» — РАЗНЫЕ ИСХОДЫ, как у архива ниже
+          # (взгляд на #1033, 195). Первое законно: значок публикуется без
+          # прежнего. Второе — сбой сети или прав: публикация без прежнего
+          # значка сняла бы его с ветки молча, поэтому прогон краснеет, как и
+          # при нечитаемом архиве. Отказ самого действия прогон по-прежнему не
+          # роняет — роняет только невозможность перенести опубликованное.
+          if ! git fetch --quiet --depth=1 origin badges; then
+            remote=0
+            git ls-remote --exit-code --heads origin badges >/dev/null || remote=$?
+            if [ "$remote" -eq 2 ]; then
+              echo "::warning::ветки badges ещё нет — прежнего значка нет, публикуется без него"
+              exit 0
+            fi
+            echo "::error::ветка badges не прочитана (ls-remote код $remote) — прежний значок не перенести, публикацию останавливаю"
+            exit 1
           fi
+          listed=0
+          found=$(git ls-tree -z --name-only FETCH_HEAD -- .github/badges/python.svg | tr -d "\0") || listed=$?
+          if [ "$listed" -ne 0 ]; then
+            echo "::error::дерево ветки badges не прочитано (ls-tree код $listed) — прежний значок не перенести, публикацию останавливаю"
+            exit 1
+          fi
+          if [ -z "$found" ]; then
+            echo "::warning::прежнего единого значка на ветке нет — до следующей сборки витрина покажет пустую картинку"
+            exit 0
+          fi
+          # Во временный файл и переносом: упавший `git show` не оставит в
+          # каталоге публикации усечённый значок (взгляд на #1033).
+          if git show FETCH_HEAD:.github/badges/python.svg > "$out.prev"; then
+            mv "$out.prev" "$out"
+            exit 0
+          fi
+          rm -f "$out.prev"
+          echo "::error::прежний значок на ветке есть, но не прочитан — публикацию останавливаю"
+          exit 1
       # АРХИВ НАХОДОК ВЗГЛЯДА (#778) — в ту же ветку и тем же адресом семьи.
       # Он ДОПИСЫВАЕТСЯ: прежний файл берётся git-ом с ветки `badges` (не API
       # содержимого: тот не отдаёт файлы больше мегабайта), и к нему
