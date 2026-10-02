@@ -136,6 +136,87 @@ def test_a_tree_without_runs_does_not_run(tmp_path: Path) -> None:
     assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN
 
 
+#: Помеченный шаг, у которого в дереве есть СВОЙ вызывающий прогон.
+MANAGED = (
+    "# ОТДАЁТСЯ НАРУЖУ: пример\n"
+    "name: step-план\non:\n  workflow_call:\njobs:\n  план:\n    steps: []\n"
+)
+#: Его вызывающий: свои события, внутренний путь к шагу.
+OWN_CALLER = (
+    "name: план\non:\n  workflow_dispatch:\n"
+    "jobs:\n  план:\n    uses: ./.github/workflows/step-план.yml\n"
+)
+#: `ci.yml`, который зовёт шаг конвейера, — его вызывающим он не считается.
+CI_CALLER = (
+    "name: ci\non: [push]\njobs:\n  пример:\n    uses: ./.github/workflows/step-пример.yml\n"
+)
+
+
+def test_a_step_with_its_own_caller_is_printed_as_that_caller(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Управляющий механизм — своим прогоном с адресом по тегу, а не джобом `ci.yml` (#993).
+
+    Джобом в `ci.yml` план шёл бы на каждом изменении и без права записи в
+    задачу. Вторая половина: шаг, который зовёт `ci.yml`, остаётся джобом.
+    """
+    root = tree(
+        tmp_path,
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
+    )
+    assert module.own_callers(root, module.steps(root)) == {
+        "план": root / ".github" / "workflows" / "план.yml"
+    }
+    kit = module.own_kit(root / ".github" / "workflows" / "план.yml", "план", "О/Р", "v2.5.0")
+    assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in kit
+    assert "workflow_dispatch" in kit, "свои события вызывающего потерялись"
+    assert module.main(["--root", str(root), "--repo", "О/Р"]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in out
+    assert "uses: ./.github/workflows/step-план.yml" not in out, "внутренний путь ушёл в заготовку"
+    assert "  пример:\n    name: пример\n" in out, "шаг конвейера перестал быть джобом ci.yml"
+    assert "  план:\n    name: план\n" not in out, "управляющий механизм напечатан джобом ci.yml"
+    checks, _, beyond = out.partition(f"{policy.BEYOND}:")
+    assert '"пример / пример"' in checks and '"план / план"' in beyond
+
+
+def test_a_step_called_by_ci_stays_a_pipeline_step(tmp_path: Path) -> None:
+    """Шаг, которого зовёт `ci.yml`, — шаг конвейера, кто бы ещё его ни звал (взгляд на #1050)."""
+    also = (
+        "name: сосед\non:\n  workflow_dispatch:\n"
+        "jobs:\n  пример:\n    uses: ./.github/workflows/step-пример.yml\n"
+    )
+    root = tree(tmp_path, **{"step-пример": MARKED, "ci": CI_CALLER, "сосед": also})
+    assert module.own_callers(root, module.steps(root)) == {}, "шаг ci.yml ушёл из его джобов"
+
+
+def test_two_own_callers_are_a_refusal(tmp_path: Path) -> None:
+    """Два своих прогона у одного шага — неоднозначность, а не выбор первого."""
+    second = OWN_CALLER.replace("name: план", "name: второй")
+    root = tree(tmp_path, **{"step-план": MANAGED, "план": OWN_CALLER, "второй": second})
+    with pytest.raises(module.NotRun, match="несколько своих прогонов"):
+        module.own_callers(root, module.steps(root))
+
+
+def test_a_call_the_kit_cannot_rewrite_is_a_refusal(tmp_path: Path) -> None:
+    """Вызов в кавычках разбор признаёт, а подмена бы пропустила — отказ, а не внутренний путь."""
+    quoted = OWN_CALLER.replace(
+        "uses: ./.github/workflows/step-план.yml", 'uses: "./.github/workflows/step-план.yml"'
+    )
+    root = tree(tmp_path, **{"step-план": MANAGED, "план": quoted})
+    flow = root / ".github" / "workflows" / "план.yml"
+    assert module.own_callers(root, module.steps(root)) == {"план": flow}
+    with pytest.raises(module.NotRun, match="не перепишет"):
+        module.own_kit(flow, "план", "О/Р", "v2.5.0")
+
+
+def test_an_unreadable_flow_does_not_turn_a_mechanism_into_a_job(tmp_path: Path) -> None:
+    """Нечитаемый прогон — третий исход, а не «своего вызывающего нет» (045)."""
+    root = tree(tmp_path, **{"step-план": MANAGED, "сломан": "jobs: [\n"})
+    with pytest.raises(module.NotRun):
+        module.own_callers(root, module.steps(root))
+
+
 def tagged_before(tmp_path: Path, *, tag: str = "v2.5.0") -> Path:
     """Дерево, где тег нарезан РАНЬШЕ помеченного файла.
 

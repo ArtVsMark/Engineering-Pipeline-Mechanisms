@@ -52,6 +52,10 @@
 [`step-window-lifetime.yml`](.github/workflows/step-window-lifetime.yml) ·
 [`step-rulebook-fresh.yml`](.github/workflows/step-rulebook-fresh.yml)
 
+Управляющие механизмы — тем же вызовом по тегу, но своим прогоном со своими
+событиями, а не джобом в `ci.yml`: [`step-work-plan.yml`](.github/workflows/step-work-plan.yml)
+(план работ). Вынос остальных ведёт #993.
+
 **Заготовку вызова собирает заход `scripts/onboard.py`**, а не вы руками:
 он печатает готовые джобы с прибивкой к последнему выпуску и заготовку ответа
 по каждой проверке. Кто уже подключён и что у него обойдено — печатает
