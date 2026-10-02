@@ -218,18 +218,49 @@ def check_name(name: str) -> str:
     return f"{name}{policy.COMPOSED}{name}"
 
 
-def answer(names: list[str], beyond: list[str] | None = None) -> str:
+def own_records(flow: Path) -> tuple[list[str], bool]:
+    """Имена записей своего прогона механизма и идёт ли он на изменении.
+
+    ИМЯ БЕРЁТСЯ У РАЗБОРА ПРОГОНА, А НЕ У ИМЕНИ ФАЙЛА ШАГА (#993). Джоб обхода
+    застрявших зовётся `stuck-prs`, а шаг — `step-stuck.yml`: имя, собранное
+    из файла, назвало бы запись, которой площадка не выдаст, и сводный гейт
+    потребителя ждал бы её вечно (045). Разбор тот же, что у ответа по
+    классам (`policy.check_names`), — второго понимания составного имени нет
+    (090).
+
+    РАЗДЕЛ ОТВЕТА ВЫВОДИТСЯ ИЗ СОБЫТИЙ, А НЕ ИЗ РОДА. Очередь — управляющий
+    механизм, но идёт и на изменении: её запись живёт на голове, и ответ по ней
+    обязан стоять в `checks`, а не в `beyond_the_change` — там его разбор
+    потребителя отверг бы как ответ о проверке, которой вне изменения нет.
+    """
+    try:
+        said = policy.run_of(flow)
+        names = [
+            one
+            for job_id, body in (said.get("jobs") or {}).items()
+            for one in policy.check_names(str(job_id), body or {}, flow.parent)
+        ]
+    except policy.BadPolicy as exc:
+        raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
+    return names, policy.ON_CHANGE in policy.triggers_of(said)
+
+
+def answer(
+    names: list[str], beyond: list[str] | None = None, *, on_change: list[str] | None = None
+) -> str:
     """Заготовка ответа потребителя: по строке на проверку, класс — не решён.
 
     `unreviewed` здесь не заглушка, а объявленная очередь разбора: молча
     обязательной проверка не становится, и молча совещательной тоже.
-    Управляющие механизмы идут вне изменения — их ответ в разделе
-    `beyond_the_change`, а не `checks`.
+    `names` — шаги конвейера, их имя составное из имени шага. `beyond` и
+    `on_change` — уже готовые имена записей своих прогонов механизмов
+    (`own_records`): вне изменения и на нём.
     """
-    rows = "\n".join(f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in names)
-    said = f"checks:\n{rows}\n"
+    rows = [f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in names]
+    rows += [f'  "{one}": {policy.UNREVIEWED}' for one in on_change or []]
+    said = "checks:\n" + "\n".join(rows) + "\n"
     if beyond:
-        more = "\n".join(f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in beyond)
+        more = "\n".join(f'  "{one}": {policy.UNREVIEWED}' for one in beyond)
         said += f"{policy.BEYOND}:\n{more}\n"
     return said
 
@@ -248,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         names = steps(args.root)
         own = own_callers(args.root, names)
+        records = {one: own_records(flow) for one, flow in own.items()}
         pin = pin_of(args.root)
     except (NotRun, check_shipped.NotRun) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
@@ -290,7 +322,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# 2. В свой `{paths.PIPELINE}` — ответ по каждой проверке.")
     print("#    Класс — СВОЙ выбор: `required`, `advisory` или `off` с причиной.")
     print(f"#    Здесь все выходят «{policy.UNREVIEWED}»: это очередь разбора, а не умолчание.\n")
-    print(answer(pipeline, sorted(own)))
+    beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
+    on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
+    print(answer(pipeline, beyond, on_change=on_change))
     print("# 3. В защиту ветки — ОДНО имя: имя своего сводного гейта.")
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
     print("#    в матрицу, и защита начинает ждать имя, которого никто не выдаёт (168).")
