@@ -52,7 +52,7 @@
 - name: "area/merge"
   color: "5319E7"
   description: "Зона: очередь и слияние (решение #3)"
-  paths: ["scripts/automerge.py", ".github/workflows/automerge.yml"]
+  paths: ["scripts/automerge.py", ".github/workflows/automerge.yml", ".github/workflows/step-automerge.yml"]
 # У зоны ниже путей нет: её механизмов не существует до шагов 9-11. До тех пор
 # зона ставится руками при разборе, и человек — её единственный читатель.
 - name: "area/health"

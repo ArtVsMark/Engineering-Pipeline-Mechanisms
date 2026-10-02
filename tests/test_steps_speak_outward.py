@@ -33,7 +33,8 @@ import pytest
 from tests.conftest import ROOT, walk
 
 #: Прогоны, чей вывод — разбор решения, а не отметка «прошло».
-SPEAKS_OUT: Final = ("automerge.yml", "ci-complete.yml")
+#: Очередь — её общим шагом: тело переехало туда из `automerge.yml` (#993).
+SPEAKS_OUT: Final = ("step-automerge.yml", "ci-complete.yml")
 
 SUMMARY: Final = "GITHUB_STEP_SUMMARY"
 

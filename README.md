@@ -54,7 +54,13 @@
 
 Управляющие механизмы — тем же вызовом по тегу, но своим прогоном со своими
 событиями, а не джобом в `ci.yml`: [`step-work-plan.yml`](.github/workflows/step-work-plan.yml)
-(план работ). Вынос остальных ведёт #993.
+(план работ) · [`step-automerge.yml`](.github/workflows/step-automerge.yml)
+(очередь и слияние) · [`step-main-red.yml`](.github/workflows/step-main-red.yml)
+(дежурный по общей ветке) · [`step-stuck.yml`](.github/workflows/step-stuck.yml)
+(застрявшее) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик).
+Очереди, обходу и оклику токен владельца `MERGE_QUEUE_TOKEN` передаётся
+вызовом явно, по имени: секретов вызывающего общий шаг не видит. Вынос
+остальных ведёт #993.
 
 **Заготовку вызова собирает заход `scripts/onboard.py`**, а не вы руками:
 он печатает готовые джобы с прибивкой к последнему выпуску и заготовку ответа
