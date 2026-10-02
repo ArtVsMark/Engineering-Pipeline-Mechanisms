@@ -2,7 +2,7 @@
 
 > **Читатель:** посетитель — что это такое и стоит ли брать.
 
-[![Состояние: Python и версия, ОС linux / windows / mac, покрытие, выпуск, версия](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![правил каталога держится машиной](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/rules.json&cacheSeconds=300)](.rules/bindings.json) [![доля машинного соблюдения семьи, закрытая общими механизмами](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/family.json&cacheSeconds=300)](docs/decisions/016-family-completeness-outranks-the-release-number.md) [![запускаемых механизмов гоняется процессом](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/scripts.json&cacheSeconds=300)](scripts/)
+[![Состояние: Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![правил каталога держится машиной](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/rules.json&cacheSeconds=300)](.rules/bindings.json) [![доля машинного соблюдения семьи, закрытая общими механизмами](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/family.json&cacheSeconds=300)](docs/decisions/016-family-completeness-outranks-the-release-number.md) [![запускаемых механизмов гоняется процессом](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/scripts.json&cacheSeconds=300)](scripts/)
 
 **Механизмы конвейера: скелет один для всех проектов, наполнение своё.**
 Открытие изменения, гейты, очередь и слияние, здоровье общей ветки, выпуск —
@@ -87,8 +87,10 @@
 после написания кода
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
 
-Первый значок — единый, общий для всей семьи: «Python», версия и ОС окрашены
-исходом прогона `ci` на `main`, за ними покрытие, выпуск и версия.
+Первый значок — единый, общий для всей семьи: «Python», его версия и ОС
+окрашены исходом прогона `ci` на `main`, за ними покрытие, выпуск и версия
+проекта. Выпуск показан двумя старшими числами и серым: на PyPI механизмы не
+публикуются, полный тег — на странице выпусков.
 Предрелизный прогон `python-next` значок не красит: каталог пока не читает
 его версию из матрицы (#1019). Зелёный — пройдено, красный — нет, серый — не
 проверялось: windows и mac у проекта серые, потому что их не гоняют. Рисует
