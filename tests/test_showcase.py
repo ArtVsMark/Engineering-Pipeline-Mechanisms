@@ -324,3 +324,34 @@ def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
     assert inputs == set(facts.ZONE_INPUTS), (
         f"зоны питаются {sorted(inputs)}, а объявлены {sorted(facts.ZONE_INPUTS)}"
     )
+
+
+#: События исходного прогона, от которых `badges.yml` идёт на `workflow_run`:
+#: список в `fromJSON('[...]')` условия джоба.
+WAKE_EVENTS: Final = re.compile(r"fromJSON\('(\[[^']*\])'\)")
+
+
+def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
+    """Значок красит тот прогон, исходом которого сборка и просыпается.
+
+    Шаг называет файл прогона (`ci-workflow`), а событие `workflow_run` —
+    его ИМЯ (`name:`). Это два написания одного предмета, и переименование
+    одного из них молча развело бы их: значок красился бы чужим исходом, а
+    сборка перестала бы просыпаться (взгляд на #1033). События фильтра
+    обязаны быть событиями этого прогона: событие, которого у него нет, —
+    мёртвое значение, читающееся как живой источник (взгляд на #1033).
+    """
+    flow = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
+    named = str((unified_step().get("with") or {}).get("ci-workflow"))
+    source = ROOT / ".github" / "workflows" / named
+    assert source.is_file(), f"шаг значка читает {named}, а такого прогона нет"
+    read = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+    woken = (flow.get(True) or {}).get("workflow_run") or {}
+    assert read.get("name") in (woken.get("workflows") or []), (
+        f"значок читает «{read.get('name')}», а сборку будит {woken.get('workflows')}"
+    )
+    said = WAKE_EVENTS.search(str(flow["jobs"]["badges"].get("if") or ""))
+    assert said, "у джоба badges нет фильтра событий workflow_run (075)"
+    events = set(json.loads(said.group(1)))
+    dead = sorted(events - set(read.get(True) or {}))
+    assert not dead, f"фильтр называет {dead}, а у {named} таких событий нет"
