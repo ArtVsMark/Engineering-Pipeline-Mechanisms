@@ -60,8 +60,8 @@ def test_the_hook_is_registered_beside_the_push_guard() -> None:
     assert any("push_guard.py" in command for command in guarded), "сторож толчка пропал"
 
 
-#: Встроенный в хук код на Python — между `python3 -c "` и `" "$1"`.
-SNIPPET: Final = re.compile(r'python3 -c "\n(.*?)\n" "\$1"', re.S)
+#: Встроенный в хук код на Python — между `<интерпретатор> -c "` и `" "$1"`.
+SNIPPET: Final = re.compile(r'(python[0-9.]*) -c "\n(.*?)\n" "\$1"', re.S)
 
 
 def snippet_says(mode: str) -> str:
@@ -69,7 +69,7 @@ def snippet_says(mode: str) -> str:
     found = SNIPPET.search(HOOK.read_text(encoding="utf-8"))
     assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
     done = subprocess.run(
-        [sys.executable, "-c", found[1], mode],
+        [sys.executable, "-c", found[2], mode],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -95,6 +95,25 @@ def test_the_hooks_snippet_answers_what_check_env_answers(mode: str) -> None:
     }[mode]
     assert expected, f"{mode}: check_env ответил пусто — сверять не с чем (075)"
     assert snippet_says(mode) == expected
+
+
+def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
+    """Разбор дерева в хуке идёт интерпретатором планки — тем, что исполняет набор.
+
+    Взгляд на #1036: набор исполнял разбор `sys.executable` (планка), а хук —
+    системным `python3` окна (3.11). Синтаксис выше 3.11 в `check_env` или
+    `paths` набор пропустил бы, а хук ушёл бы в предупреждение (107). Теперь
+    интерпретатор разбора — `python<планка>`, и хук сам ставит его до разбора.
+    """
+    found = SNIPPET.search(HOOK.read_text(encoding="utf-8"))
+    assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
+    floor = "{}.{}".format(*load_script("check_env.py").python_floor())
+    assert found[1] == f"python{floor}", (
+        f"хук читает дерево {found[1]}, а код дерева пишется под {floor}"
+    )
+    assert f"command -v python{floor}" in HOOK.read_text(encoding="utf-8"), (
+        f"хук не ставит python{floor} до разбора дерева"
+    )
 
 
 def test_the_hook_installs_local_packages_editable_and_skips_a_fit_env() -> None:
