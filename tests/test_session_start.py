@@ -83,8 +83,7 @@ def hook_interpreter() -> str:
     if sys.version_info[:2] == floor:
         return sys.executable
     pytest.skip(
-        "нет python{}.{}: разбор хука исполняет прогон на планке (ci.yml), "
-        "а не этот".format(*floor)
+        "нет python{}.{}: разбор хука исполняет прогон на планке (ci.yml), а не этот".format(*floor)
     )
 
 
