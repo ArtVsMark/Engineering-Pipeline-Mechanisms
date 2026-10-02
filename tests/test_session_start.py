@@ -121,7 +121,17 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
     assert found[1] == '"python$want"', f"хук читает дерево {found[1]}, а не python$want"
     install = code.index('uv python install "$want"')
-    assert install < code.index("$(read_tree floor)"), "интерпретатор ставится после разбора дерева"
+    read = code.index("$(read_tree floor)")
+    assert install < read, "интерпретатор ставится после разбора дерева"
+    # Обе ветки хука, которые называют настоящую причину (взгляд на #1057):
+    # нет интерпретатора — до разбора, расхождение `want` с планкой — после.
+    guard = code.index('command -v "python$want" >/dev/null 2>&1 || { warn "нет python$want')
+    assert install < guard < read, "охрана «нет python$want» стоит не между установкой и разбором"
+    mismatch = code.index('if [ "$floor" != "$want" ]; then')
+    assert read < mismatch, "сверка want с планкой стоит не после чтения планки"
+    assert "поправьте want в хуке" in code[mismatch:], "расхождение want с планкой не названо"
+    head = said.splitlines()[1]
+    assert floor not in head, "шапка хука вписывает число планки рукой — разойдётся с want молча"
     assert 'ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"' in code
 
 
