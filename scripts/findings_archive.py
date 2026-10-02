@@ -62,7 +62,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,6 +72,7 @@ import finding_chains
 import finding_kinds
 import findings as registry
 import ghrest
+import gitcall
 import paths
 import review_findings
 
@@ -445,14 +445,11 @@ TRUNK_REF: Final = f"origin/{paths.TRUNK}"
 
 def git_log(where: Path | None = None, ref: str = TRUNK_REF) -> str:
     """Темы и тела коммитов `ref` от старых к новым — вход архива; по умолчанию — общая ветка."""
-    return subprocess.run(
-        ["git", "log", "--reverse", "--format=%s%x1f%B%x00", ref],
-        cwd=where,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    ).stdout
+    return gitcall.output(
+        ["log", "--reverse", "--format=%s%x1f%B%x00", ref],
+        NotRun,
+        cwd=str(where) if where else None,
+    )
 
 
 def build(
@@ -542,7 +539,6 @@ def main(argv: list[str] | None = None) -> int:
         NotRun,
         ghrest.TransportError,
         finding_kinds.NotRun,
-        subprocess.CalledProcessError,
     ) as exc:
         print(f"архив не собран: {exc}", file=sys.stderr)
         return EXIT_BROKEN
