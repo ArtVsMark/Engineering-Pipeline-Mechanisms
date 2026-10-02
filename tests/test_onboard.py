@@ -180,6 +180,31 @@ def test_a_step_with_its_own_caller_is_printed_as_that_caller(
     assert '"пример / пример"' in checks and '"план / план"' in beyond
 
 
+def test_the_answer_of_a_mechanism_follows_its_flow_not_its_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Имя записи — по джобам прогона, раздел — по его событиям (#993).
+
+    Обход застрявших зовётся `stuck-prs` при шаге `step-stuck.yml`, и имя из
+    файла назвало бы запись, которой площадка не выдаст. Очередь идёт и на
+    изменении: ответ по ней в `checks`, а не вне изменения.
+    """
+    step = MANAGED.replace("step-план", "step-обход").replace("  план:", "  обход-всех:")
+    flow = (
+        "name: обход\non:\n  pull_request:\n"
+        "jobs:\n  обход-всех:\n    uses: ./.github/workflows/step-обход.yml\n"
+    )
+    root = tree(tmp_path, **{"step-обход": step, "обход": flow, "ci": CI_CALLER})
+    assert module.own_records(root / ".github" / "workflows" / "обход.yml") == (
+        ["обход-всех / обход-всех"],
+        True,
+    )
+    assert module.main(["--root", str(root), "--repo", "О/Р"]) == module.EXIT_OK
+    checks, _, beyond = capsys.readouterr().out.partition(f"{policy.BEYOND}:")
+    assert '"обход-всех / обход-всех"' in checks, "запись механизма на изменении ушла не туда"
+    assert '"обход / обход"' not in checks + beyond, "имя записи собрано из имени файла"
+
+
 def test_a_step_called_by_ci_stays_a_pipeline_step(tmp_path: Path) -> None:
     """Шаг, которого зовёт `ci.yml`, — шаг конвейера, кто бы ещё его ни звал (взгляд на #1050)."""
     also = (
