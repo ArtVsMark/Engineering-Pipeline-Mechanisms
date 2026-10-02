@@ -289,7 +289,6 @@ STILL_COPIED: Final = frozenset(
         "schedules-seen.yml",
         "stuck.yml",
         "task-items.yml",
-        "work-plan.yml",
     }
 )
 
