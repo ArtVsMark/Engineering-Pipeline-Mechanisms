@@ -168,9 +168,7 @@ def drawn() -> set[str]:
     """
     names = set(facts.BADGES)
     assert len(names) >= 5, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
-    # Единый значок рисует шаг `badges.yml`, а не сборка; имя у них одно —
-    # `build_facts.UNIFIED`, и со шагом его сверяет проверка ниже (#1019).
-    return names | {facts.UNIFIED}
+    return names
 
 
 def test_every_badge_the_build_draws_is_named_by_the_showcase() -> None:
@@ -188,10 +186,6 @@ def test_every_badge_the_build_draws_is_named_by_the_showcase() -> None:
     """
     named = {Path(str(q["badge"])).name for q in answers() if q.get("badge")}
     named |= {Path(str(one["badge"])).name for one in own()}
-    # Входы единого значка названы его зонами: вопрос отвечает зоной, а файл
-    # её питает. Без единого значка в ответах они ничьи — и молчат честно.
-    if facts.UNIFIED in named:
-        named |= set(facts.ZONE_INPUTS)
     silent = sorted(drawn() - named)
     assert not silent, (
         f"сборка рисует {silent}, и витрина о них молчит: назвать вопросом набора "
@@ -269,9 +263,10 @@ def test_every_badge_declares_what_moves_it() -> None:
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     said = moves()
+    assert facts.BADGES, "инвентарь значков пуст — предмет проверки не найден (075)"
     mute = [
         f"{name}: {'нет записи' if name not in said else 'событие не названо'}"
-        for name in sorted(drawn())
+        for name in sorted(facts.BADGES)
         if len(said.get(name, "").strip()) < REASON_AT_LEAST
     ]
     assert not mute, (
@@ -288,7 +283,7 @@ def test_no_declaration_outlives_its_badge() -> None:
     обещание показать число, которого никто не рисует
     ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
     """
-    orphan = sorted(set(moves()) - drawn())
+    orphan = sorted(set(moves()) - set(facts.BADGES))
     assert not orphan, (
         f"объявлено, что сдвинет значок, которого сборка не рисует: {', '.join(orphan)}"
     )
@@ -316,7 +311,7 @@ def unified_step() -> dict[str, Any]:
 def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
     """Шаг рисует ТОТ значок и из ТЕХ файлов, что объявлены рядом с инвентарём.
 
-    Гейты витрины судят имена `build_facts.UNIFIED` и `ZONE_INPUTS`, а рисует
+    Имена `build_facts.UNIFIED` и `ZONE_INPUTS` объявлены у сборки, а рисует
     значок шаг прогона: без сверки объявление и шаг разошлись бы молча — витрина
     ждала бы одно имя, а прогон клал другое (022). Сравниваются имена файлов:
     каталог публикации у шага свой, и путь к нему — дело прогона.
