@@ -6,8 +6,6 @@
 ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
 """
 
-from __future__ import annotations
-
 import pathlib
 import subprocess
 from pathlib import Path

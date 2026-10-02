@@ -22,8 +22,6 @@
 предмета не является, и её копия заносится в `SIGNED` с причиной (071).
 """
 
-from __future__ import annotations
-
 import ast
 from collections import defaultdict
 from pathlib import Path

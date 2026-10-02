@@ -5,8 +5,6 @@
 ответа с деревом, — и оба проверяются подделанными расхождениями.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest

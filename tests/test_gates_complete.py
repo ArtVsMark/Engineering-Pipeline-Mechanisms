@@ -1,7 +1,5 @@
 """Вердикт сводного гейта проверяется тем, что он обязан отвергнуть."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import pytest

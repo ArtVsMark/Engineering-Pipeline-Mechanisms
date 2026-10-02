@@ -18,8 +18,6 @@
 ([057](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/057-unmechanizable-rules-are-named-explicitly.md)).
 """
 
-from __future__ import annotations
-
 from typing import Any, Final
 
 import pytest

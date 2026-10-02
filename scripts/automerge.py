@@ -56,8 +56,6 @@
 отработал · ``3`` не настроено — нет токена владельца.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import sys

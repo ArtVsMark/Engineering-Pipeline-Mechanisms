@@ -30,8 +30,6 @@
 ``2`` заход не отработал · ``3`` токен владельца не задан — обход был бы слепым.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re

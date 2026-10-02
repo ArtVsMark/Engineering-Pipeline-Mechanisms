@@ -39,8 +39,6 @@
 не существует — механизм либо прочитал прогоны и свёл день, либо не смог (154).
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

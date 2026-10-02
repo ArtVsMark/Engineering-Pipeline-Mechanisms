@@ -13,8 +13,6 @@
 * оба проверены отказом: сказано, при каких данных они НЕ срабатывают (140).
 """
 
-from __future__ import annotations
-
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path

@@ -28,8 +28,6 @@
 `sub_issues_summary` прямо в ответ о задаче.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from typing import Any, Final

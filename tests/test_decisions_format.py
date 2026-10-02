@@ -6,8 +6,6 @@
 задачу, и нашёл это внешний взгляд, а не сборка.
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 

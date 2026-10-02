@@ -26,8 +26,6 @@
 ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 from typing import Final

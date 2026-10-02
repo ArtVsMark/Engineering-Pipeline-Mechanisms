@@ -13,8 +13,6 @@
 * класс проверки заход не решает: это свойство потребителя (174).
 """
 
-from __future__ import annotations
-
 import subprocess
 from pathlib import Path
 

@@ -7,8 +7,6 @@
 случаем, потому что выпуск делают редко и увидеть их надо сразу все.
 """
 
-from __future__ import annotations
-
 import subprocess
 from collections.abc import Callable
 from pathlib import Path

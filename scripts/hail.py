@@ -53,8 +53,6 @@
 ``3`` не настроено — нет токена.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re

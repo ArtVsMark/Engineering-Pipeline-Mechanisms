@@ -16,8 +16,6 @@
 * отсутствие носителей вовсе — третий исход, а не «чисто» (075).
 """
 
-from __future__ import annotations
-
 import subprocess
 from pathlib import Path
 

@@ -23,8 +23,6 @@
 прибивании зависимостей, а не о своей же заготовке.
 """
 
-from __future__ import annotations
-
 import re
 from collections import defaultdict
 from pathlib import Path

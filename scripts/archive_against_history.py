@@ -42,8 +42,6 @@
 ``3`` новое расхождение есть и названо.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import re

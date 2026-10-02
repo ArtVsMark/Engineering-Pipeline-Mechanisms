@@ -17,8 +17,6 @@
 правки тела задачи, и отметка уехала бы на соседний пункт молча.
 """
 
-from __future__ import annotations
-
 import re
 import sys
 from collections.abc import Callable

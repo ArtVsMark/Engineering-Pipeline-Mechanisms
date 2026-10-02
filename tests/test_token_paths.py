@@ -10,8 +10,6 @@
 ровно так, как ответила бы площадка на негодный токен.
 """
 
-from __future__ import annotations
-
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer

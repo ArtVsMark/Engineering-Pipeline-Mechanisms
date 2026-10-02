@@ -18,8 +18,6 @@
 ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
 """
 
-from __future__ import annotations
-
 from types import ModuleType
 from typing import Final
 

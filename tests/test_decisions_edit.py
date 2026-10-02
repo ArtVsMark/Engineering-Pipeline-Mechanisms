@@ -6,8 +6,6 @@
 значило бы проверять не то, что пойдёт в прогоне.
 """
 
-from __future__ import annotations
-
 import subprocess
 from pathlib import Path
 

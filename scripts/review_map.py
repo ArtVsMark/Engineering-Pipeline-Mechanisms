@@ -28,8 +28,6 @@
 Исходы (правило 039): ``0`` карта собрана · ``2`` шаг не отработал.
 """
 
-from __future__ import annotations
-
 import argparse
 import fnmatch
 import json

@@ -5,8 +5,6 @@
 прогоняется каждый объявленный исход (145), включая третий — «не отработал».
 """
 
-from __future__ import annotations
-
 import json
 import os
 import subprocess

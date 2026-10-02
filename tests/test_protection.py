@@ -14,8 +14,6 @@
 такой ответ отправил бы человека чинить не то (045, 154).
 """
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

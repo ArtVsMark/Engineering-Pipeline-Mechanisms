@@ -17,8 +17,6 @@
 принял бы его за свой — ровно тот отказ, из-за которого правило записано.
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 from typing import Final

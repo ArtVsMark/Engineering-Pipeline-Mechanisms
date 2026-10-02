@@ -47,8 +47,6 @@ claude-opus-5-5` во всех пяти вызовах `anthropics/claude-code-a
 
 # Модуль держится одной стандартной библиотекой: его зовут и там, где пакет
 # транспорта не ставится (ответ по обращению).
-from __future__ import annotations
-
 import argparse
 import json
 import sys

@@ -19,8 +19,6 @@
 «вышло за корень и дальше идёт известный раздел площадки».
 """
 
-from __future__ import annotations
-
 import re
 import subprocess
 from pathlib import Path

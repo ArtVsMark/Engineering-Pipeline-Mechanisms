@@ -5,8 +5,6 @@
 проверяется, что собранное нами тело этого не повторяет.
 """
 
-from __future__ import annotations
-
 import subprocess
 from pathlib import Path
 

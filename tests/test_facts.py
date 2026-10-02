@@ -5,8 +5,6 @@
 протухает молча). Проверяется и то, и другое.
 """
 
-from __future__ import annotations
-
 import ast
 import json
 from pathlib import Path

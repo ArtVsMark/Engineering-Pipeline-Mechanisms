@@ -19,8 +19,6 @@
 Незаписанный отказ возвращается следующим предложением — и спорят о нём заново.
 """
 
-from __future__ import annotations
-
 import ast
 import collections
 from pathlib import Path

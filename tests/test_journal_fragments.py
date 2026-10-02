@@ -17,8 +17,6 @@
 ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Final

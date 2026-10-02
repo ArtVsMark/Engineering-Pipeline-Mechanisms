@@ -8,8 +8,6 @@
 * источники независимы, и неспрошенный источник не выглядит как «всё сошлось».
 """
 
-from __future__ import annotations
-
 import ast
 import inspect
 import json

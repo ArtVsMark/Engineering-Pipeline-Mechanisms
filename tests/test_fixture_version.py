@@ -9,8 +9,6 @@
 заведомо чужой номер, а держит это проверка ниже.
 """
 
-from __future__ import annotations
-
 import ast
 from pathlib import Path
 

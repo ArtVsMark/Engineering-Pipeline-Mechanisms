@@ -59,8 +59,6 @@
 счёт · ``2`` шаг не отработал · ``3`` осечка есть, и она записана.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

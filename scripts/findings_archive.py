@@ -56,8 +56,6 @@
 репозитория, площадка не ответила, прежний архив не разбирается).
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

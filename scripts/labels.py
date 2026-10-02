@@ -11,8 +11,6 @@
 что и пять копий транспорта, только на данных: один файл, три понимания.
 """
 
-from __future__ import annotations
-
 import fnmatch
 import re
 from dataclasses import dataclass

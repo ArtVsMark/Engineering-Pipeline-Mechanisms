@@ -30,8 +30,6 @@
 Исходы (правило 039): ``0`` тело собрано · ``2`` собрать не из чего.
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import sys

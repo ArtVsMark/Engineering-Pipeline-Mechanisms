@@ -26,8 +26,6 @@
 Исходы (правило 039): ``0`` ответ записан · ``2`` шаг не отработал.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import sys

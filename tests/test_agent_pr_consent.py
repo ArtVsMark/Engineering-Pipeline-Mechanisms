@@ -12,8 +12,6 @@
 ([147](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/147-a-cancelling-switch-needs-an-addressee.md)).
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 import pytest

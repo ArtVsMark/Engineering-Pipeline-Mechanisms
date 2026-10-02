@@ -7,8 +7,6 @@
 разошёлся от 131 строки до 2436.
 """
 
-from __future__ import annotations
-
 import ast
 import email.message
 import io

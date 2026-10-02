@@ -35,8 +35,6 @@
 абзацы: иначе канон, названный в одном, прикрыл бы пересказ в соседнем.
 """
 
-from __future__ import annotations
-
 import ast
 import io
 import re

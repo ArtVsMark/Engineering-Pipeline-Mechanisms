@@ -25,8 +25,6 @@ REST.
 аннотации; здесь только те, чей вывод разбирают задним числом.
 """
 
-from __future__ import annotations
-
 import re
 from typing import Final
 

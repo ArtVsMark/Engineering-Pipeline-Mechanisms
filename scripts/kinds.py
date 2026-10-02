@@ -21,8 +21,6 @@
 трёх из четырёх.
 """
 
-from __future__ import annotations
-
 from typing import Final
 
 #: Виды, которые считаются МЕХАНИЗМОМ. Документ сюда не входит намеренно: его

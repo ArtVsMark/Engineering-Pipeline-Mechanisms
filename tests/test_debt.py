@@ -6,8 +6,6 @@
 запасной путь (045).
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path

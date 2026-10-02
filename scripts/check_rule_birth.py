@@ -44,8 +44,6 @@
 дошедшего до порога · ``1`` запись или род молчит · ``2`` гейт не отработал.
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import subprocess

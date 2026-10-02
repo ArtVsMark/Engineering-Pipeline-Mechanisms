@@ -14,8 +14,6 @@
 держится: полезности самого пояснения — это суждение о смысле (057).
 """
 
-from __future__ import annotations
-
 import re
 from typing import Final
 

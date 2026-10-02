@@ -41,8 +41,6 @@
 ``3`` изменение не тронуло файлов: считать нечего, и это сказано.
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import sys

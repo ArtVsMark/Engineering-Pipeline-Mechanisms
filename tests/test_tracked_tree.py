@@ -17,8 +17,6 @@
 и `559cfa0` на #367, и оба раза механизм ничего не сказал.
 """
 
-from __future__ import annotations
-
 import subprocess
 from fnmatch import fnmatch
 from typing import Final

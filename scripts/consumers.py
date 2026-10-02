@@ -31,8 +31,6 @@
 ``3`` часть ответов не прочитана — сказано, а не выдано за «все на свежей».
 """
 
-from __future__ import annotations
-
 import argparse
 import base64
 import json

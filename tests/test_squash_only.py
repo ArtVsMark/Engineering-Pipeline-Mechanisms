@@ -17,8 +17,6 @@ request #N» означает, что уплотнения не было. Отм
 первым молча (022).
 """
 
-from __future__ import annotations
-
 import re
 import subprocess
 from typing import Final
