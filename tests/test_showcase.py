@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+import yaml
 
 from tests.conftest import ROOT, badges_shown, load_script
 
@@ -285,4 +286,43 @@ def test_no_declaration_outlives_its_badge() -> None:
     orphan = sorted(set(moves()) - set(facts.BADGES))
     assert not orphan, (
         f"объявлено, что сдвинет значок, которого сборка не рисует: {', '.join(orphan)}"
+    )
+
+
+#: Действие каталога, которое рисует единый значок (#1019).
+UNIFIED_ACTION: Final = "/.github/actions/python-badge@"
+BADGES_FLOW: Final = ROOT / ".github" / "workflows" / "badges.yml"
+
+
+def unified_step() -> dict[str, Any]:
+    """Шаг `badges.yml`, который зовёт действие единого значка, — ровно один."""
+    document = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
+    found = [
+        step
+        for job in (document.get("jobs") or {}).values()
+        for step in (job or {}).get("steps") or []
+        if UNIFIED_ACTION in str((step or {}).get("uses") or "")
+    ]
+    assert len(found) == 1, f"шагов единого значка в badges.yml не один, а {len(found)} (075)"
+    step: dict[str, Any] = found[0]
+    return step
+
+
+def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
+    """Шаг рисует ТОТ значок и из ТЕХ файлов, что объявлены рядом с инвентарём.
+
+    Имена `build_facts.UNIFIED` и `ZONE_INPUTS` объявлены у сборки, а рисует
+    значок шаг прогона: без сверки объявление и шаг разошлись бы молча — витрина
+    ждала бы одно имя, а прогон клал другое (022). Сравниваются имена файлов:
+    каталог публикации у шага свой, и путь к нему — дело прогона.
+    """
+    said = unified_step().get("with") or {}
+    assert Path(str(said.get("out") or "")).name == facts.UNIFIED, (
+        f"шаг кладёт {said.get('out')!r}, а витрина ждёт {facts.UNIFIED}"
+    )
+    inputs = {
+        Path(str(said[key])).name for key in ("coverage-json", "version-json") if said.get(key)
+    }
+    assert inputs == set(facts.ZONE_INPUTS), (
+        f"зоны питаются {sorted(inputs)}, а объявлены {sorted(facts.ZONE_INPUTS)}"
     )

@@ -40,6 +40,6 @@ jobs:
       # делать этого, а не на неизменность. Обещание — в правилах выпуска
       # каталога: номера не переиспользуются, отправленный тег не переставляют
       # (https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/docs/VERSIONING.md).
-      - uses: ArtVsMark/Engineering-Incidents-Playbook@v1.4.0
+      - uses: ArtVsMark/Engineering-Incidents-Playbook@v1.6.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
