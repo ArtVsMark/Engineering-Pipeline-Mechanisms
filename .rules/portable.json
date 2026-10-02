@@ -183,6 +183,9 @@
     ".github/workflows/step-window-lifetime.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-work-plan.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/stuck.yml": {
       "answer": "as-is"
     },
@@ -190,7 +193,10 @@
       "answer": "as-is"
     },
     ".github/workflows/work-plan.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/work-plan.yml"
+      ]
     },
     ".rules/bindings.json": {
       "answer": "configured",
@@ -485,10 +491,10 @@
     "scripts/late_look.py": {
       "answer": "as-is"
     },
-    "scripts/look_waits.py": {
+    "scripts/look_mode.py": {
       "answer": "as-is"
     },
-    "scripts/look_mode.py": {
+    "scripts/look_waits.py": {
       "answer": "as-is"
     },
     "scripts/main_red.py": {

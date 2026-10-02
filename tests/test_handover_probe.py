@@ -30,6 +30,16 @@ PREFIX = "probe-"
 NEEDS_A_CHANGE = ("journal", "pr-meta", "window-lifetime", "rulebook-fresh")
 
 
+def managed() -> set[str]:
+    """Управляющие механизмы: шаги со своим вызывающим прогоном (#993).
+
+    Проба их не зовёт по второй причине — они пишут живые задачи, а права у
+    пробы только на чтение. Состав выводится тем же разбором, что заготовка
+    (`onboard.own_callers`), а не списком (022).
+    """
+    return set(onboard.own_callers(ROOT, onboard.steps(ROOT)))
+
+
 def probe() -> dict[Any, Any]:
     """Разобранная проба: предмет берётся из дерева, а не из памяти."""
     said: dict[Any, Any] = yaml.safe_load(PROBE.read_text(encoding="utf-8"))
@@ -44,7 +54,7 @@ def test_the_probe_calls_every_step_it_can() -> None:
     Сосед у сужения назван списком выше, а не оставлен читателю (195).
     """
     called = {name.removeprefix(PREFIX) for name in probe()["jobs"]}
-    want = set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE)
+    want = set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE) - managed()
     assert called == want, "проба зовёт не тот состав, что отдаётся наружу"
 
 
@@ -55,7 +65,8 @@ def test_the_gap_of_the_probe_is_named_not_silent() -> None:
     набора: умолчание о четырёх шагах снаружи неотличимо от их проверки (046).
     """
     said = PROBE.read_text(encoding="utf-8")
-    for one in NEEDS_A_CHANGE:
+    assert managed(), "управляющих механизмов нет — сужение пробы держит пустоту (075)"
+    for one in (*NEEDS_A_CHANGE, *(f"step-{name}" for name in sorted(managed()))):
         assert one in said, f"пробел про «{one}» в пробе не назван"
     # Регистр не судится: шапки механизмов пишут признак прописными, и
     # требовать строчных значило бы проверять стиль, а не наличие.
@@ -87,7 +98,7 @@ def test_the_probe_says_what_the_kit_prints() -> None:
     прибивки — предмет дрейфа (`probe_behind_release`), а здесь сверяется
     форма адреса при той прибивке, что стоит.
     """
-    for step in set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE):
+    for step in set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE) - managed():
         said = str(probe()["jobs"][f"{PREFIX}{step}"]["uses"])
         pin = said.rsplit("@", 1)[1]
         want = onboard.caller(step, family_uptake.OURS, pin).splitlines()
