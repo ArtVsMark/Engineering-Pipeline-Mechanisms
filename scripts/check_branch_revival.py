@@ -44,12 +44,12 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 from typing import Final
 
 import ghrest
+import gitcall
 
 EXIT_OK: Final = 0
 EXIT_REVIVED: Final = 1
@@ -66,16 +66,13 @@ class NotRun(RuntimeError):
 
 def repo_of(root: Path) -> str:
     """Имя репозитория `владелец/имя` — из адреса `origin`, а не из памяти."""
-    said = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=root or None,
-    )
-    if said.returncode != 0:
-        raise NotRun("адрес origin не прочитан — спрашивать площадку не у кого")
-    url = said.stdout.strip().removesuffix(".git")
+    try:
+        said = gitcall.output(
+            ["remote", "get-url", "origin"], NotRun, cwd=str(root) if root else None
+        )
+    except NotRun as exc:
+        raise NotRun(f"адрес origin не прочитан — спрашивать площадку не у кого: {exc}") from exc
+    url = said.strip().removesuffix(".git")
     parts = url.replace(":", "/").split("/")
     if len(parts) < 2 or not parts[-1] or not parts[-2]:
         raise NotRun(f"адрес origin не разбирается: {url}")

@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Final
 
 import catalogue
+import gitcall
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -121,16 +121,12 @@ def documents(root: Path) -> list[Path]:
     договором выровнено наоборот, и это сказано у него
     (`tests/test_type_leniency.py::carried_text`).
     """
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.md"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=root,
+    listed = gitcall.output(
+        ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.md"],
+        NotRun,
+        cwd=str(root),
     )
-    if listed.returncode != 0:
-        raise NotRun(f"список документов не получен: {listed.stderr.strip()}")
-    found = [root / name for name in listed.stdout.split("\0") if name]
+    found = [root / name for name in listed.split("\0") if name]
     if not found:
         raise NotRun("в дереве нет ни одного документа — проверять нечего (075)")
     return found

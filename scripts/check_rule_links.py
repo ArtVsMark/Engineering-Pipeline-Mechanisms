@@ -29,12 +29,12 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Final
 
 import catalogue
+import gitcall
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -79,17 +79,11 @@ def known() -> dict[str, str]:
 
 def links(root: Path) -> list[tuple[Path, int, str, str]]:
     """Ссылки на правила в отслеживаемых файлах: где, на какой номер и имя."""
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=root,
+    listed = gitcall.output(
+        ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], NotRun, cwd=str(root)
     )
-    if listed.returncode != 0:
-        raise NotRun(f"список файлов не получен: {listed.stderr.strip()}")
     found: list[tuple[Path, int, str, str]] = []
-    for name in listed.stdout.split("\0"):
+    for name in listed.split("\0"):
         if not name:
             continue
         path = root / name
