@@ -29,8 +29,14 @@ def bindings(**rules: dict[str, Any]) -> str:
 
 
 def tree(root: Path, answer: str) -> Path:
-    """Собирает дерево-источник: версия, ответ каталогу, ответ по проверкам."""
+    """Собирает дерево-источник: версия, ответ каталогу, ответ по проверкам, прогон CI.
+
+    Прогон CI — без матрицы версий: договор требует `ci.workflow` всегда, а
+    версии Python у синтетического дерева законно уходят причиной в `none`.
+    """
     (root / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
+    (root / facts.CI_FLOW).parent.mkdir(parents=True, exist_ok=True)
+    (root / facts.CI_FLOW).write_text("jobs: {}\n", encoding="utf-8")
     (root / ".rules").mkdir(exist_ok=True)
     (root / ".rules" / "bindings.json").write_text(answer, encoding="utf-8")
     (root / ".pipeline.yml").write_text(CHECKS, encoding="utf-8")
@@ -60,7 +66,7 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     # Договор фактов витрины семьи 1.2 (#1001): номер — договора, а не наш.
     assert collected["schema"] == "1.2"
     # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
-    assert "не прочитана" in collected["none"]["python"]
+    assert collected["none"]["python"] == facts.NO_PYTHON
     assert collected["generated_at"].endswith("+00:00")
 
 
