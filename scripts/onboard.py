@@ -112,15 +112,20 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
     """Шаги со СВОИМ вызывающим прогоном в нашем дереве: имя шага → файл прогона.
 
     Вызывающий ищется по внутреннему пути `uses: ./.github/workflows/step-<имя>.yml`
-    у прогонов дерева, кроме `ci.yml` и самих шагов. Шаг, который зовёт только
-    `ci.yml`, сюда не попадает: он подключается джобом. Нечитаемый прогон —
-    третий исход, а не «вызывающего нет»: молча он перевёл бы управляющий
-    механизм в джоб `ci.yml` (045).
+    у прогонов дерева, кроме самих шагов. Нечитаемый прогон — третий исход, а
+    не «вызывающего нет»: молча он перевёл бы управляющий механизм в джоб
+    `ci.yml` (045).
+
+    ЗОВЁТ `ci.yml` — ЗНАЧИТ ШАГ КОНВЕЙЕРА, кто бы ещё его ни звал (взгляд на
+    #1050). Иначе любой соседний прогон, позвавший шаг локально, молча вывел бы
+    его из джобов `ci.yml` в заготовке и из пробы передачи. Управляющий механизм
+    — шаг, которого `ci.yml` не зовёт, а зовёт ровно один свой прогон. Два своих
+    прогона у одного шага — неоднозначность, и это отказ, а не выбор первого.
     """
     wanted = {f"{LOCAL_CALL}{STEP_PREFIX}{one}.yml": one for one in names}
-    found: dict[str, Path] = {}
+    callers: dict[str, list[Path]] = {}
     for flow in sorted((root / paths.WORKFLOWS).glob("*.yml")):
-        if flow.name == PIPELINE_FLOW or flow.name.startswith(STEP_PREFIX):
+        if flow.name.startswith(STEP_PREFIX):
             continue
         try:
             said = policy.run_of(flow)
@@ -128,16 +133,48 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
             raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
         for job in (said.get("jobs") or {}).values():
             name = wanted.get(str((job or {}).get("uses") or ""))
-            if name is not None:
-                found[name] = flow
+            if name is not None and flow not in callers.setdefault(name, []):
+                callers[name].append(flow)
+    found: dict[str, Path] = {}
+    for name, flows in callers.items():
+        if any(flow.name == PIPELINE_FLOW for flow in flows):
+            continue
+        if len(flows) > 1:
+            raise NotRun(
+                f"шаг {STEP_PREFIX}{name} зовут несколько своих прогонов "
+                f"({', '.join(flow.name for flow in flows)}) — какой из них заготовка, неизвестно"
+            )
+        found[name] = flows[0]
     return found
 
 
 def own_kit(flow: Path, name: str, repo: str, pin: str) -> str:
-    """Свой прогон управляющего механизма — с адресом по тегу вместо внутреннего пути."""
+    """Свой прогон управляющего механизма — с адресом по тегу вместо внутреннего пути.
+
+    ПОДМЕНА СВЕРЯЕТСЯ С РАЗБОРОМ (взгляд на #1050). Вызывающего находит разбор
+    YAML, а переписывается текст; вызов, записанный иной формой (`uses:
+    "./…"`, два пробела), разбор признал бы, а подмена пропустила бы — и
+    внутренний путь молча ушёл бы в заготовку. Поэтому число подмен обязано
+    равняться числу вызовов по разбору; не равно — отказ с названной формой.
+    """
     inner = f"uses: {LOCAL_CALL}{STEP_PREFIX}{name}.yml"
     outer = f"uses: {repo}/.github/workflows/{STEP_PREFIX}{name}.yml@{pin}"
-    return flow.read_text(encoding="utf-8").replace(inner, outer)
+    try:
+        jobs = (policy.run_of(flow).get("jobs") or {}).values()
+    except policy.BadPolicy as exc:
+        raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
+    calls = sum(
+        1
+        for job in jobs
+        if str((job or {}).get("uses") or "") == f"{LOCAL_CALL}{STEP_PREFIX}{name}.yml"
+    )
+    text = flow.read_text(encoding="utf-8")
+    if text.count(inner) != calls:
+        raise NotRun(
+            f"{flow.name}: вызов {STEP_PREFIX}{name} записан не формой «{inner}» — "
+            "заготовка не перепишет его на адрес по тегу, а внутренний путь потребителю не годится"
+        )
+    return text.replace(inner, outer)
 
 
 def pin_of(root: Path) -> str:
