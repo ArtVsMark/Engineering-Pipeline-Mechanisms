@@ -228,7 +228,7 @@ jobs:
             exit 1
           fi
           listed=0
-          found=$(git ls-tree --name-only FETCH_HEAD -- .github/badges/python.svg) || listed=$?
+          found=$(git ls-tree -z --name-only FETCH_HEAD -- .github/badges/python.svg | tr -d "\0") || listed=$?
           if [ "$listed" -ne 0 ]; then
             echo "::error::дерево ветки badges не прочитано (ls-tree код $listed) — прежний значок не перенести, публикацию останавливаю"
             exit 1

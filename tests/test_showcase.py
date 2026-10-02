@@ -326,9 +326,19 @@ def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
     )
 
 
-#: События исходного прогона, от которых `badges.yml` идёт на `workflow_run`:
-#: список в `fromJSON('[...]')` условия джоба.
-WAKE_EVENTS: Final = re.compile(r"fromJSON\('(\[[^']*\])'\)")
+#: Обёртка списка событий в условии джоба: `fromJSON('[...]')`. Разрез строки,
+#: а не образец: разбирается выражение площадки, а не питон (166).
+WAKE_OPEN: Final = "fromJSON('"
+WAKE_CLOSE: Final = "')"
+
+
+def wake_events(condition: str) -> set[str] | None:
+    """События исходного прогона из условия джоба; None — списка нет."""
+    _, opened, rest = condition.partition(WAKE_OPEN)
+    listed, closed, _ = rest.partition(WAKE_CLOSE)
+    if not opened or not closed:
+        return None
+    return {str(one) for one in json.loads(listed)}
 
 
 def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
@@ -350,8 +360,7 @@ def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
     assert read.get("name") in (woken.get("workflows") or []), (
         f"значок читает «{read.get('name')}», а сборку будит {woken.get('workflows')}"
     )
-    said = WAKE_EVENTS.search(str(flow["jobs"]["badges"].get("if") or ""))
-    assert said, "у джоба badges нет фильтра событий workflow_run (075)"
-    events = set(json.loads(said.group(1)))
+    events = wake_events(str(flow["jobs"]["badges"].get("if") or ""))
+    assert events, "у джоба badges нет фильтра событий workflow_run (075)"
     dead = sorted(events - set(read.get(True) or {}))
     assert not dead, f"фильтр называет {dead}, а у {named} таких событий нет"
