@@ -43,12 +43,12 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Final
 
 import ghrest
+import gitcall
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -83,15 +83,13 @@ def canon() -> tuple[str, bool]:
     said = os.environ.get("GITHUB_REPOSITORY", "").strip()
     if said:
         return said, True
-    found = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    if found.returncode != 0:
-        raise NotRun("имя взять неоткуда: нет GITHUB_REPOSITORY и нет origin (075)")
-    url = found.stdout.strip().removesuffix(".git")
+    try:
+        found = gitcall.output(["remote", "get-url", "origin"], NotRun)
+    except NotRun as exc:
+        raise NotRun(
+            f"имя взять неоткуда: нет GITHUB_REPOSITORY и нет origin (075): {exc}"
+        ) from exc
+    url = found.strip().removesuffix(".git")
     parts = url.replace(":", "/").split("/")
     if len(parts) < 2:
         raise NotRun(f"адрес origin не разбирается: {url}")
@@ -104,16 +102,10 @@ def tracked(root: Path) -> list[Path]:
     Обход всего дерева читал бы `.venv` и кеши сборки — там имён репозиториев
     тысячи, и ни одно из них проект не правит. Приём тот же, что у гейта версии.
     """
-    found = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=root,
+    found = gitcall.output(
+        ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], NotRun, cwd=str(root)
     )
-    if found.returncode != 0:
-        raise NotRun(f"список файлов не получен: {found.stderr.strip()}")
-    return [root / name for name in found.stdout.split("\0") if name]
+    return [root / name for name in found.split("\0") if name]
 
 
 def mentions(root: Path) -> dict[str, list[tuple[Path, int]]]:

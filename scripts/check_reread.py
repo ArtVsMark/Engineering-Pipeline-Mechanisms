@@ -27,10 +27,10 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from typing import Any, Final
 
+import gitcall
 import paths
 import report
 
@@ -60,13 +60,9 @@ def at(ref: str, path: str) -> dict[str, Any]:
     «изменений нет» было бы выводом из незнания
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     """
-    done = subprocess.run(
-        ["git", "show", f"{ref}:{path}"], capture_output=True, text=True, encoding="utf-8"
-    )
-    if done.returncode != 0:
-        raise NotRun(f"git show {ref}:{path}: {report.cut(done.stderr.strip())}")
+    shown = gitcall.output(["show", f"{ref}:{path}"], NotRun)
     try:
-        said: dict[str, Any] = json.loads(done.stdout)
+        said: dict[str, Any] = json.loads(shown)
     except json.JSONDecodeError as exc:
         raise NotRun(f"{ref}:{path} не разбирается: {exc}") from exc
     return said
