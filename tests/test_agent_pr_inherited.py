@@ -93,3 +93,34 @@ def test_a_branch_from_the_trunk_keeps_all_its_commits(grown: Path) -> None:
     commit(grown, "прямое.txt", "да\n", "Чужая работа, первый\n\nRefs #3")
     merge_base = git(grown, "merge-base", "origin/main", "прямая").strip()
     assert module.inherited(merge_base, "прямая", "main") == merge_base
+
+
+def test_a_branch_that_merged_the_trunk_still_drops_the_inherited(grown: Path) -> None:
+    """Своя ветка влила общую ПОСЛЕ уплотнения чужой — унаследованное всё равно выпадает.
+
+    Взгляд на #1052: слияние сдвигает `merge-base` за уплотнённый коммит, и
+    кандидаты от него пусты. Обычный путь ветки под `automerge` — слияний
+    общей ветки в ней бывает несколько.
+    """
+    git(grown, "checkout", "--quiet", "своя")
+    git(grown, "merge", "--quiet", "--no-edit", "main")
+    commit(grown, "своё.txt", "моё после слияния\n", "Своя работа после слияния\n\nRefs #1019")
+    said = module.describe("своя", "main")
+    # +3: два своих коммита и слияние — слияние считается, как у живых изменений.
+    assert said.title == "Чужая работа, второй (+3)", said.title
+    assert "#998" not in said.body and "b560c75" not in said.body, said.body
+    assert "Соседнее слияние" not in said.body and "#2\n" not in said.body, said.body
+
+
+def test_a_prefix_is_inherited_only_whole(grown: Path) -> None:
+    """Дерево совпало, а заголовка раньше в уплотнении нет — не префикс (взгляд на #1052).
+
+    Свой ранний коммит правит тот же файл, что слитая ветка, и вершина
+    совпадает с деревом уплотнения. Без проверки префикса свой коммит выпал
+    бы из описания как унаследованный.
+    """
+    git(grown, "checkout", "--quiet", "-b", "смесь", "чужая~2")
+    commit(grown, "чужое.txt", "своё\n", "Своё раннее\n\nRefs #5")
+    commit(grown, "чужое.txt", "два\n", "Чужая работа, второй\n\nRefs #5")
+    merge_base = git(grown, "merge-base", "origin/main", "смесь").strip()
+    assert module.inherited(merge_base, "смесь", "main") == merge_base

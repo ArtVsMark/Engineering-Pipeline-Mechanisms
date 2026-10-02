@@ -154,12 +154,20 @@ def inherited(merge_base: str, branch: str, base: str) -> str:
     `Closes` и `Разобрано` пришли от слитого #1026, 13 коммитов вместо двух.
 
     Решает СОДЕРЖИМОЕ, а не заголовок. Заголовок лишь выбирает кандидатов —
-    коммиты общей ветки после `merge_base`, чьё тело его перечисляет (так
+    коммиты общей ветки после ТОЧКИ ОТВЕТВЛЕНИЯ, чьё тело его перечисляет (так
     площадка пишет тело уплотнения). Коммит C унаследован, если файлы,
     тронутые веткой до него, у C те же, что в дереве такого кандидата. Свой
     коммит с тем же заголовком так не выпадает: его содержимого там нет.
-    Унаследован наибольший такой префикс — промежуточные коммиты слитой
-    ветки сами с деревом уплотнения не совпадают, совпадает её вершина.
+
+    Точка ответвления — родитель самого раннего своего коммита, а не
+    `merge_base` (взгляд на #1052). Ветка, влившая общую ветку после
+    уплотнения, сдвигает `merge_base` за уплотнённый коммит, и кандидатов от
+    него не нашлось бы вовсе.
+
+    Унаследован ПРЕФИКС, и он проверяется: совпал коммит C — заголовки всех
+    коммитов до него обязаны стоять в теле того же уплотнения. Промежуточные
+    коммиты слитой ветки с деревом уплотнения не совпадают, совпадает её
+    вершина, поэтому их узнают по заголовку, а не по дереву.
 
     ГРАНИЦА НАЗВАНА (195): правка тех же файлов в общей ветке ПОСЛЕ
     уплотнения сравнение не ломает — сверяется дерево самого уплотнённого
@@ -167,22 +175,25 @@ def inherited(merge_base: str, branch: str, base: str) -> str:
     (её коммиты и так в истории общей ветки) и уплотнение с телом без
     заголовков — тогда описание собирается по-прежнему, из всех коммитов.
     """
-    commits = git("rev-list", "--reverse", f"{merge_base}..{branch}").split()
+    commits = git(
+        "rev-list", "--reverse", "--topo-order", "--no-merges", f"{merge_base}..{branch}"
+    ).split()
+    if not commits:
+        return merge_base
+    fork = git("rev-parse", f"{commits[0]}^").strip()
     landed = [
         entry.split("\0", 1)
-        for entry in git("log", "--format=%H%x00%B%x01", f"{merge_base}..origin/{base}").split(
-            "\x01"
-        )
+        for entry in git("log", "--format=%H%x00%B%x01", f"{fork}..origin/{base}").split("\x01")
         if "\0" in entry
     ]
+    subjects = [git("log", "-1", "--format=%s", sha).strip() for sha in commits]
     last = merge_base
-    for sha in commits:
-        subject = git("log", "-1", "--format=%s", sha).strip()
+    for at, sha in enumerate(commits):
         touched = [
-            name for name in git("diff", "--name-only", "-z", merge_base, sha).split("\0") if name
+            name for name in git("diff", "--name-only", "-z", fork, sha).split("\0") if name
         ]
         for squash, body in landed:
-            if subject not in body:
+            if not all(subject in body for subject in subjects[: at + 1]):
                 continue
             if not git("diff", "--name-only", "-z", sha, squash.strip(), "--", *touched).strip(
                 "\0\n "
@@ -196,7 +207,9 @@ def describe(branch: str, base: str) -> Described:
     """Собирает заголовок и тело изменения из коммитов ветки — кроме унаследованных."""
     merge_base = git("merge-base", f"origin/{base}", branch).strip()
     start = inherited(merge_base, branch, base)
-    log = git("log", "--reverse", "--format=%s", f"{start}..{branch}")
+    # Коммиты общей ветки отсекаются явно: начало от унаследованного коммита
+    # их не отсекает, если ветка вливала общую после уплотнения (взгляд на #1052).
+    log = git("log", "--reverse", "--format=%s", f"{start}..{branch}", f"^origin/{base}")
     subjects = [line for line in log.splitlines() if line]
     if not subjects:
         raise NotRun(f"в ветке {branch} нет коммитов сверх {base} — открывать нечего (075)")
@@ -233,7 +246,9 @@ def describe(branch: str, base: str) -> Described:
     # быть таким, какого в теле коммита не бывает, иначе граница подделывается
     # текстом. Разбор идёт по одному телу — склеенные документы неразличимы для
     # разметки, и незакрытая вставка одного коммита съедала связь другого.
-    log_bodies = git("log", "--reverse", "--format=%B%x00", f"{start}..{branch}")
+    log_bodies = git(
+        "log", "--reverse", "--format=%B%x00", f"{start}..{branch}", f"^origin/{base}"
+    )
     bodies = log_bodies.split("\0")
 
     # Связь читается общим модулем, а не своей регуляркой: у гейта разметки она
