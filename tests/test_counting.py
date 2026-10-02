@@ -247,11 +247,12 @@ def test_python_versions_come_from_the_ci_matrix() -> None:
     assert said["supported"] == [str(one) for one in matrix]
     # Перепутанный джоб или потерянный образ видны только сверкой целиком, а не
     # непустотой (взгляд на #1004).
-    trial = flow["jobs"][facts.EXPERIMENTAL_JOB]
+    # Предрелизная живёт своим прогоном (#1018) — и читается оттуда же, откуда
+    # её берёт сборка, а не из `ci.yml`.
+    upcoming = yaml.safe_load(facts.paths.PYTHON_NEXT.read_text(encoding="utf-8"))
+    trial = upcoming["jobs"][facts.EXPERIMENTAL_JOB]
     assert said["experimental"] == [str(one) for one in trial["strategy"]["matrix"]["python"]]
-    images = {
-        str(flow["jobs"][job]["runs-on"]) for job in (facts.SUPPORTED_JOB, facts.EXPERIMENTAL_JOB)
-    }
+    images = {str(flow["jobs"][facts.SUPPORTED_JOB]["runs-on"]), str(trial["runs-on"])}
     assert said["os"] == sorted(images)
 
 
