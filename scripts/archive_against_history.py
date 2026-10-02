@@ -47,12 +47,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Final
 
 import changerefs
+import gitcall
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -153,12 +153,10 @@ def fresh(found: dict[str, list[str]], before: list[str]) -> list[str]:
 
 def trunk_log(ref: str) -> str:
     """Тела всех коммитов общей ветки."""
-    done = subprocess.run(
-        ["git", "log", ref, "--format=%B"], capture_output=True, text=True, encoding="utf-8"
-    )
-    if done.returncode != 0 or not done.stdout.strip():
-        raise NotRun(f"история {ref} не прочитана: {done.stderr.strip() or 'пусто'} (075)")
-    return done.stdout
+    said = gitcall.output(["log", ref, "--format=%B"], NotRun)
+    if not said.strip():
+        raise NotRun(f"история {ref} не прочитана: пусто (075)")
+    return said
 
 
 def read(path: Path) -> dict[str, Any]:
