@@ -18,6 +18,15 @@
 ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
 [049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
 
+ШАГ КОНВЕЙЕРА И УПРАВЛЯЮЩИЙ МЕХАНИЗМ ПОДКЛЮЧАЮТСЯ ПО-РАЗНОМУ, И РАЗНИЦА
+ВЫВОДИТСЯ ИЗ ДЕРЕВА (#993). Шаг конвейера зовёт `ci.yml` — его заготовка
+джоб в своём `ci.yml`. Управляющий механизм (план работ и соседи) зовёт свой
+прогон со своими событиями и правами: джобом в `ci.yml` он шёл бы на каждом
+изменении и без права записи в задачу. Поэтому шаг, у которого в нашем
+дереве есть СВОЙ вызывающий прогон, печатается этим прогоном целиком, с
+адресом по тегу вместо внутреннего пути (`own_callers`). Второго списка
+таких шагов нет: вызывающий и есть ответ.
+
 ИМЯ ЗАПИСИ ПРОВЕРКИ СОСТАВНОЕ, И ЗАГОТОВКА НАЗЫВАЕТ ЕГО ПРАВИЛЬНО. Площадка
 зовёт запись вызванного джоба `<имя вызывающего> / <имя вызванного>` — замер
 прогоном на живой площадке. Потребитель, написавший в своём ответе голое имя,
@@ -74,6 +83,11 @@ STEP_PREFIX: Final = "step-"
 #: Что читается ответом «выпусков ещё не было». Пустота тут законна и обязана
 #: быть названа, а не выдана за версию (154).
 NO_RELEASE: Final = "выпусков ещё не было"
+#: Внутренний путь, которым наш прогон зовёт наш же шаг. В заготовке он
+#: заменяется адресом с тегом: потребитель ходит внешним путём.
+LOCAL_CALL: Final = "./.github/workflows/"
+#: Прогон, джобами которого подключаются шаги конвейера.
+PIPELINE_FLOW: Final = "ci.yml"
 
 
 class NotRun(RuntimeError):
@@ -92,6 +106,75 @@ def steps(root: Path) -> list[str]:
         if Path(said).name.startswith(STEP_PREFIX) and Path(said).suffix in {".yml", ".yaml"}
     ]
     return sorted(found)
+
+
+def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
+    """Шаги со СВОИМ вызывающим прогоном в нашем дереве: имя шага → файл прогона.
+
+    Вызывающий ищется по внутреннему пути `uses: ./.github/workflows/step-<имя>.yml`
+    у прогонов дерева, кроме самих шагов. Нечитаемый прогон — третий исход, а
+    не «вызывающего нет»: молча он перевёл бы управляющий механизм в джоб
+    `ci.yml` (045).
+
+    ЗОВЁТ `ci.yml` — ЗНАЧИТ ШАГ КОНВЕЙЕРА, кто бы ещё его ни звал (взгляд на
+    #1050). Иначе любой соседний прогон, позвавший шаг локально, молча вывел бы
+    его из джобов `ci.yml` в заготовке и из пробы передачи. Управляющий механизм
+    — шаг, которого `ci.yml` не зовёт, а зовёт ровно один свой прогон. Два своих
+    прогона у одного шага — неоднозначность, и это отказ, а не выбор первого.
+    """
+    wanted = {f"{LOCAL_CALL}{STEP_PREFIX}{one}.yml": one for one in names}
+    callers: dict[str, list[Path]] = {}
+    for flow in sorted((root / paths.WORKFLOWS).glob("*.yml")):
+        if flow.name.startswith(STEP_PREFIX):
+            continue
+        try:
+            said = policy.run_of(flow)
+        except policy.BadPolicy as exc:
+            raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
+        for job in (said.get("jobs") or {}).values():
+            name = wanted.get(str((job or {}).get("uses") or ""))
+            if name is not None and flow not in callers.setdefault(name, []):
+                callers[name].append(flow)
+    found: dict[str, Path] = {}
+    for name, flows in callers.items():
+        if any(flow.name == PIPELINE_FLOW for flow in flows):
+            continue
+        if len(flows) > 1:
+            raise NotRun(
+                f"шаг {STEP_PREFIX}{name} зовут несколько своих прогонов "
+                f"({', '.join(flow.name for flow in flows)}) — какой из них заготовка, неизвестно"
+            )
+        found[name] = flows[0]
+    return found
+
+
+def own_kit(flow: Path, name: str, repo: str, pin: str) -> str:
+    """Свой прогон управляющего механизма — с адресом по тегу вместо внутреннего пути.
+
+    ПОДМЕНА СВЕРЯЕТСЯ С РАЗБОРОМ (взгляд на #1050). Вызывающего находит разбор
+    YAML, а переписывается текст; вызов, записанный иной формой (`uses:
+    "./…"`, два пробела), разбор признал бы, а подмена пропустила бы — и
+    внутренний путь молча ушёл бы в заготовку. Поэтому число подмен обязано
+    равняться числу вызовов по разбору; не равно — отказ с названной формой.
+    """
+    inner = f"uses: {LOCAL_CALL}{STEP_PREFIX}{name}.yml"
+    outer = f"uses: {repo}/.github/workflows/{STEP_PREFIX}{name}.yml@{pin}"
+    try:
+        jobs = (policy.run_of(flow).get("jobs") or {}).values()
+    except policy.BadPolicy as exc:
+        raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
+    calls = sum(
+        1
+        for job in jobs
+        if str((job or {}).get("uses") or "") == f"{LOCAL_CALL}{STEP_PREFIX}{name}.yml"
+    )
+    text = flow.read_text(encoding="utf-8")
+    if text.count(inner) != calls:
+        raise NotRun(
+            f"{flow.name}: вызов {STEP_PREFIX}{name} записан не формой «{inner}» — "
+            "заготовка не перепишет его на адрес по тегу, а внутренний путь потребителю не годится"
+        )
+    return text.replace(inner, outer)
 
 
 def pin_of(root: Path) -> str:
@@ -135,14 +218,20 @@ def check_name(name: str) -> str:
     return f"{name}{policy.COMPOSED}{name}"
 
 
-def answer(names: list[str]) -> str:
+def answer(names: list[str], beyond: list[str] | None = None) -> str:
     """Заготовка ответа потребителя: по строке на проверку, класс — не решён.
 
     `unreviewed` здесь не заглушка, а объявленная очередь разбора: молча
     обязательной проверка не становится, и молча совещательной тоже.
+    Управляющие механизмы идут вне изменения — их ответ в разделе
+    `beyond_the_change`, а не `checks`.
     """
     rows = "\n".join(f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in names)
-    return f"checks:\n{rows}\n"
+    said = f"checks:\n{rows}\n"
+    if beyond:
+        more = "\n".join(f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in beyond)
+        said += f"{policy.BEYOND}:\n{more}\n"
+    return said
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -158,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         names = steps(args.root)
+        own = own_callers(args.root, names)
         pin = pin_of(args.root)
     except (NotRun, check_shipped.NotRun) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
@@ -189,14 +279,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_UNREACHABLE
 
+    pipeline = [one for one in names if one not in own]
     print(f"# шагов к подключению: {len(names)} · прибивка: {pin}\n")
-    print(f"# 1. В свой `{paths.WORKFLOWS}/ci.yml` — джобы вызова:\n")
+    print(f"# 1. В свой `{paths.WORKFLOWS}/{PIPELINE_FLOW}` — джобы вызова:\n")
     print("jobs:")
-    print("\n".join(caller(one, args.repo, pin) for one in names))
+    print("\n".join(caller(one, args.repo, pin) for one in pipeline))
+    for one, flow in sorted(own.items()):
+        print(f"# 1. Свой `{paths.WORKFLOWS}/{flow.name}` — управляющий механизм своим прогоном:\n")
+        print(own_kit(flow, one, args.repo, pin))
     print(f"# 2. В свой `{paths.PIPELINE}` — ответ по каждой проверке.")
     print("#    Класс — СВОЙ выбор: `required`, `advisory` или `off` с причиной.")
     print(f"#    Здесь все выходят «{policy.UNREVIEWED}»: это очередь разбора, а не умолчание.\n")
-    print(answer(names))
+    print(answer(pipeline, sorted(own)))
     print("# 3. В защиту ветки — ОДНО имя: имя своего сводного гейта.")
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
     print("#    в матрицу, и защита начинает ждать имя, которого никто не выдаёт (168).")
