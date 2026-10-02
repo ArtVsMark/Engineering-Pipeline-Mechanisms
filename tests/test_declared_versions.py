@@ -26,8 +26,9 @@
 ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md)).
 
 ГРАНИЦА НАЗВАНА, А НЕ ВЫРОВНЕНА. Ячейки матрицы и предрелизного прогона —
-НЕ дубли пола: матрица гоняет набор на своих версиях нарочно, и держит её
-`tests/test_drift.py`. Предмет здесь другой —
+НЕ дубли пола: матрица гоняет набор на своих версиях нарочно. С выпусками
+языка её сверяет `tests/test_drift.py`, а с планкой `requires-python` — пока
+ничто, это пробел с адресом #1038 (046). Предмет здесь другой —
 версия, вписанная в ОДИНОЧНЫЙ шаг, где выбора нет и подразумевается пол
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 """
