@@ -6,11 +6,22 @@
 находка по одному месту останавливает починку по одной форме (210): круг рвёт
 это правило, а не следующая правка.
 
-ПРАВИЛО СТРОГОЕ. Функция в `scripts/`, которая зовёт `subprocess.run` или
-`subprocess.check_output` со списком, начинающимся буквой `"git"`, ловит
-`OSError` (или его наследника `FileNotFoundError`) В ТОЙ ЖЕ ФУНКЦИИ. Общий
-вызов `gitcall.output` так и делает. Поимка выше, у вызывающего, законной не
-считается: она живёт в другом месте и уезжает от вызова молча.
+ПРАВИЛО СТРОГОЕ. Вызов процесса в `scripts/` со списком, начинающимся словом
+`"git"`, стоит В ТЕЛЕ `try`, чей обработчик ловит `OSError` (или его
+наследника `FileNotFoundError`). Общий вызов `gitcall.output` так и делает.
+Поимка выше, у вызывающего, законной не считается: она живёт в другом месте и
+уезжает от вызова молча. Не считается и поимка где-то в той же функции, если
+вызова она не обнимает.
+
+ВЫЗОВ ПРОЦЕССА — ПО ИМЕНИ, А НЕ ПО ЗАПИСИ. `run`, `check_output`,
+`check_call`, `call`, `Popen` — и через `subprocess.`, и импортом напрямую.
+Первая редакция судила только `subprocess.run` и `subprocess.check_output`, а
+поимку засчитывала у любого `except` функции. Взгляд на #1030 нашёл обе
+дыры сразу — вторая находка по тому же предикату (210), поэтому вместо
+седьмой формы разбора правило стало строже. Строгое правило нашло в дереве
+два вызова, которые прежнее пропускало: `check_rule_links.links` ловил
+`OSError` у чтения файла, а не у git, и `preflight.push_branch` — у соседнего
+шага.
 
 ПОДПИСАННЫХ ИСКЛЮЧЕНИЙ НЕТ, И ЭТО ЗАМЕР, А НЕ ЗАБЫВЧИВОСТЬ. Задача
 допускала обход с подписью рядом, как `SIGNED` у 071, — но ни одному из
@@ -20,11 +31,14 @@
 
 СОСЕД ЗА ГРАНИЦЕЙ (195): вызов, чья команда не литерал-список с `"git"`
 первым словом (`journal.git` берёт команду целиком), предикат не судит —
-он не знает, что зовётся git. Такой вызов ловит `OSError` сам, и держит это
+он не знает, что зовётся git. Не судит он и вызов через переменную-псевдоним
+(`spawn = subprocess.run`). Такой вызов ловит `OSError` сам, и держит это
 чтение, а не гейт.
 
 ЗАМЕР 01.10.2026 (#1027): функций с вызовом git без `OSError` было 19 в 11
 модулях; восемь сняты в #1021, одиннадцать — изменением этого гейта.
+Строгое правило (см. выше) нашло ещё два — итого тринадцать мест в десяти
+модулях.
 """
 
 from __future__ import annotations
@@ -39,13 +53,20 @@ from tests.conftest import ROOT, walk
 
 #: Классы, поимка которых означает «без git на пути — свой исход».
 CATCHES: Final = frozenset({"OSError", "FileNotFoundError", "Exception"})
-#: Вызовы процесса, которые судятся.
-RUNS: Final = frozenset({"subprocess.run", "subprocess.check_output"})
+#: Вызовы процесса, которые судятся, — по имени, с `subprocess.` или без.
+SPAWNS: Final = frozenset({"run", "check_output", "check_call", "call", "Popen"})
+
+
+def spawned_name(func: ast.expr) -> str:
+    """Имя вызываемого: `subprocess.run` и `run` из импорта — одно имя."""
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return func.id if isinstance(func, ast.Name) else ""
 
 
 def calls_git(call: ast.Call) -> bool:
     """Вызов процесса, чья команда — литерал-список с `"git"` первым словом."""
-    if ast.unparse(call.func) not in RUNS or not call.args:
+    if spawned_name(call.func) not in SPAWNS or not call.args:
         return False
     command = call.args[0]
     return (
@@ -56,25 +77,37 @@ def calls_git(call: ast.Call) -> bool:
     )
 
 
-def caught(function: ast.FunctionDef) -> set[str]:
-    """Имена классов, которые ловит хоть один `except` этой функции."""
+def caught(block: ast.Try) -> set[str]:
+    """Имена классов, которые ловят обработчики этого `try`."""
     names: set[str] = set()
-    for node in ast.walk(function):
-        if isinstance(node, ast.ExceptHandler) and node.type is not None:
-            kinds = node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
+    for handler in block.handlers:
+        if handler.type is not None:
+            kinds = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
             names |= {ast.unparse(one).rsplit(".", 1)[-1] for one in kinds}
     return names
 
 
+def guarded(function: ast.FunctionDef) -> set[int]:
+    """Узлы, стоящие в ТЕЛЕ `try` с поимкой отсутствия git, — не в обработчике и не после."""
+    inside: set[int] = set()
+    for block in ast.walk(function):
+        if isinstance(block, ast.Try) and caught(block) & CATCHES:
+            inside |= {id(node) for statement in block.body for node in ast.walk(statement)}
+    return inside
+
+
 def unguarded(source: str) -> list[str]:
-    """Функции исходника, что зовут git и не ловят его отсутствие у себя."""
+    """Вызовы git исходника, которых не обнимает поимка их отсутствия."""
     found: list[str] = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.FunctionDef):
             continue
-        calls = any(isinstance(one, ast.Call) and calls_git(one) for one in ast.walk(node))
-        if calls and not caught(node) & CATCHES:
-            found.append(f"{node.name}:{node.lineno}")
+        safe = guarded(node)
+        found += [
+            f"{node.name}:{one.lineno}"
+            for one in ast.walk(node)
+            if isinstance(one, ast.Call) and calls_git(one) and id(one) not in safe
+        ]
     return found
 
 
@@ -122,8 +155,33 @@ def test_the_predicate_sees_git_calls_in_the_tree() -> None:
             True,
         ),
         ('import subprocess\ndef f():\n    subprocess.run(["tar", "-x"])\n', False),
+        (
+            "import subprocess\ndef f():\n"
+            '    subprocess.run(["git", "log"])\n'
+            "    try:\n        open('x')\n    except OSError:\n        pass\n",
+            True,
+        ),
+        (
+            "import subprocess\ndef f():\n    try:\n        pass\n    except OSError:\n"
+            '        subprocess.run(["git", "log"])\n',
+            True,
+        ),
+        ('from subprocess import run\ndef f():\n    run(["git", "log"])\n', True),
+        ('import subprocess\ndef f():\n    subprocess.Popen(["git", "log"])\n', True),
+        ('import subprocess\ndef f():\n    subprocess.check_call(["git", "log"])\n', True),
     ],
-    ids=["без поимки", "OSError", "кортеж с OSError", "только CalledProcessError", "не git"],
+    ids=[
+        "без поимки",
+        "OSError",
+        "кортеж с OSError",
+        "только CalledProcessError",
+        "не git",
+        "OSError рядом, а не вокруг",
+        "вызов в обработчике",
+        "run импортом",
+        "Popen",
+        "check_call",
+    ],
 )
 def test_the_predicate_has_both_halves(source: str, bad: bool) -> None:
     """Обе половины: незащищённый вызов краснеет, защищённый и чужой — нет."""

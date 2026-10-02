@@ -62,7 +62,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -540,7 +539,6 @@ def main(argv: list[str] | None = None) -> int:
         NotRun,
         ghrest.TransportError,
         finding_kinds.NotRun,
-        subprocess.CalledProcessError,
     ) as exc:
         print(f"архив не собран: {exc}", file=sys.stderr)
         return EXIT_BROKEN

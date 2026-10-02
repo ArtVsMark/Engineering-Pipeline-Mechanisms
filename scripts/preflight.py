@@ -388,13 +388,20 @@ def push_branch(root: Path) -> int:
         print(about, file=sys.stderr if verdict else sys.stdout)
         if verdict == check_branch_revival.EXIT_REVIVED:
             return EXIT_BROKEN
-    said = subprocess.run(
-        ["git", "push", "-u", "origin", branch],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=root or None,
-    )
+    # СВОЯ ФОРМА, А НЕ `gitcall`: вывод толчка печатается целиком и при
+    # успехе, а отказ — код выхода, а не исключение. Отсутствие git ловится
+    # здесь же, у самого вызова (#1027).
+    try:
+        said = subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=root or None,
+        )
+    except OSError as exc:
+        print(f"толчок не прошёл: git не запустился — {exc}", file=sys.stderr)
+        return EXIT_BROKEN
     print(said.stdout.rstrip() or said.stderr.rstrip())
     if said.returncode != 0:
         print(f"толчок не прошёл: {report.cut(said.stderr.strip())}", file=sys.stderr)
