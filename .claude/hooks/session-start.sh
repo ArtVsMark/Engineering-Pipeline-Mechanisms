@@ -11,8 +11,11 @@
 # конвейер, — с инструментами ровно в тех границах, что стоят в строках
 # установки прогонов. Ни планка, ни список не разбираются здесь второй раз
 # (214): их читают `check_env.python_floor`, `check_env.needs` и
-# `check_env.local_packages`. Сдвинется планка или граница — хук сам соберёт
-# окружение заново.
+# `check_env.local_packages`. Сдвинется граница — хук сам соберёт окружение
+# заново. Сдвинется планка — правится одна строка `want` ниже: интерпретатор
+# планки нужен, чтобы прочитать саму планку, и вычислить его до чтения нечем.
+# Расхождение `want` с планкой хук называет предупреждением, а не молчит
+# (взгляд на #1049, 005).
 #
 # ЗАЧЕМ 3.14. Это планка семьи (решение владельца 01.10.2026, #1018), а образ
 # окна несёт 3.10–3.13, и встроенный uv знает лишь 3.14.0rc2. Сайт установщика
@@ -35,12 +38,16 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
 fi
 cd "$CLAUDE_PROJECT_DIR" || { warn "нет каталога проекта"; exit 0; }
 
-if ! command -v python3.14 >/dev/null 2>&1; then
+# ЕДИНСТВЕННОЕ МЕСТО ЧИСЛА ПЛАНКИ В ХУКЕ. Его сверяет с `requires-python`
+# `tests/test_session_start.py`, а на старте — сам хук, прочитав планку.
+want=3.14
+
+if ! command -v "python$want" >/dev/null 2>&1; then
   { python3.12 -m venv /opt/uv \
       && /opt/uv/bin/pip install -q -U uv \
-      && /opt/uv/bin/uv python install 3.14 \
-      && ln -sf "$(/opt/uv/bin/uv python find 3.14)" /usr/local/bin/python3.14; } \
-    || warn "Python 3.14 не поставлен"
+      && /opt/uv/bin/uv python install "$want" \
+      && ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"; } \
+    || warn "Python $want не поставлен"
 fi
 
 # Планку и список читает код, который уже их читает для предполётной. Без
@@ -55,7 +62,7 @@ fi
 # проверяет ровно то, что исполнит хук. Ставится этот интерпретатор строкой
 # выше, а без него окружение на планке не собрать всё равно.
 read_tree() {
-  python3.14 -c "
+  "python$want" -c "
 import sys
 sys.path[:0] = ['scripts', 'packages/transport']
 import check_env as c
@@ -68,7 +75,14 @@ else:
     print(' '.join(f'{n.name}{n.bounds}' for n in c.needs().values()))
 " "$1"
 }
+# Без интерпретатора планку не прочесть — и это его отсутствие, а не планки:
+# предупреждение называет настоящую причину (взгляд на #1049).
+command -v "python$want" >/dev/null 2>&1 || { warn "нет python$want — дерево читать нечем"; exit 0; }
 floor=$(read_tree floor) || { warn "планка интерпретатора не прочитана"; exit 0; }
+if [ "$floor" != "$want" ]; then
+  warn "планка $floor, а хук ставит python$want — поправьте want в хуке"
+  exit 0
+fi
 tools=$(read_tree needs) || { warn "строки установки прогонов не прочитаны"; exit 0; }
 locals=$(read_tree local) || { warn "пакеты дерева не прочитаны"; exit 0; }
 
