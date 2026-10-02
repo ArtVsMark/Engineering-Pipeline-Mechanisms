@@ -273,9 +273,9 @@ def test_a_foreign_cancelled_name_waits_for_a_live_own_run_and_fails_after_it() 
     """Чужое имя, у которого ВСЕ записи отменены: ожидание при живом прогоне, отказ после.
 
     Сосед случая выше (195, взгляд на #1032): у чужого `failure` тест был, у
-    чужого `cancelled` — нет, а ветка «все записи отменены» тоже спрашивает
-    `still_coming`. Обещание «дыры не открывает» держится только до конца
-    своего прогона — здесь это и проверено.
+    чужого `cancelled` — нет. Ждёт такое имя ветка «чужие записи не судятся»
+    (`run_id` задан, своих записей нет), а отказ по завершении выносит ветка
+    «все записи отменены». Её собственное ожидание держит соседний тест ниже.
     """
     runs = [
         run("lint", run_id="mine"),
@@ -286,6 +286,32 @@ def test_a_foreign_cancelled_name_waits_for_a_live_own_run_and_fails_after_it() 
     done, waiting = module.verdict(runs, REQUIRED, "ci-complete", "mine", mine={}, run_live=False)
     assert not waiting and any("все записи отменены" in problem for problem in done), (
         "по завершении своего прогона отменённое чужое имя не стало отказом"
+    )
+
+
+@pytest.mark.parametrize(
+    ("records", "run_id"),
+    [
+        pytest.param([run("test", conclusion="cancelled", run_id="mine")], "mine", id="свои"),
+        pytest.param([run("test", conclusion="cancelled", run_id="other")], "", id="без-run_id"),
+    ],
+)
+def test_the_all_cancelled_branch_waits_for_a_live_run_and_fails_after_it(
+    records: list[dict[str, Any]], run_id: str
+) -> None:
+    """Ветка «все записи отменены» сама ждёт при живом прогоне — на обоих своих входах.
+
+    Взгляд на #1041: прежний тест доходил до ожидания раньше этой ветки, и
+    снятие её `still_coming` оставляло его зелёным. Сюда при живом прогоне
+    доходят два входа — все СВОИ записи отменены, или `run_id` не задан, — и
+    оба проверены здесь.
+    """
+    runs = [run("lint", run_id="mine"), *records]
+    live = module.verdict(runs, REQUIRED, "ci-complete", run_id, mine={}, run_live=True)
+    assert live == ([], True), "при живом прогоне ветка отменённых судит до срока"
+    done, waiting = module.verdict(runs, REQUIRED, "ci-complete", run_id, mine={}, run_live=False)
+    assert not waiting and any("все записи отменены" in problem for problem in done), (
+        "по завершении прогона отменённое имя не стало отказом"
     )
 
 
