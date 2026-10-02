@@ -2,7 +2,7 @@
 
 > **Читатель:** посетитель — что это такое и стоит ли брать.
 
-[![версия проекта, посчитанная по истории](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/version.json&cacheSeconds=300)](docs/dev/release.md) [![последний выпуск: к нему прибивается потребитель](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/release.json&cacheSeconds=300)](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/releases) [![правил каталога держится машиной](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/rules.json&cacheSeconds=300)](.rules/bindings.json) [![доля машинного соблюдения семьи, закрытая общими механизмами](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/family.json&cacheSeconds=300)](docs/decisions/016-family-completeness-outranks-the-release-number.md) [![запускаемых механизмов гоняется процессом](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/scripts.json&cacheSeconds=300)](scripts/) [![доля покрытых строк: мерило охвата, а не верности механизма](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/coverage.json&cacheSeconds=300)](.github/workflows/ci.yml)
+[![Состояние: Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![правил каталога держится машиной](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/rules.json&cacheSeconds=300)](.rules/bindings.json) [![доля машинного соблюдения семьи, закрытая общими механизмами](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/family.json&cacheSeconds=300)](docs/decisions/016-family-completeness-outranks-the-release-number.md) [![запускаемых механизмов гоняется процессом](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/scripts.json&cacheSeconds=300)](scripts/)
 
 **Механизмы конвейера: скелет один для всех проектов, наполнение своё.**
 Открытие изменения, гейты, очередь и слияние, здоровье общей ветки, выпуск —
@@ -86,6 +86,17 @@
 Строка о нём ушла из таблицы пробелов после первого прогона публикации, а не
 после написания кода
 ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
+
+Первый значок — единый, общий для всей семьи: «Python», его версия и ОС
+окрашены исходом прогона `ci` на `main`, за ними покрытие, выпуск и версия
+проекта. Выпуск показан двумя старшими числами и серым: на PyPI механизмы не
+публикуются, полный тег — на странице выпусков.
+Предрелизный прогон `python-next` значок не красит: каталог пока не читает
+его версию из матрицы (#1019). Зелёный — пройдено, красный — нет, серый — не
+проверялось: windows и mac у проекта серые, потому что их не гоняют. Рисует
+его действие каталога `python-badge` с тега, а не копия здесь: копия
+разошлась бы с каталогом при первой его правке
+([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
 
 Тем же файлом открыт канал соседям и каталогу правил: версия контракта,
 сколько правил каталога проект держит и чем именно, состав классов проверок —
