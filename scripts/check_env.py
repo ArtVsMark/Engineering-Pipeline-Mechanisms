@@ -45,7 +45,7 @@ import paths
 INSTALL_RE: Final = re.compile(r"pip install[^\n]*")
 #: Одно требование внутри такой строки: имя и границы версий.
 NEED_RE: Final = re.compile(r'"([A-Za-z][\w.-]*)((?:[<>=!~]=?[\d.]+,?)*)"')
-#: Нижняя граница требования к интерпретатору: `>=3.12`.
+#: Нижняя граница требования к интерпретатору: `>=3.N`.
 PYTHON_RE: Final = re.compile(r">=\s*(\d+)\.(\d+)")
 
 EXIT_OK: Final = 0
