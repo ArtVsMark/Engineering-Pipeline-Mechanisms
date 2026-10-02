@@ -773,8 +773,14 @@ def test_no_owner_token_is_not_configured(run_script: RunScript) -> None:
 
 
 def test_python_version_is_new_enough() -> None:
-    """Скрипты пользуются синтаксисом, которого нет в старых версиях."""
-    assert sys.version_info >= (3, 11)
+    """Набор идёт на интерпретаторе не ниже планки `requires-python` (#1018).
+
+    Здесь стояло число `(3, 11)` — планка до переезда семьи, вписанная рукой и
+    отставшая на три версии (005). Число берётся из источника планки,
+    `check_env.python_floor`, а не повторяется.
+    """
+    floor = load_script("check_env.py").python_floor(ROOT)
+    assert sys.version_info[:2] >= floor, f"набор идёт на {sys.version_info[:2]}, планка — {floor}"
 
 
 def test_scripts_are_where_the_contract_says() -> None:
