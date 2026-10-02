@@ -269,6 +269,26 @@ def test_a_foreign_name_waits_for_a_live_own_run_and_is_judged_after_it() -> Non
     assert not waiting and any("failure" in problem for problem in done)
 
 
+def test_a_foreign_cancelled_name_waits_for_a_live_own_run_and_fails_after_it() -> None:
+    """Чужое имя, у которого ВСЕ записи отменены: ожидание при живом прогоне, отказ после.
+
+    Сосед случая выше (195, взгляд на #1032): у чужого `failure` тест был, у
+    чужого `cancelled` — нет, а ветка «все записи отменены» тоже спрашивает
+    `still_coming`. Обещание «дыры не открывает» держится только до конца
+    своего прогона — здесь это и проверено.
+    """
+    runs = [
+        run("lint", run_id="mine"),
+        run("test", conclusion="cancelled", run_id="other"),
+    ]
+    live = module.verdict(runs, REQUIRED, "ci-complete", "mine", mine={}, run_live=True)
+    assert live == ([], True), "при живом своём прогоне отменённое чужое имя судится до срока"
+    done, waiting = module.verdict(runs, REQUIRED, "ci-complete", "mine", mine={}, run_live=False)
+    assert not waiting and any("все записи отменены" in problem for problem in done), (
+        "по завершении своего прогона отменённое чужое имя не стало отказом"
+    )
+
+
 def test_two_records_of_the_same_run_are_still_ambiguous() -> None:
     """Внутри одного прогона два одинаковых имени — по-прежнему неоднозначность."""
     runs = [run("lint", run_id="mine"), run("test", run_id="mine"), run("test", run_id="mine")]
