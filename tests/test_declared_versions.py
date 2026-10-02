@@ -35,6 +35,7 @@
 ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 """
 
+import re
 from typing import Any, Final
 
 import pytest
@@ -54,6 +55,8 @@ FROM_MATRIX: Final = "matrix."
 MATRIX_FLOW: Final = WORKFLOWS / "ci.yml"
 MATRIX_JOB: Final = "test-matrix"
 MATRIX_AXIS: Final = "python"
+#: Ячейка, которую сверка умеет сравнить с планкой: ровно `X.Y`.
+CELL: Final = re.compile(r"(\d+)\.(\d+)")
 
 
 def floor_gap(cells: list[str], floor: tuple[int, int]) -> str:
@@ -63,10 +66,17 @@ def floor_gap(cells: list[str], floor: tuple[int, int]) -> str:
     которой проект не обещает, и её отказ красил бы чужое обещание. Выше —
     обещание планки не проверяет ни одна ячейка (002): синтаксис, убранный
     после неё, нашёл бы сосед, а не набор.
+
+    Ячейка иной формы — `3.14t`, `3.15-dev`, `pypy3.11` — для `setup-python`
+    законна, но с планкой её не сравнить: это названный отказ, а не трасса
+    `ValueError` и не молчаливый пропуск (взгляд на #1051, 045).
     """
     if not cells:
         return "в матрице нет ни одной ячейки — обещание не проверяет ничто (075)"
-    lowest = min(tuple(int(part) for part in cell.split(".")[:2]) for cell in cells)
+    odd = [cell for cell in cells if not CELL.fullmatch(cell)]
+    if odd:
+        return f"ячейки {odd} не формы X.Y — сравнить с планкой нечем; назовите их формой X.Y"
+    lowest = min((int(found[1]), int(found[2])) for cell in cells if (found := CELL.fullmatch(cell)))
     wanted = "{}.{}".format(*floor)
     if lowest < floor:
         return f"нижняя ячейка {lowest[0]}.{lowest[1]} ниже планки {wanted}"
@@ -102,6 +112,9 @@ def declared_versions() -> list[tuple[str, str, str]]:
         (["3.15"], "не проверяет ни одна"),
         (["3.15", "3.16"], "не проверяет ни одна"),
         ([], "нет ни одной ячейки"),
+        (["3.14t"], "не формы X.Y"),
+        (["3.14", "3.15-dev"], "не формы X.Y"),
+        (["pypy3.11"], "не формы X.Y"),
     ],
 )
 def test_the_floor_gap_tells_both_halves(cells: list[str], gap: str) -> None:
