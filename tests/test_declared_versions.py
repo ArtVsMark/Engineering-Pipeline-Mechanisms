@@ -73,10 +73,11 @@ def floor_gap(cells: list[str], floor: tuple[int, int]) -> str:
     """
     if not cells:
         return "в матрице нет ни одной ячейки — обещание не проверяет ничто (075)"
-    odd = [cell for cell in cells if not CELL.fullmatch(cell)]
+    parsed = {cell: CELL.fullmatch(cell) for cell in cells}
+    odd = [cell for cell, found in parsed.items() if found is None]
     if odd:
         return f"ячейки {odd} не формы X.Y — сравнить с планкой нечем; назовите их формой X.Y"
-    lowest = min((int(found[1]), int(found[2])) for cell in cells if (found := CELL.fullmatch(cell)))
+    lowest = min((int(found[1]), int(found[2])) for found in parsed.values() if found)
     wanted = "{}.{}".format(*floor)
     if lowest < floor:
         return f"нижняя ячейка {lowest[0]}.{lowest[1]} ниже планки {wanted}"
