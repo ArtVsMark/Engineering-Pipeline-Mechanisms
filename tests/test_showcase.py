@@ -16,7 +16,9 @@
 """
 
 import json
+import os
 import re
+import subprocess
 from functools import cache
 from pathlib import Path
 from typing import Any, Final
@@ -364,3 +366,98 @@ def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
     assert events, "у джоба badges нет фильтра событий workflow_run (075)"
     dead = sorted(events - set(read.get(True) or {}))
     assert not dead, f"фильтр называет {dead}, а у {named} таких событий нет"
+
+
+#: Поддельный `git` шага переноса: каждый вызов отвечает кодом из окружения.
+#: `show` при сбое успевает напечатать часть — так выглядит усечённый значок.
+FAKE_GIT: Final = """#!/bin/bash
+case "$1" in
+  fetch) exit "${FAKE_FETCH:-0}" ;;
+  ls-remote) exit "${FAKE_REMOTE:-0}" ;;
+  ls-tree)
+    [ "${FAKE_TREE:-0}" -ne 0 ] && exit "$FAKE_TREE"
+    [ -n "${FAKE_PREV:-}" ] && printf '%s\\0' .github/badges/python.svg
+    exit 0 ;;
+  show)
+    printf '%s' "${FAKE_PREV:-}"
+    exit "${FAKE_SHOW:-0}" ;;
+esac
+exit 99
+"""
+
+
+def run_unified_drop(tmp_path: Path, outcome: str, **fake: str) -> tuple[int, Path]:
+    """Исполняет шаг «положить единый значок» под `bash -e`, как площадка.
+
+    Возвращает код шага и адрес значка в каталоге публикации. Подстроки не
+    отличают ветвление от текста рядом с ним — исполнение отличает (взгляд на
+    #1037; сосед — `run_archive_step` в `tests/test_findings_archive.py`).
+    """
+    flow = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
+    steps = flow["jobs"]["badges"]["steps"]
+    run = next(step["run"] for step in steps if step.get("name") == "положить единый значок")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "git").write_text(FAKE_GIT, encoding="utf-8")
+    (bin_dir / "git").chmod(0o755)
+    (tmp_path / "badges/.github/badges").mkdir(parents=True)
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path),
+        "OUTCOME": outcome,
+        **fake,
+    }
+    done = subprocess.run(
+        ["bash", "-e", "-c", run],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return done.returncode, tmp_path / "badges/.github/badges/python.svg"
+
+
+def test_a_built_unified_badge_is_laid_or_the_run_fails(tmp_path: Path) -> None:
+    """Собранный значок кладётся; не положить его — отказ, а не зелёный шаг."""
+    code, out = run_unified_drop(tmp_path / "lost", "success")
+    assert code == 1 and not out.exists(), "значок пропал бы с ветки при зелёном шаге"
+    built = tmp_path / "built"
+    (built / ".unified-badge").mkdir(parents=True)
+    (built / ".unified-badge/python.svg").write_text("<svg/>", encoding="utf-8")
+    code, out = run_unified_drop(built, "success")
+    assert code == 0 and out.read_text(encoding="utf-8") == "<svg/>"
+
+
+@pytest.mark.parametrize(("remote", "code"), [("2", 0), ("128", 1), ("0", 1)])
+def test_only_an_absent_branch_publishes_without_the_previous_badge(
+    tmp_path: Path, remote: str, code: int
+) -> None:
+    """Непрочитанная ветка: без прежнего — только на коде 2, прочее — стоп."""
+    done, out = run_unified_drop(tmp_path, "failure", FAKE_FETCH="1", FAKE_REMOTE=remote)
+    assert done == code, f"ls-remote {remote}: значок снят бы с ветки молча"
+    assert not out.exists()
+
+
+def test_an_unread_tree_stops_the_publication(tmp_path: Path) -> None:
+    """Сбой `ls-tree` — не «файла нет»: публикация останавливается."""
+    code, out = run_unified_drop(tmp_path, "failure", FAKE_TREE="128", FAKE_PREV="<old/>")
+    assert code == 1 and not out.exists()
+
+
+def test_a_branch_without_the_badge_publishes_without_it(tmp_path: Path) -> None:
+    """Ветка прочитана, значка на ней нет — законный исход, без отказа."""
+    code, out = run_unified_drop(tmp_path, "failure")
+    assert code == 0 and not out.exists()
+
+
+def test_the_previous_badge_is_carried_whole_or_not_at_all(tmp_path: Path) -> None:
+    """Прежний значок переносится целым; сбой `show` не оставляет усечённого файла."""
+    code, out = run_unified_drop(tmp_path, "failure", FAKE_PREV="<old/>")
+    assert code == 0 and out.read_text(encoding="utf-8") == "<old/>"
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    code, out = run_unified_drop(broken, "failure", FAKE_PREV="<ol", FAKE_SHOW="1")
+    assert code == 1 and not out.exists(), "в каталоге публикации остался усечённый значок"
+    assert not out.with_name("python.svg.prev").exists()
