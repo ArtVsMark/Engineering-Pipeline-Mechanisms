@@ -189,9 +189,7 @@ def inherited(merge_base: str, branch: str, base: str) -> str:
     subjects = [git("log", "-1", "--format=%s", sha).strip() for sha in commits]
     last = merge_base
     for at, sha in enumerate(commits):
-        touched = [
-            name for name in git("diff", "--name-only", "-z", fork, sha).split("\0") if name
-        ]
+        touched = [name for name in git("diff", "--name-only", "-z", fork, sha).split("\0") if name]
         for squash, body in landed:
             if not all(subject in body for subject in subjects[: at + 1]):
                 continue
@@ -246,9 +244,7 @@ def describe(branch: str, base: str) -> Described:
     # быть таким, какого в теле коммита не бывает, иначе граница подделывается
     # текстом. Разбор идёт по одному телу — склеенные документы неразличимы для
     # разметки, и незакрытая вставка одного коммита съедала связь другого.
-    log_bodies = git(
-        "log", "--reverse", "--format=%B%x00", f"{start}..{branch}", f"^origin/{base}"
-    )
+    log_bodies = git("log", "--reverse", "--format=%B%x00", f"{start}..{branch}", f"^origin/{base}")
     bodies = log_bodies.split("\0")
 
     # Связь читается общим модулем, а не своей регуляркой: у гейта разметки она
