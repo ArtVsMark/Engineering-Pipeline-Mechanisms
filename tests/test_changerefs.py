@@ -917,7 +917,6 @@ def test_a_kind_in_a_fence_is_an_example() -> None:
     (record,) = changerefs.resolutions_parsed("Разобрано: abc1234\n```\nРод: пример\n```\n")
     assert record.kind == ""
     assert changerefs.window_meetings_in("```\nРод: пример — окно: тест\n```\n") == []
-    assert changerefs.unplaced_windows_in("```\nРод: пример — окно:\n```\n") == []
 
 
 def test_a_resolution_prints_its_kind_as_a_second_line() -> None:
@@ -937,7 +936,6 @@ def test_a_window_meeting_is_read_with_its_place() -> None:
     assert str(changerefs.window_meetings_in(text)[0]) == (
         f"{changerefs.KIND_KEY} пересказ не сверен — {changerefs.WINDOW_WORD} разбор #1022"
     )
-    assert changerefs.unplaced_windows_in(text) == []
 
 
 def test_a_window_line_does_not_stick_to_a_resolution() -> None:
@@ -949,10 +947,9 @@ def test_a_window_line_does_not_stick_to_a_resolution() -> None:
 
 
 @pytest.mark.parametrize("line", ["Род: имя — окно:", "Род: имя — окно:   ", "Род: — окно: место"])
-def test_a_window_without_a_place_is_refused_not_counted(line: str) -> None:
-    """Встреча без места или имени — не встреча, и это названо, а не проглочено (045, 154)."""
+def test_a_window_without_a_place_is_not_counted(line: str) -> None:
+    """Встреча без места или имени — не встреча: посчитать её нечем (154)."""
     assert changerefs.window_meetings_in(line) == []
-    assert changerefs.unplaced_windows_in(line) == [" ".join(line.split())]
 
 
 def test_no_kind_is_kept_as_a_kind_with_its_reason() -> None:
@@ -992,8 +989,8 @@ def test_the_change_body_carries_the_kind_and_the_window() -> None:
 
 
 def test_both_window_readers_share_one_form() -> None:
-    """Встречи и отказы читают форму одним входом: строка отдаётся, как написана."""
+    """Форму встречи читает один вход: встречей становится только полная строка."""
     text = "Род: имя — окно: место\nРод: без места — окно:\nРод: просто род\n"
     said = [line for line, _ in changerefs.window_lines_in(text)]
     assert said == ["Род: имя — окно: место", "Род: без места — окно:"]
-    assert len(changerefs.window_meetings_in(text)) + len(changerefs.unplaced_windows_in(text)) == 2
+    assert changerefs.window_meetings_in(text) == [changerefs.WindowMeeting("имя", "место")]

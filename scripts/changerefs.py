@@ -140,7 +140,7 @@ KIND_RE: Final = re.compile(
 #: рукой, и строка, молча не узнанная из-за вида тире, потеряла бы встречу
 #: (045). Тире стоит отдельным словом, иначе «само-окно:» в имени рода
 #: читалось бы адресом. Имя и место берутся как есть; пустота любого из них
-#: судится в `unplaced_windows_in`, а не здесь.
+#: судится в `window_meetings_in`, а не здесь.
 WINDOW_RE: Final = re.compile(
     rf"^(?P<kind>.*?)\s*(?<!\S)[—–-]\s*{re.escape(WINDOW_WORD)}\s*(?P<place>.*)$",
     re.IGNORECASE,
@@ -540,8 +540,9 @@ def window_meetings_in(text: str) -> list[WindowMeeting]:
 
     Встреча — строка `Род: <имя> — окно: <место>` с НЕПУСТЫМИ именем и местом.
     Строка этой формы без одного из них встречей не считается и сюда не
-    попадает, но и не теряется молча: её называет `unplaced_windows_in`, и
-    гейт вправе по ней отказать (045, 154).
+    попадает. Отказ по такой строке — дело гейта четвёртого изменения #1022:
+    заводить его разборщик раньше гейта значило бы завести код, до которого не
+    доходит ни один рабочий путь.
     """
     found: list[WindowMeeting] = []
     for _, window in window_lines_in(text):
@@ -549,20 +550,6 @@ def window_meetings_in(text: str) -> list[WindowMeeting]:
         if meeting.kind and meeting.place and meeting not in found:
             found.append(meeting)
     return found
-
-
-def unplaced_windows_in(text: str) -> list[str]:
-    """Строки в форме встречи в окне, у которых нет места или имени рода.
-
-    Отдаются КАК НАПИСАНЫ — ровно то, что отказ процитирует автору. Встреча
-    без места неотличима от «где-то было»: посчитать её нельзя, а выбросить
-    молча — значит сделать вид, что автор её не писал (045, 154).
-    """
-    return [
-        line
-        for line, window in window_lines_in(text)
-        if not (window.group("kind").strip() and window.group("place").strip())
-    ]
 
 
 def window_meetings_in_all(texts: Iterable[str]) -> list[WindowMeeting]:
