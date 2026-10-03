@@ -10,8 +10,8 @@
   транспорт по тегу (решение 024), нужен Python 3.14 вместо прежнего.
 - Предрелизный Python 3.15 проверяется отдельным прогоном `python-next.yml`
   (#1029). Код под 3.14 переписан изменением #1036: с модулей `scripts/`,
-  `tests/` и `packages/` снят `from __future__ import annotations`. Хук
-  `.claude/hooks/push_guard.py` его сохраняет намеренно: хук исполняет
-  системный `python3` окна, а не интерпретатор планки.
+  `tests/` и `packages/` снят `from __future__ import annotations`. С
+  `.claude/hooks/push_guard.py` он снят тоже: страж зовёт обёртка
+  `push_guard.sh` интерпретатором планки (#1058).
 
 #1018
