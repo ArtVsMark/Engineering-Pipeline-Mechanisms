@@ -876,3 +876,124 @@ def test_a_stray_closing_word_is_named(text: str, caught: bool) -> None:
     «безопасно», значило бы догонять каждый новый обход разбором.
     """
     assert bool(changerefs.stray_closing_words(text)) is caught
+
+
+def test_a_kind_line_belongs_to_every_mark_of_its_resolution() -> None:
+    """`Род:` вплотную под снятием — род всех его отпечатков, цепочка дублей тоже (#1022).
+
+    Род — свойство дефекта, а «A, C дубль B» — один дефект, названный трижды:
+    приставь род к одной группе — и счёт рода разошёлся бы с тем, что писал
+    автор.
+    """
+    (record,) = changerefs.resolutions_parsed(
+        f"Разобрано: aaaaaaa, ccccccc дубль bbbbbbb — так\n"
+        f"{changerefs.KIND_KEY} пересказ своей работы не сверен с источником\n"
+    )
+    assert record.kind == "пересказ своей работы не сверен с источником"
+    assert record.marks == ("aaaaaaa", "ccccccc", "bbbbbbb")
+    (lower,) = changerefs.resolutions_parsed("Разобрано: abc1234\nрод:  два   слова \n")
+    assert lower.kind == "два слова", "регистр ключа не различается, пробелы сводятся"
+
+
+def test_an_empty_line_breaks_the_kind_away_from_its_resolution() -> None:
+    """Пустая строка между снятием и родом рвёт связь: соседство строгое (#1022)."""
+    (record,) = changerefs.resolutions_parsed("Разобрано: abc1234\n\nРод: чужой\n")
+    assert record.kind == ""
+    first, second = changerefs.resolutions_parsed(
+        "Разобрано: aaaaaaa\nРазобрано: bbbbbbb\nРод: второй\n"
+    )
+    assert (first.kind, second.kind) == ("", "второй"), "род принадлежит одной строке над ним"
+
+
+def test_a_kind_in_a_fence_is_an_example() -> None:
+    """Пример рода в блоке кода родом не становится — та же маска, что у снятия (090).
+
+    Судится встреча в окне: у неё нет соседа, и пример в заборе стал бы
+    встречей сам. У рода при снятии маска в наблюдении не участвует — строка
+    вплотную под настоящим снятием в блок не попадает: забор занимает строку
+    сам, а отступный блок открывается только после пустой. Поэтому здесь —
+    только то, что род в заборе к снятию над забором не пристаёт.
+    """
+    (record,) = changerefs.resolutions_parsed("Разобрано: abc1234\n```\nРод: пример\n```\n")
+    assert record.kind == ""
+    assert changerefs.window_meetings_in("```\nРод: пример — окно: тест\n```\n") == []
+    assert changerefs.unplaced_windows_in("```\nРод: пример — окно:\n```\n") == []
+
+
+def test_a_resolution_prints_its_kind_as_a_second_line() -> None:
+    """Строка с родом печатается двумя строками и читается обратно той же (#1022)."""
+    record = changerefs.Resolution(marks=("abc1234",), why="— почему", kind="род")
+    assert str(record) == f"Разобрано: abc1234 — почему\n{changerefs.KIND_KEY} род"
+    assert changerefs.resolutions_parsed(str(record)) == [record]
+
+
+def test_a_window_meeting_is_read_with_its_place() -> None:
+    """`Род: <имя> — окно: <место>` — встреча без отпечатка, с местом вместо него."""
+    text = "тема\n\nРод: пересказ не сверен — окно: разбор #1022\nРод: другой – ОКНО: тест\n"
+    assert changerefs.window_meetings_in(text) == [
+        changerefs.WindowMeeting("пересказ не сверен", "разбор #1022"),
+        changerefs.WindowMeeting("другой", "тест"),
+    ]
+    assert str(changerefs.window_meetings_in(text)[0]) == (
+        f"{changerefs.KIND_KEY} пересказ не сверен — {changerefs.WINDOW_WORD} разбор #1022"
+    )
+    assert changerefs.unplaced_windows_in(text) == []
+
+
+def test_a_window_line_does_not_stick_to_a_resolution() -> None:
+    """Строка встречи в окне под снятием остаётся встречей, а не родом снятия."""
+    text = "Разобрано: abc1234\nРод: имя — окно: место\n"
+    (record,) = changerefs.resolutions_parsed(text)
+    assert record.kind == ""
+    assert changerefs.window_meetings_in(text) == [changerefs.WindowMeeting("имя", "место")]
+
+
+@pytest.mark.parametrize("line", ["Род: имя — окно:", "Род: имя — окно:   ", "Род: — окно: место"])
+def test_a_window_without_a_place_is_refused_not_counted(line: str) -> None:
+    """Встреча без места или имени — не встреча, и это названо, а не проглочено (045, 154)."""
+    assert changerefs.window_meetings_in(line) == []
+    assert changerefs.unplaced_windows_in(line) == [" ".join(line.split())]
+
+
+def test_no_kind_is_kept_as_a_kind_with_its_reason() -> None:
+    """`Род: нет — <причина>` хранится текстом рода, а не пустотой (154)."""
+    (record,) = changerefs.resolutions_parsed("Разобрано: abc1234\nРод: нет — разовая опечатка\n")
+    assert record.kind == f"{changerefs.KIND_NONE} — разовая опечатка"
+    assert record.kind.split()[0] == changerefs.KIND_NONE
+
+
+def test_window_meetings_across_bodies_collapse() -> None:
+    """Одна встреча, названная в двух коммитах ветки, — одна встреча."""
+    said = changerefs.window_meetings_in_all(
+        ["Род: имя — окно: место", "Род: имя — окно: место\nРод: имя — окно: другое"]
+    )
+    assert said == [
+        changerefs.WindowMeeting("имя", "место"),
+        changerefs.WindowMeeting("имя", "другое"),
+    ]
+
+
+def test_the_marked_lines_know_their_numbers() -> None:
+    """Номер строки считается по маске: пример в заборе номер не занимает молча."""
+    text = "Разобрано: aaaaaaa\n```\nРазобрано: bbbbbbb\n```\nРазобрано: ccccccc"
+    said = [index for index, _ in changerefs.marked_lines_at(text, changerefs.RESOLVED_RE)]
+    assert said == [0, 4]
+    assert len(list(changerefs.marked_lines(text, changerefs.RESOLVED_RE))) == len(said)
+
+
+def test_the_change_body_carries_the_kind_and_the_window() -> None:
+    """Тело изменения несёт те же строки, что тело уплотнения: род и встречу (#1022)."""
+    said = agent_pr.describe_from(
+        ["fix: правка"],
+        ["fix: правка\n\nRefs #7\n\nРазобрано: abc1234 — так\nРод: имя\n\nРод: вне — окно: тут\n"],
+    )
+    assert "Разобрано: abc1234 — так\nРод: имя" in said.body
+    assert "Род: вне — окно: тут" in said.body
+
+
+def test_both_window_readers_share_one_form() -> None:
+    """Встречи и отказы читают форму одним входом: строка отдаётся, как написана."""
+    text = "Род: имя — окно: место\nРод: без места — окно:\nРод: просто род\n"
+    said = [line for line, _ in changerefs.window_lines_in(text)]
+    assert said == ["Род: имя — окно: место", "Род: без места — окно:"]
+    assert len(changerefs.window_meetings_in(text)) + len(changerefs.unplaced_windows_in(text)) == 2

@@ -227,3 +227,40 @@ def test_the_subject_is_what_git_gives(tmp_path: Path, message: str) -> None:
     git("init", "-q")
     git("commit", "-q", "--allow-empty", "--cleanup=verbatim", "-m", message)
     assert body.subject_of(message) == git("log", "-1", "--format=%s").rstrip("\n")
+
+
+def test_a_kind_rides_into_the_squash_with_its_resolution() -> None:
+    """Род, написанный под снятием, доезжает до общей ветки второй строкой (#1022).
+
+    Строка снятия в теле уплотнения собирается заново, и без переноса рода он
+    оставался бы в стёртой ветке.
+    """
+    said = body.compose_from(
+        ["тема"], ["тема\n\nRefs #7\n\nРазобрано: abc1234 — так\nРод: пересказ не сверен\n"]
+    )
+    assert "Разобрано: abc1234 — так\nРод: пересказ не сверен" in said
+    (record,) = body.changerefs.resolutions_parsed(said)
+    assert record.kind == "пересказ не сверен", "тело уплотнения читается тем же разбором"
+
+
+def test_a_window_meeting_rides_into_the_squash() -> None:
+    """Встреча в окне едет в общую ветку своим абзацем, один раз на ветку."""
+    said = body.compose_from(
+        ["первый", "второй"],
+        ["первый\n\nРод: имя — окно: место\n", "второй\n\nРод: имя — окно: место\n"],
+    )
+    assert said.count("Род: имя — окно: место") == 1
+    assert body.changerefs.window_meetings_in(said) == [
+        body.changerefs.WindowMeeting("имя", "место")
+    ]
+
+
+def test_a_mark_resolved_twice_keeps_its_first_kind() -> None:
+    """Отпечаток, снятый в ветке дважды с разными родами, уезжает с первым.
+
+    Та же граница, что у причины: побеждает первая запись отпечатка.
+    """
+    said = body.changerefs.resolutions_in_all(
+        ["Разобрано: abc1234\nРод: первый", "Разобрано: abc1234, def5678\nРод: второй"]
+    )
+    assert said == ["Разобрано: abc1234\nРод: первый", "Разобрано: def5678\nРод: второй"]
