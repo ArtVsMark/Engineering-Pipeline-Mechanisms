@@ -442,3 +442,18 @@ def test_an_own_edit_by_the_last_commit_is_silent(
     edit_rulebook(tree, "свод правит последний коммит", day=1, session=WINDOW_A)
     assert run(tree, "--head", "work") == CLEAN
     assert "изменён этим окном" not in capsys.readouterr().out
+
+
+def test_own_under_bounds_the_window_on_both_sides(tree: Path) -> None:
+    """`own_under` берёт свою правку между началом и головой, строго с обеих сторон."""
+    edit_rulebook(tree, "своя правка посередине", day=0.5, session=WINDOW_A)
+    edit_rulebook(tree, "правка соседа", day=0.6, session=WINDOW_B)
+    commit(tree, "голова окна", day=1)
+    found = module.window.commits("main", cwd=str(tree))
+    start, head = found[0], found[-1]
+    own = module.own_under(WINDOW_A, start, head, ("main",), cwd=str(tree))
+    assert [edit.message.splitlines()[0] for edit in own] == ["своя правка посередине"]
+    assert module.own_under(WINDOW_A, start, own[0], ("main",), cwd=str(tree)) == []
+    said = module.said_own(WINDOW_A, own)
+    assert said[0].startswith(f"окно {WINDOW_A}: свод изменён этим окном 1 раз")
+    assert "своя правка посередине" in said[1]
