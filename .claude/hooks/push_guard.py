@@ -46,8 +46,6 @@ git — единственное место, где это возможно, с�
 """
 
 import json
-import re
-import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -65,18 +63,12 @@ from typing import Final
 SHARED: Final = "main"
 #: Ключи `git push`, за которыми идёт значение, а не имя ветки.
 WITH_VALUE: Final = frozenset({"--repo", "-o", "--push-option", "--exec", "--receive-pack"})
-#: Перенаправление оболочки — не довод git. `shlex.split` отдаёт его словом, и
-#: прежде `git push origin x 2>&1` давал вторую цель «2>&1» (#1075).
-#:
-#: ПРАВИЛО ОДНО, А НЕ ПЕРЕЧЕНЬ ФОРМ. Первая редакция знала только слово,
-#: целиком состоящее из перенаправления, и взгляд сразу нашёл два обхода:
-#: приклеенное к ветке (`agent/x>out.log`) и голое `>& файл` (`55f1f51`,
-#: `3406ba5`). Поэтому разбор повторяет правило самой оболочки: перенаправление
-#: начинается с первого `<` или `>` в слове (с `&` перед ним — `&>`). Голова до
-#: него — цель толчка, если она не номер дескриптора (`2>&1`). Хвост без цели
-#: (`>`, `>&`, `<<`) забирает и следующее слово. Так покрыты `>`, `>>`, `<`,
-#: `&>`, `&>>`, `>&N`, `<&N`, `>|`, `<>`, `<<`, `<<<`, слитно и раздельно.
-REDIRECT: Final = re.compile(r"^(?P<head>[^<>]*?)(?P<op>&?[<>][<>&|]*)(?P<aim>.*)$")
+#: Управляющие операторы оболочки: они делят строку на команды. Длинные — раньше
+#: коротких, иначе `&&` прочёлся бы двумя `&`.
+CONTROL: Final = ("&&", "||", ";;", "|&", ";", "|", "&", "\n", "(", ")")
+#: Операторы перенаправления. Цель — следующее слово, слитное или раздельное
+#: (`>out.log`, `> out.log`, `2>&1`), и она снимается вместе с оператором.
+REDIRECTS: Final = ("&>>", "&>", "<<<", "<<-", ">>", ">|", ">&", "<<", "<>", "<&", ">", "<")
 #: Глобальные ключи самого git со значением: `git -C путь push`. Отделять их
 #: нужно, потому что подкоманда — первое слово без ключа.
 GLOBAL_WITH_VALUE: Final = frozenset(
@@ -289,11 +281,11 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
         if script is None:
             return [segment], ""
         try:
-            inner = shlex.split(script)
+            inner = commands_of(script)
         except ValueError:
             return [], f"скрипт оболочки не разбирается: {script[:60]}"
         found: list[list[str]] = []
-        for part in segments(inner):
+        for part in inner:
             deeper, blind = unwrap(part, depth - 1)
             if blind:
                 return [], blind
@@ -309,11 +301,11 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
             return [], blind
         if script is not None:
             try:
-                inner = shlex.split(script)
+                inner = commands_of(script)
             except ValueError:
                 return [], f"строка `env -S` не разбирается: {script[:60]}"
             split: list[list[str]] = []
-            for part in segments(inner):
+            for part in inner:
                 deeper, blind = unwrap(part, depth - 1)
                 if blind:
                     return [], blind
@@ -329,6 +321,126 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
     return [segment], ""
 
 
+def commands_of(text: str) -> list[list[str]]:
+    """Команды строки оболочки — словами, без перенаправлений.
+
+    РАЗБОР ПО ПРАВИЛУ ОБОЛОЧКИ, А НЕ ПОВЕРХ `shlex.split`. Прежний разбор
+    делил строку `shlex.split`, а тот не знает операторов и снимает кавычки:
+    перенаправление чинилось формами поверх уже потерянного, и взгляд трижды
+    находил следующую — приклеенное к ветке, голое `>&`, `>` в кавычках,
+    склейку `cd d&&git …` и `true;git …` (`55f1f51`, `3406ba5`, `6254a26`,
+    `9248712`, `4dcc9c8`). Здесь один проход, как у самой оболочки:
+
+    * кавычки и обратная косая черта защищают символы — `>` и `&&` внутри
+      них часть слова;
+    * вне кавычек управляющий оператор (`CONTROL`) кончает команду, где бы он
+      ни стоял, хоть вплотную к слову;
+    * вне кавычек оператор перенаправления (`REDIRECTS`) снимается вместе со
+      своей целью — следующим словом. Номер дескриптора перед ним — только
+      слово из одних цифр без кавычек вплотную к оператору: `2>&1` —
+      перенаправление, `agent/x2>&1` — ветка `agent/x2`;
+    * `#` в начале слова открывает комментарий до конца строки.
+
+    * тело встроенного документа (`<<EOF` … `EOF`) — данные: строки до
+      разделителя пропускаются целиком, `git push` в записываемом файле —
+      текст, а не действие.
+
+    ПРЕДЕЛ НАЗВАН. Подстановки `$(…)`, обратные кавычки и переменные не
+    раскрываются — их не раскрывает и сторож, судящий слова. Незакрытая
+    кавычка — ``ValueError``: команду не прочесть, и сторож об этом говорит.
+    """
+    commands: list[list[str]] = [[]]
+    word: list[str] = []
+    started = quoted = dropping = False
+    #: Разделители встроенных документов, ждущие конца строки: (слово, `<<-`).
+    heredocs: list[tuple[str, bool]] = []
+    heredoc: bool | None = None
+
+    def finish() -> None:
+        nonlocal started, quoted, dropping, heredoc
+        if started:
+            if dropping:
+                dropping = False
+                if heredoc is not None:
+                    heredocs.append(("".join(word), heredoc))
+                    heredoc = None
+            else:
+                commands[-1].append("".join(word))
+        word.clear()
+        started = quoted = False
+
+    def skip_bodies(at: int) -> int:
+        """С начала строки `at` пропускает тела ждущих документов; отдаёт новое место."""
+        for mark, tabs in heredocs:
+            while at < len(text):
+                end = text.find("\n", at)
+                line = text[at : len(text) if end < 0 else end]
+                at = len(text) if end < 0 else end + 1
+                if (line.lstrip("\t") if tabs else line) == mark:
+                    break
+        heredocs.clear()
+        return at
+
+    at = 0
+    while at < len(text):
+        char = text[at]
+        if char in " \t":
+            finish()
+            at += 1
+        elif char == "\\":
+            if text[at + 1 : at + 2] == "\n":
+                at += 2
+                continue
+            word.append(text[at + 1 : at + 2])
+            started = quoted = True
+            at += 2
+        elif char == "'":
+            end = text.find("'", at + 1)
+            if end < 0:
+                raise ValueError("одиночная кавычка не закрыта")
+            word.append(text[at + 1 : end])
+            started = quoted = True
+            at = end + 1
+        elif char == '"':
+            at += 1
+            while True:
+                if at >= len(text):
+                    raise ValueError("двойная кавычка не закрыта")
+                if text[at] == '"':
+                    break
+                if text[at] == "\\" and text[at + 1 : at + 2] in ('"', "\\", "$", "`"):
+                    at += 1
+                word.append(text[at])
+                at += 1
+            started = quoted = True
+            at += 1
+        elif char == "#" and not started:
+            end = text.find("\n", at)
+            at = len(text) if end < 0 else end
+        elif redirect := next((one for one in REDIRECTS if text.startswith(one, at)), None):
+            if started and not quoted and "".join(word).isdigit():
+                word.clear()
+                started = False
+            else:
+                finish()
+            dropping = True
+            heredoc = redirect == "<<-" if redirect in ("<<", "<<-") else None
+            at += len(redirect)
+        elif control := next((one for one in CONTROL if text.startswith(one, at)), None):
+            finish()
+            dropping = False
+            commands.append([])
+            at += len(control)
+            if control == "\n" and heredocs:
+                at = skip_bodies(at)
+        else:
+            word.append(char)
+            started = True
+            at += 1
+    finish()
+    return [command for command in commands if command] or [[]]
+
+
 def push_targets(command: str) -> Look:
     """Что сторож разглядел: цели толчка, «не толчок» или причину слепоты.
 
@@ -341,10 +453,10 @@ def push_targets(command: str) -> Look:
     Нашёл внешний взгляд на #181.
     """
     try:
-        words = shlex.split(command)
+        parts = commands_of(command)
     except ValueError:
         return Look(blind="команда не разбирается на слова — кавычки не закрыты")
-    for part in segments(words):
+    for part in parts:
         found, blind = unwrap(part, DEPTH)
         if blind:
             return Look(blind=blind)
@@ -359,21 +471,6 @@ def push_targets(command: str) -> Look:
     return Look()
 
 
-def segments(words: list[str]) -> list[list[str]]:
-    """Части составной строки: `cd … && git push …` — это две команды.
-
-    Без разбиения вызов git, стоящий не первым, проходил мимо сторожа: живой
-    промах при постройке — `cd x && git push origin main` не отвергался.
-    """
-    found: list[list[str]] = [[]]
-    for word in words:
-        if word in {"&&", "||", ";", "|", "&"}:
-            found.append([])
-            continue
-        found[-1].append(word)
-    return found
-
-
 def named_branches(arguments: list[str]) -> list[str]:
     """Ветки-цели из аргументов `git push`, кроме первого (удалённого имени)."""
     found: list[str] = []
@@ -386,12 +483,6 @@ def named_branches(arguments: list[str]) -> list[str]:
         if word in WITH_VALUE:
             skip = True
             continue
-        if redirect := REDIRECT.match(word):
-            skip = not redirect["aim"]
-            head = redirect["head"]
-            if not head or head.isdigit():
-                continue
-            word = head
         if word.startswith("-"):
             continue
         if not seen_remote:

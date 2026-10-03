@@ -882,3 +882,69 @@ def test_a_number_is_a_descriptor_only_alone() -> None:
     """
     assert module.push_targets("git push origin agent/x 2>&1").targets == ("agent/x",)
     assert module.push_targets("git push origin agent/x2>&1").targets == ("agent/x2",)
+
+
+# --- разбор строки по правилу оболочки (#1076, 210) ----------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "expect"),
+    [
+        ("git push origin 'x>y:main'", ("x>y:main",)),
+        ('git push origin "agent/x&&y"', ("agent/x&&y",)),
+        ("git push origin agent/x\\>y", ("agent/x>y",)),
+    ],
+    ids=["одиночные", "двойные", "косая черта"],
+)
+def test_a_quoted_operator_is_part_of_the_word(command: str, expect: tuple[str, ...]) -> None:
+    """`>` и `&&` в кавычках — часть слова, а не оператор (`6254a26`, `3a20466`).
+
+    `shlex.split` снимал кавычки до разбора, и `'x>y:main'` читалось
+    перенаправлением: цель толчка пропадала, а с ней и отказ на общую ветку.
+    """
+    assert module.push_targets(command).targets == expect
+
+
+def test_a_quoted_shared_target_is_still_refused() -> None:
+    """Цель на общую ветку в кавычках с `>` — отказ, а не пропуск."""
+    said = ask("git push origin 'x>y:main'")
+    assert said.returncode == 2, said.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd d&&git push origin main",
+        "true;git push origin main",
+        "false||git push origin main",
+        "ls|git push origin main",
+        "(git push origin main)",
+        "ls\ngit push origin main",
+    ],
+    ids=["&&", ";", "||", "|", "скобки", "перевод строки"],
+)
+def test_a_glued_control_operator_still_splits_commands(command: str) -> None:
+    """Оператор вплотную к слову делит команды так же, как отдельно стоящий (`9248712`)."""
+    assert module.push_targets(command).targets == ("main",), command
+
+
+def test_a_push_after_a_heredoc_body_is_seen() -> None:
+    """Вторая половина: тело документа — данные, но команда ПОСЛЕ него читается."""
+    command = "cat > a.md <<'EOF'\nтекст\nEOF\ngit push origin main"
+    assert module.push_targets(command).targets == ("main",)
+    tabbed = "cat > a.md <<-EOF\n\ttekst\n\tEOF\ngit push origin main"
+    assert module.push_targets(tabbed).targets == ("main",)
+
+
+def test_a_comment_is_not_a_command() -> None:
+    """`#` в начале слова — комментарий до конца строки; `a#b` — слово."""
+    assert module.push_targets("ls # git push origin main").targets == ()
+    # Разделитель внутри комментария команды не начинает: без разбора
+    # комментария `;` отделил бы толчок, и сторож отверг бы безобидное.
+    assert module.push_targets("ls # ; git push origin main").targets == ()
+    assert module.push_targets("git push origin agent/a#b").targets == ("agent/a#b",)
+
+
+def test_an_unclosed_quote_blinds_the_guard() -> None:
+    """Незакрытая кавычка — слепота сторожа, а не «не толчок» (045)."""
+    assert module.push_targets("git push origin 'main").blind
