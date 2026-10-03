@@ -678,3 +678,23 @@ def test_the_reachability_sign_is_not_back(tmp_path: Path) -> None:
         "достижимость из общей снова читается как «работа слита» — признак,"
         f" снятый по замеру, вернулся и отвергает законный толчок: {said}"
     )
+
+
+@pytest.mark.parametrize(
+    "tail",
+    ["2>&1", ">out.log", "> out.log", ">> out.log", "2>/dev/null", "&>out.log", "< in.txt"],
+)
+def test_a_shell_redirect_is_not_a_push_target(tail: str) -> None:
+    """Перенаправление оболочки — не ветка-цель, а цель толчка видна по-прежнему.
+
+    ЗАМЕР 03.10.2026 (#1075): `git push -u origin agent/x 2>&1 | tail -2` был
+    отвергнут — сторож прочёл «2>&1» второй целью, хотя голова стояла на
+    `agent/x`. Слитная и раздельная формы проверяются обе: у раздельной
+    снимается и следующее слово.
+    """
+    assert module.push_targets(f"git push -u origin agent/x {tail}").targets == ("agent/x",)
+
+
+def test_a_branch_after_a_redirect_is_still_seen() -> None:
+    """Вторая половина: ветка, названная после перенаправления, целью остаётся (140)."""
+    assert module.push_targets("git push origin 2>&1 agent/x").targets == ("agent/x",)

@@ -48,6 +48,7 @@ git — единственное место, где это возможно, с�
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -66,6 +67,11 @@ from typing import Final
 SHARED: Final = "main"
 #: Ключи `git push`, за которыми идёт значение, а не имя ветки.
 WITH_VALUE: Final = frozenset({"--repo", "-o", "--push-option", "--exec", "--receive-pack"})
+#: Перенаправление оболочки — не довод git. `shlex.split` отдаёт его словом, и
+#: прежде `git push origin x 2>&1` давал вторую цель «2>&1» (#1075). Цель
+#: перенаправления стоит слитно (`>out.log`, `2>&1`) или следующим словом
+#: (`> out.log`) — тогда группа `aim` пуста, и следующее слово снимается тоже.
+REDIRECT: Final = re.compile(r"^(?:\d*|&)(?:>>?|<)(?P<aim>&?\S*)$")
 #: Глобальные ключи самого git со значением: `git -C путь push`. Отделять их
 #: нужно, потому что подкоманда — первое слово без ключа.
 GLOBAL_WITH_VALUE: Final = frozenset(
@@ -374,6 +380,9 @@ def named_branches(arguments: list[str]) -> list[str]:
             continue
         if word in WITH_VALUE:
             skip = True
+            continue
+        if redirect := REDIRECT.match(word):
+            skip = not redirect["aim"]
             continue
         if word.startswith("-"):
             continue
