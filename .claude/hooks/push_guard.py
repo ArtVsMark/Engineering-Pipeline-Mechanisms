@@ -45,8 +45,6 @@ git — единственное место, где это возможно, с�
 с причиной в stderr.
 """
 
-from __future__ import annotations
-
 import json
 import shlex
 import subprocess
@@ -539,7 +537,7 @@ def main() -> int:
     """Точка входа: читает событие, решает, пускать ли команду."""
     try:
         event = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         # Событие не разобралось — сторож молчит: ронять чужой инструмент из-за
         # своего разбора хуже, чем пропустить одну команду (084).
         return 0
