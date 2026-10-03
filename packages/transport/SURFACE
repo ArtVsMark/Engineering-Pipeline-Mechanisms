@@ -1,42 +1,42 @@
-# Поверхность транспорта, формат 2. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
+# Поверхность транспорта, формат 4. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
 VERSION 0.3.0
 requires-python >=3.14
 dependencies —
 ghrest.API_ROOT
 ghrest.API_VERSION
-ghrest.TIMEOUT
-ghrest.PER_PAGE
-ghrest.QUOTA_FLOOR
-ghrest.ENV_QUOTA_FLOOR
-ghrest.TransportError(RuntimeError)
-ghrest.NotFound(TransportError)
-ghrest.RateLimited(TransportError)
-ghrest.RateLimited.__init__(self, message: str, *, reset_at: int=0, resource: str='core') -> None
-ghrest.RateLimited.wait_seconds(self, *, now: float | None=None) -> int
-ghrest.RateLimited.describe(self, *, now: float | None=None) -> str
-ghrest.token_from_env() -> str
-ghrest.quota_floor() -> int
-ghrest.TRANSIENT
-ghrest.EXHAUSTED
-ghrest.TRIES
 ghrest.BACKOFF
 ghrest.CREATES
-ghrest.IDEMPOTENT
-ghrest.request(method: str, path: str, token: str, body: dict[str, Any] | None=None) -> Any
+ghrest.ENV_QUOTA_FLOOR
+ghrest.EXHAUSTED
 ghrest.GRAPHQL
+ghrest.IDEMPOTENT
+ghrest.MERGED_WINDOW
 ghrest.NO_REST
+ghrest.NotFound(TransportError)
 ghrest.OPERATION_RE
-ghrest.operation_of(query: str) -> str
+ghrest.PER_PAGE
+ghrest.QUOTA_FLOOR
+ghrest.RateLimited(TransportError)
+ghrest.RateLimited.__init__(self, message: str, *, reset_at: int=0, resource: str='core') -> None
+ghrest.RateLimited.describe(self, *, now: float | None=None) -> str
+ghrest.RateLimited.wait_seconds(self, *, now: float | None=None) -> int
+ghrest.TIMEOUT
+ghrest.TRANSIENT
+ghrest.TRIES
+ghrest.TransportError(RuntimeError)
+ghrest.files_of(repo: str, number: int, token: str) -> frozenset[str]
 ghrest.graphql(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]
+ghrest.merged_changes(repo: str, token: str, limit: int=MERGED_WINDOW) -> list[dict[str, Any]]
+ghrest.merged_page(repo: str, token: str, limit: int=MERGED_WINDOW) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]
+ghrest.operation_of(query: str) -> str
 ghrest.paginate(path: str, token: str, key: str | None=None) -> Iterator[dict[str, Any]]
+ghrest.quota_floor() -> int
+ghrest.quote(value: str) -> str
 ghrest.raw_json(url: str, timeout: int=30) -> dict[str, Any]
 ghrest.raw_text(url: str, timeout: int=30) -> str
-ghrest.MERGED_WINDOW
-ghrest.files_of(repo: str, number: int, token: str) -> frozenset[str]
-ghrest.merged_page(repo: str, token: str, limit: int=MERGED_WINDOW) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]
-ghrest.merged_changes(repo: str, token: str, limit: int=MERGED_WINDOW) -> list[dict[str, Any]]
-ghrest.quote(value: str) -> str
-report.LIMIT
+ghrest.request(method: str, path: str, token: str, body: dict[str, Any] | None=None) -> Any
+ghrest.token_from_env() -> str
 report.DRY
-report.cut(text: str, limit: int=LIMIT) -> str
+report.LIMIT
 report.announce(dry_run: bool) -> None
+report.cut(text: str, limit: int=LIMIT) -> str
