@@ -52,9 +52,6 @@ CI: Final = paths.WORKFLOWS / "ci.yml"
 #: Вызов прогона ИЗ ЭТОГО ЖЕ ДЕРЕВА.
 OUR_CALL: Final = "./"
 
-#: Команда шага прогона: строка, начинающаяся с зовомого инструмента. Читается
-#: список РАЗРЕШЁННОГО (068): что не узнано, то не запускается, а называется.
-RUNNABLE: Final = ("ruff ", "mypy ", "pytest", "python scripts/")
 #: Переменная окружения с каталогом кода конвейера у общего шага (#990): её
 #: ставит общий шаг, её же ставит предполётная и читает гейт шагов.
 MECHANISMS: Final = "MECHANISMS"
@@ -123,6 +120,12 @@ class Step:
 TYPES: Final = "mypy "
 #: Формы вызова шага типов: сам инструмент и он же модулем интерпретатора.
 TYPES_CALLS: Final = (TYPES, "python -m mypy ", "python3 -m mypy ")
+#: Команда шага прогона: строка, начинающаяся с зовомого инструмента. Читается
+#: список РАЗРЕШЁННОГО (068): что не узнано, то не запускается, а называется.
+#: Формы шага типов берутся из `TYPES_CALLS`, а не вписываются второй раз:
+#: прежде `python -m mypy` узнавала подстановка, а отбор шагов отбрасывал
+#: его молча — до подстановки он не доходил (находка `7bfdb6c` на #1078).
+RUNNABLE: Final = ("ruff ", "pytest", "python scripts/", *TYPES_CALLS)
 #: Признак строки установки внутри блока шага.
 INSTALL: Final = "pip install"
 #: Где лежат окружения шагов — вне дерева проекта, по одному на строку установки.
@@ -359,17 +362,35 @@ def lint_python(installs: str, root: Path) -> Path:
     ready = where / READY
     if ready.is_file() and time.time() - ready.stat().st_mtime < ENV_MAX_AGE:
         return python
-    shutil.rmtree(where, ignore_errors=True)
+    # СБОРКА — В СОСЕДНИЙ КАТАЛОГ, ПОДМЕНА — ТОЛЬКО ГОТОВЫМ (находка `9e96bfe`).
+    # Стирать прежнее до сборки значило бы потерять рабочее окружение, если
+    # пересборка устаревшего упала без сети. Недособранное прежнее (без метки)
+    # не стоит ничего и стирается сразу.
+    stale = ready.is_file()
+    if not stale:
+        shutil.rmtree(where, ignore_errors=True)
+    fresh = where.with_name(where.name + ".build")
+    shutil.rmtree(fresh, ignore_errors=True)
     for command in (
-        [sys.executable, "-m", "venv", str(where)],
-        [str(python), "-m", "pip", "install", "--quiet", *packages],
+        [sys.executable, "-m", "venv", str(fresh)],
+        [str(fresh / "bin" / "python"), "-m", "pip", "install", "--quiet", *packages],
     ):
         done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
         if done.returncode != 0:
-            raise NotRun(
+            shutil.rmtree(fresh, ignore_errors=True)
+            why = (
                 f"окружение шага типов не собрано ({' '.join(command[:4])}…): "
                 f"{(done.stderr or done.stdout).strip()[-300:]}"
             )
+            if stale:
+                # Названное отступление, а не тихое (045): прежнее собрано тем же
+                # составом и тем же интерпретатором, устарело лишь разрешение
+                # диапазонов, и окно об этом знает.
+                print(f"предупреждение: {why}; взято прежнее окружение {where}", file=sys.stderr)
+                return python
+            raise NotRun(why)
+    shutil.rmtree(where, ignore_errors=True)
+    fresh.rename(where)
     ready.write_text(said + "\n", encoding="utf-8")
     return python
 

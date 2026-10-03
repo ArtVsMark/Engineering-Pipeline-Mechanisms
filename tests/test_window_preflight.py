@@ -1020,18 +1020,43 @@ def test_a_half_built_env_is_not_taken_for_ready(
     assert not (where / "bin" / "python").exists(), "недособранное не стёрто перед сборкой"
 
 
-def test_a_stale_env_is_rebuilt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Метка старше срока — пересборка: площадка разрешает диапазоны заново (`793ebcd`)."""
+def test_a_stale_env_is_rebuilt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Метка старше срока — пересборка: площадка разрешает диапазоны заново (`793ebcd`).
+
+    Пересборка без сети упала — прежнее окружение не стёрто и взято с
+    названным предупреждением (`9e96bfe`): оно собрано тем же составом.
+    """
     where, said = preflight.env_dir("pip install mypy", tmp_path)
     (where / "bin").mkdir(parents=True)
+    (where / "bin" / "python").write_text("", encoding="utf-8")
     ready = where / preflight.READY
     ready.write_text(said, encoding="utf-8")
     old = time.time() - preflight.ENV_MAX_AGE - 60
     os.utime(ready, (old, old))
     asked = refuse_builds(monkeypatch)
-    with pytest.raises(preflight.NotRun):
-        preflight.lint_python("pip install mypy", tmp_path)
+    assert preflight.lint_python("pip install mypy", tmp_path) == where / "bin" / "python"
     assert asked, "устаревшее окружение взято без пересборки"
+    assert (where / "bin" / "python").exists(), "рабочее окружение стёрто до сборки"
+    assert "взято прежнее окружение" in capsys.readouterr().err
+
+
+def test_a_finished_build_replaces_the_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сборка прошла — готовое встаёт на место прежнего вместе с меткой."""
+    where, said = preflight.env_dir("pip install mypy", tmp_path)
+
+    def build(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        if command[1:3] == ["-m", "venv"]:
+            (Path(command[3]) / "bin").mkdir(parents=True)
+            (Path(command[3]) / "bin" / "python").write_text("новое", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(preflight.subprocess, "run", build)
+    python = preflight.lint_python("pip install mypy", tmp_path)
+    assert python == where / "bin" / "python" and python.read_text(encoding="utf-8") == "новое"
+    assert (where / preflight.READY).read_text(encoding="utf-8").strip() == said
+    assert not where.with_name(where.name + ".build").exists(), "каталог сборки остался"
 
 
 def test_the_env_key_follows_the_interpreter(
@@ -1129,3 +1154,23 @@ def test_a_called_workflow_keeps_its_jobs_apart(tmp_path: Path) -> None:
     found = {one.command: one.installs for one in preflight.steps(ci)}
     assert found["mypy a/"] == "python -m pip install mypy"
     assert found["mypy b/"] == "", "строка установки чужого джоба досталась шагу"
+
+
+def test_a_module_call_of_mypy_in_a_workflow_reaches_the_substitution(tmp_path: Path) -> None:
+    """Шаг `python -m mypy` из прогона доходит до подстановки через `steps()` (`7bfdb6c`).
+
+    Прежний тест строил `Step` руками и обходил отбор шагов, а отбор по
+    `RUNNABLE` такой шаг отбрасывал молча.
+    """
+    flows = tmp_path / preflight.paths.WORKFLOWS
+    flows.mkdir(parents=True)
+    ci = flows / "ci.yml"
+    ci.write_text(
+        "jobs:\n  lint:\n    steps:\n"
+        "      - run: python -m pip install mypy\n"
+        "      - name: типы\n        run: python -m mypy scripts/\n",
+        encoding="utf-8",
+    )
+    found = [one for one in preflight.steps(ci) if one.name == "типы"]
+    assert found, "шаг `python -m mypy` отброшен отбором шагов"
+    assert found[0].installs == "python -m pip install mypy"
