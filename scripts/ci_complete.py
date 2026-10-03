@@ -232,6 +232,13 @@ def worst_per_name(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 #: файл они разошлись: у гейта теперь собственный прогон, чужой всем соседям.
 SUMMARISED: Final = "ci"
 
+#: Пауза между опросами соседей, секунд. Каждый опрос — запрос квоты токена
+#: прогона, и опрос идёт на КАЖДОЙ голове, включая отменённые. Замер
+#: 03.10.2026 (#1065): при 20 с зелёный заход на #1073 шёл 139 с — около семи
+#: опросов, отменённый 523 с — около двадцати шести. 30 с режет опросы на
+#: треть; цена — вердикт позже не более чем на 10 с (решение владельца, #1065).
+POLL_INTERVAL: Final = 30
+
 
 def summarised_run(
     repo: str, sha: str, token: str, name: str = SUMMARISED
@@ -627,7 +634,9 @@ def main(argv: list[str] | None = None) -> int:
         help="имя прогона, чьи джобы сводятся: его записи имеют преимущество",
     )
     parser.add_argument("--timeout", type=int, default=900, help="сколько ждать соседей, секунд")
-    parser.add_argument("--interval", type=int, default=20, help="пауза между опросами, секунд")
+    parser.add_argument(
+        "--interval", type=int, default=POLL_INTERVAL, help="пауза между опросами, секунд"
+    )
     args = parser.parse_args(argv)
 
     try:
