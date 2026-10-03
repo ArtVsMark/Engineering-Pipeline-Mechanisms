@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -66,12 +67,32 @@ SNIPPET: Final = re.compile(r'(\S+) -c "\n(.*?)\n" "\$1"', re.S)
 WANT: Final = re.compile(r"^want=(\S+)$", re.M)
 
 
+def hook_interpreter() -> str:
+    """`python<планка>` — тот интерпретатор, которым хук исполняет свой разбор.
+
+    Не `sys.executable`: набор вправе идти выше планки, и синтаксис новее неё
+    он исполнил бы, а хук — нет (взгляд на #1049, 107). Нет интерпретатора
+    планки, и набор идёт не на ней (предрелизный прогон) — пропуск с причиной:
+    исполнимость разбора проверяет прогон на планке, а подставить свой
+    интерпретатор значило бы проверить другое.
+    """
+    floor = load_script("check_env.py").python_floor(ROOT)
+    found = shutil.which("python{}.{}".format(*floor))
+    if not found and sys.version_info[:2] != floor:
+        pytest.skip(
+            "нет python{}.{}: разбор хука исполняет прогон на планке (ci.yml), а не этот".format(
+                *floor
+            )
+        )
+    return found or sys.executable
+
+
 def snippet_says(mode: str) -> str:
-    """Что печатает встроенный в хук разбор дерева на этом дереве."""
+    """Что печатает встроенный в хук разбор дерева, исполненный интерпретатором хука."""
     found = SNIPPET.search(HOOK.read_text(encoding="utf-8"))
     assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
     done = subprocess.run(
-        [sys.executable, "-c", found[2], mode],
+        [hook_interpreter(), "-c", found[2], mode],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -91,7 +112,7 @@ def test_the_hooks_snippet_answers_what_check_env_answers(mode: str) -> None:
     """
     check_env = load_script("check_env.py")
     expected = {
-        "floor": "{}.{}".format(*check_env.python_floor()),
+        "floor": "{}.{}".format(*check_env.python_floor(ROOT)),
         "needs": " ".join(f"{one.name}{one.bounds}" for one in check_env.needs().values()),
         "local": " ".join(str(where) for _, where in check_env.local_packages()),
     }[mode]
@@ -106,17 +127,17 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     системным `python3` окна (3.11). Синтаксис выше 3.11 в `check_env` или
     `paths` набор пропустил бы, а хук ушёл бы в предупреждение (107).
 
-    Взгляд на #1049: число планки стояло в хуке рукой в трёх местах —
-    проверка `command -v`, блок установки через uv (`uv python install` и
-    ссылка `ln`, одна команда в две строки) и разбор дерева. Прежний тест
-    сверял первое и третье, а блок установки — нет. Теперь число одно —
-    `want`, — и проверяется здесь: `want`
-    равен планке, ставит и читает дерево именно `python$want`, и установка
-    стоит РАНЬШЕ разбора, а не просто где-то в файле.
+    Взгляд на #1049: число планки было вписано в хук рукой не один раз. Где
+    именно, докстрока не пересказывает — источник один:
+    `git show 2a693c3^:.claude/hooks/session-start.sh | grep -n 3.14`. Три
+    пересказа подряд разошлись с ним (взгляды на #1057 и #1060), и правило 210
+    велит остановиться, а не чинить четвёртый. Проверяется здесь итог, а не
+    история: число в коде хука одно — `want`, — оно равно планке, ставит и
+    читает дерево именно `python$want`, и установка стоит РАНЬШЕ разбора.
     """
     said = HOOK.read_text(encoding="utf-8")
     code = "\n".join(line for line in said.splitlines() if not line.lstrip().startswith("#"))
-    floor = "{}.{}".format(*load_script("check_env.py").python_floor())
+    floor = "{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
     wanted = WANT.findall(code)
     assert wanted == [floor], f"want в хуке {wanted}, а планка {floor}"
     assert code.count(floor) == 1, f"число планки {floor} вписано в код хука не один раз"
@@ -133,6 +154,10 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     mismatch = code.index('if [ "$floor" != "$want" ]; then')
     assert read < mismatch, "сверка want с планкой стоит не после чтения планки"
     assert "поправьте want в хуке" in code[mismatch:], "расхождение want с планкой не названо"
+    # Отказ чтения планки тоже называет `want`: поднятую планку `python$want`
+    # может не прочесть вовсе, и до сверки дело не дойдёт (взгляд на #1057).
+    unread = code[guard:mismatch]
+    assert "поправьте want в хуке" in unread, "отказ чтения планки не называет want"
     head = said.splitlines()[1]
     assert floor not in head, "шапка хука вписывает число планки рукой — разойдётся с want молча"
     assert 'ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"' in code
