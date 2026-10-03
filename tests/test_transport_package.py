@@ -232,6 +232,23 @@ def surface_gap(package: Path) -> str:
     return ""
 
 
+def test_the_surface_names_only_what_is_public() -> None:
+    """Подпись функции, база класса и имя константы — да; частное и значения — нет."""
+    source = (
+        "from typing import Final\n"
+        "LIMIT: Final = 300\n"
+        "_HIDDEN = 1\n"
+        "class Oops(RuntimeError):\n    pass\n"
+        "def cut(text: str, limit: int = LIMIT) -> str:\n    return text\n"
+        "def _inner() -> None:\n    pass\n"
+    )
+    assert surface.public_names(source, "m") == [
+        "m.LIMIT",
+        "m.Oops(RuntimeError)",
+        "m.cut(text: str, limit: int=LIMIT) -> str",
+    ]
+
+
 def test_the_surface_moves_only_with_the_version() -> None:
     """Поверхность транспорта сменилась — сменился и `VERSION`, и наоборот (#1048).
 
