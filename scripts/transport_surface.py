@@ -128,10 +128,7 @@ def names_in(body: list[ast.stmt], owner: str) -> list[str]:
         elif isinstance(node, ast.Assign | ast.AnnAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             found += [
-                f"{owner}.{name}"
-                for target in targets
-                for name in assigned(target)
-                if public(name)
+                f"{owner}.{name}" for target in targets for name in assigned(target) if public(name)
             ]
         elif isinstance(node, ast.If):
             found += names_in(node.body, owner) + names_in(node.orelse, owner)

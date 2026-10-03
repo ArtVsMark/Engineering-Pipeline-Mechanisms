@@ -417,7 +417,6 @@ def test_imports_and_private_names_stay_out() -> None:
     assert said == ["m.X"], said
 
 
-
 def test_the_command_does_not_rewrite_a_moved_surface_at_the_old_version(
     tmp_path: Path, run_script: RunScript
 ) -> None:
