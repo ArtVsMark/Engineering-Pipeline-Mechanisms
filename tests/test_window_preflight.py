@@ -924,6 +924,18 @@ def test_a_call_from_the_steps_checkout_reads_as_a_direct_one(line: str, seen_as
     assert preflight.plain(line) == seen_as
 
 
+def test_every_elsewhere_name_is_a_record_the_platform_issues() -> None:
+    """Имена в `ELSEWHERE` — записи из ответа по классам, а не прежние имена (взгляд на #1062).
+
+    Исключение одно и названо: сводный гейт (`look_waits.GATE`) в своём же
+    ответе не перечислен — он судит остальные записи, а не стоит среди них.
+    """
+    declared = set(load_script("pipeline_checks.py").load())
+    gate = load_script("look_waits.py").GATE
+    stale = sorted(name for name in preflight.ELSEWHERE if name not in declared and name != gate)
+    assert not stale, f"предполётная называет записи, которых площадка не выдаёт: {stale}"
+
+
 def test_the_types_step_knows_the_install_line_of_its_job() -> None:
     """Шагу типов достаётся строка установки его джоба — та, что ставит площадка (#1069)."""
     typed = [one for one in preflight.steps(ROOT / preflight.CI) if preflight.TYPES in one.command]
