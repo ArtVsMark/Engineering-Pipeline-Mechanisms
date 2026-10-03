@@ -233,19 +233,42 @@ def surface_gap(package: Path) -> str:
 
 
 def test_the_surface_names_only_what_is_public() -> None:
-    """Подпись функции, база класса и имя константы — да; частное и значения — нет."""
+    """Каждая форма публичного имени — в снимке; частное и значения — нет (взгляд на #1068).
+
+    Перечень форм — тот, что назвал взгляд: методы и `__init__` класса,
+    псевдоним `type`, кортежное присваивание, имена внутри `if`/`try`
+    верхнего уровня, — и прежние: функция, класс, константа.
+    """
     source = (
         "from typing import Final\n"
         "LIMIT: Final = 300\n"
         "_HIDDEN = 1\n"
-        "class Oops(RuntimeError):\n    pass\n"
+        "class Oops(RuntimeError):\n"
+        "    kind = 'x'\n"
+        "    def __init__(self, why: str) -> None:\n        pass\n"
+        "    def tell(self) -> str:\n        return ''\n"
+        "    def _quiet(self) -> None:\n        pass\n"
         "def cut(text: str, limit: int = LIMIT) -> str:\n    return text\n"
         "def _inner() -> None:\n    pass\n"
+        "type Pair = tuple[int, int]\n"
+        "LOW, HIGH = 1, 2\n"
+        "if LIMIT:\n    FAST = True\nelse:\n    FAST = False\n"
+        "try:\n    import json as JSON\n    PARSED = 1\nexcept ImportError:\n    PARSED = 0\n"
     )
     assert surface.public_names(source, "m") == [
         "m.LIMIT",
         "m.Oops(RuntimeError)",
+        "m.Oops.kind",
+        "m.Oops.__init__(self, why: str) -> None",
+        "m.Oops.tell(self) -> str",
         "m.cut(text: str, limit: int=LIMIT) -> str",
+        "m.Pair",
+        "m.LOW",
+        "m.HIGH",
+        "m.FAST",
+        "m.FAST",
+        "m.PARSED",
+        "m.PARSED",
     ]
 
 
@@ -265,10 +288,19 @@ def test_the_surface_moves_only_with_the_version() -> None:
     [
         (('requires-python = ">=3.14"', 'requires-python = ">=3.13"'), False, "сдвиньте VERSION"),
         (("def quote(", "def quote_it("), False, "сдвиньте VERSION"),
+        (("dependencies = []", 'dependencies = ["requests>=2"]'), False, "сдвиньте VERSION"),
+        (("def wait_seconds(self", "def wait_for(self"), False, "сдвиньте VERSION"),
         (None, True, "перепишите снимок"),
         (None, False, ""),
     ],
-    ids=["планка-без-числа", "имя-без-числа", "число-без-снимка", "ничего"],
+    ids=[
+        "планка-без-числа",
+        "имя-без-числа",
+        "зависимость-без-числа",
+        "метод-без-числа",
+        "число-без-снимка",
+        "ничего",
+    ],
 )
 def test_the_surface_gap_tells_both_halves(
     tmp_path: Path, edit: tuple[str, str] | None, bump: bool, said: str
@@ -296,6 +328,48 @@ def test_the_snapshot_is_written_by_the_command(tmp_path: Path, run_script: RunS
     assert not surface_gap(package)
     with pytest.raises(surface.NotRun, match="снимка"):
         surface.read(tmp_path / "нет")
+
+
+def copied(tmp_path: Path) -> Path:
+    """Копия пакета транспорта в дереве теста — как у потребителя под `--root`."""
+    package = tmp_path / "packages" / "transport"
+    shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
+    return package
+
+
+def test_the_command_does_not_rewrite_a_moved_surface_at_the_old_version(
+    tmp_path: Path, run_script: RunScript
+) -> None:
+    """Подсказка красного сообщения не снимает красное без сдвига числа (взгляд на #1068).
+
+    Поверхность сменилась, `VERSION` прежний — команда отказывает, и снимок
+    остаётся прежним. Сдвинули число — команда пишет. Вторая половина:
+    без неё отказ был бы неотличим от «никогда не писать».
+    """
+    package = copied(tmp_path)
+    before = (package / surface.SNAPSHOT).read_text(encoding="utf-8")
+    text = (package / "ghrest.py").read_text(encoding="utf-8")
+    (package / "ghrest.py").write_text(text.replace("def quote(", "def quote_it("), "utf-8")
+    refused = run_script("transport_surface.py", "--root", str(tmp_path))
+    assert refused.code == surface.EXIT_REFUSED, refused.err
+    assert "сдвиньте" in refused.err
+    assert (package / surface.SNAPSHOT).read_text(encoding="utf-8") == before
+    (package / "VERSION").write_text("9.9.9\n", encoding="utf-8")
+    written = run_script("transport_surface.py", "--root", str(tmp_path))
+    assert written.code == surface.EXIT_OK, written.err
+    assert not surface_gap(package)
+
+
+def test_a_new_snapshot_format_is_rewritten_at_the_same_version(tmp_path: Path) -> None:
+    """Сменился формат снимка — переписать можно и при прежнем числе: это правка разбора."""
+    package = copied(tmp_path)
+    old = (package / surface.SNAPSHOT).read_text(encoding="utf-8")
+    (package / surface.SNAPSHOT).write_text(
+        old.replace(surface.HEADER, "# формат прежний") + "m.лишнее\n", encoding="utf-8"
+    )
+    version, lines = surface.surface(package)
+    assert surface.refusal(package, version, lines) == ""
+    assert surface.header_of(tmp_path / "нет") == ""
 
 
 def test_an_unreadable_package_is_not_an_empty_surface(

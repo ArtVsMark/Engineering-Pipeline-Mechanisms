@@ -1,6 +1,7 @@
-# Поверхность транспорта. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
+# Поверхность транспорта, формат 2. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
 VERSION 0.3.0
 requires-python >=3.14
+dependencies —
 ghrest.API_ROOT
 ghrest.API_VERSION
 ghrest.TIMEOUT
@@ -10,6 +11,9 @@ ghrest.ENV_QUOTA_FLOOR
 ghrest.TransportError(RuntimeError)
 ghrest.NotFound(TransportError)
 ghrest.RateLimited(TransportError)
+ghrest.RateLimited.__init__(self, message: str, *, reset_at: int=0, resource: str='core') -> None
+ghrest.RateLimited.wait_seconds(self, *, now: float | None=None) -> int
+ghrest.RateLimited.describe(self, *, now: float | None=None) -> str
 ghrest.token_from_env() -> str
 ghrest.quota_floor() -> int
 ghrest.TRANSIENT
