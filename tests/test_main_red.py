@@ -27,6 +27,9 @@ module = load_script("main_red.py")
 policy = load_script("pipeline_checks.py")
 
 WORKFLOW = ROOT / ".github" / "workflows" / "main-red.yml"
+#: Тело дежурного — общим шагом (#993): события, условие и группа заходов
+#: остались у вызывающего `WORKFLOW`, шаги и потолок прав — здесь.
+STEP = ROOT / ".github" / "workflows" / "step-main-red.yml"
 REQUIRED = ["lint", "test"]
 
 
@@ -159,14 +162,29 @@ def document() -> dict[str, Any]:
     return loaded
 
 
+def step_document() -> dict[str, Any]:
+    """Общий шаг дежурного: его шаги и потолок прав."""
+    loaded: dict[str, Any] = yaml.safe_load(STEP.read_text(encoding="utf-8"))
+    return loaded
+
+
 def test_the_rerun_right_is_asked_for_where_it_is_used() -> None:
-    """Право перезапуска объявлено ровно у того прогона, который перезапускает."""
+    """Право перезапуска объявлено ровно у того прогона, который перезапускает.
+
+    И в потолке общего шага тоже: без него вызванный прогон права не получил
+    бы, сколько бы ни дал вызывающий (#993).
+    """
     assert document()["permissions"]["actions"] == "write"
+    assert step_document()["permissions"]["actions"] == "write"
 
 
 def test_the_step_reading_the_platform_gets_a_token() -> None:
     """Шаг, читающий площадку, получает токен: иначе он молча слеп."""
-    for step in document()["jobs"]["main-red"]["steps"]:
+    steps = step_document()["jobs"]["main-red"]["steps"]
+    assert any("main_red.py" in str(step.get("run") or "") for step in steps), (
+        "шага с дежурным не найдено — проверять нечего (075)"
+    )
+    for step in steps:
         if "main_red.py" in str(step.get("run") or ""):
             assert set(step.get("env") or {}) & {"GH_TOKEN", "GITHUB_TOKEN"}
 
@@ -185,7 +203,7 @@ def test_the_job_owns_the_shared_state() -> None:
 
 def test_the_exit_codes_are_read_as_an_allowlist() -> None:
     """Коды разбираются списком разрешённого: незнакомый — отказ (068)."""
-    text = WORKFLOW.read_text(encoding="utf-8")
+    text = STEP.read_text(encoding="utf-8")
     assert "0)" in text and "3)" in text and "*)" in text
 
 

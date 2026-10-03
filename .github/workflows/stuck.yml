@@ -40,31 +40,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ТОНКИЙ ВЫЗОВ (#993): обход застрявших — общим шагом `step-stuck.yml`,
+  # здесь только то, что решает проект, — когда обходить и один ли заход. Код
+  # конвейера шаг берёт своим checkout на коммите вызова (#990), поэтому
+  # потребитель зовёт его адресом с тегом, а не копирует.
   stuck-prs:
-    name: stuck-prs
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-      - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
-      - name: готовое и не слитое
-        # Отказ обхода не роняет ничего: это след, а не условие работы (084).
-        continue-on-error: true
-        env:
-          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          rc=0
-          python scripts/stuck.py --apply || rc=$?
-          case "$rc" in
-            0) echo "застрявших нет" ;;
-            1) echo "::warning::застрявшее найдено — причина названа в реестре" ;;
-            3) echo "::warning::обход не настроен — нет MERGE_QUEUE_TOKEN, состояние слияния ему не видно" ;;
-            *) echo "::warning::обход не отработал (код $rc) — застрявшее осталось без адресата" ;;
-          esac
+    uses: ./.github/workflows/step-stuck.yml
+    # СЕКРЕТ ПЕРЕДАЁТСЯ ПО ИМЕНИ, А НЕ `secrets: inherit`. Шаг получает ровно
+    # тот секрет, которым работает, и ни одного сверх того (108): унаследовав
+    # все, он держал бы в окружении всё, что проект когда-либо заведёт, — тот
+    # же дрейф без ведома, от которого вызов прибит к тегу (#993).
+    secrets:
+      MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}

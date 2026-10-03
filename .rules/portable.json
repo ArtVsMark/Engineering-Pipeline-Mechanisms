@@ -96,7 +96,10 @@
       "answer": "as-is"
     },
     ".github/workflows/automerge.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/automerge.yml"
+      ]
     },
     ".github/workflows/badges.yml": {
       "answer": "as-is"
@@ -118,7 +121,10 @@
       "answer": "as-is"
     },
     ".github/workflows/hail.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/hail.yml"
+      ]
     },
     ".github/workflows/handover-probe.yml": {
       "answer": "ours",
@@ -128,7 +134,10 @@
       "answer": "as-is"
     },
     ".github/workflows/main-red.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/main-red.yml"
+      ]
     },
     ".github/workflows/python-next.yml": {
       "answer": "configured",
@@ -158,6 +167,9 @@
     ".github/workflows/step-attribution.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-automerge.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-contract.yml": {
       "answer": "ours",
       "why": "@provider"
@@ -165,10 +177,16 @@
     ".github/workflows/step-debt.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-hail.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-journal.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-lint.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-main-red.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-pipeline.yml": {
@@ -180,6 +198,9 @@
     ".github/workflows/step-rulebook-fresh.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-stuck.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-window-lifetime.yml": {
       "answer": "as-is"
     },
@@ -187,7 +208,10 @@
       "answer": "as-is"
     },
     ".github/workflows/stuck.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/stuck.yml"
+      ]
     },
     ".github/workflows/task-items.yml": {
       "answer": "as-is"

@@ -241,8 +241,13 @@ def events_raw(document: dict[Any, Any]) -> Any:
     return document.get("on", document.get(True))
 
 
-def _triggers_of(document: dict[Any, Any]) -> list[str]:
-    """Отдаёт имена событий прогона."""
+def triggers_of(document: dict[Any, Any]) -> list[str]:
+    """Отдаёт имена событий прогона.
+
+    Открыт наружу с тех пор, как его спросил второй читатель — заход
+    подключения выводит из событий раздел ответа (#993): второй разбор той же
+    формы был бы вторым её пониманием (090).
+    """
     raw = events_raw(document)
     if isinstance(raw, dict):
         return [str(key) for key in raw]
@@ -495,7 +500,7 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
             "проверка по нему не появится, а красного об этом не будет (045)"
         )
     document = run_of(where)
-    if CALLED not in _triggers_of(document):
+    if CALLED not in triggers_of(document):
         raise BadPolicy(
             f"прогон {where.name} вызывают по `uses:`, а события «{CALLED}» у него нет — "
             "площадка такой вызов отвергнет"
@@ -615,7 +620,7 @@ def beyond_jobs(directory: Path = WORKFLOWS) -> dict[str, Job]:
     jobs: dict[str, Job] = {}
     for path in sorted(directory.glob("*.y*ml")):
         document = run_of(path)
-        triggers = _triggers_of(document)
+        triggers = triggers_of(document)
         _one_world_only(path, triggers)
         if CALLED in triggers or ON_CHANGE in triggers:
             continue
@@ -678,7 +683,7 @@ def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, J
         # взгляд на #150: `run_of` завели ровно ради этого, а здесь остался
         # прежний разбор.
         document = run_of(path)
-        triggers = _triggers_of(document)
+        triggers = triggers_of(document)
         _one_world_only(path, triggers)
         if CALLED in triggers or ON_CHANGE not in triggers:
             continue
