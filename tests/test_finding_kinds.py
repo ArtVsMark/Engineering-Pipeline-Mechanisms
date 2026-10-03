@@ -652,6 +652,17 @@ def test_a_kind_line_counts_one_meeting_per_twin_root() -> None:
     }
 
 
+def test_twin_roots_name_the_root_and_the_whole_chain() -> None:
+    """Корень — отпечаток без двойника, а группа несёт всю цепочку: по ней сверяют повтор."""
+    (record,) = module.changerefs.resolutions_parsed(
+        "Разобрано: aaaaaaa дубль bbbbbbb, ccccccc\nРод: род"
+    )
+    assert module.twin_roots(record) == [
+        ("bbbbbbb", frozenset({"aaaaaaa", "bbbbbbb"})),
+        ("ccccccc", frozenset({"ccccccc"})),
+    ]
+
+
 def test_a_chain_and_a_loop_are_one_meeting() -> None:
     """Цепочка «A дубль B дубль C» — одна встреча с корнем C; круг — одна, первым названным."""
     bodies = [
