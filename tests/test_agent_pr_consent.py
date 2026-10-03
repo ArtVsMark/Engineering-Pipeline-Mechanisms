@@ -540,3 +540,27 @@ def test_a_headless_trunk_is_a_refusal_not_an_answer(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(module.ghrest, "request", headless)
     with pytest.raises(module.NotRun):
         module.red_on_trunk("o/r", "токен", "ci-complete", "main")
+
+
+def test_a_lost_kind_line_is_named() -> None:
+    """Отпечаток доехал, а строка рода — нет: потеря названа (`d314ac6`, 188)."""
+    sent = "тело\n\nРазобрано: abc1234\nРод: каскад по одному месту\n"
+    published = "тело\n\nРазобрано: abc1234\n"
+    assert module.kept_the_marks(published, sent) == ["род «каскад по одному месту» у abc1234"]
+
+
+def test_a_lost_window_meeting_is_named() -> None:
+    """Встреча рода в окне не доехала — потеря названа так же."""
+    sent = "тело\n\nРод: каскад по одному месту — окно: scripts/x.py — разбор\n"
+    assert module.kept_the_marks("тело\n", sent) == [
+        "встреча «каскад по одному месту» в окне: scripts/x.py — разбор"
+    ]
+
+
+def test_kinds_and_meetings_survive_normalised_whitespace() -> None:
+    """Вторая половина: нормализованный пробел и перевод строки потерей не считаются."""
+    sent = (
+        "тело\n\nРазобрано: abc1234\nРод: каскад по одному месту\n"
+        "Род: каскад по одному месту — окно: scripts/x.py — разбор\n"
+    )
+    assert module.kept_the_marks(sent.replace("\n", "\r\n"), sent) == []
