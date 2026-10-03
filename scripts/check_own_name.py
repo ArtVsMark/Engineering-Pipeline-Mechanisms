@@ -54,13 +54,38 @@ EXIT_BROKEN: Final = 2
 
 #: Адрес вида `owner/repo` в тексте. Годится и для ссылки, и для строки данных:
 #: имя ищется одним образцом, а не тремя по видам файлов (090). Адрес API —
-#: хост `api.github.com` и путь `/repos/<владелец>/<имя>` — своя ветвь и стоит
-#: ПЕРВОЙ: поиск берёт самое левое совпадение, а без неё сегмент `repos`
-#: читался владельцем (замер 03.10.2026, #1065: три таких «имени» спрашивались
-#: у площадки).
+#: хост `api.github.com` или `uploads.github.com` и путь
+#: `/repos/<владелец>/<имя>` — своя ветвь. Держит её не порядок в
+#: альтернативе, а то, что поиск берёт САМОЕ ЛЕВОЕ совпадение: ветвь API
+#: начинается раньше, на `api.`, и без неё сегмент `repos` читался бы
+#: владельцем (находка `5408fc8` на #1082 поправила прежний довод).
 NAME_RE: Final = re.compile(
-    r"(?:api\.github\.com/repos|github\.com|githubusercontent\.com)"
+    r"(?:(?:api|uploads)\.github\.com/repos|github\.com|githubusercontent\.com)"
     r"/(?P<owner>[A-Za-z0-9][\w.-]*)/(?P<repo>[A-Za-z0-9][\w.-]*)"
+)
+#: Первые сегменты пути площадки, которые не владелец: страницы организаций и
+#: людей, вложения, приложения. Площадка не даёт заводить учётные записи с
+#: такими именами, поэтому `github.com/orgs/X` — не репозиторий «orgs/X».
+#: Список назван, а не замерен целиком, и граница сказана: неизвестный здесь
+#: служебный сегмент стоит один запрос к площадке, а её отказ гейт читает как
+#: «не спросили», а не как находку (`stale`), — ложного красного он не даёт.
+NOT_AN_OWNER: Final = frozenset(
+    {
+        "orgs",
+        "users",
+        "user-attachments",
+        "apps",
+        "settings",
+        "sponsors",
+        "marketplace",
+        "topics",
+        "features",
+        "notifications",
+        "login",
+        "search",
+        "collections",
+        "enterprises",
+    }
 )
 #: Каталоги образцов: имена в них — данные проверок (`o/r`, `someone/…`), а не
 #: ссылки дерева. Спрашивать о них площадку — запрос квоты на каждое: замер
@@ -136,6 +161,8 @@ def mentions(root: Path) -> dict[str, list[tuple[Path, int]]]:
             continue
         for number, line in enumerate(text.splitlines(), 1):
             for match in NAME_RE.finditer(line):
+                if match["owner"] in NOT_AN_OWNER:
+                    continue
                 said = f"{match['owner']}/{match['repo']}"
                 found.setdefault(said, []).append((path.relative_to(root), number))
     return found

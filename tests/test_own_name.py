@@ -182,3 +182,24 @@ def test_samples_in_tests_are_not_asked(tmp_path: Path) -> None:
     found = module.mentions(root)
     assert "o/kept" in found
     assert "o/sample" not in found
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "https://github.com/orgs/o/people",
+        "https://github.com/users/o/projects",
+        "https://github.com/user-attachments/assets/x.png",
+        "https://github.com/apps/claude/installations",
+    ],
+)
+def test_a_service_path_is_not_an_owner(tmp_path: Path, line: str) -> None:
+    """Служебный сегмент пути площадки — не владелец репозитория (`6f964eb`)."""
+    root = repo_with(tmp_path, line + "\n")
+    assert module.mentions(root) == {}, module.mentions(root)
+
+
+def test_an_uploads_address_names_the_repository(tmp_path: Path) -> None:
+    """`uploads.github.com/repos/o/name` — имя `o/name`, как у адреса API."""
+    root = repo_with(tmp_path, "POST https://uploads.github.com/repos/o/name/releases/1/assets\n")
+    assert list(module.mentions(root)) == ["o/name"]
