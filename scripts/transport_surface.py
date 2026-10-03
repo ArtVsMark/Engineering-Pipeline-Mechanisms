@@ -16,39 +16,49 @@
 снимок». Снимок пишет этот модуль, рукой его не правят: обновление — вывод
 команды, а не текст.
 
-ЧТО СЧИТАЕТСЯ ПОВЕРХНОСТЬЮ (взгляд на #1068). Договор установки —
-`requires-python` и `dependencies`. Имена модулей без `_` на верхнем уровне,
-в том числе внутри `if`/`try` верхнего уровня: функции с подписью и
-возвращаемым типом, классы с базами, их публичные методы и `__init__` с
-подписями, публичные атрибуты класса, псевдонимы `type X = …`, прочие имена —
-и поодиночке, и кортежным присваиванием.
+ЧТО СЧИТАЕТСЯ ПОВЕРХНОСТЬЮ (взгляды на #1068). Договор установки —
+`requires-python` и `dependencies`. Имена модулей без `_` на верхнем уровне и
+все dunder-имена (`__init__`, `__call__`, `__iter__`, `__all__`…), в том числе
+внутри `if`/`try`/`for`/`with` верхнего уровня и целями `for … in` и
+`with … as`: функции с декораторами, подписью и возвращаемым типом, классы с
+базами, их публичные методы и атрибуты, псевдонимы `type X = …`, прочие
+имена — и поодиночке, и кортежным присваиванием. Декоратор входит в строку:
+`@property` или `@staticmethod` меняют вызов при прежней подписи.
 
-ЧЕГО ЗДЕСЬ НЕТ, И ГРАНИЦА НАЗВАНА (195). Значение имени: смена значения
+ЧЕГО ЗДЕСЬ НЕТ, И ГРАНИЦА НАЗВАНА (195). Импорт верхнего уровня (`import
+report` в `ghrest`): `ghrest.report` достижим, но это зависимость реализации,
+а не обещание потребителю, и смена её поверхности не меняет. Присваивание
+`X += …` нового имени не заводит — имя уже стоит в снимке. Значение имени: смена значения
 константы (`TIMEOUT`) — поведение, а не поверхность. Умолчание подписи
 записано так, как стоит в коде: литерал (`timeout=30`) виден, и его смена
 краснеет, а умолчание через константу (`limit=MERGED_WINDOW`) видно именем, и
 смена значения константы — снова поведение. Поведение функции при прежней
 подписи снимок не видит тоже: его держат тесты пакета, а не число.
 
-КОМАНДА НЕ ПЕРЕПИСЫВАЕТ ПОВЕРХНОСТЬ ПРИ ПРЕЖНЕМ ЧИСЛЕ (взгляд на #1068).
-Иначе её же подсказка из красного сообщения снимала бы красное без сдвига
-`VERSION`. Сменилась поверхность, а `VERSION` тот же, что в снимке, — отказ с
-названным шагом. Переписать снимок при прежнем числе законно в одном случае —
-сменился ФОРМАТ снимка (шапка): это правка разбора, а не поверхности. Правку
-файла рукой команда не остановит, и это предел: снимок — вывод команды, и
-рукописная правка производного видна в диффе изменения.
+ПОВЕРХНОСТЬ СВЕРЯЕТСЯ С ОБЩЕЙ ВЕТКОЙ, А НЕ СО СНИМКОМ В ГОЛОВЕ (взгляды на
+#1068, `88a3574`, `0caa805`). Снимок, сверенный только сам с собой,
+обходился двумя путями: удалить `SURFACE` и запустить команду или сменить
+формат в шапке — и поверхность переписывалась при прежнем `VERSION`. Поэтому
+поверхность общей ветки вычисляется ЭТИМ ЖЕ разбором из её файлов
+(`base_surface`), и сменилась она при том же `VERSION` — отказ команды и
+красное набора, что бы ни лежало в `SURFACE`. Формат шапки на это не влияет:
+обе стороны разобраны одним кодом. Снимок в дереве остаётся сверкой «вывод
+команды записан».
 
 Исходы: ``0`` снимок записан · ``2`` не отработал (пакет не прочитан) ·
-``3`` отказ: поверхность сменилась при прежнем `VERSION`.
+``3`` отказ: поверхность сменилась при прежнем `VERSION` — против снимка или
+против общей ветки.
 """
 
 import argparse
 import ast
 import sys
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
+import gitcall
 import paths
 
 EXIT_OK: Final = 0
@@ -61,11 +71,13 @@ SNAPSHOT: Final = "SURFACE"
 #: Номер формата растёт с каждой правкой разбора: по нему команда отличает
 #: «сменился формат» от «сменилась поверхность».
 HEADER: Final = (
-    "# Поверхность транспорта, формат 2. Пишет `python scripts/transport_surface.py`; "
+    "# Поверхность транспорта, формат 3. Пишет `python scripts/transport_surface.py`; "
     "рукой не правится (#1048)."
 )
 #: Метка строки с версией, к которой относится снимок.
 VERSION_MARK: Final = "VERSION "
+#: С чем сверяется поверхность, если не сказано иное: общая ветка.
+BASE: Final = "origin/main"
 
 
 class NotRun(RuntimeError):
@@ -73,9 +85,15 @@ class NotRun(RuntimeError):
 
 
 def signature(node: ast.FunctionDef | ast.AsyncFunctionDef, owner: str) -> str:
-    """Строка снимка функции: имя, подпись как в коде и возвращаемый тип."""
+    """Строка снимка функции: декораторы, имя, подпись как в коде и возвращаемый тип."""
     back = f" -> {ast.unparse(node.returns)}" if node.returns else ""
-    return f"{owner}.{node.name}({ast.unparse(node.args)}){back}"
+    marks = "".join(f"@{ast.unparse(one)} " for one in node.decorator_list)
+    return f"{marks}{owner}.{node.name}({ast.unparse(node.args)}){back}"
+
+
+def public(name: str) -> bool:
+    """Публично ли имя: без `_` впереди либо dunder (`__call__`, `__all__`)."""
+    return not name.startswith("_") or (name.startswith("__") and name.endswith("__"))
 
 
 def assigned(target: ast.expr) -> list[str]:
@@ -97,15 +115,15 @@ def names_in(body: list[ast.stmt], owner: str) -> list[str]:
     found: list[str] = []
     for node in body:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if not node.name.startswith("_") or node.name == "__init__":
+            if public(node.name):
                 found.append(signature(node, owner))
         elif isinstance(node, ast.ClassDef):
-            if not node.name.startswith("_"):
+            if public(node.name):
                 bases = ", ".join(ast.unparse(base) for base in node.bases)
                 found.append(f"{owner}.{node.name}({bases})")
                 found += names_in(node.body, f"{owner}.{node.name}")
         elif isinstance(node, ast.TypeAlias):
-            if not node.name.id.startswith("_"):
+            if public(node.name.id):
                 found.append(f"{owner}.{node.name.id}")
         elif isinstance(node, ast.Assign | ast.AnnAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -113,10 +131,22 @@ def names_in(body: list[ast.stmt], owner: str) -> list[str]:
                 f"{owner}.{name}"
                 for target in targets
                 for name in assigned(target)
-                if not name.startswith("_")
+                if public(name)
             ]
         elif isinstance(node, ast.If):
             found += names_in(node.body, owner) + names_in(node.orelse, owner)
+        elif isinstance(node, ast.For | ast.AsyncFor):
+            found += [f"{owner}.{name}" for name in assigned(node.target) if public(name)]
+            found += names_in(node.body, owner) + names_in(node.orelse, owner)
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            found += [
+                f"{owner}.{name}"
+                for item in node.items
+                if item.optional_vars is not None
+                for name in assigned(item.optional_vars)
+                if public(name)
+            ]
+            found += names_in(node.body, owner)
         elif isinstance(node, ast.Try):
             found += names_in(node.body, owner)
             for handler in node.handlers:
@@ -133,8 +163,37 @@ def public_names(source: str, module: str) -> list[str]:
 def surface(package: Path) -> tuple[str, list[str]]:
     """Живая поверхность пакета: (`VERSION`, строки снимка без версии)."""
     try:
-        version = (package / "VERSION").read_text(encoding="utf-8").strip()
-        project = tomllib.loads((package / "pyproject.toml").read_text(encoding="utf-8"))
+        return surface_from(lambda name: (package / name).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise NotRun(f"пакет {package} не прочитан: {exc}") from exc
+
+
+def base_surface(root: Path, base: str = BASE) -> tuple[str, list[str]]:
+    """Поверхность пакета в `base` — тем же разбором из её файлов, а не из её снимка."""
+
+    def shown(name: str) -> str:
+        return gitcall.output(["show", f"{base}:{paths.TRANSPORT}/{name}"], NotRun, cwd=str(root))
+
+    return surface_from(shown)
+
+
+def moved_without_version(version: str, lines: list[str], root: Path, base: str = BASE) -> str:
+    """Почему поверхность нельзя принять против `base`; пустая строка — можно."""
+    was, before = base_surface(root, base)
+    if was == version and before != lines:
+        changed = sorted(set(lines) ^ set(before))
+        return (
+            f"поверхность сменилась против {base} при прежнем VERSION {version}: {changed} — "
+            f"сдвиньте {paths.TRANSPORT / 'VERSION'}"
+        )
+    return ""
+
+
+def surface_from(read_file: Callable[[str], str]) -> tuple[str, list[str]]:
+    """Поверхность из файлов пакета, прочитанных `read_file` по имени файла."""
+    try:
+        version = read_file("VERSION").strip()
+        project = tomllib.loads(read_file("pyproject.toml"))
         modules = list(project["tool"]["setuptools"]["py-modules"])
         needs = sorted(str(one) for one in project["project"].get("dependencies") or [])
         lines = [
@@ -142,9 +201,9 @@ def surface(package: Path) -> tuple[str, list[str]]:
             f"dependencies {', '.join(needs) or '—'}",
         ]
         for module in modules:
-            lines += public_names((package / f"{module}.py").read_text(encoding="utf-8"), module)
-    except (OSError, KeyError, SyntaxError, tomllib.TOMLDecodeError) as exc:
-        raise NotRun(f"пакет {package} не прочитан: {exc}") from exc
+            lines += public_names(read_file(f"{module}.py"), module)
+    except (KeyError, SyntaxError, tomllib.TOMLDecodeError) as exc:
+        raise NotRun(f"пакет не прочитан: {exc}") from exc
     return version, lines
 
 
@@ -199,14 +258,17 @@ def main(argv: list[str] | None = None) -> int:
     """Пишет снимок живой поверхности рядом с `VERSION`."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
+    parser.add_argument("--base", default=BASE, help="с чем сверять поверхность")
     args = parser.parse_args(argv)
     package = args.root / paths.TRANSPORT
     try:
         version, lines = surface(package)
+        why = refusal(package, version, lines) or moved_without_version(
+            version, lines, args.root, args.base
+        )
     except NotRun as exc:
         print(f"снимок не записан: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    why = refusal(package, version, lines)
     if why:
         print(f"снимок не записан: {why}", file=sys.stderr)
         return EXIT_REFUSED
