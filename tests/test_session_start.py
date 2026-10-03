@@ -78,6 +78,8 @@ SNIPPET: Final = re.compile(r'(\S+) -c "\n(.*?)\n" "\$1"', re.S)
 WANT: Final = re.compile(r"^want=(\S+)$", re.M)
 #: Как хук читает `floor.sh`: точкой от своего каталога, а не от рабочего.
 SOURCED: Final = '. "$here/floor.sh"'
+#: Каталог хука — абсолютным путём: строка одна на оба хука (`9fda04b`).
+ABSOLUTE_HERE: Final = 'here=$(cd "$(dirname "$0")" && pwd)'
 
 
 def code_of(path: Path) -> str:
@@ -174,8 +176,8 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     install = code.index('uv python install "$want"')
     read = code.index("$(read_tree floor)")
     assert sourced < install, "floor.sh читается после того, как want понадобился"
-    assert code.index('here=$(dirname "$0")') < code.index('cd "$CLAUDE_PROJECT_DIR"'), (
-        "каталог хука берётся после cd — относительный $0 укажет мимо floor.sh"
+    assert code.index(ABSOLUTE_HERE) < code.index('cd "$CLAUDE_PROJECT_DIR"'), (
+        "каталог хука берётся после cd или не абсолютным — относительный $0 укажет мимо floor.sh"
     )
     assert install < read, "интерпретатор ставится после разбора дерева"
     # Обе ветки хука, которые называют настоящую причину (взгляд на #1057):
@@ -222,3 +224,27 @@ def test_the_guard_wrapper_takes_the_same_want() -> None:
     assert floor not in code, f"число планки {floor} вписано в обёртку рукой"
     assert 'exec "python$want" "$here/push_guard.py"' in code
     assert GUARD_WRAPPER.stat().st_mode & 0o111, "обёртка не исполняема — площадка её не запустит"
+
+
+@pytest.mark.parametrize("hook", ["session-start.sh", "push_guard.sh"])
+def test_the_hook_dir_survives_a_relative_call_and_a_cd(hook: str) -> None:
+    """Строка `here=` хука находит `floor.sh` и при относительном `$0`, и после `cd`.
+
+    Находки `9fda04b` и `a0f7a91` на #1072: `here=$(dirname "$0")` до `cd`
+    оставался относительной строкой и после смены каталога указывал мимо, а
+    проверка ПОРЯДКА строк была зелена и при этом. Здесь строка исполняется,
+    а не читается.
+    """
+    code = (FLOOR_FILE.parent / hook).read_text(encoding="utf-8")
+    lines = [line for line in code.splitlines() if line.startswith("here=")]
+    assert lines == [ABSOLUTE_HERE], f"{hook}: каталог хука вычисляется не так: {lines}"
+    script = f'{lines[0]}\ncd / || exit 9\n[ -r "$here/floor.sh" ]'
+    done = subprocess.run(
+        ["sh", "-c", script, f"hooks/{hook}"],
+        cwd=FLOOR_FILE.parent.parent,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 0, f"{hook}: после cd floor.sh не найден: {done.stderr}"

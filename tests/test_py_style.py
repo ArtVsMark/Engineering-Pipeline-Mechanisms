@@ -26,8 +26,8 @@
 не в существе (090).
 """
 
+import ast
 import io
-import re
 import subprocess
 import tokenize
 from typing import Final
@@ -42,7 +42,6 @@ LAZY_ANNOTATIONS: Final = (3, 14)
 #: С какой версии несколько исключений пишутся без скобок, если нет `as` (PEP 758).
 BARE_EXCEPT_TUPLE: Final = (3, 14)
 
-FUTURE: Final = re.compile(r"^from __future__ import annotations\s*$", re.M)
 OPENING: Final = frozenset("([{")
 CLOSING: Final = frozenset(")]}")
 
@@ -111,11 +110,26 @@ def parenthesised_excepts(text: str) -> list[int]:
     return lines
 
 
+def imports_lazy_annotations(text: str) -> bool:
+    """Включены ли аннотации `__future__` — любой формой импорта.
+
+    Разбором, а не образцом строки: регулярка знала только одиночное
+    `import annotations`, и `import annotations, division` или
+    `import (annotations)` проходили гейт (`4a98809`).
+    """
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in ast.walk(ast.parse(text))
+    )
+
+
 def style_findings(where: str, text: str, floor: tuple[int, int]) -> list[str]:
     """Что в файле отстаёт от планки — с адресом и причиной."""
     said = f"{floor[0]}.{floor[1]}"
     found: list[str] = []
-    if floor >= LAZY_ANNOTATIONS and FUTURE.search(text):
+    if floor >= LAZY_ANNOTATIONS and imports_lazy_annotations(text):
         found.append(
             f"{where}: `from __future__ import annotations` при планке {said}"
             " — аннотации и так ленивы (PEP 649)"
@@ -163,3 +177,18 @@ def test_the_requirements_follow_the_floor() -> None:
     text = "from __future__ import annotations\ntry:\n    pass\nexcept (A, B):\n    pass\n"
     assert style_findings("x.py", text, (3, 13)) == []
     assert len(style_findings("x.py", text, (3, 14))) == 2
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from __future__ import annotations",
+        "from __future__ import annotations, division",
+        "from __future__ import (annotations)",
+        "from __future__ import division, annotations",
+    ],
+)
+def test_every_form_of_the_future_import_is_seen(line: str) -> None:
+    """Импорт `__future__` виден в любой форме, а соседний `division` — нет (`4a98809`)."""
+    assert imports_lazy_annotations(f"{line}\n")
+    assert not imports_lazy_annotations("from __future__ import division\n")

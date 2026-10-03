@@ -716,6 +716,65 @@ def test_the_reachability_sign_is_not_back(tmp_path: Path) -> None:
 # --- обёртка без интерпретатора планки (#1058) ---------------------------------
 
 
+def system_python3_reaches_the_floor() -> bool:
+    """Не ниже ли планки `python3` системного PATH — тогда окна «без планки» не собрать."""
+    floor = load_script("check_env.py").python_floor(ROOT)
+    done = subprocess.run(
+        ["python3", "-c", f"import sys; sys.exit(sys.version_info[:2] < {tuple(floor)!r})"],
+        env={"PATH": os.defpath},
+        capture_output=True,
+        check=False,
+    )
+    return done.returncode == 0
+
+
+def ask_with_python3(command: str, python3: Path) -> subprocess.CompletedProcess[str]:
+    """Спрашивает обёртку, у которой из интерпретаторов есть только `python3` из `python3`."""
+    return subprocess.run(
+        [str(WRAPPER)],
+        input=json.dumps({"tool_input": {"command": command}}),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": f"{python3.parent}:/usr/bin:/bin"},
+        cwd=ROOT,
+    )
+
+
+def test_a_local_window_runs_the_guard_by_a_python3_on_the_floor(tmp_path: Path) -> None:
+    """Локальное окно без `python<планка>`, но с `python3` не ниже — страж исполняется.
+
+    Находка `08446b4` на #1072: хук старта ставит интерпретатор планки только
+    в облачном окне, и в локальном обёртка отвергала бы КАЖДЫЙ толчок, советуя
+    перезапуск, который там ничего не даёт. Страж, а не обёртка, должен
+    ответить — его отказ на общую ветку и есть признак.
+    """
+    floor = "python{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
+    if any(Path(where, floor).exists() for where in ("/usr/bin", "/bin")):
+        pytest.skip(f"{floor} стоит в /usr/bin — окна без него здесь не собрать")
+    python3 = tmp_path / "python3"
+    python3.symlink_to(sys.executable)
+    harmless = ask_with_python3("ls", python3)
+    assert harmless.returncode == 0, harmless.stderr
+    shared = ask_with_python3("git push origin main", python3)
+    assert shared.returncode == 2
+    assert "страж толчка не запущен" not in shared.stderr, "ответила обёртка, а не страж"
+
+
+def test_a_python3_below_the_floor_does_not_run_the_guard(tmp_path: Path) -> None:
+    """Вторая половина: `python3` ниже планки стража не исполняет — толчок закрыт обёрткой."""
+    floor = "python{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
+    if any(Path(where, floor).exists() for where in ("/usr/bin", "/bin")):
+        pytest.skip(f"{floor} стоит в /usr/bin — окна без него здесь не собрать")
+    python3 = tmp_path / "python3"
+    python3.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    python3.chmod(0o755)
+    said = ask_with_python3("git push origin agent/here", python3)
+    assert said.returncode == 2
+    assert "страж толчка не запущен" in said.stderr
+    assert "в локальном поставьте" in said.stderr, "совет называет только перезапуск"
+
+
 def ask_without_floor(command: str) -> subprocess.CompletedProcess[str]:
     """Спрашивает обёртку в окне, где интерпретатора планки нет вовсе."""
     return subprocess.run(
@@ -750,6 +809,8 @@ def test_without_the_floor_interpreter_a_push_is_refused(command: str) -> None:
     floor = "python{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
     if any(Path(where, floor).exists() for where in os.defpath.split(":") if where):
         pytest.skip(f"{floor} стоит в системном PATH — окна без него здесь не собрать")
+    if system_python3_reaches_the_floor():
+        pytest.skip("системный python3 не ниже планки — обёртка законно берёт его")
     said = ask_without_floor(command)
     assert said.returncode == 2, f"пропущено без сторожа: {command}"
     assert "страж толчка не запущен" in said.stderr
