@@ -948,3 +948,29 @@ def test_a_comment_is_not_a_command() -> None:
 def test_an_unclosed_quote_blinds_the_guard() -> None:
     """Незакрытая кавычка — слепота сторожа, а не «не толчок» (045)."""
     assert module.push_targets("git push origin 'main").blind
+
+
+def test_a_heredoc_without_its_delimiter_blinds_the_guard() -> None:
+    """`<<` без разделителя — слепота, а не тело до конца (`664b218`).
+
+    `$((1<<2))` — арифметика, и толчок на следующей строке прежде пропадал в
+    «теле» документа, которого нет.
+    """
+    look = module.push_targets("echo $((1<<2))\ngit push origin main")
+    assert look.blind, look
+
+
+@pytest.mark.parametrize("quoted", ["$'main'", '$"main"'])
+def test_dollar_quotes_are_quotes(quoted: str) -> None:
+    """`$'main'` и `$"main"` — цель `main`, а не `$main` (`c4a1a12`)."""
+    assert module.push_targets(f"git push origin {quoted}").targets == ("main",)
+
+
+def test_a_backslash_newline_inside_double_quotes_is_removed() -> None:
+    """`"ma\\⏎in"` — цель `main`, как у оболочки (`17859f3`)."""
+    assert module.push_targets('git push origin "ma\\\nin"').targets == ("main",)
+
+
+def test_a_dollar_alone_is_still_part_of_the_word() -> None:
+    """Вторая половина: `$` без кавычки за ним — часть слова, как прежде."""
+    assert module.push_targets("git push origin agent/$x").targets == ("agent/$x",)
