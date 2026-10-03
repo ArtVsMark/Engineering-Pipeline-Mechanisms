@@ -93,14 +93,26 @@ def declared_versions() -> list[tuple[str, str, str]]:
     отношение, и присутствие строки его не доказывает
     ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
     """
-    found: list[tuple[str, str, str]] = []
+    return [(name, job, said) for name, job, said, _ in declared_steps()]
+
+
+def declared_steps() -> list[tuple[str, str, str, bool]]:
+    """То же, что `declared_versions`, и помечен ли шаг предрелизным.
+
+    Предрелизный — `allow-prereleases: true` в том же `with:`: так его узнаёт
+    и действие единого значка каталога, и без этой пометки setup-python
+    предрелиз не поставит.
+    """
+    found: list[tuple[str, str, str, bool]] = []
     for path in walk(WORKFLOWS, "*.y*ml"):
         document: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for job, body in (document.get("jobs") or {}).items():
             for step in (body or {}).get("steps") or []:
-                said = ((step or {}).get("with") or {}).get("python-version")
+                given = (step or {}).get("with") or {}
+                said = given.get("python-version")
                 if said is not None:
-                    found.append((path.name, str(job), str(said)))
+                    preview = given.get("allow-prereleases") is True
+                    found.append((path.name, str(job), str(said), preview))
     return found
 
 
@@ -129,8 +141,9 @@ def test_the_lowest_matrix_cell_is_the_floor() -> None:
 
     Поднятая планка при старой матрице — или наоборот — до этого гейта не
     краснела нигде: одиночные шаги сверялись с планкой, матрица — только с
-    выпусками языка (`tests/test_drift.py`). Разбор общий: ячейки читает
-    `pipeline_checks.matrix_axis`, планку — `check_env.python_floor` (090).
+    выпусками языка (`tests/test_drift.py`). Ячейки здесь читает
+    `pipeline_checks.matrix_axis`, планку — `check_env.python_floor` (090). У
+    оси есть второй читатель — `drift.matrix_of`; сводили их не здесь (195).
     """
     cells, _ = policy.matrix_axis(MATRIX_FLOW, MATRIX_JOB, MATRIX_AXIS)
     gap = floor_gap(cells, env.python_floor(ROOT))
@@ -150,13 +163,17 @@ def test_every_hand_written_language_version_is_the_declared_floor() -> None:
     объявлено один раз, в `pyproject.toml`. Вписанная рядом копия этого числа
     отстанет молча, и узнают об этом не здесь, а на шаге, который продолжит
     работать на старом истолкователе.
+
+    СУЖЕНИЕ НАЗВАНО (195): предрелизный шаг (`allow-prereleases: true`) по
+    определению ставит НЕ пол, и судит его соседняя проверка —
+    `test_a_preview_step_names_its_matrix_cell`, ячейкой матрицы своего джоба.
     """
     major, minor = env.python_floor(ROOT)
     floor = f"{major}.{minor}"
     wrong = [
         f"{name}:{job} ставит {said}, а пол дерева — {floor}"
-        for name, job, said in declared_versions()
-        if FROM_MATRIX not in said and said != floor
+        for name, job, said, preview in declared_steps()
+        if FROM_MATRIX not in said and said != floor and not preview
     ]
     assert not wrong, "версия истолкователя разошлась с объявленным полом (035):\n  " + "\n  ".join(
         wrong
@@ -173,6 +190,30 @@ def test_a_matrix_cell_is_not_counted_as_a_duplicate() -> None:
     """
     from_matrix = [one for one in declared_versions() if FROM_MATRIX in one[2]]
     assert from_matrix, "ни один шаг не берёт версию из матрицы — довод про границу пуст"
+
+
+def test_a_preview_step_names_its_matrix_cell() -> None:
+    """Предрелизный шаг вписывает версию буквой, и она равна ячейке матрицы его джоба.
+
+    Буквой — ради единого значка семьи: действие каталога `python-badge` узнаёт
+    предрелизную версию только по `python-version: "X.Y"` рядом с
+    `allow-prereleases: true`, а `${{ matrix.python }}` не читает (решение
+    владельца 03.10.2026). Буква — копия ячейки, по которой площадка называет
+    запись (`test-next (3.15)`), и копия держится здесь, а не вниманием (071).
+    Предрелизных шагов нет вовсе — отказ: иначе значок молча потерял бы версию,
+    а проверка осталась бы зелёной (075).
+    """
+    previews = [one for one in declared_steps() if one[3]]
+    assert previews, "ни одного предрелизного шага — значку нечего показать вторым числом"
+    wrong: list[str] = []
+    for name, job, said, _ in previews:
+        if FROM_MATRIX in said:
+            wrong.append(f"{name}:{job}: версия выражением {said} — значок её не прочтёт")
+            continue
+        cells, _ = policy.matrix_axis(WORKFLOWS / name, job, MATRIX_AXIS)
+        if cells != [said]:
+            wrong.append(f"{name}:{job}: шаг ставит {said}, а матрица — {cells}")
+    assert not wrong, "предрелизная версия расходится с ячейкой:\n  " + "\n  ".join(wrong)
 
 
 def test_one_tool_is_bounded_the_same_way_everywhere() -> None:
