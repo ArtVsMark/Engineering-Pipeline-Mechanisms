@@ -233,7 +233,11 @@ def steps(path: Path = CI) -> list[Step]:
     UNRUNNABLE.clear()
     found: list[Step] = []
     seen: set[str] = set()
-    jobs = [inner for job in (document.get("jobs") or {}).values() for inner in _jobs_of(job or {}, path)]
+    jobs = [
+        inner
+        for job in (document.get("jobs") or {}).values()
+        for inner in _jobs_of(job or {}, path)
+    ]
     for job_steps in jobs:
         # Строка установки — ПОСЛЕДНЯЯ перед шагом в его джобе: так её видит
         # площадка, ставящая окружение раньше команд (#1069). Джобы вызванного
