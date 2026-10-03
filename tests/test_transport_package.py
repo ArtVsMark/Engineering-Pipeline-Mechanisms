@@ -32,7 +32,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, RunScript, load_script, walk
+from tests.conftest import ROOT, RunScript, git, load_script, walk
 
 preflight = load_script("preflight.py")
 surface = load_script("transport_surface.py")
@@ -320,8 +320,7 @@ def test_the_surface_gap_tells_both_halves(
 
 def test_the_snapshot_is_written_by_the_command(tmp_path: Path, run_script: RunScript) -> None:
     """Снимок пишет команда, и записанное ею сходится с живой поверхностью."""
-    package = tmp_path / "packages" / "transport"
-    shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
+    package = copied(tmp_path)
     (package / surface.SNAPSHOT).unlink()
     done = run_script("transport_surface.py", "--root", str(tmp_path))
     assert done.code == surface.EXIT_OK, done.err
@@ -331,10 +330,91 @@ def test_the_snapshot_is_written_by_the_command(tmp_path: Path, run_script: RunS
 
 
 def copied(tmp_path: Path) -> Path:
-    """Копия пакета транспорта в дереве теста — как у потребителя под `--root`."""
+    """Копия пакета транспорта в дереве теста — как у потребителя под `--root`.
+
+    Дерево — git с общей веткой `origin/main` на той же копии: поверхность
+    сверяется с общей веткой (`base_surface`), и без неё команде не с чем
+    сверять.
+    """
     package = tmp_path / "packages" / "transport"
     shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
+    git(tmp_path, "init", "--initial-branch=main")
+    git(tmp_path, "config", "user.name", "Artem Markitanov")
+    git(tmp_path, "config", "user.email", "86671904+ArtVsMark@users.noreply.github.com")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-m", "пакет как в общей ветке")
+    git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
     return package
+
+
+def rename_a_function(package: Path) -> None:
+    """Сменить поверхность при прежнем `VERSION`: переименовать функцию."""
+    text = (package / "ghrest.py").read_text(encoding="utf-8")
+    (package / "ghrest.py").write_text(text.replace("def quote(", "def quote_it("), "utf-8")
+
+
+def test_the_live_surface_matches_the_shared_branch_or_moves_the_version() -> None:
+    """Поверхность дерева против общей ветки: сменилась — сдвинут и `VERSION` (`88a3574`)."""
+    try:
+        said = surface.moved_without_version(*surface.surface(PACKAGE), ROOT)
+    except surface.NotRun as exc:
+        pytest.skip(f"общей ветки в этом клоне нет — сверять не с чем: {exc}")
+    assert not said, said
+
+
+@pytest.mark.parametrize("bypass", ["снимок удалён", "шапка сменена"])
+def test_a_snapshot_bypass_does_not_move_the_surface_at_the_old_version(
+    tmp_path: Path, run_script: RunScript, bypass: str
+) -> None:
+    """Снимок удалён или шапка сменена — команда всё равно отказывает (`88a3574`, `0caa805`).
+
+    Прежде отказ сверял снимок сам с собой: без снимка или в другом формате
+    сверять было не с чем, и поверхность переписывалась при прежнем VERSION.
+    """
+    package = copied(tmp_path)
+    rename_a_function(package)
+    snapshot = package / surface.SNAPSHOT
+    if bypass == "снимок удалён":
+        snapshot.unlink()
+    else:
+        snapshot.write_text(
+            snapshot.read_text(encoding="utf-8").replace(surface.HEADER, "# формат прежний"),
+            encoding="utf-8",
+        )
+    refused = run_script("transport_surface.py", "--root", str(tmp_path))
+    assert refused.code == surface.EXIT_REFUSED, refused.err
+    assert "против origin/main" in refused.err
+
+
+def test_a_shared_branch_without_the_package_is_a_refusal(tmp_path: Path) -> None:
+    """Общей ветки нет — сверять не с чем, и это отказ шага, а не «сходится» (045)."""
+    with pytest.raises(surface.NotRun):
+        surface.base_surface(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("source", "expect"),
+    [
+        ("class A:\n    def __call__(self) -> int: ...\n", "m.A.__call__(self) -> int"),
+        ("class A:\n    def __iter__(self): ...\n", "m.A.__iter__(self)"),
+        ("__all__ = ['f']\n", "m.__all__"),
+        ("class A:\n    @property\n    def x(self) -> int: ...\n", "@property m.A.x(self) -> int"),
+        ("@staticmethod\ndef f() -> None: ...\n", "@staticmethod m.f() -> None"),
+        ("for NAME in range(2):\n    pass\n", "m.NAME"),
+        ("with open('x') as HANDLE:\n    pass\n", "m.HANDLE"),
+        ("for i in []:\n    INNER = 1\n", "m.INNER"),
+    ],
+    ids=["__call__", "__iter__", "__all__", "property", "staticmethod", "for", "with", "тело for"],
+)
+def test_every_public_form_is_in_the_surface(source: str, expect: str) -> None:
+    """Dunder-имена, декораторы и цели `for`/`with` — в снимке (`ae43a9e`, `05ae238`, `ec33c2a`)."""
+    assert expect in surface.public_names(source, "m")
+
+
+def test_imports_and_private_names_stay_out() -> None:
+    """Вторая половина: импорт — зависимость реализации, `_частное` — не поверхность."""
+    said = surface.public_names("import report\nfrom x import y\n_hidden = 1\nX = 1\nX += 1\n", "m")
+    assert said == ["m.X"], said
 
 
 def test_the_command_does_not_rewrite_a_moved_surface_at_the_old_version(
@@ -554,3 +634,26 @@ def test_the_consumer_pin_is_written_down() -> None:
     said = (PACKAGE / "pyproject.toml").read_text(encoding="utf-8")
     assert "#subdirectory=packages/transport" in said, "не сказано, как ставить пакет снаружи"
     assert "@v" in said, "не сказано, что прибиваются к ТЕГУ выпуска, а не к общей ветке"
+
+
+@pytest.mark.parametrize(
+    ("name", "said"),
+    [("f", True), ("__call__", True), ("__all__", True), ("_hidden", False), ("__mangled", False)],
+)
+def test_a_name_is_public_by_the_rule_of_the_snapshot(name: str, said: bool) -> None:
+    """Публично имя без `_` впереди либо dunder; `__mangled` без хвоста — частное."""
+    assert surface.public(name) is said
+
+
+def test_the_surface_is_read_from_any_reader() -> None:
+    """`surface_from` берёт файлы читателем: из дерева и из общей ветки — один разбор."""
+    files = {
+        "VERSION": "1.2.3\n",
+        "pyproject.toml": (
+            '[project]\nrequires-python = ">=3.14"\n[tool.setuptools]\npy-modules = ["m"]\n'
+        ),
+        "m.py": "def f() -> None: ...\n",
+    }
+    version, lines = surface.surface_from(files.__getitem__)
+    assert version == "1.2.3"
+    assert lines == ["requires-python >=3.14", "dependencies —", "m.f() -> None"]

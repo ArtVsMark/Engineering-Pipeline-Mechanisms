@@ -1,4 +1,4 @@
-# Поверхность транспорта, формат 2. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
+# Поверхность транспорта, формат 3. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
 VERSION 0.3.0
 requires-python >=3.14
 dependencies —
