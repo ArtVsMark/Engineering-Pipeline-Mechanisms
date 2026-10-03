@@ -160,3 +160,25 @@ def test_our_own_rename_is_named_as_ours(
     said = capsys.readouterr().out
     assert code == module.EXIT_FOUND, said
     assert "своё" in said, said
+
+
+def test_an_api_address_names_the_repository_not_repos(tmp_path: Path) -> None:
+    """`api.github.com/repos/o/name` — имя `o/name`, а не владелец `repos` (#1065)."""
+    root = repo_with(tmp_path, "GET https://api.github.com/repos/o/name/issues\n")
+    found = module.mentions(root)
+    assert "o/name" in found
+    assert not [name for name in found if name.startswith("repos/")], found
+
+
+def test_samples_in_tests_are_not_asked(tmp_path: Path) -> None:
+    """Образцы в `tests/` — данные проверок: их не спрашивают у площадки (#1065).
+
+    Вторая половина — то же имя вне `tests/` по-прежнему находится.
+    """
+    root = repo_with(tmp_path, "https://github.com/o/kept/x\n")
+    (root / "tests").mkdir()
+    (root / "tests" / "t.py").write_text('"https://github.com/o/sample/x"\n', encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    found = module.mentions(root)
+    assert "o/kept" in found
+    assert "o/sample" not in found
