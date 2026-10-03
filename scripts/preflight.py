@@ -28,9 +28,12 @@
 import argparse
 import hashlib
 import os
+import platform
 import shlex
+import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -49,9 +52,6 @@ CI: Final = paths.WORKFLOWS / "ci.yml"
 #: Вызов прогона ИЗ ЭТОГО ЖЕ ДЕРЕВА.
 OUR_CALL: Final = "./"
 
-#: Команда шага прогона: строка, начинающаяся с зовомого инструмента. Читается
-#: список РАЗРЕШЁННОГО (068): что не узнано, то не запускается, а называется.
-RUNNABLE: Final = ("ruff ", "mypy ", "pytest", "python scripts/")
 #: Переменная окружения с каталогом кода конвейера у общего шага (#990): её
 #: ставит общий шаг, её же ставит предполётная и читает гейт шагов.
 MECHANISMS: Final = "MECHANISMS"
@@ -118,10 +118,22 @@ class Step:
 
 #: Шаг, которому важен СОСТАВ окружения, а не только версии инструментов (#1069).
 TYPES: Final = "mypy "
+#: Формы вызова шага типов: сам инструмент и он же модулем интерпретатора.
+TYPES_CALLS: Final = (TYPES, "python -m mypy ", "python3 -m mypy ")
+#: Команда шага прогона: строка, начинающаяся с зовомого инструмента. Читается
+#: список РАЗРЕШЁННОГО (068): что не узнано, то не запускается, а называется.
+#: Формы шага типов берутся из `TYPES_CALLS`, а не вписываются второй раз:
+#: прежде `python -m mypy` узнавала подстановка, а отбор шагов отбрасывал
+#: его молча — до подстановки он не доходил (находка `7bfdb6c` на #1078).
+RUNNABLE: Final = ("ruff ", "pytest", "python scripts/", *TYPES_CALLS)
 #: Признак строки установки внутри блока шага.
 INSTALL: Final = "pip install"
 #: Где лежат окружения шагов — вне дерева проекта, по одному на строку установки.
 LINT_ENVS: Final = paths.PREFLIGHT_ENVS
+#: Метка завершённой сборки окружения шага: без неё окружение не готово.
+READY: Final = "READY"
+#: Срок окружения шага, секунд: площадка разрешает диапазоны в каждом прогоне.
+ENV_MAX_AGE: Final = 24 * 3600
 
 
 #: Проверки ПЕРЕД ТОЛЧКОМ, которых нет шагом прогона ни у кого. Это не второй
@@ -133,12 +145,15 @@ LINT_ENVS: Final = paths.PREFLIGHT_ENVS
 BEFORE_PUSH: Final = (Step("ветка откроет изменение", "python scripts/agent_pr.py --dry-run"),)
 
 #: Проверки прогона, у которых здесь нет команды вовсе: они живут не шагом с
-#: командой, а действием площадки или чужим прогоном.
+#: командой, а действием площадки или чужим прогоном. Ключ — имя записи так,
+#: как его выдаёт площадка: у вызванного общего шага оно составное. Ключи
+#: сверяет с ответом по классам `tests/test_window_preflight.py`, иначе
+#: переименование оставило бы здесь имя, которого больше нет (взгляд на #1062).
 ELSEWHERE: Final = {
-    "attribution": "считается по истории относительно базы изменения",
+    "attribution / attribution": "считается по истории относительно базы изменения",
     "ci-complete": "опрашивает записи проверок на голове у площадки",
     "review": "идёт отдельным прогоном и чужим исполнителем",
-    "automerge": "это само слияние, а не проверка перед ним",
+    "automerge / automerge": "это само слияние, а не проверка перед ним",
 }
 
 EXIT_OK: Final = 0
@@ -150,8 +165,12 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «всё зелено»."""
 
 
-def _steps_of(job: dict[str, Any], caller: Path) -> list[dict[str, Any]]:
-    """Шаги джоба — свои либо шаги прогона, который он зовёт.
+def _jobs_of(job: dict[str, Any], caller: Path) -> list[list[dict[str, Any]]]:
+    """Шаги джоба — свои либо шаги прогона, который он зовёт, ПО ДЖОБАМ.
+
+    Вызванный прогон отдаёт свои джобы порознь, а не одним списком: строка
+    установки живёт в пределах джоба, и общий список отдал бы строку одного
+    джоба шагу следующего (находка `daee131` на #1073).
 
     Адрес вызова отсчитывается от корня дерева, а не от каталога прогонов, и
     остаётся СТРОКОЙ: `Path("./x")` нормализует ведущее `./` прочь, и признак
@@ -161,7 +180,7 @@ def _steps_of(job: dict[str, Any], caller: Path) -> list[dict[str, Any]]:
     """
     said = str(job.get("uses") or "")
     if not said:
-        return list(job.get("steps") or [])
+        return [list(job.get("steps") or [])]
     if not said.startswith(OUR_CALL):
         UNRUNNABLE[said] = "вызов чужого прогона: его шагов в дереве нет"
         return []
@@ -182,11 +201,7 @@ def _steps_of(job: dict[str, Any], caller: Path) -> list[dict[str, Any]]:
     called = yaml.safe_load(where.read_text(encoding="utf-8"))
     if not isinstance(called, dict):
         raise NotRun(f"{where}: вызываемый прогон не разбирается")
-    return [
-        step
-        for inner in (called.get("jobs") or {}).values()
-        for step in ((inner or {}).get("steps") or [])
-    ]
+    return [list((inner or {}).get("steps") or []) for inner in (called.get("jobs") or {}).values()]
 
 
 def steps(path: Path = CI) -> list[Step]:
@@ -224,14 +239,18 @@ def steps(path: Path = CI) -> list[Step]:
     UNRUNNABLE.clear()
     found: list[Step] = []
     seen: set[str] = set()
-    for job in (document.get("jobs") or {}).values():
+    jobs = [
+        inner
+        for job in (document.get("jobs") or {}).values()
+        for inner in _jobs_of(job or {}, path)
+    ]
+    for job_steps in jobs:
         # Строка установки — ПОСЛЕДНЯЯ перед шагом в его джобе: так её видит
-        # площадка, ставящая окружение раньше команд (#1069). Шаги вызванного
-        # прогона приходят одним списком (`_steps_of`), и предел назван: у
-        # вызываемого прогона из нескольких джобов строка одного могла бы
-        # достаться шагу следующего, если тот ничего не ставит сам.
+        # площадка, ставящая окружение раньше команд (#1069). Джобы вызванного
+        # прогона приходят порознь (`_jobs_of`), и строка одного не достаётся
+        # шагу другого.
         installs = ""
-        for step in _steps_of(job or {}, path):
+        for step in job_steps:
             command = str((step or {}).get("run") or "").strip()
             name = str((step or {}).get("name") or "").strip()
             if INSTALL in command:
@@ -303,6 +322,16 @@ def packages_of(installs: str) -> list[str]:
     return found
 
 
+def env_dir(installs: str, root: Path) -> tuple[Path, str]:
+    """Каталог окружения шага и то, из чего собран его ключ.
+
+    Интерпретатор окна — в ключе: после смены Python прежнее окружение
+    собрано другим, и `--python-executable` указал бы на него (`64dd097`).
+    """
+    said = " ".join([sys.executable, platform.python_version(), *packages_of(installs)])
+    return root / LINT_ENVS / hashlib.sha1(said.encode()).hexdigest()[:12], said
+
+
 def lint_python(installs: str, root: Path) -> Path:
     """Интерпретатор окружения того же СОСТАВА, что у шага на площадке (#1069).
 
@@ -313,28 +342,71 @@ def lint_python(installs: str, root: Path) -> Path:
     а здесь предполётная давала «зелено». Версии инструментов сверял
     `check_env` — состав не сверял никто.
 
-    Окружение собирается один раз на строку установки — ключ её отпечаток — в
-    `LINT_ENVS` под корнем дерева; повторный заход его берёт готовым. Сбор не
-    удался (сети нет) — отказ с названной причиной, а не тихий `mypy` в
-    `.venv`: это было бы ровно то зелёное, от которого механизм заведён (045).
+    Окружение собирается на строку установки И интерпретатор окна — ключ их
+    отпечаток — в `LINT_ENVS` под корнем дерева. Сбор не удался (сети нет) —
+    отказ с названной причиной, а не тихий `mypy` в `.venv`: это было бы ровно
+    то зелёное, от которого механизм заведён (045).
+
+    ГОТОВО ТОЛЬКО ТО, ЧТО СБОРКА ОБЪЯВИЛА ГОТОВЫМ. Прежде признаком был
+    `bin/python`, а его оставляет и сборка, упавшая на `pip install`: второй
+    заход брал пустое окружение за готовое (находки `567ad6d`, `55c6ddd`,
+    `0f379a2`). Метку `READY` пишет только завершившаяся сборка; нет метки —
+    каталог стирается и собирается заново.
+
+    СРОК — СУТКИ. Площадка разрешает диапазоны пакетов заново в каждом
+    прогоне, а окружение окна застыло бы на первом разрешении навсегда
+    (`793ebcd`). Сутки — компромисс: пересборка стоит секунды, а выход нового
+    `mypy` в пределах диапазона окно увидит не позже следующего дня. Предел
+    назван: в эти сутки состав может разойтись с площадкой.
     """
     packages = packages_of(installs)
-    key = hashlib.sha1(" ".join(packages).encode()).hexdigest()[:12]
-    where = root / LINT_ENVS / key
+    where, said = env_dir(installs, root)
     python = where / "bin" / "python"
-    if python.is_file():
+    ready = where / READY
+    if ready.is_file() and time.time() - ready.stat().st_mtime < ENV_MAX_AGE:
         return python
+    # СБОРКА — В СОСЕДНИЙ КАТАЛОГ, ПОДМЕНА — ТОЛЬКО ГОТОВЫМ (находка `9e96bfe`).
+    # Стирать прежнее до сборки значило бы потерять рабочее окружение, если
+    # пересборка устаревшего упала без сети. Недособранное прежнее (без метки)
+    # не стоит ничего и стирается сразу.
+    stale = ready.is_file()
+    if not stale:
+        shutil.rmtree(where, ignore_errors=True)
+    fresh = where.with_name(where.name + ".build")
+    shutil.rmtree(fresh, ignore_errors=True)
     for command in (
-        [sys.executable, "-m", "venv", str(where)],
-        [str(python), "-m", "pip", "install", "--quiet", *packages],
+        [sys.executable, "-m", "venv", str(fresh)],
+        [str(fresh / "bin" / "python"), "-m", "pip", "install", "--quiet", *packages],
     ):
         done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
         if done.returncode != 0:
-            raise NotRun(
+            shutil.rmtree(fresh, ignore_errors=True)
+            why = (
                 f"окружение шага типов не собрано ({' '.join(command[:4])}…): "
                 f"{(done.stderr or done.stdout).strip()[-300:]}"
             )
+            if stale:
+                # Названное отступление, а не тихое (045): прежнее собрано тем же
+                # составом и тем же интерпретатором, устарело лишь разрешение
+                # диапазонов, и окно об этом знает.
+                print(f"предупреждение: {why}; взято прежнее окружение {where}", file=sys.stderr)
+                return python
+            raise NotRun(why)
+    shutil.rmtree(where, ignore_errors=True)
+    fresh.rename(where)
+    ready.write_text(said + "\n", encoding="utf-8")
     return python
+
+
+def types_call(line: str) -> str | None:
+    """Форма вызова `mypy`, которой начинается строка, или ``None``.
+
+    Один предикат на подстановку и на её проверку: тест искал шаг подстрокой
+    `"mypy " in command`, а подстановка — началом строки, и шаг вида
+    `python -m mypy …` тест видел, а подстановка нет (находка `f875389`).
+    """
+    said = line.strip()
+    return next((call for call in TYPES_CALLS if said.startswith(call)), None)
 
 
 def as_on_the_platform(step: Step, root: Path) -> str:
@@ -347,17 +419,18 @@ def as_on_the_platform(step: Step, root: Path) -> str:
     в вердикт не берут так, как берёт `mypy`, а импорты шагов держит
     `test_workflow_installs_what_its_scripts_import`.
     """
-    if not step.installs or not any(
-        line.strip().startswith(TYPES) for line in step.command.splitlines()
-    ):
+    if not step.installs or not any(types_call(line) for line in step.command.splitlines()):
         return step.command
     python = lint_python(step.installs, root)
-    return "\n".join(
-        line.replace(TYPES, f"{TYPES}--python-executable {shlex.quote(str(python))} ", 1)
-        if line.strip().startswith(TYPES)
-        else line
-        for line in step.command.splitlines()
-    )
+    lines = []
+    for line in step.command.splitlines():
+        call = types_call(line)
+        lines.append(
+            line.replace(call, f"{call}--python-executable {shlex.quote(str(python))} ", 1)
+            if call
+            else line
+        )
+    return "\n".join(lines)
 
 
 def run(step: Step, root: Path) -> tuple[int, str]:
