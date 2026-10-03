@@ -35,6 +35,7 @@ import yaml
 from tests.conftest import ROOT, load_script, walk
 
 CLAIMS = ROOT / load_script("paths.py").CLAIMS
+policy = load_script("pipeline_checks.py")
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 #: Отсутствие механизма говорится СЛОВОМ, а не пропуском поля (154).
@@ -47,6 +48,27 @@ def declared() -> list[dict[str, Any]]:
     return list(said.get("claims") or [])
 
 
+def only_called(document: dict[Any, Any]) -> bool:
+    """Прогон — общий шаг: из событий у него один `workflow_call`, в любой форме `on:`."""
+    events: list[str] = policy.triggers_of(document)
+    return events == [policy.CALLED]
+
+
+@pytest.mark.parametrize(
+    ("on", "step"),
+    [
+        ({"workflow_call": None}, True),
+        ("workflow_call", True),
+        (["workflow_call"], True),
+        ({"workflow_call": None, "workflow_dispatch": None}, False),
+        (["push"], False),
+    ],
+)
+def test_a_step_is_known_in_every_form_of_on(on: object, step: bool) -> None:
+    """Общий шаг узнаётся во всех трёх формах `on:`, а прогон с собственным событием — нет."""
+    assert only_called({"on": on, "jobs": {}}) is step, on
+
+
 def workflows_with_permission(arg: str) -> int:
     """Сколько прогонов дерева просят названное право — `contents: write`.
 
@@ -57,7 +79,9 @@ def workflows_with_permission(arg: str) -> int:
     выдаёт вызывающий, а его раздел прав — потолок, а не просьба: больше,
     чем дал вызывающий, шаг не получит, и прогон с правом остаётся один. Иначе
     вынос тела в общий шаг (#993) удваивал бы счёт механизма, не прибавив ни
-    одного обладателя права.
+    одного обладателя права. Шаг узнаётся общим разбором событий
+    (`pipeline_checks.triggers_of`) в любой форме записи `on:` — словарём,
+    списком или строкой (взгляд на #1062, 090).
     """
     name, _, value = (part.strip() for part in arg.partition(":"))
     found = 0
@@ -65,8 +89,7 @@ def workflows_with_permission(arg: str) -> int:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             continue
-        events = document.get("on", document.get(True))
-        if isinstance(events, dict) and set(events) == {"workflow_call"}:
+        if only_called(document):
             continue
         places = [document.get("permissions")]
         places += [(job or {}).get("permissions") for job in (document.get("jobs") or {}).values()]
