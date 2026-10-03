@@ -48,6 +48,7 @@ git — единственное место, где это возможно, с�
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -66,6 +67,18 @@ from typing import Final
 SHARED: Final = "main"
 #: Ключи `git push`, за которыми идёт значение, а не имя ветки.
 WITH_VALUE: Final = frozenset({"--repo", "-o", "--push-option", "--exec", "--receive-pack"})
+#: Перенаправление оболочки — не довод git. `shlex.split` отдаёт его словом, и
+#: прежде `git push origin x 2>&1` давал вторую цель «2>&1» (#1075).
+#:
+#: ПРАВИЛО ОДНО, А НЕ ПЕРЕЧЕНЬ ФОРМ. Первая редакция знала только слово,
+#: целиком состоящее из перенаправления, и взгляд сразу нашёл два обхода:
+#: приклеенное к ветке (`agent/x>out.log`) и голое `>& файл` (`55f1f51`,
+#: `3406ba5`). Поэтому разбор повторяет правило самой оболочки: перенаправление
+#: начинается с первого `<` или `>` в слове (с `&` перед ним — `&>`). Голова до
+#: него — цель толчка, если она не номер дескриптора (`2>&1`). Хвост без цели
+#: (`>`, `>&`, `<<`) забирает и следующее слово. Так покрыты `>`, `>>`, `<`,
+#: `&>`, `&>>`, `>&N`, `<&N`, `>|`, `<>`, `<<`, `<<<`, слитно и раздельно.
+REDIRECT: Final = re.compile(r"^(?P<head>[^<>]*?)(?P<op>&?[<>][<>&|]*)(?P<aim>.*)$")
 #: Глобальные ключи самого git со значением: `git -C путь push`. Отделять их
 #: нужно, потому что подкоманда — первое слово без ключа.
 GLOBAL_WITH_VALUE: Final = frozenset(
@@ -375,6 +388,12 @@ def named_branches(arguments: list[str]) -> list[str]:
         if word in WITH_VALUE:
             skip = True
             continue
+        if redirect := REDIRECT.match(word):
+            skip = not redirect["aim"]
+            head = redirect["head"]
+            if not head or head.isdigit():
+                continue
+            word = head
         if word.startswith("-"):
             continue
         if not seen_remote:

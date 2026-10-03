@@ -26,7 +26,9 @@
 """
 
 import argparse
+import hashlib
 import os
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -108,6 +110,18 @@ class Step:
 
     name: str
     command: str
+    #: Строка установки джоба, в котором стоит шаг (`pip install …`), как
+    #: написана; пусто — джоб ничего не ставит. Нужна шагу типов: `mypy`
+    #: видит пакеты окружения, а не только код, и их состав решает вердикт.
+    installs: str = ""
+
+
+#: Шаг, которому важен СОСТАВ окружения, а не только версии инструментов (#1069).
+TYPES: Final = "mypy "
+#: Признак строки установки внутри блока шага.
+INSTALL: Final = "pip install"
+#: Где лежат окружения шагов — вне дерева проекта, по одному на строку установки.
+LINT_ENVS: Final = paths.PREFLIGHT_ENVS
 
 
 #: Проверки ПЕРЕД ТОЛЧКОМ, которых нет шагом прогона ни у кого. Это не второй
@@ -214,9 +228,17 @@ def steps(path: Path = CI) -> list[Step]:
     found: list[Step] = []
     seen: set[str] = set()
     for job in (document.get("jobs") or {}).values():
+        # Строка установки — ПОСЛЕДНЯЯ перед шагом в его джобе: так её видит
+        # площадка, ставящая окружение раньше команд (#1069). Шаги вызванного
+        # прогона приходят одним списком (`_steps_of`), и предел назван: у
+        # вызываемого прогона из нескольких джобов строка одного могла бы
+        # достаться шагу следующего, если тот ничего не ставит сам.
+        installs = ""
         for step in _steps_of(job or {}, path):
             command = str((step or {}).get("run") or "").strip()
             name = str((step or {}).get("name") or "").strip()
+            if INSTALL in command:
+                installs = command
             if not command or command in seen:
                 continue
             lines = [plain(line) for line in command.splitlines()]
@@ -234,7 +256,7 @@ def steps(path: Path = CI) -> list[Step]:
                 UNRUNNABLE[name or command] = "в команде подстановка площадки"
                 continue
             seen.add(command)
-            found.append(Step(name or command.splitlines()[0], command))
+            found.append(Step(name or command.splitlines()[0], command, installs))
 
     if not found:
         raise NotRun(f"{path}: ни одной выполнимой команды не нашлось — предмет не найден (075)")
@@ -263,10 +285,92 @@ def environment() -> dict[str, str]:
     return room
 
 
+def packages_of(installs: str) -> list[str]:
+    """Пакеты строки установки, как их ставит площадка; флаги `pip` отброшены.
+
+    Путь к дереву (`$MECHANISMS/…`, `./…`) отдаётся отказом: окружение
+    шага собирается вне дерева, и путь, ставший бы здесь пакетом, был бы ДРУГИМ
+    кодом, чем у площадки (045). Шаг типов на площадке пакетов дерева не
+    ставит; встретится такой — предел станет виден, а не съеден.
+    """
+    line = next((one for one in installs.splitlines() if INSTALL in one), "")
+    words = shlex.split(line.partition(INSTALL)[2])
+    found = [word for word in words if not word.startswith("-")]
+    tree = [word for word in found if "/" in word or word.startswith(("$", "."))]
+    if tree:
+        raise NotRun(
+            f"строка установки шага ставит пакеты дерева {tree} — собрать её вне дерева нечем"
+        )
+    if not found:
+        raise NotRun(f"в строке установки «{line.strip()}» пакетов нет (075)")
+    return found
+
+
+def lint_python(installs: str, root: Path) -> Path:
+    """Интерпретатор окружения того же СОСТАВА, что у шага на площадке (#1069).
+
+    ЗАМЕР 03.10.2026, #1063. Шаг `lint` ставит `ruff`, `mypy` и `pyyaml`, а
+    `.venv` окна несёт ещё и `pytest`. `mypy` видит пакеты окружения: с
+    `pytest` вызов `pytest.skip` — `NoReturn`, без него — `Any`, и функция,
+    кончающаяся этим вызовом, на площадке краснела «Missing return statement»,
+    а здесь предполётная давала «зелено». Версии инструментов сверял
+    `check_env` — состав не сверял никто.
+
+    Окружение собирается один раз на строку установки — ключ её отпечаток — в
+    `LINT_ENVS` под корнем дерева; повторный заход его берёт готовым. Сбор не
+    удался (сети нет) — отказ с названной причиной, а не тихий `mypy` в
+    `.venv`: это было бы ровно то зелёное, от которого механизм заведён (045).
+    """
+    packages = packages_of(installs)
+    key = hashlib.sha1(" ".join(packages).encode()).hexdigest()[:12]
+    where = root / LINT_ENVS / key
+    python = where / "bin" / "python"
+    if python.is_file():
+        return python
+    for command in (
+        [sys.executable, "-m", "venv", str(where)],
+        [str(python), "-m", "pip", "install", "--quiet", *packages],
+    ):
+        done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
+        if done.returncode != 0:
+            raise NotRun(
+                f"окружение шага типов не собрано ({' '.join(command[:4])}…): "
+                f"{(done.stderr or done.stdout).strip()[-300:]}"
+            )
+    return python
+
+
+def as_on_the_platform(step: Step, root: Path) -> str:
+    """Команда шага в окружении площадки: `mypy` смотрит пакеты окружения шага (#1069).
+
+    Подставляется ровно `--python-executable` — ключ самого `mypy`, по
+    которому он ищет пакеты в чужом интерпретаторе. Инструменты и код остаются
+    прежними, меняется только то, что `mypy` видит установленным. Прочих
+    шагов это не касается, и предел назван: `pytest` и `ruff` состав окружения
+    в вердикт не берут так, как берёт `mypy`, а импорты шагов держит
+    `test_workflow_installs_what_its_scripts_import`.
+    """
+    if not step.installs or not any(
+        line.strip().startswith(TYPES) for line in step.command.splitlines()
+    ):
+        return step.command
+    python = lint_python(step.installs, root)
+    return "\n".join(
+        line.replace(TYPES, f"{TYPES}--python-executable {shlex.quote(str(python))} ", 1)
+        if line.strip().startswith(TYPES)
+        else line
+        for line in step.command.splitlines()
+    )
+
+
 def run(step: Step, root: Path) -> tuple[int, str]:
     """Запускает команду шага и отдаёт код с выводом."""
+    try:
+        command = as_on_the_platform(step, root)
+    except NotRun as exc:
+        return EXIT_BROKEN, f"шаг не отработал: {exc}"
     done = subprocess.run(
-        step.command,
+        command,
         shell=True,
         # ОБОЛОЧКА ТА ЖЕ, ЧТО У ПЛОЩАДКИ. Умолчание `shell=True` — `/bin/sh`, а
         # площадка запускает шаги в bash: `set -o pipefail` в sh не понят, и
