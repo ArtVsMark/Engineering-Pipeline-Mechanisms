@@ -611,10 +611,19 @@ def test_both_version_lists_come_from_a_matrix() -> None:
     Площадка приписывает значения матрицы к имени джоба: `test-next (3.15)`
     читается в списке проверок изменения, а версия внутри шага — нет. Владелец
     прочёл именно так: «3.15 в проверках не видно» (046).
+
+    ПРЕДРЕЛИЗНЫЙ ШАГ ВПИСЫВАЕТ ЧИСЛО БУКВОЙ — копией ячейки (решение владельца
+    03.10.2026). Действие единого значка каталога выражение матрицы не читает,
+    и 3.15 со значка пропадала. Копия равна ячейке — это и проверено здесь, а
+    вписанную букву в предрелизном шаге отдельно держит
+    `tests/test_declared_versions.py::test_a_preview_step_names_its_matrix_cell`.
     """
     flows = ROOT / ".github" / "workflows"
     # Предрелизная — своим прогоном (#1018), обязательная — в `ci.yml`.
-    for job, flow in (("test-matrix", "ci.yml"), ("test-next", "python-next.yml")):
+    for job, flow, preview in (
+        ("test-matrix", "ci.yml", False),
+        ("test-next", "python-next.yml", True),
+    ):
         path = flows / flow
         jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
         cells = module.matrix_of(jobs, job, path)
@@ -624,8 +633,9 @@ def test_both_version_lists_come_from_a_matrix() -> None:
             for step in (jobs[job].get("steps") or [])
             if (said := ((step or {}).get("with") or {}).get("python-version"))
         ]
-        assert step == ["${{ matrix.python }}"], (
-            f"{job}: шаг берёт версию не из матрицы — источников числа стало два (022)"
+        expected = cells if preview else ["${{ matrix.python }}"]
+        assert step == expected, (
+            f"{job}: шаг ставит {step}, а ожидается {expected} — источник числа разошёлся (022)"
         )
 
 
