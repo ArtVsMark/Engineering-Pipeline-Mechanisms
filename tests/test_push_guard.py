@@ -682,7 +682,22 @@ def test_the_reachability_sign_is_not_back(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "tail",
-    ["2>&1", ">out.log", "> out.log", ">> out.log", "2>/dev/null", "&>out.log", "< in.txt"],
+    [
+        "2>&1",
+        ">out.log",
+        "> out.log",
+        ">> out.log",
+        "2>/dev/null",
+        "&>out.log",
+        "&>> out.log",
+        "< in.txt",
+        ">& out.log",
+        "2>& out.log",
+        "<& 3",
+        ">| out.log",
+        "<> rw.txt",
+        "<<< слово",
+    ],
 )
 def test_a_shell_redirect_is_not_a_push_target(tail: str) -> None:
     """Перенаправление оболочки — не ветка-цель, а цель толчка видна по-прежнему.
@@ -698,3 +713,27 @@ def test_a_shell_redirect_is_not_a_push_target(tail: str) -> None:
 def test_a_branch_after_a_redirect_is_still_seen() -> None:
     """Вторая половина: ветка, названная после перенаправления, целью остаётся (140)."""
     assert module.push_targets("git push origin 2>&1 agent/x").targets == ("agent/x",)
+
+
+@pytest.mark.parametrize("glued", [">out.log", ">&1", ">>out.log", "&>out.log", ">", ">&"])
+def test_a_redirect_glued_to_the_branch_leaves_the_branch(glued: str) -> None:
+    """Перенаправление, приклеенное к ветке, — ветка остаётся целью, а не «agent/x>…».
+
+    Находка `55f1f51` на #1076: `git push origin agent/x>out.log` оболочка
+    читает как толчок `agent/x` с выводом в файл, а сторож — как ветку
+    «agent/x>out.log», и законный толчок отвергался. Хвост без цели (`>`,
+    `>&`) забирает следующее слово, и оно целью не становится.
+    """
+    look = module.push_targets(f"git push origin agent/x{glued} out.log")
+    expect = ("agent/x",) if glued in (">", ">&") else ("agent/x", "out.log")
+    assert look.targets == expect
+
+
+def test_a_number_is_a_descriptor_only_alone() -> None:
+    """Номер дескриптора — только слово из одних цифр, как у самой оболочки.
+
+    `2>&1` — перенаправление без цели толчка, а `agent/x2>&1` — толчок
+    ветки `agent/x2`: цифра, приклеенная к имени, принадлежит имени.
+    """
+    assert module.push_targets("git push origin agent/x 2>&1").targets == ("agent/x",)
+    assert module.push_targets("git push origin agent/x2>&1").targets == ("agent/x2",)
