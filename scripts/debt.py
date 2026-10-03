@@ -85,23 +85,27 @@ def contract_note(body: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def findings_debt(repo: str, token: str) -> list[tuple[str, int, str]]:
+def findings_debt(
+    repo: str, token: str, listed: list[dict[str, Any]] | None = None
+) -> list[tuple[str, int, str]]:
     """Неразобранные находки из живой задачи-адресата."""
-    _, body = findings.live_issue(repo, token)
+    _, body = findings.live_issue(repo, token, listed=listed)
     return [
         (mark, entry.pr, f"[{entry.weight}] {entry.title}")
         for mark, entry in findings.parse_entries(body).items()
     ]
 
 
-def unlooked_debt(repo: str, token: str) -> tuple[list[unlooked.Entry], dict[str, int]]:
+def unlooked_debt(
+    repo: str, token: str, listed: list[dict[str, Any]] | None = None
+) -> tuple[list[unlooked.Entry], dict[str, int]]:
     """Слитое без внешнего взгляда — из реестра, где его ведёт свой механизм.
 
     Третий долг ЧИТАЕТСЯ так же, как два первых: его считает `unlooked` в свою
     живую задачу, а здесь только берётся готовое число
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
     """
-    _, body = findings.live_issue(repo, token, unlooked.MARKER)
+    _, body = findings.live_issue(repo, token, unlooked.MARKER, listed)
     # ОТКРЫТОСТЬ СОСТОЯНИЯ СПРАШИВАЕТСЯ У ТОГО, КТО ЕГО ВЕДЁТ, а не сверяется
     # здесь вторым сравнением. Состояний стало восемь, и одно из них несёт
     # исход суффиксом — точное равенство его не берёт, и такая запись выпадала
@@ -118,7 +122,9 @@ def unlooked_debt(repo: str, token: str) -> tuple[list[unlooked.Entry], dict[str
     )
 
 
-def branch_debt(repo: str, token: str) -> tuple[list[str], list[str]]:
+def branch_debt(
+    repo: str, token: str, listed: list[dict[str, Any]] | None = None
+) -> tuple[list[str], list[str]]:
     """Краснота общей ветки из задачи, которую ведёт шаг 9.
 
     Возвращает раздельно: держащее слияние (источник 0) и не держащее
@@ -126,7 +132,7 @@ def branch_debt(repo: str, token: str) -> tuple[list[str], list[str]]:
     по живым артефактам, и второй счёт того же разошёлся бы с первым молча
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
     """
-    _, body = findings.live_issue(repo, token, main_red.MARKER)
+    _, body = findings.live_issue(repo, token, main_red.MARKER, listed)
     return section(body, "Держит слияние"), section(body, "Не держит слияние")
 
 
@@ -239,7 +245,12 @@ def inbox_age(seen: str, closed_note: str, now: datetime | None = None) -> str:
     return said_age(age_of(seen, now), CLOSED_LATE if closed_note else STALE_NOTE)
 
 
-def inbox_body(repo: str, token: str, closed: list[dict[str, Any]]) -> tuple[str, str, str]:
+def inbox_body(
+    repo: str,
+    token: str,
+    closed: list[dict[str, Any]],
+    listed: list[dict[str, Any]] | None = None,
+) -> tuple[str, str, str]:
     """Тело задачи-«входящие» и пометка о её состоянии.
 
     ПОЧЕМУ НЕ ТОЛЬКО ЖИВАЯ. Живой считается открытая задача, а «входящие»
@@ -261,7 +272,7 @@ def inbox_body(repo: str, token: str, closed: list[dict[str, Any]]) -> tuple[str
     значит выбирать за читателя (154). Так же поступает `live_issue_seen` с
     живыми копиями.
     """
-    number, body, seen = findings.live_issue_seen(repo, token, findings.INBOX_MARKER)
+    number, body, seen = findings.live_issue_seen(repo, token, findings.INBOX_MARKER, listed)
     if number is not None:
         return body, "", seen
     found = [
@@ -398,17 +409,23 @@ def closed_issues(repo: str, token: str) -> list[dict[str, Any]]:
     return sorted(found, key=lambda issue: str(issue.get("closed_at") or ""), reverse=True)
 
 
-def open_issues(repo: str, token: str) -> list[dict[str, Any]]:
+def open_listed(repo: str, token: str) -> list[dict[str, Any]]:
+    """Открытые записи площадки — задачи вместе с изменениями, — одним чтением.
+
+    Этот список нужен пяти счётам: четырём поискам живой задачи по маркеру и
+    счётам по пунктам. Прежде каждый читал его сам, и `debt` тратил на один и
+    тот же ответ пять запросов из квоты прогона (замер 03.10.2026, #1065).
+    """
+    return list(ghrest.paginate(f"repos/{repo}/issues?state=open", token))
+
+
+def open_issues(listed: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Открытые задачи без изменений — общий вход обоих счётов по пунктам.
 
     Список читается ОДИН раз: два прохода по одному источнику расходятся тем
     охотнее, чем невиннее выглядят, и расходятся молча (022).
     """
-    return [
-        issue
-        for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token)
-        if issue.get("pull_request") is None
-    ]
+    return [issue for issue in listed if issue.get("pull_request") is None]
 
 
 def looks_done(issues: list[dict[str, Any]]) -> list[tuple[int, str]]:
@@ -571,17 +588,18 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_PARTIAL
 
     try:
-        left = findings_debt(args.repo, token)
-        unlooked_left, unlooked_tally = unlooked_debt(args.repo, token)
-        holding, lagging = branch_debt(args.repo, token)
+        listed = open_listed(args.repo, token)
+        left = findings_debt(args.repo, token, listed)
+        unlooked_left, unlooked_tally = unlooked_debt(args.repo, token, listed)
+        holding, lagging = branch_debt(args.repo, token, listed)
         # Закрытые задачи читаются ОДИН раз на оба счёта: «входящие» и ревизию
         # закрытого. Два прохода по одному источнику расходятся молча (022).
         closed = closed_issues(args.repo, token)
-        inbox, inbox_note, inbox_seen = inbox_body(args.repo, token, closed)
+        inbox, inbox_note, inbox_seen = inbox_body(args.repo, token, closed, listed)
         conflicting, unknown, red = stuck_changes(args.repo, token)
         # Список задач читается ОДИН раз на оба счёта по пунктам: два прохода
         # по одному источнику расходятся тем охотнее, чем невиннее выглядят (022).
-        issues = open_issues(args.repo, token)
+        issues = open_issues(listed)
         ready = looks_done(issues)
         built, quiet = items_left.look(issues, items.open_items)
         by_prose = task_shape.without_a_checklist(issues)
