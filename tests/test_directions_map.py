@@ -258,15 +258,14 @@ ROSTER_HEAD: Final = "| Роль | Вход | Возражает |"
 NAMED_RE: Final = re.compile(r"^профиль (?P<owner>.+)$")
 
 
-def roster() -> set[str]:
-    """Имена ролей из таблицы состава — как они в ней написаны.
+def roster_rows(said: str) -> list[list[str]]:
+    """Строки таблицы состава ячейками: «Роль | Вход | Возражает».
 
-    Состав живёт в файле ролей, а исходы карты — в карте направлений: это СТЫК
-    двух файлов (#767), и держит его проверка владельца ниже.
+    Читатель один на оба файла: имена ролей берёт `roster`, адресат
+    возражения — `tests/test_roles.py`, и второго разбора таблицы нет (022).
     """
-    said = ROLES.read_text(encoding="utf-8")
     after = said.partition(ROSTER_HEAD)[2]
-    found: set[str] = set()
+    rows: list[list[str]] = []
     for line in after.splitlines():
         if not line.strip():
             # Пустая строка сразу после заголовка — это его собственный перевод
@@ -278,10 +277,23 @@ def roster() -> set[str]:
         cells = [one.strip() for one in line.strip("|").split("|")]
         if len(cells) != 3 or set(cells[0]) <= set("- "):
             continue
-        name = re.sub(r"[^\w\s-]", "", cells[0]).replace("**", "").strip()
-        if name:
-            found.add(name)
-    return found
+        rows.append(cells)
+    return rows
+
+
+def role_name(cell: str) -> str:
+    """Имя роли из первой ячейки — без значка и выделения."""
+    return re.sub(r"[^\w\s-]", "", cell).replace("**", "").strip()
+
+
+def roster() -> set[str]:
+    """Имена ролей из таблицы состава — как они в ней написаны.
+
+    Состав живёт в файле ролей, а исходы карты — в карте направлений: это СТЫК
+    двух файлов (#767), и держит его проверка владельца ниже.
+    """
+    said = ROLES.read_text(encoding="utf-8")
+    return {name for cells in roster_rows(said) if (name := role_name(cells[0]))}
 
 
 def test_the_roster_has_roles_to_judge() -> None:
