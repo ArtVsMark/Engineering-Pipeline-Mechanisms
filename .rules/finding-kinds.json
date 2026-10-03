@@ -147,7 +147,9 @@
         "9ae9739",
         "4865876",
         "8a0ea5b",
-        "bce3d4d"
+        "bce3d4d",
+        "55f1f51",
+        "3406ba5"
       ],
       "закрыт": "tests/test_call_forms.py — разбор вызова обязан знать обе формы имени: голое и через точку. ПРИЗНАК ПРИВЯЗАН К САМОМУ `.func`, а не ищется строкой по телу функции, и знает все четыре записи разбора: `node.func.id`, `isinstance(node.func, ast.Name)`, `getattr(node.func, \"id\")`, `match node.func: case ast.Name()`. Числа в гейте не вписаны намеренно — замер разборщиков рассыхался дважды за двое суток (005), и величину даёт команда, названная в его докстроке: `pytest tests/test_call_forms.py -q -s -k the_subject_of_this_gate_exists`",
       "породил": [
