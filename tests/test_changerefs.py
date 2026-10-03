@@ -433,7 +433,7 @@ def test_two_unclosed_fences_in_different_bodies_eat_nothing() -> None:
 def test_resolutions_survive_the_same_way() -> None:
     """Снятие находки переживает чужую незакрытую разметку так же."""
     bodies = ["fix: A\n```\nзаметка\n\nРазобрано: abc1234\n", "feat: B\n```\nещё\n"]
-    assert changerefs.resolved_in_all(bodies) == ["abc1234"]
+    assert changerefs.resolutions_in_all(bodies) == ["Разобрано: abc1234"]
 
 
 def test_repeats_across_bodies_collapse() -> None:
@@ -994,3 +994,48 @@ def test_both_window_readers_share_one_form() -> None:
     said = [line for line, _ in changerefs.window_lines_in(text)]
     assert said == ["Род: имя — окно: место", "Род: без места — окно:"]
     assert changerefs.window_meetings_in(text) == [changerefs.WindowMeeting("имя", "место")]
+
+
+def test_a_kind_named_later_is_not_lost_with_the_repeat() -> None:
+    """Снятие без рода, повторённое следующим коммитом с родом, — род доезжает.
+
+    Находка `0731223` на #1070: повтор отбрасывался целиком, и род, дописанный
+    вторым коммитом, терялся молча. Побеждает первый НАЗВАННЫЙ род, а не род
+    первой записи.
+    """
+    first = "fix: A\n\nРазобрано: abc1234\n"
+    later = "fix: A ещё\n\nРазобрано: abc1234\nРод: пересказ своей работы не сверен с источником\n"
+    assert changerefs.resolutions_in_all([first, later]) == [
+        "Разобрано: abc1234\nРод: пересказ своей работы не сверен с источником"
+    ]
+
+
+def test_a_kindless_line_splits_by_the_kinds_named_elsewhere() -> None:
+    """Строка без рода о двух отпечатках, род назван только у одного, — две строки."""
+    first = "fix: A\n\nРазобрано: abc1234, def5678\n"
+    later = "fix: B\n\nРазобрано: def5678\nРод: каскад по одному месту\n"
+    assert changerefs.resolutions_in_all([first, later]) == [
+        "Разобрано: abc1234",
+        "Разобрано: def5678\nРод: каскад по одному месту",
+    ]
+
+
+def test_the_first_named_kind_still_wins() -> None:
+    """Вторая половина: два НАЗВАННЫХ рода — побеждает первый, как прежде."""
+    first = "fix: A\n\nРазобрано: abc1234\nРод: первый\n"
+    later = "fix: B\n\nРазобрано: abc1234\nРод: второй\n"
+    assert changerefs.resolutions_in_all([first, later]) == ["Разобрано: abc1234\nРод: первый"]
+
+
+def test_a_kindless_line_takes_the_first_kind_named_after_it() -> None:
+    """Родов у отпечатка названо два позже — строка без рода берёт ПЕРВЫЙ из них.
+
+    Вход, на котором первый и последний различимы: прежняя проверка сравнивала
+    два названных рода и зеленела бы и при «последний побеждает».
+    """
+    texts = [
+        "fix: A\n\nРазобрано: abc1234\n",
+        "fix: B\n\nРазобрано: abc1234\nРод: второй\n",
+        "fix: C\n\nРазобрано: abc1234\nРод: третий\n",
+    ]
+    assert changerefs.resolutions_in_all(texts) == ["Разобрано: abc1234\nРод: второй"]

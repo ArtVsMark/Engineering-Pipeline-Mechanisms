@@ -713,15 +713,24 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
     СТРОКА ОТДАЁТСЯ КАК НАПИСАНА, приводится только регистр отпечатков: причину
     читает человек, и огрызок пояснения хуже его отсутствия.
 
-    РОД ЕДЕТ СО СВОЕЙ СТРОКОЙ И ПОБЕЖДАЕТ ТАК ЖЕ — ПЕРВЫМ (#1022). Строка рода
-    печатается второй строкой под снятием (`Resolution.__str__`). Отпечаток,
-    снятый в ветке дважды с разными родами, уезжает с родом ПЕРВОЙ записи —
-    вместе с ней: повтор отбрасывается целиком, и род повтора с ним. Это та же
-    граница, что у причины, а не новая: «первая запись ближе к работе».
-    Исключение одно и то же — строка с «дубль» едет целиком со своим родом,
-    даже повторяя снятые отпечатки; читатель, считающий роды, обязан брать
-    первый род отпечатка, как архив берёт первое снятие.
+    РОД ЕДЕТ СО СВОЕЙ СТРОКОЙ, И ПОБЕЖДАЕТ ПЕРВЫЙ НАЗВАННЫЙ (#1022). Строка
+    рода печатается второй строкой под снятием (`Resolution.__str__`).
+    Отпечаток, снятый в ветке дважды с разными родами, уезжает с родом первой
+    записи. Но снятие БЕЗ рода родом не считается: «Разобрано: X», а следующим
+    коммитом «Разобрано: X» с «Род: …» — это род, дописанный позже, и
+    отбросить его вместе с повтором значило бы потерять его молча (находка
+    `0731223` на #1070). Поэтому род берётся первым НАЗВАННЫМ по всем текстам,
+    а снятие без рода при уцелевших отпечатках делится по их родам. Исключение
+    прежнее — строка с «дубль» едет целиком со своим родом; читатель, считающий
+    роды, обязан брать первый род отпечатка, как архив берёт первое снятие.
     """
+    texts = list(texts)
+    named: dict[str, str] = {}
+    for text in texts:
+        for record in resolutions_parsed(text):
+            if record.kind:
+                for mark in record.marks:
+                    named.setdefault(mark, record.kind)
     found: list[str] = []
     seen: set[str] = set()
     for text in texts:
@@ -747,7 +756,14 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
             # РОД ЕДЕТ ВМЕСТЕ СО СТРОКОЙ (#1022). Строка здесь собирается заново,
             # и без `kind=` род, написанный в коммите, терялся бы ровно на
             # склейке коммитов ветки — в теле уплотнения его не было бы вовсе.
-            found.append(str(Resolution(tuple(fresh), record.why, kind=record.kind)))
+            if record.kind:
+                found.append(str(Resolution(tuple(fresh), record.why, kind=record.kind)))
+                continue
+            by_kind: dict[str, list[str]] = {}
+            for mark in fresh:
+                by_kind.setdefault(named.get(mark, ""), []).append(mark)
+            for kind, marks in by_kind.items():
+                found.append(str(Resolution(tuple(marks), record.why, kind=kind)))
     return found
 
 
@@ -803,16 +819,6 @@ def held_in_all(texts: Iterable[str]) -> str | None:
         if said:
             return said
     return None
-
-
-def resolved_in_all(texts: Iterable[str]) -> list[str]:
-    """Снятия находок из нескольких текстов — по той же причине, что и связи."""
-    found: list[str] = []
-    for text in texts:
-        for mark in resolved_in(text):
-            if mark not in found:
-                found.append(mark)
-    return found
 
 
 def closed_items_in_all(texts: Iterable[str]) -> list[str]:
