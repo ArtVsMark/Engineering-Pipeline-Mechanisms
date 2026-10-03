@@ -634,3 +634,26 @@ def test_the_consumer_pin_is_written_down() -> None:
     said = (PACKAGE / "pyproject.toml").read_text(encoding="utf-8")
     assert "#subdirectory=packages/transport" in said, "не сказано, как ставить пакет снаружи"
     assert "@v" in said, "не сказано, что прибиваются к ТЕГУ выпуска, а не к общей ветке"
+
+
+@pytest.mark.parametrize(
+    ("name", "said"),
+    [("f", True), ("__call__", True), ("__all__", True), ("_hidden", False), ("__mangled", False)],
+)
+def test_a_name_is_public_by_the_rule_of_the_snapshot(name: str, said: bool) -> None:
+    """Публично имя без `_` впереди либо dunder; `__mangled` без хвоста — частное."""
+    assert surface.public(name) is said
+
+
+def test_the_surface_is_read_from_any_reader() -> None:
+    """`surface_from` берёт файлы читателем: из дерева и из общей ветки — один разбор."""
+    files = {
+        "VERSION": "1.2.3\n",
+        "pyproject.toml": (
+            '[project]\nrequires-python = ">=3.14"\n[tool.setuptools]\npy-modules = ["m"]\n'
+        ),
+        "m.py": "def f() -> None: ...\n",
+    }
+    version, lines = surface.surface_from(files.__getitem__)
+    assert version == "1.2.3"
+    assert lines == ["requires-python >=3.14", "dependencies —", "m.f() -> None"]
