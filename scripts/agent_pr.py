@@ -280,10 +280,17 @@ def describe_from(subjects: list[str], bodies: list[str]) -> Described:
     # изменения, а механизм находок читает именно тело слитого изменения. Без
     # переноса «снятие вместе с работой» держалось бы тем, что кто-то вспомнит
     # дописать описание руками.
-    resolved = changerefs.resolved_in_all(bodies)
+    #
+    # СТРОКИ — ТЕ ЖЕ, ЧТО В ТЕЛЕ УПЛОТНЕНИЯ (#1022). Прежде сюда шли голые
+    # отпечатки, а в общую ветку — строки с причиной; род второй строкой под
+    # снятием здесь пропал бы так же, как пропадала причина. Одна сборка на
+    # оба тела — `resolutions_in_all`, — и расходиться им не на чем (022).
+    resolved = changerefs.resolutions_in_all(bodies)
     if resolved:
-        lines += ["", "## Разобранные находки", ""]
-        lines += [f"Разобрано: {mark}" for mark in resolved]
+        lines += ["", "## Разобранные находки", "", *resolved]
+    windows = changerefs.window_meetings_in_all(bodies)
+    if windows:
+        lines += ["", "## Встречи рода в окне", "", *[str(meeting) for meeting in windows]]
 
     # Отметка пункта задачи едет тем же путём и по той же причине: объявление
     # живёт в коммите, а отмечает пункт шаг слияния — и читает он ТЕЛО
@@ -364,7 +371,7 @@ def say_lost_marks(published: str, sent: str) -> None:
 
 
 def kept_the_marks(published: str, sent: str) -> list[str]:
-    """Отпечатки снятия, не пережившие публикацию. Пусто — тело доехало.
+    """Строки снятия, родов и встреч, не пережившие публикацию. Пусто — тело доехало.
 
     ОТПРАВЛЕННОЕ НЕ РАВНО ДОСТАВЛЕННОМУ, и успешный код ответа доказывает приём
     запроса, а не доставку смысла
@@ -379,14 +386,38 @@ def kept_the_marks(published: str, sent: str) -> list[str]:
     что у замера взведения (`arm.py::kept_the_body`), и предмет тот же: поле
     объявлено входом — проверяется, что оно работает.
 
-    СУДЯТСЯ ОТПЕЧАТКИ, А НЕ ТЕЛО ЦЕЛИКОМ. Площадка вправе нормализовать перевод
-    строки и пробел, и требовать побайтового совпадения значило бы краснеть на
-    исправном (051). Предмет — ровно то, что кто-то обязан прочитать и по чему
-    обязан действовать.
+    СУДЯТСЯ РАЗОБРАННЫЕ СТРОКИ, А НЕ ТЕЛО ЦЕЛИКОМ. Площадка вправе
+    нормализовать перевод строки и пробел, и требовать побайтового совпадения
+    значило бы краснеть на исправном (051). Предмет — ровно то, что кто-то
+    обязан прочитать и по чему обязан действовать: отпечатки снятия, род у
+    каждого отпечатка и встречи рода в окне. Последние два едут в тело с #1022,
+    и сверка одних отпечатков пропустила бы их потерю молча (находка `d314ac6`
+    на #1070).
     """
-    was = changerefs.resolved_in(sent)
+
+    def kinds(text: str) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for record in changerefs.resolutions_parsed(text):
+            if record.kind:
+                for mark in record.marks:
+                    found.setdefault(mark, record.kind)
+        return found
+
     now = set(changerefs.resolved_in(published))
-    return [mark for mark in was if mark not in now]
+    lost = [mark for mark in changerefs.resolved_in(sent) if mark not in now]
+    kept = kinds(published)
+    lost += [
+        f"род «{kind}» у {mark}"
+        for mark, kind in kinds(sent).items()
+        if mark in now and kept.get(mark) != kind
+    ]
+    met = set(changerefs.window_meetings_in(published))
+    lost += [
+        f"встреча «{meeting.kind}» в окне: {meeting.place}"
+        for meeting in changerefs.window_meetings_in(sent)
+        if meeting not in met
+    ]
+    return lost
 
 
 def sync_description(
