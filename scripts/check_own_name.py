@@ -53,10 +53,21 @@ EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 
 #: Адрес вида `owner/repo` в тексте. Годится и для ссылки, и для строки данных:
-#: имя ищется одним образцом, а не тремя по видам файлов (090).
+#: имя ищется одним образцом, а не тремя по видам файлов (090). Адрес API —
+#: хост `api.github.com` и путь `/repos/<владелец>/<имя>` — своя ветвь и стоит
+#: ПЕРВОЙ: поиск берёт самое левое совпадение, а без неё сегмент `repos`
+#: читался владельцем (замер 03.10.2026, #1065: три таких «имени» спрашивались
+#: у площадки).
 NAME_RE: Final = re.compile(
-    r"(?:github\.com|githubusercontent\.com)/(?P<owner>[A-Za-z0-9][\w.-]*)/(?P<repo>[A-Za-z0-9][\w.-]*)"
+    r"(?:api\.github\.com/repos|github\.com|githubusercontent\.com)"
+    r"/(?P<owner>[A-Za-z0-9][\w.-]*)/(?P<repo>[A-Za-z0-9][\w.-]*)"
 )
+#: Каталоги образцов: имена в них — данные проверок (`o/r`, `someone/…`), а не
+#: ссылки дерева. Спрашивать о них площадку — запрос квоты на каждое: замер
+#: 03.10.2026 (#1065) — из 18 имён 12 жили только в `tests/`, и все двенадцать
+#: были образцами. Граница названа: реальное имя, записанное ТОЛЬКО в тесте,
+#: гейт не спросит; живое имя дерева стоит и в рабочем коде, и в документах.
+SAMPLES: Final = ("tests/",)
 #: Расширения, которые читаются. Двоичное сюда не попадает: имя в нём не
 #: правится, а разбор упал бы на первой же картинке.
 SUFFIXES: Final = frozenset({".py", ".yml", ".yaml", ".md", ".json", ".txt", ".toml"})
@@ -116,6 +127,8 @@ def mentions(root: Path) -> dict[str, list[tuple[Path, int]]]:
     found: dict[str, list[tuple[Path, int]]] = {}
     for path in tracked(root):
         if path.suffix not in SUFFIXES:
+            continue
+        if path.relative_to(root).as_posix().startswith(SAMPLES):
             continue
         try:
             text = path.read_text(encoding="utf-8")
