@@ -121,7 +121,7 @@ TYPES: Final = "mypy "
 #: Признак строки установки внутри блока шага.
 INSTALL: Final = "pip install"
 #: Где лежат окружения шагов — вне дерева проекта, по одному на строку установки.
-LINT_ENVS: Final = Path(".cache") / "preflight-envs"
+LINT_ENVS: Final = paths.PREFLIGHT_ENVS
 
 
 #: Проверки ПЕРЕД ТОЛЧКОМ, которых нет шагом прогона ни у кого. Это не второй
