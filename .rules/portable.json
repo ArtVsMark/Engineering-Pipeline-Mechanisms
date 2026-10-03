@@ -597,6 +597,10 @@
     "scripts/task_shape.py": {
       "answer": "as-is"
     },
+    "scripts/transport_surface.py": {
+      "answer": "ours",
+      "why": "@provider"
+    },
     "scripts/unlooked.py": {
       "answer": "as-is"
     },
