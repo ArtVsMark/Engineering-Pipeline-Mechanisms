@@ -26,7 +26,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, badges_shown, load_script
+from tests.conftest import ROOT, badges_shown, load_script, walk
 
 facts = load_script("build_facts.py")
 
@@ -386,7 +386,7 @@ def preview_versions() -> list[tuple[str, str]]:
     рядом с `allow-prereleases: true` в одном `with:`.
     """
     found: list[tuple[str, str]] = []
-    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+    for path in walk(ROOT / ".github" / "workflows", "*.yml"):
         document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for body in (document.get("jobs") or {}).values():
             for step in (body or {}).get("steps") or []:
