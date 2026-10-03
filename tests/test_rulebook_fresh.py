@@ -398,3 +398,47 @@ def test_the_field_pattern_sees_both_kinds_of_quote() -> None:
     assert seen == {("claim", "ru"), ("files", "ru")}, (
         f"образец видит не обе формы записи поля: {seen}"
     )
+
+
+# --- своя правка свода называется строкой, а не исходом (#1054, 134) -----------
+
+
+def test_an_own_edit_followed_by_work_is_noted_and_stays_clean(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Окно правило свод и работало дальше — строка названа, исход чистый.
+
+    Решение владельца 03.10.2026: своя правка — не повод перезапуска, но
+    расхождение стартового свода с деревом видно, и шаг его называет.
+    """
+    edit_rulebook(tree, "свод правит само окно", day=0.5, session=WINDOW_A)
+    git(tree, "checkout", "-b", "work")
+    commit(tree, "работа после своей правки", day=1)
+    assert run(tree, "--head", "work") == CLEAN
+    said = capsys.readouterr().out
+    assert "свод изменён этим окном 1 раз" in said, said
+    assert "свод правит само окно" in said, "правка не названа поимённо (154)"
+
+
+def test_an_own_unmerged_edit_inside_the_change_is_noted(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Своя правка внутри изменения, ещё не слитая, видна так же, как слитая."""
+    git(tree, "checkout", "-b", "work")
+    edit_rulebook(tree, "свод правит окно в ветке", day=0.5, session=WINDOW_A)
+    commit(tree, "работа после правки в ветке", day=1)
+    assert run(tree, "--head", "work") == CLEAN
+    assert "свод правит окно в ветке" in capsys.readouterr().out
+
+
+def test_an_own_edit_by_the_last_commit_is_silent(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вторая половина: правка ПОСЛЕДНИМ коммитом окна — молчание (140).
+
+    После неё окно по прежнему своду не работало, и строке нечего назвать.
+    """
+    git(tree, "checkout", "-b", "work")
+    edit_rulebook(tree, "свод правит последний коммит", day=1, session=WINDOW_A)
+    assert run(tree, "--head", "work") == CLEAN
+    assert "изменён этим окном" not in capsys.readouterr().out

@@ -29,6 +29,16 @@
 подразумевается
 ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
 
+НО СВОЯ ПРАВКА НАЗЫВАЕТСЯ — СТРОКОЙ, А НЕ ИСХОДОМ (#1054, 134). Окно правку
+знает, а правила, с которыми оно стартовало, — прежние: свод, прочитанный на
+старте, и свод в дереве разошлись, и из дерева это видно. Шаг печатает такие
+правки отдельной строкой и исхода не меняет. Перезапуском это не считается —
+решение владельца 03.10.2026. Молчит шаг на правке ПОСЛЕДНИМ коммитом окна:
+после неё окно по прежнему своду не работало. Замер 03.10.2026 по 944 коммитам
+общей ветки: правок свода 73, с трейлером окна 72, и у 70 из них то же окно
+работало и до правки, и после — у шести окон. Что окно ПРОЧИТАЛО, шаг не знает:
+он видит расхождение, а не чтение.
+
 ПЕРЕЗАПУСК ШАГ НЕ ОБЪЯВЛЯЕТ И РЕШАТЬ ЗА ЧЕЛОВЕКА НЕ БЕРЁТСЯ — ровно как сосед
 по сроку жизни. Он НАЗЫВАЕТ правки поимённо и зовёт перечитать свод навыком
 `.claude/skills/rulebook-reread`: навык читается в момент вызова, а не при
@@ -104,6 +114,41 @@ def changed_under(
     return found
 
 
+def own_under(
+    session: str,
+    start: window.Commit,
+    head: window.Commit,
+    sources: tuple[str, ...],
+    cwd: str | None = None,
+) -> list[window.Commit]:
+    """Правки свода САМИМ окном, после которых оно продолжило работу.
+
+    ``sources`` — история общей ветки И диапазон изменения: своя правка, ещё
+    не слитая, расходится со стартовым сводом так же. Границы обе строгие.
+    Снизу — как у `changed_under`: начало окна и есть его первый коммит, и
+    момента чтения раньше него история не знает. Сверху — правка последним
+    коммитом окна по прежнему своду не работала.
+    """
+    found: dict[str, window.Commit] = {}
+    for source in sources:
+        known = {commit.sha: commit for commit in window.commits(source, cwd=cwd)}
+        for sha in touching(source, RULEBOOK, cwd=cwd):
+            edit = known.get(sha)
+            if edit and edit.session == session and start.when < edit.when < head.when:
+                found.setdefault(sha, edit)
+    return sorted(found.values(), key=lambda edit: edit.when)
+
+
+def said_own(session: str, edits: list[window.Commit]) -> list[str]:
+    """Что сказать об окне, правившем свод само: строка, а не исход."""
+    lines = [
+        f"окно {session}: свод изменён этим окном {len(edits)} раз — "
+        "правила на его старте прежние (134); перезапуском это не считается:"
+    ]
+    lines += [f"  {edit.sha[:7]} {edit.message.splitlines()[0][:70]}" for edit in edits]
+    return lines
+
+
 def said(session: str, edits: list[window.Commit]) -> list[str]:
     """Что сказать об окне, под которым сменился свод."""
     lines = [
@@ -176,16 +221,24 @@ def main(argv: list[str] | None = None) -> int:
             started[commit.session] = commit
 
     told: list[str] = []
+    noted: list[str] = []
     for life in lives:
         begun = started.get(life.session)
         start = begun if begun and begun.when < life.first.when else life.first
         try:
             edits = changed_under(life.session, start, life.last, args.history, cwd=cwd)
+            own = own_under(
+                life.session, start, life.last, (args.history, f"{args.base}..{args.head}"), cwd=cwd
+            )
         except window.NotRun as exc:
             print(f"шаг не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
         if edits:
             told += said(life.session, edits)
+        if own:
+            noted += said_own(life.session, own)
+    if noted:
+        print("\n".join(noted))
     if not told:
         print(f"свод под окнами изменения не менялся: {', '.join(sorted(last))}")
         return EXIT_OK
