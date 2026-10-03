@@ -26,7 +26,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, badges_shown, load_script
+from tests.conftest import ROOT, badges_shown, load_script, walk
 
 facts = load_script("build_facts.py")
 
@@ -349,28 +349,52 @@ def wake_events(condition: str) -> set[str] | None:
 
 
 def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
-    """Значок красит тот прогон, исходом которого сборка и просыпается.
+    """Значок красит те прогоны, исходом которых сборка и просыпается.
 
-    Шаг называет файл прогона (`ci-workflow`), а событие `workflow_run` —
-    его ИМЯ (`name:`). Это два написания одного предмета, и переименование
-    одного из них молча развело бы их: значок красился бы чужим исходом, а
-    сборка перестала бы просыпаться (взгляд на #1033). События фильтра
-    обязаны быть событиями этого прогона: событие, которого у него нет, —
-    мёртвое значение, читающееся как живой источник (взгляд на #1033).
+    Шаг называет основной прогон файлом (`ci-workflow`), действие находит
+    предрелизный само — по `allow-prereleases: true`, — а событие
+    `workflow_run` зовёт прогоны их ИМЕНАМИ (`name:`). Каждый прогон, чей
+    исход значок рисует, обязан будить сборку: без этого его цвет отставал бы
+    на слияние, а заход по расписанию не попадал бы на значок вовсе (взгляды
+    на #1033, #1066). События фильтра обязаны быть событиями будящих прогонов:
+    событие, которого нет ни у одного, — мёртвое значение (взгляд на #1033).
     """
     flow = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
     named = str((unified_step().get("with") or {}).get("ci-workflow"))
-    source = ROOT / ".github" / "workflows" / named
-    assert source.is_file(), f"шаг значка читает {named}, а такого прогона нет"
-    read = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+    workflows = ROOT / ".github" / "workflows"
+    assert (workflows / named).is_file(), f"шаг значка читает {named}, а такого прогона нет"
+    drawn = [workflows / named, *(workflows / name for name, _ in preview_versions())]
+    read = [yaml.safe_load(path.read_text(encoding="utf-8")) or {} for path in drawn]
     woken = (flow.get(True) or {}).get("workflow_run") or {}
-    assert read.get("name") in (woken.get("workflows") or []), (
-        f"значок читает «{read.get('name')}», а сборку будит {woken.get('workflows')}"
-    )
+    missing = [
+        str(one.get("name"))
+        for one in read
+        if one.get("name") not in (woken.get("workflows") or [])
+    ]
+    assert not missing, f"значок рисует исход {missing}, а сборку будит {woken.get('workflows')}"
     events = wake_events(str(flow["jobs"]["badges"].get("if") or ""))
     assert events, "у джоба badges нет фильтра событий workflow_run (075)"
-    dead = sorted(events - set(read.get(True) or {}))
-    assert not dead, f"фильтр называет {dead}, а у {named} таких событий нет"
+    known = {str(event) for one in read for event in (one.get(True) or {})}
+    dead = sorted(events - known)
+    assert not dead, f"фильтр называет {dead}, а у будящих прогонов таких событий нет"
+
+
+def preview_versions() -> list[tuple[str, str]]:
+    """Предрелизные шаги дерева: (файл прогона, версия) — те, что значок красит своей зоной.
+
+    Признак тот же, по которому их находит действие каталога: `python-version`
+    рядом с `allow-prereleases: true` в одном `with:`.
+    """
+    found: list[tuple[str, str]] = []
+    for path in walk(ROOT / ".github" / "workflows", "*.yml"):
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for body in (document.get("jobs") or {}).values():
+            for step in (body or {}).get("steps") or []:
+                given = (step or {}).get("with") or {}
+                if given.get("allow-prereleases") is True and given.get("python-version"):
+                    found.append((path.name, str(given["python-version"])))
+    assert found, "предрелизных прогонов нет — зону следующей версии значку красить нечем"
+    return found
 
 
 #: Поддельный `git` шага переноса: каждый вызов отвечает кодом из окружения.

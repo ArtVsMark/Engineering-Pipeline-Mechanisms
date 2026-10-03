@@ -50,9 +50,9 @@ jobs:
     timeout-minutes: 10
     # МАТРИЦА ИЗ ОДНОЙ ВЕРСИИ — РАДИ ИМЕНИ. Площадка приписывает значения
     # матрицы к имени джоба: запись называется `test-next (3.15)`, и по списку
-    # проверок видно, НА ЧЁМ прогнали (046). Источник версии один — матрица;
-    # дрейф (`scripts/drift.py`, `declared_versions`) и факты витрины
-    # (`scripts/build_facts.py`, `python_facts`) читают её отсюда же.
+    # проверок видно, НА ЧЁМ прогнали (046). Дрейф (`scripts/drift.py`,
+    # `declared_versions`) и факты витрины (`scripts/build_facts.py`,
+    # `python_facts`) читают версию из матрицы.
     strategy:
       # Ячейка одна, но `fail-fast` объявлен: добавят вторую предрелизную ветку —
       # и узнать надо про обе, а не про первую упавшую.
@@ -65,7 +65,14 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ matrix.python }}
+          # ЧИСЛО БУКВОЙ, А НЕ `${{ matrix.python }}` — ради единого значка
+          # семьи. Действие каталога `python-badge` находит предрелизную версию
+          # по `python-version: "X.Y"` рядом с `allow-prereleases: true`, а
+          # выражение матрицы не читает: с ним 3.15 с значка пропадала (решение
+          # владельца 03.10.2026). Число здесь — копия ячейки матрицы выше, и
+          # расходиться им не даёт `tests/test_declared_versions.py`
+          # (`test_a_preview_step_names_its_matrix_cell`), а не внимание (071).
+          python-version: "3.15"
           # Без него setup-python предрелиз не ставит.
           allow-prereleases: true
       - name: поставить проверки
