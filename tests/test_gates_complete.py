@@ -302,7 +302,6 @@ def test_the_all_cancelled_branch_waits_for_a_live_run_and_fails_after_it() -> N
     пятым. Держателей называет откат, а не текст: снять в
     `ci_complete.verdict` вызов `still_coming` ветки отменённых или её отказ и
     прогнать `pytest tests/` — краснеет каждый держатель своей половины.
-    
     """
     run_id = "mine"
     runs = [run("lint", run_id="mine"), run("test", conclusion="cancelled", run_id="mine")]
