@@ -416,8 +416,10 @@ def test_an_own_edit_followed_by_work_is_noted_and_stays_clean(
     commit(tree, "работа после своей правки", day=1)
     assert run(tree, "--head", "work") == CLEAN
     said = capsys.readouterr().out
-    assert "свод изменён этим окном 1 раз" in said, said
+    assert "свод изменён этим окном" in said, said
     assert "свод правит само окно" in said, "правка не названа поимённо (154)"
+    assert module.SKILL in said, "навык перечитывания не назван — вторая половина 134"
+    assert "свод под окнами изменения не менялся" not in said, "строки противоречат друг другу"
 
 
 def test_an_own_unmerged_edit_inside_the_change_is_noted(
@@ -441,19 +443,52 @@ def test_an_own_edit_by_the_last_commit_is_silent(
     git(tree, "checkout", "-b", "work")
     edit_rulebook(tree, "свод правит последний коммит", day=1, session=WINDOW_A)
     assert run(tree, "--head", "work") == CLEAN
-    assert "изменён этим окном" not in capsys.readouterr().out
+    assert "свод правит последний коммит" not in capsys.readouterr().out
 
 
 def test_own_under_bounds_the_window_on_both_sides(tree: Path) -> None:
-    """`own_under` берёт свою правку между началом и головой, строго с обеих сторон."""
+    """`own_under`: снизу граница включительна, сверху строгая, чужое — мимо.
+
+    Первый коммит дерева — сам коммит окна, заводящий свод: он и есть правка
+    первым коммитом, и она названа.
+    """
     edit_rulebook(tree, "своя правка посередине", day=0.5, session=WINDOW_A)
     edit_rulebook(tree, "правка соседа", day=0.6, session=WINDOW_B)
     commit(tree, "голова окна", day=1)
     found = module.window.commits("main", cwd=str(tree))
     start, head = found[0], found[-1]
     own = module.own_under(WINDOW_A, start, head, ("main",), cwd=str(tree))
-    assert [edit.message.splitlines()[0] for edit in own] == ["своя правка посередине"]
-    assert module.own_under(WINDOW_A, start, own[0], ("main",), cwd=str(tree)) == []
+    subjects = [edit.message.splitlines()[0] for edit in own]
+    assert subjects == ["первая работа окна", "своя правка посередине"]
+    before = module.own_under(WINDOW_A, start, own[1], ("main",), cwd=str(tree))
+    assert [edit.sha for edit in before] == [own[0].sha], "правка на самой голове названа"
     said = module.said_own(WINDOW_A, own)
-    assert said[0].startswith(f"окно {WINDOW_A}: свод изменён этим окном 1 раз")
-    assert "своя правка посередине" in said[1]
+    assert said[0].startswith(f"окно {WINDOW_A}: свод изменён этим окном 2 раз")
+    assert module.SKILL in said[0]
+    assert "своя правка посередине" in said[2]
+
+
+def test_an_own_edit_by_the_first_commit_is_noted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Правка свода ПЕРВЫМ коммитом окна с работой после неё — названа.
+
+    Находки `f74ffb2` и `3ee70c9` на #1077: нижняя граница была строгой, как у
+    чужой правки, и такая правка молчала. Но правят то, что уже прочитано:
+    окно стартовало по прежнему своду, и сама правка это доказывает.
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    git(root, "init", "--initial-branch=main")
+    git(root, "config", "user.name", "Artem Markitanov")
+    git(root, "config", "user.email", "86671904+ArtVsMark@users.noreply.github.com")
+    (root / "AGENTS.md").write_text("свод соседа", encoding="utf-8")
+    git(root, "add", "AGENTS.md")
+    commit(root, "работа соседа", day=0, session=WINDOW_B)
+    git(root, "checkout", "-b", "work")
+    edit_rulebook(root, "первый коммит окна правит свод", day=1, session=WINDOW_A)
+    commit(root, "работа после правки", day=2, session=WINDOW_A)
+    assert run(root, "--head", "work") == CLEAN
+    said = capsys.readouterr().out
+    assert "первый коммит окна правит свод" in said, said
+    assert "работа соседа" not in said, "чужая правка до старта окна названа своей"
