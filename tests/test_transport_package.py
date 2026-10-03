@@ -23,6 +23,7 @@
 
 import ast
 import re
+import shutil
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,9 +32,10 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, RunScript, load_script, walk
 
 preflight = load_script("preflight.py")
+surface = load_script("transport_surface.py")
 
 PACKAGE: Final = ROOT / "packages" / "transport"
 SCRIPTS: Final = ROOT / "scripts"
@@ -212,6 +214,80 @@ def test_the_package_version_is_a_number_of_its_own() -> None:
         "версия пакета совпала с версией контракта: числа версионируют разное, и "
         "совпадение прочтётся как одно число в двух местах (022, 164)"
     )
+
+
+def surface_gap(package: Path) -> str:
+    """Расхождение живой поверхности со снимком словами; пустая строка — сходятся."""
+    version, live = surface.surface(package)
+    noted, snapshot = surface.read(package / surface.SNAPSHOT)
+    fix = "перепишите снимок: python scripts/transport_surface.py"
+    if noted != version:
+        return f"VERSION {version}, а снимок о {noted} — {fix}"
+    if live != snapshot:
+        changed = sorted(set(live) ^ set(snapshot))
+        return (
+            f"поверхность сменилась при прежнем VERSION {version}: {changed} — "
+            f"сдвиньте VERSION и {fix}"
+        )
+    return ""
+
+
+def test_the_surface_moves_only_with_the_version() -> None:
+    """Поверхность транспорта сменилась — сменился и `VERSION`, и наоборот (#1048).
+
+    Обещание шапки `pyproject.toml` держится здесь, а не вниманием: #1025
+    поднял `requires-python` транспорта, а `VERSION` остался прежним и прожил
+    так в общей ветке до #1040 (взгляды `5808620`, `e39cec2`).
+    """
+    gap = surface_gap(PACKAGE)
+    assert not gap, gap
+
+
+@pytest.mark.parametrize(
+    ("edit", "bump", "said"),
+    [
+        (('requires-python = ">=3.14"', 'requires-python = ">=3.13"'), False, "сдвиньте VERSION"),
+        (("def quote(", "def quote_it("), False, "сдвиньте VERSION"),
+        (None, True, "перепишите снимок"),
+        (None, False, ""),
+    ],
+    ids=["планка-без-числа", "имя-без-числа", "число-без-снимка", "ничего"],
+)
+def test_the_surface_gap_tells_both_halves(
+    tmp_path: Path, edit: tuple[str, str] | None, bump: bool, said: str
+) -> None:
+    """Обе половины на копии пакета: поверхность без числа и число без снимка."""
+    package = tmp_path / "transport"
+    shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
+    if edit:
+        for name in ("pyproject.toml", "ghrest.py"):
+            text = (package / name).read_text(encoding="utf-8")
+            (package / name).write_text(text.replace(*edit), encoding="utf-8")
+    if bump:
+        (package / "VERSION").write_text("9.9.9\n", encoding="utf-8")
+    gap = surface_gap(package)
+    assert (said in gap) if said else not gap, gap
+
+
+def test_the_snapshot_is_written_by_the_command(tmp_path: Path, run_script: RunScript) -> None:
+    """Снимок пишет команда, и записанное ею сходится с живой поверхностью."""
+    package = tmp_path / "packages" / "transport"
+    shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
+    (package / surface.SNAPSHOT).unlink()
+    done = run_script("transport_surface.py", "--root", str(tmp_path))
+    assert done.code == surface.EXIT_OK, done.err
+    assert not surface_gap(package)
+    with pytest.raises(surface.NotRun, match="снимка"):
+        surface.read(tmp_path / "нет")
+
+
+def test_an_unreadable_package_is_not_an_empty_surface(
+    tmp_path: Path, run_script: RunScript
+) -> None:
+    """Пакета нет — отказ с причиной, а не пустой снимок (075)."""
+    done = run_script("transport_surface.py", "--root", str(tmp_path))
+    assert done.code == surface.EXIT_BROKEN
+    assert "не прочитан" in done.err
 
 
 def test_no_second_copy_of_the_shared_bottom_lives_in_the_tree() -> None:
