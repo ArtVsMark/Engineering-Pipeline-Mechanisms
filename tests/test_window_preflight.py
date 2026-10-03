@@ -11,10 +11,11 @@
 которой их гоняет площадка. Механизм назвал это первой же строкой.
 """
 
-import hashlib
 import importlib.util
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -938,7 +939,11 @@ def test_every_elsewhere_name_is_a_record_the_platform_issues() -> None:
 
 def test_the_types_step_knows_the_install_line_of_its_job() -> None:
     """Шагу типов достаётся строка установки его джоба — та, что ставит площадка (#1069)."""
-    typed = [one for one in preflight.steps(ROOT / preflight.CI) if preflight.TYPES in one.command]
+    typed = [
+        one
+        for one in preflight.steps(ROOT / preflight.CI)
+        if any(preflight.types_call(line) for line in one.command.splitlines())
+    ]
     assert typed, "шага типов в прогоне нет — сверять нечего (075)"
     for one in typed:
         assert preflight.INSTALL in one.installs, f"{one.name}: строки установки нет"
@@ -987,16 +992,92 @@ def test_only_the_types_step_is_run_in_the_platform_env(
 
 def test_a_built_env_is_taken_ready_and_a_broken_build_is_named(tmp_path: Path) -> None:
     """Готовое окружение берётся без сборки; не собравшееся — отказ шага, а не `.venv`."""
-    packages = preflight.packages_of("pip install mypy")
-    where = (
-        tmp_path / preflight.LINT_ENVS / hashlib.sha1(" ".join(packages).encode()).hexdigest()[:12]
-    )
+    where, said = preflight.env_dir("pip install mypy", tmp_path)
     (where / "bin").mkdir(parents=True)
     (where / "bin" / "python").write_text("", encoding="utf-8")
+    (where / preflight.READY).write_text(said, encoding="utf-8")
     assert preflight.lint_python("pip install mypy", tmp_path) == where / "bin" / "python"
     broken = preflight.Step("типы", "mypy scripts/", "pip install ./packages/transport")
-    code, said = preflight.run(broken, tmp_path)
-    assert code == preflight.EXIT_BROKEN and "пакеты дерева" in said
+    code, told = preflight.run(broken, tmp_path)
+    assert code == preflight.EXIT_BROKEN and "пакеты дерева" in told
+
+
+def refuse_builds(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Сборка окружения в тесте отказывает, а не идёт в сеть; вызовы записываются."""
+    asked: list[list[str]] = []
+
+    def fail(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        asked.append(command)
+        return subprocess.CompletedProcess(command, 1, "", "сети нет")
+
+    monkeypatch.setattr(preflight.subprocess, "run", fail)
+    return asked
+
+
+def test_a_half_built_env_is_not_taken_for_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`bin/python` без метки — недособранное окружение: его пересобирают, а не берут.
+
+    Находки `567ad6d`, `55c6ddd`, `0f379a2` на #1073: venv собрался, `pip
+    install` упал, и второй заход принимал пустое окружение за готовое.
+    """
+    where, _ = preflight.env_dir("pip install mypy", tmp_path)
+    (where / "bin").mkdir(parents=True)
+    (where / "bin" / "python").write_text("", encoding="utf-8")
+    asked = refuse_builds(monkeypatch)
+    with pytest.raises(preflight.NotRun, match="не собрано"):
+        preflight.lint_python("pip install mypy", tmp_path)
+    assert asked, "недособранное окружение взято без пересборки"
+    assert not (where / "bin" / "python").exists(), "недособранное не стёрто перед сборкой"
+
+
+def test_a_stale_env_is_rebuilt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Метка старше срока — пересборка: площадка разрешает диапазоны заново (`793ebcd`).
+
+    Пересборка без сети упала — прежнее окружение не стёрто и взято с
+    названным предупреждением (`9e96bfe`): оно собрано тем же составом.
+    """
+    where, said = preflight.env_dir("pip install mypy", tmp_path)
+    (where / "bin").mkdir(parents=True)
+    (where / "bin" / "python").write_text("", encoding="utf-8")
+    ready = where / preflight.READY
+    ready.write_text(said, encoding="utf-8")
+    old = time.time() - preflight.ENV_MAX_AGE - 60
+    os.utime(ready, (old, old))
+    asked = refuse_builds(monkeypatch)
+    assert preflight.lint_python("pip install mypy", tmp_path) == where / "bin" / "python"
+    assert asked, "устаревшее окружение взято без пересборки"
+    assert (where / "bin" / "python").exists(), "рабочее окружение стёрто до сборки"
+    assert "взято прежнее окружение" in capsys.readouterr().err
+
+
+def test_a_finished_build_replaces_the_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сборка прошла — готовое встаёт на место прежнего вместе с меткой."""
+    where, said = preflight.env_dir("pip install mypy", tmp_path)
+
+    def build(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        if command[1:3] == ["-m", "venv"]:
+            (Path(command[3]) / "bin").mkdir(parents=True)
+            (Path(command[3]) / "bin" / "python").write_text("новое", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(preflight.subprocess, "run", build)
+    python = preflight.lint_python("pip install mypy", tmp_path)
+    assert python == where / "bin" / "python" and python.read_text(encoding="utf-8") == "новое"
+    assert (where / preflight.READY).read_text(encoding="utf-8").strip() == said
+    assert not where.with_name(where.name + ".build").exists(), "каталог сборки остался"
+
+
+def test_the_env_key_follows_the_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Другой интерпретатор окна — другой каталог окружения (`64dd097`)."""
+    here, _ = preflight.env_dir("pip install mypy", tmp_path)
+    monkeypatch.setattr(preflight.sys, "executable", "/другой/python")
+    assert preflight.env_dir("pip install mypy", tmp_path)[0] != here
 
 
 def test_mypy_sees_the_packages_of_the_interpreter_it_is_given(tmp_path: Path) -> None:
@@ -1040,3 +1121,68 @@ def test_mypy_sees_the_packages_of_the_interpreter_it_is_given(tmp_path: Path) -
     )
     assert without.returncode == 1 and "Missing return statement" in without.stdout, without.stdout
     assert with_pytest.returncode == 0, with_pytest.stdout
+
+
+@pytest.mark.parametrize(
+    ("line", "call"),
+    [
+        ("mypy scripts/", "mypy "),
+        ("  python -m mypy scripts/", "python -m mypy "),
+        ("python3 -m mypy tests/", "python3 -m mypy "),
+        ("echo mypy scripts/", None),
+        ("ruff check .", None),
+    ],
+)
+def test_the_types_call_is_seen_in_every_form(line: str, call: str | None) -> None:
+    """Шаг типов узнаётся одним предикатом во всех формах вызова (`f875389`)."""
+    assert preflight.types_call(line) == call
+
+
+def test_a_module_call_of_mypy_gets_the_platform_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`python -m mypy` получает интерпретатор окружения шага, как и голый `mypy`."""
+    fake = tmp_path / "env" / "bin" / "python"
+    monkeypatch.setattr(preflight, "lint_python", lambda installs, root: fake)
+    step = preflight.Step("типы", "python -m mypy scripts/", "pip install mypy")
+    assert preflight.as_on_the_platform(step, tmp_path) == (
+        f"python -m mypy --python-executable {fake} scripts/"
+    )
+
+
+def test_a_called_workflow_keeps_its_jobs_apart(tmp_path: Path) -> None:
+    """Строка установки одного джоба вызванного прогона не достаётся шагу другого (`daee131`)."""
+    flows = tmp_path / preflight.paths.WORKFLOWS
+    flows.mkdir(parents=True)
+    (flows / "called.yml").write_text(
+        "on: workflow_call\n"
+        "jobs:\n"
+        "  one:\n    steps:\n      - run: python -m pip install mypy\n      - run: mypy a/\n"
+        "  two:\n    steps:\n      - run: mypy b/\n",
+        encoding="utf-8",
+    )
+    ci = flows / "ci.yml"
+    ci.write_text("jobs:\n  call:\n    uses: ./.github/workflows/called.yml\n", encoding="utf-8")
+    found = {one.command: one.installs for one in preflight.steps(ci)}
+    assert found["mypy a/"] == "python -m pip install mypy"
+    assert found["mypy b/"] == "", "строка установки чужого джоба досталась шагу"
+
+
+def test_a_module_call_of_mypy_in_a_workflow_reaches_the_substitution(tmp_path: Path) -> None:
+    """Шаг `python -m mypy` из прогона доходит до подстановки через `steps()` (`7bfdb6c`).
+
+    Прежний тест строил `Step` руками и обходил отбор шагов, а отбор по
+    `RUNNABLE` такой шаг отбрасывал молча.
+    """
+    flows = tmp_path / preflight.paths.WORKFLOWS
+    flows.mkdir(parents=True)
+    ci = flows / "ci.yml"
+    ci.write_text(
+        "jobs:\n  lint:\n    steps:\n"
+        "      - run: python -m pip install mypy\n"
+        "      - name: типы\n        run: python -m mypy scripts/\n",
+        encoding="utf-8",
+    )
+    found = [one for one in preflight.steps(ci) if one.name == "типы"]
+    assert found, "шаг `python -m mypy` отброшен отбором шагов"
+    assert found[0].installs == "python -m pip install mypy"
