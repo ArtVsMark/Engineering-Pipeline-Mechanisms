@@ -16,14 +16,14 @@
 снимок». Снимок пишет этот модуль, рукой его не правят: обновление — вывод
 команды, а не текст.
 
-ЧТО СЧИТАЕТСЯ ПОВЕРХНОСТЬЮ (взгляды на #1068). Договор установки —
-`requires-python` и `dependencies`. Имена модулей без `_` на верхнем уровне и
-все dunder-имена (`__init__`, `__call__`, `__iter__`, `__all__`…), в том числе
-внутри `if`/`try`/`for`/`with` верхнего уровня и целями `for … in` и
-`with … as`: функции с декораторами, подписью и возвращаемым типом, классы с
-базами, их публичные методы и атрибуты, псевдонимы `type X = …`, прочие
-имена — и поодиночке, и кортежным присваиванием. Декоратор входит в строку:
-`@property` или `@staticmethod` меняют вызов при прежней подписи.
+ЧТО СЧИТАЕТСЯ ПОВЕРХНОСТЬЮ (взгляды на #1068 и #1080). Договор установки —
+`requires-python` и `dependencies`. Имена модуля и его классов — все, которым
+область присваивает, где бы ни стояло присваивание: их берёт `symtable`, по
+которому связывает имена сам Python, а не перечень видов операторов. Публичны
+имена без `_` впереди и все dunder-имена (`__init__`, `__call__`, `__all__`).
+Функция пишется с декораторами, подписью и возвращаемым типом, класс — с
+декораторами, базами и ключами (`metaclass=…`): это меняет вызов при прежнем
+имени. Строки снимка отсортированы.
 
 ЧЕГО ЗДЕСЬ НЕТ, И ГРАНИЦА НАЗВАНА (195). Импорт верхнего уровня (`import
 report` в `ghrest`): `ghrest.report` достижим, но это зависимость реализации,
@@ -45,13 +45,15 @@ report` в `ghrest`): `ghrest.report` достижим, но это зависи
 обе стороны разобраны одним кодом. Снимок в дереве остаётся сверкой «вывод
 команды записан».
 
-Исходы: ``0`` снимок записан · ``2`` не отработал (пакет не прочитан) ·
+Исходы: ``0`` снимок записан · ``2`` не отработал (пакет не прочитан или
+общей ветки нет — сверять поверхность не с чем, и это не «сходится») ·
 ``3`` отказ: поверхность сменилась при прежнем `VERSION` — против снимка или
 против общей ветки.
 """
 
 import argparse
 import ast
+import symtable
 import sys
 import tomllib
 from collections.abc import Callable
@@ -71,7 +73,7 @@ SNAPSHOT: Final = "SURFACE"
 #: Номер формата растёт с каждой правкой разбора: по нему команда отличает
 #: «сменился формат» от «сменилась поверхность».
 HEADER: Final = (
-    "# Поверхность транспорта, формат 3. Пишет `python scripts/transport_surface.py`; "
+    "# Поверхность транспорта, формат 4. Пишет `python scripts/transport_surface.py`; "
     "рукой не правится (#1048)."
 )
 #: Метка строки с версией, к которой относится снимок.
@@ -96,65 +98,69 @@ def public(name: str) -> bool:
     return not name.startswith("_") or (name.startswith("__") and name.endswith("__"))
 
 
-def assigned(target: ast.expr) -> list[str]:
-    """Имена, которым присваивает цель: одиночное и кортежное присваивание."""
-    if isinstance(target, ast.Name):
-        return [target.id]
-    if isinstance(target, ast.Tuple | ast.List):
-        return [name for one in target.elts for name in assigned(one)]
-    return []
-
-
-def names_in(body: list[ast.stmt], owner: str) -> list[str]:
-    """Публичные имена тела модуля или класса строками снимка, по порядку в файле.
-
-    Тела `if` и `try` верхнего уровня обходятся тоже: имя, объявленное
-    условно, — всё равно имя модуля, и выпасть из снимка без следа оно не
-    вправе (взгляд на #1068).
-    """
-    found: list[str] = []
-    for node in body:
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if public(node.name):
-                found.append(signature(node, owner))
-        elif isinstance(node, ast.ClassDef):
-            if public(node.name):
-                bases = ", ".join(ast.unparse(base) for base in node.bases)
-                found.append(f"{owner}.{node.name}({bases})")
-                found += names_in(node.body, f"{owner}.{node.name}")
-        elif isinstance(node, ast.TypeAlias):
-            if public(node.name.id):
-                found.append(f"{owner}.{node.name.id}")
-        elif isinstance(node, ast.Assign | ast.AnnAssign):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            found += [
-                f"{owner}.{name}" for target in targets for name in assigned(target) if public(name)
-            ]
-        elif isinstance(node, ast.If):
-            found += names_in(node.body, owner) + names_in(node.orelse, owner)
-        elif isinstance(node, ast.For | ast.AsyncFor):
-            found += [f"{owner}.{name}" for name in assigned(node.target) if public(name)]
-            found += names_in(node.body, owner) + names_in(node.orelse, owner)
-        elif isinstance(node, ast.With | ast.AsyncWith):
-            found += [
-                f"{owner}.{name}"
-                for item in node.items
-                if item.optional_vars is not None
-                for name in assigned(item.optional_vars)
-                if public(name)
-            ]
-            found += names_in(node.body, owner)
-        elif isinstance(node, ast.Try):
-            found += names_in(node.body, owner)
-            for handler in node.handlers:
-                found += names_in(handler.body, owner)
-            found += names_in(node.orelse, owner) + names_in(node.finalbody, owner)
+def scope_nodes(body: list[ast.stmt]) -> list[ast.AST]:
+    """Узлы одной области видимости: всё, кроме тел вложенных функций и классов."""
+    found: list[ast.AST] = []
+    stack: list[ast.AST] = list(body)
+    while stack:
+        node = stack.pop(0)
+        found.append(node)
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            stack.extend(ast.iter_child_nodes(node))
     return found
 
 
+def class_line(node: ast.ClassDef, owner: str) -> str:
+    """Строка снимка класса: декораторы, имя, базы и ключи (`metaclass=…`)."""
+    marks = "".join(f"@{ast.unparse(one)} " for one in node.decorator_list)
+    said = [ast.unparse(base) for base in node.bases] + [ast.unparse(one) for one in node.keywords]
+    return f"{marks}{owner}.{node.name}({', '.join(said)})"
+
+
+def names_in(table: symtable.SymbolTable, body: list[ast.stmt], owner: str) -> list[str]:
+    """Публичные имена области строками снимка, отсортированные.
+
+    ИМЕНА ДАЁТ ИНТЕРПРЕТАТОР, А НЕ ПЕРЕЧЕНЬ ВИДОВ УЗЛОВ (взгляды на #1068 и
+    #1080, 210). Прежний разбор знал виды операторов поимённо — `if`, `try`,
+    `for`, `with` — и каждый заход взгляда называл следующий: `while`,
+    `match`, `except*`, декоратор класса. Здесь имена области берутся из
+    `symtable` — той же таблицы, по которой связывает имена сам Python: всё,
+    чему область присваивает, где бы ни стояло присваивание. AST нужен только
+    для строки `def` и `class`: подпись, декораторы, базы и ключи.
+
+    Импорт в поверхность не входит: это зависимость реализации, а не обещание
+    потребителю. Строки сортируются: перестановка определений в модуле
+    поверхность не меняет (`a417b45`).
+    """
+    defs: dict[str, list[ast.AST]] = {}
+    for node in scope_nodes(body):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            defs.setdefault(node.name, []).append(node)
+    children = {child.get_name(): child for child in table.get_children()}
+    found: set[str] = set()
+    for symbol in table.get_symbols():
+        name = symbol.get_name()
+        # Импорт символом не «присвоен» (`is_assigned` ложно), и отдельной
+        # проверки `is_imported` не нужно: условие ниже его уже снимает.
+        if not public(name) or not (symbol.is_assigned() or symbol.is_namespace()):
+            continue
+        if name not in defs:
+            found.add(f"{owner}.{name}")
+            continue
+        for node in defs[name]:
+            if isinstance(node, ast.ClassDef):
+                found.add(class_line(node, owner))
+                inner = children.get(name)
+                if inner is not None:
+                    found.update(names_in(inner, node.body, f"{owner}.{name}"))
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                found.add(signature(node, owner))
+    return sorted(found)
+
+
 def public_names(source: str, module: str) -> list[str]:
-    """Публичные имена модуля строками снимка: `модуль.имя…`, по порядку в файле."""
-    return names_in(ast.parse(source).body, module)
+    """Публичные имена модуля строками снимка: `модуль.имя…`, отсортированные."""
+    return names_in(symtable.symtable(source, module, "exec"), ast.parse(source).body, module)
 
 
 def surface(package: Path) -> tuple[str, list[str]]:

@@ -24,6 +24,7 @@
 import ast
 import re
 import shutil
+import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -255,21 +256,23 @@ def test_the_surface_names_only_what_is_public() -> None:
         "if LIMIT:\n    FAST = True\nelse:\n    FAST = False\n"
         "try:\n    import json as JSON\n    PARSED = 1\nexcept ImportError:\n    PARSED = 0\n"
     )
-    assert surface.public_names(source, "m") == [
-        "m.LIMIT",
-        "m.Oops(RuntimeError)",
-        "m.Oops.kind",
-        "m.Oops.__init__(self, why: str) -> None",
-        "m.Oops.tell(self) -> str",
-        "m.cut(text: str, limit: int=LIMIT) -> str",
-        "m.Pair",
-        "m.LOW",
-        "m.HIGH",
-        "m.FAST",
-        "m.FAST",
-        "m.PARSED",
-        "m.PARSED",
-    ]
+    # Снимок — отсортированное множество: условное имя (`FAST`, `PARSED`)
+    # стоит один раз, а порядок в файле значения не имеет (`a417b45`).
+    assert surface.public_names(source, "m") == sorted(
+        {
+            "m.LIMIT",
+            "m.Oops(RuntimeError)",
+            "m.Oops.kind",
+            "m.Oops.__init__(self, why: str) -> None",
+            "m.Oops.tell(self) -> str",
+            "m.cut(text: str, limit: int=LIMIT) -> str",
+            "m.Pair",
+            "m.LOW",
+            "m.HIGH",
+            "m.FAST",
+            "m.PARSED",
+        }
+    )
 
 
 def test_the_surface_moves_only_with_the_version() -> None:
@@ -354,11 +357,23 @@ def rename_a_function(package: Path) -> None:
 
 
 def test_the_live_surface_matches_the_shared_branch_or_moves_the_version() -> None:
-    """Поверхность дерева против общей ветки: сменилась — сдвинут и `VERSION` (`88a3574`)."""
-    try:
-        said = surface.moved_without_version(*surface.surface(PACKAGE), ROOT)
-    except surface.NotRun as exc:
-        pytest.skip(f"общей ветки в этом клоне нет — сверять не с чем: {exc}")
+    """Поверхность дерева против общей ветки: сменилась — сдвинут и `VERSION` (`88a3574`).
+
+    Пропуск — только когда ссылки общей ветки в клоне нет. Поломка разбора
+    (`SyntaxError`, `KeyError` в пакете любой стороны) пропуском не
+    считается: она краснеет как отказ (`3655874`).
+    """
+    known = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{surface.BASE}^{{commit}}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if known.returncode != 0:
+        pytest.skip(f"ссылки {surface.BASE} в этом клоне нет — сверять не с чем")
+    said = surface.moved_without_version(*surface.surface(PACKAGE), ROOT)
     assert not said, said
 
 
@@ -657,3 +672,57 @@ def test_the_surface_is_read_from_any_reader() -> None:
     version, lines = surface.surface_from(files.__getitem__)
     assert version == "1.2.3"
     assert lines == ["requires-python >=3.14", "dependencies —", "m.f() -> None"]
+
+
+@pytest.mark.parametrize(
+    ("source", "expect"),
+    [
+        ("while True:\n    LOOPED = 1\n    break\n", "m.LOOPED"),
+        ("match 1:\n    case 1:\n        MATCHED = 1\n", "m.MATCHED"),
+        ("match 1:\n    case CAPTURED:\n        pass\n", "m.CAPTURED"),
+        ("try:\n    pass\nexcept* ValueError:\n    STARRED = 1\n", "m.STARRED"),
+        ("if (WALRUS := 1):\n    pass\n", "m.WALRUS"),
+        ("@dataclass(frozen=True)\nclass A:\n    x: int\n", "@dataclass(frozen=True) m.A()"),
+        ("class A(B, metaclass=M):\n    pass\n", "m.A(B, metaclass=M)"),
+        ("class A:\n    if True:\n        def f(self) -> None: ...\n", "m.A.f(self) -> None"),
+    ],
+    ids=[
+        "while",
+        "match-тело",
+        "match-захват",
+        "except*",
+        "моржовый",
+        "декоратор класса",
+        "metaclass",
+        "метод под if",
+    ],
+)
+def test_names_come_from_the_symbol_table(source: str, expect: str) -> None:
+    """Любая форма, связывающая имя в области, — в снимке (`0034097`, `d291a70`).
+
+    Формы, которые прежний перечень видов узлов пропускал. Сюда не надо
+    дописывать вид оператора: имена даёт `symtable`, и тест лишь называет
+    обходы, найденные взглядами.
+    """
+    assert expect in surface.public_names(source, "m")
+
+
+def test_reordering_definitions_is_not_a_new_surface() -> None:
+    """Перестановка определений поверхность не меняет (`a417b45`)."""
+    first = surface.public_names("def a() -> None: ...\ndef b() -> None: ...\n", "m")
+    second = surface.public_names("def b() -> None: ...\ndef a() -> None: ...\n", "m")
+    assert first == second
+
+
+def test_scope_nodes_stop_at_nested_scopes() -> None:
+    """Обход области не спускается в тела функций и классов: их имена — не имена модуля."""
+    body = ast.parse("def f():\n    INNER = 1\nOUTER = 1\n").body
+    names = {node.id for node in surface.scope_nodes(body) if isinstance(node, ast.Name)}
+    assert names == {"OUTER"}
+
+
+def test_a_class_line_names_its_decorators_and_keywords() -> None:
+    """`class_line` пишет декораторы, базы и ключи."""
+    node = ast.parse("@final\nclass A(B, metaclass=M):\n    pass\n").body[0]
+    assert isinstance(node, ast.ClassDef)
+    assert surface.class_line(node, "m") == "@final m.A(B, metaclass=M)"
