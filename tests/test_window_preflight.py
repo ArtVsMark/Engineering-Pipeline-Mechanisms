@@ -11,6 +11,10 @@
 которой их гоняет площадка. Механизм назвал это первой же строкой.
 """
 
+import hashlib
+import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -918,3 +922,109 @@ def test_a_call_from_the_steps_checkout_reads_as_a_direct_one(line: str, seen_as
     площадкой — запускала бы: оба списка написаны прямой формой.
     """
     assert preflight.plain(line) == seen_as
+
+
+def test_the_types_step_knows_the_install_line_of_its_job() -> None:
+    """Шагу типов достаётся строка установки его джоба — та, что ставит площадка (#1069)."""
+    typed = [one for one in preflight.steps(ROOT / preflight.CI) if preflight.TYPES in one.command]
+    assert typed, "шага типов в прогоне нет — сверять нечего (075)"
+    for one in typed:
+        assert preflight.INSTALL in one.installs, f"{one.name}: строки установки нет"
+        assert "mypy" in " ".join(preflight.packages_of(one.installs))
+
+
+@pytest.mark.parametrize(
+    ("line", "said"),
+    [
+        (
+            'python -m pip install --quiet "ruff>=0.6,<1" "pyyaml>=6,<7"',
+            ["ruff>=0.6,<1", "pyyaml>=6,<7"],
+        ),
+        ("python -m pip install --quiet $MECHANISMS/packages/transport", "пакеты дерева"),
+        ("python -m pip install ./packages/transport", "пакеты дерева"),
+        ("python -m pip install --quiet", "пакетов нет"),
+    ],
+    ids=["пакеты", "путь-переменной", "путь-от-корня", "пусто"],
+)
+def test_the_install_line_is_read_as_the_platform_reads_it(
+    line: str, said: list[str] | str
+) -> None:
+    """Флаги отброшены, путь к дереву и пустота — отказ, а не тихое окружение (045, 075)."""
+    if isinstance(said, list):
+        assert preflight.packages_of(line) == said
+    else:
+        with pytest.raises(preflight.NotRun, match=said):
+            preflight.packages_of(line)
+
+
+def test_only_the_types_step_is_run_in_the_platform_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`mypy` получает интерпретатор окружения шага, прочие команды — без правки (#1069)."""
+    fake = tmp_path / "env" / "bin" / "python"
+    monkeypatch.setattr(preflight, "lint_python", lambda installs, root: fake)
+    typed = preflight.Step("типы", "set -e\nmypy scripts/", "pip install mypy")
+    assert preflight.as_on_the_platform(typed, tmp_path) == (
+        f"set -e\nmypy --python-executable {fake} scripts/"
+    )
+    plain = preflight.Step("тесты", "pytest -q", "pip install pytest")
+    assert preflight.as_on_the_platform(plain, tmp_path) == "pytest -q"
+    bare = preflight.Step("типы", "mypy scripts/")
+    assert preflight.as_on_the_platform(bare, tmp_path) == "mypy scripts/"
+
+
+def test_a_built_env_is_taken_ready_and_a_broken_build_is_named(tmp_path: Path) -> None:
+    """Готовое окружение берётся без сборки; не собравшееся — отказ шага, а не `.venv`."""
+    packages = preflight.packages_of("pip install mypy")
+    where = (
+        tmp_path / preflight.LINT_ENVS / hashlib.sha1(" ".join(packages).encode()).hexdigest()[:12]
+    )
+    (where / "bin").mkdir(parents=True)
+    (where / "bin" / "python").write_text("", encoding="utf-8")
+    assert preflight.lint_python("pip install mypy", tmp_path) == where / "bin" / "python"
+    broken = preflight.Step("типы", "mypy scripts/", "pip install ./packages/transport")
+    code, said = preflight.run(broken, tmp_path)
+    assert code == preflight.EXIT_BROKEN and "пакеты дерева" in said
+
+
+def test_mypy_sees_the_packages_of_the_interpreter_it_is_given(tmp_path: Path) -> None:
+    """Случай #1063: тот же код краснеет без `pytest` в окружении и чист с ним.
+
+    На этом и держится механизм: `--python-executable` меняет то, что `mypy`
+    видит установленным, — и только это. Окружение без `pytest` строится без
+    сети (`--without-pip`), как пустое окружение шага.
+
+    Нужен `mypy` в окружении прогона. Шаг `test` его не ставит — его ставит
+    `lint`, где нет `pytest`, — поэтому на площадке случай пропускается с
+    названной причиной, а держится прогоном в окне (предполётная ставит оба).
+    """
+    if importlib.util.find_spec("mypy") is None:
+        pytest.skip("нет mypy: шаг test его не ставит, а lint, где он есть, не гоняет pytest")
+    probe = tmp_path / "probe.py"
+    probe.write_text('import pytest\n\n\ndef probe() -> str:\n    pytest.skip("x")\n', "utf-8")
+    bare = tmp_path / "bare"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(bare)], check=True)
+    mypy = [
+        sys.executable,
+        "-m",
+        "mypy",
+        "--no-incremental",
+        "--ignore-missing-imports",
+        str(probe),
+    ]
+    without = subprocess.run(
+        [*mypy, "--python-executable", str(bare / "bin" / "python")],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=tmp_path,
+    )
+    with_pytest = subprocess.run(
+        [*mypy, "--python-executable", sys.executable],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=tmp_path,
+    )
+    assert without.returncode == 1 and "Missing return statement" in without.stdout, without.stdout
+    assert with_pytest.returncode == 0, with_pytest.stdout

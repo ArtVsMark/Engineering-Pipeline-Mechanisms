@@ -94,6 +94,9 @@ SCRIPTS: Final = Path("scripts")
 #: `scripts/`, потому что его ставят СНАРУЖИ — потребители прибивают пакет к тегу
 #: выпуска (`docs/decisions/024-…`).
 TRANSPORT: Final = Path("packages/transport")
+#: Окружения шагов предполётной того же состава, что у площадки (#1069): вне
+#: дерева проекта по смыслу — каталог в `.gitignore`.
+PREFLIGHT_ENVS: Final = Path(".cache") / "preflight-envs"
 #: Где живёт код проекта — ВСЁ, а не только `scripts/`. Список нужен тем, кто
 #: судит о дереве целиком: счёт механизмов, объявленные исходы, гигиена
 #: источника, гейт «новое со своим прогоном». Пока источников было два — скрипты и
@@ -195,6 +198,7 @@ ALL: Final = (
     DECISIONS,
     SCRIPTS,
     TRANSPORT,
+    PREFLIGHT_ENVS,
     ENTRANCE,
     AUTHORS,
     BADGES_DIR,
