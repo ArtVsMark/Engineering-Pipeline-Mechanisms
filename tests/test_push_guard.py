@@ -16,15 +16,20 @@
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, load_script
 
 HOOK = ROOT / ".claude" / "hooks" / "push_guard.py"
+#: То, что зовёт окно: обёртка выбирает интерпретатор планки (#1058). Набор
+#: спрашивает сторожа через неё же — иначе проверялся бы не тот вызов, что идёт
+#: в окне, и `python3` ниже планки остался бы невидим.
+WRAPPER = ROOT / ".claude" / "hooks" / "push_guard.sh"
 #: Сам сторож как модуль: часть его разбора проверяется прямо, без процесса.
 #: Он лежит не в `scripts/`, поэтому общий загрузчик набора сюда не годится.
 _spec = importlib.util.spec_from_file_location("push_guard", HOOK)
@@ -33,6 +38,31 @@ module = importlib.util.module_from_spec(_spec)
 sys.modules["push_guard"] = module
 _spec.loader.exec_module(module)
 SETTINGS = ROOT / ".claude" / "settings.json"
+
+
+#: Каталог с `python<планка>` для PATH обёртки — его кладёт фикстура ниже.
+FLOOR_BIN: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True, scope="module")
+def floor_interpreter_on_path(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Кладёт `python<планка>` — интерпретатор набора — туда, где обёртка его ищет.
+
+    Набор идёт на планке (`check_env` сверяет это до прогона), а в PATH проверки
+    — только `/usr/bin:/bin`, где интерпретатора планки может не быть: тогда
+    обёртка закрыла бы толчок, не спросив сторожа, и вердикты ниже проверяли бы
+    её, а не его. Ссылка кладётся в свой каталог, чтобы не тащить в PATH
+    остальное окружение, — и в площадку прогона, а не в общий `/tmp` (149).
+    """
+    floor = "{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
+    where = tmp_path_factory.mktemp("floor-python")
+    (where / f"python{floor}").symlink_to(sys.executable)
+    FLOOR_BIN["dir"] = str(where)
+
+
+def floor_interpreter() -> str:
+    """Каталог с интерпретатором планки, положенный фикстурой модуля."""
+    return FLOOR_BIN["dir"]
 
 
 def ask(
@@ -53,13 +83,13 @@ def ask(
     event = json.dumps({"tool_input": {"command": command}})
     fake = ROOT / "tests" / "fake_git"
     return subprocess.run(
-        ["python3", str(HOOK)],
+        [str(WRAPPER)],
         input=event,
         capture_output=True,
         text=True,
         encoding="utf-8",
         env={
-            "PATH": f"{fake}:/usr/bin:/bin",
+            "PATH": f"{fake}:{floor_interpreter()}:/usr/bin:/bin",
             "FAKE_HEAD": head,
             "FAKE_HEAD_BROKEN": broken,
             "FAKE_REMOTE_GONE": gone,
@@ -132,9 +162,14 @@ def test_a_heredoc_body_is_data_not_a_command() -> None:
 def test_an_unreadable_event_does_not_break_the_tool() -> None:
     """Событие не разобралось — сторож молчит, а не роняет чужой инструмент (084)."""
     said = subprocess.run(
-        ["python3", str(HOOK)], input="не json", capture_output=True, text=True, encoding="utf-8"
+        [str(WRAPPER)],
+        input="не json",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": f"{floor_interpreter()}:/usr/bin:/bin"},
     )
-    assert said.returncode == 0
+    assert said.returncode == 0, said.stderr
 
 
 def test_the_hook_is_declared_to_the_window() -> None:
@@ -142,9 +177,7 @@ def test_the_hook_is_declared_to_the_window() -> None:
     said = json.loads(SETTINGS.read_text(encoding="utf-8"))
     hooks = said["hooks"]["PreToolUse"]
     assert any(
-        Path(HOOK).name in one.get("command", "")
-        for entry in hooks
-        for one in entry.get("hooks", [])
+        WRAPPER.name in one.get("command", "") for entry in hooks for one in entry.get("hooks", [])
     ), "сторож есть, а окно о нём не знает"
     assert any(entry.get("matcher") == "Bash" for entry in hooks), "сторож не слушает Bash"
 
@@ -678,6 +711,118 @@ def test_the_reachability_sign_is_not_back(tmp_path: Path) -> None:
         "достижимость из общей снова читается как «работа слита» — признак,"
         f" снятый по замеру, вернулся и отвергает законный толчок: {said}"
     )
+
+
+# --- обёртка без интерпретатора планки (#1058) ---------------------------------
+
+
+def system_python3_reaches_the_floor() -> bool:
+    """Не ниже ли планки `python3` системного PATH — тогда окна «без планки» не собрать."""
+    floor = load_script("check_env.py").python_floor(ROOT)
+    done = subprocess.run(
+        ["python3", "-c", f"import sys; sys.exit(sys.version_info[:2] < {tuple(floor)!r})"],
+        env={"PATH": os.defpath},
+        capture_output=True,
+        check=False,
+    )
+    return done.returncode == 0
+
+
+def ask_with_python3(command: str, python3: Path) -> subprocess.CompletedProcess[str]:
+    """Спрашивает обёртку, у которой из интерпретаторов есть только `python3` из `python3`."""
+    return subprocess.run(
+        [str(WRAPPER)],
+        input=json.dumps({"tool_input": {"command": command}}),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": f"{python3.parent}:/usr/bin:/bin"},
+        cwd=ROOT,
+    )
+
+
+def test_a_local_window_runs_the_guard_by_a_python3_on_the_floor(tmp_path: Path) -> None:
+    """Локальное окно без `python<планка>`, но с `python3` не ниже — страж исполняется.
+
+    Находка `08446b4` на #1072: хук старта ставит интерпретатор планки только
+    в облачном окне, и в локальном обёртка отвергала бы КАЖДЫЙ толчок, советуя
+    перезапуск, который там ничего не даёт. Страж, а не обёртка, должен
+    ответить — его отказ на общую ветку и есть признак.
+    """
+    floor = "python{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
+    if any(Path(where, floor).exists() for where in ("/usr/bin", "/bin")):
+        pytest.skip(f"{floor} стоит в /usr/bin — окна без него здесь не собрать")
+    python3 = tmp_path / "python3"
+    python3.symlink_to(sys.executable)
+    harmless = ask_with_python3("ls", python3)
+    assert harmless.returncode == 0, harmless.stderr
+    shared = ask_with_python3("git push origin main", python3)
+    assert shared.returncode == 2
+    assert "страж толчка не запущен" not in shared.stderr, "ответила обёртка, а не страж"
+
+
+def test_a_python3_below_the_floor_does_not_run_the_guard(tmp_path: Path) -> None:
+    """Вторая половина: `python3` ниже планки стража не исполняет — толчок закрыт обёрткой."""
+    floor = "python{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
+    if any(Path(where, floor).exists() for where in ("/usr/bin", "/bin")):
+        pytest.skip(f"{floor} стоит в /usr/bin — окна без него здесь не собрать")
+    python3 = tmp_path / "python3"
+    python3.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    python3.chmod(0o755)
+    said = ask_with_python3("git push origin agent/here", python3)
+    assert said.returncode == 2
+    assert "страж толчка не запущен" in said.stderr
+    assert "в локальном поставьте" in said.stderr, "совет называет только перезапуск"
+
+
+def ask_without_floor(command: str) -> subprocess.CompletedProcess[str]:
+    """Спрашивает обёртку в окне, где интерпретатора планки нет вовсе."""
+    return subprocess.run(
+        [str(WRAPPER)],
+        input=json.dumps({"tool_input": {"command": command}}),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": "/nonexistent-floor:" + os.defpath},
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin agent/other",
+        "git push",
+        "git -C /tmp push origin agent/here",
+        "/usr/bin/git push origin main",
+        'bash -c "git push origin main"',
+    ],
+    ids=["просто", "без имени", "с ключом git", "полным путём", "в оболочке"],
+)
+def test_without_the_floor_interpreter_a_push_is_refused(command: str) -> None:
+    """Нет интерпретатора планки — толчок закрыт кодом 2, а не пропущен молча.
+
+    Ненулевой код, кроме 2, площадка считает неблокирующим: без этой ветки
+    сторож отключился бы ровно тогда, когда его некому запустить. Закрыт и
+    `git push` без имени: что он толкнёт, без сторожа не проверить. Форма
+    `git -C путь push` — та, которую подстрока каталога `git push` пропускала.
+    """
+    floor = "python{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
+    if any(Path(where, floor).exists() for where in os.defpath.split(":") if where):
+        pytest.skip(f"{floor} стоит в системном PATH — окна без него здесь не собрать")
+    if system_python3_reaches_the_floor():
+        pytest.skip("системный python3 не ниже планки — обёртка законно берёт его")
+    said = ask_without_floor(command)
+    assert said.returncode == 2, f"пропущено без сторожа: {command}"
+    assert "страж толчка не запущен" in said.stderr
+    assert "Толчок отвергнут" in said.stderr
+
+
+@pytest.mark.parametrize("command", ["ls", "git status", "pytest -q"])
+def test_without_the_floor_interpreter_other_commands_pass(command: str) -> None:
+    """Остальное открыто: закрыть всё значило бы обездвижить окно сбоем старта."""
+    said = ask_without_floor(command)
+    assert said.returncode == 0, said.stderr
+    assert said.stderr == ""
 
 
 @pytest.mark.parametrize(

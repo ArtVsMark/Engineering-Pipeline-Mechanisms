@@ -14,6 +14,10 @@ import pytest
 from tests.conftest import ROOT, load_script
 
 HOOK: Final = ROOT / ".claude" / "hooks" / "session-start.sh"
+#: Число планки для обоих хуков окна — одно место (#1058).
+FLOOR_FILE: Final = ROOT / ".claude" / "hooks" / "floor.sh"
+#: Обёртка стража толчка: второй, кто читает `FLOOR_FILE`.
+GUARD_WRAPPER: Final = ROOT / ".claude" / "hooks" / "push_guard.sh"
 SETTINGS: Final = ROOT / ".claude" / "settings.json"
 
 
@@ -53,18 +57,35 @@ def test_the_hook_reads_the_floor_and_tools_from_check_env() -> None:
 
 
 def test_the_hook_is_registered_beside_the_push_guard() -> None:
-    """`SessionStart` добавлен рядом со сторожем толчка, а не вместо него."""
+    """`SessionStart` добавлен рядом со сторожем толчка, а не вместо него.
+
+    Сторож зовётся обёрткой, а не `python3 push_guard.py`: голый `python3`
+    процесса окна — системный, ниже планки (#1058).
+    """
     hooks = json.loads(SETTINGS.read_text(encoding="utf-8"))["hooks"]
     started = [one["command"] for entry in hooks["SessionStart"] for one in entry["hooks"]]
     assert any(HOOK.name in command for command in started)
     guarded = [one["command"] for entry in hooks["PreToolUse"] for one in entry["hooks"]]
-    assert any("push_guard.py" in command for command in guarded), "сторож толчка пропал"
+    assert any(GUARD_WRAPPER.name in command for command in guarded), "сторож толчка пропал"
+    assert not any("python" in command for command in guarded), (
+        f"сторож зовётся интерпретатором напрямую, мимо обёртки: {guarded}"
+    )
 
 
 #: Встроенный в хук код на Python — между `<интерпретатор> -c "` и `" "$1"`.
 SNIPPET: Final = re.compile(r'(\S+) -c "\n(.*?)\n" "\$1"', re.S)
-#: Число планки в хуке: одна строка `want=<X.Y>` (взгляд на #1049).
+#: Число планки в хуках: одна строка `want=<X.Y>` в `floor.sh` (взгляд на #1049, #1058).
 WANT: Final = re.compile(r"^want=(\S+)$", re.M)
+#: Как хук читает `floor.sh`: точкой от своего каталога, а не от рабочего.
+SOURCED: Final = '. "$here/floor.sh"'
+#: Каталог хука — абсолютным путём: строка одна на оба хука (`9fda04b`).
+ABSOLUTE_HERE: Final = 'here=$(cd "$(dirname "$0")" && pwd)'
+
+
+def code_of(path: Path) -> str:
+    """Исполняемые строки хука: в комментариях-пояснениях число и имена законны."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return "\n".join(line for line in lines if not line.lstrip().startswith("#"))
 
 
 def hook_interpreter() -> str:
@@ -132,20 +153,32 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     `git show 2a693c3^:.claude/hooks/session-start.sh | grep -n 3.14`. Три
     пересказа подряд разошлись с ним (взгляды на #1057 и #1060), и правило 210
     велит остановиться, а не чинить четвёртый. Проверяется здесь итог, а не
-    история: число в коде хука одно — `want`, — оно равно планке, ставит и
-    читает дерево именно `python$want`, и установка стоит РАНЬШЕ разбора.
+    история: число в хуках одно — `want` в `floor.sh` (#1058), — оно равно
+    планке, хук старта берёт его точкой и своего не вписывает, ставит и читает
+    дерево именно `python$want`, и установка стоит РАНЬШЕ разбора.
     """
     said = HOOK.read_text(encoding="utf-8")
-    code = "\n".join(line for line in said.splitlines() if not line.lstrip().startswith("#"))
+    code = code_of(HOOK)
     floor = "{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
-    wanted = WANT.findall(code)
-    assert wanted == [floor], f"want в хуке {wanted}, а планка {floor}"
-    assert code.count(floor) == 1, f"число планки {floor} вписано в код хука не один раз"
+    wanted = WANT.findall(FLOOR_FILE.read_text(encoding="utf-8"))
+    assert wanted == [floor], f"want в {FLOOR_FILE.name} {wanted}, а планка {floor}"
+    # Во всём файле, с комментариями: пересказ числа в пояснении разошёлся бы
+    # с `want` молча (005).
+    assert FLOOR_FILE.read_text(encoding="utf-8").count(floor) == 1, (
+        f"число планки {floor} вписано в {FLOOR_FILE.name} не один раз"
+    )
+    assert WANT.findall(code) == [], "хук старта вписывает свой want рядом с floor.sh"
+    assert floor not in code, f"число планки {floor} вписано в код хука старта рукой"
+    sourced = code.index(SOURCED)
     found = SNIPPET.search(code)
     assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
     assert found[1] == '"python$want"', f"хук читает дерево {found[1]}, а не python$want"
     install = code.index('uv python install "$want"')
     read = code.index("$(read_tree floor)")
+    assert sourced < install, "floor.sh читается после того, как want понадобился"
+    assert code.index(ABSOLUTE_HERE) < code.index('cd "$CLAUDE_PROJECT_DIR"'), (
+        "каталог хука берётся после cd или не абсолютным — относительный $0 укажет мимо floor.sh"
+    )
     assert install < read, "интерпретатор ставится после разбора дерева"
     # Обе ветки хука, которые называют настоящую причину (взгляд на #1057):
     # нет интерпретатора — до разбора, расхождение `want` с планкой — после.
@@ -153,11 +186,12 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     assert install < guard < read, "охрана «нет python$want» стоит не между установкой и разбором"
     mismatch = code.index('if [ "$floor" != "$want" ]; then')
     assert read < mismatch, "сверка want с планкой стоит не после чтения планки"
-    assert "поправьте want в хуке" in code[mismatch:], "расхождение want с планкой не названо"
+    fix = f"поправьте want в .claude/hooks/{FLOOR_FILE.name}"
+    assert fix in code[mismatch:], "расхождение want с планкой не названо"
     # Отказ чтения планки тоже называет `want`: поднятую планку `python$want`
     # может не прочесть вовсе, и до сверки дело не дойдёт (взгляд на #1057).
     unread = code[guard:mismatch]
-    assert "поправьте want в хуке" in unread, "отказ чтения планки не называет want"
+    assert fix in unread, "отказ чтения планки не называет want"
     head = said.splitlines()[1]
     assert floor not in head, "шапка хука вписывает число планки рукой — разойдётся с want молча"
     assert 'ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"' in code
@@ -174,3 +208,43 @@ def test_the_hook_installs_local_packages_editable_and_skips_a_fit_env() -> None
     assert re.search(r"if ! \.venv/bin/python scripts/check_env\.py", code), (
         "годное окружение переставляется на каждом старте"
     )
+
+
+def test_the_guard_wrapper_takes_the_same_want() -> None:
+    """Обёртка стража берёт `want` из того же `floor.sh` и им же зовёт страж (#1058).
+
+    Своё число в обёртке разошлось бы с хуком старта на первом подъёме планки:
+    хук поставил бы новый интерпретатор, а страж искал бы старый и закрыл
+    толчок, или нашёл бы старый и упал на синтаксисе планки.
+    """
+    code = code_of(GUARD_WRAPPER)
+    floor = "{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
+    assert SOURCED in code, "обёртка не читает floor.sh"
+    assert WANT.findall(code) == [], "обёртка вписывает свой want"
+    assert floor not in code, f"число планки {floor} вписано в обёртку рукой"
+    assert 'exec "python$want" "$here/push_guard.py"' in code
+    assert GUARD_WRAPPER.stat().st_mode & 0o111, "обёртка не исполняема — площадка её не запустит"
+
+
+@pytest.mark.parametrize("hook", ["session-start.sh", "push_guard.sh"])
+def test_the_hook_dir_survives_a_relative_call_and_a_cd(hook: str) -> None:
+    """Строка `here=` хука находит `floor.sh` и при относительном `$0`, и после `cd`.
+
+    Находки `9fda04b` и `a0f7a91` на #1072: `here=$(dirname "$0")` до `cd`
+    оставался относительной строкой и после смены каталога указывал мимо, а
+    проверка ПОРЯДКА строк была зелена и при этом. Здесь строка исполняется,
+    а не читается.
+    """
+    code = (FLOOR_FILE.parent / hook).read_text(encoding="utf-8")
+    lines = [line for line in code.splitlines() if line.startswith("here=")]
+    assert lines == [ABSOLUTE_HERE], f"{hook}: каталог хука вычисляется не так: {lines}"
+    script = f'{lines[0]}\ncd / || exit 9\n[ -r "$here/floor.sh" ]'
+    done = subprocess.run(
+        ["sh", "-c", script, f"hooks/{hook}"],
+        cwd=FLOOR_FILE.parent.parent,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 0, f"{hook}: после cd floor.sh не найден: {done.stderr}"
