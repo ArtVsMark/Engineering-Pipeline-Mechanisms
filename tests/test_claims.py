@@ -51,7 +51,7 @@ def declared() -> list[dict[str, Any]]:
 def only_called(document: dict[Any, Any]) -> bool:
     """Прогон — общий шаг: из событий у него один `workflow_call`, в любой форме `on:`."""
     events: list[str] = policy.triggers_of(document)
-    return events == ["workflow_call"]
+    return events == [policy.CALLED]
 
 
 @pytest.mark.parametrize(
