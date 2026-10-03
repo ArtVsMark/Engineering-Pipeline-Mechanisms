@@ -12,6 +12,7 @@
 """
 
 import hashlib
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -992,7 +993,13 @@ def test_mypy_sees_the_packages_of_the_interpreter_it_is_given(tmp_path: Path) -
     На этом и держится механизм: `--python-executable` меняет то, что `mypy`
     видит установленным, — и только это. Окружение без `pytest` строится без
     сети (`--without-pip`), как пустое окружение шага.
+
+    Нужен `mypy` в окружении прогона. Шаг `test` его не ставит — его ставит
+    `lint`, где нет `pytest`, — поэтому на площадке случай пропускается с
+    названной причиной, а держится прогоном в окне (предполётная ставит оба).
     """
+    if importlib.util.find_spec("mypy") is None:
+        pytest.skip("нет mypy: шаг test его не ставит, а lint, где он есть, не гоняет pytest")
     probe = tmp_path / "probe.py"
     probe.write_text('import pytest\n\n\ndef probe() -> str:\n    pytest.skip("x")\n', "utf-8")
     bare = tmp_path / "bare"
