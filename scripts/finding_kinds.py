@@ -47,12 +47,14 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Final
 
 import changerefs
 import findings
 import paths
+import trunk_log
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -173,6 +175,82 @@ def said_no(held: str) -> bool:
     """
     first = re.split(r"[^\w]+", held.strip().lower(), maxsplit=1)[0]
     return first == NO_MECHANISM
+
+
+def twin_roots(record: changerefs.Resolution) -> list[tuple[str, frozenset[str]]]:
+    """Встречи одного снятия: корень цепочки дублей и все её отпечатки.
+
+    ОДНА ВСТРЕЧА НА КОРЕНЬ, А НЕ НА ОТПЕЧАТОК (#1022): дубль — один дефект,
+    названный дважды, и «A дубль B» — одна встреча рода, «A дубль B, C дубль
+    D» — две. Цепочки — компоненты связи `twin_of`; корень — отпечаток, у
+    которого двойника нет, а у круга (`A дубль A`) — первый названный.
+    """
+    links = record.twin_of
+    groups: dict[str, set[str]] = {mark: {mark} for mark in record.marks}
+    for mark, twin in links.items():
+        joined = groups[mark] | groups.get(twin, {twin})
+        for one in joined:
+            groups[one] = joined
+    found: list[tuple[str, frozenset[str]]] = []
+    for mark in record.marks:
+        group = frozenset(groups[mark])
+        if any(group == seen for _, seen in found):
+            continue
+        roots = [one for one in record.marks if one in group and one not in links]
+        found.append((roots[0] if roots else mark, group))
+    return found
+
+
+def met_in_history(bodies: Iterable[str], kinds: dict[str, Any]) -> dict[str, list[str]]:
+    """Род → встречи, названные строками `Род:` в телах слитых коммитов (#1022).
+
+    ВСТРЕЧА ЕДЕТ С РАБОТОЙ, А НЕ ПРАВКОЙ СЛОВАРЯ. Прежде отпечаток дописывали в
+    `встречен`, и конец одних и тех же списков правило почти каждое изменение:
+    каждое слияние давало конфликт у всех открытых веток (замер 03.10.2026 —
+    30 из 34 слитых изменений трогали словарь). Теперь встреча — строка
+    `Род:` под снятием, и считает её одна функция для архива, плана и гейта
+    рождения правила (022).
+
+    ВТОРОЙ РАЗ НЕ СЧИТАЕТСЯ: цепочка, чей отпечаток уже стоит в `встречен`
+    словаря или раньше в истории, — та же встреча; встреча в окне — та же
+    пара «род, место». `Род: нет — <причина>` — ответ без рода, и встречей он
+    не становится (154).
+    """
+    seen = {str(met).strip("`") for body in kinds.values() for met in body.get("встречен") or []}
+    found: dict[str, list[str]] = {}
+    for body in bodies:
+        for record in changerefs.resolutions_parsed(body):
+            if not record.kind or said_no(record.kind):
+                continue
+            for root, group in twin_roots(record):
+                if group & seen:
+                    continue
+                seen |= group
+                found.setdefault(record.kind, []).append(root)
+        for meeting in changerefs.window_meetings_in(body):
+            said = f"{IN_WINDOW}{meeting.place}"
+            if said in found.get(meeting.kind, []) or said in seen:
+                continue
+            found.setdefault(meeting.kind, []).append(said)
+    return found
+
+
+def with_history(
+    kinds: dict[str, Any], bodies: Iterable[str]
+) -> tuple[dict[str, Any], dict[str, list[str]]]:
+    """Словарь, у которого `встречен` — замороженный список плюс встречи истории.
+
+    Вторым отдаются встречи родов, которых в словаре нет: опечатка имени или
+    переименованный род не пропадают молча, а называются (045). Остальные
+    читатели словаря — порог, долг, ответ каталогу — работают над первым без
+    правок: число встреч у них по-прежнему длина `встречен`.
+    """
+    met = met_in_history(bodies, kinds)
+    merged = {
+        name: {**body, "встречен": [*(body.get("встречен") or []), *met.get(name, [])]}
+        for name, body in kinds.items()
+    }
+    return merged, {name: one for name, one in met.items() if name not in kinds}
 
 
 def repeated(kinds: dict[str, Any]) -> list[tuple[str, int]]:
@@ -352,6 +430,10 @@ NO_KIND: Final = ""
 #: словаря по ним, а не по переписанным буквам (взгляд на #830, 209).
 OUTSIDE: Final = "род архива вне словаря:"
 KINDLESS: Final = "записей архива без рода:"
+#: Строка о встречах, пришедших строками `Род:` из истории (#1022).
+HISTORY_SAID: Final = "из них строками «Род:» истории"
+#: Начало строки о роде, названном в истории, но не объявленном в словаре.
+OUTSIDE_HISTORY: Final = "род истории вне словаря:"
 #: Хвост строки замера дублей: тест узнаёт её по нему, а не по буквам (209).
 TWIN_SHARE: Final = "от разобранных"
 #: Сколько изменений отрезка архив учёл — первым числом строки замера: отрезок,
@@ -450,6 +532,11 @@ def main(argv: list[str] | None = None) -> int:
         "--archive", default=None, help="архив находок (findings.json): встречи рода в нём"
     )
     parser.add_argument(
+        "--trunk",
+        default=trunk_log.TRUNK_REF,
+        help="чья история несёт встречи строками «Род:» (#1022); по умолчанию — общая ветка",
+    )
+    parser.add_argument(
         "--twins",
         default="",
         metavar=SPAN_FORM,
@@ -476,14 +563,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_OK
     try:
-        kinds = read(Path(args.kinds) if args.kinds else None)
+        frozen = read(Path(args.kinds) if args.kinds else None)
+        kinds, outside = with_history(frozen, trunk_log.merged_bodies(ref=args.trunk))
         archived, gap = in_archive(Path(args.archive)) if args.archive else ({}, "")
-    except NotRun as refusal:
+    except (NotRun, trunk_log.NotRun) as refusal:
         print(f"роды не сосчитаны: {refusal}", file=sys.stderr)
         return EXIT_BROKEN
 
     meetings = sum(len(body.get("встречен") or []) for body in kinds.values())
-    print(f"родов {len(kinds)}, встреч {meetings}")
+    told = meetings - sum(len(body.get("встречен") or []) for body in frozen.values())
+    print(f"родов {len(kinds)}, встреч {meetings} ({HISTORY_SAID} {args.trunk} — {told})")
+    # РОД ИСТОРИИ ВНЕ СЛОВАРЯ НЕ ВЫПАДАЕТ МОЛЧА: опечатка в строке `Род:` иначе
+    # уносила бы встречу из счёта без слова (045).
+    for name in sorted(outside):
+        print(f"  {OUTSIDE_HISTORY} {name} — встреч {len(outside[name])}")
     if gap:
         print(f"{findings.UNFILLED_SAID} {gap} — числа архива ниже неполные")
     if archived and args.kinds:

@@ -623,3 +623,118 @@ def test_every_written_catalogue_answer_is_still_true() -> None:
         if (problem := module.answer_problem(body, queue, known)) is not None
     }
     assert not stale, f"ответ каталогу разошёлся с очередью или номерами: {stale}"
+
+
+@pytest.fixture(autouse=True)
+def no_trunk_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вход набора — подделки, а не история дерева, в котором он идёт (#1022).
+
+    Без подмены `main` считал бы встречи по настоящей истории общей ветки, и
+    число в проверке зависело бы от того, сколько строк `Род:` уже слито.
+    """
+    monkeypatch.setattr(module.trunk_log, "merged_bodies", lambda *_, **__: [])
+
+
+def history_kinds(*met: str) -> dict[str, object]:
+    """Словарь с одним родом «род» и замороженными встречами."""
+    return {"род": {"признак": "x", "встречен": list(met), "закрыт": "нет — нечем"}}
+
+
+def test_a_kind_line_counts_one_meeting_per_twin_root() -> None:
+    """Одна встреча на корень дублей: «A дубль B» — одна, две пары — две (#1022)."""
+    bodies = [
+        "Разобрано: aaaaaaa дубль bbbbbbb — один дефект\nРод: род",
+        "Разобрано: ccccccc дубль ddddddd, eeeeeee дубль fffffff\nРод: род",
+        "Разобрано: 1111111, 2222222 дубль 3333333\nРод: род",
+    ]
+    assert module.met_in_history(bodies, {}) == {
+        "род": ["bbbbbbb", "ddddddd", "fffffff", "3333333"]
+    }
+
+
+def test_a_chain_and_a_loop_are_one_meeting() -> None:
+    """Цепочка «A дубль B дубль C» — одна встреча с корнем C; круг — одна, первым названным."""
+    bodies = [
+        "Разобрано: aaaaaaa дубль bbbbbbb дубль ccccccc\nРод: род",
+        "Разобрано: ddddddd дубль ddddddd\nРод: род",
+    ]
+    assert module.met_in_history(bodies, {}) == {"род": ["ccccccc", "ddddddd"]}
+
+
+def test_a_meeting_is_not_counted_twice() -> None:
+    """Отпечаток в замороженном списке или раньше в истории — та же встреча."""
+    bodies = [
+        "Разобрано: aaaaaaa\nРод: род",
+        "Разобрано: aaaaaaa\nРод: род",
+        "Разобрано: bbbbbbb дубль ccccccc\nРод: род",
+        "Разобрано: ddddddd\nРод: род",
+    ]
+    assert module.met_in_history(bodies, history_kinds("`ccccccc`", "ddddddd")) == {
+        "род": ["aaaaaaa"]
+    }
+
+
+def test_no_kind_and_a_refused_kind_are_not_meetings() -> None:
+    """Снятие без `Род:`, с пустой строкой между ними и `Род: нет — …` встреч не дают."""
+    bodies = [
+        "Разобрано: aaaaaaa",
+        "Разобрано: bbbbbbb\n\nРод: род",
+        "Разобрано: ccccccc\nРод: нет — находка про прозу, рода у неё нет",
+    ]
+    assert module.met_in_history(bodies, {}) == {}
+
+
+def test_a_window_meeting_is_counted_once_by_its_place() -> None:
+    """Встреча в окне — пара «род, место»: повтор в истории и в словаре не считается."""
+    bodies = [
+        "Род: род — окно: tests/test_x.py — первая редакция",
+        "Род: род — окно: tests/test_x.py — первая редакция",
+        "Род: род — окно: tests/test_y.py — откат зелёный",
+    ]
+    frozen = history_kinds("окно: tests/test_y.py — откат зелёный")
+    assert module.met_in_history(bodies, frozen) == {
+        "род": ["окно: tests/test_x.py — первая редакция"]
+    }
+
+
+def test_history_adds_to_the_frozen_list_and_names_the_outsiders() -> None:
+    """`with_history`: встречи истории дописаны к роду, род вне словаря назван отдельно."""
+    bodies = ["Разобрано: aaaaaaa\nРод: род", "Разобрано: bbbbbbb\nРод: опечатка"]
+    merged, outside = module.with_history(history_kinds("1111111", "2222222"), bodies)
+    assert merged["род"]["встречен"] == ["1111111", "2222222", "aaaaaaa"]
+    assert outside == {"опечатка": ["bbbbbbb"]}
+    assert module.repeated(merged) == [("род", 3)]
+
+
+def test_without_kind_lines_the_count_is_the_frozen_one() -> None:
+    """Приёмка #1022 числом: пока строк `Род:` нет, счёт совпадает с прежним."""
+    kinds = module.read()
+    merged, outside = module.with_history(kinds, ["Разобрано: aaaaaaa", "Тема без снятий"])
+    assert merged == kinds and outside == {}
+
+
+def test_the_entry_point_names_the_history_and_its_outsiders(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`main` печатает долю истории в счёте и род истории вне словаря (045)."""
+    kinds = tmp_path / "kinds.json"
+    kinds.write_text(json.dumps({"kinds": history_kinds("1111111")}, ensure_ascii=False))
+    bodies = ["Разобрано: aaaaaaa\nРод: род", "Разобрано: bbbbbbb\nРод: опечатка"]
+    monkeypatch.setattr(module.trunk_log, "merged_bodies", lambda *_, **__: bodies)
+    assert module.main(["--kinds", str(kinds)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert f"встреч 2 ({module.HISTORY_SAID} origin/main — 1)" in out
+    assert f"{module.OUTSIDE_HISTORY} опечатка — встреч 1" in out
+
+
+def test_an_unreadable_history_is_the_third_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """История не прочитана — отказ, а не счёт по одному словарю (045)."""
+
+    def refuse(*_: object, **__: object) -> list[str]:
+        raise module.trunk_log.NotRun(module.trunk_log.SHALLOW)
+
+    monkeypatch.setattr(module.trunk_log, "merged_bodies", refuse)
+    assert module.main([]) == module.EXIT_BROKEN
+    assert module.trunk_log.SHALLOW in capsys.readouterr().err

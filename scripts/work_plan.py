@@ -83,6 +83,7 @@ import finding_kinds
 import findings
 import ghrest
 import paths
+import trunk_log
 from report import announce
 
 #: По этой строке план находится снова. Тем же приёмом, что у прочих живых
@@ -284,7 +285,7 @@ def rules_part(repo: str, token: str) -> Source:
     )
 
 
-def birth_part(where: Path | None = None) -> Source:
+def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> Source:
     """Третья часть источника 5 — поводы для правила из инцидентов (#650).
 
     Род находки, встреченный не реже порога и без ответа каталогу, — это
@@ -298,17 +299,25 @@ def birth_part(where: Path | None = None) -> Source:
     есть всегда, и его отсутствие — поломка захода. То же с очередью
     предложений: без неё ответ «предложено» не сверить, и это молчание, а не
     «без ответа» у каждого такого рода (`dd1da87`).
+
+    ВСТРЕЧИ — СЛОВАРЬ ПЛЮС ИСТОРИЯ (#1022). С тех пор как встреча едет строкой
+    `Род:` в теле коммита, словарь заморожен, и счёт по нему одному отставал бы
+    от гейта рождения правила. История общей ветки читается тем же
+    `trunk_log.merged_bodies`, а сводится тем же `finding_kinds.with_history`;
+    обрезанная история — молчание раздела, а не меньший счёт (045). `bodies`
+    подставляет историю для прогона на подделках.
     """
     declared = where or paths.FINDING_KINDS
     queue_path = declared.parent / paths.PROPOSALS.name
     try:
-        kinds = finding_kinds.read(declared)
+        said = trunk_log.merged_bodies() if bodies is None else bodies
+        kinds, _ = finding_kinds.with_history(finding_kinds.read(declared), said)
         left = finding_kinds.unanswered(
             kinds,
             finding_kinds.queued(queue_path),
             finding_kinds.known_rules(declared.parent / paths.BINDINGS.name),
         )
-    except finding_kinds.NotRun as exc:
+    except (finding_kinds.NotRun, trunk_log.NotRun) as exc:
         return Source(unread=f"роды находок не прочитаны: {exc}")
     return Source(
         rows=[

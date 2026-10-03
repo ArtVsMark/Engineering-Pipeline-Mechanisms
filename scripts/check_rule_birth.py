@@ -54,6 +54,7 @@ from typing import Any, Final
 import check_journal
 import finding_kinds
 import paths
+import trunk_log
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -217,6 +218,10 @@ def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     порога восемь, ответа каталогу нет ни у одного. Спрашивается ПРИРОСТ, как и
     у решений: род, дошедший до порога раньше, требовать ответа задним числом
     не заставляет — его называет план, разделом 5.
+
+    Встречи здесь — уже сведённые со строками `Род:` истории
+    (`with_history`, #1022): прирост бывает и правкой словаря, и строкой в
+    коммите ветки.
     """
     at = finding_kinds.REPEATED_AT
 
@@ -279,11 +284,22 @@ def main(argv: list[str] | None = None) -> int:
         # Словаря нет у головы — роды не ведутся, и это не отказ: шаг журнала
         # переносим, и у потребителя словаря может не быть вовсе.
         after = kinds_at(args.head, args.root)
-        grown = crossed(kinds_at(args.base, args.root), after) if after else []
+        grown: list[str] = []
+        if after:
+            # ВСТРЕЧИ — СЛОВАРЬ ПЛЮС ИСТОРИЯ GIT, А НЕ ВЕТКА `badges` (решение
+            # владельца 03.10.2026, #1022). «До» — история базы, «после» — она
+            # же и коммиты изменения: строка `Род:` в них уедет в тело
+            # уплотнения. Сводит та же функция, что у архива и плана; мелкий
+            # клон — отказ, а не тихий недосчёт (045).
+            history = trunk_log.merged_bodies(args.root, args.base)
+            own = trunk_log.branch_bodies(args.base, args.head, args.root)
+            before, _ = finding_kinds.with_history(kinds_at(args.base, args.root), history)
+            after, _ = finding_kinds.with_history(after, [*history, *own])
+            grown = crossed(before, after)
         told += kinds_missing(
             grown, after, queue, known_at(args.head, args.root) if grown else None
         )
-    except (NotRun, finding_kinds.NotRun) as exc:
+    except (NotRun, finding_kinds.NotRun, trunk_log.NotRun) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

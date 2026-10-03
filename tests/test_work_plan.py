@@ -488,6 +488,12 @@ def test_the_plan_and_the_queue_count_sources_alike() -> None:
         assert automerge.RANK_NAMES[number].startswith(f"{number} ·"), automerge.RANK_NAMES[number]
 
 
+@pytest.fixture(autouse=True)
+def no_trunk_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Раздел поводов считает встречи по подделкам, а не по истории дерева набора (#1022)."""
+    monkeypatch.setattr(module.trunk_log, "merged_bodies", lambda *_, **__: [])
+
+
 def kinds_file(tmp_path: Any, kinds: dict[str, Any]) -> Any:
     """Словарь родов находок в той форме, в какой его ведёт дерево."""
     path = tmp_path / "finding-kinds.json"
@@ -520,6 +526,32 @@ def test_a_kind_at_the_threshold_without_an_answer_is_plan_work(tmp_path: Any) -
     )
     said = module.birth_part(path)
     assert said.rows == ["род находок у порога без ответа каталогу: «без ответа» — встреч 3"]
+
+
+def test_kind_lines_of_the_history_count_towards_the_threshold(tmp_path: Any) -> None:
+    """Встречи строками `Род:` истории доводят род до порога и в плане (#1022).
+
+    Словарь заморожен, и счёт по нему одному отставал бы от гейта рождения
+    правила: род у порога по истории без ответа каталогу из плана выпадал бы.
+    """
+    path = kinds_file(tmp_path, {"род": {"признак": "x", "встречен": ["a", "b"], "закрыт": "гейт"}})
+    assert module.birth_part(path, []).rows == []
+    said = module.birth_part(path, ["Разобрано: aaaaaaa\nРод: род"])
+    assert said.rows == ["род находок у порога без ответа каталогу: «род» — встреч 3"]
+
+
+def test_an_unreadable_history_is_named_silence(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """История не прочитана — раздел молчит, а не считает по одному словарю (045)."""
+
+    def refuse(*_: object, **__: object) -> list[str]:
+        raise module.trunk_log.NotRun(module.trunk_log.SHALLOW)
+
+    monkeypatch.setattr(module.trunk_log, "merged_bodies", refuse)
+    path = kinds_file(tmp_path, {"род": {"признак": "x", "встречен": ["a"], "закрыт": "гейт"}})
+    said = module.birth_part(path)
+    assert said.rows == [] and module.trunk_log.SHALLOW in said.unread
 
 
 def test_a_dry_run_names_the_plan_number(
