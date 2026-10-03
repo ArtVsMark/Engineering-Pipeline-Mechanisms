@@ -24,6 +24,11 @@
 иначе «снятие едет вместе с работой» держится тем, что кто-то вспомнит про
 описание. Разбор общий по той же причине, что и у связи с задачей: два чтения
 одной строки расходятся молча.
+
+ЗДЕСЬ ЖЕ — РОД НАХОДКИ (#1022). Строка `Род: <имя>` вплотную под снятием
+называет род его отпечатков, а `Род: <имя> — окно: <место>` — встречу,
+пойманную в окне без отпечатка. Обе едут тем же путём, что снятие: из тела
+коммита в тело уплотнения.
 """
 
 import re
@@ -73,6 +78,26 @@ INDENTED_RE: Final = re.compile(r"^(?: {4}|\t)")
 #: (`archive_against_history`) берут их отсюда, а не переписывают (209).
 RESOLVED_WORD: Final = "Разобрано:"
 TWIN_WORD: Final = "дубль"
+#: ВСТРЕЧА РОДА ПИШЕТСЯ В ТЕЛЕ КОММИТА, РЯДОМ СО СНЯТИЕМ (#1022). Строка
+#: `Род: <имя>` ВПЛОТНУЮ под строкой «Разобрано» относится ко всем её
+#: отпечаткам, дубли цепочки включительно: род — свойство дефекта, а дефект
+#: здесь один, названный несколько раз. Пустая строка между ними связь рвёт:
+#: «следующая по смыслу» — это догадка разбора, а «следующая по счёту» —
+#: факт, и отвечать за него автору понятнее (068).
+#:
+#: Ключ — константой по той же причине, что `CLOSED_ITEM_KEY`: его ПИШЕТ
+#: `Resolution.__str__` в тело уплотнения и ЧИТАЕТ разбор ниже, и образец
+#: строится из неё же (209).
+KIND_KEY: Final = "Род:"
+#: Встреча, пойманная В ОКНЕ до толчка: отпечатка у неё нет — находка до
+#: реестра не дошла, — и вместо хэша стоит адрес места, где род себя показал.
+#: Слово одно с `finding_kinds.IN_WINDOW`, которым встречу считает словарь
+#: родов: два написания одного слова разошлись бы молча (022).
+WINDOW_WORD: Final = "окно:"
+#: «Рода нет» — тоже ответ, но с причиной рядом: `Род: нет — <причина>` (154).
+#: Разбор отдаёт его ТЕКСТОМ рода, как написан, а не пустотой: пустота
+#: неотличима от забытой строки, и различить их обязан будущий гейт.
+KIND_NONE: Final = "нет"
 #: Отпечаток находки — семь шестнадцатеричных знаков, как короткий хэш.
 #: Кавычки вокруг отпечатка допускаются: строку пишет человек, и оформить хэш
 #: как код — первое, что он делает. Без этого отпечаток в кавычках терялся
@@ -104,6 +129,21 @@ MARK_RE: Final = re.compile(r"[0-9a-f]{7}")
 #: исправленной: четыре такие записи на 25.09.2026 (#807).
 TWIN_RE: Final = re.compile(
     rf"\A\s*{TWIN_WORD}(?=[\s`])((?:[\s,;`]*[0-9a-f]{{7}}(?![0-9a-f]))+)[\s,;`]*", re.IGNORECASE
+)
+#: Строка рода: ключ и непустой текст. Регистр ключа не различается — как у
+#: «Разобрано»: строку пишет человек, и «род:» с маленькой — та же строка (045).
+KIND_RE: Final = re.compile(
+    rf"^\s*(?P<mark>{re.escape(KIND_KEY)})\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
+)
+#: Форма встречи в окне внутри текста рода: `<имя> — окно: <место>`. Тире
+#: любое из трёх — длинное, короткое, дефис: человек набирает то, что под
+#: рукой, и строка, молча не узнанная из-за вида тире, потеряла бы встречу
+#: (045). Тире стоит отдельным словом, иначе «само-окно:» в имени рода
+#: читалось бы адресом. Имя и место берутся как есть; пустота любого из них
+#: судится в `window_meetings_in`, а не здесь.
+WINDOW_RE: Final = re.compile(
+    rf"^(?P<kind>.*?)\s*(?<!\S)[—–-]\s*{re.escape(WINDOW_WORD)}\s*(?P<place>.*)$",
+    re.IGNORECASE,
 )
 #: ЗАКРЫТЫЙ ПУНКТ ЧЕК-ЛИСТА. Площадка умеет только полное закрытие: `Closes #N`
 #: закрывает задачу целиком, и задача из нескольких этапов закрывается
@@ -223,6 +263,10 @@ class Resolution:
     #: одна группа, `marks`. Хранятся затем, чтобы строка доехала до тела
     #: изменения В ТОЙ ЖЕ ФОРМЕ: архив читает связь дублей оттуда (#807).
     groups: tuple[tuple[str, ...], ...] = ()
+    #: Род находки из строки `Род:` вплотную под строкой снятия, как написан.
+    #: Пусто — рода строка не назвала; `нет — <причина>` хранится текстом,
+    #: а не пустотой (`KIND_NONE`). Относится ко ВСЕМ отпечаткам строки.
+    kind: str = ""
 
     @property
     def twin_of(self) -> dict[str, str]:
@@ -257,9 +301,30 @@ class Resolution:
         return found
 
     def __str__(self) -> str:
-        """Строка того вида, который едет в тело изменения и читает человек."""
+        """Строка того вида, который едет в тело изменения и читает человек.
+
+        Род печатается ВТОРОЙ СТРОКОЙ, вплотную: так его читает разбор, и тело
+        уплотнения, разобранное заново, отдаёт тот же род (#1022).
+        """
         said = " дубль ".join(", ".join(group) for group in self.groups or (self.marks,))
-        return f"Разобрано: {said} {self.why}".rstrip()
+        line = f"Разобрано: {said} {self.why}".rstrip()
+        return f"{line}\n{KIND_KEY} {self.kind}" if self.kind else line
+
+
+@dataclass(frozen=True, slots=True)
+class WindowMeeting:
+    """Встреча рода, пойманная в окне: имя рода и место, где он себя показал.
+
+    Отпечатка нет и быть не может — находка до реестра не дошла; место стоит
+    вместо него, и без места встреча неотличима от слова «бывает» (154).
+    """
+
+    kind: str
+    place: str
+
+    def __str__(self) -> str:
+        """Строка того вида, в котором её пишет автор и читает разбор."""
+        return f"{KIND_KEY} {self.kind} — {WINDOW_WORD} {self.place}"
 
 
 def blank(match: re.Match[str]) -> str:
@@ -346,7 +411,19 @@ def marked_lines(text: str, pattern: re.Pattern[str]) -> Iterator[re.Match[str]]
     Образец обязан назвать две группы: ``mark`` — сам маркер, по нему решают,
     настоящая строка или пример, и ``text`` — то, что из строки берут.
     """
-    for mask, line in masked_lines(text):
+    for _, found in marked_lines_at(text, pattern):
+        yield found
+
+
+def marked_lines_at(text: str, pattern: re.Pattern[str]) -> Iterator[tuple[int, re.Match[str]]]:
+    """То же, что `marked_lines`, но с номером строки — для строк, связанных соседством.
+
+    Строка `Род:` относится к снятию, только если стоит ВПЛОТНУЮ под ним
+    (#1022), и это вопрос о положении, которого голое совпадение не знает.
+    Номер считается по тем же строкам, что и маска, — второго деления текста
+    на строки нет, и разойтись им не на чем (090).
+    """
+    for index, (mask, line) in enumerate(masked_lines(text)):
         for found in pattern.finditer(line):
             # Настоящий маркер — тот, что в маске уцелел. Сверяется ровно он, а
             # не вся строка: сам текст вырезанным быть вправе — инлайн-код
@@ -354,7 +431,7 @@ def marked_lines(text: str, pattern: re.Pattern[str]) -> Iterator[re.Match[str]]
             # оформляет кодом чаще, чем не оформляет.
             head = slice(*found.span("mark"))
             if mask[head] == line[head]:
-                yield found
+                yield index, found
 
 
 def links_in(text: str) -> list[Link]:
@@ -403,9 +480,21 @@ def resolutions_parsed(text: str) -> list[Resolution]:
     14.09.2026: «Разобрано: 1111111 — сосед deadbeef рядом» давал лишний
     отпечаток `deadbee`, и настоящее снятие `deadbee` из следующего коммита
     ветки в общую ветку не уезжало (090).
+
+    РОД БЕРЁТСЯ СО СЛЕДУЮЩЕЙ СТРОКИ, И ТОЛЬКО С НЕЁ (#1022). Строка `Род:`
+    вплотную под снятием — род всех его отпечатков; пустая строка между ними
+    связь рвёт. Строка в форме встречи в окне к снятию не пристаёт никогда: у
+    неё своё место вместо отпечатка, и это отдельная встреча
+    (`window_meetings_in`). Заборы и отступные блоки маскирует тот же
+    `masked_lines`: пример рода в блоке кода родом не становится (090).
     """
+    kinds = {
+        index: said
+        for index, match in marked_lines_at(text, KIND_RE)
+        if not WINDOW_RE.match(said := " ".join(match.group("text").split()))
+    }
     found: list[Resolution] = []
-    for match in marked_lines(text, RESOLVED_RE):
+    for index, match in marked_lines_at(text, RESOLVED_RE):
         tail = match.group("text").strip()
         run = MARK_RUN_RE.match(tail.lower())
         if not run:
@@ -421,7 +510,59 @@ def resolutions_parsed(text: str) -> list[Resolution]:
             groups.append(tuple(MARK_RE.findall(twin.group(1).lower())))
             rest = rest[twin.end() :]
         marks = tuple(mark for group in groups for mark in group)
-        found.append(Resolution(marks, rest.strip(), tuple(groups) if len(groups) > 1 else ()))
+        found.append(
+            Resolution(
+                marks,
+                rest.strip(),
+                tuple(groups) if len(groups) > 1 else (),
+                kinds.get(index + 1, ""),
+            )
+        )
+    return found
+
+
+def window_lines_in(text: str) -> list[tuple[str, re.Match[str]]]:
+    """Строки рода в форме встречи в окне: строка как написана и разбор формы.
+
+    Общий вход для двух читателей ниже — встреч и отказов, — чтобы форму
+    узнавал один образец, а не два (090).
+    """
+    found: list[tuple[str, re.Match[str]]] = []
+    for _, match in marked_lines_at(text, KIND_RE):
+        said = " ".join(match.group("text").split())
+        if window := WINDOW_RE.match(said):
+            found.append((f"{KIND_KEY} {said}", window))
+    return found
+
+
+def window_meetings_in(text: str) -> list[WindowMeeting]:
+    """Встречи рода, пойманные в окне, в порядке появления, без повторов.
+
+    Встреча — строка `Род: <имя> — окно: <место>` с НЕПУСТЫМИ именем и местом.
+    Строка этой формы без одного из них встречей не считается и сюда не
+    попадает. Отказ по такой строке — дело гейта четвёртого изменения #1022:
+    заводить его разборщик раньше гейта значило бы завести код, до которого не
+    доходит ни один рабочий путь.
+    """
+    found: list[WindowMeeting] = []
+    for _, window in window_lines_in(text):
+        meeting = WindowMeeting(window.group("kind").strip(), window.group("place").strip())
+        if meeting.kind and meeting.place and meeting not in found:
+            found.append(meeting)
+    return found
+
+
+def window_meetings_in_all(texts: Iterable[str]) -> list[WindowMeeting]:
+    """Встречи в окне из нескольких тел — каждое со своей разметкой, как у связей.
+
+    Повтор — та же пара «род, место», названная в двух коммитах ветки: это одна
+    встреча, описанная дважды, и считать её двумя значило бы раздуть род.
+    """
+    found: list[WindowMeeting] = []
+    for text in texts:
+        for meeting in window_meetings_in(text):
+            if meeting not in found:
+                found.append(meeting)
     return found
 
 
@@ -571,7 +712,25 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
 
     СТРОКА ОТДАЁТСЯ КАК НАПИСАНА, приводится только регистр отпечатков: причину
     читает человек, и огрызок пояснения хуже его отсутствия.
+
+    РОД ЕДЕТ СО СВОЕЙ СТРОКОЙ, И ПОБЕЖДАЕТ ПЕРВЫЙ НАЗВАННЫЙ (#1022). Строка
+    рода печатается второй строкой под снятием (`Resolution.__str__`).
+    Отпечаток, снятый в ветке дважды с разными родами, уезжает с родом первой
+    записи. Но снятие БЕЗ рода родом не считается: «Разобрано: X», а следующим
+    коммитом «Разобрано: X» с «Род: …» — это род, дописанный позже, и
+    отбросить его вместе с повтором значило бы потерять его молча (находка
+    `0731223` на #1070). Поэтому род берётся первым НАЗВАННЫМ по всем текстам,
+    а снятие без рода при уцелевших отпечатках делится по их родам. Исключение
+    прежнее — строка с «дубль» едет целиком со своим родом; читатель, считающий
+    роды, обязан брать первый род отпечатка, как архив берёт первое снятие.
     """
+    texts = list(texts)
+    named: dict[str, str] = {}
+    for text in texts:
+        for record in resolutions_parsed(text):
+            if record.kind:
+                for mark in record.marks:
+                    named.setdefault(mark, record.kind)
     found: list[str] = []
     seen: set[str] = set()
     for text in texts:
@@ -594,7 +753,17 @@ def resolutions_in_all(texts: Iterable[str]) -> list[str]:
             if len(record.groups) > 1:
                 found.append(str(record))
                 continue
-            found.append(str(Resolution(tuple(fresh), record.why)))
+            # РОД ЕДЕТ ВМЕСТЕ СО СТРОКОЙ (#1022). Строка здесь собирается заново,
+            # и без `kind=` род, написанный в коммите, терялся бы ровно на
+            # склейке коммитов ветки — в теле уплотнения его не было бы вовсе.
+            if record.kind:
+                found.append(str(Resolution(tuple(fresh), record.why, kind=record.kind)))
+                continue
+            by_kind: dict[str, list[str]] = {}
+            for mark in fresh:
+                by_kind.setdefault(named.get(mark, ""), []).append(mark)
+            for kind, marks in by_kind.items():
+                found.append(str(Resolution(tuple(marks), record.why, kind=kind)))
     return found
 
 
@@ -650,16 +819,6 @@ def held_in_all(texts: Iterable[str]) -> str | None:
         if said:
             return said
     return None
-
-
-def resolved_in_all(texts: Iterable[str]) -> list[str]:
-    """Снятия находок из нескольких текстов — по той же причине, что и связи."""
-    found: list[str] = []
-    for text in texts:
-        for mark in resolved_in(text):
-            if mark not in found:
-                found.append(mark)
-    return found
 
 
 def closed_items_in_all(texts: Iterable[str]) -> list[str]:
