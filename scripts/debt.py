@@ -415,15 +415,21 @@ def open_listed(repo: str, token: str) -> list[dict[str, Any]]:
     Этот список нужен пяти счётам: четырём поискам живой задачи по маркеру и
     счётам по пунктам. Прежде каждый читал его сам, и `debt` тратил на один и
     тот же ответ пять запросов из квоты прогона (замер 03.10.2026, #1065).
+
+    СОСЕДИ НАЗВАНЫ, А НЕ ПОЧИНЕНЫ ЗДЕСЬ (195). Тот же повтор взгляд нашёл в
+    `work_plan`, `unlooked` и `main_red` (находка `caaa207` на #1081); их
+    замер и починка — ArtVsMark/Engineering-Pipeline-Mechanisms#1084.
     """
     return list(ghrest.paginate(f"repos/{repo}/issues?state=open", token))
 
 
 def open_issues(listed: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Открытые задачи без изменений — общий вход обоих счётов по пунктам.
+    """Открытые задачи без изменений из уже прочитанного списка — вход обоих счётов по пунктам.
 
-    Список читается ОДИН раз: два прохода по одному источнику расходятся тем
-    охотнее, чем невиннее выглядят, и расходятся молча (022).
+    Сама функция ничего не читает: список читает `open_listed`, а здесь он
+    только отсеивается от изменений. Один вход на оба счёта нужен потому, что
+    два прохода по одному источнику расходятся тем охотнее, чем невиннее
+    выглядят, и расходятся молча (022).
     """
     return [issue for issue in listed if issue.get("pull_request") is None]
 
@@ -597,8 +603,8 @@ def main(argv: list[str] | None = None) -> int:
         closed = closed_issues(args.repo, token)
         inbox, inbox_note, inbox_seen = inbox_body(args.repo, token, closed, listed)
         conflicting, unknown, red = stuck_changes(args.repo, token)
-        # Список задач читается ОДИН раз на оба счёта по пунктам: два прохода
-        # по одному источнику расходятся тем охотнее, чем невиннее выглядят (022).
+        # Счёты по пунктам берут задачи из того же списка, что прочитан выше
+        # для пяти счётов (`open_listed`), — здесь он только отсеивается (022).
         issues = open_issues(listed)
         ready = looks_done(issues)
         built, quiet = items_left.look(issues, items.open_items)
