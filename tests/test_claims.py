@@ -52,12 +52,21 @@ def workflows_with_permission(arg: str) -> int:
 
     Считаются права и прогона целиком, и его джобов: право, выданное джобу,
     ничем не слабее выданного файлу.
+
+    ОБЩИЙ ШАГ (`on: workflow_call`) НЕ СЧИТАЕТСЯ, и это не пропуск. Права ему
+    выдаёт вызывающий, а его раздел прав — потолок, а не просьба: больше,
+    чем дал вызывающий, шаг не получит, и прогон с правом остаётся один. Иначе
+    вынос тела в общий шаг (#993) удваивал бы счёт механизма, не прибавив ни
+    одного обладателя права.
     """
     name, _, value = (part.strip() for part in arg.partition(":"))
     found = 0
     for path in walk(WORKFLOWS, "*.y*ml"):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
+            continue
+        events = document.get("on", document.get(True))
+        if isinstance(events, dict) and set(events) == {"workflow_call"}:
             continue
         places = [document.get("permissions")]
         places += [(job or {}).get("permissions") for job in (document.get("jobs") or {}).values()]

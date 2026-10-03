@@ -289,24 +289,21 @@ def test_a_foreign_cancelled_name_waits_for_a_live_own_run_and_fails_after_it() 
     )
 
 
-@pytest.mark.parametrize(
-    ("records", "run_id"),
-    [
-        pytest.param([run("test", conclusion="cancelled", run_id="mine")], "mine", id="свои"),
-        pytest.param([run("test", conclusion="cancelled", run_id="other")], "", id="без-run_id"),
-    ],
-)
-def test_the_all_cancelled_branch_waits_for_a_live_run_and_fails_after_it(
-    records: list[dict[str, Any]], run_id: str
-) -> None:
-    """Ветка «все записи отменены» сама ждёт при живом прогоне — на обоих своих входах.
+def test_the_all_cancelled_branch_waits_for_a_live_run_and_fails_after_it() -> None:
+    """Все СВОИ записи имени отменены: при живом прогоне ждём, по завершении — отказ.
 
-    Взгляд на #1041: прежний тест доходил до ожидания раньше этой ветки, и
-    снятие её `still_coming` оставляло его зелёным. Сюда при живом прогоне
-    доходят два входа — все СВОИ записи отменены, или `run_id` не задан, — и
-    оба проверены здесь.
+    Это единственный вход ветки «все записи отменены», которого прежние тесты
+    не держали. Кто держит остальное, не пересказывается, а меряется откатом
+    по всему набору (правило 210: заход по этому тесту третий). Замер
+    03.10.2026: снять `still_coming` ветки — краснеют, кроме этого,
+    `test_a_cancelled_record_does_not_hide_a_queued_job` и
+    `test_a_name_missing_from_a_live_run_waits_rather_than_refuses`; снять
+    отказ ветки — краснеют, кроме этого, пять тестов, среди них
+    `test_all_cancelled_is_rejected`. Вход «без `run_id`» обе половины держат
+    они, и здесь он не повторяется.
     """
-    runs = [run("lint", run_id="mine"), *records]
+    run_id = "mine"
+    runs = [run("lint", run_id="mine"), run("test", conclusion="cancelled", run_id="mine")]
     live = module.verdict(runs, REQUIRED, "ci-complete", run_id, mine={}, run_live=True)
     assert live == ([], True), "при живом прогоне ветка отменённых судит до срока"
     done, waiting = module.verdict(runs, REQUIRED, "ci-complete", run_id, mine={}, run_live=False)
