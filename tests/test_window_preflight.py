@@ -1009,10 +1009,15 @@ def test_mypy_sees_the_packages_of_the_interpreter_it_is_given(tmp_path: Path) -
         [*mypy, "--python-executable", str(bare / "bin" / "python")],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=tmp_path,
     )
     with_pytest = subprocess.run(
-        [*mypy, "--python-executable", sys.executable], capture_output=True, text=True, cwd=tmp_path
+        [*mypy, "--python-executable", sys.executable],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=tmp_path,
     )
     assert without.returncode == 1 and "Missing return statement" in without.stdout, without.stdout
     assert with_pytest.returncode == 0, with_pytest.stdout
