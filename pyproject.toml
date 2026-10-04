@@ -57,7 +57,10 @@ mypy_path = "packages/transport"
 # `jsonschema` — тот же случай (#1001): сверку фактов со схемой витрины зовёт
 # только публикация, а шаг `типы` общий и отдаётся наружу — заглушки в нём
 # ставились бы каждому потребителю ради одного нашего механизма.
-module = ["yaml", "pytest", "_pytest.*", "jsonschema"]
+# `referencing.exceptions` — его зависимость, которую сверка ловит по имени
+# (неразрешимая `$ref` в схеме витрины, взгляд на #1112): на шаге `типы` её
+# нет по той же причине.
+module = ["yaml", "pytest", "_pytest.*", "jsonschema", "referencing.exceptions"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
