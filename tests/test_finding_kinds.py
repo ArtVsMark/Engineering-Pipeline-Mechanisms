@@ -111,6 +111,21 @@ def test_a_kind_counts_by_fingerprints_not_by_a_number(name: str) -> None:
     assert not wrong, f"{name}: {'; '.join(wrong)}"
 
 
+@pytest.mark.parametrize("name", sorted(kinds()), ids=lambda one: one)
+def test_a_meeting_is_listed_once_per_kind(name: str) -> None:
+    """Встреча стоит в списке рода один раз: дубль завысил бы счёт и порог (005).
+
+    Так `bc5cb76` дважды стоял в «соседний текст описывает прежнее дерево» и
+    прошёл зелёным (взгляд на #1077). ПРЕДЕЛ НАЗВАН (195): между РОДАМИ
+    повтор законен — одна находка бывает двух родов, и таких отпечатков на
+    04.10.2026 четыре (`dbf186b`, `ca9216b`, `4394e1f`, `1ad3e72`).
+    """
+    said = kinds()[name].get("встречен")
+    met = [str(one) for one in said] if isinstance(said, list) else []
+    twice = sorted({one for one in met if met.count(one) > 1})
+    assert not twice, f"{name}: встреча записана дважды — {twice}"
+
+
 def test_the_word_no_is_matched_whole_not_by_prefix() -> None:
     """«Нет» узнаётся целым словом: приставка увела бы род в долг по первой букве.
 
@@ -808,3 +823,16 @@ def test_successor_of_maps_every_old_name() -> None:
     """Каждое имя из «прежде» указывает на нынешний род; без поля — ничего."""
     kinds = {"новое": {"прежде": ["a", "b"]}, "своё": {}}
     assert module.successor_of(kinds) == {"a": "новое", "b": "новое"}
+
+
+def test_one_finding_may_meet_two_kinds() -> None:
+    """Отпечаток в словаре у одного рода — встреча и другого, если `Род:` его называет (#1092)."""
+    kinds = {
+        "первый": {"встречен": ["aaaaaaa"]},
+        "второй": {"встречен": []},
+    }
+    assert module.met_in_history(["Разобрано: aaaaaaa\nРод: второй"], kinds) == {
+        "второй": ["aaaaaaa"]
+    }
+    # Вторая половина: под тем же родом повтор по-прежнему не считается.
+    assert module.met_in_history(["Разобрано: aaaaaaa\nРод: первый"], kinds) == {}

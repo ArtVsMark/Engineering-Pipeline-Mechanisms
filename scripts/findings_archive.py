@@ -351,10 +351,20 @@ def with_kinds(
         name = by_mark.get(mark) or named.get(mark)
         entry["род"] = name
         entry["правило"] = rule_of(kinds[name]) if name in kinds else None
-    kinds = merged
+    # ВСТРЕЧИ РОДА — ОТПЕЧАТКИ ЕГО СПИСКА, а не «отпечаток → один род»: находка
+    # бывает двух родов, и счёт по `by_mark` отдавал бы её первому, расходясь
+    # со счётом словаря (взгляд на #1092). Встреча в окне находкой архива не
+    # бывает и сюда не входит, как и прежде.
     return {
-        name: {"встреч": sum(1 for one in by_mark.values() if one == name), **rule_of(body)}
-        for name, body in kinds.items()
+        name: {
+            "встреч": sum(
+                1
+                for met in body.get("встречен") or []
+                if changerefs.MARK_RE.fullmatch(str(met).strip("`"))
+            ),
+            **rule_of(kinds[name]),
+        }
+        for name, body in merged.items()
     }
 
 

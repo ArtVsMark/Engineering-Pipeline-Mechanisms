@@ -221,25 +221,34 @@ def met_in_history(bodies: Iterable[str], kinds: dict[str, Any]) -> dict[str, li
     рождения правила (022).
 
     ВТОРОЙ РАЗ НЕ СЧИТАЕТСЯ: цепочка, чей отпечаток уже стоит в `встречен`
-    словаря или раньше в истории, — та же встреча; встреча в окне — та же
+    ЭТОГО ЖЕ рода или раньше в истории под ним, — та же встреча; встреча в окне — та же
     пара «род, место». `Род: нет — <причина>` — ответ без рода, и встречей он
     не становится (154).
     """
-    seen = {str(met).strip("`") for body in kinds.values() for met in body.get("встречен") or []}
+    # ВИДЕННОЕ — У КАЖДОГО РОДА СВОЁ (взгляд на #1092). Одна находка бывает
+    # двух родов, и словарь это знает: четыре отпечатка стоят в двух списках
+    # сразу. Общее «виденное» роняло бы встречу второго рода молча.
+    seen: dict[str, set[str]] = {
+        name: {str(met).strip("`") for met in body.get("встречен") or []}
+        for name, body in kinds.items()
+    }
     found: dict[str, list[str]] = {}
     for body in bodies:
         for record in changerefs.resolutions_parsed(body):
             if not record.kind or said_no(record.kind):
                 continue
+            own = seen.setdefault(record.kind, set())
             for root, group in twin_roots(record):
-                if group & seen:
+                if group & own:
                     continue
-                seen |= group
+                own |= group
                 found.setdefault(record.kind, []).append(root)
         for meeting in changerefs.window_meetings_in(body):
             said = f"{IN_WINDOW}{meeting.place}"
-            if said in found.get(meeting.kind, []) or said in seen:
+            own = seen.setdefault(meeting.kind, set())
+            if said in own:
                 continue
+            own.add(said)
             found.setdefault(meeting.kind, []).append(said)
     return found
 
