@@ -23,7 +23,10 @@
   конфликт, красное на своих — идёт раньше новой строки плана
   ([091](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/091-work-sources-are-ordered-first-non-empty-wins.md)).
   Новую ветку толкают `python scripts/preflight.py --push`: при трёх
-  открытых он её не толкнёт (#1085, `scripts/check_open_limit.py`).
+  открытых он её не толкнёт (#1085, `scripts/check_open_limit.py`). Число
+  открытых знает только площадка: без токена (`GH_TOKEN`/`GITHUB_TOKEN`)
+  предел называется непроверенным, и толчок проходит — тогда предел держит
+  чтение плана.
 
 ## 🎭 От чьего лица окно отвечает
 

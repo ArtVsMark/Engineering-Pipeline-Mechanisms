@@ -231,3 +231,33 @@ def test_the_measure_prints_the_count(
     assert module.main([module.MEASURE]) == module.EXIT_OK
     out = capsys.readouterr().out
     assert "с известным окном 4" in out and out.rstrip().endswith("— 1"), out
+
+
+def test_the_measure_refuses_a_shallow_history(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Замер на мелком клоне — отказ, а не число неполной истории (045, взгляд на #1087)."""
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow)],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(shallow)
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([]))
+    assert module.main([module.MEASURE]) == module.EXIT_BROKEN
+    said = capsys.readouterr().err
+    assert module.trunk_log.SHALLOW in said and "окна слитых изменений" in said, said
+
+
+def test_a_shallow_branch_is_refused_not_unasked(repo: Path, tmp_path: Path) -> None:
+    """Мелкий клон — отказ гейта, а не «предел не про неё» (взгляд на #1094)."""
+    shallow = tmp_path / "shallow-branch"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow)],
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(module.NotRun, match="свои коммиты ветки"):
+        module.session_of(shallow)
