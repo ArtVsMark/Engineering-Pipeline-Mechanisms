@@ -24,6 +24,15 @@ name: step-pr-meta
 
 on:
   workflow_call:
+    inputs:
+      # ВХОД ТОЛЬКО ДЛЯ ПРОБЫ ПЕРЕНОСА (#990): стереть `scripts/`, `packages/`
+      # и `tests/` из дерева вызывающего после того, как код конвейера взят
+      # своим checkout. Цена названа владельцем при выборе: у договора шага
+      # появляется вход, которого потребитель не задаёт.
+      strip-ours:
+        description: проба переноса — стереть наш код из дерева вызывающего
+        type: boolean
+        default: false
 
 # Потолок прав: большего шаг не получит, даже если вызывающий даст больше.
 permissions:
@@ -77,9 +86,15 @@ jobs:
       # Из рабочего дерева код уносится: обходы по дереву потребителя видят
       # только его файлы, а не наши.
       - name: унести код конвейера из дерева потребителя
+        env:
+          STRIP_OURS: ${{ inputs.strip-ours }}
         run: |
           set -euo pipefail
           mv .pipeline-mechanisms "$RUNNER_TEMP/mechanisms"
+          # ПРОБА ПЕРЕНОСА (#990, решение владельца 04.10.2026): со входом
+          # `strip-ours` дерево вызывающего лишается нашего кода, и шаг обязан
+          # завестись тем, что взял своим checkout. Потребитель вход не задаёт.
+          if [ "$STRIP_OURS" = "true" ]; then rm -rf scripts packages tests; fi
           echo "MECHANISMS=$RUNNER_TEMP/mechanisms" >>"$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:

@@ -284,3 +284,48 @@ def test_the_code_block_is_one_in_every_step() -> None:
     assert f'echo "{preflight.MECHANISMS}=' in block, (
         "шаг ставит не ту переменную, что предполётная"
     )
+
+
+#: Вход пробы переноса (#990): одно имя у всех шагов, зовущих наш код.
+STRIP_INPUT: Final = "strip-ours"
+#: Команда стирания нашего кода из дерева вызывающего — под входом и только.
+STRIP_COMMAND: Final = 'if [ "$STRIP_OURS" = "true" ]; then rm -rf scripts packages tests; fi'
+
+
+def test_every_step_with_our_code_takes_the_probe_input() -> None:
+    """Шаг, зовущий наш код, объявляет вход `strip-ours`: логический, по умолчанию выключен (#990).
+
+    Решение владельца 04.10.2026, вариант 2: проба переноса зовёт шаги со
+    входом, стирающим наш код из дерева вызывающего. Потребитель вход не
+    задаёт, поэтому умолчание — выключен: иначе шаг стирал бы его `scripts/`.
+    """
+    carrying = {
+        name: said
+        for name, said in steps().items()
+        if any(MECHANISMS in line for line in commands_of(said))
+    }
+    assert carrying, "ни один шаг не зовёт наш код — сверять нечего (075)"
+    wrong = []
+    for name, said in sorted(carrying.items()):
+        trigger = yaml.safe_load(said)[True]["workflow_call"] or {}
+        declared = (trigger.get("inputs") or {}).get(STRIP_INPUT)
+        if declared is None or declared.get("type") != "boolean" or declared.get("default"):
+            wrong.append(name)
+    assert not wrong, f"вход {STRIP_INPUT} не объявлен как выключенный логический: {wrong}"
+
+
+def test_the_strip_happens_after_our_code_is_taken_and_only_under_the_input() -> None:
+    """Стирание — в общем блоке, ПОСЛЕ выноса нашего кода и только под входом (#990).
+
+    Раньше выноса оно стёрло бы и сам взятый код; без входа — дерево каждого
+    потребителя.
+    """
+    block = next(
+        code_block(said)
+        for said in steps().values()
+        if any(MECHANISMS in line for line in commands_of(said))
+    )
+    assert STRIP_COMMAND in block, "стирание под входом в блоке не найдено"
+    assert "STRIP_OURS: ${{ inputs.strip-ours }}" in block, "входу не передан флаг шага"
+    taken = block.index('mv .pipeline-mechanisms "$RUNNER_TEMP/mechanisms"')
+    assert taken < block.index(STRIP_COMMAND), "наш код стирается раньше, чем вынесен"
