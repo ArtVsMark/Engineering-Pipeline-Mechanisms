@@ -541,3 +541,37 @@ def test_a_grown_list_is_refused_end_to_end(
     with contextlib.chdir(root):
         assert module.main(["--base", "main", "--root", str(root)]) == FOUND
     assert "замороженный список" in capsys.readouterr().err
+
+
+def test_a_rename_and_a_merge_have_a_lawful_path() -> None:
+    """Переименование и слияние — поле «прежде» у нынешнего имени (взгляд на #1090)."""
+    before = {"старое": kind(1), "соседнее": {"встречен": ["n0"]}}
+    renamed = {
+        "новое": {"встречен": ["m0"], "прежде": ["старое"]},
+        "соседнее": {"встречен": ["n0"]},
+    }
+    assert module.thawed(before, renamed) == []
+    merged = {"соседнее": {"встречен": ["n0", "m0"], "прежде": ["старое"]}}
+    assert module.thawed(before, merged) == []
+    # Вторая половина: встречи при переносе теряются или растут — отказ.
+    lost = {"новое": {"встречен": [], "прежде": ["старое"]}, "соседнее": {"встречен": ["n0"]}}
+    grown = {
+        "новое": {"встречен": ["m0", "x"], "прежде": ["старое"]},
+        "соседнее": {"встречен": ["n0"]},
+    }
+    assert module.thawed(before, lost) and module.thawed(before, grown)
+    # Без поля «прежде» исчезновение — отказ, и отказ называет выход.
+    told = " ".join(module.thawed(before, {"соседнее": {"встречен": ["n0"]}}))
+    assert "«старое» исчез" in told and "«прежде»" in told
+
+
+def test_an_old_name_leaves_and_previous_names_do_not_drop() -> None:
+    """Старое имя из «прежде» уходит из словаря; «прежде» не убывает (взгляд на #1093)."""
+    before = {"A": kind(1), "B": {"встречен": ["b1"]}}
+    stays = {"A": kind(1), "B": {"встречен": ["b1", "m0"], "прежде": ["A"]}}
+    assert "остался в словаре" in " ".join(module.thawed(before, stays))
+    chained_before = {"B": {"встречен": ["m0"], "прежде": ["A"]}}
+    dropped = {"C": {"встречен": ["m0"], "прежде": ["B"]}}
+    assert "«A» выпало" in " ".join(module.thawed(chained_before, dropped))
+    carried = {"C": {"встречен": ["m0"], "прежде": ["A", "B"]}}
+    assert module.thawed(chained_before, carried) == []
