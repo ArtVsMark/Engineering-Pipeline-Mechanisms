@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-03T09:44:53+00:00",
+  "updated": "2026-10-04T10:28:33+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -2715,6 +2715,176 @@
         }
       },
       "coverage": 92.0
+    },
+    "2026-10-04": {
+      "runs": {
+        "main-red": {
+          "runs": 128,
+          "red": 0,
+          "cancelled": 13,
+          "seconds": 1659,
+          "timed": 128,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 200,
+          "red": 0,
+          "cancelled": 109,
+          "seconds": 3230,
+          "timed": 200,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 100,
+          "red": 0,
+          "cancelled": 23,
+          "seconds": 2068,
+          "timed": 100,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 101,
+          "red": 0,
+          "cancelled": 21,
+          "seconds": 1938,
+          "timed": 101,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 100,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 365,
+          "timed": 100,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 100,
+          "red": 0,
+          "cancelled": 34,
+          "seconds": 3088,
+          "timed": 100,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 20,
+          "red": 0,
+          "cancelled": 6,
+          "seconds": 10760,
+          "timed": 20,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 16,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 2973,
+          "timed": 16,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 187,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 53,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 99,
+          "red": 0,
+          "cancelled": 65,
+          "seconds": 9370,
+          "timed": 99,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1037,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 11,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 24,
+          "timed": 11,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 94,
+          "red": 0,
+          "cancelled": 72,
+          "seconds": 7975,
+          "timed": 94,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 298,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 92.4
     }
   }
 }
