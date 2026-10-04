@@ -411,8 +411,8 @@ def test_an_own_edit_followed_by_work_is_noted_and_stays_clean(
     Решение владельца 03.10.2026: своя правка — не повод перезапуска, но
     расхождение стартового свода с деревом видно, и шаг его называет.
     """
-    edit_rulebook(tree, "свод правит само окно", day=0.5, session=WINDOW_A)
     git(tree, "checkout", "-b", "work")
+    edit_rulebook(tree, "свод правит само окно", day=0.5, session=WINDOW_A)
     commit(tree, "работа после своей правки", day=1)
     assert run(tree, "--head", "work") == CLEAN
     said = capsys.readouterr().out
@@ -492,3 +492,30 @@ def test_an_own_edit_by_the_first_commit_is_noted(
     said = capsys.readouterr().out
     assert "первый коммит окна правит свод" in said, said
     assert "работа соседа" not in said, "чужая правка до старта окна названа своей"
+
+
+
+def test_an_own_edit_of_an_earlier_change_is_not_repeated(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Своя правка, слитая прежде, на следующих изменениях окна не повторяется (#1077).
+
+    Строка, печатаемая на каждом изменении до конца жизни окна, перестаёт
+    читаться: замер на #1077 — 71 правка из 72 у шести окон (051).
+    """
+    edit_rulebook(tree, "свод правило прошлое изменение", day=0.5, session=WINDOW_A)
+    git(tree, "checkout", "-b", "work")
+    commit(tree, "следующее изменение окна", day=1)
+    assert run(tree, "--head", "work") == CLEAN
+    assert "свод правило прошлое изменение" not in capsys.readouterr().out
+
+
+def test_an_own_edit_with_work_in_the_same_second_is_noted(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Правка и работа после неё в одну секунду — правка названа (взгляд на #1077)."""
+    git(tree, "checkout", "-b", "work")
+    edit_rulebook(tree, "правка скриптом", day=1, session=WINDOW_A)
+    commit(tree, "работа той же секундой", day=1)
+    assert run(tree, "--head", "work") == CLEAN
+    assert "правка скриптом" in capsys.readouterr().out
