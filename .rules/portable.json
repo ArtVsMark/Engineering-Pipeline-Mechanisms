@@ -74,6 +74,9 @@
     ".claude/skills/propose-a-rule": {
       "answer": "as-is"
     },
+    ".claude/skills/retell-from-the-source": {
+      "answer": "as-is"
+    },
     ".claude/skills/role-profile": {
       "answer": "as-is"
     },
