@@ -433,21 +433,22 @@ def test_an_own_unmerged_edit_inside_the_change_is_noted(
     assert "свод правит окно в ветке" in capsys.readouterr().out
 
 
-def test_an_own_edit_by_the_last_commit_is_silent(
+def test_an_own_edit_by_the_last_commit_is_noted(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Вторая половина: правка ПОСЛЕДНИМ коммитом окна — молчание (140).
+    """Правка свода ПОСЛЕДНИМ коммитом окна — названа на своём изменении (`26b0113`, #1097).
 
-    После неё окно по прежнему своду не работало, и строке нечего назвать.
+    На следующем изменении её в диапазоне нет, и молчание здесь значило бы
+    «не названа никогда», а окно живёт дальше по прежнему своду.
     """
     git(tree, "checkout", "-b", "work")
     edit_rulebook(tree, "свод правит последний коммит", day=1, session=WINDOW_A)
     assert run(tree, "--head", "work") == CLEAN
-    assert "свод правит последний коммит" not in capsys.readouterr().out
+    assert "свод правит последний коммит" in capsys.readouterr().out
 
 
 def test_own_under_bounds_the_window_on_both_sides(tree: Path) -> None:
-    """`own_under`: снизу граница включительна, сверху строгая, чужое — мимо.
+    """`own_under`: обе границы включительны, чужое — мимо.
 
     Первый коммит дерева — сам коммит окна, заводящий свод: он и есть правка
     первым коммитом, и она названа.
@@ -460,8 +461,8 @@ def test_own_under_bounds_the_window_on_both_sides(tree: Path) -> None:
     own = module.own_under(WINDOW_A, start, head, ("main",), cwd=str(tree))
     subjects = [edit.message.splitlines()[0] for edit in own]
     assert subjects == ["первая работа окна", "своя правка посередине"]
-    before = module.own_under(WINDOW_A, start, own[1], ("main",), cwd=str(tree))
-    assert [edit.sha for edit in before] == [own[0].sha], "правка на самой голове названа"
+    before = module.own_under(WINDOW_A, start, own[0], ("main",), cwd=str(tree))
+    assert [edit.sha for edit in before] == [own[0].sha], "правка на самой голове не названа"
     said = module.said_own(WINDOW_A, own)
     assert said[0].startswith(f"окно {WINDOW_A}: свод изменён этим окном 2 раз")
     assert module.SKILL in said[0]
@@ -494,15 +495,21 @@ def test_an_own_edit_by_the_first_commit_is_noted(
     assert "работа соседа" not in said, "чужая правка до старта окна названа своей"
 
 
+@pytest.mark.parametrize("last", [True, False], ids=["последним-коммитом", "с-работой-после"])
 def test_an_own_edit_of_an_earlier_change_is_not_repeated(
-    tree: Path, capsys: pytest.CaptureFixture[str]
+    tree: Path, capsys: pytest.CaptureFixture[str], last: bool
 ) -> None:
     """Своя правка, слитая прежде, на следующих изменениях окна не повторяется (#1077).
 
     Строка, печатаемая на каждом изменении до конца жизни окна, перестаёт
-    читаться: замер на #1077 — 71 правка из 72 у шести окон (051).
+    читаться: замер на #1077 — 71 правка из 72 у шести окон (051). Место
+    правки в прежнем изменении задано обоими случаями (`a0f8903`, #1097): и
+    последний коммит окна, и работа после — на своём изменении правка
+    названа, тест `test_an_own_edit_by_the_last_commit_is_noted`.
     """
     edit_rulebook(tree, "свод правило прошлое изменение", day=0.5, session=WINDOW_A)
+    if not last:
+        commit(tree, "работа прошлого изменения после правки", day=0.7)
     git(tree, "checkout", "-b", "work")
     commit(tree, "следующее изменение окна", day=1)
     assert run(tree, "--head", "work") == CLEAN
