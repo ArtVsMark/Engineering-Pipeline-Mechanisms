@@ -81,6 +81,13 @@ def session_of(root: Path, base: str = trunk_log.TRUNK_REF) -> str:
     ровно на ветке, которую подтягивали к базе. Слияния не читаются вовсе — их
     тело пишет git, а не окно.
     """
+    # ОБРЕЗАННАЯ ИСТОРИЯ — ОТКАЗ, А НЕ «НЕ ПРО НЕЁ» (взгляд на #1094): в мелком
+    # клоне свои коммиты ветки за срезом не видны, и голова-слияние без
+    # трейлера отвечала бы «предел не про неё».
+    try:
+        trunk_log.whole(root, "свои коммиты ветки")
+    except trunk_log.NotRun as exc:
+        raise NotRun(str(exc)) from exc
     log = gitcall.output(
         ["log", "--no-merges", "--format=%B%x00", f"{base}..HEAD"],
         NotRun,
@@ -142,6 +149,9 @@ def measure(root: Path) -> int:
         return EXIT_UNASKED
     try:
         repo = check_branch_revival.repo_of(root)
+        # Мелкий клон — отказ, как у счёта встреч: окна слитых изменений
+        # недосчитались бы, а число печаталось бы полным (045, взгляд на #1087).
+        trunk_log.whole(root, "окна слитых изменений")
         log = trunk_log.git_log(root)
     except (check_branch_revival.NotRun, trunk_log.NotRun) as exc:
         print(f"замер не сделан: {exc}", file=sys.stderr)
@@ -184,7 +194,7 @@ def look(root: Path, branch: str) -> tuple[int, str]:
     """Вердикт по одной ветке: исход и что сказать."""
     session = session_of(root)
     if not session:
-        return EXIT_OK, f"голова не несёт трейлера {TRAILER} — предел окна не про неё"
+        return EXIT_OK, f"свои коммиты ветки не несут трейлера {TRAILER} — предел окна не про неё"
     token = ghrest.token_from_env()
     if not token:
         return EXIT_UNASKED, (
