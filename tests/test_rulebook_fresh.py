@@ -494,7 +494,6 @@ def test_an_own_edit_by_the_first_commit_is_noted(
     assert "работа соседа" not in said, "чужая правка до старта окна названа своей"
 
 
-
 def test_an_own_edit_of_an_earlier_change_is_not_repeated(
     tree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
