@@ -261,7 +261,9 @@ class Entry:
 INBOX_MARKER: Final = marker("rules-inbox")
 
 
-def live_issue(repo: str, token: str, marker: str = MARKER) -> tuple[int | None, str]:
+def live_issue(
+    repo: str, token: str, marker: str = MARKER, listed: list[dict[str, Any]] | None = None
+) -> tuple[int | None, str]:
     """Находит живую задачу по скрытому маркеру.
 
     Списком, а не поиском: поисковый индекс площадки догоняет с задержкой в
@@ -285,12 +287,20 @@ def live_issue(repo: str, token: str, marker: str = MARKER) -> tuple[int | None,
     того, чтобы положить её в известное место
     ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
     """
-    number, body, _ = live_issue_seen(repo, token, marker)
+    number, body, _ = live_issue_seen(repo, token, marker, listed)
     return number, body
 
 
-def live_issue_seen(repo: str, token: str, marker: str = MARKER) -> tuple[int | None, str, str]:
+def live_issue_seen(
+    repo: str, token: str, marker: str = MARKER, listed: list[dict[str, Any]] | None = None
+) -> tuple[int | None, str, str]:
     """То же, но третьим отдаёт, КОГДА задачу последний раз трогали.
+
+    ``listed`` — уже прочитанный список открытых записей. Его передаёт тот, кто
+    ищет НЕСКОЛЬКО живых задач за прогон и сам ничего в них не пишет: `debt`
+    искал четыре и читал один и тот же список четыре раза (#1065). Кэша здесь
+    нет намеренно: писатель реестра, перечитав устаревший список, положил бы
+    запись по прежнему телу.
 
     ЗАЧЕМ ВОЗРАСТ. Часть этих задач ведёт не наш механизм, а чужой прогон:
     «входящие» пишет ночной заход каталога. Числа из них читаются как сегодняшние,
@@ -304,7 +314,8 @@ def live_issue_seen(repo: str, token: str, marker: str = MARKER) -> tuple[int | 
     """
     found: list[tuple[int, str, str]] = []
     seen = 0
-    for item in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
+    source = ghrest.paginate(f"repos/{repo}/issues?state=open", token) if listed is None else listed
+    for item in source:
         seen += 1
         # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
         if item.get("pull_request") is not None:

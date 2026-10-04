@@ -77,6 +77,29 @@ def test_a_resolution_counted_before_its_finding_is_kept() -> None:
     assert archive["findings"][one]["resolved_by"] == 20
 
 
+def test_a_kind_line_names_the_kind_before_the_dictionary() -> None:
+    """Форма 3: род новой находки — из строки `Род:`, записанной в словаре — из словаря (#1022)."""
+    findings: dict[str, dict[str, Any]] = {
+        "aaaaaaa": {"pr": 1},
+        "ccccccc": {"pr": 3},
+        "ddddddd": {"pr": 4},
+        "eeeeeee": {"pr": 5},
+    }
+    bodies = [
+        "Разобрано: aaaaaaa\nРод: тихий род",
+        "Разобрано: ccccccc дубль ddddddd\nРод: каскад по одному месту",
+        "Разобрано: eeeeeee\nРод: нет — рода у находки нет",
+    ]
+    summary = module.with_kinds(findings, KINDS, bodies)
+    # Отпечаток словаря остаётся за его родом: так же его считает счёт встреч.
+    assert findings["aaaaaaa"]["род"] == "каскад по одному месту"
+    assert findings["ccccccc"]["род"] == findings["ddddddd"]["род"] == "каскад по одному месту"
+    assert findings["eeeeeee"]["род"] is None
+    # Дубль — одна встреча: каскад — словарный `aaaaaaa` и корень `ddddddd`.
+    assert summary["каскад по одному месту"]["встреч"] == 2
+    assert summary["тихий род"]["встреч"] == 0, "`aaaaaaa` уже стоит в словаре у каскада"
+
+
 def test_a_repeat_seen_earlier_moves_the_birth_back() -> None:
     """Изменения учитываются по времени слияния: повтор на меньшем номере — рождение раньше."""
     archive = empty()
@@ -232,7 +255,7 @@ def test_an_unreadable_history_writes_nothing(
 def test_a_run_writes_the_archive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Заход кладёт архив по названному адресу."""
     platform(monkeypatch)
-    monkeypatch.setattr(module, "git_log", lambda where=None, ref="": "")
+    monkeypatch.setattr(module.trunk_log, "git_log", lambda where=None, ref="": "")
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
     out = tmp_path / "deep" / "findings.json"
     assert module.main(["--repo", "o/r", "--out", str(out)]) == module.EXIT_OK
@@ -586,7 +609,7 @@ def test_a_new_mark_does_not_close_a_loop_in_the_archive() -> None:
 def test_merged_messages_take_the_number_from_the_subject() -> None:
     """Номер берётся из «(#N)» темы; коммит без номера — не слияние изменения (#820)."""
     log = "Тема (#12)\x1fТема (#12)\n\nРазобрано: aaaaaaa\x00прямая правка\x1fтело\x00"
-    assert module.merged_messages(log) == [(12, "Тема (#12)\n\nРазобрано: aaaaaaa")]
+    assert module.trunk_log.merged_messages(log) == [(12, "Тема (#12)\n\nРазобрано: aaaaaaa")]
 
 
 def test_reread_adds_the_missed_twin_and_changes_nothing_twice() -> None:
@@ -637,7 +660,7 @@ def test_git_log_reads_the_history_oldest_first(tmp_path: Path) -> None:
             "-m",
             f"Разобрано: {number:07d}",
         )
-    assert module.merged_messages(module.git_log(tmp_path, "HEAD")) == [
+    assert module.trunk_log.merged_messages(module.trunk_log.git_log(tmp_path, "HEAD")) == [
         (3, "Тема (#3)\n\nРазобрано: 0000003"),
         (7, "Тема (#7)\n\nРазобрано: 0000007"),
     ]
@@ -750,7 +773,7 @@ def test_merges_per_hour_is_not_below_the_history() -> None:
     times = sorted(
         int(when)
         for when, _, subject in (line.partition("\x1f") for line in log.splitlines())
-        if module.MERGED_SUBJECT_RE.search(subject)
+        if module.trunk_log.MERGED_SUBJECT_RE.search(subject)
     )
     worst = sliding_hour_max(times)
     assert worst <= module.MERGES_PER_HOUR, (
@@ -822,20 +845,21 @@ def test_the_history_is_the_trunks_not_the_runs(tmp_path: Path) -> None:
 
     git("init", "-q", "-b", "main")
     git("commit", "-q", "--allow-empty", "-m", "Своё (#1)")
-    git("update-ref", f"refs/remotes/{module.TRUNK_REF}", "HEAD")
+    git("update-ref", f"refs/remotes/{module.trunk_log.TRUNK_REF}", "HEAD")
     git("checkout", "-q", "-b", "other")
     git("commit", "-q", "--allow-empty", "-m", "Чужое (#2)", "-m", "Разобрано: aaaaaaa")
-    assert [one for one, _ in module.merged_messages(module.git_log(tmp_path))] == [1]
+    log = module.trunk_log.git_log(tmp_path)
+    assert [one for one, _ in module.trunk_log.merged_messages(log)] == [1]
 
 
 def test_unsquashed_merges_are_named_in_gaps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Слияние «Merge pull request #N» архив не учитывает, но называет числом (#879)."""
+    field, record = module.trunk_log.FIELD, module.trunk_log.RECORD
     log = (
-        f"Merge pull request #48 from o/agent/x{module.FIELD}тело{module.RECORD}"
-        f"Тема (#5){module.FIELD}Тема (#5){module.RECORD}"
+        f"Merge pull request #48 from o/agent/x{field}тело{record}Тема (#5){field}Тема (#5){record}"
     )
-    assert module.unsquashed(log) == 1
-    assert [one for one, _ in module.merged_messages(log)] == [5]
+    assert module.trunk_log.unsquashed(log) == 1
+    assert [one for one, _ in module.trunk_log.merged_messages(log)] == [5]
     platform(monkeypatch)
     archive = module.build("o/r", "t", 10, KINDS, {}, history(), unseen=1)
     assert f"{module.UNSEEN_GAP} — 1" in archive["gaps"]
