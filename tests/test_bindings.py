@@ -60,8 +60,22 @@ def test_every_rule_has_an_answer() -> None:
     assert all(isinstance(item, dict) and item.get("status") for item in rules.values())
 
 
-#: Как `why` ответа объявляет вид механизма словами: «ВИД МЕХАНИЗМА — pipeline».
-SAID_KIND_RE = re.compile(r"ВИД МЕХАНИЗМА — (\w+)")
+#: Как `why` ответа объявляет вид механизма словами. Форм две, и обе
+#: в дереве: «ВИД МЕХАНИЗМА — pipeline» (134) и «Вид механизма назван
+#: КОНВЕЙЕРОМ» (034, 060). Регистр не важен (взгляд на #1108, 195).
+SAID_KIND_RE = re.compile(r"вид механизма(?: назван| —)\s+(\w+)", re.IGNORECASE)
+#: Слово после формы → вид поля. Незнакомое слово — отказ теста, а не
+#: пропуск: форма узнана, а вид не сверен.
+KIND_WORDS = {
+    "gate": "gate",
+    "гейтом": "gate",
+    "pipeline": "pipeline",
+    "конвейером": "pipeline",
+    "document": "document",
+    "документом": "document",
+    "skill": kinds.SKILL,
+    "навыком": kinds.SKILL,
+}
 
 
 def test_a_kind_said_in_why_is_the_kind_in_the_field() -> None:
@@ -69,18 +83,21 @@ def test_a_kind_said_in_why_is_the_kind_in_the_field() -> None:
 
     Первая правка ответа 134 записала довод в его `why`, а поле сменила у 047:
     соседи и карта читают поле, и довод остался словами. Предмет — ответы,
-    где вид назван этой формой; без неё сверять нечего.
+    где вид назван одной из форм `SAID_KIND_RE`; без неё сверять нечего.
     """
+    rules = load()["rules"]
     said = {
-        number: found.group(1)
-        for number, item in load()["rules"].items()
+        number: found.group(1).lower()
+        for number, item in rules.items()
         if (found := SAID_KIND_RE.search(str(item.get("why", ""))))
     }
-    assert said, "ни один ответ не называет вид словами — проверка не о чем (075)"
+    assert len(said) >= 3, f"формы вида узнаны не везде: {sorted(said)} (034, 060, 134)"
+    unknown = {number: word for number, word in said.items() if word not in KIND_WORDS}
+    assert not unknown, f"вид назван словом вне KIND_WORDS: {unknown}"
     wrong = {
-        n: (kind, load()["rules"][n].get("mechanism"))
-        for n, kind in said.items()
-        if load()["rules"][n].get("mechanism") != kind
+        number: (KIND_WORDS[word], rules[number].get("mechanism"))
+        for number, word in said.items()
+        if rules[number].get("mechanism") != KIND_WORDS[word]
     }
     assert not wrong, f"вид в why и в поле расходятся: {wrong}"
 
