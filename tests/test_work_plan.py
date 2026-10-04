@@ -779,3 +779,11 @@ def test_the_plan_names_missing_answers_and_a_mistyped_rule(tmp_path: Any) -> No
     (tmp_path / "bindings.json").unlink()
     said = module.birth_part(path)
     assert said.rows == [] and module.finding_kinds.ANSWERS_UNREAD in said.unread, said
+
+
+def test_a_history_kind_outside_the_dictionary_is_named(tmp_path: Any) -> None:
+    """Род строки `Род:`, которого нет в словаре, план называет пометкой (взгляд на #1086)."""
+    path = kinds_file(tmp_path, {"род": {"признак": "x", "встречен": ["a"], "закрыт": "гейт"}})
+    said = module.birth_part(path, ["Разобрано: aaaaaaa\nРод: опечатка"])
+    assert f"{module.finding_kinds.OUTSIDE_HISTORY} «опечатка» — встреч 1" in said.note
+    assert module.birth_part(path, ["Разобрано: aaaaaaa\nРод: род"]).note == ""

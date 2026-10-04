@@ -312,7 +312,7 @@ def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> So
     try:
         said = trunk_log.merged_bodies() if bodies is None else bodies
         unseen = trunk_log.unseen() if bodies is None else 0
-        kinds, _ = finding_kinds.with_history(finding_kinds.read(declared), said)
+        kinds, outside = finding_kinds.with_history(finding_kinds.read(declared), said)
         left = finding_kinds.unanswered(
             kinds,
             finding_kinds.queued(queue_path),
@@ -325,7 +325,18 @@ def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> So
             f"род находок у порога без ответа каталогу: «{name}» — встреч {times}"
             for name, times in left
         ],
-        note=f"{finding_kinds.UNSEEN_SAID} {unseen}" if unseen else "",
+        # РОД ИСТОРИИ ВНЕ СЛОВАРЯ НАЗЫВАЕТСЯ И ЗДЕСЬ (взгляд на #1086): ручной
+        # заход `finding_kinds.py` его печатает, но его не зовёт ни один
+        # прогон, и опечатка в слитой строке `Род:` иначе не всплыла бы нигде.
+        note="; ".join(
+            [
+                *([f"{finding_kinds.UNSEEN_SAID} {unseen}"] if unseen else []),
+                *(
+                    f"{finding_kinds.OUTSIDE_HISTORY} «{name}» — встреч {len(met)}"
+                    for name, met in sorted(outside.items())
+                ),
+            ]
+        ),
     )
 
 
