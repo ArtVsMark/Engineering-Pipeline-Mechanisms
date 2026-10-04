@@ -251,13 +251,25 @@ def test_the_measure_refuses_a_shallow_history(
     assert module.trunk_log.SHALLOW in said and "окна слитых изменений" in said, said
 
 
-def test_a_shallow_branch_is_refused_not_unasked(repo: Path, tmp_path: Path) -> None:
-    """Мелкий клон — отказ гейта, а не «предел не про неё» (взгляд на #1094)."""
-    shallow = tmp_path / "shallow-branch"
+def shallow_clone_of(repo: Path, where: Path) -> Path:
+    """Мелкий клон дерева окна: обе ветки по одному коммиту."""
+    git(repo, "branch", "-f", "main", "origin/main")
     subprocess.run(
-        ["git", "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow)],
+        ["git", "clone", "-q", "--depth", "1", "--no-single-branch", f"file://{repo}", str(where)],
         check=True,
         capture_output=True,
     )
+    return where
+
+
+def test_a_visible_trailer_counts_in_a_shallow_clone(repo: Path, tmp_path: Path) -> None:
+    """Свой коммит с трейлером виден и в мелком клоне — окно достоверно (взгляд на #1094)."""
+    assert module.session_of(shallow_clone_of(repo, tmp_path / "shallow")) == MINE
+
+
+def test_a_shallow_branch_without_a_visible_trailer_is_refused(repo: Path, tmp_path: Path) -> None:
+    """Трейлера не видно и клон мелкий — отказ, а не «предел не про неё» (#1094)."""
+    git(repo, "commit", "-q", "--allow-empty", "-m", "рукой поверх среза")
+    shallow = shallow_clone_of(repo, tmp_path / "shallow")
     with pytest.raises(module.NotRun, match="свои коммиты ветки"):
         module.session_of(shallow)
