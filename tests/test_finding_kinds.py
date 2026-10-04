@@ -120,7 +120,8 @@ def test_a_meeting_is_listed_once_per_kind(name: str) -> None:
     повтор законен — одна находка бывает двух родов, и таких отпечатков на
     04.10.2026 четыре (`dbf186b`, `ca9216b`, `4394e1f`, `1ad3e72`).
     """
-    met = [str(one) for one in kinds()[name].get("встречен") or []]
+    said = kinds()[name].get("встречен")
+    met = [str(one) for one in said] if isinstance(said, list) else []
     twice = sorted({one for one in met if met.count(one) > 1})
     assert not twice, f"{name}: встреча записана дважды — {twice}"
 
