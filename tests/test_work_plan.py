@@ -787,3 +787,57 @@ def test_a_history_kind_outside_the_dictionary_is_named(tmp_path: Any) -> None:
     said = module.birth_part(path, ["Разобрано: aaaaaaa\nРод: опечатка"])
     assert f"{module.finding_kinds.OUTSIDE_HISTORY} «опечатка» — встреч 1" in said.note
     assert module.birth_part(path, ["Разобрано: aaaaaaa\nРод: род"]).note == ""
+
+
+def test_the_open_list_is_read_once_and_handed_to_every_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Список открытых записей читается один раз и уходит всем каналам (#1084)."""
+    quiet_platform(monkeypatch)
+    listed = [{"number": 1}]
+    reads: list[str] = []
+
+    def read(*_: object) -> list[dict[str, int]]:
+        reads.append("x")
+        return listed
+
+    monkeypatch.setattr(module.debt, "open_listed", read)
+    got: dict[str, object] = {}
+    monkeypatch.setattr(
+        module.debt, "branch_debt", lambda r, t, seen=None: got.update(branch=seen) or ([], [])
+    )
+    monkeypatch.setattr(
+        module.debt, "findings_debt", lambda r, t, seen=None: got.update(findings=seen) or []
+    )
+    monkeypatch.setattr(
+        module.debt, "inbox_body", lambda r, t, c, seen=None: got.update(inbox=seen) or ("", "", "")
+    )
+    monkeypatch.setattr(
+        module.findings,
+        "live_issue_seen",
+        lambda r, t, m, seen=None: got.update(drift=seen) or (None, "", ""),
+    )
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+    assert reads == ["x"]
+    assert got == {"branch": listed, "findings": listed, "inbox": listed, "drift": listed}
+
+
+def test_born_rows_read_the_handed_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Рождённые строки берут переданный список, а не читают его заново (#1084)."""
+    monkeypatch.setattr(
+        module.ghrest,
+        "paginate",
+        lambda path, *_, **__: (
+            (_ for _ in ()).throw(AssertionError(path)) if "state=open" in path else iter([])
+        ),
+    )
+    held = {4: ["- **#10** — строка"], 6: []}
+    child = {
+        "number": 11,
+        "title": "t",
+        "body": "Refs #10",
+        "state": "open",
+        "html_url": "https://github.com/o/r/issues/11",
+    }
+    rows = module.born_rows("o/r", "t", held, frozenset(), [child])
+    assert any("#11" in row for row in rows), rows
