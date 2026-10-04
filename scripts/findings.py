@@ -261,6 +261,23 @@ class Entry:
 INBOX_MARKER: Final = marker("rules-inbox")
 
 
+#: «Номер живой задачи не передан — найти самому»: отличен от ``None``, который
+#: значит «задачи нет». Один на всех писателей живых задач (071, взгляд на
+#: #1091): `unlooked.save` и `main_red.save` принимают номер, найденный заходом.
+UNREAD: Final = -1
+
+
+def found_or_unread(number: int | None) -> int:
+    """Номер, найденный заходом, — для записи; задачи не было — `UNREAD`.
+
+    ЗАДАЧИ НЕТ — ИЩЕТСЯ ЗАНОВО ПЕРЕД ЗАПИСЬЮ (взгляд на #1091). Заход идёт
+    минуты, и писателей у реестра бывает двое: оба, не нашедшие задачи в
+    начале, завели бы по одной — ровно «вторая живая», от которой
+    `live_issue` предостерегает. Найденный номер за заход не меняется.
+    """
+    return UNREAD if number is None else number
+
+
 def live_issue(
     repo: str, token: str, marker: str = MARKER, listed: list[dict[str, Any]] | None = None
 ) -> tuple[int | None, str]:
