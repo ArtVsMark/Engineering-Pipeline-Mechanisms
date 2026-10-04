@@ -44,7 +44,7 @@ from typing import Any, Final
 
 import ghrest
 import jsonschema
-import referencing.exceptions
+from referencing.exceptions import Unresolvable
 
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
@@ -115,7 +115,7 @@ def problems(facts: dict[str, Any], schema: dict[str, Any]) -> list[str]:
         errors = sorted(validator.iter_errors(facts), key=lambda error: list(error.absolute_path))
     except jsonschema.exceptions.SchemaError as exc:
         raise NotRun(f"схема витрины испорчена: {exc.message}") from exc
-    except referencing.exceptions.Unresolvable as exc:
+    except Unresolvable as exc:
         raise NotRun(f"ссылка в схеме витрины не разрешилась: {exc}") from exc
     return [
         f"{'/'.join(str(part) for part in error.absolute_path) or '<корень>'}: {error.message}"
