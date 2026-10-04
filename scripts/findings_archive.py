@@ -237,7 +237,7 @@ def kinds_by_mark(kinds: dict[str, Any]) -> dict[str, str]:
     found: dict[str, str] = {}
     for name, body in kinds.items():
         for met in body.get("встречен", []):
-            mark = str(met).strip("`")
+            mark = finding_kinds.mark_of(met)
             if changerefs.MARK_RE.fullmatch(mark):
                 found.setdefault(mark, name)
     return found
@@ -316,17 +316,21 @@ def settle(archive: dict[str, Any]) -> None:
         entry["twin_of"] = said["twin_of"] if said else ""
 
 
-def named_in(bodies: list[str]) -> dict[str, str]:
+def named_in(bodies: list[str], canon: dict[str, str] | None = None) -> dict[str, str]:
     """Отпечаток → род из строки `Род:` под его снятием; первый названный побеждает.
 
-    `Род: нет — <причина>` рода не называет и сюда не входит (154).
+    `Род: нет — <причина>` рода не называет и сюда не входит (154). Прежнее
+    имя сводится к нынешнему (`canon` — `finding_kinds.successor_of`), как у
+    счёта встреч: иначе находка получала бы старое имя и пустое `правило`
+    (взгляд на #1093).
     """
+    canon = canon or {}
     found: dict[str, str] = {}
     for body in bodies:
         for record in changerefs.resolutions_parsed(body):
             if record.kind and not finding_kinds.said_no(record.kind):
                 for mark in record.marks:
-                    found.setdefault(mark, record.kind)
+                    found.setdefault(mark, canon.get(record.kind, record.kind))
     return found
 
 
@@ -338,15 +342,18 @@ def with_kinds(
     РОД ЕДЕТ С РАБОТОЙ (#1022, форма 3). Словарь с этой формы заморожен, и
     новых отпечатков в `встречен` не получает: род находки, которой в нём нет,
     называет строка `Род:` под её снятием в теле слияния. Отпечаток, уже
-    стоящий в словаре, остаётся за его родом — так же его считает
-    `met_in_history`, и род у находки не расходится со счётом. Встречи рода считает тот же
+    стоящий в словаре, остаётся за его родом. ПРЕДЕЛ НАЗВАН (195, взгляд на
+    #1092): род у находки архива ОДИН, а находка бывает двух родов — строкой
+    `Род:` второго рода при отпечатке, записанном за первым. Счёт встреч
+    (`встреч` ниже) засчитывает её обоим, а поле `род` находки — первому.
+    Встречи рода считает тот же
     `finding_kinds.with_history`, что у плана и гейта рождения правила, — по
     отпечаткам, как и прежде: встреча в окне находкой архива не бывает.
     """
     said = bodies or []
     merged, _ = finding_kinds.with_history(kinds, said)
     by_mark = kinds_by_mark(merged)
-    named = named_in(said)
+    named = named_in(said, finding_kinds.successor_of(kinds))
     for mark, entry in findings.items():
         name = by_mark.get(mark) or named.get(mark)
         entry["род"] = name
@@ -360,7 +367,7 @@ def with_kinds(
             "встреч": sum(
                 1
                 for met in body.get("встречен") or []
-                if changerefs.MARK_RE.fullmatch(str(met).strip("`"))
+                if changerefs.MARK_RE.fullmatch(finding_kinds.mark_of(met))
             ),
             **rule_of(kinds[name]),
         }
