@@ -245,7 +245,7 @@ def test_the_look_polls_at_the_gates_pace(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     def waited(_repo: str, _sha: str, _token: str, _timeout: float, interval: float) -> str:
         asked.append(interval)
-        return module.GREEN
+        return str(module.GREEN)
 
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
