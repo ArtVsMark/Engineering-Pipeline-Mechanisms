@@ -1,0 +1,64 @@
+# Будильник сводного гейта: `ci` завершился — устаревшая сводка перезапускается.
+#
+# РЕШЕНИЕ ВЛАДЕЛЬЦА 04.10.2026 (#1007, вариант 2). Под очередью площадки
+# `ci-complete` краснел сроком «соседи не завершились» при зелёной голове и сам
+# не пересобирался. Срок остаётся коротким, а вердикт приходит, когда соседи
+# действительно кончились: их завершение и будит сводку.
+#
+# ПЕРЕЗАПУСК, А НЕ СВОЯ ЗАПИСЬ. Записи прогона по `workflow_run` площадка
+# вешает на голову общей ветки, и защита ветки их не увидит. Поэтому здесь
+# нет вердикта: прогон перезапускает сам `ci-complete`, и тот выносит вердикт
+# на своём событии изменения. Логика и её граница — `scripts/ci_complete_wake.py`.
+#
+# ЗАКРЕПЛЕНИЕ (152). `workflow_run` исполняет определение с общей ветки и код
+# с неё же: checkout без `ref` берёт голову общей ветки, а не изменения. Код
+# изменения здесь не исполняется вовсе — у прогона право перезапуска, и чужой
+# код с ним был бы обходом 085.
+name: ci-complete-wake
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: голова изменения, чью сводку разбудить
+        required: true
+
+permissions:
+  contents: read
+  # Перезапуск прогона сводки — право `actions: write`, и только оно.
+  actions: write
+
+concurrency:
+  # Одна голова — один будильник: два завершения `ci` подряд позвали бы два
+  # перезапуска одной сводки, каждый не увидев другого (149).
+  group: ci-complete-wake-${{ github.event.workflow_run.head_sha || inputs.sha }}
+  cancel-in-progress: false
+
+jobs:
+  ci-complete-wake:
+    name: ci-complete-wake
+    # Сводка живёт только на изменении: прогон `ci` на общей ветке будить нечего.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - run: python -m pip install --quiet ./packages/transport
+      - name: разбудить сводку на голове
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || inputs.sha }}
+          # Ручной заход времени конца `ci` не знает: сводка, завершённая до
+          # нажатия кнопки, считается вынесенной раньше.
+          CI_DONE_AT: ${{ github.event.workflow_run.updated_at || '9999-12-31T23:59:59Z' }}
+        run: python scripts/ci_complete_wake.py

@@ -120,6 +120,9 @@
     ".github/workflows/drift.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/ci-complete-wake.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/hail.yml": {
       "answer": "configured",
       "where": [
@@ -495,6 +498,9 @@
       ]
     },
     "scripts/gitcall.py": {
+      "answer": "as-is"
+    },
+    "scripts/ci_complete_wake.py": {
       "answer": "as-is"
     },
     "scripts/hail.py": {
