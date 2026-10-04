@@ -380,6 +380,9 @@
     "scripts/check_new_is_tested.py": {
       "answer": "as-is"
     },
+    "scripts/check_open_limit.py": {
+      "answer": "as-is"
+    },
     "scripts/check_own_name.py": {
       "answer": "as-is"
     },
