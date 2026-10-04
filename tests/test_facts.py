@@ -61,8 +61,8 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     assert collected["rules"]["by_mechanism"] == {"document": 1, "gate": 1}
     assert collected["checks_per_pr"]["by_class"]["required"] == 1
     assert collected["commit"] == "голова"
-    # Договор фактов витрины семьи 1.2 (#1001): номер — договора, а не наш.
-    assert collected["schema"] == "1.2"
+    # Договор фактов витрины семьи 1.3 (#1046): номер — договора, а не наш.
+    assert collected["schema"] == "1.3"
     # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
     assert collected["none"]["python"] == facts.NO_PYTHON
     assert collected["generated_at"].endswith("+00:00")
@@ -649,3 +649,12 @@ def test_an_empty_answer_is_refused_before_the_count(tmp_path: Path) -> None:
     empty.write_text('{"rules": {}}', encoding="utf-8")
     with pytest.raises(facts.NotRun):
         facts.rules_facts(empty)
+
+
+@pytest.mark.parametrize(
+    ("tag", "series"),
+    [("v1.3.0", "1.3"), ("v1.10.0", "1.10"), ("v2.0.4", "2.0"), (None, ""), ("", "")],
+)
+def test_release_is_a_series_not_a_tag(tag: str | None, series: str) -> None:
+    """`release` — серия `X.Y` по договору 1.3 (#1046): без `v` и без третьей цифры."""
+    assert facts.release_series(tag) == series
