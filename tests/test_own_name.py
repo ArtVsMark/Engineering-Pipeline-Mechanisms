@@ -269,7 +269,7 @@ def test_no_answer_at_all_is_the_third_outcome(
     ],
 )
 def test_a_host_outside_the_list_is_not_a_name(tmp_path: Path, line: str) -> None:
-    """Имя — только на хостах `NAME_HOSTS` и под `/repos` у API; прочий хост — не имя (210, #1095)."""
+    """Имя — только с хостов `NAME_HOSTS` и с `/repos` у API; прочий хост — не имя (210)."""
     root = repo_with(tmp_path, line + "\n")
     assert module.mentions(root) == {}, module.mentions(root)
 
