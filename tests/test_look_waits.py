@@ -237,3 +237,18 @@ def test_a_stale_head_does_not_call_the_look(
     assert out.read_text(encoding="utf-8") == f"run={run}\n"
     assert (f"::notice title={module.STALE}::" in capsys.readouterr().out) is noted
     assert module.STALE != module.SKIPPED, "устаревшую голову очередь перезапускала бы как должную"
+
+
+def test_the_look_polls_at_the_gates_pace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Шаг опроса по умолчанию — пауза гейта, которого ждут: квота у них одна (взгляд на #1083)."""
+    asked: list[float] = []
+
+    def waited(_repo: str, _sha: str, _token: str, _timeout: float, interval: float) -> str:
+        asked.append(interval)
+        return module.GREEN
+
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module, "wait", waited)
+    assert module.main(["--repo", "o/r", "--sha", "abc"]) == module.EXIT_OK
+    assert asked == [float(module.ci_complete.POLL_INTERVAL)]
