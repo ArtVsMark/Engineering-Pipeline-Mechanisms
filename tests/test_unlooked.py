@@ -1180,3 +1180,34 @@ def test_a_stalled_late_look_is_named() -> None:
     }
     assert module.stalled(entries, "2026-09-26") == [77]
     assert module.stalled(entries, "2026-09-11") == []
+
+
+def test_save_with_a_known_number_does_not_look_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Номер, найденный заходом, второго чтения списка не стоит (#1084); без него — ищется."""
+    looked: list[str] = []
+
+    def look(*_: object, **__: object) -> tuple[int, str]:
+        looked.append("x")
+        return 7, ""
+
+    monkeypatch.setattr(module.findings, "live_issue", look)
+    module.save("o/r", "t", {}, 0, False, None, 7)
+    assert looked == []
+    module.save("o/r", "t", {}, 0, False)
+    assert looked == ["x"]
+
+
+@pytest.mark.parametrize(("found", "handed"), [(89, 89), (None, -1)])
+def test_main_hands_the_found_number_to_save(
+    monkeypatch: pytest.MonkeyPatch, found: int | None, handed: int
+) -> None:
+    """`main` передаёт найденный номер; задачи нет — `save` ищет заново (взгляды на #1091)."""
+    body = f"{module.MARKER}\n"
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", lambda repo, token, marker: (found, body))
+    monkeypatch.setattr(module, "merged_changes", lambda repo, token, limit: [])
+    monkeypatch.setattr(module, "late_on", lambda repo, number, token, *_: "")
+    saved: list[object] = []
+    monkeypatch.setattr(module, "save", lambda *args, **kwargs: saved.append(args[-1]))
+    module.main(["--repo", "o/r"])
+    assert saved == [handed] and handed in (89, module.findings.UNREAD)
