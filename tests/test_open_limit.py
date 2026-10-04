@@ -33,6 +33,8 @@ def repo(tmp_path: Path) -> Path:
     git(tmp_path, "config", "user.name", "t")
     git(tmp_path, "config", "user.email", "t@t")
     git(tmp_path, "remote", "add", "origin", "https://github.com/o/r.git")
+    git(tmp_path, "commit", "-q", "--allow-empty", "-m", "основание (#1)")
+    git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
     git(tmp_path, "commit", "-q", "--allow-empty", "-m", "работа", "-m", f"Claude-Session: {MINE}")
     return tmp_path
 
@@ -110,10 +112,11 @@ def test_no_token_is_not_clean(repo: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert code == module.EXIT_UNASKED and "НЕ ПРОВЕРЕН" in said
 
 
-def test_a_head_without_the_trailer_is_not_the_subject(
+def test_a_branch_without_the_trailer_is_not_the_subject(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Коммит без трейлера — не работа окна, и площадку не спрашивают вовсе."""
+    """Ветка без своих коммитов с трейлером — не работа окна, и площадку не спрашивают."""
+    git(repo, "reset", "-q", "--hard", "origin/main")
     git(repo, "commit", "-q", "--allow-empty", "-m", "рукой")
     asked = platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
     assert module.look(repo, "agent/новая")[0] == module.EXIT_OK
@@ -171,3 +174,60 @@ def test_own_open_reads_the_trailer_in_any_commit(monkeypatch: pytest.MonkeyPatc
     }
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, _token: iter(pages[path]))
     assert [one["number"] for one in module.own_open("o/r", "токен", MINE)] == [1]
+
+
+def test_a_merge_of_the_base_on_top_keeps_the_window(repo: Path) -> None:
+    """Голова — слияние общей ветки без трейлера, а окно — по своим коммитам (взгляд на #1087)."""
+    git(repo, "checkout", "-q", "-b", "база", "origin/main")
+    git(
+        repo, "commit", "-q", "--allow-empty", "-m", "чужое (#2)", "-m", f"Claude-Session: {THEIRS}"
+    )
+    git(repo, "checkout", "-q", "agent/новая")
+    git(repo, "merge", "-q", "--no-ff", "--no-edit", "база")
+    git(repo, "update-ref", "refs/remotes/origin/main", "база")
+    assert module.session_of(repo) == MINE
+
+
+def test_a_quoted_session_is_not_a_trailer() -> None:
+    """Адрес окна в цитате — не трейлер: своё узнаётся строкой целиком (взгляд на #1087)."""
+    quoted = f"оклик\n\nАдресат — окно, трейлер «Claude-Session: {MINE}» в коммитах"
+    assert module.trailers_in(quoted) == set()
+    assert module.trailers_in(f"x\n\nClaude-Session: {MINE}\n") == {MINE}
+
+
+def test_overlaps_count_changes_opened_over_the_limit() -> None:
+    """Замер: открытое при трёх открытых своих — превышение; чужие и закрытые — нет."""
+    rows = [
+        (1, "2026-10-01T10:00", None, "a"),
+        (2, "2026-10-01T10:01", None, "a"),
+        (3, "2026-10-01T10:02", "2026-10-01T10:05", "a"),
+        (4, "2026-10-01T10:03", "2026-10-01T10:05", "a"),
+        (5, "2026-10-01T10:04", None, "b"),
+        (6, "2026-10-01T10:06", None, "a"),
+        (7, "2026-10-01T10:07", None, ""),
+    ]
+    # 6 открыто после закрытия 3 и 4: у окна открыты лишь 1 и 2.
+    assert module.overlaps(rows) == [4]
+
+
+def test_the_measure_prints_the_count(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--measure` берёт окно из тела уплотнения, а время — у площадки."""
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
+    body = f"x\n\nClaude-Session: {MINE}"
+    monkeypatch.setattr(
+        module.trunk_log,
+        "git_log",
+        lambda *_, **__: "".join(
+            f"т (#{n}){module.trunk_log.FIELD}{body}{module.trunk_log.RECORD}" for n in (1, 2, 3, 4)
+        ),
+    )
+    pulls = [
+        {"number": n, "created_at": f"2026-10-01T10:0{n}", "closed_at": None} for n in (1, 2, 3, 4)
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(pulls))
+    assert module.main([module.MEASURE]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "с известным окном 4" in out and out.rstrip().endswith("— 1"), out

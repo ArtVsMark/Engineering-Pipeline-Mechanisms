@@ -9,10 +9,10 @@
 ЗАМЕР, РАДИ КОТОРОГО ГЕЙТ ЗАВЕДЁН. За 03.10.2026 открыто 17 изменений, слито
 10; с 10:40 до 16:10 — ни одного слияния. Первый заход взгляда нашёл находки
 у 11 из 12, автослияние законно ждало починки, а окно в это время открывало
-новые. По всей истории площадки (замер 04.10.2026, окно — по трейлеру
-`Claude-Session` в теле уплотнения): из 884 изменений с известным окном 95
-открыты, когда у того же окна уже было три открытых и больше; у четырёх окон
-из семи одновременно открытых бывало больше трёх, наибольшее — девять.
+новые. По всей истории площадки — замер 04.10.2026 командой
+`python scripts/check_open_limit.py --measure`, окно — по трейлеру
+`Claude-Session` в теле уплотнения: из 908 изменений окно известно у 880, и 97
+из них открыты, когда у того же окна уже было три открытых и больше.
 
 ПРИЗНАК ДОСТОВЕРЕН, ПОЭТОМУ ОН ДЕРЖИТ ТОЛЧОК (051). Число открытых изменений
 окна — ответ площадки, а не догадка. Держит его `preflight.py --push`: проверка
@@ -35,12 +35,15 @@
 отработал · ``3`` не спросить: токена нет.
 """
 
+import re
+import sys
 from pathlib import Path
 from typing import Any, Final
 
 import check_branch_revival
 import ghrest
 import gitcall
+import trunk_log
 
 EXIT_OK: Final = 0
 EXIT_OVER: Final = 1
@@ -49,23 +52,45 @@ EXIT_UNASKED: Final = 3
 
 #: Сколько открытых изменений окна держит предел: четвёртое не открывается.
 LIMIT: Final = 3
-#: Трейлер, по которому изменение узнаётся своим.
+#: Трейлер, по которому изменение узнаётся своим, и его строка целиком.
 TRAILER: Final = "Claude-Session"
+TRAILER_RE: Final = re.compile(rf"^{TRAILER}:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+#: Режим замера по истории: печатает число превышений, гейтом не служит.
+MEASURE: Final = "--measure"
 
 
 class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «чисто»."""
 
 
-def session_of(root: Path) -> str:
-    """Окно головы — значение трейлера `Claude-Session` её коммита; нет — пусто."""
-    said = gitcall.output(
-        ["log", "-1", f"--format=%(trailers:key={TRAILER},valueonly)", "HEAD"],
+def trailers_in(message: str) -> set[str]:
+    """Значения трейлера `Claude-Session` в тексте коммита — строкой целиком, а не вхождением.
+
+    Адрес окна, процитированный в теле (оклик, разбор), трейлером не
+    становится: своё узнаётся разбором строки, а не подстрокой (взгляд на
+    #1087, 141).
+    """
+    return set(TRAILER_RE.findall(message))
+
+
+def session_of(root: Path, base: str = trunk_log.TRUNK_REF) -> str:
+    """Окно ветки — трейлер самого нового СВОЕГО коммита `base..HEAD`; нет — пусто.
+
+    СВОИ КОММИТЫ, А НЕ ГОЛОВА (взгляд на #1087). Головой бывает слияние
+    общей ветки, и трейлера у него нет: гейт по голове отвечал «не про неё»
+    ровно на ветке, которую подтягивали к базе. Слияния не читаются вовсе — их
+    тело пишет git, а не окно.
+    """
+    log = gitcall.output(
+        ["log", "--no-merges", "--format=%B%x00", f"{base}..HEAD"],
         NotRun,
         cwd=str(root) if root else None,
     )
-    lines = [line.strip() for line in said.splitlines() if line.strip()]
-    return lines[-1] if lines else ""
+    for body in log.split(trunk_log.RECORD):
+        said = sorted(trailers_in(body))
+        if said:
+            return said[-1]
+    return ""
 
 
 def own_open(repo: str, token: str, session: str) -> list[dict[str, Any]]:
@@ -73,9 +98,75 @@ def own_open(repo: str, token: str, session: str) -> list[dict[str, Any]]:
     found = []
     for change in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
         commits = ghrest.paginate(f"repos/{repo}/pulls/{change['number']}/commits", token)
-        if any(session in str(one.get("commit", {}).get("message", "")) for one in commits):
+        if any(
+            session in trailers_in(str(one.get("commit", {}).get("message", ""))) for one in commits
+        ):
             found.append(change)
     return found
+
+
+def overlaps(rows: list[tuple[int, str, str | None, str]], limit: int = LIMIT) -> list[int]:
+    """Изменения, открытые, когда у того же окна уже было `limit` открытых.
+
+    Строка — (номер, открыто, закрыто или ``None``, окно); время — ISO 8601
+    одной зоны, и строки сравниваются как время. Окно пусто — строка не
+    считается: чьё изменение, неизвестно.
+    """
+    found = []
+    for number, opened, _, session in rows:
+        if not session:
+            continue
+        busy = sum(
+            1
+            for other, since, until, whose in rows
+            if whose == session
+            and other != number
+            and since < opened
+            and (until is None or until > opened)
+        )
+        if busy >= limit:
+            found.append(number)
+    return found
+
+
+def measure(root: Path) -> int:
+    """Замер по истории площадки: сколько изменений открыто сверх предела (#1085).
+
+    Окно изменения — трейлер в теле его уплотнения в общей ветке; время —
+    открытие и закрытие по списку площадки. Неслитые без окна не считаются,
+    и их число печатается (045).
+    """
+    token = ghrest.token_from_env()
+    if not token:
+        print("замер не сделан: токена площадки нет (045)", file=sys.stderr)
+        return EXIT_UNASKED
+    try:
+        repo = check_branch_revival.repo_of(root)
+        log = trunk_log.git_log(root)
+    except (check_branch_revival.NotRun, trunk_log.NotRun) as exc:
+        print(f"замер не сделан: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    whose = {
+        number: sorted(trailers_in(body))[-1]
+        for number, body in trunk_log.merged_messages(log)
+        if trailers_in(body)
+    }
+    rows = [
+        (
+            int(one["number"]),
+            str(one["created_at"]),
+            one.get("closed_at"),
+            whose.get(int(one["number"]), ""),
+        )
+        for one in ghrest.paginate(f"repos/{repo}/pulls?state=all", token)
+    ]
+    known = sum(1 for row in rows if row[3])
+    over = overlaps(rows)
+    print(
+        f"изменений {len(rows)}, с известным окном {known}; открыто при {LIMIT} и более "
+        f"открытых у того же окна — {len(over)}"
+    )
+    return EXIT_OK
 
 
 def refusal(branch: str, mine: list[dict[str, Any]]) -> str:
@@ -120,8 +211,11 @@ def look(root: Path, branch: str) -> tuple[int, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Точка входа: одна ветка против числа открытых изменений окна."""
-    return check_branch_revival.cli(look, __doc__, NotRun, argv)
+    """Точка входа: одна ветка против числа открытых изменений окна; `--measure` — замер."""
+    said = list(sys.argv[1:] if argv is None else argv)
+    if said == [MEASURE]:
+        return measure(Path())
+    return check_branch_revival.cli(look, __doc__, NotRun, said)
 
 
 if __name__ == "__main__":
