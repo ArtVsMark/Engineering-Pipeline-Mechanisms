@@ -57,7 +57,8 @@
 (план работ) · [`step-automerge.yml`](.github/workflows/step-automerge.yml)
 (очередь и слияние) · [`step-main-red.yml`](.github/workflows/step-main-red.yml)
 (дежурный по общей ветке) · [`step-stuck.yml`](.github/workflows/step-stuck.yml)
-(застрявшее) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик).
+(застрявшее) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
+[`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану).
 Очереди, обходу и оклику токен владельца `MERGE_QUEUE_TOKEN` передаётся
 вызовом явно, по имени: секретов вызывающего общий шаг не видит. Вынос
 остальных ведёт #993.
