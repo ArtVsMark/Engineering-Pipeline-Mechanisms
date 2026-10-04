@@ -547,3 +547,79 @@ def test_the_ancestor_is_asked_exactly_once_per_pass(
     assert len(merge_bases) == 1, (
         f"общий предок спрошен {len(merge_bases)} раз(а) за заход: {merge_bases}"
     )
+
+
+# --- шапка `internal` против состава изменения (#1010, 215) ------------------
+
+HEADER = "> **Потребителю безразлично:** правится `scripts/x.py` и `docs/decisions/037`; ничего\n"
+
+
+def test_header_paths_are_names_that_look_like_paths() -> None:
+    """Путь — с косой чертой или расширением; «`internal`» путём не является."""
+    text = "> **Потребителю безразлично:** `internal`, `a/b.py`, `c.json`, `requires-python`.\n"
+    assert check.header_paths(text) == ["a/b.py", "c.json"]
+
+
+def test_only_the_first_line_is_the_header() -> None:
+    """Пути ниже шапки — проза фрагмента, а не пересказ состава."""
+    assert check.header_paths("> шапка без путей\n\n`scripts/x.py` в теле\n") == []
+
+
+@pytest.mark.parametrize(
+    ("files", "stray"),
+    [
+        (["scripts/x.py", "docs/decisions/037-a-kind.md"], []),
+        (["scripts/x.py"], ["docs/decisions/037"]),
+        (["docs/decisions/037-a-kind.md"], ["scripts/x.py"]),
+    ],
+    ids=["всё-тронуто", "решение-не-тронуто", "скрипт-не-тронут"],
+)
+def test_a_header_path_outside_the_change_is_stray(files: list[str], stray: list[str]) -> None:
+    """Обе половины: тронутое (в том числе по началу имени) не названо, чужое — названо."""
+    assert check.stray_in_header(HEADER, files) == stray
+
+
+def test_a_directory_in_the_header_covers_its_files() -> None:
+    """`.rules/` в шапке покрывает тронутый `.rules/bindings.json`."""
+    assert check.stray_in_header("> `.rules/` правится\n", [".rules/bindings.json"]) == []
+
+
+def test_an_unnamed_mechanism_is_named_back() -> None:
+    """Тронутый механизм `scripts/`, не названный шапкой, называется; названный — нет."""
+    files = ["scripts/x.py", "scripts/y.py", "tests/test_y.py"]
+    assert check.unnamed_mechanisms(HEADER, files) == ["scripts/y.py"]
+    assert check.unnamed_mechanisms("> правится `y` и x.py\n", files) == []
+
+
+def test_a_stray_header_rejects_the_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Шапка с путём вне изменения — отказ шага журнала, и путь назван."""
+    fragment = "changelog.d/a-note.internal.md"
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / fragment).write_text(HEADER + "\n### Заголовок\n\nтекст\n\n#1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(check.journal, "common_ancestor", lambda _base: "предок")
+    monkeypatch.setattr(check.journal, "changed_files", lambda *_, **__: [fragment, "scripts/x.py"])
+    monkeypatch.setattr(check, "travelled", lambda *_: [])
+    assert check.main(["--base", "origin/main"]) == check.EXIT_REJECTED
+    assert "docs/decisions/037" in capsys.readouterr().err
+
+
+def test_an_unnamed_mechanism_is_a_warning_not_a_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Тронутый, но не названный механизм — предупреждение, и исход чистый (051)."""
+    fragment = "changelog.d/a-note.internal.md"
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / fragment).write_text(
+        "> **Потребителю безразлично:** поправлена докстрока\n\n### З\n\nт\n\n#1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(check.journal, "common_ancestor", lambda _base: "предок")
+    monkeypatch.setattr(check.journal, "changed_files", lambda *_, **__: [fragment, "scripts/y.py"])
+    monkeypatch.setattr(check, "travelled", lambda *_: [])
+    assert check.main(["--base", "origin/main"]) == check.EXIT_OK
+    out = capsys.readouterr().out
+    assert "предупреждение" in out and "scripts/y.py" in out, out

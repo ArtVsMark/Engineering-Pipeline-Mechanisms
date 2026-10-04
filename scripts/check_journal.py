@@ -20,6 +20,7 @@
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Final
@@ -90,6 +91,14 @@ INTERNAL: Final = "internal"
 #: истинного
 #: ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 TOPICS_WITHOUT_WARNING: Final = 1
+
+#: Имя в обратных кавычках шапки `internal`: предмет сверки с составом.
+HEADER_NAME_RE: Final = re.compile(r"`([^`\s]+)`")
+#: Имя считается путём, если в нём косая черта или расширение файла: «`internal`»
+#: и «`requires-python`» путями не являются.
+LOOKS_LIKE_PATH: Final = re.compile(r"/|\.(?:py|md|json|ya?ml|toml|txt|sh)$")
+#: Механизм, который шапка обязана назвать, если изменение его тронуло.
+MECHANISM_RE: Final = re.compile(r"^scripts/[^/]+\.py$")
 
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
@@ -198,6 +207,57 @@ def marks_of(text: str) -> set[str]:
 #:   fatal: path '<путь>' exists on disk, but not in '<sha>' — путь есть в
 #:                                                             рабочем дереве.
 NO_SUCH_PATH: Final = ("does not exist in", "exists on disk, but not in")
+
+
+def header_paths(text: str) -> list[str]:
+    """Пути, названные в ПЕРВОЙ строке фрагмента — шапке `internal`.
+
+    Хвостовая пунктуация снимается: «`docs/decisions/037`,» — тот же путь.
+    """
+    lines = text.splitlines()
+    head = lines[0] if lines else ""
+    return [
+        name.rstrip(".,;:")
+        for name in HEADER_NAME_RE.findall(head)
+        if LOOKS_LIKE_PATH.search(name.rstrip(".,;:"))
+    ]
+
+
+def covered(name: str, files: list[str]) -> bool:
+    """Тронуло ли изменение путь, названный шапкой.
+
+    Совпадение — сам файл, каталог (`.rules/`) или начало имени: решение
+    зовут номером (`docs/decisions/037`), а файл несёт номер и слаг. Так
+    сопоставлял и замер, по которому гейт заведён.
+    """
+    return any(one == name or one.startswith(name) or one.endswith("/" + name) for one in files)
+
+
+def stray_in_header(text: str, files: list[str]) -> list[str]:
+    """Пути шапки, которых изменение не трогает: пересказ разошёлся с составом (215)."""
+    return [name for name in header_paths(text) if not covered(name, files)]
+
+
+def unnamed_mechanisms(text: str, files: list[str]) -> list[str]:
+    """Тронутые механизмы `scripts/`, которых шапка не называет ни путём, ни именем.
+
+    Это ПРЕДУПРЕЖДЕНИЕ, а не отказ (051): правка докстроки механизма законно
+    описывается словами «поправлена докстрока», без имени файла. Замер
+    04.10.2026 по истории: таких фрагментов 29 из 99, и часть из них законна.
+    """
+    lines = text.splitlines()
+    head = lines[0] if lines else ""
+    # Имя ищется ЦЕЛЫМ СЛОВОМ, а не подстрокой (141): иначе короткое имя
+    # находится внутри чужого — `y` внутри `x.py`.
+    return [
+        name
+        for name in files
+        if MECHANISM_RE.match(name)
+        and not any(
+            re.search(rf"(?<![\w.]){re.escape(said)}(?![\w])", head)
+            for said in (name, Path(name).name, Path(name).stem)
+        )
+    ]
 
 
 def at_base(ancestor: str, name: str) -> str:
@@ -392,6 +452,40 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_REJECTED
+
+    # ШАПКА `internal` СВЕРЯЕТСЯ С СОСТАВОМ ИЗМЕНЕНИЯ (решение владельца
+    # 04.10.2026 по #1010, правило 215). «Потребителю безразлично: правится
+    # X» — пересказ своей работы, и путь, которого изменение не трогает, —
+    # пересказ по памяти. Замер 04.10.2026 по истории: из 99 фрагментов
+    # `internal` пути называют 21, и ни один не назвал чужого — гейт держит
+    # форму на будущее, а не чинит прошлое. Остальные формы пересказа держит
+    # приём, а не гейт: навык `retell-from-the-source` (057).
+    for name in fragments:
+        if not name.endswith(f".{INTERNAL}.md"):
+            continue
+        try:
+            text = Path(name).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"проверка не отработала: фрагмент {name} не прочитан: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        stray = stray_in_header(text, files)
+        if stray:
+            print(
+                f"отвергнуто: шапка {name} называет то, чего изменение не трогает: "
+                f"{', '.join(stray)}\n\n"
+                "Шапка «Потребителю безразлично: …» — пересказ этой работы, и он\n"
+                "сверяется с составом изменения, а не пишется по памяти (215).\n"
+                "Сверьте её с `git diff --stat <база>...HEAD`.",
+                file=sys.stderr,
+            )
+            return EXIT_REJECTED
+        quiet = unnamed_mechanisms(text, files)
+        if quiet:
+            print(
+                f"предупреждение: изменение тронуло механизмы, которых шапка {name} не "
+                f"называет: {', '.join(quiet[:5])} — если поведение не меняется, так и "
+                "скажите; если меняется, род записи не `internal`"
+            )
 
     if fragments:
         print(f"фрагмент журнала есть: {', '.join(fragments)}")
