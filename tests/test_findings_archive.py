@@ -873,3 +873,22 @@ def test_reread_keeps_a_link_of_a_mark_named_without_a_twin() -> None:
     archive["resolutions"] = {"eeeeeee": {"by": 9, "twin_of": "fffffff"}}
     module.reread(archive, [(10, "Разобрано: eeeeeee — ещё раз")], {9, 10})
     assert archive["resolutions"]["eeeeeee"]["twin_of"] == "fffffff", "связь стёрта"
+
+
+def test_an_old_kind_name_is_archived_under_the_new_one() -> None:
+    """Строка `Род: старое` даёт находке нынешнее имя и его `правило` (взгляд на #1093)."""
+    kinds = {
+        "новое": {
+            "признак": "…",
+            "встречен": [],
+            "закрыт": "нет — причина",
+            "прежде": ["старое"],
+            "каталогу": "своё — у каталога этого нет",
+        }
+    }
+    # `ddddddd` — источник дубля: корень цепочки `ccccccc` счёт относит к роду
+    # сам, а хвост получает род только через `named_in`.
+    findings: dict[str, dict[str, Any]] = {"ddddddd": {"pr": 3}}
+    module.with_kinds(findings, kinds, ["Разобрано: ddddddd дубль ccccccc\nРод: старое"])
+    assert findings["ddddddd"]["род"] == "новое"
+    assert findings["ddddddd"]["правило"] is not None
