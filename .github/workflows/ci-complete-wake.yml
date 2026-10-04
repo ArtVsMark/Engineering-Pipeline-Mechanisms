@@ -42,9 +42,12 @@ jobs:
   ci-complete-wake:
     name: ci-complete-wake
     # Сводка живёт только на изменении: прогон `ci` на общей ветке будить нечего.
+    # Отменённый `ci` — это новый толчок, отменивший прежний заход: голова
+    # мертва, а её сводку перезапускать незачем (взгляд на #1110).
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.event == 'pull_request'
+      (github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.conclusion != 'cancelled')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

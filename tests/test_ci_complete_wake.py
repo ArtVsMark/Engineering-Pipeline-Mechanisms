@@ -9,8 +9,9 @@
 from typing import Any
 
 import pytest
+import yaml
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("ci_complete_wake.py")
 
@@ -41,7 +42,7 @@ def test_a_red_summary_judged_before_ci_ended_is_stale() -> None:
         {"status": "in_progress", "conclusion": None},
         {"conclusion": "success"},
         {"conclusion": "cancelled"},
-        {"updated_at": "2026-10-04T12:05:00Z"},
+        {"updated_at": "2026-10-04T12:02:01Z"},
         {"run_attempt": module.MAX_ATTEMPTS},
     ],
     ids=["идёт", "зелёная", "отменена", "после-конца-ci", "попытки-исчерпаны"],
@@ -49,6 +50,34 @@ def test_a_red_summary_judged_before_ci_ended_is_stale() -> None:
 def test_a_summary_that_is_not_stale_is_left_alone(fields: dict[str, Any]) -> None:
     """Вторая половина: идущую, зелёную, отменённую, позднюю и исчерпанную не трогают."""
     assert module.stale_summary([run(**fields)], CI_DONE) is None
+
+
+@pytest.mark.parametrize(
+    "updated_at",
+    ["2026-10-04T12:00:00Z", "2026-10-04T12:02:00Z"],
+    ids=["ровно-конец-ci", "конец-запаса"],
+)
+def test_a_summary_finished_within_the_tail_is_stale(updated_at: str) -> None:
+    """Граница включена: вердикт вынесен до конца `ci`, а завершение пришло хвостом (#1110)."""
+    assert module.stale_summary([run(updated_at=updated_at)], CI_DONE) is not None
+
+
+def test_the_manual_run_end_of_time_does_not_overflow() -> None:
+    """Ручной заход передаёт последний миг календаря — сравнение не переполняется."""
+    assert module.stale_summary([run()], "9999-12-31T23:59:59Z") is not None
+
+
+def test_an_unread_platform_time_is_not_run() -> None:
+    """Время площадки не прочитано — будильник не отработал, а не «не устарела» (045)."""
+    with pytest.raises(module.NotRun, match="время"):
+        module.stale_summary([run(updated_at="вчера")], CI_DONE)
+
+
+def test_a_cancelled_ci_does_not_wake_the_summary() -> None:
+    """Отменённый `ci` — новый толчок на голове: будильник не идёт (взгляд на #1110)."""
+    flow = (ROOT / ".github" / "workflows" / "ci-complete-wake.yml").read_text(encoding="utf-8")
+    condition = yaml.safe_load(flow)["jobs"]["ci-complete-wake"]["if"]
+    assert "github.event.workflow_run.conclusion != 'cancelled'" in condition
 
 
 def test_only_the_last_summary_of_the_head_counts() -> None:
