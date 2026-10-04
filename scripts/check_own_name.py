@@ -53,11 +53,12 @@ EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 
 #: Адрес вида `owner/repo` в тексте. Годится и для ссылки, и для строки данных:
-#: имя ищется одним образцом, а не тремя по видам файлов (090). Поиск берёт
-#: САМОЕ ЛЕВОЕ совпадение, поэтому хост `api.`/`uploads.` узнаётся целиком, а
-#: не хвостом `github.com` (находка `5408fc8` на #1082).
+#: имя ищется одним образцом, а не тремя по видам файлов (090). Хост берётся
+#: ЦЕЛИКОМ, со всеми поддоменами: поиск отдаёт самое левое совпадение, и
+#: `gist.github.com` не читается хвостом `github.com` (находки `5408fc8` на
+#: #1082 и `a9a87c5` на #1095).
 NAME_RE: Final = re.compile(
-    r"(?P<host>(?:api\.|uploads\.)?github\.com|githubusercontent\.com)"
+    r"(?P<host>(?:[A-Za-z0-9-]+\.)*github(?:usercontent)?\.com)"
     r"/(?P<owner>[A-Za-z0-9][\w.-]*)/(?P<repo>[A-Za-z0-9][\w.-]*)"
     r"(?:/(?P<more>[A-Za-z0-9][\w.-]*))?"
 )
@@ -68,6 +69,15 @@ NAME_RE: Final = re.compile(
 #: спрашивают.
 API_HOSTS: Final = frozenset({"api.github.com", "uploads.github.com"})
 API_REPOS: Final = "repos"
+#: Хосты, у которых путь начинается с `<владелец>/<имя>`. То же строгое правило
+#: на всё прочее (210, второй заход по образцу — `a9a87c5` на #1095): хост вне
+#: этого списка и вне `API_HOSTS` — не имя, и площадку о нём не спрашивают.
+#: Перечень, а не исключения: `gist.`, `avatars.`, `user-images.`, `objects.`
+#: дописывались бы по одному. Замер 04.10.2026 по дереву вне `tests/`: хосты
+#: площадки — только `github.com` (1790) и `raw.githubusercontent.com` (10).
+#: Сосед за границей назван (195): `codeload.github.com/<владелец>/<имя>` тоже
+#: несёт имя, но в дереве его нет, и гейт его не спросит.
+NAME_HOSTS: Final = frozenset({"github.com", "www.github.com", "raw.githubusercontent.com"})
 #: Первые сегменты пути площадки, которые не владелец: страницы организаций и
 #: людей, вложения, приложения. Площадка не даёт заводить учётные записи с
 #: такими именами, поэтому `github.com/orgs/X` — не репозиторий «orgs/X».
@@ -175,11 +185,12 @@ def mentions(root: Path) -> dict[str, list[tuple[Path, int]]]:
 
 def name_of(match: re.Match[str]) -> str:
     """Имя `владелец/репозиторий` из совпадения; пусто — адрес не о репозитории."""
-    if match["host"] in API_HOSTS:
+    host = match["host"].lower()
+    if host in API_HOSTS:
         if match["owner"] != API_REPOS or not match["more"]:
             return ""
         return f"{match['repo']}/{match['more']}"
-    if match["owner"] in NOT_AN_OWNER:
+    if host not in NAME_HOSTS or match["owner"] in NOT_AN_OWNER:
         return ""
     return f"{match['owner']}/{match['repo']}"
 
@@ -263,15 +274,33 @@ def main(argv: list[str] | None = None) -> int:
         print("Имя берётся у площадки, а не из памяти дерева (172).")
         return EXIT_FOUND
 
+    # НИ ОДНОГО ОТВЕТА — НЕ «ЧИСТО» (045, взгляд на #1095). Протухший токен,
+    # 401 или кончившаяся квота дают отказ на каждом имени, и сверено ноль:
+    # исход тот же, что у полной сверки, был бы ложным. Отказ на части имён —
+    # законная чужая закрытость, и она печатается числом.
+    if asked and unanswered == asked:
+        print(
+            f"гейт не отработал: площадка не ответила ни на одно из {asked} имён — "
+            "редиректы не сверены (токен, квота, сеть)",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
     said_names = f"имён в дереве: {len(written)}"
-    if unanswered:
-        said_names += f"; площадка не ответила на {unanswered} из {asked} — они не сверены"
     if not token:
         print(f"чисто по своему имени; {said_names}. Редиректы не спрошены: нет токена")
-    elif not exact:
-        print(f"чисто; {said_names}, спрошено {asked}. Регистр не сверялся: канон из origin")
+        return EXIT_OK
+    # Начало строки говорит ровно то, что сверено: «совпадают» — только когда
+    # ответила площадка на все (взгляд на #1095, `5e80cf8`).
+    checked = asked - unanswered
+    said_names += f", сверено {checked} из {asked}"
+    if unanswered:
+        said_names += f"; не ответила на {unanswered} — они не сверены"
+    if not exact:
+        print(f"чисто по ответившим; {said_names}. Регистр не сверялся: канон из origin")
+    elif unanswered:
+        print(f"чисто по ответившим: их имена совпадают с площадкой; {said_names}")
     else:
-        print(f"чисто: имена совпадают с площадкой; {said_names}, спрошено {asked}")
+        print(f"чисто: имена совпадают с площадкой; {said_names}")
     return EXIT_OK
 
 

@@ -238,7 +238,40 @@ def test_an_unanswered_name_is_counted_apart(
     monkeypatch.setattr(module.ghrest, "request", answer)
     assert module.main(["--root", str(root)]) == module.EXIT_OK
     said = capsys.readouterr().out
-    assert "не ответила на 1 из 2" in said and "спрошено 2" in said, said
+    assert "не ответила на 1" in said and "сверено 1 из 2" in said, said
+    assert not said.startswith("чисто: имена совпадают"), "несверенное не зовётся совпавшим"
+
+
+def test_no_answer_at_all_is_the_third_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Площадка не ответила ни на одно имя — «не отработал», а не «чисто» (взгляд на #1095)."""
+    root = repo_with(tmp_path, "https://github.com/o/name/x\nhttps://github.com/p/other/x\n")
+    monkeypatch.setattr(module, "canon", lambda: ("o/name", True))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "token")
+
+    def refuse(*_: object, **__: object) -> dict[str, str]:
+        raise module.ghrest.TransportError("401")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+    assert "ни на одно из 2" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "https://gist.github.com/o/0123abcd",
+        "https://avatars.githubusercontent.com/u/86671904",
+        "https://user-images.githubusercontent.com/123/x.png",
+        "https://objects.githubusercontent.com/o/r",
+        "https://codeload.github.com/o/r/zip/main",
+    ],
+)
+def test_a_host_outside_the_list_is_not_a_name(tmp_path: Path, line: str) -> None:
+    """Имя — только на хостах `NAME_HOSTS` и под `/repos` у API; прочий хост — не имя (210, #1095)."""
+    root = repo_with(tmp_path, line + "\n")
+    assert module.mentions(root) == {}, module.mentions(root)
 
 
 @pytest.mark.parametrize(
@@ -247,6 +280,9 @@ def test_an_unanswered_name_is_counted_apart(
         ("https://api.github.com/repos/o/r/issues", "o/r"),
         ("https://api.github.com/user/repos", ""),
         ("https://github.com/o/r", "o/r"),
+        ("https://www.github.com/o/r", "o/r"),
+        ("https://raw.githubusercontent.com/o/r/main/x", "o/r"),
+        ("https://gist.github.com/o/r", ""),
         ("https://github.com/orgs/o/people", ""),
     ],
 )
