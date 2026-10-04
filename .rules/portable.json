@@ -123,6 +123,9 @@
     ".github/workflows/drift.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/ci-complete-wake.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/hail.yml": {
       "answer": "configured",
       "where": [
@@ -207,6 +210,9 @@
     ".github/workflows/step-window-lifetime.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-verify-queue.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-work-plan.yml": {
       "answer": "as-is"
     },
@@ -218,6 +224,12 @@
     },
     ".github/workflows/task-items.yml": {
       "answer": "as-is"
+    },
+    ".github/workflows/verify-queue.yml": {
+      "answer": "configured",
+      "where": [
+        ".github/workflows/verify-queue.yml"
+      ]
     },
     ".github/workflows/work-plan.yml": {
       "answer": "configured",
@@ -507,6 +519,9 @@
     "scripts/gitcall.py": {
       "answer": "as-is"
     },
+    "scripts/ci_complete_wake.py": {
+      "answer": "as-is"
+    },
     "scripts/hail.py": {
       "answer": "as-is"
     },
@@ -621,6 +636,9 @@
       "answer": "as-is"
     },
     "scripts/unlooked.py": {
+      "answer": "as-is"
+    },
+    "scripts/verify_queue.py": {
       "answer": "as-is"
     },
     "scripts/version.py": {
