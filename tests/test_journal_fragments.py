@@ -623,3 +623,60 @@ def test_an_unnamed_mechanism_is_a_warning_not_a_refusal(
     assert check.main(["--base", "origin/main"]) == check.EXIT_OK
     out = capsys.readouterr().out
     assert "предупреждение" in out and "scripts/y.py" in out, out
+
+
+def test_a_wrapped_header_is_read_whole() -> None:
+    """Шапка, перенесённая на строки `> …`, читается целиком (взгляд на #1111)."""
+    text = "> **Потребителю безразлично:** правится\n> `scripts/x.py`.\n\n### З\n\n`scripts/y.py`\n"
+    assert check.header_paths(text) == ["scripts/x.py"]
+    assert check.unnamed_mechanisms(text, ["scripts/x.py"]) == []
+
+
+def test_a_path_under_a_negation_is_not_a_claim() -> None:
+    """«Ни `.pipeline.yml` не тронут» — не пересказ правки; соседняя часть — пересказ."""
+    text = (
+        "> **Потребителю безразлично:** правится `scripts/x.py` — "
+        "ни форма `.pipeline.yml`, ни имена не тронуты.\n"
+    )
+    assert check.header_paths(text) == ["scripts/x.py"]
+    assert check.stray_in_header(text, ["scripts/x.py"]) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "files", "seen"),
+    [
+        ("scripts/review", ["scripts/review_map.py"], False),
+        ("scripts/review", ["scripts/review.py"], True),
+        ("docs/decisions/037", ["docs/decisions/037-a-kind.md"], True),
+        ("docs/decisions/03", ["docs/decisions/037-a-kind.md"], False),
+        (".rules/", [".rules/bindings.json"], True),
+    ],
+    ids=["чужой-хвост", "расширение", "номер-решения", "часть-номера", "каталог"],
+)
+def test_a_name_prefix_counts_only_at_a_boundary(name: str, files: list[str], seen: bool) -> None:
+    """Начало имени засчитывается на границе «-», «.», «/» — не внутри имени (взгляд на #1111)."""
+    assert check.covered(name, files) is seen
+
+
+def test_measure_counts_internal_fragments_by_their_own_commits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Замер судит каждый фрагмент составом коммита, который его завёл."""
+    fragment = "changelog.d/a.internal.md"
+    answers = {
+        ("log",): "aaa\n",
+        ("show", "-z", "--name-only", "--format="): f"\n{fragment}\0scripts/z.py\0",
+        ("show", "-z", "--name-only", "--diff-filter=A"): f"\n{fragment}\0",
+        ("show", "aaa:"): "> **Потребителю безразлично:** правится `docs/x.md`\n",
+    }
+
+    def output(args: list[str], *_: object, **__: object) -> str:
+        for prefix, said in answers.items():
+            if tuple(args[: len(prefix)]) == prefix or (
+                prefix[0] == "show" and len(prefix) == 2 and args[1].startswith(prefix[1])
+            ):
+                return said
+        raise AssertionError(args)
+
+    monkeypatch.setattr(check.gitcall, "output", output)
+    assert check.measure("HEAD") == (1, 1, 1)
