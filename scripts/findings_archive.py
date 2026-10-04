@@ -59,7 +59,6 @@
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,20 +69,21 @@ import finding_chains
 import finding_kinds
 import findings as registry
 import ghrest
-import gitcall
-import paths
 import review_findings
+import trunk_log
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
 
 #: Версия формы архива.
-SCHEMA: Final = "2"
+SCHEMA: Final = "3"
 #: Что версия описывает: пояснение ставится рядом с номером (164).
 SCHEMA_SAID: Final = (
     "версия формы архива: findings (отпечаток → запись), resolutions (снятия, в том "
     "числе ещё без находки; fix_check — снято проверкой починки, а не строкой в теле "
-    "слияния), counted (учтённые изменения), kinds (род → встречи и судьба), gaps "
+    "слияния), counted (учтённые изменения), kinds (род → встречи по словарю и строкам "
+    "«Род:» истории, и судьба; с формы 3 род находки, которой нет в словаре, берётся "
+    "из строки «Род:» в теле слияния), gaps "
     "(чего архив не знает), unconfirmed (что сверка с историей не подтвердила)"
 )
 #: Сколько слитых изменений дописывать за заход. Арифметику держит гейт, а не
@@ -116,13 +116,8 @@ MERGES_PER_HOUR: Final = 15
 #: Номер изменения в теме уплотнённого коммита: «Тема (#N)».
 #: Слияние площадки без уплотнения: «Merge pull request #N from …». Архив его
 #: не учитывает, а считает — для строки в `gaps`.
-UNSQUASHED_RE: Final = re.compile(r"^Merge pull request #\d+ from ")
 #: Строка `gaps` о них: снятия у таких слияний в коммитах ветки, и архив их не знает.
 UNSEEN_GAP: Final = "слияний без уплотнения, которых архив не видит"
-MERGED_SUBJECT_RE: Final = re.compile(r"\(#(\d+)\)$")
-#: Разделители полей и записей в выводе `git log` для перечитки.
-FIELD: Final = "\x1f"
-RECORD: Final = "\x00"
 #: Граница, которую архив знает о себе всегда: ответ верификатора подхватывается
 #: из живого реестра, пока запись в нём, и у ушедших раньше первого захода его нет.
 VERIFIER_GAP: Final = (
@@ -321,13 +316,42 @@ def settle(archive: dict[str, Any]) -> None:
         entry["twin_of"] = said["twin_of"] if said else ""
 
 
-def with_kinds(findings: dict[str, dict[str, Any]], kinds: dict[str, Any]) -> dict[str, Any]:
-    """Род и его судьба у каждой находки — из дерева, пересчётом, а не из прошлого архива."""
-    by_mark = kinds_by_mark(kinds)
+def named_in(bodies: list[str]) -> dict[str, str]:
+    """Отпечаток → род из строки `Род:` под его снятием; первый названный побеждает.
+
+    `Род: нет — <причина>` рода не называет и сюда не входит (154).
+    """
+    found: dict[str, str] = {}
+    for body in bodies:
+        for record in changerefs.resolutions_parsed(body):
+            if record.kind and not finding_kinds.said_no(record.kind):
+                for mark in record.marks:
+                    found.setdefault(mark, record.kind)
+    return found
+
+
+def with_kinds(
+    findings: dict[str, dict[str, Any]], kinds: dict[str, Any], bodies: list[str] | None = None
+) -> dict[str, Any]:
+    """Род и его судьба у каждой находки — из дерева и истории, пересчётом, а не из прошлого архива.
+
+    РОД ЕДЕТ С РАБОТОЙ (#1022, форма 3). Словарь с этой формы заморожен, и
+    новых отпечатков в `встречен` не получает: род находки, которой в нём нет,
+    называет строка `Род:` под её снятием в теле слияния. Отпечаток, уже
+    стоящий в словаре, остаётся за его родом — так же его считает
+    `met_in_history`, и род у находки не расходится со счётом. Встречи рода считает тот же
+    `finding_kinds.with_history`, что у плана и гейта рождения правила, — по
+    отпечаткам, как и прежде: встреча в окне находкой архива не бывает.
+    """
+    said = bodies or []
+    merged, _ = finding_kinds.with_history(kinds, said)
+    by_mark = kinds_by_mark(merged)
+    named = named_in(said)
     for mark, entry in findings.items():
-        name = by_mark.get(mark)
+        name = by_mark.get(mark) or named.get(mark)
         entry["род"] = name
-        entry["правило"] = rule_of(kinds[name]) if name else None
+        entry["правило"] = rule_of(kinds[name]) if name in kinds else None
+    kinds = merged
     return {
         name: {"встреч": sum(1 for one in by_mark.values() if one == name), **rule_of(body)}
         for name, body in kinds.items()
@@ -360,30 +384,6 @@ def merged_pending(merged: list[tuple[int, str]], counted: set[int]) -> list[tup
             seen.add(number)
             pending.append((number, body))
     return pending
-
-
-def merged_messages(log: str) -> list[tuple[int, str]]:
-    """Номер изменения и тело его уплотнённого коммита — из вывода `git log`.
-
-    Коммит без «(#N)» в теме слиянием изменения не считается и пропускается:
-    снятие из него принадлежит не изменению, а прямой правке ветки.
-    """
-    out = []
-    for record in log.split(RECORD):
-        subject, _, body = record.strip("\n").partition(FIELD)
-        said = MERGED_SUBJECT_RE.search(subject.strip())
-        if said:
-            out.append((int(said.group(1)), body))
-    return out
-
-
-def unsquashed(log: str) -> int:
-    """Сколько слияний площадки без уплотнения в истории — их архив не видит (#879)."""
-    return sum(
-        1
-        for record in log.split(RECORD)
-        if UNSQUASHED_RE.search(record.strip("\n").partition(FIELD)[0].strip())
-    )
 
 
 def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: set[int]) -> int:
@@ -434,22 +434,6 @@ def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: se
     )
 
 
-#: Чья история читается. ОБЩЕЙ ВЕТКИ, а не головы прогона: кнопка, нажатая на
-#: другой ветке, иначе сняла бы находку её коммитом с «(#N)» и «Разобрано:».
-#: Страж в `badges.yml` держит только перечитку, а история теперь читается
-#: всегда (взгляд на #879); сверка по соседству идёт по той же ветке.
-TRUNK_REF: Final = f"origin/{paths.TRUNK}"
-
-
-def git_log(where: Path | None = None, ref: str = TRUNK_REF) -> str:
-    """Темы и тела коммитов `ref` от старых к новым — вход архива; по умолчанию — общая ветка."""
-    return gitcall.output(
-        ["log", "--reverse", "--format=%s%x1f%B%x00", ref],
-        NotRun,
-        cwd=str(where) if where else None,
-    )
-
-
 def build(
     repo: str,
     token: str,
@@ -483,7 +467,7 @@ def build(
         if entry is not None and not entry.get("checked"):
             entry["checked"] = said
     settle(archive)
-    summary = with_kinds(archive["findings"], kinds)
+    summary = with_kinds(archive["findings"], kinds, [body for _, body in history])
     left = max(0, len(pending) - budget)
     gaps = [VERIFIER_GAP]
     if left:
@@ -521,8 +505,8 @@ def main(argv: list[str] | None = None) -> int:
         print("архив не собран: нет токена или репозитория (045)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        log = git_log()
-        history = merged_messages(log)
+        log = trunk_log.git_log()
+        history = trunk_log.merged_messages(log)
         archive = build(
             args.repo,
             token,
@@ -531,10 +515,11 @@ def main(argv: list[str] | None = None) -> int:
             previous(args.previous),
             history,
             args.reread,
-            unsquashed(log),
+            trunk_log.unsquashed(log),
         )
     except (
         NotRun,
+        trunk_log.NotRun,
         ghrest.TransportError,
         finding_kinds.NotRun,
     ) as exc:

@@ -604,6 +604,9 @@
       "answer": "ours",
       "why": "@provider"
     },
+    "scripts/trunk_log.py": {
+      "answer": "as-is"
+    },
     "scripts/unlooked.py": {
       "answer": "as-is"
     },
