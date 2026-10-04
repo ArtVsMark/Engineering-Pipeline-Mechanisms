@@ -1056,7 +1056,9 @@ def platform(
     )
     monkeypatch.setattr(module, "queue_now", lambda live: module.Queue(0, 0))
     monkeypatch.setattr(module, "pause", lambda repo, token, live, *, frozen, apply: ([], []))
-    monkeypatch.setattr(module, "save", lambda repo, token, body, apply: written.append(body))
+    monkeypatch.setattr(
+        module, "save", lambda repo, token, body, apply, number=None: written.append(body)
+    )
     return written
 
 
@@ -1883,3 +1885,36 @@ def test_every_run_addressed_to_the_duty_wakes_it() -> None:
     assert not addressed - woken, (
         f"красное адресовано дежурному, а его не будит: {sorted(addressed - woken)}"
     )
+
+
+def test_the_attempt_is_asked_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Попытка спрашивается раз на прогон, а не на каждую его запись (#1084)."""
+    url = "https://github.com/o/r/actions/runs/77/job/1"
+    platform(
+        monkeypatch,
+        [
+            {"name": f"j{one}", "status": "completed", "conclusion": "success", "details_url": url}
+            for one in range(5)
+        ],
+    )
+    asked: list[int] = []
+
+    def counted(repo: str, run: int, token: str) -> int:
+        asked.append(run)
+        return 1
+
+    monkeypatch.setattr(module, "attempt", counted)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_GREEN
+    assert asked == [77], asked
+
+
+def test_save_with_a_known_number_does_not_look_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Номер, найденный заходом, второго чтения списка не стоит (#1084); без него — ищется."""
+    looked: list[str] = []
+    monkeypatch.setattr(
+        module.findings, "live_issue", lambda *a, **k: looked.append("x") or (7, "")
+    )
+    module.save("o/r", "t", "тело", False, 7)
+    assert looked == []
+    module.save("o/r", "t", "тело", False)
+    assert looked == ["x"]

@@ -1180,3 +1180,15 @@ def test_a_stalled_late_look_is_named() -> None:
     }
     assert module.stalled(entries, "2026-09-26") == [77]
     assert module.stalled(entries, "2026-09-11") == []
+
+
+def test_save_with_a_known_number_does_not_look_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Номер, найденный заходом, второго чтения списка не стоит (#1084); без него — ищется."""
+    looked: list[str] = []
+    monkeypatch.setattr(
+        module.findings, "live_issue", lambda *a, **k: looked.append("x") or (7, "")
+    )
+    module.save("o/r", "t", {}, 0, False, None, 7)
+    assert looked == []
+    module.save("o/r", "t", {}, 0, False)
+    assert looked == ["x"]

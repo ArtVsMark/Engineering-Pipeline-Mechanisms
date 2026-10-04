@@ -175,13 +175,18 @@ def rows_of(body: str, head: str) -> list[str]:
     return found
 
 
-def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[str]]:
+def sources(
+    repo: str, token: str, listed: list[dict[str, Any]] | None = None
+) -> tuple[dict[int, Source], list[str], set[str]]:
     """Источники 0–3 и 5, прочитанные у тех, кто их ведёт.
 
     Отказ ОДНОГО источника не роняет весь план: остальные разделы собираются, а
     непрочитанный называет себя. План, исчезнувший целиком из-за молчания
     одного канала, хуже плана с названной дырой
     ([084](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/084-best-effort-channels-never-block-the-main-path.md)).
+
+    ``listed`` — список открытых записей, прочитанный один раз на заход (#1084).
+    ``None`` — каждый канал читает сам, как прежде.
     """
     built: dict[int, Source] = {}
     broken: list[str] = []
@@ -192,7 +197,7 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[st
     # и выглядел полным (045).
     lagging_silent = ""
     try:
-        holding, lagging = debt.branch_debt(repo, token)
+        holding, lagging = debt.branch_debt(repo, token, listed)
         built[0] = Source(rows=[f"**{one}** — держит слияние" for one in holding])
     except ghrest.TransportError as exc:
         built[0] = Source(unread=f"задача о красноте не прочитана: {exc}")
@@ -227,7 +232,7 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[st
     # прочитанное. Симметрию нашёл внешний взгляд на #652.
     stayed = [f"**{one}** — совещательное красное пережило слияние" for one in lagging]
     try:
-        left = debt.findings_debt(repo, token)
+        left = debt.findings_debt(repo, token, listed)
         marks = {mark for mark, _, _ in left}
         rows = [f"`{mark}` · #{pr} — {said}" for mark, pr, said in left]
         built[3] = Source(rows=rows + stayed, unread=lagging_silent)
@@ -243,8 +248,8 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[st
     # выглядел полным, когда дрейф назвал бы работу (#665). Каналы читаются
     # порознь: отказ одного не стирает прочитанное у другого — тот же урок,
     # что у источника 3 (#651).
-    rules = rules_part(repo, token)
-    moved = drift_part(repo, token)
+    rules = rules_part(repo, token, listed)
+    moved = drift_part(repo, token, listed)
     born = birth_part()
     parts = (rules, moved, born)
     built[5] = Source(
@@ -258,11 +263,11 @@ def sources(repo: str, token: str) -> tuple[dict[int, Source], list[str], set[st
     return built, broken, marks
 
 
-def rules_part(repo: str, token: str) -> Source:
+def rules_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None) -> Source:
     """Половина источника 5 о правилах каталога — из «входящих»."""
     try:
         closed = debt.closed_issues(repo, token)
-        inbox, inbox_note, seen = debt.inbox_body(repo, token, closed)
+        inbox, inbox_note, seen = debt.inbox_body(repo, token, closed, listed)
     except ghrest.TransportError as exc:
         return Source(unread=f"«входящие» каталога не прочитаны: {exc}")
     numbers = debt.rules_debt(inbox)
@@ -334,7 +339,7 @@ def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> So
 DRIFT_LATE: Final = "ночной заход дрейфа, похоже, пропущен"
 
 
-def drift_part(repo: str, token: str) -> Source:
+def drift_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None) -> Source:
     """Половина источника 5 о дрейфе — записи живой задачи дрейфа.
 
     Строка плана несёт номер задачи дрейфа: он и есть адрес — снимается запись
@@ -346,7 +351,7 @@ def drift_part(repo: str, token: str) -> Source:
     читался бы как «всё сошлось» (045).
     """
     try:
-        number, body, seen = findings.live_issue_seen(repo, token, drift.MARKER)
+        number, body, seen = findings.live_issue_seen(repo, token, drift.MARKER, listed)
     except ghrest.TransportError as exc:
         return Source(unread=f"задача дрейфа не прочитана: {exc}")
     if number is None:
@@ -457,7 +462,11 @@ def may_be_born(issue: dict[str, Any], repo: str, taken: frozenset[int] | set[in
 
 
 def born_rows(
-    repo: str, token: str, held: dict[int, list[str]], taken: frozenset[int] = frozenset()
+    repo: str,
+    token: str,
+    held: dict[int, list[str]],
+    taken: frozenset[int] = frozenset(),
+    listed: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """Строки раздела 4 для задач, рождённых работой по строкам разделов 4 и 6.
 
@@ -497,7 +506,8 @@ def born_rows(
     if not parents:
         return []
     found: dict[int, tuple[str, int]] = {}
-    for issue in ghrest.paginate(f"repos/{repo}/issues?state=open", token):
+    opened = ghrest.paginate(f"repos/{repo}/issues?state=open", token) if listed is None else listed
+    for issue in opened:
         if not may_be_born(issue, repo, parents | taken):
             continue
         links = changerefs.links_in(str(issue.get("body") or ""))
@@ -545,7 +555,13 @@ def hand_part(body: str) -> list[str]:
 
 
 def fresh_build(
-    repo: str, token: str, built: dict[int, Source], marks: set[str], when: str, apply: bool
+    repo: str,
+    token: str,
+    built: dict[int, Source],
+    marks: set[str],
+    when: str,
+    apply: bool,
+    listed: list[dict[str, Any]] | None = None,
 ) -> tuple[int, str, dict[int, list[str]], str]:
     """Собирает план по свежему телу и перед записью сверяет, не правила ли его рука.
 
@@ -583,7 +599,7 @@ def fresh_build(
             for row in source.rows
             if (address := address_of(row)).startswith("#")
         )
-        held[BORN_INTO] = held[BORN_INTO] + born_rows(repo, token, held, taken)
+        held[BORN_INTO] = held[BORN_INTO] + born_rows(repo, token, held, taken, listed)
         said = assemble(body, built, held, when)
         if not apply:
             return number, body, held, said
@@ -615,9 +631,23 @@ def main(argv: list[str] | None = None) -> int:
         # тело, прочитанное в начале, к записи устаревает. Замер 23.09.2026:
         # владелец поставил #673 первым в раздел 4, а заход, прочитавший тело
         # до правки, записал его после — и указание владельца пропало молча.
-        built, broken, marks = sources(args.repo, token)
+        #
+        # СПИСОК ОТКРЫТЫХ ЗАПИСЕЙ ЧИТАЕТСЯ ОДИН РАЗ (#1084). Замер 04.10.2026
+        # счётчиком запросов: шесть чтений `issues?state=open` за заход — пять
+        # каналов и рождённые строки. Тело плана сюда не входит: его
+        # `fresh_build` перечитывает после источников и перед записью, и это
+        # защита от гонки с рукой, а не повтор. Отказ общего чтения — не отказ
+        # плана: каналы читают сами и называют своё молчание порознь (084).
+        try:
+            listed: list[dict[str, Any]] | None = debt.open_listed(args.repo, token)
+        except ghrest.TransportError as exc:
+            print(f"общий список открытых записей не прочитан — каналы читают сами: {exc}")
+            listed = None
+        built, broken, marks = sources(args.repo, token, listed)
         when = datetime.now(UTC).strftime("%d.%m.%Y")
-        number, body, held, said = fresh_build(args.repo, token, built, marks, when, args.apply)
+        number, body, held, said = fresh_build(
+            args.repo, token, built, marks, when, args.apply, listed
+        )
     except (NotRun, ghrest.TransportError) as exc:
         print(f"сборщик не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

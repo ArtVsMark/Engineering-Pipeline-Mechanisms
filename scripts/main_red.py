@@ -1188,9 +1188,20 @@ def render_body(
     return "\n".join(lines) + "\n"
 
 
-def save(repo: str, token: str, body: str, apply: bool) -> None:
-    """Записывает задачу: обновляет по месту или заводит одну."""
-    number, _ = findings.live_issue(repo, token, MARKER)
+#: «Номер живой задачи не передан — найти самому»: отличен от ``None``, который
+#: значит «задачи нет».
+UNREAD: Final = -1
+
+
+def save(repo: str, token: str, body: str, apply: bool, number: int | None = UNREAD) -> None:
+    """Записывает задачу: обновляет по месту или заводит одну.
+
+    ``number`` — номер, уже найденный заходом в начале (#1084): тело задачи
+    ведёт один механизм, и второе чтение списка ради того же номера стоило
+    запроса без нового знания. Без него (`UNREAD`) задача ищется здесь.
+    """
+    if number == UNREAD:
+        number, _ = findings.live_issue(repo, token, MARKER)
     if not apply:
         print("записал бы в " + (f"#{number}" if number else "новую задачу"))
         return
@@ -1260,18 +1271,25 @@ def main(argv: list[str] | None = None) -> int:
         red = red_of(runs)
         holds, rest = split(red, required)
 
-        _, body = findings.live_issue(args.repo, token, MARKER)
+        live_number, body = findings.live_issue(args.repo, token, MARKER)
         flakes = parse_flakes(body)
         day = datetime.now(UTC).strftime("%d.%m.%Y")
 
         # Мигание видно ТАМ ЖЕ, где всё остальное: зелёная запись прогона,
         # который шёл не с первой попытки. Отдельного состояния для этого не
         # нужно — площадка помнит номер попытки за нас.
+        #
+        # ПОПЫТКА СПРАШИВАЕТСЯ РАЗ НА ПРОГОН, А НЕ НА ЗАПИСЬ (#1084). Записей
+        # проверки у одного прогона столько, сколько в нём джобов, и замер
+        # 04.10.2026 счётчиком запросов дал пять чтений одного прогона за заход.
+        tried: dict[int, int] = {}
         for run in runs:
             if run.get("conclusion") != "success":
                 continue
             number = run_id_of(run)
-            if number and attempt(args.repo, number, token) > 1:
+            if number and number not in tried:
+                tried[number] = attempt(args.repo, number, token)
+            if number and tried[number] > 1:
                 flakes = flakes_after(flakes, str(run.get("name", "")), number, day)
 
         if holds or rest:
@@ -1286,7 +1304,7 @@ def main(argv: list[str] | None = None) -> int:
             # разобрался». Починка меняла причину отказа, а не исход. Нашёл
             # внешний взгляд на #160.
             number = target_run(holds, rest, red, fed)
-            tries = attempt(args.repo, number, token) if number else 1
+            tries = (tried.get(number) or attempt(args.repo, number, token)) if number else 1
             why = rerun_reason(holds, rest, number, tries, fed, rerunnable())
             if why:
                 print(f"перезапуска не будет: {why}")
@@ -1353,6 +1371,7 @@ def main(argv: list[str] | None = None) -> int:
             token,
             render_body(holds, rest, flakes, sha, queue, proof, seen.unfixed),
             args.apply,
+            live_number,
         )
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
