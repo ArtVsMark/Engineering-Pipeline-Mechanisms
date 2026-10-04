@@ -95,7 +95,10 @@ def test_a_kind_counts_by_fingerprints_not_by_a_number(name: str) -> None:
     проверить нечем — коммита с находкой не существует.
     """
     met = kinds()[name].get("встречен")
-    assert isinstance(met, list) and met, f"{name}: встречи не перечислены поштучно"
+    # ПУСТОЙ СПИСОК ЗАКОНЕН С 04.10.2026 (решение 038): список заморожен, и у
+    # нового рода первая встреча — строка `Род:` в коммите, а не запись здесь.
+    # Списком поле быть обязано: число рассохлось бы (005).
+    assert isinstance(met, list), f"{name}: встречи не перечислены поштучно"
     wrong: list[str] = []
     for one in (str(each) for each in met):
         if FINGERPRINT.match(one):
