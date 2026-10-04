@@ -390,7 +390,10 @@
       "answer": "as-is"
     },
     "scripts/check_pr_meta.py": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".rules/finding-kinds.json"
+      ]
     },
     "scripts/check_reached_by_work.py": {
       "answer": "as-is"

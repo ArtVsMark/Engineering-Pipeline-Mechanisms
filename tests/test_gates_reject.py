@@ -1663,3 +1663,66 @@ def test_messages_are_read_whole_and_their_absence_is_said(
     assert check.read_messages(str(said)) == ["первый\n", "второй\n"]
     assert check.read_messages("") == []
     assert check.MESSAGES_UNREAD in capsys.readouterr().err
+
+
+# --- строка рода у каждого снятия (#1022, часть 4; решение 038) --------------
+
+KINDS_FOR_LINES: dict[str, object] = {"число без способа замера": {"встречен": []}}
+
+
+def test_a_resolution_without_a_kind_line_is_refused() -> None:
+    """Снятие без `Род:` вплотную — отказ; с родом из словаря или «нет — причина» — нет."""
+    check = load_script("check_pr_meta.py")
+    bad = "Разобрано: aaaaaaa\n\nРод: число без способа замера"
+    assert check.NO_KIND_LINE in " ".join(check.kind_problems(bad, KINDS_FOR_LINES))
+    good = (
+        "Разобрано: aaaaaaa\nРод: число без способа замера\n"
+        "Разобрано: bbbbbbb\nРод: нет — находка про опечатку, рода у неё нет"
+    )
+    assert check.kind_problems(good, KINDS_FOR_LINES) == []
+
+
+def test_a_kind_outside_the_dictionary_and_a_bare_no_are_refused() -> None:
+    """Опечатка имени рода и «Род: нет» без причины — отказ (045, 154)."""
+    check = load_script("check_pr_meta.py")
+    said = " ".join(
+        check.kind_problems(
+            "Разобрано: aaaaaaa\nРод: число без способа замеров\nРазобрано: bbbbbbb\nРод: нет",
+            KINDS_FOR_LINES,
+        )
+    )
+    assert "«число без способа замеров» нет в словаре" in said
+    assert "«Род: нет» без причины" in said
+
+
+def test_a_window_meeting_needs_a_known_kind_and_a_place() -> None:
+    """Встреча в окне: род из словаря и место; без места или с чужим родом — отказ."""
+    check = load_script("check_pr_meta.py")
+    good = "Род: число без способа замера — окно: tests/test_x.py — откат зелёный"
+    assert check.kind_problems(good, KINDS_FOR_LINES) == []
+    said = " ".join(
+        check.kind_problems(
+            "Род: число без способа замера — окно:\nРод: чужой род — окно: a.py", KINDS_FOR_LINES
+        )
+    )
+    assert "без рода или без места" in said and "«чужой род» нет в словаре" in said
+
+
+def test_the_kind_line_gate_runs_end_to_end(run_script: RunScript, tmp_path: Path) -> None:
+    """Вшивка: `check_pr_meta` судит тело уплотнения и краснеет на снятии без рода."""
+    check = load_script("check_pr_meta.py")
+    env = write_event(tmp_path, ["area/docs"], "Refs #1")
+    bad = tmp_path / "bad.txt"
+    bad.write_bytes("тема\n\nRefs #1\nРазобрано: 13cf07f\n\0".encode())
+    result = run_script(
+        "check_pr_meta.py", "--files", "README.md", "--messages-from", str(bad), env=env
+    )
+    assert result.code == REJECTED and check.NO_KIND_LINE in result.text
+    good = tmp_path / "good.txt"
+    good.write_bytes(
+        "тема\n\nRefs #1\nРазобрано: 13cf07f\nРод: число без способа замера\n\0".encode()
+    )
+    result = run_script(
+        "check_pr_meta.py", "--files", "README.md", "--messages-from", str(good), env=env
+    )
+    assert check.NO_KIND_LINE not in result.text

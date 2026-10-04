@@ -231,6 +231,42 @@ def crossed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     return sorted(name for name in after if times(after, name) >= at > times(before, name))
 
 
+def thawed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """Роды, чей замороженный список `встречен` изменение тронуло (решение 038).
+
+    СПИСОК НЕ РАСТЁТ И НЕ УБЫВАЕТ. Рост по привычке возвращает горячую точку,
+    ради которой словарь заморожен: каждое слияние снова конфликтовало бы у
+    всех открытых веток. Убыль молча уносит встречи до 04.10.2026 из счёта.
+    Новый род приходит с пустым списком — его встречи едут строками `Род:`;
+    исчезнувший род уносит свои встречи, и это тоже называется (взгляд на
+    #1089).
+
+    СВЕРЯЕТСЯ МНОЖЕСТВО ВСТРЕЧ, А НЕ СПИСОК. Снять дубль законно: встреча,
+    записанная дважды, завышала счёт, и после снятия встреч не меньше
+    (взгляд на #1077, `0ff657e`). Порядок записей смысла не несёт.
+    """
+    told: list[str] = []
+
+    def met(kinds: dict[str, Any], name: str) -> list[str]:
+        return [str(one) for one in (kinds.get(name) or {}).get("встречен") or []]
+
+    for name in sorted(before):
+        if name not in after:
+            told.append(f"  род «{name}» исчез — его замороженные встречи пропали бы из счёта")
+        elif set(met(after, name)) != set(met(before, name)):
+            told.append(
+                f"  у рода «{name}» изменён замороженный список «встречен» — новая встреча "
+                "пишется строкой «Род:» под снятием в коммите"
+            )
+    for name in sorted(set(after) - set(before)):
+        if met(after, name):
+            told.append(
+                f"  новый род «{name}» пришёл с непустым «встречен» — его встречи едут "
+                "строками «Род:», а список у нового рода пуст"
+            )
+    return told
+
+
 def known_at(head: str, root: Path = Path()) -> frozenset[str]:
     """Номера правил, на которые дерево отвечает у головы, — чем сверять ответ «есть» (#887).
 
@@ -285,7 +321,10 @@ def main(argv: list[str] | None = None) -> int:
         # переносим, и у потребителя словаря может не быть вовсе.
         after = kinds_at(args.head, args.root)
         grown: list[str] = []
+        frozen: list[str] = []
         if after:
+            base_kinds = kinds_at(args.base, args.root)
+            frozen = thawed(base_kinds, after) if base_kinds else []
             # ВСТРЕЧИ — СЛОВАРЬ ПЛЮС ИСТОРИЯ GIT, А НЕ ВЕТКА `badges` (решение
             # владельца 03.10.2026, #1022). «До» — история базы, «после» — она
             # же и коммиты изменения: строка `Род:` в них уедет в тело
@@ -296,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
             # на него этот предел не влияет.
             history = trunk_log.merged_bodies(args.root, args.base)
             own = trunk_log.branch_bodies(args.base, args.head, args.root)
-            before, _ = finding_kinds.with_history(kinds_at(args.base, args.root), history)
+            before, _ = finding_kinds.with_history(base_kinds, history)
             after, _ = finding_kinds.with_history(after, [*history, *own])
             grown = crossed(before, after)
         told += kinds_missing(
@@ -310,6 +349,14 @@ def main(argv: list[str] | None = None) -> int:
     # решения этому правилу не подчиняется; требовать предмета от него значило бы
     # красить исправную работу. Это НЕ тот случай, где пустота подозрительна: у
     # гейта есть свой прогон на подделках, и он держит оба отказа.
+    if frozen:
+        print(f"замороженный словарь родов тронут ({len(frozen)}):", file=sys.stderr)
+        for one in frozen:
+            print(one, file=sys.stderr)
+        # Отказ о каталоге не теряется за отказом о заморозке: чинить оба.
+        for one in told:
+            print(one, file=sys.stderr)
+        return EXIT_FOUND
     if not new and not grown:
         print("записей решений не добавлено и порога род не перешёл — вопрос о правиле не встаёт")
         return EXIT_OK
