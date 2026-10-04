@@ -53,22 +53,27 @@ EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 
 #: Адрес вида `owner/repo` в тексте. Годится и для ссылки, и для строки данных:
-#: имя ищется одним образцом, а не тремя по видам файлов (090). Адрес API —
-#: хост `api.github.com` или `uploads.github.com` и путь
-#: `/repos/<владелец>/<имя>` — своя ветвь. Держит её не порядок в
-#: альтернативе, а то, что поиск берёт САМОЕ ЛЕВОЕ совпадение: ветвь API
-#: начинается раньше, на `api.`, и без неё сегмент `repos` читался бы
-#: владельцем (находка `5408fc8` на #1082 поправила прежний довод).
+#: имя ищется одним образцом, а не тремя по видам файлов (090). Поиск берёт
+#: САМОЕ ЛЕВОЕ совпадение, поэтому хост `api.`/`uploads.` узнаётся целиком, а
+#: не хвостом `github.com` (находка `5408fc8` на #1082).
 NAME_RE: Final = re.compile(
-    r"(?:(?:api|uploads)\.github\.com/repos|github\.com|githubusercontent\.com)"
+    r"(?P<host>(?:api\.|uploads\.)?github\.com|githubusercontent\.com)"
     r"/(?P<owner>[A-Za-z0-9][\w.-]*)/(?P<repo>[A-Za-z0-9][\w.-]*)"
+    r"(?:/(?P<more>[A-Za-z0-9][\w.-]*))?"
 )
+#: У хостов API именем репозитория считается ТОЛЬКО путь `/repos/<владелец>/<имя>`
+#: (210, взгляды на #1082). Три находки по одному образцу дописывали служебные
+#: сегменты по одному — `user`, `gists`, `networks` были бы следующими. Строгое
+#: правило рвёт круг: всё прочее на хостах API — не имя, и площадку о нём не
+#: спрашивают.
+API_HOSTS: Final = frozenset({"api.github.com", "uploads.github.com"})
+API_REPOS: Final = "repos"
 #: Первые сегменты пути площадки, которые не владелец: страницы организаций и
 #: людей, вложения, приложения. Площадка не даёт заводить учётные записи с
 #: такими именами, поэтому `github.com/orgs/X` — не репозиторий «orgs/X».
 #: Список назван, а не замерен целиком, и граница сказана: неизвестный здесь
-#: служебный сегмент стоит один запрос к площадке, а её отказ гейт читает как
-#: «не спросили», а не как находку (`stale`), — ложного красного он не даёт.
+#: служебный сегмент стоит один запрос к площадке, а её отказ гейт считает
+#: «не ответила» и печатает числом (`stale`), — ложного красного он не даёт.
 NOT_AN_OWNER: Final = frozenset(
     {
         "orgs",
@@ -161,15 +166,26 @@ def mentions(root: Path) -> dict[str, list[tuple[Path, int]]]:
             continue
         for number, line in enumerate(text.splitlines(), 1):
             for match in NAME_RE.finditer(line):
-                if match["owner"] in NOT_AN_OWNER:
+                said = name_of(match)
+                if not said:
                     continue
-                said = f"{match['owner']}/{match['repo']}"
                 found.setdefault(said, []).append((path.relative_to(root), number))
     return found
 
 
-def stale(said: str, token: str) -> str:
-    """Каким именем площадка отвечает на это; пусто — совпало или не спросить.
+def name_of(match: re.Match[str]) -> str:
+    """Имя `владелец/репозиторий` из совпадения; пусто — адрес не о репозитории."""
+    if match["host"] in API_HOSTS:
+        if match["owner"] != API_REPOS or not match["more"]:
+            return ""
+        return f"{match['repo']}/{match['more']}"
+    if match["owner"] in NOT_AN_OWNER:
+        return ""
+    return f"{match['owner']}/{match['repo']}"
+
+
+def stale(said: str, token: str) -> str | None:
+    """Каким именем площадка отвечает на это; пусто — совпало, ``None`` — не ответила.
 
     ПОЧЕМУ У ПЛОЩАДКИ, А НЕ СРАВНЕНИЕМ С КАНОНОМ. Переименованный репозиторий
     отвечает по СТАРОМУ адресу — площадка держит редирект, — и снаружи ссылка
@@ -183,8 +199,8 @@ def stale(said: str, token: str) -> str:
     except ghrest.TransportError:
         # Отказ на ОДНОМ имени не роняет гейт: чужой репозиторий бывает закрыт
         # или удалён, и это не наша находка. Молчание тут — не «совпало», а
-        # «не спросили», и об этом говорит счёт неспрошенных в выводе.
-        return ""
+        # «не ответила», и счёт таких печатается отдельно (взгляд на #1082).
+        return None
     full = str(answer.get("full_name") or "")
     return full if full and full != said else ""
 
@@ -219,17 +235,21 @@ def main(argv: list[str] | None = None) -> int:
 
     token = ghrest.token_from_env()
     asked = 0
+    unanswered = 0
     if token:
         # ПЕРЕИМЕНОВАННОЕ ЛОВИТСЯ ТОЛЬКО ЗДЕСЬ. Старое имя не похоже на новое, и
         # сравнить их нечем; площадка же держит редирект и в ответе называет
         # `full_name`.
         for said, places in sorted(written.items()):
-            asked += 1
             # Уже названное по регистру не повторяется редиректом: находка одна,
             # и два сообщения о ней читаются как две разные (154).
             if said in named:
                 continue
+            asked += 1
             now = stale(said, token)
+            if now is None:
+                unanswered += 1
+                continue
             if not now:
                 continue
             where = ", ".join(f"{path}:{number}" for path, number in places[:3])
@@ -244,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_FOUND
 
     said_names = f"имён в дереве: {len(written)}"
+    if unanswered:
+        said_names += f"; площадка не ответила на {unanswered} из {asked} — они не сверены"
     if not token:
         print(f"чисто по своему имени; {said_names}. Редиректы не спрошены: нет токена")
     elif not exact:
