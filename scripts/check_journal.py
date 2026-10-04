@@ -20,11 +20,13 @@
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Final
 
 import changerefs
+import gitcall
 import journal
 import paths
 
@@ -90,6 +92,17 @@ INTERNAL: Final = "internal"
 #: истинного
 #: ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
 TOPICS_WITHOUT_WARNING: Final = 1
+
+#: Имя в обратных кавычках шапки `internal`: предмет сверки с составом.
+HEADER_NAME_RE: Final = re.compile(r"`([^`\s]+)`")
+#: Имя считается путём, если в нём косая черта или расширение файла: «`internal`»
+#: и «`requires-python`» путями не являются.
+LOOKS_LIKE_PATH: Final = re.compile(r"/|\.(?:py|md|json|ya?ml|toml|txt|sh)$")
+#: Части предложения шапки и слова отрицания в них (взгляд на #1111).
+CLAUSE_RE: Final = re.compile(r"[;.]\s|\s—\s")
+NEGATION_RE: Final = re.compile(r"(?<!\w)(?:не|ни|без)(?!\w)")
+#: Механизм, который шапка обязана назвать, если изменение его тронуло.
+MECHANISM_RE: Final = re.compile(r"^scripts/[^/]+\.py$")
 
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
@@ -200,6 +213,123 @@ def marks_of(text: str) -> set[str]:
 NO_SUCH_PATH: Final = ("does not exist in", "exists on disk, but not in")
 
 
+def header_of(text: str) -> str:
+    """Шапка фрагмента `internal`: первая цитата целиком, а не одна строка.
+
+    Шапку переносят на строки `> …` (взгляд на #1111): замер 04.10.2026 по
+    дереву — 11 шапок из 100 в несколько строк. Читалась бы одна первая —
+    путь из переноса не сверялся бы, а механизм из него ложно звался бы
+    неназванным.
+    """
+    head = []
+    for line in text.splitlines():
+        if not line.startswith(">"):
+            break
+        head.append(line.lstrip(">").strip())
+    return " ".join(head)
+
+
+def header_paths(text: str) -> list[str]:
+    """Пути, которые шапка называет ТРОНУТЫМИ: без отрицаемых.
+
+    Путь в части предложения со словом «не», «ни» или «без» — отрицание, а
+    не пересказ правки: «ни форма `.pipeline.yml` … не тронуты» (взгляд на
+    #1111; замер по дереву — три такие шапки из 100). Часть предложения —
+    отрезок между «;», «.», « — ». Граница названа (195): отрицание, стоящее
+    в соседней части, путь не снимает, и это сужение, а не разбор смысла.
+    Хвостовая пунктуация снимается: «`docs/decisions/037`,» — тот же путь.
+    """
+    found = []
+    for part in CLAUSE_RE.split(header_of(text)):
+        if NEGATION_RE.search(part):
+            continue
+        found += [
+            name.rstrip(".,;:")
+            for name in HEADER_NAME_RE.findall(part)
+            if LOOKS_LIKE_PATH.search(name.rstrip(".,;:"))
+        ]
+    return found
+
+
+def covered(name: str, files: list[str]) -> bool:
+    """Тронуло ли изменение путь, названный шапкой.
+
+    Совпадение — сам файл, каталог (`.rules/`) или начало имени НА ГРАНИЦЕ:
+    решение зовут номером (`docs/decisions/037`), а файл несёт номер, дефис и
+    слаг. Граница — «-», «.» или «/» (взгляд на #1111): без неё
+    `scripts/review` покрывался бы тронутым `scripts/review_map.py`.
+    """
+    bare = name.rstrip("/")
+    return any(
+        one == bare
+        or one.endswith("/" + bare)
+        or (one.startswith(bare) and one[len(bare) : len(bare) + 1] in ("-", ".", "/"))
+        for one in files
+    )
+
+
+def stray_in_header(text: str, files: list[str]) -> list[str]:
+    """Пути шапки, которых изменение не трогает: пересказ разошёлся с составом (215)."""
+    return [name for name in header_paths(text) if not covered(name, files)]
+
+
+def unnamed_mechanisms(text: str, files: list[str]) -> list[str]:
+    """Тронутые механизмы `scripts/`, которых шапка не называет ни путём, ни именем.
+
+    Это ПРЕДУПРЕЖДЕНИЕ, а не отказ (051): правка докстроки механизма законно
+    описывается словами «поправлена докстрока», без имени файла. Сколько таких
+    по истории, печатает `--measure`.
+    """
+    head = header_of(text)
+    # Имя ищется ЦЕЛЫМ СЛОВОМ, а не подстрокой (141): иначе короткое имя
+    # находится внутри чужого — `y` внутри `x.py`.
+    return [
+        name
+        for name in files
+        if MECHANISM_RE.match(name)
+        and not any(
+            re.search(rf"(?<![\w.]){re.escape(said)}(?![\w])", head)
+            for said in (name, Path(name).name, Path(name).stem)
+        )
+    ]
+
+
+def measure(ref: str) -> tuple[int, int, int]:
+    """Замер по истории `ref`: (фрагментов `internal`, отказов, предупреждений).
+
+    Каждый фрагмент судится составом того коммита, который его завёл, — тем
+    же предикатом, что и на изменении. Ответ на 215 называет этот замер
+    командой и закреплённым коммитом (взгляд на #1111).
+    """
+    total = refused = warned = 0
+    for sha in gitcall.output(
+        ["log", "--format=%H", "--diff-filter=A", ref, "--", "changelog.d/*.internal.md"], NotRun
+    ).split():
+        files = [
+            one
+            for one in gitcall.output(
+                ["show", "-z", "--name-only", "--format=", sha], NotRun
+            ).split("\0")
+            if one.strip()
+        ]
+        added = [
+            one.strip()
+            for one in gitcall.output(
+                ["show", "-z", "--name-only", "--diff-filter=A", "--format=", sha], NotRun
+            ).split("\0")
+            if one.strip()
+        ]
+        files = [one.strip() for one in files]
+        for name in added:
+            if not (name.startswith(EXEMPT_PREFIXES) and name.endswith(f".{INTERNAL}.md")):
+                continue
+            text = gitcall.output(["show", f"{sha}:{name}"], NotRun)
+            total += 1
+            refused += bool(stray_in_header(text, files))
+            warned += bool(unnamed_mechanisms(text, files))
+    return total, refused, warned
+
+
 def at_base(ancestor: str, name: str) -> str:
     """Каким файл был у ОБЩЕГО ПРЕДКА: пусто, если его там не было вовсе.
 
@@ -282,7 +412,23 @@ def main(argv: list[str] | None = None) -> int:
     # и упал в первом же прогоне на площадке — локально переменной нет, и
     # расхождение не воспроизводилось.
     parser.add_argument("--base", default=journal.base_from_env(), help="ветка сравнения")
+    parser.add_argument(
+        "--measure",
+        metavar="REF",
+        help="замер сверки шапок internal по истории REF: печатает числа, гейтом не служит",
+    )
     args = parser.parse_args(argv)
+    if args.measure:
+        try:
+            total, refused, warned = measure(args.measure)
+        except NotRun as exc:
+            print(f"замер не сделан: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(
+            f"фрагментов internal в истории {args.measure}: {total}; "
+            f"отказов {refused}, предупреждений {warned}"
+        )
+        return EXIT_OK
 
     # ТОЧКА СРАВНЕНИЯ СПРАШИВАЕТСЯ ОДИН РАЗ НА ЗАХОД, И СПРАШИВАЕТСЯ ЗДЕСЬ.
     # Прежде её брали трижды: дважды внутри `changed_files` и ещё раз внутри
@@ -392,6 +538,40 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_REJECTED
+
+    # ШАПКА `internal` СВЕРЯЕТСЯ С СОСТАВОМ ИЗМЕНЕНИЯ (решение владельца
+    # 04.10.2026 по #1010, правило 215). «Потребителю безразлично: правится
+    # X» — пересказ своей работы, и путь, которого изменение не трогает, —
+    # пересказ по памяти. Замер 04.10.2026 по истории: из 99 фрагментов
+    # `internal` пути называют 21, и ни один не назвал чужого — гейт держит
+    # форму на будущее, а не чинит прошлое. Остальные формы пересказа держит
+    # приём, а не гейт: навык `retell-from-the-source` (057).
+    for name in fragments:
+        if not name.endswith(f".{INTERNAL}.md"):
+            continue
+        try:
+            text = Path(name).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"проверка не отработала: фрагмент {name} не прочитан: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        stray = stray_in_header(text, files)
+        if stray:
+            print(
+                f"отвергнуто: шапка {name} называет то, чего изменение не трогает: "
+                f"{', '.join(stray)}\n\n"
+                "Шапка «Потребителю безразлично: …» — пересказ этой работы, и он\n"
+                "сверяется с составом изменения, а не пишется по памяти (215).\n"
+                "Сверьте её с `git diff --stat <база>...HEAD`.",
+                file=sys.stderr,
+            )
+            return EXIT_REJECTED
+        quiet = unnamed_mechanisms(text, files)
+        if quiet:
+            print(
+                f"предупреждение: изменение тронуло механизмы, которых шапка {name} не "
+                f"называет: {', '.join(quiet[:5])} — если поведение не меняется, так и "
+                "скажите; если меняется, род записи не `internal`"
+            )
 
     if fragments:
         print(f"фрагмент журнала есть: {', '.join(fragments)}")
