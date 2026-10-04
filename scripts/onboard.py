@@ -95,6 +95,8 @@ NO_RELEASE: Final = "выпусков ещё не было"
 LOCAL_CALL: Final = "./.github/workflows/"
 #: Прогон, джобами которого подключаются шаги конвейера.
 PIPELINE_FLOW: Final = "ci.yml"
+#: Сводный гейт: заготовка его не кладёт, а называет — он пока копируется.
+SUMMARY_FLOW: Final = "ci-complete.yml"
 
 
 class NotRun(RuntimeError):
@@ -193,13 +195,26 @@ def thin_ci(names: list[str], repo: str, pin: str) -> str:
     (`check_pipeline.py`): у каждой проверки дерева есть ответ, у каждого
     ответа — проверка. Поэтому вызовы и есть данные, и второго списка «что
     включено» не заводится.
+
+    СОБЫТИЯ И ОЧЕРЕДЬ — КАК У НАШЕГО `ci.yml` (взгляд на #1114). `push` на
+    общую ветку нужен заготовке дежурного (`main-red.yml`): она ждёт
+    `workflow_run` прогона `ci` на `main`, и без него сигнал не пришёл бы ни
+    разу. Голова в группе очереди (179): последнее слово остаётся за прогоном
+    последнего коммита, а не устаревшего.
+
+    Пустой набор — отказ: прогон без джобов площадка не примет, а заход
+    назвал бы его готовым.
     """
+    if not names:
+        raise NotRun("шагов к подключению в ci.yml нет — тонкий ci.yml был бы прогоном без джобов")
     head = (
         "# Тонкий вызов шагов конвейера: собран `scripts/onboard.py` поставщика.\n"
         "# Что проверяется — эти вызовы; класс каждой проверки — `.pipeline.yml`.\n"
         "# Сверяет одно с другим шаг `pipeline`: правьте оба вместе.\n"
         "name: ci\n\n"
         "on:\n"
+        "  push:\n"
+        f"    branches: [{paths.TRUNK}]\n"
         "  pull_request:\n"
         "    types: [opened, synchronize, reopened, labeled, unlabeled, edited]\n"
         "  workflow_dispatch:\n\n"
@@ -208,6 +223,10 @@ def thin_ci(names: list[str], repo: str, pin: str) -> str:
         "  checks: read\n"
         "  pull-requests: read\n"
         "  issues: read\n\n"
+        "concurrency:\n"
+        "  group: ci-${{ github.event.pull_request.number || github.ref }}"
+        "-${{ github.event.pull_request.head.sha || github.sha }}\n"
+        "  cancel-in-progress: true\n\n"
         "jobs:\n"
     )
     return head + "\n".join(caller(one, repo, pin) for one in names)
@@ -397,6 +416,10 @@ def main(argv: list[str] | None = None) -> int:
         lay(args.write, files)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files)))
         print("Класс каждой проверки в .pipeline.yml — СВОЙ выбор; в защиту ветки — одно имя.")
+        print(
+            f"Сводный гейт заготовка не кладёт: скопируйте `{paths.WORKFLOWS}/{SUMMARY_FLOW}` "
+            "поставщика — его имя и ставится в защиту ветки."
+        )
         return EXIT_OK
 
     print(f"# шагов к подключению: {len(names)} · прибивка: {pin}\n")
@@ -411,6 +434,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"#    Здесь все выходят «{policy.UNREVIEWED}»: это очередь разбора, а не умолчание.\n")
     print(answer(pipeline, beyond, on_change=on_change))
     print("# 3. В защиту ветки — ОДНО имя: имя своего сводного гейта.")
+    print(
+        f"#    Сводный гейт — копия `{paths.WORKFLOWS}/{SUMMARY_FLOW}` поставщика: он не зовётся."
+    )
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
     print("#    в матрицу, и защита начинает ждать имя, которого никто не выдаёт (168).")
     return EXIT_OK

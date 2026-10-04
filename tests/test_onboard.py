@@ -355,3 +355,54 @@ def test_occupied_names_only_what_exists(tmp_path: Path) -> None:
     assert module.occupied(tmp_path, files) == [Path("y.yml")]
     module.lay(tmp_path / "новое", files)
     assert (tmp_path / "новое" / "a" / "x.yml").read_text("utf-8") == "x\n"
+
+
+def test_the_thin_ci_runs_on_the_trunk_and_keeps_the_last_word_by_head() -> None:
+    """`push` на общую ветку и голова в группе очереди — как у нашего `ci.yml` (#1114).
+
+    Без `push` заготовка дежурного (`main-red.yml`) не получила бы сигнала
+    ни разу; без головы в группе последнее слово досталось бы устаревшему
+    коммиту (179).
+    """
+    import yaml
+
+    flow = yaml.safe_load(module.thin_ci(["а"], "o/r", "v1.0.0"))
+    events = flow[True] if True in flow else flow["on"]
+    assert events["push"] == {"branches": [module.paths.TRUNK]}
+    ours = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
+    assert flow["concurrency"] == ours["concurrency"], "очередь разошлась с нашим ci.yml"
+
+
+def test_no_pipeline_steps_is_a_refusal_not_an_empty_flow() -> None:
+    """Все шаги управляющие — тонкий `ci.yml` был бы без джобов: отказ (#1114)."""
+    with pytest.raises(module.NotRun, match="без джобов"):
+        module.thin_ci([], "o/r", "v1.0.0")
+
+
+def test_write_lays_the_own_flows_and_names_the_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--write` кладёт и прогоны управляющих механизмов, а сводный гейт называет (#1114)."""
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
+    )
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    kit = (consumer / ".github" / "workflows" / "план.yml").read_text("utf-8")
+    assert "step-план.yml@v2.5.0" in kit
+    assert module.SUMMARY_FLOW in capsys.readouterr().out
+
+
+def test_write_refuses_a_kit_it_cannot_rewrite_and_lays_nothing(tmp_path: Path) -> None:
+    """Вызов, который заготовка не перепишет, — отказ, и не кладётся ни один файл (#1114)."""
+    quoted = OWN_CALLER.replace(
+        "uses: ./.github/workflows/step-план.yml", 'uses: "./.github/workflows/step-план.yml"'
+    )
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": quoted, "ci": CI_CALLER},
+    )
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_BROKEN
+    assert not consumer.exists() or not any(consumer.rglob("*.yml"))
