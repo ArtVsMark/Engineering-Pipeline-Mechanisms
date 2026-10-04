@@ -1020,6 +1020,10 @@ def test_open_changes_are_still_walked(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- объявленные исходы захода -----------------------------------------------
 
 
+#: Номера, которые заход передал в `save`: подделка записи их собирает.
+HANDED: list[int | None] = []
+
+
 def platform(
     monkeypatch: pytest.MonkeyPatch,
     records: list[dict[str, Any]],
@@ -1056,9 +1060,14 @@ def platform(
     )
     monkeypatch.setattr(module, "queue_now", lambda live: module.Queue(0, 0))
     monkeypatch.setattr(module, "pause", lambda repo, token, live, *, frozen, apply: ([], []))
-    monkeypatch.setattr(
-        module, "save", lambda repo, token, body, apply, number=None: written.append(body)
-    )
+
+    def saved(repo: str, token: str, body: str, apply: bool, number: int | None = None) -> None:
+        written.append(body)
+        handed.append(number)
+
+    handed = HANDED
+    handed.clear()
+    monkeypatch.setattr(module, "save", saved)
     return written
 
 
@@ -1921,3 +1930,16 @@ def test_save_with_a_known_number_does_not_look_again(monkeypatch: pytest.Monkey
     assert looked == []
     module.save("o/r", "t", "тело", False)
     assert looked == ["x"]
+
+
+def test_main_hands_the_found_number_to_save(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`main` передаёт в `save` номер, найденный в начале захода (взгляд на #1091)."""
+    platform(monkeypatch, [{"name": "lint / lint", "status": "completed", "conclusion": "success"}])
+    module.main(["--repo", "o/r"])
+    assert HANDED == [1]
+
+
+def test_found_or_unread_keeps_a_number_and_relooks_an_absence() -> None:
+    """Найденный номер едет в запись; «задачи нет» — `UNREAD`, ищется перед записью."""
+    assert module.findings.found_or_unread(7) == 7
+    assert module.findings.found_or_unread(None) == module.findings.UNREAD

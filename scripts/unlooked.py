@@ -895,11 +895,6 @@ def said_tally(tally: dict[str, int]) -> str:
     return f"{TALLY_HEAD} {parts}"
 
 
-#: «Номер живой задачи не передан — найти самому»: отличен от ``None``, который
-#: значит «задачи нет».
-UNREAD: Final = -1
-
-
 def save(
     repo: str,
     token: str,
@@ -907,7 +902,7 @@ def save(
     watermark: int,
     apply: bool,
     tally: dict[str, int] | None = None,
-    number: int | None = UNREAD,
+    number: int | None = findings.UNREAD,
 ) -> None:
     """Записывает реестр: обновляет по месту или заводит одну задачу.
 
@@ -916,7 +911,7 @@ def save(
     второе чтение того же списка стоило запроса без нового знания: тело
     реестра ведёт один механизм, и номер за заход не меняется (#1084).
     """
-    if number == UNREAD:
+    if number == findings.UNREAD:
         number, _ = findings.live_issue(repo, token, MARKER)
     body = render_body(entries, watermark, tally)
     if not apply:
@@ -1043,7 +1038,9 @@ def main(argv: list[str] | None = None) -> int:
         for entry in sorted(entries.values(), key=lambda item: -item.number):
             print(f"  {entry.said()[2:]}")
 
-        save(args.repo, token, entries, watermark, args.apply, tally, live)
+        save(
+            args.repo, token, entries, watermark, args.apply, tally, findings.found_or_unread(live)
+        )
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

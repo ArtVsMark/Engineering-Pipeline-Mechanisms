@@ -1188,19 +1188,16 @@ def render_body(
     return "\n".join(lines) + "\n"
 
 
-#: «Номер живой задачи не передан — найти самому»: отличен от ``None``, который
-#: значит «задачи нет».
-UNREAD: Final = -1
-
-
-def save(repo: str, token: str, body: str, apply: bool, number: int | None = UNREAD) -> None:
+def save(
+    repo: str, token: str, body: str, apply: bool, number: int | None = findings.UNREAD
+) -> None:
     """Записывает задачу: обновляет по месту или заводит одну.
 
     ``number`` — номер, уже найденный заходом в начале (#1084): тело задачи
     ведёт один механизм, и второе чтение списка ради того же номера стоило
     запроса без нового знания. Без него (`UNREAD`) задача ищется здесь.
     """
-    if number == UNREAD:
+    if number == findings.UNREAD:
         number, _ = findings.live_issue(repo, token, MARKER)
     if not apply:
         print("записал бы в " + (f"#{number}" if number else "новую задачу"))
@@ -1371,7 +1368,7 @@ def main(argv: list[str] | None = None) -> int:
             token,
             render_body(holds, rest, flakes, sha, queue, proof, seen.unfixed),
             args.apply,
-            live_number,
+            findings.found_or_unread(live_number),
         )
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
