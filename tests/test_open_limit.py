@@ -280,7 +280,12 @@ def test_a_foreign_trailer_behind_the_cut_is_not_taken(repo: Path, tmp_path: Pat
     git(repo, "checkout", "-q", "origin/main")
     git(repo, "commit", "-q", "--allow-empty", "-m", "чужое уплотнение\n\nClaude-Session: theirs")
     theirs = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     ).stdout.strip()
     for one in range(3):
         git(repo, "commit", "-q", "--allow-empty", "-m", f"общая ветка {one}")
