@@ -52,8 +52,9 @@
 охотнее, чем меньше знает
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
-Исходы (правило 039): ``0`` свод не менялся под окном или предмета нет ·
-``1`` менялся, и правки названы · ``2`` шаг не отработал.
+Исходы (правило 039): ``0`` чужих правок свода под окном нет или предмета нет —
+своя правка при этом называется строкой (#1054) · ``1`` чужие правки были, и
+они названы · ``2`` шаг не отработал.
 """
 
 import argparse
@@ -121,24 +122,34 @@ def own_under(
     sources: tuple[str, ...],
     cwd: str | None = None,
 ) -> list[window.Commit]:
-    """Правки свода САМИМ окном, после которых оно продолжило работу.
+    """Правки свода САМИМ окном внутри изменения — все, в любом месте окна.
 
-    ``sources`` — история общей ветки И диапазон изменения: своя правка, ещё
-    не слитая, расходится со стартовым сводом так же.
+    ``sources`` — где искать правку. Зовущий передаёт ТОЛЬКО диапазон
+    изменения: строка о своей правке говорится один раз, на изменении, которое
+    её несёт. Читаемая из всей истории, она печаталась бы на каждом изменении
+    окна до конца его жизни — замер на #1077: 71 правка из 72 у шести окон, — и
+    почти постоянная строка перестаёт читаться (051, взгляд на #1077).
 
     СНИЗУ ГРАНИЦА ВКЛЮЧИТЕЛЬНАЯ, И ДОВОД ТУТ НЕ ТОТ, ЧТО У `changed_under`.
     Для чужой правки начало окна — момент чтения: правка раньше него и есть
     свод, который окно прочитало. Своя правка первым же коммитом окна —
     наоборот, доказательство, что стартовало оно по ПРЕЖНЕМУ своду: правят то,
-    что уже прочитано (находка `f74ffb2` на #1077). Сверху граница строгая:
-    правка последним коммитом окна по прежнему своду не работала.
+    что уже прочитано (находка `f74ffb2` на #1077).
+
+    ПОСЛЕДНИЙ КОММИТ ОКНА НЕ ИСКЛЮЧАЕТСЯ — строгое правило вместо третьей
+    границы (210, находка `26b0113` на #1097). Прежде сверху стояло «не
+    последний коммит окна»: такая правка молчала на своём изменении, а на
+    следующем её уже нет в диапазоне — то есть не называлась НИКОГДА. Окно же
+    живёт дальше и следующую работу ведёт по прежнему своду. Предмет строки —
+    «свод изменён этим окном», и он верен с первой правки, где бы она ни
+    стояла. Сверху граница — голова окна включительно.
     """
     found: dict[str, window.Commit] = {}
     for source in sources:
         known = {commit.sha: commit for commit in window.commits(source, cwd=cwd)}
         for sha in touching(source, RULEBOOK, cwd=cwd):
             edit = known.get(sha)
-            if edit and edit.session == session and start.when <= edit.when < head.when:
+            if edit and edit.session == session and start.when <= edit.when <= head.when:
                 found.setdefault(sha, edit)
     return sorted(found.values(), key=lambda edit: edit.when)
 
@@ -232,9 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         start = begun if begun and begun.when < life.first.when else life.first
         try:
             edits = changed_under(life.session, start, life.last, args.history, cwd=cwd)
-            own = own_under(
-                life.session, start, life.last, (args.history, f"{args.base}..{args.head}"), cwd=cwd
-            )
+            own = own_under(life.session, start, life.last, (f"{args.base}..{args.head}",), cwd=cwd)
         except window.NotRun as exc:
             print(f"шаг не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
