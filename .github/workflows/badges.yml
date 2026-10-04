@@ -185,7 +185,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
-          python -m pip install --quiet "jsonschema>=4.20,<5"
+          # Установка отдельно: её провал — не «отказ по схеме», а сверки не было.
+          if ! python -m pip install --quiet "jsonschema>=4.20,<5"; then
+            echo "::warning::Факты не сверены со схемой витрины: проверяльщик не установился — публикация идёт без сверки."
+            exit 0
+          fi
           rc=0
           python scripts/check_facts_schema.py "${RUNNER_TEMP}/badges/.github/badges/facts.json" || rc=$?
           case "$rc" in

@@ -20,9 +20,25 @@
 истории `main` витрины (`compare`), и коммит вне её — отказ, а не сверка.
 
 ЧЕРНОВИК СХЕМЫ — ИЗ САМОЙ СХЕМЫ. Проверяльщик берётся по её `$schema`
-(`validator_for`), а не прибит к одному черновику, и `format` проверяется:
-иначе смысл ключей разошёлся бы с витриной молча. Испорченная схема —
-неизвестный тип, неразрешимая `$ref` — «не отработал», а не «отклонён».
+(`validator_for`), а не прибит к одному черновику: иначе смысл ключей
+разошёлся бы с витриной молча. Схема без `$schema` читается как 2020-12 —
+это умолчание названо здесь. Испорченная схема — неизвестный `$schema`,
+неизвестный тип, неразрешимая `$ref` — «не отработал», а не «отклонён»
+(взгляды на #1112 и #1116).
+
+`format` ПРОВЕРЯЕТСЯ НЕ ВЕСЬ, И ГРАНИЦА НАЗВАНА (195). Шаг ставит
+`jsonschema` без дополнений, и проверяются форматы, которым внешние
+библиотеки не нужны (`date`, `email`, `ipv4`, …). Форматы с библиотекой
+(`date-time`, `uri`, …) проходят непроверенными. Схема витрины на прибитом
+коммите `format` не использует вовсе (замер:
+`git show <SCHEMA_SHA>:.rules/facts.schema.json` — ключа нет), поэтому
+граница сегодня ничего не пропускает; поднял договор с форматом — ставьте
+`jsonschema[format]`.
+
+НЕПРЕДВИДЕННЫЙ СБОЙ — «НЕ ОТРАБОТАЛ» (взгляд на #1116). Трассировка Python
+выходит кодом 1, а код 1 здесь — «отказ», и шаг публикации остановился бы
+из-за ошибки гейта. Поэтому `main` переводит любое необработанное
+исключение в исход 2 и называет его.
 
 ЧЕГО ГЕЙТ НЕ ЛОВИТ, и это названо (046): он не знает, что витрина подняла
 договор, — сверка идёт с прибитой версией. Сверку версии договора с живой
@@ -39,6 +55,7 @@
 import argparse
 import json
 import sys
+import warnings
 from pathlib import Path
 from typing import Any, Final
 
@@ -87,6 +104,8 @@ def pinned_on_trunk(sha: str, token: str) -> None:
         said = ghrest.request("GET", f"repos/{SHOWCASE}/compare/{sha}...main", token) or {}
     except ghrest.TransportError as exc:
         raise NotRun(f"история витрины не прочитана: {exc}") from exc
+    if not isinstance(said, dict):
+        raise NotRun(f"история витрины прочитана не словарём: {type(said).__name__}")
     status = str(said.get("status") or "")
     if status not in ON_TRUNK:
         raise Foreign(
@@ -103,12 +122,29 @@ def read_schema(url: str = SCHEMA_URL) -> dict[str, Any]:
         raise NotRun(f"схема не прочитана ({url}): {exc}") from exc
 
 
+def draft_of(schema: dict[str, Any]) -> Any:
+    """Проверяльщик по `$schema` схемы; без `$schema` — 2020-12, неизвестный — `NotRun`."""
+    declared = schema.get("$schema")
+    if declared is None:
+        return jsonschema.Draft202012Validator
+    with warnings.catch_warnings():
+        # Неизвестный `$schema` библиотека называет предупреждением и отдаёт
+        # умолчание. Здесь умолчание — отказ: узнаётся он тем, что объявленное
+        # не совпало с метасхемой отданного проверяльщика.
+        warnings.simplefilter("ignore", DeprecationWarning)
+        kind = jsonschema.validators.validator_for(schema, default=jsonschema.Draft202012Validator)
+    meta = kind.META_SCHEMA
+    if str(meta.get("$id", meta.get("id", ""))).rstrip("#") != str(declared).rstrip("#"):
+        raise NotRun(f"черновик схемы витрины неизвестен: $schema {declared!r}")
+    return kind
+
+
 def problems(facts: dict[str, Any], schema: dict[str, Any]) -> list[str]:
     """Расхождения файла со схемой: путь поля и что не так, по порядку путей.
 
     Черновик — по `$schema` самой схемы; испорченная схема — `NotRun`.
     """
-    kind = jsonschema.validators.validator_for(schema, default=jsonschema.Draft202012Validator)
+    kind = draft_of(schema)
     try:
         kind.check_schema(schema)
         validator = kind(schema, format_checker=kind.FORMAT_CHECKER)
@@ -130,22 +166,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", default=SCHEMA_URL, help="адрес схемы витрины")
     args = parser.parse_args(argv)
     try:
+        return judge(args.facts, args.schema)
+    # Непредвиденный сбой гейта — не «отказ» (1), а исход 2: см. докстроку модуля.
+    except Exception as exc:
+        print(
+            f"сверка не отработала: непредвиденный сбой {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
+
+
+def judge(facts_path: Path, schema_url: str) -> int:
+    """Сверка одного файла: исход по правилу 039; непредвиденное ловит `main`."""
+    try:
         try:
-            facts = json.loads(args.facts.read_text(encoding="utf-8"))
+            facts = json.loads(facts_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise NotRun(f"файл фактов не прочитан ({args.facts}): {exc}") from exc
+            raise NotRun(f"файл фактов не прочитан ({facts_path}): {exc}") from exc
         # Принадлежность проверяется у прибитого адреса: чужой `--schema`
         # называет себя сам и коммитом витрины не прикрывается.
-        if args.schema == SCHEMA_URL:
+        if schema_url == SCHEMA_URL:
             pinned_on_trunk(SCHEMA_SHA, ghrest.token_from_env())
-        found = problems(facts, read_schema(args.schema))
+        found = problems(facts, read_schema(schema_url))
     except NotRun as exc:
         print(f"сверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     except Foreign as exc:
         print(f"сверка отклонена: {exc}", file=sys.stderr)
         return EXIT_REJECTED
-    against = f"коммит {SCHEMA_SHA[:7]}" if args.schema == SCHEMA_URL else args.schema
+    against = f"коммит {SCHEMA_SHA[:7]}" if schema_url == SCHEMA_URL else schema_url
     if found:
         print(f"facts.json не отвечает схеме витрины ({len(found)}), {against}:", file=sys.stderr)
         for line in found[:SHOWN]:

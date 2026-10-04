@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("check_facts_schema.py")
 
@@ -211,3 +211,53 @@ def test_read_schema_asks_the_pinned_address(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(module.ghrest, "raw_json", refuse)
     with pytest.raises(module.NotRun, match="схема не прочитана"):
         module.read_schema()
+
+
+def test_an_unknown_draft_is_not_run_and_no_draft_is_2020_12(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Неизвестный `$schema` — исход 2, а не молчаливое 2020-12; без `$schema` — 2020-12 (#1116)."""
+    unknown = {**SCHEMA, "$schema": "https://пример/черновик-9"}
+    monkeypatch.setattr(module, "read_schema", lambda *_: unknown)
+    assert (
+        module.main([str(facts_file(tmp_path, schema="1.3", release="1.3"))]) == module.EXIT_BROKEN
+    )
+    bare = {key: value for key, value in SCHEMA.items() if key != "$schema"}
+    assert module.draft_of(bare) is module.jsonschema.Draft202012Validator
+
+
+def test_an_unexpected_failure_is_not_run_rather_than_a_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Непредвиденное исключение — исход 2 с названием, а не трассировка с кодом 1 (#1116)."""
+
+    def broken(*_: object) -> None:
+        raise AttributeError("нежданное")
+
+    monkeypatch.setattr(module, "read_schema", broken)
+    assert module.main([str(facts_file(tmp_path, schema="1.3"))]) == module.EXIT_BROKEN
+    assert "AttributeError" in capsys.readouterr().err
+
+
+def test_a_compare_answer_that_is_not_a_mapping_is_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`compare` ответил не словарём — заход не отработал, а не «чужой коммит» (#1116)."""
+    monkeypatch.undo()
+    monkeypatch.setattr(module.ghrest, "request", lambda *_a, **_k: ["не", "словарь"])
+    with pytest.raises(module.NotRun, match="не словарём"):
+        module.pinned_on_trunk(module.SCHEMA_SHA, "токен")
+
+
+def test_the_publish_step_stops_only_on_a_rejection() -> None:
+    """В `badges.yml` установка отдельно, с предупреждением; стоп — только исход 1 (#1116)."""
+    import yaml
+
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
+    step = next(
+        one
+        for job in flow["jobs"].values()
+        for one in job.get("steps", [])
+        if "check_facts_schema.py" in str(one.get("run") or "")
+    )
+    run = step["run"]
+    assert "if ! python -m pip install" in run, "провал установки читался бы как отказ"
+    assert '2) echo "::warning::' in run and '*) exit "$rc"' in run
