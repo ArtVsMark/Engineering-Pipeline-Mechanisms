@@ -513,55 +513,6 @@ def declared_protection(where: Path | None = None) -> dict[str, Any]:
 OWNER_TOKEN_ENV: Final = "MERGE_QUEUE_TOKEN"
 
 
-#: Что источник «способ слияния» говорит, когда заход с секретом не отработал
-#: или не звался вовсе: файла нет — и это молчание с причиной, а не «сошлось».
-UNPASSED: Final = (
-    "настройки слияния не переданы: заход с секретом владельца "
-    "(`--save-merge-ways`) не отработал или не звался (#993)"
-)
-
-
-def save_merge_settings(repo: str, owner_token: str, path: Path) -> None:
-    """Единственный заход с секретом владельца: один запрос, в файл — поля `allow_*`.
-
-    СЕКРЕТ ПОЛУЧАЕТ ОДИН ИСТОЧНИК, И ЭТО ДЕРЖИТ УСТРОЙСТВО, А НЕ КОД (#993).
-    До выноса дрейфа общим шагом `MERGE_QUEUE_TOKEN` лежал в окружении всего
-    захода, и «читает его только источник „способ слияния“» держала дисциплина
-    кода — цену владелец принял в #953. Теперь секрет получает отдельный шаг
-    прогона, который делает ровно этот запрос и кладёт в файл только поля
-    способов слияния; остальные источники идут без секрета вовсе.
-
-    ЧИТАЕТСЯ ТОКЕНОМ ВЛАДЕЛЬЦА, И ТОЛЬКО ИМ. Токену прогона площадка полей
-    `allow_*` не отдаёт никогда (замер 29.09.2026, ручной прогон дрейфа), и
-    запасной ход на него дал бы ту же немоту, только позже. Секрета нет —
-    в файл ложится причина, а к площадке заход не обращается: «не настроено»
-    приходит раньше запроса, как у открытия изменения (взгляд на #865).
-    """
-    said: dict[str, Any]
-    if not owner_token:
-        said = {
-            "reason": f"{OWNER_TOKEN_ENV} не задан — настройки слияния читает только токен "
-            "владельца, токену прогона площадка полей allow_* не отдаёт (#953)"
-        }
-    else:
-        try:
-            said = {"settings": check_required_context.merge_settings(repo, owner_token)}
-        except check_required_context.NotRun as exc:
-            said = {"reason": str(exc)}
-    path.write_text(json.dumps(said, ensure_ascii=False), encoding="utf-8")
-
-
-def load_merge_settings(path: Path | None) -> dict[str, Any]:
-    """Сказанное заходом с секретом; файла нет или он испорчен — причина, а не пустота."""
-    if path is None or not path.is_file():
-        return {"reason": UNPASSED}
-    try:
-        said = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return {"reason": f"настройки слияния не прочитаны из {path}: {exc}"}
-    return said if isinstance(said, dict) else {"reason": f"в {path} не словарь"}
-
-
 def merge_ways_moved(said: dict[str, Any]) -> list[Drift]:
     """Лишние способы слияния, включённые у площадки, — против решения 006.
 
@@ -571,14 +522,12 @@ def merge_ways_moved(said: dict[str, Any]) -> list[Drift]:
     на двоих — `check_required_context.extra_ways`: второе понимание той же
     настройки разошлось бы с первым молча (090).
 
-    `said` — сказанное заходом с секретом (`save_merge_settings`): поля
+    `said` — сказанное чтением настроек (`check_required_context.merge_settings_said`
+    или файл захода с секретом, `load_merge_settings`): поля
     способов слияния либо причина, по которой их нет.
     """
-    settings = said.get("settings")
-    if not isinstance(settings, dict):
-        raise NotRun(str(said.get("reason") or UNPASSED))
     try:
-        extra = check_required_context.extra_ways(settings)
+        extra = check_required_context.extra_ways_said(said)
     except check_required_context.NotRun as exc:
         raise NotRun(str(exc)) from exc
     if not extra:
@@ -1662,10 +1611,12 @@ def look(
 ) -> tuple[list[Drift], list[str]]:
     """Спрашивает все источники; отдаёт находки и имена тех, кто не ответил.
 
-    `merge_said` — сказанное заходом с секретом (`load_merge_settings`); не
+    `merge_said` — сказанное чтением настроек слияния; не
     передано — источник «способ слияния» молчит с причиной.
     """
-    merge_said = merge_said if merge_said is not None else {"reason": UNPASSED}
+    merge_said = (
+        merge_said if merge_said is not None else {"reason": check_required_context.UNPASSED}
+    )
     found: list[Drift] = []
     silent: list[str] = []
     own = own_prefixes()
@@ -1744,7 +1695,7 @@ def main(argv: list[str] | None = None) -> int:
             print("шаг не отработал: репозиторий не назван", file=sys.stderr)
             return EXIT_BROKEN
         try:
-            save_merge_settings(
+            check_required_context.save_merge_settings(
                 args.repo, os.environ.get(OWNER_TOKEN_ENV, ""), args.save_merge_ways
             )
         except OSError as exc:
@@ -1764,7 +1715,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    found, silent = look(args.repo, token, mine, load_merge_settings(args.merge_ways_from))
+    # ФАЙЛА НЕТ — ЧИТАЕТСЯ НАПРЯМУЮ, ЕСЛИ СЕКРЕТ В ОКРУЖЕНИИ (взгляд на #1117).
+    # Так идёт ручной и локальный заход: прежде он читал настройки сам, и
+    # потерять это незачем. В общем шаге секрета в окружении захода нет, и
+    # файл передаётся всегда.
+    merge_said = (
+        check_required_context.load_merge_settings(args.merge_ways_from)
+        if args.merge_ways_from
+        else check_required_context.merge_settings_said(
+            args.repo, os.environ.get(OWNER_TOKEN_ENV, "")
+        )
+    )
+    found, silent = look(args.repo, token, mine, merge_said)
     # Молчание ВСЕХ источников — это поломка захода, а не сошедшееся состояние:
     # «дрейфа нет» и «спросить не удалось» снаружи одинаковы (045).
     if len(silent) == len(SOURCES):

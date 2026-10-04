@@ -127,13 +127,22 @@ jobs:
       # захода, и «только этот источник» держал код. Теперь его получает этот
       # шаг: один запрос `GET repos/{repo}`, в файл — только поля способов
       # слияния. Заход источников ниже идёт без секрета вовсе. Отказ здесь не
-      # роняет заход: файл несёт причину, и источник её называет (045).
+      # роняет заход: настройки не прочитаны — причина в файле, и источник её
+      # называет; файл не записан — причина идёт в аннотацию здесь, а не
+      # остаётся в журнале шага (045, взгляд на #1117).
       - name: прочитать настройки слияния токеном владельца
-        continue-on-error: true
         env:
           MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python $MECHANISMS/scripts/drift.py --save-merge-ways "$RUNNER_TEMP/merge-ways.json"
+        run: |
+          set -uo pipefail
+          said="${RUNNER_TEMP}/merge-ways.txt"
+          rc=0
+          python $MECHANISMS/scripts/drift.py --save-merge-ways "$RUNNER_TEMP/merge-ways.json" >"$said" 2>&1 || rc=$?
+          cat "$said"
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::Настройки слияния не прочитаны заходом с секретом (код $rc): $(tr '\n' ' ' <"$said")"
+          fi
       - name: спросить внешние входы
         env:
           GH_TOKEN: ${{ github.token }}

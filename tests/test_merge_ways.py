@@ -13,9 +13,11 @@
 способный предотвратить инцидент, а не только поймать его повторение.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tests.conftest import ROOT, load_script
 
@@ -204,3 +206,75 @@ def test_extra_ways_refuse_the_unsaid_rather_than_read_it_as_off() -> None:
     assert module.extra_ways(answer(allow_rebase_merge=True)) == ["перестановка"]
     with pytest.raises(module.NotRun, match="не сказала"):
         module.extra_ways({"allow_squash_merge": True})
+
+
+# --- секрет получает один запрос (#993, взгляд на #1117) ----------------------
+
+
+def test_the_secret_step_writes_the_merge_fields_and_main_reads_them_without_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Заход с секретом кладёт поля в файл; сверка читает файл и токена владельца не видит."""
+    said = tmp_path / "merge-ways.json"
+    tokens: list[str] = []
+
+    def answer(method: str, path: str, token: str, *_: object, **__: object) -> dict[str, Any]:
+        tokens.append(token)
+        return {"allow_merge_commit": True, "allow_rebase_merge": False}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    monkeypatch.setenv(module.OWNER_TOKEN_ENV, "токен-владельца")
+    assert module.main(["--repo", "o/r", "--save-merge-ways", str(said)]) == module.EXIT_OK
+    assert tokens == ["токен-владельца"]
+
+    # Секрет НЕ убирается из окружения: с файлом сверка обязана взять токен
+    # прогона, даже если секрет рядом, — иначе откат этого выбора неотличим.
+    monkeypatch.setenv("GH_TOKEN", "токен-прогона")
+    seen: list[str] = []
+    monkeypatch.setattr(module, "declared_context", lambda *a, **k: "ci-complete")
+
+    def contexts(repo: str, branch: str, token: str) -> tuple[list[str], bool]:
+        seen.append(token)
+        return ["ci-complete"], False
+
+    monkeypatch.setattr(module, "live_contexts", contexts)
+    monkeypatch.setattr(module, "merge_ways", lambda *a, **k: pytest.fail("спросил площадку"))
+    assert module.main(["--repo", "o/r", "--merge-ways-from", str(said)]) == module.EXIT_FINDINGS
+    assert seen == ["токен-прогона"]
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [(None, "не переданы"), ("{не json", "не прочитаны"), ("[]", "не словарь")],
+    ids=["файла-нет", "испорчен", "не-словарь"],
+)
+def test_a_missing_or_broken_file_is_not_run(tmp_path: Path, body: str | None, reason: str) -> None:
+    """Файла нет или он испорчен — половина «способ слияния» не отработала (045)."""
+    said = tmp_path / "merge-ways.json"
+    if body is not None:
+        said.write_text(body, encoding="utf-8")
+    with pytest.raises(module.NotRun, match=reason):
+        module.extra_ways_said(module.load_merge_settings(said))
+
+
+def test_without_the_owner_token_the_reason_comes_before_the_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Секрета нет — причина, а к площадке не обращаются (взгляд на #865)."""
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: pytest.fail("спросил площадку"))
+    said = module.merge_settings_said("o/r", "")
+    assert module.OWNER_TOKEN_ENV in said["reason"]
+
+
+def test_in_the_flow_the_secret_reaches_one_step_only() -> None:
+    """В `required-context.yml` секрет владельца получает один шаг — чтение настроек (#1117)."""
+    flow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "required-context.yml").read_text(encoding="utf-8")
+    )
+    steps = [step for job in flow["jobs"].values() for step in job["steps"]]
+    holders = [step for step in steps if module.OWNER_TOKEN_ENV in (step.get("env") or {})]
+    assert len(holders) == 1, [step.get("name") for step in holders]
+    assert "--save-merge-ways" in holders[0]["run"]
+    # Сбой шага с секретом называется аннотацией, а не остаётся в журнале шага (#1117).
+    assert "::warning::" in holders[0]["run"] and "continue-on-error" not in holders[0]
+    assert any("--merge-ways-from" in str(step.get("run") or "") for step in steps)
