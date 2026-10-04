@@ -33,6 +33,14 @@ def facts_file(tmp_path: Path, **facts: Any) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def on_trunk(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Принадлежность коммита витрине — без сети: по умолчанию коммит в её истории."""
+    asked: list[str] = []
+    monkeypatch.setattr(module, "pinned_on_trunk", lambda sha, _token: asked.append(sha))
+    return asked
+
+
 def test_facts_of_the_contract_pass() -> None:
     """Серия `1.3` отвечает схеме — расхождений нет."""
     assert module.problems({"schema": "1.3", "release": "1.3"}, SCHEMA) == []
@@ -77,6 +85,100 @@ def test_an_unreadable_schema_is_the_third_outcome(
     monkeypatch.setattr(module.ghrest, "raw_json", refuse)
     path = facts_file(tmp_path, schema="1.3", release="1.3")
     assert module.main([str(path)]) == module.EXIT_BROKEN
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "нет-такого-типа"},
+        {"$ref": "#/$defs/нет"},
+    ],
+    ids=["неизвестный-тип", "неразрешимая-ссылка"],
+)
+def test_a_broken_schema_is_not_run_rather_than_a_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: dict[str, Any]
+) -> None:
+    """Испорченная схема — «не отработал» (2), а не «файл отклонён» (1) (взгляд на #1112)."""
+    monkeypatch.setattr(module, "read_schema", lambda *_: schema)
+    assert module.main([str(facts_file(tmp_path, schema="1.3"))]) == module.EXIT_BROKEN
+
+
+def test_the_draft_is_taken_from_the_schema_itself() -> None:
+    """Черновик — по `$schema` схемы: draft-04 читает `exclusiveMaximum` логическим."""
+    draft4 = {
+        "$schema": "http://json-schema.org/draft-04/schema#",
+        "properties": {"n": {"maximum": 5, "exclusiveMaximum": True}},
+    }
+    assert module.problems({"n": 5}, draft4), "draft-04 не прочитан как draft-04"
+
+
+def test_a_format_is_checked() -> None:
+    """`format` проверяется, а не служит пометкой (взгляд на #1112)."""
+    schema = {"properties": {"when": {"type": "string", "format": "date"}}}
+    assert module.problems({"when": "вчера"}, schema)
+    assert module.problems({"when": "2026-10-04"}, schema) == []
+
+
+def test_the_pinned_commit_is_asked_about_and_a_foreign_one_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, on_trunk: list[str]
+) -> None:
+    """Прибитый коммит спрашивается у витрины; не из её истории — отказ (взгляд на #1112)."""
+    monkeypatch.setattr(module, "read_schema", lambda *_: SCHEMA)
+    path = facts_file(tmp_path, schema="1.3", release="1.3")
+    assert module.main([str(path)]) == module.EXIT_OK
+    assert on_trunk == [module.SCHEMA_SHA]
+
+    def foreign(*_: object) -> None:
+        raise module.Foreign("не из истории")
+
+    monkeypatch.setattr(module, "pinned_on_trunk", foreign)
+    assert module.main([str(path)]) == module.EXIT_REJECTED
+
+
+@pytest.mark.parametrize(
+    ("status", "outcome"),
+    [("ahead", None), ("identical", None), ("diverged", "Foreign"), ("behind", "Foreign")],
+)
+def test_on_trunk_reads_the_compare_answer(
+    monkeypatch: pytest.MonkeyPatch, status: str, outcome: str | None
+) -> None:
+    """«ahead» и «identical» — коммит в истории `main`; «diverged», «behind» — нет."""
+    monkeypatch.undo()
+    monkeypatch.setattr(module.ghrest, "request", lambda *_a, **_k: {"status": status})
+    if outcome is None:
+        module.pinned_on_trunk(module.SCHEMA_SHA, "токен")
+        return
+    with pytest.raises(module.Foreign):
+        module.pinned_on_trunk(module.SCHEMA_SHA, "токен")
+
+
+def test_on_trunk_without_a_token_or_network_is_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без токена или сети историю не спросить — «не отработал», а не «чужой»."""
+    monkeypatch.undo()
+    with pytest.raises(module.NotRun):
+        module.pinned_on_trunk(module.SCHEMA_SHA, "")
+
+    def refuse(*_: object, **__: object) -> None:
+        raise module.ghrest.TransportError("сети нет")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    with pytest.raises(module.NotRun):
+        module.pinned_on_trunk(module.SCHEMA_SHA, "токен")
+
+
+def test_another_schema_names_itself_not_the_pinned_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    on_trunk: list[str],
+) -> None:
+    """Чужой `--schema` называется своим адресом и коммитом витрины не прикрывается."""
+    monkeypatch.setattr(module, "read_schema", lambda *_: SCHEMA)
+    path = facts_file(tmp_path, schema="1.3", release="1.3")
+    assert module.main([str(path), "--schema", "https://пример/схема.json"]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "https://пример/схема.json" in said and module.SCHEMA_SHA[:7] not in said
+    assert on_trunk == []
 
 
 def test_an_unreadable_facts_file_is_the_third_outcome(tmp_path: Path) -> None:
