@@ -136,7 +136,14 @@ def main(argv: list[str] | None = None) -> int:
         "--pr", type=int, default=0, help="номер изменения: сверить, не устарела ли голова"
     )
     parser.add_argument("--timeout", type=float, default=1500.0, help="сколько ждать, секунд")
-    parser.add_argument("--interval", type=float, default=20.0, help="шаг опроса, секунд")
+    # Шаг тот же, что у гейта, которого ждут: опрос идёт по той же квоте токена,
+    # и пауза в 20 с здесь осталась бы прежней ценой (взгляд на #1083, 195).
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=float(ci_complete.POLL_INTERVAL),
+        help="шаг опроса, секунд",
+    )
     args = parser.parse_args(argv)
     token = ghrest.token_from_env()
     if not token or not args.repo or not args.sha:
