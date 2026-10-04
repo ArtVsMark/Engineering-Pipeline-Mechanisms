@@ -87,11 +87,11 @@ CATALOGUE: Final = "каталогу"
 #: какие старые имена теперь значат этот род: их встречи считаются под ним, а
 #: гейт заморозки принимает исчезновение старого имени.
 PREVIOUS: Final = "прежде"
-#: «Рода нет» с причиной: `нет — <причина>`, разделитель — тире любое, двоеточие
-#: или запятая, как их узнаёт `said_no` (взгляд на #1093); причина — хотя бы
+#: «Рода нет» с причиной: после «нет» — любой разделитель, не буква, ровно как его
+#: узнаёт `said_no` (взгляды на #1093); причина — хотя бы
 #: одна буква или цифра. Число слов не мерка: «нет—опечатка» — причина, а
 #: «нет — —» — нет (взгляд на #1090).
-REFUSED_RE: Final = re.compile(r"^нет\s*[—–\-:,]\s*(?=.*\w)(?P<why>.+)$", re.IGNORECASE)
+REFUSED_RE: Final = re.compile(r"^нет[^\w]+(?=.*\w)(?P<why>.+)$", re.IGNORECASE)
 FATE_RE: Final = re.compile(r"^(?P<kind>предложено|своё|есть)\s+—\s+(?P<said>\S.*)$")
 
 
@@ -229,34 +229,65 @@ def met_in_history(bodies: Iterable[str], kinds: dict[str, Any]) -> dict[str, li
     # ВИДЕННОЕ — У КАЖДОГО РОДА СВОЁ (взгляд на #1092). Одна находка бывает
     # двух родов, и словарь это знает: четыре отпечатка стоят в двух списках
     # сразу. Общее «виденное» роняло бы встречу второго рода молча.
+    #
+    # ИМЯ СВОДИТСЯ К НЫНЕШНЕМУ ДО ЛЮБОГО СЧЁТА (210, взгляды на #1093). Строка
+    # `Род: старое` и строка `Род: новое` — один род, и «виденное» у них одно:
+    # сведение после счёта считало бы перенесённый отпечаток второй раз и
+    # одну цепочку под двумя именами — дважды. Одна точка на всех: `canon`.
+    canon = successor_of(kinds)
     seen: dict[str, set[str]] = {
-        name: {str(met).strip("`") for met in body.get("встречен") or []}
-        for name, body in kinds.items()
+        name: {mark_of(met) for met in body.get("встречен") or []} for name, body in kinds.items()
     }
     found: dict[str, list[str]] = {}
     for body in bodies:
         for record in changerefs.resolutions_parsed(body):
             if not record.kind or said_no(record.kind):
                 continue
-            own = seen.setdefault(record.kind, set())
+            kind = canon.get(record.kind, record.kind)
+            own = seen.setdefault(kind, set())
             for root, group in twin_roots(record):
                 if group & own:
                     continue
                 own |= group
-                found.setdefault(record.kind, []).append(root)
+                found.setdefault(kind, []).append(root)
         for meeting in changerefs.window_meetings_in(body):
             said = f"{IN_WINDOW}{meeting.place}"
-            own = seen.setdefault(meeting.kind, set())
+            kind = canon.get(meeting.kind, meeting.kind)
+            own = seen.setdefault(kind, set())
             if said in own:
                 continue
             own.add(said)
-            found.setdefault(meeting.kind, []).append(said)
+            found.setdefault(kind, []).append(said)
     return found
 
 
+def mark_of(met: object) -> str:
+    """Встреча словаря в той форме, в какой её сверяют: без обратных кавычек.
+
+    Одна форма на счёт и на проверку повтора (взгляд на #1092): гейт, сверявший
+    сырую строку, не видел, что `` `abc1234` `` и `abc1234` — одна встреча.
+    """
+    return str(met).strip("`")
+
+
 def successor_of(kinds: dict[str, Any]) -> dict[str, str]:
-    """Прежнее имя рода → нынешнее, по полю `прежде` (взгляд на #1090)."""
-    return {str(old): name for name, body in kinds.items() for old in body.get(PREVIOUS) or []}
+    """Прежнее имя рода → нынешнее, по полю `прежде` (взгляд на #1090).
+
+    Одно старое имя у двух родов — неопределённость, а не «последний
+    побеждает»: какой род получит строки `Род: старое`, решал бы порядок
+    ключей. Это отказ (взгляд на #1093); гейт заморозки и читатели счёта ловят
+    `NotRun`.
+    """
+    found: dict[str, str] = {}
+    for name, body in kinds.items():
+        for old in body.get(PREVIOUS) or []:
+            if str(old) in found and found[str(old)] != name:
+                raise NotRun(
+                    f"прежнее имя «{old}» стоит в «{PREVIOUS}» у двух родов: "
+                    f"«{found[str(old)]}» и «{name}»"
+                )
+            found[str(old)] = name
+    return found
 
 
 def with_history(
@@ -269,9 +300,7 @@ def with_history(
     читатели словаря — порог, долг, ответ каталогу — работают над первым без
     правок: число встреч у них по-прежнему длина `встречен`.
     """
-    met: dict[str, list[str]] = {}
-    for name, found in met_in_history(bodies, kinds).items():
-        met.setdefault(successor_of(kinds).get(name, name), []).extend(found)
+    met = met_in_history(bodies, kinds)
     merged = {
         name: {**body, "встречен": [*(body.get("встречен") or []), *met.get(name, [])]}
         for name, body in kinds.items()
@@ -479,8 +508,10 @@ def in_archive(path: Path) -> tuple[dict[str, tuple[int, int, int]], str]:
     Род у находки архив берёт из этого же словаря (`встречен`), так что число
     здесь не второй счёт встреч, а их СУДЬБА: сколько из них в истории и чем
     они сняты. Дубль закрыт связью с другой находкой, а не работой, и в «снято
-    работой» не входит (взгляд на #817). Вторым отдаётся строка архива о
-    неполном наполнении: без неё счёт печатался бы как полный (045).
+    работой» не входит (взгляд на #817). ПРЕДЕЛ НАЗВАН (195, взгляд на #1092):
+    у находки архива род один, и находка двух родов здесь считается первому —
+    «находок рода» у второго на неё меньше, чем «встреч» в счёте рода.
+    Вторым отдаётся строка архива о неполном наполнении: без неё счёт печатался бы как полный (045).
     """
     try:
         archive = findings.read_archive(path)
