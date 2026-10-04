@@ -75,7 +75,7 @@ def kind_problems(landing: str, kinds: dict[str, Any]) -> list[str]:
         if not record.kind:
             told.append(f"«Разобрано: {marks}» — {NO_KIND_LINE}")
         elif finding_kinds.said_no(record.kind):
-            if len(record.kind.split()) < 3:
+            if not finding_kinds.REFUSED_RE.match(record.kind):
                 told.append(f"«Разобрано: {marks}» — «Род: нет» без причины (154)")
         elif record.kind not in kinds:
             told.append(f"«Разобрано: {marks}» — рода «{record.kind}» нет в словаре родов")
