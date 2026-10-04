@@ -1725,4 +1725,14 @@ def test_the_kind_line_gate_runs_end_to_end(run_script: RunScript, tmp_path: Pat
     result = run_script(
         "check_pr_meta.py", "--files", "README.md", "--messages-from", str(good), env=env
     )
-    assert check.NO_KIND_LINE not in result.text
+    # Исход, а не отсутствие одной строки: отказ по другой причине (род ушёл
+    # из словаря) иначе прошёл бы зелёным (взгляд на #1090).
+    assert result.code == CLEAN, result.text
+
+
+def test_the_reason_of_a_refused_kind_is_read_by_form() -> None:
+    """Гейт судит причину «Род: нет» формой: «нет—опечатка» — да, «нет — —» — нет (#1090)."""
+    check = load_script("check_pr_meta.py")
+    assert check.kind_problems("Разобрано: aaaaaaa\nРод: нет—опечатка", KINDS_FOR_LINES) == []
+    said = " ".join(check.kind_problems("Разобрано: aaaaaaa\nРод: нет — —", KINDS_FOR_LINES))
+    assert "без причины" in said
