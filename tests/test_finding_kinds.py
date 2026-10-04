@@ -802,3 +802,9 @@ def test_an_old_name_in_history_counts_under_the_new_one() -> None:
 def test_a_refused_kind_needs_a_reason_by_form(said: str, ok: bool) -> None:
     """Причина у «Род: нет» — по форме, а не по числу слов (взгляд на #1090)."""
     assert bool(module.REFUSED_RE.match(said)) is ok
+
+
+def test_successor_of_maps_every_old_name() -> None:
+    """Каждое имя из «прежде» указывает на нынешний род; без поля — ничего."""
+    kinds = {"новое": {"прежде": ["a", "b"]}, "своё": {}}
+    assert module.successor_of(kinds) == {"a": "новое", "b": "новое"}
