@@ -141,7 +141,7 @@ jobs:
           # счётчика 12.09. Число, ни разу не опубликованное, выглядело
           # опубликованным (045).
           python -m pip install --quiet \
-            "coverage>=7,<8" "pytest>=8,<10" "pytest-randomly>=3,<4" ./packages/transport
+            "coverage>=7,<8" "pytest>=8,<10" "jsonschema>=4.20,<5" "pytest-randomly>=3,<4" ./packages/transport
           rc=0
           python -m coverage run --parallel-mode --source=scripts -m pytest \
             --strict-markers -p no:cacheprovider \
@@ -165,6 +165,15 @@ jobs:
             --sha "${GITHUB_SHA}" \
             --family "${RUNNER_TEMP}/where.json" \
             --coverage "${RUNNER_TEMP}/coverage.json"
+      # ФАКТЫ СВЕРЯЮТСЯ СО СХЕМОЙ ВИТРИНЫ ДО ПУБЛИКАЦИИ, а не у неё после
+      # (#1001, решение владельца 04.10.2026). Схема прибита коммитом витрины
+      # (`check_facts_schema.SCHEMA_SHA`, 152): живая ветка сменила бы
+      # требование под нами молча. Отказ останавливает заход — на `badges`
+      # уезжает только файл, которому витрина не откажет.
+      - name: сверить факты со схемой витрины
+        run: |
+          python -m pip install --quiet "jsonschema>=4.20,<5"
+          python scripts/check_facts_schema.py "${RUNNER_TEMP}/badges/.github/badges/facts.json"
       # ЕДИНЫЙ ЗНАЧОК «Python │ ОС │ coverage │ release / PyPI │ version» (#1019,
       # решение владельца 01.10.2026). Рисует его действие каталога с тега, а не
       # копия здесь (022). Стоит ПОСЛЕ сборки фактов: покрытие и версию он берёт

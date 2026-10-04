@@ -371,6 +371,13 @@
     "scripts/check_env.py": {
       "answer": "as-is"
     },
+    "scripts/check_facts_schema.py": {
+      "answer": "configured",
+      "where": [
+        "scripts/check_facts_schema.py"
+      ],
+      "seam": "адрес схемы прибит коммитом витрины семьи: у чужого проекта своя витрина и свой договор"
+    },
     "scripts/check_foreign_why.py": {
       "answer": "as-is"
     },
