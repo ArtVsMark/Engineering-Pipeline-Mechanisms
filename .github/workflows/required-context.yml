@@ -32,23 +32,42 @@ jobs:
         with:
           python-version: "3.14"
       - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
+      # ТОКЕН ПРОГОНА ДОСТАТОЧЕН ПОЛОВИНЕ, И ЭТО ЗАМЕР. Набор правил площадка
+      # отдаёт любому токену. Настройки слияния (`allow_*`) — нет: токену
+      # прогона она их не отдаёт (замер 29.09.2026, #953), и без токена
+      # владельца сверка способов слияния говорит «не отработало». Замер
+      # 15.09.2026 «прочитано без токена» касался двух адресов НАБОРА ПРАВИЛ
+      # (`scripts/protection.py`) и верен; на настройки слияния его
+      # распространили без замера.
+      #
+      # ПОЭТОМУ СЕКРЕТ ПОЛУЧАЕТ ОДИН ЗАПРОС (#993, взгляд на #1117): этот шаг
+      # читает настройки слияния и кладёт в файл только поля `allow_*`, а
+      # сверка ниже идёт без секрета. Тот же приём, что у дрейфа. Файл не
+      # записан — причина в аннотации, а половина «способ слияния» ниже скажет
+      # «не отработало», а не «сошлось».
+      - name: прочитать настройки слияния токеном владельца
+        env:
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          said="${RUNNER_TEMP}/merge-ways.txt"
+          rc=0
+          python scripts/check_required_context.py --save-merge-ways "$RUNNER_TEMP/merge-ways.json" >"$said" 2>&1 || rc=$?
+          cat "$said"
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::Настройки слияния не прочитаны заходом с секретом (код $rc): $(tr '\n' ' ' <"$said")"
+          fi
       - name: сверить имя контекста с защитой ветки
         env:
-          # ТОКЕН ПРОГОНА ДОСТАТОЧЕН ПОЛОВИНЕ, И ЭТО ЗАМЕР. Набор правил площадка
-          # отдаёт любому токену. Настройки слияния (`allow_*`) — нет: токену
-          # прогона она их не отдаёт (замер 29.09.2026, #953), и без токена
-          # владельца сверка способов слияния говорит «не отработало». Замер
-          # 15.09.2026 «прочитано без токена» касался двух адресов НАБОРА ПРАВИЛ
-          # (`scripts/protection.py`) и верен; на настройки слияния его
-          # распространили без замера.
-          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -uo pipefail
           rc=0
           said="${RUNNER_TEMP}/compare.txt"
-          python scripts/check_required_context.py >"$said" 2>&1 || rc=$?
+          python scripts/check_required_context.py --merge-ways-from "$RUNNER_TEMP/merge-ways.json" >"$said" 2>&1 || rc=$?
           cat "$said"
           # ПРИЧИНА ЕДЕТ В АННОТАЦИЮ, А НЕ ОСТАЁТСЯ В ЛОГЕ. Логи прогонов из части
           # окон не читаются вовсе, и «смотрите вывод шага» для них — тупик:

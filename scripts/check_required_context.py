@@ -34,6 +34,7 @@
 """
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -142,12 +143,94 @@ UNSAID_REASON: Final = (
 )
 
 
-def merge_ways(repo: str, token: str) -> list[str]:
-    """Лишние способы слияния, оставшиеся включёнными у площадки."""
+def merge_settings(repo: str, token: str) -> dict[str, Any]:
+    """Поля способов слияния из настроек репозитория — и только они.
+
+    Отдельно от разбора, потому что дрейф читает их ОТДЕЛЬНЫМ шагом: секрет
+    владельца получает только этот запрос, а разбор идёт без секрета (#993).
+    Отсутствующий у площадки ключ в ответ не попадает и разбором читается как
+    «не сказано», а не как «выключено».
+    """
     try:
         answer = ghrest.request("GET", f"repos/{repo}", token) or {}
     except ghrest.TransportError as exc:
         raise NotRun(f"настройки репозитория не прочитаны: {exc}") from exc
+    return {key: answer[key] for key in MERGE_WAYS if key in answer}
+
+
+#: Секрет владельца, которым читаются настройки слияния. Тот же секрет
+#: объявляют у себя дрейф и очередь — общей константы нет, это дубль (071).
+OWNER_TOKEN_ENV: Final = "MERGE_QUEUE_TOKEN"
+
+#: Что говорит половина «способ слияния», когда заход с секретом не отработал
+#: или не звался вовсе: файла нет — и это молчание с причиной, а не «сошлось».
+UNPASSED: Final = (
+    "настройки слияния не переданы: заход с секретом владельца "
+    "(`--save-merge-ways`) не отработал или не звался (#993)"
+)
+
+
+def merge_settings_said(repo: str, owner_token: str) -> dict[str, Any]:
+    """Поля способов слияния токеном владельца — либо причина, по которой их нет.
+
+    ЧИТАЕТСЯ ТОКЕНОМ ВЛАДЕЛЬЦА, И ТОЛЬКО ИМ. Токену прогона площадка полей
+    `allow_*` не отдаёт никогда (замер 29.09.2026), и запасной ход на него дал
+    бы ту же немоту, только позже. Секрета нет — причина приходит раньше
+    запроса, как у открытия изменения (взгляд на #865).
+    """
+    if not owner_token:
+        return {
+            "reason": f"{OWNER_TOKEN_ENV} не задан — настройки слияния читает только токен "
+            "владельца, токену прогона площадка полей allow_* не отдаёт (#953)"
+        }
+    try:
+        return {"settings": merge_settings(repo, owner_token)}
+    except NotRun as exc:
+        return {"reason": str(exc)}
+
+
+def save_merge_settings(repo: str, owner_token: str, path: Path) -> None:
+    """Единственный заход с секретом владельца: один запрос, в файл — поля `allow_*`.
+
+    СЕКРЕТ ПОЛУЧАЕТ ОДИН ЗАПРОС, И ЭТО ДЕРЖИТ УСТРОЙСТВО, А НЕ КОД (#993).
+    Прежде `MERGE_QUEUE_TOKEN` лежал в окружении всего захода — у дрейфа и у
+    этой сверки, — и «читает его только половина „способ слияния“» держала
+    дисциплина кода (цена принята в #953). Теперь секрет получает отдельный
+    шаг прогона, который делает ровно этот запрос и кладёт в файл только поля
+    способов слияния; всё остальное идёт без секрета вовсе. Читают файл оба
+    механизма — дрейф и эта сверка, — и разбор у файла один (090).
+    """
+    path.write_text(
+        json.dumps(merge_settings_said(repo, owner_token), ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def load_merge_settings(path: Path | None) -> dict[str, Any]:
+    """Сказанное заходом с секретом; файла нет или он испорчен — причина, а не пустота."""
+    if path is None or not path.is_file():
+        return {"reason": UNPASSED}
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"reason": f"настройки слияния не прочитаны из {path}: {exc}"}
+    return said if isinstance(said, dict) else {"reason": f"в {path} не словарь"}
+
+
+def extra_ways_said(said: dict[str, Any]) -> list[str]:
+    """Лишние способы слияния по сказанному чтением; причины вместо полей — `NotRun`."""
+    settings = said.get("settings")
+    if not isinstance(settings, dict):
+        raise NotRun(str(said.get("reason") or UNPASSED))
+    return extra_ways(settings)
+
+
+def merge_ways(repo: str, token: str) -> list[str]:
+    """Лишние способы слияния, оставшиеся включёнными у площадки."""
+    return extra_ways(merge_settings(repo, token))
+
+
+def extra_ways(answer: dict[str, Any]) -> list[str]:
+    """Лишние способы слияния по прочитанным полям; несказанное — отказ, а не «выключено»."""
     # НЕ СКАЗАНО — НЕ ЗНАЧИТ ВЫКЛЮЧЕНО. Поля `allow_*` площадка отдаёт не всякому
     # вызывающему, и отсутствующий ключ, прочитанный как `False`, делал бы
     # непрочитанное «сошлось» каждую ночь (045). Нашёл внешний взгляд на #951.
@@ -166,7 +249,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--branch", default=paths.TRUNK)
     parser.add_argument("--summary-job", default="ci-complete")
+    parser.add_argument(
+        "--save-merge-ways",
+        type=Path,
+        metavar="ФАЙЛ",
+        help=f"только прочитать настройки слияния токеном {OWNER_TOKEN_ENV} и положить в файл",
+    )
+    parser.add_argument(
+        "--merge-ways-from",
+        type=Path,
+        metavar="ФАЙЛ",
+        help="настройки слияния, положенные заходом --save-merge-ways",
+    )
     args = parser.parse_args(argv)
+
+    if args.save_merge_ways:
+        try:
+            save_merge_settings(
+                args.repo, os.environ.get(OWNER_TOKEN_ENV, ""), args.save_merge_ways
+            )
+        except OSError as exc:
+            print(f"сверка не отработала: настройки слияния не записаны: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(f"настройки слияния положены: {args.save_merge_ways}")
+        return EXIT_OK
 
     try:
         expected = declared_context(args.summary_job)
@@ -180,7 +286,13 @@ def main(argv: list[str] | None = None) -> int:
     # Замер 15.09.2026 касался ДВУХ АДРЕСОВ НАБОРА ПРАВИЛ (`scripts/protection.py`)
     # и верен; ошибкой было распространить его на `repos/{repo}`, которого он
     # не читал. Без токена владельца вторая половина говорит «не прочитано».
-    token = os.environ.get("MERGE_QUEUE_TOKEN") or ghrest.token_from_env()
+    # С файлом настроек секрета в окружении нет вовсе: наборам правил хватает
+    # токена прогона (#993, взгляд на #1117).
+    token = (
+        ghrest.token_from_env()
+        if args.merge_ways_from
+        else os.environ.get(OWNER_TOKEN_ENV) or ghrest.token_from_env()
+    )
 
     try:
         actual, guarded_otherwise = live_contexts(args.repo, args.branch, token)
@@ -219,7 +331,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"совпадает: защита «{args.branch}» требует ровно «{expected}»")
 
     try:
-        extra = merge_ways(args.repo, token)
+        extra = (
+            extra_ways_said(load_merge_settings(args.merge_ways_from))
+            if args.merge_ways_from
+            else merge_ways(args.repo, token)
+        )
     except NotRun as exc:
         print(f"сверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN

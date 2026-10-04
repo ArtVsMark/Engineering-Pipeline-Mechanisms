@@ -1089,7 +1089,7 @@ def test_no_drift_is_its_own_outcome(
     """
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "ours", dict)
-    monkeypatch.setattr(module, "look", lambda repo, token, mine: ([], []))
+    monkeypatch.setattr(module, "look", lambda repo, token, mine, said: ([], []))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--repo", "o/r"]) == module.EXIT_NOTHING
     assert "дрейфа нет" in capsys.readouterr().out
@@ -1102,7 +1102,7 @@ def test_a_found_drift_is_recorded(
     moved = module.Drift("каталог", "было 200, стало 203", "перечитать ответы")
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "ours", dict)
-    monkeypatch.setattr(module, "look", lambda repo, token, mine: ([moved], []))
+    monkeypatch.setattr(module, "look", lambda repo, token, mine, said: ([moved], []))
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     assert module.main(["--repo", "o/r"]) == module.EXIT_RECORDED
     said = capsys.readouterr().out
@@ -1121,7 +1121,7 @@ def test_all_sources_silent_is_not_a_settled_state(
     """
     monkeypatch.setenv("GH_TOKEN", "токен")
     monkeypatch.setattr(module, "ours", dict)
-    monkeypatch.setattr(module, "look", lambda repo, token, mine: ([], list(module.SOURCES)))
+    monkeypatch.setattr(module, "look", lambda repo, token, mine, said: ([], list(module.SOURCES)))
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
     assert "ни один источник не ответил" in capsys.readouterr().err
 
@@ -1728,12 +1728,9 @@ def test_the_issue_body_reads_back_into_the_same_records() -> None:
         ),
     ],
 )
-def test_extra_merge_ways_are_named(
-    monkeypatch: pytest.MonkeyPatch, settings: dict[str, bool], named: list[str]
-) -> None:
+def test_extra_merge_ways_are_named(settings: dict[str, bool], named: list[str]) -> None:
     """Способ слияния сверх уплотнения — находка; одно уплотнение — тишина (006, #948)."""
-    monkeypatch.setattr(module.check_required_context.ghrest, "request", lambda *a, **k: settings)
-    found = module.merge_ways_moved("о/р", "токен")
+    found = module.merge_ways_moved({"settings": settings})
     if not named:
         assert found == []
         return
@@ -1742,68 +1739,99 @@ def test_extra_merge_ways_are_named(
     assert found[0].next_step
 
 
-def test_unread_merge_settings_are_the_third_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Настройки не прочитаны — источник молчит с причиной, а не «сошлось» (045)."""
+def test_unread_merge_settings_are_the_third_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Настройки не прочитаны — в файл ложится причина, и источник её называет (045)."""
 
     def refuse(*args: object, **kwargs: object) -> None:
         raise module.ghrest.TransportError("площадка недоступна")
 
     monkeypatch.setattr(module.check_required_context.ghrest, "request", refuse)
+    said = tmp_path / "merge-ways.json"
+    module.check_required_context.save_merge_settings("о/р", "токен", said)
     with pytest.raises(module.NotRun, match="не прочитаны"):
-        module.merge_ways_moved("о/р", "токен")
+        module.merge_ways_moved(module.check_required_context.load_merge_settings(said))
 
 
 def test_merge_ways_without_the_owner_token_are_silent_before_the_platform(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Секрета владельца нет — источник молчит с причиной, не обращаясь к площадке (#953).
+    """Секрета владельца нет — причина в файле, а к площадке заход не обращается (#953).
 
     Проверяется именно НЕВЫЗОВ: «не настроено» обязано прийти раньше запроса,
-    иначе с пустым токеном источник спросил бы площадку и получил ту же немоту.
+    иначе с пустым токеном заход спросил бы площадку и получил ту же немоту.
     """
 
     def no_platform(*args: object, **kwargs: object) -> None:
         raise AssertionError("обращение к площадке без токена владельца")
 
     monkeypatch.setattr(module.check_required_context.ghrest, "request", no_platform)
+    said = tmp_path / "merge-ways.json"
+    module.check_required_context.save_merge_settings("о/р", "", said)
     with pytest.raises(module.NotRun, match=module.OWNER_TOKEN_ENV):
-        module.merge_ways_moved("о/р", "")
+        module.merge_ways_moved(module.check_required_context.load_merge_settings(said))
 
 
-def test_merge_ways_are_read_with_the_owner_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Настройки слияния спрашиваются токеном владельца — тем, что передан (#953)."""
-    seen: list[str] = []
-
-    def answer(
-        method: str, path: str, token: str, *args: object, **kwargs: object
-    ) -> dict[str, bool]:
-        seen.append(token)
-        return {"allow_merge_commit": False, "allow_rebase_merge": False}
-
-    monkeypatch.setattr(module.check_required_context.ghrest, "request", answer)
-    assert module.merge_ways_moved("о/р", "токен-владельца") == []
-    assert seen == ["токен-владельца"]
-
-
-def test_look_hands_the_merge_ways_source_the_owner_token(
-    monkeypatch: pytest.MonkeyPatch,
+def test_merge_settings_are_read_with_the_owner_token_and_only_their_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`look` отдаёт источнику «способ слияния» секрет владельца, а не токен прогона (#953).
+    """Настройки — переданным токеном владельца, в файл — только поля способов (#953, #993).
 
-    Без этой связки оба теста выше зелены и тогда, когда `look` зовёт источник
-    токеном прогона: источник снова спрашивал бы площадку тем, кому она полей
-    `allow_*` не отдаёт. Нашёл внешний взгляд на #972.
+    Ответ `repos/{repo}` несёт всё о репозитории; в файл, который читает заход
+    без секрета, уходят ровно поля `allow_*`, по которым судит источник.
     """
     seen: list[str] = []
+
+    def answer(method: str, path: str, token: str, *args: object, **kwargs: object) -> Any:
+        seen.append(token)
+        return {"allow_merge_commit": False, "allow_rebase_merge": False, "private": True}
+
+    monkeypatch.setattr(module.check_required_context.ghrest, "request", answer)
+    said = tmp_path / "merge-ways.json"
+    module.check_required_context.save_merge_settings("о/р", "токен-владельца", said)
+    assert seen == ["токен-владельца"]
+    assert set(module.check_required_context.load_merge_settings(said)["settings"]) == {
+        "allow_merge_commit",
+        "allow_rebase_merge",
+    }
+    assert module.merge_ways_moved(module.check_required_context.load_merge_settings(said)) == []
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [(None, "не переданы"), ("{не json", "не прочитаны"), ("[]", "не словарь")],
+    ids=["файла-нет", "испорчен", "не-словарь"],
+)
+def test_a_missing_or_broken_file_is_silence_with_a_reason(
+    tmp_path: Path, body: str | None, reason: str
+) -> None:
+    """Заход с секретом не отработал — источник молчит с причиной, а не «сошлось» (045)."""
+    said = tmp_path / "merge-ways.json"
+    if body is not None:
+        said.write_text(body, encoding="utf-8")
+    with pytest.raises(module.NotRun, match=reason):
+        module.merge_ways_moved(module.check_required_context.load_merge_settings(said))
+
+
+def test_look_hands_the_merge_ways_source_what_the_secret_step_said(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`look` отдаёт источнику «способ слияния» сказанное заходом с секретом (#953, #993).
+
+    Без этой связки тесты выше зелены и тогда, когда `look` зовёт источник
+    чем-то другим: источник снова спрашивал бы площадку тем, кому она полей
+    `allow_*` не отдаёт. Нашёл внешний взгляд на #972.
+    """
+    seen: list[dict[str, Any]] = []
 
     def broken(*_: Any, **__: Any) -> Any:
         raise module.NotRun("снимок не прочитан")
 
-    def merge_ways(repo: str, owner_token: str) -> list[Any]:
-        seen.append(owner_token)
+    def merge_ways(said: dict[str, Any]) -> list[Any]:
+        seen.append(said)
         return []
 
-    monkeypatch.setenv(module.OWNER_TOKEN_ENV, "токен-владельца")
     monkeypatch.setattr(module, "fetch", broken)
     for name in (
         "pinned_tag_moved",
@@ -1818,8 +1846,12 @@ def test_look_hands_the_merge_ways_source_the_owner_token(
     ):
         monkeypatch.setattr(module, name, lambda *a, **k: [])
     monkeypatch.setattr(module, "merge_ways_moved", merge_ways)
+    module.look("o/r", "токен-прогона", {"rules": {}}, {"settings": {"x": True}})
     module.look("o/r", "токен-прогона", {"rules": {}})
-    assert seen == ["токен-владельца"]
+    assert seen == [{"settings": {"x": True}}, {"reason": module.check_required_context.UNPASSED}]
+
+
+WORKFLOWS: Final = ROOT / ".github" / "workflows"
 
 
 def test_the_owner_token_reaches_drift_only_from_the_shared_branch() -> None:
@@ -1827,27 +1859,56 @@ def test_the_owner_token_reaches_drift_only_from_the_shared_branch() -> None:
 
     Кнопка прогона принимает любую ветку и исполняет её код. Без условия на
     `github.ref` пишущий `MERGE_QUEUE_TOKEN` получил бы `drift.py` с ветки
-    изменения — непросмотренный код.
+    изменения — непросмотренный код. После выноса общим шагом (#993) секрет
+    передаёт вызов, и условие стоит там.
     """
-    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "drift.yml").read_text())
-    given = [
-        step["env"][module.OWNER_TOKEN_ENV]
-        for step in flow["jobs"]["drift"]["steps"]
-        if module.OWNER_TOKEN_ENV in step.get("env", {})
-    ]
-    assert given, "секрет владельца шагу дрейфа не передан"
+    flow = yaml.safe_load((WORKFLOWS / "drift.yml").read_text(encoding="utf-8"))
+    given = flow["jobs"]["drift"].get("secrets") or {}
     # Выражение сверяется ЦЕЛИКОМ: по началу проходит и `… && secrets.X ||
     # secrets.X`, отдающее секрет на любой ветке (взгляд на #974).
     whole = "${{ github.ref == 'refs/heads/main' && secrets.MERGE_QUEUE_TOKEN || '' }}"
-    assert given == [whole] * len(given), given
+    assert given == {module.OWNER_TOKEN_ENV: whole}, given
 
 
-def test_unsaid_merge_settings_are_not_read_as_settled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_inside_the_step_the_secret_reaches_one_request_only() -> None:
+    """В общем шаге секрет владельца получает один шаг — чтение настроек слияния (#993).
+
+    Это и есть «секрет получает только источник „способ слияния“»: остальные
+    источники идут шагом, в окружении которого секрета нет.
+    """
+    flow = yaml.safe_load((WORKFLOWS / "step-drift.yml").read_text(encoding="utf-8"))
+    steps = flow["jobs"]["drift"]["steps"]
+    holders = [step for step in steps if module.OWNER_TOKEN_ENV in (step.get("env") or {})]
+    assert len(holders) == 1, [step.get("name") for step in holders]
+    assert "--save-merge-ways" in holders[0]["run"]
+    # Сбой шага с секретом называется аннотацией, а не остаётся в журнале шага (#1117).
+    assert "::warning::" in holders[0]["run"] and "continue-on-error" not in holders[0]
+    assert "--save-merge-ways" not in " ".join(
+        str(step.get("run") or "") for step in steps if step is not holders[0]
+    )
+
+
+def test_the_secret_step_writes_its_file_and_reads_nothing_else(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Заход `--save-merge-ways` пишет файл и не спрашивает ни одного источника (#993)."""
+
+    def no_sources(*_: Any, **__: Any) -> Any:
+        raise AssertionError("заход с секретом спросил источники")
+
+    monkeypatch.setattr(module, "look", no_sources)
+    monkeypatch.setenv(module.OWNER_TOKEN_ENV, "")
+    said = tmp_path / "merge-ways.json"
+    assert module.main(["--repo", "o/r", "--save-merge-ways", str(said)]) == module.EXIT_NOTHING
+    assert (
+        module.OWNER_TOKEN_ENV in module.check_required_context.load_merge_settings(said)["reason"]
+    )
+
+
+def test_unsaid_merge_settings_are_not_read_as_settled() -> None:
     """Площадка не отдала ключей `allow_*` — источник молчит, а не «сошлось» (045, #951)."""
-    said = {"allow_squash_merge": True}
-    monkeypatch.setattr(module.check_required_context.ghrest, "request", lambda *a, **k: said)
     with pytest.raises(module.NotRun, match=re.escape(module.check_required_context.UNSAID_REASON)):
-        module.merge_ways_moved("о/р", "токен")
+        module.merge_ways_moved({"settings": {"allow_squash_merge": True}})
 
 
 def test_only_the_family_is_left_to_its_own_judge() -> None:
@@ -1882,3 +1943,27 @@ def test_a_consumers_own_action_is_judged_and_the_family_is_not(
     assert not any(name.startswith(module.catalogue.FAMILY_PREFIX) for name in seen)
     pinned = module.pinned_hashes(tmp_path)
     assert set(pinned) == {"Other/own-action", "actions/checkout"}
+
+
+def test_a_manual_run_without_the_file_reads_the_settings_with_the_secret_in_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ручной заход без `--merge-ways-from` читает настройки сам, если секрет задан (#1117)."""
+    handed: list[dict[str, Any]] = []
+    monkeypatch.setenv(module.OWNER_TOKEN_ENV, "токен-владельца")
+    monkeypatch.setenv("GH_TOKEN", "токен-прогона")
+    monkeypatch.setattr(module, "ours", lambda: {"rules": {}})
+    monkeypatch.setattr(
+        module.check_required_context,
+        "merge_settings_said",
+        lambda repo, token: {"settings": {"allow_merge_commit": False}, "token": token},
+    )
+
+    def look(repo: str, token: str, mine: dict[str, Any], said: dict[str, Any]) -> Any:
+        handed.append(said)
+        return [], []
+
+    monkeypatch.setattr(module, "look", look)
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    module.main(["--repo", "o/r"])
+    assert handed and handed[0]["token"] == "токен-владельца"
