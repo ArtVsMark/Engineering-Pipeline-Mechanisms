@@ -142,6 +142,9 @@ def measure(root: Path) -> int:
         return EXIT_UNASKED
     try:
         repo = check_branch_revival.repo_of(root)
+        # Мелкий клон — отказ, как у счёта встреч: окна слитых изменений
+        # недосчитались бы, а число печаталось бы полным (045, взгляд на #1087).
+        trunk_log.whole(root)
         log = trunk_log.git_log(root)
     except (check_branch_revival.NotRun, trunk_log.NotRun) as exc:
         print(f"замер не сделан: {exc}", file=sys.stderr)
@@ -184,7 +187,7 @@ def look(root: Path, branch: str) -> tuple[int, str]:
     """Вердикт по одной ветке: исход и что сказать."""
     session = session_of(root)
     if not session:
-        return EXIT_OK, f"голова не несёт трейлера {TRAILER} — предел окна не про неё"
+        return EXIT_OK, f"свои коммиты ветки не несут трейлера {TRAILER} — предел окна не про неё"
     token = ghrest.token_from_env()
     if not token:
         return EXIT_UNASKED, (
