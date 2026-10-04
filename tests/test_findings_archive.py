@@ -858,7 +858,7 @@ def test_unsquashed_merges_are_named_in_gaps(monkeypatch: pytest.MonkeyPatch) ->
     log = (
         f"Merge pull request #48 from o/agent/x{field}тело{record}Тема (#5){field}Тема (#5){record}"
     )
-    assert module.unsquashed(log) == 1
+    assert module.trunk_log.unsquashed(log) == 1
     assert [one for one, _ in module.trunk_log.merged_messages(log)] == [5]
     platform(monkeypatch)
     archive = module.build("o/r", "t", 10, KINDS, {}, history(), unseen=1)

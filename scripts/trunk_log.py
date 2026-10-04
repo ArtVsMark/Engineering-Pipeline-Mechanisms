@@ -30,6 +30,10 @@ RECORD: Final = "\x00"
 #: Страж в `badges.yml` держит только перечитку, а история теперь читается
 #: всегда (взгляд на #879); сверка по соседству идёт по той же ветке.
 TRUNK_REF: Final = f"origin/{paths.TRUNK}"
+#: Слияние площадки без уплотнения: «Merge pull request #N from …». Его тело —
+#: не тело изменения: строки `Разобрано:` и `Род:` у такого слияния лежат в
+#: коммитах ветки, и история их не отдаёт. Они считаются, а не угадываются.
+UNSQUASHED_RE: Final = re.compile(r"^Merge pull request #\d+ from ")
 #: Начало отказа на мелком клоне: тест узнаёт его по константе (209).
 SHALLOW: Final = "история обрезана (мелкий клон)"
 
@@ -60,6 +64,26 @@ def merged_messages(log: str) -> list[tuple[int, str]]:
         if said:
             out.append((int(said.group(1)), body))
     return out
+
+
+def unsquashed(log: str) -> int:
+    """Сколько слияний площадки без уплотнения в истории — их тел счёт не видит (#879)."""
+    return sum(
+        1
+        for record in log.split(RECORD)
+        if UNSQUASHED_RE.search(record.strip("\n").partition(FIELD)[0].strip())
+    )
+
+
+def unseen(where: Path | None = None, ref: str = TRUNK_REF) -> int:
+    """Слияний без уплотнения в истории `ref`: их строки `Род:` в счёт не попадают.
+
+    ПРЕДЕЛ НАЗВАН ЧИСЛОМ, А НЕ МОЛЧАНИЕМ (045, взгляд на #1086). Замер
+    04.10.2026: таких слияний 17, все — #1…#154, до уплотнения и задолго до
+    строки `Род:`, то есть встреч в них нет. Новое такое слияние строки
+    `Род:` своей ветки потеряло бы, и читатели счёта печатают это число.
+    """
+    return unsquashed(git_log(where, ref))
 
 
 def whole(where: Path | None = None) -> None:

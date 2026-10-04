@@ -63,3 +63,11 @@ def test_an_unknown_ref_is_refused(tmp_path: Path) -> None:
     """Ветки нет — отказ, а не пустая история."""
     with pytest.raises(module.NotRun):
         module.merged_bodies(repo(tmp_path), "нет-такой")
+
+
+def test_merges_without_squash_are_counted(tmp_path: Path) -> None:
+    """Слияние «Merge pull request #N» в теле изменения не несёт — его считают, а не читают."""
+    root = repo(tmp_path)
+    git(root, "commit", "-q", "--allow-empty", "-m", "Merge pull request #7 from o/agent/x")
+    assert module.unseen(root, "HEAD") == 1
+    assert len(module.merged_bodies(root, "HEAD")) == 2

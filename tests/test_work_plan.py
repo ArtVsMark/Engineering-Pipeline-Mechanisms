@@ -492,6 +492,7 @@ def test_the_plan_and_the_queue_count_sources_alike() -> None:
 def no_trunk_history(monkeypatch: pytest.MonkeyPatch) -> None:
     """Раздел поводов считает встречи по подделкам, а не по истории дерева набора (#1022)."""
     monkeypatch.setattr(module.trunk_log, "merged_bodies", lambda *_, **__: [])
+    monkeypatch.setattr(module.trunk_log, "unseen", lambda *_, **__: 0)
 
 
 def kinds_file(tmp_path: Any, kinds: dict[str, Any]) -> Any:
@@ -538,6 +539,15 @@ def test_kind_lines_of_the_history_count_towards_the_threshold(tmp_path: Any) ->
     assert module.birth_part(path, []).rows == []
     said = module.birth_part(path, ["Разобрано: aaaaaaa\nРод: род"])
     assert said.rows == ["род находок у порога без ответа каталогу: «род» — встреч 3"]
+
+
+def test_merges_without_squash_are_named_in_the_section(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Слияния без уплотнения раздел называет пометкой, а не молчит (045, взгляд на #1086)."""
+    monkeypatch.setattr(module.trunk_log, "unseen", lambda *_, **__: 17)
+    path = kinds_file(tmp_path, {"род": {"признак": "x", "встречен": ["a"], "закрыт": "гейт"}})
+    assert module.birth_part(path).note == f"{module.finding_kinds.UNSEEN_SAID} 17"
 
 
 def test_an_unreadable_history_is_named_silence(

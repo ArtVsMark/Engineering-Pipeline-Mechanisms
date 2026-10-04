@@ -432,6 +432,8 @@ OUTSIDE: Final = "род архива вне словаря:"
 KINDLESS: Final = "записей архива без рода:"
 #: Строка о встречах, пришедших строками `Род:` из истории (#1022).
 HISTORY_SAID: Final = "из них строками «Род:» истории"
+#: Начало строки о слияниях без уплотнения: их строк `Род:` история не отдаёт.
+UNSEEN_SAID: Final = "слияний без уплотнения, чьих строк «Род:» счёт не видит:"
 #: Начало строки о роде, названном в истории, но не объявленном в словаре.
 OUTSIDE_HISTORY: Final = "род истории вне словаря:"
 #: Хвост строки замера дублей: тест узнаёт её по нему, а не по буквам (209).
@@ -565,6 +567,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         frozen = read(Path(args.kinds) if args.kinds else None)
         kinds, outside = with_history(frozen, trunk_log.merged_bodies(ref=args.trunk))
+        unseen = trunk_log.unseen(ref=args.trunk)
         archived, gap = in_archive(Path(args.archive)) if args.archive else ({}, "")
     except (NotRun, trunk_log.NotRun) as refusal:
         print(f"роды не сосчитаны: {refusal}", file=sys.stderr)
@@ -577,6 +580,8 @@ def main(argv: list[str] | None = None) -> int:
     # уносила бы встречу из счёта без слова (045).
     for name in sorted(outside):
         print(f"  {OUTSIDE_HISTORY} {name} — встреч {len(outside[name])}")
+    if unseen:
+        print(f"  {UNSEEN_SAID} {unseen}")
     if gap:
         print(f"{findings.UNFILLED_SAID} {gap} — числа архива ниже неполные")
     if archived and args.kinds:

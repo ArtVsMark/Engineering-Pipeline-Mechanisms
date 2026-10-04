@@ -59,7 +59,6 @@
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -117,7 +116,6 @@ MERGES_PER_HOUR: Final = 15
 #: Номер изменения в теме уплотнённого коммита: «Тема (#N)».
 #: Слияние площадки без уплотнения: «Merge pull request #N from …». Архив его
 #: не учитывает, а считает — для строки в `gaps`.
-UNSQUASHED_RE: Final = re.compile(r"^Merge pull request #\d+ from ")
 #: Строка `gaps` о них: снятия у таких слияний в коммитах ветки, и архив их не знает.
 UNSEEN_GAP: Final = "слияний без уплотнения, которых архив не видит"
 #: Граница, которую архив знает о себе всегда: ответ верификатора подхватывается
@@ -388,15 +386,6 @@ def merged_pending(merged: list[tuple[int, str]], counted: set[int]) -> list[tup
     return pending
 
 
-def unsquashed(log: str) -> int:
-    """Сколько слияний площадки без уплотнения в истории — их архив не видит (#879)."""
-    return sum(
-        1
-        for record in log.split(trunk_log.RECORD)
-        if UNSQUASHED_RE.search(record.strip("\n").partition(trunk_log.FIELD)[0].strip())
-    )
-
-
 def reread(archive: dict[str, Any], messages: list[tuple[int, str]], counted: set[int]) -> int:
     """Дописывает снятия и пересчитывает связи учтённых изменений; отдаёт число изменённых.
 
@@ -526,7 +515,7 @@ def main(argv: list[str] | None = None) -> int:
             previous(args.previous),
             history,
             args.reread,
-            unsquashed(log),
+            trunk_log.unsquashed(log),
         )
     except (
         NotRun,

@@ -14,6 +14,7 @@
 
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Final
 
@@ -244,8 +245,25 @@ def test_the_skill_and_the_record_name_each_other() -> None:
 
 
 def test_the_walk_names_the_kinds(run_script) -> None:  # type: ignore[no-untyped-def]
-    """Заход процессом называет роды и выходит нулём — исход прогоняется."""
+    """Заход процессом называет роды и выходит нулём; на мелком клоне — отказывает вслух.
+
+    Счёт встреч читает историю (#1022), и глубина клона — свойство среды, а не
+    дерева: взгляд идёт по `fetch-depth: 1` (взгляд на #1086). Прогоняются
+    оба исхода — какой из двух, решает среда, а не пропуск.
+    """
     done = run_script("finding_kinds.py")
+    shallow = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.strip()
+    if shallow == "true":
+        assert done.code == module.EXIT_BROKEN, done.out
+        assert module.trunk_log.SHALLOW in done.err, done.err
+        return
     assert done.code == module.EXIT_OK, done.err
     assert "родов" in done.out, done.out
 
@@ -633,6 +651,7 @@ def no_trunk_history(monkeypatch: pytest.MonkeyPatch) -> None:
     число в проверке зависело бы от того, сколько строк `Род:` уже слито.
     """
     monkeypatch.setattr(module.trunk_log, "merged_bodies", lambda *_, **__: [])
+    monkeypatch.setattr(module.trunk_log, "unseen", lambda *_, **__: 0)
 
 
 def history_kinds(*met: str) -> dict[str, object]:
@@ -736,6 +755,15 @@ def test_the_entry_point_names_the_history_and_its_outsiders(
     out = capsys.readouterr().out
     assert f"встреч 2 ({module.HISTORY_SAID} origin/main — 1)" in out
     assert f"{module.OUTSIDE_HISTORY} опечатка — встреч 1" in out
+
+
+def test_merges_without_squash_are_named_by_number(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Слияния без уплотнения называются числом: их строк `Род:` счёт не видит (045)."""
+    monkeypatch.setattr(module.trunk_log, "unseen", lambda *_, **__: 17)
+    assert module.main([]) == module.EXIT_OK
+    assert f"{module.UNSEEN_SAID} 17" in capsys.readouterr().out
 
 
 def test_an_unreadable_history_is_the_third_outcome(

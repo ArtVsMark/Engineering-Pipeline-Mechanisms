@@ -290,7 +290,10 @@ def main(argv: list[str] | None = None) -> int:
             # владельца 03.10.2026, #1022). «До» — история базы, «после» — она
             # же и коммиты изменения: строка `Род:` в них уедет в тело
             # уплотнения. Сводит та же функция, что у архива и плана; мелкий
-            # клон — отказ, а не тихий недосчёт (045).
+            # клон — отказ, а не тихий недосчёт (045). ПРЕДЕЛ НАЗВАН (195):
+            # слияния без уплотнения строк `Род:` в истории не оставляют
+            # (`trunk_log.unseen`); прирост гейт берёт из коммитов изменения, и
+            # на него этот предел не влияет.
             history = trunk_log.merged_bodies(args.root, args.base)
             own = trunk_log.branch_bodies(args.base, args.head, args.root)
             before, _ = finding_kinds.with_history(kinds_at(args.base, args.root), history)

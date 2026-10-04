@@ -311,6 +311,7 @@ def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> So
     queue_path = declared.parent / paths.PROPOSALS.name
     try:
         said = trunk_log.merged_bodies() if bodies is None else bodies
+        unseen = trunk_log.unseen() if bodies is None else 0
         kinds, _ = finding_kinds.with_history(finding_kinds.read(declared), said)
         left = finding_kinds.unanswered(
             kinds,
@@ -323,7 +324,8 @@ def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> So
         rows=[
             f"род находок у порога без ответа каталогу: «{name}» — встреч {times}"
             for name, times in left
-        ]
+        ],
+        note=f"{finding_kinds.UNSEEN_SAID} {unseen}" if unseen else "",
     )
 
 
