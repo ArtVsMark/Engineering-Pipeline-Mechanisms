@@ -448,3 +448,60 @@ def test_an_unreadable_head_is_refused_with_the_same_start(tmp_path: Path) -> No
     root = tree(tmp_path)
     with pytest.raises(module.NotRun, match=f"^{module.finding_kinds.ANSWERS_UNREAD}"):
         module.known_at("нет-такой-головы", root)
+
+
+def kinds_tree(tmp_path: Path, times: int, answer: str = "") -> tuple[Path, Path]:
+    """Дерево с родом у `times` замороженных встреч на общей ветке."""
+    root = tree(tmp_path)
+    kinds = root / ".rules" / "finding-kinds.json"
+    kinds.write_text(
+        json.dumps({"kinds": {"род": kind(times, answer)}}, ensure_ascii=False), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "роды")
+    return root, kinds
+
+
+def test_a_kind_line_in_the_branch_crosses_the_threshold(tmp_path: Path) -> None:
+    """Строка `Род:` в коммите изменения — прирост встреч, и порог спрашивает ответа (#1022).
+
+    Словарь заморожен: встреча едет строкой в коммите, а не правкой
+    `встречен`, и без истории гейт бы этого перехода не увидел.
+    """
+    root, _ = kinds_tree(tmp_path, 2)
+    git(root, "checkout", "-q", "-b", "work")
+    git(root, "commit", "--allow-empty", "-m", "починка", "-m", "Разобрано: aaaaaaa\nРод: род")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND
+    # Вторая половина: строка не того рода прироста не даёт.
+    git(root, "checkout", "-q", "main")
+    git(root, "checkout", "-q", "-b", "other")
+    git(root, "commit", "--allow-empty", "-m", "починка", "-m", "Разобрано: aaaaaaa\nРод: чужой")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
+
+
+def test_a_threshold_crossed_in_the_trunk_history_is_not_asked_again(tmp_path: Path) -> None:
+    """Род, дошедший до порога строкой `Род:` в слитом раньше, — не прирост этого изменения."""
+    root, _ = kinds_tree(tmp_path, 2)
+    git(root, "commit", "--allow-empty", "-m", "Слито (#5)", "-m", "Разобрано: aaaaaaa\nРод: род")
+    git(root, "checkout", "-q", "-b", "work")
+    git(root, "commit", "--allow-empty", "-m", "ещё", "-m", "Разобрано: bbbbbbb\nРод: род")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
+
+
+def test_a_shallow_history_is_the_third_outcome(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Мелкий клон — отказ, а не тихий недосчёт встреч (решение владельца, #1022)."""
+    root, _ = kinds_tree(tmp_path, 2)
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{root}", str(shallow)],
+        check=True,
+        capture_output=True,
+    )
+    with contextlib.chdir(shallow):
+        assert module.main(["--base", "HEAD", "--root", str(shallow)]) == BROKEN
+    assert module.trunk_log.SHALLOW in capsys.readouterr().err
