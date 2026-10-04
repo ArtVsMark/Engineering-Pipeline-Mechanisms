@@ -42,6 +42,7 @@ import agent_pr
 import check_agent_silenced
 import check_branch_revival
 import check_env
+import check_open_limit
 import ghrest
 import gitcall
 import paths
@@ -523,6 +524,9 @@ def push_branch(root: Path) -> int:
     ЗДЕСЬ ПРОВЕРКА И ДЕЙСТВИЕ СТАЛИ ОДНИМ ЗАХОДОМ. Красное просто не доходит до
     этой строки: толкать нечем, а не «не следует».
 
+    ТРЕТИЙ — ПРЕДЕЛ ОТКРЫТЫХ ИЗМЕНЕНИЙ ОКНА (`check_open_limit`, #1085):
+    новая ветка при трёх открытых своих не толкается.
+
     ВТОРОЙ ЗАПРЕТ ЗДЕСЬ — ВОСКРЕШЕНИЕ СЛИТОЙ ВЕТКИ, и он спрашивает ПЛОЩАДКУ.
     Сторож перед git ловит тот же случай локальными ссылками и потому устаревает
     до первого фетча; 19.09.2026 он ровно поэтому и не сработал. Отказ ставится
@@ -562,6 +566,17 @@ def push_branch(root: Path) -> int:
     else:
         print(about, file=sys.stderr if verdict else sys.stdout)
         if verdict == check_branch_revival.EXIT_REVIVED:
+            return EXIT_BROKEN
+    # ТРЕТИЙ ЗАПРЕТ — ПРЕДЕЛ ОТКРЫТЫХ ИЗМЕНЕНИЙ ОКНА (#1085). Тот же порядок,
+    # что у воскрешения: число — ответ площадки и потому держит толчок, а
+    # отказ канала толчок не держит, но называется (051).
+    try:
+        verdict, about = check_open_limit.look(root, branch)
+    except (check_open_limit.NotRun, ghrest.TransportError, OSError) as exc:
+        print(f"предел открытых изменений не проверен: {report.cut(str(exc))}", file=sys.stderr)
+    else:
+        print(about, file=sys.stderr if verdict else sys.stdout)
+        if verdict == check_open_limit.EXIT_OVER:
             return EXIT_BROKEN
     # СВОЯ ФОРМА, А НЕ `gitcall`: вывод толчка печатается целиком и при
     # успехе, а отказ — код выхода, а не исключение. Отсутствие git ловится

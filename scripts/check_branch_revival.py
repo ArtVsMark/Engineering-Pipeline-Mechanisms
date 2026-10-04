@@ -43,6 +43,7 @@
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -124,16 +125,27 @@ def look(root: Path, branch: str) -> tuple[int, str]:
     return EXIT_OK, f"ветка «{branch}» слитых изменений не несёт — толчок её не воскресит"
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Точка входа: одна ветка против памяти площадки о слияниях."""
-    parser = argparse.ArgumentParser(description=__doc__)
+def cli(
+    verdict: Callable[[Path, str], tuple[int, str]],
+    about: str | None,
+    refused: type[Exception],
+    argv: list[str] | None,
+) -> int:
+    """Вход гейта «одна ветка перед толчком»: разбор доводов, вердикт и исход.
+
+    ОДИН ВХОД НА ГЕЙТЫ ПЕРЕД ТОЛЧКОМ. Его зовут этот гейт и предел открытых
+    изменений окна (`check_open_limit`): форма у них одна — ветка и корень на
+    входе, вердикт `look` на выходе, — и второй копией тела она разошлась бы
+    молча (071).
+    """
+    parser = argparse.ArgumentParser(description=about)
     parser.add_argument("--branch", required=True, help="ветка, в которую пойдёт толчок")
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     args = parser.parse_args(argv)
 
     try:
-        code, said = look(args.root, args.branch)
-    except NotRun as exc:
+        code, said = verdict(args.root, args.branch)
+    except refused as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     except ghrest.TransportError as exc:
@@ -141,6 +153,11 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
     print(said, file=sys.stderr if code else sys.stdout)
     return code
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Точка входа: одна ветка против памяти площадки о слияниях."""
+    return cli(look, __doc__, NotRun, argv)
 
 
 if __name__ == "__main__":

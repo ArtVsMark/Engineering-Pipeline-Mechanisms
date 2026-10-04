@@ -228,3 +228,20 @@ def test_the_owner_of_the_head_is_taken_from_the_repo(monkeypatch: pytest.Monkey
     monkeypatch.setattr(module.ghrest, "request", remember)
     module.merged_changes_of("чужой/дерево", "agent/работа", "токен")
     assert asked == ["repos/чужой/дерево/pulls?head=чужой:agent/работа&state=all&per_page=100"]
+
+
+def test_the_shared_entry_point_gives_the_verdict_and_names_a_breakage(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`cli` — общий вход гейтов перед толчком: исход вердикта и третий исход отказа."""
+
+    def refusing(_root: Path, branch: str) -> tuple[int, str]:
+        return module.EXIT_REVIVED, f"нельзя в {branch}"
+
+    def broken(_root: Path, _branch: str) -> tuple[int, str]:
+        raise module.NotRun("сломано")
+
+    assert module.cli(refusing, "гейт", module.NotRun, ["--branch", "b"]) == module.EXIT_REVIVED
+    assert "нельзя в b" in capsys.readouterr().err
+    assert module.cli(broken, "гейт", module.NotRun, ["--branch", "b"]) == module.EXIT_BROKEN
+    assert "гейт не отработал: сломано" in capsys.readouterr().err
