@@ -190,3 +190,17 @@ def test_an_unread_protection_is_the_third_outcome(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(module.protection, "live", refuse)
     with pytest.raises(module.NotRun, match="не ответила"):
         module.live_contexts("o/r", "main", "токен")
+
+
+def test_merge_settings_keep_only_the_merge_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Чтение отдаёт только поля лишних способов; несказанное в ответ не входит (#993)."""
+    said = {"allow_squash_merge": True, "allow_merge_commit": False, "private": True}
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: said)
+    assert module.merge_settings("o/r", "token") == {"allow_merge_commit": False}
+
+
+def test_extra_ways_refuse_the_unsaid_rather_than_read_it_as_off() -> None:
+    """Разбор без поля — отказ, а не «выключено»: иначе непрочитанное сходилось бы (045)."""
+    assert module.extra_ways(answer(allow_rebase_merge=True)) == ["перестановка"]
+    with pytest.raises(module.NotRun, match="не сказала"):
+        module.extra_ways({"allow_squash_merge": True})

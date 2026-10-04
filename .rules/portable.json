@@ -121,7 +121,10 @@
       "answer": "as-is"
     },
     ".github/workflows/drift.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/drift.yml"
+      ]
     },
     ".github/workflows/hail.yml": {
       "answer": "configured",
@@ -178,6 +181,9 @@
       "why": "@provider"
     },
     ".github/workflows/step-debt.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-drift.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-hail.yml": {

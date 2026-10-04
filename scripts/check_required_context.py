@@ -142,12 +142,28 @@ UNSAID_REASON: Final = (
 )
 
 
-def merge_ways(repo: str, token: str) -> list[str]:
-    """Лишние способы слияния, оставшиеся включёнными у площадки."""
+def merge_settings(repo: str, token: str) -> dict[str, Any]:
+    """Поля способов слияния из настроек репозитория — и только они.
+
+    Отдельно от разбора, потому что дрейф читает их ОТДЕЛЬНЫМ шагом: секрет
+    владельца получает только этот запрос, а разбор идёт без секрета (#993).
+    Отсутствующий у площадки ключ в ответ не попадает и разбором читается как
+    «не сказано», а не как «выключено».
+    """
     try:
         answer = ghrest.request("GET", f"repos/{repo}", token) or {}
     except ghrest.TransportError as exc:
         raise NotRun(f"настройки репозитория не прочитаны: {exc}") from exc
+    return {key: answer[key] for key in MERGE_WAYS if key in answer}
+
+
+def merge_ways(repo: str, token: str) -> list[str]:
+    """Лишние способы слияния, оставшиеся включёнными у площадки."""
+    return extra_ways(merge_settings(repo, token))
+
+
+def extra_ways(answer: dict[str, Any]) -> list[str]:
+    """Лишние способы слияния по прочитанным полям; несказанное — отказ, а не «выключено»."""
     # НЕ СКАЗАНО — НЕ ЗНАЧИТ ВЫКЛЮЧЕНО. Поля `allow_*` площадка отдаёт не всякому
     # вызывающему, и отсутствующий ключ, прочитанный как `False`, делал бы
     # непрочитанное «сошлось» каждую ночь (045). Нашёл внешний взгляд на #951.

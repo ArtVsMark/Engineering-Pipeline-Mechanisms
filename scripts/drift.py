@@ -513,29 +513,72 @@ def declared_protection(where: Path | None = None) -> dict[str, Any]:
 OWNER_TOKEN_ENV: Final = "MERGE_QUEUE_TOKEN"
 
 
-def merge_ways_moved(repo: str, owner_token: str) -> list[Drift]:
+#: Что источник «способ слияния» говорит, когда заход с секретом не отработал
+#: или не звался вовсе: файла нет — и это молчание с причиной, а не «сошлось».
+UNPASSED: Final = (
+    "настройки слияния не переданы: заход с секретом владельца "
+    "(`--save-merge-ways`) не отработал или не звался (#993)"
+)
+
+
+def save_merge_settings(repo: str, owner_token: str, path: Path) -> None:
+    """Единственный заход с секретом владельца: один запрос, в файл — поля `allow_*`.
+
+    СЕКРЕТ ПОЛУЧАЕТ ОДИН ИСТОЧНИК, И ЭТО ДЕРЖИТ УСТРОЙСТВО, А НЕ КОД (#993).
+    До выноса дрейфа общим шагом `MERGE_QUEUE_TOKEN` лежал в окружении всего
+    захода, и «читает его только источник „способ слияния“» держала дисциплина
+    кода — цену владелец принял в #953. Теперь секрет получает отдельный шаг
+    прогона, который делает ровно этот запрос и кладёт в файл только поля
+    способов слияния; остальные источники идут без секрета вовсе.
+
+    ЧИТАЕТСЯ ТОКЕНОМ ВЛАДЕЛЬЦА, И ТОЛЬКО ИМ. Токену прогона площадка полей
+    `allow_*` не отдаёт никогда (замер 29.09.2026, ручной прогон дрейфа), и
+    запасной ход на него дал бы ту же немоту, только позже. Секрета нет —
+    в файл ложится причина, а к площадке заход не обращается: «не настроено»
+    приходит раньше запроса, как у открытия изменения (взгляд на #865).
+    """
+    said: dict[str, Any]
+    if not owner_token:
+        said = {
+            "reason": f"{OWNER_TOKEN_ENV} не задан — настройки слияния читает только токен "
+            "владельца, токену прогона площадка полей allow_* не отдаёт (#953)"
+        }
+    else:
+        try:
+            said = {"settings": check_required_context.merge_settings(repo, owner_token)}
+        except check_required_context.NotRun as exc:
+            said = {"reason": str(exc)}
+    path.write_text(json.dumps(said, ensure_ascii=False), encoding="utf-8")
+
+
+def load_merge_settings(path: Path | None) -> dict[str, Any]:
+    """Сказанное заходом с секретом; файла нет или он испорчен — причина, а не пустота."""
+    if path is None or not path.is_file():
+        return {"reason": UNPASSED}
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"reason": f"настройки слияния не прочитаны из {path}: {exc}"}
+    return said if isinstance(said, dict) else {"reason": f"в {path} не словарь"}
+
+
+def merge_ways_moved(said: dict[str, Any]) -> list[Drift]:
     """Лишние способы слияния, включённые у площадки, — против решения 006.
 
     ЭТО ВТОРАЯ ПОЛОВИНА СВЕРКИ `required-context`, ПОСТАВЛЕННАЯ НА РАСПИСАНИЕ
     (#948). Обязательные контексты дрейф сверяет в «защите общей ветки»;
-    способ слияния оставался только у сверки, а та идёт кнопкой. Чтение одно
-    на двоих — `check_required_context.merge_ways`: второе понимание той же
+    способ слияния оставался только у сверки, а та идёт кнопкой. Разбор один
+    на двоих — `check_required_context.extra_ways`: второе понимание той же
     настройки разошлось бы с первым молча (090).
 
-    ЧИТАЕТСЯ ТОКЕНОМ ВЛАДЕЛЬЦА, И ТОЛЬКО ИМ. Токену прогона площадка полей
-    `allow_*` не отдаёт никогда (замер 29.09.2026, ручной прогон дрейфа), и
-    запасной ход на него дал бы ту же немоту, только позже. Решение владельца
-    30.09.2026 (#953): дать дрейфу `MERGE_QUEUE_TOKEN`. Секрета нет —
-    источник молчит с причиной, не обращаясь к площадке: «не настроено»
-    приходит раньше запроса, как у открытия изменения (взгляд на #865).
+    `said` — сказанное заходом с секретом (`save_merge_settings`): поля
+    способов слияния либо причина, по которой их нет.
     """
-    if not owner_token:
-        raise NotRun(
-            f"{OWNER_TOKEN_ENV} не задан — настройки слияния читает только токен владельца, "
-            "токену прогона площадка полей allow_* не отдаёт (#953)"
-        )
+    settings = said.get("settings")
+    if not isinstance(settings, dict):
+        raise NotRun(str(said.get("reason") or UNPASSED))
     try:
-        extra = check_required_context.merge_ways(repo, owner_token)
+        extra = check_required_context.extra_ways(settings)
     except check_required_context.NotRun as exc:
         raise NotRun(str(exc)) from exc
     if not extra:
@@ -1614,8 +1657,15 @@ SOURCES: Final = (
 )
 
 
-def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list[str]]:
-    """Спрашивает все источники; отдаёт находки и имена тех, кто не ответил."""
+def look(
+    repo: str, token: str, mine: dict[str, Any], merge_said: dict[str, Any] | None = None
+) -> tuple[list[Drift], list[str]]:
+    """Спрашивает все источники; отдаёт находки и имена тех, кто не ответил.
+
+    `merge_said` — сказанное заходом с секретом (`load_merge_settings`); не
+    передано — источник «способ слияния» молчит с причиной.
+    """
+    merge_said = merge_said if merge_said is not None else {"reason": UNPASSED}
     found: list[Drift] = []
     silent: list[str] = []
     own = own_prefixes()
@@ -1631,7 +1681,7 @@ def look(repo: str, token: str, mine: dict[str, Any]) -> tuple[list[Drift], list
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
         ("защита общей ветки", lambda: protection_moved(repo, token)),
-        ("способ слияния", lambda: merge_ways_moved(repo, os.environ.get(OWNER_TOKEN_ENV, ""))),
+        ("способ слияния", lambda: merge_ways_moved(merge_said)),
         ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
         ("версии чужих действий", lambda: actions_disagree(action_versions(own=own))),
         ("выпуски чужих действий", lambda: actions_behind(action_versions(own=own), token)),
@@ -1675,7 +1725,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--apply", action="store_true", help="записать, а не показать")
+    parser.add_argument(
+        "--save-merge-ways",
+        type=Path,
+        metavar="ФАЙЛ",
+        help=f"только прочитать настройки слияния токеном {OWNER_TOKEN_ENV} и положить в файл",
+    )
+    parser.add_argument(
+        "--merge-ways-from",
+        type=Path,
+        metavar="ФАЙЛ",
+        help="настройки слияния, положенные заходом --save-merge-ways",
+    )
     args = parser.parse_args(argv)
+
+    if args.save_merge_ways:
+        if not args.repo:
+            print("шаг не отработал: репозиторий не назван", file=sys.stderr)
+            return EXIT_BROKEN
+        try:
+            save_merge_settings(
+                args.repo, os.environ.get(OWNER_TOKEN_ENV, ""), args.save_merge_ways
+            )
+        except OSError as exc:
+            print(f"шаг не отработал: настройки слияния не записаны: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(f"настройки слияния положены: {args.save_merge_ways}")
+        return EXIT_NOTHING
 
     try:
         token = ghrest.token_from_env()
@@ -1688,7 +1764,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    found, silent = look(args.repo, token, mine)
+    found, silent = look(args.repo, token, mine, load_merge_settings(args.merge_ways_from))
     # Молчание ВСЕХ источников — это поломка захода, а не сошедшееся состояние:
     # «дрейфа нет» и «спросить не удалось» снаружи одинаковы (045).
     if len(silent) == len(SOURCES):

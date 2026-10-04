@@ -276,7 +276,6 @@ STILL_COPIED: Final = frozenset(
         "badges.yml",
         "ci-complete.yml",
         "claude.yml",
-        "drift.yml",
         "labels-sync.yml",
         "release.yml",
         "required-context.yml",
