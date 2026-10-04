@@ -365,7 +365,7 @@ def contract_coverage(said: dict[str, Any]) -> dict[str, Any]:
     ДОЛЯ ОДНА, А НЕ ДВЕ: `coverage_percent` контракта заменяет прежнее
     `coverage.percent`, а не дублирует его (#759). Не прочитано — ключа
     `coverage_percent` нет вовсе, а причина стоит в `none.coverage_percent`:
-    договор фактов (с 1.2) требует по каждому показателю значение или причину, и
+    договор фактов с 1.2 требует по каждому показателю значение или причину, и
     молчание третьим исходом не считается (#1001). Ноль читался бы как ответ.
     """
     parts = {key: value for key, value in said.items() if key != "percent"}
@@ -393,7 +393,7 @@ def python_facts(path: Path = CI_FLOW) -> dict[str, list[str]]:
 
     `supported` — матрица `test-matrix`, `experimental` — `test-next` из
     `python-next.yml`, `os` —
-    образы, на которых они идут. Договор фактов витрины (с 1.2) требует раздел
+    образы, на которых они идут. Договор фактов с 1.2 требует раздел
     `python` либо причину в `none.python` (#1001): матрица у нас есть, поэтому
     раздел, а не причина. Матрицу читает `pipeline_checks` — читатель прогонов
     один; не прочитана — `policy.BadPolicy` с причиной.
@@ -468,7 +468,7 @@ def collect(
         "repo": mine,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": sha,
-        # Статус CI витрина спрашивает у площадки по имени файла (договор с 1.2).
+        # Статус CI витрина спрашивает у площадки по имени файла (договор фактов с 1.2).
         **run,
         "contract": contract_version(root / VERSION_FILE),
         "version": number,
