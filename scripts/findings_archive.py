@@ -237,7 +237,7 @@ def kinds_by_mark(kinds: dict[str, Any]) -> dict[str, str]:
     found: dict[str, str] = {}
     for name, body in kinds.items():
         for met in body.get("встречен", []):
-            mark = str(met).strip("`")
+            mark = finding_kinds.mark_of(met)
             if changerefs.MARK_RE.fullmatch(mark):
                 found.setdefault(mark, name)
     return found
@@ -367,7 +367,7 @@ def with_kinds(
             "встреч": sum(
                 1
                 for met in body.get("встречен") or []
-                if changerefs.MARK_RE.fullmatch(str(met).strip("`"))
+                if changerefs.MARK_RE.fullmatch(finding_kinds.mark_of(met))
             ),
             **rule_of(kinds[name]),
         }
