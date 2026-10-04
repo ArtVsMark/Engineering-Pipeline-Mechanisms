@@ -85,7 +85,7 @@ def test_a_refusal_on_one_name_is_not_a_finding(monkeypatch: pytest.MonkeyPatch)
         raise module.ghrest.TransportError("404")
 
     monkeypatch.setattr(module.ghrest, "request", broken)
-    assert module.stale("o/gone", "token") == ""
+    assert module.stale("o/gone", "token") is None, "отказ — «не ответила», а не «совпало»"
 
 
 def test_the_platform_name_beats_the_origin_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,3 +203,90 @@ def test_an_uploads_address_names_the_repository(tmp_path: Path) -> None:
     """`uploads.github.com/repos/o/name` — имя `o/name`, как у адреса API."""
     root = repo_with(tmp_path, "POST https://uploads.github.com/repos/o/name/releases/1/assets\n")
     assert list(module.mentions(root)) == ["o/name"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "https://api.github.com/user/repos",
+        "https://api.github.com/gists/abc123",
+        "https://api.github.com/networks/o/r/events",
+        "https://api.github.com/repositories/42/x",
+        "https://api.github.com/app/installations",
+        "https://api.github.com/repos/o",
+    ],
+)
+def test_an_api_address_is_a_name_only_under_repos(tmp_path: Path, line: str) -> None:
+    """У хостов API имя — только `/repos/<владелец>/<имя>`; иной корень — не имя (210, #1082)."""
+    root = repo_with(tmp_path, line + "\n")
+    assert module.mentions(root) == {}, module.mentions(root)
+
+
+def test_an_unanswered_name_is_counted_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ площадки — «не ответила», и число таких печатается (взгляд на #1082)."""
+    root = repo_with(tmp_path, "https://github.com/o/name/x\nhttps://github.com/gone/away/x\n")
+    monkeypatch.setattr(module, "canon", lambda: ("o/name", True))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "token")
+
+    def answer(_method: str, path: str, *_: object, **__: object) -> dict[str, str]:
+        if "gone" in path:
+            raise module.ghrest.TransportError("404")
+        return {"full_name": "o/name"}
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "не ответила на 1" in said and "сверено 1 из 2" in said, said
+    assert not said.startswith("чисто: имена совпадают"), "несверенное не зовётся совпавшим"
+
+
+def test_no_answer_at_all_is_the_third_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Площадка не ответила ни на одно имя — «не отработал», а не «чисто» (взгляд на #1095)."""
+    root = repo_with(tmp_path, "https://github.com/o/name/x\nhttps://github.com/p/other/x\n")
+    monkeypatch.setattr(module, "canon", lambda: ("o/name", True))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "token")
+
+    def refuse(*_: object, **__: object) -> dict[str, str]:
+        raise module.ghrest.TransportError("401")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+    assert "ни на одно из 2" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "https://gist.github.com/o/0123abcd",
+        "https://avatars.githubusercontent.com/u/86671904",
+        "https://user-images.githubusercontent.com/123/x.png",
+        "https://objects.githubusercontent.com/o/r",
+        "https://codeload.github.com/o/r/zip/main",
+    ],
+)
+def test_a_host_outside_the_list_is_not_a_name(tmp_path: Path, line: str) -> None:
+    """Имя — только с хостов `NAME_HOSTS` и с `/repos` у API; прочий хост — не имя (210)."""
+    root = repo_with(tmp_path, line + "\n")
+    assert module.mentions(root) == {}, module.mentions(root)
+
+
+@pytest.mark.parametrize(
+    ("line", "name"),
+    [
+        ("https://api.github.com/repos/o/r/issues", "o/r"),
+        ("https://api.github.com/user/repos", ""),
+        ("https://github.com/o/r", "o/r"),
+        ("https://www.github.com/o/r", "o/r"),
+        ("https://raw.githubusercontent.com/o/r/main/x", "o/r"),
+        ("https://gist.github.com/o/r", ""),
+        ("https://github.com/orgs/o/people", ""),
+    ],
+)
+def test_name_of_reads_the_host(line: str, name: str) -> None:
+    """`name_of` — имя по хосту: API только через `/repos`, веб — кроме служебных сегментов."""
+    match = module.NAME_RE.search(line)
+    assert match is not None and module.name_of(match) == name
