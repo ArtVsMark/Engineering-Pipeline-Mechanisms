@@ -26,9 +26,11 @@ from typing import Any, Final
 
 import agent_pr
 import changerefs
+import finding_kinds
 import ghrest
 import items
 import labels
+import paths
 import squash_body
 
 #: Отказ по слову закрытия вне строки связи — константой: на него ссылаются
@@ -48,6 +50,42 @@ EXIT_BROKEN: Final = 2
 
 class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «прошло»."""
+
+
+#: Отказ по снятию без рода — константой: тест сверяется с ней (209).
+NO_KIND_LINE: Final = "снятие без строки «Род:» вплотную под ним (решение 038)"
+
+
+def kind_problems(landing: str, kinds: dict[str, Any]) -> list[str]:
+    """Чем строки рода в теле, которое уедет в общую ветку, не годятся (#1022, часть 4).
+
+    ВСТРЕЧА ЕДЕТ СТРОКОЙ, И ЕЁ ТРЕБУЕТ ГЕЙТ, А НЕ ПАМЯТЬ. Решение 038 заморозило
+    `встречен`, и счёт рода теперь живёт в строках `Род:`. Снятие без рода
+    уносит встречу из счёта молча (045): у каждой строки `Разобрано:` —
+    `Род:` вплотную под ней. Имя — из словаря либо `нет — <причина>` (154);
+    опечатка имени иначе стала бы родом вне словаря, которого порог не видит.
+    Встреча в окне без рода или без места — не встреча, и это называется.
+
+    Судится ТЕЛО УПЛОТНЕНИЯ (`squash_body.compose_from`): ровно его читает
+    счёт по истории, и пример в прозе коммита сюда не доезжает.
+    """
+    told: list[str] = []
+    for record in changerefs.resolutions_parsed(landing):
+        marks = ", ".join(record.marks)
+        if not record.kind:
+            told.append(f"«Разобрано: {marks}» — {NO_KIND_LINE}")
+        elif finding_kinds.said_no(record.kind):
+            if len(record.kind.split()) < 3:
+                told.append(f"«Разобрано: {marks}» — «Род: нет» без причины (154)")
+        elif record.kind not in kinds:
+            told.append(f"«Разобрано: {marks}» — рода «{record.kind}» нет в словаре родов")
+    for line, window in changerefs.window_lines_in(landing):
+        kind, place = window.group("kind").strip(), window.group("place").strip()
+        if not kind or not place:
+            told.append(f"«{line}» — встреча в окне без рода или без места")
+        elif kind not in kinds:
+            told.append(f"«{line}» — рода «{kind}» нет в словаре родов")
+    return told
 
 
 def load_event() -> dict[str, Any]:
@@ -261,6 +299,14 @@ def main(argv: list[str] | None = None) -> int:
     for heading in dict.fromkeys([title, *([coming.title] if coming else [])]):
         if changerefs.CLOSING_KEYWORD_RE.search(heading):
             problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")
+    # РОДА СУДЯТСЯ ТАМ, ГДЕ РОДЫ ВЕДУТСЯ: у потребителя без словаря строк
+    # `Род:` нет и требовать их не с чем.
+    if messages and paths.FINDING_KINDS.is_file():
+        try:
+            problems += kind_problems(landing, finding_kinds.read())
+        except finding_kinds.NotRun as exc:
+            print(f"проверка не отработала: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
     said = "\n".join([body, landing, coming.body if coming else ""])
     for line in dict.fromkeys(changerefs.stray_closing_words(said)):
         problems.append(f"в строке «{line}» {STRAY_CLOSING}")

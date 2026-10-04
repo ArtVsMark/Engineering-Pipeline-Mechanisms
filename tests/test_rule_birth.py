@@ -336,13 +336,20 @@ def test_the_gate_asks_a_kind_crossing_the_threshold_end_to_end(tmp_path: Path) 
     git(root, "add", "-A")
     git(root, "commit", "-m", "роды до порога")
     git(root, "checkout", "-b", "work")
-    kinds.write_text(json.dumps({"kinds": {"род": kind(3)}}, ensure_ascii=False), encoding="utf-8")
-    git(root, "add", "-A")
-    git(root, "commit", "-m", "род дошёл до порога")
+    # С решения 038 порог переходят строкой `Род:`, а не правкой `встречен`.
+    git(
+        root,
+        "commit",
+        "--allow-empty",
+        "-m",
+        "род дошёл до порога",
+        "-m",
+        "Разобрано: aaaaaaa\nРод: род",
+    )
     with contextlib.chdir(root):
         assert module.main(["--base", "main", "--root", str(root)]) == FOUND
     kinds.write_text(
-        json.dumps({"kinds": {"род": kind(3, "есть — 206")}}, ensure_ascii=False), encoding="utf-8"
+        json.dumps({"kinds": {"род": kind(2, "есть — 206")}}, ensure_ascii=False), encoding="utf-8"
     )
     git(root, "add", "-A")
     git(root, "commit", "-m", "ответ каталогу")
@@ -350,7 +357,7 @@ def test_the_gate_asks_a_kind_crossing_the_threshold_end_to_end(tmp_path: Path) 
         assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
     # Опечатка номера краснеет всем путём гейта, а не только в `known_at` (#887).
     kinds.write_text(
-        json.dumps({"kinds": {"род": kind(3, "есть — 211")}}, ensure_ascii=False), encoding="utf-8"
+        json.dumps({"kinds": {"род": kind(2, "есть — 211")}}, ensure_ascii=False), encoding="utf-8"
     )
     git(root, "add", "-A")
     git(root, "commit", "-m", "опечатка номера")
@@ -505,3 +512,32 @@ def test_a_shallow_history_is_the_third_outcome(
     with contextlib.chdir(shallow):
         assert module.main(["--base", "HEAD", "--root", str(shallow)]) == BROKEN
     assert module.trunk_log.SHALLOW in capsys.readouterr().err
+
+
+def test_the_frozen_list_neither_grows_nor_shrinks() -> None:
+    """Решение 038: `встречен` у прежних родов не меняется, у новых пуст, род не исчезает."""
+    before = {"старый": kind(2), "уходящий": kind(1)}
+    assert module.thawed(before, {"старый": kind(2), "уходящий": kind(1), "новый": kind(0)}) == []
+    told = " ".join(
+        module.thawed(before, {"старый": kind(3), "новый": kind(1)})
+        + module.thawed(before, {"старый": kind(1), "уходящий": kind(1)})
+    )
+    assert told.count("«старый»") == 2, told
+    assert "«уходящий» исчез" in told and "новый род «новый»" in told
+    # Снять дубль и переставить записи — не правка заморозки.
+    twice = {"старый": {"встречен": ["m0", "m1", "m0"]}}
+    assert module.thawed(twice, {"старый": {"встречен": ["m1", "m0"]}}) == []
+
+
+def test_a_grown_list_is_refused_end_to_end(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Дописанный по привычке отпечаток краснеет на всём пути гейта (взгляд на #1089)."""
+    root, kinds = kinds_tree(tmp_path, 1)
+    git(root, "checkout", "-q", "-b", "work")
+    kinds.write_text(json.dumps({"kinds": {"род": kind(2)}}, ensure_ascii=False), encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "по старой привычке")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND
+    assert "замороженный список" in capsys.readouterr().err
