@@ -97,7 +97,9 @@ def test_a_kind_line_names_the_kind_before_the_dictionary() -> None:
     assert findings["eeeeeee"]["род"] is None
     # Дубль — одна встреча: каскад — словарный `aaaaaaa` и корень `ddddddd`.
     assert summary["каскад по одному месту"]["встреч"] == 2
-    assert summary["тихий род"]["встреч"] == 0, "`aaaaaaa` уже стоит в словаре у каскада"
+    # Находка двух родов — встреча обоих: `aaaaaaa` у каскада в словаре и у
+    # тихого рода строкой `Род:` (взгляд на #1092).
+    assert summary["тихий род"]["встреч"] == 1
 
 
 def test_a_repeat_seen_earlier_moves_the_birth_back() -> None:
