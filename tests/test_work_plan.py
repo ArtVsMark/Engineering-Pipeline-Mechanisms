@@ -781,12 +781,20 @@ def test_the_plan_names_missing_answers_and_a_mistyped_rule(tmp_path: Any) -> No
     assert said.rows == [] and module.finding_kinds.ANSWERS_UNREAD in said.unread, said
 
 
-def test_a_history_kind_outside_the_dictionary_is_named(tmp_path: Any) -> None:
-    """Род строки `Род:`, которого нет в словаре, план называет пометкой (взгляд на #1086)."""
+def test_a_history_kind_outside_the_dictionary_is_work(tmp_path: Any) -> None:
+    """Род строки `Род:` вне словаря — строка раздела 5, и раздел не «Пусто» (#1086, #1096).
+
+    Проверяется до вывода `render`: пометка, потерянная между `birth_part` и
+    разделом, иначе осталась бы зелёной (`c2d193c`).
+    """
     path = kinds_file(tmp_path, {"род": {"признак": "x", "встречен": ["a"], "закрыт": "гейт"}})
     said = module.birth_part(path, ["Разобрано: aaaaaaa\nРод: опечатка"])
-    assert f"{module.finding_kinds.OUTSIDE_HISTORY} «опечатка» — встреч 1" in said.note
-    assert module.birth_part(path, ["Разобрано: aaaaaaa\nРод: род"]).note == ""
+    wanted = f"{module.finding_kinds.OUTSIDE_HISTORY} «опечатка» — встреч 1"
+    assert [row for row in said.rows if row.startswith(wanted)], said
+    shown = "\n".join(module.render(5, said))
+    assert wanted in shown and "**Пусто**" not in shown, shown
+    clean = module.birth_part(path, ["Разобрано: aaaaaaa\nРод: род"])
+    assert clean.rows == [] and clean.note == "", clean
 
 
 def test_the_open_list_is_read_once_and_handed_to_every_channel(
