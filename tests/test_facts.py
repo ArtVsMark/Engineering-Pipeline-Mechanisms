@@ -658,3 +658,12 @@ def test_an_empty_answer_is_refused_before_the_count(tmp_path: Path) -> None:
 def test_release_is_a_series_not_a_tag(tag: str | None, series: str) -> None:
     """`release` — серия `X.Y` по договору 1.3 (#1046): без `v` и без третьей цифры."""
     assert facts.release_series(tag) == series
+
+
+def test_collect_writes_the_release_as_a_series(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`collect` пишет в `release` серию, а не тег: сверяется сборка, а не помощник (#1105)."""
+    tree(tmp_path, bindings(**{"001": {"status": "active", "mechanism": "gate", "where": "тут"}}))
+    monkeypatch.setattr(facts.version, "release_tag", lambda *_: "v1.3.0")
+    assert facts.collect(tmp_path, "голова")["release"] == "1.3"
