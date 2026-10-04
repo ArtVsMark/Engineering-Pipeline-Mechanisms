@@ -541,3 +541,25 @@ def test_a_grown_list_is_refused_end_to_end(
     with contextlib.chdir(root):
         assert module.main(["--base", "main", "--root", str(root)]) == FOUND
     assert "замороженный список" in capsys.readouterr().err
+
+
+def test_a_rename_and_a_merge_have_a_lawful_path() -> None:
+    """Переименование и слияние — поле «прежде» у нынешнего имени (взгляд на #1090)."""
+    before = {"старое": kind(1), "соседнее": {"встречен": ["n0"]}}
+    renamed = {
+        "новое": {"встречен": ["m0"], "прежде": ["старое"]},
+        "соседнее": {"встречен": ["n0"]},
+    }
+    assert module.thawed(before, renamed) == []
+    merged = {"соседнее": {"встречен": ["n0", "m0"], "прежде": ["старое"]}}
+    assert module.thawed(before, merged) == []
+    # Вторая половина: встречи при переносе теряются или растут — отказ.
+    lost = {"новое": {"встречен": [], "прежде": ["старое"]}, "соседнее": {"встречен": ["n0"]}}
+    grown = {
+        "новое": {"встречен": ["m0", "x"], "прежде": ["старое"]},
+        "соседнее": {"встречен": ["n0"]},
+    }
+    assert module.thawed(before, lost) and module.thawed(before, grown)
+    # Без поля «прежде» исчезновение — отказ, и отказ называет выход.
+    told = " ".join(module.thawed(before, {"соседнее": {"встречен": ["n0"]}}))
+    assert "«старое» исчез" in told and "«прежде»" in told

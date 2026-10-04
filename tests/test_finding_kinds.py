@@ -780,3 +780,25 @@ def test_an_unreadable_history_is_the_third_outcome(
     monkeypatch.setattr(module.trunk_log, "merged_bodies", refuse)
     assert module.main([]) == module.EXIT_BROKEN
     assert module.trunk_log.SHALLOW in capsys.readouterr().err
+
+
+def test_an_old_name_in_history_counts_under_the_new_one() -> None:
+    """Строка `Род:` со старым именем считается под нынешним: историю не переписать (#1090)."""
+    kinds = {"новое": {"признак": "x", "встречен": ["1111111"], "прежде": ["старое"]}}
+    merged, outside = module.with_history(kinds, ["Разобрано: aaaaaaa\nРод: старое"])
+    assert merged["новое"]["встречен"] == ["1111111", "aaaaaaa"] and outside == {}
+
+
+@pytest.mark.parametrize(
+    ("said", "ok"),
+    [
+        ("нет — опечатка", True),
+        ("нет—опечатка", True),
+        ("нет – 1 случай", True),
+        ("нет — —", False),
+        ("нет", False),
+    ],
+)
+def test_a_refused_kind_needs_a_reason_by_form(said: str, ok: bool) -> None:
+    """Причина у «Род: нет» — по форме, а не по числу слов (взгляд на #1090)."""
+    assert bool(module.REFUSED_RE.match(said)) is ok
