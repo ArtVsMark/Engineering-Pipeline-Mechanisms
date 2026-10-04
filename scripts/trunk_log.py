@@ -86,13 +86,17 @@ def unseen(where: Path | None = None, ref: str = TRUNK_REF) -> int:
     return unsquashed(git_log(where, ref))
 
 
-def whole(where: Path | None = None) -> None:
-    """Отказ, если история обрезана: по мелкому клону встречи недосчитаются."""
+def whole(where: Path | None = None, lost: str = "встречи родов") -> None:
+    """Отказ, если история обрезана; ``lost`` — что по ней недосчиталось бы.
+
+    Предмет называет зовущий: у счёта родов это встречи, у предела окна — окна
+    изменений (взгляд на #1094).
+    """
     said = gitcall.output(
         ["rev-parse", "--is-shallow-repository"], NotRun, cwd=str(where) if where else None
     )
     if said.strip() != "false":
-        raise NotRun(f"{SHALLOW}: встречи родов по ней недосчитаются — нужен fetch-depth: 0")
+        raise NotRun(f"{SHALLOW}: {lost} по ней недосчитаются — нужен fetch-depth: 0")
 
 
 def merged_bodies(where: Path | None = None, ref: str = TRUNK_REF) -> list[str]:
