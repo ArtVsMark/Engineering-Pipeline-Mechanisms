@@ -795,3 +795,16 @@ def test_an_unreadable_history_is_the_third_outcome(
     monkeypatch.setattr(module.trunk_log, "merged_bodies", refuse)
     assert module.main([]) == module.EXIT_BROKEN
     assert module.trunk_log.SHALLOW in capsys.readouterr().err
+
+
+def test_one_finding_may_meet_two_kinds() -> None:
+    """Отпечаток в словаре у одного рода — встреча и другого, если `Род:` его называет (#1092)."""
+    kinds = {
+        "первый": {"встречен": ["aaaaaaa"]},
+        "второй": {"встречен": []},
+    }
+    assert module.met_in_history(["Разобрано: aaaaaaa\nРод: второй"], kinds) == {
+        "второй": ["aaaaaaa"]
+    }
+    # Вторая половина: под тем же родом повтор по-прежнему не считается.
+    assert module.met_in_history(["Разобрано: aaaaaaa\nРод: первый"], kinds) == {}
