@@ -1911,9 +1911,12 @@ def test_the_attempt_is_asked_once_per_run(monkeypatch: pytest.MonkeyPatch) -> N
 def test_save_with_a_known_number_does_not_look_again(monkeypatch: pytest.MonkeyPatch) -> None:
     """Номер, найденный заходом, второго чтения списка не стоит (#1084); без него — ищется."""
     looked: list[str] = []
-    monkeypatch.setattr(
-        module.findings, "live_issue", lambda *a, **k: looked.append("x") or (7, "")
-    )
+
+    def look(*_: object, **__: object) -> tuple[int, str]:
+        looked.append("x")
+        return 7, ""
+
+    monkeypatch.setattr(module.findings, "live_issue", look)
     module.save("o/r", "t", "тело", False, 7)
     assert looked == []
     module.save("o/r", "t", "тело", False)

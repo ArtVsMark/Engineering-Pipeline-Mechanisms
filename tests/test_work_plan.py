@@ -788,7 +788,12 @@ def test_the_open_list_is_read_once_and_handed_to_every_channel(
     quiet_platform(monkeypatch)
     listed = [{"number": 1}]
     reads: list[str] = []
-    monkeypatch.setattr(module.debt, "open_listed", lambda *_: reads.append("x") or listed)
+
+    def read(*_: object) -> list[dict[str, int]]:
+        reads.append("x")
+        return listed
+
+    monkeypatch.setattr(module.debt, "open_listed", read)
     got: dict[str, object] = {}
     monkeypatch.setattr(
         module.debt, "branch_debt", lambda r, t, seen=None: got.update(branch=seen) or ([], [])
