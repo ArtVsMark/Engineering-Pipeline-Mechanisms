@@ -232,7 +232,7 @@ def test_no_badge_name_clashes_with_another_published_file(monkeypatch: pytest.M
 
 
 def test_coverage_not_read_names_its_reason() -> None:
-    """Покрытие не прочитано — причина в `none`, а не молчание (договор фактов 1.2, #1001)."""
+    """Покрытие не прочитано — причина в `none`, а не молчание (договор фактов с 1.2, #1001)."""
     said = facts.contract_coverage({"read": False})
     assert said["none"]["coverage_percent"].strip()
 
