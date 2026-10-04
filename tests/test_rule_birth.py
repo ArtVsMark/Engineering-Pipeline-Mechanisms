@@ -524,6 +524,9 @@ def test_the_frozen_list_neither_grows_nor_shrinks() -> None:
     )
     assert told.count("«старый»") == 2, told
     assert "«уходящий» исчез" in told and "новый род «новый»" in told
+    # Снять дубль и переставить записи — не правка заморозки.
+    twice = {"старый": {"встречен": ["m0", "m1", "m0"]}}
+    assert module.thawed(twice, {"старый": {"встречен": ["m1", "m0"]}}) == []
 
 
 def test_a_grown_list_is_refused_end_to_end(
