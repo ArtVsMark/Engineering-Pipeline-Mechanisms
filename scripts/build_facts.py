@@ -56,7 +56,7 @@ PUBLISHED_DIR: Final = paths.BADGES_DIR
 #: Версия формата — СТРОКОЙ, как требует контракт: число не различает `1.0` и
 #: `1.10`. Мажор — контракта семьи, а не наш: наши собственные разделы едут
 #: рядом незнакомыми ему ключами, и их он игнорирует.
-SCHEMA: Final = "1.2"
+SCHEMA: Final = "1.3"
 SCHEMA_OF: Final = (
     "контракт фактов витрины семьи: "
     "https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md"
@@ -72,6 +72,20 @@ EXIT_BROKEN: Final = 2
 
 class NotRun(RuntimeError):
     """Сборка не отработала: третий исход, а не пустые факты."""
+
+
+def release_series(tag: str | None) -> str:
+    """Выпуск в форме договора фактов 1.3 — серия `X.Y`, а не тег; выпуска нет — пусто.
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 02.10.2026 (#1046, договор витрины 1.3). Третья цифра
+    тега выпуска всегда 0 и смысла не несёт, буква `v` — запись тега, а не
+    выпуска. Версия головы (`version`, `X.Y.Z`) начинается с серии и точки —
+    это сверяет витрина. Разбор — `version.digits`, а не нарезка по точке (214).
+    """
+    if not tag:
+        return ""
+    major, minor, _ = version.digits(version.bare(tag))
+    return f"{major}.{minor}"
 
 
 def contract_version(path: Path = VERSION_FILE) -> str:
@@ -379,7 +393,7 @@ def python_facts(path: Path = CI_FLOW) -> dict[str, list[str]]:
 
     `supported` — матрица `test-matrix`, `experimental` — `test-next` из
     `python-next.yml`, `os` —
-    образы, на которых они идут. Договор фактов витрины 1.2 требует раздел
+    образы, на которых они идут. Договор фактов витрины (с 1.2) требует раздел
     `python` либо причину в `none.python` (#1001): матрица у нас есть, поэтому
     раздел, а не причина. Матрицу читает `pipeline_checks` — читатель прогонов
     один; не прочитана — `policy.BadPolicy` с причиной.
@@ -454,7 +468,7 @@ def collect(
         "repo": mine,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "commit": sha,
-        # Статус CI витрина спрашивает у площадки по имени файла (договор 1.2).
+        # Статус CI витрина спрашивает у площадки по имени файла (договор с 1.2).
         **run,
         "contract": contract_version(root / VERSION_FILE),
         "version": number,
@@ -463,8 +477,9 @@ def collect(
         "version_whole": whole,
         # ВЫПУСК И ВЕРСИЯ ГОЛОВЫ — РАЗНЫЕ ЧИСЛА. Голова уходит вперёд каждым
         # изменением, потребитель живёт на выпущенном; одно вместо другого
-        # обещало бы ему то, чего он не получал.
-        "release": version.release_tag(root) or "",
+        # обещало бы ему то, чего он не получал. Серией `X.Y`, а не тегом
+        # (договор 1.3, #1046).
+        "release": release_series(version.release_tag(root)),
         # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им
         # не нужен и вреден — они дёргаются от каждого изменения, — но живой
         # адрес обязателен, и вот он (049).
