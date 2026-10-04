@@ -239,3 +239,18 @@ def test_an_unanswered_name_is_counted_apart(
     assert module.main(["--root", str(root)]) == module.EXIT_OK
     said = capsys.readouterr().out
     assert "не ответила на 1 из 2" in said and "спрошено 2" in said, said
+
+
+@pytest.mark.parametrize(
+    ("line", "name"),
+    [
+        ("https://api.github.com/repos/o/r/issues", "o/r"),
+        ("https://api.github.com/user/repos", ""),
+        ("https://github.com/o/r", "o/r"),
+        ("https://github.com/orgs/o/people", ""),
+    ],
+)
+def test_name_of_reads_the_host(line: str, name: str) -> None:
+    """`name_of` — имя по хосту: API только через `/repos`, веб — кроме служебных сегментов."""
+    match = module.NAME_RE.search(line)
+    assert match is not None and module.name_of(match) == name
