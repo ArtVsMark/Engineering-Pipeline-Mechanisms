@@ -296,14 +296,16 @@ def test_a_task_with_every_item_closed_is_named(monkeypatch: pytest.MonkeyPatch)
     """
     rows = [{"number": 26, "title": "Частичное закрытие", "body": "- [x] раз\n- [x] два\n"}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done(debt.open_issues("o/r", "token")) == [(26, "Частичное закрытие")]
+    assert debt.looks_done(debt.open_issues(debt.open_listed("o/r", "token"))) == [
+        (26, "Частичное закрытие")
+    ]
 
 
 def test_one_open_item_is_enough_to_stay_silent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Один незакрытый пункт — задача не кандидат: работа не доделана."""
     rows = [{"number": 39, "title": "Слито без взгляда", "body": "- [x] раз\n- [ ] два\n"}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done(debt.open_issues("o/r", "token")) == []
+    assert debt.looks_done(debt.open_issues(debt.open_listed("o/r", "token"))) == []
 
 
 def test_a_task_without_items_is_not_a_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -315,14 +317,14 @@ def test_a_task_without_items_is_not_a_candidate(monkeypatch: pytest.MonkeyPatch
     """
     rows = [{"number": 25, "title": "Приоритет и мерило", "body": "Три вопроса прозой."}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done(debt.open_issues("o/r", "token")) == []
+    assert debt.looks_done(debt.open_issues(debt.open_listed("o/r", "token"))) == []
 
 
 def test_a_change_is_not_a_task(monkeypatch: pytest.MonkeyPatch) -> None:
     """Изменения приходят в том же списке и в счёт не идут."""
     rows = [{"number": 7, "title": "PR", "body": "- [x] раз\n", "pull_request": {"url": "…"}}]
     monkeypatch.setattr(debt.ghrest, "paginate", issues_from(rows))
-    assert debt.looks_done(debt.open_issues("o/r", "token")) == []
+    assert debt.looks_done(debt.open_issues(debt.open_listed("o/r", "token"))) == []
 
 
 # --- закрытые «входящие» -----------------------------------------------------
@@ -726,15 +728,15 @@ def test_a_fully_read_debt_is_clean(
     ([145](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/145-every-declared-outcome-is-run.md)).
     """
     monkeypatch.setenv("GH_TOKEN", "токен")
-    monkeypatch.setattr(debt, "findings_debt", lambda repo, token: [])
-    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: ([], {}))
-    monkeypatch.setattr(debt, "branch_debt", lambda repo, token: ([], []))
+    monkeypatch.setattr(debt, "open_listed", lambda repo, token: [])
+    monkeypatch.setattr(debt, "findings_debt", lambda repo, token, listed: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token, listed: ([], {}))
+    monkeypatch.setattr(debt, "branch_debt", lambda repo, token, listed: ([], []))
     monkeypatch.setattr(debt, "closed_issues", lambda repo, token: [])
     monkeypatch.setattr(
-        debt, "inbox_body", lambda repo, token, closed: ("правила: осталось 0", "", None)
+        debt, "inbox_body", lambda repo, token, closed, listed: ("правила: осталось 0", "", None)
     )
     monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
-    monkeypatch.setattr(debt, "open_issues", lambda repo, token: [])
     monkeypatch.setattr(debt, "looks_done", lambda issues: [])
     monkeypatch.setattr(debt.items_left, "look", lambda issues, opener: ([], []))
     monkeypatch.setattr(debt.task_shape, "without_a_checklist", lambda issues: [])
@@ -787,9 +789,10 @@ def test_a_silent_platform_is_the_broken_outcome(monkeypatch: pytest.MonkeyPatch
         raise debt.ghrest.TransportError("502")
 
     monkeypatch.setenv("GH_TOKEN", "токен")
-    monkeypatch.setattr(debt, "findings_debt", lambda repo, token: [])
-    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: ([], {}))
-    monkeypatch.setattr(debt, "branch_debt", lambda repo, token: ([], []))
+    monkeypatch.setattr(debt, "open_listed", lambda repo, token: [])
+    monkeypatch.setattr(debt, "findings_debt", lambda repo, token, listed: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token, listed: ([], {}))
+    monkeypatch.setattr(debt, "branch_debt", lambda repo, token, listed: ([], []))
     monkeypatch.setattr(debt, "closed_issues", refuse)
     assert debt.main(["--repo", "o/r"]) == debt.EXIT_BROKEN
 
@@ -799,11 +802,12 @@ def test_a_broken_label_set_is_the_broken_outcome(
 ) -> None:
     """Объявление меток не разбирается — роды взять неоткуда, и это отказ шага, а не «голых нет»."""
     monkeypatch.setenv("GH_TOKEN", "токен")
-    for name in ("findings_debt", "closed_issues", "open_issues"):
+    for name in ("closed_issues", "open_listed"):
         monkeypatch.setattr(debt, name, lambda repo, token: [])
-    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token: ([], {}))
-    monkeypatch.setattr(debt, "branch_debt", lambda repo, token: ([], []))
-    monkeypatch.setattr(debt, "inbox_body", lambda repo, token, closed: ("", "", None))
+    monkeypatch.setattr(debt, "findings_debt", lambda repo, token, listed: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token, listed: ([], {}))
+    monkeypatch.setattr(debt, "branch_debt", lambda repo, token, listed: ([], []))
+    monkeypatch.setattr(debt, "inbox_body", lambda repo, token, closed, listed: ("", "", None))
     monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
     broken = tmp_path / "labels.yml"
     broken.write_text("не список меток\n", encoding="utf-8")
@@ -830,3 +834,65 @@ def test_a_closed_inbox_does_not_claim_a_missed_run() -> None:
     assert debt.STALE_NOTE in opened and debt.CLOSED_LATE not in opened
     fresh = debt.inbox_age("2026-09-30T20:00:00Z", debt.CLOSED_INBOX, now)
     assert debt.CLOSED_LATE not in fresh
+
+
+def test_the_open_list_is_read_once_and_shared(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Список открытых записей читается ОДИН раз и уходит всем пяти счётам.
+
+    ЗАМЕР 03.10.2026 (#1065): шаг читал `issues?state=open` пять раз за
+    прогон — четыре поиска живой задачи и счёт по пунктам, — и каждый раз
+    тратил запрос квоты на тот же ответ.
+    """
+    shared: list[dict[str, Any]] = []
+    reads: list[str] = []
+    seen: list[object] = []
+
+    def listed(repo: str, token: str) -> list[dict[str, Any]]:
+        reads.append(repo)
+        return shared
+
+    def keep(result: object) -> Callable[..., object]:
+        def take(*args: object) -> object:
+            seen.append(args[-1])
+            return result
+
+        return take
+
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(debt, "open_listed", listed)
+    monkeypatch.setattr(debt, "findings_debt", keep([]))
+    monkeypatch.setattr(debt, "unlooked_debt", keep(([], {})))
+    monkeypatch.setattr(debt, "branch_debt", keep(([], [])))
+    monkeypatch.setattr(debt, "closed_issues", lambda repo, token: [])
+    monkeypatch.setattr(debt, "inbox_body", keep(("", "", None)))
+    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
+    real_open = debt.open_issues
+
+    def counted_open(given: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen.append(given)
+        opened: list[dict[str, Any]] = real_open(given)
+        return opened
+
+    monkeypatch.setattr(debt, "open_issues", counted_open)
+    monkeypatch.setattr(
+        debt.coverage_floor,
+        "look",
+        lambda repo, token: debt.coverage_floor.Floor(
+            day="2026-10-03", now=88.6, floor=88.6, days=4
+        ),
+    )
+    debt.main(["--repo", "o/r"])
+    assert reads == ["o/r"], f"список прочитан {len(reads)} раз"
+    assert len(seen) == 5 and all(one is shared for one in seen), seen
+
+
+def test_a_given_list_is_searched_without_the_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`live_issue_seen` с готовым списком в сеть не ходит и находит по нему же."""
+    findings = load_script("findings.py")
+
+    def no_network(*_a: object, **_k: object) -> Iterator[dict[str, Any]]:
+        raise AssertionError("готовый список, а поиск ушёл в сеть")
+
+    monkeypatch.setattr(findings.ghrest, "paginate", no_network)
+    given = [{"number": 7, "body": f"x {findings.MARKER}", "updated_at": "2026-10-03"}]
+    assert findings.live_issue_seen("o/r", "t", listed=given) == (7, given[0]["body"], "2026-10-03")
