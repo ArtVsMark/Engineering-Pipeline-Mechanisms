@@ -241,6 +241,11 @@ def thawed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     исчезнувший род уносит свои встречи, и это тоже называется (взгляд на
     #1089).
 
+    ПЕРЕИМЕНОВАНИЕ И СЛИЯНИЕ — ЗАКОННАЯ ПРАВКА, и у неё есть путь (взгляд на
+    #1090): нынешнее имя несёт поле «прежде» со старыми именами, и его список —
+    ровно их встречи. Старое имя тогда исчезает законно, а строки `Род:` со
+    старым именем счёт относит к нынешнему (`finding_kinds.successor_of`).
+
     СВЕРЯЕТСЯ МНОЖЕСТВО ВСТРЕЧ, А НЕ СПИСОК. Снять дубль законно: встреча,
     записанная дважды, завышала счёт, и после снятия встреч не меньше
     (взгляд на #1077, `0ff657e`). Порядок записей смысла не несёт.
@@ -250,15 +255,48 @@ def thawed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     def met(kinds: dict[str, Any], name: str) -> list[str]:
         return [str(one) for one in (kinds.get(name) or {}).get("встречен") or []]
 
+    successor = finding_kinds.successor_of(after)
     for name in sorted(before):
-        if name not in after:
-            told.append(f"  род «{name}» исчез — его замороженные встречи пропали бы из счёта")
-        elif set(met(after, name)) != set(met(before, name)):
+        if name not in after and name not in successor:
+            told.append(
+                f"  род «{name}» исчез — его замороженные встречи пропали бы из счёта; "
+                f"переименование или слияние называется полем «{finding_kinds.PREVIOUS}» "
+                "у нынешнего имени"
+            )
+        elif (
+            name in after
+            and name not in successor.values()
+            and set(met(after, name)) != set(met(before, name))
+        ):
             told.append(
                 f"  у рода «{name}» изменён замороженный список «встречен» — новая встреча "
                 "пишется строкой «Род:» под снятием в коммите"
             )
-    for name in sorted(set(after) - set(before)):
+    # ПЕРЕИМЕНОВАНИЕ И СЛИЯНИЕ (взгляд на #1090): у нынешнего имени с полем
+    # «прежде» список — ровно встречи прежних имён (и свои, если род был).
+    for name in sorted(set(successor.values())):
+        olds = [old for old, new in successor.items() if new == name]
+        wanted = {one for old in [*olds, name] for one in met(before, old)}
+        if set(met(after, name)) != wanted:
+            told.append(
+                f"  у рода «{name}» список «встречен» не равен встречам его прежних имён "
+                f"({', '.join(olds)}) — при переименовании и слиянии встречи переносятся целиком"
+            )
+    # СТАРОЕ ИМЯ УХОДИТ, А «ПРЕЖДЕ» НЕ УБЫВАЕТ (взгляд на #1093). Имя, названное
+    # в «прежде», но оставшееся в словаре, считало бы свои встречи дважды, а
+    # строки `Род:` истории отдавало бы преемнику. Снятое «прежде» или цепочка
+    # A→B→C без A у C уронили бы строки `Род: A` в «вне словаря».
+    for old in sorted(set(successor) & set(after)):
+        told.append(
+            f"  род «{old}» назван в «{finding_kinds.PREVIOUS}» у «{successor[old]}», но "
+            "остался в словаре — при переименовании старое имя уходит"
+        )
+    for old in sorted(set(finding_kinds.successor_of(before)) - set(successor)):
+        told.append(
+            f"  прежнее имя «{old}» выпало из «{finding_kinds.PREVIOUS}» — строки `Род: {old}` "
+            "истории ушли бы из счёта; при новом переименовании оно переносится к новому имени"
+        )
+    for name in sorted(set(after) - set(before) - set(successor.values())):
         if met(after, name):
             told.append(
                 f"  новый род «{name}» пришёл с непустым «встречен» — его встречи едут "

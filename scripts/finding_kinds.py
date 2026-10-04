@@ -82,6 +82,16 @@ BORN: Final = "породил"
 #: повторяющийся класс ошибки чаще всего уже назван общим правилом, и ответ
 #: «правило есть, мы его нарушали» — не молчание, а адрес.
 CATALOGUE: Final = "каталогу"
+#: Поле «прежние имена рода» (#1022, взгляд на #1090). Строки `Род:` в истории
+#: не переписать, поэтому переименование и слияние родов говорят словарю,
+#: какие старые имена теперь значат этот род: их встречи считаются под ним, а
+#: гейт заморозки принимает исчезновение старого имени.
+PREVIOUS: Final = "прежде"
+#: «Рода нет» с причиной: `нет — <причина>`, разделитель — тире любое, двоеточие
+#: или запятая, как их узнаёт `said_no` (взгляд на #1093); причина — хотя бы
+#: одна буква или цифра. Число слов не мерка: «нет—опечатка» — причина, а
+#: «нет — —» — нет (взгляд на #1090).
+REFUSED_RE: Final = re.compile(r"^нет\s*[—–\-:,]\s*(?=.*\w)(?P<why>.+)$", re.IGNORECASE)
 FATE_RE: Final = re.compile(r"^(?P<kind>предложено|своё|есть)\s+—\s+(?P<said>\S.*)$")
 
 
@@ -244,6 +254,11 @@ def met_in_history(bodies: Iterable[str], kinds: dict[str, Any]) -> dict[str, li
     return found
 
 
+def successor_of(kinds: dict[str, Any]) -> dict[str, str]:
+    """Прежнее имя рода → нынешнее, по полю `прежде` (взгляд на #1090)."""
+    return {str(old): name for name, body in kinds.items() for old in body.get(PREVIOUS) or []}
+
+
 def with_history(
     kinds: dict[str, Any], bodies: Iterable[str]
 ) -> tuple[dict[str, Any], dict[str, list[str]]]:
@@ -254,7 +269,9 @@ def with_history(
     читатели словаря — порог, долг, ответ каталогу — работают над первым без
     правок: число встреч у них по-прежнему длина `встречен`.
     """
-    met = met_in_history(bodies, kinds)
+    met: dict[str, list[str]] = {}
+    for name, found in met_in_history(bodies, kinds).items():
+        met.setdefault(successor_of(kinds).get(name, name), []).extend(found)
     merged = {
         name: {**body, "встречен": [*(body.get("встречен") or []), *met.get(name, [])]}
         for name, body in kinds.items()
