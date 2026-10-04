@@ -29,12 +29,12 @@
   "filling": {
     "_": "Три шва наполнения из решения владельца: где сосед даёт свой ответ. `none` — файла данных нет, наполнение прибито к коду, и `why` называет где.",
     "what-is-checked": {
-      "where": "none",
-      "why": "что проверяется, названо шагами .github/workflows/ci.yml; файла данных под это нет"
+      "where": ".github/workflows/ci.yml",
+      "why": "что проверяется — тонкие вызовы шагов в ci.yml потребителя; кладёт их scripts/onboard.py --write, а сверку с классами в .pipeline.yml держит scripts/check_pipeline.py (решение владельца по #992, вариант 3)"
     },
     "inner-approaches": {
-      "where": "none",
-      "why": "подходы проверок — это scripts/check_*.py и tests/; наполнением они не отделены от механизма"
+      "where": ".github/workflows/ci.yml",
+      "why": "какие из наших проверок проект включает — тот же список вызовов шагов в ci.yml; отдельного файла под это нет и не заводится: второй список разошёлся бы с первым (022)"
     },
     "required-and-advisory": {
       "where": ".pipeline.yml",

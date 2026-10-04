@@ -305,3 +305,53 @@ def test_the_kit_agrees_with_the_live_release(run_script: RunScript) -> None:
     assert "uses:" in done.out and "checks:" in done.out
     for name in module.steps(ROOT):
         assert f"step-{name}.yml@" in done.out, f"шаг «{name}» в заготовку не попал"
+
+
+# --- заход кладёт заготовку сам (#992, вариант 3) ----------------------------
+
+
+def test_write_lays_a_thin_ci_and_the_answer(tmp_path: Path) -> None:
+    """С `--write` заход кладёт тонкий `ci.yml` и заготовку `.pipeline.yml` (#992).
+
+    `ci.yml` — только вызовы шагов по тегу; класс каждой проверки — в
+    `.pipeline.yml`, и он «в очереди разбора»: решает потребитель (174).
+    """
+    import yaml
+
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    flow = yaml.safe_load((consumer / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
+    job = flow["jobs"]["пример"]
+    assert job["uses"].endswith("/.github/workflows/step-пример.yml@v2.5.0"), job
+    said = yaml.safe_load((consumer / ".pipeline.yml").read_text("utf-8"))
+    assert said["checks"] == {module.check_name("пример"): policy.UNREVIEWED}
+
+
+def test_write_never_overwrites_what_is_there(tmp_path: Path) -> None:
+    """Занятый путь — отказ, и не кладётся ни один файл: половина заготовки хуже никакой."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    (consumer / ".github" / "workflows").mkdir(parents=True)
+    (consumer / ".pipeline.yml").write_text("свой ответ\n", encoding="utf-8")
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OCCUPIED
+    assert (consumer / ".pipeline.yml").read_text("utf-8") == "свой ответ\n"
+    assert not (consumer / ".github" / "workflows" / "ci.yml").exists()
+
+
+def test_the_thin_ci_carries_only_calls(tmp_path: Path) -> None:
+    """В тонком `ci.yml` нет своих шагов: каждый джоб — вызов по тегу."""
+    import yaml
+
+    flow = yaml.safe_load(module.thin_ci(["а", "б"], "o/r", "v1.0.0"))
+    assert set(flow["jobs"]) == {"а", "б"}
+    assert all("steps" not in job and "@v1.0.0" in job["uses"] for job in flow["jobs"].values())
+
+
+def test_occupied_names_only_what_exists(tmp_path: Path) -> None:
+    """`occupied` называет занятые пути, `lay` кладёт все."""
+    files = {Path("a/x.yml"): "x\n", Path("y.yml"): "y\n"}
+    (tmp_path / "y.yml").write_text("было\n", encoding="utf-8")
+    assert module.occupied(tmp_path, files) == [Path("y.yml")]
+    module.lay(tmp_path / "новое", files)
+    assert (tmp_path / "новое" / "a" / "x.yml").read_text("utf-8") == "x\n"

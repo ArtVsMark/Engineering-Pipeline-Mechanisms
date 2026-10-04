@@ -50,14 +50,18 @@
 Третий исход называет предмет: нарезать выпуск
 ([158](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/158-the-third-outcome-names-its-subject.md)).
 
-ЧЕГО ЗАХОД НЕ ДЕЛАЕТ: не пишет в чужое дерево и не трогает защиту ветки.
-Первое — чужая работа, второе живёт вне дерева вовсе. Заход печатает, а
-потребитель кладёт; иначе «подключено» и «подправлено на ходу» стали бы
-неотличимы.
+ЧЕГО ЗАХОД НЕ ДЕЛАЕТ: не правит чужое дерево и не трогает защиту ветки.
+По умолчанию он печатает, а потребитель кладёт. С ключом `--write` (решение
+владельца 04.10.2026 по #992, вариант 3) он кладёт заготовку сам — но только
+в свободные пути: файл, который уже есть, называется, и не пишется ни один.
+Иначе «подключено» и «подправлено на ходу» стали бы неотличимы. Сводный гейт
+`ci-complete.yml` заготовка не кладёт: он пока копируется, а не зовётся
+(`tests/test_portable.py::STILL_COPIED`, вынос — #993).
 
 Исходы (правило 039): ``0`` заготовка собрана · ``2`` не отработал ·
 ``3`` отдавать нечего: ни один шаг не помечен · ``4`` прибивка не несёт
-помеченного: выпуск отстал от дерева.
+помеченного: выпуск отстал от дерева · ``5`` с ``--write``: путь заготовки в
+дереве потребителя уже занят.
 """
 
 import argparse
@@ -76,6 +80,9 @@ EXIT_NOTHING: Final = 3
 #: Прибивка есть, а помеченного в ней нет. Отдельный исход, а не «нечего
 #: отдавать»: предмет тот же, причина и выход РАЗНЫЕ (039, 104).
 EXIT_UNREACHABLE: Final = 4
+#: Заход с `--write` нашёл файл, который положил бы: чужое не перезаписывается,
+#: а называется (#992). Выход — свой: убрать файл или сверить его руками.
+EXIT_OCCUPIED: Final = 5
 
 #: Приставка вынесенного шага. Помеченным бывает и не шаг — пакет, действие, —
 #: а заготовку вызова собирают только из прогонов, которые ЗОВУТ.
@@ -177,6 +184,47 @@ def own_kit(flow: Path, name: str, repo: str, pin: str) -> str:
     return text.replace(inner, outer)
 
 
+def thin_ci(names: list[str], repo: str, pin: str) -> str:
+    """Тонкий `ci.yml` потребителя: вызовы шагов по тегу — и ничего своего (#992).
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 04.10.2026 по #992, вариант 3. «Что проверяется» у
+    потребителя — набор этих вызовов, а класс каждой проверки — его
+    `.pipeline.yml`. Сверяет одно с другим общий шаг `pipeline`
+    (`check_pipeline.py`): у каждой проверки дерева есть ответ, у каждого
+    ответа — проверка. Поэтому вызовы и есть данные, и второго списка «что
+    включено» не заводится.
+    """
+    head = (
+        "# Тонкий вызов шагов конвейера: собран `scripts/onboard.py` поставщика.\n"
+        "# Что проверяется — эти вызовы; класс каждой проверки — `.pipeline.yml`.\n"
+        "# Сверяет одно с другим шаг `pipeline`: правьте оба вместе.\n"
+        "name: ci\n\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, labeled, unlabeled, edited]\n"
+        "  workflow_dispatch:\n\n"
+        "permissions:\n"
+        "  contents: read\n"
+        "  checks: read\n"
+        "  pull-requests: read\n"
+        "  issues: read\n\n"
+        "jobs:\n"
+    )
+    return head + "\n".join(caller(one, repo, pin) for one in names)
+
+
+def occupied(root: Path, files: dict[Path, str]) -> list[Path]:
+    """Файлы заготовки, которые в дереве потребителя уже есть: их заход не трогает."""
+    return sorted(path for path in files if (root / path).exists())
+
+
+def lay(root: Path, files: dict[Path, str]) -> None:
+    """Кладёт заготовку в дерево потребителя; занятое проверяет зовущий (`occupied`)."""
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text, encoding="utf-8")
+
+
 def pin_of(root: Path) -> str:
     """Тег ВЫПУСКА, к которому прибивается потребитель, — из истории.
 
@@ -274,6 +322,12 @@ def main(argv: list[str] | None = None) -> int:
         default="ArtVsMark/Engineering-Pipeline-Mechanisms",
         help="откуда потребитель зовёт шаги",
     )
+    parser.add_argument(
+        "--write",
+        type=Path,
+        metavar="КОРЕНЬ",
+        help="положить заготовку в дерево потребителя, а не печатать; занятое не трогается",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -312,6 +366,39 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_UNREACHABLE
 
     pipeline = [one for one in names if one not in own]
+    beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
+    on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
+    if args.write:
+        # КЛАДЁТСЯ ТОЛЬКО ПО ЯВНОМУ КЛЮЧУ И ТОЛЬКО В СВОБОДНОЕ (#992). Чужое
+        # дерево заход не правит: занятый путь называется, и не пишется ни
+        # один файл — половина заготовки хуже никакой.
+        try:
+            files = {
+                paths.WORKFLOWS / PIPELINE_FLOW: thin_ci(pipeline, args.repo, pin),
+                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change),
+                **{
+                    paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
+                    for one, flow in sorted(own.items())
+                },
+            }
+        except NotRun as exc:
+            print(f"заход не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        taken = occupied(args.write, files)
+        if taken:
+            print(
+                "заготовка не положена: в дереве уже есть "
+                + ", ".join(str(one) for one in taken)
+                + ". Заход чужое не перезаписывает — уберите файл или сверьте его с "
+                "выводом захода без --write",
+                file=sys.stderr,
+            )
+            return EXIT_OCCUPIED
+        lay(args.write, files)
+        print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files)))
+        print("Класс каждой проверки в .pipeline.yml — СВОЙ выбор; в защиту ветки — одно имя.")
+        return EXIT_OK
+
     print(f"# шагов к подключению: {len(names)} · прибивка: {pin}\n")
     print(f"# 1. В свой `{paths.WORKFLOWS}/{PIPELINE_FLOW}` — джобы вызова:\n")
     print("jobs:")
@@ -322,8 +409,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# 2. В свой `{paths.PIPELINE}` — ответ по каждой проверке.")
     print("#    Класс — СВОЙ выбор: `required`, `advisory` или `off` с причиной.")
     print(f"#    Здесь все выходят «{policy.UNREVIEWED}»: это очередь разбора, а не умолчание.\n")
-    beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
-    on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
     print(answer(pipeline, beyond, on_change=on_change))
     print("# 3. В защиту ветки — ОДНО имя: имя своего сводного гейта.")
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
