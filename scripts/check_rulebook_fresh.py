@@ -149,11 +149,7 @@ def own_under(
         known = {commit.sha: commit for commit in window.commits(source, cwd=cwd)}
         for sha in touching(source, RULEBOOK, cwd=cwd):
             edit = known.get(sha)
-            if (
-                edit
-                and edit.session == session
-                and start.when <= edit.when <= head.when
-            ):
+            if edit and edit.session == session and start.when <= edit.when <= head.when:
                 found.setdefault(sha, edit)
     return sorted(found.values(), key=lambda edit: edit.when)
 
