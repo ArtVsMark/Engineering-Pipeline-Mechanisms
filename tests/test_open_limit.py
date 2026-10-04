@@ -262,9 +262,50 @@ def shallow_clone_of(repo: Path, where: Path) -> Path:
     return where
 
 
-def test_a_visible_trailer_counts_in_a_shallow_clone(repo: Path, tmp_path: Path) -> None:
-    """Свой коммит с трейлером виден и в мелком клоне — окно достоверно (взгляд на #1094)."""
-    assert module.session_of(shallow_clone_of(repo, tmp_path / "shallow")) == MINE
+def test_a_shallow_clone_is_refused_even_with_a_visible_trailer(repo: Path, tmp_path: Path) -> None:
+    """Мелкий клон — отказ и при видимом трейлере (210, взгляды на #1094 и #1100).
+
+    За срезом `base..HEAD` не ограничен своими коммитами, и видимый трейлер
+    бывает чужим — его случай ниже.
+    """
+    with pytest.raises(module.NotRun, match="свои коммиты ветки"):
+        module.session_of(shallow_clone_of(repo, tmp_path / "shallow"))
+
+
+def test_a_foreign_trailer_behind_the_cut_is_not_taken(repo: Path, tmp_path: Path) -> None:
+    """Случай взгляда на #1100: в ветку слита общая с чужим уплотнением, клон мелкий.
+
+    Прежняя редакция возвращала чужое окно; теперь — отказ, а не чужой счёт.
+    """
+    git(repo, "checkout", "-q", "origin/main")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "чужое уплотнение\n\nClaude-Session: theirs")
+    theirs = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    for one in range(3):
+        git(repo, "commit", "-q", "--allow-empty", "-m", f"общая ветка {one}")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "-")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "своё без трейлера")
+    git(repo, "merge", "-q", "--no-edit", theirs)
+    shallow = tmp_path / "shallow"
+    git(repo, "branch", "-f", "main", "origin/main")
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "-q",
+            "--depth",
+            "3",
+            "--no-single-branch",
+            f"file://{repo}",
+            str(shallow),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(module.NotRun, match="свои коммиты ветки"):
+        module.session_of(shallow)
 
 
 def test_a_shallow_branch_without_a_visible_trailer_is_refused(repo: Path, tmp_path: Path) -> None:
