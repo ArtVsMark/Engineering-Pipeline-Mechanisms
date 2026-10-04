@@ -252,8 +252,11 @@ def thawed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     """
     told: list[str] = []
 
+    # Встреча сверяется в форме `finding_kinds.mark_of`, как у счёта: перенос
+    # `` `abc1234` `` в `abc1234` — та же встреча, а не тронутая заморозка
+    # (взгляд на #1098).
     def met(kinds: dict[str, Any], name: str) -> list[str]:
-        return [str(one) for one in (kinds.get(name) or {}).get("встречен") or []]
+        return [finding_kinds.mark_of(one) for one in (kinds.get(name) or {}).get("встречен") or []]
 
     successor = finding_kinds.successor_of(after)
     for name in sorted(before):

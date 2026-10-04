@@ -121,7 +121,9 @@ def test_a_meeting_is_listed_once_per_kind(name: str) -> None:
     04.10.2026 четыре (`dbf186b`, `ca9216b`, `4394e1f`, `1ad3e72`).
     """
     said = kinds()[name].get("встречен")
-    met = [str(one) for one in said] if isinstance(said, list) else []
+    # Повтор сверяется той же формой, что счёт (`mark_of`): `abc1234` в кавычках и
+    # без — одна встреча (взгляд на #1092).
+    met = [module.mark_of(one) for one in said] if isinstance(said, list) else []
     twice = sorted({one for one in met if met.count(one) > 1})
     assert not twice, f"{name}: встреча записана дважды — {twice}"
 
@@ -808,6 +810,8 @@ def test_an_old_name_in_history_counts_under_the_new_one() -> None:
     ("said", "ok"),
     [
         ("нет — опечатка", True),
+        ("нет потому что опечатка", True),
+        ("нет; опечатка", True),
         ("нет: опечатка", True),
         ("нет, опечатка", True),
         ("нет—опечатка", True),
@@ -838,3 +842,28 @@ def test_one_finding_may_meet_two_kinds() -> None:
     }
     # Вторая половина: под тем же родом повтор по-прежнему не считается.
     assert module.met_in_history(["Разобрано: aaaaaaa\nРод: первый"], kinds) == {}
+
+
+def test_a_migrated_meeting_is_not_counted_again_under_the_old_name() -> None:
+    """Перенесённый в нынешний род отпечаток под `Род: старое` не считается вновь (#1093)."""
+    kinds = {"новое": {"встречен": ["aaaaaaa"], "прежде": ["старое"]}}
+    assert module.met_in_history(["Разобрано: aaaaaaa\nРод: старое"], kinds) == {}
+
+
+def test_one_chain_under_the_old_and_the_new_name_is_one_meeting() -> None:
+    """Одна цепочка под строками `Род: старое` и `Род: новое` — одна встреча (#1093)."""
+    kinds = {"новое": {"встречен": [], "прежде": ["старое"]}}
+    bodies = ["Разобрано: bbbbbbb\nРод: старое", "Разобрано: bbbbbbb\nРод: новое"]
+    assert module.met_in_history(bodies, kinds) == {"новое": ["bbbbbbb"]}
+
+
+def test_one_old_name_under_two_kinds_is_refused() -> None:
+    """Одно прежнее имя у двух родов — отказ, а не «последний побеждает» (#1093)."""
+    kinds = {"первый": {"прежде": ["старое"]}, "второй": {"прежде": ["старое"]}}
+    with pytest.raises(module.NotRun, match="у двух родов"):
+        module.successor_of(kinds)
+
+
+def test_mark_of_strips_the_backticks() -> None:
+    """`mark_of` — одна форма встречи на счёт и на проверку повтора (#1092)."""
+    assert module.mark_of("`abc1234`") == module.mark_of("abc1234") == "abc1234"

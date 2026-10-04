@@ -553,6 +553,12 @@ def test_a_rename_and_a_merge_have_a_lawful_path() -> None:
     assert module.thawed(before, renamed) == []
     merged = {"соседнее": {"встречен": ["n0", "m0"], "прежде": ["старое"]}}
     assert module.thawed(before, merged) == []
+    # Кавычки у одной стороны переноса — та же встреча (`finding_kinds.mark_of`).
+    quoted = {
+        "новое": {"встречен": ["`m0`"], "прежде": ["старое"]},
+        "соседнее": {"встречен": ["n0"]},
+    }
+    assert module.thawed(before, quoted) == []
     # Вторая половина: встречи при переносе теряются или растут — отказ.
     lost = {"новое": {"встречен": [], "прежде": ["старое"]}, "соседнее": {"встречен": ["n0"]}}
     grown = {
