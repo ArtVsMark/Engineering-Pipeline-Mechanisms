@@ -282,6 +282,20 @@ def thawed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
                 f"  у рода «{name}» список «встречен» не равен встречам его прежних имён "
                 f"({', '.join(olds)}) — при переименовании и слиянии встречи переносятся целиком"
             )
+    # СТАРОЕ ИМЯ УХОДИТ, А «ПРЕЖДЕ» НЕ УБЫВАЕТ (взгляд на #1093). Имя, названное
+    # в «прежде», но оставшееся в словаре, считало бы свои встречи дважды, а
+    # строки `Род:` истории отдавало бы преемнику. Снятое «прежде» или цепочка
+    # A→B→C без A у C уронили бы строки `Род: A` в «вне словаря».
+    for old in sorted(set(successor) & set(after)):
+        told.append(
+            f"  род «{old}» назван в «{finding_kinds.PREVIOUS}» у «{successor[old]}», но "
+            "остался в словаре — при переименовании старое имя уходит"
+        )
+    for old in sorted(set(finding_kinds.successor_of(before)) - set(successor)):
+        told.append(
+            f"  прежнее имя «{old}» выпало из «{finding_kinds.PREVIOUS}» — строки `Род: {old}` "
+            "истории ушли бы из счёта; при новом переименовании оно переносится к новому имени"
+        )
     for name in sorted(set(after) - set(before) - set(successor.values())):
         if met(after, name):
             told.append(

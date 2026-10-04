@@ -808,6 +808,8 @@ def test_an_old_name_in_history_counts_under_the_new_one() -> None:
     ("said", "ok"),
     [
         ("нет — опечатка", True),
+        ("нет: опечатка", True),
+        ("нет, опечатка", True),
         ("нет—опечатка", True),
         ("нет – 1 случай", True),
         ("нет — —", False),
