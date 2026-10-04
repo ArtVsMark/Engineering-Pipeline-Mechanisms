@@ -24,6 +24,7 @@ import yaml
 from tests.conftest import ROOT, load_script, string_args_of, walk
 
 paths = load_script("paths.py")
+RULEBOOK = load_script("check_rulebook_fresh.py")
 
 ANSWERS: Final = frozenset({"as-is", "configured", "ours", "unreviewed"})
 
@@ -61,6 +62,10 @@ def subjects(root: Path = ROOT) -> set[str]:
     found |= {p.relative_to(root).as_posix() for p in (root / ".rules").glob("*.json")}
     found |= {p.relative_to(root).as_posix() for p in (root / paths.SKILLS).iterdir() if p.is_dir()}
     found |= {p.relative_to(root).as_posix() for p in (root / "packages").iterdir() if p.is_dir()}
+    # СВОД — ТОЖЕ МЕХАНИЗМ (#995). Окно работает по нему, и потребителю нужен
+    # свой: молчание инвентаря о своде читалось бы как «переносится как есть».
+    # Имена берутся у того, кто свод уже сверяет, а не пишутся здесь заново.
+    found |= {name for name in RULEBOOK.RULEBOOK if (root / name).is_file()}
     return found
 
 
@@ -342,11 +347,14 @@ def test_subjects_see_yaml_flows_and_directories(tmp_path: Path) -> None:
     """Предмет инвентаря: прогон `.yaml` и каталог навыка входят в него (#768)."""
     for part in ("scripts", ".github/workflows", ".rules", ".claude/skills/one", "packages/p"):
         (tmp_path / part).mkdir(parents=True)
+    (tmp_path / "AGENTS.md").write_text("# свод\n", encoding="utf-8")
     (tmp_path / ".github/workflows/a.yaml").write_text("on: push\n", encoding="utf-8")
     (tmp_path / ".github/workflows/b.yml").write_text("on: push\n", encoding="utf-8")
     found = subjects(tmp_path)
     assert ".github/workflows/a.yaml" in found, "прогон `.yaml` выпал из инвентаря"
     assert {".github/workflows/b.yml", ".claude/skills/one", "packages/p"} <= found
+    assert "AGENTS.md" in found, "свод выпал из инвентаря (#995)"
+    assert "CLAUDE.md" not in found, "отсутствующий файл свода попал в предмет"
 
 
 def test_a_directory_is_measured_by_its_files(tmp_path: Path) -> None:
