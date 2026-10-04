@@ -60,6 +60,31 @@ def test_every_rule_has_an_answer() -> None:
     assert all(isinstance(item, dict) and item.get("status") for item in rules.values())
 
 
+#: Как `why` ответа объявляет вид механизма словами: «ВИД МЕХАНИЗМА — pipeline».
+SAID_KIND_RE = re.compile(r"ВИД МЕХАНИЗМА — (\w+)")
+
+
+def test_a_kind_said_in_why_is_the_kind_in_the_field() -> None:
+    """Вид, названный в `why`, совпадает с полем `mechanism` того же ответа (взгляд на #1103).
+
+    Первая правка ответа 134 записала довод в его `why`, а поле сменила у 047:
+    соседи и карта читают поле, и довод остался словами. Предмет — ответы,
+    где вид назван этой формой; без неё сверять нечего.
+    """
+    said = {
+        number: found.group(1)
+        for number, item in load()["rules"].items()
+        if (found := SAID_KIND_RE.search(str(item.get("why", ""))))
+    }
+    assert said, "ни один ответ не называет вид словами — проверка не о чем (075)"
+    wrong = {
+        n: (kind, load()["rules"][n].get("mechanism"))
+        for n, kind in said.items()
+        if load()["rules"][n].get("mechanism") != kind
+    }
+    assert not wrong, f"вид в why и в поле расходятся: {wrong}"
+
+
 def test_statuses_are_from_the_contract() -> None:
     """Статус — из четырёх объявленных контрактом, а не произвольное слово."""
     assert {item["status"] for item in answers().values()} <= STATUSES
