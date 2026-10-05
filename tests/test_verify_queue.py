@@ -274,9 +274,13 @@ def test_the_default_pick_reaches_every_number() -> None:
     зерно оставлено только для повторяемости. Срез `population[:k]` при этом
     спрашивает лишь номера 1–4 и краснеет на любом числе заходов.
     """
+    numbers = set(range(1, 41))
+    limit = 4
+    # Границу держит машина, а не комментарий (005, взгляд на #1152,
+    # `43f3ef3`): уменьши `TURNS` — краснеет здесь, а не молчит за зерном.
+    assert len(numbers) * (1 - limit / len(numbers)) ** TURNS < 1e-12, TURNS
     state = random.getstate()
     random.seed(1134)
-    numbers = set(range(1, 41))
     asked: set[int] = set()
 
     def ask(number: int) -> str | None:
@@ -285,7 +289,7 @@ def test_the_default_pick_reaches_every_number() -> None:
 
     try:
         for _ in range(TURNS):
-            module.merged_dates(numbers, [], set(), ask, limit=4)
+            module.merged_dates(numbers, [], set(), ask, limit=limit)
     finally:
         random.setstate(state)
     assert asked == numbers, f"не спрошены ни разу: {sorted(numbers - asked)}"
