@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1235,7 +1236,9 @@ def test_the_source_line_warns_only_on_another_tree(
     line, warned = preflight.source_line(origin.format(root=root, other=other), root)
     assert warned is warns and said in line, line
     if warns:
-        assert str(root.resolve()) in line, "назван не каждый путь"
+        assert str(root.resolve()) in line, "не назван корень прогона"
+        imported = Path(origin.format(root=root, other=other)).resolve()
+        assert str(imported) in line, "не назван путь импортированного модуля (взгляд на #1145)"
         assert "mypy_path" in line, "не сказано, какие шаги правку видят"
 
 
@@ -1251,6 +1254,19 @@ def test_the_owning_tree_is_named_by_git(tmp_path: Path) -> None:
     assert preflight.owning_tree(nested / "ghrest.py") == nested.resolve()
     assert preflight.owning_tree(loose / "ghrest.py") is None
     assert preflight.owning_tree(tmp_path / "нет" / "ghrest.py") is None
+
+
+def test_a_refusal_of_git_is_not_a_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Отказ git, кроме «не дерево», — названное незнание, а не «чужое дерево» (взгляд на #1145)."""
+
+    def refuse(args: list[str], refusal: Any, **_: Any) -> str:
+        raise refusal("git rev-parse → fatal: detected dubious ownership in repository")
+
+    monkeypatch.setattr(preflight.gitcall, "output", refuse)
+    with pytest.raises(preflight.NotRun):
+        preflight.owning_tree(tmp_path / "ghrest.py")
+    line, warned = preflight.source_line(str(tmp_path / "ghrest.py"), tmp_path)
+    assert warned is False and "дерево не установлено" in line and "dubious" in line, line
 
 
 def test_the_origin_is_asked_of_the_steps_environment(

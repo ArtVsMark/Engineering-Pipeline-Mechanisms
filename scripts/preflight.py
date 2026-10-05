@@ -620,6 +620,8 @@ def push_branch(root: Path) -> int:
 #: Модуль, по которому узнаётся источник ПРОВЕРЯЕМОГО кода транспорта: шаги
 #: импортируют пакет `packages/transport` по имени его модуля, а не по пути.
 TRANSPORT_MODULE: Final = "ghrest"
+#: Отказ git, означающий «это не дерево», а не «спросить не удалось».
+NOT_A_TREE: Final = "not a git repository"
 #: Каталоги обычной установки: код там — копия, а не дерево исходников, и о
 #: свежести копии правило 216 не говорит.
 INSTALLED: Final = ("site-packages", "dist-packages")
@@ -673,7 +675,14 @@ def source_line(origin: str, root: Path) -> tuple[str, bool]:
     where = Path(origin).resolve()
     if any(part in INSTALLED for part in where.parts):
         return f"код транспорта: обычная установка {where}", False
-    if owning_tree(where) == root.resolve():
+    try:
+        owner = owning_tree(where)
+    except NotRun as exc:
+        # ОТКАЗ GIT — НЕ ЧУЖОЕ ДЕРЕВО (взгляд на #1145). «dubious ownership»
+        # и прочие отказы говорят, что хозяин не установлен, а не что он
+        # другой: ложное «НЕ из проверяемого дерева» было бы хуже молчания (045).
+        return f"код транспорта: {where} — дерево не установлено: {report.cut(str(exc))}", False
+    if owner == root.resolve():
         return f"код транспорта: из этого дерева, {where}", False
     return (
         f"⚠ код транспорта НЕ из проверяемого дерева: импортируется {where},"
@@ -691,13 +700,22 @@ def owning_tree(path: Path) -> Path | None:
     (`.claude/worktrees/<имя>`), и путь из него лежит под корнем основного, хотя
     дерево чужое (взгляд на #1132, `f35e912`). Хозяина называет сам git
     (`rev-parse --show-toplevel` из каталога пути): поиск `.git` вверх по
-    родителям нашёл бы и чужое (гейт `tests/test_settings_anchor.py`). Путь вне
-    дерева git или каталог, которого нет, — ``None``.
+    родителям нашёл бы и чужое (гейт `tests/test_settings_anchor.py`).
+
+    ДВА ОТКАЗА РАЗЛИЧНЫ (взгляд на #1145). Путь вне дерева git или каталог,
+    которого нет, — ``None``: хозяина нет. Любой другой отказ git — например,
+    «dubious ownership» при чужом владельце каталога (`safe.directory`), —
+    `NotRun`: хозяин есть, но не назван, и выдавать это за «чужое дерево»
+    нельзя.
     """
+    if not path.parent.is_dir():
+        return None
     try:
         said = gitcall.output(["rev-parse", "--show-toplevel"], NotRun, cwd=str(path.parent))
-    except NotRun, OSError:
-        return None
+    except NotRun as exc:
+        if NOT_A_TREE in str(exc):
+            return None
+        raise
     return Path(said.strip()).resolve()
 
 
