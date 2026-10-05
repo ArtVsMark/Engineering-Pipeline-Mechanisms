@@ -209,6 +209,14 @@ def test_a_finding_reaches_its_rule_through_its_kind(tmp_path: Path) -> None:
     assert rows(out, "SELECT mark, verdict, rule FROM finding_rules") == [
         ("aaaaaaa", "есть", "206")
     ]
+    # Род, которого нет в разделе родов, не роняет находку из представления
+    # (взгляд на #1154, `f86b56c`): она остаётся с пустым ответом.
+    other = tmp_path / "g.sqlite"
+    body = archive(findings={"ddddddd": finding(13, род="род без записи")})
+    module.build([written(tmp_path, "b.json", body)], other)
+    assert rows(other, "SELECT mark, rod, verdict, rule FROM finding_rules") == [
+        ("ddddddd", "род без записи", None, None)
+    ]
     assert rows(out, "SELECT name, verdict, rule FROM kinds ORDER BY name") == [
         ("без ответа", None, None),
         ("своё предложение", "предложено", None),
