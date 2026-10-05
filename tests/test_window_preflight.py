@@ -480,6 +480,20 @@ def test_branch_checks_run_before_the_workflow_ones() -> None:
     assert "agent_pr.py --dry-run" in preflight.BEFORE_PUSH[0].command
 
 
+def test_the_commit_text_is_judged_before_the_push() -> None:
+    """Строки рода и слова закрытия в коммитах судятся до толчка, а не площадкой (#1135).
+
+    `pr-meta` отложен как площадочный, но его часть по коммитам ветки здесь
+    считается той же функцией гейта: 05.10.2026 «Разобрано» без «Род:» уехало
+    толчком, и изменение пришлось переносить.
+    """
+    commands = [step.command for step in preflight.BEFORE_PUSH]
+    assert any(
+        command.startswith("python scripts/check_pr_meta.py --local ") for command in commands
+    )
+    assert "текст коммитов" in preflight.NEEDS_PLATFORM["python scripts/check_pr_meta.py"]
+
+
 def test_the_branch_check_is_not_a_second_list_of_the_workflow() -> None:
     """Это не второй список тех же команд (022), а то, чего в прогоне нет.
 

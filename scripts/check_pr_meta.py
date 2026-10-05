@@ -28,6 +28,7 @@ import agent_pr
 import changerefs
 import finding_kinds
 import ghrest
+import gitcall
 import items
 import labels
 import paths
@@ -222,6 +223,86 @@ def read_messages(from_path: str) -> list[str]:
     return [one for one in raw.split("\0") if one.strip()]
 
 
+def text_problems(
+    title: str, body: str, messages: list[str], coming: agent_pr.Described | None
+) -> list[str]:
+    """Чем текст, который доедет до общей ветки, не годится: слова закрытия и роды.
+
+    ОДНА ФУНКЦИЯ НА ДВА ПУТИ (#1135). Её зовёт гейт на площадке — с
+    заголовком и описанием изменения — и предполётная до толчка
+    (`--local`), где изменения ещё нет и судится только то, что собирается
+    из коммитов ветки. Второй список тех же проверок в предполётной
+    разошёлся бы с этим молча (022).
+
+    Тело уплотнения собирается здесь, а не у зовущего: судится ровно то, что
+    отберёт `squash_body.compose_from`. Роды судятся там, где они ведутся:
+    у потребителя без словаря строк `Род:` нет, и требовать их не с чем.
+    Нечитаемый словарь — `finding_kinds.NotRun`, исход 2 у зовущего.
+    """
+    subjects = [squash_body.subject_of(one) for one in messages]
+    landing = squash_body.compose_from(subjects, messages)
+    problems: list[str] = []
+    for heading in dict.fromkeys([title, *([coming.title] if coming else [])]):
+        if changerefs.CLOSING_KEYWORD_RE.search(heading):
+            problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")
+    if messages and paths.FINDING_KINDS.is_file():
+        problems += kind_problems(landing, finding_kinds.read())
+    said = "\n".join([body, landing, coming.body if coming else ""])
+    for line in dict.fromkeys(changerefs.stray_closing_words(said)):
+        problems.append(f"в строке «{line}» {STRAY_CLOSING}")
+    return problems
+
+
+def local_messages(base: str) -> list[str]:
+    """Сообщения коммитов ветки сверх базы — от старых к новым, как читает прогон.
+
+    Та же выборка, что пишет шаг `step-pr-meta.yml` в `/tmp/messages.txt`:
+    `git log --reverse --format=%B%x00 <база>..HEAD`. База — ОБЩАЯ ТОЧКА с
+    `base`, а не сама `base`: ушедшая вперёд общая ветка иначе принесла бы
+    чужие коммиты в суд над своими.
+    """
+    try:
+        fork = gitcall.output(["merge-base", base, "HEAD"], NotRun).strip()
+        raw = gitcall.output(["log", "--reverse", "--format=%B%x00", f"{fork}..HEAD"], NotRun)
+    except NotRun as exc:
+        raise NotRun(f"коммиты ветки не прочитаны: {exc}") from exc
+    return [one for one in raw.split("\0") if one.strip()]
+
+
+def judge_local(base: str) -> int:
+    """Предполётная часть гейта (#1135): то, что считается по коммитам, — до толчка.
+
+    Метки, заголовок и описание изменения живут у площадки и здесь не
+    судятся. Описание, которое допишет `agent_pr`, — судится: его соберёт та
+    же `describe_from` из тех же коммитов, если ветка несёт его приставку.
+    Охват печатается числом (165): «снятий прочитано: 0» отличимо от «чисто».
+    """
+    try:
+        messages = local_messages(base)
+        branch = gitcall.output(["rev-parse", "--abbrev-ref", "HEAD"], NotRun).strip()
+        subjects = [squash_body.subject_of(one) for one in messages]
+        coming = (
+            agent_pr.describe_from(subjects, messages)
+            if messages and branch.startswith(agent_pr.PREFIXES)
+            else None
+        )
+        problems = text_problems("", "", messages, coming)
+    except (NotRun, finding_kinds.NotRun) as exc:
+        print(f"проверка не отработала: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    landing = squash_body.compose_from(subjects, messages)
+    print(
+        f"коммитов ветки прочитано: {len(messages)}, "
+        f"снятий в теле уплотнения: {len(changerefs.resolutions_parsed(landing))}"
+    )
+    if problems:
+        print("текст коммитов не годится для общей ветки:")
+        for problem in problems:
+            print(f"  {problem}")
+        return EXIT_REJECTED
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -236,7 +317,15 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="файл с сообщениями коммитов изменения, разделёнными NUL (git log %%B%%x00)",
     )
+    parser.add_argument(
+        "--local",
+        default="",
+        metavar="БАЗА",
+        help="судить только текст коммитов ветки сверх БАЗЫ — без площадки (предполётная)",
+    )
     args = parser.parse_args(argv)
+    if args.local:
+        return judge_local(args.local)
 
     try:
         pull = load_event()
@@ -292,24 +381,14 @@ def main(argv: list[str] | None = None) -> int:
     # судить то, чего не будет.
     messages = read_messages(args.messages_from)
     subjects = [squash_body.subject_of(one) for one in messages]
-    landing = squash_body.compose_from(subjects, messages)
     head = str((pull.get("head") or {}).get("ref") or "")
     rewritten = head.startswith(agent_pr.PREFIXES) and agent_pr.MARK in body
     coming = agent_pr.describe_from(subjects, messages) if messages and rewritten else None
-    for heading in dict.fromkeys([title, *([coming.title] if coming else [])]):
-        if changerefs.CLOSING_KEYWORD_RE.search(heading):
-            problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")
-    # РОДА СУДЯТСЯ ТАМ, ГДЕ РОДЫ ВЕДУТСЯ: у потребителя без словаря строк
-    # `Род:` нет и требовать их не с чем.
-    if messages and paths.FINDING_KINDS.is_file():
-        try:
-            problems += kind_problems(landing, finding_kinds.read())
-        except finding_kinds.NotRun as exc:
-            print(f"проверка не отработала: {exc}", file=sys.stderr)
-            return EXIT_BROKEN
-    said = "\n".join([body, landing, coming.body if coming else ""])
-    for line in dict.fromkeys(changerefs.stray_closing_words(said)):
-        problems.append(f"в строке «{line}» {STRAY_CLOSING}")
+    try:
+        problems += text_problems(title, body, messages, coming)
+    except finding_kinds.NotRun as exc:
+        print(f"проверка не отработала: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
 
     undeclared = sorted(on_pr - {label.name for label in declared})
     if undeclared:
