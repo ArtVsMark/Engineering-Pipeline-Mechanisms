@@ -80,7 +80,11 @@
       "answer": "as-is"
     },
     ".claude/hooks/session-start.sh": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".claude/hooks/session-start.sh"
+      ],
+      "seam": "хук собирает окружение проверки по `check_env` из нашего `scripts/` и ставит `packages/transport` из дерева; у потребителя их нет (запись 037), и хук промолчал бы предупреждением, не собрав ничего. Заготовки хука для потребителя нет (#995)"
     },
     ".claude/settings.json": {
       "answer": "as-is"

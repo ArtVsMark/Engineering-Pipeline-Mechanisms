@@ -7,6 +7,8 @@
 
 import ast
 import json
+import re
+import subprocess
 from pathlib import Path
 from typing import Any, Final
 
@@ -61,7 +63,7 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     assert collected["rules"]["by_mechanism"] == {"document": 1, "gate": 1}
     assert collected["checks_per_pr"]["by_class"]["required"] == 1
     assert collected["commit"] == "голова"
-    # Договор фактов витрины семьи 1.3 (#1046): номер — договора, а не наш.
+    # Договор фактов 1.3 (#1046): номер — договора, а не наш.
     assert collected["schema"] == "1.3"
     # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
     assert collected["none"]["python"] == facts.NO_PYTHON
@@ -656,7 +658,7 @@ def test_an_empty_answer_is_refused_before_the_count(tmp_path: Path) -> None:
     [("v1.3.0", "1.3"), ("v1.10.0", "1.10"), ("v2.0.4", "2.0"), (None, ""), ("", "")],
 )
 def test_release_is_a_series_not_a_tag(tag: str | None, series: str) -> None:
-    """`release` — серия `X.Y` по договору 1.3 (#1046): без `v` и без третьей цифры."""
+    """`release` — серия `X.Y` по договору фактов 1.3 (#1046): без `v` и без третьей цифры."""
     assert facts.release_series(tag) == series
 
 
@@ -667,3 +669,95 @@ def test_collect_writes_the_release_as_a_series(
     tree(tmp_path, bindings(**{"001": {"status": "active", "mechanism": "gate", "where": "тут"}}))
     monkeypatch.setattr(facts.version, "release_tag", lambda *_: "v1.3.0")
     assert facts.collect(tmp_path, "голова")["release"] == "1.3"
+
+
+#: Договоры, которые проект называет по версии, — по имени (взгляд на #1109).
+NAMED_CONTRACTS: Final = frozenset({"фактов", "ответа"})
+#: Договоры БЕЗ номера версии: у них число во фразе — чужое (планка Python,
+#: версия проекта), и имя договора стоит — этого гейт и требует. ЗАМЕР 05.10.2026
+#: по дереву: других слов, называющих договор, после «договор» нет.
+UNVERSIONED_CONTRACTS: Final = frozenset({"конвейера", "шага", "плана", "подключения"})
+#: Слова между именем и номером: «с 1.2», «поднялся до 1.3». Замер
+#: того же дня — других нет, и всё прочее (`витрины семьи`) — второе имя.
+CONNECTORS: Final = frozenset({"с", "до", "поднялся"})
+#: «договор … X.Y» в пределах ОДНОЙ ФРАЗЫ, в любом регистре. СТРОГОЕ ПРАВИЛО,
+#: А НЕ ЧИСЛО СЛОВ (210, взгляд на #1125): промежуток кончается на знаке конца
+#: фразы, а не на третьем слове, и «Договор» в начале предложения — то же слово.
+CONTRACT_MENTION: Final = re.compile(
+    r"\bдоговор\w*((?:\s+[^\s\d.!?;:]+)*?)\s+\d+\.\d+\b", re.IGNORECASE
+)
+#: Слово, собранное из частей: отвергаемые примеры ниже не стоят в исходнике
+#: буквами, и обход дерева не находит их в этом же файле.
+WORD: Final = "догово" + "р"
+#: Выпущенный журнал — история: его формулировки уже прочитаны и не правятся.
+HISTORY: Final = ("CHANGELOG.md", "changelog.d/released/")
+
+
+def contract_names_off_form(text: str) -> list[str]:
+    """Упоминания договора по версии без имени договора или со вторым именем.
+
+    ГРАНИЦА НАЗВАНА (195): форма «1.3 договора» — номер ДО слова — не видна;
+    в дереве её нет (замер 05.10.2026), а признать её означало бы читать
+    каждую дату `09.2026` перед словом. Договор без версии
+    (`UNVERSIONED_CONTRACTS`) проходит с любым хвостом: его число не его.
+    """
+    found = []
+    for match in CONTRACT_MENTION.finditer(text):
+        words = [word.lower() for word in match.group(1).split()]
+        named = bool(words) and words[0] in NAMED_CONTRACTS
+        if words and words[0] in UNVERSIONED_CONTRACTS:
+            continue
+        if not named or not set(words[1:]) <= CONNECTORS:
+            found.append(" ".join(match.group(0).split()))
+    return found
+
+
+@pytest.mark.parametrize(
+    ("text", "off"),
+    [
+        ("договор фактов 1.3", []),
+        ("по договору фактов с 1.2", []),
+        ("договор фактов поднялся до 1.3", []),
+        ("договор ответа до 2.1", []),
+        (f"{WORD} 1.3", [f"{WORD} 1.3"]),
+        (f"{WORD}у витрины семьи 1.3", [f"{WORD}у витрины семьи 1.3"]),
+        (f"{WORD} поднялся до 1.3", [f"{WORD} поднялся до 1.3"]),
+        (f"{WORD.capitalize()} 1.3", [f"{WORD.capitalize()} 1.3"]),
+        (f"{WORD} поднялся в тот день до 1.3", [f"{WORD} поднялся в тот день до 1.3"]),
+        (f"{WORD} фактов витрины семьи 1.3", [f"{WORD} фактов витрины семьи 1.3"]),
+        ("Договор фактов с 1.2", []),
+        ("договор конвейера и пояснения говорят о планке 3.14", []),
+        (f"{WORD} описан. Версия 1.3", []),
+    ],
+)
+def test_a_contract_is_named_before_its_version(text: str, off: list[str]) -> None:
+    """Обе половины формы: имя договора стоит — чисто; голое или чужое имя — названо."""
+    assert contract_names_off_form(text) == off
+
+
+def test_every_versioned_contract_mention_names_its_contract() -> None:
+    """В дереве договор по версии назван одной формой — «договор фактов X.Y» (взгляд на #1109).
+
+    Второй заход по одному месту (210): прошлое изменение свело к одной форме
+    ссылки на 1.2, и на 1.3 остались три другие. Строгое правило вместо
+    перечня: первое слово после «договор» — имя договора из `NAMED_CONTRACTS`.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.split("\0")
+    off = {}
+    for name in listed:
+        if not name or name.startswith(HISTORY) or not (ROOT / name).is_file():
+            continue
+        try:
+            text = (ROOT / name).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if found := contract_names_off_form(text):
+            off[name] = found
+    assert not off, f"договор по версии без имени: {off}"
