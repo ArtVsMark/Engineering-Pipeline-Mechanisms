@@ -1198,25 +1198,65 @@ def test_a_module_call_of_mypy_in_a_workflow_reaches_the_substitution(tmp_path: 
         ("{root}/packages/transport/ghrest.py", False, "из этого дерева"),
         ("/opt/py/lib/python3.14/site-packages/ghrest.py", False, "обычная установка"),
         ("{other}/packages/transport/ghrest.py", True, "НЕ из проверяемого дерева"),
+        # Вложенное рабочее дерево лежит ПОД корнем, но дерево у него своё
+        # (взгляд на #1132, `f35e912`).
+        ("{root}/.claude/worktrees/x/packages/transport/ghrest.py", True, "НЕ из проверяемого"),
     ],
-    ids=["не-найден", "своё-дерево", "установка", "чужое-дерево"],
+    ids=["не-найден", "своё-дерево", "установка", "чужое-дерево", "вложенное-дерево"],
 )
 def test_the_source_line_warns_only_on_another_tree(
     tmp_path: Path, origin: str, warns: bool, said: str
 ) -> None:
-    """Обе половины 216: чужое дерево — предупреждение с обоими путями; прочее — молча."""
+    """Обе половины 216: чужое дерево — предупреждение с обоими путями; прочее — молча.
+
+    Деревья настоящие: хозяина пути называет git, и вложенное дерево — своё
+    `git init` внутри корня.
+    """
     root, other = tmp_path / "wt", tmp_path / "main"
+    nested = root / ".claude" / "worktrees" / "x"
+    for tree in (root, other, nested):
+        tree.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "--quiet"], cwd=tree, check=True)
+        (tree / "packages" / "transport").mkdir(parents=True)
     line, warned = preflight.source_line(origin.format(root=root, other=other), root)
     assert warned is warns and said in line, line
     if warns:
-        assert str(other) in line and str(root.resolve()) in line, "назван не каждый путь"
+        assert str(root.resolve()) in line, "назван не каждый путь"
+        assert "mypy_path" in line, "не сказано, какие шаги правку видят"
 
 
-def test_the_origin_is_asked_of_the_steps_environment(tmp_path: Path) -> None:
-    """Источник спрашивается у среды шагов — тем же корнем, — а не выводится из корня (216)."""
-    (tmp_path / f"{preflight.TRANSPORT_MODULE}.py").write_text("", encoding="utf-8")
-    origin = preflight.code_origin(tmp_path)
-    assert Path(origin).resolve() == (tmp_path / f"{preflight.TRANSPORT_MODULE}.py").resolve()
+def test_the_owning_tree_is_named_by_git(tmp_path: Path) -> None:
+    """Хозяина пути называет git: вложенное дерево — своё, путь вне деревьев — ничей."""
+    clone, nested = tmp_path / "clone", tmp_path / "clone" / ".claude" / "worktrees" / "x"
+    for tree in (clone, nested):
+        tree.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "--quiet"], cwd=tree, check=True)
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    assert preflight.owning_tree(clone / "ghrest.py") == clone.resolve()
+    assert preflight.owning_tree(nested / "ghrest.py") == nested.resolve()
+    assert preflight.owning_tree(loose / "ghrest.py") is None
+    assert preflight.owning_tree(tmp_path / "нет" / "ghrest.py") is None
+
+
+def test_the_origin_is_asked_of_the_steps_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Источник спрашивается у среды шагов, а не выводится из корня (216).
+
+    Модуль лежит ВНЕ корня, и путь к нему знает только окружение шагов
+    (`environment`): прежняя редакция клала его в корень, и `python -c` находил
+    его текущим каталогом даже без переданной среды — тест зеленел бы и без
+    неё (взгляд на #1132, `255505f`).
+    """
+    root, elsewhere = tmp_path / "root", tmp_path / "elsewhere"
+    root.mkdir()
+    elsewhere.mkdir()
+    (elsewhere / f"{preflight.TRANSPORT_MODULE}.py").write_text("", encoding="utf-8")
+    plain = preflight.environment()
+    monkeypatch.setattr(preflight, "environment", lambda: {**plain, "PYTHONPATH": str(elsewhere)})
+    origin = preflight.code_origin(root)
+    assert Path(origin).resolve() == (elsewhere / f"{preflight.TRANSPORT_MODULE}.py").resolve()
 
 
 def test_the_source_is_the_first_line_of_the_report(

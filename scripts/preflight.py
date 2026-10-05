@@ -656,14 +656,32 @@ def source_line(origin: str, root: Path) -> tuple[str, bool]:
     where = Path(origin).resolve()
     if any(part in INSTALLED for part in where.parts):
         return f"код транспорта: обычная установка {where}", False
-    if where.is_relative_to(root.resolve()):
+    if owning_tree(where) == root.resolve():
         return f"код транспорта: из этого дерева, {where}", False
     return (
         f"⚠ код транспорта НЕ из проверяемого дерева: импортируется {where},"
-        f" а прогон идёт в {root.resolve()} — правка транспорта здесь в прогоне не"
-        " участвует (216)",
+        f" а прогон идёт в {root.resolve()} — правку транспорта здесь видят только"
+        " шаги, читающие исходники (типы через `mypy_path`, линтер), а шаги и набор,"
+        " импортирующие его, берут чужую (216)",
         True,
     )
+
+
+def owning_tree(path: Path) -> Path | None:
+    """Корень дерева git, которому принадлежит путь, — по ответу git, а не поиском.
+
+    НЕ «ЛЕЖИТ ПОД КОРНЕМ». Рабочее дерево бывает вложено в основной клон
+    (`.claude/worktrees/<имя>`), и путь из него лежит под корнем основного, хотя
+    дерево чужое (взгляд на #1132, `f35e912`). Хозяина называет сам git
+    (`rev-parse --show-toplevel` из каталога пути): поиск `.git` вверх по
+    родителям нашёл бы и чужое (гейт `tests/test_settings_anchor.py`). Путь вне
+    дерева git или каталог, которого нет, — ``None``.
+    """
+    try:
+        said = gitcall.output(["rev-parse", "--show-toplevel"], NotRun, cwd=str(path.parent))
+    except NotRun, OSError:
+        return None
+    return Path(said.strip()).resolve()
 
 
 def environment_gap(root: Path) -> list[str]:
