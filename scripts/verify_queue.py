@@ -70,6 +70,11 @@ REVIEW_FLOW: Final = "review.yml"
 RUN_PREFIX: Final = "verify "
 #: За сколько дней находка, на которую верификатор уже звался, не зовётся снова.
 RECALL_DAYS: Final = 7
+#: Сколько дат слияния вне окна спрашивается за заход. Заход идёт после каждой
+#: пересборки плана, и без потолка давний реестр тратил бы квоту площадки
+#: сотнями запросов (взгляд на #1121). Спрашиваются старшие номера первыми —
+#: они и вероятнее всего висят; остальные ждут следующего захода, и это названо.
+ASK_LIMIT: Final = 20
 
 
 class NotRun(RuntimeError):
@@ -124,7 +129,8 @@ def merged_dates(
     window: list[dict[str, Any]],
     live: set[int],
     ask: Callable[[int], str | None],
-) -> dict[int, str]:
+    limit: int = ASK_LIMIT,
+) -> tuple[dict[int, str], int]:
     """Дата слияния каждого названного изменения: из окна, а вне его — спросом.
 
     `window` — последние закрытые (`ghrest.merged_page`), `live` — номера
@@ -132,14 +138,26 @@ def merged_dates(
     слито). Номер из окна берёт свою дату; номер вне окна и не открытый
     спрашивается — окно упорядочено по созданию, и давнее, слитое вчера, в
     него не попадает. Открытое и закрытое без слияния в ответ не входят.
+
+    Спросов не больше `limit`, младшие номера первыми; второе в ответе —
+    сколько номеров осталось неспрошенными в этот заход.
     """
     seen = {int(one["number"]): one for one in window}
     said: dict[int, str] = {}
+    asked = 0
+    unasked = 0
     for number in sorted(numbers - live):
-        merged_at = seen[number].get("merged_at") if number in seen else ask(number)
+        if number in seen:
+            merged_at = seen[number].get("merged_at")
+        elif asked < limit:
+            asked += 1
+            merged_at = ask(number)
+        else:
+            unasked += 1
+            continue
         if merged_at:
             said[number] = str(merged_at)
-    return said
+    return said, unasked
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,10 +200,16 @@ def main(argv: list[str] | None = None) -> int:
         }
 
         def ask(number: int) -> str | None:
-            said = ghrest.request("GET", f"repos/{args.repo}/pulls/{number}", token) or {}
+            # Номера нет у площадки (удалён, перенесён) — не слито, а не сбой
+            # всего захода: одна такая запись иначе гасила бы вызовы на все
+            # остальные (взгляд на #1121).
+            try:
+                said = ghrest.request("GET", f"repos/{args.repo}/pulls/{number}", token) or {}
+            except ghrest.NotFound:
+                return None
             return said.get("merged_at") if isinstance(said, dict) else None
 
-        merged = merged_dates({entry.pr for entry in entries.values()}, window, live, ask)
+        merged, unasked = merged_dates({entry.pr for entry in entries.values()}, window, live, ask)
         trunk = str(
             (ghrest.request("GET", f"repos/{args.repo}", token) or {}).get("default_branch") or ""
         )
@@ -199,6 +223,10 @@ def main(argv: list[str] | None = None) -> int:
         f"висящих находок по слитому (старше {STALE_DAYS} дн., без проверки, не звались "
         f"{RECALL_DAYS} дн.): {len(queue)}; запусков за сутки осталось {room} из {DAILY_CAP}"
     )
+    if unasked:
+        print(
+            f"  дат слияния не спрошено: {unasked} (потолок {ASK_LIMIT}) — ждут следующего захода"
+        )
     for mark in queue[:room]:
         if args.dry_run:
             print(f"  {report.DRY} позвал бы верификатор на {mark}")
