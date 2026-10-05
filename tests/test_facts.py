@@ -680,12 +680,18 @@ UNVERSIONED_CONTRACTS: Final = frozenset({"конвейера", "шага", "п�
 #: Слова между именем и номером: «с 1.2», «поднялся до 1.3». Замер
 #: того же дня — других нет, и всё прочее (`витрины семьи`) — второе имя.
 CONNECTORS: Final = frozenset({"с", "до", "поднялся"})
-#: «договор … X.Y» в пределах ОДНОЙ ФРАЗЫ, в любом регистре. СТРОГОЕ ПРАВИЛО,
-#: А НЕ ЧИСЛО СЛОВ (210, взгляд на #1125): промежуток кончается на знаке конца
-#: фразы, а не на третьем слове, и «Договор» в начале предложения — то же слово.
-CONTRACT_MENTION: Final = re.compile(
-    r"\bдоговор\w*((?:\s+[^\s\d.!?;:]+)*?)\s+\d+\.\d+\b", re.IGNORECASE
-)
+#: Слово «договор» — СУЩЕСТВИТЕЛЬНОЕ во всех падежах, а не основа:
+#: «договорённость» и «договорились» — другие слова (взгляд на #1125).
+CONTRACT_WORD: Final = re.compile(r"\bдоговор(?:а|у|ом|е|ы|ов|ам|ами|ах)?\b", re.IGNORECASE)
+#: Конец фразы: знак конца, пустая строка или точка, за которой не цифра и
+#: не буква (точка внутри `1.3` и `v1.3.0` фразу не рвёт).
+CLAUSE_END: Final = re.compile(r"[!?;:]|\n\s*\n|\.(?![\w`])")
+#: Номер версии в любой записи: голый, в кавычках, с `v`, с третьей цифрой.
+VERSION: Final = re.compile(r"(?<![\w.])v?(\d+\.\d+(?:\.\d+)?)(?![\w.])")
+#: Дата — не версия: `02.10.2026` и `09.2026` номером договора не бывают.
+DATE: Final = re.compile(r"\d{1,2}\.\d{2}\.\d{4}|\d{2}\.\d{4}")
+#: Слова между «договор» и номером — буквами; кавычки и запятые не слова.
+CLAUSE_WORD: Final = re.compile(r"[^\W\d_][\w-]*")
 #: Слово, собранное из частей: отвергаемые примеры ниже не стоят в исходнике
 #: буквами, и обход дерева не находит их в этом же файле.
 WORD: Final = "догово" + "р"
@@ -696,19 +702,31 @@ HISTORY: Final = ("CHANGELOG.md", "changelog.d/released/")
 def contract_names_off_form(text: str) -> list[str]:
     """Упоминания договора по версии без имени договора или со вторым именем.
 
-    ГРАНИЦА НАЗВАНА (195): форма «1.3 договора» — номер ДО слова — не видна;
-    в дереве её нет (замер 05.10.2026), а признать её означало бы читать
-    каждую дату `09.2026` перед словом. Договор без версии
+    СТРОГОЕ ПРАВИЛО, А НЕ ПЕРЕЧЕНЬ ФОРМ (210, четвёртый заход на #1109,
+    #1125): номер ищется во всей фразе после этого слова в ЛЮБОЙ записи —
+    `1.3`, `v1.3`, с запятой после слова, через перенос строки. Нашёлся —
+    первое слово за ним обязано быть именем договора, а слова до
+    номера — связками. Дата номером не считается.
+
+    ГРАНИЦА НАЗВАНА (195): форма «1.3 договора» — номер ДО слова — не видна:
+    фраза читается вперёд от слова, а назад читать значило бы приписывать
+    договору всякое число перед ним. Договор без версии
     (`UNVERSIONED_CONTRACTS`) проходит с любым хвостом: его число не его.
     """
     found = []
-    for match in CONTRACT_MENTION.finditer(text):
-        words = [word.lower() for word in match.group(1).split()]
-        named = bool(words) and words[0] in NAMED_CONTRACTS
+    for word in CONTRACT_WORD.finditer(text):
+        end = CLAUSE_END.search(text, word.end())
+        clause = text[word.end() : end.start() if end else len(text)]
+        version = next(
+            (one for one in VERSION.finditer(clause) if not DATE.fullmatch(one.group(1))), None
+        )
+        if version is None:
+            continue
+        words = [one.lower() for one in CLAUSE_WORD.findall(clause[: version.start()])]
         if words and words[0] in UNVERSIONED_CONTRACTS:
             continue
-        if not named or not set(words[1:]) <= CONNECTORS:
-            found.append(" ".join(match.group(0).split()))
+        if not words or words[0] not in NAMED_CONTRACTS or not set(words[1:]) <= CONNECTORS:
+            found.append(" ".join((word.group(0) + clause[: version.end()]).split()))
     return found
 
 
@@ -728,6 +746,15 @@ def contract_names_off_form(text: str) -> list[str]:
         ("Договор фактов с 1.2", []),
         ("договор конвейера и пояснения говорят о планке 3.14", []),
         (f"{WORD} описан. Версия 1.3", []),
+        (f"номер {WORD}а `1.3`", [f"{WORD}а `1.3"]),
+        (f"{WORD} v1.3", [f"{WORD} v1.3"]),
+        (f"{WORD}, по которому 1.3", [f"{WORD}, по которому 1.3"]),
+        (f"{WORD}\nподнялся до 1.3", [f"{WORD} поднялся до 1.3"]),
+        ("договор фактов `1.3`", []),
+        (f"{WORD}ились 02.10.2026", []),
+        (f"{WORD}ённость о 1.3", []),
+        (f"{WORD} от 02.10.2026", []),
+        (f"{WORD} описан.\n\nВерсия 1.3", []),
     ],
 )
 def test_a_contract_is_named_before_its_version(text: str, off: list[str]) -> None:
@@ -743,7 +770,9 @@ def test_every_versioned_contract_mention_names_its_contract() -> None:
     перечня: первое слово после «договор» — имя договора из `NAMED_CONTRACTS`.
     """
     listed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        # Отслеживаемое, и только оно: черновик в рабочей копии не должен
+        # красить гейт у окна, когда у площадки тот же набор зелёный (#1125).
+        ["git", "ls-files", "-z", "--cached"],
         cwd=ROOT,
         capture_output=True,
         text=True,
