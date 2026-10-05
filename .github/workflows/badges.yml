@@ -190,13 +190,18 @@ jobs:
             echo "::warning::Факты не сверены со схемой витрины: проверяльщик не установился — публикация идёт без сверки."
             exit 0
           fi
+          # ОСТАНАВЛИВАЕТ ВЕРДИКТ, А НЕ КОД (взгляд на #1116). Код 1 даёт и
+          # трассировка, упавшая до `main` (на импорте), — это сбой, а не
+          # отказ. Отказ скрипт называет словом в файле, и только им.
           rc=0
-          python scripts/check_facts_schema.py "${RUNNER_TEMP}/badges/.github/badges/facts.json" || rc=$?
-          case "$rc" in
-            0) ;;
-            2) echo "::warning::Факты не сверены со схемой витрины: сверка не отработала — публикация идёт без сверки." ;;
-            *) exit "$rc" ;;
-          esac
+          verdict="${RUNNER_TEMP}/facts-verdict.txt"
+          python scripts/check_facts_schema.py "${RUNNER_TEMP}/badges/.github/badges/facts.json" --verdict "$verdict" || rc=$?
+          if [ "$rc" -ne 0 ] && [ "$(cat "$verdict" 2>/dev/null)" = "rejected" ]; then
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::Факты не сверены со схемой витрины: сверка не отработала (код $rc; код 1 без вердикта — сбой до main или вердикт отказа не записан) — публикация идёт без сверки."
+          fi
       # ЕДИНЫЙ ЗНАЧОК «Python │ ОС │ coverage │ release / PyPI │ version» (#1019,
       # решение владельца 01.10.2026). Рисует его действие каталога с тега, а не
       # копия здесь (022). Стоит ПОСЛЕ сборки фактов: покрытие и версию он берёт

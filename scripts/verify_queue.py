@@ -23,6 +23,24 @@
 после слияния, заход сочтёт старой сразу. Это сдвиг к ранней проверке, а не к
 пропуску, и предел суток держит его цену.
 
+ДАТА СЛИЯНИЯ СПРАШИВАЕТСЯ, А НЕ ВЫВОДИТСЯ (взгляд на #1115). Окно закрытых
+площадка упорядочивает по созданию, а не по закрытию: давнее изменение,
+слитое вчера, в окно не попадает. Поэтому номер вне окна и не открытый
+спрашивается у площадки отдельно, и закрытое без слияния слитым не
+считается. Спрашиваются только номера непроверенных находок, и только когда
+в сутках осталось место.
+
+ПОТОЛОК ДЕРЖИТСЯ И БЕЗ ИМЕНИ ЗАПУСКА (взгляд на #1115). В потолок идёт
+КАЖДЫЙ ручной запуск `review.yml` за сутки, с именем `verify <отпечаток>` или
+без: копия `review.yml` у потребителя может быть старше `run-name`, и тогда
+запуски звались бы «review» и не считались. Лишний счёт ручных нажатий —
+безопасная сторона. Имя запуска нужно другому: находка, на которую
+верификатор уже звался за `RECALL_DAYS`, повторно не зовётся — без отметки
+`checked` (агент упал, токена нет) она иначе занимала бы место каждые сутки.
+
+ВЕТКА ВЫЗОВА — ВЕТКА ПО УМОЛЧАНИЮ РЕПОЗИТОРИЯ, у площадки, а не буквой: у
+потребителя общая ветка может зваться иначе.
+
 Исходы (правило 039): ``0`` позвано или звать некого — что именно, названо ·
 ``2`` заход не отработал · ``3`` токен не задан — спросить не у кого.
 """
@@ -30,6 +48,7 @@
 import argparse
 import os
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
@@ -49,23 +68,29 @@ DAILY_CAP: Final = 3
 #: Прогон верификатора и приставка имени его запуска (`run-name`).
 REVIEW_FLOW: Final = "review.yml"
 RUN_PREFIX: Final = "verify "
+#: За сколько дней находка, на которую верификатор уже звался, не зовётся снова.
+RECALL_DAYS: Final = 7
+#: Сколько дат слияния вне окна спрашивается за заход. Заход идёт после каждой
+#: пересборки плана, и без потолка давний реестр тратил бы квоту площадки
+#: сотнями запросов (взгляд на #1121). Спрашиваются старшие номера первыми —
+#: они и вероятнее всего висят; остальные ждут следующего захода, и это названо.
+ASK_LIMIT: Final = 20
 
 
 class NotRun(RuntimeError):
     """Заход не отработал: третий исход, а не «звать некого»."""
 
 
-#: Дата слияния изменения, которое старше окна слитых: заведомо давнее срока.
-LONG_AGO: Final = ""
-
-
 def candidates(
-    entries: dict[str, findings.Entry], merged: dict[int, str], now: datetime
+    entries: dict[str, findings.Entry],
+    merged: dict[int, str],
+    now: datetime,
+    called: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Отпечатки к проверке: по слитому, без отметки верификатора, старше срока; старые — первыми.
 
-    `merged` — дата слияния по номеру; `LONG_AGO` — слито раньше окна
-    чтения, и такая находка идёт первой.
+    `merged` — дата слияния по номеру; `called` — отпечатки, на которые
+    верификатор уже звался в окне `RECALL_DAYS`.
     """
     edge = (now - timedelta(days=STALE_DAYS)).isoformat()
     ready = [
@@ -73,6 +98,7 @@ def candidates(
         for mark, entry in entries.items()
         if changerefs.MARK_RE.fullmatch(mark)
         and not entry.checked
+        and mark not in called
         and entry.pr in merged
         and merged[entry.pr] <= edge
     ]
@@ -80,35 +106,58 @@ def candidates(
 
 
 def launched_today(runs: list[dict[str, Any]], now: datetime) -> int:
-    """Сколько запусков верификатора уже ушло за текущие сутки UTC — по имени прогона."""
+    """Сколько ручных запусков `review.yml` ушло за текущие сутки UTC — каждый, а не по имени."""
     day = now.astimezone(UTC).date().isoformat()
-    return sum(
-        1
+    return sum(1 for run in runs if str(run.get("created_at") or "").startswith(day))
+
+
+def recently_called(runs: list[dict[str, Any]]) -> set[str]:
+    """Отпечатки, на которые верификатор уже звался в окне чтения, — по имени запуска."""
+    return {
+        title.removeprefix(RUN_PREFIX)
         for run in runs
-        if str(run.get("display_title") or "").startswith(RUN_PREFIX)
-        and str(run.get("created_at") or "").startswith(day)
-    )
+        if (title := str(run.get("display_title") or "")).startswith(RUN_PREFIX)
+    }
 
 
 #: Сколько последних закрытых изменений читается одним запросом.
 WINDOW: Final = 100
 
 
-def merged_dates(numbers: set[int], window: list[dict[str, Any]], live: set[int]) -> dict[int, str]:
-    """Дата слияния каждого названного изменения — ДВУМЯ чтениями на весь реестр (#1065).
+def merged_dates(
+    numbers: set[int],
+    window: list[dict[str, Any]],
+    live: set[int],
+    ask: Callable[[int], str | None],
+    limit: int = ASK_LIMIT,
+) -> tuple[dict[int, str], int]:
+    """Дата слияния каждого названного изменения: из окна, а вне его — спросом.
 
     `window` — последние закрытые (`ghrest.merged_page`), `live` — номера
-    открытых. Номер из окна берёт свою дату; номер старше окна и не открытый
-    слит давно (`LONG_AGO`). Закрытое без слияния, неоткрытое и открытое в
-    ответ не входят: проверять по нему нечего.
+    открытых, `ask` — дата слияния одного номера у площадки (`None` — не
+    слито). Номер из окна берёт свою дату; номер вне окна и не открытый
+    спрашивается — окно упорядочено по созданию, и давнее, слитое вчера, в
+    него не попадает. Открытое и закрытое без слияния в ответ не входят.
+
+    Спросов не больше `limit`, младшие номера первыми; второе в ответе —
+    сколько номеров осталось неспрошенными в этот заход.
     """
-    found = {int(one["number"]): str(one["merged_at"]) for one in window if one.get("merged_at")}
-    oldest = min((int(one["number"]) for one in window), default=0)
-    return {
-        number: found.get(number, LONG_AGO)
-        for number in numbers
-        if number in found or (number < oldest and number not in live)
-    }
+    seen = {int(one["number"]): one for one in window}
+    said: dict[int, str] = {}
+    asked = 0
+    unasked = 0
+    for number in sorted(numbers - live):
+        if number in seen:
+            merged_at = seen[number].get("merged_at")
+        elif asked < limit:
+            asked += 1
+            merged_at = ask(number)
+        else:
+            unasked += 1
+            continue
+        if merged_at:
+            said[number] = str(merged_at)
+    return said, unasked
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -125,31 +174,59 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not args.repo:
             raise NotRun("репозиторий не назван")
+        since = (now - timedelta(days=RECALL_DAYS)).date().isoformat()
+        runs = list(
+            ghrest.paginate(
+                f"repos/{args.repo}/actions/workflows/{REVIEW_FLOW}/runs"
+                f"?event=workflow_dispatch&created=>={since}",
+                token,
+                key="workflow_runs",
+            )
+        )
+        room = max(DAILY_CAP - launched_today(runs, now), 0)
+        if not room:
+            print(
+                f"запусков за сутки не осталось: потолок {DAILY_CAP} выбран — звать некого сегодня"
+            )
+            return EXIT_OK
         _, body = findings.live_issue(args.repo, token)
-        entries = findings.parse_entries(body)
+        entries = {
+            mark: entry for mark, entry in findings.parse_entries(body).items() if not entry.checked
+        }
         _, window = ghrest.merged_page(args.repo, token, WINDOW)
         live = {
             int(one["number"])
             for one in ghrest.paginate(f"repos/{args.repo}/pulls?state=open", token)
         }
-        merged = merged_dates({entry.pr for entry in entries.values()}, window, live)
-        runs = list(
-            ghrest.paginate(
-                f"repos/{args.repo}/actions/workflows/{REVIEW_FLOW}/runs"
-                f"?event=workflow_dispatch&created=>={now.date().isoformat()}",
-                token,
-                key="workflow_runs",
-            )
+
+        def ask(number: int) -> str | None:
+            # Номера нет у площадки (удалён, перенесён) — не слито, а не сбой
+            # всего захода: одна такая запись иначе гасила бы вызовы на все
+            # остальные (взгляд на #1121).
+            try:
+                said = ghrest.request("GET", f"repos/{args.repo}/pulls/{number}", token) or {}
+            except ghrest.NotFound:
+                return None
+            return said.get("merged_at") if isinstance(said, dict) else None
+
+        merged, unasked = merged_dates({entry.pr for entry in entries.values()}, window, live, ask)
+        trunk = str(
+            (ghrest.request("GET", f"repos/{args.repo}", token) or {}).get("default_branch") or ""
         )
+        if not trunk:
+            raise NotRun("ветка по умолчанию репозитория не названа площадкой")
     except (NotRun, ghrest.TransportError) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    queue = candidates(entries, merged, now)
-    room = max(DAILY_CAP - launched_today(runs, now), 0)
+    queue = candidates(entries, merged, now, frozenset(recently_called(runs)))
     print(
-        f"висящих находок по слитому (старше {STALE_DAYS} дн., без проверки): {len(queue)}; "
-        f"запусков за сутки осталось {room} из {DAILY_CAP}"
+        f"висящих находок по слитому (старше {STALE_DAYS} дн., без проверки, не звались "
+        f"{RECALL_DAYS} дн.): {len(queue)}; запусков за сутки осталось {room} из {DAILY_CAP}"
     )
+    if unasked:
+        print(
+            f"  дат слияния не спрошено: {unasked} (потолок {ASK_LIMIT}) — ждут следующего захода"
+        )
     for mark in queue[:room]:
         if args.dry_run:
             print(f"  {report.DRY} позвал бы верификатор на {mark}")
@@ -159,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
                 "POST",
                 f"repos/{args.repo}/actions/workflows/{REVIEW_FLOW}/dispatches",
                 token,
-                {"ref": "main", "inputs": {"mark": mark}},
+                {"ref": trunk, "inputs": {"mark": mark}},
             )
         except ghrest.TransportError as exc:
             print(f"заход не отработал: верификатор на {mark} не позван: {exc}", file=sys.stderr)
