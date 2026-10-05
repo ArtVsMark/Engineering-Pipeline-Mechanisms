@@ -1789,6 +1789,26 @@ def test_the_local_part_without_a_base_is_the_third_outcome(
     assert result.code == BROKEN, result.text
 
 
+def test_the_local_part_judges_the_coming_description_only_on_its_branch(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Будущее описание судится там, где его допишет `agent_pr`, — и только там (взгляд на #1142).
+
+    Строка задержки `Ждёт:` едет в описание, но не в тело уплотнения: слово
+    закрытия в ней видно лишь по пути будущего описания. На ветке с приставкой
+    `agent_pr` оно краснит, на ветке без неё — нет: описание человека
+    `agent_pr` не трогает, и строка туда не доедет.
+    """
+    check = load_script("check_pr_meta.py")
+    message = "тема\n\nRefs #1\nЖдёт: решения владельца, fixes #5\n"
+    tree = judged_branch(tmp_path / "t", message)
+    result = run_script("check_pr_meta.py", "--local", "origin/main", cwd=tree)
+    assert result.code == REJECTED and check.STRAY_CLOSING in result.text, result.text
+    subprocess.run(["git", "branch", "-q", "-m", "other/x"], cwd=tree, check=True)
+    result = run_script("check_pr_meta.py", "--local", "origin/main", cwd=tree)
+    assert result.code == CLEAN, result.text
+
+
 def test_the_local_part_is_held_piece_by_piece(tmp_path: Path) -> None:
     """Части `--local` названы прямо: выборка коммитов, суд текста и исход (#1135).
 
