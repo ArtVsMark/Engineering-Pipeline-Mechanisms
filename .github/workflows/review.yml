@@ -793,8 +793,14 @@ jobs:
     # слито в окно сломанных ворот. Ночная очередь берёт три за заход, и
     # слитое без взгляда ждало сутками. Очередь та же — из реестра, тот же
     # предел за заход; пустая очередь стоит один короткий джоб.
+    #
+    # ВЫЗОВ ВЕРИФИКАТОРА ОЧЕРЕДИ НЕ ЗОВЁТ (взгляд на #1115). Кнопка с отпечатком
+    # (`inputs.mark`) — это проверка одной находки, а не обход очереди: иначе
+    # каждый вызов по плану (`verify_queue.py`) тащил бы за собой поздний взгляд
+    # по всей очереди, и потолок суток его бы не считал.
     if: >-
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      github.event_name == 'schedule'
+      || (github.event_name == 'workflow_dispatch' && inputs.mark == '')
       || github.event_name == 'workflow_run'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
