@@ -1186,3 +1186,49 @@ def test_a_module_call_of_mypy_in_a_workflow_reaches_the_substitution(tmp_path: 
     found = [one for one in preflight.steps(ci) if one.name == "типы"]
     assert found, "шаг `python -m mypy` отброшен отбором шагов"
     assert found[0].installs == "python -m pip install mypy"
+
+
+# --- чей код проверяется (216) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("origin", "warns", "said"),
+    [
+        ("", False, "не найден"),
+        ("{root}/packages/transport/ghrest.py", False, "из этого дерева"),
+        ("/opt/py/lib/python3.14/site-packages/ghrest.py", False, "обычная установка"),
+        ("{other}/packages/transport/ghrest.py", True, "НЕ из проверяемого дерева"),
+    ],
+    ids=["не-найден", "своё-дерево", "установка", "чужое-дерево"],
+)
+def test_the_source_line_warns_only_on_another_tree(
+    tmp_path: Path, origin: str, warns: bool, said: str
+) -> None:
+    """Обе половины 216: чужое дерево — предупреждение с обоими путями; прочее — молча."""
+    root, other = tmp_path / "wt", tmp_path / "main"
+    line, warned = preflight.source_line(origin.format(root=root, other=other), root)
+    assert warned is warns and said in line, line
+    if warns:
+        assert str(other) in line and str(root.resolve()) in line, "назван не каждый путь"
+
+
+def test_the_origin_is_asked_of_the_steps_environment(tmp_path: Path) -> None:
+    """Источник спрашивается у среды шагов — тем же корнем, — а не выводится из корня (216)."""
+    (tmp_path / f"{preflight.TRANSPORT_MODULE}.py").write_text("", encoding="utf-8")
+    origin = preflight.code_origin(tmp_path)
+    assert Path(origin).resolve() == (tmp_path / f"{preflight.TRANSPORT_MODULE}.py").resolve()
+
+
+def test_the_source_is_the_first_line_of_the_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Строка об источнике идёт первой: остальное имеет смысл только после неё (216)."""
+    monkeypatch.setattr(preflight, "code_origin", lambda root: "/elsewhere/ghrest.py")
+    monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
+    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
+    monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
+    monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    preflight.main([])
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first.startswith("⚠ код транспорта"), first
