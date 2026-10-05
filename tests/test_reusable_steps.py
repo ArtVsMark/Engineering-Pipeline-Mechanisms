@@ -343,18 +343,33 @@ def strip_step(said: str) -> dict[str, Any]:
     raise AssertionError("шага со стиранием нет")
 
 
+PROVIDER: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+PROBE: Final = f"{PROVIDER}/.github/workflows/handover-probe.yml@refs/heads/main"
+NEIGHBOUR: Final = "сосед/его-проект"
+NEIGHBOUR_CI: Final = f"{NEIGHBOUR}/.github/workflows/ci.yml@refs/heads/main"
+
+
 @pytest.mark.parametrize(
-    ("strip", "caller", "code", "left"),
+    ("strip", "caller", "frm", "flow", "code", "left"),
     [
-        ("true", "ArtVsMark/Engineering-Pipeline-Mechanisms", 0, False),
-        ("true", "artvsmark/engineering-pipeline-mechanisms", 0, False),
-        ("true", "сосед/его-проект", 1, True),
-        ("false", "сосед/его-проект", 0, True),
+        ("true", PROVIDER, PROVIDER, PROBE, 0, False),
+        ("true", PROVIDER.lower(), PROVIDER, PROBE, 0, False),
+        ("true", NEIGHBOUR, PROVIDER, NEIGHBOUR_CI, 1, True),
+        ("true", NEIGHBOUR, NEIGHBOUR, NEIGHBOUR_CI, 1, True),
+        (
+            "true",
+            PROVIDER,
+            PROVIDER,
+            f"{PROVIDER}/.github/workflows/ci.yml@refs/heads/main",
+            1,
+            True,
+        ),
+        ("false", NEIGHBOUR, PROVIDER, NEIGHBOUR_CI, 0, True),
     ],
-    ids=["свой", "свой-иным-регистром", "чужой-отказ", "выключен"],
+    ids=["проба", "проба-иным-регистром", "чужой", "копия-у-соседа", "не-проба", "выключен"],
 )
 def test_the_strip_runs_only_in_the_providers_own_repository(
-    tmp_path: Path, strip: str, caller: str, code: int, left: bool
+    tmp_path: Path, strip: str, caller: str, frm: str, flow: str, code: int, left: bool
 ) -> None:
     """Стирание по именам папок идёт только у поставщика; у соседа — отказ (взгляд на #1113).
 
@@ -374,8 +389,10 @@ def test_the_strip_runs_only_in_the_providers_own_repository(
     env = {
         **os.environ,
         "STRIP_OURS": strip,
-        "FROM": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+        # «копия-у-соседа»: площадка называет репозиторием шага самого соседа.
+        "FROM": frm,
         "GITHUB_REPOSITORY": caller,
+        "CALLER": flow,
         "RUNNER_TEMP": str(tmp_path / "runner"),
         "GITHUB_ENV": str(tmp_path / "github-env"),
     }
@@ -392,3 +409,4 @@ def test_the_strip_runs_only_in_the_providers_own_repository(
     assert done.returncode == code, done.stderr or done.stdout
     assert (tmp_path / "scripts").exists() is left
     assert step["env"]["FROM"] == "${{ job.workflow_repository }}"
+    assert step["env"]["CALLER"] == "${{ github.workflow_ref }}"
