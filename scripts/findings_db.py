@@ -42,6 +42,14 @@
 держит правило N каталога», а родилось ли N здесь или стояло до рода, архив
 не хранит — это знает только история `.rules/proposals.json`, и прозой.
 
+В ПРЕДСТАВЛЕНИИ — КАЖДАЯ НАХОДКА С РОДОМ, И ТОЛЬКО ОНИ (взгляд на #1154,
+`f86b56c`). Находка без рода в него не входит: правила у неё нет по
+определению. Находка, чей род в разделе родов архива не записан (встреча
+строкой «Род:», а род ещё не заведён), остаётся с пустыми `verdict` и
+`rule`, а не выпадает молча. Пустой `verdict` значит одно из двух — род не
+записан в архив или записан, но ответа каталогу у него нет; различает их
+столбец `kind_known` (взгляд на #1157).
+
 Исходы (правило 039): ``0`` база собрана · ``2`` не собрана — архив не
 прочитан, форма чужая или проект повторён; причина названа.
 """
@@ -129,8 +137,10 @@ CREATE TABLE kind_spawned (
     PRIMARY KEY (repo, kind, mechanism)
 );
 CREATE VIEW finding_rules AS
-    SELECT f.repo, f.mark, f.pr, f.role, f.weight, f.rod, k.verdict, k.rule
-    FROM findings AS f JOIN kinds AS k ON k.repo = f.repo AND k.name = f.rod;
+    SELECT f.repo, f.mark, f.pr, f.role, f.weight, f.rod, k.verdict, k.rule,
+        k.name IS NOT NULL AS kind_known
+    FROM findings AS f LEFT JOIN kinds AS k ON k.repo = f.repo AND k.name = f.rod
+    WHERE f.rod IS NOT NULL;
 """
 
 
