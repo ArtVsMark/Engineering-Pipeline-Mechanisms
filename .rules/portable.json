@@ -581,6 +581,9 @@
         ".rules/finding-kinds.json"
       ]
     },
+    "scripts/findings_db.py": {
+      "answer": "as-is"
+    },
     "scripts/gitcall.py": {
       "answer": "as-is"
     },
