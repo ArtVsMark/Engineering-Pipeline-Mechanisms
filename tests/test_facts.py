@@ -9,7 +9,6 @@ import ast
 import json
 import re
 import subprocess
-import unicodedata
 from pathlib import Path
 from typing import Any, Final
 
@@ -684,43 +683,34 @@ DATE: Final = re.compile(r"\d{1,2}\.\d{2}\.\d{4}|\d{2}\.\d{4}")
 #: `**`, скобки, двоеточие одинаково не слова. Дальше — номер (цифры через
 #: точки; точка конца фразы к нему не пристаёт) либо слово.
 #:
-#: ГРАНИЦЫ НЕ ПРОПУСКАЮТСЯ, И ИХ НАБОР ВЫВОДИТСЯ, А НЕ ПЕРЕЧИСЛЯЕТСЯ (210, 206).
-#: Знак конца фразы рвёт пропуск ГДЕ БЫ НИ СТОЯЛ — и перед пробелом, и перед
-#: кавычкой, скобкой, `**`: номер за ним принадлежит следующей фразе, а не
-#: слову. Четыре захода взгляда подряд (#1128, #1130, #1133 дважды) находили
-#: знак, которого перечень не знал: `…`, затем `\r\r` и U+2028 как пустую
-#: строку. Поэтому оба набора берутся у чужого готового определения:
+#: КАЖДЫЙ ЗНАК ЗА СЛОВОМ ОТНЕСЁН ЯВНО, А НЕИЗВЕСТНЫЙ — КРАСНОЕ С ИМЕНЕМ (210,
+#: 206, 213). Пять заходов взгляда подряд (#1128, #1130, #1133 дважды, #1146)
+#: находили знак, которого правило не знало. Вывод по именам Юникода оказался
+#: тем же перечнем уровнем выше: `‽` и `।` — концы фразы, а в набор не
+#: попали, `¿` и `¡` попали, хотя начинают фразу. У Python нет свойства
+#: «конец предложения» (Sentence_Terminal), и любой вывод его угадывает.
+#: Поэтому круг рвётся не новой формой, а тем, что неизвестное больше не
+#: молчит:
 #:
-#: * КОНЕЦ ФРАЗЫ — знак пунктуации (категория `P*`), чьё имя в Юникоде
-#:   называет его концом: FULL STOP, EXCLAMATION MARK, QUESTION MARK, ELLIPSIS.
-#:   Категория отсекает цифры с точкой (`⒈`): имя у них то же, а знак — число;
-#: * ПЕРЕВОД СТРОКИ — то, что считает им сам Python (`str.splitlines`), и
-#:   пустая строка — два перевода, между которыми только пробелы. `\r\n` — ОДИН
-#:   перевод, и атомарная группа не даёт разобрать его как два.
-#:
-#: Поимённо остаются две границы по смыслу, которых имя не выводит: конец
-#: части `;` и ячейка таблицы `|`. Выборка — основная плоскость Юникода:
-#: знаки за её пределами в тексте дерева не встречаются (замер 05.10.2026).
-SENTENCE_ENDS: Final = "".join(
-    char
-    for char in map(chr, range(0x10000))
-    if unicodedata.category(char).startswith("P")
-    and any(
-        word in unicodedata.name(char, "")
-        for word in ("FULL STOP", "EXCLAMATION MARK", "QUESTION MARK", "ELLIPSIS")
-    )
-)
-BOUNDARY: Final = SENTENCE_ENDS + ";|"
+#: * ПРОПУСКАЮТСЯ пробельные знаки (`str.isspace`) и закрытый перечень
+#:   `SKIP_MARKS` — ровно знаки, которые стоят за словом в тексте дерева
+#:   (замер 05.10.2026: 18 разных знаков, из них границ — 3);
+#: * ГРАНИЦЫ — `BOUNDARY` (конец фразы `.` `!` `?` `…`, конец части `;`,
+#:   ячейка `|`) и пустая строка; переводы строки — по `str.splitlines`,
+#:   `\r\n` — один перевод (атомарная группа);
+#: * ЛЮБОЙ ДРУГОЙ знак за словом обрывает разбор, а проверка по дереву
+#:   называет его (`unclassified_marks`) и краснеет, пока его не отнесут к
+#:   одному из двух перечней. Так `‽` или `¿` в тексте — не ложное красное и
+#:   не обход, а вопрос, заданный вслух.
+SKIP_MARKS: Final = ',—():`#»*«"[]{}'
+BOUNDARY: Final = ".!?…;|"
 LINE_BREAKS: Final = "".join(
     char for char in map(chr, range(0x10000)) if len(f"a{char}b".splitlines()) == 2
 )
-#: ПРОБЕЛЬНЫЕ ЗНАКИ — НЕ ПЕРЕЧЕНЬ (210, взгляд на #1133): пропускается любой
-#: не-словесный знак вне `BOUNDARY`, а пустая строка запрещена одним
-#: заглядыванием вперёд.
 _BREAK: Final = rf"(?>\r\n|[{re.escape(LINE_BREAKS)}])"
 BLANK_LINE: Final = rf"{_BREAK}[^\S{re.escape(LINE_BREAKS)}]*{_BREAK}"
 NEXT_TOKEN: Final = re.compile(
-    rf"(?:(?!{BLANK_LINE})[^\w{re.escape(BOUNDARY)}]|_)*"
+    rf"(?:(?!{BLANK_LINE})[\s{re.escape(SKIP_MARKS)}]|_)*"
     r"(?P<token>[vV]?\d+(?:\.\d+)+|\w+)"
 )
 #: Слово, собранное из частей: отвергаемые примеры ниже не стоят в исходнике
@@ -739,10 +729,11 @@ def contract_names_off_form(text: str) -> list[str]:
     либо обход, либо ложное красное («договор фактов, пункт 2.1»). Предикат
     судил СМЫСЛ, а не запись. Поэтому машина держит одно: первое, что стоит
     за словом после знаков той же части текста, не номер версии.
-    Пропускается всё, что не буква и не цифра, кроме границ `BOUNDARY` и
-    пустой строки, — поэтому разметка, скобки и регистр `v` обхода не дают,
-    а номер следующей фразы, абзаца или ячейки ложно не краснеет (примеры —
-    в таблице ниже).
+    Пропускаются пробелы и знаки `SKIP_MARKS`; граница `BOUNDARY`, пустая
+    строка и неизвестный знак разбор обрывают, — поэтому разметка, скобки и
+    регистр `v` обхода не дают, а номер следующей фразы, абзаца или ячейки
+    ложно не краснеет (примеры — в таблице ниже). Неизвестный знак называет
+    `unclassified_marks`.
 
     ОСТАТОК ДЕРЖИТСЯ ЧТЕНИЕМ, и это названо (195, 057): за словом стоит
     другое слово — «договор поднялся до 1.3», «договору витрины семьи 1.3».
@@ -761,14 +752,13 @@ def contract_names_off_form(text: str) -> list[str]:
     return found
 
 
-def test_the_boundaries_are_derived_not_listed() -> None:
-    """Границы взяты у Юникода и у `splitlines`, и каждое сужение видно (206, 210).
-
-    Конец фразы — пунктуация, а не цифра с точкой (`⒈`); перевод строки — ровно
-    то, что считает им Python, и `\r\n` — один перевод, а не пустая строка.
-    """
-    assert {".", "!", "?", "…", "‼", "。"} <= set(SENTENCE_ENDS)
-    assert "⒈" not in SENTENCE_ENDS
+def test_an_unknown_mark_is_named_not_guessed() -> None:
+    """Знак вне обоих перечней обрывает разбор и назван — ни обхода, ни ложного красного (#1146)."""
+    for mark in ("‽", "¿", "¡", "।", "‼"):
+        text = f"{WORD}{mark} 1.3"
+        assert contract_names_off_form(text) == [], text
+        assert unclassified_marks(text) == [mark], text
+    assert unclassified_marks(f"{WORD} «фактов» (1.3), — `1.3` **1.3**") == []
     assert set(LINE_BREAKS) == {
         "\n",
         "\r",
@@ -782,6 +772,23 @@ def test_the_boundaries_are_derived_not_listed() -> None:
         "\u2029",
     }
     assert re.match(BLANK_LINE, "\r\n") is None and re.match(BLANK_LINE, "\r\n\r\n")
+
+
+def unclassified_marks(text: str) -> list[str]:
+    """Знаки за словом «договор», которых нет ни в `SKIP_MARKS`, ни в `BOUNDARY`.
+
+    Смотрится промежуток от слова до первой буквы или цифры: в нём каждый
+    не-пробельный знак обязан быть отнесён к одному из двух перечней.
+    """
+    unknown: list[str] = []
+    for word in CONTRACT_WORD.finditer(text):
+        index = word.end()
+        while index < len(text) and not (text[index].isalnum() or text[index] == "_"):
+            char = text[index]
+            if not char.isspace() and char not in SKIP_MARKS + BOUNDARY and char not in unknown:
+                unknown.append(char)
+            index += 1
+    return unknown
 
 
 @pytest.mark.parametrize(
@@ -878,7 +885,7 @@ def test_no_contract_word_in_the_tree_is_followed_by_a_bare_version() -> None:
         encoding="utf-8",
         check=True,
     ).stdout.split("\0")
-    off = {}
+    off, unsorted = {}, {}
     for name in listed:
         if not name or name.startswith(HISTORY) or not (ROOT / name).is_file():
             continue
@@ -888,4 +895,10 @@ def test_no_contract_word_in_the_tree_is_followed_by_a_bare_version() -> None:
             continue
         if found := contract_names_off_form(text):
             off[name] = found
+        if unknown := unclassified_marks(text):
+            unsorted[name] = unknown
     assert not off, f"договор по версии без имени: {off}"
+    assert not unsorted, (
+        f"за словом стоит знак, которого перечни не знают: {unsorted} — отнесите его "
+        "к SKIP_MARKS (пропускать) или к BOUNDARY (граница фразы)"
+    )
