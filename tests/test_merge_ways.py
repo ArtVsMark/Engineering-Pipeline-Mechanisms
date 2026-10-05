@@ -13,8 +13,9 @@
 способный предотвратить инцидент, а не только поймать его повторение.
 """
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -208,7 +209,7 @@ def test_extra_ways_refuse_the_unsaid_rather_than_read_it_as_off() -> None:
         module.extra_ways({"allow_squash_merge": True})
 
 
-# --- секрет получает один запрос (#993, взгляд на #1117) ----------------------
+# --- секрет получает один шаг (#993, взгляд на #1117) -------------------------
 
 
 def test_the_secret_step_writes_the_merge_fields_and_main_reads_them_without_it(
@@ -226,6 +227,11 @@ def test_the_secret_step_writes_the_merge_fields_and_main_reads_them_without_it(
     monkeypatch.setenv(module.OWNER_TOKEN_ENV, "токен-владельца")
     assert module.main(["--repo", "o/r", "--save-merge-ways", str(said)]) == module.EXIT_OK
     assert tokens == ["токен-владельца"]
+    # Что секрет не уходит дальше файлом, держит код, а не устройство (#1124):
+    # в файле только поля способов слияния, и токена в нём нет.
+    written = said.read_text(encoding="utf-8")
+    assert "токен-владельца" not in written
+    assert set(json.loads(written)["settings"]) <= set(module.MERGE_WAYS)
 
     # Секрет НЕ убирается из окружения: с файлом сверка обязана взять токен
     # прогона, даже если секрет рядом, — иначе откат этого выбора неотличим.
@@ -278,3 +284,82 @@ def test_in_the_flow_the_secret_reaches_one_step_only() -> None:
     # Сбой шага с секретом называется аннотацией, а не остаётся в журнале шага (#1117).
     assert "::warning::" in holders[0]["run"] and "continue-on-error" not in holders[0]
     assert any("--merge-ways-from" in str(step.get("run") or "") for step in steps)
+
+
+#: КАНАЛЫ, КОТОРЫМИ ШАГ ПЕРЕДАЁТ ЗНАЧЕНИЕ ДАЛЬШЕ, — ПЕРЕЧЕНЬ ПЛОЩАДКИ, А НЕ НАШ
+#: (взгляды на #1124 и #1126, 210): файлы окружения шагов и команды процесса в
+#: выводе. Файлы проверяются и в тексте `run`, и прогоном кода; команды — в
+#: тексте `run`, а у кода их ловит захват вывода целиком.
+PLATFORM_FILES: Final = ("GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH", "GITHUB_STATE")
+PLATFORM_COMMANDS: Final = ("::set-output", "::save-state", "::set-env", "::add-path")
+#: Отправители кода с секретом: обе ветки `--save-merge-ways`.
+SECRET_SENDERS: Final = ("check_required_context.py", "drift.py")
+
+
+@pytest.mark.parametrize("flow", ["required-context.yml", "step-drift.yml"])
+def test_the_secret_step_hands_nothing_to_the_next_steps(flow: str) -> None:
+    """Оболочка шага с секретом не пишет в каналы площадки (#1124).
+
+    Устройство разводит окружение шагов, но шаг с секретом исполняет наш код:
+    запись в `$GITHUB_ENV` отдала бы токен всем шагам ниже. Здесь судится
+    оболочка шага; код, который она зовёт, судит прогоном соседняя проверка.
+    """
+    steps = [
+        step
+        for job in yaml.safe_load(
+            (ROOT / ".github" / "workflows" / flow).read_text(encoding="utf-8")
+        )["jobs"].values()
+        for step in job.get("steps", [])
+    ]
+    holders = [step for step in steps if module.OWNER_TOKEN_ENV in (step.get("env") or {})]
+    assert holders, f"{flow}: шага с секретом нет — проверять нечего"
+    leaks = {
+        str(step.get("name")): [
+            name for name in (*PLATFORM_FILES, *PLATFORM_COMMANDS) if name in step["run"]
+        ]
+        for step in holders
+    }
+    assert not any(leaks.values()), f"{flow}: шаг с секретом пишет в каналы площадки: {leaks}"
+
+
+@pytest.mark.parametrize("sender", SECRET_SENDERS)
+@pytest.mark.parametrize("answers", [True, False], ids=["прочитано", "отказ"])
+def test_the_secret_code_leaves_the_token_nowhere(
+    sender: str,
+    answers: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Код `--save-merge-ways` не оставляет токен ни в одном канале — судится прогоном (#1126).
+
+    СТРОГОЕ ПРАВИЛО, А НЕ ПЕРЕЧЕНЬ ВЫЗОВОВ (210): третий заход взгляда по
+    одному абзацу. Не ищется, КАК код мог бы передать токен, — проверяется,
+    что после прогона его нет нигде, куда шаг пишет: в файлах площадки, в
+    выводе (там же и команды процесса) и в файле полей. Оба исхода — ответ
+    площадки и отказ, — потому что причина отказа тоже уходит в файл.
+    """
+    secret = "токен-владельца-секрет"
+    runner = module if sender == "check_required_context.py" else load_script(sender)
+    transport = getattr(runner, "check_required_context", runner).ghrest
+
+    def answer(*_: object, **__: object) -> dict[str, Any]:
+        if not answers:
+            # Как у `ghrest`: метод, путь, код и ответ площадки — токена в тексте
+            # отказа транспорт не кладёт, и подделка его туда не кладёт тоже.
+            raise transport.TransportError("GET repos/o/r → 403: Resource not accessible")
+        return {"allow_merge_commit": True, "allow_rebase_merge": False}
+
+    monkeypatch.setattr(transport, "request", answer)
+    monkeypatch.setenv(module.OWNER_TOKEN_ENV, secret)
+    channels = {name: tmp_path / name for name in PLATFORM_FILES}
+    for name, path in channels.items():
+        path.write_text("", encoding="utf-8")
+        monkeypatch.setenv(name, str(path))
+    said = tmp_path / "merge-ways.json"
+    runner.main(["--repo", "o/r", "--save-merge-ways", str(said)])
+    printed = capsys.readouterr()
+    left = {name: path.read_text(encoding="utf-8") for name, path in channels.items()}
+    assert not any(left.values()), f"{sender}: код записал в файлы площадки: {left}"
+    seen = {"вывод": printed.out + printed.err, "файл полей": said.read_text(encoding="utf-8")}
+    assert not [where for where, text in seen.items() if secret in text], (sender, seen)
