@@ -185,7 +185,7 @@ def test_asks_are_bounded_and_the_rest_is_named() -> None:
 
 
 def test_a_number_the_platform_no_longer_has_is_not_merged(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """404 на номер находки — «не слито», а не сбой всего захода (#1121)."""
     fake_platform(monkeypatch, [], {"0000001": entry(101), "0000002": entry(102)})
@@ -201,3 +201,41 @@ def test_a_number_the_platform_no_longer_has_is_not_merged(
 
     monkeypatch.setattr(module.ghrest, "request", request)
     assert module.main(["--repo", "o/r", "--dry-run"]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert "0000002" in said, "404 на соседний номер погасил остальных"
+    assert "0000001" not in said
+
+
+@pytest.mark.parametrize(
+    ("turn", "asked"),
+    [(0, [1, 2]), (1, [3, 4]), (2, [5, 1])],
+)
+def test_asks_go_round_the_ring_by_turn(turn: int, asked: list[int]) -> None:
+    """Круг сдвигается на потолок каждый заход: номер не занимает спросы навсегда (#1123)."""
+    seen: list[int] = []
+
+    def ask(number: int) -> str | None:
+        seen.append(number)
+        return None
+
+    module.merged_dates({1, 2, 3, 4, 5}, [], set(), ask, limit=2, turn=turn)
+    assert seen == asked
+
+
+def test_recently_called_findings_cost_no_asks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Звавшаяся за `RECALL_DAYS` находка отсеяна до спроса даты (#1123)."""
+    runs = [{"display_title": "verify 0000001", "created_at": "2026-09-30T00:00:00Z"}]
+    fake_platform(monkeypatch, runs, {"0000001": entry(101)})
+    asked: list[str] = []
+
+    def request(method: str, path: str, _token: str, body: Any = None) -> Any:
+        if "/pulls/" in path:
+            asked.append(path)
+            return {"merged_at": "2026-09-01T00:00:00Z"}
+        if method == "GET":
+            return {"default_branch": "trunk"}
+        return None
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.main(["--repo", "o/r", "--dry-run"]) == module.EXIT_OK
+    assert asked == [], "спросили дату у находки, которую звать не будут"
