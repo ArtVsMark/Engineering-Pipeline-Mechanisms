@@ -46,7 +46,7 @@ concurrency:
 jobs:
   test-next:
     name: test-next
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     # МАТРИЦА ИЗ ОДНОЙ ВЕРСИИ — РАДИ ИМЕНИ. Площадка приписывает значения
     # матрицы к имени джоба: запись называется `test-next (3.15)`, и по списку
