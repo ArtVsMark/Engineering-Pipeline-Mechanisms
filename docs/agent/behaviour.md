@@ -169,6 +169,16 @@
 границу задаёт пересечение файлов, а не число задач
 ([133](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/133-file-overlap-sets-the-boundary.md)).
 
+### Рабочее дерево проверяет не всё
+
+Окно ставит пакеты дерева в `.venv` редактируемой установкой из того клона,
+где собралось, а работает и в соседних рабочих деревьях (`git worktree`).
+Правки `scripts/`, `tests/` и документов рабочее дерево проверяет как есть;
+правку `packages/transport` — нет: шаги импортируют транспорт основного
+клона, и её проверяют там. Предполётная называет источник транспорта первой
+строкой и предупреждает, когда он из другого дерева
+([216](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/216-gate-names-the-tree-it-checks.md)).
+
 ---
 
 ## Контур 2. Движение изменения

@@ -1492,6 +1492,22 @@
       "analysed": "2026-10-04",
       "decided": "2026-10-01",
       "skill": ".claude/skills/retell-from-the-source"
+    },
+    "216": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "scripts/preflight.py::source_line и code_origin — первой строкой отчёта предполётная печатает, откуда ШАГИ импортируют транспорт: спрошено у их же среды (bash, PATH и корень шагов), а не выведено из корня; модуль чужого дерева — предупреждение с обоими путями, обычная установка (site-packages) — молча. Держит tests/test_window_preflight.py::test_the_source_line_warns_only_on_another_tree (обе половины), test_the_origin_is_asked_of_the_steps_environment и test_the_source_is_the_first_line_of_the_report. Документ окна — docs/agent/behaviour.md, раздел «Рабочее дерево проверяет не всё»: правка packages/transport проверяется в дереве, откуда стоит пакет",
+      "why": "Ответ дан 05.10.2026, в день приёма. Вопрос правила — знает ли прогон, откуда на самом деле импортирован проверяемый код, когда тот может прийти из другого дерева. Предмет у нас есть: хук старта окна (.claude/hooks/session-start.sh) ставит packages/transport в .venv РЕДАКТИРУЕМОЙ установкой из основного клона, а окно работает и в соседних рабочих деревьях (git worktree). Замер 05.10.2026: из рабочего дерева и скрипт, и набор импортировали ghrest из основного клона, а установка в .venv была версии 0.2.0 при 0.3.0 в дереве. В CI правило не работает по своей букве: выкачка одна. Механизм — предупреждение, а не отказ (051): тестовая правка против кода основного клона законна.",
+      "analysed": "2026-10-05",
+      "decided": "2026-10-05"
+    },
+    "217": {
+      "status": "active",
+      "mechanism": "gate",
+      "where": "tests/test_py_style.py — стиль кода выводится из requires-python через check_env.python_floor; tests/test_declared_versions.py — каждая версия языка, вписанная рукой, равна планке; tests/test_python_after_setup.py — ни одна работа прогона не зовёт python или pip раньше actions/setup-python; .claude/hooks/push_guard.sh — страж толчка зовётся интерпретатором планки, а без него закрывает толчок кодом 2 (tests/test_push_guard.py::test_without_the_floor_interpreter_a_push_is_refused); .claude/hooks/session-start.sh собирает .venv на планке (tests/test_session_start.py)",
+      "why": "Ответ дан 05.10.2026, в день приёма. Вопрос правила — доказан ли переезд на 3.14 стилем кода и тем, что всё исполняется интерпретатором планки, а не зелёным набором. Переезд вели ArtVsMark/Engineering-Pipeline-Mechanisms#1018 и ArtVsMark/Engineering-Pipeline-Mechanisms#1058 (правило выросло из того же переезда у каталога). Замер 05.10.2026: работ со шагами 41, python или pip зовут 37, раньше setup-python — ни одна; 69 скриптов с #!/usr/bin/env python3 напрямую не исполняются нигде — их зовёт интерпретатор. Гейт «python раньше установки» заведён этим же изменением: до него ноль держался состоянием, а не механизмом. Открыто по ArtVsMark/Engineering-Pipeline-Mechanisms#1058: замер скорости до и после и перезапуск окон после слияния (047) — практические границы правила, а не его доказательства.",
+      "analysed": "2026-10-05",
+      "decided": "2026-10-05"
     }
   }
 }

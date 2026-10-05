@@ -600,6 +600,72 @@ def push_branch(root: Path) -> int:
     return EXIT_OK
 
 
+#: Модуль, по которому узнаётся источник ПРОВЕРЯЕМОГО кода транспорта: шаги
+#: импортируют пакет `packages/transport` по имени его модуля, а не по пути.
+TRANSPORT_MODULE: Final = "ghrest"
+#: Каталоги обычной установки: код там — копия, а не дерево исходников, и о
+#: свежести копии правило 216 не говорит.
+INSTALLED: Final = ("site-packages", "dist-packages")
+
+
+def code_origin(root: Path) -> str:
+    """Откуда ШАГИ импортируют транспорт — спрошено у их же среды, а не выведено (216).
+
+    Спрашивает тот же `bash` с тем же `PATH` и корнем, что у шагов (`run`):
+    ответ про импорт знает только импортирующий, а корень прогона об установке
+    не знает ничего. Не ответила среда — пустая строка: молчание называет
+    `source_line`, а не прячет.
+    """
+    probe = (
+        f"import importlib.util as u; s = u.find_spec({TRANSPORT_MODULE!r});"
+        " print(s.origin if s and s.origin else '')"
+    )
+    query = f"python -c {shlex.quote(probe)}"
+    try:
+        done = subprocess.run(
+            query,
+            shell=True,
+            executable="/bin/bash",
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={**environment(), MECHANISMS: str(root.resolve())},
+        )
+    except OSError:
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def source_line(origin: str, root: Path) -> tuple[str, bool]:
+    """Строка отчёта об источнике проверяемого кода и признак предупреждения (216).
+
+    ПРЕДУПРЕЖДЕНИЕ, А НЕ ОТКАЗ (051). Окно ставит пакеты дерева в `.venv`
+    РЕДАКТИРУЕМОЙ установкой из того дерева, где оно собралось (хук старта), а
+    работает и в соседних рабочих деревьях. Тогда шаги рабочего дерева проверяют
+    транспорт ДРУГОГО дерева: правка в нём в прогоне не участвует. Замер
+    05.10.2026: из рабочего дерева и скрипты, и набор брали `ghrest` из
+    основного. Тестовая правка против кода основного дерева бывает законной,
+    поэтому прогон не останавливается — он называет оба пути.
+
+    Обычная установка (`site-packages`) — копия, и о ней молчат: предупреждение
+    горело бы на каждом прогоне без сигнала.
+    """
+    if not origin:
+        return f"код транспорта: `{TRANSPORT_MODULE}` среде шагов не найден", False
+    where = Path(origin).resolve()
+    if any(part in INSTALLED for part in where.parts):
+        return f"код транспорта: обычная установка {where}", False
+    if where.is_relative_to(root.resolve()):
+        return f"код транспорта: из этого дерева, {where}", False
+    return (
+        f"⚠ код транспорта НЕ из проверяемого дерева: импортируется {where},"
+        f" а прогон идёт в {root.resolve()} — правка транспорта здесь в прогоне не"
+        " участвует (216)",
+        True,
+    )
+
+
 def environment_gap(root: Path) -> list[str]:
     """Чем окружение окна расходится с тем, что ставит прогон, — или пусто.
 
@@ -673,6 +739,9 @@ def main(argv: list[str] | None = None) -> int:
     # краснела на шаге типов. Сверка окружения лежала рядом (`check_env.py`) и
     # не звалась ничем — то есть существовала, а работала по памяти (002).
     if not args.list:
+        # ПЕРВОЙ СТРОКОЙ — ЧЕЙ КОД ПРОВЕРЯЕТСЯ (216): остальные ответы прогона
+        # имеют смысл только после неё.
+        print(source_line(code_origin(args.root), args.root)[0])
         gap = environment_gap(args.root)
         if gap:
             print("окружение окна расходится с тем, что ставит прогон:")
