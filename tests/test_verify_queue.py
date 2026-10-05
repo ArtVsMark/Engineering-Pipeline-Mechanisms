@@ -6,6 +6,7 @@
 считается по именам прогонов.
 """
 
+import random
 from datetime import UTC, datetime
 from typing import Any
 
@@ -232,8 +233,9 @@ def test_every_number_outside_the_window_is_offered_to_the_sample() -> None:
     Отсюда и обещание «вечной немоты нет»: номер, который в набор не попадал бы,
     не спрашивался бы никогда при любой выборке. Набор между заходами меняется —
     растёт, теряет открытый номер, — и каждый заход отдаёт выборке ровно его
-    нынешний состав. Распределение внутри выборки — свойство `random.sample`, а
-    не этого кода, и здесь не проверяется (поздний взгляд на #1129).
+    нынешний состав. Распределение внутри выборки — свойство `random.sample` и
+    здесь не проверяется (поздний взгляд на #1129); что выборка по умолчанию —
+    именно она, а не срез, держит `test_the_default_pick_reaches_every_number`.
     """
     given: list[list[int]] = []
 
@@ -249,6 +251,33 @@ def test_every_number_outside_the_window_is_offered_to_the_sample() -> None:
         expected.append(sorted(numbers - live))
         module.merged_dates(numbers, [], live, lambda number: None, limit=4, pick=pick)
     assert given == expected, "выборке отдан не весь набор вне окна"
+
+
+def test_the_default_pick_reaches_every_number() -> None:
+    """Умолчание `pick` — выборка, а не срез: без подстановки спрошен каждый номер (#1123).
+
+    Тесты выше подставляют свой `pick`, а `main` берёт умолчание. Срез
+    `population[:k]` на его месте оставил бы набор зелёным и вернул вечную
+    немоту старших номеров (взгляд на #1134). Зерно закрепляется у ОБЩЕГО
+    генератора: умолчание связано с `random.sample` при определении функции,
+    и подмена атрибута модуля его не тронула бы. Сорок заходов по четыре
+    спроса на сорок номеров обязаны покрыть их все.
+    """
+    state = random.getstate()
+    random.seed(1134)
+    numbers = set(range(1, 41))
+    asked: set[int] = set()
+
+    def ask(number: int) -> str | None:
+        asked.add(number)
+        return None
+
+    try:
+        for _ in range(40):
+            module.merged_dates(numbers, [], set(), ask, limit=4)
+    finally:
+        random.setstate(state)
+    assert asked == numbers, f"не спрошены ни разу: {sorted(numbers - asked)}"
 
 
 def test_recently_called_findings_cost_no_asks(monkeypatch: pytest.MonkeyPatch) -> None:
