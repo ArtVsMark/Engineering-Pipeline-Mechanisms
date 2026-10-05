@@ -72,8 +72,11 @@ RUN_PREFIX: Final = "verify "
 RECALL_DAYS: Final = 7
 #: Сколько дат слияния вне окна спрашивается за заход. Заход идёт после каждой
 #: пересборки плана, и без потолка давний реестр тратил бы квоту площадки
-#: сотнями запросов (взгляд на #1121). Спрашиваются старшие номера первыми —
-#: они и вероятнее всего висят; остальные ждут следующего захода, и это названо.
+#: сотнями запросов (взгляд на #1121). Спросы идут ПО КРУГУ: начало сдвигается
+#: на `ASK_LIMIT` каждый час (`turn`), и без памяти о спрошенном каждый номер
+#: спрашивается не реже раза в ⌈номеров / ASK_LIMIT⌉ часов. Старт всегда с
+#: младших отдавал бы весь потолок одним и тем же номерам — закрытым без
+#: слияния или ушедшим в 404 — навсегда (взгляд на #1123).
 ASK_LIMIT: Final = 20
 
 
@@ -130,6 +133,7 @@ def merged_dates(
     live: set[int],
     ask: Callable[[int], str | None],
     limit: int = ASK_LIMIT,
+    turn: int = 0,
 ) -> tuple[dict[int, str], int]:
     """Дата слияния каждого названного изменения: из окна, а вне его — спросом.
 
@@ -139,25 +143,25 @@ def merged_dates(
     спрашивается — окно упорядочено по созданию, и давнее, слитое вчера, в
     него не попадает. Открытое и закрытое без слияния в ответ не входят.
 
-    Спросов не больше `limit`, младшие номера первыми; второе в ответе —
+    Спросов не больше `limit`; номера вне окна идут по кругу, и `turn`
+    (номер захода — час) сдвигает начало круга на `limit`. Второе в ответе —
     сколько номеров осталось неспрошенными в этот заход.
     """
     seen = {int(one["number"]): one for one in window}
-    said: dict[int, str] = {}
-    asked = 0
-    unasked = 0
-    for number in sorted(numbers - live):
-        if number in seen:
-            merged_at = seen[number].get("merged_at")
-        elif asked < limit:
-            asked += 1
-            merged_at = ask(number)
-        else:
-            unasked += 1
-            continue
-        if merged_at:
+    said: dict[int, str] = {
+        number: str(seen[number]["merged_at"])
+        for number in numbers - live
+        if number in seen and seen[number].get("merged_at")
+    }
+    outside = sorted(number for number in numbers - live if number not in seen)
+    if not outside:
+        return said, 0
+    start = (turn * limit) % len(outside)
+    ring = outside[start:] + outside[:start]
+    for number in ring[:limit]:
+        if merged_at := ask(number):
             said[number] = str(merged_at)
-    return said, unasked
+    return said, max(len(outside) - limit, 0)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,8 +194,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             return EXIT_OK
         _, body = findings.live_issue(args.repo, token)
+        # Отсев ДО спроса дат: проверенные и уже звавшиеся за `RECALL_DAYS` звать
+        # не будут, и квота спросов на них не тратится (взгляд на #1123).
+        called = frozenset(recently_called(runs))
         entries = {
-            mark: entry for mark, entry in findings.parse_entries(body).items() if not entry.checked
+            mark: entry
+            for mark, entry in findings.parse_entries(body).items()
+            if not entry.checked and mark not in called
         }
         _, window = ghrest.merged_page(args.repo, token, WINDOW)
         live = {
@@ -209,7 +218,13 @@ def main(argv: list[str] | None = None) -> int:
                 return None
             return said.get("merged_at") if isinstance(said, dict) else None
 
-        merged, unasked = merged_dates({entry.pr for entry in entries.values()}, window, live, ask)
+        merged, unasked = merged_dates(
+            {entry.pr for entry in entries.values()},
+            window,
+            live,
+            ask,
+            turn=int(now.timestamp() // 3600),
+        )
         trunk = str(
             (ghrest.request("GET", f"repos/{args.repo}", token) or {}).get("default_branch") or ""
         )
@@ -218,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     except (NotRun, ghrest.TransportError) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    queue = candidates(entries, merged, now, frozenset(recently_called(runs)))
+    queue = candidates(entries, merged, now, called)
     print(
         f"висящих находок по слитому (старше {STALE_DAYS} дн., без проверки, не звались "
         f"{RECALL_DAYS} дн.): {len(queue)}; запусков за сутки осталось {room} из {DAILY_CAP}"
