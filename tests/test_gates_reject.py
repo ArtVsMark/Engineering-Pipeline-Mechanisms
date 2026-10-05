@@ -1809,6 +1809,38 @@ def test_the_local_part_judges_the_coming_description_only_on_its_branch(
     assert result.code == CLEAN, result.text
 
 
+def test_the_local_part_judges_inherited_commits_unlike_agent_pr(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Унаследованный от слитой ветки коммит судится и здесь: суд не мягче площадки (#1034).
+
+    Обещание докстроки `judge_local` держится тестом, а не только словами
+    (взгляд на #1150, `65336e6`): ветка выросла из ветки, уже слитой
+    уплотнением, и несёт её коммит с изъяном. `agent_pr.describe` его в
+    описание не берёт, а `--local` — как `pr-meta` на площадке — судит.
+    """
+    check = load_script("check_pr_meta.py")
+    agent_pr = load_script("agent_pr.py")
+    tree = judged_branch(tmp_path / "t", "слитая работа\n\nRefs #1\nРазобрано: 13cf07f\n")
+    run = partial(subprocess.run, cwd=tree, check=True, capture_output=True)
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet"]
+    # Уплотнение: в общую ветку ложится дерево ветки одним коммитом, тело
+    # перечисляет заголовок — так его пишет площадка.
+    run(["git", "checkout", "--quiet", "main"])
+    run(["git", "checkout", "--quiet", "agent/x", "--", "readme.md"])
+    run([*commit, "-m", "слитая работа (#2)\n\n* слитая работа"])
+    run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"])
+    run(["git", "checkout", "--quiet", "-b", "agent/y", "agent/x"])
+    (tree / "more.md").write_text("ещё\n", encoding="utf-8")
+    run(["git", "add", "-A"])
+    run([*commit, "-m", "своя работа\n\nRefs #1\n"])
+    with inside(tree):
+        described = agent_pr.describe("agent/y", "main")
+    assert "13cf07f" not in described.body and "своя работа" in described.title
+    result = run_script("check_pr_meta.py", "--local", "origin/main", cwd=tree)
+    assert result.code == REJECTED and check.NO_KIND_LINE in result.text, result.text
+
+
 def test_the_local_part_is_held_piece_by_piece(tmp_path: Path) -> None:
     """Части `--local` названы прямо: выборка коммитов, суд текста и исход (#1135).
 
