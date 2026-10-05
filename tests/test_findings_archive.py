@@ -196,6 +196,15 @@ def test_a_first_run_counts_everything_and_settles_resolutions(
     assert not any("не учтено" in one for one in archive["gaps"])
 
 
+def test_merge_dates_ride_the_archive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Даты слияния из истории ложатся полем `merged`, ключом — номер строкой (#1136)."""
+    platform(monkeypatch)
+    dates = {7: "2026-09-02T00:00:00+00:00", 5: "2026-09-01T00:00:00+00:00"}
+    archive = module.build("o/r", "t", 10, KINDS, {}, history(), dates=dates)
+    assert archive["merged"] == {"5": dates[5], "7": dates[7]}
+    assert module.build("o/r", "t", 10, KINDS, {}, history())["merged"] == {}
+
+
 def test_reread_goes_before_the_new_merges(monkeypatch: pytest.MonkeyPatch) -> None:
     """Снявшим встаёт учтённое раньше, а не новое слитое с тем же отпечатком (взгляд на #849)."""
     platform(monkeypatch)

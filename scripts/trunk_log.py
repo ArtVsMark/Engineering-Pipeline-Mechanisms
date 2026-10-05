@@ -14,6 +14,7 @@
 """
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
@@ -97,6 +98,28 @@ def whole(where: Path | None = None, lost: str = "встречи родов") ->
     )
     if said.strip() != "false":
         raise NotRun(f"{SHALLOW}: {lost} по ней недосчитаются — нужен fetch-depth: 0")
+
+
+def merge_dates(where: Path | None = None, ref: str = TRUNK_REF) -> dict[int, str]:
+    """Дата слияния каждого уплотнённого изменения `ref` — по истории, а не площадке (#1136).
+
+    Дата — время коммитера уплотнённого коммита «Тема (#N)», в UTC: площадка
+    ставит его в миг слияния. Слияние без уплотнения своего «(#N)» в теме не
+    несёт и сюда не входит — его дату история так не отдаёт. Мелкий клон —
+    отказ: даты давних слияний пропали бы молча.
+    """
+    whole(where, "даты слияний")
+    log = gitcall.output(
+        ["log", "--format=%s%x1f%cI%x00", ref], NotRun, cwd=str(where) if where else None
+    )
+    out: dict[int, str] = {}
+    for record in log.split(RECORD):
+        subject, _, when = record.strip("\n").partition(FIELD)
+        said = MERGED_SUBJECT_RE.search(subject.strip())
+        if said and when.strip():
+            stamp = datetime.fromisoformat(when.strip()).astimezone(UTC)
+            out.setdefault(int(said.group(1)), stamp.isoformat(timespec="seconds"))
+    return out
 
 
 def merged_bodies(where: Path | None = None, ref: str = TRUNK_REF) -> list[str]:
