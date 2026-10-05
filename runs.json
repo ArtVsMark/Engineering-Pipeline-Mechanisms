@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-04T10:28:33+00:00",
+  "updated": "2026-10-05T11:17:40+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -2885,6 +2885,331 @@
         }
       },
       "coverage": 92.4
+    },
+    "2026-10-05": {
+      "runs": {
+        "main-red": {
+          "runs": 100,
+          "red": 0,
+          "cancelled": 18,
+          "seconds": 1107,
+          "timed": 100,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 10,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 24,
+          "timed": 10,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 540,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 287,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 18,
+          "seconds": 1787,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 10,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 2129,
+          "timed": 10,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 20,
+          "seconds": 2116,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 9,
+          "seconds": 1595,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 170,
+          "red": 0,
+          "cancelled": 100,
+          "seconds": 3214,
+          "timed": 170,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 27,
+          "seconds": 2616,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 84,
+          "red": 1,
+          "cancelled": 57,
+          "seconds": 6996,
+          "timed": 84,
+          "red_jobs": {
+            "pr-meta / pr-meta": 1
+          },
+          "red_steps": {
+            "pr-meta / pr-meta · метки и связь с задачей": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "ci-complete": {
+          "runs": 80,
+          "red": 1,
+          "cancelled": 62,
+          "seconds": 6493,
+          "timed": 80,
+          "red_jobs": {
+            "ci-complete": 1
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "agent-pr": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 275,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 72,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 85,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 795,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт «python не раньше setup-python» видит агента, shell: python и составное действие": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 460,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 153,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ 194: вид механизма — pipeline, слияние не держит ни одна половина (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 709,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Локальный суд текста: путь будущего описания держит тест, сосед назван": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 359,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ 194: вид механизма — pipeline, слияние не держит ни одна половина (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 611,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Источник транспорта: хозяин — по .git, «не участвует» сказано точно (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 545,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ 194: вид механизма — pipeline, слияние не держит ни одна половина": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 2,
+          "seconds": 858,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Источник транспорта: хозяин — по .git, «не участвует» сказано точно (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 906,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Фрагмент о пяти закрытых задачах сверен с историей (+5)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 816,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт имени договора: границы выводятся из Юникода и splitlines, а не перечисляются (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 288,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Фрагмент о пяти закрытых задачах сверен с историей (+4)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 831,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Источник транспорта: хозяин — по .git, «не участвует» сказано точно (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1037,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 92.5
     }
   }
 }
