@@ -75,7 +75,11 @@ def test_merges_without_squash_are_counted(tmp_path: Path) -> None:
 
 
 def test_merge_dates_come_from_the_squash_commits(tmp_path: Path) -> None:
-    """Дата слияния — время коммитера уплотнённого «(#N)», в UTC; прямая правка — нет (#1136)."""
+    """Дата слияния — время коммитера уплотнённого «(#N)», в UTC; прямая правка — нет (#1136).
+
+    Даты разбираются из того же вывода `git_log`, что тела: один проход
+    истории (взгляд на #1158); двухпольная запись даты не несёт.
+    """
     root = tmp_path / "dated"
     root.mkdir()
     git(root, "init", "-q", "--initial-branch=main")
@@ -93,15 +97,16 @@ def test_merge_dates_come_from_the_squash_commits(tmp_path: Path) -> None:
             capture_output=True,
             env={**os.environ, "GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when},
         )
-    assert module.merge_dates(root, "HEAD") == {
+    log = module.git_log(root, "HEAD")
+    assert module.merge_dates(log) == {
         1: "2026-09-01T07:00:00+00:00",
         2: "2026-09-03T12:30:00+00:00",
     }
-    shallow = tmp_path / "shallow-dated"
-    subprocess.run(
-        ["git", "clone", "-q", "--depth", "1", f"file://{root}", str(shallow)],
-        check=True,
-        capture_output=True,
+    assert [number for number, _ in module.merged_messages(log)] == [1, 2]
+    two = f"Тема (#3){module.FIELD}тело{module.RECORD}"
+    assert module.merge_dates(two) == {} and module.merged_messages(two) == [(3, "тело")]
+    assert module.fields(f"т{module.FIELD}д{module.FIELD}тело{module.FIELD}ещё") == (
+        "т",
+        "д",
+        f"тело{module.FIELD}ещё",
     )
-    with pytest.raises(module.NotRun, match=re.escape(module.SHALLOW)):
-        module.merge_dates(shallow, "HEAD")

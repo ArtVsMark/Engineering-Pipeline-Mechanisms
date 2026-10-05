@@ -538,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
             history,
             args.reread,
             trunk_log.unsquashed(log),
-            trunk_log.merge_dates(),
+            trunk_log.merge_dates(log),
         )
     except (
         NotRun,

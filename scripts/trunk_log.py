@@ -44,12 +44,25 @@ class NotRun(RuntimeError):
 
 
 def git_log(where: Path | None = None, ref: str = TRUNK_REF) -> str:
-    """Темы и тела коммитов `ref` от старых к новым; по умолчанию — общая ветка."""
+    """Темы, даты коммитера и тела коммитов `ref` от старых к новым; по умолчанию — общая ветка.
+
+    Запись — «тема · дата · тело» через `FIELD`. Дата едет в том же выводе,
+    чтобы даты слияний разбирались из одного прохода истории, а не из
+    второго (взгляд на #1158); разбор (`fields`) принимает и запись без даты.
+    """
     return gitcall.output(
-        ["log", "--reverse", "--format=%s%x1f%B%x00", ref],
+        ["log", "--reverse", "--format=%s%x1f%cI%x1f%B%x00", ref],
         NotRun,
         cwd=str(where) if where else None,
     )
+
+
+def fields(record: str) -> tuple[str, str, str]:
+    """Тема, дата и тело одной записи `git_log`; запись в два поля — без даты."""
+    parts = record.strip("\n").split(FIELD, 2)
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+    return parts[0], "", parts[1] if len(parts) == 2 else ""
 
 
 def merged_messages(log: str) -> list[tuple[int, str]]:
@@ -60,7 +73,7 @@ def merged_messages(log: str) -> list[tuple[int, str]]:
     """
     out = []
     for record in log.split(RECORD):
-        subject, _, body = record.strip("\n").partition(FIELD)
+        subject, _, body = fields(record)
         said = MERGED_SUBJECT_RE.search(subject.strip())
         if said:
             out.append((int(said.group(1)), body))
@@ -69,11 +82,7 @@ def merged_messages(log: str) -> list[tuple[int, str]]:
 
 def unsquashed(log: str) -> int:
     """Сколько слияний площадки без уплотнения в истории — их тел счёт не видит (#879)."""
-    return sum(
-        1
-        for record in log.split(RECORD)
-        if UNSQUASHED_RE.search(record.strip("\n").partition(FIELD)[0].strip())
-    )
+    return sum(1 for record in log.split(RECORD) if UNSQUASHED_RE.search(fields(record)[0].strip()))
 
 
 def unseen(where: Path | None = None, ref: str = TRUNK_REF) -> int:
@@ -100,21 +109,16 @@ def whole(where: Path | None = None, lost: str = "встречи родов") ->
         raise NotRun(f"{SHALLOW}: {lost} по ней недосчитаются — нужен fetch-depth: 0")
 
 
-def merge_dates(where: Path | None = None, ref: str = TRUNK_REF) -> dict[int, str]:
-    """Дата слияния каждого уплотнённого изменения `ref` — по истории, а не площадке (#1136).
+def merge_dates(log: str) -> dict[int, str]:
+    """Дата слияния каждого уплотнённого изменения — из того же вывода `git_log` (#1136).
 
     Дата — время коммитера уплотнённого коммита «Тема (#N)», в UTC: площадка
     ставит его в миг слияния. Слияние без уплотнения своего «(#N)» в теме не
-    несёт и сюда не входит — его дату история так не отдаёт. Мелкий клон —
-    отказ: даты давних слияний пропали бы молча.
+    несёт и сюда не входит. Запись без даты (двухпольная) пропускается.
     """
-    whole(where, "даты слияний")
-    log = gitcall.output(
-        ["log", "--format=%s%x1f%cI%x00", ref], NotRun, cwd=str(where) if where else None
-    )
     out: dict[int, str] = {}
     for record in log.split(RECORD):
-        subject, _, when = record.strip("\n").partition(FIELD)
+        subject, when, _ = fields(record)
         said = MERGED_SUBJECT_RE.search(subject.strip())
         if said and when.strip():
             stamp = datetime.fromisoformat(when.strip()).astimezone(UTC)
