@@ -97,13 +97,35 @@ jobs:
       - name: унести код конвейера из дерева потребителя
         env:
           STRIP_OURS: ${{ inputs.strip-ours }}
+          FROM: ${{ job.workflow_repository }}
+          CALLER: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
           mv .pipeline-mechanisms "$RUNNER_TEMP/mechanisms"
           # ПРОБА ПЕРЕНОСА (#990, решение владельца 04.10.2026): со входом
           # `strip-ours` дерево вызывающего лишается нашего кода, и шаг обязан
-          # завестись тем, что взял своим checkout. Потребитель вход не задаёт.
-          if [ "$STRIP_OURS" = "true" ]; then rm -rf scripts packages tests; fi
+          # завестись тем, что взял своим checkout. СТИРАЕТСЯ ПО ИМЕНАМ ПАПОК,
+          # и у соседа под ними лежит его собственный код. Поэтому стирание
+          # идёт, только когда вызывающий прогон — проба передачи
+          # `handover-probe.yml` (ответ `ours`: у потребителя её нет) и шаг взят
+          # из того же репозитория. Сверки репозиториев одной мало: копию шага
+          # у потребителя (`uses: ./…`) площадка тоже считает «своей»
+          # (взгляды на #1113, #1118). Форк поставщика с той же пробой — его
+          # законный случай: у форка под этими папками наш же код.
+          if [ "$STRIP_OURS" = "true" ]; then
+            case "$CALLER" in
+              */.github/workflows/handover-probe.yml@*) ;;
+              *)
+                echo "::error::Вход strip-ours — только для пробы передачи handover-probe.yml; здесь зовёт ${CALLER}, и стирать своё нельзя"
+                exit 1
+                ;;
+            esac
+            if [ "${GITHUB_REPOSITORY,,}" != "${FROM,,}" ]; then
+              echo "::error::Вход strip-ours — только для пробы в репозитории поставщика ${FROM}; здесь ${GITHUB_REPOSITORY}, и стирать нечего своего"
+              exit 1
+            fi
+            rm -rf scripts packages tests
+          fi
           echo "MECHANISMS=$RUNNER_TEMP/mechanisms" >>"$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
