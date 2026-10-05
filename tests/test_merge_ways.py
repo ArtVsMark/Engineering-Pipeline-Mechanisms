@@ -13,8 +13,9 @@
 способный предотвратить инцидент, а не только поймать его повторение.
 """
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -208,7 +209,7 @@ def test_extra_ways_refuse_the_unsaid_rather_than_read_it_as_off() -> None:
         module.extra_ways({"allow_squash_merge": True})
 
 
-# --- секрет получает один запрос (#993, взгляд на #1117) ----------------------
+# --- секрет получает один шаг (#993, взгляд на #1117) -------------------------
 
 
 def test_the_secret_step_writes_the_merge_fields_and_main_reads_them_without_it(
@@ -226,6 +227,11 @@ def test_the_secret_step_writes_the_merge_fields_and_main_reads_them_without_it(
     monkeypatch.setenv(module.OWNER_TOKEN_ENV, "токен-владельца")
     assert module.main(["--repo", "o/r", "--save-merge-ways", str(said)]) == module.EXIT_OK
     assert tokens == ["токен-владельца"]
+    # Что секрет не уходит дальше файлом, держит код, а не устройство (#1124):
+    # в файле только поля способов слияния, и токена в нём нет.
+    written = said.read_text(encoding="utf-8")
+    assert "токен-владельца" not in written
+    assert set(json.loads(written)["settings"]) <= set(module.MERGE_WAYS)
 
     # Секрет НЕ убирается из окружения: с файлом сверка обязана взять токен
     # прогона, даже если секрет рядом, — иначе откат этого выбора неотличим.
@@ -278,3 +284,30 @@ def test_in_the_flow_the_secret_reaches_one_step_only() -> None:
     # Сбой шага с секретом называется аннотацией, а не остаётся в журнале шага (#1117).
     assert "::warning::" in holders[0]["run"] and "continue-on-error" not in holders[0]
     assert any("--merge-ways-from" in str(step.get("run") or "") for step in steps)
+
+
+#: Файлы площадки, через которые шаг передаёт значение следующим шагам.
+PLATFORM_HANDOFF: Final = ("GITHUB_ENV", "GITHUB_OUTPUT", "GITHUB_PATH")
+
+
+@pytest.mark.parametrize("flow", ["required-context.yml", "step-drift.yml"])
+def test_the_secret_step_hands_nothing_to_the_next_steps(flow: str) -> None:
+    """Шаг с секретом не пишет в файлы площадки — это держит код, а не устройство (#1124).
+
+    Устройство разводит окружение шагов, но шаг с секретом исполняет наш код:
+    запись в `$GITHUB_ENV` отдала бы токен всем шагам ниже.
+    """
+    steps = [
+        step
+        for job in yaml.safe_load(
+            (ROOT / ".github" / "workflows" / flow).read_text(encoding="utf-8")
+        )["jobs"].values()
+        for step in job.get("steps", [])
+    ]
+    holders = [step for step in steps if module.OWNER_TOKEN_ENV in (step.get("env") or {})]
+    assert holders, f"{flow}: шага с секретом нет — проверять нечего"
+    leaks = {
+        str(step.get("name")): [name for name in PLATFORM_HANDOFF if name in step["run"]]
+        for step in holders
+    }
+    assert not any(leaks.values()), f"{flow}: шаг с секретом пишет в файлы площадки: {leaks}"
