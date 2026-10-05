@@ -6,7 +6,6 @@
 считается по именам прогонов.
 """
 
-import random
 from datetime import UTC, datetime
 from typing import Any
 
@@ -227,26 +226,29 @@ def test_asks_are_a_sample_bounded_by_the_cap() -> None:
     assert given[-1] == ([1], 1), "выборка больше набора"
 
 
-def test_no_number_is_silent_forever_whatever_the_schedule() -> None:
-    """Ни пропуск заходов, ни перемены набора не оставляют номер неспрошенным (#1127).
+def test_every_number_outside_the_window_is_offered_to_the_sample() -> None:
+    """Выборке в каждом заходе отдаётся ВЕСЬ набор вне окна — никто не исключён (#1127).
 
-    Ровно те условия, на которых круг по часу немел: заходы только в чётные
-    часы и набор, который растёт и теряет номера между заходами. Выборка с
-    закреплённым зерном — чтобы прогон был воспроизводим, а не «обычно зелён».
+    Отсюда и обещание «вечной немоты нет»: номер, который в набор не попадал бы,
+    не спрашивался бы никогда при любой выборке. Набор между заходами меняется —
+    растёт, теряет открытый номер, — и каждый заход отдаёт выборке ровно его
+    нынешний состав. Распределение внутри выборки — свойство `random.sample`, а
+    не этого кода, и здесь не проверяется (поздний взгляд на #1129).
     """
-    rng = random.Random(1127)
-    asked: set[int] = set()
+    given: list[list[int]] = []
 
-    def ask(number: int) -> str | None:
-        asked.add(number)
-        return None
+    def pick(population: list[int], k: int) -> list[int]:
+        given.append(sorted(population))
+        return population[:k]
 
     numbers = set(range(1, 41))
-    for run in range(0, 400, 2):
-        live = {run % 40 + 1}
-        numbers |= {41 + run // 50}
-        module.merged_dates(numbers, [], live, ask, limit=4, pick=rng.sample)
-    assert numbers - asked == set(), f"неспрошены навсегда: {sorted(numbers - asked)}"
+    expected: list[list[int]] = []
+    for turn in range(10):
+        live = {turn + 1}
+        numbers |= {41 + turn}
+        expected.append(sorted(numbers - live))
+        module.merged_dates(numbers, [], live, lambda number: None, limit=4, pick=pick)
+    assert given == expected, "выборке отдан не весь набор вне окна"
 
 
 def test_recently_called_findings_cost_no_asks(monkeypatch: pytest.MonkeyPatch) -> None:
