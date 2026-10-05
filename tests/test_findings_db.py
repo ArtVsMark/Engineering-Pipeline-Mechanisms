@@ -137,9 +137,30 @@ def test_two_projects_lie_side_by_side(tmp_path: Path) -> None:
         ({k: v for k, v in archive().items() if k != "kinds"}, "нет ключа 'kinds'"),
         (
             archive(findings={"aaaaaaa": {k: v for k, v in finding(1).items() if k != "role"}}),
-            "нет полей role",
+            "`role` не str",
         ),
         (archive(findings=[]), "не словарь записей"),
+        # Форма — целиком (взгляд на #1154): каждая часть, тип записи, тип поля.
+        ({k: v for k, v in archive().items() if k != "findings"}, "нет ключа 'findings'"),
+        (archive(findings=None), "`findings` не словарь записей"),
+        (archive(resolutions=[]), "`resolutions` не словарь записей"),
+        (archive(kinds=None), "`kinds` не словарь записей"),
+        (archive(kinds={"род": "строка"}), "kinds род — запись не словарь"),
+        (
+            archive(kinds={"род": {"встреч": 1, "каталогу": None, "породил": "abc"}}),
+            "`породил` не list",
+        ),
+        (archive(kinds={"род": {"встреч": 1, "породил": []}}), "нет поля `каталогу`"),
+        (
+            archive(kinds={"род": {"встреч": 1, "каталогу": "x", "породил": []}}),
+            "`каталогу` не dict",
+        ),
+        (archive(resolutions={"aaaaaaa": {"by": True, "twin_of": ""}}), "`by` не int"),
+        (archive(findings={"aaaaaaa": finding(1, resolved_by="11")}), "`resolved_by` не int"),
+        (
+            archive(findings={"aaaaaaa": {k: v for k, v in finding(1).items() if k != "род"}}),
+            "нет поля `род`",
+        ),
     ],
 )
 def test_a_foreign_form_is_the_third_outcome(
@@ -215,6 +236,11 @@ def test_the_pieces_are_held_directly(tmp_path: Path) -> None:
         "a-slug",
     )
     assert module.fate_row({"каталогу": None}) == (None, None, None)
+    assert module.misshapen_record({"a": 1, "b": None}, {"a": int}, {"b": str}) == ""
+    assert module.misshapen_record({"a": 1}, {"a": int}, {"b": str}) == "нет поля `b`"
+    assert (
+        module.misshapen_record({"a": 1, "b": 2}, {"a": int}, {"b": str}) == "`b` не str и не null"
+    )
     with sqlite3.connect(":memory:") as db:
         db.executescript(module.TABLES)
         module.fill(db, archive())

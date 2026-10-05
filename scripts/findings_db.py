@@ -67,20 +67,39 @@ EXIT_BROKEN: Final = 2
 #: здесь она не пишется второй раз: поднял форму там — сборка откажет, пока её
 #: не научат новой, а не соберёт молча то, чего не знает (045).
 SUPPORTED: Final = frozenset({findings_archive.SCHEMA})
-#: Поля записи находки, которые ложатся в столбцы. Нехватка любого — отказ.
-FINDING_KEYS: Final = (
-    "pr",
-    "seen_on",
-    "weight",
-    "kind",
-    "role",
-    "title",
-    "place",
-    "checked",
-    "resolved_by",
-    "twin_of",
-    "род",
-)
+#: ФОРМА ПРОВЕРЯЕТСЯ ЦЕЛИКОМ, ПО ПЕРЕЧНЮ, А НЕ ПОЛЕ ЗА ПОЛЕМ (210, взгляд на
+#: #1154): у сборщика архива та же сверка чинилась трижды по одному полю
+#: (#830), и здесь она взята оттуда же — `findings_archive.misshapen`, а форма
+#: снятия — его `RESOLUTION_SHAPE` (022). Перечни ниже — поля, которые
+#: ложатся в столбцы, с типами; замер 05.10.2026 по живому архиву: 2166
+#: находок, 2347 снятий, 22 рода — у всех ровно эти типы.
+#: Части архива: каждая обязана быть словарём записей.
+PARTS: Final = ("findings", "resolutions", "kinds")
+#: Находка: поля со своим типом.
+FINDING_SHAPE: Final[dict[str, type]] = {
+    "pr": int,
+    "seen_on": list,
+    "weight": str,
+    "kind": str,
+    "role": str,
+    "title": str,
+    "place": str,
+    "checked": str,
+    "twin_of": str,
+}
+#: Род: поля со своим типом.
+KIND_SHAPE: Final[dict[str, type]] = {"встреч": int, "породил": list}
+#: Поля, которые бывают `null`: ключ обязан стоять, значение — тип или `null`.
+NULLABLE: Final[dict[str, dict[str, type]]] = {
+    "findings": {"resolved_by": int, "род": str},
+    "resolutions": {},
+    "kinds": {"каталогу": dict},
+}
+SHAPES: Final[dict[str, dict[str, type]]] = {
+    "findings": FINDING_SHAPE,
+    "resolutions": findings_archive.RESOLUTION_SHAPE,
+    "kinds": KIND_SHAPE,
+}
 #: Таблицы базы, по которым печатается счёт строк.
 TABLE_NAMES: Final = ("projects", "findings", "seen_on", "resolutions", "kinds", "kind_spawned")
 #: Схема базы. Ключи составные: отпечаток уникален внутри проекта, а не семьи.
@@ -131,14 +150,33 @@ def checked_archive(path: Path) -> dict[str, Any]:
             f"{path}: форма архива {schema!r} не знакома сборке "
             f"(понимает {', '.join(sorted(SUPPORTED))})"
         )
-    for key in ("repo", "generated_at", "resolutions", "kinds"):
+    for key in ("repo", "generated_at", *PARTS):
         if key not in archive:
             raise NotRun(f"{path}: в архиве нет ключа {key!r}")
-    for mark, entry in archive["findings"].items():
-        missing = [key for key in FINDING_KEYS if key not in entry]
-        if missing:
-            raise NotRun(f"{path}: у находки {mark} нет полей {', '.join(missing)}")
+    for part in PARTS:
+        if not isinstance(archive[part], dict):
+            raise NotRun(f"{path}: `{part}` не словарь записей")
+        for mark, entry in archive[part].items():
+            if said := misshapen_record(entry, SHAPES[part], NULLABLE[part]):
+                raise NotRun(f"{path}: {part} {mark} — {said}")
     return archive
+
+
+def misshapen_record(entry: Any, shape: dict[str, type], nullable: dict[str, type]) -> str:
+    """Чем запись расходится с формой части; пустая строка — не расходится.
+
+    Обязательные поля судит `findings_archive.misshapen`; поле из `nullable`
+    обязано стоять, а значение — быть своего типа или `null`.
+    """
+    if said := findings_archive.misshapen(entry, shape):
+        return said
+    for field, kind in nullable.items():
+        if field not in entry:
+            return f"нет поля `{field}`"
+        value = entry[field]
+        if value is not None and (not isinstance(value, kind) or isinstance(value, bool)):
+            return f"`{field}` не {kind.__name__} и не null"
+    return ""
 
 
 def fate_row(body: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
