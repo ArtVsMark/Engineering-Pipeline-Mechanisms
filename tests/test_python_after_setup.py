@@ -21,14 +21,25 @@
 * шаг агента (`claude-code-action`) — агент зовёт `python3 -m pytest` и
   скрипты из ТЕКСТА ЗАДАНИЯ, и какой python он найдёт, решает порядок
   шагов. Замер 05.10.2026: таких шагов 5, у всех `setup-python` раньше —
-  но держалось это порядком, а не проверкой;
-* составное действие из дерева (`uses: ./…`) — судится по шагам своего
-  `action.yml`; файл не найден — вызов считается состоявшимся: неизвестное
-  не доказывает отсутствия python (045). Замер: составных из дерева 0.
+  но держалось это порядком, а не проверкой.
+
+СОСТАВНОЕ ДЕЙСТВИЕ ИЗ ДЕРЕВА И `defaults.run.shell` — НЕ РАЗБИРАЮТСЯ, А
+ЗАПРЕЩЕНЫ (210: второй заход взгляда на одно место — строгое правило вместо
+новых форм; взгляд на #1149). Разбор составного действия требовал своего
+порядка установки внутри, защиты от цикла ссылок и `defaults` на трёх
+уровнях — три формы ради того, чего в дереве нет. Замер 05.10.2026: шагов
+`uses: ./…` — 0, `defaults:` — 0. Поэтому проверка по дереву краснеет на
+ЛЮБОМ из них с причиной: появится нужда — гейт сначала научат, а не
+пропустят молча (`test_no_flow_uses_what_the_gate_does_not_parse`).
+
+УСТАНОВКА И АГЕНТ УЗНАЮТСЯ ПО ИМЕНИ ДЕЙСТВИЯ, А НЕ ПОДСТРОКОЙ — и с разной
+строгостью в сторону красного. Установка — ровно `actions/setup-python`:
+чужое действие, принятое за установку, гасило бы красное. Агент — по имени
+действия без владельца (`…/claude-code-action`): форк агента, не узнанный
+агентом, тоже гасил бы красное.
 """
 
 import re
-from pathlib import Path
 from typing import Any, Final
 
 import pytest
@@ -40,57 +51,71 @@ from tests.conftest import ROOT, walk
 CALL: Final = re.compile(r"(?<![\w./$-])(?:python[0-9.]*|pip[0-9.]*)(?=[\s;|&)]|$)", re.M)
 #: Шаг установки интерпретатора.
 SETUP: Final = "actions/setup-python"
-#: Действие агента: исполняет команды из текста задания, python в том числе.
+#: Имя действия агента без владельца: агент исполняет команды из текста
+#: задания, python в том числе.
 AGENT: Final = "claude-code-action"
-#: Признак составного действия из своего дерева.
+#: Признак составного действия из своего дерева: гейт его не разбирает.
 LOCAL_ACTION: Final = "./"
 
 
-def calls_python(step: dict[str, Any], root: Path = ROOT) -> bool:
-    """Выберет ли шаг интерпретатор: строкой `run:`, оболочкой, агентом или составным действием."""
+def action_name(step: dict[str, Any]) -> str:
+    """Имя действия шага без версии: `владелец/имя` или путь в дереве."""
+    return str(step.get("uses") or "").split("@")[0].strip()
+
+
+def calls_python(step: dict[str, Any]) -> bool:
+    """Выберет ли шаг интерпретатор: строкой `run:`, оболочкой или агентом."""
     if str(step.get("shell") or "").startswith("python"):
         return True
-    uses = str(step.get("uses") or "")
-    if AGENT in uses:
+    if action_name(step).rsplit("/", 1)[-1] == AGENT:
         return True
-    if uses.startswith(LOCAL_ACTION):
-        return local_action_calls_python(root / uses.removeprefix(LOCAL_ACTION), root)
     lines = str(step.get("run") or "").splitlines()
     code = [line for line in lines if not line.lstrip().startswith("#")]
     return any(CALL.search(line) for line in code)
 
 
-def local_action_calls_python(where: Path, root: Path) -> bool:
-    """Составное действие из дерева зовёт python своими шагами; файла нет — считается, что зовёт."""
-    for name in ("action.yml", "action.yaml"):
-        if (where / name).is_file():
-            action = yaml.safe_load((where / name).read_text(encoding="utf-8")) or {}
-            steps = (action.get("runs") or {}).get("steps") or []
-            return any(calls_python(step, root) for step in steps)
-    return True
+def unparsed(flow: dict[str, Any]) -> list[str]:
+    """Что в прогоне гейт не разбирает: составные действия из дерева и `defaults.run.shell`."""
+    found = []
+    if ((flow.get("defaults") or {}).get("run") or {}).get("shell"):
+        found.append("defaults.run.shell прогона")
+    for name, job in (flow.get("jobs") or {}).items():
+        if ((job.get("defaults") or {}).get("run") or {}).get("shell"):
+            found.append(f"{name}: defaults.run.shell работы")
+        for number, step in enumerate(job.get("steps") or [], start=1):
+            if action_name(step).startswith(LOCAL_ACTION):
+                found.append(f"{name}: {step.get('name') or f'шаг {number}'} — составное действие")
+    return found
 
 
-def calls_before_setup(steps: list[dict[str, Any]], root: Path = ROOT) -> list[str]:
+def calls_before_setup(steps: list[dict[str, Any]]) -> list[str]:
     """Шаги, выбирающие python раньше `setup-python`; строки-комментарии не в счёт."""
     found, ready = [], False
     for number, step in enumerate(steps, start=1):
         # Установка — ровно это действие, а не подстрока имени: `setup-pythonX`
         # или чужое `…/actions/setup-python` установкой не считаются.
-        if str(step.get("uses") or "").split("@")[0] == SETUP:
+        if action_name(step) == SETUP:
             ready = True
-        elif not ready and calls_python(step, root):
+        elif not ready and calls_python(step):
             found.append(str(step.get("name") or f"шаг {number}"))
     return found
+
+
+def flows() -> dict[str, dict[str, Any]]:
+    """Прогоны дерева по имени файла."""
+    return {
+        path.name: yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for path in walk(ROOT / ".github" / "workflows", "*.y*ml")
+    }
 
 
 def jobs_with_steps() -> dict[str, list[dict[str, Any]]]:
     """Работы всех прогонов дерева, у которых есть свои шаги."""
     found = {}
-    for path in walk(ROOT / ".github" / "workflows", "*.y*ml"):
-        flow = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    for file, flow in flows().items():
         for name, job in (flow.get("jobs") or {}).items():
             if job.get("steps"):
-                found[f"{path.name}:{name}"] = job["steps"]
+                found[f"{file}:{name}"] = job["steps"]
     return found
 
 
@@ -110,7 +135,8 @@ def jobs_with_steps() -> dict[str, list[dict[str, Any]]]:
         ([{"uses": "actions/setup-pythonX@x"}, {"name": "a", "run": "python x.py"}], ["a"]),
         ([{"uses": f"{SETUP}@x"}, {"name": "a", "uses": "anthropics/claude-code-action@x"}], []),
         ([{"name": "a", "shell": "python {0}", "run": "print(1)"}], ["a"]),
-        ([{"name": "a", "uses": "./.github/actions/нет"}], ["a"]),
+        ([{"name": "a", "uses": "someone/claude-code-action@x"}], ["a"]),
+        ([{"name": "a", "uses": "anthropics/claude-code-action-notes@x"}], []),
     ],
     ids=[
         "после-установки",
@@ -126,7 +152,8 @@ def jobs_with_steps() -> dict[str, list[dict[str, Any]]]:
         "похожее-имя",
         "агент-после-установки",
         "shell-python",
-        "составное-не-найдено",
+        "агент-форк",
+        "агент-похожее-имя",
     ],
 )
 def test_a_call_before_the_setup_is_named(steps: list[dict[str, Any]], off: list[str]) -> None:
@@ -154,26 +181,44 @@ def test_no_job_calls_python_before_its_setup() -> None:
     assert not off, f"python зовётся до установки интерпретатора: {off}"
 
 
-def test_a_local_action_is_judged_by_its_own_steps(tmp_path: Path) -> None:
-    """Составное действие из дерева судится по шагам своего `action.yml` (#1143)."""
-    calling, quiet = tmp_path / "calling", tmp_path / "quiet"
-    for where, run in ((calling, "python x.py"), (quiet, "echo ok")):
-        where.mkdir()
-        (where / "action.yml").write_text(
-            yaml.safe_dump(
-                {"runs": {"using": "composite", "steps": [{"run": run, "shell": "bash"}]}}
-            ),
-            encoding="utf-8",
-        )
-    assert calls_before_setup([{"name": "a", "uses": "./calling"}], tmp_path) == ["a"]
-    assert calls_before_setup([{"name": "a", "uses": "./quiet"}], tmp_path) == []
+def test_what_the_gate_does_not_parse_is_named() -> None:
+    """Составное действие и `defaults.run.shell` на обоих уровнях названы, обычный шаг — нет."""
+    flow = {
+        "defaults": {"run": {"shell": "python {0}"}},
+        "jobs": {
+            "j": {
+                "defaults": {"run": {"shell": "bash"}},
+                "steps": [{"name": "a", "uses": "./.github/actions/x"}, {"run": "echo ok"}],
+            },
+            "k": {"steps": [{"uses": f"{SETUP}@x"}, {"uses": "./y@v1"}]},
+        },
+    }
+    assert unparsed(flow) == [
+        "defaults.run.shell прогона",
+        "j: defaults.run.shell работы",
+        "j: a — составное действие",
+        "k: шаг 2 — составное действие",
+    ]
+    assert unparsed({"jobs": {"j": {"steps": [{"uses": f"{SETUP}@x"}, {"run": "x"}]}}}) == []
 
 
-def test_every_agent_step_comes_after_its_setup() -> None:
-    """Предмет агентской половины есть: шаги агента в дереве, и все — после установки (#1143)."""
+def test_no_flow_uses_what_the_gate_does_not_parse() -> None:
+    """В дереве нет того, что гейт не разбирает: появится — гейт учат, а не пропускают (210)."""
+    off = {file: found for file, flow in flows().items() if (found := unparsed(flow))}
+    assert not off, (
+        f"гейт «python не раньше setup-python» этого не разбирает: {off} — научите его "
+        "(порядок установки внутри составного, цикл ссылок, defaults) или уберите"
+    )
+
+
+def test_agent_steps_exist_in_the_tree() -> None:
+    """Предмет агентской половины есть: шаги агента в дереве (075, #1143).
+
+    Порядок их относительно установки держит `test_no_job_calls_python_before_its_setup`.
+    """
     agents = [
         name
         for name, steps in jobs_with_steps().items()
-        if any(AGENT in str(step.get("uses") or "") for step in steps)
+        if any(action_name(step).rsplit("/", 1)[-1] == AGENT for step in steps)
     ]
     assert agents, "шагов агента в дереве нет — агентская половина гейта судит пустоту (075)"
