@@ -15,6 +15,7 @@
 import ast
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Final
 
@@ -52,6 +53,27 @@ def test_the_inventory_has_the_form_this_gate_reads() -> None:
     assert isinstance(data["own_issues"], dict), "own_issues второй версии — словарь"
 
 
+def tracked(root: Path) -> set[str] | None:
+    """Файлы под git в дереве; дерево не под git (подложное в тесте) — `None`.
+
+    ПРЕДМЕТ — ОТСЛЕЖИВАЕМОЕ, А НЕ ЛЕЖАЩЕЕ НА ДИСКЕ (взгляд на #1119). Окно пишет
+    у себя `.claude/settings.local.json`, площадка кладёт копии дерева в
+    `.claude/worktrees/`: обход диска сделал бы их механизмами без ответа, и
+    набор краснел бы только у того, у кого они лежат.
+    """
+    if not (root / ".git").exists():
+        return None
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+    return {name for name in listed.split("\0") if name}
+
+
 def subjects(root: Path = ROOT) -> set[str]:
     """Механизмы дерева, о которых инвентарь обязан ответить."""
     found = {p.relative_to(root).as_posix() for p in (root / paths.SCRIPTS).glob("*.py")}
@@ -71,14 +93,22 @@ def subjects(root: Path = ROOT) -> set[str]:
     # формы задач — механизмы и данные, которые читает конвейер или окно; перечень
     # пропускал бы следующий файл так же, как пропускал свод. Вне правила только
     # то, что уже названо выше своей единицей: прогоны — файлом, навыки — каталогом.
+    # ГРАНИЦА ПРАВИЛА НАЗВАНА (195, взгляд на #1119): строгим оно стоит только под
+    # `.claude/` и `.github/`. Корень дерева идёт перечнем намеренно — там лежат
+    # документы и данные проекта (`README.md`, `CHANGELOG.md`, `pyproject.toml`,
+    # `.pipeline.yml`), а не механизмы: их перенос отвечается швами наполнения
+    # (`filling` — `.pipeline.yml` там назван), а не ответом по файлу.
+    known = tracked(root)
     for base, covered in ((".claude", paths.SKILLS), (".github", paths.WORKFLOWS)):
-        found |= {
-            one.relative_to(root).as_posix()
-            for one in (root / base).rglob("*")
-            if one.is_file()
-            and "__pycache__" not in one.parts
-            and not one.is_relative_to(root / covered)
-        }
+        for one in (root / base).rglob("*"):
+            name = one.relative_to(root).as_posix()
+            if (
+                one.is_file()
+                and "__pycache__" not in one.parts
+                and not one.is_relative_to(root / covered)
+                and (known is None or name in known)
+            ):
+                found.add(name)
     return found
 
 
@@ -355,6 +385,25 @@ def test_the_measure_sees_our_issue_numbers_in_prose_the_agent_reads() -> None:
     assert pinned_in(code, ".py", ["Me/P"], [], [23]) == [2]
 
 
+def test_an_untracked_file_is_not_a_subject(tmp_path: Path) -> None:
+    """Неотслеживаемое под `.claude/` предметом не становится (взгляд на #1119).
+
+    Дерево — временный репозиторий, а не наше: тест не пишет в рабочую копию и
+    не зависит от того, лежит ли рядом `.git` (взгляд на #1122).
+    """
+    for part in ("scripts", ".github/workflows", ".rules", ".claude/skills", ".claude/hooks"):
+        (tmp_path / part).mkdir(parents=True)
+    (tmp_path / "packages").mkdir()
+    (tmp_path / ".claude/hooks/start.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (tmp_path / ".claude/settings.local.json").write_text("{}\n", encoding="utf-8")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([*git, "add", ".claude/hooks/start.sh"], cwd=tmp_path, check=True)
+    found = subjects(tmp_path)
+    assert ".claude/hooks/start.sh" in found, "отслеживаемый хук выпал из предмета"
+    assert ".claude/settings.local.json" not in found, "неотслеживаемое стало предметом"
+
+
 def test_subjects_see_yaml_flows_and_directories(tmp_path: Path) -> None:
     """Предмет инвентаря: прогон `.yaml` и каталог навыка входят в него (#768)."""
     for part in ("scripts", ".github/workflows", ".rules", ".claude/skills/one", "packages/p"):
@@ -581,3 +630,72 @@ def test_the_filling_gate_rejects_an_unnamed_read() -> None:
     assert filling_read_by("paths.ROLES; paths.BADGES; paths.X", constants) == {
         "docs/agent/roles.md"
     }
+
+
+#: Обращение к нашему коду из дерева: у потребителя `scripts/` и `packages/` нет
+#: (запись 037), и механизм окна, который к ним обращается, ответом `as-is` быть
+#: не может (взгляд на #1119).
+#:
+#: СТРОГОЕ ПРАВИЛО, А НЕ ПЕРЕЧЕНЬ ФОРМ (210, взгляд на #1122): папка — отдельным
+#: словом или КОНЦОМ пути (`$CLAUDE_PROJECT_DIR/scripts/`, `../scripts/`). Не
+#: обращение только чужое имя, в котором `scripts` — хвост слова
+#: (`my-scripts/`, `.scripts/`, `transcripts/`).
+OUR_TREE: Final = re.compile(r"(?:^|[^\w.-])(?:scripts|packages)/|/(?:scripts|packages)/")
+
+
+def calls_our_tree(text: str) -> list[int]:
+    """Строки, где механизм окна обращается к нашему коду, — комментарии не в счёт.
+
+    ГРАНИЦА НАЗВАНА (195): комментарием считается строка с `#` в начале. Проза
+    в докстроке Python счёт пройдёт как обращение — сегодня таких строк в
+    хуках нет, и найденное читается поимённо, а не принимается числом. И имя
+    папки без косой черты (`'scripts'` в списке путей) предикат не видит: у
+    `session-start.sh` его выдаёт соседний `packages/transport` той же строки.
+    """
+    return [
+        number
+        for number, line in enumerate(text.splitlines(), start=1)
+        if not line.lstrip().startswith("#") and OUR_TREE.search(line)
+    ]
+
+
+def test_a_window_mechanism_that_calls_our_tree_is_not_as_is() -> None:
+    """Хук или настройка окна с ответом `as-is` не обращается к `scripts/`/`packages/` (#1119).
+
+    Так стоял `session-start.sh`: он собирал окружение через наш `check_env`, а
+    у потребителя этого кода нет — хук промолчал бы предупреждением.
+
+    ГРАНИЦА НАЗВАНА (195, взгляд на #1122): навыки `.claude/skills/` вне гейта.
+    Их `as-is` — ответ о слое ЗАГОТОВКИ: девять из двенадцати называют
+    `scripts/` в прозе как инструмент проекта, и у потребителя такая ссылка
+    указывает на его дерево или на пакет. Сверку ссылок навыков с тем, что
+    потребитель получает, ведёт #995, пункт 2, — не этот гейт.
+    """
+    answers = inventory()["answers"]
+    off = {
+        name: calls_our_tree((ROOT / name).read_text(encoding="utf-8"))
+        for name, said in answers.items()
+        if name.startswith(".claude/")
+        and not name.startswith(".claude/skills/")
+        and said.get("answer") == "as-is"
+        and calls_our_tree((ROOT / name).read_text(encoding="utf-8"))
+    }
+    assert not off, f"механизм окна зовёт наш код, а помечен as-is: {off}"
+
+
+@pytest.mark.parametrize(
+    ("text", "lines"),
+    [
+        ("sys.path[:0] = ['scripts', 'packages/transport']\n", [1]),
+        ("python scripts/check_env.py\n", [1]),
+        ("# живёт вне `scripts/`\n", []),
+        ("#: см. packages/transport\n", []),
+        ("./.claude/hooks/x.sh\n", []),
+        ('python "$CLAUDE_PROJECT_DIR/scripts/x.py"\n', [1]),
+        ("cd .. && ../scripts/x.py\n", [1]),
+        ("ls my-scripts/ .scripts/ transcripts/\n", []),
+    ],
+)
+def test_calls_our_tree_tells_a_call_from_a_comment(text: str, lines: list[int]) -> None:
+    """Обе половины предиката: обращение в коде — названо; в комментарии — нет."""
+    assert calls_our_tree(text) == lines
