@@ -51,7 +51,7 @@ jobs:
     # премисы (scripts/verify_queue.py). Когда звать, решает ВЫЗЫВАЮЩИЙ —
     # событие и очередь заходов стоят у него (`.github/workflows/verify-queue.yml`).
     name: verify-queue
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
