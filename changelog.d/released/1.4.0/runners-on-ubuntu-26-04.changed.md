@@ -6,8 +6,8 @@
 не флейками в месяц разнобоя. Закрепление постоянное: следующий переезд
 делается по извещению площадки о снятии образа, и его называет дрейф; выход
 нового образа дрейф не слышит (решение
-[`039`](../docs/decisions/039-the-runner-image-is-named-drift-names-the-next.md)
-и поправка [`040`](../docs/decisions/040-the-runner-move-follows-a-removal-notice-039-corrected.md)).
+[`039`](../../../docs/decisions/039-the-runner-image-is-named-drift-names-the-next.md)
+и поправка [`040`](../../../docs/decisions/040-the-runner-move-follows-a-removal-notice-039-corrected.md)).
 Касается и шагов `step-*.yml`; потребителю совет тот же — явная метка у себя.
 
 #1151
