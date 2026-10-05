@@ -83,7 +83,8 @@ SCHEMA_SAID: Final = (
     "числе ещё без находки; fix_check — снято проверкой починки, а не строкой в теле "
     "слияния), counted (учтённые изменения), kinds (род → встречи по словарю и строкам "
     "«Род:» истории, и судьба; с формы 3 род находки, которой нет в словаре, берётся "
-    "из строки «Род:» в теле слияния), gaps "
+    "из строки «Род:» в теле слияния), merged (номер изменения → дата слияния из "
+    "истории общей ветки, #1136), gaps "
     "(чего архив не знает), unconfirmed (что сверка с историей не подтвердила)"
 )
 #: Сколько слитых изменений дописывать за заход. Арифметику держит гейт, а не
@@ -460,6 +461,7 @@ def build(
     history: list[tuple[int, str]],
     reread_counted: bool = False,
     unseen: int = 0,
+    dates: dict[int, str] | None = None,
 ) -> dict[str, Any]:
     """Архив: прежний плюс слитое из `history`, которого в нём ещё нет, — не больше бюджета."""
     archive: dict[str, Any] = {
@@ -497,6 +499,9 @@ def build(
         "repo": repo,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "counted": sorted(counted),
+        # ДАТЫ СЛИЯНИЯ — ИЗ ИСТОРИИ, А НЕ ОТ ПЛОЩАДКИ (#1136, 049): верификатор
+        # берёт их отсюда и спрашивает площадку только о номерах, которых нет.
+        "merged": {str(number): when for number, when in sorted((dates or {}).items())},
         "gaps": gaps,
         "findings": dict(sorted(archive["findings"].items())),
         "resolutions": dict(sorted(archive["resolutions"].items())),
@@ -533,6 +538,7 @@ def main(argv: list[str] | None = None) -> int:
             history,
             args.reread,
             trunk_log.unsquashed(log),
+            trunk_log.merge_dates(log),
         )
     except (
         NotRun,

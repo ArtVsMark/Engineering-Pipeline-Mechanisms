@@ -86,10 +86,14 @@ def test_merged_dates_ask_outside_the_window_and_skip_the_unmerged() -> None:
 
 
 def fake_platform(
-    monkeypatch: pytest.MonkeyPatch, runs: list[dict[str, Any]], marks: dict[str, Any]
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[dict[str, Any]],
+    marks: dict[str, Any],
+    memory: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Площадка: реестр, окно слитых, открытые, запуски, настройки — и запись вызовов."""
+    """Площадка: реестр, окно слитых, открытые, запуски, настройки, архив — и запись вызовов."""
     called: list[dict[str, Any]] = []
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda _url: {"merged": memory or {}})
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
     monkeypatch.setattr(module.findings, "live_issue", lambda *_: (23, "тело"))
     monkeypatch.setattr(module.findings, "parse_entries", lambda _body: marks)
@@ -316,3 +320,59 @@ def test_recently_called_findings_cost_no_asks(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(module.ghrest, "request", request)
     assert module.main(["--repo", "o/r", "--dry-run"]) == module.EXIT_OK
     assert asked == [], "спросили дату у находки, которую звать не будут"
+
+
+def test_remembered_dates_are_taken_without_asking() -> None:
+    """Номер из памяти архива берёт дату без спроса; спрашиваются только неизвестные (#1136)."""
+    asked: list[int] = []
+
+    def ask(number: int) -> str | None:
+        asked.append(number)
+        return None
+
+    given: list[list[int]] = []
+
+    def pick(population: list[int], k: int) -> list[int]:
+        given.append(list(population))
+        return population[:k]
+
+    said, unasked = module.merged_dates(
+        {1, 2, 3}, [], set(), ask, pick=pick, known={1: "2026-09-01T00:00:00+00:00"}
+    )
+    assert said == {1: "2026-09-01T00:00:00+00:00"}
+    assert given == [[2, 3]] and sorted(asked) == [2, 3] and unasked == 0
+
+
+def test_an_old_finding_is_queued_on_the_first_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Давняя находка вне окна встаёт в очередь в первом же заходе — по памяти, без спроса (#1136).
+
+    Площадка на вопрос о дате отвечает провалом теста: дата обязана прийти из
+    архива, а не из удачной выборки.
+    """
+    marks = {"0000abc": entry(7)}
+    called = fake_platform(monkeypatch, [], marks, {"7": "2026-01-01T00:00:00+00:00"})
+    fallback = module.ghrest.request
+
+    def request(method: str, path: str, token: str, body: Any = None) -> Any:
+        if method == "GET" and "/pulls/" in path:
+            pytest.fail("дата спрошена у площадки, хотя есть в памяти")
+        return fallback(method, path, token, body)
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_OK
+    assert [one["body"]["inputs"]["mark"] for one in called] == ["0000abc"]
+
+
+def test_an_unread_archive_leaves_no_memory_and_says_so(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Архив не прочитан или без поля — память пуста, и это сказано, а не отказ захода (045)."""
+
+    def refuse(_url: str) -> dict[str, Any]:
+        raise module.ghrest.TransportError("404")
+
+    assert module.remembered("o/r", refuse) == {}
+    assert module.remembered("o/r", lambda _url: {"findings": {}}) == {}
+    assert module.remembered("o/r", lambda _url: {"merged": {"5": "d", "x": "e"}}) == {5: "d"}
+    said = capsys.readouterr().out
+    assert said.count("памяти дат нет") == 2

@@ -82,18 +82,17 @@ RECALL_DAYS: Final = 7
 #: меняется; заход же идёт по событию, а набор живёт. Каждая починка круга
 #: рождала бы следующий обход. Выборка не зависит ни от расписания, ни от
 #: позиций: в каждом заходе каждый номер вне окна спрашивается с вероятностью
-#: `ASK_LIMIT / номеров`, и вечной немоты нет. СРОКА НЕТ, и это названо:
-#: твёрдый срок требует памяти о спрошенном, а своей памяти у захода нет (049).
+#: `ASK_LIMIT / номеров`, и вечной немоты нет.
 #:
-#: ЦЕНА ВЫБОРКИ НАЗВАНА (поздний взгляд на #1129). Дата номера из окна известна
-#: в каждом заходе, а номера вне окна — лишь когда он попал в выборку. Поэтому
-#: при малом остатке суточного потолка очередь чаще заполняют недавние висящие
-#: находки, а самые давние — ради которых верификатор и заведён — ждут без
-#: верхней границы. Круг по часу ограничивал ожидание только при заходе каждый
-#: час и неизменном наборе, то есть не ограничивал. Снимает это память о датах:
-#: дата слияния не меняется, и спрошенную однажды можно хранить, — это новый
-#: механизм: решение владельца 05.10.2026 — строить, место хранения — архив
-#: находок (#1136).
+#: ПАМЯТЬ О ДАТАХ — АРХИВ НАХОДОК (#1136, решение владельца 05.10.2026). Дата
+#: слияния не меняется, и сборщик архива пишет её из истории общей ветки полем
+#: `merged`. Номер из памяти берёт дату оттуда в КАЖДОМ заходе, без спроса, и
+#: давняя находка встаёт в очередь по настоящему возрасту — срок у неё есть.
+#: Выборка осталась только для номеров, которых память не знает, и это
+#: названный остаток (195): слитые без уплотнения (в теме нет «(#N)»),
+#: слитые после последней сборки архива и не попавшие в окно закрытых, и
+#: все — если архив с ветки `badges` не прочитан (тогда заход говорит это и
+#: работает как прежде, по окну и выборке).
 ASK_LIMIT: Final = 20
 
 
@@ -111,9 +110,9 @@ def candidates(
 
     `merged` — дата слияния по номеру; `called` — отпечатки, на которые
     верификатор уже звался в окне `RECALL_DAYS`. «Старые — первыми» — среди
-    тех, чья дата известна в этот заход: из окна — всегда, вне окна — только
-    попавшие в выборку `merged_dates`. Давняя находка вне выборки в очередь
-    этого захода не попадает вовсе (цена названа у `ASK_LIMIT`).
+    тех, чья дата известна в этот заход: из памяти архива и из окна — всегда,
+    прочие — только попавшие в выборку `merged_dates` (остаток назван у
+    `ASK_LIMIT`).
     """
     edge = (now - timedelta(days=STALE_DAYS)).isoformat()
     ready = [
@@ -154,8 +153,12 @@ def merged_dates(
     ask: Callable[[int], str | None],
     limit: int = ASK_LIMIT,
     pick: Callable[[list[int], int], list[int]] = random.sample,
+    known: dict[int, str] | None = None,
 ) -> tuple[dict[int, str], int]:
-    """Дата слияния каждого названного изменения: из окна, а вне его — спросом.
+    """Дата слияния каждого названного изменения: из памяти, из окна, а вне них — спросом.
+
+    `known` — даты из архива находок (`remembered`): номер оттуда берёт
+    дату без спроса в каждом заходе.
 
     `window` — последние закрытые (`ghrest.merged_page`), `live` — номера
     открытых, `ask` — дата слияния одного номера у площадки (`None` — не
@@ -168,18 +171,46 @@ def merged_dates(
     номеров осталось неспрошенными в этот заход.
     """
     seen = {int(one["number"]): one for one in window}
-    said: dict[int, str] = {
+    memory = known or {}
+    said: dict[int, str] = {number: memory[number] for number in numbers - live if number in memory}
+    said |= {
         number: str(seen[number]["merged_at"])
         for number in numbers - live
-        if number in seen and seen[number].get("merged_at")
+        if number not in said and number in seen and seen[number].get("merged_at")
     }
-    outside = sorted(number for number in numbers - live if number not in seen)
+    outside = sorted(
+        number for number in numbers - live if number not in seen and number not in said
+    )
     if not outside:
         return said, 0
     for number in pick(outside, min(limit, len(outside))):
         if merged_at := ask(number):
             said[number] = str(merged_at)
     return said, max(len(outside) - limit, 0)
+
+
+#: Где сборщик архива публикует архив находок: ветка `badges`.
+ARCHIVE_URL: Final = "https://raw.githubusercontent.com/{repo}/badges/.github/badges/findings.json"
+
+
+def remembered(repo: str, read: Callable[[str], dict[str, Any]] | None = None) -> dict[int, str]:
+    """Даты слияния из архива находок (`merged`, #1136); архив не прочитан — пусто и сказано.
+
+    Пустая память — не отказ захода: без неё он работает как прежде, по окну
+    и выборке, и печатает, что памяти нет (045).
+    """
+    try:
+        # Чтение берётся в миг вызова, а не при определении: иначе подмена
+        # транспорта в тесте его не тронула бы.
+        archive = (read or ghrest.raw_json)(ARCHIVE_URL.format(repo=repo))
+    except ghrest.TransportError as exc:
+        print(f"  памяти дат нет: архив находок не прочитан ({exc}) — даты по окну и выборке")
+        return {}
+    said = archive.get("merged")
+    if not isinstance(said, dict):
+        print("  памяти дат нет: в архиве нет поля `merged` — даты по окну и выборке")
+        return {}
+    return {int(number): str(when) for number, when in said.items() if str(number).isdigit()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -241,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
             window,
             live,
             ask,
+            known=remembered(args.repo),
         )
         trunk = str(
             (ghrest.request("GET", f"repos/{args.repo}", token) or {}).get("default_branch") or ""
@@ -257,8 +289,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if unasked:
         print(
-            f"  дат слияния не спрошено: {unasked} (потолок {ASK_LIMIT}) — их находок нет в "
-            "очереди этого захода; следующие берут свою выборку, срока у номера нет"
+            f"  дат слияния не спрошено: {unasked} (потолок {ASK_LIMIT}) — номеров нет ни в "
+            "памяти архива, ни в окне; их находок нет в очереди этого захода"
         )
     for mark in queue[:room]:
         if args.dry_run:

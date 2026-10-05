@@ -1,5 +1,6 @@
 """История общей ветки: тела слитых изменений и отказ на обрезанной истории (#1022)."""
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -71,3 +72,41 @@ def test_merges_without_squash_are_counted(tmp_path: Path) -> None:
     git(root, "commit", "-q", "--allow-empty", "-m", "Merge pull request #7 from o/agent/x")
     assert module.unseen(root, "HEAD") == 1
     assert len(module.merged_bodies(root, "HEAD")) == 2
+
+
+def test_merge_dates_come_from_the_squash_commits(tmp_path: Path) -> None:
+    """Дата слияния — время коммитера уплотнённого «(#N)», в UTC; прямая правка — нет (#1136).
+
+    Даты разбираются из того же вывода `git_log`, что тела: один проход
+    истории (взгляд на #1158); двухпольная запись даты не несёт.
+    """
+    root = tmp_path / "dated"
+    root.mkdir()
+    git(root, "init", "-q", "--initial-branch=main")
+    git(root, "config", "user.name", "t")
+    git(root, "config", "user.email", "t@t")
+    for subject, when in (
+        ("Первое (#1)", "2026-09-01T10:00:00+03:00"),
+        ("Прямая правка", "2026-09-02T10:00:00+00:00"),
+        ("Второе (#2)", "2026-09-03T12:30:00+00:00"),
+    ):
+        subprocess.run(
+            ["git", "commit", "-q", "--allow-empty", "-m", subject],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            env={**os.environ, "GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when},
+        )
+    log = module.git_log(root, "HEAD")
+    assert module.merge_dates(log) == {
+        1: "2026-09-01T07:00:00+00:00",
+        2: "2026-09-03T12:30:00+00:00",
+    }
+    assert [number for number, _ in module.merged_messages(log)] == [1, 2]
+    two = f"Тема (#3){module.FIELD}тело{module.RECORD}"
+    assert module.merge_dates(two) == {} and module.merged_messages(two) == [(3, "тело")]
+    assert module.fields(f"т{module.FIELD}д{module.FIELD}тело{module.FIELD}ещё") == (
+        "т",
+        "д",
+        f"тело{module.FIELD}ещё",
+    )
