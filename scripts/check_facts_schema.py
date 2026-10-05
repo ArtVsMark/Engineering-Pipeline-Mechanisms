@@ -42,6 +42,10 @@
 так не поймать, и это соседний случай: поэтому шаг публикации останавливает
 не код 1, а вердикт `VERDICT_REJECTED` в файле `--verdict`. Пишет его только
 `main`, и только на отказе; любой другой ненулевой код — предупреждение.
+ПРЕДЕЛ ЗАМЫСЛА НАЗВАН (195, взгляд на #1120): отказ, вердикт которого не
+записался, снаружи неотличим от сбоя до `main` и публикацию не держит. Он
+не молчит — вывод называет его «отклонена, но вердикт не записан», и шаг
+публикации поднимает предупреждение с кодом 1, — но и не останавливает.
 
 ЧЕГО ГЕЙТ НЕ ЛОВИТ, и это названо (046): он не знает, что витрина подняла
 договор, — сверка идёт с прибитой версией. Сверку версии договора с живой
@@ -125,7 +129,7 @@ def pinned_on_trunk(sha: str, token: str) -> None:
         )
     raise Foreign(
         f"коммит {sha[:7]} не лежит в истории main витрины {SHOWCASE} "
-        f"(compare: {status or 'нет ответа'}) — договор поднимала не она"
+        f"(compare: {status}) — договор поднимала не она"
     )
 
 
@@ -185,9 +189,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         outcome = judge(args.facts, args.schema)
-        if outcome == EXIT_REJECTED and args.verdict:
-            args.verdict.write_text(VERDICT_REJECTED, encoding="utf-8")
-        return outcome
     # Непредвиденный сбой гейта — не «отказ» (1), а исход 2: см. докстроку модуля.
     except Exception as exc:
         print(
@@ -195,6 +196,16 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_BROKEN
+    if outcome == EXIT_REJECTED and args.verdict:
+        # Вердикт не записался — отказ называется вслух, а не тонет в общем
+        # перехвате под видом «непредвиденного сбоя» (взгляд на #1120).
+        try:
+            args.verdict.write_text(VERDICT_REJECTED, encoding="utf-8")
+        except OSError as exc:
+            print(
+                f"сверка отклонена, но вердикт не записан в {args.verdict}: {exc}", file=sys.stderr
+            )
+    return outcome
 
 
 def judge(facts_path: Path, schema_url: str) -> int:

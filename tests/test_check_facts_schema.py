@@ -345,3 +345,15 @@ def test_the_publish_step_decides_by_the_verdict_not_the_code(
     assert (done.returncode != 0) is stops, done.stdout + done.stderr
     if code and not stops:
         assert "::warning::" in done.stdout
+
+
+def test_an_unwritable_verdict_keeps_the_rejection_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вердикт не записался — отказ остаётся отказом и назван, а не «сбоем» (#1120)."""
+    monkeypatch.setattr(module, "read_schema", lambda *_: SCHEMA)
+    bad = facts_file(tmp_path, schema="1.3", release="v1.3.0")
+    nowhere = tmp_path / "нет-каталога" / "verdict.txt"
+    assert module.main([str(bad), "--verdict", str(nowhere)]) == module.EXIT_REJECTED
+    said = capsys.readouterr().err
+    assert "вердикт не записан" in said and "непредвиденный" not in said
