@@ -6,6 +6,7 @@
 считается по именам прогонов.
 """
 
+import random
 from datetime import UTC, datetime
 from typing import Any
 
@@ -81,7 +82,7 @@ def test_merged_dates_ask_outside_the_window_and_skip_the_unmerged() -> None:
     said, unasked = module.merged_dates({50, 49, 10, 11, 12}, window, {12}, ask)
     assert unasked == 0
     assert said == {50: "2026-10-05T00:00:00Z", 10: "2026-10-09T00:00:00Z"}
-    assert asked == [10, 11], "спрошено лишнее или не спрошено нужное"
+    assert sorted(asked) == [10, 11], "спрошено лишнее или не спрошено нужное"
 
 
 def fake_platform(
@@ -173,7 +174,7 @@ def test_a_verifier_call_does_not_walk_the_late_queue() -> None:
 
 
 def test_asks_are_bounded_and_the_rest_is_named() -> None:
-    """Спросов не больше потолка, младшие номера первыми; остаток назван числом (#1121)."""
+    """Спросов не больше потолка; остаток назван числом (#1121)."""
     asked: list[int] = []
 
     def ask(number: int) -> str | None:
@@ -181,7 +182,7 @@ def test_asks_are_bounded_and_the_rest_is_named() -> None:
         return "2026-09-01T00:00:00Z"
 
     said, unasked = module.merged_dates({5, 3, 4, 1, 2}, [], set(), ask, limit=2)
-    assert asked == [1, 2] and set(said) == {1, 2} and unasked == 3
+    assert len(asked) == 2 and set(said) == set(asked) and unasked == 3
 
 
 def test_a_number_the_platform_no_longer_has_is_not_merged(
@@ -206,20 +207,46 @@ def test_a_number_the_platform_no_longer_has_is_not_merged(
     assert "0000001" not in said
 
 
-@pytest.mark.parametrize(
-    ("turn", "asked"),
-    [(0, [1, 2]), (1, [3, 4]), (2, [5, 1])],
-)
-def test_asks_go_round_the_ring_by_turn(turn: int, asked: list[int]) -> None:
-    """Круг сдвигается на потолок каждый заход: номер не занимает спросы навсегда (#1123)."""
+def test_asks_are_a_sample_bounded_by_the_cap() -> None:
+    """Спрос берёт выборку не больше потолка и только из номеров вне окна (#1127)."""
+    given: list[tuple[list[int], int]] = []
+
+    def pick(population: list[int], k: int) -> list[int]:
+        given.append((list(population), k))
+        return population[-k:]
+
     seen: list[int] = []
 
     def ask(number: int) -> str | None:
         seen.append(number)
         return None
 
-    module.merged_dates({1, 2, 3, 4, 5}, [], set(), ask, limit=2, turn=turn)
-    assert seen == asked
+    module.merged_dates({1, 2, 3, 4, 5}, [{"number": 5}], {4}, ask, limit=2, pick=pick)
+    assert given == [([1, 2, 3], 2)] and seen == [2, 3]
+    module.merged_dates({1}, [], set(), ask, limit=2, pick=pick)
+    assert given[-1] == ([1], 1), "выборка больше набора"
+
+
+def test_no_number_is_silent_forever_whatever_the_schedule() -> None:
+    """Ни пропуск заходов, ни перемены набора не оставляют номер неспрошенным (#1127).
+
+    Ровно те условия, на которых круг по часу немел: заходы только в чётные
+    часы и набор, который растёт и теряет номера между заходами. Выборка с
+    закреплённым зерном — чтобы прогон был воспроизводим, а не «обычно зелён».
+    """
+    rng = random.Random(1127)
+    asked: set[int] = set()
+
+    def ask(number: int) -> str | None:
+        asked.add(number)
+        return None
+
+    numbers = set(range(1, 41))
+    for run in range(0, 400, 2):
+        live = {run % 40 + 1}
+        numbers |= {41 + run // 50}
+        module.merged_dates(numbers, [], live, ask, limit=4, pick=rng.sample)
+    assert numbers - asked == set(), f"неспрошены навсегда: {sorted(numbers - asked)}"
 
 
 def test_recently_called_findings_cost_no_asks(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -47,6 +47,7 @@
 
 import argparse
 import os
+import random
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -72,11 +73,17 @@ RUN_PREFIX: Final = "verify "
 RECALL_DAYS: Final = 7
 #: Сколько дат слияния вне окна спрашивается за заход. Заход идёт после каждой
 #: пересборки плана, и без потолка давний реестр тратил бы квоту площадки
-#: сотнями запросов (взгляд на #1121). Спросы идут ПО КРУГУ: начало сдвигается
-#: на `ASK_LIMIT` каждый час (`turn`), и без памяти о спрошенном каждый номер
-#: спрашивается не реже раза в ⌈номеров / ASK_LIMIT⌉ часов. Старт всегда с
-#: младших отдавал бы весь потолок одним и тем же номерам — закрытым без
-#: слияния или ушедшим в 404 — навсегда (взгляд на #1123).
+#: сотнями запросов (взгляд на #1121). Старт всегда с младших отдавал бы весь
+#: потолок одним и тем же номерам — закрытым без слияния или ушедшим в 404 —
+#: навсегда (взгляд на #1123).
+#:
+#: СЛУЧАЙНАЯ ВЫБОРКА, А НЕ КРУГ (210, взгляд на #1127). Круг со сдвигом по часу
+#: держал обещание, только если заход идёт каждый час и набор между заходами не
+#: меняется; заход же идёт по событию, а набор живёт. Каждая починка круга
+#: рождала бы следующий обход. Выборка не зависит ни от расписания, ни от
+#: позиций: в каждом заходе каждый номер вне окна спрашивается с вероятностью
+#: `ASK_LIMIT / номеров`, и вечной немоты нет. СРОКА НЕТ, и это названо:
+#: твёрдый срок требует памяти о спрошенном, а своей памяти у захода нет (049).
 ASK_LIMIT: Final = 20
 
 
@@ -133,7 +140,7 @@ def merged_dates(
     live: set[int],
     ask: Callable[[int], str | None],
     limit: int = ASK_LIMIT,
-    turn: int = 0,
+    pick: Callable[[list[int], int], list[int]] = random.sample,
 ) -> tuple[dict[int, str], int]:
     """Дата слияния каждого названного изменения: из окна, а вне его — спросом.
 
@@ -143,9 +150,9 @@ def merged_dates(
     спрашивается — окно упорядочено по созданию, и давнее, слитое вчера, в
     него не попадает. Открытое и закрытое без слияния в ответ не входят.
 
-    Спросов не больше `limit`; номера вне окна идут по кругу, и `turn`
-    (номер захода — час) сдвигает начало круга на `limit`. Второе в ответе —
-    сколько номеров осталось неспрошенными в этот заход.
+    Спросов не больше `limit`; номера вне окна берёт случайная выборка `pick`
+    (`random.sample`; тест подставляет свою). Второе в ответе — сколько
+    номеров осталось неспрошенными в этот заход.
     """
     seen = {int(one["number"]): one for one in window}
     said: dict[int, str] = {
@@ -156,9 +163,7 @@ def merged_dates(
     outside = sorted(number for number in numbers - live if number not in seen)
     if not outside:
         return said, 0
-    start = (turn * limit) % len(outside)
-    ring = outside[start:] + outside[:start]
-    for number in ring[:limit]:
+    for number in pick(outside, min(limit, len(outside))):
         if merged_at := ask(number):
             said[number] = str(merged_at)
     return said, max(len(outside) - limit, 0)
@@ -223,7 +228,6 @@ def main(argv: list[str] | None = None) -> int:
             window,
             live,
             ask,
-            turn=int(now.timestamp() // 3600),
         )
         trunk = str(
             (ghrest.request("GET", f"repos/{args.repo}", token) or {}).get("default_branch") or ""
@@ -240,7 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if unasked:
         print(
-            f"  дат слияния не спрошено: {unasked} (потолок {ASK_LIMIT}) — ждут следующего захода"
+            f"  дат слияния не спрошено: {unasked} (потолок {ASK_LIMIT}) — следующие заходы "
+            "берут свою случайную выборку, срока у номера нет"
         )
     for mark in queue[:room]:
         if args.dry_run:
