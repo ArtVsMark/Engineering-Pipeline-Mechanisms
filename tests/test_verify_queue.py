@@ -253,6 +253,10 @@ def test_every_number_outside_the_window_is_offered_to_the_sample() -> None:
     assert given == expected, "выборке отдан не весь набор вне окна"
 
 
+#: Заходов в проверке выборки: 40 · 0,9^300 < 1e-12 — граница, а не удача зерна.
+TURNS = 300
+
+
 def test_the_default_pick_reaches_every_number() -> None:
     """Умолчание `pick` — выборка, а не срез: без подстановки спрошен каждый номер (#1123).
 
@@ -260,12 +264,23 @@ def test_the_default_pick_reaches_every_number() -> None:
     `population[:k]` на его месте оставил бы набор зелёным и вернул вечную
     немоту старших номеров (взгляд на #1134). Зерно закрепляется у ОБЩЕГО
     генератора: умолчание связано с `random.sample` при определении функции,
-    и подмена атрибута модуля его не тронула бы. Сорок заходов по четыре
-    спроса на сорок номеров обязаны покрыть их все.
+    и подмена атрибута модуля его не тронула бы.
+
+    ЧИСЛО ЗАХОДОВ — ИЗ ГРАНИЦЫ, А НЕ ИЗ ЗЕРНА (поздний взгляд на #1134,
+    `7ce9724`). Сорок заходов по четыре спроса на сорок номеров покрывали все
+    номера лишь с вероятностью около 0,55, и зелёным тест держало зерно. При
+    `TURNS` заходах вероятность пропустить хоть один номер не больше
+    `40 · (36/40)^TURNS` < 1e-12 — при ЛЮБОМ зерне и любой исправной выборке;
+    зерно оставлено только для повторяемости. Срез `population[:k]` при этом
+    спрашивает лишь номера 1–4 и краснеет на любом числе заходов.
     """
+    numbers = set(range(1, 41))
+    limit = 4
+    # Границу держит машина, а не комментарий (005, взгляд на #1152,
+    # `43f3ef3`): уменьши `TURNS` — краснеет здесь, а не молчит за зерном.
+    assert len(numbers) * (1 - limit / len(numbers)) ** TURNS < 1e-12, TURNS
     state = random.getstate()
     random.seed(1134)
-    numbers = set(range(1, 41))
     asked: set[int] = set()
 
     def ask(number: int) -> str | None:
@@ -273,8 +288,8 @@ def test_the_default_pick_reaches_every_number() -> None:
         return None
 
     try:
-        for _ in range(40):
-            module.merged_dates(numbers, [], set(), ask, limit=4)
+        for _ in range(TURNS):
+            module.merged_dates(numbers, [], set(), ask, limit=limit)
     finally:
         random.setstate(state)
     assert asked == numbers, f"не спрошены ни разу: {sorted(numbers - asked)}"
