@@ -1730,6 +1730,65 @@ def test_the_kind_line_gate_runs_end_to_end(run_script: RunScript, tmp_path: Pat
     assert result.code == CLEAN, result.text
 
 
+def judged_branch(root: Path, message: str, *, kinds: bool = True) -> Path:
+    """Ветка `branch_with` со словарём родов в корне — или без него, как у потребителя.
+
+    `--local` читает словарь из корня дерева, где его держит проект; копия
+    настоящего, а не выдуманный: род из теста обязан быть в живом словаре.
+    """
+    root.mkdir()
+    branch_with(root, message)
+    if kinds:
+        (root / ".rules").mkdir()
+        (root / ".rules" / "finding-kinds.json").write_bytes(
+            (ROOT / ".rules" / "finding-kinds.json").read_bytes()
+        )
+    return root
+
+
+def test_the_local_part_judges_the_branch_commits(run_script: RunScript, tmp_path: Path) -> None:
+    """`--local` судит текст коммитов ветки до толчка — той же функцией, что площадка (#1135).
+
+    Дерево настоящее, а не подложенный файл сообщений: предмет — что выборка
+    коммитов здесь та же, что пишет шаг `step-pr-meta.yml`.
+    """
+    check = load_script("check_pr_meta.py")
+    bad = judged_branch(tmp_path / "bad", "тема\n\nRefs #1\nРазобрано: 13cf07f\n")
+    result = run_script("check_pr_meta.py", "--local", "origin/main", cwd=bad)
+    assert result.code == REJECTED and check.NO_KIND_LINE in result.text, result.text
+    good = judged_branch(
+        tmp_path / "good",
+        "тема\n\nRefs #1\nРазобрано: 13cf07f\nРод: число без способа замера\n",
+    )
+    result = run_script("check_pr_meta.py", "--local", "origin/main", cwd=good)
+    assert result.code == CLEAN, result.text
+    assert "снятий в теле уплотнения: 1" in result.text
+
+
+def test_the_local_part_judges_closing_words_and_spares_a_consumer(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Слово закрытия в заголовке коммита краснит и здесь; без словаря родов род не требуется."""
+    check = load_script("check_pr_meta.py")
+    stray = judged_branch(tmp_path / "stray", "тема, fixes #5 по ходу\n\nRefs #1\n")
+    result = run_script("check_pr_meta.py", "--local", "origin/main", cwd=stray)
+    assert result.code == REJECTED and check.STRAY_CLOSING in result.text, result.text
+    consumer = judged_branch(
+        tmp_path / "consumer", "тема\n\nRefs #1\nРазобрано: 13cf07f\n", kinds=False
+    )
+    result = run_script("check_pr_meta.py", "--local", "origin/main", cwd=consumer)
+    assert result.code == CLEAN, result.text
+
+
+def test_the_local_part_without_a_base_is_the_third_outcome(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Базы нет — коммиты ветки не прочитаны, и это исход 2, а не «чисто» (075)."""
+    tree = judged_branch(tmp_path / "t", "тема\n\nRefs #1\n")
+    result = run_script("check_pr_meta.py", "--local", "origin/нет", cwd=tree)
+    assert result.code == BROKEN, result.text
+
+
 def test_the_reason_of_a_refused_kind_is_read_by_form() -> None:
     """Гейт судит причину «Род: нет» формой: «нет—опечатка» — да, «нет — —» — нет (#1090)."""
     check = load_script("check_pr_meta.py")
