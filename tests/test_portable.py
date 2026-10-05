@@ -66,6 +66,19 @@ def subjects(root: Path = ROOT) -> set[str]:
     # свой: молчание инвентаря о своде читалось бы как «переносится как есть».
     # Имена берутся у того, кто свод уже сверяет, а не пишутся здесь заново.
     found |= {name for name in RULEBOOK.RULEBOOK if (root / name).is_file()}
+    # ВСЁ ОСТАЛЬНОЕ ПОД `.claude/` И `.github/` — ПО ФАЙЛУ, И ЭТО СТРОГОЕ ПРАВИЛО, А
+    # НЕ ПЕРЕЧЕНЬ (взгляд на #1119, 210). Настройки и хуки окна, метки, авторы,
+    # формы задач — механизмы и данные, которые читает конвейер или окно; перечень
+    # пропускал бы следующий файл так же, как пропускал свод. Вне правила только
+    # то, что уже названо выше своей единицей: прогоны — файлом, навыки — каталогом.
+    for base, covered in ((".claude", paths.SKILLS), (".github", paths.WORKFLOWS)):
+        found |= {
+            one.relative_to(root).as_posix()
+            for one in (root / base).rglob("*")
+            if one.is_file()
+            and "__pycache__" not in one.parts
+            and not one.is_relative_to(root / covered)
+        }
     return found
 
 
@@ -347,6 +360,10 @@ def test_subjects_see_yaml_flows_and_directories(tmp_path: Path) -> None:
     for part in ("scripts", ".github/workflows", ".rules", ".claude/skills/one", "packages/p"):
         (tmp_path / part).mkdir(parents=True)
     (tmp_path / "AGENTS.md").write_text("# свод\n", encoding="utf-8")
+    (tmp_path / ".claude/hooks").mkdir(parents=True)
+    (tmp_path / ".claude/hooks/страж.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (tmp_path / ".claude/skills/one/SKILL.md").write_text("# навык\n", encoding="utf-8")
+    (tmp_path / ".github/labels.yml").write_text("[]\n", encoding="utf-8")
     (tmp_path / ".github/workflows/a.yaml").write_text("on: push\n", encoding="utf-8")
     (tmp_path / ".github/workflows/b.yml").write_text("on: push\n", encoding="utf-8")
     found = subjects(tmp_path)
@@ -354,6 +371,12 @@ def test_subjects_see_yaml_flows_and_directories(tmp_path: Path) -> None:
     assert {".github/workflows/b.yml", ".claude/skills/one", "packages/p"} <= found
     assert "AGENTS.md" in found, "свод выпал из инвентаря (#995)"
     assert "CLAUDE.md" not in found, "отсутствующий файл свода попал в предмет"
+    assert {".claude/hooks/страж.sh", ".github/labels.yml"} <= found, "хук или данные выпали"
+    assert ".claude/skills/one/SKILL.md" not in found, "навык считан и файлом, и каталогом"
+    assert (
+        ".github/workflows/b.yml" in found
+        and len([one for one in found if one.startswith(".github/workflows/")]) == 2
+    ), "прогон посчитан дважды"
 
 
 def test_a_directory_is_measured_by_its_files(tmp_path: Path) -> None:
