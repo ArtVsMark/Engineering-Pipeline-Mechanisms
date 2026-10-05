@@ -1789,6 +1789,23 @@ def test_the_local_part_without_a_base_is_the_third_outcome(
     assert result.code == BROKEN, result.text
 
 
+def test_the_local_part_is_held_piece_by_piece(tmp_path: Path) -> None:
+    """Части `--local` названы прямо: выборка коммитов, суд текста и исход (#1135).
+
+    Вшивка выше идёт отдельным процессом и внутренних имён не знает; здесь
+    каждое из них зовётся в том же дереве.
+    """
+    check = load_script("check_pr_meta.py")
+    tree = judged_branch(tmp_path / "t", "тема\n\nRefs #1\nРазобрано: 13cf07f\n")
+    with inside(tree):
+        messages = check.local_messages("origin/main")
+        assert len(messages) == 1 and "Разобрано: 13cf07f" in messages[0]
+        assert check.NO_KIND_LINE in " ".join(check.text_problems("", "", messages, None))
+        assert check.judge_local("origin/main") == REJECTED
+        with pytest.raises(check.NotRun):
+            check.local_messages("origin/нет")
+
+
 def test_the_reason_of_a_refused_kind_is_read_by_form() -> None:
     """Гейт судит причину «Род: нет» формой: «нет—опечатка» — да, «нет — —» — нет (#1090)."""
     check = load_script("check_pr_meta.py")
