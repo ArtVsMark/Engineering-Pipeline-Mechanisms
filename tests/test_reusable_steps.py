@@ -14,8 +14,11 @@
 держится: полезности самого пояснения — это суждение о смысле (057).
 """
 
+import os
 import re
-from typing import Final
+import subprocess
+from pathlib import Path
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -289,7 +292,7 @@ def test_the_code_block_is_one_in_every_step() -> None:
 #: Вход пробы переноса (#990): одно имя у всех шагов, зовущих наш код.
 STRIP_INPUT: Final = "strip-ours"
 #: Команда стирания нашего кода из дерева вызывающего — под входом и только.
-STRIP_COMMAND: Final = 'if [ "$STRIP_OURS" = "true" ]; then rm -rf scripts packages tests; fi'
+STRIP_COMMAND: Final = "rm -rf scripts packages tests"
 
 
 def test_every_step_with_our_code_takes_the_probe_input() -> None:
@@ -329,3 +332,81 @@ def test_the_strip_happens_after_our_code_is_taken_and_only_under_the_input() ->
     assert "STRIP_OURS: ${{ inputs.strip-ours }}" in block, "входу не передан флаг шага"
     taken = block.index('mv .pipeline-mechanisms "$RUNNER_TEMP/mechanisms"')
     assert taken < block.index(STRIP_COMMAND), "наш код стирается раньше, чем вынесен"
+
+
+def strip_step(said: str) -> dict[str, Any]:
+    """Шаг блока кода, который выносит наш код и стирает его под входом."""
+    for job in yaml.safe_load(said)["jobs"].values():
+        for step in job.get("steps", []):
+            if STRIP_COMMAND in str(step.get("run") or ""):
+                return dict(step)
+    raise AssertionError("шага со стиранием нет")
+
+
+PROVIDER: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+PROBE: Final = f"{PROVIDER}/.github/workflows/handover-probe.yml@refs/heads/main"
+NEIGHBOUR: Final = "сосед/его-проект"
+NEIGHBOUR_CI: Final = f"{NEIGHBOUR}/.github/workflows/ci.yml@refs/heads/main"
+
+
+@pytest.mark.parametrize(
+    ("strip", "caller", "frm", "flow", "code", "left"),
+    [
+        ("true", PROVIDER, PROVIDER, PROBE, 0, False),
+        ("true", PROVIDER.lower(), PROVIDER, PROBE, 0, False),
+        ("true", NEIGHBOUR, PROVIDER, NEIGHBOUR_CI, 1, True),
+        ("true", NEIGHBOUR, NEIGHBOUR, NEIGHBOUR_CI, 1, True),
+        (
+            "true",
+            PROVIDER,
+            PROVIDER,
+            f"{PROVIDER}/.github/workflows/ci.yml@refs/heads/main",
+            1,
+            True,
+        ),
+        ("false", NEIGHBOUR, PROVIDER, NEIGHBOUR_CI, 0, True),
+    ],
+    ids=["проба", "проба-иным-регистром", "чужой", "копия-у-соседа", "не-проба", "выключен"],
+)
+def test_the_strip_runs_only_in_the_providers_own_repository(
+    tmp_path: Path, strip: str, caller: str, frm: str, flow: str, code: int, left: bool
+) -> None:
+    """Стирание по именам папок идёт только у поставщика; у соседа — отказ (взгляд на #1113).
+
+    Исполняется сам шаг блока, а не сверяется его текст: у соседа под
+    `scripts/` лежит его код, и словами «потребитель вход не задаёт» он не
+    защищён.
+    """
+    step = strip_step(
+        next(
+            said
+            for said in steps().values()
+            if any(MECHANISMS in line for line in commands_of(said))
+        )
+    )
+    for folder in ("scripts", "packages", "tests", ".pipeline-mechanisms"):
+        (tmp_path / folder).mkdir()
+    env = {
+        **os.environ,
+        "STRIP_OURS": strip,
+        # «копия-у-соседа»: площадка называет репозиторием шага самого соседа.
+        "FROM": frm,
+        "GITHUB_REPOSITORY": caller,
+        "CALLER": flow,
+        "RUNNER_TEMP": str(tmp_path / "runner"),
+        "GITHUB_ENV": str(tmp_path / "github-env"),
+    }
+    (tmp_path / "runner").mkdir()
+    done = subprocess.run(
+        ["bash", "-c", step["run"]],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == code, done.stderr or done.stdout
+    assert (tmp_path / "scripts").exists() is left
+    assert step["env"]["FROM"] == "${{ job.workflow_repository }}"
+    assert step["env"]["CALLER"] == "${{ github.workflow_ref }}"
