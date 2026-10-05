@@ -759,6 +759,13 @@ def test_an_unknown_mark_is_named_not_guessed() -> None:
         assert contract_names_off_form(text) == [], text
         assert unclassified_marks(text) == [mark], text
     assert unclassified_marks(f"{WORD} «фактов» (1.3), — `1.3` **1.3**") == []
+    # Промежуток — тот же, что у разбора: за границей и пустой строкой знаки
+    # другой части не судятся, а за неизвестным — назван только он (`438b122`).
+    assert unclassified_marks(f"{WORD}.\n\n- пункт") == []
+    assert unclassified_marks(f"{WORD}\n\n- пункт") == []
+    assert unclassified_marks(f"{WORD}; ‽ 1.3") == []
+    assert unclassified_marks(f"{WORD} ‽ ¿ 1.3") == ["‽"]
+    assert unclassified_marks(f"{WORD} _1.3") == []
     assert set(LINE_BREAKS) == {
         "\n",
         "\r",
@@ -777,16 +784,25 @@ def test_an_unknown_mark_is_named_not_guessed() -> None:
 def unclassified_marks(text: str) -> list[str]:
     """Знаки за словом «договор», которых нет ни в `SKIP_MARKS`, ни в `BOUNDARY`.
 
-    Смотрится промежуток от слова до первой буквы или цифры: в нём каждый
-    не-пробельный знак обязан быть отнесён к одному из двух перечней.
+    Смотрится ТОТ ЖЕ промежуток, что проходит `NEXT_TOKEN`, и ни знаком
+    дальше (взгляд на #1146, `438b122`): от слова до первой буквы или цифры,
+    границы `BOUNDARY` или пустой строки. За границей начинается другая
+    часть текста — «договор.\n\n- пункт» не судится по `-`, на котором разбор
+    и не стоял. Неизвестный знак обрывает разбор, поэтому назван первый,
+    а не все до буквы.
     """
     unknown: list[str] = []
+    blank_line = re.compile(BLANK_LINE)
     for word in CONTRACT_WORD.finditer(text):
         index = word.end()
-        while index < len(text) and not (text[index].isalnum() or text[index] == "_"):
+        while index < len(text) and not text[index].isalnum():
             char = text[index]
-            if not char.isspace() and char not in SKIP_MARKS + BOUNDARY and char not in unknown:
-                unknown.append(char)
+            if char in BOUNDARY or blank_line.match(text, index):
+                break
+            if not (char.isspace() or char in SKIP_MARKS or char == "_"):
+                if char not in unknown:
+                    unknown.append(char)
+                break
             index += 1
     return unknown
 
@@ -834,9 +850,12 @@ def unclassified_marks(text: str) -> list[str]:
         (f"{WORD}\r\n\r\n1.3 Раздел", []),
         (f"{WORD}\n \t\n1.3 Раздел", []),
         (f"{WORD}\u00a0\n\n1.3 Раздел", []),
-        # Границы выведены, а не перечислены (взгляд на #1133, `ec3f6cf`, `19aacc3`):
+        # Границы — перечень `BOUNDARY`, переводы строки — по `str.splitlines`
+        # (взгляд на #1133, `ec3f6cf`, `19aacc3`; на #1146, `436af87`):
         # многоточие одним знаком, перевод строки `\r`, U+2028/U+2029, `\x85`.
         (f"{WORD}… 1.3", []),
+        # `‼` — не граница, а неизвестный знак: разбор обрывается, и проверка
+        # по дереву его называет (`test_an_unknown_mark_is_named_not_guessed`).
         (f"{WORD}‼ 1.3", []),
         (f"{WORD}\r\r1.3 Раздел", []),
         (f"{WORD}\u2028\u20281.3 Раздел", []),
