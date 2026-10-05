@@ -41,7 +41,7 @@ concurrency:
 jobs:
   respond:
     name: respond
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Зависший агент держит слот и очередь проверок: умолчание площадки — шесть
     # часов.
     timeout-minutes: 30

@@ -59,7 +59,7 @@ jobs:
     # ВЫЗЫВАЮЩИЙ — события и единственная группа заходов стоят у него
     # (`.github/workflows/automerge.yml`), здесь только заход.
     name: automerge
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       # Тело уплотнения собирается из коммитов ветки — нужна вся история.

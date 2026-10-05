@@ -82,7 +82,7 @@ jobs:
   # её вердикт доезжает до него через `needs`.
   test-matrix:
     name: test-matrix
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     strategy:
       # Ячейка одна, но `fail-fast` объявлен: добавят вторую версию — и
@@ -138,7 +138,7 @@ jobs:
     #
     # Вердикта у отменённого прогона нет, и выдавать за вердикт нечего.
     if: always() && needs.test-matrix.result != 'cancelled'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: вердикт матрицы
@@ -164,7 +164,7 @@ jobs:
     # Только на изменении: у ручного прогона нет базы (`pull_request.base.ref`
     # пуст), и счёт давал бы ложное «не сосчитаны».
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
