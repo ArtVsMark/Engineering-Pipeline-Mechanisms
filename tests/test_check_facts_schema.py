@@ -137,7 +137,14 @@ def test_the_pinned_commit_is_asked_about_and_a_foreign_one_is_rejected(
 
 @pytest.mark.parametrize(
     ("status", "outcome"),
-    [("ahead", None), ("identical", None), ("diverged", "Foreign"), ("behind", "Foreign")],
+    [
+        ("ahead", None),
+        ("identical", None),
+        ("diverged", "Foreign"),
+        ("behind", "Foreign"),
+        ("", "NotRun"),
+        ("неведомо", "NotRun"),
+    ],
 )
 def test_on_trunk_reads_the_compare_answer(
     monkeypatch: pytest.MonkeyPatch, status: str, outcome: str | None
@@ -148,8 +155,42 @@ def test_on_trunk_reads_the_compare_answer(
     if outcome is None:
         module.pinned_on_trunk(module.SCHEMA_SHA, "токен")
         return
-    with pytest.raises(module.Foreign):
+    with pytest.raises(getattr(module, outcome)):
         module.pinned_on_trunk(module.SCHEMA_SHA, "токен")
+
+
+@pytest.mark.parametrize("said", [None, {}], ids=["пустое-тело", "без-статуса"])
+def test_an_answer_without_a_status_is_not_run(
+    monkeypatch: pytest.MonkeyPatch, said: dict[str, Any] | None
+) -> None:
+    """Пустое тело и ответ без `status` — «не прочитали», а не «чужой коммит» (#1116)."""
+    monkeypatch.undo()
+    monkeypatch.setattr(module.ghrest, "request", lambda *_a, **_k: said)
+    with pytest.raises(module.NotRun):
+        module.pinned_on_trunk(module.SCHEMA_SHA, "токен")
+
+
+def test_the_verdict_file_is_written_on_a_rejection_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Вердикт отказа пишется только на отказе; сбой и чистая сверка файла не оставляют (#1116)."""
+    verdict = tmp_path / "verdict.txt"
+    monkeypatch.setattr(module, "read_schema", lambda *_: SCHEMA)
+    bad = facts_file(tmp_path, schema="1.3", release="v1.3.0")
+    assert module.main([str(bad), "--verdict", str(verdict)]) == module.EXIT_REJECTED
+    assert verdict.read_text(encoding="utf-8") == module.VERDICT_REJECTED
+    verdict.unlink()
+
+    good = facts_file(tmp_path, schema="1.3", release="1.3")
+    assert module.main([str(good), "--verdict", str(verdict)]) == module.EXIT_OK
+    assert not verdict.exists(), "чистая сверка оставила вердикт отказа"
+
+    def broken(*_: object) -> None:
+        raise AttributeError("нежданное")
+
+    monkeypatch.setattr(module, "read_schema", broken)
+    assert module.main([str(bad), "--verdict", str(verdict)]) == module.EXIT_BROKEN
+    assert not verdict.exists()
 
 
 def test_on_trunk_without_a_token_or_network_is_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,4 +301,47 @@ def test_the_publish_step_stops_only_on_a_rejection() -> None:
     )
     run = step["run"]
     assert "if ! python -m pip install" in run, "провал установки читался бы как отказ"
-    assert '2) echo "::warning::' in run and '*) exit "$rc"' in run
+    # Останавливает вердикт, а не код: слово сверяется с константой скрипта.
+    assert f'= "{module.VERDICT_REJECTED}" ]; then' in run and "--verdict" in run
+    assert '*) exit "$rc"' not in run, "код выхода снова решает остановку"
+
+
+@pytest.mark.parametrize(
+    ("code", "verdict", "stops"),
+    [(0, "", False), (1, "rejected", True), (1, "", False), (2, "", False)],
+    ids=["чисто", "отказ", "трассировка-до-main", "не-отработал"],
+)
+def test_the_publish_step_decides_by_the_verdict_not_the_code(
+    tmp_path: Path, code: int, verdict: str, stops: bool
+) -> None:
+    """Исполняется сам шаг: код 1 без вердикта — предупреждение, вердикт — остановка (#1116)."""
+    import os
+    import subprocess
+
+    import yaml
+
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
+    run = next(
+        str(one["run"])
+        for job in flow["jobs"].values()
+        for one in job.get("steps", [])
+        if "check_facts_schema.py" in str(one.get("run") or "")
+    )
+    decision = run[run.index("\nrc=0") + 1 :]
+    fake = f'sh -c \'[ -n "{verdict}" ] && printf %s "{verdict}" > "$0"; exit {code}\' "$verdict"'
+    lines = [
+        fake if "scripts/check_facts_schema.py" in line else line for line in decision.splitlines()
+    ]
+    script = "\n".join(lines).replace(" || rc=$?", "") + "\n"
+    script = script.replace(fake, fake + " || rc=$?")
+    done = subprocess.run(
+        ["bash", "-c", "set -uo pipefail\n" + script],
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert (done.returncode != 0) is stops, done.stdout + done.stderr
+    if code and not stops:
+        assert "::warning::" in done.stdout

@@ -35,10 +35,13 @@
 граница сегодня ничего не пропускает; поднял договор с форматом — ставьте
 `jsonschema[format]`.
 
-НЕПРЕДВИДЕННЫЙ СБОЙ — «НЕ ОТРАБОТАЛ» (взгляд на #1116). Трассировка Python
+НЕПРЕДВИДЕННЫЙ СБОЙ — «НЕ ОТРАБОТАЛ» (взгляды на #1116). Трассировка Python
 выходит кодом 1, а код 1 здесь — «отказ», и шаг публикации остановился бы
 из-за ошибки гейта. Поэтому `main` переводит любое необработанное
-исключение в исход 2 и называет его.
+исключение в исход 2 и называет его. Сбой ДО `main` — на импорте модуля —
+так не поймать, и это соседний случай: поэтому шаг публикации останавливает
+не код 1, а вердикт `VERDICT_REJECTED` в файле `--verdict`. Пишет его только
+`main`, и только на отказе; любой другой ненулевой код — предупреждение.
 
 ЧЕГО ГЕЙТ НЕ ЛОВИТ, и это названо (046): он не знает, что витрина подняла
 договор, — сверка идёт с прибитой версией. Сверку версии договора с живой
@@ -89,6 +92,13 @@ class Foreign(ValueError):
 
 #: Ответы `compare` площадки, при которых коммит — предок `main` витрины.
 ON_TRUNK: Final = frozenset({"ahead", "identical"})
+#: Ответы, при которых коммита в истории `main` нет. Список разрешительный
+#: (068): отказ — только на названном статусе; ответ без статуса, пустой или с
+#: незнакомым словом — «не прочитали», а не «чужой» (взгляд на #1116).
+OFF_TRUNK: Final = frozenset({"diverged", "behind"})
+#: Слово вердикта отказа в файле `--verdict`: останавливает публикацию оно, а не
+#: код выхода — код 1 даёт и трассировка, упавшая до `main` (взгляд на #1116).
+VERDICT_REJECTED: Final = "rejected"
 
 
 def pinned_on_trunk(sha: str, token: str) -> None:
@@ -107,11 +117,16 @@ def pinned_on_trunk(sha: str, token: str) -> None:
     if not isinstance(said, dict):
         raise NotRun(f"история витрины прочитана не словарём: {type(said).__name__}")
     status = str(said.get("status") or "")
-    if status not in ON_TRUNK:
-        raise Foreign(
-            f"коммит {sha[:7]} не лежит в истории main витрины {SHOWCASE} "
-            f"(compare: {status or 'нет ответа'}) — договор поднимала не она"
+    if status in ON_TRUNK:
+        return
+    if status not in OFF_TRUNK:
+        raise NotRun(
+            f"история витрины не прочитана: compare ответил статусом {status or 'никаким'!r}"
         )
+    raise Foreign(
+        f"коммит {sha[:7]} не лежит в истории main витрины {SHOWCASE} "
+        f"(compare: {status or 'нет ответа'}) — договор поднимала не она"
+    )
 
 
 def read_schema(url: str = SCHEMA_URL) -> dict[str, Any]:
@@ -164,9 +179,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("facts", type=Path, help="собранный facts.json")
     parser.add_argument("--schema", default=SCHEMA_URL, help="адрес схемы витрины")
+    parser.add_argument(
+        "--verdict", type=Path, help=f"файл, куда на отказе пишется «{VERDICT_REJECTED}»"
+    )
     args = parser.parse_args(argv)
     try:
-        return judge(args.facts, args.schema)
+        outcome = judge(args.facts, args.schema)
+        if outcome == EXIT_REJECTED and args.verdict:
+            args.verdict.write_text(VERDICT_REJECTED, encoding="utf-8")
+        return outcome
     # Непредвиденный сбой гейта — не «отказ» (1), а исход 2: см. докстроку модуля.
     except Exception as exc:
         print(
