@@ -78,7 +78,8 @@ def test_merged_dates_ask_outside_the_window_and_skip_the_unmerged() -> None:
         asked.append(number)
         return {10: "2026-10-09T00:00:00Z"}.get(number)
 
-    said = module.merged_dates({50, 49, 10, 11, 12}, window, {12}, ask)
+    said, unasked = module.merged_dates({50, 49, 10, 11, 12}, window, {12}, ask)
+    assert unasked == 0
     assert said == {50: "2026-10-05T00:00:00Z", 10: "2026-10-09T00:00:00Z"}
     assert asked == [10, 11], "спрошено лишнее или не спрошено нужное"
 
@@ -166,6 +167,37 @@ def test_a_verifier_call_does_not_walk_the_late_queue() -> None:
     flow = yaml.safe_load((ROOT / ".github" / "workflows" / "review.yml").read_text("utf-8"))
     condition = " ".join(str(flow["jobs"]["late-queue"]["if"]).split())
     assert "(github.event_name == 'workflow_dispatch' && inputs.mark == '')" in condition
-    assert "|| github.event_name == 'workflow_dispatch'\n" not in str(
-        flow["jobs"]["late-queue"]["if"]
-    )
+    # Голое `|| github.event_name == 'workflow_dispatch'` рядом с новой формой
+    # снова пускало бы кнопку верификатора: ручной запуск назван ровно раз (#1121).
+    assert condition.count("github.event_name == 'workflow_dispatch'") == 1, condition
+
+
+def test_asks_are_bounded_and_the_rest_is_named() -> None:
+    """Спросов не больше потолка, младшие номера первыми; остаток назван числом (#1121)."""
+    asked: list[int] = []
+
+    def ask(number: int) -> str | None:
+        asked.append(number)
+        return "2026-09-01T00:00:00Z"
+
+    said, unasked = module.merged_dates({5, 3, 4, 1, 2}, [], set(), ask, limit=2)
+    assert asked == [1, 2] and set(said) == {1, 2} and unasked == 3
+
+
+def test_a_number_the_platform_no_longer_has_is_not_merged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """404 на номер находки — «не слито», а не сбой всего захода (#1121)."""
+    fake_platform(monkeypatch, [], {"0000001": entry(101), "0000002": entry(102)})
+
+    def request(method: str, path: str, _token: str, body: Any = None) -> Any:
+        if path.endswith("/pulls/101"):
+            raise module.ghrest.NotFound("404")
+        if "/pulls/" in path:
+            return {"merged_at": "2026-09-01T00:00:00Z"}
+        if method == "GET":
+            return {"default_branch": "trunk"}
+        return None
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.main(["--repo", "o/r", "--dry-run"]) == module.EXIT_OK
