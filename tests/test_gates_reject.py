@@ -844,7 +844,10 @@ def test_the_journal_unfolds_a_bounded_number_of_releases(tmp_path: Path) -> Non
 
     unfolded = [line for line in assembled.splitlines() if line.startswith("## 1.")]
     assert len(unfolded) == module.UNFOLDED_RELEASES, assembled
-    assert "Выпуски раньше" in assembled, "свёрнутые выпуски оборваны молча"
+    assert "## Выпуски " in assembled, "свёрнутые выпуски оборваны молча"
+    # Заголовок называет НОВЕЙШИЙ свёрнутый выпуск и включает его: «раньше
+    # 1.2.0» над списком, где 1.2.0 стоит первым, противоречил себе (#1172).
+    assert "## Выпуски 1.2.0 и раньше" in assembled, "заголовок свёрнутых не включает свой выпуск"
     for minor in range(3):
         assert f"1.{minor}.0" in assembled, "свёрнутый выпуск не назван ссылкой"
 
@@ -870,7 +873,7 @@ def test_a_short_history_folds_nothing(tmp_path: Path) -> None:
     finally:
         monkey.undo()
 
-    assert "Выпуски раньше" not in assembled, assembled
+    assert "## Выпуски " not in assembled, assembled
 
 
 # --- частичное закрытие задачи -----------------------------------------------
