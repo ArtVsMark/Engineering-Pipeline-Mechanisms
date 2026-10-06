@@ -46,6 +46,9 @@
 """
 
 import argparse
+import base64
+import binascii
+import json
 import os
 import random
 import sys
@@ -56,6 +59,7 @@ from typing import Any, Final
 import changerefs
 import findings
 import ghrest
+import paths
 import report
 
 EXIT_OK: Final = 0
@@ -155,7 +159,7 @@ def merged_dates(
     pick: Callable[[list[int], int], list[int]] = random.sample,
     known: dict[int, str] | None = None,
 ) -> tuple[dict[int, str], int]:
-    """Дата слияния каждого названного изменения: из памяти, из окна, а вне них — спросом.
+    """Дата слияния каждого названного изменения: из окна, из памяти, а вне них — спросом.
 
     `known` — даты из архива находок (`remembered`): номер оттуда берёт
     дату без спроса в каждом заходе.
@@ -172,11 +176,19 @@ def merged_dates(
     """
     seen = {int(one["number"]): one for one in window}
     memory = known or {}
-    said: dict[int, str] = {number: memory[number] for number in numbers - live if number in memory}
-    said |= {
+    # ДАТА ПЛОЩАДКИ — ПЕРВОЙ, ПАМЯТЬ — ТОЛЬКО ВНЕ ОКНА (взгляд на #1158). Память
+    # хранит время коммитера, а его меняет переписанная история (rebase,
+    # cherry-pick): находка «помолодела» бы и ушла в очередь позже настоящего
+    # срока. `merged_at` площадки историей не переписывается.
+    said: dict[int, str] = {
         number: str(seen[number]["merged_at"])
         for number in numbers - live
-        if number not in said and number in seen and seen[number].get("merged_at")
+        if number in seen and seen[number].get("merged_at")
+    }
+    said |= {
+        number: memory[number]
+        for number in numbers - live
+        if number not in said and number not in seen and number in memory
     }
     outside = sorted(
         number for number in numbers - live if number not in seen and number not in said
@@ -191,18 +203,49 @@ def merged_dates(
 
 #: Где сборщик архива публикует архив находок: ветка `badges`.
 ARCHIVE_URL: Final = "https://raw.githubusercontent.com/{repo}/badges/.github/badges/findings.json"
+#: Тот же архив для API площадки: путь в ветке `badges`.
+ARCHIVE_PATH: Final = (paths.BADGES_DIR / "findings.json").as_posix()
 
 
-def remembered(repo: str, read: Callable[[str], dict[str, Any]] | None = None) -> dict[int, str]:
+def archive_by_api(repo: str, token: str) -> dict[str, Any]:
+    """Архив находок через API площадки с токеном — читается и в приватном репозитории.
+
+    ПРЯМАЯ ССЫЛКА БЕЗ ТОКЕНА В ПРИВАТНОМ РЕПОЗИТОРИИ ВСЕГДА 404 (взгляд на
+    #1158): у потребителя память дат была бы пуста всегда, и срок давней
+    находки там не наступал бы. Содержимое берётся блобом, а не ответом
+    `contents`: тот не отдаёт файлы больше мегабайта, а архив больше.
+    """
+    meta = ghrest.request("GET", f"repos/{repo}/contents/{ARCHIVE_PATH}?ref=badges", token) or {}
+    sha = str(meta.get("sha") or "") if isinstance(meta, dict) else ""
+    if not sha:
+        raise ghrest.TransportError("архив находок: площадка не назвала блоб")
+    blob = ghrest.request("GET", f"repos/{repo}/git/blobs/{sha}", token) or {}
+    try:
+        archive = json.loads(base64.b64decode(str(blob.get("content") or "")))
+    except (binascii.Error, ValueError) as exc:
+        raise ghrest.TransportError(f"архив находок не разбирается: {exc}") from exc
+    if not isinstance(archive, dict):
+        raise ghrest.TransportError("архив находок не словарь: читать нечего")
+    return archive
+
+
+def remembered(
+    repo: str, read: Callable[[str], dict[str, Any]] | None = None, token: str = ""
+) -> dict[int, str]:
     """Даты слияния из архива находок (`merged`, #1136); архив не прочитан — пусто и сказано.
 
+    С токеном архив читается API площадки (`archive_by_api`), без него —
+    прямой ссылкой, которая отвечает только у публичного репозитория.
     Пустая память — не отказ захода: без неё он работает как прежде, по окну
     и выборке, и печатает, что памяти нет (045).
     """
     try:
         # Чтение берётся в миг вызова, а не при определении: иначе подмена
         # транспорта в тесте его не тронула бы.
-        archive = (read or ghrest.raw_json)(ARCHIVE_URL.format(repo=repo))
+        if read is None and token:
+            archive = archive_by_api(repo, token)
+        else:
+            archive = (read or ghrest.raw_json)(ARCHIVE_URL.format(repo=repo))
     except ghrest.TransportError as exc:
         print(f"  памяти дат нет: архив находок не прочитан ({exc}) — даты по окну и выборке")
         return {}
@@ -272,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
             window,
             live,
             ask,
-            known=remembered(args.repo),
+            known=remembered(args.repo, token=token),
         )
         trunk = str(
             (ghrest.request("GET", f"repos/{args.repo}", token) or {}).get("default_branch") or ""

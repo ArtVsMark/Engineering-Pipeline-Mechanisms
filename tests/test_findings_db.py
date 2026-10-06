@@ -42,6 +42,7 @@ def archive(repo: str = "o/r", **overrides: Any) -> dict[str, Any]:
         "repo": repo,
         "generated_at": "2026-10-05T08:00:00+00:00",
         "counted": [10, 11],
+        "merged": {"10": "2026-09-30T10:00:00+00:00", "11": "2026-10-01T10:00:00+00:00"},
         "gaps": [],
         "findings": {
             "aaaaaaa": finding(10, род="форма записи не разобрана", resolved_by=11),
@@ -96,6 +97,7 @@ def test_an_archive_lands_in_every_table(tmp_path: Path) -> None:
         "resolutions": 2,
         "kinds": 3,
         "kind_spawned": 2,
+        "merges": 2,
     }
     assert rows(out, "SELECT mark, rod FROM findings ORDER BY mark") == [
         ("aaaaaaa", "форма записи не разобрана"),
@@ -261,3 +263,24 @@ def test_the_pieces_are_held_directly(tmp_path: Path) -> None:
         module.fill(db, archive())
         with pytest.raises(module.NotRun, match="передан дважды"):
             module.fill(db, archive())
+
+
+def test_merge_dates_land_and_an_old_archive_has_none(tmp_path: Path) -> None:
+    """Даты слияния — в таблице `merges`; архив до #1158 без поля законен (взгляд на #1158)."""
+    out = tmp_path / "f.sqlite"
+    module.build([written(tmp_path, "a.json", archive())], out)
+    assert rows(out, "SELECT pr, merged_at FROM merges ORDER BY pr") == [
+        (10, "2026-09-30T10:00:00+00:00"),
+        (11, "2026-10-01T10:00:00+00:00"),
+    ]
+    old = archive()
+    del old["merged"]
+    counts = module.build([written(tmp_path, "b.json", old)], tmp_path / "g.sqlite")
+    assert counts["merges"] == 0
+
+
+def test_a_misshapen_merge_map_is_refused(tmp_path: Path) -> None:
+    """`merged` не «номер → дата» — отказ, а не тихо пустая таблица (045)."""
+    bad = archive(merged={"x": "d"})
+    with pytest.raises(module.NotRun, match="merged"):
+        module.build([written(tmp_path, "a.json", bad)], tmp_path / "f.sqlite")
