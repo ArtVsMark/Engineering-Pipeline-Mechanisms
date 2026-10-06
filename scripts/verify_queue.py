@@ -46,9 +46,6 @@
 """
 
 import argparse
-import base64
-import binascii
-import json
 import os
 import random
 import sys
@@ -56,10 +53,10 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+import badges_read
 import changerefs
 import findings
 import ghrest
-import paths
 import report
 
 EXIT_OK: Final = 0
@@ -203,30 +200,11 @@ def merged_dates(
 
 #: Где сборщик архива публикует архив находок: ветка `badges`.
 ARCHIVE_URL: Final = "https://raw.githubusercontent.com/{repo}/badges/.github/badges/findings.json"
-#: Тот же архив для API площадки: путь в ветке `badges`.
-ARCHIVE_PATH: Final = (paths.BADGES_DIR / "findings.json").as_posix()
 
 
 def archive_by_api(repo: str, token: str) -> dict[str, Any]:
-    """Архив находок через API площадки с токеном — читается и в приватном репозитории.
-
-    ПРЯМАЯ ССЫЛКА БЕЗ ТОКЕНА В ПРИВАТНОМ РЕПОЗИТОРИИ ВСЕГДА 404 (взгляд на
-    #1158): у потребителя память дат была бы пуста всегда, и срок давней
-    находки там не наступал бы. Содержимое берётся блобом, а не ответом
-    `contents`: тот не отдаёт файлы больше мегабайта, а архив больше.
-    """
-    meta = ghrest.request("GET", f"repos/{repo}/contents/{ARCHIVE_PATH}?ref=badges", token) or {}
-    sha = str(meta.get("sha") or "") if isinstance(meta, dict) else ""
-    if not sha:
-        raise ghrest.TransportError("архив находок: площадка не назвала блоб")
-    blob = ghrest.request("GET", f"repos/{repo}/git/blobs/{sha}", token) or {}
-    try:
-        archive = json.loads(base64.b64decode(str(blob.get("content") or "")))
-    except (binascii.Error, ValueError) as exc:
-        raise ghrest.TransportError(f"архив находок не разбирается: {exc}") from exc
-    if not isinstance(archive, dict):
-        raise ghrest.TransportError("архив находок не словарь: читать нечего")
-    return archive
+    """Архив находок через API площадки с токеном — общим читателем `badges_read` (#1158)."""
+    return badges_read.by_api(repo, "findings.json", token)
 
 
 def remembered(
