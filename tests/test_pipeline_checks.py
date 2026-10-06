@@ -896,3 +896,17 @@ def test_a_pattern_found_only_at_the_supplier_needs_the_supplier(tmp_path: Path)
     (supplier / "scripts" / "stuck.py").write_text("", encoding="utf-8")
     assert policy.resolves("scripts/*.py", tree, supplier)
     assert not policy.resolves("scripts/*.py", tree), "без поставщика образец разрешился"
+
+
+def test_a_climb_out_of_the_mechanism_dirs_is_not_looked_up_at_the_supplier(
+    tmp_path: Path,
+) -> None:
+    """`scripts/../docs/x.md` начинается с каталога механизмов, но к поставщику не идёт (#1167)."""
+    tree, supplier = tmp_path / "tree", tmp_path / "supplier"
+    tree.mkdir()
+    for name in ("scripts/main_red.py", "docs/runbook.md"):
+        (supplier / name).parent.mkdir(parents=True, exist_ok=True)
+        (supplier / name).write_text("", encoding="utf-8")
+    assert not policy.resolves("scripts/../docs/runbook.md", tree, supplier)
+    assert not policy.resolves("scripts/../docs/*.md", tree, supplier)
+    assert policy.resolves("scripts/main_red.py", tree, supplier)
