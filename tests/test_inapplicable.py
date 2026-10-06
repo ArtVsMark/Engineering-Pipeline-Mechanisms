@@ -49,7 +49,10 @@ def hits(argv: list[str], root: Path) -> list[str]:
     nothing = argv[:2] == ["git", "grep"] and done.returncode == 1 and not done.stderr.strip()
     if done.returncode != 0 and not nothing:
         raise AssertionError(f"предикат не исполнился ({done.returncode}): {argv}: {done.stderr}")
-    return sorted({one.strip() for one in done.stdout.splitlines() if one.strip()})
+    # СПИСОК ПУТЕЙ — ПО NUL: путь с переводом строки законен, и построчный
+    # разбор развалил бы его надвое (`tests/test_source_hygiene.py`).
+    parts = done.stdout.split("\0") if "-z" in argv else done.stdout.splitlines()
+    return sorted({one.strip() for one in parts if one.strip()})
 
 
 def arrived(rule: str, root: Path = ROOT) -> list[str]:
@@ -111,6 +114,7 @@ def test_a_planted_condition_turns_the_gate_red(tmp_path: Path) -> None:
     (tmp_path / "ru.po").write_text('msgid "x"\n', encoding="utf-8")
     git("add", "-A")
     assert hits(argv, tmp_path) == ["ru.po"]
+    assert "-z" in argv, "список путей предиката читается не по NUL"
     grep = ["git", "grep", "-nE", "flock", "--", "."]
     assert hits(grep, tmp_path) == [], "«совпадений нет» у git grep — не отказ"
 
@@ -118,4 +122,4 @@ def test_a_planted_condition_turns_the_gate_red(tmp_path: Path) -> None:
 def test_a_broken_command_is_a_refusal_not_silence(tmp_path: Path) -> None:
     """Сломанная команда — отказ, а не «условие не наступило» (045)."""
     with pytest.raises(AssertionError, match="не исполнился"):
-        hits(["git", "ls-files"], tmp_path)
+        hits(["git", "rev-parse", "--verify", "HEAD"], tmp_path)
