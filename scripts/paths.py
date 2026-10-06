@@ -112,6 +112,9 @@ SOURCES: Final = (SCRIPTS, TRANSPORT)
 LENIENCY: Final = Path(".rules/leniency.json")
 #: Инвентарь переносимого: ответ по каждому механизму о переносе к соседу (#642).
 PORTABLE: Final = Path(".rules/portable.json")
+#: Исполняемые предикаты ответов «неприменимо» (#1171): команда и законный
+#: сегодня вывод по каждому номеру; держит tests/test_inapplicable.py.
+INAPPLICABLE: Final = Path(".rules/inapplicable.json")
 #: Записи решений: почему выбрано так, а не иначе. Адрес объявлен здесь, а не
 #: строится читателем: второй якорь заводится именно так (115).
 DECISIONS: Final = Path("docs/decisions")
@@ -185,6 +188,7 @@ ALL: Final = (
     RERUN,
     LENIENCY,
     PORTABLE,
+    INAPPLICABLE,
     PROTECTION,
     OUTCOMES,
     CONSUMERS,
