@@ -336,9 +336,27 @@ def test_the_review_reads_runs_and_passes_the_base_by_environment() -> None:
     flow = yaml.safe_load(
         (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
     )
-    assert flow["permissions"].get("actions") == "read"
+    assert "actions" not in flow["permissions"], "чтение прогонов выдано всему прогону"
+    assert flow["jobs"]["map"]["permissions"].get("actions") == "read"
+    review = flow["jobs"]["review"].get("permissions") or flow["permissions"]
+    assert "actions" not in review, "джоб взгляда получил чтение прогонов"
     mode = next(step for step in flow["jobs"]["map"]["steps"] if step.get("id") == "mode")
     assert "${{" not in mode["run"].split("look_mode.py", 1)[1].split("||")[0].replace(
         '"${{ github.event.pull_request.number }}"', ""
     ), "голова или база подставлены в текст команды"
     assert mode["env"]["BASE_REF"] == "${{ github.event.pull_request.base.ref }}"
+
+
+def test_a_large_text_file_enters_the_key_by_its_blob() -> None:
+    """Текстовый файл с правкой, слишком большой для заплатки: ключ по блобу (#1164).
+
+    Тот же блоб — то же содержимое побайтно, и пропуск законен; другой блоб —
+    другой ключ, и взгляд идёт.
+    """
+
+    def large(sha: str) -> list[dict[str, Any]]:
+        return [{"filename": "big.json", "status": "modified", "changes": 4000, "sha": sha}]
+
+    assert module.diff_key(large("aaa")) is not None
+    assert module.diff_key(large("aaa")) == module.diff_key(large("aaa"))
+    assert module.diff_key(large("aaa")) != module.diff_key(large("bbb"))
