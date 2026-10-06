@@ -1347,11 +1347,17 @@ def test_the_owed_look_is_read_from_the_skip_note_of_the_latest_record(
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     item = change(1, "automerge")
     url = "https://github.com/o/r/actions/runs/{run}/job/9"
-    records[:] = [{"id": 1, "status": "completed", "details_url": url.format(run=555)}]
+    records[:] = [
+        {"id": 1, "name": "review", "status": "completed", "details_url": url.format(run=555)}
+    ]
     assert module.owed_look("o/r", item, "token") == "555"
-    records[:] = [{"id": 2, "status": "completed", "details_url": url.format(run=556)}]
+    records[:] = [
+        {"id": 2, "name": "review", "status": "completed", "details_url": url.format(run=556)}
+    ]
     assert module.owed_look("o/r", item, "token") == "", "взгляд без пометки назван должным"
-    records[:] = [{"id": 1, "status": "in_progress", "details_url": url.format(run=557)}]
+    records[:] = [
+        {"id": 1, "name": "review", "status": "in_progress", "details_url": url.format(run=557)}
+    ]
     assert module.owed_look("o/r", item, "token") == "", "идущий взгляд назван пропущенным"
 
 
@@ -1369,10 +1375,21 @@ def test_a_finished_look_lets_the_head_go(platform: dict[str, Any]) -> None:
         ([{"name": "review", "status": "queued"}], True),
         ([{"name": "review", "status": "completed", "conclusion": "failure"}], False),
         ([{"name": "review", "status": "completed", "conclusion": "skipped"}], False),
+        ([{"name": "review / review", "status": "in_progress"}], True),
+        ([{"name": "review / review", "status": "completed", "conclusion": "success"}], False),
         ([{"name": "test", "status": "in_progress"}], False),
         ([], False),
     ],
-    ids=["идёт", "в очереди", "упал", "пропущен", "чужая запись", "записи нет"],
+    ids=[
+        "идёт",
+        "в очереди",
+        "упал",
+        "пропущен",
+        "идёт под составным именем",
+        "завершён под составным именем",
+        "чужая запись",
+        "записи нет",
+    ],
 )
 def test_the_look_is_awaited_only_while_it_runs(runs: list[dict[str, Any]], pending: bool) -> None:
     """Ждётся только идущий взгляд: исход не судится, отсутствие записи не держит.
@@ -1392,12 +1409,12 @@ def test_awaiting_the_look_asks_the_review_record_of_the_head(
 
     def paginate(path: str, tok: str, key: str | None = None) -> Any:
         asked.append(path)
-        return iter([{"name": "review", "status": "in_progress"}])
+        return iter([{"name": "review / review", "status": "in_progress"}])
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     item = change(1, "automerge")
     assert module.awaits_look("o/r", item, "token") is True
-    assert asked == [f"repos/o/r/commits/{item.head}/check-runs?check_name=review"]
+    assert asked == [f"repos/o/r/commits/{item.head}/check-runs?filter=latest"]
 
 
 def test_a_head_behind_the_base_is_synced_before_the_look_is_awaited(
@@ -1659,7 +1676,7 @@ def test_the_hold_reads_the_head_time_and_the_comments(monkeypatch: pytest.Monke
     head = replace(change(1, "automerge"), head="head-sha")
     assert module.look_runs("o/r", "old-sha", "token") == runs["old-sha"]
     # Все попытки прогона, а не последняя: у попыток общий номер (#752).
-    assert asked and asked[-1].endswith("&filter=all")
+    assert asked and asked[-1].endswith("?filter=all")
     assert module.findings_hold("o/r", head, "token") is False
     said.pop(0)
     assert module.findings_hold("o/r", head, "token") is True
@@ -1779,11 +1796,13 @@ def test_a_rerun_of_the_head_look_keeps_its_first_start(monkeypatch: pytest.Monk
     job = f"https://github.com/o/r/actions/runs/{LOOK_RUN}/job/{{}}"
     attempts = [
         {
+            "name": "review",
             "started_at": HEAD_AT,
             "completed_at": "2026-09-24T10:05:00Z",
             "details_url": job.format(1),
         },
         {
+            "name": "review",
             "started_at": "2026-09-24T10:20:00Z",
             "completed_at": "2026-09-24T10:25:00Z",
             "details_url": job.format(2),
@@ -2076,3 +2095,28 @@ def test_a_fix_check_verdict_is_read_by_the_gate() -> None:
     assert module.verdicts_on([fix], looks) == [("2026-09-24T10:05:00Z", 1)]
     full = verdict("2026-09-24T09:55:00Z", 2)
     assert module.holds_for_findings(module.verdicts_on([full, fix], looks), HEAD_AT) is False
+
+
+def test_look_records_take_both_names_and_nothing_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Запись взгляда узнаётся под составным именем шага и под прежним (#993).
+
+    Головы, толкнутые до выноса взгляда в общий шаг, несут «review»; новые —
+    «review / review». Чужая запись с похожим именем взглядом не становится.
+    """
+    said = [
+        {"name": "review / review", "id": 1},
+        {"name": "review", "id": 2},
+        {"name": "review / map", "id": 3},
+        {"name": "test", "id": 4},
+    ]
+    asked: list[str] = []
+
+    def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        asked.append(path)
+        return iter(said)
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert [one["id"] for one in module.look_records("o/r", "sha", "t", "all")] == [1, 2]
+    assert asked == ["repos/o/r/commits/sha/check-runs?filter=all"]
+    assert module.is_look({"name": "review / review"}) is True
+    assert module.is_look({"name": "review / findings"}) is False

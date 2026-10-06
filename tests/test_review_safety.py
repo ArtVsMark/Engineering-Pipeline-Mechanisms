@@ -20,6 +20,9 @@ from tests.test_family_pinning import FAMILY, PINNED_RE
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 AUTO_REVIEW = WORKFLOWS / "review.yml"
+#: Тело взгляда: джобы, шаги и задания агенту живут в общем шаге, а у
+#: `AUTO_REVIEW` остались события, кнопка и группа отмены (#993).
+LOOK_BODY = WORKFLOWS / "step-review.yml"
 ON_MENTION = WORKFLOWS / "claude.yml"
 SHA_PIN = re.compile(r"@[0-9a-f]{40}\b")
 TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
@@ -44,7 +47,7 @@ def test_no_workflow_uses_pull_request_target(path: Path) -> None:
 
 def test_auto_review_skips_forks_explicitly() -> None:
     """Форк пропускается явно, а не ломается молча на шаге агента (027)."""
-    condition = load(AUTO_REVIEW)["jobs"]["review"]["if"]
+    condition = load(LOOK_BODY)["jobs"]["review"]["if"]
     assert "head.repo.full_name == github.repository" in condition
 
 
@@ -91,14 +94,14 @@ def test_mention_review_requires_a_trusted_author() -> None:
         assert f"github.event_name == '{event}'" in condition, f"{event} без гейта автора"
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_agent_jobs_have_a_timeout(path: Path) -> None:
     """У джоба агента есть предел: умолчание площадки — шесть часов молчания."""
     for name, job in load(path)["jobs"].items():
         assert job.get("timeout-minutes"), f"{path.name}: у джоба {name} нет предела"
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_actions_that_receive_the_token_are_pinned_by_sha(path: Path) -> None:
     """Действия ревью закреплены по SHA, а не по подвижной метке (152).
 
@@ -153,7 +156,7 @@ def declared_tools(path: Path) -> list[tuple[str, list[str]]]:
     ]
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
     """Инструменты агента — закрытый список, и голого `Bash` в нём нет.
 
@@ -175,7 +178,7 @@ def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
 WRITING_TOOLS = ("Write", "Edit", "WebFetch", "WebSearch", "Bash(gh ", "Bash(curl ")
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY], ids=lambda p: p.name)
 def test_the_reviewer_stays_a_reader(path: Path) -> None:
     """Ревьюер не пишет ни в площадку, ни наружу — за него это делает механизм.
 
@@ -202,7 +205,8 @@ def test_review_is_not_a_required_context() -> None:
     адресату, переживающему слияние (142).
     """
     checks = yaml.safe_load((ROOT / ".pipeline.yml").read_text(encoding="utf-8"))["checks"]
-    answer = checks.get("review")
+    # Имя составное с выноса взгляда в общий шаг (#993).
+    answer = checks.get("review / review")
     assert answer is not None, (
         "ревью не названо в ответе проекта: «не держит» неотличимо от «забыли»"
     )
@@ -213,7 +217,7 @@ def test_review_is_not_a_required_context() -> None:
 # --- прогон и его зависимости ------------------------------------------------
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_a_permitted_run_is_actually_possible(path: Path) -> None:
     """Что список разрешает запускать, то прогон обязан поставить.
 
@@ -235,7 +239,7 @@ def test_a_permitted_run_is_actually_possible(path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_both_interpreter_names_are_permitted(path: Path) -> None:
     """Разрешение выдаётся по началу команды, и `python3` — другая строка.
 
@@ -533,6 +537,20 @@ def own_ref(ref: object, repository: object) -> bool:
 
 #: Префикс вызова переиспользуемого прогона из этого же дерева.
 LOCAL_WORKFLOW: Final = "./.github/workflows/"
+#: Свой вызов по АДРЕСУ С ОБЩЕЙ ВЕТКОЙ (#993): `review.yml` зовёт
+#: `step-review.yml` не `./`, а так, чтобы карта не исполняла код головы. На
+#: событиях общей ветки это тот же ref, что у `./`, — сама общая ветка. Разбор
+#: адреса — у разбора ответа каталогу, а не второй образец здесь (022).
+ADDRESSED_CALL: Final = load_script("pipeline_checks.py").ADDRESSED_CALL
+
+
+def own_addressed(said: str) -> str:
+    """Имя файла из этого дерева, позванного адресом с общей веткой; пусто — не он."""
+    found = ADDRESSED_CALL.match(said)
+    if not found:
+        return ""
+    where = ROOT / found["path"]
+    return where.name if where.is_file() else ""
 
 
 def listed(value: Any) -> list[str]:
@@ -589,6 +607,11 @@ def shared_callees(documents: dict[str, dict[Any, Any]] | None = None) -> set[st
             for job in document["jobs"].values()
             if str(job.get("uses") or "").startswith(LOCAL_WORKFLOW)
         }
+        | {
+            one
+            for job in document["jobs"].values()
+            if (one := own_addressed(str(job.get("uses") or "")))
+        }
         for name, document in documents.items()
     }
     reached: set[str] = set()
@@ -628,6 +651,8 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
     метки: он приезжает тем же ref, что и файл прогона, — то есть с общей ветки.
     Менять его код, не меняя общей ветки, нечем
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+    Тот же довод у своего файла, позванного адресом с общей веткой
+    (`own_addressed`, #993): его ref — та же общая ветка.
 
     СОСЕД НАЗВАН, И У СУЖЕНИЯ ЕСТЬ УСЛОВИЕ ИСТЕЧЕНИЯ. Рассуждение выше держится
     ровно до тех пор, пока прогон от общей ветки не заберёт ЧУЖОЙ ref: тогда
@@ -649,6 +674,7 @@ def test_a_shared_caller_pins_what_it_calls(path: Path) -> None:
         and not SHA_PIN.search(said)
         and not by_contract_tag(said)
         and not said.startswith(OUR_OWN_TREE)
+        and not own_addressed(said)
     ]
     assert not unpinned, (
         f"{path.name} идёт от общей ветки, а вызывает незакреплённое: {unpinned} — "
@@ -903,7 +929,7 @@ def test_the_map_is_taken_from_the_shared_branch() -> None:
     смотреть (085). База вызова — `FETCH_HEAD` подтянутой ветки, либо `HEAD`
     ТОЛЬКО в джобе, чей чекаут и есть общая ветка (`map`, #804).
     """
-    jobs = load(WORKFLOWS / "review.yml").get("jobs") or {}
+    jobs = load(WORKFLOWS / "step-review.yml").get("jobs") or {}
     calls = 0
     for name, job in jobs.items():
         base_checkout = any(
@@ -956,10 +982,12 @@ UNPACKS_A_TREE: Final = re.compile(
 SHELL_JOIN: Final = re.compile(r";|&&|\|\||(?<!\|)\|(?!\|)")
 #: Подмена интерпретатора в шаге: свой `PATH`, псевдоним или функция.
 INTERPRETER_SWAP: Final = re.compile(r"(?:^|\s)PATH=|\balias\s|\b\w+\s*\(\)\s*\{|\bfunction\s")
-#: Путь импорта карты: база, развёрнутая рядом.
-BASE_TRANSPORT: Final = '"$RUNNER_TEMP/base/packages/transport"'
-#: Вызов карты из базы — общий хвост тестовых случаев.
-MAP_CALL: Final = 'python "$RUNNER_TEMP/base/scripts/review_map.py"'
+#: Путь импорта карты: выкачка кода конвейера на коммите вызова (#993), а не
+#: дерево головы. Прежде — база, развёрнутая рядом; выкачка ту же роль несёт
+#: у каждого шага, и вызов прибит к общей ветке (`own_addressed`).
+BASE_TRANSPORT: Final = '"$MECHANISMS/packages/transport"'
+#: Вызов карты из выкачки — общий хвост тестовых случаев.
+MAP_CALL: Final = "python $MECHANISMS/scripts/review_map.py"
 
 
 def map_path_is_pinned(commands: list[str], at: int) -> str:
@@ -1061,10 +1089,21 @@ def test_the_map_code_runs_from_the_shared_branch() -> None:
     только выборкой. Джоб взгляда карту не собирает, а берёт из `needs.map`.
     Поздний взгляд клонирует общую ветку и держит путь импорта префиксом.
     """
-    jobs = load(WORKFLOWS / "review.yml").get("jobs") or {}
+    jobs = load(WORKFLOWS / "step-review.yml").get("jobs") or {}
     steps = jobs["map"].get("steps") or []
-    checkouts = [one for one in steps if str(one.get("uses") or "").startswith("actions/checkout")]
-    assert len(checkouts) == 1, "у джоба карты чекаутов не один"
+    # Выкачка кода конвейера (#990) деревом не считается: её коммит — коммит
+    # вызова, а вызов прибит к общей ветке (`own_addressed`, #993).
+    checkouts = [
+        one
+        for one in steps
+        if str(one.get("uses") or "").startswith("actions/checkout")
+        and (one.get("with") or {}).get("repository") != OUR_CALL_REPO
+    ]
+    assert len(checkouts) == 1, "у джоба карты чекаутов дерева не один"
+    caller = load(AUTO_REVIEW)["jobs"]
+    assert [own_addressed(str(job.get("uses") or "")) for job in caller.values()] == [
+        LOOK_BODY.name
+    ], "взгляд зовётся не адресом с общей веткой — карта исполнила бы код головы"
     assert (checkouts[0].get("with") or {}).get("ref") == OUR_BASE_REF, (
         "джоб карты разворачивает не общую ветку"
     )
@@ -1096,7 +1135,7 @@ def test_the_registry_is_swept_outside_a_review() -> None:
     его некому, — и приёмка «реестр пуст и держится сутки» была недостижима не
     из-за работы, а из-за устройства.
     """
-    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    text = (WORKFLOWS / "step-review.yml").read_text(encoding="utf-8")
     document = yaml.safe_load(text)
     sweeping = [
         name
@@ -1119,7 +1158,7 @@ def test_a_job_condition_names_its_events_instead_of_excluding_them() -> None:
     ([068](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/068-allowlist-not-denylist.md)).
     Ровно это и случилось бы с уборкой, добавленной четвёртым событием.
     """
-    document = yaml.safe_load((WORKFLOWS / "review.yml").read_text(encoding="utf-8"))
+    document = yaml.safe_load((WORKFLOWS / "step-review.yml").read_text(encoding="utf-8"))
     denying = [
         name for name, job in document["jobs"].items() if "event_name !=" in str(job.get("if", ""))
     ]
@@ -1138,7 +1177,7 @@ def test_a_failed_fetch_never_falls_back_to_the_head() -> None:
     Проверяются ОБА экземпляра шага — у взгляда на изменение и у позднего:
     починка одного конца из двух здесь уже стоила находки (195).
     """
-    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    text = (WORKFLOWS / "step-review.yml").read_text(encoding="utf-8")
     fetches = [line for line in text.splitlines() if "git fetch" in line and "origin" in line]
     assert fetches, "общая ветка не подтягивается вовсе — предмет проверки не найден (075)"
     for line in fetches:
@@ -1158,7 +1197,7 @@ def test_the_output_delimiter_is_not_guessable() -> None:
     внутри такого текста закрыла бы блок раньше времени — и дописала бы в вывод
     шага что угодно. Нашёл внешний взгляд на #120.
     """
-    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    text = (WORKFLOWS / "step-review.yml").read_text(encoding="utf-8")
     heredocs = [line for line in text.splitlines() if "text<<" in line]
     assert heredocs, "блок вывода не собирается — предмет проверки не найден (075)"
     for line in heredocs:
@@ -1173,7 +1212,7 @@ def test_a_missing_map_does_not_stop_the_look() -> None:
     Канал совещательный: потерять взгляд целиком из-за подсказки к нему — тот
     самый худший размен, от которого предостерегает 084.
     """
-    text = (WORKFLOWS / "review.yml").read_text(encoding="utf-8")
+    text = (WORKFLOWS / "step-review.yml").read_text(encoding="utf-8")
     for chunk in text.split("id: map")[1:]:
         head = chunk[: chunk.index("- name:")] if "- name:" in chunk else chunk
         assert "continue-on-error: true" in head, "отказ сборки карты роняет шаг"
@@ -1292,8 +1331,9 @@ def test_the_gate_catches_a_planted_interpolation(tmp_path: Path, said: str) -> 
     assert found, f"подстановка не увидена образцом: {said!r}"
 
 
-#: Прогоны, у которых есть кнопка с номером изменения.
-TAKES_A_NUMBER: Final = ("review.yml", "task-items.yml")
+#: Прогоны, читающие номер изменения с кнопки: у взгляда — его тело, общий шаг,
+#: куда вызывающий передаёт вход кнопки как есть (#993).
+TAKES_A_NUMBER: Final = ("step-review.yml", "task-items.yml")
 
 #: Как выглядит проверка «это цифры и ничего кроме».
 DIGITS: Final = "*[!0-9]*"
@@ -1532,7 +1572,7 @@ def test_a_matrix_of_agents_runs_as_a_wave_not_a_salvo() -> None:
     ([031](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/031-waves-not-salvos.md),
     [149](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/149-the-suite-owns-its-temp.md)).
     """
-    jobs = load(AUTO_REVIEW)["jobs"]
+    jobs = load(LOOK_BODY)["jobs"]
     fanned = {
         name: job
         for name, job in jobs.items()
@@ -1582,7 +1622,7 @@ def commands_and_task(path: Path) -> list[tuple[str, list[str], str]]:
     return said
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_the_task_names_the_environments_limit(path: Path) -> None:
     """Каждая разрешённая команда названа в ТЕКСТЕ задания, а не только в настройке.
 
@@ -1616,7 +1656,7 @@ def test_the_task_names_the_environments_limit(path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_the_task_says_the_list_is_closed(path: Path) -> None:
     """Задание говорит, что список ЗАКРЫТЫЙ, а не просто перечисляет команды.
 
@@ -1632,7 +1672,7 @@ def test_the_task_says_the_list_is_closed(path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize("path", [AUTO_REVIEW, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_the_task_carries_its_numbers(path: Path) -> None:
     """В задании стоят ЧИСЛА, и оба взяты из своих канонических мест.
 
@@ -1912,7 +1952,7 @@ def test_only_the_verifier_posts_under_its_own_marker() -> None:
     Оба зовут `late_look.py` тем же токеном; без флага ответ верификатора лёг
     бы под метку позднего взгляда и засчитался бы им.
     """
-    jobs = load(WORKFLOWS / "review.yml").get("jobs") or {}
+    jobs = load(WORKFLOWS / "step-review.yml").get("jobs") or {}
     calls: dict[str, list[str]] = {}
     for name, job in jobs.items():
         for step in job.get("steps") or []:

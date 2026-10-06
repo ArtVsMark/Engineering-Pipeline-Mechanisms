@@ -766,6 +766,22 @@ def test_the_leading_dot_slash_is_not_normalised_away(tmp_path: Path) -> None:
     assert policy.called_jobs(".github/workflows/step-debt.yml", directory) is None
 
 
+def test_an_own_call_by_the_trunk_address_is_read_from_the_tree(tmp_path: Path) -> None:
+    """Свой вызов адресом с общей веткой читается деревом, по тегу — нет (#993).
+
+    Так `review.yml` зовёт тело взгляда, чтобы карта не исполняла код головы;
+    имя его записи площадка собирает составным, как у `./`. Вызов по тегу —
+    выпуск, а не дерево, и его имена остаются неизвестными (046); адрес, чьего
+    файла в дереве нет, — чужой вызов, а не отказ.
+    """
+    directory = called_tree(tmp_path)
+    trunk = f"О/Р/.github/workflows/step-debt.yml@{policy.paths.TRUNK}"
+    assert policy.called_jobs(trunk, directory) == ["внутри"]
+    assert policy.called_jobs("О/Р/.github/workflows/step-debt.yml@v1.4.0", directory) is None
+    absent = f"О/Р/.github/workflows/нет-такого.yml@{policy.paths.TRUNK}"
+    assert policy.called_jobs(absent, directory) is None
+
+
 # --- разбор ответа: один на своё дерево и на чужое ---------------------------
 
 

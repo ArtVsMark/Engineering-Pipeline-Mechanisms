@@ -562,27 +562,27 @@ def test_a_skipped_review_is_not_a_missing_one() -> None:
     нет» — то есть читателя отправляли смотреть, почему шаг не запускался,
     когда он и не должен был.
     """
-    runs = [{"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "skipped"}]
+    runs = [{"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "skipped"}]
     assert module.why_quiet(runs) == module.STATE_SKIPPED
 
 
 def test_a_cancelled_review_is_not_a_missing_one() -> None:
     """Отменённый прогон зовёт смотреть, кто его гасит, а не условия шага (154)."""
-    runs = [{"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "cancelled"}]
+    runs = [{"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "cancelled"}]
     assert module.why_quiet(runs) == module.STATE_CANCELLED
 
 
 def test_a_running_review_is_not_a_missing_one() -> None:
     """Прогон ещё идёт — вердикта нет и не должно быть: спрашивать рано."""
-    runs = [{"name": module.REVIEW_CHECK, "status": "in_progress", "conclusion": None}]
+    runs = [{"name": module.REVIEW_CHECKS[0], "status": "in_progress", "conclusion": None}]
     assert module.why_quiet(runs) == module.STATE_RUNNING
 
 
 def test_a_failure_still_outranks_the_rest() -> None:
     """«Упал» важнее всего прочего: иначе отменённый сосед спрятал бы красное."""
     runs = [
-        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "cancelled"},
-        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "failure"},
+        {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "cancelled"},
+        {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "failure"},
     ]
     assert module.why_quiet(runs) == module.STATE_BROKEN
 
@@ -612,8 +612,8 @@ def test_a_running_run_outranks_yesterdays_green() -> None:
     реестр говорил «прошёл, а ответа нет» там, где ответа ещё просто не было.
     """
     runs = [
-        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "success"},
-        {"name": module.REVIEW_CHECK, "status": "in_progress", "conclusion": None},
+        {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "success"},
+        {"name": module.REVIEW_CHECKS[0], "status": "in_progress", "conclusion": None},
     ]
     assert module.why_quiet(runs) == module.STATE_RUNNING
 
@@ -624,7 +624,7 @@ def test_a_zombie_record_is_not_running() -> None:
     Площадка оставляет такие записи-зомби; принять их за идущие значило бы
     ждать вечно. Тот же приём и по той же причине — в `ci_complete.roster_of`.
     """
-    runs = [{"name": module.REVIEW_CHECK, "status": "in_progress", "conclusion": "success"}]
+    runs = [{"name": module.REVIEW_CHECKS[0], "status": "in_progress", "conclusion": "success"}]
     assert module.why_quiet(runs) == module.STATE_SILENT
 
 
@@ -634,7 +634,7 @@ def test_an_unknown_conclusion_is_named_with_its_word() -> None:
     Запись ЕСТЬ, и говорить «шаг не запускался» значит послать читателя искать
     не там (046). Слово исхода — от площадки: догадываться о нём нечем (154).
     """
-    runs = [{"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "timed_out"}]
+    runs = [{"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "timed_out"}]
     said = module.why_quiet(runs)
     assert said.startswith(module.STATE_ODD)
     assert "timed_out" in said
@@ -643,9 +643,9 @@ def test_an_unknown_conclusion_is_named_with_its_word() -> None:
 def test_every_unknown_conclusion_is_listed_once() -> None:
     """Несколько незнакомых исходов названы все и без повторов (159)."""
     runs = [
-        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "neutral"},
-        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "stale"},
-        {"name": module.REVIEW_CHECK, "status": "completed", "conclusion": "neutral"},
+        {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "neutral"},
+        {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "stale"},
+        {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "neutral"},
     ]
     said = module.why_quiet(runs)
     assert "neutral" in said and "stale" in said
@@ -992,11 +992,13 @@ def test_the_late_queue_runs_after_every_ci_on_the_trunk() -> None:
     """
     import yaml
 
-    flow = yaml.safe_load((ROOT / ".github/workflows/review.yml").read_text(encoding="utf-8"))
+    flow = yaml.safe_load((ROOT / ".github/workflows/step-review.yml").read_text(encoding="utf-8"))
     condition = str(flow["jobs"]["late-queue"]["if"])
     for event in ("schedule", "workflow_dispatch", "workflow_run"):
         assert f"github.event_name == '{event}'" in condition, f"очередь не идёт по {event}"
-    assert "workflow_run" in (flow.get(True) or flow.get("on") or {}), "прогон не слушает ci"
+    # События — у вызывающего: тело взгляда вынесено в общий шаг (#993).
+    caller = yaml.safe_load((ROOT / ".github/workflows/review.yml").read_text(encoding="utf-8"))
+    assert "workflow_run" in (caller.get(True) or caller.get("on") or {}), "прогон не слушает ci"
 
 
 def test_the_feed_is_read_once_per_change_in_a_run(monkeypatch: pytest.MonkeyPatch) -> None:

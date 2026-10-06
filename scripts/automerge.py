@@ -491,9 +491,33 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
     return ci_complete.verdict(ci_complete.worst_per_name(runs), required, "", strict_missing=True)
 
 
-#: Имя записи проверки взгляда на голове: имя джоба и есть имя контекста
-#: (`docs/use/pipeline.md`), как и у реестра слитого без взгляда.
-REVIEW_CHECK: Final = "review"
+#: Имена записи проверки взгляда на голове: имя джоба и есть имя контекста
+#: (`docs/use/pipeline.md`), как и у реестра слитого без взгляда. ИМЁН ДВА
+#: (#993): с выносом взгляда в общий шаг запись зовётся составным именем
+#: «review / review», а головы, толкнутые до выноса, несут прежнее «review».
+#: Прежнее не снимается: старые головы из истории не уходят.
+REVIEW_CHECKS: Final = ("review / review", "review")
+
+
+def is_look(run: dict[str, Any]) -> bool:
+    """Запись ли это проверки взгляда — под нынешним именем или прежним."""
+    return str(run.get("name") or "") in REVIEW_CHECKS
+
+
+def look_records(repo: str, sha: str, token: str, which: str) -> list[dict[str, Any]]:
+    """Записи проверки взгляда на коммите; `which` — `latest` или `all`.
+
+    Имя сверяется здесь, а не фильтром площадки: фильтр берёт ОДНО имя, а
+    их два (`REVIEW_CHECKS`), и два запроса по одной голове — вдвое больше
+    обращений ради того же списка.
+    """
+    return [
+        run
+        for run in ghrest.paginate(
+            f"repos/{repo}/commits/{sha}/check-runs?filter={which}", token, key="check_runs"
+        )
+        if is_look(run)
+    ]
 
 
 def look_pending(runs: list[dict[str, Any]]) -> bool:
@@ -511,10 +535,7 @@ def look_pending(runs: list[dict[str, Any]]) -> bool:
     запускался (правка файла прогона, форк), и ждать некого: молчание взгляда
     не становится затором, его называет реестр слитого без взгляда.
     """
-    return any(
-        str(run.get("name") or "") == REVIEW_CHECK and run.get("status") != "completed"
-        for run in runs
-    )
+    return any(is_look(run) and run.get("status") != "completed" for run in runs)
 
 
 def awaits_look(repo: str, change: Change, owner_token: str) -> bool:
@@ -524,14 +545,7 @@ def awaits_look(repo: str, change: Change, owner_token: str) -> bool:
     сейчас взводят или сливают: вопрос другой (взгляд в вердикт не входит), и
     читать его надо в миг решения, а не в начале захода.
     """
-    runs = list(
-        ghrest.paginate(
-            f"repos/{repo}/commits/{change.head}/check-runs?check_name={REVIEW_CHECK}",
-            owner_token,
-            key="check_runs",
-        )
-    )
-    return look_pending(runs)
+    return look_pending(look_records(repo, change.head, owner_token, "latest"))
 
 
 def owed_look(repo: str, change: Change, owner_token: str) -> str:
@@ -544,12 +558,7 @@ def owed_look(repo: str, change: Change, owner_token: str) -> str:
     взгляда. Пропуск помечен аннотацией `look_waits.SKIPPED` на записи; очередь
     читает её у ПОСЛЕДНЕЙ записи взгляда головы. Пусто — взгляд не должен.
     """
-    runs = ghrest.paginate(
-        f"repos/{repo}/commits/{change.head}/check-runs?check_name={REVIEW_CHECK}&filter=latest",
-        owner_token,
-        key="check_runs",
-    )
-    for run in runs:
+    for run in look_records(repo, change.head, owner_token, "latest"):
         if run.get("status") != "completed" or not run.get("id"):
             continue
         notes = ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", owner_token)
@@ -780,13 +789,7 @@ def look_runs(repo: str, sha: str, owner_token: str) -> list[dict[str, Any]]:
     голове начался толчком. По последней попытке перезапуск взгляда самой
     головы делал её первый вердикт с находками «прежним», и держания не было.
     """
-    return list(
-        ghrest.paginate(
-            f"repos/{repo}/commits/{sha}/check-runs?check_name={REVIEW_CHECK}&filter=all",
-            owner_token,
-            key="check_runs",
-        )
-    )
+    return look_records(repo, sha, owner_token, "all")
 
 
 def findings_hold(repo: str, change: Change, owner_token: str) -> bool:

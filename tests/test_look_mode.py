@@ -7,6 +7,8 @@ import pytest
 
 from tests.conftest import load_script
 
+#: Тело взгляда — общий шаг (#993).
+LOOK_STEP = ".github/workflows/step-review.yml"
 module = load_script("look_mode.py")
 Entry = module.findings.Entry
 REVIEWER = module.review_findings.REVIEWER_AUTHOR
@@ -119,9 +121,7 @@ def test_a_new_head_cancels_the_look_of_the_old_one() -> None:
     """Заход взгляда снимается новым толчком: группа по изменению, с отменой (#848)."""
     import yaml
 
-    flow = yaml.safe_load(
-        (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
-    )
+    flow = yaml.safe_load((Path(__file__).parents[1] / LOOK_STEP).read_text(encoding="utf-8"))
     group = flow["jobs"]["review"]["concurrency"]
     assert group["cancel-in-progress"] is True
     assert "pull_request.number" in group["group"] and "head.sha" not in group["group"]
@@ -274,9 +274,7 @@ def test_the_skip_turns_off_the_look_and_says_so() -> None:
     """Пропуск выключает шаг ключа — а с ним агента — и пишет строку с вердиктом."""
     import yaml
 
-    flow = yaml.safe_load(
-        (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
-    )
+    flow = yaml.safe_load((Path(__file__).parents[1] / LOOK_STEP).read_text(encoding="utf-8"))
     outputs = flow["jobs"]["map"]["outputs"]
     assert outputs["mode"] == "${{ steps.mode.outputs.mode }}"
     assert outputs["seen"] == "${{ steps.mode.outputs.seen }}"
@@ -333,9 +331,7 @@ def test_the_review_reads_runs_and_passes_the_base_by_environment() -> None:
     """Карта читает прогоны (`actions: read`), голова и база — окружением (#1161, 085)."""
     import yaml
 
-    flow = yaml.safe_load(
-        (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
-    )
+    flow = yaml.safe_load((Path(__file__).parents[1] / LOOK_STEP).read_text(encoding="utf-8"))
     assert "actions" not in flow["permissions"], "чтение прогонов выдано всему прогону"
     assert flow["jobs"]["map"]["permissions"].get("actions") == "read"
     review = flow["jobs"]["review"].get("permissions") or flow["permissions"]

@@ -58,14 +58,14 @@
 | 9 | Красный `main`: тревога, мигания и красное, пережившее слияние | `main-red.yml` → `step-main-red.yml` | `main-red / main-red` | нет |
 | 10 | Красный `main`: разморозка | `automerge.yml` → `step-automerge.yml` (по `workflow_run` от `ci` на общей ветке) | `automerge / automerge` | нет |
 | 11 | Застрявшее: готово и не слито | `stuck.yml` → `step-stuck.yml` (по `workflow_run` от `ci`) | `stuck-prs / stuck-prs` | нет, совещательный |
-| 11a | Карта взгляда кодом общей ветки | `review.yml` | `map` | нет, совещательный |
-| 12 | Ревью — последним: ждёт зелёного `ci-complete`, не дождался — идёт всё равно | `review.yml` | `review` | нет |
-| 12b | Поздний взгляд по слитому | `review.yml` (по расписанию, после `ci` на общей ветке и кнопкой) | `late-look` | нет |
-| 12d | Очередь на поздний взгляд | `review.yml` | `late-queue` | нет |
+| 11a | Карта взгляда кодом общей ветки | `review.yml` → `step-review.yml` | `review / map` | нет, совещательный |
+| 12 | Ревью — последним: ждёт зелёного `ci-complete`, не дождался — идёт всё равно | `review.yml` → `step-review.yml` | `review / review` | нет |
+| 12b | Поздний взгляд по слитому | `review.yml` → `step-review.yml` (по расписанию, после `ci` на общей ветке и кнопкой) | `review / late-look` | нет |
+| 12d | Очередь на поздний взгляд | `review.yml` → `step-review.yml` | `review / late-queue` | нет |
 | 12a | Ревью по обращению | `claude.yml` | `respond` | нет |
-| 12c | Находки получают адресата | `review.yml` | `findings` | нет, совещательный |
-| 12e | Уборка разобранного с реестра | `review.yml` (по слиянию и расписанию) | `sweep` | нет, совещательный |
-| 12f | Проверка премисы находки: опровергнуть или подтвердить | `review.yml` (кнопкой и по плану, по отпечатку из #23) | `verify` | нет, совещательный |
+| 12c | Находки получают адресата | `review.yml` → `step-review.yml` | `review / findings` | нет, совещательный |
+| 12e | Уборка разобранного с реестра | `review.yml` → `step-review.yml` (по слиянию и расписанию) | `review / sweep` | нет, совещательный |
+| 12f | Проверка премисы находки: опровергнуть или подтвердить | `review.yml` → `step-review.yml` (кнопкой и по плану, по отпечатку из #23) | `review / verify` | нет, совещательный |
 | 12g | План работ: зеркало источников 0–6 | `work-plan.yml` → `step-work-plan.yml` (по `workflow_run` от `ci` и `drift`) | `work-plan / work-plan` | нет, совещательный |
 | 12i | Верификатор по плану: висящие находки по слитому — на проверку премисы | `verify-queue.yml` → `step-verify-queue.yml` (по `workflow_run` от `work-plan`) | `verify-queue / verify-queue` | нет, совещательный |
 | 12h | Пропущенный и упавший заход по расписанию | `schedules-seen.yml` (по `workflow_run` от `ci`) | `schedules-seen` | нет, совещательный |

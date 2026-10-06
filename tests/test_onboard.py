@@ -406,3 +406,36 @@ def test_write_refuses_a_kit_it_cannot_rewrite_and_lays_nothing(tmp_path: Path) 
     consumer = tmp_path / "потребитель"
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_BROKEN
     assert not consumer.exists() or not any(consumer.rglob("*.yml"))
+
+
+@pytest.mark.parametrize(
+    ("said", "name"),
+    [
+        ("./.github/workflows/step-план.yml", "план"),
+        ("О/Р/.github/workflows/step-план.yml@main", "план"),
+        ("О/Р/.github/workflows/step-план.yml@v2.5.0", ""),
+        ("./.github/workflows/план.yml", ""),
+        ("actions/checkout@v7", ""),
+    ],
+    ids=["внутренний путь", "адрес с общей веткой", "адрес с тегом", "не шаг", "действие"],
+)
+def test_a_step_is_called_by_its_path_or_by_the_trunk_address(said: str, name: str) -> None:
+    """Свой шаг узнаётся и по адресу с общей веткой, а по тегу — нет (#993).
+
+    Адрес с общей веткой — свой вызов взгляда, прибитый к ней, чтобы карта не
+    исполняла код головы; адрес с тегом — вызов выпуска, как у пробы передачи.
+    """
+    assert module.step_called(said) == name
+
+
+def test_a_caller_by_the_trunk_address_is_printed_with_the_tag(tmp_path: Path) -> None:
+    """Вызывающий по адресу с общей веткой уходит в заготовку адресом по тегу (#993)."""
+    by_address = OWN_CALLER.replace(
+        "uses: ./.github/workflows/step-план.yml", "uses: О/Р/.github/workflows/step-план.yml@main"
+    )
+    root = tree(tmp_path, **{"step-план": MANAGED, "план": by_address})
+    flow = root / ".github" / "workflows" / "план.yml"
+    assert module.own_callers(root, module.steps(root)) == {"план": flow}
+    kit = module.own_kit(flow, "план", "О/Р", "v2.5.0")
+    assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in kit
+    assert "@main" not in kit, "адрес общей ветки ушёл в заготовку"

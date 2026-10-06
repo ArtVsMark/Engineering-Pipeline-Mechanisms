@@ -87,6 +87,9 @@ PYTHON_NEXT: Final = WORKFLOWS / "python-next.yml"
 #: Прогон внешнего взгляда: замер оборванных заходов отделяет им заход от
 #: ответа на `@claude`, у которого та же подпись (поздний взгляд на #907).
 REVIEW_RUN: Final = WORKFLOWS / "review.yml"
+#: Тело взгляда — общий шаг; `REVIEW_RUN` — его вызывающий: события,
+#: кнопка и имя запуска (#993).
+REVIEW_STEP: Final = WORKFLOWS / "step-review.yml"
 #: Механизмы проекта — каталог, а не отдельный файл: его читают те, кто судит о
 #: дереве целиком, а не об одном скрипте.
 SCRIPTS: Final = Path("scripts")
@@ -194,6 +197,7 @@ ALL: Final = (
     HANDOVER_PROBE,
     PYTHON_NEXT,
     REVIEW_RUN,
+    REVIEW_STEP,
     SKILLS,
     DECISIONS,
     SCRIPTS,

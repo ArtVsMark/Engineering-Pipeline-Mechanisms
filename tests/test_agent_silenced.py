@@ -154,3 +154,35 @@ def test_the_run_returns_the_declared_outcome(tmp_path: Path) -> None:
     )
     assert module.main(["--root", str(root), "--base", "база"]) == module.EXIT_SILENCED
     assert module.main(["--root", str(tmp_path / "нет"), "--base", "база"]) == module.EXIT_BROKEN
+
+
+#: Тело взгляда — общий шаг с действием агента (#993).
+STEP = ".github/workflows/step-review.yml"
+#: Вызывающий того же шага: по адресу с общей веткой и внутренним путём.
+BY_TRUNK = "jobs:\n  review:\n    uses: О/Р/.github/workflows/step-review.yml@main\n"
+BY_PATH = "jobs:\n  review:\n    uses: ./.github/workflows/step-review.yml\n"
+
+
+def test_the_caller_of_a_carrier_carries_too(tmp_path: Path) -> None:
+    """Правка ВЫЗЫВАЮЩЕГО носителя названа: файлом прогона площадке служит он (#993)."""
+    caller = ".github/workflows/review.yml"
+    root = tree(tmp_path, {STEP: CARRIER, caller: BY_TRUNK}, {caller: BY_TRUNK + "# правка\n"})
+    assert module.callers(root, "база", {STEP}) == {caller}
+    code, said = module.look(root, "база")
+    assert code == module.EXIT_SILENCED, said
+    assert "review.yml" in said
+
+
+def test_a_step_called_from_the_trunk_is_not_silenced(tmp_path: Path) -> None:
+    """Обе половины: шаг, позванный с общей веткой, правкой не глушится, а внутренним путём — да.
+
+    Адрес с общей веткой берёт файл не из изменения (#993), и расходиться с
+    общей веткой на голове ему нечему; внутренний путь берёт его из изменения.
+    """
+    caller = ".github/workflows/review.yml"
+    trunk = tree(tmp_path / "т", {STEP: CARRIER, caller: BY_TRUNK}, {STEP: CARRIER + "# правка\n"})
+    assert module.from_trunk(trunk, "база", {STEP}) == {STEP}
+    assert module.look(trunk, "база")[0] == module.EXIT_OK
+    local = tree(tmp_path / "л", {STEP: CARRIER, caller: BY_PATH}, {STEP: CARRIER + "# правка\n"})
+    assert module.from_trunk(local, "база", {STEP}) == set()
+    assert module.look(local, "база")[0] == module.EXIT_SILENCED
