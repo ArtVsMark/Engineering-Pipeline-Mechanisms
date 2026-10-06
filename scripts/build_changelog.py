@@ -69,6 +69,14 @@ UNFOLDED_RELEASES: Final = 3
 #: с запасом над договором, но не над эссе: разбор и замер едут в задачу, а
 #: во фрагменте остаётся ссылка на неё.
 FRAGMENT_LINES: Final = 10
+#: Предел ТЕЛА в знаках — та же граница, но против абзаца, записанного одной
+#: длинной строкой: предел строк объёма не держит, а гейт заведён ради
+#: объёма (взгляд на #1174). Замер 06.10.2026: у невыпущенных фрагментов
+#: наибольшее тело — 645 знаков, медиана выпуска 1.4.0 — 524, у прежних
+#: выпусков медиана 1000–1900. Восемьсот — с запасом над нынешней формой.
+FRAGMENT_CHARS: Final = 800
+#: Ограда блока кода: внутри неё `#` — комментарий примера, а не заголовок.
+FENCE: Final = "```"
 #: Заголовок выше `###`: в собранном журнале он встаёт в ряд с версиями (`##`)
 #: и ломает навигацию по выпускам — таких в выпущенном 16 (#1172).
 TOO_HIGH_RE: Final = re.compile(r"^#{1,2}\s")
@@ -234,14 +242,27 @@ def fragments_of(paths: list[str]) -> list[Fragment]:
 
 
 def shape_fault(fragment: Fragment) -> str:
-    """Чем фрагмент нарушает форму: длина тела или заголовок выше `###`; пусто — ничем."""
+    """Чем фрагмент нарушает форму: заголовок выше `###` или размер тела; пусто — ничем.
+
+    ТЕЛО — все непустые строки, кроме первой строки-заголовка и последней строки
+    ссылки на задачу: подзаголовки `####`, строки блоков кода и строка причины
+    рода `internal` в счёт идут. Заголовок ищется только вне блоков кода:
+    `# …` в примере shell — комментарий, а не заголовок (взгляд на #1174).
+    """
     lines = [one.strip() for one in fragment.body.splitlines() if one.strip()]
-    high = [one for one in lines if TOO_HIGH_RE.match(one)]
-    if high:
-        return f"заголовок выше `###`: «{high[0]}»"
-    body = [one for one in lines[:-1] if not one.startswith("#")]
+    inside = False
+    for one in lines:
+        if one.startswith(FENCE):
+            inside = not inside
+            continue
+        if not inside and TOO_HIGH_RE.match(one):
+            return f"заголовок выше `###`: «{one}»"
+    body = lines[1:-1] if lines and lines[0].startswith("#") else lines[:-1]
     if len(body) > FRAGMENT_LINES:
         return f"тело {len(body)} строк, предел {FRAGMENT_LINES}"
+    size = sum(len(one) for one in body)
+    if size > FRAGMENT_CHARS:
+        return f"тело {size} знаков, предел {FRAGMENT_CHARS}"
     return ""
 
 
