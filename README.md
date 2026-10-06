@@ -59,9 +59,11 @@
 (дежурный по общей ветке) · [`step-stuck.yml`](.github/workflows/step-stuck.yml)
 (застрявшее) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
-[`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов).
+[`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
+[`step-review.yml`](.github/workflows/step-review.yml) (внешний взгляд и реестр находок).
 Очереди, обходу, оклику и дрейфу токен владельца `MERGE_QUEUE_TOKEN` передаётся
-вызовом явно, по имени: секретов вызывающего общий шаг не видит. Вынос
+вызовом явно, по имени: секретов вызывающего общий шаг не видит; взгляду так же
+передаётся ключ агента `CLAUDE_CODE_OAUTH_TOKEN`. Вынос
 остальных ведёт #993.
 
 **Заготовку вызова собирает заход `scripts/onboard.py`**, а не вы руками:
