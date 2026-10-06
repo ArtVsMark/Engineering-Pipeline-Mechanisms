@@ -51,6 +51,15 @@
 # подтверждает проба в чужом дереве —
 # последний пункт #993, — а не эта.
 #
+# ДЕРЕВО ВЫЗЫВАЮЩЕГО — БЕЗ НАШЕГО КОДА, КАК У ПОТРЕБИТЕЛЯ (#990). Проба
+# живёт здесь, и в дереве вызывающего лежат наши `scripts/`, `packages/` и
+# `tests/`: шаг, по ошибке зовущий код оттуда, а не из своего checkout,
+# прошёл бы пробу и упал бы у потребителя. Поэтому шаги, берущие код своим
+# checkout, зовутся с `strip-ours: true` — они стирают эти каталоги из дерева
+# вызывающего до прогона. `step-lint` и `step-attribution` нашего кода не
+# зовут, входа у них нет. Вход появился в выпуске 1.4.0, раньше прибивки он
+# площадкой не принимается.
+#
 # ИМЕНА ДЖОБОВ ЗДЕСЬ СВОИ, С ПРИСТАВКОЙ `probe-`, И ЭТО НЕ УКРАШЕНИЕ. Без
 # неё джоб пробы звался бы `lint` — как джоб `ci`, — и на площадке две
 # РАЗНЫЕ проверки дали бы записи с одним именем. Сводный гейт такое уже
@@ -82,7 +91,7 @@ concurrency:
 jobs:
   probe-attribution:
     name: probe-attribution
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.3.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.4.0
     permissions:
       contents: read
       checks: read
@@ -91,7 +100,9 @@ jobs:
 
   probe-contract:
     name: probe-contract
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.3.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.4.0
+    with:
+      strip-ours: true
     permissions:
       contents: read
       checks: read
@@ -100,7 +111,9 @@ jobs:
 
   probe-debt:
     name: probe-debt
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.3.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.4.0
+    with:
+      strip-ours: true
     permissions:
       contents: read
       checks: read
@@ -109,7 +122,7 @@ jobs:
 
   probe-lint:
     name: probe-lint
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.3.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.4.0
     permissions:
       contents: read
       checks: read
@@ -118,7 +131,9 @@ jobs:
 
   probe-pipeline:
     name: probe-pipeline
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.3.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.4.0
+    with:
+      strip-ours: true
     permissions:
       contents: read
       checks: read
