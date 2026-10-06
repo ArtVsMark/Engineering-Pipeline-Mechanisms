@@ -276,7 +276,8 @@ def steps(path: Path = CI) -> list[Step]:
             if not command or command in seen:
                 continue
             lines = [plain(line) for line in command.splitlines()]
-            if not any(line.startswith(RUNNABLE) for line in lines):
+            # Пробел дописывается к строке: голый `mypy` — тоже вызов (#992).
+            if not any(f"{line} ".startswith(RUNNABLE) for line in lines):
                 continue
             # Площадка нужна блоку целиком, если её требует ХОТЯ БЫ одна его
             # строка: запустить остальное без неё значит проверить половину и
@@ -423,7 +424,10 @@ def types_call(line: str) -> str | None:
     `"mypy " in command`, а подстановка — началом строки, и шаг вида
     `python -m mypy …` тест видел, а подстановка нет (находка `f875389`).
     """
-    said = line.strip()
+    # ГОЛЫЙ ВЫЗОВ — ТОЖЕ ВЫЗОВ: шаг типов зовёт `mypy` без путей, и состав
+    # берётся из `[tool.mypy] files` (#992). Пробел дописывается к строке, а не
+    # снимается с формы: `mypyc` вызовом `mypy` не становится.
+    said = f"{line.strip()} "
     return next((call for call in TYPES_CALLS if said.startswith(call)), None)
 
 
@@ -444,7 +448,9 @@ def as_on_the_platform(step: Step, root: Path) -> str:
     for line in step.command.splitlines():
         call = types_call(line)
         lines.append(
-            line.replace(call, f"{call}--python-executable {shlex.quote(str(python))} ", 1)
+            f"{line.rstrip()} ".replace(
+                call, f"{call}--python-executable {shlex.quote(str(python))} ", 1
+            ).rstrip()
             if call
             else line
         )

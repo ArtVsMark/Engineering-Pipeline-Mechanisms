@@ -1003,6 +1003,9 @@ def test_only_the_types_step_is_run_in_the_platform_env(
     assert preflight.as_on_the_platform(plain, tmp_path) == "pytest -q"
     bare = preflight.Step("типы", "mypy scripts/")
     assert preflight.as_on_the_platform(bare, tmp_path) == "mypy scripts/"
+    # Голый вызов (#992): состав — в `[tool.mypy] files`, подстановка та же.
+    alone = preflight.Step("типы", "mypy", "pip install mypy")
+    assert preflight.as_on_the_platform(alone, tmp_path) == f"mypy --python-executable {fake}"
 
 
 def test_a_built_env_is_taken_ready_and_a_broken_build_is_named(tmp_path: Path) -> None:
@@ -1146,6 +1149,9 @@ def test_mypy_sees_the_packages_of_the_interpreter_it_is_given(tmp_path: Path) -
         ("python3 -m mypy tests/", "python3 -m mypy "),
         ("echo mypy scripts/", None),
         ("ruff check .", None),
+        ("mypy", "mypy "),
+        ("  python -m mypy", "python -m mypy "),
+        ("mypyc scripts/", None),
     ],
 )
 def test_the_types_call_is_seen_in_every_form(line: str, call: str | None) -> None:
