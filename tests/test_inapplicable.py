@@ -51,14 +51,26 @@ def hits(argv: list[str], root: Path) -> list[str]:
         raise AssertionError(f"предикат не исполнился ({done.returncode}): {argv}: {done.stderr}")
     # СПИСОК ПУТЕЙ — ПО NUL: путь с переводом строки законен, и построчный
     # разбор развалил бы его надвое (`tests/test_source_hygiene.py`).
+    # Строка вывода не обрезается: путь с пробелом по краю законен и иначе
+    # не совпал бы со своей записью в `allowed` (взгляд на #1177).
     parts = done.stdout.split("\0") if "-z" in argv else done.stdout.splitlines()
-    return sorted({one.strip() for one in parts if one.strip()})
+    return sorted({one for one in parts if one.strip()})
+
+
+def checks(rule: str) -> list[dict[str, Any]]:
+    """Предикаты правила: один или несколько — по половине границы ответа на каждый."""
+    said = predicates()["predicates"][rule]
+    return list(said) if isinstance(said, list) else [said]
 
 
 def arrived(rule: str, root: Path = ROOT) -> list[str]:
-    """Строки вывода сверх законных: условие вступления наступило, если не пусто."""
-    one = predicates()["predicates"][rule]
-    return [line for line in hits(one["argv"], root) if line not in one["allowed"]]
+    """Строки вывода сверх законных по всем предикатам правила: не пусто — условие наступило."""
+    return [
+        line
+        for one in checks(rule)
+        for line in hits(one["argv"], root)
+        if line not in one["allowed"]
+    ]
 
 
 def test_every_inapplicable_answer_is_held_here_and_nothing_else_is() -> None:
@@ -95,8 +107,9 @@ def test_the_condition_of_entry_has_not_arrived(rule: str) -> None:
 @pytest.mark.parametrize("rule", sorted(predicates()["predicates"]))
 def test_every_allowed_line_is_still_found(rule: str) -> None:
     """Законная строка, которой больше нет, снимается: список законного не копит мёртвое (005)."""
-    one = predicates()["predicates"][rule]
-    gone = sorted(set(one["allowed"]) - set(hits(one["argv"], ROOT)))
+    gone = sorted(
+        line for one in checks(rule) for line in set(one["allowed"]) - set(hits(one["argv"], ROOT))
+    )
     assert not gone, f"{rule}: в allowed строки, которых вывод больше не даёт: {gone}"
 
 
@@ -109,7 +122,7 @@ def test_a_planted_condition_turns_the_gate_red(tmp_path: Path) -> None:
     git("init", "-q")
     (tmp_path / "x.py").write_text("print(1)\n", encoding="utf-8")
     git("add", "-A")
-    argv = predicates()["predicates"]["077"]["argv"]
+    argv = checks("077")[0]["argv"]
     assert hits(argv, tmp_path) == []
     (tmp_path / "ru.po").write_text('msgid "x"\n', encoding="utf-8")
     git("add", "-A")
@@ -123,3 +136,18 @@ def test_a_broken_command_is_a_refusal_not_silence(tmp_path: Path) -> None:
     """Сломанная команда — отказ, а не «условие не наступило» (045)."""
     with pytest.raises(AssertionError, match="не исполнился"):
         hits(["git", "rev-parse", "--verify", "HEAD"], tmp_path)
+
+
+def test_every_half_of_a_border_has_its_own_predicate() -> None:
+    """Граница 066 — блокировка и второй писатель; держатся обе половины (взгляд на #1177)."""
+    whys = " ".join(one["why"] for one in checks("066"))
+    assert len(checks("066")) >= 2, "у 066 предикат одной половины границы"
+    assert "блокировк" in whys and "писател" in whys, "половина границы 066 без предиката"
+
+
+def test_a_path_keeps_its_edges(tmp_path: Path) -> None:
+    """Путь с пробелом по краю читается как есть, а не обрезанным (взгляд на #1177)."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / " x.po").write_text("", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
+    assert hits(["git", "ls-files", "-z", "*.po"], tmp_path) == [" x.po"]
