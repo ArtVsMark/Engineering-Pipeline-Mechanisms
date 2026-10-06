@@ -110,6 +110,16 @@ COMPOSED: Final = " / "
 #: сюда не попадает намеренно: его джобов в дереве нет, и прочитать их нечем —
 #: имя такой проверки остаётся неизвестным, и это названо, а не угадано (046).
 OUR_CALL: Final = "./"
+#: Вызов по АДРЕСУ С ОБЩЕЙ ВЕТКОЙ, чей прогон лежит в этом же дереве:
+#: `owner/repo/<путь>@{paths.TRUNK}`. Так свой вызов прибивают к общей ветке,
+#: когда код головы исполнять нельзя (`review.yml`, #993). Читается он деревом:
+#: файла в дереве нет — вызов чужой, как прежде. Вызов по ТЕГУ сюда не входит
+#: намеренно: его файл — выпуск, а не дерево, и его имена остаются неизвестными
+#: (пробы передачи). Расхождение названо и у общей ветки: дерево — голова
+#: изменения, и правка имён джобов шага сойдётся с площадкой после слияния (046).
+ADDRESSED_CALL: Final = re.compile(
+    rf"^[^./][^/]*/[^/]+/(?P<path>\.github/workflows/[^@]+)@{re.escape(paths.TRUNK)}$"
+)
 
 #: Раздел ответа по прогонам за пределами изменения.
 BEYOND: Final = "beyond_the_change"
@@ -535,7 +545,8 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     Поймано первым же прогоном разбора по дереву.
     """
-    if not said.startswith(OUR_CALL):
+    addressed = ADDRESSED_CALL.match(said)
+    if not said.startswith(OUR_CALL) and not addressed:
         return None
     # КОРЕНЬ ВЫВОДИТСЯ ИЗ ОБЪЯВЛЕННОГО ПУТИ, А НЕ ПОДЪЁМОМ ПО ДЕРЕВУ. Адрес
     # вызова отсчитывается от корня, а подъём `.parent.parent` угадывал бы, на
@@ -549,7 +560,12 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
             "корень дерева из него не выводится, а угадывать его нечем (075)"
         )
     root = Path(str(directory)[: -len(tail)] or ".")
-    where = root / said[len(OUR_CALL) :].split("@")[0]
+    if addressed:
+        where = root / addressed["path"]
+        if not where.is_file():
+            return None
+    else:
+        where = root / said[len(OUR_CALL) :].split("@")[0]
     if not where.is_file():
         raise BadPolicy(
             f"вызов «{said}» указывает на прогон, которого в дереве нет — "

@@ -221,7 +221,10 @@
       "answer": "as-is"
     },
     ".github/workflows/review.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/review.yml"
+      ]
     },
     ".github/workflows/rules-inbox.yml": {
       "answer": "as-is"
@@ -725,6 +728,9 @@
         ".rules/proposals.json",
         ".rules/bindings.json"
       ]
+    },
+    ".github/workflows/step-review.yml": {
+      "answer": "as-is"
     }
   }
 }

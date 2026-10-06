@@ -183,9 +183,12 @@ def is_open(state: str) -> bool:
     return any(state.startswith(one) for one in OPEN_STATES)
 
 
-#: Имя проверки, по записи которой на голове различаются причины. Берётся из
+#: Имена проверки, по записи которой на голове различаются причины. Берутся из
 #: договора, а не из памяти: имя джоба и есть имя контекста (`docs/use/pipeline.md`).
-REVIEW_CHECK: Final = "review"
+#: ИМЁН ДВА (#993): вынесенный в общий шаг взгляд пишет составное
+#: «review / review», а слитое до выноса несёт прежнее «review» — и реестр
+#: читает историю, где оба живут.
+REVIEW_CHECKS: Final = ("review / review", "review")
 #: Поле, которым `head_runs` помечает запись проверки взгляда, на которой
 #: аннотация называет отказ захода. Своё имя, а не поле площадки: его ставит
 #: механизм, прочитав аннотации.
@@ -432,7 +435,7 @@ def why_quiet(runs: list[dict[str, Any]]) -> str:
     Площадки здесь нет: записи приходят списком, и подделать их в проверке
     можно, не подделывая транспорт (140).
     """
-    ours = [run for run in runs if str(run.get("name") or "") == REVIEW_CHECK]
+    ours = [run for run in runs if str(run.get("name") or "") in REVIEW_CHECKS]
     if not ours:
         return STATE_NONE
 
@@ -590,7 +593,7 @@ def head_runs(repo: str, number: int, token: str) -> list[dict[str, Any]]:
         # писал бы «записи нет» там, где было «прошёл, а ответа нет» или
         # «упал», — размен факта на подробность, от которого предостерегает
         # эта же докстрока. Нашёл внешний взгляд на #686 (`3d25893`).
-        if str(run.get("name") or "") != REVIEW_CHECK or not (run.get("output") or {}).get(
+        if str(run.get("name") or "") not in REVIEW_CHECKS or not (run.get("output") or {}).get(
             "annotations_count"
         ):
             continue

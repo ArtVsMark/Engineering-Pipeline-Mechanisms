@@ -233,13 +233,19 @@ def test_a_step_takes_our_code_by_its_own_checkout(name: str) -> None:
     assert not stray, f"{name}: наш код зовётся из дерева вызывающего — {stray}"
     if not any(MECHANISMS in line for line in commands_of(said)):
         return
-    taken = code_checkouts(said)
-    assert len(taken) == 1, (
-        f"{name}: код конвейера зовётся, а checkout нашего репозитория — {len(taken)}"
-    )
-    assert taken[0].get("ref") == OUR_SHA, (
-        f"{name}: код берётся не на коммите вызова — прибивка к тегу его не прибьёт"
-    )
+    # ПО ДЖОБУ, А НЕ ПО ФАЙЛУ (#993): у шага взгляда джобов семь, и каждый
+    # исполняется на своей машине — выкачка одного джоба другому не видна.
+    for job_id, job in (yaml.safe_load(said).get("jobs") or {}).items():
+        alone = yaml.safe_dump({"jobs": {job_id: job}}, allow_unicode=True)
+        if not any(MECHANISMS in line for line in commands_of(alone)):
+            continue
+        taken = code_checkouts(alone)
+        assert len(taken) == 1, (
+            f"{name}:{job_id}: код конвейера зовётся, а checkout нашего репозитория — {len(taken)}"
+        )
+        assert taken[0].get("ref") == OUR_SHA, (
+            f"{name}:{job_id}: код берётся не на коммите вызова — прибивка к тегу его не прибьёт"
+        )
 
 
 #: Начало и конец блока, которым общий шаг берёт наш код (#990).

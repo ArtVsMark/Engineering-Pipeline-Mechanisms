@@ -117,11 +117,29 @@ def steps(root: Path) -> list[str]:
     return sorted(found)
 
 
+def step_called(said: str) -> str:
+    """Имя шага, который зовёт этот `uses:` из нашего дерева; пусто — не наш шаг.
+
+    Форм ДВЕ: внутренний путь `./.github/workflows/step-<имя>.yml` и адрес с
+    общей веткой (`pipeline_checks.ADDRESSED_CALL`): так свой вызов взгляда
+    прибит к общей ветке, чтобы карта не исполняла код головы (#993).
+    """
+    if said.startswith(f"{LOCAL_CALL}{STEP_PREFIX}"):
+        where = said[len(LOCAL_CALL) :]
+    elif found := policy.ADDRESSED_CALL.match(said):
+        where = Path(found["path"]).name
+    else:
+        return ""
+    if not where.startswith(STEP_PREFIX) or Path(where).suffix != ".yml":
+        return ""
+    return Path(where).stem[len(STEP_PREFIX) :]
+
+
 def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
     """Шаги со СВОИМ вызывающим прогоном в нашем дереве: имя шага → файл прогона.
 
-    Вызывающий ищется по внутреннему пути `uses: ./.github/workflows/step-<имя>.yml`
-    у прогонов дерева, кроме самих шагов. Нечитаемый прогон — третий исход, а
+    Вызывающий ищется по вызову шага (`step_called`: внутренний путь или адрес
+    с общей веткой) у прогонов дерева, кроме самих шагов. Нечитаемый прогон — третий исход, а
     не «вызывающего нет»: молча он перевёл бы управляющий механизм в джоб
     `ci.yml` (045).
 
@@ -131,7 +149,7 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
     — шаг, которого `ci.yml` не зовёт, а зовёт ровно один свой прогон. Два своих
     прогона у одного шага — неоднозначность, и это отказ, а не выбор первого.
     """
-    wanted = {f"{LOCAL_CALL}{STEP_PREFIX}{one}.yml": one for one in names}
+    wanted = set(names)
     callers: dict[str, list[Path]] = {}
     for flow in sorted((root / paths.WORKFLOWS).glob("*.yml")):
         if flow.name.startswith(STEP_PREFIX):
@@ -141,8 +159,8 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
         except policy.BadPolicy as exc:
             raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
         for job in (said.get("jobs") or {}).values():
-            name = wanted.get(str((job or {}).get("uses") or ""))
-            if name is not None and flow not in callers.setdefault(name, []):
+            name = step_called(str((job or {}).get("uses") or ""))
+            if name in wanted and flow not in callers.setdefault(name, []):
                 callers[name].append(flow)
     found: dict[str, Path] = {}
     for name, flows in callers.items():
@@ -166,24 +184,26 @@ def own_kit(flow: Path, name: str, repo: str, pin: str) -> str:
     внутренний путь молча ушёл бы в заготовку. Поэтому число подмен обязано
     равняться числу вызовов по разбору; не равно — отказ с названной формой.
     """
-    inner = f"uses: {LOCAL_CALL}{STEP_PREFIX}{name}.yml"
     outer = f"uses: {repo}/.github/workflows/{STEP_PREFIX}{name}.yml@{pin}"
     try:
         jobs = (policy.run_of(flow).get("jobs") or {}).values()
     except policy.BadPolicy as exc:
         raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
-    calls = sum(
-        1
+    said = [
+        str((job or {}).get("uses") or "")
         for job in jobs
-        if str((job or {}).get("uses") or "") == f"{LOCAL_CALL}{STEP_PREFIX}{name}.yml"
-    )
+        if step_called(str((job or {}).get("uses") or "")) == name
+    ]
     text = flow.read_text(encoding="utf-8")
-    if text.count(inner) != calls:
+    inner = sorted({f"uses: {one}" for one in said})
+    if sum(text.count(one) for one in inner) != len(said):
         raise NotRun(
-            f"{flow.name}: вызов {STEP_PREFIX}{name} записан не формой «{inner}» — "
-            "заготовка не перепишет его на адрес по тегу, а внутренний путь потребителю не годится"
+            f"{flow.name}: вызов {STEP_PREFIX}{name} записан не формой «uses: <адрес>» — "
+            "заготовка не перепишет его на адрес по тегу, а наш адрес потребителю не годится"
         )
-    return text.replace(inner, outer)
+    for one in inner:
+        text = text.replace(one, outer)
+    return text
 
 
 def thin_ci(names: list[str], repo: str, pin: str) -> str:
