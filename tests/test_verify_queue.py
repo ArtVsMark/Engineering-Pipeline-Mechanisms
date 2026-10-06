@@ -170,7 +170,7 @@ def test_a_verifier_call_does_not_walk_the_late_queue() -> None:
 
     from tests.conftest import ROOT
 
-    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "review.yml").read_text("utf-8"))
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-review.yml").read_text("utf-8"))
     condition = " ".join(str(flow["jobs"]["late-queue"]["if"]).split())
     assert "(github.event_name == 'workflow_dispatch' && inputs.mark == '')" in condition
     # Голое `|| github.event_name == 'workflow_dispatch'` рядом с новой формой

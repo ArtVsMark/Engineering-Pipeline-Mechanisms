@@ -511,7 +511,9 @@ STATE_NOT_A_COMMIT: dict[str, str] = {
 #: догоняет поздний взгляд. Устаревшая голова, пришедшая последней, агента не
 #: зовёт: ворота взгляда сверяют её с головой изменения (`look_waits.stale`).
 ADVISORY_JOBS: dict[str, str] = {
-    "review.yml:review": "новый толчок снимает взгляд прежней головы (#848); взгляд совещательный",
+    "step-review.yml:review": (
+        "новый толчок снимает взгляд прежней головы (#848); взгляд совещательный"
+    ),
 }
 
 
@@ -539,7 +541,7 @@ def cancelling_groups() -> dict[str, str]:
 
 def test_a_job_group_is_seen_by_the_head_gate() -> None:
     """Группа джоба входит в предмет гейта: без неё `review` не был бы виден (#829)."""
-    assert "review.yml:review" in cancelling_groups()
+    assert "step-review.yml:review" in cancelling_groups()
 
 
 def test_a_cancelling_group_names_the_head_or_declares_why_not() -> None:

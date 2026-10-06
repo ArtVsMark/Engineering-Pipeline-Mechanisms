@@ -511,7 +511,7 @@ def test_the_writing_job_owns_the_shared_issue() -> None:
     ни при чём, лечится это владением.
     """
     document = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "review.yml").read_text(encoding="utf-8")
+        (ROOT / ".github" / "workflows" / "step-review.yml").read_text(encoding="utf-8")
     )
     writing = [
         (name, job)
@@ -1601,7 +1601,7 @@ PROMPT_KEY_RE: Final = re.compile(r"^\s+НАХОДКА\[<вес>\]:\s*(?P<form>.
 
 def prompt_forms() -> list[str]:
     """Формы ключа из всех промптов, выдающих находки (#668)."""
-    text = (ROOT / ".github" / "workflows" / "review.yml").read_text(encoding="utf-8")
+    text = (ROOT / ".github" / "workflows" / "step-review.yml").read_text(encoding="utf-8")
     return PROMPT_KEY_RE.findall(text)
 
 
@@ -2069,7 +2069,7 @@ def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
     """
     import yaml
 
-    flow = yaml.safe_load((ROOT / ".github/workflows/review.yml").read_text(encoding="utf-8"))
+    flow = yaml.safe_load((ROOT / ".github/workflows/step-review.yml").read_text(encoding="utf-8"))
     job = flow["jobs"]["verify"]
     assert job["concurrency"] == {"group": "findings-write", "cancel-in-progress": False}
     runs = [str(step.get("run") or "") for step in job["steps"]]
@@ -2077,7 +2077,9 @@ def test_the_verifier_answer_and_its_transfer_share_one_hold() -> None:
     assert agent and "claude-code-action" in agent[0], "агент верификатора ушёл из джоба записи"
     assert any("review_findings.py --verify" in run for run in runs), "перенос ушёл из джоба"
     # Верхняя группа снимающая: у проверки премисы она своя на каждый запуск.
-    top = str(flow["concurrency"]["group"])
+    # Группа — у вызывающего: `concurrency` прогона стоит там (#993).
+    caller = yaml.safe_load((ROOT / ".github/workflows/review.yml").read_text(encoding="utf-8"))
+    top = str(caller["concurrency"]["group"])
     assert "inputs.mark" in top and "github.run_id" in top, "повторное нажатие снимет идущий verify"
     # Предел агента меньше предела джоба: перенос успевает.
     refute = next(step for step in job["steps"] if step.get("id") == "refute")
@@ -2436,7 +2438,7 @@ def test_the_tasks_carry_no_copy_of_the_mark_instruction() -> None:
     поздний взгляд находил соседнюю (#913–#915). Решение владельца 28.09.2026:
     источник один — карта, она подставляется в оба задания.
     """
-    text = (ROOT / ".github" / "workflows" / "review.yml").read_text(encoding="utf-8")
+    text = (ROOT / ".github" / "workflows" / "step-review.yml").read_text(encoding="utf-8")
     for kind in (findings_module.ANSWER_KIND, findings_module.CODE):
         assert f"· {kind}]" not in text, f"в задании снова копия скобки «{kind}»"
         # Слово рода в обратных кавычках — вторая форма, которой указание

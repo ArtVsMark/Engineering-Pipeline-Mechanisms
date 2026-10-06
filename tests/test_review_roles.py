@@ -102,8 +102,8 @@ MAP_TEXT: Final = re.compile(r"\$\{\{\s*(?:needs|steps)\.map\.outputs\.text\s*\}
 
 
 def prompts() -> dict[str, str]:
-    """Задания взгляда в `review.yml`, по джобам: только те, что получают карту."""
-    said = yaml.safe_load((ROOT / paths.REVIEW_RUN).read_text(encoding="utf-8"))
+    """Задания взгляда в общем шаге (#993), по джобам: только те, что получают карту."""
+    said = yaml.safe_load((ROOT / paths.REVIEW_STEP).read_text(encoding="utf-8"))
     return {
         job_id: step["with"]["prompt"]
         for job_id, job in said["jobs"].items()
@@ -138,7 +138,7 @@ def test_the_review_task_says_nothing_of_the_project() -> None:
     procedure = (ROOT / paths.REVIEW_PROCEDURE).read_text(encoding="utf-8")
     body = sentences(subject_of(procedure).split("\n\n*", 1)[0])
     found = prompts()
-    assert found, "заданий с картой в review.yml нет — проверять нечего (075)"
+    assert found, "заданий с картой в step-review.yml нет — проверять нечего (075)"
     title = review_map.SUBJECT.removeprefix("## ")
     unnamed = [job_id for job_id, prompt in found.items() if title not in prompt]
     copied = {
@@ -202,7 +202,7 @@ def test_changed_files_are_asked_of_the_platform(monkeypatch: pytest.MonkeyPatch
 
 def test_both_prompts_point_to_the_procedure_instead_of_retelling_it() -> None:
     """Обе подсказки отсылают к процедуре и не пересказывают её (#776, 022)."""
-    text = (ROOT / ".github/workflows/review.yml").read_text(encoding="utf-8")
+    text = (ROOT / ".github/workflows/step-review.yml").read_text(encoding="utf-8")
     assert text.count("Процедура взгляда и роли этого изменения") == 2
     assert "`РОЛЬ <имя>: нечего`" not in text, "процедура пересказана в подсказке"
     assert len(re.findall(r"review_map\.py[^\n]*\n\s*--pr ", text)) == 2, "шаг карты без номера"
