@@ -173,12 +173,15 @@ def test_the_caller_of_a_carrier_carries_too(tmp_path: Path) -> None:
     assert "review.yml" in said
 
 
-def test_a_step_called_from_the_trunk_is_not_silenced(tmp_path: Path) -> None:
+def test_a_step_called_from_the_trunk_is_not_silenced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Обе половины: шаг, позванный с общей веткой, правкой не глушится, а внутренним путём — да.
 
     Адрес с общей веткой берёт файл не из изменения (#993), и расходиться с
     общей веткой на голове ему нечему; внутренний путь берёт его из изменения.
     """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "О/Р")
     caller = ".github/workflows/review.yml"
     trunk = tree(tmp_path / "т", {STEP: CARRIER, caller: BY_TRUNK}, {STEP: CARRIER + "# правка\n"})
     assert module.from_trunk(trunk, "база", {STEP}) == {STEP}
@@ -186,3 +189,48 @@ def test_a_step_called_from_the_trunk_is_not_silenced(tmp_path: Path) -> None:
     local = tree(tmp_path / "л", {STEP: CARRIER, caller: BY_PATH}, {STEP: CARRIER + "# правка\n"})
     assert module.from_trunk(local, "база", {STEP}) == set()
     assert module.look(local, "база")[0] == module.EXIT_SILENCED
+
+
+@pytest.mark.parametrize(
+    ("calls", "silenced"),
+    [
+        ([BY_TRUNK.replace("О/Р/", "Чужой/Р/")], True),
+        ([BY_TRUNK.replace("@main", "@main-next")], True),
+        ([BY_TRUNK, BY_PATH.replace("  review:", "  ещё:")], True),
+        ([BY_TRUNK.replace("о/р".upper(), "о/р")], False),
+    ],
+    ids=["чужой репозиторий", "ветка с хвостом", "есть и вызов ./", "свой адрес иным регистром"],
+)
+def test_only_an_own_trunk_call_excludes_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calls: list[str], silenced: bool
+) -> None:
+    """Шаг выпадает из носителей, только если ВСЕ его вызовы — свой адрес с общей веткой (#1170).
+
+    Чужой репозиторий с тем же именем файла, `@main-next` и соседний вызов `./`
+    шаг не освобождают: тогда правка шага может исполниться из изменения.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "О/Р")
+    flows = {STEP: CARRIER}
+    for number, said in enumerate(calls):
+        flows[f".github/workflows/зовущий-{number}.yml"] = said
+    root = tree(tmp_path, flows, {STEP: CARRIER + "# правка\n"})
+    code = module.look(root, "база")[0]
+    assert code == (module.EXIT_SILENCED if silenced else module.EXIT_OK)
+
+
+def test_an_unknown_own_name_excludes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Своего имени не узнать — шаг остаётся носителем: ошибка в сторону громкости (051)."""
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    root = tree(tmp_path, {STEP: CARRIER, ".github/workflows/review.yml": BY_TRUNK}, {})
+    assert module.own_repo(root) == ""
+    assert module.from_trunk(root, "база", {STEP}) == set()
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/О/Р.git"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    assert module.own_repo(root) == "О/Р"
+    assert module.from_trunk(root, "база", {STEP}) == {STEP}

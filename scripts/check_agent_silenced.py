@@ -38,13 +38,14 @@ repository's default branch». Шаг при этом объявлен `continue
 """
 
 import argparse
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Final
 
-import paths
+import pipeline_checks as policy
 import report
 
 #: Чем объявлено действие агента в файле прогона. Признак — строка вызова, а не
@@ -118,14 +119,20 @@ def carriers(root: Path, base: str) -> set[str]:
     return (found | callers(root, base, found)) - from_trunk(root, base, found)
 
 
-#: Вызов прогона в строке `uses:`: путь вызываемого — после каталога прогонов.
-CALL_RE: Final = re.compile(r"uses:\s*[\"']?(?P<said>\S*?\.github/workflows/(?P<name>[^@\s\"']+))")
+#: Вызов прогона в строке `uses:`: путь вызываемого от корня — после адреса.
+CALL_RE: Final = re.compile(
+    r"uses:\s*[\"']?(?P<said>(?:\S*?/)?(?P<path>\.github/workflows/[^@\s\"']+)(?:@[^\s\"']+)?)"
+)
 
 
 def _calls(root: Path, base: str, found: set[str]) -> list[tuple[str, str, str]]:
-    """Вызовы носителей по общей ветке: (вызывающий, вызванный, строка вызова)."""
-    names = {Path(one).name: one for one in found}
-    if not names:
+    """Вызовы носителей по общей ветке: (вызывающий, вызванный, адрес вызова).
+
+    Вызванный сверяется ПОЛНЫМ путём от корня, а не именем файла: чужой
+    `X/Y/.github/workflows/step-review.yml@main` наш шаг не зовёт, хоть имя у
+    файлов одно (поздний взгляд на #1170).
+    """
+    if not found:
         return []
     said = _git(root, "grep", "-n", "-E", "uses:", base, "--", WORKFLOWS, empty=GREP_FOUND_NOTHING)
     calls: list[tuple[str, str, str]] = []
@@ -134,9 +141,8 @@ def _calls(root: Path, base: str, found: set[str]) -> list[tuple[str, str, str]]
         parts = line[len(base) + 1 :].split(":", 2)
         if len(parts) != 3 or not (match := CALL_RE.search(parts[2])):
             continue
-        callee = names.get(match["name"])
-        if callee is not None and callee != parts[0]:
-            calls.append((parts[0], callee, parts[2]))
+        if match["path"] in found and match["path"] != parts[0]:
+            calls.append((parts[0], match["path"], match["said"]))
     return calls
 
 
@@ -151,17 +157,45 @@ def callers(root: Path, base: str, found: set[str]) -> set[str]:
     return {caller for caller, _, _ in _calls(root, base, found)}
 
 
+def own_repo(root: Path) -> str:
+    """Своё имя `владелец/репозиторий`: площадка в прогоне, `origin` локально; пусто — неизвестно.
+
+    Неизвестное имя не исключает НИЧЕГО (`from_trunk`): предупреждение
+    скажет лишнее, но не промолчит о носителе — ошибка в сторону громкости (051).
+    """
+    said = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if said:
+        return said
+    try:
+        url = _git(root, "remote", "get-url", "origin").strip().removesuffix(".git")
+    except NotRun:
+        return ""
+    parts = url.replace(":", "/").split("/")
+    return f"{parts[-2]}/{parts[-1]}" if len(parts) >= 2 else ""
+
+
 def from_trunk(root: Path, base: str, found: set[str]) -> set[str]:
-    """Носители, которых зовут адресом С ОБЩЕЙ ВЕТКОЙ: их правка агента не глушит.
+    """Носители, которых зовут ТОЛЬКО своим адресом с общей веткой: их правка агента не глушит.
 
     Такой вызов берёт файл с общей ветки, а не из изменения (`review.yml` →
     `step-review.yml@main`, #993): правка шага в изменении на его голове не
-    исполняется вовсе, и расходиться с общей веткой там нечему.
+    исполняется вовсе. Признак адреса — один на проект
+    (`pipeline_checks.ADDRESSED_CALL`, с концом строки после ветки), репозиторий
+    — свой, и ни одного вызова `./`: такой взял бы файл из изменения
+    (поздний взгляд на #1170).
     """
+    own = own_repo(root).lower()
+    by_callee: dict[str, list[str]] = {}
+    for _, callee, said in _calls(root, base, found):
+        by_callee.setdefault(callee, []).append(said)
     return {
         callee
-        for _, callee, line in _calls(root, base, found)
-        if re.search(rf"@{re.escape(paths.TRUNK)}\b", line) and "./" not in line.split("uses:")[1]
+        for callee, said in by_callee.items()
+        if own
+        and all(
+            policy.ADDRESSED_CALL.match(one) and one.split("/.github/")[0].lower() == own
+            for one in said
+        )
     }
 
 
