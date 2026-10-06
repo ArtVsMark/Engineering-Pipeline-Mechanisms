@@ -308,6 +308,10 @@ def compatible(declared: str, version: str) -> bool:
 
 #: Переменная, где общий шаг держит выкачанный код конвейера (#990).
 SUPPLIER_ENV: Final = "MECHANISMS"
+#: Каталоги кода механизмов: только в них путь-адресат ищется у поставщика.
+#: Остальное в выкачке — документы и набор поставщика, а не механизмы (#1163).
+#: Состав — из объявления `paths.SOURCES` и каталога прогонов, а не строками.
+SUPPLIER_DIRS: Final = tuple(f"{place.as_posix()}/" for place in (*paths.SOURCES, WORKFLOWS))
 
 
 def resolves(address: str, root: Path = Path(), supplier: Path | None = None) -> bool:
@@ -333,11 +337,23 @@ def resolves(address: str, root: Path = Path(), supplier: Path | None = None) ->
     `$MECHANISMS` — тот же коммит, что дерево: адресат, удалённый из дерева,
     пропал и у поставщика. В пробе поставщик — прибитый выпуск, и это её
     предмет. У потребителя его собственный путь, удалённый из дерева, пройдёт
-    сверку, только если у поставщика лежит путь с тем же именем.
+    сверку, только если он лежит в каталоге кода механизмов
+    (`SUPPLIER_DIRS`) и у поставщика есть путь с тем же именем; образец —
+    если у поставщика есть хоть одно совпадение в этих каталогах.
+
+    У ПОСТАВЩИКА ИЩЕТСЯ ТОЛЬКО КОД МЕХАНИЗМОВ (поздний взгляд на #1163).
+    Предмет правки — «путь механизма», а выкачка несёт и `README.md`, и
+    `docs/`, и `tests/`: ходовой адресат потребителя — его документ в
+    `docs/`, — удалённый из его дерева, молча проходил бы сверку по
+    одноимённому файлу поставщика.
     """
     if ISSUE_RE.match(address):
         return True
-    places = [root] if supplier is None else [root, supplier]
+    # Префикс судится по пути БЕЗ подъёма: `scripts/../docs/x.md` начинается с
+    # каталога механизмов, а указывает на документ поставщика (взгляд на #1167).
+    climbs = ".." in Path(address).parts
+    ours = supplier is not None and not climbs and address.startswith(SUPPLIER_DIRS)
+    places = [root, supplier] if ours and supplier is not None else [root]
     if any(mark in address for mark in GLOB_MARKS):
         return any(any(place.glob(address)) for place in places)
     return any((place / address).exists() for place in places)

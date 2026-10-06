@@ -873,3 +873,40 @@ def test_the_supplier_is_read_from_the_environment(
     assert policy.supplier_of() is None
     monkeypatch.setenv(policy.SUPPLIER_ENV, str(tmp_path))
     assert policy.supplier_of() == tmp_path
+
+
+def test_only_mechanism_code_is_looked_up_at_the_supplier(tmp_path: Path) -> None:
+    """У поставщика ищется код механизмов, а не его документы и набор (#1163)."""
+    tree, supplier = tmp_path / "tree", tmp_path / "supplier"
+    tree.mkdir()
+    for name in ("scripts/main_red.py", "docs/runbook.md", "README.md"):
+        (supplier / name).parent.mkdir(parents=True, exist_ok=True)
+        (supplier / name).write_text("", encoding="utf-8")
+    assert policy.resolves("scripts/main_red.py", tree, supplier)
+    assert not policy.resolves("docs/runbook.md", tree, supplier), "документ поставщика засчитан"
+    assert not policy.resolves("README.md", tree, supplier)
+    assert not policy.resolves("docs/*.md", tree, supplier), "образец по документам поставщика"
+
+
+def test_a_pattern_found_only_at_the_supplier_needs_the_supplier(tmp_path: Path) -> None:
+    """Образец, совпавший лишь у поставщика, без поставщика не разрешается (#1163)."""
+    tree, supplier = tmp_path / "tree", tmp_path / "supplier"
+    tree.mkdir()
+    (supplier / "scripts").mkdir(parents=True)
+    (supplier / "scripts" / "stuck.py").write_text("", encoding="utf-8")
+    assert policy.resolves("scripts/*.py", tree, supplier)
+    assert not policy.resolves("scripts/*.py", tree), "без поставщика образец разрешился"
+
+
+def test_a_climb_out_of_the_mechanism_dirs_is_not_looked_up_at_the_supplier(
+    tmp_path: Path,
+) -> None:
+    """`scripts/../docs/x.md` начинается с каталога механизмов, но к поставщику не идёт (#1167)."""
+    tree, supplier = tmp_path / "tree", tmp_path / "supplier"
+    tree.mkdir()
+    for name in ("scripts/main_red.py", "docs/runbook.md"):
+        (supplier / name).parent.mkdir(parents=True, exist_ok=True)
+        (supplier / name).write_text("", encoding="utf-8")
+    assert not policy.resolves("scripts/../docs/runbook.md", tree, supplier)
+    assert not policy.resolves("scripts/../docs/*.md", tree, supplier)
+    assert policy.resolves("scripts/main_red.py", tree, supplier)
