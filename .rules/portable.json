@@ -744,6 +744,12 @@
     },
     ".github/workflows/step-review.yml": {
       "answer": "as-is"
+    },
+    ".rules/inapplicable.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/inapplicable.json"
+      ]
     }
   }
 }
