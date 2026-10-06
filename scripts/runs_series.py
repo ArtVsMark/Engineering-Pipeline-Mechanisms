@@ -49,6 +49,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
+import badges_read
 import ghrest
 import paths
 import yaml
@@ -601,7 +602,7 @@ def merge(
     return dict(sorted(days.items()))
 
 
-def coverage_now(repo: str) -> float | None:
+def coverage_now(repo: str, token: str = "") -> float | None:
     """Доля покрытых строк с витрины проекта; ``None`` — НЕ ПРОЧИТАНО.
 
     ЧИСЛО НЕ СЧИТАЕТСЯ ЗДЕСЬ. Покрытие считает шаг значков прогоном набора под
@@ -619,7 +620,12 @@ def coverage_now(repo: str) -> float | None:
     прочитано» — это отсутствие ключа `coverage_percent`.
     """
     try:
-        facts = ghrest.raw_json(FACTS_URL.format(repo=repo))
+        # С токеном — API площадки: прямая ссылка в приватном репозитории
+        # всегда 404, и покрытие было бы «не прочитано» всегда (взгляд на #1162).
+        if token:
+            facts = badges_read.by_api(repo, "facts.json", token)
+        else:
+            facts = ghrest.raw_json(FACTS_URL.format(repo=repo))
     except ghrest.TransportError, OSError, ValueError:
         return None
     # Доля — ключом контракта `coverage_percent` (#759); его нет — покрытие не
@@ -832,7 +838,7 @@ def main(argv: list[str] | None = None) -> int:
         # Покрытие берётся ОДИН раз и только за нынешний день: витрина публикует
         # текущее число, и записать его во вчерашний день значило бы подделать
         # замер, которого не было (005).
-        days = merge(known, fresh, bounds, today, coverage_now(args.repo))
+        days = merge(known, fresh, bounds, today, coverage_now(args.repo, token))
         body = {
             "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
             "window_days": bounds.window_days,

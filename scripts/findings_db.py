@@ -109,7 +109,15 @@ SHAPES: Final[dict[str, dict[str, type]]] = {
     "kinds": KIND_SHAPE,
 }
 #: Таблицы базы, по которым печатается счёт строк.
-TABLE_NAMES: Final = ("projects", "findings", "seen_on", "resolutions", "kinds", "kind_spawned")
+TABLE_NAMES: Final = (
+    "projects",
+    "findings",
+    "seen_on",
+    "resolutions",
+    "kinds",
+    "kind_spawned",
+    "merges",
+)
 #: Схема базы. Ключи составные: отпечаток уникален внутри проекта, а не семьи.
 TABLES: Final = """
 CREATE TABLE projects (
@@ -135,6 +143,10 @@ CREATE TABLE kinds (
 CREATE TABLE kind_spawned (
     repo TEXT NOT NULL, kind TEXT NOT NULL, mechanism TEXT NOT NULL,
     PRIMARY KEY (repo, kind, mechanism)
+);
+CREATE TABLE merges (
+    repo TEXT NOT NULL, pr INTEGER NOT NULL, merged_at TEXT NOT NULL,
+    PRIMARY KEY (repo, pr)
 );
 CREATE VIEW finding_rules AS
     SELECT f.repo, f.mark, f.pr, f.role, f.weight, f.rod, k.verdict, k.rule,
@@ -169,6 +181,11 @@ def checked_archive(path: Path) -> dict[str, Any]:
         for mark, entry in archive[part].items():
             if said := misshapen_record(entry, SHAPES[part], NULLABLE[part]):
                 raise NotRun(f"{path}: {part} {mark} — {said}")
+    merged = archive.get("merged", {})
+    if not isinstance(merged, dict) or not all(
+        str(pr).isdigit() and isinstance(when, str) for pr, when in merged.items()
+    ):
+        raise NotRun(f"{path}: `merged` не словарь «номер → дата»")
     return archive
 
 
@@ -257,6 +274,13 @@ def fill(db: sqlite3.Connection, archive: dict[str, Any]) -> None:
             for name, one in archive["kinds"].items()
             for mechanism in one.get("породил") or []
         ],
+    )
+    # ДАТЫ СЛИЯНИЯ (#1136, взгляд на #1158): возраст находки — то, ради чего её
+    # анализируют, и без них база его не знала. Архив до #1158 поля не несёт —
+    # тогда строк нет, а не отказ: старый архив законен.
+    db.executemany(
+        "INSERT INTO merges VALUES (?, ?, ?)",
+        [(repo, int(pr), when) for pr, when in (archive.get("merged") or {}).items()],
     )
 
 
