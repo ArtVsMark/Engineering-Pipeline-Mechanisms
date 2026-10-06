@@ -16,6 +16,7 @@ import ast
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Final
 
@@ -347,9 +348,8 @@ def test_an_as_is_flow_is_called_not_copied() -> None:
     списка (005).
 
     СОСЕД НАЗВАН (195): слой выводится здесь только у прогонов. Ответ `as-is` у
-    навыков `.claude/skills/*` — слой заготовки, и с деревом он сегодня не
-    сверяется ничем: навык ссылается на наши скрипты и документы, которых у
-    потребителя не будет. Эту сверку ведёт #995, а не этот тест.
+    навыков `.claude/skills/*` — слой заготовки, и его сверяет с тем, что
+    потребитель получит, `test_a_skill_answer_follows_what_it_names` (#995).
     """
     copied = set()
     for name, said in inventory()["answers"].items():
@@ -665,10 +665,8 @@ def test_a_window_mechanism_that_calls_our_tree_is_not_as_is() -> None:
     у потребителя этого кода нет — хук промолчал бы предупреждением.
 
     ГРАНИЦА НАЗВАНА (195, взгляд на #1122): навыки `.claude/skills/` вне гейта.
-    Их `as-is` — ответ о слое ЗАГОТОВКИ: девять из двенадцати называют
-    `scripts/` в прозе как инструмент проекта, и у потребителя такая ссылка
-    указывает на его дерево или на пакет. Сверку ссылок навыков с тем, что
-    потребитель получает, ведёт #995, пункт 2, — не этот гейт.
+    Их ответ сверяет с тем, что потребитель получает, свой гейт —
+    `test_a_skill_answer_follows_what_it_names` (#995, пункт 2).
     """
     answers = inventory()["answers"]
     off = {
@@ -698,3 +696,148 @@ def test_a_window_mechanism_that_calls_our_tree_is_not_as_is() -> None:
 def test_calls_our_tree_tells_a_call_from_a_comment(text: str, lines: list[int]) -> None:
     """Обе половины предиката: обращение в коде — названо; в комментарии — нет."""
     assert calls_our_tree(text) == lines
+
+
+#: Путь дерева, названный навыком: от корня, под одним из каталогов, которые
+#: бывают у проекта. Читается и в прозе, и в коде навыка — ссылка есть ссылка.
+NAMED_PATH: Final = re.compile(
+    r"(?<![\w/.-])((?:\.claude|\.github|\.rules|scripts|tests|docs|packages)/[\w./-]*[\w-])"
+)
+
+
+def named_paths(skill: Path) -> set[str]:
+    """Пути НАШЕГО дерева, которые называет навык: существующие, а не похожие на путь.
+
+    Читаются ВСЕ файлы навыка, а не один `SKILL.md`: вспомогательный скрипт
+    навыка ссылается на дерево так же (взгляд на #1173). Свой каталог навыка
+    не считается — ссылка на себя у потребителя всегда при нём.
+
+    ПРЕДЕЛ НАЗВАН: судится только путь, который в дереве ЕСТЬ. Путь на другой
+    ветке (`.github/badges/findings.json` живёт на ветке `badges`) или
+    похожая на путь проза в счёт не идут — первую судить нечем, вторая не
+    ссылка.
+    """
+    own = skill.relative_to(ROOT).as_posix()
+    found: set[str] = set()
+    for one in sorted(path for path in skill.rglob("*") if path.is_file()):
+        text = one.read_text(encoding="utf-8", errors="replace")
+        for match in NAMED_PATH.finditer(text):
+            said = match.group(1).rstrip(".")
+            if (ROOT / said).exists() and said != own and not said.startswith(f"{own}/"):
+                found.add(said)
+    return found
+
+
+def consumer_has(said: str, answers: dict[str, Any]) -> bool:
+    """Будет ли путь в дереве потребителя: навык `as-is`, свод или своё по ответу `configured`.
+
+    Код конвейера (`scripts/`, `packages/`) у потребителя живёт только выкачкой
+    в прогоне (#990), а в дереве окна его нет; `tests/` и `docs/` — наши.
+    """
+    # Свод у потребителя есть всегда — его наполнение пишет владелец (#995);
+    # состав свода — у гейта его свежести, а не второй список здесь (022).
+    if said in RULEBOOK.RULEBOOK:
+        return True
+    head = "/".join(said.split("/")[:3])
+    if head.startswith(".claude/skills/"):
+        return bool(answers.get(head, {}).get("answer") == "as-is")
+    return any(
+        said == where or said.startswith(f"{where}/")
+        for one in answers.values()
+        if one.get("answer") == "configured"
+        for where in one.get("where", [])
+    )
+
+
+def missing_at_the_consumer(skill: str, answers: dict[str, Any]) -> list[str]:
+    """Пути, которые навык называет, а у потребителя их не будет."""
+    return sorted(one for one in named_paths(ROOT / skill) if not consumer_has(one, answers))
+
+
+def test_a_skill_answer_follows_what_it_names() -> None:
+    """Ответ навыка честен в обе стороны: `as-is` — только когда всё названное у потребителя есть.
+
+    Решение владельца 06.10.2026 по #995, пункт 2а. Навык `as-is`, зовущий наш
+    `scripts/work_plan.py`, у потребителя ссылается в пустоту, а заготовка
+    обещает работающий навык. Обратная половина: навык с причиной `skill-tree`,
+    у которого чужого в ссылках не осталось, переводится в `as-is`, а не
+    застревает в `ours` по инерции. Замер 06.10.2026: 12 навыков из 12 зовут
+    `scripts/`, `tests/` или `docs/` поставщика.
+    """
+    answers = inventory()["answers"]
+    skills = [name for name in answers if name.startswith(".claude/skills/")]
+    assert skills, "навыков в инвентаре нет — сверять нечего (075)"
+    lying = {
+        name: missing_at_the_consumer(name, answers)
+        for name in skills
+        if answers[name]["answer"] == "as-is" and missing_at_the_consumer(name, answers)
+    }
+    assert not lying, f"навык помечен as-is, а называет то, чего у потребителя нет: {lying}"
+    stale = ready_to_move(skills, answers)
+    assert not stale, f"навыку больше нечего ждать — переведите в as-is: {sorted(stale)}"
+
+
+def ready_to_move(skills: list[str], answers: dict[str, Any]) -> set[str]:
+    """Навыки `skill-tree`, которым ждать нечего, — с учётом ссылок друг на друга.
+
+    Навык, называющий другой навык `ours`, ждёт его; два навыка, называющие
+    друг друга, ждали бы вечно (взгляд на #1173). Поэтому ответ — наибольшее
+    множество, где каждый навык не ждёт ничего, кроме навыков того же
+    множества: перевести их можно разом.
+    """
+    ready = {
+        name
+        for name in skills
+        if answers[name].get("why") == "@skill-tree"
+        and all(one.startswith(".claude/skills/") for one in missing_at_the_consumer(name, answers))
+    }
+    while True:
+        assume = {**answers, **{name: {"answer": "as-is"} for name in ready}}
+        kept = {name for name in ready if not missing_at_the_consumer(name, assume)}
+        if kept == ready:
+            return ready
+        ready = kept
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "ready"),
+    [
+        ([".claude/skills/б"], [".claude/skills/а"], {".claude/skills/а", ".claude/skills/б"}),
+        ([".claude/skills/б"], ["scripts/x.py"], set()),
+        ([], [], {".claude/skills/а", ".claude/skills/б"}),
+    ],
+    ids=["взаимные ссылки", "ждёт ждущего наше", "ссылок нет"],
+)
+def test_skills_waiting_for_each_other_move_together(
+    monkeypatch: pytest.MonkeyPatch, first: list[str], second: list[str], ready: set[str]
+) -> None:
+    """Обе половины: взаимная ссылка не держит навыки вечно, ссылка на наше — держит."""
+    refs = {".claude/skills/а": first, ".claude/skills/б": second}
+    answers = {name: {"answer": "ours", "why": "@skill-tree"} for name in refs}
+
+    def missing(name: str, said: dict[str, Any]) -> list[str]:
+        return [one for one in refs[name] if not consumer_has(one, said)]
+
+    monkeypatch.setattr(sys.modules[__name__], "missing_at_the_consumer", missing)
+    assert ready_to_move(list(refs), answers) == ready
+
+
+@pytest.mark.parametrize(
+    ("said", "answer", "has"),
+    [
+        ("AGENTS.md", "ours", True),
+        (".claude/skills/навык", "as-is", True),
+        (".claude/skills/навык/SKILL.md", "ours", False),
+        (".github/workflows/ci.yml", "configured", True),
+        ("scripts/work_plan.py", "as-is", False),
+    ],
+    ids=["свод", "навык as-is", "навык ours", "своё по configured", "наш скрипт"],
+)
+def test_the_consumer_tree_is_told(said: str, answer: str, has: bool) -> None:
+    """Обе половины предиката: что у потребителя будет и чего не будет."""
+    answers = {
+        ".claude/skills/навык": {"answer": answer},
+        ".github/workflows/ci.yml": {"answer": "configured", "where": [".github/workflows/ci.yml"]},
+        "scripts/work_plan.py": {"answer": answer},
+    }
+    assert consumer_has(said, answers) is has
