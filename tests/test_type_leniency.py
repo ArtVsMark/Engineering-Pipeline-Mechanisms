@@ -74,21 +74,19 @@ DESCENDANTS: Final = ".*"
 
 
 def judged() -> tuple[str, ...]:
-    """Каталоги, которые разбирает шаг «типы», — ИЗ САМОГО ПРОГОНА.
+    """Каталоги, которые разбирает шаг «типы», — ИЗ НАСТРОЕК ИНСТРУМЕНТА.
 
-    Читается строка шага, а не пишется список рядом. Второй список тех же
-    каталогов разошёлся бы с прогоном молча, и гейт судил бы не то дерево
+    Шаг зовёт `mypy` без путей, и состав берётся из `[tool.mypy] files` —
+    это данные проекта, а не общего шага (#992). Читается тот же ключ, что
+    читает сам mypy, а не пишется список рядом: второй список тех же каталогов
+    разошёлся бы с прогоном молча, и гейт судил бы не то дерево
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
     """
-    for path in walk_deep(STEPS, "*.yml"):
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for job in ((doc or {}).get("jobs") or {}).values():
-            for step in (job or {}).get("steps") or []:
-                if str(step.get("name", "")).strip() != STEP_NAME:
-                    continue
-                said = str(step.get("run", "")).split()
-                return tuple(one.rstrip("/") for one in said[1:] if not one.startswith("-"))
-    raise AssertionError(f"в {STEPS} нет шага «{STEP_NAME}» — предмет гейта не найден (075)")
+    doc = tomllib.loads(SETTINGS.read_text(encoding="utf-8"))
+    said = doc["tool"]["mypy"].get("files") or []
+    if isinstance(said, str):
+        said = [one.strip() for one in said.split(",")]
+    return tuple(str(one).rstrip("/") for one in said)
 
 
 def leniencies() -> list[str]:
@@ -367,15 +365,17 @@ def test_the_mypy_pattern_semantics_are_held_by_a_run(
 
 
 def test_the_subject_is_taken_from_the_step_not_written_beside_it() -> None:
-    """Разбираемые каталоги читаются у прогона — второй список разошёлся бы молча.
+    """Разбираемые каталоги — у настроек mypy, и шаг их не переписывает.
 
     Здесь они были написаны рядом константой, и один из трёх — `packages/transport`
     вместо `packages` — уже расходился с прогоном: гейт судил ДРУГОЕ дерево, чем
     то, на котором краснеет площадка
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Теперь шаг зовёт голый `mypy` (#992): путь в строке шага перебил бы
+    `files` и вернул бы второй список.
     """
     said = judged()
-    assert said, "шаг «типы» не назвал ни одного каталога — предмет гейта исчез (075)"
+    assert said, "в `[tool.mypy] files` ни одного каталога — предмет гейта исчез (075)"
     runs = [
         str(one.get("run", ""))
         for path in walk_deep(STEPS, "*.yml")
@@ -386,9 +386,11 @@ def test_the_subject_is_taken_from_the_step_not_written_beside_it() -> None:
         if str(one.get("name", "")).strip() == STEP_NAME
     ]
     assert len(runs) == 1, f"шаг «{STEP_NAME}» объявлен не один раз: {len(runs)}"
+    assert runs[0].split() == ["mypy"], (
+        f"шаг «{STEP_NAME}» зовёт mypy с доводами: {runs[0]} — состав живёт в настройках"
+    )
     for where in said:
-        assert f"{where}/" in runs[0], f"каталог «{where}» шагу не отдаётся: {runs[0]}"
-        assert (ROOT / where).is_dir(), f"каталог «{where}» шагу отдаётся, а в дереве его нет"
+        assert (ROOT / where).is_dir(), f"каталог «{where}» объявлен mypy, а в дереве его нет"
 
 
 def test_the_walk_goes_as_deep_as_the_step_does() -> None:

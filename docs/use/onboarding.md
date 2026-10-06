@@ -32,6 +32,12 @@ jobs:
 | [`step-window-lifetime.yml`](../../.github/workflows/step-window-lifetime.yml) | срок жизни окна, открывшего изменение |
 | [`step-rulebook-fresh.yml`](../../.github/workflows/step-rulebook-fresh.yml) | свод не менялся под окном изменения |
 
+**Что линтуется — объявляете вы, а не шаг.** `step-lint` зовёт `ruff check`,
+`ruff format --check` и `mypy` без путей (#992): состав берётся из настроек
+инструментов в вашем `pyproject.toml` — `[tool.ruff] include` и
+`[tool.mypy] files`. Без `files` mypy откажет «нет целей», и это красное —
+о незаявленном составе, а не о коде. Образец — `pyproject.toml` этого проекта.
+
 **Заготовку собирает заход, а не вы руками:**
 
 ```
