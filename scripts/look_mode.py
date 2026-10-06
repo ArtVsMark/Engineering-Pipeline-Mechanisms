@@ -21,13 +21,24 @@
 ОТКАЗ — ПОЛНЫЙ ЗАХОД. Не прочитали ленту или реестр — режима нет, и взгляд идёт
 полным, как до #848: молчание не облегчает проверку (045).
 
+ТРЕТИЙ РЕЖИМ — ВЗГЛЯД НЕ НУЖЕН (#1144, указание владельца 05.10.2026). Подтянутая
+`main` даёт новую голову, но собственный дифф изменения против базы обычно
+прежний, и заход по нему уже есть. Замер 05.10.2026: до 250 минут агента в день
+уходило на доведённые взгляды по уже просмотренному диффу. Поэтому, когда
+дифф головы совпадает с диффом, на котором стоит вердикт ревьюера, взгляд не
+зовётся (`same_diff`). Совпадение — по содержанию, а не по сообщению коммита:
+слияние с разрешённым конфликтом меняет дифф и взгляд получает. Не прочитали
+сравнение — взгляд идёт, как без этого режима.
+
 Исходы (правило 039): ``0`` режим записан · ``2`` не отработал.
 """
 
 import argparse
+import hashlib
 import os
 import secrets
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
@@ -40,6 +51,16 @@ EXIT_BROKEN: Final = 2
 
 FULL: Final = "full"
 FIX: Final = "fix"
+SKIP: Final = "skip"
+
+#: Предел файлов в ответе сравнения у площадки. Ответ на пределе может быть
+#: обрезан, и ключ по нему был бы ключом части диффа — тогда ключа нет.
+COMPARE_FILES_CAP: Final = 300
+
+#: Сравнение `база...голова` — файлы, как их отдаёт площадка; шов для тестов.
+Compare = Callable[[str], list[dict[str, Any]] | None]
+#: Голова прогона по его номеру; шов для тестов.
+RunHead = Callable[[int], str]
 
 
 def mode_of(comments: list[dict[str, Any]]) -> str:
@@ -100,6 +121,103 @@ def settled(mode: str, pr: int, recorded: dict[int, int]) -> str:
     return FIX if mode == FIX and pr in recorded else FULL
 
 
+def diff_key(files: list[dict[str, Any]] | None) -> str | None:
+    """Ключ собственного диффа изменения: только строки `+`/`-`, без контекста.
+
+    КОНТЕКСТ И ЗАГОЛОВКИ ХАНКОВ ОТБРОШЕНЫ НАМЕРЕННО. Подтянутая `main`,
+    правившая тот же файл в другом месте, сдвигает номера строк в `@@` и
+    меняет соседние строки контекста, а собственная правка изменения та же.
+    Ключ по полной заплатке считал бы такой дифф новым, и взгляд шёл бы зря.
+
+    КЛЮЧА НЕТ, А НЕ «КЛЮЧ ЧАСТИ», когда площадка отдала не всё: файлов на
+    пределе ответа или у файла с правкой нет заплатки (двоичный, слишком
+    большой). Тогда сравнивать нечем, и взгляд идёт (045).
+    """
+    if files is None or len(files) >= COMPARE_FILES_CAP:
+        return None
+    digest = hashlib.sha256()
+    for item in sorted(files, key=lambda f: str(f.get("filename") or "")):
+        patch = item.get("patch")
+        if patch is None and int(item.get("changes") or 0):
+            return None
+        digest.update(f"{item.get('status')}\0{item.get('filename')}\0".encode())
+        for line in str(patch or "").splitlines():
+            if line[:1] in ("+", "-"):
+                digest.update(line.encode() + b"\n")
+    return digest.hexdigest()
+
+
+def verdict_runs(comments: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    """Заходы ревьюера с вердиктом: адрес комментария вердикта и номер его прогона.
+
+    Заходы те же, что у режима (`review_findings.looks`): оборванный и ответ
+    верификатора выпадают. Заход без ссылки на прогон пропускается — голову его
+    вердикта не узнать, а угадывать её по времени значило бы судить по соседству.
+    """
+    out: list[tuple[str, int]] = []
+    for look_id, look in review_findings.looks(own(comments)):
+        # Голову вердикта называет его прогон — шапка «View job», разобранная
+        # общим `review_findings.run_id_of` (214): у комментария головы нет.
+        said = next((c for c in look if int(c.get("id") or 0) == look_id), None)
+        run = review_findings.run_id_of(str((said or {}).get("body") or ""))
+        if said is not None and run:
+            out.append((str(said.get("html_url") or look_id), int(run)))
+    return out
+
+
+def same_diff(
+    head: str,
+    comments: list[dict[str, Any]],
+    compare: Compare,
+    run_head: RunHead,
+) -> str | None:
+    """Адрес вердикта, стоящего на том же диффе, что и голова; нет такого — None.
+
+    ТА ЖЕ ГОЛОВА НЕ В СЧЁТ. Повторный прогон на голове с вердиктом — это
+    человек, который просит взгляд снова (перезапуск руками), и пропускать его
+    значило бы спорить с ним.
+    """
+    runs = verdict_runs(comments)
+    if not runs:
+        return None
+    mine = diff_key(compare(head))
+    if mine is None:
+        return None
+    for where, run in reversed(runs):
+        seen = run_head(run)
+        if seen and seen != head and diff_key(compare(seen)) == mine:
+            return where
+    return None
+
+
+def platform_compare(repo: str, base: str, token: str) -> Compare:
+    """Сравнение `база...голова` у площадки: файлы ответа, отказ — None."""
+
+    def compare(sha: str) -> list[dict[str, Any]] | None:
+        try:
+            said = ghrest.request("GET", f"repos/{repo}/compare/{base}...{sha}", token) or {}
+        except ghrest.TransportError as exc:
+            print(f"сравнение {base}...{sha[:7]} не прочитано: {exc}", file=sys.stderr)
+            return None
+        return list(said.get("files") or [])
+
+    return compare
+
+
+def platform_run_head(repo: str, token: str) -> RunHead:
+    """Голова прогона у площадки; отказ — пустая строка."""
+
+    def run_head(run: int) -> str:
+        try:
+            said = ghrest.request("GET", f"repos/{repo}/actions/runs/{run}", token) or {}
+        except ghrest.TransportError as exc:
+            print(f"прогон {run} не прочитан: {exc}", file=sys.stderr)
+            return ""
+        return str(said.get("head_sha") or "")
+
+    return run_head
+
+
 def task_text(mode: str, prior: list[tuple[str, findings.Entry]]) -> str:
     """Задание проверки починки; у полного захода задания сверх общего нет."""
     if mode != FIX:
@@ -135,12 +253,16 @@ def task_text(mode: str, prior: list[tuple[str, findings.Entry]]) -> str:
 """
 
 
-def write_output(path: Path, mode: str, task: str) -> None:
-    """Режим и задание — в `$GITHUB_OUTPUT`; разделитель случаен, как у карты."""
+def write_output(path: Path, mode: str, task: str, seen: str = "") -> None:
+    """Режим, задание и адрес прежнего вердикта — в `$GITHUB_OUTPUT`.
+
+    Разделитель задания случаен, как у карты.
+    """
     eof = f"LOOK_MODE_EOF_{secrets.token_hex(16)}"
     with path.open("a", encoding="utf-8") as out:
         out.write(f"mode={mode}\n")
         out.write(f"task<<{eof}\n{task}{eof}\n")
+        out.write(f"seen={seen}\n")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,12 +271,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--pr", type=int, required=True)
     parser.add_argument("--output", default=os.environ.get("GITHUB_OUTPUT", ""))
+    parser.add_argument("--head", default="", help="голова изменения; пусто — без пропуска (#1144)")
+    parser.add_argument("--base", default="", help="ветка базы изменения")
     args = parser.parse_args(argv)
     try:
         token = ghrest.token_from_env()
         if not token or not args.repo or not args.output:
             raise review_findings.NotRun("нет токена, репозитория или $GITHUB_OUTPUT")
         comments = list(ghrest.paginate(f"repos/{args.repo}/issues/{args.pr}/comments", token))
+        seen = None
+        if args.head and args.base:
+            seen = same_diff(
+                args.head,
+                comments,
+                platform_compare(args.repo, args.base, token),
+                platform_run_head(args.repo, token),
+            )
+        if seen:
+            write_output(Path(args.output), SKIP, "", seen)
+            print(f"заход на #{args.pr}: {SKIP} — дифф совпадает с просмотренным, вердикт: {seen}")
+            return EXIT_OK
         mode = mode_of(comments)
         prior: list[tuple[str, findings.Entry]] = []
         if mode == FIX:

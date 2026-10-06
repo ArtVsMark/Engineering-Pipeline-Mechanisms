@@ -103,6 +103,8 @@ jobs:
     outputs:
       text: ${{ steps.map.outputs.text }}
       task: ${{ steps.mode.outputs.task }}
+      mode: ${{ steps.mode.outputs.mode }}
+      seen: ${{ steps.mode.outputs.seen }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -160,6 +162,8 @@ jobs:
           set -uo pipefail
           python -m pip install --quiet ./packages/transport
           python scripts/look_mode.py --pr "${{ github.event.pull_request.number }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --base "${{ github.event.pull_request.base.ref }}" \
             || echo "::warning::Режим захода не выбран — взгляд пойдёт полным."
 
   review:
@@ -208,8 +212,23 @@ jobs:
       # красное как фон (051). Проверка идёт через `env` и вывод шага, а не
       # через `if: secrets.X != ''`: контекст secrets в условиях шага не
       # гарантирован.
+      # ДИФФ УЖЕ ПРОСМОТРЕН — ВЗГЛЯД НЕ ЗОВЁТСЯ (#1144). Решает карта, где код
+      # головы не исполняется (`look_mode.same_diff`): собственный дифф головы
+      # против базы совпал с диффом, на котором стоит вердикт ревьюера. Строка
+      # называет прежний вердикт, чтобы пропуск не выглядел тишиной (045).
+      # Все шаги ниже ждут ответа шага ключа, и пропущенный шаг ключа
+      # выключает их разом.
+      - name: дифф уже просмотрен — взгляд не нужен
+        if: needs.map.outputs.mode == 'skip'
+        env:
+          SEEN: ${{ needs.map.outputs.seen }}
+        run: |
+          echo "::notice title=взгляд не нужен::Собственный дифф головы совпадает с уже просмотренным, вердикт: ${SEEN}"
+          echo "Взгляд не нужен: дифф головы совпадает с просмотренным, вердикт — ${SEEN}" >> "$GITHUB_STEP_SUMMARY"
+
       - name: ключа ревью нет — внешний взгляд не состоится
         id: token
+        if: needs.map.outputs.mode != 'skip'
         env:
           TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
