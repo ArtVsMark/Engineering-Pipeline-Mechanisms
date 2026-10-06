@@ -84,6 +84,10 @@ permissions:
   # Живая задача-адресат находок заводится и обновляется этим прогоном.
   issues: write
   id-token: write
+  # Голову прежнего вердикта карта узнаёт по его прогону (`look_mode`,
+  # #1144): без права чтения прогонов ответ 403, и пропуск молча не работал
+  # бы (поздний взгляд на #1161).
+  actions: read
 
 jobs:
   # КАРТА — ОТДЕЛЬНЫМ ДЖОБОМ, ГДЕ КОД ГОЛОВЫ НЕ ИСПОЛНЯЕТСЯ ВОВСЕ (#804,
@@ -158,12 +162,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Голова и база — окружением, а не подстановкой в текст команды (085,
+          # поздний взгляд на #1161): как `SEEN` в джобе взгляда.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -uo pipefail
           python -m pip install --quiet ./packages/transport
           python scripts/look_mode.py --pr "${{ github.event.pull_request.number }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --base "${{ github.event.pull_request.base.ref }}" \
+            --head "$HEAD_SHA" --base "$BASE_REF" \
             || echo "::warning::Режим захода не выбран — взгляд пойдёт полным."
 
   review:
