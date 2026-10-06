@@ -364,7 +364,7 @@ def test_the_mypy_pattern_semantics_are_held_by_a_run(
     assert covers(pattern, name) is want, case
 
 
-def test_the_subject_is_taken_from_the_step_not_written_beside_it() -> None:
+def test_the_subject_is_read_from_the_settings_and_the_step_names_none() -> None:
     """Разбираемые каталоги — у настроек mypy, и шаг их не переписывает.
 
     Здесь они были написаны рядом константой, и один из трёх — `packages/transport`
@@ -389,8 +389,29 @@ def test_the_subject_is_taken_from_the_step_not_written_beside_it() -> None:
     assert runs[0].split() == ["mypy"], (
         f"шаг «{STEP_NAME}» зовёт mypy с доводами: {runs[0]} — состав живёт в настройках"
     )
+    # ПРЕДЕЛ НАЗВАН (046, взгляд на #1169): mypy примет в `files` и глоб, и
+    # отдельный файл, а гейт обходит КАТАЛОГИ — шесть обходов здесь читают
+    # дерево под каждым. Глоб или файл краснеет вслух, а не пропускается
+    # молча; расширять форму — вместе с обходами, а не одной этой строкой.
     for where in said:
-        assert (ROOT / where).is_dir(), f"каталог «{where}» объявлен mypy, а в дереве его нет"
+        assert (ROOT / where).is_dir(), (
+            f"«{where}» в `[tool.mypy] files` — не каталог дерева: гейт обходит только "
+            "каталоги, глоб и отдельный файл он не разбирает"
+        )
+
+
+def test_ruff_and_mypy_judge_the_same_directories() -> None:
+    """Состав линта и состав типов — одни каталоги (#992, взгляд на #1169).
+
+    Раньше шаг называл три каталога одной строкой рядом; теперь списка два —
+    `[tool.ruff] include` глобами и `[tool.mypy] files` каталогами, — и
+    разошлись бы они молча (022).
+    """
+    ruff = tomllib.loads(SETTINGS.read_text(encoding="utf-8"))["tool"]["ruff"]["include"]
+    roots = {str(one).split("/", 1)[0] for one in ruff}
+    assert roots == set(judged()), (
+        f"ruff разбирает {sorted(roots)}, а mypy — {sorted(judged())}: составы разошлись"
+    )
 
 
 def test_the_walk_goes_as_deep_as_the_step_does() -> None:
