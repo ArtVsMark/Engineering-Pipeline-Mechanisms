@@ -164,7 +164,8 @@ def test_without_a_head_the_wait_is_refused(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_the_look_step_waits_for_the_gate() -> None:
     """Шаги взгляда стоят на воротах, а ворота — до них (#762)."""
-    text = (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
+    step = Path(__file__).parents[1] / ".github/workflows/step-review.yml"
+    text = step.read_text(encoding="utf-8")
     job = text[: text.index("\n  findings:\n")]
     assert job.index("scripts/look_waits.py") < job.index("- name: внешний взгляд")
     look = job[job.index("- name: внешний взгляд") :]

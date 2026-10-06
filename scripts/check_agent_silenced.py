@@ -38,11 +38,13 @@ repository's default branch». Шаг при этом объявлен `continue
 """
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Final
 
+import paths
 import report
 
 #: Чем объявлено действие агента в файле прогона. Признак — строка вызова, а не
@@ -112,7 +114,55 @@ def carriers(root: Path, base: str) -> set[str]:
     said = _git(root, "grep", "-l", ACTION, base, "--", WORKFLOWS, empty=GREP_FOUND_NOTHING)
     # РАЗБОР ПОСТРОЧНЫЙ, А НЕ ПО ПРОБЕЛАМ: `git grep -l` кладёт один путь на
     # строку, и путь с пробелом развалился бы надвое.
-    return {line.split(":", 1)[1] for line in said.splitlines() if ":" in line}
+    found = {line.split(":", 1)[1] for line in said.splitlines() if ":" in line}
+    return (found | callers(root, base, found)) - from_trunk(root, base, found)
+
+
+#: Вызов прогона в строке `uses:`: путь вызываемого — после каталога прогонов.
+CALL_RE: Final = re.compile(r"uses:\s*[\"']?(?P<said>\S*?\.github/workflows/(?P<name>[^@\s\"']+))")
+
+
+def _calls(root: Path, base: str, found: set[str]) -> list[tuple[str, str, str]]:
+    """Вызовы носителей по общей ветке: (вызывающий, вызванный, строка вызова)."""
+    names = {Path(one).name: one for one in found}
+    if not names:
+        return []
+    said = _git(root, "grep", "-n", "-E", "uses:", base, "--", WORKFLOWS, empty=GREP_FOUND_NOTHING)
+    calls: list[tuple[str, str, str]] = []
+    for line in said.splitlines():
+        # `база:путь:строка:текст` — путь без двоеточий, база названа вызывающим.
+        parts = line[len(base) + 1 :].split(":", 2)
+        if len(parts) != 3 or not (match := CALL_RE.search(parts[2])):
+            continue
+        callee = names.get(match["name"])
+        if callee is not None and callee != parts[0]:
+            calls.append((parts[0], callee, parts[2]))
+    return calls
+
+
+def callers(root: Path, base: str, found: set[str]) -> set[str]:
+    """Прогоны, ЗОВУЩИЕ носителя: правка вызывающего глушит его так же (#993).
+
+    Тело взгляда вынесено в общий шаг, и действие агента объявлено там, а
+    файлом прогона площадке служит вызывающий `review.yml`. Сверяет ли она
+    при вызове вызывающего или вызванного, не измерено — поэтому носителем
+    считается и тот, и другой, кроме вызванного с общей ветки ниже (051).
+    """
+    return {caller for caller, _, _ in _calls(root, base, found)}
+
+
+def from_trunk(root: Path, base: str, found: set[str]) -> set[str]:
+    """Носители, которых зовут адресом С ОБЩЕЙ ВЕТКОЙ: их правка агента не глушит.
+
+    Такой вызов берёт файл с общей ветки, а не из изменения (`review.yml` →
+    `step-review.yml@main`, #993): правка шага в изменении на его голове не
+    исполняется вовсе, и расходиться с общей веткой там нечему.
+    """
+    return {
+        callee
+        for _, callee, line in _calls(root, base, found)
+        if re.search(rf"@{re.escape(paths.TRUNK)}\b", line) and "./" not in line.split("uses:")[1]
+    }
 
 
 def touched(root: Path, base: str) -> set[str]:

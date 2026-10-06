@@ -328,7 +328,6 @@ STILL_COPIED: Final = frozenset(
         "labels-sync.yml",
         "release.yml",
         "required-context.yml",
-        "review.yml",
         "rules-inbox.yml",
         "runs-series.yml",
         "schedules-seen.yml",

@@ -143,8 +143,11 @@ def test_every_copy_of_the_cancellation_note_names_every_cause() -> None:
         for flow in flows
         for block in flow.read_text(encoding="utf-8").split("# Снятое задание")[1:]
     ]
+    # Обе формы вызова: из дерева и из выкачки общего шага (#993).
     calls = sum(
-        flow.read_text(encoding="utf-8").count("python scripts/agent_run.py") for flow in flows
+        flow.read_text(encoding="utf-8").count(form)
+        for flow in flows
+        for form in ("python scripts/agent_run.py", "python $MECHANISMS/scripts/agent_run.py")
     )
     assert calls, "вызовов agent_run.py не найдено — предмета нет (075)"
     assert len(notes) == calls, f"комментарий о снятии у {len(notes)} вызовов из {calls}"
