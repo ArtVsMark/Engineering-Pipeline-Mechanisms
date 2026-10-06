@@ -74,6 +74,12 @@ beyond_the_change:
 """
 
 
+@pytest.fixture(autouse=True)
+def no_supplier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Набор не видит `$MECHANISMS` зовущего: иначе «не разрешается» зеленело бы (#1163)."""
+    monkeypatch.delenv(policy.SUPPLIER_ENV, raising=False)
+
+
 def tree(root: Path, answer: str, *workflows: str) -> Path:
     """Собирает дерево из ответа и прогонов; отдаёт путь ответа."""
     answer_path = root / ".pipeline.yml"
@@ -817,3 +823,53 @@ def test_a_matrix_axis_is_read_or_refused(tmp_path: Path) -> None:
     assert policy.matrix_axis(flow, "t", "python") == (["3.12", "3.13"], "img")
     with pytest.raises(policy.BadPolicy, match="не прочитана"):
         policy.matrix_axis(flow, "нет", "python")
+
+
+def test_a_mechanism_path_resolves_in_the_supplier_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Путь механизма, которого нет в дереве, ищется в коде поставщика `$MECHANISMS` (#990).
+
+    У потребителя наших `scripts/` нет: управляющий шаг зовёт их из своей
+    выкачки, и адресат «путь механизма» лежит там же.
+    """
+    tree, supplier = tmp_path / "tree", tmp_path / "supplier"
+    (supplier / "scripts").mkdir(parents=True)
+    (supplier / "scripts" / "main_red.py").write_text("", encoding="utf-8")
+    tree.mkdir()
+    path = tree / ".pipeline.yml"
+    path.write_text(
+        HEAD + "checks:\n  review:\n    class: advisory\n"
+        "    why: смотрим\n    addressee: scripts/main_red.py\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(policy.BadPolicy, match="не разрешается"):
+        policy.load(path)
+    monkeypatch.setenv(policy.SUPPLIER_ENV, str(supplier))
+    assert policy.load(path)["review"].records is True
+    assert policy.resolves("scripts/*.py", tree, supplier)
+    assert not policy.resolves("scripts/nowhere.py", tree, supplier)
+    assert not policy.resolves("scripts/main_red.py", tree), "окружение прочитано в resolves"
+
+
+def test_a_refusal_names_both_places(tmp_path: Path) -> None:
+    """С поставщиком отказ называет и дерево, и код конвейера — искать надо в обоих."""
+    path = tmp_path / ".pipeline.yml"
+    path.write_text(
+        HEAD + "checks:\n  review:\n    class: advisory\n"
+        "    why: смотрим\n    addressee: scripts/nowhere.py\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(policy.BadPolicy, match="в дереве и в коде конвейера"):
+        policy.load(path, supplier=tmp_path / "supplier")
+
+
+def test_the_supplier_is_read_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`supplier_of` — `$MECHANISMS` общего шага; не задан или пуст — поставщика нет."""
+    assert policy.supplier_of() is None
+    monkeypatch.setenv(policy.SUPPLIER_ENV, "")
+    assert policy.supplier_of() is None
+    monkeypatch.setenv(policy.SUPPLIER_ENV, str(tmp_path))
+    assert policy.supplier_of() == tmp_path
