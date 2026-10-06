@@ -680,3 +680,62 @@ def test_measure_counts_internal_fragments_by_their_own_commits(
 
     monkeypatch.setattr(check.gitcall, "output", output)
     assert check.measure("HEAD") == (1, 1, 1)
+
+
+def test_every_unreleased_fragment_keeps_the_shape() -> None:
+    """Форма нового фрагмента держится на всей папке, а не только на тронутом (#1172, 195).
+
+    Фрагмент, приехавший слиянием, гейт изменения не видел бы. Выпущенное в
+    `released/` не судится: оно источник, и правка задним числом запрещена.
+    """
+    off = {
+        one.slug: why for one in module.parse_fragments(files()) if (why := module.shape_fault(one))
+    }
+    assert not off, f"невыпущенные фрагменты не той формы: {off}"
+
+
+@pytest.mark.parametrize(
+    ("body", "fault"),
+    [
+        ("### Заголовок\n\nОдна строка о сути.\n\n#1", ""),
+        ("### Заголовок\n\n" + "строка\n" * 10 + "\n#1", ""),
+        ("### Заголовок\n\n" + "строка\n" * 11 + "\n#1", "тело 11 строк"),
+        ("## Заголовок\n\nСтрока.\n\n#1", "заголовок выше"),
+        ("### Заголовок\n\nСтрока.\n\n# Раздел\n\n#1", "заголовок выше"),
+        ("### Заголовок\n\n#### Подраздел\n\nСтрока.\n\n#1 #2", ""),
+        ("### Заголовок\n\n```sh\n# комментарий примера\n```\n\n#1", ""),
+        ("### Заголовок\n\n" + "я" * 801 + "\n\n#1", "801 знаков"),
+        ("### Заголовок\n\n" + "я" * 800 + "\n\n#1", ""),
+    ],
+    ids=[
+        "короткий",
+        "ровно предел",
+        "сверх предела",
+        "уровень версии",
+        "уровень h1",
+        "ниже ###",
+        "# в блоке кода",
+        "одна длинная строка",
+        "ровно предел знаков",
+    ],
+)
+def test_the_shape_fault_is_named(body: str, fault: str) -> None:
+    """Обе половины: длина и уровень заголовка названы; годный фрагмент чист."""
+    said = module.shape_fault(module.Fragment("fixed", "проба", body))
+    assert (fault in said) if fault else said == "", said
+
+
+def test_the_change_gate_refuses_a_long_fragment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Гейт изменения отвергает длинный фрагмент; выпуск того же не требует (#1172)."""
+    folder = tmp_path / "changelog.d"
+    folder.mkdir()
+    (folder / "длинный.fixed.md").write_text(
+        "### Заголовок\n\n" + "строка\n" * 11 + "\n#1\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "FRAGMENTS", Path("changelog.d"))
+    with pytest.raises(module.NotRun, match="не той формы"):
+        module.fragments_of(["changelog.d/длинный.fixed.md"])
+    assert module.read_fragments(folder), "выпуск отверг то, что формой не судит"
