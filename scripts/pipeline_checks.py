@@ -325,19 +325,36 @@ def resolves(address: str, root: Path = Path(), supplier: Path | None = None) ->
     выкачал сам (`$MECHANISMS`). Проба с `strip-ours` поймала это на нашем же
     ответе: стёртые `scripts/` сделали неразрешимыми 14 адресатов. Не задан
     поставщик — путь ищется только в дереве, как прежде.
+
+    ОКРУЖЕНИЕ ЧИТАЕТ ЗОВУЩИЙ (`supplier_of`), А НЕ ЭТА ФУНКЦИЯ (взгляд на
+    #1163): иначе ответ зависел бы от переменной того, кто запустил набор.
+
+    ГРАНИЦА НАЗВАНА (046). В нашем `ci` шаг зовётся внутренним путём, и
+    `$MECHANISMS` — тот же коммит, что дерево: адресат, удалённый из дерева,
+    пропал и у поставщика. В пробе поставщик — прибитый выпуск, и это её
+    предмет. У потребителя его собственный путь, удалённый из дерева, пройдёт
+    сверку, только если у поставщика лежит путь с тем же именем.
     """
     if ISSUE_RE.match(address):
         return True
-    if supplier is None and (said := os.environ.get(SUPPLIER_ENV)):
-        supplier = Path(said)
     places = [root] if supplier is None else [root, supplier]
     if any(mark in address for mark in GLOB_MARKS):
         return any(any(place.glob(address)) for place in places)
     return any((place / address).exists() for place in places)
 
 
-def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
-    """Читает ответ проекта по проверкам, отвергая любой дефект входа."""
+def supplier_of() -> Path | None:
+    """Код конвейера, выкачанный общим шагом (`$MECHANISMS`); не задан — None."""
+    said = os.environ.get(SUPPLIER_ENV, "")
+    return Path(said) if said else None
+
+
+def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, Check]:
+    """Читает ответ проекта по проверкам, отвергая любой дефект входа.
+
+    `supplier` — где ещё искать путь-адресат; по умолчанию `supplier_of()`.
+    """
+    supplier = supplier if supplier is not None else supplier_of()
     if not path.is_file():
         raise BadPolicy(f"ответа по проверкам нет: {path} — ошибка входа, а не «нечего опрашивать»")
 
@@ -367,7 +384,7 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
     if not isinstance(declared, dict) or not declared:
         raise BadPolicy(f"{path}: раздел checks пуст — предмет опроса не найден (075)")
 
-    checks, problems = _read_section(declared, path.parent, CLASSES)
+    checks, problems = _read_section(declared, path.parent, CLASSES, supplier=supplier)
 
     beyond = raw.get(BEYOND)
     if beyond is not None:
@@ -376,7 +393,9 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
                 f"раздел {BEYOND}: ожидалось отображение, пришло {type(beyond).__name__}"
             )
         else:
-            more, hurt = _read_section(beyond, path.parent, BEYOND_CLASSES, beyond=True)
+            more, hurt = _read_section(
+                beyond, path.parent, BEYOND_CLASSES, beyond=True, supplier=supplier
+            )
             problems.extend(hurt)
             both = sorted(set(checks) & set(more))
             if both:
@@ -392,7 +411,12 @@ def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
 
 
 def _read_section(
-    declared: dict[Any, Any], root: Path, classes: tuple[str, ...], *, beyond: bool = False
+    declared: dict[Any, Any],
+    root: Path,
+    classes: tuple[str, ...],
+    *,
+    beyond: bool = False,
+    supplier: Path | None = None,
 ) -> tuple[dict[str, Check], list[str]]:
     """Разбирает раздел ответа: одно прочтение формы на оба раздела.
 
@@ -427,10 +451,11 @@ def _read_section(
                 f"(142). Адрес задачи, путь механизма или слово «{NO_ADDRESSEE}»"
             )
             continue
-        if addressee and addressee != NO_ADDRESSEE and not resolves(addressee, root):
+        if addressee and addressee != NO_ADDRESSEE and not resolves(addressee, root, supplier):
+            where = "дереве" if supplier is None else f"дереве и в коде конвейера ({supplier})"
             problems.append(
                 f"{name}: адресат «{addressee}» не разрешается — ни задача, ни путь в "
-                "дереве. Проза рядом с адресом законна, вместо адреса — нет"
+                f"{where}. Проза рядом с адресом законна, вместо адреса — нет"
             )
             continue
         checks[name] = Check(name, klass, why, addressee, beyond)
