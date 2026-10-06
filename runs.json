@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-05T11:17:40+00:00",
+  "updated": "2026-10-06T11:07:11+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -3210,6 +3210,308 @@
         }
       },
       "coverage": 92.5
+    },
+    "2026-10-06": {
+      "runs": {
+        "main-red": {
+          "runs": 108,
+          "red": 0,
+          "cancelled": 15,
+          "seconds": 1798,
+          "timed": 108,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 166,
+          "red": 0,
+          "cancelled": 97,
+          "seconds": 3301,
+          "timed": 166,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 14,
+          "seconds": 2423,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 8,
+          "seconds": 670,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 842,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 22,
+          "seconds": 2634,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 22,
+          "seconds": 2392,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 28,
+          "seconds": 2754,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 765,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 3660,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 59,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 251,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 53,
+          "seconds": 9208,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1139,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 9,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 25,
+          "timed": 9,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 77,
+          "red": 0,
+          "cancelled": 58,
+          "seconds": 8131,
+          "timed": 77,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ по правилу 217 закрывает свои границы замером до/после (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 734,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 444,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ по правилу 217 закрывает свои границы замером до/после (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1372,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ по правилу 217 закрывает свои границы замером до/после (+1)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 2,
+          "seconds": 1763,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Находки на #1170: вызов шага узнаётся по полному адресу, имя записи — новое (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 602,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Находки на #1170: вызов шага узнаётся по полному адресу, имя записи — новое (+1)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1666,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ навыка окна сверяется с тем, что он называет (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1058,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Журнал: три развёрнутых выпуска и гейт формы нового фрагмента (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 599,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ навыка окна сверяется с тем, что он называет (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 897,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Журнал: три развёрнутых выпуска и гейт формы нового фрагмента": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 379,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ навыка окна сверяется с тем, что он называет (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 544,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 92.7
     }
   }
 }
