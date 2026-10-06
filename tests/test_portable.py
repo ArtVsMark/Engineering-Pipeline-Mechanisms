@@ -16,6 +16,7 @@ import ast
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Final
 
@@ -705,12 +706,24 @@ NAMED_PATH: Final = re.compile(
 
 
 def named_paths(skill: Path) -> set[str]:
-    """Пути НАШЕГО дерева, которые называет навык: существующие, а не похожие на путь."""
+    """Пути НАШЕГО дерева, которые называет навык: существующие, а не похожие на путь.
+
+    Читаются ВСЕ файлы навыка, а не один `SKILL.md`: вспомогательный скрипт
+    навыка ссылается на дерево так же (взгляд на #1173). Свой каталог навыка
+    не считается — ссылка на себя у потребителя всегда при нём.
+
+    ПРЕДЕЛ НАЗВАН: судится только путь, который в дереве ЕСТЬ. Путь на другой
+    ветке (`.github/badges/findings.json` живёт на ветке `badges`) или
+    похожая на путь проза в счёт не идут — первую судить нечем, вторая не
+    ссылка.
+    """
+    own = skill.relative_to(ROOT).as_posix()
     found: set[str] = set()
-    for one in sorted(skill.rglob("*.md")):
-        for match in NAMED_PATH.finditer(one.read_text(encoding="utf-8")):
+    for one in sorted(path for path in skill.rglob("*") if path.is_file()):
+        text = one.read_text(encoding="utf-8", errors="replace")
+        for match in NAMED_PATH.finditer(text):
             said = match.group(1).rstrip(".")
-            if (ROOT / said).exists():
+            if (ROOT / said).exists() and said != own and not said.startswith(f"{own}/"):
                 found.add(said)
     return found
 
@@ -760,12 +773,53 @@ def test_a_skill_answer_follows_what_it_names() -> None:
         if answers[name]["answer"] == "as-is" and missing_at_the_consumer(name, answers)
     }
     assert not lying, f"навык помечен as-is, а называет то, чего у потребителя нет: {lying}"
-    stale = [
+    stale = ready_to_move(skills, answers)
+    assert not stale, f"навыку больше нечего ждать — переведите в as-is: {sorted(stale)}"
+
+
+def ready_to_move(skills: list[str], answers: dict[str, Any]) -> set[str]:
+    """Навыки `skill-tree`, которым ждать нечего, — с учётом ссылок друг на друга.
+
+    Навык, называющий другой навык `ours`, ждёт его; два навыка, называющие
+    друг друга, ждали бы вечно (взгляд на #1173). Поэтому ответ — наибольшее
+    множество, где каждый навык не ждёт ничего, кроме навыков того же
+    множества: перевести их можно разом.
+    """
+    ready = {
         name
         for name in skills
-        if answers[name].get("why") == "@skill-tree" and not missing_at_the_consumer(name, answers)
-    ]
-    assert not stale, f"навыку больше нечего ждать — переведите в as-is: {stale}"
+        if answers[name].get("why") == "@skill-tree"
+        and all(one.startswith(".claude/skills/") for one in missing_at_the_consumer(name, answers))
+    }
+    while True:
+        assume = {**answers, **{name: {"answer": "as-is"} for name in ready}}
+        kept = {name for name in ready if not missing_at_the_consumer(name, assume)}
+        if kept == ready:
+            return ready
+        ready = kept
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "ready"),
+    [
+        ([".claude/skills/б"], [".claude/skills/а"], {".claude/skills/а", ".claude/skills/б"}),
+        ([".claude/skills/б"], ["scripts/x.py"], set()),
+        ([], [], {".claude/skills/а", ".claude/skills/б"}),
+    ],
+    ids=["взаимные ссылки", "ждёт ждущего наше", "ссылок нет"],
+)
+def test_skills_waiting_for_each_other_move_together(
+    monkeypatch: pytest.MonkeyPatch, first: list[str], second: list[str], ready: set[str]
+) -> None:
+    """Обе половины: взаимная ссылка не держит навыки вечно, ссылка на наше — держит."""
+    refs = {".claude/skills/а": first, ".claude/skills/б": second}
+    answers = {name: {"answer": "ours", "why": "@skill-tree"} for name in refs}
+
+    def missing(name: str, said: dict[str, Any]) -> list[str]:
+        return [one for one in refs[name] if not consumer_has(one, said)]
+
+    monkeypatch.setattr(sys.modules[__name__], "missing_at_the_consumer", missing)
+    assert ready_to_move(list(refs), answers) == ready
 
 
 @pytest.mark.parametrize(
