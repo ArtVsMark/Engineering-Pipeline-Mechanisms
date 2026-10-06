@@ -411,6 +411,9 @@
         ".rules/bindings.json"
       ]
     },
+    "scripts/badges_read.py": {
+      "answer": "as-is"
+    },
     "scripts/build_changelog.py": {
       "answer": "configured",
       "where": [

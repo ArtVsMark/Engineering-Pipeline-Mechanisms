@@ -1001,3 +1001,17 @@ def test_the_details_of_a_red_run_come_in_one_pass(monkeypatch: pytest.MonkeyPat
     assert said[0]["step"] == "тесты"
     assert said[0]["mark"] == REPORT_MARKS["ждём соседей"]
     assert sum(1 for one in asked if "/jobs" in one) == 1, "список джобов спрошен не один раз"
+
+
+def test_the_coverage_is_read_by_the_api_with_a_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """С токеном факты читаются API площадки, а не прямой ссылкой (взгляд на #1162)."""
+    asked: list[tuple[str, str, str]] = []
+
+    def by_api(repo: str, name: str, token: str) -> dict[str, Any]:
+        asked.append((repo, name, token))
+        return {"coverage_percent": 91.26}
+
+    monkeypatch.setattr(module.badges_read, "by_api", by_api)
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda url: pytest.fail("прямая ссылка"))
+    assert module.coverage_now("o/r", "t") == 91.3
+    assert asked == [("o/r", "facts.json", "t")]

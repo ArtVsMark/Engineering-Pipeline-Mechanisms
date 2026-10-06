@@ -94,6 +94,7 @@ def fake_platform(
     """Площадка: реестр, окно слитых, открытые, запуски, настройки, архив — и запись вызовов."""
     called: list[dict[str, Any]] = []
     monkeypatch.setattr(module.ghrest, "raw_json", lambda _url: {"merged": memory or {}})
+    monkeypatch.setattr(module, "archive_by_api", lambda *_: {"merged": memory or {}})
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
     monkeypatch.setattr(module.findings, "live_issue", lambda *_: (23, "тело"))
     monkeypatch.setattr(module.findings, "parse_entries", lambda _body: marks)
@@ -376,3 +377,49 @@ def test_an_unread_archive_leaves_no_memory_and_says_so(
     assert module.remembered("o/r", lambda _url: {"merged": {"5": "d", "x": "e"}}) == {5: "d"}
     said = capsys.readouterr().out
     assert said.count("памяти дат нет") == 2
+
+
+def test_the_platform_date_wins_over_memory() -> None:
+    """Номер из окна берёт дату площадки, а не память: та помнит время коммитера (#1158)."""
+    window = [{"number": 1, "merged_at": "2026-09-01T00:00:00Z"}]
+    said, _ = module.merged_dates(
+        {1, 2},
+        window,
+        set(),
+        lambda _n: None,
+        known={1: "2026-09-20T00:00:00+00:00", 2: "2026-08-01T00:00:00+00:00"},
+    )
+    assert said == {1: "2026-09-01T00:00:00Z", 2: "2026-08-01T00:00:00+00:00"}
+
+
+def test_the_archive_is_read_by_the_api_with_a_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """С токеном архив читается API площадки — блобом, как в приватном репозитории (#1158)."""
+    import base64
+    import json
+
+    content = base64.b64encode(json.dumps({"merged": {"5": "d"}}).encode()).decode()
+    asked: list[str] = []
+
+    def request(method: str, path: str, token: str, body: Any = None) -> Any:
+        asked.append(path)
+        if "/contents/" in path:
+            return {"sha": "b10b"}
+        return {"content": content}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda _url: pytest.fail("прямая ссылка"))
+    assert module.remembered("o/r", token="t") == {5: "d"}
+    assert module.archive_by_api("o/r", "t") == {"merged": {"5": "d"}}
+    assert asked[:2] == [
+        "repos/o/r/contents/.github/badges/findings.json?ref=badges",
+        "repos/o/r/git/blobs/b10b",
+    ]
+
+
+def test_an_unreadable_blob_leaves_no_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Блоба нет или он не JSON — памяти нет, заход идёт по окну (045)."""
+    monkeypatch.setattr(module.ghrest, "request", lambda *_a, **_k: {})
+    assert module.remembered("o/r", token="t") == {}
+    answers = iter([{"sha": "b"}, {"content": "не base64!"}])
+    monkeypatch.setattr(module.ghrest, "request", lambda *_a, **_k: next(answers))
+    assert module.remembered("o/r", token="t") == {}
