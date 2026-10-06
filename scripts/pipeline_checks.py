@@ -47,6 +47,7 @@
 отвергаться с невнятной причиной.
 """
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -305,7 +306,11 @@ def compatible(declared: str, version: str) -> bool:
     return low <= now < high
 
 
-def resolves(address: str, root: Path = Path()) -> bool:
+#: Переменная, где общий шаг держит выкачанный код конвейера (#990).
+SUPPLIER_ENV: Final = "MECHANISMS"
+
+
+def resolves(address: str, root: Path = Path(), supplier: Path | None = None) -> bool:
     """Разрешается ли адрес адресата: задача, существующий путь или образец.
 
     Проза адресом не считается. Требование то же, что каталог предъявил полю
@@ -313,12 +318,22 @@ def resolves(address: str, root: Path = Path()) -> bool:
     нельзя назвать, обычно и не имеет адресата — а снаружи это выглядит как
     осознанный совещательный класс
     ([142](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/142-a-scheduled-red-needs-an-addressee.md)).
+
+    ПУТЬ МЕХАНИЗМА ИЩЕТСЯ И У ПОСТАВЩИКА (#990, проба передачи 06.10.2026).
+    Адресат «путь механизма» — `scripts/main_red.py` у управляющего шага — у
+    потребителя лежит не в его дереве, а в коде конвейера, который общий шаг
+    выкачал сам (`$MECHANISMS`). Проба с `strip-ours` поймала это на нашем же
+    ответе: стёртые `scripts/` сделали неразрешимыми 14 адресатов. Не задан
+    поставщик — путь ищется только в дереве, как прежде.
     """
     if ISSUE_RE.match(address):
         return True
+    if supplier is None and (said := os.environ.get(SUPPLIER_ENV)):
+        supplier = Path(said)
+    places = [root] if supplier is None else [root, supplier]
     if any(mark in address for mark in GLOB_MARKS):
-        return any(root.glob(address))
-    return (root / address).exists()
+        return any(any(place.glob(address)) for place in places)
+    return any((place / address).exists() for place in places)
 
 
 def load(path: Path = DEFAULT_PATH) -> dict[str, Check]:
