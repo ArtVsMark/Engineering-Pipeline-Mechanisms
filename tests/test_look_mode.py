@@ -112,7 +112,7 @@ def test_write_output_keeps_the_task_whole_between_random_fences(tmp_path: Path)
     written = out.read_text(encoding="utf-8").splitlines()
     fence = written[1].removeprefix("task<<")
     assert written[0] == "mode=fix" and fence.startswith("LOOK_MODE_EOF_") and len(fence) > 20
-    assert written[2:] == ["строка", "LOOK_MODE_EOF_", "ещё", fence]
+    assert written[2:] == ["строка", "LOOK_MODE_EOF_", "ещё", fence, "seen="]
 
 
 def test_a_new_head_cancels_the_look_of_the_old_one() -> None:
@@ -161,3 +161,155 @@ def test_the_task_line_form_is_the_one_the_parser_reads() -> None:
         assert rf.fix_answers([said(1, line)]) == {"abc1234": closed}
     task = module.task_text(module.FIX, [])
     assert rf.fix_form("<отпечаток>", True, "<чем закрыта, одной фразой>") in task
+
+
+# --- #1144: дифф уже просмотрен — взгляд не нужен --------------------------------
+
+OWN = "@@ -1,3 +1,3 @@\n контекст\n-было\n+стало\n контекст"
+#: Та же правка после подтянутой main: номера в `@@` и контекст сдвинуты.
+OWN_MOVED = "@@ -10,3 +12,3 @@\n другой контекст\n-было\n+стало\n ещё контекст"
+#: Слияние с разрешённым конфликтом: собственная правка стала другой.
+RESOLVED = "@@ -1,3 +1,3 @@\n контекст\n-было\n+стало иначе\n контекст"
+
+
+def changed(patch: str, name: str = "a.py") -> list[dict[str, Any]]:
+    """Ответ сравнения площадки с одним файлом."""
+    return [{"filename": name, "status": "modified", "changes": 2, "patch": patch}]
+
+
+def look_on_run(look_id: int, run: int, body: str = "ВЕРДИКТ: находок 0") -> dict[str, Any]:
+    """Вердикт ревьюера со ссылкой на свой прогон, как его пишет действие."""
+    link = f"[View job](https://github.com/o/r/actions/runs/{run})"
+    return said(look_id, f"**Claude finished** —— {link}\n\n{body}") | {
+        "html_url": f"https://github.com/o/r/pull/7#issuecomment-{look_id}"
+    }
+
+
+def test_the_diff_key_ignores_context_and_hunk_headers() -> None:
+    """Подтянутая main сдвигает `@@` и контекст — ключ прежний, правка та же."""
+    assert module.diff_key(changed(OWN)) == module.diff_key(changed(OWN_MOVED))
+    assert module.diff_key(changed(OWN)) != module.diff_key(changed(RESOLVED))
+    assert module.diff_key(changed(OWN)) != module.diff_key(changed(OWN, name="b.py"))
+
+
+def test_a_cut_comparison_has_no_key() -> None:
+    """Обрезанный ответ или файл без заплатки — ключа нет, а не ключ части диффа."""
+    assert module.diff_key(None) is None
+    assert module.diff_key(changed(OWN) * module.COMPARE_FILES_CAP) is None
+    binary = [{"filename": "a.png", "status": "modified", "changes": 3}]
+    assert module.diff_key(binary) is None
+    renamed = [{"filename": "b.py", "status": "renamed", "changes": 0}]
+    assert module.diff_key(renamed) is not None, "переименование без правки — законный ключ"
+
+
+def head_of(runs: dict[int, str]) -> Any:
+    """Голова прогона по номеру."""
+    return lambda run: runs.get(run, "")
+
+
+def test_a_merged_main_with_the_same_own_diff_skips_the_look() -> None:
+    """Голова после подтянутой main: дифф прежний, вердикт есть — взгляд не нужен."""
+    patches = {"old": OWN, "new": OWN_MOVED}
+    seen = module.same_diff(
+        "new", [look_on_run(5, 100)], lambda sha: changed(patches[sha]), head_of({100: "old"})
+    )
+    assert seen == "https://github.com/o/r/pull/7#issuecomment-5"
+
+
+def test_a_resolved_conflict_gets_the_look() -> None:
+    """Слияние с разрешённым конфликтом меняет дифф — взгляд идёт."""
+    patches = {"old": OWN, "new": RESOLVED}
+    seen = module.same_diff(
+        "new", [look_on_run(5, 100)], lambda sha: changed(patches[sha]), head_of({100: "old"})
+    )
+    assert seen is None
+
+
+def test_no_verdict_or_the_same_head_gets_the_look() -> None:
+    """Вердикта нет, он чужой, оборван или на той же голове — взгляд идёт."""
+    same = lambda sha: changed(OWN)  # noqa: E731
+    heads = head_of({100: "old", 101: "new"})
+    assert module.same_diff("new", [], same, heads) is None
+    foreign = look_on_run(5, 100) | {"user": {"login": "someone"}}
+    assert module.same_diff("new", [foreign], same, heads) is None, "чужой вердикт засчитан"
+    assert module.same_diff("new", [look_on_run(6, 101)], same, heads) is None, "перезапуск снят"
+    unlinked = said(7, "ВЕРДИКТ: находок 0")
+    assert module.same_diff("new", [unlinked], same, heads) is None
+
+
+def test_an_unread_comparison_gets_the_look() -> None:
+    """Сравнение не прочитано — взгляд идёт, как без пропуска (045)."""
+    assert (
+        module.same_diff("new", [look_on_run(5, 100)], lambda sha: None, head_of({100: "old"}))
+        is None
+    )
+    assert (
+        module.same_diff("new", [look_on_run(5, 100)], lambda sha: changed(OWN), head_of({}))
+        is None
+    )
+
+
+def test_main_writes_the_skip_with_the_prior_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Исход «записан»: режим пропуска и адрес прежнего вердикта — в `$GITHUB_OUTPUT`."""
+    out = tmp_path / "output"
+    platform(monkeypatch, [look_on_run(5, 100)], "")
+    patches = {"old": OWN, "new": OWN_MOVED}
+    monkeypatch.setattr(
+        module, "platform_compare", lambda repo, base, token: lambda sha: changed(patches[sha])
+    )
+    monkeypatch.setattr(module, "platform_run_head", lambda repo, token: head_of({100: "old"}))
+    argv = ["--repo", "o/r", "--pr", "7", "--output", str(out), "--head", "new", "--base", "main"]
+    assert module.main(argv) == module.EXIT_OK
+    written = out.read_text(encoding="utf-8")
+    assert "mode=skip\n" in written
+    assert "seen=https://github.com/o/r/pull/7#issuecomment-5\n" in written
+
+
+def test_the_skip_turns_off_the_look_and_says_so() -> None:
+    """Пропуск выключает шаг ключа — а с ним агента — и пишет строку с вердиктом."""
+    import yaml
+
+    flow = yaml.safe_load(
+        (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
+    )
+    outputs = flow["jobs"]["map"]["outputs"]
+    assert outputs["mode"] == "${{ steps.mode.outputs.mode }}"
+    assert outputs["seen"] == "${{ steps.mode.outputs.seen }}"
+    steps = flow["jobs"]["review"]["steps"]
+    token = next(step for step in steps if step.get("id") == "token")
+    assert token["if"] == "needs.map.outputs.mode != 'skip'"
+    told = next(step for step in steps if step.get("if") == "needs.map.outputs.mode == 'skip'")
+    assert "SEEN" in told["run"] and told["env"]["SEEN"] == "${{ needs.map.outputs.seen }}"
+    mode = next(step for step in flow["jobs"]["map"]["steps"] if step.get("id") == "mode")
+    assert "--head" in mode["run"] and "--base" in mode["run"]
+
+
+def test_verdict_runs_name_the_run_of_each_verdict() -> None:
+    """Каждый вердикт ревьюера — со своим прогоном; без ссылки заход не берётся."""
+    comments = [look_on_run(5, 100), said(6, "ВЕРДИКТ: находок 0"), look_on_run(7, 101)]
+    assert module.verdict_runs(comments) == [
+        ("https://github.com/o/r/pull/7#issuecomment-5", 100),
+        ("https://github.com/o/r/pull/7#issuecomment-7", 101),
+    ]
+
+
+def test_platform_readers_say_nothing_on_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сравнение и голова прогона — у площадки; её отказ — «не прочитано», а не падение."""
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str) -> dict[str, Any]:
+        asked.append(path)
+        if path.endswith("/compare/main...abc"):
+            return {"files": changed(OWN)}
+        if path.endswith("/actions/runs/100"):
+            return {"head_sha": "abc"}
+        raise module.ghrest.TransportError("503")
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    compare = module.platform_compare("o/r", "main", "t")
+    run_head = module.platform_run_head("o/r", "t")
+    assert compare("abc") == changed(OWN) and compare("def") is None
+    assert run_head(100) == "abc" and run_head(101) == ""
+    assert "repos/o/r/compare/main...abc" in asked and "repos/o/r/actions/runs/100" in asked
