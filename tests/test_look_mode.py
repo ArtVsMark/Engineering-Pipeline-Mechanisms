@@ -166,8 +166,10 @@ def test_the_task_line_form_is_the_one_the_parser_reads() -> None:
 # --- #1144: дифф уже просмотрен — взгляд не нужен --------------------------------
 
 OWN = "@@ -1,3 +1,3 @@\n контекст\n-было\n+стало\n контекст"
-#: Та же правка после подтянутой main: номера в `@@` и контекст сдвинуты.
-OWN_MOVED = "@@ -10,3 +12,3 @@\n другой контекст\n-было\n+стало\n ещё контекст"
+#: Та же правка после подтянутой main: сдвинуты только номера в `@@`.
+OWN_MOVED = "@@ -10,3 +12,3 @@\n контекст\n-было\n+стало\n контекст"
+#: Те же строки `+`/`-`, перенесённые в другое место файла.
+OWN_ELSEWHERE = "@@ -40,3 +40,3 @@\n другое место\n-было\n+стало\n другое место"
 #: Слияние с разрешённым конфликтом: собственная правка стала другой.
 RESOLVED = "@@ -1,3 +1,3 @@\n контекст\n-было\n+стало иначе\n контекст"
 
@@ -185,9 +187,10 @@ def look_on_run(look_id: int, run: int, body: str = "ВЕРДИКТ: наход�
     }
 
 
-def test_the_diff_key_ignores_context_and_hunk_headers() -> None:
-    """Подтянутая main сдвигает `@@` и контекст — ключ прежний, правка та же."""
+def test_the_diff_key_ignores_hunk_numbers_but_sees_the_place() -> None:
+    """Сдвиг `@@` ключа не меняет, перенос правки в другое место — меняет (#1161)."""
     assert module.diff_key(changed(OWN)) == module.diff_key(changed(OWN_MOVED))
+    assert module.diff_key(changed(OWN)) != module.diff_key(changed(OWN_ELSEWHERE))
     assert module.diff_key(changed(OWN)) != module.diff_key(changed(RESOLVED))
     assert module.diff_key(changed(OWN)) != module.diff_key(changed(OWN, name="b.py"))
 
@@ -196,8 +199,8 @@ def test_a_cut_comparison_has_no_key() -> None:
     """Обрезанный ответ или файл без заплатки — ключа нет, а не ключ части диффа."""
     assert module.diff_key(None) is None
     assert module.diff_key(changed(OWN) * module.COMPARE_FILES_CAP) is None
-    binary = [{"filename": "a.png", "status": "modified", "changes": 3}]
-    assert module.diff_key(binary) is None
+    unread = [{"filename": "a.png", "status": "modified", "changes": 3}]
+    assert module.diff_key(unread) is None, "ни заплатки, ни блоба — а ключ есть"
     renamed = [{"filename": "b.py", "status": "renamed", "changes": 0}]
     assert module.diff_key(renamed) is not None, "переименование без правки — законный ключ"
 
@@ -313,3 +316,29 @@ def test_platform_readers_say_nothing_on_a_refusal(monkeypatch: pytest.MonkeyPat
     assert compare("abc") == changed(OWN) and compare("def") is None
     assert run_head(100) == "abc" and run_head(101) == ""
     assert "repos/o/r/compare/main...abc" in asked and "repos/o/r/actions/runs/100" in asked
+
+
+def test_a_binary_file_enters_the_key_by_its_blob() -> None:
+    """Двоичный файл — `changes` 0 и без заплатки, как отдаёт площадка: смену видит блоб (#1161)."""
+
+    def binary(sha: str) -> list[dict[str, Any]]:
+        return [{"filename": "a.png", "status": "modified", "changes": 0, "sha": sha}]
+
+    assert module.diff_key(binary("aaa")) is not None
+    assert module.diff_key(binary("aaa")) == module.diff_key(binary("aaa"))
+    assert module.diff_key(binary("aaa")) != module.diff_key(binary("bbb"))
+
+
+def test_the_review_reads_runs_and_passes_the_base_by_environment() -> None:
+    """Карта читает прогоны (`actions: read`), голова и база — окружением (#1161, 085)."""
+    import yaml
+
+    flow = yaml.safe_load(
+        (Path(__file__).parents[1] / ".github/workflows/review.yml").read_text(encoding="utf-8")
+    )
+    assert flow["permissions"].get("actions") == "read"
+    mode = next(step for step in flow["jobs"]["map"]["steps"] if step.get("id") == "mode")
+    assert "${{" not in mode["run"].split("look_mode.py", 1)[1].split("||")[0].replace(
+        '"${{ github.event.pull_request.number }}"', ""
+    ), "голова или база подставлены в текст команды"
+    assert mode["env"]["BASE_REF"] == "${{ github.event.pull_request.base.ref }}"
