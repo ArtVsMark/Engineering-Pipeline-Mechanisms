@@ -11,6 +11,7 @@
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Final
 
@@ -43,8 +44,12 @@ def hits(argv: list[str], root: Path) -> list[str]:
     отказ, а не пустота: молчание сломанной команды читалось бы как «условие не
     наступило» (045).
     """
+    # `python3` — ИНТЕРПРЕТАТОР НАБОРА, а не первый из PATH: тот бывает старше
+    # планки, и предикат краснел бы отказом, к ответу не относящимся (взгляд
+    # на #1177).
+    run = [sys.executable, *argv[1:]] if argv[:1] == ["python3"] else argv
     done = subprocess.run(
-        argv, cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
+        run, cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
     )
     nothing = argv[:2] == ["git", "grep"] and done.returncode == 1 and not done.stderr.strip()
     if done.returncode != 0 and not nothing:
@@ -138,11 +143,80 @@ def test_a_broken_command_is_a_refusal_not_silence(tmp_path: Path) -> None:
         hits(["git", "rev-parse", "--verify", "HEAD"], tmp_path)
 
 
-def test_every_half_of_a_border_has_its_own_predicate() -> None:
-    """Граница 066 — блокировка и второй писатель; держатся обе половины (взгляд на #1177)."""
-    whys = " ".join(one["why"] for one in checks("066"))
-    assert len(checks("066")) >= 2, "у 066 предикат одной половины границы"
-    assert "блокировк" in whys and "писател" in whys, "половина границы 066 без предиката"
+def test_every_predicate_names_the_border_it_holds() -> None:
+    """Предикат цитирует границу ответа, которую держит, — у КАЖДОГО правила (взгляд на #1177).
+
+    Прежде гейт смотрел одно 066 и подстроки в собственном `why` предиката:
+    связь предиката с ответом не проверялась ничем, и у 120 вторая половина
+    границы осталась без предиката. Теперь `border` — дословная цитата из
+    ответа в `.rules/bindings.json`, и стоит она там РОВНО ОДИН РАЗ: цитата,
+    повторённая соседней фразой, пережила бы правку самой границы, и гейт
+    остался бы зелёным (взгляд на #1182). Правка границы в ответе без правки
+    предиката краснеет.
+
+    ПРЕДЕЛ НАЗВАН: полноту — все ли половины границы названы — держит
+    чтение: перечислить половины прозы разбор не умеет.
+    """
+    said = answers()
+    off = [
+        f"{rule}: «{one.get('border', '')}»"
+        for rule in predicates()["predicates"]
+        for one in checks(rule)
+        if not one.get("border") or said[rule]["why"].count(one["border"]) != 1
+    ]
+    assert not off, f"предикат не цитирует границу своего ответа ровно один раз: {off}"
+
+
+@pytest.mark.parametrize(
+    ("rule", "borders"),
+    [("066", 2), ("120", 2)],
+    ids=["блокировка и второй писатель", "корпус правил и указатель решений"],
+)
+def test_a_composite_border_has_a_predicate_per_half(rule: str, borders: int) -> None:
+    """Составная граница держится по половине на предикат: обе половины 066 и 120 названы."""
+    assert len({one["border"] for one in checks(rule)}) == borders
+
+
+def test_a_new_replace_inside_a_known_file_arrives(tmp_path: Path) -> None:
+    """Вторая подмена в уже известном файле меняет вывод: сверяется строка, а не файл."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / "scripts").mkdir()
+    known = "    os.replace(a, b)\n"
+    (tmp_path / "scripts" / "x.py").write_text(known, encoding="utf-8")
+    git("add", "-A")
+    argv = checks("066")[1]["argv"]
+    before = hits(argv, tmp_path)
+    (tmp_path / "scripts" / "x.py").write_text(known + "    os.replace(c, d)\n", encoding="utf-8")
+    git("add", "-A")
+    assert set(hits(argv, tmp_path)) - set(before), "новая подмена в известном файле не видна"
+
+
+def test_a_script_that_calls_the_findings_base_is_a_second_writer(tmp_path: Path) -> None:
+    """Скрипт, зовущий базу находок, — второй писатель, даже если прогон зовёт не её саму."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "findings_db.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "scripts" / "prose.py").write_text('"""Зовёт `findings_db` рукой."""\n', "utf-8")
+    git("add", "-A")
+    argv = checks("066")[2]["argv"]
+    assert hits(argv, tmp_path) == [], "упоминание в прозе — не вызов"
+    (tmp_path / "scripts" / "nightly.py").write_text("import findings_db\n", encoding="utf-8")
+    git("add", "-A")
+    assert hits(argv, tmp_path) == ["scripts/nightly.py"]
+
+
+def test_python3_runs_as_the_suite_interpreter(tmp_path: Path) -> None:
+    """Предикат `python3` исполняется интерпретатором набора, а не первым из PATH."""
+    said = hits(["python3", "-c", "import sys; print(sys.executable)"], tmp_path)
+    assert said == [sys.executable]
 
 
 def test_a_path_keeps_its_edges(tmp_path: Path) -> None:
