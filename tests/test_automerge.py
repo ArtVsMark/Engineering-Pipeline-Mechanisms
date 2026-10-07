@@ -1431,6 +1431,15 @@ def test_a_head_behind_the_base_waits_for_its_running_look(platform: dict[str, A
     assert platform["synced"] == []
 
 
+def test_a_waiting_head_does_not_hand_the_sync_to_the_next(platform: dict[str, Any]) -> None:
+    """Ждущая голова кончает заход: следующую отставшую очередь не подтягивает (052, #1194)."""
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["states"] = {1: module.STATE_BEHIND, 2: module.STATE_BEHIND}
+    platform["looking"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == []
+
+
 def test_a_head_behind_the_base_is_synced_once_its_look_is_done(platform: dict[str, Any]) -> None:
     """Взгляд кончился — та же голова подтягивается: ожидание не держит её навсегда."""
     platform["changes"] = [change(1, "automerge")]
