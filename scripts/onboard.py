@@ -133,6 +133,30 @@ def steps(root: Path) -> list[str]:
 CALLED_SCRIPT: Final = re.compile(r"(?:\$MECHANISMS|\$\{\{ env\.MECHANISMS \}\})/scripts/(\w+)\.py")
 
 
+def step_texts(flow: Path) -> list[str]:
+    """Значения шагов прогона — `run:` и входы `with:`, без комментариев файла.
+
+    СТРОГОЕ ПРАВИЛО, А НЕ ФОРМА (третий заход по месту — взгляды на #1196 и
+    #1201; 210). Вызов нашего скрипта — любое значение шага: `run:` зовёт
+    сам шаг, а вход действия зовёт агент взгляда по своим разрешениям
+    (`check_version.py`, `check_pipeline.py` в дереве потребителя). Не вызов —
+    только комментарий файла: его разбор YAML и не отдаёт.
+    """
+    try:
+        document = policy.run_of(flow)
+    except policy.BadPolicy as exc:
+        raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
+    found: list[str] = []
+    for job in (document.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            if step.get("run"):
+                found.append(str(step["run"]))
+            found += [str(value) for value in (step.get("with") or {}).values()]
+    return found
+
+
 def called_scripts(root: Path, names: list[str]) -> set[str]:
     """Имена наших скриптов, которые зовут вынесенные шаги, — вместе с их импортами.
 
@@ -144,9 +168,8 @@ def called_scripts(root: Path, names: list[str]) -> set[str]:
         {
             match.group(1)
             for name in names
-            for match in CALLED_SCRIPT.finditer(
-                (root / paths.WORKFLOWS / f"{STEP_PREFIX}{name}.yml").read_text(encoding="utf-8")
-            )
+            for line in step_texts(root / paths.WORKFLOWS / f"{STEP_PREFIX}{name}.yml")
+            for match in CALLED_SCRIPT.finditer(line)
         }
     )
     seen: set[str] = set()
@@ -168,11 +191,15 @@ def consumer_data(root: Path, names: list[str], laid: set[Path]) -> list[str] | 
     """Данные, которые вынесенные шаги читают из дерева потребителя, а заготовка не кладёт.
 
     ПЕРЕЧЕНЬ ВЫВОДИТСЯ, А НЕ ПИШЕТСЯ (решение владельца 07.10.2026 по #996).
-    Источник один — ответ `configured` инвентаря переноса у скрипта, который
-    шаг зовёт: там названо, где потребитель его настраивает. Свои пути
-    скрипта и прогоны в перечень не идут — первые едут выкачкой, вторые
-    кладёт заготовка. Инвентаря нет — `None`: перечень не выведен, и это
-    говорится, а не подменяется пустым (045).
+    Источник один — ответ `configured` инвентаря переноса у самого шага и у
+    скриптов, которые он зовёт: там названо, где потребитель его
+    настраивает. Шаг читает данные и мимо скриптов — входом действия
+    (`authors:` у атрибуции, взгляд на #1196); такой вход обязан стоять в
+    ответе шага, и это держит `tests/test_portable.py`. Свои пути скрипта и
+    прогоны в перечень не идут — первые едут выкачкой, вторые кладёт
+    заготовка. Инвентаря нет — `None`: перечень не выведен, и это говорится,
+    а не подменяется пустым (045). Ответ не той формы — отказ, а не перечень
+    по буквам.
     """
     inventory = root / paths.PORTABLE
     if not inventory.is_file():
@@ -185,15 +212,20 @@ def consumer_data(root: Path, names: list[str], laid: set[Path]) -> list[str] | 
         raise NotRun(f"`{paths.PORTABLE}`: поле answers — не словарь")
     skip = {str(path) for path in laid}
     ours = (f"{paths.SCRIPTS.as_posix()}/", f"{paths.WORKFLOWS}/")
+    keys = [f"{paths.WORKFLOWS}/{STEP_PREFIX}{name}.yml" for name in names] + [
+        f"{paths.SCRIPTS.as_posix()}/{one}.py" for one in called_scripts(root, names)
+    ]
     found: set[str] = set()
-    for one in called_scripts(root, names):
-        said = answers.get(f"{paths.SCRIPTS.as_posix()}/{one}.py") or {}
+    for key in keys:
+        said = answers.get(key, {})
+        if not isinstance(said, dict):
+            raise NotRun(f"`{paths.PORTABLE}`: ответ «{key}» — не словарь")
         if said.get("answer") != "configured":
             continue
-        for where in said.get("where") or []:
-            if where.startswith(ours) or where in skip:
-                continue
-            found.add(where)
+        where = said.get("where")
+        if not isinstance(where, list) or not all(isinstance(one, str) for one in where):
+            raise NotRun(f"`{paths.PORTABLE}`: у «{key}» where — не список путей")
+        found |= {one for one in where if not one.startswith(ours) and one not in skip}
     return sorted(found)
 
 
@@ -309,7 +341,8 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
     СТРОГОЕ ПРАВИЛО, А НЕ ПЕРЕЧЕНЬ (четвёртый заход по месту — взгляды на
     #1189 и #1195; 210). У вызова снимаются ровно те `needs`, что ведут на
     снятые джобы; `needs` на другой джоб вызова остаётся, иначе два вызова
-    потеряли бы порядок. Отказ с причиной, а не склейка, в двух случаях:
+    потеряли бы порядок; через снятого посредника `needs` тоже ведёт на вызов
+    (`kept_needs`). Отказ с причиной, а не склейка, в двух случаях:
     выражение площадки (`if` целиком, остальное — внутри `${{ }}`) ссылается
     на снятый джоб — в заготовке оно вело бы в пустоту; или `needs` снят, а
     в своём либо перенесённом условии стоит статусная функция — она судила
@@ -329,7 +362,7 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
     for key in calls:
         job = jobs[key] or {}
         body = {one: value for one, value in job.items() if one != "needs"}
-        stays = [one for one in needed_by(jobs, key) if one not in gone]
+        stays = kept_needs(jobs, key, gone)
         if stays:
             body = {"needs": stays[0] if len(stays) == 1 else stays, **body}
         body["uses"] = outer.removeprefix("uses: ")
@@ -378,6 +411,28 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
             f"# снятого джоба): {', '.join(dropped)}.\n"
         )
     return head + str(yaml.safe_dump(said, allow_unicode=True, sort_keys=False))
+
+
+def kept_needs(jobs: dict[Any, Any], key: Any, gone: set[str]) -> list[str]:
+    """Джобы заготовки, на которых вызов стоит — прямо или через снятых посредников.
+
+    ПОРЯДОК ЧЕРЕЗ СНЯТОГО НЕ ТЕРЯЕТСЯ (взгляд на #1195). Вызов, стоящий на
+    снятом джобе, который сам стоит на другом вызове, после снятия обязан
+    стоять на том вызове: иначе два вызова теряют порядок молча.
+    """
+    found: list[str] = []
+    queue = needed_by(jobs, key)
+    seen: set[str] = set()
+    while queue:
+        one = queue.pop(0)
+        if one in seen:
+            continue
+        seen.add(one)
+        if one in gone:
+            queue += needed_by(jobs, one)
+        elif one not in found:
+            found.append(one)
+    return found
 
 
 def needed_by(jobs: dict[Any, Any], key: Any) -> list[str]:
@@ -743,7 +798,9 @@ def main(argv: list[str] | None = None) -> int:
         elif data:
             print("Данных общих шагов заготовка не кладёт — заведите их у себя: " + ", ".join(data))
         else:
-            print("Данных из вашего дерева общие шаги не читают.")
+            print(
+                "Инвентарь переноса не называет данных, которые общие шаги читают из вашего дерева."
+            )
         return EXIT_OK
 
     print(f"# шагов к подключению: {len(names)} · прибивка: {pin}\n")
@@ -775,7 +832,7 @@ def main(argv: list[str] | None = None) -> int:
     for one in data or []:
         print(f"#    {one}")
     if data == []:
-        print("#    (нет)")
+        print("#    (инвентарь переноса не называет ни одного)")
     return EXIT_OK
 
 
