@@ -1341,7 +1341,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 "подтяну после вердикта, иначе подтяжка снимет оплаченный заход (#1144)"
             )
             keep_only(repo, change, queue, owner_token, dry_run=dry_run)
-            return EXIT_OK
+            return EXIT_BROKEN if refused else EXIT_OK
         if state == STATE_BEHIND:
             print(f"#{change.number}: голова очереди отстала от базы — подтягиваю только её (052)")
             # Взведение соседей снимается и на этом выходе: толчок во
@@ -1349,7 +1349,9 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # голову и выйдет, соседа сольёт площадка раньше нового взгляда.
             keep_only(repo, change, queue, owner_token, dry_run=dry_run)
             sync_head(repo, change.number, owner_token, dry_run=dry_run)
-            return EXIT_OK
+            # Отказ по голове выше не теряется на этом выходе (взгляд на #1203):
+            # каждый выход из цикла голов отвечает с учётом `refused`.
+            return EXIT_BROKEN if refused else EXIT_OK
         # ОЖИДАНИЕ ВЗГЛЯДА ДЛЯ ПОДТЯНУТОЙ ГОЛОВЫ. Прежде подтяжка стояла раньше
         # ожидания с доводом «отставшую голову подтяжка всё равно отправит на
         # новый взгляд, и ждать старого значило бы ждать дважды» (`14207cf`).

@@ -1445,6 +1445,37 @@ def test_a_waiting_head_takes_back_an_armed_neighbour(platform: dict[str, Any]) 
     assert platform["disarmed"] == ["PR_2"], "взведение соседа не снято у ждущей головы"
 
 
+@pytest.mark.parametrize("looking", [True, False], ids=["ждёт взгляда", "подтягивается"])
+def test_a_refusal_above_is_kept_by_the_exit_of_a_behind_head(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, looking: bool
+) -> None:
+    """Отказ взвода у головы выше не теряется на выходе отставшей головы (взгляд на #1203)."""
+
+    def refuse(repo: str, change: Any, queue: Any, tok: str, *, dry_run: bool) -> None:
+        raise module.NotRun("площадка отвергла мутацию")
+
+    monkeypatch.setattr(module, "hand_over", refuse)
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["states"] = {1: module.STATE_ARMABLE, 2: module.STATE_BEHIND}
+    platform["looking"] = {2} if looking else set()
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
+
+
+def test_every_exit_from_the_heads_loop_answers_with_the_refusals() -> None:
+    """Строгое правило (210): любой `return` в цикле голов `advance` учитывает `refused`."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(module.advance)))
+    loops = [node for node in ast.walk(tree) if isinstance(node, ast.For)]
+    assert loops, "цикла голов в advance не найдено — предмет проверки не найден (075)"
+    exits = [node for loop in loops for node in ast.walk(loop) if isinstance(node, ast.Return)]
+    assert exits, "выходов из цикла голов не найдено (075)"
+    silent = [node.lineno for node in exits if "refused" not in ast.unparse(node)]
+    assert not silent, f"выходы цикла голов без учёта отказов: строки {silent} функции advance"
+
+
 def test_a_waiting_head_does_not_hand_the_sync_to_the_next(platform: dict[str, Any]) -> None:
     """Ждущая голова кончает заход: следующую отставшую очередь не подтягивает (052, #1194)."""
     platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
