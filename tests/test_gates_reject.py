@@ -127,16 +127,30 @@ def test_fresh_marker_passes(run_script: RunScript, tmp_path: Path) -> None:
     assert run_script("check_version.py", cwd=repo).code == CLEAN
 
 
-def test_missing_version_source_is_third_outcome(
-    run_script: RunScript, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Нет источника версии — гейт не отработал, а не «чисто» (075).
+def test_missing_version_source_is_not_applicable(run_script: RunScript, tmp_path: Path) -> None:
+    """Нет источника версии — гейт неприменим с названной причиной, а не красен (#1187).
 
-    Отказ сверяется с тем, что говорит сам `version.declared` на том же дереве,
-    а не с переписанными буквами (209): переформулировка отказа не краснит.
+    Решение владельца 07.10.2026, вариант 2: у потребителя общего шага своей
+    версии контракта может не быть. Причина печатается та, что объявлена у
+    гейта, а не переписанные буквы (209).
     """
     git(tmp_path, "init", "-q", "-b", BASE_BRANCH)
-    (tmp_path / "a.md").write_text("текст\n", encoding="utf-8")
+    (tmp_path / "a.md").write_text("текст 1.2.3\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    result = run_script("check_version.py", cwd=tmp_path)
+    assert result.code == CLEAN, result.text
+    assert load_script("check_version.py").NO_SOURCE in result.text
+
+
+def test_a_broken_version_source_is_still_a_refusal(
+    run_script: RunScript, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Источник есть, а версии в нём нет — это отказ, а не неприменимость (075).
+
+    Отказ сверяется с тем, что говорит сам `version.declared` на том же дереве (209).
+    """
+    git(tmp_path, "init", "-q", "-b", BASE_BRANCH)
+    (tmp_path / "CONTRACT_VERSION").write_text("не версия\n", encoding="utf-8")
     git(tmp_path, "add", "-A")
     result = run_script("check_version.py", cwd=tmp_path)
     assert result.code == BROKEN

@@ -249,6 +249,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="сверить объявленное с тегом")
     args = parser.parse_args(argv)
 
+    # СВЕРКЕ НЕЧЕГО СВЕРЯТЬ, ЕСЛИ ПРОЕКТ НЕ ВЕДЁТ ВЕРСИЮ ЭТИМ СПОСОБОМ (#1187,
+    # вариант 2). Ни выпускного тега, ни `CONTRACT_VERSION` — у потребителя
+    # общего шага это законное состояние, а не обрезанная история. Без
+    # `--check` версию по-прежнему спрашивают, и отказ остаётся отказом.
+    if args.check and not paths.VERSION.is_file() and release_tag() is None:
+        print(
+            f"неприменимо: ни выпускного тега, ни {paths.VERSION} — "
+            "проект не ведёт версию этим способом, сверять нечего (#1187)"
+        )
+        return EXIT_OK
+
     try:
         number, whole = version()
     except NotRun as exc:
