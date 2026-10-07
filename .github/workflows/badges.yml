@@ -367,6 +367,18 @@ jobs:
           git fetch --quiet origin badges
           git worktree add --quiet --detach "$pub" FETCH_HEAD
           cp -R "${RUNNER_TEMP}/badges/.github/badges/." "$pub/.github/badges/"
+          # СНЯТОЕ УХОДИТ С ВЕТКИ (взгляд на #1198): копия поверх ничего не
+          # удаляет, и снятый значок застывал по своему адресу навсегда.
+          # Перечень допустимого выводит сборка из инвентаря, а не список
+          # снятых по имени.
+          keep="$(python scripts/build_facts.py --branch-files)"
+          for path in "$pub"/.github/badges/*; do
+            name="$(basename "$path")"
+            if ! grep -qxF "$name" <<<"$keep"; then
+              git -C "$pub" rm -q -- ".github/badges/$name"
+              echo "снято с ветки: $name — сборка его больше не издаёт"
+            fi
+          done
           cd "$pub"
           # Производное собирает машина, и подписывать его человеком было бы
           # ложью: автор здесь — прогон, и в истории это должно быть видно.
