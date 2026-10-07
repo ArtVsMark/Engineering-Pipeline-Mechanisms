@@ -15,6 +15,7 @@
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -563,6 +564,77 @@ def test_an_input_naming_a_dropped_artifact_does_not_ship() -> None:
     assert job["if"] == "фильтр"
     assert module.artifacts_of(document["jobs"], {"inputs"}) == {"сырьё"}
     assert module.artifacts_of(document["jobs"], set()) == set()
+
+
+@pytest.mark.parametrize(
+    ("jobs", "said"),
+    [
+        ({"н": {"if": "${{ б }}"}, "в": {"needs": "н", "if": "${{ а }}"}}, "(а) && (б)"),
+        ({"н": {"if": "б"}, "в": {"needs": "н", "if": "always()"}}, None),
+        ({"н": {"if": "needs.д.result == 'success'"}, "в": {"needs": "н"}}, None),
+        ({"н": {}, "в": {"needs": "н", "if": "always()"}}, "always()"),
+    ],
+    ids=[
+        "обёртка снимается до склейки",
+        "статусная функция вызова — отказ",
+        "условие снятого ссылается на needs — отказ",
+        "статусная функция без переноса — как есть",
+    ],
+)
+def test_the_guard_forms_are_carried_or_refused(jobs: dict[str, Any], said: str | None) -> None:
+    """Перечень форм переноса условия: что переносится, а что честно не переносится (#1189)."""
+    if said is None:
+        with pytest.raises(module.NotRun):
+            module.inherited_guard(jobs, "в", {"н"})
+    else:
+        assert module.inherited_guard(jobs, "в", {"н"}) == said
+
+
+def test_an_input_leaning_on_a_dropped_job_does_not_ship_and_is_named() -> None:
+    """Вход с выходом снятого джоба не едет и назван в шапке; чужое имя с тем же началом — едет."""
+    import yaml
+
+    document = {
+        "name": "значки",
+        True: {"push": None},
+        "jobs": {
+            "inputs": {"steps": []},
+            "facts": {
+                "needs": "inputs",
+                "uses": "./.github/workflows/step-план.yml",
+                "with": {
+                    "сырьё": "${{ needs.inputs.outputs.path }}",
+                    "соседнее": "${{ needs.inputs2.outputs.path }}",
+                },
+            },
+        },
+    }
+    kit = module.calling_part("значки.yml", document, "план", "uses: О/Р/x.yml@v1")
+    head = kit.split("\nname:", 1)[0]
+    assert "facts.сырьё" in head and "соседнее" not in head, head
+    job = yaml.safe_load(kit)["jobs"]["facts"]
+    assert job["with"] == {"соседнее": "${{ needs.inputs2.outputs.path }}"}
+
+
+def test_the_real_facts_caller_ships_its_filter_and_not_its_artifact() -> None:
+    """Наш `badges.yml`: в заготовке у `facts` фильтр будящих событий есть, артефакта нет (107)."""
+    import yaml
+
+    flow = ROOT / ".github" / "workflows" / "badges.yml"
+    said = yaml.safe_load(module.own_kit(flow, "facts", "О/Р", "v9.9.9"))
+    job = said["jobs"]["facts"]
+    assert "workflow_run.event" in job["if"], job
+    assert "inputs-artifact" not in (job.get("with") or {}), job
+
+
+def test_a_condition_and_a_lean_are_read_as_expressions() -> None:
+    """Обёртка снимается только целая; ссылка на снятый джоб — по имени целиком."""
+    assert module.bare_condition("${{ а == б }}") == "а == б"
+    assert module.bare_condition("  а == б ") == "а == б"
+    assert module.bare_condition("${{ а }} && б") == "${{ а }} && б"
+    assert module.leans_on("${{ needs.inputs.outputs.x }}", {"inputs"})
+    assert not module.leans_on("${{ needs.inputs2.outputs.x }}", {"inputs"})
+    assert not module.leans_on("ci.yml", {"inputs"})
 
 
 # --- заготовка свода окна (#995, пункт 1) ------------------------------------
