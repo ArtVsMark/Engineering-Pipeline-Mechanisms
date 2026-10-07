@@ -163,8 +163,15 @@ BY_TRUNK = "jobs:\n  review:\n    uses: О/Р/.github/workflows/step-review.yml@
 BY_PATH = "jobs:\n  review:\n    uses: ./.github/workflows/step-review.yml\n"
 
 
-def test_the_caller_of_a_carrier_carries_too(tmp_path: Path) -> None:
-    """Правка ВЫЗЫВАЮЩЕГО носителя названа: файлом прогона площадке служит он (#993)."""
+def test_the_caller_of_a_carrier_carries_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Правка ВЫЗЫВАЮЩЕГО носителя названа: файлом прогона площадке служит он (#993).
+
+    Своё имя объявлено явно: вызов `О/Р/…` свой, только если своё имя — `О/Р`.
+    Без этого тест зависел от среды — на площадке имя задаёт её переменная.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "О/Р")
     caller = ".github/workflows/review.yml"
     root = tree(tmp_path, {STEP: CARRIER, caller: BY_TRUNK}, {caller: BY_TRUNK + "# правка\n"})
     assert module.callers(root, "база", {STEP}) == {caller}
@@ -234,3 +241,37 @@ def test_an_unknown_own_name_excludes_nothing(
     )
     assert module.own_repo(root) == "О/Р"
     assert module.from_trunk(root, "база", {STEP}) == {STEP}
+
+
+def test_a_foreign_call_of_the_same_path_is_not_ours(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Чужой адрес того же пути не делает вызывающего носителем и не возвращает шаг (#1175).
+
+    Обе половины: рядом со своим `@main` чужой вызов шаг в носители не
+    возвращает, а вызывающий чужого файла носителем не считается; свой
+    внутренний путь — по-прежнему вызов.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "О/Р")
+    foreign = BY_TRUNK.replace("О/Р/", "Другой/Р/").replace("  review:", "  чужой:")
+    flows = {STEP: CARRIER, ".github/workflows/свой.yml": BY_TRUNK}
+    flows[".github/workflows/чужой.yml"] = foreign
+    root = tree(tmp_path, flows, {STEP: CARRIER + "# правка\n"})
+    assert module.callers(root, "база", {STEP}) == {".github/workflows/свой.yml"}
+    assert module.from_trunk(root, "база", {STEP}) == {STEP}
+    assert module.look(root, "база")[0] == module.EXIT_OK
+
+
+@pytest.mark.parametrize(
+    ("said", "own", "is_ours"),
+    [
+        ("./.github/workflows/x.yml", "о/р", True),
+        ("О/Р/.github/workflows/x.yml@main", "о/р", True),
+        ("Другой/Р/.github/workflows/x.yml@main", "о/р", False),
+        ("Другой/Р/.github/workflows/x.yml@main", "", True),
+    ],
+    ids=["внутренний путь", "свой адрес", "чужой адрес", "своё имя неизвестно"],
+)
+def test_ours_tells_an_own_call_from_a_foreign_one(said: str, own: str, is_ours: bool) -> None:
+    """Обе половины признака: свой путь и свой адрес — наши, чужой — нет, без имени — наш (051)."""
+    assert module.ours(said, own) is is_ours
