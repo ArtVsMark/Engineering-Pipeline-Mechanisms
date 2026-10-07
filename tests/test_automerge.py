@@ -1417,19 +1417,37 @@ def test_awaiting_the_look_asks_the_review_record_of_the_head(
     assert asked == [f"repos/o/r/commits/{item.head}/check-runs?filter=latest"]
 
 
-def test_a_head_behind_the_base_is_synced_before_the_look_is_awaited(
-    platform: dict[str, Any],
-) -> None:
-    """Отставшую голову подтягивают, не дожидаясь старого взгляда (`14207cf`).
+def test_a_head_behind_the_base_waits_for_its_running_look(platform: dict[str, Any]) -> None:
+    """Отставшую голову с идущим взглядом не подтягивают: подтяжка сняла бы оплаченный заход.
 
-    Подтяжка всё равно отправит голову на новый взгляд: ждать старого значило
-    бы ждать дважды, а при подвижной общей ветке — голодать.
+    Решение владельца 07.10.2026 (#1144). Прежний довод «ждать старого значило
+    бы ждать дважды» (`14207cf`) перевернул пропуск по равному диффу (#1161):
+    после вердикта новый взгляд по подтянутой голове стоит секунды.
     """
     platform["changes"] = [change(1, "automerge")]
     platform["states"] = {1: module.STATE_BEHIND}
     platform["looking"] = {1}
     module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == []
+
+
+def test_a_head_behind_the_base_is_synced_once_its_look_is_done(platform: dict[str, Any]) -> None:
+    """Взгляд кончился — та же голова подтягивается: ожидание не держит её навсегда."""
+    platform["changes"] = [change(1, "automerge")]
+    platform["states"] = {1: module.STATE_BEHIND}
+    platform["looking"] = set()
+    module.advance("o/r", "token", "main", dry_run=False)
     assert platform["synced"] == [1]
+
+
+def test_a_repair_behind_the_base_is_synced_without_waiting(platform: dict[str, Any]) -> None:
+    """Починку красной общей ветки ожидание взгляда не держит и у подтяжки (`f3c79a7`)."""
+    platform["changes"] = [change(9, "automerge", "fix-main")]
+    platform["health"] = ["test: failure"]
+    platform["states"] = {9: module.STATE_BEHIND}
+    platform["looking"] = {9}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == [9]
 
 
 def test_a_repair_of_the_shared_branch_does_not_wait_for_the_look(
