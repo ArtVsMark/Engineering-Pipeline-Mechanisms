@@ -98,12 +98,15 @@ git config user.email "<почта учётной записи владельц�
 
 ## 🌿 Ветка в облачном окне
 
-**Работа ведётся в ветке `agent/<задача>`, которую окно создаёт само.**
-Платформа при старте выдаёт окну ветку вида `claude/<имя-окна>` — это след
-запуска, а не место работы: имя окна задачей не является
+**Работа ведётся в ветке `agent/<задача>`, которую окно создаёт само.** Имя
+ветки — по задаче, а не по окну
 ([189](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/189-a-branch-is-named-by-its-task-not-its-window.md)),
-и приставки конвейера в нём нет
-([003](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/003-branch-name-is-a-switch.md)).
+и приставка `agent/` — переключатель конвейера
+([003](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/003-branch-name-is-a-switch.md)):
+толчок в ветку без неё изменения не откроет.
+
+Платформа при старте выдаёт окну ветку вида `claude/<имя-окна>` — это след
+запуска, а не место работы.
 
 Порядок простой:
 
