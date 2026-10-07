@@ -73,6 +73,7 @@
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Any, Final
@@ -227,14 +228,48 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
     потребителя они вели бы в пустоту (#1001). Поэтому едут события, права,
     очередь и джобы вызова — с адресом по тегу и без `needs` на снятые джобы;
     входы вызова остаются как есть: это данные, и правит их потребитель.
+
+    СНЯТЫЙ `needs` НЕ УНОСИТ С СОБОЙ ТО, ЧТО НА НЁМ ДЕРЖАЛОСЬ (взгляд на #1183).
+    Условие снятого джоба переходит на джоб вызова (`inherited_guard`): у нас
+    фильтр будящих событий стоит на `inputs`, и без него `facts` с правом
+    записи шёл бы на любое завершение `ci`. Вход, называющий артефакт снятого
+    джоба (`artifacts_of`), в заготовку не едет: у потребителя его некому
+    выгрузить, и шаг предупреждал бы на каждом заходе.
+
+    ПЕРЕЧЕНЬ ФОРМ, а не очередная (второй заход по месту — взгляд на #1189;
+    210). Что снятый джоб уносит или оставляет висеть: его условие —
+    переносится; условие в обёртке `${{ }}` — обёртка снимается до склейки,
+    иначе площадка прочла бы непустую строку как истину; условие со ссылкой
+    на `needs.` и статусная функция в своём условии вызова — честно не
+    переносятся, и заход отказывает с названной причиной; вход с именем
+    артефакта или со ссылкой на `needs.<снятый>` — не едет и назван в шапке
+    заготовки.
     """
     jobs = document.get("jobs") or {}
+    calls = [
+        key for key, job in jobs.items() if step_called(str((job or {}).get("uses") or "")) == name
+    ]
+    gone = {str(key) for key in jobs} - {str(key) for key in calls}
+    lost = artifacts_of(jobs, gone)
     kept: dict[str, Any] = {}
-    for key, job in jobs.items():
-        if step_called(str((job or {}).get("uses") or "")) != name:
-            continue
-        body = {one: value for one, value in (job or {}).items() if one != "needs"}
+    dropped: list[str] = []
+    for key in calls:
+        job = jobs[key] or {}
+        body = {one: value for one, value in job.items() if one != "needs"}
         body["uses"] = outer.removeprefix("uses: ")
+        guard = inherited_guard(jobs, key, gone)
+        if guard:
+            body["if"] = guard
+        said_with: dict[str, Any] = {}
+        for one, value in (body.get("with") or {}).items():
+            if value in lost or leans_on(str(value), gone):
+                dropped.append(f"{key}.{one}")
+            else:
+                said_with[one] = value
+        if said_with:
+            body["with"] = said_with
+        else:
+            body.pop("with", None)
         kept[str(key)] = body
     said: dict[str, Any] = {"name": document.get("name") or Path(source).stem}
     said["on"] = policy.events_raw(document)
@@ -247,7 +282,93 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
         "# только джобы вызова общего шага. Свои джобы поставщика не едут —\n"
         "# входы вызова (`with:`) — данные, правьте их под свой проект.\n"
     )
+    if dropped:
+        head += (
+            "# Не едут входы, которые называют снятое (артефакт или выход\n"
+            f"# снятого джоба): {', '.join(dropped)}.\n"
+        )
     return head + str(yaml.safe_dump(said, allow_unicode=True, sort_keys=False))
+
+
+def needed_by(jobs: dict[Any, Any], key: Any) -> list[str]:
+    """Имена джобов, от которых зависит `key` (`needs` строкой или списком)."""
+    said = (jobs.get(key) or {}).get("needs") or []
+    return [str(one) for one in ([said] if isinstance(said, str) else said)]
+
+
+#: Ссылка выражения площадки на выходы и исходы соседних джобов.
+NEEDS_REF: Final = re.compile(r"\bneeds\.")
+#: Статусные функции: они судят исход `needs`, и при снятом `needs` меняют смысл.
+STATUS_CALL: Final = re.compile(r"\b(?:always|cancelled|success|failure)\s*\(")
+
+
+def bare_condition(text: str) -> str:
+    """Условие без обёртки `${{ }}`: в склейке обёртка дала бы строку, а строка истинна."""
+    said = text.strip()
+    if said.startswith("${{") and said.endswith("}}"):
+        return said[3:-2].strip()
+    return said
+
+
+def leans_on(text: str, gone: set[str]) -> bool:
+    """Ссылается ли выражение на выход или исход одного из снятых джобов."""
+    return any(re.search(rf"\bneeds\.{re.escape(one)}\b", text) for one in gone)
+
+
+def inherited_guard(jobs: dict[Any, Any], key: Any, gone: set[str]) -> str:
+    """Условие джоба вызова вместе с условиями снятых джобов, на которых он стоял.
+
+    Обход транзитивный: снятый джоб может сам стоять на снятом, и его условие
+    держало вызов так же. Порядок — от ближнего к дальнему, без повторов.
+    Чего честно не перенести — отказ с причиной (`NotRun`), а не склейка:
+    условие снятого со ссылкой на `needs.` в новом месте ведёт в пустоту, а
+    статусная функция своего условия при снятом `needs` судила бы другое.
+    """
+    found: list[str] = []
+    own = (jobs.get(key) or {}).get("if")
+    if own:
+        found.append(bare_condition(str(own)))
+    queue = [one for one in needed_by(jobs, key) if one in gone]
+    seen: set[str] = set()
+    carried = 0
+    while queue:
+        one = queue.pop(0)
+        if one in seen:
+            continue
+        seen.add(one)
+        raw = (jobs.get(one) or {}).get("if")
+        condition = bare_condition(str(raw)) if raw else ""
+        if condition and NEEDS_REF.search(condition):
+            raise NotRun(
+                f"условие снятого джоба `{one}` ссылается на `needs.`: «{condition}» — "
+                f"на вызове `{key}` оно вело бы в пустоту, перенесите его руками"
+            )
+        if condition and condition not in found:
+            found.append(condition)
+            carried += 1
+        queue += [more for more in needed_by(jobs, one) if more in gone]
+    if carried and own and STATUS_CALL.search(found[0]):
+        raise NotRun(
+            f"у вызова `{key}` своё условие со статусной функцией: «{found[0]}» — "
+            "склейка с условием снятого джоба изменила бы его смысл, разберите руками"
+        )
+    if len(found) < 2:
+        return found[0] if found else ""
+    return " && ".join(f"({one})" for one in found)
+
+
+def artifacts_of(jobs: dict[Any, Any], gone: set[str]) -> set[str]:
+    """Имена артефактов, которые выгружают снятые джобы (`actions/upload-artifact`)."""
+    names: set[str] = set()
+    for key, job in jobs.items():
+        if str(key) not in gone:
+            continue
+        for step in (job or {}).get("steps") or []:
+            if "actions/upload-artifact" in str(step.get("uses") or ""):
+                said = (step.get("with") or {}).get("name")
+                if said:
+                    names.add(str(said))
+    return names
 
 
 def thin_ci(names: list[str], repo: str, pin: str) -> str:
