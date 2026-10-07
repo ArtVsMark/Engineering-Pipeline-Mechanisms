@@ -73,6 +73,8 @@
 """
 
 import argparse
+import ast
+import json
 import re
 import sys
 from pathlib import Path
@@ -124,6 +126,74 @@ def steps(root: Path) -> list[str]:
         for said in check_shipped.shipped(root)
         if Path(said).name.startswith(STEP_PREFIX) and Path(said).suffix in {".yml", ".yaml"}
     ]
+    return sorted(found)
+
+
+#: Как общий шаг зовёт наш скрипт: из выкачки механизмов, а не из дерева потребителя.
+CALLED_SCRIPT: Final = re.compile(r"(?:\$MECHANISMS|\$\{\{ env\.MECHANISMS \}\})/scripts/(\w+)\.py")
+
+
+def called_scripts(root: Path, names: list[str]) -> set[str]:
+    """Имена наших скриптов, которые зовут вынесенные шаги, — вместе с их импортами.
+
+    Импорт обходится транзитивно и только по нашему `scripts/`: `agent_pr`
+    сам меток не читает, их читает импортированный `labels`, и без обхода
+    данные соседа выпали бы из перечня молча (045).
+    """
+    queue = sorted(
+        {
+            match.group(1)
+            for name in names
+            for match in CALLED_SCRIPT.finditer(
+                (root / paths.WORKFLOWS / f"{STEP_PREFIX}{name}.yml").read_text(encoding="utf-8")
+            )
+        }
+    )
+    seen: set[str] = set()
+    while queue:
+        one = queue.pop()
+        source = root / paths.SCRIPTS / f"{one}.py"
+        if one in seen or not source.is_file():
+            continue
+        seen.add(one)
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                queue += [alias.name.split(".")[0] for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                queue.append(node.module.split(".")[0])
+    return seen
+
+
+def consumer_data(root: Path, names: list[str], laid: set[Path]) -> list[str] | None:
+    """Данные, которые вынесенные шаги читают из дерева потребителя, а заготовка не кладёт.
+
+    ПЕРЕЧЕНЬ ВЫВОДИТСЯ, А НЕ ПИШЕТСЯ (решение владельца 07.10.2026 по #996).
+    Источник один — ответ `configured` инвентаря переноса у скрипта, который
+    шаг зовёт: там названо, где потребитель его настраивает. Свои пути
+    скрипта и прогоны в перечень не идут — первые едут выкачкой, вторые
+    кладёт заготовка. Инвентаря нет — `None`: перечень не выведен, и это
+    говорится, а не подменяется пустым (045).
+    """
+    inventory = root / paths.PORTABLE
+    if not inventory.is_file():
+        return None
+    try:
+        answers = json.loads(inventory.read_text(encoding="utf-8"))["answers"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise NotRun(f"`{paths.PORTABLE}` не разобран: {exc!r}") from exc
+    if not isinstance(answers, dict):
+        raise NotRun(f"`{paths.PORTABLE}`: поле answers — не словарь")
+    skip = {str(path) for path in laid}
+    ours = (f"{paths.SCRIPTS.as_posix()}/", f"{paths.WORKFLOWS}/")
+    found: set[str] = set()
+    for one in called_scripts(root, names):
+        said = answers.get(f"{paths.SCRIPTS.as_posix()}/{one}.py") or {}
+        if said.get("answer") != "configured":
+            continue
+        for where in said.get("where") or []:
+            if where.startswith(ours) or where in skip:
+                continue
+            found.add(where)
     return sorted(found)
 
 
@@ -592,6 +662,9 @@ def main(argv: list[str] | None = None) -> int:
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
         rulebook = rulebook_kit(args.root)
+        # Перечень данных выводится ДО печати и до записи: битый инвентарь
+        # отказывает выходом захода, а не трейсбеком после положенного (#996).
+        data = consumer_data(args.root, names, {paths.PIPELINE, *rulebook})
     except (NotRun, check_shipped.NotRun) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -665,6 +738,12 @@ def main(argv: list[str] | None = None) -> int:
             f"Сводный гейт заготовка не кладёт: скопируйте `{paths.WORKFLOWS}/{SUMMARY_FLOW}` "
             "поставщика — его имя и ставится в защиту ветки."
         )
+        if data is None:
+            print(f"Перечень данных общих шагов не выведен: нет `{paths.PORTABLE}`.")
+        elif data:
+            print("Данных общих шагов заготовка не кладёт — заведите их у себя: " + ", ".join(data))
+        else:
+            print("Данных из вашего дерева общие шаги не читают.")
         return EXIT_OK
 
     print(f"# шагов к подключению: {len(names)} · прибивка: {pin}\n")
@@ -690,6 +769,13 @@ def main(argv: list[str] | None = None) -> int:
     for path, text in sorted(rulebook.items()):
         print(f"\n# --- `{path}` ---\n")
         print(text, end="")
+    print("\n# 5. Данные, которые общие шаги читают из ВАШЕГО дерева, — заготовка их не кладёт:")
+    if data is None:
+        print(f"#    перечень не выведен: нет `{paths.PORTABLE}`")
+    for one in data or []:
+        print(f"#    {one}")
+    if data == []:
+        print("#    (нет)")
     return EXIT_OK
 
 
