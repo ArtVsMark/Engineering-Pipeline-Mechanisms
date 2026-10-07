@@ -177,7 +177,12 @@ def consumer_data(root: Path, names: list[str], laid: set[Path]) -> list[str] | 
     inventory = root / paths.PORTABLE
     if not inventory.is_file():
         return None
-    answers = json.loads(inventory.read_text(encoding="utf-8"))["answers"]
+    try:
+        answers = json.loads(inventory.read_text(encoding="utf-8"))["answers"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise NotRun(f"`{paths.PORTABLE}` не разобран: {exc!r}") from exc
+    if not isinstance(answers, dict):
+        raise NotRun(f"`{paths.PORTABLE}`: поле answers — не словарь")
     skip = {str(path) for path in laid}
     ours = (f"{paths.SCRIPTS.as_posix()}/", f"{paths.WORKFLOWS}/")
     found: set[str] = set()
@@ -624,6 +629,9 @@ def main(argv: list[str] | None = None) -> int:
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
         rulebook = rulebook_kit(args.root)
+        # Перечень данных выводится ДО печати и до записи: битый инвентарь
+        # отказывает выходом захода, а не трейсбеком после положенного (#996).
+        data = consumer_data(args.root, names, {paths.PIPELINE, *rulebook})
     except (NotRun, check_shipped.NotRun) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -697,7 +705,6 @@ def main(argv: list[str] | None = None) -> int:
             f"Сводный гейт заготовка не кладёт: скопируйте `{paths.WORKFLOWS}/{SUMMARY_FLOW}` "
             "поставщика — его имя и ставится в защиту ветки."
         )
-        data = consumer_data(args.root, names, set(files) | set(rulebook))
         if data is None:
             print(f"Перечень данных общих шагов не выведен: нет `{paths.PORTABLE}`.")
         elif data:
@@ -729,7 +736,6 @@ def main(argv: list[str] | None = None) -> int:
     for path, text in sorted(rulebook.items()):
         print(f"\n# --- `{path}` ---\n")
         print(text, end="")
-    data = consumer_data(args.root, names, {paths.PIPELINE, *rulebook})
     print("\n# 5. Данные, которые общие шаги читают из ВАШЕГО дерева, — заготовка их не кладёт:")
     if data is None:
         print(f"#    перечень не выведен: нет `{paths.PORTABLE}`")

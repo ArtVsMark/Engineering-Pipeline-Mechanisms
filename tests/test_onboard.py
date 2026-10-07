@@ -715,6 +715,15 @@ def test_without_an_inventory_the_list_is_not_derived(tmp_path: Path) -> None:
     assert module.consumer_data(tmp_path, [], set()) is None
 
 
+@pytest.mark.parametrize("text", ["{не json", "{}", '{"answers": []}'])
+def test_a_broken_inventory_is_a_refusal_not_a_traceback(tmp_path: Path, text: str) -> None:
+    """Битый инвентарь — отказ захода (`NotRun`), а не трейсбек после положенного (#996)."""
+    (tmp_path / ".rules").mkdir()
+    (tmp_path / ".rules" / "portable.json").write_text(text, encoding="utf-8")
+    with pytest.raises(module.NotRun):
+        module.consumer_data(tmp_path, [], set())
+
+
 def test_called_scripts_walk_our_imports_only(tmp_path: Path) -> None:
     """Обход идёт по нашему `scripts/` транзитивно; чужой модуль и стандартная библиотека — нет."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
