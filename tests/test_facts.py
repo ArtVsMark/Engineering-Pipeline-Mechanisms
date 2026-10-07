@@ -273,7 +273,7 @@ def shown_badges() -> list[str]:
     экземпляр здесь был третьим (022).
     """
     found = sorted(badges_shown((ROOT / "README.md").read_text("utf-8")))
-    assert len(found) >= 4, f"витрина показывает {found} — предмет проверки не найден (075)"
+    assert len(found) >= 3, f"витрина показывает {found} — предмет проверки не найден (075)"
     return found
 
 
@@ -307,7 +307,7 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     drawn = set(facts.BADGES)
-    assert len(drawn) >= 5, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
+    assert len(drawn) >= 4, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
     # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
     # ним они были бы дублями. Сам единый значок рисует шаг `badges.yml`.
     expected = (drawn - set(facts.ZONE_INPUTS)) | {facts.UNIFIED}

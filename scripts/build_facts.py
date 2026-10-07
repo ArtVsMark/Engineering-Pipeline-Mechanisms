@@ -472,23 +472,6 @@ def family_badge(facts: dict[str, Any]) -> Badge:
     return badge("общие механизмы", f"{percent}% семьи", color)
 
 
-def scripts_badge(facts: dict[str, Any]) -> Badge:
-    """Сколько запускаемых механизмов набор гоняет процессом.
-
-    Порог здесь не назначен, а взят у того же правила, что и прочие значки:
-    цвет говорит о доле, а решает человек. Число без знаменателя ничего не
-    значит, поэтому показываются оба (005).
-    """
-    counts = facts.get("scripts") or {}
-    runnable = int(counts.get("runnable") or 0)
-    started = int(counts.get("started") or 0)
-    if not runnable:
-        return badge("гейты прогоном", "нет данных", "#9f9f9f")
-    share = started / runnable
-    color = "#4c1" if share >= 0.8 else "#dfb317" if share >= 0.5 else "#e05d44"
-    return badge("гейты прогоном", f"{started}/{runnable}", color)
-
-
 def coverage_badge(facts: dict[str, Any]) -> Badge:
     """Доля покрытых строк — или прямое «не прочитано»."""
     if "coverage_percent" not in facts:
@@ -530,7 +513,6 @@ BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
     "rules.json": rules_badge,
     "family.json": family_badge,
     "version.json": version_badge,
-    "scripts.json": scripts_badge,
     "coverage.json": coverage_badge,
 }
 

@@ -77,7 +77,7 @@ def test_the_readme_badges_are_seen_by_this_parser() -> None:
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
     seen = module.ours(readme, OURS)
-    assert len(seen) >= 4, f"значков витрины разобрано {len(seen)} — разбор их не видит"
+    assert len(seen) >= 3, f"значков витрины разобрано {len(seen)} — разбор их не видит"
     assert {ref for ref, _ in seen} == {"badges"}, seen
 
 
