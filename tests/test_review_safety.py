@@ -1332,8 +1332,8 @@ def test_the_gate_catches_a_planted_interpolation(tmp_path: Path, said: str) -> 
 
 
 #: Прогоны, читающие номер изменения с кнопки: у взгляда — его тело, общий шаг,
-#: куда вызывающий передаёт вход кнопки как есть (#993).
-TAKES_A_NUMBER: Final = ("step-review.yml", "task-items.yml")
+#: куда вызывающий передаёт вход кнопки как есть (#993), и у разбора задач (#994).
+TAKES_A_NUMBER: Final = ("step-review.yml", "step-task-items.yml")
 
 #: Как выглядит проверка «это цифры и ничего кроме».
 DIGITS: Final = "*[!0-9]*"
