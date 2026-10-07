@@ -165,7 +165,10 @@
       "why": "@skill-tree"
     },
     ".github/workflows/agent-pr.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/agent-pr.yml"
+      ]
     },
     ".github/workflows/arm.yml": {
       "answer": "as-is"
@@ -253,6 +256,9 @@
     ".github/workflows/step-attribution.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-agent-pr.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-automerge.yml": {
       "answer": "as-is"
     },
@@ -293,6 +299,9 @@
     ".github/workflows/step-stuck.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-task-items.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-window-lifetime.yml": {
       "answer": "as-is"
     },
@@ -309,7 +318,10 @@
       ]
     },
     ".github/workflows/task-items.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/task-items.yml"
+      ]
     },
     ".github/workflows/verify-queue.yml": {
       "answer": "configured",

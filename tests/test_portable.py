@@ -323,7 +323,6 @@ def test_the_seams_of_the_filling_and_the_port_check_are_named() -> None:
 #: допуск: он только убывает, и снимает его #993. Замер 01.10.2026 — 20.
 STILL_COPIED: Final = frozenset(
     {
-        "agent-pr.yml",
         "arm.yml",
         "attribution-history.yml",
         "badges.yml",
@@ -336,7 +335,6 @@ STILL_COPIED: Final = frozenset(
         "rules-inbox.yml",
         "runs-series.yml",
         "schedules-seen.yml",
-        "task-items.yml",
     }
 )
 

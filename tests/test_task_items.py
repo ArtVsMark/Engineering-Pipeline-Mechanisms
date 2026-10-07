@@ -21,7 +21,9 @@ from tests.conftest import ROOT, load_script
 module = load_script("task_items.py")
 items = load_script("items.py")
 
-WORKFLOW = ROOT / ".github" / "workflows" / "task-items.yml"
+#: Тело разбора — общий шаг; вызывающий держит события и очередь записи (#994).
+WORKFLOW = ROOT / ".github" / "workflows" / "step-task-items.yml"
+CALLER = ROOT / ".github" / "workflows" / "task-items.yml"
 
 
 def test_a_proposal_needs_its_proof() -> None:
@@ -183,7 +185,8 @@ def test_an_unmerged_close_is_not_reviewed() -> None:
 
 def test_the_writing_job_owns_the_task() -> None:
     """Запись в задачу идёт под репозиторной группой: ресурс общий (149)."""
-    group = document()["jobs"]["task-items"]["concurrency"]
+    caller = yaml.safe_load(CALLER.read_text(encoding="utf-8"))
+    group = caller["jobs"]["task-items"]["concurrency"]
     assert group["group"] and "${{" not in group["group"]
     assert group["cancel-in-progress"] is False
 
