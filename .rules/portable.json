@@ -58,15 +58,13 @@
       "answer": "configured",
       "where": [
         "AGENTS.md"
-      ],
-      "seam": "свод потребителя — его наполнение; общая часть (как окно работает с конвейером) приходит заготовкой kit/AGENTS.md, которую кладёт onboard.py, а её совпадение с нашим сводом держит tests/test_rulebook_kit.py"
+      ]
     },
     "CLAUDE.md": {
       "answer": "configured",
       "where": [
         "CLAUDE.md"
-      ],
-      "seam": "как у AGENTS.md: механика окна, общая для любого потребителя, приходит заготовкой kit/CLAUDE.md, договорённости с владельцем — заглушками в ней"
+      ]
     },
     "kit": {
       "answer": "as-is"

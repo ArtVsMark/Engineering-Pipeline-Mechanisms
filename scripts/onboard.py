@@ -490,9 +490,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
     print("#    в матрицу, и защита начинает ждать имя, которого никто не выдаёт (168).")
+    kit_names = ", ".join(f"`{path}`" for path in sorted(rulebook))
+    print(f"\n# 4. Свой свод окна — {kit_names}: общая часть сверена с нашим сводом,")
+    print("#    заглушки «Наполнение проекта» пишет владелец.")
     for path, text in sorted(rulebook.items()):
-        print(f"\n# 4. Свой `{path}` — заготовка свода окна: общая часть сверена с нашим")
-        print("#    сводом, заглушки «Наполнение проекта» пишет владелец.\n")
+        print(f"\n# --- `{path}` ---\n")
         print(text, end="")
     return EXIT_OK
 
