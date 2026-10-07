@@ -625,6 +625,60 @@ def test_a_configured_answer_names_every_filling_it_reads() -> None:
     assert not silent, f"ответ не называет прочитанное наполнение: {silent}"
 
 
+def step_inputs_naming_the_tree(flow: Path, root: Path = ROOT) -> set[str]:
+    """Входы действий шага, которые называют существующий путь дерева вызывающего."""
+    document = yaml.safe_load(flow.read_text(encoding="utf-8")) or {}
+    return {
+        value
+        for job in (document.get("jobs") or {}).values()
+        for step in (job or {}).get("steps") or []
+        if isinstance(step, dict)
+        for value in (step.get("with") or {}).values()
+        if isinstance(value, str)
+        and value.strip() not in ("", ".")
+        and "${{" not in value
+        and "\n" not in value
+        and (root / value).exists()
+    }
+
+
+def test_a_step_answer_names_every_tree_path_its_inputs_read() -> None:
+    """Шаг, читающий путь дерева входом действия, называет его в ответе `configured`.
+
+    ЗАМЕР 07.10.2026 (взгляд на #1196): `step-attribution.yml` передаёт действию
+    каталога `authors: .github/authors.txt`, а инвентарь отвечал `as-is`, и
+    перечень данных потребителя этого файла не называл: шаг атрибуции упал бы
+    на первом же изменении. Перечень строился только по скриптам. Предикат по
+    всем шагам находил ровно этот случай.
+    """
+    answers = inventory()["answers"]
+    silent = {}
+    for flow in sorted(walk(ROOT / ".github" / "workflows", "step-*.yml")):
+        named = answers.get(f".github/workflows/{flow.name}", {})
+        read = step_inputs_naming_the_tree(flow)
+        if not read:
+            continue
+        missing = (
+            read - set(named.get("where") or []) if named.get("answer") == "configured" else read
+        )
+        if missing:
+            silent[flow.name] = sorted(missing)
+    assert not silent, f"шаг читает путь дерева входом, а ответ его не называет: {silent}"
+
+
+def test_the_step_input_gate_sees_a_path_and_skips_an_expression(tmp_path: Path) -> None:
+    """Предикат видит путь дерева во входе и пропускает выражение и несуществующее (140)."""
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "a.txt").write_text("x", encoding="utf-8")
+    flow = tmp_path / "step.yml"
+    flow.write_text(
+        "jobs:\n  j:\n    steps:\n      - uses: x/y@v1\n        with:\n"
+        "          a: .github/a.txt\n          b: ${{ github.sha }}\n          c: нет.txt\n",
+        encoding="utf-8",
+    )
+    assert step_inputs_naming_the_tree(flow, tmp_path) == {".github/a.txt"}
+
+
 def test_the_filling_gate_rejects_an_unnamed_read() -> None:
     """Предикат видит чтение наполнения и пропускает названный выход (140)."""
     constants = {"ROLES": "docs/agent/roles.md", "BADGES": ".github/badges", "X": "scripts/x.py"}
