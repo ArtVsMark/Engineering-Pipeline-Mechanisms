@@ -54,6 +54,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ПРОБА #1007 — НЕ СЛИВАЕТСЯ. Обязательный сосед, который кончается позже
+  # таймаута сводки (900 с): сводка обязана покраснеть «соседи не завершились»,
+  # а будильник `ci-complete-wake` — перезапустить её по завершении `ci` и
+  # получить зелёное без толчка и кнопки. Изменение закрывают после прогона.
+  probe-sleep:
+    name: probe-sleep
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - run: sleep 1080
   lint:
     name: lint
     uses: ./.github/workflows/step-lint.yml
