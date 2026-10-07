@@ -32,6 +32,10 @@ MARKED = (
 PLAIN = "name: step-молчун\non:\n  workflow_call:\njobs:\n  x:\n    steps: []\n"
 
 
+#: Заготовка свода: состав читается из `kit/`, а не списком (#995).
+KIT = {"AGENTS.md": "# ядро\n", "CLAUDE.md": "# окно\n"}
+
+
 def tree(tmp_path: Path, *, tagged: str = "v2.5.0", **runs: str) -> Path:
     """Дерево с прогонами и тегом выпуска — настоящим, а не подделанным.
 
@@ -44,6 +48,9 @@ def tree(tmp_path: Path, *, tagged: str = "v2.5.0", **runs: str) -> Path:
     for name, body in runs.items():
         (tmp_path / ".github" / "workflows" / f"{name}.yml").write_text(body, encoding="utf-8")
     (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
+    (tmp_path / "kit").mkdir()
+    for name, text in KIT.items():
+        (tmp_path / "kit" / name).write_text(text, encoding="utf-8")
     run = ["git", "-C", str(tmp_path)]
     subprocess.run([*run, "init", "--quiet", "-b", "main"], check=True)
     subprocess.run([*run, "config", "user.email", "т@т"], check=True)
@@ -439,3 +446,55 @@ def test_a_caller_by_the_trunk_address_is_printed_with_the_tag(tmp_path: Path) -
     kit = module.own_kit(flow, "план", "О/Р", "v2.5.0")
     assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in kit
     assert "@main" not in kit, "адрес общей ветки ушёл в заготовку"
+
+
+# --- заготовка свода окна (#995, пункт 1) ------------------------------------
+
+
+def test_write_lays_the_rulebook_kit(tmp_path: Path) -> None:
+    """`--write` кладёт `kit/<имя>` под `<имя>`: окну потребителя есть по чему работать."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    for name, text in KIT.items():
+        assert (consumer / name).read_text("utf-8") == text
+
+
+def test_an_existing_rulebook_is_kept_and_does_not_stop_the_call(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Свод — наполнение владельца: занятый не пишется и называется, а вызов кладётся."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    consumer.mkdir()
+    (consumer / "CLAUDE.md").write_text("свой свод\n", encoding="utf-8")
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    assert (consumer / "CLAUDE.md").read_text("utf-8") == "свой свод\n"
+    assert (consumer / "AGENTS.md").read_text("utf-8") == KIT["AGENTS.md"]
+    assert (consumer / ".github" / "workflows" / "ci.yml").exists()
+    assert "CLAUDE.md" in capsys.readouterr().out
+
+
+def test_the_printed_kit_carries_the_rulebook(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Без `--write` заготовка свода печатается целиком, с именем, под которым она ложится."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    for name, text in KIT.items():
+        assert f"`{name}`" in out and text in out
+
+
+def test_no_rulebook_kit_is_a_refusal(tmp_path: Path) -> None:
+    """Пустой `kit/` — отказ: подключение без свода заход назвал бы полным (045)."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    for one in (root / "kit").iterdir():
+        one.unlink()
+    assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+
+
+def test_the_live_kit_is_what_onboard_lays() -> None:
+    """Живое дерево: заход кладёт ровно файлы свода, у которых есть заготовка."""
+    rulebook = load_script("check_rulebook_fresh.py").RULEBOOK
+    assert sorted(str(one) for one in module.rulebook_kit(ROOT)) == sorted(rulebook)
