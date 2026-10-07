@@ -869,19 +869,20 @@ def test_a_step_answer_brings_its_own_data(tmp_path: Path) -> None:
     assert module.consumer_data(tmp_path, ["план"], set()) == [".github/a.txt"]
 
 
-def test_run_lines_skip_prose_outside_run(tmp_path: Path) -> None:
-    """Скрипт, названный в прозе входа, вызовом не считается — только `run:` (#1196)."""
+def test_step_texts_count_run_and_inputs_but_not_comments(tmp_path: Path) -> None:
+    """Вызов — `run:` и вход действия (агент зовёт по разрешениям); комментарий — нет (#1201)."""
     flow = tmp_path / "step.yml"
     flow.write_text(
+        "# коммент: $MECHANISMS/scripts/коммент.py\n"
         "jobs:\n  j:\n    steps:\n      - uses: a/b@v1\n        with:\n"
-        "          prompt: ${{ env.MECHANISMS }}/scripts/проза.py\n"
+        "          allowed: Bash(python ${{ env.MECHANISMS }}/scripts/агент.py)\n"
         "      - run: python $MECHANISMS/scripts/вызов.py\n",
         encoding="utf-8",
     )
-    found = [
-        m.group(1) for line in module.run_lines(flow) for m in module.CALLED_SCRIPT.finditer(line)
-    ]
-    assert found == ["вызов"]
+    found = sorted(
+        m.group(1) for line in module.step_texts(flow) for m in module.CALLED_SCRIPT.finditer(line)
+    )
+    assert found == ["агент", "вызов"]
 
 
 def test_called_scripts_walk_our_imports_only(tmp_path: Path) -> None:

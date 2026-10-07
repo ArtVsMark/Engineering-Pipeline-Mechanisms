@@ -625,58 +625,66 @@ def test_a_configured_answer_names_every_filling_it_reads() -> None:
     assert not silent, f"ответ не называет прочитанное наполнение: {silent}"
 
 
-def step_inputs_naming_the_tree(flow: Path, root: Path = ROOT) -> set[str]:
-    """Входы действий шага, которые называют существующий путь дерева вызывающего."""
+#: Вход в форме относительного пути: каталоги через косую черту либо одно имя с точкой.
+PATH_SHAPE: Final = re.compile(r"^\.?[\w.-]+(?:/[\w.-]+)+$|^\.[\w.-]+$")
+#: Действие выкачки: его `path:` — куда шаг кладёт код, а не данные потребителя.
+CHECKOUT: Final = "actions/checkout"
+
+
+def step_path_inputs(flow: Path) -> set[str]:
+    """Входы действий шага в форме пути — кроме места выкачки у `actions/checkout`.
+
+    СТРОГОЕ ПРАВИЛО ПО ФОРМЕ, А НЕ ПО НАШЕМУ ДЕРЕВУ (взгляд на #1201): прежде
+    вход засчитывался, только если файл есть у поставщика, и путь, живущий
+    только у потребителя, гейт не видел. Замер 07.10.2026 по всем шагам:
+    форму пути несут `authors: .github/authors.txt` у атрибуции и `path:
+    .pipeline-mechanisms` у выкачки — второе исключено по действию, а не по
+    имени.
+    """
     document = yaml.safe_load(flow.read_text(encoding="utf-8")) or {}
     return {
-        value
+        value.strip()
         for job in (document.get("jobs") or {}).values()
         for step in (job or {}).get("steps") or []
-        if isinstance(step, dict)
+        if isinstance(step, dict) and not str(step.get("uses") or "").startswith(CHECKOUT)
         for value in (step.get("with") or {}).values()
-        if isinstance(value, str)
-        and value.strip() not in ("", ".")
-        and "${{" not in value
-        and "\n" not in value
-        and (root / value).exists()
+        if isinstance(value, str) and "${{" not in value and PATH_SHAPE.match(value.strip())
     }
 
 
-def test_a_step_answer_names_every_tree_path_its_inputs_read() -> None:
-    """Шаг, читающий путь дерева входом действия, называет его в ответе `configured`.
+def test_a_step_answer_names_every_path_its_inputs_read() -> None:
+    """Шаг, читающий путь входом действия, называет его в ответе `configured`.
 
     ЗАМЕР 07.10.2026 (взгляд на #1196): `step-attribution.yml` передаёт действию
     каталога `authors: .github/authors.txt`, а инвентарь отвечал `as-is`, и
     перечень данных потребителя этого файла не называл: шаг атрибуции упал бы
-    на первом же изменении. Перечень строился только по скриптам. Предикат по
-    всем шагам находил ровно этот случай.
+    на первом же изменении.
     """
     answers = inventory()["answers"]
     silent = {}
     for flow in sorted(walk(ROOT / ".github" / "workflows", "step-*.yml")):
         named = answers.get(f".github/workflows/{flow.name}", {})
-        read = step_inputs_naming_the_tree(flow)
+        read = step_path_inputs(flow)
         if not read:
             continue
-        missing = (
-            read - set(named.get("where") or []) if named.get("answer") == "configured" else read
-        )
-        if missing:
-            silent[flow.name] = sorted(missing)
-    assert not silent, f"шаг читает путь дерева входом, а ответ его не называет: {silent}"
+        declared = set(named.get("where") or []) if named.get("answer") == "configured" else set()
+        if read - declared:
+            silent[flow.name] = sorted(read - declared)
+    assert not silent, f"шаг читает путь входом, а ответ его не называет: {silent}"
 
 
-def test_the_step_input_gate_sees_a_path_and_skips_an_expression(tmp_path: Path) -> None:
-    """Предикат видит путь дерева во входе и пропускает выражение и несуществующее (140)."""
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "a.txt").write_text("x", encoding="utf-8")
+def test_the_step_input_gate_sees_a_consumer_only_path(tmp_path: Path) -> None:
+    """Предикат видит путь, которого у поставщика нет, и пропускает выкачку и выражение (140)."""
     flow = tmp_path / "step.yml"
     flow.write_text(
-        "jobs:\n  j:\n    steps:\n      - uses: x/y@v1\n        with:\n"
-        "          a: .github/a.txt\n          b: ${{ github.sha }}\n          c: нет.txt\n",
+        "jobs:\n  j:\n    steps:\n"
+        "      - uses: actions/checkout@v5\n        with:\n          path: .pipeline-mechanisms\n"
+        "      - uses: x/y@v1\n        with:\n"
+        "          a: .github/только-у-потребителя.txt\n          b: ${{ github.sha }}\n"
+        "          c: просто слово\n",
         encoding="utf-8",
     )
-    assert step_inputs_naming_the_tree(flow, tmp_path) == {".github/a.txt"}
+    assert step_path_inputs(flow) == {".github/только-у-потребителя.txt"}
 
 
 def test_the_filling_gate_rejects_an_unnamed_read() -> None:

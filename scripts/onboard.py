@@ -133,22 +133,28 @@ def steps(root: Path) -> list[str]:
 CALLED_SCRIPT: Final = re.compile(r"(?:\$MECHANISMS|\$\{\{ env\.MECHANISMS \}\})/scripts/(\w+)\.py")
 
 
-def run_lines(flow: Path) -> list[str]:
-    """Тексты `run:` всех шагов прогона: вызов скрипта — только там (взгляд на #1196).
+def step_texts(flow: Path) -> list[str]:
+    """Значения шагов прогона — `run:` и входы `with:`, без комментариев файла.
 
-    Текстом всего файла ловились и упоминания в прозе — разрешения агента
-    взгляда называют `check_*.py`, которых шаг не зовёт.
+    СТРОГОЕ ПРАВИЛО, А НЕ ФОРМА (третий заход по месту — взгляды на #1196 и
+    #1201; 210). Вызов нашего скрипта — любое значение шага: `run:` зовёт
+    сам шаг, а вход действия зовёт агент взгляда по своим разрешениям
+    (`check_version.py`, `check_pipeline.py` в дереве потребителя). Не вызов —
+    только комментарий файла: его разбор YAML и не отдаёт.
     """
     try:
         document = policy.run_of(flow)
     except policy.BadPolicy as exc:
         raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
-    return [
-        str(step["run"])
-        for job in (document.get("jobs") or {}).values()
-        for step in (job or {}).get("steps") or []
-        if isinstance(step, dict) and step.get("run")
-    ]
+    found: list[str] = []
+    for job in (document.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            if step.get("run"):
+                found.append(str(step["run"]))
+            found += [str(value) for value in (step.get("with") or {}).values()]
+    return found
 
 
 def called_scripts(root: Path, names: list[str]) -> set[str]:
@@ -162,7 +168,7 @@ def called_scripts(root: Path, names: list[str]) -> set[str]:
         {
             match.group(1)
             for name in names
-            for line in run_lines(root / paths.WORKFLOWS / f"{STEP_PREFIX}{name}.yml")
+            for line in step_texts(root / paths.WORKFLOWS / f"{STEP_PREFIX}{name}.yml")
             for match in CALLED_SCRIPT.finditer(line)
         }
     )
