@@ -36,15 +36,10 @@
 
 ## 🚦 Запрет, которого нет в ядре
 
-```
-❌ НЕ открывать изменение учётными данными окна — на записи прокси подменяет
-   их, и в общей ветке автором станет приложение. Решает учётная запись,
-   ОТКРЫВШАЯ изменение, а не подпись коммитов: после уплотнения переписать
-   это нечем (131)
-```
-
-Адрес: [131](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/131-no-writes-from-a-cloud-session.md) —
-внутри блока ссылка не работает, поэтому она здесь.
+> **Наполнение проекта:** запрет открывать изменение учётными данными окна
+> ([131](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/131-no-writes-from-a-cloud-session.md))
+> и чем он держится в вашем окружении: что именно подменяет учётные данные на
+> записи и кем в общей ветке станет автор. Пишется замером своего окна.
 
 ## ✍️ Подпись и открытие изменения
 
@@ -69,12 +64,12 @@ git config user.email "<почта учётной записи владельц�
 
 ## 🌿 Ветка в облачном окне
 
-**Работа ведётся в ветке `agent/<задача>`, которую окно создаёт само.**
-Платформа при старте выдаёт окну ветку вида `claude/<имя-окна>` — это след
-запуска, а не место работы: имя окна задачей не является
-([189](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/189-a-branch-is-named-by-its-task-not-its-window.md)),
-и приставки конвейера в нём нет
-([003](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/003-branch-name-is-a-switch.md)).
+> **Наполнение проекта:** где работает окно. Работа ведётся в ветке
+> `agent/<задача>`: имя ветки — по задаче, а не по окну
+> ([189](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/189-a-branch-is-named-by-its-task-not-its-window.md)),
+> и приставка — переключатель конвейера
+> ([003](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/003-branch-name-is-a-switch.md)).
+> Какую ветку выдаёт окну платформа при старте — замером своего окна.
 
 Порядок простой:
 
