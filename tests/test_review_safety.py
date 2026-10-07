@@ -1656,6 +1656,52 @@ def test_the_task_names_the_environments_limit(path: Path) -> None:
         )
 
 
+#: Как разрешённая команда зовёт наш код: из выкачки механизмов шага (#990).
+FROM_MECHANISMS = "${{ env.MECHANISMS }}/scripts/"
+
+
+def our_tree_in(command: str) -> bool:
+    """Зовёт ли команда `scripts/` из дерева головы, а не из выкачки механизмов.
+
+    Путь выкачки ВЫЧИТАЕТСЯ, а не служит пропуском: команда, где рядом с ним
+    стоит и вызов из дерева головы, иначе считалась бы чистой (взгляд на #1185).
+    """
+    return "scripts/" in command.replace(FROM_MECHANISMS, "")
+
+
+@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+def test_an_allowed_gate_comes_from_the_mechanisms(path: Path) -> None:
+    """Разрешённый агенту гейт проекта зовётся из выкачки механизмов, а не из дерева головы.
+
+    Решение владельца 06.10.2026 по #993: у потребителя нашего `scripts/` нет,
+    и разрешение на `scripts/check_*.py` из дерева головы звало бы пустоту —
+    взгляд остался бы без прогона гейтов, разрешение имея. Замер 07.10.2026:
+    таких разрешений было восемь (по четыре в двух заданиях взгляда).
+    """
+    wrong = [
+        f"«{name}»: {command}"
+        for name, commands, _ in commands_and_task(path)
+        for command in commands
+        if our_tree_in(command)
+    ]
+    assert not wrong, f"{path.name}: гейт зовётся из дерева головы — {wrong}"
+
+
+@pytest.mark.parametrize(
+    ("command", "ours"),
+    [
+        ("python scripts/check_version.py", True),
+        ("python ${{ env.MECHANISMS }}/scripts/check_version.py", False),
+        ("python -m pytest", False),
+        ("python ${{ env.MECHANISMS }}/scripts/a.py scripts/b.py", True),
+    ],
+    ids=["дерево головы", "выкачка механизмов", "не наш код", "оба пути в одной команде"],
+)
+def test_our_tree_is_told_from_the_mechanisms(command: str, ours: bool) -> None:
+    """Обе половины признака: путь головы — наш код из дерева, путь выкачки — нет."""
+    assert our_tree_in(command) is ours
+
+
 @pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
 def test_the_task_says_the_list_is_closed(path: Path) -> None:
     """Задание говорит, что список ЗАКРЫТЫЙ, а не просто перечисляет команды.
