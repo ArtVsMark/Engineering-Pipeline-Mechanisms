@@ -50,9 +50,8 @@
 # прогоны и агента, а очередь ещё и сливает: проба переписала бы план работ,
 # запись дрейфа и реестр находок этого репозитория, перезапускала бы его
 # джобы, звала бы его верификатор и двигала бы его очередь, а права у неё
-# только на чтение. Их внешний путь
-# подтверждает проба в чужом дереве —
-# последний пункт #993, — а не эта.
+# только на чтение. Их внешний путь подтвердит первое подключение проекта
+# семьи (#1191), а не эта проба.
 #
 # ДЕРЕВО ВЫЗЫВАЮЩЕГО — БЕЗ НАШЕГО КОДА, КАК У ПОТРЕБИТЕЛЯ (#990). Проба
 # живёт здесь, и в дереве вызывающего лежат наши `scripts/`, `packages/` и
@@ -64,12 +63,10 @@
 #
 # У `step-lint` и `step-attribution` входа нет, и причины разные (195).
 # `step-attribution` судит историю действием каталога, наших каталогов не
-# касается. `step-lint` касается: он гоняет `ruff` и `mypy` по `scripts/
-# tests/ packages/` дерева вызывающего, и здесь эти каталоги наши, поэтому
-# `probe-lint` зелёный там, где у
-# потребителя с другой раскладкой шаг упадёт. Это ПРОБЕЛ ШАГА, а не пробы:
-# пути линтера — шов наполнения, он назван в #990 и уходит данными в #992
-# (взгляд на #1160).
+# касается. `step-lint` касается иначе: с 1.5.0 он зовёт `ruff` и `mypy` без
+# путей, и состав берётся из `pyproject.toml` вызывающего (#992). Здесь это
+# наш `pyproject.toml`, поэтому `probe-lint` подтверждает вызов внешним путём,
+# но не чужой состав: его проверит только дерево потребителя.
 #
 # ИМЕНА ДЖОБОВ ЗДЕСЬ СВОИ, С ПРИСТАВКОЙ `probe-`, И ЭТО НЕ УКРАШЕНИЕ. Без
 # неё джоб пробы звался бы `lint` — как джоб `ci`, — и на площадке две
@@ -102,7 +99,7 @@ concurrency:
 jobs:
   probe-attribution:
     name: probe-attribution
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.4.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.5.0
     permissions:
       contents: read
       checks: read
@@ -111,7 +108,7 @@ jobs:
 
   probe-contract:
     name: probe-contract
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.4.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.5.0
     with:
       strip-ours: true
     permissions:
@@ -122,7 +119,7 @@ jobs:
 
   probe-debt:
     name: probe-debt
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.4.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.5.0
     with:
       strip-ours: true
     permissions:
@@ -133,7 +130,7 @@ jobs:
 
   probe-lint:
     name: probe-lint
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.4.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.5.0
     permissions:
       contents: read
       checks: read
@@ -142,7 +139,7 @@ jobs:
 
   probe-pipeline:
     name: probe-pipeline
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.4.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.5.0
     with:
       strip-ours: true
     permissions:
