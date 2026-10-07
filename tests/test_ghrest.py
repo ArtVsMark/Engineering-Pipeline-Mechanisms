@@ -9,6 +9,7 @@
 
 import ast
 import email.message
+import http.client
 import io
 import json
 import threading
@@ -501,6 +502,38 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
             nonlocal asked
             asked += 1
             raise urllib.error.URLError("связь оборвалась")
+
+        monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+        monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
+        with pytest.raises(transport.TransportError):
+            transport.request(method, "/x", "t", {"тело": 1} if method == "POST" else None)
+        assert asked == expected, f"{method}: попыток {asked}, ожидалось {expected}"
+
+
+@pytest.mark.parametrize(
+    "dropped",
+    [
+        http.client.RemoteDisconnected("обрыв без ответа"),
+        ConnectionResetError("сброс"),
+        TimeoutError("таймаут чтения"),
+    ],
+    ids=["RemoteDisconnected", "ConnectionResetError", "TimeoutError"],
+)
+def test_a_response_dropped_midway_is_the_same_broken_connection(
+    monkeypatch: pytest.MonkeyPatch, dropped: Exception
+) -> None:
+    """Обрыв во время ответа: повтор у чтения, не у записи, итог — `TransportError` (#1205).
+
+    `urlopen` заворачивает в `URLError` лишь сбой соединения: обрыв на чтении
+    ответа летел голым исключением — трейсбек вместо повтора (замер на #1203).
+    """
+    for method, expected in (("GET", transport.TRIES), ("POST", 1)):
+        asked = 0
+
+        def opener(*_args: object, **_kwargs: object) -> Any:
+            nonlocal asked
+            asked += 1
+            raise dropped
 
         monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
         monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)

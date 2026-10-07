@@ -21,6 +21,7 @@
 поломка. Теперь у отказа один разбор и один текст.
 """
 
+import http.client
 import json
 import os
 import re
@@ -185,6 +186,10 @@ CREATES: Final = "POST"
 IDEMPOTENT: Final = frozenset({"enablePullRequestAutoMerge", "disablePullRequestAutoMerge"})
 
 
+#: Обрыв уже во время ответа: `urlopen` не заворачивает его в `URLError` (#1205).
+_DROPPED: Final = (http.client.HTTPException, ConnectionError, TimeoutError)
+
+
 def _survivable(method: str, path: str, exc: Exception) -> bool:
     """Стоит ли повторять этот отказ — и повторять ли его ЭТОМУ запросу.
 
@@ -268,6 +273,15 @@ def request(
         except (urllib.error.HTTPError, urllib.error.URLError) as exc:
             last = exc
             if not _survivable(method, path, exc):
+                break
+        except _DROPPED as exc:
+            # ОБРЫВ ВО ВРЕМЯ ОТВЕТА — ТОТ ЖЕ ОБРЫВ СВЯЗИ (#1205). `urlopen`
+            # заворачивает в `URLError` лишь сбой соединения, а обрыв на чтении
+            # ответа (`RemoteDisconnected`, сброс, таймаут чтения) летел голым
+            # исключением: мимо повтора на чтении и мимо `TransportError`, и шаг
+            # падал трейсбеком. Он ведётся как `URLError` — граница повтора та же.
+            last = urllib.error.URLError(exc)
+            if not _survivable(method, path, last):
                 break
         except ValueError as exc:
             raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
