@@ -245,9 +245,54 @@ def version(root: Path | None = None) -> tuple[str, bool]:
     return f"{major}.{minor}.{changes_in('HEAD', root)}", False
 
 
-def shallow(root: Path | None = None) -> bool:
-    """Мелкий ли клон: отсутствие тегов в нём ничего не говорит о проекте."""
-    return git("rev-parse", "--is-shallow-repository", root=root) == "true"
+#: Почему тегов не видно — исходы `absence`. Только `NONE` значит «у проекта их нет».
+ABSENCE_NONE: Final = "none"
+ABSENCE_SHALLOW: Final = "shallow"
+ABSENCE_UNFETCHED: Final = "unfetched"
+ABSENCE_UNASKED: Final = "unasked"
+
+
+def absence(root: Path | None = None) -> str:
+    """Почему в клоне нет выпускного тега: «неприменимо» только по доказанному.
+
+    СТРОГОЕ ПРАВИЛО, А НЕ ФОРМА ЗА ФОРМОЙ (второй заход по месту — взгляд на
+    #1192; 210). Отсутствие тега в клоне доказывает отсутствие у проекта, только
+    когда все три вопроса отвечены: git отвечает (иначе `NotRun` — это не
+    репозиторий или git сломан, а не «тегов нет»); клон не мелкий; источник
+    (`git ls-remote`) выпускных тегов тоже не несёт. Источник не ответил —
+    `ABSENCE_UNASKED`, а не «нет». Клона без источника доказывать не у кого: его
+    теги — все теги, что есть.
+    """
+    said = git("rev-parse", "--is-shallow-repository", root=root)
+    if said is None:
+        raise NotRun("git не ответил: это не репозиторий или git недоступен — сверять не по чему")
+    if said == "true":
+        return ABSENCE_SHALLOW
+    remote = (git("remote", root=root) or "").split("\n")[0].strip()
+    if not remote:
+        return ABSENCE_NONE
+    listed = git("ls-remote", "--tags", "--refs", remote, RELEASE_TAG_GLOB, root=root)
+    if listed is None:
+        return ABSENCE_UNASKED
+    tags = [line.rsplit("refs/tags/", 1)[-1] for line in listed.split("\n") if line]
+    return ABSENCE_UNFETCHED if any(is_release_tag(tag) for tag in tags) else ABSENCE_NONE
+
+
+#: Что сказать, когда тегов не видно, а доказать их отсутствие у проекта нечем.
+HINTS: Final = {
+    ABSENCE_SHALLOW: (
+        f"тегов не видно, и клон мелкий: нет ни выпускного тега, ни {paths.VERSION} — "
+        "подтяните историю: git fetch --tags --unshallow"
+    ),
+    ABSENCE_UNFETCHED: (
+        f"тегов не видно, а у источника выпускные теги есть: нет ни тега, ни {paths.VERSION} "
+        "в клоне — подтяните теги: git fetch --tags"
+    ),
+    ABSENCE_UNASKED: (
+        f"тегов не видно, и источник о своих тегах не ответил: нет ни тега, ни {paths.VERSION} "
+        "— отсутствие тегов у проекта не доказано, повторите с доступом к источнику"
+    ),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -264,12 +309,13 @@ def main(argv: list[str] | None = None) -> int:
     # там, где их просто не принесли: у такого проекта теги есть, и сверка
     # обязана сказать об обрезанной истории, а не промолчать.
     if args.check and not paths.VERSION.is_file() and release_tag() is None:
-        if shallow():
-            print(
-                f"тегов не видно, и клон мелкий: нет ни выпускного тега, ни {paths.VERSION} — "
-                "подтяните историю: git fetch --tags --unshallow",
-                file=sys.stderr,
-            )
+        try:
+            why = absence()
+        except NotRun as exc:
+            print(f"шаг не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        if why != ABSENCE_NONE:
+            print(HINTS[why], file=sys.stderr)
             return EXIT_PARTIAL
         print(
             f"неприменимо: ни выпускного тега, ни {paths.VERSION} в полном клоне — "

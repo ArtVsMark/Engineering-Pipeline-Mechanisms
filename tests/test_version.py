@@ -195,6 +195,53 @@ def test_a_shallow_clone_without_any_version_is_still_partial(
     assert "мелкий" in run.text and "неприменимо" not in run.text
 
 
+def _repo_with_a_release(where: Path) -> None:
+    """Источник с одним коммитом и выпускным тегом."""
+    where.mkdir()
+    for args in (
+        ["init", "-q"],
+        ["commit", "-q", "--allow-empty", "-m", "а"],
+        ["tag", "v1.0.0"],
+    ):
+        subprocess.run(
+            ["git", "-c", "user.name=т", "-c", "user.email=т@т", *args], cwd=where, check=True
+        )
+
+
+def test_outside_a_repository_the_check_is_a_refusal(run_script: RunScript, tmp_path: Path) -> None:
+    """Вне репозитория git не отвечает — «не отработал», а не «неприменимо» (взгляд на #1192)."""
+    run = run_script("version.py", "--check", cwd=tmp_path)
+    assert run.code == 2, run.text
+    assert "неприменимо" not in run.text
+
+
+def test_a_full_clone_without_tags_whose_origin_has_them_is_partial(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Полный клон `--no-tags` проекта с тегами — подсказка подтянуть теги, а не «неприменимо»."""
+    origin = tmp_path / "исток"
+    _repo_with_a_release(origin)
+    clone = tmp_path / "клон"
+    subprocess.run(["git", "clone", "-q", "--no-tags", str(origin), str(clone)], check=True)
+    run = run_script("version.py", "--check", cwd=clone)
+    assert run.code == 3, run.text
+    assert "git fetch --tags" in run.text and "неприменимо" not in run.text
+
+
+def test_a_silent_origin_does_not_prove_the_absence(run_script: RunScript, tmp_path: Path) -> None:
+    """Источник не ответил о тегах — отсутствие не доказано, третий исход, а не «неприменимо»."""
+    origin = tmp_path / "исток"
+    _repo_with_a_release(origin)
+    clone = tmp_path / "клон"
+    subprocess.run(["git", "clone", "-q", "--no-tags", str(origin), str(clone)], check=True)
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", str(tmp_path / "нет")], cwd=clone, check=True
+    )
+    run = run_script("version.py", "--check", cwd=clone)
+    assert run.code == 3, run.text
+    assert "не доказано" in run.text
+
+
 def test_the_provider_keeps_its_version_source() -> None:
     """У поставщика источник версии есть: «неприменимо» не спрячет его пропажу (#1187)."""
     paths = load_script("paths.py")
@@ -332,3 +379,19 @@ def test_digits_read_the_number_by_the_shared_form() -> None:
     assert module.bare("v1.10.3") == "1.10.3"
     with pytest.raises(module.NotRun):
         module.digits("1.10")
+
+
+def test_absence_names_why_the_tags_are_missing(tmp_path: Path) -> None:
+    """`absence` различает: нет у проекта, не принесли, источник молчит, git не ответил."""
+    with pytest.raises(module.NotRun):
+        module.absence(tmp_path)
+    origin = tmp_path / "исток"
+    _repo_with_a_release(origin)
+    assert module.absence(origin) == module.ABSENCE_NONE
+    clone = tmp_path / "клон"
+    subprocess.run(["git", "clone", "-q", "--no-tags", str(origin), str(clone)], check=True)
+    assert module.absence(clone) == module.ABSENCE_UNFETCHED
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", str(tmp_path / "нет")], cwd=clone, check=True
+    )
+    assert module.absence(clone) == module.ABSENCE_UNASKED
