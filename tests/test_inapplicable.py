@@ -149,7 +149,9 @@ def test_every_predicate_names_the_border_it_holds() -> None:
     Прежде гейт смотрел одно 066 и подстроки в собственном `why` предиката:
     связь предиката с ответом не проверялась ничем, и у 120 вторая половина
     границы осталась без предиката. Теперь `border` — дословная цитата из
-    ответа в `.rules/bindings.json`: правка границы в ответе без правки
+    ответа в `.rules/bindings.json`, и стоит она там РОВНО ОДИН РАЗ: цитата,
+    повторённая соседней фразой, пережила бы правку самой границы, и гейт
+    остался бы зелёным (взгляд на #1182). Правка границы в ответе без правки
     предиката краснеет.
 
     ПРЕДЕЛ НАЗВАН: полноту — все ли половины границы названы — держит
@@ -160,9 +162,9 @@ def test_every_predicate_names_the_border_it_holds() -> None:
         f"{rule}: «{one.get('border', '')}»"
         for rule in predicates()["predicates"]
         for one in checks(rule)
-        if not one.get("border") or one["border"] not in said[rule]["why"]
+        if not one.get("border") or said[rule]["why"].count(one["border"]) != 1
     ]
-    assert not off, f"предикат не цитирует границу своего ответа: {off}"
+    assert not off, f"предикат не цитирует границу своего ответа ровно один раз: {off}"
 
 
 @pytest.mark.parametrize(
