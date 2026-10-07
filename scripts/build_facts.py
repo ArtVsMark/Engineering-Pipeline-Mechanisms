@@ -417,6 +417,22 @@ def published_names() -> list[str]:
     return [FACTS, *BADGES]
 
 
+#: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
+ARCHIVE: Final = "findings.json"
+
+
+def branch_files() -> list[str]:
+    """Всё, что ветка `badges` вправе держать: изданное сборкой, единый значок и архив.
+
+    СНЯТОЕ С ВЕТКИ УХОДИТ ВМЕСТЕ С ИНВЕНТАРЁМ (взгляд на #1198). Публикация
+    копирует поверх и прежде ничего не удаляла: снятый значок оставался на
+    ветке с последним числом навсегда, и по адресу его нельзя было отличить
+    от живого. Перечень выводится из инвентаря, а не из списка снятых по
+    имени: значок, убранный из `BADGES`, уходит с ветки следующим заходом.
+    """
+    return sorted({*published_names(), UNIFIED, ARCHIVE})
+
+
 def clashing_names() -> list[str]:
     """Имена вывода, которые встречаются дважды (взгляд на #1002).
 
@@ -621,6 +637,11 @@ def main(argv: list[str] | None = None) -> int:
         "--extra-out", default="", help="записать только свои разделы — вход extra-facts шага"
     )
     parser.add_argument("--from-facts", default="", help="нарисовать значки по готовому facts.json")
+    parser.add_argument(
+        "--branch-files",
+        action="store_true",
+        help="напечатать всё, что ветка badges вправе держать, — по строке на имя",
+    )
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
     parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
@@ -634,6 +655,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.branch_files:
+        print("\n".join(branch_files()))
+        return EXIT_OK
     if args.from_facts:
         return drawn_from(Path(args.from_facts), args.out_dir)
     if args.extra_out:
