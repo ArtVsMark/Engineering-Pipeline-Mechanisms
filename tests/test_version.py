@@ -160,6 +160,41 @@ def test_a_project_without_any_version_is_not_applicable(
     assert run_script("version.py", cwd=tmp_path).code == 2
 
 
+def test_a_shallow_clone_without_any_version_is_still_partial(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Мелкий клон без тегов и файла — третий исход с подсказкой, а не «неприменимо» (#1192)."""
+    origin = tmp_path / "исток"
+    origin.mkdir()
+    for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "а"]):
+        subprocess.run(
+            ["git", "-c", "user.name=т", "-c", "user.email=т@т", *args], cwd=origin, check=True
+        )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "б",
+        ],
+        cwd=origin,
+        check=True,
+    )
+    clone = tmp_path / "клон"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origin}", str(clone)], check=True
+    )
+    run = run_script("version.py", "--check", cwd=clone)
+    assert run.code == 3, run.text
+    assert "мелкий" in run.text and "неприменимо" not in run.text
+
+
 def test_the_provider_keeps_its_version_source() -> None:
     """У поставщика источник версии есть: «неприменимо» не спрячет его пропажу (#1187)."""
     paths = load_script("paths.py")
