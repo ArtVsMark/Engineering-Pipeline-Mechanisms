@@ -61,7 +61,9 @@
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
 [`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
 [`step-review.yml`](.github/workflows/step-review.yml) (внешний взгляд и реестр находок) ·
-[`step-facts.yml`](.github/workflows/step-facts.yml) (факты о проекте для витрины семьи).
+[`step-facts.yml`](.github/workflows/step-facts.yml) (факты о проекте для витрины семьи) ·
+[`step-agent-pr.yml`](.github/workflows/step-agent-pr.yml) (открытие изменения) ·
+[`step-task-items.yml`](.github/workflows/step-task-items.yml) (разбор слитого против задачи).
 Очереди, обходу, оклику и дрейфу токен владельца `MERGE_QUEUE_TOKEN` передаётся
 вызовом явно, по имени: секретов вызывающего общий шаг не видит; взгляду так же
 передаётся ключ агента `CLAUDE_CODE_OAUTH_TOKEN`. Вынос
