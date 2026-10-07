@@ -459,34 +459,18 @@ def test_a_built_unified_badge_is_laid_or_the_run_fails(tmp_path: Path) -> None:
     assert code == 0 and out.read_text(encoding="utf-8") == "<svg/>"
 
 
-@pytest.mark.parametrize(("remote", "code"), [("2", 0), ("128", 1), ("0", 1)])
-def test_only_an_absent_branch_publishes_without_the_previous_badge(
-    tmp_path: Path, remote: str, code: int
-) -> None:
-    """Непрочитанная ветка: без прежнего — только на коде 2, прочее — стоп."""
-    done, out = run_unified_drop(tmp_path, "failure", FAKE_FETCH="1", FAKE_REMOTE=remote)
-    assert done == code, f"ls-remote {remote}: значок снят бы с ветки молча"
-    assert not out.exists()
-
-
-def test_an_unread_tree_stops_the_publication(tmp_path: Path) -> None:
-    """Сбой `ls-tree` — не «файла нет»: публикация останавливается."""
-    code, out = run_unified_drop(tmp_path, "failure", FAKE_TREE="128", FAKE_PREV="<old/>")
-    assert code == 1 and not out.exists()
-
-
 def test_a_branch_without_the_badge_publishes_without_it(tmp_path: Path) -> None:
     """Ветка прочитана, значка на ней нет — законный исход, без отказа."""
     code, out = run_unified_drop(tmp_path, "failure")
     assert code == 0 and not out.exists()
 
 
-def test_the_previous_badge_is_carried_whole_or_not_at_all(tmp_path: Path) -> None:
-    """Прежний значок переносится целым; сбой `show` не оставляет усечённого файла."""
-    code, out = run_unified_drop(tmp_path, "failure", FAKE_PREV="<old/>")
-    assert code == 0 and out.read_text(encoding="utf-8") == "<old/>"
-    broken = tmp_path / "broken"
-    broken.mkdir()
-    code, out = run_unified_drop(broken, "failure", FAKE_PREV="<ol", FAKE_SHOW="1")
-    assert code == 1 and not out.exists(), "в каталоге публикации остался усечённый значок"
-    assert not out.with_name("python.svg.prev").exists()
+def test_an_unbuilt_badge_leaves_the_branch_alone(tmp_path: Path) -> None:
+    """Значок не собран — шаг не трогает ветку и не кладёт ничего: прежний на ней остаётся.
+
+    Ветка `badges` пополняется коммитами, а не перезаписывается (#1001, шаг 2),
+    поэтому переносить прежний значок нечего: поддельный `git` отвечает 99 на
+    любой вызов, и шаг обязан не звать его вовсе.
+    """
+    code, out = run_unified_drop(tmp_path, "failure", FAKE_FETCH="99", FAKE_REMOTE="99")
+    assert code == 0 and not out.exists()

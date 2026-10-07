@@ -1,0 +1,261 @@
+# ПЕРЕИСПОЛЬЗУЕМЫЙ ПРОГОН: общий шаг, который зовут, а не запускают.
+#
+# Тело переехало из прогона, который его исполнял, ЦЕЛИКОМ — у шагов конвейера
+# из `ci.yml`, у управляющих механизмов из их собственного прогона, — и при
+# переезде менялся адрес, а не поведение: иначе перевод и починку нельзя было
+# бы отличить друг от друга. Код конвейера шаг с тех пор берёт своим checkout
+# (#990) — это сказано в его блоке кода, а не здесь.
+#
+# ОТДАЁТСЯ НАРУЖУ: потребитель зовёт этот файл адресом с версией, к которой он
+# прибит (157), а не копией у себя. Почему копия — беда, с замером копий по
+# проектам семьи, — в договоре, docs/use/pipeline.md (022).
+#
+# ИМЯ ЗАПИСИ ПРОВЕРКИ У ВЫЗВАННОГО ДЖОБА СОСТАВНОЕ — «<имя вызывающего> / <имя
+# вызванного>». Замер прогоном на живой площадке (изменение #549), а не по
+# документации: из окна она недоступна (139).
+#
+# ДУБЛЬ ЭТОЙ ШАПКИ НАМЕРЕННЫЙ, И ЭТО СКАЗАНО, А НЕ УМОЛЧАНО (071). Площадка
+# требует от переиспользуемого прогона ОТДЕЛЬНОГО ФАЙЛА: вынести пояснение в
+# общее место нечем — комментарий не подключается, а сам прогон зовут по адресу
+# файла. Цена названа: правка пояснения идёт по всем файлам разом, и расходятся
+# они молча. Держит их от расхождения не внимание, а прогон
+# `tests/test_reusable_steps.py`.
+name: step-facts
+
+# ОБЩИЙ ИЗДАТЕЛЬ ФАКТОВ СЕМЬИ (#1001, шаг 2; решения владельца 04.10 и
+# 06.10.2026). Генератор `facts.json` был у каждого проекта свой, и они
+# разъехались: 20 расхождений с договором витрины (замер 01.10.2026). Здесь
+# сборка одна — `scripts/facts_common.py`: общие показатели шаг выводит из
+# дерева сам, свои числа проект отдаёт файлом `extra-facts.json`, и до
+# публикации файл сверяется со схемой витрины.
+#
+# ПУБЛИКАЦИЯ — КОММИТОМ ПОВЕРХ ВЕТКИ `badges`, А НЕ ПЕРЕЗАПИСЬЮ (вариант 1
+# решения 06.10.2026). Шаг кладёт только `.github/badges/facts.json` и не
+# трогает остального: свои значки и файлы потребителя на ветке живут. Цена
+# названа: ветка копит историю производного — вреда не несёт, ценности тоже.
+#
+# УПРАВЛЯЮЩИЙ МЕХАНИЗМ, А НЕ ШАГ КОНВЕЙЕРА: пишет в ветку и зовётся своим
+# прогоном потребителя (у нас — `badges.yml`), а не джобом `ci.yml` на
+# изменении. Поэтому проба передачи его не зовёт: опубликовала бы факты
+# этого репозитория (#993).
+
+on:
+  workflow_call:
+    inputs:
+      ci-workflow:
+        description: файл прогона CI проекта — витрина спрашивает его статус по имени
+        type: string
+        default: ci.yml
+      python-matrix:
+        description: матрица версий Python — «<файл прогона>:<джоб>»; пусто — причина в none
+        type: string
+        default: ""
+      python-next:
+        description: матрица пробных версий Python — «<файл прогона>:<джоб>»
+        type: string
+        default: ""
+      inputs-artifact:
+        description: артефакт этого прогона с extra-facts.json и coverage.json; пусто — без них
+        type: string
+        default: ""
+      publish:
+        description: класть ли facts.json на ветку badges; false — только собрать и сверить
+        type: boolean
+        default: true
+      # ВХОД ТОЛЬКО ДЛЯ ПРОБЫ ПЕРЕНОСА (#990): стереть `scripts/`, `packages/`
+      # и `tests/` из дерева вызывающего после того, как код конвейера взят
+      # своим checkout. Цена названа владельцем при выборе: у договора шага
+      # появляется вход, которого потребитель не задаёт.
+      strip-ours:
+        description: проба переноса — стереть наш код из дерева вызывающего
+        type: boolean
+        default: false
+
+# Потолок прав: большего шаг не получит, даже если вызывающий даст больше.
+# Запись — ради одной ветки `badges`; чтение действий — ради артефакта входа.
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  facts:
+    name: facts
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      # Теги нужны версии и выпуску: без них число головы правдоподобно и ложно.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
+      # потребителя нашего `scripts/` нет: дерево вызывающего — ЕГО, и в нём
+      # только данные. Репозиторий и коммит — того файла, который позвали
+      # (`job.workflow_repository`, `job.workflow_sha`), поэтому прибивка
+      # вызова к тегу прибивает и код, а адрес поставщика буквами не пишется.
+      # Замер прогоном 01.10.2026 (#997): `github.job_workflow_sha` у
+      # вызванного шага пуст, `job.workflow_sha` — коммит вызванного файла.
+      # Пустой коммит не подменяется веткой по умолчанию молча (045).
+      # ДУБЛЬ ЭТОГО БЛОКА НАМЕРЕННЫЙ (071): площадка не подключает шаги внутрь
+      # шага, и блок стоит в каждом общем шаге, зовущем наш код. Совпадение
+      # блоков держит `tests/test_reusable_steps.py::test_the_code_block_is_one_in_every_step`.
+      - name: коммит и репозиторий вызова названы
+        env:
+          AT: ${{ job.workflow_sha }}
+          FROM: ${{ job.workflow_repository }}
+        run: |
+          if [ -z "$AT" ]; then
+            echo "::error::коммит вызова шага не назван — код конвейера не взят (045)"
+            exit 1
+          fi
+          # Пустой репозиторий checkout молча заменил бы деревом вызывающего.
+          if [ -z "$FROM" ]; then
+            echo "::error::репозиторий вызова шага не назван — checkout взял бы дерево вызывающего (045)"
+            exit 1
+          fi
+      - name: код конвейера — на коммите вызова
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pipeline-mechanisms
+          persist-credentials: false
+      # Из рабочего дерева код уносится: обходы по дереву потребителя видят
+      # только его файлы, а не наши.
+      - name: унести код конвейера из дерева потребителя
+        env:
+          STRIP_OURS: ${{ inputs.strip-ours }}
+          FROM: ${{ job.workflow_repository }}
+          CALLER: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          mv .pipeline-mechanisms "$RUNNER_TEMP/mechanisms"
+          # ПРОБА ПЕРЕНОСА (#990, решение владельца 04.10.2026): со входом
+          # `strip-ours` дерево вызывающего лишается нашего кода, и шаг обязан
+          # завестись тем, что взял своим checkout. СТИРАЕТСЯ ПО ИМЕНАМ ПАПОК,
+          # и у соседа под ними лежит его собственный код. Поэтому стирание
+          # идёт, только когда вызывающий прогон — проба передачи
+          # `handover-probe.yml` (ответ `ours`: у потребителя её нет) и шаг взят
+          # из того же репозитория. Сверки репозиториев одной мало: копию шага
+          # у потребителя (`uses: ./…`) площадка тоже считает «своей»
+          # (взгляды на #1113, #1118). Форк поставщика с той же пробой — его
+          # законный случай: у форка под этими папками наш же код.
+          if [ "$STRIP_OURS" = "true" ]; then
+            case "$CALLER" in
+              */.github/workflows/handover-probe.yml@*) ;;
+              *)
+                echo "::error::Вход strip-ours — только для пробы передачи handover-probe.yml; здесь зовёт ${CALLER}, и стирать своё нельзя"
+                exit 1
+                ;;
+            esac
+            if [ "${GITHUB_REPOSITORY,,}" != "${FROM,,}" ]; then
+              echo "::error::Вход strip-ours — только для пробы в репозитории поставщика ${FROM}; здесь ${GITHUB_REPOSITORY}, и стирать нечего своего"
+              exit 1
+            fi
+            rm -rf scripts packages tests
+          fi
+          echo "MECHANISMS=$RUNNER_TEMP/mechanisms" >>"$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      # Общий низ конвейера ставится пакетом (024).
+      - run: python -m pip install --quiet $MECHANISMS/packages/transport
+      - run: python -m pip install --quiet "pyyaml>=6,<7"
+      # Артефакта нет — не отказ, а названное: свои числа проекта не влиты, и
+      # их показатели уходят причинами в `none` (заготовка потребителя зовёт
+      # шаг и без своего джоба входов, #1001).
+      - name: взять входы проекта
+        id: given
+        if: inputs.inputs-artifact != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.inputs-artifact }}
+          path: ${{ runner.temp }}/facts-in
+      - name: собрать факты
+        env:
+          GIVEN: ${{ steps.given.outcome }}
+          ARTIFACT: ${{ inputs.inputs-artifact }}
+          CI_WORKFLOW: ${{ inputs.ci-workflow }}
+          PYTHON_MATRIX: ${{ inputs.python-matrix }}
+          PYTHON_NEXT: ${{ inputs.python-next }}
+        run: |
+          set -euo pipefail
+          if [ "$GIVEN" = "failure" ]; then
+            echo "::warning::Артефакт входов «$ARTIFACT» не взят — свои числа проекта не влиты, их показатели уйдут причинами в none."
+          fi
+          given="$RUNNER_TEMP/facts-in"
+          args=()
+          if [ -f "$given/extra-facts.json" ]; then args+=(--extra "$given/extra-facts.json"); fi
+          if [ -f "$given/coverage.json" ]; then args+=(--coverage "$given/coverage.json"); fi
+          python $MECHANISMS/scripts/facts_common.py \
+            --root . \
+            --out "$RUNNER_TEMP/facts/facts.json" \
+            --sha "$GITHUB_SHA" \
+            --repo "$GITHUB_REPOSITORY" \
+            --ci-workflow "$CI_WORKFLOW" \
+            --python-matrix "$PYTHON_MATRIX" \
+            --python-next "$PYTHON_NEXT" \
+            "${args[@]}"
+      # СВЕРКА СО СХЕМОЙ ВИТРИНЫ ДО ПУБЛИКАЦИИ (#1001, шаг 1). Останавливает
+      # публикацию только вердикт отказа: сбой самой сверки — предупреждение,
+      # как было в прогоне значков (`scripts/check_facts_schema.py`).
+      - name: сверить факты со схемой витрины
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # Установка отдельно: её провал — не «отказ по схеме», а сверки не было.
+          if ! python -m pip install --quiet "jsonschema>=4.20,<5"; then
+            echo "::warning::Факты не сверены со схемой витрины: проверяльщик не установился — публикация идёт без сверки."
+            exit 0
+          fi
+          # ОСТАНАВЛИВАЕТ ВЕРДИКТ, А НЕ КОД (взгляд на #1116): код 1 даёт и
+          # трассировка, упавшая до `main`. Отказ скрипт называет словом в файле.
+          rc=0
+          verdict="$RUNNER_TEMP/facts-verdict.txt"
+          python $MECHANISMS/scripts/check_facts_schema.py "$RUNNER_TEMP/facts/facts.json" --verdict "$verdict" || rc=$?
+          case "$rc" in
+            0) ;;
+            *)
+              if [ "$(cat "$verdict" 2>/dev/null)" = "rejected" ]; then
+                exit 1
+              fi
+              echo "::warning::Факты не сверены со схемой витрины: сверка не отработала (код $rc; код 1 без вердикта — сбой до main или вердикт отказа не записан) — публикация идёт без сверки."
+              ;;
+          esac
+      - name: опубликовать факты коммитом поверх ветки badges
+        if: inputs.publish
+        run: |
+          set -euo pipefail
+          target=.github/badges/facts.json
+          pub="$RUNNER_TEMP/publish"
+          if git fetch --quiet origin badges; then
+            git worktree add --quiet --detach "$pub" FETCH_HEAD
+          else
+            remote=0
+            git ls-remote --exit-code --heads origin badges >/dev/null || remote=$?
+            if [ "$remote" -ne 2 ]; then
+              echo "::error::ветка badges не прочитана (ls-remote код $remote) — публиковать поверх нечего, и затирать её нельзя"
+              exit 1
+            fi
+            # Ветки ещё нет — первая публикация начинает её сиротой.
+            git worktree add --quiet --orphan -b badges-first "$pub"
+          fi
+          mkdir -p "$pub/.github/badges"
+          cp "$RUNNER_TEMP/facts/facts.json" "$pub/$target"
+          cd "$pub"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$target"
+          if git diff --cached --quiet; then
+            echo "факты не изменились — коммита нет"
+            exit 0
+          fi
+          git commit -q -m "факты на ${GITHUB_SHA}"
+          # Ветка выбирается целиком, без --depth: мелкая выборка в полном клоне
+          # поставила бы границу истории на чужой коммит.
+          # БЕЗ --force: чужое на ветке не затирается. Отказ гонки — красное,
+          # а не перезапись: вызывающий держит очередь своей группой.
+          git push -q origin HEAD:refs/heads/badges
+          echo "опубликовано: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/badges/${target}"

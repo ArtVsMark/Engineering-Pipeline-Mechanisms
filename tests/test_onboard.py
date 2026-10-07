@@ -448,6 +448,68 @@ def test_a_caller_by_the_trunk_address_is_printed_with_the_tag(tmp_path: Path) -
     assert "@main" not in kit, "адрес общей ветки ушёл в заготовку"
 
 
+# --- вызывающий со своими джобами (#1001, шаг 2) ------------------------------
+
+#: Вызывающий, у которого перед вызовом шага свой джоб на наших скриптах.
+MIXED_CALLER = (
+    "name: план\non:\n  workflow_dispatch:\npermissions:\n  contents: write\n"
+    "jobs:\n"
+    "  своё:\n    runs-on: x\n    steps:\n      - run: python scripts/наше.py\n"
+    "  план:\n    needs: своё\n    uses: ./.github/workflows/step-план.yml\n"
+    "    with:\n      вход: данные\n"
+)
+
+
+def test_a_caller_with_its_own_jobs_ships_only_the_call(tmp_path: Path) -> None:
+    """Свои джобы вызывающего в заготовку не едут; вызов — по тегу, без `needs` на снятое.
+
+    Наш `badges.yml` перед общим шагом фактов собирает свои разделы нашими
+    скриптами: целиком напечатанный, он вёл бы потребителя в пустоту.
+    """
+    import yaml
+
+    root = tree(tmp_path, **{"step-пример": MARKED, "step-план": MANAGED, "план": MIXED_CALLER})
+    flow = root / ".github" / "workflows" / "план.yml"
+    kit = module.own_kit(flow, "план", "О/Р", "v2.5.0")
+    said = yaml.safe_load(kit)
+    assert list(said["jobs"]) == ["план"], kit
+    job = said["jobs"]["план"]
+    assert job["uses"] == "О/Р/.github/workflows/step-план.yml@v2.5.0"
+    assert "needs" not in job and job["with"] == {"вход": "данные"}
+    assert said["permissions"] == {"contents": "write"}
+    assert "scripts/наше.py" not in kit
+
+
+def test_the_answer_of_a_mixed_caller_names_only_the_call(tmp_path: Path) -> None:
+    """Ответ по проверкам — только о джобе вызова: о своём джобе поставщика у потребителя нечего."""
+    root = tree(tmp_path, **{"step-план": MANAGED, "план": MIXED_CALLER})
+    flow = root / ".github" / "workflows" / "план.yml"
+    names, _ = module.own_records(flow, "план")
+    assert names == ["план / план"]
+    every, _ = module.own_records(flow)
+    assert "своё" in every, "без имени шага ответ сужаться не должен"
+
+
+def test_calling_part_keeps_the_events_and_the_call() -> None:
+    """Часть вызова несёт события и права вызывающего — и только джобы вызова."""
+    document = {
+        "name": "значки",
+        True: {"push": {"branches": ["main"]}},
+        "permissions": {"contents": "write"},
+        "jobs": {
+            "своё": {"runs-on": "x", "steps": []},
+            "план": {"needs": "своё", "uses": "./.github/workflows/step-план.yml"},
+        },
+    }
+    import yaml
+
+    kit = module.calling_part("значки.yml", document, "план", "uses: О/Р/x.yml@v1")
+    said = yaml.safe_load(kit)
+    # Ключ событий пишется строкой в кавычках: голое `on` YAML 1.1 читает как «истину».
+    assert said["on"] == {"push": {"branches": ["main"]}}
+    assert said["jobs"] == {"план": {"uses": "О/Р/x.yml@v1"}}
+
+
 # --- заготовка свода окна (#995, пункт 1) ------------------------------------
 
 
