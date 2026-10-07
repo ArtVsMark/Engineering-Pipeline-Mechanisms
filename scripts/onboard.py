@@ -227,14 +227,35 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
     потребителя они вели бы в пустоту (#1001). Поэтому едут события, права,
     очередь и джобы вызова — с адресом по тегу и без `needs` на снятые джобы;
     входы вызова остаются как есть: это данные, и правит их потребитель.
+
+    СНЯТЫЙ `needs` НЕ УНОСИТ С СОБОЙ ТО, ЧТО НА НЁМ ДЕРЖАЛОСЬ (взгляд на #1183).
+    Условие снятого джоба переходит на джоб вызова (`inherited_guard`): у нас
+    фильтр будящих событий стоит на `inputs`, и без него `facts` с правом
+    записи шёл бы на любое завершение `ci`. Вход, называющий артефакт снятого
+    джоба (`artifacts_of`), в заготовку не едет: у потребителя его некому
+    выгрузить, и шаг предупреждал бы на каждом заходе.
     """
     jobs = document.get("jobs") or {}
+    calls = [
+        key for key, job in jobs.items() if step_called(str((job or {}).get("uses") or "")) == name
+    ]
+    gone = {str(key) for key in jobs} - {str(key) for key in calls}
+    lost = artifacts_of(jobs, gone)
     kept: dict[str, Any] = {}
-    for key, job in jobs.items():
-        if step_called(str((job or {}).get("uses") or "")) != name:
-            continue
-        body = {one: value for one, value in (job or {}).items() if one != "needs"}
+    for key in calls:
+        job = jobs[key] or {}
+        body = {one: value for one, value in job.items() if one != "needs"}
         body["uses"] = outer.removeprefix("uses: ")
+        guard = inherited_guard(jobs, key, gone)
+        if guard:
+            body["if"] = guard
+        said_with = {
+            one: value for one, value in (body.get("with") or {}).items() if value not in lost
+        }
+        if said_with:
+            body["with"] = said_with
+        else:
+            body.pop("with", None)
         kept[str(key)] = body
     said: dict[str, Any] = {"name": document.get("name") or Path(source).stem}
     said["on"] = policy.events_raw(document)
@@ -248,6 +269,52 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
         "# входы вызова (`with:`) — данные, правьте их под свой проект.\n"
     )
     return head + str(yaml.safe_dump(said, allow_unicode=True, sort_keys=False))
+
+
+def needed_by(jobs: dict[Any, Any], key: Any) -> list[str]:
+    """Имена джобов, от которых зависит `key` (`needs` строкой или списком)."""
+    said = (jobs.get(key) or {}).get("needs") or []
+    return [str(one) for one in ([said] if isinstance(said, str) else said)]
+
+
+def inherited_guard(jobs: dict[Any, Any], key: Any, gone: set[str]) -> str:
+    """Условие джоба вызова вместе с условиями снятых джобов, на которых он стоял.
+
+    Обход транзитивный: снятый джоб может сам стоять на снятом, и его условие
+    держало вызов так же. Порядок — от ближнего к дальнему, без повторов.
+    """
+    found: list[str] = []
+    own = (jobs.get(key) or {}).get("if")
+    if own:
+        found.append(str(own))
+    queue = [one for one in needed_by(jobs, key) if one in gone]
+    seen: set[str] = set()
+    while queue:
+        one = queue.pop(0)
+        if one in seen:
+            continue
+        seen.add(one)
+        condition = (jobs.get(one) or {}).get("if")
+        if condition and str(condition) not in found:
+            found.append(str(condition))
+        queue += [more for more in needed_by(jobs, one) if more in gone]
+    if len(found) < 2:
+        return found[0] if found else ""
+    return " && ".join(f"({one})" for one in found)
+
+
+def artifacts_of(jobs: dict[Any, Any], gone: set[str]) -> set[str]:
+    """Имена артефактов, которые выгружают снятые джобы (`actions/upload-artifact`)."""
+    names: set[str] = set()
+    for key, job in jobs.items():
+        if str(key) not in gone:
+            continue
+        for step in (job or {}).get("steps") or []:
+            if "actions/upload-artifact" in str(step.get("uses") or ""):
+                said = (step.get("with") or {}).get("name")
+                if said:
+                    names.add(str(said))
+    return names
 
 
 def thin_ci(names: list[str], repo: str, pin: str) -> str:

@@ -510,6 +510,61 @@ def test_calling_part_keeps_the_events_and_the_call() -> None:
     assert said["jobs"] == {"план": {"uses": "О/Р/x.yml@v1"}}
 
 
+def test_a_dropped_need_hands_its_guard_to_the_call() -> None:
+    """Условие снятого джоба переходит на вызов — транзитивно; своё условие вызова стоит первым.
+
+    Взгляд на #1183: у нас фильтр будящих событий стоит на `inputs`, и без
+    переноса `facts` с правом записи у потребителя шёл бы на любое `ci`.
+    """
+    jobs = {
+        "дальний": {"if": "в"},
+        "ближний": {"needs": "дальний", "if": "б"},
+        "вызов": {"needs": ["ближний"], "if": "а", "uses": "./x.yml"},
+        "свой": {"if": "г"},
+    }
+    gone = {"дальний", "ближний", "свой"}
+    assert module.inherited_guard(jobs, "вызов", gone) == "(а) && (б) && (в)"
+    assert module.inherited_guard({"вызов": {"uses": "x"}}, "вызов", set()) == ""
+    assert (
+        module.inherited_guard({"н": {"if": "б"}, "вызов": {"needs": "н"}}, "вызов", {"н"}) == "б"
+    )
+
+
+def test_needs_are_read_in_both_forms() -> None:
+    """`needs` строкой и списком читаются одинаково; без `needs` — пусто."""
+    jobs = {"а": {"needs": "б"}, "в": {"needs": ["б", "г"]}, "д": {}}
+    assert module.needed_by(jobs, "а") == ["б"]
+    assert module.needed_by(jobs, "в") == ["б", "г"]
+    assert module.needed_by(jobs, "д") == []
+
+
+def test_an_input_naming_a_dropped_artifact_does_not_ship() -> None:
+    """Вход, называющий артефакт снятого джоба, не едет; прочие входы — данные — едут."""
+    import yaml
+
+    document = {
+        "name": "значки",
+        True: {"push": None},
+        "jobs": {
+            "inputs": {
+                "if": "фильтр",
+                "steps": [{"uses": "actions/upload-artifact@x", "with": {"name": "сырьё"}}],
+            },
+            "facts": {
+                "needs": "inputs",
+                "uses": "./.github/workflows/step-план.yml",
+                "with": {"inputs-artifact": "сырьё", "ci-workflow": "ci.yml"},
+            },
+        },
+    }
+    said = yaml.safe_load(module.calling_part("значки.yml", document, "план", "uses: О/Р/x.yml@v1"))
+    job = said["jobs"]["facts"]
+    assert job["with"] == {"ci-workflow": "ci.yml"}
+    assert job["if"] == "фильтр"
+    assert module.artifacts_of(document["jobs"], {"inputs"}) == {"сырьё"}
+    assert module.artifacts_of(document["jobs"], set()) == set()
+
+
 # --- заготовка свода окна (#995, пункт 1) ------------------------------------
 
 
