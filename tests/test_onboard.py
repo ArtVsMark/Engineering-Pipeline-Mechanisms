@@ -572,13 +572,17 @@ def test_an_input_naming_a_dropped_artifact_does_not_ship() -> None:
         ({"н": {"if": "${{ б }}"}, "в": {"needs": "н", "if": "${{ а }}"}}, "(а) && (б)"),
         ({"н": {"if": "б"}, "в": {"needs": "н", "if": "always()"}}, None),
         ({"н": {"if": "needs.д.result == 'success'"}, "в": {"needs": "н"}}, None),
-        ({"н": {}, "в": {"needs": "н", "if": "always()"}}, "always()"),
+        ({"н": {}, "в": {"needs": "н", "if": "failure()"}}, None),
+        ({"в": {"if": "always()"}}, "always()"),
+        ({"н": {"if": "failure()"}, "в": {"needs": "н"}}, None),
     ],
     ids=[
         "обёртка снимается до склейки",
         "статусная функция вызова — отказ",
         "условие снятого ссылается на needs — отказ",
-        "статусная функция без переноса — как есть",
+        "статусная функция при снятом needs без переноса — отказ",
+        "статусная функция без снятого needs — как есть",
+        "статусная функция в перенесённом — отказ",
     ],
 )
 def test_the_guard_forms_are_carried_or_refused(jobs: dict[str, Any], said: str | None) -> None:
@@ -590,8 +594,89 @@ def test_the_guard_forms_are_carried_or_refused(jobs: dict[str, Any], said: str 
         assert module.inherited_guard(jobs, "в", {"н"}) == said
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"if": "needs.inputs.outputs.go == 'true'"},
+        {"secrets": {"K": "${{ needs.inputs.outputs.k }}"}},
+        {"strategy": {"matrix": {"x": "${{ fromJSON(needs.inputs.outputs.list) }}"}}},
+        {"concurrency": "g-${{ needs.inputs.outputs.id }}"},
+    ],
+    ids=["своё условие", "секреты", "матрица", "очередь"],
+)
+def test_any_needs_left_on_the_call_is_refused(field: dict[str, Any]) -> None:
+    """Любое `needs.` на джобе вызова после снятия `needs` — отказ, где бы оно ни стояло (#1189)."""
+    document = {
+        "name": "значки",
+        True: {"push": None},
+        "jobs": {
+            "inputs": {"steps": []},
+            "facts": {"needs": "inputs", "uses": "./.github/workflows/step-план.yml", **field},
+        },
+    }
+    with pytest.raises(module.NotRun):
+        module.calling_part("значки.yml", document, "план", "uses: О/Р/x.yml@v1")
+
+
+def test_a_need_on_another_call_stays_and_may_be_read() -> None:
+    """`needs` на другой джоб вызова не снимается: порядок двух вызовов держится (#1195)."""
+    import yaml
+
+    step = "./.github/workflows/step-план.yml"
+    document = {
+        "name": "значки",
+        True: {"push": None},
+        "jobs": {
+            "inputs": {"steps": []},
+            "первый": {"needs": "inputs", "uses": step},
+            "второй": {
+                "needs": ["inputs", "первый"],
+                "uses": step,
+                "if": "needs.первый.result == 'success'",
+            },
+        },
+    }
+    jobs = yaml.safe_load(
+        module.calling_part("значки.yml", document, "план", "uses: О/Р/x.yml@v1")
+    )["jobs"]
+    assert "needs" not in jobs["первый"]
+    assert jobs["второй"]["needs"] == "первый"
+    assert jobs["второй"]["if"] == "needs.первый.result == 'success'"
+
+
+def test_expressions_are_found_at_any_depth_and_only_inside_the_wrapper() -> None:
+    """`expressions` отдаёт содержимое каждого `${{ }}` в строках, списках и словарях (#1195)."""
+    value = {"a": ["x ${{ needs.н.outputs.p }} y", {"b": "${{ github.sha }}"}], "c": "needs.н"}
+    assert module.expressions(value) == [" needs.н.outputs.p ", " github.sha "]
+    assert module.expressions("needs.н") == []
+
+
+def test_a_literal_needs_word_outside_an_expression_is_not_a_reference() -> None:
+    """Слово `needs.` вне `${{ }}` во входе или секрете — литерал, а не ссылка (#1195)."""
+    import yaml
+
+    document = {
+        "name": "значки",
+        True: {"push": None},
+        "jobs": {
+            "inputs": {"steps": []},
+            "facts": {
+                "needs": "inputs",
+                "uses": "./.github/workflows/step-план.yml",
+                "with": {"путь": "docs/needs.inputs.md"},
+                "secrets": {"K": "needs.inputs"},
+            },
+        },
+    }
+    job = yaml.safe_load(module.calling_part("значки.yml", document, "план", "uses: О/Р/x.yml@v1"))[
+        "jobs"
+    ]["facts"]
+    assert job["with"] == {"путь": "docs/needs.inputs.md"}
+    assert job["secrets"] == {"K": "needs.inputs"}
+
+
 def test_an_input_leaning_on_a_dropped_job_does_not_ship_and_is_named() -> None:
-    """Вход с выходом снятого джоба не едет и назван в шапке; чужое имя с тем же началом — едет."""
+    """Вход с выходом снятого джоба не едет и назван в шапке; вход без `needs` — едет."""
     import yaml
 
     document = {
@@ -604,7 +689,7 @@ def test_an_input_leaning_on_a_dropped_job_does_not_ship_and_is_named() -> None:
                 "uses": "./.github/workflows/step-план.yml",
                 "with": {
                     "сырьё": "${{ needs.inputs.outputs.path }}",
-                    "соседнее": "${{ needs.inputs2.outputs.path }}",
+                    "соседнее": "${{ github.ref_name }}",
                 },
             },
         },
@@ -613,7 +698,7 @@ def test_an_input_leaning_on_a_dropped_job_does_not_ship_and_is_named() -> None:
     head = kit.split("\nname:", 1)[0]
     assert "facts.сырьё" in head and "соседнее" not in head, head
     job = yaml.safe_load(kit)["jobs"]["facts"]
-    assert job["with"] == {"соседнее": "${{ needs.inputs2.outputs.path }}"}
+    assert job["with"] == {"соседнее": "${{ github.ref_name }}"}
 
 
 def test_the_real_facts_caller_ships_its_filter_and_not_its_artifact() -> None:
