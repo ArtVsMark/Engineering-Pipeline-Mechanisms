@@ -644,6 +644,13 @@ def test_a_need_on_another_call_stays_and_may_be_read() -> None:
     assert jobs["второй"]["if"] == "needs.первый.result == 'success'"
 
 
+def test_expressions_are_found_at_any_depth_and_only_inside_the_wrapper() -> None:
+    """`expressions` отдаёт содержимое каждого `${{ }}` в строках, списках и словарях (#1195)."""
+    value = {"a": ["x ${{ needs.н.outputs.p }} y", {"b": "${{ github.sha }}"}], "c": "needs.н"}
+    assert module.expressions(value) == [" needs.н.outputs.p ", " github.sha "]
+    assert module.expressions("needs.н") == []
+
+
 def test_a_literal_needs_word_outside_an_expression_is_not_a_reference() -> None:
     """Слово `needs.` вне `${{ }}` во входе или секрете — литерал, а не ссылка (#1195)."""
     import yaml
