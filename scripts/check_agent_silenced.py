@@ -128,12 +128,16 @@ CALL_RE: Final = re.compile(
 def _calls(root: Path, base: str, found: set[str]) -> list[tuple[str, str, str]]:
     """Вызовы носителей по общей ветке: (вызывающий, вызванный, адрес вызова).
 
-    Вызванный сверяется ПОЛНЫМ путём от корня, а не именем файла: чужой
-    `X/Y/.github/workflows/step-review.yml@main` наш шаг не зовёт, хоть имя у
-    файлов одно (поздний взгляд на #1170).
+    Вызванный сверяется ПОЛНЫМ путём от корня, а не именем файла, И СВОИМ
+    РЕПОЗИТОРИЕМ: чужой `X/Y/.github/workflows/step-review.yml@main` наш шаг не
+    зовёт, хоть путь у файлов один (поздний взгляд на #1170). Прежде сверялся
+    только путь, и вызывающий чужого файла попадал в носители, а чужой вызов
+    рядом со своим `@main` возвращал шаг в носители (взгляд на #1175).
+    Своего имени не узнать — свой любой адрес: ошибка в сторону громкости (051).
     """
     if not found:
         return []
+    own = own_repo(root).lower()
     said = _git(root, "grep", "-n", "-E", "uses:", base, "--", WORKFLOWS, empty=GREP_FOUND_NOTHING)
     calls: list[tuple[str, str, str]] = []
     for line in said.splitlines():
@@ -141,9 +145,15 @@ def _calls(root: Path, base: str, found: set[str]) -> list[tuple[str, str, str]]
         parts = line[len(base) + 1 :].split(":", 2)
         if len(parts) != 3 or not (match := CALL_RE.search(parts[2])):
             continue
-        if match["path"] in found and match["path"] != parts[0]:
+        if match["path"] in found and match["path"] != parts[0] and ours(match["said"], own):
             calls.append((parts[0], match["path"], match["said"]))
     return calls
+
+
+def ours(said: str, own: str) -> bool:
+    """Зовёт ли адрес `uses:` файл СВОЕГО дерева: внутренним путём или своим репозиторием."""
+    where = said.split("/.github/", 1)[0]
+    return where in {"", "."} or not own or where.lower() == own
 
 
 def callers(root: Path, base: str, found: set[str]) -> set[str]:
