@@ -167,7 +167,7 @@ def drawn() -> set[str]:
     (146). Здесь предмет тот же, и источник поэтому один — `build_facts.BADGES`.
     """
     names = set(facts.BADGES)
-    assert len(names) >= 5, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
+    assert len(names) >= 4, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
     # Единый значок рисует шаг `badges.yml`, а не сборка; имя у них одно —
     # `build_facts.UNIFIED`, и со шагом его сверяет проверка ниже (#1019).
     return names | {facts.UNIFIED}

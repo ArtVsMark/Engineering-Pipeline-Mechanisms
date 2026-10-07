@@ -273,7 +273,7 @@ def shown_badges() -> list[str]:
     экземпляр здесь был третьим (022).
     """
     found = sorted(badges_shown((ROOT / "README.md").read_text("utf-8")))
-    assert len(found) >= 4, f"витрина показывает {found} — предмет проверки не найден (075)"
+    assert len(found) >= 3, f"витрина показывает {found} — предмет проверки не найден (075)"
     return found
 
 
@@ -307,7 +307,7 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     drawn = set(facts.BADGES)
-    assert len(drawn) >= 5, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
+    assert len(drawn) >= 4, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
     # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
     # ним они были бы дублями. Сам единый значок рисует шаг `badges.yml`.
     expected = (drawn - set(facts.ZONE_INPUTS)) | {facts.UNIFIED}
@@ -982,3 +982,18 @@ def test_zeroed_names_a_count_cut_short_and_clashed_sees_no_clash(
     whole = {"tests": {"functions": 1, "modules": 1}, "scripts": {"runnable": 1}}
     assert facts.zeroed(whole, "корень") is False
     assert facts.clashed() is False
+
+
+def test_the_badges_branch_keeps_only_what_is_published() -> None:
+    """Ветка `badges` держит изданное сборкой, единый значок и архив — и только (#1198).
+
+    Значок, снятый из инвентаря, уходит с ветки: публикация удаляет всё, чего
+    в перечне нет, а не копирует поверх.
+    """
+    module = load_script("build_facts.py")
+    kept = set(module.branch_files())
+    assert kept == {*module.published_names(), module.UNIFIED, module.ARCHIVE}
+    assert "scripts.json" not in kept, "снятый значок остался допустимым на ветке"
+    flow = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
+    assert "build_facts.py --branch-files" in flow, "публикация не спрашивает перечень"
+    assert 'git -C "$pub" rm' in flow, "публикация ничего не удаляет"

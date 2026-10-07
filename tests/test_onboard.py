@@ -13,6 +13,7 @@
 * класс проверки заход не решает: это свойство потребителя (174).
 """
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -605,7 +606,7 @@ def test_the_guard_forms_are_carried_or_refused(jobs: dict[str, Any], said: str 
     ids=["своё условие", "секреты", "матрица", "очередь"],
 )
 def test_any_needs_left_on_the_call_is_refused(field: dict[str, Any]) -> None:
-    """Любое `needs.` на джобе вызова после снятия `needs` — отказ, где бы оно ни стояло (#1189)."""
+    """Ссылка на СНЯТЫЙ джоб на вызове — отказ, где бы она ни стояла (#1189, #1195)."""
     document = {
         "name": "значки",
         True: {"push": None},
@@ -649,6 +650,27 @@ def test_expressions_are_found_at_any_depth_and_only_inside_the_wrapper() -> Non
     value = {"a": ["x ${{ needs.н.outputs.p }} y", {"b": "${{ github.sha }}"}], "c": "needs.н"}
     assert module.expressions(value) == [" needs.н.outputs.p ", " github.sha "]
     assert module.expressions("needs.н") == []
+
+
+def test_order_through_a_dropped_middle_job_is_kept() -> None:
+    """Вызов стоит на снятом посреднике, тот — на другом вызове: порядок сохраняется (#1195)."""
+    import yaml
+
+    step = "./.github/workflows/step-план.yml"
+    document = {
+        "name": "значки",
+        True: {"push": None},
+        "jobs": {
+            "первый": {"uses": step},
+            "посредник": {"needs": "первый", "steps": []},
+            "второй": {"needs": "посредник", "uses": step},
+        },
+    }
+    jobs = yaml.safe_load(
+        module.calling_part("значки.yml", document, "план", "uses: О/Р/x.yml@v1")
+    )["jobs"]
+    assert jobs["второй"]["needs"] == "первый"
+    assert module.kept_needs(document["jobs"], "второй", {"посредник"}) == ["первый"]
 
 
 def test_a_literal_needs_word_outside_an_expression_is_not_a_reference() -> None:
@@ -809,11 +831,66 @@ def test_a_broken_inventory_is_a_refusal_not_a_traceback(tmp_path: Path, text: s
         module.consumer_data(tmp_path, [], set())
 
 
+@pytest.mark.parametrize(
+    "answers",
+    [
+        {".github/workflows/step-план.yml": "configured"},
+        {".github/workflows/step-план.yml": {"answer": "configured", "where": ".github/a.txt"}},
+    ],
+    ids=["ответ не словарь", "where строкой"],
+)
+def test_an_answer_of_a_wrong_shape_is_a_refusal(tmp_path: Path, answers: dict[str, Any]) -> None:
+    """Ответ инвентаря не той формы — отказ, а не трейсбек и не перечень по буквам (#1196)."""
+    (tmp_path / ".rules").mkdir()
+    (tmp_path / ".rules" / "portable.json").write_text(
+        json.dumps({"answers": answers}), encoding="utf-8"
+    )
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "step-план.yml").write_text(
+        "jobs: {}\n", encoding="utf-8"
+    )
+    with pytest.raises(module.NotRun):
+        module.consumer_data(tmp_path, ["план"], set())
+
+
+def test_a_step_answer_brings_its_own_data(tmp_path: Path) -> None:
+    """Данные, которые шаг читает мимо скриптов, приходят из ответа самого шага (#1196)."""
+    (tmp_path / ".rules").mkdir()
+    answers = {
+        ".github/workflows/step-план.yml": {"answer": "configured", "where": [".github/a.txt"]}
+    }
+    (tmp_path / ".rules" / "portable.json").write_text(
+        json.dumps({"answers": answers}), encoding="utf-8"
+    )
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "step-план.yml").write_text(
+        "jobs: {}\n", encoding="utf-8"
+    )
+    assert module.consumer_data(tmp_path, ["план"], set()) == [".github/a.txt"]
+
+
+def test_step_texts_count_run_and_inputs_but_not_comments(tmp_path: Path) -> None:
+    """Вызов — `run:` и вход действия (агент зовёт по разрешениям); комментарий — нет (#1201)."""
+    flow = tmp_path / "step.yml"
+    flow.write_text(
+        "# коммент: $MECHANISMS/scripts/коммент.py\n"
+        "jobs:\n  j:\n    steps:\n      - uses: a/b@v1\n        with:\n"
+        "          allowed: Bash(python ${{ env.MECHANISMS }}/scripts/агент.py)\n"
+        "      - run: python $MECHANISMS/scripts/вызов.py\n",
+        encoding="utf-8",
+    )
+    found = sorted(
+        m.group(1) for line in module.step_texts(flow) for m in module.CALLED_SCRIPT.finditer(line)
+    )
+    assert found == ["агент", "вызов"]
+
+
 def test_called_scripts_walk_our_imports_only(tmp_path: Path) -> None:
     """Обход идёт по нашему `scripts/` транзитивно; чужой модуль и стандартная библиотека — нет."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "step-план.yml").write_text(
-        "run: python $MECHANISMS/scripts/верх.py\n", encoding="utf-8"
+        "jobs:\n  j:\n    steps:\n      - run: python $MECHANISMS/scripts/верх.py\n",
+        encoding="utf-8",
     )
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "верх.py").write_text("import os\nimport низ\n", encoding="utf-8")

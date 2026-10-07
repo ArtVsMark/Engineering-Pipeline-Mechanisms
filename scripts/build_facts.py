@@ -417,6 +417,22 @@ def published_names() -> list[str]:
     return [FACTS, *BADGES]
 
 
+#: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
+ARCHIVE: Final = "findings.json"
+
+
+def branch_files() -> list[str]:
+    """Всё, что ветка `badges` вправе держать: изданное сборкой, единый значок и архив.
+
+    СНЯТОЕ С ВЕТКИ УХОДИТ ВМЕСТЕ С ИНВЕНТАРЁМ (взгляд на #1198). Публикация
+    копирует поверх и прежде ничего не удаляла: снятый значок оставался на
+    ветке с последним числом навсегда, и по адресу его нельзя было отличить
+    от живого. Перечень выводится из инвентаря, а не из списка снятых по
+    имени: значок, убранный из `BADGES`, уходит с ветки следующим заходом.
+    """
+    return sorted({*published_names(), UNIFIED, ARCHIVE})
+
+
 def clashing_names() -> list[str]:
     """Имена вывода, которые встречаются дважды (взгляд на #1002).
 
@@ -472,23 +488,6 @@ def family_badge(facts: dict[str, Any]) -> Badge:
     return badge("общие механизмы", f"{percent}% семьи", color)
 
 
-def scripts_badge(facts: dict[str, Any]) -> Badge:
-    """Сколько запускаемых механизмов набор гоняет процессом.
-
-    Порог здесь не назначен, а взят у того же правила, что и прочие значки:
-    цвет говорит о доле, а решает человек. Число без знаменателя ничего не
-    значит, поэтому показываются оба (005).
-    """
-    counts = facts.get("scripts") or {}
-    runnable = int(counts.get("runnable") or 0)
-    started = int(counts.get("started") or 0)
-    if not runnable:
-        return badge("гейты прогоном", "нет данных", "#9f9f9f")
-    share = started / runnable
-    color = "#4c1" if share >= 0.8 else "#dfb317" if share >= 0.5 else "#e05d44"
-    return badge("гейты прогоном", f"{started}/{runnable}", color)
-
-
 def coverage_badge(facts: dict[str, Any]) -> Badge:
     """Доля покрытых строк — или прямое «не прочитано»."""
     if "coverage_percent" not in facts:
@@ -530,7 +529,6 @@ BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
     "rules.json": rules_badge,
     "family.json": family_badge,
     "version.json": version_badge,
-    "scripts.json": scripts_badge,
     "coverage.json": coverage_badge,
 }
 
@@ -639,6 +637,11 @@ def main(argv: list[str] | None = None) -> int:
         "--extra-out", default="", help="записать только свои разделы — вход extra-facts шага"
     )
     parser.add_argument("--from-facts", default="", help="нарисовать значки по готовому facts.json")
+    parser.add_argument(
+        "--branch-files",
+        action="store_true",
+        help="напечатать всё, что ветка badges вправе держать, — по строке на имя",
+    )
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
     parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
@@ -652,6 +655,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.branch_files:
+        print("\n".join(branch_files()))
+        return EXIT_OK
     if args.from_facts:
         return drawn_from(Path(args.from_facts), args.out_dir)
     if args.extra_out:

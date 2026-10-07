@@ -254,7 +254,10 @@
       "answer": "as-is"
     },
     ".github/workflows/step-attribution.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/authors.txt"
+      ]
     },
     ".github/workflows/step-agent-pr.yml": {
       "answer": "as-is"

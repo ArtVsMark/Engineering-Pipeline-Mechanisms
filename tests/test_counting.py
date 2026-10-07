@@ -83,13 +83,6 @@ def test_a_same_named_mechanism_is_named_not_collapsed(
     assert "::warning::" in capsys.readouterr().err, "столкновение осталось молчаливым"
 
 
-def test_the_badge_shows_both_numbers() -> None:
-    """Значок показывает долю, а не голое число: одно без другого ничего не значит."""
-    said = facts.scripts_badge({"scripts": {"runnable": 31, "started": 17}})
-    assert said.message == "17/31"
-    assert facts.scripts_badge({}).message == "нет данных", "пустой ответ выдан за число"
-
-
 def test_a_missing_tree_is_not_a_zero(tmp_path: Path) -> None:
     """Пустое дерево даёт ноль запускаемых, а не ложную полноту (075)."""
     (tmp_path / "scripts").mkdir()
