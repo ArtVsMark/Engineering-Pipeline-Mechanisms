@@ -221,12 +221,13 @@ def test_an_empty_parametrisation_is_a_refusal_not_a_skip() -> None:
 
 
 def test_the_measuring_runner_is_among_them() -> None:
-    """Шаг значков, считающий покрытие, — прогонщик набора, а не сосед.
+    """Джоб значков, считающий покрытие, — прогонщик набора, а не сосед.
 
     Это и есть находка 15.09.2026: он зовёт набор, и состав ему нужен тот же.
     Без этой проверки он снова окажется вне сверки — от одной правки строки.
+    С выносом фактов в общий шаг (#1001) покрытие считает джоб `inputs`.
     """
-    assert ("badges.yml", "badges") in [(where, name) for where, name, _ in runners()]
+    assert ("badges.yml", "inputs") in [(where, name) for where, name, _ in runners()]
 
 
 def test_an_import_under_another_name_keeps_both(tmp_path: Path) -> None:

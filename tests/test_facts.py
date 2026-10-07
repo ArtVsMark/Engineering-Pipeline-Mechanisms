@@ -339,6 +339,16 @@ def test_publication_writes_only_to_the_derived_branch() -> None:
     command = push_command(publish["run"])
     assert command.rstrip().endswith("badges"), f"толчок идёт не в производную ветку: {command}"
     assert "main" not in command, "шаг публикации называет общую ветку"
+    # Факты кладёт общий шаг (#1001, шаг 2) — и его толчок под тем же судом.
+    shared = yaml.safe_load((WORKFLOW.parent / "step-facts.yml").read_text(encoding="utf-8"))
+    facts_publish = next(
+        step
+        for step in shared["jobs"]["facts"]["steps"]
+        if step.get("name") == "опубликовать факты коммитом поверх ветки badges"
+    )
+    command = push_command(facts_publish["run"])
+    assert command.rstrip().endswith("badges"), f"шаг фактов толкает не в badges: {command}"
+    assert "--force" not in command, "шаг фактов затирает ветку, а не кладёт поверх"
 
 
 def test_publication_is_not_a_check_on_a_change() -> None:
@@ -922,3 +932,53 @@ def test_no_contract_word_in_the_tree_is_followed_by_a_bare_version() -> None:
         f"за словом стоит знак, которого перечни не знают: {unsorted} — отнесите его "
         "к SKIP_MARKS (пропускать) или к BOUNDARY (граница фразы)"
     )
+
+
+# --- режимы общего издателя (#1001, шаг 2) -----------------------------------
+
+
+def test_extra_written_carries_only_our_sections(tmp_path: Path) -> None:
+    """`--extra-out` пишет свои разделы — и ни одного общего: их считает общий шаг."""
+    import argparse
+
+    out = tmp_path / "extra.json"
+    args = argparse.Namespace(root=str(ROOT), family="", repo="Я/Проект", extra_out=str(out))
+    assert facts.extra_written(args) == facts.EXIT_OK
+    said = json.loads(out.read_text(encoding="utf-8"))
+    assert set(said) == {"contract", "tests", "scripts", "rules", "checks_per_pr", "family"}
+    assert not set(said) & facts.common.COMMON_KEYS
+
+
+def test_drawn_from_draws_the_same_badges_as_the_build(tmp_path: Path) -> None:
+    """Значки по опубликованному файлу совпадают со значками сборки: источник один (022)."""
+    whole = facts.collect(ROOT, "голова", mine="Я/Проект")
+    built = tmp_path / "built"
+    built.mkdir()
+    facts.draw_badges(whole, built)
+    source = tmp_path / "facts.json"
+    source.write_text(json.dumps(whole, ensure_ascii=False), encoding="utf-8")
+    assert facts.drawn_from(source, str(tmp_path / "out")) == facts.EXIT_OK
+    for name in facts.BADGES:
+        drawn = tmp_path / "out" / facts.PUBLISHED_DIR / name
+        assert drawn.read_text(encoding="utf-8") == (built / name).read_text(encoding="utf-8")
+
+
+def test_drawn_from_refuses_what_it_cannot_read(tmp_path: Path) -> None:
+    """Файла нет, раздела нет, каталога вывода нет — отказ, а не пустые значки (075)."""
+    assert facts.drawn_from(tmp_path / "нет.json", str(tmp_path)) == facts.EXIT_BROKEN
+    thin = tmp_path / "thin.json"
+    thin.write_text("{}", encoding="utf-8")
+    assert facts.drawn_from(thin, str(tmp_path / "out")) == facts.EXIT_BROKEN
+    assert facts.drawn_from(thin, "") == facts.EXIT_BROKEN
+
+
+def test_zeroed_names_a_count_cut_short_and_clashed_sees_no_clash(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Ноль в счётчике — обрыв, и он назван; живые имена вывода не совпадают."""
+    said = {"tests": {"functions": 0, "modules": 1}, "scripts": {"runnable": 1}}
+    assert facts.zeroed(said, "корень") is True
+    assert "tests.functions" in capsys.readouterr().err
+    whole = {"tests": {"functions": 1, "modules": 1}, "scripts": {"runnable": 1}}
+    assert facts.zeroed(whole, "корень") is False
+    assert facts.clashed() is False

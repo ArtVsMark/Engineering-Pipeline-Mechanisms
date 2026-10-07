@@ -289,10 +289,14 @@ def test_a_compare_answer_that_is_not_a_mapping_is_not_run(monkeypatch: pytest.M
 
 
 def test_the_publish_step_stops_only_on_a_rejection() -> None:
-    """В `badges.yml` установка отдельно, с предупреждением; стоп — только исход 1 (#1116)."""
+    """В общем шаге фактов установка отдельно, с предупреждением; стоп — только исход 1 (#1116).
+
+    Сверка переехала из `badges.yml` в `step-facts.yml` вместе со сборкой
+    (#1001, шаг 2): публикует теперь общий шаг, и стоп держит он.
+    """
     import yaml
 
-    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-facts.yml").read_text("utf-8"))
     step = next(
         one
         for job in flow["jobs"].values()
@@ -320,7 +324,7 @@ def test_the_publish_step_decides_by_the_verdict_not_the_code(
 
     import yaml
 
-    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-facts.yml").read_text("utf-8"))
     run = next(
         str(one["run"])
         for job in flow["jobs"].values()
