@@ -163,8 +163,15 @@ BY_TRUNK = "jobs:\n  review:\n    uses: О/Р/.github/workflows/step-review.yml@
 BY_PATH = "jobs:\n  review:\n    uses: ./.github/workflows/step-review.yml\n"
 
 
-def test_the_caller_of_a_carrier_carries_too(tmp_path: Path) -> None:
-    """Правка ВЫЗЫВАЮЩЕГО носителя названа: файлом прогона площадке служит он (#993)."""
+def test_the_caller_of_a_carrier_carries_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Правка ВЫЗЫВАЮЩЕГО носителя названа: файлом прогона площадке служит он (#993).
+
+    Своё имя объявлено явно: вызов `О/Р/…` свой, только если своё имя — `О/Р`.
+    Без этого тест зависел от среды — на площадке имя задаёт её переменная.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "О/Р")
     caller = ".github/workflows/review.yml"
     root = tree(tmp_path, {STEP: CARRIER, caller: BY_TRUNK}, {caller: BY_TRUNK + "# правка\n"})
     assert module.callers(root, "база", {STEP}) == {caller}
