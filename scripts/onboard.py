@@ -236,6 +236,12 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
     джоба (`artifacts_of`), в заготовку не едет: у потребителя его некому
     выгрузить, и шаг предупреждал бы на каждом заходе.
 
+    СТРОГОЕ ПРАВИЛО ПОСЛЕ ПЕРЕЧНЯ (третий заход по месту — поздний взгляд на
+    #1189; 210). `needs` у джоба вызова снимается целиком, поэтому любое
+    выражение `needs.` в нём — в своём условии, в `secrets`, `strategy`,
+    `concurrency` — ведёт в пустоту: заход отказывает, а не перебирает ключи.
+    Статусная функция ищется во всех склеиваемых условиях, а не только в своём.
+
     ПЕРЕЧЕНЬ ФОРМ, а не очередная (второй заход по месту — взгляд на #1189;
     210). Что снятый джоб уносит или оставляет висеть: его условие —
     переносится; условие в обёртке `${{ }}` — обёртка снимается до склейки,
@@ -270,6 +276,12 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
             body["with"] = said_with
         else:
             body.pop("with", None)
+        dangling = [one for one, value in body.items() if NEEDS_REF.search(str(value))]
+        if dangling:
+            raise NotRun(
+                f"у вызова `{key}` снят `needs`, а {', '.join(sorted(dangling))} ссылается на "
+                "`needs.` — в заготовке это вело бы в пустоту, перенесите руками"
+            )
         kept[str(key)] = body
     said: dict[str, Any] = {"name": document.get("name") or Path(source).stem}
     said["on"] = policy.events_raw(document)
@@ -347,10 +359,11 @@ def inherited_guard(jobs: dict[Any, Any], key: Any, gone: set[str]) -> str:
             found.append(condition)
             carried += 1
         queue += [more for more in needed_by(jobs, one) if more in gone]
-    if carried and own and STATUS_CALL.search(found[0]):
+    status = [one for one in found if STATUS_CALL.search(one)]
+    if carried and status:
         raise NotRun(
-            f"у вызова `{key}` своё условие со статусной функцией: «{found[0]}» — "
-            "склейка с условием снятого джоба изменила бы его смысл, разберите руками"
+            f"у вызова `{key}` условие со статусной функцией: «{status[0]}» — без `needs` "
+            "она судит другое, и склейка изменила бы смысл, разберите руками"
         )
     if len(found) < 2:
         return found[0] if found else ""
