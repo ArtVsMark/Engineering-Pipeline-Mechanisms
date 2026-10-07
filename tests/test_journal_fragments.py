@@ -725,6 +725,51 @@ def test_the_shape_fault_is_named(body: str, fault: str) -> None:
     assert (fault in said) if fault else said == "", said
 
 
+REASON = "> **Потребителю безразлично:** причина."
+
+
+@pytest.mark.parametrize(
+    ("body", "fault"),
+    [
+        (f"{REASON}\n\n### Заголовок\n\n" + "строка\n" * 9 + "\n#1", ""),
+        (f"{REASON}\n\n### Заголовок\n\n" + "строка\n" * 10 + "\n#1", "тело 11 строк"),
+        (f"{REASON}\n\n### " + "з" * 700 + "\n\n" + "я" * 700 + "\n\n#1", ""),
+        (f"{REASON}\n\n## Заголовок\n\nСтрока.\n\n#1", "заголовок выше"),
+        (f"{REASON}\n> продолжение причины.\n\n### " + "з" * 780 + "\n\nСтрока.\n\n#1", ""),
+        (f"{REASON}\n> продолжение причины.\n\n### Заголовок\n\n" + "строка\n" * 8 + "\n#1", ""),
+    ],
+    ids=[
+        "причина и девять",
+        "причина и десять",
+        "длинный заголовок",
+        "уровень версии",
+        "причина в две строки",
+        "причина в две строки и ровно предел",
+    ],
+)
+def test_an_internal_fragment_counts_its_reason_but_not_its_heading(body: str, fault: str) -> None:
+    """У `internal` заголовок второй строкой — и в счёт не идёт; причина идёт (взгляд на #1174)."""
+    said = module.shape_fault(module.Fragment("internal", "проба", body))
+    assert (fault in said) if fault else said == "", said
+
+
+def test_a_last_line_that_is_not_a_link_stays_in_the_count() -> None:
+    """Последняя строка снимается только ссылкой: иначе предел молча рос бы на строку."""
+    body = "### Заголовок\n\n" + "строка\n" * 11
+    assert "тело 11 строк" in module.shape_fault(module.Fragment("fixed", "проба", body))
+
+
+def test_the_refusal_names_both_limits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ называет оба предела: фрагмент, отвергнутый за знаки, по строкам может быть годен."""
+    folder = tmp_path / "changelog.d"
+    folder.mkdir()
+    (folder / "широкий.fixed.md").write_text("### З\n\n" + "я" * 801 + "\n\n#1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "FRAGMENTS", Path("changelog.d"))
+    with pytest.raises(module.NotRun, match=f"{module.FRAGMENT_CHARS} знаков"):
+        module.fragments_of(["changelog.d/широкий.fixed.md"])
+
+
 def test_the_change_gate_refuses_a_long_fragment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
