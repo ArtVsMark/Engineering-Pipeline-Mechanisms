@@ -250,35 +250,66 @@ def shape_fault(fragment: Fragment) -> str:
     рода `internal` в счёт идут. Заголовок ищется только вне блоков кода:
     `# …` в примере shell — комментарий, а не заголовок (взгляд на #1174).
 
-    ЗАГОЛОВОК НЕ СЧИТАЕТСЯ И У `internal`, где он стоит под причиной —
-    цитатой в одну строку или в несколько. Прежде снималась только первая
-    строка, и у этого рода в счёт шёл заголовок: предел выходил строже на
-    строку и на длину заголовка.
+    ЗАГОЛОВОК НЕ СЧИТАЕТСЯ И У `internal`, где он стоит под причиной; где
+    именно он стоит, решает `heading_at` по перечню форм.
     Ссылка снимается, только если она ссылка: разбор отвергает фрагмент без
     неё раньше, но предел не должен молча расти на строку, если сюда придёт
     иной (взгляд на #1174).
     """
-    lines = [one.strip() for one in fragment.body.splitlines() if one.strip()]
+    raw = [one.strip() for one in fragment.body.splitlines()]
     inside = False
-    for one in lines:
+    for one in raw:
         if one.startswith(FENCE):
             inside = not inside
             continue
         if not inside and TOO_HIGH_RE.match(one):
             return f"заголовок выше `###`: «{one}»"
-    body = lines[:-1] if lines and LINK_LINE_RE.match(lines[-1]) else list(lines)
-    # Заголовок — первая строка ПОСЛЕ ведущей цитаты причины, сколько бы строк
-    # она ни заняла: жёсткий индекс пропускал причину в две строки `>`, и
-    # заголовок снова шёл в счёт (взгляд на #1181, 195).
-    at = next((index for index, one in enumerate(body) if not one.startswith(">")), len(body))
-    if at < len(body) and body[at].startswith("#"):
-        del body[at]
+    heading = heading_at(raw)
+    lines = [one for index, one in enumerate(raw) if one and index != heading]
+    body = lines[:-1] if lines and LINK_LINE_RE.match(lines[-1]) else lines
     if len(body) > FRAGMENT_LINES:
         return f"тело {len(body)} строк, предел {FRAGMENT_LINES}"
     size = sum(len(one) for one in body)
     if size > FRAGMENT_CHARS:
         return f"тело {size} знаков, предел {FRAGMENT_CHARS}"
     return ""
+
+
+#: Что прерывает абзац цитаты по CommonMark, а не продолжает его лениво:
+#: ATX-заголовок, забор блока кода (обоих видов), тематический разрыв, пункт
+#: маркированного списка, пункт нумерованного с единицы, начало HTML-блока.
+PARAGRAPH_BREAKERS: Final = re.compile(
+    r"^(?:#{1,6}(?:\s|$)|`{3}|~{3}|(?:-\s*){3,}$|(?:\*\s*){3,}$|(?:_\s*){3,}$"
+    r"|[-*+]\s|1[.)]\s|<)"
+)
+
+
+def heading_at(raw: list[str]) -> int | None:
+    """Индекс строки-заголовка фрагмента среди его СЫРЫХ строк; нет заголовка — None.
+
+    Заголовок — первая непустая строка после ведущего АБЗАЦА цитаты причины.
+    Абзац читается по правилам Markdown, а не по приставке строк: строка с
+    `>` его продолжает, строка без `>` — тоже, лениво, если только она не
+    начинает блок, прерывающий абзац (`PARAGRAPH_BREAKERS`); пустая строка его
+    кончает. Пустые строки здесь нужны, поэтому разбор идёт по сырым строкам.
+
+    ПЕРЕЧЕНЬ ФОРМ, а не очередная. Место получило три находки подряд
+    (взгляды на #1181 — жёсткий индекс, затем ленивое продолжение; на #1188 —
+    блок кода под цитатой), и третья закрыта не формой, а полным списком
+    прерывающих конструкций CommonMark (210). Формы: причины нет; причина в
+    одну строку `>`; в несколько; с ленивым продолжением; вплотную под
+    цитатой — заголовок, блок кода, разрыв, пункт списка, HTML; цитатой открыт
+    фрагмент не-`internal`; заголовка нет. Каждая — строкой таблицы в
+    `tests/test_journal_fragments.py`.
+    """
+    at = next((index for index, one in enumerate(raw) if one), len(raw))
+    if at < len(raw) and raw[at].startswith(">"):
+        while at < len(raw) and raw[at]:
+            if not raw[at].startswith(">") and PARAGRAPH_BREAKERS.match(raw[at]):
+                break
+            at += 1
+    at = next((index for index in range(at, len(raw)) if raw[index]), len(raw))
+    return at if at < len(raw) and raw[at].startswith("#") else None
 
 
 def render_section(title: str, fragments: list[Fragment]) -> str:

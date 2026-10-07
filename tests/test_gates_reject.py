@@ -855,7 +855,7 @@ def test_the_journal_unfolds_a_bounded_number_of_releases(tmp_path: Path) -> Non
 def test_a_short_history_folds_nothing(tmp_path: Path) -> None:
     """Пока выпусков меньше предела, свёрнутого раздела нет вовсе.
 
-    Раздел «раньше такой-то версии» на пустом месте объявлял бы предел там, где
+    Раздел «выпуски такой-то версии и раньше» на пустом месте объявлял бы предел там, где
     его ещё не достигли, — и читался бы как пропажа (075).
     """
     module = load_script("build_changelog.py")
