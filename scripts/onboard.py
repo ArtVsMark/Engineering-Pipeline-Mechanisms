@@ -58,6 +58,14 @@
 `ci-complete.yml` заготовка не кладёт: он пока копируется, а не зовётся
 (`tests/test_portable.py::STILL_COPIED`, вынос — #993).
 
+СВОД ОКНА КЛАДЁТСЯ ЗАГОТОВКОЙ, И ЗАНЯТЫЙ СВОД ЗАКЛАДКУ НЕ ДЕРЖИТ (#995,
+пункт 1). Окно потребителя работает с конвейером по своду, и общая часть
+приходит из `kit/` — сверенной с нашим сводом (`tests/test_rulebook_kit.py`),
+с заглушками наполнения. Но свод у живого проекта почти всегда уже есть: он —
+наполнение владельца, а не файл заготовки. Поэтому занятый `AGENTS.md` или
+`CLAUDE.md` не пишется и называется, а прочая заготовка кладётся: правило «ни
+одного файла при занятом» держит половину ВЫЗОВА, а свод вызовом не является.
+
 Исходы (правило 039): ``0`` заготовка собрана · ``2`` не отработал ·
 ``3`` отдавать нечего: ни один шаг не помечен · ``4`` прибивка не несёт
 помеченного: выпуск отстал от дерева · ``5`` с ``--write``: путь заготовки в
@@ -300,6 +308,21 @@ def lay(root: Path, files: dict[Path, str]) -> None:
         (root / path).write_text(text, encoding="utf-8")
 
 
+def rulebook_kit(root: Path) -> dict[Path, str]:
+    """Заготовка свода окна: файл `kit/<имя>` ложится у потребителя под `<имя>`.
+
+    Состав — из дерева, а не списком: второй перечень имён свода отстал бы молча
+    (022). Пустой `kit/` — отказ: заход назвал бы подключение полным без свода.
+    """
+    found = {
+        Path(one.name): one.read_text(encoding="utf-8")
+        for one in sorted((root / paths.KIT).glob("*.md"))
+    }
+    if not found:
+        raise NotRun(f"заготовки свода нет: {paths.KIT}/ пуст — окну потребителя нечем работать")
+    return found
+
+
 def pin_of(root: Path) -> str:
     """Тег ВЫПУСКА, к которому прибивается потребитель, — из истории.
 
@@ -414,6 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         own = own_callers(args.root, names)
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
+        rulebook = rulebook_kit(args.root)
     except (NotRun, check_shipped.NotRun) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -473,8 +497,15 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return EXIT_OCCUPIED
-        lay(args.write, files)
-        print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files)))
+        kept = occupied(args.write, rulebook)
+        free = {path: text for path, text in rulebook.items() if path not in kept}
+        lay(args.write, files | free)
+        print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
+        if kept:
+            print(
+                "свод уже есть и не тронут: " + ", ".join(str(one) for one in kept) + ". "
+                f"Сверьте его общие разделы с заготовкой `{paths.KIT}/` поставщика."
+            )
         print("Класс каждой проверки в .pipeline.yml — СВОЙ выбор; в защиту ветки — одно имя.")
         print(
             f"Сводный гейт заготовка не кладёт: скопируйте `{paths.WORKFLOWS}/{SUMMARY_FLOW}` "
@@ -499,6 +530,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
     print("#    в матрицу, и защита начинает ждать имя, которого никто не выдаёт (168).")
+    kit_names = ", ".join(f"`{path}`" for path in sorted(rulebook))
+    print(f"\n# 4. Свой свод окна — {kit_names}: общая часть сверена с нашим сводом,")
+    print("#    заглушки «Наполнение проекта» пишет владелец.")
+    for path, text in sorted(rulebook.items()):
+        print(f"\n# --- `{path}` ---\n")
+        print(text, end="")
     return EXIT_OK
 
 
