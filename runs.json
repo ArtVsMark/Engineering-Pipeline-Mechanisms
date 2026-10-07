@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-06T11:07:11+00:00",
+  "updated": "2026-10-07T10:56:04+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -3504,6 +3504,309 @@
           "red": 0,
           "cancelled": 1,
           "seconds": 544,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 92.7
+    },
+    "2026-10-07": {
+      "runs": {
+        "verify-queue": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 13,
+          "seconds": 1825,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 584,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 101,
+          "red": 0,
+          "cancelled": 6,
+          "seconds": 1129,
+          "timed": 101,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 22,
+          "seconds": 2246,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 17,
+          "seconds": 2082,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 170,
+          "red": 0,
+          "cancelled": 100,
+          "seconds": 3371,
+          "timed": 170,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 313,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 25,
+          "seconds": 2973,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 82,
+          "red": 1,
+          "cancelled": 57,
+          "seconds": 9905,
+          "timed": 82,
+          "red_jobs": {
+            "journal / journal": 1
+          },
+          "red_steps": {
+            "journal / journal · новая запись решения называет судьбу правила": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "ci-complete": {
+          "runs": 79,
+          "red": 1,
+          "cancelled": 63,
+          "seconds": 8730,
+          "timed": 79,
+          "red_jobs": {
+            "ci-complete": 1
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "claude": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 17,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 323,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 9,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 1941,
+          "timed": 9,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 381,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Общий издатель фактов семьи: step-facts.yml, а badges.yml — его первый потребитель (+2)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1644,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        ".github/workflows/step-facts.yml": {
+          "runs": 2,
+          "red": 2,
+          "cancelled": 0,
+          "seconds": 0,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 35,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 204,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 661,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Предикаты «неприменимо» цитируют границу ответа; 066 и 120 держат обе половины (+1)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 2,
+          "seconds": 1039,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Чужой вызов того же пути не делает прогон носителем агента (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 707,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Чужой вызов того же пути не делает прогон носителем агента (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 490,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Форма фрагмента: заголовок internal не тело, ссылка снимается только ссылкой (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 684,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Форма фрагмента: заголовок internal не тело, ссылка снимается только ссылкой": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 438,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Чужой вызов того же пути не делает прогон носителем агента (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 953,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Чужой вызов того же пути не делает прогон носителем агента": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 492,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
