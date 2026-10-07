@@ -236,20 +236,17 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
     джоба (`artifacts_of`), в заготовку не едет: у потребителя его некому
     выгрузить, и шаг предупреждал бы на каждом заходе.
 
-    СТРОГОЕ ПРАВИЛО ПОСЛЕ ПЕРЕЧНЯ (третий заход по месту — поздний взгляд на
-    #1189; 210). `needs` у джоба вызова снимается целиком, поэтому любое
-    выражение `needs.` в нём — в своём условии, в `secrets`, `strategy`,
-    `concurrency` — ведёт в пустоту: заход отказывает, а не перебирает ключи.
-    Статусная функция ищется во всех склеиваемых условиях, а не только в своём.
-
-    ПЕРЕЧЕНЬ ФОРМ, а не очередная (второй заход по месту — взгляд на #1189;
-    210). Что снятый джоб уносит или оставляет висеть: его условие —
-    переносится; условие в обёртке `${{ }}` — обёртка снимается до склейки,
-    иначе площадка прочла бы непустую строку как истину; условие со ссылкой
-    на `needs.` и статусная функция в своём условии вызова — честно не
-    переносятся, и заход отказывает с названной причиной; вход с именем
-    артефакта или со ссылкой на `needs.<снятый>` — не едет и назван в шапке
-    заготовки.
+    СТРОГОЕ ПРАВИЛО, А НЕ ПЕРЕЧЕНЬ (четвёртый заход по месту — взгляды на
+    #1189 и #1195; 210). У вызова снимаются ровно те `needs`, что ведут на
+    снятые джобы; `needs` на другой джоб вызова остаётся, иначе два вызова
+    потеряли бы порядок. Отказ с причиной, а не склейка, в двух случаях:
+    выражение площадки (`if` целиком, остальное — внутри `${{ }}`) ссылается
+    на снятый джоб — в заготовке оно вело бы в пустоту; или `needs` снят, а
+    в своём либо перенесённом условии стоит статусная функция — она судила
+    бы исход другого множества джобов. Условие снятого переносится без
+    обёртки `${{ }}`: обёрнутая склейка — непустая строка, а строка истинна.
+    Вход с именем артефакта или со ссылкой на снятый джоб не едет и назван в
+    шапке заготовки.
     """
     jobs = document.get("jobs") or {}
     calls = [
@@ -262,13 +259,16 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
     for key in calls:
         job = jobs[key] or {}
         body = {one: value for one, value in job.items() if one != "needs"}
+        stays = [one for one in needed_by(jobs, key) if one not in gone]
+        if stays:
+            body = {"needs": stays[0] if len(stays) == 1 else stays, **body}
         body["uses"] = outer.removeprefix("uses: ")
         guard = inherited_guard(jobs, key, gone)
         if guard:
             body["if"] = guard
         said_with: dict[str, Any] = {}
         for one, value in (body.get("with") or {}).items():
-            if value in lost or leans_on(str(value), gone):
+            if value in lost or any(leans_on(one, gone) for one in expressions(value)):
                 dropped.append(f"{key}.{one}")
             else:
                 said_with[one] = value
@@ -276,11 +276,19 @@ def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -
             body["with"] = said_with
         else:
             body.pop("with", None)
-        dangling = [one for one, value in body.items() if NEEDS_REF.search(str(value))]
+        dangling = [
+            one
+            for one, value in body.items()
+            if any(
+                leans_on(said, gone)
+                for said in ([bare_condition(str(value))] if one == "if" else expressions(value))
+            )
+        ]
         if dangling:
             raise NotRun(
-                f"у вызова `{key}` снят `needs`, а {', '.join(sorted(dangling))} ссылается на "
-                "`needs.` — в заготовке это вело бы в пустоту, перенесите руками"
+                f"у вызова `{key}` {', '.join(sorted(dangling))} ссылается на снятый джоб "
+                f"({', '.join(sorted(gone))}) — в заготовке это вело бы в пустоту, "
+                "перенесите руками"
             )
         kept[str(key)] = body
     said: dict[str, Any] = {"name": document.get("name") or Path(source).stem}
@@ -322,6 +330,19 @@ def bare_condition(text: str) -> str:
     return said
 
 
+#: Выражение площадки внутри строки: вне `${{ }}` слово `needs.` — литерал.
+EXPRESSION: Final = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
+
+
+def expressions(value: Any) -> list[str]:
+    """Все выражения `${{ }}` в значении — в строках, списках и словарях на любой глубине."""
+    if isinstance(value, dict):
+        return [one for inner in value.values() for one in expressions(inner)]
+    if isinstance(value, list):
+        return [one for inner in value for one in expressions(inner)]
+    return [match.group(1) for match in EXPRESSION.finditer(str(value))]
+
+
 def leans_on(text: str, gone: set[str]) -> bool:
     """Ссылается ли выражение на выход или исход одного из снятых джобов."""
     return any(re.search(rf"\bneeds\.{re.escape(one)}\b", text) for one in gone)
@@ -341,8 +362,8 @@ def inherited_guard(jobs: dict[Any, Any], key: Any, gone: set[str]) -> str:
     if own:
         found.append(bare_condition(str(own)))
     queue = [one for one in needed_by(jobs, key) if one in gone]
+    cut = bool(queue)
     seen: set[str] = set()
-    carried = 0
     while queue:
         one = queue.pop(0)
         if one in seen:
@@ -357,10 +378,9 @@ def inherited_guard(jobs: dict[Any, Any], key: Any, gone: set[str]) -> str:
             )
         if condition and condition not in found:
             found.append(condition)
-            carried += 1
         queue += [more for more in needed_by(jobs, one) if more in gone]
     status = [one for one in found if STATUS_CALL.search(one)]
-    if carried and status:
+    if cut and status:
         raise NotRun(
             f"у вызова `{key}` условие со статусной функцией: «{status[0]}» — без `needs` "
             "она судит другое, и склейка изменила бы смысл, разберите руками"
