@@ -687,3 +687,41 @@ def test_the_live_kit_is_what_onboard_lays() -> None:
     """Живое дерево: заход кладёт ровно файлы свода, у которых есть заготовка."""
     rulebook = load_script("check_rulebook_fresh.py").RULEBOOK
     assert sorted(str(one) for one in module.rulebook_kit(ROOT)) == sorted(rulebook)
+
+
+# --- данные потребителя (#996) -----------------------------------------------
+
+
+def test_the_consumer_data_follows_imports_and_skips_what_is_laid() -> None:
+    """Перечень данных выводится из дерева: через импорт и без того, что кладёт заготовка.
+
+    `.github/labels.yml` читает не `agent_pr`, которого зовёт шаг, а импортированный
+    им `labels`: без обхода импорта перечень терял бы его молча. Крюк окна
+    `.claude/hooks/floor.sh` настраивается потребителем, но шаги его не зовут.
+    """
+    paths = load_script("paths.py")
+    names = module.steps(ROOT)
+    data = module.consumer_data(ROOT, names, {paths.PIPELINE})
+    assert data is not None
+    assert ".github/labels.yml" in data, data
+    assert ".claude/hooks/floor.sh" not in data, data
+    assert not [one for one in data if one.startswith(("scripts/", ".github/workflows/"))], data
+    laid = module.consumer_data(ROOT, names, {paths.PIPELINE, Path(".github/labels.yml")})
+    assert laid is not None and ".github/labels.yml" not in laid
+
+
+def test_without_an_inventory_the_list_is_not_derived(tmp_path: Path) -> None:
+    """Инвентаря нет — перечень не выведен (`None`), а не пуст: пустой значил бы «не нужно»."""
+    assert module.consumer_data(tmp_path, [], set()) is None
+
+
+def test_called_scripts_walk_our_imports_only(tmp_path: Path) -> None:
+    """Обход идёт по нашему `scripts/` транзитивно; чужой модуль и стандартная библиотека — нет."""
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "step-план.yml").write_text(
+        "run: python $MECHANISMS/scripts/верх.py\n", encoding="utf-8"
+    )
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "верх.py").write_text("import os\nimport низ\n", encoding="utf-8")
+    (tmp_path / "scripts" / "низ.py").write_text("from yaml import safe_load\n", encoding="utf-8")
+    assert module.called_scripts(tmp_path, ["план"]) == {"верх", "низ"}
