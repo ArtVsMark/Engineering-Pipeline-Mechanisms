@@ -115,6 +115,9 @@ PORTABLE: Final = Path(".rules/portable.json")
 #: Исполняемые предикаты ответов «неприменимо» (#1171): команда и законный
 #: сегодня вывод по каждому номеру; держит tests/test_inapplicable.py.
 INAPPLICABLE: Final = Path(".rules/inapplicable.json")
+#: Заготовка свода для потребителя (#995): общая часть нашего свода и заглушки
+#: наполнения; сверку с нашим сводом держит tests/test_rulebook_kit.py.
+KIT: Final = Path("kit")
 #: Записи решений: почему выбрано так, а не иначе. Адрес объявлен здесь, а не
 #: строится читателем: второй якорь заводится именно так (115).
 DECISIONS: Final = Path("docs/decisions")
@@ -189,6 +192,7 @@ ALL: Final = (
     LENIENCY,
     PORTABLE,
     INAPPLICABLE,
+    KIT,
     PROTECTION,
     OUTCOMES,
     CONSUMERS,
