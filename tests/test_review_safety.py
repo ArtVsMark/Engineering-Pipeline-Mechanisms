@@ -1661,8 +1661,12 @@ FROM_MECHANISMS = "${{ env.MECHANISMS }}/scripts/"
 
 
 def our_tree_in(command: str) -> bool:
-    """Зовёт ли команда `scripts/` из дерева головы, а не из выкачки механизмов."""
-    return "scripts/" in command and FROM_MECHANISMS not in command
+    """Зовёт ли команда `scripts/` из дерева головы, а не из выкачки механизмов.
+
+    Путь выкачки ВЫЧИТАЕТСЯ, а не служит пропуском: команда, где рядом с ним
+    стоит и вызов из дерева головы, иначе считалась бы чистой (взгляд на #1185).
+    """
+    return "scripts/" in command.replace(FROM_MECHANISMS, "")
 
 
 @pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
@@ -1689,8 +1693,9 @@ def test_an_allowed_gate_comes_from_the_mechanisms(path: Path) -> None:
         ("python scripts/check_version.py", True),
         ("python ${{ env.MECHANISMS }}/scripts/check_version.py", False),
         ("python -m pytest", False),
+        ("python ${{ env.MECHANISMS }}/scripts/a.py scripts/b.py", True),
     ],
-    ids=["дерево головы", "выкачка механизмов", "не наш код"],
+    ids=["дерево головы", "выкачка механизмов", "не наш код", "оба пути в одной команде"],
 )
 def test_our_tree_is_told_from_the_mechanisms(command: str, ours: bool) -> None:
     """Обе половины признака: путь головы — наш код из дерева, путь выкачки — нет."""
