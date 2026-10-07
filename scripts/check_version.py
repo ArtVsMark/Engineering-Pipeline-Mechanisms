@@ -16,8 +16,13 @@
 осталось, расходиться нечему; опасен обратный случай — маркер сняли, число
 оставили, — и он ловится.
 
-Исходы (правило 039): ``0`` чисто, либо гейт неприменим — нет `CONTRACT_VERSION`,
-и причина напечатана (#1187) · ``1`` есть находки · ``2`` не отработал.
+Без `CONTRACT_VERSION` дерево читается всё равно: маркер контракта без
+источника — находка, а рукописное число без источника сверить не с чем, и это
+говорится, а не выдаётся за «чисто» (взгляд на #1192).
+
+Исходы (правило 039): ``0`` чисто, либо гейт неприменим — нет `CONTRACT_VERSION`
+и нет маркеров, причина напечатана (#1187) · ``1`` есть находки · ``2`` не
+отработал.
 """
 
 import argparse
@@ -77,14 +82,14 @@ def tracked_files() -> list[Path]:
     return files
 
 
-def check(version: str, files: list[Path]) -> list[str]:
-    """Ищет рукописные вхождения версии и расхождения внутри маркеров."""
-    # Границы вокруг числа: «1.2.3» не должно совпадать с «11.2.3» или «1.2.30».
-    loose = re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
-    findings: list[str] = []
-    scanned = 0
-    skipped = 0
+def texts(files: list[Path]) -> list[tuple[str, str]]:
+    """Тексты проверяемых файлов по имени; охват печатается числом, пустота — отказ.
 
+    Охват называется числом: проверка, читающая список путей, без него
+    неотличима от чистого результата — слепота выглядит как «чисто» (165).
+    """
+    found: list[tuple[str, str]] = []
+    skipped = 0
     for path in files:
         name = path.as_posix()
         if name in ALLOWED or name.startswith(ALLOWED_PREFIXES):
@@ -94,12 +99,21 @@ def check(version: str, files: list[Path]) -> list[str]:
             skipped += 1
             continue
         try:
-            text = path.read_text(encoding="utf-8")
+            found.append((name, path.read_text(encoding="utf-8")))
         except OSError, UnicodeDecodeError:
             skipped += 1
-            continue
-        scanned += 1
+    print(f"просмотрено файлов: {len(found)}, пропущено: {skipped}")
+    if not found:
+        raise NotRun("не просмотрено ни одного файла — предмет проверки не найден (075)")
+    return found
 
+
+def check(version: str, files: list[Path]) -> list[str]:
+    """Ищет рукописные вхождения версии и расхождения внутри маркеров."""
+    # Границы вокруг числа: «1.2.3» не должно совпадать с «11.2.3» или «1.2.30».
+    loose = re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
+    findings: list[str] = []
+    for name, text in texts(files):
         for match in MARKER_RE.finditer(text):
             value = match["value"].strip()
             if value != version:
@@ -114,19 +128,23 @@ def check(version: str, files: list[Path]) -> list[str]:
                 findings.append(
                     f"{name}:{number}: версия «{version}» вписана вне источника и вне маркера"
                 )
-
-    # Охват называется числом: проверка, читающая список путей, без него
-    # неотличима от чистого результата — слепота выглядит как «чисто» (165).
-    print(f"просмотрено файлов: {scanned}, пропущено: {skipped}")
-    if scanned == 0:
-        raise NotRun("не просмотрено ни одного файла — предмет проверки не найден (075)")
     return findings
+
+
+def orphan_markers(files: list[Path]) -> list[str]:
+    """Маркеры контракта в дереве без источника: переписать их сборке нечем."""
+    return [
+        f"{name}: маркер контракта «{match['value'].strip()}» стоит, а {paths.VERSION} нет — "
+        "сборке переписать его нечем"
+        for name, text in texts(files)
+        for match in MARKER_RE.finditer(text)
+    ]
 
 
 #: Почему гейт неприменим в дереве без источника версии: причина названа (154).
 NO_SOURCE: Final = (
-    f"неприменимо: в корне нет {paths.VERSION} — проект не объявляет версию "
-    "контракта, и дублировать руками нечего (#1187)"
+    f"неприменимо: в корне нет {paths.VERSION} и маркеров контракта — проект не "
+    "объявляет версию контракта; рукописное число без источника сверить не с чем (#1187)"
 )
 
 
@@ -142,12 +160,19 @@ def main(argv: list[str] | None = None) -> int:
     `tests/test_version.py`: его пропажа у нас не спрячется за этим исходом.
     """
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
-    if not paths.VERSION.is_file():
-        print(NO_SOURCE)
-        return EXIT_CLEAN
+    # СПИСОК ФАЙЛОВ — ПЕРВЫМ, до вопроса об источнике (взгляд на #1192):
+    # вне репозитория гейт обязан сказать «не отработал», а не «неприменимо».
     try:
-        version = project_version.declared()
-        findings = check(version, tracked_files())
+        files = tracked_files()
+        if not paths.VERSION.is_file():
+            findings = orphan_markers(files)
+            if not findings:
+                print(NO_SOURCE)
+                return EXIT_CLEAN
+            version = ""
+        else:
+            version = project_version.declared()
+            findings = check(version, files)
     except (NotRun, project_version.NotRun) as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
