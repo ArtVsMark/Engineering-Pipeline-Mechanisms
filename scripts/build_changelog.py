@@ -234,8 +234,9 @@ def fragments_of(paths: list[str]) -> list[Fragment]:
         raise NotRun(
             "фрагменты не той формы:\n  "
             + "\n  ".join(faults)
-            + f"\n\nТело — не длиннее {FRAGMENT_LINES} строк о том, что изменилось для "
-            "потребителя; разбор и замеры — в задачу, во фрагменте — ссылка на неё. "
+            + f"\n\nТело — не длиннее {FRAGMENT_LINES} строк и {FRAGMENT_CHARS} знаков о том, "
+            "что изменилось для потребителя; разбор и замеры — в задачу, во фрагменте — "
+            "ссылка на неё. "
             "Заголовок — `###` и ниже: `##` в журнале — уровень версии"
         )
     return fragments
@@ -244,10 +245,18 @@ def fragments_of(paths: list[str]) -> list[Fragment]:
 def shape_fault(fragment: Fragment) -> str:
     """Чем фрагмент нарушает форму: заголовок выше `###` или размер тела; пусто — ничем.
 
-    ТЕЛО — все непустые строки, кроме первой строки-заголовка и последней строки
+    ТЕЛО — все непустые строки, кроме строки-заголовка и последней строки
     ссылки на задачу: подзаголовки `####`, строки блоков кода и строка причины
     рода `internal` в счёт идут. Заголовок ищется только вне блоков кода:
     `# …` в примере shell — комментарий, а не заголовок (взгляд на #1174).
+
+    ЗАГОЛОВОК НЕ СЧИТАЕТСЯ И У `internal`, где он стоит под причиной —
+    цитатой в одну строку или в несколько. Прежде снималась только первая
+    строка, и у этого рода в счёт шёл заголовок: предел выходил строже на
+    строку и на длину заголовка.
+    Ссылка снимается, только если она ссылка: разбор отвергает фрагмент без
+    неё раньше, но предел не должен молча расти на строку, если сюда придёт
+    иной (взгляд на #1174).
     """
     lines = [one.strip() for one in fragment.body.splitlines() if one.strip()]
     inside = False
@@ -257,7 +266,13 @@ def shape_fault(fragment: Fragment) -> str:
             continue
         if not inside and TOO_HIGH_RE.match(one):
             return f"заголовок выше `###`: «{one}»"
-    body = lines[1:-1] if lines and lines[0].startswith("#") else lines[:-1]
+    body = lines[:-1] if lines and LINK_LINE_RE.match(lines[-1]) else list(lines)
+    # Заголовок — первая строка ПОСЛЕ ведущей цитаты причины, сколько бы строк
+    # она ни заняла: жёсткий индекс пропускал причину в две строки `>`, и
+    # заголовок снова шёл в счёт (взгляд на #1181, 195).
+    at = next((index for index, one in enumerate(body) if not one.startswith(">")), len(body))
+    if at < len(body) and body[at].startswith("#"):
+        del body[at]
     if len(body) > FRAGMENT_LINES:
         return f"тело {len(body)} строк, предел {FRAGMENT_LINES}"
     size = sum(len(one) for one in body)
