@@ -1857,12 +1857,8 @@ def test_every_agent_call_names_its_model_and_its_failure() -> None:
 
 
 #: Джобы с полной историей, чья мелкая выборка её не режет, — с причиной.
-SHALLOW_FETCH_EXEMPT: dict[tuple[str, str], str] = {
-    ("badges.yml", "badges"): (
-        "выборка берёт ветку `badges` — сироту, с историей общей ветки не связанную: "
-        "граница мелкости ложится на её коммит, а не на историю общей ветки"
-    ),
-}
+#: Пусто с 07.10.2026: ветку `badges` джоб значков выбирает целиком (взгляд на #1183).
+SHALLOW_FETCH_EXEMPT: dict[tuple[str, str], str] = {}
 
 #: Вся семья флагов, делающих клон мелким, а не один `--depth` (взгляд на #793).
 SHALLOW_FETCH = re.compile(r"\bgit\s+fetch\b.*--(?:depth|deepen|shallow-since|shallow-exclude)\b")
