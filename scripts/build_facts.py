@@ -34,15 +34,24 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, NamedTuple
 
+import facts_common as common
 import family
 import kinds
 import paths
 import pipeline_checks as policy
-import version
+import version as version
+
+# ОБЩАЯ ЧАСТЬ ПОДНЯТА В `facts_common` (#1001, 090); имена остаются и здесь:
+# их читают наши тесты и соседи, а смысл у них тот же — источник один.
+from facts_common import SCHEMA as SCHEMA
+from facts_common import SCHEMA_OF as SCHEMA_OF
+from facts_common import NotRun as NotRun
+from facts_common import contract_coverage as contract_coverage
+from facts_common import coverage_facts as coverage_facts
+from facts_common import release_series as release_series
 
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
@@ -53,39 +62,12 @@ FACTS: Final = "facts.json"
 #: `.rules/facts-contract.md`; решение владельца 24.09.2026, #759). До этого
 #: файл лежал в корне ветки, и витрина считала, что фактов у проекта нет.
 PUBLISHED_DIR: Final = paths.BADGES_DIR
-#: Версия формата — СТРОКОЙ, как требует контракт: число не различает `1.0` и
-#: `1.10`. Мажор — контракта семьи, а не наш: наши собственные разделы едут
-#: рядом незнакомыми ему ключами, и их он игнорирует.
-SCHEMA: Final = "1.3"
-SCHEMA_OF: Final = (
-    "контракт фактов витрины семьи: "
-    "https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md"
-)
-
 #: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
 #: а не новая тонкость, о которой механизм обязан догадаться.
 STATUSES: Final = ("active", "rejected", "not-applicable", "unreviewed")
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
-
-
-class NotRun(RuntimeError):
-    """Сборка не отработала: третий исход, а не пустые факты."""
-
-
-def release_series(tag: str | None) -> str:
-    """Выпуск в форме договора фактов 1.3 — серия `X.Y`, а не тег; выпуска нет — пусто.
-
-    РЕШЕНИЕ ВЛАДЕЛЬЦА 02.10.2026 (#1046, договор фактов 1.3). Третья цифра
-    тега выпуска всегда 0 и смысла не несёт, буква `v` — запись тега, а не
-    выпуска. Версия головы (`version`, `X.Y.Z`) начинается с серии и точки —
-    это сверяет витрина. Разбор — `version.digits`, а не нарезка по точке (214).
-    """
-    if not tag:
-        return ""
-    major, minor, _ = version.digits(version.bare(tag))
-    return f"{major}.{minor}"
 
 
 def contract_version(path: Path = VERSION_FILE) -> str:
@@ -311,77 +293,12 @@ def script_runs(root: Path) -> dict[str, int]:
     return {"runnable": sum(len(where) for where in found.values()), "started": len(started)}
 
 
-def coverage_facts(path: Path | None) -> dict[str, Any]:
-    """Покрытие строк из отчёта счётчика; без отчёта — «не прочитано».
-
-    ЧИСЛО ПРИХОДИТ ИЗ ПРОГОНА, А НЕ СЧИТАЕТСЯ ЗДЕСЬ. Считать покрытие по дереву
-    нельзя: оно про исполнение, а не про текст. Отчёта нет — так и говорится;
-    ноль вместо незнания читался бы как «ничего не покрыто» (045).
-
-    ЗАМЕР ОБЯЗАН ВИДЕТЬ ПОДПРОЦЕССЫ. Гейты проверяются запуском, и счётчик без
-    этого показывал ноль у полностью проверенных модулей: 66% против настоящих
-    77%. Держит это `tests/conftest.py` (`under_counter`), а не договорённость.
-
-    ДОЛЯ ЕДЕТ ВМЕСТЕ С ДВУМЯ ЧИСЛАМИ, ИЗ КОТОРЫХ СДЕЛАНА. «77 %» отвечает на
-    вопрос «много ли», но не на «много ЧЕГО»: та же доля у дерева в сто строк и
-    в десять тысяч значит разное, а падение с 77 до 70 бывает и новым кодом без
-    проверок, и удалением покрытого
-    ([041](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/041-two-honest-numbers-beat-one-averaged.md)).
-    До 18.09.2026 витрина публиковала ОДНУ долю покрытия — единственное
-    усреднённое число во всём наборе фактов, и единственное без своих слагаемых:
-    у семьи доля стоит рядом с `closed_by_shared` из `held_by_machine`, у правил
-    вместо доли пара «отвечено из всего».
-
-    ОТСУТСТВИЕ ЧИСЕЛ — ОТКАЗ, А НЕ МОЛЧАНИЕ, и той же породы, что у доли выше:
-    форма чужого отчёта меняется, и опубликовать долю без слагаемых значило бы
-    вернуться к тому, что здесь и чинится (045).
-    """
-    if path is None or not path.is_file():
-        return {"read": False}
-    try:
-        report = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        raise NotRun(f"отчёт покрытия не разобрался: {exc}") from exc
-    totals = report.get("totals") or {}
-    percent = totals.get("percent_covered")
-    if percent is None:
-        raise NotRun(f"{path}: в отчёте нет доли покрытия — форма ответа изменилась")
-    covered, lines = totals.get("covered_lines"), totals.get("num_statements")
-    if covered is None or lines is None:
-        raise NotRun(
-            f"{path}: в отчёте нет чисел, из которых сделана доля — форма ответа изменилась"
-        )
-    return {
-        "read": True,
-        "percent": round(float(percent), 1),
-        "covered": int(covered),
-        "lines": int(lines),
-    }
-
-
-def contract_coverage(said: dict[str, Any]) -> dict[str, Any]:
-    """Покрытие в форме контракта: доля — наверху, слагаемые — в `coverage`.
-
-    ДОЛЯ ОДНА, А НЕ ДВЕ: `coverage_percent` контракта заменяет прежнее
-    `coverage.percent`, а не дублирует его (#759). Не прочитано — ключа
-    `coverage_percent` нет вовсе, а причина стоит в `none.coverage_percent`:
-    договор фактов с 1.2 требует по каждому показателю значение или причину, и
-    молчание третьим исходом не считается (#1001). Ноль читался бы как ответ.
-    """
-    parts = {key: value for key, value in said.items() if key != "percent"}
-    if not said.get("read"):
-        why = "отчёт покрытия этого прогона не прочитан — доля не мерилась, а не равна нулю"
-        return {"coverage": parts, "none": {"coverage_percent": why}}
-    return {"coverage": parts, "coverage_percent": said["percent"]}
-
-
 #: Прогон CI, чей статус витрина спрашивает у площадки по имени файла: свой
 #: красный файл фактов честно сказать не может (договор фактов с 1.2, #1001).
 CI_FLOW: Final = paths.WORKFLOWS / "ci.yml"
-#: Причина в `none.python` — для читателя витрины, а не трасса: путь раннера
-#: и `repr` исключения ему ничего не говорят. Подробность уходит в поток
-#: диагностики прогона (взгляд на #1004).
-NO_PYTHON: Final = "матрица версий Python в ci.yml не прочитана — версии не названы, а не пусты"
+#: Причина в `none.python` — для читателя витрины, а не трасса: формулировка —
+#: у общего издателя, здесь только имя нашего прогона в ней.
+NO_PYTHON: Final = common.UNREAD_MATRIX.format(CI_FLOW.name)
 #: Джобы матрицы версий: поддерживаемые и пробные. Версии берутся из самой
 #: матрицы, а не пишутся второй раз (005).
 SUPPORTED_JOB: Final = "test-matrix"
@@ -389,42 +306,47 @@ EXPERIMENTAL_JOB: Final = "test-next"
 
 
 def python_facts(path: Path = CI_FLOW) -> dict[str, list[str]]:
-    """Версии Python, на которых проект гоняется, — из матрицы CI, а не по памяти.
+    """Наши версии Python: `test-matrix` в `ci.yml` и пробные `test-next` рядом (#1018).
 
-    `supported` — матрица `test-matrix`, `experimental` — `test-next` из
-    `python-next.yml`, `os` —
-    образы, на которых они идут. Договор фактов с 1.2 требует раздел
-    `python` либо причину в `none.python` (#1001): матрица у нас есть, поэтому
-    раздел, а не причина. Матрицу читает `pipeline_checks` — читатель прогонов
-    один; не прочитана — `policy.BadPolicy` с причиной.
+    Читает общий издатель (`facts_common.python_facts`): матрица у нас та же,
+    что он назовёт потребителю, и второго чтения нет (022).
     """
-    supported, first = policy.matrix_axis(path, SUPPORTED_JOB, "python")
-    # Предрелизная — своим прогоном рядом с `ci.yml` (#1018).
-    experimental, second = policy.matrix_axis(
-        path.with_name(paths.PYTHON_NEXT.name), EXPERIMENTAL_JOB, "python"
+    return common.python_facts(
+        path, SUPPORTED_JOB, path.with_name(paths.PYTHON_NEXT.name), EXPERIMENTAL_JOB
     )
-    return {"supported": supported, "experimental": experimental, "os": sorted({first, second})}
+
+
+#: Наши матрицы в форме входа общего шага: `<файл прогона>:<джоб>`.
+OUR_MATRIX: Final = f"{CI_FLOW.name}:{SUPPORTED_JOB}"
+OUR_NEXT: Final = f"{paths.PYTHON_NEXT.name}:{EXPERIMENTAL_JOB}"
 
 
 def ci_facts(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
-    """Разделы `ci` и `python` договора — и причины в `none` для непрочитанного.
+    """Разделы `ci` и `python` договора у нас — общим издателем, с нашими матрицами."""
+    return common.ci_facts(root, CI_FLOW.name, OUR_MATRIX, OUR_NEXT)
 
-    `ci` договор требует всегда, а в `none` его не положить: прогона, которого
-    нет в дереве, файл фактов не называет, и сборка отказывает (045). Матрица
-    не прочитана — раздела `python` нет, причина для читателя витрины стоит в
-    `none.python`, а подробность уходит в поток диагностики (взгляд на #1004).
+
+def ours(root: Path, summary: Path | None = None, mine: str = "") -> dict[str, Any]:
+    """Свои разделы проекта — то, что общий издатель не выводит: вход `extra-facts`.
+
+    Ответ каталогу и проверки читаются первыми: их отказ — о входе самого
+    проекта, и назвать его надо раньше чужой причины.
     """
-    if not (root / CI_FLOW).is_file():
-        raise NotRun(
-            f"нет прогона CI {CI_FLOW}: договор фактов требует ci.workflow, а назвать нечего"
-        )
-    run: dict[str, Any] = {"ci": {"workflow": CI_FLOW.name}}
-    try:
-        run["python"] = python_facts(root / CI_FLOW)
-    except policy.BadPolicy as exc:
-        print(f"warning: {exc}", file=sys.stderr)
-        return run, {"python": NO_PYTHON}
-    return run, {}
+    rules = rules_facts(root / BINDINGS)
+    checks = checks_facts(root / policy.DEFAULT_PATH)
+    return {
+        "contract": contract_version(root / VERSION_FILE),
+        # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им
+        # не нужен и вреден, а живой адрес обязателен (049).
+        "tests": test_counts(root),
+        # Гейты проверяются ЗАПУСКОМ, и это отдельный предмет от покрытия строк.
+        "scripts": script_runs(root),
+        "rules": rules,
+        "checks_per_pr": checks,
+        # Разрез семьи — раздел сверх договора, и причину он несёт своей формой
+        # `{"read": false, "why": NO_FAMILY}` (взгляды на #1004 и #1014, 195).
+        "family": family_facts(summary, mine=mine, answers=root / BINDINGS),
+    }
 
 
 def collect(
@@ -434,68 +356,26 @@ def collect(
     coverage: Path | None = None,
     mine: str = "",
 ) -> dict[str, Any]:
-    """Собирает все факты о проекте в одно отображение.
+    """Собирает все факты о проекте: общие — общим издателем, свои — `ours`.
 
     `mine` — наше каноничное имя у площадки. Оно нужно ровно одному числу:
     отставанию от семьи, где своё надо отличить от чужого. Пусто — число не
     считается и говорит об этом, а не выходит нулём (045).
+
+    СБОРКА ТА ЖЕ, ЧТО У ОБЩЕГО ШАГА (#1001): общая часть и слияние — его,
+    поэтому наш файл и файл потребителя расходиться не могут (022).
     """
-    # ВЕРСИЯ ПРОЕКТА И ВЕРСИЯ КОНТРАКТА — РАЗНЫЕ ЧИСЛА, И ОБА НУЖНЫ. Контракт
-    # объявляет поверхность механизмов и поднимается решением человека; версия
-    # проекта СЧИТАЕТСЯ по истории — «столько изменений принято после выпуска».
-    # Свести их в одно значило бы либо скрыть работу, либо объявить выпуском
-    # каждое изменение (035).
-    number, whole = version.version(root)
-    # ЗНАЧЕНИЕ ИЛИ ПРИЧИНА, ТРЕТЬЕГО НЕТ (договор фактов с 1.2, #1001): показатель
-    # ДОГОВОРА, который не прочитан, уходит причиной в `none`, а не пропадает
-    # молча. Ключи `none` схема витрины перечисляет закрытым списком, и разреза
-    # семьи в нём нет: `family` — раздел сверх договора, и причину он несёт
-    # своей формой `{"read": false, "why": NO_FAMILY}` — причиной для читателя,
-    # а не текстом отказа (взгляды на #1004 и #1014, 195).
-    # Ответ каталогу и проверки читаются раньше прогона CI: их отказ — о входе
-    # самого проекта, и назвать его надо первым, а не за чужой причиной.
-    rules = rules_facts(root / BINDINGS)
-    checks = checks_facts(root / policy.DEFAULT_PATH)
-    run, none = ci_facts(root)
-    covered = contract_coverage(coverage_facts(coverage))
-    none.update(covered.pop("none", {}))
-    said = {
-        # МИНИМУМ КОНТРАКТА СЕМЬИ: версия формата строкой, о ком файл и когда
-        # собран — с поясом, чтобы витрина могла сказать «факты устарели»
-        # вместо того, чтобы показывать прошлое как настоящее (#759).
-        "schema": SCHEMA,
-        "schema_of": SCHEMA_OF,
-        "repo": mine,
-        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "commit": sha,
-        # Статус CI витрина спрашивает у площадки по имени файла (договор фактов с 1.2).
-        **run,
-        "contract": contract_version(root / VERSION_FILE),
-        "version": number,
-        # Неполнота названа рядом с числом, а не выброшена: клон без тегов даёт
-        # правдоподобное число, которое ложь (045).
-        "version_whole": whole,
-        # ВЫПУСК И ВЕРСИЯ ГОЛОВЫ — РАЗНЫЕ ЧИСЛА. Голова уходит вперёд каждым
-        # изменением, потребитель живёт на выпущенном; одно вместо другого
-        # обещало бы ему то, чего он не получал. Серией `X.Y`, а не тегом
-        # (договор фактов 1.3, #1046).
-        "release": release_series(version.release_tag(root)),
-        # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им
-        # не нужен и вреден — они дёргаются от каждого изменения, — но живой
-        # адрес обязателен, и вот он (049).
-        "tests": test_counts(root),
-        # Гейты проверяются ЗАПУСКОМ, и это отдельный предмет от покрытия строк:
-        # исход процесса — то, ради чего гейт существует.
-        "scripts": script_runs(root),
-        # Покрытие строк приходит из прогона: по дереву его не сосчитать.
-        **covered,
-        "rules": rules,
-        "checks_per_pr": checks,
-        "family": family_facts(summary, mine=mine, answers=root / BINDINGS),
-    }
-    if none:
-        said["none"] = none
-    return said
+    mine_part = ours(root, summary, mine)
+    shared = common.common(
+        root,
+        sha=sha,
+        repo=mine,
+        ci_workflow=CI_FLOW.name,
+        python_matrix=OUR_MATRIX,
+        python_next=OUR_NEXT,
+        coverage=coverage,
+    )
+    return common.merge(shared, mine_part)
 
 
 class Badge(NamedTuple):
@@ -668,11 +548,97 @@ UNIFIED: Final = "python.svg"
 ZONE_INPUTS: Final = ("coverage.json", "version.json")
 
 
+def zeroed(facts: dict[str, Any], root: str) -> bool:
+    """Сосчитанное в ноль названо и остановлено: это обрыв обхода, а не состояние (075)."""
+    counted = {
+        "tests.functions": facts["tests"]["functions"],
+        "tests.modules": facts["tests"]["modules"],
+        "scripts.runnable": facts["scripts"]["runnable"],
+    }
+    empty = sorted(name for name, value in counted.items() if not value)
+    if empty:
+        print(
+            f"факты не опубликованы: {', '.join(empty)} сосчитаны в ноль — это обрыв "
+            f"обхода, а не состояние проекта (075). Корень: {root}",
+            file=sys.stderr,
+        )
+    return bool(empty)
+
+
+def clashed() -> bool:
+    """Имена вывода совпадают — один файл затёр бы другой молча."""
+    clash = clashing_names()
+    if clash:
+        print(
+            f"факты не опубликованы: имена вывода совпадают — {', '.join(clash)}", file=sys.stderr
+        )
+    return bool(clash)
+
+
+def draw_badges(facts: dict[str, Any], out: Path) -> None:
+    """Значки-конечные точки по фактам — в каталог вывода."""
+    for name, draw in BADGES.items():
+        said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
+        (out / name).write_text(said, encoding="utf-8")
+
+
+def extra_written(args: argparse.Namespace) -> int:
+    """Режим `--extra-out`: свои разделы проекта файлом — вход общего шага (#1001)."""
+    try:
+        said = ours(Path(args.root), Path(args.family) if args.family else None, args.repo)
+    except NotRun as exc:
+        print(f"свои разделы не собраны: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    if zeroed(said, args.root):
+        return EXIT_BROKEN
+    out = Path(args.extra_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(said, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"свои разделы: {out} — {', '.join(sorted(said))}")
+    return EXIT_OK
+
+
+def drawn_from(path: Path, out_dir: str) -> int:
+    """Режим `--from-facts`: значки по опубликованному общим шагом `facts.json`.
+
+    Значки рисуются по ТОМУ файлу, который читает витрина, а не по второй
+    сборке: число на значке и в фактах иначе разошлись бы на время между
+    двумя сборками (022).
+    """
+    if not out_dir:
+        print("значки не нарисованы: не назван --out-dir", file=sys.stderr)
+        return EXIT_BROKEN
+    try:
+        facts = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"значки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    if clashed():
+        return EXIT_BROKEN
+    out = Path(out_dir) / PUBLISHED_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        draw_badges(facts, out)
+    except (KeyError, TypeError) as exc:
+        print(f"значки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    print(f"значки нарисованы по {path}: {', '.join(sorted(BADGES))}")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает факты и значок в каталог вывода."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".", help="корень дерева, откуда читаются источники")
-    parser.add_argument("--out-dir", required=True, help="куда положить производное")
+    parser.add_argument("--out-dir", default="", help="куда положить производное")
+    # ДВА РЕЖИМА ДЛЯ ОБЩЕГО ИЗДАТЕЛЯ (#1001, шаг 2). Наш прогон значков —
+    # первый потребитель шага `step-facts.yml`: отдаёт ему свои разделы файлом
+    # и рисует значки по тому `facts.json`, который шаг опубликовал, а не по
+    # второй сборке тех же чисел (155, 022).
+    parser.add_argument(
+        "--extra-out", default="", help="записать только свои разделы — вход extra-facts шага"
+    )
+    parser.add_argument("--from-facts", default="", help="нарисовать значки по готовому facts.json")
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
     parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
@@ -686,6 +652,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.from_facts:
+        return drawn_from(Path(args.from_facts), args.out_dir)
+    if args.extra_out:
+        return extra_written(args)
+    if not args.out_dir:
+        print("факты не собраны: не назван --out-dir", file=sys.stderr)
+        return EXIT_BROKEN
     try:
         facts = collect(
             Path(args.root),
@@ -728,32 +701,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_BROKEN
-    counted = {
-        "tests.functions": facts["tests"]["functions"],
-        "tests.modules": facts["tests"]["modules"],
-        "scripts.runnable": facts["scripts"]["runnable"],
-    }
-    empty = sorted(name for name, value in counted.items() if not value)
-    if empty:
-        print(
-            f"факты не опубликованы: {', '.join(empty)} сосчитаны в ноль — это обрыв "
-            f"обхода, а не состояние проекта (075). Корень: {args.root}",
-            file=sys.stderr,
-        )
-        return EXIT_BROKEN
-
-    clash = clashing_names()
-    if clash:
-        print(
-            f"факты не опубликованы: имена вывода совпадают — {', '.join(clash)}", file=sys.stderr
-        )
+    if zeroed(facts, args.root) or clashed():
         return EXIT_BROKEN
     out = Path(args.out_dir) / PUBLISHED_DIR
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
-    for name, draw in BADGES.items():
-        said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
-        (out / name).write_text(said, encoding="utf-8")
+    draw_badges(facts, out)
 
     rules = facts["rules"]
     print(

@@ -7,7 +7,8 @@
     "ArtVsMark/"
   ],
   "family": [
-    "ArtVsMark/Engineering-Incidents-Playbook"
+    "ArtVsMark/Engineering-Incidents-Playbook",
+    "ArtVsMark/ArtVsMark/"
   ],
   "_own_issues": "номера ЖИВЫХ задач этого проекта — реестров и плана — по метке ведущего механизма. У соседа это номера других задач, поэтому механизм, в строках которого такой номер стоит буквами (константа кода, строка прогона, строка навыка), ответом `as-is` быть не может (находка позднего взгляда на #768). КЛЮЧ — МЕТКА, А НЕ НОМЕР: набор меток сверяется с `findings.marker(...)` и меткой плана в scripts/, и новый реестр без строки здесь краснеет, а не выпадает из замера молча (взгляд на #783, 005). НЕ НОМЕР — ЗНАЧИТ ПРИЧИНА СЛОВАМИ, а не `null`: пустое значение не отличало «номера не бывает» от «ещё не заведена», и оба держались рукой (взгляд на #795). Сверки с площадкой у замера нет: дерево её не видит",
   "own_issues": {
@@ -264,6 +265,9 @@
     ".github/workflows/step-drift.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-facts.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-hail.yml": {
       "answer": "as-is"
     },
@@ -441,6 +445,9 @@
       "where": [
         ".rules/bindings.json"
       ]
+    },
+    "scripts/facts_common.py": {
+      "answer": "as-is"
     },
     "scripts/catalogue.py": {
       "answer": "as-is"

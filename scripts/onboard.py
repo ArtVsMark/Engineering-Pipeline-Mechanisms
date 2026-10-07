@@ -67,12 +67,13 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import check_shipped
 import paths
 import pipeline_checks as policy
 import version
+import yaml
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -186,9 +187,13 @@ def own_kit(flow: Path, name: str, repo: str, pin: str) -> str:
     """
     outer = f"uses: {repo}/.github/workflows/{STEP_PREFIX}{name}.yml@{pin}"
     try:
-        jobs = (policy.run_of(flow).get("jobs") or {}).values()
+        document = policy.run_of(flow)
     except policy.BadPolicy as exc:
         raise NotRun(f"{flow.name} не прочитан: {exc}") from exc
+    every = document.get("jobs") or {}
+    jobs = every.values()
+    if any(step_called(str((job or {}).get("uses") or "")) != name for job in jobs):
+        return calling_part(flow.name, document, name, outer)
     said = [
         str((job or {}).get("uses") or "")
         for job in jobs
@@ -204,6 +209,37 @@ def own_kit(flow: Path, name: str, repo: str, pin: str) -> str:
     for one in inner:
         text = text.replace(one, outer)
     return text
+
+
+def calling_part(source: str, document: dict[Any, Any], name: str, outer: str) -> str:
+    """Заготовка из вызывающего, у которого есть СВОИ джобы: только джобы, зовущие шаг.
+
+    Свои джобы вызывающего — наполнение поставщика: у нас `badges.yml` перед
+    общим шагом фактов собирает свои разделы нашими скриптами, и в заготовке
+    потребителя они вели бы в пустоту (#1001). Поэтому едут события, права,
+    очередь и джобы вызова — с адресом по тегу и без `needs` на снятые джобы;
+    входы вызова остаются как есть: это данные, и правит их потребитель.
+    """
+    jobs = document.get("jobs") or {}
+    kept: dict[str, Any] = {}
+    for key, job in jobs.items():
+        if step_called(str((job or {}).get("uses") or "")) != name:
+            continue
+        body = {one: value for one, value in (job or {}).items() if one != "needs"}
+        body["uses"] = outer.removeprefix("uses: ")
+        kept[str(key)] = body
+    said: dict[str, Any] = {"name": document.get("name") or Path(source).stem}
+    said["on"] = policy.events_raw(document)
+    for one in ("permissions", "concurrency"):
+        if one in document:
+            said[one] = document[one]
+    said["jobs"] = kept
+    head = (
+        f"# Заготовка собрана `scripts/onboard.py` поставщика из его `{source}`:\n"
+        "# только джобы вызова общего шага. Свои джобы поставщика не едут —\n"
+        "# входы вызова (`with:`) — данные, правьте их под свой проект.\n"
+    )
+    return head + str(yaml.safe_dump(said, allow_unicode=True, sort_keys=False))
 
 
 def thin_ci(names: list[str], repo: str, pin: str) -> str:
@@ -305,7 +341,7 @@ def check_name(name: str) -> str:
     return f"{name}{policy.COMPOSED}{name}"
 
 
-def own_records(flow: Path) -> tuple[list[str], bool]:
+def own_records(flow: Path, step: str = "") -> tuple[list[str], bool]:
     """Имена записей своего прогона механизма и идёт ли он на изменении.
 
     ИМЯ БЕРЁТСЯ У РАЗБОРА ПРОГОНА, А НЕ У ИМЕНИ ФАЙЛА ШАГА (#993). Джоб обхода
@@ -322,9 +358,13 @@ def own_records(flow: Path) -> tuple[list[str], bool]:
     """
     try:
         said = policy.run_of(flow)
+        # Названный шаг сужает ответ до джобов, зовущих его: свои джобы
+        # вызывающего в заготовку не едут (`calling_part`), и ответ о них
+        # потребителю был бы ответом о проверке, которой у него нет.
         names = [
             one
             for job_id, body in (said.get("jobs") or {}).items()
+            if not step or step_called(str((body or {}).get("uses") or "")) == step
             for one in policy.check_names(str(job_id), body or {}, flow.parent)
         ]
     except policy.BadPolicy as exc:
@@ -372,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         names = steps(args.root)
         own = own_callers(args.root, names)
-        records = {one: own_records(flow) for one, flow in own.items()}
+        records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
     except (NotRun, check_shipped.NotRun) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
