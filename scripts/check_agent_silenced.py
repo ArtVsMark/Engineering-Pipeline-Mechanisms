@@ -198,14 +198,12 @@ def from_trunk(root: Path, base: str, found: set[str]) -> set[str]:
     by_callee: dict[str, list[str]] = {}
     for _, callee, said in _calls(root, base, found):
         by_callee.setdefault(callee, []).append(said)
+    # СВОЙ ЛИ РЕПОЗИТОРИЙ, РЕШАЕТ ОДНО МЕСТО — `ours` в `_calls`: сюда доходят
+    # только свои вызовы, а `./` отсекает сам `ADDRESSED_CALL` (взгляд на #1180).
     return {
         callee
         for callee, said in by_callee.items()
-        if own
-        and all(
-            policy.ADDRESSED_CALL.match(one) and one.split("/.github/")[0].lower() == own
-            for one in said
-        )
+        if own and all(policy.ADDRESSED_CALL.match(one) for one in said)
     }
 
 
