@@ -35,8 +35,10 @@
 `git fetch --tags`
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
-Исходы (правило 039): ``0`` версия посчитана · ``2`` шаг не отработал ·
-``3`` посчитана неполно либо разошлась с объявленной — сказано, а не скрыто.
+Исходы (правило 039): ``0`` версия посчитана, либо сверка `--check`
+неприменима — нет ни тега, ни `CONTRACT_VERSION` в полном клоне, и причина
+напечатана · ``2`` шаг не отработал · ``3`` посчитана неполно либо разошлась
+с объявленной — сказано, а не скрыто.
 """
 
 import argparse
@@ -243,11 +245,37 @@ def version(root: Path | None = None) -> tuple[str, bool]:
     return f"{major}.{minor}.{changes_in('HEAD', root)}", False
 
 
+def shallow(root: Path | None = None) -> bool:
+    """Мелкий ли клон: отсутствие тегов в нём ничего не говорит о проекте."""
+    return git("rev-parse", "--is-shallow-repository", root=root) == "true"
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает версию и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="сверить объявленное с тегом")
     args = parser.parse_args(argv)
+
+    # СВЕРКЕ НЕЧЕГО СВЕРЯТЬ, ЕСЛИ ПРОЕКТ НЕ ВЕДЁТ ВЕРСИЮ ЭТИМ СПОСОБОМ (#1187,
+    # вариант 2). Ни выпускного тега, ни `CONTRACT_VERSION` — у потребителя
+    # общего шага это законное состояние, а не обрезанная история. Без
+    # `--check` версию по-прежнему спрашивают, и отказ остаётся отказом.
+    # МЕЛКИЙ КЛОН — НЕ «НЕПРИМЕНИМО» (взгляд на #1192, 195). Тегов не видно и
+    # там, где их просто не принесли: у такого проекта теги есть, и сверка
+    # обязана сказать об обрезанной истории, а не промолчать.
+    if args.check and not paths.VERSION.is_file() and release_tag() is None:
+        if shallow():
+            print(
+                f"тегов не видно, и клон мелкий: нет ни выпускного тега, ни {paths.VERSION} — "
+                "подтяните историю: git fetch --tags --unshallow",
+                file=sys.stderr,
+            )
+            return EXIT_PARTIAL
+        print(
+            f"неприменимо: ни выпускного тега, ни {paths.VERSION} в полном клоне — "
+            "проект не ведёт версию этим способом, сверять нечего (#1187)"
+        )
+        return EXIT_OK
 
     try:
         number, whole = version()
