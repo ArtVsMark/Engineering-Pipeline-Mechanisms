@@ -1431,6 +1431,20 @@ def test_a_head_behind_the_base_waits_for_its_running_look(platform: dict[str, A
     assert platform["synced"] == []
 
 
+def test_a_waiting_head_takes_back_an_armed_neighbour(platform: dict[str, Any]) -> None:
+    """Пока голова ждёт взгляда, взведённый сосед снят: площадка не сольёт его мимо очереди.
+
+    Поздний взгляд на #1194: ранний выход ждущей головы не звал `keep_only`, и
+    сосед, уже актуальный к базе, уходил бы в общую ветку раньше головы (053).
+    """
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge", armed=True)]
+    platform["states"] = {1: module.STATE_BEHIND, 2: module.STATE_ARMABLE}
+    platform["looking"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == []
+    assert platform["disarmed"] == ["PR_2"], "взведение соседа не снято у ждущей головы"
+
+
 def test_a_waiting_head_does_not_hand_the_sync_to_the_next(platform: dict[str, Any]) -> None:
     """Ждущая голова кончает заход: следующую отставшую очередь не подтягивает (052, #1194)."""
     platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
