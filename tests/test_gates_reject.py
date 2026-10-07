@@ -142,6 +142,39 @@ def test_missing_version_source_is_not_applicable(run_script: RunScript, tmp_pat
     assert load_script("check_version.py").NO_SOURCE in result.text
 
 
+def test_without_a_repository_the_gate_is_a_refusal(run_script: RunScript, tmp_path: Path) -> None:
+    """Вне репозитория список файлов не получен — отказ, а не «неприменимо» (взгляд на #1192)."""
+    (tmp_path / "a.md").write_text("текст\n", encoding="utf-8")
+    result = run_script("check_version.py", cwd=tmp_path)
+    assert result.code == BROKEN, result.text
+    assert "неприменимо" not in result.text
+
+
+def test_a_marker_without_a_source_is_a_finding(run_script: RunScript, tmp_path: Path) -> None:
+    """Источника нет, а маркер контракта стоит — переписать его нечем, это находка."""
+    git(tmp_path, "init", "-q", "-b", BASE_BRANCH)
+    opening = "<!--" + "m:contract" + "-->"
+    closing = "<!--" + "/m:contract" + "-->"
+    (tmp_path / "doc.md").write_text(f"версия {opening}1.2.3{closing}\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    result = run_script("check_version.py", cwd=tmp_path)
+    assert result.code == REJECTED, result.text
+    assert "переписать его нечем" in result.text
+
+
+def test_orphan_markers_names_each_marker(tmp_path: Path) -> None:
+    """`orphan_markers` называет каждый маркер без источника и молчит без маркеров."""
+    module = load_script("check_version.py")
+    opening = "<!--" + "m:contract" + "-->"
+    closing = "<!--" + "/m:contract" + "-->"
+    marked = tmp_path / "doc.md"
+    marked.write_text(f"{opening}1.0.0{closing} и {opening}2.0.0{closing}\n", encoding="utf-8")
+    plain = tmp_path / "plain.md"
+    plain.write_text("без маркеров\n", encoding="utf-8")
+    assert len(module.orphan_markers([marked])) == 2
+    assert module.orphan_markers([plain]) == []
+
+
 def test_a_broken_version_source_is_still_a_refusal(
     run_script: RunScript, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
