@@ -1017,15 +1017,75 @@ def test_pruning_removes_files_and_folders_but_keeps_the_list(tmp_path: Path) ->
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(module.branch_files())
 
 
+#: Что шаг кладёт в коммит: аргумент `git add` и присваивание переменной.
+GIT_ADD: Final = re.compile(r"^\s*git add\s+(.+?)\s*$", re.MULTILINE)
+ASSIGNED: Final = re.compile(r"^\s*(\w+)=(\S+)\s*$", re.MULTILINE)
+
+
+def published_by(run: str) -> list[str]:
+    """Пути, которые сценарий шага добавляет в коммит, с подставленными переменными.
+
+    Читается то, что шаг ИСПОЛНЯЕТ, — аргументы `git add`, — а не любое
+    упоминание пути: проза в комментарии держала бы множество непустым, когда
+    запись уже ушла (взгляд на #1217). Аргумент, который не разрешается
+    присваиванием в том же сценарии, — отказ, а не пропуск: имени файла тогда
+    не знает никто.
+    """
+    script = "\n".join(line for line in run.splitlines() if not line.lstrip().startswith("#"))
+    known = dict(ASSIGNED.findall(script))
+    paths = []
+    for argument in GIT_ADD.findall(script):
+        for word in argument.split():
+            word = word.strip('"')
+            if word.startswith("$"):
+                name = word.strip("${}")
+                assert name in known, f"путь `{word}` в `git add` не разрешён присваиванием"
+                word = known[name]
+            paths.append(word)
+    return paths
+
+
+@pytest.mark.parametrize(
+    ("run", "paths"),
+    [
+        ('target=.github/badges/facts.json\ngit add "$target"', [".github/badges/facts.json"]),
+        (
+            "# кладёт .github/badges/old.json\ngit add .github/badges/new.json",
+            [".github/badges/new.json"],
+        ),
+        ("echo .github/badges/facts.json", []),
+    ],
+    ids=["через переменную", "комментарий не считается", "упоминание без записи"],
+)
+def test_the_published_paths_are_read_from_what_runs(run: str, paths: list[str]) -> None:
+    """Пути берутся из исполняемого `git add`, а не из упоминаний."""
+    assert published_by(run) == paths
+
+
+def test_an_unresolved_published_path_is_a_refusal() -> None:
+    """Переменная без присваивания в сценарии — отказ: имени файла не знает никто."""
+    with pytest.raises(AssertionError, match="не разрешён"):
+        published_by('git add "$elsewhere"')
+
+
 def test_the_shared_steps_files_are_kept_on_the_branch() -> None:
     """Файлы общего шага фактов на ветке допустимы, и чистка их не снимает (взгляд на #1202).
 
     Перечень допустимого строит потребитель из своего инвентаря, а ветку он
-    делит с общим шагом: второй файл шага удалялся бы каждым заходом.
+    делит с общим шагом: второй файл шага удалялся бы каждым заходом. Имена
+    берутся из того, что шаг добавляет в коммит, а не из текста файла.
     """
     module = load_script("build_facts.py")
-    step = (ROOT / ".github" / "workflows" / "step-facts.yml").read_text(encoding="utf-8")
-    written = set(re.findall(r"\.github/badges/([\w.-]+)", step))
+    steps = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "step-facts.yml").read_text(encoding="utf-8")
+    )
+    written = {
+        Path(path).name
+        for job in steps["jobs"].values()
+        for step in job.get("steps") or []
+        for path in published_by(str(step.get("run") or ""))
+        if path.startswith(".github/badges/")
+    }
     assert written, "файлов общего шага на ветке не найдено — предмет проверки пропал (075)"
     missing = written - set(module.branch_files())
     assert not missing, f"чистка сняла бы файлы общего шага: {sorted(missing)}"
