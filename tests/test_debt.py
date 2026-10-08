@@ -133,7 +133,7 @@ def test_the_order_puts_debts_before_the_plan() -> None:
     и перестановка строк меняет поведение проекта.
     """
     text = (ROOT / "docs" / "agent" / "behaviour.md").read_text(encoding="utf-8")
-    findings_at = text.index("неразобранные находки внешнего взгляда")
+    findings_at = text.index("неразобранные **дефекты** внешнего взгляда")
     rules_at = text.index("незакрытая работа по правилам каталога")
     plan_at = text.index("задача из трекера и план автора")
     assert findings_at < rules_at < plan_at
@@ -896,3 +896,30 @@ def test_a_given_list_is_searched_without_the_network(monkeypatch: pytest.Monkey
     monkeypatch.setattr(findings.ghrest, "paginate", no_network)
     given = [{"number": 7, "body": f"x {findings.MARKER}", "updated_at": "2026-10-03"}]
     assert findings.live_issue_seen("o/r", "t", listed=given) == (7, given[0]["body"], "2026-10-03")
+
+
+def test_only_named_weights_accrue_and_only_on_merged() -> None:
+    """Копится лишь `ACCRUED` на слитом; дефект, без веса и чужой вес — долг (068, 045)."""
+    left = [
+        ("a", 1, "дефект", "x"),
+        ("b", 1, "риск", "x"),
+        ("c", 1, "замечание", "x"),
+        ("d", 1, "без веса", "x"),
+        ("e", 1, "неведомый", "x"),
+        ("f", 2, "замечание", "x"),
+    ]
+    owed, kept = debt.accrued(left, frozenset({2}))
+    assert [one[0] for one in owed] == ["a", "d", "e", "f"]
+    assert [one[0] for one in kept] == ["b", "c"]
+    assert set(debt.findings.WEIGHTS) >= debt.ACCRUED, "копящийся вес не из словаря весов"
+    assert debt.findings.DEFECT not in debt.ACCRUED
+
+
+def test_open_changes_are_the_pull_requests_of_the_listing() -> None:
+    """Открытые изменения — записи с `pull_request`; задачи в счёт не идут."""
+    listed = [
+        {"number": 5, "pull_request": {}},
+        {"number": 6},
+        {"number": 7, "pull_request": {"x": 1}},
+    ]
+    assert debt.open_changes(listed) == frozenset({5, 7})

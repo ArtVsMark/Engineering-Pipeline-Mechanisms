@@ -37,6 +37,7 @@ import argparse
 import os
 import re
 import sys
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
@@ -85,15 +86,42 @@ def contract_note(body: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+#: Веса находки на СЛИТОМ, которые копятся в источнике 5, а не стоят долгом в
+#: источнике 3. РЕШЕНИЕ ВЛАДЕЛЬЦА 08.10.2026 (#639): поздний взгляд с #1000 дал
+#: 42 находки из 446, и 36 из них — риски и замечания; их починки и крутили
+#: цикл — 14 изменений получили 26 новых находок, дефектов из них 2. Перечень
+#: разрешительный (068): дефект, находка без веса и вес, которого здесь нет,
+#: остаются долгом — неизвестное не прячется в отложенное (045).
+ACCRUED: Final = frozenset({"риск", "замечание"})
+
+
 def findings_debt(
     repo: str, token: str, listed: list[dict[str, Any]] | None = None
-) -> list[tuple[str, int, str]]:
-    """Неразобранные находки из живой задачи-адресата."""
+) -> list[tuple[str, int, str, str]]:
+    """Неразобранные находки из живой задачи-адресата: отпечаток, изменение, вес, суть."""
     _, body = findings.live_issue(repo, token, listed=listed)
     return [
-        (mark, entry.pr, f"[{entry.weight}] {entry.title}")
+        (mark, entry.pr, entry.weight, entry.title)
         for mark, entry in findings.parse_entries(body).items()
     ]
+
+
+def open_changes(listed: Iterable[dict[str, Any]]) -> frozenset[int]:
+    """Номера открытых изменений из списка открытых записей (изменения в нём — с `pull_request`)."""
+    return frozenset(int(one["number"]) for one in listed if "pull_request" in one)
+
+
+def accrued(
+    left: list[tuple[str, int, str, str]], opened: frozenset[int]
+) -> tuple[list[tuple[str, int, str, str]], list[tuple[str, int, str, str]]]:
+    """Делит находки на долг (источник 3) и копящееся (источник 5).
+
+    Находка на ОТКРЫТОМ изменении — долг любого веса: её разбирают до слияния.
+    На слитом долгом остаётся всё, кроме весов `ACCRUED`.
+    """
+    owed = [one for one in left if one[1] in opened or one[2] not in ACCRUED]
+    kept = [one for one in left if one[1] not in opened and one[2] in ACCRUED]
+    return owed, kept
 
 
 def unlooked_debt(
@@ -595,7 +623,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         listed = open_listed(args.repo, token)
-        left = findings_debt(args.repo, token, listed)
+        left, kept = accrued(findings_debt(args.repo, token, listed), open_changes(listed))
         unlooked_left, unlooked_tally = unlooked_debt(args.repo, token, listed)
         holding, lagging = branch_debt(args.repo, token, listed)
         # Закрытые задачи читаются ОДИН раз на оба счёта: «входящие» и ревизию
@@ -631,9 +659,12 @@ def main(argv: list[str] | None = None) -> int:
         for said in red:
             print(f"  {said}")
 
-    print(f"находки, пережившие слияние: {len(left)}")
-    for mark, pr, title in left:
-        print(f"  {mark} · #{pr} — {title}")
+    print(f"находки, долг: {len(left)}")
+    for mark, pr, weight, title in left:
+        print(f"  {mark} · #{pr} — [{weight}] {title}")
+    print(f"находки на слитом, копятся до разбора пачкой: {len(kept)}")
+    for mark, pr, weight, title in kept:
+        print(f"  {mark} · #{pr} — [{weight}] {title}")
 
     # ТРЕТИЙ ДОЛГ ПЕЧАТАЕТСЯ, НО НАПОМИНАНИЯ НЕ ВКЛЮЧАЕТ. Слитое без взгляда —
     # мера того, сколько прошло мимо канала, а не список работы: посмотреть
