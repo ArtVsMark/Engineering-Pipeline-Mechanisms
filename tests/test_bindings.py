@@ -267,8 +267,14 @@ def test_a_bare_change_number_is_told_from_a_full_address(text: str, bare: list[
     assert bare_numbers(text) == bare
 
 
-def led_to(item: dict[str, Any]) -> Path:
-    """Куда ведёт предложение: навык — к `path`, правило — к следу `trail`."""
+def led_to(item: dict[str, Any]) -> Path | None:
+    """Куда ведёт предложение: навык — к `path`, правило — к следу `trail`.
+
+    Слияние файла в нашем дереве не называет: его предмет — правила каталога,
+    и инциденты переносит каталог при приёме. ``None`` — вести некуда.
+    """
+    if item.get("kind") == "merge":
+        return None
     return ROOT / str(item.get("path") if item.get("kind") == "skill" else item.get("trail"))
 
 
@@ -289,7 +295,8 @@ def read_by_catalogue(queued: list[dict[str, Any]] | None = None) -> list[Path]:
     разбирает его при приёме.
     """
     items = proposals() if queued is None else queued
-    return sorted({BINDINGS, PROPOSALS, *(led_to(item) for item in items)})
+    led = (led_to(item) for item in items)
+    return sorted({BINDINGS, PROPOSALS, *(path for path in led if path is not None)})
 
 
 def test_the_catalogue_is_read_where_a_proposal_leads() -> None:
@@ -364,6 +371,11 @@ INCIDENT_AT_LEAST = 200
 #: Поля предложения НАВЫКА по форме 1.2: вместо инцидента — замер в работе,
 #: вместо следа — путь к `SKILL.md` и полный sha коммита (взгляд на #885).
 SKILL_FIELDS = ("slug", "path", "sha", "holds", "measurement")
+#: Слияние правил (формат 1.3 канала): что сводится, почему одно целое и
+#: утверждение нового правила; инцидент и след переносит каталог при приёме.
+MERGE_FIELDS = ("slug", "rules", "why", "claim")
+#: Больше трёх — перестройка области, а не слияние (контракт каталога).
+MERGE_AT_MOST = 3
 #: Полный sha коммита: каталог читает навык на нём, а не на ветке.
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -377,6 +389,17 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     (взгляд на #885).
     """
     slug = item.get("slug", "?")
+    if item.get("kind") == "merge":
+        found = [f"{slug}: поля «{one}» нет" for one in MERGE_FIELDS if not item.get(one)]
+        rules = item.get("rules")
+        if (
+            not isinstance(rules, list)
+            or not 2 <= len(rules) <= MERGE_AT_MOST
+            or len(set(map(str, rules))) != len(rules)
+            or not all(re.fullmatch(r"\d{3}", str(one)) for one in rules)
+        ):
+            found.append(f"{slug}: rules — от 2 до {MERGE_AT_MOST} разных номеров правил каталога")
+        return found
     if item.get("kind") == "skill":
         found = [f"{slug}: поля «{one}» нет" for one in SKILL_FIELDS if not item.get(one)]
         if len(str(item.get("measurement") or "")) < INCIDENT_AT_LEAST:
@@ -514,6 +537,16 @@ def test_a_skill_proposal_is_judged_by_its_own_form(tmp_path: Path) -> None:
     )
     rule = {"slug": "y", "claim": "к", "incident": "и" * INCIDENT_AT_LEAST, "trail": "нет.py"}
     assert proposal_problems(rule, tmp_path) == ["y: след «нет.py» не разрешается"]
+
+
+def test_a_merge_proposal_is_judged_by_its_own_form() -> None:
+    """Слияние формата 1.3: 2–3 разных номера, почему одно целое и новое утверждение."""
+    good = {"kind": "merge", "slug": "m", "rules": ["005", "127"], "why": "в", "claim": "у"}
+    assert proposal_problems(good) == []
+    for rules in (["005"], ["005", "005"], ["005", "127", "131", "135"], ["5", "127"], "005"):
+        assert proposal_problems({**good, "rules": rules}), f"rules={rules!r} принят"
+    assert proposal_problems({**good, "claim": ""}) == ["m: поля «claim» нет"]
+    assert led_to(good) is None, "слияние ведёт к файлу, которого у него нет"
 
 
 def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:

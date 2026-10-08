@@ -773,6 +773,47 @@ def test_a_merged_proposal_points_at_the_existing_rule() -> None:
     assert "предмет тот же" in found[0].said
 
 
+@pytest.mark.parametrize(
+    ("kind", "key"),
+    [("skill", "o/r:skill/a-thing-broke"), ("merge", "o/r:merge/a-thing-broke")],
+)
+def test_a_skill_or_merge_verdict_is_read_under_its_own_key(kind: str, key: str) -> None:
+    """Вердикт по навыку и слиянию лежит под ключом с приставкой рода.
+
+    Прежде разбор искал его под ключом правила и молчал: каталог ответил, а
+    источник печатал «вердикта нет» — ровно то, от чего защищался #140.
+    """
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": kind}]}
+    said = {"status": "rejected", "why": "иначе"}
+    assert module.proposals_answered(answer(said, key), mine, "o/r"), (
+        "вердикт под своим ключом не прочитан"
+    )
+    assert not module.proposals_answered(answer(said), mine, "o/r"), (
+        "вердикт правила засчитан навыку"
+    )
+
+
+def test_an_unknown_proposal_kind_is_named() -> None:
+    """Род предложения, которого разбор не знает, называется, а не ищется наугад (068)."""
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "bundle"}]}
+    found = module.proposals_answered({module.VERDICTS: {}}, mine, "o/r")
+    assert len(found) == 1 and "bundle" in found[0].said
+
+
+def test_merge_neighbours_and_replacements_are_read() -> None:
+    """Слияние: `neighbours` с причиной и `replaces` у принятого — оба названы."""
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge"}]}
+    key = "o/r:merge/a-thing-broke"
+    kept = module.proposals_answered(
+        answer({"status": "neighbours", "why": "вопрос 4"}, key), mine, "o/r"
+    )
+    assert len(kept) == 1 and kept[0].source == "proposal-neighbours" and "вопрос 4" in kept[0].said
+    took = module.proposals_answered(
+        answer({"status": "admitted", "rule": "219", "replaces": ["005", "127"]}, key), mine, "o/r"
+    )
+    assert "219" in took[0].said and "005, 127" in took[0].said and "005, 127" in took[0].next_step
+
+
 def test_an_unknown_status_is_named_not_swallowed() -> None:
     """Статус, которого разбор не знает, называется, а не молчит (045)."""
     found = module.proposals_answered(answer({"status": "deferred"}), MINE, "o/r")
