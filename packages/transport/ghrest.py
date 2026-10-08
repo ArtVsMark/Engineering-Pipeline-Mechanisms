@@ -194,10 +194,11 @@ IDEMPOTENT: Final = frozenset({"enablePullRequestAutoMerge", "disablePullRequest
 #: оборван (`SSLEOFError` — `OSError`, но не `ConnectionError`). Сбой
 #: рукопожатия сюда не доходит: он случается при соединении, и его `urlopen`
 #: уже завернул. ПЕРЕЧЕНЬ, А НЕ ВЕСЬ `HTTPException`: в нём и ошибки ФОРМЫ —
-#: `InvalidURL`, `LineTooLong` и сам `BadStatusLine` с непустой строкой (ответ
-#: не по HTTP, нечисловой код), — а их повтор трижды назвал бы «площадка
+#: `InvalidURL`, `LineTooLong` и `BadStatusLine` с ЦЕЛОЙ строкой (ответ не по
+#: HTTP, нечисловой код), — а их повтор трижды назвал бы «площадка
 #: недоступна» то, что от связи не зависит (взгляды на #1206 и #1214, 045).
-#: Они — `_MALFORMED`.
+#: Они — `_MALFORMED`. Оборванная строка статуса — тоже `BadStatusLine`, но
+#: обрыв: её отличает `_cut_short` (взгляды на #1223 и #1229).
 _DROPPED: Final = (
     http.client.IncompleteRead,
     ConnectionError,
@@ -207,6 +208,19 @@ _DROPPED: Final = (
 #: Всё прочее, что `http.client` бросает мимо `URLError`: ответ или запрос не
 #: той формы. Повтор его не исправит — он сразу становится названным отказом.
 _MALFORMED: Final = http.client.HTTPException
+
+
+def _unframed(response: object) -> bool:
+    """У ответа нет ни длины, ни `chunked`: конец тела — закрытие связи.
+
+    ОБРЫВ ПОСЛЕ ЦЕЛОЙ СТРОКИ СТАТУСА НЕВИДИМ `http.client` (взгляд на #1229).
+    Связь, закрытая после `HTTP/1.1 200 OK\\r\\n` или посреди заголовков, даёт
+    пустые заголовки и тело `b""` без отказа, и запрос вернул бы «пустой
+    ответ». Площадка пустой ответ обрамляет всегда — у 204 длина 0, — поэтому
+    пустое необрамлённое тело судится обрывом. Непустое необрамлённое, если
+    оборвано, ловит разбор JSON. Подделка без этих полей считается обрамлённой.
+    """
+    return getattr(response, "length", 0) is None and not getattr(response, "chunked", False)
 
 
 def _cut_short(exc: Exception) -> bool:
@@ -303,7 +317,10 @@ def request(
         try:
             with urllib.request.urlopen(prepare(), timeout=TIMEOUT) as response:
                 _note_quota(response.headers)
+                unframed = _unframed(response)
                 payload = response.read()
+                if not payload and unframed:
+                    raise http.client.IncompleteRead(b"")
                 return json.loads(payload) if payload else None
         except (urllib.error.HTTPError, urllib.error.URLError) as exc:
             last = exc
@@ -489,7 +506,11 @@ def raw_text(url: str, timeout: int = 30) -> str:
         # здесь, и он тоже отказ, а не трейсбек (взгляд на #1214).
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=timeout) as answer:
-            return str(answer.read().decode("utf-8"))
+            unframed = _unframed(answer)
+            body = answer.read()
+            if not body and unframed:
+                raise http.client.IncompleteRead(b"")
+            return str(body.decode("utf-8"))
     # Обрыв на чтении и ответ не той формы — тот же отказ, что сбой соединения
     # (#1205): без них `IncompleteRead` и `BadStatusLine` летели трейсбеком
     # мимо `TransportError` (взгляд на #1206). Повтора у снимка нет — он один.
