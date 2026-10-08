@@ -51,24 +51,23 @@ import sys
 from dataclasses import dataclass
 from typing import Final
 
-#: Общая ветка, когда клон её не называет: ссылки `origin/HEAD` нет (131).
+#: Единственная приставка ветки, в которую окно вправе толкать (131, 003).
 #:
-#: ИМЯ ОБЩЕЙ ВЕТКИ — ФАКТ ПОТРЕБИТЕЛЯ, А НЕ НАШ. Перехват едет в заготовку как
-#: есть (`.rules/portable.json`), и вшитое `main` не держало бы запрет у
-#: проекта с общей `master` или `develop` (взгляд на #1218). Поэтому имя
-#: читается у клона — `shared_branch()`, — а литерал здесь только умолчание,
-#: и отказ его называет: молча подставленное имя неотличимо от прочитанного
-#: ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+#: СТРОГОЕ ПРАВИЛО ВМЕСТО УГАДЫВАНИЯ ОБЩЕЙ ВЕТКИ (решение владельца 08.10.2026,
+#: #1220). Прежде перехват запрещал толчок в общую ветку и потому должен был
+#: знать её имя: сперва вшитое `main`, затем `origin/HEAD` клона. Поздний взгляд
+#: на #1218 нашёл пять форм одной беды — ссылки нет, она устарела после
+#: переименования, `git -C` читает не тот клон, отказ называет не ту причину,
+#: совет подаёт умолчание фактом. Круг рвёт правило, которому имя общей ветки
+#: не нужно вовсе (210): окно пишет только в `agent/<задача>`, ветку, по которой
+#: конвейер открывает изменение (003). Всё прочее — общая ветка, чужая ветка,
+#: ветка окна `claude/…` — отвергается одинаково.
 #:
-#: ЛИТЕРАЛ ЗДЕСЬ НАМЕРЕННЫЙ, а не забытая унификация с `paths.TRUNK`. Перехват
-#: живёт вне `scripts/`: он запускается оболочкой до и вместо механизмов, своего
-#: окружения не имеет и импортировать дерево не вправе — зависимость от него
-#: означала бы, что запрет на толчок в общую ветку перестаёт работать ровно
-#: тогда, когда дерево сломано
-#: ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
-DEFAULT_SHARED: Final = "main"
-#: Ссылка, по которой клон называет общую ветку площадки: её ставит `git clone`.
-ORIGIN_HEAD: Final = "refs/remotes/origin/HEAD"
+#: ЛИТЕРАЛ ЗДЕСЬ НАМЕРЕННЫЙ, а не забытая унификация с `agent_pr.PREFIXES`.
+#: Перехват живёт вне `scripts/` и импортировать дерево не вправе: запрет на
+#: толчок перестал бы работать ровно тогда, когда дерево сломано (046).
+#: Совпадение с каноном держит `tests/test_push_guard.py::test_the_prefix_is_the_pipeline_one`.
+AGENT_PREFIX: Final = "agent/"
 #: Ключи `git push`, за которыми идёт значение, а не имя ветки.
 WITH_VALUE: Final = frozenset({"--repo", "-o", "--push-option", "--exec", "--receive-pack"})
 #: Управляющие операторы оболочки: они делят строку на команды. Длинные — раньше
@@ -561,48 +560,15 @@ def branch_of(target: str) -> str:
     return target.removeprefix(REF_PREFIX)
 
 
-@dataclass(frozen=True)
-class Shared:
-    """Общая ветка клона и то, откуда её имя: прочитано или взято умолчанием."""
-
-    name: str
-    read: bool
-
-    def said(self) -> str:
-        """Имя для отказа — с оговоркой, если оно не прочитано, а подставлено."""
-        if self.read:
-            return f"«{self.name}»"
-        return f"«{self.name}» (умолчание: клон не называет общую ветку, `{ORIGIN_HEAD}` нет)"
-
-
-def shared_branch() -> Shared:
-    """Общая ветка клона по `origin/HEAD`; нет ссылки — умолчание, и это сказано.
-
-    ЦЕНА НАЗВАНА: ссылку ставит `git clone`, а клон, собранный `git init` и
-    `git fetch`, её не имеет. Тогда запрет держит умолчание `main`, и у такого
-    клона с другой общей веткой он не сработает — это названный предел, а не
-    полнота (046). Чинится он командой `git remote set-head origin --auto`.
-    """
-    said = subprocess.run(
-        ["git", "symbolic-ref", "--quiet", "--short", ORIGIN_HEAD],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    name = said.stdout.strip().removeprefix("origin/")
-    if said.returncode == 0 and name:
-        return Shared(name, read=True)
-    return Shared(DEFAULT_SHARED, read=False)
-
-
-def refused(targets: list[str], current: str, shared: Shared) -> str:
+def refused(targets: list[str], current: str) -> str:
     """Причина отказа; пусто — толчок разрешён."""
     for raw in targets:
         target = branch_of(raw)
-        if target == shared.name:
+        if not target.startswith(AGENT_PREFIX):
             return (
-                f"{shared.said()} — общая ветка: писать в неё напрямую нельзя, только изменением "
-                "через ветку (критический запрет свода)"
+                f"«{target}» — не ветка изменения: окно пишет только в `{AGENT_PREFIX}<задача>`, "
+                "по ней конвейер открывает изменение (003). В общую и чужие ветки — только "
+                "изменением (критический запрет свода)"
             )
         if current and target != current:
             return (
@@ -613,7 +579,7 @@ def refused(targets: list[str], current: str, shared: Shared) -> str:
     return ""
 
 
-def merged_away(branch: str, shared: Shared) -> str:
+def merged_away(branch: str) -> str:
     """Причина отказа, если ветку уже слили и удалили; пусто — толчок разрешён.
 
     ВЕТКА, УДАЛЁННАЯ ПЛОЩАДКОЙ ПРИ СЛИЯНИИ, ВОСКРЕСАЕТ ОТ ЛЮБОГО СЛЕДУЮЩЕГО
@@ -683,8 +649,8 @@ def merged_away(branch: str, shared: Shared) -> str:
         return (
             f"ветку «{branch}» площадка удалила — так она поступает при слиянии. Толчок "
             "воскресит её вместе с коммитами, которых нет в общей ветке (202). Продолжение "
-            f"идёт с НОВОЙ ветки: git fetch origin {shared.name} && git checkout -b <новая> "
-            f"origin/{shared.name}"
+            f"идёт с НОВОЙ ветки: git fetch origin <общая> && git checkout -b "
+            f"{AGENT_PREFIX}<новая> origin/<общая>"
         )
     # ВТОРОГО ПРИЗНАКА ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО СНЯТИЕ ПО ЗАМЕРУ, А НЕ УПРОЩЕНИЕ.
     # Он спрашивал «голова достижима из origin/main» и говорил «работа слита».
@@ -730,15 +696,14 @@ def main() -> int:
     if not targets:
         return 0
     current, broken = head()
-    # ЗАПРЕТ НА ОБЩУЮ ВЕТКУ ГОЛОВЫ НЕ ТРЕБУЕТ, и спрашивается он первым: его
-    # причина точнее, чем «сторож ослеп», и читателю нужна именно она (154).
-    trunk = shared_branch()
-    shared = refused(targets, "", trunk)
-    if shared:
-        print(f"Толчок отвергнут до вызова git: {shared}", file=sys.stderr)
+    # ЗАПРЕТ НА ВЕТКУ БЕЗ ПРИСТАВКИ ГОЛОВЫ НЕ ТРЕБУЕТ, и спрашивается он первым:
+    # его причина точнее, чем «сторож ослеп», и читателю нужна именно она (154).
+    foreign = refused(targets, "")
+    if foreign:
+        print(f"Толчок отвергнут до вызова git: {foreign}", file=sys.stderr)
         return 2
     for target in targets:
-        revived = merged_away(branch_of(target), trunk)
+        revived = merged_away(branch_of(target))
         if revived:
             print(f"Толчок отвергнут до вызова git: {revived}", file=sys.stderr)
             return 2
@@ -755,7 +720,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    why = refused(targets, current, trunk)
+    why = refused(targets, current)
     if not why:
         return 0
     print(f"Толчок отвергнут до вызова git: {why}", file=sys.stderr)

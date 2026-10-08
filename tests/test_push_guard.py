@@ -37,8 +37,6 @@ assert _spec is not None and _spec.loader is not None
 module = importlib.util.module_from_spec(_spec)
 sys.modules["push_guard"] = module
 _spec.loader.exec_module(module)
-#: Общая ветка для прямых вызовов функций сторожа: имя прочитано, а не подставлено.
-TRUNK = module.Shared("main", read=True)
 SETTINGS = ROOT / ".claude" / "settings.json"
 
 
@@ -75,14 +73,12 @@ def ask(
     merged: str = "",
     elsewhere: str = "",
     tracked: str = "",
-    shared: str = "",
 ) -> subprocess.CompletedProcess[str]:
     """Спрашивает сторожа о команде, подделав состояние репозитория.
 
     `broken` заставляет подделку git отказать: так проверяется, что сторож,
     не сумевший узнать голову, отвергает толчок, а не пропускает его молча.
     `gone` — площадка удалила ветку, `merged` — работа уже слита.
-    `shared` — общая ветка, которую клон называет ссылкой `origin/HEAD`.
     """
     event = json.dumps({"tool_input": {"command": command}})
     fake = ROOT / "tests" / "fake_git"
@@ -100,7 +96,6 @@ def ask(
             "FAKE_MERGED": merged,
             "FAKE_UPSTREAM_ELSEWHERE": elsewhere,
             "FAKE_TRACKED": tracked,
-            "FAKE_SHARED": shared,
         },
     )
 
@@ -136,39 +131,40 @@ def test_a_push_to_the_shared_branch_is_always_refused(command: str) -> None:
     """Общая ветка отвергается из любой головы: писать в неё напрямую нельзя."""
     said = ask(command, head="main")
     assert said.returncode == 2, f"пропущено: {command}"
-    assert "общая ветка" in said.stderr
+    assert "не ветка изменения" in said.stderr
 
 
-def test_the_shared_branch_is_read_from_the_clone() -> None:
-    """Общая ветка — та, что клон называет `origin/HEAD`, а не вшитое `main` (взгляд на #1218).
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin master",
+        "git push origin develop",
+        "git push origin HEAD:claude/окно",
+        "git -C /tmp/другой push origin main",
+    ],
+    ids=["master", "develop", "ветка окна", "другой клон"],
+)
+def test_only_an_agent_branch_takes_a_push(command: str) -> None:
+    """Толчок проходит только в `agent/…`, какая бы ветка ни была общей (#1220).
 
-    Перехват едет потребителю как есть, и у проекта с общей `master` вшитое
-    имя не держало бы запрет вовсе.
+    Имя общей ветки перехвату не нужно: `master`, `develop`, ветка окна и
+    толчок в другой клон отвергаются одним правилом, без чтения `origin/HEAD`.
     """
-    said = ask("git push origin master", head="master", shared="master")
+    said = ask(command, head=command.rsplit(" ", 1)[-1].split(":")[-1])
     assert said.returncode == 2, said.stderr
-    assert "«master» — общая ветка" in said.stderr, said.stderr
-    assert "умолчание" not in said.stderr, "прочитанное имя названо подставленным"
+    assert "не ветка изменения" in said.stderr, said.stderr
 
 
-def test_a_branch_named_main_is_not_shared_when_the_clone_says_otherwise() -> None:
-    """У клона с общей `master` ветка `main` — обычная: запрет её не называет общей."""
-    said = ask("git push origin main", head="main", shared="master")
-    assert said.returncode == 0, said.stderr
+def test_the_prefix_is_the_pipeline_one() -> None:
+    """Приставка перехвата — та же, по которой конвейер открывает изменение (003, 046)."""
+    assert (module.AGENT_PREFIX,) == load_script("agent_pr.py").PREFIXES
 
 
-def test_the_default_shared_branch_is_named_as_default() -> None:
-    """Нет `origin/HEAD` — запрет держит умолчание и говорит об этом (045)."""
-    said = ask("git push origin main", head="main")
+def test_the_revival_advice_names_no_guessed_branch() -> None:
+    """Совет после слияния не подставляет имя общей ветки — перехват его не знает (#1218)."""
+    said = ask("git push -u origin agent/here", gone="1")
     assert said.returncode == 2, said.stderr
-    assert "умолчание" in said.stderr and "origin/HEAD" in said.stderr, said.stderr
-
-
-def test_a_revival_names_the_clones_shared_branch() -> None:
-    """Совет после слияния режет новую ветку от общей ветки клона, а не от `main`."""
-    said = ask("git push -u origin agent/here", gone="1", shared="develop")
-    assert said.returncode == 2, said.stderr
-    assert "origin/develop" in said.stderr, said.stderr
+    assert "origin/<общая>" in said.stderr and "agent/<новая>" in said.stderr, said.stderr
 
 
 @pytest.mark.parametrize(
@@ -251,7 +247,7 @@ def test_a_wrapped_push_to_the_shared_branch_is_refused() -> None:
     """Общая ветка отвергается и под обёрткой: запрет не зависит от написания."""
     said = ask('bash -c "git push origin main"')
     assert said.returncode == 2
-    assert "общая ветка" in said.stderr
+    assert "не ветка изменения" in said.stderr
 
 
 def test_a_wrapper_does_not_swallow_a_harmless_command() -> None:
@@ -293,7 +289,7 @@ def test_the_shared_branch_is_refused_even_blind() -> None:
     """
     said = ask("git push origin main", broken="not a git repository")
     assert said.returncode == 2
-    assert "общая ветка" in said.stderr, said.stderr
+    assert "не ветка изменения" in said.stderr, said.stderr
 
 
 # --- разбор, не дошедший до конца, отвергает ---------------------------------
@@ -578,8 +574,8 @@ def test_a_detached_head_is_not_asked_about_revival(tmp_path: Path) -> None:
     запроса о ветке, которой не существует. Молчание здесь верно: предмета нет,
     а не «ветка жива».
     """
-    assert module.merged_away("", TRUNK) == ""
-    assert module.merged_away("HEAD", TRUNK) == ""
+    assert module.merged_away("") == ""
+    assert module.merged_away("HEAD") == ""
 
 
 def test_the_revival_check_runs_against_a_real_repository(tmp_path: Path) -> None:
@@ -618,7 +614,7 @@ def test_the_revival_check_runs_against_a_real_repository(tmp_path: Path) -> Non
     here = Path.cwd()
     try:
         os.chdir(clone)
-        said = module.merged_away("agent/work", TRUNK)
+        said = module.merged_away("agent/work")
     finally:
         os.chdir(here)
     assert "площадка удалила" in said, said or "живой репозиторий не дал признака удаления"
@@ -667,7 +663,7 @@ def test_the_revival_check_survives_the_real_auto_tracking(tmp_path: Path) -> No
     here = Path.cwd()
     try:
         os.chdir(clone)
-        said = module.merged_away("agent/новая", TRUNK)
+        said = module.merged_away("agent/новая")
     finally:
         os.chdir(here)
     assert said == "", f"первый толчок новой ветки отвергнут ложно: {said}"
@@ -741,7 +737,7 @@ def test_the_reachability_sign_is_not_back(tmp_path: Path) -> None:
     here = Path.cwd()
     try:
         os.chdir(clone)
-        said = module.merged_away("agent/сброшена", TRUNK)
+        said = module.merged_away("agent/сброшена")
     finally:
         os.chdir(here)
     assert not said, (

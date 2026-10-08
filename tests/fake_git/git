@@ -8,11 +8,7 @@
 # проверяется, что сторож, не сумевший узнать голову, отвергает толчок.
 # FAKE_REMOTE_GONE=1 — ссылки origin/<ветка> нет: площадка её удалила.
 # FAKE_MERGED=1 — голова достижима из общей ветки: работа слита.
-# FAKE_SHARED=<имя> — клон называет общую ветку ссылкой origin/HEAD; пусто — ссылки нет.
 case "$1 $2" in
-  "symbolic-ref --quiet")
-    [ -n "$FAKE_SHARED" ] || exit 1
-    echo "origin/$FAKE_SHARED"; exit 0 ;;
   "rev-parse --abbrev-ref")
     if [ -n "$FAKE_HEAD_BROKEN" ]; then echo "$FAKE_HEAD_BROKEN" >&2; exit 128; fi
     echo "${FAKE_HEAD:-agent/here}"; exit 0 ;;
