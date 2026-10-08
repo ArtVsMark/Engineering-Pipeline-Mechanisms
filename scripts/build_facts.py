@@ -148,10 +148,34 @@ def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, Any]:
 #: не скачался, не разобрался. Подробность отказа уходит в поток диагностики,
 #: а не к читателю витрины (взгляд на #1014, 195).
 NO_FAMILY: Final = "сводка семьи не прочитана — числа неизвестны, а не нулевые"
+#: Обход клонов не дал чисел — «взяли вызовом» неизвестно, а не ноль (045).
+NO_UPTAKE: Final = "обход клонов семьи не прочитан — кто взял наши шаги, неизвестно, а не «никто»"
+
+
+def uptake_facts(path: Path | None) -> dict[str, Any]:
+    """«Взяли вызовом» — числа обхода клонов `family_uptake.py --out` (#1199).
+
+    Обход идёт отдельным шагом прогона: клоны — сеть, а сборка фактов читает
+    только файлы. Файла нет или он не той формы — число неизвестно и названо.
+    """
+    if path is None or not path.is_file():
+        return {"read": False, "why": NO_UPTAKE}
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+        projects, steps = said["projects"], said["steps"]
+        int(projects["took"]), int(projects["of"]), int(steps["taken"]), int(steps["of"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"warning: числа обхода не разобраны: {exc}", file=sys.stderr)
+        return {"read": False, "why": NO_UPTAKE}
+    return {"read": True, **said}
 
 
 def family_facts(
-    path: Path | None, *, mine: str = "", answers: Path | None = None
+    path: Path | None,
+    *,
+    mine: str = "",
+    answers: Path | None = None,
+    uptake: Path | None = None,
 ) -> dict[str, Any]:
     """Разрез по общим механизмам семьи — вторая ось приоритета переноса.
 
@@ -166,19 +190,21 @@ def family_facts(
     закрывают»
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
     """
+    taken = uptake_facts(uptake)
     if path is None or not path.is_file():
-        return {"read": False, "why": NO_FAMILY}
+        return {"read": False, "why": NO_FAMILY, "uptake": taken}
     try:
         # Разбор ОДИН: `family.load` читал файл дважды за вызов — для разреза и
         # для отставания, — и второе чтение могло прийти уже другим (022).
         # Нашёл внешний взгляд на #240.
         summary_read = family.load(path)
-        picture = family.picture(summary_read)
+        picture = family.picture(summary_read, mine=mine)
     except family.NotRun as exc:
         # Причина — для читателя витрины, как у `none.python`: путь раннера и
         # `repr` ошибки разбора уходят в поток диагностики (взгляд на #1014).
         print(f"warning: {exc}", file=sys.stderr)
-        return {"read": False, "why": NO_FAMILY}
+        return {"read": False, "why": NO_FAMILY, "uptake": taken}
+    picture["uptake"] = taken
     # Форма чужая: её подъём — повод перечитать разрез, а не подвинуть число
     # (157). Расхождение называется рядом с числами, а не прячется.
     picture["read"] = True
@@ -327,7 +353,9 @@ def ci_facts(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
     return common.ci_facts(root, CI_FLOW.name, OUR_MATRIX, OUR_NEXT)
 
 
-def ours(root: Path, summary: Path | None = None, mine: str = "") -> dict[str, Any]:
+def ours(
+    root: Path, summary: Path | None = None, mine: str = "", uptake: Path | None = None
+) -> dict[str, Any]:
     """Свои разделы проекта — то, что общий издатель не выводит: вход `extra-facts`.
 
     Ответ каталогу и проверки читаются первыми: их отказ — о входе самого
@@ -346,7 +374,7 @@ def ours(root: Path, summary: Path | None = None, mine: str = "") -> dict[str, A
         "checks_per_pr": checks,
         # Разрез семьи — раздел сверх договора, и причину он несёт своей формой
         # `{"read": false, "why": NO_FAMILY}` (взгляды на #1004 и #1014, 195).
-        "family": family_facts(summary, mine=mine, answers=root / BINDINGS),
+        "family": family_facts(summary, mine=mine, answers=root / BINDINGS, uptake=uptake),
     }
 
 
@@ -356,6 +384,7 @@ def collect(
     summary: Path | None = None,
     coverage: Path | None = None,
     mine: str = "",
+    uptake: Path | None = None,
 ) -> dict[str, Any]:
     """Собирает все факты о проекте: общие — общим издателем, свои — `ours`.
 
@@ -366,7 +395,7 @@ def collect(
     СБОРКА ТА ЖЕ, ЧТО У ОБЩЕГО ШАГА (#1001): общая часть и слияние — его,
     поэтому наш файл и файл потребителя расходиться не могут (022).
     """
-    mine_part = ours(root, summary, mine)
+    mine_part = ours(root, summary, mine, uptake)
     shared = common.common(
         root,
         sha=sha,
@@ -505,19 +534,34 @@ def rules_badge(facts: dict[str, Any]) -> Badge:
 
 
 def family_badge(facts: dict[str, Any]) -> Badge:
-    """Доля машинного соблюдения семьи, которую закрывают ОБЩИЕ механизмы.
+    """Кто из семьи взял наше: проекты и шаги вызовом, правила гейтом (#1199).
 
-    Это прямое мерило «второго исхода» эпика #2: если общий модуль окупается,
-    доля растёт; если нет — стоит на месте, и это видно числом, а не ощущением.
-    Снимок не пришёл — значок не выдумывается, а говорит «нет данных» (045).
+    Решение владельца 07.10.2026: три числа с числителем и знаменателем —
+    «взяли вызовом» по обходу клонов и «взяли гейт» по объявленному
+    происхождению. Непрочитанное говорит «не прочитано» на своём месте, а не
+    ноль; непрочитанные клоны названы числом рядом (045). Все числа — из
+    фактов: значок их только показывает (122).
     """
     picture = facts.get("family") or {}
-    share = picture.get("share")
-    if not isinstance(share, int | float) or not picture.get("consumers"):
+    taken = picture.get("uptake") or {}
+    adopted = picture.get("adopted") if picture.get("read") else None
+    if not taken.get("read") and not isinstance(adopted, dict):
         return badge("общие механизмы", "нет данных", "#9f9f9f")
-    percent = round(float(share) * 100)
-    color = "#e05d44" if percent < 30 else "#dfb317" if percent < 60 else "#4c1"
-    return badge("общие механизмы", f"{percent}% семьи", color)
+    if taken.get("read"):
+        projects, steps = taken["projects"], taken["steps"]
+        unread = f" ({projects['unread']} не прочитано)" if projects.get("unread") else ""
+        called = (
+            f"{projects['took']}/{projects['of']} проектов{unread}"
+            f" · {steps['taken']}/{steps['of']} шагов"
+        )
+        took = int(projects["took"])
+    else:
+        called, took = "вызовы не прочитаны", 0
+    if isinstance(adopted, dict):
+        gate, ours = f"гейт {adopted['ours']}/{adopted['of']} правил", int(adopted["ours"])
+    else:
+        gate, ours = "гейт: нет данных", 0
+    return badge("общие механизмы", f"{called} · {gate}", "#4c1" if took or ours else "#dfb317")
 
 
 def coverage_badge(facts: dict[str, Any]) -> Badge:
@@ -615,7 +659,12 @@ def draw_badges(facts: dict[str, Any], out: Path) -> None:
 def extra_written(args: argparse.Namespace) -> int:
     """Режим `--extra-out`: свои разделы проекта файлом — вход общего шага (#1001)."""
     try:
-        said = ours(Path(args.root), Path(args.family) if args.family else None, args.repo)
+        said = ours(
+            Path(args.root),
+            Path(args.family) if args.family else None,
+            args.repo,
+            Path(args.uptake) if args.uptake else None,
+        )
     except NotRun as exc:
         print(f"свои разделы не собраны: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -681,6 +730,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
+    parser.add_argument("--uptake", default="", help="числа обхода клонов: family_uptake.py --out")
     parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
     # Наше имя у площадки. Умолчание берётся у прогона, а не выдумывается:
     # выдуманное отличило бы нас от себя же и завысило отставание на все наши
@@ -713,6 +763,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.family) if args.family else None,
             Path(args.coverage) if args.coverage else None,
             args.repo,
+            Path(args.uptake) if args.uptake else None,
         )
     except NotRun as exc:
         print(f"факты не собраны: {exc}", file=sys.stderr)
@@ -763,10 +814,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     kin = facts["family"]
     if kin.get("read"):
+        adopted = kin["adopted"]
         print(
-            f"общих механизмов семьи: {kin['shared']} из {kin['mechanisms']}, "
-            f"они держат {kin['closed_by_shared']} правил из {kin['held_by_machine']} "
-            f"({kin['share']:.0%} машинного соблюдения)"
+            f"правил семьи на гейте нашего происхождения: {adopted['ours']} "
+            f"из {adopted['of']} машинных"
         )
         # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
         # считалось здесь с 8 сентября, ложилось в факты ключом

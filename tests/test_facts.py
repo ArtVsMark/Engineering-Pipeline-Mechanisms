@@ -133,7 +133,6 @@ def test_badge_colour_follows_the_share() -> None:
 #: она обязана приехать со своими слагаемыми либо быть объявлена тут с ними.
 A_SHARE_AND_ITS_NUMBERS: dict[str, tuple[str, str]] = {
     "coverage_percent": ("coverage.covered", "coverage.lines"),
-    "family.share": ("family.closed_by_shared", "family.held_by_machine"),
 }
 
 
@@ -534,7 +533,6 @@ INSIDE_THE_FACTS: Final = frozenset(
         "float",
         "str",
         "bool",
-        "round",
         "isinstance",
         ".get",
         ".items",
@@ -956,7 +954,9 @@ def test_extra_written_carries_only_our_sections(tmp_path: Path) -> None:
     import argparse
 
     out = tmp_path / "extra.json"
-    args = argparse.Namespace(root=str(ROOT), family="", repo="Я/Проект", extra_out=str(out))
+    args = argparse.Namespace(
+        root=str(ROOT), family="", uptake="", repo="Я/Проект", extra_out=str(out)
+    )
     assert facts.extra_written(args) == facts.EXIT_OK
     said = json.loads(out.read_text(encoding="utf-8"))
     assert set(said) == {"contract", "tests", "scripts", "rules", "checks_per_pr", "family"}

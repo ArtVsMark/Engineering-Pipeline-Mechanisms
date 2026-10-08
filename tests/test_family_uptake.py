@@ -29,6 +29,12 @@ def test_a_call_is_found_with_its_step_and_version() -> None:
     assert refs == ("v1.2.0",)
 
 
+def test_a_call_in_another_case_is_found() -> None:
+    """Адрес в `uses:` площадка читает без регистра — и обход тоже."""
+    steps, _refs = module.calls_in(CALL.replace("ArtVsMark/Engineering", "artvsmark/engineering"))
+    assert steps == ("step-lint",)
+
+
 def test_a_mention_is_not_a_call() -> None:
     """Имя проекта в прозе — не подключение (166).
 
@@ -176,7 +182,7 @@ def test_the_clone_is_shallow_and_sparse() -> None:
 
 def test_the_sweep_reaches_its_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Оба исхода захода ПРОГОНЯЮТСЯ, а не только объявлены (039, 145)."""
-    monkeypatch.setattr(module, "family", lambda: ["o/сосед"])
+    monkeypatch.setattr(module, "family", lambda **_: ["o/сосед"])
     monkeypatch.setattr(
         module, "took", lambda repo, _where: module.Took(repo=repo, steps=(), refs=())
     )
@@ -192,7 +198,7 @@ def test_the_sweep_reaches_its_outcomes(monkeypatch: pytest.MonkeyPatch) -> None
 def test_a_broken_family_list_is_its_own_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
     """Список семьи не прочитан — второй исход, а не пустая сводка."""
 
-    def broken() -> None:
+    def broken(**_: object) -> None:
         raise module.NotRun("сводка семьи не прочитана")
 
     monkeypatch.setattr(module, "family", broken)
@@ -284,3 +290,95 @@ def test_a_refused_narrowing_is_not_an_empty_neighbour(
     into.mkdir()
     with pytest.raises(module.NotRun, match="сузить"):
         module.shallow_clone("сосед", into, host=str(tmp_path))
+
+
+def test_the_uptake_counts_projects_and_offered_steps() -> None:
+    """Числа «взяли вызовом»: проект со шагом по тегу засчитан, позванное не отдаваемое — нет.
+
+    Решение владельца 07.10.2026 (#1199): знаменатель проектов — вся семья без
+    нас, непрочитанный клон в нём назван, а не засчитан «не взял»; знаменатель
+    шагов — отдаваемые наружу.
+    """
+    # Имена шагов — из настоящего `calls_in`, а не собраны рукой: рукой
+    # собранное «lint» прятало, что вызов называет файл `step-lint` (взгляд на #1241, 107).
+    call = CALL.replace("step-lint", "step-secret") + CALL
+    steps, refs = module.calls_in(call)
+    took = module.Took(repo="o/a", steps=steps, refs=refs)
+    none = module.Took(repo="o/b", steps=(), refs=())
+    said = module.uptake([took, none], ["o/c"], ["lint", "facts"])
+    assert said["projects"] == {"took": 1, "of": 3, "unread": 1, "unread_repos": ["o/c"]}
+    assert said["steps"] == {"taken": 1, "of": 2, "names": ["lint"]}
+    assert said["by"] == [
+        {"repo": "o/a", "steps": ["step-lint", "step-secret"], "refs": ["v1.2.0"]}
+    ]
+
+
+def test_a_project_calling_only_what_we_do_not_offer_took_nothing() -> None:
+    """Позвал только неотдаваемый шаг — проект не «взял»: числа проектов и шагов согласны."""
+    steps, refs = module.calls_in(CALL.replace("step-lint", "step-secret"))
+    said = module.uptake([module.Took("o/a", steps, refs)], [], ["lint"])
+    assert said["projects"]["took"] == 0 and said["steps"]["taken"] == 0
+
+
+def test_offered_names_drop_the_file_prefix() -> None:
+    """Имя файла шага приводится к имени отдаваемого, чужое без приставки — отброшено."""
+    assert module.offered_names(("step-lint", "ci")) == ["lint"]
+
+
+def test_a_namesake_without_our_call_is_not_taken(tmp_path: Path) -> None:
+    """Одноимённый файл соседа без вызова по нашему адресу — не «взял» (#1199)."""
+    folder = tmp_path / ".github" / "workflows"
+    folder.mkdir(parents=True)
+    (folder / "step-lint.yml").write_text("jobs:\n  lint:\n    runs-on: x\n", encoding="utf-8")
+    steps, refs = module.calls_in((folder / "step-lint.yml").read_text(encoding="utf-8"))
+    assert steps == () and refs == ()
+
+
+def test_main_writes_the_numbers_for_the_facts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--out` кладёт числа файлом — его читает сборка фактов, а не второй обход."""
+    import json
+
+    monkeypatch.setattr(module, "family", lambda **_: ["o/сосед"])
+    monkeypatch.setattr(
+        module,
+        "took",
+        lambda repo, _where: module.Took(repo=repo, steps=("step-lint",), refs=("v1",)),
+    )
+    monkeypatch.setattr(module.onboard, "steps", lambda _root: ["lint", "facts"])
+    out = tmp_path / "uptake.json"
+    assert module.main(["--out", str(out)]) == module.EXIT_OK
+    said = json.loads(out.read_text(encoding="utf-8"))
+    assert said["projects"]["took"] == 1 and said["steps"] == {
+        "taken": 1,
+        "of": 2,
+        "names": ["lint"],
+    }
+
+
+def test_no_offered_steps_is_a_refusal_not_a_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отдаваемых шагов не найдено — знаменателя нет, и это отказ, а не 0/0 (075)."""
+    monkeypatch.setattr(module, "family", lambda **_: ["o/сосед"])
+    monkeypatch.setattr(module.onboard, "steps", lambda _root: [])
+    assert module.main([]) == module.EXIT_BROKEN
+
+
+def test_a_local_summary_is_read_without_the_network(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Скачанная прогоном сводка читается с диска: разрез и обход считают по одному снимку."""
+    import json
+
+    def no_network(*_: object) -> None:
+        raise AssertionError("локальная сводка ушла в сеть")
+
+    monkeypatch.setattr(module.ghrest, "raw_json", no_network)
+    path = tmp_path / "where.json"
+    path.write_text(
+        json.dumps({"consumers": [{"repo": module.OURS}, {"repo": "o/сосед"}]}), encoding="utf-8"
+    )
+    assert module.family(local=path) == ["o/сосед"]
+    path.write_text("{не json", encoding="utf-8")
+    with pytest.raises(module.NotRun):
+        module.family(local=path)
