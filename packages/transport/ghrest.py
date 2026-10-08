@@ -25,6 +25,7 @@ import http.client
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.error
@@ -187,7 +188,11 @@ IDEMPOTENT: Final = frozenset({"enablePullRequestAutoMerge", "disablePullRequest
 
 
 #: Обрыв уже во время ответа: `urlopen` не заворачивает его в `URLError` (#1205).
-_DROPPED: Final = (http.client.HTTPException, ConnectionError, TimeoutError)
+#: Четыре рода: ответ HTTP оборван (`IncompleteRead`, `RemoteDisconnected`),
+#: сокет сброшен, чтение вышло по таймауту, поток TLS оборван (`SSLEOFError`
+#: — `OSError`, но не `ConnectionError`). Сбой рукопожатия сюда не доходит:
+#: он случается при соединении, и его `urlopen` уже завернул.
+_DROPPED: Final = (http.client.HTTPException, ConnectionError, TimeoutError, ssl.SSLError)
 
 
 def _survivable(method: str, path: str, exc: Exception) -> bool:
@@ -277,7 +282,7 @@ def request(
         except _DROPPED as exc:
             # ОБРЫВ ВО ВРЕМЯ ОТВЕТА — ТОТ ЖЕ ОБРЫВ СВЯЗИ (#1205). `urlopen`
             # заворачивает в `URLError` лишь сбой соединения, а обрыв на чтении
-            # ответа (`RemoteDisconnected`, сброс, таймаут чтения) летел голым
+            # ответа (роды — у `_DROPPED`) летел голым
             # исключением: мимо повтора на чтении и мимо `TransportError`, и шаг
             # падал трейсбеком. Он ведётся как `URLError` — граница повтора та же.
             last = urllib.error.URLError(exc)

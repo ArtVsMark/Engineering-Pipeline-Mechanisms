@@ -12,6 +12,7 @@ import email.message
 import http.client
 import io
 import json
+import ssl
 import threading
 import time
 import urllib.error
@@ -516,8 +517,16 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         http.client.RemoteDisconnected("обрыв без ответа"),
         ConnectionResetError("сброс"),
         TimeoutError("таймаут чтения"),
+        http.client.IncompleteRead(b"", 10),
+        ssl.SSLEOFError("EOF occurred in violation of protocol"),
     ],
-    ids=["RemoteDisconnected", "ConnectionResetError", "TimeoutError"],
+    ids=[
+        "RemoteDisconnected",
+        "ConnectionResetError",
+        "TimeoutError",
+        "IncompleteRead",
+        "SSLEOFError",
+    ],
 )
 def test_a_response_dropped_midway_is_the_same_broken_connection(
     monkeypatch: pytest.MonkeyPatch, dropped: Exception
