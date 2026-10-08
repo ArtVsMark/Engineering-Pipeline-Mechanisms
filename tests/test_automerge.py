@@ -10,6 +10,7 @@
 (`tests/test_ghrest.py`, `tests/test_token_paths.py`).
 """
 
+import ast
 from dataclasses import replace
 from typing import Any, Final
 
@@ -2334,3 +2335,90 @@ def test_look_records_take_both_names_and_nothing_else(monkeypatch: pytest.Monke
     assert asked == ["repos/o/r/commits/sha/check-runs?filter=all"]
     assert module.is_look({"name": "review / review"}) is True
     assert module.is_look({"name": "review / findings"}) is False
+
+
+#: КАЖДЫЙ пропуск головы в цикле очереди отнесён здесь: ждёт ли голова на нём
+#: вердикта взгляда (и тогда ставит ступень) или нет. Таблица разрешительная
+#: (068): пропуск, которого в ней нет, краснит сверку, и человек решает о нём
+#: явно. Набор ключей ожидания взгляда, заведённый рукой отдельно, новый выход
+#: ожидания со своим ключом пропускал молча (взгляд на #1231, проверено мутацией).
+#: `<состояние>` — счётчик с подставленным именем, `<отказ взведения>` — выход
+#: без счётчика (`NotRun`).
+SKIP_WAITS_FOR_LOOK: Final = {
+    "пусты": False,
+    "красны": False,
+    "конфликтуют": False,
+    "ждут починки находок": False,
+    "ждут головы важнее": False,
+    "ждут вердикта взгляда": True,
+    "ждут пропущенного взгляда": True,
+    "<состояние>": False,
+    "<отказ взведения>": False,
+}
+
+
+def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
+    """Блоки цикла голов, кончающиеся `continue`: их счётчики пропуска и ставят ли они ступень.
+
+    Счётчик с подставленным именем (`f"в состоянии «…»"`) называется `<состояние>`,
+    блок без счётчика (отказ взведения) — пустым набором.
+    """
+    loop = next(
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.For)
+        and any(isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node))
+    )
+    found = []
+    for node in ast.walk(loop):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(node, field, None)
+            if not isinstance(block, list) or not block or not isinstance(block[-1], ast.Continue):
+                continue
+            if node is loop and field == "body":
+                continue
+            keys = frozenset(
+                str(one.slice.value) if isinstance(one.slice, ast.Constant) else "<состояние>"
+                for statement in block
+                for one in ast.walk(statement)
+                if isinstance(one, ast.Subscript)
+                and isinstance(one.value, ast.Name)
+                and one.value.id == "skipped"
+            )
+            sets = any(
+                isinstance(one, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "waiting_rank"
+                    for target in one.targets
+                )
+                for statement in block
+                for one in ast.walk(statement)
+            )
+            found.append((keys, sets))
+    return found
+
+
+def test_only_the_look_waiting_exits_set_the_step() -> None:
+    """Каждый пропуск головы отнесён, и ступень ставят ровно отнесённые к ожиданию взгляда.
+
+    Перечень «НЕ ставят» в комментарии у `waiting_rank` дважды оказывался
+    неполным (взгляды на #1221, #1231); теперь он правило, а состав выходов
+    сверяется разбором кода с таблицей `SKIP_WAITS_FOR_LOOK`, где пропуск без
+    отнесения — отказ.
+    """
+    tree = ast.parse((ROOT / "scripts" / "automerge.py").read_text(encoding="utf-8"))
+    advance = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "advance"
+    )
+    exits = [(keys or frozenset({"<отказ взведения>"}), sets) for keys, sets in skip_exits(advance)]
+    seen = frozenset().union(*(keys for keys, _ in exits))
+    unknown = sorted(seen - SKIP_WAITS_FOR_LOOK.keys())
+    assert not unknown, f"пропуск не отнесён в `SKIP_WAITS_FOR_LOOK`: {unknown}"
+    gone = sorted(SKIP_WAITS_FOR_LOOK.keys() - seen)
+    assert not gone, f"в таблице пропуски, которых в очереди нет: {gone}"
+    for keys, sets in exits:
+        waits = {SKIP_WAITS_FOR_LOOK[key] for key in keys}
+        assert waits == {sets}, (
+            f"выход {sorted(keys)}: {'ставит' if sets else 'не ставит'} ступень, "
+            f"а по таблице ждёт взгляда: {sorted(waits)}"
+        )
