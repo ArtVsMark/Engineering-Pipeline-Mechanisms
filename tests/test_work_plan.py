@@ -184,6 +184,7 @@ def quiet_platform(monkeypatch: pytest.MonkeyPatch, *, body: str = BODY) -> list
     monkeypatch.setattr(module.debt, "branch_debt", lambda *_: ([], []))
     monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], [], []))
     monkeypatch.setattr(module.debt, "findings_debt", lambda *_: [])
+    monkeypatch.setattr(module.debt, "open_changes", lambda *_: frozenset())
     monkeypatch.setattr(module.debt, "closed_issues", lambda *_: [])
     monkeypatch.setattr(module.debt, "inbox_body", lambda *_: ("", "", ""))
     monkeypatch.setattr(module.debt, "rules_debt", lambda _: (0, 0, 0))
@@ -275,7 +276,9 @@ def test_a_silent_neighbour_does_not_make_a_section_look_full(
         raise module.ghrest.TransportError("задача о красноте молчит")
 
     monkeypatch.setattr(module.debt, "branch_debt", refuse)
-    monkeypatch.setattr(module.debt, "findings_debt", lambda *_: [("abc1234", 635, "находка")])
+    monkeypatch.setattr(
+        module.debt, "findings_debt", lambda *_: [("abc1234", 635, "дефект", "находка")]
+    )
     built, broken, _ = module.sources("o/r", "t")
     said = "\n".join(module.render(3, built[3], "01.01.2026"))
     assert "abc1234" in said, "прочитанная половина источника пропала"
@@ -296,7 +299,7 @@ def test_the_registry_is_read_once_per_pass(monkeypatch: pytest.MonkeyPatch) -> 
     quiet_platform(monkeypatch)
     asked: list[int] = []
 
-    def counted(*_: Any, **__: Any) -> list[tuple[str, int, str]]:
+    def counted(*_: Any, **__: Any) -> list[tuple[str, int, str, str]]:
         asked.append(1)
         return []
 
@@ -849,3 +852,56 @@ def test_born_rows_read_the_handed_list(monkeypatch: pytest.MonkeyPatch) -> None
     }
     rows = module.born_rows("o/r", "t", held, frozenset(), [child])
     assert any("#11" in row for row in rows), rows
+
+
+def test_late_minor_findings_accrue_in_source_five(monkeypatch: pytest.MonkeyPatch) -> None:
+    """На слитом дефект — долг раздела 3, риск и замечание копятся в разделе 5.
+
+    Решение владельца 08.10.2026 (#639): поздний взгляд дробил план мелочью,
+    и её починки крутили цикл. Находка на открытом изменении — долг любого веса.
+    """
+    quiet_platform(monkeypatch)
+    monkeypatch.setattr(
+        module.debt,
+        "findings_debt",
+        lambda *_: [
+            ("aaaaaaa", 10, "дефект", "слитое ломается"),
+            ("bbbbbbb", 10, "риск", "слитое сломается при условии"),
+            ("ccccccc", 10, "замечание", "слитое написано криво"),
+            ("ddddddd", 20, "замечание", "открытое написано криво"),
+        ],
+    )
+    monkeypatch.setattr(module.debt, "open_changes", lambda *_: frozenset({20}))
+    built, broken, marks = module.sources("o/r", "t")
+    three = "\n".join(built[3].rows)
+    five = "\n".join(built[5].rows)
+    assert "aaaaaaa" in three and "ddddddd" in three, three
+    assert "bbbbbbb" not in three and "ccccccc" not in three, three
+    assert "bbbbbbb" in five and "ccccccc" in five, five
+    assert "копится" in built[5].note, built[5].note
+    assert marks == {"aaaaaaa", "bbbbbbb", "ccccccc", "ddddddd"}, "копящееся выпало из снятия"
+    assert not broken
+
+
+def test_unread_openness_keeps_the_registry_and_owes_everything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ чтения открытых изменений не выбрасывает реестр: всё — долг, и это названо.
+
+    Взгляд на #1236: открытость читалась в одном `try` с реестром, и её отказ
+    оставлял раздел 3 и снятие пустыми.
+    """
+    quiet_platform(monkeypatch)
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("список открытых молчит")
+
+    monkeypatch.setattr(
+        module.debt, "findings_debt", lambda *_: [("bbbbbbb", 10, "риск", "слитое сломается")]
+    )
+    monkeypatch.setattr(module.debt, "open_changes", refuse)
+    built, _, marks = module.sources("o/r", "t")
+    assert "bbbbbbb" in "\n".join(built[3].rows), "прочитанный реестр выброшен"
+    assert "не прочитаны" in built[3].note, "слепота открытости не названа"
+    assert "bbbbbbb" not in "\n".join(built[5].rows), "вслепую отложено в раздел 5"
+    assert marks == {"bbbbbbb"}

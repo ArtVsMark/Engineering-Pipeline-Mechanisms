@@ -99,7 +99,7 @@ HEADS: Final[dict[int, str]] = {
     2: "2 · Красное и находки на своём открытом изменении",
     3: "3 · Долг по уже слитому",
     4: "4 · Прямое указание владельца",
-    5: "5 · Незакрытая работа по правилам каталога и дрейф",
+    5: "5 · Незакрытая работа по правилам каталога, дрейф и копящиеся находки",
     6: "6 · План автора",
 }
 
@@ -231,19 +231,49 @@ def sources(
     # непрочитанное выдавалось за пустоту, теперь непрочитанное вытесняло
     # прочитанное. Симметрию нашёл внешний взгляд на #652.
     stayed = [f"**{one}** — совещательное красное пережило слияние" for one in lagging]
+    # НАХОДКА НА СЛИТОМ ДОЛГОМ СТОИТ ПО ВЕСУ (решение владельца 08.10.2026,
+    # #639): дефект — в источнике 3, риск и замечание копятся в источнике 5 и
+    # разбираются пачкой, когда пусты 0–4. Граница и её довод — у
+    # `debt.ACCRUED`. Копящееся не теряется: строка с отпечатком стоит в
+    # разделе 5, и снимает её то же `Разобрано:`.
+    kept_part = Source()
     try:
-        left = debt.findings_debt(repo, token, listed)
-        marks = {mark for mark, _, _ in left}
-        rows = [f"`{mark}` · #{pr} — {said}" for mark, pr, said in left]
-        built[3] = Source(rows=rows + stayed, unread=lagging_silent)
+        everything = debt.findings_debt(repo, token, listed)
+    except ghrest.TransportError as exc:
+        everything = None
+        built[3] = Source(rows=stayed, unread=f"реестр находок не прочитан: {exc}")
+        kept_part = Source(unread=f"реестр находок не прочитан: {exc}")
+        broken.append("3")
+    if everything is not None:
+        # ОТКРЫТОСТЬ ЧИТАЕТСЯ ОТДЕЛЬНО ОТ РЕЕСТРА: её отказ не выбрасывает
+        # прочитанные находки (взгляд на #1236). Не узнали, что открыто, —
+        # всё остаётся долгом, и это названо: копить вслепую значило бы
+        # спрятать в отложенное то, что, может быть, ещё не слито (045).
+        opened: frozenset[int] | None
+        blind = ""
+        try:
+            opened = debt.open_changes(
+                ghrest.paginate(f"repos/{repo}/issues?state=open", token)
+                if listed is None
+                else listed
+            )
+        except ghrest.TransportError as exc:
+            opened = None
+            blind = f"открытые изменения не прочитаны, находки оставлены долгом: {exc}"
+        left, kept = (everything, []) if opened is None else debt.accrued(everything, opened)
+        marks = {one[0] for one in everything}
+        rows = [f"`{mark}` · #{pr} — [{weight}] {said}" for mark, pr, weight, said in left]
+        built[3] = Source(rows=rows + stayed, unread=lagging_silent, note=blind)
+        kept_part = Source(
+            rows=[f"`{mark}` · #{pr} — [{weight}] {said}" for mark, pr, weight, said in kept],
+            note=f"находок на слитом копится до разбора пачкой: {len(kept)}" if kept else "",
+        )
         if lagging_silent:
             broken.append("3")
-    except ghrest.TransportError as exc:
-        built[3] = Source(rows=stayed, unread=f"реестр находок не прочитан: {exc}")
-        broken.append("3")
 
-    # ИСТОЧНИК 5 СКЛАДЫВАЕТСЯ ИЗ ДВУХ КАНАЛОВ, как и источник 3: «входящие»
-    # каталога и задача дрейфа. Договор называет дрейф частью источника 5
+    # ИСТОЧНИК 5 СКЛАДЫВАЕТСЯ ИЗ НЕСКОЛЬКИХ КАНАЛОВ, как и источник 3:
+    # «входящие» каталога, задача дрейфа, поводы для правила и копящиеся
+    # находки на слитом. Договор называет дрейф частью источника 5
     # (`docs/agent/behaviour.md`, контур 1), а сборщик его не читал — раздел
     # выглядел полным, когда дрейф назвал бы работу (#665). Каналы читаются
     # порознь: отказ одного не стирает прочитанное у другого — тот же урок,
@@ -251,7 +281,7 @@ def sources(
     rules = rules_part(repo, token, listed)
     moved = drift_part(repo, token, listed)
     born = birth_part()
-    parts = (rules, moved, born)
+    parts = (rules, moved, born, kept_part)
     built[5] = Source(
         rows=[row for part in parts for row in part.rows],
         note="; ".join(part.note for part in parts if part.note),
