@@ -702,6 +702,9 @@ def test_every_unreleased_fragment_keeps_the_shape() -> None:
         (["> ```", "# x"], ["```", "# x"], []),
         (["<div>", "```", "", "# Раздел"], ["<div>", "```", "", "# Раздел"], ["вплотную"]),
         (["", "```", "# x"], [""], ["забор не закрыт"]),
+        (["<!-- x", "", "```", "-->", "```", "# Раздел"], None, ["HTML-блок"]),
+        (["> <pre>"], None, ["HTML-блок"]),
+        (["<div>", "", "текст"], None, []),
     ],
     ids=[
         "забор без отступа прячет код",
@@ -709,14 +712,17 @@ def test_every_unreleased_fragment_keeps_the_shape() -> None:
         "забор в цитате — текст",
         "забор вплотную к HTML-блоку — отказ, h1 виден (взгляд на #1222)",
         "незакрытый забор — отказ",
+        "комментарий HTML с забором внутри — отказ (взгляд на #1222)",
+        "блок pre в цитате — отказ",
+        "HTML вида 6 — не отказ: кончается пустой строкой",
     ],
 )
 def test_fenced_names_the_fences_of_a_wrong_shape(
-    raw: list[str], outside: list[str], refused: list[str]
+    raw: list[str], outside: list[str] | None, refused: list[str]
 ) -> None:
-    """`fenced` отдаёт строки вне заборов и отдельно — отказы по форме забора."""
+    """`fenced` отдаёт строки вне заборов и отдельно — отказы по форме забора и HTML."""
     kept, said = module.fenced(raw)
-    assert kept == outside
+    assert outside is None or kept == outside
     assert len(said) == len(refused)
     assert all(part in one for part, one in zip(refused, said, strict=True)), said
 

@@ -378,11 +378,29 @@ def fenced(raw: list[str]) -> tuple[list[str], list[str]]:
                 opened = line.rstrip()
                 previous = line
                 continue
+        if UNENDING_HTML_RE.match(content(line)):
+            refused.append(
+                f"HTML-блок, который не кончается пустой строкой: «{line.strip()}» — "
+                "во фрагменте не пишется"
+            )
         kept.append(content(line))
         previous = line
     if fence:
         refused.append(f"забор не закрыт: «{opened}»")
     return kept, refused
+
+
+#: Начало HTML-блока видов 1–5 по CommonMark 0.31 (§4.6): `script`/`pre`/
+#: `style`/`textarea`, комментарий, инструкция обработки, объявление, CDATA.
+#: Такой блок длится до своего закрывающего знака, а не до пустой строки, и
+#: забор внутри него — не забор: закрытый, он спрятал бы за собой заголовок,
+#: который CommonMark покажет (взгляд на #1222). Строгое правило вместо
+#: разбора (210): во фрагменте такой блок — отказ. Замер 08.10.2026: в 949
+#: фрагментах журнала их нет ни одного.
+UNENDING_HTML_RE: Final = re.compile(
+    r"<(?:(?:script|pre|style|textarea)(?:\s|>|$)|!--|\?|![A-Za-z]|!\[CDATA\[)",
+    re.IGNORECASE,
+)
 
 
 def indent(line: str) -> int:
