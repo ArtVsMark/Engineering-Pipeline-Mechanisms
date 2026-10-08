@@ -31,6 +31,7 @@ import argparse
 import ast
 import json
 import os
+import shutil
 import sys
 from collections import Counter
 from collections.abc import Callable
@@ -433,6 +434,29 @@ def branch_files() -> list[str]:
     return sorted({*published_names(), UNIFIED, ARCHIVE})
 
 
+def prune(directory: Path) -> list[str]:
+    """Убирает из каталога публикации всё, чего нет в :func:`branch_files`; отдаёт снятое.
+
+    УДАЛЕНИЕ — ЗДЕСЬ, А НЕ ЦИКЛОМ ОБОЛОЧКИ (взгляд на #1202). Цикл звал
+    `git rm` без `-r`: подкаталог или неотслеживаемый файл в каталоге
+    публикации ронял под `set -e` всю публикацию — не уезжали ни значки, ни
+    архив. Здесь снимается файл или каталог целиком, а запись удаления
+    делает `git add -A` прогона. И поведение проверяется прогоном, а не
+    подстрокой в тексте прогона.
+    """
+    keep = set(branch_files())
+    gone: list[str] = []
+    for path in sorted(directory.iterdir()):
+        if path.name in keep:
+            continue
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        gone.append(path.name)
+    return gone
+
+
 def clashing_names() -> list[str]:
     """Имена вывода, которые встречаются дважды (взгляд на #1002).
 
@@ -642,6 +666,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="напечатать всё, что ветка badges вправе держать, — по строке на имя",
     )
+    parser.add_argument(
+        "--prune",
+        default="",
+        help="убрать из каталога публикации всё, чего ветка badges держать не вправе",
+    )
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
     parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
@@ -657,6 +686,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.branch_files:
         print("\n".join(branch_files()))
+        return EXIT_OK
+    if args.prune:
+        for name in prune(Path(args.prune)):
+            print(f"снято с ветки: {name} — сборка его больше не издаёт")
         return EXIT_OK
     if args.from_facts:
         return drawn_from(Path(args.from_facts), args.out_dir)
