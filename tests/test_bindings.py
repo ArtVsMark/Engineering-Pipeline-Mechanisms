@@ -1119,6 +1119,7 @@ ORIGIN_RE = re.compile(r"^[\w.-]+/[\w.-]+:[^@\s]+@[\w.-]+$")
 #: Как механизм взят — закрытый словарь контракта.
 ORIGIN_KINDS = frozenset({"called", "copied", "adapted"})
 #: Вызов действия каталога в наших прогонах: адрес действия и тег.
+CATALOGUE_ORIGIN = "ArtVsMark/Engineering-Incidents-Playbook:"
 CATALOGUE_CALL_RE = re.compile(
     r"uses:\s*ArtVsMark/Engineering-Incidents-Playbook(?P<path>/[\w./-]+)?@(?P<tag>[\w.-]+)"
 )
@@ -1140,23 +1141,44 @@ def test_an_origin_is_shaped_as_the_contract_asks() -> None:
     assert not bad, "; ".join(bad)
 
 
-def test_a_called_catalogue_origin_names_the_tag_we_call() -> None:
-    """Вызванное действие каталога в `origin` несёт тот же тег, что стоит в прогонах.
-
-    Иначе подъём тега оставит origin на прежней версии, и число «чьи гейты в
-    ходу» у каталога будет считать по устаревшему адресу молча (005).
-    """
-    called = {
-        found["tag"]
-        for path in walk(ROOT / ".github" / "workflows", "*.yml")
+def catalogue_calls(folder: Path) -> set[tuple[str, str]]:
+    """Вызовы действий каталога в прогонах: (файл действия, тег) — как их пишет `origin`."""
+    return {
+        (f"{found['path'].lstrip('/')}/action.yml" if found["path"] else "action.yml", found["tag"])
+        for path in walk(folder, "*.yml")
         for found in CATALOGUE_CALL_RE.finditer(path.read_text(encoding="utf-8"))
     }
+
+
+def test_a_called_catalogue_origin_names_an_action_we_call() -> None:
+    """Вызванное действие каталога в `origin` — ровно то действие и тот тег, что зовут прогоны.
+
+    Сверяется ПАРА путь+тег, а не тег сам по себе: иначе attribution, оставленный
+    на прежнем теге при поднятом соседе, прошёл бы, а `origin` на несуществующее
+    действие — тоже (взгляд на #1242). Подъём тега без правки origin краснеет здесь,
+    а не уводит счёт каталога «чьи гейты в ходу» на устаревший адрес молча (005).
+    """
+    called = catalogue_calls(ROOT / ".github" / "workflows")
     assert called, "вызовов действий каталога в прогонах нет — сверять не с чем (075)"
-    stale = [
-        f"{number}: {answer['origin']}"
-        for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items()
-        if str(answer.get("origin") or "").startswith("ArtVsMark/Engineering-Incidents-Playbook:")
-        and answer.get("origin_kind") == "called"
-        and answer["origin"].rsplit("@", 1)[-1] not in called
-    ]
-    assert not stale, f"origin вызванного действия не на теге прогонов {sorted(called)}: {stale}"
+    stale = []
+    for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
+        origin = str(answer.get("origin") or "")
+        if answer.get("origin_kind") != "called" or not origin.startswith(CATALOGUE_ORIGIN):
+            continue
+        path, _, tag = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")
+        if (path, tag) not in called:
+            stale.append(f"{number}: {origin}")
+    assert not stale, f"origin вызванного действия не из вызовов прогонов {sorted(called)}: {stale}"
+
+
+def test_catalogue_calls_pair_the_action_with_its_tag(tmp_path: Path) -> None:
+    """Пара берётся из одного вызова: корневое действие — `action.yml`, вложенное — по пути."""
+    (tmp_path / "a.yml").write_text(
+        "steps:\n  - uses: ArtVsMark/Engineering-Incidents-Playbook@v1.9.0\n"
+        "  - uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.6.0\n",
+        encoding="utf-8",
+    )
+    assert catalogue_calls(tmp_path) == {
+        ("action.yml", "v1.9.0"),
+        (".github/actions/attribution/action.yml", "v1.6.0"),
+    }
