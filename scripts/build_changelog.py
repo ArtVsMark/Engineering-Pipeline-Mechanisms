@@ -249,7 +249,9 @@ def fragments_of(paths: list[str]) -> list[Fragment]:
 
 
 def shape_fault(fragment: Fragment) -> str:
-    """Чем фрагмент нарушает форму: заголовок выше `###` или размер тела; пусто — ничем.
+    """Чем фрагмент нарушает форму: забор не той формы, заголовок выше `###`, размер тела.
+
+    Пусто — ничем. Форму забора судит `fenced`.
 
     ТЕЛО — все непустые строки, кроме строки-заголовка и последней строки
     ссылки на задачу: подзаголовки `####`, строки блоков кода и строка причины
@@ -264,9 +266,9 @@ def shape_fault(fragment: Fragment) -> str:
     иной (взгляд на #1174).
     """
     raw = fragment.body.splitlines()
-    outside, indented = fenced(raw)
-    if indented:
-        return f"забор с отступом: «{indented[0]}» — забор пишется без отступа"
+    outside, refused = fenced(raw)
+    if refused:
+        return refused[0]
     for one in outside:
         if TOO_HIGH_RE.match(one):
             return f"заголовок выше `###`: «{one}»"
@@ -313,9 +315,10 @@ def content(line: str) -> str:
     фрагменте пишется в заборе — ```` ``` ```` или `~~~`.
 
     ЗАБОРЫ СУДЯТСЯ ТАК ЖЕ СТРОГО, но в обратную сторону: строгость здесь —
-    прятать меньше. Забор узнаётся только на верхнем уровне (`outside_fences`),
-    а не по этой строке: снятый контейнер превращал `> ```` и строку с
-    отступом 4+ в забор, и тот прятал следующий h1 (взгляд на #1207).
+    прятать меньше. Забор узнаёт `fenced` по строке целиком — без отступа, без
+    приставки контейнера, после пустой строки, — а не по этой строке: снятый
+    контейнер превращал `> ```` и строку с отступом 4+ в забор, и тот прятал
+    следующий h1 (взгляд на #1207).
     """
     one = line.strip()
     while mark := CONTAINER_RE.match(one):
@@ -323,13 +326,8 @@ def content(line: str) -> str:
     return one
 
 
-def outside_fences(raw: list[str]) -> list[str]:
-    """Содержимое строк (`content`) вне заборов блоков кода."""
-    return fenced(raw)[0]
-
-
 def fenced(raw: list[str]) -> tuple[list[str], list[str]]:
-    """Строки вне заборов (`content`) и строки-заборы с отступом, которым отказано.
+    """Строки вне заборов (`content`) и отказы по форме заборов.
 
     ЗАБОР — ТОЛЬКО С НУЛЕВЫМ ОТСТУПОМ, и это строгое правило, а не очередная
     форма разбора (210). Седьмой заход по этому месту называл новую глубину:
@@ -345,11 +343,20 @@ def fenced(raw: list[str]) -> tuple[list[str], list[str]]:
     за ней заголовок. Под `>`, маркером пункта или с отступом 4+ строка
     забором не является и судится как текст, как прежде. Закрывает забор тот
     же знак не короче открывшего, без строки сведений, с отступом до трёх.
-    Незакрытый забор длится до конца фрагмента, как в CommonMark.
+
+    ЕЩЁ ДВА ОТКАЗА ТОЙ ЖЕ СТРОГОСТИ (взгляд на #1222). Забор вплотную к
+    строке текста и незакрытый забор — отказ. Строка забора сразу за `<div>`
+    или `<!--` в CommonMark — часть HTML-блока, а не забор, и прятать за ней
+    заголовок нельзя: перед забором пустая строка, и HTML-блок вида 6 ею
+    кончается. Незакрытый забор длился до конца фрагмента и прятал всё за
+    собой, в том числе там, где CommonMark забора не видит вовсе. Замер
+    08.10.2026: из 38 заборов журнала таких нет ни одного.
     """
     kept: list[str] = []
     refused: list[str] = []
     fence = ""
+    opened = ""
+    previous = ""
     for line in raw:
         top = opening(line)
         if top is not None and CONTAINER_RE.match(top):
@@ -357,15 +364,24 @@ def fenced(raw: list[str]) -> tuple[list[str], list[str]]:
         if fence:
             if top is not None and top.startswith(fence) and not top.strip(fence[0]):
                 fence = ""
+            previous = line
             continue
         if top is not None and (mark := FENCE_RE.match(top)):
             if indent(line):
-                refused.append(line.rstrip())
-                kept.append(content(line))
+                refused.append(f"забор с отступом: «{line.rstrip()}» — забор пишется без отступа")
+            elif previous.strip():
+                refused.append(
+                    f"забор вплотную к строке «{previous.strip()}»: перед забором — пустая строка"
+                )
+            else:
+                fence = mark.group(1) or mark.group(2)
+                opened = line.rstrip()
+                previous = line
                 continue
-            fence = mark.group(1) or mark.group(2)
-            continue
         kept.append(content(line))
+        previous = line
+    if fence:
+        refused.append(f"забор не закрыт: «{opened}»")
     return kept, refused
 
 
