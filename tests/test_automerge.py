@@ -2337,8 +2337,24 @@ def test_look_records_take_both_names_and_nothing_else(monkeypatch: pytest.Monke
     assert module.is_look({"name": "review / findings"}) is False
 
 
-#: Пропуски головы, на которых она ждёт ВЕРДИКТА взгляда: только они ставят ступень.
-LOOK_WAITING_SKIPS: Final = frozenset({"ждут вердикта взгляда", "ждут пропущенного взгляда"})
+#: КАЖДЫЙ пропуск головы в цикле очереди отнесён здесь: ждёт ли голова на нём
+#: вердикта взгляда (и тогда ставит ступень) или нет. Таблица разрешительная
+#: (068): пропуск, которого в ней нет, краснит сверку, и человек решает о нём
+#: явно. Набор ключей ожидания взгляда, заведённый рукой отдельно, новый выход
+#: ожидания со своим ключом пропускал молча (взгляд на #1231, проверено мутацией).
+#: `<состояние>` — счётчик с подставленным именем, `<отказ взведения>` — выход
+#: без счётчика (`NotRun`).
+SKIP_WAITS_FOR_LOOK: Final = {
+    "пусты": False,
+    "красны": False,
+    "конфликтуют": False,
+    "ждут починки находок": False,
+    "ждут головы важнее": False,
+    "ждут вердикта взгляда": True,
+    "ждут пропущенного взгляда": True,
+    "<состояние>": False,
+    "<отказ взведения>": False,
+}
 
 
 def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
@@ -2383,22 +2399,26 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
 
 
 def test_only_the_look_waiting_exits_set_the_step() -> None:
-    """Ступень ставят ровно три выхода ожидания вердикта, прочие пропуски — нет (взгляд на #1221).
+    """Каждый пропуск головы отнесён, и ступень ставят ровно отнесённые к ожиданию взгляда.
 
     Перечень «НЕ ставят» в комментарии у `waiting_rank` дважды оказывался
-    неполным; теперь он правило, а состав выходов сверяется разбором кода.
+    неполным (взгляды на #1221, #1231); теперь он правило, а состав выходов
+    сверяется разбором кода с таблицей `SKIP_WAITS_FOR_LOOK`, где пропуск без
+    отнесения — отказ.
     """
     tree = ast.parse((ROOT / "scripts" / "automerge.py").read_text(encoding="utf-8"))
     advance = next(
         node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "advance"
     )
-    exits = skip_exits(advance)
-    setting = [keys for keys, sets in exits if sets]
-    assert len(setting) == 3, f"ступень ставят {len(setting)} выходов, а форм ожидания три"
-    assert all(keys and keys <= LOOK_WAITING_SKIPS for keys in setting), setting
-    others = [keys for keys, sets in exits if not sets]
-    assert not any(keys & LOOK_WAITING_SKIPS for keys in others), (
-        f"выход ожидания вердикта не ставит ступень: {others}"
-    )
-    assert frozenset() in others, "отказ взведения (`NotRun`) не найден среди пропусков"
-    assert frozenset({"<состояние>"}) in others, "незнакомое состояние не найдено среди пропусков"
+    exits = [(keys or frozenset({"<отказ взведения>"}), sets) for keys, sets in skip_exits(advance)]
+    seen = frozenset().union(*(keys for keys, _ in exits))
+    unknown = sorted(seen - SKIP_WAITS_FOR_LOOK.keys())
+    assert not unknown, f"пропуск не отнесён в `SKIP_WAITS_FOR_LOOK`: {unknown}"
+    gone = sorted(SKIP_WAITS_FOR_LOOK.keys() - seen)
+    assert not gone, f"в таблице пропуски, которых в очереди нет: {gone}"
+    for keys, sets in exits:
+        waits = {SKIP_WAITS_FOR_LOOK[key] for key in keys}
+        assert waits == {sets}, (
+            f"выход {sorted(keys)}: {'ставит' if sets else 'не ставит'} ступень, "
+            f"а по таблице ждёт взгляда: {sorted(waits)}"
+        )
