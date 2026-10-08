@@ -330,24 +330,40 @@ def outside_fences(raw: list[str]) -> list[str]:
     прежде такой «забор» длился до конца фрагмента и прятал h1 (взгляд на
     #1207). Цена: пример с `# ` внутри пункта или цитаты пишется забором на
     верхнем уровне. Закрывает забор тот же знак не короче открывшего, без
-    строки сведений и тоже на верхнем уровне; незакрытый длится до конца
-    фрагмента, как в CommonMark.
+    строки сведений и тоже на верхнем уровне. Обрывает — непустая строка
+    левее самого забора: забор с отступом продолжения пункта живёт в пункте,
+    и строка левее кончает пункт вместе с ним (взгляд на #1215). Незакрытый
+    и необорванный забор длится до конца фрагмента, как в CommonMark.
     """
     kept: list[str] = []
     fence = ""
+    depth = 0
     for line in raw:
         top = opening(line)
         if top is not None and CONTAINER_RE.match(top):
             top = None
         if fence:
-            if top is not None and top.startswith(fence) and not top.strip(fence[0]):
+            if line.strip() and indent(line) < depth:
+                # СТРОКА ЛЕВЕЕ ЗАБОРА ОБРЫВАЕТ ЕГО: забор, отбитый отступом
+                # продолжения пункта, живёт в пункте, а строка левее пункт
+                # кончает — и судится как текст (взгляд на #1215).
                 fence = ""
-            continue
+            else:
+                if top is not None and top.startswith(fence) and not top.strip(fence[0]):
+                    fence = ""
+                continue
         if top is not None and (mark := FENCE_RE.match(top)):
             fence = mark.group(1) or mark.group(2)
+            depth = indent(line)
             continue
         kept.append(content(line))
     return kept
+
+
+def indent(line: str) -> int:
+    """Отступ строки в пробелах, табуляция — до позиции, кратной четырём."""
+    expanded = line.expandtabs(CODE_INDENT)
+    return len(expanded) - len(expanded.lstrip(" "))
 
 
 #: Имена HTML-блока вида 6 по CommonMark 0.31 (§4.6), альтернативой выражения:
