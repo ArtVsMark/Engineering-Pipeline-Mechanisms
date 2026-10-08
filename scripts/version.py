@@ -36,12 +36,14 @@
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
 Исходы (правило 039): ``0`` версия посчитана, либо сверка `--check`
-неприменима — нет ни тега, ни `CONTRACT_VERSION` в полном клоне, и причина
-напечатана · ``2`` шаг не отработал · ``3`` посчитана неполно либо разошлась
-с объявленной — сказано, а не скрыто.
+неприменима — нет `CONTRACT_VERSION`, а отсутствие выпускных тегов доказано
+(`absence`), и причина напечатана · ``2`` шаг не отработал, в том числе вне
+репозитория · ``3`` посчитана неполно, разошлась с объявленной или отсутствие
+тегов не доказано — сказано, а не скрыто.
 """
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -245,9 +247,104 @@ def version(root: Path | None = None) -> tuple[str, bool]:
     return f"{major}.{minor}.{changes_in('HEAD', root)}", False
 
 
-def shallow(root: Path | None = None) -> bool:
-    """Мелкий ли клон: отсутствие тегов в нём ничего не говорит о проекте."""
-    return git("rev-parse", "--is-shallow-repository", root=root) == "true"
+#: Почему тегов не видно — исходы `absence`. Только `NONE` значит «у проекта их нет».
+ABSENCE_NONE: Final = "none"
+ABSENCE_SHALLOW: Final = "shallow"
+ABSENCE_UNFETCHED: Final = "unfetched"
+ABSENCE_UNASKED: Final = "unasked"
+ABSENCE_ELSEWHERE: Final = "elsewhere"
+#: Сколько ждать ответа источника о тегах: молчание дольше — «не спросили», а не «нет».
+ASK_TIMEOUT: Final = 30
+
+
+def absence(root: Path | None = None) -> str:
+    """Почему в клоне нет выпускного тега: «неприменимо» только по доказанному.
+
+    СТРОГОЕ ПРАВИЛО, А НЕ ФОРМА ЗА ФОРМОЙ (второй заход по месту — взгляд на
+    #1192; 210). Отсутствие тега в клоне доказывает отсутствие у проекта, только
+    когда все три вопроса отвечены: git отвечает (иначе `NotRun` — это не
+    репозиторий или git сломан, а не «тегов нет»); клон не мелкий; источник
+    (`git ls-remote`) выпускных тегов тоже не несёт. Источник не ответил —
+    `ABSENCE_UNASKED`, а не «нет». Клона без источника доказывать не у кого: его
+    теги — все теги, что есть.
+
+    Взгляд на #1200 назвал три соседа, и они держатся тем же правилом:
+    выпускной тег есть в клоне, но не в истории HEAD, — `ABSENCE_ELSEWHERE`,
+    у проекта теги есть; источник — upstream ветки, иначе `origin`, иначе
+    единственный; несколько без upstream и `origin` — не у кого спросить
+    (`ABSENCE_UNASKED`); вопрос источнику идёт без запроса пароля и с
+    пределом ожидания — повисший шаг тоже «не спросили».
+    """
+    said = git("rev-parse", "--is-shallow-repository", root=root)
+    if said is None:
+        raise NotRun("git не ответил: это не репозиторий или git недоступен — сверять не по чему")
+    if said == "true":
+        return ABSENCE_SHALLOW
+    local = (git("tag", "--no-merged", "HEAD", "--list", RELEASE_TAG_GLOB, root=root) or "").split(
+        "\n"
+    )
+    if any(is_release_tag(tag) for tag in local):
+        return ABSENCE_ELSEWHERE
+    remotes = [one for one in (git("remote", root=root) or "").split("\n") if one.strip()]
+    if not remotes:
+        return ABSENCE_NONE
+    remote = source_of(remotes, root)
+    if remote is None:
+        return ABSENCE_UNASKED
+    listed = ask_tags(remote, root)
+    if listed is None:
+        return ABSENCE_UNASKED
+    tags = [line.rsplit("refs/tags/", 1)[-1] for line in listed.split("\n") if line]
+    return ABSENCE_UNFETCHED if any(is_release_tag(tag) for tag in tags) else ABSENCE_NONE
+
+
+def source_of(remotes: list[str], root: Path | None = None) -> str | None:
+    """Источник клона: upstream текущей ветки, иначе `origin`, иначе единственный."""
+    upstream = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", root=root)
+    if upstream and "/" in upstream and upstream.split("/", 1)[0] in remotes:
+        return upstream.split("/", 1)[0]
+    if "origin" in remotes:
+        return "origin"
+    return remotes[0] if len(remotes) == 1 else None
+
+
+def ask_tags(remote: str, root: Path | None = None) -> str | None:
+    """Выпускные теги источника; ``None`` — источник не ответил или ответ не дождались."""
+    try:
+        return subprocess.run(
+            ["git", "ls-remote", "--tags", "--refs", remote, RELEASE_TAG_GLOB],
+            cwd=root,
+            capture_output=True,
+            check=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=ASK_TIMEOUT,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "true"},
+        ).stdout.strip()
+    except OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired:
+        return None
+
+
+#: Что сказать, когда тегов не видно, а доказать их отсутствие у проекта нечем.
+HINTS: Final = {
+    ABSENCE_SHALLOW: (
+        f"тегов не видно, и клон мелкий: нет ни выпускного тега, ни {paths.VERSION} — "
+        "подтяните историю: git fetch --tags --unshallow"
+    ),
+    ABSENCE_UNFETCHED: (
+        f"тегов не видно, а у источника выпускные теги есть: нет ни тега, ни {paths.VERSION} "
+        "в клоне — подтяните теги: git fetch --tags"
+    ),
+    ABSENCE_ELSEWHERE: (
+        f"выпускной тег в клоне есть, но не в истории HEAD: нет ни достижимого тега, ни "
+        f"{paths.VERSION} — проект версию ведёт, сверяйте на ветке, где выпуск"
+    ),
+    ABSENCE_UNASKED: (
+        f"тегов не видно, и источник о своих тегах не ответил: нет ни тега, ни {paths.VERSION} "
+        "— отсутствие тегов у проекта не доказано, повторите с доступом к источнику"
+    ),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -264,12 +361,13 @@ def main(argv: list[str] | None = None) -> int:
     # там, где их просто не принесли: у такого проекта теги есть, и сверка
     # обязана сказать об обрезанной истории, а не промолчать.
     if args.check and not paths.VERSION.is_file() and release_tag() is None:
-        if shallow():
-            print(
-                f"тегов не видно, и клон мелкий: нет ни выпускного тега, ни {paths.VERSION} — "
-                "подтяните историю: git fetch --tags --unshallow",
-                file=sys.stderr,
-            )
+        try:
+            why = absence()
+        except NotRun as exc:
+            print(f"шаг не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        if why != ABSENCE_NONE:
+            print(HINTS[why], file=sys.stderr)
             return EXIT_PARTIAL
         print(
             f"неприменимо: ни выпускного тега, ни {paths.VERSION} в полном клоне — "
