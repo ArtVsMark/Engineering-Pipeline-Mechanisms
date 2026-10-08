@@ -995,5 +995,37 @@ def test_the_badges_branch_keeps_only_what_is_published() -> None:
     assert kept == {*module.published_names(), module.UNIFIED, module.ARCHIVE}
     assert "scripts.json" not in kept, "снятый значок остался допустимым на ветке"
     flow = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
-    assert "build_facts.py --branch-files" in flow, "публикация не спрашивает перечень"
-    assert 'git -C "$pub" rm' in flow, "публикация ничего не удаляет"
+    assert 'build_facts.py --prune "$pub/.github/badges"' in flow, "публикация не чистит каталог"
+    assert "git add -A .github/badges" in flow, "удаление не записывается в коммит публикации"
+
+
+def test_pruning_removes_files_and_folders_but_keeps_the_list(tmp_path: Path) -> None:
+    """Чистка снимает лишний файл и каталог целиком и не трогает допустимого (взгляд на #1202).
+
+    Прежний цикл звал `git rm` без `-r` и падал на подкаталоге или
+    неотслеживаемом файле, роняя всю публикацию; гейт по подстроке в тексте
+    прогона этого не видел.
+    """
+    module = load_script("build_facts.py")
+    for name in module.branch_files():
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    (tmp_path / "retired.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "stray").mkdir()
+    (tmp_path / "stray" / "inner.json").write_text("{}", encoding="utf-8")
+    gone = module.prune(tmp_path)
+    assert sorted(gone) == ["retired.json", "stray"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted(module.branch_files())
+
+
+def test_the_shared_steps_files_are_kept_on_the_branch() -> None:
+    """Файлы общего шага фактов на ветке допустимы, и чистка их не снимает (взгляд на #1202).
+
+    Перечень допустимого строит потребитель из своего инвентаря, а ветку он
+    делит с общим шагом: второй файл шага удалялся бы каждым заходом.
+    """
+    module = load_script("build_facts.py")
+    step = (ROOT / ".github" / "workflows" / "step-facts.yml").read_text(encoding="utf-8")
+    written = set(re.findall(r"\.github/badges/([\w.-]+)", step))
+    assert written, "файлов общего шага на ветке не найдено — предмет проверки пропал (075)"
+    missing = written - set(module.branch_files())
+    assert not missing, f"чистка сняла бы файлы общего шага: {sorted(missing)}"
