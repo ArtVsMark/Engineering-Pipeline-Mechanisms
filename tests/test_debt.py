@@ -207,9 +207,31 @@ def test_the_third_number_does_not_switch_the_reminder_on() -> None:
     источника, и добавить третий молча не выйдет.
     """
     source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
-    assert "remind(bool(left) or bool(lagging) or rules_left(numbers, note))" in source, (
+    call = "remind(before_plan(left=left, kept=kept, lagging=lagging, rules=rules_left("
+    assert call in source, (
         "решение о напоминании собрано иначе — проверьте, не вошло ли в него слитое без взгляда"
     )
+
+
+@pytest.mark.parametrize(
+    ("left", "kept", "lagging", "rules", "owed"),
+    [
+        ([], [], [], False, False),
+        ([("a", 1, "дефект", "x")], [], [], False, True),
+        ([], [("b", 1, "риск", "x")], [], False, True),
+        ([], [], ["test (3.15)"], False, True),
+        ([], [], [], True, True),
+    ],
+)
+def test_accrued_findings_alone_come_before_the_plan(
+    left: list[Any], kept: list[Any], lagging: list[str], rules: bool, owed: bool
+) -> None:
+    """Одни копящиеся находки — источник 5, он выше плана автора: «долга нет» не печатается.
+
+    Сборщик плана ставит их в раздел 5, а шаг долга при них говорил «работа по
+    плану» — два механизма по-разному читали один порядок (взгляд на #1236).
+    """
+    assert debt.before_plan(left=left, kept=kept, lagging=lagging, rules=rules) is owed
 
 
 # --- краснота общей ветки: два разных состояния, а не одно --------------------

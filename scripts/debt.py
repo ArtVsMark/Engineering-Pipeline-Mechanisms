@@ -594,6 +594,18 @@ def shape_report(
     return lines
 
 
+def before_plan(*, left: list[Any], kept: list[Any], lagging: list[str], rules: bool) -> bool:
+    """Есть ли работа ПЕРЕД планом автора: источники 3 и 5 контура 1.
+
+    Копящиеся риски и замечания на слитом — источник 5, а он стоит выше плана
+    автора (6). Прежде решение их не видело, и шаг при одних копящихся
+    находках печатал «долга нет, работа по плану» — вопреки порядку, который
+    сборщик плана держит (взгляд на #1236). Слитое без взгляда и держащее
+    красное в решение не входят: первое — мера канала, второе — остановка.
+    """
+    return bool(left) or bool(kept) or bool(lagging) or rules
+
+
 def remind(has_debt: bool) -> None:
     """Ведёт к договору, а не пересказывает его."""
     if has_debt:
@@ -602,7 +614,7 @@ def remind(has_debt: bool) -> None:
             "Правило каталога — 177: пока незакрытая работа по правилам есть, новую не начинают."
         )
     else:
-        print("\nдолга нет: оба источника пусты, работа берётся по плану")
+        print("\nдолга нет: источники 3 и 5 пусты, работа берётся по плану")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -762,7 +774,7 @@ def main(argv: list[str] | None = None) -> int:
     # Совещательное красное общей ветки входит в долг перед планом; держащее
     # слияние — нет: оно не долг, а остановка, и решается оно починкой, а не
     # порядком работ.
-    remind(bool(left) or bool(lagging) or rules_left(numbers, note))
+    remind(before_plan(left=left, kept=kept, lagging=lagging, rules=rules_left(numbers, note)))
     return EXIT_PARTIAL if partial else EXIT_OK
 
 
