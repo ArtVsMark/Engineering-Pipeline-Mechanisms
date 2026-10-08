@@ -222,8 +222,19 @@ def _unframed(response: object) -> bool:
     Площадка и снимки обрамляют ответ всегда — у 204 длина 0, — так что
     целый ответ под признак не попадает. Подделка без этих полей считается
     обрамлённой.
+
+    НЕГОДНАЯ ДЛИНА — ФОРМА, А НЕ ОБРЫВ (взгляд на #1235). `http.client` ставит
+    `length = None` и тогда, когда `Content-Length` есть, но не число или
+    отрицательна. Рамку такой ответ объявил, только не той формы, и повтор её
+    не исправит: это `_MALFORMED`, а не обрыв. Без рамки — только ответ, где
+    заголовка длины нет вовсе.
     """
-    return getattr(response, "length", 0) is None and not getattr(response, "chunked", False)
+    if getattr(response, "length", 0) is not None or getattr(response, "chunked", False):
+        return False
+    declared = (getattr(response, "headers", None) or {}).get("Content-Length")
+    if declared is not None:
+        raise _MALFORMED(f"длина ответа не той формы: Content-Length {declared!r}")
+    return True
 
 
 def _cut_short(exc: Exception) -> bool:

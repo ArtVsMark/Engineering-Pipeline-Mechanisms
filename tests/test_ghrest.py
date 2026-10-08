@@ -669,6 +669,35 @@ def test_framing_is_read_from_the_real_http_client() -> None:
     ):
         assert not transport._unframed(begun(raw)), f"{raw!r}: обрамлённый назван обрывом"
     assert not transport._unframed(Answer(b"")), "подделка без полей обязана быть обрамлённой"
+    for raw in (
+        b"HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n{}",
+        b"HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n{}",
+        b"HTTP/1.1 200 OK\r\nContent-Length: \r\n\r\n{}",
+    ):
+        with pytest.raises(http.client.HTTPException, match="не той формы"):
+            transport._unframed(begun(raw))
+
+
+def test_a_malformed_length_is_refused_once_and_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Негодная длина — ответ не той формы: отказ сразу, без повтора (взгляд на #1235)."""
+    asked = 0
+
+    def opener(*_args: object, **_kwargs: object) -> Any:
+        nonlocal asked
+        asked += 1
+        answer = Unframed(b"{}")
+        answer.headers = {"Content-Length": "x"}
+        return answer
+
+    monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
+    with pytest.raises(transport.TransportError, match="не той формы"):
+        transport.request("GET", "/x", "t")
+    assert asked == 1, f"ошибку формы повторили {asked} раз"
+    with pytest.raises(transport.TransportError, match="снимок не прочитан"):
+        transport.raw_text("https://example.org/x.json")
 
 
 def test_an_empty_status_line_is_a_drop_and_not_a_malformed_answer() -> None:
