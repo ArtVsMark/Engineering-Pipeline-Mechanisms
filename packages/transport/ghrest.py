@@ -209,6 +209,22 @@ _DROPPED: Final = (
 _MALFORMED: Final = http.client.HTTPException
 
 
+def _cut_short(exc: Exception) -> bool:
+    """Строка статуса оборвана посреди: связь закрылась раньше перевода строки.
+
+    ГРАНИЦА ПО ПРИЗНАКУ, А НЕ ПО ПЕРЕЧНЮ СОДЕРЖИМОГО (210, взгляд на #1223).
+    Третий заход подряд граница «обрыв или форма» сдвигалась на одну форму
+    строки: пустая, не по HTTP, нечисловой код — и следующий взгляд находил
+    соседнюю, `b"HTTP/1.1"` без `\r\n`. Признак один: целая строка кончается
+    переводом строки, и тогда она — ответ не той формы; строку без него
+    оборвала связь, что бы в ней ни успело прийти.
+    """
+    if not isinstance(exc, http.client.BadStatusLine):
+        return False
+    line = str(exc.args[0]) if exc.args else ""
+    return not line.endswith("\n")
+
+
 def _survivable(method: str, path: str, exc: Exception) -> bool:
     """Стоит ли повторять этот отказ — и повторять ли его ЭТОМУ запросу.
 
@@ -303,9 +319,13 @@ def request(
             if not _survivable(method, path, last):
                 break
         except _MALFORMED as exc:
-            raise TransportError(
-                f"{method} {path} → запрос или ответ не той формы: {exc!r}"
-            ) from exc
+            if not _cut_short(exc):
+                raise TransportError(
+                    f"{method} {path} → запрос или ответ не той формы: {exc!r}"
+                ) from exc
+            last = urllib.error.URLError(exc)
+            if not _survivable(method, path, last):
+                break
         except ValueError as exc:
             raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
 
