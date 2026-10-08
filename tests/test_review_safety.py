@@ -34,6 +34,32 @@ def load(path: Path) -> dict[Any, Any]:
     return document
 
 
+def agent_steps(path: Path) -> list[dict[str, Any]]:
+    """Шаги, запускающие агента: у них есть `claude_args`.
+
+    У джоба, зовущего переиспользуемый прогон (`uses:`), шагов нет вовсе — и
+    обход всего дерева на нём падал бы, не дойдя до шагов агента.
+    """
+    return [
+        step
+        for job in load(path)["jobs"].values()
+        for step in job.get("steps") or []
+        if "claude_args" in (step.get("with") or {})
+    ]
+
+
+#: Все прогоны, где есть шаг агента, — замер по дереву, а не список рукой.
+#: Рукописная пара `step-review.yml` и `claude.yml` пропустила третье задание,
+#: `step-task-items.yml` (взгляд на #1209): новый шаг агента попадает под гейты
+#: сам, без правки этой строки.
+AGENT_WORKFLOWS: Final = sorted(path for path in walk(WORKFLOWS, "*.yml") if agent_steps(path))
+
+
+def test_the_agent_workflows_are_found() -> None:
+    """Замер прогонов с агентом не пуст и видит оба известных прогона (075)."""
+    assert {LOOK_BODY, ON_MENTION} <= set(AGENT_WORKFLOWS), AGENT_WORKFLOWS
+
+
 @pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_no_workflow_uses_pull_request_target(path: Path) -> None:
     """`pull_request_target` не используется НИГДЕ.
@@ -94,14 +120,14 @@ def test_mention_review_requires_a_trusted_author() -> None:
         assert f"github.event_name == '{event}'" in condition, f"{event} без гейта автора"
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_agent_jobs_have_a_timeout(path: Path) -> None:
     """У джоба агента есть предел: умолчание площадки — шесть часов молчания."""
     for name, job in load(path)["jobs"].items():
         assert job.get("timeout-minutes"), f"{path.name}: у джоба {name} нет предела"
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_actions_that_receive_the_token_are_pinned_by_sha(path: Path) -> None:
     """Действия ревью закреплены по SHA, а не по подвижной метке (152).
 
@@ -113,20 +139,6 @@ def test_actions_that_receive_the_token_are_pinned_by_sha(path: Path) -> None:
         uses = step.get("uses")
         if uses:
             assert SHA_PIN.search(uses), f"{path.name}: {uses} закреплено меткой, а не SHA"
-
-
-def agent_steps(path: Path) -> list[dict[str, Any]]:
-    """Шаги, запускающие агента: у них есть `claude_args`.
-
-    У джоба, зовущего переиспользуемый прогон (`uses:`), шагов нет вовсе — и
-    обход всего дерева на нём падал бы, не дойдя до шагов агента.
-    """
-    return [
-        step
-        for job in load(path)["jobs"].values()
-        for step in job.get("steps") or []
-        if "claude_args" in (step.get("with") or {})
-    ]
 
 
 def declared_tools(path: Path) -> list[tuple[str, list[str]]]:
@@ -156,7 +168,7 @@ def declared_tools(path: Path) -> list[tuple[str, list[str]]]:
     ]
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
     """Инструменты агента — закрытый список, и голого `Bash` в нём нет.
 
@@ -217,7 +229,7 @@ def test_review_is_not_a_required_context() -> None:
 # --- прогон и его зависимости ------------------------------------------------
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_a_permitted_run_is_actually_possible(path: Path) -> None:
     """Что список разрешает запускать, то прогон обязан поставить.
 
@@ -239,7 +251,7 @@ def test_a_permitted_run_is_actually_possible(path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_both_interpreter_names_are_permitted(path: Path) -> None:
     """Разрешение выдаётся по началу команды, и `python3` — другая строка.
 
@@ -1622,7 +1634,7 @@ def commands_and_task(path: Path) -> list[tuple[str, list[str], str]]:
     return said
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_the_task_names_the_environments_limit(path: Path) -> None:
     """Каждая разрешённая команда названа в ТЕКСТЕ задания, а не только в настройке.
 
@@ -1673,8 +1685,11 @@ def test_the_task_does_not_explain_a_command_it_is_denied() -> None:
     от соседа вместе с доводом: задание верификатора объясняло исход
     `check_version.py`, которого в его закрытом списке нет (взгляд на #1185).
     Исполнитель зовёт команду, получает отказ окружения и тратит заход.
-    Ответ на обращение (`claude.yml`) скриптов не зовёт вовсе — сравнивать
-    там не с чем, поэтому предмет — шаг взгляда.
+    Сверка идёт МЕЖДУ заходами одного файла, поэтому предмет — шаг взгляда.
+    Соседи названы с причиной (195): ответ на обращение (`claude.yml`) скриптов
+    не зовёт вовсе, а разбор пунктов (`step-task-items.yml`) — единственный
+    заход своего файла, и чужого списка, откуда перенести абзац, у него нет.
+    Границу обоих держит предыдущая проверка: всё разрешённое названо.
 
     Сверяются ОБЕ формы: имя скрипта (так абзац и был написан) и команда
     целиком — у команды без скрипта, `git show`, имени `*.py` нет, и по одним
@@ -1704,7 +1719,7 @@ def our_tree_in(command: str) -> bool:
     return "scripts/" in command.replace(FROM_MECHANISMS, "")
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_an_allowed_gate_comes_from_the_mechanisms(path: Path) -> None:
     """Разрешённый агенту гейт проекта зовётся из выкачки механизмов, а не из дерева головы.
 
@@ -1737,7 +1752,7 @@ def test_our_tree_is_told_from_the_mechanisms(command: str, ours: bool) -> None:
     assert our_tree_in(command) is ours
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_the_task_says_the_list_is_closed(path: Path) -> None:
     """Задание говорит, что список ЗАКРЫТЫЙ, а не просто перечисляет команды.
 
@@ -1753,7 +1768,14 @@ def test_the_task_says_the_list_is_closed(path: Path) -> None:
         )
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY, ON_MENTION], ids=lambda p: p.name)
+#: Задания, которые пишут НАХОДКИ: только им нужен предел находки. Разбор
+#: пунктов (`step-task-items.yml`) находок не пишет — его ответ разбирает
+#: `task_items.py` построчно, и предела `findings.SAID_LIMIT` у него нет. Это
+#: исключение с причиной, а не пропуск (195).
+WRITES_FINDINGS: Final = [path for path in AGENT_WORKFLOWS if path.name != "step-task-items.yml"]
+
+
+@pytest.mark.parametrize("path", WRITES_FINDINGS, ids=lambda p: p.name)
 def test_the_task_carries_its_numbers(path: Path) -> None:
     """В задании стоят ЧИСЛА, и оба взяты из своих канонических мест.
 
