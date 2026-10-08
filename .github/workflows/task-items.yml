@@ -55,7 +55,8 @@ jobs:
     # снимало бы ожидающий разбор слитого изменения (взгляд на #1186). Совпадение
     # с условием шага держит `tests/test_reusable_steps.py`. Тот же класс —
     # закрытие ЗАДАЧИ: его событие не сужено условием, а снято вовсе (см.
-    # события выше, #1210), и держит это `tests/test_task_items.py`.
+    # события выше, #1210), и держит это
+    # `tests/test_task_items.py::test_no_task_close_event_shares_the_review_queue`.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule' ||

@@ -10,6 +10,7 @@
 предложением не считается.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -408,3 +409,17 @@ def test_the_review_waits_for_a_change_number_not_an_event_name() -> None:
     """Шаги разбора идут по номеру изменения: ночной обход без номера их не зовёт."""
     steps = {step.get("name"): step for step in document()["jobs"]["task-items"]["steps"]}
     assert steps["ключа нет — разбор не состоится"]["if"] == "steps.number.outputs.number != ''"
+
+
+def test_the_caller_names_the_test_that_holds_the_close_case() -> None:
+    """Вызов называет тест, держащий закрытие задачи, и тест этот существует.
+
+    Комментарий у джоба отсылает к проверке вместо пересказа (взгляд на #1208):
+    переименуй тест — и ссылка протухла бы молча, а читатель счёл бы класс
+    закрытым.
+    """
+    said = CALLER.read_text(encoding="utf-8")
+    named = re.findall(r"tests/test_task_items\.py::(\w+)", said)
+    assert named, "вызов не называет теста, который держит закрытие задачи"
+    for name in named:
+        assert name in globals(), f"вызов называет несуществующий тест: {name}"
