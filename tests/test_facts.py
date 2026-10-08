@@ -1020,6 +1020,10 @@ def test_pruning_removes_files_and_folders_but_keeps_the_list(tmp_path: Path) ->
 
 #: Присваивание переменной в сценарии шага: имя пути, которое `git add` подставит.
 ASSIGNED: Final = re.compile(r"^\s*(\w+)=(\S+)\s*$", re.MULTILINE)
+#: Строка сценария, где вообще стоит команда git: только такие режет `shlex`.
+GIT_WORD: Final = re.compile(r"(?<![\w./-])git(?![\w.-])")
+#: Знаки оболочки, которые `shlex` с `punctuation_chars` отдаёт отдельным словом.
+SHELL_SIGNS: Final = frozenset("();<>|&")
 #: Ключи git, за которыми идёт значение: подкоманда стоит после него, а не на его месте.
 GIT_VALUED_OPTIONS: Final = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
 
@@ -1046,25 +1050,37 @@ def published_by(run: str) -> list[str]:
     видела. Поэтому `git add` принимается только в начале строки, без ключей и
     с явными путями; любая другая запись добавления — отказ, а не пропуск. Так
     же — аргумент, не разрешённый присваиванием в том же сценарии: имени файла
-    тогда не знает никто.
+    тогда не знает никто, — и знак оболочки среди аргументов (`>`, `&`, `;`):
+    путём он не бывает.
+
+    Режется только строка, где стоит слово `git`: прочие строки шага (heredoc,
+    многострочный `python -c`) `shlex` разобрать не обязан, и непарная кавычка
+    в них гейт не роняет. Строка с `git`, которую `shlex` не разобрал, — отказ
+    с самой строкой, а не `ValueError` без предмета (взгляд на #1227).
     """
     script = run.replace("\\\n", " ")
     known = dict(ASSIGNED.findall(script))
     paths = []
     for line in script.splitlines():
+        if not GIT_WORD.search(line):
+            continue
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = "#"
-        words = list(lexer)
+        try:
+            words = list(lexer)
+        except ValueError as error:
+            raise AssertionError(
+                f"строка с git не разобрана ({error}): `{line.strip()}`"
+            ) from error
         for start, word in enumerate(words):
             if word != "git" or git_subcommand(words, start) != "add":
                 continue
             arguments = words[start + 2 :]
             assert start == 0 and words[1] == "add", f"`git add` не в своей форме: `{line.strip()}`"
             assert arguments and not any(
-                argument.startswith("-") or argument in {";", "&&", "||", "|"}
-                for argument in arguments
-            ), f"`git add` без явных путей или с ключом: `{line.strip()}`"
+                argument.startswith("-") or set(argument) <= SHELL_SIGNS for argument in arguments
+            ), f"`git add` без явных путей, с ключом или знаком оболочки: `{line.strip()}`"
             for argument in arguments:
                 if argument.startswith("$"):
                     name = argument.strip("${}")
@@ -1086,6 +1102,7 @@ def published_by(run: str) -> list[str]:
         ("git add .github/badges/new.json  # пояснение", [".github/badges/new.json"]),
         ('git worktree add --quiet --detach "$pub" FETCH_HEAD', []),
         ("git add a.json \\\n  b.json", ["a.json", "b.json"]),
+        ("cat <<EOF\ndon't\nEOF\ngit add a.json", ["a.json"]),
     ],
     ids=[
         "через переменную",
@@ -1094,6 +1111,7 @@ def published_by(run: str) -> list[str]:
         "хвост-комментарий не путь",
         "worktree add не добавление",
         "перенос строки",
+        "непарная кавычка вне git",
     ],
 )
 def test_the_published_paths_are_read_from_what_runs(run: str, paths: list[str]) -> None:
@@ -1115,8 +1133,22 @@ def test_an_unresolved_published_path_is_a_refusal() -> None:
         "if true; then git add facts.json; fi",
         "git add -A .github/badges",
         "git add",
+        "git add facts.json >/dev/null",
+        "git add facts.json &",
+        "git add facts.json 2>&1",
+        'git add "facts.json',
     ],
-    ids=["через -C", "после &&", "после then", "ключ вместо пути", "без пути"],
+    ids=[
+        "через -C",
+        "после &&",
+        "после then",
+        "ключ вместо пути",
+        "без пути",
+        "перенаправление",
+        "фон",
+        "перенаправление потока",
+        "непарная кавычка",
+    ],
 )
 def test_a_published_path_in_another_form_is_a_refusal(run: str) -> None:
     """Добавление в коммит не своей формой — отказ, а не молчаливый пропуск (210)."""
