@@ -10,6 +10,7 @@ import fnmatch
 import json
 import re
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any, Final
 
@@ -374,6 +375,52 @@ def test_project_settings_grant_no_rights() -> None:
 def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
     """Разрешения в настройках и хук вне своего каталога дают отказ — проба."""
     assert settings_problems(settings), f"канал прав в настройках прошёл молча: {settings}"
+
+
+#: Каналы настроек, которые агент прочтёт из дерева головы, — ЗАКРЫТЫЙ перечень
+#: (068). Права выдаёт любой из них: `settings.local.json` — тем же
+#: `permissions.allow`, `.mcp.json` — сервером, который запустит команду из
+#: дерева (взгляд на #1232). Разрешён один файл, и его судит `settings_problems`.
+SETTINGS_CHANNELS: Final = (".claude/settings*.json", ".claude/*.json", ".mcp.json", "**/.mcp.json")
+ALLOWED_CHANNELS: Final = frozenset({".claude/settings.json"})
+
+
+def tracked_channels(root: Path = ROOT) -> set[str]:
+    """Отслеживаемые файлы каналов настроек — то, что агент найдёт в чекауте головы."""
+    done = subprocess.run(
+        ["git", "ls-files", "-z", "--", *SETTINGS_CHANNELS],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return {one for one in done.stdout.split("\0") if one}
+
+
+def test_no_other_settings_channel_is_tracked() -> None:
+    """Кроме `.claude/settings.json`, каналов настроек в дереве нет (взгляд на #1232).
+
+    ПРЕДЕЛ НАЗВАН: судится ОТСЛЕЖИВАЕМОЕ — в чекауте прогона только оно и есть,
+    а неотслеживаемый `settings.local.json` в окне агенту CI не виден.
+    """
+    beyond = sorted(tracked_channels() - ALLOWED_CHANNELS)
+    assert not beyond, f"канал прав агента вне перечня в дереве: {beyond}"
+
+
+def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
+    """Проба: `.mcp.json` и `settings.local.json` в индексе находятся и вне перечня."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / ".claude").mkdir()
+    for name in (".claude/settings.json", ".claude/settings.local.json", ".mcp.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    git("add", "-A")
+    found = tracked_channels(tmp_path)
+    assert found - ALLOWED_CHANNELS == {".claude/settings.local.json", ".mcp.json"}, found
 
 
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
