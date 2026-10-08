@@ -45,9 +45,15 @@ def stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     return {"remote": remote, "clone": clone, "source": source, "tmp": tmp_path}
 
 
+#: Ветка, куда публикация ОБЯЗАНА писать, — литералом вне модуля. Сверка со
+#: своей же константой `publish_facts.BRANCH` проверяла намерение, а не факт:
+#: `BRANCH = "main"` проходил бы зелёным (взгляд на #1233).
+PUBLISHED_TO = "badges"
+
+
 def on_branch(remote: Path, path: str) -> str:
     """Содержимое файла на ветке `badges` удалённого репозитория."""
-    return git("show", f"{module.BRANCH}:{path}", cwd=remote)
+    return git("show", f"{PUBLISHED_TO}:{path}", cwd=remote)
 
 
 def test_the_first_publication_starts_the_branch(stand: dict[str, Path]) -> None:
@@ -61,13 +67,13 @@ def test_a_publication_lays_over_and_keeps_the_rest(stand: dict[str, Path]) -> N
     """Поверх ветки: свой файл потребителя на ней уцелел, факты обновились."""
     module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
     other = stand["tmp"] / "other"
-    git("clone", "-q", "-b", module.BRANCH, str(stand["remote"]), str(other), cwd=stand["tmp"])
+    git("clone", "-q", "-b", PUBLISHED_TO, str(stand["remote"]), str(other), cwd=stand["tmp"])
     for key, value in (("user.name", "t"), ("user.email", "t@t")):
         git("config", key, value, cwd=other)
     (other / "own.svg").write_text("<svg/>", encoding="utf-8")
     git("add", "own.svg", cwd=other)
     git("commit", "-q", "-m", "свой значок", cwd=other)
-    git("push", "-q", "origin", module.BRANCH, cwd=other)
+    git("push", "-q", "origin", PUBLISHED_TO, cwd=other)
     stand["source"].write_text('{"a": 2}\n', encoding="utf-8")
     assert module.publish(stand["source"], stand["tmp"] / "w2", sha="def")
     assert on_branch(stand["remote"], "own.svg") == "<svg/>"
@@ -97,13 +103,13 @@ def test_a_racing_branch_is_refused_not_overwritten(
     def checkout_then_race(workdir: Path) -> None:
         real(workdir)
         other = stand["tmp"] / "racer"
-        git("clone", "-q", "-b", module.BRANCH, str(stand["remote"]), str(other), cwd=stand["tmp"])
+        git("clone", "-q", "-b", PUBLISHED_TO, str(stand["remote"]), str(other), cwd=stand["tmp"])
         for key, value in (("user.name", "t"), ("user.email", "t@t")):
             git("config", key, value, cwd=other)
         (other / "race").write_text("r", encoding="utf-8")
         git("add", "race", cwd=other)
         git("commit", "-q", "-m", "гонка", cwd=other)
-        git("push", "-q", "origin", module.BRANCH, cwd=other)
+        git("push", "-q", "origin", PUBLISHED_TO, cwd=other)
 
     monkeypatch.setattr(module, "checkout", checkout_then_race)
     stand["source"].write_text('{"a": 3}\n', encoding="utf-8")
