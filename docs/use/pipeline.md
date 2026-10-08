@@ -52,7 +52,7 @@
 | 7a | Будильник сводного гейта: `ci` кончился — устаревшая сводка перезапускается | `ci-complete-wake.yml` (по `workflow_run` от `ci`) | `ci-complete-wake` | нет, вне изменения |
 | 8 | Очередь: порядок наш, слияние площадки | `automerge.yml`¹ → `step-automerge.yml` | `automerge / automerge` | нет |
 | 8a | Разбор слитого против задачи | `task-items.yml` → `step-task-items.yml` | `task-items / task-items` | нет, совещательный |
-| 8b | Пункт эпика следует своей задаче | `task-items.yml` → `step-task-items.yml` (по закрытию задачи) | `task-items / task-items` | нет |
+| 8b | Пункт эпика следует своей задаче | `task-items.yml` → `step-task-items.yml` (ночной обход) | `task-items / task-items` | нет |
 | 8c | Оклик: вердикт находит окно | `hail.yml` → `step-hail.yml` (по `workflow_run` от `ci`) | `hail / hail` | нет, совещательный |
 | 8d | Замер: площадка принимает тело уплотнения | `arm.yml` (кнопкой, по названному номеру) | `arm-probe` | нет, совещательный |
 | 9 | Красный `main`: тревога, мигания и красное, пережившее слияние | `main-red.yml` → `step-main-red.yml` | `main-red / main-red` | нет |

@@ -388,3 +388,23 @@ def test_a_sweep_that_marked_something_records_it(
     monkeypatch.setattr(module.items, "sweep", lambda repo, token, *, dry_run: 2)
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_RECORDED
     assert "отмечено пунктов по объявлению автора: 2" in capsys.readouterr().out
+
+
+def test_no_task_close_event_shares_the_review_queue() -> None:
+    """Закрытие задачи не встаёт в группу разбора: его догоняет ночной обход (#1208).
+
+    Группа держит одно ожидающее место. Событие `issues: closed` при слиянии с
+    `Closes` приходило вслед за слиянием и вытесняло ожидающий разбор слитого.
+    Решение владельца 08.10.2026: событие снято, задачу, закрытую руками,
+    догоняет обход по расписанию.
+    """
+    caller = yaml.safe_load(CALLER.read_text(encoding="utf-8"))
+    events = caller.get("on") or caller.get(True)
+    assert "issues" not in events, "закрытие задачи снова стоит в группе разбора"
+    assert "schedule" in events, "ночного обхода нет — задачу, закрытую руками, не догонит никто"
+
+
+def test_the_review_waits_for_a_change_number_not_an_event_name() -> None:
+    """Шаги разбора идут по номеру изменения: ночной обход без номера их не зовёт."""
+    steps = {step.get("name"): step for step in document()["jobs"]["task-items"]["steps"]}
+    assert steps["ключа нет — разбор не состоится"]["if"] == "steps.number.outputs.number != ''"
