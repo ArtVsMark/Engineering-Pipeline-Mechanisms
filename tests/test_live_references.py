@@ -21,7 +21,9 @@
 """
 
 import ast
+import io
 import re
+import tokenize
 from pathlib import Path
 
 import pytest
@@ -156,33 +158,95 @@ def test_every_exception_is_earned() -> None:
         assert addresses, f"{name}: исключать нечего — в файле нет ни одного такого адреса"
 
 
-#: Адрес теста в прозе: `tests/<файл>.py` и, если назван, `::<имя>`.
-TEST_ADDRESS_RE = re.compile(r"tests/(?P<file>[\w/]+\.py)(?:::(?P<name>\w+))?")
-#: Где живёт ЖИВАЯ проза, которая отсылает к тестам: перечень корней (068), а
-#: не обход всего дерева. Код (`.py`) сверяет гейт выше.
-PROSE_ROOTS = (".github", ".claude", "docs", "kit", "AGENTS.md", "CLAUDE.md", "README.md")
-PROSE_SUFFIXES = frozenset({".yml", ".yaml", ".md", ".json", ".sh", ".toml"})
-#: Не сверяются, с причиной (154). Записи решений — история: ссылка там
-#: говорит, где лежало тогда, и правка задним числом переписала бы её.
-#: Выпущенный журнал и `.rules/` вне корней вовсе: первый тоже история, у
-#: адресов механизмов в `.rules/` свой гейт — `test_bindings_addresses.py`.
-PROSE_HISTORY = ("docs/decisions/",)
+#: Адрес теста: `tests/<файл>.py` и, если назван, `::<имя>`. Левая граница
+#: обязательна: `packages/x/tests/y.py` или адрес в чужом репозитории — не наш
+#: `tests/`, и судить его по нашему дереву значило бы краснеть ложно (взгляд на
+#: #1224).
+TEST_ADDRESS_RE = re.compile(r"(?<![\w./-])tests/(?P<file>[\w/]+\.py)(?:::(?P<name>\w+))?")
+#: Где живут адреса тестов: перечень корней (068), а не обход всего дерева.
+#: Код (`.py`) входит наравне с прозой — гейт `модуль.имя` выше адреса вида
+#: `tests/<файл>.py::имя` не ловит, — и `.rules/` тоже: гейт адресов ответов
+#: сверяет там имя файла, но не `::имя` (взгляд на #1224).
+LIVE_ROOTS = (
+    "scripts",
+    "packages",
+    "tests",
+    ".claude",
+    ".github",
+    "docs",
+    "kit",
+    ".rules",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+)
+LIVE_SUFFIXES = frozenset({".py", ".yml", ".yaml", ".md", ".json", ".sh", ".toml"})
+#: Не сверяются, с причиной (154): записи решений — история, ссылка там
+#: говорит, где лежало тогда. Выпущенный журнал вне корней по той же причине.
+HISTORY = ("docs/decisions/",)
+#: Адреса, мёртвые НАРОЧНО: проза называет их как несуществующие. Каждое
+#: исключение обязано быть заслуженным — адрес встречается и мёртв
+#: (`test_every_deliberately_dead_address_is_earned`).
+DELIBERATELY_DEAD: dict[str, str] = {
+    "tests/test_journal.py": (
+        "`check_journal.py` и `test_messages_point_somewhere.py` называют его как сторож, "
+        "которого не существует — находка о самом его отсутствии"
+    ),
+}
 
 
-def prose_files() -> list[Path]:
-    """Файлы живой прозы под корнями `PROSE_ROOTS`, без истории."""
+def live_files() -> list[Path]:
+    """Файлы под корнями `LIVE_ROOTS` с адресами тестов, без истории."""
     found: list[Path] = []
-    for root in PROSE_ROOTS:
+    for root in LIVE_ROOTS:
         where = ROOT / root
         candidates = [where] if where.is_file() else walk_deep(where)
         found += [
             one
             for one in candidates
             if one.is_file()
-            and one.suffix in PROSE_SUFFIXES
-            and not one.relative_to(ROOT).as_posix().startswith(PROSE_HISTORY)
+            and one.suffix in LIVE_SUFFIXES
+            and not one.relative_to(ROOT).as_posix().startswith(HISTORY)
         ]
     return found
+
+
+def prose_of(path: Path) -> str:
+    """Проза файла: у кода — комментарии и докстроки, у прочего — весь текст.
+
+    Строки кода — данные, а не ссылки: адрес файла-подделки в тесте — вход
+    разбора, и требовать от него существования значило бы красить
+    исправное (так же решено в `test_messages_point_somewhere.py`).
+    """
+    text = path.read_text(encoding="utf-8")
+    if path.suffix != ".py":
+        return text
+    parts = [
+        token.string
+        for token in tokenize.generate_tokens(io.StringIO(text).readline)
+        if token.type == tokenize.COMMENT
+    ]
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            said = ast.get_docstring(node, clean=False)
+            if said:
+                parts.append(said)
+    return "\n".join(parts)
+
+
+def defined_in(path: Path) -> set[str]:
+    """Имена, которые модуль ОПРЕДЕЛЯЕТ: функции, классы, присваивания — не импорты.
+
+    Импорт — чужое имя: `Path`, импортированный в модуль тестов, адресом теста
+    живым быть не должен (взгляд на #1224).
+    """
+    return names_of(path) - {
+        (one.asname or one.name.split(".")[0])
+        for node in ast.parse(path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for one in node.names
+    }
 
 
 def dead_test_addresses(text: str) -> list[str]:
@@ -190,9 +254,11 @@ def dead_test_addresses(text: str) -> list[str]:
     dead = []
     for found in TEST_ADDRESS_RE.finditer(text):
         path = ROOT / "tests" / found.group("file")
+        if found.group(0) in DELIBERATELY_DEAD:
+            continue
         if not path.is_file():
             dead.append(f"{found.group(0)} — нет файла")
-        elif found.group("name") and found.group("name") not in names_of(path):
+        elif found.group("name") and found.group("name") not in defined_in(path):
             dead.append(f"{found.group(0)} — нет имени")
     return dead
 
@@ -204,29 +270,62 @@ def dead_test_addresses(text: str) -> list[str]:
         ("держит `tests/test_live_references.py::переименован`", 1),
         ("держит `tests/test_нет_такого.py`", 1),
         ("держит `tests/test_live_references.py`", 0),
+        ("держит `tests/test_live_references.py::Path`", 1),
+        ("держит `packages/x/tests/test_нет_такого.py`", 0),
+        ("держит `other/repo/tests/test_нет_такого.py`", 0),
     ],
-    ids=["живое имя", "мёртвое имя", "нет файла", "файл без имени"],
+    ids=[
+        "живое имя",
+        "мёртвое имя",
+        "нет файла",
+        "файл без имени",
+        "импорт — не имя модуля",
+        "чужой tests/ в пакете",
+        "чужой tests/ в адресе",
+    ],
 )
 def test_a_test_address_is_judged_by_file_and_name(text: str, dead: int) -> None:
-    """Адрес теста судится по обеим половинам: файл есть, имя в нём есть."""
+    """Адрес теста судится по обеим половинам: файл есть, имя в нём определено."""
     assert len(dead_test_addresses(text)) == dead
 
 
-def test_every_test_address_in_prose_is_alive() -> None:
-    """Каждый адрес `tests/<файл>.py[::имя]` в живой прозе указывает на живое (взгляд на #1211).
+def test_code_is_judged_by_its_prose_only(tmp_path: Path) -> None:
+    """У кода судятся комментарии и докстроки, строки-данные — нет."""
+    code = tmp_path / "x.py"
+    code.write_text(
+        '"""Держит `tests/test_нет_докстроки.py`."""\n'
+        "# держит `tests/test_нет_комментария.py`\n"
+        'DATA = "tests/test_данные.py"\n',
+        encoding="utf-8",
+    )
+    said = prose_of(code)
+    assert "test_нет_докстроки" in said and "test_нет_комментария" in said
+    assert "test_данные" not in said
+
+
+def test_every_test_address_is_alive() -> None:
+    """Каждый адрес `tests/<файл>.py[::имя]` в живом дереве указывает на живое.
 
     Сверка была частной: один тест в `test_task_items.py` проверял ссылки
-    одного прогона на один файл тестов, а ссылки на `test_reusable_steps.py`
-    рядом и ещё сотня в других прогонах и документах не сверялись никем —
-    переименование протушило бы их молча. Замер 08.10.2026: 114 адресов в 47
-    файлах живой прозы, мёртвых — ни одного.
+    одного прогона на один файл тестов (взгляд на #1211). Первая редакция
+    общего гейта взяла только прозу и пропустила код и `.rules/` (взгляд на
+    #1224). Замер 08.10.2026: 563 адреса под корнями, мёртвые — только
+    нарочные из `DELIBERATELY_DEAD`.
     """
-    files = prose_files()
     seen = 0
     dead: list[str] = []
-    for path in files:
-        text = path.read_text(encoding="utf-8")
+    for path in live_files():
+        text = prose_of(path)
         seen += len(TEST_ADDRESS_RE.findall(text))
         dead += [f"{path.relative_to(ROOT)}: {one}" for one in dead_test_addresses(text)]
-    assert seen, "адресов тестов в живой прозе нет — предмет проверки не найден (075)"
+    assert seen, "адресов тестов в дереве нет — предмет проверки не найден (075)"
     assert not dead, "адреса тестов ведут в пустоту:\n  " + "\n  ".join(dead)
+
+
+def test_every_deliberately_dead_address_is_earned() -> None:
+    """Нарочно мёртвый адрес встречается в дереве и действительно мёртв (044, 075)."""
+    prose = "\n".join(prose_of(path) for path in live_files())
+    for address, why in DELIBERATELY_DEAD.items():
+        assert why.strip(), f"{address}: исключение без причины (154)"
+        assert address in prose, f"{address}: исключать нечего — адреса в дереве нет"
+        assert not (ROOT / address).exists(), f"{address}: адрес жив, исключение не нужно"
