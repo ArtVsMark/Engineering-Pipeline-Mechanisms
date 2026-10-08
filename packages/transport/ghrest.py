@@ -188,11 +188,24 @@ IDEMPOTENT: Final = frozenset({"enablePullRequestAutoMerge", "disablePullRequest
 
 
 #: Обрыв уже во время ответа: `urlopen` не заворачивает его в `URLError` (#1205).
-#: Четыре рода: ответ HTTP оборван (`IncompleteRead`, `RemoteDisconnected`),
-#: сокет сброшен, чтение вышло по таймауту, поток TLS оборван (`SSLEOFError`
-#: — `OSError`, но не `ConnectionError`). Сбой рукопожатия сюда не доходит:
-#: он случается при соединении, и его `urlopen` уже завернул.
-_DROPPED: Final = (http.client.HTTPException, ConnectionError, TimeoutError, ssl.SSLError)
+#: Четыре рода: ответ HTTP оборван (`IncompleteRead`; `BadStatusLine` и его
+#: `RemoteDisconnected` — пустая или обрезанная строка статуса), сокет сброшен,
+#: чтение вышло по таймауту, поток TLS оборван (`SSLEOFError` — `OSError`, но
+#: не `ConnectionError`). Сбой рукопожатия сюда не доходит: он случается при
+#: соединении, и его `urlopen` уже завернул. ПЕРЕЧЕНЬ, А НЕ ВЕСЬ
+#: `HTTPException`: в нём и ошибки ФОРМЫ — `InvalidURL`, `LineTooLong`, — а их
+#: повтор трижды назвал бы «площадка недоступна» то, что от связи не зависит
+#: (взгляд на #1206, 045). Они — `_MALFORMED`.
+_DROPPED: Final = (
+    http.client.IncompleteRead,
+    http.client.BadStatusLine,
+    ConnectionError,
+    TimeoutError,
+    ssl.SSLError,
+)
+#: Всё прочее, что `http.client` бросает мимо `URLError`: ответ или запрос не
+#: той формы. Повтор его не исправит — он сразу становится названным отказом.
+_MALFORMED: Final = http.client.HTTPException
 
 
 def _survivable(method: str, path: str, exc: Exception) -> bool:
@@ -288,6 +301,8 @@ def request(
             last = urllib.error.URLError(exc)
             if not _survivable(method, path, last):
                 break
+        except _MALFORMED as exc:
+            raise TransportError(f"{method} {path} → ответ не той формы: {exc!r}") from exc
         except ValueError as exc:
             raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
 
@@ -450,8 +465,11 @@ def raw_text(url: str, timeout: int = 30) -> str:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as answer:
             return str(answer.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, UnicodeDecodeError) as exc:
-        raise TransportError(f"снимок не прочитан ({url}): {exc}") from exc
+    # Обрыв на чтении и ответ не той формы — тот же отказ, что сбой соединения
+    # (#1205): без них `IncompleteRead` и `BadStatusLine` летели трейсбеком
+    # мимо `TransportError` (взгляд на #1206). Повтора у снимка нет — он один.
+    except (urllib.error.URLError, OSError, UnicodeDecodeError, *_DROPPED, _MALFORMED) as exc:
+        raise TransportError(f"снимок не прочитан ({url}): {exc!r}") from exc
 
 
 #: Сколько последних закрытых изменений спрашивается за раз. Окно — не история:
