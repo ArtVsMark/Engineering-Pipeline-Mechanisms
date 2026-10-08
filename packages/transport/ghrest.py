@@ -302,7 +302,9 @@ def request(
             if not _survivable(method, path, last):
                 break
         except _MALFORMED as exc:
-            raise TransportError(f"{method} {path} → ответ не той формы: {exc!r}") from exc
+            raise TransportError(
+                f"{method} {path} → запрос или ответ не той формы: {exc!r}"
+            ) from exc
         except ValueError as exc:
             raise TransportError(f"{method} {path} → ответ не разобран: {exc}") from exc
 

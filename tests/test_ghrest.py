@@ -519,6 +519,7 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         TimeoutError("таймаут чтения"),
         http.client.IncompleteRead(b"", 10),
         ssl.SSLEOFError("EOF occurred in violation of protocol"),
+        http.client.BadStatusLine(""),
     ],
     ids=[
         "RemoteDisconnected",
@@ -526,6 +527,7 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         "TimeoutError",
         "IncompleteRead",
         "SSLEOFError",
+        "BadStatusLine",
     ],
 )
 def test_a_response_dropped_midway_is_the_same_broken_connection(
