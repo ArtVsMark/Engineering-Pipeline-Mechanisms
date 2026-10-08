@@ -186,6 +186,27 @@ def test_a_legitimate_command_passes(command: str) -> None:
     assert ask(command).returncode == 0, f"отвергнуто зря: {command}"
 
 
+@pytest.mark.parametrize("head", ["main", "claude/окно", "HEAD"])
+def test_a_push_without_a_target_is_judged_by_the_head(head: str) -> None:
+    """`git push` без цели толкает голову — и вне `agent/…` отвергается (взгляд на #1226)."""
+    said = ask("git push", head=head)
+    assert said.returncode == 2, f"толчок без цели с головы «{head}» пропущен"
+    assert "не ветка изменения" in said.stderr, said.stderr
+
+
+def test_a_push_without_a_target_and_an_unknown_head_is_refused() -> None:
+    """Голову не узнать — толчок без цели не проверить, и он отвергается."""
+    said = ask("git push", broken="1")
+    assert said.returncode == 2, said.stderr
+    assert "толкает голову" in said.stderr, said.stderr
+
+
+def test_a_push_without_a_target_does_not_revive_a_merged_branch() -> None:
+    """`git push` со слитой головы воскресил бы её так же, как толчок по имени."""
+    said = ask("git push", gone="1")
+    assert said.returncode == 2, said.stderr
+
+
 def test_a_heredoc_body_is_data_not_a_command() -> None:
     """`git push` внутри записываемого файла — текст, а не действие."""
     said = ask("cat > a.md <<'EOF'\ngit push origin agent/other\nEOF")
