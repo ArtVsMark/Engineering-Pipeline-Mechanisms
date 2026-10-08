@@ -881,3 +881,27 @@ def test_late_minor_findings_accrue_in_source_five(monkeypatch: pytest.MonkeyPat
     assert "копится" in built[5].note, built[5].note
     assert marks == {"aaaaaaa", "bbbbbbb", "ccccccc", "ddddddd"}, "копящееся выпало из снятия"
     assert not broken
+
+
+def test_unread_openness_keeps_the_registry_and_owes_everything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ чтения открытых изменений не выбрасывает реестр: всё — долг, и это названо.
+
+    Взгляд на #1236: открытость читалась в одном `try` с реестром, и её отказ
+    оставлял раздел 3 и снятие пустыми.
+    """
+    quiet_platform(monkeypatch)
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("список открытых молчит")
+
+    monkeypatch.setattr(
+        module.debt, "findings_debt", lambda *_: [("bbbbbbb", 10, "риск", "слитое сломается")]
+    )
+    monkeypatch.setattr(module.debt, "open_changes", refuse)
+    built, _, marks = module.sources("o/r", "t")
+    assert "bbbbbbb" in "\n".join(built[3].rows), "прочитанный реестр выброшен"
+    assert "не прочитаны" in built[3].note, "слепота открытости не названа"
+    assert "bbbbbbb" not in "\n".join(built[5].rows), "вслепую отложено в раздел 5"
+    assert marks == {"bbbbbbb"}

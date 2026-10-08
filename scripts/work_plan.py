@@ -239,23 +239,37 @@ def sources(
     kept_part = Source()
     try:
         everything = debt.findings_debt(repo, token, listed)
-        opened = debt.open_changes(
-            ghrest.paginate(f"repos/{repo}/issues?state=open", token) if listed is None else listed
-        )
-        left, kept = debt.accrued(everything, opened)
+    except ghrest.TransportError as exc:
+        everything = None
+        built[3] = Source(rows=stayed, unread=f"реестр находок не прочитан: {exc}")
+        kept_part = Source(unread=f"реестр находок не прочитан: {exc}")
+        broken.append("3")
+    if everything is not None:
+        # ОТКРЫТОСТЬ ЧИТАЕТСЯ ОТДЕЛЬНО ОТ РЕЕСТРА: её отказ не выбрасывает
+        # прочитанные находки (взгляд на #1236). Не узнали, что открыто, —
+        # всё остаётся долгом, и это названо: копить вслепую значило бы
+        # спрятать в отложенное то, что, может быть, ещё не слито (045).
+        opened: frozenset[int] | None
+        blind = ""
+        try:
+            opened = debt.open_changes(
+                ghrest.paginate(f"repos/{repo}/issues?state=open", token)
+                if listed is None
+                else listed
+            )
+        except ghrest.TransportError as exc:
+            opened = None
+            blind = f"открытые изменения не прочитаны, находки оставлены долгом: {exc}"
+        left, kept = (everything, []) if opened is None else debt.accrued(everything, opened)
         marks = {one[0] for one in everything}
         rows = [f"`{mark}` · #{pr} — [{weight}] {said}" for mark, pr, weight, said in left]
-        built[3] = Source(rows=rows + stayed, unread=lagging_silent)
+        built[3] = Source(rows=rows + stayed, unread=lagging_silent, note=blind)
         kept_part = Source(
             rows=[f"`{mark}` · #{pr} — [{weight}] {said}" for mark, pr, weight, said in kept],
             note=f"находок на слитом копится до разбора пачкой: {len(kept)}" if kept else "",
         )
         if lagging_silent:
             broken.append("3")
-    except ghrest.TransportError as exc:
-        built[3] = Source(rows=stayed, unread=f"реестр находок не прочитан: {exc}")
-        kept_part = Source(unread=f"реестр находок не прочитан: {exc}")
-        broken.append("3")
 
     # ИСТОЧНИК 5 СКЛАДЫВАЕТСЯ ИЗ НЕСКОЛЬКИХ КАНАЛОВ, как и источник 3:
     # «входящие» каталога, задача дрейфа, поводы для правила и копящиеся
