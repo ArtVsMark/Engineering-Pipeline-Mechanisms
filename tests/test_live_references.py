@@ -253,12 +253,19 @@ def defined_in(path: Path) -> set[str]:
     }
 
 
-def dead_test_addresses(text: str) -> list[str]:
-    """Адреса тестов в тексте, которые ведут в пустоту: нет файла или имени в нём."""
+def dead_test_addresses(text: str, where: str = "") -> list[str]:
+    """Адреса тестов в тексте `where`, которые ведут в пустоту: нет файла или имени в нём.
+
+    Нарочно мёртвый адрес прощается только в местах, названных в
+    `DELIBERATELY_DEAD`: ключ исключения — пара «адрес и место», а не один адрес.
+    Иначе третий файл, назвавший того же несуществующего сторожа живым, прошёл
+    бы молча (взгляд на #1230).
+    """
     dead = []
     for found in TEST_ADDRESS_RE.finditer(text):
         path = ROOT / "tests" / found.group("file")
-        if found.group(0) in DELIBERATELY_DEAD:
+        excused = DELIBERATELY_DEAD.get(found.group(0))
+        if excused and where in excused[0]:
             continue
         if not path.is_file():
             dead.append(f"{found.group(0)} — нет файла")
@@ -321,9 +328,35 @@ def test_every_test_address_is_alive() -> None:
     for path in live_files():
         text = prose_of(path)
         seen += len(TEST_ADDRESS_RE.findall(text))
-        dead += [f"{path.relative_to(ROOT)}: {one}" for one in dead_test_addresses(text)]
+        place = path.relative_to(ROOT).as_posix()
+        dead += [f"{place}: {one}" for one in dead_test_addresses(text, place)]
     assert seen, "адресов тестов в дереве нет — предмет проверки не найден (075)"
     assert not dead, "адреса тестов ведут в пустоту:\n  " + "\n  ".join(dead)
+
+
+def test_a_deliberately_dead_address_is_excused_only_in_its_places() -> None:
+    """Тот же мёртвый адрес вне названных мест — мёртв (взгляд на #1230)."""
+    said = "сторож `tests/test_journal.py`"
+    assert dead_test_addresses(said, "scripts/check_journal.py") == []
+    assert len(dead_test_addresses(said, "docs/новый.md")) == 1
+
+
+def test_every_package_is_a_declared_source() -> None:
+    """Каждый пакет в `packages/` назван в `paths.py::SOURCES` (взгляд на #1230).
+
+    Корни кода этот гейт берёт из `SOURCES`, а не из всего `packages/`: пакет,
+    положенный туда без записи, выпал бы из сверки адресов молча. Сверка держит
+    обе стороны — и `SOURCES` как единственный перечень, и полноту сверки.
+    """
+    declared = {where.as_posix() for where in load_script("paths.py").SOURCES}
+    packages = sorted(
+        one.relative_to(ROOT).as_posix()
+        for one in (ROOT / "packages").iterdir()
+        if one.is_dir() and any(walk_deep(one))
+    )
+    assert packages, "пакетов нет — предмет сверки не найден (075)"
+    missing = [one for one in packages if one not in declared]
+    assert not missing, f"пакеты вне `paths.py::SOURCES`: {missing}"
 
 
 def addresses_in(text: str) -> set[str]:

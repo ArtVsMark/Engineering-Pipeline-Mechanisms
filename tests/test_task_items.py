@@ -10,7 +10,6 @@
 предложением не считается.
 """
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,7 @@ import pytest
 import yaml
 
 from tests.conftest import ROOT, load_script
+from tests.test_live_references import TEST_ADDRESS_RE
 
 module = load_script("task_items.py")
 items = load_script("items.py")
@@ -420,7 +420,13 @@ def test_the_caller_names_the_test_that_holds_the_close_case() -> None:
     контракт вызова (взгляды на #1208 и #1224).
     """
     said = CALLER.read_text(encoding="utf-8")
-    named = re.findall(r"tests/test_task_items\.py::(\w+)", said)
+    # Адрес ищется образцом общего гейта, с его левой границей: два образца
+    # одного адреса судили бы по-разному (взгляд на #1230).
+    named = [
+        found.group("name")
+        for found in TEST_ADDRESS_RE.finditer(said)
+        if found.group("file") == "test_task_items.py" and found.group("name")
+    ]
     assert named, "вызов не называет теста, который держит закрытие задачи"
     for name in named:
         assert name.startswith("test_") and callable(globals().get(name)), (
