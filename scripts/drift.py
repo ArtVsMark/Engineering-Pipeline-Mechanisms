@@ -1249,6 +1249,25 @@ VERDICTS: Final = "verdicts"
 VERDICT_PREFIX: Final = {"": "", "skill": "skill/", "merge": "merge/"}
 
 
+def replaced_numbers(value: object, *, merge: bool) -> tuple[list[str], str]:
+    """Номера, заменённые принятым правилом, и причина, если поле не прочитано.
+
+    ФОРМЫ ПЕРЕЧИСЛЕНЫ, А НЕ ЛАТАЮТСЯ ПО ОДНОЙ (210, два взгляда на #1239 и
+    #1243). Поле читается только у принятого. Список непустых строк — номера.
+    Строка, число, словарь или список с иным элементом — не прочитано: строку
+    `join` разобрал бы по буквам. Нет поля или пустой список — у правила и
+    навыка «заменять нечего», а у слияния ответ не прочитан: принятое слияние
+    без заменённых — форма не узнана, а не пустой ответ (045).
+    """
+    if value is None or value == []:
+        return [], ("поле «replaces» пусто, а принято слияние" if merge else "")
+    if not isinstance(value, list):
+        return [], f"поле «replaces» не список ({type(value).__name__})"
+    if not all(isinstance(one, str) and one for one in value):
+        return [], "в поле «replaces» не только непустые строки номеров"
+    return list(value), ""
+
+
 def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
     """Каталог ответил по нашему предложению, а оно всё ещё числится предложением.
 
@@ -1341,22 +1360,19 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
         # предложений номера не несёт и нести не может — это сказано в нём же.
         number = str(verdict.get("rule") or "?")
         why = str(verdict.get("why") or "причина не названа")
-        replaces = verdict.get("replaces")
-        if replaces is not None and not isinstance(replaces, list):
-            # СПИСОК, А НЕ ЧТО ПОПАЛО. Строку «005, 127» `join` разобрал бы по
-            # буквам и назвал заменёнными «0, 0, 5, ,…» — ответ, прочитанный
-            # неверно, хуже непрочитанного (045, взгляд на #1239).
-            found.append(
-                Drift(
-                    "proposal-answer-unread",
-                    f"вердикт по «{slug}»: поле «replaces» не список ({type(replaces).__name__})",
-                    "сверить разбор с export/README.md каталога: заменённые "
-                    "правила приходят списком номеров",
-                )
-            )
-            continue
         if status == "admitted":
-            replaced = ", ".join(map(str, replaces or []))
+            numbers, unread = replaced_numbers(verdict.get("replaces"), merge=kind == "merge")
+            if unread:
+                found.append(
+                    Drift(
+                        "proposal-answer-unread",
+                        f"вердикт по «{slug}»: {unread}",
+                        "сверить разбор с export/README.md каталога: заменённые "
+                        "правила приходят списком номеров",
+                    )
+                )
+                continue
+            replaced = ", ".join(numbers)
             found.append(
                 Drift(
                     "proposal-admitted",
