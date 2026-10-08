@@ -416,3 +416,44 @@ def test_the_strip_runs_only_in_the_providers_own_repository(
     assert (tmp_path / "scripts").exists() is left
     assert step["env"]["FROM"] == "${{ job.workflow_repository }}"
     assert step["env"]["CALLER"] == "${{ github.workflow_ref }}"
+
+
+def queued_callers() -> list[tuple[str, str, dict[str, Any], dict[str, Any]]]:
+    """Вызовы наших шагов, стоящие в группе: (файл, джоб, джоб вызова, шаг)."""
+    found = []
+    for path in walk(STEPS, "*.yml"):
+        flow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for name, job in (flow.get("jobs") or {}).items():
+            uses = str(job.get("uses") or "")
+            if not uses.startswith("./") or not (job.get("concurrency") or flow.get("concurrency")):
+                continue
+            step = yaml.safe_load((ROOT / uses).read_text(encoding="utf-8"))
+            found.append((path.name, name, job, step))
+    return found
+
+
+def test_a_queued_caller_is_measured() -> None:
+    """Предмет есть: хотя бы один вызов шага стоит в группе — иначе проверка пуста (075)."""
+    assert queued_callers(), "вызовов шага в группе не найдено — предмет проверки пропал"
+
+
+@pytest.mark.parametrize(
+    ("caller", "job", "called", "step"),
+    [pytest.param(*one, id=f"{one[0]}:{one[1]}") for one in queued_callers()],
+)
+def test_a_queue_does_not_take_what_the_step_skips(
+    caller: str, job: str, called: dict[str, Any], step: dict[str, Any]
+) -> None:
+    """Условие шага стоит и у вызова в группе — до группы, а не только внутри неё.
+
+    Группа держит одно ожидающее место, и новый ожидающий вытесняет прежнего.
+    Событие, которое шаг всё равно пропустит, вставшее в очередь, снимало бы
+    ожидающий настоящий прогон: так было у `task-items` — незлитое закрытие
+    против разбора слитого (взгляд на #1186).
+    """
+    said = " ".join(str(called.get("if") or "").split())
+    for name, inner in step["jobs"].items():
+        wanted = " ".join(str(inner.get("if") or "").split())
+        assert not wanted or wanted == said, (
+            f"{caller}:{job} — у шага `{name}` условие «{wanted}», у вызова «{said}»"
+        )
