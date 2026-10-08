@@ -10,6 +10,7 @@
 (`tests/test_ghrest.py`, `tests/test_token_paths.py`).
 """
 
+import ast
 from dataclasses import replace
 from typing import Any, Final
 
@@ -2334,3 +2335,70 @@ def test_look_records_take_both_names_and_nothing_else(monkeypatch: pytest.Monke
     assert asked == ["repos/o/r/commits/sha/check-runs?filter=all"]
     assert module.is_look({"name": "review / review"}) is True
     assert module.is_look({"name": "review / findings"}) is False
+
+
+#: Пропуски головы, на которых она ждёт ВЕРДИКТА взгляда: только они ставят ступень.
+LOOK_WAITING_SKIPS: Final = frozenset({"ждут вердикта взгляда", "ждут пропущенного взгляда"})
+
+
+def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
+    """Блоки цикла голов, кончающиеся `continue`: их счётчики пропуска и ставят ли они ступень.
+
+    Счётчик с подставленным именем (`f"в состоянии «…»"`) называется `<состояние>`,
+    блок без счётчика (отказ взведения) — пустым набором.
+    """
+    loop = next(
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.For)
+        and any(isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node))
+    )
+    found = []
+    for node in ast.walk(loop):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(node, field, None)
+            if not isinstance(block, list) or not block or not isinstance(block[-1], ast.Continue):
+                continue
+            if node is loop and field == "body":
+                continue
+            keys = frozenset(
+                str(one.slice.value) if isinstance(one.slice, ast.Constant) else "<состояние>"
+                for statement in block
+                for one in ast.walk(statement)
+                if isinstance(one, ast.Subscript)
+                and isinstance(one.value, ast.Name)
+                and one.value.id == "skipped"
+            )
+            sets = any(
+                isinstance(one, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "waiting_rank"
+                    for target in one.targets
+                )
+                for statement in block
+                for one in ast.walk(statement)
+            )
+            found.append((keys, sets))
+    return found
+
+
+def test_only_the_look_waiting_exits_set_the_step() -> None:
+    """Ступень ставят ровно три выхода ожидания вердикта, прочие пропуски — нет (взгляд на #1221).
+
+    Перечень «НЕ ставят» в комментарии у `waiting_rank` дважды оказывался
+    неполным; теперь он правило, а состав выходов сверяется разбором кода.
+    """
+    tree = ast.parse((ROOT / "scripts" / "automerge.py").read_text(encoding="utf-8"))
+    advance = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "advance"
+    )
+    exits = skip_exits(advance)
+    setting = [keys for keys, sets in exits if sets]
+    assert len(setting) == 3, f"ступень ставят {len(setting)} выходов, а форм ожидания три"
+    assert all(keys and keys <= LOOK_WAITING_SKIPS for keys in setting), setting
+    others = [keys for keys, sets in exits if not sets]
+    assert not any(keys & LOOK_WAITING_SKIPS for keys in others), (
+        f"выход ожидания вердикта не ставит ступень: {others}"
+    )
+    assert frozenset() in others, "отказ взведения (`NotRun`) не найден среди пропусков"
+    assert frozenset({"<состояние>"}) in others, "незнакомое состояние не найдено среди пропусков"
