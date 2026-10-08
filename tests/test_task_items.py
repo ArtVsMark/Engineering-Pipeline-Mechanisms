@@ -422,4 +422,7 @@ def test_the_caller_names_the_test_that_holds_the_close_case() -> None:
     named = re.findall(r"tests/test_task_items\.py::(\w+)", said)
     assert named, "вызов не называет теста, который держит закрытие задачи"
     for name in named:
-        assert name in globals(), f"вызов называет несуществующий тест: {name}"
+        found = globals().get(name)
+        assert name.startswith("test_") and callable(found), (
+            f"вызов называет не тест этого модуля: {name}"
+        )
