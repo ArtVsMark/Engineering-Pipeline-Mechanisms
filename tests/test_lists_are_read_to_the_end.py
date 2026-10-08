@@ -26,7 +26,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
 #: Списки, которые обязаны читаться до конца: проверки коммита, аннотации
 #: проверки, задания прогона. Путь сверяется по концу — до `?` или конца строки:
@@ -39,7 +39,7 @@ LIST_RE: Final = re.compile(
 )
 
 #: Где живут механизмы, ходящие к площадке.
-PLACES: Final = (ROOT / "scripts", ROOT / "packages" / "transport")
+PLACES: Final = tuple(ROOT / where for where in load_script("paths.py").SOURCES)
 
 
 def literal(node: ast.expr) -> str | None:

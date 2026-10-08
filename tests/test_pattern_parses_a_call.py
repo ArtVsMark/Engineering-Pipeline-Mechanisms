@@ -39,10 +39,14 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
 #: Где ищем образцы: набор, механизмы, перехваты и общий низ.
-WHERE: Final = ("tests", "scripts", ".claude/hooks", "packages/transport")
+WHERE: Final = (
+    "tests",
+    *(where.as_posix() for where in load_script("paths.py").SOURCES),
+    ".claude/hooks",
+)
 
 #: Как узнают образец, разбирающий вызов: ИМЯ вплотную к экранированной скобке.
 #: Скобка Markdown (`](`) сюда не попадает намеренно — там перед скобкой не имя.
