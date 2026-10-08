@@ -1241,6 +1241,12 @@ CATALOGUE_SHOWCASE: Final = catalogue.SHOWCASE_URL
 #: Раздел ответа, в котором каталог держит вердикты. Имя взято У КАТАЛОГА, а не
 #: придумано: разбор по памяти молчал четыре раза подряд (#140).
 VERDICTS: Final = "verdicts"
+#: Приставка ключа вердикта по роду предложения: правило — `владелец/репо:слаг`,
+#: навык — `…:skill/слаг`, слияние — `…:merge/слаг` (export/README.md каталога).
+#: Разрешительный перечень (068): род, которого здесь нет, называется, а не
+#: ищется под ключом правила — там вердикта не будет никогда, и молчание
+#: выглядело бы ожиданием. Слияние и навык прежде искались под ключом правила.
+VERDICT_PREFIX: Final = {"": "", "skill": "skill/", "merge": "merge/"}
 
 
 def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
@@ -1290,7 +1296,18 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
     found: list[Drift] = []
     for one in ours:
         slug = str(one.get("slug") or "")
-        verdict = said.get(f"{project}:{slug}")
+        kind = str(one.get("kind") or "")
+        if kind not in VERDICT_PREFIX:
+            found.append(
+                Drift(
+                    "proposal-answer-unread",
+                    f"предложение «{slug}» рода «{kind}»: ключа вердикта для него разбор не знает",
+                    "сверить роды предложений с export/README.md каталога и дописать "
+                    "drift.VERDICT_PREFIX: под чужим ключом вердикта не будет никогда",
+                )
+            )
+            continue
+        verdict = said.get(f"{project}:{VERDICT_PREFIX[kind]}{slug}")
         if verdict is None:
             # Каталог ещё не ответил — ожидание, а не расхождение.
             continue
@@ -1325,12 +1342,24 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
         number = str(verdict.get("rule") or "?")
         why = str(verdict.get("why") or "причина не названа")
         if status == "admitted":
+            replaced = ", ".join(map(str, verdict.get("replaces") or []))
             found.append(
                 Drift(
                     "proposal-admitted",
-                    f"каталог принял «{slug}» под номером {number}",
+                    f"каталог принял «{slug}» под номером {number}"
+                    + (f", заменены {replaced}" if replaced else ""),
                     f"убрать его из .rules/proposals.json и ответить по правилу {number} "
-                    "в .rules/bindings.json — принятое перестаёт быть предложением",
+                    "в .rules/bindings.json — принятое перестаёт быть предложением"
+                    + (f"; ответы по заменённым ({replaced}) перечитать" if replaced else ""),
+                )
+            )
+        elif status == "neighbours":
+            found.append(
+                Drift(
+                    "proposal-neighbours",
+                    f"каталог оставил правила «{slug}» раздельными: {report.cut(why)}",
+                    "убрать его из .rules/proposals.json: соседи названы с причиной, "
+                    "и то же слияние тем же доводом не вернётся",
                 )
             )
         elif status == "merged-into":
