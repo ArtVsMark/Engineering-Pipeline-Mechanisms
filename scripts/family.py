@@ -153,14 +153,16 @@ def adopted(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     total = 0
     for consumer in summary.get("consumers") or []:
         repo = str(consumer.get("repo") or "")
-        if repo == (mine or family_uptake.OURS):
+        if repo.casefold() == (mine or family_uptake.OURS).casefold():
             continue
         for number, answer in sorted((consumer.get("holds") or {}).items()):
             if not isinstance(answer, dict) or answer.get("mechanism") not in KINDS:
                 continue
             total += 1
             origin = str(answer.get("origin") or "")
-            if origin.startswith(OURS_ORIGIN):
+            # Площадка имена репозиториев различает без регистра: объявленное
+            # строчными — тоже наше, а не ноль без слова (взгляд на #1241).
+            if origin.casefold().startswith(OURS_ORIGIN.casefold()):
                 kind = str(answer.get("origin_kind") or "")
                 by.append({"repo": repo, "rule": str(number), "origin": origin, "kind": kind})
     return {"ours": len(by), "of": total, "by": by}

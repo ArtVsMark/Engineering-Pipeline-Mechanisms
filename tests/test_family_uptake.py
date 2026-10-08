@@ -29,6 +29,12 @@ def test_a_call_is_found_with_its_step_and_version() -> None:
     assert refs == ("v1.2.0",)
 
 
+def test_a_call_in_another_case_is_found() -> None:
+    """Адрес в `uses:` площадка читает без регистра — и обход тоже."""
+    steps, _refs = module.calls_in(CALL.replace("ArtVsMark/Engineering", "artvsmark/engineering"))
+    assert steps == ("step-lint",)
+
+
 def test_a_mention_is_not_a_call() -> None:
     """Имя проекта в прозе — не подключение (166).
 
@@ -293,12 +299,30 @@ def test_the_uptake_counts_projects_and_offered_steps() -> None:
     нас, непрочитанный клон в нём назван, а не засчитан «не взял»; знаменатель
     шагов — отдаваемые наружу.
     """
-    took = module.Took(repo="o/a", steps=("lint", "secret"), refs=("v1.2.0",))
+    # Имена шагов — из настоящего `calls_in`, а не собраны рукой: рукой
+    # собранное «lint» прятало, что вызов называет файл `step-lint` (взгляд на #1241, 107).
+    call = CALL.replace("step-lint", "step-secret") + CALL
+    steps, refs = module.calls_in(call)
+    took = module.Took(repo="o/a", steps=steps, refs=refs)
     none = module.Took(repo="o/b", steps=(), refs=())
     said = module.uptake([took, none], ["o/c"], ["lint", "facts"])
     assert said["projects"] == {"took": 1, "of": 3, "unread": 1, "unread_repos": ["o/c"]}
     assert said["steps"] == {"taken": 1, "of": 2, "names": ["lint"]}
-    assert said["by"] == [{"repo": "o/a", "steps": ["lint", "secret"], "refs": ["v1.2.0"]}]
+    assert said["by"] == [
+        {"repo": "o/a", "steps": ["step-lint", "step-secret"], "refs": ["v1.2.0"]}
+    ]
+
+
+def test_a_project_calling_only_what_we_do_not_offer_took_nothing() -> None:
+    """Позвал только неотдаваемый шаг — проект не «взял»: числа проектов и шагов согласны."""
+    steps, refs = module.calls_in(CALL.replace("step-lint", "step-secret"))
+    said = module.uptake([module.Took("o/a", steps, refs)], [], ["lint"])
+    assert said["projects"]["took"] == 0 and said["steps"]["taken"] == 0
+
+
+def test_offered_names_drop_the_file_prefix() -> None:
+    """Имя файла шага приводится к имени отдаваемого, чужое без приставки — отброшено."""
+    assert module.offered_names(("step-lint", "ci")) == ["lint"]
 
 
 def test_a_namesake_without_our_call_is_not_taken(tmp_path: Path) -> None:
@@ -318,7 +342,9 @@ def test_main_writes_the_numbers_for_the_facts(
 
     monkeypatch.setattr(module, "family", lambda **_: ["o/сосед"])
     monkeypatch.setattr(
-        module, "took", lambda repo, _where: module.Took(repo=repo, steps=("lint",), refs=("v1",))
+        module,
+        "took",
+        lambda repo, _where: module.Took(repo=repo, steps=("step-lint",), refs=("v1",)),
     )
     monkeypatch.setattr(module.onboard, "steps", lambda _root: ["lint", "facts"])
     out = tmp_path / "uptake.json"

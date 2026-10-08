@@ -56,10 +56,13 @@ EXIT_BROKEN: Final = 2
 EXIT_UNREAD: Final = 3
 
 #: Наш адрес в чужом прогоне. Ищется ВЫЗОВ, а не упоминание: имя проекта
-#: встречается и в прозе комментариев, и это не подключение (166).
+#: встречается и в прозе комментариев, и это не подключение (166). Регистр
+#: имени площадка не различает, и сравнение с ним везде без регистра.
 OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
 CALL_RE: Final = re.compile(
-    r"uses:\s*" + re.escape(OURS) + r"/\.github/workflows/(?P<step>[\w.-]+)\.ya?ml@(?P<ref>[\w.-]+)"
+    r"uses:\s*(?i:"
+    + re.escape(OURS)
+    + r")/\.github/workflows/(?P<step>[\w.-]+)\.ya?ml@(?P<ref>[\w.-]+)"
 )
 
 #: Что клонируется: только объявление прогонов. Остальное дерево соседа нам не
@@ -120,7 +123,9 @@ def family(url: str = catalogue.WHERE_URL, local: Path | None = None) -> list[st
     found = [
         str(one["repo"])
         for one in rows
-        if isinstance(one, dict) and one.get("repo") and str(one["repo"]) != OURS
+        if isinstance(one, dict)
+        and one.get("repo")
+        and str(one["repo"]).casefold() != OURS.casefold()
     ]
     if not found:
         raise NotRun(f"в сводке семьи только мы сами ({OURS}) — обходить некого (075)")
@@ -239,6 +244,13 @@ def report_lines(seen: list[Took], unread: list[str]) -> list[str]:
     return lines
 
 
+def offered_names(called: tuple[str, ...]) -> list[str]:
+    """Имена позванных файлов шагов в форме `onboard.steps` — без приставки `step-`."""
+    return [
+        name[len(onboard.STEP_PREFIX) :] for name in called if name.startswith(onboard.STEP_PREFIX)
+    ]
+
+
 def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str, object]:
     """Числа «взяли вызовом» для фактов: проекты и шаги, с числителем и знаменателем.
 
@@ -246,10 +258,14 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
     нас, и непрочитанный клон в нём есть, но в «взял» не засчитан и назван
     поимённо: незнание — не «не взял» (045). Знаменатель шагов — то, что мы
     отдаём наружу (`onboard.steps`), а не то, что кто-то позвал: позванный, но
-    не отдаваемый шаг в числитель тоже не идёт.
+    не отдаваемый шаг в числитель не идёт — ни шагов, ни проектов.
     """
-    takers = [one for one in seen if one.steps]
-    taken = sorted({step for one in takers for step in one.steps} & set(offered))
+    # ИМЕНА ПРИВОДЯТСЯ К ОДНОЙ ФОРМЕ. Вызов называет файл (`step-lint`), а
+    # отдаваемое — шаг без приставки (`lint`, `onboard.steps`): сравнение как
+    # есть давало пустое пересечение всегда (взгляд на #1241).
+    offers = set(offered)
+    takers = [one for one in seen if offers & set(offered_names(one.steps))]
+    taken = sorted({step for one in takers for step in offered_names(one.steps)} & offers)
     return {
         "projects": {
             "took": len(takers),

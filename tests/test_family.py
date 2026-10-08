@@ -289,6 +289,13 @@ def test_a_gate_of_our_origin_is_adopted_and_a_namesake_is_not() -> None:
     assert adopted["by"] == [{"repo": "o/a", "rule": "001", "origin": ours, "kind": "called"}]
 
 
+def test_our_origin_in_another_case_is_still_ours() -> None:
+    """Площадка имя репозитория различает без регистра — строчное объявление тоже наше."""
+    ours = f"{family.OURS_ORIGIN.lower()}scripts/check_x.py@v1.4.0"
+    document = summary(declared("o/a", **{"001": ("gate", ours, "called")}))
+    assert family.picture(document)["adopted"]["ours"] == 1
+
+
 def test_our_own_answers_are_not_counted_as_adopted() -> None:
     """Мерило о семье: свои ответы не входят ни в числитель, ни в знаменатель."""
     ours = f"{family.OURS_ORIGIN}scripts/x.py@v1"
