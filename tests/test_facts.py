@@ -8,7 +8,6 @@
 import ast
 import json
 import re
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Final
@@ -347,9 +346,12 @@ def test_publication_writes_only_to_the_derived_branch() -> None:
         for step in shared["jobs"]["facts"]["steps"]
         if step.get("name") == "опубликовать факты коммитом поверх ветки badges"
     )
-    command = push_command(facts_publish["run"])
-    assert command.rstrip().endswith("badges"), f"шаг фактов толкает не в badges: {command}"
-    assert "--force" not in command, "шаг фактов затирает ветку, а не кладёт поверх"
+    # Толчок шага фактов — в скрипте `publish_facts.py`, и его ветку и отказ
+    # от `--force` проверяет прогон скрипта (`tests/test_publish_facts.py`);
+    # здесь — что шаг зовёт ровно скрипт и сам ничего не пишет (#639).
+    said = facts_publish["run"].split()
+    assert said[:2] == ["python", "$MECHANISMS/scripts/publish_facts.py"], said
+    assert "git" not in said, "шаг фактов пишет на ветку сам, мимо скрипта"
 
 
 def test_publication_is_not_a_check_on_a_change() -> None:
@@ -1018,169 +1020,17 @@ def test_pruning_removes_files_and_folders_but_keeps_the_list(tmp_path: Path) ->
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(module.branch_files())
 
 
-#: Присваивание переменной в сценарии шага: имя пути, которое `git add` подставит.
-ASSIGNED: Final = re.compile(r"^\s*(\w+)=(\S+)\s*$", re.MULTILINE)
-#: Строка сценария, где вообще стоит команда git: только такие режет `shlex`.
-GIT_WORD: Final = re.compile(r"(?<![\w./-])git(?![\w.-])")
-#: Знаки оболочки, которые `shlex` с `punctuation_chars` отдаёт отдельным словом.
-SHELL_SIGNS: Final = frozenset("();<>|&")
-#: Ключи git, за которыми идёт значение: подкоманда стоит после него, а не на его месте.
-GIT_VALUED_OPTIONS: Final = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
-
-
-def git_subcommand(words: list[str], start: int) -> str | None:
-    """Подкоманда git, вызванного словом ``words[start]``: первое слово не-ключ после ключей."""
-    index = start + 1
-    while index < len(words) and words[index].startswith("-"):
-        index += 2 if words[index] in GIT_VALUED_OPTIONS else 1
-    return words[index] if index < len(words) else None
-
-
-def published_by(run: str) -> list[str]:
-    """Пути, которые сценарий шага добавляет в коммит, с подставленными переменными.
-
-    Читается то, что шаг ИСПОЛНЯЕТ, — аргументы `git add`, — а не любое
-    упоминание пути: проза в комментарии держала бы множество непустым, когда
-    запись уже ушла (взгляд на #1217). Слова режет `shlex` с комментариями, так
-    что хвост `# пояснение` в пути не попадает.
-
-    ФОРМА ОДНА, ОСТАЛЬНОЕ — ОТКАЗ (210, взгляд на #1217). Разбор каждой новой
-    формы — `git -C путь add`, `cd x && git add`, `then git add` — снова
-    оставлял соседнюю выпасть молча, и проверка «множество не пусто» этого не
-    видела. Поэтому `git add` принимается только в начале строки, без ключей и
-    с явными путями; любая другая запись добавления — отказ, а не пропуск. Так
-    же — аргумент, не разрешённый присваиванием в том же сценарии: имени файла
-    тогда не знает никто, — и знак оболочки среди аргументов (`>`, `&`, `;`):
-    путём он не бывает.
-
-    Режется только строка, где стоит слово `git`: прочие строки шага (heredoc,
-    многострочный `python -c`) `shlex` разобрать не обязан, и непарная кавычка
-    в них гейт не роняет. Строка с `git`, которую `shlex` не разобрал, — отказ
-    с самой строкой, а не `ValueError` без предмета (взгляд на #1227).
-    """
-    script = run.replace("\\\n", " ")
-    known = dict(ASSIGNED.findall(script))
-    paths = []
-    for line in script.splitlines():
-        if not GIT_WORD.search(line):
-            continue
-        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        lexer.commenters = "#"
-        try:
-            words = list(lexer)
-        except ValueError as error:
-            raise AssertionError(
-                f"строка с git не разобрана ({error}): `{line.strip()}`"
-            ) from error
-        for start, word in enumerate(words):
-            if word != "git" or git_subcommand(words, start) != "add":
-                continue
-            arguments = words[start + 2 :]
-            assert start == 0 and words[1] == "add", f"`git add` не в своей форме: `{line.strip()}`"
-            assert arguments and not any(
-                argument.startswith("-") or set(argument) <= SHELL_SIGNS for argument in arguments
-            ), f"`git add` без явных путей, с ключом или знаком оболочки: `{line.strip()}`"
-            for argument in arguments:
-                if argument.startswith("$"):
-                    name = argument.strip("${}")
-                    assert name in known, f"путь `{argument}` в `git add` не разрешён присваиванием"
-                    argument = known[name]
-                paths.append(argument)
-    return paths
-
-
-@pytest.mark.parametrize(
-    ("run", "paths"),
-    [
-        ('target=.github/badges/facts.json\ngit add "$target"', [".github/badges/facts.json"]),
-        (
-            "# кладёт .github/badges/old.json\ngit add .github/badges/new.json",
-            [".github/badges/new.json"],
-        ),
-        ("echo .github/badges/facts.json", []),
-        ("git add .github/badges/new.json  # пояснение", [".github/badges/new.json"]),
-        ('git worktree add --quiet --detach "$pub" FETCH_HEAD', []),
-        ("git add a.json \\\n  b.json", ["a.json", "b.json"]),
-        ("cat <<EOF\ndon't\nEOF\ngit add a.json", ["a.json"]),
-    ],
-    ids=[
-        "через переменную",
-        "комментарий не считается",
-        "упоминание без записи",
-        "хвост-комментарий не путь",
-        "worktree add не добавление",
-        "перенос строки",
-        "непарная кавычка вне git",
-    ],
-)
-def test_the_published_paths_are_read_from_what_runs(run: str, paths: list[str]) -> None:
-    """Пути берутся из исполняемого `git add`, а не из упоминаний."""
-    assert published_by(run) == paths
-
-
-def test_an_unresolved_published_path_is_a_refusal() -> None:
-    """Переменная без присваивания в сценарии — отказ: имени файла не знает никто."""
-    with pytest.raises(AssertionError, match="не разрешён"):
-        published_by('git add "$elsewhere"')
-
-
-@pytest.mark.parametrize(
-    "run",
-    [
-        'git -C "$pub" add facts.json',
-        "cd x && git add facts.json",
-        "if true; then git add facts.json; fi",
-        "git add -A .github/badges",
-        "git add",
-        "git add facts.json >/dev/null",
-        "git add facts.json &",
-        "git add facts.json 2>&1",
-        'git add "facts.json',
-    ],
-    ids=[
-        "через -C",
-        "после &&",
-        "после then",
-        "ключ вместо пути",
-        "без пути",
-        "перенаправление",
-        "фон",
-        "перенаправление потока",
-        "непарная кавычка",
-    ],
-)
-def test_a_published_path_in_another_form_is_a_refusal(run: str) -> None:
-    """Добавление в коммит не своей формой — отказ, а не молчаливый пропуск (210)."""
-    with pytest.raises(AssertionError, match="git add"):
-        published_by(run)
-
-
-def test_the_git_subcommand_is_read_past_its_options() -> None:
-    """Подкоманда git — первое слово после ключей; значение ключа подкомандой не считается."""
-    assert git_subcommand(["git", "-C", "add", "status"], 0) == "status"
-    assert git_subcommand(["x", "git", "--no-pager", "add"], 1) == "add"
-    assert git_subcommand(["git", "-c"], 0) is None
-
-
 def test_the_shared_steps_files_are_kept_on_the_branch() -> None:
     """Файлы общего шага фактов на ветке допустимы, и чистка их не снимает (взгляд на #1202).
 
     Перечень допустимого строит потребитель из своего инвентаря, а ветку он
-    делит с общим шагом: второй файл шага удалялся бы каждым заходом. Имена
-    берутся из того, что шаг добавляет в коммит, а не из текста файла.
+    делит с общим шагом: второй файл шага удалялся бы каждым заходом. Что шаг
+    кладёт, названо константой `publish_facts.PUBLISHES` и читается импортом:
+    разбор оболочки шага три захода подряд пропускал новую форму записи
+    (решение владельца 08.10.2026, #639).
     """
     module = load_script("build_facts.py")
-    steps = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "step-facts.yml").read_text(encoding="utf-8")
-    )
-    written = {
-        Path(path).name
-        for job in steps["jobs"].values()
-        for step in job.get("steps") or []
-        for path in published_by(str(step.get("run") or ""))
-        if path.startswith(".github/badges/")
-    }
+    written = {Path(path).name for path in load_script("publish_facts.py").PUBLISHES}
     assert written == set(module.SHARED_STEP), (
         f"общий шаг кладёт {sorted(written)}, а `SHARED_STEP` называет {sorted(module.SHARED_STEP)}"
     )

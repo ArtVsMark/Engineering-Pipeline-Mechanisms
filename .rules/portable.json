@@ -465,6 +465,9 @@
     "scripts/facts_common.py": {
       "answer": "as-is"
     },
+    "scripts/publish_facts.py": {
+      "answer": "as-is"
+    },
     "scripts/catalogue.py": {
       "answer": "as-is"
     },

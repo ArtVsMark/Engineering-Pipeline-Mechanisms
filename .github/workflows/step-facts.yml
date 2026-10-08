@@ -30,8 +30,8 @@ name: step-facts
 # публикации файл сверяется со схемой витрины.
 #
 # ПУБЛИКАЦИЯ — КОММИТОМ ПОВЕРХ ВЕТКИ `badges`, А НЕ ПЕРЕЗАПИСЬЮ (вариант 1
-# решения 06.10.2026). Шаг кладёт только `.github/badges/facts.json` и не
-# трогает остального: свои значки и файлы потребителя на ветке живут. Цена
+# решения 06.10.2026). Шаг кладёт только `.github/badges/facts.json` — перечень
+# `publish_facts.PUBLISHES` — и не трогает остального: свои значки и файлы потребителя на ветке живут. Цена
 # названа: ветка копит историю производного — вреда не несёт, ценности тоже.
 #
 # УПРАВЛЯЮЩИЙ МЕХАНИЗМ, А НЕ ШАГ КОНВЕЙЕРА: пишет в ветку и зовётся своим
@@ -226,36 +226,9 @@ jobs:
           esac
       - name: опубликовать факты коммитом поверх ветки badges
         if: inputs.publish
-        run: |
-          set -euo pipefail
-          target=.github/badges/facts.json
-          pub="$RUNNER_TEMP/publish"
-          if git fetch --quiet origin badges; then
-            git worktree add --quiet --detach "$pub" FETCH_HEAD
-          else
-            remote=0
-            git ls-remote --exit-code --heads origin badges >/dev/null || remote=$?
-            if [ "$remote" -ne 2 ]; then
-              echo "::error::ветка badges не прочитана (ls-remote код $remote) — публиковать поверх нечего, и затирать её нельзя"
-              exit 1
-            fi
-            # Ветки ещё нет — первая публикация начинает её сиротой.
-            git worktree add --quiet --orphan -b badges-first "$pub"
-          fi
-          mkdir -p "$pub/.github/badges"
-          cp "$RUNNER_TEMP/facts/facts.json" "$pub/$target"
-          cd "$pub"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$target"
-          if git diff --cached --quiet; then
-            echo "факты не изменились — коммита нет"
-            exit 0
-          fi
-          git commit -q -m "факты на ${GITHUB_SHA}"
-          # Ветка выбирается целиком, без --depth: мелкая выборка в полном клоне
-          # поставила бы границу истории на чужой коммит.
-          # БЕЗ --force: чужое на ветке не затирается. Отказ гонки — красное,
-          # а не перезапись: вызывающий держит очередь своей группой.
-          git push -q origin HEAD:refs/heads/badges
-          echo "опубликовано: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/badges/${target}"
+        # Запись — скриптом, а не сценарием оболочки (решение владельца
+        # 08.10.2026, #639): что кладётся на ветку, названо константой
+        # `publish_facts.PUBLISHES`, и гейт читает её, а не разбирает оболочку.
+        run: >-
+          python $MECHANISMS/scripts/publish_facts.py "$RUNNER_TEMP/facts/facts.json"
+          --workdir "$RUNNER_TEMP/publish" --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"
