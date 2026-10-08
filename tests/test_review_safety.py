@@ -1656,6 +1656,35 @@ def test_the_task_names_the_environments_limit(path: Path) -> None:
         )
 
 
+#: Имя нашего скрипта в тексте задания: `check_version.py` и подобные.
+SCRIPT_NAME = re.compile(r"\b(\w+\.py)\b")
+
+
+def granted_scripts(commands: list[str]) -> set[str]:
+    """Имена скриптов, которые разрешённые команды зовут."""
+    return {name for command in commands for name in SCRIPT_NAME.findall(command)}
+
+
+def test_the_task_does_not_explain_a_command_it_is_denied() -> None:
+    """Задание не объясняет исход скрипта, которого его окружение не даст.
+
+    Обратная сторона предыдущей проверки. Скрипт, разрешённый СОСЕДНЕМУ
+    заходу этого же файла, а здесь названный в тексте, — абзац, перенесённый
+    от соседа вместе с доводом: задание верификатора объясняло исход
+    `check_version.py`, которого в его закрытом списке нет (взгляд на #1185).
+    Исполнитель зовёт команду, получает отказ окружения и тратит заход.
+    Ответ на обращение (`claude.yml`) скриптов не зовёт вовсе — сравнивать
+    там не с чем, поэтому предмет — шаг взгляда.
+    """
+    path = LOOK_BODY
+    steps = commands_and_task(path)
+    anywhere = set().union(*(granted_scripts(commands) for _, commands, _ in steps))
+    assert anywhere, f"{path.name}: ни один заход не зовёт скрипт — предмета нет (075)"
+    for name, commands, task in steps:
+        denied = sorted((anywhere - granted_scripts(commands)) & set(SCRIPT_NAME.findall(task)))
+        assert not denied, f"{path.name}, «{name}»: задание называет неразрешённое: {denied}"
+
+
 #: Как разрешённая команда зовёт наш код: из выкачки механизмов шага (#990).
 FROM_MECHANISMS = "${{ env.MECHANISMS }}/scripts/"
 
