@@ -616,19 +616,29 @@ class Unframed(Answer):
     chunked = False
 
 
-def test_an_empty_unframed_answer_is_retried_as_a_drop(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Пустое необрамлённое тело — обрыв, а не «пустой ответ» (взгляд на #1229)."""
+@pytest.mark.parametrize(
+    "body", [b"", b'{"a": [1, 2', b'{"a": 1}'], ids=["пусто", "оборвано", "цело"]
+)
+def test_an_unframed_answer_is_retried_as_a_drop(
+    monkeypatch: pytest.MonkeyPatch, body: bytes
+) -> None:
+    """Тело без рамки — обрыв, пустое оно, оборванное или на вид целое (взгляд на #1229, 210).
+
+    Целое на вид тоже судится обрывом: без рамки его полноту нечем доказать,
+    и граница по признаку не зависит от того, что успело прийти.
+    """
     asked = 0
 
     def opener(*_args: object, **_kwargs: object) -> Any:
         nonlocal asked
         asked += 1
-        return Unframed(b"")
+        return Unframed(body)
 
     monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
     monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
-    with pytest.raises(transport.TransportError):
+    with pytest.raises(transport.TransportError) as caught:
         transport.request("GET", "/x", "t")
+    assert "не разобран" not in str(caught.value), f"обрыв назван ошибкой формы: {caught.value}"
     assert asked == transport.TRIES, f"обрыв повторён {asked} раз из {transport.TRIES}"
     with pytest.raises(transport.TransportError, match="снимок не прочитан"):
         transport.raw_text("https://example.org/x.json")

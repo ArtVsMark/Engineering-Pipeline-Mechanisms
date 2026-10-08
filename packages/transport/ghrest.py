@@ -213,12 +213,15 @@ _MALFORMED: Final = http.client.HTTPException
 def _unframed(response: object) -> bool:
     """У ответа нет ни длины, ни `chunked`: конец тела — закрытие связи.
 
-    ОБРЫВ ПОСЛЕ ЦЕЛОЙ СТРОКИ СТАТУСА НЕВИДИМ `http.client` (взгляд на #1229).
-    Связь, закрытая после `HTTP/1.1 200 OK\\r\\n` или посреди заголовков, даёт
-    пустые заголовки и тело `b""` без отказа, и запрос вернул бы «пустой
-    ответ». Площадка пустой ответ обрамляет всегда — у 204 длина 0, — поэтому
-    пустое необрамлённое тело судится обрывом. Непустое необрамлённое, если
-    оборвано, ловит разбор JSON. Подделка без этих полей считается обрамлённой.
+    ТЕЛО БЕЗ РАМКИ НЕ ДОКАЗЫВАЕТ СВОЕЙ ПОЛНОТЫ — это признак, а не форма (210).
+    Четвёртый заход по этому месту (#1206, #1214, #1223, #1229) добавлял по
+    форме тела: пустое без рамки судилось обрывом, а непустое оборванное
+    уходило в разбор JSON ошибкой формы и в `raw_text` возвращалось целым
+    (взгляд на #1229). Признак один: где конец тела — закрытие связи, обрыв от
+    конца не отличить, и такой ответ судится обрывом, пустой или нет.
+    Площадка и снимки обрамляют ответ всегда — у 204 длина 0, — так что
+    целый ответ под признак не попадает. Подделка без этих полей считается
+    обрамлённой.
     """
     return getattr(response, "length", 0) is None and not getattr(response, "chunked", False)
 
@@ -317,10 +320,9 @@ def request(
         try:
             with urllib.request.urlopen(prepare(), timeout=TIMEOUT) as response:
                 _note_quota(response.headers)
-                unframed = _unframed(response)
-                payload = response.read()
-                if not payload and unframed:
+                if _unframed(response):
                     raise http.client.IncompleteRead(b"")
+                payload = response.read()
                 return json.loads(payload) if payload else None
         except (urllib.error.HTTPError, urllib.error.URLError) as exc:
             last = exc
@@ -506,11 +508,9 @@ def raw_text(url: str, timeout: int = 30) -> str:
         # здесь, и он тоже отказ, а не трейсбек (взгляд на #1214).
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=timeout) as answer:
-            unframed = _unframed(answer)
-            body = answer.read()
-            if not body and unframed:
+            if _unframed(answer):
                 raise http.client.IncompleteRead(b"")
-            return str(body.decode("utf-8"))
+            return str(answer.read().decode("utf-8"))
     # Обрыв на чтении и ответ не той формы — тот же отказ, что сбой соединения
     # (#1205): без них `IncompleteRead` и `BadStatusLine` летели трейсбеком
     # мимо `TransportError` (взгляд на #1206). Повтора у снимка нет — он один.
