@@ -184,10 +184,29 @@ def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
                 assert tool.startswith("Bash(") and tool.endswith(")"), f"{path.name}: {tool}"
 
 
-#: Инструменты, которыми агент пишет в площадку или наружу. Список
-#: запретительный намеренно: разрешительный здесь пришлось бы держать полным
-#: списком безобидного, а безобидное растёт быстрее опасного.
-WRITING_TOOLS = ("Write", "Edit", "WebFetch", "WebSearch", "Bash(gh ", "Bash(curl ")
+#: Всё, что агенту вправе быть выдано: чтение дерева, истории и прогон
+#: проверок. Список РАЗРЕШИТЕЛЬНЫЙ (взгляд на #1228): запретительный пропускал
+#: `Bash(git push:*)`, `Bash(git commit:*)`, `NotebookEdit` и запись через
+#: `mcp__github…` — каждое новое имя записи выдавалось молча. Безобидное здесь
+#: растёт правкой этой строки, и правка видна взгляду; опасное не растёт вовсе.
+#: Состав — замер по всем шагам агента на 08.10.2026, ничего сверх него.
+READER_TOOLS: Final = frozenset(
+    {
+        "Read",
+        "Grep",
+        "Glob",
+        "Bash(git log:*)",
+        "Bash(git show:*)",
+        "Bash(git diff:*)",
+        "Bash(python -m pytest:*)",
+        "Bash(python3 -m pytest:*)",
+        *(
+            f"Bash({python} ${{{{ env.MECHANISMS }}}}/scripts/{script}:*)"
+            for python in ("python", "python3")
+            for script in ("check_pipeline.py", "check_version.py")
+        ),
+    }
+)
 
 
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
@@ -205,10 +224,10 @@ def test_the_reviewer_stays_a_reader(path: Path) -> None:
     добавь туда `Edit` — и зелено.
     """
     for name, tools in declared_tools(path):
-        writing = [tool for tool in tools if tool.startswith(WRITING_TOOLS)]
-        assert not writing, (
-            f"{path.name}, «{name}»: ревьюеру разрешена запись: {writing} — "
-            "ответ обязан переносить механизм, а не агент"
+        beyond = sorted(set(tools) - READER_TOOLS)
+        assert not beyond, (
+            f"{path.name}, «{name}»: агенту выдано сверх чтения: {beyond} — "
+            "ответ обязан переносить механизм, а не агент; новое безобидное — в `READER_TOOLS`"
         )
 
 
@@ -1787,6 +1806,17 @@ WRITES_FINDINGS: Final = [path for path in AGENT_WORKFLOWS if path.name != "step
 DEADLINE_SAID: Final = re.compile(r"(?<!\d)(\d+)\s+минут")
 
 
+#: Предел ответа в задании: число в обороте «не длиннее N знаков». Подстрокой
+#: `300` нашлось бы и в «3000», и в любом другом числе (взгляд на #1228).
+LIMIT_SAID: Final = re.compile(r"не длиннее\s+(\d+)\s+знак")
+
+
+def test_the_limit_is_read_as_characters_not_a_substring() -> None:
+    """Предел читается оборотом «не длиннее N знаков», а не любым вхождением числа."""
+    assert LIMIT_SAID.findall("находка — не длиннее 300 знаков") == ["300"]
+    assert LIMIT_SAID.findall("не дольше 3000 минут, замер 300") == []
+
+
 def test_the_deadline_is_read_as_minutes_not_a_substring() -> None:
     """Срок читается по слову «минут», а дата с тем же числом сроком не считается."""
     assert DEADLINE_SAID.findall("08.10.2026: не дольше 15 минут") == ["15"]
@@ -1819,9 +1849,10 @@ def test_the_task_carries_its_numbers(path: Path) -> None:
             args = step["with"]["claude_args"]
             appended = re.search(r'--append-system-prompt\s+"([^"]+)"', args)
             task = str(step["with"].get("prompt") or "") + (appended.group(1) if appended else "")
-            assert path not in WRITES_FINDINGS or str(FINDING_LIMIT) in task, (
-                f"{path.name}, «{name}»: предел размера ответа в задании не назван — "
-                f"канон `findings.SAID_LIMIT` = {FINDING_LIMIT}"
+            limits = {int(number) for number in LIMIT_SAID.findall(task)}
+            assert path not in WRITES_FINDINGS or limits == {FINDING_LIMIT}, (
+                f"{path.name}, «{name}»: предел ответа — {sorted(limits) or 'не назван'}, "
+                f"а канон `findings.SAID_LIMIT` = {FINDING_LIMIT}"
             )
             # Предел ШАГА агента, если он задан, точнее предела задания: задание
             # взгляда держит ещё и ожидание зелёной головы (#762), а заход
