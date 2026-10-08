@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-07T10:56:04+00:00",
+  "updated": "2026-10-08T11:13:22+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -3815,6 +3815,281 @@
         }
       },
       "coverage": 92.7
+    },
+    "2026-10-08": {
+      "runs": {
+        "schedules-seen": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 334,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 111,
+          "red": 0,
+          "cancelled": 9,
+          "seconds": 2087,
+          "timed": 111,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 637,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 9,
+          "seconds": 2349,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 18,
+          "seconds": 2160,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 17,
+          "seconds": 2253,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 11,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 165,
+          "red": 1,
+          "cancelled": 97,
+          "seconds": 3338,
+          "timed": 165,
+          "red_jobs": {
+            "automerge / automerge": 1
+          },
+          "red_steps": {
+            "automerge / automerge · двигать очередь": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "work-plan": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 22,
+          "seconds": 3056,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 81,
+          "red": 0,
+          "cancelled": 55,
+          "seconds": 9584,
+          "timed": 81,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 75,
+          "red": 0,
+          "cancelled": 58,
+          "seconds": 7985,
+          "timed": 75,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 392,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт фрагментов: забор — только без отступа, забор с отступом — отказ (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 131,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 636,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 5003,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 184,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 101,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1260,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ссылки прозы на тесты сверяются везде, а не одним частным тестом": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 959,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт фрагментов: забор — только без отступа, забор с отступом — отказ": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2722,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Транспорт: строка статуса не той формы — ошибка формы, а не обрыв": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1252,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Очередь: ступень держат все формы ожидания вердикта, а не две из трёх": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1310,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Разбор пунктов называет свою границу окружения (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 47,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Заготовка свода: запрет называет общую ветку, а не наше main (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 165,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 92.8
     }
   }
 }
