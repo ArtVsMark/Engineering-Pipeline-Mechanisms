@@ -75,8 +75,14 @@ FRAGMENT_LINES: Final = 10
 #: наибольшее тело — 645 знаков, медиана выпуска 1.4.0 — 524, у прежних
 #: выпусков медиана 1000–1900. Восемьсот — с запасом над нынешней формой.
 FRAGMENT_CHARS: Final = 800
-#: Ограда блока кода: внутри неё `#` — комментарий примера, а не заголовок.
-FENCE: Final = "```"
+#: Забор блока кода по CommonMark: три и больше обратных кавычек или тильд.
+#: Внутри него `#` — комментарий примера, а не заголовок; закрывает его забор
+#: того же знака не короче открывшего. У забора кавычками в строке сведений
+#: кавычки нет — иначе это код в строке, а не забор.
+FENCE_RE: Final = re.compile(r"^(?:(`{3,})[^`]*|(~{3,}).*)$")
+#: Отступ, с которого строка — блок кода или ленивое продолжение абзаца, а не
+#: начало блока: ни заголовком, ни забором, ни цитатой она не бывает.
+CODE_INDENT: Final = 4
 #: Заголовок выше `###`: в собранном журнале он встаёт в ряд с версиями (`##`)
 #: и ломает навигацию по выпускам — таких в выпущенном 16 (#1172).
 TOO_HIGH_RE: Final = re.compile(r"^#{1,2}\s")
@@ -256,16 +262,12 @@ def shape_fault(fragment: Fragment) -> str:
     неё раньше, но предел не должен молча расти на строку, если сюда придёт
     иной (взгляд на #1174).
     """
-    raw = [one.strip() for one in fragment.body.splitlines()]
-    inside = False
-    for one in raw:
-        if one.startswith(FENCE):
-            inside = not inside
-            continue
-        if not inside and TOO_HIGH_RE.match(one):
+    raw = fragment.body.splitlines()
+    for one in outside_fences(raw):
+        if TOO_HIGH_RE.match(one):
             return f"заголовок выше `###`: «{one}»"
     heading = heading_at(raw)
-    lines = [one for index, one in enumerate(raw) if one and index != heading]
+    lines = [kept for index, one in enumerate(raw) if (kept := one.strip()) and index != heading]
     body = lines[:-1] if lines and LINK_LINE_RE.match(lines[-1]) else lines
     if len(body) > FRAGMENT_LINES:
         return f"тело {len(body)} строк, предел {FRAGMENT_LINES}"
@@ -275,13 +277,80 @@ def shape_fault(fragment: Fragment) -> str:
     return ""
 
 
-#: Что прерывает абзац цитаты по CommonMark, а не продолжает его лениво:
-#: ATX-заголовок, забор блока кода (обоих видов), тематический разрыв, пункт
-#: маркированного списка, пункт нумерованного с единицы, начало HTML-блока.
-PARAGRAPH_BREAKERS: Final = re.compile(
-    r"^(?:#{1,6}(?:\s|$)|`{3}|~{3}|(?:-\s*){3,}$|(?:\*\s*){3,}$|(?:_\s*){3,}$"
-    r"|[-*+]\s|1[.)]\s|<)"
+def opening(line: str) -> str | None:
+    """Строка без отступа, если она может начать блок; отступ 4+ — None.
+
+    По CommonMark блок начинается с отступом до трёх пробелов, табуляция —
+    до следующей позиции, кратной четырём. Строка глубже — блок кода с
+    отступом или ленивое продолжение абзаца, и `# x` в ней не заголовок.
+    """
+    expanded = line.expandtabs(CODE_INDENT)
+    stripped = expanded.lstrip(" ")
+    if len(expanded) - len(stripped) >= CODE_INDENT:
+        return None
+    return stripped.rstrip()
+
+
+def outside_fences(raw: list[str]) -> list[str]:
+    """Строки, способные начать блок, вне заборов блоков кода — без отступа.
+
+    Забор открывают и закрывают оба вида (`FENCE_RE`), закрывает — тот же
+    знак не короче открывшего и без строки сведений; незакрытый забор длится
+    до конца фрагмента, как в CommonMark. Строки с отступом 4+ (`opening`)
+    отброшены: блоком они не бывают.
+    """
+    kept: list[str] = []
+    fence = ""
+    for line in raw:
+        one = opening(line)
+        if one is None:
+            continue
+        if fence:
+            if one.startswith(fence) and not one.strip(fence[0]):
+                fence = ""
+            continue
+        if mark := FENCE_RE.match(one):
+            fence = mark.group(1) or mark.group(2)
+            continue
+        kept.append(one)
+    return kept
+
+
+#: Имена HTML-блока вида 6 по CommonMark 0.31 (§4.6), альтернативой выражения:
+#: только они и виды 1–5 прерывают абзац. Вид 7 — любой иной тег — абзаца не
+#: прерывает, и автоссылка `<https://…>` тоже.
+HTML_BLOCK_NAMES: Final = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|"
+    "details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h1|"
+    "h2|h3|h4|h5|h6|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|"
+    "noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|"
+    "thead|title|tr|track|ul"
 )
+#: Начало HTML-блока видов 1–6: `script`/`pre`/`style`/`textarea`, комментарий,
+#: инструкция обработки, объявление, CDATA и блочный тег из `HTML_BLOCK_NAMES`.
+HTML_BREAKER: Final = (
+    r"<(?:(?:script|pre|style|textarea)(?:\s|>|$)|!--|\?|![A-Za-z]|!\[CDATA\["
+    r"|/?(?:" + HTML_BLOCK_NAMES + r")(?:\s|/?>|$))"
+)
+#: ATX-заголовок: от одной до шести решёток и пробел или конец строки. `#1`
+#: и `#тег` — абзац, а не заголовок.
+ATX_RE: Final = re.compile(r"^#{1,6}(?:\s|$)")
+#: Что прерывает абзац цитаты по CommonMark, а не продолжает его лениво:
+#: ATX-заголовок, тематический разрыв, НЕпустой
+#: пункт маркированного списка, непустой пункт нумерованного с единицы,
+#: HTML-блок видов 1–6 — и забор блока кода, но его знает один `FENCE_RE`.
+#: Сверяется строка без отступа (`opening`): с отступом 4+ ничто из этого
+#: абзаца не прерывает.
+PARAGRAPH_BREAKERS: Final = re.compile(
+    r"^(?:#{1,6}(?:\s|$)|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$"
+    r"|[-*+]\s+\S|1[.)]\s+\S|" + HTML_BREAKER + ")",
+    re.IGNORECASE,
+)
+
+
+def breaks(one: str) -> bool:
+    """Прерывает ли строка без отступа абзац: блок из перечня или забор кода."""
+    return bool(PARAGRAPH_BREAKERS.match(one) or FENCE_RE.match(one))
 
 
 def heading_at(raw: list[str]) -> int | None:
@@ -291,25 +360,30 @@ def heading_at(raw: list[str]) -> int | None:
     Абзац читается по правилам Markdown, а не по приставке строк: строка с
     `>` его продолжает, строка без `>` — тоже, лениво, если только она не
     начинает блок, прерывающий абзац (`PARAGRAPH_BREAKERS`); пустая строка его
-    кончает. Пустые строки здесь нужны, поэтому разбор идёт по сырым строкам.
+    кончает. Строки сырые, с отступом: пустые нужны разбору, а отступ 4+
+    решает, начало ли это блока (`opening`).
 
-    ПЕРЕЧЕНЬ ФОРМ, а не очередная. Место получило три находки подряд
+    ПЕРЕЧЕНЬ ФОРМ, а не очередная. Место получило находки в трёх заходах
     (взгляды на #1181 — жёсткий индекс, затем ленивое продолжение; на #1188 —
-    блок кода под цитатой), и третья закрыта не формой, а полным списком
-    прерывающих конструкций CommonMark (210). Формы: причины нет; причина в
-    одну строку `>`; в несколько; с ленивым продолжением; вплотную под
-    цитатой — заголовок, блок кода, разрыв, пункт списка, HTML; цитатой открыт
-    фрагмент не-`internal`; заголовка нет. Каждая — строкой таблицы в
+    блок кода под цитатой; ещё раз на #1188 — забор тильдами, отступ, HTML
+    вида 7), и разбор строки сведён к CommonMark целиком (210). Формы: причины
+    нет; причина в одну строку `>`; в несколько; с ленивым продолжением, в том
+    числе с отступом 4+; вплотную под цитатой — заголовок, забор обоих видов,
+    разрыв, непустой пункт списка, HTML видов 1–6; не прерывают — пустой
+    пункт, HTML вида 7, автоссылка; цитатой открыт фрагмент не-`internal`;
+    заголовка нет; `#1` — не заголовок. Каждая — строкой таблицы в
     `tests/test_journal_fragments.py`.
     """
-    at = next((index for index, one in enumerate(raw) if one), len(raw))
-    if at < len(raw) and raw[at].startswith(">"):
-        while at < len(raw) and raw[at]:
-            if not raw[at].startswith(">") and PARAGRAPH_BREAKERS.match(raw[at]):
+    lines = [opening(one) for one in raw]
+    at = next((index for index, one in enumerate(raw) if one.strip()), len(raw))
+    if at < len(raw) and (lines[at] or "").startswith(">"):
+        while at < len(raw) and raw[at].strip():
+            one = lines[at]
+            if one is not None and not one.startswith(">") and breaks(one):
                 break
             at += 1
-    at = next((index for index in range(at, len(raw)) if raw[index]), len(raw))
-    return at if at < len(raw) and raw[at].startswith("#") else None
+    at = next((index for index in range(at, len(raw)) if raw[index].strip()), len(raw))
+    return at if at < len(raw) and ATX_RE.match(lines[at] or "") else None
 
 
 def render_section(title: str, fragments: list[Fragment]) -> str:
