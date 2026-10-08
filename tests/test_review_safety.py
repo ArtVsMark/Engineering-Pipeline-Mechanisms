@@ -190,14 +190,19 @@ def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
 WRITING_TOOLS = ("Write", "Edit", "WebFetch", "WebSearch", "Bash(gh ", "Bash(curl ")
 
 
-@pytest.mark.parametrize("path", [LOOK_BODY], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_the_reviewer_stays_a_reader(path: Path) -> None:
-    """Ревьюер не пишет ни в площадку, ни наружу — за него это делает механизм.
+    """Агент не пишет ни в площадку, ни наружу — за него это делает механизм.
 
-    Вход ревью собран из проверяемого текста, и право записи в этом канале
-    означает, что чужой текст сможет им воспользоваться (085). Поздний взгляд
-    по общей ветке — самое место, где такое право хочется выдать: адресата у
-    него нет по построению. Поэтому ответ переносит `late_look.py`, а не агент.
+    Вход любого шага агента собран из недоверенного текста — изменения,
+    обращения, тела задачи, — и право записи в этом канале означает, что чужой
+    текст сможет им воспользоваться (085). Поздний взгляд по общей ветке —
+    самое место, где такое право хочется выдать: адресата у него нет по
+    построению. Поэтому ответ переносит `late_look.py`, а не агент.
+
+    ГЕЙТ БЕРЁТ ВСЕ ПРОГОНЫ С АГЕНТОМ (взгляд на #1219). На одном `LOOK_BODY`
+    разбор пунктов задачи держался только нынешней строкой `--allowedTools`:
+    добавь туда `Edit` — и зелено.
     """
     for name, tools in declared_tools(path):
         writing = [tool for tool in tools if tool.startswith(WRITING_TOOLS)]
@@ -1776,6 +1781,18 @@ def test_the_task_says_the_list_is_closed(path: Path) -> None:
 WRITES_FINDINGS: Final = [path for path in AGENT_WORKFLOWS if path.name != "step-task-items.yml"]
 
 
+#: Срок захода в задании: число, стоящее перед словом «минут». Подстрокой
+#: срок не ищется: «20» сидит в любой дате «…2026» задания взгляда, и гейт там
+#: не проверял ничего (взгляд на #1219).
+DEADLINE_SAID: Final = re.compile(r"(?<!\d)(\d+)\s+минут")
+
+
+def test_the_deadline_is_read_as_minutes_not_a_substring() -> None:
+    """Срок читается по слову «минут», а дата с тем же числом сроком не считается."""
+    assert DEADLINE_SAID.findall("08.10.2026: не дольше 15 минут") == ["15"]
+    assert DEADLINE_SAID.findall("замер 20.09.2026") == []
+
+
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_the_task_carries_its_numbers(path: Path) -> None:
     """В задании стоят ЧИСЛА, и оба взяты из своих канонических мест.
@@ -1811,9 +1828,10 @@ def test_the_task_carries_its_numbers(path: Path) -> None:
             # агента получает свой срок.
             deadline = step.get("timeout-minutes") or body.get("timeout-minutes")
             assert deadline, f"{path.name}, джоб «{job}»: у шага агента нет срока — назвать нечего"
-            assert str(deadline) in task, (
-                f"{path.name}, «{name}»: срок захода в задании не назван либо разошёлся с "
-                f"`timeout-minutes: {deadline}` — исполнитель планировал бы по неверному числу"
+            said = {int(number) for number in DEADLINE_SAID.findall(task)}
+            assert said == {int(deadline)}, (
+                f"{path.name}, «{name}»: срок захода в задании — {sorted(said) or 'не назван'}, "
+                f"а `timeout-minutes: {deadline}` — исполнитель планировал бы по неверному числу"
             )
 
 
