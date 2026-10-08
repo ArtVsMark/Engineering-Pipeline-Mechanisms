@@ -8,6 +8,7 @@
 
 import fnmatch
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Final
 
@@ -141,6 +142,56 @@ def test_actions_that_receive_the_token_are_pinned_by_sha(path: Path) -> None:
             assert SHA_PIN.search(uses), f"{path.name}: {uses} закреплено меткой, а не SHA"
 
 
+#: Флаги `claude_args`, которые шагу агента вправе быть выданы: модель,
+#: задание и список инструментов. Перечень разрешительный (068, взгляд на
+#: #1228): права выдаются и другими флагами — `--permission-mode`,
+#: `--dangerously-skip-permissions`, `--disallowedTools`, — и любой из них,
+#: не названный здесь, краснит гейт, а не проходит мимо запрета писать.
+AGENT_FLAGS: Final = frozenset({"--model", "--append-system-prompt", "--allowedTools"})
+#: Входы действия агента, которые шаг вправе задать. `settings` и прочие каналы
+#: выдачи прав сюда не входят (взгляд на #1228).
+AGENT_INPUTS: Final = frozenset(
+    {"claude_args", "claude_code_oauth_token", "prompt", "track_progress", "additional_permissions"}
+)
+#: Дополнительные права площадки, допустимые шагу агента: только чтение.
+READ_PERMISSIONS: Final = frozenset({"actions: read"})
+
+
+def flags_of(args: str) -> list[tuple[str, str]]:
+    """Флаги `claude_args` с их значениями — разбором по словам, а не поиском по строке.
+
+    Слово `--allowedTools` внутри текста задания (`--append-system-prompt "…"`)
+    флагом не является, и поиск по строке принял бы его за флаг; а `re.search`
+    видел только ПЕРВЫЙ настоящий флаг, и второй `--allowedTools "Edit"` обходил
+    запрет зелёным (взгляд на #1228). Слово, не начинающее флаг и не бывшее
+    значением, — отказ: голые слова в аргументах не разбираются.
+    """
+    words = shlex.split(args)
+    found: list[tuple[str, str]] = []
+    index = 0
+    while index < len(words):
+        flag = words[index]
+        assert flag.startswith("--"), f"слово «{flag}» вне флага в `claude_args`"
+        assert index + 1 < len(words), f"у флага {flag} нет значения"
+        found.append((flag, words[index + 1]))
+        index += 2
+    return found
+
+
+def test_flags_are_read_by_words() -> None:
+    """Флаг в тексте задания — не флаг; повторный `--allowedTools` читается."""
+    args = (
+        '--model m --append-system-prompt "см. --allowedTools ниже" '
+        '--allowedTools "Read" --allowedTools "Edit"'
+    )
+    assert flags_of(args) == [
+        ("--model", "m"),
+        ("--append-system-prompt", "см. --allowedTools ниже"),
+        ("--allowedTools", "Read"),
+        ("--allowedTools", "Edit"),
+    ]
+
+
 def declared_tools(path: Path) -> list[tuple[str, list[str]]]:
     """Списки инструментов агента — ВСЕ, а не первый попавшийся.
 
@@ -151,21 +202,23 @@ def declared_tools(path: Path) -> list[tuple[str, list[str]]]:
     ПОЧЕМУ ВСЕ. Прогон ревью держит больше одного шага агента — взгляд на
     изменение и поздний взгляд по общей ветке, — и у каждого свой список.
     Проверка первого зеленела бы на втором, сколько бы там ни было разрешено:
-    ровно тот случай, когда гейт смотрит не туда, где предмет (075).
+    ровно тот случай, когда гейт смотрит не туда, где предмет (075). Внутри
+    шага — тоже все флаги `--allowedTools`, а не первый (взгляд на #1228).
     """
-    found = [
-        (str(step.get("name") or "без имени"), match)
-        for step in agent_steps(path)
-        if (match := re.search(r'--allowedTools\s+"([^"]+)"', step["with"]["claude_args"]))
-    ]
-    assert len(found) == len(agent_steps(path)), (
-        f"{path.name}: у шага агента список инструментов не объявлен"
-    )
+    found = []
+    for step in agent_steps(path):
+        name = str(step.get("name") or "без имени")
+        tools = [
+            tool.strip()
+            for flag, value in flags_of(step["with"]["claude_args"])
+            if flag == "--allowedTools"
+            for tool in value.split(",")
+            if tool.strip()
+        ]
+        assert tools, f"{path.name}, «{name}»: список инструментов агента не объявлен"
+        found.append((name, tools))
     assert found, f"{path.name}: список инструментов агента не объявлен"
-    return [
-        (name, [tool.strip() for tool in match.group(1).split(",") if tool.strip()])
-        for name, match in found
-    ]
+    return found
 
 
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
@@ -188,8 +241,10 @@ def test_agent_tools_are_an_allowlist_without_bare_bash(path: Path) -> None:
 #: проверок. Список РАЗРЕШИТЕЛЬНЫЙ (взгляд на #1228): запретительный пропускал
 #: `Bash(git push:*)`, `Bash(git commit:*)`, `NotebookEdit` и запись через
 #: `mcp__github…` — каждое новое имя записи выдавалось молча. Безобидное здесь
-#: растёт правкой этой строки, и правка видна взгляду; опасное не растёт вовсе.
+#: растёт правкой этой строки, и правка видна взгляду; опасное здесь не растёт.
 #: Состав — замер по всем шагам агента на 08.10.2026, ничего сверх него.
+#: Права выдаются и мимо этого списка — флагами и входами действия; их держит
+#: `test_no_other_channel_grants_the_agent_rights` (взгляд на #1228).
 READER_TOOLS: Final = frozenset(
     {
         "Read",
@@ -210,6 +265,33 @@ READER_TOOLS: Final = frozenset(
 
 
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
+def test_no_other_channel_grants_the_agent_rights(path: Path) -> None:
+    """Права агенту выдаёт только список инструментов: прочие флаги и входы — закрытый перечень.
+
+    Запрет писать держится на `--allowedTools`, но права выдаются и мимо него:
+    `--permission-mode`, `--dangerously-skip-permissions`, вход `settings`,
+    дополнительные права площадки. Гейт их не читал (взгляд на #1228); теперь
+    флаг или вход вне перечня — отказ, а права площадки — только на чтение.
+    """
+    for step in agent_steps(path):
+        name = str(step.get("name") or "без имени")
+        given = step["with"]
+        beyond = sorted(set(given) - AGENT_INPUTS)
+        assert not beyond, f"{path.name}, «{name}»: входы действия вне перечня: {beyond}"
+        flags = sorted({flag for flag, _ in flags_of(given["claude_args"])} - AGENT_FLAGS)
+        assert not flags, f"{path.name}, «{name}»: флаги вне перечня: {flags}"
+        extra = {
+            line.strip()
+            for line in str(given.get("additional_permissions") or "").splitlines()
+            if line.strip()
+        }
+        assert extra <= READ_PERMISSIONS, (
+            f"{path.name}, «{name}»: права площадки сверх чтения: "
+            f"{sorted(extra - READ_PERMISSIONS)}"
+        )
+
+
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_the_reviewer_stays_a_reader(path: Path) -> None:
     """Агент не пишет ни в площадку, ни наружу — за него это делает механизм.
 
@@ -222,6 +304,11 @@ def test_the_reviewer_stays_a_reader(path: Path) -> None:
     ГЕЙТ БЕРЁТ ВСЕ ПРОГОНЫ С АГЕНТОМ (взгляд на #1219). На одном `LOOK_BODY`
     разбор пунктов задачи держался только нынешней строкой `--allowedTools`:
     добавь туда `Edit` — и зелено.
+
+    ПРЕДЕЛ ГЕЙТА (взгляд на #1228): он судит ОБЪЯВЛЕННЫЙ список, а не то, что
+    исполнится. `Bash(python -m pytest:*)` запускает код проверяемого дерева —
+    `conftest` и тесты головы, — и выход наружу оттуда держат уже права
+    джоба и сеть прогона, а не этот список.
     """
     for name, tools in declared_tools(path):
         beyond = sorted(set(tools) - READER_TOOLS)
