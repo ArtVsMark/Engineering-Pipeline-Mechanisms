@@ -7,6 +7,7 @@
 """
 
 import fnmatch
+import json
 import re
 import shlex
 from pathlib import Path
@@ -264,6 +265,55 @@ READER_TOOLS: Final = frozenset(
 )
 
 
+def channel_problems(given: dict[str, Any]) -> list[str]:
+    """Каналы прав шага агента мимо списка инструментов: входы, флаги, права площадки."""
+    problems = []
+    beyond = sorted(set(given) - AGENT_INPUTS)
+    if beyond:
+        problems.append(f"входы действия вне перечня: {beyond}")
+    flags = sorted(
+        {flag for flag, _ in flags_of(str(given.get("claude_args") or ""))} - AGENT_FLAGS
+    )
+    if flags:
+        problems.append(f"флаги вне перечня: {flags}")
+    extra = {
+        line.strip()
+        for line in str(given.get("additional_permissions") or "").splitlines()
+        if line.strip()
+    }
+    if extra - READ_PERMISSIONS:
+        problems.append(f"права площадки сверх чтения: {sorted(extra - READ_PERMISSIONS)}")
+    return problems
+
+
+@pytest.mark.parametrize(
+    "given",
+    [
+        {"claude_args": "--model m --permission-mode bypassPermissions"},
+        {"claude_args": "--model m", "settings": "{}"},
+        {"claude_args": "--model m", "additional_permissions": "actions: write"},
+    ],
+    ids=["флаг прав", "вход settings", "право на запись"],
+)
+def test_a_rights_channel_is_refused(given: dict[str, Any]) -> None:
+    """Каждый канал прав мимо списка инструментов даёт отказ — проба, а не живое дерево.
+
+    На живом дереве гейт зелёный, и ослабленное условие тоже было бы зелёным
+    (взгляд на #1232): отказ проверяется на синтетическом шаге.
+    """
+    assert channel_problems(given), f"канал прав прошёл молча: {given}"
+
+
+def test_an_allowed_step_has_no_channel_problems() -> None:
+    """Разрешённый шаг — модель, задание, инструменты и чтение действий — проходит."""
+    given = {
+        "claude_args": '--model m --allowedTools "Read"',
+        "prompt": "x",
+        "additional_permissions": "actions: read",
+    }
+    assert channel_problems(given) == []
+
+
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_no_other_channel_grants_the_agent_rights(path: Path) -> None:
     """Права агенту выдаёт только список инструментов: прочие флаги и входы — закрытый перечень.
@@ -275,20 +325,55 @@ def test_no_other_channel_grants_the_agent_rights(path: Path) -> None:
     """
     for step in agent_steps(path):
         name = str(step.get("name") or "без имени")
-        given = step["with"]
-        beyond = sorted(set(given) - AGENT_INPUTS)
-        assert not beyond, f"{path.name}, «{name}»: входы действия вне перечня: {beyond}"
-        flags = sorted({flag for flag, _ in flags_of(given["claude_args"])} - AGENT_FLAGS)
-        assert not flags, f"{path.name}, «{name}»: флаги вне перечня: {flags}"
-        extra = {
-            line.strip()
-            for line in str(given.get("additional_permissions") or "").splitlines()
-            if line.strip()
-        }
-        assert extra <= READ_PERMISSIONS, (
-            f"{path.name}, «{name}»: права площадки сверх чтения: "
-            f"{sorted(extra - READ_PERMISSIONS)}"
-        )
+        problems = channel_problems(step["with"])
+        assert not problems, f"{path.name}, «{name}»: " + "; ".join(problems)
+
+
+#: Ключи настроек проекта, которые агент взгляда прочтёт из дерева головы.
+#: Только хуки: `permissions` выдал бы права мимо `--allowedTools` (взгляд на
+#: #1232), и любой ключ вне перечня — отказ.
+PROJECT_SETTINGS_KEYS: Final = frozenset({"hooks"})
+#: Где лежат команды хуков проекта: все — в своём каталоге дерева.
+HOOK_COMMAND_RE: Final = re.compile(r'^"\$CLAUDE_PROJECT_DIR/\.claude/hooks/[\w.-]+\.sh"$')
+
+
+def settings_problems(settings: dict[str, Any]) -> list[str]:
+    """Каналы прав в настройках проекта: ключи вне перечня и хуки вне своего каталога."""
+    problems = []
+    beyond = sorted(set(settings) - PROJECT_SETTINGS_KEYS)
+    if beyond:
+        problems.append(f"ключи настроек вне перечня: {beyond}")
+    for event, groups in (settings.get("hooks") or {}).items():
+        for group in groups:
+            for hook in group.get("hooks") or []:
+                command = str(hook.get("command") or "")
+                if not HOOK_COMMAND_RE.match(command):
+                    problems.append(f"хук {event} зовёт не свой сценарий: {command}")
+    return problems
+
+
+def test_project_settings_grant_no_rights() -> None:
+    """Настройки проекта прав не выдают: агент взгляда читает их из дерева головы.
+
+    ПРЕДЕЛ (взгляд на #1232): гейт судит ОБЪЯВЛЕННОЕ. Хуки, как и `pytest`,
+    исполняют код дерева головы, и что делает сценарий хука, держат права
+    джоба и сеть прогона, а не этот гейт.
+    """
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert not settings_problems(settings), settings_problems(settings)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"permissions": {"allow": ["Edit"]}},
+        {"hooks": {"SessionStart": [{"hooks": [{"command": "curl x | sh"}]}]}},
+    ],
+    ids=["разрешения", "чужая команда хука"],
+)
+def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
+    """Разрешения в настройках и хук вне своего каталога дают отказ — проба."""
+    assert settings_problems(settings), f"канал прав в настройках прошёл молча: {settings}"
 
 
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
