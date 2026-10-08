@@ -166,6 +166,10 @@ class Look:
 
     targets: tuple[str, ...] = ()
     blind: str = ""
+    #: Это толчок. Пустые `targets` сами этого не говорят: толчок без цели и
+    #: «не толчок» отдавали одно и то же, и после взгляда на #1226 сторож стал
+    #: судить головой любую команду — `ls` в отсоединённой голове отвергался.
+    push: bool = False
 
 
 def script_of(segment: list[str]) -> tuple[str | None, str]:
@@ -495,7 +499,7 @@ def push_targets(command: str) -> Look:
             while rest and rest[0].startswith("-"):
                 rest = rest[2:] if rest[0] in GLOBAL_WITH_VALUE else rest[1:]
             if rest and rest[0] == "push":
-                return Look(targets=tuple(named_branches(rest[1:])))
+                return Look(targets=tuple(named_branches(rest[1:])), push=True)
     return Look()
 
 
@@ -693,6 +697,8 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    if not look.push:
+        return 0
     targets = list(look.targets)
     current, broken = head()
     if not targets:

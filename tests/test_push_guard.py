@@ -194,6 +194,13 @@ def test_a_push_without_a_target_is_judged_by_the_head(head: str) -> None:
     assert "не ветка изменения" in said.stderr, said.stderr
 
 
+@pytest.mark.parametrize("command", ["ls", "git status", "pytest -q"])
+def test_a_command_that_is_not_a_push_passes_on_any_head(command: str) -> None:
+    """Не толчок проходит и с головы вне `agent/…`: голова судит только толчок без цели."""
+    assert ask(command, head="HEAD").returncode == 0, f"отвергнуто зря: {command}"
+    assert ask(command, broken="1").returncode == 0, f"отвергнуто зря при слепой голове: {command}"
+
+
 def test_a_push_without_a_target_and_an_unknown_head_is_refused() -> None:
     """Голову не узнать — толчок без цели не проверить, и он отвергается."""
     said = ask("git push", broken="1")
