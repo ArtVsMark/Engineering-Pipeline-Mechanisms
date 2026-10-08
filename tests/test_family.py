@@ -49,27 +49,6 @@ def written(tmp: Path, document: dict[str, Any]) -> Path:
     return path
 
 
-def test_a_mechanism_of_two_projects_is_shared(tmp_path: Path) -> None:
-    """Механизм у двух и более проектов считается общим — это весь предмет."""
-    document = summary(
-        consumer("o/a", **{"001": ("gate", "scripts/check_x.py")}),
-        consumer("o/b", **{"002": ("gate", "tools/check_x.py")}),
-    )
-    picture = family.picture(document)
-    assert picture["shared"] == 1
-    assert picture["closed_by_shared"] == 2
-
-
-def test_a_mechanism_of_one_project_is_not_shared(tmp_path: Path) -> None:
-    """Домашний механизм общим не считается, сколько бы правил ни держал.
-
-    Восемнадцать правил у одного проекта — не повод выносить: они про его
-    предмет. Число говорит, где смотреть, а не что делать.
-    """
-    document = summary(consumer("o/a", **{"001": ("gate", "scripts/own.py")}))
-    assert family.picture(document)["shared"] == 0
-
-
 def test_documents_are_not_mechanisms(tmp_path: Path) -> None:
     """Документ механизмом не считается: его некуда выносить.
 
@@ -82,34 +61,8 @@ def test_documents_are_not_mechanisms(tmp_path: Path) -> None:
         consumer("o/b", **{"002": ("document", "CLAUDE.md")}),
     )
     picture = family.picture(document)
-    assert picture["mechanisms"] == 0
     assert picture["held_by_machine"] == 0
-
-
-def test_an_answer_without_an_address_is_not_counted() -> None:
-    """Ответ без разрешимого адреса в счёт не идёт: механизма там может и не быть.
-
-    Гейт, чей адрес нельзя назвать, обычно и не гейт — это замер каталога на
-    собственных ответах, и здесь он даёт то же: считать такое значило бы
-    считать прозу.
-    """
-    document = summary(consumer("o/a", **{"001": ("gate", "держится всеми скриптами разом")}))
-    assert family.picture(document)["mechanisms"] == 0
-
-
-def test_the_share_is_of_machine_held_only() -> None:
-    """Доля считается от машинного соблюдения, а не от всех ответов подряд.
-
-    Знаменатель со всеми видами включал бы документы и занижал долю вдвое —
-    мерило «окупается ли общий модуль» показывало бы не то.
-    """
-    document = summary(
-        consumer("o/a", **{"001": ("gate", "scripts/x.py"), "002": ("document", "CLAUDE.md")}),
-        consumer("o/b", **{"003": ("gate", "scripts/x.py")}),
-    )
-    picture = family.picture(document)
-    assert picture["held_by_machine"] == 2
-    assert picture["share"] == 1.0
+    assert picture["adopted"]["of"] == 0
 
 
 def test_an_empty_summary_is_an_input_error(tmp_path: Path) -> None:
@@ -147,7 +100,8 @@ def test_an_unparsed_summary_gives_the_reader_a_reason_not_a_trace(
     path = tmp_path / "summary.json"
     path.write_text("{не json", encoding="utf-8")
     answer = facts.family_facts(path)
-    assert answer == {"read": False, "why": facts.NO_FAMILY}
+    assert answer["read"] is False and answer["why"] == facts.NO_FAMILY
+    assert answer["uptake"]["read"] is False, "непрочитанный обход выдан числом"
     assert str(path) in capsys.readouterr().err, "подробность отказа потеряна"
 
 
@@ -205,16 +159,6 @@ def test_a_matching_schema_says_nothing(tmp_path: Path, capsys: pytest.CaptureFi
     path = written(tmp_path, summary(consumer("o/a", **{"001": ("gate", "scripts/x.py")})))
     facts.main(["--family", str(path), "--out", str(tmp_path / "out"), "--repo", "o/r"])
     assert "форма сводки" not in capsys.readouterr().err
-
-
-def test_the_top_is_ordered_by_rules(tmp_path: Path) -> None:
-    """В верхушке сначала те, кто держит больше правил: разрез про это и есть."""
-    document = summary(
-        consumer("o/a", **{"1": ("gate", "a.py"), "2": ("gate", "b.py"), "3": ("gate", "b.py")}),
-        consumer("o/b", **{"4": ("gate", "a.py"), "5": ("gate", "b.py")}),
-    )
-    top = family.picture(document)["top"]
-    assert [item["name"] for item in top] == ["b.py", "a.py"]
 
 
 def test_no_second_collector_is_started() -> None:
@@ -275,10 +219,84 @@ def test_the_family_badge_says_when_it_has_no_data() -> None:
     assert facts.family_badge({}).message == "нет данных"
 
 
-def test_the_family_badge_shows_the_measure_of_the_epic() -> None:
-    """Доля общих механизмов — прямое мерило «второго исхода» эпика #2."""
-    said = facts.family_badge({"family": {"share": 0.276, "consumers": 6}})
-    assert said.message == "28% семьи"
+def test_the_family_badge_shows_calls_steps_and_gates() -> None:
+    """Значок несёт три числа с числителем и знаменателем (#1199, решение 07.10.2026)."""
+    said = facts.family_badge(
+        {
+            "family": {
+                "read": True,
+                "adopted": {"ours": 2, "of": 800, "by": []},
+                "uptake": {
+                    "read": True,
+                    "projects": {"took": 1, "of": 5, "unread": 0, "unread_repos": []},
+                    "steps": {"taken": 3, "of": 20, "names": []},
+                },
+            }
+        }
+    )
+    assert said.message == "1/5 проектов · 3/20 шагов · гейт 2/800 правил"
+
+
+def test_an_unread_clone_is_named_on_the_badge_not_counted_as_zero() -> None:
+    """Непрочитанные клоны названы числом рядом, а не спрятаны в знаменатель (045)."""
+    said = facts.family_badge(
+        {
+            "family": {
+                "read": False,
+                "uptake": {
+                    "read": True,
+                    "projects": {"took": 0, "of": 5, "unread": 2, "unread_repos": ["a", "b"]},
+                    "steps": {"taken": 0, "of": 20, "names": []},
+                },
+            }
+        }
+    )
+    assert said.message == "0/5 проектов (2 не прочитано) · 0/20 шагов · гейт: нет данных"
+
+
+def test_an_unread_sweep_is_not_a_zero_on_the_badge() -> None:
+    """Обход не прочитан — «вызовы не прочитаны», а не «0/5» (045)."""
+    said = facts.family_badge(
+        {"family": {"read": True, "adopted": {"ours": 0, "of": 9}, "uptake": {"read": False}}}
+    )
+    assert said.message == "вызовы не прочитаны · гейт 0/9 правил"
+
+
+# --- взяли гейт: объявленное происхождение ---------------------------------
+
+
+def declared(repo: str, **holds: tuple[str, str, str]) -> dict[str, Any]:
+    """Потребитель формы 1.6: правило → вид, origin и origin_kind."""
+    return {
+        "repo": repo,
+        "holds": {
+            rule: {"mechanism": kind, "where": "x.py", "origin": origin, "origin_kind": how}
+            for rule, (kind, origin, how) in holds.items()
+        },
+    }
+
+
+def test_a_gate_of_our_origin_is_adopted_and_a_namesake_is_not() -> None:
+    """Засчитан гейт, чей origin ведёт к нам; одноимённая копия без origin — нет (#1199)."""
+    ours = f"{family.OURS_ORIGIN}scripts/check_x.py@v1.4.0"
+    document = summary(
+        declared("o/a", **{"001": ("gate", ours, "called")}),
+        declared("o/b", **{"002": ("gate", "", "")}),
+        declared("o/c", **{"003": ("gate", "o/other:scripts/check_x.py@v1", "copied")}),
+    )
+    adopted = family.picture(document)["adopted"]
+    assert adopted["ours"] == 1 and adopted["of"] == 3
+    assert adopted["by"] == [{"repo": "o/a", "rule": "001", "origin": ours, "kind": "called"}]
+
+
+def test_our_own_answers_are_not_counted_as_adopted() -> None:
+    """Мерило о семье: свои ответы не входят ни в числитель, ни в знаменатель."""
+    ours = f"{family.OURS_ORIGIN}scripts/x.py@v1"
+    document = summary(
+        declared(MINE, **{"001": ("gate", ours, "called")}),
+        declared("o/a", **{"002": ("document", ours, "called")}),
+    )
+    assert family.picture(document, mine=MINE)["adopted"] == {"ours": 0, "of": 0, "by": []}
 
 
 def test_the_version_badge_names_incompleteness() -> None:
@@ -358,7 +376,6 @@ def test_a_record_of_form_1_5_is_read_as_before() -> None:
         }
     )
     assert family.held_by_machine(said) == 1
-    assert set(family.mechanisms(said)) == {"check.py"}
 
 
 def test_every_summary_reader_is_declared() -> None:
@@ -383,3 +400,35 @@ def test_every_summary_reader_is_declared() -> None:
     assert found == family.SUMMARY_READERS, (
         f"читатели сводки в дереве {sorted(found)}, объявлено {sorted(family.SUMMARY_READERS)}"
     )
+
+
+def test_adopted_counts_only_machine_answers_of_the_family() -> None:
+    """Знаменатель «взяли гейт» — машинные ответы семьи; документ с нашим origin не в счёт."""
+    ours = f"{family.OURS_ORIGIN}scripts/x.py@v1"
+    document = summary(
+        declared("o/a", **{"001": ("gate", ours, "adapted"), "002": ("document", ours, "copied")}),
+    )
+    said = family.adopted(document)
+    assert (said["ours"], said["of"]) == (1, 1)
+    assert said["by"][0]["kind"] == "adapted"
+
+
+def test_uptake_facts_name_an_unread_sweep(tmp_path: Path) -> None:
+    """Числа обхода не пришли или не той формы — «не прочитано», а не ноль (045)."""
+    assert facts.uptake_facts(None) == {"read": False, "why": facts.NO_UPTAKE}
+    broken = tmp_path / "uptake.json"
+    broken.write_text('{"projects": {}}', encoding="utf-8")
+    assert facts.uptake_facts(broken)["read"] is False
+    good = tmp_path / "good.json"
+    good.write_text(
+        json.dumps(
+            {
+                "projects": {"took": 0, "of": 5, "unread": 0, "unread_repos": []},
+                "steps": {"taken": 0, "of": 20, "names": []},
+                "by": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    said = facts.uptake_facts(good)
+    assert said["read"] is True and said["steps"]["of"] == 20
