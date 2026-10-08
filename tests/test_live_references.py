@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import code_files, walk_deep
+from tests.conftest import code_files, load_script, walk, walk_deep
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Где живёт код, названо ОДИН раз — `paths.py::SOURCES`, — и читается отсюда.
@@ -166,10 +166,12 @@ TEST_ADDRESS_RE = re.compile(r"(?<![\w./-])tests/(?P<file>[\w/]+\.py)(?:::(?P<na
 #: Где живут адреса тестов: перечень корней (068), а не обход всего дерева.
 #: Код (`.py`) входит наравне с прозой — гейт `модуль.имя` выше адреса вида
 #: `tests/<файл>.py::имя` не ловит, — и `.rules/` тоже: гейт адресов ответов
-#: сверяет там имя файла, но не `::имя` (взгляд на #1224).
+#: сверяет там имя файла, но не `::имя` (взгляд на #1224). Корни КОДА не
+#: перечисляются заново, а берутся из `paths.py::SOURCES`, как у `SOURCES`
+#: выше: новый источник там иначе прошёл бы мимо этого гейта (071, взгляд на
+#: #1224).
 LIVE_ROOTS = (
-    "scripts",
-    "packages",
+    *(where.as_posix() for where in load_script("paths.py").SOURCES),
     "tests",
     ".claude",
     ".github",
@@ -184,13 +186,15 @@ LIVE_SUFFIXES = frozenset({".py", ".yml", ".yaml", ".md", ".json", ".sh", ".toml
 #: Не сверяются, с причиной (154): записи решений — история, ссылка там
 #: говорит, где лежало тогда. Выпущенный журнал вне корней по той же причине.
 HISTORY = ("docs/decisions/",)
-#: Адреса, мёртвые НАРОЧНО: проза называет их как несуществующие. Каждое
-#: исключение обязано быть заслуженным — адрес встречается и мёртв
-#: (`test_every_deliberately_dead_address_is_earned`).
-DELIBERATELY_DEAD: dict[str, str] = {
+#: Адреса, мёртвые НАРОЧНО: проза называет их как несуществующие. Значение —
+#: файлы, где адрес назван, и причина. Каждое исключение обязано быть
+#: заслуженным: адрес мёртв и стоит ИМЕННО в названных файлах — иначе причина
+#: устареет молча (044, взгляд на #1224;
+#: `test_every_deliberately_dead_address_is_earned`).
+DELIBERATELY_DEAD: dict[str, tuple[tuple[str, ...], str]] = {
     "tests/test_journal.py": (
-        "`check_journal.py` и `test_messages_point_somewhere.py` называют его как сторож, "
-        "которого не существует — находка о самом его отсутствии"
+        ("scripts/check_journal.py", "tests/test_messages_point_somewhere.py"),
+        "называют его как сторож, которого не существует — находка о самом его отсутствии",
     ),
 }
 
@@ -249,12 +253,19 @@ def defined_in(path: Path) -> set[str]:
     }
 
 
-def dead_test_addresses(text: str) -> list[str]:
-    """Адреса тестов в тексте, которые ведут в пустоту: нет файла или имени в нём."""
+def dead_test_addresses(text: str, where: str = "") -> list[str]:
+    """Адреса тестов в тексте `where`, которые ведут в пустоту: нет файла или имени в нём.
+
+    Нарочно мёртвый адрес прощается только в местах, названных в
+    `DELIBERATELY_DEAD`: ключ исключения — пара «адрес и место», а не один адрес.
+    Иначе третий файл, назвавший того же несуществующего сторожа живым, прошёл
+    бы молча (взгляд на #1230).
+    """
     dead = []
     for found in TEST_ADDRESS_RE.finditer(text):
         path = ROOT / "tests" / found.group("file")
-        if found.group(0) in DELIBERATELY_DEAD:
+        excused = DELIBERATELY_DEAD.get(found.group(0))
+        if excused and where in excused[0]:
             continue
         if not path.is_file():
             dead.append(f"{found.group(0)} — нет файла")
@@ -317,15 +328,55 @@ def test_every_test_address_is_alive() -> None:
     for path in live_files():
         text = prose_of(path)
         seen += len(TEST_ADDRESS_RE.findall(text))
-        dead += [f"{path.relative_to(ROOT)}: {one}" for one in dead_test_addresses(text)]
+        place = path.relative_to(ROOT).as_posix()
+        dead += [f"{place}: {one}" for one in dead_test_addresses(text, place)]
     assert seen, "адресов тестов в дереве нет — предмет проверки не найден (075)"
     assert not dead, "адреса тестов ведут в пустоту:\n  " + "\n  ".join(dead)
 
 
+def test_a_deliberately_dead_address_is_excused_only_in_its_places() -> None:
+    """Тот же мёртвый адрес вне названных мест — мёртв (взгляд на #1230)."""
+    said = "сторож `tests/test_journal.py`"
+    assert dead_test_addresses(said, "scripts/check_journal.py") == []
+    assert len(dead_test_addresses(said, "docs/новый.md")) == 1
+
+
+def test_every_package_is_a_declared_source() -> None:
+    """Каждый пакет в `packages/` назван в `paths.py::SOURCES` (взгляд на #1230).
+
+    Корни кода этот гейт берёт из `SOURCES`, а не из всего `packages/`: пакет,
+    положенный туда без записи, выпал бы из сверки адресов молча. Сверка держит
+    обе стороны — и `SOURCES` как единственный перечень, и полноту сверки.
+    """
+    declared = {where.as_posix() for where in load_script("paths.py").SOURCES}
+    packages = sorted(
+        one.relative_to(ROOT).as_posix()
+        for one in walk(ROOT / "packages")
+        if one.is_dir() and walk_deep(one, "*.py")
+    )
+    assert packages, "пакетов нет — предмет сверки не найден (075)"
+    missing = [one for one in packages if one not in declared]
+    assert not missing, f"пакеты вне `paths.py::SOURCES`: {missing}"
+
+
+def addresses_in(text: str) -> set[str]:
+    """Адреса тестов в тексте — тем же образцом, что судит гейт, а не подстрокой."""
+    return {found.group(0) for found in TEST_ADDRESS_RE.finditer(text)}
+
+
+def test_an_address_inside_another_is_not_a_meeting() -> None:
+    """Чужой `tests/` и адрес с именем не засчитываются встречей адреса файла."""
+    said = "`packages/x/tests/test_journal.py` и `tests/test_journal.py::x`"
+    assert "tests/test_journal.py" not in addresses_in(said)
+    assert "tests/test_journal.py" in addresses_in("называет `tests/test_journal.py`")
+
+
 def test_every_deliberately_dead_address_is_earned() -> None:
-    """Нарочно мёртвый адрес встречается в дереве и действительно мёртв (044, 075)."""
-    prose = "\n".join(prose_of(path) for path in live_files())
-    for address, why in DELIBERATELY_DEAD.items():
-        assert why.strip(), f"{address}: исключение без причины (154)"
-        assert address in prose, f"{address}: исключать нечего — адреса в дереве нет"
+    """Нарочно мёртвый адрес мёртв и стоит в каждом названном файле (044, 075)."""
+    for address, (where, why) in DELIBERATELY_DEAD.items():
+        assert why.strip() and where, f"{address}: исключение без мест и причины (154)"
         assert not (ROOT / address).exists(), f"{address}: адрес жив, исключение не нужно"
+        for named in where:
+            assert address in addresses_in(prose_of(ROOT / named)), (
+                f"{address}: в `{named}` адреса нет — причина исключения устарела"
+            )

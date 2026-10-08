@@ -570,7 +570,7 @@ class Broken(Answer):
     [
         http.client.InvalidURL("нет хоста"),
         http.client.LineTooLong("заголовок"),
-        http.client.BadStatusLine("SSH-2.0-OpenSSH"),
+        http.client.BadStatusLine("SSH-2.0-OpenSSH\r\n"),
     ],
     ids=["InvalidURL", "LineTooLong", "BadStatusLine — ответ не по HTTP"],
 )
@@ -592,8 +592,79 @@ def test_a_malformed_answer_is_named_and_not_retried(
     assert asked == 1, f"ошибку формы повторили {asked} раз"
 
 
+def test_a_status_line_cut_short_is_retried_as_a_drop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Оборванная строка статуса — обрыв: чтение повторяется, как при любом обрыве (#1223)."""
+    asked = 0
+
+    def opener(*_args: object, **_kwargs: object) -> Any:
+        nonlocal asked
+        asked += 1
+        raise http.client.BadStatusLine("HTTP/1.1")
+
+    monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
+    with pytest.raises(transport.TransportError) as caught:
+        transport.request("GET", "/x", "t")
+    assert "не той формы" not in str(caught.value), caught.value
+    assert asked == transport.TRIES, f"обрыв повторён {asked} раз из {transport.TRIES}"
+
+
+class Unframed(Answer):
+    """Ответ без длины и без `chunked`: так `http.client` видит обрыв после строки статуса."""
+
+    length = None
+    chunked = False
+
+
+def test_an_empty_unframed_answer_is_retried_as_a_drop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пустое необрамлённое тело — обрыв, а не «пустой ответ» (взгляд на #1229)."""
+    asked = 0
+
+    def opener(*_args: object, **_kwargs: object) -> Any:
+        nonlocal asked
+        asked += 1
+        return Unframed(b"")
+
+    monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
+    with pytest.raises(transport.TransportError):
+        transport.request("GET", "/x", "t")
+    assert asked == transport.TRIES, f"обрыв повторён {asked} раз из {transport.TRIES}"
+    with pytest.raises(transport.TransportError, match="снимок не прочитан"):
+        transport.raw_text("https://example.org/x.json")
+
+
+def test_framing_is_read_from_the_real_http_client() -> None:
+    """Обрыв после строки статуса и посреди заголовков — без рамки; 204 и длина 0 — в рамке."""
+    import io
+
+    class Socket:
+        def __init__(self, raw: bytes) -> None:
+            self.raw = raw
+
+        def makefile(self, *_args: object, **_kwargs: object) -> io.BytesIO:
+            return io.BytesIO(self.raw)
+
+    def begun(raw: bytes) -> http.client.HTTPResponse:
+        response = http.client.HTTPResponse(Socket(raw), method="GET")  # type: ignore[arg-type]
+        response.begin()
+        return response
+
+    for raw in (b"HTTP/1.1 200 OK\r\n", b"HTTP/1.1 200 OK\r\nContent-Ty"):
+        assert transport._unframed(begun(raw)), f"{raw!r}: обрыв назван обрамлённым"
+    for raw in (
+        b"HTTP/1.1 204 No Content\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+    ):
+        assert not transport._unframed(begun(raw)), f"{raw!r}: обрамлённый назван обрывом"
+    assert not transport._unframed(Answer(b"")), "подделка без полей обязана быть обрамлённой"
+
+
 def test_an_empty_status_line_is_a_drop_and_not_a_malformed_answer() -> None:
-    """Пустая строка статуса — обрыв, непустая не той формы — ошибка формы (взгляд на #1214).
+    """Пустая и оборванная строка статуса — обрыв, целая не той формы — ошибка формы.
+
+    Взгляды на #1214 и #1223: граница — перевод строки, а не содержимое.
 
     Сверяется с настоящим `http.client`, а не с подделкой: `BadStatusLine("")`
     он не бросает вовсе — пустую строку называет `RemoteDisconnected`.
@@ -615,9 +686,13 @@ def test_an_empty_status_line_is_a_drop_and_not_a_malformed_answer() -> None:
         raise AssertionError(f"{raw!r}: ответ разобран без отказа")
 
     assert isinstance(said(b""), transport._DROPPED)
-    for raw in (b"SSH-2.0-OpenSSH\r\n", b"HTTP/1.1 abc OK\r\n"):
+    for raw in (b"HTTP/1.1", b"HTT", b"SSH-2.0"):
+        failure = said(raw)
+        assert transport._cut_short(failure), f"{raw!r}: оборванная строка не названа обрывом"
+    for raw in (b"SSH-2.0-OpenSSH\r\n", b"HTTP/1.1 abc OK\r\n", b"garbage\n"):
         failure = said(raw)
         assert not isinstance(failure, transport._DROPPED), f"{raw!r} назван обрывом"
+        assert not transport._cut_short(failure), f"{raw!r}: целая строка названа обрывом"
         assert isinstance(failure, transport._MALFORMED)
 
 
