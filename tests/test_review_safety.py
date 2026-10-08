@@ -1770,12 +1770,13 @@ def test_the_task_says_the_list_is_closed(path: Path) -> None:
 
 #: Задания, которые пишут НАХОДКИ: только им нужен предел находки. Разбор
 #: пунктов (`step-task-items.yml`) находок не пишет — его ответ разбирает
-#: `task_items.py` построчно, и предела `findings.SAID_LIMIT` у него нет. Это
-#: исключение с причиной, а не пропуск (195).
+#: `task_items.py` построчно, и предела `findings.SAID_LIMIT` у него нет. Срок
+#: захода при этом нужен ВСЕМ заданиям: исключение сужено до предела находки,
+#: а не до гейта целиком (195; взгляд на #1219 — первая редакция снимала и срок).
 WRITES_FINDINGS: Final = [path for path in AGENT_WORKFLOWS if path.name != "step-task-items.yml"]
 
 
-@pytest.mark.parametrize("path", WRITES_FINDINGS, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_the_task_carries_its_numbers(path: Path) -> None:
     """В задании стоят ЧИСЛА, и оба взяты из своих канонических мест.
 
@@ -1801,7 +1802,7 @@ def test_the_task_carries_its_numbers(path: Path) -> None:
             args = step["with"]["claude_args"]
             appended = re.search(r'--append-system-prompt\s+"([^"]+)"', args)
             task = str(step["with"].get("prompt") or "") + (appended.group(1) if appended else "")
-            assert str(FINDING_LIMIT) in task, (
+            assert path not in WRITES_FINDINGS or str(FINDING_LIMIT) in task, (
                 f"{path.name}, «{name}»: предел размера ответа в задании не назван — "
                 f"канон `findings.SAID_LIMIT` = {FINDING_LIMIT}"
             )
