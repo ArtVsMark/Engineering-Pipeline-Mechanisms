@@ -188,17 +188,18 @@ IDEMPOTENT: Final = frozenset({"enablePullRequestAutoMerge", "disablePullRequest
 
 
 #: Обрыв уже во время ответа: `urlopen` не заворачивает его в `URLError` (#1205).
-#: Четыре рода: ответ HTTP оборван (`IncompleteRead`; `BadStatusLine` и его
-#: `RemoteDisconnected` — пустая или обрезанная строка статуса), сокет сброшен,
-#: чтение вышло по таймауту, поток TLS оборван (`SSLEOFError` — `OSError`, но
-#: не `ConnectionError`). Сбой рукопожатия сюда не доходит: он случается при
-#: соединении, и его `urlopen` уже завернул. ПЕРЕЧЕНЬ, А НЕ ВЕСЬ
-#: `HTTPException`: в нём и ошибки ФОРМЫ — `InvalidURL`, `LineTooLong`, — а их
-#: повтор трижды назвал бы «площадка недоступна» то, что от связи не зависит
-#: (взгляд на #1206, 045). Они — `_MALFORMED`.
+#: Четыре рода: ответ HTTP оборван (`IncompleteRead`; пустая строка статуса —
+#: `RemoteDisconnected`, он же `ConnectionResetError`, и потому ловится
+#: `ConnectionError`), сокет сброшен, чтение вышло по таймауту, поток TLS
+#: оборван (`SSLEOFError` — `OSError`, но не `ConnectionError`). Сбой
+#: рукопожатия сюда не доходит: он случается при соединении, и его `urlopen`
+#: уже завернул. ПЕРЕЧЕНЬ, А НЕ ВЕСЬ `HTTPException`: в нём и ошибки ФОРМЫ —
+#: `InvalidURL`, `LineTooLong` и сам `BadStatusLine` с непустой строкой (ответ
+#: не по HTTP, нечисловой код), — а их повтор трижды назвал бы «площадка
+#: недоступна» то, что от связи не зависит (взгляды на #1206 и #1214, 045).
+#: Они — `_MALFORMED`.
 _DROPPED: Final = (
     http.client.IncompleteRead,
-    http.client.BadStatusLine,
     ConnectionError,
     TimeoutError,
     ssl.SSLError,
@@ -463,14 +464,17 @@ def raw_text(url: str, timeout: int = 30) -> str:
     один на всех означал бы, что транспорт знает форму чужих данных. Транспорт
     её знать не должен: он про доставку (090).
     """
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
+        # Запрос собирается ВНУТРИ `try`: адрес без схемы — `ValueError` уже
+        # здесь, и он тоже отказ, а не трейсбек (взгляд на #1214).
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=timeout) as answer:
             return str(answer.read().decode("utf-8"))
     # Обрыв на чтении и ответ не той формы — тот же отказ, что сбой соединения
     # (#1205): без них `IncompleteRead` и `BadStatusLine` летели трейсбеком
     # мимо `TransportError` (взгляд на #1206). Повтора у снимка нет — он один.
-    except (urllib.error.URLError, OSError, UnicodeDecodeError, *_DROPPED, _MALFORMED) as exc:
+    # `ValueError` покрывает и адрес не той формы, и `UnicodeDecodeError`.
+    except (urllib.error.URLError, OSError, ValueError, *_DROPPED, _MALFORMED) as exc:
         raise TransportError(f"снимок не прочитан ({url}): {exc!r}") from exc
 
 

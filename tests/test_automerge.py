@@ -1497,6 +1497,79 @@ def test_a_waiting_head_holds_the_queue_by_step(
         assert "PR_2" in armed, "сосед своей ступени не взведён — задержан ждущей головой"
 
 
+#: Все формы, в которых голова ждёт ВЕРДИКТА взгляда: как их собрать на стенде.
+#: Перечень, а не очередная форма (210): находки на #1203 и #1216 называли их
+#: по одной, и каждая следующая оказывалась непокрытой.
+WAITING_FORMS: dict[str, dict[str, Any]] = {
+    "отставшая": {"states": {1: module.STATE_BEHIND}, "looking": {1}},
+    "актуальная": {"looking": {1}},
+    "взгляд пропущен воротами": {"owed": {1: "777"}},
+}
+
+
+@pytest.mark.parametrize("form", sorted(WAITING_FORMS))
+@pytest.mark.parametrize(
+    ("head", "held"),
+    [(("automerge",), False), (("automerge", "blocker"), True)],
+    ids=["та же ступень — сливается", "ступень ниже — ждёт"],
+)
+def test_every_waiting_form_holds_the_queue_by_step(
+    platform: dict[str, Any], form: str, head: tuple[str, ...], held: bool
+) -> None:
+    """Каждая форма ожидания вердикта держит ступень одинаково (взгляд на #1216).
+
+    Сосед зелёный (`clean`): своей ступени он СЛИВАЕТСЯ мимо ждущей головы, а
+    не только взводится; ступенью ниже — не сливается и не взводится.
+    """
+    platform["changes"] = [change(1, *head), change(2, "automerge")]
+    for key, value in WAITING_FORMS[form].items():
+        platform[key] = value
+    module.advance("o/r", "token", "main", dry_run=False)
+    armed = [node for node, *_ in platform["asked"]]
+    if held:
+        assert platform["merged"] == [], "соседа ступенью ниже слили мимо ждущей головы"
+        assert "PR_2" not in armed, "соседа ступенью ниже взвели мимо ждущей головы"
+    else:
+        assert platform["merged"] == [2], "сосед своей ступени задержан ждущей головой"
+
+
+def test_a_held_neighbour_with_an_owed_look_is_not_moved(platform: dict[str, Any]) -> None:
+    """Менее важный сосед, которому ворота пропустили взгляд, ждёт голову выше (взгляд на #1216)."""
+    platform["changes"] = [change(1, "automerge", "blocker"), change(2, "automerge", armed=True)]
+    platform["looking"] = {1}
+    platform["owed"] = {2: "777"}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["merged"] == []
+    assert platform["disarmed"] == ["PR_2"], "взведённый сосед ниже оставлен площадке"
+
+
+def test_a_same_step_neighbour_is_not_named_the_head_of_the_queue(
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Сосед ступени, подтягиваемый мимо ждущей головы, не назван головой очереди (#1216)."""
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    platform["states"] = {2: module.STATE_BEHIND}
+    platform["looking"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    said = capsys.readouterr().out
+    assert platform["synced"] == [2]
+    assert "#2: сосед ступени ждущей головы отстал от базы" in said, said
+    assert "#2: голова очереди" not in said, said
+
+
+def test_a_head_waiting_for_a_fix_does_not_hold_the_step(platform: dict[str, Any]) -> None:
+    """Голова, ждущая починки находок, ступень не держит — с причиной (195).
+
+    Она ждёт толчка окна, а не вердикта взгляда: решение владельца 08.10.2026
+    о держании по ступени её не касается. Исключение названо и здесь, и у
+    `waiting_rank`, чтобы следующая находка не открыла его заново.
+    """
+    platform["changes"] = [change(1, "automerge", "blocker"), change(2, "automerge")]
+    platform["holding"] = {1}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["merged"] == [2]
+
+
 @pytest.mark.parametrize("looking", [True, False], ids=["ждёт взгляда", "подтягивается"])
 def test_a_refusal_above_is_kept_by_the_exit_of_a_behind_head(
     platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, looking: bool
