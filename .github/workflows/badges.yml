@@ -171,11 +171,31 @@ jobs:
               echo "::warning::Набор не прошёл под счётчиком (код $rc) — покрытие будет объявлено непрочитанным."
               ;;
           esac
+      # КТО ИЗ СЕМЬИ ЗОВЁТ НАШИ ШАГИ — обходом клонов, а не совпадением имён
+      # (#1199). Клоны — сеть, поэтому обход отдельным шагом, а сборка фактов
+      # читает его файл. Код 3 — часть клонов не прочитана: числа есть и
+      # непрочитанные в них названы; иной ненулевой — файла нет, и факты
+      # скажут «не прочитано», а не ноль (045). Свой предел времени: клон ждёт
+      # до 120 с, и повисшие соседи иначе сняли бы весь джоб вместе с фактами;
+      # снятый по пределу шаг файла не оставит — это то же «не прочитано».
+      - name: обойти клоны семьи
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/family_uptake.py --summary "${RUNNER_TEMP}/where.json" \
+            --out "${RUNNER_TEMP}/uptake.json" || rc=$?
+          case "$rc" in
+            0|3) ;;
+            *) echo "::warning::обход клонов семьи не отработал (код $rc) — «взяли вызовом» не прочитано" ;;
+          esac
       - name: свои разделы — файлом для общего шага
         run: |
           python scripts/build_facts.py \
             --extra-out "${RUNNER_TEMP}/in/extra-facts.json" \
-            --family "${RUNNER_TEMP}/where.json"
+            --family "${RUNNER_TEMP}/where.json" \
+            --uptake "${RUNNER_TEMP}/uptake.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: facts-inputs

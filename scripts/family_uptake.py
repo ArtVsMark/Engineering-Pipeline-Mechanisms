@@ -36,6 +36,7 @@
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -46,6 +47,7 @@ from typing import Final
 
 import catalogue
 import ghrest
+import onboard
 import paths
 import report
 
@@ -54,10 +56,13 @@ EXIT_BROKEN: Final = 2
 EXIT_UNREAD: Final = 3
 
 #: Наш адрес в чужом прогоне. Ищется ВЫЗОВ, а не упоминание: имя проекта
-#: встречается и в прозе комментариев, и это не подключение (166).
+#: встречается и в прозе комментариев, и это не подключение (166). Регистр
+#: имени площадка не различает, и сравнение с ним везде без регистра.
 OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
 CALL_RE: Final = re.compile(
-    r"uses:\s*" + re.escape(OURS) + r"/\.github/workflows/(?P<step>[\w.-]+)\.ya?ml@(?P<ref>[\w.-]+)"
+    r"uses:\s*(?i:"
+    + re.escape(OURS)
+    + r")/\.github/workflows/(?P<step>[\w.-]+)\.ya?ml@(?P<ref>[\w.-]+)"
 )
 
 #: Что клонируется: только объявление прогонов. Остальное дерево соседа нам не
@@ -97,19 +102,30 @@ class Took:
         return f"- `{self.repo}` — {about}"
 
 
-def family(url: str = catalogue.WHERE_URL) -> list[str]:
-    """Репозитории семьи из выгрузки каталога, кроме нас самих."""
+def family(url: str = catalogue.WHERE_URL, local: Path | None = None) -> list[str]:
+    """Репозитории семьи из выгрузки каталога, кроме нас самих.
+
+    ``local`` — уже скачанная сводка: прогон значков берёт её один раз и
+    отдаёт и разрезу, и обходу, чтобы оба считали по одному снимку (022).
+    """
     try:
-        said = ghrest.raw_json(url)
-    except ghrest.TransportError as exc:
+        if local is not None:
+            said = json.loads(local.read_text(encoding="utf-8"))
+        else:
+            said = ghrest.raw_json(url)
+    except (ghrest.TransportError, OSError, ValueError) as exc:
         raise NotRun(f"сводка семьи не прочитана: {exc}") from exc
+    if not isinstance(said, dict):
+        raise NotRun("сводка семьи не словарём — форма не узнана (075)")
     rows = said.get("consumers")
     if not isinstance(rows, list) or not rows:
         raise NotRun("в сводке семьи нет ни одного проекта — обходить некого (075)")
     found = [
         str(one["repo"])
         for one in rows
-        if isinstance(one, dict) and one.get("repo") and str(one["repo"]) != OURS
+        if isinstance(one, dict)
+        and one.get("repo")
+        and str(one["repo"]).casefold() != OURS.casefold()
     ]
     if not found:
         raise NotRun(f"в сводке семьи только мы сами ({OURS}) — обходить некого (075)")
@@ -228,16 +244,62 @@ def report_lines(seen: list[Took], unread: list[str]) -> list[str]:
     return lines
 
 
+def offered_names(called: tuple[str, ...]) -> list[str]:
+    """Имена позванных файлов шагов в форме `onboard.steps` — без приставки `step-`."""
+    return [
+        name[len(onboard.STEP_PREFIX) :] for name in called if name.startswith(onboard.STEP_PREFIX)
+    ]
+
+
+def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str, object]:
+    """Числа «взяли вызовом» для фактов: проекты и шаги, с числителем и знаменателем.
+
+    Решение владельца 07.10.2026 (#1199). Знаменатель проектов — вся семья без
+    нас, и непрочитанный клон в нём есть, но в «взял» не засчитан и назван
+    поимённо: незнание — не «не взял» (045). Знаменатель шагов — то, что мы
+    отдаём наружу (`onboard.steps`), а не то, что кто-то позвал: позванный, но
+    не отдаваемый шаг в числитель не идёт — ни шагов, ни проектов.
+    """
+    # ИМЕНА ПРИВОДЯТСЯ К ОДНОЙ ФОРМЕ. Вызов называет файл (`step-lint`), а
+    # отдаваемое — шаг без приставки (`lint`, `onboard.steps`): сравнение как
+    # есть давало пустое пересечение всегда (взгляд на #1241).
+    offers = set(offered)
+    takers = [one for one in seen if offers & set(offered_names(one.steps))]
+    taken = sorted({step for one in takers for step in offered_names(one.steps)} & offers)
+    return {
+        "projects": {
+            "took": len(takers),
+            "of": len(seen) + len(unread),
+            "unread": len(unread),
+            "unread_repos": sorted(unread),
+        },
+        "steps": {"taken": len(taken), "of": len(offered), "names": taken},
+        "by": [
+            {"repo": one.repo, "steps": list(one.steps), "refs": list(one.refs)} for one in takers
+        ],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: обходит клоны семьи и печатает, кто что взял."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--where", help="готовый каталог с клонами; по умолчанию временный")
+    parser.add_argument("--summary", help="уже скачанная сводка семьи where.json")
+    parser.add_argument("--out", help="куда положить числа для фактов (JSON)")
+    parser.add_argument("--root", default=".", help="наше дерево: отсюда берутся отдаваемые шаги")
     args = parser.parse_args(argv)
 
     try:
-        repos = family()
+        repos = family(local=Path(args.summary) if args.summary else None)
+        offered = onboard.steps(Path(args.root))
     except NotRun as exc:
         print(f"обход не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    if not offered:
+        print(
+            "обход не отработал: отдаваемых шагов не найдено — знаменателя нет (075)",
+            file=sys.stderr,
+        )
         return EXIT_BROKEN
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -245,6 +307,11 @@ def main(argv: list[str] | None = None) -> int:
 
     for line in report_lines(seen, unread):
         print(line)
+    if args.out:
+        Path(args.out).write_text(
+            json.dumps(uptake(seen, unread, offered), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     return EXIT_UNREAD if unread else EXIT_OK
 
 
