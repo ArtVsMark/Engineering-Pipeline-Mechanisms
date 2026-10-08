@@ -418,8 +418,14 @@ def test_the_strip_runs_only_in_the_providers_own_repository(
     assert step["env"]["CALLER"] == "${{ github.workflow_ref }}"
 
 
-def queued_callers() -> list[tuple[str, str, dict[str, Any], dict[str, Any]]]:
-    """Вызовы наших шагов, стоящие в группе: (файл, джоб, джоб вызова, шаг)."""
+def queued_callers() -> list[tuple[str, str, bool, dict[str, Any], dict[str, Any]]]:
+    """Вызовы наших шагов, стоящие в группе: (файл, джоб, группа прогона?, вызов, шаг).
+
+    ГРУППА ПРОГОНА — НЕ ТО ЖЕ, ЧТО ГРУППА ДЖОБА. Прогон занимает свою группу
+    ещё до того, как вычислен `if` любого его джоба, — условие у вызова от
+    вытеснения там не защищает (взгляд на #1208). Поэтому место группы
+    передаётся дальше, а не сливается с группой джоба.
+    """
     found = []
     for path in walk(STEPS, "*.yml"):
         flow = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -428,32 +434,50 @@ def queued_callers() -> list[tuple[str, str, dict[str, Any], dict[str, Any]]]:
             if not uses.startswith("./") or not (job.get("concurrency") or flow.get("concurrency")):
                 continue
             step = yaml.safe_load((ROOT / uses).read_text(encoding="utf-8"))
-            found.append((path.name, name, job, step))
+            found.append((path.name, name, not job.get("concurrency"), job, step))
     return found
 
 
 def test_a_queued_caller_is_measured() -> None:
-    """Предмет есть: хотя бы один вызов шага стоит в группе — иначе проверка пуста (075)."""
-    assert queued_callers(), "вызовов шага в группе не найдено — предмет проверки пропал"
+    """Предмет есть: вызов шага в группе джоба есть — иначе проверка пуста (075)."""
+    assert any(not whole for _, _, whole, _, _ in queued_callers()), (
+        "вызовов шага в группе джоба не найдено — предмет проверки пропал"
+    )
 
 
 @pytest.mark.parametrize(
-    ("caller", "job", "called", "step"),
+    ("caller", "job", "whole", "called", "step"),
     [pytest.param(*one, id=f"{one[0]}:{one[1]}") for one in queued_callers()],
 )
 def test_a_queue_does_not_take_what_the_step_skips(
-    caller: str, job: str, called: dict[str, Any], step: dict[str, Any]
+    caller: str, job: str, whole: bool, called: dict[str, Any], step: dict[str, Any]
 ) -> None:
     """Условие шага стоит и у вызова в группе — до группы, а не только внутри неё.
 
     Группа держит одно ожидающее место, и новый ожидающий вытесняет прежнего.
     Событие, которое шаг всё равно пропустит, вставшее в очередь, снимало бы
     ожидающий настоящий прогон: так было у `task-items` — незлитое закрытие
-    против разбора слитого (взгляд на #1186).
+    против разбора слитого (взгляд на #1186). У группы ПРОГОНА условие джоба
+    не спасает вовсе: шаг с условием там — красное, условие уходит в события.
     """
     said = " ".join(str(called.get("if") or "").split())
     for name, inner in step["jobs"].items():
         wanted = " ".join(str(inner.get("if") or "").split())
-        assert not wanted or wanted == said, (
+        if not wanted:
+            continue
+        assert not whole, (
+            f"{caller}:{job} — шаг `{name}` с условием «{wanted}» стоит в группе ПРОГОНА: "
+            "её занимают до условия джоба — сузьте события или перенесите группу в джоб"
+        )
+        assert wanted == said, (
             f"{caller}:{job} — у шага `{name}` условие «{wanted}», у вызова «{said}»"
         )
+
+
+def test_a_run_group_does_not_pass_on_a_matching_condition() -> None:
+    """Совпавшее условие не спасает группу прогона: её занимают до `if` джоба (#1208)."""
+    condition = "github.event.pull_request.merged == true"
+    step = {"jobs": {"inner": {"if": condition}}}
+    with pytest.raises(AssertionError, match="группе ПРОГОНА"):
+        test_a_queue_does_not_take_what_the_step_skips("x.yml", "j", True, {"if": condition}, step)
+    test_a_queue_does_not_take_what_the_step_skips("x.yml", "j", False, {"if": condition}, step)
