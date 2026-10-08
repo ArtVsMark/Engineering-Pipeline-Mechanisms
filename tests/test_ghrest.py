@@ -519,6 +519,7 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         TimeoutError("таймаут чтения"),
         http.client.IncompleteRead(b"", 10),
         ssl.SSLEOFError("EOF occurred in violation of protocol"),
+        http.client.BadStatusLine(""),
     ],
     ids=[
         "RemoteDisconnected",
@@ -526,6 +527,7 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         "TimeoutError",
         "IncompleteRead",
         "SSLEOFError",
+        "BadStatusLine",
     ],
 )
 def test_a_response_dropped_midway_is_the_same_broken_connection(
@@ -536,19 +538,70 @@ def test_a_response_dropped_midway_is_the_same_broken_connection(
     `urlopen` заворачивает в `URLError` лишь сбой соединения: обрыв на чтении
     ответа летел голым исключением — трейсбек вместо повтора (замер на #1203).
     """
-    for method, expected in (("GET", transport.TRIES), ("POST", 1)):
-        asked = 0
+    for where in ("при открытии", "при чтении тела"):
+        for method, expected in (("GET", transport.TRIES), ("POST", 1)):
+            asked = 0
 
-        def opener(*_args: object, **_kwargs: object) -> Any:
-            nonlocal asked
-            asked += 1
-            raise dropped
+            def opener(*_args: object, where: str = where, **_kwargs: object) -> Any:
+                nonlocal asked
+                asked += 1
+                if where == "при открытии":
+                    raise dropped
+                return Broken(dropped)
 
-        monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
-        monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
-        with pytest.raises(transport.TransportError):
-            transport.request(method, "/x", "t", {"тело": 1} if method == "POST" else None)
-        assert asked == expected, f"{method}: попыток {asked}, ожидалось {expected}"
+            monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+            monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
+            with pytest.raises(transport.TransportError):
+                transport.request(method, "/x", "t", {"тело": 1} if method == "POST" else None)
+            assert asked == expected, f"{where}, {method}: попыток {asked}, ожидалось {expected}"
+
+
+class Broken(Answer):
+    """Ответ, оборванный на чтении тела: настоящее место `IncompleteRead` (#1206)."""
+
+    def __init__(self, failure: Exception) -> None:
+        super().__init__()
+        self.failure = failure
+
+    def read(self) -> bytes:
+        raise self.failure
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [http.client.InvalidURL("нет хоста"), http.client.LineTooLong("заголовок")],
+    ids=["InvalidURL", "LineTooLong"],
+)
+def test_a_malformed_answer_is_named_and_not_retried(
+    monkeypatch: pytest.MonkeyPatch, malformed: Exception
+) -> None:
+    """Ошибка формы — не обрыв: одна попытка и названный отказ, а не «недоступна» (045)."""
+    asked = 0
+
+    def opener(*_args: object, **_kwargs: object) -> Any:
+        nonlocal asked
+        asked += 1
+        raise malformed
+
+    monkeypatch.setattr("ghrest.time.sleep", lambda _: None)
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", opener)
+    with pytest.raises(transport.TransportError, match="не той формы"):
+        transport.request("GET", "/x", "t")
+    assert asked == 1, f"ошибку формы повторили {asked} раз"
+
+
+@pytest.mark.parametrize(
+    "dropped",
+    [http.client.IncompleteRead(b"", 10), http.client.BadStatusLine("")],
+    ids=["IncompleteRead", "BadStatusLine"],
+)
+def test_a_snapshot_dropped_on_read_is_a_named_refusal(
+    monkeypatch: pytest.MonkeyPatch, dropped: Exception
+) -> None:
+    """Снимок, оборванный на чтении, — `TransportError`, а не трейсбек (взгляд на #1206)."""
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", lambda *_a, **_k: Broken(dropped))
+    with pytest.raises(transport.TransportError, match="снимок не прочитан"):
+        transport.raw_text("https://example.org/x.json")
 
 
 def test_the_number_of_tries_is_at_least_one() -> None:
