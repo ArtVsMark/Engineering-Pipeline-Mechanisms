@@ -1288,6 +1288,45 @@ def test_a_head_waits_for_the_look_before_it_is_armed(platform: dict[str, Any]) 
     assert platform["merged"] == [2], "голова, ждущая взгляда, слита или держит очередь"
 
 
+@pytest.mark.parametrize(
+    ("state", "said"),
+    [("dirty", "конфликтуют"), ("empty", "пусты")],
+    ids=["конфликт", "пусто"],
+)
+def test_a_held_neighbour_is_still_named(
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str], state: str, said: str
+) -> None:
+    """Держание по ступени запрещает двигать соседа, но не называть его (004, взгляд на #1216).
+
+    Конфликт менее важного публикуется источником работы, пустота называется
+    пустотой — и при ждущей голове важнее.
+    """
+    platform["changes"] = [change(1, "automerge", "blocker"), change(2, "automerge")]
+    platform["looking"] = {1}
+    if state == "empty":
+        platform["files_changed"] = {2: 0}
+    else:
+        platform["states"] = {2: module.STATE_CONFLICT}
+    module.advance("o/r", "token", "main", dry_run=False)
+    out = capsys.readouterr().out
+    assert said in out, f"держание спрятало «{said}» соседа:\n{out}"
+    assert "ждут головы важнее" not in out
+
+
+def test_a_current_waiting_head_holds_a_less_important_neighbour(
+    platform: dict[str, Any],
+) -> None:
+    """Актуальная ждущая голова тоже держит соседа ступенью ниже: держит важность (053).
+
+    Своей ступени сосед идёт мимо — это закрепляет тест выше о взведённой
+    голове; здесь — вторая половина правила.
+    """
+    platform["changes"] = [change(1, "automerge", "blocker"), change(2, "automerge")]
+    platform["looking"] = {1}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["merged"] == [], "сосед ступенью ниже слит мимо ждущей головы"
+
+
 def test_a_look_skipped_on_a_red_head_is_called_before_the_head_goes(
     platform: dict[str, Any],
 ) -> None:
@@ -1431,18 +1470,31 @@ def test_a_head_behind_the_base_waits_for_its_running_look(platform: dict[str, A
     assert platform["synced"] == []
 
 
-def test_a_waiting_head_takes_back_an_armed_neighbour(platform: dict[str, Any]) -> None:
-    """Пока голова ждёт взгляда, взведённый сосед снят: площадка не сольёт его мимо очереди.
+@pytest.mark.parametrize(
+    ("head", "held"),
+    [(("automerge",), False), (("automerge", "blocker"), True)],
+    ids=["та же ступень — идёт", "ступень ниже — ждёт"],
+)
+def test_a_waiting_head_holds_the_queue_by_step(
+    platform: dict[str, Any], head: tuple[str, ...], held: bool
+) -> None:
+    """Ждущая голова держит соседа ступенью ниже и пропускает соседа своей ступени (053).
 
-    Поздний взгляд на #1194: ранний выход ждущей головы не звал `keep_only`, и
-    сосед, уже актуальный к базе, уходил бы в общую ветку раньше головы (053).
+    Решение владельца 08.10.2026 (взгляд на #1203): прежде это решало
+    отставание головы от базы — отставшая держала всех, актуальная никого.
+    Держит теперь важность: менее важному снимается взведение, равный идёт.
     """
-    platform["changes"] = [change(1, "automerge"), change(2, "automerge", armed=True)]
+    platform["changes"] = [change(1, *head), change(2, "automerge", armed=True)]
     platform["states"] = {1: module.STATE_BEHIND, 2: module.STATE_ARMABLE}
     platform["looking"] = {1}
     module.advance("o/r", "token", "main", dry_run=False)
     assert platform["synced"] == []
-    assert platform["disarmed"] == ["PR_2"], "взведение соседа не снято у ждущей головы"
+    armed = [node for node, *_ in platform["asked"]]
+    if held:
+        assert platform["disarmed"] == ["PR_2"], "сосед ступенью ниже не снят"
+        assert "PR_2" not in armed, "соседа ступенью ниже взвели мимо ждущей головы"
+    else:
+        assert "PR_2" in armed, "сосед своей ступени не взведён — задержан ждущей головой"
 
 
 @pytest.mark.parametrize("looking", [True, False], ids=["ждёт взгляда", "подтягивается"])
@@ -1461,8 +1513,18 @@ def test_a_refusal_above_is_kept_by_the_exit_of_a_behind_head(
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
 
 
+#: Единственная форма выхода из цикла голов: отказы выше делают исход красным.
+EXIT_ON_REFUSALS = "EXIT_BROKEN if refused else EXIT_OK"
+
+
 def test_every_exit_from_the_heads_loop_answers_with_the_refusals() -> None:
-    """Строгое правило (210): любой `return` в цикле голов `advance` учитывает `refused`."""
+    """Строгое правило (210): любой `return` в цикле голов `advance` отвечает одной формой.
+
+    Форма одна — `EXIT_BROKEN if refused else EXIT_OK`, — и сверяется она
+    целиком, а не подстрокой: поиск имени `refused` пропускал
+    `EXIT_OK if refused else EXIT_OK`, то есть держал забывчивость, а не
+    верный код выхода (взгляд на #1203).
+    """
     import ast
     import inspect
     import textwrap
@@ -1472,17 +1534,24 @@ def test_every_exit_from_the_heads_loop_answers_with_the_refusals() -> None:
     assert loops, "цикла голов в advance не найдено — предмет проверки не найден (075)"
     exits = [node for loop in loops for node in ast.walk(loop) if isinstance(node, ast.Return)]
     assert exits, "выходов из цикла голов не найдено (075)"
-    silent = [node.lineno for node in exits if "refused" not in ast.unparse(node)]
-    assert not silent, f"выходы цикла голов без учёта отказов: строки {silent} функции advance"
+    silent = [node.lineno for node in exits if ast.unparse(node) != f"return {EXIT_ON_REFUSALS}"]
+    assert not silent, f"выходы цикла голов не той формы: строки {silent} функции advance"
 
 
-def test_a_waiting_head_does_not_hand_the_sync_to_the_next(platform: dict[str, Any]) -> None:
-    """Ждущая голова кончает заход: следующую отставшую очередь не подтягивает (052, #1194)."""
-    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
-    platform["states"] = {1: module.STATE_BEHIND, 2: module.STATE_BEHIND}
+@pytest.mark.parametrize(
+    ("head", "synced"),
+    [(("automerge",), [2]), (("automerge", "blocker"), [])],
+    ids=["та же ступень — подтягивается следующий", "ступень ниже — ждёт"],
+)
+def test_a_waiting_head_hands_the_sync_only_within_its_step(
+    platform: dict[str, Any], head: tuple[str, ...], synced: list[int]
+) -> None:
+    """Ждущая голова передаёт подтяжку только своей ступени; одна подтяжка за заход (052, 053)."""
+    platform["changes"] = [change(1, *head), change(2, "automerge"), change(3, "automerge")]
+    platform["states"] = {1: module.STATE_BEHIND, 2: module.STATE_BEHIND, 3: module.STATE_BEHIND}
     platform["looking"] = {1}
     module.advance("o/r", "token", "main", dry_run=False)
-    assert platform["synced"] == []
+    assert platform["synced"] == synced
 
 
 def test_a_head_behind_the_base_is_synced_once_its_look_is_done(platform: dict[str, Any]) -> None:
