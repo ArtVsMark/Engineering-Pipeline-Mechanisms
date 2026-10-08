@@ -8,6 +8,7 @@
 import ast
 import json
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Final
@@ -1017,9 +1018,18 @@ def test_pruning_removes_files_and_folders_but_keeps_the_list(tmp_path: Path) ->
     assert sorted(path.name for path in tmp_path.iterdir()) == sorted(module.branch_files())
 
 
-#: Что шаг кладёт в коммит: аргумент `git add` и присваивание переменной.
-GIT_ADD: Final = re.compile(r"^\s*git add\s+(.+?)\s*$", re.MULTILINE)
+#: Присваивание переменной в сценарии шага: имя пути, которое `git add` подставит.
 ASSIGNED: Final = re.compile(r"^\s*(\w+)=(\S+)\s*$", re.MULTILINE)
+#: Ключи git, за которыми идёт значение: подкоманда стоит после него, а не на его месте.
+GIT_VALUED_OPTIONS: Final = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
+
+
+def git_subcommand(words: list[str], start: int) -> str | None:
+    """Подкоманда git, вызванного словом ``words[start]``: первое слово не-ключ после ключей."""
+    index = start + 1
+    while index < len(words) and words[index].startswith("-"):
+        index += 2 if words[index] in GIT_VALUED_OPTIONS else 1
+    return words[index] if index < len(words) else None
 
 
 def published_by(run: str) -> list[str]:
@@ -1027,21 +1037,40 @@ def published_by(run: str) -> list[str]:
 
     Читается то, что шаг ИСПОЛНЯЕТ, — аргументы `git add`, — а не любое
     упоминание пути: проза в комментарии держала бы множество непустым, когда
-    запись уже ушла (взгляд на #1217). Аргумент, который не разрешается
-    присваиванием в том же сценарии, — отказ, а не пропуск: имени файла тогда
-    не знает никто.
+    запись уже ушла (взгляд на #1217). Слова режет `shlex` с комментариями, так
+    что хвост `# пояснение` в пути не попадает.
+
+    ФОРМА ОДНА, ОСТАЛЬНОЕ — ОТКАЗ (210, взгляд на #1217). Разбор каждой новой
+    формы — `git -C путь add`, `cd x && git add`, `then git add` — снова
+    оставлял соседнюю выпасть молча, и проверка «множество не пусто» этого не
+    видела. Поэтому `git add` принимается только в начале строки, без ключей и
+    с явными путями; любая другая запись добавления — отказ, а не пропуск. Так
+    же — аргумент, не разрешённый присваиванием в том же сценарии: имени файла
+    тогда не знает никто.
     """
-    script = "\n".join(line for line in run.splitlines() if not line.lstrip().startswith("#"))
+    script = run.replace("\\\n", " ")
     known = dict(ASSIGNED.findall(script))
     paths = []
-    for argument in GIT_ADD.findall(script):
-        for word in argument.split():
-            word = word.strip('"')
-            if word.startswith("$"):
-                name = word.strip("${}")
-                assert name in known, f"путь `{word}` в `git add` не разрешён присваиванием"
-                word = known[name]
-            paths.append(word)
+    for line in script.splitlines():
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        words = list(lexer)
+        for start, word in enumerate(words):
+            if word != "git" or git_subcommand(words, start) != "add":
+                continue
+            arguments = words[start + 2 :]
+            assert start == 0 and words[1] == "add", f"`git add` не в своей форме: `{line.strip()}`"
+            assert arguments and not any(
+                argument.startswith("-") or argument in {";", "&&", "||", "|"}
+                for argument in arguments
+            ), f"`git add` без явных путей или с ключом: `{line.strip()}`"
+            for argument in arguments:
+                if argument.startswith("$"):
+                    name = argument.strip("${}")
+                    assert name in known, f"путь `{argument}` в `git add` не разрешён присваиванием"
+                    argument = known[name]
+                paths.append(argument)
     return paths
 
 
@@ -1054,8 +1083,18 @@ def published_by(run: str) -> list[str]:
             [".github/badges/new.json"],
         ),
         ("echo .github/badges/facts.json", []),
+        ("git add .github/badges/new.json  # пояснение", [".github/badges/new.json"]),
+        ('git worktree add --quiet --detach "$pub" FETCH_HEAD', []),
+        ("git add a.json \\\n  b.json", ["a.json", "b.json"]),
     ],
-    ids=["через переменную", "комментарий не считается", "упоминание без записи"],
+    ids=[
+        "через переменную",
+        "комментарий не считается",
+        "упоминание без записи",
+        "хвост-комментарий не путь",
+        "worktree add не добавление",
+        "перенос строки",
+    ],
 )
 def test_the_published_paths_are_read_from_what_runs(run: str, paths: list[str]) -> None:
     """Пути берутся из исполняемого `git add`, а не из упоминаний."""
@@ -1066,6 +1105,30 @@ def test_an_unresolved_published_path_is_a_refusal() -> None:
     """Переменная без присваивания в сценарии — отказ: имени файла не знает никто."""
     with pytest.raises(AssertionError, match="не разрешён"):
         published_by('git add "$elsewhere"')
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        'git -C "$pub" add facts.json',
+        "cd x && git add facts.json",
+        "if true; then git add facts.json; fi",
+        "git add -A .github/badges",
+        "git add",
+    ],
+    ids=["через -C", "после &&", "после then", "ключ вместо пути", "без пути"],
+)
+def test_a_published_path_in_another_form_is_a_refusal(run: str) -> None:
+    """Добавление в коммит не своей формой — отказ, а не молчаливый пропуск (210)."""
+    with pytest.raises(AssertionError, match="git add"):
+        published_by(run)
+
+
+def test_the_git_subcommand_is_read_past_its_options() -> None:
+    """Подкоманда git — первое слово после ключей; значение ключа подкомандой не считается."""
+    assert git_subcommand(["git", "-C", "add", "status"], 0) == "status"
+    assert git_subcommand(["x", "git", "--no-pager", "add"], 1) == "add"
+    assert git_subcommand(["git", "-c"], 0) is None
 
 
 def test_the_shared_steps_files_are_kept_on_the_branch() -> None:
@@ -1086,6 +1149,8 @@ def test_the_shared_steps_files_are_kept_on_the_branch() -> None:
         for path in published_by(str(step.get("run") or ""))
         if path.startswith(".github/badges/")
     }
-    assert written, "файлов общего шага на ветке не найдено — предмет проверки пропал (075)"
+    assert written == set(module.SHARED_STEP), (
+        f"общий шаг кладёт {sorted(written)}, а `SHARED_STEP` называет {sorted(module.SHARED_STEP)}"
+    )
     missing = written - set(module.branch_files())
     assert not missing, f"чистка сняла бы файлы общего шага: {sorted(missing)}"
