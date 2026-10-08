@@ -347,11 +347,22 @@ def test_publication_writes_only_to_the_derived_branch() -> None:
         if step.get("name") == "опубликовать факты коммитом поверх ветки badges"
     )
     # Толчок шага фактов — в скрипте `publish_facts.py`, и его ветку и отказ
-    # от `--force` проверяет прогон скрипта (`tests/test_publish_facts.py`);
-    # здесь — что шаг зовёт ровно скрипт и сам ничего не пишет (#639).
-    said = facts_publish["run"].split()
-    assert said[:2] == ["python", "$MECHANISMS/scripts/publish_facts.py"], said
-    assert "git" not in said, "шаг фактов пишет на ветку сам, мимо скрипта"
+    # от `--force` проверяет прогон скрипта (`tests/test_publish_facts.py`).
+    # Здесь — что шаг зовёт РОВНО скрипт: сценарий сверяется целиком, а не
+    # разбором по слову `git` — `/usr/bin/git`, `"$GIT"` и `cd x;git` разбор
+    # пропускал, и ради этого подход и сменили (210, взгляд на #1233).
+    assert " ".join(facts_publish["run"].split()) == FACTS_PUBLISH_RUN, facts_publish["run"]
+
+
+#: Сценарий шага публикации фактов — целиком. Иная запись шага, даже
+#: равносильная, краснеет: о ней решают правкой этой строки, а не разбором.
+#: ПРЕДЕЛ (взгляд на #1233): запись на `badges` из ДРУГОГО шага `step-facts.yml`
+#: этим не ловится — найти её можно только разбором оболочки, от которого и
+#: ушли; держит это чтение изменения, а не гейт.
+FACTS_PUBLISH_RUN: Final = (
+    'python $MECHANISMS/scripts/publish_facts.py "$RUNNER_TEMP/facts/facts.json" '
+    '--workdir "$RUNNER_TEMP/publish" --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"'
+)
 
 
 def test_publication_is_not_a_check_on_a_change() -> None:
