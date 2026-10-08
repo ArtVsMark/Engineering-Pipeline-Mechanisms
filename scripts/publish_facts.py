@@ -79,11 +79,21 @@ def checkout(workdir: Path) -> None:
 def publish(source: Path, workdir: Path, *, sha: str) -> bool:
     """Кладёт `source` по каждому пути `PUBLISHES` и толкает; ``False`` — изменений нет."""
     checkout(workdir)
-    for target in PUBLISHES:
-        (workdir / target).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, workdir / target)
-    git("config", "user.name", BOT_NAME, cwd=workdir)
-    git("config", "user.email", BOT_EMAIL, cwd=workdir)
+    # СБОЙ ДИСКА И ОТСУТСТВИЕ ФАКТОВ — ТОЖЕ «НЕ ОПУБЛИКОВАНО», а не трейсбек с
+    # кодом 1: шапка обещает исходы 0 и 2 и `::error::` (039, взгляд на #1233).
+    try:
+        for target in PUBLISHES:
+            (workdir / target).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, workdir / target)
+    except OSError as exc:
+        raise NotPublished(f"факты не положены в дерево ветки: {exc}") from exc
+    # ПОДПИСЬ ПРОВЕРЯЕТСЯ: у оболочки `set -e` останавливал шаг на отказе
+    # `git config`, а без проверки коммит ушёл бы под подписью окружения
+    # (взгляд на #1233).
+    for key, value in (("user.name", BOT_NAME), ("user.email", BOT_EMAIL)):
+        signed = git("config", key, value, cwd=workdir)
+        if signed.returncode != 0:
+            raise NotPublished(f"подпись публикации не записана ({key}): {signed.stderr.strip()}")
     if git("add", "--", *PUBLISHES, cwd=workdir).returncode != 0:
         raise NotPublished("файлы фактов не добавлены в коммит")
     if git("diff", "--cached", "--quiet", cwd=workdir).returncode == 0:

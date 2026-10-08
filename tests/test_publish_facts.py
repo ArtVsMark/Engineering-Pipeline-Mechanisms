@@ -8,6 +8,7 @@
 """
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -141,3 +142,29 @@ def test_the_exit_names_the_refusal(
     argv[2] = str(stand["tmp"] / "w2")
     assert module.main(argv) == module.EXIT_BROKEN
     assert "::error::факты не опубликованы" in capsys.readouterr().out
+
+
+def test_a_missing_source_is_a_refusal_not_a_traceback(
+    stand: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Нет `facts.json` — код 2 и `::error::`, а не трейсбек с кодом 1 (039, взгляд на #1233)."""
+    argv = [str(stand["tmp"] / "нет.json"), "--workdir", str(stand["tmp"] / "w1")]
+    argv += ["--sha", "a", "--repo", "o/r"]
+    assert module.main(argv) == module.EXIT_BROKEN
+    assert "::error::факты не опубликованы" in capsys.readouterr().out
+
+
+def test_a_refused_signature_is_a_refusal(
+    stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Отказ `git config` — «не опубликовано», а не коммит под чужой подписью (взгляд на #1233)."""
+    real: Callable[..., subprocess.CompletedProcess[str]] = module.git
+
+    def refusing(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        if args[:1] == ("config",):
+            return subprocess.CompletedProcess(list(args), 1, "", "нет прав")
+        return real(*args, cwd=cwd)
+
+    monkeypatch.setattr(module, "git", refusing)
+    with pytest.raises(module.NotPublished, match="подпись"):
+        module.publish(stand["source"], stand["tmp"] / "w1", sha="a")
