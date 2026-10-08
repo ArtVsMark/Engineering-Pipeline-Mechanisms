@@ -2,8 +2,8 @@
   "schema": "1.3",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-08T15:06:33+00:00",
-  "commit": "2916259fe2c871821cbaa40b4d95b8693ce8c29d",
+  "generated_at": "2026-10-08T15:37:18+00:00",
+  "commit": "823739c7701ecbd91ee438a0ee78646e04c33eb6",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -18,7 +18,7 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.5.27",
+  "version": "1.5.28",
   "version_whole": true,
   "release": "1.5",
   "coverage": {
@@ -29,7 +29,7 @@
   "coverage_percent": 92.8,
   "contract": "0.7.0",
   "tests": {
-    "functions": 3186,
+    "functions": 3189,
     "modules": 152
   },
   "scripts": {
@@ -86,11 +86,11 @@
   },
   "family": {
     "schema_read": "1.6",
-    "snapshot_at": "2026-10-08T15:00:54+00:00",
+    "snapshot_at": "2026-10-08T15:30:06+00:00",
     "consumers": 6,
-    "mechanisms": 284,
+    "mechanisms": 285,
     "shared": 31,
-    "held_by_machine": 814,
+    "held_by_machine": 815,
     "closed_by_shared": 229,
     "share": 0.281,
     "top": [
@@ -149,7 +149,7 @@
     "schema_expected": "1.5",
     "schema_agrees": false,
     "behind_read": true,
-    "behind": 12,
+    "behind": 13,
     "behind_rules": [
       "044",
       "048",
@@ -162,7 +162,8 @@
       "107",
       "120",
       "195",
-      "201"
+      "201",
+      "218"
     ]
   }
 }
