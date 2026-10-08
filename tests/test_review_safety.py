@@ -1675,13 +1675,19 @@ def test_the_task_does_not_explain_a_command_it_is_denied() -> None:
     Исполнитель зовёт команду, получает отказ окружения и тратит заход.
     Ответ на обращение (`claude.yml`) скриптов не зовёт вовсе — сравнивать
     там не с чем, поэтому предмет — шаг взгляда.
+
+    Сверяются ОБЕ формы: имя скрипта (так абзац и был написан) и команда
+    целиком — у команды без скрипта, `git show`, имени `*.py` нет, и по одним
+    именам гейт её не увидел бы (взгляд на #1209).
     """
     path = LOOK_BODY
     steps = commands_and_task(path)
-    anywhere = set().union(*(granted_scripts(commands) for _, commands, _ in steps))
-    assert anywhere, f"{path.name}: ни один заход не зовёт скрипт — предмета нет (075)"
+    scripts = set().union(*(granted_scripts(commands) for _, commands, _ in steps))
+    every = set().union(*(set(commands) for _, commands, _ in steps))
+    assert scripts, f"{path.name}: ни один заход не зовёт скрипт — предмета нет (075)"
     for name, commands, task in steps:
-        denied = sorted((anywhere - granted_scripts(commands)) & set(SCRIPT_NAME.findall(task)))
+        denied = sorted((scripts - granted_scripts(commands)) & set(SCRIPT_NAME.findall(task)))
+        denied += sorted(one for one in every - set(commands) if one in task)
         assert not denied, f"{path.name}, «{name}»: задание называет неразрешённое: {denied}"
 
 
