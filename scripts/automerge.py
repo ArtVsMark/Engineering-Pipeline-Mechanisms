@@ -1254,12 +1254,6 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     waiting_rank: int | None = None
 
     for change in queue:
-        if waiting_rank is not None and rank(change) > waiting_rank:
-            if change.armed:
-                take_back(repo, change, "ждёт головы важнее", owner_token, dry_run=dry_run)
-            print(f"#{change.number}: ступень ниже ждущей головы — ждёт её вердикта (053)")
-            skipped["ждут головы важнее"] += 1
-            continue
         problems, _ = verdicts[change.number]
         if problems:
             # КРАСНУЮ ГОЛОВУ СПРАШИВАЕМ ОБ ОБЪЁМЕ, И ЭТО НЕ НАРУШЕНИЕ 052.
@@ -1333,6 +1327,17 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 "в ту же ветку (#734)"
             )
             skipped["ждут починки находок"] += 1
+            continue
+        # ДЕРЖАНИЕ ПО СТУПЕНИ СТОИТ ЗДЕСЬ — ПЕРЕД ДЕЙСТВИЯМИ, А НЕ ПЕРЕД РАЗМЕТКОЙ.
+        # Краснота, пустота и конфликт менее важного соседа называются и
+        # публикуются источником работы и при ждущей голове (004): держание
+        # запрещает только двигать его — взводить, подтягивать, сливать
+        # (взгляд на #1216).
+        if waiting_rank is not None and rank(change) > waiting_rank:
+            if change.armed:
+                take_back(repo, change, "ждёт головы важнее", owner_token, dry_run=dry_run)
+            print(f"#{change.number}: ступень ниже ждущей головы — ждёт её вердикта (053)")
+            skipped["ждут головы важнее"] += 1
             continue
         # ПОДТЯЖКА ЖДЁТ ИДУЩЕГО ВЗГЛЯДА (решение владельца 07.10.2026, #1144).
         # Подтянутая голова — новая голова, и группа взгляда снимает идущий

@@ -1288,6 +1288,31 @@ def test_a_head_waits_for_the_look_before_it_is_armed(platform: dict[str, Any]) 
     assert platform["merged"] == [2], "голова, ждущая взгляда, слита или держит очередь"
 
 
+@pytest.mark.parametrize(
+    ("state", "said"),
+    [("dirty", "конфликтуют"), ("empty", "пусты")],
+    ids=["конфликт", "пусто"],
+)
+def test_a_held_neighbour_is_still_named(
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str], state: str, said: str
+) -> None:
+    """Держание по ступени запрещает двигать соседа, но не называть его (004, взгляд на #1216).
+
+    Конфликт менее важного публикуется источником работы, пустота называется
+    пустотой — и при ждущей голове важнее.
+    """
+    platform["changes"] = [change(1, "automerge", "blocker"), change(2, "automerge")]
+    platform["looking"] = {1}
+    if state == "empty":
+        platform["files_changed"] = {2: 0}
+    else:
+        platform["states"] = {2: module.STATE_CONFLICT}
+    module.advance("o/r", "token", "main", dry_run=False)
+    out = capsys.readouterr().out
+    assert said in out, f"держание спрятало «{said}» соседа:\n{out}"
+    assert "ждут головы важнее" not in out
+
+
 def test_a_current_waiting_head_holds_a_less_important_neighbour(
     platform: dict[str, Any],
 ) -> None:
@@ -1469,7 +1494,7 @@ def test_a_waiting_head_holds_the_queue_by_step(
         assert platform["disarmed"] == ["PR_2"], "сосед ступенью ниже не снят"
         assert "PR_2" not in armed, "соседа ступенью ниже взвели мимо ждущей головы"
     else:
-        assert "PR_2" not in platform["disarmed"] or "PR_2" in armed, "сосед своей ступени задержан"
+        assert "PR_2" in armed, "сосед своей ступени не взведён — задержан ждущей головой"
 
 
 @pytest.mark.parametrize("looking", [True, False], ids=["ждёт взгляда", "подтягивается"])
