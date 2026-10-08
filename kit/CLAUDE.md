@@ -64,19 +64,15 @@ git config user.email "<почта учётной записи владельц�
 
 ## 🌿 Ветка в облачном окне
 
-> **Наполнение проекта:** где работает окно. Работа ведётся в ветке
-> `agent/<задача>`: имя ветки — по задаче, а не по окну
-> ([189](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/189-a-branch-is-named-by-its-task-not-its-window.md)),
-> и приставка — переключатель конвейера
-> ([003](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/003-branch-name-is-a-switch.md)).
-> Какую ветку выдаёт окну платформа при старте — замером своего окна.
+**Работа ведётся в ветке `agent/<задача>`, которую окно создаёт само.** Имя
+ветки — по задаче, а не по окну
+([189](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/189-a-branch-is-named-by-its-task-not-its-window.md)),
+и приставка `agent/` — переключатель конвейера
+([003](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/003-branch-name-is-a-switch.md)):
+толчок в ветку без неё изменения не откроет.
 
-Порядок простой:
-
-```
-git fetch origin main
-git checkout -b agent/<короткое-имя-задачи> origin/main
-```
+> **Наполнение проекта:** команда, которой окно режет ветку `agent/<задача>`
+> от СВОЕЙ общей ветки: её имя у каждого проекта своё, механизм его не вшивает.
 
 > **Наполнение проекта:** чем открывается изменение по толчку этой ветки. У
 > поставщика это прогон `agent-pr` — тонкий вызов общего шага `step-agent-pr.yml`;
