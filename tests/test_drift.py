@@ -814,6 +814,17 @@ def test_merge_neighbours_and_replacements_are_read() -> None:
     assert "219" in took[0].said and "005, 127" in took[0].said and "005, 127" in took[0].next_step
 
 
+def test_replaces_not_a_list_is_unread_not_spelled_out() -> None:
+    """`replaces` строкой — ответ не прочитан, а не заменены «0, 0, 5» (взгляд на #1239)."""
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge"}]}
+    key = "o/r:merge/a-thing-broke"
+    found = module.proposals_answered(
+        answer({"status": "admitted", "rule": "219", "replaces": "005, 127"}, key), mine, "o/r"
+    )
+    assert [one.source for one in found] == ["proposal-answer-unread"]
+    assert "replaces" in found[0].said and "0, 0, 5" not in found[0].said
+
+
 def test_an_unknown_status_is_named_not_swallowed() -> None:
     """Статус, которого разбор не знает, называется, а не молчит (045)."""
     found = module.proposals_answered(answer({"status": "deferred"}), MINE, "o/r")

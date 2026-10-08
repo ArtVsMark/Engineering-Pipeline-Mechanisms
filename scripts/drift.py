@@ -1341,8 +1341,22 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
         # предложений номера не несёт и нести не может — это сказано в нём же.
         number = str(verdict.get("rule") or "?")
         why = str(verdict.get("why") or "причина не названа")
+        replaces = verdict.get("replaces")
+        if replaces is not None and not isinstance(replaces, list):
+            # СПИСОК, А НЕ ЧТО ПОПАЛО. Строку «005, 127» `join` разобрал бы по
+            # буквам и назвал заменёнными «0, 0, 5, ,…» — ответ, прочитанный
+            # неверно, хуже непрочитанного (045, взгляд на #1239).
+            found.append(
+                Drift(
+                    "proposal-answer-unread",
+                    f"вердикт по «{slug}»: поле «replaces» не список ({type(replaces).__name__})",
+                    "сверить разбор с export/README.md каталога: заменённые "
+                    "правила приходят списком номеров",
+                )
+            )
+            continue
         if status == "admitted":
-            replaced = ", ".join(map(str, verdict.get("replaces") or []))
+            replaced = ", ".join(map(str, replaces or []))
             found.append(
                 Drift(
                     "proposal-admitted",
