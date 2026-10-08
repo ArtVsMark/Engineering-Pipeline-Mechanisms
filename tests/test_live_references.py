@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import code_files
+from tests.conftest import code_files, walk_deep
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Где живёт код, названо ОДИН раз — `paths.py::SOURCES`, — и читается отсюда.
@@ -154,3 +154,79 @@ def test_every_exception_is_earned() -> None:
             if found.group("module") in LIVE and found.group("name") not in FILE_SUFFIXES
         ]
         assert addresses, f"{name}: исключать нечего — в файле нет ни одного такого адреса"
+
+
+#: Адрес теста в прозе: `tests/<файл>.py` и, если назван, `::<имя>`.
+TEST_ADDRESS_RE = re.compile(r"tests/(?P<file>[\w/]+\.py)(?:::(?P<name>\w+))?")
+#: Где живёт ЖИВАЯ проза, которая отсылает к тестам: перечень корней (068), а
+#: не обход всего дерева. Код (`.py`) сверяет гейт выше.
+PROSE_ROOTS = (".github", ".claude", "docs", "kit", "AGENTS.md", "CLAUDE.md", "README.md")
+PROSE_SUFFIXES = frozenset({".yml", ".yaml", ".md", ".json", ".sh", ".toml"})
+#: Не сверяются, с причиной (154). Записи решений — история: ссылка там
+#: говорит, где лежало тогда, и правка задним числом переписала бы её.
+#: Выпущенный журнал и `.rules/` вне корней вовсе: первый тоже история, у
+#: адресов механизмов в `.rules/` свой гейт — `test_bindings_addresses.py`.
+PROSE_HISTORY = ("docs/decisions/",)
+
+
+def prose_files() -> list[Path]:
+    """Файлы живой прозы под корнями `PROSE_ROOTS`, без истории."""
+    found: list[Path] = []
+    for root in PROSE_ROOTS:
+        where = ROOT / root
+        candidates = [where] if where.is_file() else walk_deep(where)
+        found += [
+            one
+            for one in candidates
+            if one.is_file()
+            and one.suffix in PROSE_SUFFIXES
+            and not one.relative_to(ROOT).as_posix().startswith(PROSE_HISTORY)
+        ]
+    return found
+
+
+def dead_test_addresses(text: str) -> list[str]:
+    """Адреса тестов в тексте, которые ведут в пустоту: нет файла или имени в нём."""
+    dead = []
+    for found in TEST_ADDRESS_RE.finditer(text):
+        path = ROOT / "tests" / found.group("file")
+        if not path.is_file():
+            dead.append(f"{found.group(0)} — нет файла")
+        elif found.group("name") and found.group("name") not in names_of(path):
+            dead.append(f"{found.group(0)} — нет имени")
+    return dead
+
+
+@pytest.mark.parametrize(
+    ("text", "dead"),
+    [
+        ("держит `tests/test_live_references.py::dead_test_addresses`", 0),
+        ("держит `tests/test_live_references.py::переименован`", 1),
+        ("держит `tests/test_нет_такого.py`", 1),
+        ("держит `tests/test_live_references.py`", 0),
+    ],
+    ids=["живое имя", "мёртвое имя", "нет файла", "файл без имени"],
+)
+def test_a_test_address_is_judged_by_file_and_name(text: str, dead: int) -> None:
+    """Адрес теста судится по обеим половинам: файл есть, имя в нём есть."""
+    assert len(dead_test_addresses(text)) == dead
+
+
+def test_every_test_address_in_prose_is_alive() -> None:
+    """Каждый адрес `tests/<файл>.py[::имя]` в живой прозе указывает на живое (взгляд на #1211).
+
+    Сверка была частной: один тест в `test_task_items.py` проверял ссылки
+    одного прогона на один файл тестов, а ссылки на `test_reusable_steps.py`
+    рядом и ещё сотня в других прогонах и документах не сверялись никем —
+    переименование протушило бы их молча. Замер 08.10.2026: 114 адресов в 47
+    файлах живой прозы, мёртвых — ни одного.
+    """
+    files = prose_files()
+    seen = 0
+    dead: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        seen += len(TEST_ADDRESS_RE.findall(text))
+        dead += [f"{path.relative_to(ROOT)}: {one}" for one in dead_test_addresses(text)]
+    assert seen, "адресов тестов в живой прозе нет — предмет проверки не найден (075)"
+    assert not dead, "адреса тестов ведут в пустоту:\n  " + "\n  ".join(dead)
