@@ -519,7 +519,6 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         TimeoutError("таймаут чтения"),
         http.client.IncompleteRead(b"", 10),
         ssl.SSLEOFError("EOF occurred in violation of protocol"),
-        http.client.BadStatusLine(""),
     ],
     ids=[
         "RemoteDisconnected",
@@ -527,7 +526,6 @@ def test_a_broken_connection_is_retried_only_for_a_read(monkeypatch: pytest.Monk
         "TimeoutError",
         "IncompleteRead",
         "SSLEOFError",
-        "BadStatusLine",
     ],
 )
 def test_a_response_dropped_midway_is_the_same_broken_connection(
@@ -569,8 +567,12 @@ class Broken(Answer):
 
 @pytest.mark.parametrize(
     "malformed",
-    [http.client.InvalidURL("нет хоста"), http.client.LineTooLong("заголовок")],
-    ids=["InvalidURL", "LineTooLong"],
+    [
+        http.client.InvalidURL("нет хоста"),
+        http.client.LineTooLong("заголовок"),
+        http.client.BadStatusLine("SSH-2.0-OpenSSH"),
+    ],
+    ids=["InvalidURL", "LineTooLong", "BadStatusLine — ответ не по HTTP"],
 )
 def test_a_malformed_answer_is_named_and_not_retried(
     monkeypatch: pytest.MonkeyPatch, malformed: Exception
@@ -590,18 +592,63 @@ def test_a_malformed_answer_is_named_and_not_retried(
     assert asked == 1, f"ошибку формы повторили {asked} раз"
 
 
+def test_an_empty_status_line_is_a_drop_and_not_a_malformed_answer() -> None:
+    """Пустая строка статуса — обрыв, непустая не той формы — ошибка формы (взгляд на #1214).
+
+    Сверяется с настоящим `http.client`, а не с подделкой: `BadStatusLine("")`
+    он не бросает вовсе — пустую строку называет `RemoteDisconnected`.
+    """
+    import io
+
+    class Socket:
+        def __init__(self, raw: bytes) -> None:
+            self.raw = raw
+
+        def makefile(self, *_args: object, **_kwargs: object) -> io.BytesIO:
+            return io.BytesIO(self.raw)
+
+    def said(raw: bytes) -> Exception:
+        try:
+            http.client.HTTPResponse(Socket(raw)).begin()  # type: ignore[arg-type]
+        except Exception as exc:
+            return exc
+        raise AssertionError(f"{raw!r}: ответ разобран без отказа")
+
+    assert isinstance(said(b""), transport._DROPPED)
+    for raw in (b"SSH-2.0-OpenSSH\r\n", b"HTTP/1.1 abc OK\r\n"):
+        failure = said(raw)
+        assert not isinstance(failure, transport._DROPPED), f"{raw!r} назван обрывом"
+        assert isinstance(failure, transport._MALFORMED)
+
+
 @pytest.mark.parametrize(
-    "dropped",
-    [http.client.IncompleteRead(b"", 10), http.client.BadStatusLine("")],
-    ids=["IncompleteRead", "BadStatusLine"],
+    "failure",
+    [
+        http.client.IncompleteRead(b"", 10),
+        http.client.RemoteDisconnected("обрыв без ответа"),
+        http.client.BadStatusLine("SSH-2.0-OpenSSH"),
+        http.client.InvalidURL("нет хоста"),
+        http.client.LineTooLong("заголовок"),
+    ],
+    ids=["IncompleteRead", "RemoteDisconnected", "BadStatusLine", "InvalidURL", "LineTooLong"],
 )
 def test_a_snapshot_dropped_on_read_is_a_named_refusal(
-    monkeypatch: pytest.MonkeyPatch, dropped: Exception
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
 ) -> None:
-    """Снимок, оборванный на чтении, — `TransportError`, а не трейсбек (взгляд на #1206)."""
-    monkeypatch.setattr("ghrest.urllib.request.urlopen", lambda *_a, **_k: Broken(dropped))
+    """Снимок, оборванный или не той формы, — `TransportError`, а не трейсбек.
+
+    Обе половины обещания фрагмента: обрыв (взгляд на #1206) и ошибка формы
+    `_MALFORMED` (взгляд на #1214).
+    """
+    monkeypatch.setattr("ghrest.urllib.request.urlopen", lambda *_a, **_k: Broken(failure))
     with pytest.raises(transport.TransportError, match="снимок не прочитан"):
         transport.raw_text("https://example.org/x.json")
+
+
+def test_a_snapshot_address_without_a_scheme_is_a_named_refusal() -> None:
+    """Адрес без схемы — отказ снимка, а не голый `ValueError` (взгляд на #1214)."""
+    with pytest.raises(transport.TransportError, match="снимок не прочитан"):
+        transport.raw_text("example.org/x.json")
 
 
 def test_the_number_of_tries_is_at_least_one() -> None:
