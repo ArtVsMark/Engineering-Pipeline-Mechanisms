@@ -445,8 +445,8 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
 
 
 def published_names() -> list[str]:
-    """Всё, что сборка кладёт в каталог публикации: факты и значки."""
-    return [FACTS, *BADGES, *PICTURES]
+    """Всё, что сборка кладёт в каталог публикации: факты, значки, картинки и страницы."""
+    return [FACTS, *BADGES, *PICTURES, *PAGES]
 
 
 #: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
@@ -727,6 +727,53 @@ PICTURES: Final[dict[str, Callable[[dict[str, Any]], list[list[Part]]]]] = {
     "project.svg": project_zones,
 }
 
+
+def who_page(facts: dict[str, Any]) -> str:
+    """Таблица «кем» — кто из семьи зовёт наши шаги по тегу, из `family.uptake.by`.
+
+    Решение по #1213 (вариант 1): таблица живёт файлом на ветке `badges`, куда
+    прогон уже пишет, а не блоком README — в `main` прогон не пишет. Чисел
+    здесь нет: их несёт значок проекта, страница называет только имена (122).
+    Обход не прочитан — так и сказано, а не «никто» (045).
+    """
+    lines = [
+        "# Кто взял наши механизмы",
+        "",
+        "> **Читатель:** посетитель витрины — кто из семьи зовёт наши шаги по тегу.",
+        "",
+        "Собрано сборкой фактов из `facts.json` (`family.uptake.by`); руками не правится.",
+        "",
+    ]
+    taken = (facts.get("family") or {}).get("uptake") or {}
+    if not taken.get("read"):
+        return "\n".join([*lines, f"**Не прочитано:** {taken.get('why') or NO_UPTAKE}.", ""])
+    by = taken.get("by") or []
+    if by:
+        lines += ["| проект | шаги | теги |", "|---|---|---|"]
+        for one in sorted(by, key=lambda item: str(item.get("repo"))):
+            steps = ", ".join(f"`{step}`" for step in one.get("steps") or []) or "—"
+            refs = ", ".join(f"`{ref}`" for ref in one.get("refs") or []) or "—"
+            lines.append(f"| {one.get('repo')} | {steps} | {refs} |")
+    else:
+        lines.append("Пока никто из прочитанных проектов семьи наши шаги по тегу не зовёт.")
+    unread = (taken.get("projects") or {}).get("unread_repos") or []
+    if unread:
+        said = ", ".join(sorted(unread))
+        lines += ["", f"**Не прочитаны клоны:** {said} — незнание, а не «не взял» (045)."]
+    return "\n".join([*lines, ""])
+
+
+#: СТРАНИЦЫ, которые сборка кладёт рядом со значками: имя файла → сборщик
+#: текста. Инвентарь третий: не значок и не картинка, но изданное для чужого
+#: прочтения — гейты публикации и уборки ветки читают и его (#1213).
+PAGES: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
+    "who.md": who_page,
+}
+#: Страницы, которые сборка кладёт ВПРОК, до ссылки из витрины (196): ссылка
+#: на ненарисованное попала бы в main раньше файла. Второй шаг ставит ссылку и
+#: убирает имя отсюда; гейт `tests/test_facts.py` требует ссылку у всех прочих.
+AHEAD: Final = frozenset({"who.md"})
+
 #: ЕДИНЫЙ ЗНАЧОК РИСУЕТ НЕ СБОРКА, А ДЕЙСТВИЕ КАТАЛОГА (#1019): «Python │ ОС │
 #: coverage │ release / PyPI │ version» собирает `python-badge` шагом
 #: `badges.yml`, а код его исполняется с тега каталога, а не копией здесь (022).
@@ -775,6 +822,8 @@ def draw_badges(facts: dict[str, Any], out: Path) -> None:
         (out / name).write_text(said, encoding="utf-8")
     for name, zones in PICTURES.items():
         (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
+    for name, page in PAGES.items():
+        (out / name).write_text(page(facts), encoding="utf-8")
 
 
 def extra_written(args: argparse.Namespace) -> int:
@@ -822,7 +871,10 @@ def drawn_from(path: Path, out_dir: str) -> int:
     except (KeyError, TypeError) as exc:
         print(f"значки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    print(f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}")
+    print(
+        f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}; "
+        f"страницы: {', '.join(sorted(PAGES))}"
+    )
     return EXIT_OK
 
 

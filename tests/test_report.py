@@ -13,11 +13,9 @@ import pytest
 import report
 import yaml
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, code_files, load_script, walk
 
 runs_series = load_script("runs_series.py")
-
-SCRIPTS = ROOT / "scripts"
 
 
 def test_short_text_is_left_alone() -> None:
@@ -43,7 +41,9 @@ def test_no_mechanism_cuts_output_silently() -> None:
     Копий было четыре — шаг открытия, гейт журнала, транспорт и сборка тела
     уплотнения, — и каждая обрезала молча. Разошлись бы они так же молча.
     """
-    for path in walk(SCRIPTS, "*.py"):
+    # Корни — из `paths.SOURCES`: транспорт был среди тех четырёх копий, и
+    # пятая в общем низу разошлась бы так же молча (#1254).
+    for path in code_files():
         if path.name == "report.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
