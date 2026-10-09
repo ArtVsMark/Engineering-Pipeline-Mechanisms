@@ -813,10 +813,13 @@ def test_a_registry_with_entries_stays_pending(monkeypatch: pytest.MonkeyPatch) 
     assert module.main(["--sweep", "--repo", "o/r"]) == module.EXIT_PENDING
 
 
-def test_a_verdict_that_disagrees_with_its_list_is_announced(
+def test_a_verdict_that_disagrees_with_its_list_is_refused(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Вердикт спорит со списком находок — это сказано наружу, а не в лог.
+    """Вердикт спорит со списком находок — отказ шага с причиной, а не `::warning::` (#1247).
+
+    Шаг зеленел, а находка была потеряна молча (045). Прочитанное при этом
+    записывается ДО отказа: отказ не стирает то, что разбор узнал.
 
     Вердикт и строки находок пишет ОДИН ответ: если они спорят, доверять
     нечему ни тому, ни другому. Машинная половина правила 136 держится именно
@@ -835,11 +838,13 @@ def test_a_verdict_that_disagrees_with_its_list_is_announced(
         module, "findings_of", lambda comments: [("дефект", "очередь читает не то", "код")]
     )
     monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
-    monkeypatch.setattr(module, "save", lambda *a, **k: None)
-    module.main(["--repo", "o/r", "--pr", "131"])
+    saved: list[int] = []
+    monkeypatch.setattr(module, "save", lambda *a, **k: saved.append(1))
+    assert module.main(["--repo", "o/r", "--pr", "131"]) == module.EXIT_BROKEN
     said = capsys.readouterr().err
-    assert "::warning::" in said, "расхождение осталось в логе — наружу его не видно"
+    assert "::error::" in said, "отказ остался в логе — наружу его не видно"
     assert "находок 3" in said and "строк находок 1" in said, "числа не названы"
+    assert saved, "записанное потеряно отказом"
 
 
 def test_a_full_page_of_closed_warns_even_when_few_were_merged(
@@ -2455,3 +2460,44 @@ def test_the_registry_header_names_the_canon_by_the_function() -> None:
     assert (ROOT / where).resolve() == Path(module.closable.__code__.co_filename).resolve()
     assert name == module.closable.__name__
     assert f"`{module.canon_at()}`" in module.render_body({})
+
+
+@pytest.mark.parametrize(
+    ("line", "title"),
+    [
+        (
+            "**НАХОДКА[риск]**: `a.py:3` — выделение до двоеточия",
+            "`a.py:3` — выделение до двоеточия",
+        ),
+        ("`НАХОДКА[риск]`: a.py:3 — ключ в кавычках", "a.py:3 — ключ в кавычках"),
+        ("`НАХОДКА[риск · аудитор]: a.py:3-5 — строка в кавычках`", "a.py:3-5 — строка в кавычках"),
+        ("**a.py:54-68** — НАХОДКА[риск]: место перед ключом", "a.py:54-68 — место перед ключом"),
+        ("`a/b.py:163-167` — НАХОДКА[риск]: место в кавычках", "a/b.py:163-167 — место в кавычках"),
+    ],
+    ids=[
+        "жирный-до-двоеточия",
+        "ключ-в-кавычках",
+        "строка-в-кавычках",
+        "место-первым",
+        "место-в-кавычках",
+    ],
+)
+def test_every_measured_form_of_a_finding_is_read(line: str, title: str) -> None:
+    """Каждая форма замера 09.10.2026 узнаётся и даёт заголовок с местом (#1247, 210)."""
+    said = module.finding_in(module.bare(line))
+    assert said is not None, f"форма не узнана: {line}"
+    assert said[1] == title
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "> НАХОДКА[риск]: пересказ чужой находки",
+        "**`a.py:216`**: фильтр по боту стоит. Раньше строка `НАХОДКА[…]` из реплики",
+        "**1. Соседний читатель не назван.** строка `НАХОДКА[…]` в прозе",
+    ],
+    ids=["цитата", "проза-с-ключом", "пункт-с-ключом"],
+)
+def test_prose_mentioning_the_key_is_not_a_finding(line: str) -> None:
+    """Проза, упоминающая ключ, и цитата находками не становятся — замер их тоже видел."""
+    assert module.finding_in(module.bare(line)) is None
