@@ -7,6 +7,7 @@
 подключений (045).
 """
 
+import ast
 import subprocess
 import time
 from pathlib import Path
@@ -352,11 +353,12 @@ def test_a_spent_budget_keeps_what_was_read(
 def test_the_step_limit_covers_the_worst_sweep() -> None:
     """Предел шага обхода в `badges.yml` выше худшего случая самого обхода — с запасом.
 
-    Худший случай — `BUDGET + 2 × TIMEOUT`: последний начатый сосед получает
-    оба вызова git. Связь держит этот тест, а не комментарий: поднятый `BUDGET`
-    при прежнем пределе снял бы шаг раньше обхода, и файл пропал бы вместе с
-    прочитанными клонами (взгляд на #1246). Запас `STEP_MARGIN` — на запуск
-    Python и уборку клонов: без него гейт проходил с запасом в секунды.
+    Худший случай — `BUDGET + TIMEOUT`: остаток считается один раз на соседа,
+    и начатый в t кончает к t + 2·min(TIMEOUT, BUDGET − t) (взгляд на #1261).
+    Связь держит этот тест, а не комментарий: поднятый `BUDGET` при прежнем
+    пределе снял бы шаг раньше обхода, и файл пропал бы вместе с прочитанными
+    клонами (взгляд на #1246). Запас `STEP_MARGIN` — на запуск Python и уборку
+    клонов: без него гейт проходил с запасом в секунды.
     """
     flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
     limits = [
@@ -366,10 +368,35 @@ def test_the_step_limit_covers_the_worst_sweep() -> None:
         if "family_uptake.py" in str(step.get("run") or "")
     ]
     assert limits, "шаг обхода клонов в badges.yml не найден или без своего предела (075)"
-    need = module.BUDGET + 2 * module.TIMEOUT + module.STEP_MARGIN
+    need = module.BUDGET + module.TIMEOUT + module.STEP_MARGIN
     assert all(limit is not None and limit * 60 >= need for limit in limits), (
         f"предел шага {limits} мин ниже худшего случая обхода с запасом: {need} с"
     )
+
+
+def test_the_worst_sweep_is_the_budget_plus_one_limit() -> None:
+    """Сосед, начатый в любую секунду бюджета, кончает не позже `BUDGET + TIMEOUT`."""
+    ends = [
+        start + 2 * min(module.TIMEOUT, module.BUDGET - start) for start in range(module.BUDGET)
+    ]
+    assert max(ends) == module.BUDGET + module.TIMEOUT
+
+
+def test_the_clones_cleanup_cannot_drop_the_numbers() -> None:
+    """Временный каталог клонов убирается без отказа: потомок git мог ещё писать (#1261)."""
+    tree = ast.parse((ROOT / "scripts" / "family_uptake.py").read_text(encoding="utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "TemporaryDirectory"
+    ]
+    assert calls, "временный каталог клонов не найден — предмет проверки не найден (075)"
+    for call in calls:
+        flags = {one.arg: one.value for one in call.keywords}
+        value = flags.get("ignore_cleanup_errors")
+        assert isinstance(value, ast.Constant) and value.value is True, ast.unparse(call)
 
 
 def test_one_hung_neighbour_cannot_eat_the_whole_budget() -> None:
