@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.conftest import MEASURING, ROOT, load_script, under_counter, walk
+from tests.conftest import MEASURING, ROOT, code_files, load_script, under_counter
 
 facts = load_script("build_facts.py")
 
@@ -54,7 +54,9 @@ def test_the_runnable_are_the_denominator() -> None:
     counts = facts.script_runs(ROOT)
     assert counts["runnable"] > 0, "запускаемых механизмов не нашлось — предмет не найден (075)"
     assert 0 < counts["started"] <= counts["runnable"]
-    modules = len(list(walk(ROOT / "scripts", "*.py")))
+    # Знаменатель `script_runs` идёт по `paths.SOURCES`, и модули считаются по
+    # тем же корням: иначе сравнивались бы числа о разных деревьях (#1254).
+    modules = len(code_files())
     assert counts["runnable"] < modules, "все модули объявлены запускаемыми — разбор не разбирает"
 
 

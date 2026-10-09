@@ -11,7 +11,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script, needs_history, walk
+from tests.conftest import ROOT, code_files, load_script, needs_history
 
 module = load_script("task_shape.py")
 
@@ -371,9 +371,11 @@ def test_no_reader_keeps_its_own_zone_predicate() -> None:
     names, _ = zone_carriers()
     assert names, "константы приставки зоны у labels нет — предмет гейта исчез (075)"
     allowed = {DEFINES + name for name in names} | {"zone_named"}
+    # Корни — из `paths.SOURCES`: приставка зоны, вписанная в общем низу, —
+    # такая же копия мимо `labels`, как в скрипте (#1254).
     outside = [
         f"{path.name}:{line}"
-        for path in walk(ROOT / "scripts", "*.py")
+        for path in code_files()
         for owner, line in zone_mentions(path)
         if path.name != "labels.py" or owner not in allowed
     ]

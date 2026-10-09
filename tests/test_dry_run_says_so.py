@@ -30,35 +30,39 @@
 """
 
 import ast
+from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import code_files, load_script
 
 #: Ключи, которыми механизм объявляет пробный режим.
 DRY_FLAGS: Final = ('"--apply"', '"--dry-run"')
 #: Имя общего признака: гейт спрашивает ЕГО, а не семь букв внутри строки.
 MARK: Final = "DRY"
-SCRIPTS: Final = ROOT / "scripts"
 
 
-def with_a_dry_run() -> list[str]:
-    """Механизмы, объявившие пробный режим ключом входа."""
+def with_a_dry_run() -> list[Path]:
+    """Механизмы, объявившие пробный режим ключом входа.
+
+    Корни — из `paths.SOURCES`, а не один `scripts/`: ключ, заведённый в общем
+    низу, иначе прошёл бы мимо гейта молча (#1254).
+    """
     found = []
-    for path in walk(SCRIPTS, "*.py"):
+    for path in code_files():
         text = path.read_text(encoding="utf-8")
         if any(flag in text for flag in DRY_FLAGS):
-            found.append(path.name)
+            found.append(path)
     return found
 
 
-def names_the_mode(name: str) -> bool:
+def names_the_mode(path: Path) -> bool:
     """Тянется ли механизм к общему признаку режима — РАЗБОРОМ, а не подстрокой.
 
     Признаётся обращение `report.DRY`/`report.announce` и прямой импорт имени.
     Строка с теми же буквами, вписанная у себя, признаком НЕ считается: она и
     есть то, от чего признак вынесен наверх.
     """
-    tree = ast.parse((SCRIPTS / name).read_text(encoding="utf-8"))
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Attribute)
@@ -83,7 +87,7 @@ def test_the_subject_of_this_gate_exists() -> None:
 
 def test_every_mechanism_with_a_dry_run_can_name_it() -> None:
     """Объявил пробный режим — умеет его назвать. Иначе ослабление невидимо."""
-    silent = [name for name in with_a_dry_run() if not names_the_mode(name)]
+    silent = [path.name for path in with_a_dry_run() if not names_the_mode(path)]
     assert not silent, (
         "механизм объявил пробный режим и не умеет его назвать — ослабление молчит (045):\n  "
         + "\n  ".join(silent)
@@ -98,9 +102,15 @@ def test_the_mark_lives_in_one_place() -> None:
     заметит: здесь она это замечает
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    mark = load_script("../packages/transport/report.py").DRY
+    shared = load_script("../packages/transport/report.py")
+    mark = shared.DRY
+    # Корни — `paths.SOURCES`: вписанная копия в общем низу та же копия (#1254).
+    # Сам источник признака из обхода вынут — объявление не копия себя.
     written = [
-        path.name for path in walk(SCRIPTS, "*.py") if mark in path.read_text(encoding="utf-8")
+        path.name
+        for path in code_files()
+        if path.resolve() != Path(str(shared.__file__)).resolve()
+        and mark in path.read_text(encoding="utf-8")
     ]
     assert not written, (
         f"признак режима «{mark}» вписан строкой, а не взят из общего низа (022, 090): "

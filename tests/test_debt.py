@@ -7,7 +7,6 @@
 """
 
 import ast
-import inspect
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -197,61 +196,281 @@ def test_the_third_number_is_read_not_counted_again() -> None:
     assert "pulls?state=closed" not in source, "шаг ходит за слитыми изменениями"
 
 
+def function_named(path: Path, name: str) -> ast.FunctionDef:
+    """Определение функции по имени — разбором, а не подстрокой."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return next(
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+
+
+def plan_sections() -> set[int]:
+    """Разделы, которые собирает `work_plan.sources`: ключи `built[N] = …`, цепочки включительно."""
+    sources = function_named(ROOT / "scripts" / "work_plan.py", "sources")
+    found: set[int] = set()
+    for node in ast.walk(sources):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "built"
+                and isinstance(target.slice, ast.Constant)
+                and isinstance(target.slice.value, int)
+            ):
+                found.add(target.slice.value)
+    assert found, "`work_plan.sources` не собирает ни одного раздела — предмет не найден (075)"
+    return found
+
+
+def call_name(node: ast.Call) -> str:
+    """Имя вызова в обеих формах записи: `f(...)` и `модуль.f(...)`."""
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return ""
+
+
+def decision_call() -> ast.Dict:
+    """Словарь прочитанного, который `debt.main` отдаёт решению через `checked`."""
+    main = function_named(ROOT / "scripts" / "debt.py", "main")
+    calls = [
+        node
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call) and call_name(node) == "checked"
+    ]
+    assert len(calls) == 1, f"`checked` зовётся из шага {len(calls)} раз, ожидался один"
+    asked = calls[0].args[0] if calls[0].args else None
+    assert isinstance(asked, ast.Dict), "прочитанное отдано решению не словарём"
+    return asked
+
+
+def test_the_decision_is_derived_from_the_tables() -> None:
+    """`before_plan` спрашивается `owed_by`, а не выражением рукой (взгляд на #1260)."""
+    main = function_named(ROOT / "scripts" / "debt.py", "main")
+    calls = [
+        node
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call) and call_name(node) == "before_plan"
+    ]
+    assert len(calls) == 1, f"`before_plan` зовётся из шага {len(calls)} раз, ожидался один"
+    [asked] = calls[0].args
+    assert isinstance(asked, ast.Call) and call_name(asked) == "owed_by", ast.unparse(asked)
+
+
+def test_the_decision_asks_every_source_the_plan_puts_first() -> None:
+    """`BEFORE_PLAN` со `STOP` — ровно разделы плана, и шаг спрашивает решение по каждому (210).
+
+    Решение дважды не видело источник, который шаг читал и печатал рядом:
+    копящиеся находки (взгляд на #1236), затем конфликт и красное на своих
+    (взгляд на #1256). Поэтому не перечень параметров, а строгое правило:
+    набор источников выводится из сборщика плана, а вызов из шага обязан
+    назвать каждый.
+    """
+    assert not set(debt.BEFORE_PLAN) & set(debt.STOP), "раздел и в долге, и в остановке"
+    assert set(debt.BEFORE_PLAN) | set(debt.STOP) == plan_sections()
+    assert set(debt.FED_BY) == set(debt.BEFORE_PLAN)
+    assert set(debt.UNREAD_BY) <= set(debt.BEFORE_PLAN)
+    keys = {key.value for key in decision_call().keys if isinstance(key, ast.Constant)}
+    assert keys == debt.read_names()
+
+
+def test_each_name_is_read_from_its_own_value() -> None:
+    """Значение каждого ключа прочитанного — само имя или вызов чтеца того же имени.
+
+    Иначе таблица решала бы по подмене: `"red": []` или `"conflicting": red`
+    сверку по ключам проходили бы (взгляд на #1260).
+    """
+    for key, value in zip(decision_call().keys, decision_call().values, strict=True):
+        assert isinstance(key, ast.Constant) and isinstance(key.value, str)
+        named = value.id if isinstance(value, ast.Name) else ""
+        called = call_name(value) if isinstance(value, ast.Call) else ""
+        assert key.value in (named, called), f"«{key.value}» прочитан из {ast.unparse(value)}"
+
+
+@pytest.mark.parametrize("name", sorted({n for names in debt.FED_BY.values() for n in names}))
+def test_each_read_name_decides_its_own_source(name: str) -> None:
+    """Непустое прочитанное в одиночку включает ровно свой источник (взгляд на #1260).
+
+    Имя, упомянутое в выражении, ещё не решает: `bool(x) and False` сверку по
+    именам проходил. Здесь решение спрашивается поведением.
+    """
+    read = debt.checked({one: one == name for one in debt.read_names()})
+    owed = debt.owed_by(read)
+    assert {source for source, yes in owed.items() if yes} == {
+        source for source, names in debt.FED_BY.items() if name in names
+    }
+
+
+def test_a_read_missing_a_name_is_refused() -> None:
+    """Прочитанное без имени из таблиц — отказ, а не молчаливое «пусто» (210)."""
+    with pytest.raises(ValueError, match="210"):
+        debt.checked({"conflicting": []})
+
+
+#: Одно непустое прочитанное — имя в таблицах шага долга, чтец, общий у
+#: шага и сборщика плана, и что он вернёт. Перечень обязан покрыть ВСЕ имена
+#: `read_names()` — это держит тест ниже, а не память (005).
+ONE_READ: Final[tuple[tuple[str, str, object], ...]] = (
+    ("conflicting", "stuck_changes", (["#1 — x"], [], [])),
+    ("unknown", "stuck_changes", ([], ["#1 — x"], [])),
+    ("red", "stuck_changes", ([], [], ["#1 — x"])),
+    ("lagging", "branch_debt", ([], ["lint"])),
+    ("left", "findings_debt", [("abc1234", 5, "дефект", "x")]),
+    ("kept", "findings_debt", [("abc1234", 5, "риск", "x")]),
+    ("rules_left", "rules_debt", (0, 1, 0)),
+)
+
+
+def plan_with(monkeypatch: pytest.MonkeyPatch, reader: str, said: object) -> dict[int, Any]:
+    """Разделы плана, собранные, когда чтец `reader` вернул `said`, а прочие — пустоту."""
+    plan = load_script("work_plan.py")
+    quiet: dict[str, object] = {
+        "branch_debt": ([], []),
+        "stuck_changes": ([], [], []),
+        "findings_debt": [],
+        "open_changes": frozenset(),
+        "closed_issues": [],
+        "inbox_body": ("", "", ""),
+        "rules_debt": (0, 0, 0),
+        "contract_note": None,
+    }
+    quiet[reader] = said
+    for name, value in quiet.items():
+        monkeypatch.setattr(plan.debt, name, lambda *_, value=value, **__: value)
+    monkeypatch.setattr(plan.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
+    monkeypatch.setattr(plan, "birth_part", lambda *_: plan.Source())
+    monkeypatch.setattr(plan.ghrest, "paginate", lambda *_, **__: iter([]))
+    built: dict[int, Any] = plan.sources("o/r", "t", [])[0]
+    return built
+
+
+def test_one_read_covers_every_name_of_the_tables() -> None:
+    """Перечень случаев — ровно имена таблиц: новое имя без случая краснеет (взгляд на #1275)."""
+    assert {name for name, _, _ in ONE_READ} == debt.read_names()
+
+
+@pytest.mark.parametrize(("name", "reader", "said"), ONE_READ, ids=[one[0] for one in ONE_READ])
+def test_the_plan_puts_each_read_where_the_tables_say(
+    monkeypatch: pytest.MonkeyPatch, name: str, reader: str, said: object
+) -> None:
+    """Строгое правило сверено ПОВЕДЕНИЕМ, а не разбором кода (взгляды на #1260, #1267, #1275; 210).
+
+    Одно непустое прочитанное подаётся сборщику плана; оно обязано лечь ровно
+    в тот раздел и то поле, что называют `FED_BY` (строки) и `UNREAD_BY`
+    (непрочитанное), и больше никуда. Разбор кода по именам видел только
+    прямые вызовы `debt.*` и для разделов 3 и 5 проходил пустым.
+    """
+    built = plan_with(monkeypatch, reader, said)
+    where = {
+        (section, field)
+        for section in debt.BEFORE_PLAN
+        for field in ("rows", "unread")
+        if getattr(built[section], field)
+    }
+    owed = {(section, "rows") for section, names in debt.FED_BY.items() if name in names}
+    unread = {(section, "unread") for section, said in debt.UNREAD_BY.items() if name in said}
+    assert where == owed | unread, f"«{name}»: план кладёт в {sorted(where)}"
+
+
 def test_the_third_number_does_not_switch_the_reminder_on() -> None:
-    """Слитое без взгляда печатается, но приоритета перед планом не даёт.
+    """Слитое без взгляда печатается, но в решение о долге не входит.
 
     Долг — это работа, которую обязаны сделать раньше новой. Посмотреть слитое
     заново можно, обязанности нет, и напоминание, звучащее всегда, перестаёт
     что-либо значить (051).
-
-    Печать и решение здесь уже расходились однажды — на числах правила 177, —
-    поэтому решение проверяется отдельно от вывода. В него входят ровно четыре
-    источника — `left`, `kept`, `lagging`, `rules`, — и сверяется ПЕРЕЧЕНЬ
-    параметров `before_plan`, а не начало вызова: пятый, дописанный хвостом с
-    умолчанием, прошёл бы сверку по началу молча (взгляд на #1245).
     """
-    assert list(inspect.signature(debt.before_plan).parameters) == [
-        "left",
-        "kept",
-        "lagging",
-        "rules",
-    ], "в решение о долге вошёл новый источник — проверьте, не слитое ли это без взгляда"
-    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
-    call = (
-        "remind(before_plan(left=left, kept=kept, lagging=lagging, "
-        "rules=rules_left(numbers, note)))"
-    )
-    assert call in source, "решение о напоминании собрано иначе, чем `before_plan` из шага"
+    used = {node.id for node in ast.walk(decision_call()) if isinstance(node, ast.Name)}
+    assert "unlooked_left" not in used and "unlooked_tally" not in used, used
 
 
-@pytest.mark.parametrize(
-    ("left", "kept", "lagging", "rules", "owed"),
-    [
-        ([], [], [], False, False),
-        ([("a", 1, "дефект", "x")], [], [], False, True),
-        ([], [("b", 1, "риск", "x")], [], False, True),
-        ([], [], ["test (3.15)"], False, True),
-        ([], [], [], True, True),
-    ],
-)
-def test_accrued_findings_alone_come_before_the_plan(
-    left: list[Any], kept: list[Any], lagging: list[str], rules: bool, owed: bool
+def test_a_decision_missing_a_source_is_refused() -> None:
+    """Решение без источника — отказ, а не молчаливое «долга нет» (взгляд на #1256)."""
+    partial = {one: False for one in debt.BEFORE_PLAN if one != 1}
+    with pytest.raises(ValueError, match="210"):
+        debt.before_plan(partial)
+
+
+def test_an_unread_source_is_not_called_empty(capsys: pytest.CaptureFixture[str]) -> None:
+    """Источник с несказанным состоянием назван отдельно, а не в «пусты» (#1260)."""
+    read = debt.checked({one: one == "unknown" for one in debt.read_names()})
+    debt.remind(debt.before_plan(debt.owed_by(read)), debt.unread_in(read))
+    said = capsys.readouterr().out
+    assert f"источники {debt.sources_said()} пусты" not in said
+    assert f"источники {debt.sources_said([1])} пусты" in said
+    assert "Источник 1 прочитан не весь" in said
+
+
+def test_a_one_shot_skip_is_honoured() -> None:
+    """Пропуск одноразовым итератором не теряется после первой проверки (взгляд на #1267)."""
+    assert "5" not in debt.sources_said(iter([5]))
+
+
+@pytest.mark.parametrize("source", [None, *debt.BEFORE_PLAN])
+def test_any_source_alone_comes_before_the_plan(source: int | None) -> None:
+    """Любой источник перед планом в одиночку — долг; все пусты — нет (взгляды на #1236, #1256).
+
+    Сборщик плана ставит каждый из них выше плана автора, а шаг при одних
+    копящихся находках, а затем при одном конфликте говорил «работы нет».
+    """
+    owed = {one: one == source for one in debt.BEFORE_PLAN}
+    assert debt.before_plan(owed) is (source is not None)
+
+
+@pytest.mark.parametrize("owed", [True, False])
+def test_the_reminder_names_the_debt_sources_from_the_declaration(
+    owed: bool, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Одни копящиеся находки — источник 5, он выше плана автора: «долга нет» не печатается.
+    """Напоминание называет источники долга из `BEFORE_PLAN`, а не рукописным «3 и 5» (005)."""
+    debt.remind(owed)
+    said = capsys.readouterr().out
+    assert f"источники {debt.sources_said()}" in said
+    assert debt.sources_said() == ", ".join(str(one) for one in debt.BEFORE_PLAN)
 
-    Сборщик плана ставит их в раздел 5, а шаг долга при них говорил «работа по
-    плану» — два механизма по-разному читали один порядок (взгляд на #1236).
+
+def test_every_read_channel_is_read_by_the_step() -> None:
+    """Канал из `READ` шаг на деле читает: его функция зовётся в `main` (взгляд на #1256).
+
+    Иначе строка в `READ` закрывала бы сверку каналов, а шаг выдавал бы
+    непрочитанное за пустоту (195).
     """
-    assert debt.before_plan(left=left, kept=kept, lagging=lagging, rules=rules) is owed
+    main = function_named(ROOT / "scripts" / "debt.py", "main")
+    called = {call_name(node) for node in ast.walk(main) if isinstance(node, ast.Call)}
+    missing = sorted(set(debt.READ.values()) - called)
+    assert not missing, f"`READ` называет чтение, которого `main` не делает: {missing}"
 
 
-#: Каналы раздела 5, которые шаг долга ЧИТАЕТ САМ, — с тем, чем он их читает.
-#: Вместе с `debt.NOT_READ` они обязаны покрыть кортеж `parts` целиком: имя
-#: без строки ни там, ни здесь краснеет, а не отбрасывается (взгляд на #1256).
-READ_BY_STEP: Final = {
-    "work_plan.rules_part": "правила — те же «входящие», `debt.rules_left`",
-    "work_plan.sources:kept_part": "копящиеся находки — `debt.accrued`",
-}
+def producers_in_main() -> dict[str, set[str]]:
+    """Имя прочитанного → чтецы, которыми `main` его получил: присваиванием или в словаре."""
+    main = function_named(ROOT / "scripts" / "debt.py", "main")
+    made: dict[str, set[str]] = {}
+    for node in ast.walk(main):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            for target in node.targets:
+                names = target.elts if isinstance(target, ast.Tuple) else [target]
+                for one in names:
+                    if isinstance(one, ast.Name):
+                        made.setdefault(one.id, set()).add(call_name(node.value))
+    for key, value in zip(decision_call().keys, decision_call().values, strict=True):
+        if isinstance(key, ast.Constant) and isinstance(value, ast.Call):
+            made.setdefault(str(key.value), set()).add(call_name(value))
+    return made
+
+
+def test_source_five_is_fed_by_the_read_channels() -> None:
+    """Источник 5 решает то, что получено чтецами `READ`, и только оно (взгляд на #1260).
+
+    Сверка «функция зовётся в `main`» не видела, что из неё получено: строка в
+    `READ` пережила бы смену чтеца молча.
+    """
+    made = producers_in_main()
+    readers = set(debt.READ.values())
+    for name in debt.FED_BY[5]:
+        assert made.get(name, set()) & readers, f"«{name}» получен не чтецом из `READ`"
+    fed = {reader for name in debt.FED_BY[5] for reader in made.get(name, set())}
+    assert readers <= fed, f"чтец из `READ` источник 5 не кормит: {sorted(readers - fed)}"
 
 
 def source_five_channels(text: str) -> set[str]:
@@ -269,7 +488,10 @@ def source_five_channels(text: str) -> set[str]:
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "sources"
     )
-    named: dict[str, str] = {}
+    # ВСЕ ПРИСВАИВАНИЯ ИМЕНИ, А НЕ ПОСЛЕДНЕЕ: чтец, обёрнутый в try с запасным
+    # `Source(unread=…)`, как у `kept_part`, иначе читался бы запасом
+    # (взгляд на #1256).
+    named: dict[str, set[str]] = {}
     parts: list[ast.expr] = []
     for node in ast.walk(sources):
         if not isinstance(node, ast.Assign) or not isinstance(node.targets[0], ast.Name):
@@ -281,30 +503,29 @@ def source_five_channels(text: str) -> set[str]:
             # Обе формы имени вызова: `drift_part(...)` и `work_plan.drift_part(...)`.
             call = node.value.func
             if isinstance(call, ast.Name):
-                named[target] = call.id
+                named.setdefault(target, set()).add(call.id)
             elif isinstance(call, ast.Attribute):
-                named[target] = call.attr
+                named.setdefault(target, set()).add(call.attr)
     assert parts, "раздел 5 в `work_plan.sources` больше не собирается кортежем `parts`"
     channels: set[str] = set()
     for one in parts:
         assert isinstance(one, ast.Name), f"в `parts` не имя: {ast.unparse(one)}"
         assert one.id in named, f"канал раздела 5 «{one.id}» не присвоен вызовом в `sources`"
-        reader = named[one.id]
-        channels.add(
-            f"work_plan.{reader}" if reader.endswith("_part") else f"work_plan.sources:{one.id}"
-        )
+        readers = sorted(name for name in named[one.id] if name.endswith("_part"))
+        assert len(readers) <= 1, f"канал «{one.id}» читают два чтеца: {readers}"
+        channels.add(f"work_plan.{readers[0]}" if readers else f"work_plan.sources:{one.id}")
     return channels
 
 
 def test_the_unread_channels_are_the_plans_other_readers() -> None:
-    """`NOT_READ` и `READ_BY_STEP` вместе — ровно каналы раздела 5 (взгляды на #1245, #1256).
+    """`NOT_READ` и `READ` вместе — ровно каналы раздела 5 (взгляды на #1245, #1256).
 
     Новый канал раздела 5, не названный ни там, ни здесь, краснеет: иначе шаг
     снова молча выдал бы непрочитанное за пустоту (195).
     """
     text = (ROOT / "scripts" / "work_plan.py").read_text(encoding="utf-8")
-    assert not set(debt.NOT_READ.values()) & set(READ_BY_STEP), "канал назван дважды"
-    assert source_five_channels(text) == set(debt.NOT_READ.values()) | set(READ_BY_STEP)
+    assert not set(debt.NOT_READ.values()) & set(debt.READ), "канал назван дважды"
+    assert source_five_channels(text) == set(debt.NOT_READ.values()) | set(debt.READ)
 
 
 @pytest.mark.parametrize(
@@ -386,8 +607,8 @@ def test_an_advisory_red_switches_the_reminder_on() -> None:
     Работа помечена закрытой, а часть её не работает. Это то же основание, по
     которому выше плана стоят находки.
     """
-    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
-    assert "bool(lagging)" in source, "совещательное красное в решение о долге не входит"
+    read = debt.checked({one: one == "lagging" for one in debt.read_names()})
+    assert debt.owed_by(read)[3], "совещательное красное в решение о долге не входит"
 
 
 def test_a_frozen_queue_is_not_called_a_debt() -> None:
@@ -397,8 +618,7 @@ def test_a_frozen_queue_is_not_called_a_debt() -> None:
     решает — решает починка. Напоминание «сделай долг раньше плана» здесь
     сказало бы не то (051).
     """
-    source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
-    assert "bool(holding)" not in source, "заморозка объявлена долгом перед планом"
+    assert "holding" not in debt.read_names(), "заморозка объявлена долгом перед планом"
 
 
 # --- задача, выглядящая готовой ----------------------------------------------
@@ -634,6 +854,20 @@ def test_an_unknown_merge_state_is_not_a_clean_one(monkeypatch: pytest.MonkeyPat
     assert unknown == ["#6 — работа"]
 
 
+def test_an_unknown_merge_state_is_still_asked_for_red(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красное от состояния слияния не зависит: неизвестное спрашивается и о нём (#1260)."""
+    listing = [{"number": 6, "title": "работа", "draft": False, "head": {"sha": "abc"}}]
+    runs = [{"name": "test", "status": "completed", "conclusion": "failure"}]
+
+    def request(method: str, path: str, *_: object, **__: object) -> object:
+        return {"mergeable_state": "unknown"} if path == "repos/o/r/pulls/6" else None
+
+    monkeypatch.setattr(debt.ghrest, "request", request)
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing, runs))
+    _, unknown, red = debt.stuck_changes("o/r", "token")
+    assert unknown == red == ["#6 — работа"]
+
+
 def test_a_draft_is_not_stuck(monkeypatch: pytest.MonkeyPatch) -> None:
     """Черновик застрять не может: он и не подан."""
     listing = [{"number": 7, "title": "черновик", "draft": True, "head": {"sha": "abc"}}]
@@ -844,10 +1078,21 @@ def test_the_revision_counts_before_and_after_the_counter_apart() -> None:
     assert "до счётчика пунктов" in said and task_shape.ITEMS_SINCE in said
 
 
+@pytest.mark.parametrize(
+    ("unknown", "outcome"),
+    [([], "EXIT_OK"), (["#6 — работа"], "EXIT_PARTIAL")],
+    ids=["всё-прочитано", "слияние-не-сказано"],
+)
 def test_a_fully_read_debt_is_clean(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    unknown: list[str],
+    outcome: str,
 ) -> None:
     """Все источники долга прочитаны — чистый исход, а не «частично».
+
+    Несказанное состояние слияния — источник 1 прочитан не весь, и это тот же
+    исход «прочитано не всё»: строка без кода проходила зелёной (взгляд на #1267).
 
     «Прочитано всё» и «часть неизвестна» — разные состояния, и второе у этого
     шага уже прогонялось, а первое было объявлено и не проверялось ни разу
@@ -862,7 +1107,7 @@ def test_a_fully_read_debt_is_clean(
     monkeypatch.setattr(
         debt, "inbox_body", lambda repo, token, closed, listed: ("правила: осталось 0", "", None)
     )
-    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
+    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], unknown, []))
     monkeypatch.setattr(debt, "looks_done", lambda issues: [])
     monkeypatch.setattr(debt.items_left, "look", lambda issues, opener: ([], []))
     monkeypatch.setattr(debt.task_shape, "without_a_checklist", lambda issues: [])
@@ -889,7 +1134,7 @@ def test_a_fully_read_debt_is_clean(
         raise AssertionError("изолированный прогон ушёл в сеть")
 
     monkeypatch.setattr(debt.coverage_floor.ghrest, "request", no_network)
-    assert debt.main(["--repo", "o/r"]) == debt.EXIT_OK
+    assert debt.main(["--repo", "o/r"]) == getattr(debt, outcome)
     assert "слито без внешнего взгляда: 0" in capsys.readouterr().out
 
 

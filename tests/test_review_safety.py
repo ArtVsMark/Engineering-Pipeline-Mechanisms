@@ -385,8 +385,45 @@ def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
 #: сценарии хуков и `SKILL.md` навыков, — любой другой путь под `.claude/` и любой
 #: `.mcp.json` в дереве дают отказ, а навык не объявляет `allowed-tools`.
 CLAUDE_TREE: Final = re.compile(r"\.claude/(?:settings\.json|hooks/[^/]+|skills/[^/]+/SKILL\.md)")
-#: Права навыку объявляет его шапка; в наших навыках их нет, и не будет молча.
-GRANTS_RE: Final = re.compile(r"^allowed-tools\s*:", re.M)
+#: Ключи шапки навыка — ЗАКРЫТЫЙ перечень (068): имя и описание. Права навыку
+#: выдаёт его шапка — `allowed-tools`, а соседние ключи могут давать свои
+#: (например, хуки); перечислять запрещённое значит гадать, разрешённое —
+#: замерить: на 09.10.2026 все навыки дерева несут ровно эти два ключа. Шапка
+#: разбирается YAML-ом, а не образцом по началу строки: ключ в кавычках или со
+#: сдвигом образец не видел — вторая находка по одному месту, строгое правило
+#: вместо третьей формы (взгляды на #1251, 210).
+SKILL_HEAD_KEYS: Final = frozenset({"name", "description"})
+#: Закрытие шапки — РОВНО строка `---`, и это строгое правило, а не форма
+#: разбора (210). Как режет шапку Claude Code, в дереве не замерено (взгляд на
+#: #1262), а прочтений много: по началу строки (`---x: 1` обрывал шапку и
+#: прятал `allowed-tools` за собой), строкой целиком, строкой с хвостовым
+#: пробелом (`--- ` — и `allowed-tools` после неё видел бы потребитель, режущий
+#: по ровному `---`; взгляд на #1296). Сравнивать их попарно — четвёртая форма.
+#: Поэтому гейт требует, чтобы ПЕРВАЯ строка шапки, начинающаяся с `---`, была
+#: ровно `---`: тогда любое из прочтений кончается на ней, и ключи у всех одни.
+HEAD_CLOSE: Final = "---"
+#: Строка, начинающаяся с `---`, — кандидат в конец шапки при любом прочтении.
+HEAD_FENCE_RE: Final = re.compile(r"^---.*$", re.M)
+
+
+def head_is_unambiguous(text: str) -> bool:
+    """Первая строка шапки, начинающаяся с `---`, — ровно `---`: конец один при любом прочтении."""
+    fence = HEAD_FENCE_RE.search(text, 4)
+    return fence is not None and fence.group() == HEAD_CLOSE
+
+
+def skill_head_keys(text: str) -> set[str] | None:
+    """Ключи шапки навыка, разобранные YAML; ``None`` — шапки нет или она не разбирается."""
+    if not text.startswith("---\n"):
+        return None
+    fence = HEAD_FENCE_RE.search(text, 4)
+    if fence is None:
+        return None
+    try:
+        said = yaml.safe_load(text[4 : fence.start()])
+    except yaml.YAMLError:
+        return None
+    return {str(key) for key in said} if isinstance(said, dict) else None
 
 
 def tracked_channels(root: Path = ROOT) -> set[str]:
@@ -403,16 +440,24 @@ def tracked_channels(root: Path = ROOT) -> set[str]:
 
 
 def tree_channel_problems(root: Path = ROOT) -> list[str]:
-    """Пути вне перечня `CLAUDE_TREE` и навыки, объявляющие себе права."""
+    """Пути вне перечня `CLAUDE_TREE` и навыки, чья шапка шире `SKILL_HEAD_KEYS`."""
     tracked = sorted(tracked_channels(root))
     problems = [
         f"канал прав агента вне перечня: {one}" for one in tracked if not CLAUDE_TREE.fullmatch(one)
     ]
     for one in tracked:
         if one.endswith("/SKILL.md"):
-            head = (root / one).read_text(encoding="utf-8").split("\n---", 1)[0]
-            if GRANTS_RE.search(head):
-                problems.append(f"навык объявляет себе права: {one}")
+            text = (root / one).read_text(encoding="utf-8")
+            keys = skill_head_keys(text)
+            if keys is not None and not head_is_unambiguous(text):
+                problems.append(
+                    f"шапка навыка кончается по-разному при двух прочтениях `---`: {one}"
+                )
+            elif keys is None:
+                problems.append(f"шапка навыка не разобрана — права не сверить: {one}")
+            elif keys - SKILL_HEAD_KEYS:
+                extra = ", ".join(sorted(keys - SKILL_HEAD_KEYS))
+                problems.append(f"шапка навыка шире перечня ({extra}): {one}")
     return problems
 
 
@@ -421,8 +466,41 @@ def test_no_other_settings_channel_is_tracked() -> None:
 
     ПРЕДЕЛ НАЗВАН: судится ОТСЛЕЖИВАЕМОЕ — в чекауте прогона только оно и есть,
     а неотслеживаемый `settings.local.json` в окне агенту CI не виден.
+
+    ВТОРОЙ ПРЕДЕЛ (взгляды на #1262, #1296): шапка навыка судится СВОИМ
+    разбором — YAML до первой строки, начинающейся с `---`. Где кончается
+    шапка, гейт не угадывает: эта строка обязана быть ровно `---`
+    (`head_is_unambiguous`), и тогда по ней остановится любой разрезающий —
+    по началу строки, строкой целиком, с хвостовым пробелом или без. Как
+    разбирает сам YAML потребитель, гейт не знает.
     """
     assert not tree_channel_problems(), tree_channel_problems()
+
+
+@pytest.mark.parametrize(
+    ("text", "unambiguous"),
+    [
+        ("---\nname: a\ndescription: b\n---\nтекст\n", True),
+        ("---\nname: a\n---x: 1\nallowed-tools: Edit\n---\n", False),
+        ("---\nname: a\n----\n---\n", False),
+        ("---\nname: a\n", False),
+        ("---\nname: a\n--- \nallowed-tools: Bash\n---\n", False),
+        ("---\nname: a\n---\t\n", False),
+        ("---\nname: a\n---\r\n", False),
+    ],
+    ids=[
+        "ровная",
+        "ключ-с-тремя-дефисами",
+        "четыре-дефиса",
+        "не-закрыта",
+        "хвостовой-пробел",
+        "хвостовая-табуляция",
+        "возврат-каретки",
+    ],
+)
+def test_a_skill_head_must_close_the_same_both_ways(text: str, unambiguous: bool) -> None:
+    """Первая строка шапки на `---` — ровно `---`, или отказ (взгляды на #1262, #1296, 210)."""
+    assert head_is_unambiguous(text) is unambiguous
 
 
 def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
@@ -443,6 +521,13 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
         ".mcp.json": "{}",
         "sub/.mcp.json": "{}",
         ".claude/skills/bad/SKILL.md": "---\nname: bad\nallowed-tools: Bash\n---\n",
+        ".claude/skills/quoted/SKILL.md": '---\nname: q\n"allowed-tools": Bash\n---\n',
+        ".claude/skills/shifted/SKILL.md": "---\n  name: s\n  allowed-tools: Bash\n---\n",
+        ".claude/skills/hooks/SKILL.md": "---\nname: h\nhooks: {}\n---\n",
+        ".claude/skills/broken/SKILL.md": "---\nname: [\n---\n",
+        ".claude/skills/headless/SKILL.md": "# без шапки\n",
+        ".claude/skills/early/SKILL.md": "---\nname: e\n---x: 1\nallowed-tools: Bash\n---\n",
+        ".claude/skills/late/SKILL.md": "---\nname: l\n--- \nallowed-tools: Bash\n---\n",
     }
     for name, text in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -459,6 +544,13 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
             ".mcp.json",
             "sub/.mcp.json",
             ".claude/skills/bad/SKILL.md",
+            ".claude/skills/quoted/SKILL.md",
+            ".claude/skills/shifted/SKILL.md",
+            ".claude/skills/hooks/SKILL.md",
+            ".claude/skills/broken/SKILL.md",
+            ".claude/skills/headless/SKILL.md",
+            ".claude/skills/early/SKILL.md",
+            ".claude/skills/late/SKILL.md",
         ]
     ), said
 
@@ -1883,6 +1975,233 @@ def test_a_matrix_of_agents_runs_as_a_wave_not_a_salvo() -> None:
             f"«{name}»: матрица агентов идёт по {size or 'без предела'} разом — "
             "волна обязана быть объявлена числом, а залп сам себе создаёт отказ"
         )
+
+
+#: Выражение площадки внутри текста: `${{ … }}`.
+EXPRESSION: Final = re.compile(r"\$\{\{\s*(.*?)\s*\}\}", re.S)
+
+#: Вход «дифф изменения»: джоб идёт ТОЛЬКО на событии одного изменения.
+ONE_CHANGE: Final = "github.event_name == 'pull_request'"
+
+#: Вход «одна находка»: джоб идёт ТОЛЬКО с названным отпечатком из кнопки.
+ONE_MARK: Final = "inputs.mark != ''"
+
+#: Ось матрицы, у которой ячейка — ОДНО изменение.
+ONE_PR_AXIS: Final = "pr"
+
+
+def conjuncts(condition: str) -> set[str]:
+    """Условия, которые выражение `if:` требует ВСЕ сразу.
+
+    Разбор идёт по верхнему уровню скобок и мимо строк в кавычках: `&&` внутри
+    `contains(…)` — не условие джоба. Есть на верхнем уровне `||` — не
+    гарантировано ни одно, и ответ пуст: «идёт на изменении ИЛИ по расписанию»
+    не обещает, что дифф один.
+    """
+    parts: list[str] = []
+    depth, quoted, start, place = 0, False, 0, 0
+    text = " ".join(condition.split())
+    while place < len(text):
+        char = text[place]
+        if char == "'":
+            quoted = not quoted
+        elif not quoted and char == "(":
+            depth += 1
+        elif not quoted and char == ")":
+            depth -= 1
+        elif not quoted and depth == 0 and text.startswith(("&&", "||"), place):
+            if text[place] == "|":
+                return set()
+            parts.append(text[start:place])
+            start = place + 2
+            place += 1
+        place += 1
+    parts.append(text[start:])
+    return {part.strip() for part in parts}
+
+
+def names_the_mark(job: dict[str, Any], prompt: str) -> bool:
+    """Задание берёт находку у шага, который читает её ПО ОТПЕЧАТКУ из кнопки.
+
+    Шаг-источник несёт `inputs.mark` в окружении и отдаёт его разбору реестра
+    доводом `--tell` — одна запись, а не реестр целиком. Задание обязано читать
+    выход именно этого шага: отпечаток в условии джоба, которого агент не
+    видит, вход не сужает.
+    """
+    read = {
+        expression.split(".")[1]
+        for expression in EXPRESSION.findall(prompt)
+        if expression.startswith("steps.")
+    }
+    told = False
+    for step in job.get("steps") or []:
+        if step.get("id") not in read:
+            continue
+        carried = [
+            key
+            for key, value in (step.get("env") or {}).items()
+            if EXPRESSION.findall(str(value)) == ["inputs.mark"]
+        ]
+        for line in str(step.get("run") or "").splitlines():
+            if "review_findings.py" not in line:
+                continue
+            words = shlex.split(line, comments=True)
+            if any(
+                word == "--tell" and words[at + 1 : at + 2] == [f"${key}"]
+                for at, word in enumerate(words)
+                for key in carried
+            ):
+                told = True
+            else:
+                # Читаемый заданием шаг отдаёт реестр не по отпечатку: одна
+                # запись рядом с реестром целиком вход не сужает (взгляд на #1286).
+                return False
+    return told
+
+
+def zone_faults(job: dict[str, Any], step: dict[str, Any]) -> list[str]:
+    """Чем вход шага агента шире ОДНОГО предмета; пусто — вход по правилу 034.
+
+    Входы перечислены, а не исключены (068): дифф одного изменения, одна
+    находка по отпечатку, одна ячейка матрицы изменений. Третьего рода вход
+    краснеет как неназванный, пока его не назовут здесь.
+    """
+    prompt = str((step.get("with") or {}).get("prompt") or "")
+    said = EXPRESSION.findall(prompt)
+    required = conjuncts(str(job.get("if") or ""))
+    matrix = (job.get("strategy") or {}).get("matrix")
+    subjects = []
+    if ONE_CHANGE in required:
+        subjects.append("дифф изменения")
+    if ONE_MARK in required and names_the_mark(job, prompt):
+        subjects.append("находка по отпечатку")
+    if matrix is not None:
+        subjects.append("ячейка матрицы")
+    faults = []
+    if len(subjects) != 1:
+        faults.append(
+            f"вход назван {len(subjects)} раз ({', '.join(subjects) or 'ни разу'}), а нужен один"
+        )
+    if matrix is not None:
+        if set(matrix) != {ONE_PR_AXIS}:
+            faults.append(f"матрица не одна ось «{ONE_PR_AXIS}»: {sorted(matrix)}")
+        if f"matrix.{ONE_PR_AXIS}" not in said:
+            faults.append(f"задание не называет свою ячейку `matrix.{ONE_PR_AXIS}`")
+    whole = [
+        one
+        for one in said
+        if "fromJSON" in one or (one.startswith("matrix.") and one != f"matrix.{ONE_PR_AXIS}")
+    ]
+    if whole:
+        faults.append(f"задание получает список, а не предмет: {whole}")
+    return faults
+
+
+def test_each_agent_in_the_look_takes_one_subject() -> None:
+    """Вход каждого шага агента во взгляде — ОДИН предмет, и он назван.
+
+    Правило [034](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/034-small-zone-per-executor.md):
+    зона одного исполнителя мала. Здесь она задана формой прогона — входом
+    запуска, — и до этой проверки её расширение не краснело нигде: вторая ось
+    матрицы, `||` в условии джоба или задание без отпечатка прошли бы молча.
+
+    ЧТО ЗНАЧИТ «ОДИН». `review` идёт только на событии изменения — дифф один;
+    `verify` идёт только с отпечатком из кнопки, и задание читает выход шага,
+    отдавшего разбору реестра `--tell "$MARK"`, — находка одна; `late-look` —
+    матрица ровно по оси `pr`, и задание называет `matrix.pr` — изменение одно
+    на ячейку. Сколько ячеек идёт разом, держит соседняя проверка волны (031),
+    не эта.
+
+    ЗАМЕР 09.10.2026 ПО ВСЕМУ ДЕРЕВУ: шагов агента пять в трёх прогонах; в
+    `step-review.yml` их три, и вход по правилу у трёх из трёх.
+
+    СУЖЕНИЕ НАЗЫВАЕТ СОСЕДЕЙ (195). Ответ на обращение в `claude.yml` берёт
+    вход от упоминания — его зону задаёт человек текстом, а не прогон; разбор
+    слитого против задачи в `step-task-items.yml` — свой предмет со своим
+    входом. Оба вне этой проверки: их вход не из трёх родов выше, и судить его
+    этими родами значило бы краснеть на чужом.
+    """
+    jobs = load(LOOK_BODY)["jobs"]
+    agents = [
+        (name, job, step)
+        for name, job in jobs.items()
+        for step in job.get("steps") or []
+        if "claude_args" in (step.get("with") or {})
+    ]
+    assert agents, "шагов агента во взгляде нет — предмета у проверки нет (075)"
+    wide = {
+        f"{name}/{step.get('id') or step.get('name')}": faults
+        for name, job, step in agents
+        if (faults := zone_faults(job, step))
+    }
+    assert not wide, f"{LOOK_BODY.name}: вход шага агента шире одного предмета: {wide}"
+
+
+CELL: Final = "${{ matrix.pr }} ${{ env.X }}"
+PLAIN: Final = "${{ env.X }}"
+
+
+@pytest.mark.parametrize(
+    ("job", "prompt", "wide"),
+    [
+        ({"if": ONE_CHANGE}, PLAIN, False),
+        ({"if": f"{ONE_CHANGE} && github.head_ref != 'a||b'"}, PLAIN, False),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, CELL, False),
+        ({"if": f"{ONE_CHANGE} || github.event_name == 'schedule'"}, PLAIN, True),
+        ({"if": "github.event_name == 'workflow_dispatch'"}, PLAIN, True),
+        ({"if": ONE_CHANGE, "strategy": {"matrix": {"pr": "[1]"}}}, CELL, True),
+        ({"strategy": {"matrix": {"pr": "[1]", "os": "[a]"}}}, CELL, True),
+        ({"if": f"{ONE_MARK} && contains('a||b', 'a')"}, PLAIN, True),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, PLAIN, True),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, CELL + " ${{ fromJSON(env.ALL) }}", True),
+    ],
+    ids=[
+        "change",
+        "quoted-or",
+        "cell",
+        "change-or-schedule",
+        "no-subject",
+        "two-subjects",
+        "two-axes",
+        "mark-unread",
+        "cell-unnamed",
+        "cell-and-list",
+    ],
+)
+def test_a_wider_zone_is_named(job: dict[str, Any], prompt: str, wide: bool) -> None:
+    """Расширение зоны каждого рода краснеет; верный вход — нет.
+
+    `quoted-or` держит разбор кавычек: `||` внутри строки на верхнем уровне —
+    не вторая ветка условия, и снятие учёта кавычек здесь покраснеет. Внутри
+    скобок его отсекала бы глубина, а не кавычки (взгляд на #1286).
+    """
+    step = {"with": {"claude_args": "", "prompt": prompt}}
+    assert bool(zone_faults(job, step)) is wide
+
+
+def test_the_mark_counts_only_when_the_task_reads_it() -> None:
+    """Отпечаток в условии джоба — вход, только если задание читает его находку.
+
+    Без этого `verify` зеленел бы и тогда, когда агенту отдан реестр целиком,
+    а отпечаток остался в `if:`, которого агент не видит.
+    """
+    source = {
+        "id": "subject",
+        "env": {"MARK": "${{ inputs.mark }}"},
+        "run": 'python scripts/review_findings.py --tell "$MARK" >out\n',
+    }
+    job = {"if": f"github.event_name == 'workflow_dispatch' && {ONE_MARK}", "steps": [source]}
+    reads = {"with": {"claude_args": "", "prompt": "${{ steps.subject.outputs.title }}"}}
+    blind = {"with": {"claude_args": "", "prompt": "весь реестр"}}
+    assert not zone_faults(job, reads)
+    assert zone_faults(job, blind)
+    source["run"] = "python scripts/review_findings.py --list >out\n"
+    assert zone_faults(job, reads)
+    source["run"] = (
+        'python scripts/review_findings.py --tell "$MARK" >out\n'
+        "python scripts/review_findings.py --list >all\n"
+    )
+    assert zone_faults(job, reads), "одна запись рядом с реестром целиком — не сужение"
 
 
 #: Предел размера ответа — из общего места, а не своей копией числа (022, 115).
