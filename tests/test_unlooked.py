@@ -572,10 +572,30 @@ def test_a_cancelled_review_is_not_a_missing_one() -> None:
     assert module.why_quiet(runs) == module.STATE_CANCELLED
 
 
-def test_a_running_review_is_not_a_missing_one() -> None:
-    """Прогон ещё идёт — вердикта нет и не должно быть: спрашивать рано."""
-    runs = [{"name": module.REVIEW_CHECKS[0], "status": "in_progress", "conclusion": None}]
+@pytest.mark.parametrize("status", ["in_progress", "queued", "waiting", "pending"])
+def test_a_running_review_is_not_a_missing_one(status: str) -> None:
+    """Прогон идёт или ждёт — вердикта нет и не должно быть: спрашивать рано (007).
+
+    Ждущий заход — тот же предмет, что идущий: «взгляда не было» про него
+    сказать нельзя. Статусы ожидания площадки закреплены поимённо, а не
+    одним `in_progress` (взгляд на #1284).
+    """
+    runs = [{"name": module.REVIEW_CHECKS[0], "status": status, "conclusion": None}]
     assert module.why_quiet(runs) == module.STATE_RUNNING
+
+
+def test_a_review_waiting_for_approval_is_named_not_missed() -> None:
+    """`action_required` — заход ждёт разрешения человека: назван словом площадки (007).
+
+    Это ровно исход, из-за которого перевёрнут ответ 007: агент остановился на
+    запросе разрешения. Он не сводится ни к «взгляда не было», ни к «упал».
+    """
+    runs = [
+        {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "action_required"}
+    ]
+    said = module.why_quiet(runs)
+    assert said.startswith(module.STATE_ODD)
+    assert "action_required" in said
 
 
 def test_a_failure_still_outranks_the_rest() -> None:
