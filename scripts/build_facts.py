@@ -29,12 +29,14 @@
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import shutil
 import sys
 from collections import Counter
 from collections.abc import Callable
+from html import escape
 from pathlib import Path
 from typing import Any, Final, NamedTuple
 
@@ -444,7 +446,7 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
 
 def published_names() -> list[str]:
     """Всё, что сборка кладёт в каталог публикации: факты и значки."""
-    return [FACTS, *BADGES]
+    return [FACTS, *BADGES, *AHEAD]
 
 
 #: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
@@ -564,6 +566,168 @@ def family_badge(facts: dict[str, Any]) -> Badge:
     return badge("общие механизмы", f"{called} · {gate}", "#4c1" if took or ours else "#dfb317")
 
 
+#: Что значок проекта говорит на месте числа, которого нет: незнание — не ноль (045).
+UNREAD_PART: Final = "не прочитано"
+
+#: ЗНАЧОК ПРОЕКТА РИСУЕТСЯ ТЕМ ЖЕ ВИДОМ, ЧТО ЕДИНЫЙ ЗНАЧОК КАТАЛОГА (решение
+#: владельца 09.10.2026): зоны со своей подписью, просвет между зонами,
+#: палитра GitHub. Рисовалка — копия `scripts/python_badge.py::рисунок`
+#: каталога: действия «нарисовать произвольные зоны» у каталога нет, а строка
+#: shields с тремя числами через точку читалась плохо. Копия названа здесь,
+#: чтобы её было видно. Палитра — значения каталога на 09.10.2026
+#: (`СОСТОЯНИЯ`, `ПОДПИСЬ`, `ЦВЕТ_ПОКРЫТИЯ`); сверки с каталогом нет — его кода
+#: в нашем дереве нет, и расхождение вида видно глазом рядом с `python.svg`.
+#: Часть значка: надпись, цвет, слово для подсказки.
+Part = tuple[str, str, str]
+#: Цвета частей — палитра каталога (GitHub), а не shields.
+LABEL_COLOR: Final = "#444d56"
+GREEN: Final = "#2da44e"
+YELLOW: Final = "#bf8700"
+RED: Final = "#cf222e"
+GREY: Final = "#8c959f"
+#: Просвет между зонами, как у каталога.
+ZONE_GAP: Final = 4
+
+
+def part_width(text: str) -> int:
+    """Ширина надписи шрифтом 11px Verdana — приближение, как у shields и каталога."""
+    return round(len(text) * 7.2) + 14
+
+
+def drawing(zones: list[list[Part]]) -> str:
+    """SVG из зон: каждая зона — скруглённая полоса своих частей (вид каталога)."""
+    hint = "; ".join(f"{text}: {word}" for zone in zones for text, _, word in zone if word)
+    mark = hashlib.sha1(repr(zones).encode("utf-8")).hexdigest()[:8]
+    x = 0
+    clips: list[str] = []
+    rects: list[str] = []
+    seams: list[str] = []
+    texts: list[str] = []
+    for number, zone in enumerate(zones):
+        start = x
+        for index, (text, color, _) in enumerate(zone):
+            width = part_width(text)
+            rects.append(
+                f'<rect x="{x}" width="{width}" height="20" fill="{color}" '
+                f'clip-path="url(#z{mark}{number})"/>'
+            )
+            if index:
+                seams.append(
+                    f'<rect x="{x - 1}" width="1" height="20" fill="#fff" fill-opacity=".7"/>'
+                )
+            middle = x + width / 2
+            texts.append(
+                f'<text x="{middle}" y="15" fill="#010101" fill-opacity=".3">{escape(text)}</text>'
+                f'<text x="{middle}" y="14">{escape(text)}</text>'
+            )
+            x += width
+        clips.append(
+            f'<clipPath id="z{mark}{number}"><rect width="{x - start}" height="20" '
+            f'rx="3" x="{start}"/></clipPath>'
+        )
+        x += ZONE_GAP
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{x - ZONE_GAP}" height="20" '
+        f'role="img" aria-label="{escape(hint)}">'
+        f"<title>{escape(hint)}</title>{''.join(clips)}"
+        f"<g>{''.join(rects)}{''.join(seams)}</g>"
+        '<g fill="#fff" text-anchor="middle" '
+        'font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">'
+        f"{''.join(texts)}</g></svg>\n"
+    )
+
+
+def counted(numerator: int, denominator: int, *, known: bool = True) -> str:
+    """Число с числителем и знаменателем и справа процент: «66/195 · 34%» (владелец, 09.10.2026).
+
+    Доли нет — «—»: пустой знаменатель или часть знаменателя не прочитана
+    (``known=False``) — процент утверждал бы о неизвестном (045).
+    """
+    share = f"{round(100 * numerator / denominator)}%" if denominator and known else "—"
+    return f"{numerator}/{denominator} · {share}"
+
+
+def share_color(numerator: int, denominator: int, *, known: bool = True) -> str:
+    """Цвет доли: красный ниже трети, жёлтый ниже двух третей, иначе зелёный.
+
+    Доли нет — серый, как незнание, а не красный, как плохой исход (045, взгляд
+    на #1259): пустой знаменатель или непрочитанная часть его.
+    """
+    if not denominator or not known:
+        return GREY
+    share = numerator / denominator
+    return RED if share < 0.34 else YELLOW if share < 0.67 else GREEN
+
+
+def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
+    """Значок проекта зонами: правила машиной и семья — проекты и гейты в ходу.
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 08.10.2026 (#1212, #1213). Один значок заменяет два —
+    «держится машиной» (`rules.json`) и «общие механизмы» (`family.json`), — и
+    несёт только числа, каждое с числителем и знаменателем. «Кем» — поимённо
+    в фактах (`family.uptake.by`), а не в значке. Вид — как у единого значка
+    каталога, справа от каждого числа — его процент (решения владельца
+    09.10.2026). Пока витрина показывает прежние два значка, этот рисуется
+    рядом (`AHEAD`): переход — вторым изменением (196).
+
+    «ГЕЙТ В ХОДУ» — ПО ВЫЗОВУ НАШЕГО ШАГА ПО ТЕГУ (#1199): отдаваемый шаг,
+    который зовёт хотя бы один проект семьи. Объявленное потребителем
+    происхождение гейта (каталог, ArtVsMark/Engineering-Incidents-Playbook#701)
+    в счёт не входит, пока его нет; разрез `family.adopted` остаётся в фактах.
+
+    Непрочитанный обход клонов — серое «не прочитано» на месте чисел семьи, а
+    не ноль; непрочитанные клоны названы числом рядом (045). Цвет числа — по
+    его доле.
+
+    ПОЧЕМУ НЕ «ОТВЕЧЕНО». Прежняя редакция показывала `answered/total` и
+    подписывала это «правил держится». Число было `195/195` и не могло стать
+    другим: проект отвечает по каждому правилу каталога по построению (129).
+    Значок, который не движется, — украшение: он не говорит, где проект стоит, и
+    не может сказать, что тот сдвинулся.
+
+    ЗНАМЕНАТЕЛЬ — ДЕЙСТВУЮЩИЕ, А НЕ ВСЕ. Неприменимое правило машиной не
+    держится и держаться не должно; считать его в знаменателе значило бы
+    занижать долю за то, у чего нет предмета (154).
+    """
+    kinds = facts["rules"]["by_mechanism"]
+    machine = sum(int(count) for name, count in kinds.items() if name in MACHINE)
+    active = sum(int(count) for count in kinds.values())
+    rules = [
+        ("правила", LABEL_COLOR, ""),
+        (
+            f"машиной {counted(machine, active)}",
+            share_color(machine, active),
+            "правил каталога держится машиной",
+        ),
+    ]
+    taken = (facts.get("family") or {}).get("uptake") or {}
+    if not taken.get("read"):
+        family_zone = [
+            ("семья", LABEL_COLOR, ""),
+            (f"проектов {UNREAD_PART}", GREY, "обход клонов семьи не прочитан"),
+            (f"гейтов {UNREAD_PART}", GREY, "обход клонов семьи не прочитан"),
+        ]
+        return [rules, family_zone]
+    projects, steps = taken["projects"], taken["steps"]
+    took, of = int(projects["took"]), int(projects["of"])
+    unread = f" ({projects['unread']} {UNREAD_PART})" if projects.get("unread") else ""
+    gates, offered = int(steps["taken"]), int(steps["of"])
+    family_zone = [
+        ("семья", LABEL_COLOR, ""),
+        (
+            f"проектов {counted(took, of, known=not unread)}{unread}",
+            share_color(took, of, known=not unread),
+            "проектов семьи зовут наш шаг по тегу",
+        ),
+        (
+            f"гейтов {counted(gates, offered)}",
+            share_color(gates, offered),
+            "наших отдаваемых шагов в ходу у семьи",
+        ),
+    ]
+    return [rules, family_zone]
+
+
 def coverage_badge(facts: dict[str, Any]) -> Badge:
     """Доля покрытых строк — или прямое «не прочитано»."""
     if "coverage_percent" not in facts:
@@ -606,6 +770,16 @@ BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
     "family.json": family_badge,
     "version.json": version_badge,
     "coverage.json": coverage_badge,
+}
+
+#: РИСУЕТСЯ ВПРОК: значок проекта видом значка каталога (#1213). Ссылка на
+#: производное въезжает в витрину только ПОСЛЕ того, как оно нарисовано
+#: (правило 196, гейт `check_derived_refs`): этим изменением сборка начинает
+#: класть `project.svg` на ветку `badges`, а витрина переходит на него вторым
+#: изменением — тогда же уходят `rules.json` и `family.json`, а эта запись
+#: переезжает в инвентарь показанного. Так же шёл переход на значки семьи (#1026).
+AHEAD: Final[dict[str, Callable[[dict[str, Any]], list[list[Part]]]]] = {
+    "project.svg": project_zones,
 }
 
 #: ЕДИНЫЙ ЗНАЧОК РИСУЕТ НЕ СБОРКА, А ДЕЙСТВИЕ КАТАЛОГА (#1019): «Python │ ОС │
@@ -654,6 +828,8 @@ def draw_badges(facts: dict[str, Any], out: Path) -> None:
     for name, draw in BADGES.items():
         said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
         (out / name).write_text(said, encoding="utf-8")
+    for name, zones in AHEAD.items():
+        (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
 
 
 def extra_written(args: argparse.Namespace) -> int:

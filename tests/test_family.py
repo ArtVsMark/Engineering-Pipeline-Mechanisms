@@ -11,7 +11,7 @@
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -260,6 +260,75 @@ def test_an_unread_sweep_is_not_a_zero_on_the_badge() -> None:
         {"family": {"read": True, "adopted": {"ours": 0, "of": 9}, "uptake": {"read": False}}}
     )
     assert said.message == "вызовы не прочитаны · гейт 0/9 правил"
+
+
+RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}
+
+
+@pytest.mark.parametrize(
+    ("family_said", "texts"),
+    [
+        (
+            {
+                "read": True,
+                "uptake": {
+                    "read": True,
+                    "projects": {"took": 1, "of": 5, "unread": 0, "unread_repos": []},
+                    "steps": {"taken": 3, "of": 20, "names": []},
+                },
+            },
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов 1/5 · 20%", "гейтов 3/20 · 15%"],
+            ],
+        ),
+        (
+            {
+                "read": False,
+                "uptake": {
+                    "read": True,
+                    "projects": {"took": 0, "of": 5, "unread": 2, "unread_repos": ["a", "b"]},
+                    "steps": {"taken": 0, "of": 20, "names": []},
+                },
+            },
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов 0/5 · — (2 не прочитано)", "гейтов 0/20 · 0%"],
+            ],
+        ),
+        (
+            {"read": True, "uptake": {"read": False}},
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов не прочитано", "гейтов не прочитано"],
+            ],
+        ),
+        (
+            {},
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов не прочитано", "гейтов не прочитано"],
+            ],
+        ),
+    ],
+    ids=["прочитано", "клоны-не-прочитаны", "обход-не-прочитан", "семьи-нет"],
+)
+def test_the_project_badge_carries_three_numbers(
+    family_said: dict[str, Any], texts: list[list[str]]
+) -> None:
+    """Один значок, три числа с числителем и знаменателем (#1213, решение 08.10.2026).
+
+    Непрочитанный обход и непрочитанные клоны — «не прочитано» на своём месте,
+    а не ноль (045). Разрез «взяли гейт» по объявленному происхождению в значок
+    не входит: «гейт в ходу» — по вызову нашего шага, пока каталог не дал
+    происхождения (#1212).
+    """
+    zones = facts.project_zones({"rules": RULES_PLANTED, "family": family_said})
+    assert [[text for text, _, _ in zone] for zone in zones] == texts
+    # Серым — всякая часть, где доля неизвестна: числа нет или часть
+    # знаменателя не прочитана (взгляд на #1259).
+    unknown = [color for zone in zones for text, color, _ in zone if "не прочитано" in text]
+    assert all(color == facts.GREY for color in unknown), "незнание окрашено не серым"
 
 
 # --- взяли гейт: объявленное происхождение ---------------------------------
