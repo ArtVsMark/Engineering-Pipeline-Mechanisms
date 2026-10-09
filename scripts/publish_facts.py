@@ -15,8 +15,9 @@
 другой причине, затирать нельзя.
 
 Исходы (правило 039): ``0`` опубликовано или публиковать нечего · ``2``
-не опубликовано: ветка не прочитана, git отказал (любой шаг, с его `stderr`),
-фактов нет или сбой диска, подпись не записана. Все отказы — `NotPublished`.
+не опубликовано: ветка не прочитана, git отказал (любой шаг — с кодом и
+`stderr`, через `reason`), фактов нет или сбой диска, подпись не записана. Все
+отказы — `NotPublished`.
 """
 
 import argparse
@@ -61,20 +62,38 @@ def git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]
         raise NotPublished(f"git не запустился: {exc}") from exc
 
 
+def reason(done: subprocess.CompletedProcess[str]) -> str:
+    """Причина отказа git: код и `stderr`, если git его сказал.
+
+    ОДНА ФОРМА НА ВСЕ ШАГИ, а не своя у каждого (210). Причину чинили по шагу
+    за заход — `add`, затем `diff`, затем `fetch` и `ls-remote` (взгляды на
+    #1233 и #1249), — и каждый следующий взгляд находил соседа без неё.
+    Тест сверяет, что отказ каждого вызова `git` в модуле несёт эту причину:
+    вызов различается подкомандой и флагами, так что оба пути `worktree add`
+    прогоняются порознь (взгляд на #1257).
+    """
+    said = done.stderr.strip()
+    return f"код {done.returncode}: {said}" if said else f"код {done.returncode}"
+
+
 def checkout(workdir: Path) -> None:
     """Рабочее дерево ветки `badges` в `workdir`: поверх неё или сиротой, если её нет."""
-    if git("fetch", "--quiet", "origin", BRANCH).returncode == 0:
+    fetched = git("fetch", "--quiet", "origin", BRANCH)
+    if fetched.returncode == 0:
         added = git("worktree", "add", "--quiet", "--detach", str(workdir), "FETCH_HEAD")
     else:
-        remote = git("ls-remote", "--exit-code", "--heads", "origin", BRANCH).returncode
-        if remote != NO_SUCH_BRANCH:
+        # ОТКАЗ `fetch` — НЕ ПРИГОВОР: ветки может не быть вовсе, и это решает
+        # `ls-remote`. Но если ветка есть и не прочитана, причина `fetch` и
+        # есть ответ «почему», и терять её нельзя (взгляд на #1249).
+        remote = git("ls-remote", "--exit-code", "--heads", "origin", BRANCH)
+        if remote.returncode != NO_SUCH_BRANCH:
             raise NotPublished(
-                f"ветка {BRANCH} не прочитана (ls-remote код {remote}) — "
-                "публиковать поверх нечего, и затирать её нельзя"
+                f"ветка {BRANCH} не прочитана (fetch {reason(fetched)}; "
+                f"ls-remote {reason(remote)}) — публиковать поверх нечего, и затирать её нельзя"
             )
         added = git("worktree", "add", "--quiet", "--orphan", "-b", f"{BRANCH}-first", str(workdir))
     if added.returncode != 0:
-        raise NotPublished(f"рабочее дерево ветки не создано: {added.stderr.strip()}")
+        raise NotPublished(f"рабочее дерево ветки не создано: {reason(added)}")
 
 
 def publish(source: Path, workdir: Path, *, sha: str) -> bool:
@@ -94,18 +113,17 @@ def publish(source: Path, workdir: Path, *, sha: str) -> bool:
     for key, value in (("user.name", BOT_NAME), ("user.email", BOT_EMAIL)):
         signed = git("config", key, value, cwd=workdir)
         if signed.returncode != 0:
-            raise NotPublished(f"подпись публикации не записана ({key}): {signed.stderr.strip()}")
-    # КАЖДЫЙ ВЫЗОВ GIT ЗДЕСЬ ВЕДЁТ СВОЮ ПРИЧИНУ, `stderr` включительно (взгляд на
-    # #1249, 195): `add` был единственным без неё. `diff --quiet` отвечает
-    # 0 «нечего» и 1 «есть»; иной код — отказ git, а не «есть изменения».
+            raise NotPublished(f"подпись публикации не записана ({key}): {reason(signed)}")
+    # КАЖДЫЙ ВЫЗОВ GIT ВЕДЁТ СВОЮ ПРИЧИНУ ОДНОЙ ФОРМОЙ — `reason`. `diff --quiet`
+    # отвечает 0 «нечего» и 1 «есть»; иной код — отказ git, а не «есть изменения».
     added = git("add", "--", *PUBLISHES, cwd=workdir)
     if added.returncode != 0:
-        raise NotPublished(f"git add отказал: {added.stderr.strip()}")
-    staged = git("diff", "--cached", "--quiet", cwd=workdir).returncode
-    if staged == 0:
+        raise NotPublished(f"git add отказал: {reason(added)}")
+    staged = git("diff", "--cached", "--quiet", cwd=workdir)
+    if staged.returncode == 0:
         return False
-    if staged != 1:
-        raise NotPublished(f"git diff не ответил, есть ли что публиковать (код {staged})")
+    if staged.returncode != 1:
+        raise NotPublished(f"git diff не ответил, есть ли что публиковать: {reason(staged)}")
     for step in (
         ("commit", "-q", "-m", f"факты на {sha}"),
         # Ветка выбирается целиком, без --depth; БЕЗ --force: чужое не затирается.
@@ -113,7 +131,7 @@ def publish(source: Path, workdir: Path, *, sha: str) -> bool:
     ):
         done = git(*step, cwd=workdir)
         if done.returncode != 0:
-            raise NotPublished(f"git {step[0]} отказал: {done.stderr.strip()}")
+            raise NotPublished(f"git {step[0]} отказал: {reason(done)}")
     return True
 
 
