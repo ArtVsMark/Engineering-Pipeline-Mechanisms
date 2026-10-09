@@ -445,8 +445,8 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
 
 
 def published_names() -> list[str]:
-    """Всё, что сборка кладёт в каталог публикации: факты и значки."""
-    return [FACTS, *BADGES, *PICTURES]
+    """Всё, что сборка кладёт в каталог публикации: факты, значки, картинки и страницы."""
+    return [FACTS, *BADGES, *PICTURES, *PAGES]
 
 
 #: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
@@ -607,7 +607,7 @@ def share_color(numerator: int, denominator: int, *, known: bool = True) -> str:
 
 
 def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
-    """Значок проекта зонами: правила машиной и семья — проекты и гейты в ходу.
+    """Значок проекта зонами: правила машиной и семья — проекты и шаги в ходу.
 
     РЕШЕНИЕ ВЛАДЕЛЬЦА 08.10.2026 (#1212, #1213). Один значок заменяет два —
     «держится машиной» (`rules.json`) и «общие механизмы» (`family.json`), — и
@@ -617,7 +617,7 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
     09.10.2026). Витрина перешла на него вторым изменением, после первого
     прогона публикации (196).
 
-    «ГЕЙТ В ХОДУ» — ПО ВЫЗОВУ НАШЕГО ШАГА ПО ТЕГУ (#1199): отдаваемый шаг,
+    «ШАГ В ХОДУ» — ПО ВЫЗОВУ НАШЕГО ШАГА ПО ТЕГУ (#1199): отдаваемый шаг,
     который зовёт хотя бы один проект семьи. Объявленное потребителем
     происхождение гейта (каталог, ArtVsMark/Engineering-Incidents-Playbook#701)
     в счёт не входит, пока его нет; разрез `family.adopted` остаётся в фактах.
@@ -652,13 +652,16 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
         family_zone = [
             ("семья", LABEL_COLOR, ""),
             (f"проектов {UNREAD_PART}", GREY, "обход клонов семьи не прочитан"),
-            (f"гейтов {UNREAD_PART}", GREY, "обход клонов семьи не прочитан"),
+            (f"шагов {UNREAD_PART}", GREY, "обход клонов семьи не прочитан"),
         ]
         return [rules, family_zone]
     projects, steps = taken["projects"], taken["steps"]
     took, of = int(projects["took"]), int(projects["of"])
     unread = f" ({projects['unread']} {UNREAD_PART})" if projects.get("unread") else ""
-    gates, offered = int(steps["taken"]), int(steps["of"])
+    # ШАГОВ, А НЕ ГЕЙТОВ (взгляд на #1265): счёт идёт по всем отдаваемым шагам
+    # (`onboard.steps`), среди которых `agent-pr`, `automerge`, `review` — не
+    # гейты. Подпись называет то, что посчитано.
+    used, offered = int(steps["taken"]), int(steps["of"])
     family_zone = [
         ("семья", LABEL_COLOR, ""),
         (
@@ -667,8 +670,8 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
             "проектов семьи зовут наш шаг по тегу",
         ),
         (
-            f"гейтов {counted(gates, offered)}",
-            share_color(gates, offered),
+            f"шагов {counted(used, offered)}",
+            share_color(used, offered),
             "наших отдаваемых шагов в ходу у семьи",
         ),
     ]
@@ -697,9 +700,10 @@ def version_badge(facts: dict[str, Any]) -> Badge:
 
 
 #: ЧТО СБОРКА РИСУЕТ — ОБЪЯВЛЕНО ЗДЕСЬ ОДИН РАЗ: имя файла → чем его рисуют.
-#: Каждый значок публикуется формой shields-endpoint (#998): витрина показывает
-#: его через `img.shields.io/endpoint`, как вся семья. Свои SVG сняты решением
-#: владельца 01.10.2026 — один источник числа, а не два.
+#: Здесь — значки формой shields-endpoint (#998), которые витрина показала бы
+#: через `img.shields.io/endpoint`. Инвентарей три: этот, картинки `PICTURES`
+#: (свой SVG видом единого значка каталога — значок проекта, #1213) и страницы
+#: `PAGES`. Гейты витрины и публикации читают все три (взгляд на #1265).
 #: Порядок записей — порядок сборки.
 #:
 #: ПОЧЕМУ ЭТО ДАННЫЕ, А НЕ ШЕСТЬ КОНСТАНТ И КОРТЕЖ ВНУТРИ `main`. Список нужен
@@ -717,6 +721,7 @@ BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
     "coverage.json": coverage_badge,
 }
 
+
 #: КАРТИНКИ, которые сборка рисует сама — SVG зонами, видом единого значка
 #: каталога, а не shields-endpoint: имя файла → чем собираются его зоны.
 #: Инвентарь второй, а не общий с `BADGES`: форма вывода другая, но гейты
@@ -726,6 +731,54 @@ BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
 PICTURES: Final[dict[str, Callable[[dict[str, Any]], list[list[Part]]]]] = {
     "project.svg": project_zones,
 }
+
+
+def who_page(facts: dict[str, Any]) -> str:
+    """Таблица «кем» — кто из семьи зовёт наши шаги по тегу, из `family.uptake.by`.
+
+    Решение по #1213 (вариант 1): таблица живёт файлом на ветке `badges`, куда
+    прогон уже пишет, а не блоком README — в `main` прогон не пишет. Чисел
+    здесь нет: их несёт значок проекта, страница называет только имена (122).
+    Обход не прочитан — так и сказано, а не «никто» (045).
+    """
+    lines = [
+        "# Кто взял наши механизмы",
+        "",
+        "> **Читатель:** посетитель витрины — кто из семьи зовёт наши шаги по тегу.",
+        "",
+        "Собрано сборкой фактов из `facts.json` (`family.uptake.by`); руками не правится.",
+        "",
+    ]
+    taken = (facts.get("family") or {}).get("uptake") or {}
+    if not taken.get("read"):
+        return "\n".join([*lines, f"**Не прочитано:** {taken.get('why') or NO_UPTAKE}.", ""])
+    by = taken.get("by") or []
+    if by:
+        lines += ["| проект | шаги | теги |", "|---|---|---|"]
+        for one in sorted(by, key=lambda item: str(item.get("repo"))):
+            steps = ", ".join(f"`{step}`" for step in one.get("steps") or []) or "—"
+            refs = ", ".join(f"`{ref}`" for ref in one.get("refs") or []) or "—"
+            lines.append(f"| {one.get('repo')} | {steps} | {refs} |")
+    else:
+        lines.append("Пока никто из прочитанных проектов семьи наши шаги по тегу не зовёт.")
+    unread = (taken.get("projects") or {}).get("unread_repos") or []
+    if unread:
+        said = ", ".join(sorted(unread))
+        lines += ["", f"**Не прочитаны клоны:** {said} — незнание, а не «не взял» (045)."]
+    return "\n".join([*lines, ""])
+
+
+#: СТРАНИЦЫ, которые сборка кладёт рядом со значками: имя файла → сборщик
+#: текста. Инвентарь третий: не значок и не картинка, но изданное для чужого
+#: прочтения — гейты публикации и уборки ветки читают и его (#1213).
+PAGES: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
+    "who.md": who_page,
+}
+#: Картинки и страницы, которые сборка кладёт ВПРОК, до показа на витрине
+#: (196): ссылка на ненарисованное попала бы в main раньше файла. Второй шаг
+#: ставит картинку и убирает имя отсюда; гейты `tests/test_facts.py` требуют
+#: показа у всех прочих.
+AHEAD: Final = frozenset[str]()
 
 #: ЕДИНЫЙ ЗНАЧОК РИСУЕТ НЕ СБОРКА, А ДЕЙСТВИЕ КАТАЛОГА (#1019): «Python │ ОС │
 #: coverage │ release / PyPI │ version» собирает `python-badge` шагом
@@ -775,6 +828,8 @@ def draw_badges(facts: dict[str, Any], out: Path) -> None:
         (out / name).write_text(said, encoding="utf-8")
     for name, zones in PICTURES.items():
         (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
+    for name, page in PAGES.items():
+        (out / name).write_text(page(facts), encoding="utf-8")
 
 
 def extra_written(args: argparse.Namespace) -> int:
@@ -822,7 +877,10 @@ def drawn_from(path: Path, out_dir: str) -> int:
     except (KeyError, TypeError) as exc:
         print(f"значки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    print(f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}")
+    print(
+        f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}; "
+        f"страницы: {', '.join(sorted(PAGES))}"
+    )
     return EXIT_OK
 
 

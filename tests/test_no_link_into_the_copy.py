@@ -1,5 +1,13 @@
 """Ссылка из оригинала в копию: только картинкой, никогда текстом.
 
+ПРЕДМЕТ — КОПИЯ ОРИГИНАЛА, А НЕ ВСЯКОЕ ПРОИЗВОДНОЕ (решение владельца 09.10.2026,
+#1213). Правило 089 говорит о связи источника с его витриной: копия отстаёт от
+оригинала, и ссылка уводит в прошлое. Производное, у которого оригинала в
+дереве НЕТ — данные обхода чужих деревьев, — не копия: свежее места нет, и
+ссылка на него никуда не уводит. Такие имена названы перечнем
+`NO_ORIGINAL_IN_TREE` с причиной, а не выведены догадкой (046). Прежняя редакция
+запрещала текстом любой адрес производного и тем трактовала 089 шире буквы.
+
 Связь источника с витриной односторонняя. Ссылка из оригинала в копию уводит
 читателя на заведомо более старое — витрина пересобирается прогоном и отстаёт от
 дерева всегда, — а полноту источника начинают мерить по чужому справочнику
@@ -48,6 +56,16 @@ IMAGE: Final = re.compile(r"!\[[^\]]*\]\([^)\s]*\)")
 #: ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
 #: Нашёл внешний взгляд.
 OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+#: Производное без оригинала в дереве — ПОЛНЫЙ адрес на ветке `badges` и почему.
+#: Ссылка текстом на них законна: копией чего-то из дерева они не являются.
+#: Адрес целиком, с веткой и путём, а не имя файла: иначе одноимённая копия в
+#: другом каталоге или на другой ветке прошла бы как законный текст (взгляд на #1280).
+WITHOUT_ORIGIN_BRANCH: Final = "badges"
+NO_ORIGINAL_IN_TREE: Final = {
+    f"{paths.BADGES_DIR.as_posix()}/who.md": (
+        "кто из семьи зовёт наши шаги — обход клонов соседей; в дереве этих данных нет"
+    ),
+}
 
 
 def documents() -> list[Path]:
@@ -63,7 +81,10 @@ def addresses() -> list[tuple[Path, int, str, bool]]:
             for match in der.DERIVED_RE.finditer(line):
                 where = match["rawrepo"] or match["repo"] or ""
                 ref = match["rawref"] or match["ref"] or ""
+                path_on_branch = (match["rawpath"] or match["path"] or "").lstrip("/")
                 if where.lower() != OURS.lower() or ref == paths.TRUNK:
+                    continue
+                if ref == WITHOUT_ORIGIN_BRANCH and path_on_branch in NO_ORIGINAL_IN_TREE:
                     continue
                 inside = any(
                     shot.start() <= match.start() and match.end() <= shot.end()
@@ -111,3 +132,26 @@ def test_a_neighbours_repository_is_not_taken_for_ours() -> None:
         "ArtVsMark/Engineering-Pipeline-Mechanisms-Docs",
     ):
         assert foreign.lower() != OURS.lower(), f"{foreign} принят за своё"
+
+
+def test_every_exception_is_laid_by_the_build() -> None:
+    """Исключение называет то, что сборка и правда кладёт: мёртвое имя краснеет (005)."""
+    facts = load_script("build_facts.py")
+    laid = {f"{paths.BADGES_DIR.as_posix()}/{name}" for name in facts.branch_files()}
+    stale = sorted(set(NO_ORIGINAL_IN_TREE) - laid)
+    assert not stale, f"исключение 089 называет то, чего сборка не кладёт: {stale}"
+
+
+def test_the_exception_has_no_original_in_the_tree() -> None:
+    """Основание исключения держится сборкой: из одного дерева таблицы «кем» не собрать.
+
+    Таблица читает раздел фактов семьи «uptake», а его даёт только обход клонов (`--uptake`).
+    Ляжет этот вход в дерево — сборка без обхода прочтёт его, исключение станет
+    ложным, и здесь покраснеет (взгляд на #1280, 044).
+    """
+    facts = load_script("build_facts.py")
+    tree_only = facts.family_facts(None, answers=ROOT / ".rules" / "bindings.json")
+    assert not tree_only["uptake"].get("read"), (
+        "family.uptake прочитан без обхода клонов — у таблицы «кем» есть оригинал в дереве,"
+        " и исключение 089 для неё больше не законно"
+    )

@@ -65,7 +65,12 @@ SOURCE_DIRS = frozenset(one.as_posix() for one in paths.SOURCES)
 
 
 def scripts() -> list[Path]:
-    """Механизмы проекта, кроме самого якоря."""
+    """Механизмы проекта, кроме самого якоря.
+
+    Один `scripts/`, а не `paths.SOURCES`, — по предмету (#1254): общий низ —
+    отдельно ставящийся пакет, якоря `scripts/paths.py` он не видит, и
+    требовать от него этого якоря нечем.
+    """
     return sorted(p for p in walk(SCRIPTS, "*.py") if p.name != ANCHOR_NAME)
 
 
@@ -396,6 +401,8 @@ def test_a_canonical_name_is_not_spelled_a_second_time() -> None:
         if value not in SPELLING_MEANS_NOTHING
     }
     found: list[str] = []
+    # Один `scripts/` — та же причина, что у `scripts()`: общий низ якоря не
+    # видит, и второй литерал вместо `paths.<имя>` ему не в упрёк (#1254).
     for path in walk(ROOT / "scripts", "*.py"):
         if path.name == "paths.py":
             continue
@@ -432,6 +439,8 @@ def source_sets_built_by_hand() -> list[str]:
     автор перечисляет каталоги, которые помнит, и второй забывается.
     """
     found: list[str] = []
+    # Без общего низа намеренно (#1254): назвать `paths.SCRIPTS` мимо
+    # `paths.SOURCES` может лишь тот, кто якорь видит, а пакет его не видит.
     for path in [*walk(ROOT / "scripts", "*.py"), *walk(ROOT / "tests", "*.py")]:
         if path.name == ANCHOR_NAME:
             continue
