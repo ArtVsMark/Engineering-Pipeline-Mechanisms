@@ -91,8 +91,12 @@ def links(root: Path) -> list[tuple[Path, int, str, str]]:
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError, UnicodeDecodeError:
-            continue
+        except (OSError, UnicodeDecodeError) as exc:
+            # НЕЧИТАЕМЫЙ ДОКУМЕНТ — «НЕ ОТРАБОТАЛ», А НЕ ПРОПУСК (взгляд на
+            # #1300, 045): прежде он молча выпадал, и ссылки в нём гейт не
+            # проверял, ничего о том не сказав. Тот же приём у соседа
+            # `check_foreign_why` — и тоже раньше выгрузки.
+            raise NotRun(f"{name} не прочитан: {exc}") from exc
         for line_number, line in enumerate(text.splitlines(), 1):
             for match in LINK_RE.finditer(line):
                 found.append((Path(name), line_number, match["number"], match["slug"]))
@@ -121,7 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     args = parser.parse_args(argv)
 
-    # ДЕРЕВО ЧИТАЕТСЯ РАНЬШЕ КАТАЛОГА. Пустое или нечитаемое дерево — «не
+    # ДЕРЕВО ЧИТАЕТСЯ РАНЬШЕ КАТАЛОГА. Пустое дерево, отказ `git ls-files` и
+    # документ, который не прочитать (не UTF-8, нет на диске), — «не
     # отработал» при любой сети; прежде выгрузка спрашивалась первой, и тот же
     # пустой вход отвечал «каталог молчит», стоило сети моргнуть (#1255).
     # СОСЕДИ ПО ЧТЕНИЮ ВЫГРУЗКИ НАЗВАНЫ (195, взгляд на #1258): тот же порядок у
