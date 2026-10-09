@@ -8,6 +8,7 @@
 """
 
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -349,12 +350,13 @@ def test_a_spent_budget_keeps_what_was_read(
 
 
 def test_the_step_limit_covers_the_worst_sweep() -> None:
-    """Предел шага обхода в `badges.yml` выше худшего случая самого обхода.
+    """Предел шага обхода в `badges.yml` выше худшего случая самого обхода — с запасом.
 
-    Худший случай — `2 × BUDGET`: последний начатый сосед получает остаток на
+    Худший случай — `BUDGET + 2 × TIMEOUT`: последний начатый сосед получает
     оба вызова git. Связь держит этот тест, а не комментарий: поднятый `BUDGET`
     при прежнем пределе снял бы шаг раньше обхода, и файл пропал бы вместе с
-    прочитанными клонами (взгляд на #1246).
+    прочитанными клонами (взгляд на #1246). Запас `STEP_MARGIN` — на запуск
+    Python и уборку клонов: без него гейт проходил с запасом в секунды.
     """
     flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
     limits = [
@@ -364,9 +366,38 @@ def test_the_step_limit_covers_the_worst_sweep() -> None:
         if "family_uptake.py" in str(step.get("run") or "")
     ]
     assert limits, "шаг обхода клонов в badges.yml не найден или без своего предела (075)"
-    assert all(limit is not None and limit * 60 > 2 * module.BUDGET for limit in limits), (
-        f"предел шага {limits} мин не выше худшего случая обхода 2×{module.BUDGET} с"
+    need = module.BUDGET + 2 * module.TIMEOUT + module.STEP_MARGIN
+    assert all(limit is not None and limit * 60 >= need for limit in limits), (
+        f"предел шага {limits} мин ниже худшего случая обхода с запасом: {need} с"
     )
+
+
+def test_one_hung_neighbour_cannot_eat_the_whole_budget() -> None:
+    """Оба вызова одного соседа короче бюджета: повисший первым не прячет остальных (#1246)."""
+    assert 2 * module.TIMEOUT < module.BUDGET
+
+
+def test_a_timed_out_call_does_not_wait_for_its_children() -> None:
+    """Снятие по пределу возвращается сразу, даже если потомок держит каналы открытыми.
+
+    Предел вызова git (`TIMEOUT`) настоящий только потому, что на POSIX
+    `subprocess.run` после снятия зовёт `wait()` и каналы НЕ дочитывает —
+    дочитывание есть лишь на Windows, а шаг идёт на ubuntu. Взгляд на #1246
+    опасался обратного (`git-remote-https` держит каналы); этот прогон
+    закрепляет поведение платформы, на котором держится предел, тем же
+    вызовом, что у `shallow_clone`.
+    """
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        subprocess.run(
+            ["sh", "-c", "sleep 30 & sleep 30"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=0.5,
+        )
+    assert time.monotonic() - started < 10
 
 
 def test_offered_names_drop_the_file_prefix() -> None:
