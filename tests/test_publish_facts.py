@@ -168,3 +168,31 @@ def test_a_refused_signature_is_a_refusal(
     monkeypatch.setattr(module, "git", refusing)
     with pytest.raises(module.NotPublished, match="подпись"):
         module.publish(stand["source"], stand["tmp"] / "w1", sha="a")
+
+
+@pytest.mark.parametrize(
+    ("step", "code", "said"),
+    [
+        ("add", 1, "git add отказал: нет прав"),
+        ("diff", 128, "git diff не ответил"),
+        ("commit", 1, "git commit отказал: нет прав"),
+        ("push", 1, "git push отказал: нет прав"),
+    ],
+)
+def test_every_git_step_refuses_with_its_reason(
+    stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch, step: str, code: int, said: str
+) -> None:
+    """Каждый шаг git после дерева ветки — отказ со своей причиной, а не молча (взгляд на #1249).
+
+    `diff --quiet` с кодом не 0 и не 1 — отказ git, а не «есть изменения».
+    """
+    real: Callable[..., subprocess.CompletedProcess[str]] = module.git
+
+    def refusing(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        if args[:1] == (step,):
+            return subprocess.CompletedProcess(list(args), code, "", "нет прав")
+        return real(*args, cwd=cwd)
+
+    monkeypatch.setattr(module, "git", refusing)
+    with pytest.raises(module.NotPublished, match=said):
+        module.publish(stand["source"], stand["tmp"] / "w1", sha="a")

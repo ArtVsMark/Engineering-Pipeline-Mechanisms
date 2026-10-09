@@ -15,7 +15,8 @@
 другой причине, затирать нельзя.
 
 Исходы (правило 039): ``0`` опубликовано или публиковать нечего · ``2``
-не опубликовано: ветка не прочитана, git отказал.
+не опубликовано: ветка не прочитана, git отказал (любой шаг, с его `stderr`),
+фактов нет или сбой диска, подпись не записана. Все отказы — `NotPublished`.
 """
 
 import argparse
@@ -94,10 +95,17 @@ def publish(source: Path, workdir: Path, *, sha: str) -> bool:
         signed = git("config", key, value, cwd=workdir)
         if signed.returncode != 0:
             raise NotPublished(f"подпись публикации не записана ({key}): {signed.stderr.strip()}")
-    if git("add", "--", *PUBLISHES, cwd=workdir).returncode != 0:
-        raise NotPublished("файлы фактов не добавлены в коммит")
-    if git("diff", "--cached", "--quiet", cwd=workdir).returncode == 0:
+    # КАЖДЫЙ ВЫЗОВ GIT ЗДЕСЬ ВЕДЁТ СВОЮ ПРИЧИНУ, `stderr` включительно (взгляд на
+    # #1249, 195): `add` был единственным без неё. `diff --quiet` отвечает
+    # 0 «нечего» и 1 «есть»; иной код — отказ git, а не «есть изменения».
+    added = git("add", "--", *PUBLISHES, cwd=workdir)
+    if added.returncode != 0:
+        raise NotPublished(f"git add отказал: {added.stderr.strip()}")
+    staged = git("diff", "--cached", "--quiet", cwd=workdir).returncode
+    if staged == 0:
         return False
+    if staged != 1:
+        raise NotPublished(f"git diff не ответил, есть ли что публиковать (код {staged})")
     for step in (
         ("commit", "-q", "-m", f"факты на {sha}"),
         # Ветка выбирается целиком, без --depth; БЕЗ --force: чужое не затирается.
