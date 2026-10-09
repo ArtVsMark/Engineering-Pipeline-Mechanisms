@@ -500,7 +500,10 @@ def test_the_who_page_tells_unknown_from_nobody(said: dict[str, Any], expected: 
 
 def test_the_who_page_is_published_and_kept_on_the_branch(tmp_path: Path) -> None:
     """Страница рисуется вместе со значками и уборкой ветки не снимается (#1213)."""
-    facts.draw_badges({"rules": {"by_mechanism": {"gate": 1}}, "version": "1.0.0"}, tmp_path)
+    planted = {"repo": "Я/Проект", "manifest": {"release": None, "gives": {"steps": "0.7"}}}
+    facts.draw_badges(
+        {"rules": {"by_mechanism": {"gate": 1}}, "version": "1.0.0", **planted}, tmp_path
+    )
     for name in facts.PAGES:
         assert (tmp_path / name).read_text(encoding="utf-8").startswith("# ")
         assert name in facts.branch_files()
