@@ -380,6 +380,13 @@ def test_every_page_the_build_lays_is_linked() -> None:
         if f"/badges/.github/badges/{name}" not in readme
     )
     assert not unlinked, f"страница кладётся, а витрина на неё не ведёт: {unlinked}"
+    # ОБРАТНОЕ НАПРАВЛЕНИЕ (взгляд на #1268): ссылка README в ветку `badges`
+    # называет только то, что сборка вправе туда класть, — иначе имя, убранное
+    # из `PAGES`, оставило бы ссылку на снятый файл молча. Образец адреса берёт
+    # любое имя, а не только `.json|.svg`, как разбор значков.
+    linked = set(re.findall(r"/badges/\.github/badges/([\w.-]+)", readme))
+    stray = sorted(linked - set(facts.branch_files()))
+    assert not stray, f"витрина ведёт в ветку badges на то, чего сборка не кладёт: {stray}"
 
 
 def push_command(step: str) -> str:
