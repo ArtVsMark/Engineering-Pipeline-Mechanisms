@@ -1117,11 +1117,11 @@
     },
     "160": {
       "status": "active",
-      "mechanism": "pipeline",
-      "where": "scripts/build_facts.py::branch_files — значок и facts.json пересобираются на каждое слияние, то есть чаще, чем идут изменения, и в дереве общей ветки не лежат: .github/workflows/badges.yml кладёт их в ветку badges коммитом поверх неё, без --force (ArtVsMark/Engineering-Pipeline-Mechanisms#1001), а снятое с ветки уносит scripts/build_facts.py::prune по перечню допустимого; факты общего шага публикует scripts/publish_facts.py тоже поверх, без --force. Иначе каждое слияние конфликтовало бы на одном и том же файле, а сдвиг числа красил бы ветку как поломка",
+      "mechanism": "gate",
+      "where": "tests/test_facts.py::test_derived_output_is_not_in_the_shared_branch — ни одно имя из scripts/build_facts.py::branch_files (изданное сборкой, общий шаг фактов, единый значок, архив находок) не отслеживается git в общей ветке (tests/test_facts.py::tracked_names — git ls-files, а не рабочий каталог: неотслеживаемый архив в корне клона в main не попадёт): отслеживаемый файл с таким именем краснит набор до слияния. Сами производные пересобираются на каждое слияние и ложатся в ветку badges коммитом поверх неё, без --force (ArtVsMark/Engineering-Pipeline-Mechanisms#1001); снятое с ветки уносит scripts/build_facts.py::prune по тому же перечню",
       "analysed": "2026-10-09",
-      "why": "Перечитан 08.10.2026 по ArtVsMark/Engineering-Pipeline-Mechanisms#1237: ответ говорил «ветка-сирота badges, силовой толчок», а с ArtVsMark/Engineering-Pipeline-Mechanisms#1001 ветку ведут поверх, без --force, — утверждение о дереве устарело молча (005). Проверено чтением шага публикации в badges.yml и scripts/publish_facts.py 08.10.2026. ГЕЙТ ВОЗМОЖЕН (перечитано 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237): признак читается из дерева — ни одно имя из scripts/build_facts.py::branch_files не отслеживается в общей ветке (git ls-files). Сегодня в общей ветке не отслеживается ни одно имя из scripts/build_facts.py::branch_files; гейт не построен — назван, а не отвергнут.",
-      "decided": "2026-10-08"
+      "why": "Поднят с pipeline до gate 09.10.2026 (ArtVsMark/Engineering-Pipeline-Mechanisms#1271): разбор ответов, держащихся не гейтом (ArtVsMark/Engineering-Pipeline-Mechanisms#1237), нашёл, что признак правила — имя производного в дереве — читается до слияния. Гейт уже стоял на изданном сборкой и не видел архив находок; теперь перечень берётся из branch_files целиком. Замер на голове: ни одно имя из scripts/build_facts.py::branch_files не лежит в дереве (число не пишется рукой — перечень выводится, 005); откат (архив находок файлом в корне дерева) краснит.",
+      "decided": "2026-10-09"
     },
     "161": {
       "status": "active",

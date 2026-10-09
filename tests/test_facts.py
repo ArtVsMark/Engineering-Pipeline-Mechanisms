@@ -15,7 +15,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, found_by, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, load_script
 
 facts = load_script("build_facts.py")
 
@@ -297,15 +297,47 @@ def derived_names() -> list[str]:
     return found
 
 
+def tracked_names(root: Path) -> set[str]:
+    """Имена файлов, ОТСЛЕЖИВАЕМЫХ git в дереве `root`; нечитаемый git — отказ (075)."""
+    out = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert out.returncode == 0, f"git ls-files не ответил — сверять не с чем: {out.stderr}"
+    return {Path(one).name for one in out.stdout.split("\0") if one}
+
+
 def test_derived_output_is_not_in_the_shared_branch() -> None:
-    """Производного нет в дереве: оно живёт в ветке `badges` (125).
+    """Производного нет в общей ветке: оно живёт в ветке `badges` (125, 160).
 
     Гейт написан на ИМЕНА вывода, а не на его содержимое: файл, случайно
     закоммиченный рядом с источником, выглядит безобидно ровно до того дня,
     когда число в нём разойдётся с источником.
+
+    СУДИТСЯ ОТСЛЕЖИВАЕМОЕ, А НЕ РАБОЧИЙ КАТАЛОГ (взгляд на #1290). Навык
+    `close-a-finding` велит класть архив `findings.json` в корень клона для
+    разбора; неотслеживаемый, он в общую ветку не попадёт, и красить за него
+    набор и предполётную значило бы краснеть на чужом. Предмет правила —
+    то, что уйдёт в `main`, то есть `git ls-files`.
     """
-    for name in derived_names():
-        assert not found_by(ROOT, f"**/{name}"), f"{name} лежит в общей ветке рядом с источником"
+    tracked = tracked_names(ROOT)
+    assert tracked, "git не отслеживает ни одного файла — предмет проверки не найден (075)"
+    # ВСЁ, ЧТО ВПРАВЕ ДЕРЖАТЬ ВЕТКА `badges`, а не только изданное сборкой: архив
+    # находок там же, и его копия в дереве разошлась бы с веткой так же (160, #1271).
+    lying = sorted({*derived_names(), *facts.branch_files()} & tracked)
+    assert not lying, f"производное ветки badges отслеживается в общей ветке: {lying}"
+
+
+def test_an_untracked_derived_file_is_not_the_shared_branch(tmp_path: Path) -> None:
+    """Неотслеживаемый файл производного — не нарушение, отслеживаемый — нарушение."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "findings.json").write_text("{}", encoding="utf-8")
+    assert "findings.json" not in tracked_names(tmp_path)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "findings.json"], check=True)
+    assert "findings.json" in tracked_names(tmp_path)
 
 
 def shown_badges() -> list[str]:
