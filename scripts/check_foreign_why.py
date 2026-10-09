@@ -159,13 +159,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     args = parser.parse_args(argv)
 
-    # ДЕРЕВО ЧИТАЕТСЯ РАНЬШЕ КАТАЛОГА — как у соседа `check_rule_links` (#1255,
-    # 195): пустое дерево — «не отработал» при любой сети, а не «каталог молчит».
+    # ДЕРЕВО ЧИТАЕТСЯ РАНЬШЕ КАТАЛОГА — ЦЕЛИКОМ, ТЕКСТЫ ВКЛЮЧИТЕЛЬНО, как у
+    # соседа `check_rule_links` (#1255, 195). Прежде до сети читался только
+    # перечень файлов, а тексты — после: у документа в чужой кодировке исход
+    # решала сеть (с ней 2, без неё 4; взгляд на #1258). Теперь всё, что может
+    # дать «не отработал» по дереву, случается раньше выгрузки.
     try:
         docs = documents(args.root)
     except NotRun as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    texts: list[tuple[Path, str]] = []
+    for path in docs:
+        try:
+            texts.append((path, path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError) as exc:
+            # НЕ-UTF8 В ДЕРЕВЕ — ЭТО ТОЖЕ «НЕ ПРОЧИТАН», а не падение. Ловился
+            # только OSError, и документ в чужой кодировке ронял гейт
+            # трассировкой мимо всех трёх объявленных исходов (039, находка
+            # внешнего взгляда на #315).
+            print(f"гейт не отработал: {path} не прочитан: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
 
     try:
         said = claims()
@@ -182,16 +196,7 @@ def main(argv: list[str] | None = None) -> int:
 
     problems: list[str] = []
     quoted = 0
-    for path in docs:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            # НЕ-UTF8 В ДЕРЕВЕ — ЭТО ТОЖЕ «НЕ ПРОЧИТАН», а не падение. Ловился
-            # только OSError, и документ в чужой кодировке ронял гейт
-            # трассировкой мимо всех трёх объявленных исходов (039, находка
-            # внешнего взгляда на #315).
-            print(f"гейт не отработал: {path} не прочитан: {exc}", file=sys.stderr)
-            return EXIT_BROKEN
+    for path, text in texts:
         here = copied(text, said)
         quoted += len(here)
         for rule in sorted(here - linked(text)):
