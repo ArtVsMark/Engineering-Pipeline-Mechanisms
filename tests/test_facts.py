@@ -292,7 +292,7 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, *facts.PICTURES, facts.FACTS, facts.UNIFIED})
+    found = sorted({*facts.BADGES, *facts.PICTURES, *facts.PAGES, facts.FACTS, facts.UNIFIED})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
@@ -363,6 +363,30 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     assert expected == set(shown_badges()), (
         f"витрине положено показать {sorted(expected)}, а показано {shown_badges()}"
     )
+
+
+def test_every_page_the_build_lays_is_linked() -> None:
+    """Страница, положенная сборкой, связана из витрины — или объявлена впрок (195, #1268).
+
+    Сверка значков выше читает `BADGES | PICTURES`; страница — соседний случай
+    того же предмета, и без этой проверки ссылка на неё держалась бы ничем.
+    """
+    assert facts.PAGES, "сборка не кладёт ни одной страницы — предмет проверки не найден (075)"
+    assert set(facts.PAGES) >= facts.AHEAD, f"впрок объявлено не страница: {sorted(facts.AHEAD)}"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    unlinked = sorted(
+        name
+        for name in set(facts.PAGES) - facts.AHEAD
+        if f"/badges/.github/badges/{name}" not in readme
+    )
+    assert not unlinked, f"страница кладётся, а витрина на неё не ведёт: {unlinked}"
+    # ОБРАТНОЕ НАПРАВЛЕНИЕ (взгляд на #1268): ссылка README в ветку `badges`
+    # называет только то, что сборка вправе туда класть, — иначе имя, убранное
+    # из `PAGES`, оставило бы ссылку на снятый файл молча. Образец адреса берёт
+    # любое имя, а не только `.json|.svg`, как разбор значков.
+    linked = set(re.findall(r"/badges/\.github/badges/([\w.-]+)", readme))
+    stray = sorted(linked - set(facts.branch_files()))
+    assert not stray, f"витрина ведёт в ветку badges на то, чего сборка не кладёт: {stray}"
 
 
 def push_command(step: str) -> str:
