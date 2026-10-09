@@ -6,6 +6,7 @@
 запасной путь (045).
 """
 
+import ast
 import inspect
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -242,6 +243,58 @@ def test_accrued_findings_alone_come_before_the_plan(
     плану» — два механизма по-разному читали один порядок (взгляд на #1236).
     """
     assert debt.before_plan(left=left, kept=kept, lagging=lagging, rules=rules) is owed
+
+
+def source_five_readers() -> set[str]:
+    """Чтецы каналов источника 5 у сборщика плана — из кода `work_plan.sources`.
+
+    Раздел 5 собирается кортежем `parts`; у каждого его имени ищется вызов
+    `<имя>_part(...)`, которым оно присвоено. Копящиеся находки присваиваются
+    `Source(...)`, а не чтецом: их шаг долга читает сам (`accrued`).
+    """
+    tree = ast.parse((ROOT / "scripts" / "work_plan.py").read_text(encoding="utf-8"))
+    sources = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "sources"
+    )
+    named: dict[str, str] = {}
+    parts: list[str] = []
+    for node in ast.walk(sources):
+        if not isinstance(node, ast.Assign) or not isinstance(node.targets[0], ast.Name):
+            continue
+        target = node.targets[0].id
+        if target == "parts" and isinstance(node.value, ast.Tuple):
+            parts = [one.id for one in node.value.elts if isinstance(one, ast.Name)]
+        elif isinstance(node.value, ast.Call):
+            # Обе формы имени вызова: `drift_part(...)` и `work_plan.drift_part(...)`.
+            call = node.value.func
+            if isinstance(call, ast.Name):
+                named[target] = call.id
+            elif isinstance(call, ast.Attribute):
+                named[target] = call.attr
+    assert parts, "раздел 5 в `work_plan.sources` больше не собирается кортежем `parts`"
+    return {f"work_plan.{named[one]}" for one in parts if named.get(one, "").endswith("_part")}
+
+
+def test_the_unread_channels_are_the_plans_other_readers() -> None:
+    """`NOT_READ` — ровно те каналы раздела 5, которых шаг не читает (взгляд на #1245).
+
+    Шаг читает правила (`rules_part` плана берёт те же «входящие») и копящиеся
+    находки. Новый канал раздела 5 без строки в `NOT_READ` краснеет здесь:
+    иначе шаг снова молча выдал бы непрочитанное за пустоту (195).
+    """
+    assert set(debt.NOT_READ.values()) == source_five_readers() - {"work_plan.rules_part"}
+
+
+def test_an_empty_step_names_what_it_did_not_read(capsys: pytest.CaptureFixture[str]) -> None:
+    """Без долга шаг не обещает «работу по плану»: дрейф и поводы он не читал (#1245)."""
+    debt.remind(False)
+    said = capsys.readouterr().out
+    assert "работа берётся по плану" not in said
+    assert "источники 3 и 5 пусты" not in said
+    for name in debt.NOT_READ:
+        assert name in said, f"непрочитанный канал «{name}» не назван"
 
 
 # --- краснота общей ветки: два разных состояния, а не одно --------------------
