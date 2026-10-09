@@ -23,6 +23,7 @@
 import ast
 import io
 import re
+import subprocess
 import tokenize
 from pathlib import Path
 
@@ -417,11 +418,20 @@ def test_code_files_reach_a_nested_source(tmp_path: Path) -> None:
 
     Неглубокий обход пропускал вложенное молча, а восемь гейтов брали его
     копии: каждый пропустил бы одно и то же.
+
+    Сосед (CI на #1298): неотслеживаемая копия сборки `build/lib/` лежит
+    вглубь того же источника и кодом не считается.
     """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     for where in load_script("paths.py").SOURCES:
         (tmp_path / where / "nested").mkdir(parents=True)
         (tmp_path / where / "top.py").write_text("x = 1\n", encoding="utf-8")
         (tmp_path / where / "nested" / "deep.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    for where in load_script("paths.py").SOURCES:
+        (tmp_path / where / "build" / "lib").mkdir(parents=True)
+        (tmp_path / where / "build" / "lib" / "top.py").write_text("x = 1\n", encoding="utf-8")
     found = {one.relative_to(tmp_path).as_posix() for one in code_files(root=tmp_path)}
     for where in load_script("paths.py").SOURCES:
         assert f"{where.as_posix()}/nested/deep.py" in found, sorted(found)
+        assert f"{where.as_posix()}/build/lib/top.py" not in found, sorted(found)

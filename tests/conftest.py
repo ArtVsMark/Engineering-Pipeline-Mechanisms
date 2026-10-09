@@ -334,11 +334,30 @@ def code_files(*, with_tests: bool = False, root: Path = ROOT) -> list[Path]:
     (`test_every_package_is_a_declared_source`) ищет вглубь и такой пакет
     принимает. Гейты, бравшие свои копии обхода, теперь берут его здесь: копий
     было восемь, и каждая пропустила бы вложенное одинаково.
+
+    ТОЛЬКО ОТСЛЕЖИВАЕМОЕ (CI на #1298). Вглубь лежит и то, что кодом проекта не
+    является: установка пакета оставляет `packages/transport/build/lib/` с
+    копиями модулей, и гейты «одно тело — один модуль» увидели бы их дублями.
+    Код — то, что в индексе git; сборка и `__pycache__` в нём не лежат.
     """
     paths = load_script("paths.py")
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files", "-z", "--", *(where.as_posix() for where in paths.SOURCES)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout.split("\0")
+    )
     found: list[Path] = []
     for where in paths.SOURCES:
-        found += [one for one in walk_deep(root / where, "*.py") if "__pycache__" not in one.parts]
+        found += [
+            one
+            for one in walk_deep(root / where, "*.py")
+            if one.relative_to(root).as_posix() in tracked
+        ]
     if with_tests:
         found += walk(root / "tests", "*.py")
     return found
