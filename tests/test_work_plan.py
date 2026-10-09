@@ -222,6 +222,20 @@ def test_a_silent_source_lowers_the_outcome(monkeypatch: pytest.MonkeyPatch) -> 
     assert module.main(["--repo", "o/r"]) == module.EXIT_PARTIAL
 
 
+def test_an_unsaid_merge_state_is_unread_not_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Несказанное слияние — раздел 1 прочитан не весь и исход 3, а не «Пусто» (взгляд на #1267).
+
+    Шаг долга тем же предметом выходит исходом 3; план, державший его
+    заметкой, печатал раздел пустым — два механизма расходились (195).
+    """
+    quiet_platform(monkeypatch)
+    monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], ["#6 — работа"], []))
+    built, broken, _ = module.sources("o/r", "t")
+    assert "#6 — работа" in built[1].unread and not built[1].note
+    assert "1" in broken
+    assert module.main(["--repo", "o/r"]) == module.EXIT_PARTIAL
+
+
 def test_no_living_plan_is_a_refusal_not_an_empty_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     """Живой задачи плана нет — отказ, а не пустой план.
 
