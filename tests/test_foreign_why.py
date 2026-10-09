@@ -166,6 +166,27 @@ def test_a_file_in_another_encoding_is_named_not_a_traceback(
     assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
 
 
+def test_an_unreadable_document_is_broken_whatever_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Документ в чужой кодировке — «не отработал» и при молчащем каталоге (взгляд на #1258).
+
+    Тексты читались после выгрузки, и исход решала сеть: с ней 2, без неё 4.
+    """
+    asked: list[str] = []
+
+    def silent() -> dict[str, str]:
+        asked.append("каталог")
+        raise module.catalogue.Silent("каталог не ответил")
+
+    monkeypatch.setattr(module, "claims", silent)
+    root = tree(tmp_path, "обычный документ\n")
+    (root / "чужая-кодировка.md").write_bytes("привет".encode("cp1251"))
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+    assert asked == [], "нечитаемое дерево спросило каталог — исход снова зависит от сети"
+
+
 def test_a_copy_is_seen_and_a_paraphrase_is_not() -> None:
     """Копия — дословный кусок; пересказ теми же словами врозь ею не является."""
     said = {"153": " ".join(f"слово{at}" for at in range(module.WINDOW + 2))}

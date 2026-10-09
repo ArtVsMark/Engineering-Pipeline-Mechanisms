@@ -393,21 +393,34 @@ CLAUDE_TREE: Final = re.compile(r"\.claude/(?:settings\.json|hooks/[^/]+|skills/
 #: сдвигом образец не видел — вторая находка по одному месту, строгое правило
 #: вместо третьей формы (взгляды на #1251, 210).
 SKILL_HEAD_KEYS: Final = frozenset({"name", "description"})
-#: Закрытие шапки — строка `---` ЦЕЛИКОМ. Совпадение по началу строки
-#: обрезало шапку на ключе вида `---x: 1`, и стоявший за ним `allowed-tools`
-#: гейт не видел (взгляд на #1262).
-HEAD_CLOSE_RE: Final = re.compile(r"^---[ \t]*$", re.M)
+#: Закрытие шапки — РОВНО строка `---`, и это строгое правило, а не форма
+#: разбора (210). Как режет шапку Claude Code, в дереве не замерено (взгляд на
+#: #1262), а прочтений много: по началу строки (`---x: 1` обрывал шапку и
+#: прятал `allowed-tools` за собой), строкой целиком, строкой с хвостовым
+#: пробелом (`--- ` — и `allowed-tools` после неё видел бы потребитель, режущий
+#: по ровному `---`; взгляд на #1296). Сравнивать их попарно — четвёртая форма.
+#: Поэтому гейт требует, чтобы ПЕРВАЯ строка шапки, начинающаяся с `---`, была
+#: ровно `---`: тогда любое из прочтений кончается на ней, и ключи у всех одни.
+HEAD_CLOSE: Final = "---"
+#: Строка, начинающаяся с `---`, — кандидат в конец шапки при любом прочтении.
+HEAD_FENCE_RE: Final = re.compile(r"^---.*$", re.M)
+
+
+def head_is_unambiguous(text: str) -> bool:
+    """Первая строка шапки, начинающаяся с `---`, — ровно `---`: конец один при любом прочтении."""
+    fence = HEAD_FENCE_RE.search(text, 4)
+    return fence is not None and fence.group() == HEAD_CLOSE
 
 
 def skill_head_keys(text: str) -> set[str] | None:
     """Ключи шапки навыка, разобранные YAML; ``None`` — шапки нет или она не разбирается."""
     if not text.startswith("---\n"):
         return None
-    closed = HEAD_CLOSE_RE.search(text, 4)
-    if closed is None:
+    fence = HEAD_FENCE_RE.search(text, 4)
+    if fence is None:
         return None
     try:
-        said = yaml.safe_load(text[4 : closed.start()])
+        said = yaml.safe_load(text[4 : fence.start()])
     except yaml.YAMLError:
         return None
     return {str(key) for key in said} if isinstance(said, dict) else None
@@ -434,8 +447,13 @@ def tree_channel_problems(root: Path = ROOT) -> list[str]:
     ]
     for one in tracked:
         if one.endswith("/SKILL.md"):
-            keys = skill_head_keys((root / one).read_text(encoding="utf-8"))
-            if keys is None:
+            text = (root / one).read_text(encoding="utf-8")
+            keys = skill_head_keys(text)
+            if keys is not None and not head_is_unambiguous(text):
+                problems.append(
+                    f"шапка навыка кончается по-разному при двух прочтениях `---`: {one}"
+                )
+            elif keys is None:
                 problems.append(f"шапка навыка не разобрана — права не сверить: {one}")
             elif keys - SKILL_HEAD_KEYS:
                 extra = ", ".join(sorted(keys - SKILL_HEAD_KEYS))
@@ -448,8 +466,41 @@ def test_no_other_settings_channel_is_tracked() -> None:
 
     ПРЕДЕЛ НАЗВАН: судится ОТСЛЕЖИВАЕМОЕ — в чекауте прогона только оно и есть,
     а неотслеживаемый `settings.local.json` в окне агенту CI не виден.
+
+    ВТОРОЙ ПРЕДЕЛ (взгляды на #1262, #1296): шапка навыка судится СВОИМ
+    разбором — YAML до первой строки, начинающейся с `---`. Где кончается
+    шапка, гейт не угадывает: эта строка обязана быть ровно `---`
+    (`head_is_unambiguous`), и тогда по ней остановится любой разрезающий —
+    по началу строки, строкой целиком, с хвостовым пробелом или без. Как
+    разбирает сам YAML потребитель, гейт не знает.
     """
     assert not tree_channel_problems(), tree_channel_problems()
+
+
+@pytest.mark.parametrize(
+    ("text", "unambiguous"),
+    [
+        ("---\nname: a\ndescription: b\n---\nтекст\n", True),
+        ("---\nname: a\n---x: 1\nallowed-tools: Edit\n---\n", False),
+        ("---\nname: a\n----\n---\n", False),
+        ("---\nname: a\n", False),
+        ("---\nname: a\n--- \nallowed-tools: Bash\n---\n", False),
+        ("---\nname: a\n---\t\n", False),
+        ("---\nname: a\n---\r\n", False),
+    ],
+    ids=[
+        "ровная",
+        "ключ-с-тремя-дефисами",
+        "четыре-дефиса",
+        "не-закрыта",
+        "хвостовой-пробел",
+        "хвостовая-табуляция",
+        "возврат-каретки",
+    ],
+)
+def test_a_skill_head_must_close_the_same_both_ways(text: str, unambiguous: bool) -> None:
+    """Первая строка шапки на `---` — ровно `---`, или отказ (взгляды на #1262, #1296, 210)."""
+    assert head_is_unambiguous(text) is unambiguous
 
 
 def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
@@ -476,6 +527,7 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
         ".claude/skills/broken/SKILL.md": "---\nname: [\n---\n",
         ".claude/skills/headless/SKILL.md": "# без шапки\n",
         ".claude/skills/early/SKILL.md": "---\nname: e\n---x: 1\nallowed-tools: Bash\n---\n",
+        ".claude/skills/late/SKILL.md": "---\nname: l\n--- \nallowed-tools: Bash\n---\n",
     }
     for name, text in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -498,6 +550,7 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
             ".claude/skills/broken/SKILL.md",
             ".claude/skills/headless/SKILL.md",
             ".claude/skills/early/SKILL.md",
+            ".claude/skills/late/SKILL.md",
         ]
     ), said
 

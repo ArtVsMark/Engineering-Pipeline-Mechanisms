@@ -8,6 +8,7 @@
 верным, а имя файла писалось по памяти, близко к смыслу.
 """
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -143,3 +144,25 @@ def test_an_empty_tree_is_broken_whatever_the_network(
     assert module.main([]) == module.EXIT_BROKEN
     assert "ссылок на правила в дереве нет" in capsys.readouterr().err
     assert asked == [], "пустое дерево спросило каталог — исход снова зависит от сети"
+
+
+def test_an_unreadable_document_is_broken_whatever_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Документ не в UTF-8 — «не отработал», а не молчаливый пропуск, и раньше сети (#1300).
+
+    Прежде `links` пропускал такой файл, и ссылки в нём не проверялись вовсе;
+    сосед `check_foreign_why` в том же случае отвечал «не отработал».
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "doc.md").write_bytes(b"rule \xff\xfe")
+    asked: list[str] = []
+
+    def silent() -> dict[str, str]:
+        asked.append("каталог")
+        raise module.catalogue.Silent("каталог не ответил")
+
+    monkeypatch.setattr(module, "known", silent)
+    assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN
+    assert "doc.md не прочитан" in capsys.readouterr().err
+    assert asked == [], "нечитаемый документ спросил каталог — исход снова зависит от сети"
