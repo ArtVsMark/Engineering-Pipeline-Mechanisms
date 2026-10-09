@@ -840,9 +840,10 @@ def test_a_verdict_that_disagrees_with_its_list_is_refused(
     monkeypatch.setattr(module, "resolved_marks", lambda repo, token, since="": ({}, since))
     saved: list[int] = []
     monkeypatch.setattr(module, "save", lambda *a, **k: saved.append(1))
-    assert module.main(["--repo", "o/r", "--pr", "131"]) == module.EXIT_BROKEN
+    assert module.main(["--repo", "o/r", "--pr", "131"]) == module.EXIT_DISAGREED
     said = capsys.readouterr().err
     assert "::error::" in said, "отказ остался в логе — наружу его не видно"
+    assert "строки записаны" in said, "записанное объявлено незаписанным (взгляд на #1272)"
     assert "находок 3" in said and "строк находок 1" in said, "числа не названы"
     assert saved, "записанное потеряно отказом"
 
@@ -2006,14 +2007,16 @@ def test_a_fix_check_without_a_verdict_is_refused() -> None:
         module.record_fix_check({}, 7, fix_look("ПОЧИНКА[aaa1111]: закрыта — да"))
 
 
-def test_a_fix_check_that_disagrees_with_its_verdict_is_announced(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Вердикт спорит с числом не закрытых — это сказано предупреждением."""
-    module.record_fix_check(
+def test_a_fix_check_that_disagrees_with_its_verdict_is_the_same_outcome() -> None:
+    """Вердикт спорит с числом не закрытых — тот же исход, что у основного захода.
+
+    Прежде здесь было предупреждение, а основной заход отказывал: соседний случай
+    той же починки оставался мягче без причины (взгляд на #1272, 195).
+    """
+    said = module.record_fix_check(
         {}, 7, fix_look("ПОЧИНКА[aaa1111]: не закрыта — нет", "ВЕРДИКТ: находок 0")
     )
-    assert "::warning::проверка починки #7" in capsys.readouterr().err
+    assert "проверка починки #7" in said and "находок 0" in said
 
 
 def test_fix_answers_read_the_word_whole() -> None:
@@ -2473,6 +2476,7 @@ def test_the_registry_header_names_the_canon_by_the_function() -> None:
         ("`НАХОДКА[риск · аудитор]: a.py:3-5 — строка в кавычках`", "a.py:3-5 — строка в кавычках"),
         ("**a.py:54-68** — НАХОДКА[риск]: место перед ключом", "a.py:54-68 — место перед ключом"),
         ("`a/b.py:163-167` — НАХОДКА[риск]: место в кавычках", "a/b.py:163-167 — место в кавычках"),
+        ("`НАХОДКА[риск]`: a.py:3 — зовёт `foo`", "a.py:3 — зовёт `foo`"),
     ],
     ids=[
         "жирный-до-двоеточия",
@@ -2480,6 +2484,7 @@ def test_the_registry_header_names_the_canon_by_the_function() -> None:
         "строка-в-кавычках",
         "место-первым",
         "место-в-кавычках",
+        "кончается-кодом",
     ],
 )
 def test_every_measured_form_of_a_finding_is_read(line: str, title: str) -> None:
