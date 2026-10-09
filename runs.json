@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-08T11:13:22+00:00",
+  "updated": "2026-10-09T11:12:21+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -4090,6 +4090,292 @@
         }
       },
       "coverage": 92.8
+    },
+    "2026-10-09": {
+      "runs": {
+        "agent-pr": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 285,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 87,
+          "red": 0,
+          "cancelled": 9,
+          "seconds": 2385,
+          "timed": 87,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 104,
+          "red": 0,
+          "cancelled": 13,
+          "seconds": 1664,
+          "timed": 104,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 319,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 532,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 12,
+          "seconds": 2765,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 166,
+          "red": 1,
+          "cancelled": 88,
+          "seconds": 4053,
+          "timed": 166,
+          "red_jobs": {
+            "automerge / automerge": 1
+          },
+          "red_steps": {
+            "automerge / automerge · двигать очередь": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "hail": {
+          "runs": 86,
+          "red": 0,
+          "cancelled": 12,
+          "seconds": 2417,
+          "timed": 86,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 78,
+          "red": 0,
+          "cancelled": 52,
+          "seconds": 9423,
+          "timed": 78,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 74,
+          "red": 0,
+          "cancelled": 56,
+          "seconds": 8872,
+          "timed": 74,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 19,
+          "seconds": 3817,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 34,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 348,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 3543,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 914,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 51,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 168,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Дрейф: номер вердикта перечнем форм, заменённые у слияния — ровно сводимые (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 88,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Таблица «кем»: сборка кладёт who.md на ветку badges, витрина — вторым шагом": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 3647,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Дрейф: номер вердикта перечнем форм, заменённые у слияния — ровно сводимые (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 47,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Дрейф: номер вердикта перечнем форм, заменённые у слияния — ровно сводимые": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 775,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Шаг долга: решение выводится из таблиц, несказанное слияние — не «пусто»": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2116,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "drift": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 64,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "План: раздел 5 печатается группами по каналу, находки — по файлу (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 125,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "План: раздел 5 печатается группами по каналу, находки — по файлу (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 45,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 93.0
     }
   }
 }
