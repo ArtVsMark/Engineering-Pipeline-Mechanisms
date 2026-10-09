@@ -83,7 +83,13 @@ def test_the_readme_badges_are_seen_by_this_parser() -> None:
     # ВСЕ значки (005).
     shown = badges_shown(text)
     assert shown, "витрина без значков — предмет проверки не найден (075)"
-    assert len(seen) == len(shown), f"разбор видит {seen}, витрина показывает {sorted(shown)}"
+    # Страницы (`build_facts.PAGES`) витрина называет ссылкой, а не значком:
+    # разбор видит их тоже, и сверка с показанными значками их не считает (#1213).
+    pages = set(load_script("build_facts.py").PAGES)
+    seen_badges = [one for one in seen if one[1].rpartition("/")[2] not in pages]
+    assert len(seen_badges) == len(shown), (
+        f"разбор видит {seen_badges}, витрина показывает {sorted(shown)}"
+    )
     assert {ref for ref, _ in seen} == {"badges"}, seen
 
 
