@@ -385,8 +385,28 @@ def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
 #: сценарии хуков и `SKILL.md` навыков, — любой другой путь под `.claude/` и любой
 #: `.mcp.json` в дереве дают отказ, а навык не объявляет `allowed-tools`.
 CLAUDE_TREE: Final = re.compile(r"\.claude/(?:settings\.json|hooks/[^/]+|skills/[^/]+/SKILL\.md)")
-#: Права навыку объявляет его шапка; в наших навыках их нет, и не будет молча.
-GRANTS_RE: Final = re.compile(r"^allowed-tools\s*:", re.M)
+#: Ключи шапки навыка — ЗАКРЫТЫЙ перечень (068): имя и описание. Права навыку
+#: выдаёт его шапка — `allowed-tools`, а соседние ключи могут давать свои
+#: (например, хуки); перечислять запрещённое значит гадать, разрешённое —
+#: замерить: на 09.10.2026 все навыки дерева несут ровно эти два ключа. Шапка
+#: разбирается YAML-ом, а не образцом по началу строки: ключ в кавычках или со
+#: сдвигом образец не видел — вторая находка по одному месту, строгое правило
+#: вместо третьей формы (взгляды на #1251, 210).
+SKILL_HEAD_KEYS: Final = frozenset({"name", "description"})
+
+
+def skill_head_keys(text: str) -> set[str] | None:
+    """Ключи шапки навыка, разобранные YAML; ``None`` — шапки нет или она не разбирается."""
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---", 4)
+    if end < 0:
+        return None
+    try:
+        said = yaml.safe_load(text[4:end])
+    except yaml.YAMLError:
+        return None
+    return {str(key) for key in said} if isinstance(said, dict) else None
 
 
 def tracked_channels(root: Path = ROOT) -> set[str]:
@@ -403,16 +423,19 @@ def tracked_channels(root: Path = ROOT) -> set[str]:
 
 
 def tree_channel_problems(root: Path = ROOT) -> list[str]:
-    """Пути вне перечня `CLAUDE_TREE` и навыки, объявляющие себе права."""
+    """Пути вне перечня `CLAUDE_TREE` и навыки, чья шапка шире `SKILL_HEAD_KEYS`."""
     tracked = sorted(tracked_channels(root))
     problems = [
         f"канал прав агента вне перечня: {one}" for one in tracked if not CLAUDE_TREE.fullmatch(one)
     ]
     for one in tracked:
         if one.endswith("/SKILL.md"):
-            head = (root / one).read_text(encoding="utf-8").split("\n---", 1)[0]
-            if GRANTS_RE.search(head):
-                problems.append(f"навык объявляет себе права: {one}")
+            keys = skill_head_keys((root / one).read_text(encoding="utf-8"))
+            if keys is None:
+                problems.append(f"шапка навыка не разобрана — права не сверить: {one}")
+            elif keys - SKILL_HEAD_KEYS:
+                extra = ", ".join(sorted(keys - SKILL_HEAD_KEYS))
+                problems.append(f"шапка навыка шире перечня ({extra}): {one}")
     return problems
 
 
@@ -443,6 +466,11 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
         ".mcp.json": "{}",
         "sub/.mcp.json": "{}",
         ".claude/skills/bad/SKILL.md": "---\nname: bad\nallowed-tools: Bash\n---\n",
+        ".claude/skills/quoted/SKILL.md": '---\nname: q\n"allowed-tools": Bash\n---\n',
+        ".claude/skills/shifted/SKILL.md": "---\n  name: s\n  allowed-tools: Bash\n---\n",
+        ".claude/skills/hooks/SKILL.md": "---\nname: h\nhooks: {}\n---\n",
+        ".claude/skills/broken/SKILL.md": "---\nname: [\n---\n",
+        ".claude/skills/headless/SKILL.md": "# без шапки\n",
     }
     for name, text in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -459,6 +487,11 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
             ".mcp.json",
             "sub/.mcp.json",
             ".claude/skills/bad/SKILL.md",
+            ".claude/skills/quoted/SKILL.md",
+            ".claude/skills/shifted/SKILL.md",
+            ".claude/skills/hooks/SKILL.md",
+            ".claude/skills/broken/SKILL.md",
+            ".claude/skills/headless/SKILL.md",
         ]
     ), said
 
