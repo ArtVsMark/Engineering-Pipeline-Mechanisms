@@ -367,12 +367,22 @@ def manifest_facts(root: Path) -> dict[str, Any]:
     Выпуска нет — `release: null`, как велит форма манифеста, а не выдуманный
     тег. Номер контракта — MAJOR.MINOR: выпуск минора у издателя и есть смена
     того, что он отдаёт, а патч её не меняет.
+
+    НОМЕР ЧИТАЕТСЯ НА ДЕРЕВЕ ТЕГА, А НЕ С ГОЛОВЫ — как у `release.contract_at`
+    (#299): голова уходит вперёд, и номер с неё приписал бы выпуску чужой
+    контракт (взгляд на #1294). Без выпуска приписывать некому — номер с головы.
     """
     tag = version.release_tag(root)
     sha = version.git("rev-list", "-n", "1", tag, root=root) if tag else None
-    major_minor = ".".join(contract_version(root / VERSION_FILE).split(".")[:2])
+    released = tag if tag and sha else None
+    at_tag = f"{released}:{VERSION_FILE.as_posix()}"
+    said = version.git("show", at_tag, root=root) if released else None
+    if released and not said:
+        raise NotRun(f"версия контракта на дереве {released} не прочитана")
+    full = said.strip() if said else contract_version(root / VERSION_FILE)
+    major_minor = ".".join(full.split(".")[:2])
     return {
-        "release": {"tag": tag, "sha": sha} if tag and sha else None,
+        "release": {"tag": released, "sha": sha} if released else None,
         "gives": {GIVES_STEPS: major_minor},
     }
 
@@ -932,7 +942,7 @@ def drawn_from(path: Path, out_dir: str) -> int:
         return EXIT_BROKEN
     print(
         f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}; "
-        f"страницы: {', '.join(sorted(PAGES))}"
+        f"страницы: {', '.join(sorted(PAGES))}; машинные: {', '.join(sorted(MACHINE_READ))}"
     )
     return EXIT_OK
 

@@ -190,6 +190,10 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
         [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8"
     ).stdout.strip()
     assert facts.manifest_facts(tmp_path)["release"] == {"tag": "v1.5.0", "sha": sha}
+    # Голова ушла вперёд выпуска — номер остаётся номером тега (#299, взгляд на #1294).
+    (tmp_path / facts.VERSION_FILE).write_text("0.8.0\n", encoding="utf-8")
+    subprocess.run([*git, "commit", "-qam", "d"], check=True)
+    assert facts.manifest_facts(tmp_path)["gives"] == {"steps": "0.7"}
 
 
 def test_the_project_picture_is_drawn_and_kept_on_the_branch(tmp_path: Path) -> None:
