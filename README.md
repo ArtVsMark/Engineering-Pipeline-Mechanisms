@@ -2,7 +2,7 @@
 
 > **Читатель:** посетитель — что это такое и стоит ли брать.
 
-[![Состояние: CI, Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![правил каталога держится машиной](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/rules.json&cacheSeconds=300)](.rules/bindings.json) [![кто из семьи взял наше: проекты и шаги вызовом по тегу, правила гейтом нашего происхождения](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/family.json&cacheSeconds=300)](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/1199)
+[![Состояние: CI, Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![значок проекта: правил каталога держится машиной, проектов семьи на нашем механизме, наших гейтов в ходу — каждое числом из скольких](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/project.svg)](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/1212)
 
 **Механизмы конвейера: скелет один для всех проектов, наполнение своё.**
 Открытие изменения, гейты, очередь и слияние, здоровье общей ветки, выпуск —
@@ -72,7 +72,11 @@
 ветку `badges`
 ([160](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/160-derived-artifacts-live-off-the-branch.md)).
 Первый значок общий для семьи: версии Python и ОС окрашены исходом своих
-прогонов, серое — не проверялось. Факты по тому же адресу читают соседи и
+прогонов, серое — не проверялось. Второй — значок проекта: сколько правил
+каталога держится машиной, сколько проектов семьи зовут наши шаги по тегу и
+сколько наших гейтов в ходу, каждое числом из скольких; непрочитанное так и
+названо, а не ноль. Кто именно взял — поимённо в фактах, раздел
+`family.uptake.by`. Факты по тому же адресу читают соседи и
 каталог правил
 ([174](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/174-facts-about-a-project-are-published-by-it.md)).
 
