@@ -144,13 +144,25 @@ class Source:
     #: адресует по-прежнему `rows` (#1263).
     groups: list[tuple[str, list[str]]] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        """Группы — перекладка `rows`, а не второй состав (взгляд на #1264).
+
+        Печать при группах берёт только группы: строка, которой группа не
+        досталась, пропала бы из плана молча (045).
+        """
+        grouped = sorted(row for _, rows in self.groups for row in rows)
+        if self.groups and grouped != sorted(self.rows):
+            raise ValueError("группы раздела не совпадают с его строками (#1263)")
+
 
 #: Каналы источника 5 — подзаголовки раздела в порядке `parts` (решение
 #: владельца 09.10.2026, #1263): без них около тридцати строк четырёх каналов
 #: шли одним списком.
 FIVE_TITLES: Final = ("Правила каталога", "Дрейф", "Поводы для правила", "Копящиеся находки")
-#: Файл находки в строке реестра: «… — [вес] путь:строки — …».
-FINDING_FILE_RE: Final = re.compile(r"\] (?P<path>[\w./-]+\.\w+)(?::[\d-]+)? — ")
+#: Заголовок находки в строке реестра: «… — [вес] заголовок». Место в нём
+#: разбирает канон `findings.place_of`, а не своя регулярка: своя расходилась
+#: с ним на кавычках, пути без расширения и нескольких строках (взгляд на #1264).
+FINDING_TITLE_RE: Final = re.compile(r"\] (?P<title>.*)")
 #: Группа находки, у которой места нет.
 NO_PLACE: Final = "без места"
 
@@ -159,8 +171,9 @@ def by_file(title: str, rows: list[str]) -> list[tuple[str, list[str]]]:
     """Копящиеся находки по файлу: одна группа — одно будущее изменение (#1263)."""
     grouped: dict[str, list[str]] = {}
     for row in rows:
-        found = FINDING_FILE_RE.search(row)
-        grouped.setdefault(f"`{found['path']}`" if found else NO_PLACE, []).append(row)
+        found = FINDING_TITLE_RE.search(row)
+        place = findings.place_of(found["title"]) if found else ""
+        grouped.setdefault(f"`{place}`" if place else NO_PLACE, []).append(row)
     return [(f"{title} · {place}", grouped[place]) for place in sorted(grouped)]
 
 

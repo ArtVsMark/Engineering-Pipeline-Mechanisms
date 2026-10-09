@@ -21,6 +21,7 @@ import pytest
 from tests.conftest import ROOT, load_script
 
 module = load_script("work_plan.py")
+findings = load_script("findings.py")
 
 
 BODY = (
@@ -938,6 +939,34 @@ def test_accrued_findings_are_grouped_by_file() -> None:
         f"Копящиеся находки · {module.NO_PLACE}",
     ]
     assert groups[0][1] == [rows[0], rows[2]]
+
+
+@pytest.mark.parametrize(
+    ("title", "place"),
+    [
+        ("scripts/x.py:12 — голый путь", "scripts/x.py"),
+        ("`scripts/x.py:12` — … — в кавычках", "scripts/x.py"),
+        ("CONTRACT_VERSION:1 — путь без расширения", "CONTRACT_VERSION"),
+        ("scripts/x.py:12, 40 — несколько строк", "scripts/x.py"),
+        ("scripts/x.py:12 и tests/y.py:3 — два файла", "scripts/x.py"),
+        ("(без места) — прозой", ""),
+    ],
+)
+def test_a_finding_is_grouped_where_the_canon_places_it(title: str, place: str) -> None:
+    """Группа находки — место по канону `findings.place_of`, во всех формах (взгляд на #1264).
+
+    Своя регулярка расходилась с каноном на кавычках, пути без расширения и
+    нескольких строках, и такие находки ложились в «без места» (210).
+    """
+    assert findings.place_of(title) == place
+    [(group, _)] = module.by_file("К", [f"`aaaaaaa` · #1 — [риск] {title}"])
+    assert group == (f"К · `{place}`" if place else f"К · {module.NO_PLACE}")
+
+
+def test_groups_that_lose_a_row_are_refused() -> None:
+    """Группы, не покрывающие строки раздела, — отказ, а не молчаливая потеря (взгляд на #1264)."""
+    with pytest.raises(ValueError, match="1263"):
+        module.Source(rows=["раз", "два"], groups=[("Г", ["раз"])])
 
 
 def test_every_channel_of_section_five_has_a_title() -> None:
