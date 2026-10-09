@@ -166,8 +166,9 @@ def drawn() -> set[str]:
     ровно так `tests/test_facts.py` два месяца сверял четыре имени из шести
     (146). Здесь предмет тот же, и источник поэтому один — `build_facts.BADGES`.
     """
-    names = set(facts.BADGES)
-    assert len(names) >= 4, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
+    names = set(facts.BADGES) | set(facts.PICTURES)
+    # Пол — три: значок проекта заменил «держится машиной» и «семью» (#1213).
+    assert len(names) >= 3, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
     # Единый значок рисует шаг `badges.yml`, а не сборка; имя у них одно —
     # `build_facts.UNIFIED`, и со шагом его сверяет проверка ниже (#1019).
     return names | {facts.UNIFIED}

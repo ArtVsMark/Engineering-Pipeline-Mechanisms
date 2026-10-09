@@ -113,11 +113,11 @@ def test_badge_shows_the_number_it_measured() -> None:
     построению — проект отвечает по каждому правилу каталога (129), — и такой
     значок не сдвинулся бы никогда.
     """
-    drawn = facts.rules_badge(
+    zones = facts.project_zones(
         {"rules": {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}}
     )
-    assert drawn.message == "66/195"
-    assert drawn.label == "держится машиной"
+    assert zones[0][1][0] == "машиной 66/195 · 34%"
+    assert "машиной 66/195 · 34%" in facts.drawing(zones)
 
 
 @pytest.mark.parametrize(
@@ -147,11 +147,10 @@ def test_a_wider_text_gets_a_wider_part() -> None:
     assert f'width="{facts.part_width("правила") + wide}"' in svg
 
 
-def test_the_project_picture_is_drawn_ahead_and_kept_on_the_branch(tmp_path: Path) -> None:
-    """Значок проекта рисуется впрок и уборкой ветки не снимается (196, #1213).
+def test_the_project_picture_is_drawn_and_kept_on_the_branch(tmp_path: Path) -> None:
+    """Значок проекта рисуется сборкой и уборкой ветки не снимается (196, #1213).
 
-    Витрина перейдёт на него вторым изменением — к тому моменту он обязан уже
-    лежать на ветке `badges`.
+    Витрина ссылается на него, и ссылка не смеет вести на снятый файл.
     """
     facts.draw_badges(
         {
@@ -161,17 +160,20 @@ def test_the_project_picture_is_drawn_ahead_and_kept_on_the_branch(tmp_path: Pat
         },
         tmp_path,
     )
-    for name in facts.AHEAD:
+    for name in facts.PICTURES:
         assert (tmp_path / name).read_text(encoding="utf-8").startswith("<svg")
         assert name in facts.branch_files()
 
 
 def test_badge_colour_follows_the_share() -> None:
-    """Цвет говорит о доле, а не о настроении: три доли — три цвета."""
-    low = facts.rules_badge({"rules": {"by_mechanism": {"gate": 10, "document": 90}}})
-    mid = facts.rules_badge({"rules": {"by_mechanism": {"gate": 50, "document": 50}}})
-    high = facts.rules_badge({"rules": {"by_mechanism": {"gate": 90, "document": 10}}})
-    assert len({low.color, mid.color, high.color}) == 3
+    """Цвет говорит о доле правил, а не о настроении: три доли — три цвета."""
+    low, mid, high = (
+        facts.project_zones({"rules": {"by_mechanism": {"gate": share, "document": 100 - share}}})[
+            0
+        ][1][1]
+        for share in (10, 50, 90)
+    )
+    assert len({low, mid, high}) == 3
 
 
 #: Разрезы витрины, публикующие ДОЛЮ, и два числа, из которых она сделана.
@@ -290,7 +292,7 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, facts.FACTS, facts.UNIFIED})
+    found = sorted({*facts.BADGES, *facts.PICTURES, facts.FACTS, facts.UNIFIED})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
@@ -318,7 +320,8 @@ def shown_badges() -> list[str]:
     экземпляр здесь был третьим (022).
     """
     found = sorted(badges_shown((ROOT / "README.md").read_text("utf-8")))
-    assert len(found) >= 3, f"витрина показывает {found} — предмет проверки не найден (075)"
+    # Пол — два: значок проекта заменил «держится машиной» и «семью» (#1213).
+    assert len(found) >= 2, f"витрина показывает {found} — предмет проверки не найден (075)"
     return found
 
 
@@ -351,8 +354,9 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     утверждал о себе неправду
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    drawn = set(facts.BADGES)
-    assert len(drawn) >= 4, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
+    drawn = set(facts.BADGES) | set(facts.PICTURES)
+    # Пол — три: значок проекта заменил «держится машиной» и «семью» (#1213).
+    assert len(drawn) >= 3, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
     # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
     # ним они были бы дублями. Сам единый значок рисует шаг `badges.yml`.
     expected = (drawn - set(facts.ZONE_INPUTS)) | {facts.UNIFIED}
@@ -579,8 +583,11 @@ INSIDE_THE_FACTS: Final = frozenset(
         "float",
         "str",
         "bool",
-        "isinstance",
         ".get",
+        # Цвет доли по двум уже прочитанным числам: ничего не читает (#1213).
+        "share_color",
+        # Процент по тем же двум числам, что факты публикуют рядом: форма, не новое число.
+        "counted",
         ".items",
         ".values",
     }
@@ -596,7 +603,7 @@ def badge_makers() -> list[ast.FunctionDef]:
     Инвентарь `BADGES` — тот же источник, по которому значки и собираются, так что
     предмет проверки и предмет сборки совпадают по построению (022).
     """
-    named = {maker.__name__ for maker in facts.BADGES.values()}
+    named = {maker.__name__ for maker in [*facts.BADGES.values(), *facts.PICTURES.values()]}
     tree = ast.parse((ROOT / "scripts" / "build_facts.py").read_text(encoding="utf-8"))
     found = [
         node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name in named
@@ -671,10 +678,11 @@ def test_every_badge_maker_is_in_the_inventory() -> None:
     in_code = {
         node.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name.endswith("_badge")
+        if isinstance(node, ast.FunctionDef) and node.name.endswith(("_badge", "_zones"))
     }
     assert in_code, "рисовалок значков в дереве не нашлось — предмет проверки не найден (075)"
-    forgotten = sorted(in_code - {maker.__name__ for maker in facts.BADGES.values()})
+    makers = [*facts.BADGES.values(), *facts.PICTURES.values()]
+    forgotten = sorted(in_code - {maker.__name__ for maker in makers})
     assert not forgotten, (
         "рисовалка есть в коде, но не в инвентаре — значок собирается в обход, и"
         f" проверка выше его не судит: {', '.join(forgotten)}"

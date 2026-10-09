@@ -198,7 +198,7 @@ def test_a_snapshot_without_a_date_says_so() -> None:
 # --- значки --------------------------------------------------------------
 
 
-def test_the_rules_badge_counts_machines_not_answers() -> None:
+def test_the_project_badge_counts_machines_not_answers() -> None:
     """Значок считает правила, держащиеся МАШИНОЙ, а не отвеченные.
 
     Прежняя редакция показывала `answered/total` и подписывала это «правил
@@ -206,60 +206,10 @@ def test_the_rules_badge_counts_machines_not_answers() -> None:
     каждому правилу каталога по построению (129). Значок, который не движется,
     ничего не говорит ни о том, где проект стоит, ни о том, что он сдвинулся.
     """
-    said = facts.rules_badge(
+    zones = facts.project_zones(
         {"rules": {"by_mechanism": {"gate": 10, "pipeline": 2, "document": 8, "none": 1}}}
     )
-    assert said.message == "12/21"
-    assert said.label == "держится машиной"
-
-
-def test_the_family_badge_says_when_it_has_no_data() -> None:
-    """Снимок семьи не пришёл — значок говорит это, а не рисует ноль (045)."""
-    assert facts.family_badge({"family": {"read": False}}).message == "нет данных"
-    assert facts.family_badge({}).message == "нет данных"
-
-
-def test_the_family_badge_shows_calls_steps_and_gates() -> None:
-    """Значок несёт три числа с числителем и знаменателем (#1199, решение 07.10.2026)."""
-    said = facts.family_badge(
-        {
-            "family": {
-                "read": True,
-                "adopted": {"ours": 2, "of": 800, "by": []},
-                "uptake": {
-                    "read": True,
-                    "projects": {"took": 1, "of": 5, "unread": 0, "unread_repos": []},
-                    "steps": {"taken": 3, "of": 20, "names": []},
-                },
-            }
-        }
-    )
-    assert said.message == "1/5 проектов · 3/20 шагов · гейт 2/800 правил"
-
-
-def test_an_unread_clone_is_named_on_the_badge_not_counted_as_zero() -> None:
-    """Непрочитанные клоны названы числом рядом, а не спрятаны в знаменатель (045)."""
-    said = facts.family_badge(
-        {
-            "family": {
-                "read": False,
-                "uptake": {
-                    "read": True,
-                    "projects": {"took": 0, "of": 5, "unread": 2, "unread_repos": ["a", "b"]},
-                    "steps": {"taken": 0, "of": 20, "names": []},
-                },
-            }
-        }
-    )
-    assert said.message == "0/5 проектов (2 не прочитано) · 0/20 шагов · гейт: нет данных"
-
-
-def test_an_unread_sweep_is_not_a_zero_on_the_badge() -> None:
-    """Обход не прочитан — «вызовы не прочитаны», а не «0/5» (045)."""
-    said = facts.family_badge(
-        {"family": {"read": True, "adopted": {"ours": 0, "of": 9}, "uptake": {"read": False}}}
-    )
-    assert said.message == "вызовы не прочитаны · гейт 0/9 правил"
+    assert zones[0][1][0] == "машиной 12/21 · 57%"
 
 
 RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}
