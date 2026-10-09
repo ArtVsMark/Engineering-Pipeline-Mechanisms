@@ -41,10 +41,12 @@ def test_the_built_link_passes_the_gate_that_judges_links() -> None:
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
     """
     said = module.link("005", SLUGS)
-    found = gate.LINK_RE.search(said)
+    # Гейт ищет ссылку в байтах файла, а не в раскодированном тексте: кодировка
+    # файла исхода не решает (`check_rule_links.links`).
+    found = gate.LINK_RE.search(said.encode())
     assert found, f"гейт не узнаёт собственную форму ссылки: {said}"
-    assert found["number"] == "005"
-    assert found["slug"] == SLUGS["005"]
+    assert found["number"] == b"005"
+    assert found["slug"] == SLUGS["005"].encode()
 
 
 @pytest.mark.parametrize("written", ["5", "05", "005", "#5", " 5 "])
