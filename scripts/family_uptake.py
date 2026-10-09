@@ -41,6 +41,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -74,6 +76,13 @@ HOST: Final = "https://github.com"
 #: Сколько ждать клон. Без предела заход висит на недоступном соседе, и обход
 #: не доходит до остальных.
 TIMEOUT: Final = 120
+#: Сколько секунд обход начинает новых соседей. Шаг прогона снимается по своему
+#: пределу целиком, и вместе с ним пропали бы числа уже прочитанных клонов;
+#: поэтому предел держит сам обход: после бюджета соседи не начинаются и
+#: названы непрочитанными, а ожидание git урезано до остатка (взгляд на #1241).
+#: Худший случай — бюджет плюс остаток на втором вызове git, то есть вдвое;
+#: предел шага в `badges.yml` стоит выше него.
+BUDGET: Final = 75
 
 
 class NotRun(RuntimeError):
@@ -147,7 +156,7 @@ def calls_in(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(sorted(set(steps))), tuple(sorted(set(refs)))
 
 
-def shallow_clone(repo: str, where: Path, host: str = HOST) -> Path:
+def shallow_clone(repo: str, where: Path, host: str = HOST, timeout: float = TIMEOUT) -> Path:
     """Поверхностный клон одного соседа: только объявление прогонов."""
     into = where / repo.replace("/", "_")
     # БЕЗ GIT НА ПУТИ — ОТКАЗ ЗДЕСЬ, у вызова, а не только выше у `took`: поимка
@@ -169,7 +178,7 @@ def shallow_clone(repo: str, where: Path, host: str = HOST) -> Path:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=TIMEOUT,
+            timeout=timeout,
         )
         if done.returncode:
             raise NotRun(f"{repo}: клон не взят — {report.cut(done.stderr.strip() or 'отказ git')}")
@@ -186,7 +195,7 @@ def shallow_clone(repo: str, where: Path, host: str = HOST) -> Path:
             encoding="utf-8",
             errors="replace",
             check=False,
-            timeout=TIMEOUT,
+            timeout=timeout,
         )
         if narrowed.returncode:
             raise NotRun(
@@ -199,9 +208,9 @@ def shallow_clone(repo: str, where: Path, host: str = HOST) -> Path:
     return into
 
 
-def took(repo: str, where: Path) -> Took:
+def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
     """Что взял один сосед — по его клону."""
-    folder = shallow_clone(repo, where) / WANT
+    folder = shallow_clone(repo, where, timeout=timeout) / WANT
     steps: set[str] = set()
     refs: set[str] = set()
     # КАТАЛОГА ПРОГОНОВ МОЖЕТ НЕ БЫТЬ ВОВСЕ, и это «не взял», а не отказ:
@@ -214,27 +223,50 @@ def took(repo: str, where: Path) -> Took:
     return Took(repo=repo, steps=tuple(sorted(steps)), refs=tuple(sorted(refs)))
 
 
-def sweep(repos: list[str], where: Path) -> tuple[list[Took], list[str]]:
+def sweep(
+    repos: list[str],
+    where: Path,
+    *,
+    budget: float = BUDGET,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[list[Took], list[str]]:
     """Обход всех соседей; отдельно — те, чей клон не прочитан.
 
     ОТКАЗ ПО ОДНОМУ НЕ УНОСИТ ОБХОД: недоступный сосед не должен прятать
     состояние остальных, а его непрочитанность обязана быть названа (045).
+    То же со временем: сосед, до которого не дошли за `budget`, назван
+    непрочитанным, а прочитанные остаются в числах.
     """
     seen: list[Took] = []
     unread: list[str] = []
+    deadline = clock() + budget
     for repo in repos:
+        left = deadline - clock()
+        if left <= 0:
+            print(f"::warning::{repo}: не прочитан — время обхода исчерпано", file=sys.stderr)
+            unread.append(repo)
+            continue
         try:
-            seen.append(took(repo, where))
+            seen.append(took(repo, where, timeout=min(TIMEOUT, left)))
         except (NotRun, subprocess.TimeoutExpired, OSError) as exc:
             print(f"::warning::{repo}: не прочитан — {report.cut(str(exc))}", file=sys.stderr)
             unread.append(repo)
     return seen, unread
 
 
-def report_lines(seen: list[Took], unread: list[str]) -> list[str]:
-    """Строки сводки — отдельно от печати, чтобы их можно было спросить."""
-    takers = [one for one in seen if one.steps]
-    lines = [f"взяли наши шаги: {len(takers)} из {len(seen)} прочитанных"]
+def takers(seen: list[Took], offered: list[str]) -> list[Took]:
+    """Взявшие: позвали хотя бы один ОТДАВАЕМЫЙ шаг. Одно правило на печать и факты (022)."""
+    offers = set(offered)
+    return [one for one in seen if offers & set(offered_names(one.steps))]
+
+
+def report_lines(seen: list[Took], unread: list[str], offered: list[str]) -> list[str]:
+    """Строки сводки — отдельно от печати, чтобы их можно было спросить.
+
+    «Взяли» считается тем же `takers`, что и в фактах: печать и файл одного
+    захода не отвечают на один вопрос разными числами (взгляд на #1241).
+    """
+    lines = [f"взяли наши шаги: {len(takers(seen, offered))} из {len(seen)} прочитанных"]
     lines += [one.said() for one in seen]
     if unread:
         lines.append(
@@ -264,18 +296,19 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
     # отдаваемое — шаг без приставки (`lint`, `onboard.steps`): сравнение как
     # есть давало пустое пересечение всегда (взгляд на #1241).
     offers = set(offered)
-    takers = [one for one in seen if offers & set(offered_names(one.steps))]
-    taken = sorted({step for one in takers for step in offered_names(one.steps)} & offers)
+    took_ours = takers(seen, offered)
+    taken = sorted({step for one in took_ours for step in offered_names(one.steps)} & offers)
     return {
         "projects": {
-            "took": len(takers),
+            "took": len(took_ours),
             "of": len(seen) + len(unread),
             "unread": len(unread),
             "unread_repos": sorted(unread),
         },
         "steps": {"taken": len(taken), "of": len(offered), "names": taken},
         "by": [
-            {"repo": one.repo, "steps": list(one.steps), "refs": list(one.refs)} for one in takers
+            {"repo": one.repo, "steps": list(one.steps), "refs": list(one.refs)}
+            for one in took_ours
         ],
     }
 
@@ -305,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         seen, unread = sweep(repos, Path(args.where or tmp))
 
-    for line in report_lines(seen, unread):
+    for line in report_lines(seen, unread, offered):
         print(line)
     if args.out:
         Path(args.out).write_text(
