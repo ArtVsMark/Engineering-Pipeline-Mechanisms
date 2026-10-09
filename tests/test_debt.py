@@ -11,7 +11,7 @@ import inspect
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -245,27 +245,38 @@ def test_accrued_findings_alone_come_before_the_plan(
     assert debt.before_plan(left=left, kept=kept, lagging=lagging, rules=rules) is owed
 
 
-def source_five_readers() -> set[str]:
-    """Чтецы каналов источника 5 у сборщика плана — из кода `work_plan.sources`.
+#: Каналы раздела 5, которые шаг долга ЧИТАЕТ САМ, — с тем, чем он их читает.
+#: Вместе с `debt.NOT_READ` они обязаны покрыть кортеж `parts` целиком: имя
+#: без строки ни там, ни здесь краснеет, а не отбрасывается (взгляд на #1256).
+READ_BY_STEP: Final = {
+    "work_plan.rules_part": "правила — те же «входящие», `debt.rules_left`",
+    "work_plan.sources:kept_part": "копящиеся находки — `debt.accrued`",
+}
 
-    Раздел 5 собирается кортежем `parts`; у каждого его имени ищется вызов
-    `<имя>_part(...)`, которым оно присвоено. Копящиеся находки присваиваются
-    `Source(...)`, а не чтецом: их шаг долга читает сам (`accrued`).
+
+def source_five_channels(text: str) -> set[str]:
+    """Каналы раздела 5 у сборщика плана — из кода `work_plan.sources`.
+
+    Раздел 5 собирается кортежем `parts`. Канал называется чтецом, если имя
+    присвоено вызовом `<что-то>_part(...)`, иначе — самим именем в `sources`
+    (`work_plan.sources:<имя>`). НИЧЕГО НЕ ОТБРАСЫВАЕТСЯ: имя без присваивания
+    или элемент кортежа не именем — отказ с названием, а не тихий пропуск
+    (взгляд на #1256).
     """
-    tree = ast.parse((ROOT / "scripts" / "work_plan.py").read_text(encoding="utf-8"))
+    tree = ast.parse(text)
     sources = next(
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "sources"
     )
     named: dict[str, str] = {}
-    parts: list[str] = []
+    parts: list[ast.expr] = []
     for node in ast.walk(sources):
         if not isinstance(node, ast.Assign) or not isinstance(node.targets[0], ast.Name):
             continue
         target = node.targets[0].id
         if target == "parts" and isinstance(node.value, ast.Tuple):
-            parts = [one.id for one in node.value.elts if isinstance(one, ast.Name)]
+            parts = node.value.elts
         elif isinstance(node.value, ast.Call):
             # Обе формы имени вызова: `drift_part(...)` и `work_plan.drift_part(...)`.
             call = node.value.func
@@ -274,17 +285,47 @@ def source_five_readers() -> set[str]:
             elif isinstance(call, ast.Attribute):
                 named[target] = call.attr
     assert parts, "раздел 5 в `work_plan.sources` больше не собирается кортежем `parts`"
-    return {f"work_plan.{named[one]}" for one in parts if named.get(one, "").endswith("_part")}
+    channels: set[str] = set()
+    for one in parts:
+        assert isinstance(one, ast.Name), f"в `parts` не имя: {ast.unparse(one)}"
+        assert one.id in named, f"канал раздела 5 «{one.id}» не присвоен вызовом в `sources`"
+        reader = named[one.id]
+        channels.add(
+            f"work_plan.{reader}" if reader.endswith("_part") else f"work_plan.sources:{one.id}"
+        )
+    return channels
 
 
 def test_the_unread_channels_are_the_plans_other_readers() -> None:
-    """`NOT_READ` — ровно те каналы раздела 5, которых шаг не читает (взгляд на #1245).
+    """`NOT_READ` и `READ_BY_STEP` вместе — ровно каналы раздела 5 (взгляды на #1245, #1256).
 
-    Шаг читает правила (`rules_part` плана берёт те же «входящие») и копящиеся
-    находки. Новый канал раздела 5 без строки в `NOT_READ` краснеет здесь:
-    иначе шаг снова молча выдал бы непрочитанное за пустоту (195).
+    Новый канал раздела 5, не названный ни там, ни здесь, краснеет: иначе шаг
+    снова молча выдал бы непрочитанное за пустоту (195).
     """
-    assert set(debt.NOT_READ.values()) == source_five_readers() - {"work_plan.rules_part"}
+    text = (ROOT / "scripts" / "work_plan.py").read_text(encoding="utf-8")
+    assert not set(debt.NOT_READ.values()) & set(READ_BY_STEP), "канал назван дважды"
+    assert source_five_channels(text) == set(debt.NOT_READ.values()) | set(READ_BY_STEP)
+
+
+@pytest.mark.parametrize(
+    ("added", "said"),
+    [
+        ("    fresh = read_fresh(repo)\n", "work_plan.sources:fresh"),
+        ("    fresh = changerefs.fresh_part(repo)\n", "work_plan.fresh_part"),
+        ("", "не присвоен"),
+    ],
+)
+def test_a_new_channel_is_not_dropped(added: str, said: str) -> None:
+    """Новый канал в `parts` виден сверке в любой форме: чтецом, не-чтецом, без присваивания."""
+    text = (ROOT / "scripts" / "work_plan.py").read_text(encoding="utf-8")
+    old = "    parts = (rules, moved, born, kept_part)\n"
+    assert old in text, "кортеж раздела 5 сменил форму — пример пересобрать"
+    changed = text.replace(old, added + "    parts = (rules, moved, born, kept_part, fresh)\n")
+    if said == "не присвоен":
+        with pytest.raises(AssertionError, match=said):
+            source_five_channels(changed)
+        return
+    assert said in source_five_channels(changed)
 
 
 def test_an_empty_step_names_what_it_did_not_read(capsys: pytest.CaptureFixture[str]) -> None:
