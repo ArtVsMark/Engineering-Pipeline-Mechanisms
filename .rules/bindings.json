@@ -637,7 +637,7 @@
       "mechanism": "gate",
       "where": ".github/workflows/ci.yml — джоб attribution подключён действием каталога, а не переписан здесь; packages/transport/ghrest.py — общий транспорт вместо пяти копий, и tests/test_ghrest.py краснеет на появлении шестой",
       "analysed": "2026-09-26",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v1.9.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v1.11.0",
       "origin_kind": "called"
     },
     "091": {
@@ -862,7 +862,7 @@
       "mechanism": "gate",
       "where": ".github/workflows/ci.yml — джоб attribution с отметкой cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b; отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть однозначным, и отметка тогда указывает не туда. Тот же полный отпечаток стоит в .github/workflows/ci.yml и в docs/decisions/001-attribution-of-merged-1.md — три места, одно написание. .github/authors.txt — список согласованных имён",
       "analysed": "2026-09-26",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v1.9.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v1.11.0",
       "origin_kind": "called"
     },
     "124": {
@@ -911,7 +911,7 @@
       "mechanism": "pipeline",
       "where": ".github/workflows/rules-inbox.yml — новое правило каталога приходит не в чужой репозиторий, а ЗАДАЧЕЙ в трекер этого проекта, вместе с тремя числами долга по 177: без ответа, действующих без механизма, и разошедшийся контракт. Вторая половина правила — подбирать к новому правилу кандидатов из открытых задач — пока не сделана: список кандидатов проходная не собирает, и связывает правило с предметом окно",
       "analysed": "2026-10-09",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.9.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.11.0",
       "origin_kind": "called",
       "why": "ПОЧЕМУ НЕ ГЕЙТ (перечитано 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237): новое правило приходит событием каталога по его расписанию, а не изменением этого проекта; красное на изменении отвечало бы за чужой выпуск (190). Недостроенная вторая половина — кандидаты из открытых задач — тоже была бы прогоном входящих, а не гейтом: это долг механизма, а не отказ от гейта."
     },
@@ -952,7 +952,7 @@
       "mechanism": "gate",
       "where": ".github/workflows/attribution-history.yml — личность записи узнаётся ЗАПИСЬЮ: первопредками общей ветки, а не тем, что окно объявило о себе. Гейт на изменении этого не видит по построению — он спрашивает коммиты ветки, а в общую ветку едет уплотнение, тело которому составляет очередь. Замер 10.09.2026: из ста первопредков после объявленной отметки шестнадцать шли без строки соавтора, и все они старше того дня, когда очередь научилась переносить трейлеры. Отметка `since` объявлена в прогоне: старый хвост переписать нечем, а вечное красное — фон, а не сигнал (051). Плюс CLAUDE.md, раздел «Подпись и открытие изменения».",
       "analysed": "2026-09-26",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v1.9.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v1.11.0",
       "origin_kind": "called"
     },
     "136": {
@@ -1135,7 +1135,7 @@
       "mechanism": "pipeline",
       "where": ".github/workflows/rules-inbox.yml — ночной прогон каталога приносит в задачу-«входящие» раздел «У соседей это уже решено»: по каждому правилу, признанному действующим и не держащемуся ничем, названы соседи по своду и АДРЕС их механизма. Вторая ось — scripts/family.py: разрез по сводке каталога показывает, что соседи держат машиной там, где мы отвечаем документом; из него вырос список переноса (ArtVsMark/Engineering-Pipeline-Mechanisms#117). Спрашивается сводка каталога, а не поход по чужим репозиториям (001). Прежний ответ говорил «документ» и отстал от дерева: механизм стоял, ответ его не называл.",
       "analysed": "2026-10-09",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.9.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.11.0",
       "origin_kind": "called",
       "why": "ПОЧЕМУ НЕ ГЕЙТ (перечитано 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237): ответы соседей меняются в их репозиториях и по их расписанию; гейт на изменении краснел бы от чужой правки, то есть дал бы соседу право остановить наш конвейер — ровно то, что запрещает 190. Поэтому список «у соседей решено» приносит ночной прогон, а решение, переносить ли приём, остаётся за окном."
     },
@@ -1244,7 +1244,7 @@
       "mechanism": "pipeline",
       "where": ".github/workflows/rules-inbox.yml и scripts/debt.py — числа об одной величине приходят с двух сторон: каталог считает по своей выгрузке, проект — по .rules/bindings.json. При расхождении первым проверяется СВОЁ чтение: поле answers_to называет версию выгрузки, по которой построены ответы, и сверяется каталогом. Именно так расхождение и всплыло — schema была вписана по разумению окна вместо заготовки каталога, а не потому, что величины разные; scripts/drift.py — «один снимок старее другого» проверяется механизмом, а не гипотезой: сводка семьи сверяется с живым ответом дерева, и расхождение называется правилами поимённо",
       "analysed": "2026-10-09",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.9.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.11.0",
       "origin_kind": "called",
       "why": "ПОЧЕМУ НЕ ГЕЙТ (перечитано 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237): одна из сторон сверки — снимок каталога, обновляемый вне этого репозитория; расхождение возникает от чужого события, и гейт на изменении краснел бы на работе, которая его не трогала (190). Сверка идёт заходом дрейфа и прогоном входящих и называет расхождение поимённо."
     },
@@ -1328,7 +1328,7 @@
       "where": ".rules/bindings.json и .rules/proposals.json собраны scripts/onboard_consumer.py каталога, .github/workflows/rules-inbox.yml подключён его действием — форма ответа спрошена у соседа, а не воспроизведена по памяти. ВИТРИНА ЧУЖИХ ЧИСЕЛ — scripts/family.py и scripts/build_facts.py: разрез по сводке каталога спрашивает источник, а не помнит его форму. Расхождение здесь НАХОДКА, А НЕ ОТКАЗ СБОРКИ: непрочитанная сводка даёт `read: false` с названной причиной, а не ноль (family.NotRun), разошедшаяся форма печатается рядом с числами и заводит запись дрейфа `family-schema` (scripts/drift.py::reader_is_behind). Право остановить наш конвейер правкой у себя сосед таким образом не получает",
       "why": "Ответ дополнен 17.09.2026. Назван был канал подключения — как форма ответа спрошена у соседа, — а вторая половина правила про то, ЧТО ДЕЛАТЬ ПРИ РАСХОЖДЕНИИ, не называлась вовсе. Она в дереве есть и в тот же день была достроена: расхождение формы сводки стало записью дрейфа. ПОЧЕМУ НЕ ГЕЙТ (перечитано 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237): по букве самого правила — расхождение записанного с живым источником есть находка, а не отказ сборки; гейт дал бы соседу право остановить наш конвейер правкой у себя. Поэтому запись дрейфа, а не красное.",
       "analysed": "2026-10-09",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.9.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v1.11.0",
       "origin_kind": "called"
     },
     "191": {
