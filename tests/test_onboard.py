@@ -348,6 +348,51 @@ def test_write_never_overwrites_what_is_there(tmp_path: Path) -> None:
     assert not (consumer / ".github" / "workflows" / "ci.yml").exists()
 
 
+def cloned_with_trunk(where: Path, trunk: str) -> Path:
+    """Дерево потребителя, чей клон знает общую ветку по `origin/HEAD`."""
+    where.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(where)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(where),
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            f"refs/remotes/origin/{trunk}",
+        ],
+        check=True,
+    )
+    return where
+
+
+def test_write_refuses_a_foreign_trunk(tmp_path: Path) -> None:
+    """Общая ветка потребителя не `paths.TRUNK` — отказ до записи, а не чужая база (#1220)."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = cloned_with_trunk(tmp_path / "потребитель", "master")
+    called = ["--root", str(root), "--write", str(consumer)]
+    assert module.main(called) == module.EXIT_FOREIGN_TRUNK
+    assert not (consumer / ".pipeline.yml").exists(), "положено в дерево с чужой веткой"
+
+
+def test_write_takes_the_required_trunk(tmp_path: Path) -> None:
+    """Общая ветка совпала — заготовка кладётся (#1220)."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = cloned_with_trunk(tmp_path / "потребитель", module.paths.TRUNK)
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    assert module.trunk_of(consumer) == module.paths.TRUNK
+
+
+def test_an_unknown_trunk_is_named_not_assumed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Клон без `origin/HEAD` — «не проверено», а не молчаливое совпадение (045, #1220)."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    assert "общая ветка дерева не проверена" in capsys.readouterr().out
+
+
 def test_the_thin_ci_carries_only_calls(tmp_path: Path) -> None:
     """В тонком `ci.yml` нет своих шагов: каждый джоб — вызов по тегу."""
     import yaml
