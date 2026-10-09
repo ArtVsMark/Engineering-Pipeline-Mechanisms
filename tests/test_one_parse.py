@@ -27,7 +27,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, code_files, walk
+from tests.conftest import ROOT, code_files
 
 #: Намеренные копии образца — с причиной у каждой (071). Подпись ставится на
 #: ПАРУ МОДУЛЕЙ, а не на образец целиком: общий образец вроде «числа подряд»
