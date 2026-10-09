@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import code_files, load_script, walk, walk_deep
+from tests.conftest import code_files, found_by, load_script, walk, walk_deep
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Где живёт код, названо ОДИН раз — `paths.py::SOURCES`, — и читается отсюда.
@@ -352,7 +352,7 @@ def test_every_package_is_a_declared_source() -> None:
     packages = sorted(
         one.relative_to(ROOT).as_posix()
         for one in walk(ROOT / "packages")
-        if one.is_dir() and walk_deep(one, "*.py")
+        if one.is_dir() and found_by(one, "**/*.py")
     )
     assert packages, "пакетов нет — предмет сверки не найден (075)"
     missing = [one for one in packages if one not in declared]

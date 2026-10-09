@@ -33,10 +33,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
 #: Где живёт рабочий код — то же место, что у гейта одного разбора (214).
-PLACES: Final = (ROOT / "scripts", ROOT / "packages" / "transport")
+PLACES: Final = tuple(ROOT / where for where in load_script("paths.py").SOURCES)
 
 #: Тело короче этого числа узлов — обёртка или однострочник, а не разбор: их
 #: повтор — ссылка на общее, а не копия. Замер 01.10.2026: при 20, 30 и 40

@@ -43,15 +43,20 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, walk, walk_deep
+from tests.conftest import ROOT, load_script, walk, walk_deep
 
 #: Где объявляются метки — рабочий код.
 DECLARED_IN: Final = ROOT / "scripts"
 
 #: Где метку могли бы переписать: код, проверки, прогоны и прочее, что читает
 #: машина, — весь `.github/` (не только `*.yml`) и `.pipeline.yml` (взгляд на
-#: #1009).
-JUDGED: Final = (ROOT / "scripts", ROOT / "tests", ROOT / ".github")
+#: #1009). Корни КОДА — из `paths.SOURCES`, а не рукой: перечень без общего
+#: низа не видел метку, переписанную в `packages/transport` (взгляд на #1252).
+JUDGED: Final = (
+    *(ROOT / where for where in load_script("paths.py").SOURCES),
+    ROOT / "tests",
+    ROOT / ".github",
+)
 JUDGED_FILES: Final = (ROOT / ".pipeline.yml",)
 
 #: Открытие комментария разметки: с него начинается каждая метка.
