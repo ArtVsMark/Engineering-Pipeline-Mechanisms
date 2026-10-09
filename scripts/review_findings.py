@@ -118,18 +118,28 @@ PREFIX_RE: Final = re.compile(r"^(?:[ \t#-]|\*(?=\s))*")
 #: становится «kwargs игнорируется», «называется id_» — «называется id». Сосед
 #: заплатил за этот урок внешним взглядом на #413.
 WRAP_RE: Final = re.compile(r"^(\*{1,2}|_{1,2})(.+?)\1$")
+#: Обратная кавычка вокруг ВСЕЙ строки — код-спан, и он не содержит других
+#: обратных кавычек: замер 09.10.2026 нашёл две такие находки, потерянные
+#: разбором (#1247). Строка, кончающаяся своим кодом — `` `НАХОДКА[риск]`: a.py:3
+#: — зовёт `foo` `` — парой не является, и снимать с неё края значило бы
+#: оставить в заголовке непарную кавычку (взгляд на #1272).
+CODE_WRAP_RE: Final = re.compile(r"^`([^`]+)`$")
 
 #: Выделение, оставшееся ВНУТРИ строки после снятия парной обёртки: ревьюер
 #: выделяет один маркер, а заголовок оставляет снаружи — `**НАХОДКА[вес]:** …`.
 #: Парной обёрткой такая строка не является, и без этого её не прочесть.
-MARK: Final = r"[*_]{0,3}"
+#: Обратная кавычка — тоже выделение ключа: `` `НАХОДКА[вес]`: … `` (#1247).
+MARK: Final = r"[*_`]{0,3}"
 
 
 def bare(line: str) -> str:
     """Строка без разметки ВОКРУГ ключа. Одиночный знак — текст, а не обёртка."""
     said = PREFIX_RE.sub("", line.strip()).strip()
     pair = WRAP_RE.match(said)
-    return pair.group(2).strip() if pair else said
+    if pair:
+        return pair.group(2).strip()
+    code = CODE_WRAP_RE.match(said)
+    return code.group(1).strip() if code else said
 
 
 def bare_lines(text: str) -> list[str]:
@@ -151,9 +161,36 @@ VERDICT_RE: Final = re.compile(rf"^{MARK}\s*ВЕРДИКТ\s*:\s*находок\
 #: «Находка одна:» — заголовков раздела, за которыми предмет идёт СЛЕДУЮЩЕЙ
 #: строкой. Принять их значило бы завести запись с пустым или служебным
 #: заголовком — ровно призрак «нет» из разбора #414 ниже (051, 140).
+#:
+#: ПЕРЕЧЕНЬ ФОРМ СОБРАН ЗАМЕРОМ, а не добавлением ещё одной (210, #1247). Замер
+#: 09.10.2026 по 3078 комментариям: строк с ключом 2458, не узнаны 44, из них
+#: находками были четыре формы — выделение закрыто ДО двоеточия
+#: (`**НАХОДКА[вес]**: …`), ключ в обратных кавычках, вся строка в обратных
+#: кавычках (`WRAP_RE`) и место ПЕРЕД ключом (`PLACED_RE`). Остальное — проза,
+#: упоминающая ключ, и цитата `>`, исключённая намеренно (см. `PREFIX_RE`).
 FINDING_RE: Final = re.compile(
-    rf"^{MARK}\s*НАХОДКА(?:\[\s*([^\]]+?)\s*\])?\s*:{MARK}\s*(\S.*?)\s*$", re.I
+    rf"^{MARK}\s*НАХОДКА(?:\[\s*([^\]]+?)\s*\])?{MARK}\s*:{MARK}\s*(\S.*?)\s*$", re.I
 )
+#: Место перед ключом: `**путь:строки** — НАХОДКА[вес]: …`. Место — путь со
+#: строкой, как у `findings.PLACE_RE`, и становится началом заголовка: так
+#: заголовок выглядит ровно как у находки, написанной по образцу.
+PLACED_RE: Final = re.compile(
+    rf"^{MARK}(?P<place>[\w./-]+:\d[\d,–-]*){MARK}\s*—\s*(?P<rest>{MARK}\s*НАХОДКА.*)$", re.I
+)
+
+
+def finding_in(line: str) -> tuple[str, str] | None:
+    """Вес и заголовок находки в строке, уже снятой с обёртки; не находка — ``None``."""
+    said = FINDING_RE.match(line)
+    if said is not None:
+        return said.group(1) or "", said.group(2)
+    placed = PLACED_RE.match(line)
+    keyed = FINDING_RE.match(placed["rest"]) if placed else None
+    if placed is None or keyed is None:
+        return None
+    return keyed.group(1) or "", f"{placed['place']} — {keyed.group(2)}"
+
+
 #: Слова строки проверки починки. Задание пишет строку `fix_form`, разбор
 #: читает `FIX_RE` — оба из этих констант, а не буквами в двух местах (209).
 FIX_HEAD: Final = "ПОЧИНКА"
@@ -174,8 +211,12 @@ EXIT_NOTHING: Final = 0
 EXIT_BROKEN: Final = 2
 #: Единицу отдаёт сам Python при необработанном сбое, поэтому объявленным
 #: состоянием она быть не может: иначе сломанный механизм читается как
-#: работающий. Объявленные исходы — 0, 2 и 3; всё прочее отказ (068).
+#: работающий. Объявленные исходы — 0, 2, 3 и 4; всё прочее отказ (068).
 EXIT_PENDING: Final = 3
+#: Вердикт разошёлся со строками находок (или с незакрытыми `ПОЧИНКА`):
+#: прочитанное ЗАПИСАНО, а доверять ответу нечему. Свой исход, а не «не
+#: отработал»: шаг объявляет записанное записанным (взгляд на #1272, #1247).
+EXIT_DISAGREED: Final = 4
 
 
 class NotRun(RuntimeError):
@@ -390,10 +431,10 @@ def found_said(comments: list[dict[str, Any]]) -> list[tuple[str, str, str, str,
     known = findings.roles()
     for comment in comments:
         for line in bare_lines(comment.get("body") or ""):
-            said = FINDING_RE.match(line)
+            said = finding_in(line)
             if said is None:
                 continue
-            raw_weight, title = said.group(1) or "", said.group(2)
+            raw_weight, title = said
             # ЗАГОЛОВОК НЕ СРЕЗАЕТСЯ ПО ЗНАКАМ: обёртка уже снята со строки
             # целиком, а `strip` по набору съедал бы знаки, принадлежащие
             # ТЕКСТУ. Так в реестре и лежит сегодня «SERVICE_STEPS` объявлен» —
@@ -1303,8 +1344,12 @@ def save(
 
 def record_fix_check(
     entries: dict[str, findings.Entry], pr: int, look: list[dict[str, Any]]
-) -> None:
-    """Снимает находки изменения, которые проверка починки назвала закрытыми."""
+) -> str:
+    """Снимает находки изменения, которые проверка починки назвала закрытыми.
+
+    Возвращает расхождение вердикта с незакрытыми `ПОЧИНКА` словами, пусто —
+    сошлись: тот же исход, что у основного захода (взгляд на #1272, 195).
+    """
     verdict = verdict_of(look)
     if verdict is None:
         raise NotRun(f"в проверке починки #{pr} нет строки вердикта — это не «всё закрыто» (075)")
@@ -1315,29 +1360,32 @@ def record_fix_check(
     for mark in closed:
         del entries[mark]
     still = sum(1 for ok in answers.values() if not ok)
-    if still != verdict:
-        print(
-            f"::warning::проверка починки #{pr} говорит «находок {verdict}», а не закрытых {still}",
-            file=sys.stderr,
-        )
     print(
         f"из #{pr}: проверка починки — закрыто {len(closed)}, не закрыто {still}"
         + (f": снято {', '.join(closed)}" if closed else "")
+    )
+    return (
+        f"проверка починки #{pr} говорит «находок {verdict}», а не закрытых {still}"
+        if still != verdict
+        else ""
     )
 
 
 def record_look(
     entries: dict[str, findings.Entry], pr: int, look: list[dict[str, Any]], strict: bool
-) -> None:
+) -> str:
     """Записывает находки одного захода взгляда в реестр; вердикта нет — отказ.
+
+    Возвращает расхождение вердикта со строками находок словами, пусто — сошлись.
+    Прочитанное при расхождении ЗАПИСЫВАЕТСЯ, а отказывает вызывающий: отказ
+    до записи потерял бы и то, что разбор узнал (#1247).
 
     ПРОВЕРКА ПОЧИНКИ НОВЫХ ЗАПИСЕЙ НЕ ЗАВОДИТ (#848): она отвечает только о
     прошлых находках этого изменения, и названную закрытой снимает. Чужие
     изменения она не трогает: снимается лишь запись с тем же номером.
     """
     if is_fix_check(look):
-        record_fix_check(entries, pr, look)
-        return
+        return record_fix_check(entries, pr, look)
     # ВЕРДИКТ И СТРОКИ НАХОДОК ЧИТАЮТСЯ С ОДНОГО ОТРЕЗКА. Прежде число
     # брали с последнего захода, а строки — со всей ленты, и спорили
     # они по устройству, а не по вине ревьюера (022).
@@ -1351,14 +1399,13 @@ def record_look(
     seen_by = {title: роль for _, title, _, роль in found_in(look)}
     said_kind = {title: said for _, title, _, _, said in found_said(look)}
     declared = {title for title, said in said_kind.items() if said == findings.ANSWER_KIND}
-    if len(titles) != verdict:
-        # Расхождение названо, а не сглажено: вердикт и строки находок
-        # пишет один и тот же ответ, и если они спорят, доверять нечему.
-        print(
-            f"::warning::вердикт по #{pr} говорит «находок {verdict}», "
-            f"а строк находок {len(titles)} — записаны строки",
-            file=sys.stderr,
-        )
+    # Расхождение названо, а не сглажено: вердикт и строки находок пишет
+    # один и тот же ответ, и если они спорят, доверять нечему.
+    disagreed = (
+        f"вердикт по #{pr} говорит «находок {verdict}», а строк находок {len(titles)}"
+        if len(titles) != verdict
+        else ""
+    )
     renamed = 0
     # Пары «строка — прежняя запись» решаются для захода ЦЕЛИКОМ, до
     # записи: см. `pair_up`. Построчный выбор зависел от порядка строк.
@@ -1410,6 +1457,7 @@ def record_look(
     if renamed:
         said += f", из них уже лежат под своим отпечатком {renamed}"
     print(said)
+    return disagreed
 
 
 def open_changes(repo: str, token: str) -> set[int]:
@@ -1483,7 +1531,12 @@ def catch_up(
         elif seen:
             for look_id, look in unrecorded(comments, recorded.get(pr)):
                 print(f"догон записи: #{pr}, заход {look_id}")
-                record_look(entries, pr, look, strict)
+                # ДОГОН ИСТОРИИ НЕ ОТКАЗЫВАЕТ на расхождении, а называет его:
+                # старый заход не перепишет никто, и уборка краснела бы на нём
+                # каждую ночь. Отказ — у записи своего захода (`--pr`, #1247).
+                disagreed = record_look(entries, pr, look, strict)
+                if disagreed:
+                    print(f"::warning::{disagreed} — записаны строки", file=sys.stderr)
                 recorded[pr] = look_id
         if pr not in live:
             recorded.pop(pr, None)
@@ -1513,6 +1566,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     report.announce(not args.apply)
 
+    disagreed: list[str] = []
     try:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
         if not token:
@@ -1593,7 +1647,7 @@ def main(argv: list[str] | None = None) -> int:
             if not pending:
                 print(f"из #{args.pr}: последний заход уже записан")
             for look_id, look in pending:
-                record_look(entries, args.pr, look, args.strict)
+                disagreed += [record_look(entries, args.pr, look, args.strict)]
                 if look_id:
                     recorded[args.pr] = look_id
 
@@ -1618,6 +1672,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"::warning::снятие `{mark}` не принято: {why}", file=sys.stderr)
 
         save(args.repo, token, entries, args.apply, swept_to, recorded)
+        # РАСХОЖДЕНИЕ ВЕРДИКТА СО СТРОКАМИ — ОТКАЗ, А НЕ ПРЕДУПРЕЖДЕНИЕ (#1247):
+        # шаг зеленел, а находка была потеряна молча (045). Записанное уже
+        # сохранено выше: отказ называет то, что разбор не смог прочесть.
+        # РАСХОЖДЕНИЕ ВЕРДИКТА СО СТРОКАМИ — СВОЙ ИСХОД, А НЕ ПРЕДУПРЕЖДЕНИЕ
+        # (#1247) и не «не отработал» (взгляд на #1272): записанное уже
+        # сохранено выше, и шаг объявляет его записанным, а ответ — спорным.
+        named = [why for why in disagreed if why]
+        for why in named:
+            print(f"::error::{why} — строки записаны, ответу доверять нечему", file=sys.stderr)
+        if named:
+            return EXIT_DISAGREED
     except (NotRun, ghrest.TransportError) as exc:
         print(f"механизм не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
