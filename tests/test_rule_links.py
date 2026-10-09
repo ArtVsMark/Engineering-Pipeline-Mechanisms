@@ -122,3 +122,24 @@ def test_a_link_leading_nowhere_is_the_found_outcome(
     monkeypatch.setattr(module, "links", lambda root: [("AGENTS.md", 1, "044", "not-that-name")])
     assert module.main([]) == module.EXIT_FOUND
     assert "ведущих не туда: 1 из 1" in capsys.readouterr().out
+
+
+def test_an_empty_tree_is_broken_whatever_the_network(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пустое дерево — «не отработал» и при молчащем каталоге: дерево читается первым (#1255).
+
+    Прежде выгрузка спрашивалась раньше дерева, и тот же пустой вход отвечал
+    «каталог молчит», стоило сети моргнуть: исход третьего пути решала сеть.
+    """
+    asked: list[str] = []
+
+    def silent() -> dict[str, str]:
+        asked.append("каталог")
+        raise module.catalogue.Silent("каталог не ответил")
+
+    monkeypatch.setattr(module, "known", silent)
+    monkeypatch.setattr(module, "links", lambda root: [])
+    assert module.main([]) == module.EXIT_BROKEN
+    assert "ссылок на правила в дереве нет" in capsys.readouterr().err
+    assert asked == [], "пустое дерево спросило каталог — исход снова зависит от сети"

@@ -312,3 +312,23 @@ def test_a_new_document_not_yet_in_the_index_is_judged(tmp_path: Path) -> None:
         f" с остальными — видно только {sorted(found)}"
     )
     assert "внесён.md" in found, "внесённый документ выпал из перечня"
+
+
+def test_an_empty_tree_is_broken_whatever_the_network(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пустое дерево — «не отработал» и при молчащем каталоге: дерево читается первым (#1255)."""
+    asked: list[str] = []
+
+    def silent() -> dict[str, str]:
+        asked.append("каталог")
+        raise module.catalogue.Silent("каталог не ответил")
+
+    def empty(root: Path) -> list[Path]:
+        raise module.NotRun("в дереве нет ни одного документа — проверять нечего (075)")
+
+    monkeypatch.setattr(module, "claims", silent)
+    monkeypatch.setattr(module, "documents", empty)
+    assert module.main([]) == module.EXIT_BROKEN
+    assert "нет ни одного документа" in capsys.readouterr().err
+    assert asked == [], "пустое дерево спросило каталог — исход снова зависит от сети"
