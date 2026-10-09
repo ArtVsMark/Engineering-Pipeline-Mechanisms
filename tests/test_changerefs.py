@@ -11,12 +11,10 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import code_files, load_script
 
 changerefs = load_script("changerefs.py")
 agent_pr = load_script("agent_pr.py")
-
-SCRIPTS = ROOT / "scripts"
 
 
 def test_a_list_after_one_verb_is_read_whole() -> None:
@@ -62,7 +60,9 @@ def test_no_mechanism_reads_the_link_itself() -> None:
     Две регулярки на один вход — это не дублирование кода, а два разных
     понимания одной строки, и расходятся они молча.
     """
-    for path in walk(SCRIPTS, "*.py"):
+    # Корни — из `paths.SOURCES`: вторая регулярка в общем низу расходилась бы
+    # с модулем так же молча, как в скрипте (#1254).
+    for path in code_files():
         if path.name == "changerefs.py":
             continue
         # Смотрятся именно образцы `re.compile`, а не текст файла: слова

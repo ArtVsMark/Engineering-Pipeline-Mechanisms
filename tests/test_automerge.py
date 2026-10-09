@@ -2398,12 +2398,29 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     Счётчик с подставленным именем (`f"в состоянии «…»"`) называется `<состояние>`,
     блок без счётчика (отказ взведения) — пустым набором. Вложенный выход
     считается своим блоком и объемлющему не засчитывается (`own_nodes`).
+
+    ВНУТРЕННИЙ ЦИКЛ — ОТКАЗ С ПРИЧИНОЙ, А НЕ ВЫХОД (взгляд на #1253). Его
+    `continue` уходит к нему, а не к циклу голов: засчитанный выходом, он стал
+    бы «<отказ взведения>», а счётчики внутри пропали бы у объемлющего выхода.
+    Разбирать такую форму незачем, пока её нет; появится — разбор говорит
+    прямо, что сломалось, а не «новый выход отнесите явно». Генераторы списков
+    циклом здесь не считаются: `continue` в них не бывает.
     """
     loop = next(
         node
         for node in ast.walk(function)
         if isinstance(node, ast.For)
         and any(isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node))
+    )
+    inner = [
+        node.lineno
+        for node in ast.walk(loop)
+        if node is not loop and isinstance(node, (ast.For, ast.AsyncFor, ast.While))
+    ]
+    assert not inner, (
+        f"в цикле голов внутренний цикл (строки {inner}) — форма, которой разбор выходов "
+        "не знает: отказ на любой внутренний цикл, с `continue` или без, потому что "
+        "`continue` в нём ушёл бы к нему, а не к циклу голов — научите `skip_exits` его форме"
     )
     found = []
     for node in ast.walk(loop):
@@ -2432,6 +2449,24 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
             )
             found.append((keys, sets))
     return found
+
+
+def test_an_inner_loop_is_named_not_counted_as_an_exit() -> None:
+    """Внутренний цикл в цикле голов — отказ разбора с причиной, а не ложный выход (#1253)."""
+    code = """
+def f(queue):
+    waiting_rank = None
+    for change in queue:
+        waiting_rank = 1
+        for one in change.items:
+            if one:
+                skipped["пусты"] += 1
+                continue
+        continue
+"""
+    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    with pytest.raises(AssertionError, match="внутренний цикл"):
+        skip_exits(function)
 
 
 def test_only_the_look_waiting_exits_set_the_step() -> None:

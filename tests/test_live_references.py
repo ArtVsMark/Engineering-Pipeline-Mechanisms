@@ -359,6 +359,36 @@ def test_every_package_is_a_declared_source() -> None:
     assert not missing, f"пакеты вне `paths.py::SOURCES`: {missing}"
 
 
+def same_names(files: list[Path]) -> dict[str, list[str]]:
+    """Имена модулей, встретившиеся в корнях кода больше одного раза, — с местами."""
+    seen: dict[str, list[str]] = {}
+    for path in files:
+        seen.setdefault(path.name, []).append(path.relative_to(ROOT).as_posix())
+    return {name: places for name, places in sorted(seen.items()) if len(places) > 1}
+
+
+def test_module_names_are_unique_across_the_roots() -> None:
+    """Имя модуля одно на все корни кода — `paths.SOURCES` (взгляд на #1273, 210).
+
+    Обходы, переведённые на два корня, исключают и ключуют файл по имени
+    (`path.name`, `stem`): одноимённый модуль в `packages/transport` молча выпал
+    бы из гейта или схлопнулся с модулем из `scripts/`. Чинить каждый обход
+    — форма за формой; строгое правило одно: имя уникально, и тогда ключ по
+    имени верен везде. Замер 09.10.2026: одноимённых модулей ноль.
+    """
+    files = code_files()
+    assert files, "файлов кода нет — предмет проверки не найден (075)"
+    twins = same_names(files)
+    assert not twins, f"одноимённые модули в разных корнях — ключ по имени их смешает: {twins}"
+
+
+def test_a_twin_name_is_named() -> None:
+    """Проба: два файла одного имени в разных корнях называются вместе с местами."""
+    one = ROOT / "scripts" / "x.py"
+    two = ROOT / "packages" / "transport" / "x.py"
+    assert same_names([one, two]) == {"x.py": ["scripts/x.py", "packages/transport/x.py"]}
+
+
 def addresses_in(text: str) -> set[str]:
     """Адреса тестов в тексте — тем же образцом, что судит гейт, а не подстрокой."""
     return {found.group(0) for found in TEST_ADDRESS_RE.finditer(text)}

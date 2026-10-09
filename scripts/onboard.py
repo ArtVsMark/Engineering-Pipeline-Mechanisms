@@ -95,6 +95,9 @@ EXIT_UNREACHABLE: Final = 4
 #: Заход с `--write` нашёл файл, который положил бы: чужое не перезаписывается,
 #: а называется (#992). Выход — свой: убрать файл или сверить его руками.
 EXIT_OCCUPIED: Final = 5
+#: Общая ветка потребителя — не `paths.TRUNK`. Механизмы её имя не угадывают:
+#: база гейтов, предмет дрейфа и цель выпуска оказались бы чужими (#1220).
+EXIT_FOREIGN_TRUNK: Final = 6
 
 #: Приставка вынесенного шага. Помеченным бывает и не шаг — пакет, действие, —
 #: а заготовку вызова собирают только из прогонов, которые ЗОВУТ.
@@ -575,6 +578,26 @@ def thin_ci(names: list[str], repo: str, pin: str) -> str:
     return head + "\n".join(caller(one, repo, pin) for one in names)
 
 
+def trunk_of(root: Path) -> str:
+    """Общая ветка дерева потребителя по `origin/HEAD`; пусто — клон её не знает.
+
+    ТРЕБОВАНИЕ, А НЕ УГАДЫВАНИЕ (решение по #1220). Имя общей ветки механизмы
+    берут из `paths.TRUNK` и у потребителя его не ищут: перехват толчка прошёл
+    пять форм одной беды на угадывании (#1218). Здесь ветка только СВЕРЯЕТСЯ
+    при подключении — замер 09.10.2026: у всех шести проектов семьи она `main`.
+
+    Сверяется ЛОКАЛЬНЫЙ кэш клона: `origin/HEAD` ставится клонированием, и
+    `git fetch` его не обновляет — поэтому зовущий называет это в выводе.
+    Дерево, не являющееся корнем своего клона, — тоже пусто: иначе git поднялся
+    бы к внешнему репозиторию и сверил бы чужую ветку.
+    """
+    top = version.git("rev-parse", "--show-toplevel", root=root)
+    if top is None or Path(top).resolve() != root.resolve():
+        return ""
+    said = version.git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", root=root)
+    return (said or "").removeprefix("origin/")
+
+
 def occupied(root: Path, files: dict[Path, str]) -> list[Path]:
     """Файлы заготовки, которые в дереве потребителя уже есть: их заход не трогает."""
     return sorted(path for path in files if (root / path).exists())
@@ -769,6 +792,27 @@ def main(argv: list[str] | None = None) -> int:
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
+        # ОБЩАЯ ВЕТКА СВЕРЯЕТСЯ ДО ЗАПИСИ (#1220): заготовка, положенная в
+        # дерево с другой общей веткой, сравнивала бы гейты не с той базой.
+        # Клон её не знает — это названо, а не принято за совпадение (045).
+        trunk = trunk_of(args.write)
+        if trunk and trunk != paths.TRUNK:
+            print(
+                f"заготовка не положена: общая ветка дерева — «{trunk}», а механизмы "
+                f"работают с «{paths.TRUNK}» (`paths.TRUNK`). Выход: переименовать общую "
+                "ветку потребителя или не подключать до решения в #1220. Сверялся "
+                "локальный кэш `origin/HEAD`: если ветку на площадке уже "
+                "переименовали, обновите его — `git remote set-head origin --auto`",
+                file=sys.stderr,
+            )
+            return EXIT_FOREIGN_TRUNK
+        if not trunk:
+            print(
+                "общая ветка дерева не проверена: дерево не корень своего клона или "
+                "у клона нет `origin/HEAD` (локальный кэш — `git remote set-head origin "
+                f"--auto`). Механизмы работают с «{paths.TRUNK}» — убедитесь, что она "
+                "общая и у вас."
+            )
         taken = occupied(args.write, files)
         if taken:
             print(
@@ -814,7 +858,8 @@ def main(argv: list[str] | None = None) -> int:
     print("#    Класс — СВОЙ выбор: `required`, `advisory` или `off` с причиной.")
     print(f"#    Здесь все выходят «{policy.UNREVIEWED}»: это очередь разбора, а не умолчание.\n")
     print(answer(pipeline, beyond, on_change=on_change))
-    print("# 3. В защиту ветки — ОДНО имя: имя своего сводного гейта.")
+    print(f"# 3. В защиту ветки «{paths.TRUNK}» — ОДНО имя: имя своего сводного гейта.")
+    print(f"#    Общая ветка обязана зваться «{paths.TRUNK}»: механизмы её имя не угадывают.")
     print(
         f"#    Сводный гейт — копия `{paths.WORKFLOWS}/{SUMMARY_FLOW}` поставщика: он не зовётся."
     )

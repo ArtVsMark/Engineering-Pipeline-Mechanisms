@@ -257,9 +257,30 @@ def test_the_shared_branch_is_checked_too() -> None:
 CHANGE_ONLY = "github.event_name != 'push'"
 
 
+#: Вторая форма «только на изменении»: событие названо прямо. Уже, чем
+#: `!= 'push'` (без ручной кнопки), но на общей ветке тоже не идёт.
+ON_A_CHANGE = "github.event_name == 'pull_request'"
+
+#: Чтение контекста изменения: номер, база, голова. Шаг, который его читает,
+#: на общей ветке предмета не имеет.
+CHANGE_CONTEXT = re.compile(
+    r"github\.(?:event\.pull_request|base_ref|head_ref|event\.number)"
+    r"|pull_request\.(?:number|head|base)"
+)
+
+
 def runs_only_on_a_change(condition: str) -> bool:
     """Объявляет ли условие «этот шаг идёт только на изменении»."""
-    return " ".join(condition.split()) == CHANGE_ONLY
+    return " ".join(condition.split()) in (CHANGE_ONLY, ON_A_CHANGE)
+
+
+def reads_the_change(job: dict[str, Any]) -> bool:
+    """Читает ли джоб контекст изменения — сам или в вызванном прогоне своего дерева."""
+    text = yaml.safe_dump(job, allow_unicode=True)
+    called = str(job.get("uses") or "")
+    if called.startswith("./"):
+        text += (ROOT / called.removeprefix("./")).read_text(encoding="utf-8")
+    return bool(CHANGE_CONTEXT.search(text))
 
 
 def test_change_only_jobs_do_not_run_on_the_shared_branch() -> None:
@@ -277,14 +298,31 @@ def test_change_only_jobs_do_not_run_on_the_shared_branch() -> None:
     На это условие опирается и очередь: `scripts/automerge.py` считает пропуск
     на общей ветке объявленным состоянием, а не краснотой, — и держится это
     именно здесь.
+
+    ДЖОБЫ ВЫВОДЯТСЯ, А НЕ ПЕРЕЧИСЛЯЮТСЯ (взгляд на #1283, правило 018 — про
+    КАЖДУЮ проверку). Прежде гейт сверял три названных джоба, и новый шаг
+    изменения без условия его не красил. Теперь предмет — каждый джоб, который
+    читает контекст изменения сам или в вызванном прогоне (`reads_the_change`).
     """
     jobs = load_gates()["jobs"]
-    for name in ("pr-meta", "journal", "attribution"):
-        condition = str(jobs[name].get("if", ""))
-        assert runs_only_on_a_change(condition), (
-            f"{name}: условие «{condition}» не объявляет «только на изменении» — "
-            f"ожидалось «{CHANGE_ONLY}»"
-        )
+    of_a_change = sorted(name for name, job in jobs.items() if reads_the_change(job))
+    assert of_a_change, "ни один джоб не читает изменение — предмет проверки не найден (075)"
+    wrong = [
+        f"{name}: «{jobs[name].get('if', '')}»"
+        for name in of_a_change
+        if not runs_only_on_a_change(str(jobs[name].get("if", "")))
+    ]
+    assert not wrong, (
+        f"джоб читает изменение, но идёт и на общей ветке — ожидалось «{CHANGE_ONLY}» "
+        f"или «{ON_A_CHANGE}»: {wrong}"
+    )
+
+
+def test_reading_the_change_is_seen_through_a_called_flow() -> None:
+    """Признак видит контекст изменения и в джобе, и в вызванном им прогоне."""
+    assert reads_the_change({"steps": [{"run": "echo ${{ github.base_ref }}"}]})
+    assert not reads_the_change({"steps": [{"run": "pytest"}]})
+    assert reads_the_change({"uses": "./.github/workflows/step-pr-meta.yml"})
 
 
 def test_the_summary_never_comes_to_the_shared_branch_at_all() -> None:
