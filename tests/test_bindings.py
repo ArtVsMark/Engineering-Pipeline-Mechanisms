@@ -1171,6 +1171,73 @@ def test_a_called_catalogue_origin_names_an_action_we_call() -> None:
     assert not stale, f"origin вызванного действия не из вызовов прогонов {sorted(called)}: {stale}"
 
 
+#: Вызванные действия каталога, которые НЕ держат правила, и почему. Остальные
+#: обязаны стоять в чьём-то `origin`: иначе ответ, держащийся чужим действием,
+#: читался бы как «разработан здесь» — так контракт 1.8 понимает отсутствие
+#: `origin` (#1237).
+CALLED_WITHOUT_A_RULE: Final = {
+    ".github/actions/python-badge/action.yml": (
+        "рисует единый значок витрины по исходам прогонов; правила не держит — "
+        "держат сами прогоны, которые он показывает"
+    ),
+}
+
+
+def test_every_called_catalogue_action_is_someones_origin() -> None:
+    """Каждое вызванное действие каталога названо `origin` ответа или объявлено с причиной (#1237).
+
+    Обратная сторона сверки выше: та ловит `origin` на невызванное действие, эта —
+    вызов, за которым не стоит ни один `origin`. Без неё ответ, чей механизм —
+    действие каталога, молча числился бы разработанным здесь.
+    """
+    called = {path for path, _ in catalogue_calls(ROOT / ".github" / "workflows")}
+    assert called, "вызовов действий каталога в прогонах нет — сверять не с чем (075)"
+    named = {
+        str(answer["origin"]).removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
+        for answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].values()
+        if answer.get("origin_kind") == "called"
+        and str(answer.get("origin") or "").startswith(CATALOGUE_ORIGIN)
+    }
+    assert set(CALLED_WITHOUT_A_RULE) <= called, "объявлено действие, которого прогоны не зовут"
+    orphans = sorted(called - named - set(CALLED_WITHOUT_A_RULE))
+    assert not orphans, (
+        f"действие каталога вызывается, а ни один ответ его origin не называет: {orphans}"
+    )
+
+
+def catalogue_callers(folder: Path) -> set[str]:
+    """Прогоны, зовущие действие каталога, что держит правила: имя файла прогона."""
+    return {
+        path.name
+        for path in walk(folder, "*.yml")
+        if any(
+            (f"{found['path'].lstrip('/')}/action.yml" if found["path"] else "action.yml")
+            not in CALLED_WITHOUT_A_RULE
+            for found in CATALOGUE_CALL_RE.finditer(path.read_text(encoding="utf-8"))
+        )
+    }
+
+
+def test_an_answer_held_by_a_catalogue_caller_names_its_origin() -> None:
+    """Ответ, чей адрес — прогон с действием каталога, несёт `origin_kind: called` (#1237).
+
+    Сверка выше требует, чтобы действие назвал ХОТЬ ОДИН ответ; второй ответ на тот
+    же прогон без `origin` прошёл бы и числился «разработан здесь» (взгляд на #1281).
+    Держится ли ответ прогоном, решает ГОЛОВА `where` — адрес до первого « — »:
+    там ответ называет свой механизм, а дальше идёт довод, где прогон может быть
+    лишь упомянут.
+    """
+    callers = catalogue_callers(ROOT / ".github" / "workflows")
+    assert callers, "прогонов с действием каталога нет — сверять не с чем (075)"
+    unnamed = sorted(
+        number
+        for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items()
+        if any(name in str(answer.get("where") or "").split(" — ")[0] for name in callers)
+        and answer.get("origin_kind") != "called"
+    )
+    assert not unnamed, f"адрес — прогон с действием каталога, а origin не назван: {unnamed}"
+
+
 def test_catalogue_calls_pair_the_action_with_its_tag(tmp_path: Path) -> None:
     """Пара берётся из одного вызова: корневое действие — `action.yml`, вложенное — по пути."""
     (tmp_path / "a.yml").write_text(
