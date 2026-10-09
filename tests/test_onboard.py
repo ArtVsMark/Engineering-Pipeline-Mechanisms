@@ -389,8 +389,20 @@ def test_an_unknown_trunk_is_named_not_assumed(
     """Клон без `origin/HEAD` — «не проверено», а не молчаливое совпадение (045, #1220)."""
     root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
     consumer = tmp_path / "потребитель"
+    consumer.mkdir()
+    subprocess.run(["git", "init", "-q", str(consumer)], check=True)
+    assert module.trunk_of(consumer) == ""
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
     assert "общая ветка дерева не проверена" in capsys.readouterr().out
+
+
+def test_a_tree_inside_a_foreign_clone_is_not_checked_by_it(tmp_path: Path) -> None:
+    """Каталог без своего `.git` внутри чужого клона — не его ветка (#1220)."""
+    outer = cloned_with_trunk(tmp_path / "чужой", module.paths.TRUNK)
+    inner = outer / "вложенный"
+    inner.mkdir()
+    assert module.trunk_of(outer) == module.paths.TRUNK
+    assert module.trunk_of(inner) == "", "сверена ветка внешнего репозитория"
 
 
 def test_the_thin_ci_carries_only_calls(tmp_path: Path) -> None:

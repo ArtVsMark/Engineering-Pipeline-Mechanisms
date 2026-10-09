@@ -585,7 +585,15 @@ def trunk_of(root: Path) -> str:
     берут из `paths.TRUNK` и у потребителя его не ищут: перехват толчка прошёл
     пять форм одной беды на угадывании (#1218). Здесь ветка только СВЕРЯЕТСЯ
     при подключении — замер 09.10.2026: у всех шести проектов семьи она `main`.
+
+    Сверяется ЛОКАЛЬНЫЙ кэш клона: `origin/HEAD` ставится клонированием, и
+    `git fetch` его не обновляет — поэтому зовущий называет это в выводе.
+    Дерево, не являющееся корнем своего клона, — тоже пусто: иначе git поднялся
+    бы к внешнему репозиторию и сверил бы чужую ветку.
     """
+    top = version.git("rev-parse", "--show-toplevel", root=root)
+    if top is None or Path(top).resolve() != root.resolve():
+        return ""
     said = version.git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", root=root)
     return (said or "").removeprefix("origin/")
 
@@ -792,14 +800,18 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"заготовка не положена: общая ветка дерева — «{trunk}», а механизмы "
                 f"работают с «{paths.TRUNK}» (`paths.TRUNK`). Выход: переименовать общую "
-                "ветку потребителя или не подключать до решения в #1220",
+                "ветку потребителя или не подключать до решения в #1220. Сверялся "
+                "локальный кэш `origin/HEAD`: если ветку на площадке уже "
+                "переименовали, обновите его — `git remote set-head origin --auto`",
                 file=sys.stderr,
             )
             return EXIT_FOREIGN_TRUNK
         if not trunk:
             print(
-                f"общая ветка дерева не проверена: у клона нет `origin/HEAD`. Механизмы "
-                f"работают с «{paths.TRUNK}» — убедитесь, что она общая и у вас."
+                "общая ветка дерева не проверена: дерево не корень своего клона или "
+                "у клона нет `origin/HEAD` (локальный кэш — `git remote set-head origin "
+                f"--auto`). Механизмы работают с «{paths.TRUNK}» — убедитесь, что она "
+                "общая и у вас."
             )
         taken = occupied(args.write, files)
         if taken:
