@@ -310,21 +310,32 @@ def test_a_read_missing_a_name_is_refused() -> None:
         debt.checked({"conflicting": []})
 
 
-def plan_fed(section: int, reader: str) -> tuple[set[str], set[str]]:
-    """Имена чтеца `reader`, которыми `work_plan.sources` кормит раздел: строки и заметку."""
+def plan_fed(section: int) -> tuple[set[str], set[str]]:
+    """Имена чтецов `debt`, которыми `work_plan.sources` кормит раздел: строки и непрочитанное.
+
+    Берётся ВСЁ, что сборщик связал вызовом `debt.<чтец>(...)`, а не один чтец:
+    сверка по разделам 1 и 2 пропускала бы новый непрочитанный канал в 3 или 5
+    (взгляд на #1267). Заметка `note` — справка и ни о чём не судит: у
+    непрочитанного своё поле `unread` (взгляд на #1267, 044).
+    """
     sources = function_named(ROOT / "scripts" / "work_plan.py", "sources")
     bound: set[str] = set()
     for node in ast.walk(sources):
-        if (
-            isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Call)
-            and call_name(node.value) == reader
-            and isinstance(node.targets[0], ast.Tuple)
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        func = node.value.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "debt"
         ):
-            bound |= {one.id for one in node.targets[0].elts if isinstance(one, ast.Name)}
-    assert bound, f"`work_plan.sources` не зовёт `{reader}` — предмет не найден (075)"
+            continue
+        for target in node.targets:
+            names = target.elts if isinstance(target, ast.Tuple) else [target]
+            bound |= {one.id for one in names if isinstance(one, ast.Name)}
+    assert bound, "`work_plan.sources` не зовёт чтецов `debt` — предмет не найден (075)"
     rows: set[str] = set()
-    noted: set[str] = set()
+    unread: set[str] = set()
     for node in ast.walk(sources):
         if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
             continue
@@ -337,21 +348,27 @@ def plan_fed(section: int, reader: str) -> tuple[set[str], set[str]]:
             continue
         for keyword in node.value.keywords:
             used = {one.id for one in ast.walk(keyword.value) if isinstance(one, ast.Name)}
-            (rows if keyword.arg == "rows" else noted).update(used & bound)
-    return rows, noted
+            if keyword.arg == "rows":
+                rows |= used & bound
+            elif keyword.arg == "unread":
+                unread |= used & bound
+    return rows, unread
 
 
-@pytest.mark.parametrize("section", [1, 2])
+@pytest.mark.parametrize("section", list(debt.BEFORE_PLAN))
 def test_the_tables_follow_what_the_plan_shows(section: int) -> None:
-    """Строгое правило выведено из плана, а не из прочитанного шагом (взгляд на #1260, 210).
+    """Строгое правило выведено из плана, а не из прочитанного шагом (взгляды на #1260, #1267, 210).
 
-    Что сборщик кладёт разделу строкой — долг (`FED_BY`), что заметкой —
-    неизвестность (`UNREAD_BY`). Прежняя таблица знала только строки, и
-    несказанное состояние слияния проходило её зелёным как «пусто».
+    Что сборщик кладёт разделу строкой из чтеца `debt` — долг (`FED_BY`), что
+    полем `unread` — неизвестность (`UNREAD_BY`). Сверка идёт по ВСЕМ разделам
+    перед планом: новый непрочитанный канал в разделе 3 или 5 без строки в
+    `UNREAD_BY` краснеет здесь, а не проходит зелёным.
     """
-    rows, noted = plan_fed(section, "stuck_changes")
-    assert set(debt.FED_BY[section]) == rows
-    assert set(debt.UNREAD_BY.get(section, {})) == noted
+    rows, unread = plan_fed(section)
+    assert rows <= set(debt.FED_BY[section]), (
+        f"раздел {section} кормят {sorted(rows)}, а FED_BY называет {debt.FED_BY[section]}"
+    )
+    assert set(debt.UNREAD_BY.get(section, {})) == unread
 
 
 def test_the_third_number_does_not_switch_the_reminder_on() -> None:
