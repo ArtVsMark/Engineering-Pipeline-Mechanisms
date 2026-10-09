@@ -355,6 +355,46 @@ def ci_facts(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
     return common.ci_facts(root, CI_FLOW.name, OUR_MATRIX, OUR_NEXT)
 
 
+#: Формат манифеста семьи — контракт `family` каталога (v1.11.0, #1285).
+FAMILY_SCHEMA: Final = "1.1"
+#: Имя отдаваемого контракта шагов: номер — MAJOR.MINOR из `CONTRACT_VERSION`.
+GIVES_STEPS: Final = "steps"
+
+
+def manifest_facts(root: Path) -> dict[str, Any]:
+    """Выпуск (тег и его коммит) и отдаваемые контракты — из дерева `root`.
+
+    Выпуска нет — `release: null`, как велит форма манифеста, а не выдуманный
+    тег. Номер контракта — MAJOR.MINOR: выпуск минора у издателя и есть смена
+    того, что он отдаёт, а патч её не меняет.
+    """
+    tag = version.release_tag(root)
+    sha = version.git("rev-list", "-n", "1", tag, root=root) if tag else None
+    major_minor = ".".join(contract_version(root / VERSION_FILE).split(".")[:2])
+    return {
+        "release": {"tag": tag, "sha": sha} if tag and sha else None,
+        "gives": {GIVES_STEPS: major_minor},
+    }
+
+
+def family_manifest(facts: dict[str, Any]) -> str:
+    """Манифест семьи по фактам: что отдаём, с какого выпуска; парных связей нет.
+
+    Форма — контракт `family` каталога: `schema`, `project`, `release`,
+    `gives`, `takes`. Семейные связи (действия каталога, схема ответа) сверка
+    каталога находит в дереве сама, поэтому `takes` пуст (#1285).
+    """
+    said = facts["manifest"]
+    doc = {
+        "schema": FAMILY_SCHEMA,
+        "project": facts["repo"],
+        "release": said["release"],
+        "gives": said["gives"],
+        "takes": [],
+    }
+    return json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
+
+
 def ours(
     root: Path, summary: Path | None = None, mine: str = "", uptake: Path | None = None
 ) -> dict[str, Any]:
@@ -377,6 +417,10 @@ def ours(
         # Разрез семьи — раздел сверх договора, и причину он несёт своей формой
         # `{"read": false, "why": NO_FAMILY}` (взгляды на #1004 и #1014, 195).
         "family": family_facts(summary, mine=mine, answers=root / BINDINGS, uptake=uptake),
+        # Что проект отдаёт семье и с какого выпуска — вход манифеста семьи
+        # (`contracts.json`, #1285): номера берутся здесь, у источников, а не
+        # второй копией в сборщике манифеста (049).
+        "manifest": manifest_facts(root),
     }
 
 
@@ -445,8 +489,8 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
 
 
 def published_names() -> list[str]:
-    """Всё, что сборка кладёт в каталог публикации: факты, значки, картинки и страницы."""
-    return [FACTS, *BADGES, *PICTURES, *PAGES]
+    """Всё, что сборка кладёт в публикацию: факты, значки, картинки, страницы, файлы для машины."""
+    return [FACTS, *BADGES, *PICTURES, *PAGES, *MACHINE_READ]
 
 
 #: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
@@ -774,6 +818,13 @@ def who_page(facts: dict[str, Any]) -> str:
 PAGES: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
     "who.md": who_page,
 }
+#: ФАЙЛЫ ДЛЯ МАШИНЫ, а не для посетителя: их читает чужая сборка, и витрина на
+#: них не ведёт. Инвентарь четвёртый, чтобы гейт показа страниц не требовал
+#: ссылки на то, что человек не читает; гейты публикации и уборки ветки
+#: читают и его (#1285).
+MACHINE_READ: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
+    "contracts.json": family_manifest,
+}
 #: Картинки и страницы, которые сборка кладёт ВПРОК, до показа на витрине
 #: (196): ссылка на ненарисованное попала бы в main раньше файла. Второй шаг
 #: ставит картинку и убирает имя отсюда; гейты `tests/test_facts.py` требуют
@@ -830,6 +881,8 @@ def draw_badges(facts: dict[str, Any], out: Path) -> None:
         (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
     for name, page in PAGES.items():
         (out / name).write_text(page(facts), encoding="utf-8")
+    for name, build in MACHINE_READ.items():
+        (out / name).write_text(build(facts), encoding="utf-8")
 
 
 def extra_written(args: argparse.Namespace) -> int:

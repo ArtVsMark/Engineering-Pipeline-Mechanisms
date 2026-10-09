@@ -147,6 +147,51 @@ def test_a_wider_text_gets_a_wider_part() -> None:
     assert f'width="{facts.part_width("правила") + wide}"' in svg
 
 
+#: Посаженные факты манифеста семьи: проект, выпуск и отдаваемый контракт.
+MANIFEST_PLANTED: Final[dict[str, Any]] = {
+    "repo": "Я/Проект",
+    "manifest": {"release": {"tag": "v1.5.0", "sha": "a" * 40}, "gives": {"steps": "0.7"}},
+}
+
+
+def test_the_family_manifest_has_the_catalogue_form(tmp_path: Path) -> None:
+    """Манифест — форма контракта `family` каталога, и уборка ветки его не снимает (#1285)."""
+    facts.draw_badges({"rules": {"by_mechanism": {"gate": 1}}, **MANIFEST_PLANTED}, tmp_path)
+    doc = json.loads((tmp_path / "contracts.json").read_text(encoding="utf-8"))
+    assert doc == {
+        "schema": facts.FAMILY_SCHEMA,
+        "project": "Я/Проект",
+        "release": {"tag": "v1.5.0", "sha": "a" * 40},
+        "gives": {"steps": "0.7"},
+        "takes": [],
+    }
+    assert "contracts.json" in facts.branch_files()
+    planted = {"rules": {}, **MANIFEST_PLANTED}
+    assert facts.family_manifest(planted) == (tmp_path / "contracts.json").read_text("utf-8")
+
+
+def test_the_manifest_without_a_section_is_not_drawn_empty(tmp_path: Path) -> None:
+    """Нет раздела `manifest` — отказ, а не манифест «ничего не отдаю» (045)."""
+    with pytest.raises(KeyError):
+        facts.draw_badges({"rules": {"by_mechanism": {"gate": 1}}, "repo": "Я/Проект"}, tmp_path)
+
+
+def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> None:
+    """Выпуск — последний тег с его коммитом; без тега — null; контракт — MAJOR.MINOR."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / facts.VERSION_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / facts.VERSION_FILE).write_text("0.7.3\n", encoding="utf-8")
+    assert facts.manifest_facts(tmp_path) == {"release": None, "gives": {"steps": "0.7"}}
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "c"], check=True)
+    subprocess.run([*git, "tag", "v1.5.0"], check=True)
+    sha = subprocess.run(
+        [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout.strip()
+    assert facts.manifest_facts(tmp_path)["release"] == {"tag": "v1.5.0", "sha": sha}
+
+
 def test_the_project_picture_is_drawn_and_kept_on_the_branch(tmp_path: Path) -> None:
     """Значок проекта рисуется сборкой и уборкой ветки не снимается (196, #1213).
 
@@ -157,6 +202,7 @@ def test_the_project_picture_is_drawn_and_kept_on_the_branch(tmp_path: Path) -> 
             "rules": {"by_mechanism": {"gate": 1, "document": 1}},
             "version": "1.0.0",
             "version_whole": True,
+            **MANIFEST_PLANTED,
         },
         tmp_path,
     )
@@ -1039,7 +1085,15 @@ def test_extra_written_carries_only_our_sections(tmp_path: Path) -> None:
     )
     assert facts.extra_written(args) == facts.EXIT_OK
     said = json.loads(out.read_text(encoding="utf-8"))
-    assert set(said) == {"contract", "tests", "scripts", "rules", "checks_per_pr", "family"}
+    assert set(said) == {
+        "contract",
+        "tests",
+        "scripts",
+        "rules",
+        "checks_per_pr",
+        "family",
+        "manifest",
+    }
     assert not set(said) & facts.common.COMMON_KEYS
 
 
