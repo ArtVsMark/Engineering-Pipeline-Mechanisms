@@ -132,8 +132,8 @@ jobs:
           # `-z` обязателен: без него git экранирует имена с пробелами и
           # не-ASCII, и такой путь молча выпадает из отбора зон (165). Список
           # передаётся ФАЙЛОМ, а не подстановкой: оболочка вырезает NUL.
-          git diff --name-only -z "$base_sha...HEAD" > /tmp/changed.txt
-          echo "тронуто файлов: $(tr -cd '\0' < /tmp/changed.txt | wc -c)"
+          git diff --name-only -z "$base_sha...HEAD" > "$RUNNER_TEMP/changed.txt"
+          echo "тронуто файлов: $(tr -cd '\0' < "$RUNNER_TEMP/changed.txt" | wc -c)"
           # Сообщения коммитов. Гейт отбирает из них то, что уедет в тело
           # коммита слияния (`squash_body.compose_from`: заголовки, строки
           # связи, «Разобрано», трейлеры), — слово закрытия там закрыло бы
@@ -142,7 +142,7 @@ jobs:
           # `--reverse` обязателен: от старых к новым читает и `agent_pr`, и
           # `squash_body`, а первая задержка и заголовок берутся у ПЕРВОГО
           # коммита — в обратном порядке гейт судил бы не тот (взгляд на #934).
-          git log --reverse --format='%B%x00' "$base_sha..HEAD" > /tmp/messages.txt
+          git log --reverse --format='%B%x00' "$base_sha..HEAD" > "$RUNNER_TEMP/messages.txt"
       - name: метки и связь с задачей
         # ТОКЕН ЗДЕСЬ НЕ УКРАШЕНИЕ. Гейт перечитывает состояние изменения у
         # площадки, потому что снимок события — это состояние на момент
@@ -154,4 +154,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python $MECHANISMS/scripts/check_pr_meta.py --files-from /tmp/changed.txt --messages-from /tmp/messages.txt
+        run: python $MECHANISMS/scripts/check_pr_meta.py --files-from "$RUNNER_TEMP/changed.txt" --messages-from "$RUNNER_TEMP/messages.txt"
