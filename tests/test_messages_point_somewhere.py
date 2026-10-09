@@ -35,13 +35,20 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, code_files, walk
 
-#: Где живут механизмы: их сообщения читает окно и владелец.
-WHERE: Final = (
-    *(where.as_posix() for where in load_script("paths.py").SOURCES),
-    ".claude/hooks",
-)
+
+def where_files() -> list[Path]:
+    """Где живут механизмы: их сообщения читает окно и владелец.
+
+    Код и набор — общим обходчиком `code_files` (вглубь), прочие корни — свои
+    (взгляд на #1252: восемь копий обхода пропустили бы вложенное одинаково).
+    """
+    return [
+        *code_files(with_tests=False),
+        *walk(ROOT / ".claude/hooks", "*.py"),
+    ]
+
 
 #: Что считается путём НАШЕГО дерева. Список приставок закрытый: «похоже на
 #: путь» приняло бы и чужой адрес, и кусок URL
@@ -82,17 +89,16 @@ def prose_of(tree: ast.AST) -> set[int]:
 def paths_in_messages() -> list[tuple[Path, int, str]]:
     """Пути, названные сообщениями механизмов: файл, строка, адрес."""
     found: list[tuple[Path, int, str]] = []
-    for where in WHERE:
-        for path in walk(ROOT / where, "*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            prose = prose_of(tree)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
-                    continue
-                if id(node) in prose:
-                    continue
-                for said in A_PATH.findall(node.value):
-                    found.append((path.relative_to(ROOT), node.lineno, said))
+    for path in where_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        prose = prose_of(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            if id(node) in prose:
+                continue
+            for said in A_PATH.findall(node.value):
+                found.append((path.relative_to(ROOT), node.lineno, said))
     return found
 
 
@@ -132,19 +138,14 @@ def test_a_dead_path_in_prose_is_not_judged() -> None:
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     prose_paths: list[str] = []
-    for where in WHERE:
-        for path in walk(ROOT / where, "*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            prose = prose_of(tree)
-            for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Constant)
-                    and isinstance(node.value, str)
-                    and id(node) in prose
-                ):
-                    prose_paths += [
-                        one for one in A_PATH.findall(node.value) if not (ROOT / one).exists()
-                    ]
+    for path in where_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        prose = prose_of(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) in prose:
+                prose_paths += [
+                    one for one in A_PATH.findall(node.value) if not (ROOT / one).exists()
+                ]
     assert prose_paths, (
         "в докстроках механизмов нет ни одного намеренно мёртвого адреса — "
         "довод о границе пуст, и докстроку можно вернуть в предмет"

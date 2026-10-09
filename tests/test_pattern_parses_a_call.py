@@ -39,14 +39,20 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, code_files, walk
 
-#: Где ищем образцы: набор, механизмы, перехваты и общий низ.
-WHERE: Final = (
-    "tests",
-    *(where.as_posix() for where in load_script("paths.py").SOURCES),
-    ".claude/hooks",
-)
+
+def where_files() -> list[Path]:
+    """Где ищем образцы: набор, механизмы, перехваты и общий низ.
+
+    Код и набор — общим обходчиком `code_files` (вглубь), прочие корни — свои
+    (взгляд на #1252: восемь копий обхода пропустили бы вложенное одинаково).
+    """
+    return [
+        *code_files(with_tests=True),
+        *walk(ROOT / ".claude/hooks", "*.py"),
+    ]
+
 
 #: Как узнают образец, разбирающий вызов: ИМЯ вплотную к экранированной скобке.
 #: Скобка Markdown (`](`) сюда не попадает намеренно — там перед скобкой не имя.
@@ -72,18 +78,17 @@ PARSES_SOMETHING_ELSE: Final = {
 def patterns() -> list[tuple[Path, int, str]]:
     """Все образцы дерева, отданные разбору: файл, строка, сам образец."""
     found: list[tuple[Path, int, str]] = []
-    for where in WHERE:
-        for path in walk(ROOT / where, "*.py"):
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if not isinstance(node, ast.Call) or not node.args:
-                    continue
-                head = node.func
-                name = head.attr if isinstance(head, ast.Attribute) else getattr(head, "id", "")
-                if name not in PATTERN_GOES_TO:
-                    continue
-                said = node.args[0]
-                if isinstance(said, ast.Constant) and isinstance(said.value, str):
-                    found.append((path, node.lineno, said.value))
+    for path in where_files():
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            head = node.func
+            name = head.attr if isinstance(head, ast.Attribute) else getattr(head, "id", "")
+            if name not in PATTERN_GOES_TO:
+                continue
+            said = node.args[0]
+            if isinstance(said, ast.Constant) and isinstance(said.value, str):
+                found.append((path, node.lineno, said.value))
     return found
 
 

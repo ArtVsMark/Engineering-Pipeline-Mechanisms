@@ -380,3 +380,18 @@ def test_every_deliberately_dead_address_is_earned() -> None:
             assert address in addresses_in(prose_of(ROOT / named)), (
                 f"{address}: в `{named}` адреса нет — причина исключения устарела"
             )
+
+
+def test_code_files_reach_a_nested_source(tmp_path: Path) -> None:
+    """Общий обходчик видит вложенный каталог источника — как сверка пакетов (взгляд на #1252).
+
+    Неглубокий обход пропускал вложенное молча, а восемь гейтов брали его
+    копии: каждый пропустил бы одно и то же.
+    """
+    for where in load_script("paths.py").SOURCES:
+        (tmp_path / where / "nested").mkdir(parents=True)
+        (tmp_path / where / "top.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / where / "nested" / "deep.py").write_text("x = 1\n", encoding="utf-8")
+    found = {one.relative_to(tmp_path).as_posix() for one in code_files(root=tmp_path)}
+    for where in load_script("paths.py").SOURCES:
+        assert f"{where.as_posix()}/nested/deep.py" in found, sorted(found)

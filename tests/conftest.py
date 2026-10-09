@@ -315,7 +315,7 @@ def found_by(where: Path, pattern: str) -> list[Path]:
     return sorted(where.glob(pattern)) if where.is_dir() else []
 
 
-def code_files(*, with_tests: bool = False) -> list[Path]:
+def code_files(*, with_tests: bool = False, root: Path = ROOT) -> list[Path]:
     """Файлы кода проекта — из ОБЪЯВЛЕННОГО списка, а не из глоба по каталогу.
 
     Где живёт код, названо один раз — `scripts/paths.py::SOURCES`, — и до сих
@@ -328,13 +328,19 @@ def code_files(*, with_tests: bool = False) -> list[Path]:
 
     Набор добавляется отдельным словом: он не «источник проекта» — потребители
     его не ставят, — но правилам прозы и живых ссылок подчиняется наравне.
+
+    ВГЛУБЬ, А НЕ ПЕРВЫМ УРОВНЕМ (взгляд на #1252). Вложенный каталог источника
+    неглубокий обход пропускал молча, а сверка пакетов
+    (`test_every_package_is_a_declared_source`) ищет вглубь и такой пакет
+    принимает. Гейты, бравшие свои копии обхода, теперь берут его здесь: копий
+    было восемь, и каждая пропустила бы вложенное одинаково.
     """
     paths = load_script("paths.py")
     found: list[Path] = []
     for where in paths.SOURCES:
-        found += walk(ROOT / where, "*.py")
+        found += [one for one in walk_deep(root / where, "*.py") if "__pycache__" not in one.parts]
     if with_tests:
-        found += walk(ROOT / "tests", "*.py")
+        found += walk(root / "tests", "*.py")
     return found
 
 

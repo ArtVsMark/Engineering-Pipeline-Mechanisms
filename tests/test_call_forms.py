@@ -46,16 +46,21 @@ import ast
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, code_files, walk
 
-#: Где ищем разборы: набор, механизмы, перехваты перед git и общий низ. Корни
-#: кода берутся из `paths.SOURCES`, а не перечисляются рукой: так же, как у
-#: соседа `test_pattern_parses_a_call.WHERE` (195, взгляд на #1252).
-WHERE: Final = (
-    "tests",
-    *(where.as_posix() for where in load_script("paths.py").SOURCES),
-    ".claude/hooks",
-)
+
+def where_files() -> list[Path]:
+    """Где ищем разборы: набор, механизмы, перехваты перед git и общий низ.
+
+    Код и набор — общим обходчиком `code_files` (вглубь), прочие корни — свои
+    (взгляд на #1252: восемь копий обхода пропустили бы вложенное одинаково).
+    """
+    return [
+        *code_files(with_tests=True),
+        *walk(ROOT / ".claude/hooks", "*.py"),
+    ]
+
+
 #: Поле вызова, чтение которого и делает функцию разборщиком.
 THE_CALL: Final = "func"
 #: Голое имя вызова: класс узла и поле, которым его читают.
@@ -115,14 +120,13 @@ def parsers() -> list[tuple[Path, ast.FunctionDef]]:
     форму имени.
     """
     found: list[tuple[Path, ast.FunctionDef]] = []
-    for where in WHERE:
-        for path in walk(ROOT / where, "*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for fn in ast.walk(tree):
-                if isinstance(fn, ast.FunctionDef) and any(forms_of(fn)):
-                    found.append((path, fn))
+    for path in where_files():
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if isinstance(fn, ast.FunctionDef) and any(forms_of(fn)):
+                found.append((path, fn))
     return found
 
 
