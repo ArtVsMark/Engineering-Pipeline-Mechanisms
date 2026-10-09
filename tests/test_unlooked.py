@@ -584,18 +584,20 @@ def test_a_running_review_is_not_a_missing_one(status: str) -> None:
     assert module.why_quiet(runs) == module.STATE_RUNNING
 
 
-def test_a_review_waiting_for_approval_is_named_not_missed() -> None:
-    """`action_required` — заход ждёт разрешения человека: назван словом площадки (007).
+def test_a_review_waiting_for_approval_has_its_own_state() -> None:
+    """`action_required` — заход ждёт разрешения человека: своё имя, не «незнакомый исход» (007).
 
     Это ровно исход, из-за которого перевёрнут ответ 007: агент остановился на
-    запросе разрешения. Он не сводится ни к «взгляда не было», ни к «упал».
+    запросе разрешения. Он не сводится ни к «взгляда не было», ни к «упал», ни
+    к исходу, которого разбор не знает (взгляд на #1293), и перечитывается
+    заходом, как идущий.
     """
     runs = [
         {"name": module.REVIEW_CHECKS[0], "status": "completed", "conclusion": "action_required"}
     ]
     said = module.why_quiet(runs)
-    assert said.startswith(module.STATE_ODD)
-    assert "action_required" in said
+    assert said == module.STATE_AWAITING
+    assert said in module.OPEN_STATES
 
 
 def test_a_failure_still_outranks_the_rest() -> None:
