@@ -243,12 +243,18 @@ def sources(
 
     try:
         conflicting, unknown, red = debt.stuck_changes(repo, token)
+        # НЕСКАЗАННОЕ СЛИЯНИЕ — НЕПРОЧИТАННОЕ, А НЕ СПРАВКА (взгляд на #1267). В
+        # заметке оно печаталось рядом с «Пусто», а шаг долга тем же предметом
+        # называл раздел прочитанным не весь и выходил исходом 3: два механизма
+        # расходились по одному источнику (195).
         built[1] = Source(
             rows=[f"{one} — база устарела" for one in conflicting],
-            note=(
+            unread=(
                 "площадка ещё считает состояние слияния: " + ", ".join(unknown) if unknown else ""
             ),
         )
+        if unknown:
+            broken.append("1")
         built[2] = Source(rows=[f"{one} — красное на своей голове" for one in red])
     except ghrest.TransportError as exc:
         built[1] = built[2] = Source(unread=f"свои открытые изменения не спрошены: {exc}")
