@@ -1276,11 +1276,30 @@ def rule_number(value: object) -> tuple[str, str]:
     без номера печатало «ответить по правилу ?» вместо «не прочитано». Номер —
     непустая строка цифр; всё остальное, число включительно, — форма не узнана.
     """
-    if isinstance(value, str) and value.isdigit():
+    # `isdigit` один принимает и «²», и «٣»: номер каталога — ASCII-цифры
+    # (взгляд на #1266).
+    if isinstance(value, str) and value.isascii() and value.isdigit():
         return value, ""
     if value is None or value == "":
         return "", "поля «rule» нет — номер принятого не назван"
     return "", f"поле «rule» не строка номера ({type(value).__name__}: {report.cut(str(value))})"
+
+
+def verdict_subject(kind: str, verdict: dict[str, Any]) -> tuple[str, str]:
+    """Чем стало принятое: номер правила или адрес навыка — и причина, если не прочитано.
+
+    ВЕРДИКТ НАВЫКУ НАЗЫВАЕТ НАВЫК, А НЕ НОМЕР: так его проверяет сам каталог
+    (`scripts/collect_proposals.py`, поле `skill`). Номер у навыка искать —
+    значит навсегда считать принятый навык непрочитанным (взгляд на #1266).
+    """
+    if kind != "skill":
+        return rule_number(verdict.get("rule"))
+    skill = verdict.get("skill")
+    if isinstance(skill, str) and skill.strip():
+        return skill.strip(), ""
+    if skill is None or skill == "":
+        return "", "поля «skill» нет — принятый навык не назван"
+    return "", f"поле «skill» не строка адреса ({type(skill).__name__})"
 
 
 def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
@@ -1371,32 +1390,38 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
                 )
             )
             continue
-        # Номер присваивает КАТАЛОГ и называет его полем `rule`. Наш файл
-        # предложений номера не несёт и нести не может — это сказано в нём же.
-        # Номер нужен принятому и сведённому; у «соседей» его нет по смыслу.
+        # Номер присваивает КАТАЛОГ и называет его полем `rule`, навык — полем
+        # `skill`. Наш файл предложений их не несёт и нести не может — это
+        # сказано в нём же. Нужны принятому и сведённому; у «соседей» их нет.
         why = str(verdict.get("why") or "причина не названа")
-        number, no_number = rule_number(verdict.get("rule"))
+        number, no_number = verdict_subject(kind, verdict)
         if status in {"admitted", "merged-into"} and no_number:
             found.append(
                 Drift(
                     "proposal-answer-unread",
                     f"вердикт по «{slug}» ({status}): {no_number}",
-                    "сверить разбор с export/README.md каталога: без номера ответ "
-                    "не на что перевести в .rules/bindings.json",
+                    "сверить разбор с export/README.md каталога: без номера или "
+                    "навыка ответ не на что перевести в .rules/bindings.json",
                 )
             )
             continue
         if status == "admitted":
             numbers, unread = replaced_numbers(verdict.get("replaces"), merge=kind == "merge")
-            # У СЛИЯНИЯ ЗАМЕНЁННЫЕ — РОВНО СВОДИМЫЕ (взгляд на #1243). Принятое
-            # слияние 002+057 с `replaces: ["005"]` велело бы перечитать 005 и
-            # промолчало о 002 и 057: форма, не узнанная по смыслу.
+            # ЗАМЕНЁННЫЕ БЕРУТСЯ ИЗ ВЕРДИКТА, А РАСХОЖДЕНИЕ С ПРЕДЛОЖЕНИЕМ
+            # НАЗЫВАЕТСЯ, а не делает ответ непрочитанным (взгляд на #1266).
+            # Каталог требует от `replaces` лишь 2–3 разных номера с пометкой
+            # «Заменено» (`collect_proposals.py`), а не равенства сводимым:
+            # оставить одно правило или заменить соседнее он вправе, и
+            # «не прочитано» стало бы вечным. Перечитать при этом надо и
+            # заменённые, и сводимые — о 002 и 057 при `replaces: ["005"]`
+            # молчать нельзя (взгляд на #1243).
             own = sorted(str(rule) for rule in one.get("rules") or [])
-            if not unread and kind == "merge" and sorted(numbers) != own:
-                unread = (
-                    f"заменены {', '.join(numbers)}, а сводило предложение "
-                    f"{', '.join(own) or 'ничего'}"
-                )
+            apart = (
+                f" (сводило предложение {', '.join(own)})"
+                if not unread and kind == "merge" and sorted(numbers) != own
+                else ""
+            )
+            reread = sorted({*numbers, *own}) if apart else numbers
             if unread:
                 found.append(
                     Drift(
@@ -1411,11 +1436,22 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
             found.append(
                 Drift(
                     "proposal-admitted",
-                    f"каталог принял «{slug}» под номером {number}"
-                    + (f", заменены {replaced}" if replaced else ""),
-                    f"убрать его из .rules/proposals.json и ответить по правилу {number} "
-                    "в .rules/bindings.json — принятое перестаёт быть предложением"
-                    + (f"; ответы по заменённым ({replaced}) перечитать" if replaced else ""),
+                    (
+                        f"каталог принял навык «{slug}» как {number}"
+                        if kind == "skill"
+                        else f"каталог принял «{slug}» под номером {number}"
+                    )
+                    + (f", заменены {replaced}" if replaced else "")
+                    + apart,
+                    (
+                        f"убрать его из .rules/proposals.json; навык {number} ставится "
+                        "плагином каталога — ответы, которые держит наш навык, перечитать"
+                        if kind == "skill"
+                        else f"убрать его из .rules/proposals.json и ответить по правилу "
+                        f"{number} в .rules/bindings.json — принятое перестаёт быть "
+                        "предложением"
+                    )
+                    + (f"; ответы по {', '.join(reread)} перечитать" if reread else ""),
                 )
             )
         elif status == "neighbours":
