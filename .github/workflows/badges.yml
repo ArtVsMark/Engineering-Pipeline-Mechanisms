@@ -279,7 +279,7 @@ jobs:
       - name: единый значок — проверки, покрытие, выпуск, версия
         id: unified
         continue-on-error: true
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/python-badge@v1.9.0
+        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/python-badge@v1.11.0
         with:
           ci-workflow: ci.yml
           coverage-json: .unified-badge/coverage.json
