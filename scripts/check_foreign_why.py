@@ -157,9 +157,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     args = parser.parse_args(argv)
 
+    # ДЕРЕВО ЧИТАЕТСЯ РАНЬШЕ КАТАЛОГА — как у соседа `check_rule_links` (#1255,
+    # 195): пустое дерево — «не отработал» при любой сети, а не «каталог молчит».
+    try:
+        docs = documents(args.root)
+    except NotRun as exc:
+        print(f"гейт не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+
     try:
         said = claims()
-        docs = documents(args.root)
     except catalogue.Silent as exc:
         # ОТКАЗ КАНАЛА НАЗЫВАЕТСЯ И НЕ КРАСИТ. Печатается в поток вывода, а не
         # ошибок: это не находка и не поломка шага, а состояние сети. Адресата
