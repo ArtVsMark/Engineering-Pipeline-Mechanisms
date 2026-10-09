@@ -229,7 +229,7 @@ RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 
             },
             [
                 ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов 1/5 · 20%", "гейтов 3/20 · 15%"],
+                ["семья", "проектов 1/5 · 20%", "шагов 3/20 · 15%"],
             ],
         ),
         (
@@ -243,21 +243,21 @@ RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 
             },
             [
                 ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов 0/5 · — (2 не прочитано)", "гейтов 0/20 · 0%"],
+                ["семья", "проектов 0/5 · — (2 не прочитано)", "шагов 0/20 · 0%"],
             ],
         ),
         (
             {"read": True, "uptake": {"read": False}},
             [
                 ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов не прочитано", "гейтов не прочитано"],
+                ["семья", "проектов не прочитано", "шагов не прочитано"],
             ],
         ),
         (
             {},
             [
                 ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов не прочитано", "гейтов не прочитано"],
+                ["семья", "проектов не прочитано", "шагов не прочитано"],
             ],
         ),
     ],
@@ -504,3 +504,27 @@ def test_the_who_page_is_published_and_kept_on_the_branch(tmp_path: Path) -> Non
     for name in facts.PAGES:
         assert (tmp_path / name).read_text(encoding="utf-8").startswith("# ")
         assert name in facts.branch_files()
+
+
+@pytest.mark.parametrize(
+    ("said", "texts"),
+    [
+        (
+            {
+                "read": True,
+                "by": [{"repo": "o/a", "steps": ["step-x", "step-y"], "refs": ["v1.5.0"]}],
+            },
+            [["кем", "o/a", "шагов 2 · v1.5.0"]],
+        ),
+        ({"read": True, "by": [], "projects": {"unread_repos": ["o/c"]}}, [["не прочитан", "o/c"]]),
+        ({"read": True, "by": []}, [["кем", "никто"]]),
+        ({"read": False}, [["кем", "не прочитано"]]),
+    ],
+    ids=["взял", "клон-не-прочитан", "никто", "обход-не-прочитан"],
+)
+def test_the_who_picture_tells_unknown_from_nobody(
+    said: dict[str, Any], texts: list[list[str]]
+) -> None:
+    """Таблица «кем» картинкой: кто взял, кто не прочитан и «никто» — разные зоны (045, #1213)."""
+    zones = facts.who_zones({"family": {"uptake": said}})
+    assert [[text for text, _, _ in zone] for zone in zones] == texts
