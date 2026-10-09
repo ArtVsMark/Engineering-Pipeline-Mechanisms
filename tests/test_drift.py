@@ -814,6 +814,60 @@ def test_merge_neighbours_and_replacements_are_read() -> None:
     assert "219" in took[0].said and "005, 127" in took[0].said and "005, 127" in took[0].next_step
 
 
+def test_replaces_not_a_list_is_unread_not_spelled_out() -> None:
+    """`replaces` строкой — ответ не прочитан, а не заменены «0, 0, 5» (взгляд на #1239)."""
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge"}]}
+    key = "o/r:merge/a-thing-broke"
+    found = module.proposals_answered(
+        answer({"status": "admitted", "rule": "219", "replaces": "005, 127"}, key), mine, "o/r"
+    )
+    assert [one.source for one in found] == ["proposal-answer-unread"]
+    assert "replaces" in found[0].said and "0, 0, 5" not in found[0].said
+
+
+@pytest.mark.parametrize(
+    ("value", "merge", "numbers", "unread"),
+    [
+        (["005", "127"], True, ["005", "127"], False),
+        (None, False, [], False),
+        ([], False, [], False),
+        (None, True, [], True),
+        ([], True, [], True),
+        ("005, 127", True, [], True),
+        (5, False, [], True),
+        ({"005": 1}, True, [], True),
+        (["005", 127], True, [], True),
+        (["005", ""], True, [], True),
+    ],
+)
+def test_every_form_of_replaces_is_named(
+    value: object, merge: bool, numbers: list[str], unread: bool
+) -> None:
+    """Перечень форм `replaces` (210): номера читаются, остальное названо, а не угадано."""
+    got, why = module.replaced_numbers(value, merge=merge)
+    assert got == numbers and bool(why) is unread
+
+
+def test_an_admitted_merge_without_replaces_is_unread() -> None:
+    """Принятое слияние без заменённых — форма не узнана (взгляд на #1243)."""
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge"}]}
+    key = "o/r:merge/a-thing-broke"
+    found = module.proposals_answered(
+        answer({"status": "admitted", "rule": "219"}, key), mine, "o/r"
+    )
+    assert [one.source for one in found] == ["proposal-answer-unread"]
+
+
+def test_replaces_beside_another_status_is_not_read() -> None:
+    """`replaces` при `neighbours` не нужен и не читается: ответ разобран, а не отложен."""
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge"}]}
+    key = "o/r:merge/a-thing-broke"
+    found = module.proposals_answered(
+        answer({"status": "neighbours", "why": "вопрос 4", "replaces": "x"}, key), mine, "o/r"
+    )
+    assert [one.source for one in found] == ["proposal-neighbours"]
+
+
 def test_an_unknown_status_is_named_not_swallowed() -> None:
     """Статус, которого разбор не знает, называется, а не молчит (045)."""
     found = module.proposals_answered(answer({"status": "deferred"}), MINE, "o/r")
