@@ -26,7 +26,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import code_files
 
 #: Списки, которые обязаны читаться до конца: проверки коммита, аннотации
 #: проверки, задания прогона. Путь сверяется по концу — до `?` или конца строки:
@@ -37,9 +37,6 @@ from tests.conftest import ROOT, load_script, walk
 LIST_RE: Final = re.compile(
     r"/check-runs(?:\?|$)|/annotations(?:\?|$)|/jobs(?:\?|$)|/rules/branches/[^/?]+(?:\?|$)"
 )
-
-#: Где живут механизмы, ходящие к площадке.
-PLACES: Final = tuple(ROOT / where for where in load_script("paths.py").SOURCES)
 
 
 def literal(node: ast.expr) -> str | None:
@@ -93,7 +90,7 @@ def test_the_predicate_tells_a_list_from_a_single_record(said: str, list_read: b
 
 def test_no_list_of_checks_annotations_or_jobs_is_read_one_page() -> None:
     """В дереве нет ни одного такого списка, прочитанного одним запросом."""
-    scripts = [one for place in PLACES for one in walk(place, "*.py")]
+    scripts = code_files()
     offenders = [line for path in scripts for line in single_reads(path)]
     assert not offenders, (
         "список читается одной страницей — всё за её краем пропадёт молча; "

@@ -38,13 +38,8 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, code_files
 
-#: Где живут механизмы, чьи находки читает человек.
-WHERE: Final = (
-    *(where.as_posix() for where in load_script("paths.py").SOURCES),
-    ".claude/hooks",
-)
 #: Чем копят находки.
 COLLECTS: Final = frozenset({"append", "extend"})
 
@@ -78,27 +73,26 @@ def inside(node: ast.AST) -> Iterator[ast.AST]:
 def collectors() -> list[tuple[Path, ast.FunctionDef]]:
     """Функции, которые КОПЯТ находки в список и им же заканчиваются."""
     found: list[tuple[Path, ast.FunctionDef]] = []
-    for where in WHERE:
-        for path in walk(ROOT / where, "*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.FunctionDef) or not node.body:
-                    continue
-                piles = {
-                    one.func.value.id
-                    for one in inside(node)
-                    if isinstance(one, ast.Call)
-                    and isinstance(one.func, ast.Attribute)
-                    and one.func.attr in COLLECTS
-                    and isinstance(one.func.value, ast.Name)
-                }
-                last = node.body[-1]
-                if (
-                    isinstance(last, ast.Return)
-                    and isinstance(last.value, ast.Name)
-                    and last.value.id in piles
-                ):
-                    found.append((path.relative_to(ROOT), node))
+    for path in code_files(with_tests=False, with_hooks=True):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or not node.body:
+                continue
+            piles = {
+                one.func.value.id
+                for one in inside(node)
+                if isinstance(one, ast.Call)
+                and isinstance(one.func, ast.Attribute)
+                and one.func.attr in COLLECTS
+                and isinstance(one.func.value, ast.Name)
+            }
+            last = node.body[-1]
+            if (
+                isinstance(last, ast.Return)
+                and isinstance(last.value, ast.Name)
+                and last.value.id in piles
+            ):
+                found.append((path.relative_to(ROOT), node))
     return found
 
 

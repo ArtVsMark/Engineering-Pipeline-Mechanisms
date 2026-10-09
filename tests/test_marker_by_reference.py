@@ -43,10 +43,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script, walk, walk_deep
-
-#: Где объявляются метки — рабочий код.
-DECLARED_IN: Final = ROOT / "scripts"
+from tests.conftest import ROOT, code_files, load_script, walk_deep
 
 #: Где метку могли бы переписать: код, проверки, прогоны и прочее, что читает
 #: машина, — весь `.github/` (не только `*.yml`) и `.pipeline.yml` (взгляд на
@@ -104,11 +101,16 @@ def declared(path: Path) -> dict[str, int]:
     return found
 
 
-def heads(root: Path = DECLARED_IN) -> dict[str, tuple[str, int]]:
-    """Все начала меток дерева: начало → место определения."""
+def heads() -> dict[str, tuple[str, int]]:
+    """Все начала меток дерева: начало → место определения — во ВСЕХ источниках кода.
+
+    Объявления читались только в `scripts/`: метку, объявленную в общем низу
+    (`packages/transport`), гейт не знал, хотя переписанную там уже видел
+    (взгляд на #1252, 195).
+    """
     return {
         head: (path.relative_to(ROOT).as_posix(), line)
-        for path in walk(root, "*.py")
+        for path in code_files()
         for head, line in declared(path).items()
     }
 

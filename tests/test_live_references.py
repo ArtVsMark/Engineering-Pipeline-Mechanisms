@@ -23,6 +23,7 @@
 import ast
 import io
 import re
+import subprocess
 import tokenize
 from pathlib import Path
 
@@ -410,3 +411,39 @@ def test_every_deliberately_dead_address_is_earned() -> None:
             assert address in addresses_in(prose_of(ROOT / named)), (
                 f"{address}: в `{named}` адреса нет — причина исключения устарела"
             )
+
+
+def test_code_files_reach_a_nested_source(tmp_path: Path) -> None:
+    """Общий обходчик видит вложенный каталог источника — как сверка пакетов (взгляд на #1252).
+
+    Неглубокий обход пропускал вложенное молча, а восемь гейтов брали его
+    копии: каждый пропустил бы одно и то же.
+
+    Соседи (CI и взгляд на #1298): копия сборки `build/lib/`, которую прячет
+    `.gitignore`, кодом не считается; новый модуль до `git add` — считается.
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("build/\n", encoding="utf-8")
+    for where in load_script("paths.py").SOURCES:
+        (tmp_path / where / "nested").mkdir(parents=True)
+        (tmp_path / where / "top.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / where / "nested" / "deep.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    for where in load_script("paths.py").SOURCES:
+        (tmp_path / where / "build" / "lib").mkdir(parents=True)
+        (tmp_path / where / "build" / "lib" / "top.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / where / "fresh.py").write_text("x = 1\n", encoding="utf-8")
+    found = {one.relative_to(tmp_path).as_posix() for one in code_files(root=tmp_path)}
+    for where in load_script("paths.py").SOURCES:
+        assert f"{where.as_posix()}/nested/deep.py" in found, sorted(found)
+        assert f"{where.as_posix()}/fresh.py" in found, sorted(found)
+        assert f"{where.as_posix()}/build/lib/top.py" not in found, sorted(found)
+
+
+def test_code_files_outside_git_is_a_named_refusal(tmp_path: Path) -> None:
+    """Вне рабочего дерева git обходчик отказывает словами проекта, а не трассой (075, #1298)."""
+    for where in load_script("paths.py").SOURCES:
+        (tmp_path / where).mkdir(parents=True)
+        (tmp_path / where / "top.py").write_text("x = 1\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="не рабочее дерево git"):
+        code_files(root=tmp_path)
