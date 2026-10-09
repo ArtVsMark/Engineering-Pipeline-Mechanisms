@@ -802,7 +802,7 @@ def test_an_unknown_proposal_kind_is_named() -> None:
 
 def test_merge_neighbours_and_replacements_are_read() -> None:
     """Слияние: `neighbours` с причиной и `replaces` у принятого — оба названы."""
-    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge"}]}
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge", "rules": ["005", "127"]}]}
     key = "o/r:merge/a-thing-broke"
     kept = module.proposals_answered(
         answer({"status": "neighbours", "why": "вопрос 4"}, key), mine, "o/r"
@@ -846,6 +846,46 @@ def test_every_form_of_replaces_is_named(
     """Перечень форм `replaces` (210): номера читаются, остальное названо, а не угадано."""
     got, why = module.replaced_numbers(value, merge=merge)
     assert got == numbers and bool(why) is unread
+
+
+def test_an_admitted_merge_replacing_other_numbers_is_unread() -> None:
+    """Принятое слияние, заменившее не те номера, что сводило, — не прочитано (взгляд на #1243).
+
+    Слияние 002+057, принятое с `replaces: ["005"]`, велело бы перечитать 005 и
+    промолчало бы о 002 и 057: форма, не узнанная по смыслу.
+    """
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge", "rules": ["002", "057"]}]}
+    key = "o/r:merge/a-thing-broke"
+    found = module.proposals_answered(
+        answer({"status": "admitted", "rule": "219", "replaces": ["005"]}, key), mine, "o/r"
+    )
+    assert [one.source for one in found] == ["proposal-answer-unread"]
+    assert "005" in found[0].said and "002, 057" in found[0].said
+
+
+@pytest.mark.parametrize(
+    ("value", "number", "unread"),
+    [
+        ("219", "219", False),
+        (None, "", True),
+        ("", "", True),
+        (219, "", True),
+        ("219a", "", True),
+        (["219"], "", True),
+    ],
+)
+def test_every_form_of_the_rule_number_is_named(value: object, number: str, unread: bool) -> None:
+    """Перечень форм `rule` — тем же приёмом, что у `replaces` (195, взгляд на #1243)."""
+    got, why = module.rule_number(value)
+    assert got == number and bool(why) is unread
+
+
+@pytest.mark.parametrize("status", ["admitted", "merged-into"])
+def test_a_verdict_without_its_number_is_unread_not_a_question_mark(status: str) -> None:
+    """Принятое или сведённое без номера — «не прочитано», а не «ответить по правилу ?»."""
+    found = module.proposals_answered(answer({"status": status, "why": "x"}), MINE, "o/r")
+    assert [one.source for one in found] == ["proposal-answer-unread"]
+    assert "?" not in found[0].next_step and "«rule»" in found[0].said
 
 
 def test_an_admitted_merge_without_replaces_is_unread() -> None:

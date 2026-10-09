@@ -1268,6 +1268,21 @@ def replaced_numbers(value: object, *, merge: bool) -> tuple[list[str], str]:
     return list(value), ""
 
 
+def rule_number(value: object) -> tuple[str, str]:
+    """Номер правила из поля `rule` вердикта и причина, если поле не прочитано.
+
+    ТЕМ ЖЕ ПЕРЕЧНЕМ ФОРМ, ЧТО У `replaced_numbers` (195, взгляд на #1243).
+    Соседнее поле того же вердикта читалось по-старому — `or "?"`, — и принятое
+    без номера печатало «ответить по правилу ?» вместо «не прочитано». Номер —
+    непустая строка цифр; всё остальное, число включительно, — форма не узнана.
+    """
+    if isinstance(value, str) and value.isdigit():
+        return value, ""
+    if value is None or value == "":
+        return "", "поля «rule» нет — номер принятого не назван"
+    return "", f"поле «rule» не строка номера ({type(value).__name__}: {report.cut(str(value))})"
+
+
 def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
     """Каталог ответил по нашему предложению, а оно всё ещё числится предложением.
 
@@ -1358,10 +1373,30 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
             continue
         # Номер присваивает КАТАЛОГ и называет его полем `rule`. Наш файл
         # предложений номера не несёт и нести не может — это сказано в нём же.
-        number = str(verdict.get("rule") or "?")
+        # Номер нужен принятому и сведённому; у «соседей» его нет по смыслу.
         why = str(verdict.get("why") or "причина не названа")
+        number, no_number = rule_number(verdict.get("rule"))
+        if status in {"admitted", "merged-into"} and no_number:
+            found.append(
+                Drift(
+                    "proposal-answer-unread",
+                    f"вердикт по «{slug}» ({status}): {no_number}",
+                    "сверить разбор с export/README.md каталога: без номера ответ "
+                    "не на что перевести в .rules/bindings.json",
+                )
+            )
+            continue
         if status == "admitted":
             numbers, unread = replaced_numbers(verdict.get("replaces"), merge=kind == "merge")
+            # У СЛИЯНИЯ ЗАМЕНЁННЫЕ — РОВНО СВОДИМЫЕ (взгляд на #1243). Принятое
+            # слияние 002+057 с `replaces: ["005"]` велело бы перечитать 005 и
+            # промолчало о 002 и 057: форма, не узнанная по смыслу.
+            own = sorted(str(rule) for rule in one.get("rules") or [])
+            if not unread and kind == "merge" and sorted(numbers) != own:
+                unread = (
+                    f"заменены {', '.join(numbers)}, а сводило предложение "
+                    f"{', '.join(own) or 'ничего'}"
+                )
             if unread:
                 found.append(
                     Drift(
