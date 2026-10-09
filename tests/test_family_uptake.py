@@ -11,8 +11,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("family_uptake.py")
 
@@ -127,14 +128,14 @@ def test_an_unread_clone_is_not_a_zero(monkeypatch: pytest.MonkeyPatch, tmp_path
     полной там, где она неполна.
     """
 
-    def refuse(repo: str, _where: Path) -> None:
+    def refuse(repo: str, _where: Path, **_: object) -> None:
         raise module.NotRun(f"{repo}: клон не взят")
 
     monkeypatch.setattr(module, "took", refuse)
     seen, unread = module.sweep(["o/один", "o/два"], tmp_path)
     assert seen == []
     assert unread == ["o/один", "o/два"]
-    lines = module.report_lines(seen, unread)
+    lines = module.report_lines(seen, unread, ["lint"])
     assert any("не прочитано клонов: 2" in line for line in lines), lines
     assert any("незнание" in line for line in lines), lines
 
@@ -144,7 +145,7 @@ def test_one_refusal_does_not_fell_the_sweep(
 ) -> None:
     """Вторая половина: отказ по одному соседу не прячет состояние остальных."""
 
-    def half(repo: str, _where: Path):  # type: ignore[no-untyped-def]
+    def half(repo: str, _where: Path, **_: object):  # type: ignore[no-untyped-def]
         if repo == "o/один":
             raise module.NotRun("клон не взят")
         return module.Took(repo=repo, steps=("step-lint",), refs=("v1.2.0",))
@@ -163,7 +164,7 @@ def test_a_neighbour_without_workflows_took_nothing(
     Настоящий клон здесь не делается: предмет проверки — разбор ОТСУТСТВИЯ
     каталога, а не работа git.
     """
-    monkeypatch.setattr(module, "shallow_clone", lambda _repo, _where: tmp_path)
+    monkeypatch.setattr(module, "shallow_clone", lambda _repo, _where, **_: tmp_path)
     got = module.took("o/пустой", tmp_path)
     assert got.steps == () and got.refs == ()
 
@@ -184,11 +185,11 @@ def test_the_sweep_reaches_its_outcomes(monkeypatch: pytest.MonkeyPatch) -> None
     """Оба исхода захода ПРОГОНЯЮТСЯ, а не только объявлены (039, 145)."""
     monkeypatch.setattr(module, "family", lambda **_: ["o/сосед"])
     monkeypatch.setattr(
-        module, "took", lambda repo, _where: module.Took(repo=repo, steps=(), refs=())
+        module, "took", lambda repo, _where, **_: module.Took(repo=repo, steps=(), refs=())
     )
     assert module.main([]) == module.EXIT_OK
 
-    def refuse(repo: str, _where: Path) -> None:
+    def refuse(repo: str, _where: Path, **_: object) -> None:
         raise module.NotRun(f"{repo}: клон не взят")
 
     monkeypatch.setattr(module, "took", refuse)
@@ -214,7 +215,7 @@ def test_a_timeout_is_caught_like_any_other_refusal(
     то есть один медленный прячет состояние всех.
     """
 
-    def slow(repo: str, _where: Path) -> None:
+    def slow(repo: str, _where: Path, **_: object) -> None:
         raise subprocess.TimeoutExpired(cmd=["git", "clone", repo], timeout=module.TIMEOUT)
 
     monkeypatch.setattr(module, "took", slow)
@@ -320,6 +321,54 @@ def test_a_project_calling_only_what_we_do_not_offer_took_nothing() -> None:
     assert said["projects"]["took"] == 0 and said["steps"]["taken"] == 0
 
 
+def test_print_and_facts_count_the_same_takers() -> None:
+    """Печать и факты одного захода считают «взял» одним правилом (взгляд на #1241, 022)."""
+    ours, _ = module.calls_in(CALL)
+    other, _ = module.calls_in(CALL.replace("step-lint", "step-secret"))
+    seen = [module.Took("o/a", ours, ("v1",)), module.Took("o/b", other, ("v1",))]
+    assert [one.repo for one in module.takers(seen, ["lint"])] == ["o/a"]
+    assert module.report_lines(seen, [], ["lint"])[0] == "взяли наши шаги: 1 из 2 прочитанных"
+    assert module.uptake(seen, [], ["lint"])["projects"]["took"] == 1
+
+
+def test_a_spent_budget_keeps_what_was_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Время вышло — прочитанные остаются в числах, остальные названы непрочитанными."""
+    ticks = iter([0.0, 0.0, 100.0])
+    asked: list[float] = []
+
+    def fast(repo: str, _where: Path, timeout: float = 0) -> object:
+        asked.append(timeout)
+        return module.Took(repo=repo, steps=(), refs=())
+
+    monkeypatch.setattr(module, "took", fast)
+    seen, unread = module.sweep(["o/a", "o/b"], tmp_path, budget=10, clock=lambda: next(ticks))
+    assert [one.repo for one in seen] == ["o/a"] and unread == ["o/b"]
+    assert asked == [10.0], "ожидание git не урезано до остатка бюджета"
+
+
+def test_the_step_limit_covers_the_worst_sweep() -> None:
+    """Предел шага обхода в `badges.yml` выше худшего случая самого обхода.
+
+    Худший случай — `2 × BUDGET`: последний начатый сосед получает остаток на
+    оба вызова git. Связь держит этот тест, а не комментарий: поднятый `BUDGET`
+    при прежнем пределе снял бы шаг раньше обхода, и файл пропал бы вместе с
+    прочитанными клонами (взгляд на #1246).
+    """
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
+    limits = [
+        step.get("timeout-minutes")
+        for job in flow["jobs"].values()
+        for step in job.get("steps") or []
+        if "family_uptake.py" in str(step.get("run") or "")
+    ]
+    assert limits, "шаг обхода клонов в badges.yml не найден или без своего предела (075)"
+    assert all(limit is not None and limit * 60 > 2 * module.BUDGET for limit in limits), (
+        f"предел шага {limits} мин не выше худшего случая обхода 2×{module.BUDGET} с"
+    )
+
+
 def test_offered_names_drop_the_file_prefix() -> None:
     """Имя файла шага приводится к имени отдаваемого, чужое без приставки — отброшено."""
     assert module.offered_names(("step-lint", "ci")) == ["lint"]
@@ -344,7 +393,7 @@ def test_main_writes_the_numbers_for_the_facts(
     monkeypatch.setattr(
         module,
         "took",
-        lambda repo, _where: module.Took(repo=repo, steps=("step-lint",), refs=("v1",)),
+        lambda repo, _where, **_: module.Took(repo=repo, steps=("step-lint",), refs=("v1",)),
     )
     monkeypatch.setattr(module.onboard, "steps", lambda _root: ["lint", "facts"])
     out = tmp_path / "uptake.json"
