@@ -354,7 +354,8 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     утверждал о себе неправду
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    drawn = set(facts.BADGES) | set(facts.PICTURES)
+    # Нарисованное впрок (`AHEAD`) показывается вторым шагом (196).
+    drawn = (set(facts.BADGES) | set(facts.PICTURES)) - facts.AHEAD
     # Пол — три: значок проекта заменил «держится машиной» и «семью» (#1213).
     assert len(drawn) >= 3, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
     # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
@@ -372,7 +373,8 @@ def test_every_page_the_build_lays_is_linked() -> None:
     того же предмета, и без этой проверки ссылка на неё держалась бы ничем.
     """
     assert facts.PAGES, "сборка не кладёт ни одной страницы — предмет проверки не найден (075)"
-    assert set(facts.PAGES) >= facts.AHEAD, f"впрок объявлено не страница: {sorted(facts.AHEAD)}"
+    drawn = {*facts.PICTURES, *facts.PAGES}
+    assert drawn >= facts.AHEAD, f"впрок объявлено не то, что рисуется: {sorted(facts.AHEAD)}"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     unlinked = sorted(
         name
