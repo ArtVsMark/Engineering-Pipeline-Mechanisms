@@ -10,6 +10,7 @@
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -170,29 +171,69 @@ def test_a_refused_signature_is_a_refusal(
         module.publish(stand["source"], stand["tmp"] / "w1", sha="a")
 
 
-@pytest.mark.parametrize(
-    ("step", "code", "said"),
-    [
-        ("add", 1, "git add отказал: нет прав"),
-        ("diff", 128, "git diff не ответил"),
-        ("commit", 1, "git commit отказал: нет прав"),
-        ("push", 1, "git push отказал: нет прав"),
-    ],
-)
-def test_every_git_step_refuses_with_its_reason(
-    stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch, step: str, code: int, said: str
-) -> None:
-    """Каждый шаг git после дерева ветки — отказ со своей причиной, а не молча (взгляд на #1249).
+#: Отказ каждого шага git: подкоманда → код, которым она отказывает. Набор
+#: сверяется с подкомандами, которые публикация зовёт на деле
+#: (`test_the_refusals_cover_every_git_step`): шаг без строки здесь краснеет.
+#: `ls-remote` отказывает вместе с `fetch` — порознь он не зовётся.
+REFUSALS: Final = {
+    "fetch": 1,
+    "ls-remote": 128,
+    "worktree": 1,
+    "config": 1,
+    "add": 1,
+    "diff": 128,
+    "commit": 1,
+    "push": 1,
+}
+#: Что отказавший шаг говорит в `stderr` — уникально по шагу, чтобы видеть, ЧЬЯ
+#: причина дошла.
+SAID_BY = "причина-{}"
 
-    `diff --quiet` с кодом не 0 и не 1 — отказ git, а не «есть изменения».
+
+@pytest.mark.parametrize("step", sorted(set(REFUSALS) - {"ls-remote"}))
+def test_every_git_step_refuses_with_its_reason(
+    stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    """Отказ любого шага git несёт его код и `stderr` (взгляды на #1249, 210).
+
+    Причину чинили по шагу за заход; перечень всех шагов закрывает круг.
+    `fetch` отказывает вместе с `ls-remote`: ветка есть, но не прочитана, и в
+    отказе обе причины. `diff --quiet` с кодом не 0 и не 1 — отказ git.
     """
     real: Callable[..., subprocess.CompletedProcess[str]] = module.git
+    failing = {step, "ls-remote"} if step == "fetch" else {step}
 
     def refusing(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        if args[:1] == (step,):
-            return subprocess.CompletedProcess(list(args), code, "", "нет прав")
+        if args[0] in failing:
+            said = SAID_BY.format(args[0])
+            return subprocess.CompletedProcess(list(args), REFUSALS[args[0]], "", said)
         return real(*args, cwd=cwd)
 
     monkeypatch.setattr(module, "git", refusing)
-    with pytest.raises(module.NotPublished, match=said):
+    with pytest.raises(module.NotPublished) as refused:
         module.publish(stand["source"], stand["tmp"] / "w1", sha="a")
+    for one in failing:
+        assert f"код {REFUSALS[one]}: {SAID_BY.format(one)}" in str(refused.value)
+
+
+def test_the_refusals_cover_every_git_step(
+    stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Перечень отказов равен подкомандам, которые публикация зовёт на деле.
+
+    Подкоманды записываются прогоном, а не разбором текста: и первая
+    публикация (ветки нет), и публикация поверх. Новый вызов git без строки в
+    `REFUSALS` краснеет здесь — отказ без причины не пройдёт молча (210).
+    """
+    real: Callable[..., subprocess.CompletedProcess[str]] = module.git
+    called: set[str] = set()
+
+    def recording(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        called.add(args[0])
+        return real(*args, cwd=cwd)
+
+    monkeypatch.setattr(module, "git", recording)
+    assert module.publish(stand["source"], stand["tmp"] / "w1", sha="a")
+    stand["source"].write_text('{"a": 2}\n', encoding="utf-8")
+    assert module.publish(stand["source"], stand["tmp"] / "w2", sha="b")
+    assert called == set(REFUSALS)
