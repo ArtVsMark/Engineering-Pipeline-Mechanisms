@@ -11,7 +11,7 @@
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -198,7 +198,7 @@ def test_a_snapshot_without_a_date_says_so() -> None:
 # --- значки --------------------------------------------------------------
 
 
-def test_the_rules_badge_counts_machines_not_answers() -> None:
+def test_the_project_badge_counts_machines_not_answers() -> None:
     """Значок считает правила, держащиеся МАШИНОЙ, а не отвеченные.
 
     Прежняя редакция показывала `answered/total` и подписывала это «правил
@@ -206,60 +206,79 @@ def test_the_rules_badge_counts_machines_not_answers() -> None:
     каждому правилу каталога по построению (129). Значок, который не движется,
     ничего не говорит ни о том, где проект стоит, ни о том, что он сдвинулся.
     """
-    said = facts.rules_badge(
+    zones = facts.project_zones(
         {"rules": {"by_mechanism": {"gate": 10, "pipeline": 2, "document": 8, "none": 1}}}
     )
-    assert said.message == "12/21"
-    assert said.label == "держится машиной"
+    assert zones[0][1][0] == "машиной 12/21 · 57%"
 
 
-def test_the_family_badge_says_when_it_has_no_data() -> None:
-    """Снимок семьи не пришёл — значок говорит это, а не рисует ноль (045)."""
-    assert facts.family_badge({"family": {"read": False}}).message == "нет данных"
-    assert facts.family_badge({}).message == "нет данных"
+RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}
 
 
-def test_the_family_badge_shows_calls_steps_and_gates() -> None:
-    """Значок несёт три числа с числителем и знаменателем (#1199, решение 07.10.2026)."""
-    said = facts.family_badge(
-        {
-            "family": {
+@pytest.mark.parametrize(
+    ("family_said", "texts"),
+    [
+        (
+            {
                 "read": True,
-                "adopted": {"ours": 2, "of": 800, "by": []},
                 "uptake": {
                     "read": True,
                     "projects": {"took": 1, "of": 5, "unread": 0, "unread_repos": []},
                     "steps": {"taken": 3, "of": 20, "names": []},
                 },
-            }
-        }
-    )
-    assert said.message == "1/5 проектов · 3/20 шагов · гейт 2/800 правил"
-
-
-def test_an_unread_clone_is_named_on_the_badge_not_counted_as_zero() -> None:
-    """Непрочитанные клоны названы числом рядом, а не спрятаны в знаменатель (045)."""
-    said = facts.family_badge(
-        {
-            "family": {
+            },
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов 1/5 · 20%", "шагов 3/20 · 15%"],
+            ],
+        ),
+        (
+            {
                 "read": False,
                 "uptake": {
                     "read": True,
                     "projects": {"took": 0, "of": 5, "unread": 2, "unread_repos": ["a", "b"]},
                     "steps": {"taken": 0, "of": 20, "names": []},
                 },
-            }
-        }
-    )
-    assert said.message == "0/5 проектов (2 не прочитано) · 0/20 шагов · гейт: нет данных"
+            },
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов 0/5 · — (2 не прочитано)", "шагов 0/20 · 0%"],
+            ],
+        ),
+        (
+            {"read": True, "uptake": {"read": False}},
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов не прочитано", "шагов не прочитано"],
+            ],
+        ),
+        (
+            {},
+            [
+                ["правила", "машиной 66/195 · 34%"],
+                ["семья", "проектов не прочитано", "шагов не прочитано"],
+            ],
+        ),
+    ],
+    ids=["прочитано", "клоны-не-прочитаны", "обход-не-прочитан", "семьи-нет"],
+)
+def test_the_project_badge_carries_three_numbers(
+    family_said: dict[str, Any], texts: list[list[str]]
+) -> None:
+    """Один значок, три числа с числителем и знаменателем (#1213, решение 08.10.2026).
 
-
-def test_an_unread_sweep_is_not_a_zero_on_the_badge() -> None:
-    """Обход не прочитан — «вызовы не прочитаны», а не «0/5» (045)."""
-    said = facts.family_badge(
-        {"family": {"read": True, "adopted": {"ours": 0, "of": 9}, "uptake": {"read": False}}}
-    )
-    assert said.message == "вызовы не прочитаны · гейт 0/9 правил"
+    Непрочитанный обход и непрочитанные клоны — «не прочитано» на своём месте,
+    а не ноль (045). Разрез «взяли гейт» по объявленному происхождению в значок
+    не входит: «шаг в ходу» — по вызову нашего шага, пока каталог не дал
+    происхождения (#1212).
+    """
+    zones = facts.project_zones({"rules": RULES_PLANTED, "family": family_said})
+    assert [[text for text, _, _ in zone] for zone in zones] == texts
+    # Серым — всякая часть, где доля неизвестна: числа нет или часть
+    # знаменателя не прочитана (взгляд на #1259).
+    unknown = [color for zone in zones for text, color, _ in zone if "не прочитано" in text]
+    assert all(color == facts.GREY for color in unknown), "незнание окрашено не серым"
 
 
 # --- взяли гейт: объявленное происхождение ---------------------------------
@@ -392,11 +411,13 @@ def test_every_summary_reader_is_declared() -> None:
     НАЗВАН (195): модуль, взявший адрес сводки буквами, мимо констант, не
     узнаётся — но и тогда он нарушает правило 209, и это видно чтением.
     """
-    from tests.conftest import ROOT, walk
+    from tests.conftest import code_files
 
+    # Корни — из `paths.SOURCES`: читатель сводки в общем низу так же обязан
+    # быть объявлен, как скрипт (#1254).
     found = {
         path.stem
-        for path in walk(ROOT / "scripts", "*.py")
+        for path in code_files()
         if path.stem != "catalogue"
         and (
             "WHERE_URL" in (text := path.read_text(encoding="utf-8"))
@@ -439,3 +460,47 @@ def test_uptake_facts_name_an_unread_sweep(tmp_path: Path) -> None:
     )
     said = facts.uptake_facts(good)
     assert said["read"] is True and said["steps"]["of"] == 20
+
+
+# --- таблица «кем» -----------------------------------------------------------
+
+
+def test_the_who_page_names_who_took_our_steps() -> None:
+    """Таблица «кем» — из `family.uptake.by`, по проекту строка (#1213, вариант 1)."""
+    page = facts.who_page(
+        {
+            "family": {
+                "uptake": {
+                    "read": True,
+                    "projects": {"took": 1, "of": 3, "unread": 1, "unread_repos": ["o/c"]},
+                    "by": [{"repo": "o/a", "steps": ["step-lint"], "refs": ["v1.6.0"]}],
+                }
+            }
+        }
+    )
+    assert "| o/a | `step-lint` | `v1.6.0` |" in page
+    assert "**Не прочитаны клоны:** o/c" in page
+
+
+@pytest.mark.parametrize(
+    ("said", "expected"),
+    [
+        ({"family": {"uptake": {"read": False, "why": "сеть"}}}, "**Не прочитано:** сеть."),
+        ({}, f"**Не прочитано:** {facts.NO_UPTAKE}."),
+        ({"family": {"uptake": {"read": True, "by": []}}}, "Пока никто"),
+    ],
+    ids=["обход-не-прочитан", "семьи-нет", "никто"],
+)
+def test_the_who_page_tells_unknown_from_nobody(said: dict[str, Any], expected: str) -> None:
+    """Непрочитанный обход — «не прочитано», а не пустая таблица «никто» (045)."""
+    page = facts.who_page(said)
+    assert expected in page
+    assert "|---|" not in page
+
+
+def test_the_who_page_is_published_and_kept_on_the_branch(tmp_path: Path) -> None:
+    """Страница рисуется вместе со значками и уборкой ветки не снимается (#1213)."""
+    facts.draw_badges({"rules": {"by_mechanism": {"gate": 1}}, "version": "1.0.0"}, tmp_path)
+    for name in facts.PAGES:
+        assert (tmp_path / name).read_text(encoding="utf-8").startswith("# ")
+        assert name in facts.branch_files()

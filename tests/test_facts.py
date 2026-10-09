@@ -15,7 +15,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, found_by, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, load_script
 
 facts = load_script("build_facts.py")
 
@@ -113,19 +113,67 @@ def test_badge_shows_the_number_it_measured() -> None:
     построению — проект отвечает по каждому правилу каталога (129), — и такой
     значок не сдвинулся бы никогда.
     """
-    drawn = facts.rules_badge(
+    zones = facts.project_zones(
         {"rules": {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}}
     )
-    assert drawn.message == "66/195"
-    assert drawn.label == "держится машиной"
+    assert zones[0][1][0] == "машиной 66/195 · 34%"
+    assert "машиной 66/195 · 34%" in facts.drawing(zones)
+
+
+@pytest.mark.parametrize(
+    ("numerator", "denominator", "color"),
+    [
+        (0, 5, "RED"),
+        (1, 3, "RED"),
+        (1, 2, "YELLOW"),
+        (2, 3, "YELLOW"),
+        (7, 10, "GREEN"),
+        (5, 5, "GREEN"),
+        (0, 0, "GREY"),
+    ],
+)
+def test_the_share_colour_has_three_bands(numerator: int, denominator: int, color: str) -> None:
+    """Три полосы доли — красная, жёлтая, зелёная; пустой знаменатель — ноль, а не падение."""
+    assert facts.share_color(numerator, denominator) == getattr(facts, color)
+
+
+def test_a_wider_text_gets_a_wider_part() -> None:
+    """Ширина части растёт с надписью: зоны не наезжают друг на друга в картинке."""
+    narrow, wide = facts.part_width("1/5"), facts.part_width("машиной 66/195 · 34%")
+    assert 0 < narrow < wide
+    svg = facts.drawing(
+        [[("правила", facts.LABEL_COLOR, ""), ("машиной 66/195 · 34%", "#000", "")]]
+    )
+    assert f'width="{facts.part_width("правила") + wide}"' in svg
+
+
+def test_the_project_picture_is_drawn_and_kept_on_the_branch(tmp_path: Path) -> None:
+    """Значок проекта рисуется сборкой и уборкой ветки не снимается (196, #1213).
+
+    Витрина ссылается на него, и ссылка не смеет вести на снятый файл.
+    """
+    facts.draw_badges(
+        {
+            "rules": {"by_mechanism": {"gate": 1, "document": 1}},
+            "version": "1.0.0",
+            "version_whole": True,
+        },
+        tmp_path,
+    )
+    for name in facts.PICTURES:
+        assert (tmp_path / name).read_text(encoding="utf-8").startswith("<svg")
+        assert name in facts.branch_files()
 
 
 def test_badge_colour_follows_the_share() -> None:
-    """Цвет говорит о доле, а не о настроении: три доли — три цвета."""
-    low = facts.rules_badge({"rules": {"by_mechanism": {"gate": 10, "document": 90}}})
-    mid = facts.rules_badge({"rules": {"by_mechanism": {"gate": 50, "document": 50}}})
-    high = facts.rules_badge({"rules": {"by_mechanism": {"gate": 90, "document": 10}}})
-    assert len({low.color, mid.color, high.color}) == 3
+    """Цвет говорит о доле правил, а не о настроении: три доли — три цвета."""
+    low, mid, high = (
+        facts.project_zones({"rules": {"by_mechanism": {"gate": share, "document": 100 - share}}})[
+            0
+        ][1][1]
+        for share in (10, 50, 90)
+    )
+    assert len({low, mid, high}) == 3
 
 
 #: Разрезы витрины, публикующие ДОЛЮ, и два числа, из которых она сделана.
@@ -244,20 +292,52 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, facts.FACTS, facts.UNIFIED})
+    found = sorted({*facts.BADGES, *facts.PICTURES, *facts.PAGES, facts.FACTS, facts.UNIFIED})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
 
+def tracked_names(root: Path) -> set[str]:
+    """Имена файлов, ОТСЛЕЖИВАЕМЫХ git в дереве `root`; нечитаемый git — отказ (075)."""
+    out = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert out.returncode == 0, f"git ls-files не ответил — сверять не с чем: {out.stderr}"
+    return {Path(one).name for one in out.stdout.split("\0") if one}
+
+
 def test_derived_output_is_not_in_the_shared_branch() -> None:
-    """Производного нет в дереве: оно живёт в ветке `badges` (125).
+    """Производного нет в общей ветке: оно живёт в ветке `badges` (125, 160).
 
     Гейт написан на ИМЕНА вывода, а не на его содержимое: файл, случайно
     закоммиченный рядом с источником, выглядит безобидно ровно до того дня,
     когда число в нём разойдётся с источником.
+
+    СУДИТСЯ ОТСЛЕЖИВАЕМОЕ, А НЕ РАБОЧИЙ КАТАЛОГ (взгляд на #1290). Навык
+    `close-a-finding` велит класть архив `findings.json` в корень клона для
+    разбора; неотслеживаемый, он в общую ветку не попадёт, и красить за него
+    набор и предполётную значило бы краснеть на чужом. Предмет правила —
+    то, что уйдёт в `main`, то есть `git ls-files`.
     """
-    for name in derived_names():
-        assert not found_by(ROOT, f"**/{name}"), f"{name} лежит в общей ветке рядом с источником"
+    tracked = tracked_names(ROOT)
+    assert tracked, "git не отслеживает ни одного файла — предмет проверки не найден (075)"
+    # ВСЁ, ЧТО ВПРАВЕ ДЕРЖАТЬ ВЕТКА `badges`, а не только изданное сборкой: архив
+    # находок там же, и его копия в дереве разошлась бы с веткой так же (160, #1271).
+    lying = sorted({*derived_names(), *facts.branch_files()} & tracked)
+    assert not lying, f"производное ветки badges отслеживается в общей ветке: {lying}"
+
+
+def test_an_untracked_derived_file_is_not_the_shared_branch(tmp_path: Path) -> None:
+    """Неотслеживаемый файл производного — не нарушение, отслеживаемый — нарушение."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "findings.json").write_text("{}", encoding="utf-8")
+    assert "findings.json" not in tracked_names(tmp_path)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "findings.json"], check=True)
+    assert "findings.json" in tracked_names(tmp_path)
 
 
 def shown_badges() -> list[str]:
@@ -272,7 +352,8 @@ def shown_badges() -> list[str]:
     экземпляр здесь был третьим (022).
     """
     found = sorted(badges_shown((ROOT / "README.md").read_text("utf-8")))
-    assert len(found) >= 3, f"витрина показывает {found} — предмет проверки не найден (075)"
+    # Пол — два: значок проекта заменил «держится машиной» и «семью» (#1213).
+    assert len(found) >= 2, f"витрина показывает {found} — предмет проверки не найден (075)"
     return found
 
 
@@ -305,14 +386,41 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     утверждал о себе неправду
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    drawn = set(facts.BADGES)
-    assert len(drawn) >= 4, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
+    # Нарисованное впрок (`AHEAD`) показывается вторым шагом (196).
+    drawn = (set(facts.BADGES) | set(facts.PICTURES)) - facts.AHEAD
+    # Пол — три: значок проекта заменил «держится машиной» и «семью» (#1213).
+    assert len(drawn) >= 3, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
     # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
     # ним они были бы дублями. Сам единый значок рисует шаг `badges.yml`.
     expected = (drawn - set(facts.ZONE_INPUTS)) | {facts.UNIFIED}
     assert expected == set(shown_badges()), (
         f"витрине положено показать {sorted(expected)}, а показано {shown_badges()}"
     )
+
+
+def test_every_page_the_build_lays_is_linked() -> None:
+    """Страница, положенная сборкой, связана из витрины — или объявлена впрок (195, #1268).
+
+    Сверка значков выше читает `BADGES | PICTURES`; страница — соседний случай
+    того же предмета, и без этой проверки ссылка на неё держалась бы ничем.
+    """
+    assert facts.PAGES, "сборка не кладёт ни одной страницы — предмет проверки не найден (075)"
+    drawn = {*facts.PICTURES, *facts.PAGES}
+    assert drawn >= facts.AHEAD, f"впрок объявлено не то, что рисуется: {sorted(facts.AHEAD)}"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    unlinked = sorted(
+        name
+        for name in set(facts.PAGES) - facts.AHEAD
+        if f"/badges/.github/badges/{name}" not in readme
+    )
+    assert not unlinked, f"страница кладётся, а витрина на неё не ведёт: {unlinked}"
+    # ОБРАТНОЕ НАПРАВЛЕНИЕ (взгляд на #1268): ссылка README в ветку `badges`
+    # называет только то, что сборка вправе туда класть, — иначе имя, убранное
+    # из `PAGES`, оставило бы ссылку на снятый файл молча. Образец адреса берёт
+    # любое имя, а не только `.json|.svg`, как разбор значков.
+    linked = set(re.findall(r"/badges/\.github/badges/([\w.-]+)", readme))
+    stray = sorted(linked - set(facts.branch_files()))
+    assert not stray, f"витрина ведёт в ветку badges на то, чего сборка не кладёт: {stray}"
 
 
 def push_command(step: str) -> str:
@@ -533,8 +641,11 @@ INSIDE_THE_FACTS: Final = frozenset(
         "float",
         "str",
         "bool",
-        "isinstance",
         ".get",
+        # Цвет доли по двум уже прочитанным числам: ничего не читает (#1213).
+        "share_color",
+        # Процент по тем же двум числам, что факты публикуют рядом: форма, не новое число.
+        "counted",
         ".items",
         ".values",
     }
@@ -550,7 +661,7 @@ def badge_makers() -> list[ast.FunctionDef]:
     Инвентарь `BADGES` — тот же источник, по которому значки и собираются, так что
     предмет проверки и предмет сборки совпадают по построению (022).
     """
-    named = {maker.__name__ for maker in facts.BADGES.values()}
+    named = {maker.__name__ for maker in [*facts.BADGES.values(), *facts.PICTURES.values()]}
     tree = ast.parse((ROOT / "scripts" / "build_facts.py").read_text(encoding="utf-8"))
     found = [
         node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name in named
@@ -625,10 +736,11 @@ def test_every_badge_maker_is_in_the_inventory() -> None:
     in_code = {
         node.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name.endswith("_badge")
+        if isinstance(node, ast.FunctionDef) and node.name.endswith(("_badge", "_zones"))
     }
     assert in_code, "рисовалок значков в дереве не нашлось — предмет проверки не найден (075)"
-    forgotten = sorted(in_code - {maker.__name__ for maker in facts.BADGES.values()})
+    makers = [*facts.BADGES.values(), *facts.PICTURES.values()]
+    forgotten = sorted(in_code - {maker.__name__ for maker in makers})
     assert not forgotten, (
         "рисовалка есть в коде, но не в инвентаре — значок собирается в обход, и"
         f" проверка выше его не судит: {', '.join(forgotten)}"

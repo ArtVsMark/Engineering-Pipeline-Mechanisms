@@ -1114,10 +1114,12 @@ def test_a_skill_holding_an_unmachined_rule_is_named_by_its_answer() -> None:
     )
 
 
-#: Форма адреса происхождения по контракту ответа 1.8: `<владелец>/<репо>:<путь>@<версия>`.
+#: Форма адреса происхождения по контракту ответа: `<владелец>/<репо>:<путь>@<версия>`.
 ORIGIN_RE = re.compile(r"^[\w.-]+/[\w.-]+:[^@\s]+@[\w.-]+$")
-#: Как механизм взят — закрытый словарь контракта.
+#: Виды происхождения, требующие адреса источника; `own` адреса не несёт (1.9).
 ORIGIN_KINDS = frozenset({"called", "copied", "adapted"})
+#: Механизмы, у которых с контракта 1.9 происхождение обязательно.
+ORIGIN_REQUIRED_FOR = frozenset({"gate", "pipeline"})
 #: Вызов действия каталога в наших прогонах: адрес действия и тег.
 CATALOGUE_ORIGIN = "ArtVsMark/Engineering-Incidents-Playbook:"
 CATALOGUE_CALL_RE = re.compile(
@@ -1126,18 +1128,31 @@ CATALOGUE_CALL_RE = re.compile(
 
 
 def test_an_origin_is_shaped_as_the_contract_asks() -> None:
-    """`origin` по форме контракта 1.8, всегда с `origin_kind` и не у `mechanism: none` (#1237)."""
+    """Происхождение по форме контракта 1.9 (#1274).
+
+    `origin_kind` обязателен у действующих ответов с `gate` и `pipeline`: с 1.9
+    отсутствие поля больше не читается как «разработан здесь», это говорит
+    явное `own`. У `own` адреса нет; у `called`, `copied`, `adapted` адрес
+    обязателен и разрешим по форме. У `mechanism: none` происхождения нет вовсе.
+    """
     bad: list[str] = []
     for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
         origin, kind = str(answer.get("origin") or ""), str(answer.get("origin_kind") or "")
+        mechanism = answer.get("mechanism")
+        if answer.get("status") == "active" and mechanism in ORIGIN_REQUIRED_FOR and not kind:
+            bad.append(f"{number}: у {mechanism} нет origin_kind (обязателен с 1.9)")
         if not origin and not kind:
             continue
+        if mechanism in (None, "none"):
+            bad.append(f"{number}: происхождение у ответа без механизма")
+        if kind == "own":
+            if origin:
+                bad.append(f"{number}: origin при origin_kind own")
+            continue
+        if kind not in ORIGIN_KINDS:
+            bad.append(f"{number}: origin_kind «{kind}» не из own и {sorted(ORIGIN_KINDS)}")
         if not ORIGIN_RE.match(origin):
             bad.append(f"{number}: origin «{origin}» не по форме владелец/репо:путь@версия")
-        if kind not in ORIGIN_KINDS:
-            bad.append(f"{number}: origin_kind «{kind}» не из {sorted(ORIGIN_KINDS)}")
-        if answer.get("mechanism") in (None, "none"):
-            bad.append(f"{number}: origin у ответа без механизма")
     assert not bad, "; ".join(bad)
 
 
@@ -1169,6 +1184,180 @@ def test_a_called_catalogue_origin_names_an_action_we_call() -> None:
         if (path, tag) not in called:
             stale.append(f"{number}: {origin}")
     assert not stale, f"origin вызванного действия не из вызовов прогонов {sorted(called)}: {stale}"
+
+
+#: Вызванные действия каталога, которые НЕ держат правила, и почему. Остальные
+#: обязаны стоять в чьём-то `origin`: иначе ответ, держащийся чужим действием,
+#: читался бы как свой — с контракта 1.9 это явное `origin_kind: own`, и
+#: вызов без ответа с `called` прошёл бы под ним молча (#1237).
+CALLED_WITHOUT_A_RULE: Final = {
+    ".github/actions/python-badge/action.yml": (
+        "рисует единый значок витрины по исходам прогонов; правила не держит — "
+        "держат сами прогоны, которые он показывает"
+    ),
+}
+
+
+def test_every_called_catalogue_action_is_someones_origin() -> None:
+    """Каждое вызванное действие каталога названо `origin` ответа или объявлено с причиной (#1237).
+
+    Обратная сторона сверки выше: та ловит `origin` на невызванное действие, эта —
+    вызов, за которым не стоит ни один `origin`. Без неё ответ, чей механизм —
+    действие каталога, молча числился бы разработанным здесь.
+    """
+    called = {path for path, _ in catalogue_calls(ROOT / ".github" / "workflows")}
+    assert called, "вызовов действий каталога в прогонах нет — сверять не с чем (075)"
+    named = {
+        str(answer["origin"]).removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
+        for answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].values()
+        if answer.get("origin_kind") == "called"
+        and str(answer.get("origin") or "").startswith(CATALOGUE_ORIGIN)
+    }
+    assert set(CALLED_WITHOUT_A_RULE) <= called, "объявлено действие, которого прогоны не зовут"
+    orphans = sorted(called - named - set(CALLED_WITHOUT_A_RULE))
+    assert not orphans, (
+        f"действие каталога вызывается, а ни один ответ его origin не называет: {orphans}"
+    )
+
+
+#: Вызов переиспользуемого прогона своего дерева: джоб, который его зовёт,
+#: держится тем, что зовёт вызванный прогон.
+LOCAL_CALL_RE: Final = re.compile(r"uses:\s*\./\.github/workflows/(?P<file>[\w.-]+\.yml)")
+
+
+def action_path(found: re.Match[str]) -> str:
+    """Файл действия каталога из вызова — в той форме, в какой его пишет `origin`."""
+    return f"{found['path'].lstrip('/')}/action.yml" if found["path"] else "action.yml"
+
+
+def catalogue_jobs(folder: Path) -> dict[tuple[str, str], set[str]]:
+    """(прогон, джоб) → действия каталога, держащие правила, которые джоб зовёт.
+
+    Зов идёт напрямую (`uses:` действия) или через переиспользуемый прогон своего
+    дерева: `ci.yml` зовёт `attribution` джобом, который вызывает
+    `step-attribution.yml` (взгляд на #1281). Объявленные в
+    `CALLED_WITHOUT_A_RULE` в счёт не идут.
+    """
+    import yaml
+
+    texts: dict[tuple[str, str], str] = {}
+    for path in walk(folder, "*.yml"):
+        flow = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for name, job in (flow.get("jobs") or {}).items():
+            texts[(path.name, str(name))] = yaml.safe_dump(job, allow_unicode=True)
+
+    def reach(text: str, seen: frozenset[str]) -> set[str]:
+        acts = {action_path(found) for found in CATALOGUE_CALL_RE.finditer(text)}
+        for call in LOCAL_CALL_RE.finditer(text):
+            if call["file"] in seen:
+                continue
+            for (flow_name, _), inner in texts.items():
+                if flow_name == call["file"]:
+                    acts |= reach(inner, seen | {call["file"]})
+        return acts
+
+    found: dict[tuple[str, str], set[str]] = {}
+    for (flow_name, job), text in texts.items():
+        acts = reach(text, frozenset({flow_name})) - set(CALLED_WITHOUT_A_RULE)
+        if acts:
+            found[(flow_name, job)] = acts
+    return found
+
+
+def held_by(head: str, jobs: dict[tuple[str, str], set[str]], sizes: dict[str, int]) -> set[str]:
+    """Действия каталога, которыми держится ответ с этой головой `where`.
+
+    Голова называет джоб каталога, если называет прогон и либо прогон из одного
+    джоба, либо назван и сам джоб («джоб X»). ПРЕДЕЛ, а не обещание: прогон из
+    многих джобов, названный без джоба (`ci.yml`), не говорит, какая его часть
+    держит правило, — такой ответ эта сверка не судит (взгляд на #1281).
+    """
+    return {
+        act
+        for (flow_name, job), acts in jobs.items()
+        if flow_name in head and (sizes.get(flow_name) == 1 or f"джоб {job}" in head)
+        for act in acts
+    }
+
+
+def job_counts(folder: Path) -> dict[str, int]:
+    """Сколько джобов в каждом прогоне."""
+    import yaml
+
+    return {
+        path.name: len((yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {})
+        for path in walk(folder, "*.yml")
+    }
+
+
+def test_an_answer_held_by_a_catalogue_job_names_that_action() -> None:
+    """Ответ, чья голова `where` называет джоб каталога, несёт `origin` ЭТОГО действия (#1237).
+
+    Строгое правило вместо третьей формы разбора по одному месту (210): взгляды
+    на #1281 нашли, что прежняя сверка не видела вызова через переиспользуемый
+    прогон и не сверяла, ТО ЛИ действие названо. Теперь держащийся джобом каталога
+    ответ обязан нести `origin_kind: called`, и его `origin` — одно из действий,
+    которые этот джоб зовёт. Голова — адрес до первого « — »: дальше идёт довод,
+    где прогон может быть лишь упомянут.
+    """
+    folder = ROOT / ".github" / "workflows"
+    jobs, sizes = catalogue_jobs(folder), job_counts(folder)
+    assert jobs, "джобов с действием каталога нет — сверять не с чем (075)"
+    wrong = []
+    for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
+        held = held_by(str(answer.get("where") or "").split(" — ")[0], jobs, sizes)
+        if not held:
+            continue
+        origin = str(answer.get("origin") or "")
+        named = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
+        if answer.get("origin_kind") != "called" or named not in held:
+            wrong.append(f"{number}: держится {sorted(held)}, origin «{origin or 'нет'}»")
+    assert not wrong, "ответ на джоб каталога без своего origin: " + "; ".join(wrong)
+
+
+def test_a_called_origin_is_reached_from_its_head() -> None:
+    """`origin` вызовом — действие, которое зовёт прогон из головы ответа, а не любое (#1237).
+
+    Иначе ответ на `rules-inbox.yml` с `origin` attribution прошёл бы: действие
+    вызывается где-то в дереве, но не тем прогоном, которым ответ держится
+    (взгляд на #1281).
+    """
+    folder = ROOT / ".github" / "workflows"
+    jobs = catalogue_jobs(folder)
+    by_flow: dict[str, set[str]] = {}
+    for (flow_name, _), acts in jobs.items():
+        by_flow.setdefault(flow_name, set()).update(acts)
+    stray = []
+    for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
+        origin = str(answer.get("origin") or "")
+        if answer.get("origin_kind") != "called" or not origin.startswith(CATALOGUE_ORIGIN):
+            continue
+        named = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
+        head = str(answer.get("where") or "").split(" — ")[0]
+        if not any(flow in head and named in acts for flow, acts in by_flow.items()):
+            stray.append(f"{number}: {named}")
+    assert not stray, "origin не зовёт ни один прогон из головы ответа: " + "; ".join(stray)
+
+
+def test_catalogue_jobs_follow_a_reusable_flow(tmp_path: Path) -> None:
+    """Джоб, зовущий переиспользуемый прогон, держится его действием; чужой джоб — нет."""
+    (tmp_path / "ci.yml").write_text(
+        "jobs:\n  attribution:\n    uses: ./.github/workflows/step.yml\n"
+        "  test:\n    runs-on: x\n    steps:\n      - run: pytest\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "step.yml").write_text(
+        "jobs:\n  attribution:\n    runs-on: x\n    steps:\n"
+        "      - uses: ArtVsMark/Engineering-Incidents-Playbook"
+        "/.github/actions/attribution@v1.9.0\n",
+        encoding="utf-8",
+    )
+    jobs, sizes = catalogue_jobs(tmp_path), job_counts(tmp_path)
+    act = {".github/actions/attribution/action.yml"}
+    assert jobs == {("ci.yml", "attribution"): act, ("step.yml", "attribution"): act}
+    assert held_by(".github/workflows/ci.yml, джоб attribution", jobs, sizes) == act
+    assert held_by(".github/workflows/step.yml", jobs, sizes) == act
+    assert held_by(".github/workflows/ci.yml", jobs, sizes) == set(), "многоджобный без джоба"
 
 
 def test_catalogue_calls_pair_the_action_with_its_tag(tmp_path: Path) -> None:

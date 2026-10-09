@@ -79,6 +79,8 @@ def scripts_needing_the_package() -> set[str]:
     но зовёт `findings`, который знает. Список, написанный рукой, отстал бы от
     первого же нового импорта (005).
     """
+    # Граф импортов скриптов — один `scripts/` по предмету (#1254): вопрос в
+    # том, кому ставить пакет, а сам пакет себе не потребитель.
     graph = {path.stem: imports_of(path) for path in walk(SCRIPTS, "*.py")}
     need = {name for name, deps in graph.items() if deps & set(SHARED)}
     while True:

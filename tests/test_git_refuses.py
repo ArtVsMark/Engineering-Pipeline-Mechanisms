@@ -47,7 +47,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, walk
+from tests.conftest import code_files
 
 #: Классы, поимка которых означает «без git на пути — свой исход».
 CATCHES: Final = frozenset({"OSError", "FileNotFoundError", "Exception"})
@@ -110,10 +110,14 @@ def unguarded(source: str) -> list[str]:
 
 
 def test_every_git_call_refuses_without_git() -> None:
-    """Каждая функция `scripts/`, зовущая git, ловит его отсутствие у себя."""
+    """Каждая функция кода проекта, зовущая git, ловит его отсутствие у себя.
+
+    Корни — из `paths.SOURCES`: общий низ без git на пути упал бы трассой так
+    же, как скрипт, который его зовёт (#1254).
+    """
     found = {
         path.name: bad
-        for path in walk(ROOT / "scripts", "*.py")
+        for path in code_files()
         if (bad := unguarded(path.read_text(encoding="utf-8")))
     }
     assert not found, (
@@ -123,12 +127,12 @@ def test_every_git_call_refuses_without_git() -> None:
 
 
 def test_the_predicate_sees_git_calls_in_the_tree() -> None:
-    """У гейта есть предмет: вызовы git в `scripts/` есть (075)."""
+    """У гейта есть предмет: вызовы git в коде проекта есть (075)."""
     seen = 0
-    for path in walk(ROOT / "scripts", "*.py"):
+    for path in code_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         seen += sum(1 for one in ast.walk(tree) if isinstance(one, ast.Call) and calls_git(one))
-    assert seen, "вызовов git в scripts/ не найдено — предикат не про то"
+    assert seen, "вызовов git в коде проекта не найдено — предикат не про то"
 
 
 @pytest.mark.parametrize(

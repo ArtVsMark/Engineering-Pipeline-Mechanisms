@@ -7,7 +7,12 @@
 подключений (045).
 """
 
+import ast
+import contextlib
+import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -349,12 +354,15 @@ def test_a_spent_budget_keeps_what_was_read(
 
 
 def test_the_step_limit_covers_the_worst_sweep() -> None:
-    """Предел шага обхода в `badges.yml` выше худшего случая самого обхода.
+    """Предел шага обхода в `badges.yml` выше худшего случая самого обхода — с запасом.
 
-    Худший случай — `2 × BUDGET`: последний начатый сосед получает остаток на
-    оба вызова git. Связь держит этот тест, а не комментарий: поднятый `BUDGET`
-    при прежнем пределе снял бы шаг раньше обхода, и файл пропал бы вместе с
-    прочитанными клонами (взгляд на #1246).
+    Худший случай не выводится формулой, а замеряется: `worst_sweep()` гоняет
+    настоящий `sweep` с поддельными часами, и третий вызов git у соседа
+    сдвинул бы замер, а не остался бы зелёным (взгляды на #1261, #1295).
+    Связь держит этот тест, а не комментарий: поднятый `BUDGET` при прежнем
+    пределе снял бы шаг раньше обхода, и файл пропал бы вместе с прочитанными
+    клонами (взгляд на #1246). Запас `STEP_MARGIN` — на запуск Python и уборку
+    клонов: без него гейт проходил с запасом в секунды.
     """
     flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
     limits = [
@@ -364,9 +372,114 @@ def test_the_step_limit_covers_the_worst_sweep() -> None:
         if "family_uptake.py" in str(step.get("run") or "")
     ]
     assert limits, "шаг обхода клонов в badges.yml не найден или без своего предела (075)"
-    assert all(limit is not None and limit * 60 > 2 * module.BUDGET for limit in limits), (
-        f"предел шага {limits} мин не выше худшего случая обхода 2×{module.BUDGET} с"
+    need = worst_sweep()[0] + module.STEP_MARGIN
+    assert all(limit is not None and limit * 60 >= need for limit in limits), (
+        f"предел шага {limits} мин ниже худшего случая обхода с запасом: {need} с"
     )
+
+
+def swept_from(start: int) -> tuple[float, int]:
+    """Конец обхода одного соседа, начатого в секунду `start`, и сколько раз звался git.
+
+    Каждый вызов git «висит» ровно до своего предела, часы поддельные: первый
+    вопрос — начало обхода (0), второй — начало соседа (`start`).
+    """
+    now = [0.0]
+    made = [0]
+    asked = [0]
+
+    def clock() -> float:
+        asked[0] += 1
+        if asked[0] == 2:
+            now[0] = float(start)
+        return now[0]
+
+    def run(*_: object, timeout: float = 0, **__: object) -> subprocess.CompletedProcess[str]:
+        made[0] += 1
+        now[0] += timeout
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(module.subprocess, "run", run)
+        seen, unread = module.sweep(["o/сосед"], Path("нет"), clock=clock)
+    assert [one.repo for one in seen] == ["o/сосед"] and not unread
+    return now[0], made[0]
+
+
+def worst_sweep() -> tuple[float, int]:
+    """Худший конец обхода и число вызовов git на соседа — ПРОГОНОМ `sweep`, а не формулой.
+
+    Сосед начинается в каждую секунду бюджета. Формула с вписанной рукой
+    двойкой оставалась бы зелёной при третьем вызове у соседа (взгляд на #1261).
+    """
+    runs = [swept_from(start) for start in range(module.BUDGET)]
+    calls = {made for _, made in runs}
+    assert len(calls) == 1, f"число вызовов на соседа зависит от времени: {sorted(calls)}"
+    return max(end for end, _ in runs), calls.pop()
+
+
+def test_the_worst_sweep_is_the_budget_plus_one_limit() -> None:
+    """Сосед, начатый в любую секунду бюджета, кончает не позже `BUDGET + TIMEOUT` — замером."""
+    worst, _ = worst_sweep()
+    assert worst == module.BUDGET + module.TIMEOUT
+
+
+def test_the_clones_cleanup_cannot_drop_the_numbers() -> None:
+    """Временный каталог клонов убирается без отказа: потомок git мог ещё писать (#1261)."""
+    tree = ast.parse((ROOT / "scripts" / "family_uptake.py").read_text(encoding="utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "TemporaryDirectory"
+    ]
+    assert calls, "временный каталог клонов не найден — предмет проверки не найден (075)"
+    for call in calls:
+        flags = {one.arg: one.value for one in call.keywords}
+        value = flags.get("ignore_cleanup_errors")
+        assert isinstance(value, ast.Constant) and value.value is True, ast.unparse(call)
+
+
+def test_one_hung_neighbour_cannot_eat_the_whole_budget() -> None:
+    """Все вызовы одного соседа короче бюджета: повисший первым не прячет остальных (#1246).
+
+    Число вызовов на соседа берётся прогоном `sweep`, а не рукой (взгляд на #1261).
+    """
+    _, calls = worst_sweep()
+    assert calls * module.TIMEOUT < module.BUDGET
+
+
+@pytest.mark.skipif(os.name != "posix", reason="вне POSIX `run` дочитывает каналы — предмета нет")
+def test_a_timed_out_call_does_not_wait_for_its_children(tmp_path: Path) -> None:
+    """Снятие по пределу возвращается сразу, даже если потомок держит каналы открытыми.
+
+    Предел вызова git (`TIMEOUT`) настоящий только потому, что на POSIX
+    `subprocess.run` после снятия зовёт `wait()` и каналы НЕ дочитывает —
+    дочитывание есть лишь на Windows, а шаг идёт на ubuntu. Взгляд на #1246
+    опасался обратного (`git-remote-https` держит каналы); этот прогон
+    закрепляет поведение платформы, на котором держится предел, тем же
+    вызовом, что у `shallow_clone`.
+    """
+    # Потомок пишет свой номер, и тест его снимает: иначе `sleep 30` оставался
+    # сиротой на каждый прогон набора (взгляд на #1261).
+    child = tmp_path / "потомок"
+    started = time.monotonic()
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            subprocess.run(
+                ["sh", "-c", f'sleep 30 & echo $! > "{child}"; sleep 30'],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=0.5,
+            )
+        assert time.monotonic() - started < 10
+    finally:
+        if child.is_file():
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(child.read_text(encoding="utf-8")), signal.SIGTERM)
 
 
 def test_offered_names_drop_the_file_prefix() -> None:
