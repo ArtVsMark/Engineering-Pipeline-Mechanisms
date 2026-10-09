@@ -35,10 +35,13 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
 #: Где живут механизмы: их сообщения читает окно и владелец.
-WHERE: Final = ("scripts", "packages/transport", ".claude/hooks")
+WHERE: Final = (
+    *(where.as_posix() for where in load_script("paths.py").SOURCES),
+    ".claude/hooks",
+)
 
 #: Что считается путём НАШЕГО дерева. Список приставок закрытый: «похоже на
 #: путь» приняло бы и чужой адрес, и кусок URL

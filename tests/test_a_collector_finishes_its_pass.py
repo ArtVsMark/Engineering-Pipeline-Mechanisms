@@ -38,10 +38,13 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
 #: Где живут механизмы, чьи находки читает человек.
-WHERE: Final = ("scripts", "packages/transport", ".claude/hooks")
+WHERE: Final = (
+    *(where.as_posix() for where in load_script("paths.py").SOURCES),
+    ".claude/hooks",
+)
 #: Чем копят находки.
 COLLECTS: Final = frozenset({"append", "extend"})
 

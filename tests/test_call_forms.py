@@ -46,10 +46,16 @@ import ast
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
-#: Где ищем разборы: набор, механизмы и перехваты перед git.
-WHERE: Final = ("tests", "scripts", ".claude/hooks")
+#: Где ищем разборы: набор, механизмы, перехваты перед git и общий низ. Корни
+#: кода берутся из `paths.SOURCES`, а не перечисляются рукой: так же, как у
+#: соседа `test_pattern_parses_a_call.WHERE` (195, взгляд на #1252).
+WHERE: Final = (
+    "tests",
+    *(where.as_posix() for where in load_script("paths.py").SOURCES),
+    ".claude/hooks",
+)
 #: Поле вызова, чтение которого и делает функцию разборщиком.
 THE_CALL: Final = "func"
 #: Голое имя вызова: класс узла и поле, которым его читают.
