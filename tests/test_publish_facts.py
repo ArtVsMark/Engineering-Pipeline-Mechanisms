@@ -171,65 +171,88 @@ def test_a_refused_signature_is_a_refusal(
         module.publish(stand["source"], stand["tmp"] / "w1", sha="a")
 
 
-#: Отказ каждого шага git: подкоманда → код, которым она отказывает. Набор
-#: сверяется с подкомандами, которые публикация зовёт на деле
-#: (`test_the_refusals_cover_every_git_step`): шаг без строки здесь краснеет.
-#: `ls-remote` отказывает вместе с `fetch` — порознь он не зовётся.
-REFUSALS: Final = {
-    "fetch": 1,
-    "ls-remote": 128,
-    "worktree": 1,
-    "config": 1,
-    "add": 1,
-    "diff": 128,
-    "commit": 1,
-    "push": 1,
+def call_key(args: tuple[str, ...]) -> str:
+    """Чем вызов git отличается от соседних: подкоманда и все её флаги.
+
+    По одной подкоманде два вызова `worktree` — поверх ветки (`--detach`) и
+    сиротой (`--orphan`) — сливались в один ключ, и отказ первого не
+    прогонялся вовсе (взгляд на #1257). Флаги различают и их, и новый вызов
+    знакомой подкоманды (`worktree remove`, второй `diff` с иными флагами).
+    Предел назван: вызов, повторяющий подкоманду с ТЕМИ ЖЕ флагами, ключа не
+    добавит.
+    """
+    flags = sorted(one for one in args[1:] if one.startswith("-") and one != "--")
+    return " ".join([args[0], *flags])
+
+
+#: Отказ каждого вызова git: ключ (`call_key`) → код отказа и нужна ли ветка
+#: заранее. Набор сверяется с ключами вызовов, которые публикация делает на
+#: деле (`test_the_refusals_cover_every_git_step`): вызов без строки краснеет.
+#: `ls-remote` отказывает вместе с `fetch` — порознь он не зовётся; путь
+#: «поверх» (`--detach`) требует ветки, поэтому ей предшествует публикация.
+REFUSALS: Final[dict[str, tuple[int, bool]]] = {
+    "fetch --quiet": (1, False),
+    "ls-remote --exit-code --heads": (128, False),
+    "worktree --orphan --quiet -b": (1, False),
+    "worktree --detach --quiet": (1, True),
+    "config": (1, False),
+    "add": (1, False),
+    "diff --cached --quiet": (128, False),
+    "commit -m -q": (1, False),
+    "push -q": (1, False),
 }
-#: Что отказавший шаг говорит в `stderr` — уникально по шагу, чтобы видеть, ЧЬЯ
-#: причина дошла.
+#: Что отказавший вызов говорит в `stderr` — уникально по ключу, чтобы видеть,
+#: ЧЬЯ причина дошла.
 SAID_BY = "причина-{}"
+FETCH: Final = "fetch --quiet"
+LS_REMOTE: Final = "ls-remote --exit-code --heads"
 
 
-@pytest.mark.parametrize("step", sorted(set(REFUSALS) - {"ls-remote"}))
+@pytest.mark.parametrize("step", sorted(set(REFUSALS) - {LS_REMOTE}))
 def test_every_git_step_refuses_with_its_reason(
     stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
-    """Отказ любого шага git несёт его код и `stderr` (взгляды на #1249, 210).
+    """Отказ любого вызова git несёт его код и `stderr` (взгляды на #1249, #1257, 210).
 
-    Причину чинили по шагу за заход; перечень всех шагов закрывает круг.
+    Причину чинили по шагу за заход; перечень всех вызовов закрывает круг.
     `fetch` отказывает вместе с `ls-remote`: ветка есть, но не прочитана, и в
     отказе обе причины. `diff --quiet` с кодом не 0 и не 1 — отказ git.
     """
     real: Callable[..., subprocess.CompletedProcess[str]] = module.git
-    failing = {step, "ls-remote"} if step == "fetch" else {step}
+    if REFUSALS[step][1]:
+        assert module.publish(stand["source"], stand["tmp"] / "w0", sha="0")
+        stand["source"].write_text('{"a": 2}\n', encoding="utf-8")
+    failing = {step, LS_REMOTE} if step == FETCH else {step}
 
     def refusing(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        if args[0] in failing:
-            said = SAID_BY.format(args[0])
-            return subprocess.CompletedProcess(list(args), REFUSALS[args[0]], "", said)
+        key = call_key(args)
+        if key in failing:
+            return subprocess.CompletedProcess(
+                list(args), REFUSALS[key][0], "", SAID_BY.format(key)
+            )
         return real(*args, cwd=cwd)
 
     monkeypatch.setattr(module, "git", refusing)
     with pytest.raises(module.NotPublished) as refused:
         module.publish(stand["source"], stand["tmp"] / "w1", sha="a")
     for one in failing:
-        assert f"код {REFUSALS[one]}: {SAID_BY.format(one)}" in str(refused.value)
+        assert f"код {REFUSALS[one][0]}: {SAID_BY.format(one)}" in str(refused.value)
 
 
 def test_the_refusals_cover_every_git_step(
     stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Перечень отказов равен подкомандам, которые публикация зовёт на деле.
+    """Перечень отказов равен ключам вызовов, которые публикация делает на деле.
 
-    Подкоманды записываются прогоном, а не разбором текста: и первая
-    публикация (ветки нет), и публикация поверх. Новый вызов git без строки в
+    Вызовы записываются прогоном, а не разбором текста: и первая публикация
+    (ветки нет), и публикация поверх. Новый вызов git без строки в
     `REFUSALS` краснеет здесь — отказ без причины не пройдёт молча (210).
     """
     real: Callable[..., subprocess.CompletedProcess[str]] = module.git
     called: set[str] = set()
 
     def recording(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        called.add(args[0])
+        called.add(call_key(args))
         return real(*args, cwd=cwd)
 
     monkeypatch.setattr(module, "git", recording)
