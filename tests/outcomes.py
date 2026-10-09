@@ -105,6 +105,9 @@ def declared(script: str) -> dict[str, int]:
 def with_outcomes() -> dict[str, dict[str, int]]:
     """Механизмы дерева, объявившие хоть один исход, — предмет реестра."""
     found: dict[str, dict[str, int]] = {}
+    # Один `scripts/`, а не `paths.SOURCES`, — по предмету (#1254): исход
+    # процесса объявляет точка входа, а у общего низа входа нет, и реестр
+    # ключуется именем механизма в `scripts/`.
     for path in walk(ROOT / "scripts", "*.py"):
         said = declared(path.name)
         if said:
