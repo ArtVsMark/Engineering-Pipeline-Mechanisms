@@ -12,12 +12,13 @@
 * **молчание источника не выдаётся за пустоту** (045).
 """
 
+import ast
 import json
 from typing import Any, Final
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("work_plan.py")
 
@@ -905,3 +906,50 @@ def test_unread_openness_keeps_the_registry_and_owes_everything(
     assert "не прочитаны" in built[3].note, "слепота открытости не названа"
     assert "bbbbbbb" not in "\n".join(built[5].rows), "вслепую отложено в раздел 5"
     assert marks == {"bbbbbbb"}
+
+
+# --- раздел 5 группами (#1263) -------------------------------------------
+
+
+def test_section_five_prints_its_groups_and_skips_the_empty() -> None:
+    """Подзаголовок у каждого непустого канала, пустой канал не печатается."""
+    source = module.Source(
+        rows=["a", "b"],
+        groups=[("Правила каталога", ["a"]), ("Дрейф", []), ("Копящиеся находки · `x.py`", ["b"])],
+    )
+    lines = module.render(5, source)
+    assert "*Правила каталога*" in lines and "*Копящиеся находки · `x.py`*" in lines
+    assert "*Дрейф*" not in lines, "пустая группа напечатана"
+    assert lines.index("- a") < lines.index("*Копящиеся находки · `x.py`*") < lines.index("- b")
+
+
+def test_accrued_findings_are_grouped_by_file() -> None:
+    """Находки — по файлу, без места — своей группой; одна группа — одно изменение."""
+    rows = [
+        "`aaaaaaa` · #1 — [риск] scripts/drift.py:12 — раз",
+        "`bbbbbbb` · #2 — [замечание] (без места) — два",
+        "`ccccccc` · #3 — [риск] scripts/drift.py:40-41 — три",
+        "`ddddddd` · #4 — [риск] tests/test_x.py:5 — четыре",
+    ]
+    groups = module.by_file("Копящиеся находки", rows)
+    assert [title for title, _ in groups] == [
+        "Копящиеся находки · `scripts/drift.py`",
+        "Копящиеся находки · `tests/test_x.py`",
+        f"Копящиеся находки · {module.NO_PLACE}",
+    ]
+    assert groups[0][1] == [rows[0], rows[2]]
+
+
+def test_every_channel_of_section_five_has_a_title() -> None:
+    """Подзаголовков столько же, сколько каналов в `parts`: новый канал без заголовка краснеет."""
+    tree = ast.parse((ROOT / "scripts" / "work_plan.py").read_text(encoding="utf-8"))
+    parts = next(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "parts"
+        and isinstance(node.value, ast.Tuple)
+    )
+    assert isinstance(parts, ast.Tuple)
+    assert len(module.FIVE_TITLES) == len(parts.elts)

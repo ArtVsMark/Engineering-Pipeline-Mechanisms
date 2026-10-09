@@ -139,6 +139,29 @@ class Source:
     rows: list[str] = field(default_factory=list)
     note: str = ""
     unread: str = ""
+    #: Строки группами для печати: (подзаголовок, строки). Пусто — раздел
+    #: печатается одним списком `rows`. Состав от групп не зависит: снимает и
+    #: адресует по-прежнему `rows` (#1263).
+    groups: list[tuple[str, list[str]]] = field(default_factory=list)
+
+
+#: Каналы источника 5 — подзаголовки раздела в порядке `parts` (решение
+#: владельца 09.10.2026, #1263): без них около тридцати строк четырёх каналов
+#: шли одним списком.
+FIVE_TITLES: Final = ("Правила каталога", "Дрейф", "Поводы для правила", "Копящиеся находки")
+#: Файл находки в строке реестра: «… — [вес] путь:строки — …».
+FINDING_FILE_RE: Final = re.compile(r"\] (?P<path>[\w./-]+\.\w+)(?::[\d-]+)? — ")
+#: Группа находки, у которой места нет.
+NO_PLACE: Final = "без места"
+
+
+def by_file(title: str, rows: list[str]) -> list[tuple[str, list[str]]]:
+    """Копящиеся находки по файлу: одна группа — одно будущее изменение (#1263)."""
+    grouped: dict[str, list[str]] = {}
+    for row in rows:
+        found = FINDING_FILE_RE.search(row)
+        grouped.setdefault(f"`{found['path']}`" if found else NO_PLACE, []).append(row)
+    return [(f"{title} · {place}", grouped[place]) for place in sorted(grouped)]
 
 
 def address_of(line: str) -> str:
@@ -286,6 +309,10 @@ def sources(
         rows=[row for part in parts for row in part.rows],
         note="; ".join(part.note for part in parts if part.note),
         unread="; ".join(part.unread for part in parts if part.unread),
+        groups=[
+            *zip(FIVE_TITLES[:-1], (part.rows for part in parts[:-1]), strict=True),
+            *by_file(FIVE_TITLES[-1], kept_part.rows),
+        ],
     )
     if built[5].unread:
         broken.append("5")
@@ -429,7 +456,14 @@ def render(number: int, source: Source, when: str = "") -> list[str]:
     ([027](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/027-empty-state-is-a-state.md)).
     """
     lines = [f"## {HEADS[number]}", ""]
-    if source.rows:
+    if source.rows and source.groups:
+        # ПУСТАЯ ГРУППА НЕ ПЕЧАТАЕТСЯ: заголовок без строк — та же старость, что
+        # снята с раздела 4 (#1263).
+        for title, rows in source.groups:
+            if rows:
+                lines += [f"*{title}*", *(f"- {one}" for one in rows), ""]
+        lines.pop()
+    elif source.rows:
         lines += [f"- {one}" for one in source.rows]
     elif not source.unread:
         lines.append(f"**Пусто** на {when or datetime.now(UTC).strftime('%d.%m.%Y')}.")
