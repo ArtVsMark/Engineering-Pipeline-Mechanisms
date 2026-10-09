@@ -397,6 +397,18 @@ SKILL_HEAD_KEYS: Final = frozenset({"name", "description"})
 #: обрезало шапку на ключе вида `---x: 1`, и стоявший за ним `allowed-tools`
 #: гейт не видел (взгляд на #1262).
 HEAD_CLOSE_RE: Final = re.compile(r"^---[ \t]*$", re.M)
+#: Закрытие шапки по НАЧАЛУ строки — прочтение, которым мог бы резать
+#: потребитель. Какое из двух у Claude Code, в дереве не замерено (взгляд на
+#: #1262), поэтому гейт не выбирает: шапка годна, только если оба прочтения
+#: кончаются на одной строке (210 — строгое правило вместо третьей формы).
+HEAD_LOOSE_RE: Final = re.compile(r"^---", re.M)
+
+
+def head_is_unambiguous(text: str) -> bool:
+    """Оба прочтения конца шапки — строка `---` целиком и по началу — совпадают."""
+    closed = HEAD_CLOSE_RE.search(text, 4)
+    loose = HEAD_LOOSE_RE.search(text, 4)
+    return closed is not None and loose is not None and closed.start() == loose.start()
 
 
 def skill_head_keys(text: str) -> set[str] | None:
@@ -434,8 +446,13 @@ def tree_channel_problems(root: Path = ROOT) -> list[str]:
     ]
     for one in tracked:
         if one.endswith("/SKILL.md"):
-            keys = skill_head_keys((root / one).read_text(encoding="utf-8"))
-            if keys is None:
+            text = (root / one).read_text(encoding="utf-8")
+            keys = skill_head_keys(text)
+            if keys is not None and not head_is_unambiguous(text):
+                problems.append(
+                    f"шапка навыка кончается по-разному при двух прочтениях `---`: {one}"
+                )
+            elif keys is None:
                 problems.append(f"шапка навыка не разобрана — права не сверить: {one}")
             elif keys - SKILL_HEAD_KEYS:
                 extra = ", ".join(sorted(keys - SKILL_HEAD_KEYS))
@@ -448,8 +465,29 @@ def test_no_other_settings_channel_is_tracked() -> None:
 
     ПРЕДЕЛ НАЗВАН: судится ОТСЛЕЖИВАЕМОЕ — в чекауте прогона только оно и есть,
     а неотслеживаемый `settings.local.json` в окне агенту CI не виден.
+
+    ВТОРОЙ ПРЕДЕЛ (взгляд на #1262): шапка навыка судится СВОИМ разбором —
+    YAML между строками `---`, — а не тем, что прочтёт потребитель. Разрыв
+    сужен, но не снят: шапка, конец которой читается двумя способами
+    по-разному, — отказ (`head_is_unambiguous`), так что ключи не зависят от
+    выбора разрезающего. Как разбирает сам YAML потребитель, гейт не знает.
     """
     assert not tree_channel_problems(), tree_channel_problems()
+
+
+@pytest.mark.parametrize(
+    ("text", "unambiguous"),
+    [
+        ("---\nname: a\ndescription: b\n---\nтекст\n", True),
+        ("---\nname: a\n---x: 1\nallowed-tools: Edit\n---\n", False),
+        ("---\nname: a\n----\n---\n", False),
+        ("---\nname: a\n", False),
+    ],
+    ids=["ровная", "ключ-с-тремя-дефисами", "четыре-дефиса", "не-закрыта"],
+)
+def test_a_skill_head_must_close_the_same_both_ways(text: str, unambiguous: bool) -> None:
+    """Конец шапки одинаков при двух прочтениях `---` — или отказ (взгляд на #1262, 210)."""
+    assert head_is_unambiguous(text) is unambiguous
 
 
 def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
