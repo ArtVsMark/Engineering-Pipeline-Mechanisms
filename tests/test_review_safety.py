@@ -1980,6 +1980,7 @@ def names_the_mark(job: dict[str, Any], prompt: str) -> bool:
         for expression in EXPRESSION.findall(prompt)
         if expression.startswith("steps.")
     }
+    told = False
     for step in job.get("steps") or []:
         if step.get("id") not in read:
             continue
@@ -1989,14 +1990,20 @@ def names_the_mark(job: dict[str, Any], prompt: str) -> bool:
             if EXPRESSION.findall(str(value)) == ["inputs.mark"]
         ]
         for line in str(step.get("run") or "").splitlines():
-            words = shlex.split(line, comments=True) if "review_findings.py" in line else []
-            for key in carried:
-                if any(
-                    word == "--tell" and words[at + 1 : at + 2] == [f"${key}"]
-                    for at, word in enumerate(words)
-                ):
-                    return True
-    return False
+            if "review_findings.py" not in line:
+                continue
+            words = shlex.split(line, comments=True)
+            if any(
+                word == "--tell" and words[at + 1 : at + 2] == [f"${key}"]
+                for at, word in enumerate(words)
+                for key in carried
+            ):
+                told = True
+            else:
+                # Читаемый заданием шаг отдаёт реестр не по отпечатку: одна
+                # запись рядом с реестром целиком вход не сужает (взгляд на #1286).
+                return False
+    return told
 
 
 def zone_faults(job: dict[str, Any], step: dict[str, Any]) -> list[str]:
@@ -2077,23 +2084,45 @@ def test_each_agent_in_the_look_takes_one_subject() -> None:
     assert not wide, f"{LOOK_BODY.name}: вход шага агента шире одного предмета: {wide}"
 
 
+CELL: Final = "${{ matrix.pr }} ${{ env.X }}"
+PLAIN: Final = "${{ env.X }}"
+
+
 @pytest.mark.parametrize(
-    ("job", "wide"),
+    ("job", "prompt", "wide"),
     [
-        ({"if": ONE_CHANGE}, False),
-        ({"if": f"{ONE_CHANGE} || github.event_name == 'schedule'"}, True),
-        ({"if": "github.event_name == 'workflow_dispatch'"}, True),
-        ({"if": ONE_CHANGE, "strategy": {"matrix": {"pr": "[1]"}}}, True),
-        ({"strategy": {"matrix": {"pr": "[1]", "os": "[a]"}}}, True),
-        ({"if": f"{ONE_MARK} && contains('a||b', 'a')"}, True),
+        ({"if": ONE_CHANGE}, PLAIN, False),
+        ({"if": f"{ONE_CHANGE} && github.head_ref != 'a||b'"}, PLAIN, False),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, CELL, False),
+        ({"if": f"{ONE_CHANGE} || github.event_name == 'schedule'"}, PLAIN, True),
+        ({"if": "github.event_name == 'workflow_dispatch'"}, PLAIN, True),
+        ({"if": ONE_CHANGE, "strategy": {"matrix": {"pr": "[1]"}}}, CELL, True),
+        ({"strategy": {"matrix": {"pr": "[1]", "os": "[a]"}}}, CELL, True),
+        ({"if": f"{ONE_MARK} && contains('a||b', 'a')"}, PLAIN, True),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, PLAIN, True),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, CELL + " ${{ fromJSON(env.ALL) }}", True),
     ],
-    ids=["change", "change-or-schedule", "no-subject", "two-subjects", "two-axes", "mark-unread"],
+    ids=[
+        "change",
+        "quoted-or",
+        "cell",
+        "change-or-schedule",
+        "no-subject",
+        "two-subjects",
+        "two-axes",
+        "mark-unread",
+        "cell-unnamed",
+        "cell-and-list",
+    ],
 )
-def test_a_wider_zone_is_named(job: dict[str, Any], wide: bool) -> None:
-    """Расширение зоны каждого рода краснеет; верный вход — нет."""
-    step = {"with": {"claude_args": "", "prompt": "${{ matrix.pr }} ${{ env.X }}"}}
-    if "strategy" not in job:
-        step["with"]["prompt"] = "${{ env.X }}"
+def test_a_wider_zone_is_named(job: dict[str, Any], prompt: str, wide: bool) -> None:
+    """Расширение зоны каждого рода краснеет; верный вход — нет.
+
+    `quoted-or` держит разбор кавычек: `||` внутри строки на верхнем уровне —
+    не вторая ветка условия, и снятие учёта кавычек здесь покраснеет. Внутри
+    скобок его отсекала бы глубина, а не кавычки (взгляд на #1286).
+    """
+    step = {"with": {"claude_args": "", "prompt": prompt}}
     assert bool(zone_faults(job, step)) is wide
 
 
@@ -2115,6 +2144,11 @@ def test_the_mark_counts_only_when_the_task_reads_it() -> None:
     assert zone_faults(job, blind)
     source["run"] = "python scripts/review_findings.py --list >out\n"
     assert zone_faults(job, reads)
+    source["run"] = (
+        'python scripts/review_findings.py --tell "$MARK" >out\n'
+        "python scripts/review_findings.py --list >all\n"
+    )
+    assert zone_faults(job, reads), "одна запись рядом с реестром целиком — не сужение"
 
 
 #: Предел размера ответа — из общего места, а не своей копией числа (022, 115).
