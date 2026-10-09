@@ -10,7 +10,7 @@ import ast
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -310,48 +310,69 @@ def test_a_read_missing_a_name_is_refused() -> None:
         debt.checked({"conflicting": []})
 
 
-def plan_fed(section: int, reader: str) -> tuple[set[str], set[str]]:
-    """Имена чтеца `reader`, которыми `work_plan.sources` кормит раздел: строки и заметку."""
-    sources = function_named(ROOT / "scripts" / "work_plan.py", "sources")
-    bound: set[str] = set()
-    for node in ast.walk(sources):
-        if (
-            isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Call)
-            and call_name(node.value) == reader
-            and isinstance(node.targets[0], ast.Tuple)
-        ):
-            bound |= {one.id for one in node.targets[0].elts if isinstance(one, ast.Name)}
-    assert bound, f"`work_plan.sources` не зовёт `{reader}` — предмет не найден (075)"
-    rows: set[str] = set()
-    noted: set[str] = set()
-    for node in ast.walk(sources):
-        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
-            continue
-        if not any(
-            isinstance(target, ast.Subscript)
-            and isinstance(target.slice, ast.Constant)
-            and target.slice.value == section
-            for target in node.targets
-        ):
-            continue
-        for keyword in node.value.keywords:
-            used = {one.id for one in ast.walk(keyword.value) if isinstance(one, ast.Name)}
-            (rows if keyword.arg == "rows" else noted).update(used & bound)
-    return rows, noted
+#: Одно непустое прочитанное — имя в таблицах шага долга, чтец, общий у
+#: шага и сборщика плана, и что он вернёт. Перечень обязан покрыть ВСЕ имена
+#: `read_names()` — это держит тест ниже, а не память (005).
+ONE_READ: Final[tuple[tuple[str, str, object], ...]] = (
+    ("conflicting", "stuck_changes", (["#1 — x"], [], [])),
+    ("unknown", "stuck_changes", ([], ["#1 — x"], [])),
+    ("red", "stuck_changes", ([], [], ["#1 — x"])),
+    ("lagging", "branch_debt", ([], ["lint"])),
+    ("left", "findings_debt", [("abc1234", 5, "дефект", "x")]),
+    ("kept", "findings_debt", [("abc1234", 5, "риск", "x")]),
+    ("rules_left", "rules_debt", (0, 1, 0)),
+)
 
 
-@pytest.mark.parametrize("section", [1, 2])
-def test_the_tables_follow_what_the_plan_shows(section: int) -> None:
-    """Строгое правило выведено из плана, а не из прочитанного шагом (взгляд на #1260, 210).
+def plan_with(monkeypatch: pytest.MonkeyPatch, reader: str, said: object) -> dict[int, Any]:
+    """Разделы плана, собранные, когда чтец `reader` вернул `said`, а прочие — пустоту."""
+    plan = load_script("work_plan.py")
+    quiet: dict[str, object] = {
+        "branch_debt": ([], []),
+        "stuck_changes": ([], [], []),
+        "findings_debt": [],
+        "open_changes": frozenset(),
+        "closed_issues": [],
+        "inbox_body": ("", "", ""),
+        "rules_debt": (0, 0, 0),
+        "contract_note": None,
+    }
+    quiet[reader] = said
+    for name, value in quiet.items():
+        monkeypatch.setattr(plan.debt, name, lambda *_, value=value, **__: value)
+    monkeypatch.setattr(plan.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
+    monkeypatch.setattr(plan, "birth_part", lambda *_: plan.Source())
+    monkeypatch.setattr(plan.ghrest, "paginate", lambda *_, **__: iter([]))
+    built: dict[int, Any] = plan.sources("o/r", "t", [])[0]
+    return built
 
-    Что сборщик кладёт разделу строкой — долг (`FED_BY`), что заметкой —
-    неизвестность (`UNREAD_BY`). Прежняя таблица знала только строки, и
-    несказанное состояние слияния проходило её зелёным как «пусто».
+
+def test_one_read_covers_every_name_of_the_tables() -> None:
+    """Перечень случаев — ровно имена таблиц: новое имя без случая краснеет (взгляд на #1275)."""
+    assert {name for name, _, _ in ONE_READ} == debt.read_names()
+
+
+@pytest.mark.parametrize(("name", "reader", "said"), ONE_READ, ids=[one[0] for one in ONE_READ])
+def test_the_plan_puts_each_read_where_the_tables_say(
+    monkeypatch: pytest.MonkeyPatch, name: str, reader: str, said: object
+) -> None:
+    """Строгое правило сверено ПОВЕДЕНИЕМ, а не разбором кода (взгляды на #1260, #1267, #1275; 210).
+
+    Одно непустое прочитанное подаётся сборщику плана; оно обязано лечь ровно
+    в тот раздел и то поле, что называют `FED_BY` (строки) и `UNREAD_BY`
+    (непрочитанное), и больше никуда. Разбор кода по именам видел только
+    прямые вызовы `debt.*` и для разделов 3 и 5 проходил пустым.
     """
-    rows, noted = plan_fed(section, "stuck_changes")
-    assert set(debt.FED_BY[section]) == rows
-    assert set(debt.UNREAD_BY.get(section, {})) == noted
+    built = plan_with(monkeypatch, reader, said)
+    where = {
+        (section, field)
+        for section in debt.BEFORE_PLAN
+        for field in ("rows", "unread")
+        if getattr(built[section], field)
+    }
+    owed = {(section, "rows") for section, names in debt.FED_BY.items() if name in names}
+    unread = {(section, "unread") for section, said in debt.UNREAD_BY.items() if name in said}
+    assert where == owed | unread, f"«{name}»: план кладёт в {sorted(where)}"
 
 
 def test_the_third_number_does_not_switch_the_reminder_on() -> None:
