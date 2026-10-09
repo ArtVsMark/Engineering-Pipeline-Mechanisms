@@ -27,7 +27,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, code_files, load_script
 
 module = load_script("review_findings.py")
 paths = load_script("paths.py")
@@ -106,7 +106,9 @@ def similarity_sites() -> list[tuple[str, str]]:
     ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
     """
     found: list[tuple[str, str]] = []
-    for path in walk(ROOT / "scripts", "*.py"):
+    # Корни — из `paths.SOURCES`: сходство, посчитанное в общем низу, — то же
+    # послабление и так же обязано стоять в таблице (#1254).
+    for path in code_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):

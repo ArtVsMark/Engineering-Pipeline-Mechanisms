@@ -802,7 +802,7 @@ def test_an_unknown_proposal_kind_is_named() -> None:
 
 def test_merge_neighbours_and_replacements_are_read() -> None:
     """Слияние: `neighbours` с причиной и `replaces` у принятого — оба названы."""
-    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge"}]}
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge", "rules": ["005", "127"]}]}
     key = "o/r:merge/a-thing-broke"
     kept = module.proposals_answered(
         answer({"status": "neighbours", "why": "вопрос 4"}, key), mine, "o/r"
@@ -846,6 +846,78 @@ def test_every_form_of_replaces_is_named(
     """Перечень форм `replaces` (210): номера читаются, остальное названо, а не угадано."""
     got, why = module.replaced_numbers(value, merge=merge)
     assert got == numbers and bool(why) is unread
+
+
+def test_an_admitted_merge_replacing_other_numbers_names_both() -> None:
+    """Слияние, заменившее не те номера, что сводило, — принято, и перечитать велено все.
+
+    Каталог требует от `replaces` лишь 2–3 разных номера с пометкой «Заменено»
+    (`collect_proposals.py`), а не равенства сводимым: «не прочитано» стало бы
+    вечным (взгляд на #1266). Но и о сводимых 002 и 057 при `replaces: ["005"]`
+    молчать нельзя (взгляд на #1243).
+    """
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "merge", "rules": ["002", "057"]}]}
+    key = "o/r:merge/a-thing-broke"
+    found = module.proposals_answered(
+        answer({"status": "admitted", "rule": "219", "replaces": ["005"]}, key), mine, "o/r"
+    )
+    assert [one.source for one in found] == ["proposal-admitted"]
+    assert "заменены 005" in found[0].said and "сводило предложение 002, 057" in found[0].said
+    assert "ответы по 002, 005, 057 перечитать" in found[0].next_step
+
+
+@pytest.mark.parametrize(
+    ("verdict", "source", "said"),
+    [
+        (
+            {"status": "admitted", "skill": "catalogue:a-thing"},
+            "proposal-admitted",
+            "catalogue:a-thing",
+        ),
+        ({"status": "admitted"}, "proposal-answer-unread", "поля «skill» нет"),
+        ({"status": "admitted", "skill": 5}, "proposal-answer-unread", "не строка адреса"),
+    ],
+    ids=["навык-назван", "навыка-нет", "навык-не-строкой"],
+)
+def test_an_admitted_skill_is_read_by_its_skill_field(
+    verdict: dict[str, Any], source: str, said: str
+) -> None:
+    """Вердикт навыку называет навык полем `skill`, а не номером (взгляд на #1266).
+
+    Так его проверяет сам каталог (`collect_proposals.py`); поиск номера
+    делал принятый навык вечно непрочитанным.
+    """
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": "skill"}]}
+    found = module.proposals_answered(answer(verdict, "o/r:skill/a-thing-broke"), mine, "o/r")
+    assert [one.source for one in found] == [source]
+    assert said in found[0].said
+
+
+@pytest.mark.parametrize(
+    ("value", "number", "unread"),
+    [
+        ("219", "219", False),
+        (None, "", True),
+        ("", "", True),
+        (219, "", True),
+        ("219a", "", True),
+        (["219"], "", True),
+        ("²", "", True),
+        ("٢١٩", "", True),
+    ],
+)
+def test_every_form_of_the_rule_number_is_named(value: object, number: str, unread: bool) -> None:
+    """Перечень форм `rule` — тем же приёмом, что у `replaces` (195, взгляд на #1243)."""
+    got, why = module.rule_number(value)
+    assert got == number and bool(why) is unread
+
+
+@pytest.mark.parametrize("status", ["admitted", "merged-into"])
+def test_a_verdict_without_its_number_is_unread_not_a_question_mark(status: str) -> None:
+    """Принятое или сведённое без номера — «не прочитано», а не «ответить по правилу ?»."""
+    found = module.proposals_answered(answer({"status": status, "why": "x"}), MINE, "o/r")
+    assert [one.source for one in found] == ["proposal-answer-unread"]
+    assert "?" not in found[0].next_step and "«rule»" in found[0].said
 
 
 def test_an_admitted_merge_without_replaces_is_unread() -> None:
@@ -2062,3 +2134,20 @@ def test_a_manual_run_without_the_file_reads_the_settings_with_the_secret_in_env
     monkeypatch.setattr(module, "save", lambda *a, **k: None)
     module.main(["--repo", "o/r"])
     assert handed and handed[0]["token"] == "токен-владельца"
+
+
+@pytest.mark.parametrize(
+    ("kind", "verdict", "subject"),
+    [
+        ("", {"rule": "219"}, "219"),
+        ("merge", {"rule": "219"}, "219"),
+        ("skill", {"skill": " catalogue:a-thing "}, "catalogue:a-thing"),
+        ("skill", {"rule": "219"}, ""),
+    ],
+    ids=["правило", "слияние", "навык", "навык-номером"],
+)
+def test_the_verdict_subject_follows_the_kind(
+    kind: str, verdict: dict[str, Any], subject: str
+) -> None:
+    """Правило и слияние — номером `rule`, навык — адресом `skill` (взгляд на #1266)."""
+    assert module.verdict_subject(kind, verdict)[0] == subject

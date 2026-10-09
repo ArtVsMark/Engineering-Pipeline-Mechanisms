@@ -481,3 +481,50 @@ def test_a_run_group_does_not_pass_on_a_matching_condition() -> None:
     with pytest.raises(AssertionError, match="группе ПРОГОНА"):
         test_a_queue_does_not_take_what_the_step_skips("x.yml", "j", True, {"if": condition}, step)
     test_a_queue_does_not_take_what_the_step_skips("x.yml", "j", False, {"if": condition}, step)
+
+
+#: Общий временный каталог в строке прогона: `/tmp` и `/var/tmp` — оба пишутся
+#: всеми. Хвост переменной (`$RUNNER_TEMP/tmp`, `}}/tmp`) — не он: перед ним
+#: имя, а не начало пути (взгляд на #1289 нашёл пропущенный `/var/tmp`).
+SHARED_TMP: Final = re.compile(r"(?<![\w$}])(?:/var)?/tmp\b")
+
+
+def test_no_run_reads_or_runs_from_the_shared_tmp() -> None:
+    """Прогоны не кладут и не берут файлы в общем `/tmp` — только в `$RUNNER_TEMP` (081, #1270).
+
+    Общий временный каталог — недоверенный вход: в него пишут другие, и имя,
+    положенное заранее, подхватится раньше нашего кода. Признак взят строгий,
+    по всему `/tmp`, а не «исполняется ли файл»: исполнение неявно (путь поиска
+    модулей, рядом лежащий файл), и разбор «исполняемо ли» пропустил бы его.
+    Замер 09.10.2026: четыре строки в одном прогоне, все с данными, перенесены.
+
+    ПРЕДЕЛ, А НЕ ОБЕЩАНИЕ (взгляд на #1289): судится ТЕКСТ прогонов. Скрипты,
+    которые прогоны зовут, берут временное через `tempfile` — каталог со
+    случайным именем и правами 0700 (`check_contract.py`, `family_uptake.py`);
+    подложить туда имя заранее нельзя, и это не предмет правила.
+    """
+    folder = ROOT / ".github"
+    used = [
+        f"{path.relative_to(ROOT)}:{number}"
+        for path in sorted(walk(folder, "*.y*ml"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if SHARED_TMP.search(line)
+    ]
+    assert not used, f"общий /tmp в прогонах — берите $RUNNER_TEMP: {used}"
+
+
+@pytest.mark.parametrize(
+    ("line", "shared"),
+    [
+        ("git log > /tmp/messages.txt", True),
+        ("python run.py > /var/tmp/changed.txt", True),
+        ("cd /tmp && ./x", True),
+        ('git log > "$RUNNER_TEMP/messages.txt"', False),
+        ('cp a "${{ runner.temp }}/tmp/b"', False),
+        ("echo $RUNNER_TEMP/tmp", False),
+    ],
+    ids=["tmp", "var-tmp", "cd-tmp", "runner-temp", "expr-tail", "var-tail"],
+)
+def test_the_shared_tmp_is_told_from_a_variable_tail(line: str, shared: bool) -> None:
+    """Общий каталог ловится и как `/var/tmp`; хвост переменной — не он."""
+    assert bool(SHARED_TMP.search(line)) is shared

@@ -613,6 +613,8 @@ def test_a_configured_answer_names_every_filling_it_reads() -> None:
     constants = path_constants()
     answers = inventory()["answers"]
     silent = {}
+    # Один `scripts/` по предмету (#1254): инвентарь отвечает по скрипту, а об
+    # общем низе — одной строкой `packages/transport` на весь пакет.
     for path in sorted(walk(ROOT / "scripts", "*.py")):
         answer = answers.get(f"scripts/{path.name}", {})
         if answer.get("answer") not in ("configured", "as-is"):

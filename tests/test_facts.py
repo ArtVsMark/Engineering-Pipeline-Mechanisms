@@ -15,7 +15,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, found_by, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, load_script
 
 facts = load_script("build_facts.py")
 
@@ -292,20 +292,52 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, *facts.PICTURES, facts.FACTS, facts.UNIFIED})
+    found = sorted({*facts.BADGES, *facts.PICTURES, *facts.PAGES, facts.FACTS, facts.UNIFIED})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
 
+def tracked_names(root: Path) -> set[str]:
+    """Имена файлов, ОТСЛЕЖИВАЕМЫХ git в дереве `root`; нечитаемый git — отказ (075)."""
+    out = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert out.returncode == 0, f"git ls-files не ответил — сверять не с чем: {out.stderr}"
+    return {Path(one).name for one in out.stdout.split("\0") if one}
+
+
 def test_derived_output_is_not_in_the_shared_branch() -> None:
-    """Производного нет в дереве: оно живёт в ветке `badges` (125).
+    """Производного нет в общей ветке: оно живёт в ветке `badges` (125, 160).
 
     Гейт написан на ИМЕНА вывода, а не на его содержимое: файл, случайно
     закоммиченный рядом с источником, выглядит безобидно ровно до того дня,
     когда число в нём разойдётся с источником.
+
+    СУДИТСЯ ОТСЛЕЖИВАЕМОЕ, А НЕ РАБОЧИЙ КАТАЛОГ (взгляд на #1290). Навык
+    `close-a-finding` велит класть архив `findings.json` в корень клона для
+    разбора; неотслеживаемый, он в общую ветку не попадёт, и красить за него
+    набор и предполётную значило бы краснеть на чужом. Предмет правила —
+    то, что уйдёт в `main`, то есть `git ls-files`.
     """
-    for name in derived_names():
-        assert not found_by(ROOT, f"**/{name}"), f"{name} лежит в общей ветке рядом с источником"
+    tracked = tracked_names(ROOT)
+    assert tracked, "git не отслеживает ни одного файла — предмет проверки не найден (075)"
+    # ВСЁ, ЧТО ВПРАВЕ ДЕРЖАТЬ ВЕТКА `badges`, а не только изданное сборкой: архив
+    # находок там же, и его копия в дереве разошлась бы с веткой так же (160, #1271).
+    lying = sorted({*derived_names(), *facts.branch_files()} & tracked)
+    assert not lying, f"производное ветки badges отслеживается в общей ветке: {lying}"
+
+
+def test_an_untracked_derived_file_is_not_the_shared_branch(tmp_path: Path) -> None:
+    """Неотслеживаемый файл производного — не нарушение, отслеживаемый — нарушение."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "findings.json").write_text("{}", encoding="utf-8")
+    assert "findings.json" not in tracked_names(tmp_path)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "findings.json"], check=True)
+    assert "findings.json" in tracked_names(tmp_path)
 
 
 def shown_badges() -> list[str]:
@@ -354,7 +386,8 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     утверждал о себе неправду
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    drawn = set(facts.BADGES) | set(facts.PICTURES)
+    # Нарисованное впрок (`AHEAD`) показывается вторым шагом (196).
+    drawn = (set(facts.BADGES) | set(facts.PICTURES)) - facts.AHEAD
     # Пол — три: значок проекта заменил «держится машиной» и «семью» (#1213).
     assert len(drawn) >= 3, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
     # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
@@ -363,6 +396,31 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     assert expected == set(shown_badges()), (
         f"витрине положено показать {sorted(expected)}, а показано {shown_badges()}"
     )
+
+
+def test_every_page_the_build_lays_is_linked() -> None:
+    """Страница, положенная сборкой, связана из витрины — или объявлена впрок (195, #1268).
+
+    Сверка значков выше читает `BADGES | PICTURES`; страница — соседний случай
+    того же предмета, и без этой проверки ссылка на неё держалась бы ничем.
+    """
+    assert facts.PAGES, "сборка не кладёт ни одной страницы — предмет проверки не найден (075)"
+    drawn = {*facts.PICTURES, *facts.PAGES}
+    assert drawn >= facts.AHEAD, f"впрок объявлено не то, что рисуется: {sorted(facts.AHEAD)}"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    unlinked = sorted(
+        name
+        for name in set(facts.PAGES) - facts.AHEAD
+        if f"/badges/.github/badges/{name}" not in readme
+    )
+    assert not unlinked, f"страница кладётся, а витрина на неё не ведёт: {unlinked}"
+    # ОБРАТНОЕ НАПРАВЛЕНИЕ (взгляд на #1268): ссылка README в ветку `badges`
+    # называет только то, что сборка вправе туда класть, — иначе имя, убранное
+    # из `PAGES`, оставило бы ссылку на снятый файл молча. Образец адреса берёт
+    # любое имя, а не только `.json|.svg`, как разбор значков.
+    linked = set(re.findall(r"/badges/\.github/badges/([\w.-]+)", readme))
+    stray = sorted(linked - set(facts.branch_files()))
+    assert not stray, f"витрина ведёт в ветку badges на то, чего сборка не кладёт: {stray}"
 
 
 def push_command(step: str) -> str:

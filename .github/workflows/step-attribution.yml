@@ -56,7 +56,7 @@ jobs:
       # Это пояснение — одно на оба подключения гейта: `attribution-history.yml`
       # ссылается сюда.
       - name: сверить атрибуцию
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.9.0
+        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v1.11.0
         with:
           authors: .github/authors.txt
           # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
@@ -71,3 +71,11 @@ jobs:
           require-declared-author: "true"
           require-coauthor: "true"
           range: origin/${{ github.event.pull_request.base.ref || 'main' }}..HEAD
+          # `merge-method` НЕ задан намеренно — по умолчанию `merge`, строгий
+          # режим (вход появился в v1.11.0 каталога, #1285). Проект сливает
+          # уплотнением, и при `squash` гейт перестал бы смотреть авторов
+          # коммитов ветки: автора в общей ветке задаёт открывший изменение
+          # (131). У нас авторы коммитов ветки — всегда владелец, поэтому
+          # строгий режим проходит и ловит окно, подписавшее коммит собой;
+          # личность открывшего держит другой прогон — `attribution-history.yml`
+          # первопредками общей ветки.
