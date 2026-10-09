@@ -637,15 +637,25 @@ def drawing(zones: list[list[Part]]) -> str:
     )
 
 
-def counted(numerator: int, denominator: int) -> str:
-    """Число с числителем и знаменателем и справа процент: «66/195 · 34%» (владелец, 09.10.2026)."""
-    share = f"{round(100 * numerator / denominator)}%" if denominator else "—"
+def counted(numerator: int, denominator: int, *, known: bool = True) -> str:
+    """Число с числителем и знаменателем и справа процент: «66/195 · 34%» (владелец, 09.10.2026).
+
+    Доли нет — «—»: пустой знаменатель или часть знаменателя не прочитана
+    (``known=False``) — процент утверждал бы о неизвестном (045).
+    """
+    share = f"{round(100 * numerator / denominator)}%" if denominator and known else "—"
     return f"{numerator}/{denominator} · {share}"
 
 
-def share_color(numerator: int, denominator: int) -> str:
-    """Цвет доли: красный ниже трети, жёлтый ниже двух третей, иначе зелёный."""
-    share = numerator / denominator if denominator else 0.0
+def share_color(numerator: int, denominator: int, *, known: bool = True) -> str:
+    """Цвет доли: красный ниже трети, жёлтый ниже двух третей, иначе зелёный.
+
+    Доли нет — серый, как незнание, а не красный, как плохой исход (045, взгляд
+    на #1259): пустой знаменатель или непрочитанная часть его.
+    """
+    if not denominator or not known:
+        return GREY
+    share = numerator / denominator
     return RED if share < 0.34 else YELLOW if share < 0.67 else GREEN
 
 
@@ -705,8 +715,8 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
     family_zone = [
         ("семья", LABEL_COLOR, ""),
         (
-            f"проектов {counted(took, of)}{unread}",
-            share_color(took, of),
+            f"проектов {counted(took, of, known=not unread)}{unread}",
+            share_color(took, of, known=not unread),
             "проектов семьи зовут наш шаг по тегу",
         ),
         (

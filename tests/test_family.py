@@ -293,7 +293,7 @@ RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 
             },
             [
                 ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов 0/5 · 0% (2 не прочитано)", "гейтов 0/20 · 0%"],
+                ["семья", "проектов 0/5 · — (2 не прочитано)", "гейтов 0/20 · 0%"],
             ],
         ),
         (
@@ -325,14 +325,9 @@ def test_the_project_badge_carries_three_numbers(
     """
     zones = facts.project_zones({"rules": RULES_PLANTED, "family": family_said})
     assert [[text for text, _, _ in zone] for zone in zones] == texts
-    # Серым — часть, где числа нет вовсе; часть с числом и непрочитанными
-    # клонами рядом окрашена своей долей.
-    unknown = [
-        color
-        for zone in zones
-        for text, color, _ in zone
-        if "/" not in text and "не прочитано" in text
-    ]
+    # Серым — всякая часть, где доля неизвестна: числа нет или часть
+    # знаменателя не прочитана (взгляд на #1259).
+    unknown = [color for zone in zones for text, color, _ in zone if "не прочитано" in text]
     assert all(color == facts.GREY for color in unknown), "незнание окрашено не серым"
 
 

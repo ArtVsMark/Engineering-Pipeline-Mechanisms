@@ -129,7 +129,7 @@ def test_badge_shows_the_number_it_measured() -> None:
         (2, 3, "YELLOW"),
         (7, 10, "GREEN"),
         (5, 5, "GREEN"),
-        (0, 0, "RED"),
+        (0, 0, "GREY"),
     ],
 )
 def test_the_share_colour_has_three_bands(numerator: int, denominator: int, color: str) -> None:
