@@ -672,10 +672,36 @@ def test_framing_is_read_from_the_real_http_client() -> None:
     for raw in (
         b"HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n{}",
         b"HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n{}",
-        b"HTTP/1.1 200 OK\r\nContent-Length: \r\n\r\n{}",
     ):
         with pytest.raises(http.client.HTTPException, match="не той формы"):
             transport._unframed(begun(raw))
+
+
+def test_a_length_cut_after_its_name_is_a_drop() -> None:
+    """Пустая длина — обрыв, оборвана ли строка или дописана: различить их нечем.
+
+    Первый пример — связь закрылась сразу после `Content-Length:` (#1235).
+    Второй — целая строка с пустым значением: это НЕ обрыв, а рамка не той
+    формы, и судить его обрывом — объявленная цена правила «неразличимое
+    судится обрывом» (взгляд на #1250). Тест держит, что оба разбора дают одно
+    и то же, и потому правило одно на оба.
+    """
+    import io
+
+    class Socket:
+        def __init__(self, raw: bytes) -> None:
+            self.raw = raw
+
+        def makefile(self, *_args: object, **_kwargs: object) -> io.BytesIO:
+            return io.BytesIO(self.raw)
+
+    for raw in (
+        b"HTTP/1.1 200 OK\r\nContent-Length:",
+        b"HTTP/1.1 200 OK\r\nContent-Length: \r\n\r\n",
+    ):
+        response = http.client.HTTPResponse(Socket(raw), method="GET")  # type: ignore[arg-type]
+        response.begin()
+        assert transport._unframed(response), f"{raw!r}: пустая длина названа формой"
 
 
 def test_a_malformed_length_is_refused_once_and_not_retried(
