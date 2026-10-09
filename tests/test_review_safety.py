@@ -393,17 +393,21 @@ CLAUDE_TREE: Final = re.compile(r"\.claude/(?:settings\.json|hooks/[^/]+|skills/
 #: сдвигом образец не видел — вторая находка по одному месту, строгое правило
 #: вместо третьей формы (взгляды на #1251, 210).
 SKILL_HEAD_KEYS: Final = frozenset({"name", "description"})
+#: Закрытие шапки — строка `---` ЦЕЛИКОМ. Совпадение по началу строки
+#: обрезало шапку на ключе вида `---x: 1`, и стоявший за ним `allowed-tools`
+#: гейт не видел (взгляд на #1262).
+HEAD_CLOSE_RE: Final = re.compile(r"^---[ \t]*$", re.M)
 
 
 def skill_head_keys(text: str) -> set[str] | None:
     """Ключи шапки навыка, разобранные YAML; ``None`` — шапки нет или она не разбирается."""
     if not text.startswith("---\n"):
         return None
-    end = text.find("\n---", 4)
-    if end < 0:
+    closed = HEAD_CLOSE_RE.search(text, 4)
+    if closed is None:
         return None
     try:
-        said = yaml.safe_load(text[4:end])
+        said = yaml.safe_load(text[4 : closed.start()])
     except yaml.YAMLError:
         return None
     return {str(key) for key in said} if isinstance(said, dict) else None
@@ -471,6 +475,7 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
         ".claude/skills/hooks/SKILL.md": "---\nname: h\nhooks: {}\n---\n",
         ".claude/skills/broken/SKILL.md": "---\nname: [\n---\n",
         ".claude/skills/headless/SKILL.md": "# без шапки\n",
+        ".claude/skills/early/SKILL.md": "---\nname: e\n---x: 1\nallowed-tools: Bash\n---\n",
     }
     for name, text in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -492,6 +497,7 @@ def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
             ".claude/skills/hooks/SKILL.md",
             ".claude/skills/broken/SKILL.md",
             ".claude/skills/headless/SKILL.md",
+            ".claude/skills/early/SKILL.md",
         ]
     ), said
 
