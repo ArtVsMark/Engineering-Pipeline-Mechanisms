@@ -2418,8 +2418,9 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
         if node is not loop and isinstance(node, (ast.For, ast.AsyncFor, ast.While))
     ]
     assert not inner, (
-        f"в цикле голов внутренний цикл (строки {inner}): его `continue` — не выход "
-        "цикла голов, и разбор выходов его не различает — научите `skip_exits` его форме"
+        f"в цикле голов внутренний цикл (строки {inner}) — форма, которой разбор выходов "
+        "не знает: отказ на любой внутренний цикл, с `continue` или без, потому что "
+        "`continue` в нём ушёл бы к нему, а не к циклу голов — научите `skip_exits` его форме"
     )
     found = []
     for node in ast.walk(loop):
