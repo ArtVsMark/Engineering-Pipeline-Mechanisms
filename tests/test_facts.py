@@ -304,7 +304,9 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
     закоммиченный рядом с источником, выглядит безобидно ровно до того дня,
     когда число в нём разойдётся с источником.
     """
-    for name in derived_names():
+    # ВСЁ, ЧТО ВПРАВЕ ДЕРЖАТЬ ВЕТКА `badges`, а не только изданное сборкой: архив
+    # находок там же, и его копия в дереве разошлась бы с веткой так же (160, #1271).
+    for name in sorted({*derived_names(), *facts.branch_files()}):
         assert not found_by(ROOT, f"**/{name}"), f"{name} лежит в общей ветке рядом с источником"
 
 
