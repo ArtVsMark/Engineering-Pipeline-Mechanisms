@@ -36,11 +36,9 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, load_script, walk
+from tests.conftest import ROOT, code_files, load_script
 
 paths = load_script("paths.py")
-
-SCRIPTS: Final = ROOT / "scripts"
 
 #: Объявление, по которому механизм узнаёт СВОЁ тело живой задачи.
 MARKER: Final = "MARKER"
@@ -54,10 +52,14 @@ A_DAY: Final = re.compile(r"strftime|isoformat|Убрано до")
 
 
 def publishers() -> list[Path]:
-    """Механизмы, переписывающие тело живой задачи поверх прежнего."""
+    """Механизмы, переписывающие тело живой задачи поверх прежнего.
+
+    Корни — из `paths.SOURCES`: тело живой задачи, собранное в общем низу,
+    обязано называть день обхода наравне со скриптом (#1254).
+    """
     return [
         path
-        for path in walk(SCRIPTS, "*.py")
+        for path in code_files()
         if re.search(rf"^{MARKER}\b", path.read_text(encoding="utf-8"), re.M)
     ]
 
