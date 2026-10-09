@@ -1924,6 +1924,233 @@ def test_a_matrix_of_agents_runs_as_a_wave_not_a_salvo() -> None:
         )
 
 
+#: Выражение площадки внутри текста: `${{ … }}`.
+EXPRESSION: Final = re.compile(r"\$\{\{\s*(.*?)\s*\}\}", re.S)
+
+#: Вход «дифф изменения»: джоб идёт ТОЛЬКО на событии одного изменения.
+ONE_CHANGE: Final = "github.event_name == 'pull_request'"
+
+#: Вход «одна находка»: джоб идёт ТОЛЬКО с названным отпечатком из кнопки.
+ONE_MARK: Final = "inputs.mark != ''"
+
+#: Ось матрицы, у которой ячейка — ОДНО изменение.
+ONE_PR_AXIS: Final = "pr"
+
+
+def conjuncts(condition: str) -> set[str]:
+    """Условия, которые выражение `if:` требует ВСЕ сразу.
+
+    Разбор идёт по верхнему уровню скобок и мимо строк в кавычках: `&&` внутри
+    `contains(…)` — не условие джоба. Есть на верхнем уровне `||` — не
+    гарантировано ни одно, и ответ пуст: «идёт на изменении ИЛИ по расписанию»
+    не обещает, что дифф один.
+    """
+    parts: list[str] = []
+    depth, quoted, start, place = 0, False, 0, 0
+    text = " ".join(condition.split())
+    while place < len(text):
+        char = text[place]
+        if char == "'":
+            quoted = not quoted
+        elif not quoted and char == "(":
+            depth += 1
+        elif not quoted and char == ")":
+            depth -= 1
+        elif not quoted and depth == 0 and text.startswith(("&&", "||"), place):
+            if text[place] == "|":
+                return set()
+            parts.append(text[start:place])
+            start = place + 2
+            place += 1
+        place += 1
+    parts.append(text[start:])
+    return {part.strip() for part in parts}
+
+
+def names_the_mark(job: dict[str, Any], prompt: str) -> bool:
+    """Задание берёт находку у шага, который читает её ПО ОТПЕЧАТКУ из кнопки.
+
+    Шаг-источник несёт `inputs.mark` в окружении и отдаёт его разбору реестра
+    доводом `--tell` — одна запись, а не реестр целиком. Задание обязано читать
+    выход именно этого шага: отпечаток в условии джоба, которого агент не
+    видит, вход не сужает.
+    """
+    read = {
+        expression.split(".")[1]
+        for expression in EXPRESSION.findall(prompt)
+        if expression.startswith("steps.")
+    }
+    told = False
+    for step in job.get("steps") or []:
+        if step.get("id") not in read:
+            continue
+        carried = [
+            key
+            for key, value in (step.get("env") or {}).items()
+            if EXPRESSION.findall(str(value)) == ["inputs.mark"]
+        ]
+        for line in str(step.get("run") or "").splitlines():
+            if "review_findings.py" not in line:
+                continue
+            words = shlex.split(line, comments=True)
+            if any(
+                word == "--tell" and words[at + 1 : at + 2] == [f"${key}"]
+                for at, word in enumerate(words)
+                for key in carried
+            ):
+                told = True
+            else:
+                # Читаемый заданием шаг отдаёт реестр не по отпечатку: одна
+                # запись рядом с реестром целиком вход не сужает (взгляд на #1286).
+                return False
+    return told
+
+
+def zone_faults(job: dict[str, Any], step: dict[str, Any]) -> list[str]:
+    """Чем вход шага агента шире ОДНОГО предмета; пусто — вход по правилу 034.
+
+    Входы перечислены, а не исключены (068): дифф одного изменения, одна
+    находка по отпечатку, одна ячейка матрицы изменений. Третьего рода вход
+    краснеет как неназванный, пока его не назовут здесь.
+    """
+    prompt = str((step.get("with") or {}).get("prompt") or "")
+    said = EXPRESSION.findall(prompt)
+    required = conjuncts(str(job.get("if") or ""))
+    matrix = (job.get("strategy") or {}).get("matrix")
+    subjects = []
+    if ONE_CHANGE in required:
+        subjects.append("дифф изменения")
+    if ONE_MARK in required and names_the_mark(job, prompt):
+        subjects.append("находка по отпечатку")
+    if matrix is not None:
+        subjects.append("ячейка матрицы")
+    faults = []
+    if len(subjects) != 1:
+        faults.append(
+            f"вход назван {len(subjects)} раз ({', '.join(subjects) or 'ни разу'}), а нужен один"
+        )
+    if matrix is not None:
+        if set(matrix) != {ONE_PR_AXIS}:
+            faults.append(f"матрица не одна ось «{ONE_PR_AXIS}»: {sorted(matrix)}")
+        if f"matrix.{ONE_PR_AXIS}" not in said:
+            faults.append(f"задание не называет свою ячейку `matrix.{ONE_PR_AXIS}`")
+    whole = [
+        one
+        for one in said
+        if "fromJSON" in one or (one.startswith("matrix.") and one != f"matrix.{ONE_PR_AXIS}")
+    ]
+    if whole:
+        faults.append(f"задание получает список, а не предмет: {whole}")
+    return faults
+
+
+def test_each_agent_in_the_look_takes_one_subject() -> None:
+    """Вход каждого шага агента во взгляде — ОДИН предмет, и он назван.
+
+    Правило [034](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/034-small-zone-per-executor.md):
+    зона одного исполнителя мала. Здесь она задана формой прогона — входом
+    запуска, — и до этой проверки её расширение не краснело нигде: вторая ось
+    матрицы, `||` в условии джоба или задание без отпечатка прошли бы молча.
+
+    ЧТО ЗНАЧИТ «ОДИН». `review` идёт только на событии изменения — дифф один;
+    `verify` идёт только с отпечатком из кнопки, и задание читает выход шага,
+    отдавшего разбору реестра `--tell "$MARK"`, — находка одна; `late-look` —
+    матрица ровно по оси `pr`, и задание называет `matrix.pr` — изменение одно
+    на ячейку. Сколько ячеек идёт разом, держит соседняя проверка волны (031),
+    не эта.
+
+    ЗАМЕР 09.10.2026 ПО ВСЕМУ ДЕРЕВУ: шагов агента пять в трёх прогонах; в
+    `step-review.yml` их три, и вход по правилу у трёх из трёх.
+
+    СУЖЕНИЕ НАЗЫВАЕТ СОСЕДЕЙ (195). Ответ на обращение в `claude.yml` берёт
+    вход от упоминания — его зону задаёт человек текстом, а не прогон; разбор
+    слитого против задачи в `step-task-items.yml` — свой предмет со своим
+    входом. Оба вне этой проверки: их вход не из трёх родов выше, и судить его
+    этими родами значило бы краснеть на чужом.
+    """
+    jobs = load(LOOK_BODY)["jobs"]
+    agents = [
+        (name, job, step)
+        for name, job in jobs.items()
+        for step in job.get("steps") or []
+        if "claude_args" in (step.get("with") or {})
+    ]
+    assert agents, "шагов агента во взгляде нет — предмета у проверки нет (075)"
+    wide = {
+        f"{name}/{step.get('id') or step.get('name')}": faults
+        for name, job, step in agents
+        if (faults := zone_faults(job, step))
+    }
+    assert not wide, f"{LOOK_BODY.name}: вход шага агента шире одного предмета: {wide}"
+
+
+CELL: Final = "${{ matrix.pr }} ${{ env.X }}"
+PLAIN: Final = "${{ env.X }}"
+
+
+@pytest.mark.parametrize(
+    ("job", "prompt", "wide"),
+    [
+        ({"if": ONE_CHANGE}, PLAIN, False),
+        ({"if": f"{ONE_CHANGE} && github.head_ref != 'a||b'"}, PLAIN, False),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, CELL, False),
+        ({"if": f"{ONE_CHANGE} || github.event_name == 'schedule'"}, PLAIN, True),
+        ({"if": "github.event_name == 'workflow_dispatch'"}, PLAIN, True),
+        ({"if": ONE_CHANGE, "strategy": {"matrix": {"pr": "[1]"}}}, CELL, True),
+        ({"strategy": {"matrix": {"pr": "[1]", "os": "[a]"}}}, CELL, True),
+        ({"if": f"{ONE_MARK} && contains('a||b', 'a')"}, PLAIN, True),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, PLAIN, True),
+        ({"strategy": {"matrix": {"pr": "[1]"}}}, CELL + " ${{ fromJSON(env.ALL) }}", True),
+    ],
+    ids=[
+        "change",
+        "quoted-or",
+        "cell",
+        "change-or-schedule",
+        "no-subject",
+        "two-subjects",
+        "two-axes",
+        "mark-unread",
+        "cell-unnamed",
+        "cell-and-list",
+    ],
+)
+def test_a_wider_zone_is_named(job: dict[str, Any], prompt: str, wide: bool) -> None:
+    """Расширение зоны каждого рода краснеет; верный вход — нет.
+
+    `quoted-or` держит разбор кавычек: `||` внутри строки на верхнем уровне —
+    не вторая ветка условия, и снятие учёта кавычек здесь покраснеет. Внутри
+    скобок его отсекала бы глубина, а не кавычки (взгляд на #1286).
+    """
+    step = {"with": {"claude_args": "", "prompt": prompt}}
+    assert bool(zone_faults(job, step)) is wide
+
+
+def test_the_mark_counts_only_when_the_task_reads_it() -> None:
+    """Отпечаток в условии джоба — вход, только если задание читает его находку.
+
+    Без этого `verify` зеленел бы и тогда, когда агенту отдан реестр целиком,
+    а отпечаток остался в `if:`, которого агент не видит.
+    """
+    source = {
+        "id": "subject",
+        "env": {"MARK": "${{ inputs.mark }}"},
+        "run": 'python scripts/review_findings.py --tell "$MARK" >out\n',
+    }
+    job = {"if": f"github.event_name == 'workflow_dispatch' && {ONE_MARK}", "steps": [source]}
+    reads = {"with": {"claude_args": "", "prompt": "${{ steps.subject.outputs.title }}"}}
+    blind = {"with": {"claude_args": "", "prompt": "весь реестр"}}
+    assert not zone_faults(job, reads)
+    assert zone_faults(job, blind)
+    source["run"] = "python scripts/review_findings.py --list >out\n"
+    assert zone_faults(job, reads)
+    source["run"] = (
+        'python scripts/review_findings.py --tell "$MARK" >out\n'
+        "python scripts/review_findings.py --list >all\n"
+    )
+    assert zone_faults(job, reads), "одна запись рядом с реестром целиком — не сужение"
+
+
 #: Предел размера ответа — из общего места, а не своей копией числа (022, 115).
 FINDING_LIMIT: Final = load_script("findings.py").SAID_LIMIT
 
