@@ -78,8 +78,8 @@
 непрочитанное так и названо, а не ноль. Кто именно взял — таблица
 [«кем»](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/who.md),
 её собирает тот же прогон из обхода клонов семьи (`family.uptake.by`): в дереве
-этих данных нет, и таблица — не копия, а единственное их место. Факты по тому же адресу читают соседи и
-каталог правил
+этих данных нет, и таблица — не копия, а единственное их место. Факты по тому
+же адресу читают соседи и каталог правил
 ([174](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/174-facts-about-a-project-are-published-by-it.md)).
 
 ## Что читать

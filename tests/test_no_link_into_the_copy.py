@@ -56,10 +56,15 @@ IMAGE: Final = re.compile(r"!\[[^\]]*\]\([^)\s]*\)")
 #: ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
 #: Нашёл внешний взгляд.
 OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
-#: Производное без оригинала в дереве — имя файла на ветке `badges` и почему.
+#: Производное без оригинала в дереве — ПОЛНЫЙ адрес на ветке `badges` и почему.
 #: Ссылка текстом на них законна: копией чего-то из дерева они не являются.
+#: Адрес целиком, с веткой и путём, а не имя файла: иначе одноимённая копия в
+#: другом каталоге или на другой ветке прошла бы как законный текст (взгляд на #1280).
+WITHOUT_ORIGIN_BRANCH: Final = "badges"
 NO_ORIGINAL_IN_TREE: Final = {
-    "who.md": "кто из семьи зовёт наши шаги — обход клонов соседей; в дереве этих данных нет",
+    f"{paths.BADGES_DIR.as_posix()}/who.md": (
+        "кто из семьи зовёт наши шаги — обход клонов соседей; в дереве этих данных нет"
+    ),
 }
 
 
@@ -76,10 +81,10 @@ def addresses() -> list[tuple[Path, int, str, bool]]:
             for match in der.DERIVED_RE.finditer(line):
                 where = match["rawrepo"] or match["repo"] or ""
                 ref = match["rawref"] or match["ref"] or ""
-                name = (match["rawpath"] or match["path"] or "").rpartition("/")[2]
+                path_on_branch = (match["rawpath"] or match["path"] or "").lstrip("/")
                 if where.lower() != OURS.lower() or ref == paths.TRUNK:
                     continue
-                if name in NO_ORIGINAL_IN_TREE:
+                if ref == WITHOUT_ORIGIN_BRANCH and path_on_branch in NO_ORIGINAL_IN_TREE:
                     continue
                 inside = any(
                     shot.start() <= match.start() and match.end() <= shot.end()
@@ -132,5 +137,21 @@ def test_a_neighbours_repository_is_not_taken_for_ours() -> None:
 def test_every_exception_is_laid_by_the_build() -> None:
     """Исключение называет то, что сборка и правда кладёт: мёртвое имя краснеет (005)."""
     facts = load_script("build_facts.py")
-    stale = sorted(set(NO_ORIGINAL_IN_TREE) - set(facts.branch_files()))
+    laid = {f"{paths.BADGES_DIR.as_posix()}/{name}" for name in facts.branch_files()}
+    stale = sorted(set(NO_ORIGINAL_IN_TREE) - laid)
     assert not stale, f"исключение 089 называет то, чего сборка не кладёт: {stale}"
+
+
+def test_the_exception_has_no_original_in_the_tree() -> None:
+    """Основание исключения держится сборкой: из одного дерева таблицы «кем» не собрать.
+
+    Таблица читает `family.uptake`, а его даёт только обход клонов (`--uptake`).
+    Ляжет этот вход в дерево — сборка без обхода прочтёт его, исключение станет
+    ложным, и здесь покраснеет (взгляд на #1280, 044).
+    """
+    facts = load_script("build_facts.py")
+    tree_only = facts.family_facts(None, answers=ROOT / ".rules" / "bindings.json")
+    assert not tree_only["uptake"].get("read"), (
+        "family.uptake прочитан без обхода клонов — у таблицы «кем» есть оригинал в дереве,"
+        " и исключение 089 для неё больше не законно"
+    )
