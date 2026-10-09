@@ -11,8 +11,9 @@
 """
 
 import ast
+from collections.abc import Iterator
 from dataclasses import replace
-from typing import Any, Final
+from typing import Any, Final, TypeGuard
 
 import pytest
 
@@ -2338,30 +2339,65 @@ def test_look_records_take_both_names_and_nothing_else(monkeypatch: pytest.Monke
 
 
 #: КАЖДЫЙ пропуск головы в цикле очереди отнесён здесь: ждёт ли голова на нём
-#: вердикта взгляда (и тогда ставит ступень) или нет. Таблица разрешительная
-#: (068): пропуск, которого в ней нет, краснит сверку, и человек решает о нём
-#: явно. Набор ключей ожидания взгляда, заведённый рукой отдельно, новый выход
-#: ожидания со своим ключом пропускал молча (взгляд на #1231, проверено мутацией).
-#: `<состояние>` — счётчик с подставленным именем, `<отказ взведения>` — выход
-#: без счётчика (`NotRun`).
-SKIP_WAITS_FOR_LOOK: Final = {
-    "пусты": False,
-    "красны": False,
-    "конфликтуют": False,
-    "ждут починки находок": False,
-    "ждут головы важнее": False,
-    "ждут вердикта взгляда": True,
-    "ждут пропущенного взгляда": True,
-    "<состояние>": False,
-    "<отказ взведения>": False,
+#: вердикта взгляда (и тогда ставит ступень) или нет — и СКОЛЬКО выходов с этим
+#: ключом в цикле. Таблица разрешительная (068): пропуск, которого в ней нет,
+#: краснит сверку, и человек решает о нём явно. Набор ключей ожидания взгляда,
+#: заведённый рукой отдельно, новый выход ожидания со своим ключом пропускал
+#: молча (взгляд на #1231, проверено мутацией). `<состояние>` — счётчик с
+#: подставленным именем, `<отказ взведения>` — выход без счётчика (`NotRun`).
+#:
+#: ЧИСЛО ВЫХОДОВ — СТРОГОЕ ПРАВИЛО ВМЕСТО ОЧЕРЕДНОЙ ФОРМЫ (210, взгляд на
+#: #1231). Обе общие корзины принимали ЛЮБОЙ новый выход — без счётчика или с
+#: подставленным именем — и относили его к «не ждёт», так что новый выход
+#: ожидания, забывший поставить ступень, проходил зелёным. Теперь у каждого
+#: ключа объявлено число выходов: новый выход меняет счёт и краснеет, под
+#: каким бы ключом он ни встал. Замер 09.10.2026 разбором `skip_exits`: число —
+#: выходы в коде, вложенный выход объемлющему блоку не засчитан (взгляд на #1253).
+SKIP_WAITS_FOR_LOOK: Final[dict[str, tuple[bool, int]]] = {
+    "пусты": (False, 2),
+    "красны": (False, 1),
+    "конфликтуют": (False, 1),
+    "ждут починки находок": (False, 1),
+    "ждут головы важнее": (False, 1),
+    "ждут вердикта взгляда": (True, 2),
+    "ждут пропущенного взгляда": (True, 1),
+    "<состояние>": (False, 1),
+    "<отказ взведения>": (False, 1),
 }
+
+
+#: Поля узла, где лежат вложенные блоки инструкций.
+BLOCK_FIELDS: Final = ("body", "orelse", "finalbody")
+
+
+def ends_in_continue(block: object) -> TypeGuard[list[ast.stmt]]:
+    """Блок инструкций, кончающийся `continue`, — выход из цикла голов."""
+    return isinstance(block, list) and bool(block) and isinstance(block[-1], ast.Continue)
+
+
+def own_nodes(statement: ast.AST) -> Iterator[ast.AST]:
+    """Узлы инструкции БЕЗ вложенных выходов: их счётчики — свои, а не объемлющего.
+
+    Блок красной головы держит внутри выход «пусты»; обход целиком засчитывал
+    его счётчик и красному блоку, и «пусты» насчитывал три выхода при двух в
+    коде (взгляд на #1253).
+    """
+    yield statement
+    for name, value in ast.iter_fields(statement):
+        if name in BLOCK_FIELDS and ends_in_continue(value):
+            continue
+        children = value if isinstance(value, list) else [value]
+        for child in children:
+            if isinstance(child, ast.AST):
+                yield from own_nodes(child)
 
 
 def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     """Блоки цикла голов, кончающиеся `continue`: их счётчики пропуска и ставят ли они ступень.
 
     Счётчик с подставленным именем (`f"в состоянии «…»"`) называется `<состояние>`,
-    блок без счётчика (отказ взведения) — пустым набором.
+    блок без счётчика (отказ взведения) — пустым набором. Вложенный выход
+    считается своим блоком и объемлющему не засчитывается (`own_nodes`).
     """
     loop = next(
         node
@@ -2371,16 +2407,16 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     )
     found = []
     for node in ast.walk(loop):
-        for field in ("body", "orelse", "finalbody"):
+        for field in BLOCK_FIELDS:
             block = getattr(node, field, None)
-            if not isinstance(block, list) or not block or not isinstance(block[-1], ast.Continue):
+            if not ends_in_continue(block):
                 continue
             if node is loop and field == "body":
                 continue
             keys = frozenset(
                 str(one.slice.value) if isinstance(one.slice, ast.Constant) else "<состояние>"
                 for statement in block
-                for one in ast.walk(statement)
+                for one in own_nodes(statement)
                 if isinstance(one, ast.Subscript)
                 and isinstance(one.value, ast.Name)
                 and one.value.id == "skipped"
@@ -2392,7 +2428,7 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
                     for target in one.targets
                 )
                 for statement in block
-                for one in ast.walk(statement)
+                for one in own_nodes(statement)
             )
             found.append((keys, sets))
     return found
@@ -2416,8 +2452,14 @@ def test_only_the_look_waiting_exits_set_the_step() -> None:
     assert not unknown, f"пропуск не отнесён в `SKIP_WAITS_FOR_LOOK`: {unknown}"
     gone = sorted(SKIP_WAITS_FOR_LOOK.keys() - seen)
     assert not gone, f"в таблице пропуски, которых в очереди нет: {gone}"
+    counted = {key: sum(key in keys for keys, _ in exits) for key in seen}
+    declared = {key: count for key, (_, count) in SKIP_WAITS_FOR_LOOK.items()}
+    assert counted == declared, (
+        f"число выходов разошлось с таблицей: в коде {counted}, объявлено {declared} — "
+        "новый выход отнесите явно, а не в общую корзину"
+    )
     for keys, sets in exits:
-        waits = {SKIP_WAITS_FOR_LOOK[key] for key in keys}
+        waits = {SKIP_WAITS_FOR_LOOK[key][0] for key in keys}
         assert waits == {sets}, (
             f"выход {sorted(keys)}: {'ставит' if sets else 'не ставит'} ступень, "
             f"а по таблице ждёт взгляда: {sorted(waits)}"

@@ -22,7 +22,9 @@
 одинаковы, и молчаливое «чисто» здесь было бы тихим запасным ответом
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 
-Исходы (правило 039): ``0`` чисто · ``1`` есть находки · ``2`` не отработал.
+Исходы (правило 039): ``0`` чисто · ``1`` есть находки · ``2`` не отработал
+(пустое дерево — при любой сети: оно читается раньше выгрузки) · ``4`` каталог
+молчит.
 """
 
 import argparse
@@ -119,9 +121,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     args = parser.parse_args(argv)
 
+    # ДЕРЕВО ЧИТАЕТСЯ РАНЬШЕ КАТАЛОГА. Пустое или нечитаемое дерево — «не
+    # отработал» при любой сети; прежде выгрузка спрашивалась первой, и тот же
+    # пустой вход отвечал «каталог молчит», стоило сети моргнуть (#1255).
+    try:
+        found = links(args.root)
+    except NotRun as exc:
+        print(f"гейт не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    if not found:
+        print("гейт не отработал: ссылок на правила в дереве нет (075)", file=sys.stderr)
+        return EXIT_BROKEN
+
     try:
         real = known()
-        found = links(args.root)
     except catalogue.Silent as exc:
         # ОТКАЗ КАНАЛА НАЗЫВАЕТСЯ И НЕ КРАСИТ. Печатается в поток вывода, а не
         # ошибок: это не находка и не поломка шага, а состояние сети. Адресата
@@ -131,9 +144,6 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_SILENT
     except NotRun as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
-        return EXIT_BROKEN
-    if not found:
-        print("гейт не отработал: ссылок на правила в дереве нет (075)", file=sys.stderr)
         return EXIT_BROKEN
 
     problems = broken(found, real)
