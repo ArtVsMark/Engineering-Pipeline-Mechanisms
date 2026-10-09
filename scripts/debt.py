@@ -387,9 +387,10 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
         if not state:
             # Площадка считает состояние асинхронно и до готовности отдаёт
             # `unknown`. Это НЕ «конфликта нет»: неизвестность называется, а не
-            # подменяется тихим ответом (045).
+            # подменяется тихим ответом (045). Красное от состояния слияния не
+            # зависит и спрашивается дальше: прежде неизвестное уходило мимо
+            # источника 2 целиком (взгляд на #1260).
             unknown.append(said)
-            continue
         runs = list(
             ghrest.paginate(
                 f"repos/{repo}/commits/{change['head']['sha']}/check-runs", token, key="check_runs"
@@ -614,14 +615,22 @@ BEFORE_PLAN: Final = (1, 2, 3, 5)
 #: (051). Объявлена здесь, а не пропущена: иначе пропуск неотличим от забытого.
 STOP: Final = (0,)
 #: Что шаг читает в каждый источник долга — имена прочитанного в `main`.
-#: Сверка по одним ключам пропускала `1: False` и переставленные значения:
-#: ключи на месте, а источник не прочитан (взгляд на #1260, 195). Тест
-#: сверяет, что значение каждого ключа зовёт ровно своё прочитанное.
+#: РЕШЕНИЕ ВЫВОДИТСЯ ИЗ ЭТОЙ ТАБЛИЦЫ (`owed_by`), а не выражением рукой:
+#: выражение пропускало `1: False`, переставленные значения и `bool(x) and
+#: False` — имя на месте, а источник не решает (взгляды на #1260, 195).
 FED_BY: Final = {
     1: ("conflicting",),
     2: ("red",),
     3: ("left", "lagging"),
     5: ("kept", "rules_left"),
+}
+#: Прочитанное, которое делает источник НЕПРОЧИТАННЫМ, и как это сказать.
+#: Таблица сверяется с разделами плана: что сборщик кладёт заметкой, а не
+#: строкой, здесь — неизвестность, а не пустота и не долг. Изменения с
+#: несказанным состоянием слияния шаг не судил по источнику 1 и печатал
+#: «источники пусты» (взгляд на #1260, 045).
+UNREAD_BY: Final = {
+    1: {"unknown": "площадка ещё считает состояние слияния"},
 }
 
 #: Каналы источника 5, которых этот шаг НЕ читает, и кто их читает. Источник 5
@@ -669,24 +678,64 @@ def before_plan(owed: dict[int, bool]) -> bool:
     return any(owed.values())
 
 
-def sources_said() -> str:
+def read_names() -> set[str]:
+    """Всё прочитанное, о котором решение обязано знать: `FED_BY` и `UNREAD_BY`."""
+    fed = {name for names in FED_BY.values() for name in names}
+    return fed | {name for said in UNREAD_BY.values() for name in said}
+
+
+def checked(read: dict[str, object]) -> dict[str, object]:
+    """Прочитанное шага — ровно `read_names()`; лишнее или недостающее — отказ (210)."""
+    if set(read) != read_names():
+        raise ValueError(
+            f"решению отдано прочитанное {sorted(read)}, а таблицы называют "
+            f"{sorted(read_names())} (210)"
+        )
+    return read
+
+
+def owed_by(read: dict[str, object]) -> dict[int, bool]:
+    """Есть ли долг в каждом источнике — по `FED_BY`, а не выражением рукой."""
+    return {source: any(bool(read[name]) for name in names) for source, names in FED_BY.items()}
+
+
+def unread_in(read: dict[str, object]) -> dict[int, list[str]]:
+    """Источники, прочитанные не целиком, и почему — по `UNREAD_BY`."""
+    found = {
+        source: [why for name, why in said.items() if read[name]]
+        for source, said in UNREAD_BY.items()
+    }
+    return {source: whys for source, whys in found.items() if whys}
+
+
+def sources_said(skip: Iterable[int] = ()) -> str:
     """Источники долга словами — из `BEFORE_PLAN`, а не рукой."""
-    return ", ".join(str(one) for one in BEFORE_PLAN)
+    # Множество — ДО генератора: одноразовый итератор расходовался бы на первой
+    # проверке, и пропуск терялся (взгляд на #1267).
+    skipped = set(skip)
+    return ", ".join(str(one) for one in BEFORE_PLAN if one not in skipped)
 
 
-def remind(has_debt: bool) -> None:
+def remind(has_debt: bool, unread: dict[int, list[str]] | None = None) -> None:
     """Ведёт к договору, а не пересказывает его; непрочитанное называет."""
+    unread = unread or {}
     if has_debt:
         print(
             f"\nЭто идёт ПЕРЕД планом: {paths.BEHAVIOUR}, контур 1, источники {sources_said()}.\n"
             "Правило каталога — 177: пока незакрытая работа по правилам есть, новую не начинают."
         )
     else:
+        # ПУСТЫМИ НАЗВАНЫ ТОЛЬКО ПРОЧИТАННЫЕ ЦЕЛИКОМ: источник с несказанным
+        # состоянием назван отдельно, а не записан в «пусты» (взгляд на #1260).
+        empty = sources_said(unread)
+        said = f"источники {empty} пусты" if empty else "пустых нет"
         print(
-            f"\nпо прочитанному долга нет: источники {sources_said()} пусты.\n"
+            f"\nпо прочитанному долга нет: {said}.\n"
             f"Источник 5 шаг читает не весь — {', '.join(NOT_READ)} сводит план "
             f"({paths.BEHAVIOUR}, контур 1): за работой по плану — туда."
         )
+    for source, whys in sorted(unread.items()):
+        print(f"Источник {source} прочитан не весь: {'; '.join(whys)} — это НЕ «пусто» (045).")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -844,20 +893,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  контракт разошёлся: {note}")
 
     # РЕШЕНИЕ СПРАШИВАЕТ КАЖДЫЙ ИСТОЧНИК ДОЛГА, а не те, что вспомнились:
-    # ключи сверяются с `BEFORE_PLAN`, а он со `STOP` — с разделами плана (210).
+    # прочитанное сверяется с `FED_BY` и `UNREAD_BY`, ключи `FED_BY` — с
+    # `BEFORE_PLAN`, а он со `STOP` — с разделами плана (210).
     # Держащее красное — остановка (`STOP`), и решается оно починкой, а не
     # порядком работ.
-    remind(
-        before_plan(
-            {
-                1: bool(conflicting),
-                2: bool(red),
-                3: bool(left) or bool(lagging),
-                5: bool(kept) or rules_left(numbers, note),
-            }
-        )
+    read = checked(
+        {
+            "conflicting": conflicting,
+            "unknown": unknown,
+            "red": red,
+            "left": left,
+            "lagging": lagging,
+            "kept": kept,
+            "rules_left": rules_left(numbers, note),
+        }
     )
-    return EXIT_PARTIAL if partial else EXIT_OK
+    unread = unread_in(read)
+    remind(before_plan(owed_by(read)), unread)
+    # НЕПРОЧИТАННЫЙ ИСТОЧНИК — ТОТ ЖЕ ИСХОД «ПРОЧИТАНО НЕ ВСЁ», что непрочитанные
+    # правила: `step-debt.yml` предупреждает только по коду, и строка без кода
+    # проходила зелёной молча (взгляд на #1267, 195).
+    return EXIT_PARTIAL if partial or unread else EXIT_OK
 
 
 if __name__ == "__main__":
