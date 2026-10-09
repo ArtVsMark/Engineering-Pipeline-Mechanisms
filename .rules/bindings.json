@@ -127,8 +127,9 @@
     "018": {
       "status": "active",
       "mechanism": "gate",
-      "where": "tests/test_gates_contract.py::test_the_shared_branch_is_checked_too и ::test_change_only_jobs_do_not_run_on_the_shared_branch — окружение проверки читается из событий и условий джобов .github/workflows/ci.yml: гейты идут и на общей ветке (с ArtVsMark/Engineering-Pipeline-Mechanisms#48 — изменение и main разные окружения, и зелёное на изменении не значит зелёного на main), а шаги, чей предмет — изменение, на main не идут, и пропуск объявлен условием. Узлы и цепочка разведены там же: набор в scripts/ и tests/ проверяет механизмы по одному на раннере, а цепочку — площадка, поэтому решение принимается по прогону, а не по зелёному набору (139). Раньше ответ был «pipeline», хотя направление условий уже держали эти гейты (решение владельца 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237)",
-      "analysed": "2026-09-26"
+      "where": "tests/test_gates_contract.py::test_the_shared_branch_is_checked_too и ::test_change_only_jobs_do_not_run_on_the_shared_branch — окружение проверки читается из событий и условий джобов .github/workflows/ci.yml, и джобы изменения выводятся признаком (чтение контекста изменения сам или в вызванном прогоне), а не перечнем: гейты идут и на общей ветке (с ArtVsMark/Engineering-Pipeline-Mechanisms#48 — изменение и main разные окружения, и зелёное на изменении не значит зелёного на main), а шаги, чей предмет — изменение, на main не идут, и пропуск объявлен условием. Узлы и цепочка разведены там же: набор в scripts/ и tests/ проверяет механизмы по одному на раннере, а цепочку — площадка, поэтому решение принимается по прогону, а не по зелёному набору (139). Раньше ответ был «pipeline», хотя направление условий уже держали эти гейты (решение владельца 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237)",
+      "analysed": "2026-10-09",
+      "decided": "2026-10-09"
     },
     "019": {
       "status": "active",
@@ -1261,7 +1262,8 @@
       "status": "active",
       "mechanism": "gate",
       "where": "tests/test_bindings.py::test_active_names_its_mechanism_and_address и ::test_every_unheld_answer_names_its_limit — ответ «машинно нельзя» не принимается целиком: у ответа без механизма обязательна машинная половина (machine_half), у любого ответа вне машины — названный предел (holdable). Пример разложения надвое — требование «изменение открывается от лица владельца»: намерение машине недоступно, а автора и соавтора в истории держит действие каталога attribution (джоб attribution в .github/workflows/ci.yml, ответы 090, 123, 135). AGENTS.md называет вторую половину явно (057). Раньше ответ был «pipeline» и называл адресом пример, а не механизм (решение владельца 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237)",
-      "analysed": "2026-09-26"
+      "analysed": "2026-10-09",
+      "decided": "2026-10-09"
     },
     "183": {
       "status": "active",
