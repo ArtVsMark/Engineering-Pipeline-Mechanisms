@@ -262,6 +262,26 @@ def test_the_decision_asks_every_source_the_plan_puts_first() -> None:
     assert keys == set(debt.BEFORE_PLAN)
 
 
+def test_each_source_is_fed_by_what_the_step_read_for_it() -> None:
+    """Значение каждого ключа зовёт своё прочитанное, и только его (взгляд на #1260).
+
+    Ключи на месте ещё не значат, что источник прочитан: `1: False` или
+    переставленные `1: bool(red), 2: bool(conflicting)` сверку по ключам
+    проходили.
+    """
+    assert set(debt.FED_BY) == set(debt.BEFORE_PLAN)
+    asked = decision_call()
+    every = {name for names in debt.FED_BY.values() for name in names}
+    for key, value in zip(asked.keys, asked.values, strict=True):
+        assert isinstance(key, ast.Constant) and isinstance(key.value, int)
+        used = {node.id for node in ast.walk(value) if isinstance(node, ast.Name)}
+        own = set(debt.FED_BY[key.value])
+        assert own <= used, (
+            f"источник {key.value} спрошен без своего прочитанного {sorted(own - used)}"
+        )
+        assert not (used & every) - own, f"источник {key.value} спрошен чужим прочитанным"
+
+
 def test_the_third_number_does_not_switch_the_reminder_on() -> None:
     """Слитое без взгляда печатается, но в решение о долге не входит.
 
