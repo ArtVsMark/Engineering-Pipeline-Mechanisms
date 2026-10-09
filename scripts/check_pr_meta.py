@@ -256,7 +256,7 @@ def text_problems(
 def local_messages(base: str) -> list[str]:
     """Сообщения коммитов ветки сверх базы — от старых к новым, как читает прогон.
 
-    Та же выборка, что пишет шаг `step-pr-meta.yml` в `/tmp/messages.txt`:
+    Та же выборка, что пишет шаг `step-pr-meta.yml` в `$RUNNER_TEMP/messages.txt`:
     `git log --reverse --format=%B%x00 <база>..HEAD`. База — ОБЩАЯ ТОЧКА с
     `base`, а не сама `base`: ушедшая вперёд общая ветка иначе принесла бы
     чужие коммиты в суд над своими.
