@@ -6,6 +6,7 @@
 запасной путь (045).
 """
 
+import inspect
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -203,14 +204,23 @@ def test_the_third_number_does_not_switch_the_reminder_on() -> None:
     что-либо значить (051).
 
     Печать и решение здесь уже расходились однажды — на числах правила 177, —
-    поэтому решение проверяется отдельно от вывода: в него входят ровно два
-    источника, и добавить третий молча не выйдет.
+    поэтому решение проверяется отдельно от вывода. В него входят ровно четыре
+    источника — `left`, `kept`, `lagging`, `rules`, — и сверяется ПЕРЕЧЕНЬ
+    параметров `before_plan`, а не начало вызова: пятый, дописанный хвостом с
+    умолчанием, прошёл бы сверку по началу молча (взгляд на #1245).
     """
+    assert list(inspect.signature(debt.before_plan).parameters) == [
+        "left",
+        "kept",
+        "lagging",
+        "rules",
+    ], "в решение о долге вошёл новый источник — проверьте, не слитое ли это без взгляда"
     source = (ROOT / "scripts" / "debt.py").read_text(encoding="utf-8")
-    call = "remind(before_plan(left=left, kept=kept, lagging=lagging, rules=rules_left("
-    assert call in source, (
-        "решение о напоминании собрано иначе — проверьте, не вошло ли в него слитое без взгляда"
+    call = (
+        "remind(before_plan(left=left, kept=kept, lagging=lagging, "
+        "rules=rules_left(numbers, note)))"
     )
+    assert call in source, "решение о напоминании собрано иначе, чем `before_plan` из шага"
 
 
 @pytest.mark.parametrize(
