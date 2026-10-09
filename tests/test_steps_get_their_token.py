@@ -46,6 +46,9 @@ NEEDS_TOKEN: Final = "token_from_env"
 def reads_the_platform() -> set[str]:
     """Скрипты, которым нужен токен прогона, — по коду, а не по списку руками."""
     found = set()
+    # Один `scripts/` по предмету (#1254): сверяются с шагами, а шаг зовёт
+    # `python scripts/<имя>.py` — общий низ шагом не запускается, его токен
+    # спрашивает зовущий скрипт.
     for path in walk(SCRIPTS, "*.py"):
         if path.name == "ghrest.py":
             continue
