@@ -411,11 +411,13 @@ def test_every_summary_reader_is_declared() -> None:
     НАЗВАН (195): модуль, взявший адрес сводки буквами, мимо констант, не
     узнаётся — но и тогда он нарушает правило 209, и это видно чтением.
     """
-    from tests.conftest import ROOT, walk
+    from tests.conftest import code_files
 
+    # Корни — из `paths.SOURCES`: читатель сводки в общем низу так же обязан
+    # быть объявлен, как скрипт (#1254).
     found = {
         path.stem
-        for path in walk(ROOT / "scripts", "*.py")
+        for path in code_files()
         if path.stem != "catalogue"
         and (
             "WHERE_URL" in (text := path.read_text(encoding="utf-8"))
