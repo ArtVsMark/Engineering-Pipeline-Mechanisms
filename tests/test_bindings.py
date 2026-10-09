@@ -1117,7 +1117,10 @@ def test_a_skill_holding_an_unmachined_rule_is_named_by_its_answer() -> None:
 #: Форма адреса происхождения по контракту ответа 1.8: `<владелец>/<репо>:<путь>@<версия>`.
 ORIGIN_RE = re.compile(r"^[\w.-]+/[\w.-]+:[^@\s]+@[\w.-]+$")
 #: Как механизм взят — закрытый словарь контракта.
+#: Виды происхождения, требующие адреса источника; `own` адреса не несёт (1.9).
 ORIGIN_KINDS = frozenset({"called", "copied", "adapted"})
+#: Механизмы, у которых с контракта 1.9 происхождение обязательно.
+ORIGIN_REQUIRED_FOR = frozenset({"gate", "pipeline"})
 #: Вызов действия каталога в наших прогонах: адрес действия и тег.
 CATALOGUE_ORIGIN = "ArtVsMark/Engineering-Incidents-Playbook:"
 CATALOGUE_CALL_RE = re.compile(
@@ -1126,18 +1129,31 @@ CATALOGUE_CALL_RE = re.compile(
 
 
 def test_an_origin_is_shaped_as_the_contract_asks() -> None:
-    """`origin` по форме контракта 1.8, всегда с `origin_kind` и не у `mechanism: none` (#1237)."""
+    """Происхождение по форме контракта 1.9 (#1274).
+
+    `origin_kind` обязателен у действующих ответов с `gate` и `pipeline`: с 1.9
+    отсутствие поля больше не читается как «разработан здесь», это говорит
+    явное `own`. У `own` адреса нет; у `called`, `copied`, `adapted` адрес
+    обязателен и разрешим по форме. У `mechanism: none` происхождения нет вовсе.
+    """
     bad: list[str] = []
     for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
         origin, kind = str(answer.get("origin") or ""), str(answer.get("origin_kind") or "")
+        mechanism = answer.get("mechanism")
+        if answer.get("status") == "active" and mechanism in ORIGIN_REQUIRED_FOR and not kind:
+            bad.append(f"{number}: у {mechanism} нет origin_kind (обязателен с 1.9)")
         if not origin and not kind:
             continue
+        if mechanism in (None, "none"):
+            bad.append(f"{number}: происхождение у ответа без механизма")
+        if kind == "own":
+            if origin:
+                bad.append(f"{number}: origin при origin_kind own")
+            continue
+        if kind not in ORIGIN_KINDS:
+            bad.append(f"{number}: origin_kind «{kind}» не из own и {sorted(ORIGIN_KINDS)}")
         if not ORIGIN_RE.match(origin):
             bad.append(f"{number}: origin «{origin}» не по форме владелец/репо:путь@версия")
-        if kind not in ORIGIN_KINDS:
-            bad.append(f"{number}: origin_kind «{kind}» не из {sorted(ORIGIN_KINDS)}")
-        if answer.get("mechanism") in (None, "none"):
-            bad.append(f"{number}: origin у ответа без механизма")
     assert not bad, "; ".join(bad)
 
 
@@ -1173,8 +1189,8 @@ def test_a_called_catalogue_origin_names_an_action_we_call() -> None:
 
 #: Вызванные действия каталога, которые НЕ держат правила, и почему. Остальные
 #: обязаны стоять в чьём-то `origin`: иначе ответ, держащийся чужим действием,
-#: читался бы как «разработан здесь» — так контракт 1.8 понимает отсутствие
-#: `origin` (#1237).
+#: читался бы как свой — с контракта 1.9 это явное `origin_kind: own`, и
+#: вызов без ответа с `called` прошёл бы под ним молча (#1237).
 CALLED_WITHOUT_A_RULE: Final = {
     ".github/actions/python-badge/action.yml": (
         "рисует единый значок витрины по исходам прогонов; правила не держит — "
