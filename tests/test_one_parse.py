@@ -27,10 +27,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, walk
+from tests.conftest import ROOT, load_script, walk
 
 #: Где живёт рабочий код, который разбирает предметы конвейера.
-PLACES: Final = (ROOT / "scripts", ROOT / "packages" / "transport")
+PLACES: Final = tuple(ROOT / where for where in load_script("paths.py").SOURCES)
 
 #: Намеренные копии образца — с причиной у каждой (071). Подпись ставится на
 #: ПАРУ МОДУЛЕЙ, а не на образец целиком: общий образец вроде «числа подряд»
