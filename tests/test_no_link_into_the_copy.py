@@ -1,5 +1,13 @@
 """Ссылка из оригинала в копию: только картинкой, никогда текстом.
 
+ПРЕДМЕТ — КОПИЯ ОРИГИНАЛА, А НЕ ВСЯКОЕ ПРОИЗВОДНОЕ (решение владельца 09.10.2026,
+#1213). Правило 089 говорит о связи источника с его витриной: копия отстаёт от
+оригинала, и ссылка уводит в прошлое. Производное, у которого оригинала в
+дереве НЕТ — данные обхода чужих деревьев, — не копия: свежее места нет, и
+ссылка на него никуда не уводит. Такие имена названы перечнем
+`NO_ORIGINAL_IN_TREE` с причиной, а не выведены догадкой (046). Прежняя редакция
+запрещала текстом любой адрес производного и тем трактовала 089 шире буквы.
+
 Связь источника с витриной односторонняя. Ссылка из оригинала в копию уводит
 читателя на заведомо более старое — витрина пересобирается прогоном и отстаёт от
 дерева всегда, — а полноту источника начинают мерить по чужому справочнику
@@ -48,6 +56,11 @@ IMAGE: Final = re.compile(r"!\[[^\]]*\]\([^)\s]*\)")
 #: ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
 #: Нашёл внешний взгляд.
 OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+#: Производное без оригинала в дереве — имя файла на ветке `badges` и почему.
+#: Ссылка текстом на них законна: копией чего-то из дерева они не являются.
+NO_ORIGINAL_IN_TREE: Final = {
+    "who.md": "кто из семьи зовёт наши шаги — обход клонов соседей; в дереве этих данных нет",
+}
 
 
 def documents() -> list[Path]:
@@ -63,7 +76,10 @@ def addresses() -> list[tuple[Path, int, str, bool]]:
             for match in der.DERIVED_RE.finditer(line):
                 where = match["rawrepo"] or match["repo"] or ""
                 ref = match["rawref"] or match["ref"] or ""
+                name = (match["rawpath"] or match["path"] or "").rpartition("/")[2]
                 if where.lower() != OURS.lower() or ref == paths.TRUNK:
+                    continue
+                if name in NO_ORIGINAL_IN_TREE:
                     continue
                 inside = any(
                     shot.start() <= match.start() and match.end() <= shot.end()
@@ -111,3 +127,10 @@ def test_a_neighbours_repository_is_not_taken_for_ours() -> None:
         "ArtVsMark/Engineering-Pipeline-Mechanisms-Docs",
     ):
         assert foreign.lower() != OURS.lower(), f"{foreign} принят за своё"
+
+
+def test_every_exception_is_laid_by_the_build() -> None:
+    """Исключение называет то, что сборка и правда кладёт: мёртвое имя краснеет (005)."""
+    facts = load_script("build_facts.py")
+    stale = sorted(set(NO_ORIGINAL_IN_TREE) - set(facts.branch_files()))
+    assert not stale, f"исключение 089 называет то, чего сборка не кладёт: {stale}"
