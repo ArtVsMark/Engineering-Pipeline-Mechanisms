@@ -151,14 +151,13 @@
           "python3",
           "-I",
           "-c",
-          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted([b.FACTS, b.UNIFIED, *b.BADGES]), sep='\\n')"
+          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted([b.FACTS, b.UNIFIED, *b.BADGES, *b.PICTURES]), sep='\\n')"
         ],
         "allowed": [
           "coverage.json",
           "facts.json",
-          "family.json",
+          "project.svg",
           "python.svg",
-          "rules.json",
           "version.json"
         ],
         "why": "предмет — то, что проект издаёт для чужого прочтения; сборщик витрины издаёт числа о проекте и значки, а не перечень требований — новое изданное перечитывается на него",

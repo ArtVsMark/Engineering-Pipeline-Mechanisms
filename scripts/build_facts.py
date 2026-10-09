@@ -446,7 +446,7 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
 
 def published_names() -> list[str]:
     """Всё, что сборка кладёт в каталог публикации: факты и значки."""
-    return [FACTS, *BADGES, *AHEAD]
+    return [FACTS, *BADGES, *PICTURES]
 
 
 #: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
@@ -511,59 +511,6 @@ def clashing_names() -> list[str]:
 #: и у дрейфа: три понимания одного слова разошлись бы молча (090).
 #: Виды механизма — из общего места (`scripts/kinds.py`), а не своей копией.
 MACHINE: Final = kinds.MACHINE
-
-
-def rules_badge(facts: dict[str, Any]) -> Badge:
-    """Сколько ДЕЙСТВУЮЩИХ правил держится машиной, а не документом.
-
-    ПОЧЕМУ НЕ «ОТВЕЧЕНО». Прежняя редакция показывала `answered/total` и
-    подписывала это «правил держится». Число было `195/195` и не могло стать
-    другим: проект отвечает по каждому правилу каталога по построению (129).
-    Значок, который не движется, — украшение: он не говорит, где проект стоит, и
-    не может сказать, что тот сдвинулся. Нашёл это владелец, спросив, почему
-    статистика собирается не вся.
-
-    ЗНАМЕНАТЕЛЬ — ДЕЙСТВУЮЩИЕ, А НЕ ВСЕ. Неприменимое правило машиной не
-    держится и держаться не должно; считать его в знаменателе значило бы
-    занижать долю за то, у чего нет предмета (154).
-    """
-    kinds = facts["rules"]["by_mechanism"]
-    machine = sum(int(count) for name, count in kinds.items() if name in MACHINE)
-    active = sum(int(count) for count in kinds.values())
-    share = machine / active if active else 0.0
-    color = "#e05d44" if share < 0.34 else "#dfb317" if share < 0.67 else "#4c1"
-    return badge("держится машиной", f"{machine}/{active}", color)
-
-
-def family_badge(facts: dict[str, Any]) -> Badge:
-    """Кто из семьи взял наше: проекты и шаги вызовом, правила гейтом (#1199).
-
-    Решение владельца 07.10.2026: три числа с числителем и знаменателем —
-    «взяли вызовом» по обходу клонов и «взяли гейт» по объявленному
-    происхождению. Непрочитанное говорит «не прочитано» на своём месте, а не
-    ноль; непрочитанные клоны названы числом рядом (045). Все числа — из
-    фактов: значок их только показывает (122).
-    """
-    picture = facts.get("family") or {}
-    taken = picture.get("uptake") or {}
-    adopted = picture.get("adopted") if picture.get("read") else None
-    if not taken.get("read") and not isinstance(adopted, dict):
-        return badge("общие механизмы", "нет данных", "#9f9f9f")
-    if taken.get("read"):
-        projects, steps = taken["projects"], taken["steps"]
-        unread = f" ({projects['unread']} не прочитано)" if projects.get("unread") else ""
-        called = (
-            f"{projects['took']}/{projects['of']} проектов{unread}"
-            f" · {steps['taken']}/{steps['of']} шагов"
-        )
-        took = int(projects["took"])
-    else:
-        called, took = "вызовы не прочитаны", 0
-    if isinstance(adopted, dict):
-        gate, ours = f"гейт {adopted['ours']}/{adopted['of']} правил", int(adopted["ours"])
-    else:
-        gate, ours = "гейт: нет данных", 0
-    return badge("общие механизмы", f"{called} · {gate}", "#4c1" if took or ours else "#dfb317")
 
 
 #: Что значок проекта говорит на месте числа, которого нет: незнание — не ноль (045).
@@ -667,8 +614,8 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
     несёт только числа, каждое с числителем и знаменателем. «Кем» — поимённо
     в фактах (`family.uptake.by`), а не в значке. Вид — как у единого значка
     каталога, справа от каждого числа — его процент (решения владельца
-    09.10.2026). Пока витрина показывает прежние два значка, этот рисуется
-    рядом (`AHEAD`): переход — вторым изменением (196).
+    09.10.2026). Витрина перешла на него вторым изменением, после первого
+    прогона публикации (196).
 
     «ГЕЙТ В ХОДУ» — ПО ВЫЗОВУ НАШЕГО ШАГА ПО ТЕГУ (#1199): отдаваемый шаг,
     который зовёт хотя бы один проект семьи. Объявленное потребителем
@@ -766,19 +713,17 @@ def version_badge(facts: dict[str, Any]) -> Badge:
 #: стороны узнают о нём в тот же миг
 #: ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
 BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
-    "rules.json": rules_badge,
-    "family.json": family_badge,
     "version.json": version_badge,
     "coverage.json": coverage_badge,
 }
 
-#: РИСУЕТСЯ ВПРОК: значок проекта видом значка каталога (#1213). Ссылка на
-#: производное въезжает в витрину только ПОСЛЕ того, как оно нарисовано
-#: (правило 196, гейт `check_derived_refs`): этим изменением сборка начинает
-#: класть `project.svg` на ветку `badges`, а витрина переходит на него вторым
-#: изменением — тогда же уходят `rules.json` и `family.json`, а эта запись
-#: переезжает в инвентарь показанного. Так же шёл переход на значки семьи (#1026).
-AHEAD: Final[dict[str, Callable[[dict[str, Any]], list[list[Part]]]]] = {
+#: КАРТИНКИ, которые сборка рисует сама — SVG зонами, видом единого значка
+#: каталога, а не shields-endpoint: имя файла → чем собираются его зоны.
+#: Инвентарь второй, а не общий с `BADGES`: форма вывода другая, но гейты
+#: витрины, публикации и «число только из фактов» читают оба (#1213).
+#: Значок проекта сменил «держится машиной» и «общие механизмы» вторым шагом
+#: после того, как прогон публикации его нарисовал (196, #1259).
+PICTURES: Final[dict[str, Callable[[dict[str, Any]], list[list[Part]]]]] = {
     "project.svg": project_zones,
 }
 
@@ -828,7 +773,7 @@ def draw_badges(facts: dict[str, Any], out: Path) -> None:
     for name, draw in BADGES.items():
         said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
         (out / name).write_text(said, encoding="utf-8")
-    for name, zones in AHEAD.items():
+    for name, zones in PICTURES.items():
         (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
 
 
@@ -877,7 +822,7 @@ def drawn_from(path: Path, out_dir: str) -> int:
     except (KeyError, TypeError) as exc:
         print(f"значки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    print(f"значки нарисованы по {path}: {', '.join(sorted(BADGES))}")
+    print(f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}")
     return EXIT_OK
 
 
