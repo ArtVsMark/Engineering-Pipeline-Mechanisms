@@ -10,6 +10,7 @@ import fnmatch
 import json
 import re
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any, Final
 
@@ -374,6 +375,92 @@ def test_project_settings_grant_no_rights() -> None:
 def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
     """Разрешения в настройках и хук вне своего каталога дают отказ — проба."""
     assert settings_problems(settings), f"канал прав в настройках прошёл молча: {settings}"
+
+
+#: Что агент прочтёт из дерева головы как свои права, — ЗАКРЫТЫЙ ПЕРЕЧЕНЬ ВСЕГО
+#: `.claude/`, а не перечень форм (068, 210). Прежде гейт перечислял каналы
+#: шаблонами `*.json`, и взгляды находили соседей по одному: `settings.local.json`
+#: и `.mcp.json` (#1232), затем `allowed-tools` навыков, `.claude/agents/*.md` и
+#: `.claude/commands/*.md` (#1251). Теперь разрешено ровно то, что есть: настройки,
+#: сценарии хуков и `SKILL.md` навыков, — любой другой путь под `.claude/` и любой
+#: `.mcp.json` в дереве дают отказ, а навык не объявляет `allowed-tools`.
+CLAUDE_TREE: Final = re.compile(r"\.claude/(?:settings\.json|hooks/[^/]+|skills/[^/]+/SKILL\.md)")
+#: Права навыку объявляет его шапка; в наших навыках их нет, и не будет молча.
+GRANTS_RE: Final = re.compile(r"^allowed-tools\s*:", re.M)
+
+
+def tracked_channels(root: Path = ROOT) -> set[str]:
+    """Отслеживаемые пути, откуда агент берёт права: весь `.claude/` и любой `.mcp.json`."""
+    done = subprocess.run(
+        ["git", "ls-files", "-z", "--", ".claude", ":(glob)**/.mcp.json"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return {one for one in done.stdout.split("\0") if one}
+
+
+def tree_channel_problems(root: Path = ROOT) -> list[str]:
+    """Пути вне перечня `CLAUDE_TREE` и навыки, объявляющие себе права."""
+    tracked = sorted(tracked_channels(root))
+    problems = [
+        f"канал прав агента вне перечня: {one}" for one in tracked if not CLAUDE_TREE.fullmatch(one)
+    ]
+    for one in tracked:
+        if one.endswith("/SKILL.md"):
+            head = (root / one).read_text(encoding="utf-8").split("\n---", 1)[0]
+            if GRANTS_RE.search(head):
+                problems.append(f"навык объявляет себе права: {one}")
+    return problems
+
+
+def test_no_other_settings_channel_is_tracked() -> None:
+    """Под `.claude/` только настройки, хуки и навыки без прав; `.mcp.json` нет.
+
+    ПРЕДЕЛ НАЗВАН: судится ОТСЛЕЖИВАЕМОЕ — в чекауте прогона только оно и есть,
+    а неотслеживаемый `settings.local.json` в окне агенту CI не виден.
+    """
+    assert not tree_channel_problems(), tree_channel_problems()
+
+
+def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
+    """Проба: каждый известный канал прав в индексе даёт отказ, а свой перечень — нет."""
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    files = {
+        ".claude/settings.json": "{}",
+        ".claude/hooks/start.sh": "",
+        ".claude/skills/ok/SKILL.md": "---\nname: ok\n---\n",
+        ".claude/settings.local.json": "{}",
+        ".claude/agents/a.md": "",
+        ".claude/commands/c.md": "",
+        ".claude/hooks/deep/x.json": "{}",
+        ".mcp.json": "{}",
+        "sub/.mcp.json": "{}",
+        ".claude/skills/bad/SKILL.md": "---\nname: bad\nallowed-tools: Bash\n---\n",
+    }
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    git("add", "-A")
+    said = tree_channel_problems(tmp_path)
+    refused = sorted(name for name in files if any(line.endswith(f": {name}") for line in said))
+    assert refused == sorted(
+        [
+            ".claude/settings.local.json",
+            ".claude/agents/a.md",
+            ".claude/commands/c.md",
+            ".claude/hooks/deep/x.json",
+            ".mcp.json",
+            "sub/.mcp.json",
+            ".claude/skills/bad/SKILL.md",
+        ]
+    ), said
 
 
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
