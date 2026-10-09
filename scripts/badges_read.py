@@ -23,7 +23,7 @@ from typing import Any, Final
 import ghrest
 import paths
 
-#: Ветка-сирота производного (125).
+#: Ветка производного (125): начата сиротой, ведётся коммитами поверх, без `--force` (#1001).
 BRANCH: Final = "badges"
 
 
