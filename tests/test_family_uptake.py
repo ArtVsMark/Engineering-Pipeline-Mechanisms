@@ -11,8 +11,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("family_uptake.py")
 
@@ -345,6 +346,27 @@ def test_a_spent_budget_keeps_what_was_read(
     seen, unread = module.sweep(["o/a", "o/b"], tmp_path, budget=10, clock=lambda: next(ticks))
     assert [one.repo for one in seen] == ["o/a"] and unread == ["o/b"]
     assert asked == [10.0], "ожидание git не урезано до остатка бюджета"
+
+
+def test_the_step_limit_covers_the_worst_sweep() -> None:
+    """Предел шага обхода в `badges.yml` выше худшего случая самого обхода.
+
+    Худший случай — `2 × BUDGET`: последний начатый сосед получает остаток на
+    оба вызова git. Связь держит этот тест, а не комментарий: поднятый `BUDGET`
+    при прежнем пределе снял бы шаг раньше обхода, и файл пропал бы вместе с
+    прочитанными клонами (взгляд на #1246).
+    """
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "badges.yml").read_text("utf-8"))
+    limits = [
+        step.get("timeout-minutes")
+        for job in flow["jobs"].values()
+        for step in job.get("steps") or []
+        if "family_uptake.py" in str(step.get("run") or "")
+    ]
+    assert limits, "шаг обхода клонов в badges.yml не найден или без своего предела (075)"
+    assert all(limit is not None and limit * 60 > 2 * module.BUDGET for limit in limits), (
+        f"предел шага {limits} мин не выше худшего случая обхода 2×{module.BUDGET} с"
+    )
 
 
 def test_offered_names_drop_the_file_prefix() -> None:
