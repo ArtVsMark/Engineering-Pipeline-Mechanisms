@@ -365,6 +365,23 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     )
 
 
+def test_every_page_the_build_lays_is_linked() -> None:
+    """Страница, положенная сборкой, связана из витрины — или объявлена впрок (195, #1268).
+
+    Сверка значков выше читает `BADGES | PICTURES`; страница — соседний случай
+    того же предмета, и без этой проверки ссылка на неё держалась бы ничем.
+    """
+    assert facts.PAGES, "сборка не кладёт ни одной страницы — предмет проверки не найден (075)"
+    assert set(facts.PAGES) >= facts.AHEAD, f"впрок объявлено не страница: {sorted(facts.AHEAD)}"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    unlinked = sorted(
+        name
+        for name in set(facts.PAGES) - facts.AHEAD
+        if f"/badges/.github/badges/{name}" not in readme
+    )
+    assert not unlinked, f"страница кладётся, а витрина на неё не ведёт: {unlinked}"
+
+
 def push_command(step: str) -> str:
     """Склеивает команду толчка вместе с её переносами строк."""
     joined = step.replace("\\\n", " ")

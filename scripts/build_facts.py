@@ -445,7 +445,7 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
 
 
 def published_names() -> list[str]:
-    """Всё, что сборка кладёт в каталог публикации: факты и значки."""
+    """Всё, что сборка кладёт в каталог публикации: факты, значки, картинки и страницы."""
     return [FACTS, *BADGES, *PICTURES, *PAGES]
 
 
@@ -769,6 +769,10 @@ def who_page(facts: dict[str, Any]) -> str:
 PAGES: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
     "who.md": who_page,
 }
+#: Страницы, которые сборка кладёт ВПРОК, до ссылки из витрины (196): ссылка
+#: на ненарисованное попала бы в main раньше файла. Второй шаг ставит ссылку и
+#: убирает имя отсюда; гейт `tests/test_facts.py` требует ссылку у всех прочих.
+AHEAD: Final = frozenset({"who.md"})
 
 #: ЕДИНЫЙ ЗНАЧОК РИСУЕТ НЕ СБОРКА, А ДЕЙСТВИЕ КАТАЛОГА (#1019): «Python │ ОС │
 #: coverage │ release / PyPI │ version» собирает `python-badge` шагом
@@ -867,7 +871,10 @@ def drawn_from(path: Path, out_dir: str) -> int:
     except (KeyError, TypeError) as exc:
         print(f"значки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    print(f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES, *PAGES]))}")
+    print(
+        f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}; "
+        f"страницы: {', '.join(sorted(PAGES))}"
+    )
     return EXIT_OK
 
 
