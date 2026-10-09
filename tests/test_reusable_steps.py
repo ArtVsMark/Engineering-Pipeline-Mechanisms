@@ -481,3 +481,22 @@ def test_a_run_group_does_not_pass_on_a_matching_condition() -> None:
     with pytest.raises(AssertionError, match="группе ПРОГОНА"):
         test_a_queue_does_not_take_what_the_step_skips("x.yml", "j", True, {"if": condition}, step)
     test_a_queue_does_not_take_what_the_step_skips("x.yml", "j", False, {"if": condition}, step)
+
+
+def test_no_run_reads_or_runs_from_the_shared_tmp() -> None:
+    """Прогоны не кладут и не берут файлы в общем `/tmp` — только в `$RUNNER_TEMP` (081, #1270).
+
+    Общий временный каталог — недоверенный вход: в него пишут другие, и имя,
+    положенное заранее, подхватится раньше нашего кода. Признак взят строгий,
+    по всему `/tmp`, а не «исполняется ли файл»: исполнение неявно (путь поиска
+    модулей, рядом лежащий файл), и разбор «исполняемо ли» пропустил бы его.
+    Замер 09.10.2026: четыре строки в одном прогоне, все с данными, перенесены.
+    """
+    folder = ROOT / ".github"
+    used = [
+        f"{path.relative_to(ROOT)}:{number}"
+        for path in sorted(walk(folder, "*.y*ml"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"(?<![\w$}])/tmp\b", line)
+    ]
+    assert not used, f"общий /tmp в прогонах — берите $RUNNER_TEMP: {used}"
