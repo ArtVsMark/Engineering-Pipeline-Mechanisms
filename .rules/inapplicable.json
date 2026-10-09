@@ -103,8 +103,8 @@
       "argv": [
         "git",
         "grep",
-        "-ohE",
-        "https?://[A-Za-z0-9.-]+",
+        "-ohP",
+        "(?<!xmlns=\")https?://[A-Za-z0-9.-]+",
         "--",
         "scripts",
         "packages",
@@ -116,7 +116,7 @@
         "https://raw.githubusercontent.com",
         "https://x-access-token"
       ],
-      "why": "сбор данных наружу начинается с адреса, который не площадка и не каталог; x-access-token — форма git-адреса площадки с токеном, а не хост",
+      "why": "сбор данных наружу начинается с адреса, который не площадка и не каталог; x-access-token — форма git-адреса площадки с токеном, а не хост; имя пространства XML (`xmlns=…` в SVG значка проекта, #1213) адресом не считается — образец его пропускает, а не разрешает хост: настоящий запрос к тому же хосту краснеет",
       "border": "первом адресе, который не площадка и не каталог"
     },
     "120": [
@@ -151,15 +151,15 @@
           "python3",
           "-I",
           "-c",
-          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted([b.FACTS, b.UNIFIED, *b.BADGES]), sep='\\n')"
+          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted([b.FACTS, b.UNIFIED, *b.BADGES, *b.PICTURES, *b.PAGES]), sep='\\n')"
         ],
         "allowed": [
           "coverage.json",
           "facts.json",
-          "family.json",
+          "project.svg",
           "python.svg",
-          "rules.json",
-          "version.json"
+          "version.json",
+          "who.md"
         ],
         "why": "предмет — то, что проект издаёт для чужого прочтения; сборщик витрины издаёт числа о проекте и значки, а не перечень требований — новое изданное перечитывается на него",
         "border": "издавать наружу список требований ОТДЕЛЬНО от их исполнения"

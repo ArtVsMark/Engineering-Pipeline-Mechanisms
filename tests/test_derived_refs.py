@@ -73,11 +73,23 @@ def test_the_readme_badges_are_seen_by_this_parser() -> None:
     Без этой строки гейт мог бы разбирать форму, которой в дереве нет, и молчать
     ровно про тот случай, ради которого построен.
     """
-    from tests.conftest import ROOT
+    from tests.conftest import ROOT, badges_shown
 
-    readme = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
-    seen = module.ours(readme, OURS)
-    assert len(seen) >= 3, f"значков витрины разобрано {len(seen)} — разбор их не видит"
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    seen = module.ours(text.splitlines(), OURS)
+    # Сколько значков на витрине, говорит НЕЗАВИСИМЫЙ разбор витрины, а не
+    # рукописный пол: пол «не меньше трёх» краснел, стоило витрине сократиться
+    # по решению владельца (#1213), и ничего не говорил о том, видит ли разбор
+    # ВСЕ значки (005).
+    shown = badges_shown(text)
+    assert shown, "витрина без значков — предмет проверки не найден (075)"
+    # Страницы (`build_facts.PAGES`) витрина называет ссылкой, а не значком:
+    # разбор видит их тоже, и сверка с показанными значками их не считает (#1213).
+    pages = set(load_script("build_facts.py").PAGES)
+    seen_badges = [one for one in seen if one[1].rpartition("/")[2] not in pages]
+    assert len(seen_badges) == len(shown), (
+        f"разбор видит {seen_badges}, витрина показывает {sorted(shown)}"
+    )
     assert {ref for ref, _ in seen} == {"badges"}, seen
 
 

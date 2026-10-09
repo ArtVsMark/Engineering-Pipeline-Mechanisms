@@ -270,7 +270,8 @@ def test_a_module_that_knows_the_version_form_does_not_cut_it() -> None:
     тоже не видит.
     """
     cut = []
-    for path in walk(ROOT / "scripts", "*.py"):
+    # Корни — те же `paths.SOURCES`, что у остальных гейтов модуля (#1254).
+    for path in modules():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         if not knows_the_version_form(tree):
             continue

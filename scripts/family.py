@@ -109,7 +109,14 @@ KINDS: Final = kinds.MACHINE
 #: происхождения. Остальные читатели перечитаны: `build_facts` — тем же `load`;
 #: `drift` — только `mechanism` и `findings`; `family_uptake` — только
 #: `consumers[].repo`. Им подъём ничего не меняет.
-READS_SCHEMA: Final = "1.6"
+#:
+#: ПЕРЕЧИТАНО 09.10.2026 ПОД 1.7 (дрейф #193, #1274). Подъём прибавил раздел
+#: `notes` — заметки и замеры проектов по правилам — и у ответов 1.9 слово
+#: `origin_kind: own` без `origin`. Разрез `notes` не читает, а `adopted`
+#: считает по `origin`, ведущему к нам: `own` без адреса в него не входит, то
+#: есть «разработан здесь» у соседа нашим не засчитывается. Прочие читатели
+#: тех полей не трогают.
+READS_SCHEMA: Final = "1.7"
 #: Модули, читающие сводку семьи: через `family.load` или по адресу
 #: `catalogue.WHERE_URL`. Перечень, а не счёт в прозе — его держит тест.
 SUMMARY_READERS: Final = frozenset({"family", "build_facts", "drift", "family_uptake"})
