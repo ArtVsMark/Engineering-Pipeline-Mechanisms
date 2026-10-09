@@ -39,20 +39,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, code_files, walk
-
-
-def where_files() -> list[Path]:
-    """Где ищем образцы: набор, механизмы, перехваты и общий низ.
-
-    Код и набор — общим обходчиком `code_files` (вглубь), прочие корни — свои
-    (взгляд на #1252: восемь копий обхода пропустили бы вложенное одинаково).
-    """
-    return [
-        *code_files(with_tests=True),
-        *walk(ROOT / ".claude/hooks", "*.py"),
-    ]
-
+from tests.conftest import ROOT, code_files
 
 #: Как узнают образец, разбирающий вызов: ИМЯ вплотную к экранированной скобке.
 #: Скобка Markdown (`](`) сюда не попадает намеренно — там перед скобкой не имя.
@@ -78,7 +65,7 @@ PARSES_SOMETHING_ELSE: Final = {
 def patterns() -> list[tuple[Path, int, str]]:
     """Все образцы дерева, отданные разбору: файл, строка, сам образец."""
     found: list[tuple[Path, int, str]] = []
-    for path in where_files():
+    for path in code_files(with_tests=True, with_hooks=True):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, ast.Call) or not node.args:
                 continue

@@ -315,7 +315,13 @@ def found_by(where: Path, pattern: str) -> list[Path]:
     return sorted(where.glob(pattern)) if where.is_dir() else []
 
 
-def code_files(*, with_tests: bool = False, root: Path = ROOT) -> list[Path]:
+#: Корень перехватов перед git: код окна, не источник проекта и не набор.
+HOOKS: Final = Path(".claude/hooks")
+
+
+def code_files(
+    *, with_tests: bool = False, with_hooks: bool = False, root: Path = ROOT
+) -> list[Path]:
     """Файлы кода проекта — из ОБЪЯВЛЕННОГО списка, а не из глоба по каталогу.
 
     Где живёт код, названо один раз — `scripts/paths.py::SOURCES`, — и до сих
@@ -326,40 +332,50 @@ def code_files(*, with_tests: bool = False, root: Path = ROOT) -> list[Path]:
     ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md),
     [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
 
-    Набор добавляется отдельным словом: он не «источник проекта» — потребители
-    его не ставят, — но правилам прозы и живых ссылок подчиняется наравне.
+    Набор и перехваты перед git добавляются отдельными словами: они не
+    «источник проекта» — потребители их не ставят, — но гейтам кода
+    подчиняются наравне. ОДИН ОБХОДЧИК НА ВСЕ КОРНИ (взгляд на #1298): прежде
+    набор и перехваты обходились своими копиями первым уровнем, и копий
+    `where_files` было четыре.
 
-    ВГЛУБЬ, А НЕ ПЕРВЫМ УРОВНЕМ (взгляд на #1252). Вложенный каталог источника
-    неглубокий обход пропускал молча, а сверка пакетов
-    (`test_every_package_is_a_declared_source`) ищет вглубь и такой пакет
-    принимает. Гейты, бравшие свои копии обхода, теперь берут его здесь: копий
-    было восемь, и каждая пропустила бы вложенное одинаково.
+    ВГЛУБЬ, А НЕ ПЕРВЫМ УРОВНЕМ (взгляд на #1252) — для каждого корня.
+    Вложенный каталог неглубокий обход пропускал молча, а сверка пакетов
+    (`test_every_package_is_a_declared_source`) ищет вглубь.
 
-    ТОЛЬКО ОТСЛЕЖИВАЕМОЕ (CI на #1298). Вглубь лежит и то, что кодом проекта не
-    является: установка пакета оставляет `packages/transport/build/lib/` с
-    копиями модулей, и гейты «одно тело — один модуль» увидели бы их дублями.
-    Код — то, что в индексе git; сборка и `__pycache__` в нём не лежат.
+    КОД — ТО, ЧТО GIT СЧИТАЕТ ДЕРЕВОМ: отслеживаемое и новое, не игнорируемое
+    (`git ls-files --cached --others --exclude-standard`; CI и взгляд на
+    #1298). Глубокий обход видит и сборку: установка пакета оставляет
+    `packages/transport/build/lib/` с копиями модулей, и гейты «одно тело —
+    один модуль» увидели бы их дублями. `build/` и `__pycache__` игнорирует
+    `.gitignore`, а новый модуль до `git add` виден: гейт не зеленеет на
+    непроверенном файле. Цена названа: файл, который `.gitignore` прячет,
+    гейты не судят. Вне рабочего дерева git — отказ с причиной (075).
     """
     paths = load_script("paths.py")
-    tracked = set(
-        subprocess.run(
-            ["git", "ls-files", "-z", "--", *(where.as_posix() for where in paths.SOURCES)],
+    roots = [*paths.SOURCES, *(["tests"] if with_tests else []), *([HOOKS] if with_hooks else [])]
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"]
+            + [Path(where).as_posix() for where in roots],
             cwd=root,
             capture_output=True,
             text=True,
             encoding="utf-8",
             check=True,
         ).stdout.split("\0")
-    )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise AssertionError(
+            f"код проекта не перечислен: {root} не рабочее дерево git ({exc}) — "
+            "гейтам кода судить нечего, и это отказ, а не пустота (075)"
+        ) from exc
+    seen = set(listed)
     found: list[Path] = []
-    for where in paths.SOURCES:
+    for where in roots:
         found += [
             one
             for one in walk_deep(root / where, "*.py")
-            if one.relative_to(root).as_posix() in tracked
+            if one.relative_to(root).as_posix() in seen
         ]
-    if with_tests:
-        found += walk(root / "tests", "*.py")
     return found
 
 

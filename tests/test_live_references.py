@@ -419,10 +419,11 @@ def test_code_files_reach_a_nested_source(tmp_path: Path) -> None:
     Неглубокий обход пропускал вложенное молча, а восемь гейтов брали его
     копии: каждый пропустил бы одно и то же.
 
-    Сосед (CI на #1298): неотслеживаемая копия сборки `build/lib/` лежит
-    вглубь того же источника и кодом не считается.
+    Соседи (CI и взгляд на #1298): копия сборки `build/lib/`, которую прячет
+    `.gitignore`, кодом не считается; новый модуль до `git add` — считается.
     """
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("build/\n", encoding="utf-8")
     for where in load_script("paths.py").SOURCES:
         (tmp_path / where / "nested").mkdir(parents=True)
         (tmp_path / where / "top.py").write_text("x = 1\n", encoding="utf-8")
@@ -431,7 +432,18 @@ def test_code_files_reach_a_nested_source(tmp_path: Path) -> None:
     for where in load_script("paths.py").SOURCES:
         (tmp_path / where / "build" / "lib").mkdir(parents=True)
         (tmp_path / where / "build" / "lib" / "top.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / where / "fresh.py").write_text("x = 1\n", encoding="utf-8")
     found = {one.relative_to(tmp_path).as_posix() for one in code_files(root=tmp_path)}
     for where in load_script("paths.py").SOURCES:
         assert f"{where.as_posix()}/nested/deep.py" in found, sorted(found)
+        assert f"{where.as_posix()}/fresh.py" in found, sorted(found)
         assert f"{where.as_posix()}/build/lib/top.py" not in found, sorted(found)
+
+
+def test_code_files_outside_git_is_a_named_refusal(tmp_path: Path) -> None:
+    """Вне рабочего дерева git обходчик отказывает словами проекта, а не трассой (075, #1298)."""
+    for where in load_script("paths.py").SOURCES:
+        (tmp_path / where).mkdir(parents=True)
+        (tmp_path / where / "top.py").write_text("x = 1\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="не рабочее дерево git"):
+        code_files(root=tmp_path)

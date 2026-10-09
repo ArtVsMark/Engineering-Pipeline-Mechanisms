@@ -35,20 +35,7 @@ import re
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, code_files, walk
-
-
-def where_files() -> list[Path]:
-    """Где живут механизмы: их сообщения читает окно и владелец.
-
-    Код и набор — общим обходчиком `code_files` (вглубь), прочие корни — свои
-    (взгляд на #1252: восемь копий обхода пропустили бы вложенное одинаково).
-    """
-    return [
-        *code_files(with_tests=False),
-        *walk(ROOT / ".claude/hooks", "*.py"),
-    ]
-
+from tests.conftest import ROOT, code_files
 
 #: Что считается путём НАШЕГО дерева. Список приставок закрытый: «похоже на
 #: путь» приняло бы и чужой адрес, и кусок URL
@@ -89,7 +76,7 @@ def prose_of(tree: ast.AST) -> set[int]:
 def paths_in_messages() -> list[tuple[Path, int, str]]:
     """Пути, названные сообщениями механизмов: файл, строка, адрес."""
     found: list[tuple[Path, int, str]] = []
-    for path in where_files():
+    for path in code_files(with_tests=False, with_hooks=True):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         prose = prose_of(tree)
         for node in ast.walk(tree):
@@ -138,7 +125,7 @@ def test_a_dead_path_in_prose_is_not_judged() -> None:
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     prose_paths: list[str] = []
-    for path in where_files():
+    for path in code_files(with_tests=False, with_hooks=True):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         prose = prose_of(tree)
         for node in ast.walk(tree):

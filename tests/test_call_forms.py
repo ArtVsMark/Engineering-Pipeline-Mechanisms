@@ -46,20 +46,7 @@ import ast
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, code_files, walk
-
-
-def where_files() -> list[Path]:
-    """Где ищем разборы: набор, механизмы, перехваты перед git и общий низ.
-
-    Код и набор — общим обходчиком `code_files` (вглубь), прочие корни — свои
-    (взгляд на #1252: восемь копий обхода пропустили бы вложенное одинаково).
-    """
-    return [
-        *code_files(with_tests=True),
-        *walk(ROOT / ".claude/hooks", "*.py"),
-    ]
-
+from tests.conftest import ROOT, code_files
 
 #: Поле вызова, чтение которого и делает функцию разборщиком.
 THE_CALL: Final = "func"
@@ -120,9 +107,7 @@ def parsers() -> list[tuple[Path, ast.FunctionDef]]:
     форму имени.
     """
     found: list[tuple[Path, ast.FunctionDef]] = []
-    for path in where_files():
-        if "__pycache__" in path.parts:
-            continue
+    for path in code_files(with_tests=True, with_hooks=True):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef) and any(forms_of(fn)):

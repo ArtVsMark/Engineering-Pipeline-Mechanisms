@@ -38,20 +38,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, code_files, walk
-
-
-def where_files() -> list[Path]:
-    """Где живут механизмы, чьи находки читает человек.
-
-    Код и набор — общим обходчиком `code_files` (вглубь), прочие корни — свои
-    (взгляд на #1252: восемь копий обхода пропустили бы вложенное одинаково).
-    """
-    return [
-        *code_files(with_tests=False),
-        *walk(ROOT / ".claude/hooks", "*.py"),
-    ]
-
+from tests.conftest import ROOT, code_files
 
 #: Чем копят находки.
 COLLECTS: Final = frozenset({"append", "extend"})
@@ -86,7 +73,7 @@ def inside(node: ast.AST) -> Iterator[ast.AST]:
 def collectors() -> list[tuple[Path, ast.FunctionDef]]:
     """Функции, которые КОПЯТ находки в список и им же заканчиваются."""
     found: list[tuple[Path, ast.FunctionDef]] = []
-    for path in where_files():
+    for path in code_files(with_tests=False, with_hooks=True):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef) or not node.body:
