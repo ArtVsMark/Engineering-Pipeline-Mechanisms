@@ -11,8 +11,9 @@
 """
 
 import ast
+from collections.abc import Iterator
 from dataclasses import replace
-from typing import Any, Final
+from typing import Any, Final, TypeGuard
 
 import pytest
 
@@ -2350,9 +2351,10 @@ def test_look_records_take_both_names_and_nothing_else(monkeypatch: pytest.Monke
 #: подставленным именем — и относили его к «не ждёт», так что новый выход
 #: ожидания, забывший поставить ступень, проходил зелёным. Теперь у каждого
 #: ключа объявлено число выходов: новый выход меняет счёт и краснеет, под
-#: каким бы ключом он ни встал. Замер 08.10.2026 разбором `skip_exits`.
+#: каким бы ключом он ни встал. Замер 09.10.2026 разбором `skip_exits`: число —
+#: выходы в коде, вложенный выход объемлющему блоку не засчитан (взгляд на #1253).
 SKIP_WAITS_FOR_LOOK: Final[dict[str, tuple[bool, int]]] = {
-    "пусты": (False, 3),
+    "пусты": (False, 2),
     "красны": (False, 1),
     "конфликтуют": (False, 1),
     "ждут починки находок": (False, 1),
@@ -2364,11 +2366,38 @@ SKIP_WAITS_FOR_LOOK: Final[dict[str, tuple[bool, int]]] = {
 }
 
 
+#: Поля узла, где лежат вложенные блоки инструкций.
+BLOCK_FIELDS: Final = ("body", "orelse", "finalbody")
+
+
+def ends_in_continue(block: object) -> TypeGuard[list[ast.stmt]]:
+    """Блок инструкций, кончающийся `continue`, — выход из цикла голов."""
+    return isinstance(block, list) and bool(block) and isinstance(block[-1], ast.Continue)
+
+
+def own_nodes(statement: ast.AST) -> Iterator[ast.AST]:
+    """Узлы инструкции БЕЗ вложенных выходов: их счётчики — свои, а не объемлющего.
+
+    Блок красной головы держит внутри выход «пусты»; обход целиком засчитывал
+    его счётчик и красному блоку, и «пусты» насчитывал три выхода при двух в
+    коде (взгляд на #1253).
+    """
+    yield statement
+    for name, value in ast.iter_fields(statement):
+        if name in BLOCK_FIELDS and ends_in_continue(value):
+            continue
+        children = value if isinstance(value, list) else [value]
+        for child in children:
+            if isinstance(child, ast.AST):
+                yield from own_nodes(child)
+
+
 def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     """Блоки цикла голов, кончающиеся `continue`: их счётчики пропуска и ставят ли они ступень.
 
     Счётчик с подставленным именем (`f"в состоянии «…»"`) называется `<состояние>`,
-    блок без счётчика (отказ взведения) — пустым набором.
+    блок без счётчика (отказ взведения) — пустым набором. Вложенный выход
+    считается своим блоком и объемлющему не засчитывается (`own_nodes`).
     """
     loop = next(
         node
@@ -2378,16 +2407,16 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     )
     found = []
     for node in ast.walk(loop):
-        for field in ("body", "orelse", "finalbody"):
+        for field in BLOCK_FIELDS:
             block = getattr(node, field, None)
-            if not isinstance(block, list) or not block or not isinstance(block[-1], ast.Continue):
+            if not ends_in_continue(block):
                 continue
             if node is loop and field == "body":
                 continue
             keys = frozenset(
                 str(one.slice.value) if isinstance(one.slice, ast.Constant) else "<состояние>"
                 for statement in block
-                for one in ast.walk(statement)
+                for one in own_nodes(statement)
                 if isinstance(one, ast.Subscript)
                 and isinstance(one.value, ast.Name)
                 and one.value.id == "skipped"
@@ -2399,7 +2428,7 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
                     for target in one.targets
                 )
                 for statement in block
-                for one in ast.walk(statement)
+                for one in own_nodes(statement)
             )
             found.append((keys, sets))
     return found
