@@ -177,6 +177,9 @@ ONBOARDING: Final = Path("docs/use/onboarding.md")
 #: бы поиском по строке
 #: ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md),
 #: [090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+#: У ПОТРЕБИТЕЛЯ ЭТО ТРЕБОВАНИЕ, А НЕ УГАДЫВАНИЕ (#1220): общая ветка обязана
+#: зваться так же, и подключение (`onboard.py --write`) сверяет это по
+#: `origin/HEAD`, отказывая на другой ветке.
 TRUNK: Final = "main"
 
 ALL: Final = (
