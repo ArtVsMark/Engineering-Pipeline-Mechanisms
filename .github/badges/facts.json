@@ -2,8 +2,8 @@
   "schema": "1.3",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-09T17:23:36+00:00",
-  "commit": "49a8ba9d1227131b75889e869143fc9359319ed4",
+  "generated_at": "2026-10-09T17:28:13+00:00",
+  "commit": "9ccda264c3ef84c5a07758b9c2059d2b17f29fcd",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -18,7 +18,7 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.5.73",
+  "version": "1.5.74",
   "version_whole": true,
   "release": "1.5",
   "coverage": {
@@ -29,7 +29,7 @@
   "coverage_percent": 93.0,
   "contract": "0.7.0",
   "tests": {
-    "functions": 3292,
+    "functions": 3295,
     "modules": 153
   },
   "scripts": {
@@ -47,8 +47,8 @@
     },
     "by_mechanism": {
       "document": 4,
-      "gate": 182,
-      "pipeline": 21,
+      "gate": 183,
+      "pipeline": 20,
       "skill": 2
     }
   },
