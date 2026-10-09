@@ -710,7 +710,10 @@ def unread_in(read: dict[str, object]) -> dict[int, list[str]]:
 
 def sources_said(skip: Iterable[int] = ()) -> str:
     """Источники долга словами — из `BEFORE_PLAN`, а не рукой."""
-    return ", ".join(str(one) for one in BEFORE_PLAN if one not in set(skip))
+    # Множество — ДО генератора: одноразовый итератор расходовался бы на первой
+    # проверке, и пропуск терялся (взгляд на #1267).
+    skipped = set(skip)
+    return ", ".join(str(one) for one in BEFORE_PLAN if one not in skipped)
 
 
 def remind(has_debt: bool, unread: dict[int, list[str]] | None = None) -> None:
@@ -905,8 +908,12 @@ def main(argv: list[str] | None = None) -> int:
             "rules_left": rules_left(numbers, note),
         }
     )
-    remind(before_plan(owed_by(read)), unread_in(read))
-    return EXIT_PARTIAL if partial else EXIT_OK
+    unread = unread_in(read)
+    remind(before_plan(owed_by(read)), unread)
+    # НЕПРОЧИТАННЫЙ ИСТОЧНИК — ТОТ ЖЕ ИСХОД «ПРОЧИТАНО НЕ ВСЁ», что непрочитанные
+    # правила: `step-debt.yml` предупреждает только по коду, и строка без кода
+    # проходила зелёной молча (взгляд на #1267, 195).
+    return EXIT_PARTIAL if partial or unread else EXIT_OK
 
 
 if __name__ == "__main__":

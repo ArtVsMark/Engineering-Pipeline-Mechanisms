@@ -382,6 +382,11 @@ def test_an_unread_source_is_not_called_empty(capsys: pytest.CaptureFixture[str]
     assert "Источник 1 прочитан не весь" in said
 
 
+def test_a_one_shot_skip_is_honoured() -> None:
+    """Пропуск одноразовым итератором не теряется после первой проверки (взгляд на #1267)."""
+    assert "5" not in debt.sources_said(iter([5]))
+
+
 @pytest.mark.parametrize("source", [None, *debt.BEFORE_PLAN])
 def test_any_source_alone_comes_before_the_plan(source: int | None) -> None:
     """Любой источник перед планом в одиночку — долг; все пусты — нет (взгляды на #1236, #1256).
@@ -1052,10 +1057,21 @@ def test_the_revision_counts_before_and_after_the_counter_apart() -> None:
     assert "до счётчика пунктов" in said and task_shape.ITEMS_SINCE in said
 
 
+@pytest.mark.parametrize(
+    ("unknown", "outcome"),
+    [([], "EXIT_OK"), (["#6 — работа"], "EXIT_PARTIAL")],
+    ids=["всё-прочитано", "слияние-не-сказано"],
+)
 def test_a_fully_read_debt_is_clean(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    unknown: list[str],
+    outcome: str,
 ) -> None:
     """Все источники долга прочитаны — чистый исход, а не «частично».
+
+    Несказанное состояние слияния — источник 1 прочитан не весь, и это тот же
+    исход «прочитано не всё»: строка без кода проходила зелёной (взгляд на #1267).
 
     «Прочитано всё» и «часть неизвестна» — разные состояния, и второе у этого
     шага уже прогонялось, а первое было объявлено и не проверялось ни разу
@@ -1070,7 +1086,7 @@ def test_a_fully_read_debt_is_clean(
     monkeypatch.setattr(
         debt, "inbox_body", lambda repo, token, closed, listed: ("правила: осталось 0", "", None)
     )
-    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
+    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], unknown, []))
     monkeypatch.setattr(debt, "looks_done", lambda issues: [])
     monkeypatch.setattr(debt.items_left, "look", lambda issues, opener: ([], []))
     monkeypatch.setattr(debt.task_shape, "without_a_checklist", lambda issues: [])
@@ -1097,7 +1113,7 @@ def test_a_fully_read_debt_is_clean(
         raise AssertionError("изолированный прогон ушёл в сеть")
 
     monkeypatch.setattr(debt.coverage_floor.ghrest, "request", no_network)
-    assert debt.main(["--repo", "o/r"]) == debt.EXIT_OK
+    assert debt.main(["--repo", "o/r"]) == getattr(debt, outcome)
     assert "слито без внешнего взгляда: 0" in capsys.readouterr().out
 
 
