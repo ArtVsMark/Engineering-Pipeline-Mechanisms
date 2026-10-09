@@ -120,6 +120,52 @@ def test_badge_shows_the_number_it_measured() -> None:
     assert drawn.label == "держится машиной"
 
 
+@pytest.mark.parametrize(
+    ("numerator", "denominator", "color"),
+    [
+        (0, 5, "RED"),
+        (1, 3, "RED"),
+        (1, 2, "YELLOW"),
+        (2, 3, "YELLOW"),
+        (7, 10, "GREEN"),
+        (5, 5, "GREEN"),
+        (0, 0, "GREY"),
+    ],
+)
+def test_the_share_colour_has_three_bands(numerator: int, denominator: int, color: str) -> None:
+    """Три полосы доли — красная, жёлтая, зелёная; пустой знаменатель — ноль, а не падение."""
+    assert facts.share_color(numerator, denominator) == getattr(facts, color)
+
+
+def test_a_wider_text_gets_a_wider_part() -> None:
+    """Ширина части растёт с надписью: зоны не наезжают друг на друга в картинке."""
+    narrow, wide = facts.part_width("1/5"), facts.part_width("машиной 66/195 · 34%")
+    assert 0 < narrow < wide
+    svg = facts.drawing(
+        [[("правила", facts.LABEL_COLOR, ""), ("машиной 66/195 · 34%", "#000", "")]]
+    )
+    assert f'width="{facts.part_width("правила") + wide}"' in svg
+
+
+def test_the_project_picture_is_drawn_ahead_and_kept_on_the_branch(tmp_path: Path) -> None:
+    """Значок проекта рисуется впрок и уборкой ветки не снимается (196, #1213).
+
+    Витрина перейдёт на него вторым изменением — к тому моменту он обязан уже
+    лежать на ветке `badges`.
+    """
+    facts.draw_badges(
+        {
+            "rules": {"by_mechanism": {"gate": 1, "document": 1}},
+            "version": "1.0.0",
+            "version_whole": True,
+        },
+        tmp_path,
+    )
+    for name in facts.AHEAD:
+        assert (tmp_path / name).read_text(encoding="utf-8").startswith("<svg")
+        assert name in facts.branch_files()
+
+
 def test_badge_colour_follows_the_share() -> None:
     """Цвет говорит о доле, а не о настроении: три доли — три цвета."""
     low = facts.rules_badge({"rules": {"by_mechanism": {"gate": 10, "document": 90}}})
