@@ -2,7 +2,7 @@
   "schema": "1.3",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-10T06:32:13+00:00",
+  "generated_at": "2026-10-10T06:38:11+00:00",
   "commit": "d00e0ce05423af7e64d7a52627e15fabf3a0dd7a",
   "ci": {
     "workflow": "ci.yml"
