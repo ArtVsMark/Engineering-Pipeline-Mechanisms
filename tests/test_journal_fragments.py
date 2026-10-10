@@ -641,7 +641,11 @@ def test_a_shared_fragment_keeps_the_paths_of_the_earlier_work(
 
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(tmp_path), *args], check=True, capture_output=True, text=True
+            ["git", "-C", str(tmp_path), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         ).stdout.strip()
 
     git("init", "-q")
