@@ -2394,24 +2394,44 @@ def own_nodes(statement: ast.AST) -> Iterator[ast.AST]:
 
 
 def assigns_waiting_rank(node: ast.AST) -> bool:
-    """Узел сам — присваивание `waiting_rank` в любой из трёх форм: `=`, `: тип =`, `+=`.
+    """Узел — запись в имя `waiting_rank`: имя в контексте `Store`, какой бы формой ни шла запись.
 
     ОДИН ПРИЗНАК НА ВСЕ ЧТЕНИЯ (взгляд на #1311). Поиск цикла голов признавал
     три формы, а отнесение выхода к ступени — одну `=`: выход с аннотацией нашёл
     бы цикл голов, но ступень бы не поставил.
+
+    СТРОГОЕ ПРАВИЛО ВМЕСТО ПЕРЕЧНЯ ФОРМ (взгляды на #1311, 210). Перечень
+    `=`, `: тип =`, `+=` пропускал соседей — морж `(waiting_rank := …)` и
+    распаковку `waiting_rank, x = …`. Запись в имя в любой форме — это `Name`
+    в контексте `Store`: так ловятся и они, и цель `for`, и `with … as`, и
+    любая будущая форма; чтение и `del` — нет.
     """
-    if isinstance(node, ast.Assign):
-        targets = node.targets
-    elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-        targets = [node.target]
-    else:
-        return False
-    return any(isinstance(one, ast.Name) and one.id == "waiting_rank" for one in targets)
+    return (
+        isinstance(node, ast.Name) and node.id == "waiting_rank" and isinstance(node.ctx, ast.Store)
+    )
 
 
-def sets_waiting_rank(node: ast.AST) -> bool:
-    """Где-то в узле есть присваивание `waiting_rank` — признак цикла голов, а не упоминание."""
-    return any(assigns_waiting_rank(one) for one in ast.walk(node))
+#: Циклы, чьё тело — своё, а не объемлющего: запись в них — не запись цикла снаружи.
+LOOPS: Final = (ast.For, ast.AsyncFor, ast.While)
+
+
+def own_loop_nodes(node: ast.AST) -> Iterator[ast.AST]:
+    """Узлы под `node` без тел вложенных циклов: сам вложенный цикл — да, его тело — нет."""
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, LOOPS):
+            yield from own_loop_nodes(child)
+
+
+def sets_waiting_rank(loop: ast.AST) -> bool:
+    """Цикл САМ присваивает `waiting_rank` — не только упоминает и не во вложенном цикле.
+
+    Обход целиком засчитывал циклу запись во вложенном (взгляды на #1311): цикл
+    попыток вокруг цикла голов становился «головным», а настоящий цикл голов
+    отказ называл внутренним; два соседних ставящих цикла под общим внешним
+    давали одного кандидата, и отказ приходил не от счёта циклов.
+    """
+    return any(assigns_waiting_rank(one) for one in own_loop_nodes(loop))
 
 
 def skip_exits(
@@ -2430,11 +2450,13 @@ def skip_exits(
     прямо, что сломалось, а не «новый выход отнесите явно». Генераторы списков
     циклом здесь не считаются: `continue` в них не бывает.
     """
-    # ЦИКЛ ГОЛОВ — РОВНО ОДИН ЦИКЛ, ПРИСВАИВАЮЩИЙ `waiting_rank` (взгляды на
-    # #1297, #1304; 210). Прежде брался первый цикл, где имя хотя бы упомянуто,
-    # а отказ описывал цикл, который его ставит: цикл, лишь читающий имя, был бы
-    # взят за цикл голов. Формы обе — `for` и `async for`; ни одного или больше
-    # одного — отказ с причиной, а не догадка.
+    # ЦИКЛ ГОЛОВ — РОВНО ОДИН ЦИКЛ, САМ ПРИСВАИВАЮЩИЙ `waiting_rank` (взгляды
+    # на #1297, #1304, #1311; 210). Прежде брался первый цикл, где имя хотя бы
+    # упомянуто, а отказ описывал цикл, который его ставит: цикл, лишь читающий
+    # имя, был бы взят за цикл голов. «Сам» — не во вложенном цикле
+    # (`sets_waiting_rank`): обёртка попыток кандидатом не становится. Формы
+    # обе — `for` и `async for`; ни одного или больше одного — отказ с
+    # причиной, а не догадка.
     candidates = [
         node
         for node in ast.walk(function)
@@ -2449,7 +2471,7 @@ def skip_exits(
         if not any(other is not node and node in ast.walk(other) for other in candidates)
     ]
     assert len(heads) == 1, (
-        f"в {function.name} циклов, присваивающих `waiting_rank`, {len(heads)} "
+        f"в {function.name} циклов, сами присваивающих `waiting_rank`, {len(heads)} "
         f"(строки {[one.lineno for one in heads]}), а цикл голов должен быть один: "
         "разбирать выходы не из чего или неясно, из какого (075)"
     )
@@ -2540,7 +2562,7 @@ async def f(queue):
     assert skip_exits(function) == [(frozenset({"пусты"}), False)]
     empty = ast.parse("def g():\n    pass\n").body[0]
     assert isinstance(empty, ast.FunctionDef)
-    with pytest.raises(AssertionError, match="присваивающих `waiting_rank`, 0"):
+    with pytest.raises(AssertionError, match="сами присваивающих `waiting_rank`, 0"):
         skip_exits(empty)
 
 
@@ -2563,13 +2585,26 @@ def f(queue):
     function = next(
         node for node in ast.walk(ast.parse(twice)) if isinstance(node, ast.FunctionDef)
     )
-    with pytest.raises(AssertionError, match="циклов, присваивающих"):
+    with pytest.raises(AssertionError, match="циклов, сами присваивающих"):
         skip_exits(function)
 
 
-@pytest.mark.parametrize("form", ["waiting_rank = 1", "waiting_rank: int = 1", "waiting_rank += 1"])
+#: Формы записи в `waiting_rank`: три первых признавались и прежде, морж и
+#: распаковку перечень пропускал (взгляд на #1311). Каждая — проба строгого
+#: правила, а не повод для четвёртой формы разбора (210).
+RANK_WRITES: Final = {
+    "=": "waiting_rank = 1",
+    ": тип =": "waiting_rank: int = 1",
+    "+=": "waiting_rank += 1",
+    "морж": "print(waiting_rank := 1)",
+    "распаковка": "waiting_rank, other = 1, 2",
+    "распаковка в скобках": "(waiting_rank, other) = 1, 2",
+}
+
+
+@pytest.mark.parametrize("form", list(RANK_WRITES.values()), ids=list(RANK_WRITES))
 def test_every_form_of_setting_the_rank_is_read_alike(form: str) -> None:
-    """`=`, `: тип =` и `+=` — одно присваивание: и для цикла голов, и для ступени (#1311)."""
+    """Любая запись в `waiting_rank` — одно присваивание: для цикла голов и ступени (#1311)."""
     code = f"""
 def f(queue):
     waiting_rank = 0
@@ -2636,3 +2671,55 @@ def test_only_the_look_waiting_exits_set_the_step() -> None:
             f"выход {sorted(keys)}: {'ставит' if sets else 'не ставит'} ступень, "
             f"а по таблице ждёт взгляда: {sorted(waits)}"
         )
+
+
+def test_a_retry_loop_around_the_head_loop_is_not_the_head() -> None:
+    """Цикл попыток вокруг цикла голов — не головной: выходы читаются из настоящего (#1311)."""
+    code = """
+def f(queue):
+    waiting_rank = None
+    for attempt in range(3):
+        for change in queue:
+            if change:
+                skipped["пусты"] += 1
+                continue
+            waiting_rank = 1
+"""
+    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    assert skip_exits(function) == [(frozenset({"пусты"}), False)]
+
+
+def test_two_sibling_head_loops_under_one_outer_are_counted() -> None:
+    """Два соседних ставящих цикла под общим внешним — отказ счёта циклов, а не `inner` (#1311)."""
+    code = """
+def f(queue):
+    waiting_rank = None
+    for attempt in range(3):
+        for change in queue:
+            waiting_rank = 1
+        for change in queue:
+            waiting_rank = 2
+"""
+    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    with pytest.raises(AssertionError, match="циклов, сами присваивающих `waiting_rank`, 2"):
+        skip_exits(function)
+
+
+def test_reading_or_deleting_the_rank_is_not_a_write() -> None:
+    """Чтение и `del` — не запись: строгий признак берёт только `Store` (#1311)."""
+    store, load, delete = (
+        node
+        for text in ("waiting_rank = 1", "print(waiting_rank)", "del waiting_rank")
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Name) and node.id == "waiting_rank"
+    )
+    assert assigns_waiting_rank(store)
+    assert not assigns_waiting_rank(load)
+    assert not assigns_waiting_rank(delete)
+
+
+def test_own_loop_nodes_stop_at_a_nested_loop_body() -> None:
+    """Вложенный цикл отдаётся узлом, а его тело — нет (#1311)."""
+    loop = ast.parse("for a in b:\n    x = 1\n    for c in d:\n        y = 2\n").body[0]
+    names = {one.id for one in own_loop_nodes(loop) if isinstance(one, ast.Name)}
+    assert names == {"a", "b", "x"}
