@@ -433,27 +433,29 @@ def test_head_look_reads_state_and_size_in_one_request(monkeypatch: Any) -> None
     assert asked == ["repos/o/r/pulls/7"], "объём стоил лишнего запроса (052)"
 
 
-def test_head_look_does_not_wait_for_an_unsaid_state(monkeypatch: Any) -> None:
-    """Несказанное состояние голова читает одним запросом, без ожидания соседей (взгляд на #1313).
+def test_head_look_waits_for_an_unsaid_state(monkeypatch: Any) -> None:
+    """Несказанное состояние голова дожидается, как оклик и долг (взгляды на #1313, #1320).
 
-    Оклик и долг ждут посчитанного (`hail.merge_state`), а очередь пропускает
-    `unknown` с причиной и читает его следующим заходом: ожидание здесь держало
-    бы заход, не меняя исхода. Проба держит этот выбор — повтор или пауза
-    краснеют.
+    У очереди нет расписания: голова, пропущенная в `unknown`, ждала бы чужого
+    события. Проба держит, что второй ответ площадки — посчитанный — и есть
+    состояние головы, а объём берётся из первого.
     """
+    replies: list[dict[str, Any]] = [
+        {"mergeable_state": "unknown", "changed_files": 2},
+        {"mergeable_state": "clean"},
+    ]
+    answers = iter(replies)
     asked: list[str] = []
 
     def answer(method: str, path: str, token: str, body: Any = None) -> dict[str, Any]:
         asked.append(path)
-        return {"mergeable_state": "unknown", "changed_files": 1}
-
-    def no_pause(_: float) -> None:
-        raise AssertionError("голова очереди ждёт посчитанного состояния")
+        return next(answers)
 
     monkeypatch.setattr(module.ghrest, "request", answer)
-    monkeypatch.setattr("time.sleep", no_pause)
-    assert module.head_look("o/r", 7, "token").state == "unknown"
-    assert asked == ["repos/o/r/pulls/7"]
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    look = module.head_look("o/r", 7, "token")
+    assert (look.state, look.changed) == ("clean", 2)
+    assert asked == ["repos/o/r/pulls/7", "repos/o/r/pulls/7"]
     assert "unknown" not in module.STATE_MERGEABLE, "несказанное взяли бы за слияемое"
 
 
@@ -839,7 +841,7 @@ def test_an_unmergeable_state_skips_the_head_instead_of_reddening(
     said = capsys.readouterr().out
     for number in (1, 2):
         line = next(one for one in said.splitlines() if one.startswith(f"#{number}: состояние"))
-        assert "ещё не посчитано" in line and "не допускает" not in line, line
+        assert "не посчитано" in line and "не допускает" not in line, line
 
 
 def test_an_advisory_red_still_merges(platform: dict[str, Any]) -> None:

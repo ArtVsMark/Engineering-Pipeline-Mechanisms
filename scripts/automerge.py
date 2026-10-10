@@ -877,18 +877,19 @@ def head_look(repo: str, number: int, owner_token: str) -> Head:
     спрашивать его у всех значит заказывать вычисление, которое никому не
     понадобится. Объём приезжает тем же ответом и своего запроса не стоит.
 
-    ЧИТАЕТСЯ ОДИН РАЗ, БЕЗ ОЖИДАНИЯ `hail.merge_state`, — И ЭТО ВЫБОР
-    (взгляд на #1313). Соседи — оклик и долг — ждут посчитанного, потому что
-    их ответ печатается сейчас. Очередь же несказанное (`hail.UNCOMPUTED`)
-    пропускает с причиной «ещё не посчитано» и читает снова следующим заходом;
-    ожидание здесь держало бы заход, не меняя исхода.
+    НЕСКАЗАННОЕ ДОЖИДАЕТСЯ, КАК У ОКЛИКА И ДОЛГА (взгляды на #1313, #1320).
+    Прежде голова читалась один раз в расчёте на следующий заход, но у очереди
+    нет расписания — её будят события (`.github/workflows/automerge.yml`), и
+    единственная голова в `unknown` могла ждать до чужого толчка; а пропуск
+    менял и то, кто сольётся первым. Ожидание — общее, `hail.merge_state`, с
+    его объявленными величинами; объём берётся из первого ответа.
     """
     payload = ghrest.request("GET", f"repos/{repo}/pulls/{number}", owner_token) or {}
+    state = str(payload.get("mergeable_state") or "")
+    if state in hail.UNCOMPUTED:
+        state = hail.merge_state(repo, number, owner_token)
     said = payload.get("changed_files")
-    return Head(
-        str(payload.get("mergeable_state") or ""),
-        said if isinstance(said, int) and not isinstance(said, bool) else None,
-    )
+    return Head(state, said if isinstance(said, int) and not isinstance(said, bool) else None)
 
 
 def sync_head(repo: str, number: int, owner_token: str, *, dry_run: bool) -> None:
@@ -1504,7 +1505,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # бы так же, как «ещё считает» у плана и долга до #1313. Множество
             # несказанного — общее с окликом и долгом (`hail.UNCOMPUTED`).
             said = (
-                "ещё не посчитано площадкой, прочтётся следующим заходом"
+                "не посчитано площадкой и после ожидания — ждёт следующего события очереди"
                 if state in hail.UNCOMPUTED
                 else "слияния не допускает"
             )
