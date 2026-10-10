@@ -281,6 +281,56 @@ def test_the_project_badge_carries_three_numbers(
     assert all(color == facts.GREY for color in unknown), "незнание окрашено не серым"
 
 
+@pytest.mark.parametrize(
+    ("rules", "texts", "grey"),
+    [
+        (
+            {**RULES_PLANTED, "machine": {"own": 48, "taken": 12, "elsewhere": 6}},
+            ["механизмы", "свои 48", "взяты 12 · 18%"],
+            False,
+        ),
+        (
+            {**RULES_PLANTED, "machine": {"own": 0, "taken": 0, "elsewhere": 0}},
+            ["механизмы", "свои 0", "взяты 0 · —"],
+            True,
+        ),
+        (
+            RULES_PLANTED,
+            ["механизмы", "свои не прочитано", "взяты не прочитано"],
+            True,
+        ),
+        (
+            {**RULES_PLANTED, "machine": {"read": False, "why": "поставщик не назван"}},
+            ["механизмы", "свои не прочитано", "взяты не прочитано"],
+            True,
+        ),
+        (
+            {"read": False, "why": "нет ответа каталогу"},
+            ["механизмы", "свои не прочитано", "взяты не прочитано"],
+            True,
+        ),
+    ],
+    ids=["прочитано", "машинных-нет", "факты-до-разбивки", "поставщик-не-назван", "ответа-нет"],
+)
+def test_the_consumer_badge_counts_own_and_taken_mechanisms(
+    rules: dict[str, Any], texts: list[str], grey: bool
+) -> None:
+    """Без раздела `family` значок — потребителя: вторая зона «механизмы» (#1282).
+
+    Доля взятых — среди всех машинных, включая взятые у других (`elsewhere`):
+    12 из 66, а не из 60. Незнание — серое «не прочитано», а не ноль: ответа
+    нет, факты собраны до разбивки по происхождению или поставщик не назван (045).
+    """
+    rules_part, mechanisms = facts.project_zones({"rules": rules})
+    assert [text for text, _, _ in mechanisms] == texts
+    numbers = [color for _, color, _ in mechanisms[1:]]
+    assert all(color == facts.GREY for color in numbers) is grey
+    if rules.get("read") is False:
+        assert rules_part[1][:2] == ("машиной не прочитано", facts.GREY)
+    else:
+        assert rules_part[1][0] == "машиной 66/195 · 34%"
+
+
 # --- взяли гейт: объявленное происхождение ---------------------------------
 
 

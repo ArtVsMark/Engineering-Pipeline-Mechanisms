@@ -34,7 +34,6 @@ import json
 import os
 import shutil
 import sys
-from collections import Counter
 from collections.abc import Callable
 from html import escape
 from pathlib import Path
@@ -51,10 +50,12 @@ import version as version
 # их читают наши тесты и соседи, а смысл у них тот же — источник один.
 from facts_common import SCHEMA as SCHEMA
 from facts_common import SCHEMA_OF as SCHEMA_OF
+from facts_common import STATUSES as STATUSES
 from facts_common import NotRun as NotRun
 from facts_common import contract_coverage as contract_coverage
 from facts_common import coverage_facts as coverage_facts
 from facts_common import release_series as release_series
+from facts_common import rules_facts as rules_facts
 
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
@@ -65,9 +66,6 @@ FACTS: Final = "facts.json"
 #: `.rules/facts-contract.md`; решение владельца 24.09.2026, #759). До этого
 #: файл лежал в корне ветки, и витрина считала, что фактов у проекта нет.
 PUBLISHED_DIR: Final = paths.BADGES_DIR
-#: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
-#: а не новая тонкость, о которой механизм обязан догадаться.
-STATUSES: Final = ("active", "rejected", "not-applicable", "unreviewed")
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -81,46 +79,6 @@ def contract_version(path: Path = VERSION_FILE) -> str:
     if not version:
         raise NotRun(f"{path} пуст — это ошибка входа, а не «версии нет» (075)")
     return version
-
-
-def rules_facts(path: Path = BINDINGS) -> dict[str, Any]:
-    """Считает ответ проекта по правилам каталога.
-
-    Считается не «сколько правил хороших», а чем они держатся: механизм и
-    документ — оба законные ответы, и разница между ними видна только числом.
-    """
-    if not path.is_file():
-        raise NotRun(f"нет ответа каталогу: {path}")
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise NotRun(f"{path} не разбирается: {exc}") from exc
-
-    rules = document.get("rules")
-    if not isinstance(rules, dict) or not rules:
-        raise NotRun(f"{path}: раздел rules пуст — предмет счёта не найден (075)")
-
-    statuses: Counter[str] = Counter()
-    mechanisms: Counter[str] = Counter()
-    for number, answer in rules.items():
-        if not isinstance(answer, dict):
-            raise NotRun(f"{path}: ответ по правилу {number} не отображение")
-        status = str(answer.get("status", "")).strip()
-        if status not in STATUSES:
-            raise NotRun(f"{path}: правило {number} несёт статус «{status}», которого нет в схеме")
-        statuses[status] += 1
-        if status == "active":
-            mechanism = str(answer.get("mechanism", "")).strip()
-            if not mechanism:
-                raise NotRun(f"{path}: правило {number} действует, но чем — не сказано")
-            mechanisms[mechanism] += 1
-
-    return {
-        "total": len(rules),
-        "answered": len(rules) - statuses["unreviewed"],
-        "by_status": {status: statuses[status] for status in STATUSES},
-        "by_mechanism": dict(sorted(mechanisms.items())),
-    }
 
 
 def checks_facts(path: Path = policy.DEFAULT_PATH) -> dict[str, Any]:
@@ -412,8 +370,14 @@ def ours(
 
     Ответ каталогу и проверки читаются первыми: их отказ — о входе самого
     проекта, и назвать его надо раньше чужой причины.
+
+    СЧЁТ ОТВЕТА КАТАЛОГУ ДАЁТ ОБЩИЙ ИЗДАТЕЛЬ (#1282), и раздела `rules` здесь
+    нет: свой ключ, совпавший с общим, `common.merge` отвергает. Но читается
+    ответ здесь по-прежнему, и его отказ — по-прежнему отказ сборки: у
+    потребителя ответа может не быть, а у нас его отсутствие — сломанный вход,
+    и общий издатель с его серым «не прочитано» этого бы не сказал (045).
     """
-    rules = rules_facts(root / BINDINGS)
+    rules_facts(root / BINDINGS)
     checks = checks_facts(root / policy.DEFAULT_PATH)
     return {
         "contract": contract_version(root / VERSION_FILE),
@@ -422,7 +386,6 @@ def ours(
         "tests": test_counts(root),
         # Гейты проверяются ЗАПУСКОМ, и это отдельный предмет от покрытия строк.
         "scripts": script_runs(root),
-        "rules": rules,
         "checks_per_pr": checks,
         # Разрез семьи — раздел сверх договора, и причину он несёт своей формой
         # `{"read": false, "why": NO_FAMILY}` (взгляды на #1004 и #1014, 195).
@@ -460,6 +423,9 @@ def collect(
         python_matrix=OUR_MATRIX,
         python_next=OUR_NEXT,
         coverage=coverage,
+        # Поставщик — мы сами: та же величина, что общий шаг берёт из
+        # `job.workflow_repository` нашего же вызова.
+        supplier=mine,
     )
     return common.merge(shared, mine_part)
 
@@ -661,7 +627,7 @@ def share_color(numerator: int, denominator: int, *, known: bool = True) -> str:
 
 
 def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
-    """Значок проекта зонами: правила машиной и семья — проекты и шаги в ходу.
+    """Значок проекта зонами: правила машиной — и семья у поставщика, механизмы у потребителя.
 
     РЕШЕНИЕ ВЛАДЕЛЬЦА 08.10.2026 (#1212, #1213). Один значок заменяет два —
     «держится машиной» (`rules.json`) и «общие механизмы» (`family.json`), — и
@@ -671,13 +637,26 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
     09.10.2026). Витрина перешла на него вторым изменением, после первого
     прогона публикации (196).
 
+    РОЛЬ — ИЗ ДАННЫХ, А НЕ ВХОДОМ (#1282). Поставщик — тот, у кого в фактах
+    раздел `family`: разрез семьи собирает только он. У него вторая зона —
+    «семья», у потребителя — «механизмы» (вид принят владельцем 09.10.2026, без
+    зоны «конвейер»): `механизмы │ свои 120 │ взяты 30 · 20%`. «Свои» —
+    машинные ответы без `origin`, «взяты» — чей `origin` ведёт к поставщику;
+    процент — доля взятых среди ВСЕХ машинных, включая взятые у других
+    (`machine.elsewhere`), иначе он завышал бы нашу долю. Разбивка по
+    `origin_kind` — в фактах, не на значке. Выбор и обе зоны — в одной
+    рисовалке: вспомогательную функцию гейт инвентаря не судил бы (122).
+
     «ШАГ В ХОДУ» — ПО ВЫЗОВУ НАШЕГО ШАГА ПО ТЕГУ (#1199): отдаваемый шаг,
     который зовёт хотя бы один проект семьи. Объявленное потребителем
     происхождение гейта (каталог, ArtVsMark/Engineering-Incidents-Playbook#701)
     в счёт не входит, пока его нет; разрез `family.adopted` остаётся в фактах.
 
-    Непрочитанный обход клонов — серое «не прочитано» на месте чисел семьи, а
-    не ноль; непрочитанные клоны названы числом рядом (045). Цвет числа — по
+    НЕЗНАНИЕ — СЕРОЕ «НЕ ПРОЧИТАНО», А НЕ НОЛЬ (045): непрочитанный обход
+    клонов (непрочитанные клоны названы числом рядом), непрочитанный ответ
+    каталогу (`{"read": false, "why": …}` — у потребителя его может не быть) и
+    факты без разбивки по происхождению (до #1282 у `rules` не было
+    `machine`), а также не названный общему шагу поставщик. Цвет числа — по
     его доле.
 
     ПОЧЕМУ НЕ «ОТВЕЧЕНО». Прежняя редакция показывала `answered/total` и
@@ -690,17 +669,57 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
     держится и держаться не должно; считать его в знаменателе значило бы
     занижать долю за то, у чего нет предмета (154).
     """
-    kinds = facts["rules"]["by_mechanism"]
-    machine = sum(int(count) for name, count in kinds.items() if name in MACHINE)
-    active = sum(int(count) for count in kinds.values())
-    rules = [
-        ("правила", LABEL_COLOR, ""),
-        (
-            f"машиной {counted(machine, active)}",
-            share_color(machine, active),
-            "правил каталога держится машиной",
-        ),
-    ]
+    said = facts.get("rules") or {}
+    if said.get("read") is False:
+        rules = [
+            ("правила", LABEL_COLOR, ""),
+            (f"машиной {UNREAD_PART}", GREY, "ответ каталогу не прочитан"),
+        ]
+    else:
+        by_kind = said["by_mechanism"]
+        machine = sum(int(count) for name, count in by_kind.items() if name in MACHINE)
+        active = sum(int(count) for count in by_kind.values())
+        rules = [
+            ("правила", LABEL_COLOR, ""),
+            (
+                f"машиной {counted(machine, active)}",
+                share_color(machine, active),
+                "правил каталога держится машиной",
+            ),
+        ]
+    if "family" not in facts:
+        origins = said.get("machine") if said.get("read") is not False else None
+        if not isinstance(origins, dict) or origins.get("read") is False:
+            why = (
+                "ответ каталогу не прочитан"
+                if said.get("read") is False
+                else "поставщик не назван"
+                if isinstance(origins, dict)
+                else "в фактах нет разбивки по происхождению"
+            )
+            return [
+                rules,
+                [
+                    ("механизмы", LABEL_COLOR, ""),
+                    (f"свои {UNREAD_PART}", GREY, why),
+                    (f"взяты {UNREAD_PART}", GREY, why),
+                ],
+            ]
+        own, took = int(origins["own"]), int(origins["taken"])
+        every = own + took + int(origins["elsewhere"])
+        share = f"{round(100 * took / every)}%" if every else "—"
+        return [
+            rules,
+            [
+                ("механизмы", LABEL_COLOR, ""),
+                (f"свои {own}", GREEN if every else GREY, "машинных ответов — свой механизм"),
+                (
+                    f"взяты {took} · {share}",
+                    share_color(took, every),
+                    "машинных ответов — механизм поставщика",
+                ),
+            ],
+        ]
     taken = (facts.get("family") or {}).get("uptake") or {}
     if not taken.get("read"):
         family_zone = [
