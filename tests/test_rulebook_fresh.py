@@ -16,9 +16,8 @@ from pathlib import Path
 from typing import Final
 
 import pytest
-import yaml
 
-from tests.conftest import ROOT, WINDOW_A, WINDOW_B, commit, git, load_script, walk
+from tests.conftest import ROOT, WINDOW_A, WINDOW_B, commit, git, load_script, skill_head, walk
 
 module = load_script("check_rulebook_fresh.py")
 
@@ -300,9 +299,8 @@ def test_a_skill_declares_its_name_and_description(path: Path) -> None:
     заполненного (045).
     """
     text = path.read_text(encoding="utf-8")
-    assert text.startswith("---\n"), f"{path}: нет frontmatter"
-    head = yaml.safe_load(text.split("---", 2)[1])
-    assert isinstance(head, dict), f"{path}: frontmatter не разбирается"
+    head = skill_head(text)
+    assert head is not None, f"{path}: frontmatter нет или он не разбирается"
     assert str(head.get("name") or "").strip(), f"{path}: имя не объявлено"
     assert str(head.get("description") or "").strip(), f"{path}: описание не объявлено"
     assert head["name"] == path.parent.name, (
