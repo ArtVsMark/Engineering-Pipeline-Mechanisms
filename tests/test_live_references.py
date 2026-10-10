@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+import tests.conftest as conftest_module
 from tests.conftest import HOOKS, code_files, code_roots, found_by, load_script, walk, walk_deep
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -374,11 +375,24 @@ def same_names(files: list[Path]) -> dict[str, list[str]]:
 
 
 def blind_roots(roots: list[str], places: list[str], base: Path = ROOT) -> list[str]:
-    """Корни, где лежит `.py`, но в обходе нет ни одного файла из них (взгляды на #1315, #1319)."""
+    """Корни, где git знает `.py`, но в обходе нет ни одного файла из них (#1315, #1319, #1322).
+
+    `.py` ищутся тем же `git ls-files --exclude-standard`, что у `code_files`, а не
+    глобом по диску: корень с одними игнорируемыми `.py` слепым не назовётся.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *roots],
+        cwd=base,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.split("\0")
+    known = [one for one in listed if one.endswith(".py")]
     return [
         root
         for root in roots
-        if found_by(base / root, "**/*.py")
+        if any(one.startswith(f"{root}/") for one in known)
         and not any(one.startswith(f"{root}/") for one in places)
     ]
 
@@ -426,13 +440,25 @@ def test_module_names_are_unique_across_the_roots() -> None:
 
 
 def test_a_root_without_python_is_not_blind(tmp_path: Path) -> None:
-    """Корень на одной оболочке гейт не красит, а корень с `.py` вне обхода — красит (#1319)."""
+    """Корень на оболочке или с одними игнорируемыми `.py` не слеп; с `.py` вне обхода — слеп."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("/ign/\n", encoding="utf-8")
+    (tmp_path / "ign").mkdir()
+    (tmp_path / "ign" / "b.py").write_text("", encoding="utf-8")
+    assert blind_roots(["ign"], [], tmp_path) == [], "игнорируемые `.py` сделали корень слепым"
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks" / "guard.sh").write_text("", encoding="utf-8")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("", encoding="utf-8")
     assert blind_roots(["hooks", "src"], [], tmp_path) == ["src"]
     assert blind_roots(["hooks", "src"], ["src/a.py"], tmp_path) == []
+
+
+def test_code_files_walks_the_roots_of_code_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`code_files` обходит ровно корни `code_roots`, а не свою копию списка (взгляд на #1322)."""
+    monkeypatch.setattr(conftest_module, "code_roots", lambda **_: [Path("tests")])
+    seen = {path.relative_to(ROOT).parts[0] for path in code_files()}
+    assert seen == {"tests"}, f"`code_files` обходит не корни `code_roots`: {sorted(seen)}"
 
 
 def test_code_roots_hold_every_declared_source() -> None:
