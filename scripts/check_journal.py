@@ -351,6 +351,19 @@ def at_base(ancestor: str, name: str) -> str:
         raise
 
 
+def is_shallow_boundary(sha: str) -> bool:
+    """Коммит — граница мелкого клона: родителей у него в клоне нет, а у истории — есть.
+
+    На границе git видит каждый файл заведённым, и `--diff-filter=A` встал бы на
+    неё как на рождение имени — а состав коммита-границы есть всё дерево
+    (взгляд на #1309). Корень настоящей истории границей не считается: клон не
+    мелкий.
+    """
+    if journal.git(["git", "rev-parse", "--is-shallow-repository"]).strip() != "true":
+        return False
+    return len(journal.git(["git", "rev-list", "--parents", "-n", "1", sha]).split()) == 1
+
+
 def earlier_files(ancestor: str, name: str) -> list[str]:
     """Пути, которые тронули коммиты предка, писавшие фрагмент `name`: его прежний состав.
 
@@ -359,11 +372,36 @@ def earlier_files(ancestor: str, name: str) -> list[str]:
     обязана была бы стереть путь, который фрагмент уже честно называл: выпуск
     соврал бы о прежней работе. Фрагмента у предка нет — прежнего состава
     нет, и это не отказ.
+
+    ИСТОРИЯ ИМЕНИ — С ЕГО ПОСЛЕДНЕГО ЗАВЕДЕНИЯ, А НЕ ВСЯ (взгляд на #1303, 210).
+    Выпуск уносит фрагмент в `released/`, и имя можно завести снова: вся его
+    история засчитала бы и выпущенную работу, и сам коммит выпуска с журналом и
+    всеми фрагментами пачки. Поэтому состав берётся только у коммитов от того,
+    что завёл ныне живой фрагмент, — сквозь переименования. Не видно и его —
+    мелкий клон обрезал историю (`is_shallow_boundary`), — прежнего состава
+    нет: строже, а не шире.
+
+    ЦЕНА НАЗВАНА. Прежний состав — это ВЕСЬ коммит прежней работы: принесла
+    она два фрагмента — шапка одного законно назовёт пути другого. Делить
+    уплотнённый коммит по фрагментам нечем, и допуск остаётся этой шириной.
     """
+    if not at_base(ancestor, name):
+        return []
+    # СКВОЗЬ ПЕРЕИМЕНОВАНИЕ (взгляд на #1309): `git mv` невыпущенного фрагмента
+    # без `--follow` выглядел заведением имени, и прежняя работа под старым
+    # именем терялась — шапке снова пришлось бы стереть честный путь.
+    born = journal.git(
+        ["git", "log", "--follow", "-1", "--diff-filter=A", "--format=%H", ancestor, "--", name]
+    ).strip()
+    if not born or is_shallow_boundary(born):
+        return []
     found: set[str] = set()
-    for sha in journal.git(["git", "log", "--format=%H", ancestor, "--", name]).split():
+    history = ["git", "log", "--follow", "--format=%H", ancestor, "--", name]
+    for sha in journal.git(history).split():
         listed = journal.git(["git", "show", "-z", "--name-only", "--format=", sha])
         found |= {one.strip() for one in listed.split("\0") if one.strip()}
+        if sha == born:
+            break
     return sorted(found)
 
 
