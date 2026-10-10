@@ -2393,34 +2393,113 @@ def own_nodes(statement: ast.AST) -> Iterator[ast.AST]:
                 yield from own_nodes(child)
 
 
+#: Поля, которыми узел СВЯЗЫВАЕТ имя в объемлющей области, кроме `Name` в
+#: `Store` (справочник языка, «Binding of names»): `def`/`class`, `except … as`,
+#: захваты `case`. `import … as` разбирает `bound_names` — у `alias` имя
+#: составное. Полнота сверяется пробой по всем строковым полям `ast`.
+BINDING_FIELDS: Final[dict[type[ast.AST], str]] = {
+    ast.FunctionDef: "name",
+    ast.AsyncFunctionDef: "name",
+    ast.ClassDef: "name",
+    ast.ExceptHandler: "name",
+    ast.MatchAs: "name",
+    ast.MatchStar: "name",
+    ast.MatchMapping: "rest",
+}
+#: Строковые поля `ast`, которые имени в объемлющей области НЕ связывают, — с причиной.
+NOT_BINDING: Final[dict[tuple[type[ast.AST], str], str]] = {
+    (ast.Attribute, "attr"): "атрибут объекта, а не имя области",
+    (ast.Global, "names"): "объявление, записи нет",
+    (ast.Nonlocal, "names"): "объявление, записи нет",
+    (ast.ImportFrom, "module"): "имя модуля-источника; связывает `alias`",
+    (ast.MatchClass, "kwd_attrs"): "атрибуты образца, а не захват",
+    (ast.TypeVar, "name"): "область аннотаций, а не объемлющая",
+    (ast.ParamSpec, "name"): "область аннотаций, а не объемлющая",
+    (ast.TypeVarTuple, "name"): "область аннотаций, а не объемлющая",
+    (ast.arg, "arg"): "параметр — область функции",
+    (ast.keyword, "arg"): "имя довода вызова",
+    (ast.Constant, "kind"): "пометка строки, не имя",
+    (ast.TypeIgnore, "tag"): "пометка, не имя",
+}
+
+
+def bound_names(node: ast.AST) -> set[str]:
+    """Имена, которые узел сам связывает в объемлющей области, — по правилам языка."""
+    if isinstance(node, ast.Name):
+        return {node.id} if isinstance(node.ctx, ast.Store) else set()
+    if isinstance(node, ast.alias):
+        return {node.asname or node.name.split(".")[0]} if node.name != "*" else set()
+    field = BINDING_FIELDS.get(type(node))
+    said = getattr(node, field, None) if field else None
+    return {said} if isinstance(said, str) else set()
+
+
 def assigns_waiting_rank(node: ast.AST) -> bool:
-    """Узел — запись в имя `waiting_rank`: имя в контексте `Store`, какой бы формой ни шла запись.
+    """Узел связывает имя `waiting_rank` — любой связывающей операцией языка.
 
     ОДИН ПРИЗНАК НА ВСЕ ЧТЕНИЯ (взгляд на #1311). Поиск цикла голов признавал
-    три формы, а отнесение выхода к ступени — одну `=`: выход с аннотацией нашёл
-    бы цикл голов, но ступень бы не поставил.
+    три формы, а отнесение выхода к ступени — одну `=`.
 
-    СТРОГОЕ ПРАВИЛО ВМЕСТО ПЕРЕЧНЯ ФОРМ (взгляды на #1311, 210). Перечень
-    `=`, `: тип =`, `+=` пропускал соседей — морж `(waiting_rank := …)` и
-    распаковку `waiting_rank, x = …`. Запись в имя в любой форме — это `Name`
-    в контексте `Store`: так ловятся и они, и цель `for`, и `with … as`, и
-    любая будущая форма; чтение и `del` — нет.
+    СТРОГОЕ ПРАВИЛО ВМЕСТО ПЕРЕЧНЯ ФОРМ (взгляды на #1311, #1314; 210).
+    Перечень `=`, `: тип =`, `+=` пропускал морж и распаковку, а признак «`Name`
+    в `Store`» — `except … as`, `import … as` и захват `case`: там имя лежит
+    строкой поля. Признак — связывание имени по справочнику языка
+    (`bound_names`); что его поля полны, сверяет проба по всем строковым полям
+    `ast`. Чтение, `del` и объявления — не запись.
     """
-    return (
-        isinstance(node, ast.Name) and node.id == "waiting_rank" and isinstance(node.ctx, ast.Store)
-    )
+    return "waiting_rank" in bound_names(node)
 
 
-#: Циклы, чьё тело — своё, а не объемлющего: запись в них — не запись цикла снаружи.
-LOOPS: Final = (ast.For, ast.AsyncFor, ast.While)
+#: Узлы со своей областью видимости: запись в их теле — не запись объемлющего.
+SCOPES: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+#: Включения: цель `for` в них — своя область, а морж связывает объемлющую (PEP 572).
+COMPREHENSIONS: Final = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 
 def own_loop_nodes(node: ast.AST) -> Iterator[ast.AST]:
-    """Узлы под `node` без тел вложенных циклов: сам вложенный цикл — да, его тело — нет."""
+    """Узлы под `node`, исполняемые в ЕГО области и на ЕГО шаге, — не во вложенном цикле.
+
+    Граница — область видимости и тело вложенного цикла, а не поддерево
+    (взгляд на #1314). У вложенного цикла своё — цель и тело; `iter` и `else`
+    исполняются на шаге объемлющего. У `def`/`class`/`lambda` своё — тело; их
+    имя, декораторы, умолчания и базы — объемлющего. У включения своё — цель
+    `for`; первый источник и морж — объемлющего.
+    """
     for child in ast.iter_child_nodes(node):
         yield child
-        if not isinstance(child, LOOPS):
-            yield from own_loop_nodes(child)
+        yield from enclosing_parts(child)
+
+
+def enclosing_parts(node: ast.AST) -> Iterator[ast.AST]:
+    """Части `node`, исполняемые в объемлющей области и на её шаге, — вглубь по тем же правилам."""
+    match node:
+        case ast.For() | ast.AsyncFor():
+            parts: list[ast.AST] = [node.iter, *node.orelse]
+        case ast.While():
+            parts = list(node.orelse)
+        case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.Lambda():
+            decorators = [] if isinstance(node, ast.Lambda) else node.decorator_list
+            defaults = [*node.args.defaults, *(one for one in node.args.kw_defaults if one)]
+            parts = [*decorators, *defaults]
+        case ast.ClassDef():
+            parts = [*node.decorator_list, *node.bases, *node.keywords]
+        case ast.ListComp() | ast.SetComp() | ast.DictComp() | ast.GeneratorExp():
+            parts = [node.generators[0].iter, *walrus_targets(node)]
+        case _:
+            yield from own_loop_nodes(node)
+            return
+    for part in parts:
+        yield part
+        yield from enclosing_parts(part)
+
+
+def walrus_targets(node: ast.AST) -> Iterator[ast.AST]:
+    """Цели моржа во включении — связывают объемлющую область (PEP 572); до своих областей."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.NamedExpr):
+            yield child.target
+        if not isinstance(child, SCOPES):
+            yield from walrus_targets(child)
 
 
 def sets_waiting_rank(loop: ast.AST) -> bool:
@@ -2719,7 +2798,88 @@ def test_reading_or_deleting_the_rank_is_not_a_write() -> None:
 
 
 def test_own_loop_nodes_stop_at_a_nested_loop_body() -> None:
-    """Вложенный цикл отдаётся узлом, а его тело — нет (#1311)."""
-    loop = ast.parse("for a in b:\n    x = 1\n    for c in d:\n        y = 2\n").body[0]
-    names = {one.id for one in own_loop_nodes(loop) if isinstance(one, ast.Name)}
-    assert names == {"a", "b", "x"}
+    """Вложенный цикл: его `iter` и `else` — объемлющего, цель и тело — свои (#1311, #1314)."""
+    code = "for a in b:\n    x = 1\n    for c in d:\n        y = 2\n    else:\n        z = 3\n"
+    names = {one.id for one in own_loop_nodes(ast.parse(code).body[0]) if isinstance(one, ast.Name)}
+    assert names == {"a", "b", "x", "d", "z"}
+
+
+#: Формы связывания имени без `Name` в `Store` (взгляд на #1314): каждая обязана
+#: ставить ступень, как `=`.
+FIELD_WRITES: Final = {
+    "except as": "try:\n    pass\nexcept Exception as waiting_rank:\n    pass",
+    "import as": "import os as waiting_rank",
+    "from import": "from os import sep as waiting_rank",
+    "case захват": "match change:\n    case waiting_rank:\n        pass",
+    "def": "def waiting_rank():\n    pass",
+}
+
+
+@pytest.mark.parametrize("form", list(FIELD_WRITES.values()), ids=list(FIELD_WRITES))
+def test_a_binding_by_field_sets_the_rank(form: str) -> None:
+    """Связывание строкой поля — тоже запись в `waiting_rank` (взгляд на #1314)."""
+    body = textwrap.indent(form, " " * 12)
+    code = f"""
+def f(queue):
+    waiting_rank = 0
+    for change in queue:
+        if change:
+{body}
+            continue
+"""
+    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    assert skip_exits(function) == [(frozenset(), True)]
+
+
+#: Записи в ЧУЖУЮ область внутри цикла: цикл ими ступень не ставит (взгляд на #1314).
+FOREIGN_WRITES: Final = {
+    "тело def": "def g():\n    waiting_rank = 1",
+    "тело class": "class C:\n    waiting_rank = 1",
+    "цель включения": "print([0 for waiting_rank in change])",
+    "lambda": "print(lambda waiting_rank: waiting_rank)",
+}
+
+
+@pytest.mark.parametrize("form", list(FOREIGN_WRITES.values()), ids=list(FOREIGN_WRITES))
+def test_a_write_in_another_scope_is_not_the_loops(form: str) -> None:
+    """Запись в своей области вложенного `def`/`class`/включения — не запись цикла (#1314)."""
+    loop = ast.parse(f"for change in queue:\n{textwrap.indent(form, '    ')}\n").body[0]
+    assert not sets_waiting_rank(loop)
+
+
+#: Записи, исполняемые в области и на шаге цикла, хоть и внутри вложенного узла.
+ENCLOSING_WRITES: Final = {
+    "морж в источнике вложенного цикла": "for c in (waiting_rank := change):\n    pass",
+    "else вложенного цикла": "for c in change:\n    pass\nelse:\n    waiting_rank = 1",
+    "морж во включении": "print([(waiting_rank := x) for x in change])",
+    "умолчание def": "def g(a=(waiting_rank := 1)):\n    pass",
+}
+
+
+@pytest.mark.parametrize("form", list(ENCLOSING_WRITES.values()), ids=list(ENCLOSING_WRITES))
+def test_a_write_on_the_loops_step_is_the_loops(form: str) -> None:
+    """`iter` и `else` вложенного цикла, морж во включении и умолчания — запись цикла (#1314)."""
+    loop = ast.parse(f"for change in queue:\n{textwrap.indent(form, '    ')}\n").body[0]
+    assert sets_waiting_rank(loop)
+
+
+def test_every_string_field_of_the_ast_is_classified() -> None:
+    """Каждое строковое поле `ast` — связывающее или нет с причиной: новое не пройдёт (#1314)."""
+    found = {
+        (kind, field)
+        for kind in vars(ast).values()
+        if isinstance(kind, type) and issubclass(kind, ast.AST)
+        for field, said in getattr(kind, "_field_types", {}).items()
+        if "str" in repr(said) and field != "type_comment"
+    }
+    assert found, "строковых полей не найдено — предмет проверки пропал (075)"
+    known: set[tuple[type[ast.AST], str]] = {
+        *BINDING_FIELDS.items(),
+        (ast.Name, "id"),
+        (ast.alias, "name"),
+        (ast.alias, "asname"),
+    }
+    unknown = sorted(f"{kind.__name__}.{field}" for kind, field in found - known - set(NOT_BINDING))
+    assert not unknown, f"строковые поля ast без решения, связывают ли они имя: {unknown}"
+    stale = sorted(f"{k.__name__}.{f}" for k, f in (known | set(NOT_BINDING)) - found)
+    assert not stale, f"решения о полях, которых в ast нет: {stale}"
