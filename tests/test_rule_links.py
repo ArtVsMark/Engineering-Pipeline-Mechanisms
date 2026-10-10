@@ -208,12 +208,13 @@ def test_a_wide_file_without_a_mark_is_the_named_limit(tmp_path: Path) -> None:
     assert module.links(tmp_path) == []
 
 
-def test_a_broken_wide_file_is_not_run(tmp_path: Path) -> None:
-    """Файл с меткой UTF-16, но битым телом — «не отработал», а не пропуск (#1302)."""
+def test_a_broken_wide_file_still_shows_its_link(tmp_path: Path) -> None:
+    """Битое тело после широкой метки не красит гейт: ASCII-ссылка найдена (#1310)."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    (tmp_path / "data.json").write_bytes(codecs.BOM_UTF16_LE + b"\x00\xd8")
-    with pytest.raises(module.NotRun, match="не раскодирован"):
-        module.links(tmp_path)
+    link = "rules/ru/045-no-silent-fallback.md\n"
+    body = codecs.BOM_UTF16_LE + link.encode("utf-16-le") + b"\x00\xd8"
+    (tmp_path / "data.json").write_bytes(body)
+    assert module.links(tmp_path) == [(Path("data.json"), 1, "045", "no-silent-fallback")]
 
 
 def test_only_a_wide_file_is_recoded() -> None:

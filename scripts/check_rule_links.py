@@ -99,14 +99,13 @@ def as_ascii_compatible(data: bytes) -> bytes:
 
     Широкий файл с меткой прежде молча считался проверенным: ссылок в нём
     байтовый образец не находил, а «не отработал» после #1300 он больше не
-    давал (взгляд на #1302, 045). Битый широкий файл — «не отработал».
+    давал (взгляд на #1302, 045). БИТОЕ ТЕЛО НЕ КРАСИТ (взгляд на #1310):
+    ссылка — ASCII и переживает замену соседних битых символов, а красное за
+    кодировку — ровно тот класс, от которого уводит поиск в байтах выше.
     """
     for bom, codec in WIDE_BOMS:
         if data.startswith(bom):
-            try:
-                return data.decode(codec).encode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise NotRun(f"файл с меткой {codec} не раскодирован: {exc}") from exc
+            return data.decode(codec, errors="replace").encode("utf-8")
     return data
 
 
