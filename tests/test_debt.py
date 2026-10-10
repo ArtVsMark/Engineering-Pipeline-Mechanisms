@@ -1136,7 +1136,7 @@ def test_the_revision_counts_before_and_after_the_counter_apart() -> None:
 
 @pytest.mark.parametrize(
     ("unknown", "outcome"),
-    [([], "EXIT_OK"), (["#6 — работа"], "EXIT_PARTIAL")],
+    [([], "EXIT_OK"), ([f"#6 — работа ({debt.hail.UNSAID_SPENT})"], "EXIT_PARTIAL")],
     ids=["всё-прочитано", "слияние-не-сказано"],
 )
 def test_a_fully_read_debt_is_clean(
@@ -1191,7 +1191,13 @@ def test_a_fully_read_debt_is_clean(
 
     monkeypatch.setattr(debt.coverage_floor.ghrest, "request", no_network)
     assert debt.main(["--repo", "o/r"]) == getattr(debt, outcome)
-    assert "слито без внешнего взгляда: 0" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "слито без внешнего взгляда: 0" in out
+    # ИСЧЕРПАННЫЙ БЮДЖЕТ ВИДЕН В ВЫВОДЕ, А НЕ ТОЛЬКО В ЧИСЛЕ ЗАПРОСОВ (взгляд на
+    # #1306): причину несёт строка изменения, и заголовок её не перебивает.
+    for said in unknown:
+        assert said in out, f"строка несказанного слияния не напечатана: {said}"
+    assert "ещё считает" not in out
 
 
 def test_the_bare_tasks_are_counted_even_at_zero() -> None:
