@@ -488,7 +488,9 @@ def render(number: int, source: Source, when: str = "") -> list[str]:
         lines.append(f"**Пусто** на {when or datetime.now(UTC).strftime('%d.%m.%Y')}.")
     lines.append("")
     if source.unread:
-        lines += [f"⚠️ **Не спрошено:** {source.unread}", ""]
+        # «НЕ ПРОЧИТАНО», А НЕ «НЕ СПРОШЕНО» (взгляд на #1275): под строкой стоит
+        # и неспрошенное, и спрошенное без ответа — площадка ещё считает.
+        lines += [f"⚠️ **Не прочитано:** {source.unread}", ""]
         lines += ["Это НЕ «пусто»: пустота и молчание снаружи неотличимы (045).", ""]
     if source.note:
         lines += [f"ℹ️ {source.note}", ""]

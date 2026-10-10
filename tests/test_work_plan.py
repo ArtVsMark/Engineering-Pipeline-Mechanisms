@@ -152,7 +152,7 @@ def test_a_silent_source_is_not_an_empty_one() -> None:
     """
     quiet = "\n".join(module.render(3, module.Source(unread="реестр не ответил")))
     empty = "\n".join(module.render(3, module.Source()))
-    assert "Не спрошено" in quiet and "Пусто" not in quiet
+    assert "Не прочитано" in quiet and "Пусто" not in quiet
     assert "**Пусто** на " in empty
     assert quiet != empty
 
@@ -298,7 +298,7 @@ def test_a_silent_neighbour_does_not_make_a_section_look_full(
     built, broken, _ = module.sources("o/r", "t")
     said = "\n".join(module.render(3, built[3], "01.01.2026"))
     assert "abc1234" in said, "прочитанная половина источника пропала"
-    assert "Не спрошено" in said, "непрочитанная половина выдана за прочитанную"
+    assert "Не прочитано" in said, "непрочитанная половина выдана за прочитанную"
     assert "3" in broken, "молчащий источник не назван в исходе"
 
 
@@ -348,7 +348,7 @@ def test_a_silent_registry_does_not_erase_what_was_already_read(
     built, broken, marks = module.sources("o/r", "t")
     said = "\n".join(module.render(3, built[3], "01.01.2026"))
     assert "test-next (3.15)" in said, "прочитанная половина источника выброшена"
-    assert "Не спрошено" in said, "молчание реестра не названо"
+    assert "Не прочитано" in said, "молчание реестра не названо"
     assert "3" in broken
     assert marks == set(), "отпечатки взялись ниоткуда при молчащем реестре"
 

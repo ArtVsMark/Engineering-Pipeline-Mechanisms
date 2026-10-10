@@ -44,6 +44,7 @@ import argparse
 import os
 import re
 import sys
+import time
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -52,6 +53,7 @@ import ci_complete
 import coverage_floor
 import findings
 import ghrest
+import hail
 import items
 import items_left
 import labels
@@ -327,17 +329,26 @@ def inbox_body(
     return newest[1], note, newest[2]
 
 
-def merge_state(repo: str, number: int, token: str) -> str:
+def merge_state(repo: str, number: int, token: str, *, spent: bool = False) -> str:
     """Состояние слияния одного изменения; пустая строка — площадка не сказала.
 
     Отдельный запрос на изменение — цена, названная, а не обойдённая (046):
     списочный ответ этого поля не несёт, и читать его оттуда значит не читать
     вовсе. Изменений в работе единицы, и запрос на каждое дешевле молчащего
     источника.
+
+    ЧИТАЕТСЯ С ОЖИДАНИЕМ, ОБЩИМ С ОКЛИКОМ (взгляд на #1275, 090). Первый
+    запрос лишь заказывает расчёт и отдаёт `unknown`, а план собирается сразу
+    после `ci` — ровно когда расчёт ещё не готов. Спрошенное один раз, оно
+    роняло план в исход 3 там, где пара секунд дала бы ответ. Ожидание и его
+    величины — у `hail.merge_state`: второе понимание «сколько ждать» разошлось
+    бы с первым молча. Цена — до `hail.WAIT_TRIES` запросов на изменение, чьё
+    состояние ещё не посчитано, а на весь обход — не дольше `hail.WAIT_BUDGET`:
+    `spent` — бюджет обхода израсходован, и спрашивается один раз (взгляд на
+    #1306).
     """
-    one = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
-    state = str(one.get("mergeable_state") or "")
-    return "" if state in ("", "unknown") else state
+    state = hail.merge_state(repo, number, token, tries=1 if spent else hail.WAIT_TRIES)
+    return "" if state in hail.UNCOMPUTED else state
 
 
 def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str]]:
@@ -364,6 +375,9 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
     conflicting: list[str] = []
     unknown: list[str] = []
     red: list[str] = []
+    # БЮДЖЕТ ОЖИДАНИЯ — НА ВЕСЬ ОБХОД, как у `hail.subjects`: предмет предела —
+    # время захода, и тратят его все изменения вместе (взгляд на #1306).
+    deadline = time.monotonic() + hail.WAIT_BUDGET
     # СПИСОК ИДЁТ СТРАНИЦАМИ, А НЕ ОДНОЙ. Одна страница молча теряет хвост:
     # при числе открытых изменений больше пятидесяти застрявшее уезжало за
     # край и в долг не попадало — то есть механизм отвечал «застрявших нет»,
@@ -380,7 +394,7 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
         # в одиночном. Пока читался список, источник 1 не срабатывал ни разу:
         # механизм молчал, и молчание выглядело как «конфликтов нет». Нашёл
         # внешний взгляд на #132.
-        state = merge_state(repo, number, token)
+        state = merge_state(repo, number, token, spent=time.monotonic() >= deadline)
         if state == "dirty":
             conflicting.append(said)
             continue
