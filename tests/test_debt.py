@@ -889,6 +889,27 @@ def test_an_unknown_merge_state_is_still_asked_for_red(monkeypatch: pytest.Monke
     assert unknown == red == ["#6 — работа"]
 
 
+def test_the_wait_budget_covers_the_whole_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Бюджет ожидания — на весь обход: израсходован — изменение спрашивается раз (#1306)."""
+    listing = [
+        {"number": n, "title": "работа", "draft": False, "head": {"sha": "abc"}} for n in (6, 7)
+    ]
+    asked: list[str] = []
+
+    def request(method: str, path: str, *_: object, **__: object) -> object:
+        asked.append(path)
+        return {"mergeable_state": "unknown"}
+
+    clock = iter([0.0, 0.0, debt.hail.WAIT_BUDGET + 1.0])
+    monkeypatch.setattr(debt.ghrest, "request", request)
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
+    monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
+    monkeypatch.setattr(debt.hail.time, "monotonic", lambda: next(clock))
+    debt.stuck_changes("o/r", "token")
+    assert asked.count("repos/o/r/pulls/6") == debt.hail.WAIT_TRIES
+    assert asked.count("repos/o/r/pulls/7") == 1, "бюджет обхода не держит второе изменение"
+
+
 def test_a_draft_is_not_stuck(monkeypatch: pytest.MonkeyPatch) -> None:
     """Черновик застрять не может: он и не подан."""
     listing = [{"number": 7, "title": "черновик", "draft": True, "head": {"sha": "abc"}}]
