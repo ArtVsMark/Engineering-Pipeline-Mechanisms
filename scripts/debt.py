@@ -52,6 +52,7 @@ import ci_complete
 import coverage_floor
 import findings
 import ghrest
+import hail
 import items
 import items_left
 import labels
@@ -334,10 +335,17 @@ def merge_state(repo: str, number: int, token: str) -> str:
     списочный ответ этого поля не несёт, и читать его оттуда значит не читать
     вовсе. Изменений в работе единицы, и запрос на каждое дешевле молчащего
     источника.
+
+    ЧИТАЕТСЯ С ОЖИДАНИЕМ, ОБЩИМ С ОКЛИКОМ (взгляд на #1275, 090). Первый
+    запрос лишь заказывает расчёт и отдаёт `unknown`, а план собирается сразу
+    после `ci` — ровно когда расчёт ещё не готов. Спрошенное один раз, оно
+    роняло план в исход 3 там, где пара секунд дала бы ответ. Ожидание и его
+    величины — у `hail.merge_state`: второе понимание «сколько ждать» разошлось
+    бы с первым молча. Цена — до `hail.WAIT_TRIES` запросов на изменение, чьё
+    состояние ещё не посчитано.
     """
-    one = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
-    state = str(one.get("mergeable_state") or "")
-    return "" if state in ("", "unknown") else state
+    state = hail.merge_state(repo, number, token)
+    return "" if state in hail.UNCOMPUTED else state
 
 
 def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str]]:
