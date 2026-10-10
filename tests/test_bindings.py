@@ -1118,8 +1118,13 @@ def test_a_skill_holding_an_unmachined_rule_is_named_by_its_answer() -> None:
 ORIGIN_RE = re.compile(r"^[\w.-]+/[\w.-]+:[^@\s]+@[\w.-]+$")
 #: Виды происхождения, требующие адреса источника; `own` адреса не несёт (1.9).
 ORIGIN_KINDS = frozenset({"called", "copied", "adapted"})
-#: Механизмы, у которых с контракта 1.9 происхождение обязательно.
-ORIGIN_REQUIRED_FOR = frozenset({"gate", "pipeline"})
+#: Механизмы, у которых происхождение обязательно: ВСЕ машинные виды
+#: (`kinds.MACHINE`), а не только названные контрактом 1.9 `gate` и `pipeline`
+#: (взгляд на #1291). Ответ с `code` `family.adopted` считает машинным, и без
+#: `origin_kind` он прошёл бы молча; строже контракта — допустимо, свой ответ
+#: обязан быть разборчивее его минимума. Второй список машинных видов разошёлся
+#: бы с `kinds.MACHINE` молча (022).
+ORIGIN_REQUIRED_FOR = kinds.MACHINE
 #: Вызов действия каталога в наших прогонах: адрес действия и тег.
 CATALOGUE_ORIGIN = "ArtVsMark/Engineering-Incidents-Playbook:"
 CATALOGUE_CALL_RE = re.compile(
@@ -1127,10 +1132,17 @@ CATALOGUE_CALL_RE = re.compile(
 )
 
 
+def test_the_origin_is_required_of_every_machine_kind() -> None:
+    """Происхождение обязательно у каждого машинного вида, `code` включительно (#1291)."""
+    assert ORIGIN_REQUIRED_FOR == kinds.MACHINE
+    assert "code" in ORIGIN_REQUIRED_FOR
+
+
 def test_an_origin_is_shaped_as_the_contract_asks() -> None:
     """Происхождение по форме контракта 1.9 (#1274).
 
-    `origin_kind` обязателен у действующих ответов с `gate` и `pipeline`: с 1.9
+    `origin_kind` обязателен у действующих ответов с машинным механизмом
+    (`ORIGIN_REQUIRED_FOR`, контракт называет `gate` и `pipeline`): с 1.9
     отсутствие поля больше не читается как «разработан здесь», это говорит
     явное `own`. У `own` адреса нет; у `called`, `copied`, `adapted` адрес
     обязателен и разрешим по форме. У `mechanism: none` происхождения нет вовсе.
