@@ -718,6 +718,51 @@ def test_a_name_born_again_after_release_keeps_only_its_new_work(
     assert check.earlier_files(released, fragment) == [], "имени у предка нет — состава нет"
 
 
+def test_a_renamed_fragment_keeps_its_earlier_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Переименованный невыпущенный фрагмент хранит состав работы под старым именем (#1309)."""
+    git = history(tmp_path)
+    (tmp_path / "scripts" / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / "changelog.d" / "old.internal.md").write_text(
+        "> текст фрагмента\n", encoding="utf-8"
+    )
+    git("add", "-A")
+    git("commit", "-q", "-m", "прежняя работа")
+    git("mv", "changelog.d/old.internal.md", "changelog.d/new.internal.md")
+    git("commit", "-q", "-m", "переименование")
+    monkeypatch.chdir(tmp_path)
+    earlier = check.earlier_files(git("rev-parse", "HEAD"), "changelog.d/new.internal.md")
+    assert "scripts/a.py" in earlier, "прежняя работа потерялась на переименовании"
+
+
+def test_a_shallow_boundary_is_not_a_birth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Граница мелкого клона — не рождение имени: состава нет, а не всё дерево (#1309)."""
+    source = tmp_path / "source"
+    source.mkdir()
+    git = history(source)
+    fragment = "changelog.d/shared.internal.md"
+    (source / fragment).write_text("> старое\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "заведение")
+    (source / "scripts" / "b.py").write_text("", encoding="utf-8")
+    (source / fragment).write_text("> старое и новое\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "дописано")
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{source}", str(clone)],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(clone)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout.strip()
+    assert check.is_shallow_boundary(head)
+    assert check.earlier_files(head, fragment) == [], "граница клона засчитана рождением"
+
+
 def test_main_judges_the_header_by_both_works(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
