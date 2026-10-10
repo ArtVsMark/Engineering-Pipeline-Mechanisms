@@ -8,6 +8,7 @@
 верным, а имя файла писалось по памяти, близко к смыслу.
 """
 
+import codecs
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -176,3 +177,49 @@ def test_a_listed_file_missing_on_disk_is_broken_whatever_the_network(
     assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN
     assert "doc.md не прочитан" in capsys.readouterr().err
     assert asked == [], "непрочитанный файл спросил каталог — исход снова зависит от сети"
+
+
+@pytest.mark.parametrize("codec", ["utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"])
+def test_a_wide_file_with_a_mark_is_read(tmp_path: Path, codec: str) -> None:
+    """Файл UTF-16/32 с меткой порядка байтов перекодируется: ссылка найдена (взгляд на #1302).
+
+    Прежде такой файл молча считался проверенным: байтовый образец ссылок в нём не видел.
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    mark = {
+        "utf-16-le": codecs.BOM_UTF16_LE,
+        "utf-16-be": codecs.BOM_UTF16_BE,
+        "utf-32-le": codecs.BOM_UTF32_LE,
+        "utf-32-be": codecs.BOM_UTF32_BE,
+    }[codec]
+    text = "правило rules/ru/045-no-silent-fallback.md\n"
+    (tmp_path / "data.json").write_bytes(mark + text.encode(codec))
+    assert module.links(tmp_path) == [(Path("data.json"), 1, "045", "no-silent-fallback")]
+
+
+def test_a_wide_file_without_a_mark_is_the_named_limit(tmp_path: Path) -> None:
+    """UTF-16 без метки не отличить от двоичного: ссылки в нём не видны — предел назван (#1302).
+
+    Проба держит предел словами кода: изменится поведение — она скажет об этом.
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    link = "rules/ru/045-no-silent-fallback.md"
+    (tmp_path / "data.json").write_bytes(link.encode("utf-16-le"))
+    assert module.links(tmp_path) == []
+
+
+def test_a_broken_wide_file_still_shows_its_link(tmp_path: Path) -> None:
+    """Битое тело после широкой метки не красит гейт: ASCII-ссылка найдена (#1310)."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    link = "rules/ru/045-no-silent-fallback.md\n"
+    body = codecs.BOM_UTF16_LE + link.encode("utf-16-le") + b"\x00\xd8"
+    (tmp_path / "data.json").write_bytes(body)
+    assert module.links(tmp_path) == [(Path("data.json"), 1, "045", "no-silent-fallback")]
+
+
+def test_only_a_wide_file_is_recoded() -> None:
+    """Перекодируется только файл с широкой меткой; прочие байты — как есть (#1302)."""
+    plain = "правило".encode("cp1251")
+    assert module.as_ascii_compatible(plain) == plain
+    wide = codecs.BOM_UTF16_LE + "rules/ru/045".encode("utf-16-le")
+    assert module.as_ascii_compatible(wide) == b"rules/ru/045"
