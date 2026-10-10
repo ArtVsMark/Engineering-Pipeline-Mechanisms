@@ -232,6 +232,9 @@ def test_an_unsaid_merge_state_is_unread_not_empty(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], ["#6 — работа"], []))
     built, broken, _ = module.sources("o/r", "t")
     assert "#6 — работа" in built[1].unread and not built[1].note
+    # Причину несёт строка изменения, а не заголовок: «площадка ещё считает»
+    # лгало, когда ждать не стали (взгляд на #1306).
+    assert "ещё считает" not in built[1].unread
     assert "1" in broken
     assert module.main(["--repo", "o/r"]) == module.EXIT_PARTIAL
 
