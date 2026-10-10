@@ -29,7 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import HOOKS, code_files, found_by, load_script, walk, walk_deep
+import tests.conftest as conftest_module
+from tests.conftest import HOOKS, code_files, code_roots, found_by, load_script, walk, walk_deep
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Где живёт код, названо ОДИН раз — `paths.py::SOURCES`, — и читается отсюда.
@@ -373,6 +374,29 @@ def same_names(files: list[Path]) -> dict[str, list[str]]:
     return {name: places for name, places in sorted(seen.items()) if len(places) > 1}
 
 
+def blind_roots(roots: list[str], places: list[str], base: Path = ROOT) -> list[str]:
+    """Корни, где git знает `.py`, но в обходе нет ни одного файла из них (#1315, #1319, #1322).
+
+    `.py` ищутся тем же `git ls-files --exclude-standard`, что у `code_files`, а не
+    глобом по диску: корень с одними игнорируемыми `.py` слепым не назовётся.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *roots],
+        cwd=base,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.split("\0")
+    known = [one for one in listed if one.endswith(".py")]
+    return [
+        root
+        for root in roots
+        if any(one.startswith(f"{root}/") for one in known)
+        and not any(one.startswith(f"{root}/") for one in places)
+    ]
+
+
 def test_module_names_are_unique_across_the_roots() -> None:
     """Имя `.py`-файла одно на корни кода, `tests/` и хуки на Python (#1273, #1276, 210).
 
@@ -405,15 +429,43 @@ def test_module_names_are_unique_across_the_roots() -> None:
     """
     files = code_files(with_tests=True, with_hooks=True)
     places = [path.relative_to(ROOT).as_posix() for path in files]
-    roots = [
-        *(one.as_posix() for one in load_script("paths.py").SOURCES),
-        "tests",
-        HOOKS.as_posix(),
-    ]
-    blind = [root for root in roots if not any(one.startswith(f"{root}/") for one in places)]
+    # Корни — из того же `code_roots`, что обходит `code_files`: второй список
+    # отстал бы от первого (взгляд на #1319). Требуется корень, где `.py`
+    # вообще лежит: хуки на одной оболочке гейт красить не должны.
+    roots = [one.as_posix() for one in code_roots(with_tests=True, with_hooks=True)]
+    blind = blind_roots(roots, places)
     assert not blind, f"гейт имён не видит корни: {blind}"
     twins = same_names(files)
     assert not twins, f"одноимённые `.py`-файлы — ключ по имени их смешает: {twins}"
+
+
+def test_a_root_without_python_is_not_blind(tmp_path: Path) -> None:
+    """Корень на оболочке или с одними игнорируемыми `.py` не слеп; с `.py` вне обхода — слеп."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("/ign/\n", encoding="utf-8")
+    (tmp_path / "ign").mkdir()
+    (tmp_path / "ign" / "b.py").write_text("", encoding="utf-8")
+    assert blind_roots(["ign"], [], tmp_path) == [], "игнорируемые `.py` сделали корень слепым"
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks" / "guard.sh").write_text("", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("", encoding="utf-8")
+    assert blind_roots(["hooks", "src"], [], tmp_path) == ["src"]
+    assert blind_roots(["hooks", "src"], ["src/a.py"], tmp_path) == []
+
+
+def test_code_files_walks_the_roots_of_code_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`code_files` обходит ровно корни `code_roots`, а не свою копию списка (взгляд на #1322)."""
+    monkeypatch.setattr(conftest_module, "code_roots", lambda **_: [Path("tests")])
+    seen = {path.relative_to(ROOT).parts[0] for path in code_files()}
+    assert seen == {"tests"}, f"`code_files` обходит не корни `code_roots`: {sorted(seen)}"
+
+
+def test_code_roots_hold_every_declared_source() -> None:
+    """Корни обхода — каждый из `paths.SOURCES`, набор и хуки: список не теряет источник (#1319)."""
+    roots = set(code_roots(with_tests=True, with_hooks=True))
+    assert set(load_script("paths.py").SOURCES) <= roots, f"источник выпал из корней: {roots}"
+    assert {Path("tests"), HOOKS} <= roots, f"набор или хуки выпали из корней: {roots}"
 
 
 def test_a_twin_name_is_named() -> None:
