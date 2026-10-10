@@ -670,6 +670,99 @@ def test_a_shared_fragment_keeps_the_paths_of_the_earlier_work(
     assert check.earlier_files(ancestor, "changelog.d/new.internal.md") == []
 
 
+def history(tmp_path: Path) -> Callable[..., str]:
+    """Свой git в `tmp_path` с подписью, чтобы коммитить пробы."""
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(tmp_path), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "x@example.com")
+    git("config", "user.name", "x")
+    for folder in ("changelog.d/released", "scripts"):
+        (tmp_path / folder).mkdir(parents=True)
+    return git
+
+
+def test_a_name_born_again_after_release_keeps_only_its_new_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Имя, заведённое снова после выпуска, не наследует выпущенную работу (#1303, 210).
+
+    Прежде история имени засчитывала и старую работу, и коммит выпуска с
+    журналом: шапка нового фрагмента прошла бы, называя чужое.
+    """
+    fragment = "changelog.d/shared.internal.md"
+    git = history(tmp_path)
+    (tmp_path / "scripts" / "old.py").write_text("", encoding="utf-8")
+    (tmp_path / fragment).write_text("> старое\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "выпущенная работа")
+    git("mv", fragment, "changelog.d/released/shared.internal.md")
+    (tmp_path / "CHANGELOG.md").write_text("журнал\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "выпуск")
+    released = git("rev-parse", "HEAD")
+    (tmp_path / "scripts" / "new.py").write_text("", encoding="utf-8")
+    (tmp_path / fragment).write_text("> новое\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "новая работа")
+    monkeypatch.chdir(tmp_path)
+    assert check.earlier_files(git("rev-parse", "HEAD"), fragment) == [fragment, "scripts/new.py"]
+    assert check.earlier_files(released, fragment) == [], "имени у предка нет — состава нет"
+
+
+def test_main_judges_the_header_by_both_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`main` зовёт настоящий `earlier_files`: путь прежней работы — свой, чужой — отказ (#1303)."""
+    fragment = "changelog.d/shared.internal.md"
+    git = history(tmp_path)
+    (tmp_path / "scripts" / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / fragment).write_text("> старое\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "прежняя работа")
+    ancestor = git("rev-parse", "HEAD")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(check.journal, "common_ancestor", lambda _base: ancestor)
+    monkeypatch.setattr(check.journal, "changed_files", lambda *_, **__: [fragment, "docs/b.md"])
+    monkeypatch.setattr(check, "travelled", lambda *_: [])
+    said = (
+        "> **Потребителю безразлично:** правятся `scripts/a.py` и `docs/b.md`.\n\n"
+        "### З\n\nт\n\n#1\n"
+    )
+    (tmp_path / fragment).write_text(said, encoding="utf-8")
+    assert check.main(["--base", "origin/main"]) == check.EXIT_OK
+    (tmp_path / fragment).write_text(said.replace("scripts/a.py", "scripts/c.py"), encoding="utf-8")
+    assert check.main(["--base", "origin/main"]) == check.EXIT_REJECTED
+    assert "scripts/c.py" in capsys.readouterr().err
+
+
+def test_an_unreadable_history_is_broken_not_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Отказ git при чтении прежнего состава — «не отработал», а не чистый исход (#1303)."""
+    fragment = "changelog.d/a-note.internal.md"
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / fragment).write_text(HEADER + "\n### З\n\nт\n\n#1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(check.journal, "common_ancestor", lambda _base: "предок")
+    monkeypatch.setattr(check.journal, "changed_files", lambda *_, **__: [fragment, "scripts/x.py"])
+    monkeypatch.setattr(check, "travelled", lambda *_: [])
+
+    def broken(*_: object) -> list[str]:
+        raise check.NotRun("git log не ответил")
+
+    monkeypatch.setattr(check, "earlier_files", broken)
+    assert check.main(["--base", "origin/main"]) == check.EXIT_BROKEN
+
+
 def test_a_wrapped_header_is_read_whole() -> None:
     """Шапка, перенесённая на строки `> …`, читается целиком (взгляд на #1111)."""
     text = "> **Потребителю безразлично:** правится\n> `scripts/x.py`.\n\n### З\n\n`scripts/y.py`\n"
