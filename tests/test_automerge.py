@@ -2393,6 +2393,18 @@ def own_nodes(statement: ast.AST) -> Iterator[ast.AST]:
                 yield from own_nodes(child)
 
 
+def sets_waiting_rank(node: ast.AST) -> bool:
+    """В узле есть присваивание `waiting_rank` — признак цикла голов, а не упоминание."""
+    return any(
+        isinstance(one, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+        and any(
+            isinstance(target, ast.Name) and target.id == "waiting_rank"
+            for target in (one.targets if isinstance(one, ast.Assign) else [one.target])
+        )
+        for one in ast.walk(node)
+    )
+
+
 def skip_exits(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> list[tuple[frozenset[str], bool]]:
@@ -2409,24 +2421,22 @@ def skip_exits(
     прямо, что сломалось, а не «новый выход отнесите явно». Генераторы списков
     циклом здесь не считаются: `continue` в них не бывает.
     """
-    # Цикл голов ищется в ОБЕИХ формах, `for` и `async for`: подпись принимает
-    # и сопрограмму, и не найденный цикл — отказ с причиной, а не голый
-    # `StopIteration` (взгляд на #1304).
-    loop = next(
-        (
-            node
-            for node in ast.walk(function)
-            if isinstance(node, (ast.For, ast.AsyncFor))
-            and any(
-                isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node)
-            )
-        ),
-        None,
+    # ЦИКЛ ГОЛОВ — РОВНО ОДИН ЦИКЛ, ПРИСВАИВАЮЩИЙ `waiting_rank` (взгляды на
+    # #1297, #1304; 210). Прежде брался первый цикл, где имя хотя бы упомянуто,
+    # а отказ описывал цикл, который его ставит: цикл, лишь читающий имя, был бы
+    # взят за цикл голов. Формы обе — `for` и `async for`; ни одного или больше
+    # одного — отказ с причиной, а не догадка.
+    heads = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, (ast.For, ast.AsyncFor)) and sets_waiting_rank(node)
+    ]
+    assert len(heads) == 1, (
+        f"в {function.name} циклов, присваивающих `waiting_rank`, {len(heads)} "
+        f"(строки {[one.lineno for one in heads]}), а цикл голов должен быть один: "
+        "разбирать выходы не из чего или неясно, из какого (075)"
     )
-    assert loop is not None, (
-        f"в {function.name} нет цикла голов — цикла, ставящего `waiting_rank`: "
-        "разбирать выходы не из чего (075)"
-    )
+    loop = heads[0]
     inner = [
         node.lineno
         for node in ast.walk(loop)
@@ -2519,8 +2529,31 @@ async def f(queue):
     assert skip_exits(function) == [(frozenset({"пусты"}), False)]
     empty = ast.parse("def g():\n    pass\n").body[0]
     assert isinstance(empty, ast.FunctionDef)
-    with pytest.raises(AssertionError, match="нет цикла голов"):
+    with pytest.raises(AssertionError, match="присваивающих `waiting_rank`, 0"):
         skip_exits(empty)
+
+
+def test_a_loop_that_only_reads_the_rank_is_not_the_head_loop() -> None:
+    """Цикл, лишь читающий `waiting_rank`, — не цикл голов; два ставящих — отказ (#1304, 210)."""
+    code = """
+def f(queue):
+    waiting_rank = None
+    for one in queue:
+        print(waiting_rank)
+    for change in queue:
+        if change:
+            skipped["пусты"] += 1
+            continue
+        waiting_rank = 1
+"""
+    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    assert skip_exits(function) == [(frozenset({"пусты"}), False)]
+    twice = code.replace("print(waiting_rank)", "waiting_rank = 2")
+    function = next(
+        node for node in ast.walk(ast.parse(twice)) if isinstance(node, ast.FunctionDef)
+    )
+    with pytest.raises(AssertionError, match="циклов, присваивающих"):
+        skip_exits(function)
 
 
 def test_only_the_look_waiting_exits_set_the_step() -> None:
@@ -2532,9 +2565,17 @@ def test_only_the_look_waiting_exits_set_the_step() -> None:
     отнесения — отказ.
     """
     tree = ast.parse((ROOT / "scripts" / "automerge.py").read_text(encoding="utf-8"))
+    # `advance` ищется в обеих формах — подпись `skip_exits` принимает сопрограмму,
+    # и пропажа называется причиной, а не голым `StopIteration` (взгляд на #1304).
     advance = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "advance"
+        (
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "advance"
+        ),
+        None,
     )
+    assert advance is not None, "в scripts/automerge.py нет `advance` — сверять нечего (075)"
     exits = [(keys or frozenset({"<отказ взведения>"}), sets) for keys, sets in skip_exits(advance)]
     seen = frozenset().union(*(keys for keys, _ in exits))
     unknown = sorted(seen - SKIP_WAITS_FOR_LOOK.keys())
