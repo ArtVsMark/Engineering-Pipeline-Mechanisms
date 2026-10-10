@@ -373,11 +373,6 @@ def same_names(files: list[Path]) -> dict[str, list[str]]:
     return {name: places for name, places in sorted(seen.items()) if len(places) > 1}
 
 
-def name_gate_files() -> list[Path]:
-    """Файлы, которые судит гейт имён: корни кода, набор и хуки на Python."""
-    return code_files(with_tests=True, with_hooks=True)
-
-
 def test_module_names_are_unique_across_the_roots() -> None:
     """Имя `.py`-файла одно на корни кода, `tests/` и хуки на Python (#1273, #1276, 210).
 
@@ -395,28 +390,25 @@ def test_module_names_are_unique_across_the_roots() -> None:
     ПРЕДЕЛ НАЗВАН (взгляд на #1307): судятся только `.py` — `code_files` ищет
     по `*.py`. Хуки на оболочке (`*.sh`) сюда не входят: их по имени не
     ключует ни один обход, и правило о них ничего не обещает.
+
+    ЧТО ГЕЙТ ВИДИТ НАБОР И ХУКИ, СВЕРЯЕТ ОН САМ (взгляды на #1307, #1315):
+    проба вне гейта судила бы обёртку, а не вызов в гейте, и откат вызова к
+    `code_files()` оставил бы её зелёной.
     """
-    files = name_gate_files()
-    assert files, "файлов кода нет — предмет проверки не найден (075)"
+    files = code_files(with_tests=True, with_hooks=True)
+    seen = {path.relative_to(ROOT).parts[0] for path in files}
+    assert {"tests", ".claude"} <= seen, f"гейт имён не видит набор или хуки: {sorted(seen)}"
     twins = same_names(files)
     assert not twins, f"одноимённые `.py`-файлы — ключ по имени их смешает: {twins}"
 
 
-def test_the_name_gate_sees_tests_and_hooks() -> None:
-    """Гейт имён видит `tests/` и хуки на Python, а не только корни кода (взгляд на #1307).
-
-    Проба тёзок берёт только `scripts/` и `packages/transport`: откат к
-    `code_files()` без `with_tests`/`with_hooks` она бы не заметила.
-    """
-    seen = {path.relative_to(ROOT).parts[0] for path in name_gate_files()}
-    assert {"tests", ".claude"} <= seen, f"гейт имён не видит набор или хуки: {sorted(seen)}"
-
-
 def test_a_twin_name_is_named() -> None:
-    """Проба: два файла одного имени в разных корнях называются вместе с местами."""
+    """Проба: тёзки называются с местами — в разных корнях и внутри одного (взгляд на #1315)."""
     one = ROOT / "scripts" / "x.py"
     two = ROOT / "packages" / "transport" / "x.py"
     assert same_names([one, two]) == {"x.py": ["scripts/x.py", "packages/transport/x.py"]}
+    nested = ROOT / "scripts" / "sub" / "x.py"
+    assert same_names([one, nested]) == {"x.py": ["scripts/x.py", "scripts/sub/x.py"]}
 
 
 def addresses_in(text: str) -> set[str]:
