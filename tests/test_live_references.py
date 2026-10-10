@@ -361,7 +361,12 @@ def test_every_package_is_a_declared_source() -> None:
 
 
 def same_names(files: list[Path]) -> dict[str, list[str]]:
-    """Имена модулей, встретившиеся в корнях кода больше одного раза, — с местами."""
+    """Имена `.py`-файлов, встреченные больше одного раза, — с местами, в одном корне или в разных.
+
+    Ключ — имя файла, а не путь модуля: тёзок внутри одного корня (`x.py` в
+    каталоге и в его подкаталоге) ключ по имени смешает так же, как тёзок из
+    разных корней (взгляд на #1307).
+    """
     seen: dict[str, list[str]] = {}
     for path in files:
         seen.setdefault(path.name, []).append(path.relative_to(ROOT).as_posix())
@@ -369,7 +374,7 @@ def same_names(files: list[Path]) -> dict[str, list[str]]:
 
 
 def test_module_names_are_unique_across_the_roots() -> None:
-    """Имя файла одно на корни кода (`paths.SOURCES`), `tests/` и хуки (#1273, #1276, 210).
+    """Имя `.py`-файла одно на корни кода, `tests/` и хуки на Python (#1273, #1276, 210).
 
     Обходы, переведённые на два корня, исключают и ключуют файл по имени
     (`path.name`, `stem`): одноимённый модуль в `packages/transport` молча выпал
@@ -381,18 +386,29 @@ def test_module_names_are_unique_across_the_roots() -> None:
     файл по `path.name` в наборе с `tests/`, и правило без них обещало бы
     больше, чем держит. Замер 10.10.2026 с `tests/` и `.claude/hooks`:
     одноимённых файлов ноль.
+
+    ПРЕДЕЛ НАЗВАН (взгляд на #1307): судятся только `.py` — `code_files` ищет
+    по `*.py`. Хуки на оболочке (`*.sh`) сюда не входят: их по имени не
+    ключует ни один обход, и правило о них ничего не обещает.
+
+    ЧТО ГЕЙТ ВИДИТ НАБОР И ХУКИ, СВЕРЯЕТ ОН САМ (взгляды на #1307, #1315):
+    проба вне гейта судила бы обёртку, а не вызов в гейте, и откат вызова к
+    `code_files()` оставил бы её зелёной.
     """
     files = code_files(with_tests=True, with_hooks=True)
-    assert files, "файлов кода нет — предмет проверки не найден (075)"
+    seen = {path.relative_to(ROOT).parts[0] for path in files}
+    assert {"tests", ".claude"} <= seen, f"гейт имён не видит набор или хуки: {sorted(seen)}"
     twins = same_names(files)
-    assert not twins, f"одноимённые модули в разных корнях — ключ по имени их смешает: {twins}"
+    assert not twins, f"одноимённые `.py`-файлы — ключ по имени их смешает: {twins}"
 
 
 def test_a_twin_name_is_named() -> None:
-    """Проба: два файла одного имени в разных корнях называются вместе с местами."""
+    """Проба: тёзки называются с местами — в разных корнях и внутри одного (взгляд на #1315)."""
     one = ROOT / "scripts" / "x.py"
     two = ROOT / "packages" / "transport" / "x.py"
     assert same_names([one, two]) == {"x.py": ["scripts/x.py", "packages/transport/x.py"]}
+    nested = ROOT / "scripts" / "sub" / "x.py"
+    assert same_names([one, nested]) == {"x.py": ["scripts/x.py", "scripts/sub/x.py"]}
 
 
 def addresses_in(text: str) -> set[str]:
