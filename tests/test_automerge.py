@@ -2393,16 +2393,25 @@ def own_nodes(statement: ast.AST) -> Iterator[ast.AST]:
                 yield from own_nodes(child)
 
 
+def assigns_waiting_rank(node: ast.AST) -> bool:
+    """Узел сам — присваивание `waiting_rank` в любой из трёх форм: `=`, `: тип =`, `+=`.
+
+    ОДИН ПРИЗНАК НА ВСЕ ЧТЕНИЯ (взгляд на #1311). Поиск цикла голов признавал
+    три формы, а отнесение выхода к ступени — одну `=`: выход с аннотацией нашёл
+    бы цикл голов, но ступень бы не поставил.
+    """
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        targets = [node.target]
+    else:
+        return False
+    return any(isinstance(one, ast.Name) and one.id == "waiting_rank" for one in targets)
+
+
 def sets_waiting_rank(node: ast.AST) -> bool:
-    """В узле есть присваивание `waiting_rank` — признак цикла голов, а не упоминание."""
-    return any(
-        isinstance(one, (ast.Assign, ast.AnnAssign, ast.AugAssign))
-        and any(
-            isinstance(target, ast.Name) and target.id == "waiting_rank"
-            for target in (one.targets if isinstance(one, ast.Assign) else [one.target])
-        )
-        for one in ast.walk(node)
-    )
+    """Где-то в узле есть присваивание `waiting_rank` — признак цикла голов, а не упоминание."""
+    return any(assigns_waiting_rank(one) for one in ast.walk(node))
 
 
 def skip_exits(
@@ -2426,10 +2435,18 @@ def skip_exits(
     # а отказ описывал цикл, который его ставит: цикл, лишь читающий имя, был бы
     # взят за цикл голов. Формы обе — `for` и `async for`; ни одного или больше
     # одного — отказ с причиной, а не догадка.
-    heads = [
+    candidates = [
         node
         for node in ast.walk(function)
         if isinstance(node, (ast.For, ast.AsyncFor)) and sets_waiting_rank(node)
+    ]
+    # Вложенный в кандидата цикл, тоже присваивающий имя, — не второй цикл голов,
+    # а внутренний цикл: его называет отказ `inner` ниже с верной причиной
+    # (взгляд на #1311).
+    heads = [
+        node
+        for node in candidates
+        if not any(other is not node and node in ast.walk(other) for other in candidates)
     ]
     assert len(heads) == 1, (
         f"в {function.name} циклов, присваивающих `waiting_rank`, {len(heads)} "
@@ -2466,13 +2483,7 @@ def skip_exits(
                 and one.value.id == "skipped"
             )
             sets = any(
-                isinstance(one, ast.Assign)
-                and any(
-                    isinstance(target, ast.Name) and target.id == "waiting_rank"
-                    for target in one.targets
-                )
-                for statement in block
-                for one in own_nodes(statement)
+                assigns_waiting_rank(one) for statement in block for one in own_nodes(statement)
             )
             found.append((keys, sets))
     return found
@@ -2553,6 +2564,37 @@ def f(queue):
         node for node in ast.walk(ast.parse(twice)) if isinstance(node, ast.FunctionDef)
     )
     with pytest.raises(AssertionError, match="циклов, присваивающих"):
+        skip_exits(function)
+
+
+@pytest.mark.parametrize("form", ["waiting_rank = 1", "waiting_rank: int = 1", "waiting_rank += 1"])
+def test_every_form_of_setting_the_rank_is_read_alike(form: str) -> None:
+    """`=`, `: тип =` и `+=` — одно присваивание: и для цикла голов, и для ступени (#1311)."""
+    code = f"""
+def f(queue):
+    waiting_rank = 0
+    for change in queue:
+        if change:
+            {form}
+            continue
+"""
+    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    assert skip_exits(function) == [(frozenset(), True)]
+
+
+def test_an_inner_loop_setting_the_rank_is_named_as_inner() -> None:
+    """Внутренний цикл, сам ставящий `waiting_rank`, — внутренний, а не второй головной (#1311)."""
+    code = """
+def f(queue):
+    waiting_rank = None
+    for change in queue:
+        waiting_rank = 1
+        for one in change.items:
+            waiting_rank = 2
+        continue
+"""
+    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    with pytest.raises(AssertionError, match="внутренний цикл"):
         skip_exits(function)
 
 
