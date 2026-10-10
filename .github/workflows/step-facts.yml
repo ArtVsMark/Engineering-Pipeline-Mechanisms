@@ -179,6 +179,9 @@ jobs:
           CI_WORKFLOW: ${{ inputs.ci-workflow }}
           PYTHON_MATRIX: ${{ inputs.python-matrix }}
           PYTHON_NEXT: ${{ inputs.python-next }}
+          # Поставщик — тот, чей код шаг выкачал: «взятыми» считаются ответы,
+          # чей `origin` ведёт к нему, и имя буквами не пишется (#1282).
+          SUPPLIER: ${{ job.workflow_repository }}
         run: |
           set -euo pipefail
           if [ "$GIVEN" = "failure" ]; then
@@ -196,6 +199,7 @@ jobs:
             --ci-workflow "$CI_WORKFLOW" \
             --python-matrix "$PYTHON_MATRIX" \
             --python-next "$PYTHON_NEXT" \
+            --supplier "$SUPPLIER" \
             "${args[@]}"
       # СВЕРКА СО СХЕМОЙ ВИТРИНЫ ДО ПУБЛИКАЦИИ (#1001, шаг 1). Останавливает
       # публикацию только вердикт отказа: сбой самой сверки — предупреждение,

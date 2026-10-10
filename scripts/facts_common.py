@@ -10,7 +10,9 @@
 
 ОБЩЕЕ — ТО, ЧТО ВЫВОДИТСЯ ИЗ ДЕРЕВА БЕЗ ЗНАНИЯ ПРОЕКТА: версия формата, о ком
 файл, когда и на каком коммите собран, прогон CI, версии Python из матрицы,
-версия головы и выпуск по тегам, доля покрытия из отчёта прогона. Наш
+версия головы и выпуск по тегам, доля покрытия из отчёта прогона, счёт ответа
+каталогу `.rules/bindings.json` (#1282: у потребителя исполняется только этот
+модуль, и «держится машиной» иначе посчитать было бы нечем). Наш
 `build_facts.py` берёт эти значения ОТСЮДА, а не считает второй раз (022):
 значения у нас при выносе не изменились.
 
@@ -29,10 +31,12 @@
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+import kinds
 import paths
 import pipeline_checks as policy
 import version
@@ -69,8 +73,17 @@ COMMON_KEYS: Final = frozenset(
         "release",
         "coverage",
         "coverage_percent",
+        "rules",
     }
 )
+#: Поставщик не назван — машинные ответы по происхождению не разделить:
+#: взятое у него от взятого у других не отличить, и «свои/взяты» были бы ложью.
+NO_SUPPLIER: Final = "поставщик механизмов не назван (--supplier) — «свои/взяты» не разделить"
+#: Список разрешённого (068): статус, которого здесь нет, — это дефект ответа,
+#: а не новая тонкость, о которой механизм обязан догадаться.
+STATUSES: Final = ("active", "rejected", "not-applicable", "unreviewed")
+#: `origin_kind`, которого ответ не назвал: форма до 1.9 его не требовала.
+UNNAMED_KIND: Final = "не названо"
 #: Причина для показателя, которого никто не дал: названо, кто должен был.
 NOT_GIVEN: Final = "проект не отдал показатель во входе extra-facts общего шага step-facts"
 NO_MATRIX: Final = "матрица версий Python не названа входом шага — версии не названы, а не пусты"
@@ -206,6 +219,95 @@ def ci_facts(
     return run, {}
 
 
+def taken_from(origin: str, supplier: str) -> bool:
+    """`origin` формы `<владелец>/<репозиторий>:<путь>@<версия>` ведёт к поставщику.
+
+    Регистр имени площадка не различает — сравнение без него.
+    """
+    return origin.split(":", 1)[0].strip().casefold() == supplier.casefold()
+
+
+def rules_facts(path: Path, supplier: str = "") -> dict[str, Any]:
+    """Считает ответ проекта по правилам каталога.
+
+    Считается не «сколько правил хороших», а чем они держатся: механизм и
+    документ — оба законные ответы, и разница между ними видна только числом.
+
+    МАШИННЫЕ ОТВЕТЫ — ЕЩЁ И ПО ПРОИСХОЖДЕНИЮ (#1282): `own` — без `origin`,
+    `taken` — `origin` ведёт к поставщику, `elsewhere` — к кому-то ещё
+    (например, действие каталога). Третье число на значок не идёт, но лежит
+    здесь: без него сумма не сходилась бы с «машиной», и пропажа была бы не
+    видна (045).
+
+    ПОСТАВЩИК — ВХОДОМ, А НЕ БУКВАМИ. Общий шаг знает, чей код он выкачал
+    (`job.workflow_repository`), и имя у соседа то же, откуда он шаг позвал;
+    литерал прибил бы модуль к нашему проекту (инвентарь переносимого). Не
+    назван — разбивка говорит «не прочитано» своей формой, а не делит наугад.
+    """
+    if not path.is_file():
+        raise NotRun(f"нет ответа каталогу: {path}")
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise NotRun(f"{path} не разбирается: {exc}") from exc
+
+    rules = document.get("rules") if isinstance(document, dict) else None
+    if not isinstance(rules, dict) or not rules:
+        raise NotRun(f"{path}: раздел rules пуст — предмет счёта не найден (075)")
+
+    statuses: Counter[str] = Counter()
+    mechanisms: Counter[str] = Counter()
+    sources: Counter[str] = Counter()
+    origin_kinds: Counter[str] = Counter()
+    for number, answer in rules.items():
+        if not isinstance(answer, dict):
+            raise NotRun(f"{path}: ответ по правилу {number} не отображение")
+        status = str(answer.get("status", "")).strip()
+        if status not in STATUSES:
+            raise NotRun(f"{path}: правило {number} несёт статус «{status}», которого нет в схеме")
+        statuses[status] += 1
+        if status != "active":
+            continue
+        mechanism = str(answer.get("mechanism", "")).strip()
+        if not mechanism:
+            raise NotRun(f"{path}: правило {number} действует, но чем — не сказано")
+        mechanisms[mechanism] += 1
+        if mechanism not in kinds.MACHINE:
+            continue
+        origin = str(answer.get("origin") or "").strip()
+        taken = bool(origin and supplier and taken_from(origin, supplier))
+        sources["taken" if taken else "elsewhere" if origin else "own"] += 1
+        origin_kinds[str(answer.get("origin_kind") or "").strip() or UNNAMED_KIND] += 1
+
+    return {
+        "read": True,
+        "total": len(rules),
+        "answered": len(rules) - statuses["unreviewed"],
+        "by_status": {status: statuses[status] for status in STATUSES},
+        "by_mechanism": dict(sorted(mechanisms.items())),
+        "machine": {
+            **{source: sources[source] for source in ("own", "taken", "elsewhere")},
+            "by_origin_kind": dict(sorted(origin_kinds.items())),
+        }
+        if supplier
+        else {"read": False, "why": NO_SUPPLIER},
+    }
+
+
+def rules_said(root: Path, supplier: str = "") -> dict[str, Any]:
+    """Счёт ответа каталогу или его отсутствие с причиной — третий исход, а не отказ шага.
+
+    Причина — формой раздела `{"read": false, "why": …}`, а не в `none`: ключи
+    `none` схема витрины перечисляет закрытым списком, и `rules` в нём нет.
+    Потребитель без ответа каталогу законен — значок скажет «не прочитано», а
+    не ноль (045).
+    """
+    try:
+        return rules_facts(root / paths.BINDINGS, supplier)
+    except NotRun as exc:
+        return {"read": False, "why": str(exc)}
+
+
 def common(
     root: Path,
     *,
@@ -215,8 +317,13 @@ def common(
     python_matrix: str = "",
     python_next: str = "",
     coverage: Path | None = None,
+    supplier: str = "",
 ) -> dict[str, Any]:
-    """Общие факты: минимум договора, CI, Python, версия, выпуск, покрытие — и `none`."""
+    """Общие факты: минимум договора, CI, Python, версии, покрытие, ответ каталогу — и `none`.
+
+    `supplier` — чей код конвейера исполняется (`job.workflow_repository` у
+    общего шага): по нему машинные ответы делятся на свои и взятые (#1282).
+    """
     run, none = ci_facts(root, ci_workflow, python_matrix, python_next)
     said: dict[str, Any] = {
         # МИНИМУМ КОНТРАКТА СЕМЬИ: версия формата строкой, о ком файл и когда
@@ -228,6 +335,7 @@ def common(
         "commit": sha,
         # Статус CI витрина спрашивает у площадки по имени файла (договор с 1.2).
         **run,
+        "rules": rules_said(root, supplier),
     }
     # ВЕРСИЯ ГОЛОВЫ И ВЫПУСК — РАЗНЫЕ ЧИСЛА (договор фактов 1.3, #1046): голова
     # уходит вперёд каждым изменением, потребитель живёт на выпущенном.
@@ -302,6 +410,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python-next", default="", help="пробные версии: <файл>:<джоб>")
     parser.add_argument("--coverage", type=Path, default=None, help="отчёт покрытия coverage.json")
     parser.add_argument("--extra", type=Path, default=None, help="свои числа проекта, JSON")
+    parser.add_argument(
+        "--supplier", default="", help="поставщик кода конвейера: владелец/репо — для «свои/взяты»"
+    )
     args = parser.parse_args(argv)
     if not args.repo:
         print("факты не собраны: не названо имя проекта — минимум договора (#759)", file=sys.stderr)
@@ -315,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
             python_matrix=args.python_matrix,
             python_next=args.python_next,
             coverage=args.coverage,
+            supplier=args.supplier,
         )
         facts = merge(shared, read_extra(args.extra))
     except NotRun as exc:
