@@ -849,9 +849,29 @@ def test_an_unknown_merge_state_is_not_a_clean_one(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(debt.ghrest, "request", request)
     monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
+    monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
     conflicting, unknown, red = debt.stuck_changes("o/r", "token")
     assert (conflicting, red) == ([], [])
     assert unknown == ["#6 — работа"]
+
+
+def test_a_merge_state_counted_while_waiting_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Первый ответ `unknown`, второй — посчитанный: долг читает второй (взгляд на #1275).
+
+    План собирается сразу после `ci`, когда площадка ещё считает. Спрошенное
+    один раз состояние роняло план в «не прочитано», хотя пара секунд дала бы ответ.
+    """
+    answers = iter(["unknown", "dirty"])
+    asked: list[str] = []
+
+    def request(method: str, path: str, *_: object, **__: object) -> object:
+        asked.append(path)
+        return {"mergeable_state": next(answers)}
+
+    monkeypatch.setattr(debt.ghrest, "request", request)
+    monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
+    assert debt.merge_state("o/r", 6, "token") == "dirty"
+    assert asked == ["repos/o/r/pulls/6", "repos/o/r/pulls/6"]
 
 
 def test_an_unknown_merge_state_is_still_asked_for_red(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -864,8 +884,30 @@ def test_an_unknown_merge_state_is_still_asked_for_red(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(debt.ghrest, "request", request)
     monkeypatch.setattr(debt.ghrest, "paginate", walks(listing, runs))
+    monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
     _, unknown, red = debt.stuck_changes("o/r", "token")
     assert unknown == red == ["#6 — работа"]
+
+
+def test_the_wait_budget_covers_the_whole_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Бюджет ожидания — на весь обход: израсходован — изменение спрашивается раз (#1306)."""
+    listing = [
+        {"number": n, "title": "работа", "draft": False, "head": {"sha": "abc"}} for n in (6, 7)
+    ]
+    asked: list[str] = []
+
+    def request(method: str, path: str, *_: object, **__: object) -> object:
+        asked.append(path)
+        return {"mergeable_state": "unknown"}
+
+    clock = iter([0.0, 0.0, debt.hail.WAIT_BUDGET + 1.0])
+    monkeypatch.setattr(debt.ghrest, "request", request)
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
+    monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
+    monkeypatch.setattr(debt.hail.time, "monotonic", lambda: next(clock))
+    debt.stuck_changes("o/r", "token")
+    assert asked.count("repos/o/r/pulls/6") == debt.hail.WAIT_TRIES
+    assert asked.count("repos/o/r/pulls/7") == 1, "бюджет обхода не держит второе изменение"
 
 
 def test_a_draft_is_not_stuck(monkeypatch: pytest.MonkeyPatch) -> None:
