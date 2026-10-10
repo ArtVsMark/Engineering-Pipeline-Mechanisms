@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-09T11:12:21+00:00",
+  "updated": "2026-10-10T10:29:31+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -4376,6 +4376,303 @@
         }
       },
       "coverage": 93.0
+    },
+    "2026-10-10": {
+      "runs": {
+        "main-red": {
+          "runs": 112,
+          "red": 0,
+          "cancelled": 10,
+          "seconds": 1897,
+          "timed": 112,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 1458,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 165,
+          "red": 1,
+          "cancelled": 83,
+          "seconds": 3036,
+          "timed": 165,
+          "red_jobs": {
+            "automerge / automerge": 1
+          },
+          "red_steps": {
+            "automerge / automerge · двигать очередь": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "ci-complete-wake": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 489,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 19,
+          "seconds": 1432,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 295,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 19,
+          "seconds": 1611,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 484,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 22,
+          "seconds": 2715,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 18,
+          "red": 0,
+          "cancelled": 6,
+          "seconds": 4646,
+          "timed": 18,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 9,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 16,
+          "timed": 9,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 138,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 69,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 81,
+          "red": 0,
+          "cancelled": 51,
+          "seconds": 8313,
+          "timed": 81,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1701,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 75,
+          "red": 0,
+          "cancelled": 55,
+          "seconds": 7207,
+          "timed": 75,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт имён: корни — из того же списка, что обходит code_files (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 49,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 11,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 224,
+          "timed": 11,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Очередь: голова дожидается посчитанного состояния слияния, как оклик и долг (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 46,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт имён: корни — из того же списка, что обходит code_files (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 46,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Очередь: голова дожидается посчитанного состояния слияния, как оклик и долг": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 3200,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт имён: корни — из того же списка, что обходит code_files": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2950,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Проба исходов долга говорит, что держит: печать, а не исчерпание бюджета": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1869,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт производного: отчёт покрытия игнорируется в любом каталоге (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 45,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт производного: отчёт покрытия игнорируется в любом каталоге": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 647,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Очередь: почему голова читает состояние слияния один раз — сказано у head_look (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 43,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 93.1
     }
   }
 }
