@@ -347,13 +347,8 @@ def derived_names() -> list[str]:
     return found
 
 
-#: Каталог фикстур набора: файл с именем производного там — вход пробы, а не
-#: вывод сборки, и в ветку `badges` он не просится (взгляд на #1290).
-FIXTURES: Final = "tests"
-
-
 def carried_names(root: Path) -> set[str]:
-    """Имена файлов, которые унёс бы в общую ветку `git add -A`; фикстуры набора — не в счёт.
+    """Имена файлов, которые унёс бы в общую ветку `git add -A`.
 
     ВНЕСЁННОЕ И ЕЩЁ НЕ ВНЕСЁННОЕ — ОБА (взгляд на #1290): гейт, видящий только
     индекс, зелен на файле, который окно создало и ещё не добавило, — урок
@@ -361,6 +356,18 @@ def carried_names(root: Path) -> set[str]:
     test_the_version_gate_sees_a_file_not_yet_committed`). Игнорируемое не в
     счёт: его `git add -A` не возьмёт, и архив находок в корне клона, куда его
     кладёт навык `close-a-finding`, объявлен в `.gitignore`.
+
+    СОСЕД В ЭТОМ ФАЙЛЕ ВЫБРАЛ ОБРАТНОЕ, И ЭТО НЕ РАСХОЖДЕНИЕ (взгляд на #1305).
+    `test_no_contract_word_in_the_tree_is_followed_by_a_bare_version` судит
+    только индекс: его предмет — ТЕКСТ отслеживаемых файлов, и черновик правки
+    там — незаконченная работа, красить за которую окно нельзя (#1125). Здесь
+    предмет — само ПОЯВЛЕНИЕ файла производного: незаконченным оно не бывает,
+    и уедет оно первым же `git add -A`.
+
+    ИСКЛЮЧЕНИЙ ПО КАТАЛОГУ НЕТ. Фикстур с именами производного в дереве нет —
+    пробы пишут их в `tmp_path`, — а снятый целиком каталог пропускал бы и
+    настоящее производное, попавшее туда (взгляд на #1305). Появится фикстура —
+    гейт её назовёт, и исключать её придётся поимённо, с причиной.
     Нечитаемый git — отказ (075).
     """
     out = subprocess.run(
@@ -371,9 +378,7 @@ def carried_names(root: Path) -> set[str]:
         check=False,
     )
     assert out.returncode == 0, f"git ls-files не ответил — сверять не с чем: {out.stderr}"
-    return {
-        Path(one).name for one in out.stdout.split("\0") if one and Path(one).parts[0] != FIXTURES
-    }
+    return {Path(one).name for one in out.stdout.split("\0") if one}
 
 
 def test_derived_output_is_not_in_the_shared_branch() -> None:
@@ -384,8 +389,7 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
     когда число в нём разойдётся с источником.
 
     СУДИТСЯ ТО, ЧТО УЕДЕТ В `main`, А НЕ РАБОЧИЙ КАТАЛОГ (взгляд на #1290):
-    внесённое и ещё не внесённое, без игнорируемого и без фикстур набора
-    (`carried_names`).
+    внесённое и ещё не внесённое, без игнорируемого (`carried_names`).
     """
     carried = carried_names(ROOT)
     assert carried, "git не отдал ни одного файла — предмет проверки не найден (075)"
@@ -396,17 +400,16 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
 
 
 def test_the_gate_judges_what_git_add_would_carry(tmp_path: Path) -> None:
-    """Не внесённый файл производного — нарушение; игнорируемый и фикстура набора — нет."""
+    """Не внесённый файл производного — нарушение, и в любом каталоге; игнорируемый — нет."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "facts.json").write_text("{}", encoding="utf-8")
     assert "facts.json" in carried_names(tmp_path), "не внесённое в индекс выпало"
     (tmp_path / ".gitignore").write_text("/facts.json\n", encoding="utf-8")
     assert "facts.json" not in carried_names(tmp_path), "игнорируемое засчитано"
-    fixture = tmp_path / FIXTURES / "data" / "findings.json"
-    fixture.parent.mkdir(parents=True)
-    fixture.write_text("{}", encoding="utf-8")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
-    assert "findings.json" not in carried_names(tmp_path), "фикстура набора засчитана"
+    nested = tmp_path / "tests" / "data" / "findings.json"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("{}", encoding="utf-8")
+    assert "findings.json" in carried_names(tmp_path), "производное в tests/ пропущено"
 
 
 def test_the_root_archive_of_the_skill_is_ignored() -> None:
