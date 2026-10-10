@@ -31,6 +31,7 @@
 """
 
 import argparse
+import codecs
 import re
 import sys
 from pathlib import Path
@@ -82,6 +83,32 @@ def known() -> dict[str, str]:
     return found
 
 
+#: Метки порядка байтов кодировок, где ASCII лежит НЕ своими байтами, — и имя
+#: кодека, который их понимает. UTF-32 проверяется первой: её метка `ff fe 00 00`
+#: начинается с метки UTF-16 `ff fe`.
+WIDE_BOMS: Final = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def as_ascii_compatible(data: bytes) -> bytes:
+    """Байты файла в кодировке, где ASCII лежит своими байтами: широкая — перекодируется.
+
+    Широкий файл с меткой прежде молча считался проверенным: ссылок в нём
+    байтовый образец не находил, а «не отработал» после #1300 он больше не
+    давал (взгляд на #1302, 045). БИТОЕ ТЕЛО НЕ КРАСИТ (взгляд на #1310):
+    ссылка — ASCII и переживает замену соседних битых символов, а красное за
+    кодировку — ровно тот класс, от которого уводит поиск в байтах выше.
+    """
+    for bom, codec in WIDE_BOMS:
+        if data.startswith(bom):
+            return data.decode(codec, errors="replace").encode("utf-8")
+    return data
+
+
 def links(root: Path) -> list[tuple[Path, int, str, str]]:
     """Ссылки на правила в отслеживаемых файлах: где, на какой номер и имя."""
     listed = gitcall.output(
@@ -105,8 +132,10 @@ def links(root: Path) -> list[tuple[Path, int, str, str]]:
         # «не отработал» — и фикстура кодировки в любом проекте семьи, берущем
         # шаг (`step-journal.yml`), краснила бы его без способа исключить файл.
         # Ссылка — ASCII и лежит теми же байтами в любой совместимой кодировке,
-        # поэтому раскодировать нечего. Предел назван: в UTF-16 и UTF-32 ASCII
-        # лежит иначе, и ссылку там гейт не увидит.
+        # поэтому раскодировать нечего. В UTF-16 и UTF-32 ASCII лежит иначе:
+        # файл с меткой порядка байтов перекодируется (`as_ascii_compatible`),
+        # без метки — его не отличить от двоичного, и это предел (взгляд на #1302).
+        data = as_ascii_compatible(data)
         for line_number, line in enumerate(data.splitlines(), 1):
             for match in LINK_RE.finditer(line):
                 number, slug = match["number"].decode(), match["slug"].decode()
