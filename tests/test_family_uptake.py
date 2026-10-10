@@ -462,13 +462,17 @@ def test_a_timed_out_call_does_not_wait_for_its_children(tmp_path: Path) -> None
     вызовом, что у `shallow_clone`.
     """
     # Потомок пишет свой номер, и тест его снимает: иначе `sleep 30` оставался
-    # сиротой на каждый прогон набора (взгляд на #1261).
+    # сиротой на каждый прогон набора (взгляд на #1261). Передний процесс —
+    # `wait` самой оболочки, а не второй `sleep`: тот оставался сиротой там,
+    # где `sh -c` не заменяет себя последней командой (bash 3.2 на macOS;
+    # взгляд на #1295). Снятая по пределу оболочка потомков не держит —
+    # единственный потомок и есть тот, чей номер записан.
     child = tmp_path / "потомок"
     started = time.monotonic()
     try:
         with pytest.raises(subprocess.TimeoutExpired):
             subprocess.run(
-                ["sh", "-c", f'sleep 30 & echo $! > "{child}"; sleep 30'],
+                ["sh", "-c", f'sleep 30 & echo $! > "{child}"; wait'],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

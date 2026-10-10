@@ -351,6 +351,22 @@ def at_base(ancestor: str, name: str) -> str:
         raise
 
 
+def earlier_files(ancestor: str, name: str) -> list[str]:
+    """Пути, которые тронули коммиты предка, писавшие фрагмент `name`: его прежний состав.
+
+    НЕВЫПУЩЕННЫЙ ФРАГМЕНТ ОБЩИЙ (взгляд на #1303). Изменение, дописывающее
+    фрагмент, заведённый раньше, судилось бы только своим составом — и шапка
+    обязана была бы стереть путь, который фрагмент уже честно называл: выпуск
+    соврал бы о прежней работе. Фрагмента у предка нет — прежнего состава
+    нет, и это не отказ.
+    """
+    found: set[str] = set()
+    for sha in journal.git(["git", "log", "--format=%H", ancestor, "--", name]).split():
+        listed = journal.git(["git", "show", "-z", "--name-only", "--format=", sha])
+        found |= {one.strip() for one in listed.split("\0") if one.strip()}
+    return sorted(found)
+
+
 def travelled(base: str, ancestor: str | None = None) -> list[str]:
     """Отметки снятия, объявленные фрагментом и НЕ уехавшие с работой.
 
@@ -545,22 +561,29 @@ def main(argv: list[str] | None = None) -> int:
     # пересказ по памяти. Замер 04.10.2026 по истории: из 99 фрагментов
     # `internal` пути называют 21, и ни один не назвал чужого — гейт держит
     # форму на будущее, а не чинит прошлое. Остальные формы пересказа держит
-    # приём, а не гейт: навык `retell-from-the-source` (057).
+    # приём, а не гейт: навык `retell-from-the-source` (057). Фрагмент,
+    # заведённый раньше и дописываемый теперь, судится составом ОБЕИХ работ
+    # (`earlier_files`): иначе дописывающий стирал бы чужую правду (#1303).
     for name in fragments:
         if not name.endswith(f".{INTERNAL}.md"):
             continue
         try:
             text = Path(name).read_text(encoding="utf-8")
+            earlier = earlier_files(ancestor, name)
         except OSError as exc:
             print(f"проверка не отработала: фрагмент {name} не прочитан: {exc}", file=sys.stderr)
             return EXIT_BROKEN
-        stray = stray_in_header(text, files)
+        except NotRun as exc:
+            print(f"проверка не отработала: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        stray = stray_in_header(text, [*files, *earlier])
         if stray:
             print(
                 f"отвергнуто: шапка {name} называет то, чего изменение не трогает: "
                 f"{', '.join(stray)}\n\n"
                 "Шапка «Потребителю безразлично: …» — пересказ этой работы, и он\n"
-                "сверяется с составом изменения, а не пишется по памяти (215).\n"
+                "сверяется с составом изменения, а не пишется по памяти (215);\n"
+                "у фрагмента, заведённого раньше, — и с составом прежних работ.\n"
                 "Сверьте её с `git diff --stat <база>...HEAD`.",
                 file=sys.stderr,
             )
