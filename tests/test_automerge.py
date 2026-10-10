@@ -433,6 +433,30 @@ def test_head_look_reads_state_and_size_in_one_request(monkeypatch: Any) -> None
     assert asked == ["repos/o/r/pulls/7"], "объём стоил лишнего запроса (052)"
 
 
+def test_head_look_does_not_wait_for_an_unsaid_state(monkeypatch: Any) -> None:
+    """Несказанное состояние голова читает одним запросом, без ожидания соседей (взгляд на #1313).
+
+    Оклик и долг ждут посчитанного (`hail.merge_state`), а очередь пропускает
+    `unknown` с причиной и читает его следующим заходом: ожидание здесь держало
+    бы заход, не меняя исхода. Проба держит этот выбор — повтор или пауза
+    краснеют.
+    """
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str, body: Any = None) -> dict[str, Any]:
+        asked.append(path)
+        return {"mergeable_state": "unknown", "changed_files": 1}
+
+    def no_pause(_: float) -> None:
+        raise AssertionError("голова очереди ждёт посчитанного состояния")
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    monkeypatch.setattr("time.sleep", no_pause)
+    assert module.head_look("o/r", 7, "token").state == "unknown"
+    assert asked == ["repos/o/r/pulls/7"]
+    assert "unknown" not in module.STATE_MERGEABLE, "несказанное взяли бы за слияемое"
+
+
 def test_head_look_keeps_silence_apart_from_zero(monkeypatch: Any) -> None:
     """Поля объёма нет — это `None`, а не ноль: молчание не пустота (045)."""
     monkeypatch.setattr(
@@ -795,7 +819,7 @@ def test_one_pass_merges_at_most_one_change(platform: dict[str, Any]) -> None:
 
 
 def test_an_unmergeable_state_skips_the_head_instead_of_reddening(
-    platform: dict[str, Any],
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Незнакомое состояние головы пропускается, а не зовёт слияние наугад.
 
@@ -811,6 +835,11 @@ def test_an_unmergeable_state_skips_the_head_instead_of_reddening(
     platform["states"] = {1: "unknown", 2: ""}
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["merged"] == [3]
+    # Несказанное — не запрет: причина пропуска своя (взгляд на #1320).
+    said = capsys.readouterr().out
+    for number in (1, 2):
+        line = next(one for one in said.splitlines() if one.startswith(f"#{number}: состояние"))
+        assert "ещё не посчитано" in line and "не допускает" not in line, line
 
 
 def test_an_advisory_red_still_merges(platform: dict[str, Any]) -> None:

@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import code_files, found_by, load_script, walk, walk_deep
+from tests.conftest import HOOKS, code_files, found_by, load_script, walk, walk_deep
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Где живёт код, названо ОДИН раз — `paths.py::SOURCES`, — и читается отсюда.
@@ -391,13 +391,27 @@ def test_module_names_are_unique_across_the_roots() -> None:
     по `*.py`. Хуки на оболочке (`*.sh`) сюда не входят: их по имени не
     ключует ни один обход, и правило о них ничего не обещает.
 
-    ЧТО ГЕЙТ ВИДИТ НАБОР И ХУКИ, СВЕРЯЕТ ОН САМ (взгляды на #1307, #1315):
-    проба вне гейта судила бы обёртку, а не вызов в гейте, и откат вызова к
-    `code_files()` оставил бы её зелёной.
+    ЧТО ГЕЙТ ВИДИТ ВСЕ СВОИ КОРНИ, СВЕРЯЕТ ОН САМ (взгляды на #1307, #1315):
+    проба вне гейта судила бы обёртку, а не вызов в гейте. Корни — каждый из
+    `paths.SOURCES`, ради тёзок которых правило и заведено, плюс набор и хуки:
+    выпади любой из `code_files`, гейт краснеет, а не зеленеет на половине.
+
+    ТЁЗКИ ПО УСТРОЙСТВУ ЯЗЫКА ЗАПРЕЩЕНЫ ТОЖЕ, И ЭТО ВЫБОР (взгляды на #1315,
+    #1319). Второй `__init__.py`, вложенный `conftest.py` или `__main__.py`
+    гейт краснит: `LIVE` ключует модули по `stem`, а `NOT_REFERENCES` ищет
+    файл по `name`, и тёзка схлопнул бы их молча. Изъять эти имена — значит
+    держать обходы удачей, а не гейтом. Понадобится подпакет — сперва обходы
+    переводятся на путь, потом снимается запрет.
     """
     files = code_files(with_tests=True, with_hooks=True)
-    seen = {path.relative_to(ROOT).parts[0] for path in files}
-    assert {"tests", ".claude"} <= seen, f"гейт имён не видит набор или хуки: {sorted(seen)}"
+    places = [path.relative_to(ROOT).as_posix() for path in files]
+    roots = [
+        *(one.as_posix() for one in load_script("paths.py").SOURCES),
+        "tests",
+        HOOKS.as_posix(),
+    ]
+    blind = [root for root in roots if not any(one.startswith(f"{root}/") for one in places)]
+    assert not blind, f"гейт имён не видит корни: {blind}"
     twins = same_names(files)
     assert not twins, f"одноимённые `.py`-файлы — ключ по имени их смешает: {twins}"
 
@@ -409,6 +423,10 @@ def test_a_twin_name_is_named() -> None:
     assert same_names([one, two]) == {"x.py": ["scripts/x.py", "packages/transport/x.py"]}
     nested = ROOT / "scripts" / "sub" / "x.py"
     assert same_names([one, nested]) == {"x.py": ["scripts/x.py", "scripts/sub/x.py"]}
+    package = [ROOT / "scripts" / "__init__.py", ROOT / "scripts" / "sub" / "__init__.py"]
+    assert same_names(package) == {
+        "__init__.py": ["scripts/__init__.py", "scripts/sub/__init__.py"]
+    }, "имя, повторяемое языком, пропущено: обходы по имени схлопнули бы его (#1319)"
 
 
 def addresses_in(text: str) -> set[str]:
