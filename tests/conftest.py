@@ -320,6 +320,20 @@ def found_by(where: Path, pattern: str) -> list[Path]:
 HOOKS: Final = Path(".claude/hooks")
 
 
+def code_roots(*, with_tests: bool = False, with_hooks: bool = False) -> list[Path]:
+    """Корни кода, которые обходит `code_files`, — один список на обход и на гейты (071).
+
+    Гейт имён сверял, что видит каждый корень, по своей копии этого списка, и
+    четвёртый корень в `code_files` он бы не потребовал (взгляд на #1319).
+    """
+    paths = load_script("paths.py")
+    return [
+        *paths.SOURCES,
+        *([Path("tests")] if with_tests else []),
+        *([HOOKS] if with_hooks else []),
+    ]
+
+
 def code_files(
     *, with_tests: bool = False, with_hooks: bool = False, root: Path = ROOT
 ) -> list[Path]:
@@ -352,8 +366,7 @@ def code_files(
     непроверенном файле. Цена названа: файл, который `.gitignore` прячет,
     гейты не судят. Вне рабочего дерева git — отказ с причиной (075).
     """
-    paths = load_script("paths.py")
-    roots = [*paths.SOURCES, *(["tests"] if with_tests else []), *([HOOKS] if with_hooks else [])]
+    roots = code_roots(with_tests=with_tests, with_hooks=with_hooks)
     try:
         listed = subprocess.run(
             ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"]
