@@ -435,11 +435,19 @@ def test_a_file_deleted_from_disk_is_not_carried(tmp_path: Path) -> None:
     assert git_listed(tmp_path, "--deleted") == {"facts.json"}
 
 
-@pytest.mark.parametrize("where", ["coverage.json", "packages/transport/coverage.json"])
-def test_a_coverage_report_anywhere_is_ignored(where: str) -> None:
-    """`coverage json` пишет отчёт в каталог запуска — он игнорируется везде (#1305, #1316)."""
+@pytest.mark.parametrize(
+    ("where", "ignored"),
+    [
+        ("coverage.json", True),
+        ("packages/transport/coverage.json", True),
+        ("tests/data/coverage.json", False),
+    ],
+    ids=["корень", "подкаталог", "фикстура-набора"],
+)
+def test_a_coverage_report_anywhere_is_ignored(where: str, ignored: bool) -> None:
+    """Отчёт `coverage json` игнорируется везде, кроме набора: там это фикстура (#1316, #1318)."""
     out = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", where], check=False)
-    assert out.returncode == 0, f"отчёт покрытия {where} не игнорируется — гейт покраснеет"
+    assert (out.returncode == 0) is ignored, f"{where}: игнорируется — {out.returncode == 0}"
 
 
 def test_the_root_archive_of_the_skill_is_ignored() -> None:
