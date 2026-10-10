@@ -146,16 +146,26 @@ def test_an_empty_tree_is_broken_whatever_the_network(
     assert asked == [], "пустое дерево спросило каталог — исход снова зависит от сети"
 
 
-def test_an_unreadable_document_is_broken_whatever_the_network(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Документ не в UTF-8 — «не отработал», а не молчаливый пропуск, и раньше сети (#1300).
+def test_a_document_in_another_encoding_is_read_by_its_bytes(tmp_path: Path) -> None:
+    """Файл не в UTF-8 не роняет гейт и не выпадает: ссылка в нём найдена (взгляд на #1300).
 
-    Прежде `links` пропускал такой файл, и ссылки в нём не проверялись вовсе;
-    сосед `check_foreign_why` в том же случае отвечал «не отработал».
+    Прежде такой файл сперва молча пропускался, затем ронял весь гейт в «не
+    отработал» — без способа исключить фикстуру кодировки.
     """
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    (tmp_path / "doc.md").write_bytes(b"rule \xff\xfe")
+    link = "rules/ru/045-no-silent-fallback.md"
+    (tmp_path / "doc.md").write_bytes("правило ".encode("cp1251") + b"\xff " + link.encode())
+    assert module.links(tmp_path) == [(Path("doc.md"), 1, "045", "no-silent-fallback")]
+
+
+def test_a_listed_file_missing_on_disk_is_broken_whatever_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Перечисленный, но не прочитанный файл — «не отработал», и раньше сети (#1300)."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "doc.md").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "doc.md"], check=True)
+    (tmp_path / "doc.md").unlink()
     asked: list[str] = []
 
     def silent() -> dict[str, str]:
@@ -165,4 +175,4 @@ def test_an_unreadable_document_is_broken_whatever_the_network(
     monkeypatch.setattr(module, "known", silent)
     assert module.main(["--root", str(tmp_path)]) == module.EXIT_BROKEN
     assert "doc.md не прочитан" in capsys.readouterr().err
-    assert asked == [], "нечитаемый документ спросил каталог — исход снова зависит от сети"
+    assert asked == [], "непрочитанный файл спросил каталог — исход снова зависит от сети"
