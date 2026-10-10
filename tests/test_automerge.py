@@ -2409,11 +2409,23 @@ def skip_exits(
     прямо, что сломалось, а не «новый выход отнесите явно». Генераторы списков
     циклом здесь не считаются: `continue` в них не бывает.
     """
+    # Цикл голов ищется в ОБЕИХ формах, `for` и `async for`: подпись принимает
+    # и сопрограмму, и не найденный цикл — отказ с причиной, а не голый
+    # `StopIteration` (взгляд на #1304).
     loop = next(
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.For)
-        and any(isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node))
+        (
+            node
+            for node in ast.walk(function)
+            if isinstance(node, (ast.For, ast.AsyncFor))
+            and any(
+                isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node)
+            )
+        ),
+        None,
+    )
+    assert loop is not None, (
+        f"в {function.name} нет цикла голов — цикла, ставящего `waiting_rank`: "
+        "разбирать выходы не из чего (075)"
     )
     inner = [
         node.lineno
@@ -2458,7 +2470,8 @@ def skip_exits(
 
 #: Формы внутреннего цикла, на которые разбор выходов обязан отказать (взгляд на
 #: #1297): проба на одну форму держала бы только её — сузь проверку типов в
-#: `inner`, и остальные прошли бы молча. Тело цикла голов подставляется в `{}`.
+#: `inner`, и остальные прошли бы молча. Каждая форма подставляется в тело цикла
+#: голов пробы (`{body}`).
 INNER_LOOPS: Final = {
     "for с continue": (
         "for one in change.items:\n    if one:\n        skipped['пусты'] += 1\n        continue"
@@ -2487,6 +2500,27 @@ async def f(queue):
     )
     with pytest.raises(AssertionError, match="внутренний цикл"):
         skip_exits(function)
+
+
+def test_an_async_head_loop_is_read_and_a_missing_one_is_named() -> None:
+    """Цикл голов `async for` разбирается, а функция без него — отказ с причиной (#1304)."""
+    code = """
+async def f(queue):
+    waiting_rank = None
+    async for change in queue:
+        if change:
+            skipped["пусты"] += 1
+            continue
+        waiting_rank = 1
+"""
+    function = next(
+        node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.AsyncFunctionDef)
+    )
+    assert skip_exits(function) == [(frozenset({"пусты"}), False)]
+    empty = ast.parse("def g():\n    pass\n").body[0]
+    assert isinstance(empty, ast.FunctionDef)
+    with pytest.raises(AssertionError, match="нет цикла голов"):
+        skip_exits(empty)
 
 
 def test_only_the_look_waiting_exits_set_the_step() -> None:
