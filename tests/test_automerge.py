@@ -11,6 +11,7 @@
 """
 
 import ast
+import textwrap
 from collections.abc import Iterator
 from dataclasses import replace
 from typing import Any, Final, TypeGuard
@@ -2392,7 +2393,9 @@ def own_nodes(statement: ast.AST) -> Iterator[ast.AST]:
                 yield from own_nodes(child)
 
 
-def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
+def skip_exits(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[frozenset[str], bool]]:
     """Блоки цикла голов, кончающиеся `continue`: их счётчики пропуска и ставят ли они ступень.
 
     Счётчик с подставленным именем (`f"в состоянии «…»"`) называется `<состояние>`,
@@ -2406,11 +2409,23 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     прямо, что сломалось, а не «новый выход отнесите явно». Генераторы списков
     циклом здесь не считаются: `continue` в них не бывает.
     """
+    # Цикл голов ищется в ОБЕИХ формах, `for` и `async for`: подпись принимает
+    # и сопрограмму, и не найденный цикл — отказ с причиной, а не голый
+    # `StopIteration` (взгляд на #1304).
     loop = next(
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.For)
-        and any(isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node))
+        (
+            node
+            for node in ast.walk(function)
+            if isinstance(node, (ast.For, ast.AsyncFor))
+            and any(
+                isinstance(one, ast.Name) and one.id == "waiting_rank" for one in ast.walk(node)
+            )
+        ),
+        None,
+    )
+    assert loop is not None, (
+        f"в {function.name} нет цикла голов — цикла, ставящего `waiting_rank`: "
+        "разбирать выходы не из чего (075)"
     )
     inner = [
         node.lineno
@@ -2419,8 +2434,10 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     ]
     assert not inner, (
         f"в цикле голов внутренний цикл (строки {inner}) — форма, которой разбор выходов "
-        "не знает: отказ на любой внутренний цикл, с `continue` или без, потому что "
-        "`continue` в нём ушёл бы к нему, а не к циклу голов — научите `skip_exits` его форме"
+        "не знает. С `continue` он ушёл бы к внутреннему циклу, а не к циклу голов, и "
+        "засчитался бы ложным выходом; без `continue` счётчик в его теле `own_nodes` "
+        "отнёс бы объемлющему выходу как счёт раз на голову, хотя он идёт раз на элемент "
+        "или ни разу. Научите `skip_exits` его форме"
     )
     found = []
     for node in ast.walk(loop):
@@ -2451,22 +2468,59 @@ def skip_exits(function: ast.FunctionDef) -> list[tuple[frozenset[str], bool]]:
     return found
 
 
-def test_an_inner_loop_is_named_not_counted_as_an_exit() -> None:
-    """Внутренний цикл в цикле голов — отказ разбора с причиной, а не ложный выход (#1253)."""
-    code = """
-def f(queue):
+#: Формы внутреннего цикла, на которые разбор выходов обязан отказать (взгляд на
+#: #1297): проба на одну форму держала бы только её — сузь проверку типов в
+#: `inner`, и остальные прошли бы молча. Каждая форма подставляется в тело цикла
+#: голов пробы (`{body}`).
+INNER_LOOPS: Final = {
+    "for с continue": (
+        "for one in change.items:\n    if one:\n        skipped['пусты'] += 1\n        continue"
+    ),
+    "for без continue": "for one in change.items:\n    skipped['пусты'] += 1",
+    "while": "while change.items:\n    skipped['пусты'] += 1\n    break",
+    "async for": "async for one in change.items:\n    skipped['пусты'] += 1",
+    "цикл под условием": "if change:\n    for one in change.items:\n        skipped['пусты'] += 1",
+}
+
+
+@pytest.mark.parametrize("inner", list(INNER_LOOPS.values()), ids=list(INNER_LOOPS))
+def test_an_inner_loop_is_named_not_counted_as_an_exit(inner: str) -> None:
+    """Внутренний цикл любой формы в цикле голов — отказ разбора с причиной (#1253, #1297)."""
+    body = textwrap.indent(inner, " " * 8)
+    code = f"""
+async def f(queue):
     waiting_rank = None
     for change in queue:
         waiting_rank = 1
-        for one in change.items:
-            if one:
-                skipped["пусты"] += 1
-                continue
+{body}
         continue
 """
-    function = next(node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.FunctionDef))
+    function = next(
+        node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.AsyncFunctionDef)
+    )
     with pytest.raises(AssertionError, match="внутренний цикл"):
         skip_exits(function)
+
+
+def test_an_async_head_loop_is_read_and_a_missing_one_is_named() -> None:
+    """Цикл голов `async for` разбирается, а функция без него — отказ с причиной (#1304)."""
+    code = """
+async def f(queue):
+    waiting_rank = None
+    async for change in queue:
+        if change:
+            skipped["пусты"] += 1
+            continue
+        waiting_rank = 1
+"""
+    function = next(
+        node for node in ast.walk(ast.parse(code)) if isinstance(node, ast.AsyncFunctionDef)
+    )
+    assert skip_exits(function) == [(frozenset({"пусты"}), False)]
+    empty = ast.parse("def g():\n    pass\n").body[0]
+    assert isinstance(empty, ast.FunctionDef)
+    with pytest.raises(AssertionError, match="нет цикла голов"):
+        skip_exits(empty)
 
 
 def test_only_the_look_waiting_exits_set_the_step() -> None:
