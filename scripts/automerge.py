@@ -59,6 +59,7 @@
 import argparse
 import os
 import sys
+import time
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -870,7 +871,7 @@ class Head:
     changed: int | None
 
 
-def head_look(repo: str, number: int, owner_token: str) -> Head:
+def head_look(repo: str, number: int, owner_token: str, *, tries: int = 1) -> Head:
     """Состояние слияния и объём изменения у головы очереди — одним запросом.
 
     Читается ТОЛЬКО у головы (052): площадка считает состояние лениво, и
@@ -883,11 +884,17 @@ def head_look(repo: str, number: int, owner_token: str) -> Head:
     единственная голова в `unknown` могла ждать до чужого толчка; а пропуск
     менял и то, кто сольётся первым. Ожидание — общее, `hail.merge_state`, с
     его объявленными величинами; объём берётся из первого ответа.
+
+    `tries` — сколько ответов спросить всего, первый включительно; по
+    умолчанию один, без ожидания: красной голове нужен только объём (взгляд на
+    #1321). Повтор идёт после паузы, а не сразу: ответ, спрошенный вслед за
+    `unknown`, почти наверняка тот же.
     """
     payload = ghrest.request("GET", f"repos/{repo}/pulls/{number}", owner_token) or {}
     state = str(payload.get("mergeable_state") or "")
-    if state in hail.UNCOMPUTED:
-        state = hail.merge_state(repo, number, owner_token)
+    if state in hail.UNCOMPUTED and tries > 1:
+        time.sleep(hail.WAIT_PAUSE)
+        state = hail.merge_state(repo, number, owner_token, tries=tries - 1)
     said = payload.get("changed_files")
     return Head(state, said if isinstance(said, int) and not isinstance(said, bool) else None)
 
@@ -1277,6 +1284,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     # и без ступени.
     waiting_rank: int | None = None
 
+    deadline = time.monotonic() + hail.WAIT_BUDGET
     for change in queue:
         problems, _ = verdicts[change.number]
         if problems:
@@ -1306,7 +1314,10 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             skipped["красны"] += 1
             continue
 
-        look = head_look(repo, change.number, owner_token)
+        # БЮДЖЕТ ОЖИДАНИЯ — НА ВЕСЬ ЗАХОД, как у оклика и долга (взгляд на
+        # #1321): голов в `unknown` может быть много, и паузы складывались бы.
+        spent = time.monotonic() >= deadline
+        look = head_look(repo, change.number, owner_token, tries=1 if spent else hail.WAIT_TRIES)
         state = look.state
         if look.changed == 0:
             name_the_emptiness(

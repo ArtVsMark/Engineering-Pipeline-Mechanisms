@@ -269,7 +269,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(
         module,
         "head_look",
-        lambda repo, number, tok: module.Head(
+        lambda repo, number, tok, **_: module.Head(
             state["states"].get(number, "clean"), state["files_changed"].get(number, 1)
         ),
     )
@@ -451,11 +451,49 @@ def test_head_look_waits_for_an_unsaid_state(monkeypatch: Any) -> None:
         asked.append(path)
         return next(answers)
 
+    pauses: list[float] = []
     monkeypatch.setattr(module.ghrest, "request", answer)
-    monkeypatch.setattr("time.sleep", lambda _: None)
-    look = module.head_look("o/r", 7, "token")
+    monkeypatch.setattr("time.sleep", pauses.append)
+    look = module.head_look("o/r", 7, "token", tries=module.hail.WAIT_TRIES)
     assert (look.state, look.changed) == ("clean", 2)
     assert asked == ["repos/o/r/pulls/7", "repos/o/r/pulls/7"]
+    # Повтор — после паузы, а не вслед за `unknown` (взгляд на #1321).
+    assert pauses[:1] == [module.hail.WAIT_PAUSE]
+
+
+def test_the_wait_budget_covers_the_queue_sweep(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Бюджет ожидания — на весь заход: исчерпан — следующая голова спрашивается раз (#1321)."""
+    platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
+    asked: list[tuple[int, int]] = []
+
+    def look(repo: str, number: int, tok: str, *, tries: int = 1) -> Any:
+        asked.append((number, tries))
+        return module.Head("unknown", 1)
+
+    clock = iter([0.0, 0.0])
+    monkeypatch.setattr(module, "head_look", look)
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(clock, module.hail.WAIT_BUDGET + 1))
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert asked == [(1, module.hail.WAIT_TRIES), (2, 1)], asked
+
+
+def test_head_look_by_default_asks_once(monkeypatch: Any) -> None:
+    """Без `tries` — один ответ и без паузы: красной голове нужен только объём (#1321)."""
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str, body: Any = None) -> dict[str, Any]:
+        asked.append(path)
+        return {"mergeable_state": "unknown", "changed_files": 0}
+
+    def no_pause(_: float) -> None:
+        raise AssertionError("объём головы спрошен с ожиданием состояния")
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    monkeypatch.setattr("time.sleep", no_pause)
+    assert module.head_look("o/r", 7, "token").changed == 0
+    assert asked == ["repos/o/r/pulls/7"]
     assert "unknown" not in module.STATE_MERGEABLE, "несказанное взяли бы за слияемое"
 
 
