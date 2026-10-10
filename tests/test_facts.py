@@ -347,17 +347,33 @@ def derived_names() -> list[str]:
     return found
 
 
-def tracked_names(root: Path) -> set[str]:
-    """Имена файлов, ОТСЛЕЖИВАЕМЫХ git в дереве `root`; нечитаемый git — отказ (075)."""
+#: Каталог фикстур набора: файл с именем производного там — вход пробы, а не
+#: вывод сборки, и в ветку `badges` он не просится (взгляд на #1290).
+FIXTURES: Final = "tests"
+
+
+def carried_names(root: Path) -> set[str]:
+    """Имена файлов, которые унёс бы в общую ветку `git add -A`; фикстуры набора — не в счёт.
+
+    ВНЕСЁННОЕ И ЕЩЁ НЕ ВНЕСЁННОЕ — ОБА (взгляд на #1290): гейт, видящий только
+    индекс, зелен на файле, который окно создало и ещё не добавило, — урок
+    10.09 у гейта версии (`tests/test_gates_reject.py::
+    test_the_version_gate_sees_a_file_not_yet_committed`). Игнорируемое не в
+    счёт: его `git add -A` не возьмёт, и архив находок в корне клона, куда его
+    кладёт навык `close-a-finding`, объявлен в `.gitignore`.
+    Нечитаемый git — отказ (075).
+    """
     out = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z"],
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=False,
     )
     assert out.returncode == 0, f"git ls-files не ответил — сверять не с чем: {out.stderr}"
-    return {Path(one).name for one in out.stdout.split("\0") if one}
+    return {
+        Path(one).name for one in out.stdout.split("\0") if one and Path(one).parts[0] != FIXTURES
+    }
 
 
 def test_derived_output_is_not_in_the_shared_branch() -> None:
@@ -367,27 +383,41 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
     закоммиченный рядом с источником, выглядит безобидно ровно до того дня,
     когда число в нём разойдётся с источником.
 
-    СУДИТСЯ ОТСЛЕЖИВАЕМОЕ, А НЕ РАБОЧИЙ КАТАЛОГ (взгляд на #1290). Навык
-    `close-a-finding` велит класть архив `findings.json` в корень клона для
-    разбора; неотслеживаемый, он в общую ветку не попадёт, и красить за него
-    набор и предполётную значило бы краснеть на чужом. Предмет правила —
-    то, что уйдёт в `main`, то есть `git ls-files`.
+    СУДИТСЯ ТО, ЧТО УЕДЕТ В `main`, А НЕ РАБОЧИЙ КАТАЛОГ (взгляд на #1290):
+    внесённое и ещё не внесённое, без игнорируемого и без фикстур набора
+    (`carried_names`).
     """
-    tracked = tracked_names(ROOT)
-    assert tracked, "git не отслеживает ни одного файла — предмет проверки не найден (075)"
+    carried = carried_names(ROOT)
+    assert carried, "git не отдал ни одного файла — предмет проверки не найден (075)"
     # ВСЁ, ЧТО ВПРАВЕ ДЕРЖАТЬ ВЕТКА `badges`, а не только изданное сборкой: архив
     # находок там же, и его копия в дереве разошлась бы с веткой так же (160, #1271).
-    lying = sorted({*derived_names(), *facts.branch_files()} & tracked)
-    assert not lying, f"производное ветки badges отслеживается в общей ветке: {lying}"
+    lying = sorted({*derived_names(), *facts.branch_files()} & carried)
+    assert not lying, f"производное ветки badges уедет в общую ветку: {lying}"
 
 
-def test_an_untracked_derived_file_is_not_the_shared_branch(tmp_path: Path) -> None:
-    """Неотслеживаемый файл производного — не нарушение, отслеживаемый — нарушение."""
+def test_the_gate_judges_what_git_add_would_carry(tmp_path: Path) -> None:
+    """Не внесённый файл производного — нарушение; игнорируемый и фикстура набора — нет."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    (tmp_path / "findings.json").write_text("{}", encoding="utf-8")
-    assert "findings.json" not in tracked_names(tmp_path)
-    subprocess.run(["git", "-C", str(tmp_path), "add", "findings.json"], check=True)
-    assert "findings.json" in tracked_names(tmp_path)
+    (tmp_path / "facts.json").write_text("{}", encoding="utf-8")
+    assert "facts.json" in carried_names(tmp_path), "не внесённое в индекс выпало"
+    (tmp_path / ".gitignore").write_text("/facts.json\n", encoding="utf-8")
+    assert "facts.json" not in carried_names(tmp_path), "игнорируемое засчитано"
+    fixture = tmp_path / FIXTURES / "data" / "findings.json"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text("{}", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    assert "findings.json" not in carried_names(tmp_path), "фикстура набора засчитана"
+
+
+def test_the_root_archive_of_the_skill_is_ignored() -> None:
+    """Архив находок, который навык велит класть в корень клона, игнорируется git (#1290)."""
+    out = subprocess.run(
+        ["git", "-C", str(ROOT), "check-ignore", "-q", facts.ARCHIVE],
+        check=False,
+    )
+    assert out.returncode == 0, (
+        f"{facts.ARCHIVE} в корне не игнорируется — гейт 160 краснил бы разбор"
+    )
 
 
 def shown_badges() -> list[str]:
