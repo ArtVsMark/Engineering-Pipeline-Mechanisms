@@ -819,7 +819,7 @@ def test_one_pass_merges_at_most_one_change(platform: dict[str, Any]) -> None:
 
 
 def test_an_unmergeable_state_skips_the_head_instead_of_reddening(
-    platform: dict[str, Any],
+    platform: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Незнакомое состояние головы пропускается, а не зовёт слияние наугад.
 
@@ -835,6 +835,11 @@ def test_an_unmergeable_state_skips_the_head_instead_of_reddening(
     platform["states"] = {1: "unknown", 2: ""}
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["merged"] == [3]
+    # Несказанное — не запрет: причина пропуска своя (взгляд на #1320).
+    said = capsys.readouterr().out
+    for number in (1, 2):
+        line = next(one for one in said.splitlines() if one.startswith(f"#{number}: состояние"))
+        assert "ещё не посчитано" in line and "не допускает" not in line, line
 
 
 def test_an_advisory_red_still_merges(platform: dict[str, Any]) -> None:
