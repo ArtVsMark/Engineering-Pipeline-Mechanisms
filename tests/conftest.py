@@ -14,6 +14,7 @@ from types import ModuleType
 from typing import Final
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -500,3 +501,28 @@ def commit(
         when=when,
         committed=committed,
     )
+
+
+#: Строка, начинающаяся с `---`, — кандидат в конец шапки навыка при любом прочтении.
+SKILL_HEAD_FENCE_RE = re.compile(r"^---.*$", re.M)
+
+
+def skill_head(text: str) -> dict[str, object] | None:
+    """Шапка навыка, разобранная YAML до ПЕРВОЙ строки на `---`; ``None`` — нет или не разобрана.
+
+    ОДНО ПРОЧТЕНИЕ ШАПКИ НА ВСЕ ПРОВЕРКИ (взгляд на #1296, 210). Права навыка
+    сверял `tests/test_review_safety.py`, а имя и описание —
+    `tests/test_rulebook_fresh.py` своим `split("---", 2)`, который резал по
+    любому вхождению `---`, даже посреди строки: третье прочтение той же шапки.
+    Что первая такая строка — ровно `---`, держит `test_review_safety.py`.
+    """
+    if not text.startswith("---\n"):
+        return None
+    fence = SKILL_HEAD_FENCE_RE.search(text, 4)
+    if fence is None:
+        return None
+    try:
+        said = yaml.safe_load(text[4 : fence.start()])
+    except yaml.YAMLError:
+        return None
+    return {str(key): value for key, value in said.items()} if isinstance(said, dict) else None
