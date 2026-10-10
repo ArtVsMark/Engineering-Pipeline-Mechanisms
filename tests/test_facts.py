@@ -400,7 +400,8 @@ def test_derived_output_is_not_in_the_shared_branch() -> None:
     когда число в нём разойдётся с источником.
 
     СУДИТСЯ ТО, ЧТО УЕДЕТ В `main`, А НЕ РАБОЧИЙ КАТАЛОГ (взгляд на #1290):
-    внесённое и ещё не внесённое, без игнорируемого (`carried_names`).
+    внесённое и ещё не внесённое, без игнорируемого и без снятого с диска
+    (`carried_names`).
     """
     carried = carried_names(ROOT)
     assert carried, "git не отдал ни одного файла — предмет проверки не найден (075)"
@@ -434,14 +435,19 @@ def test_a_file_deleted_from_disk_is_not_carried(tmp_path: Path) -> None:
     assert git_listed(tmp_path, "--deleted") == {"facts.json"}
 
 
-def test_a_coverage_report_in_the_root_is_ignored() -> None:
-    """`coverage json` пишет `./coverage.json` — оно игнорируется, а не краснит гейт (#1305)."""
-    out = subprocess.run(
-        ["git", "-C", str(ROOT), "check-ignore", "-q", "coverage.json"], check=False
-    )
-    assert out.returncode == 0, (
-        "отчёт покрытия в корне не игнорируется — гейт производного покраснеет"
-    )
+@pytest.mark.parametrize(
+    ("where", "ignored"),
+    [
+        ("coverage.json", True),
+        ("packages/transport/coverage.json", True),
+        ("tests/data/coverage.json", False),
+    ],
+    ids=["корень", "подкаталог", "фикстура-набора"],
+)
+def test_a_coverage_report_anywhere_is_ignored(where: str, ignored: bool) -> None:
+    """Отчёт `coverage json` игнорируется везде, кроме набора: там это фикстура (#1316, #1318)."""
+    out = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", where], check=False)
+    assert (out.returncode == 0) is ignored, f"{where}: игнорируется — {out.returncode == 0}"
 
 
 def test_the_root_archive_of_the_skill_is_ignored() -> None:
