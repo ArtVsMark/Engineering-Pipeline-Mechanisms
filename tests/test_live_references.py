@@ -369,7 +369,7 @@ def same_names(files: list[Path]) -> dict[str, list[str]]:
 
 
 def test_module_names_are_unique_across_the_roots() -> None:
-    """Имя модуля одно на все корни кода — `paths.SOURCES` (взгляд на #1273, 210).
+    """Имя файла одно на корни кода (`paths.SOURCES`), `tests/` и хуки (#1273, #1276, 210).
 
     Обходы, переведённые на два корня, исключают и ключуют файл по имени
     (`path.name`, `stem`): одноимённый модуль в `packages/transport` молча выпал
