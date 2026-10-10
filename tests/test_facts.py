@@ -369,16 +369,27 @@ def carried_names(root: Path) -> set[str]:
     настоящее производное, попавшее туда (взгляд на #1305). Появится фикстура —
     гейт её назовёт, и исключать её придётся поимённо, с причиной.
     Нечитаемый git — отказ (075).
+
+    УДАЛЁННОЕ С ДИСКА НЕ В СЧЁТ (взгляд на #1305). `--cached` отдаёт и файл,
+    снятый с диска, но ещё числящийся в индексе, а `git add -A` такой файл
+    снимет: в `main` он не уедет. Его вычитает `--deleted`.
     """
+    carried = git_listed(root, "--cached", "--others", "--exclude-standard")
+    gone = git_listed(root, "--deleted")
+    return {Path(one).name for one in carried - gone}
+
+
+def git_listed(root: Path, *flags: str) -> set[str]:
+    """Пути `git ls-files` с флагами; нечитаемый git — отказ (075)."""
     out = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        ["git", "-C", str(root), "ls-files", "-z", *flags],
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=False,
     )
     assert out.returncode == 0, f"git ls-files не ответил — сверять не с чем: {out.stderr}"
-    return {Path(one).name for one in out.stdout.split("\0") if one}
+    return {one for one in out.stdout.split("\0") if one}
 
 
 def test_derived_output_is_not_in_the_shared_branch() -> None:
@@ -410,6 +421,27 @@ def test_the_gate_judges_what_git_add_would_carry(tmp_path: Path) -> None:
     nested.parent.mkdir(parents=True)
     nested.write_text("{}", encoding="utf-8")
     assert "findings.json" in carried_names(tmp_path), "производное в tests/ пропущено"
+
+
+def test_a_file_deleted_from_disk_is_not_carried(tmp_path: Path) -> None:
+    """Внесённый и снятый с диска файл `git add -A` снимет — в счёт не идёт (взгляд на #1305)."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "facts.json").write_text("{}", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "facts.json"], check=True)
+    assert "facts.json" in carried_names(tmp_path), "внесённое выпало"
+    (tmp_path / "facts.json").unlink()
+    assert "facts.json" not in carried_names(tmp_path), "снятое с диска засчитано"
+    assert git_listed(tmp_path, "--deleted") == {"facts.json"}
+
+
+def test_a_coverage_report_in_the_root_is_ignored() -> None:
+    """`coverage json` пишет `./coverage.json` — оно игнорируется, а не краснит гейт (#1305)."""
+    out = subprocess.run(
+        ["git", "-C", str(ROOT), "check-ignore", "-q", "coverage.json"], check=False
+    )
+    assert out.returncode == 0, (
+        "отчёт покрытия в корне не игнорируется — гейт производного покраснеет"
+    )
 
 
 def test_the_root_archive_of_the_skill_is_ignored() -> None:
