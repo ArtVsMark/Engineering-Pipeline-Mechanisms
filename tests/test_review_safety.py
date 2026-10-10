@@ -17,7 +17,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import load_script, walk
+from tests.conftest import SKILL_HEAD_FENCE_RE, load_script, skill_head, walk
 from tests.test_family_pinning import FAMILY, PINNED_RE
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -402,8 +402,8 @@ SKILL_HEAD_KEYS: Final = frozenset({"name", "description"})
 #: Поэтому гейт требует, чтобы ПЕРВАЯ строка шапки, начинающаяся с `---`, была
 #: ровно `---`: тогда любое из прочтений кончается на ней, и ключи у всех одни.
 HEAD_CLOSE: Final = "---"
-#: Строка, начинающаяся с `---`, — кандидат в конец шапки при любом прочтении.
-HEAD_FENCE_RE: Final = re.compile(r"^---.*$", re.M)
+#: Кандидат в конец шапки — общий с прочими чтениями шапки навыка (`conftest`).
+HEAD_FENCE_RE: Final = SKILL_HEAD_FENCE_RE
 
 
 def head_is_unambiguous(text: str) -> bool:
@@ -414,16 +414,8 @@ def head_is_unambiguous(text: str) -> bool:
 
 def skill_head_keys(text: str) -> set[str] | None:
     """Ключи шапки навыка, разобранные YAML; ``None`` — шапки нет или она не разбирается."""
-    if not text.startswith("---\n"):
-        return None
-    fence = HEAD_FENCE_RE.search(text, 4)
-    if fence is None:
-        return None
-    try:
-        said = yaml.safe_load(text[4 : fence.start()])
-    except yaml.YAMLError:
-        return None
-    return {str(key) for key in said} if isinstance(said, dict) else None
+    head = skill_head(text)
+    return set(head) if head is not None else None
 
 
 def tracked_channels(root: Path = ROOT) -> set[str]:
@@ -451,7 +443,8 @@ def tree_channel_problems(root: Path = ROOT) -> list[str]:
             keys = skill_head_keys(text)
             if keys is not None and not head_is_unambiguous(text):
                 problems.append(
-                    f"шапка навыка кончается по-разному при двух прочтениях `---`: {one}"
+                    f"первая строка шапки навыка на `---` — не ровно `---`, конец шапки "
+                    f"не один: {one}"
                 )
             elif keys is None:
                 problems.append(f"шапка навыка не разобрана — права не сверить: {one}")
@@ -498,9 +491,24 @@ def test_no_other_settings_channel_is_tracked() -> None:
         "возврат-каретки",
     ],
 )
-def test_a_skill_head_must_close_the_same_both_ways(text: str, unambiguous: bool) -> None:
+def test_a_skill_head_closes_on_a_bare_fence(text: str, unambiguous: bool) -> None:
     """Первая строка шапки на `---` — ровно `---`, или отказ (взгляды на #1262, #1296, 210)."""
     assert head_is_unambiguous(text) is unambiguous
+
+
+@pytest.mark.parametrize(
+    ("text", "head"),
+    [
+        ("---\nname: a---b\ndescription: c\n---\n", {"name": "a---b", "description": "c"}),
+        ("---\nname: a\n", None),
+        ("нет шапки\n", None),
+        ("---\n- a\n---\n", None),
+    ],
+    ids=["дефисы-посреди-строки", "не-закрыта", "без-шапки", "не-словарь"],
+)
+def test_skill_head_cuts_only_at_a_line_start(text: str, head: dict[str, object] | None) -> None:
+    """Шапка режется по строке на `---`, а не по вхождению посреди строки (взгляд на #1296)."""
+    assert skill_head(text) == head
 
 
 def test_a_tracked_neighbour_channel_is_refused(tmp_path: Path) -> None:
