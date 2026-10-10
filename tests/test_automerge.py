@@ -433,6 +433,30 @@ def test_head_look_reads_state_and_size_in_one_request(monkeypatch: Any) -> None
     assert asked == ["repos/o/r/pulls/7"], "объём стоил лишнего запроса (052)"
 
 
+def test_head_look_does_not_wait_for_an_unsaid_state(monkeypatch: Any) -> None:
+    """Несказанное состояние голова читает одним запросом, без ожидания соседей (взгляд на #1313).
+
+    Оклик и долг ждут посчитанного (`hail.merge_state`), а очередь пропускает
+    `unknown` с причиной и читает его следующим заходом: ожидание здесь держало
+    бы заход, не меняя исхода. Проба держит этот выбор — повтор или пауза
+    краснеют.
+    """
+    asked: list[str] = []
+
+    def answer(method: str, path: str, token: str, body: Any = None) -> dict[str, Any]:
+        asked.append(path)
+        return {"mergeable_state": "unknown", "changed_files": 1}
+
+    def no_pause(_: float) -> None:
+        raise AssertionError("голова очереди ждёт посчитанного состояния")
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    monkeypatch.setattr("time.sleep", no_pause)
+    assert module.head_look("o/r", 7, "token").state == "unknown"
+    assert asked == ["repos/o/r/pulls/7"]
+    assert "unknown" not in module.STATE_MERGEABLE, "несказанное взяли бы за слияемое"
+
+
 def test_head_look_keeps_silence_apart_from_zero(monkeypatch: Any) -> None:
     """Поля объёма нет — это `None`, а не ноль: молчание не пустота (045)."""
     monkeypatch.setattr(
