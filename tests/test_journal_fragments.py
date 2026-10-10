@@ -17,6 +17,7 @@
 ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
 """
 
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Final
@@ -602,6 +603,7 @@ def test_a_stray_header_rejects_the_change(
     monkeypatch.setattr(check.journal, "common_ancestor", lambda _base: "предок")
     monkeypatch.setattr(check.journal, "changed_files", lambda *_, **__: [fragment, "scripts/x.py"])
     monkeypatch.setattr(check, "travelled", lambda *_: [])
+    monkeypatch.setattr(check, "earlier_files", lambda *_: [])
     assert check.main(["--base", "origin/main"]) == check.EXIT_REJECTED
     assert "docs/decisions/037" in capsys.readouterr().err
 
@@ -620,9 +622,48 @@ def test_an_unnamed_mechanism_is_a_warning_not_a_refusal(
     monkeypatch.setattr(check.journal, "common_ancestor", lambda _base: "предок")
     monkeypatch.setattr(check.journal, "changed_files", lambda *_, **__: [fragment, "scripts/y.py"])
     monkeypatch.setattr(check, "travelled", lambda *_: [])
+    monkeypatch.setattr(check, "earlier_files", lambda *_: [])
     assert check.main(["--base", "origin/main"]) == check.EXIT_OK
     out = capsys.readouterr().out
     assert "предупреждение" in out and "scripts/y.py" in out, out
+
+
+def test_a_shared_fragment_keeps_the_paths_of_the_earlier_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Шапка дописываемого фрагмента судится составом и прежней работы (взгляд на #1303).
+
+    Прежняя работа тронула `scripts/a.py` и завела фрагмент; нынешняя трогает
+    фрагмент и `docs/b.md`. Путь прежней работы в шапке — не чужой; путь, которого
+    не трогала ни одна из двух, — по-прежнему чужой.
+    """
+    fragment = "changelog.d/shared.internal.md"
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(tmp_path), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "x@example.com")
+    git("config", "user.name", "x")
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / fragment).write_text("> старое\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "прежняя работа")
+    ancestor = git("rev-parse", "HEAD")
+    monkeypatch.chdir(tmp_path)
+    earlier = check.earlier_files(ancestor, fragment)
+    assert earlier == [fragment, "scripts/a.py"]
+    now = [fragment, "docs/b.md"]
+    header = "> **Потребителю безразлично:** правятся `scripts/a.py` и `docs/b.md`.\n"
+    assert check.stray_in_header(header, [*now, *earlier]) == []
+    assert check.stray_in_header("> правится `scripts/c.py`\n", [*now, *earlier]) == [
+        "scripts/c.py"
+    ]
+    assert check.earlier_files(ancestor, "changelog.d/new.internal.md") == []
 
 
 def test_a_wrapped_header_is_read_whole() -> None:
