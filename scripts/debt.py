@@ -394,7 +394,8 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
         # в одиночном. Пока читался список, источник 1 не срабатывал ни разу:
         # механизм молчал, и молчание выглядело как «конфликтов нет». Нашёл
         # внешний взгляд на #132.
-        state = merge_state(repo, number, token, spent=time.monotonic() >= deadline)
+        spent = time.monotonic() >= deadline
+        state = merge_state(repo, number, token, spent=spent)
         if state == "dirty":
             conflicting.append(said)
             continue
@@ -403,8 +404,9 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
             # `unknown`. Это НЕ «конфликта нет»: неизвестность называется, а не
             # подменяется тихим ответом (045). Красное от состояния слияния не
             # зависит и спрашивается дальше: прежде неизвестное уходило мимо
-            # источника 2 целиком (взгляд на #1260).
-            unknown.append(said)
+            # источника 2 целиком (взгляд на #1260). Причина едет со строкой:
+            # «не дождались» и «ждать не стали» — разное (взгляд на #1306).
+            unknown.append(f"{said} ({hail.unsaid_why(spent)})")
         runs = list(
             ghrest.paginate(
                 f"repos/{repo}/commits/{change['head']['sha']}/check-runs", token, key="check_runs"
@@ -644,7 +646,7 @@ FED_BY: Final = {
 #: несказанным состоянием слияния шаг не судил по источнику 1 и печатал
 #: «источники пусты» (взгляд на #1260, 045).
 UNREAD_BY: Final = {
-    1: {"unknown": "площадка ещё считает состояние слияния"},
+    1: {"unknown": "состояние слияния не сказано — причина у каждого изменения"},
 }
 
 #: Каналы источника 5, которых этот шаг НЕ читает, и кто их читает. Источник 5
@@ -800,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
         for said in conflicting:
             print(f"  {said}")
     if unknown:
-        print(f"состояние слияния не сказано: {len(unknown)} — площадка ещё считает")
+        print(f"состояние слияния не сказано: {len(unknown)} — причина у каждого")
         for said in unknown:
             print(f"  {said}")
     if red:

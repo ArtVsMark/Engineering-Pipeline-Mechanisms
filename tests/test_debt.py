@@ -852,7 +852,7 @@ def test_an_unknown_merge_state_is_not_a_clean_one(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
     conflicting, unknown, red = debt.stuck_changes("o/r", "token")
     assert (conflicting, red) == ([], [])
-    assert unknown == ["#6 — работа"]
+    assert unknown == [f"#6 — работа ({debt.hail.UNSAID_WAITED})"]
 
 
 def test_a_merge_state_counted_while_waiting_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -886,7 +886,8 @@ def test_an_unknown_merge_state_is_still_asked_for_red(monkeypatch: pytest.Monke
     monkeypatch.setattr(debt.ghrest, "paginate", walks(listing, runs))
     monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
     _, unknown, red = debt.stuck_changes("o/r", "token")
-    assert unknown == red == ["#6 — работа"]
+    assert unknown == [f"#6 — работа ({debt.hail.UNSAID_WAITED})"]
+    assert red == ["#6 — работа"]
 
 
 def test_the_wait_budget_covers_the_whole_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -905,9 +906,22 @@ def test_the_wait_budget_covers_the_whole_sweep(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(debt.ghrest, "paginate", walks(listing))
     monkeypatch.setattr(debt.hail.time, "sleep", lambda _: None)
     monkeypatch.setattr(debt.hail.time, "monotonic", lambda: next(clock))
-    debt.stuck_changes("o/r", "token")
+    _, unknown, _ = debt.stuck_changes("o/r", "token")
     assert asked.count("repos/o/r/pulls/6") == debt.hail.WAIT_TRIES
     assert asked.count("repos/o/r/pulls/7") == 1, "бюджет обхода не держит второе изменение"
+    # «Не дождались» и «ждать не стали» — разные ответы, и строка несёт свой
+    # (взгляд на #1306): прежде обе звались «площадка ещё считает».
+    assert unknown == [
+        f"#6 — работа ({debt.hail.UNSAID_WAITED})",
+        f"#7 — работа ({debt.hail.UNSAID_SPENT})",
+    ]
+
+
+def test_unsaid_why_tells_waited_from_spent() -> None:
+    """Причина несказанного слияния — одна на всех читателей и различает два ответа (#1306)."""
+    assert debt.hail.unsaid_why(spent=False) == debt.hail.UNSAID_WAITED
+    assert debt.hail.unsaid_why(spent=True) == debt.hail.UNSAID_SPENT
+    assert debt.hail.UNSAID_WAITED != debt.hail.UNSAID_SPENT
 
 
 def test_a_draft_is_not_stuck(monkeypatch: pytest.MonkeyPatch) -> None:

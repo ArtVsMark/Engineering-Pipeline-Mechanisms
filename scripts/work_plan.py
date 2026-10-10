@@ -249,9 +249,7 @@ def sources(
         # расходились по одному источнику (195).
         built[1] = Source(
             rows=[f"{one} — база устарела" for one in conflicting],
-            unread=(
-                "площадка ещё считает состояние слияния: " + ", ".join(unknown) if unknown else ""
-            ),
+            unread=("состояние слияния не сказано: " + ", ".join(unknown) if unknown else ""),
         )
         if unknown:
             broken.append("1")
@@ -489,7 +487,7 @@ def render(number: int, source: Source, when: str = "") -> list[str]:
     lines.append("")
     if source.unread:
         # «НЕ ПРОЧИТАНО», А НЕ «НЕ СПРОШЕНО» (взгляд на #1275): под строкой стоит
-        # и неспрошенное, и спрошенное без ответа — площадка ещё считает.
+        # и неспрошенное, и спрошенное без ответа — не дождались или ждать не стали.
         lines += [f"⚠️ **Не прочитано:** {source.unread}", ""]
         lines += ["Это НЕ «пусто»: пустота и молчание снаружи неотличимы (045).", ""]
     if source.note:
