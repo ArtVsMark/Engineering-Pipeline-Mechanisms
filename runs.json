@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-10T10:29:31+00:00",
+  "updated": "2026-10-11T10:41:34+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -4379,34 +4379,23 @@
     },
     "2026-10-10": {
       "runs": {
-        "main-red": {
-          "runs": 112,
+        "hail": {
+          "runs": 85,
           "red": 0,
-          "cancelled": 10,
-          "seconds": 1897,
-          "timed": 112,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "verify-queue": {
-          "runs": 83,
-          "red": 0,
-          "cancelled": 5,
-          "seconds": 1458,
-          "timed": 83,
+          "cancelled": 19,
+          "seconds": 1473,
+          "timed": 85,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "automerge": {
-          "runs": 165,
+          "runs": 163,
           "red": 1,
-          "cancelled": 83,
-          "seconds": 3036,
-          "timed": 165,
+          "cancelled": 82,
+          "seconds": 2896,
+          "timed": 163,
           "red_jobs": {
             "automerge / automerge": 1
           },
@@ -4418,34 +4407,100 @@
             "свой": 1
           }
         },
-        "ci-complete-wake": {
+        "review": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 501,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 1487,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
           "runs": 82,
           "red": 0,
-          "cancelled": 1,
-          "seconds": 489,
+          "cancelled": 23,
+          "seconds": 2643,
           "timed": 82,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "hail": {
-          "runs": 82,
+        "drift": {
+          "runs": 1,
           "red": 0,
-          "cancelled": 19,
-          "seconds": 1432,
-          "timed": 82,
+          "cancelled": 0,
+          "seconds": 27,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "rules-inbox": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 14,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 10,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 43,
+          "timed": 10,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "schedules-seen": {
-          "runs": 82,
+          "runs": 81,
           "red": 0,
           "cancelled": 4,
           "seconds": 295,
-          "timed": 82,
+          "timed": 81,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 110,
+          "red": 0,
+          "cancelled": 10,
+          "seconds": 1861,
+          "timed": 110,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 81,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 476,
+          "timed": 81,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -4455,107 +4510,113 @@
           "runs": 82,
           "red": 0,
           "cancelled": 19,
-          "seconds": 1611,
+          "seconds": 1621,
           "timed": 82,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "review": {
-          "runs": 6,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 484,
-          "timed": 6,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "work-plan": {
-          "runs": 82,
-          "red": 0,
-          "cancelled": 22,
-          "seconds": 2715,
-          "timed": 82,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "badges": {
-          "runs": 18,
-          "red": 0,
-          "cancelled": 6,
-          "seconds": 4646,
-          "timed": 18,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "claude": {
-          "runs": 9,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 16,
-          "timed": 9,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "task-items": {
-          "runs": 7,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 138,
-          "timed": 7,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "attribution-history": {
-          "runs": 6,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 69,
-          "timed": 6,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "ci": {
-          "runs": 81,
-          "red": 0,
+          "runs": 79,
+          "red": 2,
           "cancelled": 51,
-          "seconds": 8313,
-          "timed": 81,
+          "seconds": 7811,
+          "timed": 79,
+          "red_jobs": {
+            "window-lifetime / window-lifetime": 2
+          },
+          "red_steps": {
+            "window-lifetime / window-lifetime · срок жизни окна, открывшего изменение": 2
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 2
+          }
+        },
+        "ci-complete": {
+          "runs": 74,
+          "red": 0,
+          "cancelled": 54,
+          "seconds": 6862,
+          "timed": 74,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "python-next": {
+        "Общий шаг фактов считает ответ каталогу: «свои» и «взяты» у потребителя": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 706,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 11,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 221,
+          "timed": 11,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "runs-series": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 37,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 17,
+          "red": 0,
+          "cancelled": 6,
+          "seconds": 4287,
+          "timed": 17,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
           "runs": 6,
           "red": 0,
           "cancelled": 0,
-          "seconds": 1701,
+          "seconds": 118,
           "timed": 6,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "ci-complete": {
-          "runs": 75,
+        "attribution-history": {
+          "runs": 5,
           "red": 0,
-          "cancelled": 55,
-          "seconds": 7207,
-          "timed": 75,
+          "cancelled": 0,
+          "seconds": 56,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1418,
+          "timed": 5,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -4567,17 +4628,6 @@
           "cancelled": 0,
           "seconds": 49,
           "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "agent-pr": {
-          "runs": 11,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 224,
-          "timed": 11,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -4659,13 +4709,29 @@
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
-        },
-        "Очередь: почему голова читает состояние слияния один раз — сказано у head_look (+1)": {
+        }
+      },
+      "coverage": 93.1
+    },
+    "2026-10-11": {
+      "runs": {
+        "task-items": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 43,
+          "seconds": 19,
           "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 49,
+          "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
