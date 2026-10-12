@@ -43,6 +43,8 @@ def stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     git("push", "-q", "origin", "main", cwd=clone)
     source = tmp_path / "facts.json"
     source.write_text('{"a": 1}\n', encoding="utf-8")
+    # Значок проекта шаг рисует рядом с фактами (#1282) — стенд кладёт его так же.
+    (tmp_path / "project.svg").write_text("<svg/>\n", encoding="utf-8")
     monkeypatch.chdir(clone)
     return {"remote": remote, "clone": clone, "source": source, "tmp": tmp_path}
 
@@ -53,6 +55,7 @@ def stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
 #: `PUBLISHES` (взгляд на #1240).
 PUBLISHED_TO = "badges"
 PUBLISHED_PATH = ".github/badges/facts.json"
+PUBLISHED_PICTURE = ".github/badges/project.svg"
 
 
 def on_branch(remote: Path, path: str) -> str:
@@ -63,8 +66,21 @@ def on_branch(remote: Path, path: str) -> str:
 def test_the_first_publication_starts_the_branch(stand: dict[str, Path]) -> None:
     """Ветки нет — публикация начинает её сиротой и кладёт ровно `PUBLISHES`."""
     assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
-    assert module.PUBLISHES == (PUBLISHED_PATH,)
+    assert module.PUBLISHES == (PUBLISHED_PATH, PUBLISHED_PICTURE)
     assert on_branch(stand["remote"], PUBLISHED_PATH) == '{"a": 1}\n'
+    assert on_branch(stand["remote"], PUBLISHED_PICTURE) == "<svg/>\n"
+
+
+def test_a_missing_picture_publishes_nothing(stand: dict[str, Path]) -> None:
+    """Значка рядом с фактами нет — отказ, а не публикация одних фактов (#1282, 045).
+
+    Значок и факты едут одним коммитом, чтобы число на значке и в файле
+    витрины не расходились; половина публикации развела бы их молча.
+    """
+    (stand["tmp"] / "project.svg").unlink()
+    with pytest.raises(module.NotPublished, match="не положены"):
+        module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
+    assert git("ls-remote", "--heads", str(stand["remote"]), PUBLISHED_TO, cwd=stand["tmp"]) == ""
 
 
 def test_a_publication_lays_over_and_keeps_the_rest(stand: dict[str, Path]) -> None:

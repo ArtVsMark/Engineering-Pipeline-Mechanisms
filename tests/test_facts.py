@@ -582,6 +582,30 @@ def test_publication_writes_only_to_the_derived_branch() -> None:
     assert " ".join(facts_publish["run"].split()) == FACTS_PUBLISH_RUN, facts_publish["run"]
 
 
+#: Сценарий шага, рисующего значок проекта у общего шага фактов, — целиком (#1282).
+FACTS_PICTURE_RUN: Final = (
+    'python $MECHANISMS/scripts/build_facts.py --from-facts "$RUNNER_TEMP/facts/facts.json" '
+    '--pictures-out "$RUNNER_TEMP/facts"'
+)
+
+
+def test_the_shared_step_draws_the_picture_before_it_publishes() -> None:
+    """Значок рисуется в каталог фактов ДО публикации — иначе публиковать нечего (#1282).
+
+    Публикация берёт `project.svg` рядом с `facts.json` и без него отказывает
+    целиком. Снятый или переставленный шаг рисования краснел бы только на
+    площадке, у потребителя; здесь — сразу. Сценарий сверяется целиком, как у
+    соседа: каталог картинки обязан быть каталогом фактов.
+    """
+    shared = yaml.safe_load((WORKFLOW.parent / "step-facts.yml").read_text(encoding="utf-8"))
+    names = [step.get("name") for step in shared["jobs"]["facts"]["steps"]]
+    draw = names.index("нарисовать значок проекта по фактам")
+    publish = names.index("опубликовать факты коммитом поверх ветки badges")
+    assert draw < publish, "значок рисуется после публикации — публиковать было бы нечего"
+    run = shared["jobs"]["facts"]["steps"][draw]["run"]
+    assert " ".join(run.split()) == FACTS_PICTURE_RUN, run
+
+
 #: Сценарий шага публикации фактов — целиком. Иная запись шага, даже
 #: равносильная, краснеет: о ней решают правкой этой строки, а не разбором.
 #: ПРЕДЕЛ (взгляд на #1233): запись на `badges` из ДРУГОГО шага `step-facts.yml`

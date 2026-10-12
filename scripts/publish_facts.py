@@ -31,7 +31,13 @@ import paths
 
 #: Что шаг кладёт на ветку `badges` — путь от корня ветки. Ветку держит этот
 #: перечень: `build_facts.SHARED_STEP` обязан ему равняться, и это сверяет тест.
-PUBLISHES: Final = ((paths.BADGES_DIR / "facts.json").as_posix(),)
+#: Значок проекта едет тем же коммитом, что факты, по которым он нарисован
+#: (#1282, решение владельца 12.10.2026): число на значке и в файле витрины не
+#: расходятся ни на одно мгновение.
+PUBLISHES: Final = (
+    (paths.BADGES_DIR / "facts.json").as_posix(),
+    (paths.BADGES_DIR / "project.svg").as_posix(),
+)
 #: Ветка публикации — производная, не общая.
 BRANCH: Final = "badges"
 #: `git ls-remote --exit-code` отвечает этим кодом, когда ветки нет вовсе.
@@ -97,14 +103,21 @@ def checkout(workdir: Path) -> None:
 
 
 def publish(source: Path, workdir: Path, *, sha: str) -> bool:
-    """Кладёт `source` по каждому пути `PUBLISHES` и толкает; ``False`` — изменений нет."""
+    """Кладёт `source` и его соседей по `PUBLISHES` и толкает; ``False`` — изменений нет.
+
+    `source` — собранный `facts.json`, первая запись перечня; остальные файлы
+    берутся РЯДОМ с ним по имени. Сам `source` по имени не ищется: иначе
+    названный, но несуществующий файл подменил бы соседний `facts.json`
+    молча. Нет любого — отказ, а не публикация части (045).
+    """
     checkout(workdir)
     # СБОЙ ДИСКА И ОТСУТСТВИЕ ФАКТОВ — ТОЖЕ «НЕ ОПУБЛИКОВАНО», а не трейсбек с
     # кодом 1: шапка обещает исходы 0 и 2 и `::error::` (039, взгляд на #1233).
     try:
         for target in PUBLISHES:
             (workdir / target).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, workdir / target)
+            given = source if target == PUBLISHES[0] else source.parent / Path(target).name
+            shutil.copyfile(given, workdir / target)
     except OSError as exc:
         raise NotPublished(f"факты не положены в дерево ветки: {exc}") from exc
     # ПОДПИСЬ ПРОВЕРЯЕТСЯ: у оболочки `set -e` останавливал шаг на отказе
@@ -136,7 +149,7 @@ def publish(source: Path, workdir: Path, *, sha: str) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Точка входа: публикует собранный `facts.json` на ветку `badges`."""
+    """Точка входа: публикует собранный `facts.json` и значок рядом на ветку `badges`."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="собранный facts.json")
     parser.add_argument("--workdir", type=Path, required=True, help="где поднять дерево ветки")

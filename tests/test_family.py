@@ -347,6 +347,27 @@ def test_facts_without_a_rules_section_draw_unread() -> None:
     assert mechanisms[1][2] == "ответ каталогу не прочитан"
 
 
+def test_the_shared_step_draws_the_picture_from_consumer_facts(tmp_path: Path) -> None:
+    """Режим «только картинки» рисует значок по фактам без наших разделов (#1282).
+
+    У потребителя в фактах нет `family` и страниц: `--from-facts` упал бы на
+    них, а общему шагу нужен один `project.svg` — рядом с `facts.json`, плоско.
+    Непрочитанный файл — отказ с причиной, а не пустая картинка (045).
+    """
+    given = tmp_path / "facts.json"
+    given.write_text(
+        json.dumps({"rules": {**RULES_PLANTED, "machine": {"own": 2, "taken": 1, "elsewhere": 0}}}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    assert facts.main(["--from-facts", str(given), "--pictures-out", str(out)]) == facts.EXIT_OK
+    assert sorted(path.name for path in out.iterdir()) == sorted(facts.PICTURES)
+    drawn = (out / "project.svg").read_text(encoding="utf-8")
+    assert "механизмы" in drawn and "свои 2" in drawn and "взяты 1" in drawn
+    missing = tmp_path / "нет.json"
+    assert facts.pictures_drawn(missing, str(out)) == facts.EXIT_BROKEN
+
+
 # --- взяли гейт: объявленное происхождение ---------------------------------
 
 
