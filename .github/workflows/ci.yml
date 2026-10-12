@@ -85,11 +85,11 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     strategy:
-      # Ячейка одна, но `fail-fast` объявлен: добавят вторую версию — и
-      # узнать надо про обе, а не про первую упавшую.
+      # Ячеек две — обе стабильные ветки: 3.15 вышла 12.10.2026 (дрейф #193),
+      # и `fail-fast: false` говорит про обе, а не про первую упавшую.
       fail-fast: false
       matrix:
-        python: ["3.14"]
+        python: ["3.14", "3.15"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
