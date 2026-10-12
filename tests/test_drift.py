@@ -291,6 +291,11 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # запрос к площадке, гасятся так же (#665).
     monkeypatch.setattr(module, "pin_mislabelled", lambda *a, **k: [])
     monkeypatch.setattr(module, "platform_warnings", lambda *a, **k: [])
+    # Манифест версий языка — тоже свой путь в сеть (`ghrest.raw_text`), мимо
+    # `fetch`. Пока стабильной была 3.14, живой ответ давал «дрейфа нет», и
+    # проба зеленела на чужом источнике; 12.10.2026 стабильной стала 3.15, и
+    # она покраснела на каждой голове, `main` включительно. Гасится так же.
+    monkeypatch.setattr(module, "language_moved", lambda *a, **k: [])
     found, silent = module.look("o/r", "token", {"rules": {}})
     assert found == []
     assert silent == [
