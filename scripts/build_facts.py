@@ -904,13 +904,23 @@ def clashed() -> bool:
     return bool(clash)
 
 
+def draw_pictures(facts: dict[str, Any], out: Path) -> None:
+    """Картинки `PICTURES` по фактам — в каталог вывода.
+
+    ПИСАТЕЛЬ ОДИН НА ОБА ПУТИ (взгляд на #1327): `project.svg` у нас кладут
+    общий шаг фактов (`pictures_drawn`) и `badges.yml` (`draw_badges`), и
+    одинаковыми их держит то, что оба зовут эту функцию, а не две копии цикла.
+    """
+    for name, zones in PICTURES.items():
+        (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
+
+
 def draw_badges(facts: dict[str, Any], out: Path) -> None:
     """Значки-конечные точки по фактам — в каталог вывода."""
     for name, draw in BADGES.items():
         said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
         (out / name).write_text(said, encoding="utf-8")
-    for name, zones in PICTURES.items():
-        (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
+    draw_pictures(facts, out)
     for name, page in PAGES.items():
         (out / name).write_text(page(facts), encoding="utf-8")
     for name, build in MACHINE_READ.items():
@@ -987,8 +997,7 @@ def pictures_drawn(path: Path, out_dir: str) -> int:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     try:
-        for name, zones in PICTURES.items():
-            (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
+        draw_pictures(facts, out)
     except (KeyError, TypeError) as exc:
         print(f"картинки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
         return EXIT_BROKEN
