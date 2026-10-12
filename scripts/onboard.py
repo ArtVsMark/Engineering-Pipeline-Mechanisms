@@ -112,10 +112,15 @@ LOCAL_CALL: Final = "./.github/workflows/"
 PIPELINE_FLOW: Final = "ci.yml"
 #: Сводный гейт: заготовка его не кладёт, а называет — он пока копируется.
 SUMMARY_FLOW: Final = "ci-complete.yml"
-#: Значок проекта на ветке `badges` потребителя: его рисует общий шаг фактов
-#: (#1282). Имя — то, что значок держит в `build_facts.PICTURES`; совпадение
-#: сверяет тест, а не память.
+#: Значок проекта на ветке `badges` потребителя: его кладёт общий шаг фактов
+#: (#1282, изменение #1327). Путь — тот, что шаг публикует
+#: (`publish_facts.PUBLISHES`); совпадение сверяет тест, а не память.
 BADGE: Final = paths.BADGES_DIR / "project.svg"
+#: Условие, при котором строка значка не работает, — печатается рядом с ней.
+PRIVATE_NOTE: Final = (
+    "в закрытом репозитории ссылка на raw.githubusercontent.com без токена не отдаётся — "
+    "значок в README там не покажется"
+)
 #: Имя репозитория, пока его не знает заход: печать без `--write` идёт без дерева.
 REPO_PLACEHOLDER: Final = "<владелец>/<репо>"
 
@@ -624,6 +629,11 @@ def badge_line(repo: str) -> str:
 
     README ЗАХОД НЕ ПРАВИТ (решение владельца 12.10.2026, #1282): он почти
     всегда уже есть, а чужое заход не трогает. Строку кладёт владелец.
+
+    ЗАКРЫТЫЙ РЕПОЗИТОРИЙ ЭТУ ССЫЛКУ НЕ ОТДАСТ: `raw.githubusercontent.com` без
+    токена в приватном репозитории — всегда 404 (`scripts/badges_read.py`), и
+    значок в README там не покажется. Условие печатается рядом со строкой
+    (`PRIVATE_NOTE`), а не выясняется битой картинкой.
     """
     return f"![проект](https://raw.githubusercontent.com/{repo}/badges/{BADGE.as_posix()})"
 
@@ -865,7 +875,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Класс каждой проверки в .pipeline.yml — СВОЙ выбор; в защиту ветки — одно имя.")
         print(
             "Значок проекта в README — строкой ниже; README заход не трогает, а значок "
-            "появится после первого прогона общего шага фактов:\n"
+            f"появится после первого прогона общего шага фактов; {PRIVATE_NOTE}:\n"
             + badge_line(repo_of(args.write) or REPO_PLACEHOLDER)
         )
         print(
@@ -914,7 +924,8 @@ def main(argv: list[str] | None = None) -> int:
     if data == []:
         print("#    (инвентарь переноса не называет ни одного)")
     print("\n# 6. В свой README — значок проекта; README заход не трогает (#1282).")
-    print("#    Значок рисует общий шаг фактов на ветке `badges` после первого прогона.\n")
+    print("#    Значок рисует общий шаг фактов на ветке `badges` после первого прогона;")
+    print(f"#    {PRIVATE_NOTE}.\n")
     print(badge_line(REPO_PLACEHOLDER))
     return EXIT_OK
 
