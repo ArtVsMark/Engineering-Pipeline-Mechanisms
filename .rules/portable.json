@@ -463,7 +463,10 @@
       ]
     },
     "scripts/facts_common.py": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
     },
     "scripts/publish_facts.py": {
       "answer": "as-is"

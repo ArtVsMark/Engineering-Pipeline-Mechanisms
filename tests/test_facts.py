@@ -769,6 +769,12 @@ INSIDE_THE_FACTS: Final = frozenset(
         "counted",
         ".items",
         ".values",
+        # Форма раздела `rules.machine` проверяется, а не угадывается: у фактов,
+        # собранных до #1282, его нет, и это «не прочитано», а не отказ рисовалки.
+        "isinstance",
+        # Доля взятых — по трём числам `rules.machine`, лежащим в фактах рядом:
+        # форма, не новое число (#1282).
+        "round",
     }
 )
 
@@ -1196,7 +1202,6 @@ def test_extra_written_carries_only_our_sections(tmp_path: Path) -> None:
         "contract",
         "tests",
         "scripts",
-        "rules",
         "checks_per_pr",
         "family",
         "manifest",
