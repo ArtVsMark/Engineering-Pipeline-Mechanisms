@@ -953,3 +953,57 @@ def test_called_scripts_walk_our_imports_only(tmp_path: Path) -> None:
     (tmp_path / "scripts" / "верх.py").write_text("import os\nimport низ\n", encoding="utf-8")
     (tmp_path / "scripts" / "низ.py").write_text("from yaml import safe_load\n", encoding="utf-8")
     assert module.called_scripts(tmp_path, ["план"]) == {"верх", "низ"}
+
+
+# --- значок проекта в README (#1282, шаг 3) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/Владелец/репо.git",
+        "git@github.com:Владелец/репо.git",
+        "http://proxy@127.0.0.1:8080/git/Владелец/репо",
+    ],
+)
+def test_the_repo_is_read_from_origin_in_every_form(tmp_path: Path, url: str) -> None:
+    """Имя `владелец/репо` берётся из `origin` в любой форме адреса, а не угадывается."""
+    consumer = cloned_with_trunk(tmp_path / "потребитель", module.paths.TRUNK)
+    subprocess.run(["git", "-C", str(consumer), "remote", "add", "origin", url], check=True)
+    assert module.repo_of(consumer) == "Владелец/репо"
+
+
+def test_a_tree_without_its_own_origin_names_no_repo(tmp_path: Path) -> None:
+    """Нет `origin` или дерево внутри чужого клона — пусто, а не имя внешнего (045)."""
+    outer = cloned_with_trunk(tmp_path / "чужой", module.paths.TRUNK)
+    assert module.repo_of(outer) == ""
+    url = "https://github.com/Чужой/репо.git"
+    subprocess.run(["git", "-C", str(outer), "remote", "add", "origin", url], check=True)
+    inner = outer / "вложенный"
+    inner.mkdir()
+    assert module.repo_of(inner) == "", "назван репозиторий внешнего клона"
+
+
+def test_the_badge_is_the_picture_the_shared_step_draws() -> None:
+    """Значок, на который ведёт строка, — тот, что рисует сборка (`build_facts.PICTURES`)."""
+    drawn = load_script("build_facts.py").PICTURES
+    assert module.BADGE.name in drawn, f"строка ведёт на {module.BADGE.name}, а рисуется {drawn}"
+    line = module.badge_line("o/r")
+    assert (
+        line == "![проект](https://raw.githubusercontent.com/o/r/badges/.github/badges/project.svg)"
+    )
+
+
+def test_both_kits_print_the_badge_line_and_leave_readme_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Печать — строка с заглушкой; `--write` — с именем из `origin`; README не создан (#1282)."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    assert module.badge_line(module.REPO_PLACEHOLDER) in capsys.readouterr().out
+    consumer = cloned_with_trunk(tmp_path / "потребитель", module.paths.TRUNK)
+    url = "https://github.com/Владелец/репо.git"
+    subprocess.run(["git", "-C", str(consumer), "remote", "add", "origin", url], check=True)
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    assert module.badge_line("Владелец/репо") in capsys.readouterr().out
+    assert not (consumer / "README.md").exists(), "заход положил README"
