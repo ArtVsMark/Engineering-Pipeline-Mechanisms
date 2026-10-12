@@ -387,6 +387,11 @@ def test_both_writers_draw_the_same_picture(
     assert facts.pictures_drawn(given, str(tmp_path / "shared")) == facts.EXIT_OK
     facts.draw_badges({"rules": RULES_PLANTED}, tmp_path)
     assert called == ["picture", "picture"], "один из путей рисует картинку своей копией"
+    monkeypatch.undo()
+    drawn = tmp_path / "drawn"
+    drawn.mkdir()
+    facts.draw_pictures({"rules": RULES_PLANTED}, drawn)
+    assert sorted(path.name for path in drawn.iterdir()) == sorted(facts.PICTURES)
 
 
 # --- взяли гейт: объявленное происхождение ---------------------------------
