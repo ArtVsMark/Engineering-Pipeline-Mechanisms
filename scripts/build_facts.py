@@ -478,7 +478,7 @@ ARCHIVE: Final = "findings.json"
 #: пишется литералом, а не через `FACTS`. Через `FACTS` он переименовался бы
 #: вместе с нашей константой и держал бы совпадение, а не файл шага (взгляд на
 #: #1227). Что литерал равен `PUBLISHES`, сверяет тест.
-SHARED_STEP: Final = ("facts.json",)
+SHARED_STEP: Final = ("facts.json", "project.svg")
 
 
 def branch_files() -> list[str]:
@@ -904,13 +904,23 @@ def clashed() -> bool:
     return bool(clash)
 
 
+def draw_pictures(facts: dict[str, Any], out: Path) -> None:
+    """Картинки `PICTURES` по фактам — в каталог вывода.
+
+    ПИСАТЕЛЬ ОДИН НА ОБА ПУТИ (взгляд на #1327): `project.svg` у нас кладут
+    общий шаг фактов (`pictures_drawn`) и `badges.yml` (`draw_badges`), и
+    одинаковыми их держит то, что оба зовут эту функцию, а не две копии цикла.
+    """
+    for name, zones in PICTURES.items():
+        (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
+
+
 def draw_badges(facts: dict[str, Any], out: Path) -> None:
     """Значки-конечные точки по фактам — в каталог вывода."""
     for name, draw in BADGES.items():
         said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
         (out / name).write_text(said, encoding="utf-8")
-    for name, zones in PICTURES.items():
-        (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
+    draw_pictures(facts, out)
     for name, page in PAGES.items():
         (out / name).write_text(page(facts), encoding="utf-8")
     for name, build in MACHINE_READ.items():
@@ -969,6 +979,32 @@ def drawn_from(path: Path, out_dir: str) -> int:
     return EXIT_OK
 
 
+def pictures_drawn(path: Path, out_dir: str) -> int:
+    """Режим `--pictures-out`: только картинки `PICTURES` по готовым фактам — плоско в каталог.
+
+    ДЛЯ ОБЩЕГО ШАГА ФАКТОВ, А НЕ ДЛЯ НАШЕЙ ПУБЛИКАЦИИ (#1282, решение
+    владельца 12.10.2026). У потребителя в фактах нет наших разделов (`family`,
+    страниц), и `--from-facts` упал бы на значках-конечных точках и страницах.
+    Картинка проекта читает свои разделы через «не прочитано», а не через
+    отказ, — поэтому шаг рисует её всем, кто его зовёт. Каталог плоский: шаг
+    кладёт файл рядом с `facts.json`, и публикация берёт оба оттуда.
+    """
+    try:
+        facts = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"картинки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        draw_pictures(facts, out)
+    except (KeyError, TypeError) as exc:
+        print(f"картинки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    print(f"картинки нарисованы по {path}: {', '.join(sorted(PICTURES))}")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает факты и значок в каталог вывода."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -982,6 +1018,11 @@ def main(argv: list[str] | None = None) -> int:
         "--extra-out", default="", help="записать только свои разделы — вход extra-facts шага"
     )
     parser.add_argument("--from-facts", default="", help="нарисовать значки по готовому facts.json")
+    parser.add_argument(
+        "--pictures-out",
+        default="",
+        help="с --from-facts: только картинки PICTURES, плоско в этот каталог (общий шаг фактов)",
+    )
     parser.add_argument(
         "--branch-files",
         action="store_true",
@@ -1013,6 +1054,8 @@ def main(argv: list[str] | None = None) -> int:
         for name in prune(Path(args.prune)):
             print(f"снято с ветки: {name} — сборка его больше не издаёт")
         return EXIT_OK
+    if args.from_facts and args.pictures_out:
+        return pictures_drawn(Path(args.from_facts), args.pictures_out)
     if args.from_facts:
         return drawn_from(Path(args.from_facts), args.out_dir)
     if args.extra_out:

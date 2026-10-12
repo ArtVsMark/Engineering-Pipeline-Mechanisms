@@ -347,6 +347,53 @@ def test_facts_without_a_rules_section_draw_unread() -> None:
     assert mechanisms[1][2] == "ответ каталогу не прочитан"
 
 
+def test_the_shared_step_draws_the_picture_from_consumer_facts(tmp_path: Path) -> None:
+    """Режим «только картинки» рисует значок по фактам без наших разделов (#1282).
+
+    У потребителя в фактах нет `family` и страниц: `--from-facts` упал бы на
+    них, а общему шагу нужен один `project.svg` — рядом с `facts.json`, плоско.
+    Непрочитанный файл — отказ с причиной, а не пустая картинка (045).
+    """
+    given = tmp_path / "facts.json"
+    given.write_text(
+        json.dumps({"rules": {**RULES_PLANTED, "machine": {"own": 2, "taken": 1, "elsewhere": 0}}}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    assert facts.main(["--from-facts", str(given), "--pictures-out", str(out)]) == facts.EXIT_OK
+    assert sorted(path.name for path in out.iterdir()) == sorted(facts.PICTURES)
+    drawn = (out / "project.svg").read_text(encoding="utf-8")
+    assert "механизмы" in drawn and "свои 2" in drawn and "взяты 1" in drawn
+    missing = tmp_path / "нет.json"
+    assert facts.pictures_drawn(missing, str(out)) == facts.EXIT_BROKEN
+
+
+def test_both_writers_draw_the_same_picture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """У нас `project.svg` пишут общий шаг и `badges.yml` — через одного писателя.
+
+    Общий шаг рисует режимом «только картинки», `badges.yml` — полным
+    `--from-facts`. Разойдись они — значок мигал бы между двумя коммитами
+    одного прогона. Поэтому писатель один, `draw_pictures`, и проба держит,
+    что оба пути идут через него, а не через свою копию цикла (взгляд на #1327).
+    """
+    called: list[str] = []
+    monkeypatch.setattr(facts, "draw_pictures", lambda *_: called.append("picture"))
+    for inventory in ("BADGES", "PAGES", "MACHINE_READ"):
+        monkeypatch.setattr(facts, inventory, {})
+    given = tmp_path / "facts.json"
+    given.write_text(json.dumps({"rules": RULES_PLANTED}), encoding="utf-8")
+    assert facts.pictures_drawn(given, str(tmp_path / "shared")) == facts.EXIT_OK
+    facts.draw_badges({"rules": RULES_PLANTED}, tmp_path)
+    assert called == ["picture", "picture"], "один из путей рисует картинку своей копией"
+    monkeypatch.undo()
+    drawn = tmp_path / "drawn"
+    drawn.mkdir()
+    facts.draw_pictures({"rules": RULES_PLANTED}, drawn)
+    assert sorted(path.name for path in drawn.iterdir()) == sorted(facts.PICTURES)
+
+
 # --- взяли гейт: объявленное происхождение ---------------------------------
 
 
