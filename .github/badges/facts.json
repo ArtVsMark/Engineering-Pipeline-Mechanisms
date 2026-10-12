@@ -2,8 +2,8 @@
   "schema": "1.3",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-12T10:40:52+00:00",
-  "commit": "0d9e5ba126b5c51f6dd57d3a9163950c5f758476",
+  "generated_at": "2026-10-12T10:56:52+00:00",
+  "commit": "50de3e171f50770e9779e67e86de79ba551386d6",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,25 +19,8 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.5.111",
-  "version_whole": true,
-  "release": "1.5",
-  "coverage": {
-    "read": true,
-    "covered": 11883,
-    "lines": 12767
-  },
-  "coverage_percent": 93.1,
-  "contract": "0.7.0",
-  "tests": {
-    "functions": 3344,
-    "modules": 153
-  },
-  "scripts": {
-    "runnable": 67,
-    "started": 25
-  },
   "rules": {
+    "read": true,
     "total": 217,
     "answered": 217,
     "by_status": {
@@ -51,7 +34,34 @@
       "gate": 185,
       "pipeline": 18,
       "skill": 2
+    },
+    "machine": {
+      "own": 196,
+      "taken": 0,
+      "elsewhere": 7,
+      "by_origin_kind": {
+        "called": 7,
+        "own": 196
+      }
     }
+  },
+  "version": "1.5.112",
+  "version_whole": true,
+  "release": "1.5",
+  "coverage": {
+    "read": true,
+    "covered": 11921,
+    "lines": 12802
+  },
+  "coverage_percent": 93.1,
+  "contract": "0.7.0",
+  "tests": {
+    "functions": 3350,
+    "modules": 153
+  },
+  "scripts": {
+    "runnable": 67,
+    "started": 25
   },
   "checks_per_pr": {
     "count": 21,
