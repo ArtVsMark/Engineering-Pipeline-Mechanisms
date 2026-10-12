@@ -112,6 +112,17 @@ LOCAL_CALL: Final = "./.github/workflows/"
 PIPELINE_FLOW: Final = "ci.yml"
 #: Сводный гейт: заготовка его не кладёт, а называет — он пока копируется.
 SUMMARY_FLOW: Final = "ci-complete.yml"
+#: Значок проекта на ветке `badges` потребителя: его кладёт общий шаг фактов
+#: (#1282, изменение #1327). Путь — тот, что шаг публикует
+#: (`publish_facts.PUBLISHES`); совпадение сверяет тест, а не память.
+BADGE: Final = paths.BADGES_DIR / "project.svg"
+#: Условие, при котором строка значка не работает, — печатается рядом с ней.
+PRIVATE_NOTE: Final = (
+    "в закрытом репозитории ссылка на raw.githubusercontent.com без токена не отдаётся — "
+    "значок в README там не покажется"
+)
+#: Имя репозитория, пока его не знает заход: печать без `--write` идёт без дерева.
+REPO_PLACEHOLDER: Final = "<владелец>/<репо>"
 
 
 class NotRun(RuntimeError):
@@ -598,6 +609,35 @@ def trunk_of(root: Path) -> str:
     return (said or "").removeprefix("origin/")
 
 
+def repo_of(root: Path) -> str:
+    """Имя `владелец/репо` по адресу `origin` клона; пусто — клон его не называет.
+
+    Берутся две последние части адреса: так читаются и `https://…/o/r.git`, и
+    `git@host:o/r.git`, и адрес через прокси. Дерево, не являющееся корнем
+    своего клона, — пусто, тем же приёмом, что у `trunk_of`.
+    """
+    top = version.git("rev-parse", "--show-toplevel", root=root)
+    if top is None or Path(top).resolve() != root.resolve():
+        return ""
+    said = (version.git("remote", "get-url", "origin", root=root) or "").strip()
+    parts = [part for part in re.split(r"[/:]", said.removesuffix(".git")) if part]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else ""
+
+
+def badge_line(repo: str) -> str:
+    """Строка значка проекта для README потребителя — markdown со ссылкой на ветку `badges`.
+
+    README ЗАХОД НЕ ПРАВИТ (решение владельца 12.10.2026, #1282): он почти
+    всегда уже есть, а чужое заход не трогает. Строку кладёт владелец.
+
+    ЗАКРЫТЫЙ РЕПОЗИТОРИЙ ЭТУ ССЫЛКУ НЕ ОТДАСТ: `raw.githubusercontent.com` без
+    токена в приватном репозитории — всегда 404 (`scripts/badges_read.py`), и
+    значок в README там не покажется. Условие печатается рядом со строкой
+    (`PRIVATE_NOTE`), а не выясняется битой картинкой.
+    """
+    return f"![проект](https://raw.githubusercontent.com/{repo}/badges/{BADGE.as_posix()})"
+
+
 def occupied(root: Path, files: dict[Path, str]) -> list[Path]:
     """Файлы заготовки, которые в дереве потребителя уже есть: их заход не трогает."""
     return sorted(path for path in files if (root / path).exists())
@@ -834,6 +874,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         print("Класс каждой проверки в .pipeline.yml — СВОЙ выбор; в защиту ветки — одно имя.")
         print(
+            "Значок проекта в README — строкой ниже; README заход не трогает, а значок "
+            f"появится после первого прогона общего шага фактов; {PRIVATE_NOTE}:\n"
+            + badge_line(repo_of(args.write) or REPO_PLACEHOLDER)
+        )
+        print(
             f"Сводный гейт заготовка не кладёт: скопируйте `{paths.WORKFLOWS}/{SUMMARY_FLOW}` "
             "поставщика — его имя и ставится в защиту ветки."
         )
@@ -878,6 +923,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"#    {one}")
     if data == []:
         print("#    (инвентарь переноса не называет ни одного)")
+    print("\n# 6. В свой README — значок проекта; README заход не трогает (#1282).")
+    print("#    Значок рисует общий шаг фактов на ветке `badges` после первого прогона;")
+    print(f"#    {PRIVATE_NOTE}.\n")
+    print(badge_line(REPO_PLACEHOLDER))
     return EXIT_OK
 
 
