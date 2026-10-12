@@ -728,7 +728,7 @@ def declared_versions() -> tuple[list[str], str]:
     jobs = pipeline_checks.run_of(path).get("jobs") or {}
     matrix = matrix_of(jobs, "test-matrix", path)
     # ПРЕДРЕЛИЗНАЯ ЖИВЁТ СВОИМ ПРОГОНОМ (#1018): её красное на общей ветке
-    # дежурный кладёт долгом в план, а зоны 3.15 на едином значке пока нет (#1019).
+    # дежурный кладёт долгом в план, а предрелизной зоны на едином значке пока нет (#1019).
     # Читается тем же разбором.
     upcoming = pipeline_checks.run_of(paths.PYTHON_NEXT).get("jobs") or {}
     ahead = sorted(matrix_of(upcoming, "test-next", paths.PYTHON_NEXT), key=order)[-1]

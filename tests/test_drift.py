@@ -264,6 +264,16 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     def broken(*_: Any, **__: Any) -> Any:
         raise module.NotRun("снимок не прочитан")
 
+    def poisoned(*_: object, **__: object) -> None:
+        raise AssertionError("источник пошёл в сеть: он не подделан")
+
+    # ТРАНСПОРТ ОТРАВЛЕН — тем же приёмом, что у соседа ниже
+    # (`test_one_silent_source_does_not_stop_the_others`). Рукописный список
+    # подделок отстаёт от механизма молча: манифест версий языка шёл в сеть
+    # мимо `fetch`, и проба краснела по живому дрейфу 12.10.2026. Забытый
+    # источник теперь упрётся в отравленный транспорт и скажет о себе сам (075).
+    monkeypatch.setattr(module.ghrest, "request", poisoned)
+    monkeypatch.setattr(module.ghrest, "raw_text", poisoned)
     monkeypatch.setattr(module, "fetch", broken)
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
     # Источник версий чужих действий читает ДЕРЕВО, а не сеть: `broken` его не
@@ -291,6 +301,13 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # запрос к площадке, гасятся так же (#665).
     monkeypatch.setattr(module, "pin_mislabelled", lambda *a, **k: [])
     monkeypatch.setattr(module, "platform_warnings", lambda *a, **k: [])
+    # Версии языка: сеть дёргает `manifest(...)`, стоящий АРГУМЕНТОМ, — он
+    # вычисляется раньше вызова `language_moved`, и подделки одного
+    # `language_moved` мало (поймал внешний взгляд на #1326; сосед ниже
+    # разобрал ту же ловушку). Гасятся все три.
+    monkeypatch.setattr(module, "manifest", lambda url: [{}])
+    monkeypatch.setattr(module, "declared_versions", lambda: ([], ""))
+    monkeypatch.setattr(module, "language_moved", lambda *a, **k: [])
     found, silent = module.look("o/r", "token", {"rules": {}})
     assert found == []
     assert silent == [
