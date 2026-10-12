@@ -252,6 +252,10 @@ jobs:
           set -euo pipefail
           git fetch --quiet origin badges
           git show FETCH_HEAD:.github/badges/facts.json > "${RUNNER_TEMP}/facts.json"
+      # `project.svg` ПИШУТ ДВА ПРОГОНА — общий шаг фактов (джоб `facts`) и этот
+      # шаг, оба по одному `facts.json` и одним писателем
+      # `build_facts.draw_pictures`. Что оба пути идут через него, держит
+      # `tests/test_family.py::test_both_writers_draw_the_same_picture` (взгляд на #1327).
       - name: нарисовать значки по фактам
         run: |
           python scripts/build_facts.py \
