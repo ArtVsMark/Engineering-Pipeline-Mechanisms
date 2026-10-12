@@ -670,7 +670,10 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
     занижать долю за то, у чего нет предмета (154).
     """
     said = facts.get("rules") or {}
-    if said.get("read") is False:
+    # РАЗДЕЛА НЕТ СОВСЕМ — тоже «не прочитано», а не отказ (взгляд на #1324):
+    # так выглядят факты потребителя, опубликованные до #1282 без `rules`.
+    no_rules = "rules" not in facts or said.get("read") is False
+    if no_rules:
         rules = [
             ("правила", LABEL_COLOR, ""),
             (f"машиной {UNREAD_PART}", GREY, "ответ каталогу не прочитан"),
@@ -688,11 +691,11 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
             ),
         ]
     if "family" not in facts:
-        origins = said.get("machine") if said.get("read") is not False else None
+        origins = None if no_rules else said.get("machine")
         if not isinstance(origins, dict) or origins.get("read") is False:
             why = (
                 "ответ каталогу не прочитан"
-                if said.get("read") is False
+                if no_rules
                 else "поставщик не назван"
                 if isinstance(origins, dict)
                 else "в фактах нет разбивки по происхождению"

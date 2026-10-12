@@ -331,6 +331,22 @@ def test_the_consumer_badge_counts_own_and_taken_mechanisms(
         assert rules_part[1][0] == "машиной 66/195 · 34%"
 
 
+def test_facts_without_a_rules_section_draw_unread() -> None:
+    """Раздела `rules` нет совсем — обе зоны серые, а не KeyError (взгляд на #1324).
+
+    Так выглядят факты потребителя, опубликованные до #1282 без своего `rules`:
+    `--from-facts` по ним обязан нарисовать «не прочитано», а не упасть (045).
+    """
+    rules_part, mechanisms = facts.project_zones({})
+    assert rules_part[1][:2] == ("машиной не прочитано", facts.GREY)
+    assert [text for text, _, _ in mechanisms] == [
+        "механизмы",
+        "свои не прочитано",
+        "взяты не прочитано",
+    ]
+    assert mechanisms[1][2] == "ответ каталогу не прочитан"
+
+
 # --- взяли гейт: объявленное происхождение ---------------------------------
 
 
