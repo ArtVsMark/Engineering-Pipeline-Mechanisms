@@ -45,12 +45,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import catalogue
 import ghrest
 import onboard
 import paths
+import pipeline_checks as policy
 import report
 
 EXIT_OK: Final = 0
@@ -111,6 +112,9 @@ class Took:
     #: Версии, к которым он прибит. Их бывает НЕСКОЛЬКО, и это находка: разные
     #: шаги на разных тегах означают недоведённый переезд.
     refs: tuple[str, ...]
+    #: Диапазон `contract:` из его `.pipeline.yml`. `None` — не объявлен или
+    #: не прочитан: «на свежем» без него не сказать, и он назван, а не угадан.
+    span: str | None = None
 
     def said(self) -> str:
         """Строка сводки: числа и имена, а не оценка."""
@@ -222,7 +226,8 @@ def shallow_clone(repo: str, where: Path, host: str = HOST, timeout: float = TIM
 
 def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
     """Что взял один сосед — по его клону."""
-    folder = shallow_clone(repo, where, timeout=timeout) / WANT
+    clone = shallow_clone(repo, where, timeout=timeout)
+    folder = clone / WANT
     steps: set[str] = set()
     refs: set[str] = set()
     # КАТАЛОГА ПРОГОНОВ МОЖЕТ НЕ БЫТЬ ВОВСЕ, и это «не взял», а не отказ:
@@ -232,7 +237,12 @@ def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
             mine, pinned = calls_in(path.read_text(encoding="utf-8", errors="replace"))
             steps.update(mine)
             refs.update(pinned)
-    return Took(repo=repo, steps=tuple(sorted(steps)), refs=tuple(sorted(refs)))
+    # ОТВЕТ ЛЕЖИТ В КОРНЕ, а сужение в режиме конуса корневые файлы оставляет:
+    # второго клона ради одного файла не нужно.
+    answer = clone / paths.PIPELINE
+    text = answer.read_text(encoding="utf-8", errors="replace") if answer.is_file() else ""
+    span = policy.span_said(text) if text else None
+    return Took(repo=repo, steps=tuple(sorted(steps)), refs=tuple(sorted(refs)), span=span)
 
 
 def sweep(
@@ -319,9 +329,85 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
         },
         "steps": {"taken": len(taken), "of": len(offered), "names": taken},
         "by": [
-            {"repo": one.repo, "steps": list(one.steps), "refs": list(one.refs)}
+            {
+                "repo": one.repo,
+                "steps": list(one.steps),
+                "refs": list(one.refs),
+                "contract": one.span,
+            }
             for one in took_ours
         ],
+    }
+
+
+#: Свежесть без выпуска или без обхода не считается — и это сказано, а не ноль.
+NO_FRESHNESS: Final = "выпуска или обхода нет — на свежем ли семья, неизвестно, а не «никто»"
+#: Пин тегом выпуска: `v` и три числа. Хеш коммита — от семи шестнадцатеричных
+#: знаков. Иное имя (`main`, `dev`) — ветка: она движется, и возраста у неё нет.
+TAG_RE: Final = re.compile(r"^v\d+\.\d+\.\d+$")
+SHA_RE: Final = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def pin_of(ref: str, release: dict[str, str]) -> str:
+    """Чем прибит вызов: `release` — тег или коммит выпуска (и короткий хеш тоже),
+    `other` — другой тег или коммит, `branch` — имя ветки."""
+    if ref == release["tag"] or (SHA_RE.match(ref) and release["sha"].startswith(ref)):
+        return "release"
+    return "other" if TAG_RE.match(ref) or SHA_RE.match(ref) else "branch"
+
+
+def freshness(
+    by: list[dict[str, Any]], release: dict[str, str] | None, steps: str
+) -> dict[str, object]:
+    """На свежем ли взявшие: пин на последний выпуск и диапазон, включающий `steps`.
+
+    Решение владельца 14.10.2026 (#1344): вопрос издателя — «на каком
+    контракте и теге сидит семья». Свёртка — поле фактов, картинку рисует
+    каталог. Знаменатель — взявшие проекты. Группы:
+
+    - **на свежем** — каждый пин на теге выпуска или его коммите (полным или
+      коротким хешем), и `contract:` включает текущий номер `steps`;
+    - **в диапазоне** — контракт совместим, а пин на другом теге или коммите;
+    - **на ветке** — контракт совместим, а вызов прибит к имени ветки: она
+      движется, и «старше» о ней не скажешь (195);
+    - **отстал** — диапазон кончается не выше текущего номера;
+    - **впереди** — диапазон начинается выше текущего номера: сосед объявил
+      контракт, которого мы не выпускали, — это не отставание;
+    - **не объявлен** — диапазона нет или он не разбирается: свежесть не
+      утверждается и не отрицается (045).
+
+    Каждая группа, кроме свежих, — поимённо.
+    """
+    if not release:
+        return {"read": False, "why": NO_FRESHNESS}
+    now = tuple(int(part) for part in steps.split(".")[:2])
+    groups: dict[str, list[str]] = {
+        name: [] for name in ("fresh", "in_range", "branch", "behind", "ahead", "undeclared")
+    }
+    for one in by:
+        repo, span = str(one["repo"]), one.get("contract")
+        bounds = policy.RANGE_RE.match(str(span).strip()) if span else None
+        if bounds is None:
+            groups["undeclared"].append(repo)
+            continue
+        low = (int(bounds.group(1)), int(bounds.group(2)))
+        high = (int(bounds.group(3)), int(bounds.group(4)))
+        if now < low:
+            groups["ahead"].append(repo)
+        elif now >= high:
+            groups["behind"].append(repo)
+        else:
+            pins = {pin_of(str(ref), release) for ref in one.get("refs") or []}
+            group = "branch" if "branch" in pins else "in_range" if "other" in pins else "fresh"
+            groups[group].append(repo)
+    return {
+        "read": True,
+        "release": release["tag"],
+        "steps": steps,
+        "of": len(by),
+        "fresh": len(groups["fresh"]),
+        "in_range": len(groups["in_range"]),
+        **{f"{name}_repos": groups[name] for name in groups if name != "fresh"},
     }
 
 

@@ -41,6 +41,7 @@ from typing import Any, Final, NamedTuple
 
 import facts_common as common
 import family
+import family_uptake
 import kinds
 import paths
 import pipeline_checks as policy
@@ -379,6 +380,18 @@ def ours(
     """
     rules_facts(root / BINDINGS)
     checks = checks_facts(root / policy.DEFAULT_PATH)
+    said = manifest_facts(root)
+    seen = family_facts(summary, mine=mine, answers=root / BINDINGS, uptake=uptake)
+    taken = seen["uptake"]
+    # НА СВЕЖЕМ ЛИ СЕМЬЯ — вопрос издателя (#1344): пины взявших против
+    # нашего выпуска и их диапазоны против отдаваемого `steps`. Выпуск и
+    # номер — те же, что в манифесте, а не второе чтение тега (022). Без
+    # обхода поле есть и говорит «неизвестно», а не пропадает (взгляд на #1355).
+    taken["fresh"] = (
+        family_uptake.freshness(taken.get("by") or [], said["release"], said["gives"][GIVES_STEPS])
+        if taken.get("read")
+        else {"read": False, "why": family_uptake.NO_FRESHNESS}
+    )
     return {
         "contract": contract_version(root / VERSION_FILE),
         # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им
@@ -389,11 +402,11 @@ def ours(
         "checks_per_pr": checks,
         # Разрез семьи — раздел сверх договора, и причину он несёт своей формой
         # `{"read": false, "why": NO_FAMILY}` (взгляды на #1004 и #1014, 195).
-        "family": family_facts(summary, mine=mine, answers=root / BINDINGS, uptake=uptake),
+        "family": seen,
         # Что проект отдаёт семье и с какого выпуска — вход манифеста семьи
         # (`contracts.json`, #1285): номера берутся здесь, у источников, а не
         # второй копией в сборщике манифеста (049).
-        "manifest": manifest_facts(root),
+        "manifest": said,
     }
 
 
