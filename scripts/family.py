@@ -305,7 +305,7 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
                 row["note"] = entry["note"].strip()
             # Пустой замер в `by` не идёт: в `count` он прибавил бы запись, где
             # читать нечего (взгляд на #1352).
-            if isinstance(entry.get("metric"), dict) and entry["metric"]:
+            if filled(entry.get("metric")):
                 row["metric"] = entry["metric"]
             if len(row) > 2:
                 by.append(row)
@@ -325,12 +325,24 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
 NOTE_KEYS: Final = frozenset({"note", "metric"})
 
 
+def filled(metric: object) -> bool:
+    """Замер, в котором есть что читать: словарь хотя бы с одним непустым значением.
+
+    `{}` и `{"value": None}` — не замер (взгляд на #1352 и #1358): читать в них
+    нечего. Пустой замер при годной заметке записи не портит — заметка
+    читается, а замер в `by` не идёт; это решение, а не пропуск.
+    """
+    return isinstance(metric, dict) and any(
+        value not in (None, "", [], {}) for value in metric.values()
+    )
+
+
 def entry_wrong(entry: object) -> str:
     """Почему запись `notes` не той формы — все причины через «; »; пусто — годится.
 
     Перечень форм, которые вход допускает (210): не словарь; чужой ключ;
     `note` не строкой; `metric` не словарём; ни заметки, ни замера — в том
-    числе пустая или пробельная `note` и пустой `metric: {}`: такую запись
+    числе пустая или пробельная `note` и замер без значений (`filled`): такую запись
     разрез не читает, и её пропуск обязан быть назван (взгляд на #1352). Причины
     называются все, а не первая: иначе починка у соседа шла бы в два захода.
     """
@@ -348,7 +360,7 @@ def entry_wrong(entry: object) -> str:
     said = isinstance(note, str) and bool(note.strip())
     # ПУСТОЙ ЗАМЕР — НЕ ЗАМЕР, как пустая заметка — не заметка: `metric: {}`
     # нечего читать, и запись без заметки с таким замером кривая (взгляд на #1352).
-    measured = isinstance(metric, dict) and bool(metric)
+    measured = filled(metric)
     if not said and not measured:
         reasons.append("ни заметки, ни замера")
     return "; ".join(reasons)

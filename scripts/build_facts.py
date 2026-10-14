@@ -45,6 +45,7 @@ import family_uptake
 import kinds
 import paths
 import pipeline_checks as policy
+import report
 import version as version
 
 # ОБЩАЯ ЧАСТЬ ПОДНЯТА В `facts_common` (#1001, 090); имена остаются и здесь:
@@ -1094,6 +1095,11 @@ def pictures_drawn(path: Path, out_dir: str, root: str = ".", supplier: str = ""
     return EXIT_OK
 
 
+def plain(value: object) -> str:
+    """Чужая строка для лога: пробелы и переводы строк свёрнуты, длина ограничена."""
+    return report.cut(" ".join(str(value).split()))
+
+
 def say_family(kin: dict[str, Any]) -> None:
     """Печатает разрез семьи рядом с числами сборки: что посчитано — сказано (046)."""
     if kin.get("read"):
@@ -1120,8 +1126,12 @@ def say_family(kin: dict[str, Any]) -> None:
         )
         # Кривая запись НАЗЫВАЕТСЯ, а не только считается (взгляд на #1352):
         # причина — здесь, рядом с числом, а не лишь в файле фактов (046).
+        # Строки соседа — в одну строку и с пределом: перевод строки в его
+        # ключе дал бы в логе строку, которую площадка читает командой `::…`
+        # (взгляд на #1358).
         for one in said.get("wrong_entries_by") or []:
-            print(f"  - {one.get('repo')} · правило {one.get('rule')}: {one.get('why')}")
+            repo, rule, why = (plain(one.get(key)) for key in ("repo", "rule", "why"))
+            print(f"  - {repo} · правило {rule}: {why}")
         # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
         # считалось здесь с 8 сентября, ложилось в факты ключом
         # `schema_agrees` — и не печаталось нигде: сводка ушла на 1.3, разрез
