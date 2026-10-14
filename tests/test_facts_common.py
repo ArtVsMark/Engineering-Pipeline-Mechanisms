@@ -328,25 +328,57 @@ def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
     assert contract_step()["env"]["FACTS_CONTRACT"] == tag
 
 
+#: Строка, которой `check_facts.py --file` выпуска называет расхождения:
+#: `print(f"{args.repo}: {'договору отвечает' if not found else f'расхождений {len(found)}'}")`
+#: (тег `facts-v1.6.0`, `main`). Шаг судит по ней, а не по одному коду.
+MISMATCH: str = "o/a: расхождений 3"
+
+
 @pytest.mark.parametrize(
-    ("fetched", "code", "stops"),
-    [(True, 0, False), (True, 1, True), (True, 2, False), (False, 0, False)],
-    ids=["отвечает", "расхождения", "не-отработала", "выпуск-не-скачан"],
+    ("fetched", "intact", "code", "said", "stops"),
+    [
+        (True, True, 0, "o/a: договору отвечает", False),
+        (True, True, 1, MISMATCH, True),
+        (True, True, 1, "Traceback (most recent call last):", False),
+        (True, True, 2, "проверка не отработала", False),
+        (False, True, 0, "", False),
+        (True, False, 0, "o/a: договору отвечает", True),
+    ],
+    ids=["отвечает", "расхождения", "трассировка", "не-отработала", "не-скачан", "хеш-не-тот"],
 )
-def test_the_contract_step_stops_only_on_a_mismatch(
-    tmp_path: Path, fetched: bool, code: int, stops: bool
+def test_the_contract_step_stops_only_on_a_mismatch_or_a_foreign_file(
+    tmp_path: Path, fetched: bool, intact: bool, code: int, said: str, stops: bool
 ) -> None:
-    """Публикацию держит только исход 1; сбой сверки и недоступный выпуск — предупреждение (039)."""
+    """Останавливают расхождения и чужой файл; трассировка и недоступный выпуск — предупреждение.
+
+    Код 1 даёт и трассировка Python (взгляд на #1348): вердикт — строка
+    проверки, а не один код. Файл выпуска исполняется только по хешу.
+    """
+    import hashlib
     import os
     import subprocess
 
     run = str(contract_step()["run"])
     fake = tmp_path / "bin"
     fake.mkdir()
-    (fake / "curl").write_text(f"#!/bin/sh\nexit {0 if fetched else 22}\n", encoding="utf-8")
-    (fake / "python").write_text(f"#!/bin/sh\nexit {code}\n", encoding="utf-8")
+    body = "файл выпуска"
+    (fake / "curl").write_text(
+        "#!/bin/sh\n"
+        + (
+            'while [ "$#" -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\n'
+            f"printf %s '{body}' > \"$out\"\n"
+            if fetched
+            else "exit 22\n"
+        ),
+        encoding="utf-8",
+    )
+    (fake / "python").write_text(f"#!/bin/sh\necho '{said}'\nexit {code}\n", encoding="utf-8")
     for one in fake.iterdir():
         one.chmod(0o755)
+    digest = hashlib.sha256(body.encode()).hexdigest() if intact else "0" * 64
+    pinned = "\n".join(
+        f"{digest}  {name}" for name in ("check_facts.py", "facts.schema.json", "facts.version")
+    )
     done = subprocess.run(
         ["bash", "-c", run],
         env={
@@ -354,6 +386,7 @@ def test_the_contract_step_stops_only_on_a_mismatch(
             "PATH": f"{fake}:{os.environ['PATH']}",
             "RUNNER_TEMP": str(tmp_path),
             "FACTS_CONTRACT": module.CONTRACT_TAG,
+            "FACTS_SHA256": pinned,
             "RELEASES": "https://example.invalid",
             "GITHUB_REPOSITORY": "o/a",
         },
@@ -365,3 +398,19 @@ def test_the_contract_step_stops_only_on_a_mismatch(
     assert (done.returncode != 0) is stops, done.stdout + done.stderr
     if not stops and (code or not fetched):
         assert "::warning::" in done.stdout
+
+
+def test_every_release_file_is_pinned_by_its_hash() -> None:
+    """Каждый скачиваемый файл выпуска прибит sha256 — чужой код не исполняется без сверки."""
+    import re
+
+    step = contract_step()
+    pinned: dict[str, str] = {}
+    for line in str(step["env"]["FACTS_SHA256"]).splitlines():
+        if line:
+            digest, name = line.split("  ", 1)
+            pinned[name] = digest
+    fetched = re.search(r"for f in ([^;]+); do", str(step["run"]))
+    assert fetched, "шаг больше не перечисляет файлы выпуска — сверять нечего"
+    assert set(pinned) == set(fetched.group(1).split())
+    assert all(re.fullmatch(r"[0-9a-f]{64}", one) for one in pinned.values())
