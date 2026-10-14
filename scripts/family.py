@@ -324,23 +324,29 @@ NOTE_KEYS: Final = frozenset({"note", "metric"})
 
 
 def entry_wrong(entry: object) -> str:
-    """Почему запись `notes` не той формы; пусто — форма годится.
+    """Почему запись `notes` не той формы — все причины через «; »; пусто — годится.
 
     Перечень форм, которые вход допускает (210): не словарь; чужой ключ;
-    ни заметки, ни замера; `note` не строкой; `metric` не словарём.
+    `note` не строкой; `metric` не словарём; ни заметки, ни замера — в том
+    числе пустая или пробельная `note` без замера: такую запись разрез не
+    читает, и её пропуск обязан быть назван (взгляд на #1352). Причины
+    называются все, а не первая: иначе починка у соседа шла бы в два захода.
     """
     if not isinstance(entry, dict):
         return "запись не словарь"
+    reasons: list[str] = []
     alien = sorted(set(entry) - NOTE_KEYS)
     if alien:
-        return f"чужие ключи: {', '.join(alien)}"
-    if not entry:
-        return "ни заметки, ни замера"
-    if "note" in entry and not isinstance(entry["note"], str):
-        return "note не строка"
-    if "metric" in entry and not isinstance(entry["metric"], dict):
-        return "metric не словарь"
-    return ""
+        reasons.append(f"чужие ключи: {', '.join(alien)}")
+    note, metric = entry.get("note"), entry.get("metric")
+    if "note" in entry and not isinstance(note, str):
+        reasons.append("note не строка")
+    if "metric" in entry and not isinstance(metric, dict):
+        reasons.append("metric не словарь")
+    said = isinstance(note, str) and bool(note.strip())
+    if not said and not isinstance(metric, dict):
+        reasons.append("ни заметки, ни замера")
+    return "; ".join(reasons)
 
 
 def held_by_machine(summary: dict[str, Any]) -> int:
