@@ -698,8 +698,8 @@ def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
     return ordered, sorted(seen - stable, key=order)
 
 
-def published(manifest: list[Any], minor: str) -> bool:
-    """Есть ли у площадки хоть одна сборка ветки языка — стабильная или пробная.
+def published(manifest: list[Any], minor: str, platform_version: str = "") -> bool:
+    """Есть ли у площадки сборка ветки языка под раннер — стабильная или пробная.
 
     ВОПРОС ПРЕДРЕЛИЗНОГО ПРОГОНА, А НЕ ДРЕЙФА (решение владельца 14.10.2026,
     #193). `python-next` наведён на следующую ветку раньше, чем у площадки
@@ -707,9 +707,32 @@ def published(manifest: list[Any], minor: str) -> bool:
     вопроса `setup-python` отказывал, прогон краснел, а дежурный клал красное
     долгом в план — и долг загораживал работу до выхода альфы. Ответ берётся
     тем же разбором манифеста, что у дрейфа (`minors`), а не вторым (090).
+
+    СБОРКА — ЭТО ФАЙЛ ПОД РАННЕР, А НЕ НОМЕР (взгляд на #1329, `b1aea69`).
+    `setup-python` ставит файл `linux`/`x64` под версию системы раннера; номер
+    без такого файла отказал бы ровно так же, как отсутствие номера. Поэтому
+    засчитывается выпуск ветки, у которого есть файл `linux`/`x64`, а при
+    названной `platform_version` — и под неё. Пусто — версия системы не
+    сверяется: так отвечает вопрос «есть ли ветка вообще».
     """
     stable, pre = minors(manifest)
-    return minor in stable or minor in pre
+    if minor not in stable and minor not in pre:
+        return False
+    for one in manifest:
+        if not isinstance(one, dict):
+            continue
+        found = MINOR_RE.match(str(one.get("version") or ""))
+        if not found or found.group("minor") != minor:
+            continue
+        for file in one.get("files") or []:
+            if (
+                isinstance(file, dict)
+                and file.get("platform") == "linux"
+                and file.get("arch") == "x64"
+                and (not platform_version or file.get("platform_version") == platform_version)
+            ):
+                return True
+    return False
 
 
 def matrix_of(jobs: dict[str, Any], job: str, path: Path) -> list[str]:
@@ -750,6 +773,26 @@ def declared_versions() -> tuple[list[str], str]:
     upcoming = pipeline_checks.run_of(paths.PYTHON_NEXT).get("jobs") or {}
     ahead = sorted(matrix_of(upcoming, "test-next", paths.PYTHON_NEXT), key=order)[-1]
     return matrix, ahead
+
+
+#: Раннер площадки с версией системы: `ubuntu-26.04` → `26.04`.
+RUNNER_SYSTEM_RE: Final = re.compile(r"^ubuntu-(?P<system>\d+\.\d+)$")
+
+
+def matrix_system() -> str:
+    """Версия системы раннера обязательной матрицы — из её `runs-on`.
+
+    Тем же разбором `ci.yml`, что `declared_versions` (090). Раннер без
+    версии (`ubuntu-latest`) или не `ubuntu` — третий исход, а не «любая»:
+    сверка файла под систему молча отключилась бы (045).
+    """
+    path = paths.WORKFLOWS / "ci.yml"
+    jobs = pipeline_checks.run_of(path).get("jobs") or {}
+    said = str((jobs.get("test-matrix") or {}).get("runs-on") or "")
+    found = RUNNER_SYSTEM_RE.match(said)
+    if not found:
+        raise NotRun(f"{path}: раннер матрицы «{said}» без версии системы — сверять нечего (075)")
+    return found.group("system")
 
 
 #: Обращение к чужому действию: `uses: владелец/имя@ссылка` и, если ссылка —
@@ -1198,19 +1241,29 @@ def release_behind_tree(root: Path | None = None) -> list[Drift]:
     ]
 
 
-def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[Drift]:
+def language_moved(
+    manifest: list[Any], matrix: list[str], ahead: str, system: str | None = None
+) -> list[Drift]:
     """Язык выпустил версию, а прогон об этом не знает.
 
     ПОЧЕМУ ЭТО ДРЕЙФ, А НЕ ЗАДАЧА. Ни одна наша правка не делает 3.15
     стабильной: это происходит по расписанию CPython, между нашими изменениями,
     и не приходит ни красным, ни задачей. Замер 10.09.2026: о том, что 3.14 уже
     вышла, а предрелизной стала 3.15, механизм не узнал — это сказал владелец.
+
+    В МАТРИЦУ ЗОВЁТСЯ ВЕТКА, КОТОРУЮ РАННЕР ПОСТАВИТ, А НЕ НОМЕР (взгляд на
+    #1333, тот же корень, что `b1aea69`). Стабильный номер без файла
+    `linux`/`x64` под систему раннера матрицы (`system`, из её `runs-on`) в
+    матрицу не зовётся: добавленная по такому совету ячейка краснела бы на
+    каждом изменении. `None` — файлы не сверяются (так читают подделки без
+    `files`).
     """
     stable, pre = minors(manifest)
     if not stable:
         raise NotRun("в манифесте нет ни одной стабильной ветки — читать нечего (075)")
     found: list[Drift] = []
-    newest = stable[-1]
+    ready = stable if system is None else [m for m in stable if published(manifest, m, system)]
+    newest = ready[-1] if ready else ""
     unknown = sorted(set(matrix) - set(stable) - set(pre), key=order)
     if unknown:
         found.append(
@@ -1220,7 +1273,7 @@ def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[D
                 "прогон не сможет поставить эту версию — сверить матрицу с манифестом",
             )
         )
-    if newest not in matrix:
+    if newest and newest not in matrix:
         found.append(
             Drift(
                 "python-stable",
@@ -1229,7 +1282,7 @@ def language_moved(manifest: list[Any], matrix: list[str], ahead: str) -> list[D
                 f"обещает работу на стабильных ветках",
             )
         )
-    if ahead and ahead in stable:
+    if ahead and ahead in ready:
         found.append(
             Drift(
                 "python-next",
@@ -1780,7 +1833,12 @@ def look(
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
         ("защита общей ветки", lambda: protection_moved(repo, token)),
         ("способ слияния", lambda: merge_ways_moved(merge_said)),
-        ("версии языка", lambda: language_moved(manifest(PYTHON_MANIFEST), *declared_versions())),
+        (
+            "версии языка",
+            lambda: language_moved(
+                manifest(PYTHON_MANIFEST), *declared_versions(), matrix_system()
+            ),
+        ),
         ("версии чужих действий", lambda: actions_disagree(action_versions(own=own))),
         ("выпуски чужих действий", lambda: actions_behind(action_versions(own=own), token)),
         ("пометки закреплений", lambda: pin_mislabelled(pinned_hashes(own=own), token)),
@@ -1829,6 +1887,12 @@ def main(argv: list[str] | None = None) -> int:
         help="только спросить, есть ли у площадки сборка ветки языка: 0 — есть, 4 — нет",
     )
     parser.add_argument(
+        "--platform-version",
+        default="",
+        metavar="ВЕРСИЯ",
+        help="с --published: версия системы раннера (`24.04`); пусто — не сверять",
+    )
+    parser.add_argument(
         "--save-merge-ways",
         type=Path,
         metavar="ФАЙЛ",
@@ -1844,12 +1908,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.published:
         try:
-            present = published(manifest(PYTHON_MANIFEST), args.published)
+            present = published(manifest(PYTHON_MANIFEST), args.published, args.platform_version)
         except (NotRun, ghrest.TransportError) as exc:
             print(f"шаг не отработал: манифест версий не прочитан: {exc}", file=sys.stderr)
             return EXIT_BROKEN
         if not present:
-            print(f"сборки {args.published} у площадки ещё нет")
+            under = f" под {args.platform_version}" if args.platform_version else ""
+            print(f"сборки {args.published}{under} у площадки ещё нет")
             return EXIT_ABSENT
         print(f"сборка {args.published} у площадки есть")
         return EXIT_NOTHING
