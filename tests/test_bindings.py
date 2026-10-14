@@ -14,6 +14,7 @@
 
 import json
 import re
+from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 from typing import Any, Final
@@ -1291,6 +1292,21 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, str]] = {
 }
 
 
+def flows_named(where: str, flows: Iterable[str]) -> list[str]:
+    """Прогоны, названные в `where`, по месту первого упоминания.
+
+    Имя ищется ИМЕНЕМ ФАЙЛА, а не подстрокой: `drift.yml` сидит внутри
+    `step-drift.yml`, и подстрока нашла бы вызывающий прогон в ответе, который
+    его не называет (взгляд на #1331, `4a4971d`).
+    """
+    at: dict[str, int] = {}
+    for flow in flows:
+        found = re.search(rf"(?<![\w.-]){re.escape(flow)}(?![\w-])", where)
+        if found:
+            at[flow] = found.start()
+    return sorted(at, key=at.__getitem__)
+
+
 def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     """Ответ, называющий прогон-вызыватель каталога, — `called` с его действием или в перечне.
 
@@ -1301,6 +1317,13 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     called`, `origin` — одно из действий, которые зовут названные прогоны), либо
     стоит в `CALLER_NAMED_NOT_CALLED` с причиной. `called` без названного
     вызывающего прогона — тоже отказ: `origin` не достигается из ответа.
+
+    У `called` действие ищется у ПЕРВОГО названного прогона, а не у любого:
+    origin называет исполнителя половины, которую `where` называет первой
+    (`_origin` ответа). Прогон, названный лишь доводом дальше по тексту,
+    origin не оправдывает — этот случай ловила прежняя проба головы (#1281,
+    взгляд на #1331, `bb65d4c`). Порядок — данные, а не пунктуация: ищется
+    место имени файла, а не « — ».
     """
     folder = ROOT / ".github" / "workflows"
     jobs = catalogue_jobs(folder)
@@ -1311,14 +1334,15 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     wrong, named_only = [], set()
     for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
         where = str(answer.get("where") or "")
-        reached = {act for flow, acts in by_flow.items() if flow in where for act in acts}
+        callers = flows_named(where, by_flow)
         origin = str(answer.get("origin") or "")
         called = answer.get("origin_kind") == "called" and origin.startswith(CATALOGUE_ORIGIN)
         if called:
             named = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
-            if named not in reached:
-                wrong.append(f"{number}: origin {named} не зовёт ни один прогон из where")
-        elif reached:
+            if not callers or named not in by_flow[callers[0]]:
+                first = callers[0] if callers else "ни один"
+                wrong.append(f"{number}: origin {named} не зовёт первый названный прогон ({first})")
+        elif callers:
             named_only.add(number)
     unlisted = sorted(named_only - set(CALLER_NAMED_NOT_CALLED))
     stale = sorted(set(CALLER_NAMED_NOT_CALLED) - named_only)
@@ -1327,6 +1351,16 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     ]
     wrong += [f"{n}: строка перечня без предмета — снять" for n in stale]
     assert not wrong, "ответы на прогоны каталога:\n  " + "\n  ".join(wrong)
+
+
+def test_a_flow_is_named_by_its_file_and_in_order() -> None:
+    """Имя прогона — имя файла, по месту упоминания (`4a4971d`, `bb65d4c`)."""
+    flows = ["ci.yml", "drift.yml", "rules-inbox.yml"]
+    assert flows_named("step-drift.yml — свой шаг", flows) == []
+    assert flows_named(
+        "scripts/x.py — довод; держит .github/workflows/rules-inbox.yml, а ci.yml — пример",
+        flows,
+    ) == ["rules-inbox.yml", "ci.yml"]
 
 
 def test_catalogue_jobs_follow_a_reusable_flow(tmp_path: Path) -> None:
