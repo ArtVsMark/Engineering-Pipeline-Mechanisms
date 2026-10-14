@@ -271,8 +271,16 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     Запись не той формы внутри раздела пропускается, а не валит разрез:
     раздел совещательный, и одна кривая строка соседа не должна гасить
     числа всех остальных (039).
+
+    НО ПРОПУСК СЧИТАЕТСЯ И НАЗЫВАЕТСЯ (взгляд на #1340, вторая находка по
+    месту — 210). Различать ноль только на уровне раздела мало: иная
+    раскладка записи дала бы тот же тихий ноль. Формы, которые вход
+    допускает, перечислены в `entry_wrong`, и каждая кривая запись идёт в
+    `wrong_entries` с причиной; годная половина записи (заметка при кривом
+    замере) при этом читается.
     """
     by: list[dict[str, Any]] = []
+    wrong_entries: list[dict[str, str]] = []
     read = unread = wrong_shape = 0
     for consumer in summary.get("consumers") or []:
         repo = str(consumer.get("repo") or "")
@@ -287,6 +295,9 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
             continue
         read += 1
         for number, entry in sorted(said.items()):
+            why = entry_wrong(entry)
+            if why:
+                wrong_entries.append({"repo": repo, "rule": str(number), "why": why})
             if not isinstance(entry, dict):
                 continue
             row: dict[str, Any] = {"repo": repo, "rule": str(number)}
@@ -301,8 +312,41 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
         "read": read,
         "unread": unread,
         "wrong_shape": wrong_shape,
+        "wrong_entries": len(wrong_entries),
+        "wrong_entries_by": wrong_entries,
         "by": by,
     }
+
+
+#: Ключи записи раздела `notes` — как их кладёт сборщик каталога
+#: (`aggregate_bindings.py`, тег `v1.11.0`): «правило → {note, metric}».
+NOTE_KEYS: Final = frozenset({"note", "metric"})
+
+
+def entry_wrong(entry: object) -> str:
+    """Почему запись `notes` не той формы — все причины через «; »; пусто — годится.
+
+    Перечень форм, которые вход допускает (210): не словарь; чужой ключ;
+    `note` не строкой; `metric` не словарём; ни заметки, ни замера — в том
+    числе пустая или пробельная `note` без замера: такую запись разрез не
+    читает, и её пропуск обязан быть назван (взгляд на #1352). Причины
+    называются все, а не первая: иначе починка у соседа шла бы в два захода.
+    """
+    if not isinstance(entry, dict):
+        return "запись не словарь"
+    reasons: list[str] = []
+    alien = sorted(set(entry) - NOTE_KEYS)
+    if alien:
+        reasons.append(f"чужие ключи: {', '.join(alien)}")
+    note, metric = entry.get("note"), entry.get("metric")
+    if "note" in entry and not isinstance(note, str):
+        reasons.append("note не строка")
+    if "metric" in entry and not isinstance(metric, dict):
+        reasons.append("metric не словарь")
+    said = isinstance(note, str) and bool(note.strip())
+    if not said and not isinstance(metric, dict):
+        reasons.append("ни заметки, ни замера")
+    return "; ".join(reasons)
 
 
 def held_by_machine(summary: dict[str, Any]) -> int:
