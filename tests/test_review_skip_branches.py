@@ -87,6 +87,11 @@ def test_the_look_waits_for_the_machine_answer() -> None:
     condition = " ".join(str(jobs["review"]["if"]).split())
     assert "needs.map.outputs.machine != 'yes'" in condition
     assert jobs["findings"]["needs"] == "review", "реестр находок обязан ждать взгляда"
+    # Реестр уходит вслед за взглядом только потому, что его условие несёт
+    # неявный success(): `always()` или `!cancelled()` пустили бы его на
+    # машинную ветку молча (взгляд на #1350).
+    registry = str(jobs["findings"].get("if") or "")
+    assert "always()" not in registry and "cancelled()" not in registry, registry
 
 
 def test_the_input_is_declared_empty_by_default() -> None:
