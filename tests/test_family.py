@@ -527,6 +527,13 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
     }
 
 
+def test_an_empty_metric_is_not_counted_as_a_measurement() -> None:
+    """Пустой замер не прибавляет запись к `count`: читать в нём нечего (взгляд на #1352)."""
+    said = family.notes(summary({**consumer("o/a"), "notes": {"001": {"metric": {}}}}))
+    assert said["count"] == 0 and said["by"] == []
+    assert said["wrong_entries"] == 1
+
+
 @pytest.mark.parametrize(
     ("entry", "why"),
     [
@@ -536,7 +543,11 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
         ({"note": "   "}, "ни заметки, ни замера"),
         ({"note": 5}, "note не строка; ни заметки, ни замера"),
         ({"metric": "ноль"}, "metric не словарь; ни заметки, ни замера"),
-        ({"note": 5, "seen": 1, "metric": {}}, "чужие ключи: seen; note не строка"),
+        (
+            {"note": 5, "seen": 1, "metric": {}},
+            "чужие ключи: seen; note не строка; ни заметки, ни замера",
+        ),
+        ({"metric": {}}, "ни заметки, ни замера"),
         ({"note": "", "metric": {"value": 1}}, ""),
         ({"note": "x", "metric": {"value": 1}}, ""),
     ],
@@ -548,6 +559,7 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
         "заметка-не-строка",
         "замер-не-словарь",
         "все-причины",
+        "пустой-замер",
         "замер-без-заметки",
         "годная",
     ],
@@ -581,6 +593,7 @@ def test_neighbours_notes_are_said_next_to_the_numbers(
             "unread": 1,
             "wrong_shape": 2,
             "wrong_entries": 3,
+            "wrong_entries_by": [{"repo": "o/a", "rule": "001", "why": "ни заметки, ни замера"}],
             "by": [],
         },
     }
@@ -591,6 +604,8 @@ def test_neighbours_notes_are_said_next_to_the_numbers(
     assert "пар «проект × механизм» 22 (взяты 4, переделаны 18, не объявлено 0)" in said
     # Ненулевые исходы «не той формы» тоже сказаны, а не только ноль (взгляд на #1340).
     assert "не той формы у 2" in said and "записей не той формы 3" in said
+    # И названы поимённо с причиной (взгляд на #1352): число без причины не чинится.
+    assert "  - o/a · правило 001: ни заметки, ни замера" in said
 
 
 def test_a_summary_without_notes_reads_as_none() -> None:
