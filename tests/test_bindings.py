@@ -1281,19 +1281,20 @@ def catalogue_jobs(folder: Path) -> dict[tuple[str, str], set[str]]:
 #: ПРЕДЕЛ НАЗВАН (взгляд на #1331, `56cfefd`): строка судит НОМЕР, а не то, чем
 #: ответ держится. Ответ из перечня может начать держаться действием каталога,
 #: оставшись `own`, — проба промолчит. Это ловит чтение при перечитывании
-#: ответа: причина в строке называет, чем держится ответ, и перечитывающий
-#: сверяет её с `where`.
+#: ответа: причина в строке называет держателя — «держит <путь>», — и
+#: `test_every_listed_reason_names_a_holder_from_where` держит, что путь есть
+#: в дереве и стоит в `where` ответа (взгляд на #1339).
 CALLER_NAMED_NOT_CALLED: Final[dict[str, str]] = {
-    "002": "ci.yml — джоб на каждый шаг, свой; действие каталога правило не держит",
-    "006": "ci.yml — место своего шага window-lifetime",
-    "018": "ci.yml — окружение проверки читается из событий и условий его джобов",
+    "002": "ci.yml — джоб на каждый шаг, свой; держит tests/test_gates_reject.py",
+    "006": "ci.yml — место своего шага; держит scripts/check_window_lifetime.py",
+    "018": "ci.yml — предмет чтения; держит tests/test_gates_contract.py",
     "035": "ci.yml — место своего гейта версии; держит scripts/check_version.py",
     "080": "rules-inbox.yml упомянут как канал каталога; держит .rules/proposals.json",
-    "100": "ci.yml — поле timeout-minutes у своих шагов",
-    "133": "ci.yml — свой джоб parts",
+    "100": "ci.yml — поле timeout-minutes у своих шагов; держит scripts/ci_complete.py",
+    "133": "ci.yml — свой джоб parts; держит scripts/change_parts.py",
     "156": "ci.yml — джоб attribution назван доводом; держит scripts/squash_body.py",
     "165": "ci.yml — шаг прогона, где гейт требует -z; держит tests/test_source_hygiene.py",
-    "179": "ci.yml, rules-inbox.yml — примеры замера групп отмены",
+    "179": "ci.yml, rules-inbox.yml — примеры групп отмены; держит tests/test_gates_contract.py",
     "182": "ci.yml упомянут в доводе; держит tests/test_bindings.py",
 }
 
@@ -1376,8 +1377,7 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     wrong, named_only, read = [], set(), set()
     for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
         where = str(answer.get("where") or "")
-        places = flow_places(where, by_flow)
-        callers = sorted(places, key=places.__getitem__)
+        callers = flows_named(where, by_flow)
         origin = str(answer.get("origin") or "")
         called = answer.get("origin_kind") == "called" and origin.startswith(CATALOGUE_ORIGIN)
         if called:
@@ -1403,6 +1403,30 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
         for n in sorted(set(CALLED_HEAD_READ) - read)
     ]
     assert not wrong, "ответы на прогоны каталога:\n  " + "\n  ".join(wrong)
+
+
+HOLDER_RE: Final = re.compile(r"держит (?P<path>[\w./-]+)")
+
+
+def test_every_listed_reason_names_a_holder_from_where() -> None:
+    """Причина в перечне называет держателя путём из дерева и из `where` ответа (#1339).
+
+    Без этого обещание абзаца над перечнем держалось на прозе: пять строк
+    называли только место, и сверять при перечитывании было нечего.
+    """
+    rules = json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"]
+    wrong = []
+    for number, reason in sorted(CALLER_NAMED_NOT_CALLED.items()):
+        found = HOLDER_RE.search(reason)
+        if not found:
+            wrong.append(f"{number}: в причине нет «держит <путь>»")
+            continue
+        path = found.group("path").rstrip(".,;")
+        if not (ROOT / path).exists():
+            wrong.append(f"{number}: держателя {path} нет в дереве")
+        elif path not in str(rules[number].get("where") or ""):
+            wrong.append(f"{number}: {path} не назван в where ответа")
+    assert not wrong, "перечень без держателей:\n  " + "\n  ".join(wrong)
 
 
 def test_a_flow_is_named_by_its_file_and_in_order() -> None:
