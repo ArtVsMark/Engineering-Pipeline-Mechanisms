@@ -15,7 +15,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 family = load_script("family.py")
 facts = load_script("build_facts.py")
@@ -796,6 +796,47 @@ def test_uptake_facts_name_an_unread_sweep(tmp_path: Path) -> None:
     )
     said = facts.uptake_facts(good)
     assert said["read"] is True and said["steps"]["of"] == 20
+
+
+def test_our_facts_say_how_fresh_the_takers_are(tmp_path: Path) -> None:
+    """Свежесть взявших считается по НАШЕМУ выпуску и номеру из манифеста (#1344).
+
+    Живое дерево: тег и `steps` — те же, что уходят в `contracts.json`, а не
+    второе чтение тега. Проект на теге выпуска с совместимым диапазоном —
+    свежий; на старом теге — в диапазоне.
+    """
+    said = facts.manifest_facts(ROOT)
+    if said["release"] is None:
+        pytest.skip("в клоне нет тега выпуска — свежесть мерить не по чему")
+    tag, steps = said["release"]["tag"], said["gives"][facts.GIVES_STEPS]
+    major, minor = (int(part) for part in steps.split("."))
+    span = f">={major}.{minor},<{major}.{minor + 1}"
+    numbers = tmp_path / "uptake.json"
+    numbers.write_text(
+        json.dumps(
+            {
+                "projects": {"took": 2, "of": 5, "unread": 0, "unread_repos": []},
+                "steps": {"taken": 1, "of": 20, "names": ["lint"]},
+                "by": [
+                    {"repo": "o/свежий", "steps": ["step-lint"], "refs": [tag], "contract": span},
+                    {
+                        "repo": "o/старый",
+                        "steps": ["step-lint"],
+                        "refs": ["v0.0.1"],
+                        "contract": span,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    fresh = facts.ours(ROOT, uptake=numbers)["family"]["uptake"]["fresh"]
+    assert (fresh["release"], fresh["steps"]) == (tag, steps)
+    assert (fresh["fresh"], fresh["in_range"], fresh["of"]) == (1, 1, 2)
+    unknown = facts.ours(ROOT)["family"]["uptake"]["fresh"]
+    assert unknown == {"read": False, "why": facts.family_uptake.NO_FRESHNESS}, (
+        "без обхода свежесть выдана числом или пропала"
+    )
 
 
 # --- таблица «кем» -----------------------------------------------------------

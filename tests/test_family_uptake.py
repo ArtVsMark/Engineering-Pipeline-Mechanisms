@@ -252,6 +252,97 @@ def test_a_shallow_clone_brings_only_the_workflows(tmp_path: Path) -> None:
     assert (got / ".github" / "workflows" / "ci.yml").is_file(), "прогоны не приехали"
 
 
+def test_the_neighbours_span_comes_with_the_sparse_clone(tmp_path: Path) -> None:
+    """Диапазон `contract:` читается из НАСТОЯЩЕГО суженного клона (#1344).
+
+    Сужение оставляет корневые файлы, и на этом держится чтение ответа без
+    второго клона. Допущение проверено живым git, а не подделкой (146).
+    """
+    source = tmp_path / "сосед"
+    (source / ".github" / "workflows").mkdir(parents=True)
+    (source / ".github" / "workflows" / "ci.yml").write_text(CALL, encoding="utf-8")
+    (source / ".pipeline.yml").write_text('contract: ">=0.5,<0.9"\n', encoding="utf-8")
+    run = ["git", "-C", str(source)]
+    subprocess.run(["git", "init", "--quiet", "-b", "main", str(source)], check=True)
+    subprocess.run([*run, "config", "user.email", "т@т"], check=True)
+    subprocess.run([*run, "config", "user.name", "т"], check=True)
+    subprocess.run([*run, "add", "-A"], check=True, capture_output=True)
+    subprocess.run([*run, "commit", "--quiet", "-m", "прогоны"], check=True)
+
+    into = tmp_path / "клоны"
+    into.mkdir()
+    real_clone = module.shallow_clone
+
+    def local(repo: str, where: Path, **kwargs: object) -> Path:
+        got: Path = real_clone(repo, where, host=str(tmp_path))
+        return got
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(module, "shallow_clone", local)
+        got = module.took("сосед", into)
+    assert got.span == ">=0.5,<0.9"
+    assert got.refs == ("v1.2.0",)
+
+
+def test_a_missing_or_broken_span_is_none_not_a_guess() -> None:
+    """Нет поля, не словарь, сломанный YAML — диапазона нет, и он не угадан (045)."""
+    assert module.policy.span_said('contract: ">=0.5,<0.9"\n') == ">=0.5,<0.9"
+    assert module.policy.span_said("checks: {}\n") is None
+    assert module.policy.span_said("- список\n") is None
+    assert module.policy.span_said("contract: [\n") is None
+
+
+RELEASE = {"tag": "v1.5.0", "sha": "a" * 40}
+
+
+def test_freshness_sorts_the_takers_by_pin_and_span() -> None:
+    """Шесть ответов о соседе — шесть групп, и ни одна не прячет соседний случай (#1344, 195).
+
+    Свежий — пин на теге или коммите выпуска (и коротким хешем) при диапазоне
+    с текущим `steps`; в диапазоне — пин на другом теге; на ветке — пин к
+    имени ветки; отстал — диапазон кончается не выше номера; впереди —
+    начинается выше; без диапазона свежесть не утверждается.
+    """
+    by = [
+        {"repo": "o/тег", "refs": ["v1.5.0"], "contract": ">=0.5,<0.9"},
+        {"repo": "o/коммит", "refs": ["a" * 40], "contract": ">=0.7,<0.8"},
+        {"repo": "o/короткий", "refs": ["a" * 7], "contract": ">=0.5,<0.9"},
+        {"repo": "o/старый", "refs": ["v1.0.0"], "contract": ">=0.5,<0.9"},
+        {"repo": "o/разные", "refs": ["v1.0.0", "v1.5.0"], "contract": ">=0.5,<0.9"},
+        {"repo": "o/ветка", "refs": ["main"], "contract": ">=0.5,<0.9"},
+        {"repo": "o/отстал", "refs": ["v1.5.0"], "contract": ">=0.3,<0.6"},
+        {"repo": "o/впереди", "refs": ["v1.5.0"], "contract": ">=0.8,<0.9"},
+        {"repo": "o/молчит", "refs": ["v1.5.0"], "contract": None},
+        {"repo": "o/криво", "refs": ["v1.5.0"], "contract": "любой"},
+    ]
+    said = module.freshness(by, RELEASE, "0.7")
+    assert said["read"] is True and said["of"] == 10
+    assert said["fresh"] == 3
+    assert said["in_range"] == 2 and said["in_range_repos"] == ["o/старый", "o/разные"]
+    assert said["branch_repos"] == ["o/ветка"]
+    assert said["behind_repos"] == ["o/отстал"]
+    assert said["ahead_repos"] == ["o/впереди"]
+    assert said["undeclared_repos"] == ["o/молчит", "o/криво"]
+    assert (said["release"], said["steps"]) == ("v1.5.0", "0.7")
+
+
+def test_a_pin_is_named_by_its_kind() -> None:
+    """Пин — выпуск, другой тег или коммит, или ветка; чужой хеш выпуском не станет."""
+    assert module.pin_of("v1.5.0", RELEASE) == "release"
+    assert module.pin_of("a" * 9, RELEASE) == "release"
+    assert module.pin_of("b" * 7, RELEASE) == "other"
+    assert module.pin_of("v1.4.0", RELEASE) == "other"
+    assert module.pin_of("main", RELEASE) == "branch"
+
+
+def test_freshness_without_a_release_is_unknown_not_zero() -> None:
+    """Выпуска нет — свежесть неизвестна и названа, а не «на свежем 0» (045)."""
+    said = module.freshness(
+        [{"repo": "o/a", "refs": ["v1"], "contract": ">=0.5,<0.9"}], None, "0.7"
+    )
+    assert said == {"read": False, "why": module.NO_FRESHNESS}
+
+
 def test_a_clone_that_refuses_is_named(tmp_path: Path) -> None:
     """Источника нет — отказ с причиной, а не пустой клон (075)."""
     with pytest.raises(module.NotRun, match="клон не взят"):
@@ -315,7 +406,7 @@ def test_the_uptake_counts_projects_and_offered_steps() -> None:
     assert said["projects"] == {"took": 1, "of": 3, "unread": 1, "unread_repos": ["o/c"]}
     assert said["steps"] == {"taken": 1, "of": 2, "names": ["lint"]}
     assert said["by"] == [
-        {"repo": "o/a", "steps": ["step-lint", "step-secret"], "refs": ["v1.2.0"]}
+        {"repo": "o/a", "steps": ["step-lint", "step-secret"], "refs": ["v1.2.0"], "contract": None}
     ]
 
 
