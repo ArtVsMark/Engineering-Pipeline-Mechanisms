@@ -98,3 +98,68 @@ def test_the_input_is_declared_empty_by_default() -> None:
     """Пустой вход — смотреть все ветки: у вызывающего, не знающего о входе, ничего не меняется."""
     said = flow()[True]["workflow_call"]["inputs"]["skip-branches"]
     assert said["type"] == "string" and said["default"] == ""
+
+
+# --- реестр позднего взгляда (#1349) -------------------------------------------
+
+AUTOMERGE = ROOT / ".github" / "workflows" / "step-automerge.yml"
+
+
+@pytest.mark.parametrize(
+    ("head", "machine"),
+    [
+        ({"ref": "chore/metrics"}, True),
+        ({"ref": "agent/fix"}, False),
+        ({}, False),
+        (None, False),
+    ],
+    ids=["машинная", "своя", "имени-нет", "головы-нет"],
+)
+def test_the_registry_skips_a_merged_machine_branch(head: object, machine: bool) -> None:
+    """Слитое с машинной ветки в реестр не встаёт; незнание имени взгляд не гасит (045)."""
+    from tests.conftest import load_script
+
+    unlooked = load_script("unlooked.py")
+    item = {"number": 1, "head": head}
+    assert unlooked.machine_branch(item, ["chore/", "dependabot/"]) is machine
+    assert unlooked.machine_branch(item, []) is False
+
+
+def test_the_registry_run_drops_machine_branches_before_the_scan(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Заход реестра отсеивает машинную ветку ДО обхода и называет пропуск числом.
+
+    Проверка одной `machine_branch` не держит подключение: сними отсев в `main`,
+    и машинное слитое снова встанет в реестр при зелёном наборе (взгляд на #1353).
+    """
+    from tests.conftest import load_script
+
+    unlooked = load_script("unlooked.py")
+    merged = [
+        {"number": 10, "head": {"ref": "chore/metrics"}, "merged_at": "2026-10-14"},
+        {"number": 11, "head": {"ref": "agent/fix"}, "merged_at": "2026-10-14"},
+    ]
+    scanned: list[list[int]] = []
+
+    def scan(items: Any, known: Any, watermark: int, look: Any) -> tuple[dict[int, Any], int]:
+        scanned.append([item["number"] for item in items])
+        return {}, watermark
+
+    monkeypatch.setattr(unlooked.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(unlooked.findings, "live_issue", lambda *_: (89, unlooked.MARKER))
+    monkeypatch.setattr(unlooked, "merged_changes", lambda *_: merged)
+    monkeypatch.setattr(unlooked, "scan", scan)
+    unlooked.main(["--repo", "o/r", "--skip-branches", "chore/ dependabot/"])
+    assert scanned == [[11]], scanned
+    assert "в реестр не встали: 1 (#10)" in capsys.readouterr().out
+
+
+def test_both_steps_take_the_same_input() -> None:
+    """Вход один по имени и форме у взгляда и у реестра: приставки передаются одной строкой."""
+    automerge: dict[Any, Any] = yaml.safe_load(AUTOMERGE.read_text(encoding="utf-8"))
+    review = flow()[True]["workflow_call"]["inputs"]["skip-branches"]
+    registry = automerge[True]["workflow_call"]["inputs"]["skip-branches"]
+    assert (review["type"], review["default"]) == (registry["type"], registry["default"])
+    text = AUTOMERGE.read_text(encoding="utf-8")
+    assert "SKIP_BRANCHES: ${{ inputs.skip-branches }}" in text, "вход не доходит до реестра"
