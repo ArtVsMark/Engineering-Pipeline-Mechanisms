@@ -368,6 +368,43 @@ def test_the_shared_step_draws_the_picture_from_consumer_facts(tmp_path: Path) -
     assert facts.pictures_drawn(missing, str(out)) == facts.EXIT_BROKEN
 
 
+@pytest.mark.parametrize(
+    "rules",
+    [["список"], {"machine": {"own": "два"}}, {"machine": "ноль"}],
+    ids=["раздел-не-словарь", "число-не-число", "разбивка-не-словарь"],
+)
+def test_facts_of_a_wrong_shape_are_a_refusal_not_a_traceback(
+    tmp_path: Path, rules: object
+) -> None:
+    """Факты не той формы — исход 2 с причиной, а не трейсбек с кодом 1 (`1edf07c`)."""
+    given = tmp_path / "facts.json"
+    given.write_text(json.dumps({"rules": rules}), encoding="utf-8")
+    assert facts.pictures_drawn(given, str(tmp_path / "out")) == facts.EXIT_BROKEN
+
+
+def test_a_bug_in_drawing_is_not_blamed_on_the_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Опечатка в рисовании — трейсбек, а не «факты не той формы» (взгляд на #1338)."""
+    assert facts.picture_input_wrong({"rules": {"machine": "ноль"}}) == "rules.machine не объект"
+    assert facts.picture_input_wrong({"rules": RULES_PLANTED}) is None
+
+    def broken(*_: object) -> None:
+        raise AttributeError("опечатка в коде рисования")
+
+    monkeypatch.setattr(facts, "draw_pictures", broken)
+    given = tmp_path / "facts.json"
+    given.write_text(json.dumps({"rules": RULES_PLANTED}), encoding="utf-8")
+    with pytest.raises(AttributeError):
+        facts.pictures_drawn(given, str(tmp_path / "out"))
+
+
+def test_pictures_out_alone_is_a_refusal(tmp_path: Path) -> None:
+    """`--pictures-out` без `--from-facts` — отказ, а не тихая полная сборка (`303d8f0`)."""
+    assert facts.main(["--pictures-out", str(tmp_path)]) == facts.EXIT_BROKEN
+    assert not any(tmp_path.iterdir()), "заход без фактов всё же что-то собрал"
+
+
 def test_both_writers_draw_the_same_picture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -436,6 +473,54 @@ def test_our_own_answers_are_not_counted_as_adopted() -> None:
         declared("o/a", **{"002": ("document", ours, "called")}),
     )
     assert family.picture(document, mine=MINE)["adopted"] == {"ours": 0, "of": 0, "by": []}
+
+
+def test_neighbours_notes_are_read_and_ours_are_not() -> None:
+    """Раздел `notes` сводки 1.7 читается поимённо; свои и кривые записи — нет (#1274)."""
+    metric = {"what": "отмен за неделю", "value": 3, "measured": "2026-10-14"}
+    neighbour = {
+        **consumer("o/a"),
+        "notes": {
+            "002": {"note": "держим ревью вместо гейта"},
+            "001": {"metric": metric},
+            "003": "не объект",
+            "004": {"note": "   "},
+        },
+    }
+    own = {**consumer(MINE), "notes": {"005": {"note": "своё"}}}
+    said = family.picture(summary(neighbour, own, {**consumer("o/b"), "notes": []}), mine=MINE)
+    assert said["notes"] == {
+        "count": 2,
+        "read": 1,
+        "unread": 0,
+        "wrong_shape": 1,
+        "by": [
+            {"repo": "o/a", "rule": "001", "metric": metric},
+            {"repo": "o/a", "rule": "002", "note": "держим ревью вместо гейта"},
+        ],
+    }
+
+
+def test_neighbours_notes_are_said_next_to_the_numbers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Число заметок соседей печатается рядом с `adopted`, а не только в файле (#1340)."""
+    kin = {
+        "read": True,
+        "schema_agrees": True,
+        "adopted": {"ours": 1, "of": 3},
+        "notes": {"count": 2, "read": 4, "unread": 1, "wrong_shape": 0, "by": []},
+    }
+    facts.say_family(kin)
+    said = capsys.readouterr().out
+    assert "заметок и замеров соседей по правилам: 2" in said
+    assert "нет у 1" in said
+
+
+def test_a_summary_without_notes_reads_as_none() -> None:
+    """Нет раздела и пустой раздел — разные исходы, а не один ноль (взгляд на #1340)."""
+    said = family.picture(summary(consumer("o/a"), {**consumer("o/b"), "notes": {}}))["notes"]
+    assert said == {"count": 0, "read": 1, "unread": 1, "wrong_shape": 0, "by": []}
 
 
 def test_the_version_badge_names_incompleteness() -> None:

@@ -979,6 +979,25 @@ def drawn_from(path: Path, out_dir: str) -> int:
     return EXIT_OK
 
 
+def picture_input_wrong(facts: object) -> str | None:
+    """Что не так с формой фактов для картинки; None — форма годится.
+
+    Разделы, которые читает картинка, обязаны быть словарями, если они есть:
+    иначе рисование упало бы `AttributeError`, неотличимым от опечатки в
+    собственном коде (взгляд на #1338).
+    """
+    if not isinstance(facts, dict):
+        return "факты не объект"
+    for section in ("rules", "family"):
+        if section in facts and not isinstance(facts[section], dict):
+            return f"раздел {section} не объект"
+    rules = facts.get("rules") or {}
+    for part in ("by_mechanism", "machine"):
+        if part in rules and not isinstance(rules[part], dict):
+            return f"rules.{part} не объект"
+    return None
+
+
 def pictures_drawn(path: Path, out_dir: str) -> int:
     """Режим `--pictures-out`: только картинки `PICTURES` по готовым фактам — плоско в каталог.
 
@@ -994,15 +1013,57 @@ def pictures_drawn(path: Path, out_dir: str) -> int:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"картинки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    wrong = picture_input_wrong(facts)
+    if wrong:
+        print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
+        return EXIT_BROKEN
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     try:
         draw_pictures(facts, out)
-    except (KeyError, TypeError) as exc:
-        print(f"картинки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
+    # ИСХОДОВ ДВА (взгляд на #1327, `1edf07c`): нет раздела, число не
+    # число — «факты не той формы», исход 2, а не трейсбек с кодом 1.
+    # `AttributeError` здесь НЕ ловится (взгляд на #1338): им падает и
+    # опечатка в коде рисования, и вину за неё нёс бы вход. Раздел не того
+    # типа ловит явная проверка формы выше, до рисования.
+    except (KeyError, TypeError, ValueError) as exc:
+        print(f"картинки не нарисованы: {path} не той формы — {exc!r}", file=sys.stderr)
         return EXIT_BROKEN
     print(f"картинки нарисованы по {path}: {', '.join(sorted(PICTURES))}")
     return EXIT_OK
+
+
+def say_family(kin: dict[str, Any]) -> None:
+    """Печатает разрез семьи рядом с числами сборки: что посчитано — сказано (046)."""
+    if kin.get("read"):
+        adopted = kin["adopted"]
+        print(
+            f"правил семьи на гейте нашего происхождения: {adopted['ours']} "
+            f"из {adopted['of']} машинных"
+        )
+        # Заметки соседей — рядом с числами, а не только в файле (взгляд на
+        # #1340): ноль различается на «раздела нет» и «не той формы».
+        said = kin.get("notes") or {}
+        print(
+            f"заметок и замеров соседей по правилам: {said.get('count', 0)} "
+            f"(раздел прочитан у {said.get('read', 0)}, нет у {said.get('unread', 0)}, "
+            f"не той формы у {said.get('wrong_shape', 0)})"
+        )
+        # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
+        # считалось здесь с 8 сентября, ложилось в факты ключом
+        # `schema_agrees` — и не печаталось нигде: сводка ушла на 1.3, разрез
+        # остался под 1.2, и девять дней об этом не знал никто. Число рядом с
+        # числами, а не в файле, который никто не открывает (046).
+        if not kin.get("schema_agrees"):
+            print(
+                f"форма сводки семьи разошлась: каталог отдаёт "
+                f"{kin.get('schema_read') or '—'}, разрез написан под "
+                f"{kin.get('schema_expected') or '—'} — перечитать разрез, "
+                f"а не подвинуть число (157)",
+                file=sys.stderr,
+            )
+    else:
+        print(f"сводка семьи: {kin['why']}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1054,6 +1115,11 @@ def main(argv: list[str] | None = None) -> int:
         for name in prune(Path(args.prune)):
             print(f"снято с ветки: {name} — сборка его больше не издаёт")
         return EXIT_OK
+    if args.pictures_out and not args.from_facts:
+        # Пара флагов, а не один (`303d8f0`): картинки рисуются ПО ГОТОВЫМ
+        # фактам, и без них заход ушёл бы молча в полную сборку.
+        print("--pictures-out работает только вместе с --from-facts", file=sys.stderr)
+        return EXIT_BROKEN
     if args.from_facts and args.pictures_out:
         return pictures_drawn(Path(args.from_facts), args.pictures_out)
     if args.from_facts:
@@ -1119,28 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
         f"правил {rules['answered']} из {rules['total']}, "
         f"проверок на изменении {facts['checks_per_pr']['count']}"
     )
-    kin = facts["family"]
-    if kin.get("read"):
-        adopted = kin["adopted"]
-        print(
-            f"правил семьи на гейте нашего происхождения: {adopted['ours']} "
-            f"из {adopted['of']} машинных"
-        )
-        # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
-        # считалось здесь с 8 сентября, ложилось в факты ключом
-        # `schema_agrees` — и не печаталось нигде: сводка ушла на 1.3, разрез
-        # остался под 1.2, и девять дней об этом не знал никто. Число рядом с
-        # числами, а не в файле, который никто не открывает (046).
-        if not kin.get("schema_agrees"):
-            print(
-                f"форма сводки семьи разошлась: каталог отдаёт "
-                f"{kin.get('schema_read') or '—'}, разрез написан под "
-                f"{kin.get('schema_expected') or '—'} — перечитать разрез, "
-                f"а не подвинуть число (157)",
-                file=sys.stderr,
-            )
-    else:
-        print(f"сводка семьи: {kin['why']}", file=sys.stderr)
+    say_family(facts["family"])
     return EXIT_OK
 
 

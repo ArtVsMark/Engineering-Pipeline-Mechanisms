@@ -964,6 +964,10 @@ def test_called_scripts_walk_our_imports_only(tmp_path: Path) -> None:
         "https://github.com/Владелец/репо.git",
         "git@github.com:Владелец/репо.git",
         "http://proxy@127.0.0.1:8080/git/Владелец/репо",
+        "ssh://git@github.com/Владелец/репо.git",
+        "https://x-access-token:секрет@github.com/Владелец/репо.git",
+        "http://github.com/Владелец/репо",
+        "https://www.github.com/Владелец/репо",
     ],
 )
 def test_the_repo_is_read_from_origin_in_every_form(tmp_path: Path, url: str) -> None:
@@ -971,6 +975,29 @@ def test_the_repo_is_read_from_origin_in_every_form(tmp_path: Path, url: str) ->
     consumer = cloned_with_trunk(tmp_path / "потребитель", module.paths.TRUNK)
     subprocess.run(["git", "-C", str(consumer), "remote", "add", "origin", url], check=True)
     assert module.repo_of(consumer) == "Владелец/репо"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/srv/git/Владелец/репо",
+        "https://gitlab.com/Владелец/репо.git",
+        "git@ghe.example.com:Владелец/репо.git",
+        "https://github.com/Владелец",
+    ],
+    ids=["локальный-путь", "чужой-хост", "свой-сервер-площадки", "без-репо"],
+)
+def test_a_foreign_origin_names_no_repo(tmp_path: Path, url: str) -> None:
+    """Не адрес площадки — пусто, и заход печатает заглушку, а не битую ссылку (`d3639d2`)."""
+    consumer = cloned_with_trunk(tmp_path / "потребитель", module.paths.TRUNK)
+    subprocess.run(["git", "-C", str(consumer), "remote", "add", "origin", url], check=True)
+    assert module.repo_of(consumer) == ""
+
+
+def test_the_badge_line_names_the_published_branch() -> None:
+    """Ветка в строке значка — та, куда публикует общий шаг (`df6d81f`)."""
+    line = module.badge_line("o/r")
+    assert f"/o/r/{module.publish_facts.BRANCH}/" in line
 
 
 def test_a_tree_without_its_own_origin_names_no_repo(tmp_path: Path) -> None:
