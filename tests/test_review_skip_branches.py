@@ -98,3 +98,38 @@ def test_the_input_is_declared_empty_by_default() -> None:
     """Пустой вход — смотреть все ветки: у вызывающего, не знающего о входе, ничего не меняется."""
     said = flow()[True]["workflow_call"]["inputs"]["skip-branches"]
     assert said["type"] == "string" and said["default"] == ""
+
+
+# --- реестр позднего взгляда (#1349) -------------------------------------------
+
+AUTOMERGE = ROOT / ".github" / "workflows" / "step-automerge.yml"
+
+
+@pytest.mark.parametrize(
+    ("head", "machine"),
+    [
+        ({"ref": "chore/metrics"}, True),
+        ({"ref": "agent/fix"}, False),
+        ({}, False),
+        (None, False),
+    ],
+    ids=["машинная", "своя", "имени-нет", "головы-нет"],
+)
+def test_the_registry_skips_a_merged_machine_branch(head: object, machine: bool) -> None:
+    """Слитое с машинной ветки в реестр не встаёт; незнание имени взгляд не гасит (045)."""
+    from tests.conftest import load_script
+
+    unlooked = load_script("unlooked.py")
+    item = {"number": 1, "head": head}
+    assert unlooked.machine_branch(item, ["chore/", "dependabot/"]) is machine
+    assert unlooked.machine_branch(item, []) is False
+
+
+def test_both_steps_take_the_same_input() -> None:
+    """Вход один по имени и форме у взгляда и у реестра: приставки передаются одной строкой."""
+    automerge: dict[Any, Any] = yaml.safe_load(AUTOMERGE.read_text(encoding="utf-8"))
+    review = flow()[True]["workflow_call"]["inputs"]["skip-branches"]
+    registry = automerge[True]["workflow_call"]["inputs"]["skip-branches"]
+    assert (review["type"], review["default"]) == (registry["type"], registry["default"])
+    text = AUTOMERGE.read_text(encoding="utf-8")
+    assert "SKIP_BRANCHES: ${{ inputs.skip-branches }}" in text, "вход не доходит до реестра"

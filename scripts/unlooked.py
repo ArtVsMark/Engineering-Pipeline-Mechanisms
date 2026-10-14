@@ -671,6 +671,18 @@ def scan(
     return entries, mark
 
 
+def machine_branch(item: dict[str, Any], prefixes: Iterable[str]) -> bool:
+    """Слитое изменение открыто с машинной ветки: имя головы начинается с приставки.
+
+    Приставки задаёт вызывающий входом `skip-branches` шагов взгляда и
+    очереди, буквально, без масок (#1342, #1349): с машины вердикта не
+    спрашивают (051), и поздний взгляд на ней — плата за пересказ чисел. Имя
+    головы без строки — не машинная ветка: незнание не гасит взгляд (045).
+    """
+    head = (item.get("head") or {}).get("ref")
+    return isinstance(head, str) and any(head.startswith(one) for one in prefixes if one)
+
+
 def mark_late(entries: dict[int, Entry], number: int, day: str) -> dict[int, Entry]:
     """ДОПИСЫВАЕТ поздний взгляд к записи, не трогая её состояния.
 
@@ -954,6 +966,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="напечатать очередь на поздний взгляд списком JSON и выйти",
     )
+    parser.add_argument(
+        "--skip-branches",
+        default=os.environ.get("SKIP_BRANCHES", ""),
+        help="приставки машинных веток через пробел: их слитое в реестр не встаёт",
+    )
     args = parser.parse_args(argv)
     report.announce(not args.apply)
 
@@ -984,6 +1001,15 @@ def main(argv: list[str] | None = None) -> int:
         live, body = findings.live_issue(args.repo, token, MARKER)
         feed = feed_reader(args.repo, token)
         merged = merged_changes(args.repo, token, args.limit)
+        # МАШИННЫЕ ВЕТКИ В РЕЕСТР НЕ ВСТАЮТ (#1349): отсев здесь, а не в
+        # очереди позднего взгляда — иначе запись висела бы «без взгляда»
+        # навсегда и занимала место в каждой выборке. Пропуск назван числом.
+        skip = args.skip_branches.split()
+        skipped = [item for item in merged if machine_branch(item, skip)]
+        if skipped:
+            merged = [item for item in merged if not machine_branch(item, skip)]
+            numbers = ", ".join(f"#{item.get('number')}" for item in skipped)
+            print(f"машинных веток в окне — в реестр не встали: {len(skipped)} ({numbers})")
         known = parse_entries(body)
         entries, watermark = scan(
             merged,
