@@ -2,8 +2,8 @@
   "schema": "1.6",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-14T21:52:39+00:00",
-  "commit": "86abbfe2a3c20a31a0fd24b98c3439d3da256371",
+  "generated_at": "2026-10-14T22:42:55+00:00",
+  "commit": "73dc8d52e6f862caa4c493f9f8642885b8ca6df2",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,11 +19,11 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.5.131",
+  "version": "1.5.132",
   "release": "1.5",
-  "coverage_percent": 93.1,
+  "coverage_percent": 93.2,
   "tests": {
-    "functions": 3371,
+    "functions": 3377,
     "modules": 153
   },
   "checks_per_pr": {
@@ -65,8 +65,8 @@
       "schema_of": "общий шаг фактов механизмов: детали покрытия и полнота версии",
       "coverage": {
         "read": true,
-        "covered": 12050,
-        "lines": 12941
+        "covered": 12099,
+        "lines": 12986
       },
       "version_whole": true
     },
@@ -457,7 +457,8 @@
               ],
               "refs": [
                 "c36d16b1abe889e16be1b4a4b2fbd7a165a2e147"
-              ]
+              ],
+              "contract": ">=0.7,<0.8"
             },
             {
               "repo": "ArtVsMark/Engineering-Incidents-Playbook",
@@ -467,9 +468,25 @@
               ],
               "refs": [
                 "v1.5.0"
-              ]
+              ],
+              "contract": null
             }
-          ]
+          ],
+          "fresh": {
+            "read": true,
+            "release": "v1.5.0",
+            "steps": "0.7",
+            "of": 2,
+            "fresh": 1,
+            "in_range": 0,
+            "in_range_repos": [],
+            "branch_repos": [],
+            "behind_repos": [],
+            "ahead_repos": [],
+            "undeclared_repos": [
+              "ArtVsMark/Engineering-Incidents-Playbook"
+            ]
+          }
         },
         "read": true,
         "schema_expected": "1.7",
