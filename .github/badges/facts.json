@@ -2,8 +2,8 @@
   "schema": "1.6",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-14T18:06:11+00:00",
-  "commit": "e92480b9059a64302bf85d1db043fee6af4e6528",
+  "generated_at": "2026-10-14T18:18:19+00:00",
+  "commit": "cd16c1d98d3ea78649520daa54dab5e2cfc64645",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,11 +19,11 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.5.126",
+  "version": "1.5.127",
   "release": "1.5",
   "coverage_percent": 93.1,
   "tests": {
-    "functions": 3361,
+    "functions": 3363,
     "modules": 152
   },
   "checks_per_pr": {
@@ -65,8 +65,8 @@
       "schema_of": "общий шаг фактов механизмов: детали покрытия и полнота версии",
       "coverage": {
         "read": true,
-        "covered": 11984,
-        "lines": 12875
+        "covered": 12019,
+        "lines": 12910
       },
       "version_whole": true
     },
@@ -225,6 +225,201 @@
               "rule": "191",
               "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/change_parts.py@d38fcbddb8baf030bf4b1a92ea0f0df92defbfa3",
               "kind": "adapted"
+            }
+          ]
+        },
+        "origins": {
+          "pairs": 22,
+          "taken": 4,
+          "adapted": 18,
+          "by_kind": {
+            "adapted": 18,
+            "copied": 0,
+            "called": 4
+          },
+          "undeclared": 0,
+          "projects": {
+            "took": 3,
+            "of": 5
+          },
+          "by": [
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-review.yml",
+              "kind": "called",
+              "rules": [
+                "105"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-rulebook-fresh.yml",
+              "kind": "adapted",
+              "rules": [
+                "047"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-window-lifetime.yml",
+              "kind": "adapted",
+              "rules": [
+                "006"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/agent_pr.py",
+              "kind": "adapted",
+              "rules": [
+                "188"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/check_journal.py",
+              "kind": "adapted",
+              "rules": [
+                "132"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/ci_complete.py",
+              "kind": "called",
+              "rules": [
+                "168"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/main_red.py",
+              "kind": "adapted",
+              "rules": [
+                "124"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/review_findings.py",
+              "kind": "adapted",
+              "rules": [
+                "136"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/task_shape.py",
+              "kind": "adapted",
+              "rules": [
+                "028"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/work_plan.py",
+              "kind": "adapted",
+              "rules": [
+                "091"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:tests/test_citation_applicability.py",
+              "kind": "adapted",
+              "rules": [
+                "204"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:tests/test_docs_shape.py",
+              "kind": "adapted",
+              "rules": [
+                "029"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:tests/test_no_link_into_the_copy.py",
+              "kind": "adapted",
+              "rules": [
+                "089"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/ArtVsMark",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:tests/test_showcase.py",
+              "kind": "adapted",
+              "rules": [
+                "200"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Claude-Code_Usage-Token",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.claude/hooks/push_guard.py",
+              "kind": "adapted",
+              "rules": [
+                "012"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Claude-Code_Usage-Token",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/change_parts.py",
+              "kind": "adapted",
+              "rules": [
+                "191"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Claude-Code_Usage-Token",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/journal.py",
+              "kind": "adapted",
+              "rules": [
+                "030"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Claude-Code_Usage-Token",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:tests/test_ghrest.py",
+              "kind": "adapted",
+              "rules": [
+                "001"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Engineering-Incidents-Playbook",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-rulebook-fresh.yml",
+              "kind": "called",
+              "rules": [
+                "047",
+                "134"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Engineering-Incidents-Playbook",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-window-lifetime.yml",
+              "kind": "called",
+              "rules": [
+                "006"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Engineering-Incidents-Playbook",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/check_journal.py",
+              "kind": "adapted",
+              "rules": [
+                "014",
+                "132"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Engineering-Incidents-Playbook",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/preflight.py",
+              "kind": "adapted",
+              "rules": [
+                "208"
+              ]
             }
           ]
         },
