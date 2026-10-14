@@ -98,14 +98,29 @@ EXCHANGE: Final[dict[str, tuple[str, str, tuple[str, ...]]]] = {
 #: месте — доли механизмов считает каталог по ответу (090), манифест лежит
 #: рядом файлом `contracts.json`, номер контракта — его `gives`. Рисующий
 #: берёт их из дерева (`build_facts.rehydrated`), а не из второй записи.
-NOT_PUBLISHED: Final = ("rules", "manifest", "contract")
+#: `rules` кладёт общая часть КАЖДОМУ, а `manifest` и `contract` — наши:
+#: одноимённые разделы потребителя — его, и молча не вырезаются (взгляд на #1345).
+NOT_PUBLISHED: Final = ("rules",)
+SUPPLIER_NOT_PUBLISHED: Final = ("manifest", "contract")
+#: Темы, которые кладёт ТОЛЬКО поставщик механизмов. Факты общего шага
+#: собирает каждый потребитель, и его свои `family` / `scripts` под подписью
+#: «числа поставщика механизмов» были бы ложью (взгляд на #1345): у него они
+#: остаются его ключами, а не уезжают в нашу тему.
+SUPPLIER_TOPICS: Final = frozenset({"epm"})
 
 
-def published(facts: dict[str, Any]) -> dict[str, Any]:
-    """Форма для витрины: договор в корне, своё — в `exchange.<тема>`, вторых записей нет."""
-    said = {key: value for key, value in facts.items() if key not in NOT_PUBLISHED}
+def published(facts: dict[str, Any], *, supplier: bool = False) -> dict[str, Any]:
+    """Форма для витрины: договор в корне, своё — в `exchange.<тема>`, вторых записей нет.
+
+    `supplier` — факты собирает сам поставщик механизмов: только тогда его
+    разделы уходят в тему `epm`, а `manifest` и `contract` — из файла.
+    """
+    dropped = NOT_PUBLISHED + (SUPPLIER_NOT_PUBLISHED if supplier else ())
+    said = {key: value for key, value in facts.items() if key not in dropped}
     exchange: dict[str, Any] = {}
     for topic, (schema, schema_of, keys) in EXCHANGE.items():
+        if topic in SUPPLIER_TOPICS and not supplier:
+            continue
         moved = {key: said.pop(key) for key in keys if key in said}
         if moved:
             exchange[topic] = {"schema": schema, "schema_of": schema_of, **moved}
@@ -122,7 +137,10 @@ def lifted(facts: dict[str, Any]) -> dict[str, Any]:
     месте (022). Тема чужой версии мажора не поднимается: её форму мы не знаем.
     """
     said = {key: value for key, value in facts.items() if key != "exchange"}
-    for topic, body in (facts.get("exchange") or {}).items():
+    exchange = facts.get("exchange")
+    # Раздел не той формы — нечего поднимать, а не трейсбек `AttributeError`
+    # (взгляд на #1345): форму входа судит рисующий, а не этот подъём.
+    for topic, body in (exchange if isinstance(exchange, dict) else {}).items():
         if topic not in EXCHANGE or not isinstance(body, dict):
             continue
         if str(body.get("schema", "")).split(".")[0] != EXCHANGE[topic][0].split(".")[0]:
@@ -495,11 +513,13 @@ def main(argv: list[str] | None = None) -> int:
     except NotRun as exc:
         print(f"факты не собраны: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    # Поставщик — тот, кто сам себе поставляет: имя проекта и поставщика совпали.
+    supplier = bool(args.supplier) and args.supplier.casefold() == args.repo.casefold()
+    said = published(facts, supplier=supplier)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(
-        json.dumps(published(facts), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    print(f"собрано: {args.out} — показателей {len(facts)}, причин {len(facts.get('none', {}))}")
+    args.out.write_text(json.dumps(said, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # Счёт — по УШЕДШЕМУ в файл, а не по плоским фактам до публикации (взгляд на #1345).
+    print(f"собрано: {args.out} — разделов {len(said)}, причин {len(said.get('none', {}))}")
     return EXIT_OK
 
 

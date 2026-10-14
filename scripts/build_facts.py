@@ -955,7 +955,7 @@ def rehydrated(
 
     ОПУБЛИКОВАННЫЕ ФАКТЫ — ФОРМА ДОГОВОРА ФАКТОВ 1.6 (#1337): `rules`, `manifest` и
     `contract` в них не лежат, у каждого канон в другом месте
-    (`facts_common.NOT_PUBLISHED`). Рисующему они нужны, и берутся тем же
+    (`facts_common.NOT_PUBLISHED`, `SUPPLIER_NOT_PUBLISHED`). Рисующему они нужны, и берутся тем же
     кодом, что считал их до публикации, — из дерева, а не второй записью.
     `ours_too` — только у нашей публикации: у потребителя манифеста и номера
     контракта механизмов нет, ему нужен лишь ответ каталогу для картинки.
@@ -1014,7 +1014,7 @@ def picture_input_wrong(facts: object) -> str | None:
     """
     if not isinstance(facts, dict):
         return "факты не объект"
-    for section in ("rules", "family"):
+    for section in ("rules", "family", "exchange"):
         if section in facts and not isinstance(facts[section], dict):
             return f"раздел {section} не объект"
     rules = facts.get("rules") or {}
@@ -1044,6 +1044,12 @@ def pictures_drawn(path: Path, out_dir: str, root: str = ".", supplier: str = ""
         print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
         return EXIT_BROKEN
     facts = rehydrated(facts, Path(root), supplier, ours_too=False)
+    # Второй взгляд — ПОСЛЕ подъёма тем (взгляд на #1345): `exchange.epm.family`
+    # не объектом проходил первый и падал бы трейсбеком при рисовании.
+    wrong = picture_input_wrong(facts)
+    if wrong:
+        print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
+        return EXIT_BROKEN
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     try:
@@ -1176,7 +1182,8 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args.out_dir) / PUBLISHED_DIR
     out.mkdir(parents=True, exist_ok=True)
     (out / FACTS).write_text(
-        json.dumps(common.published(facts), ensure_ascii=False, indent=2) + "\n", "utf-8"
+        json.dumps(common.published(facts, supplier=True), ensure_ascii=False, indent=2) + "\n",
+        "utf-8",
     )
     draw_badges(facts, out)
 

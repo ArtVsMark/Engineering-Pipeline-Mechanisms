@@ -124,7 +124,7 @@ def test_the_published_form_keeps_the_contract_at_the_root_and_the_rest_in_topic
         "manifest": {"gives": {}},
         "contract": "контракт",
     }
-    said = module.published(flat)
+    said = module.published(flat, supplier=True)
     assert set(said) == {"schema", "repo", "coverage_percent", "exchange"}
     steps, epm = said["exchange"]["steps"], said["exchange"]["epm"]
     assert steps["schema"] == "1.0" and steps["coverage"] == {"read": True}
@@ -133,6 +133,24 @@ def test_the_published_form_keeps_the_contract_at_the_root_and_the_rest_in_topic
     assert {key: lifted[key] for key in ("coverage", "family", "scripts", "version_whole")} == {
         key: flat[key] for key in ("coverage", "family", "scripts", "version_whole")
     }
+
+
+def test_a_consumer_keeps_its_own_sections_out_of_our_topic() -> None:
+    """Свои `family`, `scripts`, `manifest` потребителя — его, а не наша тема (взгляд на #1345).
+
+    Факты общего шага собирает каждый потребитель: под подписью «числа
+    поставщика механизмов» его разделы были бы ложью, а вырезанными — потерей.
+    """
+    flat = {"schema": module.SCHEMA, "family": {"own": 1}, "manifest": {"m": 1}, "rules": {}}
+    said = module.published(flat)
+    assert said["family"] == {"own": 1} and said["manifest"] == {"m": 1}
+    assert "epm" not in said.get("exchange", {}) and "rules" not in said
+
+
+@pytest.mark.parametrize("exchange", [[], "тема", None])
+def test_an_exchange_of_a_wrong_shape_lifts_nothing(exchange: object) -> None:
+    """`exchange` не объектом — поднимать нечего, а не трейсбек (взгляд на #1345)."""
+    assert module.lifted({"repo": REPO, "exchange": exchange}) == {"repo": REPO}
 
 
 def test_a_topic_of_another_major_is_not_lifted() -> None:
