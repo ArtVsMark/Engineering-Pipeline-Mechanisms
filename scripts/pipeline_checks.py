@@ -286,6 +286,20 @@ def span_of(raw: dict[str, Any], path: Path = DEFAULT_PATH) -> str:
     return found
 
 
+def span_said(text: str) -> str | None:
+    """Диапазон из ТЕКСТА чужого ответа; не объявлен или не разобран — `None`.
+
+    Читатель — обход клонов семьи (#1344): чужой ответ не судится нашими
+    правилами, и отказ разбора здесь не отказ, а «диапазон неизвестен».
+    Разбор поля тот же `span_of` (090).
+    """
+    try:
+        raw = yaml.safe_load(text)
+        return span_of(raw) if isinstance(raw, dict) else None
+    except yaml.YAMLError, BadPolicy:
+        return None
+
+
 def span(path: Path = DEFAULT_PATH) -> str:
     """Диапазон совместимости, прочитанный с диска: тот же разбор, что у `load`."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None

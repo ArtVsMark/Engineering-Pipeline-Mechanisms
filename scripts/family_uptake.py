@@ -45,12 +45,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import catalogue
 import ghrest
 import onboard
 import paths
+import pipeline_checks as policy
 import report
 
 EXIT_OK: Final = 0
@@ -111,6 +112,9 @@ class Took:
     #: Версии, к которым он прибит. Их бывает НЕСКОЛЬКО, и это находка: разные
     #: шаги на разных тегах означают недоведённый переезд.
     refs: tuple[str, ...]
+    #: Диапазон `contract:` из его `.pipeline.yml`. `None` — не объявлен или
+    #: не прочитан: «на свежем» без него не сказать, и он назван, а не угадан.
+    span: str | None = None
 
     def said(self) -> str:
         """Строка сводки: числа и имена, а не оценка."""
@@ -222,7 +226,8 @@ def shallow_clone(repo: str, where: Path, host: str = HOST, timeout: float = TIM
 
 def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
     """Что взял один сосед — по его клону."""
-    folder = shallow_clone(repo, where, timeout=timeout) / WANT
+    clone = shallow_clone(repo, where, timeout=timeout)
+    folder = clone / WANT
     steps: set[str] = set()
     refs: set[str] = set()
     # КАТАЛОГА ПРОГОНОВ МОЖЕТ НЕ БЫТЬ ВОВСЕ, и это «не взял», а не отказ:
@@ -232,7 +237,12 @@ def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
             mine, pinned = calls_in(path.read_text(encoding="utf-8", errors="replace"))
             steps.update(mine)
             refs.update(pinned)
-    return Took(repo=repo, steps=tuple(sorted(steps)), refs=tuple(sorted(refs)))
+    # ОТВЕТ ЛЕЖИТ В КОРНЕ, а сужение в режиме конуса корневые файлы оставляет:
+    # второго клона ради одного файла не нужно.
+    answer = clone / paths.PIPELINE
+    text = answer.read_text(encoding="utf-8", errors="replace") if answer.is_file() else ""
+    span = policy.span_said(text) if text else None
+    return Took(repo=repo, steps=tuple(sorted(steps)), refs=tuple(sorted(refs)), span=span)
 
 
 def sweep(
@@ -319,9 +329,68 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
         },
         "steps": {"taken": len(taken), "of": len(offered), "names": taken},
         "by": [
-            {"repo": one.repo, "steps": list(one.steps), "refs": list(one.refs)}
+            {
+                "repo": one.repo,
+                "steps": list(one.steps),
+                "refs": list(one.refs),
+                "contract": one.span,
+            }
             for one in took_ours
         ],
+    }
+
+
+#: Свежесть без выпуска или без обхода не считается — и это сказано, а не ноль.
+NO_FRESHNESS: Final = "выпуска или обхода нет — на свежем ли семья, неизвестно, а не «никто»"
+
+
+def freshness(
+    by: list[dict[str, Any]], release: dict[str, str] | None, steps: str
+) -> dict[str, object]:
+    """На свежем ли взявшие: пин на последний выпуск и диапазон, включающий `steps`.
+
+    Решение владельца 14.10.2026 (#1344): вопрос издателя — «на каком
+    контракте и теге сидит семья». Свёртка — поле фактов, картинку рисует
+    каталог. Знаменатель — взявшие проекты.
+
+    - **на свежем** — каждый пин на теге выпуска или его коммите, и `contract:`
+      включает текущий номер `steps`;
+    - **в диапазоне** — контракт совместим, но пин старше;
+    - **отстал** — диапазон текущий номер не включает;
+    - **не объявлен** — диапазона нет или он не разбирается: свежесть не
+      утверждается и не отрицается, проект назван (045).
+    """
+    if not release:
+        return {"read": False, "why": NO_FRESHNESS}
+    pins = {release["tag"], release["sha"]}
+    fresh: list[str] = []
+    in_range: list[str] = []
+    behind: list[str] = []
+    undeclared: list[str] = []
+    for one in by:
+        repo, span = str(one["repo"]), one.get("contract")
+        try:
+            fits = policy.compatible(str(span), steps) if span else None
+        except policy.BadPolicy:
+            fits = None
+        if fits is None:
+            undeclared.append(repo)
+        elif not fits:
+            behind.append(repo)
+        elif set(map(str, one.get("refs") or [])) <= pins:
+            fresh.append(repo)
+        else:
+            in_range.append(repo)
+    return {
+        "read": True,
+        "release": release["tag"],
+        "steps": steps,
+        "of": len(by),
+        "fresh": len(fresh),
+        "in_range": len(in_range),
+        "behind_repos": behind,
+        "undeclared_repos": undeclared,
+        "in_range_repos": in_range,
     }
 
 
