@@ -998,8 +998,11 @@ def pictures_drawn(path: Path, out_dir: str) -> int:
     out.mkdir(parents=True, exist_ok=True)
     try:
         draw_pictures(facts, out)
-    except (KeyError, TypeError) as exc:
-        print(f"картинки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
+    # ИСХОДОВ ДВА, И ВЕТКА ОТКАЗА ЛОВИТ ВСЕ ПОЛОМКИ ФОРМЫ ФАКТОВ (взгляд на
+    # #1327, `1edf07c`): нет раздела, раздел не словарь, число не число —
+    # одинаково «факты не той формы», а не трейсбек с кодом 1.
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        print(f"картинки не нарисованы: {path} не той формы — {exc!r}", file=sys.stderr)
         return EXIT_BROKEN
     print(f"картинки нарисованы по {path}: {', '.join(sorted(PICTURES))}")
     return EXIT_OK
@@ -1054,6 +1057,11 @@ def main(argv: list[str] | None = None) -> int:
         for name in prune(Path(args.prune)):
             print(f"снято с ветки: {name} — сборка его больше не издаёт")
         return EXIT_OK
+    if args.pictures_out and not args.from_facts:
+        # Пара флагов, а не один (`303d8f0`): картинки рисуются ПО ГОТОВЫМ
+        # фактам, и без них заход ушёл бы молча в полную сборку.
+        print("--pictures-out работает только вместе с --from-facts", file=sys.stderr)
+        return EXIT_BROKEN
     if args.from_facts and args.pictures_out:
         return pictures_drawn(Path(args.from_facts), args.pictures_out)
     if args.from_facts:
