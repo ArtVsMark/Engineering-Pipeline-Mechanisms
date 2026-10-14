@@ -368,6 +368,43 @@ def test_the_shared_step_draws_the_picture_from_consumer_facts(tmp_path: Path) -
     assert facts.pictures_drawn(missing, str(out)) == facts.EXIT_BROKEN
 
 
+@pytest.mark.parametrize(
+    "rules",
+    [["список"], {"machine": {"own": "два"}}, {"machine": "ноль"}],
+    ids=["раздел-не-словарь", "число-не-число", "разбивка-не-словарь"],
+)
+def test_facts_of_a_wrong_shape_are_a_refusal_not_a_traceback(
+    tmp_path: Path, rules: object
+) -> None:
+    """Факты не той формы — исход 2 с причиной, а не трейсбек с кодом 1 (`1edf07c`)."""
+    given = tmp_path / "facts.json"
+    given.write_text(json.dumps({"rules": rules}), encoding="utf-8")
+    assert facts.pictures_drawn(given, str(tmp_path / "out")) == facts.EXIT_BROKEN
+
+
+def test_a_bug_in_drawing_is_not_blamed_on_the_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Опечатка в рисовании — трейсбек, а не «факты не той формы» (взгляд на #1338)."""
+    assert facts.picture_input_wrong({"rules": {"machine": "ноль"}}) == "rules.machine не объект"
+    assert facts.picture_input_wrong({"rules": RULES_PLANTED}) is None
+
+    def broken(*_: object) -> None:
+        raise AttributeError("опечатка в коде рисования")
+
+    monkeypatch.setattr(facts, "draw_pictures", broken)
+    given = tmp_path / "facts.json"
+    given.write_text(json.dumps({"rules": RULES_PLANTED}), encoding="utf-8")
+    with pytest.raises(AttributeError):
+        facts.pictures_drawn(given, str(tmp_path / "out"))
+
+
+def test_pictures_out_alone_is_a_refusal(tmp_path: Path) -> None:
+    """`--pictures-out` без `--from-facts` — отказ, а не тихая полная сборка (`303d8f0`)."""
+    assert facts.main(["--pictures-out", str(tmp_path)]) == facts.EXIT_BROKEN
+    assert not any(tmp_path.iterdir()), "заход без фактов всё же что-то собрал"
+
+
 def test_both_writers_draw_the_same_picture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
