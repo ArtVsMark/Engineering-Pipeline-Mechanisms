@@ -271,10 +271,11 @@ def test_a_bare_change_number_is_told_from_a_full_address(text: str, bare: list[
 def led_to(item: dict[str, Any]) -> Path | None:
     """Куда ведёт предложение: навык — к `path`, правило — к следу `trail`.
 
-    Слияние файла в нашем дереве не называет: его предмет — правила каталога,
-    и инциденты переносит каталог при приёме. ``None`` — вести некуда.
+    Слияние и данные к гипотезе файла в нашем дереве не называют: предмет
+    первого — правила каталога, второго — его кандидат, а источник данных —
+    адрес `source`. ``None`` — вести некуда.
     """
-    if item.get("kind") == "merge":
+    if item.get("kind") in {"merge", "evidence"}:
         return None
     return ROOT / str(item.get("path") if item.get("kind") == "skill" else item.get("trail"))
 
@@ -377,6 +378,12 @@ SKILL_FIELDS = ("slug", "path", "sha", "holds", "measurement")
 MERGE_FIELDS = ("slug", "rules", "why", "claim")
 #: Больше трёх — перестройка области, а не слияние (контракт каталога).
 MERGE_AT_MOST = 3
+#: Данные к гипотезе (формат 1.4 канала): кандидат, направление, сами данные,
+#: адрес источника и дата замера (export/README.md каталога).
+EVIDENCE_FIELDS = ("slug", "hypothesis", "direction", "data", "source", "measured_at")
+EVIDENCE_DIRECTIONS = frozenset({"for", "against", "neutral"})
+#: Источник — адрес, а не проза: ссылка или `владелец/репозиторий#номер`.
+SOURCE_RE = re.compile(r"^(https://\S+|[\w.-]+/[\w.-]+#\d+)$")
 #: Полный sha коммита: каталог читает навык на нём, а не на ветке.
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -390,6 +397,17 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     (взгляд на #885).
     """
     slug = item.get("slug", "?")
+    if item.get("kind") == "evidence":
+        found = [f"{slug}: поля «{one}» нет" for one in EVIDENCE_FIELDS if not item.get(one)]
+        if item.get("direction") and item["direction"] not in EVIDENCE_DIRECTIONS:
+            found.append(f"{slug}: direction — for, against или neutral")
+        if item.get("source") and not SOURCE_RE.match(str(item["source"])):
+            found.append(f"{slug}: source — адрес https://… или владелец/репозиторий#номер")
+        if item.get("measured_at") and not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}", str(item["measured_at"])
+        ):
+            found.append(f"{slug}: measured_at — дата вида 2026-10-14")
+        return found
     if item.get("kind") == "merge":
         found = [f"{slug}: поля «{one}» нет" for one in MERGE_FIELDS if not item.get(one)]
         rules = item.get("rules")
@@ -538,6 +556,28 @@ def test_a_skill_proposal_is_judged_by_its_own_form(tmp_path: Path) -> None:
     )
     rule = {"slug": "y", "claim": "к", "incident": "и" * INCIDENT_AT_LEAST, "trail": "нет.py"}
     assert proposal_problems(rule, tmp_path) == ["y: след «нет.py» не разрешается"]
+
+
+def test_an_evidence_record_is_judged_by_its_own_form() -> None:
+    """Данные к гипотезе формата 1.4: кандидат, направление, данные, адрес и дата."""
+    good = {
+        "kind": "evidence",
+        "slug": "e",
+        "hypothesis": "h",
+        "direction": "for",
+        "data": "замер",
+        "source": "ArtVsMark/Engineering-Pipeline-Mechanisms#1144",
+        "measured_at": "2026-10-14",
+    }
+    assert proposal_problems(good) == []
+    assert proposal_problems({**good, "source": "https://example.org/x"}) == []
+    assert proposal_problems({**good, "direction": "вверх"}) == [
+        "e: direction — for, against или neutral"
+    ]
+    assert proposal_problems({**good, "source": "замер в окне"})
+    assert proposal_problems({**good, "measured_at": "14.10"})
+    assert proposal_problems({**good, "data": ""}) == ["e: поля «data» нет"]
+    assert led_to(good) is None
 
 
 def test_a_merge_proposal_is_judged_by_its_own_form() -> None:

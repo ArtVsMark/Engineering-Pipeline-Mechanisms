@@ -2312,3 +2312,45 @@ def test_the_preview_run_stops_quietly_without_a_build() -> None:
         if step.get("if") != guard
     ]
     assert not unguarded, f"шаги после сверки идут и без сборки: {unguarded}"
+
+
+EVIDENCE = {
+    "proposals": [
+        {
+            "kind": "evidence",
+            "slug": "a-thing-broke",
+            "hypothesis": "h",
+            "measured_at": "2026-10-14",
+        }
+    ]
+}
+EVIDENCE_KEY = "o/r:evidence/a-thing-broke"
+
+
+def test_admitted_evidence_names_its_candidate() -> None:
+    """Принятые данные (формат 1.4) называют гипотезу и уходят из очереди."""
+    said = {"status": "admitted", "candidate": "h", "measured_at": "2026-10-14"}
+    found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
+    assert len(found) == 1 and "к гипотезе h" in found[0].said
+    assert "убрать" in found[0].next_step
+
+
+def test_evidence_answers_its_own_measurement() -> None:
+    """Ответ на прежний замер новый замер под тем же слагом не закрывает (формат 1.4)."""
+    said = {"status": "admitted", "candidate": "h", "measured_at": "2026-10-01"}
+    assert not module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
+
+
+@pytest.mark.parametrize(
+    ("said", "words"),
+    [
+        ({"status": "admitted", "measured_at": "2026-10-14"}, "candidate"),
+        ({"status": "neighbours", "measured_at": "2026-10-14"}, "у данных не бывает"),
+    ],
+    ids=["без-кандидата", "чужой-статус"],
+)
+def test_an_unreadable_evidence_verdict_is_named(said: dict[str, str], words: str) -> None:
+    """Принятое без кандидата и статус правил у данных — «не прочитано», а не тишина (045)."""
+    found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
+    assert len(found) == 1 and found[0].source == "proposal-answer-unread"
+    assert words in found[0].said
