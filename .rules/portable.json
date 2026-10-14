@@ -338,6 +338,12 @@
         ".github/workflows/work-plan.yml"
       ]
     },
+    ".rules/area-paths.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/area-paths.json"
+      ]
+    },
     ".rules/bindings.json": {
       "answer": "configured",
       "where": [
@@ -701,6 +707,7 @@
     "scripts/review_map.py": {
       "answer": "configured",
       "where": [
+        ".rules/area-paths.json",
         ".rules/bindings.json",
         ".rules/review-roles.json",
         "docs/agent/review.md",

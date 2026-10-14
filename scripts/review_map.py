@@ -35,7 +35,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
 import catalogue
 import findings
@@ -228,14 +228,20 @@ def render_roles(
     return "\n".join([*lines, "", procedure.strip(), ""]) + "\n"
 
 
-def titles() -> dict[str, str]:
-    """Заголовки правил каталога; пусто — выгрузка не пришла, и это сказано."""
+def export_meta() -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Заголовки и области правил каталога — одним чтением выгрузки.
+
+    Пусто — выгрузка не пришла, и это сказано. Области берутся английскими
+    именами (`areas.en`): ими ключуется таблица `.rules/area-paths.json`, а
+    русские имена каталог вправе переформулировать.
+    """
     try:
         export = ghrest.raw_json(EXPORT_URL)
     except ghrest.TransportError as exc:
         print(f"::warning::Заголовки правил не пришли: {exc}", file=sys.stderr)
-        return {}
+        return {}, {}
     found: dict[str, str] = {}
+    areas: dict[str, list[str]] = {}
     for rule in export.get("rules") or []:
         if not isinstance(rule, dict):
             continue
@@ -246,7 +252,124 @@ def titles() -> dict[str, str]:
         title = str(said.get("ru") or "" if isinstance(said, dict) else said or "").strip()
         if number and title:
             found[number] = title
-    return found
+        named = rule.get("areas")
+        english = named.get("en") if isinstance(named, dict) else None
+        if number and isinstance(english, list) and all(isinstance(one, str) for one in english):
+            areas[number] = list(english)
+    return found, areas
+
+
+def titles() -> dict[str, str]:
+    """Заголовки правил каталога; пусто — выгрузка не пришла, и это сказано."""
+    return export_meta()[0]
+
+
+#: Имя роли, которой карта отдаёт правила без машины (решение владельца 09.10.2026, #1277).
+CATALOGUE_ROLE: Final = "правила каталога"
+
+
+def area_table(base: str) -> dict[str, list[str]]:
+    """Таблица «область → образцы путей» с ОБЩЕЙ ветки; иная форма — отказ (075, 085).
+
+    Голову пишет тот, кого проверяют: изменение, сузившее таблицу, само убрало
+    бы правила из-под взгляда.
+    """
+    try:
+        said = json.loads(shown_from_base(base, paths.AREA_PATHS))
+    except json.JSONDecodeError as exc:
+        raise NotRun(f"{paths.AREA_PATHS} не разбирается: {exc}") from exc
+    areas = said.get("areas") if isinstance(said, dict) else None
+    if not isinstance(areas, dict) or not areas:
+        raise NotRun(f"{paths.AREA_PATHS}: нет словаря `areas`")
+    table: dict[str, list[str]] = {}
+    for name, one in areas.items():
+        masks = one.get("paths") if isinstance(one, dict) else None
+        if not strings(masks):
+            raise NotRun(f"{paths.AREA_PATHS}: у области «{name}» `paths` не список строк")
+        if not masks and not str(one.get("why") or "").strip():
+            raise NotRun(f"{paths.AREA_PATHS}: у области «{name}» пустой `paths` без причины")
+        table[str(name)] = [str(mask) for mask in masks or []]
+    return table
+
+
+class Narrowed(NamedTuple):
+    """Что роль «правила каталога» получила, а что нет — и почему."""
+
+    eyes: list[str]
+    inapplicable: list[str]
+    #: Правила, чьи области у дерева есть, но этим изменением не задеты.
+    untouched: list[str]
+    #: Правила, все области которых по диффу не видны: роли не отдаются.
+    blind: list[str]
+    #: Области выгрузки, которых нет в таблице: их правила оставлены, а таблица отстала.
+    unknown: list[str]
+
+
+def narrow(
+    eyes: list[str],
+    inapplicable: list[str],
+    areas_of: dict[str, list[str]],
+    table: dict[str, list[str]],
+    files: list[str],
+) -> Narrowed:
+    """Сужает вопросы роли до правил, чьи области задеты тронутыми путями.
+
+    НЕЗНАНИЕ НЕ ОТСЕИВАЕТ (045). Правило без областей в выгрузке или с областью,
+    которой нет в таблице, остаётся в списке: отсеять его значило бы выдать
+    «не задето» там, где мы не знаем. Области вне таблицы карта называет.
+    """
+    touched = {
+        area
+        for area, masks in table.items()
+        if any(matches(name, mask) for name in files for mask in masks)
+    }
+    kept: dict[str, list[str]] = {"eyes": [], "inapplicable": []}
+    untouched: list[str] = []
+    blind: list[str] = []
+    unknown: set[str] = set()
+    for group, numbers in (("eyes", eyes), ("inapplicable", inapplicable)):
+        for number in numbers:
+            areas = areas_of.get(number) or []
+            unknown |= {area for area in areas if area not in table}
+            if not areas or any(area not in table for area in areas) or touched & set(areas):
+                kept[group].append(number)
+            elif all(not table[area] for area in areas):
+                blind.append(number)
+            else:
+                untouched.append(number)
+    return Narrowed(kept["eyes"], kept["inapplicable"], untouched, blind, sorted(unknown))
+
+
+def narrowed_said(narrowed: Narrowed | None, why: str = "") -> list[str]:
+    """Строки карты о роли «правила каталога» и о том, как отобраны её правила."""
+    lines = [
+        f"**Роль «{CATALOGUE_ROLE}».** Два списка ниже — её вопросы: нарушает ли",
+        "изменение правило, держащееся только глазами, и не принесло ли оно предмет",
+        "правилу, объявленному неприменимым. В находке роли назови номер правила",
+        "словами: «(правило 133)». Слияние роль не держит — это суждение, а не гейт.",
+        "",
+    ]
+    if narrowed is None:
+        return [
+            *lines,
+            f"> Правила по тронутым путям НЕ отобраны: {why}. Ниже — списки целиком.",
+            "",
+        ]
+    lines.append(
+        "Правила отобраны по тронутым путям (`.rules/area-paths.json` с общей ветки): "
+        f"не задеты этим изменением — {len(narrowed.untouched)}."
+    )
+    if narrowed.blind:
+        lines.append("По диффу не видны и роли не отданы — " + ", ".join(narrowed.blind) + ".")
+    if narrowed.unknown:
+        # Таблица отстала от каталога: правила с такой областью оставлены, а не
+        # отсеяны, и отставание названо здесь, где его видит каждый взгляд (045).
+        lines.append(
+            "> Областей каталога нет в таблице: "
+            + ", ".join(narrowed.unknown)
+            + ". Их правила оставлены в списке; таблицу надо дополнить."
+        )
+    return [*lines, ""]
 
 
 def split(answer: dict[str, Any]) -> tuple[list[str], list[str], dict[str, list[str]]]:
@@ -396,8 +519,9 @@ def render(
     named: dict[str, str],
     *,
     touched: bool,
+    note: list[str] | None = None,
 ) -> str:
-    """Карта в том виде, в каком её читает ревьюер."""
+    """Карта в том виде, в каком её читает ревьюер; `note` — строки роли «правила каталога»."""
     lines = [
         "## Карта: чем что держится в этом проекте",
         "",
@@ -411,6 +535,7 @@ def render(
         "точнее. Если считаешь, что гейт неверен, — это находка о ГЕЙТЕ, и её надо",
         "назвать так.",
         "",
+        *(note or []),
         f"**Машины нет на {len(eyes)} правилах — вот они.** Это единственное место,",
         "где внешний взгляд незаменим: здесь никто, кроме тебя, не смотрит.",
         "",
@@ -468,8 +593,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 
-    text = render(machine, eyes, denied, titles(), touched=touches_the_answer(args.base, args.head))
-    text += roles_section(args.base, args.repo, args.pr)
+    named, areas_of = export_meta()
+    files, unread = touched_files(args.repo, args.pr)
+    narrowed: Narrowed | None = None
+    why = unread
+    if not why and not areas_of:
+        why = "области правил не пришли с выгрузкой каталога"
+    if not why:
+        try:
+            narrowed = narrow(
+                eyes, denied.get("not-applicable", []), areas_of, area_table(args.base), files
+            )
+        except NotRun as exc:
+            why = f"таблица областей не прочитана — {exc}"
+    if narrowed is not None:
+        eyes = narrowed.eyes
+        if "not-applicable" in denied:
+            denied = {**denied, "not-applicable": narrowed.inapplicable}
+    text = render(
+        machine,
+        eyes,
+        denied,
+        named,
+        touched=touches_the_answer(args.base, args.head),
+        note=narrowed_said(narrowed, why),
+    )
+    text += roles_section(args.base, args.repo, args.pr, files=files, unread=unread)
     args.out.write_text(text, encoding="utf-8")
     # СОБИРАЕТСЯ СПИСКОМ, А НЕ СКЛЕЙКОЙ. При пустом `denied` склейка давала
     # висящую запятую и двойной пробел: «глазами 8,  → путь». Нашёл внешний
@@ -480,8 +629,30 @@ def main(argv: list[str] | None = None) -> int:
     return EXIT_OK
 
 
-def roles_section(base: str, repo: str, number: int) -> str:
-    """Раздел ролей для карты; его отказ не роняет карту, а называется в ней (084)."""
+def touched_files(repo: str, number: int) -> tuple[list[str], str]:
+    """Тронутые пути изменения и причина, если их нет: одно чтение на роли и на правила."""
+    token = ghrest.token_from_env()
+    if not number or not repo or not token:
+        return [], "номер изменения, репозиторий или токен не переданы"
+    try:
+        return changed_files(repo, number, token), ""
+    except ghrest.TransportError as exc:
+        return [], f"пути изменения не прочитаны — {exc}"
+
+
+def roles_section(
+    base: str,
+    repo: str,
+    number: int,
+    *,
+    files: list[str] | None = None,
+    unread: str = "",
+) -> str:
+    """Раздел ролей для карты; его отказ не роняет карту, а называется в ней (084).
+
+    Пути, уже прочитанные картой, передаются сюда (`files`): второе чтение
+    одного списка могло бы разойтись с первым (022).
+    """
     try:
         procedure = shown_from_base(base, paths.REVIEW_PROCEDURE)
         table = table_shape(json.loads(shown_from_base(base, paths.REVIEW_ROLES)))
@@ -494,16 +665,8 @@ def roles_section(base: str, repo: str, number: int) -> str:
             f"Раздела «{SUBJECT.removeprefix('## ')}» нет: предмет проекта читай по "
             "`AGENTS.md`.\n"
         )
-    token = ghrest.token_from_env()
-    unread = ""
-    files: list[str] = []
-    if not number or not repo or not token:
-        unread = "номер изменения, репозиторий или токен не переданы"
-    else:
-        try:
-            files = changed_files(repo, number, token)
-        except ghrest.TransportError as exc:
-            unread = f"пути изменения не прочитаны — {exc}"
+    if files is None:
+        files, unread = touched_files(repo, number)
     required, context = roles_for(files, table)
     return render_roles(procedure, required, context, unread=unread)
 
