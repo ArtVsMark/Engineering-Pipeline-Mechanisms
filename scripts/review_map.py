@@ -268,6 +268,22 @@ def titles() -> dict[str, str]:
 CATALOGUE_ROLE: Final = "правила каталога"
 
 
+def role_declared(base: str) -> bool:
+    """Объявлена ли роль «правила каталога» в таблице ролей ОБЩЕЙ ветки.
+
+    Таблица не прочиталась — «не объявлена»: строк о роли нет, и это тише,
+    чем указание роли, которой у проекта может не быть. Отказ таблицы ролей
+    карта называет своим разделом (`roles_section`).
+    """
+    try:
+        table = table_shape(json.loads(shown_from_base(base, paths.REVIEW_ROLES)))
+    except NotRun, json.JSONDecodeError:
+        return False
+    named = set(table.get("required", []))
+    named |= {role for rule in table.get("by_path", []) for role in rule.get("roles", [])}
+    return CATALOGUE_ROLE in named
+
+
 def area_table(base: str) -> dict[str, list[str]]:
     """Таблица «область → образцы путей» с ОБЩЕЙ ветки; иная форма — отказ (075, 085).
 
@@ -596,16 +612,23 @@ def main(argv: list[str] | None = None) -> int:
     named, areas_of = export_meta()
     files, unread = touched_files(args.repo, args.pr)
     narrowed: Narrowed | None = None
+    note: list[str] = []
     why = unread
-    if not why and not areas_of:
-        why = "области правил не пришли с выгрузкой каталога"
-    if not why:
-        try:
-            narrowed = narrow(
-                eyes, denied.get("not-applicable", []), areas_of, area_table(args.base), files
-            )
-        except NotRun as exc:
-            why = f"таблица областей не прочитана — {exc}"
+    # РОЛЬ — ТОЛЬКО У ТОГО, КТО ЕЁ ОБЪЯВИЛ (взгляд на #1357). Карту собирает
+    # код механизмов у всей семьи; у соседа без этой роли в таблице ролей
+    # строки о ней были бы указанием роли, которой у него нет. Тогда — прежние
+    # списки целиком и ни слова о роли.
+    if role_declared(args.base):
+        if not why and not areas_of:
+            why = "области правил не пришли с выгрузкой каталога"
+        if not why:
+            try:
+                narrowed = narrow(
+                    eyes, denied.get("not-applicable", []), areas_of, area_table(args.base), files
+                )
+            except NotRun as exc:
+                why = f"таблица областей не прочитана — {exc}"
+        note = narrowed_said(narrowed, why)
     if narrowed is not None:
         eyes = narrowed.eyes
         if "not-applicable" in denied:
@@ -616,7 +639,7 @@ def main(argv: list[str] | None = None) -> int:
         denied,
         named,
         touched=touches_the_answer(args.base, args.head),
-        note=narrowed_said(narrowed, why),
+        note=note,
     )
     text += roles_section(args.base, args.repo, args.pr, files=files, unread=unread)
     args.out.write_text(text, encoding="utf-8")

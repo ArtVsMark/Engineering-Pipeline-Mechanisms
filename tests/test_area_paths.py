@@ -135,6 +135,7 @@ def test_the_map_hands_the_role_only_touched_rules(
     monkeypatch.setattr(module, "area_table", lambda base: TABLE_OF)
     monkeypatch.setattr(module, "touches_the_answer", lambda base, head="HEAD": False)
     monkeypatch.setattr(module, "roles_section", lambda *a, **k: "")
+    monkeypatch.setattr(module, "role_declared", lambda base: True)
     assert module.main(["--out", str(where)]) == module.EXIT_OK
     text = where.read_text("utf-8")
     assert "**001**" in text and "**002**" not in text
@@ -172,3 +173,62 @@ def test_narrowing_answers_in_its_named_shape() -> None:
     said = module.narrow([], [], {}, TABLE_OF, [])
     assert isinstance(said, module.Narrowed)
     assert said._fields == ("eyes", "inapplicable", "untouched", "blind", "unknown")
+
+
+def test_a_project_without_the_role_gets_no_word_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Роль не объявлена в таблице ролей — карта о ней молчит и списков не сужает (взгляд на #1357).
+
+    Карту собирает код механизмов у всей семьи; у соседа без роли строки о ней
+    были бы указанием роли, которой у него нет.
+    """
+    where = tmp_path / "карта.md"
+    monkeypatch.setattr(module, "split", lambda said: ([], ["001", "002"], {}))
+    monkeypatch.setattr(module, "from_base", lambda base: {})
+    monkeypatch.setattr(module, "export_meta", lambda: ({}, {"001": ["gates"], "002": ["docs"]}))
+    monkeypatch.setattr(module, "touched_files", lambda repo, pr: (["scripts/check_a.py"], ""))
+    monkeypatch.setattr(module, "touches_the_answer", lambda base, head="HEAD": False)
+    monkeypatch.setattr(module, "roles_section", lambda *a, **k: "")
+    monkeypatch.setattr(module, "role_declared", lambda base: False)
+    assert module.main(["--out", str(where)]) == module.EXIT_OK
+    text = where.read_text("utf-8")
+    assert module.CATALOGUE_ROLE not in text
+    assert "**001**" in text and "**002**" in text
+
+
+def test_the_role_is_declared_by_the_base_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Объявлена ли роль — по таблице ролей с общей ветки; таблицы нет — не объявлена."""
+    table = {
+        "required": ["тестировщик"],
+        "by_path": [{"paths": ["x"], "roles": ["правила каталога"]}],
+    }
+    monkeypatch.setattr(module, "shown_from_base", lambda base, path: json.dumps(table))
+    assert module.role_declared("B") is True
+    monkeypatch.setattr(module, "shown_from_base", lambda base, path: json.dumps({"required": []}))
+    assert module.role_declared("B") is False
+
+    def refuse(base: str, path: Path) -> str:
+        raise module.NotRun("нет файла")
+
+    monkeypatch.setattr(module, "shown_from_base", refuse)
+    assert module.role_declared("B") is False
+
+
+def test_our_table_names_the_role() -> None:
+    """У механизмов роль объявлена: живое дерево, а не подделка (146)."""
+    assert module.role_declared("HEAD") is True
+
+
+def test_a_changelog_fragment_touches_no_area() -> None:
+    """Фрагмент журнала области не задевает: он есть почти в каждом изменении (взгляд на #1357).
+
+    Иначе его область не отсеивалась бы никогда — по той же причине он в
+    `ignored` таблицы ролей (#785). Фрагмент рода `contract` — исключение.
+    """
+    hit = [
+        name
+        for name, one in TABLE["areas"].items()
+        if any(module.matches("changelog.d/x.fixed.md", mask) for mask in one["paths"])
+    ]
+    assert not hit, f"фрагмент журнала задевает области: {hit}"
