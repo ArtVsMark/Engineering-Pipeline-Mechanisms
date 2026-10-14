@@ -206,6 +206,10 @@ def origins(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     Пара без слова о том, как взята (`origin_kind` нет или он не из
     известных), — «не объявлено», а не ноль в «взяты» (045). Знаменатель
     проектов — потребители сводки без нас: мерило о семье.
+
+    МЕХАНИЗМ — МАШИННЫЙ ОТВЕТ, КАК У `adopted` (взгляд на #1346): документ с
+    нашим `origin` механизмом не держится, и в «проектов N/M» он не входит.
+    Два разреза одной сводки читают одно множество видов (`KINDS`).
     """
     me = (mine or family_uptake.OURS).casefold()
     pairs: dict[tuple[str, str], dict[str, Any]] = {}
@@ -216,7 +220,7 @@ def origins(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
             continue
         family_size += 1
         for number, answer in sorted((consumer.get("holds") or {}).items()):
-            if not isinstance(answer, dict):
+            if not isinstance(answer, dict) or answer.get("mechanism") not in KINDS:
                 continue
             origin = str(answer.get("origin") or "")
             if not origin.casefold().startswith(OURS_ORIGIN.casefold()):

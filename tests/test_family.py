@@ -665,12 +665,20 @@ def test_origins_count_pairs_of_project_and_mechanism() -> None:
         ),
         declared("o/b", **{"005": ("pipeline", f"{lint}@v1.5.0", "called")}),
         declared("o/c", **{"006": ("gate", f"{hook}@v1", "")}),
-        declared("o/d", **{"007": ("gate", "", "own")}),
+        declared(
+            "o/d", **{"007": ("gate", "", "own"), "009": ("document", f"{lint}@v1", "called")}
+        ),
+        declared(
+            "o/e",
+            **{"010": ("pipeline", f"{hook}@v1", "own"), "011": ("gate", f"{lint}@v1", "лишнее")},
+        ),
         declared(family.family_uptake.OURS, **{"008": ("gate", f"{lint}@v1", "called")}),
     )
     said = family.origins(document)
-    assert (said["pairs"], said["taken"], said["adapted"], said["undeclared"]) == (3, 1, 1, 1)
-    assert said["projects"] == {"took": 3, "of": 4}
+    # o/e: `own` и незнакомое слово при нашем адресе — «не объявлено», а не «взяты»;
+    # o/d: документ с нашим адресом — не механизм, проект не засчитан (взгляд на #1346).
+    assert (said["pairs"], said["taken"], said["adapted"], said["undeclared"]) == (5, 1, 1, 3)
+    assert said["projects"] == {"took": 4, "of": 5}
     assert said["by"][0] == {
         "repo": "o/a",
         "mechanism": lint,
