@@ -7,6 +7,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -304,3 +305,63 @@ def test_the_shared_step_names_the_supplier_it_checked_out() -> None:
     assert len(made) == 1, "шаг сборки фактов не найден — сверять нечего (075)"
     assert made[0]["env"]["SUPPLIER"] == "${{ job.workflow_repository }}"
     assert '--supplier "$SUPPLIER"' in made[0]["run"]
+
+
+# --- сверка с договором витрины по тегу (#1337) ------------------------------
+
+
+def contract_step() -> dict[str, Any]:
+    """Шаг общего шага фактов, сверяющий файл проверкой витрины с её выпуска."""
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-facts.yml").read_text("utf-8"))
+    return next(
+        one
+        for job in flow["jobs"].values()
+        for one in job.get("steps", [])
+        if "check_facts.py" in str(one.get("run") or "")
+    )
+
+
+def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
+    """Тег проверки, номер формы и тег в шаге — один договор, а не три записи (#1337)."""
+    tag = module.CONTRACT_TAG
+    assert tag.startswith("facts-v") and tag.removeprefix("facts-v").startswith(f"{module.SCHEMA}.")
+    assert contract_step()["env"]["FACTS_CONTRACT"] == tag
+
+
+@pytest.mark.parametrize(
+    ("fetched", "code", "stops"),
+    [(True, 0, False), (True, 1, True), (True, 2, False), (False, 0, False)],
+    ids=["отвечает", "расхождения", "не-отработала", "выпуск-не-скачан"],
+)
+def test_the_contract_step_stops_only_on_a_mismatch(
+    tmp_path: Path, fetched: bool, code: int, stops: bool
+) -> None:
+    """Публикацию держит только исход 1; сбой сверки и недоступный выпуск — предупреждение (039)."""
+    import os
+    import subprocess
+
+    run = str(contract_step()["run"])
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "curl").write_text(f"#!/bin/sh\nexit {0 if fetched else 22}\n", encoding="utf-8")
+    (fake / "python").write_text(f"#!/bin/sh\nexit {code}\n", encoding="utf-8")
+    for one in fake.iterdir():
+        one.chmod(0o755)
+    done = subprocess.run(
+        ["bash", "-c", run],
+        env={
+            **os.environ,
+            "PATH": f"{fake}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+            "FACTS_CONTRACT": module.CONTRACT_TAG,
+            "RELEASES": "https://example.invalid",
+            "GITHUB_REPOSITORY": "o/a",
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert (done.returncode != 0) is stops, done.stdout + done.stderr
+    if not stops and (code or not fetched):
+        assert "::warning::" in done.stdout

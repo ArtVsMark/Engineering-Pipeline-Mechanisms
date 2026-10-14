@@ -204,32 +204,38 @@ jobs:
             --python-next "$PYTHON_NEXT" \
             --supplier "$SUPPLIER" \
             "${args[@]}"
-      # СВЕРКА СО СХЕМОЙ ВИТРИНЫ ДО ПУБЛИКАЦИИ (#1001, шаг 1). Останавливает
-      # публикацию только вердикт отказа: сбой самой сверки — предупреждение,
-      # как было в прогоне значков (`scripts/check_facts_schema.py`).
-      - name: сверить факты со схемой витрины
+      # СВЕРКА С ДОГОВОРОМ ВИТРИНЫ ДО ПУБЛИКАЦИИ — ЕЁ ЖЕ ПРОВЕРКОЙ, ПО ТЕГУ
+      # (#1337, договор фактов 1.6). Своей копии проверки нет: витрина отдаёт
+      # `check_facts.py`, схему и номер договора файлами выпуска, и издатель
+      # гоняет ровно то, чем витрина судит его (её «Шаг для CI издателя»).
+      # Тег — `facts_common.CONTRACT_TAG`, рядом с номером формы `SCHEMA`;
+      # что они сходятся, держит тест.
+      #
+      # ОСТАНАВЛИВАЕТ ТОЛЬКО ИСХОД 1 — «расхождения» по договору. Исход 2
+      # («проверка не отработала») и недоступный выпуск — предупреждение:
+      # сбой сверки не отказ по договору, и публикация идёт без неё (039).
+      - name: сверить факты с договором витрины
         env:
-          GH_TOKEN: ${{ github.token }}
+          FACTS_CONTRACT: facts-v1.6.0
+          # Выпуски витрины семьи — адресом репозитория, а не именем (194).
+          RELEASES: https://github.com/ArtVsMark/ArtVsMark/releases/download
         run: |
           set -uo pipefail
-          # Установка отдельно: её провал — не «отказ по схеме», а сверки не было.
-          if ! python -m pip install --quiet "jsonschema>=4.20,<5"; then
-            echo "::warning::Факты не сверены со схемой витрины: проверяльщик не установился — публикация идёт без сверки."
-            exit 0
-          fi
-          # ОСТАНАВЛИВАЕТ ВЕРДИКТ, А НЕ КОД (взгляд на #1116): код 1 даёт и
-          # трассировка, упавшая до `main`. Отказ скрипт называет словом в файле.
+          dir="$RUNNER_TEMP/facts-contract"
+          mkdir -p "$dir"
+          for f in check_facts.py facts.schema.json facts.version; do
+            if ! curl -fsSL --retry 2 -o "$dir/$f" \
+              "$RELEASES/$FACTS_CONTRACT/$f"; then
+              echo "::warning::Факты не сверены с договором витрины: $f выпуска $FACTS_CONTRACT не скачан — публикация идёт без сверки."
+              exit 0
+            fi
+          done
           rc=0
-          verdict="$RUNNER_TEMP/facts-verdict.txt"
-          python $MECHANISMS/scripts/check_facts_schema.py "$RUNNER_TEMP/facts/facts.json" --verdict "$verdict" || rc=$?
+          python "$dir/check_facts.py" --file "$RUNNER_TEMP/facts/facts.json" --repo "$GITHUB_REPOSITORY" || rc=$?
           case "$rc" in
             0) ;;
-            *)
-              if [ "$(cat "$verdict" 2>/dev/null)" = "rejected" ]; then
-                exit 1
-              fi
-              echo "::warning::Факты не сверены со схемой витрины: сверка не отработала (код $rc; код 1 без вердикта — сбой до main или вердикт отказа не записан) — публикация идёт без сверки."
-              ;;
+            1) exit 1 ;;
+            *) echo "::warning::Факты не сверены с договором витрины: проверка не отработала (код $rc) — публикация идёт без сверки." ;;
           esac
       # ЗНАЧОК ПРОЕКТА — ПО ТЕМ ЖЕ ФАКТАМ, ЧТО УЙДУТ НА ВЕТКУ (#1282, решение
       # владельца 12.10.2026). Рисует его наша сборка в режиме «только
