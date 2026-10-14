@@ -1005,6 +1005,39 @@ def pictures_drawn(path: Path, out_dir: str) -> int:
     return EXIT_OK
 
 
+def say_family(kin: dict[str, Any]) -> None:
+    """Печатает разрез семьи рядом с числами сборки: что посчитано — сказано (046)."""
+    if kin.get("read"):
+        adopted = kin["adopted"]
+        print(
+            f"правил семьи на гейте нашего происхождения: {adopted['ours']} "
+            f"из {adopted['of']} машинных"
+        )
+        # Заметки соседей — рядом с числами, а не только в файле (взгляд на
+        # #1340): ноль различается на «раздела нет» и «не той формы».
+        said = kin.get("notes") or {}
+        print(
+            f"заметок и замеров соседей по правилам: {said.get('count', 0)} "
+            f"(раздел прочитан у {said.get('read', 0)}, нет у {said.get('unread', 0)}, "
+            f"не той формы у {said.get('wrong_shape', 0)})"
+        )
+        # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
+        # считалось здесь с 8 сентября, ложилось в факты ключом
+        # `schema_agrees` — и не печаталось нигде: сводка ушла на 1.3, разрез
+        # остался под 1.2, и девять дней об этом не знал никто. Число рядом с
+        # числами, а не в файле, который никто не открывает (046).
+        if not kin.get("schema_agrees"):
+            print(
+                f"форма сводки семьи разошлась: каталог отдаёт "
+                f"{kin.get('schema_read') or '—'}, разрез написан под "
+                f"{kin.get('schema_expected') or '—'} — перечитать разрез, "
+                f"а не подвинуть число (157)",
+                file=sys.stderr,
+            )
+    else:
+        print(f"сводка семьи: {kin['why']}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает факты и значок в каталог вывода."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1119,28 +1152,7 @@ def main(argv: list[str] | None = None) -> int:
         f"правил {rules['answered']} из {rules['total']}, "
         f"проверок на изменении {facts['checks_per_pr']['count']}"
     )
-    kin = facts["family"]
-    if kin.get("read"):
-        adopted = kin["adopted"]
-        print(
-            f"правил семьи на гейте нашего происхождения: {adopted['ours']} "
-            f"из {adopted['of']} машинных"
-        )
-        # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
-        # считалось здесь с 8 сентября, ложилось в факты ключом
-        # `schema_agrees` — и не печаталось нигде: сводка ушла на 1.3, разрез
-        # остался под 1.2, и девять дней об этом не знал никто. Число рядом с
-        # числами, а не в файле, который никто не открывает (046).
-        if not kin.get("schema_agrees"):
-            print(
-                f"форма сводки семьи разошлась: каталог отдаёт "
-                f"{kin.get('schema_read') or '—'}, разрез написан под "
-                f"{kin.get('schema_expected') or '—'} — перечитать разрез, "
-                f"а не подвинуть число (157)",
-                file=sys.stderr,
-            )
-    else:
-        print(f"сводка семьи: {kin['why']}", file=sys.stderr)
+    say_family(facts["family"])
     return EXIT_OK
 
 

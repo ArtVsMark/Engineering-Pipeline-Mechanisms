@@ -181,17 +181,36 @@ def adopted(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
 def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     """Заметки и замеры соседей по правилам — раздел `notes` сводки 1.7, поимённо.
 
+    ФОРМА — ИЗ ИСТОЧНИКА, А НЕ ИЗ ПОДДЕЛКИ (взгляд на #1340). Раздел кладёт
+    сборщик каталога: `scripts/aggregate_bindings.py`, `entry["notes"] =
+    заметки(rules)` — словарь «правило → {note, metric}» у КАЖДОГО потребителя
+    (тег `v1.11.0`). Живой сводки с непустыми заметками нет ни у кого (замер
+    14.10.2026), поэтому ноль различается на три исхода, а не сливается в
+    один: `read` — у скольких потребителей раздел есть и той формы;
+    `unread` — у скольких его нет вовсе; `wrong_shape` — у скольких он не
+    словарь. Иная раскладка у каталога дала бы ненулевой `wrong_shape` или
+    `unread`, а не тихий ноль (045).
+
     Свои не считаются: мерило о семье, а свои мысли живут в нашем ответе.
-    Запись не той формы пропускается, а не валит разрез: раздел совещательный,
-    и одна кривая строка соседа не должна гасить числа всех остальных (039).
+    Запись не той формы внутри раздела пропускается, а не валит разрез:
+    раздел совещательный, и одна кривая строка соседа не должна гасить
+    числа всех остальных (039).
     """
     by: list[dict[str, Any]] = []
+    read = unread = wrong_shape = 0
     for consumer in summary.get("consumers") or []:
         repo = str(consumer.get("repo") or "")
         if repo.casefold() == (mine or family_uptake.OURS).casefold():
             continue
         said = consumer.get("notes")
-        for number, entry in sorted(said.items() if isinstance(said, dict) else []):
+        if "notes" not in consumer:
+            unread += 1
+            continue
+        if not isinstance(said, dict):
+            wrong_shape += 1
+            continue
+        read += 1
+        for number, entry in sorted(said.items()):
             if not isinstance(entry, dict):
                 continue
             row: dict[str, Any] = {"repo": repo, "rule": str(number)}
@@ -201,7 +220,13 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
                 row["metric"] = entry["metric"]
             if len(row) > 2:
                 by.append(row)
-    return {"count": len(by), "by": by}
+    return {
+        "count": len(by),
+        "read": read,
+        "unread": unread,
+        "wrong_shape": wrong_shape,
+        "by": by,
+    }
 
 
 def held_by_machine(summary: dict[str, Any]) -> int:
