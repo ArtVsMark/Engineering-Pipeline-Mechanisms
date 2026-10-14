@@ -645,10 +645,14 @@ def test_both_version_lists_come_from_a_matrix() -> None:
         jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
         cells = module.matrix_of(jobs, job, path)
         assert cells, f"{job}: версии не в матрице — из имени записи они пропадут"
+        # У предрелизного джоба установок две: служебная на стабильной ветке —
+        # спросить манифест, есть ли сборка (#193), — и сама предрелизная. Предмет
+        # здесь — вторая, её и узнают по `allow-prereleases`.
         step = [
             said
             for step in (jobs[job].get("steps") or [])
             if (said := ((step or {}).get("with") or {}).get("python-version"))
+            and (not preview or ((step or {}).get("with") or {}).get("allow-prereleases"))
         ]
         expected = cells if preview else ["${{ matrix.python }}"]
         assert step == expected, (
@@ -2168,3 +2172,58 @@ def test_the_verdict_subject_follows_the_kind(
 ) -> None:
     """Правило и слияние — номером `rule`, навык — адресом `skill` (взгляд на #1266)."""
     assert module.verdict_subject(kind, verdict)[0] == subject
+
+
+# --- есть ли сборка ветки у площадки (#193) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("minor", "present"),
+    [("3.14", True), ("3.15", True), ("3.16", False)],
+    ids=["стабильная", "только-пробная", "нет-ни-одной"],
+)
+def test_a_branch_is_published_by_any_build(minor: str, present: bool) -> None:
+    """Сборка ветки есть, если у площадки есть хоть одна — стабильная или пробная.
+
+    Пробная считается: `python-next` гоняет именно её. Ветка без единой сборки —
+    «нет», и прогон предрелизной на ней зеленеет с предупреждением, а не
+    краснеет отказом `setup-python` (решение владельца 14.10.2026).
+    """
+    assert module.published(TODAY, minor) is present
+
+
+def test_the_published_mode_names_all_three_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--published`: есть — 0, нет — 4, манифест не прочитан — 2, а не «нет» (045)."""
+    monkeypatch.setattr(module, "manifest", lambda url: TODAY)
+    assert module.main(["--published", "3.15"]) == module.EXIT_NOTHING
+    assert module.main(["--published", "3.16"]) == module.EXIT_ABSENT
+
+    def unread(url: str) -> list[object]:
+        raise module.NotRun("манифест не прочитан")
+
+    monkeypatch.setattr(module, "manifest", unread)
+    assert module.main(["--published", "3.16"]) == module.EXIT_BROKEN
+
+
+def test_the_preview_run_stops_quietly_without_a_build() -> None:
+    """Каждый шаг после сверки манифеста идёт только при найденной сборке (#193).
+
+    Шаг без условия снова упёрся бы в отсутствующую версию и покрасил прогон —
+    ровно то красное, которое дежурный клал долгом в план. Сверка спрашивает
+    ячейку матрицы, а не букву: ветка одна на джоб.
+    """
+    flow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "python-next.yml").read_text(encoding="utf-8")
+    )
+    steps = flow["jobs"]["test-next"]["steps"]
+    names = [step.get("name") for step in steps]
+    check = names.index("есть ли сборка ветки у площадки")
+    assert 'drift.py --published "$WANTED"' in steps[check]["run"]
+    assert steps[check]["env"]["WANTED"] == "${{ matrix.python }}"
+    guard = "steps.version.outputs.present == 'true'"
+    unguarded = [
+        step.get("name") or step.get("uses")
+        for step in steps[check + 1 :]
+        if step.get("if") != guard
+    ]
+    assert not unguarded, f"шаги после сверки идут и без сборки: {unguarded}"
