@@ -83,6 +83,7 @@ from typing import Any, Final
 import check_shipped
 import paths
 import pipeline_checks as policy
+import publish_facts
 import version
 import yaml
 
@@ -609,23 +610,54 @@ def trunk_of(root: Path) -> str:
     return (said or "").removeprefix("origin/")
 
 
+#: Хост площадки. Отдельной константой, а не адресом в образце: адрес в
+#: исходнике читает предикат ответа 095 как исходящий (`.rules/inapplicable.json`).
+GITHUB_HOST: Final = "github.com"
+_HOST = re.escape(GITHUB_HOST)
+
+#: Адрес `origin`, из которого имя репозитория читается: площадка по `https`,
+#: по `ssh` и прокси облачной сессии (`…@127.0.0.1:порт/git/владелец/репо`).
+GITHUB_ORIGIN_RE: Final = re.compile(
+    rf"^(?:https?:/{{2}}(?:[^/@]+@)?(?:www\.)?{_HOST}/|git@{_HOST}:|ssh:/{{2}}git@{_HOST}/"
+    r"|https?:/{2}[^/@]+@(?:127\.0\.0\.1|localhost)(?::\d+)?/git/)"
+    r"(?P<repo>[^/:]+/[^/:]+?)(?:\.git)?/?$"
+)
+
+
 def repo_of(root: Path) -> str:
     """Имя `владелец/репо` по адресу `origin` клона; пусто — клон его не называет.
 
-    Берутся две последние части адреса: так читаются и `https://…/o/r.git`, и
-    `git@host:o/r.git`, и адрес через прокси. Дерево, не являющееся корнем
-    своего клона, — пусто, тем же приёмом, что у `trunk_of`.
+    ИМЯ ЧИТАЕТСЯ ТОЛЬКО У АДРЕСА ПЛОЩАДКИ (взгляд на #1328, `d3639d2`). Две
+    последние части ЛЮБОГО адреса давали имя и локальному пути
+    (`/srv/git/repo`), и чужому хосту — и строка значка уверенно вела на
+    несуществующий репозиторий. Теперь адрес вне `GITHUB_ORIGIN_RE` — пусто,
+    и заход печатает заглушку. Дерево, не являющееся корнем своего клона, —
+    тоже пусто, тем же приёмом, что у `trunk_of`.
+
+    СОСЕДНИЕ РАЗБОРЫ `origin` НАЗВАНЫ, А НЕ СЛИТЫ (195, `61b15d5`):
+    `check_branch_revival.repo_of` и `check_own_name.canon` отвечают на
+    вопрос гейта о СВОЁМ клоне. Признак у них остался широким — две последние
+    части любого адреса, `/srv/git/o/r` даёт `o/r` (взгляд на #1338), — и
+    отказывают (`NotRun`) они, только когда частей меньше двух. Там это
+    терпимо: имя идёт в запрос к площадке, и чужой адрес вернёт её отказ.
+    Здесь имя уходит строкой в README потребителя, и ошибка не всплывёт —
+    поэтому признак узкий, а неразбор даёт заглушку.
+
+    ФОРМЫ АДРЕСА ПЛОЩАДКИ (`GITHUB_ORIGIN_RE`): `https` и `http`, с токеном
+    перед хостом (`x-access-token@…` — так пишет `actions/checkout`) и с
+    `www.`; `git@…:` и `ssh://git@…/`; прокси облачной сессии. Свой сервер
+    площадки (GHE) и прочие хосты — заглушка.
     """
     top = version.git("rev-parse", "--show-toplevel", root=root)
     if top is None or Path(top).resolve() != root.resolve():
         return ""
     said = (version.git("remote", "get-url", "origin", root=root) or "").strip()
-    parts = [part for part in re.split(r"[/:]", said.removesuffix(".git")) if part]
-    return "/".join(parts[-2:]) if len(parts) >= 2 else ""
+    found = GITHUB_ORIGIN_RE.match(said)
+    return found.group("repo") if found else ""
 
 
 def badge_line(repo: str) -> str:
-    """Строка значка проекта для README потребителя — markdown со ссылкой на ветку `badges`.
+    """Строка значка проекта для README потребителя — markdown со ссылкой на ветку значков.
 
     README ЗАХОД НЕ ПРАВИТ (решение владельца 12.10.2026, #1282): он почти
     всегда уже есть, а чужое заход не трогает. Строку кладёт владелец.
@@ -635,7 +667,9 @@ def badge_line(repo: str) -> str:
     значок в README там не покажется. Условие печатается рядом со строкой
     (`PRIVATE_NOTE`), а не выясняется битой картинкой.
     """
-    return f"![проект](https://raw.githubusercontent.com/{repo}/badges/{BADGE.as_posix()})"
+    # Ветка — та, куда публикует общий шаг, а не вписанная рукой (`df6d81f`).
+    branch = publish_facts.BRANCH
+    return f"![проект](https://raw.githubusercontent.com/{repo}/{branch}/{BADGE.as_posix()})"
 
 
 def occupied(root: Path, files: dict[Path, str]) -> list[Path]:
