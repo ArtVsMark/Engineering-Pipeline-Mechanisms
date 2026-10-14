@@ -7,6 +7,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -304,3 +305,112 @@ def test_the_shared_step_names_the_supplier_it_checked_out() -> None:
     assert len(made) == 1, "шаг сборки фактов не найден — сверять нечего (075)"
     assert made[0]["env"]["SUPPLIER"] == "${{ job.workflow_repository }}"
     assert '--supplier "$SUPPLIER"' in made[0]["run"]
+
+
+# --- сверка с договором витрины по тегу (#1337) ------------------------------
+
+
+def contract_step() -> dict[str, Any]:
+    """Шаг общего шага фактов, сверяющий файл проверкой витрины с её выпуска."""
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-facts.yml").read_text("utf-8"))
+    return next(
+        one
+        for job in flow["jobs"].values()
+        for one in job.get("steps", [])
+        if "check_facts.py" in str(one.get("run") or "")
+    )
+
+
+def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
+    """Тег проверки, номер формы и тег в шаге — один договор, а не три записи (#1337)."""
+    tag = module.CONTRACT_TAG
+    assert tag.startswith("facts-v") and tag.removeprefix("facts-v").startswith(f"{module.SCHEMA}.")
+    assert contract_step()["env"]["FACTS_CONTRACT"] == tag
+
+
+#: Строка, которой `check_facts.py --file` выпуска называет расхождения:
+#: `print(f"{args.repo}: {'договору отвечает' if not found else f'расхождений {len(found)}'}")`
+#: (тег `facts-v1.6.0`, `main`). Шаг судит по ней, а не по одному коду.
+MISMATCH: str = "o/a: расхождений 3"
+
+
+@pytest.mark.parametrize(
+    ("fetched", "intact", "code", "said", "stops"),
+    [
+        (True, True, 0, "o/a: договору отвечает", False),
+        (True, True, 1, MISMATCH, True),
+        (True, True, 1, "Traceback (most recent call last):", False),
+        (True, True, 2, "проверка не отработала", False),
+        (False, True, 0, "", False),
+        (True, False, 0, "o/a: договору отвечает", True),
+    ],
+    ids=["отвечает", "расхождения", "трассировка", "не-отработала", "не-скачан", "хеш-не-тот"],
+)
+def test_the_contract_step_stops_only_on_a_mismatch_or_a_foreign_file(
+    tmp_path: Path, fetched: bool, intact: bool, code: int, said: str, stops: bool
+) -> None:
+    """Останавливают расхождения и чужой файл; трассировка и недоступный выпуск — предупреждение.
+
+    Код 1 даёт и трассировка Python (взгляд на #1348): вердикт — строка
+    проверки, а не один код. Файл выпуска исполняется только по хешу.
+    """
+    import hashlib
+    import os
+    import subprocess
+
+    run = str(contract_step()["run"])
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    body = "файл выпуска"
+    (fake / "curl").write_text(
+        "#!/bin/sh\n"
+        + (
+            'while [ "$#" -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\n'
+            f"printf %s '{body}' > \"$out\"\n"
+            if fetched
+            else "exit 22\n"
+        ),
+        encoding="utf-8",
+    )
+    (fake / "python").write_text(f"#!/bin/sh\necho '{said}'\nexit {code}\n", encoding="utf-8")
+    for one in fake.iterdir():
+        one.chmod(0o755)
+    digest = hashlib.sha256(body.encode()).hexdigest() if intact else "0" * 64
+    pinned = "\n".join(
+        f"{digest}  {name}" for name in ("check_facts.py", "facts.schema.json", "facts.version")
+    )
+    done = subprocess.run(
+        ["bash", "-c", run],
+        env={
+            **os.environ,
+            "PATH": f"{fake}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+            "FACTS_CONTRACT": module.CONTRACT_TAG,
+            "FACTS_SHA256": pinned,
+            "RELEASES": "https://example.invalid",
+            "GITHUB_REPOSITORY": "o/a",
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert (done.returncode != 0) is stops, done.stdout + done.stderr
+    if not stops and (code or not fetched):
+        assert "::warning::" in done.stdout
+
+
+def test_every_release_file_is_pinned_by_its_hash() -> None:
+    """Каждый скачиваемый файл выпуска прибит sha256 — чужой код не исполняется без сверки."""
+    import re
+
+    step = contract_step()
+    pinned: dict[str, str] = {}
+    for line in str(step["env"]["FACTS_SHA256"]).splitlines():
+        if line:
+            digest, name = line.split("  ", 1)
+            pinned[name] = digest
+    fetched = re.search(r"for f in ([^;]+); do", str(step["run"]))
+    assert fetched, "шаг больше не перечисляет файлы выпуска — сверять нечего"
+    assert set(pinned) == set(fetched.group(1).split())
+    assert all(re.fullmatch(r"[0-9a-f]{64}", one) for one in pinned.values())
