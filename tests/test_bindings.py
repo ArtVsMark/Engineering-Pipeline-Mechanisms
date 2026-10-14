@@ -1270,79 +1270,63 @@ def catalogue_jobs(folder: Path) -> dict[tuple[str, str], set[str]]:
     return found
 
 
-def held_by(head: str, jobs: dict[tuple[str, str], set[str]], sizes: dict[str, int]) -> set[str]:
-    """Действия каталога, которыми держится ответ с этой головой `where`.
-
-    Голова называет джоб каталога, если называет прогон и либо прогон из одного
-    джоба, либо назван и сам джоб («джоб X»). ПРЕДЕЛ, а не обещание: прогон из
-    многих джобов, названный без джоба (`ci.yml`), не говорит, какая его часть
-    держит правило, — такой ответ эта сверка не судит (взгляд на #1281).
-    """
-    return {
-        act
-        for (flow_name, job), acts in jobs.items()
-        if flow_name in head and (sizes.get(flow_name) == 1 or f"джоб {job}" in head)
-        for act in acts
-    }
-
-
-def job_counts(folder: Path) -> dict[str, int]:
-    """Сколько джобов в каждом прогоне."""
-    import yaml
-
-    return {
-        path.name: len((yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {})
-        for path in walk(folder, "*.yml")
-    }
+#: Ответы, которые называют прогон-вызыватель действия каталога, но держатся НЕ
+#: им: прогон назван как место своего джоба или как пример. Перечень, а не разбор
+#: прозы (решение владельца 14.10.2026, #1237): четыре захода по одному месту
+#: чинили разбор головы `where` по пунктуации (#1281, #1287 — `35cb227`,
+#: `051ea12`), а поле джоба форма ответа 1.9 не допускает (210). Новый такой
+#: ответ без строки здесь краснеет; строка, у которой предмета больше нет, — тоже.
+CALLER_NAMED_NOT_CALLED: Final[dict[str, str]] = {
+    "002": "ci.yml — джоб на каждый шаг, свой; действие каталога правило не держит",
+    "006": "ci.yml — место своего шага window-lifetime",
+    "018": "ci.yml — окружение проверки читается из событий и условий его джобов",
+    "035": "ci.yml — место своего гейта версии; держит scripts/check_version.py",
+    "080": "rules-inbox.yml упомянут как канал каталога; держит .rules/proposals.json",
+    "100": "ci.yml — поле timeout-minutes у своих шагов",
+    "133": "ci.yml — свой джоб parts",
+    "156": "ci.yml — джоб attribution назван доводом; держит scripts/squash_body.py",
+    "165": "ci.yml — шаг прогона, где гейт требует -z; держит tests/test_source_hygiene.py",
+    "179": "ci.yml, rules-inbox.yml — примеры замера групп отмены",
+    "182": "ci.yml упомянут в доводе; держит tests/test_bindings.py",
+}
 
 
-def test_an_answer_held_by_a_catalogue_job_names_that_action() -> None:
-    """Ответ, чья голова `where` называет джоб каталога, несёт `origin` ЭТОГО действия (#1237).
+def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
+    """Ответ, называющий прогон-вызыватель каталога, — `called` с его действием или в перечне.
 
-    Строгое правило вместо третьей формы разбора по одному месту (210): взгляды
-    на #1281 нашли, что прежняя сверка не видела вызова через переиспользуемый
-    прогон и не сверяла, ТО ЛИ действие названо. Теперь держащийся джобом каталога
-    ответ обязан нести `origin_kind: called`, и его `origin` — одно из действий,
-    которые этот джоб зовёт. Голова — адрес до первого « — »: дальше идёт довод,
-    где прогон может быть лишь упомянут.
-    """
-    folder = ROOT / ".github" / "workflows"
-    jobs, sizes = catalogue_jobs(folder), job_counts(folder)
-    assert jobs, "джобов с действием каталога нет — сверять не с чем (075)"
-    wrong = []
-    for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
-        held = held_by(str(answer.get("where") or "").split(" — ")[0], jobs, sizes)
-        if not held:
-            continue
-        origin = str(answer.get("origin") or "")
-        named = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
-        if answer.get("origin_kind") != "called" or named not in held:
-            wrong.append(f"{number}: держится {sorted(held)}, origin «{origin or 'нет'}»")
-    assert not wrong, "ответ на джоб каталога без своего origin: " + "; ".join(wrong)
-
-
-def test_a_called_origin_is_reached_from_its_head() -> None:
-    """`origin` вызовом — действие, которое зовёт прогон из головы ответа, а не любое (#1237).
-
-    Иначе ответ на `rules-inbox.yml` с `origin` attribution прошёл бы: действие
-    вызывается где-то в дереве, но не тем прогоном, которым ответ держится
-    (взгляд на #1281).
+    СТРОГОЕ ПРАВИЛО ВМЕСТО ФОРМЫ РАЗБОРА (210, решение владельца 14.10.2026).
+    Прежние две пробы судили голову `where` до первого « — » и искали в ней «джоб
+    X»: совпадение решала пунктуация прозы, а не данные. Теперь прозу не делят:
+    прогон назван — значит, ответ либо держится его действием (`origin_kind:
+    called`, `origin` — одно из действий, которые зовут названные прогоны), либо
+    стоит в `CALLER_NAMED_NOT_CALLED` с причиной. `called` без названного
+    вызывающего прогона — тоже отказ: `origin` не достигается из ответа.
     """
     folder = ROOT / ".github" / "workflows"
     jobs = catalogue_jobs(folder)
+    assert jobs, "джобов с действием каталога нет — сверять не с чем (075)"
     by_flow: dict[str, set[str]] = {}
     for (flow_name, _), acts in jobs.items():
         by_flow.setdefault(flow_name, set()).update(acts)
-    stray = []
+    wrong, named_only = [], set()
     for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
+        where = str(answer.get("where") or "")
+        reached = {act for flow, acts in by_flow.items() if flow in where for act in acts}
         origin = str(answer.get("origin") or "")
-        if answer.get("origin_kind") != "called" or not origin.startswith(CATALOGUE_ORIGIN):
-            continue
-        named = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
-        head = str(answer.get("where") or "").split(" — ")[0]
-        if not any(flow in head and named in acts for flow, acts in by_flow.items()):
-            stray.append(f"{number}: {named}")
-    assert not stray, "origin не зовёт ни один прогон из головы ответа: " + "; ".join(stray)
+        called = answer.get("origin_kind") == "called" and origin.startswith(CATALOGUE_ORIGIN)
+        if called:
+            named = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
+            if named not in reached:
+                wrong.append(f"{number}: origin {named} не зовёт ни один прогон из where")
+        elif reached:
+            named_only.add(number)
+    unlisted = sorted(named_only - set(CALLER_NAMED_NOT_CALLED))
+    stale = sorted(set(CALLER_NAMED_NOT_CALLED) - named_only)
+    wrong += [
+        f"{n}: называет вызывающий прогон без called и без строки в перечне" for n in unlisted
+    ]
+    wrong += [f"{n}: строка перечня без предмета — снять" for n in stale]
+    assert not wrong, "ответы на прогоны каталога:\n  " + "\n  ".join(wrong)
 
 
 def test_catalogue_jobs_follow_a_reusable_flow(tmp_path: Path) -> None:
@@ -1358,12 +1342,9 @@ def test_catalogue_jobs_follow_a_reusable_flow(tmp_path: Path) -> None:
         "/.github/actions/attribution@v1.9.0\n",
         encoding="utf-8",
     )
-    jobs, sizes = catalogue_jobs(tmp_path), job_counts(tmp_path)
+    jobs = catalogue_jobs(tmp_path)
     act = {".github/actions/attribution/action.yml"}
     assert jobs == {("ci.yml", "attribution"): act, ("step.yml", "attribution"): act}
-    assert held_by(".github/workflows/ci.yml, джоб attribution", jobs, sizes) == act
-    assert held_by(".github/workflows/step.yml", jobs, sizes) == act
-    assert held_by(".github/workflows/ci.yml", jobs, sizes) == set(), "многоджобный без джоба"
 
 
 def test_catalogue_calls_pair_the_action_with_its_tag(tmp_path: Path) -> None:
