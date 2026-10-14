@@ -382,6 +382,24 @@ def test_facts_of_a_wrong_shape_are_a_refusal_not_a_traceback(
     assert facts.pictures_drawn(given, str(tmp_path / "out")) == facts.EXIT_BROKEN
 
 
+@pytest.mark.parametrize(
+    "given",
+    [
+        {"rules": RULES_PLANTED, "exchange": []},
+        {"rules": RULES_PLANTED, "exchange": "тема"},
+        {"rules": RULES_PLANTED, "exchange": {"epm": {"schema": "1.0", "family": "ноль"}}},
+    ],
+    ids=["обмен-список", "обмен-строка", "тема-с-семьёй-не-словарём"],
+)
+def test_an_exchange_of_a_wrong_shape_is_a_refusal_not_a_traceback(
+    tmp_path: Path, given: dict[str, Any]
+) -> None:
+    """`exchange` и поднятые из него разделы не той формы — исход 2, а не трейсбек (#1345)."""
+    path = tmp_path / "facts.json"
+    path.write_text(json.dumps(given), encoding="utf-8")
+    assert facts.pictures_drawn(path, str(tmp_path / "out")) == facts.EXIT_BROKEN
+
+
 def test_a_bug_in_drawing_is_not_blamed_on_the_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

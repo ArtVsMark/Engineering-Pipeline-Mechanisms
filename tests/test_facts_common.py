@@ -106,6 +106,65 @@ def test_the_publisher_writes_the_file(tmp_path: Path, run_script: RunScript) ->
     assert done.code == module.EXIT_OK, done.text
     said = json.loads(out.read_text(encoding="utf-8"))
     assert said["tests"] == {"functions": 3} and said["repo"] == REPO
+    # Файл — форма договора фактов 1.6 (#1337): вторых записей в корне нет.
+    assert said["schema"] == "1.6" and not set(module.NOT_PUBLISHED) & set(said)
+
+
+def test_the_published_form_keeps_the_contract_at_the_root_and_the_rest_in_topics() -> None:
+    """Корень — договор, своё — в `exchange.<тема>` со своей `schema`, без вторых записей."""
+    flat = {
+        "schema": module.SCHEMA,
+        "repo": REPO,
+        "coverage_percent": 93.1,
+        "coverage": {"read": True},
+        "version_whole": True,
+        "family": {"read": False},
+        "scripts": {"runnable": 1},
+        "rules": {"total": 1},
+        "manifest": {"gives": {}},
+        "contract": "контракт",
+    }
+    said = module.published(flat, supplier=True)
+    assert set(said) == {"schema", "repo", "coverage_percent", "exchange"}
+    steps, epm = said["exchange"]["steps"], said["exchange"]["epm"]
+    assert steps["schema"] == "1.0" and steps["coverage"] == {"read": True}
+    assert steps["version_whole"] is True and epm["scripts"] == {"runnable": 1}
+    lifted = module.lifted(said)
+    assert {key: lifted[key] for key in ("coverage", "family", "scripts", "version_whole")} == {
+        key: flat[key] for key in ("coverage", "family", "scripts", "version_whole")
+    }
+
+
+def test_a_consumer_keeps_its_own_sections_out_of_our_topic() -> None:
+    """Свои `family`, `scripts`, `manifest` потребителя — его, а не наша тема (взгляд на #1345).
+
+    Факты общего шага собирает каждый потребитель: под подписью «числа
+    поставщика механизмов» его разделы были бы ложью, а вырезанными — потерей.
+    """
+    flat = {"schema": module.SCHEMA, "family": {"own": 1}, "manifest": {"m": 1}, "rules": {}}
+    said = module.published(flat)
+    assert said["family"] == {"own": 1} and said["manifest"] == {"m": 1}
+    assert "epm" not in said.get("exchange", {}) and "rules" not in said
+
+
+@pytest.mark.parametrize("exchange", [[], "тема", None])
+def test_an_exchange_of_a_wrong_shape_lifts_nothing(exchange: object) -> None:
+    """`exchange` не объектом — поднимать нечего, а не трейсбек (взгляд на #1345)."""
+    assert module.lifted({"repo": REPO, "exchange": exchange}) == {"repo": REPO}
+
+
+def test_a_topic_of_another_major_is_not_lifted() -> None:
+    """Тема чужого мажора в корень не поднимается: её форму мы не знаем (#1337)."""
+    said = {"exchange": {"epm": {"schema": "2.0", "scripts": {"runnable": 9}}}}
+    assert "scripts" not in module.lifted(said)
+
+
+def test_drawing_takes_the_unpublished_from_the_tree() -> None:
+    """Неопубликованное рисующий берёт из дерева тем же кодом, а не второй записью (#1337)."""
+    said = build.rehydrated({"repo": REPO}, ROOT, REPO)
+    assert said["rules"] == module.rules_said(ROOT, REPO)
+    assert said["manifest"] == build.manifest_facts(ROOT)
+    assert "manifest" not in build.rehydrated({"repo": REPO}, ROOT, REPO, ours_too=False)
 
 
 def test_the_publisher_refuses_an_overriding_file(tmp_path: Path, run_script: RunScript) -> None:

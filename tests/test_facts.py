@@ -63,8 +63,8 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     assert collected["rules"]["by_mechanism"] == {"document": 1, "gate": 1}
     assert collected["checks_per_pr"]["by_class"]["required"] == 1
     assert collected["commit"] == "голова"
-    # Договор фактов 1.3 (#1046): номер — договора, а не наш.
-    assert collected["schema"] == "1.3"
+    # Договор фактов 1.6 (#1337): номер — договора, а не наш.
+    assert collected["schema"] == "1.6"
     # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
     assert collected["none"]["python"] == facts.NO_PYTHON
     assert collected["generated_at"].endswith("+00:00")
@@ -585,7 +585,7 @@ def test_publication_writes_only_to_the_derived_branch() -> None:
 #: Сценарий шага, рисующего значок проекта у общего шага фактов, — целиком (#1282).
 FACTS_PICTURE_RUN: Final = (
     'python $MECHANISMS/scripts/build_facts.py --from-facts "$RUNNER_TEMP/facts/facts.json" '
-    '--pictures-out "$RUNNER_TEMP/facts"'
+    '--pictures-out "$RUNNER_TEMP/facts" --root . --supplier "$SUPPLIER"'
 )
 
 
