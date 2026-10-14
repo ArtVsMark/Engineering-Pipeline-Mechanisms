@@ -260,7 +260,8 @@ jobs:
         run: |
           python scripts/build_facts.py \
             --from-facts "${RUNNER_TEMP}/facts.json" \
-            --out-dir "${RUNNER_TEMP}/badges"
+            --out-dir "${RUNNER_TEMP}/badges" \
+            --supplier "$GITHUB_REPOSITORY"
       # ЕДИНЫЙ ЗНАЧОК «Python │ ОС │ coverage │ release / PyPI │ version» (#1019,
       # решение владельца 01.10.2026). Рисует его действие каталога с тега, а не
       # копия здесь (022). Стоит ПОСЛЕ сборки фактов: покрытие и версию он берёт
