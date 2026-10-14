@@ -475,6 +475,54 @@ def test_our_own_answers_are_not_counted_as_adopted() -> None:
     assert family.picture(document, mine=MINE)["adopted"] == {"ours": 0, "of": 0, "by": []}
 
 
+def test_neighbours_notes_are_read_and_ours_are_not() -> None:
+    """Раздел `notes` сводки 1.7 читается поимённо; свои и кривые записи — нет (#1274)."""
+    metric = {"what": "отмен за неделю", "value": 3, "measured": "2026-10-14"}
+    neighbour = {
+        **consumer("o/a"),
+        "notes": {
+            "002": {"note": "держим ревью вместо гейта"},
+            "001": {"metric": metric},
+            "003": "не объект",
+            "004": {"note": "   "},
+        },
+    }
+    own = {**consumer(MINE), "notes": {"005": {"note": "своё"}}}
+    said = family.picture(summary(neighbour, own, {**consumer("o/b"), "notes": []}), mine=MINE)
+    assert said["notes"] == {
+        "count": 2,
+        "read": 1,
+        "unread": 0,
+        "wrong_shape": 1,
+        "by": [
+            {"repo": "o/a", "rule": "001", "metric": metric},
+            {"repo": "o/a", "rule": "002", "note": "держим ревью вместо гейта"},
+        ],
+    }
+
+
+def test_neighbours_notes_are_said_next_to_the_numbers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Число заметок соседей печатается рядом с `adopted`, а не только в файле (#1340)."""
+    kin = {
+        "read": True,
+        "schema_agrees": True,
+        "adopted": {"ours": 1, "of": 3},
+        "notes": {"count": 2, "read": 4, "unread": 1, "wrong_shape": 0, "by": []},
+    }
+    facts.say_family(kin)
+    said = capsys.readouterr().out
+    assert "заметок и замеров соседей по правилам: 2" in said
+    assert "нет у 1" in said
+
+
+def test_a_summary_without_notes_reads_as_none() -> None:
+    """Нет раздела и пустой раздел — разные исходы, а не один ноль (взгляд на #1340)."""
+    said = family.picture(summary(consumer("o/a"), {**consumer("o/b"), "notes": {}}))["notes"]
+    assert said == {"count": 0, "read": 1, "unread": 1, "wrong_shape": 0, "by": []}
+
+
 def test_the_version_badge_names_incompleteness() -> None:
     """Версия посчитана неполно — сказано словом и цветом, а не скрыто."""
     whole = facts.version_badge({"version": "0.1.91", "version_whole": True})
