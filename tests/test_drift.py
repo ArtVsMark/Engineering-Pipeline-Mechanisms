@@ -603,6 +603,30 @@ def test_an_empty_manifest_is_the_third_outcome() -> None:
         module.language_moved([{"version": "3.15.0-rc.1", "stable": False}], ["3.14"], "")
 
 
+def test_a_stable_number_without_a_runner_build_is_not_called_into_the_matrix() -> None:
+    """В матрицу зовётся ветка с файлом под раннер, а не стабильный номер (#1333).
+
+    3.15 стабильна номером, но файл у неё только под 24.04: под 26.04 совет
+    «добавить в матрицу» дал бы ячейку, красную на каждом изменении. Под 24.04
+    тот же манифест совет даёт.
+    """
+    builds = [
+        build("3.14.7", ("linux", "26.04", "x64"), stable=True),
+        build("3.15.0", ("linux", "24.04", "x64"), stable=True),
+    ]
+    assert module.language_moved(builds, ["3.14"], "3.16", "26.04") == []
+    assert [d.source for d in module.language_moved(builds, ["3.14"], "3.16", "24.04")] == [
+        "python-stable"
+    ]
+    moved = module.language_moved(builds, ["3.14"], "3.15", "26.04")
+    assert "python-next" not in [d.source for d in moved]
+
+
+def test_the_matrix_runner_names_its_system() -> None:
+    """Версия системы раннера матрицы читается из `runs-on` самого `ci.yml`."""
+    assert module.matrix_system() == "26.04"
+
+
 def test_the_matrix_is_read_from_the_run_itself() -> None:
     """Версии берутся из `ci.yml`, а не из второго списка рядом.
 

@@ -97,7 +97,13 @@ jobs:
           rc=0
           # Сборка — файл под систему раннера, а не номер (`b1aea69`): версия
           # системы берётся у самого раннера, а не второй записью `runs-on`.
-          system="$(. /etc/os-release && echo "$VERSION_ID")"
+          system="$(. /etc/os-release && echo "${VERSION_ID:-}")"
+          # Пустая версия молча отключила бы сверку системы (взгляд на #1333):
+          # не прочитали — шаг не отработал, а не «сверять не надо» (045).
+          if [ -z "$system" ]; then
+            echo "::error::версия системы раннера не прочитана из /etc/os-release — сборку сверить не с чем"
+            exit 1
+          fi
           python scripts/drift.py --published "$WANTED" --platform-version "$system" || rc=$?
           case "$rc" in
             0) echo "present=true" >>"$GITHUB_OUTPUT" ;;
