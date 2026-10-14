@@ -48,6 +48,7 @@
 | 6e | Срок жизни окна, открывшего изменение | `ci.yml` → `step-window-lifetime.yml` | `window-lifetime / window-lifetime` | нет, в очереди разбора |
 | 6f | Свод не менялся под окном изменения | `ci.yml` → `step-rulebook-fresh.yml` | `rulebook-fresh / rulebook-fresh` | нет, в очереди разбора |
 | 6g | Изменение из нескольких частей: предупреждение по 133 | `ci.yml` | `parts` | нет, совещательный |
+| 6h | Ответ каталогу по форме и пробы «не применимо» — действием каталога | `ci.yml` | `answer` | через сводный |
 | 7 | **Сводный гейт** | `ci-complete.yml` | `ci-complete` | **единственный обязательный** |
 | 7a | Будильник сводного гейта: `ci` кончился — устаревшая сводка перезапускается | `ci-complete-wake.yml` (по `workflow_run` от `ci`) | `ci-complete-wake` | нет, вне изменения |
 | 8 | Очередь: порядок наш, слияние площадки | `automerge.yml`¹ → `step-automerge.yml` | `automerge / automerge` | нет |

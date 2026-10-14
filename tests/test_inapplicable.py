@@ -93,6 +93,23 @@ def test_every_inapplicable_answer_is_held_here_and_nothing_else_is() -> None:
     )
 
 
+def test_every_inapplicable_answer_has_a_catalogue_probe_or_says_why_not() -> None:
+    """У «неприменимо» сказано, что держит проба каталога `refuted_by`, или почему её нет (#1274).
+
+    Пробу исполняет действие каталога в джобе `answer` (`ci.yml`), а не этот
+    набор: копия исполнителя разъехалась бы с ним на подъёме формы (090). Здесь
+    держится только то, что молчания нет: и отсутствие пробы, и проба уже
+    предиката отсюда объясняются ключом `_refuted_by` — пояснением, которое
+    форма 1.9 пропускает.
+    """
+    silent = sorted(
+        rule
+        for rule, one in answers().items()
+        if one.get("status") == INAPPLICABLE_STATUS and not str(one.get("_refuted_by", "")).strip()
+    )
+    assert not silent, f"«неприменимо» без пояснения к пробе каталога: {silent}"
+
+
 @pytest.mark.parametrize("rule", sorted(predicates()["predicates"]))
 def test_the_condition_of_entry_has_not_arrived(rule: str) -> None:
     """Предикат ответа не нашёл нового: правило по-прежнему без предмета в дереве.
