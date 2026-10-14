@@ -833,8 +833,9 @@ def test_our_facts_say_how_fresh_the_takers_are(tmp_path: Path) -> None:
     fresh = facts.ours(ROOT, uptake=numbers)["family"]["uptake"]["fresh"]
     assert (fresh["release"], fresh["steps"]) == (tag, steps)
     assert (fresh["fresh"], fresh["in_range"], fresh["of"]) == (1, 1, 2)
-    assert facts.ours(ROOT)["family"]["uptake"].get("fresh") is None, (
-        "без обхода свежесть выдана числом"
+    unknown = facts.ours(ROOT)["family"]["uptake"]["fresh"]
+    assert unknown == {"read": False, "why": facts.family_uptake.NO_FRESHNESS}, (
+        "без обхода свежесть выдана числом или пропала"
     )
 
 

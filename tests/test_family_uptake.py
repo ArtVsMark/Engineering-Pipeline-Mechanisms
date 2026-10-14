@@ -296,28 +296,43 @@ RELEASE = {"tag": "v1.5.0", "sha": "a" * 40}
 
 
 def test_freshness_sorts_the_takers_by_pin_and_span() -> None:
-    """Свежий, в диапазоне, отставший и необъявленный — четыре разных ответа (#1344).
+    """Шесть ответов о соседе — шесть групп, и ни одна не прячет соседний случай (#1344, 195).
 
-    Свежий — пин на теге или коммите выпуска и диапазон с текущим `steps`; в
-    диапазоне — диапазон совместим, а пин старше; отставший — диапазон номер не
-    включает; без диапазона свежесть не утверждается.
+    Свежий — пин на теге или коммите выпуска (и коротким хешем) при диапазоне
+    с текущим `steps`; в диапазоне — пин на другом теге; на ветке — пин к
+    имени ветки; отстал — диапазон кончается не выше номера; впереди —
+    начинается выше; без диапазона свежесть не утверждается.
     """
     by = [
         {"repo": "o/тег", "refs": ["v1.5.0"], "contract": ">=0.5,<0.9"},
         {"repo": "o/коммит", "refs": ["a" * 40], "contract": ">=0.7,<0.8"},
+        {"repo": "o/короткий", "refs": ["a" * 7], "contract": ">=0.5,<0.9"},
         {"repo": "o/старый", "refs": ["v1.0.0"], "contract": ">=0.5,<0.9"},
         {"repo": "o/разные", "refs": ["v1.0.0", "v1.5.0"], "contract": ">=0.5,<0.9"},
+        {"repo": "o/ветка", "refs": ["main"], "contract": ">=0.5,<0.9"},
         {"repo": "o/отстал", "refs": ["v1.5.0"], "contract": ">=0.3,<0.6"},
+        {"repo": "o/впереди", "refs": ["v1.5.0"], "contract": ">=0.8,<0.9"},
         {"repo": "o/молчит", "refs": ["v1.5.0"], "contract": None},
         {"repo": "o/криво", "refs": ["v1.5.0"], "contract": "любой"},
     ]
     said = module.freshness(by, RELEASE, "0.7")
-    assert said["read"] is True and said["of"] == 7
-    assert said["fresh"] == 2
+    assert said["read"] is True and said["of"] == 10
+    assert said["fresh"] == 3
     assert said["in_range"] == 2 and said["in_range_repos"] == ["o/старый", "o/разные"]
+    assert said["branch_repos"] == ["o/ветка"]
     assert said["behind_repos"] == ["o/отстал"]
+    assert said["ahead_repos"] == ["o/впереди"]
     assert said["undeclared_repos"] == ["o/молчит", "o/криво"]
     assert (said["release"], said["steps"]) == ("v1.5.0", "0.7")
+
+
+def test_a_pin_is_named_by_its_kind() -> None:
+    """Пин — выпуск, другой тег или коммит, или ветка; чужой хеш выпуском не станет."""
+    assert module.pin_of("v1.5.0", RELEASE) == "release"
+    assert module.pin_of("a" * 9, RELEASE) == "release"
+    assert module.pin_of("b" * 7, RELEASE) == "other"
+    assert module.pin_of("v1.4.0", RELEASE) == "other"
+    assert module.pin_of("main", RELEASE) == "branch"
 
 
 def test_freshness_without_a_release_is_unknown_not_zero() -> None:

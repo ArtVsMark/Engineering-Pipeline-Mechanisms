@@ -383,13 +383,15 @@ def ours(
     said = manifest_facts(root)
     seen = family_facts(summary, mine=mine, answers=root / BINDINGS, uptake=uptake)
     taken = seen["uptake"]
-    if taken.get("read"):
-        # НА СВЕЖЕМ ЛИ СЕМЬЯ — вопрос издателя (#1344): пины взявших против
-        # нашего выпуска и их диапазоны против отдаваемого `steps`. Выпуск и
-        # номер — те же, что в манифесте, а не второе чтение тега (022).
-        taken["fresh"] = family_uptake.freshness(
-            taken.get("by") or [], said["release"], said["gives"][GIVES_STEPS]
-        )
+    # НА СВЕЖЕМ ЛИ СЕМЬЯ — вопрос издателя (#1344): пины взявших против
+    # нашего выпуска и их диапазоны против отдаваемого `steps`. Выпуск и
+    # номер — те же, что в манифесте, а не второе чтение тега (022). Без
+    # обхода поле есть и говорит «неизвестно», а не пропадает (взгляд на #1355).
+    taken["fresh"] = (
+        family_uptake.freshness(taken.get("by") or [], said["release"], said["gives"][GIVES_STEPS])
+        if taken.get("read")
+        else {"read": False, "why": family_uptake.NO_FRESHNESS}
+    )
     return {
         "contract": contract_version(root / VERSION_FILE),
         # Числа для вопросов СОПРОВОЖДАЮЩЕГО из .rules/showcase.json: значок им

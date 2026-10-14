@@ -342,6 +342,18 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
 
 #: Свежесть без выпуска или без обхода не считается — и это сказано, а не ноль.
 NO_FRESHNESS: Final = "выпуска или обхода нет — на свежем ли семья, неизвестно, а не «никто»"
+#: Пин тегом выпуска: `v` и три числа. Хеш коммита — от семи шестнадцатеричных
+#: знаков. Иное имя (`main`, `dev`) — ветка: она движется, и возраста у неё нет.
+TAG_RE: Final = re.compile(r"^v\d+\.\d+\.\d+$")
+SHA_RE: Final = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def pin_of(ref: str, release: dict[str, str]) -> str:
+    """Чем прибит вызов: `release` — тег или коммит выпуска (и короткий хеш тоже),
+    `other` — другой тег или коммит, `branch` — имя ветки."""
+    if ref == release["tag"] or (SHA_RE.match(ref) and release["sha"].startswith(ref)):
+        return "release"
+    return "other" if TAG_RE.match(ref) or SHA_RE.match(ref) else "branch"
 
 
 def freshness(
@@ -351,46 +363,51 @@ def freshness(
 
     Решение владельца 14.10.2026 (#1344): вопрос издателя — «на каком
     контракте и теге сидит семья». Свёртка — поле фактов, картинку рисует
-    каталог. Знаменатель — взявшие проекты.
+    каталог. Знаменатель — взявшие проекты. Группы:
 
-    - **на свежем** — каждый пин на теге выпуска или его коммите, и `contract:`
-      включает текущий номер `steps`;
-    - **в диапазоне** — контракт совместим, но пин старше;
-    - **отстал** — диапазон текущий номер не включает;
+    - **на свежем** — каждый пин на теге выпуска или его коммите (полным или
+      коротким хешем), и `contract:` включает текущий номер `steps`;
+    - **в диапазоне** — контракт совместим, а пин на другом теге или коммите;
+    - **на ветке** — контракт совместим, а вызов прибит к имени ветки: она
+      движется, и «старше» о ней не скажешь (195);
+    - **отстал** — диапазон кончается не выше текущего номера;
+    - **впереди** — диапазон начинается выше текущего номера: сосед объявил
+      контракт, которого мы не выпускали, — это не отставание;
     - **не объявлен** — диапазона нет или он не разбирается: свежесть не
-      утверждается и не отрицается, проект назван (045).
+      утверждается и не отрицается (045).
+
+    Каждая группа, кроме свежих, — поимённо.
     """
     if not release:
         return {"read": False, "why": NO_FRESHNESS}
-    pins = {release["tag"], release["sha"]}
-    fresh: list[str] = []
-    in_range: list[str] = []
-    behind: list[str] = []
-    undeclared: list[str] = []
+    now = tuple(int(part) for part in steps.split(".")[:2])
+    groups: dict[str, list[str]] = {
+        name: [] for name in ("fresh", "in_range", "branch", "behind", "ahead", "undeclared")
+    }
     for one in by:
         repo, span = str(one["repo"]), one.get("contract")
-        try:
-            fits = policy.compatible(str(span), steps) if span else None
-        except policy.BadPolicy:
-            fits = None
-        if fits is None:
-            undeclared.append(repo)
-        elif not fits:
-            behind.append(repo)
-        elif set(map(str, one.get("refs") or [])) <= pins:
-            fresh.append(repo)
+        bounds = policy.RANGE_RE.match(str(span).strip()) if span else None
+        if bounds is None:
+            groups["undeclared"].append(repo)
+            continue
+        low = (int(bounds.group(1)), int(bounds.group(2)))
+        high = (int(bounds.group(3)), int(bounds.group(4)))
+        if now < low:
+            groups["ahead"].append(repo)
+        elif now >= high:
+            groups["behind"].append(repo)
         else:
-            in_range.append(repo)
+            pins = {pin_of(str(ref), release) for ref in one.get("refs") or []}
+            group = "branch" if "branch" in pins else "in_range" if "other" in pins else "fresh"
+            groups[group].append(repo)
     return {
         "read": True,
         "release": release["tag"],
         "steps": steps,
         "of": len(by),
-        "fresh": len(fresh),
-        "in_range": len(in_range),
-        "behind_repos": behind,
-        "undeclared_repos": undeclared,
-        "in_range_repos": in_range,
+        "fresh": len(groups["fresh"]),
+        "in_range": len(groups["in_range"]),
+        **{f"{name}_repos": groups[name] for name in groups if name != "fresh"},
     }
 
 
