@@ -178,6 +178,78 @@ def adopted(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     return {"ours": len(by), "of": total, "by": by}
 
 
+#: Как взят механизм — по объявлению потребителя (`origin_kind`, #701 каталога).
+#: «Взяты» — без переделки, вызовом или копией; «переделаны» — под себя
+#: (решение владельца 12.10.2026, #1325). `own` нашим не бывает: у него нет адреса.
+TAKEN_KINDS: Final = ("called", "copied")
+ADAPTED_KIND: Final = "adapted"
+#: Порядок, в котором пара с разными объявлениями у разных правил получает одно
+#: слово: дальше от нашего кода — сильнее. Переделка у одного правила делает
+#: переделанным весь механизм у проекта, а не половину его.
+KIND_ORDER: Final = (ADAPTED_KIND, "copied", "called")
+#: Слово пары, у которой ни одно правило не сказало, как механизм взят.
+UNDECLARED: Final = "undeclared"
+
+
+def unversioned(origin: str) -> str:
+    """Адрес механизма без `@версии`: одна пара — один механизм, на каком бы теге он ни был."""
+    return origin.rsplit("@", 1)[0] if "@" in origin else origin
+
+
+def origins(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
+    """Механизмы НАШЕГО происхождения у семьи — парами «проект × механизм» (#1325).
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 12.10.2026. Единица — пара: один наш механизм у двух
+    проектов — два взятия, механизм, держащий у проекта два правила, — одно.
+    `adopted` считает ответы по правилам и на этот вопрос не отвечает.
+
+    Пара без слова о том, как взята (`origin_kind` нет или он не из
+    известных), — «не объявлено», а не ноль в «взяты» (045). Знаменатель
+    проектов — потребители сводки без нас: мерило о семье.
+    """
+    me = (mine or family_uptake.OURS).casefold()
+    pairs: dict[tuple[str, str], dict[str, Any]] = {}
+    family_size = 0
+    for consumer in summary.get("consumers") or []:
+        repo = str(consumer.get("repo") or "")
+        if repo.casefold() == me:
+            continue
+        family_size += 1
+        for number, answer in sorted((consumer.get("holds") or {}).items()):
+            if not isinstance(answer, dict):
+                continue
+            origin = str(answer.get("origin") or "")
+            if not origin.casefold().startswith(OURS_ORIGIN.casefold()):
+                continue
+            mechanism = unversioned(origin)
+            pair = pairs.setdefault(
+                (repo, mechanism.casefold()),
+                {"repo": repo, "mechanism": mechanism, "kinds": set(), "rules": []},
+            )
+            pair["kinds"].add(str(answer.get("origin_kind") or ""))
+            pair["rules"].append(str(number))
+    by = [
+        {
+            "repo": pair["repo"],
+            "mechanism": pair["mechanism"],
+            "kind": next((one for one in KIND_ORDER if one in pair["kinds"]), UNDECLARED),
+            "rules": pair["rules"],
+        }
+        for pair in pairs.values()
+    ]
+    by.sort(key=lambda one: (one["repo"].casefold(), one["mechanism"].casefold()))
+    count = {kind: sum(1 for one in by if one["kind"] == kind) for kind in KIND_ORDER}
+    return {
+        "pairs": len(by),
+        "taken": sum(count[kind] for kind in TAKEN_KINDS),
+        "adapted": count[ADAPTED_KIND],
+        "by_kind": count,
+        "undeclared": sum(1 for one in by if one["kind"] == UNDECLARED),
+        "projects": {"took": len({one["repo"].casefold() for one in by}), "of": family_size},
+        "by": by,
+    }
+
+
 def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     """Заметки и замеры соседей по правилам — раздел `notes` сводки 1.7, поимённо.
 
@@ -290,5 +362,6 @@ def picture(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
         "consumers": len(summary.get("consumers") or []),
         "held_by_machine": held_by_machine(summary),
         "adopted": adopted(summary, mine=mine),
+        "origins": origins(summary, mine=mine),
         "notes": notes(summary, mine=mine),
     }

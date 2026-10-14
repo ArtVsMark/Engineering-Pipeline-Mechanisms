@@ -647,13 +647,15 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
     `origin_kind` — в фактах, не на значке. Выбор и обе зоны — в одной
     рисовалке: вспомогательную функцию гейт инвентаря не судил бы (122).
 
-    «ШАГ В ХОДУ» — ПО ВЫЗОВУ НАШЕГО ШАГА ПО ТЕГУ (#1199): отдаваемый шаг,
-    который зовёт хотя бы один проект семьи. Объявленное потребителем
-    происхождение гейта (каталог, ArtVsMark/Engineering-Incidents-Playbook#701)
-    в счёт не входит, пока его нет; разрез `family.adopted` остаётся в фактах.
+    СЕМЬЯ — ПО ОТЧЁТУ О ПРОИСХОЖДЕНИИ (решение владельца 12.10.2026, #1325):
+    `семья │ проектов 3/5 · 60% │ взяты 4 │ переделаны 18`. Единица —
+    пара «проект × механизм» нашего происхождения (`family.origins`): вызов по
+    тегу видит только взятое без переделки, а главное — механизм, взятый и
+    переделанный под себя. Вызов шагов по тегу (раздел фактов `uptake`, #1199)
+    остаётся в фактах и таблице «кем», но на значок не идёт.
 
-    НЕЗНАНИЕ — СЕРОЕ «НЕ ПРОЧИТАНО», А НЕ НОЛЬ (045): непрочитанный обход
-    клонов (непрочитанные клоны названы числом рядом), непрочитанный ответ
+    НЕЗНАНИЕ — СЕРОЕ «НЕ ПРОЧИТАНО», А НЕ НОЛЬ (045): непрочитанная сводка
+    семьи и пары без `origin_kind` (названы «не объявлено»), непрочитанный ответ
     каталогу (`{"read": false, "why": …}` — у потребителя его может не быть) и
     факты без разбивки по происхождению (до #1282 у `rules` не было
     `machine`), а также не названный общему шагу поставщик. Цвет числа — по
@@ -723,34 +725,47 @@ def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
                 ),
             ],
         ]
-    taken = (facts.get("family") or {}).get("uptake") or {}
-    if not taken.get("read"):
+    kin = facts.get("family") or {}
+    said_origins = kin.get("origins") if kin.get("read") else None
+    if not isinstance(said_origins, dict):
+        why = (
+            "сводка семьи не прочитана"
+            if not kin.get("read")
+            else "в фактах нет отчёта о происхождении"
+        )
         family_zone = [
             ("семья", LABEL_COLOR, ""),
-            (f"проектов {UNREAD_PART}", GREY, "обход клонов семьи не прочитан"),
-            (f"шагов {UNREAD_PART}", GREY, "обход клонов семьи не прочитан"),
+            (f"проектов {UNREAD_PART}", GREY, why),
+            (f"взяты {UNREAD_PART}", GREY, why),
+            (f"переделаны {UNREAD_PART}", GREY, why),
         ]
         return [rules, family_zone]
-    projects, steps = taken["projects"], taken["steps"]
+    projects = said_origins["projects"]
     took, of = int(projects["took"]), int(projects["of"])
-    unread = f" ({projects['unread']} {UNREAD_PART})" if projects.get("unread") else ""
-    # ШАГОВ, А НЕ ГЕЙТОВ (взгляд на #1265): счёт идёт по всем отдаваемым шагам
-    # (`onboard.steps`), среди которых `agent-pr`, `automerge`, `review` — не
-    # гейты. Подпись называет то, что посчитано.
-    used, offered = int(steps["taken"]), int(steps["of"])
+    taken, adapted = int(said_origins["taken"]), int(said_origins["adapted"])
+    # Ноль взятых — исход, а не незнание: жёлтым, а серым — только непрочитанное.
     family_zone = [
         ("семья", LABEL_COLOR, ""),
         (
-            f"проектов {counted(took, of, known=not unread)}{unread}",
-            share_color(took, of, known=not unread),
-            "проектов семьи зовут наш шаг по тегу",
+            f"проектов {counted(took, of)}",
+            share_color(took, of),
+            "проектов семьи объявили механизм нашего происхождения",
         ),
         (
-            f"шагов {counted(used, offered)}",
-            share_color(used, offered),
-            "наших отдаваемых шагов в ходу у семьи",
+            f"взяты {taken}",
+            GREEN if taken else YELLOW,
+            "пар «проект × механизм» — наш механизм вызван или скопирован",
+        ),
+        (
+            f"переделаны {adapted}",
+            GREEN if adapted else YELLOW,
+            "пар «проект × механизм» — наш механизм переделан под себя",
         ),
     ]
+    # Как взят — не сказано: не «взяты» и не «переделаны», а названо (045).
+    undeclared = int(said_origins.get("undeclared") or 0)
+    if undeclared:
+        family_zone = [*family_zone, (f"не объявлено {undeclared}", GREY, "пар без origin_kind")]
     return [rules, family_zone]
 
 
@@ -1040,6 +1055,13 @@ def say_family(kin: dict[str, Any]) -> None:
         print(
             f"правил семьи на гейте нашего происхождения: {adopted['ours']} "
             f"из {adopted['of']} машинных"
+        )
+        taken = kin["origins"]
+        print(
+            f"механизмов нашего происхождения у семьи: пар «проект × механизм» "
+            f"{taken['pairs']} (взяты {taken['taken']}, переделаны {taken['adapted']}, "
+            f"не объявлено {taken['undeclared']}), проектов {taken['projects']['took']} "
+            f"из {taken['projects']['of']}"
         )
         # Заметки соседей — рядом с числами, а не только в файле (взгляд на
         # #1340): ноль различается на «раздела нет» и «не той формы».

@@ -2,7 +2,7 @@
 
 > **Читатель:** посетитель — что это такое и стоит ли брать.
 
-[![Состояние: CI, Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![значок проекта: правил каталога держится машиной, проектов семьи на нашем механизме, наших шагов в ходу — каждое числом из скольких](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/project.svg)](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/1212)
+[![Состояние: CI, Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![значок проекта: правил каталога держится машиной и проектов семьи на нашем механизме — числом из скольких; наших механизмов у семьи взято и переделано](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/project.svg)](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/1212)
 
 **Механизмы конвейера: скелет один для всех проектов, наполнение своё.**
 Открытие изменения, гейты, очередь и слияние, здоровье общей ветки, выпуск —
@@ -73,9 +73,11 @@
 ([160](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/160-derived-artifacts-live-off-the-branch.md)).
 Первый значок общий для семьи: версии Python и ОС окрашены исходом своих
 прогонов, серое — не проверялось. Второй — значок проекта: сколько правил
-каталога держится машиной, сколько проектов семьи зовут наши шаги по тегу и
-сколько наших отдаваемых шагов у семьи в ходу, каждое числом из скольких;
-непрочитанное так и названо, а не ноль. Кто именно взял — таблица
+каталога держится машиной и сколько проектов семьи объявили механизм нашего
+происхождения — числом из скольких, — а рядом сколько пар «проект × механизм»
+взяли наш механизм как есть и сколько переделали под себя (по отчёту каталога
+о происхождении); непрочитанное так и названо, а не ноль. Кто зовёт наши шаги
+по тегу — таблица
 [«кем»](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/who.md),
 её собирает тот же прогон из обхода клонов семьи (`family.uptake.by`): в дереве
 этих данных нет, и таблица — не копия, а единственное их место. Факты по тому
