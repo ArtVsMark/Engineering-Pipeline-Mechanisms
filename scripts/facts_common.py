@@ -45,6 +45,10 @@ import version
 #: `1.10`. Мажор — контракта семьи, а не наш. 1.6 — `facts-v1.6.0` витрины
 #: (#1337): корень — только договор, своё — в `exchange.<тема>`.
 SCHEMA: Final = "1.6"
+#: Тег выпуска договора, чьей проверкой шаг фактов сверяет файл до публикации
+#: (`step-facts.yml`, «Шаг для CI издателя» витрины). Подъём договора — эта
+#: строка, `SCHEMA` и тег в шаге; что все три сходятся, держит тест.
+CONTRACT_TAG: Final = "facts-v1.6.0"
 SCHEMA_OF: Final = (
     "контракт фактов витрины семьи: "
     "https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md"
