@@ -1299,12 +1299,41 @@ def flows_named(where: str, flows: Iterable[str]) -> list[str]:
     `step-drift.yml`, и подстрока нашла бы вызывающий прогон в ответе, который
     его не называет (взгляд на #1331, `4a4971d`).
     """
+    at = flow_places(where, flows)
+    return sorted(at, key=at.__getitem__)
+
+
+def flow_places(where: str, flows: Iterable[str]) -> dict[str, int]:
+    """Место первого упоминания каждого названного прогона — именем файла."""
     at: dict[str, int] = {}
     for flow in flows:
         found = re.search(rf"(?<![\w.-]){re.escape(flow)}(?![\w-])", where)
         if found:
             at[flow] = found.start()
-    return sorted(at, key=at.__getitem__)
+    return at
+
+
+#: Путь к НАШЕМУ механизму в прозе ответа: скрипт, пакет или прогон.
+OWN_MECHANISM_RE: Final = re.compile(
+    r"(?<![\w.-])(?:scripts|packages|\.github/workflows)/[\w./-]+\.(?:py|yml)"
+)
+
+
+def own_before(where: str, place: int, root: Path = ROOT) -> list[str]:
+    """Наши механизмы, названные в `where` раньше места `place`.
+
+    Происхождение у `called` — исполнитель ПЕРВОЙ названной половины (`_origin`
+    ответа). Если раньше вызывающего прогона стоит наш скрипт, первую половину
+    держит он, и `called` её не описывает (взгляд на #1331, `bb65d4c`: голова
+    `scripts/squash_body.py`, а `ci.yml` — в доводе). Данные (`.rules/*.json`)
+    и чужой код (скрипт каталога, которого в дереве нет) механизмом здесь не
+    считаются: их держит тот, кого вызывают.
+    """
+    return [
+        found.group(0)
+        for found in OWN_MECHANISM_RE.finditer(where[:place])
+        if (root / found.group(0)).is_file()
+    ]
 
 
 def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
@@ -1334,7 +1363,8 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     wrong, named_only = [], set()
     for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
         where = str(answer.get("where") or "")
-        callers = flows_named(where, by_flow)
+        places = flow_places(where, by_flow)
+        callers = sorted(places, key=places.__getitem__)
         origin = str(answer.get("origin") or "")
         called = answer.get("origin_kind") == "called" and origin.startswith(CATALOGUE_ORIGIN)
         if called:
@@ -1342,6 +1372,11 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
             if not callers or named not in by_flow[callers[0]]:
                 first = callers[0] if callers else "ни один"
                 wrong.append(f"{number}: origin {named} не зовёт первый названный прогон ({first})")
+            elif ahead := own_before(where, places[callers[0]]):
+                wrong.append(
+                    f"{number}: раньше вызывающего прогона {callers[0]} назван свой механизм "
+                    f"{ahead[0]} — первую половину держит он, а не действие каталога"
+                )
         elif callers:
             named_only.add(number)
     unlisted = sorted(named_only - set(CALLER_NAMED_NOT_CALLED))
@@ -1361,6 +1396,19 @@ def test_a_flow_is_named_by_its_file_and_in_order() -> None:
         "scripts/x.py — довод; держит .github/workflows/rules-inbox.yml, а ci.yml — пример",
         flows,
     ) == ["rules-inbox.yml", "ci.yml"]
+
+
+def test_own_mechanism_ahead_of_the_caller_is_found(tmp_path: Path) -> None:
+    """Свой скрипт до вызывающего прогона — найден; данные и чужой код — нет (`bb65d4c`)."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "squash_body.py").write_text("", encoding="utf-8")
+    where = (
+        ".rules/bindings.json и scripts/onboard_consumer.py каталога; "
+        "scripts/squash_body.py — довод; .github/workflows/ci.yml — джоб"
+    )
+    place = flow_places(where, ["ci.yml"])["ci.yml"]
+    assert own_before(where, place, tmp_path) == ["scripts/squash_body.py"]
+    assert own_before(where, where.index("scripts/squash_body.py"), tmp_path) == []
 
 
 def test_catalogue_jobs_follow_a_reusable_flow(tmp_path: Path) -> None:
