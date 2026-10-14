@@ -125,6 +125,36 @@ def test_the_registry_skips_a_merged_machine_branch(head: object, machine: bool)
     assert unlooked.machine_branch(item, []) is False
 
 
+def test_the_registry_run_drops_machine_branches_before_the_scan(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Заход реестра отсеивает машинную ветку ДО обхода и называет пропуск числом.
+
+    Проверка одной `machine_branch` не держит подключение: сними отсев в `main`,
+    и машинное слитое снова встанет в реестр при зелёном наборе (взгляд на #1353).
+    """
+    from tests.conftest import load_script
+
+    unlooked = load_script("unlooked.py")
+    merged = [
+        {"number": 10, "head": {"ref": "chore/metrics"}, "merged_at": "2026-10-14"},
+        {"number": 11, "head": {"ref": "agent/fix"}, "merged_at": "2026-10-14"},
+    ]
+    scanned: list[list[int]] = []
+
+    def scan(items: Any, known: Any, watermark: int, look: Any) -> tuple[dict[int, Any], int]:
+        scanned.append([item["number"] for item in items])
+        return {}, watermark
+
+    monkeypatch.setattr(unlooked.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(unlooked.findings, "live_issue", lambda *_: (89, unlooked.MARKER))
+    monkeypatch.setattr(unlooked, "merged_changes", lambda *_: merged)
+    monkeypatch.setattr(unlooked, "scan", scan)
+    unlooked.main(["--repo", "o/r", "--skip-branches", "chore/ dependabot/"])
+    assert scanned == [[11]], scanned
+    assert "в реестр не встали: 1 (#10)" in capsys.readouterr().out
+
+
 def test_both_steps_take_the_same_input() -> None:
     """Вход один по имени и форме у взгляда и у реестра: приставки передаются одной строкой."""
     automerge: dict[Any, Any] = yaml.safe_load(AUTOMERGE.read_text(encoding="utf-8"))
