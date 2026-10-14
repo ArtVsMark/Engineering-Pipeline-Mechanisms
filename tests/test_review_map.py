@@ -213,7 +213,7 @@ def test_a_map_that_assembled_is_clean(
     monkeypatch.setattr(
         module, "split", lambda said: (["001"], ["002"], {"not-applicable": ["003"]})
     )
-    monkeypatch.setattr(module, "titles", dict)
+    monkeypatch.setattr(module, "export_meta", lambda: ({}, {}))
     monkeypatch.setattr(module, "touches_the_answer", lambda base, head="HEAD": False)
     monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
     assert module.main(["--out", str(where)]) == module.EXIT_OK
@@ -236,7 +236,7 @@ def test_the_tally_line_has_no_dangling_comma_when_nothing_is_denied(
     взгляд на #416.
     """
     monkeypatch.setattr(module, "split", lambda answer: (["001"], ["002"], {}))
-    monkeypatch.setattr(module, "titles", lambda: {})
+    monkeypatch.setattr(module, "export_meta", lambda: ({}, {}))
     monkeypatch.setattr(module, "touches_the_answer", lambda base, head="HEAD": False)
     monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
     monkeypatch.setattr(module, "from_base", lambda base: {"rules": {}})
@@ -304,7 +304,7 @@ def test_the_head_argument_reaches_the_comparison(
     """`--head` из командной строки доходит до сравнения, а не теряется в разборе."""
     got: list[str] = []
     monkeypatch.setattr(module, "split", lambda answer: (["001"], [], {}))
-    monkeypatch.setattr(module, "titles", dict)
+    monkeypatch.setattr(module, "export_meta", lambda: ({}, {}))
     monkeypatch.setattr(module, "render", lambda *a, **k: "карта")
     monkeypatch.setattr(module, "from_base", lambda base: {"rules": {}})
     monkeypatch.setattr(module, "roles_section", lambda *a, **k: "")
