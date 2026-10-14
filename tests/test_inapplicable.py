@@ -10,6 +10,7 @@
 """
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -133,6 +134,91 @@ def test_every_allowed_line_is_still_found(rule: str) -> None:
         line for one in checks(rule) for line in set(one["allowed"]) - set(hits(one["argv"], ROOT))
     )
     assert not gone, f"{rule}: в allowed строки, которых вывод больше не даёт: {gone}"
+
+
+def planted_paths(glob: str) -> list[str]:
+    """Пути, которые маска пробы каталога находит, — не один образец, а края маски.
+
+    `**/` раскрывается и в ноль каталогов, и в один: проба каталога
+    (`Path.glob`) находит обе глубины, и сверка «не шире» обязана видеть обе
+    (взгляд на #1336). `*` — слово, `?` — буква, `[…]` — первый знак класса.
+    """
+    filled = re.sub(r"\[!?\^?([^\]])[^\]]*\]", r"\1", glob).replace("?", "p")
+    return sorted({filled.replace("**/", depth).replace("*", "probe") for depth in ("", "probe/")})
+
+
+#: Пробы, которые обещают ПОЛНОТУ относительно образца предиката: каждое слово
+#: чередования в образце стоит в пробе во всех названных написаниях. Проба
+#: каталога регистра не сворачивает и образца не знает, поэтому полнота — это
+#: перечень форм, и держит его тест, а не память (взгляд на #1336).
+PROBE_FORMS: Final[dict[str, tuple[str, ...]]] = {
+    "048": ("{w}", "{W}", "{WW}"),
+    "065": ('name: "{w}', "name: '{w}", "name: {w}"),
+}
+
+
+def alternatives(pattern: str) -> list[str]:
+    """Слова чередования образца: из скобок, если они есть, иначе весь образец."""
+    group = re.search(r"\(([^()]*)\)", pattern)
+    return (group.group(1) if group else pattern).split("|")
+
+
+@pytest.mark.parametrize("rule", sorted(PROBE_FORMS))
+def test_a_catalogue_probe_names_every_form_of_the_predicate(rule: str) -> None:
+    """Проба называет каждое слово образца предиката во всех обещанных написаниях (#1336).
+
+    Обратная сторона сверки «не шире»: без неё удалённое из пробы написание
+    (прописная форма слова, имя метки без кавычек) оставляло набор зелёным, и починка
+    откатывалась молча.
+    """
+    pattern = next(arg for arg in checks(rule)[0]["argv"] if "|" in arg)
+    contains = set(answers()[rule]["refuted_by"]["contains"])
+    missing = [
+        form.format(w=word, W=word.capitalize(), WW=word.upper())
+        for word in alternatives(pattern)
+        for form in PROBE_FORMS[rule]
+        if form.format(w=word, W=word.capitalize(), WW=word.upper()) not in contains
+    ]
+    assert not missing, f"{rule}: в пробе нет написаний {missing}"
+
+
+@pytest.mark.parametrize(
+    "rule",
+    sorted(r for r, one in answers().items() if isinstance(one.get("refuted_by"), dict)),
+)
+def test_a_catalogue_probe_is_no_wider_than_the_predicate(rule: str, tmp_path: Path) -> None:
+    """Что находит проба каталога `refuted_by`, находит и предикат отсюда (взгляд на #1332).
+
+    Две записи одной границы — проба в ответе и предикат здесь — без сверки
+    разошлись бы на первой правке одной из них (071, `c6b40dd`). Проба вправе
+    быть УЖЕ предиката: это названо в её `_refuted_by`. Шире — нет: тогда
+    действие каталога опровергло бы ответ тем, чего наш набор не видит. Каждая
+    маска и каждая строка пробы кладутся файлом в пустое git-дерево, и хоть
+    один предикат правила обязан его найти. Предикат командой `python3` читает
+    настоящее дерево, а не подложенный файл, и здесь не исполняется.
+    """
+    probe = answers()[rule]["refuted_by"]
+    runnable = [one for one in checks(rule) if one["argv"][:1] != ["python3"]]
+    assert runnable, f"у {rule} есть проба, а сверить её не с чем (075)"
+    missed: list[str] = []
+    for at, (path, text) in enumerate(
+        (path, text)
+        for glob in probe["globs"]
+        for path in planted_paths(glob)
+        for text in probe["contains"] or ["x"]
+    ):
+        where = tmp_path / str(at)
+        where.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=where, check=True)
+        planted = where / path
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(f"{text}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=where, check=True)
+        if not any(
+            line not in one["allowed"] for one in runnable for line in hits(one["argv"], where)
+        ):
+            missed.append(f"{path} + «{text}»")
+    assert not missed, f"{rule}: проба находит, а предикат нет — {missed}"
 
 
 def test_a_planted_condition_turns_the_gate_red(tmp_path: Path) -> None:
