@@ -61,6 +61,9 @@ TITLE: Final = "Дрейф: внешнее состояние сдвинулос
 EXIT_NOTHING: Final = 0
 EXIT_BROKEN: Final = 2
 EXIT_RECORDED: Final = 3
+#: Режим `--published`: сборки ветки языка у площадки ещё нет. Свой исход, а не
+#: «не отработал»: прогон предрелизной на нём зеленеет с предупреждением (#193).
+EXIT_ABSENT: Final = 4
 
 #: Выгрузка каталога и сводка потребителей. Оба — СНИМКИ: каталог собирает их
 #: своим прогоном, и читаются они по сети, а не из дерева. В этом весь предмет
@@ -693,6 +696,20 @@ def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
             stable.add(minor)
     ordered = sorted(stable, key=order)
     return ordered, sorted(seen - stable, key=order)
+
+
+def published(manifest: list[Any], minor: str) -> bool:
+    """Есть ли у площадки хоть одна сборка ветки языка — стабильная или пробная.
+
+    ВОПРОС ПРЕДРЕЛИЗНОГО ПРОГОНА, А НЕ ДРЕЙФА (решение владельца 14.10.2026,
+    #193). `python-next` наведён на следующую ветку раньше, чем у площадки
+    появляется её первая сборка: так было с 3.16 после выхода 3.15. Без этого
+    вопроса `setup-python` отказывал, прогон краснел, а дежурный клал красное
+    долгом в план — и долг загораживал работу до выхода альфы. Ответ берётся
+    тем же разбором манифеста, что у дрейфа (`minors`), а не вторым (090).
+    """
+    stable, pre = minors(manifest)
+    return minor in stable or minor in pre
 
 
 def matrix_of(jobs: dict[str, Any], job: str, path: Path) -> list[str]:
@@ -1807,6 +1824,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--apply", action="store_true", help="записать, а не показать")
     parser.add_argument(
+        "--published",
+        metavar="ВЕТКА",
+        help="только спросить, есть ли у площадки сборка ветки языка: 0 — есть, 4 — нет",
+    )
+    parser.add_argument(
         "--save-merge-ways",
         type=Path,
         metavar="ФАЙЛ",
@@ -1819,6 +1841,18 @@ def main(argv: list[str] | None = None) -> int:
         help="настройки слияния, положенные заходом --save-merge-ways",
     )
     args = parser.parse_args(argv)
+
+    if args.published:
+        try:
+            present = published(manifest(PYTHON_MANIFEST), args.published)
+        except (NotRun, ghrest.TransportError) as exc:
+            print(f"шаг не отработал: манифест версий не прочитан: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        if not present:
+            print(f"сборки {args.published} у площадки ещё нет")
+            return EXIT_ABSENT
+        print(f"сборка {args.published} у площадки есть")
+        return EXIT_NOTHING
 
     if args.save_merge_ways:
         if not args.repo:
