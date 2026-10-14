@@ -963,7 +963,28 @@ def extra_written(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def drawn_from(path: Path, out_dir: str) -> int:
+def rehydrated(
+    facts: dict[str, Any], root: Path, supplier: str = "", *, ours_too: bool = True
+) -> dict[str, Any]:
+    """Факты для рисования: темы `exchange` — в корень, неопубликованное — из дерева.
+
+    ОПУБЛИКОВАННЫЕ ФАКТЫ — ФОРМА ДОГОВОРА ФАКТОВ 1.6 (#1337): `rules`, `manifest` и
+    `contract` в них не лежат, у каждого канон в другом месте
+    (`facts_common.NOT_PUBLISHED`, `SUPPLIER_NOT_PUBLISHED`). Рисующему они нужны, и берутся тем же
+    кодом, что считал их до публикации, — из дерева, а не второй записью.
+    `ours_too` — только у нашей публикации: у потребителя манифеста и номера
+    контракта механизмов нет, ему нужен лишь ответ каталогу для картинки.
+    """
+    said = common.lifted(facts)
+    if "rules" not in said:
+        said["rules"] = common.rules_said(root, supplier)
+    if ours_too:
+        said.setdefault("manifest", manifest_facts(root))
+        said.setdefault("contract", contract_version(root / VERSION_FILE))
+    return said
+
+
+def drawn_from(path: Path, out_dir: str, root: str = ".", supplier: str = "") -> int:
     """Режим `--from-facts`: значки по опубликованному общим шагом `facts.json`.
 
     Значки рисуются по ТОМУ файлу, который читает витрина, а не по второй
@@ -979,6 +1000,11 @@ def drawn_from(path: Path, out_dir: str) -> int:
         print(f"значки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if clashed():
+        return EXIT_BROKEN
+    try:
+        facts = rehydrated(facts, Path(root), supplier)
+    except NotRun as exc:
+        print(f"значки не нарисованы: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     out = Path(out_dir) / PUBLISHED_DIR
     out.mkdir(parents=True, exist_ok=True)
@@ -1003,7 +1029,7 @@ def picture_input_wrong(facts: object) -> str | None:
     """
     if not isinstance(facts, dict):
         return "факты не объект"
-    for section in ("rules", "family"):
+    for section in ("rules", "family", "exchange"):
         if section in facts and not isinstance(facts[section], dict):
             return f"раздел {section} не объект"
     rules = facts.get("rules") or {}
@@ -1013,7 +1039,7 @@ def picture_input_wrong(facts: object) -> str | None:
     return None
 
 
-def pictures_drawn(path: Path, out_dir: str) -> int:
+def pictures_drawn(path: Path, out_dir: str, root: str = ".", supplier: str = "") -> int:
     """Режим `--pictures-out`: только картинки `PICTURES` по готовым фактам — плоско в каталог.
 
     ДЛЯ ОБЩЕГО ШАГА ФАКТОВ, А НЕ ДЛЯ НАШЕЙ ПУБЛИКАЦИИ (#1282, решение
@@ -1028,6 +1054,13 @@ def pictures_drawn(path: Path, out_dir: str) -> int:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"картинки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    wrong = picture_input_wrong(facts)
+    if wrong:
+        print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
+        return EXIT_BROKEN
+    facts = rehydrated(facts, Path(root), supplier, ours_too=False)
+    # Второй взгляд — ПОСЛЕ подъёма тем (взгляд на #1345): `exchange.epm.family`
+    # не объектом проходил первый и падал бы трейсбеком при рисовании.
     wrong = picture_input_wrong(facts)
     if wrong:
         print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
@@ -1117,6 +1150,11 @@ def main(argv: list[str] | None = None) -> int:
         help="убрать из каталога публикации всё, чего ветка badges держать не вправе",
     )
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
+    parser.add_argument(
+        "--supplier",
+        default="",
+        help="поставщик кода конвейера: владелец/репо — для «свои/взяты» при рисовании",
+    )
     parser.add_argument("--family", default="", help="сводка каталога export/where.json")
     parser.add_argument("--uptake", default="", help="числа обхода клонов: family_uptake.py --out")
     parser.add_argument("--coverage", default="", help="отчёт счётчика покрытия, coverage.json")
@@ -1143,9 +1181,9 @@ def main(argv: list[str] | None = None) -> int:
         print("--pictures-out работает только вместе с --from-facts", file=sys.stderr)
         return EXIT_BROKEN
     if args.from_facts and args.pictures_out:
-        return pictures_drawn(Path(args.from_facts), args.pictures_out)
+        return pictures_drawn(Path(args.from_facts), args.pictures_out, args.root, args.supplier)
     if args.from_facts:
-        return drawn_from(Path(args.from_facts), args.out_dir)
+        return drawn_from(Path(args.from_facts), args.out_dir, args.root, args.supplier)
     if args.extra_out:
         return extra_written(args)
     if not args.out_dir:
@@ -1198,7 +1236,10 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
     out = Path(args.out_dir) / PUBLISHED_DIR
     out.mkdir(parents=True, exist_ok=True)
-    (out / FACTS).write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    (out / FACTS).write_text(
+        json.dumps(common.published(facts, supplier=True), ensure_ascii=False, indent=2) + "\n",
+        "utf-8",
+    )
     draw_badges(facts, out)
 
     rules = facts["rules"]

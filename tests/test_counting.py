@@ -188,7 +188,9 @@ def test_every_badge_is_published_as_a_shields_endpoint(tmp_path: Path) -> None:
     )
     assert code == 0
     out = tmp_path / facts.PUBLISHED_DIR
-    said = json.loads((out / facts.FACTS).read_text(encoding="utf-8"))
+    # Опубликованные факты — форма договора фактов 1.6: темы `exchange` читатель
+    # поднимает в корень тем же `lifted`, что и рисующий (#1337).
+    said = facts.common.lifted(json.loads((out / facts.FACTS).read_text(encoding="utf-8")))
     for name, draw in facts.BADGES.items():
         shown = json.loads((out / name).read_text(encoding="utf-8"))
         drawn = draw(said)
