@@ -66,13 +66,7 @@ mypy_path = "packages/transport"
 # `yaml` три ошибки, без `pytest` шесть, без `_pytest.*` две, а без голого
 # `_pytest` — чисто, потому что сам `_pytest` дерево не импортирует нигде.
 # Запись убрана, соответствие держит `tests/test_type_leniency.py` (139).
-# `jsonschema` — тот же случай (#1001): сверку фактов со схемой витрины зовёт
-# только публикация, а шаг `типы` общий и отдаётся наружу — заглушки в нём
-# ставились бы каждому потребителю ради одного нашего механизма.
-# `referencing.exceptions` — его зависимость, которую сверка ловит по имени
-# (неразрешимая `$ref` в схеме витрины, взгляд на #1112): на шаге `типы` её
-# нет по той же причине.
-module = ["yaml", "pytest", "_pytest.*", "jsonschema", "referencing.exceptions"]
+module = ["yaml", "pytest", "_pytest.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

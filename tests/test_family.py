@@ -215,69 +215,72 @@ def test_the_project_badge_counts_machines_not_answers() -> None:
 RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}
 
 
+ORIGINS_PLANTED: Final = {
+    "pairs": 22,
+    "taken": 4,
+    "adapted": 18,
+    "undeclared": 0,
+    "projects": {"took": 3, "of": 5},
+}
+UNREAD_FAMILY: Final = [
+    "семья",
+    "проектов не прочитано",
+    "взяты не прочитано",
+    "переделаны не прочитано",
+]
+
+
 @pytest.mark.parametrize(
     ("family_said", "texts"),
     [
         (
-            {
-                "read": True,
-                "uptake": {
-                    "read": True,
-                    "projects": {"took": 1, "of": 5, "unread": 0, "unread_repos": []},
-                    "steps": {"taken": 3, "of": 20, "names": []},
-                },
-            },
+            {"read": True, "origins": ORIGINS_PLANTED, "uptake": {"read": False}},
             [
                 ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов 1/5 · 20%", "шагов 3/20 · 15%"],
+                ["семья", "проектов 3/5 · 60%", "взяты 4", "переделаны 18"],
             ],
         ),
         (
-            {
-                "read": False,
-                "uptake": {
-                    "read": True,
-                    "projects": {"took": 0, "of": 5, "unread": 2, "unread_repos": ["a", "b"]},
-                    "steps": {"taken": 0, "of": 20, "names": []},
-                },
-            },
+            {"read": True, "origins": {**ORIGINS_PLANTED, "undeclared": 2}},
             [
                 ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов 0/5 · — (2 не прочитано)", "шагов 0/20 · 0%"],
+                ["семья", "проектов 3/5 · 60%", "взяты 4", "переделаны 18", "не объявлено 2"],
             ],
         ),
         (
-            {"read": True, "uptake": {"read": False}},
-            [
-                ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов не прочитано", "шагов не прочитано"],
-            ],
+            {"read": False, "why": "сеть", "uptake": {"read": True}},
+            [["правила", "машиной 66/195 · 34%"], UNREAD_FAMILY],
+        ),
+        (
+            {"read": True},
+            [["правила", "машиной 66/195 · 34%"], UNREAD_FAMILY],
         ),
         (
             {},
-            [
-                ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов не прочитано", "шагов не прочитано"],
-            ],
+            [["правила", "машиной 66/195 · 34%"], UNREAD_FAMILY],
         ),
     ],
-    ids=["прочитано", "клоны-не-прочитаны", "обход-не-прочитан", "семьи-нет"],
+    ids=["прочитано", "не-объявлено", "сводка-не-прочитана", "отчёта-нет", "семьи-нет"],
 )
-def test_the_project_badge_carries_three_numbers(
+def test_the_project_badge_counts_the_family_by_origin(
     family_said: dict[str, Any], texts: list[list[str]]
 ) -> None:
-    """Один значок, три числа с числителем и знаменателем (#1213, решение 08.10.2026).
+    """Зона «семья» — по отчёту о происхождении, а не по вызову по тегу (#1325).
 
-    Непрочитанный обход и непрочитанные клоны — «не прочитано» на своём месте,
-    а не ноль (045). Разрез «взяли гейт» по объявленному происхождению в значок
-    не входит: «шаг в ходу» — по вызову нашего шага, пока каталог не дал
-    происхождения (#1212).
+    Обход клонов прочитан или нет — на значок не влияет: вызов шагов по тегу
+    остаётся в фактах. Непрочитанная сводка и пары без `origin_kind` —
+    «не прочитано» и «не объявлено» серым, а не ноль (045).
     """
     zones = facts.project_zones({"rules": RULES_PLANTED, "family": family_said})
     assert [[text for text, _, _ in zone] for zone in zones] == texts
     # Серым — всякая часть, где доля неизвестна: числа нет или часть
     # знаменателя не прочитана (взгляд на #1259).
-    unknown = [color for zone in zones for text, color, _ in zone if "не прочитано" in text]
+    unknown = [
+        color
+        for zone in zones
+        for text, color, _ in zone
+        if "не прочитано" in text or "не объявлено" in text
+    ]
     assert all(color == facts.GREY for color in unknown), "незнание окрашено не серым"
 
 
@@ -522,17 +525,19 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
 def test_neighbours_notes_are_said_next_to_the_numbers(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Число заметок соседей печатается рядом с `adopted`, а не только в файле (#1340)."""
+    """Заметки соседей и пары нашего происхождения печатаются рядом с `adopted` (#1340, #1325)."""
     kin = {
         "read": True,
         "schema_agrees": True,
         "adopted": {"ours": 1, "of": 3},
+        "origins": ORIGINS_PLANTED,
         "notes": {"count": 2, "read": 4, "unread": 1, "wrong_shape": 0, "by": []},
     }
     facts.say_family(kin)
     said = capsys.readouterr().out
     assert "заметок и замеров соседей по правилам: 2" in said
     assert "нет у 1" in said
+    assert "пар «проект × механизм» 22 (взяты 4, переделаны 18, не объявлено 0)" in said
 
 
 def test_a_summary_without_notes_reads_as_none() -> None:
@@ -655,6 +660,60 @@ def test_adopted_counts_only_machine_answers_of_the_family() -> None:
     said = family.adopted(document)
     assert (said["ours"], said["of"]) == (1, 1)
     assert said["by"][0]["kind"] == "adapted"
+
+
+def test_origins_count_pairs_of_project_and_mechanism() -> None:
+    """Пара «проект × механизм» — одна, сколько бы правил её ни держали (#1325).
+
+    Один механизм у двух проектов — два взятия; `own` и чужой `origin` не
+    считаются; версия в адресе пару не дробит; переделка у одного правила
+    делает переделанной всю пару.
+    """
+    lint = f"{family.OURS_ORIGIN}scripts/lint.py"
+    hook = f"{family.OURS_ORIGIN}.claude/hooks/guard.py"
+    document = summary(
+        declared(
+            "o/a",
+            **{
+                "001": ("gate", f"{lint}@v1.4.0", "called"),
+                "002": ("gate", f"{lint}@v1.5.0", "adapted"),
+                "003": ("document", "", "own"),
+                "004": ("gate", "o/other:scripts/lint.py@v1", "copied"),
+            },
+        ),
+        declared("o/b", **{"005": ("pipeline", f"{lint}@v1.5.0", "called")}),
+        declared("o/c", **{"006": ("gate", f"{hook}@v1", "")}),
+        declared(
+            "o/d", **{"007": ("gate", "", "own"), "009": ("document", f"{lint}@v1", "called")}
+        ),
+        declared(
+            "o/e",
+            **{"010": ("pipeline", f"{hook}@v1", "own"), "011": ("gate", f"{lint}@v1", "лишнее")},
+        ),
+        declared(family.family_uptake.OURS, **{"008": ("gate", f"{lint}@v1", "called")}),
+    )
+    said = family.origins(document)
+    # o/e: `own` и незнакомое слово при нашем адресе — «не объявлено», а не «взяты»;
+    # o/d: документ с нашим адресом — не механизм, проект не засчитан (взгляд на #1346).
+    assert (said["pairs"], said["taken"], said["adapted"], said["undeclared"]) == (5, 1, 1, 3)
+    assert said["projects"] == {"took": 4, "of": 5}
+    assert said["by"][0] == {
+        "repo": "o/a",
+        "mechanism": lint,
+        "kind": "adapted",
+        "rules": ["001", "002"],
+    }
+    assert family.picture(document)["origins"] == said
+
+
+@pytest.mark.parametrize(
+    ("origin", "mechanism"),
+    [("o/r:scripts/x.py@v1.4.0", "o/r:scripts/x.py"), ("o/r:scripts/x.py", "o/r:scripts/x.py")],
+    ids=["с-версией", "без-версии"],
+)
+def test_a_mechanism_is_named_without_its_version(origin: str, mechanism: str) -> None:
+    """Версия в адресе пару не дробит: механизм на двух тегах — один механизм (#1325)."""
+    assert family.unversioned(origin) == mechanism
 
 
 def test_uptake_facts_name_an_unread_sweep(tmp_path: Path) -> None:
