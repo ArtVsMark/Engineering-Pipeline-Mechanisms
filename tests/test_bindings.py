@@ -1313,27 +1313,23 @@ def flow_places(where: str, flows: Iterable[str]) -> dict[str, int]:
     return at
 
 
-#: Путь к НАШЕМУ механизму в прозе ответа: скрипт, пакет или прогон.
-OWN_MECHANISM_RE: Final = re.compile(
-    r"(?<![\w.-])(?:scripts|packages|\.github/workflows)/[\w./-]+\.(?:py|yml)"
-)
-
-
-def own_before(where: str, place: int, root: Path = ROOT) -> list[str]:
-    """Наши механизмы, названные в `where` раньше места `place`.
-
-    Происхождение у `called` — исполнитель ПЕРВОЙ названной половины (`_origin`
-    ответа). Если раньше вызывающего прогона стоит наш скрипт, первую половину
-    держит он, и `called` её не описывает (взгляд на #1331, `bb65d4c`: голова
-    `scripts/squash_body.py`, а `ci.yml` — в доводе). Данные (`.rules/*.json`)
-    и чужой код (скрипт каталога, которого в дереве нет) механизмом здесь не
-    считаются: их держит тот, кого вызывают.
-    """
-    return [
-        found.group(0)
-        for found in OWN_MECHANISM_RE.finditer(where[:place])
-        if (root / found.group(0)).is_file()
-    ]
+#: Ответы `called` с действием каталога, чья ГОЛОВА прочитана человеком:
+#: первую половину требования держит вызванное действие, а не наш скрипт рядом.
+#: Перечень, а не разбор прозы образцом пути (решение владельца 14.10.2026,
+#: #1237): образец не видел ни `tests/`, ни имени без каталога (взгляд на
+#: #1335), и каждый новый заход по одному месту чинил его пунктуацию (210).
+#: Новый `called` без строки здесь краснеет, пока голову не прочитают; строка
+#: без такого ответа — тоже. Замер 14.10.2026: восемь ответов.
+CALLED_HEAD_READ: Final[dict[str, str]] = {
+    "090": "ci.yml, джоб attribution — гейт атрибуции действием каталога",
+    "123": "ci.yml, джоб attribution — атрибуция на итоговой истории",
+    "129": "ci.yml, джоб answer — форма ответа и пробы действием каталога",
+    "130": "rules-inbox.yml — новое правило приходит задачей действием каталога",
+    "135": "attribution-history.yml — личность записи действием каталога",
+    "162": "rules-inbox.yml — ночные входящие действием каталога",
+    "178": "rules-inbox.yml — числа долга приходят с действием каталога",
+    "190": "данные ответа собраны кодом каталога; rules-inbox.yml зовёт его действие",
+}
 
 
 def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
@@ -1353,6 +1349,11 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     origin не оправдывает — этот случай ловила прежняя проба головы (#1281,
     взгляд на #1331, `bb65d4c`). Порядок — данные, а не пунктуация: ищется
     место имени файла, а не « — ».
+
+    ЧТО ДЕРЖИТ ГОЛОВУ, РЕШАЕТ ЧТЕНИЕ, А НЕ ОБРАЗЕЦ. Наш механизм может стоять
+    раньше прогона под любым именем — `tests/`, без каталога, словами. Поэтому
+    каждый `called` стоит в `CALLED_HEAD_READ`, и новый краснеет до чтения
+    (взгляд на #1335).
     """
     folder = ROOT / ".github" / "workflows"
     jobs = catalogue_jobs(folder)
@@ -1360,7 +1361,7 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     by_flow: dict[str, set[str]] = {}
     for (flow_name, _), acts in jobs.items():
         by_flow.setdefault(flow_name, set()).update(acts)
-    wrong, named_only = [], set()
+    wrong, named_only, read = [], set(), set()
     for number, answer in json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"].items():
         where = str(answer.get("where") or "")
         places = flow_places(where, by_flow)
@@ -1369,14 +1370,10 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
         called = answer.get("origin_kind") == "called" and origin.startswith(CATALOGUE_ORIGIN)
         if called:
             named = origin.removeprefix(CATALOGUE_ORIGIN).rpartition("@")[0]
+            read.add(number)
             if not callers or named not in by_flow[callers[0]]:
                 first = callers[0] if callers else "ни один"
                 wrong.append(f"{number}: origin {named} не зовёт первый названный прогон ({first})")
-            elif ahead := own_before(where, places[callers[0]]):
-                wrong.append(
-                    f"{number}: раньше вызывающего прогона {callers[0]} назван свой механизм "
-                    f"{ahead[0]} — первую половину держит он, а не действие каталога"
-                )
         elif callers:
             named_only.add(number)
     unlisted = sorted(named_only - set(CALLER_NAMED_NOT_CALLED))
@@ -1385,6 +1382,14 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
         f"{n}: называет вызывающий прогон без called и без строки в перечне" for n in unlisted
     ]
     wrong += [f"{n}: строка перечня без предмета — снять" for n in stale]
+    wrong += [
+        f"{n}: called без прочитанной головы — прочитать и внести в CALLED_HEAD_READ"
+        for n in sorted(read - set(CALLED_HEAD_READ))
+    ]
+    wrong += [
+        f"{n}: строка CALLED_HEAD_READ без called-ответа — снять"
+        for n in sorted(set(CALLED_HEAD_READ) - read)
+    ]
     assert not wrong, "ответы на прогоны каталога:\n  " + "\n  ".join(wrong)
 
 
@@ -1396,19 +1401,6 @@ def test_a_flow_is_named_by_its_file_and_in_order() -> None:
         "scripts/x.py — довод; держит .github/workflows/rules-inbox.yml, а ci.yml — пример",
         flows,
     ) == ["rules-inbox.yml", "ci.yml"]
-
-
-def test_own_mechanism_ahead_of_the_caller_is_found(tmp_path: Path) -> None:
-    """Свой скрипт до вызывающего прогона — найден; данные и чужой код — нет (`bb65d4c`)."""
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "squash_body.py").write_text("", encoding="utf-8")
-    where = (
-        ".rules/bindings.json и scripts/onboard_consumer.py каталога; "
-        "scripts/squash_body.py — довод; .github/workflows/ci.yml — джоб"
-    )
-    place = flow_places(where, ["ci.yml"])["ci.yml"]
-    assert own_before(where, place, tmp_path) == ["scripts/squash_body.py"]
-    assert own_before(where, where.index("scripts/squash_body.py"), tmp_path) == []
 
 
 def test_catalogue_jobs_follow_a_reusable_flow(tmp_path: Path) -> None:
