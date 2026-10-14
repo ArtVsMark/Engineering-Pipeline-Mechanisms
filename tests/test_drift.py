@@ -820,7 +820,11 @@ def test_a_merged_proposal_points_at_the_existing_rule() -> None:
 
 @pytest.mark.parametrize(
     ("kind", "key"),
-    [("skill", "o/r:skill/a-thing-broke"), ("merge", "o/r:merge/a-thing-broke")],
+    [
+        ("skill", "o/r:skill/a-thing-broke"),
+        ("merge", "o/r:merge/a-thing-broke"),
+        ("evidence", "o/r:evidence/a-thing-broke"),
+    ],
 )
 def test_a_skill_or_merge_verdict_is_read_under_its_own_key(kind: str, key: str) -> None:
     """Вердикт по навыку и слиянию лежит под ключом с приставкой рода.
@@ -828,8 +832,8 @@ def test_a_skill_or_merge_verdict_is_read_under_its_own_key(kind: str, key: str)
     Прежде разбор искал его под ключом правила и молчал: каталог ответил, а
     источник печатал «вердикта нет» — ровно то, от чего защищался #140.
     """
-    mine = {"proposals": [{**MINE["proposals"][0], "kind": kind}]}
-    said = {"status": "rejected", "why": "иначе"}
+    mine = {"proposals": [{**MINE["proposals"][0], "kind": kind, "measured_at": "2026-10-14"}]}
+    said = {"status": "rejected", "why": "иначе", "measured_at": "2026-10-14"}
     assert module.proposals_answered(answer(said, key), mine, "o/r"), (
         "вердикт под своим ключом не прочитан"
     )
@@ -2346,11 +2350,20 @@ def test_evidence_answers_its_own_measurement() -> None:
     [
         ({"status": "admitted", "measured_at": "2026-10-14"}, "candidate"),
         ({"status": "neighbours", "measured_at": "2026-10-14"}, "у данных не бывает"),
+        ({"status": "admitted", "candidate": "h"}, "без «measured_at»"),
     ],
-    ids=["без-кандидата", "чужой-статус"],
+    ids=["без-кандидата", "чужой-статус", "без-даты-замера"],
 )
 def test_an_unreadable_evidence_verdict_is_named(said: dict[str, str], words: str) -> None:
     """Принятое без кандидата и статус правил у данных — «не прочитано», а не тишина (045)."""
     found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
     assert len(found) == 1 and found[0].source == "proposal-answer-unread"
     assert words in found[0].said
+
+
+def test_rejected_evidence_names_the_reason() -> None:
+    """Отвергнутые данные несут причину каталога и уходят из очереди (формат 1.4)."""
+    said = {"status": "rejected", "why": "замер не о кандидате", "measured_at": "2026-10-14"}
+    found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
+    assert len(found) == 1 and found[0].source == "proposal-rejected"
+    assert "замер не о кандидате" in found[0].said

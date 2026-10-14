@@ -1312,7 +1312,8 @@ CATALOGUE_SHOWCASE: Final = catalogue.SHOWCASE_URL
 #: придумано: разбор по памяти молчал четыре раза подряд (#140).
 VERDICTS: Final = "verdicts"
 #: Приставка ключа вердикта по роду предложения: правило — `владелец/репо:слаг`,
-#: навык — `…:skill/слаг`, слияние — `…:merge/слаг` (export/README.md каталога).
+#: навык — `…:skill/слаг`, слияние — `…:merge/слаг`, данные к гипотезе —
+#: `…:evidence/слаг` (export/README.md каталога).
 #: Разрешительный перечень (068): род, которого здесь нет, называется, а не
 #: ищется под ключом правила — там вердикта не будет никогда, и молчание
 #: выглядело бы ожиданием. Слияние и навык прежде искались под ключом правила.
@@ -1473,7 +1474,22 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
             # ОТВЕТ — НА ЗАМЕР, А НЕ НА СЛАГ (формат 1.4): вердикт называет свой
             # `measured_at`, и новый замер под старым слагом ждёт своего ответа,
             # а не считается отвеченным.
-            if str(verdict.get("measured_at") or "") != str(one.get("measured_at") or ""):
+            answered = verdict.get("measured_at")
+            if not answered:
+                # Ответ без даты замера — форма, которой у вердикта по данным нет:
+                # молча пропустить значило бы выдать неразобранное за ожидание
+                # (взгляд на #1360, 045).
+                found.append(
+                    Drift(
+                        "proposal-answer-unread",
+                        f"вердикт по данным «{slug}» без «measured_at» — "
+                        "на какой замер он отвечает, не сказано",
+                        "сверить разбор с export/README.md каталога: ответ по "
+                        "данным называет дату своего замера",
+                    )
+                )
+                continue
+            if str(answered) != str(one.get("measured_at") or ""):
                 continue
             if status not in EVIDENCE_STATUSES:
                 found.append(

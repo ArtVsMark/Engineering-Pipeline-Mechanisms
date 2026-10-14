@@ -574,8 +574,12 @@ def test_an_evidence_record_is_judged_by_its_own_form() -> None:
     assert proposal_problems({**good, "direction": "вверх"}) == [
         "e: direction — for, against или neutral"
     ]
-    assert proposal_problems({**good, "source": "замер в окне"})
-    assert proposal_problems({**good, "measured_at": "14.10"})
+    assert proposal_problems({**good, "source": "замер в окне"}) == [
+        "e: source — адрес https://… или владелец/репозиторий#номер"
+    ]
+    assert proposal_problems({**good, "measured_at": "14.10"}) == [
+        "e: measured_at — дата вида 2026-10-14"
+    ]
     assert proposal_problems({**good, "data": ""}) == ["e: поля «data» нет"]
     assert led_to(good) is None
 
