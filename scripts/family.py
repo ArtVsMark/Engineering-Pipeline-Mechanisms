@@ -112,10 +112,13 @@ KINDS: Final = kinds.MACHINE
 #:
 #: ПЕРЕЧИТАНО 09.10.2026 ПОД 1.7 (дрейф #193, #1274). Подъём прибавил раздел
 #: `notes` — заметки и замеры проектов по правилам — и у ответов 1.9 слово
-#: `origin_kind: own` без `origin`. Разрез `notes` не читает, а `adopted`
-#: считает по `origin`, ведущему к нам: `own` без адреса в него не входит, то
-#: есть «разработан здесь» у соседа нашим не засчитывается. Прочие читатели
-#: тех полей не трогают.
+#: `origin_kind: own` без `origin`. `adopted` считает по `origin`, ведущему к
+#: нам: `own` без адреса в него не входит, то есть «разработан здесь» у соседа
+#: нашим не засчитывается. Прочие читатели тех полей не трогают.
+#:
+#: С 14.10.2026 РАЗРЕЗ ЧИТАЕТ `notes` (решение владельца, #1274): «не ломается
+#: на разделе» для 1.7 мало — мысль соседа о правиле и его замер и есть то,
+#: ради чего раздел заведён. `notes` собирает их поимённо, без своих.
 READS_SCHEMA: Final = "1.7"
 #: Модули, читающие сводку семьи: через `family.load` или по адресу
 #: `catalogue.WHERE_URL`. Перечень, а не счёт в прозе — его держит тест.
@@ -173,6 +176,57 @@ def adopted(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
                 kind = str(answer.get("origin_kind") or "")
                 by.append({"repo": repo, "rule": str(number), "origin": origin, "kind": kind})
     return {"ours": len(by), "of": total, "by": by}
+
+
+def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
+    """Заметки и замеры соседей по правилам — раздел `notes` сводки 1.7, поимённо.
+
+    ФОРМА — ИЗ ИСТОЧНИКА, А НЕ ИЗ ПОДДЕЛКИ (взгляд на #1340). Раздел кладёт
+    сборщик каталога: `scripts/aggregate_bindings.py`, `entry["notes"] =
+    заметки(rules)` — словарь «правило → {note, metric}» у КАЖДОГО потребителя
+    (тег `v1.11.0`). Живой сводки с непустыми заметками нет ни у кого (замер
+    14.10.2026), поэтому ноль различается на три исхода, а не сливается в
+    один: `read` — у скольких потребителей раздел есть и той формы;
+    `unread` — у скольких его нет вовсе; `wrong_shape` — у скольких он не
+    словарь. Иная раскладка у каталога дала бы ненулевой `wrong_shape` или
+    `unread`, а не тихий ноль (045).
+
+    Свои не считаются: мерило о семье, а свои мысли живут в нашем ответе.
+    Запись не той формы внутри раздела пропускается, а не валит разрез:
+    раздел совещательный, и одна кривая строка соседа не должна гасить
+    числа всех остальных (039).
+    """
+    by: list[dict[str, Any]] = []
+    read = unread = wrong_shape = 0
+    for consumer in summary.get("consumers") or []:
+        repo = str(consumer.get("repo") or "")
+        if repo.casefold() == (mine or family_uptake.OURS).casefold():
+            continue
+        said = consumer.get("notes")
+        if "notes" not in consumer:
+            unread += 1
+            continue
+        if not isinstance(said, dict):
+            wrong_shape += 1
+            continue
+        read += 1
+        for number, entry in sorted(said.items()):
+            if not isinstance(entry, dict):
+                continue
+            row: dict[str, Any] = {"repo": repo, "rule": str(number)}
+            if isinstance(entry.get("note"), str) and entry["note"].strip():
+                row["note"] = entry["note"].strip()
+            if isinstance(entry.get("metric"), dict):
+                row["metric"] = entry["metric"]
+            if len(row) > 2:
+                by.append(row)
+    return {
+        "count": len(by),
+        "read": read,
+        "unread": unread,
+        "wrong_shape": wrong_shape,
+        "by": by,
+    }
 
 
 def held_by_machine(summary: dict[str, Any]) -> int:
@@ -236,4 +290,5 @@ def picture(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
         "consumers": len(summary.get("consumers") or []),
         "held_by_machine": held_by_machine(summary),
         "adopted": adopted(summary, mine=mine),
+        "notes": notes(summary, mine=mine),
     }
