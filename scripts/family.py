@@ -271,8 +271,16 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     Запись не той формы внутри раздела пропускается, а не валит разрез:
     раздел совещательный, и одна кривая строка соседа не должна гасить
     числа всех остальных (039).
+
+    НО ПРОПУСК СЧИТАЕТСЯ И НАЗЫВАЕТСЯ (взгляд на #1340, вторая находка по
+    месту — 210). Различать ноль только на уровне раздела мало: иная
+    раскладка записи дала бы тот же тихий ноль. Формы, которые вход
+    допускает, перечислены в `entry_wrong`, и каждая кривая запись идёт в
+    `wrong_entries` с причиной; годная половина записи (заметка при кривом
+    замере) при этом читается.
     """
     by: list[dict[str, Any]] = []
+    wrong_entries: list[dict[str, str]] = []
     read = unread = wrong_shape = 0
     for consumer in summary.get("consumers") or []:
         repo = str(consumer.get("repo") or "")
@@ -287,6 +295,9 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
             continue
         read += 1
         for number, entry in sorted(said.items()):
+            why = entry_wrong(entry)
+            if why:
+                wrong_entries.append({"repo": repo, "rule": str(number), "why": why})
             if not isinstance(entry, dict):
                 continue
             row: dict[str, Any] = {"repo": repo, "rule": str(number)}
@@ -301,8 +312,35 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
         "read": read,
         "unread": unread,
         "wrong_shape": wrong_shape,
+        "wrong_entries": len(wrong_entries),
+        "wrong_entries_by": wrong_entries,
         "by": by,
     }
+
+
+#: Ключи записи раздела `notes` — как их кладёт сборщик каталога
+#: (`aggregate_bindings.py`, тег `v1.11.0`): «правило → {note, metric}».
+NOTE_KEYS: Final = frozenset({"note", "metric"})
+
+
+def entry_wrong(entry: object) -> str:
+    """Почему запись `notes` не той формы; пусто — форма годится.
+
+    Перечень форм, которые вход допускает (210): не словарь; чужой ключ;
+    ни заметки, ни замера; `note` не строкой; `metric` не словарём.
+    """
+    if not isinstance(entry, dict):
+        return "запись не словарь"
+    alien = sorted(set(entry) - NOTE_KEYS)
+    if alien:
+        return f"чужие ключи: {', '.join(alien)}"
+    if not entry:
+        return "ни заметки, ни замера"
+    if "note" in entry and not isinstance(entry["note"], str):
+        return "note не строка"
+    if "metric" in entry and not isinstance(entry["metric"], dict):
+        return "metric не словарь"
+    return ""
 
 
 def held_by_machine(summary: dict[str, Any]) -> int:

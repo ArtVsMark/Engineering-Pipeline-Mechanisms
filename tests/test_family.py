@@ -497,7 +497,7 @@ def test_our_own_answers_are_not_counted_as_adopted() -> None:
 
 
 def test_neighbours_notes_are_read_and_ours_are_not() -> None:
-    """Раздел `notes` сводки 1.7 читается поимённо; свои и кривые записи — нет (#1274)."""
+    """Раздел `notes` читается поимённо; свои — нет, кривые записи — счётом (#1274, #1340)."""
     metric = {"what": "отмен за неделю", "value": 3, "measured": "2026-10-14"}
     neighbour = {
         **consumer("o/a"),
@@ -515,11 +515,39 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
         "read": 1,
         "unread": 0,
         "wrong_shape": 1,
+        "wrong_entries": 1,
+        "wrong_entries_by": [{"repo": "o/a", "rule": "003", "why": "запись не словарь"}],
         "by": [
             {"repo": "o/a", "rule": "001", "metric": metric},
             {"repo": "o/a", "rule": "002", "note": "держим ревью вместо гейта"},
         ],
     }
+
+
+@pytest.mark.parametrize(
+    ("entry", "why"),
+    [
+        ("не объект", "запись не словарь"),
+        ({"note": "x", "seen": 1}, "чужие ключи: seen"),
+        ({}, "ни заметки, ни замера"),
+        ({"note": 5}, "note не строка"),
+        ({"metric": "ноль"}, "metric не словарь"),
+        ({"note": "x", "metric": {"value": 1}}, ""),
+    ],
+    ids=["не-словарь", "чужой-ключ", "пустая", "заметка-не-строка", "замер-не-словарь", "годная"],
+)
+def test_every_form_of_a_notes_entry_is_named(entry: object, why: str) -> None:
+    """Каждая форма записи, которую вход допускает, названа, а не пропущена молча (210, #1340)."""
+    assert family.entry_wrong(entry) == why
+    said = family.notes(summary({**consumer("o/a"), "notes": {"001": entry}}))
+    assert said["wrong_entries"] == (1 if why else 0)
+
+
+def test_a_good_half_of_a_crooked_entry_is_still_read() -> None:
+    """Заметка при кривом замере читается, а запись всё равно названа кривой (#1340)."""
+    said = family.notes(summary({**consumer("o/a"), "notes": {"001": {"note": "x", "metric": 1}}}))
+    assert said["by"] == [{"repo": "o/a", "rule": "001", "note": "x"}]
+    assert said["wrong_entries_by"] == [{"repo": "o/a", "rule": "001", "why": "metric не словарь"}]
 
 
 def test_neighbours_notes_are_said_next_to_the_numbers(
@@ -531,19 +559,36 @@ def test_neighbours_notes_are_said_next_to_the_numbers(
         "schema_agrees": True,
         "adopted": {"ours": 1, "of": 3},
         "origins": ORIGINS_PLANTED,
-        "notes": {"count": 2, "read": 4, "unread": 1, "wrong_shape": 0, "by": []},
+        "notes": {
+            "count": 2,
+            "read": 4,
+            "unread": 1,
+            "wrong_shape": 2,
+            "wrong_entries": 3,
+            "by": [],
+        },
     }
     facts.say_family(kin)
     said = capsys.readouterr().out
     assert "заметок и замеров соседей по правилам: 2" in said
     assert "нет у 1" in said
     assert "пар «проект × механизм» 22 (взяты 4, переделаны 18, не объявлено 0)" in said
+    # Ненулевые исходы «не той формы» тоже сказаны, а не только ноль (взгляд на #1340).
+    assert "не той формы у 2" in said and "записей не той формы 3" in said
 
 
 def test_a_summary_without_notes_reads_as_none() -> None:
     """Нет раздела и пустой раздел — разные исходы, а не один ноль (взгляд на #1340)."""
     said = family.picture(summary(consumer("o/a"), {**consumer("o/b"), "notes": {}}))["notes"]
-    assert said == {"count": 0, "read": 1, "unread": 1, "wrong_shape": 0, "by": []}
+    assert said == {
+        "count": 0,
+        "read": 1,
+        "unread": 1,
+        "wrong_shape": 0,
+        "wrong_entries": 0,
+        "wrong_entries_by": [],
+        "by": [],
+    }
 
 
 def test_the_version_badge_names_incompleteness() -> None:
