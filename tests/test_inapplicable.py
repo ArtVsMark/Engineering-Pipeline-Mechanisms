@@ -135,6 +135,46 @@ def test_every_allowed_line_is_still_found(rule: str) -> None:
     assert not gone, f"{rule}: в allowed строки, которых вывод больше не даёт: {gone}"
 
 
+def planted_path(glob: str) -> str:
+    """Путь, который маска пробы каталога находит: `**/` и `*` заполнены словом."""
+    return glob.replace("**/", "probe/").replace("*", "probe")
+
+
+@pytest.mark.parametrize(
+    "rule",
+    sorted(r for r, one in answers().items() if isinstance(one.get("refuted_by"), dict)),
+)
+def test_a_catalogue_probe_is_no_wider_than_the_predicate(rule: str, tmp_path: Path) -> None:
+    """Что находит проба каталога `refuted_by`, находит и предикат отсюда (взгляд на #1332).
+
+    Две записи одной границы — проба в ответе и предикат здесь — без сверки
+    разошлись бы на первой правке одной из них (071, `c6b40dd`). Проба вправе
+    быть УЖЕ предиката: это названо в её `_refuted_by`. Шире — нет: тогда
+    действие каталога опровергло бы ответ тем, чего наш набор не видит. Каждая
+    маска и каждая строка пробы кладутся файлом в пустое git-дерево, и хоть
+    один предикат правила обязан его найти. Предикат командой `python3` читает
+    настоящее дерево, а не подложенный файл, и здесь не исполняется.
+    """
+    probe = answers()[rule]["refuted_by"]
+    runnable = [one for one in checks(rule) if one["argv"][:1] != ["python3"]]
+    assert runnable, f"у {rule} есть проба, а сверить её не с чем (075)"
+    missed: list[str] = []
+    for glob in probe["globs"]:
+        for text in probe["contains"] or ["x"]:
+            where = tmp_path / f"{len(missed)}-{abs(hash((glob, text)))}"
+            where.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=where, check=True)
+            planted = where / planted_path(glob)
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.write_text(f"{text}\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=where, check=True)
+            if not any(
+                line not in one["allowed"] for one in runnable for line in hits(one["argv"], where)
+            ):
+                missed.append(f"{glob} + «{text}»")
+    assert not missed, f"{rule}: проба находит, а предикат нет — {missed}"
+
+
 def test_a_planted_condition_turns_the_gate_red(tmp_path: Path) -> None:
     """Обе половины на настоящем git: чистое дерево зелёное, файл перевода — красное."""
 
