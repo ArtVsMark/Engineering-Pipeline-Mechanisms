@@ -2020,6 +2020,17 @@ def test_look_hands_the_merge_ways_source_what_the_secret_step_said(
         seen.append(said)
         return []
 
+    def poisoned(*_: object, **__: object) -> None:
+        raise AssertionError("источник пошёл в сеть: он не подделан")
+
+    # ТРАНСПОРТ ОТРАВЛЕН, МАНИФЕСТ ПОДДЕЛАН — как у двух проб выше (взгляд на
+    # #1326, `b36fd5d`). Без этого оба `look()` шли в сеть за манифестом
+    # версий языка, обрыв читался молчанием, и проба зеленела при любой сети.
+    monkeypatch.setattr(module.ghrest, "request", poisoned)
+    monkeypatch.setattr(module.ghrest, "raw_text", poisoned)
+    monkeypatch.setattr(module, "manifest", lambda url: [{}])
+    monkeypatch.setattr(module, "declared_versions", lambda: ([], ""))
+    monkeypatch.setattr(module, "language_moved", lambda *a, **k: [])
     monkeypatch.setattr(module, "fetch", broken)
     for name in (
         "pinned_tag_moved",
@@ -2177,31 +2188,81 @@ def test_the_verdict_subject_follows_the_kind(
 # --- есть ли сборка ветки у площадки (#193) ----------------------------------
 
 
-@pytest.mark.parametrize(
-    ("minor", "present"),
-    [("3.14", True), ("3.15", True), ("3.16", False)],
-    ids=["стабильная", "только-пробная", "нет-ни-одной"],
-)
-def test_a_branch_is_published_by_any_build(minor: str, present: bool) -> None:
-    """Сборка ветки есть, если у площадки есть хоть одна — стабильная или пробная.
+def build(version: str, *files: tuple[str, str, str], stable: bool = False) -> dict[str, Any]:
+    """Выпуск манифеста с файлами `(platform, platform_version, arch)`."""
+    return {
+        "version": version,
+        "stable": stable,
+        "files": [
+            {"platform": platform, "platform_version": system, "arch": arch}
+            for platform, system, arch in files
+        ],
+    }
 
-    Пробная считается: `python-next` гоняет именно её. Ветка без единой сборки —
-    «нет», и прогон предрелизной на ней зеленеет с предупреждением, а не
-    краснеет отказом `setup-python` (решение владельца 14.10.2026).
+
+#: Манифест с файлами: 3.14 — под обе системы, 3.15 — пробная только под 24.04,
+#: 3.16 — номер без единого файла `linux`/`x64`.
+BUILDS = [
+    build("3.14.7", ("linux", "24.04", "x64"), ("linux", "26.04", "x64"), stable=True),
+    build("3.15.0-rc.2", ("linux", "24.04", "x64"), ("darwin", "26.04", "x64")),
+    build("3.16.0-alpha.0", ("win32", "", "x64"), ("linux", "26.04", "arm64")),
+]
+
+
+@pytest.mark.parametrize(
+    ("minor", "system", "present"),
+    [
+        ("3.14", "", True),
+        ("3.15", "", True),
+        ("3.16", "", False),
+        ("3.17", "", False),
+        ("3.14", "26.04", True),
+        ("3.15", "26.04", False),
+    ],
+    ids=[
+        "стабильная",
+        "только-пробная",
+        "номер-без-файла-linux-x64",
+        "нет-ни-одной",
+        "под-систему-раннера",
+        "под-другую-систему",
+    ],
+)
+def test_a_branch_is_published_by_a_build_for_the_runner(
+    minor: str, system: str, present: bool
+) -> None:
+    """Сборка ветки — выпуск с файлом `linux`/`x64`, при названной системе — под неё.
+
+    Пробная считается: `python-next` гоняет именно её. Номер без файла под
+    раннер `setup-python` не поставит, и это то же «нет», что и отсутствие
+    номера (взгляд на #1329, `b1aea69`).
     """
-    assert module.published(TODAY, minor) is present
+    assert module.published(BUILDS, minor, system) is present
 
 
 def test_the_published_mode_names_all_three_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     """`--published`: есть — 0, нет — 4, манифест не прочитан — 2, а не «нет» (045)."""
-    monkeypatch.setattr(module, "manifest", lambda url: TODAY)
+    monkeypatch.setattr(module, "manifest", lambda url: BUILDS)
     assert module.main(["--published", "3.15"]) == module.EXIT_NOTHING
+    assert module.main(["--published", "3.15", "--platform-version", "26.04"]) == (
+        module.EXIT_ABSENT
+    )
     assert module.main(["--published", "3.16"]) == module.EXIT_ABSENT
 
     def unread(url: str) -> list[object]:
         raise module.NotRun("манифест не прочитан")
 
     monkeypatch.setattr(module, "manifest", unread)
+    assert module.main(["--published", "3.16"]) == module.EXIT_BROKEN
+
+
+def test_a_network_failure_is_a_refusal_not_absence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обрыв сети при чтении манифеста — 2, а не 4: «не прочитан» не значит «нет» (`4d9183a`)."""
+
+    def cut(url: str) -> list[object]:
+        raise module.ghrest.TransportError("соединение оборвано")
+
+    monkeypatch.setattr(module, "manifest", cut)
     assert module.main(["--published", "3.16"]) == module.EXIT_BROKEN
 
 

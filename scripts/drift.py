@@ -698,8 +698,8 @@ def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
     return ordered, sorted(seen - stable, key=order)
 
 
-def published(manifest: list[Any], minor: str) -> bool:
-    """Есть ли у площадки хоть одна сборка ветки языка — стабильная или пробная.
+def published(manifest: list[Any], minor: str, platform_version: str = "") -> bool:
+    """Есть ли у площадки сборка ветки языка под раннер — стабильная или пробная.
 
     ВОПРОС ПРЕДРЕЛИЗНОГО ПРОГОНА, А НЕ ДРЕЙФА (решение владельца 14.10.2026,
     #193). `python-next` наведён на следующую ветку раньше, чем у площадки
@@ -707,9 +707,32 @@ def published(manifest: list[Any], minor: str) -> bool:
     вопроса `setup-python` отказывал, прогон краснел, а дежурный клал красное
     долгом в план — и долг загораживал работу до выхода альфы. Ответ берётся
     тем же разбором манифеста, что у дрейфа (`minors`), а не вторым (090).
+
+    СБОРКА — ЭТО ФАЙЛ ПОД РАННЕР, А НЕ НОМЕР (взгляд на #1329, `b1aea69`).
+    `setup-python` ставит файл `linux`/`x64` под версию системы раннера; номер
+    без такого файла отказал бы ровно так же, как отсутствие номера. Поэтому
+    засчитывается выпуск ветки, у которого есть файл `linux`/`x64`, а при
+    названной `platform_version` — и под неё. Пусто — версия системы не
+    сверяется: так отвечает вопрос «есть ли ветка вообще».
     """
     stable, pre = minors(manifest)
-    return minor in stable or minor in pre
+    if minor not in stable and minor not in pre:
+        return False
+    for one in manifest:
+        if not isinstance(one, dict):
+            continue
+        found = MINOR_RE.match(str(one.get("version") or ""))
+        if not found or found.group("minor") != minor:
+            continue
+        for file in one.get("files") or []:
+            if (
+                isinstance(file, dict)
+                and file.get("platform") == "linux"
+                and file.get("arch") == "x64"
+                and (not platform_version or file.get("platform_version") == platform_version)
+            ):
+                return True
+    return False
 
 
 def matrix_of(jobs: dict[str, Any], job: str, path: Path) -> list[str]:
@@ -1829,6 +1852,12 @@ def main(argv: list[str] | None = None) -> int:
         help="только спросить, есть ли у площадки сборка ветки языка: 0 — есть, 4 — нет",
     )
     parser.add_argument(
+        "--platform-version",
+        default="",
+        metavar="ВЕРСИЯ",
+        help="с --published: версия системы раннера (`24.04`); пусто — не сверять",
+    )
+    parser.add_argument(
         "--save-merge-ways",
         type=Path,
         metavar="ФАЙЛ",
@@ -1844,12 +1873,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.published:
         try:
-            present = published(manifest(PYTHON_MANIFEST), args.published)
+            present = published(manifest(PYTHON_MANIFEST), args.published, args.platform_version)
         except (NotRun, ghrest.TransportError) as exc:
             print(f"шаг не отработал: манифест версий не прочитан: {exc}", file=sys.stderr)
             return EXIT_BROKEN
         if not present:
-            print(f"сборки {args.published} у площадки ещё нет")
+            under = f" под {args.platform_version}" if args.platform_version else ""
+            print(f"сборки {args.published}{under} у площадки ещё нет")
             return EXIT_ABSENT
         print(f"сборка {args.published} у площадки есть")
         return EXIT_NOTHING
