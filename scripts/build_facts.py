@@ -979,6 +979,25 @@ def drawn_from(path: Path, out_dir: str) -> int:
     return EXIT_OK
 
 
+def picture_input_wrong(facts: object) -> str | None:
+    """Что не так с формой фактов для картинки; None — форма годится.
+
+    Разделы, которые читает картинка, обязаны быть словарями, если они есть:
+    иначе рисование упало бы `AttributeError`, неотличимым от опечатки в
+    собственном коде (взгляд на #1338).
+    """
+    if not isinstance(facts, dict):
+        return "факты не объект"
+    for section in ("rules", "family"):
+        if section in facts and not isinstance(facts[section], dict):
+            return f"раздел {section} не объект"
+    rules = facts.get("rules") or {}
+    for part in ("by_mechanism", "machine"):
+        if part in rules and not isinstance(rules[part], dict):
+            return f"rules.{part} не объект"
+    return None
+
+
 def pictures_drawn(path: Path, out_dir: str) -> int:
     """Режим `--pictures-out`: только картинки `PICTURES` по готовым фактам — плоско в каталог.
 
@@ -994,14 +1013,20 @@ def pictures_drawn(path: Path, out_dir: str) -> int:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"картинки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    wrong = picture_input_wrong(facts)
+    if wrong:
+        print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
+        return EXIT_BROKEN
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     try:
         draw_pictures(facts, out)
-    # ИСХОДОВ ДВА, И ВЕТКА ОТКАЗА ЛОВИТ ВСЕ ПОЛОМКИ ФОРМЫ ФАКТОВ (взгляд на
-    # #1327, `1edf07c`): нет раздела, раздел не словарь, число не число —
-    # одинаково «факты не той формы», а не трейсбек с кодом 1.
-    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+    # ИСХОДОВ ДВА (взгляд на #1327, `1edf07c`): нет раздела, число не
+    # число — «факты не той формы», исход 2, а не трейсбек с кодом 1.
+    # `AttributeError` здесь НЕ ловится (взгляд на #1338): им падает и
+    # опечатка в коде рисования, и вину за неё нёс бы вход. Раздел не того
+    # типа ловит явная проверка формы выше, до рисования.
+    except (KeyError, TypeError, ValueError) as exc:
         print(f"картинки не нарисованы: {path} не той формы — {exc!r}", file=sys.stderr)
         return EXIT_BROKEN
     print(f"картинки нарисованы по {path}: {', '.join(sorted(PICTURES))}")

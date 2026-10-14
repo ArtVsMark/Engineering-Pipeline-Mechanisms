@@ -382,6 +382,23 @@ def test_facts_of_a_wrong_shape_are_a_refusal_not_a_traceback(
     assert facts.pictures_drawn(given, str(tmp_path / "out")) == facts.EXIT_BROKEN
 
 
+def test_a_bug_in_drawing_is_not_blamed_on_the_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Опечатка в рисовании — трейсбек, а не «факты не той формы» (взгляд на #1338)."""
+    assert facts.picture_input_wrong({"rules": {"machine": "ноль"}}) == "rules.machine не объект"
+    assert facts.picture_input_wrong({"rules": RULES_PLANTED}) is None
+
+    def broken(*_: object) -> None:
+        raise AttributeError("опечатка в коде рисования")
+
+    monkeypatch.setattr(facts, "draw_pictures", broken)
+    given = tmp_path / "facts.json"
+    given.write_text(json.dumps({"rules": RULES_PLANTED}), encoding="utf-8")
+    with pytest.raises(AttributeError):
+        facts.pictures_drawn(given, str(tmp_path / "out"))
+
+
 def test_pictures_out_alone_is_a_refusal(tmp_path: Path) -> None:
     """`--pictures-out` без `--from-facts` — отказ, а не тихая полная сборка (`303d8f0`)."""
     assert facts.main(["--pictures-out", str(tmp_path)]) == facts.EXIT_BROKEN

@@ -965,6 +965,9 @@ def test_called_scripts_walk_our_imports_only(tmp_path: Path) -> None:
         "git@github.com:Владелец/репо.git",
         "http://proxy@127.0.0.1:8080/git/Владелец/репо",
         "ssh://git@github.com/Владелец/репо.git",
+        "https://x-access-token:секрет@github.com/Владелец/репо.git",
+        "http://github.com/Владелец/репо",
+        "https://www.github.com/Владелец/репо",
     ],
 )
 def test_the_repo_is_read_from_origin_in_every_form(tmp_path: Path, url: str) -> None:
