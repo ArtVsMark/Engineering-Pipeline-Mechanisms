@@ -51,6 +51,15 @@ on:
         description: "отпечаток находки из реестра находок — проверить её премису; пусто — не проверять"
         type: string
         default: ""
+      # МАШИННЫЕ ВЕТКИ — НАПОЛНЕНИЕ ПРОЕКТА, А НЕ КОД ШАГА (#1342). Какие
+      # ветки открывает машина — суточные сборки, обновления зависимостей, —
+      # у каждого проекта своё; с машины вердикта не спрашивают (051). Ветка
+      # с такой приставкой не зовёт взгляд и реестр находок, и пропуск
+      # объявляется строкой в сводке, а не тишиной (045).
+      skip-branches:
+        description: "приставки машинных веток через пробел — взгляд и реестр находок на них не зовутся; пусто — смотреть все"
+        type: string
+        default: ""
     secrets:
       # КЛЮЧ АГЕНТА ПРИХОДИТ ТОЛЬКО ЯВНО (#993, решение владельца 06.10.2026,
       # вариант «а»): вызывающий передаёт ровно этот секрет по имени, а не
@@ -106,7 +115,32 @@ jobs:
       task: ${{ steps.mode.outputs.task }}
       mode: ${{ steps.mode.outputs.mode }}
       seen: ${{ steps.mode.outputs.seen }}
+      machine: ${{ steps.machine.outputs.machine }}
     steps:
+      # МАШИННАЯ ЛИ ВЕТКА — ПО ИМЕНИ ГОЛОВЫ И ВХОДУ ВЫЗЫВАЮЩЕГО (#1342), до
+      # всякого кода: имя ветки приходит данными через `env`, а не подстановкой
+      # в сценарий. Решает вызывающий списком приставок, а не изменение — своё
+      # имя ветки изменение выбирает само, но список стоит в его прогоне на
+      # общей ветке, а не в голове.
+      - name: машинная ли ветка
+        id: machine
+        env:
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          SKIP: ${{ inputs.skip-branches }}
+        run: |
+          set -euo pipefail
+          set -f
+          for prefix in $SKIP; do
+            case "$HEAD" in
+              "$prefix"*)
+                echo "machine=yes" >> "$GITHUB_OUTPUT"
+                echo "::notice title=взгляд не зовётся::ветка ${HEAD} — машинная по входу skip-branches (приставка ${prefix})"
+                echo "Взгляд и реестр находок не позваны: ветка \`${HEAD}\` машинная по входу \`skip-branches\` (приставка \`${prefix}\`)." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+            esac
+          done
+          echo "machine=no" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.ref }}
@@ -273,10 +307,15 @@ jobs:
     # там, где ручной заход есть, — у позднего взгляда ниже.
     # Карта не собралась — взгляд всё равно идёт, без неё: `!cancelled()`
     # не даёт отказу джоба карты отменить взгляд (084).
+    #
+    # МАШИННАЯ ВЕТКА ВЗГЛЯДА НЕ ЗОВЁТ (#1342): решает карта по входу
+    # `skip-branches`. Карта не ответила — взгляд идёт: молчание проверку не
+    # облегчает (045). Реестр находок ждёт взгляда и уходит вместе с ним.
     if: >-
       !cancelled() &&
       github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.map.outputs.machine != 'yes'
     steps:
       # Секрета может не быть, и это объявленное состояние, а не дефект:
       # добавляет его владелец, окно не может. Красное здесь приучало бы читать
