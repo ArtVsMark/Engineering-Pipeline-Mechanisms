@@ -64,7 +64,7 @@ def test_two_versions_at_one_consumer_are_named() -> None:
     steps, refs = module.calls_in(said)
     assert steps == ("step-debt", "step-lint")
     assert refs == ("v1.1.0", "v1.2.0")
-    line = module.Took(repo="o/r", steps=steps, refs=refs).said()
+    line = module.Took(repo="o/r", pins=module.pins_in(said)).said()
     assert "разные версии" in line, line
 
 
@@ -74,14 +74,14 @@ def test_one_version_is_not_a_finding() -> None:
     Без неё строка кричала бы на каждом исправном подключении, а такое учат
     пропускать (051).
     """
-    line = module.Took(repo="o/r", steps=("step-lint",), refs=("v1.2.0",)).said()
+    line = module.Took(repo="o/r", pins=(("step-lint", "v1.2.0"),)).said()
     assert "разные версии" not in line
     assert "v1.2.0" in line and "step-lint" in line
 
 
 def test_taking_nothing_is_said_in_words() -> None:
     """«Не взял ничего» — состояние, названное словом, а не пустая строка."""
-    assert "не взял ничего" in module.Took(repo="o/r", steps=(), refs=()).said()
+    assert "не взял ничего" in module.Took(repo="o/r").said()
 
 
 def test_we_are_not_counted_among_the_family(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,7 +153,7 @@ def test_one_refusal_does_not_fell_the_sweep(
     def half(repo: str, _where: Path, **_: object):  # type: ignore[no-untyped-def]
         if repo == "o/один":
             raise module.NotRun("клон не взят")
-        return module.Took(repo=repo, steps=("step-lint",), refs=("v1.2.0",))
+        return module.Took(repo=repo, pins=(("step-lint", "v1.2.0"),))
 
     monkeypatch.setattr(module, "took", half)
     seen, unread = module.sweep(["o/один", "o/два"], tmp_path)
@@ -189,9 +189,7 @@ def test_the_clone_is_shallow_and_sparse() -> None:
 def test_the_sweep_reaches_its_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Оба исхода захода ПРОГОНЯЮТСЯ, а не только объявлены (039, 145)."""
     monkeypatch.setattr(module, "family", lambda **_: ["o/сосед"])
-    monkeypatch.setattr(
-        module, "took", lambda repo, _where, **_: module.Took(repo=repo, steps=(), refs=())
-    )
+    monkeypatch.setattr(module, "took", lambda repo, _where, **_: module.Took(repo=repo))
     assert module.main([]) == module.EXIT_OK
 
     def refuse(repo: str, _where: Path, **_: object) -> None:
@@ -399,29 +397,73 @@ def test_the_uptake_counts_projects_and_offered_steps() -> None:
     # Имена шагов — из настоящего `calls_in`, а не собраны рукой: рукой
     # собранное «lint» прятало, что вызов называет файл `step-lint` (взгляд на #1241, 107).
     call = CALL.replace("step-lint", "step-secret") + CALL
-    steps, refs = module.calls_in(call)
-    took = module.Took(repo="o/a", steps=steps, refs=refs)
-    none = module.Took(repo="o/b", steps=(), refs=())
+    took = module.Took(repo="o/a", pins=module.pins_in(call))
+    none = module.Took(repo="o/b")
     said = module.uptake([took, none], ["o/c"], ["lint", "facts"])
     assert said["projects"] == {"took": 1, "of": 3, "unread": 1, "unread_repos": ["o/c"]}
     assert said["steps"] == {"taken": 1, "of": 2, "names": ["lint"]}
     assert said["by"] == [
-        {"repo": "o/a", "steps": ["step-lint", "step-secret"], "refs": ["v1.2.0"], "contract": None}
+        {"repo": "o/a", "steps": ["step-lint"], "refs": ["v1.2.0"], "contract": None}
     ]
+
+
+def test_an_unoffered_step_on_a_branch_does_not_move_a_neighbour() -> None:
+    """Свежесть — по отдаваемым шагам: неотдаваемый `step-*` на `main` её не трогает (#1355).
+
+    Отдаваемое у соседа на теге выпуска, неотдаваемое — на ветке: прежде пины
+    брались со всех вызовов, и сосед уезжал в «на ветке».
+    """
+    call = CALL.replace("v1.2.0", "v1.5.0") + CALL.replace("step-lint", "step-secret").replace(
+        "v1.2.0", "main"
+    )
+    took = module.Took("o/a", module.pins_in(call), ">=0.5,<0.9")
+    by = module.uptake([took], [], ["lint"])["by"]
+    assert by[0]["refs"] == ["v1.5.0"], by
+    said = module.freshness(by, RELEASE, "0.7")
+    assert said["fresh"] == 1 and said["branch_repos"] == [], said
+
+
+def test_span_bounds_read_both_ends_and_refuse_an_open_range() -> None:
+    """Обе границы — MAJOR.MINOR; диапазон без верхней границы — отказ, а не «любой» (073)."""
+    assert module.policy.span_bounds(" >=0.5,<0.9 ") == ((0, 5), (0, 9))
+    with pytest.raises(module.policy.BadPolicy):
+        module.policy.span_bounds(">=0.5")
+
+
+def test_an_unoffered_step_elsewhere_is_no_unfinished_move() -> None:
+    """«Разные версии» — по отдаваемым шагам: неотдаваемый на `main` не тревожит (#1370).
+
+    Сводка без `offered` судит по всем вызовам, как и прежде.
+    """
+    call = CALL.replace("v1.2.0", "v1.5.0") + CALL.replace("step-lint", "step-secret").replace(
+        "v1.2.0", "main"
+    )
+    took = module.Took("o/a", module.pins_in(call))
+    assert "разные версии" not in took.said(["lint"])
+    assert "разные версии" in took.said()
+    assert took.given(["lint"]).steps == ("step-lint",)
+
+
+def test_freshness_asks_the_one_range_judge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Попадание в диапазон решает `policy.compatible`, а не своя копия разбора (#1355, 090)."""
+    by = [{"repo": "o/a", "refs": ["v1.5.0"], "contract": ">=0.1,<0.2"}]
+    assert module.freshness(by, RELEASE, "0.7")["behind_repos"] == ["o/a"]
+    monkeypatch.setattr(module.policy, "compatible", lambda _span, _version: True)
+    assert module.freshness(by, RELEASE, "0.7")["fresh"] == 1
 
 
 def test_a_project_calling_only_what_we_do_not_offer_took_nothing() -> None:
     """Позвал только неотдаваемый шаг — проект не «взял»: числа проектов и шагов согласны."""
-    steps, refs = module.calls_in(CALL.replace("step-lint", "step-secret"))
-    said = module.uptake([module.Took("o/a", steps, refs)], [], ["lint"])
+    pins = module.pins_in(CALL.replace("step-lint", "step-secret"))
+    said = module.uptake([module.Took("o/a", pins)], [], ["lint"])
     assert said["projects"]["took"] == 0 and said["steps"]["taken"] == 0
 
 
 def test_print_and_facts_count_the_same_takers() -> None:
     """Печать и факты одного захода считают «взял» одним правилом (взгляд на #1241, 022)."""
-    ours, _ = module.calls_in(CALL)
-    other, _ = module.calls_in(CALL.replace("step-lint", "step-secret"))
-    seen = [module.Took("o/a", ours, ("v1",)), module.Took("o/b", other, ("v1",))]
+    ours = module.pins_in(CALL)
+    other = module.pins_in(CALL.replace("step-lint", "step-secret"))
+    seen = [module.Took("o/a", ours), module.Took("o/b", other)]
     assert [one.repo for one in module.takers(seen, ["lint"])] == ["o/a"]
     assert module.report_lines(seen, [], ["lint"])[0] == "взяли наши шаги: 1 из 2 прочитанных"
     assert module.uptake(seen, [], ["lint"])["projects"]["took"] == 1
@@ -436,7 +478,7 @@ def test_a_spent_budget_keeps_what_was_read(
 
     def fast(repo: str, _where: Path, timeout: float = 0) -> object:
         asked.append(timeout)
-        return module.Took(repo=repo, steps=(), refs=())
+        return module.Took(repo=repo)
 
     monkeypatch.setattr(module, "took", fast)
     seen, unread = module.sweep(["o/a", "o/b"], tmp_path, budget=10, clock=lambda: next(ticks))
@@ -601,7 +643,7 @@ def test_main_writes_the_numbers_for_the_facts(
     monkeypatch.setattr(
         module,
         "took",
-        lambda repo, _where, **_: module.Took(repo=repo, steps=("step-lint",), refs=("v1",)),
+        lambda repo, _where, **_: module.Took(repo=repo, pins=(("step-lint", "v1"),)),
     )
     monkeypatch.setattr(module.onboard, "steps", lambda _root: ["lint", "facts"])
     out = tmp_path / "uptake.json"
