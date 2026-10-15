@@ -1,5 +1,6 @@
 """Полный взгляд один раз, дальше проверка починки (#848)."""
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -356,3 +357,19 @@ def test_a_large_text_file_enters_the_key_by_its_blob() -> None:
     assert module.diff_key(large("aaa")) is not None
     assert module.diff_key(large("aaa")) == module.diff_key(large("aaa"))
     assert module.diff_key(large("aaa")) != module.diff_key(large("bbb"))
+
+
+#: Адрес изменения или задачи в чужом репозитории: «владелец/репо#номер».
+ADDRESS_RE = re.compile(r"[\w.-]+/[\w.-]+#\d+")
+
+
+def test_the_fix_task_carries_no_project_address() -> None:
+    """В тексте задания нет адреса проекта: оно уходит агенту у любого потребителя (#1371).
+
+    Граница объявлена комментарием в `task_text`; без проверки адрес, вписанный
+    в f-строку задания, оставлял бы набор зелёным.
+    """
+    prior = [("aaa1111", Entry(7, "дефект", "a.py:1 — раз"))]
+    for task in (module.task_text(module.FIX, prior), module.task_text(module.FIX, [])):
+        assert not ADDRESS_RE.search(task), ADDRESS_RE.search(task)
+        assert "github.com" not in task
