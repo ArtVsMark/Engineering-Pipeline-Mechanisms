@@ -779,14 +779,15 @@ def declared_versions() -> tuple[list[str], str]:
 RUNNER_SYSTEM_RE: Final = re.compile(r"^ubuntu-(?P<system>\d+\.\d+)$")
 
 
-def matrix_system() -> str:
+def matrix_system(path: Path | None = None) -> str:
     """Версия системы раннера обязательной матрицы — из её `runs-on`.
 
     Тем же разбором `ci.yml`, что `declared_versions` (090). Раннер без
     версии (`ubuntu-latest`) или не `ubuntu` — третий исход, а не «любая»:
-    сверка файла под систему молча отключилась бы (045).
+    сверка файла под систему молча отключилась бы (045). `path` — для
+    подделки; по умолчанию `ci.yml` дерева.
     """
-    path = paths.WORKFLOWS / "ci.yml"
+    path = path or paths.WORKFLOWS / "ci.yml"
     jobs = pipeline_checks.run_of(path).get("jobs") or {}
     said = str((jobs.get("test-matrix") or {}).get("runs-on") or "")
     found = RUNNER_SYSTEM_RE.match(said)
@@ -1273,7 +1274,21 @@ def language_moved(
                 "прогон не сможет поставить эту версию — сверить матрицу с манифестом",
             )
         )
-    if newest and newest not in matrix:
+    # НИ ОДНОЙ ГОТОВОЙ ВЕТКИ ПОД СИСТЕМУ — СКАЗАНО СТРОКОЙ, А НЕ МОЛЧАНИЕМ
+    # (взгляды на #1333 и #1367, правило 195). Пустой `ready` гасил сверки
+    # python-stable и готовности предрелизной, и дрейф молчал там, где площадка
+    # не знает системы раннера. Отказом всего источника это не сделано: сверка
+    # матрицы с манифестом и предрелизной по номеру системы не требуют.
+    if not ready:
+        found.append(
+            Drift(
+                "python-stable",
+                f"ни у одной стабильной ветки нет файла под систему раннера {system}",
+                "сверить `runs-on` матрицы с манифестом площадки: под эту систему "
+                "площадка Python не ставит, и ни одна ячейка матрицы не позеленеет",
+            )
+        )
+    elif newest not in matrix:
         found.append(
             Drift(
                 "python-stable",
