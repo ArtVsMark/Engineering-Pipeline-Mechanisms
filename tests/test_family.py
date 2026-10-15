@@ -527,6 +527,15 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
     }
 
 
+def test_an_empty_metric_is_not_counted_as_a_measurement() -> None:
+    """Пустой замер не прибавляет запись к `count`: читать в нём нечего (взгляд на #1352)."""
+    said = family.notes(summary({**consumer("o/a"), "notes": {"001": {"metric": {}}}}))
+    assert said["count"] == 0 and said["by"] == []
+    kept = family.notes(summary({**consumer("o/a"), "notes": {"001": {"note": "x", "metric": {}}}}))
+    assert kept["by"] == [{"repo": "o/a", "rule": "001", "note": "x"}], "заметка потеряна"
+    assert said["wrong_entries"] == 1
+
+
 @pytest.mark.parametrize(
     ("entry", "why"),
     [
@@ -536,7 +545,13 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
         ({"note": "   "}, "ни заметки, ни замера"),
         ({"note": 5}, "note не строка; ни заметки, ни замера"),
         ({"metric": "ноль"}, "metric не словарь; ни заметки, ни замера"),
-        ({"note": 5, "seen": 1, "metric": {}}, "чужие ключи: seen; note не строка"),
+        (
+            {"note": 5, "seen": 1, "metric": {}},
+            "чужие ключи: seen; note не строка; ни заметки, ни замера",
+        ),
+        ({"metric": {}}, "ни заметки, ни замера"),
+        ({"metric": {"value": None}}, "ни заметки, ни замера"),
+        ({"note": "x", "metric": {}}, ""),
         ({"note": "", "metric": {"value": 1}}, ""),
         ({"note": "x", "metric": {"value": 1}}, ""),
     ],
@@ -548,6 +563,9 @@ def test_neighbours_notes_are_read_and_ours_are_not() -> None:
         "заметка-не-строка",
         "замер-не-словарь",
         "все-причины",
+        "пустой-замер",
+        "замер-без-значений",
+        "заметка-при-пустом-замере",
         "замер-без-заметки",
         "годная",
     ],
@@ -581,6 +599,7 @@ def test_neighbours_notes_are_said_next_to_the_numbers(
             "unread": 1,
             "wrong_shape": 2,
             "wrong_entries": 3,
+            "wrong_entries_by": [{"repo": "o/a", "rule": "001", "why": "ни заметки, ни замера"}],
             "by": [],
         },
     }
@@ -591,6 +610,32 @@ def test_neighbours_notes_are_said_next_to_the_numbers(
     assert "пар «проект × механизм» 22 (взяты 4, переделаны 18, не объявлено 0)" in said
     # Ненулевые исходы «не той формы» тоже сказаны, а не только ноль (взгляд на #1340).
     assert "не той формы у 2" in said and "записей не той формы 3" in said
+    # И названы поимённо с причиной (взгляд на #1352): число без причины не чинится.
+    assert "  - o/a · правило 001: ни заметки, ни замера" in said
+
+
+def test_a_neighbours_string_cannot_break_the_log_line(capsys: pytest.CaptureFixture[str]) -> None:
+    """Перевод строки в ключе соседа не рвёт строку лога: команды `::…` не будет (#1358)."""
+    kin = {
+        "read": True,
+        "adopted": {"ours": 0, "of": 0},
+        "origins": {
+            "pairs": 0,
+            "taken": 0,
+            "adapted": 0,
+            "undeclared": 0,
+            "projects": {"took": 0, "of": 0},
+        },
+        "schema_agrees": True,
+        "notes": {
+            "wrong_entries": 1,
+            "wrong_entries_by": [{"repo": "o/a", "rule": "1\n::error::подлог", "why": "x"}],
+        },
+    }
+    facts.say_family(kin)
+    lines = capsys.readouterr().out.splitlines()
+    assert not any(line.startswith("::") for line in lines), lines
+    assert "  - o/a · правило 1 ::error::подлог: x" in lines
 
 
 def test_a_summary_without_notes_reads_as_none() -> None:
@@ -884,3 +929,19 @@ def test_the_who_page_is_published_and_kept_on_the_branch(tmp_path: Path) -> Non
     for name in facts.PAGES:
         assert (tmp_path / name).read_text(encoding="utf-8").startswith("# ")
         assert name in facts.branch_files()
+
+
+@pytest.mark.parametrize(
+    ("metric", "read"),
+    [
+        ({}, False),
+        ({"value": None}, False),
+        ({"value": ""}, False),
+        ({"value": 0}, True),
+        ("x", False),
+    ],
+    ids=["пусто", "null", "пустая-строка", "ноль-это-число", "не-словарь"],
+)
+def test_a_metric_is_filled_only_by_a_value(metric: object, read: bool) -> None:
+    """Замер — словарь хотя бы с одним непустым значением; ноль — значение (#1358)."""
+    assert family.filled(metric) is read
