@@ -1,0 +1,85 @@
+# Перехват подъёма закреплённых действий: Dependabot — датчик, конвейер —
+# исполнитель (#1387, решение владельца 15.10.2026).
+#
+# Изменение бота наши гейты не пропускают и пропускать не должны: в нём нет
+# зоны, связи, фрагмента и объявленного автора. Поэтому оно — только сигнал
+# «вышла версия». Подъём делает `scripts/deps_intercept.py` на свежей общей
+# ветке, толкает ветку `agent/deps-…`, и её изменение идёт обычным путём:
+# `agent-pr`, очередь, гейты, взгляд. Сигнал бота закрывается.
+#
+# ПО РАСПИСАНИЮ, А НЕ ПО СОБЫТИЮ ИЗМЕНЕНИЯ БОТА. Прогоны, разбуженные ботом,
+# идут с токеном только на чтение и без секретов — толкнуть ветку токеном
+# владельца из них нечем. Заход по расписанию идёт от имени проекта, и код из
+# ветки бота не исполняется вовсе: берётся только заголовок изменения.
+#
+# ТОКЕН — ВЛАДЕЛЬЦА, как у выпуска: толчок `github.token` не будит прогоны, и
+# `agent-pr` изменения не открыл бы; а коммит несёт личность человека (131).
+name: deps-intercept
+
+on:
+  schedule:
+    # Бот проверяет версии раз в сутки; перехват дважды в сутки догоняет его
+    # без лишних заходов. Минута не круглая — круглые часы площадка сдвигает.
+    - cron: "41 5,17 * * *"
+  # У события всегда есть ручная кнопка: события теряются (правило 104).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Заход один на проект: два параллельных толкнули бы одну ветку дважды.
+  group: deps-intercept
+  cancel-in-progress: false
+
+jobs:
+  intercept:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: токен владельца задан
+        env:
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+        run: |
+          if [ -z "${MERGE_QUEUE_TOKEN:-}" ]; then
+            echo "::warning::MERGE_QUEUE_TOKEN не задан — перехват не идёт: ветку подъёма толкает токен владельца, иначе её изменение не откроется."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGE_QUEUE_TOKEN }}
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - run: python -m pip install --quiet ./packages/transport "pyyaml>=6,<7"
+
+      - name: перехватить сигналы бота
+        env:
+          GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          # Автор коммита подъёма — владелец, как у выпуска; соавтора пишет сам
+          # механизм трейлером (`deps_intercept.CO_AUTHOR`).
+          git config user.name "ArtVsMark"
+          git config user.email "86671904+ArtVsMark@users.noreply.github.com"
+          rc=0
+          said="${RUNNER_TEMP}/deps.txt"
+          python scripts/deps_intercept.py --apply >"$said" 2>&1 || rc=$?
+          cat "$said"
+          reason="$(tr '\n' ' ' <"$said")"
+          # Коды разбираются списком разрешённого (068).
+          case "$rc" in
+            0) ;;
+            1)
+              echo "::warning::Сигнал Dependabot не разобран — он остаётся открытым для человека: ${reason}"
+              ;;
+            *)
+              echo "::error::Перехват подъёма не отработал (код $rc): ${reason}"
+              exit 1
+              ;;
+          esac

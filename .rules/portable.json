@@ -216,6 +216,10 @@
       "answer": "ours",
       "why": "@provider"
     },
+    ".github/workflows/deps-intercept.yml": {
+      "answer": "ours",
+      "why": "@provider"
+    },
     ".github/workflows/labels-sync.yml": {
       "answer": "as-is"
     },
@@ -590,6 +594,10 @@
       "where": [
         "docs/agent/behaviour.md"
       ]
+    },
+    "scripts/deps_intercept.py": {
+      "answer": "ours",
+      "why": "@provider"
     },
     "scripts/drift.py": {
       "answer": "configured",
