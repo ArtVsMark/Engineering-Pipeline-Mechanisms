@@ -389,6 +389,20 @@ SOURCE_RE = re.compile(r"^(https://\S+|[\w.-]+/[\w.-]+#\d+)$")
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
+def calendar_day(value: object) -> bool:
+    """Запись — настоящий день календаря вида 2026-10-14, а не только её шаблон.
+
+    `2026-13-45` шаблон проходит, а дня такого нет (взгляд на #1360).
+    """
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     """Чем предложение не годится каталогу; пусто — годится.
 
@@ -400,13 +414,14 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     slug = item.get("slug", "?")
     if item.get("kind") == "evidence":
         found = [f"{slug}: поля «{one}» нет" for one in EVIDENCE_FIELDS if not item.get(one)]
-        if item.get("direction") and item["direction"] not in EVIDENCE_DIRECTIONS:
+        # Список или словарь в поле — отказ с именем записи, а не `TypeError`
+        # набора (взгляд на #1360): проверка формы не падает на форме.
+        direction = item.get("direction")
+        if direction and (not isinstance(direction, str) or direction not in EVIDENCE_DIRECTIONS):
             found.append(f"{slug}: direction — for, against или neutral")
         if item.get("source") and not SOURCE_RE.match(str(item["source"])):
             found.append(f"{slug}: source — адрес https://… или владелец/репозиторий#номер")
-        if item.get("measured_at") and not re.fullmatch(
-            r"\d{4}-\d{2}-\d{2}", str(item["measured_at"])
-        ):
+        if item.get("measured_at") and not calendar_day(item["measured_at"]):
             found.append(f"{slug}: measured_at — дата вида 2026-10-14")
         return found
     if item.get("kind") == "merge":
@@ -583,6 +598,32 @@ def test_an_evidence_record_is_judged_by_its_own_form() -> None:
     ]
     assert proposal_problems({**good, "data": ""}) == ["e: поля «data» нет"]
     assert led_to(good) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "said"),
+    [
+        ("direction", ["for"], "e: direction — for, against или neutral"),
+        ("direction", {"for": 1}, "e: direction — for, against или neutral"),
+        ("measured_at", "2026-13-45", "e: measured_at — дата вида 2026-10-14"),
+        ("measured_at", "2026-02-30", "e: measured_at — дата вида 2026-10-14"),
+        ("measured_at", 20261014, "e: measured_at — дата вида 2026-10-14"),
+    ],
+    ids=["направление-списком", "направление-словарём", "месяца-нет", "дня-нет", "число"],
+)
+def test_a_bad_evidence_field_is_named_not_crashed(field: str, value: object, said: str) -> None:
+    """Не та форма поля — отказ с именем записи, а не `TypeError` (взгляд на #1360)."""
+    good = {
+        "kind": "evidence",
+        "slug": "e",
+        "hypothesis": "h",
+        "direction": "for",
+        "data": "замер",
+        "source": "ArtVsMark/Engineering-Pipeline-Mechanisms#1144",
+        "measured_at": "2026-10-14",
+    }
+    assert proposal_problems({**good, field: value}) == [said]
+    assert calendar_day("2026-10-14") and not calendar_day("2026-10-14T00:00:00")
 
 
 def test_a_merge_proposal_is_judged_by_its_own_form() -> None:
