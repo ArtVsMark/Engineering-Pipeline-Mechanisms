@@ -671,7 +671,8 @@ def test_a_long_list_of_wrong_entries_is_cut_and_counted(
     facts.say_family(kin)
     lines = capsys.readouterr().out.splitlines()
     named = [line for line in lines if line.startswith("  - o/a")]
-    assert len(named) == facts.WRONG_SHOWN
+    # Сверяются номера, а не счёт: срез с хвоста дал бы столько же строк.
+    assert named == [f"  - o/a · правило {n:03}: x" for n in range(facts.WRONG_SHOWN)], named
     tails = [line for line in lines if line.startswith("  … и ещё")]
     if rest is None:
         assert tails == [], tails
@@ -1010,3 +1011,13 @@ def test_a_metric_is_filled_only_by_a_value(metric: object, read: bool) -> None:
     assert family.filled(metric) is read
     if isinstance(metric, dict):
         assert family.hollow(metric) is not read
+
+
+@pytest.mark.parametrize("filled_at_bottom", [False, True], ids=["пусто", "текст"])
+def test_hollow_survives_nesting_json_accepts(filled_at_bottom: bool) -> None:
+    """Вложенность, которую разбирает JSON, не роняет `hollow` (поздний взгляд на #1366)."""
+    depth = 10_000
+    bottom = '"x"' if filled_at_bottom else '" "'
+    value = json.loads("[" * depth + bottom + "]" * depth)
+    assert family.hollow({"value": value}) is not filled_at_bottom
+    assert family.filled({"value": value}) is filled_at_bottom
