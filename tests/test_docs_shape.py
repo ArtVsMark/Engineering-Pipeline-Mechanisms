@@ -145,8 +145,8 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
 
 
 #: Строка таблицы без номера шага: `| — | выпуск | release.yml | … |`. Такая в
-#: счёт заголовка не входит, и читатель, считающий строки глазами, получит на
-#: единицу больше.
+#: счёт заголовка не входит, и читатель, считающий строки глазами, получит
+#: больше — на столько, сколько таких строк (сейчас выпуск и замер взведения).
 UNNUMBERED_ROW_RE = re.compile(r"^\|\s*[—-]\s*\|")
 
 
@@ -154,21 +154,33 @@ def test_an_unnumbered_row_is_named_under_the_heading() -> None:
     """Строка без номера названа прозой, иначе счёт заголовка спорит с глазами.
 
     Заголовок считает НОМЕРОВАННЫЕ строки; читатель считает все. Расхождение
-    на единицу выглядит устаревшим числом, и внешний взгляд прочёл его именно
-    так на #199 — «четырнадцать не совпадает с пятнадцатью файлами дерева».
-    Разницу называет проза под заголовком, а не догадка (046).
+    выглядит устаревшим числом, и внешний взгляд прочёл его именно так на
+    #199 — «четырнадцать не совпадает с пятнадцатью файлами дерева». Разницу
+    называет проза под заголовком, а не догадка (046).
+
+    НАЗВАН КАЖДЫЙ ФАЙЛ, А НЕ СЛОВА «БЕЗ НОМЕРА» (находка взгляда на #1409).
+    Гейт искал в прозе только эти слова, и абзац с одним `release.yml` при двух
+    строках с прочерком прошёл зелёным после #1405. Теперь файл каждой такой
+    строки обязан стоять в прозе между заголовком и таблицей.
     """
     text = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     lines = text.splitlines()
     place = next(n for n, line in enumerate(lines) if line.startswith("## Скелет:"))
-    table = lines[place:]
-    unnumbered = [line for line in table if UNNUMBERED_ROW_RE.match(line)]
+    start = next(n for n in range(place, len(lines)) if lines[n].startswith("|"))
+    unnumbered = [line for line in lines[start:] if UNNUMBERED_ROW_RE.match(line)]
     if not unnumbered:
         return
-    said = "\n".join(lines[place : place + 8])
+    said = "\n".join(lines[place:start])
     assert "без номера" in said, (
         f"в таблице {len(unnumbered)} строк без номера, а проза под заголовком о них молчит"
     )
+    files = {
+        found.group("file")
+        for line in unnumbered
+        for found in STEP_FILE_RE.finditer(line.strip("|").split("|")[2])
+    }
+    unnamed = sorted(one for one in files if f"`{one}`" not in said)
+    assert not unnamed, f"строки без номера есть, а проза под заголовком их не называет: {unnamed}"
 
 
 #: Сколько первых строк документа читается в поисках читателя. Не весь файл:
