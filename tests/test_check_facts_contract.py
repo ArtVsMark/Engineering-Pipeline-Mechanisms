@@ -254,3 +254,15 @@ def test_the_gate_builds_the_facts_the_step_publishes(monkeypatch: pytest.Monkey
     monkeypatch.setattr(module.facts_common, "main", build)
     assert module.main(["--root", str(ROOT), "--repo", "o/a"]) == module.EXIT_BROKEN
     assert built and set(module.build_args(ROOT)) <= set(built[0])
+
+
+def test_gate_runs_finds_the_flow_that_calls_the_gate(tmp_path: Path) -> None:
+    """Прогон гейта находится по шагу, который его зовёт, а не по имени файла."""
+    flows = tmp_path / module.paths.WORKFLOWS
+    flows.mkdir(parents=True)
+    (flows / "x.yml").write_text(
+        "jobs:\n  g:\n    steps:\n      - run: python scripts/check_facts_contract.py\n",
+        encoding="utf-8",
+    )
+    (flows / "y.yml").write_text("jobs:\n  h:\n    steps:\n      - run: echo\n", encoding="utf-8")
+    assert module.gate_runs(tmp_path) == {module.paths.WORKFLOWS / "x.yml"}
