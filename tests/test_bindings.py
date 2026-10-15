@@ -413,15 +413,25 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     """
     slug = item.get("slug", "?")
     if item.get("kind") == "evidence":
-        found = [f"{slug}: поля «{one}» нет" for one in EVIDENCE_FIELDS if not item.get(one)]
-        # Список или словарь в поле — отказ с именем записи, а не `TypeError`
-        # набора (взгляд на #1360): проверка формы не падает на форме.
+        # КАЖДОЕ ПОЛЕ ДАННЫХ — НЕПУСТАЯ СТРОКА (взгляды на #1360 и #1383). Список,
+        # словарь или число в поле — отказ с именем записи, а не `TypeError`
+        # набора и не «годится»: одно поле, закрытое по форме, оставило бы
+        # соседей принимать что угодно истинное (правило 195).
+        found = []
+        for one in EVIDENCE_FIELDS:
+            value = item.get(one)
+            if not value:
+                found.append(f"{slug}: поля «{one}» нет")
+            elif not isinstance(value, str):
+                found.append(f"{slug}: {one} — строка, а не {type(value).__name__}")
         direction = item.get("direction")
-        if direction and (not isinstance(direction, str) or direction not in EVIDENCE_DIRECTIONS):
+        if isinstance(direction, str) and direction and direction not in EVIDENCE_DIRECTIONS:
             found.append(f"{slug}: direction — for, against или neutral")
-        if item.get("source") and not SOURCE_RE.match(str(item["source"])):
+        source = item.get("source")
+        if isinstance(source, str) and source and not SOURCE_RE.match(source):
             found.append(f"{slug}: source — адрес https://… или владелец/репозиторий#номер")
-        if item.get("measured_at") and not calendar_day(item["measured_at"]):
+        measured = item.get("measured_at")
+        if isinstance(measured, str) and measured and not calendar_day(measured):
             found.append(f"{slug}: measured_at — дата вида 2026-10-14")
         return found
     if item.get("kind") == "merge":
@@ -603,13 +613,29 @@ def test_an_evidence_record_is_judged_by_its_own_form() -> None:
 @pytest.mark.parametrize(
     ("field", "value", "said"),
     [
-        ("direction", ["for"], "e: direction — for, against или neutral"),
-        ("direction", {"for": 1}, "e: direction — for, against или neutral"),
+        ("direction", ["for"], "e: direction — строка, а не list"),
+        ("direction", {"for": 1}, "e: direction — строка, а не dict"),
+        ("direction", "maybe", "e: direction — for, against или neutral"),
         ("measured_at", "2026-13-45", "e: measured_at — дата вида 2026-10-14"),
         ("measured_at", "2026-02-30", "e: measured_at — дата вида 2026-10-14"),
-        ("measured_at", 20261014, "e: measured_at — дата вида 2026-10-14"),
+        ("measured_at", 20261014, "e: measured_at — строка, а не int"),
+        ("hypothesis", ["h"], "e: hypothesis — строка, а не list"),
+        ("data", 42, "e: data — строка, а не int"),
+        ("slug", ["e"], "['e']: slug — строка, а не list"),
+        ("source", {"u": 1}, "e: source — строка, а не dict"),
     ],
-    ids=["направление-списком", "направление-словарём", "месяца-нет", "дня-нет", "число"],
+    ids=[
+        "направление-списком",
+        "направление-словарём",
+        "направление-чужое",
+        "месяца-нет",
+        "дня-нет",
+        "дата-числом",
+        "гипотеза-списком",
+        "данные-числом",
+        "слаг-списком",
+        "источник-словарём",
+    ],
 )
 def test_a_bad_evidence_field_is_named_not_crashed(field: str, value: object, said: str) -> None:
     """Не та форма поля — отказ с именем записи, а не `TypeError` (взгляд на #1360)."""
@@ -623,7 +649,13 @@ def test_a_bad_evidence_field_is_named_not_crashed(field: str, value: object, sa
         "measured_at": "2026-10-14",
     }
     assert proposal_problems({**good, field: value}) == [said]
-    assert calendar_day("2026-10-14") and not calendar_day("2026-10-14T00:00:00")
+
+
+def test_a_calendar_day_is_a_real_date_in_its_one_form() -> None:
+    """День замера — настоящая дата ровно в форме `2026-10-14` (взгляды на #1360 и #1383)."""
+    assert calendar_day("2026-10-14")
+    for wrong in ("2026-10-14T00:00:00", "2026-13-45", "2026-02-30", "14.10", 20261014, None):
+        assert not calendar_day(wrong), wrong
 
 
 def test_a_merge_proposal_is_judged_by_its_own_form() -> None:
