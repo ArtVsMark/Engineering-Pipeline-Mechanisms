@@ -329,7 +329,6 @@ STILL_COPIED: Final = frozenset(
         "ci-complete.yml",
         "ci-complete-wake.yml",
         "claude.yml",
-        "labels-sync.yml",
         "release.yml",
         "required-context.yml",
         "rules-inbox.yml",

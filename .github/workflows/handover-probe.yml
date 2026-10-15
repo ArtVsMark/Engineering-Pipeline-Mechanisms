@@ -45,7 +45,8 @@
 # Шаг со своим вызывающим прогоном — `step-work-plan`, `step-automerge`,
 # `step-main-red`, `step-stuck`, `step-hail`, `step-verify-queue`,
 # `step-drift`, `step-review`, `step-facts`, `step-agent-pr`, `step-task-items`,
-# `step-schedules-seen` — пишет живые задачи, ленты изменений и ветку значков (`step-facts`
+# `step-schedules-seen`, `step-labels-sync` — пишет живые задачи, ленты
+# изменений, метки и ветку значков (`step-facts`
 # кладёт факты на `badges`, `step-agent-pr` открывает изменения), зовёт
 # прогоны и агента, а очередь ещё и сливает: проба переписала бы план работ,
 # запись дрейфа и реестр находок этого репозитория, перезапускала бы его
