@@ -622,9 +622,44 @@ def test_a_stable_number_without_a_runner_build_is_not_called_into_the_matrix() 
     assert "python-next" not in [d.source for d in moved]
 
 
-def test_the_matrix_runner_names_its_system() -> None:
-    """Версия системы раннера матрицы читается из `runs-on` самого `ci.yml`."""
-    assert module.matrix_system() == "26.04"
+def test_no_stable_build_for_the_runner_is_the_third_outcome() -> None:
+    """Ни одной стабильной ветки с файлом под систему раннера — отказ, а не тишина (#1333).
+
+    Пустой список готовых веток молча гасил сверки python-stable и python-next:
+    дрейф сказал бы «всё сошлось» там, где площадка не знает системы раннера (195).
+    """
+    builds = [build("3.14.7", ("linux", "24.04", "x64"), stable=True)]
+    with pytest.raises(module.NotRun, match=re.escape("26.04")):
+        module.language_moved(builds, ["3.14"], "3.15", "26.04")
+
+
+@pytest.mark.parametrize(
+    ("runs_on", "system"),
+    [("ubuntu-24.04", "24.04"), ("ubuntu-30.10", "30.10")],
+    ids=["24.04", "будущая"],
+)
+def test_the_matrix_runner_names_its_system(tmp_path: Path, runs_on: str, system: str) -> None:
+    """Версия системы раннера матрицы читается из её `runs-on` — разбором подделки.
+
+    Сверка с числом живого `ci.yml`, вписанным рукой, краснела бы при смене
+    раннера как дефект разбора, хотя разбор верен (взгляд на #1333, 005).
+    """
+    flow = tmp_path / "ci.yml"
+    flow.write_text(f"jobs:\n  test-matrix:\n    runs-on: {runs_on}\n", encoding="utf-8")
+    assert module.matrix_system(flow) == system
+
+
+def test_an_unversioned_matrix_runner_is_the_third_outcome(tmp_path: Path) -> None:
+    """Раннер без версии системы — отказ: сверка файла под систему молча отключилась бы."""
+    flow = tmp_path / "ci.yml"
+    flow.write_text("jobs:\n  test-matrix:\n    runs-on: ubuntu-latest\n", encoding="utf-8")
+    with pytest.raises(module.NotRun):
+        module.matrix_system(flow)
+
+
+def test_the_live_matrix_runner_names_a_system() -> None:
+    """Живой `ci.yml` разбирается: у раннера матрицы названа версия системы."""
+    assert re.fullmatch(r"\d+\.\d+", module.matrix_system())
 
 
 def test_the_matrix_is_read_from_the_run_itself() -> None:

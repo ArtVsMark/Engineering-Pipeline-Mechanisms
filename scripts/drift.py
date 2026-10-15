@@ -779,14 +779,15 @@ def declared_versions() -> tuple[list[str], str]:
 RUNNER_SYSTEM_RE: Final = re.compile(r"^ubuntu-(?P<system>\d+\.\d+)$")
 
 
-def matrix_system() -> str:
+def matrix_system(path: Path | None = None) -> str:
     """Версия системы раннера обязательной матрицы — из её `runs-on`.
 
     Тем же разбором `ci.yml`, что `declared_versions` (090). Раннер без
     версии (`ubuntu-latest`) или не `ubuntu` — третий исход, а не «любая»:
-    сверка файла под систему молча отключилась бы (045).
+    сверка файла под систему молча отключилась бы (045). `path` — для
+    подделки; по умолчанию `ci.yml` дерева.
     """
-    path = paths.WORKFLOWS / "ci.yml"
+    path = path or paths.WORKFLOWS / "ci.yml"
     jobs = pipeline_checks.run_of(path).get("jobs") or {}
     said = str((jobs.get("test-matrix") or {}).get("runs-on") or "")
     found = RUNNER_SYSTEM_RE.match(said)
@@ -1263,7 +1264,15 @@ def language_moved(
         raise NotRun("в манифесте нет ни одной стабильной ветки — читать нечего (075)")
     found: list[Drift] = []
     ready = stable if system is None else [m for m in stable if published(manifest, m, system)]
-    newest = ready[-1] if ready else ""
+    # НИ ОДНОЙ ГОТОВОЙ ВЕТКИ ПОД СИСТЕМУ — ТРЕТИЙ ИСХОД (взгляд на #1333, 195):
+    # пустой `ready` молча гасил бы сверки python-stable и python-next, и дрейф
+    # говорил бы «всё сошлось» там, где площадка не знает системы раннера.
+    if not ready:
+        raise NotRun(
+            f"в манифесте нет стабильной ветки с файлом под систему раннера {system} — "
+            "сверять матрицу не с чем (075)"
+        )
+    newest = ready[-1]
     unknown = sorted(set(matrix) - set(stable) - set(pre), key=order)
     if unknown:
         found.append(
