@@ -62,6 +62,8 @@ from facts_common import rules_facts as rules_facts
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
+#: Сколько кривых записей соседей сборка называет строками; остальное — числом.
+WRONG_SHOWN: Final = 20
 #: ГДЕ ЛЕЖАТ ФАКТЫ И ЗНАЧКИ — ПО КОНТРАКТУ СЕМЬИ, а не по своей раскладке:
 #: ветка `badges`, путь `.github/badges/` — как у грейдера, каталога, токенов и
 #: глоссария (контракт фактов витрины, `ArtVsMark/ArtVsMark` ·
@@ -1129,9 +1131,17 @@ def say_family(kin: dict[str, Any]) -> None:
         # Строки соседа — в одну строку и с пределом: перевод строки в его
         # ключе дал бы в логе строку, которую площадка читает командой `::…`
         # (взгляд на #1358).
-        for one in said.get("wrong_entries_by") or []:
+        # И ЧИСЛОМ СТРОК (взгляд на #1358): сосед с тысячей кривых записей дал
+        # бы тысячу строк лога. Показано первые, остальное — числом; полный
+        # список лежит в фактах (`wrong_entries_by`).
+        wrong = said.get("wrong_entries_by") or []
+        for one in wrong[:WRONG_SHOWN]:
             repo, rule, why = (plain(one.get(key)) for key in ("repo", "rule", "why"))
             print(f"  - {repo} · правило {rule}: {why}")
+        if len(wrong) > WRONG_SHOWN:
+            print(
+                f"  … и ещё {len(wrong) - WRONG_SHOWN} — полный список в фактах, wrong_entries_by"
+            )
         # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
         # считалось здесь с 8 сентября, ложилось в факты ключом
         # `schema_agrees` — и не печаталось нигде: сводка ушла на 1.3, разрез

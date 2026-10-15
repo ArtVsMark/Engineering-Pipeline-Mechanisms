@@ -638,6 +638,36 @@ def test_a_neighbours_string_cannot_break_the_log_line(capsys: pytest.CaptureFix
     assert "  - o/a · правило 1 ::error::подлог: x" in lines
 
 
+def test_a_long_list_of_wrong_entries_is_cut_and_counted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Кривые записи соседа печатаются с пределом строк, остаток — числом (взгляд на #1358)."""
+    many = facts.WRONG_SHOWN + 7
+    kin = {
+        "read": True,
+        "adopted": {"ours": 0, "of": 0},
+        "origins": {
+            "pairs": 0,
+            "taken": 0,
+            "adapted": 0,
+            "undeclared": 0,
+            "projects": {"took": 0, "of": 0},
+        },
+        "schema_agrees": True,
+        "notes": {
+            "wrong_entries": many,
+            "wrong_entries_by": [
+                {"repo": "o/a", "rule": f"{n:03}", "why": "x"} for n in range(many)
+            ],
+        },
+    }
+    facts.say_family(kin)
+    lines = capsys.readouterr().out.splitlines()
+    named = [line for line in lines if line.startswith("  - o/a")]
+    assert len(named) == facts.WRONG_SHOWN
+    assert any(line.startswith("  … и ещё 7 ") for line in lines), lines
+
+
 def test_a_summary_without_notes_reads_as_none() -> None:
     """Нет раздела и пустой раздел — разные исходы, а не один ноль (взгляд на #1340)."""
     said = family.picture(summary(consumer("o/a"), {**consumer("o/b"), "notes": {}}))["notes"]
@@ -937,10 +967,20 @@ def test_the_who_page_is_published_and_kept_on_the_branch(tmp_path: Path) -> Non
         ({}, False),
         ({"value": None}, False),
         ({"value": ""}, False),
+        ({"value": " \t"}, False),
+        ({"value": " x "}, True),
         ({"value": 0}, True),
         ("x", False),
     ],
-    ids=["пусто", "null", "пустая-строка", "ноль-это-число", "не-словарь"],
+    ids=[
+        "пусто",
+        "null",
+        "пустая-строка",
+        "пробельная-строка",
+        "строка-с-текстом",
+        "ноль-это-число",
+        "не-словарь",
+    ],
 )
 def test_a_metric_is_filled_only_by_a_value(metric: object, read: bool) -> None:
     """Замер — словарь хотя бы с одним непустым значением; ноль — значение (#1358)."""
