@@ -352,6 +352,26 @@ def test_the_calibration_word_is_seen_in_any_case(tmp_path: Path, word: str, loc
     assert planted_hits(tmp_path, "048", "docs/x.md", f"наша {word} по чужому", locale), word
 
 
+def unpaired(part: str) -> list[str]:
+    """Кириллица образца вне верного чередования регистров: голые буквы и чужие пары.
+
+    Пара с опечаткой — «(к|Л)» — тоже не чередование: слово «К…» с ней не
+    найдётся ни в одной локали (взгляд на #1393).
+    """
+    wrong = [f"({low}|{up})" for low, up in CASE_PAIR_RE.findall(part) if low.upper() != up]
+    return wrong + re.findall("[а-яёА-ЯЁ]", CASE_PAIR_RE.sub("", part))
+
+
+@pytest.mark.parametrize(
+    ("part", "found"),
+    [("(к|К)(а|А)", []), ("(к|Л)", ["(к|Л)"]), ("к(а|А)", ["к"]), ("calibrat", [])],
+    ids=["верная-пара", "чужая-пара", "голая-буква", "латиница"],
+)
+def test_unpaired_names_every_wrong_letter(part: str, found: list[str]) -> None:
+    """Обе половины: верная пара законна, чужая пара и голая буква — нет."""
+    assert unpaired(part) == found
+
+
 def test_no_predicate_carries_bare_cyrillic() -> None:
     """Строгое правило (210): кириллица в предикате — только чередованием регистров.
 
@@ -365,11 +385,8 @@ def test_no_predicate_carries_bare_cyrillic() -> None:
     for rule in predicates()["predicates"]:
         for one in checks(rule):
             for part in one["argv"]:
-                paired = CASE_PAIR_RE.findall(part)
-                seen += sum(1 for low, up in paired if low.upper() == up)
-                rest = CASE_PAIR_RE.sub("", part)
-                if re.search("[а-яёА-ЯЁ]", rest):
-                    bare.append(f"{rule}: {part}")
+                seen += len(CASE_PAIR_RE.findall(part))
+                bare += [f"{rule}: {wrong}" for wrong in unpaired(part)]
     assert seen, "кириллицы в предикатах нет — предмет проверки не найден (075)"
     assert not bare, f"кириллица вне чередования регистров: {bare}"
 
