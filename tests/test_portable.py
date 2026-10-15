@@ -330,7 +330,6 @@ STILL_COPIED: Final = frozenset(
         "claude.yml",
         "labels-sync.yml",
         "release.yml",
-        "required-context.yml",
         "runs-series.yml",
     }
 )

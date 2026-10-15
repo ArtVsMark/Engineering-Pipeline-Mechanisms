@@ -45,7 +45,8 @@
 (очередь и слияние) · [`step-main-red.yml`](.github/workflows/step-main-red.yml)
 (дежурный по общей ветке) · [`step-stuck.yml`](.github/workflows/step-stuck.yml)
 (застрявшее) · [`step-schedules-seen.yml`](.github/workflows/step-schedules-seen.yml)
-(пропущенные заходы по расписанию) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
+(пропущенные заходы по расписанию) · [`step-required-context.yml`](.github/workflows/step-required-context.yml)
+(сверка обязательного контекста) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
 [`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
 [`step-review.yml`](.github/workflows/step-review.yml) (внешний взгляд и реестр находок) ·
