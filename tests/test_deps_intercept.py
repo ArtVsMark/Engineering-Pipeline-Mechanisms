@@ -296,3 +296,21 @@ def test_main_without_a_token_does_not_run(monkeypatch: pytest.MonkeyPatch) -> N
     for name in ("GH_TOKEN", "GITHUB_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [("ArtVsMark/Engineering", "artvsmark-engineering"), ("v1.6.0", "v1.6.0"), ("A__b", "a-b")],
+    ids=["владелец-и-имя", "тег", "склейка"],
+)
+def test_slug_keeps_only_safe_marks(text: str, said: str) -> None:
+    """Часть имени ветки — строчные буквы, цифры, точки и дефисы."""
+    assert module.slug(text) == said
+
+
+def test_uses_re_takes_the_action_and_not_its_neighbour() -> None:
+    """Образец строки берёт само действие с путём, но не соседа с общим началом имени."""
+    pattern = module.uses_re("actions/checkout")
+    assert pattern.search(f"- uses: actions/checkout@{SHA_OLD} # v7.0.1")
+    assert pattern.search(f'- uses: "actions/checkout/sub@{SHA_OLD}"')
+    assert not pattern.search(f"- uses: actions/checkout-extra@{SHA_OLD}")
