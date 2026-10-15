@@ -643,6 +643,9 @@ def main(argv: list[str] | None = None) -> int:
         if not why and not areas_of:
             why = "области правил не пришли с выгрузкой каталога"
         if not why:
+            # Неприменимые идут в `narrow` не ради отсева — их роль получает все
+            # (решение 042), — а ради `unknown`: область их правила, которой нет
+            # в таблице, тоже говорит, что таблица отстала от каталога.
             try:
                 narrowed = narrow(
                     eyes, denied.get("not-applicable", []), areas_of, area_table(args.base), files
@@ -652,8 +655,6 @@ def main(argv: list[str] | None = None) -> int:
         note = narrowed_said(narrowed, why)
     if narrowed is not None:
         eyes = narrowed.eyes
-        if "not-applicable" in denied:
-            denied = {**denied, "not-applicable": narrowed.inapplicable}
     text = render(
         machine,
         eyes,
