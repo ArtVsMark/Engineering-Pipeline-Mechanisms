@@ -48,7 +48,8 @@
 (пропущенные заходы по расписанию) · [`step-labels-sync.yml`](.github/workflows/step-labels-sync.yml)
 (состав меток) · [`step-required-context.yml`](.github/workflows/step-required-context.yml)
 (сверка обязательного контекста) · [`step-ci-complete-wake.yml`](.github/workflows/step-ci-complete-wake.yml)
-(будильник сводного гейта) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
+(будильник сводного гейта) · [`step-claude.yml`](.github/workflows/step-claude.yml)
+(ответ на обращение) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
 [`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
 [`step-review.yml`](.github/workflows/step-review.yml) (внешний взгляд и реестр находок) ·

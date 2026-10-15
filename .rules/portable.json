@@ -202,7 +202,10 @@
       ]
     },
     ".github/workflows/claude.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/claude.yml"
+      ]
     },
     ".github/workflows/drift.yml": {
       "answer": "configured",
@@ -296,6 +299,9 @@
       "answer": "as-is"
     },
     ".github/workflows/step-ci-complete-wake.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-claude.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-contract.yml": {
