@@ -141,6 +141,8 @@ DIRECTIONS: Final = Path("docs/dev/directions.md")
 REVIEW_PROCEDURE: Final = Path("docs/agent/review.md")
 #: Кем смотреть: обязательные роли и роли по тронутым путям (#776).
 REVIEW_ROLES: Final = Path(".rules/review-roles.json")
+#: Области каталога → пути дерева: какие правила отдать роли «правила каталога» (#1277).
+AREA_PATHS: Final = Path(".rules/area-paths.json")
 #: ДОКУМЕНТЫ ЛЕЖАТ ПО ПОДКАТАЛОГАМ ЧИТАТЕЛЯ (#840): `agent/` — окну и взгляду,
 #: `dev/` — тому, кто ведёт и выпускает проект, `use/` — подключающему.
 #: МЕХАНИЗМ, КОТОРЫЙ ЧИТАЕТ ДОКУМЕНТ, БЕРЁТ ПУТЬ ОТСЮДА; остальные упоминания —
@@ -221,6 +223,7 @@ ALL: Final = (
     DIRECTIONS,
     REVIEW_PROCEDURE,
     REVIEW_ROLES,
+    AREA_PATHS,
     DOCS_INDEX,
     BEHAVIOUR,
     ROADMAP,

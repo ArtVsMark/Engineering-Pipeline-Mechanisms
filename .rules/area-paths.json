@@ -1,0 +1,387 @@
+{
+  "_": "Области каталога → пути этого дерева. Роль взгляда «правила каталога» отдаёт ей только правила, чьи области задеты тронутыми путями изменения (решение владельца 14.10.2026 по #1277, вариант (а)). Ключи — английские имена областей выгрузки каталога (`areas.en`); покрытие сверяет живая половина tests/test_area_paths.py. Область без поверхности в диффе — пустой `paths` с причиной `why`: правило, все области которого такие, роли не отдаётся и называется числом. Таблица читается scripts/review_map.py с ОБЩЕЙ ветки, а не с головы изменения (085). Фрагмент журнала (`changelog.d/*`) области не задевает: он есть почти в каждом изменении, и область с ним не отсеивалась бы никогда — по той же причине он в `ignored` таблицы ролей (#785); фрагмент рода `contract` образцом назван.",
+  "schema": 1,
+  "_schema": "ключ areas: имя области → {paths: образцы путей как у .rules/review-roles.json (fnmatch от корня; образец без `/` — только путь в корне), why: причина, обязательна при пустом paths}",
+  "areas": {
+    "gates": {
+      "paths": [
+        "scripts/check_*.py",
+        "scripts/preflight.py",
+        "scripts/pipeline_checks.py",
+        "tests/*",
+        ".pipeline.yml"
+      ]
+    },
+    "pipeline": {
+      "paths": [
+        ".github/workflows/*",
+        "scripts/automerge.py",
+        "scripts/agent_pr.py",
+        "scripts/arm.py",
+        ".pipeline.yml"
+      ]
+    },
+    "documentation": {
+      "paths": [
+        "docs/*",
+        "*.md",
+        ".claude/skills/*"
+      ]
+    },
+    "process": {
+      "paths": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/agent/*",
+        ".claude/*",
+        "scripts/work_plan.py"
+      ]
+    },
+    "code": {
+      "paths": [
+        "scripts/*",
+        "packages/*"
+      ]
+    },
+    "audit": {
+      "paths": [
+        ".github/workflows/review.yml",
+        ".github/workflows/step-review.yml",
+        "scripts/review_*.py",
+        "scripts/look_mode.py",
+        "scripts/late_look.py",
+        "scripts/findings*.py",
+        "scripts/unlooked.py",
+        "docs/agent/review.md"
+      ]
+    },
+    "contracts": {
+      "paths": [
+        "CONTRACT_VERSION",
+        "scripts/contract.py",
+        "scripts/check_contract.py",
+        "scripts/facts_common.py",
+        ".github/workflows/step-*.yml",
+        "docs/use/*",
+        "changelog.d/*.contract.md"
+      ]
+    },
+    "catalogue": {
+      "paths": [
+        ".rules/*",
+        "scripts/catalogue.py",
+        "scripts/rule_link.py",
+        "scripts/check_rule_*.py",
+        ".github/workflows/rules-inbox.yml"
+      ]
+    },
+    "tests": {
+      "paths": [
+        "tests/*"
+      ]
+    },
+    "data": {
+      "paths": [
+        ".rules/*",
+        "scripts/findings_db.py",
+        "scripts/findings_archive.py"
+      ]
+    },
+    "CI": {
+      "paths": [
+        ".github/workflows/*"
+      ]
+    },
+    "agent sessions": {
+      "paths": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".claude/*",
+        "scripts/window.py",
+        "scripts/check_window_lifetime.py",
+        "scripts/check_rulebook_fresh.py",
+        "scripts/agent_run.py"
+      ]
+    },
+    "reliability": {
+      "paths": [
+        ".github/workflows/*",
+        "scripts/*",
+        "packages/*"
+      ]
+    },
+    "metrics": {
+      "paths": [
+        "scripts/build_facts.py",
+        "scripts/facts_common.py",
+        "scripts/runs_series.py",
+        "scripts/family*.py",
+        ".rules/series.json",
+        ".github/workflows/badges.yml"
+      ]
+    },
+    "parallel work": {
+      "paths": [
+        "scripts/check_open_limit.py",
+        "scripts/automerge.py",
+        "scripts/change_parts.py",
+        "scripts/check_branch_revival.py"
+      ]
+    },
+    "quality": {
+      "paths": [
+        "tests/*",
+        "scripts/check_*.py",
+        "pyproject.toml"
+      ]
+    },
+    "quotas": {
+      "paths": [
+        "packages/transport/*",
+        "scripts/runs_series.py",
+        ".github/workflows/*"
+      ]
+    },
+    "architecture": {
+      "paths": [
+        "docs/decisions/*",
+        "docs/use/pipeline.md",
+        "docs/agent/behaviour.md",
+        "scripts/paths.py"
+      ]
+    },
+    "automation": {
+      "paths": [
+        ".github/workflows/*",
+        "scripts/*"
+      ]
+    },
+    "security": {
+      "paths": [
+        ".github/workflows/*",
+        "scripts/review_*.py",
+        ".claude/settings.json"
+      ]
+    },
+    "showcases": {
+      "paths": [
+        "README.md",
+        "scripts/build_facts.py",
+        "scripts/publish_facts.py",
+        "scripts/badges_read.py",
+        ".github/workflows/badges.yml",
+        ".github/workflows/step-facts.yml",
+        ".rules/showcase.json"
+      ]
+    },
+    "observation": {
+      "paths": [
+        "scripts/main_red.py",
+        "scripts/schedules_seen.py",
+        "scripts/stuck.py",
+        "scripts/hail.py",
+        ".github/workflows/main-red.yml",
+        ".github/workflows/schedules-seen.yml",
+        ".github/workflows/stuck.yml",
+        ".rules/schedules.json"
+      ]
+    },
+    "tooling": {
+      "paths": [
+        "scripts/*",
+        "pyproject.toml",
+        "kit/*"
+      ]
+    },
+    "diagnostics": {
+      "paths": [
+        "scripts/*",
+        ".github/workflows/*"
+      ]
+    },
+    "interface": {
+      "paths": [],
+      "why": "интерфейса у проекта нет: наружу он говорит прогонами и текстом, их ведут области «output» и «documentation»"
+    },
+    "release": {
+      "paths": [
+        ".github/workflows/release.yml",
+        "scripts/release.py",
+        "scripts/version.py",
+        "scripts/check_version.py",
+        "CONTRACT_VERSION",
+        "CHANGELOG.md",
+        "docs/dev/release.md",
+        "changelog.d/README.md"
+      ]
+    },
+    "environments": {
+      "paths": [
+        ".github/workflows/*",
+        "pyproject.toml",
+        "scripts/check_env.py",
+        ".github/workflows/python-next.yml"
+      ]
+    },
+    "tracker": {
+      "paths": [
+        "scripts/work_plan.py",
+        "scripts/findings.py",
+        "scripts/task_items.py",
+        "scripts/task_shape.py",
+        "scripts/items*.py",
+        "scripts/labels.py",
+        "scripts/sync_labels.py",
+        ".github/labels.yml"
+      ]
+    },
+    "roles": {
+      "paths": [
+        "docs/agent/roles.md",
+        "docs/dev/directions.md",
+        ".rules/review-roles.json"
+      ]
+    },
+    "runs": {
+      "paths": [
+        ".github/workflows/*",
+        "scripts/runs_series.py",
+        "scripts/ci_complete*.py"
+      ]
+    },
+    "concurrency": {
+      "paths": [
+        ".github/workflows/*",
+        "scripts/automerge.py"
+      ]
+    },
+    "migrations": {
+      "paths": [
+        "changelog.d/*.contract.md",
+        "docs/use/*",
+        "scripts/onboard.py"
+      ]
+    },
+    "product": {
+      "paths": [
+        "README.md",
+        "docs/use/*",
+        "docs/dev/roadmap.md"
+      ]
+    },
+    "API": {
+      "paths": [
+        "packages/transport/*",
+        "scripts/transport_surface.py"
+      ]
+    },
+    "collaboration": {
+      "paths": [
+        "AGENTS.md",
+        "docs/agent/*",
+        ".github/authors.txt"
+      ]
+    },
+    "decisions": {
+      "paths": [
+        "docs/decisions/*"
+      ]
+    },
+    "planning": {
+      "paths": [
+        "scripts/work_plan.py",
+        "docs/dev/roadmap.md",
+        "docs/dev/gaps.md"
+      ]
+    },
+    "AI": {
+      "paths": [
+        ".claude/*",
+        ".github/workflows/review.yml",
+        ".github/workflows/step-review.yml",
+        ".github/workflows/claude.yml",
+        "scripts/review_*.py"
+      ]
+    },
+    "privacy": {
+      "paths": [
+        ".github/workflows/review.yml",
+        ".github/workflows/step-review.yml",
+        ".github/workflows/claude.yml"
+      ]
+    },
+    "configuration": {
+      "paths": [
+        ".pipeline.yml",
+        "pyproject.toml",
+        ".rules/*",
+        ".claude/settings.json",
+        ".github/labels.yml"
+      ]
+    },
+    "output": {
+      "paths": [
+        "scripts/*",
+        ".github/workflows/*"
+      ]
+    },
+    "reports": {
+      "paths": [
+        "scripts/*"
+      ]
+    },
+    "pace": {
+      "paths": [],
+      "why": "темп работы окна по диффу не виден: его меряет возраст окна по трейлерам истории (`window-lifetime`), а не тронутые пути"
+    },
+    "community": {
+      "paths": [],
+      "why": "сообщества у проекта нет: внешних участников и входящей от них работы ноль"
+    },
+    "localisation": {
+      "paths": [],
+      "why": "проект одноязычный: перевода и словаря локализации в дереве нет"
+    },
+    "resources": {
+      "paths": [
+        ".github/workflows/*",
+        "scripts/runs_series.py"
+      ]
+    },
+    "taxonomy": {
+      "paths": [
+        ".rules/finding-kinds.json",
+        "scripts/kinds.py",
+        "scripts/finding_kinds.py"
+      ]
+    },
+    "network": {
+      "paths": [
+        "packages/transport/*",
+        "scripts/family_uptake.py",
+        "scripts/catalogue.py"
+      ]
+    },
+    "comparison": {
+      "paths": [],
+      "why": "сравнения с чужими продуктами проект не ведёт: соседи по семье — область «borrowing»"
+    },
+    "borrowing": {
+      "paths": [
+        ".rules/portable.json",
+        "scripts/onboard.py",
+        "docs/use/onboarding.md",
+        "kit/*"
+      ]
+    },
+    "history": {
+      "paths": [
+        ".github/authors.txt",
+        ".github/workflows/attribution-history.yml",
+        "scripts/trunk_log.py",
+        "scripts/archive_against_history.py",
+        "CHANGELOG.md"
+      ]
+    }
+  }
+}
