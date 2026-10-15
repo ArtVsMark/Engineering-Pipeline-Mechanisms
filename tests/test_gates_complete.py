@@ -967,10 +967,11 @@ def test_a_cancelled_only_name_refuses_once_the_run_is_done() -> None:
 
 def annotation_line() -> str:
     """Строка прогона, готовящая вывод к аннотации площадки."""
+    # Тело сводного гейта — составным действием (#1385): прогон его только зовёт.
     document = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "ci-complete.yml").read_text(encoding="utf-8")
+        (ROOT / ".github" / "actions" / "ci-complete" / "action.yml").read_text(encoding="utf-8")
     )
-    said = str(document["jobs"]["ci-complete"]["steps"][-1]["run"])
+    said = str(document["runs"]["steps"][-1]["run"])
     found = [line for line in said.splitlines() if "sed -z" in line]
     if len(found) != 1:
         raise AssertionError(

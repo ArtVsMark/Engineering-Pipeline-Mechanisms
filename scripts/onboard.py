@@ -55,8 +55,9 @@
 владельца 04.10.2026 по #992, вариант 3) он кладёт заготовку сам — но только
 в свободные пути: файл, который уже есть, называется, и не пишется ни один.
 Иначе «подключено» и «подправлено на ходу» стали бы неотличимы. Сводный гейт
-`ci-complete.yml` заготовка не кладёт: он пока копируется, а не зовётся
-(`tests/test_portable.py::STILL_COPIED`, вынос — #993).
+`ci-complete.yml` кладётся тонким прогоном: его джоб `ci-complete` зовёт
+составное действие `.github/actions/ci-complete` адресом с прибивкой (#1385),
+и имя в защите ветки остаётся `ci-complete`.
 
 СВОД ОКНА КЛАДЁТСЯ ЗАГОТОВКОЙ, И ЗАНЯТЫЙ СВОД ЗАКЛАДКУ НЕ ДЕРЖИТ (#995,
 пункт 1). Окно потребителя работает с конвейером по своду, и общая часть
@@ -721,6 +722,30 @@ def pin_of(root: Path) -> str:
     return tag
 
 
+#: Вызов сводного гейта в нашем прогоне — внутренним путём; у потребителя он
+#: становится адресом с прибивкой.
+SUMMARY_CALL: Final = f"uses: ./{paths.SUMMARY_ACTION.parent.as_posix()}"
+
+
+def summary_kit(root: Path, repo: str, pin: str) -> str:
+    """Тонкий `ci-complete.yml` потребителя — наш прогон с адресом действия вместо `./`.
+
+    Берётся НАШ файл, а не пишется второй рядом (022): события, группа отмены и
+    права у потребителя те же, что проверены здесь. Вызов действия в нём ровно
+    один — иначе подмена адреса была бы угадыванием (075).
+    """
+    try:
+        source = (root / paths.WORKFLOWS / SUMMARY_FLOW).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise NotRun(f"{SUMMARY_FLOW} не прочитан: {exc}") from exc
+    if source.count(SUMMARY_CALL) != 1:
+        raise NotRun(
+            f"вызовов «{SUMMARY_CALL}» в {SUMMARY_FLOW}: {source.count(SUMMARY_CALL)}, ждали один"
+        )
+    outward = f"uses: {repo}/{paths.SUMMARY_ACTION.parent.as_posix()}@{pin}"
+    return source.replace(SUMMARY_CALL, outward)
+
+
 def caller(name: str, repo: str, pin: str) -> str:
     """Джоб вызывающего для одного шага — то, что потребитель кладёт к себе."""
     return (
@@ -813,6 +838,7 @@ def main(argv: list[str] | None = None) -> int:
         own = own_callers(args.root, names)
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
+        summary = summary_kit(args.root, args.repo, pin)
         rulebook = rulebook_kit(args.root)
         # Перечень данных выводится ДО печати и до записи: битый инвентарь
         # отказывает выходом захода, а не трейсбеком после положенного (#996).
@@ -857,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             files = {
                 paths.WORKFLOWS / PIPELINE_FLOW: thin_ci(pipeline, args.repo, pin),
+                paths.WORKFLOWS / SUMMARY_FLOW: summary,
                 paths.PIPELINE: answer(pipeline, beyond, on_change=on_change),
                 **{
                     paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
@@ -913,8 +940,8 @@ def main(argv: list[str] | None = None) -> int:
             + badge_line(repo_of(args.write) or REPO_PLACEHOLDER)
         )
         print(
-            f"Сводный гейт заготовка не кладёт: скопируйте `{paths.WORKFLOWS}/{SUMMARY_FLOW}` "
-            "поставщика — его имя и ставится в защиту ветки."
+            f"Сводный гейт положен тонким `{paths.WORKFLOWS}/{SUMMARY_FLOW}`: его имя "
+            "`ci-complete` и ставится в защиту ветки."
         )
         if data is None:
             print(f"Перечень данных общих шагов не выведен: нет `{paths.PORTABLE}`.")
@@ -940,8 +967,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# 3. В защиту ветки «{paths.TRUNK}» — ОДНО имя: имя своего сводного гейта.")
     print(f"#    Общая ветка обязана зваться «{paths.TRUNK}»: механизмы её имя не угадывают.")
     print(
-        f"#    Сводный гейт — копия `{paths.WORKFLOWS}/{SUMMARY_FLOW}` поставщика: он не зовётся."
+        f"#    Сводный гейт — свой `{paths.WORKFLOWS}/{SUMMARY_FLOW}`, его джоб зовёт действие:\n"
     )
+    print(summary)
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
     print("#    в матрицу, и защита начинает ждать имя, которого никто не выдаёт (168).")
     kit_names = ", ".join(f"`{path}`" for path in sorted(rulebook))
