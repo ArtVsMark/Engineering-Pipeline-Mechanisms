@@ -284,11 +284,12 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         lambda repo, item, tok, *, dry_run: (state["merged"].append(item.number), "merged-sha")[1],
     )
 
-    def head_verdict(repo: str, item: Any, tok: str) -> tuple[list[str], bool]:
+    def head_verdict(repo: str, item: Any, tok: str, runs: Any = None) -> tuple[list[str], bool]:
         problems, waiting = state["runs"].get(item.number, ([], False))
         return list(problems), bool(waiting)
 
     monkeypatch.setattr(module, "head_verdict", head_verdict)
+    monkeypatch.setattr(module, "head_runs", lambda repo, item, tok: [])
     monkeypatch.setattr(
         module, "awaits_look", lambda repo, item, tok: item.number in state["looking"]
     )
@@ -1183,15 +1184,22 @@ def test_the_head_verdict_is_asked_once_per_change(
     движение сделало другое (022).
     """
     asked: list[int] = []
+    fetched: list[int] = []
 
-    def counting(repo: str, item: Any, tok: str) -> tuple[list[str], bool]:
+    def counting(repo: str, item: Any, tok: str, runs: Any = None) -> tuple[list[str], bool]:
         asked.append(item.number)
         return [], False
 
+    def records(repo: str, item: Any, tok: str) -> list[dict[str, Any]]:
+        fetched.append(item.number)
+        return []
+
     monkeypatch.setattr(module, "head_verdict", counting)
+    monkeypatch.setattr(module, "head_runs", records)
     platform["changes"] = [change(1, "automerge"), change(2, "automerge")]
     module.advance("o/r", "token", "main", dry_run=False)
     assert sorted(asked) == [1, 2], f"вердикт спрошен не по разу: {asked}"
+    assert sorted(fetched) == [1, 2], f"записи головы опрошены не по разу: {fetched}"
 
 
 def test_the_source_of_a_change_is_decided_without_the_platform() -> None:
@@ -1648,7 +1656,9 @@ def test_a_refusal_above_is_kept_by_the_exit_of_a_behind_head(
 ) -> None:
     """Отказ взвода у головы выше не теряется на выходе отставшей головы (взгляд на #1203)."""
 
-    def refuse(repo: str, change: Any, queue: Any, tok: str, *, dry_run: bool) -> None:
+    def refuse(
+        repo: str, change: Any, queue: Any, tok: str, *, dry_run: bool, runs: Any = None
+    ) -> None:
         raise module.NotRun("площадка отвергла мутацию")
 
     monkeypatch.setattr(module, "hand_over", refuse)
@@ -2958,23 +2968,78 @@ def test_every_string_field_of_the_ast_is_classified() -> None:
 
 
 STALL_NOW = module.datetime(2026, 10, 14, 20, 30, tzinfo=module.UTC)
+STALL_REQUIRED = ["ci-complete"]
 
 
-def stall_stand(monkeypatch: pytest.MonkeyPatch, *, green_at: str | None, ahead: int) -> list[int]:
-    """Голова: обязательные зелены с `green_at` (`None` — ещё идут), база впереди на `ahead`."""
-    synced: list[int] = []
-    monkeypatch.setattr(
-        module,
-        "head_verdict",
-        lambda repo, item, tok: ([], green_at is None),
-    )
-    monkeypatch.setattr(
-        module.ghrest,
-        "paginate",
-        lambda path, tok, **_: (
-            [{"name": "ci-complete", "completed_at": green_at}] if green_at else []
+def timed(
+    name: str, *, done: str | None = None, started: str = "2026-10-14T19:40:00Z", ok: bool = True
+) -> dict[str, Any]:
+    """Запись проверки: `done` — время конца; `None` — ещё идёт с `started`."""
+    if done is None:
+        return {"name": name, "status": "in_progress", "started_at": started}
+    return {
+        "name": name,
+        "status": "completed",
+        "conclusion": "success" if ok else "failure",
+        "started_at": started,
+        "completed_at": done,
+    }
+
+
+@pytest.mark.parametrize(
+    ("runs", "stall"),
+    [
+        ([timed("ci-complete", done="2026-10-14T19:50:51Z")], "зелены 39 мин"),
+        ([timed("ci-complete", done="2026-10-14T20:20:00Z")], None),
+        (
+            [
+                timed("ci-complete", done="2026-10-14T19:50:51Z"),
+                timed("review / review", done="2026-10-14T20:29:00Z"),
+            ],
+            "зелены 39 мин",
         ),
+        ([timed("ci-complete", started="2026-10-14T19:20:00Z")], "«ci-complete» идёт 70 мин"),
+        ([timed("ci-complete", started="2026-10-14T20:00:00Z")], None),
+        ([timed("ci-complete", done="2026-10-14T19:50:51Z", ok=False)], None),
+        ([timed("lint", done="2026-10-14T19:50:51Z")], None),
+    ],
+    ids=[
+        "зелено-давно",
+        "зелено-недавно",
+        "поздняя-необязательная-не-сдвигает",
+        "обязательная-повисла",
+        "обязательная-идёт-недолго",
+        "обязательная-красна",
+        "обязательной-нет",
+    ],
+)
+def test_a_stall_is_read_from_the_required_records_only(
+    runs: list[dict[str, Any]], stall: str | None
+) -> None:
+    """Остановка — по обязательным: зелены дольше предела или одна идёт дольше любого джоба.
+
+    Взгляд на #1390: повисшая в `in_progress` прежде читалась вечным «ещё
+    идут», а поздняя необязательная запись отодвигала отсчёт без конца.
+    """
+    said = module.stall_of(runs, STALL_REQUIRED, STALL_NOW)
+    if stall is None:
+        assert said is None
+    else:
+        assert said is not None and stall in said
+
+
+def test_a_green_stall_names_what_it_cannot_see() -> None:
+    """Все обязательные зелены — держит не они, и это сказано, а не «повисла обязательная»."""
+    said = module.stall_of(
+        [timed("ci-complete", done="2026-10-14T19:50:51Z")], STALL_REQUIRED, STALL_NOW
     )
+    assert said is not None and "держит не они" in said and "повисла" not in said
+
+
+def stall_stand(monkeypatch: pytest.MonkeyPatch, *, ahead: int) -> list[int]:
+    """Голова с базой впереди на `ahead`; обязательная — одна `ci-complete`."""
+    synced: list[int] = []
+    monkeypatch.setattr(module.policy, "names_of", lambda checks, klass, **_: STALL_REQUIRED)
     monkeypatch.setattr(
         module.ghrest, "request", lambda method, path, tok, **_: {"ahead_by": ahead}
     )
@@ -2985,36 +3050,76 @@ def stall_stand(monkeypatch: pytest.MonkeyPatch, *, green_at: str | None, ahead:
 
 
 @pytest.mark.parametrize(
-    ("green_at", "ahead", "stalled", "pulled"),
+    ("done", "ahead", "stalled", "pulled"),
     [
         ("2026-10-14T19:50:51Z", 2, True, True),
         ("2026-10-14T19:50:51Z", 0, True, False),
         ("2026-10-14T20:20:00Z", 2, False, False),
-        (None, 2, False, False),
     ],
-    ids=["остановка-база-впереди", "остановка-основы-нет", "зелено-недавно", "ещё-идёт"],
+    ids=["остановка-база-впереди", "остановка-основы-нет", "зелено-недавно"],
 )
 def test_a_stalled_armed_head_is_pulled_only_onto_a_newer_base(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    green_at: str | None,
+    done: str,
     ahead: int,
     stalled: bool,
     pulled: bool,
 ) -> None:
-    """Зелено дольше предела — остановка; подтяжка — только на базу впереди головы (#1354).
+    """Остановка подтягивает голову только на базу впереди неё (#1354).
 
-    Замер #1352: зелено в 19:50, площадка не сливала до 20:30 и дольше. Свежая
-    голова под пределом — прежнее ожидание; без новой основы мера называется
-    недоступной, а не повторяется вслепую.
+    Замер #1352: зелено в 19:50, площадка не сливала до 20:30 и дольше. Без
+    новой основы мера называется недоступной, а не повторяется вслепую.
     """
-    synced = stall_stand(monkeypatch, green_at=green_at, ahead=ahead)
+    synced = stall_stand(monkeypatch, ahead=ahead)
     head = change(1352, "automerge", armed=True)
-    assert module.unstick("o/r", head, "token", dry_run=False, now=STALL_NOW) is stalled
+    runs = [timed("ci-complete", done=done)]
+    assert module.unstick("o/r", head, "token", dry_run=False, runs=runs, now=STALL_NOW) is stalled
     assert synced == ([1352] if pulled else [])
     said = capsys.readouterr().out
     if stalled and not pulled:
         assert "::warning::" in said and "подтяжка недоступна" in said
+
+
+def test_unstick_reads_the_records_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Записи, прочитанные заходом, не опрашиваются второй раз (022, взгляд на #1390)."""
+    stall_stand(monkeypatch, ahead=0)
+
+    def refuse(*_: object, **__: object) -> list[dict[str, Any]]:
+        raise AssertionError("записи головы опрошены второй раз")
+
+    monkeypatch.setattr(module, "head_runs", refuse)
+    runs = [timed("ci-complete", done="2026-10-14T20:25:00Z")]
+    head = change(1352, "automerge", armed=True)
+    assert module.unstick("o/r", head, "token", dry_run=False, runs=runs, now=STALL_NOW) is False
+
+
+def test_head_runs_is_one_read_of_the_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Опрос записей головы — один адрес: последние записи по её коммиту."""
+    asked: list[str] = []
+
+    def paginate(path: str, tok: str, **_: Any) -> list[dict[str, Any]]:
+        asked.append(path)
+        return [timed("ci-complete", done="2026-10-14T20:25:00Z")]
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    head = change(1352, "automerge", armed=True)
+    assert module.head_runs("o/r", head, "token")[0]["name"] == "ci-complete"
+    assert asked == [f"repos/o/r/commits/{head.head}/check-runs?filter=latest"]
+
+
+@pytest.mark.parametrize(
+    ("stamp", "moment"),
+    [
+        ("2026-10-14T19:50:51Z", module.datetime(2026, 10, 14, 19, 50, 51, tzinfo=module.UTC)),
+        (None, None),
+        ("вчера", None),
+    ],
+    ids=["время", "нет-времени", "не-время"],
+)
+def test_moment_of_refuses_what_is_not_a_time(stamp: object, moment: Any) -> None:
+    """Время записи не той формы — `None`, а не трейсбек всего захода."""
+    assert module.moment_of(stamp) == moment
 
 
 def test_an_armed_head_with_the_same_body_is_asked_about_a_stall(
@@ -3025,7 +3130,9 @@ def test_an_armed_head_with_the_same_body_is_asked_about_a_stall(
     platform["held"][4] = ("изменение 4 (#4)", "тело origin/agent/change-4")
     asked: list[int] = []
 
-    def unstick(repo: str, item: Any, tok: str, *, dry_run: bool, now: Any = None) -> bool:
+    def unstick(
+        repo: str, item: Any, tok: str, *, dry_run: bool, runs: Any = None, now: Any = None
+    ) -> bool:
         asked.append(item.number)
         return True
 
@@ -3034,29 +3141,6 @@ def test_an_armed_head_with_the_same_body_is_asked_about_a_stall(
     assert asked == [4]
     assert platform["asked"] == [], "взведённое тем же телом взвели заново"
     assert "площадка ждёт зелёного" not in capsys.readouterr().out
-
-
-@pytest.mark.parametrize(
-    ("waiting", "ends", "since"),
-    [
-        (False, ["2026-10-14T20:00:00Z", "2026-10-14T20:05:00Z"], "2026-10-14T20:05:00+00:00"),
-        (True, ["2026-10-14T20:00:00Z"], None),
-        (False, [], None),
-    ],
-    ids=["зелено-с-последней", "ещё-идут", "записей-нет"],
-)
-def test_green_since_is_the_end_of_the_last_run(
-    monkeypatch: pytest.MonkeyPatch, waiting: bool, ends: list[str], since: str | None
-) -> None:
-    """Зелено «с» — конец последней записи; пока идут или записей нет — не зелено."""
-    monkeypatch.setattr(module, "head_verdict", lambda repo, item, tok: ([], waiting))
-    monkeypatch.setattr(
-        module.ghrest,
-        "paginate",
-        lambda path, tok, **_: [{"completed_at": one} for one in ends],
-    )
-    got = module.green_since("o/r", change(7, "automerge", armed=True), "token")
-    assert got == (module.datetime.fromisoformat(since) if since else None)
 
 
 @pytest.mark.parametrize(

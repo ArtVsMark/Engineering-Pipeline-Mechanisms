@@ -173,6 +173,10 @@ STATE_ARMABLE: Final = "blocked"
 #: больше 40 минут, пока не сменилась голова. Обычное слияние после зелёного
 #: идёт за минуты; двадцать — запас на очередь площадки, а не на повисшее.
 STALL_AFTER: Final = timedelta(minutes=20)
+#: СКОЛЬКО ОБЯЗАТЕЛЬНАЯ ИДЁТ, ПРЕЖДЕ ЧЕМ ЭТО ПОВИСШЕЕ, А НЕ ДОЛГОЕ (взгляд на
+#: #1390). Самый длинный предел джоба в прогонах — 45 минут (`timeout-minutes`):
+#: запись, которая идёт дольше любого предела, площадка уже не завершит сама.
+HUNG_AFTER: Final = timedelta(minutes=60)
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -481,7 +485,9 @@ def branch_health(repo: str, sha: str, owner_token: str) -> list[str]:
     return problems
 
 
-def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str], bool]:
+def head_verdict(
+    repo: str, change: Change, owner_token: str, runs: list[dict[str, Any]] | None = None
+) -> tuple[list[str], bool]:
     """Вердикт по голове кандидата: находки и признак «ещё идут».
 
     Пустой список записей на голове — отказ, а не «зелено»: предмет проверки не
@@ -489,13 +495,8 @@ def head_verdict(repo: str, change: Change, owner_token: str) -> tuple[list[str]
     """
     checks = policy.load()
     required = policy.names_of(checks, policy.REQUIRED)
-    runs = list(
-        ghrest.paginate(
-            f"repos/{repo}/commits/{change.head}/check-runs?filter=latest",
-            owner_token,
-            key="check_runs",
-        )
-    )
+    if runs is None:
+        runs = head_runs(repo, change, owner_token)
     if not runs:
         return ([f"#{change.number}: записей проверок на голове нет — прогон не стартовал"], False)
     return ci_complete.verdict(ci_complete.worst_per_name(runs), required, "", strict_missing=True)
@@ -1060,27 +1061,71 @@ def keep_only(
             take_back(repo, neighbour, "взведена не голова очереди", owner_token, dry_run=dry_run)
 
 
-def green_since(repo: str, change: Change, owner_token: str) -> datetime | None:
-    """С какого времени голова зелена по всем обязательным; не зелена — `None`.
-
-    Время — конец последней завершённой записи проверки на голове: пока любая
-    идёт, голова ещё не «зелена и ждёт», а считается.
-    """
-    problems, waiting = head_verdict(repo, change, owner_token)
-    if problems or waiting:
-        return None
-    ends = [
-        str(run["completed_at"])
-        for run in ghrest.paginate(
+def head_runs(repo: str, change: Change, owner_token: str) -> list[dict[str, Any]]:
+    """Записи проверок на голове кандидата — один опрос, который читают все."""
+    return list(
+        ghrest.paginate(
             f"repos/{repo}/commits/{change.head}/check-runs?filter=latest",
             owner_token,
             key="check_runs",
         )
-        if run.get("completed_at")
-    ]
-    if not ends:
+    )
+
+
+def moment_of(stamp: object) -> datetime | None:
+    """Время записи площадки; нет его или оно не той формы — `None`."""
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")) if stamp else None
+    except ValueError:
         return None
-    return max(datetime.fromisoformat(one.replace("Z", "+00:00")) for one in ends)
+
+
+def stall_of(runs: list[dict[str, Any]], required: list[str], moment: datetime) -> str | None:
+    """Чем остановлена голова, если остановлена; обычное ожидание — `None`.
+
+    ДВА РОДА ОСТАНОВКИ (взгляд на #1390). Обязательная, которая идёт дольше
+    `HUNG_AFTER`, — повисшая, и названа она по имени: «ещё идут» ждало бы её
+    вечно. Все обязательные зелены дольше `STALL_AFTER` — держит слияние не
+    они, а то, чего очередь не видит: требование защиты ветки вне
+    `.pipeline.yml` или запись не в виде проверки. Это так и названо, а не
+    выдано за «повисшую обязательную».
+
+    СЧЁТ — ПО ОБЯЗАТЕЛЬНЫМ, А НЕ ПО ВСЕМ ЗАПИСЯМ: поздняя необязательная —
+    повтор, сторонний прогон — иначе отодвигала бы отсчёт без конца.
+    """
+    latest = {
+        str(run.get("name")): run
+        for run in ci_complete.worst_per_name(runs)
+        if run.get("name") in required
+    }
+    if set(required) - set(latest):
+        return None
+    hung = [
+        (name, started)
+        for name, run in latest.items()
+        if run.get("status") != "completed"
+        and (started := moment_of(run.get("started_at"))) is not None
+        and moment - started >= HUNG_AFTER
+    ]
+    if hung:
+        name, started = min(hung, key=lambda one: one[1])
+        minutes = int((moment - started).total_seconds() // 60)
+        return f"обязательная «{name}» идёт {minutes} мин — повисла"
+    if any(
+        run.get("status") != "completed" or run.get("conclusion") != "success"
+        for run in latest.values()
+    ):
+        return None
+    ends = [moment_of(run.get("completed_at")) for run in latest.values()]
+    if not ends or None in ends:
+        return None
+    since = max(end for end in ends if end is not None)
+    if moment - since < STALL_AFTER:
+        return None
+    return (
+        f"обязательные зелены {int((moment - since).total_seconds() // 60)} мин, а площадка не "
+        "сливает — держит не они: требование защиты ветки вне .pipeline.yml или запись не проверкой"
+    )
 
 
 def base_ahead(repo: str, change: Change, owner_token: str) -> int:
@@ -1094,41 +1139,52 @@ def base_ahead(repo: str, change: Change, owner_token: str) -> int:
 
 
 def unstick(
-    repo: str, change: Change, owner_token: str, *, dry_run: bool, now: datetime | None = None
+    repo: str,
+    change: Change,
+    owner_token: str,
+    *,
+    dry_run: bool,
+    runs: list[dict[str, Any]] | None = None,
+    now: datetime | None = None,
 ) -> bool:
-    """Остановка взведённого: зелено дольше `STALL_AFTER`, а площадка не сливает (#1354).
+    """Остановка взведённого: площадка не сливает, хотя ждать нечего (#1354).
 
-    ПОДТЯЖКА — ЗАКОННАЯ МЕРА ПРОТИВ ПОВИСШЕЙ ПРОВЕРКИ (решение владельца
-    14.10.2026). Новая голова гонит проверки заново, а `main` подтягивается
-    настоящий: это не пустой коммит и не закрытие с переоткрытием, которые по-
-    прежнему запрещены. Мера доступна, только когда `main` ушёл вперёд головы;
-    без новой основы это говорится словами, а не повторяется вслепую.
+    ПОДТЯЖКА — ЗАКОННАЯ МЕРА ПРОТИВ ОСТАНОВКИ (решение владельца 14.10.2026).
+    Новая голова гонит проверки заново, а `main` подтягивается настоящий: это
+    не пустой коммит и не закрытие с переоткрытием, которые по-прежнему
+    запрещены. Мера доступна, только когда `main` ушёл вперёд головы; без
+    новой основы это говорится словами, а не повторяется вслепую.
 
-    Отвечает, была ли остановка: `False` — голова ещё не зелена или ждёт меньше
-    предела, и это обычное ожидание площадки.
+    `runs` — записи головы, уже прочитанные заходом (`classify`): второй опрос
+    той же головы дал бы второе состояние того же (022).
+
+    Отвечает, была ли остановка: `False` — обычное ожидание площадки.
     """
-    since = green_since(repo, change, owner_token)
-    moment = now or datetime.now(UTC)
-    if since is None or moment - since < STALL_AFTER:
+    required = policy.names_of(policy.load(), policy.REQUIRED)
+    seen = runs if runs is not None else head_runs(repo, change, owner_token)
+    stall = stall_of(seen, required, now or datetime.now(UTC))
+    if stall is None:
         return False
-    waited = int((moment - since).total_seconds() // 60)
-    said = (
-        f"#{change.number}: остановка — обязательные зелены {waited} мин, слияние взведено, "
-        "а площадка не сливает"
-    )
+    said = f"#{change.number}: остановка — {stall}; слияние взведено"
     if base_ahead(repo, change, owner_token):
-        print(f"{said}; база впереди головы — подтягиваю её, новая голова снимет повисшее (#1354)")
+        print(f"{said}; база впереди головы — подтягиваю её, новая голова снимет остановку (#1354)")
         sync_head(repo, change.number, owner_token, dry_run=dry_run)
     else:
         print(
             f"::warning::{said}; новой основы нет — подтяжка недоступна, "
-            "нужен человек: перезапуск повисшей проверки (#1354)"
+            "нужен человек: перезапустить названное или снять то, что держит слияние (#1354)"
         )
     return True
 
 
 def hand_over(
-    repo: str, change: Change, queue: list[Change], owner_token: str, *, dry_run: bool
+    repo: str,
+    change: Change,
+    queue: list[Change],
+    owner_token: str,
+    *,
+    dry_run: bool,
+    runs: list[dict[str, Any]] | None = None,
 ) -> None:
     """Отдаёт площадке последнее действие: взводит слияние НАШИМ телом.
 
@@ -1158,7 +1214,7 @@ def hand_over(
         if held_body(repo, change.number, owner_token) == (title, body):
             # ОЖИДАНИЕ И ОСТАНОВКА РАЗЛИЧАЮТСЯ (#1354): зелёное, которое площадка
             # не сливает дольше предела, — остановка, и у неё своя мера.
-            if not unstick(repo, change, owner_token, dry_run=dry_run):
+            if not unstick(repo, change, owner_token, dry_run=dry_run, runs=runs):
                 print(f"#{change.number}: уже взведено тем же телом — площадка ждёт зелёного")
             return
         take_back(
@@ -1214,7 +1270,11 @@ def source_of(change: Change, red: bool) -> int:
 
 def classify(
     repo: str, queue: list[Change], owner_token: str, *, dry_run: bool
-) -> tuple[dict[int, tuple[list[str], bool]], dict[int, frozenset[str]]]:
+) -> tuple[
+    dict[int, tuple[list[str], bool]],
+    dict[int, frozenset[str]],
+    dict[int, list[dict[str, Any]]],
+]:
     """Присваивает источник КАЖДОМУ кандидату и отдаёт прочитанные вердикты.
 
     ЗАЧЕМ ВСЕМ, А НЕ ГОЛОВЕ. Метка источника — не украшение головы очереди, а
@@ -1226,6 +1286,8 @@ def classify(
     Опрос записей проверок здесь ОДИН на кандидата за заход, и его же читает
     движение головы ниже: второй опрос того же дал бы второе состояние того же
     ([022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
+    Третьим отдаются сами записи: их читает распознавание остановки при
+    передаче площадке (`unstick`), и опроса там нет (взгляд на #1390).
 
     ЧЕГО ЗДЕСЬ НЕТ: конфликта. Состояние слияния площадка считает ЛЕНИВО, и
     запрос его заказывает вычисление; спрашивать у всех значит заказывать
@@ -1233,17 +1295,19 @@ def classify(
     обнаруживает на голове, и это названо, а не сглажено (046).
     """
     verdicts: dict[int, tuple[list[str], bool]] = {}
+    seen: dict[int, list[dict[str, Any]]] = {}
     # Что заход ПОСТАВИЛ — отдельно от того, что он прочитал: снимать метку
     # ниже придётся по записи, а не по снимку, снятому до неё.
     placed: dict[int, frozenset[str]] = {}
     print(f"кандидатов: {len(queue)}")
     for place, change in enumerate(queue, start=1):
-        problems, waiting = head_verdict(repo, change, owner_token)
+        seen[change.number] = head_runs(repo, change, owner_token)
+        problems, waiting = head_verdict(repo, change, owner_token, seen[change.number])
         verdicts[change.number] = (problems, waiting)
         source = source_of(change, bool(problems))
         print(f"  {place}. #{change.number} [{RANK_NAMES[source]}] — {change.title}")
         placed[change.number] = publish_source(repo, change, source, owner_token, dry_run=dry_run)
-    return verdicts, placed
+    return verdicts, placed, seen
 
 
 def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
@@ -1308,7 +1372,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     # раньше разметки, и метки застывали ровно тогда, когда нужнее всего:
     # красная общая ветка — момент, когда надо видеть, кто её чинит (0), а кто
     # просто ждёт.
-    verdicts, placed = classify(repo, queue, owner_token, dry_run=dry_run)
+    verdicts, placed, seen = classify(repo, queue, owner_token, dry_run=dry_run)
 
     troubles = branch_health(repo, base_sha, owner_token)
     if troubles:
@@ -1572,7 +1636,9 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
             # Нашёл внешний взгляд на #236.
             try:
-                hand_over(repo, change, queue, owner_token, dry_run=dry_run)
+                hand_over(
+                    repo, change, queue, owner_token, dry_run=dry_run, runs=seen.get(change.number)
+                )
             except NotRun as exc:
                 print(f"#{change.number}: не взведено — {exc}")
                 refused.append(str(exc))
