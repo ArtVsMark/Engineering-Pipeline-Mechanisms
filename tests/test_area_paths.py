@@ -85,6 +85,18 @@ def test_an_inapplicable_rule_with_blind_areas_stays_with_the_role() -> None:
     assert said.inapplicable == ["065", "077"]
     assert said.blind == ["003"]
     assert said.untouched == ["009"]
+    assert said.unasked == ["009"]
+
+
+def test_the_map_names_untouched_inapplicable_rules_apart() -> None:
+    """Неприменимые среди отсеянных карта называет отдельно (взгляд на #1369)."""
+    areas_of = {"001": ["gates"], "002": ["docs"], "009": ["docs"]}
+    said = module.narrow(["001", "002"], ["009"], areas_of, TABLE_OF, ["scripts/check_x.py"])
+    assert said.unasked == ["009"]
+    note = "\n".join(module.narrowed_said(said))
+    assert "не задеты этим изменением — 2 (002, 009); из них неприменимые — 009." in note
+    eyes_only = module.narrow(["001", "002"], [], areas_of, TABLE_OF, ["scripts/check_x.py"])
+    assert "неприменимые" not in "\n".join(module.narrowed_said(eyes_only))
 
 
 def test_the_map_names_untouched_rules_by_number() -> None:
@@ -196,7 +208,7 @@ def test_narrowing_answers_in_its_named_shape() -> None:
     """Отбор отвечает записью `Narrowed`: каждая группа названа полем, а не местом в кортеже."""
     said = module.narrow([], [], {}, TABLE_OF, [])
     assert isinstance(said, module.Narrowed)
-    assert said._fields == ("eyes", "inapplicable", "untouched", "blind", "unknown")
+    assert said._fields == ("eyes", "inapplicable", "untouched", "blind", "unknown", "unasked")
 
 
 def test_a_project_without_the_role_gets_no_word_of_it(

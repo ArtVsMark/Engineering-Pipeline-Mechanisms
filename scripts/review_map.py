@@ -320,6 +320,9 @@ class Narrowed(NamedTuple):
     blind: list[str]
     #: Области выгрузки, которых нет в таблице: их правила оставлены, а таблица отстала.
     unknown: list[str]
+    #: Неприменимые среди `untouched`: из вопроса роли о предмете ушли именно
+    #: они, и карта называет их отдельно (взгляд на #1369).
+    unasked: list[str]
 
 
 def narrow(
@@ -370,7 +373,8 @@ def narrow(
                 blind.append(number)
             else:
                 untouched.append(number)
-    return Narrowed(kept["eyes"], kept["inapplicable"], untouched, blind, sorted(unknown))
+    unasked = [number for number in untouched if number in inapplicable]
+    return Narrowed(kept["eyes"], kept["inapplicable"], untouched, blind, sorted(unknown), unasked)
 
 
 def narrowed_said(narrowed: Narrowed | None, why: str = "") -> list[str]:
@@ -391,9 +395,13 @@ def narrowed_said(narrowed: Narrowed | None, why: str = "") -> list[str]:
     # Отсеянное называется номерами, а не числом (взгляд на #1357): решение 041
     # обращено к тому, кто спросит, какое правило признано не задетым.
     untouched = ", ".join(narrowed.untouched) if narrowed.untouched else "ни одного"
+    # Неприменимые среди отсеянных названы отдельно (взгляд на #1369): вопрос
+    # к ним другой — «не принесло ли изменение предмет», и читатель карты
+    # должен видеть, какие из них роль не спросит.
+    unasked = f"; из них неприменимые — {', '.join(narrowed.unasked)}" if narrowed.unasked else ""
     lines.append(
         "Правила отобраны по тронутым путям (`.rules/area-paths.json` с общей ветки): "
-        f"не задеты этим изменением — {len(narrowed.untouched)} ({untouched})."
+        f"не задеты этим изменением — {len(narrowed.untouched)} ({untouched}){unasked}."
     )
     if narrowed.blind:
         lines.append("По диффу не видны и роли не отданы — " + ", ".join(narrowed.blind) + ".")
