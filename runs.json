@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-14T09:23:12+00:00",
+  "updated": "2026-10-15T09:00:58+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -5438,6 +5438,292 @@
         }
       },
       "coverage": 93.1
+    },
+    "2026-10-15": {
+      "runs": {
+        "verify-queue": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1663,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 8,
+          "seconds": 1974,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 7,
+          "seconds": 2155,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 306,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 590,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 108,
+          "red": 0,
+          "cancelled": 13,
+          "seconds": 2032,
+          "timed": 108,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 166,
+          "red": 1,
+          "cancelled": 78,
+          "seconds": 3520,
+          "timed": 166,
+          "red_jobs": {
+            "automerge / automerge": 1
+          },
+          "red_steps": {
+            "automerge / automerge · двигать очередь": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "work-plan": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 11,
+          "seconds": 3377,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 76,
+          "red": 0,
+          "cancelled": 58,
+          "seconds": 9590,
+          "timed": 76,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 80,
+          "red": 0,
+          "cancelled": 52,
+          "seconds": 10589,
+          "timed": 80,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 247,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 9,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 18,
+          "timed": 9,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1124,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 5050,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 70,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 70,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 145,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Пустота замера меряется стеком, а не рекурсией; тест предела сверяет номера (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 55,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Дрейф читает дату и кандидата вердикта по данным, ячейка без сборки названа (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1650,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Инцидент о ключе дорогого прогона называет ключ точно: без строк @@ целиком (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 66,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Пустота замера меряется стеком, а не рекурсией; тест предела сверяет номера": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2999,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Инцидент о ключе дорогого прогона называет ключ точно: без строк @@ целиком": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 3505,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Граница «в задании нет адреса проекта» держится тестом, комментарии названы (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 51,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Граница «в задании нет адреса проекта» держится тестом, комментарии названы": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1526,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Предикаты неприменимости не зависят от локали, полнота проб держится тестом (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 47,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 93.2
     }
   }
 }
