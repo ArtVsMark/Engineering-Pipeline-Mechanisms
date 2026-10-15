@@ -134,3 +134,14 @@ def test_only_a_404_says_the_tag_is_wrong(
     monkeypatch.setattr(module.urllib.request, "urlopen", refuse)
     step = {"env": {"RELEASES": "https://example.invalid", "FACTS_CONTRACT": "facts-v0.0.0"}}
     assert module.release_missing(step) is missing
+
+
+def test_the_step_runs_as_the_platform_runs_it(tmp_path: Path) -> None:
+    """Шаг идёт в `bash` с его `env`, своим `RUNNER_TEMP` и именем проекта — как на площадке."""
+    step = {
+        "env": {"FACTS_CONTRACT": "facts-v0.0.0"},
+        "run": 'echo "$FACTS_CONTRACT $GITHUB_REPOSITORY $RUNNER_TEMP"; exit 3',
+    }
+    code, said = module.run_step(step, tmp_path, "o/a")
+    assert code == 3
+    assert said.strip() == f"facts-v0.0.0 o/a {tmp_path}"

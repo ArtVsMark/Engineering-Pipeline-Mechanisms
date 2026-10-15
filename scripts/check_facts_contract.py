@@ -93,8 +93,8 @@ def contract_step(flow: str) -> dict[str, Any]:
 
 def touched(base: str, root: Path) -> bool:
     """Тронут ли предмет сверки изменением против `base`."""
-    names = gitcall.output(["diff", "--name-only", f"{base}...HEAD"], NotRun, cwd=str(root))
-    return any(name in SUBJECT for name in names.splitlines())
+    names = gitcall.output(["diff", "--name-only", "-z", f"{base}...HEAD"], NotRun, cwd=str(root))
+    return any(name in SUBJECT for name in names.split("\0"))
 
 
 def run_step(step: dict[str, Any], temp: Path, repo: str) -> tuple[int, str]:

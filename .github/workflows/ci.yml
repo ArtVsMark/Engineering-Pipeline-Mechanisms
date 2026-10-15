@@ -198,9 +198,12 @@ jobs:
   # только когда тронут шаг или сборка фактов: сеть на каждое изменение
   # не оплачивается. Свой джоб, а не шаг общего `step-*.yml`: потребитель шаг
   # фактов зовёт по тегу, и сверять его выпуск — дело поставщика.
+  #
+  # ДЖОБ ИДЁТ НА ЛЮБОМ СОБЫТИИ, А НЕ ТОЛЬКО НА ИЗМЕНЕНИИ: он обязательный
+  # (`.pipeline.yml`), а пропуск обязательного сводный гейт успехом не считает.
+  # Вне изменения базы нет, и шаг называет это, а не сверяет.
   facts-contract:
     name: facts-contract
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -216,6 +219,10 @@ jobs:
           BASE: ${{ github.event.pull_request.base.ref }}
         run: |
           set -uo pipefail
+          if [ -z "$BASE" ]; then
+            echo "не изменение — базы нет, сверка проверяется на изменениях"
+            exit 0
+          fi
           git fetch --no-tags origin "$BASE:refs/remotes/origin/$BASE"
           rc=0
           python scripts/check_facts_contract.py --base "origin/$BASE" || rc=$?
