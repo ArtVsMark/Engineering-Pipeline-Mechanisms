@@ -840,6 +840,62 @@ def test_a_tree_without_runs_is_an_empty_set(tmp_path: Path) -> None:
     assert module.installing_steps(tmp_path / "нет") == frozenset()
 
 
+def flow(folder: Path, name: str, steps: list[tuple[str, str]]) -> None:
+    """Прогон из шагов «имя — команда» в каталоге `folder`."""
+    folder.mkdir(parents=True, exist_ok=True)
+    body = "".join(f"      - name: {said}\n        run: {run}\n" for said, run in steps)
+    (folder / name).write_text(f"jobs:\n  j:\n    steps:\n{body}", encoding="utf-8")
+
+
+def test_installing_steps_reads_the_supplier_tree_too(tmp_path: Path) -> None:
+    """Шаг установки, названный только в прогонах поставщика, служебный и у потребителя (#1408).
+
+    У потребителя рабочий каталог — тонкие вызовы без шагов, а установка
+    названа в `step-*.yml` поставщика; без его каталога состав был бы пуст.
+    """
+    caller = tmp_path / "caller"
+    supplier = tmp_path / "supplier"
+    caller.mkdir()
+    flow(supplier, "step-x.yml", [("поставить проверки", "python -m pip install ./x")])
+    assert module.installing_steps(caller) == frozenset()
+    assert module.installing_steps(caller, supplier) == {"поставить проверки"}
+
+
+def test_a_name_working_in_either_tree_is_not_service(tmp_path: Path) -> None:
+    """Имя, работающее в одном дереве, выбывает из служебных и в другом: вычитание общее."""
+    caller = tmp_path / "caller"
+    supplier = tmp_path / "supplier"
+    flow(caller, "a.yml", [("поставить проверки", "pytest -q")])
+    flow(supplier, "step-x.yml", [("поставить проверки", "python -m pip install ./x")])
+    assert module.installing_steps(caller, supplier) == frozenset()
+
+
+def test_supplier_workflows_is_named_by_the_step_or_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Каталог поставщика берётся из `MECHANISMS`; пустая или нет — `None`, а не рабочее дерево."""
+    monkeypatch.delenv(module.SUPPLIER_ENV, raising=False)
+    assert module.supplier_workflows() is None
+    monkeypatch.setenv(module.SUPPLIER_ENV, "  ")
+    assert module.supplier_workflows() is None
+    monkeypatch.setenv(module.SUPPLIER_ENV, str(tmp_path))
+    assert module.supplier_workflows() == tmp_path / module.paths.WORKFLOWS
+
+
+def test_by_default_the_supplier_tree_comes_from_the_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Без явных каталогов состав берётся и у поставщика, названного шагом в `MECHANISMS`."""
+    monkeypatch.chdir(tmp_path)
+    flow(
+        tmp_path / "mech" / ".github" / "workflows", "step-x.yml", [("ставить", "pip install ./x")]
+    )
+    monkeypatch.delenv(module.SUPPLIER_ENV, raising=False)
+    assert module.installing_steps() == frozenset()
+    monkeypatch.setenv(module.SUPPLIER_ENV, str(tmp_path / "mech"))
+    assert module.installing_steps() == {"ставить"}
+
+
 def test_whose_step_fell_is_counted_not_assumed() -> None:
     """Служебный шаг отличается от своего — и это СЧИТАЕТСЯ, а не подразумевается.
 
