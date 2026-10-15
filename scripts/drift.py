@@ -38,7 +38,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -175,7 +175,12 @@ def ours_file(path: Path, *, missing: str) -> dict[str, Any]:
     """
     if not path.is_file():
         raise NotRun(f"нет {path}: {missing} (075)")
-    said = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        # Битый файл — отказ своего источника, а не падение всего захода:
+        # цикл источников ловит `NotRun`, а не ошибку разбора (взгляд на #1377).
+        raise NotRun(f"{path}: не JSON — {exc}") from exc
     if not isinstance(said, dict):
         raise NotRun(f"{path}: прочитанное не словарь")
     return said
@@ -279,6 +284,71 @@ def catalogue_moved(export: dict[str, Any], mine: dict[str, Any]) -> list[Drift]
             )
         )
     return found
+
+
+def evidence_unknown(export: dict[str, Any], proposals: dict[str, Any]) -> list[Drift]:
+    """Наши данные к гипотезе называют слаг, которого в `candidates` выгрузки нет.
+
+    Навык велит брать `hypothesis` из `candidates` выгрузки (export/rules.json),
+    а набор формы этого не сверяет: опечатка в слаге уходила в каталог, и
+    вердикта по ней можно было не дождаться (взгляд на #1360). Сверка стоит в
+    источнике «каталог», потому что выгрузку он уже прочёл: второй фетч того же
+    адреса мог бы прийти другим (022).
+    """
+    ours = [
+        one
+        for one in proposals.get("proposals") or []
+        if isinstance(one, dict) and one.get("kind") == "evidence"
+    ]
+    if not ours:
+        return []
+    candidates = export.get("candidates")
+    if not isinstance(candidates, list):
+        return [
+            Drift(
+                "proposal-hypothesis",
+                "в выгрузке каталога нет списка «candidates» — гипотезу наших данных "
+                "сверить не с чем",
+                "сверить разбор с export/README.md каталога: без списка кандидатов "
+                "опечатка в слаге не видна",
+            )
+        ]
+    known = {str(one.get("slug")) for one in candidates if isinstance(one, dict)}
+    # ОТСУТСТВИЕ В `candidates` — НЕ ТОЛЬКО ОПЕЧАТКА (взгляд на #1377, правило
+    # 195). Подтверждённая гипотеза становится правилом и уходит из списка
+    # кандидатов (export/README.md каталога), и тот же слаг, верный вчера,
+    # выглядит чужим. Различить их здесь нечем: вердикт — другой файл каталога,
+    # и второй фетч ради него завёл бы второе чтение (022). Поэтому строка
+    # называет обе причины и что делать в каждой.
+    return [
+        Drift(
+            "proposal-hypothesis",
+            f"данные «{one.get('slug')}» к гипотезе «{one.get('hypothesis')}», "
+            "а в «candidates» выгрузки её нет",
+            "если гипотеза стала правилом — данные к ней больше не идут, убрать их "
+            "из .rules/proposals.json по вердикту; иначе поправить `hypothesis` слагом "
+            "из export/rules.json → candidates: по чужому слагу вердикта не будет",
+        )
+        for one in ours
+        if str(one.get("hypothesis") or "") not in known
+    ]
+
+
+def catalogue_asked(export: dict[str, Any], mine: dict[str, Any]) -> list[Drift]:
+    """Источник «каталог»: сдвиг выгрузки и наши данные к её гипотезам — по одному фетчу.
+
+    Предложений нет или они не читаются — о файле говорит свой источник:
+    здесь сверять нечего, а не отказ всего каталога.
+    """
+    found = catalogue_moved(export, mine)
+    try:
+        proposals = ours_proposals()
+    except NotRun:
+        # НЕПРОЧИТАННЫЕ ПРЕДЛОЖЕНИЯ НЕ ГАСЯТ СДВИГ ВЫГРУЗКИ (взгляд на #1377).
+        # Файла нет, он битый или не словарь — об этом говорит свой источник,
+        # «вердикты по предложениям», читающий тот же файл; здесь сверять нечего.
+        return found
+    return found + evidence_unknown(export, proposals)
 
 
 def reader_is_behind(where: dict[str, Any]) -> list[Drift]:
@@ -1274,6 +1344,34 @@ def language_moved(
                 "прогон не сможет поставить эту версию — сверить матрицу с манифестом",
             )
         )
+    # ЯЧЕЙКЕ МАТРИЦЫ ЗАДАЁТСЯ ОДИН ВОПРОС: ЕСТЬ ЛИ У НЕЁ ФАЙЛ ПОД РАННЕР
+    # (взгляд на #1377, правило 210: третья починка этого места шла по одной
+    # форме). Форм у ячейки четыре: номера площадка не знает (строка выше);
+    # номер стабильный с файлом — чисто; стабильный без файла; предрелизный
+    # без файла. Две последние — один вопрос, и прежде он задавался только
+    # стабильной (поздний взгляд на #1367), а предрелизная ячейка без сборки
+    # молчала. `test-next` сюда не входит: свою сборку он спрашивает сам
+    # (`published`). При пустом `ready` стабильные ячейки называет строка
+    # `python-stable` ниже, и здесь они не повторяются.
+    unbuilt = (
+        []
+        if system is None
+        else [
+            m
+            for m in sorted(set(matrix) & (set(stable) | set(pre)), key=order)
+            if not published(manifest, m, system) and (ready or m in pre)
+        ]
+    )
+    if unbuilt:
+        found.append(
+            Drift(
+                "python-matrix",
+                f"матрица гоняет {', '.join(unbuilt)}, а файла под систему раннера "
+                f"{system} у площадки для них нет",
+                "сверить `runs-on` матрицы с манифестом площадки: эти ячейки не "
+                "позеленеют, пока под систему не выпущена сборка",
+            )
+        )
     # НИ ОДНОЙ ГОТОВОЙ ВЕТКИ ПОД СИСТЕМУ — СКАЗАНО СТРОКОЙ, А НЕ МОЛЧАНИЕМ
     # (взгляды на #1333 и #1367, правило 195). Пустой `ready` гасил сверки
     # python-stable и готовности предрелизной, и дрейф молчал там, где площадка
@@ -1372,6 +1470,20 @@ def rule_number(value: object) -> tuple[str, str]:
     if value is None or value == "":
         return "", "поля «rule» нет — номер принятого не назван"
     return "", f"поле «rule» не строка номера ({type(value).__name__}: {report.cut(str(value))})"
+
+
+def measured_day(value: object) -> date | None:
+    """День замера из записи даты: `2026-10-14` и `2026-10-14T00:00:00Z` — один день.
+
+    Нечитаемая запись — `None`, а не строка для сравнения: две записи одного
+    дня строкой не равны (взгляд на #1360).
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.strip()).date()
+    except ValueError:
+        return None
 
 
 def verdict_subject(kind: str, verdict: dict[str, Any]) -> tuple[str, str]:
@@ -1504,7 +1616,22 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
                     )
                 )
                 continue
-            if str(answered) != str(one.get("measured_at") or ""):
+            day = measured_day(answered)
+            if day is None:
+                # ДАТА ЧИТАЕТСЯ КАК ДАТА, А НЕ СТРОКОЙ (взгляд на #1360, 045):
+                # нечитаемая дата при сравнении строкой навсегда сошла бы за
+                # ожидание ответа на другой замер.
+                found.append(
+                    Drift(
+                        "proposal-answer-unread",
+                        f"вердикт по данным «{slug}»: «measured_at» {report.cut(str(answered))} "
+                        "не читается датой",
+                        "сверить разбор с export/README.md каталога: ответ по данным "
+                        "называет дату своего замера",
+                    )
+                )
+                continue
+            if day != measured_day(one.get("measured_at")):
                 continue
             if status not in EVIDENCE_STATUSES:
                 found.append(
@@ -1532,11 +1659,23 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
             )
             continue
         if status == "admitted" and kind == "evidence":
+            # КАНДИДАТ ВЕРДИКТА СВЕРЯЕТСЯ С НАШЕЙ ГИПОТЕЗОЙ, как `apart` у
+            # слияния (взгляд на #1360): принятое к другой гипотезе — не тот
+            # ответ, и сказать это надо, а не снять предложение молча.
+            hypothesis = str(one.get("hypothesis") or "")
+            elsewhere = (
+                f" (предлагали к {hypothesis})" if hypothesis and number != hypothesis else ""
+            )
             found.append(
                 Drift(
                     "proposal-admitted",
-                    f"каталог внёс данные «{slug}» к гипотезе {number}",
-                    "убрать их из .rules/proposals.json: данные лежат у самой гипотезы",
+                    f"каталог внёс данные «{slug}» к гипотезе {number}{elsewhere}",
+                    "убрать их из .rules/proposals.json: данные лежат у самой гипотезы"
+                    + (
+                        "; гипотеза ответа не наша — сверить, к той ли относятся данные"
+                        if elsewhere
+                        else ""
+                    ),
                 )
             )
         elif status == "admitted":
@@ -1885,7 +2024,7 @@ def look(
     silent: list[str] = []
     own = own_prefixes()
     asks: tuple[tuple[str, Any], ...] = (
-        ("каталог", lambda: catalogue_moved(fetch(EXPORT_URL), mine)),
+        ("каталог", lambda: catalogue_asked(fetch(EXPORT_URL), mine)),
         (
             # ФЕТЧ ОДИН НА ОБА ВОПРОСА. Второе чтение того же адреса могло бы
             # прийти уже другим, и два вердикта разошлись бы молча (022) —
