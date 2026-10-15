@@ -111,6 +111,35 @@ def test_the_publisher_writes_the_file(tmp_path: Path, run_script: RunScript) ->
     assert said["schema"] == "1.6" and not set(module.NOT_PUBLISHED) & set(said)
 
 
+@pytest.mark.parametrize(
+    ("supplier", "ours"),
+    [(REPO, True), (REPO.upper(), True), ("Чужой/Поставщик", False), (None, False)],
+    ids=["поставщик", "поставщик-иным-регистром", "чужой-поставщик", "поставщик-не-назван"],
+)
+def test_the_epm_topic_goes_only_to_the_supplier(
+    tmp_path: Path, run_script: RunScript, supplier: str | None, ours: bool
+) -> None:
+    """Тема `epm` — только у поставщика: `--supplier` совпал с `--repo` (взгляд на #1345).
+
+    Проверяется через CLI, а не через `published`: условие, подменённое на
+    `True` или `False`, краснит здесь хотя бы один случай.
+    """
+    extra = tmp_path / "extra.json"
+    extra.write_text(json.dumps({"family": {"read": True}}), encoding="utf-8")
+    out = tmp_path / "facts.json"
+    args = ["--root", str(tree(tmp_path / "дерево")), "--out", str(out), "--sha", "голова"]
+    args += ["--repo", REPO, "--extra", str(extra)]
+    if supplier is not None:
+        args += ["--supplier", supplier]
+    done = run_script("facts_common.py", *args)
+    assert done.code == module.EXIT_OK, done.text
+    said = json.loads(out.read_text(encoding="utf-8"))
+    topics = said.get("exchange", {})
+    assert ("epm" in topics) is ours, topics
+    # Не поставщику его раздел остаётся его ключом в корне, а не уезжает в нашу тему.
+    assert ("family" in said) is not ours, sorted(said)
+
+
 def test_the_published_form_keeps_the_contract_at_the_root_and_the_rest_in_topics() -> None:
     """Корень — договор, своё — в `exchange.<тема>` со своей `schema`, без вторых записей."""
     flat = {
