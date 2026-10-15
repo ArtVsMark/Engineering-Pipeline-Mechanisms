@@ -278,7 +278,10 @@
       ]
     },
     ".github/workflows/runs-series.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/runs-series.yml"
+      ]
     },
     ".github/workflows/schedules-seen.yml": {
       "answer": "configured",
@@ -339,6 +342,9 @@
       "answer": "as-is"
     },
     ".github/workflows/step-rulebook-fresh.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-runs-series.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-schedules-seen.yml": {
