@@ -94,6 +94,25 @@ def test_the_look_waits_for_the_machine_answer() -> None:
     assert "always()" not in registry and "cancelled()" not in registry, registry
 
 
+def test_the_costly_map_steps_skip_a_machine_branch() -> None:
+    """Дорогие шаги карты не идут на машинной ветке: `exit 0` кончает шаг, а не джоб (#1350).
+
+    Условие — «не yes», а не «no»: не ответивший шаг решения карту не гасит.
+    Шаги до решения и общего блока кода конвейера условия не несут.
+    """
+    steps = flow()["jobs"]["map"]["steps"]
+    costly = [
+        step
+        for step in steps
+        if step.get("id") in {"map", "mode"} or "setup-python" in str(step.get("uses"))
+    ]
+    assert len(costly) == 3, costly
+    for step in costly:
+        assert step.get("if") == "steps.machine.outputs.machine != 'yes'", step
+    first = steps.index(costly[0])
+    assert all("if" not in step for step in steps[:first]), "условие у шагов до карты"
+
+
 def test_the_input_is_declared_empty_by_default() -> None:
     """Пустой вход — смотреть все ветки: у вызывающего, не знающего о входе, ничего не меняется."""
     said = flow()[True]["workflow_call"]["inputs"]["skip-branches"]
