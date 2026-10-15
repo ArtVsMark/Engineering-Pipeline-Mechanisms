@@ -325,10 +325,8 @@ STILL_COPIED: Final = frozenset(
     {
         "arm.yml",
         "badges.yml",
-        "ci-complete.yml",
         "ci-complete-wake.yml",
         "claude.yml",
-        "labels-sync.yml",
         "release.yml",
         "runs-series.yml",
     }
@@ -356,7 +354,15 @@ def test_an_as_is_flow_is_called_not_copied() -> None:
         flow = yaml.safe_load((ROOT / name).read_text(encoding="utf-8"))
         events = flow.get("on", flow.get(True)) or {}
         names = set(events) if isinstance(events, (dict, list)) else {events}
-        if "workflow_call" not in {str(one) for one in names}:
+        # ТЕЛО — ВЫЗОВ, ЕСЛИ ПРОГОН ЗОВЁТ НАШЕ СОСТАВНОЕ ДЕЙСТВИЕ (#1385): тогда
+        # у потребителя лежит тонкий прогон, а тело приходит по тегу так же,
+        # как у шага. Сводный гейт отдан так, чтобы его имя в защите не менялось.
+        calls_action = any(
+            str(step.get("uses") or "").startswith(f"./{paths.ACTIONS.as_posix()}/")
+            for job in (flow.get("jobs") or {}).values()
+            for step in job.get("steps") or []
+        )
+        if "workflow_call" not in {str(one) for one in names} and not calls_action:
             copied.add(Path(name).name)
     extra = sorted(copied - STILL_COPIED)
     assert not extra, f"прогон `as-is` без `workflow_call` — копия, а не вызов (037): {extra}"

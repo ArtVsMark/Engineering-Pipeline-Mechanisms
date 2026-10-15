@@ -38,6 +38,12 @@ PLAIN = "name: step-молчун\non:\n  workflow_call:\njobs:\n  x:\n    steps:
 KIT = {"AGENTS.md": "# ядро\n", "CLAUDE.md": "# окно\n"}
 
 
+#: Наш сводный гейт в поддельном дереве: джоб зовёт действие внутренним путём.
+SUMMARY = (
+    f"jobs:\n  ci-complete:\n    name: ci-complete\n    steps:\n      - {module.SUMMARY_CALL}\n"
+)
+
+
 def tree(tmp_path: Path, *, tagged: str = "v2.5.0", **runs: str) -> Path:
     """Дерево с прогонами и тегом выпуска — настоящим, а не подделанным.
 
@@ -47,6 +53,9 @@ def tree(tmp_path: Path, *, tagged: str = "v2.5.0", **runs: str) -> Path:
     """
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / "scripts").mkdir()
+    # Сводный гейт лежит в каждом дереве поставщика (#1385): заготовка кладёт
+    # его тонким прогоном и без него не собирается.
+    runs.setdefault(Path(module.SUMMARY_FLOW).stem, SUMMARY)
     for name, body in runs.items():
         (tmp_path / ".github" / "workflows" / f"{name}.yml").write_text(body, encoding="utf-8")
     (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
@@ -458,6 +467,8 @@ def test_write_lays_the_own_flows_and_names_the_summary(
     kit = (consumer / ".github" / "workflows" / "план.yml").read_text("utf-8")
     assert "step-план.yml@v2.5.0" in kit
     assert module.SUMMARY_FLOW in capsys.readouterr().out
+    summary = (consumer / module.paths.WORKFLOWS / module.SUMMARY_FLOW).read_text("utf-8")
+    assert "/.github/actions/ci-complete@v2.5.0" in summary, "сводный гейт положен не вызовом"
 
 
 def test_write_refuses_a_kit_it_cannot_rewrite_and_lays_nothing(tmp_path: Path) -> None:
@@ -1045,3 +1056,20 @@ def test_both_kits_print_the_badge_line_and_leave_readme_alone(
     assert module.badge_line("Владелец/репо") in written
     assert module.PRIVATE_NOTE in written, "условие закрытого репозитория не названо"
     assert not (consumer / "README.md").exists(), "заход положил README"
+
+
+def test_the_summary_kit_calls_the_action_by_its_pin() -> None:
+    """Тонкий сводный гейт потребителя — наш прогон с адресом действия вместо `./` (#1385)."""
+    kit = module.summary_kit(ROOT, "o/r", "v9.9.9")
+    assert f"uses: o/r/{module.paths.SUMMARY_ACTION.parent.as_posix()}@v9.9.9" in kit
+    assert module.SUMMARY_CALL not in kit
+    assert "name: ci-complete" in kit, "имя в защите ветки обязано остаться прежним"
+
+
+def test_a_summary_flow_without_its_call_is_not_guessed(tmp_path: Path) -> None:
+    """Вызова действия в прогоне нет — третий исход, а не подмена наугад (075)."""
+    flows = tmp_path / module.paths.WORKFLOWS
+    flows.mkdir(parents=True)
+    (flows / module.SUMMARY_FLOW).write_text("jobs: {}\n", encoding="utf-8")
+    with pytest.raises(module.NotRun):
+        module.summary_kit(tmp_path, "o/r", "v1")

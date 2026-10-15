@@ -32,6 +32,14 @@
 ЛЮБОМ из них с причиной: появится нужда — гейт сначала научат, а не
 пропустят молча (`test_no_flow_uses_what_the_gate_does_not_parse`).
 
+НУЖДА ПОЯВИЛАСЬ, И ГЕЙТ НАУЧЕН РОВНО ЕЙ (#1385, решение владельца
+15.10.2026): сводный гейт отдаётся составным действием
+`.github/actions/ci-complete`. Разбирается одна форма — действие из дерева
+БЕЗ своих `uses:` и без `defaults`: его шаги встают на место вызова, и
+порядок установки судится по вызывающей работе. Цикла ссылок у такого
+действия нет по построению, порядка установки внутри — тоже. Любая иная
+форма составного — по-прежнему не разбирается и краснеет.
+
 УСТАНОВКА И АГЕНТ УЗНАЮТСЯ ПО ИМЕНИ ДЕЙСТВИЯ, А НЕ ПОДСТРОКОЙ — и с разной
 строгостью в сторону красного. Установка — ровно `actions/setup-python`:
 чужое действие, принятое за установку, гасило бы красное. Агент — по имени
@@ -74,8 +82,35 @@ def calls_python(step: dict[str, Any]) -> bool:
     return any(CALL.search(line) for line in code)
 
 
+def local_action(step: dict[str, Any]) -> dict[str, Any] | None:
+    """Составное действие из дерева в разбираемой форме — без своих `uses:` и `defaults`."""
+    name = action_name(step)
+    if not name.startswith(LOCAL_ACTION):
+        return None
+    path = ROOT / name / "action.yml"
+    if not path.is_file():
+        return None
+    action: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    runs = action.get("runs") or {}
+    inner = runs.get("steps") or []
+    if runs.get("using") != "composite" or action.get("defaults") or runs.get("defaults"):
+        return None
+    if any(one.get("uses") for one in inner):
+        return None
+    return action
+
+
+def expanded(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Шаги работы с раскрытыми составными действиями из дерева — на месте вызова."""
+    found: list[dict[str, Any]] = []
+    for step in steps:
+        action = local_action(step)
+        found += action["runs"]["steps"] if action else [step]
+    return found
+
+
 def unparsed(flow: dict[str, Any]) -> list[str]:
-    """Что в прогоне гейт не разбирает: составные действия из дерева и `defaults.run.shell`."""
+    """Что в прогоне гейт не разбирает: составные действия иной формы и `defaults.run.shell`."""
     found = []
     if ((flow.get("defaults") or {}).get("run") or {}).get("shell"):
         found.append("defaults.run.shell прогона")
@@ -83,7 +118,7 @@ def unparsed(flow: dict[str, Any]) -> list[str]:
         if ((job.get("defaults") or {}).get("run") or {}).get("shell"):
             found.append(f"{name}: defaults.run.shell работы")
         for number, step in enumerate(job.get("steps") or [], start=1):
-            if action_name(step).startswith(LOCAL_ACTION):
+            if action_name(step).startswith(LOCAL_ACTION) and local_action(step) is None:
                 found.append(f"{name}: {step.get('name') or f'шаг {number}'} — составное действие")
     return found
 
@@ -115,7 +150,7 @@ def jobs_with_steps() -> dict[str, list[dict[str, Any]]]:
     for file, flow in flows().items():
         for name, job in (flow.get("jobs") or {}).items():
             if job.get("steps"):
-                found[f"{file}:{name}"] = job["steps"]
+                found[f"{file}:{name}"] = expanded(job["steps"])
     return found
 
 
@@ -222,3 +257,15 @@ def test_agent_steps_exist_in_the_tree() -> None:
         if any(action_name(step).rsplit("/", 1)[-1] == AGENT for step in steps)
     ]
     assert agents, "шагов агента в дереве нет — агентская половина гейта судит пустоту (075)"
+
+
+def test_a_tree_action_is_judged_at_its_call() -> None:
+    """Составное действие раскрыто на месте вызова: его python судится по работе (#1385).
+
+    Вызов действия раньше установки — тот же вызов python раньше установки.
+    """
+    action = [{"name": "сводный", "uses": "./.github/actions/ci-complete"}]
+    assert calls_before_setup(expanded(action)), "python внутри действия не увиден"
+    assert not calls_before_setup(expanded([{"uses": f"{SETUP}@x"}, *action]))
+    summary = jobs_with_steps()["ci-complete.yml:ci-complete"]
+    assert any(calls_python(step) for step in summary), "тело сводного гейта не раскрыто"

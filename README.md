@@ -45,7 +45,8 @@
 (очередь и слияние) · [`step-main-red.yml`](.github/workflows/step-main-red.yml)
 (дежурный по общей ветке) · [`step-stuck.yml`](.github/workflows/step-stuck.yml)
 (застрявшее) · [`step-schedules-seen.yml`](.github/workflows/step-schedules-seen.yml)
-(пропущенные заходы по расписанию) · [`step-required-context.yml`](.github/workflows/step-required-context.yml)
+(пропущенные заходы по расписанию) · [`step-labels-sync.yml`](.github/workflows/step-labels-sync.yml)
+(состав меток) · [`step-required-context.yml`](.github/workflows/step-required-context.yml)
 (сверка обязательного контекста) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
 [`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
@@ -55,6 +56,10 @@
 [`step-task-items.yml`](.github/workflows/step-task-items.yml) (разбор слитого против задачи).
 Токен владельца `MERGE_QUEUE_TOKEN` и ключ агента `CLAUDE_CODE_OAUTH_TOKEN`
 передаются вызовом явно, по имени: секретов вызывающего общий шаг не видит.
+
+Сводный гейт — шагом своего джоба `ci-complete`, составным действием по адресу с
+версией: [`ci-complete`](.github/actions/ci-complete/action.yml). Имя джоба и
+есть единственное имя в защите ветки, и действие его не меняет.
 
 **Заготовку вызова печатает `scripts/onboard.py`**: джобы с прибивкой к
 последнему выпуску, ответ по каждой проверке и данные, которые заводите вы.

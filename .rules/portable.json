@@ -92,6 +92,9 @@
     ".claude/settings.json": {
       "answer": "as-is"
     },
+    ".github/actions/ci-complete/action.yml": {
+      "answer": "as-is"
+    },
     ".github/ISSUE_TEMPLATE/consumer-gap.yml": {
       "answer": "ours",
       "why": "@provider"
@@ -228,7 +231,10 @@
       "why": "@provider"
     },
     ".github/workflows/labels-sync.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/labels-sync.yml"
+      ]
     },
     ".github/workflows/main-red.yml": {
       "answer": "configured",
@@ -302,6 +308,9 @@
       "answer": "as-is"
     },
     ".github/workflows/step-journal.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-labels-sync.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-lint.yml": {

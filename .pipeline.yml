@@ -379,7 +379,8 @@ beyond_the_change:
     why: превращает сигнал Dependabot в подъём обычным путём; сам вердикта о дереве не выносит
     addressee: scripts/main_red.py
 
-  apply:
+  # Имя составное: применение — общим шагом `step-labels-sync.yml` (#1385).
+  "apply / apply":
     class: advisory
     why: доставляет объявленный состав меток; красное значит, что площадка разошлась с файлом
     addressee: scripts/main_red.py
