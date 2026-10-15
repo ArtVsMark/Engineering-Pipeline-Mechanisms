@@ -674,8 +674,10 @@ def scan(
 def machine_branch(item: dict[str, Any], prefixes: Iterable[str]) -> bool:
     """Слитое изменение открыто с машинной ветки: имя головы начинается с приставки.
 
-    Приставки задаёт вызывающий входом `skip-branches` шагов взгляда и
-    очереди, буквально, без масок (#1342, #1349): с машины вердикта не
+    Приставки задаёт вызывающий входом `skip-branches` шага взгляда
+    (`step-review.yml`) и реестра (`step-automerge.yml`), буквально, без масок
+    (#1342, #1349). У очереди позднего взгляда (`--queue`) своего отсева нет:
+    она читает реестр, уже отсеянный здесь. С машины вердикта не
     спрашивают (051), и поздний взгляд на ней — плата за пересказ чисел. Имя
     головы без строки — не машинная ветка: незнание не гасит взгляд (045).
     """
@@ -1001,6 +1003,10 @@ def main(argv: list[str] | None = None) -> int:
         live, body = findings.live_issue(args.repo, token, MARKER)
         feed = feed_reader(args.repo, token)
         merged = merged_changes(args.repo, token, args.limit)
+        # Полноту окна меряет то, что пришло, а не то, что осталось после
+        # отсева: волна машинных веток иначе прятала бы «окно заполнено»
+        # (взгляд на #1353).
+        window = len(merged)
         # МАШИННЫЕ ВЕТКИ В РЕЕСТР НЕ ВСТАЮТ (#1349): отсев здесь, а не в
         # очереди позднего взгляда — иначе запись висела бы «без взгляда»
         # навсегда и занимала место в каждой выборке. Пропуск назван числом.
@@ -1011,6 +1017,15 @@ def main(argv: list[str] | None = None) -> int:
             numbers = ", ".join(f"#{item.get('number')}" for item in skipped)
             print(f"машинных веток в окне — в реестр не встали: {len(skipped)} ({numbers})")
         known = parse_entries(body)
+        # ЗАПИСЬ, ВСТАВШАЯ ДО ВХОДА, СНИМАЕТСЯ ТЕМ ЖЕ ОТСЕВОМ (взгляд на #1353):
+        # иначе машинное слитое из прежних заходов оставалось бы «без взгляда»,
+        # и поздний взгляд брал бы его. Видно это только в окне обхода: имя
+        # ветки знает список слитого, а не реестр.
+        machine = {int(item["number"]) for item in skipped if item.get("number") is not None}
+        dropped = sorted(number for number in known if number in machine)
+        if dropped:
+            known = {number: entry for number, entry in known.items() if number not in machine}
+            print("машинные записи реестра сняты: " + ", ".join(f"#{n}" for n in dropped))
         entries, watermark = scan(
             merged,
             known,
@@ -1044,7 +1059,7 @@ def main(argv: list[str] | None = None) -> int:
         entries, tally = retire(entries, parse_tally(body))
         retired = sorted(before - set(entries))
 
-        if len(merged) >= args.limit:
+        if window >= args.limit:
             # Окно заполнено целиком — значит, за ним могло остаться слитое,
             # которого заход не увидел, а отметка обхода его перешагнула.
             print(
