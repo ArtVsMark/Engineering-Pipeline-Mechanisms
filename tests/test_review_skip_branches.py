@@ -163,3 +163,37 @@ def test_both_steps_take_the_same_input() -> None:
     assert (review["type"], review["default"]) == (registry["type"], registry["default"])
     text = AUTOMERGE.read_text(encoding="utf-8")
     assert "SKIP_BRANCHES: ${{ inputs.skip-branches }}" in text, "вход не доходит до реестра"
+
+
+def test_a_machine_entry_already_in_the_registry_is_dropped_and_the_window_counts_all(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Запись машинной ветки, вставшая до входа, снимается; полноту окна меряет весь список.
+
+    Отсев касался только новых записей, а «окно заполнено» считалось после
+    отсева, и волна машинных веток его прятала (взгляды на #1353).
+    """
+    from tests.conftest import load_script
+
+    unlooked = load_script("unlooked.py")
+    merged = [
+        {"number": 10, "head": {"ref": "chore/metrics"}, "merged_at": "2026-10-14"},
+        {"number": 11, "head": {"ref": "agent/fix"}, "merged_at": "2026-10-14"},
+    ]
+    body = f"{unlooked.MARKER}\n- #10 · вердикта нет · 2026-10-13\n"
+    kept: list[list[int]] = []
+
+    def scan(items: Any, known: Any, watermark: int, look: Any) -> tuple[dict[int, Any], int]:
+        kept.append(sorted(known))
+        return dict(known), watermark
+
+    monkeypatch.setattr(unlooked.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(unlooked.findings, "live_issue", lambda *_: (89, body))
+    monkeypatch.setattr(unlooked, "merged_changes", lambda *_: merged)
+    monkeypatch.setattr(unlooked, "scan", scan)
+    monkeypatch.setattr(unlooked, "late_on", lambda *a, **k: "")
+    unlooked.main(["--repo", "o/r", "--skip-branches", "chore/", "--limit", "2"])
+    said = capsys.readouterr()
+    assert kept == [[]], kept
+    assert "машинные записи реестра сняты: #10" in said.out
+    assert "окно обхода заполнено (2)" in said.err

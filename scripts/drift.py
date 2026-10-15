@@ -1312,11 +1312,15 @@ CATALOGUE_SHOWCASE: Final = catalogue.SHOWCASE_URL
 #: придумано: разбор по памяти молчал четыре раза подряд (#140).
 VERDICTS: Final = "verdicts"
 #: Приставка ключа вердикта по роду предложения: правило — `владелец/репо:слаг`,
-#: навык — `…:skill/слаг`, слияние — `…:merge/слаг` (export/README.md каталога).
+#: навык — `…:skill/слаг`, слияние — `…:merge/слаг`, данные к гипотезе —
+#: `…:evidence/слаг` (export/README.md каталога).
 #: Разрешительный перечень (068): род, которого здесь нет, называется, а не
 #: ищется под ключом правила — там вердикта не будет никогда, и молчание
 #: выглядело бы ожиданием. Слияние и навык прежде искались под ключом правила.
-VERDICT_PREFIX: Final = {"": "", "skill": "skill/", "merge": "merge/"}
+VERDICT_PREFIX: Final = {"": "", "skill": "skill/", "merge": "merge/", "evidence": "evidence/"}
+#: Ответы, которые бывают у данных к гипотезе (формат 1.4 канала): «влито» и
+#: «соседи» спрашивают о правилах, и у данных их нет (export/README.md каталога).
+EVIDENCE_STATUSES: Final = frozenset({"admitted", "rejected"})
 
 
 def replaced_numbers(value: object, *, merge: bool) -> tuple[list[str], str]:
@@ -1362,6 +1366,12 @@ def verdict_subject(kind: str, verdict: dict[str, Any]) -> tuple[str, str]:
     (`scripts/collect_proposals.py`, поле `skill`). Номер у навыка искать —
     значит навсегда считать принятый навык непрочитанным (взгляд на #1266).
     """
+    if kind == "evidence":
+        # Принятые данные называют КАНДИДАТА, к которому внесены (формат 1.4).
+        candidate = verdict.get("candidate")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip(), ""
+        return "", "поля «candidate» нет — гипотеза, принявшая данные, не названа"
     if kind != "skill":
         return rule_number(verdict.get("rule"))
     skill = verdict.get("skill")
@@ -1460,6 +1470,37 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
                 )
             )
             continue
+        if kind == "evidence":
+            # ОТВЕТ — НА ЗАМЕР, А НЕ НА СЛАГ (формат 1.4): вердикт называет свой
+            # `measured_at`, и новый замер под старым слагом ждёт своего ответа,
+            # а не считается отвеченным.
+            answered = verdict.get("measured_at")
+            if not answered:
+                # Ответ без даты замера — форма, которой у вердикта по данным нет:
+                # молча пропустить значило бы выдать неразобранное за ожидание
+                # (взгляд на #1360, 045).
+                found.append(
+                    Drift(
+                        "proposal-answer-unread",
+                        f"вердикт по данным «{slug}» без «measured_at» — "
+                        "на какой замер он отвечает, не сказано",
+                        "сверить разбор с export/README.md каталога: ответ по "
+                        "данным называет дату своего замера",
+                    )
+                )
+                continue
+            if str(answered) != str(one.get("measured_at") or ""):
+                continue
+            if status not in EVIDENCE_STATUSES:
+                found.append(
+                    Drift(
+                        "proposal-answer-unread",
+                        f"данные «{slug}»: статус «{status}» у данных не бывает",
+                        "сверить с export/README.md каталога: у данных к гипотезе "
+                        "ответы admitted и rejected",
+                    )
+                )
+                continue
         # Номер присваивает КАТАЛОГ и называет его полем `rule`, навык — полем
         # `skill`. Наш файл предложений их не несёт и нести не может — это
         # сказано в нём же. Нужны принятому и сведённому; у «соседей» их нет.
@@ -1475,7 +1516,15 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
                 )
             )
             continue
-        if status == "admitted":
+        if status == "admitted" and kind == "evidence":
+            found.append(
+                Drift(
+                    "proposal-admitted",
+                    f"каталог внёс данные «{slug}» к гипотезе {number}",
+                    "убрать их из .rules/proposals.json: данные лежат у самой гипотезы",
+                )
+            )
+        elif status == "admitted":
             numbers, unread = replaced_numbers(verdict.get("replaces"), merge=kind == "merge")
             # ЗАМЕНЁННЫЕ БЕРУТСЯ ИЗ ВЕРДИКТА, А РАСХОЖДЕНИЕ С ПРЕДЛОЖЕНИЕМ
             # НАЗЫВАЕТСЯ, а не делает ответ непрочитанным (взгляд на #1266).
