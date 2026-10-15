@@ -400,7 +400,7 @@ def test_the_uptake_counts_projects_and_offered_steps() -> None:
     # собранное «lint» прятало, что вызов называет файл `step-lint` (взгляд на #1241, 107).
     call = CALL.replace("step-lint", "step-secret") + CALL
     steps, refs = module.calls_in(call)
-    took = module.Took(repo="o/a", steps=steps, refs=refs)
+    took = module.Took(repo="o/a", steps=steps, refs=refs, pins=module.pins_in(call))
     none = module.Took(repo="o/b", steps=(), refs=())
     said = module.uptake([took, none], ["o/c"], ["lint", "facts"])
     assert said["projects"] == {"took": 1, "of": 3, "unread": 1, "unread_repos": ["o/c"]}
@@ -408,6 +408,38 @@ def test_the_uptake_counts_projects_and_offered_steps() -> None:
     assert said["by"] == [
         {"repo": "o/a", "steps": ["step-lint", "step-secret"], "refs": ["v1.2.0"], "contract": None}
     ]
+
+
+def test_an_unoffered_step_on_a_branch_does_not_move_a_neighbour() -> None:
+    """Свежесть — по отдаваемым шагам: неотдаваемый `step-*` на `main` её не трогает (#1355).
+
+    Отдаваемое у соседа на теге выпуска, неотдаваемое — на ветке: прежде пины
+    брались со всех вызовов, и сосед уезжал в «на ветке».
+    """
+    call = CALL.replace("v1.2.0", "v1.5.0") + CALL.replace("step-lint", "step-secret").replace(
+        "v1.2.0", "main"
+    )
+    steps, refs = module.calls_in(call)
+    took = module.Took("o/a", steps, refs, ">=0.5,<0.9", module.pins_in(call))
+    by = module.uptake([took], [], ["lint"])["by"]
+    assert by[0]["refs"] == ["v1.5.0"], by
+    said = module.freshness(by, RELEASE, "0.7")
+    assert said["fresh"] == 1 and said["branch_repos"] == [], said
+
+
+def test_span_bounds_read_both_ends_and_refuse_an_open_range() -> None:
+    """Обе границы — MAJOR.MINOR; диапазон без верхней границы — отказ, а не «любой» (073)."""
+    assert module.policy.span_bounds(" >=0.5,<0.9 ") == ((0, 5), (0, 9))
+    with pytest.raises(module.policy.BadPolicy):
+        module.policy.span_bounds(">=0.5")
+
+
+def test_freshness_asks_the_one_range_judge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Попадание в диапазон решает `policy.compatible`, а не своя копия разбора (#1355, 090)."""
+    by = [{"repo": "o/a", "refs": ["v1.5.0"], "contract": ">=0.1,<0.2"}]
+    assert module.freshness(by, RELEASE, "0.7")["behind_repos"] == ["o/a"]
+    monkeypatch.setattr(module.policy, "compatible", lambda _span, _version: True)
+    assert module.freshness(by, RELEASE, "0.7")["fresh"] == 1
 
 
 def test_a_project_calling_only_what_we_do_not_offer_took_nothing() -> None:

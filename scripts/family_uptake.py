@@ -115,6 +115,9 @@ class Took:
     #: Диапазон `contract:` из его `.pipeline.yml`. `None` — не объявлен или
     #: не прочитан: «на свежем» без него не сказать, и он назван, а не угадан.
     span: str | None = None
+    #: Пары «файл шага → версия» по каждому вызову: свежесть судится только по
+    #: отдаваемым шагам, а `refs` их не различает (взгляд на #1355).
+    pins: tuple[tuple[str, str], ...] = ()
 
     def said(self) -> str:
         """Строка сводки: числа и имена, а не оценка."""
@@ -170,6 +173,11 @@ def calls_in(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
         steps.append(found["step"])
         refs.append(found["ref"])
     return tuple(sorted(set(steps))), tuple(sorted(set(refs)))
+
+
+def pins_in(text: str) -> tuple[tuple[str, str], ...]:
+    """Пары «файл шага → версия» по каждому нашему вызову в тексте прогона."""
+    return tuple(sorted({(found["step"], found["ref"]) for found in CALL_RE.finditer(text)}))
 
 
 def shallow_clone(repo: str, where: Path, host: str = HOST, timeout: float = TIMEOUT) -> Path:
@@ -230,19 +238,28 @@ def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
     folder = clone / WANT
     steps: set[str] = set()
     refs: set[str] = set()
+    pins: set[tuple[str, str]] = set()
     # КАТАЛОГА ПРОГОНОВ МОЖЕТ НЕ БЫТЬ ВОВСЕ, и это «не взял», а не отказ:
     # проект без конвейера — законное состояние соседа.
     if folder.is_dir():
         for path in sorted(folder.glob("*.y*ml")):
-            mine, pinned = calls_in(path.read_text(encoding="utf-8", errors="replace"))
+            text = path.read_text(encoding="utf-8", errors="replace")
+            mine, pinned = calls_in(text)
             steps.update(mine)
             refs.update(pinned)
+            pins.update(pins_in(text))
     # ОТВЕТ ЛЕЖИТ В КОРНЕ, а сужение в режиме конуса корневые файлы оставляет:
     # второго клона ради одного файла не нужно.
     answer = clone / paths.PIPELINE
     text = answer.read_text(encoding="utf-8", errors="replace") if answer.is_file() else ""
     span = policy.span_said(text) if text else None
-    return Took(repo=repo, steps=tuple(sorted(steps)), refs=tuple(sorted(refs)), span=span)
+    return Took(
+        repo=repo,
+        steps=tuple(sorted(steps)),
+        refs=tuple(sorted(refs)),
+        span=span,
+        pins=tuple(sorted(pins)),
+    )
 
 
 def sweep(
@@ -313,6 +330,10 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
     поимённо: незнание — не «не взял» (045). Знаменатель шагов — то, что мы
     отдаём наружу (`onboard.steps`), а не то, что кто-то позвал: позванный, но
     не отдаваемый шаг в числитель не идёт — ни шагов, ни проектов.
+
+    `refs` в `by` — версии ОТДАВАЕМЫХ шагов (взгляд на #1355): свежесть
+    судится по ним, и неотдаваемый `step-*` на `main` не уводит соседа в
+    «на ветке», когда отдаваемое у него на теге выпуска.
     """
     # ИМЕНА ПРИВОДЯТСЯ К ОДНОЙ ФОРМЕ. Вызов называет файл (`step-lint`), а
     # отдаваемое — шаг без приставки (`lint`, `onboard.steps`): сравнение как
@@ -332,7 +353,9 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
             {
                 "repo": one.repo,
                 "steps": list(one.steps),
-                "refs": list(one.refs),
+                "refs": sorted(
+                    {ref for step, ref in one.pins if set(offered_names((step,))) & offers}
+                ),
                 "contract": one.span,
             }
             for one in took_ours
@@ -386,20 +409,23 @@ def freshness(
     }
     for one in by:
         repo, span = str(one["repo"]), one.get("contract")
-        bounds = policy.RANGE_RE.match(str(span).strip()) if span else None
-        if bounds is None:
+        # Форма диапазона — одним разбором с `policy.compatible` (взгляд на
+        # #1355, 090): своя регулярка рядом разошлась бы с ним молча.
+        try:
+            low, _high = policy.span_bounds(str(span)) if span else (None, None)
+        except policy.BadPolicy:
+            low = None
+        if low is None:
             groups["undeclared"].append(repo)
             continue
-        low = (int(bounds.group(1)), int(bounds.group(2)))
-        high = (int(bounds.group(3)), int(bounds.group(4)))
-        if now < low:
-            groups["ahead"].append(repo)
-        elif now >= high:
-            groups["behind"].append(repo)
-        else:
+        if policy.compatible(str(span), steps):
             pins = {pin_of(str(ref), release) for ref in one.get("refs") or []}
             group = "branch" if "branch" in pins else "in_range" if "other" in pins else "fresh"
             groups[group].append(repo)
+        elif now < low:
+            groups["ahead"].append(repo)
+        else:
+            groups["behind"].append(repo)
     return {
         "read": True,
         "release": release["tag"],

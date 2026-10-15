@@ -308,12 +308,12 @@ def span(path: Path = DEFAULT_PATH) -> str:
     return span_of(raw, path)
 
 
-def compatible(declared: str, version: str) -> bool:
-    """Попадает ли версия контракта в объявленный потребителем диапазон.
+def span_bounds(declared: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Нижняя и верхняя границы диапазона `contract:` — MAJOR.MINOR обеих.
 
-    Сравниваются MAJOR.MINOR: патч контракта поверхности не трогает по
-    построению, и требовать его совпадения значило бы тревожить потребителя
-    выпуском, который его не касается.
+    Один разбор формы на всех, кто её читает (090): `compatible` и свёртка
+    свежести семьи (`family_uptake.freshness`) спрашивают его, а не держат
+    свой `RANGE_RE.match`.
     """
     bounds = RANGE_RE.match(declared.strip())
     if bounds is None:
@@ -321,8 +321,20 @@ def compatible(declared: str, version: str) -> bool:
             f"диапазон совместимости «{declared}» не разбирается — нужен вид "
             '">=X.Y,<A.B" с ОБЯЗАТЕЛЬНОЙ верхней границей (073)'
         )
-    low = (int(bounds.group(1)), int(bounds.group(2)))
-    high = (int(bounds.group(3)), int(bounds.group(4)))
+    return (int(bounds.group(1)), int(bounds.group(2))), (
+        int(bounds.group(3)),
+        int(bounds.group(4)),
+    )
+
+
+def compatible(declared: str, version: str) -> bool:
+    """Попадает ли версия контракта в объявленный потребителем диапазон.
+
+    Сравниваются MAJOR.MINOR: патч контракта поверхности не трогает по
+    построению, и требовать его совпадения значило бы тревожить потребителя
+    выпуском, который его не касается.
+    """
+    low, high = span_bounds(declared)
     parts = version.split(".")
     if len(parts) < 2 or not all(piece.isdigit() for piece in parts[:2]):
         raise BadPolicy(f"версия контракта «{version}» не разбирается")
