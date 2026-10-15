@@ -13,6 +13,7 @@ on:
     paths:
       - ".github/labels.yml"
       - "scripts/sync_labels.py"
+      - ".github/workflows/step-labels-sync.yml"
       - ".github/workflows/labels-sync.yml"
   # У события всегда есть ручная кнопка: события теряются (правило 104).
   workflow_dispatch:
@@ -28,57 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ТОНКИЙ ВЫЗОВ (#1385): применение — общим шагом `step-labels-sync.yml`, а
+  # события и очередь — здесь. Имя записи проверки составное: `apply / apply`.
   apply:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-
-      - name: поставить разбор состава
-        # Версия закреплена с верхней границей (правило 073): без неё
-        # несовместимая версия применяется молча.
-        run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
-
-      - name: применить объявленный состав
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          # `-e` приходит из умолчания площадки — она зовёт `bash -e {0}`, и
-          # `set -uo pipefail` его НЕ снимает. Без `|| rc=$?` оболочка умирает
-          # на ненулевом коде раньше, чем `rc` присвоится: три объявленных
-          # исхода превращаются в два, и находка для человека краснеет как
-          # поломка.
-          rc=0
-          # Причина отказа едет в аннотацию, а не остаётся в логе: логи прогонов
-          # из части окон не читаются вовсе, и «смотрите вывод шага» для них —
-          # тупик (142). Приём один на проект (090).
-          said="${RUNNER_TEMP}/labels.txt"
-          python scripts/sync_labels.py >"$said" 2>&1 || rc=$?
-          cat "$said"
-          reason="$(tr '\n' ' ' <"$said")"
-
-          # Коды разбираются СПИСКОМ РАЗРЕШЁННОГО (068): зелёными считаются
-          # только объявленные, всё прочее отказ. Обратный порядок оставлял
-          # зелёным сломанный шаг — Python отдаёт единицу при любом сбое.
-          case "$rc" in
-            0) ;;
-            3)
-              # Находка для человека: в репозитории есть метки, которых файл не
-              # объявляет. Синхронизатор их не удаляет намеренно — снятие метки
-              # трогает все задачи разом.
-              echo "::warning::В репозитории есть метки, которых .github/labels.yml не объявляет. Либо вписать их с причиной, либо снять в репозитории: ${reason}"
-              ;;
-            *)
-              echo "::error::Синхронизация меток не отработала (код $rc): ${reason}"
-              exit 1
-              ;;
-          esac
-          exit 0
+    uses: ./.github/workflows/step-labels-sync.yml
