@@ -44,7 +44,8 @@
 (план работ) · [`step-automerge.yml`](.github/workflows/step-automerge.yml)
 (очередь и слияние) · [`step-main-red.yml`](.github/workflows/step-main-red.yml)
 (дежурный по общей ветке) · [`step-stuck.yml`](.github/workflows/step-stuck.yml)
-(застрявшее) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
+(застрявшее) · [`step-schedules-seen.yml`](.github/workflows/step-schedules-seen.yml)
+(пропущенные заходы по расписанию) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
 [`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
 [`step-review.yml`](.github/workflows/step-review.yml) (внешний взгляд и реестр находок) ·
