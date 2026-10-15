@@ -615,11 +615,30 @@ def test_a_stable_number_without_a_runner_build_is_not_called_into_the_matrix() 
         build("3.15.0", ("linux", "24.04", "x64"), stable=True),
     ]
     assert module.language_moved(builds, ["3.14"], "3.16", "26.04") == []
+    # Под 24.04 у 3.14 файла нет: ячейка матрицы названа, а 3.15 зовётся в неё.
     assert [d.source for d in module.language_moved(builds, ["3.14"], "3.16", "24.04")] == [
-        "python-stable"
+        "python-matrix",
+        "python-stable",
     ]
     moved = module.language_moved(builds, ["3.14"], "3.15", "26.04")
     assert "python-next" not in [d.source for d in moved]
+
+
+def test_a_matrix_cell_without_a_runner_build_is_named() -> None:
+    """Ветка матрицы с номером, но без файла под систему — строка дрейфа (поздний взгляд на #1367).
+
+    3.14 собрана под 26.04 и уже в матрице, 3.15 стабильна, но собрана только
+    под 24.04, а матрица гоняет обе: ячейка 3.15 краснеет, и причину называет
+    дрейф. Ветка, не позванная в матрицу, строки не даёт.
+    """
+    builds = [
+        build("3.14.7", ("linux", "26.04", "x64"), stable=True),
+        build("3.15.0", ("linux", "24.04", "x64"), stable=True),
+    ]
+    found = module.language_moved(builds, ["3.14", "3.15"], "3.16", "26.04")
+    assert [d.source for d in found] == ["python-matrix"], found
+    assert "3.15" in found[0].said and "26.04" in found[0].said
+    assert module.language_moved(builds, ["3.14"], "3.16", "26.04") == []
 
 
 def test_no_stable_build_for_the_runner_is_said_and_other_checks_go_on() -> None:
@@ -868,8 +887,8 @@ def test_a_merged_proposal_points_at_the_existing_rule() -> None:
         ("evidence", "o/r:evidence/a-thing-broke"),
     ],
 )
-def test_a_skill_or_merge_verdict_is_read_under_its_own_key(kind: str, key: str) -> None:
-    """Вердикт по навыку и слиянию лежит под ключом с приставкой рода.
+def test_a_skill_merge_or_evidence_verdict_is_read_under_its_own_key(kind: str, key: str) -> None:
+    """Вердикт по навыку, слиянию и данным лежит под ключом с приставкой рода.
 
     Прежде разбор искал его под ключом правила и молчал: каталог ответил, а
     источник печатал «вердикта нет» — ровно то, от чего защищался #140.
@@ -2393,14 +2412,82 @@ def test_evidence_answers_its_own_measurement() -> None:
         ({"status": "admitted", "measured_at": "2026-10-14"}, "candidate"),
         ({"status": "neighbours", "measured_at": "2026-10-14"}, "у данных не бывает"),
         ({"status": "admitted", "candidate": "h"}, "без «measured_at»"),
+        (
+            {"status": "admitted", "candidate": "h", "measured_at": "14.10.2026"},
+            "не читается датой",
+        ),
     ],
-    ids=["без-кандидата", "чужой-статус", "без-даты-замера"],
+    ids=["без-кандидата", "чужой-статус", "без-даты-замера", "дата-не-читается"],
 )
 def test_an_unreadable_evidence_verdict_is_named(said: dict[str, str], words: str) -> None:
     """Принятое без кандидата и статус правил у данных — «не прочитано», а не тишина (045)."""
     found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
     assert len(found) == 1 and found[0].source == "proposal-answer-unread"
     assert words in found[0].said
+
+
+@pytest.mark.parametrize(
+    "day", ["2026-10-14T00:00:00Z", "2026-10-14T12:30:00+03:00", " 2026-10-14 "]
+)
+def test_an_evidence_date_is_read_as_a_date_not_a_string(day: str) -> None:
+    """Другая запись того же дня — ответ на наш замер, а не вечное ожидание (взгляд на #1360)."""
+    said = {"status": "admitted", "candidate": "h", "measured_at": day}
+    found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
+    assert len(found) == 1 and found[0].source == "proposal-admitted", found
+
+
+@pytest.mark.parametrize(
+    ("value", "day"),
+    [
+        ("2026-10-14", "2026-10-14"),
+        ("2026-10-14T23:59:00Z", "2026-10-14"),
+        ("14.10.2026", None),
+        ("", None),
+        (None, None),
+        (20261014, None),
+    ],
+    ids=["дата", "с-временем", "чужая-запись", "пусто", "null", "число"],
+)
+def test_measured_day_reads_a_day_or_nothing(value: object, day: str | None) -> None:
+    """День замера: запись ISO с временем и без — один день, прочее — `None`."""
+    got = module.measured_day(value)
+    assert (got.isoformat() if got else None) == day
+
+
+def test_evidence_admitted_to_another_candidate_is_named() -> None:
+    """Принятое к другой гипотезе называет нашу, как `apart` у слияния (взгляд на #1360)."""
+    said = {"status": "admitted", "candidate": "g", "measured_at": "2026-10-14"}
+    found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
+    assert len(found) == 1 and "к гипотезе g (предлагали к h)" in found[0].said
+    assert "не наша" in found[0].next_step
+    same = {**said, "candidate": "h"}
+    found = module.proposals_answered(answer(same, EVIDENCE_KEY), EVIDENCE, "o/r")
+    assert "предлагали" not in found[0].said and "не наша" not in found[0].next_step
+
+
+@pytest.mark.parametrize(
+    ("candidates", "named"),
+    [([{"slug": "h"}], False), ([{"slug": "g"}], True), (None, True)],
+    ids=["кандидат-есть", "опечатка-в-слаге", "списка-нет"],
+)
+def test_evidence_hypothesis_is_checked_against_the_candidates(
+    candidates: list[dict[str, str]] | None, named: bool
+) -> None:
+    """`hypothesis` наших данных сверяется с `candidates` выгрузки (взгляд на #1360)."""
+    export = {} if candidates is None else {"candidates": candidates}
+    found = module.evidence_unknown(export, EVIDENCE)
+    assert bool(found) is named, found
+    assert all(one.source == "proposal-hypothesis" for one in found)
+    assert module.evidence_unknown({"candidates": []}, MINE) == [], "не данные — не сверяются"
+
+
+def test_the_catalogue_source_reads_the_export_once_for_both(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Источник «каталог» отвечает и о сдвиге выгрузки, и о гипотезе данных по одному фетчу."""
+    monkeypatch.setattr(module, "ours_proposals", lambda: EVIDENCE)
+    found = module.catalogue_asked({"candidates": [{"slug": "g"}]}, {})
+    assert [one.source for one in found] == ["proposal-hypothesis"]
 
 
 def test_rejected_evidence_names_the_reason() -> None:
