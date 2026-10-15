@@ -73,6 +73,28 @@ def test_narrowing_keeps_only_rules_whose_areas_were_touched() -> None:
     assert said.unknown == []
 
 
+def test_an_inapplicable_rule_with_blind_areas_stays_with_the_role() -> None:
+    """Неприменимое со слепыми областями — роли, а не в «не видны» (взгляд на #1357).
+
+    Пустой `paths` ставят областям без предмета в дереве, а роль спрашивает
+    неприменимое как раз о том, не принесло ли изменение предмет (195).
+    """
+    areas_of = {"003": ["pace"], "065": ["pace"]}
+    said = module.narrow(["003"], ["065"], areas_of, TABLE_OF, ["README.md"])
+    assert said.inapplicable == ["065"]
+    assert said.blind == ["003"]
+
+
+def test_the_map_names_untouched_rules_by_number() -> None:
+    """Отсеянные как «не задетые» правила карта называет номерами (взгляд на #1357)."""
+    areas_of = {"001": ["gates"], "002": ["docs"]}
+    said = module.narrow(["001", "002"], [], areas_of, TABLE_OF, ["scripts/check_x.py"])
+    note = "\n".join(module.narrowed_said(said))
+    assert "не задеты этим изменением — 1 (002)" in note
+    empty = module.narrow(["001"], [], {"001": ["gates"]}, TABLE_OF, ["scripts/check_x.py"])
+    assert "не задеты этим изменением — 0 (ни одно)" in "\n".join(module.narrowed_said(empty))
+
+
 def test_unknown_areas_do_not_drop_a_rule() -> None:
     """Области нет в таблице — правило остаётся, а отставание таблицы названо (045)."""
     said = module.narrow(["001", "002"], [], {"001": ["новая"]}, TABLE_OF, ["README.md"])

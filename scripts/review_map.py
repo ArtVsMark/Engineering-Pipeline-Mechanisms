@@ -315,7 +315,8 @@ class Narrowed(NamedTuple):
     inapplicable: list[str]
     #: Правила, чьи области у дерева есть, но этим изменением не задеты.
     untouched: list[str]
-    #: Правила, все области которых по диффу не видны: роли не отдаются.
+    #: Правила «держат глаза», все области которых по диффу не видны: роли не
+    #: отдаются. Неприменимое сюда не попадает никогда — см. `narrow`.
     blind: list[str]
     #: Области выгрузки, которых нет в таблице: их правила оставлены, а таблица отстала.
     unknown: list[str]
@@ -333,6 +334,13 @@ def narrow(
     НЕЗНАНИЕ НЕ ОТСЕИВАЕТ (045). Правило без областей в выгрузке или с областью,
     которой нет в таблице, остаётся в списке: отсеять его значило бы выдать
     «не задето» там, где мы не знаем. Области вне таблицы карта называет.
+
+    НЕПРИМЕНИМОЕ СО СЛЕПЫМИ ОБЛАСТЯМИ ОСТАЁТСЯ (взгляд на #1357, правило 195).
+    Пустой `paths` ставят областям, у которых в дереве нет предмета, — а вопрос
+    роли к неприменимому правилу ровно «не принесло ли изменение предмет».
+    Отсев выбрасывал бы из вопроса именно то правило, чей предмет отсутствует, —
+    сейчас это правила 065 и 077: изменение, добавившее перевод или метку для
+    новичков, роль бы не увидела.
     """
     touched = {
         area
@@ -347,9 +355,16 @@ def narrow(
         for number in numbers:
             areas = areas_of.get(number) or []
             unknown |= {area for area in areas if area not in table}
-            if not areas or any(area not in table for area in areas) or touched & set(areas):
+            known = all(area in table for area in areas)
+            hidden = bool(areas) and known and all(not table[area] for area in areas)
+            if (
+                not areas
+                or not known
+                or touched & set(areas)
+                or (hidden and group == "inapplicable")
+            ):
                 kept[group].append(number)
-            elif all(not table[area] for area in areas):
+            elif hidden:
                 blind.append(number)
             else:
                 untouched.append(number)
@@ -371,9 +386,12 @@ def narrowed_said(narrowed: Narrowed | None, why: str = "") -> list[str]:
             f"> Правила по тронутым путям НЕ отобраны: {why}. Ниже — списки целиком.",
             "",
         ]
+    # Отсеянное называется номерами, а не числом (взгляд на #1357): решение 041
+    # обращено к тому, кто спросит, какое правило признано не задетым.
+    untouched = ", ".join(narrowed.untouched) if narrowed.untouched else "ни одно"
     lines.append(
         "Правила отобраны по тронутым путям (`.rules/area-paths.json` с общей ветки): "
-        f"не задеты этим изменением — {len(narrowed.untouched)}."
+        f"не задеты этим изменением — {len(narrowed.untouched)} ({untouched})."
     )
     if narrowed.blind:
         lines.append("По диффу не видны и роли не отданы — " + ", ".join(narrowed.blind) + ".")
