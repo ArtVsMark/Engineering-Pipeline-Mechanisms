@@ -31,8 +31,9 @@
 ЗОВЁТСЯ ТОЛЬКО ПО ПРЕДМЕТУ. С `--base` гейт сначала спрашивает дифф и идёт,
 только если тронут его предмет (`subject`): иначе сеть оплачивалась бы на
 каждом изменении. Без `--base` — идёт всегда (ручной прогон). Предмет
-вычисляется по дереву, а не перечнем (взгляд на #1391): шаг, сам гейт, прогон,
-который его зовёт, вызывающий шага (его `with:` — аргументы сборки) и
+вычисляется по дереву, а не перечнем (взгляд на #1391): шаг, сам гейт со
+своими модулями (`ghrest`, `gitcall` — разбор 404 у пробы), прогон, который
+его зовёт, вызывающий шага (его `with:` — аргументы сборки) и
 `facts_common.py` со всеми своими модулями, от которых зависит `facts.json`.
 
 ФАКТЫ — С ТЕМИ ЖЕ АРГУМЕНТАМИ, ЧТО У ПУБЛИКАЦИИ: файл CI и матрицы берутся из
@@ -55,6 +56,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
@@ -185,7 +187,7 @@ def gate_runs(root: Path) -> set[Path]:
 def subject(root: Path) -> set[str]:
     """Пути, правка которых меняет то, что сверка видит или как гейт её судит."""
     found = {FLOW} | module_closure(BUILD, root) | gate_runs(root)
-    found |= {path for path in [source_of(GATE, root)] if path is not None}
+    found |= module_closure(GATE, root)
     found |= {path for path, _ in callers(root)}
     return {path.as_posix() for path in found}
 
@@ -251,23 +253,55 @@ def release_missing(step: dict[str, Any], named: str = PROBED) -> bool:
     return False
 
 
+def unfetched(said: str) -> str | None:
+    """Файл выпуска, который шаг не скачал, — по его предупреждению; скачал всё — `None`."""
+    if UNFETCHED not in said:
+        return None
+    named = UNFETCHED_FILE.search(said)
+    return named.group(1) if named else PROBED
+
+
 def verdict(
-    good: tuple[int, str], stranger: tuple[int, str], missing: bool = False
+    good: tuple[int, str],
+    stranger: tuple[int, str],
+    missing: Callable[[str], bool] = lambda named: False,
 ) -> tuple[int, str]:
     """Исход гейта по двум заходам шага: годному и под чужим именем.
 
-    `missing` — площадка ответила «нет такого» на файл выпуска (`release_missing`).
+    ОТКАЗ КАНАЛА СУДИТСЯ ПО ОБОИМ ЗАХОДАМ, И КАЖДЫЙ — В СВОЙ ЧЕРЁД (взгляды на
+    #1391 и #1395, правило 210). Прежде «не скачан» проверялся только у первого
+    захода: отказ сети на втором читался как «расхождение не остановило шаг».
+    Но и судить канал обоих заходов раньше всего нельзя: годный, скачавший
+    выпуск и показавший мёртвую сверку, — окончательный ответ, и мигнувшая на
+    втором заходе сеть его не отменяет. Порядок:
+
+    1. годный заход не скачал выпуск — канал: «нет такого» у названного файла
+       (`missing`) — находка о теге (1), иначе молчание канала (4);
+    2. годный заход остановлен или сказал о несверке — сверка мертва (1);
+    3. чужой заход не скачал выпуск — канал, как в п. 1;
+    4. чужой заход не остановлен своей строкой — сверка мертва (1);
+    5. иначе — сверка жива (0).
     """
+
+    def channel(said: str) -> tuple[int, str] | None:
+        """Исход канала у захода: не скачал выпуск — 1 или 4; скачал — `None`."""
+        named = unfetched(said)
+        if named is None:
+            return None
+        if missing(named):
+            return EXIT_FOUND, f"выпуска «{named}» под прибитым тегом нет — тег или имя файла не те"
+        return EXIT_SILENT, f"«{named}» выпуска витрины не скачан — сверка не проверена"
+
     rc, said = good
-    if UNFETCHED in said:
-        if missing:
-            return EXIT_FOUND, "выпуска под прибитым тегом нет — тег или имя файла не те"
-        return EXIT_SILENT, "выпуск витрины не скачан — сверка не проверена"
+    if (judged := channel(said)) is not None:
+        return judged
     if rc != 0 or "::error::" in said:
         return EXIT_FOUND, f"годные факты остановлены (код {rc}): {said.strip()[-300:]}"
     if "::warning::" in said:
         return EXIT_FOUND, f"сверка не отработала на годных фактах — мертва: {said.strip()[-300:]}"
     rc, said = stranger
+    if (judged := channel(said)) is not None:
+        return judged
     line = f"{STRANGER}: расхождений "
     if rc != 1 or line not in said:
         return EXIT_FOUND, (
@@ -321,9 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     except (NotRun, pipeline_checks.BadPolicy, OSError, ValueError) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    named = UNFETCHED_FILE.search(good[1])
-    missing = UNFETCHED in good[1] and release_missing(step, named.group(1) if named else PROBED)
-    code, said = verdict(good, stranger, missing)
+    code, said = verdict(good, stranger, lambda named: release_missing(step, named))
     print(said)
     return code
 
