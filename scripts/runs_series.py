@@ -276,7 +276,21 @@ def only_installs(run: str) -> bool:
     return bool(said) and all(any(mark in one for mark in INSTALLERS) for one in said)
 
 
-def installing_steps(directory: Path = paths.WORKFLOWS) -> frozenset[str]:
+#: Где общий шаг положил код поставщика: имя переменной окружения, которую
+#: шаг пишет сам (`MECHANISMS=$RUNNER_TEMP/mechanisms`). Корень поставщика
+#: приходит ЯВНО, а не разыскивается вверх от файла (115): у потребителя
+#: рабочий каталог — его дерево с тонкими вызовами, а шаги установки названы
+#: в `step-*.yml` поставщика (#1385).
+SUPPLIER_ENV: Final = "MECHANISMS"
+
+
+def supplier_workflows() -> Path | None:
+    """Каталог прогонов поставщика, если шаг его назвал; иначе `None`."""
+    root = os.environ.get(SUPPLIER_ENV, "").strip()
+    return Path(root) / paths.WORKFLOWS if root else None
+
+
+def installing_steps(*directories: Path) -> frozenset[str]:
     """Имена шагов дерева, которые ТОЛЬКО ставят зависимости.
 
     ЗАМЕР 22.09.2026, РАДИ КОТОРОГО ЭТО ЗАВЕДЕНО. Шагов, ставящих зависимости, в
@@ -326,12 +340,21 @@ def installing_steps(directory: Path = paths.WORKFLOWS) -> frozenset[str]:
     была бы точнее, но держалась бы на совпадении, которого механизм не
     проверяет; вычитание точнее не станет, зато не соврёт
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
+
+    ДВА ДЕРЕВА, ОДНО ВЫЧИТАНИЕ (находка взгляда на #1408). Ряд идёт общим
+    шагом: рабочий каталог — дерево ВЫЗЫВАЮЩЕГО, где у потребителя лежат
+    только тонкие вызовы, а шаги установки названы в прогонах поставщика.
+    Без явных каталогов читаются оба — `paths.WORKFLOWS` и каталог из
+    `supplier_workflows()`, — и имя, работающее хоть в одном, выбывает из
+    служебных в обоих. У поставщика это один и тот же каталог, и читается он
+    один раз; вне шага переменной нет, и читается только рабочее дерево.
     """
-    if not directory.is_dir():
-        return frozenset()
+    supplier = supplier_workflows()
+    looked = directories or (paths.WORKFLOWS, *((supplier,) if supplier else ()))
+    folders = list(dict.fromkeys(one.resolve() for one in looked if one.is_dir()))
     installs: set[str] = set()
     works: set[str] = set()
-    for path in sorted(directory.glob("*.y*ml")):
+    for path in sorted(path for folder in folders for path in folder.glob("*.y*ml")):
         document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for job in (document.get("jobs") or {}).values():
             for step in (job or {}).get("steps") or []:
