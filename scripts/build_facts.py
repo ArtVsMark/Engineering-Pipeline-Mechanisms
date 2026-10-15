@@ -62,6 +62,8 @@ from facts_common import rules_facts as rules_facts
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
+#: Сколько кривых записей соседей сборка называет строками; остальное — числом.
+WRONG_SHOWN: Final = 20
 #: ГДЕ ЛЕЖАТ ФАКТЫ И ЗНАЧКИ — ПО КОНТРАКТУ СЕМЬИ, а не по своей раскладке:
 #: ветка `badges`, путь `.github/badges/` — как у грейдера, каталога, токенов и
 #: глоссария (контракт фактов витрины, `ArtVsMark/ArtVsMark` ·
@@ -1034,6 +1036,27 @@ def drawn_from(path: Path, out_dir: str, root: str = ".", supplier: str = "") ->
     return EXIT_OK
 
 
+def commit_of(path: Path) -> int:
+    """Режим `--commit-of`: напечатать коммит, на котором собраны готовые факты.
+
+    Прогон значков берёт по нему дерево для неопубликованных разделов
+    (`rehydrated`): факты на ветке могут отставать от головы прогона, и дерево
+    головы дало бы значку числа другого коммита (взгляд на #1345). Поля нет или
+    оно пусто — отказ, а не пустая строка: пустая ушла бы в git как «голова».
+    """
+    try:
+        facts = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"коммит фактов не прочитан: {path} — {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    commit = facts.get("commit") if isinstance(facts, dict) else None
+    if not isinstance(commit, str) or not commit.strip():
+        print(f"коммит фактов не прочитан: в {path} нет поля commit", file=sys.stderr)
+        return EXIT_BROKEN
+    print(commit.strip())
+    return EXIT_OK
+
+
 def picture_input_wrong(facts: object) -> str | None:
     """Что не так с формой фактов для картинки; None — форма годится.
 
@@ -1129,9 +1152,17 @@ def say_family(kin: dict[str, Any]) -> None:
         # Строки соседа — в одну строку и с пределом: перевод строки в его
         # ключе дал бы в логе строку, которую площадка читает командой `::…`
         # (взгляд на #1358).
-        for one in said.get("wrong_entries_by") or []:
+        # И ЧИСЛОМ СТРОК (взгляд на #1358): сосед с тысячей кривых записей дал
+        # бы тысячу строк лога. Показано первые, остальное — числом; полный
+        # список лежит в фактах (`wrong_entries_by`).
+        wrong = said.get("wrong_entries_by") or []
+        for one in wrong[:WRONG_SHOWN]:
             repo, rule, why = (plain(one.get(key)) for key in ("repo", "rule", "why"))
             print(f"  - {repo} · правило {rule}: {why}")
+        if len(wrong) > WRONG_SHOWN:
+            print(
+                f"  … и ещё {len(wrong) - WRONG_SHOWN} — полный список в фактах, wrong_entries_by"
+            )
         # ВЫЧИСЛЕННОЕ И НЕСКАЗАННОЕ РАВНО НЕСЧИТАННОМУ. Расхождение формы
         # считалось здесь с 8 сентября, ложилось в факты ключом
         # `schema_agrees` — и не печаталось нигде: сводка ушла на 1.3, разрез
@@ -1168,6 +1199,9 @@ def main(argv: list[str] | None = None) -> int:
         help="с --from-facts: только картинки PICTURES, плоско в этот каталог (общий шаг фактов)",
     )
     parser.add_argument(
+        "--commit-of", default="", help="напечатать коммит, на котором собран готовый facts.json"
+    )
+    parser.add_argument(
         "--branch-files",
         action="store_true",
         help="напечатать всё, что ветка badges вправе держать, — по строке на имя",
@@ -1196,6 +1230,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.commit_of:
+        return commit_of(Path(args.commit_of))
     if args.branch_files:
         print("\n".join(branch_files()))
         return EXIT_OK
