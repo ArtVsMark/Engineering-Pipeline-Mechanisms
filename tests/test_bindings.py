@@ -1374,51 +1374,51 @@ def catalogue_jobs(folder: Path) -> dict[tuple[str, str], set[str]]:
 CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
     "002": (
         "ci.yml — джоб на каждый шаг, свой; держит tests/test_gates_reject.py",
-        "b4ca7477cfcc",
+        "e26b4ae7dce8",
     ),
     "006": (
         "ci.yml — место своего шага; держит tests/test_window_lifetime.py",
-        "8ec02dbc3c79",
+        "f3c74d8ee55f",
     ),
     "018": (
         "ci.yml — предмет чтения; держит tests/test_gates_contract.py",
-        "92c7872df11d",
+        "4f09d45c4e2a",
     ),
     "035": (
         "ci.yml — место своего гейта версии; держит scripts/check_version.py",
-        "951b4b59aed4",
+        "2a2da41abace",
     ),
     "080": (
         "rules-inbox.yml упомянут как канал каталога; держит .rules/proposals.json",
-        "f5b5f66c06eb",
+        "32785c99bb2c",
     ),
     "100": (
         "ci.yml — поле timeout-minutes у своих шагов; держит scripts/ci_complete.py",
-        "5a56d40c28f6",
+        "b07e466bcf61",
     ),
     "133": (
         "ci.yml — свой джоб parts; держит scripts/change_parts.py",
-        "23966b153736",
+        "06473b429100",
     ),
     "156": (
         "ci.yml — джоб attribution назван доводом; держит scripts/squash_body.py",
-        "45c40f191b2d",
+        "c51c41f3ee3b",
     ),
     "165": (
         "ci.yml — шаг прогона, где гейт требует -z; держит tests/test_source_hygiene.py",
-        "9329d6083310",
+        "1039e89e8b12",
     ),
     "179": (
         "ci.yml, rules-inbox.yml — примеры групп отмены; держит tests/test_gates_contract.py",
-        "3748ca3e589e",
+        "946cddca91d5",
     ),
     "182": (
         "ci.yml упомянут в доводе; держит tests/test_bindings.py",
-        "ec08905e2e8a",
+        "51ce4612f8ec",
     ),
     "190": (
         "rules-inbox.yml — канал подключения, вторая половина; держит scripts/family.py",
-        "168af3b65352",
+        "f40fad6e27a5",
     ),
 }
 
@@ -1459,37 +1459,38 @@ def flow_places(where: str, flows: Iterable[str]) -> dict[str, int]:
 #: без такого ответа — тоже.
 #:
 #: ПРОЧИТАННОЕ ПРИБИТО К ТЕКСТУ (взгляд на #1335): второй элемент — первые
-#: двенадцать знаков sha256 от `where` на день чтения. Переписанный `where`
-#: краснеет здесь, пока голову не перечитают и отпечаток не обновят: иначе
-#: «прочитано» держалось бы только для нового номера, а не для нового текста.
+#: двенадцать знаков sha256 от `where` и `origin` на день чтения
+#: (`head_digest`). Голову `called` судят по обоим полям, и отпечаток берётся с
+#: обоих (взгляд на #1372): сменённый `origin` при прежнем `where` краснеет так
+#: же, как переписанный `where`, пока голову не перечитают.
 CALLED_HEAD_READ: Final[dict[str, tuple[str, str]]] = {
     "090": (
         "ci.yml, джоб attribution — гейт атрибуции действием каталога",
-        "1177b0ff5c58",
+        "2bc8aaca2d6b",
     ),
     "123": (
         "ci.yml, джоб attribution — атрибуция на итоговой истории",
-        "c1867d7c835a",
+        "ef29a476a23b",
     ),
     "129": (
         "ci.yml, джоб answer — форма ответа и пробы действием каталога",
-        "a9ef814942c6",
+        "760571519601",
     ),
     "130": (
         "rules-inbox.yml — новое правило приходит задачей действием каталога",
-        "75316941fbf4",
+        "056f871ad798",
     ),
     "135": (
         "attribution-history.yml — личность записи действием каталога",
-        "4938dffb6cf9",
+        "48d708ac41ba",
     ),
     "162": (
         "rules-inbox.yml — ночные входящие действием каталога",
-        "2557bc6506a1",
+        "2ea0b7d23dd8",
     ),
     "178": (
         "rules-inbox.yml — числа долга приходят с действием каталога",
-        "bd81549978a4",
+        "8c69a5734977",
     ),
 }
 
@@ -1554,16 +1555,17 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     ]
     pinned = {**CALLED_HEAD_READ, **CALLER_NAMED_NOT_CALLED}
     wrong += [
-        f"{n}: `where` переписан после чтения — перечитать и обновить отпечаток"
+        f"{n}: `where` или `origin` переписан после чтения — перечитать и обновить отпечаток"
         for n in sorted((read | named_only) & set(pinned))
-        if where_digest(str(rules[n].get("where") or "")) != pinned[n][1]
+        if head_digest(rules[n]) != pinned[n][1]
     ]
     assert not wrong, "ответы на прогоны каталога:\n  " + "\n  ".join(wrong)
 
 
-def where_digest(where: str) -> str:
-    """Отпечаток текста `where`: первые двенадцать знаков sha256."""
-    return hashlib.sha256(where.encode("utf-8")).hexdigest()[:12]
+def head_digest(answer: dict[str, Any]) -> str:
+    """Отпечаток прочитанной головы: первые двенадцать знаков sha256 от `where` и `origin`."""
+    said = f"{answer.get('where') or ''}\n{answer.get('origin') or ''}"
+    return hashlib.sha256(said.encode("utf-8")).hexdigest()[:12]
 
 
 HOLDER_RE: Final = re.compile(r"держит (?P<path>[\w./-]+)")
