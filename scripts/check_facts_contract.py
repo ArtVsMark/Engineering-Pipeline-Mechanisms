@@ -29,17 +29,28 @@
 хешу, нет (замер 15.10.2026: `grep -rn 'sha256sum --check' .github/`).
 
 ЗОВЁТСЯ ТОЛЬКО ПО ПРЕДМЕТУ. С `--base` гейт сначала спрашивает дифф и идёт,
-только если тронут шаг или сборка фактов (`SUBJECT`): иначе сеть оплачивалась
-бы на каждом изменении. Без `--base` — идёт всегда (ручной прогон).
+только если тронут его предмет (`subject`): иначе сеть оплачивалась бы на
+каждом изменении. Без `--base` — идёт всегда (ручной прогон). Предмет
+вычисляется по дереву, а не перечнем (взгляд на #1391): шаг, сам гейт, прогон,
+который его зовёт, вызывающий шага (его `with:` — аргументы сборки) и
+`facts_common.py` со всеми своими модулями, от которых зависит `facts.json`.
+
+ФАКТЫ — С ТЕМИ ЖЕ АРГУМЕНТАМИ, ЧТО У ПУБЛИКАЦИИ: файл CI и матрицы берутся из
+`with:` единственного вызывающего шага. Чего гейт не повторяет — артефакта
+входов (`--extra`, `--coverage`): его кладёт соседний джоб прогона, и такие
+показатели на заходе гейта уходят причинами в none (195).
 
 Исходы: ``0`` сверка жива (или предмет не тронут) · ``1`` сверка мертва или
 хеш не тот · ``2`` не отработал · ``4`` выпуск витрины недоступен — отказ
-канала, а не находка о дереве (084), и зелёным он не считается (045).
+канала, а не находка о дереве (084). Исход 4 не «чисто»: прогон называет его
+предупреждением, а не молчит (045), но и красным не делает — дерево цело.
 """
 
 import argparse
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -59,17 +70,27 @@ EXIT_BROKEN: Final = 2
 EXIT_SILENT: Final = 4
 
 FLOW: Final = paths.FACTS_STEP
-#: Пути, правка которых меняет то, что сверка видит: сам шаг (тег, хеши, разбор
-#: вердикта) и сборка фактов, которые он сверяет.
-SUBJECT: Final = (FLOW.as_posix(), "scripts/facts_common.py")
+#: Сборка фактов: её модули и сама она — предмет гейта. Имя модуля, а не путь:
+#: где он лежит, знает якорь источников (`paths.SOURCES`).
+BUILD: Final = facts_common.__name__
+#: Сам гейт: правка его разбора меняет то, что он считает живой сверкой.
+GATE: Final = Path(__file__).stem
+#: Входы шага, которые вызывающий отдаёт сборке фактов, и их ключи у сборки.
+BUILD_INPUTS: Final = {
+    "ci-workflow": "--ci-workflow",
+    "python-matrix": "--python-matrix",
+    "python-next": "--python-next",
+}
 #: Признак шага сверки: он один исполняет проверку витрины.
 MARK: Final = "check_facts.py"
 #: Чужое имя для второго захода: проверка витрины находит у фактов чужой `repo`.
 STRANGER: Final = "facts-contract/stranger"
 #: Предупреждение шага, когда выпуск не скачан: канал — или адрес не тот.
 UNFETCHED: Final = "не скачан"
-#: Файл выпуска, по которому спрашивают, есть ли тег: первый из скачиваемых.
-PROBED: Final = "facts.version"
+#: Имя файла из предупреждения шага «<файл> выпуска <тег> не скачан».
+UNFETCHED_FILE: Final = re.compile(r"(\S+) выпуска \S+ не скачан")
+#: Файл выпуска, если предупреждение его не назвало.
+PROBED: Final = "check_facts.py"
 
 
 class NotRun(RuntimeError):
@@ -91,10 +112,105 @@ def contract_step(flow: dict[Any, Any]) -> dict[str, Any]:
     return found[0]
 
 
+def source_of(name: str, root: Path) -> Path | None:
+    """Где лежит наш модуль `name` — по якорю источников; чужой — `None`."""
+    for where in paths.SOURCES:
+        candidate = where / f"{name.split('.')[0]}.py"
+        if (root / candidate).is_file():
+            return candidate
+    return None
+
+
+def module_closure(start: str, root: Path) -> set[Path]:
+    """Модуль и все наши модули, которые он импортирует, — по дереву, а не перечнем."""
+    found: set[Path] = set()
+    todo = [start]
+    while todo:
+        path = source_of(todo.pop(), root)
+        if path is None or path in found:
+            continue
+        found.add(path)
+        tree = ast.parse((root / path).read_text(encoding="utf-8"))
+        todo += [
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        ]
+        todo += [
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        ]
+    return found
+
+
+def flows(root: Path) -> list[tuple[Path, dict[Any, Any]]]:
+    """Прогоны дерева, разобранные общим разбором."""
+    folder = root / paths.WORKFLOWS
+    if not folder.is_dir():
+        return []
+    return [
+        (paths.WORKFLOWS / one.name, pipeline_checks.run_of(one))
+        for one in sorted(folder.glob("*.yml"))
+    ]
+
+
+def jobs_of(document: dict[Any, Any]) -> list[dict[str, Any]]:
+    """Джобы прогона, которые словари."""
+    return [job for job in (document.get("jobs") or {}).values() if isinstance(job, dict)]
+
+
+def callers(root: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """Вызовы шага фактов: файл прогона и его `with:`."""
+    return [
+        (path, dict(job.get("with") or {}))
+        for path, document in flows(root)
+        for job in jobs_of(document)
+        if str(job.get("uses") or "").split("@")[0].endswith(FLOW.name)
+    ]
+
+
+def gate_runs(root: Path) -> set[Path]:
+    """Прогоны, чей шаг зовёт этот гейт."""
+    return {
+        path
+        for path, document in flows(root)
+        for job in jobs_of(document)
+        for step in job.get("steps") or []
+        if isinstance(step, dict) and f"{GATE}.py" in str(step.get("run") or "")
+    }
+
+
+def subject(root: Path) -> set[str]:
+    """Пути, правка которых меняет то, что сверка видит или как гейт её судит."""
+    found = {FLOW} | module_closure(BUILD, root) | gate_runs(root)
+    found |= {path for path in [source_of(GATE, root)] if path is not None}
+    found |= {path for path, _ in callers(root)}
+    return {path.as_posix() for path in found}
+
+
 def touched(base: str, root: Path) -> bool:
     """Тронут ли предмет сверки изменением против `base`."""
     names = gitcall.output(["diff", "--name-only", "-z", f"{base}...HEAD"], NotRun, cwd=str(root))
-    return any(name in SUBJECT for name in names.split("\0"))
+    mine = subject(root)
+    return any(name in mine for name in names.split("\0"))
+
+
+def build_args(root: Path) -> list[str]:
+    """Аргументы сборки фактов из `with:` единственного вызывающего шага (взгляд на #1391)."""
+    found = callers(root)
+    if len(found) != 1:
+        raise NotRun(f"вызовов {FLOW.name} в прогонах: {len(found)}, ждали один (075)")
+    given = found[0][1]
+    defaults = (
+        (pipeline_checks.run_of(root / FLOW).get("on") or {}).get("workflow_call") or {}
+    ).get("inputs") or {}
+    args: list[str] = []
+    for name, key in BUILD_INPUTS.items():
+        value = given.get(name, (defaults.get(name) or {}).get("default", ""))
+        args += [key, str(value)]
+    return args
 
 
 def run_step(step: dict[str, Any], temp: Path, repo: str) -> tuple[int, str]:
@@ -112,7 +228,7 @@ def run_step(step: dict[str, Any], temp: Path, repo: str) -> tuple[int, str]:
     return done.returncode, done.stdout + done.stderr
 
 
-def release_missing(step: dict[str, Any]) -> bool:
+def release_missing(step: dict[str, Any], named: str = PROBED) -> bool:
     """Отвечает ли площадка «нет такого» на файл выпуска под прибитым тегом.
 
     НЕ СКАЧАН — ЕЩЁ НЕ «КАНАЛ МОЛЧИТ» (откат при сборке гейта, #1380). Опечатка
@@ -120,9 +236,13 @@ def release_missing(step: dict[str, Any]) -> bool:
     её отказом канала: поднятый на несуществующий тег договор прошёл бы с
     одним предупреждением. Ответ 404 на адрес выпуска — находка о дереве;
     любой другой отказ — молчание канала.
+
+    Спрашивается тот файл, который назвало предупреждение шага (`named`), а не
+    любой из выпуска: тег есть, а переименован один файл — 404 только у него
+    (взгляд на #1391).
     """
     env = step.get("env") or {}
-    url = f"{env.get('RELEASES')}/{env.get('FACTS_CONTRACT')}/{PROBED}"
+    url = f"{env.get('RELEASES')}/{env.get('FACTS_CONTRACT')}/{named}"
     try:
         ghrest.raw_text(url)
     except ghrest.TransportError as exc:
@@ -170,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.base and not touched(args.base, args.root):
-            print(f"предмет не тронут ({', '.join(SUBJECT)}) — сверять нечего")
+            print(f"предмет не тронут ({', '.join(sorted(subject(args.root)))}) — сверять нечего")
             return EXIT_OK
         if not args.repo:
             raise NotRun("не названо имя проекта (--repo или GITHUB_REPOSITORY)")
@@ -190,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.repo,
                     "--supplier",
                     args.repo,
+                    *build_args(args.root),
                 ]
             )
             if built != facts_common.EXIT_OK:
@@ -200,7 +321,8 @@ def main(argv: list[str] | None = None) -> int:
     except (NotRun, pipeline_checks.BadPolicy, OSError, ValueError) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    missing = UNFETCHED in good[1] and release_missing(step)
+    named = UNFETCHED_FILE.search(good[1])
+    missing = UNFETCHED in good[1] and release_missing(step, named.group(1) if named else PROBED)
     code, said = verdict(good, stranger, missing)
     print(said)
     return code

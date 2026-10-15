@@ -109,7 +109,8 @@ def test_the_gate_runs_only_on_its_subject(tmp_path: Path, path: str, touches: b
     git(tmp_path, "checkout", "--quiet", "-b", "work")
     target = tmp_path / path
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("правка\n", encoding="utf-8")
+    # Прогон — разбираемый: гейт читает прогоны дерева, и битый был бы отказом.
+    target.write_text("jobs: {}\n" if path.endswith(".yml") else "правка\n", encoding="utf-8")
     git(tmp_path, "add", "-A")
     git(tmp_path, "commit", "--quiet", "-m", "правка")
     assert module.touched("main", tmp_path) is touches
@@ -147,7 +148,7 @@ def whole_run(monkeypatch: pytest.MonkeyPatch, said: tuple[int, str]) -> int:
         return CAUGHT if repo == module.STRANGER else said
 
     monkeypatch.setattr(module, "run_step", step)
-    monkeypatch.setattr(module, "release_missing", lambda one: False)
+    monkeypatch.setattr(module, "release_missing", lambda one, named=module.PROBED: False)
     return int(module.main(["--root", str(ROOT), "--repo", "o/a"]))
 
 
@@ -157,7 +158,7 @@ def test_a_whole_run_names_a_live_check(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_a_whole_run_names_a_silent_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Выпуск не скачан, а тег есть — 4: молчание канала не считается зелёным (045)."""
+    """Выпуск не скачан, а тег есть — 4: молчание канала названо предупреждением (045)."""
     unfetched = (0, "::warning::check_facts.py выпуска не скачан")
     assert whole_run(monkeypatch, unfetched) == module.EXIT_SILENT
 
@@ -182,3 +183,74 @@ def test_the_step_runs_as_the_platform_runs_it(tmp_path: Path) -> None:
     code, said = module.run_step(step, tmp_path, "o/a")
     assert code == 3
     assert said.strip() == f"facts-v0.0.0 o/a {tmp_path}"
+
+
+def test_the_subject_is_read_from_the_tree() -> None:
+    """Предмет — по дереву: гейт, его прогон, вызывающий шага и модули сборки (взгляд на #1391)."""
+    found = module.subject(ROOT)
+    expected = {
+        module.FLOW.as_posix(),
+        "scripts/check_facts_contract.py",
+        "scripts/facts_common.py",
+        "scripts/kinds.py",
+        "scripts/version.py",
+        ".github/workflows/badges.yml",
+        ".github/workflows/ci.yml",
+    }
+    assert expected <= found, f"нет в предмете: {sorted(expected - found)}"
+    assert "scripts/facts.py" not in found
+
+
+def test_the_facts_are_built_with_the_callers_inputs() -> None:
+    """Сборка получает файл CI и матрицы из `with:` вызывающего — как публикация."""
+    args = module.build_args(ROOT)
+    given = dict(zip(args[::2], args[1::2], strict=True))
+    assert set(given) == set(module.BUILD_INPUTS.values())
+    assert given["--python-matrix"], "матрица не передана — витрина её не увидит"
+
+
+def test_no_single_caller_is_the_third_outcome(tmp_path: Path) -> None:
+    """Вызывающего шага нет — «не отработал»: с какими аргументами собирать, неизвестно."""
+    (tmp_path / module.paths.WORKFLOWS).mkdir(parents=True)
+    with pytest.raises(module.NotRun):
+        module.build_args(tmp_path)
+
+
+def test_the_probe_asks_for_the_file_the_step_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проба спрашивает тот файл, который назвало предупреждение, а не любой (взгляд на #1391)."""
+    asked: list[str] = []
+
+    def probe(step: dict[str, Any], named: str = module.PROBED) -> bool:
+        asked.append(named)
+        return True
+
+    def step(one: dict[str, Any], temp: Path, repo: str) -> tuple[int, str]:
+        return 0, "::warning::Факты не сверены: facts.schema.json выпуска facts-v1.6.0 не скачан"
+
+    monkeypatch.setattr(module, "run_step", step)
+    monkeypatch.setattr(module, "release_missing", probe)
+    assert module.main(["--root", str(ROOT), "--repo", "o/a"]) == module.EXIT_FOUND
+    assert asked == ["facts.schema.json"]
+
+
+def test_imports_are_followed_only_into_our_sources(tmp_path: Path) -> None:
+    """Замыкание идёт по нашим модулям, а чужие импорты не тянет."""
+    scripts = tmp_path / module.paths.SCRIPTS
+    scripts.mkdir()
+    (scripts / "a.py").write_text("import json\nimport b\n", encoding="utf-8")
+    (scripts / "b.py").write_text("from a import x\n", encoding="utf-8")
+    found = module.module_closure("a", tmp_path)
+    assert found == {module.paths.SCRIPTS / "a.py", module.paths.SCRIPTS / "b.py"}
+
+
+def test_the_gate_builds_the_facts_the_step_publishes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Заход гейта отдаёт сборке те же входы, что вызывающий шага (взгляд на #1391)."""
+    built: list[list[str]] = []
+
+    def build(argv: list[str]) -> int:
+        built.append(argv)
+        return 1
+
+    monkeypatch.setattr(module.facts_common, "main", build)
+    assert module.main(["--root", str(ROOT), "--repo", "o/a"]) == module.EXIT_BROKEN
+    assert built and set(module.build_args(ROOT)) <= set(built[0])
