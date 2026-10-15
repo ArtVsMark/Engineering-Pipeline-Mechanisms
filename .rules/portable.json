@@ -210,7 +210,10 @@
       ]
     },
     ".github/workflows/ci-complete-wake.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/ci-complete-wake.yml"
+      ]
     },
     ".github/workflows/hail.yml": {
       "answer": "configured",
@@ -289,6 +292,9 @@
       "answer": "as-is"
     },
     ".github/workflows/step-automerge.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-ci-complete-wake.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-contract.yml": {
