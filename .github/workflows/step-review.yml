@@ -124,6 +124,13 @@ jobs:
       # приставкой, взгляд обходит. ПРЕДЕЛ НАЗВАН (взгляд на #1350): держит его
       # только то, что ветки в этом репозитории толкают имеющие право записи
       # (у чужого форка джоб не идёт вовсе), — см. docs/use/pipeline.md.
+      #
+      # `exit 0` КОНЧАЕТ ШАГ, А НЕ ДЖОБ (взгляд на #1350): дорогие шаги карты —
+      # Python, сборка карты, выбор захода — несут своё условие по ответу этого
+      # шага, и на машинной ветке не идут. Шаги общего блока кода конвейера
+      # условия не несут: блок один во всех шагах
+      # (`test_the_code_block_is_one_in_every_step`), а checkout и перенос кода
+      # стоят секунды. Не ответивший шаг (`machine` пуст) карту не гасит.
       - name: машинная ли ветка
         id: machine
         env:
@@ -215,10 +222,12 @@ jobs:
           fi
           echo "MECHANISMS=$RUNNER_TEMP/mechanisms" >>"$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.machine.outputs.machine != 'yes'
         with:
           python-version: "3.14"
       - name: собрать карту по общей ветке
         id: map
+        if: steps.machine.outputs.machine != 'yes'
         continue-on-error: true
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -258,6 +267,7 @@ jobs:
       # задание, то есть полный заход, как до #848 (045).
       - name: выбрать заход — полный или проверка починки
         id: mode
+        if: steps.machine.outputs.machine != 'yes'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
