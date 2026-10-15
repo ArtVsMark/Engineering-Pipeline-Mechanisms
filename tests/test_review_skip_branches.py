@@ -199,7 +199,12 @@ def test_a_machine_entry_already_in_the_registry_is_dropped_and_the_window_count
         {"number": 10, "head": {"ref": "chore/metrics"}, "merged_at": "2026-10-14"},
         {"number": 11, "head": {"ref": "agent/fix"}, "merged_at": "2026-10-14"},
     ]
-    body = f"{unlooked.MARKER}\n- #10 · вердикта нет · 2026-10-13\n"
+    # Человеческая запись обязана уцелеть: без неё `kept == [[]]` прошло бы и
+    # при отсеве, снимающем всё подряд (взгляд на #1361).
+    body = (
+        f"{unlooked.MARKER}\n- #10 · вердикта нет · 2026-10-13\n"
+        "- #11 · вердикта нет · 2026-10-13\n"
+    )
     kept: list[list[int]] = []
 
     def scan(items: Any, known: Any, watermark: int, look: Any) -> tuple[dict[int, Any], int]:
@@ -213,6 +218,6 @@ def test_a_machine_entry_already_in_the_registry_is_dropped_and_the_window_count
     monkeypatch.setattr(unlooked, "late_on", lambda *a, **k: "")
     unlooked.main(["--repo", "o/r", "--skip-branches", "chore/", "--limit", "2"])
     said = capsys.readouterr()
-    assert kept == [[]], kept
+    assert kept == [[11]], kept
     assert "машинные записи реестра сняты: #10" in said.out
     assert "окно обхода заполнено (2)" in said.err
