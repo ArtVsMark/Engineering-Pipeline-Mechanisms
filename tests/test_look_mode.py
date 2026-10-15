@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -359,30 +359,80 @@ def test_a_large_text_file_enters_the_key_by_its_blob() -> None:
     assert module.diff_key(large("aaa")) != module.diff_key(large("bbb"))
 
 
-#: Адрес изменения или задачи в чужом репозитории: «владелец/репо#номер».
-#: Адрес проекта в тексте задания во всех формах, которые запрещает комментарий
-#: `task_text`: полный `владелец/репо#N`, голый `#N` и номер решения (взгляд на
-#: #1374, правило 195): голый номер у потребителя указывает на чужую задачу.
-ADDRESS_RE = re.compile(r"[\w.-]+/[\w.-]+#\d+|(?<![\w&/])#\d+|решени\w*\s+\d{3}", re.IGNORECASE)
+#: Знаки, без которых адрес не пишется ни в какой форме: латиница, цифры, «#»
+#: и «/». Полный `владелец/репо#N`, голый `#N`, номер решения, имя проекта
+#: буквами, `../../pull/12`, путь `decisions/037-…` — каждой нужен хотя бы один.
+FOREIGN_RE = re.compile(r"[A-Za-z0-9#/]+")
+
+#: Что из этих знаков собственный текст задания несёт законно — с причиной.
+#: Перечень РАЗРЕШЁННОГО, а не запрещённого (210): прежний образец перечислял
+#: формы адреса, и каждая новая форма его обходила (взгляд на #1374, дважды).
+TASK_MAY_CARRY: Final = {
+    "N": "образец числа в строке вердикта «ВЕРДИКТ: находок N»",
+}
+
+
+def own_text(prior: list[tuple[str, Any]]) -> str:
+    """Собственный текст задания: строки данных реестра вынуты.
+
+    Данные — отпечатки, пути, заголовки находок — законно несут цифры и
+    латиницу. Строки данных — те, которых нет в задании без прошлых находок.
+    """
+    bare = set(module.task_text(module.FIX, []).splitlines())
+    return "\n".join(
+        line for line in module.task_text(module.FIX, prior).splitlines() if line in bare
+    )
+
+
+def foreign(text: str) -> set[str]:
+    """Знаки адреса в тексте сверх разрешённых."""
+    return set(FOREIGN_RE.findall(text)) - set(TASK_MAY_CARRY)
 
 
 def test_the_fix_task_carries_no_project_address() -> None:
     """В тексте задания нет адреса проекта: оно уходит агенту у любого потребителя (#1371).
 
-    Граница объявлена комментарием в `task_text`; без проверки адрес, вписанный
-    в f-строку задания, оставлял бы набор зелёным.
+    Граница объявлена комментарием в `task_text`. Держит её не перечень форм
+    адреса, а алфавит: собственный текст задания не несёт ни латиницы, ни
+    цифр, ни «#», ни «/», кроме названного в `TASK_MAY_CARRY` (210).
     """
     prior = [("aaa1111", Entry(7, "дефект", "a.py:1 — раз"))]
-    for task in (module.task_text(module.FIX, prior), module.task_text(module.FIX, [])):
-        assert not ADDRESS_RE.search(task), ADDRESS_RE.search(task)
-        assert "github.com" not in task
+    for text in (own_text(prior), own_text([])):
+        assert text.strip(), "собственного текста задания нет — предмет проверки не найден (075)"
+        assert not foreign(text), f"в задании знаки адреса: {sorted(foreign(text))}"
+
+
+def test_the_data_lines_are_the_only_lines_taken_out() -> None:
+    """Вынуты ровно строки данных: иначе алфавит проверял бы не всё задание."""
+    prior = [("aaa1111", Entry(7, "дефект", "a.py:1 — раз"))]
+    full = module.task_text(module.FIX, prior).splitlines()
+    kept = own_text(prior).splitlines()
+    assert [line for line in full if line not in kept] == ["    `aaa1111` · дефект · a.py:1 — раз"]
 
 
 @pytest.mark.parametrize(
     "planted",
-    ["o/r#1356", "(#1356)", "решение 037", "Решения 041"],
-    ids=["полный-адрес", "голый-номер", "номер-решения", "решения-с-прописной"],
+    [
+        "o/r#1356",
+        "(#1356)",
+        "решение 037",
+        "Решения 041",
+        "ArtVsMark/Engineering-Pipeline-Mechanisms",
+        "Engineering-Pipeline-Mechanisms",
+        "../../pull/12",
+        "decisions/037-the-rulebook",
+    ],
+    ids=[
+        "полный-адрес",
+        "голый-номер",
+        "номер-решения",
+        "решения-с-прописной",
+        "имя-проекта",
+        "имя-без-владельца",
+        "относительная-ссылка",
+        "путь-решения",
+    ],
 )
 def test_every_address_form_is_caught(planted: str) -> None:
-    """Образец адреса ловит каждую форму, которую запрещает комментарий (взгляд на #1374)."""
-    assert ADDRESS_RE.search(f"текст задания {planted} дальше")
+    """Любая форма адреса несёт знак вне разрешённого — и формы перечислять не надо."""
+    assert foreign(f"текст задания {planted} дальше")
