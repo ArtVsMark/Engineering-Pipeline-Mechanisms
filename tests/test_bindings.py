@@ -389,6 +389,20 @@ SOURCE_RE = re.compile(r"^(https://\S+|[\w.-]+/[\w.-]+#\d+)$")
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
+def calendar_day(value: object) -> bool:
+    """Запись — настоящий день календаря вида 2026-10-14, а не только её шаблон.
+
+    `2026-13-45` шаблон проходит, а дня такого нет (взгляд на #1360).
+    """
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     """Чем предложение не годится каталогу; пусто — годится.
 
@@ -399,14 +413,25 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     """
     slug = item.get("slug", "?")
     if item.get("kind") == "evidence":
-        found = [f"{slug}: поля «{one}» нет" for one in EVIDENCE_FIELDS if not item.get(one)]
-        if item.get("direction") and item["direction"] not in EVIDENCE_DIRECTIONS:
+        # КАЖДОЕ ПОЛЕ ДАННЫХ — НЕПУСТАЯ СТРОКА (взгляды на #1360 и #1383). Список,
+        # словарь или число в поле — отказ с именем записи, а не `TypeError`
+        # набора и не «годится»: одно поле, закрытое по форме, оставило бы
+        # соседей принимать что угодно истинное (правило 195).
+        found = []
+        for one in EVIDENCE_FIELDS:
+            value = item.get(one)
+            if not value:
+                found.append(f"{slug}: поля «{one}» нет")
+            elif not isinstance(value, str):
+                found.append(f"{slug}: {one} — строка, а не {type(value).__name__}")
+        direction = item.get("direction")
+        if isinstance(direction, str) and direction and direction not in EVIDENCE_DIRECTIONS:
             found.append(f"{slug}: direction — for, against или neutral")
-        if item.get("source") and not SOURCE_RE.match(str(item["source"])):
+        source = item.get("source")
+        if isinstance(source, str) and source and not SOURCE_RE.match(source):
             found.append(f"{slug}: source — адрес https://… или владелец/репозиторий#номер")
-        if item.get("measured_at") and not re.fullmatch(
-            r"\d{4}-\d{2}-\d{2}", str(item["measured_at"])
-        ):
+        measured = item.get("measured_at")
+        if isinstance(measured, str) and measured and not calendar_day(measured):
             found.append(f"{slug}: measured_at — дата вида 2026-10-14")
         return found
     if item.get("kind") == "merge":
@@ -583,6 +608,54 @@ def test_an_evidence_record_is_judged_by_its_own_form() -> None:
     ]
     assert proposal_problems({**good, "data": ""}) == ["e: поля «data» нет"]
     assert led_to(good) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "said"),
+    [
+        ("direction", ["for"], "e: direction — строка, а не list"),
+        ("direction", {"for": 1}, "e: direction — строка, а не dict"),
+        ("direction", "maybe", "e: direction — for, against или neutral"),
+        ("measured_at", "2026-13-45", "e: measured_at — дата вида 2026-10-14"),
+        ("measured_at", "2026-02-30", "e: measured_at — дата вида 2026-10-14"),
+        ("measured_at", 20261014, "e: measured_at — строка, а не int"),
+        ("hypothesis", ["h"], "e: hypothesis — строка, а не list"),
+        ("data", 42, "e: data — строка, а не int"),
+        ("slug", ["e"], "['e']: slug — строка, а не list"),
+        ("source", {"u": 1}, "e: source — строка, а не dict"),
+    ],
+    ids=[
+        "направление-списком",
+        "направление-словарём",
+        "направление-чужое",
+        "месяца-нет",
+        "дня-нет",
+        "дата-числом",
+        "гипотеза-списком",
+        "данные-числом",
+        "слаг-списком",
+        "источник-словарём",
+    ],
+)
+def test_a_bad_evidence_field_is_named_not_crashed(field: str, value: object, said: str) -> None:
+    """Не та форма поля — отказ с именем записи, а не `TypeError` (взгляд на #1360)."""
+    good = {
+        "kind": "evidence",
+        "slug": "e",
+        "hypothesis": "h",
+        "direction": "for",
+        "data": "замер",
+        "source": "ArtVsMark/Engineering-Pipeline-Mechanisms#1144",
+        "measured_at": "2026-10-14",
+    }
+    assert proposal_problems({**good, field: value}) == [said]
+
+
+def test_a_calendar_day_is_a_real_date_in_its_one_form() -> None:
+    """День замера — настоящая дата ровно в форме `2026-10-14` (взгляды на #1360 и #1383)."""
+    assert calendar_day("2026-10-14")
+    for wrong in ("2026-10-14T00:00:00", "2026-13-45", "2026-02-30", "14.10", 20261014, None):
+        assert not calendar_day(wrong), wrong
 
 
 def test_a_merge_proposal_is_judged_by_its_own_form() -> None:
@@ -1333,51 +1406,51 @@ def catalogue_jobs(folder: Path) -> dict[tuple[str, str], set[str]]:
 CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
     "002": (
         "ci.yml — джоб на каждый шаг, свой; держит tests/test_gates_reject.py",
-        "b4ca7477cfcc",
+        "e26b4ae7dce8",
     ),
     "006": (
         "ci.yml — место своего шага; держит tests/test_window_lifetime.py",
-        "8ec02dbc3c79",
+        "f3c74d8ee55f",
     ),
     "018": (
         "ci.yml — предмет чтения; держит tests/test_gates_contract.py",
-        "92c7872df11d",
+        "4f09d45c4e2a",
     ),
     "035": (
         "ci.yml — место своего гейта версии; держит scripts/check_version.py",
-        "951b4b59aed4",
+        "2a2da41abace",
     ),
     "080": (
         "rules-inbox.yml упомянут как канал каталога; держит .rules/proposals.json",
-        "f5b5f66c06eb",
+        "32785c99bb2c",
     ),
     "100": (
         "ci.yml — поле timeout-minutes у своих шагов; держит scripts/ci_complete.py",
-        "5a56d40c28f6",
+        "b07e466bcf61",
     ),
     "133": (
         "ci.yml — свой джоб parts; держит scripts/change_parts.py",
-        "23966b153736",
+        "06473b429100",
     ),
     "156": (
         "ci.yml — джоб attribution назван доводом; держит scripts/squash_body.py",
-        "45c40f191b2d",
+        "c51c41f3ee3b",
     ),
     "165": (
         "ci.yml — шаг прогона, где гейт требует -z; держит tests/test_source_hygiene.py",
-        "9329d6083310",
+        "1039e89e8b12",
     ),
     "179": (
         "ci.yml, rules-inbox.yml — примеры групп отмены; держит tests/test_gates_contract.py",
-        "3748ca3e589e",
+        "946cddca91d5",
     ),
     "182": (
         "ci.yml упомянут в доводе; держит tests/test_bindings.py",
-        "ec08905e2e8a",
+        "51ce4612f8ec",
     ),
     "190": (
         "rules-inbox.yml — канал подключения, вторая половина; держит scripts/family.py",
-        "168af3b65352",
+        "f40fad6e27a5",
     ),
 }
 
@@ -1418,37 +1491,38 @@ def flow_places(where: str, flows: Iterable[str]) -> dict[str, int]:
 #: без такого ответа — тоже.
 #:
 #: ПРОЧИТАННОЕ ПРИБИТО К ТЕКСТУ (взгляд на #1335): второй элемент — первые
-#: двенадцать знаков sha256 от `where` на день чтения. Переписанный `where`
-#: краснеет здесь, пока голову не перечитают и отпечаток не обновят: иначе
-#: «прочитано» держалось бы только для нового номера, а не для нового текста.
+#: двенадцать знаков sha256 от `where` и `origin` на день чтения
+#: (`head_digest`). Голову `called` судят по обоим полям, и отпечаток берётся с
+#: обоих (взгляд на #1372): сменённый `origin` при прежнем `where` краснеет так
+#: же, как переписанный `where`, пока голову не перечитают.
 CALLED_HEAD_READ: Final[dict[str, tuple[str, str]]] = {
     "090": (
         "ci.yml, джоб attribution — гейт атрибуции действием каталога",
-        "1177b0ff5c58",
+        "2bc8aaca2d6b",
     ),
     "123": (
         "ci.yml, джоб attribution — атрибуция на итоговой истории",
-        "c1867d7c835a",
+        "ef29a476a23b",
     ),
     "129": (
         "ci.yml, джоб answer — форма ответа и пробы действием каталога",
-        "a9ef814942c6",
+        "760571519601",
     ),
     "130": (
         "rules-inbox.yml — новое правило приходит задачей действием каталога",
-        "75316941fbf4",
+        "056f871ad798",
     ),
     "135": (
         "attribution-history.yml — личность записи действием каталога",
-        "4938dffb6cf9",
+        "48d708ac41ba",
     ),
     "162": (
         "rules-inbox.yml — ночные входящие действием каталога",
-        "2557bc6506a1",
+        "2ea0b7d23dd8",
     ),
     "178": (
         "rules-inbox.yml — числа долга приходят с действием каталога",
-        "bd81549978a4",
+        "8c69a5734977",
     ),
 }
 
@@ -1513,16 +1587,17 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
     ]
     pinned = {**CALLED_HEAD_READ, **CALLER_NAMED_NOT_CALLED}
     wrong += [
-        f"{n}: `where` переписан после чтения — перечитать и обновить отпечаток"
+        f"{n}: `where` или `origin` переписан после чтения — перечитать и обновить отпечаток"
         for n in sorted((read | named_only) & set(pinned))
-        if where_digest(str(rules[n].get("where") or "")) != pinned[n][1]
+        if head_digest(rules[n]) != pinned[n][1]
     ]
     assert not wrong, "ответы на прогоны каталога:\n  " + "\n  ".join(wrong)
 
 
-def where_digest(where: str) -> str:
-    """Отпечаток текста `where`: первые двенадцать знаков sha256."""
-    return hashlib.sha256(where.encode("utf-8")).hexdigest()[:12]
+def head_digest(answer: dict[str, Any]) -> str:
+    """Отпечаток прочитанной головы: первые двенадцать знаков sha256 от `where` и `origin`."""
+    said = f"{answer.get('where') or ''}\n{answer.get('origin') or ''}"
+    return hashlib.sha256(said.encode("utf-8")).hexdigest()[:12]
 
 
 HOLDER_RE: Final = re.compile(r"держит (?P<path>[\w./-]+)")
