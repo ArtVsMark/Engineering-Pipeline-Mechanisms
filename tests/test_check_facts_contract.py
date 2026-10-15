@@ -48,6 +48,12 @@ def test_no_single_contract_step_is_the_third_outcome(copies: int) -> None:
         ((0, "::warning::check_facts.py выпуска не скачан"), CAUGHT, True, 1),
         (GOOD, (0, "::warning::check_facts.py выпуска не скачан"), False, 4),
         (GOOD, (0, "::warning::check_facts.py выпуска не скачан"), True, 1),
+        (
+            (1, "::error::Файлы выпуска не сходятся с прибитыми хешами"),
+            (0, "::warning::check_facts.py выпуска не скачан"),
+            False,
+            1,
+        ),
     ],
     ids=[
         "сверка-жива",
@@ -59,6 +65,7 @@ def test_no_single_contract_step_is_the_third_outcome(copies: int) -> None:
         "тега-нет",
         "канал-молчит-на-втором",
         "тега-нет-на-втором",
+        "мёртвая-на-годных-при-молчании-второго",
     ],
 )
 def test_the_verdict_names_a_dead_check(
