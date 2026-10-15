@@ -46,6 +46,14 @@ def test_no_single_contract_step_is_the_third_outcome(copies: int) -> None:
         (GOOD, (1, "Traceback (most recent call last):"), False, 1),
         ((0, "::warning::check_facts.py выпуска не скачан"), CAUGHT, False, 4),
         ((0, "::warning::check_facts.py выпуска не скачан"), CAUGHT, True, 1),
+        (GOOD, (0, "::warning::check_facts.py выпуска не скачан"), False, 4),
+        (GOOD, (0, "::warning::check_facts.py выпуска не скачан"), True, 1),
+        (
+            (1, "::error::Файлы выпуска не сходятся с прибитыми хешами"),
+            (0, "::warning::check_facts.py выпуска не скачан"),
+            False,
+            1,
+        ),
     ],
     ids=[
         "сверка-жива",
@@ -55,13 +63,38 @@ def test_no_single_contract_step_is_the_third_outcome(copies: int) -> None:
         "код-1-без-строки",
         "канал-молчит",
         "тега-нет",
+        "канал-молчит-на-втором",
+        "тега-нет-на-втором",
+        "мёртвая-на-годных-при-молчании-второго",
     ],
 )
 def test_the_verdict_names_a_dead_check(
     good: tuple[int, str], stranger: tuple[int, str], missing: bool, code: int
 ) -> None:
-    """Жива — только когда годное прошло, а расхождение остановило шаг своей строкой."""
-    assert module.verdict(good, stranger, missing)[0] == code
+    """Жива — только когда годное прошло, а расхождение остановило шаг своей строкой.
+
+    Отказ канала судится по ОБОИМ заходам: сеть, отказавшая на втором, — тоже
+    молчание канала, а не «сверка мертва» (взгляд на #1391).
+    """
+    assert module.verdict(good, stranger, lambda named: missing)[0] == code
+
+
+def test_the_probe_asks_for_the_file_of_the_pass_that_failed() -> None:
+    """Проба спрашивает файл, названный тем заходом, который его не скачал."""
+    asked: list[str] = []
+    second = (0, "::warning::Факты не сверены: facts.schema.json выпуска facts-v1.6.0 не скачан")
+
+    def probe(named: str) -> bool:
+        asked.append(named)
+        return False
+
+    module.verdict(GOOD, second, probe)
+    assert asked == ["facts.schema.json"]
+
+
+def test_the_gate_subject_follows_its_own_imports() -> None:
+    """Модули самого гейта — предмет: правка разбора 404 у пробы должна его звать."""
+    assert "packages/transport/ghrest.py" in module.subject(ROOT)
 
 
 def test_a_dead_check_is_a_refusal_of_the_whole_gate(monkeypatch: pytest.MonkeyPatch) -> None:
