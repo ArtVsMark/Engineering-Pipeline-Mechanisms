@@ -327,7 +327,6 @@ STILL_COPIED: Final = frozenset(
         "badges.yml",
         "claude.yml",
         "release.yml",
-        "required-context.yml",
         "runs-series.yml",
     }
 )

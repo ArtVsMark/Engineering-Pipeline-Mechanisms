@@ -46,7 +46,8 @@
 (дежурный по общей ветке) · [`step-stuck.yml`](.github/workflows/step-stuck.yml)
 (застрявшее) · [`step-schedules-seen.yml`](.github/workflows/step-schedules-seen.yml)
 (пропущенные заходы по расписанию) · [`step-labels-sync.yml`](.github/workflows/step-labels-sync.yml)
-(состав меток) · [`step-ci-complete-wake.yml`](.github/workflows/step-ci-complete-wake.yml)
+(состав меток) · [`step-required-context.yml`](.github/workflows/step-required-context.yml)
+(сверка обязательного контекста) · [`step-ci-complete-wake.yml`](.github/workflows/step-ci-complete-wake.yml)
 (будильник сводного гейта) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
 [`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
