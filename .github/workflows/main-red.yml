@@ -44,7 +44,7 @@ on:
     # каждое будящее событие. Сколько их на другом слиянии — зависит от того,
     # какие из пяти прогонов шли на голове и сколько заходов сняла группа;
     # «три» — число этого слияния, а не цена вообще.
-    workflows: [ci, badges, python-next, attribution-history, labels-sync]
+    workflows: [ci, badges, python-next, attribution-history, labels-sync, deps-intercept]
     types: [completed]
   # У события всегда есть ручная кнопка: события теряются (правило 104).
   workflow_dispatch:
