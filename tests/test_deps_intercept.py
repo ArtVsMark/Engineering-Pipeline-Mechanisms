@@ -314,3 +314,26 @@ def test_uses_re_takes_the_action_and_not_its_neighbour() -> None:
     assert pattern.search(f"- uses: actions/checkout@{SHA_OLD} # v7.0.1")
     assert pattern.search(f'- uses: "actions/checkout/sub@{SHA_OLD}"')
     assert not pattern.search(f"- uses: actions/checkout-extra@{SHA_OLD}")
+
+
+def test_bump_text_lifts_every_line_and_keeps_the_rest() -> None:
+    """Весь файл: каждая строка действия поднята, прочие строки — как были."""
+    text = f"a: 1\n- uses: actions/checkout@{SHA_OLD} # v7.0.1\nb: 2\n- uses: actions/checkout@v7"
+    after = module.bump_text(text, "actions/checkout", "v7.1.0", SHA_NEW)
+    assert after.split("\n") == [
+        "a: 1",
+        f"- uses: actions/checkout@{SHA_NEW} # v7.1.0",
+        "b: 2",
+        "- uses: actions/checkout@v7.1.0",
+    ]
+
+
+def test_signals_are_only_the_bot_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сигнал — только изменение бота; изменение человека с тем же заголовком им не считается."""
+    changes = [
+        {"number": 1, "user": {"login": module.BOT}},
+        {"number": 2, "user": {"login": "ArtVsMark"}},
+        {"number": 3},
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter(changes))
+    assert [one["number"] for one in module.signals("o/r", "t")] == [1]
