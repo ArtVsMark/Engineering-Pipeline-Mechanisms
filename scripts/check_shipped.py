@@ -77,7 +77,10 @@ OPENERS: Final = ('"""', "#:", "#", "*", "-")
 #: законен он там с первого дня. Нашёл внешний взгляд на #625, разбирая ту же
 #: беду в соседнем гейте
 #: ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
-LOOK_AT: Final = (*paths.SOURCES, paths.WORKFLOWS)
+LOOK_AT: Final = (*paths.SOURCES, paths.WORKFLOWS, paths.ACTIONS)
+#: Как в каталоге поиска лежит инструмент. У составного действия файл — всегда
+#: `action.yml` в своём каталоге (#1385); у прочих — сам файл в каталоге.
+LAYOUT: Final = {paths.ACTIONS: "*/action.yml"}
 SUFFIXES: Final = frozenset({".py", ".yml", ".yaml"})
 
 #: Как вход называет пустоту. Строка взята из самого README и здесь — предмет
@@ -129,7 +132,7 @@ def shipped(root: Path) -> list[str]:
         if not folder.is_dir():
             continue
         looked += 1
-        for path in sorted(folder.glob("*")):
+        for path in sorted(folder.glob(LAYOUT.get(where, "*"))):
             if path.suffix in SUFFIXES and declares(path):
                 seen.append(str(path.relative_to(root)))
     if not looked:

@@ -90,6 +90,12 @@ REVIEW_RUN: Final = WORKFLOWS / "review.yml"
 #: Тело взгляда — общий шаг; `REVIEW_RUN` — его вызывающий: события,
 #: кнопка и имя запуска (#993).
 REVIEW_STEP: Final = WORKFLOWS / "step-review.yml"
+#: Составные действия, отданные наружу (#1385): их зовут шагом внутри своего
+#: джоба, а не отдельным джобом, и имя записи остаётся именем джоба.
+ACTIONS: Final = Path(".github/actions")
+#: Сводный гейт — составным действием: имя `ci-complete` в защите ветки не
+#: меняется ни у кого.
+SUMMARY_ACTION: Final = ACTIONS / "ci-complete" / "action.yml"
 #: Шаг публикации фактов: его сверку с выпуском витрины гейт исполняет до слияния (#1380).
 FACTS_STEP: Final = WORKFLOWS / "step-facts.yml"
 #: Механизмы проекта — каталог, а не отдельный файл: его читают те, кто судит о
@@ -213,6 +219,8 @@ ALL: Final = (
     PYTHON_NEXT,
     REVIEW_RUN,
     REVIEW_STEP,
+    ACTIONS,
+    SUMMARY_ACTION,
     FACTS_STEP,
     SKILLS,
     DECISIONS,

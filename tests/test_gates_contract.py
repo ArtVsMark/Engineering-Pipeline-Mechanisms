@@ -221,7 +221,12 @@ def test_summary_takes_its_subject_from_data() -> None:
     невозможен, и подключение к общему конвейеру не должно требовать правки
     workflow.
     """
-    step = summary_job()["steps"][-1]["run"]
+    last = summary_job()["steps"][-1]
+    # Сводный гейт зовёт составное действие из дерева (#1385): опрос — в нём.
+    if str(last.get("uses") or "").startswith("./"):
+        action = yaml.safe_load((ROOT / last["uses"] / "action.yml").read_text(encoding="utf-8"))
+        last = action["runs"]["steps"][-1]
+    step = last["run"]
     assert "--policy" in step, "сводный джоб не называет, откуда берёт наполнение"
     assert "--required" not in step, "список именами в прогоне — это класс проверки в механизме"
 

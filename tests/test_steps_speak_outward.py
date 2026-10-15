@@ -26,15 +26,17 @@ REST.
 """
 
 import re
+from pathlib import Path
 from typing import Final
 
 import pytest
 
 from tests.conftest import ROOT, walk
 
-#: Прогоны, чей вывод — разбор решения, а не отметка «прошло».
-#: Очередь — её общим шагом: тело переехало туда из `automerge.yml` (#993).
-SPEAKS_OUT: Final = ("step-automerge.yml", "ci-complete.yml")
+#: Прогоны и действия, чей вывод — разбор решения, а не отметка «прошло»; пути
+#: от `.github/`. Очередь — её общим шагом: тело переехало туда из
+#: `automerge.yml` (#993); сводный гейт — составным действием (#1385).
+SPEAKS_OUT: Final = ("workflows/step-automerge.yml", "actions/ci-complete/action.yml")
 
 SUMMARY: Final = "GITHUB_STEP_SUMMARY"
 
@@ -46,7 +48,7 @@ ESCAPED: Final = "%0A"
 @pytest.mark.parametrize("run", SPEAKS_OUT)
 def test_a_deciding_step_speaks_through_an_annotation(run: str) -> None:
     """Разбор уходит АННОТАЦИЕЙ — единственным, что отдаёт REST наружу."""
-    text = (ROOT / ".github" / "workflows" / run).read_text(encoding="utf-8")
+    text = (ROOT / ".github" / run).read_text(encoding="utf-8")
     assert "::notice::" in text or "::error::" in text, (
         f"{run} печатает разбор только в лог и сводку: из окна, которому закрыто "
         "хранилище прогонов, от захода останется один код возврата"
@@ -60,7 +62,7 @@ def test_a_deciding_step_speaks_through_an_annotation(run: str) -> None:
 @pytest.mark.parametrize("run", SPEAKS_OUT)
 def test_a_deciding_step_also_fills_the_summary(run: str) -> None:
     """Сводка джоба остаётся: она для человека в окне площадки."""
-    text = (ROOT / ".github" / "workflows" / run).read_text(encoding="utf-8")
+    text = (ROOT / ".github" / run).read_text(encoding="utf-8")
     assert SUMMARY in text, f"{run} не заполняет сводку джоба"
 
 
@@ -70,7 +72,7 @@ def test_the_log_keeps_the_output_too(run: str) -> None:
 
     Иначе сводка появляется ценой лога, и тот, у кого лог есть, теряет вывод.
     """
-    text = (ROOT / ".github" / "workflows" / run).read_text(encoding="utf-8")
+    text = (ROOT / ".github" / run).read_text(encoding="utf-8")
     assert "cat " in text, f"{run} увёл вывод в файл и не вернул его в лог"
 
 
@@ -83,7 +85,7 @@ def test_the_summary_body_cannot_be_broken_by_its_own_text(run: str) -> None:
     разъезжается по разметке. Отступ ломать нечем. Нашли внешние взгляды на
     #292.
     """
-    text = (ROOT / ".github" / "workflows" / run).read_text(encoding="utf-8")
+    text = (ROOT / ".github" / run).read_text(encoding="utf-8")
     assert "echo '```'" not in text, (
         f"{run} заворачивает тело сводки в забор из кавычек: текст из заголовка "
         "изменения закроет его раньше времени"
@@ -145,10 +147,18 @@ AFTER_THE_CODE: Final = 20
 THE_CODE: Final = re.compile(r"\(код \$\{?rc\}?\)")
 
 
+def shell_files() -> list[Path]:
+    """Где живут тела оболочки: прогоны и составные действия дерева (#1385)."""
+    return [
+        *walk(ROOT / ".github" / "workflows", "*.yml"),
+        *walk(ROOT / ".github" / "actions", "*/action.yml"),
+    ]
+
+
 def annotated() -> list[tuple[str, int, str]]:
     """Все аннотации прогонов дерева: файл, строка, текст."""
     found: list[tuple[str, int, str]] = []
-    for path in walk(ROOT / ".github" / "workflows", "*.yml"):
+    for path in shell_files():
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             said = ANNOTATES.match(line)
             if said:
@@ -171,7 +181,7 @@ def blocks() -> list[tuple[str, int, list[str]]]:
     проверки этого файла.
     """
     found: list[tuple[str, int, list[str]]] = []
-    for path in walk(ROOT / ".github" / "workflows", "*.yml"):
+    for path in shell_files():
         lines = path.read_text(encoding="utf-8").splitlines()
         for number, line in enumerate(lines, 1):
             head = re.match(r"^(\s*)-?\s*run:\s*\|", line)
