@@ -492,6 +492,10 @@
     "scripts/check_branch_revival.py": {
       "answer": "as-is"
     },
+    "scripts/check_facts_contract.py": {
+      "answer": "ours",
+      "why": "@provider"
+    },
     "scripts/check_contract.py": {
       "answer": "ours",
       "why": "@provider"
