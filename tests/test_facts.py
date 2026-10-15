@@ -7,15 +7,17 @@
 
 import ast
 import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, git, load_script
 
 facts = load_script("build_facts.py")
 
@@ -550,6 +552,136 @@ def push_command(step: str) -> str:
     commands = [line for line in joined.splitlines() if "git push" in line]
     assert commands, "шаг публикации ничего не толкает — предмет проверки не найден (075)"
     return commands[0]
+
+
+def badge_step(name: str) -> str:
+    """Скрипт шага джоба `badges` в `badges.yml` — по имени шага, а не по месту."""
+    document = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = document["jobs"]["badges"]["steps"]
+    return str(next(step for step in steps if step.get("name") == name)["run"])
+
+
+def facts_tree(tmp_path: Path, named: str | None) -> tuple[Path, str, str]:
+    """Клон с двумя коммитами `main` и веткой `badges`, чьи факты называют `named`.
+
+    `None` — факты называют ПЕРВЫЙ коммит, то есть отстают от головы клона;
+    пустая строка — поля `commit` в фактах нет вовсе.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "--quiet", "--initial-branch=main")
+    git(repo, "config", "user.email", "t@example.invalid")
+    git(repo, "config", "user.name", "t")
+    (repo / "CONTRACT_VERSION").write_text("1.0.0\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "--quiet", "-m", "первый")
+    first = head_of(repo)
+    (repo / "CONTRACT_VERSION").write_text("2.0.0\n", encoding="utf-8")
+    git(repo, "commit", "--quiet", "-am", "второй")
+    git(repo, "checkout", "--quiet", "--orphan", "badges")
+    git(repo, "rm", "-rf", "--quiet", ".")
+    (repo / ".github" / "badges").mkdir(parents=True)
+    said: dict[str, str] = {"schema": "1.6"}
+    if named != "":
+        said["commit"] = named or first
+    (repo / ".github" / "badges" / "facts.json").write_text(json.dumps(said), encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "--quiet", "-m", "факты")
+    git(repo, "checkout", "--quiet", "main")
+    git(repo, "remote", "add", "origin", str(repo))
+    temp = tmp_path / "runner"
+    temp.mkdir()
+    return repo, str(temp), first
+
+
+def head_of(repo: Path) -> str:
+    """Голова дерева `repo`."""
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.strip()
+
+
+def facts_fetched(repo: Path, temp: str) -> subprocess.CompletedProcess[str]:
+    """Настоящий шаг «взять опубликованные факты и их дерево» в клоне `repo`.
+
+    Скрипты шаг зовёт от корня дерева, а у клона их нет: путь к ним подменяется
+    нашим деревом, остальной текст шага исполняется как есть.
+    """
+    script = badge_step("взять опубликованные факты и их дерево").replace(
+        "python scripts/", f"{sys.executable} {ROOT}/scripts/"
+    )
+    return subprocess.run(
+        ["bash", "-c", script],
+        cwd=repo,
+        env={**os.environ, "RUNNER_TEMP": temp},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def test_badges_draw_the_unpublished_from_the_facts_commit(tmp_path: Path) -> None:
+    """Неопубликованные разделы берутся с коммита фактов, а не с головы прогона (взгляд на #1345).
+
+    `rules`, `manifest` и `contract` рисующий читает из дерева. Факты на
+    `badges` отстают от головы, когда публикацию отказали: дерево головы дало
+    бы значку числа другого коммита. Шаг исполняется настоящий, из прогона.
+    """
+    repo, temp, first = facts_tree(tmp_path, None)
+    run = facts_fetched(repo, temp)
+    assert run.returncode == 0, run.stdout + run.stderr
+    at_facts = Path(temp) / "at-facts"
+    version = (at_facts / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
+    assert version == "1.0.0", "дерево неопубликованного взято не с коммита фактов"
+    assert head_of(at_facts) == first
+    assert (repo / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == "2.0.0"
+    drawn = badge_step("нарисовать значки по фактам")
+    assert '--root "${RUNNER_TEMP}/at-facts"' in drawn, "рисующий читает дерево головы"
+
+
+@pytest.mark.parametrize(
+    ("named", "said"),
+    [("0" * 40, "коммита фактов"), ("", "не назван коммит")],
+    ids=["commit-missing-from-history", "no-commit-field"],
+)
+def test_badges_refuse_facts_without_their_tree(tmp_path: Path, named: str, said: str) -> None:
+    """Дерева фактов взять неоткуда — отказ шага с причиной, а не значок по чужому дереву."""
+    repo, temp, _ = facts_tree(tmp_path, named)
+    run = facts_fetched(repo, temp)
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert said in run.stdout
+    assert not (Path(temp) / "at-facts").exists()
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["{}", '{"commit": "  "}', '{"commit": 7}', "[]", "не json"],
+    ids=["absent", "blank", "not-a-string", "not-an-object", "unreadable"],
+)
+def test_commit_of_refuses_facts_without_a_commit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], body: str
+) -> None:
+    """`--commit-of` без коммита в фактах — отказ, а не пустая строка «голова» для git."""
+    given = tmp_path / "facts.json"
+    given.write_text(body, encoding="utf-8")
+    assert facts.main(["--commit-of", str(given)]) == facts.EXIT_BROKEN
+    assert capsys.readouterr().out == ""
+
+
+def test_commit_of_prints_the_facts_commit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--commit-of` печатает коммит фактов одной строкой."""
+    given = tmp_path / "facts.json"
+    given.write_text('{"commit": " abc1234 "}', encoding="utf-8")
+    assert facts.commit_of(given) == facts.EXIT_OK
+    assert capsys.readouterr().out == "abc1234\n"
 
 
 def test_publication_writes_only_to_the_derived_branch() -> None:
