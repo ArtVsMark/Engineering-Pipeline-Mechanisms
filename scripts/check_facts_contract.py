@@ -31,8 +31,9 @@
 ЗОВЁТСЯ ТОЛЬКО ПО ПРЕДМЕТУ. С `--base` гейт сначала спрашивает дифф и идёт,
 только если тронут его предмет (`subject`): иначе сеть оплачивалась бы на
 каждом изменении. Без `--base` — идёт всегда (ручной прогон). Предмет
-вычисляется по дереву, а не перечнем (взгляд на #1391): шаг, сам гейт, прогон,
-который его зовёт, вызывающий шага (его `with:` — аргументы сборки) и
+вычисляется по дереву, а не перечнем (взгляд на #1391): шаг, сам гейт со
+своими модулями (`ghrest`, `gitcall` — разбор 404 у пробы), прогон, который
+его зовёт, вызывающий шага (его `with:` — аргументы сборки) и
 `facts_common.py` со всеми своими модулями, от которых зависит `facts.json`.
 
 ФАКТЫ — С ТЕМИ ЖЕ АРГУМЕНТАМИ, ЧТО У ПУБЛИКАЦИИ: файл CI и матрицы берутся из
@@ -55,6 +56,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
@@ -185,7 +187,7 @@ def gate_runs(root: Path) -> set[Path]:
 def subject(root: Path) -> set[str]:
     """Пути, правка которых меняет то, что сверка видит или как гейт её судит."""
     found = {FLOW} | module_closure(BUILD, root) | gate_runs(root)
-    found |= {path for path in [source_of(GATE, root)] if path is not None}
+    found |= module_closure(GATE, root)
     found |= {path for path, _ in callers(root)}
     return {path.as_posix() for path in found}
 
@@ -251,18 +253,43 @@ def release_missing(step: dict[str, Any], named: str = PROBED) -> bool:
     return False
 
 
+def unfetched(said: str) -> str | None:
+    """Файл выпуска, который шаг не скачал, — по его предупреждению; скачал всё — `None`."""
+    if UNFETCHED not in said:
+        return None
+    named = UNFETCHED_FILE.search(said)
+    return named.group(1) if named else PROBED
+
+
 def verdict(
-    good: tuple[int, str], stranger: tuple[int, str], missing: bool = False
+    good: tuple[int, str],
+    stranger: tuple[int, str],
+    missing: Callable[[str], bool] = lambda named: False,
 ) -> tuple[int, str]:
     """Исход гейта по двум заходам шага: годному и под чужим именем.
 
-    `missing` — площадка ответила «нет такого» на файл выпуска (`release_missing`).
+    ОТКАЗ КАНАЛА СУДИТСЯ ОДИН РАЗ И ПО ОБОИМ ЗАХОДАМ (взгляд на #1391, правило
+    210). Прежде «не скачан» проверялся только у первого захода: отказ сети на
+    втором читался как «расхождение не остановило шаг», и гейт краснил отказ
+    канала находкой о дереве. Это была четвёртая починка одного места по одной
+    форме, поэтому исходы разобраны целиком, а не дописан пятый случай:
+
+    1. любой заход не скачал выпуск — это канал: «нет такого» у названного
+       файла (`missing`) — находка о дереве, иначе молчание канала (4);
+    2. годный заход остановлен или сказал о несверке — сверка мертва (1);
+    3. чужой заход не остановлен своей строкой — сверка мертва (1);
+    4. иначе — сверка жива (0).
     """
+    for _, said in (good, stranger):
+        named = unfetched(said)
+        if named is not None:
+            if missing(named):
+                return (
+                    EXIT_FOUND,
+                    f"выпуска «{named}» под прибитым тегом нет — тег или имя файла не те",
+                )
+            return EXIT_SILENT, f"«{named}» выпуска витрины не скачан — сверка не проверена"
     rc, said = good
-    if UNFETCHED in said:
-        if missing:
-            return EXIT_FOUND, "выпуска под прибитым тегом нет — тег или имя файла не те"
-        return EXIT_SILENT, "выпуск витрины не скачан — сверка не проверена"
     if rc != 0 or "::error::" in said:
         return EXIT_FOUND, f"годные факты остановлены (код {rc}): {said.strip()[-300:]}"
     if "::warning::" in said:
@@ -321,9 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     except (NotRun, pipeline_checks.BadPolicy, OSError, ValueError) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    named = UNFETCHED_FILE.search(good[1])
-    missing = UNFETCHED in good[1] and release_missing(step, named.group(1) if named else PROBED)
-    code, said = verdict(good, stranger, missing)
+    code, said = verdict(good, stranger, lambda named: release_missing(step, named))
     print(said)
     return code
 
