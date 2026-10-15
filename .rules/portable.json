@@ -265,7 +265,10 @@
       "answer": "as-is"
     },
     ".github/workflows/schedules-seen.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/schedules-seen.yml"
+      ]
     },
     ".github/workflows/step-attribution.yml": {
       "answer": "configured",
@@ -311,6 +314,9 @@
       "answer": "as-is"
     },
     ".github/workflows/step-rulebook-fresh.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-schedules-seen.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-stuck.yml": {

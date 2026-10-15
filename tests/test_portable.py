@@ -332,7 +332,6 @@ STILL_COPIED: Final = frozenset(
         "release.yml",
         "required-context.yml",
         "runs-series.yml",
-        "schedules-seen.yml",
     }
 )
 
