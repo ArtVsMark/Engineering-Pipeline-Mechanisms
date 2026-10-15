@@ -338,9 +338,10 @@ def narrow(
     НЕПРИМЕНИМОЕ СО СЛЕПЫМИ ОБЛАСТЯМИ ОСТАЁТСЯ (взгляд на #1357, правило 195).
     Пустой `paths` ставят областям, у которых в дереве нет предмета, — а вопрос
     роли к неприменимому правилу ровно «не принесло ли изменение предмет».
-    Отсев выбрасывал бы из вопроса именно то правило, чей предмет отсутствует, —
-    сейчас это правила 065 и 077: изменение, добавившее перевод или метку для
-    новичков, роль бы не увидела.
+    Отсев выбрасывал бы из вопроса именно то правило, чей предмет отсутствует:
+    изменение, добавившее перевод или метку для новичков, роль бы не увидела.
+    Хватает ОДНОЙ слепой области (взгляд на #1369): предмет у неё приносит
+    любое изменение, и задета ли соседняя обычная область, не важно.
     """
     touched = {
         area
@@ -357,11 +358,12 @@ def narrow(
             unknown |= {area for area in areas if area not in table}
             known = all(area in table for area in areas)
             hidden = bool(areas) and known and all(not table[area] for area in areas)
+            any_blind = known and any(not table[area] for area in areas)
             if (
                 not areas
                 or not known
                 or touched & set(areas)
-                or (hidden and group == "inapplicable")
+                or (any_blind and group == "inapplicable")
             ):
                 kept[group].append(number)
             elif hidden:
@@ -388,7 +390,7 @@ def narrowed_said(narrowed: Narrowed | None, why: str = "") -> list[str]:
         ]
     # Отсеянное называется номерами, а не числом (взгляд на #1357): решение 041
     # обращено к тому, кто спросит, какое правило признано не задетым.
-    untouched = ", ".join(narrowed.untouched) if narrowed.untouched else "ни одно"
+    untouched = ", ".join(narrowed.untouched) if narrowed.untouched else "ни одного"
     lines.append(
         "Правила отобраны по тронутым путям (`.rules/area-paths.json` с общей ветки): "
         f"не задеты этим изменением — {len(narrowed.untouched)} ({untouched})."

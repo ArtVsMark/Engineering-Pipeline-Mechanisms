@@ -79,10 +79,12 @@ def test_an_inapplicable_rule_with_blind_areas_stays_with_the_role() -> None:
     Пустой `paths` ставят областям без предмета в дереве, а роль спрашивает
     неприменимое как раз о том, не принесло ли изменение предмет (195).
     """
-    areas_of = {"003": ["pace"], "065": ["pace"]}
-    said = module.narrow(["003"], ["065"], areas_of, TABLE_OF, ["README.md"])
-    assert said.inapplicable == ["065"]
+    areas_of = {"003": ["pace"], "065": ["pace"], "077": ["pace", "docs"], "009": ["docs"]}
+    said = module.narrow(["003"], ["065", "077", "009"], areas_of, TABLE_OF, ["README.md"])
+    # Хватает одной слепой области: «docs» не задета, а 077 всё равно у роли (#1369).
+    assert said.inapplicable == ["065", "077"]
     assert said.blind == ["003"]
+    assert said.untouched == ["009"]
 
 
 def test_the_map_names_untouched_rules_by_number() -> None:
@@ -92,7 +94,7 @@ def test_the_map_names_untouched_rules_by_number() -> None:
     note = "\n".join(module.narrowed_said(said))
     assert "не задеты этим изменением — 1 (002)" in note
     empty = module.narrow(["001"], [], {"001": ["gates"]}, TABLE_OF, ["scripts/check_x.py"])
-    assert "не задеты этим изменением — 0 (ни одно)" in "\n".join(module.narrowed_said(empty))
+    assert "не задеты этим изменением — 0 (ни одного)" in "\n".join(module.narrowed_said(empty))
 
 
 def test_unknown_areas_do_not_drop_a_rule() -> None:
