@@ -641,6 +641,27 @@ def test_a_matrix_cell_without_a_runner_build_is_named() -> None:
     assert module.language_moved(builds, ["3.14"], "3.16", "26.04") == []
 
 
+@pytest.mark.parametrize("ready", [True, False], ids=["есть-готовая", "готовых-нет"])
+def test_every_matrix_cell_is_asked_for_a_runner_build(ready: bool) -> None:
+    """Каждой ячейке матрицы — один вопрос о файле под раннер, предрелизной тоже (взгляд на #1377).
+
+    Перечень форм ячейки: номер неизвестен, стабильный с файлом, стабильный
+    без файла, предрелизный без файла. Последняя прежде молчала: вопрос о
+    сборке задавался только стабильной. Предрелизная с файлом строки не даёт.
+    """
+    system = "26.04" if ready else "30.10"
+    builds = [
+        build("3.14.7", ("linux", "26.04", "x64"), stable=True),
+        build("3.16.0-a.1", ("linux", "24.04", "x64"), stable=False),
+        build("3.17.0-a.1", ("linux", system, "x64"), stable=False),
+    ]
+    found = module.language_moved(builds, ["3.14", "3.16", "3.17"], "3.16", system)
+    cells = [d.said for d in found if d.source == "python-matrix"]
+    assert len(cells) == 1 and "3.16" in cells[0] and system in cells[0], found
+    assert "3.17" not in cells[0], "ячейка со сборкой названа несобранной"
+    assert ("3.14" in cells[0]) is False, "стабильная ячейка названа дважды"
+
+
 def test_no_stable_build_for_the_runner_is_said_and_other_checks_go_on() -> None:
     """Нет стабильной ветки под систему раннера — строка дрейфа, а не тишина (#1333, #1367).
 
@@ -2488,6 +2509,37 @@ def test_the_catalogue_source_reads_the_export_once_for_both(
     monkeypatch.setattr(module, "ours_proposals", lambda: EVIDENCE)
     found = module.catalogue_asked({"candidates": [{"slug": "g"}]}, {})
     assert [one.source for one in found] == ["proposal-hypothesis"]
+
+
+@pytest.mark.parametrize(
+    "written",
+    [None, "{не json", "[]"],
+    ids=["файла-нет", "битый", "не-словарь"],
+)
+def test_unread_proposals_do_not_silence_the_export_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, written: str | None
+) -> None:
+    """Предложения не читаются — сдвиг выгрузки всё равно назван (взгляд на #1377).
+
+    Путь к файлу подменён: исход не зависит от того, есть ли
+    `.rules/proposals.json` в дереве, где идёт набор.
+    """
+    proposals = tmp_path / "proposals.json"
+    if written is not None:
+        proposals.write_text(written, encoding="utf-8")
+    monkeypatch.setattr(module.paths, "PROPOSALS", proposals)
+    found = module.catalogue_asked({"count": 3, "candidates": []}, {"rules": {}})
+    assert [one.source for one in found] == ["rules-count"], found
+    if written is not None:
+        with pytest.raises(module.NotRun):
+            module.ours_proposals()
+
+
+def test_a_hypothesis_gone_from_candidates_names_both_reasons() -> None:
+    """Слага нет в `candidates`: опечатка или гипотеза стала правилом — названы обе (#1377)."""
+    found = module.evidence_unknown({"candidates": [{"slug": "g"}]}, EVIDENCE)
+    assert len(found) == 1
+    assert "стала правилом" in found[0].next_step and "поправить `hypothesis`" in found[0].next_step
 
 
 def test_rejected_evidence_names_the_reason() -> None:

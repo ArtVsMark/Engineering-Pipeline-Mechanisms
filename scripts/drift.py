@@ -175,7 +175,12 @@ def ours_file(path: Path, *, missing: str) -> dict[str, Any]:
     """
     if not path.is_file():
         raise NotRun(f"нет {path}: {missing} (075)")
-    said = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        # Битый файл — отказ своего источника, а не падение всего захода:
+        # цикл источников ловит `NotRun`, а не ошибку разбора (взгляд на #1377).
+        raise NotRun(f"{path}: не JSON — {exc}") from exc
     if not isinstance(said, dict):
         raise NotRun(f"{path}: прочитанное не словарь")
     return said
@@ -309,13 +314,20 @@ def evidence_unknown(export: dict[str, Any], proposals: dict[str, Any]) -> list[
             )
         ]
     known = {str(one.get("slug")) for one in candidates if isinstance(one, dict)}
+    # ОТСУТСТВИЕ В `candidates` — НЕ ТОЛЬКО ОПЕЧАТКА (взгляд на #1377, правило
+    # 195). Подтверждённая гипотеза становится правилом и уходит из списка
+    # кандидатов (export/README.md каталога), и тот же слаг, верный вчера,
+    # выглядит чужим. Различить их здесь нечем: вердикт — другой файл каталога,
+    # и второй фетч ради него завёл бы второе чтение (022). Поэтому строка
+    # называет обе причины и что делать в каждой.
     return [
         Drift(
             "proposal-hypothesis",
             f"данные «{one.get('slug')}» к гипотезе «{one.get('hypothesis')}», "
             "а в «candidates» выгрузки её нет",
-            "поправить `hypothesis` в .rules/proposals.json слагом из export/rules.json "
-            "→ candidates: по чужому слагу вердикта не будет",
+            "если гипотеза стала правилом — данные к ней больше не идут, убрать их "
+            "из .rules/proposals.json по вердикту; иначе поправить `hypothesis` слагом "
+            "из export/rules.json → candidates: по чужому слагу вердикта не будет",
         )
         for one in ours
         if str(one.get("hypothesis") or "") not in known
@@ -325,13 +337,18 @@ def evidence_unknown(export: dict[str, Any], proposals: dict[str, Any]) -> list[
 def catalogue_asked(export: dict[str, Any], mine: dict[str, Any]) -> list[Drift]:
     """Источник «каталог»: сдвиг выгрузки и наши данные к её гипотезам — по одному фетчу.
 
-    Предложений нет — канал не подключён, и о нём говорит свой источник:
+    Предложений нет или они не читаются — о файле говорит свой источник:
     здесь сверять нечего, а не отказ всего каталога.
     """
     found = catalogue_moved(export, mine)
-    if paths.PROPOSALS.is_file():
-        found += evidence_unknown(export, ours_proposals())
-    return found
+    try:
+        proposals = ours_proposals()
+    except NotRun:
+        # НЕПРОЧИТАННЫЕ ПРЕДЛОЖЕНИЯ НЕ ГАСЯТ СДВИГ ВЫГРУЗКИ (взгляд на #1377).
+        # Файла нет, он битый или не словарь — об этом говорит свой источник,
+        # «вердикты по предложениям», читающий тот же файл; здесь сверять нечего.
+        return found
+    return found + evidence_unknown(export, proposals)
 
 
 def reader_is_behind(where: dict[str, Any]) -> list[Drift]:
@@ -1327,12 +1344,25 @@ def language_moved(
                 "прогон не сможет поставить эту версию — сверить матрицу с манифестом",
             )
         )
-    # ВЕТКА МАТРИЦЫ БЕЗ ФАЙЛА ПОД СИСТЕМУ — тот же соседний случай уровнем
-    # ниже (поздний взгляд на #1367, правило 195): номер площадка знает, а
-    # поставить его раннеру нечем, и ячейка краснеет без строки о причине.
-    # При пустом `ready` это все ячейки, и их называет строка ниже.
-    unbuilt = sorted((set(matrix) & set(stable)) - set(ready), key=order)
-    if unbuilt and ready:
+    # ЯЧЕЙКЕ МАТРИЦЫ ЗАДАЁТСЯ ОДИН ВОПРОС: ЕСТЬ ЛИ У НЕЁ ФАЙЛ ПОД РАННЕР
+    # (взгляд на #1377, правило 210: третья починка этого места шла по одной
+    # форме). Форм у ячейки четыре: номера площадка не знает (строка выше);
+    # номер стабильный с файлом — чисто; стабильный без файла; предрелизный
+    # без файла. Две последние — один вопрос, и прежде он задавался только
+    # стабильной (поздний взгляд на #1367), а предрелизная ячейка без сборки
+    # молчала. `test-next` сюда не входит: свою сборку он спрашивает сам
+    # (`published`). При пустом `ready` стабильные ячейки называет строка
+    # `python-stable` ниже, и здесь они не повторяются.
+    unbuilt = (
+        []
+        if system is None
+        else [
+            m
+            for m in sorted(set(matrix) & (set(stable) | set(pre)), key=order)
+            if not published(manifest, m, system) and (ready or m in pre)
+        ]
+    )
+    if unbuilt:
         found.append(
             Drift(
                 "python-matrix",
