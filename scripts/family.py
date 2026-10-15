@@ -268,11 +268,11 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
     `unread`, а не тихий ноль (045).
 
     Свои не считаются: мерило о семье, а свои мысли живут в нашем ответе.
-    Запись не той формы внутри раздела пропускается, а не валит разрез:
+    Запись не той формы внутри раздела в разрез не идёт, но и не валит его:
     раздел совещательный, и одна кривая строка соседа не должна гасить
     числа всех остальных (039).
 
-    НО ПРОПУСК СЧИТАЕТСЯ И НАЗЫВАЕТСЯ (взгляд на #1340, вторая находка по
+    ПРОПУСК СЧИТАЕТСЯ И НАЗЫВАЕТСЯ (взгляд на #1340, вторая находка по
     месту — 210). Различать ноль только на уровне раздела мало: иная
     раскладка записи дала бы тот же тихий ноль. Формы, которые вход
     допускает, перечислены в `entry_wrong`, и каждая кривая запись идёт в
@@ -303,7 +303,9 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
             row: dict[str, Any] = {"repo": repo, "rule": str(number)}
             if isinstance(entry.get("note"), str) and entry["note"].strip():
                 row["note"] = entry["note"].strip()
-            if isinstance(entry.get("metric"), dict):
+            # Пустой замер в `by` не идёт: в `count` он прибавил бы запись, где
+            # читать нечего (взгляд на #1352).
+            if filled(entry.get("metric")):
                 row["metric"] = entry["metric"]
             if len(row) > 2:
                 by.append(row)
@@ -323,13 +325,25 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
 NOTE_KEYS: Final = frozenset({"note", "metric"})
 
 
+def filled(metric: object) -> bool:
+    """Замер, в котором есть что читать: словарь хотя бы с одним непустым значением.
+
+    `{}` и `{"value": None}` — не замер (взгляд на #1352 и #1358): читать в них
+    нечего. Пустой замер при годной заметке записи не портит — заметка
+    читается, а замер в `by` не идёт; это решение, а не пропуск.
+    """
+    return isinstance(metric, dict) and any(
+        value not in (None, "", [], {}) for value in metric.values()
+    )
+
+
 def entry_wrong(entry: object) -> str:
     """Почему запись `notes` не той формы — все причины через «; »; пусто — годится.
 
     Перечень форм, которые вход допускает (210): не словарь; чужой ключ;
     `note` не строкой; `metric` не словарём; ни заметки, ни замера — в том
-    числе пустая или пробельная `note` без замера: такую запись разрез не
-    читает, и её пропуск обязан быть назван (взгляд на #1352). Причины
+    числе пустая или пробельная `note` и замер без значений (`filled`): такую запись
+    разрез не читает, и её пропуск обязан быть назван (взгляд на #1352). Причины
     называются все, а не первая: иначе починка у соседа шла бы в два захода.
     """
     if not isinstance(entry, dict):
@@ -344,7 +358,10 @@ def entry_wrong(entry: object) -> str:
     if "metric" in entry and not isinstance(metric, dict):
         reasons.append("metric не словарь")
     said = isinstance(note, str) and bool(note.strip())
-    if not said and not isinstance(metric, dict):
+    # ПУСТОЙ ЗАМЕР — НЕ ЗАМЕР, как пустая заметка — не заметка: `metric: {}`
+    # нечего читать, и запись без заметки с таким замером кривая (взгляд на #1352).
+    measured = filled(metric)
+    if not said and not measured:
         reasons.append("ни заметки, ни замера")
     return "; ".join(reasons)
 
