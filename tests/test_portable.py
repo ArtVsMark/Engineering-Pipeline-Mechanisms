@@ -328,7 +328,6 @@ STILL_COPIED: Final = frozenset(
         "ci-complete-wake.yml",
         "claude.yml",
         "release.yml",
-        "required-context.yml",
         "runs-series.yml",
     }
 )

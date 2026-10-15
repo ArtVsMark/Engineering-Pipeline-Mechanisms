@@ -253,7 +253,10 @@
       "answer": "as-is"
     },
     ".github/workflows/required-context.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/required-context.yml"
+      ]
     },
     ".github/workflows/review.yml": {
       "answer": "configured",
@@ -807,6 +810,9 @@
         ".rules/proposals.json",
         ".rules/bindings.json"
       ]
+    },
+    ".github/workflows/step-required-context.yml": {
+      "answer": "as-is"
     },
     ".github/workflows/step-review.yml": {
       "answer": "as-is"
