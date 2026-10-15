@@ -638,11 +638,18 @@ def test_a_neighbours_string_cannot_break_the_log_line(capsys: pytest.CaptureFix
     assert "  - o/a · правило 1 ::error::подлог: x" in lines
 
 
+@pytest.mark.parametrize(
+    ("over", "rest"), [(7, " … и ещё 7 "), (0, None)], ids=["сверх-предела", "ровно-предел"]
+)
 def test_a_long_list_of_wrong_entries_is_cut_and_counted(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], over: int, rest: str | None
 ) -> None:
-    """Кривые записи соседа печатаются с пределом строк, остаток — числом (взгляд на #1358)."""
-    many = facts.WRONG_SHOWN + 7
+    """Кривые записи соседа печатаются с пределом строк, остаток — числом (взгляд на #1358).
+
+    Ровно предел — все строки и никакого «ещё»: граница сдвинутым сравнением
+    или срезом краснела бы здесь (взгляд на #1366).
+    """
+    many = facts.WRONG_SHOWN + over
     kin = {
         "read": True,
         "adopted": {"ours": 0, "of": 0},
@@ -665,7 +672,11 @@ def test_a_long_list_of_wrong_entries_is_cut_and_counted(
     lines = capsys.readouterr().out.splitlines()
     named = [line for line in lines if line.startswith("  - o/a")]
     assert len(named) == facts.WRONG_SHOWN
-    assert any(line.startswith("  … и ещё 7 ") for line in lines), lines
+    tails = [line for line in lines if line.startswith("  … и ещё")]
+    if rest is None:
+        assert tails == [], tails
+    else:
+        assert len(tails) == 1 and tails[0].startswith(" " + rest), tails
 
 
 def test_a_summary_without_notes_reads_as_none() -> None:
@@ -969,7 +980,13 @@ def test_the_who_page_is_published_and_kept_on_the_branch(tmp_path: Path) -> Non
         ({"value": ""}, False),
         ({"value": " \t"}, False),
         ({"value": " x "}, True),
+        ({"value": [" "]}, False),
+        ({"value": [None, {}]}, False),
+        ({"value": {"x": None}}, False),
+        ({"value": [" ", "x"]}, True),
+        ({"value": {"x": 0}}, True),
         ({"value": 0}, True),
+        ({"value": False}, True),
         ("x", False),
     ],
     ids=[
@@ -978,10 +995,18 @@ def test_the_who_page_is_published_and_kept_on_the_branch(tmp_path: Path) -> Non
         "пустая-строка",
         "пробельная-строка",
         "строка-с-текстом",
+        "список-из-пробела",
+        "список-пустых",
+        "словарь-с-null",
+        "список-с-текстом",
+        "словарь-с-нулём",
         "ноль-это-число",
+        "false-это-значение",
         "не-словарь",
     ],
 )
 def test_a_metric_is_filled_only_by_a_value(metric: object, read: bool) -> None:
     """Замер — словарь хотя бы с одним непустым значением; ноль — значение (#1358)."""
     assert family.filled(metric) is read
+    if isinstance(metric, dict):
+        assert family.hollow(metric) is not read

@@ -325,19 +325,34 @@ def notes(summary: dict[str, Any], *, mine: str = "") -> dict[str, Any]:
 NOTE_KEYS: Final = frozenset({"note", "metric"})
 
 
+def hollow(value: object) -> bool:
+    """Значение, в котором читать нечего: `None`, пробельная строка или пустое вглубь.
+
+    Список и словарь пусты, когда пусты все их элементы: `[" "]` и
+    `{"x": None}` — тот же соседний с `""` случай уровнем глубже (взгляд на
+    #1366, правило 195). Ноль и `False` — значения.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, dict):
+        return all(hollow(one) for one in value.values())
+    if isinstance(value, list):
+        return all(hollow(one) for one in value)
+    return False
+
+
 def filled(metric: object) -> bool:
     """Замер, в котором есть что читать: словарь хотя бы с одним непустым значением.
 
     `{}` и `{"value": None}` — не замер (взгляд на #1352 и #1358): читать в них
-    нечего. Строка из одних пробелов — тоже пустая, как у заметки: соседний с
-    `""` случай (взгляд на #1358, правило 195). Пустой замер при годной заметке
+    нечего. Пустота меряется вглубь (`hollow`): пробельная строка и вложенный
+    пустой список или словарь — тоже не замер. Пустой замер при годной заметке
     записи не портит — заметка читается, а замер в `by` не идёт; это решение,
     а не пропуск.
     """
-    return isinstance(metric, dict) and any(
-        not (value in (None, [], {}) or (isinstance(value, str) and not value.strip()))
-        for value in metric.values()
-    )
+    return isinstance(metric, dict) and not hollow(metric)
 
 
 def entry_wrong(entry: object) -> str:
