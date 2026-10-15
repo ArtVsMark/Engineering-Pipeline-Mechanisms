@@ -9,11 +9,12 @@
 наступило, ответ перечитывается.
 """
 
+import fnmatch
 import json
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Final
 
 import pytest
@@ -136,12 +137,24 @@ def test_every_allowed_line_is_still_found(rule: str) -> None:
     assert not gone, f"{rule}: в allowed строки, которых вывод больше не даёт: {gone}"
 
 
+#: Класс маски по смыслу fnmatch: после `[` — необязательный `!`, затем `]`
+#: первым знаком читается буквой, а не концом класса. `^` отрицанием не
+#: бывает: fnmatch кладёт его в набор буквой (взгляд на #1373).
+MASK_CLASS: Final = re.compile(r"\[!?\]?[^\]]*\]")
+
+
 def class_member(found: re.Match[str]) -> str:
-    """Знак, который класс маски `[…]` допускает: у отрицания — первый вне класса."""
-    negated, body = found.group(1), found.group(2)
-    if not negated:
-        return body[0]
-    return next(one for one in "pqxyz0123456789" if one not in body)
+    """Знак, который класс маски `[…]` допускает, — по ответу самого fnmatch.
+
+    Смысл класса (отрицание, диапазон, `]` первым знаком) не разбирается здесь
+    второй раз (правило 214): кандидатов спрашивают у `fnmatch.fnmatchcase`,
+    и первый допущенный подкладывается (взгляд на #1373, правило 210).
+    """
+    cls = found.group(0)
+    for one in dict.fromkeys(cls[1:-1] + "pqxyz0123456789_"):
+        if one not in "[]!" and fnmatch.fnmatchcase(one, cls):
+            return one
+    raise AssertionError(f"класс {cls} не допускает ни одного пробного знака")
 
 
 def planted_paths(glob: str) -> list[str]:
@@ -150,11 +163,17 @@ def planted_paths(glob: str) -> list[str]:
     `**/` раскрывается и в ноль каталогов, и в один: проба каталога
     (`Path.glob`) находит обе глубины, и сверка «не шире» обязана видеть обе
     (взгляд на #1336). `*` — слово, `?` — буква, `[…]` — знак, который класс
-    допускает: первый у обычного класса, а у `[!…]` и `[^…]` — знак ВНЕ его
-    (взгляд на #1336: первый знак отрицания как раз исключён).
+    допускает по ответу fnmatch. Каждый путь сверяется с маской
+    `PurePath.full_match`: подложенное, которого маска не находит, ничего бы не
+    проверило (взгляд на #1373).
     """
-    filled = re.sub(r"\[([!^]?)([^\]]+)\]", class_member, glob).replace("?", "p")
-    return sorted({filled.replace("**/", depth).replace("*", "probe") for depth in ("", "probe/")})
+    filled = MASK_CLASS.sub(class_member, glob).replace("?", "p")
+    planted = sorted(
+        {filled.replace("**/", depth).replace("*", "probe") for depth in ("", "probe/")}
+    )
+    stray = [path for path in planted if not PurePath(path).full_match(glob)]
+    assert not stray, f"маска {glob} не находит подложенного: {stray}"
+    return planted
 
 
 #: Пробы, которые обещают ПОЛНОТУ относительно образца предиката: каждое слово
@@ -185,11 +204,34 @@ def test_every_probe_with_strings_declares_its_forms() -> None:
     )
 
 
-def test_a_negated_mask_class_plants_a_member() -> None:
-    """Класс `[!a]` и `[^a]` подкладывает знак вне класса, а не исключённый (#1336)."""
-    assert planted_paths("x/[!a]b") == ["x/pb"]
-    assert planted_paths("x/[^pa]b") == ["x/qb"]
-    assert planted_paths("x/[ab]c") == ["x/ac"]
+@pytest.mark.parametrize(
+    ("glob", "planted"),
+    [
+        ("x/[!a]b", "x/pb"),
+        ("x/[^pa]b", "x/^b"),
+        ("x/[ab]c", "x/ac"),
+        ("x/[!a-z]b", "x/-b"),
+        ("x/[a-c]b", "x/ab"),
+        ("x/[!]a]b", "x/pb"),
+        ("x/[]a]b", "x/ab"),
+    ],
+    ids=[
+        "отрицание",
+        "крышка-буквой",
+        "набор",
+        "отрицание-диапазона",
+        "диапазон",
+        "скобка-в-отрицании",
+        "скобка-первой",
+    ],
+)
+def test_a_mask_class_plants_a_member_by_fnmatch(glob: str, planted: str) -> None:
+    """Класс подкладывает знак, который допускает fnmatch (взгляды на #1336 и #1373).
+
+    `[^…]` у fnmatch не отрицание, а набор с `^`; у `[!a-z]` исключён весь
+    диапазон; `]` первым знаком — буква класса.
+    """
+    assert planted_paths(glob) == [planted]
 
 
 def alternatives(pattern: str) -> list[str]:
@@ -254,6 +296,20 @@ def test_a_catalogue_probe_is_no_wider_than_the_predicate(rule: str, tmp_path: P
         ):
             missed.append(f"{path} + «{text}»")
     assert not missed, f"{rule}: проба находит, а предикат нет — {missed}"
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["name: Good first issue", "name: GOOD FIRST", "name: Новичкам", "name: НОВИЧКАМ"],
+    ids=["с-прописной", "прописными", "кириллица-с-прописной", "кириллица-прописными"],
+)
+def test_the_newcomer_label_is_seen_in_any_case(tmp_path: Path, label: str) -> None:
+    """Предикат 065 видит метку в любом регистре и при любой локали (взгляд на #1373)."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "labels.yml").write_text(f"- {label}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    assert any(hits(one["argv"], tmp_path) for one in checks("065")), label
 
 
 def test_a_planted_condition_turns_the_gate_red(tmp_path: Path) -> None:
