@@ -63,6 +63,7 @@ import time
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 import arm
@@ -165,6 +166,13 @@ STATE_MERGEABLE: Final = frozenset({"clean", "unstable", "has_hooks"})
 #: бы единственное место взведения и держало бы очередь до починки, а красное —
 #: это работа по источнику 2, вернувшаяся в окно, а не голова очереди.
 STATE_ARMABLE: Final = "blocked"
+
+#: СКОЛЬКО ВЗВЕДЁННОЕ ЖДЁТ ПОСЛЕ ЗЕЛЁНОГО, ПРЕЖДЕ ЧЕМ ЭТО ОСТАНОВКА (#1354).
+#: Замер 14.10.2026, #1352: обязательная `ci-complete` зелена в 19:50, слияние
+#: взведено, конфликта нет — а площадка держала изменение «заблокированным»
+#: больше 40 минут, пока не сменилась голова. Обычное слияние после зелёного
+#: идёт за минуты; двадцать — запас на очередь площадки, а не на повисшее.
+STALL_AFTER: Final = timedelta(minutes=20)
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -1052,6 +1060,73 @@ def keep_only(
             take_back(repo, neighbour, "взведена не голова очереди", owner_token, dry_run=dry_run)
 
 
+def green_since(repo: str, change: Change, owner_token: str) -> datetime | None:
+    """С какого времени голова зелена по всем обязательным; не зелена — `None`.
+
+    Время — конец последней завершённой записи проверки на голове: пока любая
+    идёт, голова ещё не «зелена и ждёт», а считается.
+    """
+    problems, waiting = head_verdict(repo, change, owner_token)
+    if problems or waiting:
+        return None
+    ends = [
+        str(run["completed_at"])
+        for run in ghrest.paginate(
+            f"repos/{repo}/commits/{change.head}/check-runs?filter=latest",
+            owner_token,
+            key="check_runs",
+        )
+        if run.get("completed_at")
+    ]
+    if not ends:
+        return None
+    return max(datetime.fromisoformat(one.replace("Z", "+00:00")) for one in ends)
+
+
+def base_ahead(repo: str, change: Change, owner_token: str) -> int:
+    """Сколько коммитов базы нет в голове — есть ли новая основа для подтяжки."""
+    said = (
+        ghrest.request("GET", f"repos/{repo}/compare/{change.head}...{change.base}", owner_token)
+        or {}
+    )
+    ahead = said.get("ahead_by")
+    return ahead if isinstance(ahead, int) and not isinstance(ahead, bool) else 0
+
+
+def unstick(
+    repo: str, change: Change, owner_token: str, *, dry_run: bool, now: datetime | None = None
+) -> bool:
+    """Остановка взведённого: зелено дольше `STALL_AFTER`, а площадка не сливает (#1354).
+
+    ПОДТЯЖКА — ЗАКОННАЯ МЕРА ПРОТИВ ПОВИСШЕЙ ПРОВЕРКИ (решение владельца
+    14.10.2026). Новая голова гонит проверки заново, а `main` подтягивается
+    настоящий: это не пустой коммит и не закрытие с переоткрытием, которые по-
+    прежнему запрещены. Мера доступна, только когда `main` ушёл вперёд головы;
+    без новой основы это говорится словами, а не повторяется вслепую.
+
+    Отвечает, была ли остановка: `False` — голова ещё не зелена или ждёт меньше
+    предела, и это обычное ожидание площадки.
+    """
+    since = green_since(repo, change, owner_token)
+    moment = now or datetime.now(UTC)
+    if since is None or moment - since < STALL_AFTER:
+        return False
+    waited = int((moment - since).total_seconds() // 60)
+    said = (
+        f"#{change.number}: остановка — обязательные зелены {waited} мин, слияние взведено, "
+        "а площадка не сливает"
+    )
+    if base_ahead(repo, change, owner_token):
+        print(f"{said}; база впереди головы — подтягиваю её, новая голова снимет повисшее (#1354)")
+        sync_head(repo, change.number, owner_token, dry_run=dry_run)
+    else:
+        print(
+            f"::warning::{said}; новой основы нет — подтяжка недоступна, "
+            "нужен человек: перезапуск повисшей проверки (#1354)"
+        )
+    return True
+
+
 def hand_over(
     repo: str, change: Change, queue: list[Change], owner_token: str, *, dry_run: bool
 ) -> None:
@@ -1081,7 +1156,10 @@ def hand_over(
     title = f"{change.title} (#{change.number})"
     if change.armed:
         if held_body(repo, change.number, owner_token) == (title, body):
-            print(f"#{change.number}: уже взведено тем же телом — площадка ждёт зелёного")
+            # ОЖИДАНИЕ И ОСТАНОВКА РАЗЛИЧАЮТСЯ (#1354): зелёное, которое площадка
+            # не сливает дольше предела, — остановка, и у неё своя мера.
+            if not unstick(repo, change, owner_token, dry_run=dry_run):
+                print(f"#{change.number}: уже взведено тем же телом — площадка ждёт зелёного")
             return
         take_back(
             repo, change, "взведено телом без последней работы ветки", owner_token, dry_run=dry_run

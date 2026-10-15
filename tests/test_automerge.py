@@ -2952,3 +2952,84 @@ def test_every_string_field_of_the_ast_is_classified() -> None:
     assert not unknown, f"строковые поля ast без решения, связывают ли они имя: {unknown}"
     stale = sorted(f"{k.__name__}.{f}" for k, f in (known | set(NOT_BINDING)) - found)
     assert not stale, f"решения о полях, которых в ast нет: {stale}"
+
+
+# --- остановка взведённого: зелено, а площадка не сливает (#1354) ----------
+
+
+STALL_NOW = module.datetime(2026, 10, 14, 20, 30, tzinfo=module.UTC)
+
+
+def stall_stand(monkeypatch: pytest.MonkeyPatch, *, green_at: str | None, ahead: int) -> list[int]:
+    """Голова: обязательные зелены с `green_at` (`None` — ещё идут), база впереди на `ahead`."""
+    synced: list[int] = []
+    monkeypatch.setattr(
+        module,
+        "head_verdict",
+        lambda repo, item, tok: ([], green_at is None),
+    )
+    monkeypatch.setattr(
+        module.ghrest,
+        "paginate",
+        lambda path, tok, **_: (
+            [{"name": "ci-complete", "completed_at": green_at}] if green_at else []
+        ),
+    )
+    monkeypatch.setattr(
+        module.ghrest, "request", lambda method, path, tok, **_: {"ahead_by": ahead}
+    )
+    monkeypatch.setattr(
+        module, "sync_head", lambda repo, number, tok, *, dry_run: synced.append(number)
+    )
+    return synced
+
+
+@pytest.mark.parametrize(
+    ("green_at", "ahead", "stalled", "pulled"),
+    [
+        ("2026-10-14T19:50:51Z", 2, True, True),
+        ("2026-10-14T19:50:51Z", 0, True, False),
+        ("2026-10-14T20:20:00Z", 2, False, False),
+        (None, 2, False, False),
+    ],
+    ids=["остановка-база-впереди", "остановка-основы-нет", "зелено-недавно", "ещё-идёт"],
+)
+def test_a_stalled_armed_head_is_pulled_only_onto_a_newer_base(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    green_at: str | None,
+    ahead: int,
+    stalled: bool,
+    pulled: bool,
+) -> None:
+    """Зелено дольше предела — остановка; подтяжка — только на базу впереди головы (#1354).
+
+    Замер #1352: зелено в 19:50, площадка не сливала до 20:30 и дольше. Свежая
+    голова под пределом — прежнее ожидание; без новой основы мера называется
+    недоступной, а не повторяется вслепую.
+    """
+    synced = stall_stand(monkeypatch, green_at=green_at, ahead=ahead)
+    head = change(1352, "automerge", armed=True)
+    assert module.unstick("o/r", head, "token", dry_run=False, now=STALL_NOW) is stalled
+    assert synced == ([1352] if pulled else [])
+    said = capsys.readouterr().out
+    if stalled and not pulled:
+        assert "::warning::" in said and "подтяжка недоступна" in said
+
+
+def test_an_armed_head_with_the_same_body_is_asked_about_a_stall(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Путь «уже взведено тем же телом» спрашивает об остановке, а не только ждёт (#1354)."""
+    head = change(4, "automerge", armed=True)
+    platform["held"][4] = ("изменение 4 (#4)", "тело origin/agent/change-4")
+    asked: list[int] = []
+    monkeypatch.setattr(
+        module,
+        "unstick",
+        lambda repo, item, tok, *, dry_run, now=None: asked.append(item.number) or True,
+    )
+    module.hand_over("o/r", head, [head], "token", dry_run=False)
+    assert asked == [4]
+    assert platform["asked"] == [], "взведённое тем же телом взвели заново"
+    assert "площадка ждёт зелёного" not in capsys.readouterr().out
