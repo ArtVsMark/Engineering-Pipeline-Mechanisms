@@ -273,9 +273,13 @@ def test_without_the_owner_token_the_reason_comes_before_the_platform(
 
 
 def test_in_the_flow_the_secret_reaches_one_step_only() -> None:
-    """В `required-context.yml` секрет владельца получает один шаг — чтение настроек (#1117)."""
+    """В шаге сверки секрет владельца получает один шаг — чтение настроек (#1117).
+
+    Шаги живут в общем шаге `step-required-context.yml` (#1385); вызывающий
+    `required-context.yml` только передаёт секрет по имени.
+    """
     flow = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "required-context.yml").read_text(encoding="utf-8")
+        (ROOT / ".github" / "workflows" / "step-required-context.yml").read_text(encoding="utf-8")
     )
     steps = [step for job in flow["jobs"].values() for step in job["steps"]]
     holders = [step for step in steps if module.OWNER_TOKEN_ENV in (step.get("env") or {})]
@@ -296,7 +300,7 @@ PLATFORM_COMMANDS: Final = ("::set-output", "::save-state", "::set-env", "::add-
 SECRET_SENDERS: Final = ("check_required_context.py", "drift.py")
 
 
-@pytest.mark.parametrize("flow", ["required-context.yml", "step-drift.yml"])
+@pytest.mark.parametrize("flow", ["step-required-context.yml", "step-drift.yml"])
 def test_the_secret_step_hands_nothing_to_the_next_steps(flow: str) -> None:
     """Оболочка шага с секретом не пишет в каналы площадки (#1124).
 
