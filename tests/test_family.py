@@ -1021,3 +1021,19 @@ def test_hollow_survives_nesting_json_accepts(filled_at_bottom: bool) -> None:
     value = json.loads("[" * depth + bottom + "]" * depth)
     assert family.hollow({"value": value}) is not filled_at_bottom
     assert family.filled({"value": value}) is filled_at_bottom
+
+
+def test_a_deep_metric_reaches_the_written_facts() -> None:
+    """Глубокий замер соседа проходит разрез и запись JSON, как её делает сборка фактов.
+
+    Запись — `json.dumps(..., indent=2)`, тот же вызов, что в `build_facts`:
+    у неё свой предел глубины, и обещание журнала держится только всем путём
+    (взгляд на #1376).
+    """
+    depth = 10_000
+    metric = {"value": json.loads("[" * depth + '"x"' + "]" * depth)}
+    consumer = {"repo": "someone/else", "notes": {"195": {"note": "n", "metric": metric}}}
+    drawn = family.picture(summary(consumer))
+    written = json.loads(json.dumps(drawn, ensure_ascii=False, indent=2))
+    assert [row["rule"] for row in written["notes"]["by"]] == ["195"]
+    assert written["notes"]["by"][0]["metric"] == metric
