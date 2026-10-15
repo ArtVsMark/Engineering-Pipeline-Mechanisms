@@ -136,14 +136,24 @@ def test_every_allowed_line_is_still_found(rule: str) -> None:
     assert not gone, f"{rule}: в allowed строки, которых вывод больше не даёт: {gone}"
 
 
+def class_member(found: re.Match[str]) -> str:
+    """Знак, который класс маски `[…]` допускает: у отрицания — первый вне класса."""
+    negated, body = found.group(1), found.group(2)
+    if not negated:
+        return body[0]
+    return next(one for one in "pqxyz0123456789" if one not in body)
+
+
 def planted_paths(glob: str) -> list[str]:
     """Пути, которые маска пробы каталога находит, — не один образец, а края маски.
 
     `**/` раскрывается и в ноль каталогов, и в один: проба каталога
     (`Path.glob`) находит обе глубины, и сверка «не шире» обязана видеть обе
-    (взгляд на #1336). `*` — слово, `?` — буква, `[…]` — первый знак класса.
+    (взгляд на #1336). `*` — слово, `?` — буква, `[…]` — знак, который класс
+    допускает: первый у обычного класса, а у `[!…]` и `[^…]` — знак ВНЕ его
+    (взгляд на #1336: первый знак отрицания как раз исключён).
     """
-    filled = re.sub(r"\[!?\^?([^\]])[^\]]*\]", r"\1", glob).replace("?", "p")
+    filled = re.sub(r"\[([!^]?)([^\]]+)\]", class_member, glob).replace("?", "p")
     return sorted({filled.replace("**/", depth).replace("*", "probe") for depth in ("", "probe/")})
 
 
@@ -154,7 +164,32 @@ def planted_paths(glob: str) -> list[str]:
 PROBE_FORMS: Final[dict[str, tuple[str, ...]]] = {
     "048": ("{w}", "{W}", "{WW}"),
     "065": ('name: "{w}', "name: '{w}", "name: {w}"),
+    "066": ("{w}",),
 }
+
+
+def test_every_probe_with_strings_declares_its_forms() -> None:
+    """Каждая проба со строками стоит в `PROBE_FORMS`: полноту новой не держит память (#1336).
+
+    Перечень ведётся рукой, и без этой сверки проба, добавленная в ответ,
+    оставалась бы без проверки полноты — ровно то, против чего заведён перечень.
+    """
+    with_strings = {
+        rule
+        for rule, one in answers().items()
+        if isinstance(one.get("refuted_by"), dict) and one["refuted_by"].get("contains")
+    }
+    assert with_strings == set(PROBE_FORMS), (
+        f"без форм: {sorted(with_strings - set(PROBE_FORMS))}; "
+        f"форм без пробы: {sorted(set(PROBE_FORMS) - with_strings)}"
+    )
+
+
+def test_a_negated_mask_class_plants_a_member() -> None:
+    """Класс `[!a]` и `[^a]` подкладывает знак вне класса, а не исключённый (#1336)."""
+    assert planted_paths("x/[!a]b") == ["x/pb"]
+    assert planted_paths("x/[^pa]b") == ["x/qb"]
+    assert planted_paths("x/[ab]c") == ["x/ac"]
 
 
 def alternatives(pattern: str) -> list[str]:
