@@ -324,7 +324,6 @@ def test_the_seams_of_the_filling_and_the_port_check_are_named() -> None:
 STILL_COPIED: Final = frozenset(
     {
         "arm.yml",
-        "attribution-history.yml",
         "badges.yml",
         "ci-complete.yml",
         "ci-complete-wake.yml",
@@ -332,7 +331,6 @@ STILL_COPIED: Final = frozenset(
         "labels-sync.yml",
         "release.yml",
         "required-context.yml",
-        "rules-inbox.yml",
         "runs-series.yml",
         "schedules-seen.yml",
     }

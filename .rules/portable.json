@@ -174,7 +174,10 @@
       "answer": "as-is"
     },
     ".github/workflows/attribution-history.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/attribution-history.yml"
+      ]
     },
     ".github/workflows/automerge.yml": {
       "answer": "configured",
@@ -245,7 +248,10 @@
       ]
     },
     ".github/workflows/rules-inbox.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/rules-inbox.yml"
+      ]
     },
     ".github/workflows/runs-series.yml": {
       "answer": "as-is"
