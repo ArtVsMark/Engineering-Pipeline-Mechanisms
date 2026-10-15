@@ -107,25 +107,46 @@ class Took:
     """Что взял один проект семьи."""
 
     repo: str
-    #: Имена наших шагов, которые он зовёт. Пусто — не взял ничего.
-    steps: tuple[str, ...]
-    #: Версии, к которым он прибит. Их бывает НЕСКОЛЬКО, и это находка: разные
-    #: шаги на разных тегах означают недоведённый переезд.
-    refs: tuple[str, ...]
+    #: Пары «файл шага → версия» по каждому вызову — ЕДИНСТВЕННЫЙ источник:
+    #: шаги и версии из них выводятся, а не хранятся рядом вторым ответом на
+    #: тот же вопрос (взгляд на #1370, 090). Пусто — не взял ничего.
+    pins: tuple[tuple[str, str], ...] = ()
     #: Диапазон `contract:` из его `.pipeline.yml`. `None` — не объявлен или
     #: не прочитан: «на свежем» без него не сказать, и он назван, а не угадан.
     span: str | None = None
-    #: Пары «файл шага → версия» по каждому вызову: свежесть судится только по
-    #: отдаваемым шагам, а `refs` их не различает (взгляд на #1355).
-    pins: tuple[tuple[str, str], ...] = ()
 
-    def said(self) -> str:
-        """Строка сводки: числа и имена, а не оценка."""
+    @property
+    def steps(self) -> tuple[str, ...]:
+        """Файлы наших шагов, которые он зовёт."""
+        return tuple(sorted({step for step, _ref in self.pins}))
+
+    @property
+    def refs(self) -> tuple[str, ...]:
+        """Версии, к которым он прибит. Их бывает НЕСКОЛЬКО — см. `said`."""
+        return tuple(sorted({ref for _step, ref in self.pins}))
+
+    def given(self, offered: list[str]) -> Took:
+        """Тот же проект, сужённый до вызовов ОТДАВАЕМЫХ шагов (взгляд на #1355).
+
+        Свежесть и «разные версии» судятся по ним: неотдаваемый `step-*` на
+        `main` не говорит ни о свежести, ни о недоведённом переезде.
+        """
+        offers = set(offered)
+        kept = tuple(pin for pin in self.pins if set(offered_names((pin[0],))) & offers)
+        return Took(self.repo, kept, self.span)
+
+    def said(self, offered: list[str] | None = None) -> str:
+        """Строка сводки: числа и имена, а не оценка.
+
+        Разные версии у одного потребителя — недоведённый переезд (152), и
+        судятся они по отдаваемым шагам, когда `offered` назван.
+        """
         if not self.steps:
             return f"- `{self.repo}` — не взял ничего"
         pinned = ", ".join(self.refs)
         about = f"{len(self.steps)} шаг(ов) на {pinned}: {', '.join(self.steps)}"
-        if len(self.refs) > 1:
+        judged = self.given(offered) if offered is not None else self
+        if len(judged.refs) > 1:
             about += " · **разные версии у одного потребителя** — переезд не доведён (152)"
         return f"- `{self.repo}` — {about}"
 
@@ -167,12 +188,9 @@ def calls_in(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     транспорта
     ([170](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/170-green-on-a-forgery-is-a-hypothesis-too.md)).
     """
-    steps: list[str] = []
-    refs: list[str] = []
-    for found in CALL_RE.finditer(text):
-        steps.append(found["step"])
-        refs.append(found["ref"])
-    return tuple(sorted(set(steps))), tuple(sorted(set(refs)))
+    # Разбор один — `pins_in`; здесь только проекция (взгляд на #1370, 090).
+    took = Took("", pins_in(text))
+    return took.steps, took.refs
 
 
 def pins_in(text: str) -> tuple[tuple[str, str], ...]:
@@ -236,30 +254,18 @@ def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
     """Что взял один сосед — по его клону."""
     clone = shallow_clone(repo, where, timeout=timeout)
     folder = clone / WANT
-    steps: set[str] = set()
-    refs: set[str] = set()
     pins: set[tuple[str, str]] = set()
     # КАТАЛОГА ПРОГОНОВ МОЖЕТ НЕ БЫТЬ ВОВСЕ, и это «не взял», а не отказ:
     # проект без конвейера — законное состояние соседа.
     if folder.is_dir():
         for path in sorted(folder.glob("*.y*ml")):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            mine, pinned = calls_in(text)
-            steps.update(mine)
-            refs.update(pinned)
-            pins.update(pins_in(text))
+            pins.update(pins_in(path.read_text(encoding="utf-8", errors="replace")))
     # ОТВЕТ ЛЕЖИТ В КОРНЕ, а сужение в режиме конуса корневые файлы оставляет:
     # второго клона ради одного файла не нужно.
     answer = clone / paths.PIPELINE
     text = answer.read_text(encoding="utf-8", errors="replace") if answer.is_file() else ""
     span = policy.span_said(text) if text else None
-    return Took(
-        repo=repo,
-        steps=tuple(sorted(steps)),
-        refs=tuple(sorted(refs)),
-        span=span,
-        pins=tuple(sorted(pins)),
-    )
+    return Took(repo=repo, pins=tuple(sorted(pins)), span=span)
 
 
 def sweep(
@@ -306,7 +312,7 @@ def report_lines(seen: list[Took], unread: list[str], offered: list[str]) -> lis
     захода не отвечают на один вопрос разными числами (взгляд на #1241).
     """
     lines = [f"взяли наши шаги: {len(takers(seen, offered))} из {len(seen)} прочитанных"]
-    lines += [one.said() for one in seen]
+    lines += [one.said(offered) for one in seen]
     if unread:
         lines.append(
             f"не прочитано клонов: {len(unread)} — {', '.join(unread)}. "
@@ -331,9 +337,9 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
     отдаём наружу (`onboard.steps`), а не то, что кто-то позвал: позванный, но
     не отдаваемый шаг в числитель не идёт — ни шагов, ни проектов.
 
-    `refs` в `by` — версии ОТДАВАЕМЫХ шагов (взгляд на #1355): свежесть
-    судится по ним, и неотдаваемый `step-*` на `main` не уводит соседа в
-    «на ветке», когда отдаваемое у него на теге выпуска.
+    `steps` и `refs` в `by` — ОТДАВАЕМЫЕ шаги и их версии (взгляды на #1355 и
+    #1370): свежесть судится по ним, и неотдаваемый `step-*` на `main` не
+    уводит соседа в «на ветке», когда отдаваемое у него на теге выпуска.
     """
     # ИМЕНА ПРИВОДЯТСЯ К ОДНОЙ ФОРМЕ. Вызов называет файл (`step-lint`), а
     # отдаваемое — шаг без приставки (`lint`, `onboard.steps`): сравнение как
@@ -350,15 +356,17 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
         },
         "steps": {"taken": len(taken), "of": len(offered), "names": taken},
         "by": [
+            # Шаги и версии строки — ОДНОГО среза, отдаваемых шагов (взгляд на
+            # #1370): таблица фактов ставит их в одну строку «шаги | теги», и
+            # тег неотдаваемого шага в ней пропадал бы без объяснения.
             {
                 "repo": one.repo,
-                "steps": list(one.steps),
-                "refs": sorted(
-                    {ref for step, ref in one.pins if set(offered_names((step,))) & offers}
-                ),
+                "steps": list(given.steps),
+                "refs": list(given.refs),
                 "contract": one.span,
             }
             for one in took_ours
+            for given in (one.given(offered),)
         ],
     }
 
