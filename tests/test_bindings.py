@@ -12,6 +12,7 @@
 дереву неоткуда.
 """
 
+import hashlib
 import json
 import re
 from collections.abc import Iterable
@@ -1330,7 +1331,7 @@ def catalogue_jobs(folder: Path) -> dict[tuple[str, str], set[str]]:
 #: в дереве и стоит в `where` ответа (взгляд на #1339).
 CALLER_NAMED_NOT_CALLED: Final[dict[str, str]] = {
     "002": "ci.yml — джоб на каждый шаг, свой; держит tests/test_gates_reject.py",
-    "006": "ci.yml — место своего шага; держит scripts/check_window_lifetime.py",
+    "006": "ci.yml — место своего шага; держит tests/test_window_lifetime.py",
     "018": "ci.yml — предмет чтения; держит tests/test_gates_contract.py",
     "035": "ci.yml — место своего гейта версии; держит scripts/check_version.py",
     "080": "rules-inbox.yml упомянут как канал каталога; держит .rules/proposals.json",
@@ -1340,6 +1341,7 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, str]] = {
     "165": "ci.yml — шаг прогона, где гейт требует -z; держит tests/test_source_hygiene.py",
     "179": "ci.yml, rules-inbox.yml — примеры групп отмены; держит tests/test_gates_contract.py",
     "182": "ci.yml упомянут в доводе; держит tests/test_bindings.py",
+    "190": "rules-inbox.yml — канал подключения, вторая половина; держит scripts/family.py",
 }
 
 
@@ -1376,16 +1378,41 @@ def flow_places(where: str, flows: Iterable[str]) -> dict[str, int]:
 #: #1237): образец не видел ни `tests/`, ни имени без каталога (взгляд на
 #: #1335), и каждый новый заход по одному месту чинил его пунктуацию (210).
 #: Новый `called` без строки здесь краснеет, пока голову не прочитают; строка
-#: без такого ответа — тоже. Замер 14.10.2026: восемь ответов.
-CALLED_HEAD_READ: Final[dict[str, str]] = {
-    "090": "ci.yml, джоб attribution — гейт атрибуции действием каталога",
-    "123": "ci.yml, джоб attribution — атрибуция на итоговой истории",
-    "129": "ci.yml, джоб answer — форма ответа и пробы действием каталога",
-    "130": "rules-inbox.yml — новое правило приходит задачей действием каталога",
-    "135": "attribution-history.yml — личность записи действием каталога",
-    "162": "rules-inbox.yml — ночные входящие действием каталога",
-    "178": "rules-inbox.yml — числа долга приходят с действием каталога",
-    "190": "данные ответа собраны кодом каталога; rules-inbox.yml зовёт его действие",
+#: без такого ответа — тоже.
+#:
+#: ПРОЧИТАННОЕ ПРИБИТО К ТЕКСТУ (взгляд на #1335): второй элемент — первые
+#: двенадцать знаков sha256 от `where` на день чтения. Переписанный `where`
+#: краснеет здесь, пока голову не перечитают и отпечаток не обновят: иначе
+#: «прочитано» держалось бы только для нового номера, а не для нового текста.
+CALLED_HEAD_READ: Final[dict[str, tuple[str, str]]] = {
+    "090": (
+        "ci.yml, джоб attribution — гейт атрибуции действием каталога",
+        "1177b0ff5c58",
+    ),
+    "123": (
+        "ci.yml, джоб attribution — атрибуция на итоговой истории",
+        "c1867d7c835a",
+    ),
+    "129": (
+        "ci.yml, джоб answer — форма ответа и пробы действием каталога",
+        "a9ef814942c6",
+    ),
+    "130": (
+        "rules-inbox.yml — новое правило приходит задачей действием каталога",
+        "75316941fbf4",
+    ),
+    "135": (
+        "attribution-history.yml — личность записи действием каталога",
+        "4938dffb6cf9",
+    ),
+    "162": (
+        "rules-inbox.yml — ночные входящие действием каталога",
+        "2557bc6506a1",
+    ),
+    "178": (
+        "rules-inbox.yml — числа долга приходят с действием каталога",
+        "bd81549978a4",
+    ),
 }
 
 
@@ -1446,7 +1473,18 @@ def test_an_answer_naming_a_catalogue_caller_is_called_or_listed() -> None:
         f"{n}: строка CALLED_HEAD_READ без called-ответа — снять"
         for n in sorted(set(CALLED_HEAD_READ) - read)
     ]
+    rules = json.loads(BINDINGS.read_text(encoding="utf-8"))["rules"]
+    wrong += [
+        f"{n}: `where` переписан после чтения головы — перечитать и обновить отпечаток"
+        for n in sorted(read & set(CALLED_HEAD_READ))
+        if where_digest(str(rules[n].get("where") or "")) != CALLED_HEAD_READ[n][1]
+    ]
     assert not wrong, "ответы на прогоны каталога:\n  " + "\n  ".join(wrong)
+
+
+def where_digest(where: str) -> str:
+    """Отпечаток текста `where`: первые двенадцать знаков sha256."""
+    return hashlib.sha256(where.encode("utf-8")).hexdigest()[:12]
 
 
 HOLDER_RE: Final = re.compile(r"держит (?P<path>[\w./-]+)")
