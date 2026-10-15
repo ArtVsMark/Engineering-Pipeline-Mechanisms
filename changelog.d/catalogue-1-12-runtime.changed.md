@@ -2,9 +2,10 @@
 
 Прогоны зовут действия каталога выпуска v1.12.0: атрибуция (и в общем шаге
 `step-attribution.yml`), проверка ответа, единый значок и корневое действие
-входящих. Файлы самих действий между v1.11.0 и v1.12.0 не менялись
-(`git diff v1.11.0 v1.12.0 -- action.yml .github/actions` в каталоге пуст), как
-и зовомые ими `check_answer.py` и `check_attribution.py`; изменился
+входящих. Файлы самих действий между v1.11.0 и v1.12.0 не менялись, как и
+зовомые ими `check_answer.py` и `check_attribution.py` (`git diff v1.11.0
+v1.12.0 -- action.yml .github/actions scripts/check_answer.py
+scripts/check_attribution.py` в каталоге пуст); изменился
 `python_badge.py` — значок Python каталога рисует схему 3.14 / 3.15 / 3.16, и
 дерево с ней сходится: 3.14 и 3.15 — матрица, предрелизная 3.16 —
 `python-next.yml`. `origin` вызванных ответов подняты
