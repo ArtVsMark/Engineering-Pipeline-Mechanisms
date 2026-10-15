@@ -561,11 +561,12 @@ def badge_step(name: str) -> str:
     return str(next(step for step in steps if step.get("name") == name)["run"])
 
 
-def facts_tree(tmp_path: Path, named: str | None) -> tuple[Path, str, str]:
+def facts_tree(tmp_path: Path, named: str | None, body: str | None = None) -> tuple[Path, str, str]:
     """Клон с двумя коммитами `main` и веткой `badges`, чьи факты называют `named`.
 
     `None` — факты называют ПЕРВЫЙ коммит, то есть отстают от головы клона;
-    пустая строка — поля `commit` в фактах нет вовсе.
+    пустая строка — поля `commit` в фактах нет вовсе. `body` — текст файла
+    фактов как есть, мимо `named`.
     """
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -584,7 +585,8 @@ def facts_tree(tmp_path: Path, named: str | None) -> tuple[Path, str, str]:
     said: dict[str, str] = {"schema": "1.6"}
     if named != "":
         said["commit"] = named or first
-    (repo / ".github" / "badges" / "facts.json").write_text(json.dumps(said), encoding="utf-8")
+    text = json.dumps(said) if body is None else body
+    (repo / ".github" / "badges" / "facts.json").write_text(text, encoding="utf-8")
     git(repo, "add", "-A")
     git(repo, "commit", "--quiet", "-m", "факты")
     git(repo, "checkout", "--quiet", "main")
@@ -646,32 +648,76 @@ def test_badges_draw_the_unpublished_from_the_facts_commit(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    ("named", "said"),
-    [("0" * 40, "коммита фактов"), ("", "не назван коммит")],
-    ids=["commit-missing-from-history", "no-commit-field"],
+    ("named", "body", "said"),
+    [
+        ("0" * 40, None, "коммита фактов"),
+        ("", None, "нет поля commit"),
+        (None, "не json", "Expecting value"),
+    ],
+    ids=["commit-missing-from-history", "no-commit-field", "unreadable-facts"],
 )
-def test_badges_refuse_facts_without_their_tree(tmp_path: Path, named: str, said: str) -> None:
-    """Дерева фактов взять неоткуда — отказ шага с причиной, а не значок по чужому дереву."""
-    repo, temp, _ = facts_tree(tmp_path, named)
+def test_badges_refuse_facts_without_their_tree(
+    tmp_path: Path, named: str | None, body: str | None, said: str
+) -> None:
+    """Дерева фактов взять неоткуда — отказ шага с причиной, а не значок по чужому дереву.
+
+    Причина в пометке своя у каждой поломки: нечитаемый JSON — не «поля нет»
+    (взгляд на #1364).
+    """
+    repo, temp, _ = facts_tree(tmp_path, named, body)
     run = facts_fetched(repo, temp)
     assert run.returncode == 1, run.stdout + run.stderr
-    assert said in run.stdout
+    error = next((line for line in run.stdout.splitlines() if line.startswith("::error::")), "")
+    assert error, "пометки ::error:: нет:\n" + run.stdout + run.stderr
+    assert said in error, error
     assert not (Path(temp) / "at-facts").exists()
 
 
 @pytest.mark.parametrize(
-    "body",
-    ["{}", '{"commit": "  "}', '{"commit": 7}', "[]", "не json"],
+    ("lost", "said"),
+    [("branch", "ветка badges не получена"), ("file", "на ветке badges нет facts.json")],
+    ids=["no-badges-branch", "no-facts-file"],
+)
+def test_badges_name_a_missing_source_of_facts(tmp_path: Path, lost: str, said: str) -> None:
+    """Нет ветки `badges` или в ней нет фактов — пометка с причиной, а не немой `set -e` (#1382)."""
+    repo, temp, _ = facts_tree(tmp_path, None)
+    if lost == "branch":
+        git(repo, "branch", "--quiet", "-D", "badges")
+    else:
+        git(repo, "checkout", "--quiet", "badges")
+        git(repo, "rm", "--quiet", ".github/badges/facts.json")
+        git(repo, "commit", "--quiet", "-m", "без фактов")
+        git(repo, "checkout", "--quiet", "main")
+    run = facts_fetched(repo, temp)
+    assert run.returncode == 1, run.stdout + run.stderr
+    error = next((line for line in run.stdout.splitlines() if line.startswith("::error::")), "")
+    assert said in error, run.stdout + run.stderr
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        ("{}", "нет поля commit"),
+        ('{"commit": "  "}', "поле commit пустое"),
+        ('{"commit": 7}', "поле commit не строка, а int"),
+        ("[]", "факты не объект, а list"),
+        ("не json", "Expecting value"),
+    ],
     ids=["absent", "blank", "not-a-string", "not-an-object", "unreadable"],
 )
 def test_commit_of_refuses_facts_without_a_commit(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], body: str
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], body: str, why: str
 ) -> None:
-    """`--commit-of` без коммита в фактах — отказ, а не пустая строка «голова» для git."""
+    """`--commit-of` без коммита в фактах — отказ со своей причиной, а не пустая строка для git.
+
+    Причина у каждой формы своя (взгляд на #1382): `"commit": 7` — не «нет поля».
+    """
     given = tmp_path / "facts.json"
     given.write_text(body, encoding="utf-8")
     assert facts.main(["--commit-of", str(given)]) == facts.EXIT_BROKEN
-    assert capsys.readouterr().out == ""
+    said = capsys.readouterr()
+    assert said.out == ""
+    assert why in said.err, said.err
 
 
 def test_commit_of_prints_the_facts_commit(
