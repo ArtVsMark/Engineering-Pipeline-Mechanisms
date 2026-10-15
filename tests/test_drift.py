@@ -622,15 +622,22 @@ def test_a_stable_number_without_a_runner_build_is_not_called_into_the_matrix() 
     assert "python-next" not in [d.source for d in moved]
 
 
-def test_no_stable_build_for_the_runner_is_the_third_outcome() -> None:
-    """Ни одной стабильной ветки с файлом под систему раннера — отказ, а не тишина (#1333).
+def test_no_stable_build_for_the_runner_is_said_and_other_checks_go_on() -> None:
+    """Нет стабильной ветки под систему раннера — строка дрейфа, а не тишина (#1333, #1367).
 
-    Пустой список готовых веток молча гасил сверки python-stable и python-next:
-    дрейф сказал бы «всё сошлось» там, где площадка не знает системы раннера (195).
+    Пустой список готовых веток молча гасил python-stable (195). Отказом всего
+    источника он не сделан: сверка матрицы с манифестом и предрелизной по
+    номеру системы не требуют и идут дальше.
     """
-    builds = [build("3.14.7", ("linux", "24.04", "x64"), stable=True)]
-    with pytest.raises(module.NotRun, match=re.escape("26.04")):
-        module.language_moved(builds, ["3.14"], "3.15", "26.04")
+    builds = [
+        build("3.14.7", ("linux", "24.04", "x64"), stable=True),
+        {"version": "3.16.0-a.1", "stable": False, "files": []},
+    ]
+    found = module.language_moved(builds, ["3.14", "3.99"], "3.15", "26.04")
+    said = {d.source: d.said for d in found}
+    assert "26.04" in said["python-stable"], found
+    assert "3.99" in said["python-matrix"], "сверка матрицы погасла вместе с готовыми ветками"
+    assert "3.16" in said["python-next"], "предрелизная сверка погасла вместе с готовыми ветками"
 
 
 @pytest.mark.parametrize(

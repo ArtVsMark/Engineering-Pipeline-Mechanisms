@@ -1264,15 +1264,7 @@ def language_moved(
         raise NotRun("в манифесте нет ни одной стабильной ветки — читать нечего (075)")
     found: list[Drift] = []
     ready = stable if system is None else [m for m in stable if published(manifest, m, system)]
-    # НИ ОДНОЙ ГОТОВОЙ ВЕТКИ ПОД СИСТЕМУ — ТРЕТИЙ ИСХОД (взгляд на #1333, 195):
-    # пустой `ready` молча гасил бы сверки python-stable и python-next, и дрейф
-    # говорил бы «всё сошлось» там, где площадка не знает системы раннера.
-    if not ready:
-        raise NotRun(
-            f"в манифесте нет стабильной ветки с файлом под систему раннера {system} — "
-            "сверять матрицу не с чем (075)"
-        )
-    newest = ready[-1]
+    newest = ready[-1] if ready else ""
     unknown = sorted(set(matrix) - set(stable) - set(pre), key=order)
     if unknown:
         found.append(
@@ -1282,7 +1274,21 @@ def language_moved(
                 "прогон не сможет поставить эту версию — сверить матрицу с манифестом",
             )
         )
-    if newest and newest not in matrix:
+    # НИ ОДНОЙ ГОТОВОЙ ВЕТКИ ПОД СИСТЕМУ — СКАЗАНО СТРОКОЙ, А НЕ МОЛЧАНИЕМ
+    # (взгляды на #1333 и #1367, правило 195). Пустой `ready` гасил сверки
+    # python-stable и готовности предрелизной, и дрейф молчал там, где площадка
+    # не знает системы раннера. Отказом всего источника это не сделано: сверка
+    # матрицы с манифестом и предрелизной по номеру системы не требуют.
+    if not ready:
+        found.append(
+            Drift(
+                "python-stable",
+                f"ни у одной стабильной ветки нет файла под систему раннера {system}",
+                "сверить `runs-on` матрицы с манифестом площадки: под эту систему "
+                "площадка Python не ставит, и ни одна ячейка матрицы не позеленеет",
+            )
+        )
+    elif newest not in matrix:
         found.append(
             Drift(
                 "python-stable",
