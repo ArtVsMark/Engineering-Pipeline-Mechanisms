@@ -254,14 +254,16 @@ jobs:
       # а факты на `badges` могут быть от прежнего коммита: публикацию отказали
       # или её обогнала другая голова. Поэтому дерево для них — отдельная копия
       # на `commit` из самих фактов. Коммита нет в истории — отказ: значок по
-      # чужому дереву хуже прежнего значка (045).
+      # чужому дереву хуже прежнего значка (045). Отказ `--commit-of` пишет
+      # свою причину в пометку: поля нет и JSON не читается — разные поломки,
+      # и общая фраза назвала бы вторую первой (взгляд на #1364).
       - name: взять опубликованные факты и их дерево
         run: |
           set -euo pipefail
           git fetch --quiet origin badges
           git show FETCH_HEAD:.github/badges/facts.json > "${RUNNER_TEMP}/facts.json"
-          if ! commit=$(python scripts/build_facts.py --commit-of "${RUNNER_TEMP}/facts.json"); then
-            echo "::error::Значки не нарисованы: в опубликованных фактах не назван коммит."
+          if ! commit=$(python scripts/build_facts.py --commit-of "${RUNNER_TEMP}/facts.json" 2>"${RUNNER_TEMP}/commit-of.err"); then
+            echo "::error::Значки не нарисованы: $(tr '\n' ' ' < "${RUNNER_TEMP}/commit-of.err")"
             exit 1
           fi
           if ! git cat-file -e "${commit}^{commit}" 2>/dev/null; then
