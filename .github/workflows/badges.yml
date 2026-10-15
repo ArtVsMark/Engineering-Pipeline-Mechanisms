@@ -247,11 +247,28 @@ jobs:
       # клоне поставила бы границу истории на её коммит (взгляд на #1183).
       # ЗНАЧКИ РИСУЮТСЯ ПО ОПУБЛИКОВАННЫМ ФАКТАМ, а не по второй сборке: число
       # на значке и в файле, который читает витрина, иначе разошлись бы (022).
-      - name: взять опубликованные факты
+      #
+      # НЕОПУБЛИКОВАННОЕ — С ТОГО ЖЕ КОММИТА (взгляд на #1345). `rules`,
+      # `manifest` и `contract` в фактах 1.6 не лежат, и рисующий берёт их из
+      # дерева (`build_facts.rehydrated`). Дерево этого прогона — голова ветки,
+      # а факты на `badges` могут быть от прежнего коммита: публикацию отказали
+      # или её обогнала другая голова. Поэтому дерево для них — отдельная копия
+      # на `commit` из самих фактов. Коммита нет в истории — отказ: значок по
+      # чужому дереву хуже прежнего значка (045).
+      - name: взять опубликованные факты и их дерево
         run: |
           set -euo pipefail
           git fetch --quiet origin badges
           git show FETCH_HEAD:.github/badges/facts.json > "${RUNNER_TEMP}/facts.json"
+          if ! commit=$(python scripts/build_facts.py --commit-of "${RUNNER_TEMP}/facts.json"); then
+            echo "::error::Значки не нарисованы: в опубликованных фактах не назван коммит."
+            exit 1
+          fi
+          if ! git cat-file -e "${commit}^{commit}" 2>/dev/null; then
+            echo "::error::Значки не нарисованы: коммита фактов «${commit}» нет в истории — дерево для неопубликованных разделов взять неоткуда."
+            exit 1
+          fi
+          git worktree add --quiet --detach "${RUNNER_TEMP}/at-facts" "$commit"
       # `project.svg` ПИШУТ ДВА ПРОГОНА — общий шаг фактов (джоб `facts`) и этот
       # шаг, оба по одному `facts.json` и одним писателем
       # `build_facts.draw_pictures`. Что оба пути идут через него, держит
@@ -261,6 +278,7 @@ jobs:
           python scripts/build_facts.py \
             --from-facts "${RUNNER_TEMP}/facts.json" \
             --out-dir "${RUNNER_TEMP}/badges" \
+            --root "${RUNNER_TEMP}/at-facts" \
             --supplier "$GITHUB_REPOSITORY"
       # ЕДИНЫЙ ЗНАЧОК «Python │ ОС │ coverage │ release / PyPI │ version» (#1019,
       # решение владельца 01.10.2026). Рисует его действие каталога с тега, а не

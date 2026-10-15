@@ -1034,6 +1034,27 @@ def drawn_from(path: Path, out_dir: str, root: str = ".", supplier: str = "") ->
     return EXIT_OK
 
 
+def commit_of(path: Path) -> int:
+    """Режим `--commit-of`: напечатать коммит, на котором собраны готовые факты.
+
+    Прогон значков берёт по нему дерево для неопубликованных разделов
+    (`rehydrated`): факты на ветке могут отставать от головы прогона, и дерево
+    головы дало бы значку числа другого коммита (взгляд на #1345). Поля нет или
+    оно пусто — отказ, а не пустая строка: пустая ушла бы в git как «голова».
+    """
+    try:
+        facts = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"коммит фактов не прочитан: {path} — {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    commit = facts.get("commit") if isinstance(facts, dict) else None
+    if not isinstance(commit, str) or not commit.strip():
+        print(f"коммит фактов не прочитан: в {path} нет поля commit", file=sys.stderr)
+        return EXIT_BROKEN
+    print(commit.strip())
+    return EXIT_OK
+
+
 def picture_input_wrong(facts: object) -> str | None:
     """Что не так с формой фактов для картинки; None — форма годится.
 
@@ -1168,6 +1189,9 @@ def main(argv: list[str] | None = None) -> int:
         help="с --from-facts: только картинки PICTURES, плоско в этот каталог (общий шаг фактов)",
     )
     parser.add_argument(
+        "--commit-of", default="", help="напечатать коммит, на котором собран готовый facts.json"
+    )
+    parser.add_argument(
         "--branch-files",
         action="store_true",
         help="напечатать всё, что ветка badges вправе держать, — по строке на имя",
@@ -1196,6 +1220,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.commit_of:
+        return commit_of(Path(args.commit_of))
     if args.branch_files:
         print("\n".join(branch_files()))
         return EXIT_OK
