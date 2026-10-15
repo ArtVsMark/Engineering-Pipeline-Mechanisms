@@ -1043,18 +1043,29 @@ def commit_of(path: Path) -> int:
     (`rehydrated`): факты на ветке могут отставать от головы прогона, и дерево
     головы дало бы значку числа другого коммита (взгляд на #1345). Поля нет или
     оно пусто — отказ, а не пустая строка: пустая ушла бы в git как «голова».
+
+    ПРИЧИНА У КАЖДОЙ ФОРМЫ СВОЯ (взгляды на #1364 и #1382): факты не объект,
+    поля нет, поле не строка, поле пустое — разные поломки, и общая фраза
+    «нет поля» назвала бы `"commit": 123` отсутствием поля.
     """
     try:
         facts = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"коммит фактов не прочитан: {path} — {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    commit = facts.get("commit") if isinstance(facts, dict) else None
-    if not isinstance(commit, str) or not commit.strip():
-        print(f"коммит фактов не прочитан: в {path} нет поля commit", file=sys.stderr)
-        return EXIT_BROKEN
-    print(commit.strip())
-    return EXIT_OK
+    if not isinstance(facts, dict):
+        why = f"факты не объект, а {type(facts).__name__}"
+    elif "commit" not in facts:
+        why = "нет поля commit"
+    elif not isinstance(facts["commit"], str):
+        why = f"поле commit не строка, а {type(facts['commit']).__name__}"
+    elif not facts["commit"].strip():
+        why = "поле commit пустое"
+    else:
+        print(facts["commit"].strip())
+        return EXIT_OK
+    print(f"коммит фактов не прочитан: в {path} {why}", file=sys.stderr)
+    return EXIT_BROKEN
 
 
 def picture_input_wrong(facts: object) -> str | None:
