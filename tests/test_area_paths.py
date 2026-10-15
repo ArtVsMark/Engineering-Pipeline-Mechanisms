@@ -73,30 +73,26 @@ def test_narrowing_keeps_only_rules_whose_areas_were_touched() -> None:
     assert said.unknown == []
 
 
-def test_an_inapplicable_rule_with_blind_areas_stays_with_the_role() -> None:
-    """Неприменимое со слепыми областями — роли, а не в «не видны» (взгляд на #1357).
+def test_an_inapplicable_rule_is_never_narrowed_away() -> None:
+    """Неприменимое роль спрашивает всегда, задета его область или нет (решение 042).
 
-    Пустой `paths` ставят областям без предмета в дереве, а роль спрашивает
-    неприменимое как раз о том, не принесло ли изменение предмет (195).
+    Таблица говорит, где предмет живёт сейчас, а у неприменимого его нет: и
+    слепая область, и обычная незадетая, и неизвестная таблице — правило у роли.
     """
     areas_of = {"003": ["pace"], "065": ["pace"], "077": ["pace", "docs"], "009": ["docs"]}
-    said = module.narrow(["003"], ["065", "077", "009"], areas_of, TABLE_OF, ["README.md"])
-    # Хватает одной слепой области: «docs» не задета, а 077 всё равно у роли (#1369).
-    assert said.inapplicable == ["065", "077"]
+    said = module.narrow(["003"], ["065", "077", "009", "120"], areas_of, TABLE_OF, ["README.md"])
+    assert said.inapplicable == ["065", "077", "009", "120"]
     assert said.blind == ["003"]
-    assert said.untouched == ["009"]
-    assert said.unasked == ["009"]
+    assert said.untouched == []
 
 
-def test_the_map_names_untouched_inapplicable_rules_apart() -> None:
-    """Неприменимые среди отсеянных карта называет отдельно (взгляд на #1369)."""
+def test_the_untouched_line_speaks_of_eye_rules_only() -> None:
+    """Строка «не задеты» — только о правилах глаз; неприменимые отданы все (#1369)."""
     areas_of = {"001": ["gates"], "002": ["docs"], "009": ["docs"]}
     said = module.narrow(["001", "002"], ["009"], areas_of, TABLE_OF, ["scripts/check_x.py"])
-    assert said.unasked == ["009"]
+    assert said.untouched == ["002"] and said.inapplicable == ["009"]
     note = "\n".join(module.narrowed_said(said))
-    assert "не задеты этим изменением — 2 (002, 009); из них неприменимые — 009." in note
-    eyes_only = module.narrow(["001", "002"], [], areas_of, TABLE_OF, ["scripts/check_x.py"])
-    assert "неприменимые" not in "\n".join(module.narrowed_said(eyes_only))
+    assert "не задеты этим изменением — 1 (002). Неприменимые отданы роли все." in note
 
 
 def test_the_map_names_untouched_rules_by_number() -> None:
@@ -158,7 +154,7 @@ def test_a_broken_table_is_a_refusal(monkeypatch: pytest.MonkeyPatch, said: str)
 def test_the_map_hands_the_role_only_touched_rules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Заход карты целиком: тронутые пути сужают оба списка роли, отсеянное названо числом."""
+    """Заход карты целиком: тронутые пути сужают правила глаз, неприменимое отдано (042)."""
     where = tmp_path / "карта.md"
     monkeypatch.setattr(
         module, "split", lambda said: (["010"], ["001", "002"], {"not-applicable": ["003"]})
@@ -175,8 +171,8 @@ def test_the_map_hands_the_role_only_touched_rules(
     assert module.main(["--out", str(where)]) == module.EXIT_OK
     text = where.read_text("utf-8")
     assert "**001**" in text and "**002**" not in text
-    assert "- 003" not in text
-    assert "не задеты этим изменением — 2" in text
+    assert "- 003" in text, "неприменимое отсеяно таблицей областей"
+    assert "не задеты этим изменением — 1 (002)" in text
 
 
 def test_the_export_gives_titles_and_english_areas(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,7 +204,7 @@ def test_narrowing_answers_in_its_named_shape() -> None:
     """Отбор отвечает записью `Narrowed`: каждая группа названа полем, а не местом в кортеже."""
     said = module.narrow([], [], {}, TABLE_OF, [])
     assert isinstance(said, module.Narrowed)
-    assert said._fields == ("eyes", "inapplicable", "untouched", "blind", "unknown", "unasked")
+    assert said._fields == ("eyes", "inapplicable", "untouched", "blind", "unknown")
 
 
 def test_a_project_without_the_role_gets_no_word_of_it(

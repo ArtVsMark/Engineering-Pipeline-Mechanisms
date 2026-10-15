@@ -313,16 +313,14 @@ class Narrowed(NamedTuple):
 
     eyes: list[str]
     inapplicable: list[str]
-    #: Правила, чьи области у дерева есть, но этим изменением не задеты.
+    #: Правила «держат глаза», чьи области у дерева есть, но этим изменением
+    #: не задеты. Неприменимых здесь нет: их роль спрашивает всегда (решение 042).
     untouched: list[str]
     #: Правила «держат глаза», все области которых по диффу не видны: роли не
     #: отдаются. Неприменимое сюда не попадает никогда — см. `narrow`.
     blind: list[str]
     #: Области выгрузки, которых нет в таблице: их правила оставлены, а таблица отстала.
     unknown: list[str]
-    #: Неприменимые среди `untouched`: из вопроса роли о предмете ушли именно
-    #: они, и карта называет их отдельно (взгляд на #1369).
-    unasked: list[str]
 
 
 def narrow(
@@ -332,49 +330,43 @@ def narrow(
     table: dict[str, list[str]],
     files: list[str],
 ) -> Narrowed:
-    """Сужает вопросы роли до правил, чьи области задеты тронутыми путями.
+    """Сужает вопросы роли до правил, держащихся глазами, чьи области задеты.
 
     НЕЗНАНИЕ НЕ ОТСЕИВАЕТ (045). Правило без областей в выгрузке или с областью,
     которой нет в таблице, остаётся в списке: отсеять его значило бы выдать
     «не задето» там, где мы не знаем. Области вне таблицы карта называет.
 
-    НЕПРИМЕНИМОЕ СО СЛЕПЫМИ ОБЛАСТЯМИ ОСТАЁТСЯ (взгляд на #1357, правило 195).
-    Пустой `paths` ставят областям, у которых в дереве нет предмета, — а вопрос
-    роли к неприменимому правилу ровно «не принесло ли изменение предмет».
-    Отсев выбрасывал бы из вопроса именно то правило, чей предмет отсутствует:
-    изменение, добавившее перевод или метку для новичков, роль бы не увидела.
-    Хватает ОДНОЙ слепой области (взгляд на #1369): предмет у неё приносит
-    любое изменение, и задета ли соседняя обычная область, не важно.
+    НЕПРИМЕНИМОЕ НЕ ОТСЕИВАЕТСЯ ВОВСЕ (решение 042, взгляд на #1369, правило
+    195). Таблица говорит, где предмет правила живёт СЕЙЧАС, а у неприменимого
+    предмета нет — о нём таблица не говорит ничего. Вопрос роли к нему —
+    «не принесло ли изменение предмет», и предмет приносит любой путь: проба
+    ответа 048 (`scripts/**/*`) ловит правку, которую таблица звала «не
+    задето». Прежде отсев щадил только неприменимое со слепой областью
+    (взгляды на #1357 и #1369) — то был частный случай того же довода.
     """
     touched = {
         area
         for area, masks in table.items()
         if any(matches(name, mask) for name in files for mask in masks)
     }
-    kept: dict[str, list[str]] = {"eyes": [], "inapplicable": []}
+    kept: dict[str, list[str]] = {"eyes": []}
     untouched: list[str] = []
     blind: list[str] = []
     unknown: set[str] = set()
-    for group, numbers in (("eyes", eyes), ("inapplicable", inapplicable)):
-        for number in numbers:
-            areas = areas_of.get(number) or []
-            unknown |= {area for area in areas if area not in table}
-            known = all(area in table for area in areas)
-            hidden = bool(areas) and known and all(not table[area] for area in areas)
-            any_blind = known and any(not table[area] for area in areas)
-            if (
-                not areas
-                or not known
-                or touched & set(areas)
-                or (any_blind and group == "inapplicable")
-            ):
-                kept[group].append(number)
-            elif hidden:
-                blind.append(number)
-            else:
-                untouched.append(number)
-    unasked = [number for number in untouched if number in inapplicable]
-    return Narrowed(kept["eyes"], kept["inapplicable"], untouched, blind, sorted(unknown), unasked)
+    for number in inapplicable:
+        unknown |= {area for area in areas_of.get(number) or [] if area not in table}
+    for number in eyes:
+        areas = areas_of.get(number) or []
+        unknown |= {area for area in areas if area not in table}
+        known = all(area in table for area in areas)
+        hidden = bool(areas) and known and all(not table[area] for area in areas)
+        if not areas or not known or touched & set(areas):
+            kept["eyes"].append(number)
+        elif hidden:
+            blind.append(number)
+        else:
+            untouched.append(number)
+    return Narrowed(kept["eyes"], list(inapplicable), untouched, blind, sorted(unknown))
 
 
 def narrowed_said(narrowed: Narrowed | None, why: str = "") -> list[str]:
@@ -395,13 +387,14 @@ def narrowed_said(narrowed: Narrowed | None, why: str = "") -> list[str]:
     # Отсеянное называется номерами, а не числом (взгляд на #1357): решение 041
     # обращено к тому, кто спросит, какое правило признано не задетым.
     untouched = ", ".join(narrowed.untouched) if narrowed.untouched else "ни одного"
-    # Неприменимые среди отсеянных названы отдельно (взгляд на #1369): вопрос
-    # к ним другой — «не принесло ли изменение предмет», и читатель карты
-    # должен видеть, какие из них роль не спросит.
-    unasked = f"; из них неприменимые — {', '.join(narrowed.unasked)}" if narrowed.unasked else ""
+    # Отсеиваются только правила, которые держат глаза: неприменимое роль
+    # спрашивает всегда (решение 042), и строка говорит это прямо, а не
+    # смешивает два списка (взгляд на #1369).
     lines.append(
-        "Правила отобраны по тронутым путям (`.rules/area-paths.json` с общей ветки): "
-        f"не задеты этим изменением — {len(narrowed.untouched)} ({untouched}){unasked}."
+        "Правила, которые держат глаза, отобраны по тронутым путям "
+        "(`.rules/area-paths.json` с общей ветки): "
+        f"не задеты этим изменением — {len(narrowed.untouched)} ({untouched}). "
+        "Неприменимые отданы роли все."
     )
     if narrowed.blind:
         lines.append("По диффу не видны и роли не отданы — " + ", ".join(narrowed.blind) + ".")
