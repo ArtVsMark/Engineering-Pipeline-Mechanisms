@@ -44,20 +44,21 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, Final
 
 import facts_common
+import ghrest
 import gitcall
-import yaml
+import paths
+import pipeline_checks
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 EXIT_SILENT: Final = 4
 
-FLOW: Final = Path(".github/workflows/step-facts.yml")
+FLOW: Final = paths.FACTS_STEP
 #: Пути, правка которых меняет то, что сверка видит: сам шаг (тег, хеши, разбор
 #: вердикта) и сборка фактов, которые он сверяет.
 SUBJECT: Final = (FLOW.as_posix(), "scripts/facts_common.py")
@@ -75,10 +76,9 @@ class NotRun(RuntimeError):
     """Гейт не отработал: предмета нет или вход не прочитан (075)."""
 
 
-def contract_step(flow: str) -> dict[str, Any]:
-    """Шаг сверки из текста `step-facts.yml`; нет его — отказ, а не «чисто»."""
-    parsed = yaml.safe_load(flow)
-    jobs = parsed.get("jobs") if isinstance(parsed, dict) else None
+def contract_step(flow: dict[Any, Any]) -> dict[str, Any]:
+    """Шаг сверки из разобранного `step-facts.yml`; нет его — отказ, а не «чисто»."""
+    jobs = flow.get("jobs")
     found = [
         one
         for job in (jobs or {}).values()
@@ -124,12 +124,11 @@ def release_missing(step: dict[str, Any]) -> bool:
     env = step.get("env") or {}
     url = f"{env.get('RELEASES')}/{env.get('FACTS_CONTRACT')}/{PROBED}"
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=30):
-            return False
-    except urllib.error.HTTPError as exc:
-        return exc.code == 404
-    except urllib.error.URLError, OSError:
-        return False
+        ghrest.raw_text(url)
+    except ghrest.TransportError as exc:
+        cause = exc.__cause__
+        return isinstance(cause, urllib.error.HTTPError) and cause.code == 404
+    return False
 
 
 def verdict(
@@ -175,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK
         if not args.repo:
             raise NotRun("не названо имя проекта (--repo или GITHUB_REPOSITORY)")
-        step = contract_step((args.root / FLOW).read_text(encoding="utf-8"))
+        step = contract_step(pipeline_checks.run_of(args.root / FLOW))
         sha = gitcall.output(["rev-parse", "HEAD"], NotRun, cwd=str(args.root)).strip()
         with tempfile.TemporaryDirectory() as raw:
             temp = Path(raw)
@@ -198,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
             json.loads((temp / "facts" / "facts.json").read_text(encoding="utf-8"))
             good = run_step(step, temp, args.repo)
             stranger = run_step(step, temp, STRANGER)
-    except (NotRun, OSError, ValueError) as exc:
+    except (NotRun, pipeline_checks.BadPolicy, OSError, ValueError) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     missing = UNFETCHED in good[1] and release_missing(step)

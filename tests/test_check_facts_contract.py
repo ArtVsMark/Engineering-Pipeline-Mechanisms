@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tests.conftest import ROOT, load_script
 
@@ -22,7 +23,7 @@ CAUGHT = (1, f"{module.STRANGER}: расхождений 1\n")
 
 def test_the_gate_finds_exactly_one_contract_step_in_the_tree() -> None:
     """Шаг сверки в `step-facts.yml` один и несёт тег, адрес выпуска и хеши."""
-    step = module.contract_step((ROOT / module.FLOW).read_text(encoding="utf-8"))
+    step = module.contract_step(module.pipeline_checks.run_of(ROOT / module.FLOW))
     assert set(step["env"]) >= {"FACTS_CONTRACT", "RELEASES", "FACTS_SHA256"}
 
 
@@ -32,7 +33,7 @@ def test_no_single_contract_step_is_the_third_outcome(copies: int) -> None:
     step = '      - name: сверка\n        run: python "$dir/check_facts.py"\n'
     flow = "jobs:\n  facts:\n    steps:\n" + step * copies
     with pytest.raises(module.NotRun):
-        module.contract_step(flow)
+        module.contract_step(yaml.safe_load(flow))
 
 
 @pytest.mark.parametrize(
@@ -120,20 +121,56 @@ def test_the_gate_runs_only_on_its_subject(tmp_path: Path, path: str, touches: b
         (urllib.error.HTTPError("u", 404, "Not Found", {}, None), True),  # type: ignore[arg-type]
         (urllib.error.HTTPError("u", 503, "Unavailable", {}, None), False),  # type: ignore[arg-type]
         (urllib.error.URLError("нет сети"), False),
+        (None, False),
     ],
-    ids=["404", "503", "сети-нет"],
+    ids=["404", "503", "сети-нет", "выпуск-есть"],
 )
 def test_only_a_404_says_the_tag_is_wrong(
-    monkeypatch: pytest.MonkeyPatch, raised: Exception, missing: bool
+    monkeypatch: pytest.MonkeyPatch, raised: Exception | None, missing: bool
 ) -> None:
     """«Нет такого» — находка о дереве; любой другой отказ — молчание канала (084)."""
 
-    def refuse(*_: object, **__: object) -> None:
-        raise raised
+    def fetch(url: str, timeout: int = 30) -> str:
+        if raised is None:
+            return "1\n"
+        raise module.ghrest.TransportError(f"снимок не прочитан ({url})") from raised
 
-    monkeypatch.setattr(module.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(module.ghrest, "raw_text", fetch)
     step = {"env": {"RELEASES": "https://example.invalid", "FACTS_CONTRACT": "facts-v0.0.0"}}
     assert module.release_missing(step) is missing
+
+
+def whole_run(monkeypatch: pytest.MonkeyPatch, said: tuple[int, str]) -> int:
+    """Заход гейта целиком: годный заход отвечает `said`, чужой — ловит расхождение."""
+
+    def step(one: dict[str, Any], temp: Path, repo: str) -> tuple[int, str]:
+        return CAUGHT if repo == module.STRANGER else said
+
+    monkeypatch.setattr(module, "run_step", step)
+    monkeypatch.setattr(module, "release_missing", lambda one: False)
+    return int(module.main(["--root", str(ROOT), "--repo", "o/a"]))
+
+
+def test_a_whole_run_names_a_live_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Годное прошло, расхождение остановило шаг — сверка жива, исход 0."""
+    assert whole_run(monkeypatch, GOOD) == module.EXIT_OK
+
+
+def test_a_whole_run_names_a_silent_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Выпуск не скачан, а тег есть — 4: молчание канала не считается зелёным (045)."""
+    unfetched = (0, "::warning::check_facts.py выпуска не скачан")
+    assert whole_run(monkeypatch, unfetched) == module.EXIT_SILENT
+
+
+def test_an_untouched_subject_is_clean_without_the_network(tmp_path: Path) -> None:
+    """Предмет не тронут — 0 без единого захода шага: сеть не оплачивается зря."""
+    git(tmp_path, "init", "--quiet", "--initial-branch=main")
+    git(tmp_path, "config", "user.email", "t@example.invalid")
+    git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "x").write_text("x\n", encoding="utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "--quiet", "-m", "база")
+    assert module.main(["--root", str(tmp_path), "--base", "main", "--repo", "o/a"]) == 0
 
 
 def test_the_step_runs_as_the_platform_runs_it(tmp_path: Path) -> None:

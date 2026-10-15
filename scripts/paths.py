@@ -90,6 +90,8 @@ REVIEW_RUN: Final = WORKFLOWS / "review.yml"
 #: Тело взгляда — общий шаг; `REVIEW_RUN` — его вызывающий: события,
 #: кнопка и имя запуска (#993).
 REVIEW_STEP: Final = WORKFLOWS / "step-review.yml"
+#: Шаг публикации фактов: его сверку с выпуском витрины гейт исполняет до слияния (#1380).
+FACTS_STEP: Final = WORKFLOWS / "step-facts.yml"
 #: Механизмы проекта — каталог, а не отдельный файл: его читают те, кто судит о
 #: дереве целиком, а не об одном скрипте.
 SCRIPTS: Final = Path("scripts")
@@ -211,6 +213,7 @@ ALL: Final = (
     PYTHON_NEXT,
     REVIEW_RUN,
     REVIEW_STEP,
+    FACTS_STEP,
     SKILLS,
     DECISIONS,
     SCRIPTS,
