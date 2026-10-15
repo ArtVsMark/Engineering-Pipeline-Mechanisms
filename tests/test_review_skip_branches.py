@@ -202,8 +202,7 @@ def test_a_machine_entry_already_in_the_registry_is_dropped_and_the_window_count
     # Человеческая запись обязана уцелеть: без неё `kept == [[]]` прошло бы и
     # при отсеве, снимающем всё подряд (взгляд на #1361).
     body = (
-        f"{unlooked.MARKER}\n- #10 · вердикта нет · 2026-10-13\n"
-        "- #11 · вердикта нет · 2026-10-13\n"
+        f"{unlooked.MARKER}\n- #10 · вердикта нет · 2026-10-13\n- #11 · вердикта нет · 2026-10-13\n"
     )
     kept: list[list[int]] = []
 
