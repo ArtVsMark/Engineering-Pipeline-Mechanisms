@@ -1,0 +1,13 @@
+# Dependabot здесь — ДАТЧИК, а не исполнитель (#1387, решение владельца
+# 15.10.2026). Его изменение — сигнал «вышла версия»: прогон
+# `deps-intercept.yml` делает подъём сам, веткой `agent/`, и закрывает сигнал.
+#
+# Группы не заводятся: перехват разбирает заголовок «Bump <действие> from … to …»,
+# а групповой заголовок не называет ни действия, ни версии.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 10

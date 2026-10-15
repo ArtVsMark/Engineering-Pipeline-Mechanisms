@@ -115,6 +115,10 @@ jobs:
     with:
       pr: ${{ inputs.pr || '' }}
       mark: ${{ inputs.mark || '' }}
+      # Ветки Dependabot — сигналы, а не работа (#1387): их изменение закрывает
+      # перехват `deps-intercept.yml`, подъём идёт веткой `agent/` и получает
+      # взгляд там. Прогонам бота секрет не передаётся, взгляд упал бы впустую.
+      skip-branches: "dependabot/"
     # КЛЮЧ ПЕРЕДАЁТСЯ ПО ИМЕНИ, А НЕ `secrets: inherit` (#993, вариант «а»).
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
