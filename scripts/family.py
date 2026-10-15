@@ -331,16 +331,26 @@ def hollow(value: object) -> bool:
     Список и словарь пусты, когда пусты все их элементы: `[" "]` и
     `{"x": None}` — тот же соседний с `""` случай уровнем глубже (взгляд на
     #1366, правило 195). Ноль и `False` — значения.
+
+    Обход идёт явным стеком, а не рекурсией: разборщик JSON держит вложенность
+    в тысячи уровней, рекурсия падала уже на пятистах, и `RecursionError` одной
+    записи соседа гасил сборку фактов целиком (поздний взгляд на #1366, 039).
     """
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return not value.strip()
-    if isinstance(value, dict):
-        return all(hollow(one) for one in value.values())
-    if isinstance(value, list):
-        return all(hollow(one) for one in value)
-    return False
+    pending: list[object] = [value]
+    while pending:
+        one = pending.pop()
+        if one is None:
+            continue
+        if isinstance(one, str):
+            if one.strip():
+                return False
+        elif isinstance(one, dict):
+            pending.extend(one.values())
+        elif isinstance(one, list):
+            pending.extend(one)
+        else:
+            return False
+    return True
 
 
 def filled(metric: object) -> bool:
