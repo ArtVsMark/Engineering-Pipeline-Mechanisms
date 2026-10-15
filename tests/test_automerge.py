@@ -3024,12 +3024,57 @@ def test_an_armed_head_with_the_same_body_is_asked_about_a_stall(
     head = change(4, "automerge", armed=True)
     platform["held"][4] = ("изменение 4 (#4)", "тело origin/agent/change-4")
     asked: list[int] = []
-    monkeypatch.setattr(
-        module,
-        "unstick",
-        lambda repo, item, tok, *, dry_run, now=None: asked.append(item.number) or True,
-    )
+
+    def unstick(repo: str, item: Any, tok: str, *, dry_run: bool, now: Any = None) -> bool:
+        asked.append(item.number)
+        return True
+
+    monkeypatch.setattr(module, "unstick", unstick)
     module.hand_over("o/r", head, [head], "token", dry_run=False)
     assert asked == [4]
     assert platform["asked"] == [], "взведённое тем же телом взвели заново"
     assert "площадка ждёт зелёного" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("waiting", "ends", "since"),
+    [
+        (False, ["2026-10-14T20:00:00Z", "2026-10-14T20:05:00Z"], "2026-10-14T20:05:00+00:00"),
+        (True, ["2026-10-14T20:00:00Z"], None),
+        (False, [], None),
+    ],
+    ids=["зелено-с-последней", "ещё-идут", "записей-нет"],
+)
+def test_green_since_is_the_end_of_the_last_run(
+    monkeypatch: pytest.MonkeyPatch, waiting: bool, ends: list[str], since: str | None
+) -> None:
+    """Зелено «с» — конец последней записи; пока идут или записей нет — не зелено."""
+    monkeypatch.setattr(module, "head_verdict", lambda repo, item, tok: ([], waiting))
+    monkeypatch.setattr(
+        module.ghrest,
+        "paginate",
+        lambda path, tok, **_: [{"completed_at": one} for one in ends],
+    )
+    got = module.green_since("o/r", change(7, "automerge", armed=True), "token")
+    assert got == (module.datetime.fromisoformat(since) if since else None)
+
+
+@pytest.mark.parametrize(
+    ("said", "ahead"),
+    [({"ahead_by": 3}, 3), ({"ahead_by": True}, 0), ({}, 0), (None, 0)],
+    ids=["впереди", "не-число", "поля-нет", "ответа-нет"],
+)
+def test_base_ahead_reads_only_a_number(
+    monkeypatch: pytest.MonkeyPatch, said: dict[str, Any] | None, ahead: int
+) -> None:
+    """Новая основа — только число из сравнения; иное — «основы нет», а не подтяжка."""
+    asked: list[str] = []
+
+    def request(method: str, path: str, tok: str, **_: Any) -> dict[str, Any] | None:
+        asked.append(path)
+        return said
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    head = change(7, "automerge", armed=True)
+    assert module.base_ahead("o/r", head, "token") == ahead
+    assert asked == [f"repos/o/r/compare/{head.head}...{head.base}"]
