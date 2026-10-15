@@ -11,6 +11,7 @@
 
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -39,7 +40,7 @@ def answers() -> dict[str, Any]:
     return dict(said["rules"])
 
 
-def hits(argv: list[str], root: Path) -> list[str]:
+def hits(argv: list[str], root: Path, locale: str | None = None) -> list[str]:
     """Строки вывода команды предиката: отсортированные, без пустых.
 
     У `git grep` код 1 — «совпадений нет», законный вход; прочий отказ —
@@ -50,8 +51,12 @@ def hits(argv: list[str], root: Path) -> list[str]:
     # планки, и предикат краснел бы отказом, к ответу не относящимся (взгляд
     # на #1177).
     run = [sys.executable, *argv[1:]] if argv[:1] == ["python3"] else argv
+    # Локаль — явно, когда её задаёт тест: регистр кириллицы `git grep -i`
+    # сворачивает только при UTF-8, и тест в локали раннера иначе не видит
+    # разницы (взгляд на #1373).
+    env = {**os.environ, "LC_ALL": locale} if locale else None
     done = subprocess.run(
-        run, cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
+        run, cwd=root, capture_output=True, text=True, encoding="utf-8", check=False, env=env
     )
     nothing = argv[:2] == ["git", "grep"] and done.returncode == 1 and not done.stderr.strip()
     if done.returncode != 0 and not nothing:
@@ -234,8 +239,18 @@ def test_a_mask_class_plants_a_member_by_fnmatch(glob: str, planted: str) -> Non
     assert planted_paths(glob) == [planted]
 
 
+#: Кириллическая буква в чередовании регистров «(к|К)» — так её видит любая
+#: локаль; голая буква в предикате с `-i` видна только при UTF-8.
+CASE_PAIR_RE = re.compile(r"\(([а-яё])\|([А-ЯЁ])\)")
+
+
 def alternatives(pattern: str) -> list[str]:
-    """Слова чередования образца: из скобок, если они есть, иначе весь образец."""
+    """Слова чередования образца: из скобок, если они есть, иначе весь образец.
+
+    Чередование регистров «(к|К)» сворачивается в строчную букву: это одна
+    буква слова, а не группа чередования слов.
+    """
+    pattern = CASE_PAIR_RE.sub(lambda pair: pair.group(1), pattern)
     group = re.search(r"\(([^()]*)\)", pattern)
     return (group.group(1) if group else pattern).split("|")
 
@@ -298,18 +313,82 @@ def test_a_catalogue_probe_is_no_wider_than_the_predicate(rule: str, tmp_path: P
     assert not missed, f"{rule}: проба находит, а предикат нет — {missed}"
 
 
+#: Локали, в которых предикат обязан видеть одно и то же: регистр кириллицы
+#: `git grep -i` сворачивает только при UTF-8 (взгляд на #1373).
+LOCALES: Final = ("C", "C.UTF-8")
+
+
+def planted_hits(tmp_path: Path, rule: str, path: str, text: str, locale: str) -> bool:
+    """Видит ли предикат правила подложенную строку в заданной локали."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    target = tmp_path / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"{text}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    return any(hits(one["argv"], tmp_path, locale) for one in checks(rule))
+
+
+@pytest.mark.parametrize("locale", LOCALES)
 @pytest.mark.parametrize(
     "label",
-    ["name: Good first issue", "name: GOOD FIRST", "name: Новичкам", "name: НОВИЧКАМ"],
-    ids=["с-прописной", "прописными", "кириллица-с-прописной", "кириллица-прописными"],
+    [
+        "name: Good first issue",
+        "name: GOOD FIRST",
+        "name: Новичкам",
+        "name: НОВИЧКАМ",
+        "name: нОвИчКам",
+    ],
+    ids=["с-прописной", "прописными", "кириллица-с-прописной", "кириллица-прописными", "смешанно"],
 )
-def test_the_newcomer_label_is_seen_in_any_case(tmp_path: Path, label: str) -> None:
-    """Предикат 065 видит метку в любом регистре и при любой локали (взгляд на #1373)."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "labels.yml").write_text(f"- {label}\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
-    assert any(hits(one["argv"], tmp_path) for one in checks("065")), label
+def test_the_newcomer_label_is_seen_in_any_case(tmp_path: Path, label: str, locale: str) -> None:
+    """Предикат 065 видит метку в любом регистре и при ЯВНОЙ локали (взгляд на #1373)."""
+    assert planted_hits(tmp_path, "065", ".github/labels.yml", f"- {label}", locale), label
+
+
+@pytest.mark.parametrize("locale", LOCALES)
+@pytest.mark.parametrize("word", ["калибр", "Калибр", "КАЛИБР", "КаЛибр", "сВеТоФоР"])
+def test_the_calibration_word_is_seen_in_any_case(tmp_path: Path, word: str, locale: str) -> None:
+    """Предикат 048 видит шкалу в любом регистре кириллицы при любой локали (взгляд на #1373)."""
+    assert planted_hits(tmp_path, "048", "docs/x.md", f"наша {word} по чужому", locale), word
+
+
+def unpaired(part: str) -> list[str]:
+    """Кириллица образца вне верного чередования регистров: голые буквы и чужие пары.
+
+    Пара с опечаткой — «(к|Л)» — тоже не чередование: слово «К…» с ней не
+    найдётся ни в одной локали (взгляд на #1393).
+    """
+    wrong = [f"({low}|{up})" for low, up in CASE_PAIR_RE.findall(part) if low.upper() != up]
+    return wrong + re.findall("[а-яёА-ЯЁ]", CASE_PAIR_RE.sub("", part))
+
+
+@pytest.mark.parametrize(
+    ("part", "found"),
+    [("(к|К)(а|А)", []), ("(к|Л)", ["(к|Л)"]), ("к(а|А)", ["к"]), ("calibrat", [])],
+    ids=["верная-пара", "чужая-пара", "голая-буква", "латиница"],
+)
+def test_unpaired_names_every_wrong_letter(part: str, found: list[str]) -> None:
+    """Обе половины: верная пара законна, чужая пара и голая буква — нет."""
+    assert unpaired(part) == found
+
+
+def test_no_predicate_carries_bare_cyrillic() -> None:
+    """Строгое правило (210): кириллица в предикате — только чередованием регистров.
+
+    Перечень написаний «калибр|Калибр|КАЛИБР» дважды оставлял дыру: при локали
+    C смешанный регистр не виден (взгляды на #1336 и #1373). Чередование по
+    буквам покрывает все сочетания при любой локали, и следующий предикат
+    обязан писаться так же, а не перечнем.
+    """
+    bare = []
+    seen = 0
+    for rule in predicates()["predicates"]:
+        for one in checks(rule):
+            for part in one["argv"]:
+                seen += len(CASE_PAIR_RE.findall(part))
+                bare += [f"{rule}: {wrong}" for wrong in unpaired(part)]
+    assert seen, "кириллицы в предикатах нет — предмет проверки не найден (075)"
+    assert not bare, f"кириллица вне чередования регистров: {bare}"
 
 
 def test_a_planted_condition_turns_the_gate_red(tmp_path: Path) -> None:
