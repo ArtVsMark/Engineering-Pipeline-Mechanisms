@@ -282,6 +282,20 @@ def test_the_report_answers_with_a_number_and_a_date() -> None:
     assert "решение" in said and "владельца" in said, "порог остаётся решением человека"
 
 
+def test_the_report_names_the_price_of_a_look() -> None:
+    """Цена взгляда — минуты площадки по всему окну; без заходов — «не прочитана» (#1389)."""
+    days = {
+        "2026-09-14": {"runs": {"review": {"runs": 2, "seconds": 480, "timed": 2}}},
+        "2026-09-15": {"runs": {"review": {"runs": 1, "seconds": 120, "timed": 1}}},
+    }
+    bounds = module.Bounds(window_days=90, recount_days=3)
+    said = module.report(days, bounds, "2026-09-15")
+    assert "**3.3 мин** площадки по 3 заходам" in said
+    assert module.window_minutes(days, "review") == (3.3, 3)
+    empty = module.report({"2026-09-15": {"runs": {}}}, bounds, "2026-09-15")
+    assert "цена взгляда не прочитана" in empty
+
+
 def test_the_sums_of_the_series_are_counted_across_days() -> None:
     """Числа ряда складываются по всем дням и всем прогонам, а не по одному дню.
 

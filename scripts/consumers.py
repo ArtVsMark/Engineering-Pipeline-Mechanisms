@@ -13,6 +13,14 @@
 ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
 Поэтому в `.rules/consumers.json` лежат адреса, и только они.
 
+ПОДКЛЮЧЁННЫЙ МОЛЧА ТОЖЕ ПОДКЛЮЧЁН (решение владельца 16.10.2026, #1389).
+Взять шаг проще, чем сказать о взятом: замер 16.10.2026 — в реестре ни одной
+записи, а обход семьи застаёт проекты, зовущие наши шаги по тегу. Поэтому к
+объявленным адресам добавляются те, кого застал обход (`family_uptake.py
+--out`, ключ `--uptake`); имена сравниваются без учёта регистра, как у обхода.
+Обход не передан или прочитал семью не всю — это сказано: молча подключившиеся
+тогда видны не все, и пустота не значит «никого» (045).
+
 ОБХОД — ГЛАВНОЕ, ЧТО ЗДЕСЬ ВИДНО. Потребитель, обошедший общий механизм, —
 сильнейшее свидетельство пробела, и оно невидимо, пока не объявлено: снаружи
 обход неотличим от «шаг не подключён»
@@ -28,7 +36,8 @@
 ([185](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/185-a-trail-is-an-address-and-its-owner-keeps-it-alive.md)).
 
 Исходы (правило 039): ``0`` сверка прочитана · ``2`` не отработал ·
-``3`` часть ответов не прочитана — сказано, а не выдано за «все на свежей».
+``3`` часть не прочитана — ответов потребителей или самих потребителей: обход
+не передан или прочитал семью не всю. Сказано, а не выдано за «все на свежей».
 """
 
 import argparse
@@ -88,6 +97,28 @@ def registry(root: Path) -> list[dict[str, Any]]:
     return [dict(one) for one in rows]
 
 
+def swept(path: Path) -> tuple[list[str], list[str]]:
+    """Кого обход семьи застал зовущим наши шаги — и кого он не прочитал.
+
+    Форма файла — его, а не наша: раздел `by` со строкой на взявшего и
+    `projects.unread_repos` — проекты, чьё дерево обход не прочитал. Другая
+    форма — отказ, а не пустой список: пустота значила бы «никто не взял» (045).
+    Непрочитанные отдаются вторым списком: без них «найден обходом» о части
+    семьи читался бы как обо всей.
+    """
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NotRun(f"обход семьи {path} не прочитан: {exc}") from exc
+    rows = said.get("by") if isinstance(said, dict) else None
+    if not isinstance(rows, list):
+        raise NotRun(f"{path}: раздела «by» нет — это не файл обхода семьи")
+    found = sorted({str(one["repo"]) for one in rows if isinstance(one, dict) and one.get("repo")})
+    projects = said.get("projects")
+    unread = projects.get("unread_repos") if isinstance(projects, dict) else None
+    return found, sorted(str(one) for one in unread or [] if one)
+
+
 def answer_of(repo: str, token: str) -> dict[str, Any]:
     """Ответ потребителя по проверкам — из ЕГО дерева, а не из нашего реестра.
 
@@ -130,15 +161,34 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает сверку по каждому объявленному потребителю."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(), help="корень ЭТОГО дерева")
+    parser.add_argument("--uptake", type=Path, help="файл обхода семьи (`family_uptake.py --out`)")
     args = parser.parse_args(argv)
 
     try:
         rows = registry(args.root)
+        found, unswept = swept(args.uptake) if args.uptake else ([], [])
     except NotRun as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    # Регистр имени у площадки не значим: обход сравнивает через `casefold`,
+    # и `Owner/Repo` в реестре с `owner/repo` из обхода — один проект.
+    declared = {str(one["repo"]).casefold() for one in rows}
+    for repo in found:
+        if repo.casefold() not in declared:
+            print(f"  {repo}: найден обходом семьи, не объявлялся")
+            rows.append({"repo": repo})
+    if not args.uptake:
+        print(
+            "обход семьи не передан (--uptake): молча подключённые НЕ ВИДНЫ — "
+            "список ниже только из объявившихся, и его пустота не значит «никого» (045)"
+        )
+    for repo in unswept:
+        print(f"  {repo}: обход семьи его дерево не прочитал — подключён ли он, не видно")
 
     if not rows:
+        if not args.uptake or unswept:
+            print(f"{NOBODY} среди тех, кого видно, — молча подключённые видны не все (045)")
+            return EXIT_UNREAD
         print(f"{NOBODY} — сверять не с кем, и это состояние, а не тишина (154)")
         return EXIT_OK
 
@@ -167,6 +217,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"      обойдено: {name}")
     if unread:
         print(f"не прочитано ответов: {unread} из {len(rows)}", file=sys.stderr)
+        return EXIT_UNREAD
+    if unswept:
+        print(f"обход семьи не прочитал проектов: {len(unswept)} — список выше неполон")
         return EXIT_UNREAD
     return EXIT_OK
 
