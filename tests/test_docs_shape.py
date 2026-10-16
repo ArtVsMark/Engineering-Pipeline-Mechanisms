@@ -146,12 +146,55 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
 
 #: Строка таблицы без номера шага: `| — | выпуск | release.yml | … |`. Такая в
 #: счёт заголовка не входит, и читатель, считающий строки глазами, получит
-#: больше — на столько, сколько таких строк (сейчас выпуск и замер взведения).
+#: больше — на столько, сколько таких строк.
 UNNUMBERED_ROW_RE = re.compile(r"^\|\s*[—-]\s*\|")
-#: Рукописный счёт разницы: «на два больше», «на единицу больше». Его проза под
-#: заголовком не пишет вовсе — строгое правило, а не сверка числа (210): число
-#: чинили дважды по одной форме (#1405, #1409), и оба раза оно отставало молча.
-HAND_COUNT_RE = re.compile(r"\bна\s+(?:единицу|\d+|[а-яё]+)\s+больше\b", re.IGNORECASE)
+#: Слова счёта, которых в прозе под заголовком скелета нет вовсе.
+COUNT_WORDS: Final = frozenset(
+    {
+        "единицу",
+        "один",
+        "одна",
+        "одно",
+        "два",
+        "две",
+        "три",
+        "четыре",
+        "пять",
+        "шесть",
+        "семь",
+        "восемь",
+        "девять",
+        "десять",
+        "пару",
+        "несколько",
+        *SPELLED.values(),
+        *SPELLED_STEPS.values(),
+    }
+)
+#: Где счёт законен: адрес правила в скобках `(005)` и код в обратных кавычках.
+NOT_PROSE_RE = re.compile(r"\([^)]*\)|`[^`]*`")
+
+
+def hand_counts(prose: str) -> list[str]:
+    """Числа, написанные рукой в прозе: цифры и слова счёта вне скобок и кода.
+
+    СТРОГОЕ ПРАВИЛО, А НЕ ФОРМА (210). Абзац под заголовком чинили трижды:
+    «на единицу», «на два», «на три больше» — и гейт по форме «на N больше»
+    пропускал соседние формы: «на два файла больше», «больше на два», «лишних
+    два». Теперь в прозе под заголовком нет счёта вообще, в какой бы форме он
+    ни стоял. ГРАНИЦА НАЗВАНА (195): число в скобках и в коде не считается —
+    там адреса правил и имена файлов; число, записанное словом не из перечня
+    (например, «дюжина»), проходит.
+    """
+    bare = NOT_PROSE_RE.sub(" ", prose)
+    words = re.findall(r"[а-яёa-z0-9]+", bare.lower())
+    return [one for one in words if one.isdigit() or one in COUNT_WORDS]
+
+
+def file_cell(line: str) -> str:
+    """Ячейка «файл» строки таблицы; строка короче трёх ячеек — пустая ячейка, а не падение."""
+    cells = line.strip().strip("|").split("|")
+    return cells[2] if len(cells) > 2 else ""
 
 
 def test_an_unnumbered_row_is_named_under_the_heading() -> None:
@@ -176,7 +219,8 @@ def test_an_unnumbered_row_is_named_under_the_heading() -> None:
     end = next((n for n in range(start, len(lines)) if not lines[n].startswith("|")), len(lines))
     unnumbered = [line for line in lines[start:end] if UNNUMBERED_ROW_RE.match(line)]
     said = "\n".join(lines[place:start])
-    counted = HAND_COUNT_RE.findall(said)
+    # Заголовок не в счёт: его числа сверяет с таблицей соседний гейт.
+    counted = hand_counts("\n".join(lines[place + 1 : start]))
     assert not counted, (
         f"проза под заголовком считает разницу рукой: {counted} — число отстаёт от "
         "таблицы молча (005, 210)"
@@ -188,14 +232,12 @@ def test_an_unnumbered_row_is_named_under_the_heading() -> None:
     )
     # СТРОКА БЕЗ ФАЙЛА — ОТКАЗ, А НЕ ПУСТОЕ МНОЖЕСТВО (находка взгляда на #1409):
     # строка с `.github/actions/…` вместо прогона иначе проходила бы молча.
-    nameless = [
-        line for line in unnumbered if not STEP_FILE_RE.search(line.strip("|").split("|")[2])
-    ]
+    nameless = [line for line in unnumbered if not STEP_FILE_RE.search(file_cell(line))]
     assert not nameless, f"строка без номера не называет файла прогона: {nameless}"
     files = {
         found.group("file")
         for line in unnumbered
-        for found in STEP_FILE_RE.finditer(line.strip("|").split("|")[2])
+        for found in STEP_FILE_RE.finditer(file_cell(line))
     }
     unnamed = sorted(one for one in files if f"`{one}`" not in said)
     assert not unnamed, f"строки без номера есть, а проза под заголовком их не называет: {unnamed}"
