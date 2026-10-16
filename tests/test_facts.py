@@ -193,7 +193,9 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
     ).stdout.strip()
     assert facts.manifest_facts(tmp_path)["release"] == {"tag": "v1.5.0", "sha": sha}
     # Голова ушла вперёд выпуска — номер остаётся номером тега (#299, взгляд на #1294).
-    (tmp_path / facts.VERSION_FILE).write_text("0.7.4\n", encoding="utf-8")
+    # Голова — ДРУГОГО минора: у 0.7.4 тот же MAJOR.MINOR «0.7», и чтение головы
+    # вместо тега прошло бы зелёным (находка `46a0c7f` на #1395).
+    (tmp_path / facts.VERSION_FILE).write_text("2.4.1\n", encoding="utf-8")
     subprocess.run([*git, "commit", "-qam", "d"], check=True)
     assert facts.manifest_facts(tmp_path)["gives"] == {"steps": "0.7"}
 

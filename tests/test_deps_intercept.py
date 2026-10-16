@@ -337,3 +337,27 @@ def test_signals_are_only_the_bot_changes(monkeypatch: pytest.MonkeyPatch) -> No
     ]
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter(changes))
     assert [one["number"] for one in module.signals("o/r", "t")] == [1]
+
+
+@pytest.mark.parametrize(("rc", "red"), [(0, False), (1, True), (2, True)])
+def test_an_unresolved_signal_reddens_the_run(rc: int, red: bool) -> None:
+    """Исход «сигнал не разобран» краснит прогон: так обещает `.pipeline.yml` дежурному.
+
+    Зелёный прогон с предупреждением прятал сигнал в списке прогонов (находка
+    `22ae144` на #1397). Разбор кодов шага ИСПОЛНЯЕТСЯ оболочкой, а не ищется
+    подстрокой: `# exit 1` в комментарии или слово в `echo` текстовую проверку
+    обходили (находка взгляда на #1417). Обе стороны: ноль — зелёный, прочее —
+    красный с ошибкой.
+    """
+    run = (ROOT / ".github" / "workflows" / "deps-intercept.yml").read_text(encoding="utf-8")
+    start = run.index('          case "$rc" in')
+    block = run[start : run.index("esac", start) + len("esac")]
+    done = subprocess.run(
+        ["bash", "-c", f"set -uo pipefail\nrc={rc}\nreason=x\n{block}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert (done.returncode != 0) == red, (rc, done.returncode, done.stdout)
+    assert ("::error::" in done.stdout) == red, done.stdout
