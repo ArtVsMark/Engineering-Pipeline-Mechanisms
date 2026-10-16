@@ -6,5 +6,5 @@
 
 | проект | шаги | теги |
 |---|---|---|
-| ArtVsMark/ArtVsMark | `step-automerge`, `step-review` | `c36d16b1abe889e16be1b4a4b2fbd7a165a2e147` |
+| ArtVsMark/ArtVsMark | `step-automerge`, `step-review` | `817255779cdd01caeeb01a3f804fa145c9e1217d` |
 | ArtVsMark/Engineering-Incidents-Playbook | `step-rulebook-fresh`, `step-window-lifetime` | `v1.5.0` |
