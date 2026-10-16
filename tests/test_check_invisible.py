@@ -25,8 +25,36 @@ def tree(root: Path, files: dict[str, str]) -> Path:
 
 @pytest.mark.parametrize(
     "char",
-    ["\u200b", "\u202e", "\u2066", "\u2060", "\U000e0041", "\u00ad", "\ufe0f\ufe0f"],
-    ids=["zwsp", "rlo", "lri", "wj", "tag", "shy", "selectors"],
+    [
+        "\u200b",
+        "\u200e",
+        "\u202e",
+        "\u2066",
+        "\u2060",
+        "\u061c",
+        "\u180e",
+        "\U000e0041",
+        "\u00ad",
+        "\u3164",
+        "\u034f",
+        "\ufe0f\ufe0f",
+        "\U000e0100",
+    ],
+    ids=[
+        "zwsp",
+        "lrm",
+        "rlo",
+        "lri",
+        "wj",
+        "alm",
+        "mvs",
+        "tag",
+        "shy",
+        "hangul-filler",
+        "cgj",
+        "selectors",
+        "selector-after-letter",
+    ],
 )
 def test_each_class_is_rejected(run_script: RunScript, tmp_path: Path, char: str) -> None:
     """Каждый класс невидимого краснит гейт и называет место."""
@@ -42,9 +70,17 @@ def test_legal_forms_pass(run_script: RunScript, tmp_path: Path) -> None:
         tmp_path,
         {
             "a.md": "\ufeffзаголовок — «кавычки» и ё\n",
-            "b.md": "## 🧑\u200d💻 окно\n## ⚠\ufe0f внимание\n",
+            "b.md": "## 🧑\u200d💻 окно\n## ⚠\ufe0f внимание\n🐈\u200d\u2b1b кот\n",
+            "c.md": "1\ufe0f\u20e3 шаг · \u845b\U000e0100 иероглиф\n",
         },
     )
+    result = run_script("check_invisible.py", cwd=tmp_path)
+    assert result.code == CLEAN, result.text
+
+
+def test_code_is_not_judged(run_script: RunScript, tmp_path: Path) -> None:
+    """Литерал в коде законен (снятие BOM у грейдера): предмет — текст-указание (195)."""
+    tree(tmp_path, {"strip.py": "text.lstrip('\ufeff\u200b')\n", "a.md": "чисто\n"})
     result = run_script("check_invisible.py", cwd=tmp_path)
     assert result.code == CLEAN, result.text
 
