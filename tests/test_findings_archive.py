@@ -301,16 +301,16 @@ def run_archive_step(tmp_path: Path, **fake: str) -> tuple[int, str, str, str]:
     Подстроки не отличают ветвление от текста рядом с ним — исполнение отличает.
     """
     flow = yaml.safe_load(
-        (Path(__file__).parents[1] / ".github/workflows/badges.yml").read_text(encoding="utf-8")
+        (Path(__file__).parents[1] / ".github/workflows/step-facts.yml").read_text(encoding="utf-8")
     )
-    steps = flow["jobs"]["badges"]["steps"]
+    steps = flow["jobs"]["facts"]["steps"]
     run = next(step["run"] for step in steps if step.get("id") == "archive")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name, body in (("git", FAKE_GIT), ("python", FAKE_PYTHON)):
         (bin_dir / name).write_text(body, encoding="utf-8")
         (bin_dir / name).chmod(0o755)
-    (tmp_path / "badges/.github/badges").mkdir(parents=True)
+    (tmp_path / "facts").mkdir(parents=True)
     output, args = tmp_path / "output", tmp_path / "args"
     output.touch()
     env = {
@@ -319,6 +319,7 @@ def run_archive_step(tmp_path: Path, **fake: str) -> tuple[int, str, str, str]:
         "GITHUB_OUTPUT": str(output),
         "GITHUB_REPOSITORY": "o/r",
         "GH_TOKEN": "t",
+        "MECHANISMS": str(tmp_path / "mechanisms"),
         "FAKE_ARGS": str(args),
         **fake,
     }
@@ -358,7 +359,7 @@ def test_a_failed_script_carries_the_archive_and_says_so(tmp_path: Path) -> None
     """Отказ скрипта переносит прежний файл и оставляет выход, на котором краснеет прогон."""
     code, output, _, _ = run_archive_step(tmp_path, FAKE_PREV='{"old": 1}', FAKE_RC="3")
     assert code == 0, "перенос не должен останавливать публикацию фактов"
-    kept = tmp_path / "badges/.github/badges/findings.json"
+    kept = tmp_path / "facts/findings.json"
     assert kept.read_text(encoding="utf-8") == '{"old": 1}'
     assert "carried=3" in output, "перенос без следа — архив замер бы молча"
 
@@ -366,15 +367,16 @@ def test_a_failed_script_carries_the_archive_and_says_so(tmp_path: Path) -> None
 def test_a_carried_archive_turns_the_run_red_after_publishing() -> None:
     """Последний шаг — после публикации — краснеет на выходе переноса."""
     flow = yaml.safe_load(
-        (Path(__file__).parents[1] / ".github/workflows/badges.yml").read_text(encoding="utf-8")
+        (Path(__file__).parents[1] / ".github/workflows/step-facts.yml").read_text(encoding="utf-8")
     )
-    steps = flow["jobs"]["badges"]["steps"]
+    steps = flow["jobs"]["facts"]["steps"]
     names = [step.get("name") for step in steps]
     # Шаги берутся по имени, а не по месту: «последний шаг» ломался бы от
     # любого шага, добавленного после (взгляд на #791).
     guard = steps[names.index("архив не замер")]
-    assert names.index("опубликовать в ветку badges") < names.index("архив не замер")
-    assert guard.get("if") == "steps.archive.outputs.carried != ''"
+    published = names.index("опубликовать факты коммитом поверх ветки badges")
+    assert published < names.index("архив не замер")
+    assert guard.get("if") == "inputs.archive && steps.archive.outputs.carried != ''"
     assert "exit 1" in guard["run"], "замерший архив зеленел бы вместе с прогоном"
 
 
