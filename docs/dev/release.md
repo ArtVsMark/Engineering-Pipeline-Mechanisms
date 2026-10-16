@@ -198,12 +198,18 @@
 
 **Шаг 3 — исходящее оповещение — не построен, и причина у него своя.** Адреса
 есть (`.rules/consumers.json`), спрашивать по ним умеет
-[`consumers.py`](../../scripts/consumers.py) — нет **повода**: подключённых
+[`consumers.py`](../../scripts/consumers.py) — не было **повода**: объявленных
 потребителей ноль, и заход говорит это словом, а не тишиной
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
 Оповещение, у которого ни одного адресата, проверить нечем: гейт без предмета
 доказывает только себя
 ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
+
+**Повод появился, и пробел назван, а не закрыт по дороге**
+([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+Замер 16.10.2026: обход семьи (`consumers.py --uptake`) застаёт двоих, кто
+зовёт наши шаги по тегу молча. Адресаты у оповещения теперь есть, но ни один
+не объявил себя, и шаг 3 по-прежнему не построен.
 
 **Условие снятия названо и проверяемо:** первая запись в `connected` файла
 `.rules/consumers.json`. До неё шаг 3 выполняется руками, и это **объявленный
