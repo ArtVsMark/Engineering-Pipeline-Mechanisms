@@ -490,3 +490,15 @@ def test_calls_itself_reads_the_trunk_not_the_worktree(stand: Path) -> None:
     git(stand, "fetch", "--quiet", "origin")
     assert module.calls_itself(stand, "o/r")
     assert not module.calls_itself(stand, "chuzhoj/repo")
+
+
+def test_restore_keeps_a_dirty_tree(stand: Path) -> None:
+    """Возврат после захода правок не стирает: дерево с правками не трогается (`4885891`)."""
+    tracked = stand / ".github" / "workflows" / "ci.yml"
+    tracked.write_text(tracked.read_text("utf-8") + "# своё\n", encoding="utf-8")
+    module.restore(stand)
+    assert tracked.read_text("utf-8").endswith("# своё\n")
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    git(stand, "checkout", "--quiet", "--", ".")
+    module.restore(stand)
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"

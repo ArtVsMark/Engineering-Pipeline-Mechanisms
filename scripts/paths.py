@@ -120,6 +120,9 @@ SOURCES: Final = (SCRIPTS, TRANSPORT)
 LENIENCY: Final = Path(".rules/leniency.json")
 #: Инвентарь переносимого: ответ по каждому механизму о переносе к соседу (#642).
 PORTABLE: Final = Path(".rules/portable.json")
+#: Шаблон задачи «потребителю не хватает»: туда `onboard.py --update` шлёт
+#: правку нашего файла, нужную проекту (#1386).
+GAP_TEMPLATE: Final = Path(".github/ISSUE_TEMPLATE/consumer-gap.yml")
 #: Исполняемые предикаты ответов «неприменимо» (#1171): команда и законный
 #: сегодня вывод по каждому номеру; держит tests/test_inapplicable.py.
 INAPPLICABLE: Final = Path(".rules/inapplicable.json")
@@ -204,6 +207,7 @@ ALL: Final = (
     RERUN,
     LENIENCY,
     PORTABLE,
+    GAP_TEMPLATE,
     INAPPLICABLE,
     KIT,
     PROTECTION,

@@ -548,12 +548,21 @@ def run_of(path: Path) -> dict[Any, Any]:
     """
     if not path.is_file():
         raise BadPolicy(f"нет прогона {path}: предмет чтения не найден (075)")
+    return run_text(path.read_text(encoding="utf-8"), str(path))
+
+
+def run_text(text: str, where: str) -> dict[Any, Any]:
+    """Прогон из ТЕКСТА — тем же разбором, что :func:`run_of`, для заготовки и чужого дерева.
+
+    Заготовка у `onboard.py --update` — строка, собранная в памяти, а не файл
+    (#1386); второй разбор той же формы был бы вторым её пониманием (090).
+    """
     try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        document = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise BadPolicy(f"{path} не разбирается: {exc}") from exc
+        raise BadPolicy(f"{where} не разбирается: {exc}") from exc
     if not isinstance(document, dict):
-        raise BadPolicy(f"{path}: прогон не словарь — читать нечего")
+        raise BadPolicy(f"{where}: прогон не словарь — читать нечего")
     return document
 
 

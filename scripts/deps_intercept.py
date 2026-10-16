@@ -372,6 +372,19 @@ def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
     return branch
 
 
+def restore(root: Path) -> None:
+    """Вернуть дерево на общую ветку после захода — не стирая правок.
+
+    Прежде возврат шёл `checkout --force` и после ОТКАЗА `switch_clean`: правки,
+    ради которых отказ и был, стирались здесь же (`4885891`). Дерево с правками
+    теперь не трогается и называется; чистое возвращается без `--force`.
+    """
+    if git(root, "status", "--porcelain").strip():
+        print("в дереве правки — на общую ветку не возвращаю, чтобы не стереть их")
+        return
+    git(root, "checkout", "--quiet", "--detach", f"origin/{paths.TRUNK}")
+
+
 def signals(repo: str, token: str) -> list[dict[str, Any]]:
     """Открытые изменения бота."""
     return [
@@ -422,14 +435,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"не разобрано: {exc}")
             finally:
                 if args.apply:
-                    git(
-                        args.root,
-                        "checkout",
-                        "--quiet",
-                        "--force",
-                        "--detach",
-                        f"origin/{paths.TRUNK}",
-                    )
+                    restore(args.root)
     except (NotRun, ghrest.TransportError, OSError) as exc:
         print(f"не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
