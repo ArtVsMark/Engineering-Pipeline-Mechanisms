@@ -805,7 +805,6 @@ def calls_of(document: dict[Any, Any], repo: str) -> list[dict[str, Any]]:
             found.append(
                 {
                     "uses": said["address"],
-                    "with": body.get("with") or {},
                     "secrets": body.get("secrets") or {},
                     "permissions": body.get("permissions") or {},
                 }
@@ -815,16 +814,73 @@ def calls_of(document: dict[Any, Any], repo: str) -> list[dict[str, Any]]:
                 continue
             said = pattern.fullmatch(str(step.get("uses") or ""))
             if said:
-                found.append({"uses": said["address"], "with": step.get("with") or {}})
+                found.append({"uses": said["address"]})
     return sorted(found, key=lambda one: json.dumps(one, sort_keys=True, default=str))
+
+
+def callers_in(document: dict[Any, Any], repo: str) -> list[tuple[str, dict[Any, Any]]]:
+    """Узлы вызова наших шагов и действий в порядке записи: адрес без тега и сам узел."""
+    pattern = our_uses(repo)
+    found: list[tuple[str, dict[Any, Any]]] = []
+    for job in (document.get("jobs") or {}).values():
+        body = job if isinstance(job, dict) else {}
+        said = pattern.fullmatch(str(body.get("uses") or ""))
+        if said:
+            found.append((said["address"], body))
+        for step in body.get("steps") or []:
+            said = (
+                pattern.fullmatch(str(step.get("uses") or "")) if isinstance(step, dict) else None
+            )
+            if said and isinstance(step, dict):
+                found.append((said["address"], step))
+    return found
+
+
+def keep_inputs(new: str, mine: str, repo: str, where: Path) -> str:
+    """Новая заготовка с ВХОДАМИ потребителя: `with:` — его данные, обновление их не трогает.
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 16.10.2026 ПО #1386: заготовка сама приглашает править
+    входы под проект, поэтому входы не судятся и переносятся в новую
+    заготовку. Совпадают — текст заготовки как есть, с её пояснениями. Нет —
+    заготовка пересобирается разбором, вызовы сопоставляются по адресу и
+    порядку, а пояснения заменяет одна строка о сохранённых входах.
+    """
+    try:
+        fresh = policy.run_text(new, str(where))
+        theirs = policy.run_text(mine, str(where))
+    except policy.BadPolicy as exc:
+        raise NotRun(str(exc)) from exc
+    given: dict[str, list[Any]] = {}
+    for address, node in callers_in(theirs, repo):
+        given.setdefault(address, []).append(node.get("with"))
+    calls = callers_in(fresh, repo)
+    if all(node.get("with") == (given.get(address) or [None])[0] for address, node in calls):
+        return new
+    seen: dict[str, int] = {}
+    for address, node in calls:
+        at = seen.get(address, 0)
+        seen[address] = at + 1
+        said = given.get(address) or []
+        inputs = said[at] if at < len(said) else node.get("with")
+        if inputs:
+            node["with"] = inputs
+        else:
+            node.pop("with", None)
+    body = {("on" if key is True else key): value for key, value in fresh.items()}
+    return (
+        "# Заготовка `scripts/onboard.py --update`: входы `with:` — ваши, обновление\n"
+        "# их сохранило; остальное — заготовка поставщика.\n"
+        + str(yaml.safe_dump(body, allow_unicode=True, sort_keys=False))
+    )
 
 
 def essence(text: str, repo: str, where: Path) -> dict[str, Any]:
     """Существо вызывающего прогона: что сравнивается, а что — форма записи.
 
-    РЕШЕНИЕ ВЛАДЕЛЬЦА 16.10.2026 ПО #1386. Сравниваются адрес вызова без тега,
-    входы `with:`, секреты, события и права. Комментарии, порядок и форма
-    записи не в счёт: вызывающие у живого потребителя пишутся рукой, и сравнение
+    РЕШЕНИЯ ВЛАДЕЛЬЦА 16.10.2026 ПО #1386. Сравниваются адрес вызова без тега,
+    секреты, события и права. Входы `with:` — данные потребителя, их правит он
+    сам, и они переносятся (`keep_inputs`), а не судятся. Комментарии, порядок
+    и форма записи не в счёт: вызывающие у живого потребителя пишутся рукой, и сравнение
     байт в байт отказывало бы витрине на каждом файле — замер в #1386.
     """
     try:
@@ -939,7 +995,7 @@ def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path,
             if tags[0] == new_tag(text, repo):
                 update.current.append(path)
             else:
-                update.write[path] = text
+                update.write[path] = keep_inputs(text, mine, repo, path)
             continue
         if tags[0] not in pin_old:
             pin_old[tags[0]] = owned_at(root, tags[0], repo)
@@ -949,7 +1005,7 @@ def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path,
         elif essence(mine, repo, path) != essence(before, repo, path):
             update.edited[path] = gap(before, mine, path, repo)
         else:
-            update.write[path] = text
+            update.write[path] = keep_inputs(text, mine, repo, path)
 
 
 def new_tag(text: str, repo: str) -> str:

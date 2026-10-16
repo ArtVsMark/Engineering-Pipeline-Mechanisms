@@ -1241,3 +1241,34 @@ def test_the_update_plan_is_decided_before_any_write(tmp_path: Path) -> None:
     assert any("лишний / лишний" in one for one in plan.notes)
     said = module.policy.run_text("on: push\njobs: {}\n", "x.yml")
     assert module.policy.events_raw(said) == "push"
+
+
+def test_consumer_inputs_survive_the_update(tmp_path: Path) -> None:
+    """Входы `with:` — данные потребителя: правка не отказ, обновление их сохраняет (#1386)."""
+    import yaml
+
+    root, consumer = connected(tmp_path)
+    plan = consumer / ".github" / "workflows" / "план.yml"
+    text = plan.read_text("utf-8")
+    plan.write_text(
+        text.replace("step-план.yml@v2.5.0", "step-план.yml@v2.5.0\n    with:\n      свой: 1"),
+        encoding="utf-8",
+    )
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    said = yaml.safe_load(plan.read_text("utf-8"))
+    job = said["jobs"]["план"]
+    assert job["uses"].endswith("step-план.yml@v2.6.0") and job["with"] == {"свой": 1}
+    assert "push" in module.policy.events_raw(said)
+
+
+def test_keep_inputs_leaves_the_kit_as_is_when_inputs_agree() -> None:
+    """Входы совпали — текст заготовки как есть, с её пояснениями."""
+    new = "# пояснение\non: push\njobs:\n  a:\n    uses: o/r/.github/workflows/step-x.yml@v2\n"
+    mine = "on: push\njobs:\n  a:\n    uses: o/r/.github/workflows/step-x.yml@v1\n"
+    assert module.keep_inputs(new, mine, "o/r", Path("x.yml")) == new
+    edited = mine.replace("@v1\n", "@v1\n    with:\n      k: 2\n")
+    kept = module.keep_inputs(new, edited, "o/r", Path("x.yml"))
+    said = module.policy.run_text(kept, "x.yml")
+    assert said["jobs"]["a"] == {"uses": "o/r/.github/workflows/step-x.yml@v2", "with": {"k": 2}}
+    assert module.policy.events_raw(said) == "push"
