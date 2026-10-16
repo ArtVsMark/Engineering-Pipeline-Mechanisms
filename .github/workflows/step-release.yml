@@ -335,6 +335,29 @@ jobs:
               ;;
           esac
 
+      # ГРУППА «ЖДЁТ ВЫПУСКА» РАСПУСКАЕТСЯ ВЫПУСКОМ (решение владельца
+      # 16.10.2026, #1433): метка `plan/waits-release` снимается с открытых
+      # задач, и они возвращаются в «Сейчас» плана — их остаток, проверка на
+      # теге, берётся тем же окном. Метку снимает токен владельца: у токена
+      # прогона здесь только чтение задач. Отказ выпуска НЕ отменяет — тег уже
+      # уехал; шаг называет, как снять метку отдельным заходом.
+      - name: снять метку «ждёт выпуска» с задач плана
+        if: >-
+          !cancelled() &&
+          inputs.apply && steps.token.outputs.present == 'yes' &&
+          steps.release.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          rc=0
+          python $MECHANISMS/scripts/work_plan.py --released --repo "${GITHUB_REPOSITORY}" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Метка plan/waits-release не снята (код $rc). Выпуск сделан и повторять его НЕ надо: метку снимает заход work_plan.py --released --repo ${GITHUB_REPOSITORY} из кода механизмов на теге шага"
+            exit 1
+          fi
+
       - name: выпуск не сделан — сказано, а не пропущено
         if: inputs.apply && steps.token.outputs.present != 'yes'
         run: |
