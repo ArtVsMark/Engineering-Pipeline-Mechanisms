@@ -2,8 +2,8 @@
   "schema": "1.6",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-16T08:49:26+00:00",
-  "commit": "0957ef65476a27950bde6b6a1ad646ac6a41e7f4",
+  "generated_at": "2026-10-16T09:57:21+00:00",
+  "commit": "44c0fe985712d557dd16b5131c7fbebc41c4b0c6",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,11 +19,11 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.6.17",
+  "version": "1.6.18",
   "release": "1.6",
   "coverage_percent": 93.4,
   "tests": {
-    "functions": 3505,
+    "functions": 3506,
     "modules": 157
   },
   "checks_per_pr": {
@@ -76,7 +76,7 @@
       "schema_of": "числа поставщика механизмов: разрез семьи и исполняемые скрипты",
       "family": {
         "schema_read": "1.7",
-        "snapshot_at": "2026-10-15T16:23:56+00:00",
+        "snapshot_at": "2026-10-16T09:19:19+00:00",
         "consumers": 6,
         "held_by_machine": 886,
         "adopted": {
@@ -128,7 +128,7 @@
             {
               "repo": "ArtVsMark/ArtVsMark",
               "rule": "010",
-              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/ci_complete.py@c36d16b1abe889e16be1b4a4b2fbd7a165a2e147",
+              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/ci_complete.py@817255779cdd01caeeb01a3f804fa145c9e1217d",
               "kind": "called"
             },
             {
@@ -152,19 +152,19 @@
             {
               "repo": "ArtVsMark/ArtVsMark",
               "rule": "052",
-              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-automerge.yml@c36d16b1abe889e16be1b4a4b2fbd7a165a2e147",
+              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-automerge.yml@817255779cdd01caeeb01a3f804fa145c9e1217d",
               "kind": "called"
             },
             {
               "repo": "ArtVsMark/ArtVsMark",
               "rule": "053",
-              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-automerge.yml@c36d16b1abe889e16be1b4a4b2fbd7a165a2e147",
+              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-automerge.yml@817255779cdd01caeeb01a3f804fa145c9e1217d",
               "kind": "called"
             },
             {
               "repo": "ArtVsMark/ArtVsMark",
               "rule": "063",
-              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-automerge.yml@c36d16b1abe889e16be1b4a4b2fbd7a165a2e147",
+              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-automerge.yml@817255779cdd01caeeb01a3f804fa145c9e1217d",
               "kind": "called"
             },
             {
@@ -182,7 +182,7 @@
             {
               "repo": "ArtVsMark/ArtVsMark",
               "rule": "105",
-              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-review.yml@c36d16b1abe889e16be1b4a4b2fbd7a165a2e147",
+              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-review.yml@817255779cdd01caeeb01a3f804fa145c9e1217d",
               "kind": "called"
             },
             {
@@ -206,7 +206,7 @@
             {
               "repo": "ArtVsMark/ArtVsMark",
               "rule": "168",
-              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/ci_complete.py@c36d16b1abe889e16be1b4a4b2fbd7a165a2e147",
+              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:scripts/ci_complete.py@817255779cdd01caeeb01a3f804fa145c9e1217d",
               "kind": "called"
             },
             {
