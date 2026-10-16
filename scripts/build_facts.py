@@ -29,13 +29,11 @@
 
 import argparse
 import ast
-import hashlib
 import json
 import os
 import shutil
 import sys
 from collections.abc import Callable
-from html import escape
 from pathlib import Path
 from typing import Any, Final, NamedTuple
 
@@ -481,8 +479,8 @@ def endpoint(drawn: Badge) -> dict[str, Any]:
 
 
 def published_names() -> list[str]:
-    """Всё, что сборка кладёт в публикацию: факты, значки, картинки, страницы, файлы для машины."""
-    return [FACTS, *BADGES, *PICTURES, *PAGES, *MACHINE_READ]
+    """Всё, что сборка кладёт в публикацию: факты, значки, страницы, файлы для машины."""
+    return [FACTS, *BADGES, *PAGES, *MACHINE_READ]
 
 
 #: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
@@ -549,242 +547,6 @@ def clashing_names() -> list[str]:
 MACHINE: Final = kinds.MACHINE
 
 
-#: Что значок проекта говорит на месте числа, которого нет: незнание — не ноль (045).
-UNREAD_PART: Final = "не прочитано"
-
-#: ЗНАЧОК ПРОЕКТА РИСУЕТСЯ ТЕМ ЖЕ ВИДОМ, ЧТО ЕДИНЫЙ ЗНАЧОК КАТАЛОГА (решение
-#: владельца 09.10.2026): зоны со своей подписью, просвет между зонами,
-#: палитра GitHub. Рисовалка — копия `scripts/python_badge.py::рисунок`
-#: каталога: действия «нарисовать произвольные зоны» у каталога нет, а строка
-#: shields с тремя числами через точку читалась плохо. Копия названа здесь,
-#: чтобы её было видно. Палитра — значения каталога на 09.10.2026
-#: (`СОСТОЯНИЯ`, `ПОДПИСЬ`, `ЦВЕТ_ПОКРЫТИЯ`); сверки с каталогом нет — его кода
-#: в нашем дереве нет, и расхождение вида видно глазом рядом с `python.svg`.
-#: Часть значка: надпись, цвет, слово для подсказки.
-Part = tuple[str, str, str]
-#: Цвета частей — палитра каталога (GitHub), а не shields.
-LABEL_COLOR: Final = "#444d56"
-GREEN: Final = "#2da44e"
-YELLOW: Final = "#bf8700"
-RED: Final = "#cf222e"
-GREY: Final = "#8c959f"
-#: Просвет между зонами, как у каталога.
-ZONE_GAP: Final = 4
-
-
-def part_width(text: str) -> int:
-    """Ширина надписи шрифтом 11px Verdana — приближение, как у shields и каталога."""
-    return round(len(text) * 7.2) + 14
-
-
-def drawing(zones: list[list[Part]]) -> str:
-    """SVG из зон: каждая зона — скруглённая полоса своих частей (вид каталога)."""
-    hint = "; ".join(f"{text}: {word}" for zone in zones for text, _, word in zone if word)
-    mark = hashlib.sha1(repr(zones).encode("utf-8")).hexdigest()[:8]
-    x = 0
-    clips: list[str] = []
-    rects: list[str] = []
-    seams: list[str] = []
-    texts: list[str] = []
-    for number, zone in enumerate(zones):
-        start = x
-        for index, (text, color, _) in enumerate(zone):
-            width = part_width(text)
-            rects.append(
-                f'<rect x="{x}" width="{width}" height="20" fill="{color}" '
-                f'clip-path="url(#z{mark}{number})"/>'
-            )
-            if index:
-                seams.append(
-                    f'<rect x="{x - 1}" width="1" height="20" fill="#fff" fill-opacity=".7"/>'
-                )
-            middle = x + width / 2
-            texts.append(
-                f'<text x="{middle}" y="15" fill="#010101" fill-opacity=".3">{escape(text)}</text>'
-                f'<text x="{middle}" y="14">{escape(text)}</text>'
-            )
-            x += width
-        clips.append(
-            f'<clipPath id="z{mark}{number}"><rect width="{x - start}" height="20" '
-            f'rx="3" x="{start}"/></clipPath>'
-        )
-        x += ZONE_GAP
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{x - ZONE_GAP}" height="20" '
-        f'role="img" aria-label="{escape(hint)}">'
-        f"<title>{escape(hint)}</title>{''.join(clips)}"
-        f"<g>{''.join(rects)}{''.join(seams)}</g>"
-        '<g fill="#fff" text-anchor="middle" '
-        'font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">'
-        f"{''.join(texts)}</g></svg>\n"
-    )
-
-
-def counted(numerator: int, denominator: int, *, known: bool = True) -> str:
-    """Число с числителем и знаменателем и справа процент: «66/195 · 34%» (владелец, 09.10.2026).
-
-    Доли нет — «—»: пустой знаменатель или часть знаменателя не прочитана
-    (``known=False``) — процент утверждал бы о неизвестном (045).
-    """
-    share = f"{round(100 * numerator / denominator)}%" if denominator and known else "—"
-    return f"{numerator}/{denominator} · {share}"
-
-
-def share_color(numerator: int, denominator: int, *, known: bool = True) -> str:
-    """Цвет доли: красный ниже трети, жёлтый ниже двух третей, иначе зелёный.
-
-    Доли нет — серый, как незнание, а не красный, как плохой исход (045, взгляд
-    на #1259): пустой знаменатель или непрочитанная часть его.
-    """
-    if not denominator or not known:
-        return GREY
-    share = numerator / denominator
-    return RED if share < 0.34 else YELLOW if share < 0.67 else GREEN
-
-
-def project_zones(facts: dict[str, Any]) -> list[list[Part]]:
-    """Значок проекта зонами: правила машиной — и семья у поставщика, механизмы у потребителя.
-
-    РЕШЕНИЕ ВЛАДЕЛЬЦА 08.10.2026 (#1212, #1213). Один значок заменяет два —
-    «держится машиной» (`rules.json`) и «общие механизмы» (`family.json`), — и
-    несёт только числа, каждое с числителем и знаменателем. «Кем» — поимённо
-    в фактах (`family.uptake.by`), а не в значке. Вид — как у единого значка
-    каталога, справа от каждого числа — его процент (решения владельца
-    09.10.2026). Витрина перешла на него вторым изменением, после первого
-    прогона публикации (196).
-
-    РОЛЬ — ИЗ ДАННЫХ, А НЕ ВХОДОМ (#1282). Поставщик — тот, у кого в фактах
-    раздел `family`: разрез семьи собирает только он. У него вторая зона —
-    «семья», у потребителя — «механизмы» (вид принят владельцем 09.10.2026, без
-    зоны «конвейер»): `механизмы │ свои 120 │ взяты 30 · 20%`. «Свои» —
-    машинные ответы без `origin`, «взяты» — чей `origin` ведёт к поставщику;
-    процент — доля взятых среди ВСЕХ машинных, включая взятые у других
-    (`machine.elsewhere`), иначе он завышал бы нашу долю. Разбивка по
-    `origin_kind` — в фактах, не на значке. Выбор и обе зоны — в одной
-    рисовалке: вспомогательную функцию гейт инвентаря не судил бы (122).
-
-    СЕМЬЯ — ПО ОТЧЁТУ О ПРОИСХОЖДЕНИИ (решение владельца 12.10.2026, #1325):
-    `семья │ проектов 3/5 · 60% │ взяты 4 │ переделаны 18`. Единица —
-    пара «проект × механизм» нашего происхождения (`family.origins`): вызов по
-    тегу видит только взятое без переделки, а главное — механизм, взятый и
-    переделанный под себя. Вызов шагов по тегу (раздел фактов `uptake`, #1199)
-    остаётся в фактах и таблице «кем», но на значок не идёт.
-
-    НЕЗНАНИЕ — СЕРОЕ «НЕ ПРОЧИТАНО», А НЕ НОЛЬ (045): непрочитанная сводка
-    семьи и пары без `origin_kind` (названы «не объявлено»), непрочитанный ответ
-    каталогу (`{"read": false, "why": …}` — у потребителя его может не быть) и
-    факты без разбивки по происхождению (до #1282 у `rules` не было
-    `machine`), а также не названный общему шагу поставщик. Цвет числа — по
-    его доле.
-
-    ПОЧЕМУ НЕ «ОТВЕЧЕНО». Прежняя редакция показывала `answered/total` и
-    подписывала это «правил держится». Число было `195/195` и не могло стать
-    другим: проект отвечает по каждому правилу каталога по построению (129).
-    Значок, который не движется, — украшение: он не говорит, где проект стоит, и
-    не может сказать, что тот сдвинулся.
-
-    ЗНАМЕНАТЕЛЬ — ДЕЙСТВУЮЩИЕ, А НЕ ВСЕ. Неприменимое правило машиной не
-    держится и держаться не должно; считать его в знаменателе значило бы
-    занижать долю за то, у чего нет предмета (154).
-    """
-    said = facts.get("rules") or {}
-    # РАЗДЕЛА НЕТ СОВСЕМ — тоже «не прочитано», а не отказ (взгляд на #1324):
-    # так выглядят факты потребителя, опубликованные до #1282 без `rules`.
-    no_rules = "rules" not in facts or said.get("read") is False
-    if no_rules:
-        rules = [
-            ("правила", LABEL_COLOR, ""),
-            (f"машиной {UNREAD_PART}", GREY, "ответ каталогу не прочитан"),
-        ]
-    else:
-        by_kind = said["by_mechanism"]
-        machine = sum(int(count) for name, count in by_kind.items() if name in MACHINE)
-        active = sum(int(count) for count in by_kind.values())
-        rules = [
-            ("правила", LABEL_COLOR, ""),
-            (
-                f"машиной {counted(machine, active)}",
-                share_color(machine, active),
-                "правил каталога держится машиной",
-            ),
-        ]
-    if "family" not in facts:
-        origins = None if no_rules else said.get("machine")
-        if not isinstance(origins, dict) or origins.get("read") is False:
-            why = (
-                "ответ каталогу не прочитан"
-                if no_rules
-                else "поставщик не назван"
-                if isinstance(origins, dict)
-                else "в фактах нет разбивки по происхождению"
-            )
-            return [
-                rules,
-                [
-                    ("механизмы", LABEL_COLOR, ""),
-                    (f"свои {UNREAD_PART}", GREY, why),
-                    (f"взяты {UNREAD_PART}", GREY, why),
-                ],
-            ]
-        own, took = int(origins["own"]), int(origins["taken"])
-        every = own + took + int(origins["elsewhere"])
-        share = f"{round(100 * took / every)}%" if every else "—"
-        return [
-            rules,
-            [
-                ("механизмы", LABEL_COLOR, ""),
-                (f"свои {own}", GREEN if every else GREY, "машинных ответов — свой механизм"),
-                (
-                    f"взяты {took} · {share}",
-                    share_color(took, every),
-                    "машинных ответов — механизм поставщика",
-                ),
-            ],
-        ]
-    kin = facts.get("family") or {}
-    said_origins = kin.get("origins") if kin.get("read") else None
-    if not isinstance(said_origins, dict):
-        why = (
-            "сводка семьи не прочитана"
-            if not kin.get("read")
-            else "в фактах нет отчёта о происхождении"
-        )
-        family_zone = [
-            ("семья", LABEL_COLOR, ""),
-            (f"проектов {UNREAD_PART}", GREY, why),
-            (f"взяты {UNREAD_PART}", GREY, why),
-            (f"переделаны {UNREAD_PART}", GREY, why),
-        ]
-        return [rules, family_zone]
-    projects = said_origins["projects"]
-    took, of = int(projects["took"]), int(projects["of"])
-    taken, adapted = int(said_origins["taken"]), int(said_origins["adapted"])
-    # Ноль взятых — исход, а не незнание: жёлтым, а серым — только непрочитанное.
-    family_zone = [
-        ("семья", LABEL_COLOR, ""),
-        (
-            f"проектов {counted(took, of)}",
-            share_color(took, of),
-            "проектов семьи объявили механизм нашего происхождения",
-        ),
-        (
-            f"взяты {taken}",
-            GREEN if taken else YELLOW,
-            "пар «проект × механизм» — наш механизм вызван или скопирован",
-        ),
-        (
-            f"переделаны {adapted}",
-            GREEN if adapted else YELLOW,
-            "пар «проект × механизм» — наш механизм переделан под себя",
-        ),
-    ]
-    # Как взят — не сказано: не «взяты» и не «переделаны», а названо (045).
-    undeclared = int(said_origins.get("undeclared") or 0)
-    if undeclared:
-        family_zone = [*family_zone, (f"не объявлено {undeclared}", GREY, "пар без origin_kind")]
-    return [rules, family_zone]
-
-
 def coverage_badge(facts: dict[str, Any]) -> Badge:
     """Доля покрытых строк — или прямое «не прочитано»."""
     if "coverage_percent" not in facts:
@@ -808,9 +570,10 @@ def version_badge(facts: dict[str, Any]) -> Badge:
 
 #: ЧТО СБОРКА РИСУЕТ — ОБЪЯВЛЕНО ЗДЕСЬ ОДИН РАЗ: имя файла → чем его рисуют.
 #: Здесь — значки формой shields-endpoint (#998), которые витрина показала бы
-#: через `img.shields.io/endpoint`. Инвентарей три: этот, картинки `PICTURES`
-#: (свой SVG видом единого значка каталога — значок проекта, #1213) и страницы
-#: `PAGES`. Гейты витрины и публикации читают все три (взгляд на #1265).
+#: через `img.shields.io/endpoint`. Инвентарей два: этот и страницы `PAGES`.
+#: Гейты витрины и публикации читают оба (взгляд на #1265). Своих картинок
+#: сборка больше не рисует: значок проекта рисует действие каталога
+#: `project-badge` в общем шаге фактов (#1422, решение владельца 16.10.2026).
 #: Порядок записей — порядок сборки.
 #:
 #: ПОЧЕМУ ЭТО ДАННЫЕ, А НЕ ШЕСТЬ КОНСТАНТ И КОРТЕЖ ВНУТРИ `main`. Список нужен
@@ -826,17 +589,6 @@ def version_badge(facts: dict[str, Any]) -> Badge:
 BADGES: Final[dict[str, Callable[[dict[str, Any]], Badge]]] = {
     "version.json": version_badge,
     "coverage.json": coverage_badge,
-}
-
-
-#: КАРТИНКИ, которые сборка рисует сама — SVG зонами, видом единого значка
-#: каталога, а не shields-endpoint: имя файла → чем собираются его зоны.
-#: Инвентарь второй, а не общий с `BADGES`: форма вывода другая, но гейты
-#: витрины, публикации и «число только из фактов» читают оба (#1213).
-#: Значок проекта сменил «держится машиной» и «общие механизмы» вторым шагом
-#: после того, как прогон публикации его нарисовал (196, #1259).
-PICTURES: Final[dict[str, Callable[[dict[str, Any]], list[list[Part]]]]] = {
-    "project.svg": project_zones,
 }
 
 
@@ -894,12 +646,13 @@ MACHINE_READ: Final[dict[str, Callable[[dict[str, Any]], str]]] = {
 #: показа у всех прочих.
 AHEAD: Final = frozenset[str]()
 
-#: ЕДИНЫЙ ЗНАЧОК РИСУЕТ НЕ СБОРКА, А ДЕЙСТВИЕ КАТАЛОГА (#1019): «Python │ ОС │
-#: coverage │ release / PyPI │ version» собирает `python-badge` шагом
-#: `badges.yml`, а код его исполняется с тега каталога, а не копией здесь (022).
-#: Имя объявлено тут, рядом с инвентарём, потому что гейт витрины спрашивает
-#: «всё ли нарисованное названо» у одного места, а не у двух.
-UNIFIED: Final = "python.svg"
+#: ЕДИНЫЙ ЗНАЧОК РИСУЕТ НЕ СБОРКА, А ДЕЙСТВИЕ КАТАЛОГА: `project-badge` в
+#: общем шаге фактов (#1422, решение владельца 16.10.2026; прежде —
+#: `python-badge` шагом `badges.yml`, #1019). Код его исполняется с тега
+#: каталога, а не копией здесь (022). Имя объявлено тут, рядом с инвентарём,
+#: потому что гейт витрины спрашивает «всё ли нарисованное названо» у одного
+#: места, а не у двух.
+UNIFIED: Final = "project.svg"
 #: Файлы инвентаря, из которых единый значок берёт свои зоны: покрытие и версию
 #: он не меряет второй раз (214). Отдельно в витрине они больше не показываются —
 #: стали бы дублями зон. Выпуск зона «release / PyPI» спрашивает у площадки
@@ -935,23 +688,21 @@ def clashed() -> bool:
     return bool(clash)
 
 
-def draw_pictures(facts: dict[str, Any], out: Path) -> None:
-    """Картинки `PICTURES` по фактам — в каталог вывода.
+def draw_endpoints(facts: dict[str, Any], out: Path) -> None:
+    """Значки-конечные точки `BADGES` по фактам — в каталог вывода.
 
-    ПИСАТЕЛЬ ОДИН НА ОБА ПУТИ (взгляд на #1327): `project.svg` у нас кладут
-    общий шаг фактов (`pictures_drawn`) и `badges.yml` (`draw_badges`), и
-    одинаковыми их держит то, что оба зовут эту функцию, а не две копии цикла.
+    ПИСАТЕЛЬ ОДИН НА ОБА ПУТИ: конечные точки кладут и наша публикация
+    (`draw_badges`), и общий шаг фактов — входами значка каталога
+    (`endpoints_drawn`). Одинаковыми их держит то, что оба зовут эту функцию.
     """
-    for name, zones in PICTURES.items():
-        (out / name).write_text(drawing(zones(facts)), encoding="utf-8")
-
-
-def draw_badges(facts: dict[str, Any], out: Path) -> None:
-    """Значки-конечные точки по фактам — в каталог вывода."""
     for name, draw in BADGES.items():
         said = json.dumps(endpoint(draw(facts)), ensure_ascii=False, indent=2) + "\n"
         (out / name).write_text(said, encoding="utf-8")
-    draw_pictures(facts, out)
+
+
+def draw_badges(facts: dict[str, Any], out: Path) -> None:
+    """Значки-конечные точки, страницы и файлы для машины по фактам — в каталог вывода."""
+    draw_endpoints(facts, out)
     for name, page in PAGES.items():
         (out / name).write_text(page(facts), encoding="utf-8")
     for name, build in MACHINE_READ.items():
@@ -979,24 +730,19 @@ def extra_written(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def rehydrated(
-    facts: dict[str, Any], root: Path, supplier: str = "", *, ours_too: bool = True
-) -> dict[str, Any]:
+def rehydrated(facts: dict[str, Any], root: Path, supplier: str = "") -> dict[str, Any]:
     """Факты для рисования: темы `exchange` — в корень, неопубликованное — из дерева.
 
     ОПУБЛИКОВАННЫЕ ФАКТЫ — ФОРМА ДОГОВОРА ФАКТОВ 1.6 (#1337): `rules`, `manifest` и
     `contract` в них не лежат, у каждого канон в другом месте
     (`facts_common.NOT_PUBLISHED`, `SUPPLIER_NOT_PUBLISHED`). Рисующему они нужны, и берутся тем же
     кодом, что считал их до публикации, — из дерева, а не второй записью.
-    `ours_too` — только у нашей публикации: у потребителя манифеста и номера
-    контракта механизмов нет, ему нужен лишь ответ каталогу для картинки.
     """
     said = common.lifted(facts)
     if "rules" not in said:
         said["rules"] = common.rules_said(root, supplier)
-    if ours_too:
-        said.setdefault("manifest", manifest_facts(root))
-        said.setdefault("contract", contract_version(root / VERSION_FILE))
+    said.setdefault("manifest", manifest_facts(root))
+    said.setdefault("contract", contract_version(root / VERSION_FILE))
     return said
 
 
@@ -1030,7 +776,7 @@ def drawn_from(path: Path, out_dir: str, root: str = ".", supplier: str = "") ->
         print(f"значки не нарисованы: в {path} нет раздела {exc}", file=sys.stderr)
         return EXIT_BROKEN
     print(
-        f"значки нарисованы по {path}: {', '.join(sorted([*BADGES, *PICTURES]))}; "
+        f"значки нарисованы по {path}: {', '.join(sorted(BADGES))}; "
         f"страницы: {', '.join(sorted(PAGES))}; машинные: {', '.join(sorted(MACHINE_READ))}"
     )
     return EXIT_OK
@@ -1068,64 +814,33 @@ def commit_of(path: Path) -> int:
     return EXIT_BROKEN
 
 
-def picture_input_wrong(facts: object) -> str | None:
-    """Что не так с формой фактов для картинки; None — форма годится.
+def endpoints_drawn(path: Path, out_dir: str) -> int:
+    """Режим `--endpoints-out`: только конечные точки `BADGES` по готовым фактам — плоско.
 
-    Разделы, которые читает картинка, обязаны быть словарями, если они есть:
-    иначе рисование упало бы `AttributeError`, неотличимым от опечатки в
-    собственном коде (взгляд на #1338).
-    """
-    if not isinstance(facts, dict):
-        return "факты не объект"
-    for section in ("rules", "family", "exchange"):
-        if section in facts and not isinstance(facts[section], dict):
-            return f"раздел {section} не объект"
-    rules = facts.get("rules") or {}
-    for part in ("by_mechanism", "machine"):
-        if part in rules and not isinstance(rules[part], dict):
-            return f"rules.{part} не объект"
-    return None
-
-
-def pictures_drawn(path: Path, out_dir: str, root: str = ".", supplier: str = "") -> int:
-    """Режим `--pictures-out`: только картинки `PICTURES` по готовым фактам — плоско в каталог.
-
-    ДЛЯ ОБЩЕГО ШАГА ФАКТОВ, А НЕ ДЛЯ НАШЕЙ ПУБЛИКАЦИИ (#1282, решение
-    владельца 12.10.2026). У потребителя в фактах нет наших разделов (`family`,
-    страниц), и `--from-facts` упал бы на значках-конечных точках и страницах.
-    Картинка проекта читает свои разделы через «не прочитано», а не через
-    отказ, — поэтому шаг рисует её всем, кто его зовёт. Каталог плоский: шаг
-    кладёт файл рядом с `facts.json`, и публикация берёт оба оттуда.
+    ДЛЯ ОБЩЕГО ШАГА ФАКТОВ (#1422, решение владельца 16.10.2026). Значок
+    проекта рисует действие каталога `project-badge`, а покрытие и версию оно
+    берёт файлами shields-endpoint — их шаг собирает здесь, по тем же фактам,
+    что уйдут на ветку, а не меряет второй раз (214). У потребителя наших
+    разделов в фактах нет, и их не надо: оба значка читают общие показатели,
+    а непрочитанное называют «не прочитано», а не падают.
     """
     try:
         facts = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"картинки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
+        print(f"конечные точки не собраны: {path} не прочитан — {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    wrong = picture_input_wrong(facts)
-    if wrong:
-        print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
-        return EXIT_BROKEN
-    facts = rehydrated(facts, Path(root), supplier, ours_too=False)
-    # Второй взгляд — ПОСЛЕ подъёма тем (взгляд на #1345): `exchange.epm.family`
-    # не объектом проходил первый и падал бы трейсбеком при рисовании.
-    wrong = picture_input_wrong(facts)
-    if wrong:
-        print(f"картинки не нарисованы: {path} не той формы — {wrong}", file=sys.stderr)
+    if not isinstance(facts, dict):
+        print(f"конечные точки не собраны: {path} — факты не объект", file=sys.stderr)
         return EXIT_BROKEN
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     try:
-        draw_pictures(facts, out)
-    # ИСХОДОВ ДВА (взгляд на #1327, `1edf07c`): нет раздела, число не
-    # число — «факты не той формы», исход 2, а не трейсбек с кодом 1.
-    # `AttributeError` здесь НЕ ловится (взгляд на #1338): им падает и
-    # опечатка в коде рисования, и вину за неё нёс бы вход. Раздел не того
-    # типа ловит явная проверка формы выше, до рисования.
-    except (KeyError, TypeError, ValueError) as exc:
-        print(f"картинки не нарисованы: {path} не той формы — {exc!r}", file=sys.stderr)
+        draw_endpoints(common.lifted(facts), out)
+    # Число не числом — «факты не той формы», исход 2, а не трейсбек с кодом 1.
+    except (TypeError, ValueError) as exc:
+        print(f"конечные точки не собраны: {path} не той формы — {exc!r}", file=sys.stderr)
         return EXIT_BROKEN
-    print(f"картинки нарисованы по {path}: {', '.join(sorted(PICTURES))}")
+    print(f"конечные точки собраны по {path}: {', '.join(sorted(BADGES))}")
     return EXIT_OK
 
 
@@ -1205,9 +920,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--from-facts", default="", help="нарисовать значки по готовому facts.json")
     parser.add_argument(
-        "--pictures-out",
+        "--endpoints-out",
         default="",
-        help="с --from-facts: только картинки PICTURES, плоско в этот каталог (общий шаг фактов)",
+        help="с --from-facts: только конечные точки BADGES, плоско в этот каталог (общий шаг)",
     )
     parser.add_argument(
         "--commit-of", default="", help="напечатать коммит, на котором собран готовый facts.json"
@@ -1250,13 +965,13 @@ def main(argv: list[str] | None = None) -> int:
         for name in prune(Path(args.prune)):
             print(f"снято с ветки: {name} — сборка его больше не издаёт")
         return EXIT_OK
-    if args.pictures_out and not args.from_facts:
-        # Пара флагов, а не один (`303d8f0`): картинки рисуются ПО ГОТОВЫМ
-        # фактам, и без них заход ушёл бы молча в полную сборку.
-        print("--pictures-out работает только вместе с --from-facts", file=sys.stderr)
+    if args.endpoints_out and not args.from_facts:
+        # Пара флагов, а не один (`303d8f0`): конечные точки собираются ПО
+        # ГОТОВЫМ фактам, и без них заход ушёл бы молча в полную сборку.
+        print("--endpoints-out работает только вместе с --from-facts", file=sys.stderr)
         return EXIT_BROKEN
-    if args.from_facts and args.pictures_out:
-        return pictures_drawn(Path(args.from_facts), args.pictures_out, args.root, args.supplier)
+    if args.from_facts and args.endpoints_out:
+        return endpoints_drawn(Path(args.from_facts), args.endpoints_out)
     if args.from_facts:
         return drawn_from(Path(args.from_facts), args.out_dir, args.root, args.supplier)
     if args.extra_out:

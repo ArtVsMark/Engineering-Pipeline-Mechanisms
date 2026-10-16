@@ -38,6 +38,11 @@ PUBLISHES: Final = (
     (paths.BADGES_DIR / "facts.json").as_posix(),
     (paths.BADGES_DIR / "project.svg").as_posix(),
 )
+#: Значок проекта рисует действие каталога `project-badge` (#1422), и не
+#: собрать его оно вправе: площадка не ответила о прогонах, сводка семьи не
+#: прочитана. Тогда факты всё равно едут, а на ветке остаётся ПРЕЖНИЙ значок —
+#: так решает каталог для своего исхода 2 («прежний значок лучше не трогать»).
+PICTURE: Final = PUBLISHES[1]
 #: Архив находок взгляда: кладётся тем же коммитом, только если шаг позван с
 #: входом `archive` (#1414). В `PUBLISHES` его нет намеренно: без входа шаг
 #: его не трогает, и чужой файл с этим путём на ветке потребителя живёт.
@@ -106,9 +111,17 @@ def checkout(workdir: Path) -> None:
         raise NotPublished(f"рабочее дерево ветки не создано: {reason(added)}")
 
 
-def targets(*, archive: bool) -> tuple[str, ...]:
-    """Что кладётся на ветку этим заходом: перечень шага и, по входу, архив находок."""
-    return (*PUBLISHES, ARCHIVE) if archive else PUBLISHES
+def targets(source: Path, *, archive: bool) -> tuple[str, ...]:
+    """Что кладётся на ветку этим заходом: факты всегда; значок и архив — если лежат рядом.
+
+    Архив — только по входу `archive`. Чего рядом нет, то на ветке остаётся
+    прежним: отсутствие называет `publish` предупреждением, а не молчит.
+    """
+    beside = source.parent
+    said = [PUBLISHES[0]]
+    said += [PICTURE] if (beside / Path(PICTURE).name).is_file() else []
+    said += [ARCHIVE] if archive and (beside / Path(ARCHIVE).name).is_file() else []
+    return tuple(said)
 
 
 def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> bool:
@@ -117,20 +130,22 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
     `source` — собранный `facts.json`, первая запись перечня; остальные файлы
     берутся РЯДОМ с ним по имени. Сам `source` по имени не ищется: иначе
     названный, но несуществующий файл подменил бы соседний `facts.json`
-    молча. Нет любого — отказ, а не публикация части (045).
+    молча. Нет фактов — отказ, а не публикация части (045).
     """
-    # АРХИВА НЕТ — ФАКТЫ ВСЁ РАВНО ЕДУТ (взгляд на #1423). Первый заход без
-    # прежнего архива и с упавшим дописыванием архива не оставляет: отказ всей
-    # публикации из-за него оставил бы витрину со вчерашними фактами. Пропуск
-    # называется, а краснеет на нём шаг «архив не замер».
-    if archive and not (source.parent / Path(ARCHIVE).name).is_file():
-        print(f"::warning::архива находок рядом с фактами нет — {ARCHIVE} не публикуется")
-        archive = False
+    # АРХИВА ИЛИ ЗНАЧКА НЕТ — ФАКТЫ ВСЁ РАВНО ЕДУТ (взгляды на #1423, #1422).
+    # Первый заход без прежнего архива и с упавшим дописыванием архива не
+    # оставляет; несобранный значок каталога — тоже: отказ всей публикации
+    # из-за них оставил бы витрину со вчерашними фактами. Пропуск называется,
+    # а краснеет на нём свой шаг.
+    chosen = targets(source, archive=archive)
+    for wanted in (PICTURE, *([ARCHIVE] if archive else [])):
+        if wanted not in chosen:
+            print(f"::warning::рядом с фактами нет {Path(wanted).name} — на ветке остаётся прежний")
     checkout(workdir)
     # СБОЙ ДИСКА И ОТСУТСТВИЕ ФАКТОВ — ТОЖЕ «НЕ ОПУБЛИКОВАНО», а не трейсбек с
     # кодом 1: шапка обещает исходы 0 и 2 и `::error::` (039, взгляд на #1233).
     try:
-        for target in targets(archive=archive):
+        for target in chosen:
             (workdir / target).parent.mkdir(parents=True, exist_ok=True)
             given = source if target == PUBLISHES[0] else source.parent / Path(target).name
             shutil.copyfile(given, workdir / target)
@@ -145,7 +160,7 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
             raise NotPublished(f"подпись публикации не записана ({key}): {reason(signed)}")
     # КАЖДЫЙ ВЫЗОВ GIT ВЕДЁТ СВОЮ ПРИЧИНУ ОДНОЙ ФОРМОЙ — `reason`. `diff --quiet`
     # отвечает 0 «нечего» и 1 «есть»; иной код — отказ git, а не «есть изменения».
-    added = git("add", "--", *targets(archive=archive), cwd=workdir)
+    added = git("add", "--", *chosen, cwd=workdir)
     if added.returncode != 0:
         raise NotPublished(f"git add отказал: {reason(added)}")
     staged = git("diff", "--cached", "--quiet", cwd=workdir)
@@ -183,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     if not changed:
         print("факты не изменились — коммита нет")
         return EXIT_OK
-    for target in targets(archive=args.archive):
+    for target in targets(args.source, archive=args.archive):
         print(f"опубликовано: https://raw.githubusercontent.com/{args.repo}/{BRANCH}/{target}")
     return EXIT_OK
 

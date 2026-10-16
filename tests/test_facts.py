@@ -108,47 +108,6 @@ def test_missing_version_is_an_input_error(tmp_path: Path) -> None:
         facts.collect(tmp_path, "")
 
 
-def test_badge_shows_the_number_it_measured() -> None:
-    """Значок несёт то же число, что и факты: второго источника у него нет.
-
-    Считаются держащиеся МАШИНОЙ, а не отвеченные: `answered` равен `total` по
-    построению — проект отвечает по каждому правилу каталога (129), — и такой
-    значок не сдвинулся бы никогда.
-    """
-    zones = facts.project_zones(
-        {"rules": {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}}
-    )
-    assert zones[0][1][0] == "машиной 66/195 · 34%"
-    assert "машиной 66/195 · 34%" in facts.drawing(zones)
-
-
-@pytest.mark.parametrize(
-    ("numerator", "denominator", "color"),
-    [
-        (0, 5, "RED"),
-        (1, 3, "RED"),
-        (1, 2, "YELLOW"),
-        (2, 3, "YELLOW"),
-        (7, 10, "GREEN"),
-        (5, 5, "GREEN"),
-        (0, 0, "GREY"),
-    ],
-)
-def test_the_share_colour_has_three_bands(numerator: int, denominator: int, color: str) -> None:
-    """Три полосы доли — красная, жёлтая, зелёная; пустой знаменатель — ноль, а не падение."""
-    assert facts.share_color(numerator, denominator) == getattr(facts, color)
-
-
-def test_a_wider_text_gets_a_wider_part() -> None:
-    """Ширина части растёт с надписью: зоны не наезжают друг на друга в картинке."""
-    narrow, wide = facts.part_width("1/5"), facts.part_width("машиной 66/195 · 34%")
-    assert 0 < narrow < wide
-    svg = facts.drawing(
-        [[("правила", facts.LABEL_COLOR, ""), ("машиной 66/195 · 34%", "#000", "")]]
-    )
-    assert f'width="{facts.part_width("правила") + wide}"' in svg
-
-
 #: Посаженные факты манифеста семьи: проект, выпуск и отдаваемый контракт.
 MANIFEST_PLANTED: Final[dict[str, Any]] = {
     "repo": "Я/Проект",
@@ -198,36 +157,6 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
     (tmp_path / facts.VERSION_FILE).write_text("2.4.1\n", encoding="utf-8")
     subprocess.run([*git, "commit", "-qam", "d"], check=True)
     assert facts.manifest_facts(tmp_path)["gives"] == {"steps": "0.7"}
-
-
-def test_the_project_picture_is_drawn_and_kept_on_the_branch(tmp_path: Path) -> None:
-    """Значок проекта рисуется сборкой и уборкой ветки не снимается (196, #1213).
-
-    Витрина ссылается на него, и ссылка не смеет вести на снятый файл.
-    """
-    facts.draw_badges(
-        {
-            "rules": {"by_mechanism": {"gate": 1, "document": 1}},
-            "version": "1.0.0",
-            "version_whole": True,
-            **MANIFEST_PLANTED,
-        },
-        tmp_path,
-    )
-    for name in facts.PICTURES:
-        assert (tmp_path / name).read_text(encoding="utf-8").startswith("<svg")
-        assert name in facts.branch_files()
-
-
-def test_badge_colour_follows_the_share() -> None:
-    """Цвет говорит о доле правил, а не о настроении: три доли — три цвета."""
-    low, mid, high = (
-        facts.project_zones({"rules": {"by_mechanism": {"gate": share, "document": 100 - share}}})[
-            0
-        ][1][1]
-        for share in (10, 50, 90)
-    )
-    assert len({low, mid, high}) == 3
 
 
 #: Разрезы витрины, публикующие ДОЛЮ, и два числа, из которых она сделана.
@@ -346,7 +275,7 @@ def derived_names() -> list[str]:
     видит имена, объявленные КОНСТАНТОЙ, и слеп к тем же именам, объявленным
     данными. Признак взят тот, которым пользуется сама сборка.
     """
-    found = sorted({*facts.BADGES, *facts.PICTURES, *facts.PAGES, facts.FACTS, facts.UNIFIED})
+    found = sorted({*facts.BADGES, *facts.PAGES, facts.FACTS, facts.UNIFIED})
     assert len(found) >= 5, f"имён производного разобрано {found} — предмет не найден (075)"
     return found
 
@@ -477,8 +406,9 @@ def shown_badges() -> list[str]:
     экземпляр здесь был третьим (022).
     """
     found = sorted(badges_shown((ROOT / "README.md").read_text("utf-8")))
-    # Пол — два: значок проекта заменил «держится машиной» и «семью» (#1213).
-    assert len(found) >= 2, f"витрина показывает {found} — предмет проверки не найден (075)"
+    # Пол — один: значок проекта каталога несёт и верхнюю строку прежнего
+    # `python.svg`, и нижнюю — правила и семью (#1213, #1422). Пусто — обрыв.
+    assert found, "витрина не показывает ни одного значка — предмет проверки не найден (075)"
     return found
 
 
@@ -512,11 +442,12 @@ def test_every_badge_the_build_draws_is_shown() -> None:
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
     # Нарисованное впрок (`AHEAD`) показывается вторым шагом (196).
-    drawn = (set(facts.BADGES) | set(facts.PICTURES)) - facts.AHEAD
-    # Пол — три: значок проекта заменил «держится машиной» и «семью» (#1213).
-    assert len(drawn) >= 3, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
+    drawn = set(facts.BADGES) - facts.AHEAD
+    # Пол — два: покрытие и версия, входы значка проекта (#1422).
+    assert len(drawn) >= 2, f"сборка рисует {sorted(drawn)} — предмет проверки не найден (075)"
     # Входы единого значка показываются его зонами, а не сами (#1019): рядом с
-    # ним они были бы дублями. Сам единый значок рисует шаг `badges.yml`.
+    # ним они были бы дублями. Сам единый значок рисует действие каталога в
+    # общем шаге фактов (#1422).
     expected = (drawn - set(facts.ZONE_INPUTS)) | {facts.UNIFIED}
     assert expected == set(shown_badges()), (
         f"витрине положено показать {sorted(expected)}, а показано {shown_badges()}"
@@ -526,11 +457,11 @@ def test_every_badge_the_build_draws_is_shown() -> None:
 def test_every_page_the_build_lays_is_linked() -> None:
     """Страница, положенная сборкой, связана из витрины — или объявлена впрок (195, #1268).
 
-    Сверка значков выше читает `BADGES | PICTURES`; страница — соседний случай
+    Сверка значков выше читает `BADGES`; страница — соседний случай
     того же предмета, и без этой проверки ссылка на неё держалась бы ничем.
     """
     assert facts.PAGES, "сборка не кладёт ни одной страницы — предмет проверки не найден (075)"
-    drawn = {*facts.PICTURES, *facts.PAGES}
+    drawn = {*facts.PAGES}
     assert drawn >= facts.AHEAD, f"впрок объявлено не то, что рисуется: {sorted(facts.AHEAD)}"
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     unlinked = sorted(
@@ -762,28 +693,32 @@ def test_publication_writes_only_to_the_derived_branch() -> None:
     assert " ".join(facts_publish["run"].split()) == FACTS_PUBLISH_RUN, facts_publish["run"]
 
 
-#: Сценарий шага, рисующего значок проекта у общего шага фактов, — целиком (#1282).
-FACTS_PICTURE_RUN: Final = (
+#: Сценарий шага, кладущего входы значка проекта у общего шага фактов, — целиком (#1422).
+FACTS_BADGE_INPUTS_RUN: Final = (
     'python $MECHANISMS/scripts/build_facts.py --from-facts "$RUNNER_TEMP/facts/facts.json" '
-    '--pictures-out "$RUNNER_TEMP/facts" --root . --supplier "$SUPPLIER"'
+    "--endpoints-out .project-badge"
 )
 
 
 def test_the_shared_step_draws_the_picture_before_it_publishes() -> None:
-    """Значок рисуется в каталог фактов ДО публикации — иначе публиковать нечего (#1282).
+    """Входы, значок каталога и его перенос идут по порядку и ДО публикации (#1422).
 
-    Публикация берёт `project.svg` рядом с `facts.json` и без него отказывает
-    целиком. Снятый или переставленный шаг рисования краснел бы только на
-    площадке, у потребителя; здесь — сразу. Сценарий сверяется целиком, как у
-    соседа: каталог картинки обязан быть каталогом фактов.
+    Публикация берёт `project.svg` рядом с `facts.json`; без него на ветке
+    остаётся прежний значок. Снятый или переставленный шаг краснел бы только на
+    площадке, у потребителя; здесь — сразу. Сценарий входов сверяется целиком,
+    как у соседа: каталог входов обязан быть каталогом действия.
     """
     shared = yaml.safe_load((WORKFLOW.parent / "step-facts.yml").read_text(encoding="utf-8"))
-    names = [step.get("name") for step in shared["jobs"]["facts"]["steps"]]
-    draw = names.index("нарисовать значок проекта по фактам")
+    steps = shared["jobs"]["facts"]["steps"]
+    names = [step.get("name") for step in steps]
+    inputs = names.index("входы значка проекта — покрытие и версия по фактам")
+    badge = names.index("значок проекта — действием каталога")
+    laid = names.index("положить значок проекта рядом с фактами")
     publish = names.index("опубликовать факты коммитом поверх ветки badges")
-    assert draw < publish, "значок рисуется после публикации — публиковать было бы нечего"
-    run = shared["jobs"]["facts"]["steps"][draw]["run"]
-    assert " ".join(run.split()) == FACTS_PICTURE_RUN, run
+    assert inputs < badge < laid < publish, "значок собирается не по порядку или после публикации"
+    assert steps[badge].get("continue-on-error") is True, "отказ каталога ронял бы публикацию"
+    assert steps[badge]["with"]["out-dir"] == ".project-badge"
+    assert " ".join(steps[inputs]["run"].split()) == FACTS_BADGE_INPUTS_RUN, steps[inputs]["run"]
 
 
 #: Сценарий шага публикации фактов — целиком. Иная запись шага, даже
@@ -955,31 +890,17 @@ def test_a_broken_answers_file_refuses_instead_of_counting_everything(tmp_path: 
 #: выданный впрок, держит ровно столько же, сколько запретительный: он перестаёт
 #: быть замером и становится догадкой о будущем (005). Нашёл внешний взгляд.
 #:
-#: Замер 18.09.2026: шесть рисовалок зовут ровно `badge`, `sum`, `int`, `float`,
-#: `str`, `bool`, `round`, `isinstance` и методы отображения `.get`, `.items`,
-#: `.values` — ничего сверх счёта по переданным фактам. Понадобится новое имя —
+#: Замер 16.10.2026, после снятия своего значка проекта (#1422): две рисовалки
+#: зовут ровно `badge`, `float`, `str`, `bool` и `.get` — ничего сверх счёта по
+#: переданным фактам. Понадобится новое имя —
 #: оно дописывается вместе с вызовом, а не заранее.
 INSIDE_THE_FACTS: Final = frozenset(
     {
         "badge",
-        "sum",
-        "int",
         "float",
         "str",
         "bool",
         ".get",
-        # Цвет доли по двум уже прочитанным числам: ничего не читает (#1213).
-        "share_color",
-        # Процент по тем же двум числам, что факты публикуют рядом: форма, не новое число.
-        "counted",
-        ".items",
-        ".values",
-        # Форма раздела `rules.machine` проверяется, а не угадывается: у фактов,
-        # собранных до #1282, его нет, и это «не прочитано», а не отказ рисовалки.
-        "isinstance",
-        # Доля взятых — по трём числам `rules.machine`, лежащим в фактах рядом:
-        # форма, не новое число (#1282).
-        "round",
     }
 )
 
@@ -993,7 +914,7 @@ def badge_makers() -> list[ast.FunctionDef]:
     Инвентарь `BADGES` — тот же источник, по которому значки и собираются, так что
     предмет проверки и предмет сборки совпадают по построению (022).
     """
-    named = {maker.__name__ for maker in [*facts.BADGES.values(), *facts.PICTURES.values()]}
+    named = {maker.__name__ for maker in facts.BADGES.values()}
     tree = ast.parse((ROOT / "scripts" / "build_facts.py").read_text(encoding="utf-8"))
     found = [
         node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name in named
@@ -1071,7 +992,7 @@ def test_every_badge_maker_is_in_the_inventory() -> None:
         if isinstance(node, ast.FunctionDef) and node.name.endswith(("_badge", "_zones"))
     }
     assert in_code, "рисовалок значков в дереве не нашлось — предмет проверки не найден (075)"
-    makers = [*facts.BADGES.values(), *facts.PICTURES.values()]
+    makers = [*facts.BADGES.values()]
     forgotten = sorted(in_code - {maker.__name__ for maker in makers})
     assert not forgotten, (
         "рисовалка есть в коде, но не в инвентаре — значок собирается в обход, и"

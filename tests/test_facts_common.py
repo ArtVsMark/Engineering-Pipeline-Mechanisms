@@ -194,7 +194,6 @@ def test_drawing_takes_the_unpublished_from_the_tree() -> None:
     said = build.rehydrated({"repo": REPO}, ROOT, REPO)
     assert said["rules"] == module.rules_said(ROOT, REPO)
     assert said["manifest"] == build.manifest_facts(ROOT)
-    assert "manifest" not in build.rehydrated({"repo": REPO}, ROOT, REPO, ours_too=False)
 
 
 def test_the_publisher_refuses_an_overriding_file(tmp_path: Path, run_script: RunScript) -> None:

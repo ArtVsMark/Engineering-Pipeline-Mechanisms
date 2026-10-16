@@ -289,10 +289,10 @@ jobs:
             exit 1
           fi
           git worktree add --quiet --detach "${RUNNER_TEMP}/at-facts" "$commit"
-      # `project.svg` ПИШУТ ДВА ПРОГОНА — общий шаг фактов (джоб `facts`) и этот
-      # шаг, оба по одному `facts.json` и одним писателем
-      # `build_facts.draw_pictures`. Что оба пути идут через него, держит
-      # `tests/test_family.py::test_both_writers_draw_the_same_picture` (взгляд на #1327).
+      # `project.svg` ЗДЕСЬ НЕ РИСУЕТСЯ (#1422): его собирает действие каталога
+      # `project-badge` в общем шаге фактов (джоб `facts`), и писатель у файла
+      # один. Единый значок `python.svg` снят вместе с шагом `python-badge`:
+      # верхняя строка значка проекта несёт те же зоны, и уборка ветки его снимает.
       - name: нарисовать значки по фактам
         run: |
           python scripts/build_facts.py \
@@ -300,49 +300,6 @@ jobs:
             --out-dir "${RUNNER_TEMP}/badges" \
             --root "${RUNNER_TEMP}/at-facts" \
             --supplier "$GITHUB_REPOSITORY"
-      # ЕДИНЫЙ ЗНАЧОК «Python │ ОС │ coverage │ release / PyPI │ version» (#1019,
-      # решение владельца 01.10.2026). Рисует его действие каталога с тега, а не
-      # копия здесь (022). Стоит ПОСЛЕ сборки фактов: покрытие и версию он берёт
-      # из их файлов (`build_facts.ZONE_INPUTS`), а не меряет второй раз (214).
-      # PyPI у механизмов нет — вход `pypi` пуст, и зона выпуска серая.
-      #
-      # Входы и выход действие считает от корня дерева, а каталог публикации
-      # лежит вне его — поэтому файлы приносятся копией. Копируется каталог
-      # целиком: перечень имён здесь был бы вторым списком значков (049).
-      - name: принести входы единого значка
-        run: |
-          set -euo pipefail
-          mkdir -p .unified-badge
-          cp -R "${RUNNER_TEMP}/badges/.github/badges/." .unified-badge/
-      # Отказ действия не роняет прогон: исход 2 — «площадка не ответила» или
-      # «подписывать нечего», и серым это не рисуется (075). Через `uses:` код
-      # выхода не виден, поэтому 2 и 1 здесь неразличимы — это цена, и она
-      # названа: отказ любого рода оставляет на ветке ПРЕЖНИЙ значок и говорит
-      # предупреждением, а причина — в логе шага.
-      - name: единый значок — проверки, покрытие, выпуск, версия
-        id: unified
-        continue-on-error: true
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/python-badge@v1.13.0
-        with:
-          ci-workflow: ci.yml
-          coverage-json: .unified-badge/coverage.json
-          version-json: .unified-badge/version.json
-          out: .unified-badge/python.svg
-      # Ветка пополняется, а не перезаписывается: несобранный в этот заход
-      # значок на ней ОСТАЁТСЯ прежним, переносить его нечего.
-      - name: положить единый значок
-        env:
-          OUTCOME: ${{ steps.unified.outcome }}
-        run: |
-          set -uo pipefail
-          if [ "$OUTCOME" = "success" ]; then
-            if ! cp .unified-badge/python.svg "${RUNNER_TEMP}/badges/.github/badges/python.svg"; then
-              echo "::error::единый значок собран, но не положен в каталог публикации"
-              exit 1
-            fi
-            exit 0
-          fi
-          echo "::warning::единый значок не собран — на ветке остаётся прежний"
       - name: опубликовать в ветку badges
         run: |
           set -euo pipefail

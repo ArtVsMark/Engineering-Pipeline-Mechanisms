@@ -2,7 +2,7 @@
 
 > **Читатель:** посетитель — что это такое и стоит ли брать.
 
-[![Состояние: CI, Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/python.svg)](.github/workflows/ci.yml) [![значок проекта: правил каталога держится машиной и проектов семьи на нашем механизме — числом из скольких; наших механизмов у семьи взято и переделано](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/project.svg)](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/1212)
+[![Значок проекта. Сверху: CI, Python и его версия, ОС linux / windows / mac, покрытие, выпуск, версия проекта. Снизу: правил каталога держится машиной, машинных ответов на своём механизме и взятых, проектов семьи на наших шагах](https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/badges/.github/badges/project.svg)](.github/workflows/ci.yml)
 
 **Механизмы конвейера: скелет один для всех проектов, наполнение своё.**
 Открытие изменения, гейты, очередь и слияние, здоровье общей ветки, выпуск —
