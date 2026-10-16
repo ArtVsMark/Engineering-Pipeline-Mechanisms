@@ -1082,25 +1082,83 @@ def test_unread_labels_leave_section_four_as_written(
 def test_a_release_takes_the_waits_release_label_away(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """После выпуска метка снимается с каждой открытой задачи, что её несёт (#1433)."""
-    asked: list[str] = []
-    deleted: list[str] = []
+    """Метка снимается, пока первая страница помеченных не опустеет (#1433, взгляд на #1446)."""
+    pages = [[{"number": 7}, {"number": 9}], [{"number": 11}], []]
+    calls: list[str] = []
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
 
-    def listing(path: str, *_: Any, **__: Any) -> Any:
-        asked.append(path)
-        return iter([{"number": 7}, {"number": 9}])
+    def platform(method: str, path: str, *_: Any) -> Any:
+        calls.append(f"{method} {path}")
+        return pages.pop(0) if method == "GET" else {}
 
-    monkeypatch.setattr(module.ghrest, "paginate", listing)
-    monkeypatch.setattr(
-        module.ghrest, "request", lambda method, path, *_: deleted.append(f"{method} {path}")
-    )
+    monkeypatch.setattr(module.ghrest, "request", platform)
     assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_OK
-    assert asked == ["repos/o/r/issues?state=open&labels=plan%2Fwaits-release"]
-    assert deleted == [
-        "DELETE repos/o/r/issues/7/labels/plan%2Fwaits-release",
-        "DELETE repos/o/r/issues/9/labels/plan%2Fwaits-release",
-    ]
-    assert "#7, #9" in capsys.readouterr().out
+    listed = "GET repos/o/r/issues?state=open&labels=plan%2Fwaits-release&per_page=100"
+    assert calls.count(listed) == 3, "страница перечитывается, а не листается"
+    assert "DELETE repos/o/r/issues/11/labels/plan%2Fwaits-release" in calls
+    assert "#7, #9, #11" in capsys.readouterr().out
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
     assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
+
+
+def test_a_refusal_midway_names_what_was_already_freed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ посреди захода называет уже снятые метки, а не «не снято ничего»."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+
+    def platform(method: str, path: str, *_: Any) -> Any:
+        if method == "GET":
+            return [{"number": 7}, {"number": 9}]
+        if path.endswith("/9/labels/plan%2Fwaits-release"):
+            raise module.ghrest.TransportError("502")
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
+    assert "уже снята — #7" in capsys.readouterr().err
+
+
+def test_a_label_that_will_not_leave_is_a_refusal_not_a_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Первая страница не пустеет — отказ после предела заходов, а не вечный цикл."""
+    monkeypatch.setattr(module.ghrest, "request", lambda method, *_: [{"number": 7}])
+    with pytest.raises(module.NotRun, match="не уходит"):
+        module.released("o/r", "t", [])
+
+
+def test_continuations_and_hand_groups_keep_their_rows() -> None:
+    """Продолжение едет со строкой; ручная группа держит строки без метки (взгляд на #1446)."""
+    lines = [
+        "*Пояснение.*",
+        "*Сейчас*",
+        "- **#1** — первая",
+        "  продолжение первой",
+        "  - вложенный пункт",
+        "*Отложено*",
+        "- **#2** — отложена",
+        "- **#3** — ждёт выпуска",
+    ]
+    said = module.grouped(lines, {3: {module.WAITS_RELEASE}})
+    assert said == [
+        "*Пояснение.*",
+        "",
+        "*Сейчас в работе*",
+        "- **#1** — первая",
+        "  продолжение первой",
+        "  - вложенный пункт",
+        "",
+        "*Ждёт выпуска*",
+        "- **#3** — ждёт выпуска",
+        "",
+        "*Отложено*",
+        "- **#2** — отложена",
+    ]
+
+
+def test_a_hand_head_is_a_whole_italic_line() -> None:
+    """Заголовок ручной группы — курсив целиком; жирное и строка работы — нет."""
+    assert module.hand_head("*Отложено*") and module.hand_head("  *Ждёт срока*  ")
+    assert not module.hand_head("**жирное**") and not module.hand_head("- **#1** — работа")
+    assert not module.hand_head("**") and not module.hand_head("*курсив* и текст")
