@@ -49,7 +49,8 @@
 (состав меток) · [`step-required-context.yml`](.github/workflows/step-required-context.yml)
 (сверка обязательного контекста) · [`step-ci-complete-wake.yml`](.github/workflows/step-ci-complete-wake.yml)
 (будильник сводного гейта) · [`step-runs-series.yml`](.github/workflows/step-runs-series.yml)
-(ряд прогонов) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
+(ряд прогонов) · [`step-claude.yml`](.github/workflows/step-claude.yml)
+(ответ на обращение) · [`step-hail.yml`](.github/workflows/step-hail.yml) (оклик) ·
 [`step-verify-queue.yml`](.github/workflows/step-verify-queue.yml) (верификатор по плану) ·
 [`step-drift.yml`](.github/workflows/step-drift.yml) (дрейф внешних входов) ·
 [`step-review.yml`](.github/workflows/step-review.yml) (внешний взгляд и реестр находок) ·

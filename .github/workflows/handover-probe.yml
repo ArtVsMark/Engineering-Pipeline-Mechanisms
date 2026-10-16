@@ -46,8 +46,8 @@
 # `step-main-red`, `step-stuck`, `step-hail`, `step-verify-queue`,
 # `step-drift`, `step-review`, `step-facts`, `step-agent-pr`, `step-task-items`,
 # `step-schedules-seen`, `step-labels-sync`, `step-ci-complete-wake`,
-# `step-runs-series` — пишет живые задачи, ленты изменений, метки, ветки
-# значков и ряда, перезапускает прогоны (`step-facts`
+# `step-runs-series`, `step-claude` — пишет живые задачи, ленты изменений,
+# метки, ветки значков и ряда, перезапускает прогоны (`step-facts`
 # кладёт факты на `badges`, `step-agent-pr` открывает изменения), зовёт
 # прогоны и агента, а очередь ещё и сливает: проба переписала бы план работ,
 # запись дрейфа и реестр находок этого репозитория, перезапускала бы его

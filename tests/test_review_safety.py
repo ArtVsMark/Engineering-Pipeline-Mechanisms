@@ -27,6 +27,9 @@ AUTO_REVIEW = WORKFLOWS / "review.yml"
 #: `AUTO_REVIEW` остались события, кнопка и группа отмены (#993).
 LOOK_BODY = WORKFLOWS / "step-review.yml"
 ON_MENTION = WORKFLOWS / "claude.yml"
+#: Тело ответа на обращение — общий шаг: вызывающий `claude.yml` держит условие
+#: «кто вправе обратиться», а шаги агента живут здесь (#1385).
+ON_MENTION_BODY = WORKFLOWS / "step-claude.yml"
 SHA_PIN = re.compile(r"@[0-9a-f]{40}\b")
 TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
 
@@ -60,7 +63,7 @@ AGENT_WORKFLOWS: Final = sorted(path for path in walk(WORKFLOWS, "*.yml") if age
 
 def test_the_agent_workflows_are_found() -> None:
     """Замер прогонов с агентом не пуст и видит оба известных прогона (075)."""
-    assert {LOOK_BODY, ON_MENTION} <= set(AGENT_WORKFLOWS), AGENT_WORKFLOWS
+    assert {LOOK_BODY, ON_MENTION_BODY} <= set(AGENT_WORKFLOWS), AGENT_WORKFLOWS
 
 
 @pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
