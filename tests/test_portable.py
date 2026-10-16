@@ -320,12 +320,9 @@ def test_the_seams_of_the_filling_and_the_port_check_are_named() -> None:
 #: Прогоны с ответом `as-is`, которые ВЫЗВАТЬ нельзя — у них нет
 #: `on: workflow_call`, и `as-is` у них значит «скопируй». Это противоречие
 #: записи 037 (слой 1 — вызов по тегу), и список здесь — его остаток, а не
-#: допуск: он только убывает, и снимает его #993. Замер 01.10.2026 — 20.
-STILL_COPIED: Final = frozenset(
-    {
-        "badges.yml",
-    }
-)
+#: допуск: он только убывает, и снимает его #993. Замер 01.10.2026 — 20;
+#: пуст с выносом выпуска (#1385) — новая копия краснеет, а не дописывается.
+STILL_COPIED: Final[frozenset[str]] = frozenset()
 
 
 def test_an_as_is_flow_is_called_not_copied() -> None:

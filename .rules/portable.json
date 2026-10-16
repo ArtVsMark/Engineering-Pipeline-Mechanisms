@@ -190,7 +190,8 @@
       ]
     },
     ".github/workflows/badges.yml": {
-      "answer": "as-is"
+      "answer": "ours",
+      "why": "сам прогон — своё поставщика, но ОДИН ЕГО ДЖОБ уходит наружу формой: scripts/onboard.py (own_callers → own_kit) режет из него заготовку вызова step-facts.yml — события, права, очередь и джоб facts, — и правка этого джоба меняет заготовку потребителя; архив находок для потребителя — отдельный шаг по #1414"
     },
     ".github/workflows/ci-complete.yml": {
       "answer": "as-is"
