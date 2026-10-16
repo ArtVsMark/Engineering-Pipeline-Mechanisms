@@ -38,6 +38,10 @@ PUBLISHES: Final = (
     (paths.BADGES_DIR / "facts.json").as_posix(),
     (paths.BADGES_DIR / "project.svg").as_posix(),
 )
+#: Архив находок взгляда: кладётся тем же коммитом, только если шаг позван с
+#: входом `archive` (#1414). В `PUBLISHES` его нет намеренно: без входа шаг
+#: его не трогает, и чужой файл с этим путём на ветке потребителя живёт.
+ARCHIVE: Final = (paths.BADGES_DIR / "findings.json").as_posix()
 #: Ветка публикации — производная, не общая.
 BRANCH: Final = "badges"
 #: `git ls-remote --exit-code` отвечает этим кодом, когда ветки нет вовсе.
@@ -102,8 +106,13 @@ def checkout(workdir: Path) -> None:
         raise NotPublished(f"рабочее дерево ветки не создано: {reason(added)}")
 
 
-def publish(source: Path, workdir: Path, *, sha: str) -> bool:
-    """Кладёт `source` и его соседей по `PUBLISHES` и толкает; ``False`` — изменений нет.
+def targets(*, archive: bool) -> tuple[str, ...]:
+    """Что кладётся на ветку этим заходом: перечень шага и, по входу, архив находок."""
+    return (*PUBLISHES, ARCHIVE) if archive else PUBLISHES
+
+
+def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> bool:
+    """Кладёт `source` и его соседей по `targets` и толкает; ``False`` — изменений нет.
 
     `source` — собранный `facts.json`, первая запись перечня; остальные файлы
     берутся РЯДОМ с ним по имени. Сам `source` по имени не ищется: иначе
@@ -114,7 +123,7 @@ def publish(source: Path, workdir: Path, *, sha: str) -> bool:
     # СБОЙ ДИСКА И ОТСУТСТВИЕ ФАКТОВ — ТОЖЕ «НЕ ОПУБЛИКОВАНО», а не трейсбек с
     # кодом 1: шапка обещает исходы 0 и 2 и `::error::` (039, взгляд на #1233).
     try:
-        for target in PUBLISHES:
+        for target in targets(archive=archive):
             (workdir / target).parent.mkdir(parents=True, exist_ok=True)
             given = source if target == PUBLISHES[0] else source.parent / Path(target).name
             shutil.copyfile(given, workdir / target)
@@ -129,7 +138,7 @@ def publish(source: Path, workdir: Path, *, sha: str) -> bool:
             raise NotPublished(f"подпись публикации не записана ({key}): {reason(signed)}")
     # КАЖДЫЙ ВЫЗОВ GIT ВЕДЁТ СВОЮ ПРИЧИНУ ОДНОЙ ФОРМОЙ — `reason`. `diff --quiet`
     # отвечает 0 «нечего» и 1 «есть»; иной код — отказ git, а не «есть изменения».
-    added = git("add", "--", *PUBLISHES, cwd=workdir)
+    added = git("add", "--", *targets(archive=archive), cwd=workdir)
     if added.returncode != 0:
         raise NotPublished(f"git add отказал: {reason(added)}")
     staged = git("diff", "--cached", "--quiet", cwd=workdir)
@@ -155,16 +164,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workdir", type=Path, required=True, help="где поднять дерево ветки")
     parser.add_argument("--sha", required=True, help="голова, на которой собраны факты")
     parser.add_argument("--repo", required=True, help="имя проекта у площадки: владелец/репо")
+    parser.add_argument(
+        "--archive", action="store_true", help="положить и архив находок рядом с фактами"
+    )
     args = parser.parse_args(argv)
     try:
-        changed = publish(args.source, args.workdir, sha=args.sha)
+        changed = publish(args.source, args.workdir, sha=args.sha, archive=args.archive)
     except NotPublished as exc:
         print(f"::error::факты не опубликованы: {exc}")
         return EXIT_BROKEN
     if not changed:
         print("факты не изменились — коммита нет")
         return EXIT_OK
-    for target in PUBLISHES:
+    for target in targets(archive=args.archive):
         print(f"опубликовано: https://raw.githubusercontent.com/{args.repo}/{BRANCH}/{target}")
     return EXIT_OK
 
