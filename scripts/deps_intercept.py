@@ -215,6 +215,18 @@ def git(root: Path, *args: str) -> str:
     return gitcall.output(args, NotRun, cwd=str(root))
 
 
+def switch_clean(root: Path, branch: str) -> None:
+    """Режет ветку от общей, если в дереве нечего стереть; иначе — отказ.
+
+    `checkout --force -B` молча сносит незакоммиченные правки. Оба захода,
+    режущих ветку, — перехват и подъём своих шагов — идут и на машине человека,
+    поэтому проверка у них одна, а не у каждого своя (`7f52cb1`, правило 195).
+    """
+    if git(root, "status", "--porcelain").strip():
+        raise NotRun("в дереве незакоммиченные правки — заход переключает ветку и стёр бы их")
+    git(root, "checkout", "--quiet", "--force", "-B", branch, f"origin/{paths.TRUNK}")
+
+
 def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -> str:
     """Один перехват: подъём веткой `agent/` и закрытие изменения бота. Отдаёт ветку."""
     tag, sha = resolve(bump.dep, bump.new, token)
@@ -226,7 +238,7 @@ def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -
         # на машине человека смена ветки была бы правкой, которой не просили.
         if not dry_run:
             git(root, "fetch", "--quiet", "origin", paths.TRUNK)
-            git(root, "checkout", "--quiet", "--force", "-B", branch, f"origin/{paths.TRUNK}")
+            switch_clean(root, branch)
         planned = plan(root, bump.dep, tag, sha)
         if not planned:
             raise Refused(
@@ -334,9 +346,7 @@ def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
         if not calls_itself(root, repo):
             print(f"своих шагов по тегу общая ветка не зовёт — поднимать до {tag} нечего")
             return ""
-        if git(root, "status", "--porcelain").strip():
-            raise NotRun("в дереве незакоммиченные правки — заход переключает ветку и стёр бы их")
-        git(root, "checkout", "--quiet", "--force", "-B", branch, f"origin/{paths.TRUNK}")
+        switch_clean(root, branch)
     planned = plan(root, repo, tag, sha)
     if not planned:
         print(f"своих шагов по тегу дерево не зовёт — поднимать до {tag} нечего")

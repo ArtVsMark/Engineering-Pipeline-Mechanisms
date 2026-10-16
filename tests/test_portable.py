@@ -901,3 +901,23 @@ def test_the_consumer_tree_is_told(said: str, answer: str, has: bool) -> None:
         "scripts/work_plan.py": {"answer": answer},
     }
     assert consumer_has(said, answers) is has
+
+
+def test_a_flow_the_kit_is_cut_from_is_answered_configured() -> None:
+    """Прогон, из которого `onboard` режет заготовку, отвечает `configured`, а не `ours`.
+
+    Его форма уходит потребителю: события, права, очередь и джоб вызова. Ответ
+    `ours` у такого прогона говорил «только этого проекта», а `why` рядом —
+    обратное (находки `b6fa690` и `d87c6d1` на #1415). Связь держалась прозой;
+    теперь её держит сверка с `onboard.own_callers` — тем, что заготовка режет.
+    """
+    onboard = load_script("onboard.py")
+    callers = onboard.own_callers(ROOT, onboard.steps(ROOT))
+    assert callers, "заготовка не режет ни одного прогона — сверять нечего (075)"
+    answers = inventory()["answers"]
+    wrong = sorted(
+        f"{flow.name}: {answers.get(f'.github/workflows/{flow.name}', {}).get('answer')}"
+        for flow in callers.values()
+        if answers.get(f".github/workflows/{flow.name}", {}).get("answer") != "configured"
+    )
+    assert not wrong, f"заготовка режется из прогона, а ответ не `configured`: {wrong}"

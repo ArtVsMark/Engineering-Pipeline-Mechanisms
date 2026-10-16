@@ -205,6 +205,7 @@ jobs:
           python $MECHANISMS/scripts/release.py "${args[@]}"
 
       - name: выпустить
+        id: release
         if: inputs.apply && steps.token.outputs.present == 'yes'
         env:
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
@@ -302,8 +303,15 @@ jobs:
       # шагов по тегу нет, и шаг отвечает «поднимать нечего» — это не отказ.
       # Отказ здесь выпуска НЕ отменяет: тег уже уехал, и он говорит, как
       # довести подъём отдельным заходом.
+      #
+      # ДЕРЖИТСЯ ИСХОДОМ ВЫПУСКА, А НЕ СОСЕДА: упавшая страница выпуска не
+      # отменяет подъёма. Без `!cancelled()` красная страница молча снимала
+      # шаг, и проба оставалась на старом теге без единого слова (`62bbf7d`).
       - name: поднять свои шаги до выпуска
-        if: inputs.apply && steps.token.outputs.present == 'yes'
+        if: >-
+          !cancelled() &&
+          inputs.apply && steps.token.outputs.present == 'yes' &&
+          steps.release.outcome == 'success'
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           ASKED_VERSION: ${{ inputs.version }}
