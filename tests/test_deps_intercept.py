@@ -337,3 +337,16 @@ def test_signals_are_only_the_bot_changes(monkeypatch: pytest.MonkeyPatch) -> No
     ]
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter(changes))
     assert [one["number"] for one in module.signals("o/r", "t")] == [1]
+
+
+def test_an_unresolved_signal_reddens_the_run() -> None:
+    """Исход «сигнал не разобран» краснит прогон: так обещает `.pipeline.yml` дежурному.
+
+    Зелёный прогон с предупреждением прятал сигнал в списке прогонов (находка
+    `22ae144` на #1397). Проверяется ветвь `1)` разбора кодов в шаге прогона:
+    она пишет ошибку и выходит не нулём.
+    """
+    run = (ROOT / ".github" / "workflows" / "deps-intercept.yml").read_text(encoding="utf-8")
+    branch = run.split('case "$rc" in', 1)[1].split(";;", 2)[1]
+    assert branch.strip().startswith("1)"), f"ветви кода 1 нет на своём месте: {branch!r}"
+    assert "::error::" in branch and "exit 1" in branch, f"код 1 не краснит прогон: {branch!r}"
