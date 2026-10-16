@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-15T09:00:58+00:00",
+  "updated": "2026-10-16T08:52:39+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -5442,77 +5442,330 @@
     "2026-10-15": {
       "runs": {
         "verify-queue": {
-          "runs": 85,
-          "red": 0,
-          "cancelled": 1,
-          "seconds": 1663,
-          "timed": 85,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "hail": {
-          "runs": 84,
-          "red": 0,
-          "cancelled": 8,
-          "seconds": 1974,
-          "timed": 84,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "stuck": {
-          "runs": 83,
-          "red": 0,
-          "cancelled": 7,
-          "seconds": 2155,
-          "timed": 83,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "schedules-seen": {
-          "runs": 83,
+          "runs": 28,
           "red": 0,
           "cancelled": 0,
-          "seconds": 306,
-          "timed": 83,
+          "seconds": 495,
+          "timed": 28,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "ci-complete-wake": {
-          "runs": 83,
+        "claude": {
+          "runs": 8,
           "red": 0,
-          "cancelled": 1,
-          "seconds": 590,
-          "timed": 83,
+          "cancelled": 0,
+          "seconds": 26,
+          "timed": 8,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "main-red": {
-          "runs": 108,
+          "runs": 36,
           "red": 0,
-          "cancelled": 13,
-          "seconds": 2032,
-          "timed": 108,
+          "cancelled": 2,
+          "seconds": 811,
+          "timed": 36,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 27,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 108,
+          "timed": 27,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 25,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 177,
+          "timed": 25,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 25,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 568,
+          "timed": 25,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 25,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 508,
+          "timed": 25,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 25,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 907,
+          "timed": 25,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "automerge": {
-          "runs": 166,
+          "runs": 49,
+          "red": 0,
+          "cancelled": 17,
+          "seconds": 1056,
+          "timed": 49,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 24,
+          "red": 0,
+          "cancelled": 13,
+          "seconds": 4727,
+          "timed": 24,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 22,
+          "red": 0,
+          "cancelled": 16,
+          "seconds": 4086,
+          "timed": 22,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ на обращение — общим шагом, а не копией (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1496,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 94,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 297,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 6,
           "red": 1,
-          "cancelled": 78,
-          "seconds": 3520,
-          "timed": 166,
+          "cancelled": 2,
+          "seconds": 2209,
+          "timed": 6,
+          "red_jobs": {
+            "facts / facts": 1
+          },
+          "red_steps": {
+            "facts / facts · опубликовать факты коммитом поверх ветки badges": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "attribution-history": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 31,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 36,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 57,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ на обращение — общим шагом, а не копией": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1910,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Абзац о строках без номера называет обе (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1996,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ряд прогонов — общим шагом, а не копией (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 888,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 93.2
+    },
+    "2026-10-16": {
+      "runs": {
+        "main-red": {
+          "runs": 75,
+          "red": 0,
+          "cancelled": 2,
+          "seconds": 1498,
+          "timed": 75,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 55,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1213,
+          "timed": 55,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 55,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 437,
+          "timed": 55,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 55,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 234,
+          "timed": 55,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 57,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 1303,
+          "timed": 57,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 55,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 1453,
+          "timed": 55,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 55,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 2368,
+          "timed": 55,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 110,
+          "red": 1,
+          "cancelled": 48,
+          "seconds": 2773,
+          "timed": 110,
           "red_jobs": {
             "automerge / automerge": 1
           },
@@ -5524,44 +5777,55 @@
             "свой": 1
           }
         },
-        "work-plan": {
-          "runs": 85,
-          "red": 0,
-          "cancelled": 11,
-          "seconds": 3377,
-          "timed": 85,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
         "ci-complete": {
-          "runs": 76,
+          "runs": 50,
           "red": 0,
-          "cancelled": 58,
-          "seconds": 9590,
-          "timed": 76,
+          "cancelled": 39,
+          "seconds": 6194,
+          "timed": 50,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "ci": {
-          "runs": 80,
+          "runs": 54,
           "red": 0,
-          "cancelled": 52,
-          "seconds": 10589,
-          "timed": 80,
+          "cancelled": 36,
+          "seconds": 7267,
+          "timed": 54,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "agent-pr": {
-          "runs": 12,
+          "runs": 8,
           "red": 0,
           "cancelled": 0,
-          "seconds": 247,
+          "seconds": 184,
+          "timed": 8,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 502,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 4731,
           "timed": 12,
           "red_jobs": {},
           "red_steps": {},
@@ -5569,43 +5833,32 @@
           "red_whose": {}
         },
         "claude": {
-          "runs": 9,
+          "runs": 16,
           "red": 0,
           "cancelled": 0,
-          "seconds": 18,
-          "timed": 9,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "review": {
-          "runs": 5,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 1124,
-          "timed": 5,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "badges": {
-          "runs": 15,
-          "red": 0,
-          "cancelled": 5,
-          "seconds": 5050,
-          "timed": 15,
+          "seconds": 33,
+          "timed": 16,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "attribution-history": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 54,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
           "runs": 5,
           "red": 0,
           "cancelled": 0,
-          "seconds": 70,
+          "seconds": 155,
           "timed": 5,
           "red_jobs": {},
           "red_steps": {},
@@ -5613,50 +5866,61 @@
           "red_whose": {}
         },
         "python-next": {
-          "runs": 5,
+          "runs": 4,
           "red": 0,
           "cancelled": 0,
-          "seconds": 70,
-          "timed": 5,
+          "seconds": 128,
+          "timed": 4,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "task-items": {
-          "runs": 6,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 145,
-          "timed": 6,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Пустота замера меряется стеком, а не рекурсией; тест предела сверяет номера (+1)": {
+        "Выпуск — общим шагом, а не копией (+1)": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 55,
+          "seconds": 1332,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Дрейф читает дату и кандидата вердикта по данным, ячейка без сборки названа (+1)": {
+        "Значки поставщика — свои: ответ ours, а не копия": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2379,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Выпуск — общим шагом, а не копией": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 3490,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "release": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 1650,
+          "seconds": 23,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Инцидент о ключе дорогого прогона называет ключ точно: без строк @@ целиком (+1)": {
+        "github_actions in /. - Update #1630741953": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
@@ -5667,55 +5931,22 @@
           "red_marks": {},
           "red_whose": {}
         },
-        "Пустота замера меряется стеком, а не рекурсией; тест предела сверяет номера": {
-          "runs": 2,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 2999,
-          "timed": 2,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Инцидент о ключе дорогого прогона называет ключ точно: без строк @@ целиком": {
-          "runs": 2,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 3505,
-          "timed": 2,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Граница «в задании нет адреса проекта» держится тестом, комментарии названы (+1)": {
+        "Без ключа шаг ответа не берёт дерево вызывающего": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 51,
+          "seconds": 2054,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Граница «в задании нет адреса проекта» держится тестом, комментарии названы": {
+        "Ответ на обращение — общим шагом, а не копией (+2)": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 1526,
-          "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Предикаты неприменимости не зависят от локали, полнота проб держится тестом (+1)": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 47,
+          "seconds": 957,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
@@ -5723,7 +5954,7 @@
           "red_whose": {}
         }
       },
-      "coverage": 93.2
+      "coverage": 93.4
     }
   }
 }
