@@ -311,10 +311,13 @@ def test_without_the_archive_input_a_foreign_archive_lives(stand: dict[str, Path
     ]
 
 
-def test_an_asked_archive_that_is_missing_publishes_nothing(stand: dict[str, Path]) -> None:
-    """Вход есть, а архива рядом нет — отказ, а не публикация без него (045)."""
-    with pytest.raises(module.NotPublished, match="не положены"):
-        module.publish(stand["source"], stand["tmp"] / "w1", sha="abc", archive=True)
+def test_a_missing_archive_does_not_hold_the_facts(
+    stand: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вход есть, а архива нет — факты публикуются, пропуск архива назван (взгляд на #1423)."""
+    assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc", archive=True)
+    assert on_branch(stand["remote"], PUBLISHED_PATH) == '{"a": 1}\n'
+    assert "findings.json" in capsys.readouterr().out
 
 
 def test_our_badges_run_asks_the_shared_step_for_the_archive() -> None:
