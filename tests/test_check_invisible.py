@@ -39,6 +39,17 @@ def tree(root: Path, files: dict[str, str]) -> Path:
         "\u034f",
         "\ufe0f\ufe0f",
         "\U000e0100",
+        "\u2800",
+        "\u2028",
+        "\u2029",
+        "\U0001f3f4\U000e0067\U000e0062",
+        "\U0001f3f4\U000e0069\U000e0067\U000e006e\U000e006f\U000e0072\U000e0065\U000e007f",
+        "\x85",
+        "\x0b",
+        "\x0c",
+        "\x1c",
+        "\u17b4",
+        "\u180b",
     ],
     ids=[
         "zwsp",
@@ -54,6 +65,17 @@ def tree(root: Path, files: dict[str, str]) -> Path:
         "cgj",
         "selectors",
         "selector-after-letter",
+        "braille-blank",
+        "line-separator",
+        "paragraph-separator",
+        "flag-without-cancel",
+        "flag-with-any-string",
+        "nel",
+        "vertical-tab",
+        "form-feed",
+        "file-separator",
+        "khmer-inherent",
+        "mongolian-selector-after-letter",
     ],
 )
 def test_each_class_is_rejected(run_script: RunScript, tmp_path: Path, char: str) -> None:
@@ -72,6 +94,7 @@ def test_legal_forms_pass(run_script: RunScript, tmp_path: Path) -> None:
             "a.md": "\ufeffзаголовок — «кавычки» и ё\n",
             "b.md": "## 🧑\u200d💻 окно\n## ⚠\ufe0f внимание\n🐈\u200d\u2b1b кот\n",
             "c.md": "1\ufe0f\u20e3 шаг · \u845b\U000e0100 иероглиф\n",
+            "d.md": "флаг \U0001f3f4\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f\n",
         },
     )
     result = run_script("check_invisible.py", cwd=tmp_path)
@@ -129,3 +152,36 @@ def test_varied_names_the_bases_of_a_variation() -> None:
     """Вариант бывает у эмодзи, у знаков `VARIED` и у иероглифа, но не у буквы и не у селектора."""
     assert module.varied(chr(0x26A0)) and module.varied("1") and module.varied(chr(0x845B))
     assert not module.varied("а") and not module.varied(chr(0xFE0F))
+
+
+def test_flag_tags_are_legal_only_inside_a_whole_flag() -> None:
+    """Теги законны между чёрным флагом и завершающим тегом — и нигде больше (`78f3abb`)."""
+    england = "\U0001f3f4\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f"
+    assert module.flag_tags(england) == set(range(1, len(england)))
+    assert not module.hidden(f"а {england} б")
+    assert module.flag_tags("\U0001f3f4\U000e0067") == set(), "оборвана — законна"
+    assert module.flag_tags("\U0001f3f4\U000e007f") == set(), "один завершающий — законен"
+    assert module.hidden("а\U000e0067\U000e007f"), "теги без основы не покраснели"
+
+
+def test_line_and_paragraph_separators_are_named() -> None:
+    """Разделители строки и абзаца краснеют со своей причиной, а не именем формата (`36f8b72`)."""
+    assert "разделитель строки" in module.hidden("а\u2028б")[0][2]
+    assert "разделитель абзаца" in module.hidden("а\u2029б")[0][2]
+    assert "пустотой" in module.always("\u2800")
+
+
+def test_every_rgi_tag_flag_is_legal_and_nothing_else() -> None:
+    """Законны ровно три флага с тегами — Англия, Шотландия, Уэльс (взгляд на #1444)."""
+    for name in ("gbeng", "gbsct", "gbwls"):
+        tags = "".join(chr(0xE0000 + ord(one)) for one in name)
+        assert not module.hidden(f"\U0001f3f4{tags}\U000e007f"), name
+    hidden_text = "".join(chr(0xE0000 + ord(one)) for one in "ignore all")
+    assert module.hidden(f"\U0001f3f4{hidden_text}\U000e007f"), "строка тегами прошла как флаг"
+
+
+def test_plain_controls_and_mongolian_variants_pass() -> None:
+    """Табуляция, CRLF и один свободный селектор после монгольской буквы — законны."""
+    assert not module.hidden("а\tб\r\nв")
+    assert not module.hidden("\u1820\u180b")
+    assert module.hidden("\u1820\u180b\u180b"), "два селектора подряд прошли"

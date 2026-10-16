@@ -48,9 +48,15 @@ def test_an_empty_registry_is_a_state_not_a_refusal(tmp_path: Path) -> None:
     """Подключённых нет — состояние, а не отказ и не тишина (154).
 
     Отказ здесь означал бы «проект обязан иметь потребителей», а тишина —
-    «все на свежей версии», чего никто не проверял.
+    «все на свежей версии», чего никто не проверял. Пустота — состояние, только
+    когда обход семьи прочитан целиком; без него молча подключённые не видны, и
+    это третий исход, а не «никого» (взгляд на #1443).
     """
-    assert module.main(["--root", str(registry_with(tmp_path))]) == module.EXIT_OK
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(json.dumps({"by": [], "projects": {"unread_repos": []}}), encoding="utf-8")
+    root = registry_with(tmp_path)
+    assert module.main(["--root", str(root), "--uptake", str(uptake)]) == module.EXIT_OK
+    assert module.main(["--root", str(root)]) == module.EXIT_UNREAD
 
 
 def test_a_row_must_name_itself(tmp_path: Path) -> None:
@@ -152,3 +158,64 @@ def test_the_entry_is_parsed_by_the_owner_of_the_form() -> None:
     assert policy.entry_of({"class": "off", "why": "своё"}) == (policy.OFF, "своё", "")
     assert policy.entry_of(False) == (policy.OFF, "", "")
     assert policy.entry_of("required") == (policy.REQUIRED, "", "")
+
+
+def test_a_project_found_by_the_sweep_is_connected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Подключённый молча виден из обхода семьи и спрашивается так же (#1389)."""
+    root = registry_with(tmp_path)
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(json.dumps({"by": [{"repo": "o/тихий"}]}), encoding="utf-8")
+    answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
+    assert module.main(["--root", str(root), "--uptake", str(uptake)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "o/тихий: найден обходом семьи" in out and "o/тихий: диапазон" in out
+
+
+def test_a_sweep_file_of_another_shape_does_not_run(tmp_path: Path) -> None:
+    """Файл не той формы — отказ, а не «никто не взял» (045)."""
+    root = registry_with(tmp_path)
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(json.dumps({"projects": {}}), encoding="utf-8")
+    assert module.main(["--root", str(root), "--uptake", str(uptake)]) == module.EXIT_BROKEN
+    with pytest.raises(module.NotRun):
+        module.swept(uptake.with_name("нет.json"))
+
+
+def test_the_sweep_names_whom_it_did_not_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Непрочитанные обходом названы, и заход не выдаёт часть семьи за всю (045)."""
+    root = registry_with(tmp_path)
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(
+        json.dumps({"by": [], "projects": {"unread_repos": ["o/закрытый"]}}), encoding="utf-8"
+    )
+    assert module.swept(uptake) == ([], ["o/закрытый"])
+    answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
+    assert module.main(["--root", str(root), "--uptake", str(uptake)]) == module.EXIT_UNREAD
+    assert "o/закрытый: обход семьи его дерево не прочитал" in capsys.readouterr().out
+
+
+def test_a_declared_project_is_not_found_twice_in_another_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Регистр имени не значим: объявленный не становится «найденным обходом» вторично."""
+    row = {"repo": "Owner/Repo", "since": "2026-09-19", "why": "берёт линтер"}
+    root = registry_with(tmp_path, row)
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(json.dumps({"by": [{"repo": "OWNER/REPO"}]}), encoding="utf-8")
+    answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
+    assert module.main(["--root", str(root), "--uptake", str(uptake)]) == module.EXIT_OK
+    assert "найден обходом семьи" not in capsys.readouterr().out
+
+
+def test_without_a_sweep_the_silent_are_named_unseen(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Обход не передан — сказано, что молча подключённых не видно, и пустота не «никого»."""
+    assert module.main(["--root", str(registry_with(tmp_path))]) == module.EXIT_UNREAD
+    out = capsys.readouterr().out
+    assert "молча подключённые НЕ ВИДНЫ" in out
+    assert "среди тех, кого видно" in out and "это состояние" not in out
