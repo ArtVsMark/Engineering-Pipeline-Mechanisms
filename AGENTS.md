@@ -175,6 +175,10 @@ Refs #25
 чек-листа закрывается свободно: там один этап, и список был бы ритуалом
 ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 
+**Изменение, закрывающее последние пункты, несёт `Closes`, а не `Refs`** —
+иначе задача висит открытой при сделанной работе. Когда это сверять — навык
+`work-the-plan`, шаг 4; пропущенное ловит механизм после слияния (#1412).
+
 Трекер — единственный источник статусов. В файлы дерева он не дублируется, и
 **журнала работ в действующих документах нет**
 ([024](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/024-no-worklog-in-active-docs.md)):
