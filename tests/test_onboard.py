@@ -1073,3 +1073,150 @@ def test_a_summary_flow_without_its_call_is_not_guessed(tmp_path: Path) -> None:
     (flows / module.SUMMARY_FLOW).write_text("jobs: {}\n", encoding="utf-8")
     with pytest.raises(module.NotRun):
         module.summary_kit(tmp_path, "o/r", "v1")
+
+
+# --- обновление (#1386) --------------------------------------------------------
+
+
+def released(root: Path, tag: str, **runs: str) -> None:
+    """Следующий выпуск поставщика: прогоны меняются, коммит помечается тегом."""
+    for name, body in runs.items():
+        (root / ".github" / "workflows" / f"{name}.yml").write_text(body, encoding="utf-8")
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "add", "-A"], check=True, capture_output=True)
+    subprocess.run([*run, "commit", "--quiet", "-m", tag], check=True)
+    subprocess.run([*run, "tag", tag], check=True)
+
+
+def connected(tmp_path: Path) -> tuple[Path, Path]:
+    """Поставщик с шагом конвейера и управляющим механизмом и потребитель на v2.5.0."""
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
+    )
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    return root, consumer
+
+
+#: Следующий выпуск меняет вызывающий: у механизма появилось событие.
+OWN_CALLER_NEXT = OWN_CALLER.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  push:\n")
+
+
+def test_update_lifts_ours_and_keeps_the_projects_own(tmp_path: Path) -> None:
+    """Наше переписано на новый выпуск, `.pipeline.yml` проекта не тронут ни байтом."""
+    root, consumer = connected(tmp_path)
+    answer = (consumer / ".pipeline.yml").read_bytes()
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    flows = consumer / ".github" / "workflows"
+    plan = (flows / "план.yml").read_text("utf-8")
+    assert "step-план.yml@v2.6.0" in plan and "push" in plan
+    assert "step-пример.yml@v2.6.0" in (flows / "ci.yml").read_text("utf-8")
+    assert "/.github/actions/ci-complete@v2.6.0" in (flows / "ci-complete.yml").read_text("utf-8")
+    assert (consumer / ".pipeline.yml").read_bytes() == answer
+
+
+def test_update_ignores_the_form_and_reads_the_substance(tmp_path: Path) -> None:
+    """Комментарий и порядок ключей — форма записи: файл остаётся нашим и обновляется."""
+    root, consumer = connected(tmp_path)
+    flow = consumer / ".github" / "workflows" / "план.yml"
+    flow.write_text("# свой комментарий\n" + flow.read_text("utf-8"), encoding="utf-8")
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    assert "step-план.yml@v2.6.0" in flow.read_text("utf-8")
+
+
+def test_a_hand_edit_of_ours_refuses_the_whole_update(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Правка по существу — исход 7, не записан ни один файл, разница — поставщику."""
+    root, consumer = connected(tmp_path)
+    flows = consumer / ".github" / "workflows"
+    plan = flows / "план.yml"
+    plan.write_text(
+        plan.read_text("utf-8").replace("  workflow_dispatch:", "  schedule:\n  - cron: 0 1 * * *"),
+        encoding="utf-8",
+    )
+    before = {one.name: one.read_bytes() for one in flows.iterdir()}
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    code = module.main(["--root", str(root), "--update", str(consumer)])
+    assert code == module.EXIT_HAND_EDITED
+    assert {one.name: one.read_bytes() for one in flows.iterdir()} == before
+    said = capsys.readouterr().err
+    assert "schedule" in said and str(module.paths.GAP_TEMPLATE) in said
+
+
+def test_an_own_copy_is_named_and_left_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Своя копия под нашим именем, не зовущая наш шаг, не трогается, а называется."""
+    root, consumer = connected(tmp_path)
+    copy = consumer / ".github" / "workflows" / "план.yml"
+    copy.write_text("name: план\non: push\njobs:\n  свой:\n    steps: []\n", encoding="utf-8")
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    assert "свой:" in copy.read_text("utf-8")
+    assert "своя копия" in capsys.readouterr().out
+
+
+def test_a_new_pipeline_step_is_printed_not_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Новый шаг выпуска — готовым джобом в выводе; `ci.yml` проекта им не дописывается."""
+    root, consumer = connected(tmp_path)
+    second = MARKED.replace("step-пример", "step-второй")
+    released(
+        root,
+        "v2.6.0",
+        **{
+            "step-второй": second,
+            "ci": CI_CALLER + "  второй:\n    uses: ./.github/workflows/step-второй.yml\n",
+        },
+    )
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "новый шаг `второй`" in out and "step-второй.yml@v2.6.0" in out
+    assert "второй" not in (consumer / ".github" / "workflows" / "ci.yml").read_text("utf-8")
+    assert module.check_name("второй") in out
+
+
+def test_update_and_write_are_two_doors(tmp_path: Path) -> None:
+    """Первое подключение и обновление в одном заходе — ошибка вызова, а не выбор одного."""
+    with pytest.raises(SystemExit):
+        module.main(["--write", str(tmp_path), "--update", str(tmp_path)])
+
+
+def test_essence_reads_events_in_every_form() -> None:
+    """Событие строкой, списком и словарём — одно существо."""
+    forms = ["on: push\n", "on: [push]\n", "on:\n  push:\n"]
+    said = [module.essence(one + "jobs: {}\n", "o/r", Path("x.yml"))["on"] for one in forms]
+    assert said[0] == said[1] == said[2] == {"push": None}
+
+
+def test_calls_of_reads_job_and_step_calls_without_the_tag() -> None:
+    """Вызов шага джобом и действия шагом — оба без тега, чужой адрес не в счёт."""
+    document = {
+        "jobs": {
+            "a": {"uses": "o/r/.github/workflows/step-x.yml@v1.0.0", "with": {"k": 1}},
+            "b": {"steps": [{"uses": "o/r/.github/actions/y@v1.0.0"}, {"uses": "other/z@v1"}]},
+        }
+    }
+    said = module.calls_of(document, "o/r")
+    assert {one["uses"] for one in said} == {
+        "o/r/.github/actions/y",
+        "o/r/.github/workflows/step-x.yml",
+    }
+    assert module.new_tag("uses: o/r/.github/workflows/step-x.yml@v1.0.0", "o/r") == "v1.0.0"
+
+
+def test_a_tag_the_supplier_does_not_have_does_not_run(tmp_path: Path) -> None:
+    """Файл прибит к тегу, которого у поставщика нет, — «не отработал», а не «правлен»."""
+    root, consumer = connected(tmp_path)
+    plan = consumer / ".github" / "workflows" / "план.yml"
+    plan.write_text(
+        plan.read_text("utf-8").replace("@v2.5.0", "@v9.9.9").replace("workflow_dispatch", "push"),
+        encoding="utf-8",
+    )
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_BROKEN
