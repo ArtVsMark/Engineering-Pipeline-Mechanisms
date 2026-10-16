@@ -198,23 +198,6 @@ def test_a_snapshot_without_a_date_says_so() -> None:
 # --- значки --------------------------------------------------------------
 
 
-def test_the_project_badge_counts_machines_not_answers() -> None:
-    """Значок считает правила, держащиеся МАШИНОЙ, а не отвеченные.
-
-    Прежняя редакция показывала `answered/total` и подписывала это «правил
-    держится». Число было `195/195` и не могло стать другим: проект отвечает по
-    каждому правилу каталога по построению (129). Значок, который не движется,
-    ничего не говорит ни о том, где проект стоит, ни о том, что он сдвинулся.
-    """
-    zones = facts.project_zones(
-        {"rules": {"by_mechanism": {"gate": 10, "pipeline": 2, "document": 8, "none": 1}}}
-    )
-    assert zones[0][1][0] == "машиной 12/21 · 57%"
-
-
-RULES_PLANTED: Final = {"by_mechanism": {"gate": 60, "pipeline": 6, "document": 129}}
-
-
 ORIGINS_PLANTED: Final = {
     "pairs": 22,
     "taken": 4,
@@ -222,237 +205,73 @@ ORIGINS_PLANTED: Final = {
     "undeclared": 0,
     "projects": {"took": 3, "of": 5},
 }
-UNREAD_FAMILY: Final = [
-    "семья",
-    "проектов не прочитано",
-    "взяты не прочитано",
-    "переделаны не прочитано",
-]
 
 
-@pytest.mark.parametrize(
-    ("family_said", "texts"),
-    [
-        (
-            {"read": True, "origins": ORIGINS_PLANTED, "uptake": {"read": False}},
-            [
-                ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов 3/5 · 60%", "взяты 4", "переделаны 18"],
-            ],
-        ),
-        (
-            {"read": True, "origins": {**ORIGINS_PLANTED, "undeclared": 2}},
-            [
-                ["правила", "машиной 66/195 · 34%"],
-                ["семья", "проектов 3/5 · 60%", "взяты 4", "переделаны 18", "не объявлено 2"],
-            ],
-        ),
-        (
-            {"read": False, "why": "сеть", "uptake": {"read": True}},
-            [["правила", "машиной 66/195 · 34%"], UNREAD_FAMILY],
-        ),
-        (
-            {"read": True},
-            [["правила", "машиной 66/195 · 34%"], UNREAD_FAMILY],
-        ),
-        (
-            {},
-            [["правила", "машиной 66/195 · 34%"], UNREAD_FAMILY],
-        ),
-    ],
-    ids=["прочитано", "не-объявлено", "сводка-не-прочитана", "отчёта-нет", "семьи-нет"],
-)
-def test_the_project_badge_counts_the_family_by_origin(
-    family_said: dict[str, Any], texts: list[list[str]]
-) -> None:
-    """Зона «семья» — по отчёту о происхождении, а не по вызову по тегу (#1325).
+def test_the_shared_step_lays_the_badge_inputs_from_consumer_facts(tmp_path: Path) -> None:
+    """Режим `--endpoints-out` кладёт покрытие и версию — входы значка каталога (#1422).
 
-    Обход клонов прочитан или нет — на значок не влияет: вызов шагов по тегу
-    остаётся в фактах. Непрочитанная сводка и пары без `origin_kind` —
-    «не прочитано» и «не объявлено» серым, а не ноль (045).
-    """
-    zones = facts.project_zones({"rules": RULES_PLANTED, "family": family_said})
-    assert [[text for text, _, _ in zone] for zone in zones] == texts
-    # Серым — всякая часть, где доля неизвестна: числа нет или часть
-    # знаменателя не прочитана (взгляд на #1259).
-    unknown = [
-        color
-        for zone in zones
-        for text, color, _ in zone
-        if "не прочитано" in text or "не объявлено" in text
-    ]
-    assert all(color == facts.GREY for color in unknown), "незнание окрашено не серым"
-
-
-@pytest.mark.parametrize(
-    ("rules", "texts", "grey"),
-    [
-        (
-            {**RULES_PLANTED, "machine": {"own": 48, "taken": 12, "elsewhere": 6}},
-            ["механизмы", "свои 48", "взяты 12 · 18%"],
-            False,
-        ),
-        (
-            {**RULES_PLANTED, "machine": {"own": 0, "taken": 0, "elsewhere": 0}},
-            ["механизмы", "свои 0", "взяты 0 · —"],
-            True,
-        ),
-        (
-            RULES_PLANTED,
-            ["механизмы", "свои не прочитано", "взяты не прочитано"],
-            True,
-        ),
-        (
-            {**RULES_PLANTED, "machine": {"read": False, "why": "поставщик не назван"}},
-            ["механизмы", "свои не прочитано", "взяты не прочитано"],
-            True,
-        ),
-        (
-            {"read": False, "why": "нет ответа каталогу"},
-            ["механизмы", "свои не прочитано", "взяты не прочитано"],
-            True,
-        ),
-    ],
-    ids=["прочитано", "машинных-нет", "факты-до-разбивки", "поставщик-не-назван", "ответа-нет"],
-)
-def test_the_consumer_badge_counts_own_and_taken_mechanisms(
-    rules: dict[str, Any], texts: list[str], grey: bool
-) -> None:
-    """Без раздела `family` значок — потребителя: вторая зона «механизмы» (#1282).
-
-    Доля взятых — среди всех машинных, включая взятые у других (`elsewhere`):
-    12 из 66, а не из 60. Незнание — серое «не прочитано», а не ноль: ответа
-    нет, факты собраны до разбивки по происхождению или поставщик не назван (045).
-    """
-    rules_part, mechanisms = facts.project_zones({"rules": rules})
-    assert [text for text, _, _ in mechanisms] == texts
-    numbers = [color for _, color, _ in mechanisms[1:]]
-    assert all(color == facts.GREY for color in numbers) is grey
-    if rules.get("read") is False:
-        assert rules_part[1][:2] == ("машиной не прочитано", facts.GREY)
-    else:
-        assert rules_part[1][0] == "машиной 66/195 · 34%"
-
-
-def test_facts_without_a_rules_section_draw_unread() -> None:
-    """Раздела `rules` нет совсем — обе зоны серые, а не KeyError (взгляд на #1324).
-
-    Так выглядят факты потребителя, опубликованные до #1282 без своего `rules`:
-    `--from-facts` по ним обязан нарисовать «не прочитано», а не упасть (045).
-    """
-    rules_part, mechanisms = facts.project_zones({})
-    assert rules_part[1][:2] == ("машиной не прочитано", facts.GREY)
-    assert [text for text, _, _ in mechanisms] == [
-        "механизмы",
-        "свои не прочитано",
-        "взяты не прочитано",
-    ]
-    assert mechanisms[1][2] == "ответ каталогу не прочитан"
-
-
-def test_the_shared_step_draws_the_picture_from_consumer_facts(tmp_path: Path) -> None:
-    """Режим «только картинки» рисует значок по фактам без наших разделов (#1282).
-
-    У потребителя в фактах нет `family` и страниц: `--from-facts` упал бы на
-    них, а общему шагу нужен один `project.svg` — рядом с `facts.json`, плоско.
-    Непрочитанный файл — отказ с причиной, а не пустая картинка (045).
+    У потребителя в фактах нет наших разделов: оба значка читают общие
+    показатели, а полноту версии — из темы обмена `steps`. Непрочитанный файл
+    — отказ с причиной, а не пустой вход (045).
     """
     given = tmp_path / "facts.json"
     given.write_text(
-        json.dumps({"rules": {**RULES_PLANTED, "machine": {"own": 2, "taken": 1, "elsewhere": 0}}}),
+        json.dumps(
+            {
+                "version": "1.7.3",
+                "coverage_percent": 91.5,
+                "exchange": {"steps": {"schema": "1.0", "version_whole": True}},
+            }
+        ),
         encoding="utf-8",
     )
     out = tmp_path / "out"
-    assert facts.main(["--from-facts", str(given), "--pictures-out", str(out)]) == facts.EXIT_OK
-    assert sorted(path.name for path in out.iterdir()) == sorted(facts.PICTURES)
-    drawn = (out / "project.svg").read_text(encoding="utf-8")
-    assert "механизмы" in drawn and "свои 2" in drawn and "взяты 1" in drawn
-    missing = tmp_path / "нет.json"
-    assert facts.pictures_drawn(missing, str(out)) == facts.EXIT_BROKEN
+    assert facts.main(["--from-facts", str(given), "--endpoints-out", str(out)]) == facts.EXIT_OK
+    assert sorted(path.name for path in out.iterdir()) == sorted(facts.BADGES)
+    version = json.loads((out / "version.json").read_text(encoding="utf-8"))
+    coverage = json.loads((out / "coverage.json").read_text(encoding="utf-8"))
+    assert version["message"] == "1.7.3" and coverage["message"] == "91.5%"
+    assert facts.endpoints_drawn(tmp_path / "нет.json", str(out)) == facts.EXIT_BROKEN
 
 
-@pytest.mark.parametrize(
-    "rules",
-    [["список"], {"machine": {"own": "два"}}, {"machine": "ноль"}],
-    ids=["раздел-не-словарь", "число-не-число", "разбивка-не-словарь"],
-)
-def test_facts_of_a_wrong_shape_are_a_refusal_not_a_traceback(
-    tmp_path: Path, rules: object
+@pytest.mark.parametrize("said", ["[]", '{"coverage_percent": "много"}'], ids=["список", "строка"])
+def test_endpoint_facts_of_a_wrong_shape_are_a_refusal_not_a_traceback(
+    tmp_path: Path, said: str
 ) -> None:
-    """Факты не той формы — исход 2 с причиной, а не трейсбек с кодом 1 (`1edf07c`)."""
+    """Факты не объект или число не числом — исход 2 с причиной, а не трейсбек."""
     given = tmp_path / "facts.json"
-    given.write_text(json.dumps({"rules": rules}), encoding="utf-8")
-    assert facts.pictures_drawn(given, str(tmp_path / "out")) == facts.EXIT_BROKEN
+    given.write_text(said, encoding="utf-8")
+    assert facts.endpoints_drawn(given, str(tmp_path / "out")) == facts.EXIT_BROKEN
 
 
-@pytest.mark.parametrize(
-    "given",
-    [
-        {"rules": RULES_PLANTED, "exchange": []},
-        {"rules": RULES_PLANTED, "exchange": "тема"},
-        {"rules": RULES_PLANTED, "exchange": {"epm": {"schema": "1.0", "family": "ноль"}}},
-    ],
-    ids=["обмен-список", "обмен-строка", "тема-с-семьёй-не-словарём"],
-)
-def test_an_exchange_of_a_wrong_shape_is_a_refusal_not_a_traceback(
-    tmp_path: Path, given: dict[str, Any]
-) -> None:
-    """`exchange` и поднятые из него разделы не той формы — исход 2, а не трейсбек (#1345)."""
-    path = tmp_path / "facts.json"
-    path.write_text(json.dumps(given), encoding="utf-8")
-    assert facts.pictures_drawn(path, str(tmp_path / "out")) == facts.EXIT_BROKEN
+def test_endpoints_out_alone_is_a_refusal(tmp_path: Path) -> None:
+    """`--endpoints-out` без `--from-facts` — отказ, а не тихая полная сборка (`303d8f0`)."""
+    assert facts.main(["--endpoints-out", str(tmp_path)]) == facts.EXIT_BROKEN
 
 
-def test_a_bug_in_drawing_is_not_blamed_on_the_facts(
+def test_both_writers_lay_the_same_endpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Опечатка в рисовании — трейсбек, а не «факты не той формы» (взгляд на #1338)."""
-    assert facts.picture_input_wrong({"rules": {"machine": "ноль"}}) == "rules.machine не объект"
-    assert facts.picture_input_wrong({"rules": RULES_PLANTED}) is None
+    """Конечные точки кладут общий шаг и наша публикация — через одного писателя.
 
-    def broken(*_: object) -> None:
-        raise AttributeError("опечатка в коде рисования")
-
-    monkeypatch.setattr(facts, "draw_pictures", broken)
-    given = tmp_path / "facts.json"
-    given.write_text(json.dumps({"rules": RULES_PLANTED}), encoding="utf-8")
-    with pytest.raises(AttributeError):
-        facts.pictures_drawn(given, str(tmp_path / "out"))
-
-
-def test_pictures_out_alone_is_a_refusal(tmp_path: Path) -> None:
-    """`--pictures-out` без `--from-facts` — отказ, а не тихая полная сборка (`303d8f0`)."""
-    assert facts.main(["--pictures-out", str(tmp_path)]) == facts.EXIT_BROKEN
-    assert not any(tmp_path.iterdir()), "заход без фактов всё же что-то собрал"
-
-
-def test_both_writers_draw_the_same_picture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """У нас `project.svg` пишут общий шаг и `badges.yml` — через одного писателя.
-
-    Общий шаг рисует режимом «только картинки», `badges.yml` — полным
-    `--from-facts`. Разойдись они — значок мигал бы между двумя коммитами
-    одного прогона. Поэтому писатель один, `draw_pictures`, и проба держит,
-    что оба пути идут через него, а не через свою копию цикла (взгляд на #1327).
+    Иначе покрытие на значке проекта и в `coverage.json` ветки разошлись бы
+    при первой правке одного из двух циклов.
     """
     called: list[str] = []
-    monkeypatch.setattr(facts, "draw_pictures", lambda *_: called.append("picture"))
-    for inventory in ("BADGES", "PAGES", "MACHINE_READ"):
-        monkeypatch.setattr(facts, inventory, {})
+    monkeypatch.setattr(facts, "draw_endpoints", lambda *_: called.append("endpoints"))
+    # Страницы и файлы для машины читают наши разделы — здесь предмет не они.
+    monkeypatch.setattr(facts, "PAGES", {})
+    monkeypatch.setattr(facts, "MACHINE_READ", {})
     given = tmp_path / "facts.json"
-    given.write_text(json.dumps({"rules": RULES_PLANTED}), encoding="utf-8")
-    assert facts.pictures_drawn(given, str(tmp_path / "shared")) == facts.EXIT_OK
-    facts.draw_badges({"rules": RULES_PLANTED}, tmp_path)
-    assert called == ["picture", "picture"], "один из путей рисует картинку своей копией"
+    given.write_text("{}", encoding="utf-8")
+    assert facts.endpoints_drawn(given, str(tmp_path / "shared")) == facts.EXIT_OK
+    facts.draw_badges({"repo": "o/r"}, tmp_path)
+    assert called == ["endpoints", "endpoints"]
     monkeypatch.undo()
     drawn = tmp_path / "drawn"
     drawn.mkdir()
-    facts.draw_pictures({"rules": RULES_PLANTED}, drawn)
-    assert sorted(path.name for path in drawn.iterdir()) == sorted(facts.PICTURES)
-
-
-# --- взяли гейт: объявленное происхождение ---------------------------------
+    facts.draw_endpoints({}, drawn)
+    assert sorted(path.name for path in drawn.iterdir()) == sorted(facts.BADGES)
 
 
 def declared(repo: str, **holds: tuple[str, str, str]) -> dict[str, Any]:

@@ -169,7 +169,7 @@ def run_script() -> RunScript:
 #: С #998 значок показывается shields-endpoint: цель картинки —
 #: `img.shields.io/endpoint?url=…/badges/<имя>.json`, и имя ищется там же.
 #: Единый значок (#1019) — картинка, а не endpoint: его SVG рисует действие
-#: каталога, и цель — `…/badges/python.svg` с ветки значков.
+#: каталога, и цель — `…/badges/project.svg` с ветки значков (#1422).
 BADGE_IN_SHOWCASE: Final = re.compile(
     r"!\[[^\]]*\]\([^)\s]*badges/(?P<name>[\w.-]+\.(?:json|svg))[^)\s]*\)"
 )

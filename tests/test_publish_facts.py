@@ -71,16 +71,32 @@ def test_the_first_publication_starts_the_branch(stand: dict[str, Path]) -> None
     assert on_branch(stand["remote"], PUBLISHED_PICTURE) == "<svg/>\n"
 
 
-def test_a_missing_picture_publishes_nothing(stand: dict[str, Path]) -> None:
-    """Значка рядом с фактами нет — отказ, а не публикация одних фактов (#1282, 045).
+def test_a_missing_picture_keeps_the_old_one(
+    stand: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Значка рядом нет — факты едут, на ветке прежний значок, пропуск назван (#1422).
 
-    Значок и факты едут одним коммитом, чтобы число на значке и в файле
-    витрины не расходились; половина публикации развела бы их молча.
+    Значок рисует действие каталога, и не собрать его оно вправе: площадка не
+    ответила о прогонах. Отказ всей публикации из-за него оставил бы витрину
+    со вчерашними фактами.
     """
+    assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
     (stand["tmp"] / "project.svg").unlink()
-    with pytest.raises(module.NotPublished, match="не положены"):
-        module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
-    assert git("ls-remote", "--heads", str(stand["remote"]), PUBLISHED_TO, cwd=stand["tmp"]) == ""
+    stand["source"].write_text('{"a": 2}\n', encoding="utf-8")
+    assert module.publish(stand["source"], stand["tmp"] / "w2", sha="def")
+    assert on_branch(stand["remote"], PUBLISHED_PATH) == '{"a": 2}\n'
+    assert on_branch(stand["remote"], PUBLISHED_PICTURE) == "<svg/>\n"
+    assert "project.svg" in capsys.readouterr().out
+
+
+def test_targets_name_only_what_lies_beside(tmp_path: Path) -> None:
+    """Факты — всегда; значок и архив — только если лежат рядом, архив — ещё и по входу."""
+    source = tmp_path / "facts.json"
+    assert module.targets(source, archive=True) == (PUBLISHED_PATH,)
+    (tmp_path / "project.svg").write_text("<svg/>", encoding="utf-8")
+    (tmp_path / "findings.json").write_text("{}", encoding="utf-8")
+    assert module.targets(source, archive=False) == (PUBLISHED_PATH, PUBLISHED_PICTURE)
+    assert module.targets(source, archive=True)[-1] == module.ARCHIVE
 
 
 def test_a_publication_lays_over_and_keeps_the_rest(stand: dict[str, Path]) -> None:

@@ -167,11 +167,11 @@ def drawn() -> set[str]:
     (146). Здесь предмет тот же, и источник поэтому один — `build_facts.BADGES`.
     """
     # Нарисованное впрок (`build_facts.AHEAD`) объявляется витрине вторым шагом (196).
-    names: set[str] = (set(facts.BADGES) | set(facts.PICTURES)) - set(facts.AHEAD)
-    # Пол — три: значок проекта заменил «держится машиной» и «семью» (#1213).
-    assert len(names) >= 3, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
-    # Единый значок рисует шаг `badges.yml`, а не сборка; имя у них одно —
-    # `build_facts.UNIFIED`, и со шагом его сверяет проверка ниже (#1019).
+    names: set[str] = set(facts.BADGES) - set(facts.AHEAD)
+    # Пол — два: покрытие и версия, входы значка проекта (#1422).
+    assert len(names) >= 2, f"сборка рисует {sorted(names)} — предмет проверки не найден (075)"
+    # Единый значок рисует действие каталога в общем шаге фактов, а не сборка;
+    # имя у них одно — `build_facts.UNIFIED`, и с шагом его сверяет проверка ниже.
     return names | {facts.UNIFIED}
 
 
@@ -296,36 +296,40 @@ def test_no_declaration_outlives_its_badge() -> None:
     )
 
 
-#: Действие каталога, которое рисует единый значок (#1019).
-UNIFIED_ACTION: Final = "/.github/actions/python-badge@"
+#: Действие каталога, которое рисует единый значок (#1422).
+UNIFIED_ACTION: Final = "/.github/actions/project-badge@"
+FACTS_FLOW: Final = ROOT / ".github" / "workflows" / "step-facts.yml"
 BADGES_FLOW: Final = ROOT / ".github" / "workflows" / "badges.yml"
 
 
 def unified_step() -> dict[str, Any]:
-    """Шаг `badges.yml`, который зовёт действие единого значка, — ровно один."""
-    document = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
+    """Шаг общего шага фактов, который зовёт действие единого значка, — ровно один."""
+    document = yaml.safe_load(FACTS_FLOW.read_text(encoding="utf-8")) or {}
     found = [
         step
         for job in (document.get("jobs") or {}).values()
         for step in (job or {}).get("steps") or []
         if UNIFIED_ACTION in str((step or {}).get("uses") or "")
     ]
-    assert len(found) == 1, f"шагов единого значка в badges.yml не один, а {len(found)} (075)"
+    assert len(found) == 1, f"шагов единого значка в step-facts.yml не один, а {len(found)} (075)"
     step: dict[str, Any] = found[0]
     return step
 
 
 def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
-    """Шаг рисует ТОТ значок и из ТЕХ файлов, что объявлены рядом с инвентарём.
+    """Шаг рисует значок из ТЕХ файлов, что объявлены рядом с инвентарём, и шаг его публикует.
 
     Гейты витрины судят имена `build_facts.UNIFIED` и `ZONE_INPUTS`, а рисует
     значок шаг прогона: без сверки объявление и шаг разошлись бы молча — витрина
-    ждала бы одно имя, а прогон клал другое (022). Сравниваются имена файлов:
-    каталог публикации у шага свой, и путь к нему — дело прогона.
+    ждала бы одно имя, а прогон клал другое (022). Действие кладёт
+    `project.svg` в `out-dir` под своим именем, и это имя обязано быть тем, что
+    публикует шаг фактов (`SHARED_STEP`).
     """
     said = unified_step().get("with") or {}
-    assert Path(str(said.get("out") or "")).name == facts.UNIFIED, (
-        f"шаг кладёт {said.get('out')!r}, а витрина ждёт {facts.UNIFIED}"
+    out = str(said.get("out-dir") or "")
+    assert out, "шаг значка не называет out-dir — действие писало бы в .github/badges дерева"
+    assert facts.UNIFIED in facts.SHARED_STEP, (
+        f"витрина ждёт {facts.UNIFIED}, а шаг фактов публикует {facts.SHARED_STEP}"
     )
     inputs = {
         Path(str(said[key])).name for key in ("coverage-json", "version-json") if said.get(key)
@@ -333,6 +337,8 @@ def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
     assert inputs == set(facts.ZONE_INPUTS), (
         f"зоны питаются {sorted(inputs)}, а объявлены {sorted(facts.ZONE_INPUTS)}"
     )
+    beside = {Path(str(said[key])).parent.as_posix() for key in ("coverage-json", "version-json")}
+    assert beside == {out}, f"входы {sorted(beside)} не там, куда их кладёт сборка: {out}"
 
 
 #: Обёртка списка событий в условии джоба: `fromJSON('[...]')`. Разрез строки,
@@ -362,7 +368,13 @@ def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
     событие, которого нет ни у одного, — мёртвое значение (взгляд на #1033).
     """
     flow = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
-    named = str((unified_step().get("with") or {}).get("ci-workflow"))
+    # Шаг значка берёт файл прогона входом общего шага, а вход задаёт наш
+    # вызов в `badges.yml` — или умолчание шага, если вызов его не задал.
+    given = str((unified_step().get("with") or {}).get("ci-workflow"))
+    assert given == "${{ inputs.ci-workflow }}", f"шаг значка читает {given}, а не вход шага"
+    step_flow = yaml.safe_load(FACTS_FLOW.read_text(encoding="utf-8")) or {}
+    default = step_flow[True]["workflow_call"]["inputs"]["ci-workflow"]["default"]
+    named = str((flow["jobs"]["facts"].get("with") or {}).get("ci-workflow") or default)
     workflows = ROOT / ".github" / "workflows"
     assert (workflows / named).is_file(), f"шаг значка читает {named}, а такого прогона нет"
     drawn = [workflows / named, *(workflows / name for name, _ in preview_versions())]
@@ -399,44 +411,34 @@ def preview_versions() -> list[tuple[str, str]]:
     return found
 
 
-#: Поддельный `git` шага переноса: каждый вызов отвечает кодом из окружения.
-#: `show` при сбое успевает напечатать часть — так выглядит усечённый значок.
-FAKE_GIT: Final = """#!/bin/bash
-case "$1" in
-  fetch) exit "${FAKE_FETCH:-0}" ;;
-  ls-remote) exit "${FAKE_REMOTE:-0}" ;;
-  ls-tree)
-    [ "${FAKE_TREE:-0}" -ne 0 ] && exit "$FAKE_TREE"
-    [ -n "${FAKE_PREV:-}" ] && printf '%s\\0' .github/badges/python.svg
-    exit 0 ;;
-  show)
-    printf '%s' "${FAKE_PREV:-}"
-    exit "${FAKE_SHOW:-0}" ;;
-esac
-exit 99
-"""
+#: Поддельный `git`: шаг «положить значок» не зовёт git вовсе — ветка
+#: пополняется коммитом публикации, переносить прежний значок нечего.
+FAKE_GIT: Final = "#!/bin/bash\nexit 99\n"
 
 
-def run_unified_drop(tmp_path: Path, outcome: str, **fake: str) -> tuple[int, Path]:
-    """Исполняет шаг «положить единый значок» под `bash -e`, как площадка.
+def run_unified_drop(tmp_path: Path, outcome: str) -> tuple[int, Path]:
+    """Исполняет шаг «положить значок проекта рядом с фактами» под `bash -e`, как площадка.
 
-    Возвращает код шага и адрес значка в каталоге публикации. Подстроки не
+    Возвращает код шага и адрес значка рядом с фактами. Подстроки не
     отличают ветвление от текста рядом с ним — исполнение отличает (взгляд на
     #1037; сосед — `run_archive_step` в `tests/test_findings_archive.py`).
     """
-    flow = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
-    steps = flow["jobs"]["badges"]["steps"]
-    run = next(step["run"] for step in steps if step.get("name") == "положить единый значок")
+    flow = yaml.safe_load(FACTS_FLOW.read_text(encoding="utf-8")) or {}
+    steps = flow["jobs"]["facts"]["steps"]
+    run = next(
+        step["run"]
+        for step in steps
+        if step.get("name") == "положить значок проекта рядом с фактами"
+    )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / "git").write_text(FAKE_GIT, encoding="utf-8")
     (bin_dir / "git").chmod(0o755)
-    (tmp_path / "badges/.github/badges").mkdir(parents=True)
+    (tmp_path / "facts").mkdir(parents=True)
     env = {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "RUNNER_TEMP": str(tmp_path),
         "OUTCOME": outcome,
-        **fake,
     }
     done = subprocess.run(
         ["bash", "-e", "-c", run],
@@ -447,32 +449,27 @@ def run_unified_drop(tmp_path: Path, outcome: str, **fake: str) -> tuple[int, Pa
         encoding="utf-8",
         check=False,
     )
-    return done.returncode, tmp_path / "badges/.github/badges/python.svg"
+    return done.returncode, tmp_path / "facts/project.svg"
 
 
 def test_a_built_unified_badge_is_laid_or_the_run_fails(tmp_path: Path) -> None:
-    """Собранный значок кладётся; не положить его — отказ, а не зелёный шаг."""
+    """Собранный значок кладётся рядом с фактами; не положить его — отказ, а не зелёный шаг."""
     code, out = run_unified_drop(tmp_path / "lost", "success")
     assert code == 1 and not out.exists(), "значок пропал бы с ветки при зелёном шаге"
     built = tmp_path / "built"
-    (built / ".unified-badge").mkdir(parents=True)
-    (built / ".unified-badge/python.svg").write_text("<svg/>", encoding="utf-8")
+    (built / ".project-badge").mkdir(parents=True)
+    (built / ".project-badge/project.svg").write_text("<svg/>", encoding="utf-8")
     code, out = run_unified_drop(built, "success")
     assert code == 0 and out.read_text(encoding="utf-8") == "<svg/>"
-
-
-def test_a_branch_without_the_badge_publishes_without_it(tmp_path: Path) -> None:
-    """Ветка прочитана, значка на ней нет — законный исход, без отказа."""
-    code, out = run_unified_drop(tmp_path, "failure")
-    assert code == 0 and not out.exists()
+    assert not (built / ".project-badge").exists(), "каталог входов остался в дереве потребителя"
 
 
 def test_an_unbuilt_badge_leaves_the_branch_alone(tmp_path: Path) -> None:
-    """Значок не собран — шаг не трогает ветку и не кладёт ничего: прежний на ней остаётся.
+    """Значок не собран — шаг не кладёт ничего и не зовёт git: прежний на ветке остаётся.
 
     Ветка `badges` пополняется коммитами, а не перезаписывается (#1001, шаг 2),
-    поэтому переносить прежний значок нечего: поддельный `git` отвечает 99 на
-    любой вызов, и шаг обязан не звать его вовсе.
+    поэтому переносить прежний значок нечего; публикация фактов идёт без него
+    (`publish_facts.targets`).
     """
-    code, out = run_unified_drop(tmp_path, "failure", FAKE_FETCH="99", FAKE_REMOTE="99")
+    code, out = run_unified_drop(tmp_path, "failure")
     assert code == 0 and not out.exists()

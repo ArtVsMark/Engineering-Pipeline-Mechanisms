@@ -117,8 +117,9 @@ jobs:
         if: steps.version.outputs.present == 'true'
         with:
           # ЧИСЛО БУКВОЙ, А НЕ `${{ matrix.python }}` — ради единого значка
-          # семьи. Действие каталога `python-badge` находит предрелизную версию
-          # по `python-version: "X.Y"` рядом с `allow-prereleases: true`, а
+          # семьи. Действие каталога `project-badge` (его верхняя строка —
+          # расчёт `python-badge`) находит предрелизную версию по
+          # `python-version: "X.Y"` рядом с `allow-prereleases: true`, а
           # выражение матрицы не читает: с ним 3.15 с значка пропадала (решение
           # владельца 03.10.2026). Число здесь — копия ячейки матрицы выше, и
           # расходиться им не даёт `tests/test_declared_versions.py`

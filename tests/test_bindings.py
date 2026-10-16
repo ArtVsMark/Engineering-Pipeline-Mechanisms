@@ -1316,8 +1316,8 @@ def test_a_called_catalogue_origin_names_an_action_we_call() -> None:
 #: читался бы как свой — с контракта 1.9 это явное `origin_kind: own`, и
 #: вызов без ответа с `called` прошёл бы под ним молча (#1237).
 CALLED_WITHOUT_A_RULE: Final = {
-    ".github/actions/python-badge/action.yml": (
-        "рисует единый значок витрины по исходам прогонов; правила не держит — "
+    ".github/actions/project-badge/action.yml": (
+        "рисует значок проекта по исходам прогонов и ответу каталогу; правила не держит — "
         "держат сами прогоны, которые он показывает"
     ),
 }
@@ -1498,31 +1498,31 @@ def flow_places(where: str, flows: Iterable[str]) -> dict[str, int]:
 CALLED_HEAD_READ: Final[dict[str, tuple[str, str]]] = {
     "090": (
         "ci.yml, джоб attribution — гейт атрибуции действием каталога",
-        "2bc8aaca2d6b",
+        "85536c2fe7ff",
     ),
     "123": (
         "ci.yml, джоб attribution — атрибуция на итоговой истории",
-        "ef29a476a23b",
+        "292809279029",
     ),
     "129": (
         "ci.yml, джоб answer — форма ответа и пробы действием каталога",
-        "760571519601",
+        "e2056185a313",
     ),
     "130": (
         "rules-inbox.yml — новое правило приходит задачей действием каталога",
-        "056f871ad798",
+        "d265974ff2b9",
     ),
     "135": (
         "attribution-history.yml — личность записи действием каталога",
-        "48d708ac41ba",
+        "d0d8ed432f21",
     ),
     "162": (
         "rules-inbox.yml — ночные входящие действием каталога",
-        "2ea0b7d23dd8",
+        "b638372607bc",
     ),
     "178": (
         "rules-inbox.yml — числа долга приходят с действием каталога",
-        "8c69a5734977",
+        "bd7912ad62ff",
     ),
 }
 
