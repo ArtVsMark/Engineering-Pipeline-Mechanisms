@@ -324,7 +324,6 @@ def test_the_seams_of_the_filling_and_the_port_check_are_named() -> None:
 STILL_COPIED: Final = frozenset(
     {
         "badges.yml",
-        "release.yml",
     }
 )
 

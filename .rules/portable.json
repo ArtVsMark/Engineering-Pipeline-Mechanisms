@@ -257,7 +257,10 @@
       "seam": "что проверяется на предрелизной версии и какая она, названо шагами и матрицей прогона, данных под это нет: тонкого вызова, как у ci.yml, заготовка под него не кладёт"
     },
     ".github/workflows/release.yml": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/release.yml"
+      ]
     },
     ".github/workflows/required-context.yml": {
       "answer": "configured",
@@ -831,6 +834,9 @@
       ]
     },
     ".github/workflows/step-required-context.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-release.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-review.yml": {

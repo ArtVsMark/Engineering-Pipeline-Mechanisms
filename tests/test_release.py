@@ -734,7 +734,9 @@ def release_step() -> str:
     дословно, и гейт, читающий весь текст шага, видел бы `--follow-tags` в
     собственном объяснении и краснел на починенном механизме.
     """
-    document = yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text("utf-8"))
+    document = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "step-release.yml").read_text("utf-8")
+    )
     steps = document["jobs"]["release"]["steps"]
     found = [step for step in steps if step.get("name") == "выпустить"]
     if len(found) != 1:
@@ -896,7 +898,7 @@ def test_every_release_step_gets_the_owner_token(step: str) -> None:
     Проверка по СПИСКУ, а не по одному шагу: один читатель был исправлен, а
     второй молчал — ровно то расхождение, которое список и закрывает.
     """
-    run = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    run = yaml.safe_load((ROOT / ".github/workflows/step-release.yml").read_text(encoding="utf-8"))
     steps = run["jobs"]["release"]["steps"]
     found = [one for one in steps if one.get("name") == step]
     assert found, f"шаг «{step}» не найден — предмет исчез (075)"
