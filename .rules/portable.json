@@ -569,6 +569,9 @@
     "scripts/check_foreign_why.py": {
       "answer": "as-is"
     },
+    "scripts/check_invisible.py": {
+      "answer": "as-is"
+    },
     "scripts/check_journal.py": {
       "answer": "as-is"
     },
