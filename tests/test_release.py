@@ -944,9 +944,10 @@ def test_a_ruleset_past_the_first_page_is_asked(monkeypatch: pytest.MonkeyPatch)
 def test_a_release_lifts_its_own_probe_after_the_tag() -> None:
     """Выпуск последним шагом поднимает свои шаги до нового тега (#1387).
 
-    Шаг стоит ПОСЛЕ выпуска и под тем же условием — ключ и токен владельца, — а
-    зовёт код механизмов своим checkout, как соседи. Пробу Dependabot не
-    поднимает: ссылки репозитория на самого себя он не предлагает.
+    Шаг стоит ПОСЛЕ выпуска и держится ЕГО исходом, а не цепочкой соседей:
+    упавшая страница выпуска подъёма не снимает (`62bbf7d`, `473b733`). Зовёт
+    код механизмов своим checkout, как соседи. Пробу Dependabot не поднимает:
+    ссылки репозитория на самого себя он не предлагает.
     """
     flow = yaml.safe_load((ROOT / ".github/workflows/step-release.yml").read_text(encoding="utf-8"))
     steps = flow["jobs"]["release"]["steps"]
@@ -954,5 +955,8 @@ def test_a_release_lifts_its_own_probe_after_the_tag() -> None:
     lift = names.index("поднять свои шаги до выпуска")
     assert lift > names.index("выпустить"), names
     step = steps[lift]
-    assert step["if"] == "inputs.apply && steps.token.outputs.present == 'yes'"
+    assert step["if"] == (
+        "!cancelled() && inputs.apply && steps.token.outputs.present == 'yes' && "
+        "steps.release.outcome == 'success'"
+    )
     assert '$MECHANISMS/scripts/deps_intercept.py --self "v${version}" --apply' in step["run"]

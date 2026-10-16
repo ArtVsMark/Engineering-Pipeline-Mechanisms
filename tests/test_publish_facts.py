@@ -276,3 +276,58 @@ def test_the_refusals_cover_every_git_step(
     stand["source"].write_text('{"a": 2}\n', encoding="utf-8")
     assert module.publish(stand["source"], stand["tmp"] / "w2", sha="b")
     assert called == set(REFUSALS)
+
+
+#: Архив находок — литералом вне модуля, как факты (взгляд на #1240).
+PUBLISHED_ARCHIVE = ".github/badges/findings.json"
+
+
+def test_the_archive_rides_the_same_commit_when_asked(stand: dict[str, Path]) -> None:
+    """С входом `archive` архив находок ложится тем же коммитом, что факты (#1414)."""
+    (stand["tmp"] / "findings.json").write_text('{"f": 1}\n', encoding="utf-8")
+    assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc", archive=True)
+    assert module.ARCHIVE == PUBLISHED_ARCHIVE
+    assert on_branch(stand["remote"], PUBLISHED_ARCHIVE) == '{"f": 1}\n'
+    assert on_branch(stand["remote"], PUBLISHED_PATH) == '{"a": 1}\n'
+    touched = [
+        one
+        for one in git(
+            "show", "--name-only", "-z", "--format=", PUBLISHED_TO, cwd=stand["remote"]
+        ).split("\0")
+        if one.strip()
+    ]
+    assert sorted(touched) == sorted([PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_ARCHIVE])
+
+
+def test_without_the_archive_input_a_foreign_archive_lives(stand: dict[str, Path]) -> None:
+    """Без входа шаг архив не трогает: свой файл потребителя по этому пути уцелел."""
+    (stand["tmp"] / "findings.json").write_text('{"f": "наш"}\n', encoding="utf-8")
+    module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
+    assert git("ls-tree", "--name-only", "-r", "-z", PUBLISHED_TO, cwd=stand["remote"]).split("\0")[
+        :-1
+    ] == [
+        PUBLISHED_PATH,
+        PUBLISHED_PICTURE,
+    ]
+
+
+def test_a_missing_archive_does_not_hold_the_facts(
+    stand: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вход есть, а архива нет — факты публикуются, пропуск архива назван (взгляд на #1423)."""
+    assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc", archive=True)
+    assert on_branch(stand["remote"], PUBLISHED_PATH) == '{"a": 1}\n'
+    assert "findings.json" in capsys.readouterr().out
+
+
+def test_our_badges_run_asks_the_shared_step_for_the_archive() -> None:
+    """Наш `badges.yml` пишет архив тем же общим шагом, что потребитель, а не своим джобом."""
+    import yaml
+
+    from tests.conftest import ROOT
+
+    flow = yaml.safe_load((ROOT / ".github/workflows/badges.yml").read_text(encoding="utf-8"))
+    assert flow["jobs"]["facts"]["with"]["archive"] is True
+    assert "findings_archive.py" not in (ROOT / ".github/workflows/badges.yml").read_text(
+        encoding="utf-8"
+    )
