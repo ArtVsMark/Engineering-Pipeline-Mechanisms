@@ -1272,3 +1272,18 @@ def test_keep_inputs_leaves_the_kit_as_is_when_inputs_agree() -> None:
     said = module.policy.run_text(kept, "x.yml")
     assert said["jobs"]["a"] == {"uses": "o/r/.github/workflows/step-x.yml@v2", "with": {"k": 2}}
     assert module.policy.events_raw(said) == "push"
+
+
+def test_callers_in_finds_job_and_step_calls_in_order() -> None:
+    """Узлы вызова — джобом и шагом, в порядке записи, без тега; чужой адрес не в счёт."""
+    document = {
+        "jobs": {
+            "a": {"uses": "o/r/.github/workflows/step-x.yml@v1"},
+            "b": {"steps": [{"uses": "other/z@v1"}, {"uses": "o/r/.github/actions/y@v1"}]},
+        }
+    }
+    said = module.callers_in(document, "o/r")
+    assert [address for address, _ in said] == [
+        "o/r/.github/workflows/step-x.yml",
+        "o/r/.github/actions/y",
+    ]
