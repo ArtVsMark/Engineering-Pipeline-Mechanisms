@@ -103,8 +103,8 @@ def test_resolution_lines_take_only_resolution_lines() -> None:
 
 
 def test_the_badges_run_checks_the_archive() -> None:
-    """Сборка значков сверяет архив с историей после его дописывания (#864)."""
-    flow = (ROOT / ".github/workflows/badges.yml").read_text(encoding="utf-8")
+    """Общий шаг фактов сверяет архив с историей после его дописывания (#864, #1414)."""
+    flow = (ROOT / ".github/workflows/step-facts.yml").read_text(encoding="utf-8")
     assert "archive_against_history.py" in flow
     assert flow.index("findings_archive.py") < flow.index("archive_against_history.py")
 

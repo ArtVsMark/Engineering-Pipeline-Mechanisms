@@ -452,6 +452,28 @@ def test_a_dirty_tree_is_not_switched(stand: Path) -> None:
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
+def test_an_intercept_does_not_wipe_a_dirty_tree(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Перехват с правками в дереве — отказ, а не снос веткой (`7f52cb1`)."""
+    fake_platform(monkeypatch, [])
+    (stand / "wip.txt").write_text("не сохранено", encoding="utf-8")
+    bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
+    with pytest.raises(module.NotRun, match="незакоммиченные"):
+        module.intercept(stand, "o/r", "t", bump, dry_run=False)
+    assert (stand / "wip.txt").read_text(encoding="utf-8") == "не сохранено"
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
+def test_switch_clean_cuts_from_the_trunk_on_a_clean_tree(stand: Path) -> None:
+    """Чистое дерево — ветка режется от общей; правка в дереве — отказ."""
+    module.switch_clean(stand, "agent/x")
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "agent/x"
+    (stand / "wip.txt").write_text("своё", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="незакоммиченные"):
+        module.switch_clean(stand, "agent/y")
+
+
 def test_a_consumer_branch_is_not_switched(stand: Path) -> None:
     """Поднимать нечего — ветка человека не переключается (взгляд на #1421)."""
     git(stand, "tag", "v2.0.0")
