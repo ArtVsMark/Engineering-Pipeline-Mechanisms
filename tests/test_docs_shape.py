@@ -148,6 +148,10 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
 #: счёт заголовка не входит, и читатель, считающий строки глазами, получит
 #: больше — на столько, сколько таких строк (сейчас выпуск и замер взведения).
 UNNUMBERED_ROW_RE = re.compile(r"^\|\s*[—-]\s*\|")
+#: Рукописный счёт разницы: «на два больше», «на единицу больше». Его проза под
+#: заголовком не пишет вовсе — строгое правило, а не сверка числа (210): число
+#: чинили дважды по одной форме (#1405, #1409), и оба раза оно отставало молча.
+HAND_COUNT_RE = re.compile(r"\bна\s+(?:единицу|\d+|[а-яё]+)\s+больше\b", re.IGNORECASE)
 
 
 def test_an_unnumbered_row_is_named_under_the_heading() -> None:
@@ -167,13 +171,27 @@ def test_an_unnumbered_row_is_named_under_the_heading() -> None:
     lines = text.splitlines()
     place = next(n for n, line in enumerate(lines) if line.startswith("## Скелет:"))
     start = next(n for n in range(place, len(lines)) if lines[n].startswith("|"))
-    unnumbered = [line for line in lines[start:] if UNNUMBERED_ROW_RE.match(line)]
+    # ДО КОНЦА ТАБЛИЦЫ, А НЕ ДОКУМЕНТА (находка взгляда на #1409): строка с
+    # прочерком в поздней таблице к скелету не относится.
+    end = next((n for n in range(start, len(lines)) if not lines[n].startswith("|")), len(lines))
+    unnumbered = [line for line in lines[start:end] if UNNUMBERED_ROW_RE.match(line)]
+    said = "\n".join(lines[place:start])
+    counted = HAND_COUNT_RE.findall(said)
+    assert not counted, (
+        f"проза под заголовком считает разницу рукой: {counted} — число отстаёт от "
+        "таблицы молча (005, 210)"
+    )
     if not unnumbered:
         return
-    said = "\n".join(lines[place:start])
     assert "без номера" in said, (
         f"в таблице {len(unnumbered)} строк без номера, а проза под заголовком о них молчит"
     )
+    # СТРОКА БЕЗ ФАЙЛА — ОТКАЗ, А НЕ ПУСТОЕ МНОЖЕСТВО (находка взгляда на #1409):
+    # строка с `.github/actions/…` вместо прогона иначе проходила бы молча.
+    nameless = [
+        line for line in unnumbered if not STEP_FILE_RE.search(line.strip("|").split("|")[2])
+    ]
+    assert not nameless, f"строка без номера не называет файла прогона: {nameless}"
     files = {
         found.group("file")
         for line in unnumbered
