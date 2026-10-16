@@ -294,6 +294,39 @@ jobs:
               ;;
           esac
 
+      # ВЫПУСК САМ ПОДНИМАЕТ СВОЮ ПРОБУ (#1387, решение владельца 16.10.2026).
+      # Проба передачи зовёт наши шаги по тегу, как потребитель, а Dependabot
+      # ссылки репозитория на самого себя не поднимает: замер — сутки после
+      # `v1.6.0`, сигнала нет. Подъём идёт веткой `agent/deps-self-<тег>` и
+      # обычной очередью, тем же механизмом, что перехват. У потребителя своих
+      # шагов по тегу нет, и шаг отвечает «поднимать нечего» — это не отказ.
+      # Отказ здесь выпуска НЕ отменяет: тег уже уехал, и он говорит, как
+      # довести подъём отдельным заходом.
+      - name: поднять свои шаги до выпуска
+        if: inputs.apply && steps.token.outputs.present == 'yes'
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ASKED_VERSION: ${{ inputs.version }}
+        run: |
+          set -uo pipefail
+          version="${ASKED_VERSION:-}"
+          if [ -z "${version}" ]; then
+            version="$(git tag --points-at HEAD | head -1 | sed 's/^v//')"
+          fi
+          if [ -z "${version}" ]; then
+            echo "::error::Тега на HEAD нет — поднимать свои шаги не до чего (075)."
+            exit 1
+          fi
+          rc=0
+          python $MECHANISMS/scripts/deps_intercept.py --self "v${version}" --apply || rc=$?
+          case "$rc" in
+            0) ;;
+            *)
+              echo "::error::Свои шаги до v${version} не подняты (код $rc). Выпуск сделан и повторять его НЕ надо: подъём доводится заходом deps_intercept.py --self v${version} --repo ${GITHUB_REPOSITORY} --apply из кода механизмов на теге шага"
+              exit 1
+              ;;
+          esac
+
       - name: выпуск не сделан — сказано, а не пропущено
         if: inputs.apply && steps.token.outputs.present != 'yes'
         run: |
