@@ -1220,3 +1220,24 @@ def test_a_tag_the_supplier_does_not_have_does_not_run(tmp_path: Path) -> None:
     )
     released(root, "v2.6.0", план=OWN_CALLER_NEXT)
     assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_BROKEN
+
+
+def test_the_update_plan_is_decided_before_any_write(tmp_path: Path) -> None:
+    """План обновления собирается целиком по частям до записи: наше, `ci.yml`, ответ."""
+    root, consumer = connected(tmp_path)
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    repo = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+    assert module.our_uses(repo).search(f"uses: {repo}/.github/workflows/step-x.yml@v1.0.0")
+    new = module.owned(root, repo, "v2.6.0")
+    old = module.owned_at(root, "v2.5.0", repo)
+    assert set(new) == set(old)
+    plan = module.Update()
+    module.plan_owned(plan, consumer, new, root, repo)
+    module.plan_ci(plan, consumer, ["пример"], repo, "v2.6.0")
+    module.plan_answer(plan, consumer, [module.check_name("пример"), "лишний / лишний"])
+    assert not plan.edited
+    assert module.paths.WORKFLOWS / "план.yml" in plan.write
+    assert module.paths.WORKFLOWS / module.PIPELINE_FLOW in plan.write
+    assert any("лишний / лишний" in one for one in plan.notes)
+    said = module.policy.run_text("on: push\njobs: {}\n", "x.yml")
+    assert module.policy.events_raw(said) == "push"
