@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import changerefs
+import findings
 import ghrest
 import items
 import late_look
@@ -209,6 +210,88 @@ def fate(repo: str, change: dict[str, Any], links: list[Any], token: str) -> dic
     return said
 
 
+#: Скрытая метка предложения закрыть: по ней предложение не повторяется на
+#: каждом следующем слиянии с той же связью.
+NO_ITEMS_NOTE: Final = "<!-- task-finish: без пунктов приёмки -->"
+
+
+def nobody_finishes(issue: dict[str, Any]) -> bool:
+    """Задача, которую механизм не закрывает: эпик или живая задача-адресат.
+
+    Эпик закрывается вслед за своими задачами (`items.follow`), а живую задачу
+    ведёт свой механизм: план и реестры не «доделываются» никогда (#1412).
+    """
+    labels = {str((one or {}).get("name") or "") for one in issue.get("labels") or []}
+    body = str(issue.get("body") or "")
+    return (
+        items.EPIC_LABEL in labels
+        or findings.is_kept_by_a_mechanism(body)
+        or findings.is_plan(body)
+    )
+
+
+def finish(
+    repo: str, change: dict[str, Any], links: list[Any], token: str, *, dry_run: bool = False
+) -> tuple[list[int], list[int]]:
+    """Доводит задачи по `Refs`, чьё обещанное уже сделано: закрытые и спрошенные.
+
+    ЗАЧЕМ (#1412). Задачу ведут несколькими изменениями, и все они несут `Refs`,
+    последнее тоже: площадка её не закрывает, и она висит открытой при сделанной
+    работе. Замер 16.10.2026 — восемь задач за два дня закрыл руками владелец.
+
+    ОСНОВАНИЕ — ПУНКТЫ, А НЕ ВЫВОД. Задача закрывается, только если у неё есть
+    пункты приёмки и открытых не осталось после отметки (`--sweep` идёт раньше).
+    У задачи без пунктов судить не о чем: она получает предложение закрыть, один
+    раз, а не закрывается (045). Навык окна — первая линия: последнее изменение
+    несёт `Closes`; это страховка, которая ловит пропущенное навыком.
+    """
+    number = int(change.get("number") or 0)
+    closed: list[int] = []
+    asked: list[int] = []
+    for link in links:
+        if link.closes:
+            continue
+        issue = ghrest.request("GET", f"repos/{repo}/issues/{link.number}", token) or {}
+        if str(issue.get("state") or "") != "open" or nobody_finishes(issue):
+            continue
+        body = str(issue.get("body") or "")
+        if items.open_items(body):
+            continue
+        if items.done_items(body):
+            closed.append(link.number)
+            if not dry_run:
+                note = (
+                    f"Все пункты приёмки отмечены после слияния #{number}, связанного "
+                    f"`Refs #{link.number}`. Задача закрыта механизмом (#1412): "
+                    "последнее изменение не несло `Closes`."
+                )
+                publish(repo, [link.number], note, token)
+                ghrest.request(
+                    "PATCH",
+                    f"repos/{repo}/issues/{link.number}",
+                    token,
+                    {"state": "closed", "state_reason": "completed"},
+                )
+            continue
+        said = ghrest.paginate(f"repos/{repo}/issues/{link.number}/comments", token)
+        if any(NO_ITEMS_NOTE in str(one.get("body") or "") for one in said):
+            continue
+        asked.append(link.number)
+        if not dry_run:
+            note = "\n".join(
+                [
+                    NO_ITEMS_NOTE,
+                    f"У задачи нет пунктов приёмки, и механизм не может судить, сделана ли "
+                    f"она, — слияние #{number} связано с ней `Refs #{link.number}`.",
+                    "",
+                    "Если работа сделана — закройте задачу. Если нет — добавьте пункты "
+                    "`- [ ] …`: тогда её закроет последнее изменение (#1412).",
+                ]
+            )
+            publish(repo, [link.number], note, token)
+    return closed, asked
+
+
 def render(number: int, answer: str, paired: list[tuple[str, str]], bare: list[str]) -> str:
     """Собирает комментарий в задачу: разбор, а не голый список отметок."""
     lines = [
@@ -302,9 +385,15 @@ def main(argv: list[str] | None = None) -> int:
             if not args.pr:
                 raise NotRun("номер слитого изменения не назван: --pr")
             _, change = linked(args.repo, args.pr, token)
-            said = fate(
-                args.repo, change, changerefs.links_in(str(change.get("body") or "")), token
-            )
+            links = changerefs.links_in(str(change.get("body") or ""))
+            said = fate(args.repo, change, links, token)
+            # СУДЬБА СУДИТСЯ ДО ДОВОДКИ: задача, закрытая механизмом ниже, закрыта
+            # не коммитом слияния, и вторая сторона `fate` её не вменит.
+            closed, asked = finish(args.repo, change, links, token, dry_run=not args.apply)
+            for one in closed:
+                print(f"#{one}: все пункты отмечены — задача закрыта механизмом")
+            for one in asked:
+                print(f"#{one}: пунктов приёмки нет — предложено закрыть")
             if not said:
                 print(f"#{args.pr}: связь с задачами сбылась — расхождений нет")
                 return EXIT_NOTHING

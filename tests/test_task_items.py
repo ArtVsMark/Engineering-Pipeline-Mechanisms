@@ -432,3 +432,113 @@ def test_the_caller_names_the_test_that_holds_the_close_case() -> None:
         assert name.startswith("test_") and callable(globals().get(name)), (
             f"вызов называет не тест этого модуля: {name}"
         )
+
+
+# --- доводка задачи по `Refs` (#1412) ----------------------------------------
+
+
+def finishing_platform(
+    issues: dict[int, dict[str, Any]], comments: list[dict[str, Any]] | None = None
+) -> tuple[Any, Any, list[tuple[str, str, Any]]]:
+    """Площадка с задачами и журналом записей: что механизм прочёл и что написал."""
+    wrote: list[tuple[str, str, Any]] = []
+
+    def reply(method: str, path: str, _token: str, payload: Any = None) -> Any:
+        if method != "GET":
+            wrote.append((method, path, payload))
+            return {}
+        number = int(path.rstrip("/").rsplit("/", 1)[1])
+        return issues[number]
+
+    def pages(_path: str, _token: str, _key: str | None = None) -> Any:
+        return iter(comments or [])
+
+    return reply, pages, wrote
+
+
+def an_issue(body: str, *, state: str = "open", labels: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Задача площадки: тело, состояние, метки."""
+    return {"state": state, "body": body, "labels": [{"name": one} for one in labels]}
+
+
+@pytest.mark.parametrize(
+    ("issue", "closes"),
+    [
+        (an_issue("## Приёмка\n\n- [x] первое\n- [x] второе\n"), True),
+        (an_issue("## Приёмка\n\n- [x] первое\n- [ ] второе\n"), False),
+        (an_issue("- [x] первое\n", labels=("epic",)), False),
+        (an_issue(f"{module.findings.MARKER}\n- [x] первое\n"), False),
+        (an_issue(f"{module.findings.PLAN_MARKER}\n- [x] первое\n"), False),
+        (an_issue("- [x] первое\n", state="closed"), False),
+    ],
+    ids=["all-ticked", "one-open", "epic", "live", "plan", "already-closed"],
+)
+def test_a_refs_task_with_every_item_ticked_is_closed(
+    monkeypatch: pytest.MonkeyPatch, issue: dict[str, Any], closes: bool
+) -> None:
+    """`Refs`, а все пункты отмечены — механизм закрывает задачу; иначе не трогает.
+
+    Обе стороны (097): закрыть сделанную и НЕ закрыть ни недоделанную, ни
+    эпик, ни живую задачу-адресат, ни уже закрытую.
+    """
+    reply, pages, wrote = finishing_platform({12: issue})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    monkeypatch.setattr(module.ghrest, "paginate", pages)
+    closed, asked = module.finish(
+        "o/r", linked_change("Refs #12"), module.changerefs.links_in("Refs #12"), "t"
+    )
+    assert closed == ([12] if closes else []), (closed, asked)
+    assert asked == []
+    shut = [one for one in wrote if one[0] == "PATCH"]
+    assert shut == (
+        [("PATCH", "repos/o/r/issues/12", {"state": "closed", "state_reason": "completed"})]
+        if closes
+        else []
+    )
+
+
+def test_a_closes_link_is_left_to_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`Closes` закрывает площадка; доводка его не трогает и задачу не читает."""
+    reply, pages, wrote = finishing_platform({})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    monkeypatch.setattr(module.ghrest, "paginate", pages)
+    assert module.finish(
+        "o/r", linked_change("Closes #12"), module.changerefs.links_in("Closes #12"), "t"
+    ) == ([], [])
+    assert wrote == []
+
+
+def test_a_refs_task_without_items_is_asked_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Задача без пунктов не закрывается — ей предлагают закрыть, и только раз."""
+    reply, pages, wrote = finishing_platform({12: an_issue("Прозой: что сделать.\n")})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    monkeypatch.setattr(module.ghrest, "paginate", pages)
+    links = module.changerefs.links_in("Refs #12")
+    assert module.finish("o/r", linked_change("Refs #12"), links, "t") == ([], [12])
+    assert [one[0] for one in wrote] == ["POST"]
+    assert module.NO_ITEMS_NOTE in wrote[0][2]["body"]
+
+    asked_before = [{"body": f"{module.NO_ITEMS_NOTE}\nпредложено"}]
+    reply, pages, wrote = finishing_platform({12: an_issue("Прозой.\n")}, asked_before)
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    monkeypatch.setattr(module.ghrest, "paginate", pages)
+    assert module.finish("o/r", linked_change("Refs #12"), links, "t") == ([], [])
+    assert wrote == []
+
+
+def test_a_dry_finish_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без `--apply` доводка называет, что сделала бы, и не пишет ни строки."""
+    reply, pages, wrote = finishing_platform({12: an_issue("- [x] первое\n")})
+    monkeypatch.setattr(module.ghrest, "request", reply)
+    monkeypatch.setattr(module.ghrest, "paginate", pages)
+    links = module.changerefs.links_in("Refs #12")
+    assert module.finish("o/r", linked_change("Refs #12"), links, "t", dry_run=True) == ([12], [])
+    assert wrote == []
+
+
+def test_nobody_finishes_an_epic_or_a_live_task() -> None:
+    """Эпик, живая задача и план — не доводятся; задача человека — доводится."""
+    assert module.nobody_finishes(an_issue("тело", labels=("epic",)))
+    assert module.nobody_finishes(an_issue(f"{module.findings.MARKER}\nтело"))
+    assert module.nobody_finishes(an_issue(f"{module.findings.PLAN_MARKER}\nтело"))
+    assert not module.nobody_finishes(an_issue("- [x] пункт\n", labels=("enhancement",)))
