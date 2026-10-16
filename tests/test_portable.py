@@ -623,6 +623,8 @@ def test_a_configured_answer_names_every_filling_it_reads() -> None:
 
 #: Вход в форме относительного пути: каталоги через косую черту либо одно имя с точкой.
 PATH_SHAPE: Final = re.compile(r"^\.?[\w.-]+(?:/[\w.-]+)+$|^\.[\w.-]+$")
+#: Запись каталога в `run:`: флаг вывода, `mkdir` или перенаправление — перед именем.
+WRITES: Final = r"(?:--[\w-]*out|mkdir(?:\s+-p)?|>)\s+[\"']?{}(?![\w.-])"
 #: Действие выкачки: его `path:` — куда шаг кладёт код, а не данные потребителя.
 CHECKOUT: Final = "actions/checkout"
 
@@ -637,11 +639,13 @@ def step_path_inputs(flow: Path) -> set[str]:
     .pipeline-mechanisms` у выкачки — второе исключено по действию, а не по
     имени.
 
-    СОСЕД ЗА ГРАНИЦЕЙ НАЗВАН (195, #1422): путь, чей первый каталог называет
-    `run:` РАНЬШЕ в том же джобе, — то, что шаг кладёт сам (входы значка
-    проекта в `.project-badge`), а не данные потребителя. Граница — по месту
-    в джобе, а не по имени: каталог, названный только позже или в другом
-    джобе, по-прежнему судится.
+    СОСЕД ЗА ГРАНИЦЕЙ НАЗВАН (195, #1422): путь, чей первый каталог `run:`
+    РАНЬШЕ в том же джобе ЗАПИСЫВАЕТ, — то, что шаг кладёт сам (входы значка
+    проекта в `.project-badge`), а не данные потребителя. Запись — форма
+    `--…out <каталог>`, `mkdir [-p] <каталог>` или `> <каталог>`: каталог,
+    лишь прочитанный (`cat .github/x`), исключения не даёт (взгляд на #1445).
+    Граница — по месту в джобе: каталог, записанный только позже или в
+    другом джобе, по-прежнему судится.
     """
     document = yaml.safe_load(flow.read_text(encoding="utf-8")) or {}
     found: set[str] = set()
@@ -657,7 +661,7 @@ def step_path_inputs(flow: Path) -> set[str]:
                 path = value.strip()
                 if uses.startswith(CHECKOUT) or not PATH_SHAPE.match(path):
                     continue
-                if re.search(rf"(?<![\w./-]){re.escape(path.split('/')[0])}(?![\w.-])", written):
+                if re.search(WRITES.format(re.escape(path.split("/")[0])), written):
                     continue
                 found.add(path)
             written += "\n" + str(step.get("run") or "")
@@ -706,12 +710,18 @@ def test_the_step_input_gate_skips_what_the_job_lays_itself(tmp_path: Path) -> N
         "jobs:\n  j:\n    steps:\n"
         "      - uses: x/y@v1\n        with:\n          a: .свой/до.json\n"
         "      - run: build --endpoints-out .свой\n"
+        "      - run: cat .github/только-читается.txt\n"
+        "      - uses: x/y@v1\n        with:\n          d: .github/прочитанное.txt\n"
         "      - uses: x/y@v1\n        with:\n          b: .свой/после.json\n"
         "  k:\n    steps:\n"
         "      - uses: x/y@v1\n        with:\n          c: .свой/чужой-джоб.json\n",
         encoding="utf-8",
     )
-    assert step_path_inputs(flow) == {".свой/до.json", ".свой/чужой-джоб.json"}
+    assert step_path_inputs(flow) == {
+        ".свой/до.json",
+        ".свой/чужой-джоб.json",
+        ".github/прочитанное.txt",
+    }
 
 
 def test_the_filling_gate_rejects_an_unnamed_read() -> None:
