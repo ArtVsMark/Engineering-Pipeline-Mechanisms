@@ -32,6 +32,13 @@
 Повтор безопасен: ветка уже есть на площадке — подъём не повторяется, изменение
 бота только закрывается.
 
+РЕЖИМ `--self <тег>` — ТОТ ЖЕ ПОДЪЁМ, НО СИГНАЛ — ТЕГ ВЫПУСКА (#1387). Его зовёт
+`step-release.yml` последним шагом: все вызовы своих же шагов по тегу
+поднимаются до нового тега веткой `agent/deps-self-<тег>`. Dependabot ссылки
+репозитория на самого себя не предлагает. Исходы режима: ``0`` поднято или
+нечего · ``2`` не отработал (дерево с незакоммиченными правками — тоже: заход
+переключает ветку и стёр бы их).
+
 Исходы: ``0`` перехвачено или нечего · ``1`` изменение бота не разобрано
 (заголовок не той формы, тега нет, строк нет) — находка для человека:
 изменение бота остаётся открытым, а прогон краснеет, и его видит `main-red`
@@ -41,6 +48,7 @@
 import argparse
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -244,6 +252,116 @@ def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -
     return branch
 
 
+#: Ветка подъёма своих шагов после выпуска: имя по предмету, а не по
+#: адресу репозитория — адрес длинный и у потребителя свой (189).
+SELF_BRANCH: Final = "agent/deps-self-{tag}"
+
+
+def self_fragment(tag: str, touched: list[Path]) -> str:
+    """Фрагмент журнала подъёма своих шагов: какие файлы тронуты — по плану, а не буквами."""
+    names = ", ".join(f"`{one.as_posix()}`" for one in sorted(touched))
+    return (
+        f"> **Потребителю безразлично:** поднята прибивка своих шагов в прогонах "
+        f"поставщика ({names}) до `{tag}`; отдаваемые шаги не тронуты.\n\n"
+        f"### Свои шаги подняты до `{tag}`\n\n"
+        f"Выпуск `{tag}` сам поднял вызовы своих шагов по тегу: Dependabot ссылки "
+        f"репозитория на самого себя не предлагает (#1387).\n\n#1387\n"
+    )
+
+
+def calls_itself(root: Path, repo: str) -> bool:
+    """Зовёт ли общая ветка свои шаги по адресу репозитория — до переключения ветки.
+
+    `git grep` отвечает кодом: 0 — нашлось, 1 — нет, прочее — отказ. Код читается
+    здесь, поэтому форма своя, а не `gitcall.output` (тот отказывает на любом
+    ненуле); отсутствие git — третий исход, а не «не зовёт».
+    """
+    try:
+        said = subprocess.run(
+            [
+                "git",
+                "grep",
+                "-q",
+                "-i",
+                "-F",
+                f"{repo}/",
+                f"origin/{paths.TRUNK}",
+                "--",
+                WORKFLOWS.as_posix(),
+            ],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except OSError as exc:
+        raise NotRun(f"git не запустился: {exc}") from exc
+    if said.returncode not in (0, 1):
+        raise NotRun(f"git grep не ответил (код {said.returncode}): {said.stderr.strip()}")
+    return said.returncode == 0
+
+
+def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
+    """Подъём своих шагов до тега выпуска веткой `agent/`. Отдаёт ветку; пусто — нечего.
+
+    ЗАЧЕМ (#1387). Проба передачи зовёт наши шаги по тегу, как потребитель.
+    Dependabot подъёма ссылок репозитория на самого себя не предлагает: замер
+    15–16.10.2026 — сутки после `v1.6.0`, сигнала нет. Решение владельца
+    16.10.2026: пробу поднимает сам выпуск, тем же путём, что перехват, —
+    веткой `agent/` и обычной очередью.
+
+    ФОРК ПОСТАВЩИКА — ТОЖЕ НОЛЬ, И ЭТО ВЕРНО (взгляд на #1421). Его проба зовёт
+    верхний репозиторий, а не себя: теги, к которым она прибита, — выпуски
+    верхнего, и поднимать их выпуском форка значило бы прибить пробу к тегу,
+    которого у верхнего нет.
+
+    У ПОТРЕБИТЕЛЯ ЭТО НОЛЬ, А НЕ ОТКАЗ. Свой репозиторий по тегу он не зовёт —
+    его вызовы ведут к поставщику, — и строк к подъёму нет. Это законная
+    пустота, и выпуск потребителя от неё не краснеет (154).
+    """
+    branch = SELF_BRANCH.format(tag=slug(tag))
+    if git(root, "ls-remote", "--heads", "origin", branch).strip():
+        print(f"ветка {branch} уже есть — подъём не повторяется")
+        return branch
+    sha = git(root, "rev-list", "-n", "1", tag).strip()
+    if not dry_run:
+        # ВЕТКА ПЕРЕКЛЮЧАЕТСЯ, ТОЛЬКО КОГДА ЕСТЬ ЧТО ПОДНИМАТЬ И НЕЧЕГО СТЕРЕТЬ
+        # (взгляд на #1421). Ручная доводка идёт на машине человека: `--force`
+        # молча снёс бы его незакоммиченные правки, а у потребителя, которому
+        # поднимать нечего, ещё и переключил бы ветку без нужды.
+        git(root, "fetch", "--quiet", "origin", paths.TRUNK)
+        if not calls_itself(root, repo):
+            print(f"своих шагов по тегу общая ветка не зовёт — поднимать до {tag} нечего")
+            return ""
+        if git(root, "status", "--porcelain").strip():
+            raise NotRun("в дереве незакоммиченные правки — заход переключает ветку и стёр бы их")
+        git(root, "checkout", "--quiet", "--force", "-B", branch, f"origin/{paths.TRUNK}")
+    planned = plan(root, repo, tag, sha)
+    if not planned:
+        print(f"своих шагов по тегу дерево не зовёт — поднимать до {tag} нечего")
+        return ""
+    touched = list(planned)
+    planned[paths.FRAGMENTS / f"deps-self-{slug(tag)}.internal.md"] = self_fragment(tag, touched)
+    print(f"свои шаги → {tag} ({sha[:7]}), файлов: {len(planned)}")
+    if dry_run:
+        return branch
+    for path, text in planned.items():
+        (root / path).write_text(text, encoding="utf-8")
+    git(root, "add", "--", *[str(path) for path in planned])
+    git(
+        root,
+        "commit",
+        "--quiet",
+        "-m",
+        f"Проба передачи поднята до {tag}\n\nВыпуск {tag} сам поднял прибивку своих шагов:\n"
+        f"Dependabot ссылки репозитория на самого себя не предлагает.\n\n"
+        f"{REFS}\n\nCo-Authored-By: {CO_AUTHOR}\n",
+    )
+    git(root, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
+    return branch
+
+
 def signals(repo: str, token: str) -> list[dict[str, Any]]:
     """Открытые изменения бота."""
     return [
@@ -259,7 +377,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--apply", action="store_true", help="толкнуть ветку и закрыть сигнал")
+    parser.add_argument(
+        "--self",
+        dest="own_tag",
+        metavar="ТЕГ",
+        help="поднять свои шаги до тега выпуска, а не разбирать сигналы бота",
+    )
     args = parser.parse_args(argv)
+    if args.own_tag:
+        if not args.repo:
+            print("не отработал: нет имени проекта", file=sys.stderr)
+            return EXIT_BROKEN
+        report.announce(not args.apply)
+        try:
+            self_bump(args.root, args.repo, args.own_tag, dry_run=not args.apply)
+        except (NotRun, OSError) as exc:
+            print(f"не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        return EXIT_OK
     token = ghrest.token_from_env()
     if not args.repo or not token:
         print("не отработал: нет имени проекта или токена", file=sys.stderr)
