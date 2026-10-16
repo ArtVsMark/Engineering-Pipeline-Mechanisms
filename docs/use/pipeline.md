@@ -44,7 +44,7 @@
 | 5 | Запись журнала | `ci.yml` → `step-journal.yml` | `journal / journal` | через сводный |
 | 6 | Атрибуция коммитов | `ci.yml` → `step-attribution.yml` | `attribution / attribution` | через сводный |
 | 6d | Атрибуция в истории общей ветки | `attribution-history.yml` | `attribution-history` | нет, совещательный |
-| 6a | Ответ по классам проверок | `ci.yml` → `step-pipeline.yml` | `pipeline / pipeline` | через сводный |
+| 6a | Ответ по классам проверок; невидимых символов в дереве нет | `ci.yml` → `step-pipeline.yml` | `pipeline / pipeline` | через сводный |
 | 6c | Поверхность контракта не тронута молча | `ci.yml` → `step-contract.yml` | `contract / contract` | через сводный |
 | 6b | Остаток долга: находки, правила, слитое без взгляда, счёт по пунктам | `ci.yml` → `step-debt.yml` | `debt / debt` | нет, совещательный |
 | 6e | Срок жизни окна, открывшего изменение | `ci.yml` → `step-window-lifetime.yml` | `window-lifetime / window-lifetime` | нет, в очереди разбора |
