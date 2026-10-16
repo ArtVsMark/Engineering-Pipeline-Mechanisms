@@ -123,3 +123,9 @@ def test_selector_and_emoji_name_their_blocks() -> None:
     assert not module.selector("а")
     assert module.emoji(chr(0x1F9D1)) and module.emoji(chr(0x26A0))
     assert not module.emoji("б")
+
+
+def test_varied_names_the_bases_of_a_variation() -> None:
+    """Вариант бывает у эмодзи, у знаков `VARIED` и у иероглифа, но не у буквы и не у селектора."""
+    assert module.varied(chr(0x26A0)) and module.varied("1") and module.varied(chr(0x845B))
+    assert not module.varied("а") and not module.varied(chr(0xFE0F))
