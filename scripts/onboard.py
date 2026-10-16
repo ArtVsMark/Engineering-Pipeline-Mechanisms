@@ -836,14 +836,56 @@ def callers_in(document: dict[Any, Any], repo: str) -> list[tuple[str, dict[Any,
     return found
 
 
-def keep_inputs(new: str, mine: str, repo: str, where: Path) -> str:
+def accepted_inputs(root: Path, address: str, repo: str) -> set[str] | None:
+    """Входы, которые наш шаг или действие объявляет, — по его файлу в нашем дереве.
+
+    `None` — файл не прочитан или входы не объявлены списком: тогда судить,
+    принимает ли шаг вход потребителя, нечем, и его вход сохраняется (045).
+    """
+    path = root / address.removeprefix(f"{repo}/")
+    if path.is_dir():
+        path = path / "action.yml"
+    try:
+        document = policy.run_of(path)
+    except policy.BadPolicy:
+        return None
+    if path.name == "action.yml":
+        inputs = document.get("inputs")
+    else:
+        events = policy.events_raw(document)
+        call = events.get("workflow_call") if isinstance(events, dict) else None
+        inputs = call.get("inputs") if isinstance(call, dict) else None
+    return {str(one) for one in inputs} if isinstance(inputs, dict) else None
+
+
+def merged_inputs(
+    kit: dict[str, Any] | None, theirs: dict[str, Any] | None, accepted: set[str] | None
+) -> tuple[dict[str, Any], list[str]]:
+    """Входы новой заготовки, поверх них — значения потребителя; и что снято.
+
+    Вход, добавленный выпуском, остаётся (взгляд на #1438): прежде входы
+    потребителя заменяли `with:` целиком, и новый — обязательный тоже —
+    терялся. Свой вход потребителя сохраняется, если шаг его объявляет;
+    необъявленный снимается и называется: площадка отвергла бы вызов.
+    """
+    said = dict(kit or {})
+    dropped: list[str] = []
+    for key, value in (theirs or {}).items():
+        if accepted is None or key in said or key in accepted:
+            said[key] = value
+        else:
+            dropped.append(str(key))
+    return said, dropped
+
+
+def keep_inputs(new: str, mine: str, repo: str, where: Path, root: Path) -> str:
     """Новая заготовка с ВХОДАМИ потребителя: `with:` — его данные, обновление их не трогает.
 
     РЕШЕНИЕ ВЛАДЕЛЬЦА 16.10.2026 ПО #1386: заготовка сама приглашает править
-    входы под проект, поэтому входы не судятся и переносятся в новую
-    заготовку. Совпадают — текст заготовки как есть, с её пояснениями. Нет —
-    заготовка пересобирается разбором, вызовы сопоставляются по адресу и
-    порядку, а пояснения заменяет одна строка о сохранённых входах.
+    входы под проект, поэтому входы не судятся и переносятся. Вызовы
+    сопоставляются по адресу и ПОРЯДКОВОМУ НОМЕРУ — и в сверке, и в переносе
+    (взгляд на #1438: сверка шла с первым набором адреса). Совпало всё —
+    текст заготовки как есть, с её пояснениями; нет — пересборка разбором.
     """
     try:
         fresh = policy.run_text(new, str(where))
@@ -853,25 +895,32 @@ def keep_inputs(new: str, mine: str, repo: str, where: Path) -> str:
     given: dict[str, list[Any]] = {}
     for address, node in callers_in(theirs, repo):
         given.setdefault(address, []).append(node.get("with"))
-    calls = callers_in(fresh, repo)
-    if all(node.get("with") == (given.get(address) or [None])[0] for address, node in calls):
-        return new
     seen: dict[str, int] = {}
-    for address, node in calls:
+    changed = False
+    dropped: list[str] = []
+    for address, node in callers_in(fresh, repo):
         at = seen.get(address, 0)
         seen[address] = at + 1
         said = given.get(address) or []
-        inputs = said[at] if at < len(said) else node.get("with")
-        if inputs:
+        if at >= len(said):
+            continue
+        inputs, lost = merged_inputs(
+            node.get("with"), said[at], accepted_inputs(root, address, repo)
+        )
+        dropped += lost
+        if inputs != (node.get("with") or {}):
+            changed = True
             node["with"] = inputs
-        else:
-            node.pop("with", None)
+    if not changed:
+        return new
     body = {("on" if key is True else key): value for key, value in fresh.items()}
-    return (
-        "# Заготовка `scripts/onboard.py --update`: входы `with:` — ваши, обновление\n"
-        "# их сохранило; остальное — заготовка поставщика.\n"
-        + str(yaml.safe_dump(body, allow_unicode=True, sort_keys=False))
+    head = (
+        "# Заготовка `scripts/onboard.py --update`: входы `with:` — ваши поверх входов\n"
+        "# выпуска; остальное — заготовка поставщика.\n"
     )
+    if dropped:
+        head += f"# Сняты входы, которых шаг не объявляет: {', '.join(sorted(dropped))}.\n"
+    return head + str(yaml.safe_dump(body, allow_unicode=True, sort_keys=False))
 
 
 def essence(text: str, repo: str, where: Path) -> dict[str, Any]:
@@ -995,7 +1044,7 @@ def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path,
             if tags[0] == new_tag(text, repo):
                 update.current.append(path)
             else:
-                update.write[path] = keep_inputs(text, mine, repo, path)
+                update.write[path] = keep_inputs(text, mine, repo, path, root)
             continue
         if tags[0] not in pin_old:
             pin_old[tags[0]] = owned_at(root, tags[0], repo)
@@ -1005,7 +1054,7 @@ def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path,
         elif essence(mine, repo, path) != essence(before, repo, path):
             update.edited[path] = gap(before, mine, path, repo)
         else:
-            update.write[path] = keep_inputs(text, mine, repo, path)
+            update.write[path] = keep_inputs(text, mine, repo, path, root)
 
 
 def new_tag(text: str, repo: str) -> str:
@@ -1031,7 +1080,14 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
         for said in our_uses(repo).finditer(text)
         if Path(said["address"]).name.startswith(STEP_PREFIX)
     }
-    lifted = our_uses(repo).sub(lambda said: f"{said['address']}@{pin}", text)
+
+    def lift(said: re.Match[str]) -> str:
+        """Тег поднимается только у шага, который выпуск отдаёт (взгляд на #1438)."""
+        name = Path(said["address"]).name
+        gone = name.startswith(STEP_PREFIX) and Path(name).stem[len(STEP_PREFIX) :] not in pipeline
+        return said[0] if gone else f"{said['address']}@{pin}"
+
+    lifted = our_uses(repo).sub(lift, text)
     if lifted != text:
         update.write[paths.WORKFLOWS / PIPELINE_FLOW] = lifted
     for one in sorted(set(pipeline) - called):
@@ -1039,7 +1095,10 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
             f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
         )
     for one in sorted(called - set(pipeline)):
-        update.notes.append(f"шаг `{one}` в выпуске {pin} не отдаётся — снимите его вызов")
+        update.notes.append(
+            f"шаг `{one}` в выпуске {pin} не отдаётся — его вызов оставлен на прежнем теге; "
+            "снимите его"
+        )
 
 
 def plan_answer(update: Update, consumer: Path, wanted: list[str]) -> None:

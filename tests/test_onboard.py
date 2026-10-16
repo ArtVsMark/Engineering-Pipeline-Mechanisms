@@ -1266,9 +1266,9 @@ def test_keep_inputs_leaves_the_kit_as_is_when_inputs_agree() -> None:
     """Входы совпали — текст заготовки как есть, с её пояснениями."""
     new = "# пояснение\non: push\njobs:\n  a:\n    uses: o/r/.github/workflows/step-x.yml@v2\n"
     mine = "on: push\njobs:\n  a:\n    uses: o/r/.github/workflows/step-x.yml@v1\n"
-    assert module.keep_inputs(new, mine, "o/r", Path("x.yml")) == new
+    assert module.keep_inputs(new, mine, "o/r", Path("x.yml"), Path("нет")) == new
     edited = mine.replace("@v1\n", "@v1\n    with:\n      k: 2\n")
-    kept = module.keep_inputs(new, edited, "o/r", Path("x.yml"))
+    kept = module.keep_inputs(new, edited, "o/r", Path("x.yml"), Path("нет"))
     said = module.policy.run_text(kept, "x.yml")
     assert said["jobs"]["a"] == {"uses": "o/r/.github/workflows/step-x.yml@v2", "with": {"k": 2}}
     assert module.policy.events_raw(said) == "push"
@@ -1287,3 +1287,72 @@ def test_callers_in_finds_job_and_step_calls_in_order() -> None:
         "o/r/.github/workflows/step-x.yml",
         "o/r/.github/actions/y",
     ]
+
+
+def test_an_input_added_by_the_release_is_kept(tmp_path: Path) -> None:
+    """Новый вход выпуска остаётся, свой вход потребителя — поверх (взгляд на #1438)."""
+    head = "on: push\njobs:\n  a:\n    uses: o/r/.github/workflows/step-x.yml"
+    new = head + "@v2\n    with:\n      fresh: 2\n"
+    mine = head + "@v1\n    with:\n      k: 9\n"
+    said = module.policy.run_text(
+        module.keep_inputs(new, mine, "o/r", Path("x.yml"), tmp_path), "x"
+    )
+    assert said["jobs"]["a"]["with"] == {"fresh": 2, "k": 9}
+
+
+def test_inputs_are_matched_by_the_order_of_the_call(tmp_path: Path) -> None:
+    """Два вызова одного адреса: правка второго не теряется в сверке (взгляд на #1438)."""
+    call = "    uses: o/r/.github/workflows/step-x.yml@{tag}\n    with:\n      k: {k}\n"
+    new = (
+        "on: push\njobs:\n  a:\n"
+        + call.format(tag="v2", k=1)
+        + "  b:\n"
+        + call.format(tag="v2", k=1)
+    )
+    mine = (
+        "on: push\njobs:\n  a:\n"
+        + call.format(tag="v1", k=1)
+        + "  b:\n"
+        + call.format(tag="v1", k=5)
+    )
+    said = module.policy.run_text(
+        module.keep_inputs(new, mine, "o/r", Path("x.yml"), tmp_path), "x"
+    )
+    assert said["jobs"]["a"]["with"] == {"k": 1} and said["jobs"]["b"]["with"] == {"k": 5}
+
+
+def test_an_input_the_step_does_not_declare_is_dropped_and_named(tmp_path: Path) -> None:
+    """Вход, которого шаг не объявляет, снимается и называется: площадка отвергла бы вызов."""
+    step = tmp_path / ".github" / "workflows" / "step-x.yml"
+    step.parent.mkdir(parents=True)
+    step.write_text(
+        "on:\n  workflow_call:\n    inputs:\n      fresh: {}\n      k: {}\njobs: {}\n", "utf-8"
+    )
+    assert module.accepted_inputs(tmp_path, "o/r/.github/workflows/step-x.yml", "o/r") == {
+        "fresh",
+        "k",
+    }
+    new = "on: push\njobs:\n  a:\n    uses: o/r/.github/workflows/step-x.yml@v2\n"
+    mine = new.replace("@v2\n", "@v1\n    with:\n      k: 1\n      old: 2\n")
+    kept = module.keep_inputs(new, mine, "o/r", Path("x.yml"), tmp_path)
+    assert module.policy.run_text(kept, "x")["jobs"]["a"]["with"] == {"k": 1}
+    assert "Сняты входы" in kept and "old" in kept
+    assert module.merged_inputs({"a": 1}, {"b": 2}, None) == ({"a": 1, "b": 2}, [])
+
+
+def test_a_withdrawn_step_keeps_its_old_tag(tmp_path: Path) -> None:
+    """Снятый выпуском шаг не переводится на тег, где его нет (взгляд на #1438)."""
+    consumer = tmp_path
+    flows = consumer / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    repo = "o/r"
+    (flows / "ci.yml").write_text(
+        "jobs:\n  a:\n    uses: o/r/.github/workflows/step-a.yml@v1\n"
+        "  b:\n    uses: o/r/.github/workflows/step-b.yml@v1\n",
+        encoding="utf-8",
+    )
+    plan = module.Update()
+    module.plan_ci(plan, consumer, ["a"], repo, "v2")
+    text = plan.write[module.paths.WORKFLOWS / module.PIPELINE_FLOW]
+    assert "step-a.yml@v2" in text and "step-b.yml@v1" in text
+    assert any("`b`" in one and "прежнем теге" in one for one in plan.notes)
