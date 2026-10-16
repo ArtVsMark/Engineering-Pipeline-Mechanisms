@@ -542,3 +542,53 @@ def test_nobody_finishes_an_epic_or_a_live_task() -> None:
     assert module.nobody_finishes(an_issue(f"{module.findings.MARKER}\nтело"))
     assert module.nobody_finishes(an_issue(f"{module.findings.PLAN_MARKER}\nтело"))
     assert not module.nobody_finishes(an_issue("- [x] пункт\n", labels=("enhancement",)))
+
+
+def test_the_merge_fate_publishes_first_and_then_finishes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--fate` зовёт доводку — и только ПОСЛЕ записи судьбы связи (взгляд на #1418).
+
+    Отказ доводки на площадке не должен уносить найденное `fate`: его запись к
+    этому моменту уже в задаче. Закрытие называется аннотацией, а не молчит.
+    """
+    order: list[str] = []
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module, "linked", lambda *a: ([12], linked_change("Refs #12")))
+    monkeypatch.setattr(module, "fate", lambda *a: {12: "не сбылось"})
+    monkeypatch.setattr(module, "publish", lambda *a: order.append("publish"))
+
+    def finishing(*_a: object, **_k: object) -> tuple[list[int], list[int]]:
+        order.append("finish")
+        return [12], []
+
+    monkeypatch.setattr(module, "finish", finishing)
+    code = module.main(["--repo", "o/r", "--fate", "--pr", "7", "--apply"])
+    assert code == module.EXIT_RECORDED
+    assert order == ["publish", "finish"], order
+    assert "::notice::#12" in capsys.readouterr().out
+
+
+def test_an_agent_marking_is_followed_by_finishing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Разбор агентом отмечает пункты позже `--fate` — доводка зовётся и после него."""
+    called: list[str] = []
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module, "linked", lambda *a: ([12], linked_change("Refs #12")))
+    monkeypatch.setattr(module.late_look, "answer_of", lambda _text: "ответ")
+    monkeypatch.setattr(module, "proposals", lambda _a: ([("пункт", "тест")], []))
+    monkeypatch.setattr(module, "publish", lambda *a: None)
+    monkeypatch.setattr(
+        module.items, "mark", lambda *a, **k: module.items.Outcome(["пункт"], [], [])
+    )
+
+    def finishing(*_a: object, **_k: object) -> tuple[list[int], list[int]]:
+        called.append("finish")
+        return [], []
+
+    monkeypatch.setattr(module, "finish", finishing)
+    run = tmp_path / "run.json"
+    run.write_text("{}", encoding="utf-8")
+    module.main(["--repo", "o/r", "--pr", "7", "--from", str(run), "--apply"])
+    assert called == ["finish"]

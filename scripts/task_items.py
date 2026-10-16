@@ -244,6 +244,9 @@ def finish(
     У задачи без пунктов судить не о чем: она получает предложение закрыть, один
     раз, а не закрывается (045). Навык окна — первая линия: последнее изменение
     несёт `Closes`; это страховка, которая ловит пропущенное навыком.
+
+    ЗОВЁТСЯ ДВАЖДЫ: на судьбе связи (`--fate`, после отметки автором `--sweep`)
+    и после записи разбора агентом (`--from`), который отмечает пункты позже.
     """
     number = int(change.get("number") or 0)
     closed: list[int] = []
@@ -290,6 +293,14 @@ def finish(
             )
             publish(repo, [link.number], note, token)
     return closed, asked
+
+
+def told(closed: list[int], asked: list[int]) -> None:
+    """Называет доводку аннотацией прогона: закрытие задачи не проходит молча."""
+    for one in closed:
+        print(f"::notice::#{one}: все пункты отмечены — задача закрыта механизмом")
+    for one in asked:
+        print(f"::notice::#{one}: пунктов приёмки нет — предложено закрыть")
 
 
 def render(number: int, answer: str, paired: list[tuple[str, str]], bare: list[str]) -> str:
@@ -387,16 +398,10 @@ def main(argv: list[str] | None = None) -> int:
             _, change = linked(args.repo, args.pr, token)
             links = changerefs.links_in(str(change.get("body") or ""))
             said = fate(args.repo, change, links, token)
-            # СУДЬБА СУДИТСЯ ДО ДОВОДКИ: задача, закрытая механизмом ниже, закрыта
-            # не коммитом слияния, и вторая сторона `fate` её не вменит.
-            closed, asked = finish(args.repo, change, links, token, dry_run=not args.apply)
-            for one in closed:
-                print(f"#{one}: все пункты отмечены — задача закрыта механизмом")
-            for one in asked:
-                print(f"#{one}: пунктов приёмки нет — предложено закрыть")
-            if not said:
-                print(f"#{args.pr}: связь с задачами сбылась — расхождений нет")
-                return EXIT_NOTHING
+            # СУДЬБА СУДИТСЯ И ПУБЛИКУЕТСЯ ДО ДОВОДКИ. Задача, закрытая доводкой,
+            # закрыта не коммитом слияния, и вторая сторона `fate` её не вменит;
+            # а отказ доводки на площадке не уносит найденного `fate` (взгляд на
+            # #1418): его записи к этому моменту уже в задаче.
             for number, why in sorted(said.items()):
                 note = "\n".join(
                     [
@@ -411,6 +416,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"#{number}: {why}")
                 if args.apply:
                     publish(args.repo, [number], note, token)
+            told(*finish(args.repo, change, links, token, dry_run=not args.apply))
+            if not said:
+                print(f"#{args.pr}: связь с задачами сбылась — расхождений нет")
+                return EXIT_NOTHING
             return EXIT_RECORDED
 
         if args.follow:
@@ -442,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
             print("разбор не назвал ни одного закрытого пункта с доказательством")
             return EXIT_NOTHING
 
-        numbers, _ = linked(args.repo, args.pr, token)
+        numbers, change = linked(args.repo, args.pr, token)
         note = render(args.pr, answer, paired, bare)
         if not args.apply:
             print(note)
@@ -455,6 +464,10 @@ def main(argv: list[str] | None = None) -> int:
         # Пометка основания живёт в комментарии, а не в тексте пункта: пункт
         # узнаётся по тексту, и приписка к нему сделала бы его ненаходимым.
         outcome = items.mark(args.repo, numbers, [item for item, _ in paired], token)
+        # РАЗБОР ОТМЕЧАЕТ ПОЗЖЕ `--fate` (шаг «записать разобранное» идёт после
+        # судьбы), и последний пункт, закрытый им, оставил бы задачу открытой до
+        # следующего слияния (взгляд на #1418). Поэтому доводка зовётся и здесь.
+        told(*finish(args.repo, change, changerefs.links_in(str(change.get("body") or "")), token))
         # «ОТМЕТИЛ НОЛЬ ИЗ ТРЁХ» И «ОТМЕТИЛ ВСЁ» СНАРУЖИ ОДИНАКОВЫ, и это уже
         # стоило эпику вранья о себе: замер 12.09.2026 — разбор по #232
         # написал «Закрыто: 2. Слияние отдаётся площадке», галочка не встала, а
