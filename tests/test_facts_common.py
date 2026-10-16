@@ -336,7 +336,7 @@ def test_the_shared_step_names_the_supplier_it_checked_out() -> None:
     assert '--supplier "$SUPPLIER"' in made[0]["run"]
 
 
-# --- сверка с договором витрины по тегу (#1337) ------------------------------
+# --- сверка с договором семьи по тегу (#1337, #1396) -------------------------
 
 
 def contract_step() -> dict[str, Any]:
@@ -351,15 +351,27 @@ def contract_step() -> dict[str, Any]:
 
 
 def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
-    """Тег проверки, номер формы и тег в шаге — один договор, а не три записи (#1337)."""
+    """Тег проверки, номер формы и тег в шаге — один договор, а не три записи (#1337).
+
+    Номер формы отстаёт от тега ровно на объявленный переезд (#1396): мажор
+    формы — `SCHEMA_LAGS_TO`, и только пока он объявлен. Без него форма и тег
+    обязаны совпасть до минора.
+    """
     tag = module.CONTRACT_TAG
-    assert tag.startswith("facts-v") and tag.removeprefix("facts-v").startswith(f"{module.SCHEMA}.")
+    assert tag.startswith("facts-v")
+    said = tag.removeprefix("facts-v")
+    major = module.SCHEMA.split(".")[0]
+    assert said.startswith(f"{module.SCHEMA}.") or major == module.SCHEMA_LAGS_TO, (
+        tag,
+        module.SCHEMA,
+    )
     assert contract_step()["env"]["FACTS_CONTRACT"] == tag
 
 
 #: Строка, которой `check_facts.py --file` выпуска называет расхождения:
 #: `print(f"{args.repo}: {'договору отвечает' if not found else f'расхождений {len(found)}'}")`
-#: (тег `facts-v1.6.0`, `main`). Шаг судит по ней, а не по одному коду.
+#: (тег `facts-v2.0.0` каталога — строка та же, что у витрины 1.6).
+#: Шаг судит по ней, а не по одному коду.
 MISMATCH: str = "o/a: расхождений 3"
 
 
