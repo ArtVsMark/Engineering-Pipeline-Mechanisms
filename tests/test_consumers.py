@@ -233,12 +233,13 @@ def test_without_a_sweep_the_silent_are_named_unseen(
 
 
 def test_a_declared_registry_without_a_sweep_is_not_read_whole(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Реестр не пуст, ответы прочитаны, обхода нет — исход 3: молча подключённых не видно."""
     root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
     answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
     assert module.main(["--root", str(root)]) == module.EXIT_UNREAD
+    assert capsys.readouterr().out.strip().splitlines()[-1].startswith("обход семьи не передан")
     assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
         module.EXIT_OK
     )
