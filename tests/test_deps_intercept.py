@@ -421,7 +421,50 @@ def test_a_dry_release_lift_touches_nothing(stand: Path) -> None:
 
 
 def test_the_self_fragment_says_why_it_does_not_matter_to_the_consumer() -> None:
-    """Фрагмент — `internal` с причиной первой строкой и адресом задачи последней."""
-    text = module.self_fragment("v2.0.0")
+    """Фрагмент — `internal` с причиной первой строкой, тронутым по плану и адресом последней."""
+    text = module.self_fragment("v2.0.0", [Path(".github/workflows/handover-probe.yml")])
     assert text.startswith("> **Потребителю безразлично:**")
+    assert "`.github/workflows/handover-probe.yml`" in text
     assert text.rstrip().endswith("#1387")
+
+
+def test_the_fragment_names_what_the_plan_touched(stand: Path) -> None:
+    """Фрагмент называет файлы, которые поднял план, а не пробу буквами (взгляд на #1421)."""
+    with_own_calls(stand)
+    other = stand / module.paths.WORKFLOWS / "other.yml"
+    other.write_text("jobs:\n  x:\n    uses: o/r/.github/workflows/step-x.yml@v1.0.0\n")
+    git(stand, "add", "-A")
+    git(stand, "commit", "--quiet", "-m", "второй")
+    git(stand, "push", "--quiet", "origin", "HEAD:main")
+    git(stand, "tag", "-f", "v2.0.0")
+    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    note = git(stand, "show", f"origin/{branch}:changelog.d/deps-self-v2.0.0.internal.md")
+    assert "`.github/workflows/other.yml`" in note and "handover-probe.yml" in note
+
+
+def test_a_dirty_tree_is_not_switched(stand: Path) -> None:
+    """Незакоммиченная правка — отказ, а не молчаливый снос веткой (взгляд на #1421)."""
+    with_own_calls(stand)
+    (stand / "wip.txt").write_text("не сохранено", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="незакоммиченные"):
+        module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    assert (stand / "wip.txt").read_text(encoding="utf-8") == "не сохранено"
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
+def test_a_consumer_branch_is_not_switched(stand: Path) -> None:
+    """Поднимать нечего — ветка человека не переключается (взгляд на #1421)."""
+    git(stand, "tag", "v2.0.0")
+    (stand / "wip.txt").write_text("своё", encoding="utf-8")
+    assert module.self_bump(stand, "o/r", "v2.0.0", dry_run=False) == ""
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    assert (stand / "wip.txt").exists()
+
+
+def test_calls_itself_reads_the_trunk_not_the_worktree(stand: Path) -> None:
+    """Вопрос «зовём ли себя» задаётся общей ветке: правка в рабочем дереве ответа не меняет."""
+    assert not module.calls_itself(stand, "o/r")
+    with_own_calls(stand)
+    git(stand, "fetch", "--quiet", "origin")
+    assert module.calls_itself(stand, "o/r")
+    assert not module.calls_itself(stand, "chuzhoj/repo")

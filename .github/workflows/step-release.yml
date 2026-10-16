@@ -322,7 +322,7 @@ jobs:
           case "$rc" in
             0) ;;
             *)
-              echo "::error::Свои шаги до v${version} не подняты (код $rc). Выпуск сделан и повторять его НЕ надо: подъём доводится заходом deps_intercept.py --self v${version} --apply из кода механизмов на теге шага"
+              echo "::error::Свои шаги до v${version} не подняты (код $rc). Выпуск сделан и повторять его НЕ надо: подъём доводится заходом deps_intercept.py --self v${version} --repo ${GITHUB_REPOSITORY} --apply из кода механизмов на теге шага"
               exit 1
               ;;
           esac
