@@ -2,8 +2,8 @@
   "schema": "1.6",
   "schema_of": "контракт фактов витрины семьи: https://github.com/ArtVsMark/ArtVsMark/blob/main/.rules/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-16T01:41:49+00:00",
-  "commit": "a5e5dd4473f14a33e4f907448cee9f963afb6b4c",
+  "generated_at": "2026-10-16T08:03:28+00:00",
+  "commit": "22f8a67cd17f318718da87a296e1f095c7198569",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,7 +19,7 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.6.15",
+  "version": "1.6.16",
   "release": "1.6",
   "coverage_percent": 93.4,
   "tests": {
@@ -494,9 +494,9 @@
                 "step-review"
               ],
               "refs": [
-                "c36d16b1abe889e16be1b4a4b2fbd7a165a2e147"
+                "817255779cdd01caeeb01a3f804fa145c9e1217d"
               ],
-              "contract": ">=0.7,<0.8"
+              "contract": ">=0.8,<0.9"
             },
             {
               "repo": "ArtVsMark/Engineering-Incidents-Playbook",
@@ -515,13 +515,11 @@
             "release": "v1.6.0",
             "steps": "0.8",
             "of": 2,
-            "fresh": 0,
+            "fresh": 1,
             "in_range": 0,
             "in_range_repos": [],
             "branch_repos": [],
-            "behind_repos": [
-              "ArtVsMark/ArtVsMark"
-            ],
+            "behind_repos": [],
             "ahead_repos": [],
             "undeclared_repos": [
               "ArtVsMark/Engineering-Incidents-Playbook"
