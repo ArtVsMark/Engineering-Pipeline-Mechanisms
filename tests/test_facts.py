@@ -793,7 +793,8 @@ def test_the_shared_step_draws_the_picture_before_it_publishes() -> None:
 #: ушли; держит это чтение изменения, а не гейт.
 FACTS_PUBLISH_RUN: Final = (
     'python $MECHANISMS/scripts/publish_facts.py "$RUNNER_TEMP/facts/facts.json" '
-    '--workdir "$RUNNER_TEMP/publish" --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY"'
+    '--workdir "$RUNNER_TEMP/publish" --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" '
+    "$ARCHIVE_FLAG"
 )
 
 

@@ -75,9 +75,9 @@
 | 12h | Пропущенный и упавший заход по расписанию | `schedules-seen.yml` → `step-schedules-seen.yml` (по `workflow_run` от `ci`) | `schedules-seen / schedules-seen` | нет, совещательный |
 | 13 | Каталог правил: входящие | `rules-inbox.yml` | `inbox` | нет |
 | 13a | Дрейф: внешний вход сдвинулся | `drift.yml` → `step-drift.yml` (по расписанию) | `drift / drift` | нет, совещательный |
-| 14 | Значки, метрики, публикация, архив находок | `badges.yml` | `badges` | нет |
+| 14 | Значки, метрики, публикация | `badges.yml` | `badges` | нет |
 | 14b | Входы общего шага фактов: свои разделы и покрытие — файлом | `badges.yml` | `inputs` | нет |
-| 14c | Факты: общий издатель семьи, сверка со схемой витрины, публикация `facts.json` и значка `project.svg` поверх `badges` — свой файл потребителя по этим путям перезаписывается | `badges.yml` → `step-facts.yml` | `facts / facts` | нет |
+| 14c | Факты: общий издатель семьи, сверка со схемой витрины, публикация `facts.json` и значка `project.svg` поверх `badges` — свой файл потребителя по этим путям перезаписывается; со входом `archive` тем же коммитом — архив находок `findings.json` | `badges.yml` → `step-facts.yml` | `facts / facts` | нет |
 | 14a | Ряд прогонов: как конвейер работает на самом деле | `runs-series.yml` → `step-runs-series.yml` (по расписанию и кнопкой) | `runs-series / runs-series` | нет |
 | 15 | Состав меток: дерево — источник | `labels-sync.yml` → `step-labels-sync.yml` | `apply / apply` | нет |
 | 16 | Сверка обязательного контекста с защитой | `required-context.yml` → `step-required-context.yml` | `compare / compare` | нет |
