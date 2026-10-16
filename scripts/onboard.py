@@ -70,14 +70,27 @@
 Исходы (правило 039): ``0`` заготовка собрана · ``2`` не отработал ·
 ``3`` отдавать нечего: ни один шаг не помечен · ``4`` прибивка не несёт
 помеченного: выпуск отстал от дерева · ``5`` с ``--write``: путь заготовки в
-дереве потребителя уже занят.
+дереве потребителя уже занят · ``6`` общая ветка потребителя не ``main`` ·
+``7`` с ``--update``: наш файл правлен по существу, не записано ничего.
+
+ОБНОВЛЕНИЕ — ВТОРАЯ ДВЕРЬ, `--update` (#1386). Наш файл сверяется с заготовкой
+СВОЕГО тега по существу вызова, а не по тексту; совпал — переписывается новой
+заготовкой, разошёлся — отказ на всё обновление с разницей для поставщика.
+Подробно — у функции `update`.
 """
 
 import argparse
 import ast
+import contextlib
+import difflib
+import io
 import json
 import re
+import subprocess
 import sys
+import tarfile
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
@@ -100,6 +113,9 @@ EXIT_OCCUPIED: Final = 5
 #: Общая ветка потребителя — не `paths.TRUNK`. Механизмы её имя не угадывают:
 #: база гейтов, предмет дрейфа и цель выпуска оказались бы чужими (#1220).
 EXIT_FOREIGN_TRUNK: Final = 6
+#: С `--update`: наш файл у потребителя правлен по существу. Обновление не
+#: пишет ни одного файла — половина обновления хуже никакого (#1386).
+EXIT_HAND_EDITED: Final = 7
 
 #: Приставка вынесенного шага. Помеченным бывает и не шаг — пакет, действие, —
 #: а заготовку вызова собирают только из прогонов, которые ЗОВУТ.
@@ -760,6 +776,349 @@ def caller(name: str, repo: str, pin: str) -> str:
     )
 
 
+# --- обновление (#1386) ------------------------------------------------------
+
+
+def our_uses(repo: str) -> re.Pattern[str]:
+    """Вызов нашего адреса с тегом: `address` — без тега, `tag` — сам тег."""
+    return re.compile(rf"(?P<address>{re.escape(repo)}/[^@\s'\"]+)@(?P<tag>[^\s'\"#]+)")
+
+
+def events(document: dict[Any, Any]) -> dict[str, Any]:
+    """События прогона одной формой — словарём, как бы они ни были записаны."""
+    raw = policy.events_raw(document)
+    if isinstance(raw, dict):
+        return {str(key): value for key, value in raw.items()}
+    if isinstance(raw, list):
+        return {str(one): None for one in raw}
+    return {str(raw): None} if raw else {}
+
+
+def calls_of(document: dict[Any, Any], repo: str) -> list[dict[str, Any]]:
+    """Вызовы наших шагов и действий в прогоне — без тега и в порядке, не зависящем от записи."""
+    pattern = our_uses(repo)
+    found: list[dict[str, Any]] = []
+    for job in (document.get("jobs") or {}).values():
+        body = job if isinstance(job, dict) else {}
+        said = pattern.fullmatch(str(body.get("uses") or ""))
+        if said:
+            found.append(
+                {
+                    "uses": said["address"],
+                    "secrets": body.get("secrets") or {},
+                    "permissions": body.get("permissions") or {},
+                }
+            )
+        for step in body.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            said = pattern.fullmatch(str(step.get("uses") or ""))
+            if said:
+                found.append({"uses": said["address"]})
+    return sorted(found, key=lambda one: json.dumps(one, sort_keys=True, default=str))
+
+
+def callers_in(document: dict[Any, Any], repo: str) -> list[tuple[str, dict[Any, Any]]]:
+    """Узлы вызова наших шагов и действий в порядке записи: адрес без тега и сам узел."""
+    pattern = our_uses(repo)
+    found: list[tuple[str, dict[Any, Any]]] = []
+    for job in (document.get("jobs") or {}).values():
+        body = job if isinstance(job, dict) else {}
+        said = pattern.fullmatch(str(body.get("uses") or ""))
+        if said:
+            found.append((said["address"], body))
+        for step in body.get("steps") or []:
+            said = (
+                pattern.fullmatch(str(step.get("uses") or "")) if isinstance(step, dict) else None
+            )
+            if said and isinstance(step, dict):
+                found.append((said["address"], step))
+    return found
+
+
+def accepted_inputs(root: Path, address: str, repo: str) -> set[str] | None:
+    """Входы, которые наш шаг или действие объявляет, — по его файлу в нашем дереве.
+
+    `None` — файл не прочитан или входы не объявлены списком: тогда судить,
+    принимает ли шаг вход потребителя, нечем, и его вход сохраняется (045).
+    """
+    path = root / address.removeprefix(f"{repo}/")
+    if path.is_dir():
+        path = path / "action.yml"
+    try:
+        document = policy.run_of(path)
+    except policy.BadPolicy:
+        return None
+    if path.name == "action.yml":
+        inputs = document.get("inputs")
+    else:
+        events = policy.events_raw(document)
+        call = events.get("workflow_call") if isinstance(events, dict) else None
+        inputs = call.get("inputs") if isinstance(call, dict) else None
+    return {str(one) for one in inputs} if isinstance(inputs, dict) else None
+
+
+def merged_inputs(
+    kit: dict[str, Any] | None, theirs: dict[str, Any] | None, accepted: set[str] | None
+) -> tuple[dict[str, Any], list[str]]:
+    """Входы новой заготовки, поверх них — значения потребителя; и что снято.
+
+    Вход, добавленный выпуском, остаётся (взгляд на #1438): прежде входы
+    потребителя заменяли `with:` целиком, и новый — обязательный тоже —
+    терялся. Свой вход потребителя сохраняется, если шаг его объявляет;
+    необъявленный снимается и называется: площадка отвергла бы вызов.
+    """
+    said = dict(kit or {})
+    dropped: list[str] = []
+    for key, value in (theirs or {}).items():
+        if accepted is None or key in said or key in accepted:
+            said[key] = value
+        else:
+            dropped.append(str(key))
+    return said, dropped
+
+
+def keep_inputs(new: str, mine: str, repo: str, where: Path, root: Path) -> str:
+    """Новая заготовка с ВХОДАМИ потребителя: `with:` — его данные, обновление их не трогает.
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 16.10.2026 ПО #1386: заготовка сама приглашает править
+    входы под проект, поэтому входы не судятся и переносятся. Вызовы
+    сопоставляются по адресу и ПОРЯДКОВОМУ НОМЕРУ — и в сверке, и в переносе
+    (взгляд на #1438: сверка шла с первым набором адреса). Совпало всё —
+    текст заготовки как есть, с её пояснениями; нет — пересборка разбором.
+    """
+    try:
+        fresh = policy.run_text(new, str(where))
+        theirs = policy.run_text(mine, str(where))
+    except policy.BadPolicy as exc:
+        raise NotRun(str(exc)) from exc
+    given: dict[str, list[Any]] = {}
+    for address, node in callers_in(theirs, repo):
+        given.setdefault(address, []).append(node.get("with"))
+    seen: dict[str, int] = {}
+    changed = False
+    dropped: list[str] = []
+    for address, node in callers_in(fresh, repo):
+        at = seen.get(address, 0)
+        seen[address] = at + 1
+        said = given.get(address) or []
+        if at >= len(said):
+            continue
+        inputs, lost = merged_inputs(
+            node.get("with"), said[at], accepted_inputs(root, address, repo)
+        )
+        dropped += lost
+        if inputs != (node.get("with") or {}):
+            changed = True
+            node["with"] = inputs
+    if not changed:
+        return new
+    body = {("on" if key is True else key): value for key, value in fresh.items()}
+    head = (
+        "# Заготовка `scripts/onboard.py --update`: входы `with:` — ваши поверх входов\n"
+        "# выпуска; остальное — заготовка поставщика.\n"
+    )
+    if dropped:
+        head += f"# Сняты входы, которых шаг не объявляет: {', '.join(sorted(dropped))}.\n"
+    return head + str(yaml.safe_dump(body, allow_unicode=True, sort_keys=False))
+
+
+def essence(text: str, repo: str, where: Path) -> dict[str, Any]:
+    """Существо вызывающего прогона: что сравнивается, а что — форма записи.
+
+    РЕШЕНИЯ ВЛАДЕЛЬЦА 16.10.2026 ПО #1386. Сравниваются адрес вызова без тега,
+    секреты, события и права. Входы `with:` — данные потребителя, их правит он
+    сам, и они переносятся (`keep_inputs`), а не судятся. Комментарии, порядок
+    и форма записи не в счёт: вызывающие у живого потребителя пишутся рукой, и сравнение
+    байт в байт отказывало бы витрине на каждом файле — замер в #1386.
+    """
+    try:
+        document = policy.run_text(text, str(where))
+    except policy.BadPolicy as exc:
+        raise NotRun(str(exc)) from exc
+    return {
+        "on": events(document),
+        "permissions": document.get("permissions") or {},
+        "calls": calls_of(document, repo),
+    }
+
+
+def owned(root: Path, repo: str, pin: str) -> dict[Path, str]:
+    """Целиком наши файлы заготовки: свои прогоны механизмов и сводный гейт."""
+    names = steps(root)
+    files = {
+        paths.WORKFLOWS / flow.name: own_kit(flow, one, repo, pin)
+        for one, flow in sorted(own_callers(root, names).items())
+    }
+    files[paths.WORKFLOWS / SUMMARY_FLOW] = summary_kit(root, repo, pin)
+    return files
+
+
+def owned_at(root: Path, tag: str, repo: str) -> dict[Path, str]:
+    """Наши файлы заготовки, какими их клал выпуск `tag`: с ними сверяется дерево потребителя.
+
+    Дерево выпуска выгружается из истории поставщика, а собирается ТЕМ ЖЕ
+    кодом, что и новая заготовка: иначе разница кода выдала бы себя за правку
+    потребителя. Файл, которого тот выпуск не собирает (сводного гейта до
+    #1385 не было), в ответ не входит: сверить его не с чем, и это решает
+    зовущий.
+    """
+    try:
+        archive = subprocess.run(
+            ["git", "-C", str(root), "archive", "--format=tar", tag],
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise NotRun(f"git не запустился: {exc}") from exc
+    if archive.returncode:
+        said = archive.stderr.decode("utf-8", "replace").strip()
+        raise NotRun(f"дерево выпуска {tag} не выгружено: {said or archive.returncode}")
+    with tempfile.TemporaryDirectory() as where:
+        with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+            tar.extractall(where, filter="data")
+        old = Path(where)
+        try:
+            names = steps(old)
+            files = {
+                paths.WORKFLOWS / flow.name: own_kit(flow, one, repo, tag)
+                for one, flow in sorted(own_callers(old, names).items())
+            }
+        except check_shipped.NotRun as exc:
+            raise NotRun(f"заготовка выпуска {tag} не собрана: {exc}") from exc
+        # Не собран — значит тот выпуск его не клал; что это значит для файла
+        # потребителя, решает зовущий: «сверить не с чем» (045).
+        with contextlib.suppress(NotRun):
+            files[paths.WORKFLOWS / SUMMARY_FLOW] = summary_kit(old, repo, tag)
+    return files
+
+
+def gap(before: str, after: str, path: Path, repo: str) -> str:
+    """Разница по существу между заготовкой и файлом потребителя — строками для печати."""
+    said = [
+        yaml.safe_dump(essence(text, repo, path), allow_unicode=True, sort_keys=True)
+        for text in (before, after)
+    ]
+    return "".join(
+        difflib.unified_diff(
+            said[0].splitlines(keepends=True),
+            said[1].splitlines(keepends=True),
+            fromfile=f"заготовка/{path}",
+            tofile=f"ваш/{path}",
+        )
+    )
+
+
+@dataclass
+class Update:
+    """Что обновление сделает с деревом потребителя — решено целиком до первой записи."""
+
+    write: dict[Path, str] = field(default_factory=dict)
+    #: Наш файл правлен по существу: путь → разница с заготовкой его тега.
+    edited: dict[Path, str] = field(default_factory=dict)
+    #: Своя копия под нашим именем, не зовущая наш шаг: не трогается, а называется.
+    copies: list[Path] = field(default_factory=list)
+    #: Уже на новой прибивке и по существу совпадает с заготовкой.
+    current: list[Path] = field(default_factory=list)
+    #: Что заход называет, но не пишет: новые и снятые шаги `ci.yml`, ответы.
+    notes: list[str] = field(default_factory=list)
+
+
+def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path, repo: str) -> None:
+    """Целиком наши файлы: переписать, если совпадают по существу с заготовкой своего тега."""
+    pin_old: dict[str, dict[Path, str]] = {}
+    for path, text in sorted(new.items()):
+        target = consumer / path
+        if not target.is_file():
+            update.write[path] = text
+            continue
+        mine = target.read_text(encoding="utf-8")
+        tags = sorted({said["tag"] for said in our_uses(repo).finditer(mine)})
+        if not tags:
+            update.copies.append(path)
+            continue
+        if len(tags) > 1:
+            update.edited[path] = f"вызовы прибиты к разным тегам: {', '.join(tags)}\n"
+            continue
+        if essence(mine, repo, path) == essence(text, repo, path):
+            if tags[0] == new_tag(text, repo):
+                update.current.append(path)
+            else:
+                update.write[path] = keep_inputs(text, mine, repo, path, root)
+            continue
+        if tags[0] not in pin_old:
+            pin_old[tags[0]] = owned_at(root, tags[0], repo)
+        before = pin_old[tags[0]].get(path)
+        if before is None:
+            update.edited[path] = f"выпуск {tags[0]} такого файла не клал — сверить не с чем\n"
+        elif essence(mine, repo, path) != essence(before, repo, path):
+            update.edited[path] = gap(before, mine, path, repo)
+        else:
+            update.write[path] = keep_inputs(text, mine, repo, path, root)
+
+
+def new_tag(text: str, repo: str) -> str:
+    """Тег, к которому прибита заготовка: в ней он один по построению."""
+    found = our_uses(repo).search(text)
+    return found["tag"] if found else ""
+
+
+def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin: str) -> None:
+    """Смешанный `ci.yml`: тег поднимается в наших строках, новые шаги называются.
+
+    В `ci.yml` у потребителя свои джобы, и вписывать в него заход не берётся
+    (решение владельца по #1386): новый шаг печатается готовым джобом, снятый —
+    называется. Переписываются только теги в строках вызова наших шагов.
+    """
+    target = consumer / paths.WORKFLOWS / PIPELINE_FLOW
+    if not target.is_file():
+        update.write[paths.WORKFLOWS / PIPELINE_FLOW] = thin_ci(pipeline, repo, pin)
+        return
+    text = target.read_text(encoding="utf-8")
+    called = {
+        Path(said["address"]).stem[len(STEP_PREFIX) :]
+        for said in our_uses(repo).finditer(text)
+        if Path(said["address"]).name.startswith(STEP_PREFIX)
+    }
+
+    def lift(said: re.Match[str]) -> str:
+        """Тег поднимается только у шага, который выпуск отдаёт (взгляд на #1438)."""
+        name = Path(said["address"]).name
+        gone = name.startswith(STEP_PREFIX) and Path(name).stem[len(STEP_PREFIX) :] not in pipeline
+        return said[0] if gone else f"{said['address']}@{pin}"
+
+    lifted = our_uses(repo).sub(lift, text)
+    if lifted != text:
+        update.write[paths.WORKFLOWS / PIPELINE_FLOW] = lifted
+    for one in sorted(set(pipeline) - called):
+        update.notes.append(
+            f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
+        )
+    for one in sorted(called - set(pipeline)):
+        update.notes.append(
+            f"шаг `{one}` в выпуске {pin} не отдаётся — его вызов оставлен на прежнем теге; "
+            "снимите его"
+        )
+
+
+def plan_answer(update: Update, consumer: Path, wanted: list[str]) -> None:
+    """Своё проекта не трогается; названо, по каким проверкам ответа ещё нет."""
+    target = consumer / paths.PIPELINE
+    if not target.is_file():
+        update.notes.append(f"`{paths.PIPELINE}` нет — заготовку ответа печатает заход без ключей")
+        return
+    try:
+        said = policy.answer_text(target.read_text(encoding="utf-8"), str(paths.PIPELINE))
+    except policy.BadPolicy as exc:
+        raise NotRun(str(exc)) from exc
+    known = {str(name) for part in ("checks", policy.BEYOND) for name in (said.get(part) or {})}
+    missing = [one for one in wanted if one not in known]
+    if missing:
+        update.notes.append(
+            f"в `{paths.PIPELINE}` нет ответа по: {', '.join(missing)} — класс решаете вы"
+        )
+
+
 def check_name(name: str) -> str:
     """Имя записи проверки, которое выдаст площадка, — составное."""
     return f"{name}{policy.COMPOSED}{name}"
@@ -816,6 +1175,68 @@ def answer(
     return said
 
 
+def update(
+    root: Path, consumer: Path, repo: str, pin: str, pipeline: list[str], records: list[str]
+) -> int:
+    """Обновление нашего в дереве потребителя до прибивки `pin` (#1386).
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 16.10.2026. Наш файл, совпадающий по существу с
+    заготовкой своего тега, переписывается новой заготовкой. Разошедшийся —
+    отказ на ВСЁ обновление: не пишется ни один файл, а разница печатается
+    предложением поставщику. Своя копия под нашим именем, не зовущая наш шаг,
+    не трогается и называется. В `ci.yml` поднимается только тег наших строк,
+    новые шаги печатаются. `.pipeline.yml` и свод — своё проекта, их заход не
+    трогает.
+    """
+    trunk = trunk_of(consumer)
+    if trunk and trunk != paths.TRUNK:
+        print(
+            f"обновление не сделано: общая ветка дерева — «{trunk}», а механизмы "
+            f"работают с «{paths.TRUNK}» (#1220)",
+            file=sys.stderr,
+        )
+        return EXIT_FOREIGN_TRUNK
+    plan = Update()
+    try:
+        plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
+        plan_ci(plan, consumer, pipeline, repo, pin)
+        plan_answer(plan, consumer, [check_name(one) for one in pipeline] + records)
+    except NotRun as exc:
+        print(f"заход не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    if plan.edited:
+        print(
+            f"обновление до {pin} не сделано: наш файл правлен по существу — "
+            + ", ".join(str(one) for one in sorted(plan.edited))
+            + ". Не записан ни один файл: половина обновления хуже никакой.",
+            file=sys.stderr,
+        )
+        for path, said in sorted(plan.edited.items()):
+            print(f"\n# {path}\n{said}", file=sys.stderr)
+        print(
+            "Если правка нужна вашему проекту — она нужна и заготовке: принесите эту "
+            f"разницу задачей поставщику по шаблону `{paths.GAP_TEMPLATE}` ({repo}). Иначе "
+            "верните файл к заготовке и позовите обновление заново.",
+            file=sys.stderr,
+        )
+        return EXIT_HAND_EDITED
+    lay(consumer, plan.write)
+    if plan.write:
+        print(f"обновлено до {pin}: " + ", ".join(str(one) for one in sorted(plan.write)))
+    else:
+        print(f"обновлять нечего: наше уже на {pin}")
+    if plan.current:
+        print("уже на новой прибивке: " + ", ".join(str(one) for one in sorted(plan.current)))
+    for path in sorted(plan.copies):
+        print(
+            f"`{path}` — своя копия, наш шаг она не зовёт; не тронута. Заменить её "
+            "вызовом можно заготовкой: заход без ключей печатает её целиком."
+        )
+    for note in plan.notes:
+        print(note)
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает заготовку вызова и заготовку ответа."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -831,7 +1252,15 @@ def main(argv: list[str] | None = None) -> int:
         metavar="КОРЕНЬ",
         help="положить заготовку в дерево потребителя, а не печатать; занятое не трогается",
     )
+    parser.add_argument(
+        "--update",
+        type=Path,
+        metavar="КОРЕНЬ",
+        help="обновить наше в дереве потребителя до выпуска; своё и правленое не трогается",
+    )
     args = parser.parse_args(argv)
+    if args.write and args.update:
+        parser.error("--write и --update — разные двери: первое подключение и обновление")
 
     try:
         names = steps(args.root)
@@ -876,6 +1305,8 @@ def main(argv: list[str] | None = None) -> int:
     pipeline = [one for one in names if one not in own]
     beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
     on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
+    if args.update:
+        return update(args.root, args.update, args.repo, pin, pipeline, beyond + on_change)
     if args.write:
         # КЛАДЁТСЯ ТОЛЬКО ПО ЯВНОМУ КЛЮЧУ И ТОЛЬКО В СВОБОДНОЕ (#992). Чужое
         # дерево заход не правит: занятый путь называется, и не пишется ни
