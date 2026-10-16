@@ -714,6 +714,24 @@ def minutes_of(days: dict[str, Any], name: str, day: str) -> float:
     return round(int(row.get("seconds", 0)) / timed / 60, 1) if timed else 0.0
 
 
+#: Прогон взгляда в ряду: по его минутам потребитель видит цену взгляда (#1389).
+REVIEW_FLOW: Final = "review"
+
+
+def window_minutes(days: dict[str, Any], name: str) -> tuple[float, int]:
+    """Среднее время захода прогона `name` в минутах за всё окно и число таких заходов.
+
+    Среднее — по заходам, чьё время площадка сказала (`timed`): неразобранный
+    заход не тянет его вниз, как и у дневного `minutes_of`.
+    """
+    seconds = timed = 0
+    for day in days:
+        row = runs_of(days, day).get(name) or {}
+        seconds += int(row.get("seconds", 0))
+        timed += int(row.get("timed", 0))
+    return (round(seconds / timed / 60, 1) if timed else 0.0), timed
+
+
 def covered(days: dict[str, Any]) -> list[tuple[str, float]]:
     """Дни, у которых покрытие ПРОЧИТАНО, и само число — по возрастанию дня."""
     return [
@@ -803,6 +821,22 @@ def report(days: dict[str, Any], bounds: Bounds, today: str) -> str:
         ]
     else:
         lines += ["Дней в ряду меньше двух — сравнивать нечего.", ""]
+    средний, заходов = window_minutes(days, REVIEW_FLOW)
+    lines += ["## Сколько стоит взгляд", ""]
+    if заходов:
+        lines += [
+            f"Средний заход `{REVIEW_FLOW}` за окно: **{средний} мин** площадки по {заходов}"
+            " заходам. На одно изменение заходов бывает несколько: пересмотр после"
+            " починки — новый заход. Цену модели ряд не видит: её знает только ключ"
+            " владельца.",
+            "",
+        ]
+    else:
+        lines += [
+            f"Заходов `{REVIEW_FLOW}` с названным временем за окно нет — цена взгляда не"
+            " прочитана, а не равна нулю (045).",
+            "",
+        ]
     ряд = covered(days)
     lines += ["## Растёт ли покрытие", ""]
     if not ряд:
