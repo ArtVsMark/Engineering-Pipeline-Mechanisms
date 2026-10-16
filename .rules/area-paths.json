@@ -117,7 +117,8 @@
         "scripts/runs_series.py",
         "scripts/family*.py",
         ".rules/series.json",
-        ".github/workflows/badges.yml"
+        ".github/workflows/badges.yml",
+        ".github/workflows/step-facts.yml"
       ]
     },
     "parallel work": {
@@ -181,8 +182,11 @@
         "scripts/stuck.py",
         "scripts/hail.py",
         ".github/workflows/main-red.yml",
+        ".github/workflows/step-main-red.yml",
         ".github/workflows/schedules-seen.yml",
+        ".github/workflows/step-schedules-seen.yml",
         ".github/workflows/stuck.yml",
+        ".github/workflows/step-stuck.yml",
         ".rules/schedules.json"
       ]
     },
@@ -206,6 +210,7 @@
     "release": {
       "paths": [
         ".github/workflows/release.yml",
+        ".github/workflows/step-release.yml",
         "scripts/release.py",
         "scripts/version.py",
         "scripts/check_version.py",
@@ -300,6 +305,7 @@
         ".github/workflows/review.yml",
         ".github/workflows/step-review.yml",
         ".github/workflows/claude.yml",
+        ".github/workflows/step-claude.yml",
         "scripts/review_*.py"
       ]
     },
@@ -307,7 +313,8 @@
       "paths": [
         ".github/workflows/review.yml",
         ".github/workflows/step-review.yml",
-        ".github/workflows/claude.yml"
+        ".github/workflows/claude.yml",
+        ".github/workflows/step-claude.yml"
       ]
     },
     "configuration": {
