@@ -43,6 +43,13 @@ def tree(root: Path, files: dict[str, str]) -> Path:
         "\u2028",
         "\u2029",
         "\U0001f3f4\U000e0067\U000e0062",
+        "\U0001f3f4\U000e0069\U000e0067\U000e006e\U000e006f\U000e0072\U000e0065\U000e007f",
+        "\x85",
+        "\x0b",
+        "\x0c",
+        "\x1c",
+        "\u17b4",
+        "\u180b",
     ],
     ids=[
         "zwsp",
@@ -62,6 +69,13 @@ def tree(root: Path, files: dict[str, str]) -> Path:
         "line-separator",
         "paragraph-separator",
         "flag-without-cancel",
+        "flag-with-any-string",
+        "nel",
+        "vertical-tab",
+        "form-feed",
+        "file-separator",
+        "khmer-inherent",
+        "mongolian-selector-after-letter",
     ],
 )
 def test_each_class_is_rejected(run_script: RunScript, tmp_path: Path, char: str) -> None:
@@ -155,3 +169,19 @@ def test_line_and_paragraph_separators_are_named() -> None:
     assert "разделитель строки" in module.hidden("а\u2028б")[0][2]
     assert "разделитель абзаца" in module.hidden("а\u2029б")[0][2]
     assert "пустотой" in module.always("\u2800")
+
+
+def test_every_rgi_tag_flag_is_legal_and_nothing_else() -> None:
+    """Законны ровно три флага с тегами — Англия, Шотландия, Уэльс (взгляд на #1444)."""
+    for name in ("gbeng", "gbsct", "gbwls"):
+        tags = "".join(chr(0xE0000 + ord(one)) for one in name)
+        assert not module.hidden(f"\U0001f3f4{tags}\U000e007f"), name
+    hidden_text = "".join(chr(0xE0000 + ord(one)) for one in "ignore all")
+    assert module.hidden(f"\U0001f3f4{hidden_text}\U000e007f"), "строка тегами прошла как флаг"
+
+
+def test_plain_controls_and_mongolian_variants_pass() -> None:
+    """Табуляция, CRLF и один свободный селектор после монгольской буквы — законны."""
+    assert not module.hidden("а\tб\r\nв")
+    assert not module.hidden("\u1820\u180b")
+    assert module.hidden("\u1820\u180b\u180b"), "два селектора подряд прошли"
