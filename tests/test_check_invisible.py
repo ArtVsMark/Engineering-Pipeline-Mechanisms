@@ -185,3 +185,19 @@ def test_plain_controls_and_mongolian_variants_pass() -> None:
     assert not module.hidden("а\tб\r\nв")
     assert not module.hidden("\u1820\u180b")
     assert module.hidden("\u1820\u180b\u180b"), "два селектора подряд прошли"
+
+
+@pytest.mark.parametrize("code", [0x2065, 0xFFF0, 0xE0000, 0xE0002, 0xE0080, 0xE0FFF])
+def test_unassigned_ignorables_are_judged(code: int) -> None:
+    """Неназначенные точки Default_Ignorable краснеют; Cn вне них — нет (`e0b7e8a`)."""
+    assert module.always(chr(code)), hex(code)
+    assert not module.always(chr(0x0378)), "неназначенная точка вне игнорируемых покраснела"
+
+
+def test_an_ignorable_range_is_judged_whatever_its_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Точка игнорируемого диапазона, назначенная новой базой не `Cf`, всё равно судится."""
+    monkeypatch.setattr(module.unicodedata, "category", lambda _: "Mn")
+    assert module.always(chr(0xE0080)), "назначенная игнорируемая точка ушла из-под гейта"
+    assert not module.always(chr(0xE0100)), "селектор судится своим правилом, а не диапазоном"
