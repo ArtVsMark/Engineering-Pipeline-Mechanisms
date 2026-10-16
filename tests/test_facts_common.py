@@ -361,10 +361,11 @@ def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
     assert tag.startswith("facts-v")
     said = tag.removeprefix("facts-v")
     major = module.SCHEMA.split(".")[0]
-    assert said.startswith(f"{module.SCHEMA}.") or major == module.SCHEMA_LAGS_TO, (
-        tag,
-        module.SCHEMA,
-    )
+    if major == module.SCHEMA_LAGS_TO:
+        # Переезд: мажор тега — ровно следующий за мажором формы (взгляд на #1442).
+        assert said.split(".")[0] == str(int(module.SCHEMA_LAGS_TO) + 1), (tag, module.SCHEMA)
+    else:
+        assert said.startswith(f"{module.SCHEMA}."), (tag, module.SCHEMA)
     assert contract_step()["env"]["FACTS_CONTRACT"] == tag
 
 
