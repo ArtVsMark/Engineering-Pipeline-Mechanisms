@@ -65,13 +65,23 @@ ZWJ: Final = "\u200d"
 #: Рисуются пустотой вне судимых категорий. ИСТОЧНИК — СВОЙСТВО UNICODE, А НЕ
 #: ДОГАДКА (взгляды на #1437 и #1444, правило 210): это `Default_Ignorable_Code_Point`
 #: из DerivedCoreProperties.txt (Unicode 16.0) за вычетом того, что гейт судит
-#: иначе, — категории `Cf`, селекторов вариантов и неназначенных точек.
+#: иначе, — категории `Cf`, селекторов вариантов и неназначенных точек
+#: (`IGNORABLE_UNASSIGNED` ниже).
 #: Модуль `unicodedata` этого свойства не отдаёт, поэтому остаток выписан;
 #: остаток — заполнители хангыля, соединитель графем U+034F и скрытые гласные
 #: кхмерского U+17B4–U+17B5. Сверх свойства — пустой знак Брайля U+2800:
 #: он не игнорируемый, но рисуется пустотой (`36f8b72`).
 BLANK: Final = frozenset(
     chr(one) for one in (0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFFA0, 0x2800)
+)
+#: Неназначенные точки `Default_Ignorable_Code_Point` (Unicode 16.0): категория
+#: `Cn` целиком не судится — новые знаки старше Python были бы ложной краснотой,
+#: — но эти диапазоны по стандарту рисуются пустотой и будущими назначениями
+#: (поздний взгляд на #1444, `e0b7e8a`). Краснеет точка из них с категорией `Cn`.
+IGNORABLE_UNASSIGNED: Final[tuple[tuple[int, int], ...]] = (
+    (0x2065, 0x2065),
+    (0xFFF0, 0xFFF8),
+    (0xE0000, 0xE0FFF),
 )
 #: Категории, которые судятся целиком: формат, разделители строки и абзаца и
 #: управляющие. Из управляющих (`Cc`) законны только табуляция и перевод строки
@@ -139,6 +149,8 @@ def always(char: str) -> str:
     if char in PLAIN_CONTROLS:
         return ""
     category = unicodedata.category(char)
+    if category == "Cn" and any(low <= ord(char) <= high for low, high in IGNORABLE_UNASSIGNED):
+        return "неназначенная игнорируемая точка — рисуется пустотой"
     if category in CATEGORIES:
         return CATEGORIES[category] or unicodedata.name(char, "символ формата без имени")
     return ""

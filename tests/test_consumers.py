@@ -34,6 +34,13 @@ def registry_with(tmp_path: Path, *rows: dict[str, Any]) -> Path:
     return tmp_path
 
 
+def empty_sweep(tmp_path: Path) -> Path:
+    """Файл обхода семьи, прочитавшего всех и не заставшего никого."""
+    path = tmp_path / "sweep.json"
+    path.write_text(json.dumps({"by": [], "projects": {"unread_repos": []}}), encoding="utf-8")
+    return path
+
+
 def answering(monkeypatch: pytest.MonkeyPatch, said: str) -> None:
     """Потребитель отдаёт свой ответ — так, как его отдаёт площадка: в base64."""
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
@@ -104,7 +111,9 @@ def test_an_unread_answer_is_its_own_outcome(
         raise module.ghrest.TransportError("404")
 
     monkeypatch.setattr(module.ghrest, "request", broken)
-    assert module.main(["--root", str(root)]) == module.EXIT_UNREAD
+    assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
+        module.EXIT_UNREAD
+    )
 
 
 def test_without_a_token_the_answers_are_not_guessed(
@@ -113,7 +122,9 @@ def test_without_a_token_the_answers_are_not_guessed(
     """Токена нет — ответы НЕ прочитаны, и это сказано, а не выдано за чистоту."""
     root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
-    assert module.main(["--root", str(root)]) == module.EXIT_UNREAD
+    assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
+        module.EXIT_UNREAD
+    )
 
 
 def test_the_live_registry_is_readable() -> None:
@@ -219,3 +230,15 @@ def test_without_a_sweep_the_silent_are_named_unseen(
     out = capsys.readouterr().out
     assert "молча подключённые НЕ ВИДНЫ" in out
     assert "среди тех, кого видно" in out and "это состояние" not in out
+
+
+def test_a_declared_registry_without_a_sweep_is_not_read_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Реестр не пуст, ответы прочитаны, обхода нет — исход 3: молча подключённых не видно."""
+    root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
+    answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
+    assert module.main(["--root", str(root)]) == module.EXIT_UNREAD
+    assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
+        module.EXIT_OK
+    )
