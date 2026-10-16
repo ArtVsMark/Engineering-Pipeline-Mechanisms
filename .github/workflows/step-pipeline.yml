@@ -119,5 +119,15 @@ jobs:
         with:
           python-version: "3.14"
       - run: python -m pip install --quiet "pyyaml>=6,<7"
+      - run: python -m pip install --quiet $MECHANISMS/packages/transport
       - name: ответ по классам проверок полон и сходится с деревом
         run: python $MECHANISMS/scripts/check_pipeline.py
+      # НЕВИДИМОЕ В ДЕРЕВЕ — ТОЙ ЖЕ ЗАПИСЬЮ ПРОВЕРКИ (#1429). Своды, навыки и
+      # задания взгляда агент читает как указания, и символ, которого человек на
+      # ревью не видит, меняет прочитанное (085). Отдельного джоба не заводится:
+      # новая запись проверки потребовала бы класса в `.pipeline.yml` у каждого
+      # потребителя, а шаг в уже зовомом джобе приезжает ему с подъёмом тега.
+      # `!cancelled()` — отказ соседа не прячет этот ответ, и наоборот.
+      - name: в дереве нет невидимых символов
+        if: ${{ !cancelled() }}
+        run: python $MECHANISMS/scripts/check_invisible.py
