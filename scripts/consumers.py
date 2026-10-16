@@ -13,6 +13,12 @@
 ([157](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/157-a-contract-version-bump-is-a-re-read.md)).
 Поэтому в `.rules/consumers.json` лежат адреса, и только они.
 
+ПОДКЛЮЧЁННЫЙ МОЛЧА ТОЖЕ ПОДКЛЮЧЁН (решение владельца 16.10.2026, #1389).
+Объявившихся двое из тех, кто зовёт шаги, — ноль: взять шаг проще, чем сказать
+о взятом. Поэтому к объявленным адресам добавляются те, кого застал обход семьи
+(`family_uptake.py --out`, ключ `--uptake`). Обход не передан — это сказано:
+молча подключившиеся тогда не видны, и пустота не значит «никого» (045).
+
 ОБХОД — ГЛАВНОЕ, ЧТО ЗДЕСЬ ВИДНО. Потребитель, обошедший общий механизм, —
 сильнейшее свидетельство пробела, и оно невидимо, пока не объявлено: снаружи
 обход неотличим от «шаг не подключён»
@@ -88,6 +94,22 @@ def registry(root: Path) -> list[dict[str, Any]]:
     return [dict(one) for one in rows]
 
 
+def swept(path: Path) -> list[str]:
+    """Кого обход семьи застал зовущим наши шаги — из файла `family_uptake.py --out`.
+
+    Форма файла — его, а не наша: раздел `by` со строкой на взявшего. Другая
+    форма — отказ, а не пустой список: пустота значила бы «никто не взял» (045).
+    """
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NotRun(f"обход семьи {path} не прочитан: {exc}") from exc
+    rows = said.get("by") if isinstance(said, dict) else None
+    if not isinstance(rows, list):
+        raise NotRun(f"{path}: раздела «by» нет — это не файл обхода семьи")
+    return sorted({str(one["repo"]) for one in rows if isinstance(one, dict) and one.get("repo")})
+
+
 def answer_of(repo: str, token: str) -> dict[str, Any]:
     """Ответ потребителя по проверкам — из ЕГО дерева, а не из нашего реестра.
 
@@ -130,13 +152,24 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает сверку по каждому объявленному потребителю."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(), help="корень ЭТОГО дерева")
+    parser.add_argument("--uptake", type=Path, help="файл обхода семьи (`family_uptake.py --out`)")
     args = parser.parse_args(argv)
 
     try:
         rows = registry(args.root)
+        found = swept(args.uptake) if args.uptake else []
     except NotRun as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    declared = {str(one["repo"]) for one in rows}
+    for repo in found:
+        if repo not in declared:
+            print(f"  {repo}: найден обходом семьи, не объявлялся")
+            rows.append({"repo": repo})
+    if not args.uptake:
+        print(
+            "обход семьи не передан (--uptake): видны только объявившиеся, молча подключённые — нет"
+        )
 
     if not rows:
         print(f"{NOBODY} — сверять не с кем, и это состояние, а не тишина (154)")

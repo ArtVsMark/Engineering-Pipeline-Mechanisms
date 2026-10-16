@@ -152,3 +152,34 @@ def test_the_entry_is_parsed_by_the_owner_of_the_form() -> None:
     assert policy.entry_of({"class": "off", "why": "своё"}) == (policy.OFF, "своё", "")
     assert policy.entry_of(False) == (policy.OFF, "", "")
     assert policy.entry_of("required") == (policy.REQUIRED, "", "")
+
+
+def test_a_project_found_by_the_sweep_is_connected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Подключённый молча виден из обхода семьи и спрашивается так же (#1389)."""
+    root = registry_with(tmp_path)
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(json.dumps({"by": [{"repo": "o/тихий"}]}), encoding="utf-8")
+    answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
+    assert module.main(["--root", str(root), "--uptake", str(uptake)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "o/тихий: найден обходом семьи" in out and "o/тихий: диапазон" in out
+
+
+def test_a_sweep_file_of_another_shape_does_not_run(tmp_path: Path) -> None:
+    """Файл не той формы — отказ, а не «никто не взял» (045)."""
+    root = registry_with(tmp_path)
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(json.dumps({"projects": {}}), encoding="utf-8")
+    assert module.main(["--root", str(root), "--uptake", str(uptake)]) == module.EXIT_BROKEN
+    with pytest.raises(module.NotRun):
+        module.swept(uptake.with_name("нет.json"))
+
+
+def test_without_a_sweep_the_silent_are_named_unseen(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Обход не передан — сказано, что молча подключённых не видно."""
+    assert module.main(["--root", str(registry_with(tmp_path))]) == module.EXIT_OK
+    assert "обход семьи не передан" in capsys.readouterr().out
