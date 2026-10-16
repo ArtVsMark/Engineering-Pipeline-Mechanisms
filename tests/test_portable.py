@@ -628,7 +628,7 @@ CHECKOUT: Final = "actions/checkout"
 
 
 def step_path_inputs(flow: Path) -> set[str]:
-    """Входы действий шага в форме пути — кроме места выкачки у `actions/checkout`.
+    """Входы действий шага в форме пути — кроме выкачки и того, что шаг кладёт сам.
 
     СТРОГОЕ ПРАВИЛО ПО ФОРМЕ, А НЕ ПО НАШЕМУ ДЕРЕВУ (взгляд на #1201): прежде
     вход засчитывался, только если файл есть у поставщика, и путь, живущий
@@ -636,16 +636,32 @@ def step_path_inputs(flow: Path) -> set[str]:
     форму пути несут `authors: .github/authors.txt` у атрибуции и `path:
     .pipeline-mechanisms` у выкачки — второе исключено по действию, а не по
     имени.
+
+    СОСЕД ЗА ГРАНИЦЕЙ НАЗВАН (195, #1422): путь, чей первый каталог называет
+    `run:` РАНЬШЕ в том же джобе, — то, что шаг кладёт сам (входы значка
+    проекта в `.project-badge`), а не данные потребителя. Граница — по месту
+    в джобе, а не по имени: каталог, названный только позже или в другом
+    джобе, по-прежнему судится.
     """
     document = yaml.safe_load(flow.read_text(encoding="utf-8")) or {}
-    return {
-        value.strip()
-        for job in (document.get("jobs") or {}).values()
-        for step in (job or {}).get("steps") or []
-        if isinstance(step, dict) and not str(step.get("uses") or "").startswith(CHECKOUT)
-        for value in (step.get("with") or {}).values()
-        if isinstance(value, str) and "${{" not in value and PATH_SHAPE.match(value.strip())
-    }
+    found: set[str] = set()
+    for job in (document.get("jobs") or {}).values():
+        written = ""
+        for step in (job or {}).get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            uses = str(step.get("uses") or "")
+            for value in (step.get("with") or {}).values():
+                if not isinstance(value, str) or "${{" in value:
+                    continue
+                path = value.strip()
+                if uses.startswith(CHECKOUT) or not PATH_SHAPE.match(path):
+                    continue
+                if re.search(rf"(?<![\w./-]){re.escape(path.split('/')[0])}(?![\w.-])", written):
+                    continue
+                found.add(path)
+            written += "\n" + str(step.get("run") or "")
+    return found
 
 
 def test_a_step_answer_names_every_path_its_inputs_read() -> None:
@@ -681,6 +697,21 @@ def test_the_step_input_gate_sees_a_consumer_only_path(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert step_path_inputs(flow) == {".github/только-у-потребителя.txt"}
+
+
+def test_the_step_input_gate_skips_what_the_job_lays_itself(tmp_path: Path) -> None:
+    """Каталог, который `run:` того же джоба кладёт раньше, — не данные потребителя (#1422)."""
+    flow = tmp_path / "step.yml"
+    flow.write_text(
+        "jobs:\n  j:\n    steps:\n"
+        "      - uses: x/y@v1\n        with:\n          a: .свой/до.json\n"
+        "      - run: build --endpoints-out .свой\n"
+        "      - uses: x/y@v1\n        with:\n          b: .свой/после.json\n"
+        "  k:\n    steps:\n"
+        "      - uses: x/y@v1\n        with:\n          c: .свой/чужой-джоб.json\n",
+        encoding="utf-8",
+    )
+    assert step_path_inputs(flow) == {".свой/до.json", ".свой/чужой-джоб.json"}
 
 
 def test_the_filling_gate_rejects_an_unnamed_read() -> None:

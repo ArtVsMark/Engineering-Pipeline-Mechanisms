@@ -152,13 +152,12 @@
           "python3",
           "-I",
           "-c",
-          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted([b.FACTS, b.UNIFIED, *b.BADGES, *b.PICTURES, *b.PAGES]), sep='\\n')"
+          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted([b.FACTS, b.UNIFIED, *b.BADGES, *b.PAGES]), sep='\\n')"
         ],
         "allowed": [
           "coverage.json",
           "facts.json",
           "project.svg",
-          "python.svg",
           "version.json",
           "who.md"
         ],
@@ -176,8 +175,7 @@
         ],
         "allowed": [
           ".github/badges/facts.json",
-          ".github/badges/findings.json",
-          ".github/badges/python.svg"
+          ".github/badges/findings.json"
         ],
         "why": "прогон витрины докладывает на ветку значков архив находок сверх сборщика; файл, названный прогоном сверх этих, перечитывается",
         "border": "издавать наружу список требований ОТДЕЛЬНО от их исполнения"
