@@ -6,13 +6,14 @@
 """
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 module = load_script("review_map.py")
 TABLE: dict[str, Any] = json.loads((ROOT / ".rules" / "area-paths.json").read_text("utf-8"))
@@ -51,6 +52,34 @@ def test_every_pattern_finds_a_path_in_the_tree() -> None:
         if not any(module.matches(path, mask) for path in files)
     ]
     assert not dead, f"образцы без единого пути: {dead}"
+
+
+#: Вызов общего шага из прогона: `uses: ./.github/workflows/step-….yml`.
+CALLED_STEP = re.compile(r"uses:\s*\./(\.github/workflows/step-[\w-]+\.yml)")
+
+
+def test_an_area_of_a_caller_names_its_called_step() -> None:
+    """Область, назвавшая тонкий вызывающий прогон, называет и шаг, куда ушло тело.
+
+    Тело прогона переезжает в `step-*.yml` (#1385), а вызывающий остаётся
+    одной строкой `uses:`. Область, знающая только вызывающего, правку тела не
+    видит, и отбор правил её пропускает (находка `463c623` на #1413). Замер
+    16.10.2026: так отстали шесть мест — шаги claude, main-red, release,
+    schedules-seen, stuck и step-facts у области metrics.
+
+    ГРАНИЦА НАЗВАНА (195): сверяется вызов по относительному адресу в этом
+    дереве. Вызов адресом с тегом — у потребителя, его области здесь не судятся.
+    """
+    pairs = [
+        (name, caller.name, step, any(module.matches(step, mask) for mask in one["paths"]))
+        for name, one in TABLE["areas"].items()
+        for caller in walk(ROOT / ".github" / "workflows", "*.yml")
+        if any(module.matches(f".github/workflows/{caller.name}", mask) for mask in one["paths"])
+        for step in CALLED_STEP.findall(caller.read_text(encoding="utf-8"))
+    ]
+    assert pairs, "ни одна область не называет вызывающего — предмета нет (075)"
+    behind = [f"{name}: {caller} → {step}" for name, caller, step, named in pairs if not named]
+    assert not behind, f"область знает вызывающего, но не его шаг: {behind}"
 
 
 def test_the_live_table_reads_in_the_mechanism_shape() -> None:
