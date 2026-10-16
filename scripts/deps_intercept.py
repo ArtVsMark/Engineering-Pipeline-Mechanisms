@@ -244,6 +244,67 @@ def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -
     return branch
 
 
+#: Ветка подъёма своих шагов после выпуска: имя по предмету, а не по
+#: адресу репозитория — адрес длинный и у потребителя свой (189).
+SELF_BRANCH: Final = "agent/deps-self-{tag}"
+
+
+def self_fragment(tag: str) -> str:
+    """Фрагмент журнала подъёма своих шагов после выпуска."""
+    return (
+        f"> **Потребителю безразлично:** поднята прибивка нашей пробы передачи "
+        f"`.github/workflows/handover-probe.yml` до `{tag}`; отдаваемые шаги не тронуты.\n\n"
+        f"### Проба передачи поднята до `{tag}`\n\n"
+        f"Выпуск `{tag}` сам поднял прибивку своих шагов в пробе: Dependabot ссылки "
+        f"репозитория на самого себя не предлагает (#1387).\n\n#1387\n"
+    )
+
+
+def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
+    """Подъём своих шагов до тега выпуска веткой `agent/`. Отдаёт ветку; пусто — нечего.
+
+    ЗАЧЕМ (#1387). Проба передачи зовёт наши шаги по тегу, как потребитель.
+    Dependabot подъёма ссылок репозитория на самого себя не предлагает: замер
+    15–16.10.2026 — сутки после `v1.6.0`, сигнала нет. Решение владельца
+    16.10.2026: пробу поднимает сам выпуск, тем же путём, что перехват, —
+    веткой `agent/` и обычной очередью.
+
+    У ПОТРЕБИТЕЛЯ ЭТО НОЛЬ, А НЕ ОТКАЗ. Свой репозиторий по тегу он не зовёт —
+    его вызовы ведут к поставщику, — и строк к подъёму нет. Это законная
+    пустота, и выпуск потребителя от неё не краснеет (154).
+    """
+    branch = SELF_BRANCH.format(tag=slug(tag))
+    if git(root, "ls-remote", "--heads", "origin", branch).strip():
+        print(f"ветка {branch} уже есть — подъём не повторяется")
+        return branch
+    sha = git(root, "rev-list", "-n", "1", tag).strip()
+    if not dry_run:
+        git(root, "fetch", "--quiet", "origin", paths.TRUNK)
+        git(root, "checkout", "--quiet", "--force", "-B", branch, f"origin/{paths.TRUNK}")
+    planned = plan(root, repo, tag, sha)
+    if not planned:
+        print(f"своих шагов по тегу дерево не зовёт — поднимать до {tag} нечего")
+        return ""
+    planned[paths.FRAGMENTS / f"deps-self-{slug(tag)}.internal.md"] = self_fragment(tag)
+    print(f"свои шаги → {tag} ({sha[:7]}), файлов: {len(planned)}")
+    if dry_run:
+        return branch
+    for path, text in planned.items():
+        (root / path).write_text(text, encoding="utf-8")
+    git(root, "add", "--", *[str(path) for path in planned])
+    git(
+        root,
+        "commit",
+        "--quiet",
+        "-m",
+        f"Проба передачи поднята до {tag}\n\nВыпуск {tag} сам поднял прибивку своих шагов:\n"
+        f"Dependabot ссылки репозитория на самого себя не предлагает.\n\n"
+        f"{REFS}\n\nCo-Authored-By: {CO_AUTHOR}\n",
+    )
+    git(root, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
+    return branch
+
+
 def signals(repo: str, token: str) -> list[dict[str, Any]]:
     """Открытые изменения бота."""
     return [
@@ -259,7 +320,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--apply", action="store_true", help="толкнуть ветку и закрыть сигнал")
+    parser.add_argument(
+        "--self",
+        dest="own_tag",
+        metavar="ТЕГ",
+        help="поднять свои шаги до тега выпуска, а не разбирать сигналы бота",
+    )
     args = parser.parse_args(argv)
+    if args.own_tag:
+        if not args.repo:
+            print("не отработал: нет имени проекта", file=sys.stderr)
+            return EXIT_BROKEN
+        report.announce(not args.apply)
+        try:
+            self_bump(args.root, args.repo, args.own_tag, dry_run=not args.apply)
+        except (NotRun, OSError) as exc:
+            print(f"не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        return EXIT_OK
     token = ghrest.token_from_env()
     if not args.repo or not token:
         print("не отработал: нет имени проекта или токена", file=sys.stderr)

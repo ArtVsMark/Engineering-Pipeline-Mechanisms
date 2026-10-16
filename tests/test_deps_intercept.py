@@ -361,3 +361,67 @@ def test_an_unresolved_signal_reddens_the_run(rc: int, red: bool) -> None:
     )
     assert (done.returncode != 0) == red, (rc, done.returncode, done.stdout)
     assert ("::error::" in done.stdout) == red, done.stdout
+
+
+# --- подъём своих шагов после выпуска (#1387) ---------------------------------
+
+
+def with_own_calls(work: Path) -> None:
+    """Проба зовёт свои шаги по тегу, взгляд — по общей ветке; выпуск помечен тегом."""
+    probe = work / module.paths.WORKFLOWS / "handover-probe.yml"
+    probe.write_text(
+        "jobs:\n"
+        "  probe-lint:\n    uses: o/r/.github/workflows/step-lint.yml@v1.0.0\n"
+        "  probe-debt:\n    uses: o/r/.github/workflows/step-debt.yml@v1.0.0\n"
+        "  review:\n    uses: o/r/.github/workflows/step-review.yml@main\n",
+        encoding="utf-8",
+    )
+    git(work, "add", "-A")
+    git(work, "commit", "--quiet", "-m", "проба")
+    git(work, "push", "--quiet", "origin", "HEAD:main")
+    git(work, "tag", "v2.0.0")
+
+
+def test_a_release_lifts_its_own_steps_in_one_branch(stand: Path) -> None:
+    """Выпуск поднимает все свои вызовы по тегу разом; `@main` — не версия и не трогается."""
+    with_own_calls(stand)
+    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    assert branch == "agent/deps-self-v2.0.0"
+    tree = git(stand, "show", f"origin/{branch}:.github/workflows/handover-probe.yml")
+    assert tree.count("@v2.0.0") == 2 and "@v1.0.0" not in tree
+    assert "step-review.yml@main" in tree
+    files = git(stand, "show", "--name-only", "-z", "--format=", f"origin/{branch}").split("\0")
+    assert "changelog.d/deps-self-v2.0.0.internal.md" in files
+
+
+def test_a_consumer_release_has_nothing_of_its_own_to_lift(stand: Path) -> None:
+    """У потребителя своих шагов по тегу нет — пустота законна, ветки нет, выпуск не краснеет."""
+    git(stand, "tag", "v2.0.0")
+    assert module.self_bump(stand, "o/r", "v2.0.0", dry_run=False) == ""
+    assert git(stand, "ls-remote", "--heads", "origin", "agent/deps-self-v2.0.0") == ""
+    assert module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0"]) == 0
+
+
+def test_a_repeated_release_lift_does_not_push_twice(stand: Path) -> None:
+    """Ветка подъёма уже на площадке — повтор выпуска её не перезаписывает."""
+    with_own_calls(stand)
+    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    before = git(stand, "rev-parse", f"origin/{branch}")
+    module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    git(stand, "fetch", "--quiet", "origin")
+    assert git(stand, "rev-parse", f"origin/{branch}") == before
+
+
+def test_a_dry_release_lift_touches_nothing(stand: Path) -> None:
+    """Сухой подъём называет ветку и не пишет ни файла, ни ветки."""
+    with_own_calls(stand)
+    assert module.self_bump(stand, "o/r", "v2.0.0", dry_run=True) == "agent/deps-self-v2.0.0"
+    assert git(stand, "status", "--porcelain") == ""
+    assert git(stand, "ls-remote", "--heads", "origin", "agent/deps-self-v2.0.0") == ""
+
+
+def test_the_self_fragment_says_why_it_does_not_matter_to_the_consumer() -> None:
+    """Фрагмент — `internal` с причиной первой строкой и адресом задачи последней."""
+    text = module.self_fragment("v2.0.0")
+    assert text.startswith("> **Потребителю безразлично:**")
+    assert text.rstrip().endswith("#1387")
