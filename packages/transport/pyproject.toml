@@ -25,7 +25,8 @@
 # минор или правку. Оно появится вместе с первым внешним потребителем — до него
 # правило было бы выдумано.
 [build-system]
-requires = ["setuptools>=68"]
+# 77 — первая версия, читающая `license-files` из `[project]` (PEP 639).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -34,6 +35,11 @@ description = "Транспорт к площадке и обрезка выво
 requires-python = ">=3.14"
 dependencies = []
 dynamic = ["version"]
+# ЛИЦЕНЗИЯ В КОЛЕСЕ — ОБЪЯВЛЕНА, А НЕ ВЗЯТА УМОЛЧАНИЕМ СБОРЩИКА (взгляд на #1477).
+# Умолчание setuptools `LICEN[CS]E*` клало копию в колесо и без этой строки, но
+# смена сборщика или своё значение поля убрали бы её молча. Поле стандартное
+# (PEP 639): его читает любой сборщик, а не только этот.
+license-files = ["LICENSE"]
 
 [tool.setuptools]
 py-modules = ["ghrest", "report"]
