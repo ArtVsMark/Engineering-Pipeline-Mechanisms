@@ -221,6 +221,11 @@ def main(argv: list[str] | None = None) -> int:
     if unswept:
         print(f"обход семьи не прочитал проектов: {len(unswept)} — список выше неполон")
         return EXIT_UNREAD
+    # БЕЗ ОБХОДА СПИСОК НЕПОЛОН И ПРИ НЕПУСТОМ РЕЕСТРЕ (поздний взгляд на #1443):
+    # молча подключённые не видны, и исход говорит это, а не «сверка прочитана».
+    if not args.uptake:
+        print("обход семьи не передан (--uptake) — молча подключённые не видны, список неполон")
+        return EXIT_UNREAD
     return EXIT_OK
 
 
