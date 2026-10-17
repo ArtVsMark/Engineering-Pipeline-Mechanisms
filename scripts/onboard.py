@@ -747,24 +747,34 @@ def licensed(path: Path, text: str, repo: str) -> str:
     return form.format(line=line) + text
 
 
-def signed_all(files: dict[Path, str], repo: str) -> dict[Path, str]:
+def signed_all(
+    files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
+) -> dict[Path, str]:
     """Все заготовки со строкой лицензии — разом; отказ одной — `NotRun` до записи.
 
     Зовётся и ДО первой записи, внутри перехвата отказов захода: половина
     положенной заготовки хуже никакой, а `NotRun` вне перехвата ушёл бы трассой
-    с кодом 1 вместо исхода «не отработал» (039).
+    с кодом 1 вместо исхода «не отработал» (039). Пути `theirs` — файлы
+    потребителя, которые заход правит точечно (`Update.theirs`): они идут как есть.
     """
-    return {path: licensed(path, text, repo) for path, text in files.items()}
+    return {
+        path: text if path in theirs else licensed(path, text, repo) for path, text in files.items()
+    }
 
 
-def lay(root: Path, files: dict[Path, str], repo: str) -> None:
+def lay(
+    root: Path, files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
+) -> None:
     """Кладёт заготовку в дерево потребителя, каждую — со строкой лицензии (#1470).
 
     Занятое проверяет зовущий (`occupied`). Подпись ставится здесь, на единственном
-    пути записи к потребителю, а не в каждой заготовке: путь записи один, а
-    заготовки собираются в нескольких местах, и новое место ушло бы мимо.
+    пути ЗАПИСИ к потребителю, а не в каждой заготовке: путь записи один, а
+    заготовки собираются в нескольких местах, и новое место ушло бы мимо. Второй
+    путь заготовки к потребителю — печать захода без ключей; она подписывает
+    целые файлы тем же `signed_all`. Файл потребителя (`theirs`) не подписывается:
+    строка поставщика в чужом файле объявила бы его чужим.
     """
-    for path, text in signed_all(files, repo).items():
+    for path, text in signed_all(files, repo, theirs).items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
 
@@ -1238,6 +1248,10 @@ class Update:
     current: list[Path] = field(default_factory=list)
     #: Что заход называет, но не пишет: новые и снятые шаги `ci.yml`, ответы.
     notes: list[str] = field(default_factory=list)
+    #: Файлы ПОТРЕБИТЕЛЯ среди `write`: заход в них только поднимает тег наших
+    #: строк. Строку лицензии поставщика в них не ставят (взгляд на #1487): в
+    #: смешанном `ci.yml` свои джобы проекта, и файл остаётся его.
+    theirs: set[Path] = field(default_factory=set)
 
 
 def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path, repo: str) -> None:
@@ -1310,6 +1324,7 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     lifted = our_uses(repo).sub(lift, text)
     if lifted != text:
         update.write[where] = lifted
+        update.theirs.add(where)
     for one in sorted(set(pipeline) - called):
         update.notes.append(
             f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
@@ -1428,7 +1443,7 @@ def update(
         plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
         plan_ci(plan, consumer, pipeline, repo, pin)
         plan_answer(plan, consumer, [check_name(one) for one in pipeline] + records)
-        signed_all(plan.write | data, repo)
+        signed_all(plan.write | data, repo, frozenset(plan.theirs))
     except NotRun as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -1448,7 +1463,7 @@ def update(
             file=sys.stderr,
         )
         return EXIT_HAND_EDITED
-    lay(consumer, plan.write, repo)
+    lay(consumer, plan.write, repo, frozenset(plan.theirs))
     laid = lay_free(consumer, data, repo)
     if plan.write:
         print(f"обновлено до {pin}: " + ", ".join(str(one) for one in sorted(plan.write)))
@@ -1630,31 +1645,53 @@ def main(argv: list[str] | None = None) -> int:
             )
         return EXIT_OK
 
+    # ПЕЧАТЬ — ВТОРОЙ ПУТЬ ЗАГОТОВКИ К ПОТРЕБИТЕЛЮ (взгляд на #1487): целый файл
+    # отсюда копируют в чужое дерево так же, как его положил бы `lay`, и
+    # подписывается он тем же `signed_all` — до первой строки вывода, чтобы отказ
+    # подписи был исходом «не отработал», а не половиной напечатанного. Джобы
+    # вызова — не файл, а строки в СВОЙ `ci.yml` потребителя: их не подписывают,
+    # как и сам смешанный `ci.yml` при обновлении (`Update.theirs`).
+    try:
+        whole = signed_all(
+            {
+                **{
+                    paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
+                    for one, flow in sorted(own.items())
+                },
+                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change),
+                paths.WORKFLOWS / SUMMARY_FLOW: summary,
+                **rulebook,
+            },
+            args.repo,
+        )
+    except NotRun as exc:
+        print(f"заход не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
     print(f"# шагов к подключению: {len(names)} · прибивка: {pin}\n")
     print(f"# 1. В свой `{paths.WORKFLOWS}/{PIPELINE_FLOW}` — джобы вызова:\n")
     print("jobs:")
     print("\n".join(caller(one, args.repo, pin) for one in pipeline))
-    for one, flow in sorted(own.items()):
+    for _, flow in sorted(own.items()):
         print(f"# 1. Свой `{paths.WORKFLOWS}/{flow.name}` — управляющий механизм своим прогоном:\n")
-        print(own_kit(flow, one, args.repo, pin))
+        print(whole[paths.WORKFLOWS / flow.name])
     print(f"# 2. В свой `{paths.PIPELINE}` — ответ по каждой проверке.")
     print("#    Класс — СВОЙ выбор: `required`, `advisory` или `off` с причиной.")
     print(f"#    Здесь все выходят «{policy.UNREVIEWED}»: это очередь разбора, а не умолчание.\n")
-    print(answer(pipeline, beyond, on_change=on_change))
+    print(whole[paths.PIPELINE])
     print(f"# 3. В защиту ветки «{paths.TRUNK}» — ОДНО имя: имя своего сводного гейта.")
     print(f"#    Общая ветка обязана зваться «{paths.TRUNK}»: механизмы её имя не угадывают.")
     print(
         f"#    Сводный гейт — свой `{paths.WORKFLOWS}/{SUMMARY_FLOW}`, его джоб зовёт действие:\n"
     )
-    print(summary)
+    print(whole[paths.WORKFLOWS / SUMMARY_FLOW])
     print("#    Перечислять здесь шаги нельзя: список ломается добавлением версии")
     print("#    в матрицу, и защита начинает ждать имя, которого никто не выдаёт (168).")
     kit_names = ", ".join(f"`{path}`" for path in sorted(rulebook))
     print(f"\n# 4. Свой свод окна — {kit_names}: общая часть сверена с нашим сводом,")
     print("#    заглушки «Наполнение проекта» пишет владелец.")
-    for path, text in sorted(rulebook.items()):
+    for path in sorted(rulebook):
         print(f"\n# --- `{path}` ---\n")
-        print(text, end="")
+        print(whole[path], end="")
     print("\n# 5. Данные, которые общие шаги читают из ВАШЕГО дерева, — заготовка их не кладёт:")
     if data is None:
         print(f"#    перечень не выведен: нет `{paths.PORTABLE}`")

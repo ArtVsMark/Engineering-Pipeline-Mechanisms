@@ -1636,7 +1636,7 @@ def test_every_file_the_write_lays_carries_the_license(tmp_path: Path) -> None:
 
 
 def test_a_kit_that_cannot_carry_the_license_stops_the_write_before_any_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """Отказ подписи — исход «не отработал» до первой записи, а не трасса и не половина (039)."""
     root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
@@ -1644,6 +1644,56 @@ def test_a_kit_that_cannot_carry_the_license_stops_the_write_before_any_file(
     consumer = tmp_path / "потребитель"
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_BROKEN
     assert not consumer.exists() or not any(consumer.iterdir()), "положено до отказа"
+
+
+def test_an_update_leaves_the_projects_own_ci_unsigned(tmp_path: Path) -> None:
+    """Смешанный `ci.yml` — файл проекта: подъём тега не ставит в него строку лицензии.
+
+    Взгляд на #1487: `plan_ci` кладёт в план записи свой же файл потребителя с
+    поднятым тегом, и `lay` подписывал его как заготовку. Целиком наш файл рядом
+    подписывается по-прежнему.
+    """
+    root, consumer = connected(tmp_path)
+    flows = consumer / ".github" / "workflows"
+    ci = flows / "ci.yml"
+    own = "".join(
+        line
+        for line in ci.read_text("utf-8").splitlines(keepends=True)
+        if module.LICENSE_ID not in line
+    ).replace(
+        "jobs:\n",
+        "jobs:\n  свой:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo свой\n",
+        1,
+    )
+    ci.write_text(own, encoding="utf-8")
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    lifted = ci.read_text("utf-8")
+    assert "step-пример.yml@v2.6.0" in lifted and "echo свой" in lifted, lifted
+    assert module.LICENSE_ID not in lifted, lifted
+    assert module.LICENSE_ID in (flows / "план.yml").read_text("utf-8")
+
+
+def test_every_whole_file_the_print_shows_carries_the_license(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Печать без ключей — второй путь заготовки: целый файл подписан, джобы вызова — нет.
+
+    Взгляд на #1487: напечатанное копируют в чужое дерево так же, как положенное
+    `lay`. Джобы вызова — строки в СВОЙ `ci.yml` потребителя, и строки
+    поставщика в них нет, как и в смешанном `ci.yml` при обновлении.
+    """
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER},
+    )
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    # Целые файлы: свой прогон механизма, ответ, сводный гейт и свод окна.
+    whole = 3 + len(module.rulebook_kit(root))
+    assert out.count(module.LICENSE_ID) == whole, out
+    jobs = out.split("jobs:\n", 1)[1].split("\n# ", 1)[0]
+    assert "step-пример" in jobs and module.LICENSE_ID not in jobs, jobs
 
 
 def test_signed_all_signs_every_kit_or_refuses_the_whole() -> None:
