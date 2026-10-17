@@ -19,9 +19,10 @@
 ЧТО СБОРЩИК ПИШЕТ, А ЧТО НЕТ. Разделы 0–3 и 5 он собирает целиком: их предмет
 знает механизм. Разделы 4 и 6 — указание владельца и его план — механизм не
 знает и не сочиняет; их текст переносится дословно. Со строками этих разделов
-сборщик делает две вещи, и обе — чтение источника, а не сочинение: СНИМАЕТ
-строку, чей адрес закрыт, и ДОБАВЛЯЕТ в конец раздела 4 открытую задачу,
-рождённую работой по строке раздела 4 или 6 (`born_rows`, #747).
+сборщик делает три вещи, и все — чтение источника, а не сочинение: СНИМАЕТ
+строку, чей адрес закрыт, ДОБАВЛЯЕТ в конец раздела 4 открытую задачу,
+рождённую работой по строке раздела 4 или 6 (`born_rows`, #747), и
+РАСКЛАДЫВАЕТ раздел 4 по группам по меткам задач (`grouped`, #1433).
 
 СДЕЛАННОЕ ИСЧЕЗАЕТ, А НЕ ЛЕЖИТ ЗАЧЁРКНУТЫМ — тем же приёмом, что у реестра
 находок. Галочка копит историю там, где нужен ОСТАТОК: план из двадцати строк,
@@ -630,6 +631,126 @@ def born_rows(
     ]
 
 
+#: ГРУППЫ РАЗДЕЛА 4 — ПО МЕТКЕ ЗАДАЧИ, А НЕ ПО СТРОКЕ В ТЕЛЕ (решение владельца
+#: 16.10.2026, #1433). Группу знала только рука, правившая тело: строка «ждёт
+#: выпуска» стояла в «Сейчас», и окно её не брало. Метка видна в списке задач
+#: и фильтре, переносит строку сборщик, а снимает `plan/waits-release` выпуск
+#: (`released`). Без метки — «Сейчас в работе».
+WAITS_OWNER: Final = "plan/waits-owner"
+WAITS_RELEASE: Final = "plan/waits-release"
+NOW_HEAD: Final = "*Сейчас в работе*"
+#: Порядок групп, которые сборщик ставит по метке: заголовок → метка.
+GROUPS: Final[tuple[tuple[str, str], ...]] = (
+    (NOW_HEAD, ""),
+    ("*Ждёт решения*", WAITS_OWNER),
+    ("*Ждёт выпуска*", WAITS_RELEASE),
+)
+#: Заголовки групп сборщика — и прежние ручные их имена: при раскладке они
+#: снимаются, а их строки без метки встают в «Сейчас в работе».
+GROUP_HEADS: Final = frozenset(
+    {*(head for head, _ in GROUPS), "*Сейчас*", "*Ждёт владельца*", "*Родилось в работе*"}
+)
+
+
+def hand_head(line: str) -> bool:
+    """Курсивная строка-заголовок: `*…*` целиком, не жирная."""
+    said = line.strip()
+    return len(said) > 2 and said[0] == said[-1] == "*" and not said.startswith("**")
+
+
+def labels_by_number(listed: list[dict[str, Any]]) -> dict[int, set[str]]:
+    """Метки открытых задач по номеру — из уже прочитанного списка."""
+    return {
+        int(issue["number"]): {str(one.get("name") or "") for one in issue.get("labels") or []}
+        for issue in listed
+        if issue.get("number")
+    }
+
+
+def grouped(lines: list[str], labels: dict[int, set[str]]) -> list[str]:
+    """Раздел 4 по группам: пояснения сверху как были, строки — по меткам задач.
+
+    Порядок строк внутри группы — как в теле: его ставит владелец. Пустая
+    группа не пишется. Пояснение — всё до первого заголовка группы или
+    строки работы.
+
+    РУЧНЫЕ ГРУППЫ ОСТАЮТСЯ (взгляд на #1446). Курсивный заголовок после
+    пояснения, которого сборщик не знает («Ждёт срока или чужого»,
+    «Отложено»), — группа владельца: строка без метки под ним остаётся в
+    ней и не встаёт в «Сейчас», где окно взяло бы её работой. Ручные группы
+    идут после групп по меткам, в порядке тела. Продолжение строки — отступ
+    или вложенный пункт — едет со своей строкой, а не в пояснение.
+    """
+    preamble: list[str] = []
+    by_label: dict[str, list[str]] = {head: [] for head, _ in GROUPS}
+    by_hand: dict[str, list[str]] = {}
+    under = ""
+    started = False
+    last: list[str] | None = None
+    for line in lines:
+        said = line.strip()
+        if said in GROUP_HEADS:
+            under, started, last = "", True, None
+            continue
+        if line.startswith("- "):
+            started = True
+            address = address_of(line)
+            marked = labels.get(int(address[1:]), set()) if address.startswith("#") else set()
+            head = next((h for h, label in GROUPS if label and label in marked), "")
+            last = by_label[head] if head else by_hand[under] if under else by_label[NOW_HEAD]
+            last.append(line)
+            continue
+        if not started:
+            preamble.append(line)
+            continue
+        if not said:
+            continue
+        if hand_head(line):
+            under, last = said, None
+            by_hand.setdefault(said, [])
+            continue
+        # Продолжение строки — с отступом или без — едет со своей строкой.
+        (last if last is not None else preamble).append(line)
+    while preamble and not preamble[-1].strip():
+        preamble.pop()
+    said_lines = list(preamble)
+    groups = [*((head, by_label[head]) for head, _ in GROUPS), *by_hand.items()]
+    for head, rows in groups:
+        if rows:
+            said_lines += ["", head, *rows] if said_lines else [head, *rows]
+    return said_lines
+
+
+#: Сколько раз перечитывается первая страница помеченных: снятие сдвигает
+#: страницы, поэтому идётся не по ним, а по первой, пока она не опустеет.
+RELEASE_ROUNDS: Final = 50
+
+
+def released(repo: str, token: str, freed: list[int]) -> None:
+    """Снимает `plan/waits-release` с открытых задач после выпуска; снятые — в `freed`.
+
+    Иначе «ждёт выпуска» пережило бы выпуск молча (045): задачи возвращаются
+    в «Сейчас», и их остаток — проверка на теге — берётся тем же окном.
+
+    ПЕРВАЯ СТРАНИЦА, А НЕ ОБХОД СТРАНИЦ (взгляд на #1446): снятая метка
+    выводит задачу из отфильтрованного списка, и вторая страница сдвигается
+    на уже пройденные. Снятые копятся в `freed` вызывающего: отказ посреди
+    захода называет то, что уже снято.
+    """
+    label = WAITS_RELEASE.replace("/", "%2F")
+    for _ in range(RELEASE_ROUNDS):
+        page = ghrest.request(
+            "GET", f"repos/{repo}/issues?state=open&labels={label}&per_page=100", token
+        )
+        if not page:
+            return
+        for issue in page:
+            number = int(issue["number"])
+            ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{label}", token)
+            freed.append(number)
+    raise NotRun(f"метка не уходит: {RELEASE_ROUNDS} заходов подряд первая страница не пуста")
+
+
 def assemble(body: str, built: dict[int, Source], held: dict[int, list[str]], when: str) -> str:
     """Тело плана: шапка прежняя, разделы — свои собранные и чужие сохранённые."""
     head = body.split("\n## ", 1)[0].rstrip()
@@ -706,6 +827,13 @@ def fresh_build(
             if (address := address_of(row)).startswith("#")
         )
         held[BORN_INTO] = held[BORN_INTO] + born_rows(repo, token, held, taken, listed)
+        # РАСКЛАДКА ПО МЕТКАМ — ТОЛЬКО ПО ПРОЧИТАННОМУ СПИСКУ. Без него метки
+        # неизвестны, и раскладка увела бы все строки в «Сейчас» молча:
+        # раздел остаётся как в теле, и это сказано (045).
+        if listed is None:
+            print("метки задач не прочитаны — раздел 4 оставлен как в теле, без раскладки")
+        else:
+            held[BORN_INTO] = grouped(held[BORN_INTO], labels_by_number(listed))
         said = assemble(body, built, held, when)
         if not apply:
             return number, body, held, said
@@ -724,10 +852,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--apply", action="store_true", help="записать; без него — показать")
+    parser.add_argument(
+        "--released",
+        action="store_true",
+        help="после выпуска: снять plan/waits-release с открытых задач (#1433)",
+    )
     args = parser.parse_args(argv)
 
-    announce(not args.apply)
     token = ghrest.token_from_env()
+    if args.released:
+        if not token or not args.repo:
+            print("метка выпуска не снята: нет токена или репозитория (045).", file=sys.stderr)
+            return EXIT_BROKEN
+        freed: list[int] = []
+        try:
+            released(args.repo, token, freed)
+        except (ghrest.TransportError, NotRun) as exc:
+            done = ", ".join(f"#{one}" for one in freed) or "ни с одной"
+            print(f"метка выпуска снята не со всех: {exc}; уже снята — {done}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(f"{WAITS_RELEASE} снята: {', '.join(f'#{one}' for one in freed) or 'не с кого'}")
+        return EXIT_OK
+    announce(not args.apply)
     if not token or not args.repo:
         print("план не собран: нет токена или репозитория (045).", file=sys.stderr)
         return EXIT_PARTIAL

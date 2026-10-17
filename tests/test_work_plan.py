@@ -999,3 +999,166 @@ def test_every_channel_of_section_five_has_a_title() -> None:
     )
     assert isinstance(parts, ast.Tuple)
     assert len(module.FIVE_TITLES) == len(parts.elts)
+
+
+#: Раздел 4 с прежними ручными заголовками групп — так его пишет рука сегодня.
+SECTION_FOUR: Final = [
+    "*Пояснение владельца.*",
+    "",
+    "*Сейчас*",
+    "- **#701** — ждёт выпуска",
+    "- **#702** — в работе",
+    "*Ждёт владельца*",
+    "- **#703** — ждёт решения",
+    "",
+    "*Ждёт срока или чужого*",
+    "- **#704** — пересмотр 01.11.2026",
+]
+
+
+def test_section_four_is_laid_out_by_labels() -> None:
+    """Группа — по метке задачи; порядок внутри — как в теле; пояснение сверху (#1433)."""
+    labels = {701: {module.WAITS_RELEASE}, 703: {module.WAITS_OWNER}, 702: {"enhancement"}}
+    assert module.grouped(SECTION_FOUR, labels) == [
+        "*Пояснение владельца.*",
+        "",
+        "*Сейчас в работе*",
+        "- **#702** — в работе",
+        "",
+        "*Ждёт решения*",
+        "- **#703** — ждёт решения",
+        "",
+        "*Ждёт выпуска*",
+        "- **#701** — ждёт выпуска",
+        "",
+        "*Ждёт срока или чужого*",
+        "- **#704** — пересмотр 01.11.2026",
+    ]
+
+
+def test_a_row_without_a_label_leaves_a_hand_group_for_now() -> None:
+    """Без метки строка из «Ждёт владельца» встаёт в «Сейчас»: группу держит метка, а не тело."""
+    said = module.grouped(SECTION_FOUR, {})
+    assert "*Ждёт решения*" not in said and "*Ждёт выпуска*" not in said
+    assert said[said.index("*Сейчас в работе*") + 1 : said.index("*Сейчас в работе*") + 4] == [
+        "- **#701** — ждёт выпуска",
+        "- **#702** — в работе",
+        "- **#703** — ждёт решения",
+    ]
+
+
+def test_labels_are_read_from_the_open_listing() -> None:
+    """Метки берутся из уже прочитанного списка открытых задач — по номеру."""
+    listed = [{"number": 5, "labels": [{"name": module.WAITS_OWNER}, {"name": "x"}]}, {"x": 1}]
+    assert module.labels_by_number(listed) == {5: {module.WAITS_OWNER, "x"}}
+
+
+def test_the_built_plan_groups_section_four(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Собранный план раскладывает раздел 4 по меткам открытых задач."""
+    written = quiet_platform(monkeypatch)
+    listed = [{"number": 640, "labels": [{"name": module.WAITS_RELEASE}]}]
+    monkeypatch.setattr(module.debt, "open_listed", lambda *_: listed)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    four = written[0].split("## 4 ·", 1)[1].split("## 5 ·", 1)[0]
+    assert "*Сейчас в работе*\n- **#700**" in four
+    assert "*Ждёт выпуска*\n- **#640**" in four
+
+
+def test_unread_labels_leave_section_four_as_written(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Список открытых не прочитан — раздел 4 как в теле, и это сказано (045)."""
+    written = quiet_platform(monkeypatch)
+
+    def refuse(*_: Any) -> list[dict[str, Any]]:
+        raise module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.debt, "open_listed", refuse)
+    module.main(["--repo", "o/r", "--apply"])
+    assert "*Сейчас в работе*" not in written[0]
+    assert "раздел 4 оставлен как в теле" in capsys.readouterr().out
+
+
+def test_a_release_takes_the_waits_release_label_away(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Метка снимается, пока первая страница помеченных не опустеет (#1433, взгляд на #1446)."""
+    pages = [[{"number": 7}, {"number": 9}], [{"number": 11}], []]
+    calls: list[str] = []
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+
+    def platform(method: str, path: str, *_: Any) -> Any:
+        calls.append(f"{method} {path}")
+        return pages.pop(0) if method == "GET" else {}
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_OK
+    listed = "GET repos/o/r/issues?state=open&labels=plan%2Fwaits-release&per_page=100"
+    assert calls.count(listed) == 3, "страница перечитывается, а не листается"
+    assert "DELETE repos/o/r/issues/11/labels/plan%2Fwaits-release" in calls
+    assert "#7, #9, #11" in capsys.readouterr().out
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
+    assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
+
+
+def test_a_refusal_midway_names_what_was_already_freed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ посреди захода называет уже снятые метки, а не «не снято ничего»."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+
+    def platform(method: str, path: str, *_: Any) -> Any:
+        if method == "GET":
+            return [{"number": 7}, {"number": 9}]
+        if path.endswith("/9/labels/plan%2Fwaits-release"):
+            raise module.ghrest.TransportError("502")
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
+    assert "уже снята — #7" in capsys.readouterr().err
+
+
+def test_a_label_that_will_not_leave_is_a_refusal_not_a_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Первая страница не пустеет — отказ после предела заходов, а не вечный цикл."""
+    monkeypatch.setattr(module.ghrest, "request", lambda method, *_: [{"number": 7}])
+    with pytest.raises(module.NotRun, match="не уходит"):
+        module.released("o/r", "t", [])
+
+
+def test_continuations_and_hand_groups_keep_their_rows() -> None:
+    """Продолжение едет со строкой; ручная группа держит строки без метки (взгляд на #1446)."""
+    lines = [
+        "*Пояснение.*",
+        "*Сейчас*",
+        "- **#1** — первая",
+        "  продолжение первой",
+        "  - вложенный пункт",
+        "*Отложено*",
+        "- **#2** — отложена",
+        "- **#3** — ждёт выпуска",
+    ]
+    said = module.grouped(lines, {3: {module.WAITS_RELEASE}})
+    assert said == [
+        "*Пояснение.*",
+        "",
+        "*Сейчас в работе*",
+        "- **#1** — первая",
+        "  продолжение первой",
+        "  - вложенный пункт",
+        "",
+        "*Ждёт выпуска*",
+        "- **#3** — ждёт выпуска",
+        "",
+        "*Отложено*",
+        "- **#2** — отложена",
+    ]
+
+
+def test_a_hand_head_is_a_whole_italic_line() -> None:
+    """Заголовок ручной группы — курсив целиком; жирное и строка работы — нет."""
+    assert module.hand_head("*Отложено*") and module.hand_head("  *Ждёт срока*  ")
+    assert not module.hand_head("**жирное**") and not module.hand_head("- **#1** — работа")
+    assert not module.hand_head("**") and not module.hand_head("*курсив* и текст")
