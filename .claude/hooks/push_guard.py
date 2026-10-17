@@ -49,8 +49,53 @@ git — единственное место, где это возможно, с�
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Final
+
+#: Бюджет всех вызовов git на заход. ОН ОБЯЗАН БЫТЬ МЕНЬШЕ ПРЕДЕЛА ХУКА
+#: (`timeout` в `.claude/settings.json`, 10 с): убитый площадкой хук —
+#: не-блокирующая ошибка, и толчок прошёл бы без проверки (100, письмо каталога
+#: #1439). Бюджет общий, а не на вызов: число вызовов растёт с числом веток в
+#: толчке. Запас до предела — на запуск интерпретатора и разбор. Сверяет
+#: `tests/test_push_guard.py::test_the_git_budget_fits_the_hook_limit`.
+GIT_BUDGET: Final = 7.0
+#: Дедлайн одного вызова — не больше остатка бюджета.
+GIT_DEADLINE: Final = 2.5
+#: Начало захода: от него считается остаток бюджета. Ставит его `main()`, а
+#: не импорт: модуль, загруженный раньше захода (набор тестов держит его
+#: минутами), иначе приходил бы с бюджетом, исчерпанным до первого git. `None`
+#: — вне захода: общий бюджет не считается, дедлайн одного вызова — да.
+started: float | None = None
+
+
+def git(*args: str) -> subprocess.CompletedProcess[str] | str:
+    """Вызов git с дедлайном; отказ запуска или истёкший срок — причина строкой.
+
+    ОТКАЗ НЕ РОНЯЕТ СТРАЖА (письмо каталога #1439). `OSError` от отсутствующего
+    git и `TimeoutExpired` прежде уходили трейсбеком с кодом 1 — его площадка
+    считает НЕблокирующей ошибкой, и толчок проходил без проверки. Теперь отказ
+    — причина, а зовущий решает, что «не проверено» значит «не пущу».
+    """
+    deadline = GIT_DEADLINE
+    if started is not None:
+        left = GIT_BUDGET - (time.monotonic() - started)
+        if left <= 0:
+            return f"бюджет сторожа на git ({GIT_BUDGET} с) исчерпан до git {args[0]}"
+        deadline = min(deadline, left)
+    try:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=deadline,
+        )
+    except subprocess.TimeoutExpired:
+        return f"git {args[0]} не ответил за {deadline:.1f} с"
+    except OSError as exc:
+        return f"git не запустился: {exc}"
+
 
 #: Единственная приставка ветки, в которую окно вправе толкать (131, 003).
 #:
@@ -537,12 +582,9 @@ def head() -> tuple[str, str]:
     Отсоединённая голова даёт `HEAD` и код 0 — это не отказ, и сюда не
     попадает.
     """
-    said = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    said = git("rev-parse", "--abbrev-ref", "HEAD")
+    if isinstance(said, str):
+        return "", said
     if said.returncode != 0:
         return "", said.stderr.strip() or f"git rev-parse вернул {said.returncode}"
     return said.stdout.strip(), ""
@@ -621,18 +663,14 @@ def merged_away(branch: str) -> str:
     """
     if not branch or branch == "HEAD":
         return ""
-    tracked = subprocess.run(
-        ["git", "config", "--get", f"branch.{branch}.merge"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    gone = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    tracked = git("config", "--get", f"branch.{branch}.merge")
+    gone = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    # НЕ ПРОВЕРЕНО — НЕ ПУЩУ: тот же ответ, что у неузнанной головы (045).
+    # Две проверки, а не цикл: сужение типа mypy через цикл не переносит.
+    if isinstance(tracked, str):
+        return f"сторож не проверил, не слита ли ветка «{branch}», — {tracked}"
+    if isinstance(gone, str):
+        return f"сторож не проверил, не слита ли ветка «{branch}», — {gone}"
     # UPSTREAM ОБЯЗАН УКАЗЫВАТЬ НА САМУ ЭТУ ВЕТКУ, А НЕ ПРОСТО СУЩЕСТВОВАТЬ.
     # `git checkout -b <новая> origin/main` — процедура свода — оставляет
     # `branch.<новая>.merge = refs/heads/main`: git настраивает слежение за той
@@ -678,6 +716,19 @@ def merged_away(branch: str) -> str:
 
 def main() -> int:
     """Точка входа: читает событие, решает, пускать ли команду."""
+    global started
+    started = time.monotonic()
+    try:
+        return run()
+    finally:
+        # ЗАХОД КОНЧИЛСЯ — ОТСЧЁТ СНЯТ (взгляд на #1454). Модуль живёт дольше
+        # захода только в наборе тестов, и там прошлый `main()` иначе оставлял
+        # бы следующему вызову бюджет, тающий с чужого начала.
+        started = None
+
+
+def run() -> int:
+    """Заход внутри бюджета: событие → решение; сбой судейства на толчке — отказ."""
     try:
         event = json.load(sys.stdin)
     except json.JSONDecodeError, ValueError:
@@ -685,6 +736,26 @@ def main() -> int:
         # своего разбора хуже, чем пропустить одну команду (084).
         return 0
     command = str(((event or {}).get("tool_input") or {}).get("command") or "")
+    try:
+        return judge(command)
+    except Exception as exc:
+        # СБОЙ СУДЕЙСТВА НА ТОЛЧКЕ — ОТКАЗ, А НЕ КОД 1 (взгляд на #1454, 195).
+        # Трейсбек с кодом 1 площадка считает НЕблокирующей ошибкой, и толчок
+        # прошёл бы без проверки — тот же исход, что у отказа git выше. Прочую
+        # команду сторож по-прежнему не роняет: признак «толчок» здесь грубый —
+        # слово в команде, — и шире он нарочно (084).
+        if "push" not in command:
+            return 0
+        print(
+            f"Толчок отвергнут до вызова git: сторож упал на разборе ({exc!r}) и "
+            "толчок не проверил. Перепишите команду проще или почините сторожа.",
+            file=sys.stderr,
+        )
+        return 2
+
+
+def judge(command: str) -> int:
+    """Решение по разобранной команде: 0 — пускать, 2 — отказ с причиной в stderr."""
     look = push_targets(command)
     if look.blind:
         # РАЗБОР, НЕ ДОШЕДШИЙ ДО КОНЦА, НЕ МАШЕТ РУКОЙ. Сторож не знает, толчок
