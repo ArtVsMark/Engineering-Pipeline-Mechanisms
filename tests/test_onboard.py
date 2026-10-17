@@ -1656,21 +1656,47 @@ def test_a_kit_without_a_place_for_the_license_is_refused(name: str, text: str) 
 
 
 def test_every_file_the_write_lays_carries_the_license(tmp_path: Path) -> None:
-    """Каждый файл, положенный заходом в дерево потребителя, несёт строку лицензии (#1470).
+    """Каждая заготовка, положенная заходом, несёт строку лицензии; `ci.yml` — нет (#1470).
 
     Судится результат захода целиком, а не каждая заготовка порознь: путь
-    записи один, и новая заготовка, прошедшая мимо него, здесь видна.
+    записи один, и новая заготовка, прошедшая мимо него, здесь видна. Тонкий
+    `ci.yml` — файл проекта (`OWN_BY_PROJECT`): в него проект дописывает свои
+    джобы, и строка поставщика осталась бы в чужом файле (поздний взгляд на
+    #1487, `a4c2cc0`).
     """
     root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
     consumer = tmp_path / "потребитель"
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
     laid = [one for one in walk_deep(consumer) if one.is_file()]
-    unsigned = [
-        one.relative_to(consumer).as_posix()
+    own = {(consumer / one).as_posix() for one in module.OWN_BY_PROJECT}
+    signed = {
+        one.relative_to(consumer).as_posix(): module.LICENSE_ID in one.read_text(encoding="utf-8")
         for one in laid
-        if module.LICENSE_ID not in one.read_text(encoding="utf-8")
+    }
+    unsigned = [
+        path
+        for path, said in signed.items()
+        if not said and (consumer / path).as_posix() not in own
     ]
     assert not unsigned, f"положено без строки лицензии: {unsigned}"
+    projects = [
+        path for path, said in signed.items() if said and (consumer / path).as_posix() in own
+    ]
+    assert not projects, f"файл проекта подписан строкой поставщика: {projects}"
+    assert own and all(Path(one).is_file() for one in own), (
+        "тонкий ci.yml не положен — судить нечего"
+    )
+
+
+def test_an_update_lays_the_missing_ci_as_the_projects_file(tmp_path: Path) -> None:
+    """Обновление, положившее недостающий `ci.yml`, кладёт его без строки поставщика (`49976c1`)."""
+    root, consumer = connected(tmp_path)
+    ci = consumer / ".github" / "workflows" / "ci.yml"
+    ci.unlink()
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    laid = ci.read_text("utf-8")
+    assert "step-пример.yml@v2.6.0" in laid and module.LICENSE_ID not in laid, laid
 
 
 def test_a_kit_that_cannot_carry_the_license_stops_the_write_before_any_file(

@@ -747,6 +747,13 @@ def licensed(path: Path, text: str, repo: str) -> str:
     return form.format(line=line) + text
 
 
+#: Что заход кладёт, но что становится файлом ПРОЕКТА, а не нашей заготовкой:
+#: тонкий `ci.yml`, куда проект дописывает свои джобы (поздний взгляд на #1487,
+#: `a4c2cc0`). Строку лицензии поставщика он не несёт ни при первой кладке, ни
+#: при обновлении (`Update.theirs`).
+OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW})
+
+
 def signed_all(
     files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
 ) -> dict[Path, str]:
@@ -1248,9 +1255,9 @@ class Update:
     current: list[Path] = field(default_factory=list)
     #: Что заход называет, но не пишет: новые и снятые шаги `ci.yml`, ответы.
     notes: list[str] = field(default_factory=list)
-    #: Файлы ПОТРЕБИТЕЛЯ среди `write`: заход в них только поднимает тег наших
-    #: строк. Строку лицензии поставщика в них не ставят (взгляд на #1487): в
-    #: смешанном `ci.yml` свои джобы проекта, и файл остаётся его.
+    #: Файлы ПОТРЕБИТЕЛЯ среди `write`: строку лицензии поставщика в них не
+    #: ставят (взгляд на #1487). Это `ci.yml` — и поднятый, и положенный тонким
+    #: (`plan_ci`): в него проект дописывает свои джобы, и файл остаётся его.
     theirs: set[Path] = field(default_factory=set)
 
 
@@ -1305,6 +1312,10 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     """
     where = standing(consumer, paths.WORKFLOWS / PIPELINE_FLOW)
     target = consumer / where
+    # `ci.yml` — ФАЙЛ ПРОЕКТА В ОБОИХ СЛУЧАЯХ (поздний взгляд на #1487,
+    # `49976c1`): положенный тонким завтра получит свои джобы проекта, и строка
+    # поставщика в нём осталась бы в чужом файле — тот же класс, что у поднятого.
+    update.theirs.add(where)
     if not target.is_file():
         update.write[where] = thin_ci(pipeline, repo, pin)
         return
@@ -1324,7 +1335,6 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     lifted = our_uses(repo).sub(lift, text)
     if lifted != text:
         update.write[where] = lifted
-        update.theirs.add(where)
     for one in sorted(set(pipeline) - called):
         update.notes.append(
             f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
@@ -1609,7 +1619,7 @@ def main(argv: list[str] | None = None) -> int:
                     for one, flow in sorted(own.items())
                 },
             }
-            signed_all(files | rulebook | kit, args.repo)
+            signed_all(files | rulebook | kit, args.repo, OWN_BY_PROJECT)
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
@@ -1646,7 +1656,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OCCUPIED
         kept = occupied(args.write, rulebook)
         free = {path: text for path, text in rulebook.items() if path not in kept}
-        lay(args.write, files | free, args.repo)
+        lay(args.write, files | free, args.repo, OWN_BY_PROJECT)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
@@ -1687,7 +1697,7 @@ def main(argv: list[str] | None = None) -> int:
     # подписывается он тем же `signed_all` — до первой строки вывода, чтобы отказ
     # подписи был исходом «не отработал», а не половиной напечатанного. Джобы
     # вызова — не файл, а строки в СВОЙ `ci.yml` потребителя: их не подписывают,
-    # как и сам смешанный `ci.yml` при обновлении (`Update.theirs`).
+    # как и сам `ci.yml` — файл проекта (`OWN_BY_PROJECT`, `Update.theirs`).
     try:
         whole = signed_all(
             {
