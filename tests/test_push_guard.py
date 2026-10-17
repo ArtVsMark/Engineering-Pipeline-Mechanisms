@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import report
 
 from tests.conftest import ROOT, load_script
 
@@ -159,6 +160,29 @@ def test_only_an_agent_branch_takes_a_push(command: str) -> None:
 def test_the_prefix_is_the_pipeline_one() -> None:
     """Приставка перехвата — та же, по которой конвейер открывает изменение (003, 046)."""
     assert (module.AGENT_PREFIX,) == load_script("agent_pr.py").PREFIXES
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["коротко", "я" * report.LIMIT, "я" * (report.LIMIT + 1), "  поля  ", "я" * 400],
+    ids=["коротко", "на-границе", "за-границей", "поля", "длинно"],
+)
+def test_the_cut_is_the_transport_one(text: str) -> None:
+    """Обрезка сторожа — копия `report.cut`, и разойтись с ним молча ей нельзя (016, 046)."""
+    assert module.LIMIT == report.LIMIT
+    assert module.cut(text) == report.cut(text)
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [["bash", "-c", "echo '" + "я" * 400], ["env", "-S", "echo '" + "я" * 400]],
+    ids=["оболочка", "env-S"],
+)
+def test_an_unparsed_script_is_cut_aloud(segment: list[str]) -> None:
+    """Неразобранный скрипт в причине отказа обрезан вслух, а не целиком (`64f3440`)."""
+    found, blind = module.unwrap(segment, module.DEPTH)
+    assert not found and "(обрезано, всего 406 знаков)" in blind, blind
+    assert len(blind) < report.LIMIT + 100, len(blind)
 
 
 def test_the_revival_advice_names_no_guessed_branch() -> None:
