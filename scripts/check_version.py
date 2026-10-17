@@ -113,7 +113,9 @@ def texts(files: list[Path]) -> list[tuple[str, str]]:
 def check(version: str, files: list[Path]) -> list[str]:
     """Ищет рукописные вхождения версии и расхождения внутри маркеров."""
     # Границы вокруг числа: «1.2.3» не должно совпадать с «11.2.3» или «1.2.30».
-    loose = re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
+    # Точка ПОСЛЕ числа — граница, только если за ней цифра («1.2.3.4»): точка
+    # конца предложения версию не прячет (замер 17.10.2026 при ответе на 222).
+    loose = re.compile(rf"(?<![\d.]){re.escape(version)}(?!\d|\.\d)")
     findings: list[str] = []
     for name, text in texts(files):
         for match in MARKER_RE.finditer(text):

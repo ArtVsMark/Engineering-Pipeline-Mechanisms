@@ -101,6 +101,28 @@ def test_version_written_by_hand_is_a_finding(run_script: RunScript, tmp_path: P
     assert "вне источника" in result.text
 
 
+@pytest.mark.parametrize(
+    ("line", "code"),
+    [
+        ("подняли до 1.2.3.", REJECTED),
+        ("подняли до 1.2.3, дальше", REJECTED),
+        ("номер 1.2.3.4", CLEAN),
+    ],
+    ids=["точка-конца-предложения", "запятая", "другое-число"],
+)
+def test_a_period_after_the_version_does_not_hide_it(
+    run_script: RunScript, tmp_path: Path, line: str, code: int
+) -> None:
+    """Точка конца предложения — не часть числа: вписанная версия видна (замер при ответе на 222).
+
+    Прежняя граница `(?![\\d.])` пропускала «до 1.2.3.» — версию в конце фразы.
+    """
+    repo = prepare_repo(tmp_path)
+    (repo / "doc.md").write_text(f"{line}\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    assert run_script("check_version.py", cwd=repo).code == code
+
+
 def test_stale_marker_is_a_finding(run_script: RunScript, tmp_path: Path) -> None:
     """Маркер есть, а значение чужое — сборка его не переписала (127)."""
     repo = prepare_repo(tmp_path)
