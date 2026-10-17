@@ -1,5 +1,5 @@
 # Поверхность транспорта, формат 4. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
-VERSION 0.3.0
+VERSION 0.4.0
 requires-python >=3.14
 dependencies —
 ghrest.API_ROOT
@@ -40,3 +40,4 @@ report.DRY
 report.LIMIT
 report.announce(dry_run: bool) -> None
 report.cut(text: str, limit: int=LIMIT) -> str
+report.tail(text: str, limit: int=LIMIT) -> str
