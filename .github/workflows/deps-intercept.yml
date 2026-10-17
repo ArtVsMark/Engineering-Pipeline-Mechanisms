@@ -42,7 +42,7 @@ jobs:
           MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
         run: |
           if [ -z "${MERGE_QUEUE_TOKEN:-}" ]; then
-            echo "::warning::MERGE_QUEUE_TOKEN не задан — перехват не идёт: ветку подъёма толкает токен владельца, иначе её изменение не откроется."
+            echo "::error::MERGE_QUEUE_TOKEN не задан — перехват не идёт: ветку подъёма толкает токен владельца, иначе её изменение не откроется."
             exit 1
           fi
 
