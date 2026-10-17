@@ -9,7 +9,7 @@
   "rules": {
     "001": {
       "paths.SOURCES": "tests/test_ghrest.py",
-      ".claude/hooks": "исключено: хуки окна к API площадки не ходят — страж толчка спрашивает только локальный git (rev-parse, config), хук старта ходит в PyPI; grep -cE 'graphql|api.github|urllib|requests|gh' по .claude/hooks/* — 0 во всех четырёх файлах",
+      ".claude/hooks": "исключено: хуки окна к API площадки не ходят — страж толчка спрашивает только локальный git (rev-parse, config), хук старта ходит в PyPI; grep -cE 'graphql|api\\.github|urllib|requests|\\bgh\\b' по .claude/hooks/* — 0 во всех четырёх файлах (без границы слова «gh» ловит «preflight» в session-start.sh — взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
       ".github": "исключено: шаги прогонов к API площадки не обращаются — grep -nE 'gh (api|pr|issue|run|release|workflow|label|repo)|graphql|api.github.com|GITHUB_API_URL|github-script' по .github/workflows/*.yml и .github/actions/*/action.yml — 0; к площадке ходит код scripts/ через packages/transport/ghrest.py (его судит tests/test_ghrest.py), а curl в badges.yml:128 и step-facts.yml:267 качает файлы raw.githubusercontent.com и выпусков, не API"
     },
     "016": {
@@ -31,12 +31,12 @@
     "045": {
       "paths.SOURCES": "tests/test_dry_run_says_so.py",
       ".claude/hooks": "исключено: пробного режима у хуков окна нет (grep -ci dry .claude/hooks/* — 0), а режим без интерпретатора планки не ослаблен молча: страж закрывает толчок кодом 2 с причиной (tests/test_push_guard.py::test_without_the_floor_interpreter_a_push_is_refused), хук старта на каждом отказе печатает «старт окна: … — окно работает без этого»",
-      ".github": "не построено: тихий запасной путь шага прогона (continue-on-error) по дереву не судится — замер 17.10.2026 разбором YAML (шаг с continue-on-error: true, в чьём run нет ::warning/::error/::notice; census/tools/coe.py): шагов 30, без аннотации в своём run 12 — 9 вызовов агента и их разбор (отказ называет scripts/agent_run.py, держит tests/test_review_safety.py::test_every_agent_call_names_its_model_and_its_failure), 2 чужих действия в step-facts.yml («взять входы проекта», «значок проекта — действием каталога»; исход передан следующему шагу как GIVEN и OUTCOME), 1 ворота step-review.yml «дождаться зелёной головы» (отказ look_waits.py открывает взгляд: run=yes); подтверждённо молчащих 0, разобрано глазом"
+      ".github": "не построено: тихий запасной путь шага прогона (continue-on-error) по дереву не судится — замер 17.10.2026 разбором YAML (шаг с continue-on-error: true, в чьём run нет ::warning/::error/::notice; разовый разбор окна, в дерево не положен — признак назван здесь же): шагов 30, без аннотации в своём run 12 — 9 вызовов агента и их разбор (отказ называет scripts/agent_run.py, держит tests/test_review_safety.py::test_every_agent_call_names_its_model_and_its_failure), 2 чужих действия в step-facts.yml («взять входы проекта», «значок проекта — действием каталога»; исход передан следующему шагу как GIVEN и OUTCOME), 1 ворота step-review.yml «дождаться зелёной головы» (отказ look_waits.py открывает взгляд: run=yes); подтверждённо молчащих 0, разобрано глазом"
     },
     "100": {
       "paths.SOURCES": "tests/test_subprocess_deadline.py",
-      ".claude/hooks": "tests/test_subprocess_deadline.py",
-      ".github": "не построено: предел работы прогона по всему .github не судится — tests/test_review_safety.py::test_agent_jobs_have_a_timeout берёт только прогоны с агентом (AGENT_WORKFLOWS) — замер 17.10.2026 разбором YAML (работа со шагами без timeout-minutes; census/tools/jobs_timeout.py): работ со шагами 46, вызовов общего шага 32, без timeout-minutes 0"
+      ".claude/hooks": "не построено: дедлайн у вызовов процесса в *.py хуков держит tests/test_subprocess_deadline.py, а оболочечные хуки он не читает — замер 17.10.2026 по .claude/hooks/*.sh (pip install, uv python install, uv venv, curl, wget): сетевых вызовов без своего дедлайна в session-start.sh 3, их обрывает только предел хука 300 с в .claude/settings.json (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
+      ".github": "не построено: предел работы прогона по всему .github не судится — tests/test_review_safety.py::test_agent_jobs_have_a_timeout берёт только прогоны с агентом (AGENT_WORKFLOWS) — замер 17.10.2026 разбором YAML (работа со шагами без timeout-minutes; разовый разбор окна, в дерево не положен — признак назван здесь же): работ со шагами 46, вызовов общего шага 32, без timeout-minutes 0"
     },
     "140": {
       "paths.SOURCES": {
@@ -52,7 +52,7 @@
         "признак": "WITHOUT_INPUT"
       },
       ".claude/hooks": "исключено: хук отвечает площадке кодом 0 или 2, третьего исхода у контракта хука нет; отказ стража «не проверил» предмет называет («сторож не проверил, не слита ли ветка «X», — git … не ответил за N с»)",
-      ".github": "не построено: предмет в аннотации третьего исхода шага не судится — замер 17.10.2026 предикатом SUBJECT из tests/test_third_outcome.py по строкам ::warning/::error с «не отработал|не прочитан|не скачал|не собран|не заведен|не сверен» (census/tools/third_in_runs.py): аннотаций 42, без предмета по SUBJECT 37 — но большинство несёт предмет прозой или подстановкой вывода механизма (${said}, ${reason}), то есть предикат здесь не годен по той же причине, по которой предикат по дереву отвергнут в ответе 158 (59 из 196); соседний tests/test_steps_speak_outward.py (142) требует причину только у аннотаций, называющих код"
+      ".github": "не построено: предмет в аннотации третьего исхода шага не судится — замер 17.10.2026 предикатом SUBJECT из tests/test_third_outcome.py по строкам ::warning/::error с «не отработал|не прочитан|не скачал|не собран|не заведен|не сверен» (разовый разбор окна, в дерево не положен — признак назван здесь же): аннотаций 42, без предмета по SUBJECT 37 — но большинство несёт предмет прозой или подстановкой вывода механизма (${said}, ${reason}), то есть предикат здесь не годен по той же причине, по которой предикат по дереву отвергнут в ответе 158 (59 из 196); соседний tests/test_steps_speak_outward.py (142) требует причину только у аннотаций, называющих код"
     },
     "159": {
       "paths.SOURCES": "tests/test_a_collector_finishes_its_pass.py",
@@ -79,7 +79,7 @@
         "гейт": "scripts/check_reached_by_work.py",
         "признак": "paths.SOURCES"
       },
-      ".claude/hooks": "не построено: check_reached_by_work.py судит добавленное в paths.SOURCES (neighbour.touched) и рабочим путём считает paths.SOURCES и прогоны — хук окна не входит ни туда, ни туда — замер 17.10.2026 тем же предикатом mentioned/reached по .claude/hooks/*.py (рабочий путь: .claude/settings.json → push_guard.sh → push_guard.py::main; census/tools/orphans_hooks.py): функций и классов верхнего уровня 17, без рабочего пути 0",
+      ".claude/hooks": "не построено: check_reached_by_work.py судит добавленное в paths.SOURCES (neighbour.touched) и рабочим путём считает paths.SOURCES и прогоны — хук окна не входит ни туда, ни туда — замер 17.10.2026 тем же предикатом mentioned/reached по .claude/hooks/*.py (рабочий путь: .claude/settings.json → push_guard.sh → push_guard.py::main; разовый разбор окна, в дерево не положен — признак назван здесь же): функций и классов верхнего уровня 17, без рабочего пути 0",
       ".github": "исключено: прогон — точка входа площадки, а не имя кода: reached() засчитывает имя, названное шагом (RUNS = paths.WORKFLOWS), а общие шаги step-*.yml — поверхность для потребителей, вызываемость которой держит tests/test_reusable_steps.py::test_every_step_is_actually_callable"
     },
     "212": {
@@ -90,7 +90,7 @@
     "214": {
       "paths.SOURCES": "tests/test_one_parse.py",
       ".claude/hooks": "tests/test_one_parse.py",
-      ".github": "не построено: разбор текста оболочкой в шагах (sed, grep, awk) гейт одной реализации не видит — test_one_parse.py обходит code_files(with_hooks=True), YAML нет — замер 17.10.2026 по образцам sed/grep/awk в строках шагов (census/tools/shell_patterns.py): образцов 9, различных 6; повторов между файлами 2 — экранирование аннотации `sed -z 's/%/%25/g; s/\\r/%0D/g; s/\\n/%0A/g'` и отступ сводки `sed 's/^/    /'` в step-automerge.yml:195,201 и actions/ci-complete/action.yml:86,95 (их наличие в обоих требует tests/test_steps_speak_outward.py, совпадение по 071 не подписано); и второй разбор предмета, у которого реализация в коде есть, — номер выпуска из тега, step-release.yml:284 и :328 `git tag --points-at HEAD | head -1 | sed 's/^v//'` мимо version.is_release_tag/version.bare (берёт первый тег головы любого вида)"
+      ".github": "не построено: разбор текста оболочкой в шагах (sed, grep, awk) гейт одной реализации не видит — test_one_parse.py обходит code_files(with_hooks=True), YAML нет — замер 17.10.2026 по образцам sed/grep/awk в строках шагов (разовый разбор окна, в дерево не положен — признак назван здесь же): образцов 9, различных 6; повторов между файлами 2 — экранирование аннотации `sed -z 's/%/%25/g; s/\\r/%0D/g; s/\\n/%0A/g'` и отступ сводки `sed 's/^/    /'` в step-automerge.yml:195,201 и actions/ci-complete/action.yml:86,95 (их наличие в обоих требует tests/test_steps_speak_outward.py, совпадение по 071 не подписано); и второй разбор предмета, у которого реализация в коде есть, — номер выпуска из тега, step-release.yml:284 и :328 `git tag --points-at HEAD | head -1 | sed 's/^v//'` мимо version.is_release_tag/version.bare (берёт первый тег головы любого вида) — задача ArtVsMark/Engineering-Pipeline-Mechanisms#1464"
     },
     "217": {
       "paths.SOURCES": {
