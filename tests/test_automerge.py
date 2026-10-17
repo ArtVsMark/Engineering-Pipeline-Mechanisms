@@ -14,6 +14,7 @@ import ast
 import textwrap
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Final, TypeGuard
 
 import pytest
@@ -3124,26 +3125,57 @@ def test_moment_of_refuses_what_is_not_a_time(stamp: object, moment: Any) -> Non
     assert module.moment_of(stamp) == moment
 
 
+def job_limits(flows: list[Path]) -> tuple[list[int], list[str]]:
+    """Пределы джобов числом — и те, что заданы не числом: строкой, выражением."""
+    limits: list[int] = []
+    odd: list[str] = []
+    for flow in flows:
+        jobs = (yaml.safe_load(flow.read_text(encoding="utf-8")) or {}).get("jobs") or {}
+        for name, job in jobs.items():
+            if not isinstance(job, dict) or "timeout-minutes" not in job:
+                continue
+            value = job["timeout-minutes"]
+            if type(value) is int:
+                limits.append(value)
+            else:
+                odd.append(f"{flow.name}:{name} = {value!r}")
+    return limits, odd
+
+
 def test_a_hung_limit_outlasts_every_job_limit_in_the_tree() -> None:
     """`HUNG_AFTER` длиннее самого длинного `timeout-minutes` прогонов (находка `6690420`).
 
     Иначе обычный ход джоба с пределом длиннее назывался бы «повисла», и
     голову подтягивали бы зря: прогоны шли бы заново без причины. Джоб без
     `timeout-minutes` живёт до предела площадки — его предмет держит гейт
-    дедлайнов прогонов, не этот.
+    дедлайнов прогонов, не этот. Предел НЕ ЧИСЛОМ — строкой или выражением —
+    отказ, а не пропуск (взгляд на #1481): сверить его с `HUNG_AFTER` нечем,
+    и прежний фильтр по `int` молча не видел бы джоб длиннее. Замер 17.10.2026:
+    пределов в прогонах 46, все числом.
     """
-    limits = [
-        int(job["timeout-minutes"])
-        for flow in walk(ROOT / ".github" / "workflows", "*.y*ml")
-        for job in (
-            (yaml.safe_load(flow.read_text(encoding="utf-8")) or {}).get("jobs") or {}
-        ).values()
-        if isinstance(job, dict) and isinstance(job.get("timeout-minutes"), int)
-    ]
+    limits, odd = job_limits(walk(ROOT / ".github" / "workflows", "*.y*ml"))
+    assert not odd, f"предел джоба не числом — сверить его с HUNG_AFTER нечем: {odd}"
     assert limits, "пределов джобов в прогонах не найдено — сверять не с чем (075)"
     assert module.timedelta(minutes=max(limits)) < module.HUNG_AFTER, (
         f"HUNG_AFTER {module.HUNG_AFTER} не длиннее предела джоба {max(limits)} мин"
     )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['"50"', "${{ inputs.minutes }}", "true"],
+    ids=["строка", "выражение", "логическое"],
+)
+def test_a_job_limit_not_a_number_is_named(tmp_path: Path, value: str) -> None:
+    """Предел не числом называется, а не пропускается (взгляд на #1481)."""
+    flow = tmp_path / "x.yml"
+    flow.write_text(
+        f"jobs:\n  a:\n    timeout-minutes: {value}\n  b:\n    timeout-minutes: 30\n",
+        encoding="utf-8",
+    )
+    limits, odd = job_limits([flow])
+    assert limits == [30]
+    assert len(odd) == 1 and odd[0].startswith("x.yml:a = ")
 
 
 def test_an_armed_head_with_the_same_body_is_asked_about_a_stall(
