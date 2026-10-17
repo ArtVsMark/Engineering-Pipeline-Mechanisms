@@ -40,6 +40,7 @@ from typing import Any, Final, NamedTuple
 import catalogue
 import findings
 import ghrest
+import gitcall
 import kinds
 import paths
 
@@ -69,9 +70,14 @@ def git(args: list[str]) -> subprocess.CompletedProcess[str]:
     """
     try:
         return subprocess.run(
-            ["git", *args], capture_output=True, text=True, encoding="utf-8", check=False
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=gitcall.LOCAL,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"git {' '.join(args)} → {exc}") from exc
 
 

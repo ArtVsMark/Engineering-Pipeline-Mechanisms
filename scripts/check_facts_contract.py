@@ -67,6 +67,8 @@ import paths
 import pipeline_checks
 
 EXIT_OK: Final = 0
+#: Код шага, не уложившегося в дедлайн, — тот же, что отдаёт `timeout(1)`.
+STEP_TIMED_OUT: Final = 124
 EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 EXIT_SILENT: Final = 4
@@ -219,14 +221,20 @@ def run_step(step: dict[str, Any], temp: Path, repo: str) -> tuple[int, str]:
     """Исполняет шаг как площадка: `bash`, его `env`, `RUNNER_TEMP` и имя проекта."""
     env = {**os.environ, **{k: str(v) for k, v in (step.get("env") or {}).items()}}
     env.update({"RUNNER_TEMP": str(temp), "GITHUB_REPOSITORY": repo})
-    done = subprocess.run(
-        ["bash", "-c", str(step["run"])],
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
+    try:
+        done = subprocess.run(
+            ["bash", "-c", str(step["run"])],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=gitcall.NETWORK,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # Шаг ходит к площадке за выпуском: сетевой предел, а истёкший — свой
+        # код, как у `timeout(1)`, и причина, а не трасса (039).
+        return STEP_TIMED_OUT, f"шаг не отработал: {exc}"
     return done.returncode, done.stdout + done.stderr
 
 

@@ -245,7 +245,7 @@ def shallow_clone(repo: str, where: Path, host: str = HOST, timeout: float = TIM
                 f"{report.cut(narrowed.stderr.strip() or 'отказ git')}. "
                 "Без сужения «не взял ничего» неотличимо от отказа инструмента (045)"
             )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"{repo}: git не запустился — {exc}") from exc
     return into
 

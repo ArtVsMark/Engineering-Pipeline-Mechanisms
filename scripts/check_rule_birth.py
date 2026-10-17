@@ -53,6 +53,7 @@ from typing import Any, Final
 
 import check_journal
 import finding_kinds
+import gitcall
 import paths
 import trunk_log
 
@@ -92,8 +93,9 @@ def added(base: str, head: str = "HEAD", root: Path = Path()) -> list[str]:
             text=True,
             encoding="utf-8",
             check=True,
+            timeout=gitcall.LOCAL,
         )
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"состав изменения не прочитан ({base}..{head}): {exc}") from exc
     return [
         path
@@ -129,8 +131,9 @@ def text_at(ref: str, path: str, root: Path = Path()) -> str | None:
             text=True,
             encoding="utf-8",
             check=False,
+            timeout=gitcall.LOCAL,
         )
-    except (OSError, UnicodeDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"{path} у {ref} не прочитан: {exc}") from exc
     if done.returncode == 0:
         return done.stdout
