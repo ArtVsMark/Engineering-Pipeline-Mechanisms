@@ -45,6 +45,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import gitcall
 import pipeline_checks as policy
 import report
 
@@ -92,8 +93,9 @@ def _git(root: Path, *args: str, empty: int | None = None) -> str:
             text=True,
             encoding="utf-8",
             cwd=root or None,
+            timeout=gitcall.LOCAL,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"git не запустился: {report.cut(str(exc))}") from exc
     if empty is not None and said.returncode == empty and not said.stderr.strip():
         return ""

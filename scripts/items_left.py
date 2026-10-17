@@ -62,6 +62,7 @@ from typing import Any, Final, NamedTuple
 
 import findings
 import ghrest
+import gitcall
 import items
 
 #: Путь внутри дерева, названный прозой пункта. Расширение обязательно: без
@@ -149,9 +150,15 @@ def git(args: list[str], root: Path | None) -> str | None:
     """
     try:
         done = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8", check=False
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=gitcall.LOCAL,
         )
-    except OSError:
+    except OSError, subprocess.TimeoutExpired:
         return None
     return done.stdout if done.returncode == 0 else None
 

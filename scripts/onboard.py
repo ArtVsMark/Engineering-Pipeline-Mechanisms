@@ -103,6 +103,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import check_shipped
+import gitcall
 import paths
 import pipeline_checks as policy
 import publish_facts
@@ -1071,8 +1072,9 @@ def owned_at(root: Path, tag: str, repo: str) -> dict[Path, str]:
             ["git", "-C", str(root), "archive", "--format=tar", tag],
             capture_output=True,
             check=False,
+            timeout=gitcall.LOCAL,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"git не запустился: {exc}") from exc
     if archive.returncode:
         said = archive.stderr.decode("utf-8", "replace").strip()

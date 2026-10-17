@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Final
 
 import contract
+import gitcall
 import journal
 import paths
 import report
@@ -68,14 +69,22 @@ def base_tree(base: str, into: Path) -> Path:
             ["git", "archive", "--format=tar", base],
             capture_output=True,
             check=False,
+            timeout=gitcall.LOCAL,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"дерево базы «{base}» не прочитано: git не запустился — {exc}") from exc
     if done.returncode != 0:
         raise NotRun(f"дерево базы «{base}» не прочитано: {report.cut(done.stderr.decode())}")
-    unpack = subprocess.run(
-        ["tar", "-x", "-C", str(into)], input=done.stdout, capture_output=True, check=False
-    )
+    try:
+        unpack = subprocess.run(
+            ["tar", "-x", "-C", str(into)],
+            input=done.stdout,
+            capture_output=True,
+            check=False,
+            timeout=gitcall.LOCAL,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NotRun(f"дерево базы не распаковалось: {exc}") from exc
     if unpack.returncode != 0:
         raise NotRun(f"дерево базы не распаковалось: {report.cut(unpack.stderr.decode())}")
     return into
@@ -100,8 +109,9 @@ def untracked() -> list[str]:
             text=True,
             encoding="utf-8",
             check=False,
+            timeout=gitcall.LOCAL,
         )
-    except OSError:
+    except OSError, subprocess.TimeoutExpired:
         return []
     if done.returncode != 0:
         return []
