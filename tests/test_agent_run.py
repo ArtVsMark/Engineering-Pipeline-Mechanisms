@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import report
 
 from tests.conftest import ROOT, load_script, walk
 
@@ -155,3 +156,162 @@ def test_every_copy_of_the_cancellation_note_names_every_cause() -> None:
         head = block[: block.index("(071)") + 5] if "(071)" in block else block[:600]
         assert "ручная отмена" in head, f"{name}: копия не называет ручную отмену"
         assert "ПОДПИСАННЫЙ ДУБЛЬ" in head, f"{name}: копия не подписана как дубль (071)"
+
+
+# --- заход без вердикта (#1480) ------------------------------------------------
+
+
+def bash(command: str, *, background: bool = False) -> dict[str, Any]:
+    """Сообщение агента с одним вызовом оболочки — той формы, какую пишет SDK."""
+    given: dict[str, Any] = {"command": command}
+    if background:
+        given["run_in_background"] = True
+    return {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "name": "Bash", "input": given}]},
+    }
+
+
+def result(text: str = "готово", denials: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Итог захода: успех, текст и отказы разрешений."""
+    return {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": text,
+        "permission_denials": denials or [],
+    }
+
+
+#: Комментарий взгляда пишет инструмент, а не итог: строка вердикта живёт там.
+COMMENT = {
+    "type": "assistant",
+    "message": {
+        "content": [
+            {
+                "type": "tool_use",
+                "name": "mcp__github_comment__update_claude_comment",
+                "input": {"body": "находок нет\n\nВЕРДИКТ: находок 0"},
+            }
+        ]
+    },
+}
+
+
+def test_the_background_calls_are_named() -> None:
+    """Вызов оболочки, уведённый в фон, назван командой; передний план — нет."""
+    messages = [INIT, bash("python -m pytest -q"), bash("python -m pytest", background=True)]
+    assert module.background_of(messages) == ["python -m pytest"]
+
+
+def test_the_permission_denials_are_named_with_their_command() -> None:
+    """Отказы разрешений — из итога, с инструментом и его командой или путём."""
+    denials: list[Any] = [
+        {"tool_name": "Bash", "tool_input": {"command": "cd x &&\n python -m pytest"}},
+        {"tool_name": "Write", "tool_input": {"file_path": "a.py"}},
+        {"tool_name": "WebFetch", "tool_input": {}},
+        "не словарь",
+    ]
+    said = module.denials_of([INIT, result(denials=denials)])
+    assert said == ["Bash: cd x && python -m pytest", "Write: a.py", "WebFetch"]
+
+
+@pytest.mark.parametrize(
+    ("messages", "said"),
+    [
+        ([INIT, result("ВЕРДИКТ: находок 1")], True),
+        ([INIT, COMMENT, result("комментарий обновлён")], True),
+        ([INIT, bash("python -m pytest", background=True), result("жду прогона")], False),
+    ],
+    ids=["в-итоге", "в-комментарии", "нет-нигде"],
+)
+def test_the_expected_line_is_looked_for_in_the_result_and_the_tools(
+    messages: list[dict[str, Any]], said: bool
+) -> None:
+    """Строку ищут в итоге и в тексте, отданном инструментам: комментарий пишет инструмент."""
+    assert module.says(messages, "ВЕРДИКТ:") is said
+
+
+def test_a_run_without_its_verdict_is_its_own_state(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Заход «успехом» без строки вердикта назван словами `NO_VERDICT` с причинами рядом."""
+    denied = [{"tool_name": "Bash", "tool_input": {"command": "pytest -x"}}]
+    messages = [INIT, bash("python -m pytest", background=True), result("жду", denied)]
+    path = run_file(tmp_path, messages)
+    assert module.main(["--from", str(path), "--call", "взгляд", "--expect", "ВЕРДИКТ:"]) == 0
+    out = capsys.readouterr().out
+    assert f"::warning::взгляд: {module.NO_VERDICT}" in out
+    assert "в фоне: 1" in out and "отказов разрешений: 1" in out
+    assert "::notice::взгляд: увёл в фон — python -m pytest" in out
+    assert "::notice::взгляд: отказы разрешений — Bash: pytest -x" in out
+
+
+@pytest.mark.parametrize(
+    ("argv", "messages"),
+    [
+        (["--expect", "ВЕРДИКТ:"], [INIT, COMMENT, result()]),
+        ([], [INIT, result("без строки")]),
+    ],
+    ids=["вердикт-есть", "строку-не-ждут"],
+)
+def test_a_run_with_its_verdict_or_without_expectation_is_not_named(
+    argv: list[str],
+    messages: list[dict[str, Any]],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Вердикт на месте или строку не ждут — состояния «без вердикта» нет."""
+    path = run_file(tmp_path, messages)
+    assert module.main(["--from", str(path), *argv]) == module.EXIT_OK
+    assert module.NO_VERDICT not in capsys.readouterr().out
+
+
+def test_a_refusal_is_not_also_a_run_without_verdict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ захода — уже названная причина: «без вердикта» поверх него не ставится."""
+    failed = {"type": "result", "subtype": "success", "is_error": True, "result": "нет модели"}
+    path = run_file(tmp_path, [INIT, failed])
+    assert module.main(["--from", str(path), "--expect", "ВЕРДИКТ:"]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert module.REFUSED in out and module.NO_VERDICT not in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["коротко", "я" * module.LIMIT, "я" * (module.LIMIT + 1), "  поля  "],
+    ids=["коротко", "на-границе", "за-границей", "поля"],
+)
+def test_the_cut_is_the_transport_one(text: str) -> None:
+    """Обрезка шага — копия `report.cut`, и разойтись с ним молча ей нельзя (016)."""
+    assert module.LIMIT == report.LIMIT
+    assert module.cut(text) == report.cut(text)
+
+
+def test_tool_calls_are_the_tool_blocks_of_the_agent_in_order() -> None:
+    """Вызовы — блоки `tool_use` сообщений агента, по порядку; прочее не вызов.
+
+    Текст ответа, сообщение не агента и тело не той формы вызовами не считаются:
+    по ним `says` и `background_of` судили бы чужое.
+    """
+    text = {"type": "assistant", "message": {"content": [{"type": "text", "text": "думаю"}]}}
+    odd = {"type": "assistant", "message": "не словарь"}
+    user = {"type": "user", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}}
+    first, second = bash("ls"), bash("python -m pytest", background=True)
+    messages = [INIT, first, text, odd, user, second, COMMENT]
+    names = [call["name"] for call in module.tool_calls(messages)]
+    assert names == ["Bash", "Bash", "mcp__github_comment__update_claude_comment"]
+    assert module.tool_calls([INIT, result()]) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [("cd x &&\n  python -m pytest", "cd x && python -m pytest"), ("  ls  ", "ls")],
+    ids=["перенос", "поля"],
+)
+def test_one_line_joins_the_command_and_cuts_it(text: str, said: str) -> None:
+    """Команда — одной строкой без лишних пробелов и с тем же пределом, что у обрезки."""
+    assert module.one_line(text) == said
+    long = "я " * module.LIMIT
+    assert module.one_line(long) == module.cut(" ".join(long.split()))
