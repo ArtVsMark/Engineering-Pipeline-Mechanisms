@@ -39,7 +39,9 @@
 неприменима — нет `CONTRACT_VERSION`, а отсутствие выпускных тегов доказано
 (`absence`), и причина напечатана · ``2`` шаг не отработал, в том числе вне
 репозитория · ``3`` посчитана неполно, разошлась с объявленной или отсутствие
-тегов не доказано — сказано, а не скрыто.
+тегов не доказано — сказано, а не скрыто. С `--head-tag` и `--head-number`
+``0`` — тег выпуска на HEAD напечатан, ``2`` — его нет, их несколько или git не
+ответил, и причина — в `stderr`.
 """
 
 import argparse
@@ -223,6 +225,31 @@ def release_tag(root: Path | None = None) -> str | None:
     return max(released, key=lambda tag: digits(bare(tag)))
 
 
+def head_release_tag(root: Path | None = None) -> str:
+    """Единственный тег выпуска на HEAD; нет его или их несколько — `NotRun` с причиной.
+
+    ТЕГ НА HEAD ЧИТАЕТСЯ ЭТОЙ ФОРМОЙ, А НЕ ОБОЛОЧКОЙ ШАГА (214, #1464). Шаг
+    выпуска разбирал его сам трижды: толчок брал весь вывод
+    `git tag --points-at HEAD`, а страница и подъём шагов — его первую строку
+    без приставки. Тег другого рода на коммите выпуска становился «номером
+    выпуска», а два тега уходили в толчок одной строкой. Шаг общий для семьи, и
+    у потребителя на коммите выпуска может стоять что угодно. Теги иного рода
+    здесь пропускаются формой `is_release_tag`; два выпускных на одном коммите —
+    неоднозначность, и она называется, а не решается первым попавшимся.
+    """
+    out = git("tag", "--points-at", "HEAD", root=root)
+    if out is None:
+        raise NotRun("git не ответил, какие теги стоят на HEAD")
+    found = sorted(tag for tag in out.split("\n") if is_release_tag(tag))
+    if not found:
+        raise NotRun("на HEAD нет тега выпуска вида vX.Y.Z")
+    if len(found) > 1:
+        raise NotRun(
+            f"на HEAD несколько тегов выпуска ({', '.join(found)}) — какой из них выпуск, неясно"
+        )
+    return found[0]
+
+
 def declared(root: Path | None = None) -> str:
     """Объявленная версия контракта — единый источник MAJOR.MINOR до тега."""
     path = (root / paths.VERSION) if root else paths.VERSION
@@ -352,8 +379,24 @@ HINTS: Final = {
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает версию и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="сверить объявленное с тегом")
+    # РЕЖИМЫ ВЗАИМОИСКЛЮЧАЮТ ДРУГ ДРУГА — ВСЕ ТРИ (находка `c699441`).
+    # `--check --head-tag` печатал тег с кодом 0, и сверка молча не шла.
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="сверить объявленное с тегом")
+    mode.add_argument("--head-tag", action="store_true", help="тег выпуска на HEAD (vX.Y.Z)")
+    mode.add_argument("--head-number", action="store_true", help="номер выпуска на HEAD (X.Y.Z)")
     args = parser.parse_args(argv)
+
+    # ТЕГ ВЫПУСКА НА HEAD — ДЛЯ ШАГА ВЫПУСКА (#1464): толчок, страница и подъём
+    # шагов спрашивают его здесь, а не разбирают вывод git оболочкой.
+    if args.head_tag or args.head_number:
+        try:
+            tag = head_release_tag()
+        except NotRun as exc:
+            print(exc, file=sys.stderr)
+            return EXIT_BROKEN
+        print(bare(tag) if args.head_number else tag)
+        return EXIT_OK
 
     # СВЕРКЕ НЕЧЕГО СВЕРЯТЬ, ЕСЛИ ПРОЕКТ НЕ ВЕДЁТ ВЕРСИЮ ЭТИМ СПОСОБОМ (#1187,
     # вариант 2). Ни выпускного тега, ни `CONTRACT_VERSION` — у потребителя
