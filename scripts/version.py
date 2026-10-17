@@ -379,13 +379,27 @@ HINTS: Final = {
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает версию и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
-    # РЕЖИМЫ ВЗАИМОИСКЛЮЧАЮТ ДРУГ ДРУГА — ВСЕ ТРИ (находка `c699441`).
+    # РЕЖИМЫ ВЗАИМОИСКЛЮЧАЮТ ДРУГ ДРУГА — ВСЕ (находка `c699441`).
     # `--check --head-tag` печатал тег с кодом 0, и сверка молча не шла.
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="сверить объявленное с тегом")
     mode.add_argument("--head-tag", action="store_true", help="тег выпуска на HEAD (vX.Y.Z)")
     mode.add_argument("--head-number", action="store_true", help="номер выпуска на HEAD (X.Y.Z)")
+    mode.add_argument(
+        "--last-tag", action="store_true", help="последний выпущенный тег из достижимых (vX.Y.Z)"
+    )
     args = parser.parse_args(argv)
+
+    # ПОСЛЕДНИЙ ВЫПУСК — ДЛЯ ХВОСТА (взгляд на #1488): хвост доводится только у
+    # него. Хвост старого выпуска поднял бы прибивку пробы до его тега, то есть
+    # опустил бы её ниже уже выпущенного.
+    if args.last_tag:
+        last = release_tag()
+        if last is None:
+            print("выпущенного тега среди достижимых нет", file=sys.stderr)
+            return EXIT_BROKEN
+        print(last)
+        return EXIT_OK
 
     # ТЕГ ВЫПУСКА НА HEAD — ДЛЯ ШАГА ВЫПУСКА (#1464): толчок, страница и подъём
     # шагов спрашивают его здесь, а не разбирают вывод git оболочкой.

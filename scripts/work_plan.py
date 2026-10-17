@@ -728,8 +728,49 @@ def grouped(lines: list[str], labels: dict[int, set[str]]) -> list[str]:
     return said_lines
 
 
-def released(repo: str, token: str, freed: list[int], sent: list[int] | None = None) -> None:
+def labelled_at(repo: str, token: str, number: int) -> datetime | None:
+    """Когда метку `plan/waits-release` на задаче поставили в последний раз; не ставили — `None`.
+
+    По событиям задачи, а не по её меткам: метка не несёт времени, а событие
+    `labeled` несёт (взгляд на #1488).
+    """
+    found = [
+        moment
+        for event in ghrest.paginate(f"repos/{repo}/issues/{number}/events", token)
+        if event.get("event") == "labeled"
+        and (event.get("label") or {}).get("name") == WAITS_RELEASE
+        and (moment := when_of(event.get("created_at"))) is not None
+    ]
+    return max(found, default=None)
+
+
+def when_of(text: object) -> datetime | None:
+    """Время события площадки; не той формы — `None`."""
+    if not isinstance(text, str):
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def released(
+    repo: str,
+    token: str,
+    freed: list[int],
+    sent: list[int] | None = None,
+    *,
+    before: datetime | None = None,
+    later: list[int] | None = None,
+) -> None:
     """Снимает `plan/waits-release` с открытых задач после выпуска; снятые — в `freed`.
+
+    ХВОСТ ВЫПУСКА СНИМАЕТ ТОЛЬКО МЕТКИ ЭТОГО ВЫПУСКА (взгляд на #1488). Хвост
+    доводят и через день после тега, а за день метку успевают поставить задачам
+    уже следующего выпуска. С `before` — временем тега — снимается метка,
+    поставленная не позже него; поставленная позже остаётся и называется в
+    `later`. Выпуск, идущий целиком, зовёт с тем же временем: тег только что
+    поставлен, и позже него не поставлено ничего.
 
     Иначе «ждёт выпуска» пережило бы выпуск молча (045): задачи возвращаются
     в «Сейчас», и их остаток — проверка на теге — берётся тем же окном.
@@ -767,6 +808,12 @@ def released(repo: str, token: str, freed: list[int], sent: list[int] | None = N
     for number in listed:
         if number in freed:
             continue
+        if before is not None:
+            at = labelled_at(repo, token, number)
+            if at is not None and at > before:
+                if later is not None:
+                    later.append(number)
+                continue
         # 404 — метки уже нет: сняли раньше или рукой, цель достигнута.
         with contextlib.suppress(ghrest.NotFound):
             ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{label}", token)
@@ -892,6 +939,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="после выпуска: снять plan/waits-release с открытых задач (#1433)",
     )
+    parser.add_argument(
+        "--before",
+        default="",
+        help="с --released: время тега выпуска; метки, поставленные позже, остаются",
+    )
     args = parser.parse_args(argv)
 
     token = ghrest.token_from_env()
@@ -901,8 +953,16 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_BROKEN
         freed: list[int] = []
         sent: list[int] = []
+        later: list[int] = []
+        before = when_of(args.before) if args.before else None
+        if args.before and (before is None or before.tzinfo is None):
+            print(
+                f"метка выпуска не снята: время тега «{args.before}» не время с поясом",
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
         try:
-            released(args.repo, token, freed, sent)
+            released(args.repo, token, freed, sent, before=before, later=later)
         except (ghrest.TransportError, NotRun) as exc:
             done = ", ".join(f"#{one}" for one in freed) or "ни с одной"
             unsure = (
@@ -916,6 +976,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             return EXIT_BROKEN
         print(f"{WAITS_RELEASE} снята: {', '.join(f'#{one}' for one in freed) or 'не с кого'}")
+        if later:
+            print(
+                f"{WAITS_RELEASE} оставлена — поставлена после тега, ждёт следующего выпуска: "
+                + ", ".join(f"#{one}" for one in later)
+            )
         return EXIT_OK
     announce(not args.apply)
     if not token or not args.repo:

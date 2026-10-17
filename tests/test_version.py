@@ -519,6 +519,16 @@ def test_the_head_number_is_printed_or_refused(run_script: RunScript, tmp_path: 
     assert run.code == 2 and "нет тега выпуска" in run.text, run.text
 
 
+def test_the_last_tag_is_the_last_release_or_refused(run_script: RunScript, tmp_path: Path) -> None:
+    """Последний выпуск — наибольший выпускной тег из достижимых; нет его — код 2 (#1488)."""
+    _repo_with_tags(tmp_path / "repo", ["v1.2.3", "v1.10.0", "v1.9.0-rc1", "a-checkpoint"])
+    run = run_script("version.py", "--last-tag", cwd=tmp_path / "repo")
+    assert (run.code, run.out.strip()) == (0, "v1.10.0"), run.text
+    _repo_with_tags(tmp_path / "bare", [])
+    run = run_script("version.py", "--last-tag", cwd=tmp_path / "bare")
+    assert run.code == 2 and "выпущенного тега" in run.text, run.text
+
+
 def test_the_release_step_asks_the_tag_here() -> None:
     """Шаг выпуска спрашивает тег на HEAD у `version.py`, а не разбирает git сам (214, #1464)."""
     step = (ROOT / ".github" / "workflows" / "step-release.yml").read_text(encoding="utf-8")
