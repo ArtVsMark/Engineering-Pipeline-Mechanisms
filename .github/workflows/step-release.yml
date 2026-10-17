@@ -293,6 +293,9 @@ jobs:
       # в ветку успевают слиться изменения, и номер с головы был бы чужим.
       # Тег сверяется формой `version.py`: на его коммите должен читаться
       # ровно `v<version>`, иначе хвост довёл бы не тот выпуск.
+      # И ТОЛЬКО У ПОСЛЕДНЕГО ВЫПУСКА (взгляд на #1488): хвост старого поднял бы
+      # прибивку пробы до его тега, то есть опустил бы её ниже уже выпущенного.
+      # Последний выпуск спрашивается до выкачки тега — с головы общей ветки.
       - name: тег выпуска на месте — для хвоста
         id: tagged
         if: inputs.apply && inputs.tail && steps.token.outputs.present == 'yes'
@@ -300,6 +303,14 @@ jobs:
           ASKED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          python $MECHANISMS/scripts/version.py --last-tag >"${RUNNER_TEMP}/last-tag.txt" 2>"${RUNNER_TEMP}/last-tag.err" || {
+            echo "::error::Последний выпуск не прочитан: $(cat "${RUNNER_TEMP}/last-tag.err"). Чей хвост доводить, неясно (075)."
+            exit 1
+          }
+          if [ "$(cat "${RUNNER_TEMP}/last-tag.txt")" != "v${ASKED_VERSION}" ]; then
+            echo "::error::Хвост доводится только у последнего выпуска — $(cat "${RUNNER_TEMP}/last-tag.txt"), а запрошен v${ASKED_VERSION}: его хвост опустил бы прибивку пробы ниже выпущенного."
+            exit 1
+          fi
           git checkout --quiet "refs/tags/v${ASKED_VERSION}" 2>"${RUNNER_TEMP}/tail-tag.err" || {
             echo "::error::Хвост выпуска запрошен, а тега v${ASKED_VERSION} нет: $(cat "${RUNNER_TEMP}/tail-tag.err"). Доводить нечего — сперва выпуск (075)."
             exit 1
@@ -399,6 +410,9 @@ jobs:
       # теге, берётся тем же окном. Метку снимает токен владельца: у токена
       # прогона здесь только чтение задач. Отказ выпуска НЕ отменяет — тег уже
       # уехал; шаг называет, как снять метку отдельным заходом.
+      # СНИМАЮТСЯ МЕТКИ ЭТОГО ВЫПУСКА, А НЕ ВСЕ (взгляд на #1488): хвост доводят и
+      # через день, а за день метку ставят задачам уже следующего выпуска.
+      # Граница — время тега: поставленная позже него метка остаётся.
       - name: снять метку «ждёт выпуска» с задач плана
         if: >-
           !cancelled() &&
@@ -409,8 +423,17 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -uo pipefail
+          python $MECHANISMS/scripts/version.py --head-tag >"${RUNNER_TEMP}/label-tag.txt" 2>"${RUNNER_TEMP}/label-tag.err" || {
+            echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/label-tag.err"). Граница меток неизвестна — снимать нечем (075)."
+            exit 1
+          }
+          before="$(git for-each-ref --format='%(creatordate:iso-strict)' "refs/tags/$(cat "${RUNNER_TEMP}/label-tag.txt")")"
+          if [ -z "${before}" ]; then
+            echo "::error::Время тега $(cat "${RUNNER_TEMP}/label-tag.txt") не прочитано — граница меток неизвестна (075)."
+            exit 1
+          fi
           rc=0
-          python $MECHANISMS/scripts/work_plan.py --released --repo "${GITHUB_REPOSITORY}" || rc=$?
+          python $MECHANISMS/scripts/work_plan.py --released --before "${before}" --repo "${GITHUB_REPOSITORY}" || rc=$?
           if [ "$rc" -ne 0 ]; then
             echo "::error::Метка plan/waits-release не снята (код $rc). Выпуск сделан и повторять его НЕ надо: хвост доводится кнопкой выпуска с tail, номером выпуска и apply — она пройдёт весь хвост заново (#1448)"
             exit 1

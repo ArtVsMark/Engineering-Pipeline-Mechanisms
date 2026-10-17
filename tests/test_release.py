@@ -1010,8 +1010,13 @@ def test_every_tail_step_runs_after_the_release_or_the_tag(name: str) -> None:
     )
 
 
-def run_tagged(tmp_path: Path, tags: list[str], version: str) -> subprocess.CompletedProcess[str]:
-    """Исполняет сценарий выкачки тега для хвоста в подделке дерева."""
+def run_tagged(
+    tmp_path: Path, tags: list[str], version: str, later: tuple[str, ...] = ()
+) -> subprocess.CompletedProcess[str]:
+    """Исполняет сценарий выкачки тега для хвоста в подделке дерева.
+
+    `tags` стоят на первом коммите, `later` — на втором, голове общей ветки.
+    """
     tree = tmp_path / "tree"
     tree.mkdir()
     git = partial(subprocess.run, cwd=tree, check=True, capture_output=True, timeout=30)
@@ -1046,6 +1051,8 @@ def run_tagged(tmp_path: Path, tags: list[str], version: str) -> subprocess.Comp
             "б",
         ]
     )
+    for tag in later:
+        git(["git", "tag", tag])
     shim = tmp_path / "bin"
     shim.mkdir()
     (shim / "python").symlink_to(sys.executable)
@@ -1070,21 +1077,60 @@ def run_tagged(tmp_path: Path, tags: list[str], version: str) -> subprocess.Comp
 
 
 @pytest.mark.parametrize(
-    ("tags", "said"),
+    ("tags", "later", "version", "said"),
     [
-        (["v1.2.3"], ""),
-        ([], "тега v1.2.3 нет"),
-        (["v1.2.3", "v1.3.0"], "несколько тегов выпуска"),
+        (["v1.2.3"], (), "1.2.3", ""),
+        ([], (), "1.2.3", "Последний выпуск не прочитан"),
+        (["v1.2.3"], (), "1.2.4", "только у последнего выпуска"),
+        (["v1.2.3"], ("v1.3.0",), "1.2.3", "только у последнего выпуска"),
+        (["v1.2.3", "v1.3.0"], (), "1.3.0", "несколько тегов выпуска"),
     ],
-    ids=["тег-на-месте", "тега-нет", "два-выпуска-на-коммите"],
+    ids=["тег-на-месте", "выпусков-нет", "тега-нет", "старый-выпуск", "два-выпуска-на-коммите"],
 )
 def test_the_tail_stands_on_its_tag_or_says_why_not(
-    tmp_path: Path, tags: list[str], said: str
+    tmp_path: Path, tags: list[str], later: tuple[str, ...], version: str, said: str
 ) -> None:
-    """Хвост встаёт на тег `v<version>`; нет его или он неоднозначен — отказ с причиной."""
-    run = run_tagged(tmp_path, tags, "1.2.3")
+    """Хвост встаёт на тег последнего выпуска; иной, нет его или он неоднозначен — отказ.
+
+    Хвост старого выпуска опустил бы прибивку пробы ниже выпущенного (взгляд на
+    #1488), поэтому номер сверяется с последним выпуском до выкачки тега.
+    """
+    run = run_tagged(tmp_path, tags, version, later)
     if not said:
         assert run.returncode == 0, run.stdout + run.stderr
         return
     assert run.returncode == 1, run.stdout + run.stderr
     assert "::error::" in run.stdout and said in run.stdout, run.stdout
+
+
+@pytest.mark.parametrize(
+    ("version", "apply", "refused"),
+    [("1.2.3", "true", False), ("", "true", True), ("1.2.3", "false", True), ("", "", True)],
+    ids=["целиком", "без-номера", "без-apply", "без-обоих"],
+)
+def test_a_tail_without_its_number_or_apply_is_refused(
+    version: str, apply: str, refused: bool
+) -> None:
+    """Хвост без номера или без `apply` — отказ, а не выпуск (взгляд на #1488).
+
+    Исполняется сценарий шага, а не ищется подстрока: ослабленное условие
+    отказа текстовая проверка пропустила бы.
+    """
+    step = named("вход хвоста назван целиком")
+    assert step["if"] == "inputs.tail"
+    run = subprocess.run(
+        ["bash", "-c", str(step["run"])],
+        env={**os.environ, "ASKED_VERSION": version, "ASKED_APPLY": apply},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert (run.returncode != 0) is refused, run.stdout + run.stderr
+    assert ("::error::" in run.stdout) is refused, run.stdout
+
+
+def test_the_tail_frees_only_the_labels_of_its_release() -> None:
+    """Метку снимают с границей — временем тега, — а не со всех задач (взгляд на #1488)."""
+    script = str(named("снять метку «ждёт выпуска» с задач плана")["run"])
+    assert "--released --before" in script and "creatordate:iso-strict" in script
