@@ -241,8 +241,10 @@
       "why": "@provider"
     },
     ".github/workflows/deps-intercept.yml": {
-      "answer": "ours",
-      "why": "@provider"
+      "answer": "configured",
+      "where": [
+        ".github/workflows/deps-intercept.yml"
+      ]
     },
     ".github/workflows/labels-sync.yml": {
       "answer": "configured",
@@ -322,6 +324,9 @@
       "why": "@provider"
     },
     ".github/workflows/step-debt.yml": {
+      "answer": "as-is"
+    },
+    ".github/workflows/step-deps-intercept.yml": {
       "answer": "as-is"
     },
     ".github/workflows/step-drift.yml": {
@@ -660,8 +665,10 @@
       ]
     },
     "scripts/deps_intercept.py": {
-      "answer": "ours",
-      "why": "@provider"
+      "answer": "configured",
+      "where": [
+        ".rules/bindings.json"
+      ]
     },
     "scripts/drift.py": {
       "answer": "configured",

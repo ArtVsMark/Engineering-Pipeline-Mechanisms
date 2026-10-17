@@ -172,10 +172,81 @@ def test_a_silent_platform_is_not_a_refusal(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_the_message_and_fragment_carry_the_signal() -> None:
-    """Коммит несёт связь и подпись механизма, фрагмент — номер сигнала."""
-    said = module.message("actions/checkout", "v7.1.0", 41)
-    assert module.REFS in said and f"Co-Authored-By: {module.CO_AUTHOR}" in said and "#41" in said
-    assert "#41" in module.fragment("actions/checkout", "v7.1.0", 41)
+    """Коммит несёт связь с планом и подпись механизма, фрагмент — сигнал и план."""
+    said = module.message("actions/checkout", "v7.1.0", 41, 7)
+    assert "Refs #7" in said and f"Co-Authored-By: {module.CO_AUTHOR}" in said and "#41" in said
+    note = module.fragment("actions/checkout", "v7.1.0", 41, 7)
+    assert "#41" in note and note.rstrip().splitlines()[-1] == "#7"
+
+
+def test_the_intercept_names_no_task_of_ours() -> None:
+    """Номер нашей задачи в тексте перехвата у потребителя назвал бы его чужую задачу (#1387)."""
+    said = module.message("a/b", "v1", 41, 7) + module.fragment("a/b", "v1", 41, 7)
+    assert "#1387" not in said and "#639" not in said
+
+
+@pytest.mark.parametrize(
+    ("found", "number"),
+    [((7, "тело"), 7), ((None, ""), None)],
+    ids=["план-есть", "плана-нет"],
+)
+def test_the_plan_is_found_by_its_marker(
+    monkeypatch: pytest.MonkeyPatch, found: tuple[int | None, str], number: int | None
+) -> None:
+    """План — по маркеру сборщика плана; плана нет — «не отработал», а не подъём без связи."""
+    asked: list[str] = []
+
+    def live(repo: str, token: str, marker: str) -> tuple[int | None, str]:
+        asked.append(marker)
+        return found
+
+    monkeypatch.setattr(module.findings, "live_issue", live)
+    if number is None:
+        with pytest.raises(module.NotRun, match="плана работ нет"):
+            module.plan_number("o/r", "t")
+    else:
+        assert module.plan_number("o/r", "t") == number
+    assert asked == [module.findings.PLAN_MARKER]
+
+
+def test_an_unread_plan_does_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка не отдала список задач — «не отработал» с причиной (039)."""
+
+    def silent(*_: object, **__: object) -> None:
+        raise module.ghrest.TransportError("сети нет")
+
+    monkeypatch.setattr(module.findings, "live_issue", silent)
+    with pytest.raises(module.NotRun, match="не прочитан"):
+        module.plan_number("o/r", "t")
+
+
+@pytest.mark.parametrize(
+    ("said", "who"),
+    [
+        ({"login": "Owner", "id": 5}, ("Owner", "5+Owner@users.noreply.github.com")),
+        ({"login": "", "id": 5}, None),
+        ({"login": "Owner"}, None),
+        (module.ghrest.TransportError("сети нет"), None),
+    ],
+    ids=["владелец", "без-имени", "без-номера", "площадка-молчит"],
+)
+def test_the_author_is_the_owner_of_the_token(
+    monkeypatch: pytest.MonkeyPatch, said: Any, who: tuple[str, str] | None
+) -> None:
+    """Подпись — владельца токена, спрошенного у площадки; не назван — «не отработал» (131)."""
+
+    def ask(method: str, path: str, token: str, body: Any = None) -> Any:
+        assert (method, path) == ("GET", "user")
+        if isinstance(said, Exception):
+            raise said
+        return said
+
+    monkeypatch.setattr(module.ghrest, "request", ask)
+    if who is None:
+        with pytest.raises(module.NotRun):
+            module.identity("t")
+    else:
+        assert module.identity("t") == who
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -185,9 +256,19 @@ def git(cwd: Path, *args: str) -> str:
     ).stdout
 
 
+#: Подпись коммита подъёма в сквозных заходах — владелец токена, как его назвала бы площадка.
+WHO = ("Owner", "5+Owner@users.noreply.github.com")
+
+
 @pytest.fixture
-def stand(tmp_path: Path) -> Path:
-    """Пара «площадка — клон»: голый репозиторий и рабочее дерево с одним прогоном."""
+def stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Пара «площадка — клон»: голый репозиторий и рабочее дерево с одним прогоном.
+
+    План работ у стенда — #7: его поиск по маркеру держат свои тесты, а здесь
+    он подставлен, как и токен, которым его спросили бы.
+    """
+    monkeypatch.setattr(module, "plan_number", lambda repo, token: 7)
+    monkeypatch.setenv("GH_TOKEN", "t")
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "--quiet", "--bare", "--initial-branch=main", str(remote))
     work = tmp_path / "work"
@@ -226,12 +307,27 @@ def test_an_intercept_pushes_our_branch_and_closes_the_signal(
     said: list[tuple[str, str]] = []
     fake_platform(monkeypatch, said)
     bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
-    branch = module.intercept(stand, "o/r", "t", bump, dry_run=False)
+    branch = module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
     tree = git(stand, "show", f"origin/{branch}:.github/workflows/ci.yml")
     assert f"actions/checkout@{SHA_NEW} # v7.1.0" in tree
     files = git(stand, "show", "--name-only", "-z", "--format=", f"origin/{branch}").split("\0")
     assert "changelog.d/deps-actions-checkout-v7.1.0.changed.md" in files
     assert ("PATCH", "repos/o/r/pulls/41") in said
+    author = git(stand, "log", "-1", "--format=%an <%ae>", f"origin/{branch}").strip()
+    assert author == f"{WHO[0]} <{WHO[1]}>"
+    assert "Refs #7" in git(stand, "log", "-1", "--format=%B", f"origin/{branch}")
+
+
+def test_an_intercept_without_its_author_does_not_write(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Заход с записью без подписи владельца — отказ до записи, а не коммит от окружения (131)."""
+    said: list[tuple[str, str]] = []
+    fake_platform(monkeypatch, said)
+    bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
+    with pytest.raises(module.NotRun, match="подписи"):
+        module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7)
+    assert git(stand, "status", "--porcelain") == "" and said == []
 
 
 def test_a_repeated_intercept_does_not_bump_twice(
@@ -241,9 +337,9 @@ def test_a_repeated_intercept_does_not_bump_twice(
     said: list[tuple[str, str]] = []
     fake_platform(monkeypatch, said)
     bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
-    branch = module.intercept(stand, "o/r", "t", bump, dry_run=False)
+    branch = module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
     before = git(stand, "rev-parse", f"origin/{branch}")
-    module.intercept(stand, "o/r", "t", bump, dry_run=False)
+    module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
     git(stand, "fetch", "--quiet", "origin")
     assert git(stand, "rev-parse", f"origin/{branch}") == before
 
@@ -253,7 +349,7 @@ def test_a_dry_run_touches_nothing(stand: Path, monkeypatch: pytest.MonkeyPatch)
     said: list[tuple[str, str]] = []
     fake_platform(monkeypatch, said)
     bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
-    module.intercept(stand, "o/r", "t", bump, dry_run=True)
+    module.intercept(stand, "o/r", "t", bump, dry_run=True, plan_issue=7)
     assert git(stand, "status", "--porcelain") == ""
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
     assert said == []
@@ -266,23 +362,41 @@ def test_a_bump_with_nothing_to_lift_is_refused(
     said: list[tuple[str, str]] = []
     fake_platform(monkeypatch, said)
     with pytest.raises(module.Refused):
-        module.intercept(stand, "o/r", "t", module.Bump(41, "x/y", "1", "2"), dry_run=False)
+        module.intercept(
+            stand,
+            "o/r",
+            "t",
+            module.Bump(41, "x/y", "1", "2"),
+            dry_run=False,
+            plan_issue=7,
+            who=WHO,
+        )
     assert said == []
 
 
-def run_main(monkeypatch: pytest.MonkeyPatch, changes: list[dict[str, Any]]) -> int:
+def run_main(
+    monkeypatch: pytest.MonkeyPatch, changes: list[dict[str, Any]], asked: list[str] | None = None
+) -> int:
     """Заход `main` на подделанной площадке: открытые изменения — `changes`."""
     monkeypatch.setenv("GH_TOKEN", "t")
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter(changes))
     monkeypatch.setattr(module, "intercept", lambda *a, **k: "agent/x")
+
+    def plan(repo: str, token: str) -> int:
+        (asked if asked is not None else []).append(repo)
+        return 7
+
+    monkeypatch.setattr(module, "plan_number", plan)
     monkeypatch.setattr(module, "git", lambda *a, **k: "")
     return int(module.main(["--repo", "o/r"]))
 
 
 def test_main_with_no_signal_is_clean(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Сигналов бота нет — чисто; чужие изменения не трогаются."""
+    """Сигналов бота нет — чисто; чужие изменения не трогаются, план не спрашивается."""
     human = {"number": 3, "title": "Bump x/y from 1 to 2", "user": {"login": "someone"}}
-    assert run_main(monkeypatch, [human]) == module.EXIT_OK
+    asked: list[str] = []
+    assert run_main(monkeypatch, [human], asked) == module.EXIT_OK
+    assert asked == []
 
 
 def test_main_names_an_unreadable_signal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,7 +463,7 @@ def test_an_unresolved_signal_reddens_the_run(rc: int, red: bool) -> None:
     обходили (находка взгляда на #1417). Обе стороны: ноль — зелёный, прочее —
     красный с ошибкой.
     """
-    run = (ROOT / ".github" / "workflows" / "deps-intercept.yml").read_text(encoding="utf-8")
+    run = (ROOT / ".github" / "workflows" / "step-deps-intercept.yml").read_text(encoding="utf-8")
     start = run.index('          case "$rc" in')
     block = run[start : run.index("esac", start) + len("esac")]
     done = subprocess.run(
@@ -391,7 +505,7 @@ def with_own_calls(work: Path) -> None:
 def test_a_release_lifts_its_own_steps_in_one_branch(stand: Path) -> None:
     """Выпуск поднимает все свои вызовы по тегу разом; `@main` — не версия и не трогается."""
     with_own_calls(stand)
-    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False, token="t")
     assert branch == "agent/deps-self-v2.0.0"
     tree = git(stand, "show", f"origin/{branch}:.github/workflows/handover-probe.yml")
     assert tree.count("@v2.0.0") == 2 and "@v1.0.0" not in tree
@@ -403,17 +517,36 @@ def test_a_release_lifts_its_own_steps_in_one_branch(stand: Path) -> None:
 def test_a_consumer_release_has_nothing_of_its_own_to_lift(stand: Path) -> None:
     """У потребителя своих шагов по тегу нет — пустота законна, ветки нет, выпуск не краснеет."""
     git(stand, "tag", "v2.0.0")
+    # Без токена: потребителю поднимать нечего, и плана у него спрашивать незачем.
     assert module.self_bump(stand, "o/r", "v2.0.0", dry_run=False) == ""
     assert git(stand, "ls-remote", "--heads", "origin", "agent/deps-self-v2.0.0") == ""
     assert module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0"]) == 0
 
 
+def test_a_release_lift_without_a_token_refuses_before_the_switch(stand: Path) -> None:
+    """Поднимать есть что, а токена нет — отказ до смены ветки: план спросить нечем."""
+    with_own_calls(stand)
+    with pytest.raises(module.NotRun, match="токена нет"):
+        module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    assert git(stand, "ls-remote", "--heads", "origin", "agent/deps-self-v2.0.0") == ""
+
+
+def test_a_release_lift_is_tied_to_the_plan(stand: Path) -> None:
+    """Коммит и фрагмент подъёма своих шагов ссылаются на план работ, а не на литерал."""
+    with_own_calls(stand)
+    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False, token="t")
+    assert "Refs #7" in git(stand, "log", "-1", "--format=%B", f"origin/{branch}")
+    note = git(stand, "show", f"origin/{branch}:changelog.d/deps-self-v2.0.0.internal.md")
+    assert note.rstrip().splitlines()[-1] == "#7"
+
+
 def test_a_repeated_release_lift_does_not_push_twice(stand: Path) -> None:
     """Ветка подъёма уже на площадке — повтор выпуска её не перезаписывает."""
     with_own_calls(stand)
-    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False, token="t")
     before = git(stand, "rev-parse", f"origin/{branch}")
-    module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    module.self_bump(stand, "o/r", "v2.0.0", dry_run=False, token="t")
     git(stand, "fetch", "--quiet", "origin")
     assert git(stand, "rev-parse", f"origin/{branch}") == before
 
@@ -428,10 +561,10 @@ def test_a_dry_release_lift_touches_nothing(stand: Path) -> None:
 
 def test_the_self_fragment_says_why_it_does_not_matter_to_the_consumer() -> None:
     """Фрагмент — `internal` с причиной первой строкой, тронутым по плану и адресом последней."""
-    text = module.self_fragment("v2.0.0", [Path(".github/workflows/handover-probe.yml")])
+    text = module.self_fragment("v2.0.0", [Path(".github/workflows/handover-probe.yml")], 7)
     assert text.startswith("> **Потребителю безразлично:**")
     assert "`.github/workflows/handover-probe.yml`" in text
-    assert text.rstrip().endswith("#1387")
+    assert text.rstrip().endswith("#7")
 
 
 def test_the_fragment_names_what_the_plan_touched(stand: Path) -> None:
@@ -443,7 +576,7 @@ def test_the_fragment_names_what_the_plan_touched(stand: Path) -> None:
     git(stand, "commit", "--quiet", "-m", "второй")
     git(stand, "push", "--quiet", "origin", "HEAD:main")
     git(stand, "tag", "-f", "v2.0.0")
-    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+    branch = module.self_bump(stand, "o/r", "v2.0.0", dry_run=False, token="t")
     note = git(stand, "show", f"origin/{branch}:changelog.d/deps-self-v2.0.0.internal.md")
     assert "`.github/workflows/other.yml`" in note and "handover-probe.yml" in note
 
@@ -453,7 +586,7 @@ def test_a_dirty_tree_is_not_switched(stand: Path) -> None:
     with_own_calls(stand)
     (stand / "wip.txt").write_text("не сохранено", encoding="utf-8")
     with pytest.raises(module.NotRun, match="незакоммиченные"):
-        module.self_bump(stand, "o/r", "v2.0.0", dry_run=False)
+        module.self_bump(stand, "o/r", "v2.0.0", dry_run=False, token="t")
     assert (stand / "wip.txt").read_text(encoding="utf-8") == "не сохранено"
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
@@ -466,7 +599,7 @@ def test_an_intercept_does_not_wipe_a_dirty_tree(
     (stand / "wip.txt").write_text("не сохранено", encoding="utf-8")
     bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
     with pytest.raises(module.NotRun, match="незакоммиченные"):
-        module.intercept(stand, "o/r", "t", bump, dry_run=False)
+        module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
     assert (stand / "wip.txt").read_text(encoding="utf-8") == "не сохранено"
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
@@ -484,7 +617,7 @@ def test_a_consumer_branch_is_not_switched(stand: Path) -> None:
     """Поднимать нечего — ветка человека не переключается (взгляд на #1421)."""
     git(stand, "tag", "v2.0.0")
     (stand / "wip.txt").write_text("своё", encoding="utf-8")
-    assert module.self_bump(stand, "o/r", "v2.0.0", dry_run=False) == ""
+    assert module.self_bump(stand, "o/r", "v2.0.0", dry_run=False, token="t") == ""
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
     assert (stand / "wip.txt").exists()
 
@@ -538,6 +671,9 @@ def bot_signal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GH_TOKEN", "t")
     monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter([signal]))
     fake_platform(monkeypatch, [])
+    # План и подпись — свои вопросы к площадке, их держат отдельные тесты.
+    monkeypatch.setattr(module, "plan_number", lambda repo, token: 7)
+    monkeypatch.setattr(module, "identity", lambda token: WHO)
 
 
 def test_main_apply_with_a_refused_switch_keeps_the_edits(
@@ -642,4 +778,4 @@ def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.M
     assert module.uses_lines(stand, "x/y") == 0
     bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
     with pytest.raises(module.Refused, match=r"уже на v7\.1\.0"):
-        module.intercept(stand, "o/r", "t", bump, dry_run=False)
+        module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
