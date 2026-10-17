@@ -893,11 +893,12 @@ def test_data_kit_reads_the_tree_and_derives_the_areas(tmp_path: Path) -> None:
 
 
 def test_the_area_kit_names_every_area_with_a_reason(tmp_path: Path) -> None:
-    """Каждая наша область у потребителя — пустые пути и причина, а не молчание."""
+    """Каждая наша область у потребителя — любой путь и пояснение, что заполнять."""
     root = tree(tmp_path, **{"step-пример": MARKED})
     areas = json.loads(module.area_kit(root))["areas"]
     assert sorted(areas) == ["docs", "gates"]
-    assert all(one == {"paths": [], "why": module.AREA_FILL} for one in areas.values())
+    want = {"paths": list(module.AREA_ANY), "why": module.AREA_FILL}
+    assert all(one == want for one in areas.values())
 
 
 def test_an_unreadable_area_table_is_a_refusal(tmp_path: Path) -> None:
@@ -922,6 +923,15 @@ def test_lay_free_keeps_what_is_there(tmp_path: Path) -> None:
     laid = module.lay_free(tmp_path, {Path("a.md"): "заготовка", Path("b/c.md"): "заготовка"})
     assert laid == [Path("b/c.md")]
     assert (tmp_path / "a.md").read_text(encoding="utf-8") == "своё"
+
+
+def test_a_yaml_twin_takes_the_path(tmp_path: Path) -> None:
+    """`dependabot.yaml` потребителя занимает место `dependabot.yml`: второго конфига нет."""
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "dependabot.yaml").write_text("своё", encoding="utf-8")
+    assert module.taken_by_twin(tmp_path, module.paths.DEPENDABOT)
+    assert module.lay_free(tmp_path, {module.paths.DEPENDABOT: "заготовка"}) == []
+    assert not (tmp_path / module.paths.DEPENDABOT).exists()
 
 
 def test_bindings_note_speaks_only_when_the_answer_is_missing(tmp_path: Path) -> None:
@@ -982,7 +992,13 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
     kit = module.data_kit(ROOT)
     table = review_map.table_shape(json.loads(kit[Path(".rules/review-roles.json")]))
     monkeypatch.setattr(review_map, "shown_from_base", lambda _, path: kit[Path(path)])
-    assert review_map.area_table("main"), "заготовка таблицы областей пуста"
+    table_of_areas = review_map.area_table("main")
+    # НЕЗАПОЛНЕННАЯ ЗАГОТОВКА НЕ СУЖАЕТ РОЛЬ (взгляд на #1455): правило с любой
+    # областью заготовки отдаётся роли на любом пути — как без таблицы.
+    areas_of = {"1": [next(iter(table_of_areas))]}
+    for files in (["README.md"], ["scripts/deep/x.py"]):
+        said = review_map.narrow(["1"], [], areas_of, table_of_areas, files)
+        assert said.eyes == ["1"], f"заготовка отсеяла правило на {files}: {said}"
     assert review_map.SUBJECT in kit[Path("docs/agent/review.md")]
     roles = tmp_path / "roles.md"
     roles.write_text(kit[Path("docs/agent/roles.md")], encoding="utf-8")

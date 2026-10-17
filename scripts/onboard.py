@@ -732,10 +732,16 @@ DATA_KIT: Final = paths.KIT / "data"
 #: уже есть. Таблица областей сюда не входит — она собирается (`area_kit`).
 #: Совпадение перечня с `kit/data/` держит `tests/test_onboard.py`.
 DATA_KITTED: Final = (paths.REVIEW_ROLES, paths.REVIEW_PROCEDURE, paths.ROLES, paths.DEPENDABOT)
-#: Причина пустых путей у области в заготовке таблицы областей.
+#: Пути области в заготовке: ЛЮБОЙ путь — в корне и вглубь (`review_map.matches`).
+#: Не пустые: пустой `paths` карта читает «поверхности нет» и правила области
+#: роли не отдаёт, то есть незаполненная заготовка давала бы роли МЕНЬШЕ, чем
+#: отсутствие таблицы (взгляд на #1455). Любой путь — то же, что без таблицы.
+AREA_ANY: Final = ("*", "**/*")
+#: Пояснение области в заготовке: что заполнять.
 AREA_FILL: Final = (
-    "наполнение проекта: образцы путей своего дерева, которые задевает эта область, "
-    "или причина, почему поверхности у неё нет"
+    "заготовка: область задевает любой путь, и роль получает все её правила, как без "
+    "таблицы. Наполнение проекта: образцы путей своего дерева, которые область "
+    "задевает, или пустой список с причиной, почему поверхности у неё нет"
 )
 
 
@@ -744,8 +750,7 @@ def area_kit(root: Path) -> str:
 
     ОБЛАСТИ ВЫВОДЯТСЯ ИЗ НАШЕЙ ТАБЛИЦЫ, А НЕ ПИШУТСЯ ВТОРЫМ СПИСКОМ (022): её
     покрытие областей каталога сверяет `tests/test_area_paths.py`. Пути — свои у
-    каждого дерева, поэтому у потребителя они пусты, и у каждой стоит причина:
-    пустой `paths` без неё карта взгляда отвергает (`review_map.area_table`).
+    каждого дерева; до наполнения область задевает любой путь (`AREA_ANY`).
     """
     try:
         areas = json.loads((root / paths.AREA_PATHS).read_text(encoding="utf-8"))["areas"]
@@ -760,7 +765,7 @@ def area_kit(root: Path) -> str:
             "тронутыми путями. Ключи — английские имена областей выгрузки каталога."
         ),
         "schema": 1,
-        "areas": {str(name): {"paths": [], "why": AREA_FILL} for name in sorted(areas)},
+        "areas": {str(name): {"paths": list(AREA_ANY), "why": AREA_FILL} for name in sorted(areas)},
     }
     return json.dumps(kit, ensure_ascii=False, indent=2) + "\n"
 
@@ -784,9 +789,20 @@ def data_kit(root: Path) -> dict[Path, str]:
     return found | {paths.AREA_PATHS: area_kit(root)}
 
 
+#: Расширения YAML, которые площадка читает одинаково: `dependabot.yaml` занимает
+#: место `dependabot.yml`, и второй файл рядом дал бы два конфига (взгляд на #1455).
+YAML_TWINS: Final = {".yml": ".yaml", ".yaml": ".yml"}
+
+
+def taken_by_twin(consumer: Path, path: Path) -> bool:
+    """Путь занят файлом-двойником с другим расширением YAML."""
+    twin = YAML_TWINS.get(path.suffix)
+    return twin is not None and (consumer / path.with_suffix(twin)).exists()
+
+
 def lay_free(consumer: Path, kit: dict[Path, str]) -> list[Path]:
     """Кладёт заготовку только в свободные пути; возвращает положенное."""
-    taken = set(occupied(consumer, kit))
+    taken = set(occupied(consumer, kit)) | {path for path in kit if taken_by_twin(consumer, path)}
     free = {path: text for path, text in kit.items() if path not in taken}
     lay(consumer, free)
     return sorted(free)
