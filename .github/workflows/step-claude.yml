@@ -62,9 +62,10 @@ jobs:
     # очереди: условие джоба внутри шага при группе ПРОГОНА у вызывающего
     # запрещено. Всё вне блока — checkout дерева вызывающего, установка и
     # агент — идёт только при ключе.
-    # Ответ агента на обращение `@claude`. Кто вправе обратиться и на каком
-    # событии, решает ВЫЗЫВАЮЩИЙ (`.github/workflows/claude.yml`), здесь только
-    # ответ; код конвейера — своим checkout, ключ агента — секретом по имени.
+    # Ответ агента на обращение `@claude`. На каком событии обращаться, решает
+    # ВЫЗЫВАЮЩИЙ (`.github/workflows/claude.yml`); автора сверяют оба — он и
+    # шаг `who` ниже. Код конвейера — своим checkout, ключ агента — секретом по
+    # имени.
     name: respond
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -82,10 +83,33 @@ jobs:
             echo "present=yes" >> "$GITHUB_OUTPUT"
           fi
 
+      # АВТОР ОБРАЩЕНИЯ СВЕРЯЕТСЯ И ЗДЕСЬ, А НЕ ТОЛЬКО У ВЫЗЫВАЮЩЕГО (взгляд на
+      # #1410). Шаг отдаётся как есть, а вызывающий — заготовка, которую
+      # потребитель правит: тонкий вызов без условия запустил бы агента ключом
+      # владельца для любого автора. Список разрешённого тот же, что у
+      # `claude.yml` (068): `author_association` проставляет площадка по факту
+      # прав, и подделать его текстом обращения нельзя.
+      - name: автор обращения из доверенных
+        id: who
+        if: steps.token.outputs.present == 'yes'
+        env:
+          WHO: ${{ github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association }}
+        run: |
+          set -euo pipefail
+          case "${WHO:-}" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "allowed=yes" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "allowed=no" >> "$GITHUB_OUTPUT"
+              echo "::warning::Обращение не обслужено: автор «${WHO:-не назван}» не из доверенных (OWNER, MEMBER, COLLABORATOR)."
+              ;;
+          esac
+
       # Версии закреплены по SHA: действие получает токен и исполняет промпт,
       # собранный в том числе из чужого текста (152, 085).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.token.outputs.present == 'yes'
+        if: steps.token.outputs.present == 'yes' && steps.who.outputs.allowed == 'yes'
         with:
           fetch-depth: 1
       # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
@@ -156,16 +180,16 @@ jobs:
           fi
           echo "MECHANISMS=$RUNNER_TEMP/mechanisms" >>"$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: steps.token.outputs.present == 'yes'
+        if: steps.token.outputs.present == 'yes' && steps.who.outputs.allowed == 'yes'
         with:
           python-version: "3.14"
       - name: поставить проверки отвечающему
-        if: steps.token.outputs.present == 'yes'
+        if: steps.token.outputs.present == 'yes' && steps.who.outputs.allowed == 'yes'
         run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7"
 
       - name: ответить на обращение
         id: answer
-        if: steps.token.outputs.present == 'yes'
+        if: steps.token.outputs.present == 'yes' && steps.who.outputs.allowed == 'yes'
         uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

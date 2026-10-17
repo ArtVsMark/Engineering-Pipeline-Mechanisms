@@ -140,8 +140,13 @@ def load(path: Path) -> dict[str, Any]:
         raise NotRun(f"сводки семьи нет: {path} — считать нечего (075)")
     try:
         document: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise NotRun(f"{path} не разбирается: {exc}") from exc
+    except (OSError, ValueError, RecursionError) as exc:
+        # ГЛУБЖЕ ПРЕДЕЛА РАЗБОРЩИКА — ТОЖЕ «НЕ РАЗБИРАЕТСЯ» (находки `88edc0f`,
+        # `9846074`): C-разборщик JSON бросает `RecursionError` на вложенности
+        # в сотни тысяч уровней, и он проходил мимо `NotRun`, роняя сборку
+        # фактов целиком вместо «read: False». Нечитаемый файл и чужая
+        # кодировка (`OSError`, `UnicodeDecodeError`) — тот же третий исход.
+        raise NotRun(f"{path} не разбирается: {exc!r}") from exc
     if not document.get("consumers"):
         raise NotRun(f"{path}: в сводке нет ни одного потребителя — предмет не найден (075)")
     return document
@@ -335,6 +340,9 @@ def hollow(value: object) -> bool:
     Обход идёт явным стеком, а не рекурсией: разборщик JSON держит вложенность
     в тысячи уровней, рекурсия падала уже на пятистах, и `RecursionError` одной
     записи соседа гасил сборку фактов целиком (поздний взгляд на #1366, 039).
+    СОСЕД НАЗВАН (находка `9846074`, 195): вход глубже предела САМОГО
+    разборщика сюда не доходит — его отвергает `load` третьим исходом, и это
+    держит набор.
     """
     pending: list[object] = [value]
     while pending:

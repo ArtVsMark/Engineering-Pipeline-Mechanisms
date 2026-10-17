@@ -641,6 +641,24 @@ def test_a_matrix_cell_without_a_runner_build_is_named() -> None:
     assert module.language_moved(builds, ["3.14"], "3.16", "26.04") == []
 
 
+def test_a_stable_cell_with_only_a_trial_build_is_named() -> None:
+    """Ветка, стабильная номером, но под раннер собранная пробно, — несобранная (взгляд на #1377).
+
+    `setup-python` без `allow-prereleases` пробный файл не поставит: ячейка
+    покраснела бы, а дрейф считал её собранной и молчал.
+    """
+    builds = [
+        build("3.14.7", ("linux", "26.04", "x64"), stable=True),
+        build("3.15.0", ("linux", "24.04", "x64"), stable=True),
+        build("3.15.1-rc.1", ("linux", "26.04", "x64"), stable=False),
+    ]
+    found = module.language_moved(builds, ["3.14", "3.15"], "3.16", "26.04")
+    cells = [d.said for d in found if d.source == "python-matrix"]
+    assert len(cells) == 1 and "3.15" in cells[0], found
+    assert module.published(builds, "3.15", "26.04")
+    assert not module.published(builds, "3.15", "26.04", stable_only=True)
+
+
 @pytest.mark.parametrize("ready", [True, False], ids=["есть-готовая", "готовых-нет"])
 def test_every_matrix_cell_is_asked_for_a_runner_build(ready: bool) -> None:
     """Каждой ячейке матрицы — один вопрос о файле под раннер, предрелизной тоже (взгляд на #1377).
@@ -2448,6 +2466,22 @@ def test_an_unreadable_evidence_verdict_is_named(said: dict[str, str], words: st
 
 
 @pytest.mark.parametrize(
+    "ours", ["2026-02-30", "14.10.2026", ""], ids=["нет-дня", "не-тот-вид", "пусто"]
+)
+def test_our_unreadable_date_is_named_not_waited_on(ours: str) -> None:
+    """Наша дата замера читается так же, как дата ответа (взгляд на #1377).
+
+    Нечитаемая давала `None`, сравнение с днём ответа уходило в «ответ на
+    другой замер», и вердикт навсегда выглядел ожиданием.
+    """
+    mine = {"proposals": [{**EVIDENCE["proposals"][0], "measured_at": ours}]}
+    said = {"status": "admitted", "candidate": "h", "measured_at": "2026-10-14"}
+    found = module.proposals_answered(answer(said, EVIDENCE_KEY), mine, "o/r")
+    assert len(found) == 1 and found[0].source == "proposal-answer-unread", found
+    assert "наши данные" in found[0].said
+
+
+@pytest.mark.parametrize(
     "day", ["2026-10-14T00:00:00Z", "2026-10-14T12:30:00+03:00", " 2026-10-14 "]
 )
 def test_an_evidence_date_is_read_as_a_date_not_a_string(day: str) -> None:
@@ -2533,6 +2567,45 @@ def test_unread_proposals_do_not_silence_the_export_drift(
     if written is not None:
         with pytest.raises(module.NotRun):
             module.ours_proposals()
+
+
+def test_a_broken_proposals_file_silences_only_its_own_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Битый файл предложений называет свой источник в обходе `look`, а не роняет соседей.
+
+    Обещание `ours_file` (взгляд на #1377) прежде держал только разбор
+    `catalogue_asked`, а не сам обход: молчащим назван ровно источник
+    «вердикты по предложениям», остальные отвечают.
+    """
+    broken = tmp_path / "proposals.json"
+    broken.write_text("{не json", encoding="utf-8")
+    monkeypatch.setattr(module.paths, "PROPOSALS", broken)
+    monkeypatch.setattr(module, "fetch", lambda url: {"count": 0, "candidates": []})
+    for name in (
+        "family_summary",
+        "pinned_tag_moved",
+        "protection_moved",
+        "merge_ways_moved",
+        "language_moved",
+        "actions_disagree",
+        "actions_behind",
+        "pin_mislabelled",
+        "platform_warnings",
+        "showcase_questions_moved",
+        "gap_tasks_closed",
+        "release_behind_tree",
+        "probe_behind_release",
+    ):
+        monkeypatch.setattr(module, name, lambda *a, **k: [])
+    monkeypatch.setattr(module, "manifest", lambda url: [{}])
+    monkeypatch.setattr(module, "declared_versions", lambda: ([], ""))
+    monkeypatch.setattr(module, "matrix_system", lambda: None)
+    monkeypatch.setattr(module, "action_versions", lambda **_: {})
+    monkeypatch.setattr(module, "pinned_hashes", lambda **_: {})
+    monkeypatch.setattr(module, "ours_showcase", lambda: {})
+    _, silent = module.look("o/r", "token", {"rules": {}})
+    assert silent == ["вердикты по предложениям"], silent
 
 
 def test_a_hypothesis_gone_from_candidates_names_both_reasons() -> None:

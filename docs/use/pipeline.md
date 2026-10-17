@@ -77,7 +77,7 @@
 | 13a | Дрейф: внешний вход сдвинулся | `drift.yml` → `step-drift.yml` (по расписанию) | `drift / drift` | нет, совещательный |
 | 14 | Значки, метрики, публикация | `badges.yml` | `badges` | нет |
 | 14b | Входы общего шага фактов: свои разделы и покрытие — файлом | `badges.yml` | `inputs` | нет |
-| 14c | Факты: общий издатель семьи, сверка со схемой витрины, публикация `facts.json` и значка `project.svg` поверх `badges` — свой файл потребителя по этим путям перезаписывается; со входом `archive` тем же коммитом — архив находок `findings.json` | `badges.yml` → `step-facts.yml` | `facts / facts` | нет |
+| 14c | Факты: общий издатель семьи, сверка с договором фактов каталога, публикация `facts.json` и значка `project.svg` поверх `badges` — свой файл потребителя по этим путям перезаписывается; со входом `archive` тем же коммитом — архив находок `findings.json` | `badges.yml` → `step-facts.yml` | `facts / facts` | нет |
 | 14a | Ряд прогонов: как конвейер работает на самом деле | `runs-series.yml` → `step-runs-series.yml` (по расписанию и кнопкой) | `runs-series / runs-series` | нет |
 | 15 | Состав меток: дерево — источник | `labels-sync.yml` → `step-labels-sync.yml` | `apply / apply` | нет |
 | 16 | Сверка обязательного контекста с защитой | `required-context.yml` → `step-required-context.yml` | `compare / compare` | нет |
@@ -242,8 +242,8 @@ test_the_verifier_answer_and_its_transfer_share_one_hold`. Цена назван
 увидела; реестр неразобранного — задача #23. Ответ верификатора (шаг 12f)
 взглядом не считается: у него своя метка, и читатели заходов его отсеивают
 (`review_findings.is_verification`). Архив всех находок — с родом, снятием и
-рождённым правилом — собирает шаг 14 в `.github/badges/findings.json` на ветке
-`badges` (`scripts/findings_archive.py`).
+рождённым правилом — собирает шаг 14c (`step-facts.yml`, вход `archive`) в
+`.github/badges/findings.json` на ветке `badges` (`scripts/findings_archive.py`).
 
 **Полный взгляд — один раз, дальше проверка починки** ([#848](../../../issues/848),
 решение владельца 25.09.2026). Режим выбирает джоб `map` на коде общей ветки
