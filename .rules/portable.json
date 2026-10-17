@@ -119,6 +119,10 @@
         ".github/labels.yml"
       ]
     },
+    ".claude/skills/a-gate-obeys-every-rule": {
+      "answer": "ours",
+      "why": "@skill-tree"
+    },
     ".claude/skills/a-task-before-the-work": {
       "answer": "ours",
       "why": "@skill-tree"
@@ -428,6 +432,10 @@
       "where": [
         ".rules/leniency.json"
       ]
+    },
+    ".rules/mechanism-rules.json": {
+      "answer": "ours",
+      "why": "@skill-tree"
     },
     ".rules/outcomes.json": {
       "answer": "configured",

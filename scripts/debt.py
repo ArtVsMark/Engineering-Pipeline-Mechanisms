@@ -384,7 +384,7 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
     # не посмотрев на них. Нашёл внешний взгляд на #132.
     for change in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
         number = int(change.get("number") or 0)
-        title = str(change.get("title") or "")[:60]
+        title = report.cut(str(change.get("title") or ""), 60)
         said = f"#{number} — {title}"
         if change.get("draft"):
             # Черновик застрять не может: он и не подан.

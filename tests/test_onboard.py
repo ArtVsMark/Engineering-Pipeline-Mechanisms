@@ -1437,6 +1437,24 @@ def test_the_update_plan_is_decided_before_any_write(tmp_path: Path) -> None:
     assert module.policy.events_raw(said) == "push"
 
 
+def test_a_yaml_twin_of_an_owned_run_is_updated_in_place(tmp_path: Path) -> None:
+    """Свой `.yaml` целиком нашего прогона правится на месте, а не получает соседа.
+
+    Третья дверь двойника: `occupied` у `--write` и `plan_ci` у `--update`
+    проверены соседним тестом, а `plan_owned` — нет (взгляд на #1461).
+    """
+    root, consumer = connected(tmp_path)
+    flows = consumer / ".github" / "workflows"
+    (flows / "план.yml").rename(flows / "план.yaml")
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    repo = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+    plan = module.Update()
+    module.plan_owned(plan, consumer, module.owned(root, repo, "v2.6.0"), root, repo)
+    run = module.paths.WORKFLOWS / "план.yml"
+    assert run not in plan.write, "обновление положило бы план.yml рядом с план.yaml"
+    assert run.with_suffix(".yaml") in plan.write
+
+
 def test_consumer_inputs_survive_the_update(tmp_path: Path) -> None:
     """Входы `with:` — данные потребителя: правка не отказ, обновление их сохраняет (#1386)."""
     import yaml
