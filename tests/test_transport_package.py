@@ -208,6 +208,23 @@ def test_the_package_declares_the_shared_bottom() -> None:
     assert project.get("dynamic") == ["version"], "версия читается из источника, а не вписана"
 
 
+def test_the_package_carries_the_license_of_the_repository() -> None:
+    """Колесо несёт текст лицензии: установка из подкаталога корневого файла не видит (#1432).
+
+    `pip install …#subdirectory=packages/transport` собирает колесо из каталога
+    пакета, и `LICENSE` из корня в него не попадает — а MIT требует текст
+    лицензии в копии. Сборка кладёт в колесо файлы `LICENSE*` каталога пакета
+    сама (`License-File` в метаданных; замер 17.10.2026 сборкой `uv build`:
+    без копии лицензий в колесе ноль, с копией — одна). Копия — намеренный
+    дубль корневого файла, и расходиться им не даёт эта проверка.
+    """
+    copy = PACKAGE / "LICENSE"
+    assert copy.is_file(), "у пакета нет LICENSE — колесо уйдёт без лицензии"
+    assert copy.read_bytes() == (ROOT / "LICENSE").read_bytes(), (
+        "LICENSE пакета разошёлся с корневым — копия обязана быть дословной"
+    )
+
+
 def test_the_package_version_is_a_number_of_its_own() -> None:
     """У пакета своя версия: она о поверхности Python, а не о конвейере (164)."""
     said = (PACKAGE / "VERSION").read_text(encoding="utf-8").strip()
