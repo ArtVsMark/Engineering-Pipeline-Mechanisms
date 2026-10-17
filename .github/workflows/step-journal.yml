@@ -267,3 +267,12 @@ jobs:
         env:
           GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: python $MECHANISMS/scripts/check_reached_by_work.py
+      # НОВЫЙ МЕХАНИЗМ НАЗЫВАЕТ, У КОГО ИЗ СЕМЬИ СПРОСИЛИ (162, #1440). Тот же
+      # предмет — только ДОБАВЛЕННОЕ изменением, — и тот же джоб: шаг приезжает
+      # к потребителю с подъёмом тега, без новой записи проверки. Каталог
+      # перейдёт на этот шаг вместо своей копии гейта (решение владельца
+      # 17.10.2026).
+      - name: новый механизм назвал семью
+        env:
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python $MECHANISMS/scripts/check_asked_family.py
