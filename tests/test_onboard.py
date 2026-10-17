@@ -45,7 +45,16 @@ PLAIN = "name: step-молчун\non:\n  workflow_call:\njobs:\n  x:\n    steps:
 #: Заготовка свода: состав читается из `kit/`, а не списком (#995).
 KIT = {"AGENTS.md": "# ядро\n", "CLAUDE.md": "# окно\n"}
 #: Заготовки данных: состав читается из `kit/data/`, а не списком (#1386).
-DATA = {str(one): f"заготовка {one.name}\n" for one in module.DATA_KITTED}
+#: Заготовки данных поддельного дерева — каждая своего рода: JSON-заготовку
+#: заход разбирает, чтобы поставить в неё поле лицензии (#1470).
+DATA = {
+    str(one): (
+        json.dumps({"_": f"заготовка {one.name}"}, ensure_ascii=False) + "\n"
+        if one.suffix == ".json"
+        else f"заготовка {one.name}\n"
+    )
+    for one in module.DATA_KITTED
+}
 #: Наша таблица областей: из неё заготовка берёт имена областей.
 AREAS = '{"areas": {"gates": {"paths": ["tests/*"]}, "docs": {"paths": ["docs/*"]}}}\n'
 
@@ -445,8 +454,8 @@ def test_occupied_names_only_what_exists(tmp_path: Path) -> None:
     files = {Path("a/x.yml"): "x\n", Path("y.yml"): "y\n"}
     (tmp_path / "y.yml").write_text("было\n", encoding="utf-8")
     assert module.occupied(tmp_path, files) == [Path("y.yml")]
-    module.lay(tmp_path / "новое", files)
-    assert (tmp_path / "новое" / "a" / "x.yml").read_text("utf-8") == "x\n"
+    module.lay(tmp_path / "новое", files, "o/r")
+    assert (tmp_path / "новое" / "a" / "x.yml").read_text("utf-8").endswith("\nx\n")
 
 
 def test_the_thin_ci_runs_on_the_trunk_and_keeps_the_last_word_by_head() -> None:
@@ -838,7 +847,8 @@ def test_write_lays_the_rulebook_kit(tmp_path: Path) -> None:
     consumer = tmp_path / "потребитель"
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
     for name, text in KIT.items():
-        assert (consumer / name).read_text("utf-8") == text
+        laid = (consumer / name).read_text("utf-8")
+        assert laid.endswith(text) and module.LICENSE_ID in laid.splitlines()[0], laid
 
 
 def test_an_existing_rulebook_is_kept_and_does_not_stop_the_call(
@@ -851,7 +861,7 @@ def test_an_existing_rulebook_is_kept_and_does_not_stop_the_call(
     (consumer / "CLAUDE.md").write_text("свой свод\n", encoding="utf-8")
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
     assert (consumer / "CLAUDE.md").read_text("utf-8") == "свой свод\n"
-    assert (consumer / "AGENTS.md").read_text("utf-8") == KIT["AGENTS.md"]
+    assert (consumer / "AGENTS.md").read_text("utf-8").endswith(KIT["AGENTS.md"])
     assert (consumer / ".github" / "workflows" / "ci.yml").exists()
     assert "CLAUDE.md" in capsys.readouterr().out
 
@@ -920,7 +930,8 @@ def test_an_empty_data_kit_is_a_refusal(tmp_path: Path) -> None:
 def test_lay_free_keeps_what_is_there(tmp_path: Path) -> None:
     """Занятый путь не тронут и не назван положенным; свободный положен."""
     (tmp_path / "a.md").write_text("своё", encoding="utf-8")
-    laid = module.lay_free(tmp_path, {Path("a.md"): "заготовка", Path("b/c.md"): "заготовка"})
+    kit = {Path("a.md"): "заготовка", Path("b/c.md"): "заготовка"}
+    laid = module.lay_free(tmp_path, kit, "o/r")
     assert laid == [Path("b/c.md")]
     assert (tmp_path / "a.md").read_text(encoding="utf-8") == "своё"
 
@@ -955,7 +966,7 @@ def test_a_twin_of_our_own_data_takes_no_place(tmp_path: Path) -> None:
 def test_a_dormant_area_table_is_named_until_the_role_is_declared(tmp_path: Path) -> None:
     """Таблица областей без объявленной роли — названная спячка; роль объявлена — тишина."""
     assert module.dormant_areas_note(tmp_path) == "", "таблицы нет — и говорить не о чем"
-    module.lay(tmp_path, module.data_kit(ROOT))
+    module.lay(tmp_path, module.data_kit(ROOT), "o/r")
     said = module.dormant_areas_note(tmp_path)
     assert "спит" in said and module.ROLE_PILOT in said
     roles = tmp_path / module.paths.REVIEW_ROLES
@@ -970,7 +981,7 @@ def test_a_yaml_twin_takes_the_path(tmp_path: Path) -> None:
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / "dependabot.yaml").write_text("своё", encoding="utf-8")
     assert module.taken_by_twin(tmp_path, module.paths.DEPENDABOT)
-    assert module.lay_free(tmp_path, {module.paths.DEPENDABOT: "заготовка"}) == []
+    assert module.lay_free(tmp_path, {module.paths.DEPENDABOT: "заготовка"}, "o/r") == []
     assert not (tmp_path / module.paths.DEPENDABOT).exists()
 
 
@@ -1568,3 +1579,78 @@ def test_a_withdrawn_step_keeps_its_old_tag(tmp_path: Path) -> None:
     text = plan.write[module.paths.WORKFLOWS / module.PIPELINE_FLOW]
     assert "step-a.yml@v2" in text and "step-b.yml@v1" in text
     assert any("`b`" in one and "прежнем теге" in one for one in plan.notes)
+
+
+@pytest.mark.parametrize(
+    ("name", "first"),
+    [
+        ("ci.yml", "# SPDX-License-Identifier: MIT — https://github.com/o/r\n"),
+        ("ci.yaml", "# SPDX-License-Identifier: MIT — https://github.com/o/r\n"),
+        ("CLAUDE.md", "<!-- SPDX-License-Identifier: MIT — https://github.com/o/r -->\n"),
+    ],
+    ids=["yml", "yaml", "md"],
+)
+def test_the_license_line_takes_the_form_of_its_kind(name: str, first: str) -> None:
+    """Строка лицензии — в форме своего рода, первой строкой, и один раз (#1470)."""
+    signed = module.licensed(Path(name), "тело\n", "o/r")
+    assert signed == first + "тело\n"
+    assert module.licensed(Path(name), signed, "o/r") == signed
+
+
+def test_a_json_kit_carries_the_license_as_its_first_field() -> None:
+    """JSON комментариев не знает: лицензия — поле `_license`, и таблица ролей её пропускает."""
+    kit = module.data_kit(ROOT)[module.paths.REVIEW_ROLES]
+    table = json.loads(module.licensed(module.paths.REVIEW_ROLES, kit, "o/r"))
+    assert next(iter(table)) == "_license"
+    assert table["_license"] == "SPDX-License-Identifier: MIT — https://github.com/o/r"
+    module.review_map.table_shape(table)
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [("a.toml", "x = 1\n"), ("a.json", "[1]\n")],
+    ids=["род-без-формы", "json-не-словарь"],
+)
+def test_a_kit_without_a_place_for_the_license_is_refused(name: str, text: str) -> None:
+    """Некуда поставить строку лицензии — отказ, а не заготовка без неё (045, #1470)."""
+    with pytest.raises(module.NotRun, match="лицензии"):
+        module.licensed(Path(name), text, "o/r")
+
+
+def test_every_file_the_write_lays_carries_the_license(tmp_path: Path) -> None:
+    """Каждый файл, положенный заходом в дерево потребителя, несёт строку лицензии (#1470).
+
+    Судится результат захода целиком, а не каждая заготовка порознь: путь
+    записи один, и новая заготовка, прошедшая мимо него, здесь видна.
+    """
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    laid = [one for one in walk_deep(consumer) if one.is_file()]
+    unsigned = [
+        one.relative_to(consumer).as_posix()
+        for one in laid
+        if module.LICENSE_ID not in one.read_text(encoding="utf-8")
+    ]
+    assert not unsigned, f"положено без строки лицензии: {unsigned}"
+
+
+def test_a_kit_that_cannot_carry_the_license_stops_the_write_before_any_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Отказ подписи — исход «не отработал» до первой записи, а не трасса и не половина (039)."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    (root / module.DATA_KIT / module.paths.REVIEW_ROLES).write_text("[1]\n", encoding="utf-8")
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_BROKEN
+    assert not consumer.exists() or not any(consumer.iterdir()), "положено до отказа"
+
+
+def test_signed_all_signs_every_kit_or_refuses_the_whole() -> None:
+    """Подпись идёт пачкой: подписаны все, а одна неподписываемая — отказ всей пачки."""
+    files = {Path("a.yml"): "x\n", Path("b.md"): "y\n"}
+    signed = module.signed_all(files, "o/r")
+    assert set(signed) == set(files)
+    assert all(module.LICENSE_ID in text for text in signed.values())
+    with pytest.raises(module.NotRun, match="лицензии"):
+        module.signed_all({**files, Path("c.toml"): "z\n"}, "o/r")

@@ -708,9 +708,63 @@ def occupied(root: Path, files: dict[Path, str]) -> list[Path]:
     return sorted(path for path in files if (root / standing(root, path)).exists())
 
 
-def lay(root: Path, files: dict[Path, str]) -> None:
-    """Кладёт заготовку в дерево потребителя; занятое проверяет зовущий (`occupied`)."""
-    for path, text in files.items():
+#: Строка лицензии в заготовке, которая уезжает к потребителю копией (#1470,
+#: решение владельца 17.10.2026). MIT требует уведомления «во всех копиях или
+#: существенных частях». Шаги по тегу и пакет транспорта лицензию несут сами:
+#: потребитель читает их из нашего дерева. Положенное же в чужое дерево
+#: становится его файлом, и без строки лицензия до него не доходит.
+LICENSE_ID: Final = "SPDX-License-Identifier: MIT"
+#: Как строка лицензии записывается в файле каждого рода, который кладёт заход.
+#: JSON комментариев не знает, и строка там — поле `_license` первым ключом:
+#: поля с `_` читатели наших таблиц пропускают.
+LICENSE_FORMS: Final = {".yml": "# {line}\n", ".yaml": "# {line}\n", ".md": "<!-- {line} -->\n"}
+
+
+def licensed(path: Path, text: str, repo: str) -> str:
+    """Заготовка со строкой лицензии в форме своего рода; рода без формы — `NotRun`.
+
+    Род без формы — отказ, а не файл без строки: новая заготовка другого рода
+    ушла бы к потребителю молча неподписанной (045). Уже подписанная — как есть.
+    """
+    line = f"{LICENSE_ID} — https://github.com/{repo}"
+    if LICENSE_ID in text:
+        return text
+    if path.suffix == ".json":
+        try:
+            data = json.loads(text)
+        except ValueError as exc:
+            raise NotRun(f"{path}: заготовка не разбирается как JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise NotRun(f"{path}: строку лицензии в JSON класть некуда — это не словарь")
+        signed = {"_license": line, **data}
+        return json.dumps(signed, ensure_ascii=False, indent=2) + "\n"
+    form = LICENSE_FORMS.get(path.suffix)
+    if form is None:
+        raise NotRun(
+            f"{path}: строку лицензии в файл рода «{path.suffix}» класть нечем — "
+            "заготовка ушла бы к потребителю без неё (#1470)"
+        )
+    return form.format(line=line) + text
+
+
+def signed_all(files: dict[Path, str], repo: str) -> dict[Path, str]:
+    """Все заготовки со строкой лицензии — разом; отказ одной — `NotRun` до записи.
+
+    Зовётся и ДО первой записи, внутри перехвата отказов захода: половина
+    положенной заготовки хуже никакой, а `NotRun` вне перехвата ушёл бы трассой
+    с кодом 1 вместо исхода «не отработал» (039).
+    """
+    return {path: licensed(path, text, repo) for path, text in files.items()}
+
+
+def lay(root: Path, files: dict[Path, str], repo: str) -> None:
+    """Кладёт заготовку в дерево потребителя, каждую — со строкой лицензии (#1470).
+
+    Занятое проверяет зовущий (`occupied`). Подпись ставится здесь, на единственном
+    пути записи к потребителю, а не в каждой заготовке: путь записи один, а
+    заготовки собираются в нескольких местах, и новое место ушло бы мимо.
+    """
+    for path, text in signed_all(files, repo).items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
 
@@ -831,11 +885,11 @@ def taken_by_twin(consumer: Path, path: Path) -> bool:
     return standing(consumer, path) != path
 
 
-def lay_free(consumer: Path, kit: dict[Path, str]) -> list[Path]:
+def lay_free(consumer: Path, kit: dict[Path, str], repo: str) -> list[Path]:
     """Кладёт заготовку только в свободные пути; возвращает положенное."""
     taken = set(occupied(consumer, kit))
     free = {path: text for path, text in kit.items() if path not in taken}
-    lay(consumer, free)
+    lay(consumer, free, repo)
     return sorted(free)
 
 
@@ -1374,6 +1428,7 @@ def update(
         plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
         plan_ci(plan, consumer, pipeline, repo, pin)
         plan_answer(plan, consumer, [check_name(one) for one in pipeline] + records)
+        signed_all(plan.write | data, repo)
     except NotRun as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -1393,8 +1448,8 @@ def update(
             file=sys.stderr,
         )
         return EXIT_HAND_EDITED
-    lay(consumer, plan.write)
-    laid = lay_free(consumer, data)
+    lay(consumer, plan.write, repo)
+    laid = lay_free(consumer, data, repo)
     if plan.write:
         print(f"обновлено до {pin}: " + ", ".join(str(one) for one in sorted(plan.write)))
     else:
@@ -1502,6 +1557,7 @@ def main(argv: list[str] | None = None) -> int:
                     for one, flow in sorted(own.items())
                 },
             }
+            signed_all(files | rulebook | kit, args.repo)
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
@@ -1538,11 +1594,11 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OCCUPIED
         kept = occupied(args.write, rulebook)
         free = {path: text for path, text in rulebook.items() if path not in kept}
-        lay(args.write, files | free)
+        lay(args.write, files | free, args.repo)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
-        laid = lay_free(args.write, kit)
+        laid = lay_free(args.write, kit, args.repo)
         if laid:
             print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
         if unanswered := bindings_note(args.write):
