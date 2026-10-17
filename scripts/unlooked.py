@@ -681,7 +681,9 @@ def machine_branch(item: dict[str, Any], prefixes: Iterable[str]) -> bool:
     старше окна в очереди остаётся (предел назван в docs/use/pipeline.md,
     взгляд на #1361). С машины вердикта не спрашивают (051), и поздний взгляд
     на ней — плата за пересказ чисел. Имя головы без строки — не машинная
-    ветка: незнание не гасит взгляд (045).
+    ветка: незнание не гасит взгляд (045). Второй предел: имя ветки выбирает
+    автор изменения, и ветка человека с машинной приставкой обходит взгляд
+    так же — машину от человека здесь по автору не отличают (там же, #1378).
     """
     head = (item.get("head") or {}).get("ref")
     return isinstance(head, str) and any(head.startswith(one) for one in prefixes if one)
@@ -973,7 +975,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--skip-branches",
         default=os.environ.get("SKIP_BRANCHES", ""),
-        help="приставки машинных веток через пробел: их слитое в реестр не встаёт",
+        help=(
+            "приставки машинных веток через пробел: их слитое в окне обхода в реестр"
+            " не встаёт; ветку называет автор, пределы — docs/use/pipeline.md"
+        ),
     )
     args = parser.parse_args(argv)
     report.announce(not args.apply)
