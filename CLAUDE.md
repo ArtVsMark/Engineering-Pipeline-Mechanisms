@@ -44,6 +44,9 @@
 **Но навык не краснеет:** невызванный неотличим от вызванного. Чем держится
 вызов — решение [`031`](docs/decisions/031-the-rulebook-names-the-skills.md).
 
+**Перед толчком механизма — навык `a-gate-obeys-every-rule`**
+([220](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/220-a-mechanism-is-also-subject-to-the-rules-on-mechanisms.md)).
+
 ## 🪟 Имя окна и его окружение
 
 **Имя окна начинается с окружения:** `[WEB]` · `[LOCAL]` · `[CLI]`. Присваивается

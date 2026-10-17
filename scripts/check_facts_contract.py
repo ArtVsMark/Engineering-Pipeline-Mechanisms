@@ -65,6 +65,7 @@ import ghrest
 import gitcall
 import paths
 import pipeline_checks
+import report
 
 EXIT_OK: Final = 0
 #: Код шага, не уложившегося в дедлайн, — тот же, что отдаёт `timeout(1)`.
@@ -305,7 +306,7 @@ def verdict(
     def channel(rc: int, said: str) -> tuple[int, str] | None:
         """Исход канала у захода: истёк дедлайн — 4, не скачал выпуск — 1 или 4; иначе `None`."""
         if rc == STEP_TIMED_OUT:
-            return EXIT_SILENT, f"{said.strip()[-300:]} — канал молчит, сверка не проверена"
+            return EXIT_SILENT, f"{report.tail(said)} — канал молчит, сверка не проверена"
         named = unfetched(said)
         if named is None:
             return None
@@ -317,9 +318,9 @@ def verdict(
     if (judged := channel(rc, said)) is not None:
         return judged
     if rc != 0 or "::error::" in said:
-        return EXIT_FOUND, f"годные факты остановлены (код {rc}): {said.strip()[-300:]}"
+        return EXIT_FOUND, f"годные факты остановлены (код {rc}): {report.tail(said)}"
     if "::warning::" in said:
-        return EXIT_FOUND, f"сверка не отработала на годных фактах — мертва: {said.strip()[-300:]}"
+        return EXIT_FOUND, f"сверка не отработала на годных фактах — мертва: {report.tail(said)}"
     rc, said = stranger
     if (judged := channel(rc, said)) is not None:
         return judged
@@ -327,7 +328,7 @@ def verdict(
     if rc != 1 or line not in said:
         return EXIT_FOUND, (
             f"расхождение не остановило шаг (код {rc}, строки «{line}N» "
-            f"{'нет' if line not in said else 'есть'}) — сверка мертва: {said.strip()[-300:]}"
+            f"{'нет' if line not in said else 'есть'}) — сверка мертва: {report.tail(said)}"
         )
     return EXIT_OK, "сверка жива: годные факты прошли, расхождение остановило шаг"
 

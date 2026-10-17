@@ -64,6 +64,10 @@ CONSUMERS: Final = Path(".rules/consumers.json")
 #: единственный читатель строил адрес сам. Нашёл аудит ответа по 096 — не гейтом,
 #: потому что гейта на это и не было (115).
 CLAIMS: Final = Path(".rules/claims.json")
+#: Перепись правил о механизмах (220): чем держится каждое правило в каждом
+#: месте дерева, где живут механизмы. Читают её навык
+#: `a-gate-obeys-every-rule` и гейт формы `tests/test_mechanism_rules.py` (#1459).
+MECHANISM_RULES: Final = Path(".rules/mechanism-rules.json")
 #: Фрагменты журнала и собранный журнал.
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
@@ -216,6 +220,7 @@ ALL: Final = (
     OUTCOMES,
     CONSUMERS,
     CLAIMS,
+    MECHANISM_RULES,
     FRAGMENTS,
     RELEASED,
     CHANGELOG,
