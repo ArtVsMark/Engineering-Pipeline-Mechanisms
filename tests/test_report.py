@@ -42,8 +42,10 @@ def test_no_mechanism_cuts_output_silently() -> None:
     уплотнения, — и каждая обрезала молча. Разошлись бы они так же молча.
     """
     # Корни — из `paths.SOURCES`: транспорт был среди тех четырёх копий, и
-    # пятая в общем низу разошлась бы так же молча (#1254).
-    for path in code_files():
+    # пятая в общем низу разошлась бы так же молча (#1254). И хуки окна:
+    # механизм тоже предмет правил о механизмах (220, #1439) — замер
+    # 17.10.2026 при расширении: срезов вывода в хуках ноль.
+    for path in code_files(with_hooks=True):
         if path.name == "report.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

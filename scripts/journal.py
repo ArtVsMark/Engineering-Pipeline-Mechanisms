@@ -89,8 +89,7 @@ def git(args: list[str]) -> str:
             timeout=gitcall.LOCAL,
         ).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        detail = getattr(exc, "stderr", "") or exc
-        raise NotRun(f"{' '.join(args)} → {report.cut(str(detail))}") from exc
+        raise NotRun(f"{' '.join(args)} → {report.cut(gitcall.cause(exc))}") from exc
 
 
 def common_ancestor(base: str) -> str:
