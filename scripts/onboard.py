@@ -1390,20 +1390,56 @@ def own_records(flow: Path, step: str = "") -> tuple[list[str], bool]:
     return names, policy.ON_CHANGE in policy.triggers_of(said)
 
 
+def contract_at(root: Path, pin: str) -> str:
+    """Версия контракта, которую несёт выпуск `pin`, — из его дерева, а не из рабочего.
+
+    Рабочее дерево поставщика бывает впереди выпуска: окно заготовки, взятое
+    оттуда, обещало бы потребителю поверхность, которой у его прибивки нет.
+    """
+    said = gitcall.output(
+        ["show", f"{pin}:{paths.VERSION.as_posix()}"], NotRun, cwd=str(root)
+    ).strip()
+    if not paths.VERSION_RE.match(said):
+        raise NotRun(f"{pin}:{paths.VERSION}: «{said}» не версия вида X.Y.Z")
+    return said
+
+
+def contract_span(contract: str) -> str:
+    """Окно совместимости заготовки: минор выпуска, и только он (073, 157).
+
+    Минор контракта растёт, когда у поверхности появляется джоб, по которому
+    потребитель обязан ответить классом (`docs/dev/release.md`). Поэтому
+    следующий минор лежит за окном: подъём прибивки краснеет и зовёт перечитать
+    ответы, а не принимается молча.
+    """
+    found = paths.VERSION_RE.match(contract)
+    if found is None:
+        raise NotRun(f"версия контракта «{contract}» не вида X.Y.Z")
+    major, minor = int(found[1]), int(found[2])
+    return f">={major}.{minor},<{major}.{minor + 1}"
+
+
 def answer(
-    names: list[str], beyond: list[str] | None = None, *, on_change: list[str] | None = None
+    names: list[str],
+    beyond: list[str] | None = None,
+    *,
+    on_change: list[str] | None = None,
+    span: str,
 ) -> str:
-    """Заготовка ответа потребителя: по строке на проверку, класс — не решён.
+    """Заготовка ответа потребителя: схема, окно контракта и по строке на проверку.
 
     `unreviewed` здесь не заглушка, а объявленная очередь разбора: молча
     обязательной проверка не становится, и молча совещательной тоже.
     `names` — шаги конвейера, их имя составное из имени шага. `beyond` и
     `on_change` — уже готовые имена записей своих прогонов механизмов
-    (`own_records`): вне изменения и на нём.
+    (`own_records`): вне изменения и на нём. `span` — окно контракта
+    (`contract_span`): без него и без схемы ответ не читает ни один механизм
+    (`pipeline_checks.load`), и потребитель краснел бы с первого прогона.
     """
     rows = [f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in names]
     rows += [f'  "{one}": {policy.UNREVIEWED}' for one in on_change or []]
-    said = "checks:\n" + "\n".join(rows) + "\n"
+    said = f'schema: {policy.SCHEMA}\ncontract: "{span}"\n\n'
+    said += "checks:\n" + "\n".join(rows) + "\n"
     if beyond:
         more = "\n".join(f'  "{one}": {policy.UNREVIEWED}' for one in beyond)
         said += f"{policy.BEYOND}:\n{more}\n"
@@ -1517,6 +1553,7 @@ def main(argv: list[str] | None = None) -> int:
         own = own_callers(args.root, names)
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
+        span = contract_span(contract_at(args.root, pin))
         summary = summary_kit(args.root, args.repo, pin)
         rulebook = rulebook_kit(args.root)
         kit = data_kit(args.root)
@@ -1566,7 +1603,7 @@ def main(argv: list[str] | None = None) -> int:
             files = {
                 paths.WORKFLOWS / PIPELINE_FLOW: thin_ci(pipeline, args.repo, pin),
                 paths.WORKFLOWS / SUMMARY_FLOW: summary,
-                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change),
+                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change, span=span),
                 **{
                     paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
                     for one, flow in sorted(own.items())
@@ -1658,7 +1695,7 @@ def main(argv: list[str] | None = None) -> int:
                     paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
                     for one, flow in sorted(own.items())
                 },
-                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change),
+                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change, span=span),
                 paths.WORKFLOWS / SUMMARY_FLOW: summary,
                 **rulebook,
             },

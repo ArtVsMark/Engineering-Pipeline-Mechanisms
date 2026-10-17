@@ -152,7 +152,7 @@ def test_the_answer_leaves_the_class_to_the_consumer(tmp_path: Path) -> None:
     И не молчит о нём: `unreviewed` — объявленная очередь разбора. Молча
     обязательной проверка не становится, и молча совещательной тоже.
     """
-    said = module.answer(["lint", "debt"])
+    said = module.answer(["lint", "debt"], span=">=9.9,<9.10")
     assert f'"lint{policy.COMPOSED}lint": {policy.UNREVIEWED}' in said
     assert policy.REQUIRED not in said and policy.ADVISORY not in said
 
@@ -370,6 +370,44 @@ def test_write_lays_a_thin_ci_and_the_answer(tmp_path: Path) -> None:
     assert job["uses"].endswith("/.github/workflows/step-пример.yml@v2.5.0"), job
     said = yaml.safe_load((consumer / ".pipeline.yml").read_text("utf-8"))
     assert said["checks"] == {module.check_name("пример"): policy.UNREVIEWED}
+
+
+def test_the_laid_answer_is_read_by_the_mechanism(tmp_path: Path) -> None:
+    """Положенный ответ читает разбор механизма: схема и окно контракта на месте.
+
+    Найдено замером на клоне `Claude-Code_Usage-Token` (#1388): заготовка
+    клала только проверки, и `pipeline_checks.load` отказывал ей схемой, а
+    `span_of` — окном. Потребитель краснел бы шагом `pipeline` с первого же
+    прогона после подключения.
+    """
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    said = consumer / module.paths.PIPELINE
+    policy.load(said)
+    assert policy.compatible(policy.span(said), FAKE_VERSION)
+
+
+@pytest.mark.parametrize(
+    ("contract", "span", "inside", "outside"),
+    [("9.9.0", ">=9.9,<9.10", "9.9.4", "9.10.0"), ("0.10.2", ">=0.10,<0.11", "0.10.0", "1.0.0")],
+    ids=["минор", "двузначный-минор"],
+)
+def test_the_answer_window_is_the_minor_of_the_release(
+    contract: str, span: str, inside: str, outside: str
+) -> None:
+    """Окно заготовки — минор выпуска: патч внутри, следующий минор зовёт перечитать ответы."""
+    assert module.contract_span(contract) == span
+    assert policy.compatible(span, inside) and not policy.compatible(span, outside)
+
+
+def test_the_contract_is_read_at_the_pin_not_the_work_tree(tmp_path: Path) -> None:
+    """Версия контракта — с дерева выпуска: рабочее дерево поставщика бывает впереди."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    (root / "CONTRACT_VERSION").write_text("9.10.0\n", encoding="utf-8")
+    assert module.contract_at(root, "v2.5.0") == FAKE_VERSION
+    with pytest.raises(module.NotRun):
+        module.contract_at(root, "v9.9.9")
 
 
 def test_write_never_overwrites_what_is_there(tmp_path: Path) -> None:
