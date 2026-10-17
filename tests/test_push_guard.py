@@ -1078,9 +1078,27 @@ def test_an_exhausted_budget_stops_calling_git(monkeypatch: pytest.MonkeyPatch) 
     """Бюджет исчерпан — git не зовётся, а отказ называет причину."""
     called: list[object] = []
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: called.append(a))
-    monkeypatch.setattr(module, "STARTED", module.time.monotonic() - module.GIT_BUDGET - 1)
+    monkeypatch.setattr(module, "started", module.time.monotonic() - module.GIT_BUDGET - 1)
     said = module.git("rev-parse", "HEAD")
     assert isinstance(said, str) and "исчерпан" in said and not called
+
+
+def test_the_budget_starts_with_the_run_not_the_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Модуль, загруженный давно, получает в `main()` полный бюджет, а не остаток."""
+    called: list[object] = []
+
+    def fake(args: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        called.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(module.subprocess, "run", fake)
+    monkeypatch.setattr(module, "started", module.time.monotonic() - module.GIT_BUDGET - 1)
+    event = json.dumps({"tool_input": {"command": "git push -u origin agent/here"}})
+    monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
+    module.main()
+    assert called, "заход начался с исчерпанным бюджетом — отсчёт идёт от импорта"
 
 
 def test_a_push_without_git_is_refused_through_main(

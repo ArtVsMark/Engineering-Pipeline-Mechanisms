@@ -62,8 +62,11 @@ from typing import Final
 GIT_BUDGET: Final = 7.0
 #: Дедлайн одного вызова — не больше остатка бюджета.
 GIT_DEADLINE: Final = 2.5
-#: Начало захода: от него считается остаток бюджета.
-STARTED: Final = time.monotonic()
+#: Начало захода: от него считается остаток бюджета. Ставит его `main()`, а
+#: не импорт: модуль, загруженный раньше захода (набор тестов держит его
+#: минутами), иначе приходил бы с бюджетом, исчерпанным до первого git. `None`
+#: — вне захода: общий бюджет не считается, дедлайн одного вызова — да.
+started: float | None = None
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str] | str:
@@ -74,10 +77,12 @@ def git(*args: str) -> subprocess.CompletedProcess[str] | str:
     считает НЕблокирующей ошибкой, и толчок проходил без проверки. Теперь отказ
     — причина, а зовущий решает, что «не проверено» значит «не пущу».
     """
-    left = GIT_BUDGET - (time.monotonic() - STARTED)
-    if left <= 0:
-        return f"бюджет сторожа на git ({GIT_BUDGET} с) исчерпан до git {args[0]}"
-    deadline = min(GIT_DEADLINE, left)
+    deadline = GIT_DEADLINE
+    if started is not None:
+        left = GIT_BUDGET - (time.monotonic() - started)
+        if left <= 0:
+            return f"бюджет сторожа на git ({GIT_BUDGET} с) исчерпан до git {args[0]}"
+        deadline = min(deadline, left)
     try:
         return subprocess.run(
             ["git", *args],
@@ -661,9 +666,11 @@ def merged_away(branch: str) -> str:
     tracked = git("config", "--get", f"branch.{branch}.merge")
     gone = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
     # НЕ ПРОВЕРЕНО — НЕ ПУЩУ: тот же ответ, что у неузнанной головы (045).
-    for said in (tracked, gone):
-        if isinstance(said, str):
-            return f"сторож не проверил, не слита ли ветка «{branch}», — {said}"
+    # Две проверки, а не цикл: сужение типа mypy через цикл не переносит.
+    if isinstance(tracked, str):
+        return f"сторож не проверил, не слита ли ветка «{branch}», — {tracked}"
+    if isinstance(gone, str):
+        return f"сторож не проверил, не слита ли ветка «{branch}», — {gone}"
     # UPSTREAM ОБЯЗАН УКАЗЫВАТЬ НА САМУ ЭТУ ВЕТКУ, А НЕ ПРОСТО СУЩЕСТВОВАТЬ.
     # `git checkout -b <новая> origin/main` — процедура свода — оставляет
     # `branch.<новая>.merge = refs/heads/main`: git настраивает слежение за той
@@ -709,6 +716,8 @@ def merged_away(branch: str) -> str:
 
 def main() -> int:
     """Точка входа: читает событие, решает, пускать ли команду."""
+    global started
+    started = time.monotonic()
     try:
         event = json.load(sys.stdin)
     except json.JSONDecodeError, ValueError:
