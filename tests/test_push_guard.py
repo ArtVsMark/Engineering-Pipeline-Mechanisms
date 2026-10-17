@@ -1114,3 +1114,35 @@ def test_a_push_without_git_is_refused_through_main(
     monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
     assert module.main() == 2
     assert "не запустился" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("command", "outcome"), [("git push -u origin agent/here", 2), ("ls -la", 0)]
+)
+def test_a_crash_while_judging_refuses_a_push_and_spares_the_rest(
+    monkeypatch: pytest.MonkeyPatch, command: str, outcome: int
+) -> None:
+    """Сбой судейства на толчке — отказ 2, а не код 1; прочая команда не роняется."""
+
+    def crash(_: str) -> int:
+        raise RuntimeError("сломано")
+
+    monkeypatch.setattr(module, "judge", crash)
+    event = json.dumps({"tool_input": {"command": command}})
+    monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
+    assert module.main() == outcome
+
+
+def test_judge_lets_a_harmless_command_through() -> None:
+    """`judge` прямо: не толчок — пускать."""
+    assert module.judge("ls -la") == 0
+
+
+def test_run_ends_outside_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """После `main()` отсчёта нет: следующий вызов не наследует чужое начало."""
+    event = json.dumps({"tool_input": {"command": "ls -la"}})
+    monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
+    assert module.run() == 0, "заход без отсчёта — бюджет не считается, команда пущена"
+    monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
+    assert module.main() == 0
+    assert module.started is None
