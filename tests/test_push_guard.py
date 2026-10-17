@@ -1035,3 +1035,64 @@ def test_a_backslash_newline_inside_double_quotes_is_removed() -> None:
 def test_a_dollar_alone_is_still_part_of_the_word() -> None:
     """Вторая половина: `$` без кавычки за ним — часть слова, как прежде."""
     assert module.push_targets("git push origin agent/$x").targets == ("agent/$x",)
+
+
+# --- дедлайн и отказ git: сторож не пропускает толчок молча (письмо каталога #1439) ---
+
+
+def test_the_git_budget_fits_the_hook_limit() -> None:
+    """Бюджет git и дедлайн вызова меньше предела хука: убитый хук пропустил бы толчок (100)."""
+    said = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    limits = [
+        one["timeout"]
+        for entry in said["hooks"]["PreToolUse"]
+        for one in entry.get("hooks", [])
+        if WRAPPER.name in one.get("command", "")
+    ]
+    assert limits, "предел хука стража не объявлен"
+    assert module.GIT_DEADLINE <= module.GIT_BUDGET < min(limits) - 1
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("нет git"), subprocess.TimeoutExpired(["git"], 2.5)],
+    ids=["no-git", "timeout"],
+)
+def test_a_failing_git_is_a_reason_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    """Отказ запуска и истёкший срок — причина строкой, а не трейсбек с кодом 1."""
+
+    def broken(*_: object, **__: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(module.subprocess, "run", broken)
+    said = module.git("rev-parse", "HEAD")
+    assert isinstance(said, str) and said
+    current, why = module.head()
+    assert current == "" and why
+    assert "не проверил" in module.merged_away("agent/x")
+
+
+def test_an_exhausted_budget_stops_calling_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Бюджет исчерпан — git не зовётся, а отказ называет причину."""
+    called: list[object] = []
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(module, "STARTED", module.time.monotonic() - module.GIT_BUDGET - 1)
+    said = module.git("rev-parse", "HEAD")
+    assert isinstance(said, str) and "исчерпан" in said and not called
+
+
+def test_a_push_without_git_is_refused_through_main(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Без git толчок в свою ветку — отказ 2, а не трейсбек и пропуск."""
+
+    def broken(*_: object, **__: object) -> None:
+        raise OSError("нет git")
+
+    monkeypatch.setattr(module.subprocess, "run", broken)
+    event = json.dumps({"tool_input": {"command": "git push -u origin agent/here"}})
+    monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
+    assert module.main() == 2
+    assert "не запустился" in capsys.readouterr().err

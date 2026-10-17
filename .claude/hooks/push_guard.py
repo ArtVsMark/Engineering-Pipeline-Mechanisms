@@ -49,8 +49,48 @@ git — единственное место, где это возможно, с�
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Final
+
+#: Бюджет всех вызовов git на заход. ОН ОБЯЗАН БЫТЬ МЕНЬШЕ ПРЕДЕЛА ХУКА
+#: (`timeout` в `.claude/settings.json`, 10 с): убитый площадкой хук —
+#: не-блокирующая ошибка, и толчок прошёл бы без проверки (100, письмо каталога
+#: #1439). Бюджет общий, а не на вызов: число вызовов растёт с числом веток в
+#: толчке. Запас до предела — на запуск интерпретатора и разбор. Сверяет
+#: `tests/test_push_guard.py::test_the_git_budget_fits_the_hook_limit`.
+GIT_BUDGET: Final = 7.0
+#: Дедлайн одного вызова — не больше остатка бюджета.
+GIT_DEADLINE: Final = 2.5
+#: Начало захода: от него считается остаток бюджета.
+STARTED: Final = time.monotonic()
+
+
+def git(*args: str) -> subprocess.CompletedProcess[str] | str:
+    """Вызов git с дедлайном; отказ запуска или истёкший срок — причина строкой.
+
+    ОТКАЗ НЕ РОНЯЕТ СТРАЖА (письмо каталога #1439). `OSError` от отсутствующего
+    git и `TimeoutExpired` прежде уходили трейсбеком с кодом 1 — его площадка
+    считает НЕблокирующей ошибкой, и толчок проходил без проверки. Теперь отказ
+    — причина, а зовущий решает, что «не проверено» значит «не пущу».
+    """
+    left = GIT_BUDGET - (time.monotonic() - STARTED)
+    if left <= 0:
+        return f"бюджет сторожа на git ({GIT_BUDGET} с) исчерпан до git {args[0]}"
+    deadline = min(GIT_DEADLINE, left)
+    try:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=deadline,
+        )
+    except subprocess.TimeoutExpired:
+        return f"git {args[0]} не ответил за {deadline:.1f} с"
+    except OSError as exc:
+        return f"git не запустился: {exc}"
+
 
 #: Единственная приставка ветки, в которую окно вправе толкать (131, 003).
 #:
@@ -537,12 +577,9 @@ def head() -> tuple[str, str]:
     Отсоединённая голова даёт `HEAD` и код 0 — это не отказ, и сюда не
     попадает.
     """
-    said = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    said = git("rev-parse", "--abbrev-ref", "HEAD")
+    if isinstance(said, str):
+        return "", said
     if said.returncode != 0:
         return "", said.stderr.strip() or f"git rev-parse вернул {said.returncode}"
     return said.stdout.strip(), ""
@@ -621,18 +658,12 @@ def merged_away(branch: str) -> str:
     """
     if not branch or branch == "HEAD":
         return ""
-    tracked = subprocess.run(
-        ["git", "config", "--get", f"branch.{branch}.merge"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    gone = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    tracked = git("config", "--get", f"branch.{branch}.merge")
+    gone = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    # НЕ ПРОВЕРЕНО — НЕ ПУЩУ: тот же ответ, что у неузнанной головы (045).
+    for said in (tracked, gone):
+        if isinstance(said, str):
+            return f"сторож не проверил, не слита ли ветка «{branch}», — {said}"
     # UPSTREAM ОБЯЗАН УКАЗЫВАТЬ НА САМУ ЭТУ ВЕТКУ, А НЕ ПРОСТО СУЩЕСТВОВАТЬ.
     # `git checkout -b <новая> origin/main` — процедура свода — оставляет
     # `branch.<новая>.merge = refs/heads/main`: git настраивает слежение за той
