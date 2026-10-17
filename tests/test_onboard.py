@@ -944,6 +944,9 @@ def test_a_yaml_twin_of_a_run_takes_its_place_at_both_doors(tmp_path: Path) -> N
 
 def test_a_twin_of_our_own_data_takes_no_place(tmp_path: Path) -> None:
     """Свои файлы механизмов читаются точным именем: `.pipeline.yaml` места не занимает."""
+    assert module.read_by_the_platform(module.paths.WORKFLOWS / "ci.yml")
+    assert module.read_by_the_platform(module.paths.DEPENDABOT.with_suffix(".yaml"))
+    assert not module.read_by_the_platform(module.paths.PIPELINE)
     (tmp_path / ".pipeline.yaml").write_text("своё", encoding="utf-8")
     assert module.standing(tmp_path, module.paths.PIPELINE) == module.paths.PIPELINE
     assert module.occupied(tmp_path, {module.paths.PIPELINE: "заготовка"}) == []
@@ -1037,6 +1040,8 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
     declared = {**table, "required": [*table["required"], review_map.CATALOGUE_ROLE]}
     shown[Path(".rules/review-roles.json")] = json.dumps(declared, ensure_ascii=False)
     assert review_map.role_declared("main"), "объявленная роль не видна карте"
+    assert review_map.declares_role({"by_path": [{"roles": [review_map.CATALOGUE_ROLE]}]})
+    assert not review_map.declares_role(table), "скелет объявил роль"
     table_of_areas = review_map.area_table("main")
     # НЕЗАПОЛНЕННАЯ ЗАГОТОВКА НЕ СУЖАЕТ РОЛЬ (взгляд на #1455): правило с любой
     # областью заготовки отдаётся роли на любом пути — как без таблицы.
