@@ -745,56 +745,50 @@ def release_step() -> str:
     return "\n".join(line for line in said if not line.lstrip().startswith("#"))
 
 
-def test_the_tag_leaves_only_after_the_commit_landed() -> None:
-    """Тег отправляется ПОСЛЕ ветки, отдельным толчком, а не вместе с ней.
+def test_the_commit_and_the_tag_leave_in_one_atomic_push() -> None:
+    """Коммит выпуска и тег уходят ОДНИМ атомарным толчком (#1448).
 
-    Один заход на два ref'а не даёт порядка между ними: площадка вправе
-    принять тег и отвергнуть ветку, и метка остаётся на коммите, до общей
-    ветки не доехавшем — необратимое случилось, а выход оказался
-    нетерминальным
+    Один заход на два ref'а без `--atomic` не даёт порядка: площадка вправе
+    принять тег и отвергнуть ветку
     ([109](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/109-every-exit-from-a-transient-state-must-be-terminal.md)).
-    Чем это обошлось — в журнале, фрагмент
-    `a-tag-follows-the-commit-that-landed`.
+    Раздельный толчок тега на v1.7.0 получил «missing necessary objects» после
+    принятой ветки. Атомарный толчок принимает оба или ни одного.
     """
     text = release_step()
     assert "--follow-tags" not in text, "тег снова уезжает вместе с веткой, без порядка"
-    branch = text.find("git push origin HEAD")
-    assert branch != -1, "ветка не отправляется вовсе"
-    tag = text.find('git push origin "${tag}"')
-    assert tag != -1, "тег не отправляется отдельным толчком"
-    assert branch < tag, "тег отправляется раньше ветки — метить будет нечего"
+    assert 'git push --atomic origin HEAD "${tag}"' in text, "коммит и тег не одним толчком"
+    assert 'git push origin "${tag}"' not in text, "тег снова уезжает отдельным толчком"
 
 
-def test_a_rejected_branch_is_named_not_swallowed() -> None:
-    """Отказ общей ветки называется причиной, а не голым кодом возврата.
+def test_a_rejected_atomic_push_is_retried_with_a_pause() -> None:
+    """Кратковременный отказ выпуск переживает: атомарный толчок повторяется с паузой.
 
-    Отказ был бы виден как «упал шаг», и искать стали бы в механизме выпуска,
-    а искать надо в наборе правил общей ветки
+    Повтор безопасен ровно потому, что толчок атомарный: после отказа не
+    доехало ничего (#1448). Без повтора отказ того рода, что был на v1.7.0,
+    отменял бы выпуск, а не переживался им.
+    """
+    text = release_step()
+    loop = text.find("for attempt in 1 2 3; do")
+    assert loop != -1, "толчок не повторяется"
+    body = text[loop : text.find("done", loop)]
+    assert 'git push --atomic origin HEAD "${tag}"' in body, "повторяется не атомарный толчок"
+    assert "sleep" in body, "повтор без паузы"
+
+
+def test_a_rejected_push_is_named_and_says_the_release_may_be_repeated() -> None:
+    """Отказ атомарного толчка называется причиной и говорит, что повтор безопасен.
+
+    После отказа не доехало ничего — ни коммит, ни тег, — и выпуск повторяется
+    кнопкой. Причину искать в наборе правил общей ветки, а не в механизме
     ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
     """
     text = release_step()
-    assert "if ! git push origin HEAD; then" in text, "отказ ветки ничем не перехвачен"
-    said = text[text.find("if ! git push origin HEAD; then") :]
-    assert "::error::" in said, "отказ ветки не назван"
-    assert "обход" in said.lower(), "причина отказа не названа: обход набора правил"
-
-
-def test_a_rejected_tag_is_named_too_and_names_its_own_repair() -> None:
-    """Отказ ВТОРОГО толчка называется тоже, и починка у него своя.
-
-    Состояния разные: после отказа ветки не сделано ничего, после отказа тега
-    коммит выпуска уже в общей ветке, а метки на нём нет. Свести их к одному
-    «упало» значит отправить человека чинить не то
-    ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
-    Нашёл внешний взгляд на #259: здесь толчок тега падал голым кодом возврата.
-    """
-    text = release_step()
-    start = text.find('if ! git push origin "${tag}"; then')
-    assert start != -1, "отказ тега ничем не перехвачен"
+    start = text.find('if [ -z "${pushed}" ]; then')
+    assert start != -1, "отказ толчка ничем не перехвачен"
     said = text[start:]
-    assert "::error::" in said, "отказ тега не назван"
-    assert "git push origin ${tag}" in said, "починка отказа тега не названа"
-    assert "не повторять" in said.lower(), "повтор выпуска после этого отказа не запрещён"
+    assert "::error::" in said, "отказ толчка не назван"
+    assert "обход" in said.lower(), "причина отказа не названа: обход набора правил"
+    assert "можно повторить" in said, "не сказано, что после отказа выпуск повторяем"
 
 
 def test_a_branch_that_will_refuse_the_push_is_named_before_the_build(
