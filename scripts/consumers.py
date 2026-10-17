@@ -62,6 +62,13 @@ CONNECTED: Final = "connected"
 REQUIRED: Final = ("repo", "since", "why")
 #: Как читается «подключённых нет»: состояние, а не тишина.
 NOBODY: Final = "подключённых потребителей нет"
+#: Итог захода без обхода семьи — ОДНОЙ строкой и одним текстом: вступлением и
+#: итогом она печаталась дважды (находка `f4a5c14`), и тест по началу строки их
+#: не различал (`d380055`).
+NO_SWEEP: Final = (
+    "обход семьи не передан (--uptake): молча подключённые НЕ ВИДНЫ — список выше "
+    "только из объявившихся, и он неполон (045)"
+)
 
 
 class NotRun(RuntimeError):
@@ -113,7 +120,15 @@ def swept(path: Path) -> tuple[list[str], list[str]]:
     rows = said.get("by") if isinstance(said, dict) else None
     if not isinstance(rows, list):
         raise NotRun(f"{path}: раздела «by» нет — это не файл обхода семьи")
-    found = sorted({str(one["repo"]) for one in rows if isinstance(one, dict) and one.get("repo")})
+    # Повторы — без регистра, как и сверка с объявленными (находка `e775d7d`):
+    # регистр имени у площадки не значим, и одно слово в двух смыслах здесь
+    # давало бы `Owner/Repo` и `owner/repo` двумя найденными. Первое написание
+    # остаётся.
+    spelled: dict[str, str] = {}
+    for one in rows:
+        if isinstance(one, dict) and one.get("repo"):
+            spelled.setdefault(str(one["repo"]).casefold(), str(one["repo"]))
+    found = sorted(spelled.values())
     projects = said.get("projects")
     unread = projects.get("unread_repos") if isinstance(projects, dict) else None
     return found, sorted(str(one) for one in unread or [] if one)
@@ -177,17 +192,14 @@ def main(argv: list[str] | None = None) -> int:
         if repo.casefold() not in declared:
             print(f"  {repo}: найден обходом семьи, не объявлялся")
             rows.append({"repo": repo})
-    if not args.uptake:
-        print(
-            "обход семьи не передан (--uptake): молча подключённые НЕ ВИДНЫ — "
-            "список ниже только из объявившихся, и его пустота не значит «никого» (045)"
-        )
     for repo in unswept:
         print(f"  {repo}: обход семьи его дерево не прочитал — подключён ли он, не видно")
 
     if not rows:
         if not args.uptake or unswept:
             print(f"{NOBODY} среди тех, кого видно, — молча подключённые видны не все (045)")
+            if not args.uptake:
+                print(NO_SWEEP)
             return EXIT_UNREAD
         print(f"{NOBODY} — сверять не с кем, и это состояние, а не тишина (154)")
         return EXIT_OK
@@ -215,8 +227,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {repo}: диапазон {span} · обойдено {len(skipped)}")
         for name in skipped:
             print(f"      обойдено: {name}")
+    # ИТОГ НЕПОЛНОТЫ — В ОДНОМ ПОТОКЕ (находка `9695b0a`): «не прочитано
+    # ответов» шло в stderr, а однородное «обход не прочитал проектов» — в
+    # stdout. Итоговые строки — в stdout, где и остальные исходы; отказ по
+    # отдельному проекту — диагностика, она остаётся в stderr.
     if unread:
-        print(f"не прочитано ответов: {unread} из {len(rows)}", file=sys.stderr)
+        print(f"не прочитано ответов: {unread} из {len(rows)}")
         return EXIT_UNREAD
     if unswept:
         print(f"обход семьи не прочитал проектов: {len(unswept)} — список выше неполон")
@@ -224,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     # БЕЗ ОБХОДА СПИСОК НЕПОЛОН И ПРИ НЕПУСТОМ РЕЕСТРЕ (поздний взгляд на #1443):
     # молча подключённые не видны, и исход говорит это, а не «сверка прочитана».
     if not args.uptake:
-        print("обход семьи не передан (--uptake) — молча подключённые не видны, список неполон")
+        print(NO_SWEEP)
         return EXIT_UNREAD
     return EXIT_OK
 

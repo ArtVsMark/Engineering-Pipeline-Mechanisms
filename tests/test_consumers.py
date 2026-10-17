@@ -228,7 +228,8 @@ def test_without_a_sweep_the_silent_are_named_unseen(
     """Обход не передан — сказано, что молча подключённых не видно, и пустота не «никого»."""
     assert module.main(["--root", str(registry_with(tmp_path))]) == module.EXIT_UNREAD
     out = capsys.readouterr().out
-    assert "молча подключённые НЕ ВИДНЫ" in out
+    assert out.strip().splitlines()[-1] == module.NO_SWEEP
+    assert out.count(module.NO_SWEEP) == 1, "итог без обхода сказан дважды"
     assert "среди тех, кого видно" in out and "это состояние" not in out
 
 
@@ -239,7 +240,43 @@ def test_a_declared_registry_without_a_sweep_is_not_read_whole(
     root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
     answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
     assert module.main(["--root", str(root)]) == module.EXIT_UNREAD
-    assert capsys.readouterr().out.strip().splitlines()[-1].startswith("обход семьи не передан")
+    out = capsys.readouterr().out
+    # Строка — по константе, а не по началу (находка `d380055`): вступление и
+    # итог начинались одинаково, и тест их не различал (`f4a5c14`).
+    assert out.strip().splitlines()[-1] == module.NO_SWEEP
+    assert out.count(module.NO_SWEEP) == 1, "итог без обхода сказан дважды"
     assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
         module.EXIT_OK
     )
+
+
+def test_the_sweep_drops_repeats_without_case(tmp_path: Path) -> None:
+    """Повтор найденного в другом регистре — один проект, первое написание (находка `e775d7d`)."""
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(
+        json.dumps({"by": [{"repo": "Owner/Repo"}, {"repo": "owner/repo"}, {"repo": "o/r"}]}),
+        encoding="utf-8",
+    )
+    assert module.swept(uptake) == (["Owner/Repo", "o/r"], [])
+
+
+def test_unread_answers_are_said_in_the_stream_of_the_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Итог «не прочитано ответов» — в stdout, где и «обход не прочитал» (находка `9695b0a`).
+
+    Отказ по отдельному проекту остаётся диагностикой — в stderr.
+    """
+    root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
+        module.EXIT_UNREAD
+    )
+    said = capsys.readouterr()
+    assert said.out.strip().splitlines()[-1] == "не прочитано ответов: 1 из 1"
+    assert "o/r: не прочитан" in said.err
