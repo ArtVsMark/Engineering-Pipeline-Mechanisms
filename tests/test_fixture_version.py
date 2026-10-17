@@ -12,6 +12,7 @@
 import ast
 from itertools import pairwise
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -247,17 +248,44 @@ def test_what_only_looks_like_writing_the_version(как: str, tmp_path: Path) -
     assert not writes_the_version(path), f"«{как}» засчитано записью версии"
 
 
+#: Вызов → именованные доводы, которыми в него входит номер линии выпусков.
+LINE_KEYWORDS: Final = {"tree": frozenset({"tag", "version"})}
+#: Вызов, у которого номер линии — первый позиционный довод.
+LINE_FIRST_ARG: Final = frozenset({"refusals"})
+
+
+def callee(node: ast.Call) -> str:
+    """Имя вызываемого: `module.refusals(...)` → `refusals`."""
+    said = node.func
+    return said.attr if isinstance(said, ast.Attribute) else getattr(said, "id", "")
+
+
 def release_line_sites(source: str) -> tuple[int, list[tuple[int, str]]]:
     """Места, где набор задаёт номер ЛИНИИ ВЫПУСКОВ: сколько их и литералы среди них.
 
-    Два места, через которые версия выпуска входит в проверку: довод после
-    `--version` (в вызове или в списке доводов) и подмена `release_tag`
-    лямбдой. Литерал там — тот же список руками, что и запись версии выше:
-    совпадение придёт, когда проект дорастёт до номера (находка `97553e6`).
+    Входы линии в проверку: довод после `--version` (в вызове или в списке
+    доводов), подмена `release_tag` лямбдой, а также тег и версия поддельного
+    дерева выпуска (`tree(..., tag=…, version=…)`) и выпускаемый номер у
+    `refusals(…)` (взгляд на #1482: первая редакция судила только два первых
+    входа, и `tag="v0.99.0"` прошёл бы). Литерал там — тот же список руками,
+    что и запись версии выше: совпадение придёт, когда проект дорастёт до
+    номера (находка `97553e6`). ГРАНИЦА НАЗВАНА (046): версия `tree`
+    позиционным доводом не судится — у одноимённых помощников других модулей
+    второй довод значит другое; замер 17.10.2026: позиционной версии у `tree`
+    в наборе ноль.
     """
     sites = 0
     found: list[tuple[int, str]] = []
     for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            name = callee(node)
+            entries = [one.value for one in node.keywords if one.arg in LINE_KEYWORDS.get(name, ())]
+            if name in LINE_FIRST_ARG and node.args:
+                entries.append(node.args[0])
+            for one in entries:
+                sites += 1
+                if isinstance(one, ast.Constant) and isinstance(one.value, str) and one.value:
+                    found.append((one.lineno, one.value))
         runs = node.args if isinstance(node, ast.Call) else []
         runs = node.elts if isinstance(node, ast.List | ast.Tuple) else runs
         for flag, given in pairwise(runs):
@@ -284,8 +312,9 @@ def test_a_release_line_in_the_suite_does_not_share_the_real_major() -> None:
 
     Совпадение подделки с живой версией случалось уже четыре раза: три
     10.09.2026 и `0.99.0` в `test_release.py` при контракте `0.9.x`. Граница
-    названа: судятся только два входа линии; чужие номера (факты, соседи,
-    пакеты) и начало линии `0.0.0` в `next_after` — не линия этого проекта.
+    названа: судятся входы линии, перечисленные у `release_line_sites`; чужие
+    номера (факты, соседи, пакеты) и начало линии `0.0.0` в `next_after` — не
+    линия этого проекта.
     """
     real = (ROOT / "CONTRACT_VERSION").read_text(encoding="utf-8").strip().split(".")[0]
     seen = 0
@@ -314,8 +343,25 @@ def test_a_release_line_in_the_suite_does_not_share_the_real_major() -> None:
         ('run("release.py", "--version", f"{major}.1.0")', False),
         ('m.setattr(x, "release_tag", lambda: f"v{FAKE_VERSION}")', False),
         ('run("release.py", "--version", "9.40.0")', False),
+        ('tree(tmp_path, tag="v0.99.0")', True),
+        ('tree(tmp_path, version="0.2.0")', True),
+        ('module.refusals("0.10.0", acceptance="", push="never")', True),
+        ('tree(tmp_path, tag="v9.9.0")', False),
+        ('module.refusals("9.10.0", acceptance="", push="never")', False),
     ],
-    ids=["вызов", "список", "подмена-тега", "посчитано", "от-канона", "чужой-мажор"],
+    ids=[
+        "вызов",
+        "список",
+        "подмена-тега",
+        "посчитано",
+        "от-канона",
+        "чужой-мажор",
+        "тег-дерева",
+        "версия-дерева",
+        "номер-отказов",
+        "тег-дерева-чужой",
+        "номер-отказов-чужой",
+    ],
 )
 def test_the_release_line_predicate_has_both_halves(source: str, bad: bool) -> None:
     """Предикат видит литерал в обоих входах и не трогает посчитанное и чужой мажор."""
