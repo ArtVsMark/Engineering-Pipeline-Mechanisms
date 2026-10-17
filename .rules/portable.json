@@ -435,7 +435,7 @@
     },
     ".rules/mechanism-rules.json": {
       "answer": "ours",
-      "why": "@skill-tree"
+      "why": "перепись называет гейты этого дерева — tests/ и scripts/ поставщика, — а у потребителя их нет: его места судят его гейты, и перепись у него — своя работа, когда переедет навык a-gate-obeys-every-rule (ArtVsMark/Engineering-Pipeline-Mechanisms#1459)"
     },
     ".rules/outcomes.json": {
       "answer": "configured",
