@@ -18,7 +18,7 @@
         "гейт": "tests/test_report.py",
         "признак": "code_files()"
       },
-      ".github": "исключено: шаги прогонов вывод читателю не режут — grep head/tail/cut -c/${x:N:M} по .github — 2 строки, обе step-release.yml:284 и :328 `git tag --points-at HEAD | head -1` (выбор тега, а не вывод); обрезку вывода механизма делает packages/transport/report.py::cut"
+      ".github": "исключено: шаги прогонов вывод читателю не режут — grep head/tail/cut -c/${x:N:M} по .github — 0 строк (замер 17.10.2026 после #1464: прежние две, `git tag --points-at HEAD | head -1` в step-release.yml, выбирали тег, а не резали вывод, и ушли в version.py --head-number); обрезку вывода механизма делает packages/transport/report.py::cut"
     },
     "039": {
       "paths.SOURCES": {
@@ -90,7 +90,7 @@
     "214": {
       "paths.SOURCES": "tests/test_one_parse.py",
       ".claude/hooks": "tests/test_one_parse.py",
-      ".github": "не построено: разбор текста оболочкой в шагах (sed, grep, awk) гейт одной реализации не видит — test_one_parse.py обходит code_files(with_hooks=True), YAML нет — замер 17.10.2026 по образцам sed/grep/awk в сценариях run шагов — без комментариев и без текста заданий агенту, где git log --grep — пример команды, а не разбор (разовый разбор окна, в дерево не положен — признак назван здесь же; взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1471): образцов 7, различных по образцу 4; повторов между файлами 2 — экранирование аннотации `sed -z 's/%/%25/g; s/\\r/%0D/g; s/\\n/%0A/g'` и отступ сводки `sed 's/^/    /'` в step-automerge.yml:195,201 и actions/ci-complete/action.yml:86,95 (их наличие в обоих требует tests/test_steps_speak_outward.py, совпадение по 071 не подписано); и второй разбор предмета, у которого реализация в коде есть, — номер выпуска из тега, step-release.yml:284 и :328 `git tag --points-at HEAD | head -1 | sed 's/^v//'` мимо version.is_release_tag/version.bare (берёт первый тег головы любого вида) — задача ArtVsMark/Engineering-Pipeline-Mechanisms#1464"
+      ".github": "не построено: разбор текста оболочкой в шагах (sed, grep, awk) гейт одной реализации не видит — test_one_parse.py обходит code_files(with_hooks=True), YAML нет — замер 17.10.2026 после #1464 по образцам sed/grep/awk в сценариях run шагов — без комментариев и без текста заданий агенту, где git log --grep — пример команды, а не разбор (разовый разбор окна, в дерево не положен — признак назван здесь же; взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1471): образцов 5, различных по образцу 3; повторов между файлами 2 — экранирование аннотации `sed -z 's/%/%25/g; s/\\r/%0D/g; s/\\n/%0A/g'` в step-automerge.yml:207 и actions/ci-complete/action.yml:99 подписано по 071, и совпадение копий держит tests/test_gates_complete.py::test_the_annotation_escape_is_one_text_in_its_two_places; отступ сводки `sed 's/^/    /'` в step-automerge.yml:195 и actions/ci-complete/action.yml:86 не подписан. Номер выпуска из тега step-release.yml берёт у version.py --head-tag и --head-number, мимо оболочки (#1464)"
     },
     "217": {
       "paths.SOURCES": {

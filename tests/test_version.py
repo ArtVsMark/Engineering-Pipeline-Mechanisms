@@ -16,6 +16,7 @@
 гейт `version.py --check` в прогоне, а не падение проверки о чужой причине.
 """
 
+import re
 import subprocess
 from functools import partial
 from pathlib import Path
@@ -472,3 +473,56 @@ def test_asking_the_source_names_its_tags_or_says_it_did_not_answer(tmp_path: Pa
     _repo_with_a_release(origin)
     assert "refs/tags/v1.0.0" in (module.ask_tags(str(origin), tmp_path) or "")
     assert module.ask_tags(str(tmp_path / "нет"), tmp_path) is None
+
+
+def _repo_with_tags(where: Path, tags: list[str]) -> None:
+    """Репозиторий с одним коммитом и названными тегами на нём."""
+    where.mkdir()
+    for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "а"]):
+        subprocess.run(
+            ["git", "-c", "user.name=т", "-c", "user.email=т@т", *args], cwd=where, check=True
+        )
+    for tag in tags:
+        subprocess.run(["git", "tag", tag], cwd=where, check=True)
+
+
+@pytest.mark.parametrize(
+    ("tags", "said"),
+    [
+        (["v1.2.3"], "v1.2.3"),
+        (["a-checkpoint", "v1.2.3"], "v1.2.3"),
+        (["v1.2.3-rc1"], "нет тега выпуска"),
+        ([], "нет тега выпуска"),
+        (["v1.2.3", "v1.3.0"], "несколько тегов выпуска (v1.2.3, v1.3.0)"),
+    ],
+    ids=["выпуск", "тег-другого-рода-раньше", "предрелиз", "без-тегов", "два-выпуска"],
+)
+def test_the_head_release_tag_is_the_only_release_one(
+    tmp_path: Path, tags: list[str], said: str
+) -> None:
+    """Тег выпуска на HEAD — единственный выпускной, иначе причина, а не первый (#1464)."""
+    _repo_with_tags(tmp_path / "repo", tags)
+    if said.startswith("v"):
+        assert module.head_release_tag(tmp_path / "repo") == said
+        return
+    with pytest.raises(module.NotRun, match=re.escape(said)):
+        module.head_release_tag(tmp_path / "repo")
+
+
+def test_the_head_number_is_printed_or_refused(run_script: RunScript, tmp_path: Path) -> None:
+    """Шаг выпуска получает номер строкой, а отказ — кодом 2 с причиной (039)."""
+    _repo_with_tags(tmp_path / "repo", ["a-checkpoint", "v1.2.3"])
+    run = run_script("version.py", "--head-number", cwd=tmp_path / "repo")
+    assert (run.code, run.out.strip()) == (0, "1.2.3"), run.text
+    _repo_with_tags(tmp_path / "bare", [])
+    run = run_script("version.py", "--head-tag", cwd=tmp_path / "bare")
+    assert run.code == 2 and "нет тега выпуска" in run.text, run.text
+
+
+def test_the_release_step_asks_the_tag_here() -> None:
+    """Шаг выпуска спрашивает тег на HEAD у `version.py`, а не разбирает git сам (214, #1464)."""
+    step = (ROOT / ".github" / "workflows" / "step-release.yml").read_text(encoding="utf-8")
+    code = [line for line in step.splitlines() if not line.lstrip().startswith("#")]
+    assert not [line.strip() for line in code if "points-at" in line]
+    assert any("version.py --head-tag" in line for line in code)
+    assert any("version.py --head-number" in line for line in code)

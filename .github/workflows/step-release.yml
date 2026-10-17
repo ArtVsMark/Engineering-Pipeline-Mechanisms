@@ -238,11 +238,13 @@ jobs:
           # площадка его ещё не видела. Один пакет гонки не оставляет, и отказ
           # ничего не оставляет полусделанным. Разбор — фрагменты
           # `a-tag-follows-the-commit-that-landed` и `release-atomic-push`.
-          tag="$(git tag --points-at HEAD)"
-          if [ -z "${tag}" ]; then
-            echo "::error::Выпуск собран, но тега на HEAD нет: метить в общей ветке нечего (075)."
+          # ТЕГ ЧИТАЕТ `version.py`, А НЕ ОБОЛОЧКА (214, #1464): весь вывод
+          # `git tag --points-at HEAD` увёл бы в толчок и тег другого рода.
+          python $MECHANISMS/scripts/version.py --head-tag >"${RUNNER_TEMP}/head-tag.txt" 2>"${RUNNER_TEMP}/head-tag.err" || {
+            echo "::error::Выпуск собран, но тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/head-tag.err"). Метить в общей ветке нечего (075)."
             exit 1
-          fi
+          }
+          tag="$(cat "${RUNNER_TEMP}/head-tag.txt")"
 
           # ОТКАЗ АТОМАРНОГО ТОЛЧКА НИЧЕГО НЕ ОСТАВЛЯЕТ, поэтому повтор безопасен:
           # кратковременный отказ площадки выпуск переживает, а не отменяет.
@@ -281,11 +283,11 @@ jobs:
           set -uo pipefail
           version="${ASKED_VERSION:-}"
           if [ -z "${version}" ]; then
-            version="$(git tag --points-at HEAD | head -1 | sed 's/^v//')"
-          fi
-          if [ -z "${version}" ]; then
-            echo "::error::Тега на HEAD нет — страницу заводить не для чего (075)."
-            exit 1
+            python $MECHANISMS/scripts/version.py --head-number >"${RUNNER_TEMP}/head-tag.txt" 2>"${RUNNER_TEMP}/head-tag.err" || {
+              echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/head-tag.err"). Страницу заводить не для чего (075)."
+              exit 1
+            }
+            version="$(cat "${RUNNER_TEMP}/head-tag.txt")"
           fi
           rc=0
           python $MECHANISMS/scripts/release.py --page "${version}" --apply || rc=$?
@@ -325,11 +327,11 @@ jobs:
           set -uo pipefail
           version="${ASKED_VERSION:-}"
           if [ -z "${version}" ]; then
-            version="$(git tag --points-at HEAD | head -1 | sed 's/^v//')"
-          fi
-          if [ -z "${version}" ]; then
-            echo "::error::Тега на HEAD нет — поднимать свои шаги не до чего (075)."
-            exit 1
+            python $MECHANISMS/scripts/version.py --head-number >"${RUNNER_TEMP}/head-tag.txt" 2>"${RUNNER_TEMP}/head-tag.err" || {
+              echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/head-tag.err"). Поднимать свои шаги не до чего (075)."
+              exit 1
+            }
+            version="$(cat "${RUNNER_TEMP}/head-tag.txt")"
           fi
           rc=0
           python $MECHANISMS/scripts/deps_intercept.py --self "v${version}" --apply || rc=$?
