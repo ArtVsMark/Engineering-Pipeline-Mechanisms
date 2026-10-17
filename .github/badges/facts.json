@@ -2,8 +2,8 @@
   "schema": "1.6",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Incidents-Playbook — export/facts/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-17T05:16:24+00:00",
-  "commit": "18940e3c9dcd4fdc553a09c331ce5c91236803c8",
+  "generated_at": "2026-10-17T06:19:13+00:00",
+  "commit": "c534874b6268029b0521cd9a4f1f7e2738d4c896",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,8 +19,8 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.6.39",
-  "release": "1.6",
+  "version": "1.7.1",
+  "release": "1.7",
   "coverage_percent": 93.5,
   "tests": {
     "functions": 3571,
@@ -66,7 +66,7 @@
       "schema_of": "общий шаг фактов механизмов: детали покрытия и полнота версии",
       "coverage": {
         "read": true,
-        "covered": 13142,
+        "covered": 13143,
         "lines": 14051
       },
       "version_whole": true
@@ -76,7 +76,7 @@
       "schema_of": "числа поставщика механизмов: разрез семьи и исполняемые скрипты",
       "family": {
         "schema_read": "1.7",
-        "snapshot_at": "2026-10-16T20:37:18+00:00",
+        "snapshot_at": "2026-10-17T05:33:36+00:00",
         "consumers": 6,
         "held_by_machine": 887,
         "adopted": {
@@ -512,14 +512,16 @@
           ],
           "fresh": {
             "read": true,
-            "release": "v1.6.0",
-            "steps": "0.8",
+            "release": "v1.7.0",
+            "steps": "0.9",
             "of": 2,
-            "fresh": 1,
+            "fresh": 0,
             "in_range": 0,
             "in_range_repos": [],
             "branch_repos": [],
-            "behind_repos": [],
+            "behind_repos": [
+              "ArtVsMark/ArtVsMark"
+            ],
             "ahead_repos": [],
             "undeclared_repos": [
               "ArtVsMark/Engineering-Incidents-Playbook"
