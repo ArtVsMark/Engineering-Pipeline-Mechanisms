@@ -67,6 +67,7 @@ from typing import Final
 
 import gitcall
 import paths
+import report
 import window
 
 EXIT_OK: Final = 0
@@ -165,7 +166,7 @@ def said_own(session: str, edits: list[window.Commit]) -> list[str]:
         "правила на его старте прежние (134); перезапуском это не считается, "
         f"перечитать свод живым — навык `{SKILL}` ({paths.SKILLS / SKILL}):"
     ]
-    lines += [f"  {edit.sha[:7]} {edit.message.splitlines()[0][:70]}" for edit in edits]
+    lines += [f"  {edit.sha[:7]} {report.cut(edit.message.splitlines()[0], 70)}" for edit in edits]
     return lines
 
 
@@ -175,7 +176,7 @@ def said(session: str, edits: list[window.Commit]) -> list[str]:
         f"окно {session}: свод менялся под ним {len(edits)} раз — "
         f"эти правки оно при старте не читало (047):"
     ]
-    lines += [f"  {edit.sha[:7]} {edit.message.splitlines()[0][:70]}" for edit in edits]
+    lines += [f"  {edit.sha[:7]} {report.cut(edit.message.splitlines()[0], 70)}" for edit in edits]
     return lines
 
 

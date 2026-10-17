@@ -320,7 +320,7 @@ def found_by(where: Path, pattern: str) -> list[Path]:
 HOOKS: Final = Path(".claude/hooks")
 
 
-def code_roots(*, with_tests: bool = False, with_hooks: bool = False) -> list[Path]:
+def code_roots(*, with_tests: bool = False, with_hooks: bool = True) -> list[Path]:
     """Корни кода, которые обходит `code_files`, — один список на обход и на гейты (071).
 
     Гейт имён сверял, что видит каждый корень, по своей копии этого списка, и
@@ -335,7 +335,7 @@ def code_roots(*, with_tests: bool = False, with_hooks: bool = False) -> list[Pa
 
 
 def code_files(
-    *, with_tests: bool = False, with_hooks: bool = False, root: Path = ROOT
+    *, with_tests: bool = False, with_hooks: bool = True, root: Path = ROOT
 ) -> list[Path]:
     """Файлы кода проекта — из ОБЪЯВЛЕННОГО списка, а не из глоба по каталогу.
 
@@ -347,9 +347,16 @@ def code_files(
     ([002](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/002-rule-without-mechanism.md),
     [022](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/022-one-canonical-document.md)).
 
-    Набор и перехваты перед git добавляются отдельными словами: они не
-    «источник проекта» — потребители их не ставят, — но гейтам кода
-    подчиняются наравне. ОДИН ОБХОДЧИК НА ВСЕ КОРНИ (взгляд на #1298): прежде
+    Набор добавляется отдельным словом: он не «источник проекта» —
+    потребители его не ставят, — но гейтам кода подчиняется наравне.
+
+    ХУКИ ОКНА — ПО УМОЛЧАНИЮ, А НЕ СЛОВОМ (взгляд на #1462). Механизм тоже
+    предмет правил о механизмах (220), а хук окна — механизм. Пока хуки
+    добавлялись словом, гейт без него молча их не судил: дыру у 214, 016, 176
+    и 165 закрыли словом (#1439), и следующим же взглядом нашлась та же у 039
+    и 071. Вторая находка по одному месту чинится классом (210): забытое слово
+    теперь включает хуки, а исключить их — явное `with_hooks=False` с
+    причиной рядом. ОДИН ОБХОДЧИК НА ВСЕ КОРНИ (взгляд на #1298): прежде
     набор и перехваты обходились своими копиями первым уровнем, и копий
     `where_files` было четыре.
 

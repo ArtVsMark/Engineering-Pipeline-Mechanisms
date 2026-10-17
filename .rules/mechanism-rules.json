@@ -14,7 +14,10 @@
     },
     "016": {
       "paths.SOURCES": "tests/test_report.py",
-      ".claude/hooks": "tests/test_report.py",
+      ".claude/hooks": {
+        "гейт": "tests/test_report.py",
+        "признак": "code_files()"
+      },
       ".github": "исключено: шаги прогонов вывод читателю не режут — grep head/tail/cut -c/${x:N:M} по .github — 2 строки, обе step-release.yml:284 и :328 `git tag --points-at HEAD | head -1` (выбор тега, а не вывод); обрезку вывода механизма делает packages/transport/report.py::cut"
     },
     "039": {
@@ -22,7 +25,7 @@
         "гейт": "tests/test_outcomes_run.py",
         "признак": "with_outcomes"
       },
-      ".claude/hooks": "исключено: хук отвечает площадке кодом 0 или 2, третьего исхода у контракта хука нет — страж сводит «не проверил» к отказу 2 с причиной (tests/test_push_guard.py::test_a_push_without_git_is_refused_through_main), хук старта на всяком отказе печатает предупреждение с названным шагом и выходит 0",
+      ".claude/hooks": "исключено: хук отвечает площадке кодом 0 или 2, третьего исхода у контракта хука нет — страж сводит «не проверил» к отказу 2 с причиной (tests/test_push_guard.py::test_a_push_without_git_is_refused_through_main), хук старта на всяком отказе печатает предупреждение с названным шагом и выходит 0; трассу вместо отказа у вызова git судит tests/test_git_refuses.py, и хуки у него в охвате по умолчанию обходчика (взгляд на #1462)",
       ".github": "исключено: исход работы прогона — её цвет; коды механизма шаг разбирает списком разрешённого `case \"$rc\"` (tests/test_review_safety.py::test_exit_codes_are_read_as_an_allowlist, все .github/workflows/*.yml), а три исхода различает сам механизм"
     },
     "045": {

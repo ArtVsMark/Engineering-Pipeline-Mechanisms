@@ -35,29 +35,94 @@ def test_the_limit_is_the_boundary_not_a_suggestion() -> None:
     assert report.cut("я" * report.LIMIT) == "я" * report.LIMIT
 
 
+#: С какой длины срез строки — обрезка вывода, а не разбор её формы. Замер
+#: 17.10.2026 по коду механизмов и хукам окна: срезы формы — сокращение хэша
+#: (7, 8, 12 знаков) и время из штампа ISO (`[11:19]`); срезы текста — 60, 70,
+#: 80 и 300 знаков. Граница лежит между ними. Прежде она стояла на 100 и только
+#: у верхнего конца: хвост `[-300:]` и короткие срезы причин отказа проходили
+#: молча (взгляд на #1462). ПРЕДЕЛ НАЗВАН: срез именованной границей
+#: (`text[:limit]`) признак не видит — так режет и сам `report.cut`.
+CUT_FROM: Final = 20
+
+
+def bound(node: ast.expr | None) -> int | None:
+    """Постоянная граница среза со знаком; не число — `None`."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        inner = bound(node.operand)
+        return None if inner is None else -inner
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return node.value
+    return None
+
+
+def silent_cuts(source: str) -> list[int]:
+    """Строки, где строка режется на месте постоянной границей не короче `CUT_FROM`."""
+    return sorted(
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.slice, ast.Slice)
+        and any(
+            (one := bound(end)) is not None and abs(one) >= CUT_FROM
+            for end in (node.slice.lower, node.slice.upper)
+        )
+    )
+
+
 def test_no_mechanism_cuts_output_silently() -> None:
     """Гейт на дрейф: срез строки-вывода не пишут заново в каждом механизме.
 
     Копий было четыре — шаг открытия, гейт журнала, транспорт и сборка тела
     уплотнения, — и каждая обрезала молча. Разошлись бы они так же молча.
     """
-    # Корни — из `paths.SOURCES`: транспорт был среди тех четырёх копий, и
-    # пятая в общем низу разошлась бы так же молча (#1254). И хуки окна:
-    # механизм тоже предмет правил о механизмах (220, #1439) — замер
-    # 17.10.2026 при расширении: срезов вывода в хуках ноль.
-    for path in code_files(with_hooks=True):
-        if path.name == "report.py":
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not isinstance(node, ast.Subscript) or not isinstance(node.slice, ast.Slice):
-                continue
-            upper = node.slice.upper
-            if (
-                isinstance(upper, ast.Constant)
-                and isinstance(upper.value, int)
-                and upper.value >= 100
-            ):
-                raise AssertionError(f"{path.name}: вывод режется на месте, а не общим механизмом")
+    # Корни — из `paths.SOURCES` и хуки окна: транспорт был среди тех четырёх
+    # копий (#1254), а механизм тоже предмет правил о механизмах (220, #1439).
+    found = {
+        path.relative_to(ROOT).as_posix(): lines
+        for path in code_files()
+        if path.name != "report.py" and (lines := silent_cuts(path.read_text(encoding="utf-8")))
+    }
+    assert not found, (
+        f"вывод режется на месте, а не общим механизмом (016): {found} — "
+        "`report.cut` для начала, `report.tail` для конца"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "silent"),
+    [
+        ("said[:300]", True),
+        ("said.strip()[-300:]", True),
+        ("script[:60]", True),
+        ("title[:CUT_FROM]", False),
+        ("sha[:7]", False),
+        ("sha[:12]", False),
+        ("stamp[11:19]", False),
+        ("word[2:]", False),
+        ("lines[-1]", False),
+    ],
+    ids=[
+        "начало",
+        "хвост",
+        "короткий",
+        "именованный",
+        "хэш",
+        "длинный-хэш",
+        "время",
+        "форма",
+        "индекс",
+    ],
+)
+def test_the_cut_sign_tells_text_from_form(source: str, silent: bool) -> None:
+    """Обе половины признака: срез текста виден с любого конца, срез формы — нет."""
+    assert bool(silent_cuts(source)) is silent
+
+
+def test_a_tail_says_how_much_was_cut() -> None:
+    """Конец вывода остаётся, и сказано, сколько было: причина отказа — последней строкой."""
+    cut = report.tail("а" * 100 + "причина", 20)
+    assert cut.endswith("причина") and "обрезано, всего 107 знаков" in cut
+    assert report.tail("коротко", 300) == "коротко"
 
 
 def test_the_mode_prefix_speaks_in_the_diagnostic_stream(

@@ -414,7 +414,7 @@ def lint_python(installs: str, root: Path) -> Path:
             # Отказ — по КОДУ, а не по выводу: молчаливый ненулевой код давал
             # пустую причину, и недособранное окружение подменяло прежнее
             # (находка `3372c78`).
-            told = (done.stderr or done.stdout).strip()[-300:]
+            told = report.tail(done.stderr or done.stdout)
             failed = (told or f"код {done.returncode} без вывода") if done.returncode else ""
         except (OSError, subprocess.TimeoutExpired) as exc:
             failed = gitcall.cause(exc)
