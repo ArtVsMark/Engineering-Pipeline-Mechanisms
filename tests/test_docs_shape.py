@@ -121,6 +121,19 @@ STEP_ROW_RE = re.compile(r"^\|\s*(?P<step>\d+)[a-zа-я]?\s*\|")
 STEP_FILE_RE = re.compile(r"`(?P<file>[\w.-]+\.yml)`")
 
 
+def skeleton_bounds(lines: list[str]) -> tuple[int, int, int]:
+    """Заголовок скелета, начало и конец ЕГО таблицы — один разбор на оба гейта.
+
+    ДО КОНЦА ТАБЛИЦЫ, А НЕ ДОКУМЕНТА (находки взглядов на #1409 и #1420,
+    `b3c7eb7`): строка в поздней таблице к скелету не относится, а соседний
+    гейт держал эту границу своим разбором, и этот считал по всему документу.
+    """
+    place = next(n for n, line in enumerate(lines) if line.startswith("## Скелет:"))
+    start = next(n for n in range(place, len(lines)) if lines[n].startswith("|"))
+    end = next((n for n in range(start, len(lines)) if not lines[n].startswith("|")), len(lines))
+    return place, start, end
+
+
 def test_the_skeleton_heading_matches_its_own_table() -> None:
     """Заголовок договора называет столько шагов, сколько в таблице под ним.
 
@@ -129,50 +142,113 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
     руками, устаревает молча (005) — поэтому его сверяет гейт, а не читатель.
     """
     text = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
+    heading, steps, files = skeleton_counts(text)
+    assert steps and files, "таблица шагов не разобралась — гейту не с чем сверять"
+    assert SPELLED_STEPS[len(steps)] in heading.lower(), f"{heading}: шагов в таблице {len(steps)}"
+    assert SPELLED[len(files)] in heading.lower(), f"{heading}: файлов в таблице {len(files)}"
+
+
+def skeleton_counts(text: str) -> tuple[str, set[int], set[str]]:
+    """Заголовок скелета, номера шагов и файлы прогонов ЕГО таблицы."""
+    lines = text.splitlines()
+    place, start, end = skeleton_bounds(lines)
     steps: set[int] = set()
     files: set[str] = set()
-    for line in text.splitlines():
+    for line in lines[start:end]:
         row = STEP_ROW_RE.match(line)
         if not row:
             continue
         steps.add(int(row.group("step")))
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         files.update(found.group("file") for found in STEP_FILE_RE.finditer(cells[2]))
-    assert steps and files, "таблица шагов не разобралась — гейту не с чем сверять"
-    heading = next(line for line in text.splitlines() if line.startswith("## Скелет:"))
-    assert SPELLED_STEPS[len(steps)] in heading.lower(), f"{heading}: шагов в таблице {len(steps)}"
-    assert SPELLED[len(files)] in heading.lower(), f"{heading}: файлов в таблице {len(files)}"
+    return lines[place], steps, files
+
+
+def test_a_later_numbered_table_is_not_counted_by_the_heading() -> None:
+    """Нумерованная строка поздней таблицы в счёт заголовка не входит (находка `b3c7eb7`)."""
+    text = (
+        "## Скелет: шаги\n\nпроза\n\n"
+        "| шаг | что | файл |\n|---|---|---|\n| 1 | а | `a.yml` |\n\n"
+        "## Другое\n\n| шаг | что | файл |\n|---|---|---|\n| 2 | б | `b.yml` |\n"
+    )
+    _, steps, files = skeleton_counts(text)
+    assert steps == {1} and files == {"a.yml"}
 
 
 #: Строка таблицы без номера шага: `| — | выпуск | release.yml | … |`. Такая в
 #: счёт заголовка не входит, и читатель, считающий строки глазами, получит
 #: больше — на столько, сколько таких строк.
 UNNUMBERED_ROW_RE = re.compile(r"^\|\s*[—-]\s*\|")
-#: Слова счёта, которых в прозе под заголовком скелета нет вовсе.
+#: Слова счёта, которых в прозе под заголовком скелета нет вовсе: малые
+#: числительные ВО ВСЕХ ФОРМАХ, а не в начальной (находка `852fba6`) — «двух»,
+#: «трёх», «пара», «оба» проходили, — собирательные и счётные слова. Составные
+#: значения `SPELLED` («двадцати двух») с одним словом не совпали бы никогда и
+#: идут по словам (находка `27bea07`).
 COUNT_WORDS: Final = frozenset(
     {
-        "единицу",
-        "один",
-        "одна",
-        "одно",
-        "два",
-        "две",
-        "три",
-        "четыре",
-        "пять",
-        "шесть",
-        "семь",
-        "восемь",
-        "девять",
-        "десять",
-        "пару",
-        "несколько",
-        *SPELLED.values(),
-        *SPELLED_STEPS.values(),
+        *[
+            "один",
+            "одна",
+            "одно",
+            "одни",
+            "одного",
+            "одной",
+            "одному",
+            "одним",
+            "одною",
+            "одну",
+            "одном",
+            "одних",
+            "одними",
+        ],
+        *["два", "две", "двух", "двум", "двумя"],
+        *["три", "трёх", "трех", "трём", "трем", "тремя"],
+        *["четыре", "четырёх", "четырех", "четырём", "четырем", "четырьмя"],
+        *["пять", "пяти", "пятью", "шесть", "шести", "шестью", "семь", "семи", "семью"],
+        *[
+            "восемь",
+            "восьми",
+            "восемью",
+            "восьмью",
+            "девять",
+            "девяти",
+            "девятью",
+            "десять",
+            "десяти",
+            "десятью",
+        ],
+        *[
+            "двое",
+            "трое",
+            "четверо",
+            "пятеро",
+            "шестеро",
+            "семеро",
+            "двоих",
+            "троих",
+            "четверых",
+            "пятерых",
+        ],
+        *["оба", "обе", "обоих", "обеих", "обоим", "обеим", "обоими", "обеими"],
+        *["пара", "пары", "пару", "паре", "парой", "полтора", "полторы", "полутора"],
+        *["единица", "единицу", "единицы", "единице", "единицей"],
+        *[
+            "несколько",
+            "нескольких",
+            "нескольким",
+            "несколькими",
+            "десяток",
+            "десятка",
+            "дюжина",
+            "дюжину",
+        ],
+        *(word for said in (*SPELLED.values(), *SPELLED_STEPS.values()) for word in said.split()),
     }
 )
-#: Где счёт законен: адрес правила в скобках `(005)` и код в обратных кавычках.
-NOT_PROSE_RE = re.compile(r"\([^)]*\)|`[^`]*`")
+#: Где счёт законен: адрес правила в скобках `(005)` и код в обратных кавычках —
+#: и только они (находка `e23aa2c`): любые скобки пропускали и «(файлов на три
+#: больше)», то есть отвергаемая форма проходила, стоило её взять в скобки.
+NOT_PROSE_RE = re.compile(r"`[^`]*`|\(\d{3}(?:,\s*\d{3})*\)")
 
 
 def hand_counts(prose: str) -> list[str]:
@@ -182,9 +258,12 @@ def hand_counts(prose: str) -> list[str]:
     «на единицу», «на два», «на три больше» — и гейт по форме «на N больше»
     пропускал соседние формы: «на два файла больше», «больше на два», «лишних
     два». Теперь в прозе под заголовком нет счёта вообще, в какой бы форме он
-    ни стоял. ГРАНИЦА НАЗВАНА (195): число в скобках и в коде не считается —
-    там адреса правил и имена файлов; число, записанное словом не из перечня
-    (например, «дюжина»), проходит.
+    ни стоял. ГРАНИЦА НАЗВАНА (195): не считается только адрес правила в
+    скобках `(005)` и код в обратных кавычках. Перечень — малые числительные во
+    всех падежах и родах, собирательные и счётные слова; проходят порядковые
+    («второй») и числительное вне перечня («сорок»). Совпадение формы с другим
+    словом («семью» — и «семь», и «семья») гейт считает счётом: в прозе под
+    заголовком лишний отказ дешевле пропущенного числа.
     """
     bare = NOT_PROSE_RE.sub(" ", prose)
     words = re.findall(r"[а-яёa-z0-9]+", bare.lower())
@@ -212,11 +291,7 @@ def test_an_unnumbered_row_is_named_under_the_heading() -> None:
     """
     text = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     lines = text.splitlines()
-    place = next(n for n, line in enumerate(lines) if line.startswith("## Скелет:"))
-    start = next(n for n in range(place, len(lines)) if lines[n].startswith("|"))
-    # ДО КОНЦА ТАБЛИЦЫ, А НЕ ДОКУМЕНТА (находка взгляда на #1409): строка с
-    # прочерком в поздней таблице к скелету не относится.
-    end = next((n for n in range(start, len(lines)) if not lines[n].startswith("|")), len(lines))
+    place, start, end = skeleton_bounds(lines)
     unnumbered = [line for line in lines[start:end] if UNNUMBERED_ROW_RE.match(line)]
     said = "\n".join(lines[place:start])
     # Заголовок не в счёт: его числа сверяет с таблицей соседний гейт.
@@ -955,3 +1030,39 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
     assert seen == ["README.md", "docs/a.md", "docs/agent/x.md"]
     pointed = [str(one.relative_to(tmp_path)) for one in pointed_docs(tmp_path / "docs")]
     assert pointed == ["docs/a.md", "docs/agent/x.md", "docs/decisions/1.md"]
+
+
+@pytest.mark.parametrize(
+    ("prose", "counted"),
+    [
+        ("файлов больше двух", True),
+        ("на трёх строках", True),
+        ("пара файлов", True),
+        ("оба прогона", True),
+        ("их двое", True),
+        ("строк (файлов на три больше)", True),
+        ("в двадцати файлах", True),
+        ("файлов 3", True),
+        ("держит правило (005)", False),
+        ("правила (005, 127)", False),
+        ("файл `release.yml` и `3.14`", False),
+        ("вторая строка таблицы", False),
+    ],
+    ids=[
+        "падеж-два",
+        "падеж-три",
+        "пара",
+        "оба",
+        "собирательное",
+        "счёт-в-скобках",
+        "часть-составного",
+        "цифра",
+        "адрес-правила",
+        "адреса-правил",
+        "код",
+        "порядковое",
+    ],
+)
+def test_hand_counts_sees_every_form_and_spares_addresses(prose: str, counted: bool) -> None:
+    """Счёт рукой виден во всех формах; законны адрес правила и код (`852fba6`, `e23aa2c`)."""
+    assert bool(hand_counts(prose)) is counted
