@@ -66,8 +66,13 @@ NOBODY: Final = "подключённых потребителей нет"
 #: итогом она печаталась дважды (находка `f4a5c14`), и тест по началу строки их
 #: не различал (`d380055`).
 NO_SWEEP: Final = (
-    "обход семьи не передан (--uptake): молча подключённые НЕ ВИДНЫ — список выше "
-    "только из объявившихся, и он неполон (045)"
+    "обход семьи не передан (--uptake): молча подключённые НЕ ВИДНЫ — сверка идёт "
+    "только по объявившимся и потому неполна (045)"
+)
+#: Итог захода без токена площадки: ответы лежат в деревьях потребителей.
+NO_TOKEN: Final = (
+    "ответы потребителей НЕ ПРОЧИТАНЫ: токена площадки нет, а лежат они в их деревьях."
+    " Это не «все на свежей версии» (045)"
 )
 
 
@@ -131,7 +136,13 @@ def swept(path: Path) -> tuple[list[str], list[str]]:
     found = sorted(spelled.values())
     projects = said.get("projects")
     unread = projects.get("unread_repos") if isinstance(projects, dict) else None
-    return found, sorted(str(one) for one in unread or [] if one)
+    # Непрочитанные сводятся так же (взгляд на #1483): иначе повтор в другом
+    # регистре давал бы две строки и лишнюю единицу в счёте непрочитанных.
+    unspelled: dict[str, str] = {}
+    for one in unread or []:
+        if one:
+            unspelled.setdefault(str(one).casefold(), str(one))
+    return found, sorted(unspelled.values())
 
 
 def answer_of(repo: str, token: str) -> dict[str, Any]:
@@ -172,6 +183,35 @@ def bypassed(answer: dict[str, Any]) -> list[str]:
     return sorted(found)
 
 
+def gaps_of(*, swept_given: bool, unswept: int, unread: int, total: int, token: bool) -> list[str]:
+    """Итоги неполноты захода — все разом, в stdout; пусто — сверка полна.
+
+    ВСЕ ИСХОДЫ НЕПОЛНОТЫ — ОДНИМ ПУТЁМ (взгляд на #1483, правило 210). Прежде
+    каждый выход захода называл свою неполноту сам: ранний выход без токена или
+    с непрочитанными ответами молчал о том, что обход не передан, а итог «НЕ
+    ПРОЧИТАНЫ» шёл в stderr, хотя однородные с ним — в stdout. Это была уже
+    вторая находка о потоке и полноте итога (после `9695b0a`), поэтому выходы
+    говорят через одну функцию, а не каждый своё.
+    """
+    said: list[str] = []
+    if not token:
+        said.append(NO_TOKEN)
+    if unread:
+        said.append(f"не прочитано ответов: {unread} из {total}")
+    if unswept:
+        said.append(f"обход семьи не прочитал проектов: {unswept} — список выше неполон")
+    if not swept_given:
+        said.append(NO_SWEEP)
+    return said
+
+
+def finish(gaps: list[str]) -> int:
+    """Печатает итоги неполноты и отдаёт исход: есть они — 3, нет — 0."""
+    for one in gaps:
+        print(one)
+    return EXIT_UNREAD if gaps else EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает сверку по каждому объявленному потребителю."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -195,23 +235,29 @@ def main(argv: list[str] | None = None) -> int:
     for repo in unswept:
         print(f"  {repo}: обход семьи его дерево не прочитал — подключён ли он, не видно")
 
+    swept_given = args.uptake is not None
     if not rows:
-        if not args.uptake or unswept:
+        if not swept_given or unswept:
             print(f"{NOBODY} среди тех, кого видно, — молча подключённые видны не все (045)")
-            if not args.uptake:
-                print(NO_SWEEP)
-            return EXIT_UNREAD
+            return finish(
+                gaps_of(
+                    swept_given=swept_given, unswept=len(unswept), unread=0, total=0, token=True
+                )
+            )
         print(f"{NOBODY} — сверять не с кем, и это состояние, а не тишина (154)")
         return EXIT_OK
 
     token = ghrest.token_from_env()
     if not token:
-        print(
-            "ответы потребителей НЕ ПРОЧИТАНЫ: токена площадки нет, а лежат они в их"
-            " деревьях. Это не «все на свежей версии» (045)",
-            file=sys.stderr,
+        return finish(
+            gaps_of(
+                swept_given=swept_given,
+                unswept=len(unswept),
+                unread=0,
+                total=len(rows),
+                token=False,
+            )
         )
-        return EXIT_UNREAD
 
     unread = 0
     for one in rows:
@@ -227,22 +273,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {repo}: диапазон {span} · обойдено {len(skipped)}")
         for name in skipped:
             print(f"      обойдено: {name}")
-    # ИТОГ НЕПОЛНОТЫ — В ОДНОМ ПОТОКЕ (находка `9695b0a`): «не прочитано
-    # ответов» шло в stderr, а однородное «обход не прочитал проектов» — в
-    # stdout. Итоговые строки — в stdout, где и остальные исходы; отказ по
-    # отдельному проекту — диагностика, она остаётся в stderr.
-    if unread:
-        print(f"не прочитано ответов: {unread} из {len(rows)}")
-        return EXIT_UNREAD
-    if unswept:
-        print(f"обход семьи не прочитал проектов: {len(unswept)} — список выше неполон")
-        return EXIT_UNREAD
-    # БЕЗ ОБХОДА СПИСОК НЕПОЛОН И ПРИ НЕПУСТОМ РЕЕСТРЕ (поздний взгляд на #1443):
-    # молча подключённые не видны, и исход говорит это, а не «сверка прочитана».
-    if not args.uptake:
-        print(NO_SWEEP)
-        return EXIT_UNREAD
-    return EXIT_OK
+    # ИТОГ НЕПОЛНОТЫ — В ОДНОМ ПОТОКЕ (находка `9695b0a`) и ОДНИМ ПУТЁМ
+    # (`gaps_of`): итоговые строки — в stdout, где и остальные исходы; отказ по
+    # отдельному проекту — диагностика, она остаётся в stderr. Без обхода
+    # список неполон и при непустом реестре (поздний взгляд на #1443).
+    return finish(
+        gaps_of(
+            swept_given=swept_given,
+            unswept=len(unswept),
+            unread=unread,
+            total=len(rows),
+            token=True,
+        )
+    )
 
 
 if __name__ == "__main__":
