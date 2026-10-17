@@ -42,6 +42,22 @@ LOCAL: Final = 60
 NETWORK: Final = 300
 
 
+def cause(exc: Exception) -> str:
+    """Причина отказа вызова процесса строкой: истёкший дедлайн назван дедлайном.
+
+    `TimeoutExpired` несёт перехваченный вывод БАЙТАМИ при любом `text=True`
+    (так в документации `subprocess`): разбор `exc.stderr` клал в отказ
+    `b'…'`, а «не уложился» терял — находка `f767e24`. Отказ с кодом и без
+    вывода называется самим исключением: код в нём есть.
+    """
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"не уложился в дедлайн {exc.timeout:g} с"
+    said = getattr(exc, "stderr", None)
+    if isinstance(said, bytes):
+        said = said.decode("utf-8", "replace")
+    return said.strip() if isinstance(said, str) and said.strip() else str(exc)
+
+
 def output(
     args: Sequence[str],
     refusal: Callable[[str], Exception],
@@ -61,5 +77,4 @@ def output(
             timeout=timeout,
         ).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        detail = getattr(exc, "stderr", "") or exc
-        raise refusal(f"git {' '.join(args)} → {report.cut(str(detail))}") from exc
+        raise refusal(f"git {' '.join(args)} → {report.cut(cause(exc))}") from exc

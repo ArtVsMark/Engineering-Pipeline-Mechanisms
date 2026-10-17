@@ -1072,6 +1072,43 @@ def test_a_stale_env_is_rebuilt(
     assert "взято прежнее окружение" in capsys.readouterr().err
 
 
+def test_a_silent_failed_build_is_a_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ненулевой код БЕЗ вывода — отказ сборки с названным кодом, а не готовое окружение.
+
+    Находка `3372c78` на #1458: причина бралась из вывода, и молчаливый отказ
+    `pip` давал пустую строку — сборка считалась прошедшей и подменяла прежнее.
+    """
+    where, _ = preflight.env_dir("pip install mypy", tmp_path)
+
+    def silent(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        if command[1:3] == ["-m", "venv"]:
+            (Path(command[3]) / "bin").mkdir(parents=True)
+            (Path(command[3]) / "bin" / "python").write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+    monkeypatch.setattr(preflight.subprocess, "run", silent)
+    with pytest.raises(preflight.NotRun, match="код 1 без вывода"):
+        preflight.lint_python("pip install mypy", tmp_path)
+    assert not (where / preflight.READY).exists(), "недособранное окружение помечено готовым"
+
+
+def test_a_build_past_its_deadline_names_the_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Истёкшая сборка — отказ «не уложился в дедлайн», а не байты перехваченного вывода."""
+    preflight.env_dir("pip install mypy", tmp_path)
+
+    def hung(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(command, preflight.BUILD_TIMEOUT, stderr=b"half")
+
+    monkeypatch.setattr(preflight.subprocess, "run", hung)
+    with pytest.raises(preflight.NotRun, match="не уложился в дедлайн"):
+        preflight.lint_python("pip install mypy", tmp_path)
+
+
 def test_a_finished_build_replaces_the_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Сборка прошла — готовое встаёт на место прежнего вместе с меткой."""
     where, said = preflight.env_dir("pip install mypy", tmp_path)

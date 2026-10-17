@@ -925,6 +925,46 @@ def test_lay_free_keeps_what_is_there(tmp_path: Path) -> None:
     assert (tmp_path / "a.md").read_text(encoding="utf-8") == "своё"
 
 
+def test_a_yaml_twin_of_a_run_takes_its_place_at_both_doors(tmp_path: Path) -> None:
+    """Свой `ci.yaml` занимает место `ci.yml` у `--write` и правится у `--update` (`1f2ca12`).
+
+    Площадка читает прогон под обоими расширениями: второй файл рядом — два
+    прогона на одно событие.
+    """
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "ci.yaml").write_text("своё", encoding="utf-8")
+    run = module.paths.WORKFLOWS / module.PIPELINE_FLOW
+    assert module.standing(tmp_path, run) == run.with_suffix(".yaml")
+    assert module.occupied(tmp_path, {run: "заготовка"}) == [run]
+    plan = module.Update()
+    module.plan_ci(plan, tmp_path, ["а"], "o/r", "v9.0.0")
+    assert run not in plan.write, "обновление положило бы ci.yml рядом с ci.yaml"
+
+
+def test_a_twin_of_our_own_data_takes_no_place(tmp_path: Path) -> None:
+    """Свои файлы механизмов читаются точным именем: `.pipeline.yaml` места не занимает."""
+    assert module.read_by_the_platform(module.paths.WORKFLOWS / "ci.yml")
+    assert module.read_by_the_platform(module.paths.DEPENDABOT.with_suffix(".yaml"))
+    assert not module.read_by_the_platform(module.paths.PIPELINE)
+    (tmp_path / ".pipeline.yaml").write_text("своё", encoding="utf-8")
+    assert module.standing(tmp_path, module.paths.PIPELINE) == module.paths.PIPELINE
+    assert module.occupied(tmp_path, {module.paths.PIPELINE: "заготовка"}) == []
+
+
+def test_a_dormant_area_table_is_named_until_the_role_is_declared(tmp_path: Path) -> None:
+    """Таблица областей без объявленной роли — названная спячка; роль объявлена — тишина."""
+    assert module.dormant_areas_note(tmp_path) == "", "таблицы нет — и говорить не о чем"
+    module.lay(tmp_path, module.data_kit(ROOT))
+    said = module.dormant_areas_note(tmp_path)
+    assert "спит" in said and module.ROLE_PILOT in said
+    roles = tmp_path / module.paths.REVIEW_ROLES
+    table = json.loads(roles.read_text(encoding="utf-8"))
+    table["by_path"] = [{"paths": ["**/*"], "roles": [module.review_map.CATALOGUE_ROLE]}]
+    roles.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
+    assert module.dormant_areas_note(tmp_path) == ""
+
+
 def test_a_yaml_twin_takes_the_path(tmp_path: Path) -> None:
     """`dependabot.yaml` потребителя занимает место `dependabot.yml`: второго конфига нет."""
     (tmp_path / ".github").mkdir()
@@ -991,7 +1031,17 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
     findings = load_script("findings.py")
     kit = module.data_kit(ROOT)
     table = review_map.table_shape(json.loads(kit[Path(".rules/review-roles.json")]))
-    monkeypatch.setattr(review_map, "shown_from_base", lambda _, path: kit[Path(path)])
+    # ПУТЬ ЦЕЛИКОМ: заготовка → `role_declared` → `area_table` → `narrow`
+    # (находки `5f1a15d`, `72d2c49`). Скелет роль не объявляет — её пилот у
+    # механизмов (#1277), — и таблица спит; объявленная роль будит её.
+    shown = dict(kit)
+    monkeypatch.setattr(review_map, "shown_from_base", lambda _, path: shown[Path(path)])
+    assert not review_map.role_declared("main"), "скелет объявил роль до раскатки (#1277)"
+    declared = {**table, "required": [*table["required"], review_map.CATALOGUE_ROLE]}
+    shown[Path(".rules/review-roles.json")] = json.dumps(declared, ensure_ascii=False)
+    assert review_map.role_declared("main"), "объявленная роль не видна карте"
+    assert review_map.declares_role({"by_path": [{"roles": [review_map.CATALOGUE_ROLE]}]})
+    assert not review_map.declares_role(table), "скелет объявил роль"
     table_of_areas = review_map.area_table("main")
     # НЕЗАПОЛНЕННАЯ ЗАГОТОВКА НЕ СУЖАЕТ РОЛЬ (взгляд на #1455): правило с любой
     # областью заготовки отдаётся роли на любом пути — как без таблицы.
