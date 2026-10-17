@@ -56,6 +56,13 @@ OUR_CALL: Final = "./"
 #: Переменная окружения с каталогом кода конвейера у общего шага (#990): её
 #: ставит общий шаг, её же ставит предполётная и читает гейт шагов.
 MECHANISMS: Final = "MECHANISMS"
+#: Предел одной проверки дерева: самый долгий шаг — полный набор тестов. Предел
+#: его джоба у площадки — `timeout-minutes` в `ci.yml`; здесь вдвое с лишним
+#: шире: машина окна медленнее раннера, а предел нужен от зависания, а не от
+#: медленного прогона.
+STEP_TIMEOUT: Final = 30 * 60
+#: Предел сборки окружения шага типов: `venv` и `pip install` по сети.
+BUILD_TIMEOUT: Final = 10 * 60
 #: Вызов нашего кода из checkout общего шага (#990). Перед сверкой со списками
 #: разрешённого и требующего площадки он приводится к прямому `python scripts/`:
 #: иначе предполётная молча потеряла бы вынесенные проверки, а отложенные
@@ -400,13 +407,16 @@ def lint_python(installs: str, root: Path) -> Path:
         [sys.executable, "-m", "venv", str(fresh)],
         [str(fresh / "bin" / "python"), "-m", "pip", "install", "--quiet", *packages],
     ):
-        done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
-        if done.returncode != 0:
-            shutil.rmtree(fresh, ignore_errors=True)
-            why = (
-                f"окружение шага типов не собрано ({' '.join(command[:4])}…): "
-                f"{(done.stderr or done.stdout).strip()[-300:]}"
+        try:
+            done = subprocess.run(
+                command, capture_output=True, text=True, encoding="utf-8", timeout=BUILD_TIMEOUT
             )
+            failed = (done.stderr or done.stdout).strip()[-300:] if done.returncode else ""
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            failed = str(exc)
+        if failed:
+            shutil.rmtree(fresh, ignore_errors=True)
+            why = f"окружение шага типов не собрано ({' '.join(command[:4])}…): {failed}"
             if stale:
                 # Названное отступление, а не тихое (045): прежнее собрано тем же
                 # составом и тем же интерпретатором, устарело лишь разрешение
@@ -466,23 +476,27 @@ def run(step: Step, root: Path) -> tuple[int, str]:
         command = as_on_the_platform(step, root)
     except NotRun as exc:
         return EXIT_BROKEN, f"шаг не отработал: {exc}"
-    done = subprocess.run(
-        command,
-        shell=True,
-        # ОБОЛОЧКА ТА ЖЕ, ЧТО У ПЛОЩАДКИ. Умолчание `shell=True` — `/bin/sh`, а
-        # площадка запускает шаги в bash: `set -o pipefail` в sh не понят, и
-        # здоровый шаг краснел здесь с «Illegal option». Прогон, идущий другой
-        # оболочкой, проверяет не то, что проверит площадка (022).
-        executable="/bin/bash",
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        # КОД КОНВЕЙЕРА ЛОКАЛЬНО — ЭТО ДЕРЕВО. На площадке общий шаг берёт его
-        # своим checkout на коммите вызова (#990); здесь проверяется дерево, в
-        # котором лежит и код.
-        env={**environment(), MECHANISMS: str(root.resolve())},
-    )
+    try:
+        done = subprocess.run(
+            command,
+            shell=True,
+            # ОБОЛОЧКА ТА ЖЕ, ЧТО У ПЛОЩАДКИ. Умолчание `shell=True` — `/bin/sh`, а
+            # площадка запускает шаги в bash: `set -o pipefail` в sh не понят, и
+            # здоровый шаг краснел здесь с «Illegal option». Прогон, идущий другой
+            # оболочкой, проверяет не то, что проверит площадка (022).
+            executable="/bin/bash",
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            # КОД КОНВЕЙЕРА ЛОКАЛЬНО — ЭТО ДЕРЕВО. На площадке общий шаг берёт его
+            # своим checkout на коммите вызова (#990); здесь проверяется дерево, в
+            # котором лежит и код.
+            env={**environment(), MECHANISMS: str(root.resolve())},
+            timeout=STEP_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return EXIT_BROKEN, f"шаг не отработал: {exc}"
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 
 
@@ -614,8 +628,9 @@ def push_branch(root: Path) -> int:
             text=True,
             encoding="utf-8",
             cwd=root or None,
+            timeout=gitcall.NETWORK,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"толчок не прошёл: git не запустился — {exc}", file=sys.stderr)
         return EXIT_BROKEN
     print(said.stdout.rstrip() or said.stderr.rstrip())
@@ -659,8 +674,9 @@ def code_origin(root: Path) -> str:
             text=True,
             encoding="utf-8",
             env={**environment(), MECHANISMS: str(root.resolve())},
+            timeout=gitcall.LOCAL,
         )
-    except OSError:
+    except OSError, subprocess.TimeoutExpired:
         return ""
     return done.stdout.strip() if done.returncode == 0 else ""
 

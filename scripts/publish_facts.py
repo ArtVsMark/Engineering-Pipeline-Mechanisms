@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import gitcall
 import paths
 
 #: Что шаг кладёт на ветку `badges` — путь от корня ветки. Ветку держит этот
@@ -71,9 +72,16 @@ def git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]
     """
     try:
         return subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            # Здесь и выборка, и толчок ветки `badges`: предел сетевой.
+            timeout=gitcall.NETWORK,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise NotPublished(f"git не запустился: {exc}") from exc
 
 

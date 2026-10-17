@@ -875,9 +875,9 @@
     "100": {
       "status": "active",
       "mechanism": "gate",
-      "where": "scripts/ci_complete.py — дедлайна два, и они разной длины: отсутствие записи проверки на голове означает «прогон не стартовал» и отвергается СРАЗУ, не дожидаясь предела ожидания, а предел (--timeout) относится только к тем, кто уже идёт. Третий, на работу джоба, задан в .github/workflows/ci.yml полем timeout-minutes у каждого шага. ДЫРА НАЗВАНА (220, ArtVsMark/Engineering-Pipeline-Mechanisms#1439): вызовы процесса в самих механизмах дедлайна не несут — замер 17.10.2026, 21 вызов в 15 файлах scripts/; мета-гейта на это нет, гейт и починка — ArtVsMark/Engineering-Pipeline-Mechanisms#1439",
+      "where": "scripts/ci_complete.py — дедлайна два, и они разной длины: отсутствие записи проверки на голове означает «прогон не стартовал» и отвергается СРАЗУ, не дожидаясь предела ожидания, а предел (--timeout) относится только к тем, кто уже идёт. Третий, на работу джоба, задан в .github/workflows/ci.yml полем timeout-minutes у каждого шага. ДЕДЛАЙН У ВЫЗОВА ПРОЦЕССА В САМИХ МЕХАНИЗМАХ (220, ArtVsMark/Engineering-Pipeline-Mechanisms#1439): tests/test_subprocess_deadline.py — каждый вызов процесса в paths.SOURCES и .claude/hooks/ несёт timeout= и ловит TimeoutExpired тем же исходом, что OSError; пределы названы один раз — scripts/gitcall.py (LOCAL, NETWORK)",
       "origin_kind": "own",
-      "analysed": "2026-09-26"
+      "analysed": "2026-10-17"
     },
     "101": {
       "status": "active",
@@ -1850,9 +1850,9 @@
       "status": "active",
       "mechanism": "gate",
       "holdable": "not-yet",
-      "where": "Мета-гейты с охватом по механизмам дерева: tests/test_one_parse.py (214, корни paths.SOURCES), tests/test_report.py (016, корни paths.SOURCES), tests/test_py_style.py (217, включая хук окна .claude/hooks/push_guard.py), tests/test_python_after_setup.py (217, все работы .github/workflows/), .claude/hooks/push_guard.sh (217: хук окна зовётся интерпретатором планки). ДЫРЫ НАЗВАНЫ, а не выровнены (046, 182): мета-гейта на дедлайн вызова подпроцесса (100) нет — ответ по 100 называет только timeout-minutes прогонов и scripts/ci_complete.py; охват paths.SOURCES у мета-гейтов 214 и 016 не берёт .claude/hooks/",
+      "where": "Мета-гейты с охватом по механизмам дерева: tests/test_one_parse.py (214, корни paths.SOURCES), tests/test_report.py (016, корни paths.SOURCES), tests/test_py_style.py (217, включая хук окна .claude/hooks/push_guard.py), tests/test_python_after_setup.py (217, все работы .github/workflows/), .claude/hooks/push_guard.sh (217: хук окна зовётся интерпретатором планки). tests/test_subprocess_deadline.py (100 — дедлайн и его поимка у каждого вызова процесса в paths.SOURCES и .claude/hooks/). ДЫРА НАЗВАНА, а не выровнена (046, 182): охват paths.SOURCES у мета-гейтов 214 и 016 не берёт .claude/hooks/",
       "origin_kind": "own",
-      "why": "Ответ дан 17.10.2026. Вопрос правила — соблюдают ли сами гейты, хуки, прогоны и навыки остальные правила о механизмах, и держит ли это мета-гейт с охватом scripts/, .claude/hooks/ и .github/, а не место рождения правила. ЗАМЕР ПРЕДИКАТА 17.10.2026 по scripts/, .claude/hooks/ и packages/transport/ (разбор ast: вызов подпроцесса модулем subprocess без довода timeout): 21 вызов в 15 файлах, среди них гейты scripts/check_contract.py, scripts/check_version.py, scripts/check_rule_birth.py и scripts/preflight.py. Это и есть признак нарушения из буквы правила: ответ по 100 «держится гейтом», а предикат находит нарушения в самих гейтах. Охват paths.SOURCES у 214 и 016 не включает .claude/hooks/ — вторая часть той же дыры. Разбор и починка — ArtVsMark/Engineering-Pipeline-Mechanisms#1439, где первая часть (дедлайн у стража толчка) уже слита.",
+      "why": "Ответ дан 17.10.2026. Вопрос правила — соблюдают ли сами гейты, хуки, прогоны и навыки остальные правила о механизмах, и держит ли это мета-гейт с охватом scripts/, .claude/hooks/ и .github/, а не место рождения правила. ЗАМЕР ПРЕДИКАТА 17.10.2026 по scripts/, .claude/hooks/ и packages/transport/ (разбор ast: вызов подпроцесса модулем subprocess без довода timeout): 21 вызов в 15 файлах, среди них гейты scripts/check_contract.py, scripts/check_version.py, scripts/check_rule_birth.py и scripts/preflight.py. Это и есть признак нарушения из буквы правила: ответ по 100 «держится гейтом», а предикат находит нарушения в самих гейтах. Охват paths.SOURCES у 214 и 016 не включает .claude/hooks/ — вторая часть той же дыры. Дыру по 100 закрыл гейт tests/test_subprocess_deadline.py (ArtVsMark/Engineering-Pipeline-Mechanisms#1458): все 23 места починены, охват — код механизмов и хуки окна. Остаток — охват 214 и 016 — работа ArtVsMark/Engineering-Pipeline-Mechanisms#1439.",
       "analysed": "2026-10-17"
     }
   }

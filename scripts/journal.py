@@ -15,6 +15,7 @@ import re
 import subprocess
 from typing import Final
 
+import gitcall
 import report
 
 KINDS: Final = {
@@ -80,9 +81,14 @@ def git(args: list[str]) -> str:
     """Зовёт git, обращая любой отказ в третий исход."""
     try:
         return subprocess.run(
-            args, capture_output=True, check=True, text=True, encoding="utf-8"
+            args,
+            capture_output=True,
+            check=True,
+            text=True,
+            encoding="utf-8",
+            timeout=gitcall.LOCAL,
         ).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         detail = getattr(exc, "stderr", "") or exc
         raise NotRun(f"{' '.join(args)} → {report.cut(str(detail))}") from exc
 

@@ -50,6 +50,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import gitcall
 import paths
 
 #: Релизный тег: строго `vX.Y.Z`. Маска для git и образец здесь — форма
@@ -136,8 +137,9 @@ def git(*args: str, root: Path | None = None) -> str | None:
             encoding="utf-8",
             errors="replace",
             stderr=subprocess.DEVNULL,
+            timeout=gitcall.LOCAL,
         )
-    except OSError, subprocess.CalledProcessError:
+    except OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired:
         return None
     return out.strip()
 

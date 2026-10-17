@@ -306,8 +306,9 @@ def calls_itself(root: Path, repo: str) -> bool:
             text=True,
             encoding="utf-8",
             check=False,
+            timeout=gitcall.LOCAL,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"git не запустился: {exc}") from exc
     if said.returncode not in (0, 1):
         raise NotRun(f"git grep не ответил (код {said.returncode}): {said.stderr.strip()}")

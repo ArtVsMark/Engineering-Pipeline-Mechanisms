@@ -1426,7 +1426,7 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
     ),
     "100": (
         "ci.yml — поле timeout-minutes у своих шагов; держит scripts/ci_complete.py",
-        "6aea8231ebd9",
+        "c2fc371214b0",
     ),
     "133": (
         "ci.yml — свой джоб parts; держит scripts/change_parts.py",
