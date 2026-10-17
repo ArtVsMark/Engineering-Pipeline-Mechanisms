@@ -10,6 +10,7 @@
 """
 
 import ast
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -244,3 +245,80 @@ def test_what_only_looks_like_writing_the_version(как: str, tmp_path: Path) -
     path.write_text("from pathlib import Path\n" + NOT_WRITES[как] + "\n", encoding="utf-8")
 
     assert not writes_the_version(path), f"«{как}» засчитано записью версии"
+
+
+def release_line_sites(source: str) -> tuple[int, list[tuple[int, str]]]:
+    """Места, где набор задаёт номер ЛИНИИ ВЫПУСКОВ: сколько их и литералы среди них.
+
+    Два места, через которые версия выпуска входит в проверку: довод после
+    `--version` (в вызове или в списке доводов) и подмена `release_tag`
+    лямбдой. Литерал там — тот же список руками, что и запись версии выше:
+    совпадение придёт, когда проект дорастёт до номера (находка `97553e6`).
+    """
+    sites = 0
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(ast.parse(source)):
+        runs = node.args if isinstance(node, ast.Call) else []
+        runs = node.elts if isinstance(node, ast.List | ast.Tuple) else runs
+        for flag, given in pairwise(runs):
+            if isinstance(flag, ast.Constant) and flag.value == "--version":
+                sites += 1
+                if isinstance(given, ast.Constant) and isinstance(given.value, str):
+                    found.append((given.lineno, given.value))
+        if (
+            isinstance(node, ast.Call)
+            and len(node.args) >= 3
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == "release_tag"
+            and isinstance(node.args[2], ast.Lambda)
+        ):
+            sites += 1
+            body = node.args[2].body
+            if isinstance(body, ast.Constant) and isinstance(body.value, str):
+                found.append((body.lineno, body.value))
+    return sites, found
+
+
+def test_a_release_line_in_the_suite_does_not_share_the_real_major() -> None:
+    """Номер линии выпусков в наборе — не литерал с мажором живого контракта (`97553e6`).
+
+    Совпадение подделки с живой версией случалось уже четыре раза: три
+    10.09.2026 и `0.99.0` в `test_release.py` при контракте `0.9.x`. Граница
+    названа: судятся только два входа линии; чужие номера (факты, соседи,
+    пакеты) и начало линии `0.0.0` в `next_after` — не линия этого проекта.
+    """
+    real = (ROOT / "CONTRACT_VERSION").read_text(encoding="utf-8").strip().split(".")[0]
+    seen = 0
+    shared: list[str] = []
+    for path in walk(ROOT / "tests", "test_*.py"):
+        sites, found = release_line_sites(path.read_text(encoding="utf-8"))
+        seen += sites
+        shared += [
+            f"{path.name}:{line} «{said}»"
+            for line, said in found
+            if said.removeprefix("v").split(".")[0] == real
+        ]
+    assert seen >= 2, f"входов линии выпусков в наборе {seen} — предикат смотрит не туда (075)"
+    assert not shared, (
+        f"номер линии с мажором живого контракта {real}: {shared}. "
+        "Берите FAKE_VERSION или считайте от next_after"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "bad"),
+    [
+        ('run("release.py", "--version", "0.99.0")', True),
+        ('cmd = ["--version", "0.1.0"]', True),
+        ('m.setattr(x, "release_tag", lambda: "v0.5.0")', True),
+        ('run("release.py", "--version", f"{major}.1.0")', False),
+        ('m.setattr(x, "release_tag", lambda: f"v{FAKE_VERSION}")', False),
+        ('run("release.py", "--version", "9.40.0")', False),
+    ],
+    ids=["вызов", "список", "подмена-тега", "посчитано", "от-канона", "чужой-мажор"],
+)
+def test_the_release_line_predicate_has_both_halves(source: str, bad: bool) -> None:
+    """Предикат видит литерал в обоих входах и не трогает посчитанное и чужой мажор."""
+    sites, found = release_line_sites(source)
+    assert sites == 1
+    assert any(said.removeprefix("v").split(".")[0] == "0" for _, said in found) is bad
