@@ -403,6 +403,31 @@ def calendar_day(value: object) -> bool:
     return True
 
 
+#: Поля-списки форм предложений; прочие поля — непустая строка (взгляд на #1383).
+LIST_FIELDS = frozenset({"rules", "holds"})
+
+
+def field_problems(item: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
+    """Поля формы есть и своей формы: строка, а поле-список — список.
+
+    ОДНА ПРОВЕРКА НА ВСЕ ФОРМЫ (взгляды на #1360 и #1383, правила 195 и 210).
+    Форму поля держала только запись данных: у слияния, навыка и правила
+    `why`, `claim` или `slug` списком или числом проходили как годные — их
+    смотрела лишь проверка на пустоту.
+    """
+    slug = item.get("slug", "?")
+    found: list[str] = []
+    for one in fields:
+        value = item.get(one)
+        wanted = list if one in LIST_FIELDS else str
+        if not value:
+            found.append(f"{slug}: поля «{one}» нет")
+        elif not isinstance(value, wanted):
+            kind = "список" if wanted is list else "строка"
+            found.append(f"{slug}: {one} — {kind}, а не {type(value).__name__}")
+    return found
+
+
 def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     """Чем предложение не годится каталогу; пусто — годится.
 
@@ -413,17 +438,9 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
     """
     slug = item.get("slug", "?")
     if item.get("kind") == "evidence":
-        # КАЖДОЕ ПОЛЕ ДАННЫХ — НЕПУСТАЯ СТРОКА (взгляды на #1360 и #1383). Список,
-        # словарь или число в поле — отказ с именем записи, а не `TypeError`
-        # набора и не «годится»: одно поле, закрытое по форме, оставило бы
-        # соседей принимать что угодно истинное (правило 195).
-        found = []
-        for one in EVIDENCE_FIELDS:
-            value = item.get(one)
-            if not value:
-                found.append(f"{slug}: поля «{one}» нет")
-            elif not isinstance(value, str):
-                found.append(f"{slug}: {one} — строка, а не {type(value).__name__}")
+        # Список, словарь или число в поле — отказ с именем записи, а не
+        # `TypeError` набора и не «годится» (`field_problems`).
+        found = field_problems(item, EVIDENCE_FIELDS)
         direction = item.get("direction")
         if isinstance(direction, str) and direction and direction not in EVIDENCE_DIRECTIONS:
             found.append(f"{slug}: direction — for, against или neutral")
@@ -435,18 +452,23 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
             found.append(f"{slug}: measured_at — дата вида 2026-10-14")
         return found
     if item.get("kind") == "merge":
-        found = [f"{slug}: поля «{one}» нет" for one in MERGE_FIELDS if not item.get(one)]
+        found = field_problems(item, MERGE_FIELDS)
+        # Наличие и форму поля-списка называет `field_problems`; здесь — только
+        # содержание списка, иначе одна ошибка давала две строки (взгляд на #1476).
         rules = item.get("rules")
         if (
-            not isinstance(rules, list)
-            or not 2 <= len(rules) <= MERGE_AT_MOST
-            or len(set(map(str, rules))) != len(rules)
-            or not all(re.fullmatch(r"\d{3}", str(one)) for one in rules)
+            isinstance(rules, list)
+            and rules
+            and (
+                not 2 <= len(rules) <= MERGE_AT_MOST
+                or len(set(map(str, rules))) != len(rules)
+                or not all(re.fullmatch(r"\d{3}", str(one)) for one in rules)
+            )
         ):
             found.append(f"{slug}: rules — от 2 до {MERGE_AT_MOST} разных номеров правил каталога")
         return found
     if item.get("kind") == "skill":
-        found = [f"{slug}: поля «{one}» нет" for one in SKILL_FIELDS if not item.get(one)]
+        found = field_problems(item, SKILL_FIELDS)
         if len(str(item.get("measurement") or "")) < INCIDENT_AT_LEAST:
             found.append(f"{slug}: замер без конкретики — каталогу придётся спрашивать заново")
         path = str(item.get("path") or "")
@@ -455,12 +477,10 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
         if not FULL_SHA_RE.match(str(item.get("sha") or "")):
             found.append(f"{slug}: sha не полный — каталог читает навык на коммите")
         holds = item.get("holds")
-        if not isinstance(holds, list) or not all(
-            re.fullmatch(r"\d{3}", str(one)) for one in holds
-        ):
+        if isinstance(holds, list) and not all(re.fullmatch(r"\d{3}", str(one)) for one in holds):
             found.append(f"{slug}: holds — список номеров правил каталога")
         return found
-    found = [f"{slug}: поля «{one}» нет" for one in PROPOSAL_FIELDS if not item.get(one)]
+    found = field_problems(item, PROPOSAL_FIELDS)
     if len(str(item.get("incident") or "")) < INCIDENT_AT_LEAST:
         found.append(f"{slug}: инцидент без конкретики — каталогу придётся спрашивать заново")
     if not (root / str(item.get("trail") or "")).exists():
@@ -666,6 +686,68 @@ def test_a_merge_proposal_is_judged_by_its_own_form() -> None:
         assert proposal_problems({**good, "rules": rules}), f"rules={rules!r} принят"
     assert proposal_problems({**good, "claim": ""}) == ["m: поля «claim» нет"]
     assert led_to(good) is None, "слияние ведёт к файлу, которого у него нет"
+
+
+@pytest.mark.parametrize(
+    ("item", "said"),
+    [
+        (
+            {"kind": "merge", "slug": "m", "rules": ["005", "127"], "why": ["в"], "claim": "у"},
+            "m: why — строка, а не list",
+        ),
+        (
+            {"kind": "merge", "slug": "m", "rules": ["005", "127"], "why": "в", "claim": 7},
+            "m: claim — строка, а не int",
+        ),
+        (
+            {"slug": "y", "claim": {"к": 1}, "incident": "и" * INCIDENT_AT_LEAST, "trail": "x"},
+            "y: claim — строка, а не dict",
+        ),
+    ],
+    ids=["слияние-why-список", "слияние-claim-число", "правило-claim-словарь"],
+)
+def test_every_form_names_a_field_of_the_wrong_shape(item: dict[str, Any], said: str) -> None:
+    """Форму поля судит каждая форма предложения, а не одни данные (взгляд на #1383, 210)."""
+    assert said in proposal_problems(item)
+
+
+def test_a_skill_field_of_the_wrong_shape_is_named(tmp_path: Path) -> None:
+    """У навыка `slug` числом и `holds` строкой — отказ с именем поля (взгляд на #1383)."""
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "SKILL.md").write_text("---\n", encoding="utf-8")
+    item = {
+        "kind": "skill",
+        "slug": 5,
+        "path": "x/SKILL.md",
+        "sha": "0" * 40,
+        "holds": "157",
+        "measurement": "м" * INCIDENT_AT_LEAST,
+    }
+    said = proposal_problems(item, tmp_path)
+    assert "5: slug — строка, а не int" in said
+    assert [one for one in said if ": holds — " in one] == ["5: holds — список, а не str"]
+    said = proposal_problems({**item, "slug": "x", "holds": ["15"]}, tmp_path)
+    assert [one for one in said if ": holds — " in one] == [
+        "x: holds — список номеров правил каталога"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rules", "said"),
+    [
+        ("005", "m: rules — список, а не str"),
+        (["005"], f"m: rules — от 2 до {MERGE_AT_MOST} разных номеров правил каталога"),
+    ],
+    ids=["форма", "содержание"],
+)
+def test_a_list_field_is_named_once(rules: object, said: str) -> None:
+    """Поле-список — одна строка отказа: форму судит `field_problems`, содержание — своя.
+
+    Прежде строка вместо списка давала два отказа про одно поле — «список, а не
+    str» и «от 2 до … номеров» (взгляд на #1476).
+    """
+    item = {"kind": "merge", "slug": "m", "rules": rules, "why": "в", "claim": "у"}
+    assert [one for one in proposal_problems(item) if ": rules — " in one] == [said]
 
 
 def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:
@@ -1397,7 +1479,8 @@ def catalogue_jobs(folder: Path) -> dict[tuple[str, str], set[str]]:
 #: ответ без строки здесь краснеет; строка, у которой предмета больше нет, — тоже.
 #:
 #: ПРОЧИТАННОЕ ПРИБИТО К ТЕКСТУ, как у `CALLED_HEAD_READ` (взгляды на #1331,
-#: `56cfefd`, и #1372): второй элемент — отпечаток `where` на день чтения.
+#: `56cfefd`, и #1372): второй элемент — отпечаток `where` и `origin` на день
+#: чтения (`head_digest`).
 #: Ответ, переписанный так, что его стало держать действие каталога, а `own`
 #: остался, краснеет до перечитывания: строка судит уже не только номер.
 #: Причина называет держателя — «держит <путь>», — и
