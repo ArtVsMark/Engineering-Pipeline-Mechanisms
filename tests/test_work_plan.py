@@ -14,6 +14,7 @@
 
 import ast
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 import pytest
@@ -1250,3 +1251,63 @@ def test_a_hand_head_is_a_whole_italic_line() -> None:
     assert module.hand_head("*Отложено*") and module.hand_head("  *Ждёт срока*  ")
     assert not module.hand_head("**жирное**") and not module.hand_head("- **#1** — работа")
     assert not module.hand_head("**") and not module.hand_head("*курсив* и текст")
+
+
+def test_a_tail_frees_only_the_labels_set_before_its_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """С `before` метка, поставленная после тега, остаётся и называется (взгляд на #1488)."""
+    platform, _ = release_platform([7, 9, 11])
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    tag = datetime(2026, 10, 17, 12, tzinfo=UTC)
+    at = {7: tag - timedelta(hours=1), 9: tag + timedelta(hours=1), 11: None}
+    monkeypatch.setattr(module, "labelled_at", lambda repo, token, number: at[number])
+    freed: list[int] = []
+    later: list[int] = []
+    module.released("o/r", "t", freed, before=tag, later=later)
+    assert (freed, later) == ([7, 11], [9])
+
+
+def test_the_label_time_is_the_last_labeling_of_waits_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Время метки — последнее событие `labeled` именно этой метки; чужие метки не в счёт."""
+    events = [
+        {
+            "event": "labeled",
+            "label": {"name": module.WAITS_RELEASE},
+            "created_at": "2026-10-16T10:00:00Z",
+        },
+        {
+            "event": "unlabeled",
+            "label": {"name": module.WAITS_RELEASE},
+            "created_at": "2026-10-16T11:00:00Z",
+        },
+        {
+            "event": "labeled",
+            "label": {"name": module.WAITS_RELEASE},
+            "created_at": "2026-10-17T10:00:00Z",
+        },
+        {"event": "labeled", "label": {"name": "другая"}, "created_at": "2026-10-18T10:00:00Z"},
+        {"event": "labeled", "label": {"name": module.WAITS_RELEASE}, "created_at": "не время"},
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter(events))
+    assert module.labelled_at("o/r", "t", 7) == datetime(2026, 10, 17, 10, tzinfo=UTC)
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter([]))
+    assert module.labelled_at("o/r", "t", 7) is None
+
+
+@pytest.mark.parametrize("before", ["вчера", "2026-10-17T12:00:00"], ids=["не-время", "без-пояса"])
+def test_a_border_that_is_not_a_zoned_time_does_not_run(
+    monkeypatch: pytest.MonkeyPatch, before: str
+) -> None:
+    """Граница без пояса или не время — исход 2 до первого снятия, а не догадка о поясе."""
+    calls: list[str] = []
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: calls.append(str(a)))
+    code = module.main(["--repo", "o/r", "--released", "--before", before])
+    assert code == module.EXIT_BROKEN and calls == []
+
+
+def test_when_of_reads_only_a_time() -> None:
+    """Время события — ISO с поясом; иное — `None`."""
+    assert module.when_of("2026-10-17T10:00:00Z") == datetime(2026, 10, 17, 10, tzinfo=UTC)
+    assert module.when_of("вчера") is None and module.when_of(None) is None

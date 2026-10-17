@@ -51,6 +51,17 @@ on:
         description: "поверхность изменена НЕСОВМЕСТИМО: поднимает мажор версии контракта"
         type: boolean
         default: false
+      # ХВОСТ ВЫПУСКА ОТДЕЛЬНЫМ ЗАХОДОМ (#1448, решение владельца 17.10.2026).
+      # Тег уже стоит: его поставил этот шаг, а хвост упал, или человек после
+      # отказа толчка. Выпуск заново не собирается — журнал собран, фрагменты
+      # перенесены. Заход выкачивает тег `v<version>` и проходит три шага
+      # хвоста: страницу, подъём своих шагов и снятие метки
+      # `plan/waits-release`. Нужны `version` и `apply`: номер без тега не
+      # угадывается, а хвост необратим так же, как выпуск.
+      tail:
+        description: "довести хвост выпуска: тег v<version> уже стоит — страница, подъём своих шагов, снятие метки"
+        type: boolean
+        default: false
     secrets:
       # ТОКЕН ВЛАДЕЛЬЦА ПРИХОДИТ ТОЛЬКО ЯВНО. Секретов вызывающего вызванный
       # прогон не видит, и вызывающий передаёт ровно этот, по имени (#993).
@@ -78,6 +89,20 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
+      # ХВОСТ БЕЗ НОМЕРА ИЛИ БЕЗ `apply` — ОТКАЗ, А НЕ ВЫПУСК. Без номера
+      # непонятно, чей хвост доводить, а без `apply` сухой заход шёл бы по
+      # условиям выпуска, которые тег уже не пропустит.
+      - name: вход хвоста назван целиком
+        if: inputs.tail
+        env:
+          ASKED_VERSION: ${{ inputs.version }}
+          ASKED_APPLY: ${{ inputs.apply }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ASKED_VERSION:-}" ] || [ "${ASKED_APPLY:-false}" != "true" ]; then
+            echo "::error::Хвост выпуска (tail) доводится только с номером (version) и apply: номер без тега не угадывается, а хвост необратим."
+            exit 1
+          fi
       - name: токен владельца не задан
         id: token
         env:
@@ -180,6 +205,7 @@ jobs:
           git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
 
       - name: проверить условия выпуска
+        if: ${{ !inputs.tail }}
         env:
           GH_TOKEN: ${{ github.token }}
           # ПРАВО ОБХОДА СПРАШИВАЕТСЯ ТЕМ ТОКЕНОМ, КОТОРЫМ ТОЛКАЮТ. Площадка
@@ -206,7 +232,7 @@ jobs:
 
       - name: выпустить
         id: release
-        if: inputs.apply && steps.token.outputs.present == 'yes'
+        if: inputs.apply && !inputs.tail && steps.token.outputs.present == 'yes'
         env:
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           # ПРАВО ОБХОДА СПРАШИВАЕТСЯ И ЗДЕСЬ — ОСОБЕННО ЗДЕСЬ. Сухой заход
@@ -263,6 +289,41 @@ jobs:
             exit 1
           fi
 
+      # ХВОСТ ВСТАЁТ НА ТЕГ, А НЕ НА ГОЛОВУ ОБЩЕЙ ВЕТКИ (#1448). После выпуска
+      # в ветку успевают слиться изменения, и номер с головы был бы чужим.
+      # Тег сверяется формой `version.py`: на его коммите должен читаться
+      # ровно `v<version>`, иначе хвост довёл бы не тот выпуск.
+      # И ТОЛЬКО У ПОСЛЕДНЕГО ВЫПУСКА (взгляд на #1488): хвост старого поднял бы
+      # прибивку пробы до его тега, то есть опустил бы её ниже уже выпущенного.
+      # Последний выпуск спрашивается до выкачки тега — с головы общей ветки.
+      - name: тег выпуска на месте — для хвоста
+        id: tagged
+        if: inputs.apply && inputs.tail && steps.token.outputs.present == 'yes'
+        env:
+          ASKED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python $MECHANISMS/scripts/version.py --last-tag >"${RUNNER_TEMP}/last-tag.txt" 2>"${RUNNER_TEMP}/last-tag.err" || {
+            echo "::error::Последний выпуск не прочитан: $(cat "${RUNNER_TEMP}/last-tag.err"). Чей хвост доводить, неясно (075)."
+            exit 1
+          }
+          if [ "$(cat "${RUNNER_TEMP}/last-tag.txt")" != "v${ASKED_VERSION}" ]; then
+            echo "::error::Хвост доводится только у последнего выпуска — $(cat "${RUNNER_TEMP}/last-tag.txt"), а запрошен v${ASKED_VERSION}: его хвост опустил бы прибивку пробы ниже выпущенного."
+            exit 1
+          fi
+          git checkout --quiet "refs/tags/v${ASKED_VERSION}" 2>"${RUNNER_TEMP}/tail-tag.err" || {
+            echo "::error::Хвост выпуска запрошен, а тега v${ASKED_VERSION} нет: $(cat "${RUNNER_TEMP}/tail-tag.err"). Доводить нечего — сперва выпуск (075)."
+            exit 1
+          }
+          python $MECHANISMS/scripts/version.py --head-tag >"${RUNNER_TEMP}/head-tag.txt" 2>"${RUNNER_TEMP}/head-tag.err" || {
+            echo "::error::Тег v${ASKED_VERSION} выкачан, но тег выпуска на его коммите не прочитан: $(cat "${RUNNER_TEMP}/head-tag.err") (075)."
+            exit 1
+          }
+          if [ "$(cat "${RUNNER_TEMP}/head-tag.txt")" != "v${ASKED_VERSION}" ]; then
+            echo "::error::На коммите тега v${ASKED_VERSION} тегом выпуска читается $(cat "${RUNNER_TEMP}/head-tag.txt") — хвост довёл бы не тот выпуск."
+            exit 1
+          fi
+
       # СТРАНИЦА ВЫПУСКА — ПЯТЫЙ ШАГ, И ОН ИДЁТ ПОСЛЕ ТЕГА. Раньше её заводил
       # человек, и площадка наполняла её своим списком изменений вместо нашего
       # журнала. Шаг отдельный: тег к этому моменту уже уехал, и отказ здесь
@@ -298,7 +359,7 @@ jobs:
           case "$rc" in
             0) ;;
             *)
-              echo "::error::Страница выпуска v${version} не заведена (код $rc). Тег и журнал на месте, выпуск повторять НЕ надо: страница доводится отдельным заходом кода механизмов на теге этого шага — python <клон механизмов>/scripts/release.py --page ${version} --apply (в дереве потребителя скрипта нет)"
+              echo "::error::Страница выпуска v${version} не заведена (код $rc). Тег и журнал на месте, выпуск повторять НЕ надо: хвост доводится кнопкой выпуска с tail, version ${version} и apply — она пройдёт весь хвост заново (#1448)"
               exit 1
               ;;
           esac
@@ -319,7 +380,7 @@ jobs:
         if: >-
           !cancelled() &&
           inputs.apply && steps.token.outputs.present == 'yes' &&
-          steps.release.outcome == 'success'
+          (steps.release.outcome == 'success' || steps.tagged.outcome == 'success')
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           ASKED_VERSION: ${{ inputs.version }}
@@ -338,7 +399,7 @@ jobs:
           case "$rc" in
             0) ;;
             *)
-              echo "::error::Свои шаги до v${version} не подняты (код $rc). Выпуск сделан и повторять его НЕ надо: подъём доводится заходом deps_intercept.py --self v${version} --repo ${GITHUB_REPOSITORY} --apply из кода механизмов на теге шага"
+              echo "::error::Свои шаги до v${version} не подняты (код $rc). Выпуск сделан и повторять его НЕ надо: хвост доводится кнопкой выпуска с tail, version ${version} и apply — она пройдёт весь хвост заново (#1448)"
               exit 1
               ;;
           esac
@@ -349,20 +410,32 @@ jobs:
       # теге, берётся тем же окном. Метку снимает токен владельца: у токена
       # прогона здесь только чтение задач. Отказ выпуска НЕ отменяет — тег уже
       # уехал; шаг называет, как снять метку отдельным заходом.
+      # СНИМАЮТСЯ МЕТКИ ЭТОГО ВЫПУСКА, А НЕ ВСЕ (взгляд на #1488): хвост доводят и
+      # через день, а за день метку ставят задачам уже следующего выпуска.
+      # Граница — время тега: поставленная позже него метка остаётся.
       - name: снять метку «ждёт выпуска» с задач плана
         if: >-
           !cancelled() &&
           inputs.apply && steps.token.outputs.present == 'yes' &&
-          steps.release.outcome == 'success'
+          (steps.release.outcome == 'success' || steps.tagged.outcome == 'success')
         env:
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -uo pipefail
+          python $MECHANISMS/scripts/version.py --head-tag >"${RUNNER_TEMP}/label-tag.txt" 2>"${RUNNER_TEMP}/label-tag.err" || {
+            echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/label-tag.err"). Граница меток неизвестна — снимать нечем (075)."
+            exit 1
+          }
+          before="$(git for-each-ref --format='%(creatordate:iso-strict)' "refs/tags/$(cat "${RUNNER_TEMP}/label-tag.txt")")"
+          if [ -z "${before}" ]; then
+            echo "::error::Время тега $(cat "${RUNNER_TEMP}/label-tag.txt") не прочитано — граница меток неизвестна (075)."
+            exit 1
+          fi
           rc=0
-          python $MECHANISMS/scripts/work_plan.py --released --repo "${GITHUB_REPOSITORY}" || rc=$?
+          python $MECHANISMS/scripts/work_plan.py --released --before "${before}" --repo "${GITHUB_REPOSITORY}" || rc=$?
           if [ "$rc" -ne 0 ]; then
-            echo "::error::Метка plan/waits-release не снята (код $rc). Выпуск сделан и повторять его НЕ надо: метку снимает заход work_plan.py --released --repo ${GITHUB_REPOSITORY} из кода механизмов на теге шага"
+            echo "::error::Метка plan/waits-release не снята (код $rc). Выпуск сделан и повторять его НЕ надо: хвост доводится кнопкой выпуска с tail, номером выпуска и apply — она пройдёт весь хвост заново (#1448)"
             exit 1
           fi
 
