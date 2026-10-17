@@ -760,6 +760,21 @@ def test_the_commit_and_the_tag_leave_in_one_atomic_push() -> None:
     assert 'git push origin "${tag}"' not in text, "тег снова уезжает отдельным толчком"
 
 
+def test_a_rejected_atomic_push_is_retried_with_a_pause() -> None:
+    """Кратковременный отказ выпуск переживает: атомарный толчок повторяется с паузой.
+
+    Повтор безопасен ровно потому, что толчок атомарный: после отказа не
+    доехало ничего (#1448). Без повтора отказ того рода, что был на v1.7.0,
+    отменял бы выпуск, а не переживался им.
+    """
+    text = release_step()
+    loop = text.find("for attempt in 1 2 3; do")
+    assert loop != -1, "толчок не повторяется"
+    body = text[loop : text.find("done", loop)]
+    assert 'git push --atomic origin HEAD "${tag}"' in body, "повторяется не атомарный толчок"
+    assert "sleep" in body, "повтор без паузы"
+
+
 def test_a_rejected_push_is_named_and_says_the_release_may_be_repeated() -> None:
     """Отказ атомарного толчка называется причиной и говорит, что повтор безопасен.
 
@@ -768,7 +783,7 @@ def test_a_rejected_push_is_named_and_says_the_release_may_be_repeated() -> None
     ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
     """
     text = release_step()
-    start = text.find('if ! git push --atomic origin HEAD "${tag}"; then')
+    start = text.find('if [ -z "${pushed}" ]; then')
     assert start != -1, "отказ толчка ничем не перехвачен"
     said = text[start:]
     assert "::error::" in said, "отказ толчка не назван"
