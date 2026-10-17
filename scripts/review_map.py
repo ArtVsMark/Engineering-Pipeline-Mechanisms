@@ -285,6 +285,15 @@ def role_declared(base: str) -> bool:
         table = table_shape(json.loads(shown_from_base(base, paths.REVIEW_ROLES)))
     except NotRun, json.JSONDecodeError:
         return False
+    return declares_role(table)
+
+
+def declares_role(table: dict[str, Any]) -> bool:
+    """Называет ли таблица ролей роль «правила каталога» — обязательной или по пути.
+
+    Один признак на карту и на заготовку (`onboard.dormant_areas_note`, 071):
+    заход подключения по нему называет спящую таблицу областей.
+    """
     named = set(table.get("required", []))
     named |= {role for rule in table.get("by_path", []) for role in rule.get("roles", [])}
     return CATALOGUE_ROLE in named
