@@ -180,10 +180,21 @@ def test_the_shared_mention_step_checks_the_author_itself() -> None:
 
 @pytest.mark.parametrize(
     ("who", "allowed"),
-    [("OWNER", True), ("COLLABORATOR", True), ("CONTRIBUTOR", False), ("NONE", False), ("", False)],
+    [
+        *[(role, True) for role in TRUSTED],
+        ("MEMBERS", False),
+        ("CONTRIBUTOR", False),
+        ("NONE", False),
+        ("", False),
+    ],
 )
 def test_the_author_case_is_run_not_read(who: str, allowed: bool, tmp_path: Path) -> None:
-    """Сверка автора исполняется оболочкой: обе половины — доверенный и прочие."""
+    """Сверка автора исполняется оболочкой: обе половины — доверенный и прочие.
+
+    Доверенные берутся из TRUSTED целиком (взгляд на #1475): текстовая сверка
+    ищет подстроку, и опечатка в ветке `case` прошла бы её, молча отказав той
+    роли, которую исполнение не перебирало.
+    """
     out = tmp_path / "out"
     done = subprocess.run(
         ["bash", "-c", who_step()["run"]],
