@@ -38,6 +38,11 @@ on:
         required: false
         default: false
         type: boolean
+      tail:
+        description: "довести хвост выпуска: тег v<version> уже стоит — страница, подъём своих шагов, снятие метки"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -61,5 +66,6 @@ jobs:
       acceptance: ${{ inputs.acceptance }}
       apply: ${{ inputs.apply }}
       breaking: ${{ inputs.breaking }}
+      tail: ${{ inputs.tail }}
     secrets:
       MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
