@@ -17,6 +17,7 @@
 import importlib.util
 import json
 import os
+import string
 import subprocess
 import sys
 from pathlib import Path
@@ -1149,23 +1150,45 @@ def test_a_crash_while_judging_refuses_a_push_and_spares_the_rest(
 
 
 @pytest.mark.parametrize(
-    ("command", "push"),
+    "command",
     [
-        ("git push origin agent/x", True),
-        ('git p"u"sh origin agent/x', True),
-        ("git p\\ush origin agent/x", True),
-        ("git pu\\\nsh origin agent/x", True),
-        ("git 'pu'sh origin agent/x", True),
-        ("ls -la", False),
-        ("git status", False),
+        "git push origin agent/x",
+        'git p"u"sh origin agent/x',
+        "git p\\ush origin agent/x",
+        "git pu\\\nsh origin agent/x",
+        "git 'pu'sh origin agent/x",
+        "git pu$'s'h origin agent/x",
+        'git pu$"s"h origin agent/x',
     ],
-    ids=["голое", "кавычки", "косая", "перенос", "одинарные", "ls", "status"],
+    ids=["голое", "кавычки", "косая", "перенос", "одинарные", "ansi-c", "локаль"],
 )
-def test_the_crash_sign_of_a_push_is_wider_than_the_parse(command: str, push: bool) -> None:
-    """Признак при сбое видит толчок во всех формах, которые снимает разбор (`d256792`)."""
-    assert module.maybe_push(command) is push
-    if push:
-        assert module.push_targets(command).push, "разбор не видит толчка — проба не о том"
+def test_every_push_the_parse_sees_the_crash_sign_sees(command: str) -> None:
+    """Толчок, который видит разбор, видит и признак при сбое (`d256792`, `662c08e`).
+
+    Форма сверяется с самим разбором (`push_targets`): проба о том, что разбор
+    снимает, а не о нашем представлении о нём.
+    """
+    assert module.push_targets(command).push, "разбор не видит толчка — проба не о том"
+    assert module.maybe_push(command)
+
+
+@pytest.mark.parametrize(
+    "between",
+    sorted(set(string.punctuation + string.whitespace + string.digits + "\u200b\u00a0")),
+)
+def test_no_non_letter_between_the_letters_hides_a_push(between: str) -> None:
+    """Класс, а не перечень (`a9ebaae`, `dba0e48`): любой не-буквенный знак между буквами.
+
+    Что бы разбор ни снимал между буквами слова, это не буква, — поэтому
+    признак обязан видеть толчок при ЛЮБОМ таком знаке, а не при перечисленных.
+    """
+    assert module.maybe_push(f"git pu{between}sh origin agent/x"), repr(between)
+
+
+@pytest.mark.parametrize("command", ["ls -la", "git status", "git fetch origin"])
+def test_the_crash_sign_spares_what_is_not_a_push(command: str) -> None:
+    """Команда без слова `push` среди букв — не толчок: прочее сторож не роняет (084)."""
+    assert not module.maybe_push(command)
 
 
 @pytest.mark.parametrize(
