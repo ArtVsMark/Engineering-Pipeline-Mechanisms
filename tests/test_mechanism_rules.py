@@ -1,0 +1,144 @@
+"""Перепись правил о механизмах держит форму и называет живые гейты (220, #1459).
+
+ЧТО СУДИТСЯ. Перепись `.rules/mechanism-rules.json` отвечает по каждому
+правилу о механизмах, чем держится каждое место дерева: путь гейта, «исключено:
+причина» или «не построено: что — замер». Навык
+`.claude/skills/a-gate-obeys-every-rule` проходит гейт по ней, а не по памяти,
+поэтому перепись обязана называть то, что есть: гейт, которого нет в дереве,
+или гейт, в чьём коде места не видно, — ответ, на который навык опереться не
+может (182).
+
+ГРАНИЦА НАЗВАНА (046, 195). Полноту переписи гейт не судит: новое правило о
+механизмах или новое место дописывается рукой. Охват гейта судится признаком —
+словом места в его коде, — а не разбором того, что гейт с этим местом делает:
+признак `hooks` совпал бы и с прозой о хуках. Образец формы — перепись
+каталога (его `scripts/check_mechanism_scope.py`), взят приёмом, а не копией.
+"""
+
+import json
+import re
+from pathlib import Path
+from typing import Any, Final
+
+import pytest
+
+from tests.conftest import ROOT, load_script
+
+paths = load_script("paths.py")
+CENSUS: Final = ROOT / paths.MECHANISM_RULES
+SKILL: Final = ROOT / ".claude" / "skills" / "a-gate-obeys-every-rule" / "SKILL.md"
+#: Места дерева, где живут механизмы: ключи `места` и каждой записи правила.
+PLACES: Final = frozenset({"paths.SOURCES", ".claude/hooks", ".github"})
+#: Два ответа словом. После двоеточия — причина, у «не построено» — с замером.
+EXCLUDED: Final = "исключено: "
+UNBUILT: Final = "не построено: "
+#: Замер у «не построено» — число и дата: без них долг неотличим от «не смотрели» (213).
+MEASURED_RE: Final = re.compile(r"замер\s+\d{2}\.\d{2}\.\d{4}.*?\d")
+RULE_RE: Final = re.compile(r"^\d{3}$")
+
+
+def census() -> dict[str, Any]:
+    """Перепись целиком; не разбирается — отказ, а не пустота (075)."""
+    said = json.loads(CENSUS.read_text(encoding="utf-8"))
+    assert isinstance(said, dict), f"{CENSUS.name}: не словарь"
+    return said
+
+
+def judged(value: object, place: str, signs: dict[str, str]) -> str:
+    """Что не так со значением места; годное — пустая строка."""
+    if isinstance(value, str) and value.startswith(EXCLUDED):
+        return "" if value.removeprefix(EXCLUDED).strip() else "«исключено» без причины"
+    if isinstance(value, str) and value.startswith(UNBUILT):
+        return "" if MEASURED_RE.search(value) else "«не построено» без замера с датой и числом"
+    if isinstance(value, dict):
+        gate, sign = value.get("гейт"), value.get("признак")
+    else:
+        gate, sign = value, signs.get(place)
+    if not isinstance(gate, str) or not isinstance(sign, str) or not sign:
+        return f"значение не той формы: {value!r}"
+    path = ROOT / gate
+    if not path.is_file():
+        return f"гейта {gate} в дереве нет"
+    if sign not in path.read_text(encoding="utf-8"):
+        return f"в коде {gate} нет признака места «{sign}»"
+    return ""
+
+
+def test_the_census_names_its_places_and_every_rule_once() -> None:
+    """Места — объявленные, номер правила — в одном разделе, у правила — все места."""
+    said = census()
+    assert set(said.get("места") or {}) == PLACES, (
+        f"места переписи: {sorted(said.get('места') or {})}"
+    )
+    rules, judgement = said.get("rules") or {}, said.get("суждение") or {}
+    assert rules, "правил в переписи нет — навыку проходить нечем (075)"
+    twice = sorted(set(rules) & set(judgement))
+    assert not twice, f"правило и в переписи, и в суждении: {twice}"
+    shapeless = sorted(one for one in (*rules, *judgement) if not RULE_RE.match(one))
+    assert not shapeless, f"номер правила не той формы: {shapeless}"
+    partial = {
+        number: sorted(PLACES - set(one)) for number, one in rules.items() if set(one) != PLACES
+    }
+    assert not partial, f"у правила названы не все места: {partial}"
+    empty = sorted(number for number, why in judgement.items() if not str(why).strip())
+    assert not empty, f"суждение без причины: {empty}"
+
+
+def test_every_gate_of_the_census_exists_and_sees_its_place() -> None:
+    """Названный гейт есть в дереве, и признак места стоит в его коде (182)."""
+    said = census()
+    signs = said["места"]
+    wrong = {
+        f"{number} · {place}": problem
+        for number, one in said["rules"].items()
+        for place, value in one.items()
+        if (problem := judged(value, place, signs))
+    }
+    assert not wrong, f"перепись называет то, на что навык опереться не может: {wrong}"
+    gates = sum(
+        not (isinstance(value, str) and value.startswith((EXCLUDED, UNBUILT)))
+        for one in said["rules"].values()
+        for value in one.values()
+    )
+    assert gates >= 10, f"гейтов в переписи {gates} — предикат смотрит не туда (075)"
+
+
+def test_the_skill_reads_the_census() -> None:
+    """Навык ссылается на перепись: читатель у данных есть, и он назван (155)."""
+    assert CENSUS.relative_to(ROOT).as_posix() in SKILL.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("value", "bad"),
+    [
+        ("исключено: хуки списков площадки не читают", False),
+        ("исключено: ", True),
+        ("не построено: ничто не судит — замер 17.10.2026: нарушений 0", False),
+        ("не построено: ничто не судит", True),
+        ("tests/conftest.py", False),
+        ("tests/нет-такого.py", True),
+        ({"гейт": "tests/conftest.py", "признак": "def code_files"}, False),
+        ({"гейт": "tests/conftest.py", "признак": "слово, которого там нет"}, True),
+        (7, True),
+    ],
+    ids=[
+        "исключено",
+        "исключено-без-причины",
+        "не-построено",
+        "не-построено-без-замера",
+        "гейт",
+        "гейта-нет",
+        "гейт-с-признаком",
+        "признака-нет",
+        "не-та-форма",
+    ],
+)
+def test_the_judge_tells_each_form(value: object, bad: bool) -> None:
+    """Каждая из трёх форм значения судится, и каждый изъян называется."""
+    assert bool(judged(value, "paths.SOURCES", {"paths.SOURCES": "code_files("})) is bad
+
+
+def test_the_skill_path_is_a_live_skill() -> None:
+    """Путь навыка — живой каталог навыков окна, а не придуманный адрес."""
+    assert SKILL.is_file(), f"навыка {SKILL.relative_to(ROOT)} нет"
+    assert Path(SKILL.parent).name == "a-gate-obeys-every-rule"

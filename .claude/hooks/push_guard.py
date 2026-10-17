@@ -341,7 +341,10 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
         try:
             inner = commands_of(script)
         except ValueError:
-            return [], f"скрипт оболочки не разбирается: {script[:60]}"
+            # Скрипт называется ЦЕЛИКОМ: общий `report.cut` хуку недоступен — он
+            # исполняется без пакета транспорта, — а молчаливый срез на месте
+            # выглядит полным ответом (016, взгляд на #1462).
+            return [], f"скрипт оболочки не разбирается: {script}"
         found: list[list[str]] = []
         for part in inner:
             deeper, blind = unwrap(part, depth - 1)
@@ -361,7 +364,7 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
             try:
                 inner = commands_of(script)
             except ValueError:
-                return [], f"строка `env -S` не разбирается: {script[:60]}"
+                return [], f"строка `env -S` не разбирается: {script}"
             split: list[list[str]] = []
             for part in inner:
                 deeper, blind = unwrap(part, depth - 1)

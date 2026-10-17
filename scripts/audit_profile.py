@@ -46,6 +46,7 @@ from typing import Any, Final
 import catalogue
 import finding_kinds
 import paths
+import report
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -130,7 +131,7 @@ def export_rules(export: object) -> dict[str, dict[str, Any]]:
             )
         )
         if not whole:
-            raise NotRun(f"{RULE_SHAPE_SAID}: {str(one)[:80]} (075)")
+            raise NotRun(f"{RULE_SHAPE_SAID}: {report.cut(str(one), 80)} (075)")
         found[str(one["id"])] = one
     return found
 

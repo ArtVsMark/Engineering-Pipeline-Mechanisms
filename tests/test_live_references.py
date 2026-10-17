@@ -468,6 +468,18 @@ def test_code_roots_hold_every_declared_source() -> None:
     assert {Path("tests"), HOOKS} <= roots, f"набор или хуки выпали из корней: {roots}"
 
 
+def test_the_hooks_are_code_by_default() -> None:
+    """Гейт, не назвавший хуки словом, всё равно их судит (210, взгляд на #1462).
+
+    Охват словом выпадал дважды: у 214, 016, 176 и 165 (#1439), затем у 039 и
+    071. Исключить хуки — только явным `with_hooks=False`.
+    """
+    assert HOOKS in code_roots(), "хуки окна вне умолчания корней"
+    assert any(HOOKS in path.relative_to(ROOT).parents for path in code_files()), (
+        "обходчик по умолчанию не видит ни одного хука окна"
+    )
+
+
 def test_a_twin_name_is_named() -> None:
     """Проба: тёзки называются с местами — в разных корнях и внутри одного (взгляд на #1315)."""
     one = ROOT / "scripts" / "x.py"
@@ -524,7 +536,10 @@ def test_code_files_reach_a_nested_source(tmp_path: Path) -> None:
         (tmp_path / where / "build" / "lib").mkdir(parents=True)
         (tmp_path / where / "build" / "lib" / "top.py").write_text("x = 1\n", encoding="utf-8")
         (tmp_path / where / "fresh.py").write_text("x = 1\n", encoding="utf-8")
-    found = {one.relative_to(tmp_path).as_posix() for one in code_files(root=tmp_path)}
+    # Хуков в пробном дереве нет: предмет здесь — обход источников вглубь.
+    found = {
+        one.relative_to(tmp_path).as_posix() for one in code_files(with_hooks=False, root=tmp_path)
+    }
     for where in load_script("paths.py").SOURCES:
         assert f"{where.as_posix()}/nested/deep.py" in found, sorted(found)
         assert f"{where.as_posix()}/fresh.py" in found, sorted(found)
