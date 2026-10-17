@@ -19,9 +19,23 @@
 предикат его отвергает целиком: сегодня таких вызовов ноль, и первый
 появится вместе с решением, как его судить (075).
 
+ТЕЛО `try` — ТО, ЧТО ИСПОЛНЯЕТСЯ В НЁМ (находка `f7d1815`). Вызов внутри
+`def`, `lambda` или `class`, вложенных в тело, исполнится позже и вне этого
+`try`: такой вызов поимкой внешнего блока не считается. Предел назван: довод
+по умолчанию и декоратор вложенного `def` исполняются при определении, то есть
+в `try`, — их предикат тоже не засчитывает, и это строгость, а не дыра.
+
+МОДУЛЬ ПОД ДРУГИМ ИМЕНЕМ — ТОТ ЖЕ МОДУЛЬ (находка `bde3e93`): `import
+subprocess as sp` даёт `sp.run`, и предикат его видит наравне с
+`from subprocess import run as r`.
+
 СОСЕД ЗА ГРАНИЦЕЙ (195): вызов через переменную-псевдоним (`spawn =
 subprocess.run`) и `os.system` предикат не видит. Набор `tests/` не судится:
 это не механизм, а его проверка, и предел ей ставит площадка.
+
+КОРНИ — ОДИН СПИСОК (находка `5a5a96a`, правило 071): механизмы — это
+`code_files(with_hooks=True)`, то есть `paths.SOURCES` и хуки окна, обходом
+по `git ls-files`, а не свой каталог хуков рядом.
 """
 
 import ast
@@ -30,19 +44,19 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, code_files, walk
+from tests.conftest import ROOT, code_files
 
 #: Вызовы процесса, которые судятся, — по имени, как у `tests/test_git_refuses.py`.
 SPAWNS: Final = frozenset({"run", "check_output", "check_call", "call", "Popen"})
 #: Поимка, означающая «истёк дедлайн — свой исход».
 CATCHES: Final = frozenset({"TimeoutExpired", "SubprocessError", "Exception"})
-#: Хуки окна — механизмы тоже (220), и `paths.SOURCES` их не называет.
-HOOKS: Final = ROOT / ".claude" / "hooks"
+#: Узлы, тело которых исполняется не там, где написано, — вне объемлющего `try`.
+SCOPES: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
 def mechanisms() -> list[Path]:
-    """Код механизмов: источники проекта и хуки окна."""
-    return [*code_files(), *walk(HOOKS, "*.py")]
+    """Код механизмов: источники проекта и хуки окна (220) — одним списком корней."""
+    return code_files(with_hooks=True)
 
 
 def spawned_name(func: ast.expr) -> str:
@@ -52,16 +66,28 @@ def spawned_name(func: ast.expr) -> str:
     return func.id if isinstance(func, ast.Name) else ""
 
 
-def is_spawn(call: ast.Call, imported: set[str]) -> bool:
-    """Вызов процесса: атрибут модуля `subprocess` или имя, взятое из него."""
+def is_spawn(call: ast.Call, imported: set[str], modules: frozenset[str] = frozenset()) -> bool:
+    """Вызов процесса: атрибут модуля `subprocess` (под любым именем) или имя, взятое из него."""
     func = call.func
     if isinstance(func, ast.Attribute):
         return (
             func.attr in SPAWNS
             and isinstance(func.value, ast.Name)
-            and func.value.id == "subprocess"
+            and func.value.id in {"subprocess", *modules}
         )
     return isinstance(func, ast.Name) and func.id in imported
+
+
+def executed(statement: ast.AST) -> list[ast.AST]:
+    """Узлы, исполняемые там, где написан `statement`: в тела `def`, `lambda`, `class` не входит."""
+    found: list[ast.AST] = []
+    todo = [statement]
+    while todo:
+        node = todo.pop()
+        found.append(node)
+        if not isinstance(node, SCOPES):
+            todo.extend(ast.iter_child_nodes(node))
+    return found
 
 
 def caught(block: ast.Try) -> set[str]:
@@ -79,7 +105,7 @@ def guarded(tree: ast.AST) -> set[int]:
     inside: set[int] = set()
     for block in ast.walk(tree):
         if isinstance(block, ast.Try) and caught(block) & CATCHES:
-            inside |= {id(node) for statement in block.body for node in ast.walk(statement)}
+            inside |= {id(node) for statement in block.body for node in executed(statement)}
     return inside
 
 
@@ -93,10 +119,17 @@ def undeadlined(source: str) -> list[str]:
         for alias in node.names
         if alias.name in SPAWNS
     }
+    modules = frozenset(
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "subprocess" and alias.asname
+    )
     safe = guarded(tree)
     found: list[str] = []
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and is_spawn(node, imported)):
+        if not (isinstance(node, ast.Call) and is_spawn(node, imported, modules)):
             continue
         if spawned_name(node.func) == "Popen":
             found.append(f"{node.lineno}: Popen — дедлайн не в вызове")
@@ -154,6 +187,27 @@ def test_the_predicate_sees_spawns_in_the_tree() -> None:
         ("from subprocess import check_output as co\nco(['x'])\n", True),
         ("import subprocess\nsubprocess.Popen(['x'])\n", True),
         ("import re\nre.compile('x').search('y')\nrun = 1\n", False),
+        (
+            "import subprocess\ntry:\n    def later():\n        subprocess.run(['x'], timeout=5)\n"
+            "except subprocess.TimeoutExpired:\n    pass\n",
+            True,
+        ),
+        (
+            "import subprocess\ntry:\n    f = lambda: subprocess.run(['x'], timeout=5)\n"
+            "except subprocess.TimeoutExpired:\n    pass\n",
+            True,
+        ),
+        (
+            "import subprocess\ndef later():\n    try:\n        subprocess.run(['x'], timeout=5)\n"
+            "    except subprocess.TimeoutExpired:\n        pass\n",
+            False,
+        ),
+        ("import subprocess as sp\nsp.run(['x'], timeout=5)\n", True),
+        (
+            "import subprocess as sp\ntry:\n    sp.run(['x'], timeout=5)\n"
+            "except sp.TimeoutExpired:\n    pass\n",
+            False,
+        ),
     ],
     ids=[
         "дедлайн и поимка",
@@ -164,6 +218,11 @@ def test_the_predicate_sees_spawns_in_the_tree() -> None:
         "импорт под другим именем",
         "Popen",
         "не процесс",
+        "def-в-теле-try",
+        "lambda-в-теле-try",
+        "try-внутри-def",
+        "модуль-под-другим-именем",
+        "модуль-под-другим-именем-пойман",
     ],
 )
 def test_the_predicate_has_both_halves(source: str, bad: bool) -> None:
