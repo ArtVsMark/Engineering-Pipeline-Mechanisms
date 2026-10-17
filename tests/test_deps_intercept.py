@@ -500,14 +500,15 @@ def test_calls_itself_reads_the_trunk_not_the_worktree(stand: Path) -> None:
 
 def test_restore_keeps_a_dirty_tree(stand: Path) -> None:
     """Возврат после захода правок не стирает: дерево с правками не трогается (`4885891`)."""
+    git(stand, "checkout", "--quiet", "-B", "agent/x")
     tracked = stand / ".github" / "workflows" / "ci.yml"
     tracked.write_text(tracked.read_text("utf-8") + "# своё\n", encoding="utf-8")
-    module.restore(stand)
+    module.restore(stand, "main")
     assert tracked.read_text("utf-8").endswith("# своё\n")
-    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "agent/x"
     git(stand, "checkout", "--quiet", "--", ".")
-    module.restore(stand)
-    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
+    module.restore(stand, "main")
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
 # --- переключение ветки и возврат (взгляды на #1434 и #1441) -------------------
@@ -558,7 +559,7 @@ def test_restore_names_both_owners_of_the_edits(
     """Чьи правки — не угадывается: названы оба случая и ветка (взгляд на #1441)."""
     git(stand, "checkout", "--quiet", "-B", "agent/x")
     (stand / ".github" / "workflows" / "ci.yml").write_text("недописано\n", encoding="utf-8")
-    module.restore(stand)
+    module.restore(stand, "main")
     out = capsys.readouterr().out
     assert "agent/x" in out and "человека" in out and "недописанный подъём" in out
 
@@ -567,8 +568,64 @@ def test_a_self_bump_returns_the_tree(stand: Path) -> None:
     """Подъём своих шагов возвращает дерево с ветки подъёма, как перехват (взгляд на #1441)."""
     with_own_calls(stand)
     assert module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0", "--apply"]) == 0
-    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
     assert git(stand, "status", "--porcelain") == ""
+
+
+# --- возврат — туда, где застал, и только если сдвинул (взгляд на #1468) ------
+
+
+def on_own_branch(work: Path) -> None:
+    """Человек работает в своей ветке, дерево чистое."""
+    git(work, "checkout", "--quiet", "-b", "feature")
+
+
+def test_a_self_bump_with_nothing_to_lift_keeps_the_branch(stand: Path) -> None:
+    """Потребитель себя не зовёт: подъём ветку не трогал — и возврат её не трогает."""
+    git(stand, "tag", "v2.0.0")
+    on_own_branch(stand)
+    assert module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0", "--apply"]) == 0
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "feature"
+
+
+def test_a_self_bump_with_its_branch_already_there_keeps_the_branch(stand: Path) -> None:
+    """Ветка подъёма уже есть: заход не переключал — человек остаётся в своей ветке."""
+    with_own_calls(stand)
+    git(stand, "push", "--quiet", "origin", "HEAD:refs/heads/agent/deps-self-v2.0.0")
+    on_own_branch(stand)
+    assert module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0", "--apply"]) == 0
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "feature"
+
+
+def test_an_intercept_with_its_branch_already_there_keeps_the_branch(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Перехват, чья ветка уже есть, ничего не переключал — и возврат не снимает с ветки."""
+    bot_signal(monkeypatch)
+    branch = module.branch_of("actions/checkout", "v7.1.0")
+    git(stand, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
+    on_own_branch(stand)
+    assert module.main(["--root", str(stand), "--repo", "o/r", "--apply"]) == module.EXIT_OK
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "feature"
+
+
+def test_a_lift_returns_to_the_branch_it_found(stand: Path) -> None:
+    """Сдвинул — возвращает на ветку человека, а не на отвязанную общую."""
+    with_own_calls(stand)
+    on_own_branch(stand)
+    assert module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0", "--apply"]) == 0
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "feature"
+    assert git(stand, "ls-remote", "--heads", "origin", "agent/deps-self-v2.0.0").strip()
+
+
+def test_restore_returns_a_detached_tree_to_its_commit(stand: Path) -> None:
+    """Отвязанное дерево — место по sha: возврат приходит на тот же коммит отвязанным."""
+    git(stand, "checkout", "--quiet", "--detach", "HEAD")
+    start = module.spot(stand)
+    module.switch_clean(stand, "agent/x")
+    module.restore(stand, start)
+    assert module.spot(stand) == start
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
 
 
 def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.MonkeyPatch) -> None:

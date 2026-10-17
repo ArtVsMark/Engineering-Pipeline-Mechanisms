@@ -367,8 +367,10 @@ FOREIGN_RE = re.compile(r"[A-Za-z0-9#/]+")
 #: Что из этих знаков собственный текст задания несёт законно — с причиной.
 #: Перечень РАЗРЕШЁННОГО, а не запрещённого (210): прежний образец перечислял
 #: формы адреса, и каждая новая форма его обходила (взгляд на #1374, дважды).
+#: Ключ — ФРАЗА, а не знак (взгляд на #1392): «N» законно только в строке
+#: вердикта, а отдельное «N» в любой другой строке задания — та же латиница.
 TASK_MAY_CARRY: Final = {
-    "N": "образец числа в строке вердикта «ВЕРДИКТ: находок N»",
+    "находок N": "образец числа в строке вердикта «ВЕРДИКТ: находок N»",
 }
 
 
@@ -385,8 +387,10 @@ def own_text(prior: list[tuple[str, Any]]) -> str:
 
 
 def foreign(text: str) -> set[str]:
-    """Знаки адреса в тексте сверх разрешённых."""
-    return set(FOREIGN_RE.findall(text)) - set(TASK_MAY_CARRY)
+    """Знаки адреса в тексте сверх разрешённых — разрешённое снимается фразой, на своём месте."""
+    for phrase in TASK_MAY_CARRY:
+        text = text.replace(phrase, "")
+    return set(FOREIGN_RE.findall(text))
 
 
 def test_the_fix_task_carries_no_project_address() -> None:
@@ -436,3 +440,9 @@ def test_the_data_lines_are_the_only_lines_taken_out() -> None:
 def test_every_address_form_is_caught(planted: str) -> None:
     """Любая форма адреса несёт знак вне разрешённого — и формы перечислять не надо."""
     assert foreign(f"текст задания {planted} дальше")
+
+
+def test_a_lone_n_outside_the_verdict_line_is_foreign() -> None:
+    """«N» законно в строке вердикта и нигде больше: разрешение по месту, а не по знаку."""
+    assert not foreign("ВЕРДИКТ: находок N")
+    assert foreign("в задании отдельное N посреди строки")

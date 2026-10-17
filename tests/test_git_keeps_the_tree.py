@@ -12,6 +12,13 @@
 Чистому дереву принудительность не нужна, а правку, которую проверка механизма
 не увидела, git без неё стирать откажется сам.
 
+СИЛА СУДИТСЯ В ЛЮБОЙ ЗАПИСИ, КОТОРУЮ ПРИМЕТ GIT (взгляд на #1468). Склеенные
+ключи прежде перечислялись поштучно, и `clean -xf`, `-dfx`, `-ffd` или
+`checkout -fB` проходили гейт. Теперь короткая склейка разбирается по буквам —
+до первой буквы, которая берёт довод (`-Bf` — ветка с именем `f`, а не сила), —
+а длинный ключ узнаётся и сокращённым: git принимает однозначный префикс
+(`git help cli`), поэтому `--forc` — та же сила, что `--force`.
+
 ГРАНИЦА НАЗВАНА (046). Судятся строковые постоянные вызова — позиционные
 доводы и элементы списка или кортежа, — а не собранная на ходу команда:
 `[*base, "--force"]` признак видит, имя переменной с ключом — нет. Шаги прогонов
@@ -20,18 +27,30 @@
 """
 
 import ast
+from dataclasses import dataclass
 from typing import Final
 
 import pytest
 
 from tests.conftest import ROOT, code_files
 
-#: Подкоманда git → её принудительные ключи.
+
+@dataclass(frozen=True)
+class Force:
+    """Как подкоманда git пишет силу: длинные ключи, буква в склейке, буквы с доводом."""
+
+    long: frozenset[str]
+    letter: str = ""
+    valued: frozenset[str] = frozenset()
+
+
+#: Подкоманда git → как она пишет силу. Буквы с доводом взяты из справки
+#: подкоманды: после них остаток склейки — значение, а не ключи.
 FORCED: Final = {
-    "checkout": frozenset({"--force", "-f", "--discard-changes"}),
-    "switch": frozenset({"--force", "-f", "--discard-changes"}),
-    "reset": frozenset({"--hard"}),
-    "clean": frozenset({"-f", "--force", "-fd", "-fdx", "-xdf", "-df"}),
+    "checkout": Force(frozenset({"--force", "--discard-changes"}), "f", frozenset("bB")),
+    "switch": Force(frozenset({"--force", "--discard-changes"}), "f", frozenset("cC")),
+    "reset": Force(frozenset({"--hard"})),
+    "clean": Force(frozenset({"--force"}), "f", frozenset("e")),
 }
 
 
@@ -47,14 +66,31 @@ def words(call: ast.Call) -> list[str]:
     return found
 
 
+def forces(force: Force, word: str) -> bool:
+    """Пишет ли слово силу: длинным ключом, его сокращением или буквой в склейке."""
+    if word.startswith("--"):
+        return len(word) > 2 and any(key.startswith(word) for key in force.long)
+    if not word.startswith("-") or not force.letter:
+        return False
+    for letter in word[1:]:
+        if letter == force.letter:
+            return True
+        if letter in force.valued:
+            return False
+    return False
+
+
 def forced(source: str) -> list[int]:
     """Строки вызовов, где смена ветки или файлов несёт принудительный ключ."""
     found: list[int] = []
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
-        said = set(words(node))
-        if any(command in said and said & keys for command, keys in FORCED.items()):
+        said = words(node)
+        if any(
+            command in said and any(forces(force, word) for word in said)
+            for command, force in FORCED.items()
+        ):
             found.append(node.lineno)
     return sorted(found)
 
@@ -90,8 +126,18 @@ def test_the_gate_has_a_subject() -> None:
         ('run(["git", "reset", "--hard", "origin/main"])', True),
         ('run(["git", "clean", "-fdx"])', True),
         ('run([*base, "checkout", "--discard-changes"])', True),
+        ('run(["git", "clean", "-xf"])', True),
+        ('run(["git", "clean", "-dfx"])', True),
+        ('run(["git", "clean", "-ffd"])', True),
+        ('git(root, "checkout", "-fB", "b", "origin/main")', True),
+        ('git(root, "switch", "-qf", "b")', True),
+        ('git(root, "checkout", "--forc", "b")', True),
+        ('run(["git", "reset", "--ha", "origin/main"])', True),
         ('git(root, "checkout", "--quiet", "-B", "b", "origin/main")', False),
         ('git(root, "checkout", "--quiet", "--detach", "origin/main")', False),
+        ('git(root, "checkout", "--quiet", "start", "--")', False),
+        ('git(root, "checkout", "-Bf", "origin/main")', False),
+        ('run(["git", "clean", "-efoo", "-n"])', False),
         ('run(["git", "reset", "--soft", "HEAD~1"])', False),
         ('run(["git", "push", "--force-with-lease"])', False),
     ],
@@ -101,8 +147,18 @@ def test_the_gate_has_a_subject() -> None:
         "reset-hard",
         "clean-f",
         "звёздочка",
+        "clean-xf",
+        "clean-dfx",
+        "clean-ffd",
+        "checkout-fB",
+        "switch-qf",
+        "сокращение-длинного",
+        "сокращение-hard",
         "без-силы",
         "отвязка",
+        "возврат-на-место",
+        "ветка-по-имени-f",
+        "образец-с-буквой-f",
         "мягкий-reset",
         "толчок",
     ],

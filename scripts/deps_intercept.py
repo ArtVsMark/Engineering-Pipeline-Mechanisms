@@ -396,12 +396,26 @@ def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
     return branch
 
 
-def restore(root: Path) -> None:
-    """Вернуть дерево на общую ветку после захода — не стирая правок.
+def spot(root: Path) -> str:
+    """Где стоит дерево: имя ветки, а у отвязанного — полный sha."""
+    name = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    return git(root, "rev-parse", "HEAD").strip() if name == "HEAD" else name
+
+
+def restore(root: Path, start: str) -> None:
+    """Вернуть дерево туда, где заход его застал, — если сдвинул, и не стирая правок.
 
     Прежде возврат шёл `checkout --force` и после ОТКАЗА `switch_clean`: правки,
     ради которых отказ и был, стирались здесь же (`4885891`). Дерево с правками
     теперь не трогается и называется; чистое возвращается без `--force`.
+
+    ВОЗВРАТ — ТУДА, ГДЕ ЗАСТАЛ, И ТОЛЬКО ЕСЛИ СДВИНУЛ (взгляд на #1468). Прежде
+    возврат шёл на отвязанную общую ветку после каждого захода, а заход ветку
+    меняет не всегда: подъёму, которому нечего поднимать или чья ветка уже есть,
+    переключать нечего (#1421), но возврат всё равно снимал человека с его ветки.
+    Это вторая находка по возврату, поэтому чинится классом (210): заход
+    запоминает место до работы, и любой исход, не сдвинувший дерево, — отказ до
+    переключения, пустой план, готовая ветка — возврата не делает вовсе.
 
     ЧЬИ ПРАВКИ — НЕ УГАДЫВАЕТСЯ, А НАЗЫВАЕТСЯ ОБА СЛУЧАЯ (взгляд на #1441).
     После отказа `switch_clean` это правки человека, а после записи подъёма,
@@ -409,15 +423,17 @@ def restore(root: Path) -> None:
     захода. Отличить их по дереву нечем, поэтому сказаны оба и ветка, на которой
     дерево осталось.
     """
+    now = spot(root)
+    if now == start:
+        return
     if git(root, "status", "--porcelain").strip():
-        head = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
         print(
-            f"в дереве незакоммиченные правки, ветка {head} — на общую не возвращаю: "
+            f"в дереве незакоммиченные правки, ветка {now} — на {start} не возвращаю: "
             "после отказа переключения это правки человека, после записи подъёма — "
             "недописанный подъём этого захода; дерево оставлено как есть"
         )
         return
-    git(root, "checkout", "--quiet", "--detach", f"origin/{paths.TRUNK}")
+    git(root, "checkout", "--quiet", start, "--")
 
 
 def signals(repo: str, token: str) -> list[dict[str, Any]]:
@@ -449,6 +465,11 @@ def main(argv: list[str] | None = None) -> int:
         report.announce(not args.apply)
         failed = ""
         try:
+            start = spot(args.root)
+        except (NotRun, OSError) as exc:
+            print(f"не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        try:
             self_bump(args.root, args.repo, args.own_tag, dry_run=not args.apply)
         except (NotRun, OSError) as exc:
             failed = str(exc)
@@ -456,9 +477,9 @@ def main(argv: list[str] | None = None) -> int:
         # так же — прежде дерево оставалось на `agent/deps-self-…` (взгляд на #1441).
         if args.apply:
             try:
-                restore(args.root)
+                restore(args.root, start)
             except (NotRun, OSError) as exc:
-                failed = failed or f"дерево на общую ветку не возвращено: {exc}"
+                failed = failed or f"дерево на {start} не возвращено: {exc}"
         if failed:
             print(f"не отработал: {failed}", file=sys.stderr)
             return EXIT_BROKEN
@@ -470,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
     report.announce(not args.apply)
     refused: list[str] = []
     try:
+        start = spot(args.root)
         found = signals(args.repo, token)
         print(f"сигналов {BOT}: {len(found)}")
         for change in found:
@@ -480,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"не разобрано: {exc}")
             finally:
                 if args.apply:
-                    restore(args.root)
+                    restore(args.root, start)
     except (NotRun, ghrest.TransportError, OSError) as exc:
         print(f"не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
