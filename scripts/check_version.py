@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import gitcall
 import paths
 import version as project_version
 
@@ -72,8 +73,9 @@ def tracked_files() -> list[Path]:
             check=True,
             text=True,
             encoding="utf-8",
+            timeout=gitcall.LOCAL,
         ).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise NotRun(f"список файлов не получен: {exc}") from exc
 
     files = [Path(name) for name in out.split("\0") if name]

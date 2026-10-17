@@ -65,6 +65,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import gitcall
 import paths
 import window
 
@@ -91,8 +92,9 @@ def touching(history: str, files: tuple[str, ...], cwd: str | None = None) -> li
             encoding="utf-8",
             cwd=cwd,
             check=True,
+            timeout=gitcall.LOCAL,
         )
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise window.NotRun(f"история свода не прочитана: {exc}") from exc
     return done.stdout.split()
 
