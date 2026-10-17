@@ -360,6 +360,11 @@ def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
     assert tag.startswith("facts-v")
     said = tag.removeprefix("facts-v")
     major = module.SCHEMA.split(".")[0]
+    # ОБЪЯВЛЕННЫЙ ПЕРЕЕЗД СНИМАЕТСЯ С ПОДЪЁМОМ (находка `6d5a560`): мажор формы
+    # ушёл с объявленного — константа обязана уйти, а не остаться зелёной.
+    assert module.SCHEMA_LAGS_TO in {"", major}, (
+        f"SCHEMA_LAGS_TO = {module.SCHEMA_LAGS_TO!r}, а мажор формы уже {major} — снимите переезд"
+    )
     if major == module.SCHEMA_LAGS_TO:
         # Переезд: мажор тега — ровно следующий за мажором формы (взгляд на #1442).
         assert said.split(".")[0] == str(int(module.SCHEMA_LAGS_TO) + 1), (tag, module.SCHEMA)

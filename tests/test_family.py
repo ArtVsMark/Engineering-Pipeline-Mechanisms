@@ -842,17 +842,31 @@ def test_hollow_survives_nesting_json_accepts(filled_at_bottom: bool) -> None:
     assert family.filled({"value": value}) is filled_at_bottom
 
 
-def test_a_deep_metric_reaches_the_written_facts() -> None:
-    """Глубокий замер соседа проходит разрез и запись JSON, как её делает сборка фактов.
+def test_a_deep_metric_reaches_the_written_facts(tmp_path: Path) -> None:
+    """Глубокий замер соседа проходит чтение сводки, разрез и запись фактов — путём сборки.
 
-    Запись — `json.dumps(..., indent=2)`, тот же вызов, что в `build_facts`:
-    у неё свой предел глубины, и обещание журнала держится только всем путём
-    (взгляд на #1376).
+    Звать надо то, что зовёт сборка (находка `dea89bd`): `family_facts` читает
+    файл сводки тем же `family.load`, а `facts_text` пишет факты тем же
+    вызовом, что `main`. Свой `json.dumps` рядом остался бы зелёным при смене
+    записи сборки (взгляд на #1376 — у записи свой предел глубины).
     """
+    build_facts = load_script("build_facts.py")
     depth = 10_000
     metric = {"value": json.loads("[" * depth + '"x"' + "]" * depth)}
     consumer = {"repo": "someone/else", "notes": {"195": {"note": "n", "metric": metric}}}
-    drawn = family.picture(summary(consumer))
-    written = json.loads(json.dumps(drawn, ensure_ascii=False, indent=2))
+    path = tmp_path / "family.json"
+    path.write_text(json.dumps(summary(consumer), ensure_ascii=False), encoding="utf-8")
+    drawn = build_facts.family_facts(path)
+    assert drawn["read"], drawn
+    written = json.loads(build_facts.facts_text({"family": drawn}))["exchange"]["epm"]["family"]
     assert [row["rule"] for row in written["notes"]["by"]] == ["195"]
     assert written["notes"]["by"][0]["metric"] == metric
+
+
+def test_a_summary_deeper_than_the_parser_is_the_third_outcome(tmp_path: Path) -> None:
+    """Вложенность глубже предела разборщика — `NotRun`, а не трасса (`88edc0f`, `9846074`)."""
+    path = tmp_path / "family.json"
+    depth = 200_000
+    path.write_text('{"consumers": ' + "[" * depth + "]" * depth + "}", encoding="utf-8")
+    with pytest.raises(family.NotRun, match="не разбирается"):
+        family.load(path)

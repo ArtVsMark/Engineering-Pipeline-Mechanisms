@@ -635,8 +635,22 @@ def test_badges_name_a_missing_source_of_facts(tmp_path: Path, lost: str, said: 
         ('{"commit": 7}', "поле commit не строка, а int"),
         ("[]", "факты не объект, а list"),
         ("не json", "Expecting value"),
+        ('{"commit": "HEAD"}', "не полный хэш коммита"),
+        ('{"commit": "main"}', "не полный хэш коммита"),
+        ('{"commit": "abc1234"}', "не полный хэш коммита"),
+        ('{"commit": "' + "a" * 40 + '\\n"}', "не полный хэш коммита"),
     ],
-    ids=["absent", "blank", "not-a-string", "not-an-object", "unreadable"],
+    ids=[
+        "absent",
+        "blank",
+        "not-a-string",
+        "not-an-object",
+        "unreadable",
+        "head",
+        "branch",
+        "short",
+        "with-newline",
+    ],
 )
 def test_commit_of_refuses_facts_without_a_commit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], body: str, why: str
@@ -656,11 +670,12 @@ def test_commit_of_refuses_facts_without_a_commit(
 def test_commit_of_prints_the_facts_commit(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`--commit-of` печатает коммит фактов одной строкой."""
+    """`--commit-of` печатает коммит фактов одной строкой — только полный хэш (`0a6fab3`)."""
+    sha = "0123456789abcdef0123456789abcdef01234567"
     given = tmp_path / "facts.json"
-    given.write_text('{"commit": " abc1234 "}', encoding="utf-8")
+    given.write_text(json.dumps({"commit": sha}), encoding="utf-8")
     assert facts.commit_of(given) == facts.EXIT_OK
-    assert capsys.readouterr().out == "abc1234\n"
+    assert capsys.readouterr().out == sha + "\n"
 
 
 def test_publication_writes_only_to_the_derived_branch() -> None:
