@@ -884,6 +884,23 @@ def test_a_name_working_in_either_tree_is_not_service(tmp_path: Path) -> None:
     assert module.installing_steps(caller, supplier) == frozenset()
 
 
+def test_two_copies_of_one_repository_answer_as_one(tmp_path: Path) -> None:
+    """У поставщика рабочее дерево и checkout кода — две копии одного репозитория (#1408).
+
+    Обе читаются, и ответ равен ответу одной копии: имена складываются
+    множеством, а не числом. Прежде набор строил только разные деревья, и
+    неверное «читается один раз» в докстроке прошло (107).
+    """
+    steps = [("поставить проверки", "python -m pip install ./x"), ("гоняет", "pytest -q")]
+    work = tmp_path / "work"
+    mechanisms = tmp_path / "mechanisms"
+    flow(work, "ci.yml", steps)
+    flow(mechanisms, "ci.yml", steps)
+    one = module.installing_steps(work)
+    assert one == {"поставить проверки"}
+    assert module.installing_steps(work, mechanisms) == one
+
+
 def test_supplier_workflows_is_named_by_the_step_or_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
