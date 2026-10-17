@@ -54,6 +54,14 @@ def test_no_single_contract_step_is_the_third_outcome(copies: int) -> None:
             False,
             1,
         ),
+        ((module.STEP_TIMED_OUT, "шаг не уложился в дедлайн 300 с"), CAUGHT, False, 4),
+        (GOOD, (module.STEP_TIMED_OUT, "шаг не уложился в дедлайн 300 с"), False, 4),
+        (
+            (1, "::error::Файлы выпуска не сходятся с прибитыми хешами"),
+            (module.STEP_TIMED_OUT, "шаг не уложился в дедлайн 300 с"),
+            False,
+            1,
+        ),
     ],
     ids=[
         "сверка-жива",
@@ -66,6 +74,9 @@ def test_no_single_contract_step_is_the_third_outcome(copies: int) -> None:
         "канал-молчит-на-втором",
         "тега-нет-на-втором",
         "мёртвая-на-годных-при-молчании-второго",
+        "дедлайн-на-годных",
+        "дедлайн-на-втором",
+        "мёртвая-на-годных-при-дедлайне-второго",
     ],
 )
 def test_the_verdict_names_a_dead_check(
@@ -216,6 +227,33 @@ def test_the_step_runs_as_the_platform_runs_it(tmp_path: Path) -> None:
     code, said = module.run_step(step, tmp_path, "o/a")
     assert code == 3
     assert said.strip() == f"facts-v0.0.0 o/a {tmp_path}"
+
+
+def test_a_step_past_its_deadline_is_its_own_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Истёкший дедлайн — код `STEP_TIMED_OUT` с названной причиной (находка `c91b22a`)."""
+
+    def hung(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(command, 300, output=b"half")
+
+    monkeypatch.setattr(module.subprocess, "run", hung)
+    code, said = module.run_step({"run": "true"}, tmp_path, "o/a")
+    assert code == module.STEP_TIMED_OUT
+    assert "не уложился в дедлайн 300 с" in said
+
+
+def test_a_step_that_does_not_start_is_not_a_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`OSError` — гейт не отработал (2), а не «не уложился» (находка `673fef5`)."""
+
+    def absent(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("bash")
+
+    monkeypatch.setattr(module.subprocess, "run", absent)
+    with pytest.raises(module.NotRun, match="не запустился"):
+        module.run_step({"run": "true"}, tmp_path, "o/a")
 
 
 def test_the_subject_is_read_from_the_tree() -> None:

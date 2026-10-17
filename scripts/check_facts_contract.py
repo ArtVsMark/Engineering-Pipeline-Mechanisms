@@ -231,10 +231,15 @@ def run_step(step: dict[str, Any], temp: Path, repo: str) -> tuple[int, str]:
             check=False,
             timeout=gitcall.NETWORK,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except OSError as exc:
+        # Шаг не запустился — гейт не отработал (2), а не «не уложился»: ко
+        # времени это отношения не имеет (находка `673fef5`).
+        raise NotRun(f"шаг не запустился: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
         # Шаг ходит к площадке за выпуском: сетевой предел, а истёкший — свой
-        # код, как у `timeout(1)`, и причина, а не трасса (039).
-        return STEP_TIMED_OUT, f"шаг не отработал: {exc}"
+        # код, как у `timeout(1)`, и причина, а не трасса (039). Судит его
+        # `verdict` молчанием канала, а не мёртвой сверкой.
+        return STEP_TIMED_OUT, f"шаг {gitcall.cause(exc)}"
     return done.returncode, done.stdout + done.stderr
 
 
@@ -283,16 +288,24 @@ def verdict(
     выпуск и показавший мёртвую сверку, — окончательный ответ, и мигнувшая на
     втором заходе сеть его не отменяет. Порядок:
 
-    1. годный заход не скачал выпуск — канал: «нет такого» у названного файла
-       (`missing`) — находка о теге (1), иначе молчание канала (4);
+    1. годный заход не уложился в сетевой дедлайн — молчание канала (4); не
+       скачал выпуск — канал: «нет такого» у названного файла (`missing`) —
+       находка о теге (1), иначе молчание канала (4);
     2. годный заход остановлен или сказал о несверке — сверка мертва (1);
-    3. чужой заход не скачал выпуск — канал, как в п. 1;
+    3. чужой заход не уложился или не скачал выпуск — канал, как в п. 1;
     4. чужой заход не остановлен своей строкой — сверка мертва (1);
     5. иначе — сверка жива (0).
+
+    ИСТЁКШИЙ ДЕДЛАЙН — КАНАЛ, А НЕ МЁРТВАЯ СВЕРКА (находка `c91b22a`). Прежде
+    код `STEP_TIMED_OUT` шёл в п. 2 как любой ненулевой, и зависшая сеть
+    читалась находкой о дереве. Предел назван: код 124 от самого шага
+    (`timeout(1)` внутри него) судится так же — это тоже истёкший дедлайн.
     """
 
-    def channel(said: str) -> tuple[int, str] | None:
-        """Исход канала у захода: не скачал выпуск — 1 или 4; скачал — `None`."""
+    def channel(rc: int, said: str) -> tuple[int, str] | None:
+        """Исход канала у захода: истёк дедлайн — 4, не скачал выпуск — 1 или 4; иначе `None`."""
+        if rc == STEP_TIMED_OUT:
+            return EXIT_SILENT, f"{said.strip()[-300:]} — канал молчит, сверка не проверена"
         named = unfetched(said)
         if named is None:
             return None
@@ -301,14 +314,14 @@ def verdict(
         return EXIT_SILENT, f"«{named}» выпуска договора не скачан — сверка не проверена"
 
     rc, said = good
-    if (judged := channel(said)) is not None:
+    if (judged := channel(rc, said)) is not None:
         return judged
     if rc != 0 or "::error::" in said:
         return EXIT_FOUND, f"годные факты остановлены (код {rc}): {said.strip()[-300:]}"
     if "::warning::" in said:
         return EXIT_FOUND, f"сверка не отработала на годных фактах — мертва: {said.strip()[-300:]}"
     rc, said = stranger
-    if (judged := channel(said)) is not None:
+    if (judged := channel(rc, said)) is not None:
         return judged
     line = f"{STRANGER}: расхождений "
     if rc != 1 or line not in said:

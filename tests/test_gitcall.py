@@ -40,6 +40,37 @@ def test_git_missing_is_a_refusal_not_a_trace(monkeypatch: pytest.MonkeyPatch) -
         gitcall.output(["status"], Refused)
 
 
+def test_a_deadline_past_names_the_deadline_not_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Истёкший git — «не уложился в дедлайн», а не `b'…'` (находка `f767e24`).
+
+    `TimeoutExpired` несёт перехваченный вывод байтами при любом `text=True`.
+    """
+
+    def hung(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(command, gitcall.LOCAL, stderr=b"half-said")
+
+    monkeypatch.setattr(gitcall.subprocess, "run", hung)
+    with pytest.raises(Refused) as caught:
+        gitcall.output(["status"], Refused)
+    assert f"не уложился в дедлайн {gitcall.LOCAL} с" in str(caught.value)
+    assert "b'" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("exc", "said"),
+    [
+        (subprocess.CalledProcessError(1, ["git"], stderr="fatal: нет\n"), "fatal: нет"),
+        (subprocess.CalledProcessError(2, ["git"], stderr=b"fatal: bytes"), "fatal: bytes"),
+        (subprocess.CalledProcessError(3, ["git"], stderr=""), "exit status 3"),
+        (FileNotFoundError("git"), "git"),
+    ],
+    ids=["строкой", "байтами", "молча-с-кодом", "нет-git"],
+)
+def test_the_cause_of_a_refusal_is_a_readable_line(exc: Exception, said: str) -> None:
+    """Причина отказа — строка: вывод git, а без вывода — исключение с кодом."""
+    assert said in gitcall.cause(exc)
+
+
 @pytest.mark.parametrize("name", ["window.py", "release.py"])
 def test_a_module_wrapper_refuses_without_git(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Обёртки `window.git` и `release.git` без git — свой третий исход, а не трасса (#1008)."""

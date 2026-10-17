@@ -411,9 +411,13 @@ def lint_python(installs: str, root: Path) -> Path:
             done = subprocess.run(
                 command, capture_output=True, text=True, encoding="utf-8", timeout=BUILD_TIMEOUT
             )
-            failed = (done.stderr or done.stdout).strip()[-300:] if done.returncode else ""
+            # Отказ — по КОДУ, а не по выводу: молчаливый ненулевой код давал
+            # пустую причину, и недособранное окружение подменяло прежнее
+            # (находка `3372c78`).
+            told = (done.stderr or done.stdout).strip()[-300:]
+            failed = (told or f"код {done.returncode} без вывода") if done.returncode else ""
         except (OSError, subprocess.TimeoutExpired) as exc:
-            failed = str(exc)
+            failed = gitcall.cause(exc)
         if failed:
             shutil.rmtree(fresh, ignore_errors=True)
             why = f"окружение шага типов не собрано ({' '.join(command[:4])}…): {failed}"
