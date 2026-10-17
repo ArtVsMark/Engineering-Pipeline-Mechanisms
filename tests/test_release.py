@@ -7,10 +7,13 @@
 случаем, потому что выпуск делают редко и увидеть их надо сразу все.
 """
 
+import os
 import subprocess
+import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -960,6 +963,128 @@ def test_a_release_lifts_its_own_probe_after_the_tag() -> None:
     step = steps[lift]
     assert step["if"] == (
         "!cancelled() && inputs.apply && steps.token.outputs.present == 'yes' && "
-        "steps.release.outcome == 'success'"
+        "(steps.release.outcome == 'success' || steps.tagged.outcome == 'success')"
     )
     assert '$MECHANISMS/scripts/deps_intercept.py --self "v${version}" --apply' in step["run"]
+
+
+def release_steps() -> list[dict[str, Any]]:
+    """Шаги джоба выпуска — как их читает площадка."""
+    flow = yaml.safe_load((ROOT / ".github/workflows/step-release.yml").read_text(encoding="utf-8"))
+    return list(flow["jobs"]["release"]["steps"])
+
+
+def named(name: str) -> dict[str, Any]:
+    """Шаг выпуска по имени; нет его — предмет исчез (075)."""
+    found = [one for one in release_steps() if one.get("name") == name]
+    assert len(found) == 1, f"шаг «{name}» найден {len(found)} раз (075)"
+    return found[0]
+
+
+def test_the_tail_is_an_input_of_the_step_and_of_the_button() -> None:
+    """Хвост выпуска — вход шага и кнопки, а кнопка его передаёт (#1448)."""
+    flow = yaml.safe_load((ROOT / ".github/workflows/step-release.yml").read_text(encoding="utf-8"))
+    button = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    assert flow[True]["workflow_call"]["inputs"]["tail"]["default"] is False
+    assert "tail" in button[True]["workflow_dispatch"]["inputs"]
+    assert button["jobs"]["release"]["with"]["tail"] == "${{ inputs.tail }}"
+
+
+def test_the_tail_does_not_build_the_release_again() -> None:
+    """В хвосте выпуск не собирается: журнал собран, фрагменты перенесены (#1448)."""
+    assert named("проверить условия выпуска")["if"] == "${{ !inputs.tail }}"
+    assert "!inputs.tail" in named("выпустить")["if"]
+    assert named("тег выпуска на месте — для хвоста")["if"] == (
+        "inputs.apply && inputs.tail && steps.token.outputs.present == 'yes'"
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["поднять свои шаги до выпуска", "снять метку «ждёт выпуска» с задач плана"]
+)
+def test_every_tail_step_runs_after_the_release_or_the_tag(name: str) -> None:
+    """Шаги хвоста держатся исходом выпуска ИЛИ выкачки тега — и только ими."""
+    assert (
+        "(steps.release.outcome == 'success' || steps.tagged.outcome == 'success')"
+        in (named(name)["if"])
+    )
+
+
+def run_tagged(tmp_path: Path, tags: list[str], version: str) -> subprocess.CompletedProcess[str]:
+    """Исполняет сценарий выкачки тега для хвоста в подделке дерева."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    git = partial(subprocess.run, cwd=tree, check=True, capture_output=True, timeout=30)
+    git(["git", "init", "-q"])
+    git(
+        [
+            "git",
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "а",
+        ]
+    )
+    for tag in tags:
+        git(["git", "tag", tag])
+    git(
+        [
+            "git",
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "б",
+        ]
+    )
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    (shim / "python").symlink_to(sys.executable)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    env = {
+        **os.environ,
+        "PATH": f"{shim}{os.pathsep}{os.environ.get('PATH', '')}",
+        "ASKED_VERSION": version,
+        "RUNNER_TEMP": str(temp),
+        "MECHANISMS": str(ROOT),
+    }
+    return subprocess.run(
+        ["bash", "-c", str(named("тег выпуска на месте — для хвоста")["run"])],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(
+    ("tags", "said"),
+    [
+        (["v1.2.3"], ""),
+        ([], "тега v1.2.3 нет"),
+        (["v1.2.3", "v1.3.0"], "несколько тегов выпуска"),
+    ],
+    ids=["тег-на-месте", "тега-нет", "два-выпуска-на-коммите"],
+)
+def test_the_tail_stands_on_its_tag_or_says_why_not(
+    tmp_path: Path, tags: list[str], said: str
+) -> None:
+    """Хвост встаёт на тег `v<version>`; нет его или он неоднозначен — отказ с причиной."""
+    run = run_tagged(tmp_path, tags, "1.2.3")
+    if not said:
+        assert run.returncode == 0, run.stdout + run.stderr
+        return
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert "::error::" in run.stdout and said in run.stdout, run.stdout
