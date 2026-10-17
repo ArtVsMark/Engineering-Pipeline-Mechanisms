@@ -17,8 +17,9 @@ from dataclasses import replace
 from typing import Any, Final, TypeGuard
 
 import pytest
+import yaml
 
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script, walk
 
 module = load_script("automerge.py")
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -3114,12 +3115,35 @@ def test_head_runs_is_one_read_of_the_head(monkeypatch: pytest.MonkeyPatch) -> N
         ("2026-10-14T19:50:51Z", module.datetime(2026, 10, 14, 19, 50, 51, tzinfo=module.UTC)),
         (None, None),
         ("вчера", None),
+        ("2026-10-14T19:50:51", None),
     ],
-    ids=["время", "нет-времени", "не-время"],
+    ids=["время", "нет-времени", "не-время", "без-пояса"],
 )
 def test_moment_of_refuses_what_is_not_a_time(stamp: object, moment: Any) -> None:
     """Время записи не той формы — `None`, а не трейсбек всего захода."""
     assert module.moment_of(stamp) == moment
+
+
+def test_a_hung_limit_outlasts_every_job_limit_in_the_tree() -> None:
+    """`HUNG_AFTER` длиннее самого длинного `timeout-minutes` прогонов (находка `6690420`).
+
+    Иначе обычный ход джоба с пределом длиннее назывался бы «повисла», и
+    голову подтягивали бы зря: прогоны шли бы заново без причины. Джоб без
+    `timeout-minutes` живёт до предела площадки — его предмет держит гейт
+    дедлайнов прогонов, не этот.
+    """
+    limits = [
+        int(job["timeout-minutes"])
+        for flow in walk(ROOT / ".github" / "workflows", "*.y*ml")
+        for job in (
+            (yaml.safe_load(flow.read_text(encoding="utf-8")) or {}).get("jobs") or {}
+        ).values()
+        if isinstance(job, dict) and isinstance(job.get("timeout-minutes"), int)
+    ]
+    assert limits, "пределов джобов в прогонах не найдено — сверять не с чем (075)"
+    assert module.timedelta(minutes=max(limits)) < module.HUNG_AFTER, (
+        f"HUNG_AFTER {module.HUNG_AFTER} не длиннее предела джоба {max(limits)} мин"
+    )
 
 
 def test_an_armed_head_with_the_same_body_is_asked_about_a_stall(
