@@ -67,6 +67,14 @@
 `CLAUDE.md` не пишется и называется, а прочая заготовка кладётся: правило «ни
 одного файла при занятом» держит половину ВЫЗОВА, а свод вызовом не является.
 
+ДАННЫЕ ВЗГЛЯДА И `dependabot.yml` КЛАДУТСЯ ЗАГОТОВКАМИ (#1386, решение
+владельца 17.10.2026). Карта взгляда читает из дерева потребителя таблицу ролей,
+процедуру, профили и таблицу областей; без них взгляд идёт без ролей. Скелеты
+лежат в `kit/data/` и ложатся обеими дверями, `--write` и `--update`, только в
+свободные пути: занятый путь — своё проекта, отказа он не даёт. Ответ каталогу
+`.rules/bindings.json` заготовкой не кладётся — его форму ведёт каталог, — и
+заход называет, что без него карта не собирается.
+
 Исходы (правило 039): ``0`` заготовка собрана · ``2`` не отработал ·
 ``3`` отдавать нечего: ни один шаг не помечен · ``4`` прибивка не несёт
 помеченного: выпуск отстал от дерева · ``5`` с ``--write``: путь заготовки в
@@ -716,6 +724,101 @@ def rulebook_kit(root: Path) -> dict[Path, str]:
     return found
 
 
+#: Заготовки данных, которые общие шаги читают из дерева потребителя (#1386):
+#: `kit/data/<путь>` ложится у потребителя под `<путь>`, только в свободное.
+DATA_KIT: Final = paths.KIT / "data"
+#: Что кладётся из `DATA_KIT` — перечень объявленных якорей, а не обход
+#: каталога: решение владельца назвало состав поимённо, а якорь у каждого пути
+#: уже есть. Таблица областей сюда не входит — она собирается (`area_kit`).
+#: Совпадение перечня с `kit/data/` держит `tests/test_onboard.py`.
+DATA_KITTED: Final = (paths.REVIEW_ROLES, paths.REVIEW_PROCEDURE, paths.ROLES, paths.DEPENDABOT)
+#: Пути области в заготовке: ЛЮБОЙ путь — в корне и вглубь (`review_map.matches`).
+#: Не пустые: пустой `paths` карта читает «поверхности нет» и правила области
+#: роли не отдаёт, то есть незаполненная заготовка давала бы роли МЕНЬШЕ, чем
+#: отсутствие таблицы (взгляд на #1455). Любой путь — то же, что без таблицы.
+AREA_ANY: Final = ("*", "**/*")
+#: Пояснение области в заготовке: что заполнять.
+AREA_FILL: Final = (
+    "заготовка: область задевает любой путь, и роль получает все её правила, как без "
+    "таблицы. Наполнение проекта: образцы путей своего дерева, которые область "
+    "задевает, или пустой список с причиной, почему поверхности у неё нет"
+)
+
+
+def area_kit(root: Path) -> str:
+    """Заготовка таблицы «область каталога → пути»: области — наши, пути — пустые с причиной.
+
+    ОБЛАСТИ ВЫВОДЯТСЯ ИЗ НАШЕЙ ТАБЛИЦЫ, А НЕ ПИШУТСЯ ВТОРЫМ СПИСКОМ (022): её
+    покрытие областей каталога сверяет `tests/test_area_paths.py`. Пути — свои у
+    каждого дерева; до наполнения область задевает любой путь (`AREA_ANY`).
+    """
+    try:
+        areas = json.loads((root / paths.AREA_PATHS).read_text(encoding="utf-8"))["areas"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise NotRun(f"`{paths.AREA_PATHS}` не разобран: {exc!r}") from exc
+    if not isinstance(areas, dict) or not areas:
+        raise NotRun(f"`{paths.AREA_PATHS}`: нет словаря `areas` — областей для заготовки нет")
+    kit = {
+        "_": (
+            "Области каталога → пути этого дерева — заготовка механизмов (#1386). Роль "
+            "взгляда «правила каталога» получает только правила, чьи области задеты "
+            "тронутыми путями. Ключи — английские имена областей выгрузки каталога."
+        ),
+        "schema": 1,
+        "areas": {str(name): {"paths": list(AREA_ANY), "why": AREA_FILL} for name in sorted(areas)},
+    }
+    return json.dumps(kit, ensure_ascii=False, indent=2) + "\n"
+
+
+def data_kit(root: Path) -> dict[Path, str]:
+    """Заготовки данных взгляда и `dependabot.yml`: `kit/data/<путь>` → `<путь>` (#1386).
+
+    Состав — `DATA_KITTED`; недостающий файл — отказ, а не тихий пропуск (045).
+    `bindings.json` заготовкой не кладётся
+    (решение владельца 17.10.2026): это ответ проекта каталогу, и его форму
+    ведёт каталог — наш скелет стал бы вторым источником формы (022).
+    """
+    missing = [path for path in DATA_KITTED if not (root / DATA_KIT / path).is_file()]
+    if missing:
+        raise NotRun(
+            f"заготовок данных нет в {DATA_KIT}/: "
+            + ", ".join(str(one) for one in missing)
+            + " — карта взгляда у потребителя не собралась бы"
+        )
+    found = {path: (root / DATA_KIT / path).read_text(encoding="utf-8") for path in DATA_KITTED}
+    return found | {paths.AREA_PATHS: area_kit(root)}
+
+
+#: Расширения YAML, которые площадка читает одинаково: `dependabot.yaml` занимает
+#: место `dependabot.yml`, и второй файл рядом дал бы два конфига (взгляд на #1455).
+YAML_TWINS: Final = {".yml": ".yaml", ".yaml": ".yml"}
+
+
+def taken_by_twin(consumer: Path, path: Path) -> bool:
+    """Путь занят файлом-двойником с другим расширением YAML."""
+    twin = YAML_TWINS.get(path.suffix)
+    return twin is not None and (consumer / path.with_suffix(twin)).exists()
+
+
+def lay_free(consumer: Path, kit: dict[Path, str]) -> list[Path]:
+    """Кладёт заготовку только в свободные пути; возвращает положенное."""
+    taken = set(occupied(consumer, kit)) | {path for path in kit if taken_by_twin(consumer, path)}
+    free = {path: text for path, text in kit.items() if path not in taken}
+    lay(consumer, free)
+    return sorted(free)
+
+
+def bindings_note(consumer: Path) -> str:
+    """Названное отсутствие ответа каталогу: без него карта взгляда не собирается."""
+    if (consumer / paths.BINDINGS).exists():
+        return ""
+    return (
+        f"`{paths.BINDINGS}` нет: без него карта взгляда не собирается, и взгляд идёт без "
+        "карты. Заготовкой он не кладётся — это ответ проекта каталогу правил: "
+        "заведите его по договору ответа каталога."
+    )
+
+
 def pin_of(root: Path) -> str:
     """Тег ВЫПУСКА, к которому прибивается потребитель, — из истории.
 
@@ -1176,7 +1279,13 @@ def answer(
 
 
 def update(
-    root: Path, consumer: Path, repo: str, pin: str, pipeline: list[str], records: list[str]
+    root: Path,
+    consumer: Path,
+    repo: str,
+    pin: str,
+    pipeline: list[str],
+    records: list[str],
+    data: dict[Path, str],
 ) -> int:
     """Обновление нашего в дереве потребителя до прибивки `pin` (#1386).
 
@@ -1186,7 +1295,8 @@ def update(
     предложением поставщику. Своя копия под нашим именем, не зовущая наш шаг,
     не трогается и называется. В `ci.yml` поднимается только тег наших строк,
     новые шаги печатаются. `.pipeline.yml` и свод — своё проекта, их заход не
-    трогает.
+    трогает. Заготовки данных (`data`) кладутся, только если файла нет: занятый
+    путь — своё проекта и отказа не даёт.
     """
     trunk = trunk_of(consumer)
     if trunk and trunk != paths.TRUNK:
@@ -1221,6 +1331,7 @@ def update(
         )
         return EXIT_HAND_EDITED
     lay(consumer, plan.write)
+    laid = lay_free(consumer, data)
     if plan.write:
         print(f"обновлено до {pin}: " + ", ".join(str(one) for one in sorted(plan.write)))
     else:
@@ -1234,6 +1345,10 @@ def update(
         )
     for note in plan.notes:
         print(note)
+    if laid:
+        print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
+    if unanswered := bindings_note(consumer):
+        print(unanswered)
     return EXIT_OK
 
 
@@ -1269,9 +1384,10 @@ def main(argv: list[str] | None = None) -> int:
         pin = pin_of(args.root)
         summary = summary_kit(args.root, args.repo, pin)
         rulebook = rulebook_kit(args.root)
+        kit = data_kit(args.root)
         # Перечень данных выводится ДО печати и до записи: битый инвентарь
         # отказывает выходом захода, а не трейсбеком после положенного (#996).
-        data = consumer_data(args.root, names, {paths.PIPELINE, *rulebook})
+        data = consumer_data(args.root, names, {paths.PIPELINE, *rulebook, *kit})
     except (NotRun, check_shipped.NotRun) as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -1306,7 +1422,7 @@ def main(argv: list[str] | None = None) -> int:
     beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
     on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
     if args.update:
-        return update(args.root, args.update, args.repo, pin, pipeline, beyond + on_change)
+        return update(args.root, args.update, args.repo, pin, pipeline, beyond + on_change, kit)
     if args.write:
         # КЛАДЁТСЯ ТОЛЬКО ПО ЯВНОМУ КЛЮЧУ И ТОЛЬКО В СВОБОДНОЕ (#992). Чужое
         # дерево заход не правит: занятый путь называется, и не пишется ни
@@ -1359,6 +1475,13 @@ def main(argv: list[str] | None = None) -> int:
         free = {path: text for path, text in rulebook.items() if path not in kept}
         lay(args.write, files | free)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
+        # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
+        # данные взгляда — своё проекта, как свод, а не половина вызова.
+        laid = lay_free(args.write, kit)
+        if laid:
+            print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
+        if unanswered := bindings_note(args.write):
+            print(unanswered)
         if kept:
             print(
                 "свод уже есть и не тронут: " + ", ".join(str(one) for one in kept) + ". "
@@ -1416,6 +1539,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"#    {one}")
     if data == []:
         print("#    (инвентарь переноса не называет ни одного)")
+    print("#    Заготовки данных взгляда и `dependabot.yml` кладут ключи --write и --update,")
+    print("#    только в свободные пути: " + ", ".join(f"`{one}`" for one in sorted(kit)))
+    print(f"#    `{paths.BINDINGS}` заготовкой не кладётся: это ответ проекта каталогу правил.")
     print("\n# 6. В свой README — значок проекта; README заход не трогает (#1282).")
     print("#    Значок рисует общий шаг фактов на ветке `badges` после первого прогона;")
     print(f"#    {PRIVATE_NOTE}.\n")
