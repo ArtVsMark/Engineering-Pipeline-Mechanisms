@@ -1119,11 +1119,55 @@ def test_a_refusal_midway_names_what_was_already_freed(
     assert "уже снята — #7" in capsys.readouterr().err
 
 
-def test_a_label_that_will_not_leave_is_a_refusal_not_a_loop(
+def test_a_lagging_listing_ends_the_pass_instead_of_failing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Первая страница не пустеет — отказ после предела заходов, а не вечный цикл."""
-    monkeypatch.setattr(module.ghrest, "request", lambda method, *_: [{"number": 7}])
+    """Список отстаёт и снова отдаёт снятую задачу — заход кончается, а не краснеет.
+
+    Замер на выпуске v1.7.0: повторное чтение вернуло уже снятую #1388, и её
+    второе снятие получило 404. 404 значит «метки уже нет».
+    """
+    deleted: list[str] = []
+
+    def platform(method: str, path: str, *_: Any) -> Any:
+        if method == "GET":
+            return [{"number": 7}]
+        deleted.append(path)
+        if len(deleted) > 1:
+            raise module.ghrest.NotFound("404 Label does not exist")
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    freed: list[int] = []
+    module.released("o/r", "t", freed)
+    assert freed == [7] and len(deleted) == 1
+
+
+def test_a_label_already_gone_counts_as_freed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Снятие получило 404 — метки уже нет, задача названа снятой, отказа нет."""
+    pages = [[{"number": 7}], []]
+
+    def platform(method: str, path: str, *_: Any) -> Any:
+        if method == "GET":
+            return pages.pop(0)
+        raise module.ghrest.NotFound("404 Label does not exist")
+
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    freed: list[int] = []
+    module.released("o/r", "t", freed)
+    assert freed == [7]
+
+
+def test_new_labels_that_keep_coming_are_a_refusal_not_a_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Первая страница каждый раз несёт новые задачи — отказ после предела, а не вечный цикл."""
+    counter = iter(range(1, 10_000))
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda method, *_: [{"number": next(counter)}] if method == "GET" else {},
+    )
     with pytest.raises(module.NotRun, match="не уходит"):
         module.released("o/r", "t", [])
 
