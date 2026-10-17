@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-16T08:52:39+00:00",
+  "updated": "2026-10-17T08:23:11+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -5955,6 +5955,300 @@
         }
       },
       "coverage": 93.4
+    },
+    "2026-10-17": {
+      "runs": {
+        "automerge": {
+          "runs": 167,
+          "red": 0,
+          "cancelled": 83,
+          "seconds": 3317,
+          "timed": 167,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 80,
+          "red": 1,
+          "cancelled": 64,
+          "seconds": 10263,
+          "timed": 80,
+          "red_jobs": {
+            "ci-complete": 1
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 1
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 1
+          },
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "ci": {
+          "runs": 84,
+          "red": 1,
+          "cancelled": 58,
+          "seconds": 11764,
+          "timed": 84,
+          "red_jobs": {
+            "journal / journal": 1
+          },
+          "red_steps": {
+            "journal / journal · версия не правлена руками": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "main-red": {
+          "runs": 103,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 1513,
+          "timed": 103,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 306,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 475,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 11,
+          "seconds": 1932,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 12,
+          "seconds": 1996,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1663,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 14,
+          "seconds": 3275,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "onboard.py кладёт скелеты карты взгляда и dependabot.yml — обе двери, только в свободное (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 47,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 263,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 29,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 372,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 4591,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 56,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 71,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 234,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "onboard.py кладёт скелеты карты взгляда и dependabot.yml — обе двери, только в свободное": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2701,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Страж толчка: бюджет на git меньше предела хука, отказ git — отказ толчку (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 44,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Выпуск: коммит и тег одним атомарным толчком — раздельный тег отвергался": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1430,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Страж толчка: бюджет на git меньше предела хука, отказ git — отказ толчку (+2)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1900,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Снятие метки выпуска идемпотентно: отстающий список не даёт отказа (+1)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 4048,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Проба передачи поднята до v1.7.0": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1947,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Общая ветка: «0.9.0» вне источника после выпуска v1.7.0 — снято": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1264,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 93.5
     }
   }
 }
