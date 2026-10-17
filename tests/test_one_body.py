@@ -42,7 +42,13 @@ SMALLEST: Final = 20
 
 #: Намеренные повторы — с причиной у каждого (071). Подпись ставится на НАБОР
 #: мест `модуль::функция`, а не на имя: третья копия того же тела краснеет.
-SIGNED: Final[dict[frozenset[str], str]] = {}
+SIGNED: Final[dict[frozenset[str], str]] = {
+    frozenset({".claude/hooks/push_guard.py::cut", "packages/transport/report.py::cut"}): (
+        "хук не импортирует дерево (046): запрет на толчок не должен зависеть от "
+        "того, цело ли дерево; совпадение с каноном держит "
+        "tests/test_push_guard.py::test_the_cut_is_the_transport_one"
+    ),
+}
 
 
 def body_of(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.stmt]:
