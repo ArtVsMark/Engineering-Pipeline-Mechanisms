@@ -526,3 +526,10 @@ def test_the_release_step_asks_the_tag_here() -> None:
     assert not [line.strip() for line in code if "points-at" in line]
     assert any("version.py --head-tag" in line for line in code)
     assert any("version.py --head-number" in line for line in code)
+
+
+@pytest.mark.parametrize("head", ["--head-tag", "--head-number"])
+def test_the_check_and_the_head_tag_do_not_go_together(run_script: RunScript, head: str) -> None:
+    """`--check` с `--head-*` — отказ разбора, а не тег с кодом 0 без сверки (`c699441`)."""
+    run = run_script("version.py", "--check", head)
+    assert run.code == 2 and "not allowed with" in run.text, run.text
