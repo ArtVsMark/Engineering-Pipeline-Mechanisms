@@ -144,8 +144,31 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
     text = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     heading, steps, files = skeleton_counts(text)
     assert steps and files, "таблица шагов не разобралась — гейту не с чем сверять"
-    assert SPELLED_STEPS[len(steps)] in heading.lower(), f"{heading}: шагов в таблице {len(steps)}"
-    assert SPELLED[len(files)] in heading.lower(), f"{heading}: файлов в таблице {len(files)}"
+    assert names(heading, SPELLED_STEPS[len(steps)]), f"{heading}: шагов в таблице {len(steps)}"
+    assert names(heading, SPELLED[len(files)]), f"{heading}: файлов в таблице {len(files)}"
+
+
+def names(heading: str, count: str) -> bool:
+    """Называет ли заголовок число словами — с «ё» или через «е», без разницы.
+
+    Тем же правилом, что набор слов счёта (`count_words`): написание через «е»
+    — то же слово, а не другое (взгляд на #1489, `6717da0`).
+    """
+    return count.replace("ё", "е") in heading.lower().replace("ё", "е")
+
+
+@pytest.mark.parametrize(
+    ("heading", "said"),
+    [
+        ("## Скелет: двадцать три шага в двадцати трёх файлах", True),
+        ("## Скелет: двадцать три шага в двадцати трех файлах", True),
+        ("## Скелет: двадцать три шага в двадцати четырёх файлах", False),
+    ],
+    ids=["с-ё", "через-е", "другое-число"],
+)
+def test_the_heading_count_is_read_with_ye_as_with_yo(heading: str, said: bool) -> None:
+    """Заголовок через «е» называет то же число, что и с «ё»."""
+    assert names(heading, SPELLED[23]) is said
 
 
 def skeleton_counts(text: str) -> tuple[str, set[int], set[str]]:
