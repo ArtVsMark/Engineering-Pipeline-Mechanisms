@@ -453,12 +453,17 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
         return found
     if item.get("kind") == "merge":
         found = field_problems(item, MERGE_FIELDS)
+        # Наличие и форму поля-списка называет `field_problems`; здесь — только
+        # содержание списка, иначе одна ошибка давала две строки (взгляд на #1476).
         rules = item.get("rules")
         if (
-            not isinstance(rules, list)
-            or not 2 <= len(rules) <= MERGE_AT_MOST
-            or len(set(map(str, rules))) != len(rules)
-            or not all(re.fullmatch(r"\d{3}", str(one)) for one in rules)
+            isinstance(rules, list)
+            and rules
+            and (
+                not 2 <= len(rules) <= MERGE_AT_MOST
+                or len(set(map(str, rules))) != len(rules)
+                or not all(re.fullmatch(r"\d{3}", str(one)) for one in rules)
+            )
         ):
             found.append(f"{slug}: rules — от 2 до {MERGE_AT_MOST} разных номеров правил каталога")
         return found
@@ -472,9 +477,7 @@ def proposal_problems(item: dict[str, Any], root: Path = ROOT) -> list[str]:
         if not FULL_SHA_RE.match(str(item.get("sha") or "")):
             found.append(f"{slug}: sha не полный — каталог читает навык на коммите")
         holds = item.get("holds")
-        if not isinstance(holds, list) or not all(
-            re.fullmatch(r"\d{3}", str(one)) for one in holds
-        ):
+        if isinstance(holds, list) and not all(re.fullmatch(r"\d{3}", str(one)) for one in holds):
             found.append(f"{slug}: holds — список номеров правил каталога")
         return found
     found = field_problems(item, PROPOSAL_FIELDS)
@@ -721,7 +724,30 @@ def test_a_skill_field_of_the_wrong_shape_is_named(tmp_path: Path) -> None:
         "measurement": "м" * INCIDENT_AT_LEAST,
     }
     said = proposal_problems(item, tmp_path)
-    assert "5: slug — строка, а не int" in said and "5: holds — список, а не str" in said
+    assert "5: slug — строка, а не int" in said
+    assert [one for one in said if ": holds — " in one] == ["5: holds — список, а не str"]
+    said = proposal_problems({**item, "slug": "x", "holds": ["15"]}, tmp_path)
+    assert [one for one in said if ": holds — " in one] == [
+        "x: holds — список номеров правил каталога"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rules", "said"),
+    [
+        ("005", "m: rules — список, а не str"),
+        (["005"], f"m: rules — от 2 до {MERGE_AT_MOST} разных номеров правил каталога"),
+    ],
+    ids=["форма", "содержание"],
+)
+def test_a_list_field_is_named_once(rules: object, said: str) -> None:
+    """Поле-список — одна строка отказа: форму судит `field_problems`, содержание — своя.
+
+    Прежде строка вместо списка давала два отказа про одно поле — «список, а не
+    str» и «от 2 до … номеров» (взгляд на #1476).
+    """
+    item = {"kind": "merge", "slug": "m", "rules": rules, "why": "в", "claim": "у"}
+    assert [one for one in proposal_problems(item) if ": rules — " in one] == [said]
 
 
 def test_a_slug_is_shaped_as_the_catalogue_asks() -> None:
