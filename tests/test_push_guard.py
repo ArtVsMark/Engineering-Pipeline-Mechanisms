@@ -1117,12 +1117,25 @@ def test_a_push_without_git_is_refused_through_main(
 
 
 @pytest.mark.parametrize(
-    ("command", "outcome"), [("git push -u origin agent/here", 2), ("ls -la", 0)]
+    ("command", "outcome"),
+    [
+        ("git push -u origin agent/here", 2),
+        ('git p"u"sh origin agent/here', 2),
+        ("ls -la", 0),
+    ],
+    ids=["толчок", "толчок-в-кавычках", "не-толчок"],
 )
 def test_a_crash_while_judging_refuses_a_push_and_spares_the_rest(
-    monkeypatch: pytest.MonkeyPatch, command: str, outcome: int
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    outcome: int,
 ) -> None:
-    """Сбой судейства на толчке — отказ 2, а не код 1; прочая команда не роняется."""
+    """Сбой судейства на толчке — отказ 2, а не код 1; прочая команда не роняется.
+
+    Толчок в кавычках разбор видит толчком — значит, и признак при сбое обязан
+    (находка `d256792`). Отказ не валит причину на разбор (`7e090fe`).
+    """
 
     def crash(_: str) -> int:
         raise RuntimeError("сломано")
@@ -1131,6 +1144,39 @@ def test_a_crash_while_judging_refuses_a_push_and_spares_the_rest(
     event = json.dumps({"tool_input": {"command": command}})
     monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
     assert module.main() == outcome
+    if outcome:
+        assert "не досудив команду" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("command", "push"),
+    [
+        ("git push origin agent/x", True),
+        ('git p"u"sh origin agent/x', True),
+        ("git p\\ush origin agent/x", True),
+        ("git pu\\\nsh origin agent/x", True),
+        ("git 'pu'sh origin agent/x", True),
+        ("ls -la", False),
+        ("git status", False),
+    ],
+    ids=["голое", "кавычки", "косая", "перенос", "одинарные", "ls", "status"],
+)
+def test_the_crash_sign_of_a_push_is_wider_than_the_parse(command: str, push: bool) -> None:
+    """Признак при сбое видит толчок во всех формах, которые снимает разбор (`d256792`)."""
+    assert module.maybe_push(command) is push
+    if push:
+        assert module.push_targets(command).push, "разбор не видит толчка — проба не о том"
+
+
+@pytest.mark.parametrize(
+    "event", ["[1]", '{"tool_input": [1]}', '"строка"'], ids=["список", "ввод-списком", "строка"]
+)
+def test_an_event_of_another_shape_is_silence_not_a_trace(
+    monkeypatch: pytest.MonkeyPatch, event: str
+) -> None:
+    """Событие не той формы — молчание 0, а не трейсбек с кодом 1 (находка `74fb515`)."""
+    monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
+    assert module.main() == 0
 
 
 def test_judge_lets_a_harmless_command_through() -> None:
