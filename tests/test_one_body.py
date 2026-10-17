@@ -114,6 +114,17 @@ def test_no_body_is_copied_into_another_module() -> None:
     )
 
 
+def test_every_signature_names_a_live_copy() -> None:
+    """Подпись в `SIGNED` называет повтор, который в дереве есть, — не висит после него.
+
+    Копию переименовали или свели к вызову, а подпись осталась: гейт молчит, и
+    причина намеренного повтора врёт о дереве (взгляд на #1486).
+    """
+    live = {frozenset(places) for places in repeated(modules(), signed={})}
+    stale = [sorted(one) for one in SIGNED if one not in live]
+    assert not stale, f"подпись без живого повтора (071): {stale}"
+
+
 COPIED: Final = '''
 def read(path):
     """Читает."""
