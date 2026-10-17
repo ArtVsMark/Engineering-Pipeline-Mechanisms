@@ -126,6 +126,78 @@ def test_mention_review_requires_a_trusted_author() -> None:
         assert f"github.event_name == '{event}'" in condition, f"{event} без гейта автора"
 
 
+#: Голый номер изменения: у потребителя площадка разрешит его в СВОЮ задачу.
+BARE_NUMBER_RE: Final = re.compile(r"(?<![\w/])#\d+")
+
+
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
+def test_an_agent_task_carries_no_bare_change_number(path: Path) -> None:
+    """Задание агенту в общем шаге не несёт голого «#N» (взгляд на #1392, 195).
+
+    Задание уходит агенту у любого потребителя, и голый номер там указывает на
+    его задачу, а не на нашу. Алфавит задания проверки починки держит
+    `tests/test_look_mode.py`; здесь — соседи: промпты шагов агента целиком.
+    """
+    found = [
+        f"{job} · {step.get('name') or step.get('uses')}: {sorted(BARE_NUMBER_RE.findall(said))}"
+        for job, body in (load(path).get("jobs") or {}).items()
+        for step in body.get("steps") or []
+        if (
+            said := " ".join(
+                str(v)
+                for k, v in (step.get("with") or {}).items()
+                if k in ("prompt", "claude_args")
+            )
+        )
+        and BARE_NUMBER_RE.search(said)
+    ]
+    assert not found, f"голый номер в задании агенту: {found}"
+
+
+def who_step() -> dict[str, Any]:
+    """Шаг общего ответа на обращение, сверяющий автора сам."""
+    steps = load(ON_MENTION_BODY)["jobs"]["respond"]["steps"]
+    found = [one for one in steps if one.get("id") == "who"]
+    assert found, "в общем шаге ответа нет своей сверки автора"
+    step: dict[str, Any] = found[0]
+    return step
+
+
+def test_the_shared_mention_step_checks_the_author_itself() -> None:
+    """Общий шаг ответа сам сверяет автора: тонкий вызов без условия агента не зовёт (#1410).
+
+    Шаг отдаётся как есть, а вызывающий у потребителя — заготовка, которую он
+    правит. Держи сверку только вызывающий — агент с ключом владельца
+    отвечал бы любому автору.
+    """
+    steps = load(ON_MENTION_BODY)["jobs"]["respond"]["steps"]
+    agent = [one for one in steps if "claude-code-action" in str(one.get("uses") or "")]
+    assert agent, "шаг агента не найден"
+    assert "steps.who.outputs.allowed == 'yes'" in str(agent[0].get("if") or "")
+    for role in TRUSTED:
+        assert role in who_step()["run"], f"{role} не среди доверенных"
+
+
+@pytest.mark.parametrize(
+    ("who", "allowed"),
+    [("OWNER", True), ("COLLABORATOR", True), ("CONTRIBUTOR", False), ("NONE", False), ("", False)],
+)
+def test_the_author_case_is_run_not_read(who: str, allowed: bool, tmp_path: Path) -> None:
+    """Сверка автора исполняется оболочкой: обе половины — доверенный и прочие."""
+    out = tmp_path / "out"
+    done = subprocess.run(
+        ["bash", "-c", who_step()["run"]],
+        env={"WHO": who, "GITHUB_OUTPUT": str(out), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert ("allowed=yes" in out.read_text(encoding="utf-8")) is allowed
+
+
 @pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
 def test_agent_jobs_have_a_timeout(path: Path) -> None:
     """У джоба агента есть предел: умолчание площадки — шесть часов молчания."""

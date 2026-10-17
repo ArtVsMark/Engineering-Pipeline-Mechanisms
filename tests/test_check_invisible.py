@@ -201,3 +201,24 @@ def test_an_ignorable_range_is_judged_whatever_its_category(
     monkeypatch.setattr(module.unicodedata, "category", lambda _: "Mn")
     assert module.always(chr(0xE0080)), "назначенная игнорируемая точка ушла из-под гейта"
     assert not module.always(chr(0xE0100)), "селектор судится своим правилом, а не диапазоном"
+
+
+def test_the_step_runs_the_gate_only_after_the_transport_is_installed() -> None:
+    """Без пакета транспорта гейт не зовётся: падение импорта читалось бы находкой (#1437).
+
+    `import gitcall` без пакета даёт исход 1 — «найден невидимый символ», —
+    хотя докстрока обещает 2 («не отработал»). Отказ установки называет шаг
+    установки, а не этот гейт (039).
+    """
+    import yaml
+
+    from tests.conftest import ROOT
+
+    steps = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "step-pipeline.yml").read_text(encoding="utf-8")
+    )["jobs"]["pipeline"]["steps"]
+    install = [one for one in steps if "packages/transport" in str(one.get("run") or "")]
+    gate = [one for one in steps if "check_invisible.py" in str(one.get("run") or "")]
+    assert install and gate, "шаг установки или шаг гейта не найден"
+    assert install[0].get("id"), "шаг установки транспорта без id — условию не на что сослаться"
+    assert f"steps.{install[0]['id']}.outcome == 'success'" in str(gate[0].get("if") or "")
