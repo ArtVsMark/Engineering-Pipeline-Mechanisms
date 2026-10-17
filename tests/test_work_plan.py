@@ -1085,10 +1085,13 @@ def release_platform(
     """Подделка площадки для снятия метки: список постранично, снятие, метки задачи.
 
     `kept` — задачи, на которых метка остаётся после снятия; `gone` — снятие
-    отвечает 404 «метки уже нет».
+    отвечает 404 «метки уже нет». Метки задачи ПОМНЯТ снятие (взгляд на
+    #1465): без снятия или при чтении до него метка на месте, и путь, где
+    снятие не послано, краснеет, а не проходит.
     """
     calls: list[str] = []
     per = module.ghrest.PER_PAGE
+    deleted: set[int] = set(gone)
 
     def platform(method: str, path: str, *_: Any) -> Any:
         calls.append(f"{method} {path}")
@@ -1096,11 +1099,13 @@ def release_platform(
             number = int(path.split("/issues/")[1].split("/")[0])
             if number in gone:
                 raise module.ghrest.NotFound("404 Label does not exist")
+            deleted.add(number)
             return {}
         if "/labels?" in path:
             number = int(path.split("/issues/")[1].split("/")[0])
             first = path.endswith("&page=1")
-            return [{"name": module.WAITS_RELEASE}] if number in kept and first else []
+            carries = number in kept or number not in deleted
+            return [{"name": module.WAITS_RELEASE}] if carries and first else []
         page = int(path.rsplit("page=", 1)[1])
         return [{"number": one} for one in listed[(page - 1) * per : page * per]]
 
@@ -1165,6 +1170,36 @@ def test_a_refusal_midway_names_what_was_already_freed(
     monkeypatch.setattr(module.ghrest, "request", refusing)
     assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
     assert "уже снята — #7" in capsys.readouterr().err
+
+
+def test_a_refusal_after_the_delete_names_it_unverified(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Снятие послано, а сверка отказала — задача названа «не сверено», а не «снята» (#1465)."""
+    platform, _ = release_platform([7, 9])
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+
+    def refusing(method: str, path: str, *rest: Any) -> Any:
+        if method == "GET" and "/issues/9/labels?" in path:
+            raise module.ghrest.TransportError("502")
+        return platform(method, path, *rest)
+
+    monkeypatch.setattr(module.ghrest, "request", refusing)
+    assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
+    said = capsys.readouterr().err
+    assert "уже снята — #7;" in said and "послано, не сверено — #9" in said
+
+
+def test_a_release_that_sends_no_delete_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Подделка помнит снятие: заход без снятия видит метку на месте и отказывает (#1465)."""
+    platform, _ = release_platform([7])
+
+    def no_delete(method: str, path: str, *rest: Any) -> Any:
+        return {} if method == "DELETE" else platform(method, path, *rest)
+
+    monkeypatch.setattr(module.ghrest, "request", no_delete)
+    with pytest.raises(module.NotRun, match="вернулась"):
+        module.released("o/r", "t", [])
 
 
 def test_a_label_already_gone_counts_as_freed(monkeypatch: pytest.MonkeyPatch) -> None:

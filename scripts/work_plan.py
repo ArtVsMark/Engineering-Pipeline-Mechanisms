@@ -722,13 +722,14 @@ def grouped(lines: list[str], labels: dict[int, set[str]]) -> list[str]:
     return said_lines
 
 
-def released(repo: str, token: str, freed: list[int]) -> None:
+def released(repo: str, token: str, freed: list[int], sent: list[int] | None = None) -> None:
     """Снимает `plan/waits-release` с открытых задач после выпуска; снятые — в `freed`.
 
     Иначе «ждёт выпуска» пережило бы выпуск молча (045): задачи возвращаются
     в «Сейчас», и их остаток — проверка на теге — берётся тем же окном.
-    Снятые копятся в `freed` вызывающего: отказ посреди захода называет то,
-    что уже снято.
+    В `freed` вызывающего копятся задачи, чьё снятие СВЕРЕНО метками, в `sent`
+    — те, где снятие послано, а сверка ещё не прошла: отказ посреди захода
+    называет обе, а не выдаёт непроверенное за снятое (взгляд на #1465, 195).
 
     СПИСОК ЦЕЛИКОМ — ДО ПЕРВОГО СНЯТИЯ, А НЕ ПЕРВАЯ СТРАНИЦА ПО КРУГУ (находки
     `f9501b7`, `b790524`, `cbfbf87`, правило 210). Снятая метка выводит задачу
@@ -737,38 +738,42 @@ def released(repo: str, token: str, freed: list[int]) -> None:
     оставлял хвост молча. Пока ничего не снято, сдвигать нечего: помеченные
     читаются все страницы подряд (`ghrest.paginate`), и только потом снимаются.
 
-    СНЯТИЕ ПРОВЕРЯЕТСЯ МЕТКАМИ ЗАДАЧИ, А НЕ СПИСКОМ. Список отстаёт от снятия
-    (замер на выпуске v1.7.0, 17.10.2026: повторное чтение вернуло снятую
-    задачу, и её второе снятие получило 404). Метки самой задачи не отстают:
-    метка, оставшаяся на задаче после снятия, — её вернула автоматизация или
-    рука, и это отказ с номером, а не «снята». 404 на снятии значит «метки
-    уже нет» — цель достигнута.
+    СНЯТИЕ ПРОВЕРЯЕТСЯ МЕТКАМИ ЗАДАЧИ, А НЕ СПИСКОМ, и сразу за своим снятием.
+    Список отстаёт от снятия (замер на выпуске v1.7.0, 17.10.2026: повторное
+    чтение вернуло снятую задачу, и её второе снятие получило 404). Метка,
+    оставшаяся на задаче после снятия, — её вернула автоматизация или рука, и
+    это отказ с номером, а не «снята». 404 на снятии значит «метки уже нет» —
+    цель достигнута.
 
-    ПРЕДЕЛ НАЗВАН (195): задача, помеченная после чтения списка, этим заходом
+    ПРЕДЕЛЫ НАЗВАНЫ (195). Задача, помеченная после чтения списка, этим заходом
     не снимается — её снимет следующий выпуск или ручной заход `--released`.
+    Что метки задачи не отстают от снятия, НЕ замерено: замер v1.7.0 мерил
+    список. Отстанут — снятая метка будет названа вернувшейся, и это громкий
+    отказ с номером, а не молчание: повтор `--released` её снимет.
     """
+    posted = sent if sent is not None else []
     label = WAITS_RELEASE.replace("/", "%2F")
     listed = [
         int(issue["number"])
         for issue in ghrest.paginate(f"repos/{repo}/issues?state=open&labels={label}", token)
     ]
+    kept: list[int] = []
     for number in listed:
         if number in freed:
             continue
         # 404 — метки уже нет: сняли раньше или рукой, цель достигнута.
         with contextlib.suppress(ghrest.NotFound):
             ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{label}", token)
-        freed.append(number)
-    kept = [
-        number
-        for number in freed
+        posted.append(number)
         if any(
             one.get("name") == WAITS_RELEASE
             for one in ghrest.paginate(f"repos/{repo}/issues/{number}/labels", token)
-        )
-    ]
+        ):
+            kept.append(number)
+        else:
+            freed.append(number)
+        posted.remove(number)
     if kept:
-        freed[:] = [number for number in freed if number not in kept]
         raise NotRun(
             "метка вернулась после снятия — её ставит автоматизация или рука: "
             + ", ".join(f"#{one}" for one in kept)
@@ -889,11 +894,20 @@ def main(argv: list[str] | None = None) -> int:
             print("метка выпуска не снята: нет токена или репозитория (045).", file=sys.stderr)
             return EXIT_BROKEN
         freed: list[int] = []
+        sent: list[int] = []
         try:
-            released(args.repo, token, freed)
+            released(args.repo, token, freed, sent)
         except (ghrest.TransportError, NotRun) as exc:
             done = ", ".join(f"#{one}" for one in freed) or "ни с одной"
-            print(f"метка выпуска снята не со всех: {exc}; уже снята — {done}", file=sys.stderr)
+            unsure = (
+                f"; снятие послано, не сверено — {', '.join(f'#{one}' for one in sent)}"
+                if sent
+                else ""
+            )
+            print(
+                f"метка выпуска снята не со всех: {exc}; уже снята — {done}{unsure}",
+                file=sys.stderr,
+            )
             return EXIT_BROKEN
         print(f"{WAITS_RELEASE} снята: {', '.join(f'#{one}' for one in freed) or 'не с кого'}")
         return EXIT_OK
