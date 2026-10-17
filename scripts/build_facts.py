@@ -31,6 +31,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import shutil
 import sys
 from collections.abc import Callable
@@ -60,13 +61,18 @@ from facts_common import rules_facts as rules_facts
 VERSION_FILE: Final = paths.VERSION
 BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
+#: Коммит фактов — ПОЛНЫЙ хэш: так его пишет сборка (`git rev-parse HEAD`).
+#: Строгое правило вместо перечня плохих форм (находка `0a6fab3`, правило 210):
+#: `"HEAD"` или имя ветки проходили бы `git cat-file` и давали дерево головы.
+COMMIT_RE: Final = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 #: Сколько кривых записей соседей сборка называет строками; остальное — числом.
 WRONG_SHOWN: Final = 20
 #: ГДЕ ЛЕЖАТ ФАКТЫ И ЗНАЧКИ — ПО КОНТРАКТУ СЕМЬИ, а не по своей раскладке:
 #: ветка `badges`, путь `.github/badges/` — как у грейдера, каталога, токенов и
-#: глоссария (контракт фактов витрины, `ArtVsMark/ArtVsMark` ·
-#: `.rules/facts-contract.md`; решение владельца 24.09.2026, #759). До этого
-#: файл лежал в корне ветки, и витрина считала, что фактов у проекта нет.
+#: глоссария (договор фактов семьи — `SCHEMA_OF`, его держит каталог;
+#: решение владельца 24.09.2026, #759). До этого файл лежал в корне ветки, и
+#: витрина считала, что фактов у проекта нет. Адрес договора назван одним
+#: именем, а не вторым (находка `bda792d`): прежде здесь стоял адрес витрины.
 PUBLISHED_DIR: Final = paths.BADGES_DIR
 
 EXIT_OK: Final = 0
@@ -782,6 +788,15 @@ def drawn_from(path: Path, out_dir: str, root: str = ".", supplier: str = "") ->
     return EXIT_OK
 
 
+def facts_text(facts: dict[str, Any]) -> str:
+    """Текст публикуемых фактов: одна запись на сборку и на её проверку в наборе.
+
+    Тест «всем путём» звал свой `json.dumps` рядом с этим (находка `dea89bd`):
+    смени сборка вызов записи — тест остался бы зелёным.
+    """
+    return json.dumps(common.published(facts, supplier=True), ensure_ascii=False, indent=2) + "\n"
+
+
 def commit_of(path: Path) -> int:
     """Режим `--commit-of`: напечатать коммит, на котором собраны готовые факты.
 
@@ -792,7 +807,11 @@ def commit_of(path: Path) -> int:
 
     ПРИЧИНА У КАЖДОЙ ФОРМЫ СВОЯ (взгляды на #1364 и #1382): факты не объект,
     поля нет, поле не строка, поле пустое — разные поломки, и общая фраза
-    «нет поля» назвала бы `"commit": 123` отсутствием поля.
+    «нет поля» назвала бы `"commit": 123` отсутствием поля. Годное — только
+    ПОЛНЫЙ хэш (`COMMIT_RE`): строка-не-хэш прошла бы `git cat-file` как
+    `HEAD` или имя ветки (находка `0a6fab3`). Отсюда и пометка прогона значков:
+    печатаемое здесь — только шестнадцатеричные знаки, перевода строки в нём
+    не бывает (находка `4a88697`).
     """
     try:
         facts = json.loads(path.read_text(encoding="utf-8"))
@@ -807,8 +826,10 @@ def commit_of(path: Path) -> int:
         why = f"поле commit не строка, а {type(facts['commit']).__name__}"
     elif not facts["commit"].strip():
         why = "поле commit пустое"
+    elif not COMMIT_RE.fullmatch(facts["commit"]):
+        why = f"поле commit не полный хэш коммита: «{report.cut(facts['commit'])}»"
     else:
-        print(facts["commit"].strip())
+        print(facts["commit"])
         return EXIT_OK
     print(f"коммит фактов не прочитан: в {path} {why}", file=sys.stderr)
     return EXIT_BROKEN
@@ -1026,10 +1047,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
     out = Path(args.out_dir) / PUBLISHED_DIR
     out.mkdir(parents=True, exist_ok=True)
-    (out / FACTS).write_text(
-        json.dumps(common.published(facts, supplier=True), ensure_ascii=False, indent=2) + "\n",
-        "utf-8",
-    )
+    (out / FACTS).write_text(facts_text(facts), "utf-8")
     draw_badges(facts, out)
 
     rules = facts["rules"]
