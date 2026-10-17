@@ -1,11 +1,11 @@
 """Вердикт сводного гейта проверяется тем, что он обязан отвергнуть."""
 
-from typing import Any
+import re
+from typing import Any, Final
 
 import pytest
-import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk_deep
 
 module = load_script("ci_complete.py")
 
@@ -965,31 +965,54 @@ def test_a_cancelled_only_name_refuses_once_the_run_is_done() -> None:
     assert problems and "отменены" in problems[0]
 
 
-def annotation_line() -> str:
-    """Строка прогона, готовящая вывод к аннотации площадки."""
-    # Тело сводного гейта — составным действием (#1385): прогон его только зовёт.
-    document = yaml.safe_load(
-        (ROOT / ".github" / "actions" / "ci-complete" / "action.yml").read_text(encoding="utf-8")
-    )
-    said = str(document["runs"]["steps"][-1]["run"])
-    found = [line for line in said.splitlines() if "sed -z" in line]
-    if len(found) != 1:
-        raise AssertionError(
-            f"строка подготовки аннотации найдена {len(found)} раз — читать нечего"
-        )
-    return found[0]
+#: Где живёт строка экранирования аннотации: намеренной копией в двух местах
+#: (071, #1464) — шаге очереди и составном действии сводного гейта. Третья копия
+#: или расхождение двух краснеют ниже.
+ANNOTATION_PLACES: Final = frozenset(
+    {".github/workflows/step-automerge.yml", ".github/actions/ci-complete/action.yml"}
+)
 
 
-def test_the_annotation_escapes_the_percent_first() -> None:
+#: Программа `sed` в строке экранирования: копии сверяются по ней, а не по
+#: строке целиком — файл вывода у каждого места свой.
+SED_PROGRAM: Final = re.compile(r"sed -z '([^']*)'")
+
+
+def annotation_lines() -> dict[str, list[str]]:
+    """Программы `sed`, готовящие вывод к аннотации площадки, — по файлам."""
+    found: dict[str, list[str]] = {}
+    for path in walk_deep(ROOT / ".github", "*.yml"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "%25" in line and (program := SED_PROGRAM.search(line)):
+                found.setdefault(path.relative_to(ROOT).as_posix(), []).append(program[1])
+    return found
+
+
+def test_the_annotation_escape_is_one_text_in_its_two_places() -> None:
+    """Копия экранирования подписана, и разойтись молча ей нельзя (071, #1464).
+
+    Строка одна и та же в шаге очереди и в сводном гейте: порядок замен в одной
+    из копий уже чинили отдельно (#265). Третья копия — новый повтор, а не
+    подписанный.
+    """
+    found = annotation_lines()
+    assert set(found) == ANNOTATION_PLACES, f"строка экранирования живёт не там: {sorted(found)}"
+    lines = {line for said in found.values() for line in said}
+    assert all(len(said) == 1 for said in found.values()), found
+    assert len(lines) == 1, f"копии экранирования разошлись: {sorted(lines)}"
+
+
+@pytest.mark.parametrize("place", sorted(ANNOTATION_PLACES))
+def test_the_annotation_escapes_the_percent_first(place: str) -> None:
     """Знак процента экранируется ПЕРВЫМ, иначе экранирование съедает себя.
 
     Обратный порядок превращает подставленный `%0A` в `%250A`, а знак процента,
     пришедший из вывода, обрезает сообщение — то самое, ради читаемости
     которого аннотация и заведена. Нашёл внешний взгляд на #265.
     """
-    said = annotation_line()
+    [said] = annotation_lines()[place]
     where = {mark: said.find(mark) for mark in ("s/%/%25/g", "s/\\n/%0A/g")}
-    assert all(place != -1 for place in where.values()), f"замены не на месте: {where}"
+    assert all(spot != -1 for spot in where.values()), f"замены не на месте: {where}"
     assert where["s/%/%25/g"] < where["s/\\n/%0A/g"], "процент экранируется не первым"
 
 
