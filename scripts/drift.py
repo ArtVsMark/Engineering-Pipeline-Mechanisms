@@ -768,7 +768,9 @@ def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
     return ordered, sorted(seen - stable, key=order)
 
 
-def published(manifest: list[Any], minor: str, platform_version: str = "") -> bool:
+def published(
+    manifest: list[Any], minor: str, platform_version: str = "", *, stable_only: bool = False
+) -> bool:
     """Есть ли у площадки сборка ветки языка под раннер — стабильная или пробная.
 
     ВОПРОС ПРЕДРЕЛИЗНОГО ПРОГОНА, А НЕ ДРЕЙФА (решение владельца 14.10.2026,
@@ -784,6 +786,12 @@ def published(manifest: list[Any], minor: str, platform_version: str = "") -> bo
     засчитывается выпуск ветки, у которого есть файл `linux`/`x64`, а при
     названной `platform_version` — и под неё. Пусто — версия системы не
     сверяется: так отвечает вопрос «есть ли ветка вообще».
+
+    СТАБИЛЬНОЙ ЯЧЕЙКЕ — СТАБИЛЬНЫЙ ФАЙЛ (взгляд на #1377). `setup-python` без
+    `allow-prereleases` пробную сборку не поставит: ветка, стабильная номером,
+    но под систему раннера собранная только пробно, засчитывалась собранной и
+    краснела без названной причины. `stable_only` задаёт это у матрицы `ci.yml`;
+    вопрос `--published` предрелизного прогона идёт и с пробными.
     """
     stable, pre = minors(manifest)
     if minor not in stable and minor not in pre:
@@ -793,6 +801,8 @@ def published(manifest: list[Any], minor: str, platform_version: str = "") -> bo
             continue
         found = MINOR_RE.match(str(one.get("version") or ""))
         if not found or found.group("minor") != minor:
+            continue
+        if stable_only and one.get("stable") is not True:
             continue
         for file in one.get("files") or []:
             if (
@@ -1339,7 +1349,11 @@ def language_moved(
     if not stable:
         raise NotRun("в манифесте нет ни одной стабильной ветки — читать нечего (075)")
     found: list[Drift] = []
-    ready = stable if system is None else [m for m in stable if published(manifest, m, system)]
+    ready = (
+        stable
+        if system is None
+        else [m for m in stable if published(manifest, m, system, stable_only=True)]
+    )
     newest = ready[-1] if ready else ""
     unknown = sorted(set(matrix) - set(stable) - set(pre), key=order)
     if unknown:
@@ -1365,7 +1379,7 @@ def language_moved(
         else [
             m
             for m in sorted(set(matrix) & (set(stable) | set(pre)), key=order)
-            if not published(manifest, m, system) and (ready or m in pre)
+            if not published(manifest, m, system, stable_only=m in stable) and (ready or m in pre)
         ]
     )
     if unbuilt:
@@ -1637,7 +1651,22 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
                     )
                 )
                 continue
-            if day != measured_day(one.get("measured_at")):
+            # НАША ДАТА ЧИТАЕТСЯ ТАК ЖЕ, КАК ДАТА ОТВЕТА (взгляд на #1377, 195):
+            # нечитаемая давала `None`, `day != None` уходило в `continue`, и
+            # вердикт навсегда выглядел ожиданием ответа на другой замер.
+            our_day = measured_day(one.get("measured_at"))
+            if our_day is None:
+                found.append(
+                    Drift(
+                        "proposal-answer-unread",
+                        f"наши данные «{slug}»: «measured_at» "
+                        f"{report.cut(str(one.get('measured_at')))} не читается датой — "
+                        "с ответом каталога сверить нечего",
+                        "поправить дату замера в .rules/proposals.json: день вида 2026-10-14",
+                    )
+                )
+                continue
+            if day != our_day:
                 continue
             if status not in EVIDENCE_STATUSES:
                 found.append(
