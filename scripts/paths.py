@@ -154,6 +154,8 @@ REVIEW_PROCEDURE: Final = Path("docs/agent/review.md")
 REVIEW_ROLES: Final = Path(".rules/review-roles.json")
 #: Области каталога → пути дерева: какие правила отдать роли «правила каталога» (#1277).
 AREA_PATHS: Final = Path(".rules/area-paths.json")
+#: Датчик новых версий действий; потребителю кладётся заготовкой (#1387, #1386).
+DEPENDABOT: Final = Path(".github/dependabot.yml")
 #: ДОКУМЕНТЫ ЛЕЖАТ ПО ПОДКАТАЛОГАМ ЧИТАТЕЛЯ (#840): `agent/` — окну и взгляду,
 #: `dev/` — тому, кто ведёт и выпускает проект, `use/` — подключающему.
 #: МЕХАНИЗМ, КОТОРЫЙ ЧИТАЕТ ДОКУМЕНТ, БЕРЁТ ПУТЬ ОТСЮДА; остальные упоминания —
@@ -239,6 +241,7 @@ ALL: Final = (
     REVIEW_PROCEDURE,
     REVIEW_ROLES,
     AREA_PATHS,
+    DEPENDABOT,
     DOCS_INDEX,
     BEHAVIOUR,
     ROADMAP,

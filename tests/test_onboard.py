@@ -19,8 +19,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, needs_history
+from tests.conftest import (
+    FAKE_VERSION,
+    ROOT,
+    RunScript,
+    load_script,
+    needs_history,
+    walk_deep,
+)
 
 module = load_script("onboard.py")
 policy = load_script("pipeline_checks.py")
@@ -36,6 +44,10 @@ PLAIN = "name: step-молчун\non:\n  workflow_call:\njobs:\n  x:\n    steps:
 
 #: Заготовка свода: состав читается из `kit/`, а не списком (#995).
 KIT = {"AGENTS.md": "# ядро\n", "CLAUDE.md": "# окно\n"}
+#: Заготовки данных: состав читается из `kit/data/`, а не списком (#1386).
+DATA = {str(one): f"заготовка {one.name}\n" for one in module.DATA_KITTED}
+#: Наша таблица областей: из неё заготовка берёт имена областей.
+AREAS = '{"areas": {"gates": {"paths": ["tests/*"]}, "docs": {"paths": ["docs/*"]}}}\n'
 
 
 #: Наш сводный гейт в поддельном дереве: джоб зовёт действие внутренним путём.
@@ -62,6 +74,11 @@ def tree(tmp_path: Path, *, tagged: str = "v2.5.0", **runs: str) -> Path:
     (tmp_path / "kit").mkdir()
     for name, text in KIT.items():
         (tmp_path / "kit" / name).write_text(text, encoding="utf-8")
+    for name, text in DATA.items():
+        (tmp_path / module.DATA_KIT / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / module.DATA_KIT / name).write_text(text, encoding="utf-8")
+    (tmp_path / ".rules").mkdir(exist_ok=True)
+    (tmp_path / ".rules" / "area-paths.json").write_text(AREAS, encoding="utf-8")
     run = ["git", "-C", str(tmp_path)]
     subprocess.run([*run, "init", "--quiet", "-b", "main"], check=True)
     subprocess.run([*run, "config", "user.email", "т@т"], check=True)
@@ -853,7 +870,7 @@ def test_the_printed_kit_carries_the_rulebook(
 def test_no_rulebook_kit_is_a_refusal(tmp_path: Path) -> None:
     """Пустой `kit/` — отказ: подключение без свода заход назвал бы полным (045)."""
     root = tree(tmp_path, **{"step-пример": MARKED})
-    for one in (root / "kit").iterdir():
+    for one in (root / "kit").glob("*.md"):
         one.unlink()
     assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
 
@@ -862,6 +879,117 @@ def test_the_live_kit_is_what_onboard_lays() -> None:
     """Живое дерево: заход кладёт ровно файлы свода, у которых есть заготовка."""
     rulebook = load_script("check_rulebook_fresh.py").RULEBOOK
     assert sorted(str(one) for one in module.rulebook_kit(ROOT)) == sorted(rulebook)
+
+
+# --- заготовки данных взгляда (#1386) ---------------------------------------
+
+
+def test_data_kit_reads_the_tree_and_derives_the_areas(tmp_path: Path) -> None:
+    """Состав — файлы `kit/data/`, таблица областей — из наших областей с пустыми путями."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    kit = module.data_kit(root)
+    assert sorted(map(str, kit)) == sorted([*DATA, ".rules/area-paths.json"])
+    assert module.paths.BINDINGS not in kit, "ответ каталогу ушёл заготовкой"
+
+
+def test_the_area_kit_names_every_area_with_a_reason(tmp_path: Path) -> None:
+    """Каждая наша область у потребителя — пустые пути и причина, а не молчание."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    areas = json.loads(module.area_kit(root))["areas"]
+    assert sorted(areas) == ["docs", "gates"]
+    assert all(one == {"paths": [], "why": module.AREA_FILL} for one in areas.values())
+
+
+def test_an_unreadable_area_table_is_a_refusal(tmp_path: Path) -> None:
+    """Нашей таблицы областей нет — отказ, а не заготовка без областей (075)."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    (root / ".rules" / "area-paths.json").unlink()
+    with pytest.raises(module.NotRun):
+        module.area_kit(root)
+
+
+def test_an_empty_data_kit_is_a_refusal(tmp_path: Path) -> None:
+    """Пустой `kit/data/` — отказ: заход назвал бы подключение полным без данных взгляда."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    for one in sorted((root / module.DATA_KIT).rglob("*"), reverse=True):
+        one.unlink() if one.is_file() else one.rmdir()
+    assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+
+
+def test_lay_free_keeps_what_is_there(tmp_path: Path) -> None:
+    """Занятый путь не тронут и не назван положенным; свободный положен."""
+    (tmp_path / "a.md").write_text("своё", encoding="utf-8")
+    laid = module.lay_free(tmp_path, {Path("a.md"): "заготовка", Path("b/c.md"): "заготовка"})
+    assert laid == [Path("b/c.md")]
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "своё"
+
+
+def test_bindings_note_speaks_only_when_the_answer_is_missing(tmp_path: Path) -> None:
+    """Ответа каталогу нет — названо; есть — тишина."""
+    assert "карта взгляда не собирается" in module.bindings_note(tmp_path)
+    (tmp_path / ".rules").mkdir()
+    (tmp_path / ".rules" / "bindings.json").write_text("{}", encoding="utf-8")
+    assert module.bindings_note(tmp_path) == ""
+
+
+def test_write_lays_the_data_kits_and_keeps_the_projects_own(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--write`: заготовки — в свободное, занятая — не тронута и отказа не даёт."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    (consumer / "docs" / "agent").mkdir(parents=True)
+    (consumer / "docs" / "agent" / "roles.md").write_text("свои роли", encoding="utf-8")
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    assert (consumer / "docs" / "agent" / "roles.md").read_text(encoding="utf-8") == "свои роли"
+    assert (consumer / ".rules" / "review-roles.json").is_file()
+    assert (consumer / ".rules" / "area-paths.json").is_file()
+    said = capsys.readouterr().out
+    assert "положены заготовки данных" in said and "bindings.json" in said
+
+
+def test_update_lays_a_missing_data_kit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`--update`: удалённая заготовка ложится снова, своё не тронуто."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    (consumer / ".rules" / "review-roles.json").unlink()
+    (consumer / "docs" / "agent" / "roles.md").write_text("свои роли", encoding="utf-8")
+    capsys.readouterr()
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    assert (consumer / ".rules" / "review-roles.json").is_file()
+    assert (consumer / "docs" / "agent" / "roles.md").read_text(encoding="utf-8") == "свои роли"
+    assert "положены заготовки данных: .rules/review-roles.json" in capsys.readouterr().out
+
+
+def test_the_live_data_kit_holds_exactly_the_declared_paths() -> None:
+    """`kit/data/` несёт ровно `DATA_KITTED`: лишний файл не лёг бы, недостающий — отказ."""
+    base = ROOT / module.DATA_KIT
+    found = {one.relative_to(base) for one in walk_deep(base) if one.is_file()}
+    assert found == set(module.DATA_KITTED)
+
+
+def test_the_live_data_kit_is_what_the_review_map_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Живое дерево: каждая заготовка той формы, что принимает карта взгляда.
+
+    Иначе карта у нового потребителя отказывала бы на нашей же заготовке, и
+    «карта работает с первого дня» было бы словом, а не свойством (107).
+    """
+    review_map = load_script("review_map.py")
+    findings = load_script("findings.py")
+    kit = module.data_kit(ROOT)
+    table = review_map.table_shape(json.loads(kit[Path(".rules/review-roles.json")]))
+    monkeypatch.setattr(review_map, "shown_from_base", lambda _, path: kit[Path(path)])
+    assert review_map.area_table("main"), "заготовка таблицы областей пуста"
+    assert review_map.SUBJECT in kit[Path("docs/agent/review.md")]
+    roles = tmp_path / "roles.md"
+    roles.write_text(kit[Path("docs/agent/roles.md")], encoding="utf-8")
+    named = findings.roles.__wrapped__(roles)
+    assert set(table["required"]) <= named, "обязательная роль заготовки без профиля"
+    bot = yaml.safe_load(kit[Path(".github/dependabot.yml")])
+    assert [one["package-ecosystem"] for one in bot["updates"]] == ["github-actions"]
 
 
 # --- данные потребителя (#996) -----------------------------------------------
