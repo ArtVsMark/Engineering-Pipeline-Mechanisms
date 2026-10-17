@@ -68,6 +68,23 @@ GIT_DEADLINE: Final = 2.5
 #: минутами), иначе приходил бы с бюджетом, исчерпанным до первого git. `None`
 #: — вне захода: общий бюджет не считается, дедлайн одного вызова — да.
 started: float | None = None
+#: Предел чужого текста в причине отказа — тот же, что у общей обрезки.
+LIMIT: Final = 300
+
+
+def cut(text: str, limit: int = LIMIT) -> str:
+    """Обрезает чужой текст для причины отказа, сказав, насколько он обрезан.
+
+    КОПИЯ `report.cut` НАМЕРЕННАЯ — по той же причине, что литерал приставки
+    ниже: хук не импортирует дерево (046). Без неё было два плохих исхода:
+    молчаливый срез на месте выглядел полным ответом, а скрипт целиком давал
+    причину любой длины (016, находка `64f3440`). Совпадение с каноном держит
+    `tests/test_push_guard.py::test_the_cut_is_the_transport_one`.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}… (обрезано, всего {len(text)} знаков)"
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str] | str:
@@ -341,10 +358,10 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
         try:
             inner = commands_of(script)
         except ValueError:
-            # Скрипт называется ЦЕЛИКОМ: общий `report.cut` хуку недоступен — он
-            # исполняется без пакета транспорта, — а молчаливый срез на месте
-            # выглядит полным ответом (016, взгляд на #1462).
-            return [], f"скрипт оболочки не разбирается: {script}"
+            # Скрипт обрезается ВСЛУХ: молчаливый срез на месте выглядит полным
+            # ответом (016, взгляд на #1462), а целиком он даёт причину любой
+            # длины (`64f3440`).
+            return [], f"скрипт оболочки не разбирается: {cut(script)}"
         found: list[list[str]] = []
         for part in inner:
             deeper, blind = unwrap(part, depth - 1)
@@ -364,7 +381,7 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
             try:
                 inner = commands_of(script)
             except ValueError:
-                return [], f"строка `env -S` не разбирается: {script}"
+                return [], f"строка `env -S` не разбирается: {cut(script)}"
             split: list[list[str]] = []
             for part in inner:
                 deeper, blind = unwrap(part, depth - 1)
@@ -590,7 +607,7 @@ def head() -> tuple[str, str]:
     if isinstance(said, str):
         return "", said
     if said.returncode != 0:
-        return "", said.stderr.strip() or f"git rev-parse вернул {said.returncode}"
+        return "", cut(said.stderr) or f"git rev-parse вернул {said.returncode}"
     return said.stdout.strip(), ""
 
 
@@ -757,7 +774,7 @@ def run() -> int:
         if not maybe_push(command):
             return 0
         print(
-            f"Толчок отвергнут до вызова git: сторож упал, не досудив команду ({exc!r}), и "
+            f"Толчок отвергнут до вызова git: сторож упал, не досудив команду ({cut(repr(exc))}), и "
             "толчок не проверил. Причина — в разборе, в вызове git или в сверке ветки; "
             "перепишите команду проще или почините сторожа.",
             file=sys.stderr,
