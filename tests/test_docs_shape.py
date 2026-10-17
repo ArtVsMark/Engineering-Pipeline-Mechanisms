@@ -278,7 +278,9 @@ def count_words() -> frozenset[str]:
     Числительные на мягкий знак и десятки на «-десят» склоняются правилом; малые
     (один…четыре), «сорок», «девяносто», «сто» и сотни склоняются не по
     правилу и названы формами. Составное число («двадцати двух») набор
-    узнаёт по каждому слову.
+    узнаёт по каждому слову. Написание через «е» вместо «ё» строится из
+    каждой формы набора, а не дописывается к перечню: по одной форме выпали
+    сотни (находка `44321a0`).
     """
     small = {
         "один",
@@ -301,15 +303,11 @@ def count_words() -> frozenset[str]:
         "двумя",
         "три",
         "трёх",
-        "трех",
         "трём",
-        "трем",
         "тремя",
         "четыре",
         "четырёх",
-        "четырех",
         "четырём",
-        "четырем",
         "четырьмя",
     }
     soft = {form for one in SOFT_NUMERALS for form in soft_forms(one)}
@@ -331,13 +329,11 @@ def count_words() -> frozenset[str]:
         "двухстах",
         "триста",
         "трёхсот",
-        "трехсот",
         "трёмстам",
         "тремястами",
         "трёхстах",
         "четыреста",
         "четырёхсот",
-        "четырехсот",
         "четырёмстам",
         "четырьмястами",
         "четырёхстах",
@@ -390,7 +386,8 @@ def count_words() -> frozenset[str]:
         "несколькими",
     }
     nouns = {form for forms in COUNTING_NOUNS.values() for form in forms}
-    return frozenset(small | soft | tens | hundreds | collective | both | loose | nouns)
+    words = small | soft | tens | hundreds | collective | both | loose | nouns
+    return frozenset(words | {one.replace("ё", "е") for one in words})
 
 
 #: Слова счёта, которых в прозе под заголовком скелета нет вовсе.
@@ -1196,6 +1193,8 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
         ("их двое", True),
         ("строк (файлов на три больше)", True),
         ("в двадцати файлах", True),
+        ("в трехстах файлах", True),
+        ("четыремстам строкам", True),
         ("файлов 3", True),
         ("держит правило (005)", False),
         ("правила (005, 127)", False),
@@ -1218,6 +1217,8 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
         "собирательное",
         "счёт-в-скобках",
         "часть-составного",
+        "сотни-через-е",
+        "сотни-через-е-дательный",
         "цифра",
         "адрес-правила",
         "адреса-правил",
@@ -1236,3 +1237,11 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
 def test_hand_counts_sees_every_form_and_spares_addresses(prose: str, counted: bool) -> None:
     """Счёт рукой виден во всех формах; законны адреса и код (`852fba6`, `e23aa2c`, `fa9da40`)."""
     assert bool(hand_counts(prose)) is counted
+
+
+def test_every_count_word_with_yo_is_also_seen_written_with_ye() -> None:
+    """Каждая форма с «ё» узнаётся и через «е» — по построению, а не по перечню (`44321a0`)."""
+    with_yo = sorted(one for one in COUNT_WORDS if "ё" in one)
+    assert with_yo, "форм с «ё» в наборе нет — проверка ни о чём"
+    missing = [one for one in with_yo if one.replace("ё", "е") not in COUNT_WORDS]
+    assert not missing, f"через «е» не узнаются: {missing}"
