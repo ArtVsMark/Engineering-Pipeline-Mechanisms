@@ -474,7 +474,7 @@ def test_a_closed_acceptance_allows_the_major(monkeypatch: pytest.MonkeyPatch) -
     # на исправном коде. Тест, зависящий от того, что происходит в проекте,
     # проверяет не механизм, а день
     # ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
-    monkeypatch.setattr(module.project_version, "release_tag", lambda: "v0.9.0")
+    monkeypatch.setattr(module.project_version, "release_tag", lambda: "v0.99.0")
 
     def said(state: str) -> list[str]:
         return [
@@ -551,7 +551,7 @@ def test_the_first_release_starts_the_line(run_script: RunScript, tmp_path: Path
     tree(tmp_path)
     # Мажор назван ТОТ ЖЕ, что в линии: иначе первым отказом придёт приёмка —
     # мажор поднимает она, и до разряда дело не дойдёт.
-    run = run_script("release.py", "--version", "0.9.0", cwd=tmp_path)
+    run = run_script("release.py", "--version", "0.99.0", cwd=tmp_path)
     assert run.code == 1, run.text
     # Ожидаемое число СЧИТАЕТСЯ тем же механизмом, а не вписывается: вписанное
     # совпало бы с живой версией проекта, и гейт «версия не правится руками»
