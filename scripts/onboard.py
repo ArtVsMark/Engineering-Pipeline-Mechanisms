@@ -107,6 +107,7 @@ import gitcall
 import paths
 import pipeline_checks as policy
 import publish_facts
+import review_map
 import version
 import yaml
 
@@ -699,8 +700,12 @@ def badge_line(repo: str) -> str:
 
 
 def occupied(root: Path, files: dict[Path, str]) -> list[Path]:
-    """Файлы заготовки, которые в дереве потребителя уже есть: их заход не трогает."""
-    return sorted(path for path in files if (root / path).exists())
+    """Файлы заготовки, которые в дереве потребителя уже есть — сами или двойником YAML.
+
+    Их заход не трогает. Двойник — тоже «есть» (`standing`): свой `ci.yaml`
+    рядом с положенным `ci.yml` дал бы два прогона (находка `1f2ca12`).
+    """
+    return sorted(path for path in files if (root / standing(root, path)).exists())
 
 
 def lay(root: Path, files: dict[Path, str]) -> None:
@@ -738,6 +743,9 @@ DATA_KITTED: Final = (paths.REVIEW_ROLES, paths.REVIEW_PROCEDURE, paths.ROLES, p
 #: роли не отдаёт, то есть незаполненная заготовка давала бы роли МЕНЬШЕ, чем
 #: отсутствие таблицы (взгляд на #1455). Любой путь — то же, что без таблицы.
 AREA_ANY: Final = ("*", "**/*")
+#: Где идёт пилот роли «правила каталога» — полным адресом: потребитель читает
+#: строку у себя, и голый номер вёл бы в ЕГО трекер.
+ROLE_PILOT: Final = "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/1277"
 #: Пояснение области в заготовке: что заполнять.
 AREA_FILL: Final = (
     "заготовка: область задевает любой путь, и роль получает все её правила, как без "
@@ -795,15 +803,37 @@ def data_kit(root: Path) -> dict[Path, str]:
 YAML_TWINS: Final = {".yml": ".yaml", ".yaml": ".yml"}
 
 
+def read_by_the_platform(path: Path) -> bool:
+    """Файл, который площадка читает под ЛЮБЫМ из двух расширений: прогон и `dependabot`.
+
+    Свои файлы механизмов (`.pipeline.yml`, данные `.rules/`) читаются точным
+    именем: двойник им места не занимает — механизм его не увидел бы.
+    """
+    return path.parent == paths.WORKFLOWS or path.with_suffix(".yml") == paths.DEPENDABOT
+
+
+def standing(consumer: Path, path: Path) -> Path:
+    """Путь, под которым файл заготовки стоит у потребителя: сам, двойник YAML или сам.
+
+    ОДИН РАЗБОР НА ВСЕ ДВЕРИ (находка `1f2ca12`, правило 195). Двойника видела
+    только заготовка данных, а `--write` клал `ci.yml` рядом со своим
+    `ci.yaml`, и `--update` — тоже: два прогона на одно событие. Нет ни
+    файла, ни двойника — сам путь: туда и ляжет.
+    """
+    if (consumer / path).exists() or not read_by_the_platform(path):
+        return path
+    twin = path.with_suffix(YAML_TWINS.get(path.suffix, path.suffix))
+    return twin if (consumer / twin).exists() else path
+
+
 def taken_by_twin(consumer: Path, path: Path) -> bool:
     """Путь занят файлом-двойником с другим расширением YAML."""
-    twin = YAML_TWINS.get(path.suffix)
-    return twin is not None and (consumer / path.with_suffix(twin)).exists()
+    return standing(consumer, path) != path
 
 
 def lay_free(consumer: Path, kit: dict[Path, str]) -> list[Path]:
     """Кладёт заготовку только в свободные пути; возвращает положенное."""
-    taken = set(occupied(consumer, kit)) | {path for path in kit if taken_by_twin(consumer, path)}
+    taken = set(occupied(consumer, kit))
     free = {path: text for path, text in kit.items() if path not in taken}
     lay(consumer, free)
     return sorted(free)
@@ -817,6 +847,33 @@ def bindings_note(consumer: Path) -> str:
         f"`{paths.BINDINGS}` нет: без него карта взгляда не собирается, и взгляд идёт без "
         "карты. Заготовкой он не кладётся — это ответ проекта каталогу правил: "
         "заведите его по договору ответа каталога."
+    )
+
+
+def dormant_areas_note(consumer: Path) -> str:
+    """Названная спячка таблицы областей: роль, которой она отдаёт правила, не объявлена.
+
+    СКЕЛЕТ РОЛИ НЕ ОБЪЯВЛЯЕТ НАМЕРЕННО (находки `b4894a3`, `72d2c49`): роль
+    «правила каталога» в пилоте у механизмов, раскатка на семью — после его
+    отдачи (решение владельца 15.10.2026, #1277). Таблица областей ложится
+    готовой, а действует только у проекта, объявившего роль, — и это
+    говорится, а не выясняется пустой картой. Нечитаемая таблица ролей — «не
+    объявлена», как у карты (`review_map.role_declared`).
+    """
+    if not (consumer / paths.AREA_PATHS).exists():
+        return ""
+    try:
+        roles = json.loads((consumer / paths.REVIEW_ROLES).read_text(encoding="utf-8"))
+        declared = review_map.declares_role(review_map.table_shape(roles))
+    except OSError, ValueError, review_map.NotRun:
+        declared = False
+    if declared:
+        return ""
+    return (
+        f"`{paths.AREA_PATHS}` спит: карта взгляда отдаёт по ней правила роли "
+        f"«{review_map.CATALOGUE_ROLE}», а в `{paths.REVIEW_ROLES}` эта роль не объявлена. "
+        "Таблица начнёт действовать, когда проект впишет роль в `required` или `by_path` и "
+        f"даст ей профиль в `{paths.ROLES}`. Роль в пилоте у поставщика: {ROLE_PILOT}"
     )
 
 
@@ -1133,33 +1190,36 @@ def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path,
     """Целиком наши файлы: переписать, если совпадают по существу с заготовкой своего тега."""
     pin_old: dict[str, dict[Path, str]] = {}
     for path, text in sorted(new.items()):
-        target = consumer / path
+        # Двойник `.yaml` — тот же файл под своим именем: правится он, а не
+        # кладётся второй рядом (`standing`, находка `1f2ca12`).
+        where = standing(consumer, path)
+        target = consumer / where
         if not target.is_file():
             update.write[path] = text
             continue
         mine = target.read_text(encoding="utf-8")
         tags = sorted({said["tag"] for said in our_uses(repo).finditer(mine)})
         if not tags:
-            update.copies.append(path)
+            update.copies.append(where)
             continue
         if len(tags) > 1:
-            update.edited[path] = f"вызовы прибиты к разным тегам: {', '.join(tags)}\n"
+            update.edited[where] = f"вызовы прибиты к разным тегам: {', '.join(tags)}\n"
             continue
         if essence(mine, repo, path) == essence(text, repo, path):
             if tags[0] == new_tag(text, repo):
-                update.current.append(path)
+                update.current.append(where)
             else:
-                update.write[path] = keep_inputs(text, mine, repo, path, root)
+                update.write[where] = keep_inputs(text, mine, repo, path, root)
             continue
         if tags[0] not in pin_old:
             pin_old[tags[0]] = owned_at(root, tags[0], repo)
         before = pin_old[tags[0]].get(path)
         if before is None:
-            update.edited[path] = f"выпуск {tags[0]} такого файла не клал — сверить не с чем\n"
+            update.edited[where] = f"выпуск {tags[0]} такого файла не клал — сверить не с чем\n"
         elif essence(mine, repo, path) != essence(before, repo, path):
-            update.edited[path] = gap(before, mine, path, repo)
+            update.edited[where] = gap(before, mine, path, repo)
         else:
-            update.write[path] = keep_inputs(text, mine, repo, path, root)
+            update.write[where] = keep_inputs(text, mine, repo, path, root)
 
 
 def new_tag(text: str, repo: str) -> str:
@@ -1175,9 +1235,10 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     (решение владельца по #1386): новый шаг печатается готовым джобом, снятый —
     называется. Переписываются только теги в строках вызова наших шагов.
     """
-    target = consumer / paths.WORKFLOWS / PIPELINE_FLOW
+    where = standing(consumer, paths.WORKFLOWS / PIPELINE_FLOW)
+    target = consumer / where
     if not target.is_file():
-        update.write[paths.WORKFLOWS / PIPELINE_FLOW] = thin_ci(pipeline, repo, pin)
+        update.write[where] = thin_ci(pipeline, repo, pin)
         return
     text = target.read_text(encoding="utf-8")
     called = {
@@ -1194,7 +1255,7 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
 
     lifted = our_uses(repo).sub(lift, text)
     if lifted != text:
-        update.write[paths.WORKFLOWS / PIPELINE_FLOW] = lifted
+        update.write[where] = lifted
     for one in sorted(set(pipeline) - called):
         update.notes.append(
             f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
@@ -1351,6 +1412,8 @@ def update(
         print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
     if unanswered := bindings_note(consumer):
         print(unanswered)
+    if dormant := dormant_areas_note(consumer):
+        print(dormant)
     return EXIT_OK
 
 
@@ -1467,7 +1530,7 @@ def main(argv: list[str] | None = None) -> int:
         if taken:
             print(
                 "заготовка не положена: в дереве уже есть "
-                + ", ".join(str(one) for one in taken)
+                + ", ".join(str(standing(args.write, one)) for one in taken)
                 + ". Заход чужое не перезаписывает — уберите файл или сверьте его с "
                 "выводом захода без --write",
                 file=sys.stderr,
@@ -1484,6 +1547,8 @@ def main(argv: list[str] | None = None) -> int:
             print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
         if unanswered := bindings_note(args.write):
             print(unanswered)
+        if dormant := dormant_areas_note(args.write):
+            print(dormant)
         if kept:
             print(
                 "свод уже есть и не тронут: " + ", ".join(str(one) for one in kept) + ". "
