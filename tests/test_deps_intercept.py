@@ -361,6 +361,12 @@ def test_an_unresolved_signal_reddens_the_run(rc: int, red: bool) -> None:
     )
     assert (done.returncode != 0) == red, (rc, done.returncode, done.stdout)
     assert ("::error::" in done.stdout) == red, done.stdout
+    # Цвет у кодов 1 и 2 один, и различает их ТОЛЬКО текст (предел 195 в шаге):
+    # слитые в одну ветку `case` с одним текстом прошли бы проверку цвета
+    # (взгляд на #1417).
+    told = {0: "", 1: "не разобран", 2: "не отработал"}[rc]
+    assert told in done.stdout, done.stdout
+    assert {1: "не отработал", 2: "не разобран"}.get(rc, "—") not in done.stdout, done.stdout
 
 
 # --- подъём своих шагов после выпуска (#1387) ---------------------------------
@@ -502,3 +508,81 @@ def test_restore_keeps_a_dirty_tree(stand: Path) -> None:
     git(stand, "checkout", "--quiet", "--", ".")
     module.restore(stand)
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
+
+
+# --- переключение ветки и возврат (взгляды на #1434 и #1441) -------------------
+
+
+def test_a_tracked_edit_stops_the_switch(stand: Path) -> None:
+    """Правка ОТСЛЕЖИВАЕМОГО файла — отказ, и правка цела (взгляд на #1434).
+
+    Неотслеживаемый файл `checkout -B` не трогает и с `--force`, поэтому проба
+    на нём проходила бы и без защиты.
+    """
+    tracked = stand / ".github" / "workflows" / "ci.yml"
+    tracked.write_text(tracked.read_text("utf-8") + "# своё\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="незакоммиченные"):
+        module.switch_clean(stand, "agent/x")
+    assert tracked.read_text("utf-8").endswith("# своё\n")
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
+def bot_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка с одним сигналом бота: тег находится, запись ничего не делает."""
+    signal = {
+        "number": 41,
+        "title": "Bump actions/checkout from 7.0.1 to 7.1.0",
+        "user": {"login": module.BOT},
+    }
+    monkeypatch.setenv("GH_TOKEN", "t")
+    monkeypatch.setattr(module.ghrest, "paginate", lambda path, token, **_: iter([signal]))
+    fake_platform(monkeypatch, [])
+
+
+def test_main_apply_with_a_refused_switch_keeps_the_edits(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Боевой заход `main` на дереве с правкой: отказ, возврат её не стирает (взгляд на #1441)."""
+    bot_signal(monkeypatch)
+    tracked = stand / ".github" / "workflows" / "ci.yml"
+    tracked.write_text(tracked.read_text("utf-8") + "# своё\n", encoding="utf-8")
+    said = module.main(["--root", str(stand), "--repo", "o/r", "--apply"])
+    assert said == module.EXIT_BROKEN
+    assert tracked.read_text("utf-8").endswith("# своё\n")
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
+def test_restore_names_both_owners_of_the_edits(
+    stand: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Чьи правки — не угадывается: названы оба случая и ветка (взгляд на #1441)."""
+    git(stand, "checkout", "--quiet", "-B", "agent/x")
+    (stand / ".github" / "workflows" / "ci.yml").write_text("недописано\n", encoding="utf-8")
+    module.restore(stand)
+    out = capsys.readouterr().out
+    assert "agent/x" in out and "человека" in out and "недописанный подъём" in out
+
+
+def test_a_self_bump_returns_the_tree(stand: Path) -> None:
+    """Подъём своих шагов возвращает дерево с ветки подъёма, как перехват (взгляд на #1441)."""
+    with_own_calls(stand)
+    assert module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0", "--apply"]) == 0
+    assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
+    assert git(stand, "status", "--porcelain") == ""
+
+
+def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Строки уже на версии сигнала — причина «уже поднято», а не «строк нет» (взгляд на #1397)."""
+    fake_platform(monkeypatch, [])
+    flows = stand / module.paths.WORKFLOWS
+    (flows / "ci.yml").write_text(
+        f"jobs:\n  a:\n    steps:\n      - uses: actions/checkout@{SHA_NEW} # v7.1.0\n",
+        encoding="utf-8",
+    )
+    git(stand, "commit", "--quiet", "-am", "поднято")
+    git(stand, "push", "--quiet", "origin", "HEAD:main")
+    assert module.uses_lines(stand, "actions/checkout") == 1
+    assert module.uses_lines(stand, "x/y") == 0
+    bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
+    with pytest.raises(module.Refused, match=r"уже на v7\.1\.0"):
+        module.intercept(stand, "o/r", "t", bump, dry_run=False)
