@@ -35,6 +35,10 @@ UNBUILT: Final = "не построено: "
 #: Замер у «не построено» — число и дата: без них долг неотличим от «не смотрели» (213).
 MEASURED_RE: Final = re.compile(r"замер\s+\d{2}\.\d{2}\.\d{4}.*?\d")
 RULE_RE: Final = re.compile(r"^\d{3}$")
+#: Слово, которым гейт ИСКЛЮЧАЕТ место: признак места его поглощает («hooks»
+#: стоит и в `with_hooks=False`), и гейт, хуки явно исключивший, иначе прошёл
+#: бы проверку «видит место» (взгляд на #1466).
+EXCLUDED_BY: Final = {".claude/hooks": "with_hooks=False"}
 
 
 def census() -> dict[str, Any]:
@@ -44,7 +48,7 @@ def census() -> dict[str, Any]:
     return said
 
 
-def judged(value: object, place: str, signs: dict[str, str]) -> str:
+def judged(value: object, place: str, signs: dict[str, str], root: Path = ROOT) -> str:
     """Что не так со значением места; годное — пустая строка."""
     if isinstance(value, str) and value.startswith(EXCLUDED):
         return "" if value.removeprefix(EXCLUDED).strip() else "«исключено» без причины"
@@ -56,11 +60,14 @@ def judged(value: object, place: str, signs: dict[str, str]) -> str:
         gate, sign = value, signs.get(place)
     if not isinstance(gate, str) or not isinstance(sign, str) or not sign:
         return f"значение не той формы: {value!r}"
-    path = ROOT / gate
+    path = root / gate
     if not path.is_file():
         return f"гейта {gate} в дереве нет"
-    if sign not in path.read_text(encoding="utf-8"):
+    code = path.read_text(encoding="utf-8")
+    if sign not in code:
         return f"в коде {gate} нет признака места «{sign}»"
+    if (excluding := EXCLUDED_BY.get(place)) and excluding in code:
+        return f"гейт {gate} исключает место словом «{excluding}»"
     return ""
 
 
@@ -142,3 +149,12 @@ def test_the_skill_path_is_a_live_skill() -> None:
     """Путь навыка — живой каталог навыков окна, а не придуманный адрес."""
     assert SKILL.is_file(), f"навыка {SKILL.relative_to(ROOT)} нет"
     assert Path(SKILL.parent).name == "a-gate-obeys-every-rule"
+
+
+def test_a_gate_excluding_the_hooks_does_not_see_them(tmp_path: Path) -> None:
+    """Признак «hooks» стоит и в `with_hooks=False`: исключивший хуки гейт их не видит (#1466)."""
+    (tmp_path / "seeing.py").write_text("code_files()  # hooks\n", encoding="utf-8")
+    (tmp_path / "blind.py").write_text("code_files(with_hooks=False)  # hooks\n", encoding="utf-8")
+    sign = {".claude/hooks": "hooks"}
+    assert judged("seeing.py", ".claude/hooks", sign, tmp_path) == ""
+    assert "исключает" in judged("blind.py", ".claude/hooks", sign, tmp_path)

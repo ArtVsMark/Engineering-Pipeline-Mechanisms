@@ -35,7 +35,7 @@
     },
     "100": {
       "paths.SOURCES": "tests/test_subprocess_deadline.py",
-      ".claude/hooks": "tests/test_subprocess_deadline.py",
+      ".claude/hooks": "не построено: дедлайн у вызовов процесса в *.py хуков держит tests/test_subprocess_deadline.py, а оболочечные хуки он не читает — замер 17.10.2026 по .claude/hooks/*.sh (pip install, uv python install, uv venv, curl, wget): сетевых вызовов без своего дедлайна в session-start.sh 3, их обрывает только предел хука 300 с в .claude/settings.json (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
       ".github": "не построено: предел работы прогона по всему .github не судится — tests/test_review_safety.py::test_agent_jobs_have_a_timeout берёт только прогоны с агентом (AGENT_WORKFLOWS) — замер 17.10.2026 разбором YAML (работа со шагами без timeout-minutes; разовый разбор окна, в дерево не положен — признак назван здесь же): работ со шагами 46, вызовов общего шага 32, без timeout-minutes 0"
     },
     "140": {
