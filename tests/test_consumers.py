@@ -228,7 +228,8 @@ def test_without_a_sweep_the_silent_are_named_unseen(
     """Обход не передан — сказано, что молча подключённых не видно, и пустота не «никого»."""
     assert module.main(["--root", str(registry_with(tmp_path))]) == module.EXIT_UNREAD
     out = capsys.readouterr().out
-    assert "молча подключённые НЕ ВИДНЫ" in out
+    assert out.strip().splitlines()[-1] == module.NO_SWEEP
+    assert out.count(module.NO_SWEEP) == 1, "итог без обхода сказан дважды"
     assert "среди тех, кого видно" in out and "это состояние" not in out
 
 
@@ -239,7 +240,151 @@ def test_a_declared_registry_without_a_sweep_is_not_read_whole(
     root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
     answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
     assert module.main(["--root", str(root)]) == module.EXIT_UNREAD
-    assert capsys.readouterr().out.strip().splitlines()[-1].startswith("обход семьи не передан")
+    out = capsys.readouterr().out
+    # Строка — по константе, а не по началу (находка `d380055`): вступление и
+    # итог начинались одинаково, и тест их не различал (`f4a5c14`).
+    assert out.strip().splitlines()[-1] == module.NO_SWEEP
+    assert out.count(module.NO_SWEEP) == 1, "итог без обхода сказан дважды"
     assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
         module.EXIT_OK
     )
+
+
+def test_the_sweep_drops_repeats_without_case(tmp_path: Path) -> None:
+    """Повтор найденного в другом регистре — один проект, первое написание (находка `e775d7d`)."""
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(
+        json.dumps({"by": [{"repo": "Owner/Repo"}, {"repo": "owner/repo"}, {"repo": "o/r"}]}),
+        encoding="utf-8",
+    )
+    assert module.swept(uptake) == (["Owner/Repo", "o/r"], [])
+
+
+def test_unread_answers_are_said_in_the_stream_of_the_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Итог «не прочитано ответов» — в stdout, где и «обход не прочитал» (находка `9695b0a`).
+
+    Отказ по отдельному проекту остаётся диагностикой — в stderr.
+    """
+    root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
+        module.EXIT_UNREAD
+    )
+    said = capsys.readouterr()
+    assert said.out.strip().splitlines()[-1] == "не прочитано ответов: 1 из 1"
+    assert "o/r: не прочитан" in said.err
+
+
+# --- все исходы неполноты — одним путём (взгляд на #1483, правило 210) --------
+
+
+def refusing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Площадка отвечает отказом на чтение ответа потребителя."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+
+
+def without_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Токена площадки нет."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
+
+
+def reading(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ответ потребителя читается целиком."""
+    answering(monkeypatch, 'checks:\n  "lint / lint": required\n')
+
+
+ROW: Final = {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"}
+
+
+@pytest.mark.parametrize(
+    ("rows", "platform"),
+    [((), reading), ((ROW,), without_token), ((ROW,), refusing), ((ROW,), reading)],
+    ids=["пустой-реестр", "без-токена", "ответ-не-прочитан", "ответ-прочитан"],
+)
+def test_every_exit_without_a_sweep_names_it_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    rows: tuple[dict[str, Any], ...],
+    platform: Any,
+) -> None:
+    """Без обхода любой выход захода говорит `NO_SWEEP` ровно раз, в stdout, и исход 3.
+
+    Прежде ранние выходы — без токена и с непрочитанным ответом — возвращали 3
+    и молчали, что молча подключённые не видны (взгляд на #1483).
+    """
+    platform(monkeypatch)
+    assert module.main(["--root", str(registry_with(tmp_path, *rows))]) == module.EXIT_UNREAD
+    said = capsys.readouterr()
+    assert said.out.count(module.NO_SWEEP) == 1
+    assert module.NO_SWEEP not in said.err
+
+
+def test_without_a_token_the_verdict_is_in_the_stream_of_the_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """«Ответы НЕ ПРОЧИТАНЫ» — итог неполноты, и он в stdout, как и прочие (взгляд на #1483)."""
+    without_token(monkeypatch)
+    root = registry_with(tmp_path, ROW)
+    assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
+        module.EXIT_UNREAD
+    )
+    said = capsys.readouterr()
+    assert said.out.strip().splitlines() == [module.NO_TOKEN]
+    assert said.err == ""
+
+
+def test_the_sweep_drops_unread_repeats_without_case(tmp_path: Path) -> None:
+    """Непрочитанные сводятся без регистра, как и найденные (взгляд на #1483)."""
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text(
+        json.dumps({"by": [], "projects": {"unread_repos": ["Owner/Repo", "owner/repo", "o/x"]}}),
+        encoding="utf-8",
+    )
+    assert module.swept(uptake) == ([], ["Owner/Repo", "o/x"])
+
+
+@pytest.mark.parametrize(
+    ("given", "said"),
+    [
+        ({"swept_given": True, "unswept": 0, "unread": 0, "total": 2, "token": True}, []),
+        (
+            {"swept_given": False, "unswept": 0, "unread": 0, "total": 2, "token": True},
+            [module.NO_SWEEP],
+        ),
+        (
+            {"swept_given": False, "unswept": 0, "unread": 2, "total": 2, "token": False},
+            [module.NO_TOKEN, "не прочитано ответов: 2 из 2", module.NO_SWEEP],
+        ),
+        (
+            {"swept_given": True, "unswept": 1, "unread": 1, "total": 3, "token": True},
+            [
+                "не прочитано ответов: 1 из 3",
+                "обход семьи не прочитал проектов: 1 — список выше неполон",
+            ],
+        ),
+    ],
+    ids=["полна", "без-обхода", "без-токена-и-обхода", "непрочитанное"],
+)
+def test_the_gaps_are_named_together_and_decide_the_outcome(
+    given: dict[str, Any], said: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Неполнота называется вся разом, каждая строка один раз, и она же решает исход."""
+    gaps = module.gaps_of(**given)
+    assert gaps == said
+    code = module.finish(gaps)
+    assert code == (module.EXIT_UNREAD if said else module.EXIT_OK)
+    out = capsys.readouterr()
+    assert out.out.splitlines() == said and not out.err

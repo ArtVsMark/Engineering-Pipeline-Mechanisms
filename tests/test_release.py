@@ -474,11 +474,17 @@ def test_a_closed_acceptance_allows_the_major(monkeypatch: pytest.MonkeyPatch) -
     # на исправном коде. Тест, зависящий от того, что происходит в проекте,
     # проверяет не механизм, а день
     # ([044](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/044-check-the-premise-before-fixing.md)).
-    monkeypatch.setattr(module.project_version, "release_tag", lambda: "v0.99.0")
+    #
+    # ЛИНИЯ — ОТ КАНОНА ПОДДЕЛКИ, А НЕ ЛИТЕРАЛОМ (находки `8a5c767`, `97553e6`).
+    # Прежний `v0.99.0` делил мажор с живым контрактом — граница «пока не
+    # совпало», от которой проект отказался: `FAKE_VERSION` берёт чужой мажор,
+    # и держит это `tests/test_fixture_version.py`.
+    monkeypatch.setattr(module.project_version, "release_tag", lambda: f"v{FAKE_VERSION}")
+    bumped = f"{int(FAKE_VERSION.split('.')[0]) + 1}.0.0"
 
     def said(state: str) -> list[str]:
         return [
-            one for one in module.refusals("1.0.0", acceptance="196", state=state) if "мажор" in one
+            one for one in module.refusals(bumped, acceptance="196", state=state) if "мажор" in one
         ]
 
     assert said(module.ACCEPTANCE_CLOSED) == []
@@ -550,13 +556,16 @@ def test_the_first_release_starts_the_line(run_script: RunScript, tmp_path: Path
     """
     tree(tmp_path)
     # Мажор назван ТОТ ЖЕ, что в линии: иначе первым отказом придёт приёмка —
-    # мажор поднимает она, и до разряда дело не дойдёт.
-    run = run_script("release.py", "--version", "0.99.0", cwd=tmp_path)
+    # мажор поднимает она, и до разряда дело не дойдёт. Линия без тегов
+    # начинается с нуля, а нулевой мажор — мажор живого контракта, поэтому и
+    # заведомо неверный номер СЧИТАЕТСЯ от ожидаемого, а не вписывается
+    # (находка `97553e6`): литерал совпал бы с живой версией проекта, и гейт
+    # «версия не правится руками» нашёл бы его в наборе (035).
+    line = module.next_after("0.0.0")
+    major, minor, _ = line.split(".")
+    run = run_script("release.py", "--version", f"{major}.{int(minor) + 1}.0", cwd=tmp_path)
     assert run.code == 1, run.text
-    # Ожидаемое число СЧИТАЕТСЯ тем же механизмом, а не вписывается: вписанное
-    # совпало бы с живой версией проекта, и гейт «версия не правится руками»
-    # нашёл бы его в наборе (035).
-    assert f"ожидается {module.next_after('0.0.0')}" in run.text
+    assert f"ожидается {line}" in run.text
 
 
 def test_an_empty_release_is_an_input_error(run_script: RunScript, tmp_path: Path) -> None:
@@ -827,7 +836,7 @@ def test_an_unread_answer_does_not_block_the_release(tmp_path: Path) -> None:
 
     Отказ только на определённом, предупреждение на вероятном
     ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)):
-    порядок толчков и так не даст уехать тегу без ветки.
+    атомарный толчок ветки и тега (#1456) и так не даст уехать тегу без ветки.
     """
     tree(tmp_path, tag="v9.9.0")
     said = module.refusals("9.10.0", acceptance="", push=module.MAY_PUSH)
