@@ -22,10 +22,13 @@
 """
 
 import ast
+import importlib.metadata
+import json
 import re
 import shutil
 import subprocess
 import tomllib
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -33,7 +36,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import ROOT, RunScript, git, load_script, walk
+from tests.conftest import ROOT, RunScript, found_by, git, load_script, walk
 
 preflight = load_script("preflight.py")
 surface = load_script("transport_surface.py")
@@ -209,19 +212,71 @@ def test_the_package_declares_the_shared_bottom() -> None:
 
 
 def test_the_package_carries_the_license_of_the_repository() -> None:
-    """Колесо несёт текст лицензии: установка из подкаталога корневого файла не видит (#1432).
+    """Колесо несёт текст лицензии: установка из подкаталога корневого файла не видит.
 
+    Задача — #1389; корневой `LICENSE` завело изменение #1432.
     `pip install …#subdirectory=packages/transport` собирает колесо из каталога
     пакета, и `LICENSE` из корня в него не попадает — а MIT требует текст
-    лицензии в копии. Сборка кладёт в колесо файлы `LICENSE*` каталога пакета
-    сама (`License-File` в метаданных; замер 17.10.2026 сборкой `uv build`:
-    без копии лицензий в колесе ноль, с копией — одна). Копия — намеренный
-    дубль корневого файла, и расходиться им не даёт эта проверка.
+    лицензии в копии. Копия — намеренный дубль корневого файла, и расходиться
+    им не даёт эта проверка. Кладёт её в колесо поле `license-files` (PEP 639),
+    а не умолчание сборщика `LICEN[CS]E*` (взгляд на #1477): смена сборщика или
+    своё значение поля убрали бы файл молча. Замер 17.10.2026 сборкой `uv build`:
+    с полем в колесе `License-File: LICENSE` и `licenses/LICENSE`; без файла
+    setuptools лишь предупреждает «did not match any files» и колесо собирает,
+    поэтому существование копии держит эта проверка, а не сборка.
     """
     copy = PACKAGE / "LICENSE"
     assert copy.is_file(), "у пакета нет LICENSE — колесо уйдёт без лицензии"
     assert copy.read_bytes() == (ROOT / "LICENSE").read_bytes(), (
         "LICENSE пакета разошёлся с корневым — копия обязана быть дословной"
+    )
+    declared = (manifest().get("project") or {}).get("license-files") or []
+    matched = {one.name for pattern in declared for one in found_by(PACKAGE, pattern)}
+    assert "LICENSE" in matched, (
+        f"license-files пакета ({declared}) не называет LICENSE — колесо несёт "
+        "лицензию лишь по умолчанию сборщика"
+    )
+
+
+def built_from_here() -> importlib.metadata.Distribution | None:
+    """Поставленный транспорт, если его колесо собрано из этого дерева; иначе ничего.
+
+    Поставленный правкой (`-e`) или из другого клона — не след этой сборки:
+    его метаданные описывают чужое дерево (216).
+    """
+    try:
+        dist = importlib.metadata.distribution(str(manifest()["project"]["name"]))
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    said = json.loads(dist.read_text("direct_url.json") or "{}")
+    url = str(said.get("url") or "")
+    if (said.get("dir_info") or {}).get("editable") or not url.startswith("file://"):
+        return None
+    place = Path(urllib.parse.unquote(urllib.parse.urlparse(url).path)).resolve()
+    return dist if place == PACKAGE.resolve() else None
+
+
+def test_the_wheel_built_from_here_carries_the_license() -> None:
+    """Колесо, собранное из этого дерева, несёт лицензию дословно — сборка исполнила поле.
+
+    Проверка выше держит объявление, эта — его исполнение (взгляд на #1477): CI
+    ставит транспорт из дерева (`pip install ./packages/transport`), то есть
+    собирает колесо на каждом прогоне, и метаданные поставленного — след этой
+    сборки. ГРАНИЦА НАЗВАНА (046): где транспорт поставлен правкой или из
+    другого клона — окно с основным клоном, рабочее дерево, — колеса этот прогон
+    не собирал, и проверка пропускается с причиной.
+    """
+    dist = built_from_here()
+    if dist is None:
+        # Шаг типов ставит mypy без pytest: там `skip` — не NoReturn, и сужение
+        # держит `return`, а не пропуск (замер #1063, `preflight.lint_python`).
+        pytest.skip("транспорт поставлен не колесом из этого дерева — сверять нечего")
+        return
+    assert "LICENSE" in (dist.metadata.get_all("License-File") or []), (
+        "в метаданных колеса нет License-File: LICENSE"
+    )
+    assert dist.read_text("licenses/LICENSE") == (ROOT / "LICENSE").read_text(encoding="utf-8"), (
+        "колесо несёт не корневой текст лицензии"
     )
 
 
