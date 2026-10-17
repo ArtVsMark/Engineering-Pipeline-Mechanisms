@@ -69,6 +69,7 @@
 """
 
 import argparse
+import contextlib
 import os
 import re
 import sys
@@ -736,17 +737,25 @@ def released(repo: str, token: str, freed: list[int]) -> None:
     выводит задачу из отфильтрованного списка, и вторая страница сдвигается
     на уже пройденные. Снятые копятся в `freed` вызывающего: отказ посреди
     захода называет то, что уже снято.
+
+    СПИСОК ОТСТАЁТ ОТ СНЯТИЯ (замер на выпуске v1.7.0, 17.10.2026): после
+    снятия меток с четырёх задач повторное чтение вернуло одну из них снова,
+    и её второе снятие получило 404 «Label does not exist». Поэтому снятие
+    идемпотентно: 404 значит «метки уже нет», а страница из одних уже снятых
+    задач — конец захода, а не новый круг.
     """
     label = WAITS_RELEASE.replace("/", "%2F")
     for _ in range(RELEASE_ROUNDS):
         page = ghrest.request(
             "GET", f"repos/{repo}/issues?state=open&labels={label}&per_page=100", token
         )
-        if not page:
+        fresh = [int(issue["number"]) for issue in page or [] if int(issue["number"]) not in freed]
+        if not fresh:
             return
-        for issue in page:
-            number = int(issue["number"])
-            ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{label}", token)
+        for number in fresh:
+            # 404 — метки уже нет: сняли раньше или рукой, цель достигнута.
+            with contextlib.suppress(ghrest.NotFound):
+                ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{label}", token)
             freed.append(number)
     raise NotRun(f"метка не уходит: {RELEASE_ROUNDS} заходов подряд первая страница не пуста")
 
