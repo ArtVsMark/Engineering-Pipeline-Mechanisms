@@ -1079,97 +1079,106 @@ def test_unread_labels_leave_section_four_as_written(
     assert "раздел 4 оставлен как в теле" in capsys.readouterr().out
 
 
-def test_a_release_takes_the_waits_release_label_away(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Метка снимается, пока первая страница помеченных не опустеет (#1433, взгляд на #1446)."""
-    pages = [[{"number": 7}, {"number": 9}], [{"number": 11}], []]
+def release_platform(
+    listed: list[int], kept: frozenset[int] = frozenset(), gone: frozenset[int] = frozenset()
+) -> tuple[Any, list[str]]:
+    """Подделка площадки для снятия метки: список постранично, снятие, метки задачи.
+
+    `kept` — задачи, на которых метка остаётся после снятия; `gone` — снятие
+    отвечает 404 «метки уже нет».
+    """
     calls: list[str] = []
-    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    per = module.ghrest.PER_PAGE
 
     def platform(method: str, path: str, *_: Any) -> Any:
         calls.append(f"{method} {path}")
-        return pages.pop(0) if method == "GET" else {}
+        if method == "DELETE":
+            number = int(path.split("/issues/")[1].split("/")[0])
+            if number in gone:
+                raise module.ghrest.NotFound("404 Label does not exist")
+            return {}
+        if "/labels?" in path:
+            number = int(path.split("/issues/")[1].split("/")[0])
+            first = path.endswith("&page=1")
+            return [{"name": module.WAITS_RELEASE}] if number in kept and first else []
+        page = int(path.rsplit("page=", 1)[1])
+        return [{"number": one} for one in listed[(page - 1) * per : page * per]]
 
+    return platform, calls
+
+
+def test_a_release_takes_the_waits_release_label_away(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Метка снимается со всех помеченных; список читается один раз, до снятия (#1433)."""
+    platform, calls = release_platform([7, 9, 11])
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
     monkeypatch.setattr(module.ghrest, "request", platform)
     assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_OK
-    listed = "GET repos/o/r/issues?state=open&labels=plan%2Fwaits-release&per_page=100"
-    assert calls.count(listed) == 3, "страница перечитывается, а не листается"
+    listing = [one for one in calls if "labels=plan%2Fwaits-release" in one]
+    assert len(listing) == 1, f"список перечитывается: {listing}"
     assert "DELETE repos/o/r/issues/11/labels/plan%2Fwaits-release" in calls
     assert "#7, #9, #11" in capsys.readouterr().out
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
     assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
 
 
+def test_more_than_a_page_of_labelled_issues_is_freed_whole(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Помеченных больше страницы — снимаются все, хвост второй страницы тоже (`f9501b7`)."""
+    many = list(range(1, module.ghrest.PER_PAGE + 3))
+    platform, calls = release_platform(many)
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    freed: list[int] = []
+    module.released("o/r", "t", freed)
+    assert freed == many
+    first_delete = next(at for at, one in enumerate(calls) if one.startswith("DELETE"))
+    assert any("page=2" in one for one in calls[:first_delete]), "список не дочитан до снятия"
+
+
+def test_a_label_that_comes_back_is_a_refusal_naming_the_issue(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Метка осталась на задаче после снятия — отказ с номером, а не «снята» (`b790524`)."""
+    platform, _ = release_platform([7, 9], kept=frozenset({9}))
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
+    said = capsys.readouterr().err
+    assert "вернулась после снятия" in said and "#9" in said
+    assert "уже снята — #7" in said
+
+
 def test_a_refusal_midway_names_what_was_already_freed(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Отказ посреди захода называет уже снятые метки, а не «не снято ничего»."""
+    platform, _ = release_platform([7, 9])
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
 
-    def platform(method: str, path: str, *_: Any) -> Any:
-        if method == "GET":
-            return [{"number": 7}, {"number": 9}]
-        if path.endswith("/9/labels/plan%2Fwaits-release"):
+    def refusing(method: str, path: str, *rest: Any) -> Any:
+        if method == "DELETE" and path.endswith("/9/labels/plan%2Fwaits-release"):
             raise module.ghrest.TransportError("502")
-        return {}
+        return platform(method, path, *rest)
 
-    monkeypatch.setattr(module.ghrest, "request", platform)
+    monkeypatch.setattr(module.ghrest, "request", refusing)
     assert module.main(["--repo", "o/r", "--released"]) == module.EXIT_BROKEN
     assert "уже снята — #7" in capsys.readouterr().err
 
 
-def test_a_lagging_listing_ends_the_pass_instead_of_failing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Список отстаёт и снова отдаёт снятую задачу — заход кончается, а не краснеет.
-
-    Замер на выпуске v1.7.0: повторное чтение вернуло уже снятую #1388, и её
-    второе снятие получило 404. 404 значит «метки уже нет».
-    """
-    deleted: list[str] = []
-
-    def platform(method: str, path: str, *_: Any) -> Any:
-        if method == "GET":
-            return [{"number": 7}]
-        deleted.append(path)
-        if len(deleted) > 1:
-            raise module.ghrest.NotFound("404 Label does not exist")
-        return {}
-
-    monkeypatch.setattr(module.ghrest, "request", platform)
-    freed: list[int] = []
-    module.released("o/r", "t", freed)
-    assert freed == [7] and len(deleted) == 1
-
-
 def test_a_label_already_gone_counts_as_freed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Снятие получило 404 — метки уже нет, задача названа снятой, отказа нет."""
-    pages = [[{"number": 7}], []]
+    """Снятие получило 404 — метки уже нет, задача названа снятой, отказа нет (`bb9fa10`).
 
-    def platform(method: str, path: str, *_: Any) -> Any:
-        if method == "GET":
-            return pages.pop(0)
-        raise module.ghrest.NotFound("404 Label does not exist")
-
+    Так выглядит отстающий список: он отдаёт задачу, с которой метку уже сняли
+    (замер на выпуске v1.7.0, 17.10.2026).
+    """
+    platform, calls = release_platform([7, 9], gone=frozenset({7}))
     monkeypatch.setattr(module.ghrest, "request", platform)
     freed: list[int] = []
     module.released("o/r", "t", freed)
-    assert freed == [7]
-
-
-def test_new_labels_that_keep_coming_are_a_refusal_not_a_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Первая страница каждый раз несёт новые задачи — отказ после предела, а не вечный цикл."""
-    counter = iter(range(1, 10_000))
-    monkeypatch.setattr(
-        module.ghrest,
-        "request",
-        lambda method, *_: [{"number": next(counter)}] if method == "GET" else {},
-    )
-    with pytest.raises(module.NotRun, match="не уходит"):
-        module.released("o/r", "t", [])
+    assert freed == [7, 9]
+    assert "DELETE repos/o/r/issues/7/labels/plan%2Fwaits-release" in calls
 
 
 def test_continuations_and_hand_groups_keep_their_rows() -> None:

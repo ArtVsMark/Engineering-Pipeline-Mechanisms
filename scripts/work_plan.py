@@ -722,42 +722,57 @@ def grouped(lines: list[str], labels: dict[int, set[str]]) -> list[str]:
     return said_lines
 
 
-#: Сколько раз перечитывается первая страница помеченных: снятие сдвигает
-#: страницы, поэтому идётся не по ним, а по первой, пока она не опустеет.
-RELEASE_ROUNDS: Final = 50
-
-
 def released(repo: str, token: str, freed: list[int]) -> None:
     """Снимает `plan/waits-release` с открытых задач после выпуска; снятые — в `freed`.
 
     Иначе «ждёт выпуска» пережило бы выпуск молча (045): задачи возвращаются
     в «Сейчас», и их остаток — проверка на теге — берётся тем же окном.
+    Снятые копятся в `freed` вызывающего: отказ посреди захода называет то,
+    что уже снято.
 
-    ПЕРВАЯ СТРАНИЦА, А НЕ ОБХОД СТРАНИЦ (взгляд на #1446): снятая метка
-    выводит задачу из отфильтрованного списка, и вторая страница сдвигается
-    на уже пройденные. Снятые копятся в `freed` вызывающего: отказ посреди
-    захода называет то, что уже снято.
+    СПИСОК ЦЕЛИКОМ — ДО ПЕРВОГО СНЯТИЯ, А НЕ ПЕРВАЯ СТРАНИЦА ПО КРУГУ (находки
+    `f9501b7`, `b790524`, `cbfbf87`, правило 210). Снятая метка выводит задачу
+    из отфильтрованного списка, и страницы сдвигаются (взгляд на #1446); круг
+    по первой странице при помеченных больше сотни кончался на уже снятых и
+    оставлял хвост молча. Пока ничего не снято, сдвигать нечего: помеченные
+    читаются все страницы подряд (`ghrest.paginate`), и только потом снимаются.
 
-    СПИСОК ОТСТАЁТ ОТ СНЯТИЯ (замер на выпуске v1.7.0, 17.10.2026): после
-    снятия меток с четырёх задач повторное чтение вернуло одну из них снова,
-    и её второе снятие получило 404 «Label does not exist». Поэтому снятие
-    идемпотентно: 404 значит «метки уже нет», а страница из одних уже снятых
-    задач — конец захода, а не новый круг.
+    СНЯТИЕ ПРОВЕРЯЕТСЯ МЕТКАМИ ЗАДАЧИ, А НЕ СПИСКОМ. Список отстаёт от снятия
+    (замер на выпуске v1.7.0, 17.10.2026: повторное чтение вернуло снятую
+    задачу, и её второе снятие получило 404). Метки самой задачи не отстают:
+    метка, оставшаяся на задаче после снятия, — её вернула автоматизация или
+    рука, и это отказ с номером, а не «снята». 404 на снятии значит «метки
+    уже нет» — цель достигнута.
+
+    ПРЕДЕЛ НАЗВАН (195): задача, помеченная после чтения списка, этим заходом
+    не снимается — её снимет следующий выпуск или ручной заход `--released`.
     """
     label = WAITS_RELEASE.replace("/", "%2F")
-    for _ in range(RELEASE_ROUNDS):
-        page = ghrest.request(
-            "GET", f"repos/{repo}/issues?state=open&labels={label}&per_page=100", token
+    listed = [
+        int(issue["number"])
+        for issue in ghrest.paginate(f"repos/{repo}/issues?state=open&labels={label}", token)
+    ]
+    for number in listed:
+        if number in freed:
+            continue
+        # 404 — метки уже нет: сняли раньше или рукой, цель достигнута.
+        with contextlib.suppress(ghrest.NotFound):
+            ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{label}", token)
+        freed.append(number)
+    kept = [
+        number
+        for number in freed
+        if any(
+            one.get("name") == WAITS_RELEASE
+            for one in ghrest.paginate(f"repos/{repo}/issues/{number}/labels", token)
         )
-        fresh = [int(issue["number"]) for issue in page or [] if int(issue["number"]) not in freed]
-        if not fresh:
-            return
-        for number in fresh:
-            # 404 — метки уже нет: сняли раньше или рукой, цель достигнута.
-            with contextlib.suppress(ghrest.NotFound):
-                ghrest.request("DELETE", f"repos/{repo}/issues/{number}/labels/{label}", token)
-            freed.append(number)
-    raise NotRun(f"метка не уходит: {RELEASE_ROUNDS} заходов подряд первая страница не пуста")
+    ]
+    if kept:
+        freed[:] = [number for number in freed if number not in kept]
+        raise NotRun(
+            "метка вернулась после снятия — её ставит автоматизация или рука: "
+            + ", ".join(f"#{one}" for one in kept)
+        )
 
 
 def assemble(body: str, built: dict[int, Source], held: dict[int, list[str]], when: str) -> str:
