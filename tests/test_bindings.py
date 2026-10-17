@@ -1452,6 +1452,14 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
         "rules-inbox.yml — канал подключения, вторая половина; держит scripts/family.py",
         "f40fad6e27a5",
     ),
+    "221": (
+        "attribution-history.yml — сверка итоговой истории; держит scripts/agent_pr.py",
+        "7328be8f7cec",
+    ),
+    "223": (
+        "ci.yml — место своих шагов; держит scripts/onboard.py",
+        "ef9b914067a2",
+    ),
 }
 
 
