@@ -156,6 +156,17 @@ def bump_origins(text: str, dep: str, tag: str) -> str:
     return pattern.sub(lambda found: found[1] + tag + found[3], text)
 
 
+def uses_lines(root: Path, dep: str) -> int:
+    """Сколько строк `uses:` этого действия в прогонах дерева — поднятых или нет."""
+    found = uses_re(dep)
+    return sum(
+        1
+        for path in sorted((root / WORKFLOWS).glob("*.yml"))
+        for line in path.read_text(encoding="utf-8").split("\n")
+        if found.search(line)
+    )
+
+
 def plan(root: Path, dep: str, tag: str, sha: str) -> dict[Path, str]:
     """Подъём действия во всём дереве: файл от корня → новый текст. Дерево не трогается."""
     planned: dict[Path, str] = {}
@@ -218,13 +229,18 @@ def git(root: Path, *args: str) -> str:
 def switch_clean(root: Path, branch: str) -> None:
     """Режет ветку от общей, если в дереве нечего стереть; иначе — отказ.
 
-    `checkout --force -B` молча сносит незакоммиченные правки. Оба захода,
-    режущих ветку, — перехват и подъём своих шагов — идут и на машине человека,
-    поэтому проверка у них одна, а не у каждого своя (`7f52cb1`, правило 195).
+    Оба захода, режущих ветку, — перехват и подъём своих шагов — идут и на
+    машине человека, поэтому проверка у них одна, а не у каждого своя
+    (`7f52cb1`, правило 195). ПЕРЕКЛЮЧЕНИЕ БЕЗ `--force` (взгляд на #1434):
+    третья находка по одному месту — сносу правок сменой ветки — чинится
+    классом, а не очередным вызовом (210). Чистому дереву `--force` не нужен, а
+    правку, которую проверка выше не увидела, git при смене ветки откажется
+    стирать сам. Принудительную смену ветки в любом механизме судит
+    `tests/test_git_keeps_the_tree.py`.
     """
     if git(root, "status", "--porcelain").strip():
         raise NotRun("в дереве незакоммиченные правки — заход переключает ветку и стёр бы их")
-    git(root, "checkout", "--quiet", "--force", "-B", branch, f"origin/{paths.TRUNK}")
+    git(root, "checkout", "--quiet", "-B", branch, f"origin/{paths.TRUNK}")
 
 
 def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -> str:
@@ -241,9 +257,16 @@ def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -
             switch_clean(root, branch)
         planned = plan(root, bump.dep, tag, sha)
         if not planned:
-            raise Refused(
-                f"#{bump.number}: строк `uses:` {bump.dep} в дереве нет — поднимать нечего"
+            # Пустой план — два разных случая (взгляд на #1397): строк нет вовсе,
+            # или они уже на этой версии — ветку подъёма слили, а сигнал открыт.
+            lines = uses_lines(root, bump.dep)
+            why = (
+                f"строки `uses:` {bump.dep} в дереве есть ({lines}), но поднимать нечего: "
+                f"они уже на {tag} или прибиты не версией"
+                if lines
+                else f"строк `uses:` {bump.dep} в дереве нет — поднимать нечего"
             )
+            raise Refused(f"#{bump.number}: {why}")
         note = paths.FRAGMENTS / f"deps-{slug(bump.dep)}-{slug(tag)}.changed.md"
         planned[note] = fragment(bump.dep, tag, bump.number)
         print(f"#{bump.number}: {bump.dep} → {tag} ({sha[:7]}), файлов: {len(planned)}")
@@ -379,9 +402,20 @@ def restore(root: Path) -> None:
     Прежде возврат шёл `checkout --force` и после ОТКАЗА `switch_clean`: правки,
     ради которых отказ и был, стирались здесь же (`4885891`). Дерево с правками
     теперь не трогается и называется; чистое возвращается без `--force`.
+
+    ЧЬИ ПРАВКИ — НЕ УГАДЫВАЕТСЯ, А НАЗЫВАЕТСЯ ОБА СЛУЧАЯ (взгляд на #1441).
+    После отказа `switch_clean` это правки человека, а после записи подъёма,
+    которому не дали закоммититься или толкнуться, — недописанный подъём самого
+    захода. Отличить их по дереву нечем, поэтому сказаны оба и ветка, на которой
+    дерево осталось.
     """
     if git(root, "status", "--porcelain").strip():
-        print("в дереве правки — на общую ветку не возвращаю, чтобы не стереть их")
+        head = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        print(
+            f"в дереве незакоммиченные правки, ветка {head} — на общую не возвращаю: "
+            "после отказа переключения это правки человека, после записи подъёма — "
+            "недописанный подъём этого захода; дерево оставлено как есть"
+        )
         return
     git(root, "checkout", "--quiet", "--detach", f"origin/{paths.TRUNK}")
 
@@ -413,10 +447,20 @@ def main(argv: list[str] | None = None) -> int:
             print("не отработал: нет имени проекта", file=sys.stderr)
             return EXIT_BROKEN
         report.announce(not args.apply)
+        failed = ""
         try:
             self_bump(args.root, args.repo, args.own_tag, dry_run=not args.apply)
         except (NotRun, OSError) as exc:
-            print(f"не отработал: {exc}", file=sys.stderr)
+            failed = str(exc)
+        # Подъём своих шагов режет ветку так же, как перехват, и возвращается
+        # так же — прежде дерево оставалось на `agent/deps-self-…` (взгляд на #1441).
+        if args.apply:
+            try:
+                restore(args.root)
+            except (NotRun, OSError) as exc:
+                failed = failed or f"дерево на общую ветку не возвращено: {exc}"
+        if failed:
+            print(f"не отработал: {failed}", file=sys.stderr)
             return EXIT_BROKEN
         return EXIT_OK
     token = ghrest.token_from_env()
