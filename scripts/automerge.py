@@ -174,8 +174,10 @@ STATE_ARMABLE: Final = "blocked"
 #: идёт за минуты; двадцать — запас на очередь площадки, а не на повисшее.
 STALL_AFTER: Final = timedelta(minutes=20)
 #: СКОЛЬКО ОБЯЗАТЕЛЬНАЯ ИДЁТ, ПРЕЖДЕ ЧЕМ ЭТО ПОВИСШЕЕ, А НЕ ДОЛГОЕ (взгляд на
-#: #1390). Самый длинный предел джоба в прогонах — 45 минут (`timeout-minutes`):
+#: #1390). Больше самого длинного предела джоба в прогонах (`timeout-minutes`):
 #: запись, которая идёт дольше любого предела, площадка уже не завершит сама.
+#: Связь держит набор, а не этот комментарий (находка `6690420`):
+#: `tests/test_automerge.py` сверяет её со всеми прогонами дерева.
 HUNG_AFTER: Final = timedelta(minutes=60)
 
 EXIT_OK: Final = 0
@@ -1073,11 +1075,18 @@ def head_runs(repo: str, change: Change, owner_token: str) -> list[dict[str, Any
 
 
 def moment_of(stamp: object) -> datetime | None:
-    """Время записи площадки; нет его или оно не той формы — `None`."""
+    """Время записи площадки; нет его или оно не той формы — `None`.
+
+    ВРЕМЯ БЕЗ ПОЯСА — НЕ ТА ФОРМА (находка `cbdc1d9`): наивный `datetime`
+    проходил разбор, а вычитание из времени с поясом в `stall_of` роняло
+    весь заход очереди `TypeError`. Площадка время без пояса не отдаёт, и
+    угадывать пояс значило бы судить о повисшем по чужим часам.
+    """
     try:
-        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")) if stamp else None
+        moment = datetime.fromisoformat(str(stamp).replace("Z", "+00:00")) if stamp else None
     except ValueError:
         return None
+    return moment if moment is not None and moment.tzinfo is not None else None
 
 
 def stall_of(runs: list[dict[str, Any]], required: list[str], moment: datetime) -> str | None:
