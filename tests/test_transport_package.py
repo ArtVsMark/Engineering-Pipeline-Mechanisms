@@ -433,20 +433,23 @@ def rename_a_function(package: Path) -> None:
 def test_the_live_surface_matches_the_shared_branch_or_moves_the_version() -> None:
     """Поверхность дерева против общей ветки: сменилась — сдвинут и `VERSION` (`88a3574`).
 
-    Пропуск — только когда ссылки общей ветки в клоне нет. Поломка разбора
-    (`SyntaxError`, `KeyError` в пакете любой стороны) пропуском не
-    считается: она краснеет как отказ (`3655874`).
+    Пропуск — только когда точки ветвления с общей веткой в клоне нет: нет
+    ссылки или клон мелкий. С #1494 «до» — эта точка, а не вершина базы, и
+    мелкий клон взгляда её не знает. Поломка разбора (`SyntaxError`,
+    `KeyError` в пакете любой стороны) пропуском не считается: она краснеет
+    как отказ (`3655874`).
     """
     known = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"{surface.BASE}^{{commit}}"],
+        ["git", "merge-base", surface.BASE, "HEAD"],
         cwd=ROOT,
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=False,
+        timeout=30,
     )
     if known.returncode != 0:
-        pytest.skip(f"ссылки {surface.BASE} в этом клоне нет — сверять не с чем")
+        pytest.skip(f"точки ветвления с {surface.BASE} в этом клоне нет — сверять не с чем")
     said = surface.moved_without_version(*surface.surface(PACKAGE), ROOT)
     assert not said, said
 
@@ -473,6 +476,25 @@ def test_a_snapshot_bypass_does_not_move_the_surface_at_the_old_version(
     refused = run_script("transport_surface.py", "--root", str(tmp_path))
     assert refused.code == surface.EXIT_REFUSED, refused.err
     assert "против origin/main" in refused.err
+
+
+def test_a_version_moved_in_the_base_later_does_not_excuse_the_branch(tmp_path: Path) -> None:
+    """База подняла `VERSION` после ветвления — правка ветки при прежнем номере не прошла (#1494).
+
+    «До» — точка ветвления. Против вершины номер «другой», и правка поверхности
+    без своего подъёма читалась бы сдвинутой.
+    """
+    package = copied(tmp_path)
+    git(tmp_path, "checkout", "-q", "-b", "work")
+    git(tmp_path, "checkout", "-q", "main")
+    # Номер нарочно не из разбора: важно лишь, что он ДРУГОЙ, чем у ветки.
+    (package / "VERSION").write_text("99.0.0\n", encoding="utf-8")
+    git(tmp_path, "commit", "-q", "-am", "база подняла VERSION")
+    git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(tmp_path, "checkout", "-q", "work")
+    rename_a_function(package)
+    said = surface.moved_without_version(*surface.surface(package), tmp_path)
+    assert "при прежнем VERSION" in said, said
 
 
 def test_a_shared_branch_without_the_package_is_a_refusal(tmp_path: Path) -> None:

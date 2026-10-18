@@ -7,12 +7,13 @@
 ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
 """
 
+import contextlib
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, names_used, walk
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, git, load_script, names_used, walk
 
 contract = load_script("contract.py")
 policy = load_script("pipeline_checks.py")
@@ -684,6 +685,35 @@ def test_the_snapshot_reads_every_form_of_the_entry(
     assert contract.checks_surface(path)["checks"]["a"] == want, case
 
 
+def test_a_lagging_branch_is_judged_from_its_fork_point(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Прогон, пришедший в базу ПОСЛЕ ветвления, на отставшей ветке не «удалён» (#1494).
+
+    «До» — дерево точки ветвления, а не вершины базы. Замер 18.10.2026: #1496
+    отстал от `main` на #1492, и гейт сказал «step-deps-intercept.yml: прогон
+    удалён целиком» о шаге, которого ветка не трогала.
+    """
+    root = tree(tmp_path / "tree")
+    git(root, "init", "-q", "--initial-branch=main")
+    git(root, "config", "user.name", "Artem Markitanov")
+    git(root, "config", "user.email", "a@b.c")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "основание")
+    git(root, "checkout", "-q", "-b", "work")
+    git(root, "commit", "-q", "--allow-empty", "-m", "своя работа")
+    git(root, "checkout", "-q", "main")
+    (root / ".github" / "workflows" / "next.yml").write_text(
+        WORKFLOW.replace("name: ci", "name: next").replace("lint", "next"), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "сосед добавил прогон")
+    git(root, "checkout", "-q", "work")
+    with contextlib.chdir(root):
+        assert gate.main(["--base", "main"]) == gate.EXIT_CLEAN
+    assert "удалён" not in capsys.readouterr().out
+
+
 def test_a_breaking_change_without_a_transition_is_the_findings_outcome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -696,6 +726,7 @@ def test_a_breaking_change_without_a_transition_is_the_findings_outcome(
     fragment = tmp_path / "gone.contract.md"
     fragment.write_text("### Джоб снят\n\n#1\n", encoding="utf-8")
     monkeypatch.setattr(gate.journal, "base_from_env", lambda: "база")
+    monkeypatch.setattr(gate.journal, "common_ancestor", lambda base: "предок")
     monkeypatch.setattr(gate, "base_tree", lambda base, into: into)
     monkeypatch.setattr(gate.contract, "surface", lambda root=None: {})
     monkeypatch.setattr(

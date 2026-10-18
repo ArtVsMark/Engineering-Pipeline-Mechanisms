@@ -514,6 +514,93 @@ def test_a_shallow_history_is_the_third_outcome(
     assert module.trunk_log.SHALLOW in capsys.readouterr().err
 
 
+def test_a_kind_added_to_the_base_later_does_not_vanish_on_a_lagging_branch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Род, добавленный в базу ПОСЛЕ ветвления, на отставшей ветке не «исчез» (#1494).
+
+    «До» — точка ветвления, а не вершина базы. Замер 17.10.2026: #1491 добавил
+    в `main` два рода, и `journal` покраснел на #1493, ветвлённом раньше, —
+    «род исчез» о том, чего ветка не трогала.
+    """
+    root, kinds = kinds_tree(tmp_path, 1)
+    git(root, "checkout", "-q", "-b", "work")
+    git(root, "commit", "--allow-empty", "-m", "своя работа")
+    git(root, "checkout", "-q", "main")
+    kinds.write_text(
+        json.dumps({"kinds": {"род": kind(1), "новый": kind(0)}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "сосед добавил род")
+    git(root, "checkout", "-q", "work")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
+    assert "исчез" not in capsys.readouterr().err
+
+
+def test_a_kind_removed_by_the_branch_itself_still_vanishes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Род, снятый САМОЙ веткой, краснеет по-прежнему — и при ушедшей вперёд базе (#1494)."""
+    root, kinds = kinds_tree(tmp_path, 1)
+    kinds.write_text(
+        json.dumps({"kinds": {"род": kind(1), "другой": kind(1)}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "два рода")
+    git(root, "checkout", "-q", "-b", "work")
+    kinds.write_text(
+        json.dumps({"kinds": {"другой": kind(1)}}, ensure_ascii=False), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "снял род")
+    git(root, "checkout", "-q", "main")
+    git(root, "commit", "-q", "--allow-empty", "-m", "база ушла вперёд")
+    git(root, "checkout", "-q", "work")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND
+    assert "«род» исчез" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("how", ["словарь пуст", "файла нет"])
+def test_a_branch_emptying_the_dictionary_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], how: str
+) -> None:
+    """Ветка, снявшая ВСЕ роды или сам словарь, краснеет, а не «родов не ведут» (045)."""
+    root, kinds = kinds_tree(tmp_path, 1)
+    git(root, "checkout", "-q", "-b", "work")
+    if how == "словарь пуст":
+        kinds.write_text(json.dumps({"kinds": {}}, ensure_ascii=False), encoding="utf-8")
+        git(root, "add", "-A")
+    else:
+        git(root, "rm", "-q", str(kinds.relative_to(root)))
+    git(root, "commit", "-q", "-m", "снял роды")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND
+    assert "«род» исчез" in capsys.readouterr().err
+
+
+def test_a_record_removed_from_the_base_later_is_not_added_by_a_lagging_branch(
+    tmp_path: Path,
+) -> None:
+    """Запись, снятая в базе после ветвления, не «добавлена» отставшей веткой (#1494).
+
+    Двухточечный `diff` сравнивает вершины: то, что ушло из базы позже, у
+    ветки читалось бы добавленным и судилось бы как новое решение.
+    """
+    root = tree(tmp_path)
+    git(root, "checkout", "-q", "-b", "work")
+    git(root, "commit", "--allow-empty", "-m", "своя работа")
+    git(root, "checkout", "-q", "main")
+    git(root, "rm", "-q", "docs/decisions/001-старое.md")
+    git(root, "commit", "-m", "запись снята")
+    git(root, "checkout", "-q", "work")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
+
+
 def test_the_frozen_list_neither_grows_nor_shrinks() -> None:
     """Решение 038: `встречен` у прежних родов не меняется, у новых пуст, род не исчезает."""
     before = {"старый": kind(2), "уходящий": kind(1)}
