@@ -104,14 +104,12 @@ def skills(root: Path) -> list[str]:
 
 
 def moment(text: object) -> datetime | None:
-    """Время строки журнала; без пояса или не той формы — `None`, а не догадка."""
-    if not isinstance(text, str):
-        return None
-    try:
-        at = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return at if at.tzinfo is not None else None
+    """Время строки журнала; без пояса или не той формы — `None`, а не догадка.
+
+    Форма та же, что у времени площадки, поэтому и разбор тот же — `ghrest.moment`,
+    а не своя копия (взгляд на #1519, 090).
+    """
+    return ghrest.moment(text)
 
 
 def parse(lines: Iterable[str]) -> Journal:

@@ -64,6 +64,7 @@ import findings
 import ghrest
 import gitcall
 import items
+import report
 
 #: Путь внутри дерева, названный прозой пункта. Расширение обязательно: без
 #: него в улов попадает всякое слово с точкой, а `scripts/` без имени файла
@@ -346,10 +347,18 @@ def subject_evidence(item: str, since: datetime, pool: list[Subject]) -> list[st
 
 
 def when_of(issue: dict[str, Any], key: str) -> datetime:
-    """Отметка времени задачи в UTC; без пояса или не время — `ValueError`, а не догадка о поясе."""
+    """Отметка времени задачи в UTC; без пояса или не время — отказ площадки, а не догадка.
+
+    ОТКАЗ — `TransportError`, А НЕ `ValueError` (взгляд на #1519): площадка
+    отдала ответ не той формы, и это тот же третий исход, что сбой связи. Его
+    ловят и долг, и замер ниже, а `ValueError` прошёл бы мимо обоих трейсбеком.
+    """
     said = ghrest.moment(issue[key])
     if said is None:
-        raise ValueError(f"у задачи #{issue.get('number')} {key} не время с поясом")
+        raise ghrest.TransportError(
+            f"у задачи #{issue.get('number')} поле {key} — не время с поясом: "
+            f"{report.cut(str(issue[key]))}"
+        )
     return said.astimezone(UTC)
 
 
@@ -453,10 +462,10 @@ def main(argv: list[str] | None = None) -> int:
             raise ghrest.TransportError("репозиторий не назван: --repo или GITHUB_REPOSITORY")
         token = ghrest.token_from_env()
         issues = list(ghrest.paginate(f"repos/{args.repo}/issues?state=all", token))
+        said = measure(issues)
     except ghrest.TransportError as exc:
         print(f"замер не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    said = measure(issues)
     props = said.closed - said.closed_named
     print(
         f"закрытых пунктов {said.closed}: называют путь или тест {said.closed_named}, "
