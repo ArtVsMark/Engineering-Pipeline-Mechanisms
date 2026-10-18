@@ -401,6 +401,15 @@ def test_the_answer_window_is_the_minor_of_the_release(
     assert policy.compatible(span, inside) and not policy.compatible(span, outside)
 
 
+@pytest.mark.parametrize(
+    "contract", ["9.9", "v9.9.0", "9.9.0-rc"], ids=["короче", "с-приставкой", "хвост"]
+)
+def test_a_contract_not_of_the_form_is_refused_in_our_words(contract: str) -> None:
+    """Не версия X.Y.Z — отказ `onboard`, а не чужое исключение; разбор — `version.digits` (214)."""
+    with pytest.raises(module.NotRun, match="версия контракта"):
+        module.contract_span(contract)
+
+
 def test_the_contract_is_read_at_the_pin_not_the_work_tree(tmp_path: Path) -> None:
     """Версия контракта — с дерева выпуска: рабочее дерево поставщика бывает впереди."""
     root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})

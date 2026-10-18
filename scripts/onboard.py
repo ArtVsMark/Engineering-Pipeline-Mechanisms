@@ -1409,8 +1409,10 @@ def contract_at(root: Path, pin: str) -> str:
     said = gitcall.output(
         ["show", f"{pin}:{paths.VERSION.as_posix()}"], NotRun, cwd=str(root)
     ).strip()
-    if not paths.VERSION_RE.match(said):
-        raise NotRun(f"{pin}:{paths.VERSION}: «{said}» не версия вида X.Y.Z")
+    try:
+        version.digits(said)
+    except version.NotRun as exc:
+        raise NotRun(f"{pin}:{paths.VERSION}: {exc}") from exc
     return said
 
 
@@ -1422,10 +1424,11 @@ def contract_span(contract: str) -> str:
     следующий минор лежит за окном: подъём прибивки краснеет и зовёт перечитать
     ответы, а не принимается молча.
     """
-    found = paths.VERSION_RE.match(contract)
-    if found is None:
-        raise NotRun(f"версия контракта «{contract}» не вида X.Y.Z")
-    major, minor = int(found[1]), int(found[2])
+    # Разряды — одним разбором `version.digits`, а не своим (214).
+    try:
+        major, minor, _ = version.digits(contract)
+    except version.NotRun as exc:
+        raise NotRun(f"версия контракта: {exc}") from exc
     return f">={major}.{minor},<{major}.{minor + 1}"
 
 
