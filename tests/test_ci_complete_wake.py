@@ -137,6 +137,32 @@ def test_a_head_with_nothing_to_wake_is_clean(
     assert "не устарела" in capsys.readouterr().out
 
 
+def test_summary_runs_find_the_yaml_twin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сводка под `ci-complete.yaml` находится: будильник спрашивает оба имени (`940b4c6`)."""
+    asked: list[str] = []
+
+    def paginate(path: str, _token: str, key: str | None = None) -> Any:
+        asked.append(path.split("/")[5])
+        if path.split("/")[5] == "ci-complete.yml":
+            raise module.ghrest.NotFound("404 Not Found")
+        return iter([run()])
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    assert module.summary_runs("o/r", "abc", "т") == [run()]
+    assert asked == ["ci-complete.yml", "ci-complete.yaml"]
+
+
+def test_no_summary_under_either_name_is_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сводки нет ни под одним именем — третий исход, а не «будить нечего» (045)."""
+
+    def paginate(*_: Any, **__: Any) -> Any:
+        raise module.ghrest.NotFound("404 Not Found")
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    with pytest.raises(module.NotRun, match="ни под одним именем"):
+        module.summary_runs("o/r", "abc", "т")
+
+
 def test_summary_runs_asks_only_the_change_event_of_the_head(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

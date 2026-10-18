@@ -267,6 +267,19 @@ def test_two_own_callers_are_a_refusal(tmp_path: Path) -> None:
         module.own_callers(root, module.steps(root))
 
 
+def test_a_yaml_run_is_read_as_a_run(tmp_path: Path) -> None:
+    """Свой прогон под `.yaml` — тот же прогон, а `ci.yaml` — тот же `ci.yml` (`e8e7fb3`).
+
+    Обе половины: вызывающий под `.yaml` найден, а `ci.yaml`, зовущий шаг
+    конвейера, вызывающим не считается — как и `ci.yml`.
+    """
+    root = tree(tmp_path, **{"step-план": MANAGED, "step-пример": MARKED})
+    flows = root / ".github" / "workflows"
+    (flows / "план.yaml").write_text(OWN_CALLER, encoding="utf-8")
+    (flows / "ci.yaml").write_text(CI_CALLER, encoding="utf-8")
+    assert module.own_callers(root, module.steps(root)) == {"план": flows / "план.yaml"}
+
+
 def test_a_call_the_kit_cannot_rewrite_is_a_refusal(tmp_path: Path) -> None:
     """Вызов в кавычках разбор признаёт, а подмена бы пропустила — отказ, а не внутренний путь."""
     quoted = OWN_CALLER.replace(
@@ -494,6 +507,129 @@ def test_the_thin_ci_carries_only_calls(tmp_path: Path) -> None:
     flow = yaml.safe_load(module.thin_ci(["а", "б"], "o/r", "v1.0.0"))
     assert set(flow["jobs"]) == {"а", "б"}
     assert all("steps" not in job and "@v1.0.0" in job["uses"] for job in flow["jobs"].values())
+
+
+def test_a_kept_path_is_left_alone_and_its_check_goes_off(tmp_path: Path) -> None:
+    """`--keep` оставляет путь проекту: заход его не пишет, проверка прогона — `off` (#1503).
+
+    Обе половины: без ключа занятый путь — прежний отказ, с ключом — свой файл
+    цел, а запись его прогона в ответе несёт класс `off` и причину. Ключ
+    называет двойник `.yaml` — это тот же путь заготовки.
+    """
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
+    )
+    consumer = tmp_path / "потребитель"
+    flows = consumer / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "план.yaml").write_text("своё\n", encoding="utf-8")
+    argv = ["--root", str(root), "--write", str(consumer)]
+    assert module.main(argv) == module.EXIT_OCCUPIED, "занятый путь без ключа — отказ, как прежде"
+    assert module.main([*argv, "--keep", ".github/workflows/план.yaml"]) == module.EXIT_OK
+    assert (flows / "план.yaml").read_text(encoding="utf-8") == "своё\n"
+    assert not (flows / "план.yml").exists()
+    answer = (consumer / module.paths.PIPELINE).read_text(encoding="utf-8")
+    said = module.policy.answer_text(answer, str(module.paths.PIPELINE))
+    entries = {
+        str(name): module.policy.entry_of(item)
+        for part in ("checks", module.policy.BEYOND)
+        for name, item in (said.get(part) or {}).items()
+    }
+    names, _ = module.own_records(root / ".github" / "workflows" / "план.yml", "план")
+    assert names, "у прогона нет записей — судить нечего"
+    for name in names:
+        klass, why, _ = entries[name]
+        assert klass == module.policy.OFF and "--keep" in why, entries[name]
+
+
+def test_a_kept_key_is_matched_to_the_kit_path_and_its_twin() -> None:
+    """Ключ сводится к пути заготовки, двойник YAML — в любую сторону (взгляд на #1508)."""
+    flows = module.paths.WORKFLOWS
+    known = {flows / "план.yaml", flows / "ci.yml", module.paths.PIPELINE}
+    keep, unknown = module.kept_on_the_kit(
+        [flows / "план.yml", flows / "ci.yaml", module.paths.PIPELINE, flows / "нет.yml"], known
+    )
+    assert keep == [flows / "план.yaml", flows / "ci.yml", module.paths.PIPELINE]
+    assert unknown == [str(flows / "нет.yml")]
+
+
+@pytest.mark.parametrize("kept", ["ci.yml", "ci-complete.yml"])
+def test_a_kept_pipeline_path_is_named_and_its_checks_stay(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], kept: str
+) -> None:
+    """`--keep` на путь вне прогонов механизмов: не положен, проверки не тронуты (взгляд на #1508).
+
+    Своё проект сводит с печатью захода, и вывод не обещает `off`, которого нет.
+    """
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED, "ci": CI_CALLER})
+    consumer = tmp_path / "потребитель"
+    argv = ["--root", str(root), "--write", str(consumer), "--keep", f".github/workflows/{kept}"]
+    assert module.main(argv) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert not (consumer / ".github" / "workflows" / kept).exists()
+    assert "не положено по --keep" in out and "off с причиной" not in out, out
+    said = module.policy.answer_text(
+        (consumer / module.paths.PIPELINE).read_text(encoding="utf-8"), str(module.paths.PIPELINE)
+    )
+    classes = {module.policy.entry_of(item)[0] for item in (said.get("checks") or {}).values()}
+    assert classes == {module.policy.UNREVIEWED}, said
+
+
+def test_a_kept_answer_says_where_the_off_rows_are(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ответ и прогон механизма оставлены оба: `off` — в печати, а не в неположенном файле."""
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
+    )
+    consumer = tmp_path / "потребитель"
+    argv = ["--root", str(root), "--write", str(consumer)]
+    keys = ["--keep", ".github/workflows/план.yml", "--keep", str(module.paths.PIPELINE)]
+    assert module.main([*argv, *keys]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert not (consumer / module.paths.PIPELINE).exists()
+    assert "не положен (--keep)" in out, out
+
+
+def test_a_suppliers_yaml_flow_is_kept_by_either_name(tmp_path: Path) -> None:
+    """Свой прогон поставщика под `.yaml` оставляется ключом и под `.yml` (взгляд на #1508)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED, "step-план": MANAGED, "ci": CI_CALLER})
+    (root / ".github" / "workflows" / "план.yaml").write_text(OWN_CALLER, encoding="utf-8")
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "add", "-A"], check=True, capture_output=True, timeout=30)
+    subprocess.run([*run, "commit", "--quiet", "-m", "yaml"], check=True, timeout=30)
+    subprocess.run([*run, "tag", "-f", "v2.5.0"], check=True, capture_output=True, timeout=30)
+    for key in ("план.yml", "план.yaml"):
+        consumer = tmp_path / f"потребитель-{key}"
+        argv = ["--root", str(root), "--write", str(consumer), "--keep"]
+        assert module.main([*argv, f".github/workflows/{key}"]) == module.EXIT_OK, key
+        assert not (consumer / ".github" / "workflows" / "план.yaml").exists()
+
+
+def test_kept_records_name_the_checks_of_a_kept_flow_only() -> None:
+    """Причина `off` — у записей прогона по оставленному пути, и только у них."""
+    own = {"план": Path("x/план.yml"), "обход": Path("x/обход.yml")}
+    records = {"план": (["план / план"], False), "обход": (["обход / обход"], True)}
+    kept = module.kept_records([module.paths.WORKFLOWS / "план.yml"], own, records)
+    assert list(kept) == ["план / план"] and "--keep" in kept["план / план"]
+    assert module.kept_records([], own, records) == {}
+
+
+def test_a_kept_path_the_kit_does_not_lay_is_refused(tmp_path: Path) -> None:
+    """Ключ на путь, которого заготовка не кладёт, — отказ до записи, а не молчание (045)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    argv = ["--root", str(root), "--write", str(consumer), "--keep", ".github/workflows/нет.yml"]
+    assert module.main(argv) == module.EXIT_BROKEN
+    assert not consumer.exists() or not any(consumer.iterdir()), "положено до отказа"
+
+
+def test_keep_belongs_to_the_first_connection() -> None:
+    """`--keep` без `--write` — ошибка вызова: обновлению и печати ключ не нужен."""
+    with pytest.raises(SystemExit):
+        module.main(["--keep", ".github/workflows/план.yml"])
 
 
 def test_occupied_names_only_what_exists(tmp_path: Path) -> None:
@@ -991,13 +1127,21 @@ def test_a_yaml_twin_of_a_run_takes_its_place_at_both_doors(tmp_path: Path) -> N
     """
     flows = tmp_path / ".github" / "workflows"
     flows.mkdir(parents=True)
-    (flows / "ci.yaml").write_text("своё", encoding="utf-8")
+    # Двойник с нашим вызовом на старом теге: обновлению есть что править, и
+    # «не положило рядом» отличается от «промолчало» (находка `52e29e5`).
+    mine = "name: ci\non: [push]\njobs:\n" + module.caller("а", "o/r", "v8.0.0")
+    (flows / "ci.yaml").write_text(mine, encoding="utf-8")
     run = module.paths.WORKFLOWS / module.PIPELINE_FLOW
     assert module.standing(tmp_path, run) == run.with_suffix(".yaml")
     assert module.occupied(tmp_path, {run: "заготовка"}) == [run]
     plan = module.Update()
-    module.plan_ci(plan, tmp_path, ["а"], "o/r", "v9.0.0")
+    module.plan_ci(plan, tmp_path, ["а", "б"], "o/r", "v9.0.0")
     assert run not in plan.write, "обновление положило бы ci.yml рядом с ci.yaml"
+    assert "@v9.0.0" in plan.write[run.with_suffix(".yaml")], (
+        "двойник не поднят — обновление молчит"
+    )
+    # Заметка о новом шаге называет файл, который у потребителя есть (`a137a27`).
+    assert any("вашего `ci.yaml`" in note for note in plan.notes), plan.notes
 
 
 def test_a_twin_of_our_own_data_takes_no_place(tmp_path: Path) -> None:
@@ -1351,6 +1495,27 @@ def connected(tmp_path: Path) -> tuple[Path, Path]:
     return root, consumer
 
 
+@pytest.mark.parametrize(("step", "said"), [("minor", True), ("patch", False)])
+def test_an_update_past_the_contract_window_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], step: str, said: bool
+) -> None:
+    """Подъём прибивки за окно `contract:` назван обновлением, а не толчком (`b923c76`).
+
+    Минор контракта вырос — окно ответа потребителя его не покрывает, и
+    обновление говорит это до записи (`d9b9a4f`, `4962cb3`). Патч поверхности
+    не трогает: о нём обновление молчит.
+    """
+    root, consumer = connected(tmp_path)
+    major, minor, patch = (int(one) for one in FAKE_VERSION.split("."))
+    bumped = f"{major}.{minor + 1}.0" if step == "minor" else f"{major}.{minor}.{patch + 1}"
+    (root / "CONTRACT_VERSION").write_text(f"{bumped}\n", encoding="utf-8")
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    capsys.readouterr()
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert ("не покрывает контракт" in out and bumped in out) is said, out
+
+
 #: Следующий выпуск меняет вызывающий: у механизма появилось событие.
 OWN_CALLER_NEXT = OWN_CALLER.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  push:\n")
 
@@ -1486,7 +1651,8 @@ def test_the_update_plan_is_decided_before_any_write(tmp_path: Path) -> None:
     plan = module.Update()
     module.plan_owned(plan, consumer, new, root, repo)
     module.plan_ci(plan, consumer, ["пример"], repo, "v2.6.0")
-    module.plan_answer(plan, consumer, [module.check_name("пример"), "лишний / лишний"])
+    wanted = [module.check_name("пример"), "лишний / лишний"]
+    module.plan_answer(plan, consumer, wanted, FAKE_VERSION, "v2.6.0")
     assert not plan.edited
     assert module.paths.WORKFLOWS / "план.yml" in plan.write
     assert module.paths.WORKFLOWS / module.PIPELINE_FLOW in plan.write
@@ -1644,6 +1810,33 @@ def test_the_license_line_takes_the_form_of_its_kind(name: str, first: str) -> N
     assert module.licensed(Path(name), signed, "o/r") == signed
 
 
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("a.yml", "# Лицензия: SPDX-License-Identifier: MIT — названа в тексте\nx: 1\n"),
+        ("a.md", "Текст называет SPDX-License-Identifier: MIT, но файл не подписан.\n"),
+        ("a.json", '{"note": "SPDX-License-Identifier: MIT", "x": 1}\n'),
+    ],
+    ids=["yml", "md", "json"],
+)
+def test_a_mention_of_the_license_is_not_a_signature(name: str, text: str) -> None:
+    """Идентификатор, названный в теле, — не подпись: строка ставится на своё место (`c12022f`)."""
+    assert not module.is_signed(Path(name), text)
+    signed = module.licensed(Path(name), text, "o/r")
+    assert signed != text and module.is_signed(Path(name), signed), signed
+
+
+def test_the_projects_file_is_one_sign_for_every_door() -> None:
+    """Файл проекта — один признак: и `ci.yml`, и его двойник `.yaml` (`215204f`)."""
+    run = module.paths.WORKFLOWS / module.PIPELINE_FLOW
+    assert module.of_the_project(run) and module.of_the_project(run.with_suffix(".yaml"))
+    assert not module.of_the_project(module.paths.WORKFLOWS / module.SUMMARY_FLOW)
+    files = {run.with_suffix(".yaml"): "x: 1\n", Path("a.yml"): "y: 2\n"}
+    signed = module.signed_all(files, "o/r")
+    assert signed[run.with_suffix(".yaml")] == "x: 1\n"
+    assert module.is_signed(Path("a.yml"), signed[Path("a.yml")])
+
+
 def test_a_json_kit_carries_the_license_as_its_first_field() -> None:
     """JSON комментариев не знает: лицензия — поле `_license`, и таблица ролей её пропускает."""
     kit = module.data_kit(ROOT)[module.paths.REVIEW_ROLES]
@@ -1677,22 +1870,18 @@ def test_every_file_the_write_lays_carries_the_license(tmp_path: Path) -> None:
     consumer = tmp_path / "потребитель"
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
     laid = [one for one in walk_deep(consumer) if one.is_file()]
-    own = {(consumer / one).as_posix() for one in module.OWN_BY_PROJECT}
+    # Подпись судится местом, а не упоминанием идентификатора (`e776e88`).
     signed = {
-        one.relative_to(consumer).as_posix(): module.LICENSE_ID in one.read_text(encoding="utf-8")
+        one.relative_to(consumer): module.is_signed(one, one.read_text(encoding="utf-8"))
         for one in laid
     }
     unsigned = [
-        path
-        for path, said in signed.items()
-        if not said and (consumer / path).as_posix() not in own
+        str(path) for path, said in signed.items() if not said and not module.of_the_project(path)
     ]
     assert not unsigned, f"положено без строки лицензии: {unsigned}"
-    projects = [
-        path for path, said in signed.items() if said and (consumer / path).as_posix() in own
-    ]
+    projects = [str(path) for path, said in signed.items() if said and module.of_the_project(path)]
     assert not projects, f"файл проекта подписан строкой поставщика: {projects}"
-    assert own and all(Path(one).is_file() for one in own), (
+    assert any(module.of_the_project(path) for path in signed), (
         "тонкий ci.yml не положен — судить нечего"
     )
 
@@ -1729,11 +1918,11 @@ def test_an_update_leaves_the_projects_own_ci_unsigned(tmp_path: Path) -> None:
     root, consumer = connected(tmp_path)
     flows = consumer / ".github" / "workflows"
     ci = flows / "ci.yml"
-    own = "".join(
-        line
-        for line in ci.read_text("utf-8").splitlines(keepends=True)
-        if module.LICENSE_ID not in line
-    ).replace(
+    # Настоящий путь «кладка → свои джобы → обновление» (`09942b2`): положенный
+    # `ci.yml` строки лицензии не несёт, и вырезать из него нечего.
+    laid = ci.read_text("utf-8")
+    assert not module.is_signed(ci, laid) and module.LICENSE_ID not in laid, laid
+    own = laid.replace(
         "jobs:\n",
         "jobs:\n  свой:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo свой\n",
         1,
@@ -1744,7 +1933,7 @@ def test_an_update_leaves_the_projects_own_ci_unsigned(tmp_path: Path) -> None:
     lifted = ci.read_text("utf-8")
     assert "step-пример.yml@v2.6.0" in lifted and "echo свой" in lifted, lifted
     assert module.LICENSE_ID not in lifted, lifted
-    assert module.LICENSE_ID in (flows / "план.yml").read_text("utf-8")
+    assert module.is_signed(flows / "план.yml", (flows / "план.yml").read_text("utf-8"))
 
 
 def test_every_whole_file_the_print_shows_carries_the_license(
@@ -1764,7 +1953,11 @@ def test_every_whole_file_the_print_shows_carries_the_license(
     out = capsys.readouterr().out
     # Целые файлы: свой прогон механизма, ответ, сводный гейт и свод окна.
     whole = 3 + len(module.rulebook_kit(root))
-    assert out.count(module.LICENSE_ID) == whole, out
+    # Подпись — строка в начале файла, а не упоминание (`e776e88`).
+    forms = tuple(
+        form.split("{line}", 1)[0] + module.LICENSE_ID for form in module.LICENSE_FORMS.values()
+    )
+    assert sum(line.startswith(forms) for line in out.splitlines()) == whole, out
     jobs = out.split("jobs:\n", 1)[1].split("\n# ", 1)[0]
     assert "step-пример" in jobs and module.LICENSE_ID not in jobs, jobs
 
@@ -1774,6 +1967,7 @@ def test_signed_all_signs_every_kit_or_refuses_the_whole() -> None:
     files = {Path("a.yml"): "x\n", Path("b.md"): "y\n"}
     signed = module.signed_all(files, "o/r")
     assert set(signed) == set(files)
-    assert all(module.LICENSE_ID in text for text in signed.values())
+    # Подпись — место, а не упоминание (тот же род, что `e776e88`).
+    assert all(module.is_signed(path, text) for path, text in signed.items()), signed
     with pytest.raises(module.NotRun, match="лицензии"):
         module.signed_all({**files, Path("c.toml"): "z\n"}, "o/r")
