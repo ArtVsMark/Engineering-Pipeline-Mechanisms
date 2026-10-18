@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import Run, RunScript, load_script
+from tests.conftest import FAKE_VERSION, Run, RunScript, load_script
 
 policy = load_script("pipeline_checks.py")
 
@@ -74,12 +74,6 @@ beyond_the_change:
 """
 
 
-@pytest.fixture(autouse=True)
-def no_supplier(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Набор не видит `$MECHANISMS` зовущего: иначе «не разрешается» зеленело бы (#1163)."""
-    monkeypatch.delenv(policy.SUPPLIER_ENV, raising=False)
-
-
 def tree(root: Path, answer: str, *workflows: str) -> Path:
     """Собирает дерево из ответа и прогонов; отдаёт путь ответа."""
     answer_path = root / ".pipeline.yml"
@@ -100,6 +94,81 @@ def gate(run_script: RunScript, root: Path) -> Run:
         "--workflows",
         str(root / "workflows"),
     )
+
+
+# --- окно контракта: под какую версию проверяется ответ (#1387) ---------------
+
+
+def answered(root: Path) -> Path:
+    """Ответ проекта с окном `>=0.1,<0.2` и одной проверкой — без своей версии контракта."""
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / ".pipeline.yml"
+    path.write_text(HEAD + "checks:\n  lint: unreviewed\n", encoding="utf-8")
+    return path
+
+
+def supplier_at(root: Path, contract: str | None) -> Path:
+    """Выкачка поставщика: код конвейера на коммите позванного тега и его версия."""
+    root.mkdir(parents=True, exist_ok=True)
+    if contract is not None:
+        (root / "CONTRACT_VERSION").write_text(f"{contract}\n", encoding="utf-8")
+    return root
+
+
+def test_a_called_tag_outside_the_window_is_refused_at_the_consumer(tmp_path: Path) -> None:
+    """У потребителя версия контракта — у ПОЗВАННОГО тега (`$MECHANISMS`), а не в его дереве.
+
+    Дерево потребителя своего `CONTRACT_VERSION` не несёт: он наш. Прежде сверка
+    искала файл только рядом с `.pipeline.yml` и у потребителя молча не шла —
+    тег, поднятый Dependabot за окно `contract:`, проходил зелёным (045). Нашла
+    проба пути подъёма из #1387, п. 3.
+    """
+    path = answered(tmp_path / "consumer")
+    supplier = supplier_at(tmp_path / "mechanisms", FAKE_VERSION)
+    with pytest.raises(policy.BadPolicy, match="вне объявленного диапазона"):
+        policy.load(path, supplier=supplier)
+
+
+def test_a_called_tag_inside_the_window_passes(tmp_path: Path) -> None:
+    """Тег в окне ответа проходит: отказ держится версией, а не присутствием поставщика."""
+    path = answered(tmp_path / "consumer")
+    supplier = supplier_at(tmp_path / "mechanisms", "0.1.7")
+    assert "lint" in policy.load(path, supplier=supplier)
+
+
+def test_a_supplier_without_its_version_is_refused(tmp_path: Path) -> None:
+    """Выкачка без `CONTRACT_VERSION` — отказ, а не «сверять не с чем» (075)."""
+    path = answered(tmp_path / "consumer")
+    supplier = supplier_at(tmp_path / "mechanisms", None)
+    with pytest.raises(policy.BadPolicy, match="версия контракта"):
+        policy.load(path, supplier=supplier)
+
+
+def test_the_own_contract_comes_first_and_the_called_tag_second(tmp_path: Path) -> None:
+    """`contract_of`: дерево со своей версией — поставщик; без неё — версия позванного тега.
+
+    Своя версия первее выкачки: проба передачи зовёт прошлый тег на нашем
+    дереве, и выкачка первой красила бы её на каждом выпуске (взгляд на #1498).
+    Ни своей, ни поставщика — `None`; поставщик без версии — отказ (045).
+    """
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    supplier = supplier_at(tmp_path / "mechanisms", FAKE_VERSION)
+    assert policy.contract_of(tree, supplier) == "0.1.0"
+    assert policy.contract_of(tree, None) == "0.1.0"
+    assert policy.contract_of(tmp_path / "bare", supplier) == FAKE_VERSION
+    assert policy.contract_of(tmp_path / "bare", None) is None
+    with pytest.raises(policy.BadPolicy, match="версия контракта позванного тега"):
+        policy.contract_of(tmp_path / "bare", supplier_at(tmp_path / "empty", None))
+
+
+def test_the_own_version_outside_the_window_is_refused(tmp_path: Path) -> None:
+    """У поставщика без выкачки версия — своя, из дерева: окно сверяется и у нас."""
+    path = answered(tmp_path)
+    (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
+    with pytest.raises(policy.BadPolicy, match="вне объявленного диапазона"):
+        policy.load(path)
 
 
 def test_off_written_as_a_word_is_read_as_a_class(tmp_path: Path) -> None:
@@ -849,7 +918,7 @@ def test_a_mechanism_path_resolves_in_the_supplier_checkout(
     У потребителя наших `scripts/` нет: управляющий шаг зовёт их из своей
     выкачки, и адресат «путь механизма» лежит там же.
     """
-    tree, supplier = tmp_path / "tree", tmp_path / "supplier"
+    tree, supplier = tmp_path / "tree", supplier_at(tmp_path / "supplier", "0.1.7")
     (supplier / "scripts").mkdir(parents=True)
     (supplier / "scripts" / "main_red.py").write_text("", encoding="utf-8")
     tree.mkdir()
@@ -877,7 +946,7 @@ def test_a_refusal_names_both_places(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     with pytest.raises(policy.BadPolicy, match="в дереве и в коде конвейера"):
-        policy.load(path, supplier=tmp_path / "supplier")
+        policy.load(path, supplier=supplier_at(tmp_path / "supplier", "0.1.7"))
 
 
 def test_the_supplier_is_read_from_the_environment(

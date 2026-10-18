@@ -401,6 +401,40 @@ def supplier_of() -> Path | None:
     return Path(said) if said else None
 
 
+def contract_of(tree: Path, supplier: Path | None) -> str | None:
+    """Версия контракта, под которую проверяется ответ: своя у поставщика, тега — у потребителя.
+
+    Дерево, несущее свой `CONTRACT_VERSION`, — поставщик, и его окно сверяется
+    с его же версией. У потребителя своего файла нет: код конвейера — выкачка
+    `$MECHANISMS` на коммите позванного тега, и версия лежит там. Прежде версия
+    искалась только рядом с `.pipeline.yml`, и у потребителя сверка окна молча
+    не шла — тег, поднятый Dependabot за окно `contract:`, проходил зелёным
+    (045). Нашла проба пути подъёма (#1387, п. 3).
+
+    СВОЯ ВЕРСИЯ ПЕРВЕЕ ВЫКАЧКИ (взгляд на #1498). Проба передачи зовёт шаг
+    прибитым ПРОШЛЫМ тегом на НАШЕМ дереве, где окно уже сдвинул выпуск: при
+    выкачке первой она краснела бы на каждом выпуске, сдвигающем минор, — о
+    паре «новое окно, старый тег», которой у потребителя не бывает. Граница
+    названа: окно потребителя проба поэтому не проверяет.
+
+    Своей версии нет, поставщик назван, а версии нет и в нём — отказ, а не
+    «сверять не с чем» (075). Нет ни того, ни другого — `None`: спросить не у
+    кого, и так бывает только у подделки.
+    """
+    own = tree / paths.VERSION
+    if own.is_file():
+        return own.read_text(encoding="utf-8").strip()
+    if supplier is None:
+        return None
+    said = supplier / paths.VERSION
+    if not said.is_file():
+        raise BadPolicy(
+            f"версия контракта позванного тега не найдена: {said} — выкачка "
+            "поставщика без неё не та, что ждёт сверка окна (075)"
+        )
+    return said.read_text(encoding="utf-8").strip()
+
+
 def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, Check]:
     """Читает ответ проекта по проверкам, отвергая любой дефект входа.
 
@@ -423,14 +457,12 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
         )
 
     declared_span = span_of(raw, path)
-    version_file = path.parent / paths.VERSION
-    if version_file.is_file():
-        now = version_file.read_text(encoding="utf-8").strip()
-        if not compatible(declared_span, now):
-            raise BadPolicy(
-                f"{path}: контракт механизмов {now} вне объявленного диапазона «{declared_span}» — "
-                "перечитайте ответы под новый контракт (157), а не двигайте границу"
-            )
+    now = contract_of(path.parent, supplier)
+    if now is not None and not compatible(declared_span, now):
+        raise BadPolicy(
+            f"{path}: контракт механизмов {now} вне объявленного диапазона «{declared_span}» — "
+            "перечитайте ответы под новый контракт (157), а не двигайте границу"
+        )
 
     declared = raw.get("checks")
     if not isinstance(declared, dict) or not declared:
