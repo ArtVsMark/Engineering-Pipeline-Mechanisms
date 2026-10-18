@@ -535,7 +535,6 @@ def test_the_release_step_asks_the_tag_here() -> None:
     code = [line for line in step.splitlines() if not line.lstrip().startswith("#")]
     assert not [line.strip() for line in code if "points-at" in line]
     assert any("version.py --head-tag" in line for line in code)
-    assert any("version.py --head-number" in line for line in code)
 
 
 @pytest.mark.parametrize("head", ["--head-tag", "--head-number"])

@@ -288,6 +288,11 @@ jobs:
             echo "::error::Площадка не приняла толчок выпуска трижды: толчок атомарный, и не доехали ни коммит, ни тег ${tag}. Общая ветка и теги не тронуты, выпуск можно повторить кнопкой. Частая причина — набору правил общей ветки нужен обход для того, кто выпускает (Settings → Rules → Bypass list): коммит выпуска собирается машиной из уже слитых фрагментов, и проверки изменения у него нет."
             exit 1
           fi
+          # НОМЕР УЕХАВШЕГО ВЫПУСКА — ВЫХОДОМ ШАГА, ОДИН РАЗ (взгляд на #1488).
+          # Шаги хвоста берут его отсюда, а не перечитывают HEAD: подъём своих
+          # шагов, не вернувший дерево, оставил бы HEAD на своей ветке, и
+          # соседи за ним краснели бы за него.
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
       # ХВОСТ ВСТАЁТ НА ТЕГ, А НЕ НА ГОЛОВУ ОБЩЕЙ ВЕТКИ (#1448). После выпуска
       # в ветку успевают слиться изменения, и номер с головы был бы чужим.
@@ -323,6 +328,9 @@ jobs:
             echo "::error::На коммите тега v${ASKED_VERSION} тегом выпуска читается $(cat "${RUNNER_TEMP}/head-tag.txt") — хвост довёл бы не тот выпуск."
             exit 1
           fi
+          # Номер — тем же выходом, что у выпуска: шагам хвоста неважно, кто
+          # из двух их пустил.
+          echo "version=${ASKED_VERSION}" >> "$GITHUB_OUTPUT"
 
       # СТРАНИЦА ВЫПУСКА — ПЯТЫЙ ШАГ, И ОН ИДЁТ ПОСЛЕ ТЕГА. Раньше её заводил
       # человек, и площадка наполняла её своим списком изменений вместо нашего
@@ -339,16 +347,13 @@ jobs:
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ASKED_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version || steps.tagged.outputs.version }}
         run: |
           set -uo pipefail
-          version="${ASKED_VERSION:-}"
+          version="${RELEASE_VERSION:-}"
           if [ -z "${version}" ]; then
-            python $MECHANISMS/scripts/version.py --head-number >"${RUNNER_TEMP}/head-tag.txt" 2>"${RUNNER_TEMP}/head-tag.err" || {
-              echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/head-tag.err"). Страницу заводить не для чего (075)."
-              exit 1
-            }
-            version="$(cat "${RUNNER_TEMP}/head-tag.txt")"
+            echo "::error::Номер выпуска не назван ни шагом выпуска, ни выкачкой тега — страницу заводить не для чего (075)."
+            exit 1
           fi
           rc=0
           python $MECHANISMS/scripts/release.py --page "${version}" --apply || rc=$?
@@ -394,17 +399,14 @@ jobs:
           (steps.release.outcome == 'success' || steps.tagged.outcome == 'success')
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ASKED_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version || steps.tagged.outputs.version }}
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
         run: |
           set -uo pipefail
-          version="${ASKED_VERSION:-}"
+          version="${RELEASE_VERSION:-}"
           if [ -z "${version}" ]; then
-            python $MECHANISMS/scripts/version.py --head-number >"${RUNNER_TEMP}/head-tag.txt" 2>"${RUNNER_TEMP}/head-tag.err" || {
-              echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/head-tag.err"). Поднимать свои шаги не до чего (075)."
-              exit 1
-            }
-            version="$(cat "${RUNNER_TEMP}/head-tag.txt")"
+            echo "::error::Номер выпуска не назван ни шагом выпуска, ни выкачкой тега — поднимать свои шаги не до чего (075)."
+            exit 1
           fi
           rc=0
           python $MECHANISMS/scripts/deps_intercept.py --self "v${version}" --apply || rc=$?
@@ -433,17 +435,14 @@ jobs:
           (steps.release.outcome == 'success' || steps.tagged.outcome == 'success')
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ASKED_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version || steps.tagged.outputs.version }}
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
         run: |
           set -uo pipefail
-          version="${ASKED_VERSION:-}"
+          version="${RELEASE_VERSION:-}"
           if [ -z "${version}" ]; then
-            python $MECHANISMS/scripts/version.py --head-number >"${RUNNER_TEMP}/notice-tag.txt" 2>"${RUNNER_TEMP}/notice-tag.err" || {
-              echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/notice-tag.err"). Судить о мажоре контракта не по чему (075)."
-              exit 1
-            }
-            version="$(cat "${RUNNER_TEMP}/notice-tag.txt")"
+            echo "::error::Номер выпуска не назван ни шагом выпуска, ни выкачкой тега — судить о мажоре контракта не по чему (075)."
+            exit 1
           fi
           rc=0
           python $MECHANISMS/scripts/breaking_notice.py --tag "v${version}" --apply || rc=$?
@@ -468,6 +467,10 @@ jobs:
       # СНИМАЮТСЯ МЕТКИ ЭТОГО ВЫПУСКА, А НЕ ВСЕ (взгляд на #1488): хвост доводят и
       # через день, а за день метку ставят задачам уже следующего выпуска.
       # Граница — время тега: поставленная позже него метка остаётся.
+      # ТЕГ — ВЫХОДОМ ШАГА ВЫПУСКА, А НЕ С HEAD (взгляд на #1488). Шаг идёт после
+      # подъёма своих шагов, и подъём, оставивший дерево на своей ветке,
+      # делал снятие метки красным за себя — при том что шаг держится исходом
+      # выпуска, а не соседа.
       - name: снять метку «ждёт выпуска» с задач плана
         if: >-
           !cancelled() &&
@@ -476,15 +479,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version || steps.tagged.outputs.version }}
         run: |
           set -uo pipefail
-          python $MECHANISMS/scripts/version.py --head-tag >"${RUNNER_TEMP}/label-tag.txt" 2>"${RUNNER_TEMP}/label-tag.err" || {
-            echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/label-tag.err"). Граница меток неизвестна — снимать нечем (075)."
+          version="${RELEASE_VERSION:-}"
+          if [ -z "${version}" ]; then
+            echo "::error::Номер выпуска не назван ни шагом выпуска, ни выкачкой тега — граница меток неизвестна (075)."
             exit 1
-          }
-          before="$(git for-each-ref --format='%(creatordate:iso-strict)' "refs/tags/$(cat "${RUNNER_TEMP}/label-tag.txt")")"
+          fi
+          before="$(git for-each-ref --format='%(creatordate:iso-strict)' "refs/tags/v${version}")"
           if [ -z "${before}" ]; then
-            echo "::error::Время тега $(cat "${RUNNER_TEMP}/label-tag.txt") не прочитано — граница меток неизвестна (075)."
+            echo "::error::Время тега v${version} не прочитано — граница меток неизвестна (075)."
             exit 1
           fi
           rc=0

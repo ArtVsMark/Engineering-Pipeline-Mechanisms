@@ -468,10 +468,20 @@ def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool, token: str = ""
     return branch
 
 
+#: Начало полного имени ветки: место дерева на ветке пишется так, а не коротко.
+BRANCH_REF: Final = "refs/heads/"
+
+
 def spot(root: Path) -> str:
-    """Где стоит дерево: имя ветки, а у отвязанного — полный sha."""
-    name = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
-    return git(root, "rev-parse", "HEAD").strip() if name == "HEAD" else name
+    """Где стоит дерево: полное имя ветки, а у отвязанного — полный sha.
+
+    ПОЛНОЕ ИМЯ, А НЕ КОРОТКОЕ (взгляд на #1474). Короткое `--abbrev-ref` при
+    одноимённом теге отдаёт `heads/<имя>`, и возврат по нему оставлял дерево
+    отвязанным, а не на ветке, где его застал. Полное `refs/heads/<имя>`
+    неоднозначным не бывает.
+    """
+    name = git(root, "rev-parse", "--symbolic-full-name", "HEAD").strip()
+    return name if name.startswith(BRANCH_REF) else git(root, "rev-parse", "HEAD").strip()
 
 
 def restore(root: Path, start: str) -> None:
@@ -500,12 +510,18 @@ def restore(root: Path, start: str) -> None:
         return
     if git(root, "status", "--porcelain").strip():
         print(
-            f"в дереве незакоммиченные правки, ветка {now} — на {start} не возвращаю: "
+            f"в дереве незакоммиченные правки, ветка {now.removeprefix(BRANCH_REF)} — "
+            f"на {start.removeprefix(BRANCH_REF)} не возвращаю: "
             "после отказа переключения это правки человека, после записи подъёма — "
             "недописанный подъём этого захода; дерево оставлено как есть"
         )
         return
-    git(root, "checkout", "--quiet", start, "--")
+    # Ветка возвращается `switch` — он берёт только ветки, и одноимённый тег его
+    # не собьёт; отвязанное — `--detach` на свой коммит.
+    if start.startswith(BRANCH_REF):
+        git(root, "switch", "--quiet", start.removeprefix(BRANCH_REF))
+    else:
+        git(root, "checkout", "--quiet", "--detach", start)
 
 
 def signals(repo: str, token: str) -> list[dict[str, Any]]:
