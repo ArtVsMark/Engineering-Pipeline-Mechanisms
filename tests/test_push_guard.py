@@ -17,6 +17,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import string
 import subprocess
 import sys
@@ -171,6 +172,45 @@ def test_the_cut_is_the_transport_one(text: str) -> None:
     """Обрезка сторожа — копия `report.cut`, и разойтись с ним молча ей нельзя (016, 046)."""
     assert module.LIMIT == report.LIMIT
     assert module.cut(text) == report.cut(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["коротко", "я" * report.LIMIT, "я" * (report.LIMIT + 1), "  поля  ", "я" * 400],
+    ids=["коротко", "на-границе", "за-границей", "поля", "длинно"],
+)
+def test_the_tail_is_the_transport_one(text: str) -> None:
+    """Хвост сторожа — копия `report.tail`, и разойтись с ним молча ему нельзя (016, 046)."""
+    assert module.tail(text) == report.tail(text)
+
+
+def test_a_long_git_refusal_keeps_its_cause() -> None:
+    """Длинный отказ git обрезан с начала: причина у него последней строкой (взгляд на #1486)."""
+    said = ask("git push origin agent/other", broken="ш" * 400 + "\nfatal: not a git repository")
+    assert said.returncode == 2, said.stdout + said.stderr
+    assert "fatal: not a git repository" in said.stderr and "обрезано" in said.stderr
+
+
+#: Длинный чужой текст для причины отказа.
+LONG: str = "я" * 400
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"env --x={LONG} git push origin agent/x",
+        f"bash -{LONG}c 'git push origin agent/x'",
+        f"git push origin {LONG}",
+        f"git push origin agent/{LONG}",
+        f"cat <<{LONG}\ngit push origin agent/x",
+    ],
+    ids=["ключ-обёртки", "связка-ключей-оболочки", "чужая-цель", "ветка-не-головы", "разделитель"],
+)
+def test_foreign_text_in_a_refusal_is_cut_aloud(command: str) -> None:
+    """Чужой текст в причине отказа обрезан вслух во всех случаях, а не в двух (взгляд на #1486)."""
+    said = ask(command)
+    assert said.returncode == 2, said.stdout + said.stderr
+    assert "обрезано" in said.stderr and LONG not in said.stderr, said.stderr
 
 
 @pytest.mark.parametrize(
@@ -342,6 +382,35 @@ def test_the_head_beside_a_same_named_tag_is_its_branch(
     assert module.refused(["agent/x"], module.head()[0]) == ""
 
 
+def test_a_guard_without_its_floor_names_the_floor(tmp_path: Path) -> None:
+    """Нет `floor.sh` — толчок закрыт, причина — планка, а не интерпретатор (взгляд на #1491).
+
+    Остальные команды окна открыты: обёртка закрывает только то, что страж и
+    сторожит.
+    """
+    where = tmp_path / "hooks"
+    where.mkdir()
+    for name in ("push_guard.sh", "push_guard.py"):
+        shutil.copy2(HOOK.parent / name, where / name)
+
+    def wrapped(command: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(where / "push_guard.sh")],
+            input=json.dumps({"tool_input": {"command": command}}),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={"PATH": f"{floor_interpreter()}:/usr/bin:/bin"},
+            timeout=30,
+        )
+
+    said = wrapped("git push origin agent/x")
+    assert said.returncode == 2, said.stdout + said.stderr
+    assert "планка интерпретатора не прочитана" in said.stderr, said.stderr
+    assert "перезапустите" not in said.stderr and "python?" not in said.stderr, said.stderr
+    assert wrapped("ls").returncode == 0
+
+
 def test_a_guard_that_cannot_see_the_head_refuses() -> None:
     """Сторож, не узнавший голову, отвергает толчок, а не машет рукой (находка #143).
 
@@ -422,7 +491,7 @@ def test_an_unparsable_command_refuses() -> None:
     """Незакрытая кавычка — тоже «не разобрал», и тоже отказ."""
     said = ask('git push origin "agent/other')
     assert said.returncode == 2, said.stdout + said.stderr
-    assert "кавычки не закрыты" in said.stderr
+    assert "двойная кавычка не закрыта" in said.stderr
 
 
 def test_a_harmless_wrapped_command_still_passes() -> None:
@@ -1065,7 +1134,7 @@ def test_a_heredoc_without_its_delimiter_blinds_the_guard() -> None:
     «теле» документа, которого нет.
     """
     look = module.push_targets("echo $((1<<2))\ngit push origin main")
-    assert look.blind, look
+    assert "без разделителя" in look.blind, look
 
 
 @pytest.mark.parametrize("quoted", ["$'main'", '$"main"'])

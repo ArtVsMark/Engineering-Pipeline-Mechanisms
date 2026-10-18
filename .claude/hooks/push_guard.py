@@ -87,6 +87,20 @@ def cut(text: str, limit: int = LIMIT) -> str:
     return f"{text[:limit]}… (обрезано, всего {len(text)} знаков)"
 
 
+def tail(text: str, limit: int = LIMIT) -> str:
+    """Оставляет конец вывода процесса для причины отказа, сказав, насколько он обрезан.
+
+    КОНЕЦ, А НЕ НАЧАЛО (взгляд на #1486): у вывода git причина стоит последней
+    строкой, и срез начала терял именно её. Копия `report.tail` — по той же
+    причине, что `cut` выше; совпадение держит
+    `tests/test_push_guard.py::test_the_tail_is_the_transport_one`.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return f"(обрезано, всего {len(text)} знаков) …{text[-limit:]}"
+
+
 def git(*args: str) -> subprocess.CompletedProcess[str] | str:
     """Вызов git с дедлайном; отказ запуска или истёкший срок — причина строкой.
 
@@ -260,8 +274,10 @@ def script_of(segment: list[str]) -> tuple[str | None, str]:
         if cluster.endswith("c") and all(letter in SHELL_FLAGS for letter in cluster[:-1]):
             if place + 1 < len(segment):
                 return segment[place + 1], ""
-            return None, f"у оболочки ключ «{word}» без скрипта — читать нечего"
-        return None, f"связка ключей «{word}» неоднозначна: где в ней скрипт, сторожу неизвестно"
+            return None, f"у оболочки ключ «{cut(word)}» без скрипта — читать нечего"
+        return None, (
+            f"связка ключей «{cut(word)}» неоднозначна: где в ней скрипт, сторожу неизвестно"
+        )
     return None, ""
 
 
@@ -321,7 +337,7 @@ def after_wrapper(name: str, rest: list[str]) -> tuple[list[str], str]:
         if len(word) > 2 and word[:2] in values:
             place += 1
             continue
-        return [], f"ключ «{word}» у обёртки «{name}» сторожу неизвестен"
+        return [], f"ключ «{cut(word)}» у обёртки «{name}» сторожу неизвестен"
     return [], f"после обёртки «{name}» команды нет"
 
 
@@ -459,7 +475,7 @@ def commands_of(text: str) -> list[list[str]]:
                     # (находка `664b218` на #1079). `<<` бывает и арифметикой
                     # (`$((1<<2))`), и тогда «тело» проглотило бы толчок на
                     # следующей строке, а сторож ответил бы «не толчок» (045).
-                    raise ValueError(f"встроенный документ без разделителя «{mark}»")
+                    raise ValueError(f"встроенный документ без разделителя «{cut(mark)}»")
                 end = text.find("\n", at)
                 line = text[at : len(text) if end < 0 else end]
                 at = len(text) if end < 0 else end + 1
@@ -552,8 +568,12 @@ def push_targets(command: str) -> Look:
     """
     try:
         parts = commands_of(command)
-    except ValueError:
-        return Look(blind="команда не разбирается на слова — кавычки не закрыты")
+    except ValueError as exc:
+        # ПРИЧИНА — СВОЯ У КАЖДОГО ОТКАЗА РАЗБОРА, А НЕ ОДНА НА ВСЕХ (045).
+        # Документ без разделителя прежде назывался незакрытой кавычкой. Все
+        # отказы `commands_of` — свои и уже обрезаны, поэтому текст берётся как
+        # есть.
+        return Look(blind=f"команда не разбирается на слова — {exc}")
     for part in parts:
         found, blind = unwrap(part, DEPTH)
         if blind:
@@ -612,7 +632,7 @@ def head() -> tuple[str, str]:
     if isinstance(said, str):
         return "", said
     if said.returncode != 0:
-        return "", cut(said.stderr) or f"git rev-parse вернул {said.returncode}"
+        return "", tail(said.stderr) or f"git rev-parse вернул {said.returncode}"
     return said.stdout.strip().removeprefix(REF_PREFIX), ""
 
 
@@ -639,13 +659,15 @@ def refused(targets: list[str], current: str) -> str:
         target = branch_of(raw)
         if not target.startswith(AGENT_PREFIX):
             return (
-                f"«{target}» — не ветка изменения: окно пишет только в `{AGENT_PREFIX}<задача>`, "
+                f"«{cut(target)}» — не ветка изменения: окно пишет только в "
+                f"`{AGENT_PREFIX}<задача>`, "
                 "по ней конвейер открывает изменение (003). В общую и чужие ветки — только "
                 "изменением (критический запрет свода)"
             )
         if current and target != current:
             return (
-                f"толчок в «{target}», а голова стоит на «{current}». Ветку изменения ведёт "
+                f"толчок в «{cut(target)}», а голова стоит на «{cut(current)}». "
+                "Ветку изменения ведёт "
                 "своё окно (012). Если это ваша работа — перейдите на неё, иначе конвейер "
                 "откроет второе изменение на ту же работу: 10.09.2026 так и вышло с #116"
             )
@@ -694,9 +716,9 @@ def merged_away(branch: str) -> str:
     # НЕ ПРОВЕРЕНО — НЕ ПУЩУ: тот же ответ, что у неузнанной головы (045).
     # Две проверки, а не цикл: сужение типа mypy через цикл не переносит.
     if isinstance(tracked, str):
-        return f"сторож не проверил, не слита ли ветка «{branch}», — {tracked}"
+        return f"сторож не проверил, не слита ли ветка «{cut(branch)}», — {tracked}"
     if isinstance(gone, str):
-        return f"сторож не проверил, не слита ли ветка «{branch}», — {gone}"
+        return f"сторож не проверил, не слита ли ветка «{cut(branch)}», — {gone}"
     # UPSTREAM ОБЯЗАН УКАЗЫВАТЬ НА САМУ ЭТУ ВЕТКУ, А НЕ ПРОСТО СУЩЕСТВОВАТЬ.
     # `git checkout -b <новая> origin/main` — процедура свода — оставляет
     # `branch.<новая>.merge = refs/heads/main`: git настраивает слежение за той
@@ -716,7 +738,7 @@ def merged_away(branch: str) -> str:
         return ""
     if gone.returncode != 0:
         return (
-            f"ветку «{branch}» площадка удалила — так она поступает при слиянии. Толчок "
+            f"ветку «{cut(branch)}» площадка удалила — так она поступает при слиянии. Толчок "
             "воскресит её вместе с коммитами, которых нет в общей ветке (202). Продолжение "
             f"идёт с НОВОЙ ветки: git fetch origin <общая> && git checkout -b "
             f"{AGENT_PREFIX}<новая> origin/<общая>"
