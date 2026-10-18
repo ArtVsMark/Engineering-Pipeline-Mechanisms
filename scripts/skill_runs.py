@@ -20,8 +20,13 @@
 облачного окна (`CLAUDE_CODE_REMOTE=true`) — отказ, а без ключа — сухой заход:
 тело печатается, ничего не пишется.
 
-ГРАНИЦЫ, И ОНИ НАЗВАНЫ. Сводка видит, что навык ЗВАЛИ, а не что его звали
-ВОВРЕМЯ: навык, позванный после толчка, засчитан наравне с позванным до.
+ГРАНИЦЫ, И ОНИ НАЗВАНЫ. «Не звали» — вывод по ВЫБОРКЕ, а не по проекту (107):
+журнал пишет одно окно в одном рабочем дереве. Облачное окно ведёт свой журнал
+и теряет его с контейнером, у другого git worktree журнал свой, и навык,
+который звали там, здесь назван незванным. Поэтому выборка — дни и число
+сессий — названа и в теле, и в строке исхода. Сводка видит, что навык ЗВАЛИ,
+а не что его звали ВОВРЕМЯ: навык, позванный после толчка, засчитан наравне с
+позванным до.
 Отказ навыка сводка считает по событию площадки, а не по смыслу ответа.
 Сверки «вызовы были, а журнал пуст» нет: для неё нужен счёт вызовов с другой
 стороны, а его у площадки нет.
@@ -169,6 +174,11 @@ def day(at: datetime | None) -> str:
     return at.astimezone(UTC).strftime("%Y-%m-%d") if at else "—"
 
 
+def span(journal: Journal) -> str:
+    """Выборка журнала словами: «не звали» верно только для неё (107)."""
+    return f"с {day(journal.first)} по {day(journal.last)}, сессий: {len(journal.sessions)}"
+
+
 def render_body(journal: Journal, tree: list[str], now: datetime) -> str:
     """Тело сводки: пересобирается заходом целиком, а не дописывается."""
     quiet = uncalled(journal, tree)
@@ -182,10 +192,13 @@ def render_body(journal: Journal, tree: list[str], now: datetime) -> str:
         "Навык не краснеет: невызванный неотличим от вызванного (решение 031).",
         "Сводку строит `scripts/skill_runs.py` из журнала локального окна.",
         "",
-        f"Обход: {now.strftime('%Y-%m-%d %H:%M')} UTC. Журнал — с {day(journal.first)} "
-        f"по {day(journal.last)}, сессий: {len(journal.sessions)}.",
+        f"Обход: {now.strftime('%Y-%m-%d %H:%M')} UTC. Журнал — {span(journal)}.",
         "",
-        "## Не звали ни разу",
+        "## Не звали в этом журнале",
+        "",
+        "Вывод по выборке, а не по проекту (107): журнал пишет одно окно в одном",
+        "рабочем дереве. Навык, который звали в облачном окне или в другом git",
+        "worktree, здесь назван незванным.",
         "",
     ]
     if quiet:
@@ -245,7 +258,8 @@ def main(argv: list[str] | None = None) -> int:
         tree = skills(args.root)
         if not tree:
             raise NotRun(f"навыков в {args.root / paths.SKILLS} нет — сводить не с чем (075)")
-        journal = read(args.journal or args.root / JOURNAL)
+        where = args.journal or args.root / JOURNAL
+        journal = read(where)
         body = render_body(journal, tree, datetime.now(UTC))
         if args.apply:
             if not args.repo:
@@ -257,10 +271,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"сводка не отработала: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
     quiet = uncalled(journal, tree)
+    sample = f"по журналу {where} ({span(journal)})"
     if quiet:
-        print(f"не звали ни разу: {len(quiet)} из {len(tree)} — " + ", ".join(quiet))
+        print(f"не звали {sample}: {len(quiet)} из {len(tree)} — " + ", ".join(quiet))
         return EXIT_UNCALLED
-    print(f"каждый навык дерева звали: {len(tree)}")
+    print(f"каждый навык дерева звали {sample}: {len(tree)}")
     return EXIT_OK
 
 

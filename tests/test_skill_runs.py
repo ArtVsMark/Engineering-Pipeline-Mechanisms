@@ -68,12 +68,14 @@ def test_an_uncalled_skill_is_named_and_the_outcome_is_one(
     written(root, line("a"), line("b", "fail"), line("плагин:x"), "битая")
     run = run_script("skill_runs.py", "--root", str(root))
     assert run.code == module.EXIT_UNCALLED, run.text
-    quiet = run.out.split("## Не звали ни разу", 1)[1].split("##", 1)[0]
+    quiet = run.out.split("## Не звали в этом журнале", 1)[1].split("##", 1)[0]
     assert "`c`" in quiet and "`a`" not in quiet, quiet
     assert "| `b` | 1 | 1 | 2026-10-17 |" in run.out
     assert "`плагин:x` — 1" in run.out
     assert "Строк не той формы: 1 (номера: 4)" in run.out
-    assert "не звали ни разу: 1 из 3 — c" in run.out
+    said = f"не звали по журналу {root / module.JOURNAL} (с 2026-10-17 по 2026-10-17, сессий: 1)"
+    assert f"{said}: 1 из 3 — c" in run.out, run.out
+    assert "по выборке, а не по проекту (107)" in quiet
 
 
 def test_every_skill_called_is_an_empty_state_with_its_day(
@@ -84,7 +86,8 @@ def test_every_skill_called_is_an_empty_state_with_its_day(
     written(root, line("a"))
     run = run_script("skill_runs.py", "--root", str(root))
     assert run.code == module.EXIT_OK, run.text
-    assert "Пусто на " in run.out and "каждый навык дерева звали: 1" in run.out
+    assert "Пусто на " in run.out and "каждый навык дерева звали по журналу " in run.out
+    assert "сессий: 1): 1" in run.out
 
 
 @pytest.mark.parametrize(
