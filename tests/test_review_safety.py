@@ -2376,6 +2376,27 @@ def test_the_task_names_the_environments_limit(path: Path) -> None:
         )
 
 
+#: Слова задания, которыми агенту велено ждать прогон, а не уводить его в фон.
+FOREGROUND: Final = "ПЕРЕДНЕМ"
+
+
+@pytest.mark.parametrize("path", AGENT_WORKFLOWS, ids=lambda p: p.name)
+def test_a_task_allowing_pytest_asks_for_the_foreground(path: Path) -> None:
+    """Задание, разрешающее `pytest`, велит звать его на переднем плане (#1480).
+
+    Замер 17.10.2026: четыре захода взгляда кончились «успехом» без вердикта
+    за полторы–две минуты — полный набор в такой срок не проходит. Догадка —
+    прогон, уведённый в фон: неинтерактивный заход следующего хода не ждёт.
+    Разрешение фон не запрещает, поэтому запрет живёт в задании, и держит его
+    этот гейт, а не память того, кто пишет следующее задание.
+    """
+    for name, commands, task in commands_and_task(path):
+        if any("pytest" in command for command in commands):
+            assert FOREGROUND in task.upper(), (
+                f"{path.name}, «{name}»: pytest разрешён, а переднего плана задание не требует"
+            )
+
+
 #: Имя нашего скрипта в тексте задания: `check_version.py` и подобные.
 SCRIPT_NAME = re.compile(r"\b(\w+\.py)\b")
 
