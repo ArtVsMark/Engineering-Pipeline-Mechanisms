@@ -345,7 +345,9 @@ def test_a_release_line_in_the_suite_does_not_share_the_real_major() -> None:
         ('run("release.py", "--version", "9.40.0")', False),
         ('tree(tmp_path, tag="v0.99.0")', True),
         ('tree(tmp_path, version="0.2.0")', True),
-        ('module.refusals("0.10.0", acceptance="", push="never")', True),
+        # Двузначный минор взят далёким от живого контракта: литерал, совпавший
+        # с ним, гейт версии принимает за вписанный рукой (#1514, выпуск v1.8.0).
+        ('module.refusals("0.42.0", acceptance="", push="never")', True),
         ('tree(tmp_path, tag="v9.9.0")', False),
         ('module.refusals("9.10.0", acceptance="", push="never")', False),
     ],
