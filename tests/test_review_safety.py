@@ -441,7 +441,9 @@ def settings_problems(settings: dict[str, Any]) -> list[str]:
     beyond = sorted(set(settings) - PROJECT_SETTINGS_KEYS)
     if beyond:
         problems.append(f"ключи настроек вне перечня: {beyond}")
-    env = settings.get("env") or {}
+    # Ключа нет — окружения нет; ключ есть — он словарь, и пустое или ложное
+    # значение другого рода — тоже отказ, а не «пусто» (взгляд на #1506).
+    env = settings.get("env", {})
     if not isinstance(env, dict):
         problems.append(f"окружение настроек — не словарь: {type(env).__name__}")
     else:
@@ -483,6 +485,9 @@ def test_project_settings_grant_no_rights() -> None:
         {"env": {"BASH_ENV": "./.claude/hooks/a.sh"}},
         {"env": {"PYTHONDONTWRITEBYTECODE": "0"}},
         {"env": "PYTHONDONTWRITEBYTECODE=1"},
+        {"env": []},
+        {"env": None},
+        {"env": ""},
     ],
     ids=[
         "разрешения",
@@ -491,6 +496,9 @@ def test_project_settings_grant_no_rights() -> None:
         "чужая переменная",
         "чужое значение",
         "окружение строкой",
+        "окружение пустым списком",
+        "окружение null",
+        "окружение пустой строкой",
     ],
 )
 def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
