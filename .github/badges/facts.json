@@ -2,7 +2,7 @@
   "schema": "1.6",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Incidents-Playbook — export/facts/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-18T03:09:56+00:00",
+  "generated_at": "2026-10-18T03:17:59+00:00",
   "commit": "4c00636b9d0914a9df51c5107fb88b204457a8c0",
   "ci": {
     "workflow": "ci.yml"
