@@ -417,9 +417,15 @@ def test_no_other_channel_grants_the_agent_rights(path: Path) -> None:
 
 
 #: Ключи настроек проекта, которые агент взгляда прочтёт из дерева головы.
-#: Только хуки: `permissions` выдал бы права мимо `--allowedTools` (взгляд на
-#: #1232), и любой ключ вне перечня — отказ.
-PROJECT_SETTINGS_KEYS: Final = frozenset({"hooks"})
+#: Хуки и окружение: `permissions` выдал бы права мимо `--allowedTools` (взгляд
+#: на #1232), и любой ключ вне перечня — отказ.
+PROJECT_SETTINGS_KEYS: Final = frozenset({"hooks", "env"})
+#: Окружение окна — ЗАКРЫТЫЙ перечень пар «переменная → значение» (068): `env`
+#: исполняется у агента взгляда так же, как у окна, и `BASH_ENV` или
+#: `PYTHONSTARTUP` из дерева головы исполнили бы чужой сценарий на каждом
+#: вызове. Пара здесь одна: без записи байт-кода откат исполняет текст файла,
+#: а не устаревший `.pyc` (решение владельца 18.10.2026, находка 97d86df на #1500).
+PROJECT_ENV: Final = {"PYTHONDONTWRITEBYTECODE": "1"}
 #: Где лежат команды хуков проекта: все — в своём каталоге дерева. Довод —
 #: одно слово строчными буквами, и только он: журнал навыков различает им
 #: событие (`skill_log.sh ok` и `fail`, #1449). Слово без знаков оболочки не
@@ -435,6 +441,15 @@ def settings_problems(settings: dict[str, Any]) -> list[str]:
     beyond = sorted(set(settings) - PROJECT_SETTINGS_KEYS)
     if beyond:
         problems.append(f"ключи настроек вне перечня: {beyond}")
+    # Ключа нет — окружения нет; ключ есть — он словарь, и пустое или ложное
+    # значение другого рода — тоже отказ, а не «пусто» (взгляд на #1506).
+    env = settings.get("env", {})
+    if not isinstance(env, dict):
+        problems.append(f"окружение настроек — не словарь: {type(env).__name__}")
+    else:
+        strange = sorted(str(key) for key, value in env.items() if PROJECT_ENV.get(key) != value)
+        if strange:
+            problems.append(f"переменные окружения вне перечня: {strange}")
     for event, groups in (settings.get("hooks") or {}).items():
         for group in groups:
             for hook in group.get("hooks") or []:
@@ -467,8 +482,24 @@ def test_project_settings_grant_no_rights() -> None:
                 ]
             }
         },
+        {"env": {"BASH_ENV": "./.claude/hooks/a.sh"}},
+        {"env": {"PYTHONDONTWRITEBYTECODE": "0"}},
+        {"env": "PYTHONDONTWRITEBYTECODE=1"},
+        {"env": []},
+        {"env": None},
+        {"env": ""},
     ],
-    ids=["разрешения", "чужая команда хука", "команда после довода"],
+    ids=[
+        "разрешения",
+        "чужая команда хука",
+        "команда после довода",
+        "чужая переменная",
+        "чужое значение",
+        "окружение строкой",
+        "окружение пустым списком",
+        "окружение null",
+        "окружение пустой строкой",
+    ],
 )
 def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
     """Разрешения в настройках и хук вне своего каталога дают отказ — проба."""

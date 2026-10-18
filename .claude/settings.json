@@ -1,4 +1,7 @@
 {
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
   "hooks": {
     "PreToolUse": [
       {
