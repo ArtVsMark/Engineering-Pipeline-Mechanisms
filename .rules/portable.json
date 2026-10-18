@@ -677,6 +677,8 @@
     "scripts/deps_intercept.py": {
       "answer": "configured",
       "where": [
+        ".github/dependabot.yml",
+        ".github/workflows/work-plan.yml",
         ".rules/bindings.json"
       ]
     },
