@@ -726,14 +726,37 @@ LICENSE_ID: Final = "SPDX-License-Identifier: MIT"
 LICENSE_FORMS: Final = {".yml": "# {line}\n", ".yaml": "# {line}\n", ".md": "<!-- {line} -->\n"}
 
 
+def is_signed(path: Path, text: str) -> bool:
+    """Подписана ли заготовка: строка лицензии стоит ПЕРВОЙ в форме своего рода.
+
+    ПОДПИСЬ — МЕСТО, А НЕ УПОМИНАНИЕ (находки `c12022f`, `e776e88`). Прежде
+    подписанной считалась заготовка, где идентификатор встречался где угодно:
+    названный в тексте или в значении JSON, он отпускал файл к потребителю без
+    строки, и гейты полноты подписи, судившие тем же упоминанием, молчали. У
+    JSON подпись — поле `_license` первым ключом, у прочих родов — первая
+    строка в форме `LICENSE_FORMS`.
+    """
+    if path.suffix == ".json":
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return False
+        first = next(iter(data), None) if isinstance(data, dict) else None
+        return first == "_license" and str(data[first]).startswith(LICENSE_ID)
+    form = LICENSE_FORMS.get(path.suffix)
+    head = text.split("\n", 1)[0]
+    return form is not None and head.startswith(form.split("{line}", 1)[0] + LICENSE_ID)
+
+
 def licensed(path: Path, text: str, repo: str) -> str:
     """Заготовка со строкой лицензии в форме своего рода; рода без формы — `NotRun`.
 
     Род без формы — отказ, а не файл без строки: новая заготовка другого рода
-    ушла бы к потребителю молча неподписанной (045). Уже подписанная — как есть.
+    ушла бы к потребителю молча неподписанной (045). Уже подписанная
+    (`is_signed`) — как есть.
     """
     line = f"{LICENSE_ID} — https://github.com/{repo}"
-    if LICENSE_ID in text:
+    if is_signed(path, text):
         return text
     if path.suffix == ".json":
         try:
@@ -756,38 +779,46 @@ def licensed(path: Path, text: str, repo: str) -> str:
 #: Что заход кладёт, но что становится файлом ПРОЕКТА, а не нашей заготовкой:
 #: тонкий `ci.yml`, куда проект дописывает свои джобы (поздний взгляд на #1487,
 #: `a4c2cc0`). Строку лицензии поставщика он не несёт ни при первой кладке, ни
-#: при обновлении (`Update.theirs`).
+#: при обновлении, ни двойником `.yaml` (`of_the_project`).
 OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW})
 
 
-def signed_all(
-    files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
-) -> dict[Path, str]:
+def of_the_project(path: Path) -> bool:
+    """Файл проекта, а не наша заготовка: строки лицензии поставщика он не несёт.
+
+    ОДИН ПРИЗНАК НА ВСЕ ДВЕРИ (находка `215204f`, правило 210). Чей файл,
+    решалось по месту: `theirs` плана обновления, отдельная оговорка у печати,
+    `OWN_BY_PROJECT` у кладки — и каждая новая дверь находила свой хвост
+    (`6316c1f`, `b803933`, `a4c2cc0`). Двойник YAML — тот же файл.
+    """
+    return path in OWN_BY_PROJECT or path.with_suffix(".yml") in OWN_BY_PROJECT
+
+
+def signed_all(files: dict[Path, str], repo: str) -> dict[Path, str]:
     """Все заготовки со строкой лицензии — разом; отказ одной — `NotRun` до записи.
 
     Зовётся и ДО первой записи, внутри перехвата отказов захода: половина
     положенной заготовки хуже никакой, а `NotRun` вне перехвата ушёл бы трассой
-    с кодом 1 вместо исхода «не отработал» (039). Пути `theirs` — файлы
-    потребителя, которые заход правит точечно (`Update.theirs`): они идут как есть.
+    с кодом 1 вместо исхода «не отработал» (039). Файл проекта
+    (`of_the_project`) идёт как есть.
     """
     return {
-        path: text if path in theirs else licensed(path, text, repo) for path, text in files.items()
+        path: text if of_the_project(path) else licensed(path, text, repo)
+        for path, text in files.items()
     }
 
 
-def lay(
-    root: Path, files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
-) -> None:
+def lay(root: Path, files: dict[Path, str], repo: str) -> None:
     """Кладёт заготовку в дерево потребителя, каждую — со строкой лицензии (#1470).
 
     Занятое проверяет зовущий (`occupied`). Подпись ставится здесь, на единственном
     пути ЗАПИСИ к потребителю, а не в каждой заготовке: путь записи один, а
     заготовки собираются в нескольких местах, и новое место ушло бы мимо. Второй
     путь заготовки к потребителю — печать захода без ключей; она подписывает
-    целые файлы тем же `signed_all`. Файл потребителя (`theirs`) не подписывается:
-    строка поставщика в чужом файле объявила бы его чужим.
+    целые файлы тем же `signed_all`. Файл проекта (`of_the_project`) не
+    подписывается: строка поставщика в нём объявила бы его чужим.
     """
-    for path, text in signed_all(files, repo, theirs).items():
+    for path, text in signed_all(files, repo).items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
 
@@ -1261,10 +1292,6 @@ class Update:
     current: list[Path] = field(default_factory=list)
     #: Что заход называет, но не пишет: новые и снятые шаги `ci.yml`, ответы.
     notes: list[str] = field(default_factory=list)
-    #: Файлы ПОТРЕБИТЕЛЯ среди `write`: строку лицензии поставщика в них не
-    #: ставят (взгляд на #1487). Это `ci.yml` — и поднятый, и положенный тонким
-    #: (`plan_ci`): в него проект дописывает свои джобы, и файл остаётся его.
-    theirs: set[Path] = field(default_factory=set)
 
 
 def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path, repo: str) -> None:
@@ -1320,8 +1347,8 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     target = consumer / where
     # `ci.yml` — ФАЙЛ ПРОЕКТА В ОБОИХ СЛУЧАЯХ (поздний взгляд на #1487,
     # `49976c1`): положенный тонким завтра получит свои джобы проекта, и строка
-    # поставщика в нём осталась бы в чужом файле — тот же класс, что у поднятого.
-    update.theirs.add(where)
+    # поставщика в нём осталась бы в чужом файле. Решает `of_the_project`, а не
+    # пометка здесь: признак один на все двери (`215204f`).
     if not target.is_file():
         update.write[where] = thin_ci(pipeline, repo, pin)
         return
@@ -1498,7 +1525,7 @@ def update(
         plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
         plan_ci(plan, consumer, pipeline, repo, pin)
         plan_answer(plan, consumer, [check_name(one) for one in pipeline] + records)
-        signed_all(plan.write | data, repo, frozenset(plan.theirs))
+        signed_all(plan.write | data, repo)
     except NotRun as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -1518,7 +1545,7 @@ def update(
             file=sys.stderr,
         )
         return EXIT_HAND_EDITED
-    lay(consumer, plan.write, repo, frozenset(plan.theirs))
+    lay(consumer, plan.write, repo)
     laid = lay_free(consumer, data, repo)
     if plan.write:
         print(f"обновлено до {pin}: " + ", ".join(str(one) for one in sorted(plan.write)))
@@ -1628,7 +1655,7 @@ def main(argv: list[str] | None = None) -> int:
                     for one, flow in sorted(own.items())
                 },
             }
-            signed_all(files | rulebook | kit, args.repo, OWN_BY_PROJECT)
+            signed_all(files | rulebook | kit, args.repo)
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
@@ -1665,7 +1692,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OCCUPIED
         kept = occupied(args.write, rulebook)
         free = {path: text for path, text in rulebook.items() if path not in kept}
-        lay(args.write, files | free, args.repo, OWN_BY_PROJECT)
+        lay(args.write, files | free, args.repo)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
@@ -1706,7 +1733,7 @@ def main(argv: list[str] | None = None) -> int:
     # подписывается он тем же `signed_all` — до первой строки вывода, чтобы отказ
     # подписи был исходом «не отработал», а не половиной напечатанного. Джобы
     # вызова — не файл, а строки в СВОЙ `ci.yml` потребителя: их не подписывают,
-    # как и сам `ci.yml` — файл проекта (`OWN_BY_PROJECT`, `Update.theirs`).
+    # как и сам `ci.yml` — файл проекта (`of_the_project`).
     try:
         whole = signed_all(
             {

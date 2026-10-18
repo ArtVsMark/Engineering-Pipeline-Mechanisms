@@ -1665,6 +1665,33 @@ def test_the_license_line_takes_the_form_of_its_kind(name: str, first: str) -> N
     assert module.licensed(Path(name), signed, "o/r") == signed
 
 
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("a.yml", "# Лицензия: SPDX-License-Identifier: MIT — названа в тексте\nx: 1\n"),
+        ("a.md", "Текст называет SPDX-License-Identifier: MIT, но файл не подписан.\n"),
+        ("a.json", '{"note": "SPDX-License-Identifier: MIT", "x": 1}\n'),
+    ],
+    ids=["yml", "md", "json"],
+)
+def test_a_mention_of_the_license_is_not_a_signature(name: str, text: str) -> None:
+    """Идентификатор, названный в теле, — не подпись: строка ставится на своё место (`c12022f`)."""
+    assert not module.is_signed(Path(name), text)
+    signed = module.licensed(Path(name), text, "o/r")
+    assert signed != text and module.is_signed(Path(name), signed), signed
+
+
+def test_the_projects_file_is_one_sign_for_every_door() -> None:
+    """Файл проекта — один признак: и `ci.yml`, и его двойник `.yaml` (`215204f`)."""
+    run = module.paths.WORKFLOWS / module.PIPELINE_FLOW
+    assert module.of_the_project(run) and module.of_the_project(run.with_suffix(".yaml"))
+    assert not module.of_the_project(module.paths.WORKFLOWS / module.SUMMARY_FLOW)
+    files = {run.with_suffix(".yaml"): "x: 1\n", Path("a.yml"): "y: 2\n"}
+    signed = module.signed_all(files, "o/r")
+    assert signed[run.with_suffix(".yaml")] == "x: 1\n"
+    assert module.is_signed(Path("a.yml"), signed[Path("a.yml")])
+
+
 def test_a_json_kit_carries_the_license_as_its_first_field() -> None:
     """JSON комментариев не знает: лицензия — поле `_license`, и таблица ролей её пропускает."""
     kit = module.data_kit(ROOT)[module.paths.REVIEW_ROLES]
@@ -1698,22 +1725,18 @@ def test_every_file_the_write_lays_carries_the_license(tmp_path: Path) -> None:
     consumer = tmp_path / "потребитель"
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
     laid = [one for one in walk_deep(consumer) if one.is_file()]
-    own = {(consumer / one).as_posix() for one in module.OWN_BY_PROJECT}
+    # Подпись судится местом, а не упоминанием идентификатора (`e776e88`).
     signed = {
-        one.relative_to(consumer).as_posix(): module.LICENSE_ID in one.read_text(encoding="utf-8")
+        one.relative_to(consumer): module.is_signed(one, one.read_text(encoding="utf-8"))
         for one in laid
     }
     unsigned = [
-        path
-        for path, said in signed.items()
-        if not said and (consumer / path).as_posix() not in own
+        str(path) for path, said in signed.items() if not said and not module.of_the_project(path)
     ]
     assert not unsigned, f"положено без строки лицензии: {unsigned}"
-    projects = [
-        path for path, said in signed.items() if said and (consumer / path).as_posix() in own
-    ]
+    projects = [str(path) for path, said in signed.items() if said and module.of_the_project(path)]
     assert not projects, f"файл проекта подписан строкой поставщика: {projects}"
-    assert own and all(Path(one).is_file() for one in own), (
+    assert any(module.of_the_project(path) for path in signed), (
         "тонкий ci.yml не положен — судить нечего"
     )
 
@@ -1750,11 +1773,11 @@ def test_an_update_leaves_the_projects_own_ci_unsigned(tmp_path: Path) -> None:
     root, consumer = connected(tmp_path)
     flows = consumer / ".github" / "workflows"
     ci = flows / "ci.yml"
-    own = "".join(
-        line
-        for line in ci.read_text("utf-8").splitlines(keepends=True)
-        if module.LICENSE_ID not in line
-    ).replace(
+    # Настоящий путь «кладка → свои джобы → обновление» (`09942b2`): положенный
+    # `ci.yml` строки лицензии не несёт, и вырезать из него нечего.
+    laid = ci.read_text("utf-8")
+    assert not module.is_signed(ci, laid) and module.LICENSE_ID not in laid, laid
+    own = laid.replace(
         "jobs:\n",
         "jobs:\n  свой:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo свой\n",
         1,
@@ -1765,7 +1788,7 @@ def test_an_update_leaves_the_projects_own_ci_unsigned(tmp_path: Path) -> None:
     lifted = ci.read_text("utf-8")
     assert "step-пример.yml@v2.6.0" in lifted and "echo свой" in lifted, lifted
     assert module.LICENSE_ID not in lifted, lifted
-    assert module.LICENSE_ID in (flows / "план.yml").read_text("utf-8")
+    assert module.is_signed(flows / "план.yml", (flows / "план.yml").read_text("utf-8"))
 
 
 def test_every_whole_file_the_print_shows_carries_the_license(
@@ -1785,7 +1808,11 @@ def test_every_whole_file_the_print_shows_carries_the_license(
     out = capsys.readouterr().out
     # Целые файлы: свой прогон механизма, ответ, сводный гейт и свод окна.
     whole = 3 + len(module.rulebook_kit(root))
-    assert out.count(module.LICENSE_ID) == whole, out
+    # Подпись — строка в начале файла, а не упоминание (`e776e88`).
+    forms = tuple(
+        form.split("{line}", 1)[0] + module.LICENSE_ID for form in module.LICENSE_FORMS.values()
+    )
+    assert sum(line.startswith(forms) for line in out.splitlines()) == whole, out
     jobs = out.split("jobs:\n", 1)[1].split("\n# ", 1)[0]
     assert "step-пример" in jobs and module.LICENSE_ID not in jobs, jobs
 
