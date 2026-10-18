@@ -71,8 +71,12 @@ def _git(*args: str) -> str:
     return gitcall.output(args, NotRun)
 
 
-def touched(base: str) -> list[tuple[str, str]]:
-    """Модули механизмов, тронутые изменением.
+def changes(base: str) -> list[tuple[str, str, str]]:
+    """Изменения относительно общей ветки: род (`A`, `M`, `D`, `R`…), путь и прежний путь.
+
+    Разбор один на все гейты, которым нужны тронутые пути (214): этот гейт
+    берёт из него модули, `check_asked_family.py` — добавленные механизмы.
+    Прежний путь непуст только у переименования.
 
     Список путей читается по NUL: без него git экранирует имена с не-ASCII, и
     такой путь молча выпадает из отбора
@@ -84,7 +88,7 @@ def touched(base: str) -> list[tuple[str, str]]:
     fields = [
         one for one in _git("diff", "--name-status", "-z", f"{spot}...HEAD").split("\0") if one
     ]
-    found: list[tuple[str, str]] = []
+    found: list[tuple[str, str, str]] = []
     while fields:
         state = fields.pop(0)[:1]
         if not fields:
@@ -98,9 +102,17 @@ def touched(base: str) -> list[tuple[str, str]]:
         was = ""
         if state == "R" and fields:
             was, path = path, fields.pop(0)
-        if state != "D" and path.startswith(SOURCES) and path.endswith(".py"):
-            found.append((path, was))
+        found.append((state, path, was))
     return found
+
+
+def touched(base: str) -> list[tuple[str, str]]:
+    """Модули механизмов, тронутые изменением: путь и прежний путь (у переименования)."""
+    return [
+        (path, was)
+        for state, path, was in changes(base)
+        if state != "D" and path.startswith(SOURCES) and path.endswith(".py")
+    ]
 
 
 def names_in(source: str) -> set[str]:

@@ -1519,6 +1519,10 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
         "ci.yml — джоб attribution назван доводом; держит scripts/squash_body.py",
         "c51c41f3ee3b",
     ),
+    "162": (
+        "rules-inbox.yml — вторая половина, гейт свой; держит scripts/check_asked_family.py",
+        "19730a396843",
+    ),
     "165": (
         "ci.yml — шаг прогона, где гейт требует -z; держит tests/test_source_hygiene.py",
         "1039e89e8b12",
@@ -1606,10 +1610,6 @@ CALLED_HEAD_READ: Final[dict[str, tuple[str, str]]] = {
     "135": (
         "attribution-history.yml — личность записи действием каталога",
         "d0d8ed432f21",
-    ),
-    "162": (
-        "rules-inbox.yml — ночные входящие действием каталога",
-        "b638372607bc",
     ),
     "178": (
         "rules-inbox.yml — числа долга приходят с действием каталога",
