@@ -1497,6 +1497,26 @@ def contract_span(contract: str) -> str:
     return f">={major}.{minor},<{major}.{minor + 1}"
 
 
+def kept_on_the_kit(keep: list[Path], known: set[Path]) -> tuple[list[Path], list[str]]:
+    """Ключи `--keep`, сведённые к путям заготовки, и названные пути, которых она не кладёт.
+
+    Двойник YAML прогона сводится к тому пути, который заготовка кладёт, — в
+    любую сторону (взгляд на #1508): свой прогон поставщика бывает и `.yaml`
+    (`own_callers`), и приведение всегда к `.yml` отказало бы верному ключу.
+    """
+    kept: list[Path] = []
+    unknown: list[str] = []
+    for one in keep:
+        twin = one.with_suffix(YAML_TWINS.get(one.suffix, one.suffix))
+        if one in known:
+            kept.append(one)
+        elif one.parent == paths.WORKFLOWS and twin in known:
+            kept.append(twin)
+        else:
+            unknown.append(str(one))
+    return kept, sorted(unknown)
+
+
 def kept_records(
     keep: list[Path], own: dict[str, Path], records: dict[str, tuple[list[str], bool]]
 ) -> dict[str, str]:
@@ -1717,13 +1737,27 @@ def main(argv: list[str] | None = None) -> int:
         # КЛАДЁТСЯ ТОЛЬКО ПО ЯВНОМУ КЛЮЧУ И ТОЛЬКО В СВОБОДНОЕ (#992). Чужое
         # дерево заход не правит: занятый путь называется, и не пишется ни
         # один файл — половина заготовки хуже никакой.
-        # Двойник `.yaml` в ключе — тот же путь заготовки, что `.yml` (`standing`).
-        keep = [
-            one.with_suffix(".yml")
-            if one.parent == paths.WORKFLOWS and one.suffix == ".yaml"
-            else one
-            for one in args.keep
-        ]
+        # ЧТО ВПРАВЕ НАЗВАТЬ КЛЮЧ — ПУТИ ЗАГОТОВКИ, И ВСЁ (взгляд на #1508). Путь
+        # прогона механизма проект заменяет своим, и проверки его прогона идут
+        # `off`; прочие пути — `ci.yml`, сводный гейт, ответ, свод — проект
+        # сводит со своим из печати захода, и их проверки не трогаются.
+        mechanisms = {paths.WORKFLOWS / flow.name for flow in own.values()}
+        known = {
+            paths.WORKFLOWS / PIPELINE_FLOW,
+            paths.WORKFLOWS / SUMMARY_FLOW,
+            paths.PIPELINE,
+            *mechanisms,
+            *rulebook,
+            *kit,
+        }
+        keep, unknown = kept_on_the_kit(args.keep, known)
+        if unknown:
+            print(
+                "заготовка не положена: --keep называет путь, которого заготовка не кладёт — "
+                + ", ".join(unknown),
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
         kept_checks = kept_records(keep, own, records)
         try:
             files = {
@@ -1740,14 +1774,6 @@ def main(argv: list[str] | None = None) -> int:
             signed_all(files | rulebook | kit, args.repo)
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
-            return EXIT_BROKEN
-        unknown = sorted(str(one) for one in set(keep) - set(files | rulebook | kit))
-        if unknown:
-            print(
-                "заготовка не положена: --keep называет путь, которого заготовка не кладёт — "
-                + ", ".join(unknown),
-                file=sys.stderr,
-            )
             return EXIT_BROKEN
         files = {path: text for path, text in files.items() if path not in keep}
         rulebook = {path: text for path, text in rulebook.items() if path not in keep}
@@ -1787,11 +1813,23 @@ def main(argv: list[str] | None = None) -> int:
         free = {path: text for path, text in rulebook.items() if path not in kept}
         lay(args.write, files | free, args.repo)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
-        if keep:
+        if own_kept := sorted(str(one) for one in keep if one in mechanisms):
+            where = (
+                f"в заготовке ответа из печати захода — `{paths.PIPELINE}` не положен (--keep)"
+                if paths.PIPELINE in keep
+                else f"в `{paths.PIPELINE}`"
+            )
             print(
-                "оставлено своим по --keep: "
-                + ", ".join(str(one) for one in sorted(keep))
-                + f" — не тронуто; проверки их прогонов в `{paths.PIPELINE}` — off с причиной"
+                "оставлены своими прогоны механизмов: "
+                + ", ".join(own_kept)
+                + f" — не тронуты; их проверки {where} — off с причиной"
+            )
+        if other_kept := sorted(str(one) for one in keep if one not in mechanisms):
+            print(
+                "не положено по --keep: "
+                + ", ".join(other_kept)
+                + " — своё сведите с заготовкой из печати захода без ключей; "
+                "проверки в ответе не тронуты"
             )
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.

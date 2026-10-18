@@ -543,6 +543,71 @@ def test_a_kept_path_is_left_alone_and_its_check_goes_off(tmp_path: Path) -> Non
         assert klass == module.policy.OFF and "--keep" in why, entries[name]
 
 
+def test_a_kept_key_is_matched_to_the_kit_path_and_its_twin() -> None:
+    """Ключ сводится к пути заготовки, двойник YAML — в любую сторону (взгляд на #1508)."""
+    flows = module.paths.WORKFLOWS
+    known = {flows / "план.yaml", flows / "ci.yml", module.paths.PIPELINE}
+    keep, unknown = module.kept_on_the_kit(
+        [flows / "план.yml", flows / "ci.yaml", module.paths.PIPELINE, flows / "нет.yml"], known
+    )
+    assert keep == [flows / "план.yaml", flows / "ci.yml", module.paths.PIPELINE]
+    assert unknown == [str(flows / "нет.yml")]
+
+
+@pytest.mark.parametrize("kept", ["ci.yml", "ci-complete.yml"])
+def test_a_kept_pipeline_path_is_named_and_its_checks_stay(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], kept: str
+) -> None:
+    """`--keep` на путь вне прогонов механизмов: не положен, проверки не тронуты (взгляд на #1508).
+
+    Своё проект сводит с печатью захода, и вывод не обещает `off`, которого нет.
+    """
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED, "ci": CI_CALLER})
+    consumer = tmp_path / "потребитель"
+    argv = ["--root", str(root), "--write", str(consumer), "--keep", f".github/workflows/{kept}"]
+    assert module.main(argv) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert not (consumer / ".github" / "workflows" / kept).exists()
+    assert "не положено по --keep" in out and "off с причиной" not in out, out
+    said = module.policy.answer_text(
+        (consumer / module.paths.PIPELINE).read_text(encoding="utf-8"), str(module.paths.PIPELINE)
+    )
+    classes = {module.policy.entry_of(item)[0] for item in (said.get("checks") or {}).values()}
+    assert classes == {module.policy.UNREVIEWED}, said
+
+
+def test_a_kept_answer_says_where_the_off_rows_are(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ответ и прогон механизма оставлены оба: `off` — в печати, а не в неположенном файле."""
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
+    )
+    consumer = tmp_path / "потребитель"
+    argv = ["--root", str(root), "--write", str(consumer)]
+    keys = ["--keep", ".github/workflows/план.yml", "--keep", str(module.paths.PIPELINE)]
+    assert module.main([*argv, *keys]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert not (consumer / module.paths.PIPELINE).exists()
+    assert "не положен (--keep)" in out, out
+
+
+def test_a_suppliers_yaml_flow_is_kept_by_either_name(tmp_path: Path) -> None:
+    """Свой прогон поставщика под `.yaml` оставляется ключом и под `.yml` (взгляд на #1508)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED, "step-план": MANAGED, "ci": CI_CALLER})
+    (root / ".github" / "workflows" / "план.yaml").write_text(OWN_CALLER, encoding="utf-8")
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "add", "-A"], check=True, capture_output=True, timeout=30)
+    subprocess.run([*run, "commit", "--quiet", "-m", "yaml"], check=True, timeout=30)
+    subprocess.run([*run, "tag", "-f", "v2.5.0"], check=True, capture_output=True, timeout=30)
+    for key in ("план.yml", "план.yaml"):
+        consumer = tmp_path / f"потребитель-{key}"
+        argv = ["--root", str(root), "--write", str(consumer), "--keep"]
+        assert module.main([*argv, f".github/workflows/{key}"]) == module.EXIT_OK, key
+        assert not (consumer / ".github" / "workflows" / "план.yaml").exists()
+
+
 def test_kept_records_name_the_checks_of_a_kept_flow_only() -> None:
     """Причина `off` — у записей прогона по оставленному пути, и только у них."""
     own = {"план": Path("x/план.yml"), "обход": Path("x/обход.yml")}
@@ -1902,6 +1967,7 @@ def test_signed_all_signs_every_kit_or_refuses_the_whole() -> None:
     files = {Path("a.yml"): "x\n", Path("b.md"): "y\n"}
     signed = module.signed_all(files, "o/r")
     assert set(signed) == set(files)
-    assert all(module.LICENSE_ID in text for text in signed.values())
+    # Подпись — место, а не упоминание (тот же род, что `e776e88`).
+    assert all(module.is_signed(path, text) for path, text in signed.items()), signed
     with pytest.raises(module.NotRun, match="лицензии"):
         module.signed_all({**files, Path("c.toml"): "z\n"}, "o/r")
