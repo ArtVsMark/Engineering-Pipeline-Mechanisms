@@ -1521,7 +1521,7 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
     ),
     "162": (
         "rules-inbox.yml — вторая половина, гейт свой; держит scripts/check_asked_family.py",
-        "f6fcf505f967",
+        "e5093c5c8a35",
     ),
     "165": (
         "ci.yml — шаг прогона, где гейт требует -z; держит tests/test_source_hygiene.py",

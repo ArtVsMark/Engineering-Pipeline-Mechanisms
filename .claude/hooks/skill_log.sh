@@ -21,12 +21,19 @@
 here=$(cd "$(dirname "$0")" && pwd)
 unset want  # не из окружения окна: число только из floor.sh
 [ -r "$here/floor.sh" ] && . "$here/floor.sh"
-if [ -n "$want" ] && command -v "python$want" >/dev/null 2>&1; then
+# ПЛАНКА НЕ ПРОЧИТАНА — СВОЯ ПРИЧИНА, А НЕ НЕХВАТКА ИНТЕРПРЕТАТОРА (взгляд на
+# #1491, 045). `floor.sh` нет, он не читается или не задаёт `want`: совет
+# перезапустить окно или поставить python увёл бы чинить не то.
+if [ -z "$want" ]; then
+  echo "журнал навыков: планка интерпретатора не прочитана — $here/floor.sh нет, он не читается или не задаёт want; вызов не записан. Верните файл из общей ветки (214)." >&2
+  exit 1
+fi
+if command -v "python$want" >/dev/null 2>&1; then
   exec "python$want" "$here/skill_log.py" "$@"
 fi
-if [ -n "$want" ] && command -v python3 >/dev/null 2>&1 \
+if command -v python3 >/dev/null 2>&1 \
   && python3 -c "import sys; sys.exit(sys.version_info[:2] < tuple(map(int, '$want'.split('.'))))" 2>/dev/null; then
   exec python3 "$here/skill_log.py" "$@"
 fi
-echo "журнал навыков: нет ни python${want:-?}, ни python3 не ниже ${want:-?} — вызов не записан. В облачном окне интерпретатор ставит хук старта — перезапустите окно; в локальном поставьте python${want:-?} сами (217)." >&2
+echo "журнал навыков: нет ни python$want, ни python3 не ниже $want — вызов не записан. В облачном окне интерпретатор ставит хук старта — перезапустите окно; в локальном поставьте python$want сами (217)." >&2
 exit 1

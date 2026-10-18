@@ -125,6 +125,17 @@ def test_without_the_floor_interpreter_the_call_is_named_and_not_blocked(
     assert not (project / module.JOURNAL).exists()
 
 
+def test_without_the_floor_number_the_cause_is_the_floor(project: Path, tmp_path: Path) -> None:
+    """Нет `floor.sh` — причина названа планкой, а не интерпретатором (взгляд на #1491, 045)."""
+    (project / ".claude" / "hooks" / "floor.sh").unlink()
+    [command] = commands("PostToolUse")
+    run = hook(command, project, floor_bin(tmp_path), json.dumps(EVENT))
+    assert run.returncode == module.NOT_RECORDED, run.stderr
+    assert "планка интерпретатора не прочитана" in run.stderr, run.stderr
+    assert "перезапустите" not in run.stderr and "python?" not in run.stderr, run.stderr
+    assert not (project / module.JOURNAL).exists()
+
+
 def test_the_hook_limit_covers_its_work() -> None:
     """Хук не зовёт процессов и сети: предел из настроек — на запуск и одну запись (100)."""
     said = json.loads(SETTINGS.read_text(encoding="utf-8"))["hooks"]
