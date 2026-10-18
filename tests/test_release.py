@@ -971,6 +971,24 @@ def test_a_release_lifts_its_own_probe_after_the_tag() -> None:
     assert step["env"]["GH_TOKEN"] == "${{ secrets.MERGE_QUEUE_TOKEN }}"
 
 
+def test_a_breaking_release_notifies_who_took_our_steps() -> None:
+    """Несовместимый выпуск оповещает взявших — после тега и токеном владельца (#1387).
+
+    Задачу у соседа открывает владелец, а не приложение (131): токен прогона
+    чужих задач не заводит, а заведённая им подписала бы приложение. Частичное
+    оповещение — красное, а не жёлтая строка в зелёном прогоне (045).
+    """
+    names = [str(one.get("name") or "") for one in release_steps()]
+    notice = names.index("оповестить взявших о несовместимом выпуске")
+    assert notice > names.index("выпустить"), names
+    step = named("оповестить взявших о несовместимом выпуске")
+    assert '$MECHANISMS/scripts/breaking_notice.py --tag "v${version}" --apply' in step["run"]
+    assert step["env"]["GH_TOKEN"] == "${{ secrets.MERGE_QUEUE_TOKEN }}"
+    assert step["env"]["GITHUB_REPOSITORY"] == "${{ github.repository }}"
+    partial = step["run"].split("\n  3)\n", 1)[1].split(";;", 1)[0]
+    assert "exit 1" in partial, partial
+
+
 def release_steps() -> list[dict[str, Any]]:
     """Шаги джоба выпуска — как их читает площадка."""
     flow = yaml.safe_load((ROOT / ".github/workflows/step-release.yml").read_text(encoding="utf-8"))
@@ -1003,7 +1021,12 @@ def test_the_tail_does_not_build_the_release_again() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["поднять свои шаги до выпуска", "снять метку «ждёт выпуска» с задач плана"]
+    "name",
+    [
+        "поднять свои шаги до выпуска",
+        "оповестить взявших о несовместимом выпуске",
+        "снять метку «ждёт выпуска» с задач плана",
+    ],
 )
 def test_every_tail_step_runs_after_the_release_or_the_tag(name: str) -> None:
     """Шаги хвоста держатся исходом выпуска ИЛИ выкачки тега — и только ими."""

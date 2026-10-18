@@ -416,6 +416,49 @@ jobs:
               ;;
           esac
 
+      # НЕСОВМЕСТИМЫЙ ВЫПУСК ОПОВЕЩАЕТ ВЗЯВШИХ (#1387, решение владельца
+      # 16.10.2026): мажор контракта вырос — каждому, кто зовёт наши шаги по
+      # тегу, уходит задача «A→B, перечитай ответы». Повод — только мажор;
+      # адресаты — обход семьи `family_uptake`, а не список объявившихся. Задачу
+      # открывает владелец, а не приложение (131), поэтому токен — его. У
+      # потребителя шаг отвечает «оповещать некого»: оповещает поставщик.
+      # Повтор хвоста второй задачи не заводит — она узнаётся по метке выпуска.
+      # Отказ выпуска НЕ отменяет: тег уже уехал. ЧАСТИЧНОЕ — КРАСНОЕ, а не
+      # предупреждение (045): зелёный прогон с жёлтой строкой никто не читает,
+      # а не оповещённый сосед узнает о мажоре по красному у себя.
+      - name: оповестить взявших о несовместимом выпуске
+        if: >-
+          !cancelled() &&
+          inputs.apply && steps.token.outputs.present == 'yes' &&
+          (steps.release.outcome == 'success' || steps.tagged.outcome == 'success')
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ASKED_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
+        run: |
+          set -uo pipefail
+          version="${ASKED_VERSION:-}"
+          if [ -z "${version}" ]; then
+            python $MECHANISMS/scripts/version.py --head-number >"${RUNNER_TEMP}/notice-tag.txt" 2>"${RUNNER_TEMP}/notice-tag.err" || {
+              echo "::error::Тег выпуска на HEAD не прочитан: $(cat "${RUNNER_TEMP}/notice-tag.err"). Судить о мажоре контракта не по чему (075)."
+              exit 1
+            }
+            version="$(cat "${RUNNER_TEMP}/notice-tag.txt")"
+          fi
+          rc=0
+          python $MECHANISMS/scripts/breaking_notice.py --tag "v${version}" --apply || rc=$?
+          case "$rc" in
+            0) ;;
+            3)
+              echo "::error::Оповещены не все взявшие v${version} (код 3): кто не прочитан и не оповещён — названо выше. Повтор хвоста кнопкой выпуска с tail, version ${version} и apply дойдёт до остальных, а второй задачи у оповещённых не заведёт (#1448)"
+              exit 1
+              ;;
+            *)
+              echo "::error::Взявшие наши шаги о v${version} не оповещены (код $rc). Выпуск сделан и повторять его НЕ надо: хвост доводится кнопкой выпуска с tail, version ${version} и apply — она пройдёт весь хвост заново (#1448)"
+              exit 1
+              ;;
+          esac
+
       # ГРУППА «ЖДЁТ ВЫПУСКА» РАСПУСКАЕТСЯ ВЫПУСКОМ (решение владельца
       # 16.10.2026, #1433): метка `plan/waits-release` снимается с открытых
       # задач, и они возвращаются в «Сейчас» плана — их остаток, проверка на

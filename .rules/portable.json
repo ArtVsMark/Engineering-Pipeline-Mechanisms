@@ -883,6 +883,10 @@
       "where": [
         ".rules/inapplicable.json"
       ]
+    },
+    "scripts/breaking_notice.py": {
+      "answer": "ours",
+      "why": "@provider"
     }
   }
 }
