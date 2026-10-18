@@ -561,6 +561,9 @@
     "scripts/check_agent_silenced.py": {
       "answer": "as-is"
     },
+    "scripts/check_asked_family.py": {
+      "answer": "as-is"
+    },
     "scripts/check_branch_revival.py": {
       "answer": "as-is"
     },
