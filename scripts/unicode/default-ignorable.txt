@@ -1,0 +1,39 @@
+# DerivedCoreProperties-16.0.0.txt
+# Date: 2024-05-31, 18:09:32 GMT
+# © 2024 Unicode®, Inc.
+# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
+# For terms of use and license, see https://www.unicode.org/terms_of_use.html
+#
+# Выдержка для scripts/check_invisible.py: строки свойства
+# Default_Ignorable_Code_Point, дословно до знака «#» (хвост-комментарий снят).
+# Источник — https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/ucd/16.0.0/DerivedCoreProperties.txt
+# (sha256 39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd),
+# получено 18.10.2026 командой:
+#   grep '; Default_Ignorable_Code_Point' DerivedCoreProperties.txt | cut -d'#' -f1 | sed 's/ *$//'
+00AD          ; Default_Ignorable_Code_Point
+034F          ; Default_Ignorable_Code_Point
+061C          ; Default_Ignorable_Code_Point
+115F..1160    ; Default_Ignorable_Code_Point
+17B4..17B5    ; Default_Ignorable_Code_Point
+180B..180D    ; Default_Ignorable_Code_Point
+180E          ; Default_Ignorable_Code_Point
+180F          ; Default_Ignorable_Code_Point
+200B..200F    ; Default_Ignorable_Code_Point
+202A..202E    ; Default_Ignorable_Code_Point
+2060..2064    ; Default_Ignorable_Code_Point
+2065          ; Default_Ignorable_Code_Point
+2066..206F    ; Default_Ignorable_Code_Point
+3164          ; Default_Ignorable_Code_Point
+FE00..FE0F    ; Default_Ignorable_Code_Point
+FEFF          ; Default_Ignorable_Code_Point
+FFA0          ; Default_Ignorable_Code_Point
+FFF0..FFF8    ; Default_Ignorable_Code_Point
+1BCA0..1BCA3  ; Default_Ignorable_Code_Point
+1D173..1D17A  ; Default_Ignorable_Code_Point
+E0000         ; Default_Ignorable_Code_Point
+E0001         ; Default_Ignorable_Code_Point
+E0002..E001F  ; Default_Ignorable_Code_Point
+E0020..E007F  ; Default_Ignorable_Code_Point
+E0080..E00FF  ; Default_Ignorable_Code_Point
+E0100..E01EF  ; Default_Ignorable_Code_Point
+E01F0..E0FFF  ; Default_Ignorable_Code_Point
