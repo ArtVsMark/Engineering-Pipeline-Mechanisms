@@ -714,6 +714,34 @@ def test_a_lagging_branch_is_judged_from_its_fork_point(
     assert "удалён" not in capsys.readouterr().out
 
 
+def test_a_workflow_removed_by_the_branch_itself_is_still_caught(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Прогон, снятый САМОЙ веткой, краснеет и при ушедшей вперёд базе (#1494).
+
+    Обратная сторона точки ветвления: «до» от предка не должно прятать то, что
+    ветка сделала сама.
+    """
+    root = tree(tmp_path / "tree")
+    (root / ".github" / "workflows" / "next.yml").write_text(
+        WORKFLOW.replace("name: ci", "name: next").replace("lint", "next"), encoding="utf-8"
+    )
+    git(root, "init", "-q", "--initial-branch=main")
+    git(root, "config", "user.name", "Artem Markitanov")
+    git(root, "config", "user.email", "a@b.c")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "основание")
+    git(root, "checkout", "-q", "-b", "work")
+    git(root, "rm", "-q", ".github/workflows/next.yml")
+    git(root, "commit", "-q", "-m", "сняла прогон")
+    git(root, "checkout", "-q", "main")
+    git(root, "commit", "-q", "--allow-empty", "-m", "база ушла вперёд")
+    git(root, "checkout", "-q", "work")
+    with contextlib.chdir(root):
+        assert gate.main(["--base", "main"]) == gate.EXIT_FINDINGS
+    assert "next.yml: прогон удалён целиком" in capsys.readouterr().out
+
+
 def test_a_breaking_change_without_a_transition_is_the_findings_outcome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
