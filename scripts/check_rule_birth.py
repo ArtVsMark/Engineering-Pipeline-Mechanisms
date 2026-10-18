@@ -54,6 +54,7 @@ from typing import Any, Final
 import check_journal
 import finding_kinds
 import gitcall
+import journal
 import paths
 import trunk_log
 
@@ -354,21 +355,33 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        new = added(args.base, args.head, args.root)
+        # «ДО» — ТОЧКА ВЕТВЛЕНИЯ, А НЕ ВЕРШИНА БАЗЫ (#1494). Вершина движется,
+        # пока изменение открыто: род, добавленный в базу соседом, на отставшей
+        # ветке читался «исчезнувшим», а удалённая там запись — «добавленной».
+        # 17.10.2026 так покраснели `journal` на #1492 и #1493, и лечились они
+        # только слиянием базы руками. История слитого ниже по-прежнему от
+        # базы: встречи рода считаются по тому, что уже уехало.
+        fork = journal.common_ancestor(args.base, args.head, args.root)
+        new = added(fork, args.head, args.root)
         queue = queued(args.head, args.root)
         told = missing(new, queue, args.head, args.root)
         # РОДЫ ЧИТАЮТСЯ У ТОГО ЖЕ СОСТОЯНИЯ, ЧТО ЗАПИСИ И ОЧЕРЕДЬ: «до» — у
-        # базы, «после» — у головы, все через git. Прежде «после» читалось с
-        # диска корня, а записи — диапазоном коммитов, и незакоммиченная правка
-        # словаря судилась, а закоммиченная в другом коммите — нет (`c9a1c47`).
-        # Словаря нет у головы — роды не ведутся, и это не отказ: шаг журнала
-        # переносим, и у потребителя словаря может не быть вовсе.
+        # точки ветвления, «после» — у головы, все через git. Прежде «после»
+        # читалось с диска корня, а записи — диапазоном коммитов, и
+        # незакоммиченная правка словаря судилась, а закоммиченная в другом
+        # коммите — нет (`c9a1c47`). Словаря нет ни у основания, ни у головы —
+        # роды не ведутся, и это не отказ: шаг журнала переносим, и у
+        # потребителя словаря может не быть вовсе.
+        #
+        # ЗАМОРОЗКА СУДИТСЯ ПО ОСНОВАНИЮ, А НЕ ПО ГОЛОВЕ. Прежде сверка шла,
+        # только если словарь у ГОЛОВЫ непуст, и ветка, снявшая все роды или сам
+        # файл, проходила молча: пустота у головы читалась «родов не ведут»
+        # (045). Нашлось при проверке #1494 отката обратной стороны.
         after = kinds_at(args.head, args.root)
+        base_kinds = kinds_at(fork, args.root)
+        frozen = thawed(base_kinds, after) if base_kinds else []
         grown: list[str] = []
-        frozen: list[str] = []
         if after:
-            base_kinds = kinds_at(args.base, args.root)
-            frozen = thawed(base_kinds, after) if base_kinds else []
             # ВСТРЕЧИ — СЛОВАРЬ ПЛЮС ИСТОРИЯ GIT, А НЕ ВЕТКА `badges` (решение
             # владельца 03.10.2026, #1022). «До» — история базы, «после» — она
             # же и коммиты изменения: строка `Род:` в них уедет в тело
@@ -385,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         told += kinds_missing(
             grown, after, queue, known_at(args.head, args.root) if grown else None
         )
-    except (NotRun, finding_kinds.NotRun, trunk_log.NotRun) as exc:
+    except (NotRun, journal.NotRun, finding_kinds.NotRun, trunk_log.NotRun) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
 

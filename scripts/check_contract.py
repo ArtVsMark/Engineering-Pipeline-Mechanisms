@@ -188,8 +188,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         base = args.base or journal.base_from_env()
+        # «ДО» — ДЕРЕВО ТОЧКИ ВЕТВЛЕНИЯ, А НЕ ВЕРШИНЫ БАЗЫ (#1494). На отставшей
+        # ветке вершина несёт то, что база получила позже, и гейт читал это
+        # откатом: 18.10.2026 #1496 покраснел «step-deps-intercept.yml: прогон
+        # удалён целиком» — шаг пришёл в базу с #1492 после ветвления.
+        fork = journal.common_ancestor(base)
         with tempfile.TemporaryDirectory() as room:
-            before = contract.surface(base_tree(base, Path(room)))
+            before = contract.surface(base_tree(fork, Path(room)))
         after = contract.surface()
         changes = contract.differences(before, after)
     except journal.NotRun as exc:

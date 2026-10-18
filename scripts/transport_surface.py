@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Final
 
 import gitcall
+import journal
 import paths
 
 EXIT_OK: Final = 0
@@ -172,10 +173,19 @@ def surface(package: Path) -> tuple[str, list[str]]:
 
 
 def base_surface(root: Path, base: str = BASE) -> tuple[str, list[str]]:
-    """Поверхность пакета в `base` — тем же разбором из её файлов, а не из её снимка."""
+    """Поверхность пакета у точки ветвления с `base` — тем же разбором из её файлов.
+
+    «ДО» — ПРЕДОК, А НЕ ВЕРШИНА БАЗЫ (#1494). Если база подняла `VERSION` уже
+    после ветвления, вершина несла чужой номер, и правка поверхности на ветке
+    при прежнем номере проходила: «номер другой — значит сдвинут».
+    """
+    try:
+        fork = journal.common_ancestor(base, root=root)
+    except journal.NotRun as exc:
+        raise NotRun(f"точка ветвления с {base} не найдена: {exc}") from exc
 
     def shown(name: str) -> str:
-        return gitcall.output(["show", f"{base}:{paths.TRANSPORT}/{name}"], NotRun, cwd=str(root))
+        return gitcall.output(["show", f"{fork}:{paths.TRANSPORT}/{name}"], NotRun, cwd=str(root))
 
     return surface_from(shown)
 
@@ -186,7 +196,8 @@ def moved_without_version(version: str, lines: list[str], root: Path, base: str 
     if was == version and before != lines:
         changed = sorted(set(lines) ^ set(before))
         return (
-            f"поверхность сменилась против {base} при прежнем VERSION {version}: {changed} — "
+            f"поверхность сменилась против точки ветвления с {base} при прежнем VERSION "
+            f"{version}: {changed} — "
             f"сдвиньте {paths.TRANSPORT / 'VERSION'}"
         )
     return ""

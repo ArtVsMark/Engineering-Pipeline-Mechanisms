@@ -13,6 +13,7 @@
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Final
 
 import gitcall
@@ -92,7 +93,7 @@ def git(args: list[str]) -> str:
         raise NotRun(f"{' '.join(args)} → {report.cut(gitcall.cause(exc))}") from exc
 
 
-def common_ancestor(base: str) -> str:
+def common_ancestor(base: str, head: str = "HEAD", root: Path | None = None) -> str:
     """Общий предок с базой — ТОЧКА, ОТ КОТОРОЙ СУДЯТ ОБ ИЗМЕНЕНИИ.
 
     Отдельным именем, а не строкой внутри одного читателя: об изменении судят
@@ -102,8 +103,17 @@ def common_ancestor(base: str) -> str:
     другое дерево, чем тот, что читает предка. Ровно так гейт журнала требовал
     увезти отметки, уже уехавшие: список файлов он брал от предка, а содержимое
     тех же файлов — с вершины (нашёл внешний взгляд на #441).
+
+    ГОЛОВА И КОРЕНЬ — ДОВОДЫ, А НЕ ВТОРАЯ РЕАЛИЗАЦИЯ (#1494). Гейты, судящие
+    чужую голову или дерево вне текущего каталога (`--head`, `--root`), брали
+    «до» с вершины базы, потому что предка в их форме спросить было не у кого.
+    Отставшая ветка тогда читалась как откат всего, что база получила позже:
+    17–18.10.2026 так покраснели `journal` на #1492 и #1493 и `contract` на
+    #1496. Корень передаётся git'ом (`-C`), а не окружением процесса: зов
+    остаётся одним вызовом `git`.
     """
-    found = git(["git", "merge-base", base, "HEAD"]).strip()
+    where = ["-C", str(root)] if root is not None else []
+    found = git(["git", *where, "merge-base", base, head]).strip()
     if not found:
         raise NotRun(f"общий предок с «{base}» не найден")
     return found
