@@ -211,8 +211,14 @@ def family_of(
     seen: list[Any],
     unread: list[str] | None = None,
 ) -> list[str]:
-    """Подменяет семью, обход и отдаваемые шаги; отдаёт, к кому шло оповещение."""
+    """Подменяет семью, обход, отдаваемые шаги и токен; отдаёт, к кому шло оповещение.
+
+    Токен окружения снимается: с `GH_TOKEN` в среде прогона `main` шёл бы к
+    площадке, и исход зависел бы от среды, а не от дерева (107; поздний взгляд
+    на #1497). Тест, которому токен нужен, ставит его сам.
+    """
     notified: list[str] = []
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "")
     monkeypatch.setattr(module.family_uptake, "family", lambda: ["o/взял", "o/не-взял"])
     monkeypatch.setattr(module.family_uptake, "sweep", lambda repos, where: (seen, unread or []))
     monkeypatch.setattr(module.onboard, "steps", lambda root: ["release", "review"])
@@ -339,6 +345,21 @@ def test_an_unnamed_owner_is_refused(monkeypatch: pytest.MonkeyPatch, said: obje
         module.owner_of("т")
 
 
+def test_asked_owner_names_the_owner_or_says_it_did_not_ask(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`asked_owner` — владелец для пробного захода: названный или «не спрошено», без отказа."""
+    monkeypatch.setattr(module.ghrest, "request", lambda *_: {"login": "владелец"})
+    assert module.asked_owner("т") == "владелец"
+
+    def forbidden(*_: object, **__: object) -> object:
+        raise module.ghrest.TransportError("403")
+
+    monkeypatch.setattr(module.ghrest, "request", forbidden)
+    assert module.asked_owner("т") == ""
+    assert "не спрошено" in capsys.readouterr().out
+
+
 def test_no_token_has_no_owner_and_asks_nobody(monkeypatch: pytest.MonkeyPatch) -> None:
     """Без токена владельца не спрашивают: пробный заход идёт и без него."""
     monkeypatch.setattr(module.ghrest, "request", lambda *_: pytest.fail("спросил без токена"))
@@ -356,3 +377,34 @@ def test_an_unreadable_tag_list_is_the_third_outcome(
 
     monkeypatch.setattr(module.release, "git", silent)
     assert module.main(["--tag", "v1.8.0", *OURS]) == module.EXIT_BROKEN
+
+
+def test_a_dry_run_with_an_unnamed_owner_says_it_did_not_ask(
+    tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Токен приложения владельца не называет — пробный заход «не спросил», а не отказал."""
+    notified = family_of(monkeypatch, [TOOK])
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "приложение")
+
+    def forbidden(*_: object, **__: object) -> object:
+        raise module.ghrest.TransportError("403 Resource not accessible by integration")
+
+    monkeypatch.setattr(module.ghrest, "request", forbidden)
+    assert module.main(["--tag", "v1.8.0", *OURS]) == module.EXIT_OK
+    assert notified == ["o/взял"]
+    assert "не спрошено" in capsys.readouterr().out
+
+
+def test_an_applied_run_with_an_unnamed_owner_is_refused(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Боевой заход без названного владельца не начинается: от чьего имени писать — неясно."""
+    notified = family_of(monkeypatch, [TOOK])
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "приложение")
+
+    def forbidden(*_: object, **__: object) -> object:
+        raise module.ghrest.TransportError("403 Resource not accessible by integration")
+
+    monkeypatch.setattr(module.ghrest, "request", forbidden)
+    assert module.main(["--tag", "v1.8.0", *OURS, "--apply"]) == module.EXIT_BROKEN
+    assert notified == []

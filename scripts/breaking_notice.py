@@ -193,6 +193,22 @@ def owner_of(token: str) -> str:
     return login
 
 
+def asked_owner(token: str) -> str:
+    """Владелец токена для ПРОБНОГО захода; не назван — пустая строка и слово об этом.
+
+    Пробный заход ничего не пишет, и «есть ли уже задача» для него — сведение,
+    а не условие. Токен приложения (`GITHUB_TOKEN`) на `GET /user` получает 403,
+    и прежде пробный заход с ним кончался «не отработал» там, где без токена
+    говорил «не спрошено» (поздний взгляд на #1497). Боевой заход зовёт
+    `owner_of` и без владельца не начинается.
+    """
+    try:
+        return owner_of(token)
+    except (NotRun, ghrest.TransportError) as exc:
+        print(f"владелец токена не назван — есть ли уже, не спрошено: {report.cut(str(exc))}")
+        return ""
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: решает, есть ли повод, и оповещает взявших наши шаги."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -219,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         token = ghrest.token_from_env()
         if args.apply and not token:
             raise NotRun("токена нет — завести задачи соседям нечем")
-        login = owner_of(token)
+        login = owner_of(token) if args.apply else asked_owner(token)
     except (
         NotRun,
         release.NotRun,
