@@ -198,6 +198,23 @@ COMMENT = {
 }
 
 
+def test_every_review_call_waits_for_its_answer_line() -> None:
+    """Каждый заход `step-review.yml` ждёт свою строку ответа — и верификатор тоже (195).
+
+    У взгляда и позднего взгляда ответ — `ВЕРДИКТ:`, у верификатора — `ПРЕМИСА:`.
+    Запрет фона получили все три, а ожидание строки — сперва только двое, и заход
+    верификатора без ответа не назывался (поздний взгляд на #1495).
+    """
+    flow = (ROOT / ".github" / "workflows" / "step-review.yml").read_text(encoding="utf-8")
+    calls = [line for line in flow.splitlines() if "scripts/agent_run.py --from" in line]
+    assert len(calls) == 3, calls
+    expected = {"взгляд": "ВЕРДИКТ:", "верификатор": "ПРЕМИСА:", "поздний взгляд": "ВЕРДИКТ:"}
+    for call, line in expected.items():
+        found = [one for one in calls if f'--call "{call}"' in one]
+        assert len(found) == 1, f"{call}: вызов найден {len(found)} раз (075)"
+        assert f'--expect "{line}"' in found[0], f"{call}: не ждёт строки «{line}»"
+
+
 def test_the_background_calls_are_named() -> None:
     """Вызов оболочки, уведённый в фон, назван командой; передний план — нет."""
     messages = [INIT, bash("python -m pytest -q"), bash("python -m pytest", background=True)]
@@ -222,13 +239,19 @@ def test_the_permission_denials_are_named_with_their_command() -> None:
         ([INIT, result("ВЕРДИКТ: находок 1")], True),
         ([INIT, COMMENT, result("комментарий обновлён")], True),
         ([INIT, bash("python -m pytest", background=True), result("жду прогона")], False),
+        ([INIT, bash('grep -n "ВЕРДИКТ:" scripts/agent_run.py'), result("смотрю")], False),
     ],
-    ids=["в-итоге", "в-комментарии", "нет-нигде"],
+    ids=["в-итоге", "в-комментарии", "нет-нигде", "упомянута-не-сказана"],
 )
-def test_the_expected_line_is_looked_for_in_the_result_and_the_tools(
+def test_the_expected_line_is_looked_for_in_the_result_and_the_comment(
     messages: list[dict[str, Any]], said: bool
 ) -> None:
-    """Строку ищут в итоге и в тексте, отданном инструментам: комментарий пишет инструмент."""
+    """Строку ищут в итоге и в комментарии; во входе прочих инструментов — нет.
+
+    Взгляд на сам механизм вердикта зовёт `grep "ВЕРДИКТ:"`, и без отбора по
+    инструменту такой заход без ответа читался бы заходом с ответом
+    (поздний взгляд на #1495).
+    """
     assert module.says(messages, "ВЕРДИКТ:") is said
 
 

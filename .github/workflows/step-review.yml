@@ -1108,7 +1108,7 @@ jobs:
 
             ЗОВИ ЕЁ НА ПЕРЕДНЕМ ПЛАНЕ, НЕ В ФОНЕ. Заход неинтерактивный: вызов,
             уведённый в фон, он не дождётся — следующего хода, где пришёл бы его
-            итог, не будет, и заход кончится без вердикта. Долгий набор
+            итог, не будет, и заход кончится без строки `ПРЕМИСА:`. Долгий набор
             гони целиком и жди его здесь же.
 
             Список здесь — НАМЕРЕННЫЙ ДУБЛЬ `claude_args` этого же шага, и подписан он
@@ -1173,7 +1173,7 @@ jobs:
         env:
           SAID: ${{ steps.refute.outputs.execution_file }}
           OUTCOME: ${{ steps.refute.outcome }}
-        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "верификатор" --outcome "$OUTCOME"
+        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "верификатор" --outcome "$OUTCOME" --expect "ПРЕМИСА:"
 
       - name: перенести ответ в изменение и в реестр
         if: steps.token.outputs.present == 'yes'
