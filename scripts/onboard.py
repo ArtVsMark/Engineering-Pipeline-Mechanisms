@@ -747,6 +747,13 @@ def licensed(path: Path, text: str, repo: str) -> str:
     return form.format(line=line) + text
 
 
+#: Что заход кладёт, но что становится файлом ПРОЕКТА, а не нашей заготовкой:
+#: тонкий `ci.yml`, куда проект дописывает свои джобы (поздний взгляд на #1487,
+#: `a4c2cc0`). Строку лицензии поставщика он не несёт ни при первой кладке, ни
+#: при обновлении (`Update.theirs`).
+OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW})
+
+
 def signed_all(
     files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
 ) -> dict[Path, str]:
@@ -1248,9 +1255,9 @@ class Update:
     current: list[Path] = field(default_factory=list)
     #: Что заход называет, но не пишет: новые и снятые шаги `ci.yml`, ответы.
     notes: list[str] = field(default_factory=list)
-    #: Файлы ПОТРЕБИТЕЛЯ среди `write`: заход в них только поднимает тег наших
-    #: строк. Строку лицензии поставщика в них не ставят (взгляд на #1487): в
-    #: смешанном `ci.yml` свои джобы проекта, и файл остаётся его.
+    #: Файлы ПОТРЕБИТЕЛЯ среди `write`: строку лицензии поставщика в них не
+    #: ставят (взгляд на #1487). Это `ci.yml` — и поднятый, и положенный тонким
+    #: (`plan_ci`): в него проект дописывает свои джобы, и файл остаётся его.
     theirs: set[Path] = field(default_factory=set)
 
 
@@ -1305,6 +1312,10 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     """
     where = standing(consumer, paths.WORKFLOWS / PIPELINE_FLOW)
     target = consumer / where
+    # `ci.yml` — ФАЙЛ ПРОЕКТА В ОБОИХ СЛУЧАЯХ (поздний взгляд на #1487,
+    # `49976c1`): положенный тонким завтра получит свои джобы проекта, и строка
+    # поставщика в нём осталась бы в чужом файле — тот же класс, что у поднятого.
+    update.theirs.add(where)
     if not target.is_file():
         update.write[where] = thin_ci(pipeline, repo, pin)
         return
@@ -1324,7 +1335,6 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     lifted = our_uses(repo).sub(lift, text)
     if lifted != text:
         update.write[where] = lifted
-        update.theirs.add(where)
     for one in sorted(set(pipeline) - called):
         update.notes.append(
             f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
@@ -1390,20 +1400,59 @@ def own_records(flow: Path, step: str = "") -> tuple[list[str], bool]:
     return names, policy.ON_CHANGE in policy.triggers_of(said)
 
 
+def contract_at(root: Path, pin: str) -> str:
+    """Версия контракта, которую несёт выпуск `pin`, — из его дерева, а не из рабочего.
+
+    Рабочее дерево поставщика бывает впереди выпуска: окно заготовки, взятое
+    оттуда, обещало бы потребителю поверхность, которой у его прибивки нет.
+    """
+    said = gitcall.output(
+        ["show", f"{pin}:{paths.VERSION.as_posix()}"], NotRun, cwd=str(root)
+    ).strip()
+    try:
+        version.digits(said)
+    except version.NotRun as exc:
+        raise NotRun(f"{pin}:{paths.VERSION}: {exc}") from exc
+    return said
+
+
+def contract_span(contract: str) -> str:
+    """Окно совместимости заготовки: минор выпуска, и только он (073, 157).
+
+    Минор контракта растёт, когда у поверхности появляется джоб, по которому
+    потребитель обязан ответить классом (`docs/dev/release.md`). Поэтому
+    следующий минор лежит за окном: подъём прибивки краснеет и зовёт перечитать
+    ответы, а не принимается молча.
+    """
+    # Разряды — одним разбором `version.digits`, а не своим (214).
+    try:
+        major, minor, _ = version.digits(contract)
+    except version.NotRun as exc:
+        raise NotRun(f"версия контракта: {exc}") from exc
+    return f">={major}.{minor},<{major}.{minor + 1}"
+
+
 def answer(
-    names: list[str], beyond: list[str] | None = None, *, on_change: list[str] | None = None
+    names: list[str],
+    beyond: list[str] | None = None,
+    *,
+    on_change: list[str] | None = None,
+    span: str,
 ) -> str:
-    """Заготовка ответа потребителя: по строке на проверку, класс — не решён.
+    """Заготовка ответа потребителя: схема, окно контракта и по строке на проверку.
 
     `unreviewed` здесь не заглушка, а объявленная очередь разбора: молча
     обязательной проверка не становится, и молча совещательной тоже.
     `names` — шаги конвейера, их имя составное из имени шага. `beyond` и
     `on_change` — уже готовые имена записей своих прогонов механизмов
-    (`own_records`): вне изменения и на нём.
+    (`own_records`): вне изменения и на нём. `span` — окно контракта
+    (`contract_span`): без него и без схемы ответ не читает ни один механизм
+    (`pipeline_checks.load`), и потребитель краснел бы с первого прогона.
     """
     rows = [f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in names]
     rows += [f'  "{one}": {policy.UNREVIEWED}' for one in on_change or []]
-    said = "checks:\n" + "\n".join(rows) + "\n"
+    said = f'schema: {policy.SCHEMA}\ncontract: "{span}"\n\n'
+    said += "checks:\n" + "\n".join(rows) + "\n"
     if beyond:
         more = "\n".join(f'  "{one}": {policy.UNREVIEWED}' for one in beyond)
         said += f"{policy.BEYOND}:\n{more}\n"
@@ -1517,6 +1566,7 @@ def main(argv: list[str] | None = None) -> int:
         own = own_callers(args.root, names)
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
+        span = contract_span(contract_at(args.root, pin))
         summary = summary_kit(args.root, args.repo, pin)
         rulebook = rulebook_kit(args.root)
         kit = data_kit(args.root)
@@ -1566,13 +1616,13 @@ def main(argv: list[str] | None = None) -> int:
             files = {
                 paths.WORKFLOWS / PIPELINE_FLOW: thin_ci(pipeline, args.repo, pin),
                 paths.WORKFLOWS / SUMMARY_FLOW: summary,
-                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change),
+                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change, span=span),
                 **{
                     paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
                     for one, flow in sorted(own.items())
                 },
             }
-            signed_all(files | rulebook | kit, args.repo)
+            signed_all(files | rulebook | kit, args.repo, OWN_BY_PROJECT)
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
@@ -1609,7 +1659,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OCCUPIED
         kept = occupied(args.write, rulebook)
         free = {path: text for path, text in rulebook.items() if path not in kept}
-        lay(args.write, files | free, args.repo)
+        lay(args.write, files | free, args.repo, OWN_BY_PROJECT)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
@@ -1650,7 +1700,7 @@ def main(argv: list[str] | None = None) -> int:
     # подписывается он тем же `signed_all` — до первой строки вывода, чтобы отказ
     # подписи был исходом «не отработал», а не половиной напечатанного. Джобы
     # вызова — не файл, а строки в СВОЙ `ci.yml` потребителя: их не подписывают,
-    # как и сам смешанный `ci.yml` при обновлении (`Update.theirs`).
+    # как и сам `ci.yml` — файл проекта (`OWN_BY_PROJECT`, `Update.theirs`).
     try:
         whole = signed_all(
             {
@@ -1658,7 +1708,7 @@ def main(argv: list[str] | None = None) -> int:
                     paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
                     for one, flow in sorted(own.items())
                 },
-                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change),
+                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change, span=span),
                 paths.WORKFLOWS / SUMMARY_FLOW: summary,
                 **rulebook,
             },

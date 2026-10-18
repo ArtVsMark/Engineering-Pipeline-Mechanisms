@@ -152,7 +152,7 @@ def test_the_answer_leaves_the_class_to_the_consumer(tmp_path: Path) -> None:
     И не молчит о нём: `unreviewed` — объявленная очередь разбора. Молча
     обязательной проверка не становится, и молча совещательной тоже.
     """
-    said = module.answer(["lint", "debt"])
+    said = module.answer(["lint", "debt"], span=">=9.9,<9.10")
     assert f'"lint{policy.COMPOSED}lint": {policy.UNREVIEWED}' in said
     assert policy.REQUIRED not in said and policy.ADVISORY not in said
 
@@ -370,6 +370,53 @@ def test_write_lays_a_thin_ci_and_the_answer(tmp_path: Path) -> None:
     assert job["uses"].endswith("/.github/workflows/step-пример.yml@v2.5.0"), job
     said = yaml.safe_load((consumer / ".pipeline.yml").read_text("utf-8"))
     assert said["checks"] == {module.check_name("пример"): policy.UNREVIEWED}
+
+
+def test_the_laid_answer_is_read_by_the_mechanism(tmp_path: Path) -> None:
+    """Положенный ответ читает разбор механизма: схема и окно контракта на месте.
+
+    Найдено замером на клоне `Claude-Code_Usage-Token` (#1388): заготовка
+    клала только проверки, и `pipeline_checks.load` отказывал ей схемой, а
+    `span_of` — окном. Потребитель краснел бы шагом `pipeline` с первого же
+    прогона после подключения.
+    """
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    said = consumer / module.paths.PIPELINE
+    policy.load(said)
+    assert policy.compatible(policy.span(said), FAKE_VERSION)
+
+
+@pytest.mark.parametrize(
+    ("contract", "span", "inside", "outside"),
+    [("9.9.0", ">=9.9,<9.10", "9.9.4", "9.10.0"), ("0.10.2", ">=0.10,<0.11", "0.10.0", "1.0.0")],
+    ids=["минор", "двузначный-минор"],
+)
+def test_the_answer_window_is_the_minor_of_the_release(
+    contract: str, span: str, inside: str, outside: str
+) -> None:
+    """Окно заготовки — минор выпуска: патч внутри, следующий минор зовёт перечитать ответы."""
+    assert module.contract_span(contract) == span
+    assert policy.compatible(span, inside) and not policy.compatible(span, outside)
+
+
+@pytest.mark.parametrize(
+    "contract", ["9.9", "v9.9.0", "9.9.0-rc"], ids=["короче", "с-приставкой", "хвост"]
+)
+def test_a_contract_not_of_the_form_is_refused_in_our_words(contract: str) -> None:
+    """Не версия X.Y.Z — отказ `onboard`, а не чужое исключение; разбор — `version.digits` (214)."""
+    with pytest.raises(module.NotRun, match="версия контракта"):
+        module.contract_span(contract)
+
+
+def test_the_contract_is_read_at_the_pin_not_the_work_tree(tmp_path: Path) -> None:
+    """Версия контракта — с дерева выпуска: рабочее дерево поставщика бывает впереди."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    (root / "CONTRACT_VERSION").write_text("9.10.0\n", encoding="utf-8")
+    assert module.contract_at(root, "v2.5.0") == FAKE_VERSION
+    with pytest.raises(module.NotRun):
+        module.contract_at(root, "v9.9.9")
 
 
 def test_write_never_overwrites_what_is_there(tmp_path: Path) -> None:
@@ -1618,21 +1665,47 @@ def test_a_kit_without_a_place_for_the_license_is_refused(name: str, text: str) 
 
 
 def test_every_file_the_write_lays_carries_the_license(tmp_path: Path) -> None:
-    """Каждый файл, положенный заходом в дерево потребителя, несёт строку лицензии (#1470).
+    """Каждая заготовка, положенная заходом, несёт строку лицензии; `ci.yml` — нет (#1470).
 
     Судится результат захода целиком, а не каждая заготовка порознь: путь
-    записи один, и новая заготовка, прошедшая мимо него, здесь видна.
+    записи один, и новая заготовка, прошедшая мимо него, здесь видна. Тонкий
+    `ci.yml` — файл проекта (`OWN_BY_PROJECT`): в него проект дописывает свои
+    джобы, и строка поставщика осталась бы в чужом файле (поздний взгляд на
+    #1487, `a4c2cc0`).
     """
     root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
     consumer = tmp_path / "потребитель"
     assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
     laid = [one for one in walk_deep(consumer) if one.is_file()]
-    unsigned = [
-        one.relative_to(consumer).as_posix()
+    own = {(consumer / one).as_posix() for one in module.OWN_BY_PROJECT}
+    signed = {
+        one.relative_to(consumer).as_posix(): module.LICENSE_ID in one.read_text(encoding="utf-8")
         for one in laid
-        if module.LICENSE_ID not in one.read_text(encoding="utf-8")
+    }
+    unsigned = [
+        path
+        for path, said in signed.items()
+        if not said and (consumer / path).as_posix() not in own
     ]
     assert not unsigned, f"положено без строки лицензии: {unsigned}"
+    projects = [
+        path for path, said in signed.items() if said and (consumer / path).as_posix() in own
+    ]
+    assert not projects, f"файл проекта подписан строкой поставщика: {projects}"
+    assert own and all(Path(one).is_file() for one in own), (
+        "тонкий ci.yml не положен — судить нечего"
+    )
+
+
+def test_an_update_lays_the_missing_ci_as_the_projects_file(tmp_path: Path) -> None:
+    """Обновление, положившее недостающий `ci.yml`, кладёт его без строки поставщика (`49976c1`)."""
+    root, consumer = connected(tmp_path)
+    ci = consumer / ".github" / "workflows" / "ci.yml"
+    ci.unlink()
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    laid = ci.read_text("utf-8")
+    assert "step-пример.yml@v2.6.0" in laid and module.LICENSE_ID not in laid, laid
 
 
 def test_a_kit_that_cannot_carry_the_license_stops_the_write_before_any_file(
