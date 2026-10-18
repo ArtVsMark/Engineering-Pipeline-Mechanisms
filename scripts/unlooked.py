@@ -102,6 +102,12 @@ STATE_SILENT: Final = "прогон взгляда прошёл, а ответа
 #: знал, и каждый заход кончался за 0–1 с, а реестр мог сказать лишь «прошёл, а
 #: ответа нет».
 STATE_REFUSED: Final = "действие взгляда отказало — текст отказа в аннотации проверки"
+#: Прогон зелёный, агент дошёл до итога, а строки `ВЕРДИКТ:` в ответе нет: шаг
+#: `agent_run.py` назвал это аннотацией. Замер 17.10.2026 (#1480): четыре захода
+#: по полторы–две минуты, «успех», а вердикта нет. Это тоже частный случай
+#: тишины, но причину зовут искать в соседних аннотациях той же проверки —
+#: фоновые вызовы и отказы разрешений, — а не в логе, где вывод агента скрыт.
+STATE_NO_VERDICT: Final = "заход взгляда кончился без вердикта — причины в аннотациях проверки"
 #: Прогон зелёный, а взгляд пропущен воротами: голова была красной (#762). Это
 #: не тишина — причина названа на проверке, — и зовёт она к позднему взгляду.
 STATE_SKIPPED_RED: Final = "взгляд пропущен на красной голове — слито без него"
@@ -151,6 +157,7 @@ STATES: Final = (
     STATE_BROKEN,
     STATE_SILENT,
     STATE_REFUSED,
+    STATE_NO_VERDICT,
     STATE_RUNNING,
     STATE_AWAITING,
     STATE_CANCELLED,
@@ -167,6 +174,7 @@ OPEN_STATES: Final = (
     STATE_BROKEN,
     STATE_SILENT,
     STATE_REFUSED,
+    STATE_NO_VERDICT,
     STATE_RUNNING,
     STATE_AWAITING,
     STATE_CANCELLED,
@@ -200,6 +208,8 @@ REVIEW_CHECKS: Final = ("review / review", "review")
 #: аннотация называет отказ захода. Своё имя, а не поле площадки: его ставит
 #: механизм, прочитав аннотации.
 REFUSED_KEY: Final = "_refused"
+#: Пометка записи: аннотация называет заход без вердикта (`agent_run.NO_VERDICT`).
+NO_VERDICT_KEY: Final = "_no_verdict"
 #: Пометка записи: ворота пропустили взгляд, потому что голова была красной.
 SKIPPED_RED_KEY: Final = "_skipped_red"
 #: Заголовок аннотации, которой ворота взгляда (`look_waits`) помечают пропуск.
@@ -429,6 +439,15 @@ def refused(notes: list[dict[str, Any]]) -> bool:
     return any(agent_run.REFUSED in str(note.get("message") or "") for note in notes)
 
 
+def without_verdict(notes: list[dict[str, Any]]) -> bool:
+    """Назвала ли аннотация заход, кончившийся без строки вердикта (#1480).
+
+    Тем же приёмом, что `refused`: по словам `agent_run.NO_VERDICT`, которые
+    пишет только шаг `agent_run.py`, — одна фраза на пишущего и читающего.
+    """
+    return any(agent_run.NO_VERDICT in str(note.get("message") or "") for note in notes)
+
+
 def why_quiet(runs: list[dict[str, Any]]) -> str:
     """Почему ответа нет — по записи проверки взгляда на голове изменения.
 
@@ -470,6 +489,8 @@ def why_quiet(runs: list[dict[str, Any]]) -> str:
         # причина, и она видна без лога (#673).
         if any(run.get(REFUSED_KEY) for run in ours):
             return STATE_REFUSED
+        if any(run.get(NO_VERDICT_KEY) for run in ours):
+            return STATE_NO_VERDICT
         return STATE_SKIPPED_RED if any(run.get(SKIPPED_RED_KEY) for run in ours) else STATE_SILENT
     # ЗАПИСЬ ЕСТЬ, А ВЕРДИКТА НЕТ — ЭТО НЕСКОЛЬКО РАЗНЫХ СОСТОЯНИЙ, А НЕ ОДНО.
     # Прежде все они назывались «вердикта нет» — тем же словом, каким
@@ -612,6 +633,7 @@ def head_runs(repo: str, number: int, token: str) -> list[dict[str, Any]]:
             print(f"  {ANNOTATIONS_UNREAD} (#{number}): {report.cut(str(exc))}")
             continue
         run[REFUSED_KEY] = refused(notes)
+        run[NO_VERDICT_KEY] = without_verdict(notes)
         # Сосед отказа назван (195): пропуск на красной голове тоже пишется
         # аннотацией этой записи, и без узнавания он читался бы «тишиной».
         run[SKIPPED_RED_KEY] = any(
@@ -849,6 +871,10 @@ def render_body(
         "  НАЗВАНА: шаг `agent_run.py` поставил на проверке взгляда аннотацию",
         f"  «{agent_run.REFUSED} — <текст>». Лог не нужен — текст отказа в списке",
         "  аннотаций проверки (#673);",
+        f"* «{STATE_NO_VERDICT}» — тоже частный случай тишины: агент дошёл до",
+        "  итога, а строки `ВЕРДИКТ:` нет ни в итоге, ни в комментарии. Шаг",
+        f"  `agent_run.py` ставит аннотацию «{agent_run.NO_VERDICT}», а рядом —",
+        "  вызовы, уведённые в фон, и отказы разрешений с их командами (#1480);",
         f"* «{STATE_SKIPPED}» — условие джоба вычислено и оказалось",
         "  ложным. Условие у него ровно одно: голова изменения лежит в этом же",
         "  репозитории, — значит это форк, и больше ничего. Это НЕ «прогон не",

@@ -771,6 +771,33 @@ def test_a_refusal_named_on_the_check_outranks_plain_silence() -> None:
     assert module.why_quiet([{"name": "review", "conclusion": "success"}]) == module.STATE_SILENT
 
 
+def test_a_run_without_its_verdict_is_named_not_silent() -> None:
+    """Зелёная проверка с аннотацией «без вердикта» — своё состояние, а не «тишина» (#1480).
+
+    Названный отказ сильнее: у него причина — текст отказа, а «без вердикта»
+    зовёт искать её в соседних аннотациях.
+    """
+    marked = {"name": "review / review", "conclusion": "success", module.NO_VERDICT_KEY: True}
+    assert module.why_quiet([marked]) == module.STATE_NO_VERDICT
+    both = {**marked, module.REFUSED_KEY: True}
+    assert module.why_quiet([both]) == module.STATE_REFUSED
+    assert module.STATE_NO_VERDICT in module.OPEN_STATES
+
+
+@pytest.mark.parametrize(
+    ("message", "said"),
+    [
+        (f"взгляд: {module.agent_run.NO_VERDICT} — строки нет", True),
+        ("Process completed with exit code 1", False),
+        ("взгляд: модель захода — claude-opus-5-5", False),
+    ],
+    ids=["слова-шага", "ошибка-площадки", "модель"],
+)
+def test_only_the_no_verdict_words_make_a_run_without_verdict(message: str, said: bool) -> None:
+    """«Без вердикта» узнаётся по словам `agent_run.NO_VERDICT`, а не по уровню аннотации."""
+    assert module.without_verdict([{"message": message}]) is said
+
+
 def test_only_the_refusal_words_make_a_refusal() -> None:
     """Отказом считается аннотация со словами `agent_run.REFUSED`, а не любая ошибка.
 

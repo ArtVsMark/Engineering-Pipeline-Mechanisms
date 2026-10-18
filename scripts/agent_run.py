@@ -37,6 +37,20 @@ claude-opus-5-5` во всех пяти вызовах `anthropics/claude-code-a
 `failure` (`58b1367`). Успех без файла — законный пропуск (сверка процесса,
 нет вызова по имени), и шаг тогда не зовётся вовсе.
 
+ЗАХОД БЕЗ ОЖИДАЕМОЙ СТРОКИ — ТОЖЕ СВОЁ СОСТОЯНИЕ (#1480). Замер 17.10.2026:
+четыре захода взгляда кончились «успехом» за полторы–две минуты, а строки
+`ВЕРДИКТ:` в ответе не было — полный набор в такой срок не проходит. Вывод
+агента в логе скрыт, а файл захода не выгружается, поэтому причину видно только
+отсюда. Со входом `--expect` шаг ищет строку в итоге и в тексте комментария,
+отданном инструменту комментария (комментарий взгляда пишется инструментом, а
+не итогом), и без неё называет заход словами `NO_VERDICT`. Вход прочих
+инструментов ответом не считается: взгляд на сам механизм вердикта зовёт
+`grep "ВЕРДИКТ:"`, и такой заход без ответа читался бы заходом с ответом
+(поздний взгляд на #1495). Рядом — то, что
+обрывает заход молча: вызовы оболочки, ушедшие в фон (`run_in_background`), —
+следующего хода у неинтерактивного захода нет, — и отказы разрешений с их
+командами.
+
 ЧЕГО ШАГ НЕ ДЕЛАЕТ: не красит задание. Отказ взгляда держать слияние или нет —
 вопрос #654, и решает его владелец; здесь отказ перестаёт быть НЕВИДИМЫМ.
 
@@ -63,6 +77,14 @@ CANCELLED: Final = "cancelled"
 #: Слова, которыми аннотация называет отказ захода. По ним же отказ узнаёт реестр
 #: слитого без взгляда (`unlooked`) — одна фраза на пишущего и читающего (090).
 REFUSED: Final = "заход отказал"
+#: Слова захода, кончившегося без ожидаемой строки ответа: по ним его узнаёт тот
+#: же реестр, отдельным состоянием, а не «прошёл, а ответа нет» (#1480).
+NO_VERDICT: Final = "заход без ответа"
+#: Приставка инструментов, которыми заход пишет ОТВЕТ, — комментария действия.
+#: Строка во входе прочих (`grep`, чтение файла) — упоминание, а не ответ.
+ANSWER_TOOLS: Final = "mcp__github_comment__"
+#: Предел чужого текста в аннотации — тот же, что у общей обрезки (016).
+LIMIT: Final = 300
 
 
 class NotRun(RuntimeError):
@@ -107,12 +129,95 @@ def failure_of(messages: list[dict[str, Any]]) -> str | None:
     return "итога нет — заход оборвался раньше, чем подвёл его"
 
 
+def tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Вызовы инструментов агента — блоки `tool_use` его сообщений, по порядку."""
+    found: list[dict[str, Any]] = []
+    for message in messages:
+        if message.get("type") != "assistant":
+            continue
+        body = message.get("message")
+        content = body.get("content") if isinstance(body, dict) else None
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                found.append(block)
+    return found
+
+
+def cut(text: str, limit: int = LIMIT) -> str:
+    """Обрезает чужой текст для аннотации, сказав, насколько он обрезан (016).
+
+    КОПИЯ `report.cut` НАМЕРЕННАЯ: модуль держится стандартной библиотекой (его
+    зовут и там, где пакета транспорта нет). Подписана в
+    `tests/test_one_body.py::SIGNED`, совпадение держит
+    `tests/test_agent_run.py::test_the_cut_is_the_transport_one`.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}… (обрезано, всего {len(text)} знаков)"
+
+
+def one_line(text: str) -> str:
+    """Команда одной строкой, с пределом: аннотация многострочного не держит."""
+    return cut(" ".join(text.split()))
+
+
+def background_of(messages: list[dict[str, Any]]) -> list[str]:
+    """Команды оболочки, которые агент увёл в фон: заход их не дождётся."""
+    return [
+        one_line(str((call.get("input") or {}).get("command") or ""))
+        for call in tool_calls(messages)
+        if call.get("name") == "Bash"
+        and isinstance(call.get("input"), dict)
+        and call["input"].get("run_in_background") is True
+    ]
+
+
+def denials_of(messages: list[dict[str, Any]]) -> list[str]:
+    """Отказы разрешений из итога захода: инструмент и его команда или путь."""
+    for message in reversed(messages):
+        if message.get("type") != RESULT:
+            continue
+        said: list[str] = []
+        for denial in message.get("permission_denials") or []:
+            if not isinstance(denial, dict):
+                continue
+            given = denial.get("tool_input")
+            what = ""
+            if isinstance(given, dict):
+                what = str(given.get("command") or given.get("file_path") or "")
+            name = str(denial.get("tool_name") or "?")
+            said.append(f"{name}: {one_line(what)}" if what else name)
+        return said
+    return []
+
+
+def says(messages: list[dict[str, Any]], line: str) -> bool:
+    """Есть ли строка в ответе захода: в итоге или в комментарии, отданном инструменту.
+
+    Комментарий взгляда пишет инструмент, а итог захода бывает пересказом —
+    поэтому смотрится и то и другое, а не только итог. Из вызовов — только
+    инструменты комментария (`ANSWER_TOOLS`): `grep "ВЕРДИКТ:"` строку называет,
+    но ответом не является.
+    """
+    texts = [str(one.get(RESULT) or "") for one in messages if one.get("type") == RESULT]
+    texts += [
+        json.dumps(call.get("input"), ensure_ascii=False)
+        for call in tool_calls(messages)
+        if str(call.get("name") or "").startswith(ANSWER_TOOLS)
+    ]
+    return any(line in text for text in texts)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает модель и отказ захода аннотациями проверки."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from", dest="source", required=True, help="файл захода действия")
     parser.add_argument("--call", default="агент", help="какой вызов агента — для подписи")
     parser.add_argument("--outcome", default="", help="исход шага вызова: success, failure, …")
+    parser.add_argument(
+        "--expect", default="", help="строка, без которой ответ захода не ответ (`ВЕРДИКТ:`)"
+    )
     args = parser.parse_args(argv)
 
     if not args.source and args.outcome == CANCELLED:
@@ -152,6 +257,20 @@ def main(argv: list[str] | None = None) -> int:
         # Текст отказа не режется: он короткий по природе («модель не найдена»),
         # а обрезанная причина — ровно то, из-за чего шаг заведён.
         print(f"::error::{args.call}: {REFUSED} — {failure}")
+    background = background_of(messages)
+    denials = denials_of(messages)
+    if background:
+        print(f"::notice::{args.call}: увёл в фон — " + "; ".join(background))
+    if denials:
+        print(f"::notice::{args.call}: отказы разрешений — " + "; ".join(denials))
+    if failure is None and args.expect and not says(messages, args.expect):
+        causes = [f"в фоне: {len(background)}"] if background else []
+        causes += [f"отказов разрешений: {len(denials)}"] if denials else []
+        print(
+            f"::warning::{args.call}: {NO_VERDICT} — строки «{args.expect}» нет ни в итоге, "
+            "ни в комментарии"
+            + (f" ({', '.join(causes)} — команды в соседних аннотациях)" if causes else "")
+        )
     return EXIT_OK
 
 
