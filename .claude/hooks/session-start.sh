@@ -50,8 +50,13 @@ cd "$CLAUDE_PROJECT_DIR" || { warn "нет каталога проекта"; exi
 # стража толчка (#1058). Его сверяет с `requires-python`
 # `tests/test_session_start.py`, а на старте — сам хук, прочитав планку. Нет
 # файла — предупреждение и выход 0, как у всякого сбоя старта.
+unset want  # не из окружения окна: число только из floor.sh
 [ -r "$here/floor.sh" ] || { warn "нет $here/floor.sh — число планки взять неоткуда"; exit 0; }
 . "$here/floor.sh"
+# ПУСТАЯ ПЛАНКА — СВОЯ ПРИЧИНА, КАК У ОБЁРТОК (взгляд на #1518, 195). Файл есть,
+# но `want` не задаёт: под `set -u` хук падал бы ошибкой разбора, а без него
+# ставил бы `uv python install ""` и винил интерпретатор.
+[ -n "${want:-}" ] || { warn "$here/floor.sh не задаёт want — число планки взять неоткуда"; exit 0; }
 
 if ! command -v "python$want" >/dev/null 2>&1; then
   { python3.12 -m venv /opt/uv \
