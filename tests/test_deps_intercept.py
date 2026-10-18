@@ -779,6 +779,23 @@ def test_a_branch_named_like_a_tag_returns_as_a_branch(stand: Path) -> None:
     assert git(stand, "symbolic-ref", "--quiet", "HEAD").strip() == start
 
 
+def test_a_failed_return_names_the_branch_as_restore_does(
+    stand: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ возврата называет ветку, как `restore`, — без `refs/heads/` (взгляд на #1513)."""
+    git(stand, "tag", "v2.0.0")
+    on_own_branch(stand)
+
+    def broken(root: Path, start: str) -> None:
+        raise module.NotRun("сломано")
+
+    monkeypatch.setattr(module, "restore", broken)
+    said = module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0", "--apply"])
+    assert said == module.EXIT_BROKEN
+    err = capsys.readouterr().err
+    assert "дерево на feature не возвращено" in err and module.BRANCH_REF not in err, err
+
+
 def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Строки уже на версии сигнала — причина «уже поднято», а не «строк нет» (взгляд на #1397)."""
     fake_platform(monkeypatch, [])

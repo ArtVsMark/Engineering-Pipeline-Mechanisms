@@ -469,7 +469,7 @@ def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool, token: str = ""
 
 
 #: Начало полного имени ветки: место дерева на ветке пишется так, а не коротко.
-BRANCH_REF: Final = "refs/heads/"
+BRANCH_REF: Final = gitcall.BRANCH_REF
 
 
 def spot(root: Path) -> str:
@@ -573,7 +573,9 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 restore(args.root, start)
             except (NotRun, OSError) as exc:
-                failed = failed or f"дерево на {start} не возвращено: {exc}"
+                failed = failed or (
+                    f"дерево на {start.removeprefix(BRANCH_REF)} не возвращено: {exc}"
+                )
         if failed:
             print(f"не отработал: {failed}", file=sys.stderr)
             return EXIT_BROKEN

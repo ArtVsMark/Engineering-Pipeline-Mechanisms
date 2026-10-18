@@ -509,11 +509,11 @@ def test_the_head_release_tag_is_the_only_release_one(
         module.head_release_tag(tmp_path / "repo")
 
 
-def test_the_head_number_is_printed_or_refused(run_script: RunScript, tmp_path: Path) -> None:
-    """Шаг выпуска получает номер строкой, а отказ — кодом 2 с причиной (039)."""
+def test_the_head_tag_is_printed_or_refused(run_script: RunScript, tmp_path: Path) -> None:
+    """Шаг выпуска получает тег строкой, а отказ — кодом 2 с причиной (039)."""
     _repo_with_tags(tmp_path / "repo", ["a-checkpoint", "v1.2.3"])
-    run = run_script("version.py", "--head-number", cwd=tmp_path / "repo")
-    assert (run.code, run.out.strip()) == (0, "1.2.3"), run.text
+    run = run_script("version.py", "--head-tag", cwd=tmp_path / "repo")
+    assert (run.code, run.out.strip()) == (0, "v1.2.3"), run.text
     _repo_with_tags(tmp_path / "bare", [])
     run = run_script("version.py", "--head-tag", cwd=tmp_path / "bare")
     assert run.code == 2 and "нет тега выпуска" in run.text, run.text
@@ -537,8 +537,7 @@ def test_the_release_step_asks_the_tag_here() -> None:
     assert any("version.py --head-tag" in line for line in code)
 
 
-@pytest.mark.parametrize("head", ["--head-tag", "--head-number"])
-def test_the_check_and_the_head_tag_do_not_go_together(run_script: RunScript, head: str) -> None:
-    """`--check` с `--head-*` — отказ разбора, а не тег с кодом 0 без сверки (`c699441`)."""
-    run = run_script("version.py", "--check", head)
+def test_the_check_and_the_head_tag_do_not_go_together(run_script: RunScript) -> None:
+    """`--check` с `--head-tag` — отказ разбора, а не тег с кодом 0 без сверки (`c699441`)."""
+    run = run_script("version.py", "--check", "--head-tag")
     assert run.code == 2 and "not allowed with" in run.text, run.text

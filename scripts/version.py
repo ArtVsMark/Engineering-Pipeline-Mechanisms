@@ -39,7 +39,7 @@
 неприменима — нет `CONTRACT_VERSION`, а отсутствие выпускных тегов доказано
 (`absence`), и причина напечатана · ``2`` шаг не отработал, в том числе вне
 репозитория · ``3`` посчитана неполно, разошлась с объявленной или отсутствие
-тегов не доказано — сказано, а не скрыто. С `--head-tag` и `--head-number`
+тегов не доказано — сказано, а не скрыто. С `--head-tag`
 ``0`` — тег выпуска на HEAD напечатан, ``2`` — его нет, их несколько или git не
 ответил, и причина — в `stderr`.
 """
@@ -384,7 +384,6 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="сверить объявленное с тегом")
     mode.add_argument("--head-tag", action="store_true", help="тег выпуска на HEAD (vX.Y.Z)")
-    mode.add_argument("--head-number", action="store_true", help="номер выпуска на HEAD (X.Y.Z)")
     mode.add_argument(
         "--last-tag", action="store_true", help="последний выпущенный тег из достижимых (vX.Y.Z)"
     )
@@ -401,15 +400,16 @@ def main(argv: list[str] | None = None) -> int:
         print(last)
         return EXIT_OK
 
-    # ТЕГ ВЫПУСКА НА HEAD — ДЛЯ ШАГА ВЫПУСКА (#1464): толчок, страница и подъём
-    # шагов спрашивают его здесь, а не разбирают вывод git оболочкой.
-    if args.head_tag or args.head_number:
+    # ТЕГ ВЫПУСКА НА HEAD — ДЛЯ ШАГА ВЫПУСКА (#1464): толчок и выкачка тега для
+    # хвоста спрашивают его здесь, а не разбирают вывод git оболочкой. Номер без
+    # `v` шагам хвоста отдаёт выход шага, а не этот режим (взгляд на #1513).
+    if args.head_tag:
         try:
             tag = head_release_tag()
         except NotRun as exc:
             print(exc, file=sys.stderr)
             return EXIT_BROKEN
-        print(bare(tag) if args.head_number else tag)
+        print(tag)
         return EXIT_OK
 
     # СВЕРКЕ НЕЧЕГО СВЕРЯТЬ, ЕСЛИ ПРОЕКТ НЕ ВЕДЁТ ВЕРСИЮ ЭТИМ СПОСОБОМ (#1187,

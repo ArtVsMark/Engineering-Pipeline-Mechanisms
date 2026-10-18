@@ -546,12 +546,9 @@ def say_the_look_is_silenced(root: Path) -> None:
 def branch_now(root: Path) -> str:
     """Имя текущей ветки — из дерева, а не из памяти зовущего."""
     try:
-        said = gitcall.output(
-            ["rev-parse", "--abbrev-ref", "HEAD"], NotRun, cwd=str(root) if root else None
-        )
+        return gitcall.branch(NotRun, cwd=str(root) if root else None)
     except NotRun as exc:
         raise NotRun(f"ветка не прочитана: {exc}") from exc
-    return said.strip()
 
 
 def push_branch(root: Path) -> int:

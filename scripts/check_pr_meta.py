@@ -286,7 +286,7 @@ def judge_local(base: str) -> int:
     """
     try:
         messages = local_messages(base)
-        branch = gitcall.output(["rev-parse", "--abbrev-ref", "HEAD"], NotRun).strip()
+        branch = gitcall.branch(NotRun)
         subjects = [squash_body.subject_of(one) for one in messages]
         coming = (
             agent_pr.describe_from(subjects, messages)

@@ -602,13 +602,18 @@ def head() -> tuple[str, str]:
 
     Отсоединённая голова даёт `HEAD` и код 0 — это не отказ, и сюда не
     попадает.
+
+    ПОЛНЫМ ИМЕНЕМ, А НЕ `--abbrev-ref` (взгляд на #1513): при одноимённом теге
+    короткое имя — `heads/<имя>`, и толчок в свою ветку отвергался как толчок
+    мимо неё. Та же форма, что у `gitcall.branch`; копия своя — хук дерево не
+    импортирует (046).
     """
-    said = git("rev-parse", "--abbrev-ref", "HEAD")
+    said = git("rev-parse", "--symbolic-full-name", "HEAD")
     if isinstance(said, str):
         return "", said
     if said.returncode != 0:
         return "", cut(said.stderr) or f"git rev-parse вернул {said.returncode}"
-    return said.stdout.strip(), ""
+    return said.stdout.strip().removeprefix(REF_PREFIX), ""
 
 
 def branch_of(target: str) -> str:
