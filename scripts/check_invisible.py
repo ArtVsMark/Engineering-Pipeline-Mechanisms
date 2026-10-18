@@ -9,13 +9,25 @@
 ([085](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/085-content-from-the-subject-is-untrusted-input-to-the-prompt.md)).
 Мы поставщик: подмена в нашем навыке или задании уехала бы ко всей семье.
 
-ЧТО СЧИТАЕТСЯ — КАТЕГОРИЯ, А НЕ ПЕРЕЧЕНЬ, КАК У КАТАЛОГА (его #873). Вся
-категория формата `Cf`, разделители и управляющие, знаки, которые рисуются
-пустотой (заполнители хангыля, соединитель графем U+034F и прочие из
-`BLANK`), и игнорируемые диапазоны Unicode, назначены они или нет
-(`IGNORABLE_RANGES`). Перечень кодовых точек устаревал бы с
-каждой версией Unicode и пропускал соседа — так прошёл U+061C (взгляд на
-#1437). Одно понимание с каталогом — по правилу семьи #1425.
+ЧТО СЧИТАЕТСЯ — СВОЙСТВА UNICODE, А НЕ ПЕРЕЧЕНЬ, КАК У КАТАЛОГА (его #873).
+Судятся: вся категория формата `Cf`; разделители строки и абзаца U+2028,
+U+2029 (`Zl`, `Zp`) и управляющие `Cc`, кроме табуляции, перевода строки и
+возврата каретки перед ним; все точки свойства `Default_Ignorable_Code_Point`,
+назначены они или нет, — заполнители хангыля, соединитель графем U+034F,
+скрытые гласные кхмерского U+17B4–U+17B5, неназначенные диапазоны и блок
+тегов целиком; сверх свойства — пустой знак Брайля U+2800. Редактор
+показывает всё это пустотой, а читатель режет по разделителям строку
+(взгляды на #1437 и #1444). Перечень кодовых точек устаревал бы с каждой
+версией Unicode и пропускал соседа — так прошёл U+061C (взгляд на #1437).
+Одно понимание с каталогом — по правилу семьи #1425.
+
+ДАННЫЕ — ВЫДЕРЖКИ UNICODE 16.0.0 В `scripts/unicode/`, А НЕ ПАМЯТЬ (210). По
+месту «что считается» было три находки подряд — список эмодзи, перечень
+вместо `Cf`, хангыль, — и каждая починка дописывала перечень рукой. Теперь
+игнорируемые точки, знаки эмодзи и пары вариантов читаются из файлов
+стандарта: адрес источника, хеш и команда выдержки — в шапке каждого. Модуль
+`unicodedata` этих свойств не отдаёт. Совпадение версии данных с базой
+интерпретатора держит тест.
 
 ПРЕДМЕТ — ТЕКСТ-УКАЗАНИЕ: `.md`, `.yml`, `.yaml`, `.json` дерева без
 игнорируемых, включая файлы вне индекса — предполётная видит их до толчка.
@@ -24,22 +36,43 @@
 код не судится. Замер 16.10.2026 по пяти проектам семьи: все места в коде
 законны — фикстуры гейта каталога и `\\ufeff` в коде грейдера, снимающем
 метку порядка байтов. Гейт по всему дереву покраснел бы у двух проектов из
-пяти на исправном (107).
+пяти на исправном (107). Но текст заданий взгляда живёт и в строках `.py` —
+`review_map.MARK_SAID` уходит агенту дословно, — и этот сосед у себя судится:
+тест `test_our_code_carries_no_invisible` обходит `.py` нашего дерева тем же
+`hidden`. Замер 18.10.2026 тем же `hidden` по `git ls-tree origin/main`: в
+`.py` нашего дерева находок 0, у каталога 20 — все в тестах, у грейдера 6 —
+четыре в коде снятия BOM, две в тестах, у Usage-Token 0.
 
 ЗАКОННОЕ НЕ КРАСНЕЕТ:
 
 * метка порядка байтов первым символом файла — её ставят редакторы;
-* соединитель нулевой ширины между двумя знаками эмодзи — составной эмодзи;
-* ОДИН селектор варианта после знака, у которого варианты бывают: эмодзи,
-  `0-9 # * © ® ™ ‼ ⁉ ℹ` и иероглиф. Селектор после буквы или два подряд —
-  канал для скрытых данных, и он краснеет;
+* возврат каретки перед переводом строки — пара CRLF. Одиночный возвращает
+  печать к началу строки, и «видимое\\rскрытое» терминал выводит поверх;
+* соединитель нулевой ширины внутри составного эмодзи (UAX #29, правило
+  GB11): слева знак `Extended_Pictographic`, его селектор U+FE0F или тон кожи
+  (`Emoji_Modifier`), справа — знак `Extended_Pictographic`. Стрелка, буква и
+  цифра так не соединяются: «→», U+200D, «→» — скрытый разрыв;
+* ОДИН селектор варианта после основы его рода: стандартный и эмодзи
+  (U+FE00–U+FE0F) — только в паре из `StandardizedVariants.txt` или
+  `emoji-variation-sequences.txt`; идеографический (U+E0100–U+E01EF) — после
+  иероглифа; монгольский свободный (U+180B–U+180D, U+180F) — после
+  монгольской буквы. Селектор после чужой основы или два подряд — канал для
+  скрытых данных, и он краснеет;
 * символы-теги внутри флага-эмодзи из перечня RGI — Англии, Шотландии и
   Уэльса (`RGI_TAG_FLAGS`). Иная строка тегами — скрытая, даже внутри флага.
 
-РАЗДЕЛИТЕЛИ И УПРАВЛЯЮЩИЕ судятся наравне с `Cf`: U+2028, U+2029 (`Zl`, `Zp`)
-и управляющие `Cc`, кроме табуляции, перевода строки и возврата каретки.
-Редактор показывает их пустотой, а читатель режет по ним строку (взгляды на
-#1437 и #1444).
+ГРАНИЦЫ, И ОНИ НАЗВАНЫ.
+
+* Идеографический селектор сверяется с основой по роду, а не по реестру IVD:
+  реестр в данных не лежит, и селектор после иероглифа без зарегистрированной
+  пары пройдёт.
+* Монгольский — тоже по роду: `StandardizedVariants.txt` называет лишь часть
+  монгольских пар (замер 18.10.2026 по выдержке: U+180B — 40, U+180C — 14,
+  U+180D — 6, U+180F — 0), и точные пары краснили бы законный монгольский
+  текст.
+* Данные — версии 16.0.0. Интерпретатор с базой новее знает знаки, которых
+  выдержка не знает: соединитель после нового эмодзи покраснеет, пока выдержки
+  не подняты. Об этом и говорит тест версии.
 
 Исходы (правило 039): ``0`` чисто · ``1`` найден невидимый символ ·
 ``2`` гейт не отработал.
@@ -48,6 +81,8 @@
 import argparse
 import sys
 import unicodedata
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Final
 
@@ -64,30 +99,33 @@ JUDGED: Final = frozenset({".md", ".yml", ".yaml", ".json"})
 BOM: Final = "\ufeff"
 #: Соединитель нулевой ширины: законен только внутри составного эмодзи.
 ZWJ: Final = "\u200d"
-#: Рисуются пустотой вне судимых категорий. ИСТОЧНИК — СВОЙСТВО UNICODE, А НЕ
-#: ДОГАДКА (взгляды на #1437 и #1444, правило 210): это `Default_Ignorable_Code_Point`
-#: из DerivedCoreProperties.txt (Unicode 16.0) за вычетом того, что гейт судит
-#: иначе, — категории `Cf`, селекторов вариантов и диапазонов
-#: (`IGNORABLE_RANGES` ниже).
-#: Модуль `unicodedata` этого свойства не отдаёт, поэтому остаток выписан;
-#: остаток — заполнители хангыля, соединитель графем U+034F и скрытые гласные
-#: кхмерского U+17B4–U+17B5. Сверх свойства — пустой знак Брайля U+2800:
-#: он не игнорируемый, но рисуется пустотой (`36f8b72`).
-BLANK: Final = frozenset(
-    chr(one) for one in (0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFFA0, 0x2800)
+#: Данные Unicode, из которых выводится, что невидимо и что законно, — почему
+#: данные, а не перечень, сказано в разделе «ДАННЫЕ» докстроки модуля.
+UNICODE: Final = Path(__file__).resolve().parent / "unicode"
+#: Версия данных; совпадение с базой интерпретатора держит тест.
+UNICODE_VERSION: Final = "16.0.0"
+#: Откуда взяты данные: копия базы консорциума в его же репозитории.
+UNICODE_SOURCE: Final = (
+    "https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/ucd/"
+    + UNICODE_VERSION
 )
-#: Диапазоны `Default_Ignorable_Code_Point` (Unicode 16.0) с неназначенными
-#: точками. Категория `Cn` целиком не судится — знаки новее Python были бы
-#: ложной краснотой, — но эти диапазоны по стандарту рисуются пустотой и при
-#: будущих назначениях (поздний взгляд на #1444, `e0b7e8a`). Поэтому судится
-#: ДИАПАЗОН, а не категория: точка, которую новая база Unicode назначит не
-#: `Cf`, не выйдет из-под гейта (взгляд на #1447). Селекторы вариантов в них
-#: судятся своим правилом, теги — как `Cf`.
-IGNORABLE_RANGES: Final[tuple[tuple[int, int], ...]] = (
-    (0x2065, 0x2065),
-    (0xFFF0, 0xFFF8),
-    (0xE0000, 0xE0FFF),
-)
+#: Дословные копии файлов стандарта — адрес и хеш. Выдержки называют источник
+#: своей шапкой, а копия шапки не имеет; совпадение хеша держит тест, и файл
+#: рукой не правится.
+VERBATIM: Final = {
+    "emoji-variation-sequences.txt": (
+        f"{UNICODE_SOURCE}/emoji/emoji-variation-sequences.txt",
+        "71d93ec015011371a027ba2bc0a63155d381c6e0b94a586c1a88a49400cd6864",
+    ),
+    "StandardizedVariants.txt": (
+        f"{UNICODE_SOURCE}/StandardizedVariants.txt",
+        "36e799b2c5d902af094b4dd2cb60622bffc079824bfd0bf62e3a636d698b3fb5",
+    ),
+}
+#: Пустой знак Брайля: свойства «рисуется пустотой» у Unicode нет, а
+#: `Default_Ignorable_Code_Point` его не включает — это пустой глиф, а не
+#: игнорируемая точка (`36f8b72`). Единственный знак сверх данных.
+BRAILLE_BLANK: Final = "\u2800"
 #: Категории, которые судятся целиком: формат, разделители строки и абзаца и
 #: управляющие. Из управляющих (`Cc`) законны только табуляция и перевод строки
 #: с возвратом каретки; NEL U+0085, `\v`, `\f` и U+001C–U+001E режут строку
@@ -99,8 +137,13 @@ CATEGORIES: Final = {
     "Zp": "разделитель абзаца — перенос, которого редактор не показывает",
     "Cc": "управляющий символ — редактор его не показывает",
 }
-#: Управляющие, которые законны: табуляция, перевод строки, возврат каретки.
-PLAIN_CONTROLS: Final = frozenset("\t\n\r")
+#: Управляющие, которые законны: табуляция и перевод строки. Возврат каретки
+#: законен только перед переводом строки — в паре CRLF.
+PLAIN_CONTROLS: Final = frozenset("\t\n")
+#: Возврат каретки: одиночный возвращает печать к началу строки, и терминал
+#: выводит следующее поверх — «видимое\rскрытое» человек видит иначе, чем
+#: читает агент (взгляд на #1444).
+CR: Final = "\r"
 #: Флаг-эмодзи с тегами (UTS #51): основа, теги спецификации и завершающий тег.
 FLAG: Final = "\U0001f3f4"
 CANCEL_TAG: Final = "\U000e007f"
@@ -108,13 +151,18 @@ CANCEL_TAG: Final = "\U000e007f"
 #: любая цепочка тегов: тегами пишется любой ASCII-текст, и «флаг» с
 #: произвольной строкой внутри был бы той же скрытой строкой (взгляд на #1444).
 RGI_TAG_FLAGS: Final = frozenset({"gbeng", "gbsct", "gbwls"})
-#: Знаки вне блоков эмодзи, у которых селектор варианта законен.
-VARIED: Final = frozenset("0123456789#*\u00a9\u00ae\u2122\u203c\u2049\u2139")
-#: Селекторы вариантов — и монгольские свободные селекторы U+180B–U+180D, U+180F
-#: (тоже `Default_Ignorable_Code_Point`): законен один после монгольской буквы.
+#: Селекторы вариантов по родам — свойство `Variation_Selector` (PropList.txt).
+#: Род решает, после какой основы селектор законен (взгляд на #1444): свободные
+#: монгольские — после монгольской буквы, идеографические — после иероглифа,
+#: стандартные — только в паре из данных Unicode. Монгольский род — диапазон
+#: U+180B–U+180F, но U+180E внутри него — разделитель гласных `Cf`: селектором
+#: его не считает `SELECTORS`, и судится он как формат.
+MONGOLIAN_SELECTORS: Final = (0x180B, 0x180F)
+IDEOGRAPHIC_SELECTORS: Final = (0xE0100, 0xE01EF)
+STANDARD_SELECTORS: Final = (0xFE00, 0xFE0F)
 SELECTORS: Final[tuple[tuple[int, int], ...]] = (
-    (0xFE00, 0xFE0F),
-    (0xE0100, 0xE01EF),
+    STANDARD_SELECTORS,
+    IDEOGRAPHIC_SELECTORS,
     (0x180B, 0x180D),
     (0x180F, 0x180F),
 )
@@ -124,38 +172,118 @@ class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «чисто»."""
 
 
+@dataclass(frozen=True)
+class Tables:
+    """Свойства Unicode, прочитанные из `UNICODE`."""
+
+    #: `Default_Ignorable_Code_Point` — назначенные и нет.
+    ignorable: frozenset[int]
+    #: `Extended_Pictographic`: между такими соединитель строит составной эмодзи.
+    pictographic: frozenset[int]
+    #: `Emoji_Modifier` — тон кожи: стоит между эмодзи и соединителем.
+    modifiers: frozenset[int]
+    #: Пары «основа, селектор» стандартных вариантов и вариантов эмодзи.
+    variants: frozenset[tuple[int, int]]
+
+
+def codes(field: str) -> range:
+    """Точки поля данных Unicode: `00AD` или `115F..1160`."""
+    low, _, high = field.strip().partition("..")
+    return range(int(low, 16), int(high or low, 16) + 1)
+
+
+def data_lines(name: str) -> list[list[str]]:
+    """Строки данных файла `UNICODE` — поля до комментария; отказ чтения — «не отработал»."""
+    try:
+        text = (UNICODE / name).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise NotRun(f"данные Unicode {name} не прочитаны: {exc}") from exc
+    rows = [line.split("#", 1)[0].split(";") for line in text.splitlines()]
+    return [[one.strip() for one in row] for row in rows if len(row) > 1]
+
+
+def property_codes(name: str, wanted: str) -> frozenset[int]:
+    """Точки свойства `wanted` из файла данных `name`."""
+    try:
+        return frozenset(
+            code for row in data_lines(name) if row[1] == wanted for code in codes(row[0])
+        )
+    except ValueError as exc:
+        raise NotRun(f"данные Unicode {name} не разобраны: {exc}") from exc
+
+
+def sequence_pairs(name: str) -> frozenset[tuple[int, int]]:
+    """Пары «основа, селектор» из файла последовательностей вариантов."""
+    try:
+        pairs = [row[0].split() for row in data_lines(name)]
+        return frozenset((int(base, 16), int(mark, 16)) for base, mark in pairs)
+    except ValueError as exc:
+        raise NotRun(f"данные Unicode {name} не разобраны: {exc}") from exc
+
+
+@cache
+def tables() -> Tables:
+    """Свойства Unicode из `UNICODE`, прочитанные один раз за прогон."""
+    return Tables(
+        ignorable=property_codes("default-ignorable.txt", "Default_Ignorable_Code_Point"),
+        pictographic=property_codes("pictographic.txt", "Extended_Pictographic"),
+        modifiers=property_codes("pictographic.txt", "Emoji_Modifier"),
+        variants=sequence_pairs("StandardizedVariants.txt")
+        | sequence_pairs("emoji-variation-sequences.txt"),
+    )
+
+
+def within(code: int, span: tuple[int, int]) -> bool:
+    """Точка лежит в диапазоне `span` включительно."""
+    return span[0] <= code <= span[1]
+
+
 def selector(char: str) -> bool:
     """Селектор варианта — из какого бы блока он ни был."""
-    code = ord(char)
-    return any(low <= code <= high for low, high in SELECTORS)
+    return any(within(ord(char), span) for span in SELECTORS)
 
 
 def emoji(char: str) -> bool:
-    """Знак эмодзи: между такими соединитель нулевой ширины строит составной."""
-    code = ord(char)
-    return code >= 0x1F000 or 0x2190 <= code <= 0x2BFF or selector(char)
+    """Знак `Extended_Pictographic`: между такими соединитель строит составной эмодзи."""
+    return ord(char) in tables().pictographic
 
 
-def varied(char: str) -> bool:
-    """Знак, у которого селектор варианта законен: эмодзи, иероглиф, монгольская буква, `VARIED`."""
-    name = unicodedata.name(char, "")
-    return (
-        (emoji(char) and not selector(char))
-        or char in VARIED
-        or name.startswith("CJK")
-        or name.startswith("MONGOLIAN LETTER")
-    )
+def joins(text: str, at: int) -> bool:
+    """Соединитель на месте `at` строит составной эмодзи (UAX #29, правило GB11).
+
+    Слева — эмодзи, за которым может стоять его тон кожи и селектор U+FE0F,
+    справа — эмодзи. Селектор и тон проходятся назад до самой основы: «1»,
+    U+FE0F, U+200D — не эмодзи слева. Стрелка, буква и цифра соединителем не
+    соединяются: «→», U+200D, «→» — скрытый разрыв.
+    """
+    spot = at - 1
+    if spot >= 0 and text[spot] == "\ufe0f":
+        spot -= 1
+    if spot >= 0 and ord(text[spot]) in tables().modifiers:
+        spot -= 1
+    after = at + 1
+    return spot >= 0 and after < len(text) and emoji(text[spot]) and emoji(text[after])
+
+
+def fits(base: str, mark: str) -> bool:
+    """Селектор `mark` законен после `base`: род селектора сверен с основой."""
+    code = ord(mark)
+    name = unicodedata.name(base, "")
+    if within(code, MONGOLIAN_SELECTORS):
+        return name.startswith("MONGOLIAN LETTER")
+    if within(code, IDEOGRAPHIC_SELECTORS):
+        return name.startswith("CJK UNIFIED IDEOGRAPH")
+    return (ord(base), code) in tables().variants
 
 
 def always(char: str) -> str:
     """Чем символ невидим, если он краснеет вне законных форм; иначе пусто."""
-    if char in BLANK:
+    if char == BRAILLE_BLANK:
         return "рисуется пустотой"
-    if char in PLAIN_CONTROLS:
+    if char in PLAIN_CONTROLS or char == CR:
         return ""
     category = unicodedata.category(char)
-    ignorable = any(low <= ord(char) <= high for low, high in IGNORABLE_RANGES)
-    if ignorable and category != "Cf" and not selector(char):
+    if ord(char) in tables().ignorable and category != "Cf" and not selector(char):
         return "игнорируемая точка Unicode — рисуется пустотой"
     if category in CATEGORIES:
         return CATEGORIES[category] or unicodedata.name(char, "символ формата без имени")
@@ -196,14 +324,15 @@ def hidden(text: str) -> list[tuple[int, int, str]]:
         said = always(char)
         if char == BOM:
             said = "" if at == 0 else "метка порядка байтов не в начале файла"
+        elif char == CR:
+            said = "" if after == "\n" else "возврат каретки без перевода строки — печать поверх"
         elif char == ZWJ:
-            ok = before and after and emoji(before) and emoji(after)
-            said = "" if ok else "соединитель нулевой ширины вне составного эмодзи"
+            said = "" if joins(text, at) else "соединитель нулевой ширины вне составного эмодзи"
         elif selector(char):
             if not before or selector(before):
                 said = "селекторы вариантов подряд"
-            elif not varied(before):
-                said = "селектор варианта после знака без вариантов"
+            elif not fits(before, char):
+                said = "селектор варианта, которого у этой основы нет"
         if said:
             found.append((line, column, f"U+{ord(char):04X} — {said}"))
     return found
@@ -225,7 +354,9 @@ def look(root: Path) -> list[str]:
         if path.suffix not in JUDGED or not path.is_file():
             continue
         try:
-            text = path.read_text(encoding="utf-8")
+            # Переводы строк — как в файле: чтение по умолчанию сводит `\r` и
+            # `\r\n` к `\n`, и одиночный возврат каретки не дошёл бы до разбора.
+            text = path.read_text(encoding="utf-8", newline="")
         except UnicodeDecodeError, OSError:
             continue
         said += [f"{name}:{line}:{column}: {what}" for line, column, what in hidden(text)]
