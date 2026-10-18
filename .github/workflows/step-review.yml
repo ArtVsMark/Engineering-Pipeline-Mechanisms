@@ -556,6 +556,11 @@ jobs:
             выше: `python3 -m pytest` и `python -m pytest` — разные разрешения. На этом
             взгляд уже оставался без прогона, разрешение имея.
 
+            ЗОВИ ЕЁ НА ПЕРЕДНЕМ ПЛАНЕ, НЕ В ФОНЕ. Заход неинтерактивный: вызов,
+            уведённый в фон, он не дождётся — следующего хода, где пришёл бы его
+            итог, не будет, и заход кончится без вердикта. Долгий набор
+            гони целиком и жди его здесь же.
+
             `check_version.py` судит объявленную версию контракта — файл
             `CONTRACT_VERSION` в корне дерева. У проекта без этого файла гейт отвечает
             «неприменимо» с причиной: это граница проекта, а не находка.
@@ -671,7 +676,7 @@ jobs:
         env:
           SAID: ${{ steps.look.outputs.execution_file }}
           OUTCOME: ${{ steps.look.outcome }}
-        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "взгляд" --outcome "$OUTCOME"
+        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "взгляд" --outcome "$OUTCOME" --expect "ВЕРДИКТ:"
 
   # ЗАПИСЬ В ЖИВУЮ ЗАДАЧУ — ОБЩИЙ РЕСУРС, И У НЕГО ОДИН ВЛАДЕЛЕЦ (149).
   #
@@ -1101,6 +1106,11 @@ jobs:
             выше: `python3 -m pytest` и `python -m pytest` — разные разрешения. На этом
             взгляд уже оставался без прогона, разрешение имея.
 
+            ЗОВИ ЕЁ НА ПЕРЕДНЕМ ПЛАНЕ, НЕ В ФОНЕ. Заход неинтерактивный: вызов,
+            уведённый в фон, он не дождётся — следующего хода, где пришёл бы его
+            итог, не будет, и заход кончится без строки `ПРЕМИСА:`. Долгий набор
+            гони целиком и жди его здесь же.
+
             Список здесь — НАМЕРЕННЫЙ ДУБЛЬ `claude_args` этого же шага, и подписан он
             как дубль (071): канонический список один, а тебе он не виден. Разъехаться
             им не даёт гейт `test_the_task_names_the_environments_limit`.
@@ -1163,7 +1173,7 @@ jobs:
         env:
           SAID: ${{ steps.refute.outputs.execution_file }}
           OUTCOME: ${{ steps.refute.outcome }}
-        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "верификатор" --outcome "$OUTCOME"
+        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "верификатор" --outcome "$OUTCOME" --expect "ПРЕМИСА:"
 
       - name: перенести ответ в изменение и в реестр
         if: steps.token.outputs.present == 'yes'
@@ -1574,6 +1584,11 @@ jobs:
             выше: `python3 -m pytest` и `python -m pytest` — разные разрешения. На этом
             взгляд уже оставался без прогона, разрешение имея.
 
+            ЗОВИ ЕЁ НА ПЕРЕДНЕМ ПЛАНЕ, НЕ В ФОНЕ. Заход неинтерактивный: вызов,
+            уведённый в фон, он не дождётся — следующего хода, где пришёл бы его
+            итог, не будет, и заход кончится без вердикта. Долгий набор
+            гони целиком и жди его здесь же.
+
             `check_version.py` судит объявленную версию контракта — файл
             `CONTRACT_VERSION` в корне дерева. У проекта без этого файла гейт отвечает
             «неприменимо» с причиной: это граница проекта, а не находка.
@@ -1668,7 +1683,7 @@ jobs:
         env:
           SAID: ${{ steps.late.outputs.execution_file }}
           OUTCOME: ${{ steps.late.outcome }}
-        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "поздний взгляд" --outcome "$OUTCOME"
+        run: python $MECHANISMS/scripts/agent_run.py --from "$SAID" --call "поздний взгляд" --outcome "$OUTCOME" --expect "ВЕРДИКТ:"
 
       # Ответ прогона живёт в файле и умирает вместе с прогоном. Механизм
       # переносит его в само изменение — туда же, куда кладёт ответ обычное
