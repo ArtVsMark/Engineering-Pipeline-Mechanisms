@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-17T08:23:11+00:00",
+  "updated": "2026-10-18T08:43:02+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -6249,6 +6249,334 @@
         }
       },
       "coverage": 93.5
+    },
+    "2026-10-18": {
+      "runs": {
+        "task-items": {
+          "runs": 5,
+          "red": 1,
+          "cancelled": 0,
+          "seconds": 167,
+          "timed": 5,
+          "red_jobs": {
+            "task-items / task-items": 1
+          },
+          "red_steps": {
+            "task-items / task-items · судьба задачи после слияния": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "main-red": {
+          "runs": 104,
+          "red": 0,
+          "cancelled": 2,
+          "seconds": 2206,
+          "timed": 104,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 82,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1615,
+          "timed": 82,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 169,
+          "red": 1,
+          "cancelled": 81,
+          "seconds": 3377,
+          "timed": 169,
+          "red_jobs": {
+            "automerge / automerge": 1
+          },
+          "red_steps": {
+            "automerge / automerge · двигать очередь": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "badges": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 2,
+          "seconds": 6166,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1243,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 84,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 260,
+          "timed": 84,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 10,
+          "seconds": 1949,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 8,
+          "seconds": 1896,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 178,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 83,
+          "red": 0,
+          "cancelled": 12,
+          "seconds": 3008,
+          "timed": 83,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 59,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 52,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 83,
+          "red": 1,
+          "cancelled": 53,
+          "seconds": 13520,
+          "timed": 83,
+          "red_jobs": {
+            "pr-meta / pr-meta": 1
+          },
+          "red_steps": {
+            "pr-meta / pr-meta · метки и связь с задачей": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "ci-complete": {
+          "runs": 79,
+          "red": 1,
+          "cancelled": 55,
+          "seconds": 12455,
+          "timed": 79,
+          "red_jobs": {
+            "ci-complete": 1
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 1
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 1
+          },
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "Гейты судят изменение от точки ветвления, а не от вершины базы (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 45,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 256,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 35,
+          "timed": 12,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейты судят изменение от точки ветвления, а не от вершины базы (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 998,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Несовместимый выпуск оповещает тех, кто взял наши шаги (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 49,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Окно contract у потребителя сверяется с версией позванного тега (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 51,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Несовместимый выпуск оповещает тех, кто взял наши шаги (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1612,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейты судят изменение от точки ветвления, а не от вершины базы": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2675,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Окно contract у потребителя сверяется с версией позванного тега": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 3524,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Несовместимый выпуск оповещает тех, кто взял наши шаги (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1696,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Несовместимый выпуск оповещает тех, кто взял наши шаги": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1213,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Заход взгляда без вердикта называется своим состоянием, причины — аннотациями (+2)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 58,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 93.8
     }
   }
 }
