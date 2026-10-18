@@ -57,6 +57,12 @@ RECORD = (
         ("Держит 162 (162-a-gap-asks-the-neighbours-first.md): приём взят.\n", False),
         ("Спросили семью/соседа (162): ни у кого нет.\n", True),
         (f"Спросили семью — {REL} — ни у кого нет.\n", True),
+        # Строгое правило (build-a-gate, 3а): ответ — только русскими словами,
+        # и латиница не бывает ответом ни в какой форме адреса (взгляд на #1496).
+        ("Держит ([162](#162-a-gap-asks-the-neighbours-first)): приём взят.\n", False),
+        ("Держит 162-a-gap-asks-the-neighbours-first: приём взят.\n", False),
+        ("Asked the family (162): nobody has it.\n", False),
+        ("Asked family/neighbours (162): no one has it.\n", False),
     ],
     ids=[
         "наш-абзац",
@@ -82,6 +88,10 @@ RECORD = (
         "голое-имя-файла",
         "слова-через-косую",
         "номер-в-относительном-пути",
+        "якорь",
+        "голый-слаг",
+        "по-английски",
+        "по-английски-через-косую",
     ],
 )
 def test_a_record_names_the_rule_whom_and_what(text: str, said: bool) -> None:
