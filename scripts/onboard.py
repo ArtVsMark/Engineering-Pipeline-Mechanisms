@@ -302,10 +302,16 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
     его из джобов `ci.yml` в заготовке и из пробы передачи. Управляющий механизм
     — шаг, которого `ci.yml` не зовёт, а зовёт ровно один свой прогон. Два своих
     прогона у одного шага — неоднозначность, и это отказ, а не выбор первого.
+
+    ПРОГОН ЧИТАЕТСЯ ПОД ОБОИМИ РАСШИРЕНИЯМИ, как его читает площадка (находка
+    `e8e7fb3`, правило 195). Двойник признан у всех дверей захода (`standing`),
+    а здесь прогон искался только как `*.yml`, и `ci.yaml` не был бы `ci.yml`:
+    свой прогон под `.yaml` выпал бы из поиска вызывающего молча.
     """
     wanted = set(names)
     callers: dict[str, list[Path]] = {}
-    for flow in sorted((root / paths.WORKFLOWS).glob("*.yml")):
+    entries = (root / paths.WORKFLOWS).glob("*")
+    for flow in sorted(one for one in entries if one.suffix in YAML_TWINS):
         if flow.name.startswith(STEP_PREFIX):
             continue
         try:
@@ -318,7 +324,7 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
                 callers[name].append(flow)
     found: dict[str, Path] = {}
     for name, flows in callers.items():
-        if any(flow.name == PIPELINE_FLOW for flow in flows):
+        if any(flow.with_suffix(".yml").name == PIPELINE_FLOW for flow in flows):
             continue
         if len(flows) > 1:
             raise NotRun(
@@ -1337,7 +1343,7 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
         update.write[where] = lifted
     for one in sorted(set(pipeline) - called):
         update.notes.append(
-            f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
+            f"новый шаг `{one}` — джоб для вашего `{where.name}`:\n" + caller(one, repo, pin)
         )
     for one in sorted(called - set(pipeline)):
         update.notes.append(

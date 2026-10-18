@@ -267,6 +267,19 @@ def test_two_own_callers_are_a_refusal(tmp_path: Path) -> None:
         module.own_callers(root, module.steps(root))
 
 
+def test_a_yaml_run_is_read_as_a_run(tmp_path: Path) -> None:
+    """Свой прогон под `.yaml` — тот же прогон, а `ci.yaml` — тот же `ci.yml` (`e8e7fb3`).
+
+    Обе половины: вызывающий под `.yaml` найден, а `ci.yaml`, зовущий шаг
+    конвейера, вызывающим не считается — как и `ci.yml`.
+    """
+    root = tree(tmp_path, **{"step-план": MANAGED, "step-пример": MARKED})
+    flows = root / ".github" / "workflows"
+    (flows / "план.yaml").write_text(OWN_CALLER, encoding="utf-8")
+    (flows / "ci.yaml").write_text(CI_CALLER, encoding="utf-8")
+    assert module.own_callers(root, module.steps(root)) == {"план": flows / "план.yaml"}
+
+
 def test_a_call_the_kit_cannot_rewrite_is_a_refusal(tmp_path: Path) -> None:
     """Вызов в кавычках разбор признаёт, а подмена бы пропустила — отказ, а не внутренний путь."""
     quoted = OWN_CALLER.replace(
@@ -991,13 +1004,21 @@ def test_a_yaml_twin_of_a_run_takes_its_place_at_both_doors(tmp_path: Path) -> N
     """
     flows = tmp_path / ".github" / "workflows"
     flows.mkdir(parents=True)
-    (flows / "ci.yaml").write_text("своё", encoding="utf-8")
+    # Двойник с нашим вызовом на старом теге: обновлению есть что править, и
+    # «не положило рядом» отличается от «промолчало» (находка `52e29e5`).
+    mine = "name: ci\non: [push]\njobs:\n" + module.caller("а", "o/r", "v8.0.0")
+    (flows / "ci.yaml").write_text(mine, encoding="utf-8")
     run = module.paths.WORKFLOWS / module.PIPELINE_FLOW
     assert module.standing(tmp_path, run) == run.with_suffix(".yaml")
     assert module.occupied(tmp_path, {run: "заготовка"}) == [run]
     plan = module.Update()
-    module.plan_ci(plan, tmp_path, ["а"], "o/r", "v9.0.0")
+    module.plan_ci(plan, tmp_path, ["а", "б"], "o/r", "v9.0.0")
     assert run not in plan.write, "обновление положило бы ci.yml рядом с ci.yaml"
+    assert "@v9.0.0" in plan.write[run.with_suffix(".yaml")], (
+        "двойник не поднят — обновление молчит"
+    )
+    # Заметка о новом шаге называет файл, который у потребителя есть (`a137a27`).
+    assert any("вашего `ci.yaml`" in note for note in plan.notes), plan.notes
 
 
 def test_a_twin_of_our_own_data_takes_no_place(tmp_path: Path) -> None:
