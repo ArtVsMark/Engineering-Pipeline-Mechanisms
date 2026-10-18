@@ -9,7 +9,7 @@
   "rules": {
     "001": {
       "paths.SOURCES": "tests/test_ghrest.py",
-      ".claude/hooks": "исключено: хуки окна к API площадки не ходят — страж толчка спрашивает только локальный git (rev-parse, config), хук старта ходит в PyPI; grep -cE 'graphql|api\\.github|urllib|requests|\\bgh\\b' по .claude/hooks/* — 0 во всех четырёх файлах (без границы слова «gh» ловит «preflight» в session-start.sh — взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
+      ".claude/hooks": "исключено: хуки окна к API площадки не ходят — страж толчка спрашивает только локальный git (rev-parse, config), хук старта ходит в PyPI, журнал навыков пишет только свой файл; grep -cE 'graphql|api\\.github|urllib|requests|\\bgh\\b' по .claude/hooks/* — 0 во всех шести файлах (замер 17.10.2026) (без границы слова «gh» ловит «preflight» в session-start.sh — взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
       ".github": "исключено: шаги прогонов к API площадки не обращаются — grep -nE 'gh (api|pr|issue|run|release|workflow|label|repo)|graphql|api.github.com|GITHUB_API_URL|github-script' по .github/workflows/*.yml и .github/actions/*/action.yml — 0; к площадке ходит код scripts/ через packages/transport/ghrest.py (его судит tests/test_ghrest.py), а curl в badges.yml:128 и step-facts.yml:267 качает файлы raw.githubusercontent.com и выпусков, не API"
     },
     "016": {
@@ -25,12 +25,12 @@
         "гейт": "tests/test_outcomes_run.py",
         "признак": "with_outcomes"
       },
-      ".claude/hooks": "исключено: хук отвечает площадке кодом 0 или 2, третьего исхода у контракта хука нет — страж сводит «не проверил» к отказу 2 с причиной (tests/test_push_guard.py::test_a_push_without_git_is_refused_through_main), хук старта на всяком отказе печатает предупреждение с названным шагом и выходит 0; трассу вместо отказа у вызова git судит tests/test_git_refuses.py, и хуки у него в охвате по умолчанию обходчика (взгляд на #1462)",
+      ".claude/hooks": "исключено: у контракта хука нет трёх исходов гейта — 0, 2 и прочий код как неблокирующая ошибка; страж сводит «не проверил» к отказу 2 с причиной (tests/test_push_guard.py::test_a_push_without_git_is_refused_through_main), хук старта на всяком отказе печатает предупреждение с названным шагом и выходит 0, журнал навыков выходит 0, записав строку, и 1 с причиной, если строка не записана (tests/test_skill_log.py); трассу вместо отказа у вызова git судит tests/test_git_refuses.py, и хуки у него в охвате по умолчанию обходчика (взгляд на #1462)",
       ".github": "исключено: исход работы прогона — её цвет; коды механизма шаг разбирает списком разрешённого `case \"$rc\"` (tests/test_review_safety.py::test_exit_codes_are_read_as_an_allowlist, все .github/workflows/*.yml), а три исхода различает сам механизм"
     },
     "045": {
       "paths.SOURCES": "tests/test_dry_run_says_so.py",
-      ".claude/hooks": "исключено: пробного режима у хуков окна нет (grep -ci dry .claude/hooks/* — 0), а режим без интерпретатора планки не ослаблен молча: страж закрывает толчок кодом 2 с причиной (tests/test_push_guard.py::test_without_the_floor_interpreter_a_push_is_refused), хук старта на каждом отказе печатает «старт окна: … — окно работает без этого»",
+      ".claude/hooks": "исключено: пробного режима у хуков окна нет (grep -ci dry .claude/hooks/* — 0), а режим без интерпретатора планки не ослаблен молча: страж закрывает толчок кодом 2 с причиной (tests/test_push_guard.py::test_without_the_floor_interpreter_a_push_is_refused), хук старта на каждом отказе печатает «старт окна: … — окно работает без этого», журнал навыков без интерпретатора планки и на отказе записи выходит 1 — площадка показывает причину человеку, — а вызов с непрочитанным именем пишет строкой без имени (tests/test_skill_log.py)",
       ".github": "не построено: тихий запасной путь шага прогона (continue-on-error) по дереву не судится — замер 17.10.2026 разбором YAML (шаг с continue-on-error: true, в чьём run нет ::warning/::error/::notice; разовый разбор окна, в дерево не положен — признак назван здесь же): шагов 30, без аннотации в своём run 12 — 9 вызовов агента и их разбор (отказ называет scripts/agent_run.py, держит tests/test_review_safety.py::test_every_agent_call_names_its_model_and_its_failure), 2 чужих действия в step-facts.yml («взять входы проекта», «значок проекта — действием каталога»; исход передан следующему шагу как GIVEN и OUTCOME), 1 ворота step-review.yml «дождаться зелёной головы» (отказ look_waits.py открывает взгляд: run=yes); подтверждённо молчащих 0, разобрано глазом"
     },
     "100": {
@@ -51,7 +51,7 @@
         "гейт": "tests/test_third_outcome.py",
         "признак": "WITHOUT_INPUT"
       },
-      ".claude/hooks": "исключено: хук отвечает площадке кодом 0 или 2, третьего исхода у контракта хука нет; отказ стража «не проверил» предмет называет («сторож не проверил, не слита ли ветка «X», — git … не ответил за N с»)",
+      ".claude/hooks": "исключено: у контракта хука нет трёх исходов гейта — 0, 2 и прочий код как неблокирующая ошибка; отказ стража «не проверил» предмет называет («сторож не проверил, не слита ли ветка «X», — git … не ответил за N с»), журнал навыков — путь журнала и причину («журнал навыков: <путь> не записан — …»)",
       ".github": "не построено: предмет в аннотации третьего исхода шага не судится — замер 17.10.2026 предикатом SUBJECT из tests/test_third_outcome.py по строкам ::warning/::error с «не отработал|не прочитан|не скачал|не собран|не заведен|не сверен» (разовый разбор окна, в дерево не положен — признак назван здесь же): аннотаций 42, без предмета по SUBJECT 37 — но большинство несёт предмет прозой или подстановкой вывода механизма (${said}, ${reason}), то есть предикат здесь не годен по той же причине, по которой предикат по дереву отвергнут в ответе 158 (59 из 196); соседний tests/test_steps_speak_outward.py (142) требует причину только у аннотаций, называющих код"
     },
     "159": {
@@ -66,7 +66,7 @@
     },
     "167": {
       "paths.SOURCES": "исключено: правило об именах переменных оболочки, а paths.SOURCES — Python: code_files берёт *.py, файлов *.sh в scripts/ и packages/transport/ — 0 (find)",
-      ".claude/hooks": "не построено: оболочечные хуки (floor.sh, push_guard.sh, session-start.sh) на латиницу имён не сверяются — tests/test_source_hygiene.py::test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 17.10.2026 тем же SHELL_ASSIGN_RE по .claude/hooks/*.sh: присваиваний 10, не ASCII 0",
+      ".claude/hooks": "не построено: оболочечные хуки (floor.sh, push_guard.sh, session-start.sh, skill_log.sh) на латиницу имён не сверяются — tests/test_source_hygiene.py::test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 17.10.2026 тем же SHELL_ASSIGN_RE по .claude/hooks/*.sh: присваиваний 11, не ASCII 0",
       ".github": "tests/test_source_hygiene.py"
     },
     "176": {
@@ -79,7 +79,7 @@
         "гейт": "scripts/check_reached_by_work.py",
         "признак": "paths.SOURCES"
       },
-      ".claude/hooks": "не построено: check_reached_by_work.py судит добавленное в paths.SOURCES (neighbour.touched) и рабочим путём считает paths.SOURCES и прогоны — хук окна не входит ни туда, ни туда — замер 17.10.2026 тем же предикатом mentioned/reached по .claude/hooks/*.py (рабочий путь: .claude/settings.json → push_guard.sh → push_guard.py::main; разовый разбор окна, в дерево не положен — признак назван здесь же): функций и классов верхнего уровня 17, без рабочего пути 0",
+      ".claude/hooks": "не построено: check_reached_by_work.py судит добавленное в paths.SOURCES (neighbour.touched) и рабочим путём считает paths.SOURCES и прогоны — хук окна не входит ни туда, ни туда — замер 17.10.2026 тем же предикатом mentioned/reached по .claude/hooks/*.py (рабочие пути: .claude/settings.json → push_guard.sh → push_guard.py::main и .claude/settings.json → skill_log.sh → skill_log.py::main; разовый разбор окна, в дерево не положен — признак назван здесь же): функций и классов верхнего уровня 21, без рабочего пути 0",
       ".github": "исключено: прогон — точка входа площадки, а не имя кода: reached() засчитывает имя, названное шагом (RUNS = paths.WORKFLOWS), а общие шаги step-*.yml — поверхность для потребителей, вызываемость которой держит tests/test_reusable_steps.py::test_every_step_is_actually_callable"
     },
     "212": {

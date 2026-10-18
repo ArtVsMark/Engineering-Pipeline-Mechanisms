@@ -45,8 +45,11 @@ SOURCES = code_files(with_tests=True)
 REFERENCE_RE = re.compile(r"`(?P<module>[a-z_][a-z0-9_]*)\.(?P<name>[a-z_][a-z0-9_]*)\(?\)?`")
 
 #: Расширения файлов: `drift.py` — ИМЯ ФАЙЛА, а не адрес функции, и по виду они
-#: неразличимы. Перечислены, а не угаданы по длине (068).
-FILE_SUFFIXES = frozenset({"py", "yml", "yaml", "json", "md", "svg", "txt", "toml", "cfg", "lock"})
+#: неразличимы. Перечислены, а не угаданы по длине (068). `sh` — у хуков окна
+#: обёртки оболочкой (`skill_log.sh` рядом с `skill_log.py`, #1449).
+FILE_SUFFIXES = frozenset(
+    {"py", "yml", "yaml", "json", "md", "svg", "txt", "toml", "cfg", "lock", "sh"}
+)
 
 #: Файлы, где такие адреса были бы ДАННЫМИ, а не ссылками: дословные записи
 #: реестра находок, чей текст сам является предметом проверки.
