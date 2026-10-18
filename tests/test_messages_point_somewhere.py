@@ -28,14 +28,24 @@
   `tests/test_journal.py` в `check_journal.py` назван как «сторож, которого не
   существует», а `scripts/было.py` — образец переименования
   ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
+* **Данные окна судятся по-своему.** Журнал навыков появляется в окне при
+  первой записи, и в дереве его нет по построению (#1449). Такой адрес объявлен
+  якорем в закрытом `paths.WINDOW_DATA`, и проверяется у него обратное:
+  дерево его не берёт. Адрес, который в дереве не лежит и под `.gitignore` не
+  стоит, — мёртвый, и он красный по-прежнему.
 """
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, code_files
+from tests.conftest import ROOT, code_files, load_script
+
+paths = load_script("paths.py")
+#: Адреса данных окна — у якоря, а не здесь: второй список разошёлся бы молча.
+WINDOW_DATA: Final = frozenset(one.as_posix() for one in paths.WINDOW_DATA)
 
 #: Что считается путём НАШЕГО дерева. Список приставок закрытый: «похоже на
 #: путь» приняло бы и чужой адрес, и кусок URL
@@ -104,7 +114,7 @@ def test_every_path_named_by_a_message_exists() -> None:
     dead = [
         f"{path}:{line} — «{said}»"
         for path, line, said in paths_in_messages()
-        if not (ROOT / said).exists()
+        if said not in WINDOW_DATA and not (ROOT / said).exists()
     ]
     assert not dead, (
         "сообщение механизма называет путь, которого нет (076):\n  "
@@ -113,6 +123,30 @@ def test_every_path_named_by_a_message_exists() -> None:
         "\n  Если адрес назван НАРОЧНО мёртвым (сама находка в том, что его нет),"
         " ему место в докстроке, а не в сообщении: докстрока из предмета выведена."
     )
+
+
+def test_window_data_is_kept_out_of_the_tree() -> None:
+    """Адрес данных окна стоит под `.gitignore`: иначе он мёртвый, а не данные.
+
+    Спрашивается у самого git, а не разбором `.gitignore`, — по той же причине,
+    что у `tests/test_tracked_tree.py`: свой толкователь разошёлся бы с
+    настоящим молча. Пустой список — тоже отказ: граница, у которой не осталось
+    предмета, должна уйти вместе с ним (075).
+    """
+    assert WINDOW_DATA, "данных окна якорь не объявляет — граница гейта пуста"
+    for said in sorted(WINDOW_DATA):
+        done = subprocess.run(
+            ["git", "check-ignore", "-q", "--no-index", said],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
+        assert done.returncode == 0, (
+            f"{said} объявлен данными окна, но `.gitignore` его не покрывает — "
+            "это мёртвый адрес, а не данные (076)"
+        )
 
 
 def test_a_dead_path_in_prose_is_not_judged() -> None:
