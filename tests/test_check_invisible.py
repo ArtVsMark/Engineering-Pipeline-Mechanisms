@@ -2,6 +2,7 @@
 
 import hashlib
 import subprocess
+import sys
 import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
@@ -204,9 +205,71 @@ def test_a_selector_fits_only_a_base_of_its_kind(base: str, mark: str, said: boo
     assert module.fits(base, mark) is said
 
 
-def test_the_unicode_data_is_the_interpreters_version() -> None:
-    """Версия выдержек — база интерпретатора: иначе новые знаки гейт не знает (210)."""
-    assert unicodedata.unidata_version == module.UNICODE_VERSION
+def gate_python() -> str:
+    """Версия языка, которой шаг конвейера исполняет гейт у потребителя."""
+    import yaml
+
+    from tests.conftest import ROOT
+
+    steps = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "step-pipeline.yml").read_text(encoding="utf-8")
+    )["jobs"]["pipeline"]["steps"]
+    said = [
+        str(one["with"]["python-version"])
+        for one in steps
+        if "setup-python" in str(one.get("uses") or "")
+    ]
+    assert len(said) == 1, f"интерпретатор шага не назван однозначно: {said}"
+    return said[0]
+
+
+def unicode_version(said: str) -> tuple[int, ...]:
+    """Версия Unicode кортежем — для сравнения «не новее»."""
+    return tuple(int(one) for one in said.split("."))
+
+
+def version_problem(running: str, gate: str, data: str, base: str) -> str:
+    """Что не так с версией данных на этом интерпретаторе; пусто — всё в порядке."""
+    if running == gate:
+        return (
+            "" if data == base else f"на интерпретаторе шага {running} данные {data}, база {base}"
+        )
+    if unicode_version(data) <= unicode_version(base):
+        return ""
+    return f"данные Unicode {data} новее базы {base} интерпретатора {running}"
+
+
+@pytest.mark.parametrize(
+    ("running", "data", "base", "fine"),
+    [
+        ("3.14", "16.0.0", "16.0.0", True),
+        ("3.14", "16.0.0", "17.0.0", False),
+        ("3.15", "16.0.0", "17.0.0", True),
+        ("3.15", "18.0.0", "17.0.0", False),
+    ],
+    ids=["шаг-совпало", "шаг-разошлось", "новее-законно", "данные-новее-базы"],
+)
+def test_the_version_rule_holds_both_cells(running: str, data: str, base: str, fine: bool) -> None:
+    """На интерпретаторе шага — равенство, на прочих — данные не новее базы."""
+    assert (version_problem(running, "3.14", data, base) == "") is fine
+
+
+def test_the_unicode_data_is_the_gates_interpreters_version() -> None:
+    """Версия выдержек — база того интерпретатора, которым гейт исполняется у потребителя (210).
+
+    Гейт исполняет шаг конвейера (`step-pipeline.yml`), и на его версии языка
+    данные обязаны совпасть с `unicodedata` — иначе новые знаки гейт не знает,
+    и поднять выдержки надо тем же изменением, что и версию шага. На прочих
+    ячейках матрицы данные не новее базы интерпретатора: интерпретатор новее
+    знает знаки, которых выдержка не знает, — это названная граница гейта, а не
+    дефект. Прежнее точное равенство на любой ячейке краснило 3.15 с базой
+    17.0.0 (взгляд CI на #1510).
+    """
+    running = f"{sys.version_info.major}.{sys.version_info.minor}"
+    said = version_problem(
+        running, gate_python(), module.UNICODE_VERSION, unicodedata.unidata_version
+    )
+    assert not said, said
     major_minor = module.UNICODE_VERSION.rsplit(".", 1)[0]
     for one in sorted(module.UNICODE.glob("*.txt")):
         head = "\n".join(one.read_text(encoding="utf-8").splitlines()[:15])
