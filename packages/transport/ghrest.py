@@ -32,6 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any, Final
 
 import report
@@ -618,6 +619,28 @@ def merged_changes(repo: str, token: str, limit: int = MERGED_WINDOW) -> list[di
     объяснялась. Разбор слитого нашёл это в #109.
     """
     return merged_page(repo, token, limit)[0]
+
+
+def moment(stamp: object) -> datetime | None:
+    """Время записи площадки (ISO 8601, `Z` или смещение); нет его или не той формы — `None`.
+
+    ВРЕМЯ БЕЗ ПОЯСА — НЕ ТА ФОРМА (находки `cbdc1d9`, `6883122`): наивный
+    `datetime` проходил разбор, а вычитание из времени с поясом роняло заход
+    `TypeError`. Площадка время без пояса не отдаёт, и угадывать пояс значило бы
+    судить по чужим часам.
+
+    ОДНО МЕСТО НА ВСЕХ ЧИТАЮЩИХ
+    ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+    Разбор жил копиями у очереди, застрявших, оклика, долга, цепочек находок и
+    ещё пяти механизмов, и починка одной копии оставляла соседей падать.
+    """
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        said = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return said if said.tzinfo is not None else None
 
 
 def quote(value: str) -> str:

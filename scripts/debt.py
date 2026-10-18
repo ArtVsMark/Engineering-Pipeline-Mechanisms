@@ -224,9 +224,8 @@ def age_of(seen: str, now: datetime | None = None) -> timedelta | None:
     Не ноль и не «свежо»: неразобранная дата означает, что возраст НЕИЗВЕСТЕН,
     и выдавать его за свежесть — тихий запасной ответ (045).
     """
-    try:
-        stamp = datetime.fromisoformat(seen.replace("Z", "+00:00"))
-    except ValueError, AttributeError:
+    stamp = ghrest.moment(seen)
+    if stamp is None:
         return None
     return (now or datetime.now(UTC)) - stamp
 

@@ -771,13 +771,8 @@ def labelled_at(repo: str, token: str, number: int) -> datetime | None:
 
 
 def when_of(text: object) -> datetime | None:
-    """Время события площадки; не той формы — `None`."""
-    if not isinstance(text, str):
-        return None
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
+    """Время события площадки; не той формы или без пояса — `None`."""
+    return ghrest.moment(text)
 
 
 def released(
@@ -986,7 +981,7 @@ def main(argv: list[str] | None = None) -> int:
         sent: list[int] = []
         later: list[int] = []
         before = when_of(args.before) if args.before else None
-        if args.before and (before is None or before.tzinfo is None):
+        if args.before and before is None:
             print(
                 f"метка выпуска не снята: время тега «{args.before}» не время с поясом",
                 file=sys.stderr,

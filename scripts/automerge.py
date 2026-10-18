@@ -1074,21 +1074,6 @@ def head_runs(repo: str, change: Change, owner_token: str) -> list[dict[str, Any
     )
 
 
-def moment_of(stamp: object) -> datetime | None:
-    """Время записи площадки; нет его или оно не той формы — `None`.
-
-    ВРЕМЯ БЕЗ ПОЯСА — НЕ ТА ФОРМА (находка `cbdc1d9`): наивный `datetime`
-    проходил разбор, а вычитание из времени с поясом в `stall_of` роняло
-    весь заход очереди `TypeError`. Площадка время без пояса не отдаёт, и
-    угадывать пояс значило бы судить о повисшем по чужим часам.
-    """
-    try:
-        moment = datetime.fromisoformat(str(stamp).replace("Z", "+00:00")) if stamp else None
-    except ValueError:
-        return None
-    return moment if moment is not None and moment.tzinfo is not None else None
-
-
 def stall_of(runs: list[dict[str, Any]], required: list[str], moment: datetime) -> str | None:
     """Чем остановлена голова, если остановлена; обычное ожидание — `None`.
 
@@ -1113,7 +1098,7 @@ def stall_of(runs: list[dict[str, Any]], required: list[str], moment: datetime) 
         (name, started)
         for name, run in latest.items()
         if run.get("status") != "completed"
-        and (started := moment_of(run.get("started_at"))) is not None
+        and (started := ghrest.moment(run.get("started_at"))) is not None
         and moment - started >= HUNG_AFTER
     ]
     if hung:
@@ -1125,7 +1110,7 @@ def stall_of(runs: list[dict[str, Any]], required: list[str], moment: datetime) 
         for run in latest.values()
     ):
         return None
-    ends = [moment_of(run.get("completed_at")) for run in latest.values()]
+    ends = [ghrest.moment(run.get("completed_at")) for run in latest.values()]
     if not ends or None in ends:
         return None
     since = max(end for end in ends if end is not None)

@@ -166,10 +166,7 @@ def born(repo: str, name: str, token: str) -> datetime | None:
         got = ghrest.request("GET", f"repos/{repo}/actions/workflows/{name}", token) or {}
     except ghrest.TransportError:
         return None
-    said = str(got.get("created_at") or "")
-    if not said:
-        return None
-    return datetime.fromisoformat(said.replace("Z", "+00:00"))
+    return ghrest.moment(got.get("created_at"))
 
 
 def fired(repo: str, name: str, token: str, since: datetime) -> tuple[int, int]:
@@ -203,7 +200,9 @@ def fired(repo: str, name: str, token: str, since: datetime) -> tuple[int, int]:
         started = str(run.get("created_at") or "")
         if not started:
             continue
-        when = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        when = ghrest.moment(started)
+        if when is None:
+            raise NotRun(f"время захода «{name}» не время с поясом: {report.cut(started)}")
         if when < since:
             continue
         outcome = str(run.get("conclusion") or "")

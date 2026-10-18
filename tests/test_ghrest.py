@@ -16,7 +16,8 @@ import ssl
 import threading
 import time
 import urllib.error
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, ClassVar, Final
@@ -24,7 +25,7 @@ from typing import Any, ClassVar, Final
 import ghrest as transport
 import pytest
 
-from tests.conftest import code_files, names_used
+from tests.conftest import ROOT, code_files, load_script, names_used
 
 
 class Fake(BaseHTTPRequestHandler):
@@ -939,3 +940,145 @@ def test_files_of_reads_every_page_of_the_change(monkeypatch: pytest.MonkeyPatch
     assert transport.files_of("o/r", 7, "токен") == frozenset(
         {"scripts/один.py", "scripts/два.py", ".rules/bindings.json"}
     )
+
+
+@pytest.mark.parametrize(
+    ("stamp", "moment"),
+    [
+        ("2026-10-14T19:50:51Z", datetime(2026, 10, 14, 19, 50, 51, tzinfo=UTC)),
+        ("2026-10-14T22:50:51+03:00", datetime(2026, 10, 14, 19, 50, 51, tzinfo=UTC)),
+        (None, None),
+        ("", None),
+        (17, None),
+        ("вчера", None),
+        ("2026-10-14T19:50:51", None),
+    ],
+    ids=["время", "смещение", "нет-времени", "пусто", "не-строка", "не-время", "без-пояса"],
+)
+def test_moment_refuses_what_is_not_a_time_with_zone(stamp: object, moment: Any) -> None:
+    """Время записи площадки не той формы — `None`, а не трейсбек всего захода (`cbdc1d9`)."""
+    assert transport.moment(stamp) == moment
+
+
+#: Время площадки без пояса — та форма, на которой соседи очереди падали `TypeError`.
+NAIVE: Final = "2026-10-18T10:00:00"
+NOW: Final = datetime(2026, 10, 18, 12, tzinfo=UTC)
+
+
+def refuses(call: Callable[[], object], refusal: type[Exception]) -> bool:
+    """Вызов отказывает своим отказом, а не падает чужим и не отдаёт наивное время."""
+    try:
+        call()
+    except refusal:
+        return True
+    return False
+
+
+def undated(comment: dict[str, Any]) -> bool:
+    """Комментарий без годного времени — отказ `Undated`, а не наивное время."""
+    chains = load_script("finding_chains.py")
+    try:
+        chains.said_at(comment)
+    except chains.Undated:
+        return True
+    return False
+
+
+#: Читающие время площадки, о которых сказала находка `6883122`, и их ответ на
+#: время без пояса — тот же, что на неразборное, а не падение вычитания.
+READERS: Final[dict[str, Callable[[], object]]] = {
+    "застрявшие": lambda: load_script("stuck.py").is_fresh(NAIVE, NOW) is False,
+    "оклик": lambda: load_script("hail.py").is_quiet(NAIVE, NOW) is False,
+    "долг": lambda: load_script("debt.py").age_of(NAIVE, NOW) is None,
+    "цепочки-находок": lambda: undated({"updated_at": NAIVE}),
+    "ряд-прогонов": lambda: (
+        load_script("runs_series.py").elapsed({"run_started_at": NAIVE, "updated_at": NAIVE})
+        is None
+    ),
+    "план": lambda: load_script("work_plan.py").when_of(NAIVE) is None,
+    "журнал-навыков": lambda: load_script("skill_runs.py").moment(NAIVE) is None,
+    "будильник-сводки": lambda: refuses(
+        lambda: load_script("ci_complete_wake.py").moment(NAIVE),
+        load_script("ci_complete_wake.py").NotRun,
+    ),
+    "остаток-задач": lambda: refuses(
+        lambda: load_script("items_left.py").when_of(
+            {"number": 7, "created_at": NAIVE}, "created_at"
+        ),
+        transport.TransportError,
+    ),
+    "очередь": lambda: (
+        load_script("automerge.py").stall_of(
+            [{"name": "x", "status": "in_progress", "started_at": NAIVE}], ["x"], NOW
+        )
+        is None
+    ),
+}
+
+
+@pytest.mark.parametrize("reader", sorted(READERS))
+def test_every_reader_of_platform_time_refuses_a_time_without_zone(reader: str) -> None:
+    """Время без пояса — неразобранное время у каждого читающего, а не `TypeError` (`6883122`)."""
+    assert READERS[reader]() is True
+
+
+def test_the_schedule_sweep_refuses_a_time_without_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Обход расписаний: рождение без пояса — неизвестно, заход без пояса — отказ (#1519)."""
+    seen = load_script("schedules_seen.py")
+    monkeypatch.setattr(seen.ghrest, "request", lambda *_, **__: {"created_at": NAIVE})
+    assert seen.born("o/r", "x.yml", "t") is None
+    runs = [{"created_at": NAIVE, "conclusion": "success"}]
+    monkeypatch.setattr(seen.ghrest, "paginate", lambda *_, **__: iter(runs))
+    with pytest.raises(seen.NotRun, match="не время с поясом"):
+        seen.fired("o/r", "x.yml", "t", NOW)
+
+
+def test_the_debt_names_a_time_without_zone_instead_of_a_trace() -> None:
+    """Время задачи без пояса — отказ площадки, который ловит долг, а не `ValueError` (#1519)."""
+    left = load_script("items_left.py")
+    issue = {"number": 7, "title": "т", "body": "- [ ] пункт", "created_at": NAIVE}
+    with pytest.raises(transport.TransportError, match="#7"):
+        left.when_of(issue, "created_at")
+
+
+#: Разборы ISO вне `ghrest.moment` — не время площадки, и у каждого причина. Число —
+#: вызовов в файле: новая копия в уже названном файле краснеет так же, как в новом,
+#: а снятая оставляет строку висеть — и тоже краснеет (взгляд на #1519, 220).
+NOT_PLATFORM_TIME: Final[dict[str, tuple[int, str]]] = {
+    "scripts/audit_profile.py": (1, "дата строкой, а не время"),
+    "scripts/drift.py": (1, "дата выпуска из манифеста, берётся только день"),
+    "scripts/items_left.py": (3, "время коммита из git log — пояс у git есть всегда"),
+    "scripts/runs_series.py": (2, "полночь дня, собранная здесь же с поясом"),
+    "scripts/trunk_log.py": (1, "время коммита из git log — пояс у git есть всегда"),
+    "scripts/unlooked.py": (2, "даты дня, берётся только день"),
+    "scripts/window.py": (1, "время коммита из git log (%cI) — пояс у git есть всегда"),
+}
+#: Единственное место разбора времени площадки.
+PLATFORM_PARSER: Final = "packages/transport/ghrest.py"
+
+
+def iso_parses(root: Path = ROOT) -> dict[str, int]:
+    """Вызовы `fromisoformat(` в коде вне разборщика площадки — по файлам."""
+    found: dict[str, int] = {}
+    for path in code_files():
+        if path.suffix != ".py":
+            continue
+        where = path.relative_to(root).as_posix()
+        if where == PLATFORM_PARSER:
+            continue
+        count = path.read_text(encoding="utf-8").count("fromisoformat(")
+        if count:
+            found[where] = count
+    return found
+
+
+def test_platform_time_is_parsed_in_one_place() -> None:
+    """Время площадки разбирает один `ghrest.moment`; прочие разборы ISO названы с причиной (090).
+
+    Признак — любой вызов `fromisoformat(`, а не форма одной копии: прежний
+    искал замену `Z` в той же строке, и копия без неё — как в `skill_runs` —
+    проходила мимо (взгляд на #1519). Отличить время площадки от времени git
+    по тексту нельзя, поэтому прочие разборы — закрытым перечнем с числом.
+    """
+    expected = {path: count for path, (count, _) in NOT_PLATFORM_TIME.items()}
+    assert iso_parses() == expected
