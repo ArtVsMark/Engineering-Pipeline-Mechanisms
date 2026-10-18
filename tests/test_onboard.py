@@ -1372,6 +1372,27 @@ def connected(tmp_path: Path) -> tuple[Path, Path]:
     return root, consumer
 
 
+@pytest.mark.parametrize(("step", "said"), [("minor", True), ("patch", False)])
+def test_an_update_past_the_contract_window_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], step: str, said: bool
+) -> None:
+    """Подъём прибивки за окно `contract:` назван обновлением, а не толчком (`b923c76`).
+
+    Минор контракта вырос — окно ответа потребителя его не покрывает, и
+    обновление говорит это до записи (`d9b9a4f`, `4962cb3`). Патч поверхности
+    не трогает: о нём обновление молчит.
+    """
+    root, consumer = connected(tmp_path)
+    major, minor, patch = (int(one) for one in FAKE_VERSION.split("."))
+    bumped = f"{major}.{minor + 1}.0" if step == "minor" else f"{major}.{minor}.{patch + 1}"
+    (root / "CONTRACT_VERSION").write_text(f"{bumped}\n", encoding="utf-8")
+    released(root, "v2.6.0", план=OWN_CALLER_NEXT)
+    capsys.readouterr()
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert ("не покрывает контракт" in out and bumped in out) is said, out
+
+
 #: Следующий выпуск меняет вызывающий: у механизма появилось событие.
 OWN_CALLER_NEXT = OWN_CALLER.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  push:\n")
 
@@ -1507,7 +1528,8 @@ def test_the_update_plan_is_decided_before_any_write(tmp_path: Path) -> None:
     plan = module.Update()
     module.plan_owned(plan, consumer, new, root, repo)
     module.plan_ci(plan, consumer, ["пример"], repo, "v2.6.0")
-    module.plan_answer(plan, consumer, [module.check_name("пример"), "лишний / лишний"])
+    wanted = [module.check_name("пример"), "лишний / лишний"]
+    module.plan_answer(plan, consumer, wanted, FAKE_VERSION, "v2.6.0")
     assert not plan.edited
     assert module.paths.WORKFLOWS / "план.yml" in plan.write
     assert module.paths.WORKFLOWS / module.PIPELINE_FLOW in plan.write

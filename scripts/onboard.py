@@ -1379,8 +1379,16 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
         )
 
 
-def plan_answer(update: Update, consumer: Path, wanted: list[str]) -> None:
-    """Своё проекта не трогается; названо, по каким проверкам ответа ещё нет."""
+def plan_answer(update: Update, consumer: Path, wanted: list[str], contract: str, pin: str) -> None:
+    """Своё проекта не трогается; названо, по каким проверкам ответа нет и покрывает ли окно выпуск.
+
+    ОКНО СВЕРЯЕТСЯ ДО ЗАПИСИ, А НЕ ПОСЛЕ ТОЛЧКА (находки `d9b9a4f`, `4962cb3`).
+    Подъём прибивки на следующий минор контракта выводит её за окно `contract:`
+    — так устроено (`contract_span`): краснение зовёт перечитать ответы. Но
+    прежде о нём говорил только шаг `pipeline` после толчка, а обновление
+    печатало «обновлено» молча. Окно — ответ проекта, и заход его не двигает;
+    он называет расхождение тем же разбором, что у механизма (`policy.compatible`).
+    """
     target = consumer / paths.PIPELINE
     if not target.is_file():
         update.notes.append(f"`{paths.PIPELINE}` нет — заготовку ответа печатает заход без ключей")
@@ -1394,6 +1402,23 @@ def plan_answer(update: Update, consumer: Path, wanted: list[str]) -> None:
     if missing:
         update.notes.append(
             f"в `{paths.PIPELINE}` нет ответа по: {', '.join(missing)} — класс решаете вы"
+        )
+    declared = str(said.get("contract") or "").strip()
+    if not declared:
+        update.notes.append(
+            f"в `{paths.PIPELINE}` нет окна `contract:` — механизмы ответа не прочтут; "
+            f"окно выпуска {pin}: {contract_span(contract)}"
+        )
+        return
+    try:
+        covered = policy.compatible(declared, contract)
+    except policy.BadPolicy as exc:
+        raise NotRun(f"{paths.PIPELINE}: {exc}") from exc
+    if not covered:
+        update.notes.append(
+            f"окно `contract:` в `{paths.PIPELINE}` — «{declared}» — не покрывает контракт "
+            f"{contract} выпуска {pin}: после толчка шаг `pipeline` откажет. Перечитайте "
+            "ответы под новый контракт (157) и тогда поднимите окно — заход его не двигает"
         )
 
 
@@ -1500,6 +1525,7 @@ def update(
     pipeline: list[str],
     records: list[str],
     data: dict[Path, str],
+    contract: str,
 ) -> int:
     """Обновление нашего в дереве потребителя до прибивки `pin` (#1386).
 
@@ -1510,7 +1536,8 @@ def update(
     не трогается и называется. В `ci.yml` поднимается только тег наших строк,
     новые шаги печатаются. `.pipeline.yml` и свод — своё проекта, их заход не
     трогает. Заготовки данных (`data`) кладутся, только если файла нет: занятый
-    путь — своё проекта и отказа не даёт.
+    путь — своё проекта и отказа не даёт. `contract` — версия контракта выпуска
+    `pin`: обновление сверяет с ней окно ответа проекта (`plan_answer`).
     """
     trunk = trunk_of(consumer)
     if trunk and trunk != paths.TRUNK:
@@ -1524,7 +1551,8 @@ def update(
     try:
         plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
         plan_ci(plan, consumer, pipeline, repo, pin)
-        plan_answer(plan, consumer, [check_name(one) for one in pipeline] + records)
+        wanted = [check_name(one) for one in pipeline] + records
+        plan_answer(plan, consumer, wanted, contract, pin)
         signed_all(plan.write | data, repo)
     except NotRun as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
@@ -1599,7 +1627,10 @@ def main(argv: list[str] | None = None) -> int:
         own = own_callers(args.root, names)
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
-        span = contract_span(contract_at(args.root, pin))
+        # Версия контракта выпуска нужна ОБЕИМ дверям (находка `d6334b4`): кладка
+        # пишет по ней окно ответа, обновление сверяет с ней окно потребителя.
+        contract = contract_at(args.root, pin)
+        span = contract_span(contract)
         summary = summary_kit(args.root, args.repo, pin)
         rulebook = rulebook_kit(args.root)
         kit = data_kit(args.root)
@@ -1640,7 +1671,8 @@ def main(argv: list[str] | None = None) -> int:
     beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
     on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
     if args.update:
-        return update(args.root, args.update, args.repo, pin, pipeline, beyond + on_change, kit)
+        records_all = beyond + on_change
+        return update(args.root, args.update, args.repo, pin, pipeline, records_all, kit, contract)
     if args.write:
         # КЛАДЁТСЯ ТОЛЬКО ПО ЯВНОМУ КЛЮЧУ И ТОЛЬКО В СВОБОДНОЕ (#992). Чужое
         # дерево заход не правит: занятый путь называется, и не пишется ни
