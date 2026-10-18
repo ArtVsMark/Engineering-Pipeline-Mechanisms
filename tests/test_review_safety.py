@@ -2451,6 +2451,10 @@ def test_a_look_task_leaves_the_full_set_to_ci() -> None:
 
 #: Где действие кладёт головную версию путей, возвращённых к базе.
 HEAD_OF_RESTORED: Final = "`.claude-pr/`"
+#: Закрепление действия, с журнала которого снят перечень `RESTORED_PATHS`.
+#: Подъём действия краснит `test_the_restored_paths_are_read_from_the_pinned_action`:
+#: список путей мог смениться вместе с версией, и его перечитывают по журналу.
+RESTORED_FROM_PIN: Final = "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc"
 #: Пути, которые действие возвращает к базе перед заходом на изменение, — по
 #: журналу закреплённой версии (прогон 39126551465, задание `review`, 18.10.2026).
 RESTORED_PATHS: Final = (
@@ -2463,6 +2467,24 @@ RESTORED_PATHS: Final = (
     ".ripgreprc",
     ".husky",
 )
+
+
+def test_the_restored_paths_are_read_from_the_pinned_action() -> None:
+    """Перечень возвращаемых путей снят с той версии действия, что закреплена (взгляд на #1512).
+
+    Список берётся из журнала действия, а не из нашего кода, и с подъёмом
+    закрепления может смениться. Поэтому каждое закрепление
+    `anthropics/claude-code-action` в шаге взгляда совпадает с тем, с которого
+    перечень снят: подъём краснит здесь, и перечень перечитывают по журналу.
+    """
+    pins = set(
+        re.findall(r"anthropics/claude-code-action@([0-9a-f]{40})", LOOK_BODY.read_text("utf-8"))
+    )
+    assert pins, f"{LOOK_BODY.name}: закреплений действия не найдено — предмета нет (075)"
+    assert pins == {RESTORED_FROM_PIN}, (
+        f"действие закреплено на {sorted(pins)}, а перечень путей снят с {RESTORED_FROM_PIN}: "
+        "перечитайте журнал прогона и обновите RESTORED_PATHS"
+    )
 
 
 def test_the_look_names_the_paths_restored_to_the_base() -> None:
