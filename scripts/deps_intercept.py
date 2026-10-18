@@ -23,9 +23,14 @@
    подъёме. Адрес общей ветки (`@main`) не трогается — это не версия.
 3. У действий каталога в том же коммите правится `origin` в
    `.rules/bindings.json`: тег вызова и тег в ответе сверяет набор.
-4. Фрагмент журнала, коммит (автор — владелец, соавтор — подпись механизма,
-   как у выпуска), толчок ветки `agent/deps-…` токеном владельца: её
-   изменение открывает `agent-pr`.
+4. Фрагмент журнала, коммит (автор — владелец токена, соавтор — подпись
+   механизма, как у выпуска; связь — план работ проекта, найденный по
+   маркеру), толчок ветки `agent/deps-…` тем же токеном: её изменение
+   открывает `agent-pr`.
+
+ИДЁТ И У ПОТРЕБИТЕЛЯ (#1387, решение владельца 17.10.2026): общим шагом
+`step-deps-intercept.yml`. Поэтому ни номера задачи, ни имени владельца в коде
+перехвата нет — оба спрашиваются у площадки того проекта, где идёт заход.
 5. Изменение бота закрывается со ссылкой на ветку. Эту версию бот больше не
    предлагает, следующую — предложит.
 
@@ -55,6 +60,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import drift
+import findings
 import ghrest
 import gitcall
 import paths
@@ -76,8 +82,6 @@ VERSION_RE: Final = re.compile(r"^v?\d+(?:\.\d+){0,2}$")
 SHA_RE: Final = drift.HASH_RE
 #: Подпись механизма — та же, что у коммита выпуска, и объявлена в `paths.AUTHORS`.
 CO_AUTHOR: Final = "Engineering Pipeline Mechanisms <noreply@github.com>"
-#: Задача, к которой привязан каждый подъём: план работ, он открыт всегда.
-REFS: Final = "Refs #639"
 #: Где лежат строки `uses:` — прогоны. Своих действий (`.github/actions`) в
 #: дереве нет; появятся — их каталог добавится сюда, а не поиском вниз.
 WORKFLOWS: Final = paths.WORKFLOWS
@@ -201,23 +205,60 @@ def resolve(dep: str, new: str, token: str) -> tuple[str, str]:
     raise Refused(f"{dep}: тега версии «{new}» у площадки нет — поднимать не на что")
 
 
-def fragment(dep: str, tag: str, number: int) -> str:
-    """Фрагмент журнала подъёма."""
+def plan_number(repo: str, token: str) -> int:
+    """Номер плана работ проекта — по его маркеру: к плану привязан каждый подъём.
+
+    НЕ ЛИТЕРАЛОМ (#1387, решение владельца 17.10.2026): перехват стал общим
+    шагом, и номер нашего плана у потребителя назвал бы его чужую задачу. План
+    ищется тем же маркером, по которому его находит сборщик плана. Плана нет —
+    «не отработал», а не подъём без связи: связь с задачей обязательна
+    (`pr-meta`), и такой подъём покраснел бы уже после толчка.
+    """
+    try:
+        number, _ = findings.live_issue(repo, token, findings.PLAN_MARKER)
+    except ghrest.TransportError as exc:
+        raise NotRun(f"план работ не прочитан: {exc}") from exc
+    if number is None:
+        raise NotRun(
+            "плана работ нет — подъёму не к чему привязаться; план заводит прогон work-plan"
+        )
+    return number
+
+
+def identity(token: str) -> tuple[str, str]:
+    """Имя и почта владельца токена — ими подписан коммит подъёма (131).
+
+    Прежде прогон вписывал владельца буквами, и у потребителя автором стал бы
+    чужой человек. Спрашивается сам токен: он владельца, и толкает им же.
+    Почта — служебная почта площадки, той же формы, что у выпуска.
+    """
+    try:
+        said = ghrest.request("GET", "user", token) or {}
+    except ghrest.TransportError as exc:
+        raise NotRun(f"владелец токена не назван: {exc}") from exc
+    login, number = said.get("login"), said.get("id")
+    if not isinstance(login, str) or not login or not isinstance(number, int):
+        raise NotRun("площадка не назвала владельца токена — подписать подъём некем")
+    return login, f"{number}+{login}@users.noreply.github.com"
+
+
+def fragment(dep: str, tag: str, number: int, plan: int) -> str:
+    """Фрагмент журнала подъёма; ссылка — на план работ проекта."""
     return (
         f"### Поднят `{dep}` до `{tag}`\n\n"
         f"Закреплённое действие поднято до новой версии во всём дереве разом. "
         f"Сигнал — изменение Dependabot #{number}, подъём сделал перехват "
-        f"`scripts/deps_intercept.py` на общей ветке.\n\n#1387\n"
+        f"механизмов на общей ветке.\n\n#{plan}\n"
     )
 
 
-def message(dep: str, tag: str, number: int) -> str:
-    """Тело коммита подъёма: что, откуда сигнал, связь и подпись механизма."""
+def message(dep: str, tag: str, number: int, plan: int) -> str:
+    """Тело коммита подъёма: что, откуда сигнал, связь с планом и подпись механизма."""
     return (
         f"Поднят {dep} до {tag}\n\n"
         f"Сигнал — изменение Dependabot #{number}; оно закрыто, подъём идёт этим\n"
         f"изменением обычным путём. Подняты все строки uses: этого действия разом.\n\n"
-        f"{REFS}\n\nCo-Authored-By: {CO_AUTHOR}\n"
+        f"Refs #{plan}\n\nCo-Authored-By: {CO_AUTHOR}\n"
     )
 
 
@@ -243,8 +284,21 @@ def switch_clean(root: Path, branch: str) -> None:
     git(root, "checkout", "--quiet", "-B", branch, f"origin/{paths.TRUNK}")
 
 
-def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -> str:
-    """Один перехват: подъём веткой `agent/` и закрытие изменения бота. Отдаёт ветку."""
+def intercept(
+    root: Path,
+    repo: str,
+    token: str,
+    bump: Bump,
+    *,
+    dry_run: bool,
+    plan_issue: int,
+    who: tuple[str, str] | None = None,
+) -> str:
+    """Один перехват: подъём веткой `agent/` и закрытие изменения бота. Отдаёт ветку.
+
+    `plan_issue` — номер плана работ (`plan_number`), `who` — подпись коммита
+    (`identity`); без неё заход с записью не идёт.
+    """
     tag, sha = resolve(bump.dep, bump.new, token)
     branch = branch_of(bump.dep, tag)
     if git(root, "ls-remote", "--heads", "origin", branch).strip():
@@ -268,19 +322,32 @@ def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -
             )
             raise Refused(f"#{bump.number}: {why}")
         note = paths.FRAGMENTS / f"deps-{slug(bump.dep)}-{slug(tag)}.changed.md"
-        planned[note] = fragment(bump.dep, tag, bump.number)
+        planned[note] = fragment(bump.dep, tag, bump.number, plan_issue)
         print(f"#{bump.number}: {bump.dep} → {tag} ({sha[:7]}), файлов: {len(planned)}")
         if dry_run:
             return branch
+        if who is None:
+            raise NotRun("подписи коммита нет — подъём с записью без владельца не идёт (131)")
         for path, text in planned.items():
             (root / path).write_text(text, encoding="utf-8")
         git(root, "add", "--", *[str(path) for path in planned])
-        git(root, "commit", "--quiet", "-m", message(bump.dep, tag, bump.number))
+        name, email = who
+        git(
+            root,
+            "-c",
+            f"user.name={name}",
+            "-c",
+            f"user.email={email}",
+            "commit",
+            "--quiet",
+            "-m",
+            message(bump.dep, tag, bump.number, plan_issue),
+        )
         git(root, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
     if not dry_run:
         said = (
             f"Подъём перехвачен конвейером: ветка `{branch}`, изменение по ней откроет "
-            "`agent-pr`. Этот сигнал закрывается — подъём идёт обычным путём (#1387)."
+            "`agent-pr`. Этот сигнал закрывается — подъём идёт обычным путём."
         )
         ghrest.request("POST", f"repos/{repo}/issues/{bump.number}/comments", token, {"body": said})
         ghrest.request("PATCH", f"repos/{repo}/pulls/{bump.number}", token, {"state": "closed"})
@@ -292,15 +359,15 @@ def intercept(root: Path, repo: str, token: str, bump: Bump, *, dry_run: bool) -
 SELF_BRANCH: Final = "agent/deps-self-{tag}"
 
 
-def self_fragment(tag: str, touched: list[Path]) -> str:
-    """Фрагмент журнала подъёма своих шагов: какие файлы тронуты — по плану, а не буквами."""
+def self_fragment(tag: str, touched: list[Path], plan_issue: int) -> str:
+    """Фрагмент журнала подъёма своих шагов: тронутое — по плану подъёма, ссылка — план работ."""
     names = ", ".join(f"`{one.as_posix()}`" for one in sorted(touched))
     return (
         f"> **Потребителю безразлично:** поднята прибивка своих шагов в прогонах "
         f"поставщика ({names}) до `{tag}`; отдаваемые шаги не тронуты.\n\n"
         f"### Свои шаги подняты до `{tag}`\n\n"
         f"Выпуск `{tag}` сам поднял вызовы своих шагов по тегу: Dependabot ссылки "
-        f"репозитория на самого себя не предлагает (#1387).\n\n#1387\n"
+        f"репозитория на самого себя не предлагает.\n\n#{plan_issue}\n"
     )
 
 
@@ -338,7 +405,7 @@ def calls_itself(root: Path, repo: str) -> bool:
     return said.returncode == 0
 
 
-def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
+def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool, token: str = "") -> str:
     """Подъём своих шагов до тега выпуска веткой `agent/`. Отдаёт ветку; пусто — нечего.
 
     ЗАЧЕМ (#1387). Проба передачи зовёт наши шаги по тегу, как потребитель.
@@ -370,16 +437,21 @@ def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
         if not calls_itself(root, repo):
             print(f"своих шагов по тегу общая ветка не зовёт — поднимать до {tag} нечего")
             return ""
+        # План спрашивается ДО смены ветки и только когда есть что поднимать:
+        # у потребителя, которому поднимать нечего, плана может не быть вовсе.
+        if not token:
+            raise NotRun("токена нет — план работ, к которому привязан подъём, спросить нечем")
+        plan_issue = plan_number(repo, token)
         switch_clean(root, branch)
     planned = plan(root, repo, tag, sha)
     if not planned:
         print(f"своих шагов по тегу дерево не зовёт — поднимать до {tag} нечего")
         return ""
-    touched = list(planned)
-    planned[paths.FRAGMENTS / f"deps-self-{slug(tag)}.internal.md"] = self_fragment(tag, touched)
-    print(f"свои шаги → {tag} ({sha[:7]}), файлов: {len(planned)}")
+    note = paths.FRAGMENTS / f"deps-self-{slug(tag)}.internal.md"
+    print(f"свои шаги → {tag} ({sha[:7]}), файлов: {len(planned) + 1}")
     if dry_run:
         return branch
+    planned[note] = self_fragment(tag, list(planned), plan_issue)
     for path, text in planned.items():
         (root / path).write_text(text, encoding="utf-8")
     git(root, "add", "--", *[str(path) for path in planned])
@@ -390,7 +462,7 @@ def self_bump(root: Path, repo: str, tag: str, *, dry_run: bool) -> str:
         "-m",
         f"Проба передачи поднята до {tag}\n\nВыпуск {tag} сам поднял прибивку своих шагов:\n"
         f"Dependabot ссылки репозитория на самого себя не предлагает.\n\n"
-        f"{REFS}\n\nCo-Authored-By: {CO_AUTHOR}\n",
+        f"Refs #{plan_issue}\n\nCo-Authored-By: {CO_AUTHOR}\n",
     )
     git(root, "push", "--quiet", "origin", f"HEAD:refs/heads/{branch}")
     return branch
@@ -470,7 +542,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
         try:
-            self_bump(args.root, args.repo, args.own_tag, dry_run=not args.apply)
+            self_bump(
+                args.root,
+                args.repo,
+                args.own_tag,
+                dry_run=not args.apply,
+                token=ghrest.token_from_env(),
+            )
         except (NotRun, OSError) as exc:
             failed = str(exc)
         # Подъём своих шагов режет ветку так же, как перехват, и возвращается
@@ -494,9 +572,21 @@ def main(argv: list[str] | None = None) -> int:
         start = spot(args.root)
         found = signals(args.repo, token)
         print(f"сигналов {BOT}: {len(found)}")
+        # План и подпись спрашиваются ОДИН раз и только при сигнале: заход без
+        # сигналов к площадке за ними не ходит.
+        plan_issue = plan_number(args.repo, token) if found else 0
+        who = identity(token) if found and args.apply else None
         for change in found:
             try:
-                intercept(args.root, args.repo, token, parse(change), dry_run=not args.apply)
+                intercept(
+                    args.root,
+                    args.repo,
+                    token,
+                    parse(change),
+                    dry_run=not args.apply,
+                    plan_issue=plan_issue,
+                    who=who,
+                )
             except Refused as exc:
                 refused.append(str(exc))
                 print(f"не разобрано: {exc}")

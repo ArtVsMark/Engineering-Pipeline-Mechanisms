@@ -12,8 +12,10 @@
 # владельца из них нечем. Заход по расписанию идёт от имени проекта, и код из
 # ветки бота не исполняется вовсе: берётся только заголовок изменения.
 #
-# ТОКЕН — ВЛАДЕЛЬЦА, как у выпуска: толчок `github.token` не будит прогоны, и
-# `agent-pr` изменения не открыл бы; а коммит несёт личность человека (131).
+# ТОНКИЙ ВЫЗОВ (#1387, решение владельца 17.10.2026): заход — общим шагом
+# `step-deps-intercept.yml`, тем же, что зовут потребители; здесь расписание,
+# кнопка и очередь заходов. Токен — владельца, как у выпуска (131): шаг
+# требует его словом. Имя записи проверки составное: `intercept / intercept`.
 name: deps-intercept
 
 on:
@@ -34,62 +36,6 @@ concurrency:
 
 jobs:
   intercept:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    steps:
-      - name: токен владельца задан
-        env:
-          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
-        run: |
-          if [ -z "${MERGE_QUEUE_TOKEN:-}" ]; then
-            echo "::error::MERGE_QUEUE_TOKEN не задан — перехват не идёт: ветку подъёма толкает токен владельца, иначе её изменение не откроется."
-            exit 1
-          fi
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.MERGE_QUEUE_TOKEN }}
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-
-      - run: python -m pip install --quiet ./packages/transport "pyyaml>=6,<7"
-
-      - name: перехватить сигналы бота
-        env:
-          GH_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          # Автор коммита подъёма — владелец, как у выпуска; соавтора пишет сам
-          # механизм трейлером (`deps_intercept.CO_AUTHOR`).
-          git config user.name "ArtVsMark"
-          git config user.email "86671904+ArtVsMark@users.noreply.github.com"
-          rc=0
-          said="${RUNNER_TEMP}/deps.txt"
-          python scripts/deps_intercept.py --apply >"$said" 2>&1 || rc=$?
-          cat "$said"
-          reason="$(tr '\n' ' ' <"$said")"
-          # Коды разбираются списком разрешённого (068).
-          # НЕРАЗОБРАННЫЙ СИГНАЛ — КРАСНОЕ, А НЕ ПРЕДУПРЕЖДЕНИЕ. `.pipeline.yml`
-          # обещает дежурному: красное значит, что сигнал не разобран. Зелёный
-          # прогон с предупреждением прятал его в списке прогонов, и сигнал висел
-          # молча (взгляд на #1397). Красный заход по расписанию на общей ветке
-          # видит `main-red`, и у сигнала появляется адресат.
-          # ПРЕДЕЛ НАЗВАН (195): неразобранный сигнал висит до человека, и каждый
-          # заход по расписанию краснеет одинаково. Пока он висит, отказ самого
-          # перехвата (код 2) по цвету прогона от него не отличить — различает их
-          # только текст аннотации: «не разобран» против «не отработал».
-          case "$rc" in
-            0) ;;
-            1)
-              echo "::error::Сигнал Dependabot не разобран — он остаётся открытым для человека: ${reason}"
-              exit 1
-              ;;
-            *)
-              echo "::error::Перехват подъёма не отработал (код $rc): ${reason}"
-              exit 1
-              ;;
-          esac
+    uses: ./.github/workflows/step-deps-intercept.yml
+    secrets:
+      MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
