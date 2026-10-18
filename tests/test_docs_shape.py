@@ -144,8 +144,31 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
     text = (ROOT / "docs" / "use" / "pipeline.md").read_text(encoding="utf-8")
     heading, steps, files = skeleton_counts(text)
     assert steps and files, "таблица шагов не разобралась — гейту не с чем сверять"
-    assert SPELLED_STEPS[len(steps)] in heading.lower(), f"{heading}: шагов в таблице {len(steps)}"
-    assert SPELLED[len(files)] in heading.lower(), f"{heading}: файлов в таблице {len(files)}"
+    assert names(heading, SPELLED_STEPS[len(steps)]), f"{heading}: шагов в таблице {len(steps)}"
+    assert names(heading, SPELLED[len(files)]), f"{heading}: файлов в таблице {len(files)}"
+
+
+def names(heading: str, count: str) -> bool:
+    """Называет ли заголовок число словами — с «ё» или через «е», без разницы.
+
+    Тем же правилом, что набор слов счёта (`count_words`): написание через «е»
+    — то же слово, а не другое (взгляд на #1489, `6717da0`).
+    """
+    return count.replace("ё", "е") in heading.lower().replace("ё", "е")
+
+
+@pytest.mark.parametrize(
+    ("heading", "said"),
+    [
+        ("## Скелет: двадцать три шага в двадцати трёх файлах", True),
+        ("## Скелет: двадцать три шага в двадцати трех файлах", True),
+        ("## Скелет: двадцать три шага в двадцати четырёх файлах", False),
+    ],
+    ids=["с-ё", "через-е", "другое-число"],
+)
+def test_the_heading_count_is_read_with_ye_as_with_yo(heading: str, said: bool) -> None:
+    """Заголовок через «е» называет то же число, что и с «ё»."""
+    assert names(heading, SPELLED[23]) is said
 
 
 def skeleton_counts(text: str) -> tuple[str, set[int], set[str]]:
@@ -278,7 +301,9 @@ def count_words() -> frozenset[str]:
     Числительные на мягкий знак и десятки на «-десят» склоняются правилом; малые
     (один…четыре), «сорок», «девяносто», «сто» и сотни склоняются не по
     правилу и названы формами. Составное число («двадцати двух») набор
-    узнаёт по каждому слову.
+    узнаёт по каждому слову. Написание через «е» вместо «ё» строится из
+    каждой формы набора, а не дописывается к перечню: по одной форме выпали
+    сотни (находка `44321a0`).
     """
     small = {
         "один",
@@ -301,15 +326,11 @@ def count_words() -> frozenset[str]:
         "двумя",
         "три",
         "трёх",
-        "трех",
         "трём",
-        "трем",
         "тремя",
         "четыре",
         "четырёх",
-        "четырех",
         "четырём",
-        "четырем",
         "четырьмя",
     }
     soft = {form for one in SOFT_NUMERALS for form in soft_forms(one)}
@@ -331,13 +352,11 @@ def count_words() -> frozenset[str]:
         "двухстах",
         "триста",
         "трёхсот",
-        "трехсот",
         "трёмстам",
         "тремястами",
         "трёхстах",
         "четыреста",
         "четырёхсот",
-        "четырехсот",
         "четырёмстам",
         "четырьмястами",
         "четырёхстах",
@@ -390,7 +409,8 @@ def count_words() -> frozenset[str]:
         "несколькими",
     }
     nouns = {form for forms in COUNTING_NOUNS.values() for form in forms}
-    return frozenset(small | soft | tens | hundreds | collective | both | loose | nouns)
+    words = small | soft | tens | hundreds | collective | both | loose | nouns
+    return frozenset(words | {one.replace("ё", "е") for one in words})
 
 
 #: Слова счёта, которых в прозе под заголовком скелета нет вовсе.
@@ -1196,6 +1216,8 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
         ("их двое", True),
         ("строк (файлов на три больше)", True),
         ("в двадцати файлах", True),
+        ("в трехстах файлах", True),
+        ("четыремстам строкам", True),
         ("файлов 3", True),
         ("держит правило (005)", False),
         ("правила (005, 127)", False),
@@ -1218,6 +1240,8 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
         "собирательное",
         "счёт-в-скобках",
         "часть-составного",
+        "сотни-через-е",
+        "сотни-через-е-дательный",
         "цифра",
         "адрес-правила",
         "адреса-правил",
@@ -1236,3 +1260,11 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
 def test_hand_counts_sees_every_form_and_spares_addresses(prose: str, counted: bool) -> None:
     """Счёт рукой виден во всех формах; законны адреса и код (`852fba6`, `e23aa2c`, `fa9da40`)."""
     assert bool(hand_counts(prose)) is counted
+
+
+def test_every_count_word_with_yo_is_also_seen_written_with_ye() -> None:
+    """Каждая форма с «ё» узнаётся и через «е» — по построению, а не по перечню (`44321a0`)."""
+    with_yo = sorted(one for one in COUNT_WORDS if "ё" in one)
+    assert with_yo, "форм с «ё» в наборе нет — проверка ни о чём"
+    missing = [one for one in with_yo if one.replace("ё", "е") not in COUNT_WORDS]
+    assert not missing, f"через «е» не узнаются: {missing}"
