@@ -9,9 +9,14 @@
 # FAKE_REMOTE_GONE=1 — ссылки origin/<ветка> нет: площадка её удалила.
 # FAKE_MERGED=1 — голова достижима из общей ветки: работа слита.
 case "$1 $2" in
-  "rev-parse --abbrev-ref")
+  "rev-parse --symbolic-full-name")
     if [ -n "$FAKE_HEAD_BROKEN" ]; then echo "$FAKE_HEAD_BROKEN" >&2; exit 128; fi
-    echo "${FAKE_HEAD:-agent/here}"; exit 0 ;;
+    # Полное имя, как у настоящего git; отвязанная голова — голое `HEAD`.
+    case "${FAKE_HEAD:-agent/here}" in
+      HEAD) echo "HEAD" ;;
+      *) echo "refs/heads/${FAKE_HEAD:-agent/here}" ;;
+    esac
+    exit 0 ;;
   "rev-parse --verify")
     [ -n "$FAKE_REMOTE_GONE" ] && exit 1
     echo "деадбиф"; exit 0 ;;

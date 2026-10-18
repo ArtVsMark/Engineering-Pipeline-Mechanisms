@@ -320,6 +320,28 @@ def test_nested_shells_end_in_a_refusal_not_in_a_loop() -> None:
     assert said.returncode == 2, said.stdout + said.stderr
 
 
+def test_the_head_beside_a_same_named_tag_is_its_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Голова на ветке с одноимённым тегом — эта ветка, а не `heads/<имя>` (взгляд на #1513).
+
+    Короткое имя отвергло бы толчок в свою же ветку как толчок мимо неё.
+    """
+    tree = tmp_path / "дерево"
+    tree.mkdir()
+    run = ["git", "-c", "user.name=т", "-c", "user.email=т@т"]
+    for args in (
+        ["init", "-q"],
+        ["commit", "-q", "--allow-empty", "-m", "а"],
+        ["checkout", "-q", "-b", "agent/x"],
+        ["tag", "agent/x"],
+    ):
+        subprocess.run([*run, *args], cwd=tree, check=True, capture_output=True, timeout=30)
+    monkeypatch.chdir(tree)
+    assert module.head() == ("agent/x", "")
+    assert module.refused(["agent/x"], module.head()[0]) == ""
+
+
 def test_a_guard_that_cannot_see_the_head_refuses() -> None:
     """Сторож, не узнавший голову, отвергает толчок, а не машет рукой (находка #143).
 

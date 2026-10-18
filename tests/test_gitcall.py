@@ -102,3 +102,30 @@ def test_review_map_without_git_refuses_not_a_trace(monkeypatch: pytest.MonkeyPa
     with pytest.raises(review_map.NotRun):
         review_map.shown_from_base("HEAD", Path("README.md"))
     assert review_map.touches_the_answer("HEAD") is True
+
+
+def tagged_branch(where: Path, name: str) -> None:
+    """Дерево на ветке `name`, рядом с которой стоит одноимённый тег."""
+    where.mkdir()
+    run = ["git", "-c", "user.name=т", "-c", "user.email=т@т"]
+    for args in (
+        ["init", "-q"],
+        ["commit", "-q", "--allow-empty", "-m", "а"],
+        ["checkout", "-q", "-b", name],
+        ["tag", name],
+    ):
+        subprocess.run([*run, *args], cwd=where, check=True, capture_output=True, timeout=30)
+
+
+def test_the_branch_is_read_in_full_even_beside_a_same_named_tag(tmp_path: Path) -> None:
+    """Одноимённый тег не делает ветку `heads/<имя>`; отвязанная голова — `HEAD` (#1513)."""
+    tagged_branch(tmp_path / "дерево", "feature")
+    assert gitcall.branch(RuntimeError, cwd=str(tmp_path / "дерево")) == "feature"
+    subprocess.run(
+        ["git", "checkout", "-q", "--detach"],
+        cwd=tmp_path / "дерево",
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    assert gitcall.branch(RuntimeError, cwd=str(tmp_path / "дерево")) == "HEAD"

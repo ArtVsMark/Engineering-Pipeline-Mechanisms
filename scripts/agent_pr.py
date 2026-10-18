@@ -142,7 +142,7 @@ def changed_files(branch: str, base: str) -> list[str]:
 
 def current_branch() -> str:
     """Имя текущей ветки — для сухого прогона на своём дереве."""
-    return git("rev-parse", "--abbrev-ref", "HEAD").strip()
+    return gitcall.branch(NotRun)
 
 
 def inherited(merge_base: str, branch: str, base: str) -> str:

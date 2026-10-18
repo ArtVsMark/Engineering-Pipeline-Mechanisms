@@ -636,11 +636,11 @@ def test_restore_keeps_a_dirty_tree(stand: Path) -> None:
     git(stand, "checkout", "--quiet", "-B", "agent/x")
     tracked = stand / ".github" / "workflows" / "ci.yml"
     tracked.write_text(tracked.read_text("utf-8") + "# своё\n", encoding="utf-8")
-    module.restore(stand, "main")
+    module.restore(stand, f"{module.BRANCH_REF}main")
     assert tracked.read_text("utf-8").endswith("# своё\n")
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "agent/x"
     git(stand, "checkout", "--quiet", "--", ".")
-    module.restore(stand, "main")
+    module.restore(stand, f"{module.BRANCH_REF}main")
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
@@ -695,7 +695,7 @@ def test_restore_names_both_owners_of_the_edits(
     """Чьи правки — не угадывается: названы оба случая и ветка (взгляд на #1441)."""
     git(stand, "checkout", "--quiet", "-B", "agent/x")
     (stand / ".github" / "workflows" / "ci.yml").write_text("недописано\n", encoding="utf-8")
-    module.restore(stand, "main")
+    module.restore(stand, f"{module.BRANCH_REF}main")
     out = capsys.readouterr().out
     assert "agent/x" in out and "человека" in out and "недописанный подъём" in out
 
@@ -762,6 +762,38 @@ def test_restore_returns_a_detached_tree_to_its_commit(stand: Path) -> None:
     module.restore(stand, start)
     assert module.spot(stand) == start
     assert git(stand, "rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
+
+
+def test_a_branch_named_like_a_tag_returns_as_a_branch(stand: Path) -> None:
+    """Ветка с одноимённым тегом — место полным именем, возврат на ветку (взгляд на #1474).
+
+    Короткое имя здесь неоднозначно: `--abbrev-ref` отдаёт `heads/<имя>`, а
+    `checkout` по полному имени отвязывает дерево. Тест различает оба отката.
+    """
+    on_own_branch(stand)
+    git(stand, "tag", "feature")
+    start = module.spot(stand)
+    assert start == f"{module.BRANCH_REF}feature"
+    module.switch_clean(stand, "agent/x")
+    module.restore(stand, start)
+    assert git(stand, "symbolic-ref", "--quiet", "HEAD").strip() == start
+
+
+def test_a_failed_return_names_the_branch_as_restore_does(
+    stand: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отказ возврата называет ветку, как `restore`, — без `refs/heads/` (взгляд на #1513)."""
+    git(stand, "tag", "v2.0.0")
+    on_own_branch(stand)
+
+    def broken(root: Path, start: str) -> None:
+        raise module.NotRun("сломано")
+
+    monkeypatch.setattr(module, "restore", broken)
+    said = module.main(["--root", str(stand), "--repo", "o/r", "--self", "v2.0.0", "--apply"])
+    assert said == module.EXIT_BROKEN
+    err = capsys.readouterr().err
+    assert "дерево на feature не возвращено" in err and module.BRANCH_REF not in err, err
 
 
 def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.MonkeyPatch) -> None:

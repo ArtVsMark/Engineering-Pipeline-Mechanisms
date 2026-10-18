@@ -1089,6 +1089,7 @@ def run_tagged(
         "PATH": f"{shim}{os.pathsep}{os.environ.get('PATH', '')}",
         "ASKED_VERSION": version,
         "RUNNER_TEMP": str(temp),
+        "GITHUB_OUTPUT": str(tmp_path / "output"),
         "MECHANISMS": str(ROOT),
     }
     return subprocess.run(
@@ -1124,6 +1125,8 @@ def test_the_tail_stands_on_its_tag_or_says_why_not(
     run = run_tagged(tmp_path, tags, version, later)
     if not said:
         assert run.returncode == 0, run.stdout + run.stderr
+        output = (tmp_path / "output").read_text(encoding="utf-8")
+        assert f"version={version}" in output.splitlines(), output
         return
     assert run.returncode == 1, run.stdout + run.stderr
     assert "::error::" in run.stdout and said in run.stdout, run.stdout
@@ -1160,3 +1163,104 @@ def test_the_tail_frees_only_the_labels_of_its_release() -> None:
     """Метку снимают с границей — временем тега, — а не со всех задач (взгляд на #1488)."""
     script = str(named("снять метку «ждёт выпуска» с задач плана")["run"])
     assert "--released --before" in script and "creatordate:iso-strict" in script
+
+
+#: Откуда шаги хвоста берут номер выпуска — выход выпуска или выкачки тега.
+RELEASE_VERSION: Final = "${{ steps.release.outputs.version || steps.tagged.outputs.version }}"
+#: Шаги хвоста, которым нужен номер выпуска.
+NUMBERED_TAIL: Final = (
+    "завести страницу выпуска",
+    "поднять свои шаги до выпуска",
+    "оповестить взявших о несовместимом выпуске",
+    "снять метку «ждёт выпуска» с задач плана",
+)
+
+
+@pytest.mark.parametrize("name", NUMBERED_TAIL)
+def test_a_tail_step_takes_the_number_from_the_release_not_from_head(name: str) -> None:
+    """Номер выпуска шаг хвоста берёт выходом, а не перечитывает HEAD (взгляд на #1488).
+
+    Подъём своих шагов, не вернувший дерево, оставил бы HEAD на своей ветке, и
+    сосед, читающий тег с HEAD, краснел бы за него.
+    """
+    step = named(name)
+    assert step["env"]["RELEASE_VERSION"] == RELEASE_VERSION
+    assert "version.py" not in str(step["run"]), step["run"]
+
+
+def test_the_release_names_its_number_after_the_push() -> None:
+    """Выпуск называет номер выходом только после толчка, который его увёз."""
+    script = str(named("выпустить")["run"])
+    said = script.index('echo "version=${tag#v}" >> "$GITHUB_OUTPUT"')
+    assert said > script.index("git push --atomic"), script
+
+
+def run_label_step(tmp_path: Path, version: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Исполняет снятие метки там, где HEAD ушёл с тега на ветку подъёма.
+
+    Тег `v1.2.3` стоит на первом коммите, HEAD — на втором, в ветке
+    `agent/deps-self-v1-2-3`: так дерево оставляет подъём, которому не дали
+    вернуться. Механизмы подделаны: `work_plan.py` пишет свои аргументы в файл.
+    """
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    git = partial(subprocess.run, cwd=tree, check=True, capture_output=True, timeout=30)
+    commit = ["git", "-c", "user.name=т", "-c", "user.email=т@т", "commit", "-q", "--allow-empty"]
+    git(["git", "init", "-q"])
+    git([*commit, "-m", "а"])
+    git(["git", "tag", "v1.2.3"])
+    git(["git", "checkout", "-q", "-b", "agent/deps-self-v1-2-3"])
+    git([*commit, "-m", "б"])
+    said = tmp_path / "said.txt"
+    fake = tmp_path / "mechanisms" / "scripts"
+    fake.mkdir(parents=True)
+    (fake / "work_plan.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        f"Path({str(said)!r}).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    (shim / "python").symlink_to(sys.executable)
+    env = {
+        **os.environ,
+        "PATH": f"{shim}{os.pathsep}{os.environ.get('PATH', '')}",
+        "RELEASE_VERSION": version,
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_REPOSITORY": "o/r",
+        "MECHANISMS": str(tmp_path / "mechanisms"),
+    }
+    run = subprocess.run(
+        ["bash", "-c", str(named("снять метку «ждёт выпуска» с задач плана")["run"])],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+    return run, said
+
+
+def test_the_label_boundary_is_the_tag_of_the_release_not_head(tmp_path: Path) -> None:
+    """HEAD на ветке подъёма — граница меток всё равно время тега выпуска (взгляд на #1488)."""
+    run, said = run_label_step(tmp_path, "1.2.3")
+    assert run.returncode == 0, run.stdout + run.stderr
+    stamp = subprocess.run(
+        ["git", "for-each-ref", "--format=%(creatordate:iso-strict)", "refs/tags/v1.2.3"],
+        cwd=tmp_path / "tree",
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    ).stdout.strip()
+    assert said.read_text(encoding="utf-8") == f"--released --before {stamp} --repo o/r"
+
+
+def test_a_label_step_without_the_number_is_refused(tmp_path: Path) -> None:
+    """Номера нет — отказ с причиной, а не тег, угаданный по HEAD (075)."""
+    run, said = run_label_step(tmp_path, "")
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert "::error::" in run.stdout and "Номер выпуска не назван" in run.stdout, run.stdout
+    assert not said.exists()

@@ -40,6 +40,8 @@ import report
 LOCAL: Final = 60
 #: Команда, идущая по сети: толчок, клон, выборка.
 NETWORK: Final = 300
+#: Начало полного имени ветки.
+BRANCH_REF: Final = "refs/heads/"
 
 
 def cause(exc: Exception) -> str:
@@ -78,3 +80,15 @@ def output(
         ).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise refusal(f"git {' '.join(args)} → {report.cut(cause(exc))}") from exc
+
+
+def branch(refusal: Callable[[str], Exception], *, cwd: str | None = None) -> str:
+    """Имя текущей ветки; у отвязанной головы — `HEAD`; отказ git — `refusal`.
+
+    ПОЛНЫМ ИМЕНЕМ, А НЕ `--abbrev-ref` (взгляд на #1513). При одноимённом теге
+    короткое имя неоднозначно, и git отдаёт `heads/<имя>` — ветку, которой нет.
+    Полное `refs/heads/<имя>` неоднозначным не бывает, и приставка снимается
+    здесь, одним местом на всех спрашивающих (090).
+    """
+    said = output(["rev-parse", "--symbolic-full-name", "HEAD"], refusal, cwd=cwd).strip()
+    return said.removeprefix(BRANCH_REF)
