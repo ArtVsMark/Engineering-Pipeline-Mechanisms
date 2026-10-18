@@ -5,6 +5,7 @@
 ответа с деревом, — и оба проверяются подделанными расхождениями.
 """
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -161,6 +162,50 @@ def test_the_own_contract_comes_first_and_the_called_tag_second(tmp_path: Path) 
     assert policy.contract_of(tmp_path / "bare", None) is None
     with pytest.raises(policy.BadPolicy, match="версия контракта позванного тега"):
         policy.contract_of(tmp_path / "bare", supplier_at(tmp_path / "empty", None))
+
+
+def cloned(where: Path, origin: str) -> Path:
+    """Выкачка поставщика — настоящий клон с `origin`, как её оставляет `actions/checkout`."""
+    where.mkdir(parents=True, exist_ok=True)
+    for args in (["init", "--quiet"], ["remote", "add", "origin", origin]):
+        subprocess.run(["git", "-C", str(where), *args], check=True, timeout=30)
+    (where / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
+    return where
+
+
+@pytest.mark.parametrize(
+    ("running", "origin", "taken"),
+    [
+        ("Owner/Consumer", "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms", "tag"),
+        ("owner/consumer", "git@github.com:ArtVsMark/Engineering-Pipeline-Mechanisms.git", "tag"),
+        (
+            "ArtVsMark/Engineering-Pipeline-Mechanisms",
+            "https://github.com/artvsmark/engineering-pipeline-mechanisms.git",
+            "own",
+        ),
+        ("", "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms", "own"),
+    ],
+    ids=["чужой-https", "чужой-ssh", "свой-регистр", "прогон-не-назван"],
+)
+def test_a_consumers_own_contract_is_not_the_suppliers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, running: str, origin: str, taken: str
+) -> None:
+    """Своя версия контракта — только у самого поставщика, а не у дерева с файлом (`169baca`)."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_REPOSITORY", running)
+    supplier = cloned(tmp_path / "mechanisms", origin)
+    assert policy.contract_of(tree, supplier) == (FAKE_VERSION if taken == "tag" else "0.1.0")
+
+
+def test_the_supplier_is_named_by_the_origin_of_its_clone(tmp_path: Path) -> None:
+    """`supplier_repo` — `владелец/репозиторий` строчными из `origin`; не клон — пусто (045)."""
+    https = cloned(tmp_path / "a", "https://github.com/Owner/Repo.git")
+    ssh = cloned(tmp_path / "b", "git@github.com:Owner/Repo")
+    assert policy.supplier_repo(https) == policy.supplier_repo(ssh) == "owner/repo"
+    (tmp_path / "bare").mkdir()
+    assert policy.supplier_repo(tmp_path / "bare") == ""
 
 
 def test_the_own_version_outside_the_window_is_refused(tmp_path: Path) -> None:

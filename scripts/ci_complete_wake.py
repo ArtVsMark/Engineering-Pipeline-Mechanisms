@@ -50,8 +50,11 @@ import report
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
 
-#: Файл прогона сводного гейта: его прогоны на голове и перезапускаются.
-SUMMARY_FLOW: Final = "ci-complete.yml"
+#: Файл прогона сводного гейта: его прогоны на голове и перезапускаются. Площадка
+#: читает прогон под обоими расширениями, и `onboard.py --update` правит свой
+#: `ci-complete.yaml` потребителя на месте (находка `940b4c6`): будильник ищет
+#: его под тем именем, под которым он есть, — сперва `.yml`, затем двойник.
+SUMMARY_FLOWS: Final = ("ci-complete.yml", "ci-complete.yaml")
 #: Сколько попыток у прогона сводки, после которых будильник его не зовёт. Три:
 #: два завершения `ci` на одной голове (прогон и его перезапуск) плюс запас.
 #: Держится номером попытки у площадки, а не памятью будильника (049).
@@ -95,14 +98,23 @@ def stale_summary(runs: list[dict[str, Any]], ci_done_at: str) -> dict[str, Any]
 
 
 def summary_runs(repo: str, sha: str, token: str) -> list[dict[str, Any]]:
-    """Прогоны сводного гейта на голове — только на событии изменения."""
-    return list(
-        ghrest.paginate(
-            f"repos/{repo}/actions/workflows/{SUMMARY_FLOW}/runs?head_sha={sha}&event=pull_request",
-            token,
-            key="workflow_runs",
-        )
-    )
+    """Прогоны сводного гейта на голове — только на событии изменения.
+
+    Файла сводки нет ни под одним именем — отказ, а не «будить нечего»: прогон
+    сводки на голове есть всегда, и его отсутствие — дефект входа (045).
+    """
+    for flow in SUMMARY_FLOWS:
+        try:
+            return list(
+                ghrest.paginate(
+                    f"repos/{repo}/actions/workflows/{flow}/runs?head_sha={sha}&event=pull_request",
+                    token,
+                    key="workflow_runs",
+                )
+            )
+        except ghrest.NotFound:
+            continue
+    raise NotRun(f"прогона сводного гейта нет ни под одним именем: {', '.join(SUMMARY_FLOWS)}")
 
 
 def wake(repo: str, sha: str, ci_done_at: str, token: str, *, dry_run: bool) -> str:
