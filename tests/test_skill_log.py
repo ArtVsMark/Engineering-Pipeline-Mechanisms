@@ -214,6 +214,22 @@ def test_a_journal_that_cannot_be_written_is_said_and_not_blocking(
     assert "не записан" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("argv", [[], ["failed"]], ids=["без-довода", "опечатка"])
+def test_an_unknown_outcome_is_not_written_as_a_call(
+    argv: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Незнакомый довод — код 1 и причина, а не тихий «ok» поверх отказа (045)."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(sys, "stdin", _Stdin(json.dumps(EVENT)))
+    assert module.main(argv, now=NOW) == module.NOT_RECORDED
+    err = capsys.readouterr().err
+    assert "не записан" in err and ".claude/settings.json" in err, err
+    assert not (tmp_path / module.JOURNAL).exists()
+
+
 def test_the_hook_and_the_summary_read_one_journal() -> None:
     """Хук пишет туда, откуда сводка читает: путь у них один (#1449)."""
     assert module.JOURNAL == load_script("skill_runs.py").JOURNAL

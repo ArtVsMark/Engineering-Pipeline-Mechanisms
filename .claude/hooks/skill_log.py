@@ -58,8 +58,11 @@ NAME_RE: Final = re.compile(r"[\w.:/-]{1,100}")
 #: Больше этого вход не разбирается: событие несёт ответ навыка и бывает велико,
 #: а журналу нужно одно поле (016). Неразобранный вход — строка без имени.
 LIMIT: Final = 1024 * 1024
-#: Исходы — имена событий: вызов прошёл или навык отказал.
+#: Исходы — имена событий: вызов прошёл или навык отказал. Довод хука обязан
+#: быть одним из них: незнакомый не подменяется «ok» (045).
 OUTCOMES: Final = ("ok", "fail")
+#: Сколько знаков незнакомого довода называет отказ.
+SHOWN: Final = 40
 #: Записано — и вызов без прочитанного имени тоже: строка есть, сводка её назовёт.
 RECORDED: Final = 0
 #: Не записано: площадка покажет причину человеку, не останавливая работу.
@@ -91,7 +94,17 @@ def line_of(event: object, outcome: str, now: datetime) -> dict[str, str | None]
 def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     """Пишет вызов навыка; не записанный — причина в stderr и код 1, а не тишина."""
     argv = sys.argv[1:] if argv is None else argv
-    outcome = argv[0] if argv and argv[0] in OUTCOMES else OUTCOMES[0]
+    if not argv or argv[0] not in OUTCOMES:
+        # Опечатка в команде хука засчитала бы отказы навыка вызовами молча —
+        # поэтому вызов не пишется, а причина видна человеку (045).
+        said = f"«{argv[0][:SHOWN]}»" if argv else "не назван"
+        print(
+            f"журнал навыков: исход события {said}, а ждут {' или '.join(OUTCOMES)} — "
+            "вызов не записан; поправьте команду хука в .claude/settings.json",
+            file=sys.stderr,
+        )
+        return NOT_RECORDED
+    outcome = argv[0]
     raw = sys.stdin.read(LIMIT + 1)
     event: object = None
     if len(raw) > LIMIT:
