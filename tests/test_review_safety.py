@@ -2449,6 +2449,67 @@ def test_a_look_task_leaves_the_full_set_to_ci() -> None:
         )
 
 
+#: Где действие кладёт головную версию путей, возвращённых к базе.
+HEAD_OF_RESTORED: Final = "`.claude-pr/`"
+#: Закрепление действия, с журнала которого снят перечень `RESTORED_PATHS`.
+#: Подъём действия краснит `test_the_restored_paths_are_read_from_the_pinned_action`:
+#: список путей мог смениться вместе с версией, и его перечитывают по журналу.
+RESTORED_FROM_PIN: Final = "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc"
+#: Пути, которые действие возвращает к базе перед заходом на изменение, — по
+#: журналу закреплённой версии (прогон 39126551465, задание `review`, 18.10.2026).
+RESTORED_PATHS: Final = (
+    ".claude/",
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+    ".mcp.json",
+    ".claude.json",
+    ".gitmodules",
+    ".ripgreprc",
+    ".husky",
+)
+
+
+def test_the_restored_paths_are_read_from_the_pinned_action() -> None:
+    """Перечень возвращаемых путей снят с той версии действия, что закреплена (взгляд на #1512).
+
+    Список берётся из журнала действия, а не из нашего кода, и с подъёмом
+    закрепления может смениться. Поэтому каждое закрепление
+    `anthropics/claude-code-action` в шаге взгляда совпадает с тем, с которого
+    перечень снят: подъём краснит здесь, и перечень перечитывают по журналу.
+    """
+    pins = set(
+        re.findall(r"anthropics/claude-code-action@([0-9a-f]{40})", LOOK_BODY.read_text("utf-8"))
+    )
+    assert pins, f"{LOOK_BODY.name}: закреплений действия не найдено — предмета нет (075)"
+    assert pins == {RESTORED_FROM_PIN}, (
+        f"действие закреплено на {sorted(pins)}, а перечень путей снят с {RESTORED_FROM_PIN}: "
+        "перечитайте журнал прогона и обновите RESTORED_PATHS"
+    )
+
+
+def test_the_look_names_the_paths_restored_to_the_base() -> None:
+    """Задание взгляда на изменение называет пути в версии базы и где лежит голова (#1501).
+
+    Действие перед заходом на изменение возвращает `.claude/`, `CLAUDE.md` и
+    соседей к общей ветке — голова недоверенная — и кладёт её версию в
+    `.claude-pr/`. Задание об этом молчало, и дважды на #1500 и раз на #1507
+    взгляд видел «обратную правку» в рабочем дереве, а тест по `.claude/`
+    покраснел у него на версии `main`. Предмет — заход на изменение (джоб
+    `review`). Соседи названы (195): верификатор зовётся вручную, а поздний
+    взгляд смотрит уже слитое — головы, отличной от базы, у них нет.
+    """
+    review = [
+        step
+        for step in load(LOOK_BODY)["jobs"]["review"]["steps"]
+        if "claude_args" in (step.get("with") or {})
+    ]
+    assert review, f"{LOOK_BODY.name}: у джоба review нет шага агента — предмета нет (075)"
+    for step in review:
+        task = str(step["with"].get("prompt") or "")
+        missing = [one for one in (HEAD_OF_RESTORED, *RESTORED_PATHS) if one not in task]
+        assert not missing, f"{LOOK_BODY.name}, «{step.get('name')}»: задание не называет {missing}"
+
+
 #: Имя нашего скрипта в тексте задания: `check_version.py` и подобные.
 SCRIPT_NAME = re.compile(r"\b(\w+\.py)\b")
 

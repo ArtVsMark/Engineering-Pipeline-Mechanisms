@@ -37,6 +37,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -413,7 +414,73 @@ def our_slice(where: dict[str, Any], project: str) -> dict[str, Any] | None:
     )
 
 
-def catalogue_found(where: dict[str, Any], project: str) -> list[Drift]:
+#: Статус ответа `.rules/bindings.json`, который ответом не считается. Не путать
+#: с классом проверки `pipeline_checks.UNREVIEWED`: слово то же, предмет другой.
+UNREVIEWED_ANSWER: Final = "unreviewed"
+#: Пара «заменённое → заменяющее» в находке каталога о заменённых правилах:
+#: номера правил трёхзначные, стрелка — как её пишет каталог.
+SUPERSEDED_PAIR_RE: Final = re.compile(r"(?<!\d)(\d{3}) → (\d{3})(?!\d)")
+#: Номер правила в тексте находки — трёхзначный, не часть другого числа.
+RULE_NUMBER_RE: Final = re.compile(r"(?<!\d)\d{3}(?!\d)")
+
+
+def superseded_by(export: dict[str, Any]) -> dict[str, str]:
+    """Замены правил из выгрузки каталога: номер заменённого → номер заменяющего."""
+    return {
+        str(rule.get("id")): str(rule["superseded_by"])
+        for rule in export.get("rules") or []
+        if isinstance(rule, dict) and rule.get("superseded_by")
+    }
+
+
+def answered_rules(mine: dict[str, Any]) -> frozenset[str]:
+    """Номера правил, по которым у нас есть ответ, — без нерассмотренных."""
+    return frozenset(
+        str(number)
+        for number, answer in (mine.get("rules") or {}).items()
+        if str((answer or {}).get("status") or "") != UNREVIEWED_ANSWER
+    )
+
+
+def superseded_state(said: str, answered: frozenset[str], replaced: dict[str, str] | None) -> bool:
+    """Находка — ровно наши ответы о заменённых правилах, и каждое заменяющее отвечено.
+
+    СОСТОЯНИЕ, А НЕ РАБОТА — И ЭТО ГОВОРИТ САМ КАТАЛОГ. Контракт его выгрузки
+    (`export/README.md`, раздел `superseded_by`): «ответ потребителя о
+    заменённом правиле — состояние, а не находка». Сводка всё равно кладёт его в
+    `findings`, и дрейф подавал его работой с советом править ответ: замер
+    18.10.2026 — двенадцать пар, все заменяющие отвечены (#1472), чинить нечего,
+    а строка висела бы в плане всегда (#1502).
+
+    СУДЯТСЯ ДАННЫЕ, А НЕ ТЕКСТ (взгляд на #1511). Пара номеров в тексте — ещё не
+    замена: находка другого рода со стрелкой ушла бы в заметку молча. Поэтому
+    пары находки сверяются с заменами из выгрузки (`superseded_by`): состояние —
+    когда они совпадают ровно с заменами наших отвеченных правил, других номеров
+    правил в тексте нет, а каждое заменяющее у нас отвечено. Не совпало, нашёлся
+    лишний номер, заменяющее не отвечено или выгрузку прочитать не удалось
+    (`replaced` пусто) — это работа, и находка идёт прежним путём: незнакомая
+    форма не гасится молча (045). Граница названа: приписанная к находке вторая
+    беда без номера правила здесь не видна.
+    """
+    if not replaced:
+        return False
+    pairs = set(SUPERSEDED_PAIR_RE.findall(said))
+    ours = {(old, new) for old, new in replaced.items() if old in answered}
+    numbers = set(RULE_NUMBER_RE.findall(said))
+    return (
+        bool(pairs)
+        and pairs == ours
+        and numbers == {one for pair in pairs for one in pair}
+        and all(new in answered for _, new in pairs)
+    )
+
+
+def catalogue_found(
+    where: dict[str, Any],
+    project: str,
+    answered: frozenset[str] = frozenset(),
+    replaced: dict[str, str] | None = None,
+) -> list[Drift]:
     """Находки каталога о НАШЕМ ответе доезжают до того, кто их чинит.
 
     КАНАЛ БЫЛ ПОСТРОЕН С ТОЙ СТОРОНЫ И НЕ ЧИТАЛСЯ С ЭТОЙ. Ключ `findings`
@@ -441,6 +508,11 @@ def catalogue_found(where: dict[str, Any], project: str) -> list[Drift]:
     ЧИНИТСЯ У НАС, А НЕ У КАТАЛОГА. Находка о нашем ответе правится в
     `.rules/bindings.json`; ставит её каталог, а закрываем мы
     ([086](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/086-the-finder-does-not-grade-the-finding.md)).
+
+    СОСТОЯНИЕ НАЗЫВАЕТСЯ, НО РАБОТОЙ НЕ ПОДАЁТСЯ. Находка о заменённых правилах,
+    у которых заменяющие отвечены (`superseded_state`: `answered` — наши
+    отвеченные номера, `replaced` — замены из выгрузки), печатается заметкой в
+    журнал захода, а записью — нет.
     """
     us = our_slice(where, project)
     if us is None:
@@ -450,16 +522,27 @@ def catalogue_found(where: dict[str, Any], project: str) -> list[Drift]:
         # `null` каталог ставит себе сам — находок о себе у него нет. Это
         # «не нашли», а не «не прочитали», и молчание здесь законно.
         return []
-    return [
-        Drift(
-            "catalogue-finding",
-            f"каталог нашёл в нашем ответе: {report.cut(' '.join(str(one).split()))}",
-            "перечитать ответ по этой находке и поправить `.rules/bindings.json` — "
-            "ставит её каталог, а закрываем мы (086)",
+    found: list[Drift] = []
+    for one in said:
+        text = " ".join(str(one).split())
+        if not text:
+            continue
+        if superseded_state(text, answered, replaced):
+            print(
+                f"::notice::каталог называет состоянием, и заменяющие у нас отвечены — "
+                f"работы нет: {report.cut(text)}",
+                file=sys.stderr,
+            )
+            continue
+        found.append(
+            Drift(
+                "catalogue-finding",
+                f"каталог нашёл в нашем ответе: {report.cut(text)}",
+                "перечитать ответ по этой находке и поправить `.rules/bindings.json` — "
+                "ставит её каталог, а закрываем мы (086)",
+            )
         )
-        for one in said
-        if str(one).strip()
-    ]
+    return found
 
 
 def snapshot_is_stale(where: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
@@ -506,7 +589,12 @@ def snapshot_is_stale(where: dict[str, Any], mine: dict[str, Any], project: str)
     ]
 
 
-def family_summary(where: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
+def family_summary(
+    where: dict[str, Any],
+    mine: dict[str, Any],
+    project: str,
+    replaced: dict[str, str] | None = None,
+) -> list[Drift]:
     """Три вопроса к одной сводке — и слить их нельзя.
 
     «Разрез читает не ту форму» чинится у нас правкой кода; «каталог нашёл в
@@ -517,7 +605,7 @@ def family_summary(where: dict[str, Any], mine: dict[str, Any], project: str) ->
     """
     return (
         reader_is_behind(where)
-        + catalogue_found(where, project)
+        + catalogue_found(where, project, answered_rules(mine), replaced)
         + snapshot_is_stale(where, mine, project)
     )
 
@@ -561,6 +649,18 @@ def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
 #: Как площадка называет право обхода для спрашивающего. «never» — не вправе
 #: никогда; прочие значения означают, что вправе при каких-то условиях.
 NEVER: Final = "never"
+#: Приставка токена установки приложения: такой выдаёт площадка прогону
+#: (`github.token`). У токена человека приставка другая — `ghp_`,
+#: `github_pat_`, — а у прокси облачного окна своя. ГРАНИЦА: `ghs_` — у токена
+#: установки ЛЮБОГО приложения, и токен другого приложения сошёл бы за токен
+#: прогона. Что дрейф зовут именно с `github.token`, держит
+#: `tests/test_drift.py::test_drift_is_called_with_the_run_token` (взгляд на #1511).
+RUN_TOKEN_PREFIX: Final = "ghs_"
+
+
+def is_run_token(token: str) -> bool:
+    """Заход идёт прогоном площадки, и токен — токен установки, то есть прогона."""
+    return os.environ.get("GITHUB_ACTIONS") == "true" and token.startswith(RUN_TOKEN_PREFIX)
 
 
 def declared_protection(where: Path | None = None) -> dict[str, Any]:
@@ -615,7 +715,28 @@ def merge_ways_moved(said: dict[str, Any]) -> list[Drift]:
     ]
 
 
-def protection_moved(repo: str, token: str) -> list[Drift]:
+#: Защита общей ветки, прочитанная один раз: объявление и правила площадки.
+ProtectionRead = tuple[dict[str, Any], list[dict[str, Any]]]
+
+
+def protection_read(repo: str, token: str) -> ProtectionRead:
+    """Объявление защиты из дерева и действующие правила ветки на площадке.
+
+    ОТКАЗ ОБЩЕГО ЧТЕНИЯ — ТРЕТИЙ ИСХОД ИСТОЧНИКА, А НЕ ПАДЕНИЕ ЗАХОДА.
+    `protection.live` говорит о непрочитанном своим исключением, и пропустить
+    его наружу значило бы уронить весь дрейф из-за одной осечки сети: прочие
+    источники к ней отношения не имеют (084, 039). Нашёл внешний взгляд (74a6c07).
+    """
+    said = declared_protection()
+    try:
+        return said, protection.live(repo, str(said["branch"]), token)
+    except protection.NotRead as exc:
+        raise NotRun(str(exc)) from exc
+
+
+def protection_moved(
+    repo: str, token: str, read: Callable[[], ProtectionRead] | None = None
+) -> list[Drift]:
     """Защита общей ветки против объявленной: что ослаблено молча.
 
     НАСТРОЙКА ЖИВЁТ ВНЕ ДЕРЕВА, и это делает её слепым пятном: её не видит ни
@@ -630,23 +751,18 @@ def protection_moved(repo: str, token: str) -> list[Drift]:
 
     ПРАВО ОБХОДА СПРАШИВАЕТСЯ ПРО СПРАШИВАЮЩЕГО. Площадка отдаёт
     `current_user_can_bypass` — ответ про ТОТ токен, которым задан вопрос.
-    Здесь это токен прогона, и объявление говорит о нём: прогон не вправе
-    толкать мимо проверок никогда. Про токен владельца поле не говорит ничего,
-    и выдавать один ответ за другой значило бы назвать проверенным то, чего не
-    спрашивали (046).
-    """
-    said = declared_protection()
-    branch = str(said["branch"])
-    found: list[Drift] = []
+    Объявление говорит о токене прогона: прогон не вправе толкать мимо проверок
+    никогда. Про токен владельца поле не говорит ничего, и выдавать один ответ
+    за другой значило бы назвать проверенным то, чего не спрашивали (046).
 
-    # ОТКАЗ ОБЩЕГО ЧТЕНИЯ — ТРЕТИЙ ИСХОД ЭТОГО ИСТОЧНИКА, А НЕ ПАДЕНИЕ ЗАХОДА.
-    # `protection.live` говорит о непрочитанном своим исключением, и пропустить
-    # его наружу значило бы уронить весь дрейф из-за одной осечки сети: прочие
-    # источники к ней отношения не имеют (084, 039). Нашёл внешний взгляд (74a6c07).
-    try:
-        rules = protection.live(repo, branch, token)
-    except protection.NotRead as exc:
-        raise NotRun(str(exc)) from exc
+    ПОЭТОМУ ПРАВО ОБХОДА — СВОЙ ИСТОЧНИК (`bypass_moved`). Здесь — сверки, от
+    токена не зависящие: правила, обязательные контексты, свежесть. `read` —
+    чтение защиты, общее с правом обхода; не передано — читается здесь. Чтение
+    зовёт сам источник, а не тот, кто его спрашивает: подделанный источник в
+    сеть не ходит.
+    """
+    said, rules = read() if read is not None else protection_read(repo, token)
+    found: list[Drift] = []
     kinds_now = protection.kinds(rules)
     kinds_want = sorted(str(one) for one in said.get("rules") or [])
     gone = [name for name in kinds_want if name not in kinds_now]
@@ -688,6 +804,32 @@ def protection_moved(repo: str, token: str) -> list[Drift]:
                 )
             )
 
+    return found
+
+
+def bypass_moved(
+    repo: str, token: str, read: Callable[[], ProtectionRead] | None = None
+) -> list[Drift]:
+    """Право обхода защиты у токена прогона против объявленного.
+
+    ВНЕ ПРОГОНА ИСТОЧНИК НЕ ОТВЕТИЛ, И ЭТО НАЗВАНО ЕГО ИСХОДОМ. Площадка
+    отвечает про того, кто спросил, а объявление говорит о токене прогона.
+    Заход из окна шёл токеном с ролью администратора: 18.10.2026 у набора
+    22629354 обход его роли — `always`, и дрейф выдал «объявлено never,
+    площадка говорит always» о токене, про который объявление не говорит
+    (#1502). Не токен прогона (`is_run_token`) — «не отработал» с причиной: имя
+    источника попадает в неответившие и в итог захода, а не в заметку, которую
+    итог «дрейфа нет» перекрывал бы (взгляд на #1511, 084). Чтение защиты общее
+    с `protection_moved` (`read`): второе чтение того же ответа могло бы прийти
+    другим (022).
+    """
+    if not is_run_token(token):
+        raise NotRun(
+            "право обхода не проверено: заход идёт не токеном прогона, а объявление "
+            "говорит о нём — ответ площадки был бы про спросившего (046)"
+        )
+    said, rules = read() if read is not None else protection_read(repo, token)
+    found: list[Drift] = []
     # ПРАВО ОБХОДА ЧИТАЕТСЯ У КАЖДОГО НАБОРА, ПРИКРЫВАЮЩЕГО ЭТУ ВЕТКУ, А НЕ У
     # ПЕРВОГО. Наборов бывает несколько, и вправе обойти достаточно одного:
     # выйти после первого значило бы проверить самый безобидный и назвать это
@@ -2030,6 +2172,7 @@ SOURCES: Final = (
     "сводка семьи",
     "выпуск каталога",
     "защита общей ветки",
+    "право обхода защиты",
     "способ слияния",
     "версии языка",
     "версии чужих действий",
@@ -2058,18 +2201,46 @@ def look(
     found: list[Drift] = []
     silent: list[str] = []
     own = own_prefixes()
+    # ОДНО ЧТЕНИЕ НА ДВА ВОПРОСА: выгрузку читают «каталог» и замены в сводке
+    # семьи, защиту — её сверки и право обхода. Второе чтение того же ответа
+    # могло бы прийти другим, и вердикты разошлись бы молча (022).
+    once: dict[str, Any] = {}
+
+    def export_once() -> dict[str, Any]:
+        if "export" not in once:
+            once["export"] = fetch(EXPORT_URL)
+        return dict(once["export"])
+
+    def replaced_or_none() -> dict[str, str] | None:
+        # Выгрузка не прочитана — замен не знаем, и находки о заменённых идут
+        # работой. Это не молчаливый откат: отказ выгрузки называет источник
+        # «каталог» своим исходом (045).
+        try:
+            return superseded_by(export_once())
+        except ghrest.TransportError:
+            return None
+
+    def protection_once() -> ProtectionRead:
+        if "protection" not in once:
+            once["protection"] = protection_read(repo, token)
+        read: ProtectionRead = once["protection"]
+        return read
+
     asks: tuple[tuple[str, Any], ...] = (
-        ("каталог", lambda: catalogue_asked(fetch(EXPORT_URL), mine)),
+        ("каталог", lambda: catalogue_asked(export_once(), mine)),
         (
             # ФЕТЧ ОДИН НА ОБА ВОПРОСА. Второе чтение того же адреса могло бы
             # прийти уже другим, и два вердикта разошлись бы молча (022) —
             # ровно та поломка, которую внешний взгляд нашёл в `build_facts`
             # на #240.
             "сводка семьи",
-            lambda: family_summary(fetch(WHERE_URL), mine, str(mine.get("project") or repo)),
+            lambda: family_summary(
+                fetch(WHERE_URL), mine, str(mine.get("project") or repo), replaced_or_none()
+            ),
         ),
         ("выпуск каталога", lambda: pinned_tag_moved(repo, token)),
-        ("защита общей ветки", lambda: protection_moved(repo, token)),
+        ("защита общей ветки", lambda: protection_moved(repo, token, protection_once)),
+        ("право обхода защиты", lambda: bypass_moved(repo, token, protection_once)),
         ("способ слияния", lambda: merge_ways_moved(merge_said)),
         (
             "версии языка",

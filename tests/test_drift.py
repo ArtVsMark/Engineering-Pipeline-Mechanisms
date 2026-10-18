@@ -153,6 +153,117 @@ def test_a_catalogue_finding_about_us_reaches_the_registry() -> None:
     assert "bindings.json" in found[0].next_step, "починка живёт у нас, а не у каталога (086)"
 
 
+#: Находка о заменённых правилах — так, как её пишет каталог (сводка 18.10.2026).
+SUPERSEDED = (
+    "отвечает о заменённых правилах — 002 → 224, 005 → 222. Это состояние, а не "
+    "находка: ответ верен для того, что было. Перенести его или нет, решает потребитель"
+)
+#: Замены из выгрузки каталога для этих двух пар.
+REPLACED = {"002": "224", "005": "222"}
+#: Наши отвеченные: заменённые и заменяющие.
+ANSWERED = frozenset({"002", "005", "222", "224"})
+
+
+def test_superseded_with_answered_replacements_is_a_state(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Пары совпали с выгрузкой, заменяющие отвечены — это состояние, а не работа (#1502).
+
+    Каталог сам называет её состоянием, и контракт его выгрузки говорит то же
+    (`superseded_by`). Подавать её работой с советом править ответ значило бы
+    держать строку в плане вечно: чинить нечего.
+    """
+    found = module.catalogue_found(
+        slice_with([SUPERSEDED]), "o/Engineering-Pipeline-Mechanisms", ANSWERED, REPLACED
+    )
+    assert found == []
+    assert "состоянием" in capsys.readouterr().err, "состояние не названо в журнале"
+
+
+@pytest.mark.parametrize(
+    ("said", "answered", "replaced"),
+    [
+        (SUPERSEDED, frozenset({"002", "005", "224"}), REPLACED),
+        (SUPERSEDED, ANSWERED, None),
+        (SUPERSEDED, ANSWERED, {"002": "224"}),
+        (SUPERSEDED, ANSWERED | {"057"}, {**REPLACED, "057": "224"}),
+        ("ответ 002 → 224 ссылается на чужое правило", ANSWERED, {"005": "222"}),
+        (SUPERSEDED + "; ответ 131 не найден в дереве", ANSWERED, REPLACED),
+    ],
+    ids=[
+        "заменяющее-без-ответа",
+        "выгрузка-не-прочитана",
+        "пара-не-из-выгрузки",
+        "наша-замена-не-названа",
+        "стрелка-другого-рода",
+        "склеено-со-второй-бедой",
+    ],
+)
+def test_a_superseded_finding_that_does_not_match_is_work(
+    said: str, answered: frozenset[str], replaced: dict[str, str] | None
+) -> None:
+    """Не совпало с выгрузкой или наши ответы не всё покрывают — это работа (взгляд на #1511)."""
+    found = module.catalogue_found(
+        slice_with([said]), "o/Engineering-Pipeline-Mechanisms", answered, replaced
+    )
+    assert len(found) == 1 and "bindings.json" in found[0].next_step
+
+
+def test_a_replacement_of_an_unanswered_rule_is_not_ours() -> None:
+    """Замена правила, на которое мы не отвечали, в находку о наших ответах не входит."""
+    replaced = {**REPLACED, "057": "224"}
+    assert module.superseded_state(SUPERSEDED, ANSWERED, replaced)
+    assert not module.superseded_state(SUPERSEDED, ANSWERED | {"057"}, replaced)
+
+
+def test_a_finding_without_pairs_is_never_a_state() -> None:
+    """Находка без пар номеров состоянием не бывает: незнакомая форма не гасится (045)."""
+    assert not module.superseded_state("Это состояние, а не находка", ANSWERED, REPLACED)
+    assert not module.superseded_state("1002 → 2240", ANSWERED, {"1002": "2240"})
+
+
+def test_superseded_by_reads_the_export() -> None:
+    """Замены — из `superseded_by` выгрузки; правила без замены и не словари пропускаются."""
+    export = {
+        "rules": [
+            {"id": "002", "superseded_by": "224"},
+            {"id": "003"},
+            {"id": "005", "superseded_by": ""},
+            "не правило",
+        ]
+    }
+    assert module.superseded_by(export) == {"002": "224"}
+    assert module.superseded_by({}) == {}
+
+
+def test_answered_rules_skip_the_unreviewed() -> None:
+    """Отвеченные — все, кроме нерассмотренных; пустой ответ — не отвеченное правило."""
+    mine = {"rules": {"001": {"status": "active"}, "002": {"status": "unreviewed"}, "003": {}}}
+    assert module.answered_rules(mine) == frozenset({"001", "003"})
+    assert module.answered_rules({}) == frozenset()
+
+
+def test_the_summary_passes_our_answers_to_the_findings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сводка семьи отдаёт находкам наши отвеченные номера, а не пустоту."""
+    seen: list[tuple[frozenset[str], dict[str, str] | None]] = []
+
+    def found(
+        where: dict[str, Any],
+        project: str,
+        answered: frozenset[str],
+        replaced: dict[str, str] | None,
+    ) -> list[Any]:
+        seen.append((answered, replaced))
+        return []
+
+    monkeypatch.setattr(module, "catalogue_found", found)
+    monkeypatch.setattr(module, "snapshot_is_stale", lambda *a, **k: [])
+    module.family_summary({}, {"rules": {"224": {"status": "active"}}}, "o/r", REPLACED)
+    assert seen == [(frozenset({"224"}), REPLACED)]
+
+
 def test_a_finding_of_many_lines_stays_one_record() -> None:
     """Перенос строки из чужого текста не разрывает запись на две.
 
@@ -293,6 +404,7 @@ def test_a_silent_source_never_reads_as_settled(monkeypatch: pytest.MonkeyPatch)
     # `fetch`: в подделке его гасят отдельно, иначе проверка молчания одних
     # источников пошла бы в сеть за другим.
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
+    monkeypatch.setattr(module, "bypass_moved", lambda *a, **k: [])
     monkeypatch.setattr(module, "merge_ways_moved", lambda *a, **k: [])
     # Выпуски чужих действий тоже ходят к площадке своим запросом — гасятся
     # так же, по той же причине.
@@ -354,6 +466,7 @@ def test_one_silent_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(module, "snapshot_is_stale", lambda *_: [drift])
     monkeypatch.setattr(module, "pinned_tag_moved", lambda *_: [])
     monkeypatch.setattr(module, "protection_moved", lambda *a, **k: [])
+    monkeypatch.setattr(module, "bypass_moved", lambda *a, **k: [])
     monkeypatch.setattr(module, "merge_ways_moved", lambda *a, **k: [])
     monkeypatch.setattr(module, "proposals_answered", lambda *a, **k: [])
     # ВЕРСИИ ЯЗЫКА ХОДИЛИ В СЕТЬ, И ПЕРВАЯ ПОЧИНКА ЭТОГО НЕ ЗАКРЫЛА. Подделан
@@ -1268,12 +1381,174 @@ def platform(
     return reply
 
 
-def watched(monkeypatch: pytest.MonkeyPatch, reply: Any) -> list[Any]:
-    """Находки источника «защита общей ветки» на подделанном ответе."""
+#: Токен установки приложения — такой площадка выдаёт прогону.
+RUN_TOKEN = "ghs_прогон"
+#: Функции, которые спрашивает `look` помимо чтения сетью через `fetch`.
+SOURCE_FUNCTIONS = frozenset(
+    {
+        "catalogue_asked",
+        "family_summary",
+        "pinned_tag_moved",
+        "protection_moved",
+        "bypass_moved",
+        "merge_ways_moved",
+        "language_moved",
+        "actions_disagree",
+        "actions_behind",
+        "pin_mislabelled",
+        "platform_warnings",
+        "proposals_answered",
+        "showcase_questions_moved",
+        "gap_tasks_closed",
+        "release_behind_tree",
+        "probe_behind_release",
+        "manifest",
+        "declared_versions",
+        "matrix_system",
+        "action_versions",
+        "pinned_hashes",
+        "ours_proposals",
+        "ours_showcase",
+    }
+)
+
+
+def watched(
+    monkeypatch: pytest.MonkeyPatch, reply: Any, *, token: str = RUN_TOKEN, run: bool = True
+) -> list[Any]:
+    """Находки источника «защита общей ветки» на подделанном ответе — по умолчанию в прогоне."""
     monkeypatch.setattr(module, "declared_protection", lambda *a, **k: PROTECTED)
     monkeypatch.setattr(module.ghrest, "request", reply)
-    found: list[Any] = module.protection_moved("o/r", "t")
+    if run:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    else:
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    found: list[Any] = module.protection_moved("o/r", token)
+    if module.is_run_token(token):
+        found += module.bypass_moved("o/r", token)
     return found
+
+
+@pytest.mark.parametrize(
+    ("token", "run"),
+    [("ghp_человек", True), ("github_pat_человек", True), (RUN_TOKEN, False), ("proxy", False)],
+    ids=["токен-человека-в-прогоне", "тонкий-токен-человека", "прогона-вне-площадки", "окно"],
+)
+def test_bypass_outside_the_run_token_is_named_unchecked(
+    monkeypatch: pytest.MonkeyPatch, token: str, run: bool
+) -> None:
+    """Не токен прогона — источник права обхода не отработал с причиной (#1502, взгляд на #1511).
+
+    Заход из окна шёл токеном с ролью администратора, и площадка честно
+    отвечала «always» про него — дрейф выдавал это за обход у прогона. Теперь
+    источник «право обхода защиты» отвечает «не отработал»: его имя уходит в
+    неответившие и в итог захода, а не в заметку. Прочие сверки защиты от токена
+    не зависят и идут как шли.
+    """
+    asked: list[str] = []
+
+    def reply(method: str, path: str, *args: object, **kwargs: object) -> Any:
+        asked.append(path)
+        return platform(bypass="always")(method, path, *args, **kwargs)
+
+    assert watched(monkeypatch, reply, token=token, run=run) == []
+    with pytest.raises(module.NotRun, match="не проверено"):
+        module.bypass_moved("o/r", token)
+    assert not [one for one in asked if "/rulesets/" in one], "право обхода спрошено не тем токеном"
+
+
+def test_protection_read_gives_the_declaration_and_the_live_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Чтение защиты — объявление и правила площадки; отказ площадки — «не отработал» (039)."""
+    rules = [{"type": "deletion", "ruleset_id": 1}]
+    monkeypatch.setattr(module, "declared_protection", lambda *a, **k: PROTECTED)
+    monkeypatch.setattr(module.protection, "live", lambda repo, branch, token: rules)
+    assert module.protection_read("o/r", RUN_TOKEN) == (PROTECTED, rules)
+
+    def refuse(repo: str, branch: str, token: str) -> Any:
+        raise module.protection.NotRead("площадка не ответила")
+
+    monkeypatch.setattr(module.protection, "live", refuse)
+    with pytest.raises(module.NotRun, match="не ответила"):
+        module.protection_read("o/r", RUN_TOKEN)
+
+
+def test_protection_is_read_once_for_both_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Защита читается один раз на сверки и право обхода: второе чтение разошлось бы (022)."""
+    reads: list[str] = []
+
+    def read(repo: str, token: str) -> Any:
+        reads.append(token)
+        return PROTECTED, []
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(module, "protection_read", read)
+    keep = {"protection_moved", "bypass_moved", "protection_read"}
+    for name in SOURCE_FUNCTIONS - keep:
+        monkeypatch.setattr(module, name, lambda *a, **k: [])
+    monkeypatch.setattr(module, "fetch", lambda url: {})
+    module.look("o/r", RUN_TOKEN, {"rules": {}}, {"settings": {}})
+    assert reads == [RUN_TOKEN]
+
+
+def test_drift_is_called_with_the_run_token() -> None:
+    """Дрейф в прогонах зовут с `github.token`: на этом держится граница `ghs_` (взгляд на #1511).
+
+    Приставка `ghs_` есть у токена установки ЛЮБОГО приложения, и токен другого
+    приложения сошёл бы за токен прогона. Что так не бывает, держит этот тест:
+    каждый шаг, зовущий `drift.py` со сверкой защиты, ставит `GH_TOKEN` из
+    `github.token`. Соседи названы (195): `--published` и `--save-merge-ways`
+    защиту не сверяют.
+    """
+    import yaml
+
+    from tests.conftest import walk
+
+    called: list[tuple[str, str]] = []
+    for flow in walk(ROOT / ".github" / "workflows", "*.yml"):
+        jobs = (yaml.safe_load(flow.read_text(encoding="utf-8")) or {}).get("jobs") or {}
+        for job in jobs.values():
+            for step in job.get("steps") or []:
+                run = str(step.get("run") or "")
+                if "drift.py" not in run or "--published" in run or "--save-merge-ways" in run:
+                    continue
+                token = str((step.get("env") or {}).get("GH_TOKEN") or "")
+                called.append((flow.name, token))
+    assert called, "шагов, зовущих дрейф, не найдено — предмета нет (075)"
+    wrong = [one for one in called if one[1].replace(" ", "") != "${{github.token}}"]
+    assert not wrong, f"дрейф зовут не токеном прогона: {wrong}"
+
+
+@pytest.mark.parametrize(
+    ("actions", "token", "said"),
+    [
+        ("true", "ghs_x", True),
+        ("true", "ghp_x", False),
+        ("true", "github_pat_x", False),
+        ("", "ghs_x", False),
+        ("true", "", False),
+    ],
+    ids=[
+        "прогон-токен-установки",
+        "прогон-токен-человека",
+        "прогон-тонкий",
+        "вне-прогона",
+        "без-токена",
+    ],
+)
+def test_is_run_token_needs_both_the_run_and_the_installation_token(
+    monkeypatch: pytest.MonkeyPatch, actions: str, token: str, said: bool
+) -> None:
+    """Токен прогона — только в прогоне площадки и только токен установки приложения."""
+    monkeypatch.setenv("GITHUB_ACTIONS", actions)
+    assert module.is_run_token(token) is said
+
+
+def test_a_removed_rule_is_named_outside_the_run_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сверка правил от токена не зависит: снятое правило названо и из окна."""
+    found = watched(monkeypatch, platform(kinds=("required_status_checks",)), run=False)
+    assert len(found) == 1 and "deletion" in found[0].said
 
 
 def test_protection_that_matches_the_declaration_is_silent(
@@ -2166,6 +2441,7 @@ def test_look_hands_the_merge_ways_source_what_the_secret_step_said(
         "release_behind_tree",
         "probe_behind_release",
         "protection_moved",
+        "bypass_moved",
         "actions_behind",
         "pin_mislabelled",
         "platform_warnings",
@@ -2586,6 +2862,7 @@ def test_a_broken_proposals_file_silences_only_its_own_source(
         "family_summary",
         "pinned_tag_moved",
         "protection_moved",
+        "bypass_moved",
         "merge_ways_moved",
         "language_moved",
         "actions_disagree",
