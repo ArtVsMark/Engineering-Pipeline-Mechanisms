@@ -2428,6 +2428,27 @@ def test_a_task_allowing_pytest_asks_for_the_foreground(path: Path) -> None:
             )
 
 
+#: Слова задания, которыми взгляду велено оставить полный набор CI.
+FULL_SET_TO_CI: Final = "ПОЛНЫЙ НАБОР НЕ ГОНИ"
+
+
+def test_a_look_task_leaves_the_full_set_to_ci() -> None:
+    """Заход взгляда не гонит полный набор: он за CI (решение владельца 18.10.2026, #1480).
+
+    Замер 18.10.2026: заходы с полным набором кончались за 18–19 минут при
+    пределе шага 20, а три подряд — таймаутом действия без вердикта. Прежнее
+    задание само велело «долгий набор гони целиком». Предмет — заходы шага
+    взгляда. Сосед назван (195): ответ на обращение (`step-claude.yml`) зовёт
+    человек, и объём прогона там задаёт он, а не этот гейт.
+    """
+    looked = [one for one in commands_and_task(LOOK_BODY) if any("pytest" in c for c in one[1])]
+    assert looked, f"{LOOK_BODY.name}: заходов с pytest нет — предмета у проверки нет (075)"
+    for name, _, task in looked:
+        assert FULL_SET_TO_CI in task, (
+            f"{LOOK_BODY.name}, «{name}»: pytest разрешён, а задание не оставляет полный набор CI"
+        )
+
+
 #: Имя нашего скрипта в тексте задания: `check_version.py` и подобные.
 SCRIPT_NAME = re.compile(r"\b(\w+\.py)\b")
 

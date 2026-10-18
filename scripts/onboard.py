@@ -81,6 +81,13 @@
 дереве потребителя уже занят · ``6`` общая ветка потребителя не ``main`` ·
 ``7`` с ``--update``: наш файл правлен по существу, не записано ничего.
 
+СВОЙ ПУТЬ НАЗЫВАЕТСЯ КЛЮЧОМ, А НЕ УБИРАЕТСЯ РУКАМИ (#1503, решение владельца
+18.10.2026). У живого проекта часть путей заготовки уже занята своим файлом с
+другим предметом — свой выпуск пакета, свои значки. `--write --keep ПУТЬ`
+этот путь не пишет и не считает занятым, а проверки прогона по нему кладёт
+в ответ классом `off` с причиной: молча проверка не пропадает. Путь, которого
+заготовка не кладёт, — отказ: опечатка в ключе иначе прошла бы молча (045).
+
 ОБНОВЛЕНИЕ — ВТОРАЯ ДВЕРЬ, `--update` (#1386). Наш файл сверяется с заготовкой
 СВОЕГО тега по существу вызова, а не по тексту; совпал — переписывается новой
 заготовкой, разошёлся — отказ на всё обновление с разницей для поставщика.
@@ -302,10 +309,16 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
     его из джобов `ci.yml` в заготовке и из пробы передачи. Управляющий механизм
     — шаг, которого `ci.yml` не зовёт, а зовёт ровно один свой прогон. Два своих
     прогона у одного шага — неоднозначность, и это отказ, а не выбор первого.
+
+    ПРОГОН ЧИТАЕТСЯ ПОД ОБОИМИ РАСШИРЕНИЯМИ, как его читает площадка (находка
+    `e8e7fb3`, правило 195). Двойник признан у всех дверей захода (`standing`),
+    а здесь прогон искался только как `*.yml`, и `ci.yaml` не был бы `ci.yml`:
+    свой прогон под `.yaml` выпал бы из поиска вызывающего молча.
     """
     wanted = set(names)
     callers: dict[str, list[Path]] = {}
-    for flow in sorted((root / paths.WORKFLOWS).glob("*.yml")):
+    entries = (root / paths.WORKFLOWS).glob("*")
+    for flow in sorted(one for one in entries if one.suffix in YAML_TWINS):
         if flow.name.startswith(STEP_PREFIX):
             continue
         try:
@@ -318,7 +331,7 @@ def own_callers(root: Path, names: list[str]) -> dict[str, Path]:
                 callers[name].append(flow)
     found: dict[str, Path] = {}
     for name, flows in callers.items():
-        if any(flow.name == PIPELINE_FLOW for flow in flows):
+        if any(flow.with_suffix(".yml").name == PIPELINE_FLOW for flow in flows):
             continue
         if len(flows) > 1:
             raise NotRun(
@@ -720,14 +733,37 @@ LICENSE_ID: Final = "SPDX-License-Identifier: MIT"
 LICENSE_FORMS: Final = {".yml": "# {line}\n", ".yaml": "# {line}\n", ".md": "<!-- {line} -->\n"}
 
 
+def is_signed(path: Path, text: str) -> bool:
+    """Подписана ли заготовка: строка лицензии стоит ПЕРВОЙ в форме своего рода.
+
+    ПОДПИСЬ — МЕСТО, А НЕ УПОМИНАНИЕ (находки `c12022f`, `e776e88`). Прежде
+    подписанной считалась заготовка, где идентификатор встречался где угодно:
+    названный в тексте или в значении JSON, он отпускал файл к потребителю без
+    строки, и гейты полноты подписи, судившие тем же упоминанием, молчали. У
+    JSON подпись — поле `_license` первым ключом, у прочих родов — первая
+    строка в форме `LICENSE_FORMS`.
+    """
+    if path.suffix == ".json":
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return False
+        first = next(iter(data), None) if isinstance(data, dict) else None
+        return first == "_license" and str(data[first]).startswith(LICENSE_ID)
+    form = LICENSE_FORMS.get(path.suffix)
+    head = text.split("\n", 1)[0]
+    return form is not None and head.startswith(form.split("{line}", 1)[0] + LICENSE_ID)
+
+
 def licensed(path: Path, text: str, repo: str) -> str:
     """Заготовка со строкой лицензии в форме своего рода; рода без формы — `NotRun`.
 
     Род без формы — отказ, а не файл без строки: новая заготовка другого рода
-    ушла бы к потребителю молча неподписанной (045). Уже подписанная — как есть.
+    ушла бы к потребителю молча неподписанной (045). Уже подписанная
+    (`is_signed`) — как есть.
     """
     line = f"{LICENSE_ID} — https://github.com/{repo}"
-    if LICENSE_ID in text:
+    if is_signed(path, text):
         return text
     if path.suffix == ".json":
         try:
@@ -750,38 +786,46 @@ def licensed(path: Path, text: str, repo: str) -> str:
 #: Что заход кладёт, но что становится файлом ПРОЕКТА, а не нашей заготовкой:
 #: тонкий `ci.yml`, куда проект дописывает свои джобы (поздний взгляд на #1487,
 #: `a4c2cc0`). Строку лицензии поставщика он не несёт ни при первой кладке, ни
-#: при обновлении (`Update.theirs`).
+#: при обновлении, ни двойником `.yaml` (`of_the_project`).
 OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW})
 
 
-def signed_all(
-    files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
-) -> dict[Path, str]:
+def of_the_project(path: Path) -> bool:
+    """Файл проекта, а не наша заготовка: строки лицензии поставщика он не несёт.
+
+    ОДИН ПРИЗНАК НА ВСЕ ДВЕРИ (находка `215204f`, правило 210). Чей файл,
+    решалось по месту: `theirs` плана обновления, отдельная оговорка у печати,
+    `OWN_BY_PROJECT` у кладки — и каждая новая дверь находила свой хвост
+    (`6316c1f`, `b803933`, `a4c2cc0`). Двойник YAML — тот же файл.
+    """
+    return path in OWN_BY_PROJECT or path.with_suffix(".yml") in OWN_BY_PROJECT
+
+
+def signed_all(files: dict[Path, str], repo: str) -> dict[Path, str]:
     """Все заготовки со строкой лицензии — разом; отказ одной — `NotRun` до записи.
 
     Зовётся и ДО первой записи, внутри перехвата отказов захода: половина
     положенной заготовки хуже никакой, а `NotRun` вне перехвата ушёл бы трассой
-    с кодом 1 вместо исхода «не отработал» (039). Пути `theirs` — файлы
-    потребителя, которые заход правит точечно (`Update.theirs`): они идут как есть.
+    с кодом 1 вместо исхода «не отработал» (039). Файл проекта
+    (`of_the_project`) идёт как есть.
     """
     return {
-        path: text if path in theirs else licensed(path, text, repo) for path, text in files.items()
+        path: text if of_the_project(path) else licensed(path, text, repo)
+        for path, text in files.items()
     }
 
 
-def lay(
-    root: Path, files: dict[Path, str], repo: str, theirs: frozenset[Path] = frozenset()
-) -> None:
+def lay(root: Path, files: dict[Path, str], repo: str) -> None:
     """Кладёт заготовку в дерево потребителя, каждую — со строкой лицензии (#1470).
 
     Занятое проверяет зовущий (`occupied`). Подпись ставится здесь, на единственном
     пути ЗАПИСИ к потребителю, а не в каждой заготовке: путь записи один, а
     заготовки собираются в нескольких местах, и новое место ушло бы мимо. Второй
     путь заготовки к потребителю — печать захода без ключей; она подписывает
-    целые файлы тем же `signed_all`. Файл потребителя (`theirs`) не подписывается:
-    строка поставщика в чужом файле объявила бы его чужим.
+    целые файлы тем же `signed_all`. Файл проекта (`of_the_project`) не
+    подписывается: строка поставщика в нём объявила бы его чужим.
     """
-    for path, text in signed_all(files, repo, theirs).items():
+    for path, text in signed_all(files, repo).items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
 
@@ -1255,10 +1299,6 @@ class Update:
     current: list[Path] = field(default_factory=list)
     #: Что заход называет, но не пишет: новые и снятые шаги `ci.yml`, ответы.
     notes: list[str] = field(default_factory=list)
-    #: Файлы ПОТРЕБИТЕЛЯ среди `write`: строку лицензии поставщика в них не
-    #: ставят (взгляд на #1487). Это `ci.yml` — и поднятый, и положенный тонким
-    #: (`plan_ci`): в него проект дописывает свои джобы, и файл остаётся его.
-    theirs: set[Path] = field(default_factory=set)
 
 
 def plan_owned(update: Update, consumer: Path, new: dict[Path, str], root: Path, repo: str) -> None:
@@ -1314,8 +1354,8 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     target = consumer / where
     # `ci.yml` — ФАЙЛ ПРОЕКТА В ОБОИХ СЛУЧАЯХ (поздний взгляд на #1487,
     # `49976c1`): положенный тонким завтра получит свои джобы проекта, и строка
-    # поставщика в нём осталась бы в чужом файле — тот же класс, что у поднятого.
-    update.theirs.add(where)
+    # поставщика в нём осталась бы в чужом файле. Решает `of_the_project`, а не
+    # пометка здесь: признак один на все двери (`215204f`).
     if not target.is_file():
         update.write[where] = thin_ci(pipeline, repo, pin)
         return
@@ -1337,7 +1377,7 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
         update.write[where] = lifted
     for one in sorted(set(pipeline) - called):
         update.notes.append(
-            f"новый шаг `{one}` — джоб для вашего `{PIPELINE_FLOW}`:\n" + caller(one, repo, pin)
+            f"новый шаг `{one}` — джоб для вашего `{where.name}`:\n" + caller(one, repo, pin)
         )
     for one in sorted(called - set(pipeline)):
         update.notes.append(
@@ -1346,8 +1386,16 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
         )
 
 
-def plan_answer(update: Update, consumer: Path, wanted: list[str]) -> None:
-    """Своё проекта не трогается; названо, по каким проверкам ответа ещё нет."""
+def plan_answer(update: Update, consumer: Path, wanted: list[str], contract: str, pin: str) -> None:
+    """Своё проекта не трогается; названо, по каким проверкам ответа нет и покрывает ли окно выпуск.
+
+    ОКНО СВЕРЯЕТСЯ ДО ЗАПИСИ, А НЕ ПОСЛЕ ТОЛЧКА (находки `d9b9a4f`, `4962cb3`).
+    Подъём прибивки на следующий минор контракта выводит её за окно `contract:`
+    — так устроено (`contract_span`): краснение зовёт перечитать ответы. Но
+    прежде о нём говорил только шаг `pipeline` после толчка, а обновление
+    печатало «обновлено» молча. Окно — ответ проекта, и заход его не двигает;
+    он называет расхождение тем же разбором, что у механизма (`policy.compatible`).
+    """
     target = consumer / paths.PIPELINE
     if not target.is_file():
         update.notes.append(f"`{paths.PIPELINE}` нет — заготовку ответа печатает заход без ключей")
@@ -1361,6 +1409,23 @@ def plan_answer(update: Update, consumer: Path, wanted: list[str]) -> None:
     if missing:
         update.notes.append(
             f"в `{paths.PIPELINE}` нет ответа по: {', '.join(missing)} — класс решаете вы"
+        )
+    declared = str(said.get("contract") or "").strip()
+    if not declared:
+        update.notes.append(
+            f"в `{paths.PIPELINE}` нет окна `contract:` — механизмы ответа не прочтут; "
+            f"окно выпуска {pin}: {contract_span(contract)}"
+        )
+        return
+    try:
+        covered = policy.compatible(declared, contract)
+    except policy.BadPolicy as exc:
+        raise NotRun(f"{paths.PIPELINE}: {exc}") from exc
+    if not covered:
+        update.notes.append(
+            f"окно `contract:` в `{paths.PIPELINE}` — «{declared}» — не покрывает контракт "
+            f"{contract} выпуска {pin}: после толчка шаг `pipeline` откажет. Перечитайте "
+            "ответы под новый контракт (157) и тогда поднимите окно — заход его не двигает"
         )
 
 
@@ -1432,12 +1497,46 @@ def contract_span(contract: str) -> str:
     return f">={major}.{minor},<{major}.{minor + 1}"
 
 
+def kept_on_the_kit(keep: list[Path], known: set[Path]) -> tuple[list[Path], list[str]]:
+    """Ключи `--keep`, сведённые к путям заготовки, и названные пути, которых она не кладёт.
+
+    Двойник YAML прогона сводится к тому пути, который заготовка кладёт, — в
+    любую сторону (взгляд на #1508): свой прогон поставщика бывает и `.yaml`
+    (`own_callers`), и приведение всегда к `.yml` отказало бы верному ключу.
+    """
+    kept: list[Path] = []
+    unknown: list[str] = []
+    for one in keep:
+        twin = one.with_suffix(YAML_TWINS.get(one.suffix, one.suffix))
+        if one in known:
+            kept.append(one)
+        elif one.parent == paths.WORKFLOWS and twin in known:
+            kept.append(twin)
+        else:
+            unknown.append(str(one))
+    return kept, sorted(unknown)
+
+
+def kept_records(
+    keep: list[Path], own: dict[str, Path], records: dict[str, tuple[list[str], bool]]
+) -> dict[str, str]:
+    """Записи проверок прогонов, которые проект оставил своим: имя записи → причина `off`."""
+    said: dict[str, str] = {}
+    for one, flow in sorted(own.items()):
+        path = paths.WORKFLOWS / flow.name
+        if path in keep:
+            for name in records[one][0]:
+                said[name] = f"`{path}` проект оставил своим (onboard.py --keep)"
+    return said
+
+
 def answer(
     names: list[str],
     beyond: list[str] | None = None,
     *,
     on_change: list[str] | None = None,
     span: str,
+    kept: dict[str, str] | None = None,
 ) -> str:
     """Заготовка ответа потребителя: схема, окно контракта и по строке на проверку.
 
@@ -1448,13 +1547,22 @@ def answer(
     (`own_records`): вне изменения и на нём. `span` — окно контракта
     (`contract_span`): без него и без схемы ответ не читает ни один механизм
     (`pipeline_checks.load`), и потребитель краснел бы с первого прогона.
+    `kept` — записи прогонов, которые проект оставил своим (`kept_records`):
+    они ложатся классом `off` с причиной, а не очередью разбора.
     """
-    rows = [f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in names]
-    rows += [f'  "{one}": {policy.UNREVIEWED}' for one in on_change or []]
+
+    def row(name: str) -> str:
+        why = (kept or {}).get(name)
+        if why:
+            return f'  "{name}": {{class: {policy.OFF}, why: "{why}"}}'
+        return f'  "{name}": {policy.UNREVIEWED}'
+
+    rows = [row(check_name(one)) for one in names]
+    rows += [row(one) for one in on_change or []]
     said = f'schema: {policy.SCHEMA}\ncontract: "{span}"\n\n'
     said += "checks:\n" + "\n".join(rows) + "\n"
     if beyond:
-        more = "\n".join(f'  "{one}": {policy.UNREVIEWED}' for one in beyond)
+        more = "\n".join(row(one) for one in beyond)
         said += f"{policy.BEYOND}:\n{more}\n"
     return said
 
@@ -1467,6 +1575,7 @@ def update(
     pipeline: list[str],
     records: list[str],
     data: dict[Path, str],
+    contract: str,
 ) -> int:
     """Обновление нашего в дереве потребителя до прибивки `pin` (#1386).
 
@@ -1477,7 +1586,8 @@ def update(
     не трогается и называется. В `ci.yml` поднимается только тег наших строк,
     новые шаги печатаются. `.pipeline.yml` и свод — своё проекта, их заход не
     трогает. Заготовки данных (`data`) кладутся, только если файла нет: занятый
-    путь — своё проекта и отказа не даёт.
+    путь — своё проекта и отказа не даёт. `contract` — версия контракта выпуска
+    `pin`: обновление сверяет с ней окно ответа проекта (`plan_answer`).
     """
     trunk = trunk_of(consumer)
     if trunk and trunk != paths.TRUNK:
@@ -1491,8 +1601,9 @@ def update(
     try:
         plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
         plan_ci(plan, consumer, pipeline, repo, pin)
-        plan_answer(plan, consumer, [check_name(one) for one in pipeline] + records)
-        signed_all(plan.write | data, repo, frozenset(plan.theirs))
+        wanted = [check_name(one) for one in pipeline] + records
+        plan_answer(plan, consumer, wanted, contract, pin)
+        signed_all(plan.write | data, repo)
     except NotRun as exc:
         print(f"заход не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -1512,7 +1623,7 @@ def update(
             file=sys.stderr,
         )
         return EXIT_HAND_EDITED
-    lay(consumer, plan.write, repo, frozenset(plan.theirs))
+    lay(consumer, plan.write, repo)
     laid = lay_free(consumer, data, repo)
     if plan.write:
         print(f"обновлено до {pin}: " + ", ".join(str(one) for one in sorted(plan.write)))
@@ -1557,16 +1668,29 @@ def main(argv: list[str] | None = None) -> int:
         metavar="КОРЕНЬ",
         help="обновить наше в дереве потребителя до выпуска; своё и правленое не трогается",
     )
+    parser.add_argument(
+        "--keep",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="ПУТЬ",
+        help="с --write: путь от корня потребителя, который проект оставляет своим (#1503)",
+    )
     args = parser.parse_args(argv)
     if args.write and args.update:
         parser.error("--write и --update — разные двери: первое подключение и обновление")
+    if args.keep and not args.write:
+        parser.error("--keep — ключ первого подключения: он бывает только с --write")
 
     try:
         names = steps(args.root)
         own = own_callers(args.root, names)
         records = {one: own_records(flow, one) for one, flow in own.items()}
         pin = pin_of(args.root)
-        span = contract_span(contract_at(args.root, pin))
+        # Версия контракта выпуска нужна ОБЕИМ дверям (находка `d6334b4`): кладка
+        # пишет по ней окно ответа, обновление сверяет с ней окно потребителя.
+        contract = contract_at(args.root, pin)
+        span = contract_span(contract)
         summary = summary_kit(args.root, args.repo, pin)
         rulebook = rulebook_kit(args.root)
         kit = data_kit(args.root)
@@ -1607,25 +1731,53 @@ def main(argv: list[str] | None = None) -> int:
     beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
     on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
     if args.update:
-        return update(args.root, args.update, args.repo, pin, pipeline, beyond + on_change, kit)
+        records_all = beyond + on_change
+        return update(args.root, args.update, args.repo, pin, pipeline, records_all, kit, contract)
     if args.write:
         # КЛАДЁТСЯ ТОЛЬКО ПО ЯВНОМУ КЛЮЧУ И ТОЛЬКО В СВОБОДНОЕ (#992). Чужое
         # дерево заход не правит: занятый путь называется, и не пишется ни
         # один файл — половина заготовки хуже никакой.
+        # ЧТО ВПРАВЕ НАЗВАТЬ КЛЮЧ — ПУТИ ЗАГОТОВКИ, И ВСЁ (взгляд на #1508). Путь
+        # прогона механизма проект заменяет своим, и проверки его прогона идут
+        # `off`; прочие пути — `ci.yml`, сводный гейт, ответ, свод — проект
+        # сводит со своим из печати захода, и их проверки не трогаются.
+        mechanisms = {paths.WORKFLOWS / flow.name for flow in own.values()}
+        known = {
+            paths.WORKFLOWS / PIPELINE_FLOW,
+            paths.WORKFLOWS / SUMMARY_FLOW,
+            paths.PIPELINE,
+            *mechanisms,
+            *rulebook,
+            *kit,
+        }
+        keep, unknown = kept_on_the_kit(args.keep, known)
+        if unknown:
+            print(
+                "заготовка не положена: --keep называет путь, которого заготовка не кладёт — "
+                + ", ".join(unknown),
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
+        kept_checks = kept_records(keep, own, records)
         try:
             files = {
                 paths.WORKFLOWS / PIPELINE_FLOW: thin_ci(pipeline, args.repo, pin),
                 paths.WORKFLOWS / SUMMARY_FLOW: summary,
-                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change, span=span),
+                paths.PIPELINE: answer(
+                    pipeline, beyond, on_change=on_change, span=span, kept=kept_checks
+                ),
                 **{
                     paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
                     for one, flow in sorted(own.items())
                 },
             }
-            signed_all(files | rulebook | kit, args.repo, OWN_BY_PROJECT)
+            signed_all(files | rulebook | kit, args.repo)
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
+        files = {path: text for path, text in files.items() if path not in keep}
+        rulebook = {path: text for path, text in rulebook.items() if path not in keep}
+        kit = {path: text for path, text in kit.items() if path not in keep}
         # ОБЩАЯ ВЕТКА СВЕРЯЕТСЯ ДО ЗАПИСИ (#1220): заготовка, положенная в
         # дерево с другой общей веткой, сравнивала бы гейты не с той базой.
         # Клон её не знает — это названо, а не принято за совпадение (045).
@@ -1659,8 +1811,26 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OCCUPIED
         kept = occupied(args.write, rulebook)
         free = {path: text for path, text in rulebook.items() if path not in kept}
-        lay(args.write, files | free, args.repo, OWN_BY_PROJECT)
+        lay(args.write, files | free, args.repo)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
+        if own_kept := sorted(str(one) for one in keep if one in mechanisms):
+            where = (
+                f"в заготовке ответа из печати захода — `{paths.PIPELINE}` не положен (--keep)"
+                if paths.PIPELINE in keep
+                else f"в `{paths.PIPELINE}`"
+            )
+            print(
+                "оставлены своими прогоны механизмов: "
+                + ", ".join(own_kept)
+                + f" — не тронуты; их проверки {where} — off с причиной"
+            )
+        if other_kept := sorted(str(one) for one in keep if one not in mechanisms):
+            print(
+                "не положено по --keep: "
+                + ", ".join(other_kept)
+                + " — своё сведите с заготовкой из печати захода без ключей; "
+                "проверки в ответе не тронуты"
+            )
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
         laid = lay_free(args.write, kit, args.repo)
@@ -1700,7 +1870,7 @@ def main(argv: list[str] | None = None) -> int:
     # подписывается он тем же `signed_all` — до первой строки вывода, чтобы отказ
     # подписи был исходом «не отработал», а не половиной напечатанного. Джобы
     # вызова — не файл, а строки в СВОЙ `ci.yml` потребителя: их не подписывают,
-    # как и сам `ci.yml` — файл проекта (`OWN_BY_PROJECT`, `Update.theirs`).
+    # как и сам `ci.yml` — файл проекта (`of_the_project`).
     try:
         whole = signed_all(
             {

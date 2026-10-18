@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+import gitcall
 import paths
 import yaml
 
@@ -401,6 +402,34 @@ def supplier_of() -> Path | None:
     return Path(said) if said else None
 
 
+def supplier_repo(supplier: Path) -> str:
+    """Чей код конвейера выкачан — `владелец/репозиторий` по `origin` выкачки; не узнать — пусто.
+
+    Выкачка общего шага — клон `actions/checkout`, и `origin` у него — адрес
+    позванного репозитория. Не клон, нет `origin` или git молчит — пусто: чей
+    поставщик, неизвестно, и решать по догадке нельзя (045).
+    """
+    try:
+        said = gitcall.output(["remote", "get-url", "origin"], BadPolicy, cwd=str(supplier))
+    except BadPolicy:
+        return ""
+    found = re.search(r"[/:]([^/:]+/[^/:]+?)(?:\.git)?/?$", said.strip())
+    return found.group(1).lower() if found else ""
+
+
+def foreign(supplier: Path | None) -> bool:
+    """Позван ЧУЖОЙ поставщик: выкачка — другой репозиторий, чем тот, где идёт прогон.
+
+    Не узнали одну из сторон — не чужой: так решалось и до проверки, и граница
+    названа в `contract_of`.
+    """
+    if supplier is None:
+        return False
+    here = os.environ.get("GITHUB_REPOSITORY", "").lower()
+    there = supplier_repo(supplier)
+    return bool(here and there and here != there)
+
+
 def contract_of(tree: Path, supplier: Path | None) -> str | None:
     """Версия контракта, под которую проверяется ответ: своя у поставщика, тега — у потребителя.
 
@@ -417,12 +446,21 @@ def contract_of(tree: Path, supplier: Path | None) -> str | None:
     паре «новое окно, старый тег», которой у потребителя не бывает. Граница
     названа: окно потребителя проба поэтому не проверяет.
 
+    СВОЯ ВЕРСИЯ — ТОЛЬКО У САМОГО ПОСТАВЩИКА (находка `169baca`). «У кого есть
+    `CONTRACT_VERSION`, тот поставщик» было догадкой: потребитель, ведущий свой
+    контракт, сверял бы окно со своим номером, и тег за окном проходил бы
+    зелёным. Поставщик узнаётся по репозиторию выкачки (`foreign`): чужая —
+    берётся версия тега, своя у потребителя не в счёт. Граница: не узнали, чей
+    поставщик (не клон, нет `GITHUB_REPOSITORY`), — своя версия первее, как
+    прежде. Замер 18.10.2026: своего `CONTRACT_VERSION` нет ни у каталога, ни у
+    Usage-Token, ни у грейдера — условие живо, но сегодня никого не задевает.
+
     Своей версии нет, поставщик назван, а версии нет и в нём — отказ, а не
     «сверять не с чем» (075). Нет ни того, ни другого — `None`: спросить не у
     кого, и так бывает только у подделки.
     """
     own = tree / paths.VERSION
-    if own.is_file():
+    if own.is_file() and not foreign(supplier):
         return own.read_text(encoding="utf-8").strip()
     if supplier is None:
         return None
