@@ -41,28 +41,40 @@ RECORD = (
         ("# Спросили семью (162).\n#\n# Ни у кого нет.\n", False),
         ("Семь шагов (1620): подключили.\n", False),
         # Адрес ссылки — не слова абзаца: «neighbours» стоит в адресе самого 162.
-        (f"Держит ({LINK}): приём взят.\n", False),
+        (f"Держит ({LINK}): приём взят у Token.\n", False),
         (f"Ни у кого нет, спросили семью — {BARE}\n", True),
         # Словоформы: приёмка, приемлемо, соседний и подключение — не ответ семьи.
         (f"Спросили семью ([162]({BARE})): приёмка — пунктами.\n", False),
         ("Спросили семью (162): приемлемо.\n", False),
-        ("Соседний гейт (162): приём взят.\n", False),
+        ("Соседний гейт (162): приём взят у Token.\n", False),
         ("Спросили семью (162): подключение потребителя описано.\n", False),
         ("Сосед (162) подключён готовым.\n", True),
         ("Спросили соседей (162): приёмы у них свои, для себя.\n", True),
         # Формы адреса (210, взгляды на #1490): любая из них — не слова абзаца.
-        (f"Держит ([162]({REL})): приём взят.\n", False),
-        (f"Держит [162]: приём взят.\n[162]: {REL}\n", False),
-        (f"Держит 162 — {REL.removeprefix('../')}: приём взят.\n", False),
-        ("Держит 162 (162-a-gap-asks-the-neighbours-first.md): приём взят.\n", False),
+        (f"Держит ([162]({REL})): приём взят у Token.\n", False),
+        (f"Держит [162]: приём взят у Token.\n[162]: {REL}\n", False),
+        (f"Держит 162 — {REL.removeprefix('../')}: приём взят у Token.\n", False),
+        ("Держит 162 (162-a-gap-asks-the-neighbours-first.md): приём взят у Token.\n", False),
         ("Спросили семью/соседа (162): ни у кого нет.\n", True),
         (f"Спросили семью — {REL} — ни у кого нет.\n", True),
         # Строгое правило (build-a-gate, 3а): ответ — только русскими словами,
         # и латиница не бывает ответом ни в какой форме адреса (взгляд на #1496).
-        ("Держит ([162](#162-a-gap-asks-the-neighbours-first)): приём взят.\n", False),
-        ("Держит 162-a-gap-asks-the-neighbours-first: приём взят.\n", False),
+        ("Держит ([162](#162-a-gap-asks-the-neighbours-first)): приём взят у Token.\n", False),
+        ("Держит 162-a-gap-asks-the-neighbours-first: приём взят у Token.\n", False),
         ("Asked the family (162): nobody has it.\n", False),
         ("Asked family/neighbours (162): no one has it.\n", False),
+        # Исход судится связью с источником, а не словом (210, взгляды на #1490).
+        ("Спросили семью (162): шаг пишет отчёт для себя.\n", False),
+        ("Спросили семью (162): взятие пошлины описано у нас.\n", False),
+        ("Спросили семью (162): идейный разбор у нас.\n", False),
+        ("Спросили семью (162): приём у Token свой.\n", False),
+        ("Спросили семью (162). Приём взят. У каталога своё.\n", False),
+        ("Спросили семью (162): у каталога взяли приём.\n", True),
+        ("Спросили семью (162): идею взяли у Token.\n", True),
+        # Подключённое — только готовое (взгляд на #1509).
+        ("Спросили семью (162): шаг подключили к ci.yml.\n", False),
+        ("Спросили семью (162): подключили готовый шаг каталога.\n", True),
+        ("Спросили семью (162): всё готово, подключили.\n", False),
     ],
     ids=[
         "наш-абзац",
@@ -92,6 +104,16 @@ RECORD = (
         "голый-слаг",
         "по-английски",
         "по-английски-через-косую",
+        "для-себя-без-источника",
+        "взятие-не-взятое",
+        "идейный-не-идея",
+        "голый-приём-не-исход",
+        "источник-в-другом-предложении",
+        "источник-перед-глаголом",
+        "идея-у-соседа",
+        "подключили-не-готовое",
+        "подключили-готовое",
+        "готово-не-готовое",
     ],
 )
 def test_a_record_names_the_rule_whom_and_what(text: str, said: bool) -> None:
@@ -175,6 +197,33 @@ def test_only_an_added_mechanism_is_asked(repo: Path, run_script: RunScript) -> 
     commit(repo)
     run = run_script("check_asked_family.py", "--base", "main", cwd=repo)
     assert run.code == 1 and "scripts/check_new.py" in run.out, run.text
+
+
+def test_a_file_moved_onto_a_mechanism_place_is_asked(
+    repo: Path, run_script: RunScript, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Переезд с немеханизменного пути на место механизма — новый механизм (#1490)."""
+    _git(repo, "checkout", "-q", "main")
+    (repo / "scripts" / "helper.py").write_text(OLD, encoding="utf-8")
+    commit(repo)
+    _git(repo, "checkout", "-q", "-B", "change", "main")
+    _git(repo, "mv", "scripts/helper.py", "scripts/check_helper.py")
+    commit(repo)
+    monkeypatch.chdir(repo)
+    assert module.added_mechanisms("main") == ["scripts/check_helper.py"]
+    run = run_script("check_asked_family.py", "--base", "main", cwd=repo)
+    assert run.code == 1 and "scripts/check_helper.py" in run.out, run.text
+
+
+def test_the_refusal_names_the_language_and_the_skill_address(
+    repo: Path, run_script: RunScript
+) -> None:
+    """Отказ называет строгое правило языка и полный адрес навыка — у потребителя тоже."""
+    (repo / "scripts" / "check_new.py").write_text('"""Новый гейт."""\n', encoding="utf-8")
+    commit(repo)
+    run = run_script("check_asked_family.py", "--base", "main", cwd=repo)
+    assert run.code == 1, run.text
+    assert "русскими словами" in run.out and module.ASK_SKILL in run.out, run.text
 
 
 def test_a_new_mechanism_with_its_record_passes(repo: Path, run_script: RunScript) -> None:

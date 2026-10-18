@@ -1048,6 +1048,22 @@ def test_a_row_without_a_label_leaves_a_hand_group_for_now() -> None:
     ]
 
 
+def test_a_born_row_joins_now_even_after_a_hand_group() -> None:
+    """Рождённая строка встаёт по метке, а без метки — в «Сейчас», не в ручную группу (#1504).
+
+    Ручная группа после раскладки всегда последняя, и строка, дописанная в
+    конец тела, ложилась под неё: рождённая задача уходила в «Ждёт срока или
+    чужого», и окно её не брало.
+    """
+    born = ["- **#705** — рождённая без метки", "- **#706** — рождённая с меткой выпуска"]
+    said = module.grouped(SECTION_FOUR, {706: {module.WAITS_RELEASE}}, born)
+    now, release = said.index("*Сейчас в работе*"), said.index("*Ждёт выпуска*")
+    hand = said.index("*Ждёт срока или чужого*")
+    assert born[0] in said[now:release]
+    assert born[1] in said[release:hand]
+    assert said[hand + 1 :] == ["- **#704** — пересмотр 01.11.2026"]
+
+
 def test_labels_are_read_from_the_open_listing() -> None:
     """Метки берутся из уже прочитанного списка открытых задач — по номеру."""
     listed = [{"number": 5, "labels": [{"name": module.WAITS_OWNER}, {"name": "x"}]}, {"x": 1}]
@@ -1077,7 +1093,9 @@ def test_unread_labels_leave_section_four_as_written(
     monkeypatch.setattr(module.debt, "open_listed", refuse)
     module.main(["--repo", "o/r", "--apply"])
     assert "*Сейчас в работе*" not in written[0]
-    assert "раздел 4 оставлен как в теле" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "раздел 4 оставлен как в теле" in out
+    assert "рождённые задачи встанут следующим заходом" in out
 
 
 def release_platform(
