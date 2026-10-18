@@ -330,7 +330,9 @@ def test_our_code_carries_no_invisible() -> None:
     found = [
         f"{name}:{line}:{column}: {what}"
         for name in names
-        for line, column, what in module.hidden((ROOT / name).read_text(encoding="utf-8"))
+        for line, column, what in module.hidden(
+            (ROOT / name).read_text(encoding="utf-8", newline="")
+        )
     ]
     assert not found, found
 
