@@ -953,7 +953,9 @@ def test_a_release_lifts_its_own_probe_after_the_tag() -> None:
     Шаг стоит ПОСЛЕ выпуска и держится ЕГО исходом, а не цепочкой соседей:
     упавшая страница выпуска подъёма не снимает (`62bbf7d`, `473b733`). Зовёт
     код механизмов своим checkout, как соседи. Пробу Dependabot не поднимает:
-    ссылки репозитория на самого себя он не предлагает.
+    ссылки репозитория на самого себя он не предлагает. Токен владельца шагу
+    назван: подъём спрашивает у площадки номер плана работ, к которому
+    привязывается, а без токена отвечает «не отработал».
     """
     flow = yaml.safe_load((ROOT / ".github/workflows/step-release.yml").read_text(encoding="utf-8"))
     steps = flow["jobs"]["release"]["steps"]
@@ -966,6 +968,7 @@ def test_a_release_lifts_its_own_probe_after_the_tag() -> None:
         "(steps.release.outcome == 'success' || steps.tagged.outcome == 'success')"
     )
     assert '$MECHANISMS/scripts/deps_intercept.py --self "v${version}" --apply' in step["run"]
+    assert step["env"]["GH_TOKEN"] == "${{ secrets.MERGE_QUEUE_TOKEN }}"
 
 
 def release_steps() -> list[dict[str, Any]]:
