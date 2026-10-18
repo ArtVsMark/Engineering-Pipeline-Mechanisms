@@ -144,21 +144,23 @@ def test_a_supplier_without_its_version_is_refused(tmp_path: Path) -> None:
         policy.load(path, supplier=supplier)
 
 
-def test_the_contract_is_asked_of_the_supplier_first(tmp_path: Path) -> None:
-    """`contract_of`: у поставщика — его версия, даже если в дереве лежит своя.
+def test_the_own_contract_comes_first_and_the_called_tag_second(tmp_path: Path) -> None:
+    """`contract_of`: дерево со своей версией — поставщик; без неё — версия позванного тега.
 
-    Без поставщика — своя версия дерева; нет и её — `None`, спросить не у кого.
-    Поставщик без версии — отказ, а не откат на дерево (045).
+    Своя версия первее выкачки: проба передачи зовёт прошлый тег на нашем
+    дереве, и выкачка первой красила бы её на каждом выпуске (взгляд на #1498).
+    Ни своей, ни поставщика — `None`; поставщик без версии — отказ (045).
     """
     tree = tmp_path / "tree"
     tree.mkdir()
     (tree / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     supplier = supplier_at(tmp_path / "mechanisms", FAKE_VERSION)
-    assert policy.contract_of(tree, supplier) == FAKE_VERSION
+    assert policy.contract_of(tree, supplier) == "0.1.0"
     assert policy.contract_of(tree, None) == "0.1.0"
+    assert policy.contract_of(tmp_path / "bare", supplier) == FAKE_VERSION
     assert policy.contract_of(tmp_path / "bare", None) is None
     with pytest.raises(policy.BadPolicy, match="версия контракта позванного тега"):
-        policy.contract_of(tree, supplier_at(tmp_path / "empty", None))
+        policy.contract_of(tmp_path / "bare", supplier_at(tmp_path / "empty", None))
 
 
 def test_the_own_version_outside_the_window_is_refused(tmp_path: Path) -> None:
