@@ -674,7 +674,9 @@ def labels_by_number(listed: list[dict[str, Any]]) -> dict[int, set[str]]:
     }
 
 
-def grouped(lines: list[str], labels: dict[int, set[str]]) -> list[str]:
+def grouped(
+    lines: list[str], labels: dict[int, set[str]], born: list[str] | None = None
+) -> list[str]:
     """Раздел 4 по группам: пояснения сверху как были, строки — по меткам задач.
 
     Порядок строк внутри группы — как в теле: его ставит владелец. Пустая
@@ -687,6 +689,12 @@ def grouped(lines: list[str], labels: dict[int, set[str]]) -> list[str]:
     ней и не встаёт в «Сейчас», где окно взяло бы её работой. Ручные группы
     идут после групп по меткам, в порядке тела. Продолжение строки — отступ
     или вложенный пункт — едет со своей строкой, а не в пояснение.
+
+    РОЖДЁННЫЕ СТРОКИ ПРИХОДЯТ ОТДЕЛЬНО И ВСТАЮТ ПО СВОЕЙ МЕТКЕ (#1504). Пока их
+    дописывали в конец тела, строка без метки ложилась под последний ручной
+    заголовок: ручные группы идут последними, и рождённая задача при любой из
+    них уходила в неё — окно её не брало. Место рождённой строке назначает
+    метка, а без метки — «Сейчас», как и решено владельцем (#747).
     """
     preamble: list[str] = []
     by_label: dict[str, list[str]] = {head: [] for head, _ in GROUPS}
@@ -718,6 +726,12 @@ def grouped(lines: list[str], labels: dict[int, set[str]]) -> list[str]:
             continue
         # Продолжение строки — с отступом или без — едет со своей строкой.
         (last if last is not None else preamble).append(line)
+    for line in born or []:
+        address = address_of(line)
+        marked = labels.get(int(address[1:]), set()) if address.startswith("#") else set()
+        by_label[next((h for h, label in GROUPS if label and label in marked), NOW_HEAD)].append(
+            line
+        )
     while preamble and not preamble[-1].strip():
         preamble.pop()
     said_lines = list(preamble)
@@ -908,14 +922,19 @@ def fresh_build(
             for row in source.rows
             if (address := address_of(row)).startswith("#")
         )
-        held[BORN_INTO] = held[BORN_INTO] + born_rows(repo, token, held, taken, listed)
         # РАСКЛАДКА ПО МЕТКАМ — ТОЛЬКО ПО ПРОЧИТАННОМУ СПИСКУ. Без него метки
         # неизвестны, и раскладка увела бы все строки в «Сейчас» молча:
-        # раздел остаётся как в теле, и это сказано (045).
+        # раздел остаётся как в теле, и это сказано (045). Рождённые строки
+        # без раскладки не дописываются: в конце тела они легли бы под ручной
+        # заголовок и остались бы там и после (#1504) — встанут следующим заходом.
         if listed is None:
-            print("метки задач не прочитаны — раздел 4 оставлен как в теле, без раскладки")
+            print(
+                "метки задач не прочитаны — раздел 4 оставлен как в теле, без раскладки; "
+                "рождённые задачи встанут следующим заходом"
+            )
         else:
-            held[BORN_INTO] = grouped(held[BORN_INTO], labels_by_number(listed))
+            born = born_rows(repo, token, held, taken, listed)
+            held[BORN_INTO] = grouped(held[BORN_INTO], labels_by_number(listed), born)
         said = assemble(body, built, held, when)
         if not apply:
             return number, body, held, said
