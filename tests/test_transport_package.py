@@ -26,7 +26,6 @@ import importlib.metadata
 import json
 import re
 import shutil
-import subprocess
 import tomllib
 import urllib.parse
 from dataclasses import dataclass
@@ -439,16 +438,12 @@ def test_the_live_surface_matches_the_shared_branch_or_moves_the_version() -> No
     `KeyError` в пакете любой стороны) пропуском не считается: она краснеет
     как отказ (`3655874`).
     """
-    known = subprocess.run(
-        ["git", "merge-base", surface.BASE, "HEAD"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-        timeout=30,
-    )
-    if known.returncode != 0:
+    # Предка спрашивает та же функция, что и гейт, а не свой `git merge-base`:
+    # две реализации одного предиката разъехались бы, и тест краснел бы вместо
+    # пропуска или пропускался там, где гейт отработал бы (взгляд на #1499).
+    try:
+        surface.journal.common_ancestor(surface.BASE, root=ROOT)
+    except surface.journal.NotRun:
         pytest.skip(f"точки ветвления с {surface.BASE} в этом клоне нет — сверять не с чем")
     said = surface.moved_without_version(*surface.surface(PACKAGE), ROOT)
     assert not said, said
@@ -475,7 +470,7 @@ def test_a_snapshot_bypass_does_not_move_the_surface_at_the_old_version(
         )
     refused = run_script("transport_surface.py", "--root", str(tmp_path))
     assert refused.code == surface.EXIT_REFUSED, refused.err
-    assert "против origin/main" in refused.err
+    assert "против точки ветвления с origin/main" in refused.err
 
 
 def test_a_version_moved_in_the_base_later_does_not_excuse_the_branch(tmp_path: Path) -> None:

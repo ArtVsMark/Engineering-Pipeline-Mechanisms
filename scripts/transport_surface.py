@@ -196,7 +196,8 @@ def moved_without_version(version: str, lines: list[str], root: Path, base: str 
     if was == version and before != lines:
         changed = sorted(set(lines) ^ set(before))
         return (
-            f"поверхность сменилась против {base} при прежнем VERSION {version}: {changed} — "
+            f"поверхность сменилась против точки ветвления с {base} при прежнем VERSION "
+            f"{version}: {changed} — "
             f"сдвиньте {paths.TRANSPORT / 'VERSION'}"
         )
     return ""
