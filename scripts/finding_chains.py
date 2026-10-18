@@ -163,12 +163,9 @@ def moment(said: str) -> datetime:
     `…+03:00` сдвигала момент на смещение — молча и с кодом успеха (взгляд на
     #781). Момент без пояса неоднозначен, поэтому тоже отказ.
     """
-    try:
-        parsed = datetime.fromisoformat(said.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError(f"момент не в ISO: {said}") from exc
-    if parsed.tzinfo is None or "T" not in said:
-        raise ValueError(f"момент без времени или пояса: {said}")
+    parsed = ghrest.moment(said)
+    if parsed is None or "T" not in said:
+        raise ValueError(f"момент не ISO со временем и поясом: {said}")
     return parsed
 
 
@@ -189,10 +186,10 @@ def said_at(comment: dict[str, Any]) -> datetime:
     raw = str(comment.get("updated_at") or comment.get("created_at") or "")
     if not raw:
         raise Undated("у комментария нет метки времени — отсекать по моменту нечем")
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise Undated(f"метка времени комментария не разбирается: {raw}") from exc
+    said = ghrest.moment(raw)
+    if said is None:
+        raise Undated(f"метка времени комментария не время с поясом: {raw}")
+    return said
 
 
 def read_counted(

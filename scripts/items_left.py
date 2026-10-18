@@ -346,8 +346,11 @@ def subject_evidence(item: str, since: datetime, pool: list[Subject]) -> list[st
 
 
 def when_of(issue: dict[str, Any], key: str) -> datetime:
-    """Отметка времени задачи в UTC."""
-    return datetime.fromisoformat(str(issue[key]).replace("Z", "+00:00")).astimezone(UTC)
+    """Отметка времени задачи в UTC; без пояса или не время — `ValueError`, а не догадка о поясе."""
+    said = ghrest.moment(issue[key])
+    if said is None:
+        raise ValueError(f"у задачи #{issue.get('number')} {key} не время с поясом")
+    return said.astimezone(UTC)
 
 
 def look(

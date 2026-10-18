@@ -120,10 +120,8 @@ def elapsed(run: dict[str, Any]) -> int | None:
     started, ended = run.get("run_started_at"), run.get("updated_at")
     if not started or not ended:
         return None
-    try:
-        began = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
-        done = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
-    except ValueError:
+    began, done = ghrest.moment(started), ghrest.moment(ended)
+    if began is None or done is None:
         return None
     return max(0, int((done - began).total_seconds()))
 

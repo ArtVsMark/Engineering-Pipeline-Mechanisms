@@ -69,11 +69,11 @@ class NotRun(RuntimeError):
 
 
 def moment(said: str) -> datetime:
-    """Время площадки (ISO 8601, `Z` или смещение); непрочитанное — отказ захода."""
-    try:
-        return datetime.fromisoformat(said)
-    except ValueError as exc:
-        raise NotRun(f"время площадки не прочитано: {said!r}") from exc
+    """Время площадки (ISO 8601, `Z` или смещение); непрочитанное или без пояса — отказ захода."""
+    at = ghrest.moment(said)
+    if at is None:
+        raise NotRun(f"время площадки не прочитано: {said!r}")
+    return at
 
 
 def stale_summary(runs: list[dict[str, Any]], ci_done_at: str) -> dict[str, Any] | None:

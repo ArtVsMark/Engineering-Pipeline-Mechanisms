@@ -202,11 +202,8 @@ def is_quiet(said: str, now: datetime, hours: int = QUIET_AFTER_HOURS) -> bool:
     Сторона выбрана та, где механизм не зовёт владельца зря: незнание — повод
     оставить адресатом окно, а не повод разбудить человека (045).
     """
-    if not said:
-        return False
-    try:
-        when = datetime.fromisoformat(said.replace("Z", "+00:00"))
-    except ValueError:
+    when = ghrest.moment(said)
+    if when is None:
         return False
     return now - when > timedelta(hours=hours)
 

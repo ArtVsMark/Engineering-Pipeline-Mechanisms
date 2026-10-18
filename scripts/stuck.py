@@ -291,11 +291,8 @@ def is_fresh(head_at: str, now: datetime, minutes: int = FRESH_MINUTES) -> bool:
     Старая отметка лишь пускает изменение в разбор — застрявшим его делает
     состояние, а не срок.
     """
-    if not head_at:
-        return False
-    try:
-        seen = datetime.fromisoformat(head_at.replace("Z", "+00:00"))
-    except ValueError:
+    seen = ghrest.moment(head_at)
+    if seen is None:
         return False
     return now - seen < timedelta(minutes=minutes)
 

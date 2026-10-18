@@ -16,7 +16,8 @@ import ssl
 import threading
 import time
 import urllib.error
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, ClassVar, Final
@@ -24,7 +25,7 @@ from typing import Any, ClassVar, Final
 import ghrest as transport
 import pytest
 
-from tests.conftest import code_files, names_used
+from tests.conftest import code_files, load_script, names_used
 
 
 class Fake(BaseHTTPRequestHandler):
@@ -939,3 +940,69 @@ def test_files_of_reads_every_page_of_the_change(monkeypatch: pytest.MonkeyPatch
     assert transport.files_of("o/r", 7, "токен") == frozenset(
         {"scripts/один.py", "scripts/два.py", ".rules/bindings.json"}
     )
+
+
+@pytest.mark.parametrize(
+    ("stamp", "moment"),
+    [
+        ("2026-10-14T19:50:51Z", datetime(2026, 10, 14, 19, 50, 51, tzinfo=UTC)),
+        ("2026-10-14T22:50:51+03:00", datetime(2026, 10, 14, 19, 50, 51, tzinfo=UTC)),
+        (None, None),
+        ("", None),
+        (17, None),
+        ("вчера", None),
+        ("2026-10-14T19:50:51", None),
+    ],
+    ids=["время", "смещение", "нет-времени", "пусто", "не-строка", "не-время", "без-пояса"],
+)
+def test_moment_refuses_what_is_not_a_time_with_zone(stamp: object, moment: Any) -> None:
+    """Время записи площадки не той формы — `None`, а не трейсбек всего захода (`cbdc1d9`)."""
+    assert transport.moment(stamp) == moment
+
+
+#: Время площадки без пояса — та форма, на которой соседи очереди падали `TypeError`.
+NAIVE: Final = "2026-10-18T10:00:00"
+NOW: Final = datetime(2026, 10, 18, 12, tzinfo=UTC)
+
+
+def undated(comment: dict[str, Any]) -> bool:
+    """Комментарий без годного времени — отказ `Undated`, а не наивное время."""
+    chains = load_script("finding_chains.py")
+    try:
+        chains.said_at(comment)
+    except chains.Undated:
+        return True
+    return False
+
+
+#: Читающие время площадки, о которых сказала находка `6883122`, и их ответ на
+#: время без пояса — тот же, что на неразборное, а не падение вычитания.
+READERS: Final[dict[str, Callable[[], object]]] = {
+    "застрявшие": lambda: load_script("stuck.py").is_fresh(NAIVE, NOW) is False,
+    "оклик": lambda: load_script("hail.py").is_quiet(NAIVE, NOW) is False,
+    "долг": lambda: load_script("debt.py").age_of(NAIVE, NOW) is None,
+    "цепочки-находок": lambda: undated({"updated_at": NAIVE}),
+    "ряд-прогонов": lambda: (
+        load_script("runs_series.py").elapsed({"run_started_at": NAIVE, "updated_at": NAIVE})
+        is None
+    ),
+    "план": lambda: load_script("work_plan.py").when_of(NAIVE) is None,
+}
+
+
+@pytest.mark.parametrize("reader", sorted(READERS))
+def test_every_reader_of_platform_time_refuses_a_time_without_zone(reader: str) -> None:
+    """Время без пояса — неразобранное время у каждого читающего, а не `TypeError` (`6883122`)."""
+    assert READERS[reader]() is True
+
+
+def test_platform_time_is_parsed_in_one_place() -> None:
+    """Разбор времени площадки — один, `ghrest.moment`: копий с заменой `Z` в коде нет (090)."""
+    copies = [
+        f"{path}:{number}"
+        for path in code_files()
+        if path.suffix == ".py"
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if "fromisoformat(" in line and 'replace("Z"' in line
+    ]
+    assert not copies, copies

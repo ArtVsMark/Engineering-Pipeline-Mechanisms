@@ -3110,21 +3110,6 @@ def test_head_runs_is_one_read_of_the_head(monkeypatch: pytest.MonkeyPatch) -> N
     assert asked == [f"repos/o/r/commits/{head.head}/check-runs?filter=latest"]
 
 
-@pytest.mark.parametrize(
-    ("stamp", "moment"),
-    [
-        ("2026-10-14T19:50:51Z", module.datetime(2026, 10, 14, 19, 50, 51, tzinfo=module.UTC)),
-        (None, None),
-        ("вчера", None),
-        ("2026-10-14T19:50:51", None),
-    ],
-    ids=["время", "нет-времени", "не-время", "без-пояса"],
-)
-def test_moment_of_refuses_what_is_not_a_time(stamp: object, moment: Any) -> None:
-    """Время записи не той формы — `None`, а не трейсбек всего захода."""
-    assert module.moment_of(stamp) == moment
-
-
 def job_limits(flows: list[Path]) -> tuple[list[int], list[str]]:
     """Пределы джобов числом — и те, что заданы не числом: строкой, выражением."""
     limits: list[int] = []
