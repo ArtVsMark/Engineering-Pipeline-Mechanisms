@@ -401,6 +401,31 @@ def supplier_of() -> Path | None:
     return Path(said) if said else None
 
 
+def contract_of(tree: Path, supplier: Path | None) -> str | None:
+    """Версия контракта, под которую проверяется ответ: у ПОЗВАННОГО тега, а не в дереве.
+
+    У потребителя код конвейера — выкачка `$MECHANISMS` на коммите позванного
+    тега, и его `CONTRACT_VERSION` лежит там: своего дерево потребителя не несёт.
+    Прежде версия искалась только рядом с `.pipeline.yml`, и у потребителя
+    сверка окна молча не шла — тег, поднятый Dependabot за окно `contract:`,
+    проходил зелёным (045). Нашла проба пути подъёма (#1387, п. 3).
+
+    Поставщик назван, а версии в нём нет — отказ, а не «сверять не с чем»
+    (075). Без поставщика версия своя — так у нас, когда шаг зовут из дерева;
+    нет и её — `None`: спросить не у кого, и так бывает только у подделки.
+    """
+    if supplier is not None:
+        said = supplier / paths.VERSION
+        if not said.is_file():
+            raise BadPolicy(
+                f"версия контракта позванного тега не найдена: {said} — выкачка "
+                "поставщика без неё не та, что ждёт сверка окна (075)"
+            )
+        return said.read_text(encoding="utf-8").strip()
+    own = tree / paths.VERSION
+    return own.read_text(encoding="utf-8").strip() if own.is_file() else None
+
+
 def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, Check]:
     """Читает ответ проекта по проверкам, отвергая любой дефект входа.
 
@@ -423,14 +448,12 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
         )
 
     declared_span = span_of(raw, path)
-    version_file = path.parent / paths.VERSION
-    if version_file.is_file():
-        now = version_file.read_text(encoding="utf-8").strip()
-        if not compatible(declared_span, now):
-            raise BadPolicy(
-                f"{path}: контракт механизмов {now} вне объявленного диапазона «{declared_span}» — "
-                "перечитайте ответы под новый контракт (157), а не двигайте границу"
-            )
+    now = contract_of(path.parent, supplier)
+    if now is not None and not compatible(declared_span, now):
+        raise BadPolicy(
+            f"{path}: контракт механизмов {now} вне объявленного диапазона «{declared_span}» — "
+            "перечитайте ответы под новый контракт (157), а не двигайте границу"
+        )
 
     declared = raw.get("checks")
     if not isinstance(declared, dict) or not declared:
