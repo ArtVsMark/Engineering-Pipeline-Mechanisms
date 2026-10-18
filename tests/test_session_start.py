@@ -37,6 +37,47 @@ def test_outside_the_cloud_the_hook_does_nothing(tmp_path: Path) -> None:
     assert not env_file.exists(), "вне облака хук тронул окружение окна"
 
 
+@pytest.mark.parametrize("floor", ["# want не задан\n", None], ids=["пустой", "нет-файла"])
+def test_without_the_floor_number_the_hook_names_the_floor(
+    tmp_path: Path, floor: str | None
+) -> None:
+    """Планка не прочитана — причина названа планкой, а `want` окна не подхвачен (взгляд на #1518).
+
+    В окружении стоит чужой `want`: прочитай его хук, он пошёл бы ставить
+    интерпретатор, а не сказал бы, что `floor.sh` число не дал.
+    """
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    shutil.copy2(HOOK, hooks / HOOK.name)
+    # В PATH — только `dirname`: хук, не узнавший планку, не дотянется до
+    # установщика, даже если проверка пустой планки сломана.
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    dirname = shutil.which("dirname")
+    assert dirname, "без dirname хук не позвать"
+    (tools / "dirname").symlink_to(dirname)
+    if floor is not None:
+        (hooks / FLOOR_FILE.name).write_text(floor, encoding="utf-8")
+    environment = {
+        "PATH": str(tools),
+        "CLAUDE_CODE_REMOTE": "true",
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        "CLAUDE_ENV_FILE": str(tmp_path / "env"),
+        "want": "9.99",
+    }
+    done = subprocess.run(
+        [str(hooks / HOOK.name)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "число планки взять неоткуда" in done.stderr, done.stderr
+    assert "9.99" not in done.stderr, done.stderr
+
+
 def test_the_hook_reads_the_floor_and_tools_from_check_env() -> None:
     """Планку и строки установки хук спрашивает у `check_env`, а не разбирает сам (214)."""
     check_env = load_script("check_env.py")

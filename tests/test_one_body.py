@@ -56,6 +56,16 @@ SIGNED: Final[dict[frozenset[str], str]] = {
         "tests/test_push_guard.py::test_the_cut_is_the_transport_one и "
         "tests/test_agent_run.py::test_the_cut_is_the_transport_one"
     ),
+    frozenset(
+        {
+            ".claude/hooks/push_guard.py::tail",
+            "packages/transport/report.py::tail",
+        }
+    ): (
+        "хук не импортирует дерево (046), как и у `cut`: причину отказа git он "
+        "обрезает своей копией хвоста. Совпадение с каноном держит "
+        "tests/test_push_guard.py::test_the_tail_is_the_transport_one"
+    ),
 }
 
 
