@@ -509,6 +509,64 @@ def test_the_thin_ci_carries_only_calls(tmp_path: Path) -> None:
     assert all("steps" not in job and "@v1.0.0" in job["uses"] for job in flow["jobs"].values())
 
 
+def test_a_kept_path_is_left_alone_and_its_check_goes_off(tmp_path: Path) -> None:
+    """`--keep` оставляет путь проекту: заход его не пишет, проверка прогона — `off` (#1503).
+
+    Обе половины: без ключа занятый путь — прежний отказ, с ключом — свой файл
+    цел, а запись его прогона в ответе несёт класс `off` и причину. Ключ
+    называет двойник `.yaml` — это тот же путь заготовки.
+    """
+    root = tree(
+        tmp_path / "наше",
+        **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
+    )
+    consumer = tmp_path / "потребитель"
+    flows = consumer / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "план.yaml").write_text("своё\n", encoding="utf-8")
+    argv = ["--root", str(root), "--write", str(consumer)]
+    assert module.main(argv) == module.EXIT_OCCUPIED, "занятый путь без ключа — отказ, как прежде"
+    assert module.main([*argv, "--keep", ".github/workflows/план.yaml"]) == module.EXIT_OK
+    assert (flows / "план.yaml").read_text(encoding="utf-8") == "своё\n"
+    assert not (flows / "план.yml").exists()
+    answer = (consumer / module.paths.PIPELINE).read_text(encoding="utf-8")
+    said = module.policy.answer_text(answer, str(module.paths.PIPELINE))
+    entries = {
+        str(name): module.policy.entry_of(item)
+        for part in ("checks", module.policy.BEYOND)
+        for name, item in (said.get(part) or {}).items()
+    }
+    names, _ = module.own_records(root / ".github" / "workflows" / "план.yml", "план")
+    assert names, "у прогона нет записей — судить нечего"
+    for name in names:
+        klass, why, _ = entries[name]
+        assert klass == module.policy.OFF and "--keep" in why, entries[name]
+
+
+def test_kept_records_name_the_checks_of_a_kept_flow_only() -> None:
+    """Причина `off` — у записей прогона по оставленному пути, и только у них."""
+    own = {"план": Path("x/план.yml"), "обход": Path("x/обход.yml")}
+    records = {"план": (["план / план"], False), "обход": (["обход / обход"], True)}
+    kept = module.kept_records([module.paths.WORKFLOWS / "план.yml"], own, records)
+    assert list(kept) == ["план / план"] and "--keep" in kept["план / план"]
+    assert module.kept_records([], own, records) == {}
+
+
+def test_a_kept_path_the_kit_does_not_lay_is_refused(tmp_path: Path) -> None:
+    """Ключ на путь, которого заготовка не кладёт, — отказ до записи, а не молчание (045)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    argv = ["--root", str(root), "--write", str(consumer), "--keep", ".github/workflows/нет.yml"]
+    assert module.main(argv) == module.EXIT_BROKEN
+    assert not consumer.exists() or not any(consumer.iterdir()), "положено до отказа"
+
+
+def test_keep_belongs_to_the_first_connection() -> None:
+    """`--keep` без `--write` — ошибка вызова: обновлению и печати ключ не нужен."""
+    with pytest.raises(SystemExit):
+        module.main(["--keep", ".github/workflows/план.yml"])
+
+
 def test_occupied_names_only_what_exists(tmp_path: Path) -> None:
     """`occupied` называет занятые пути, `lay` кладёт все."""
     files = {Path("a/x.yml"): "x\n", Path("y.yml"): "y\n"}

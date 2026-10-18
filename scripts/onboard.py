@@ -81,6 +81,13 @@
 дереве потребителя уже занят · ``6`` общая ветка потребителя не ``main`` ·
 ``7`` с ``--update``: наш файл правлен по существу, не записано ничего.
 
+СВОЙ ПУТЬ НАЗЫВАЕТСЯ КЛЮЧОМ, А НЕ УБИРАЕТСЯ РУКАМИ (#1503, решение владельца
+18.10.2026). У живого проекта часть путей заготовки уже занята своим файлом с
+другим предметом — свой выпуск пакета, свои значки. `--write --keep ПУТЬ`
+этот путь не пишет и не считает занятым, а проверки прогона по нему кладёт
+в ответ классом `off` с причиной: молча проверка не пропадает. Путь, которого
+заготовка не кладёт, — отказ: опечатка в ключе иначе прошла бы молча (045).
+
 ОБНОВЛЕНИЕ — ВТОРАЯ ДВЕРЬ, `--update` (#1386). Наш файл сверяется с заготовкой
 СВОЕГО тега по существу вызова, а не по тексту; совпал — переписывается новой
 заготовкой, разошёлся — отказ на всё обновление с разницей для поставщика.
@@ -1490,12 +1497,26 @@ def contract_span(contract: str) -> str:
     return f">={major}.{minor},<{major}.{minor + 1}"
 
 
+def kept_records(
+    keep: list[Path], own: dict[str, Path], records: dict[str, tuple[list[str], bool]]
+) -> dict[str, str]:
+    """Записи проверок прогонов, которые проект оставил своим: имя записи → причина `off`."""
+    said: dict[str, str] = {}
+    for one, flow in sorted(own.items()):
+        path = paths.WORKFLOWS / flow.name
+        if path in keep:
+            for name in records[one][0]:
+                said[name] = f"`{path}` проект оставил своим (onboard.py --keep)"
+    return said
+
+
 def answer(
     names: list[str],
     beyond: list[str] | None = None,
     *,
     on_change: list[str] | None = None,
     span: str,
+    kept: dict[str, str] | None = None,
 ) -> str:
     """Заготовка ответа потребителя: схема, окно контракта и по строке на проверку.
 
@@ -1506,13 +1527,22 @@ def answer(
     (`own_records`): вне изменения и на нём. `span` — окно контракта
     (`contract_span`): без него и без схемы ответ не читает ни один механизм
     (`pipeline_checks.load`), и потребитель краснел бы с первого прогона.
+    `kept` — записи прогонов, которые проект оставил своим (`kept_records`):
+    они ложатся классом `off` с причиной, а не очередью разбора.
     """
-    rows = [f'  "{check_name(one)}": {policy.UNREVIEWED}' for one in names]
-    rows += [f'  "{one}": {policy.UNREVIEWED}' for one in on_change or []]
+
+    def row(name: str) -> str:
+        why = (kept or {}).get(name)
+        if why:
+            return f'  "{name}": {{class: {policy.OFF}, why: "{why}"}}'
+        return f'  "{name}": {policy.UNREVIEWED}'
+
+    rows = [row(check_name(one)) for one in names]
+    rows += [row(one) for one in on_change or []]
     said = f'schema: {policy.SCHEMA}\ncontract: "{span}"\n\n'
     said += "checks:\n" + "\n".join(rows) + "\n"
     if beyond:
-        more = "\n".join(f'  "{one}": {policy.UNREVIEWED}' for one in beyond)
+        more = "\n".join(row(one) for one in beyond)
         said += f"{policy.BEYOND}:\n{more}\n"
     return said
 
@@ -1618,9 +1648,19 @@ def main(argv: list[str] | None = None) -> int:
         metavar="КОРЕНЬ",
         help="обновить наше в дереве потребителя до выпуска; своё и правленое не трогается",
     )
+    parser.add_argument(
+        "--keep",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="ПУТЬ",
+        help="с --write: путь от корня потребителя, который проект оставляет своим (#1503)",
+    )
     args = parser.parse_args(argv)
     if args.write and args.update:
         parser.error("--write и --update — разные двери: первое подключение и обновление")
+    if args.keep and not args.write:
+        parser.error("--keep — ключ первого подключения: он бывает только с --write")
 
     try:
         names = steps(args.root)
@@ -1677,11 +1717,21 @@ def main(argv: list[str] | None = None) -> int:
         # КЛАДЁТСЯ ТОЛЬКО ПО ЯВНОМУ КЛЮЧУ И ТОЛЬКО В СВОБОДНОЕ (#992). Чужое
         # дерево заход не правит: занятый путь называется, и не пишется ни
         # один файл — половина заготовки хуже никакой.
+        # Двойник `.yaml` в ключе — тот же путь заготовки, что `.yml` (`standing`).
+        keep = [
+            one.with_suffix(".yml")
+            if one.parent == paths.WORKFLOWS and one.suffix == ".yaml"
+            else one
+            for one in args.keep
+        ]
+        kept_checks = kept_records(keep, own, records)
         try:
             files = {
                 paths.WORKFLOWS / PIPELINE_FLOW: thin_ci(pipeline, args.repo, pin),
                 paths.WORKFLOWS / SUMMARY_FLOW: summary,
-                paths.PIPELINE: answer(pipeline, beyond, on_change=on_change, span=span),
+                paths.PIPELINE: answer(
+                    pipeline, beyond, on_change=on_change, span=span, kept=kept_checks
+                ),
                 **{
                     paths.WORKFLOWS / flow.name: own_kit(flow, one, args.repo, pin)
                     for one, flow in sorted(own.items())
@@ -1691,6 +1741,17 @@ def main(argv: list[str] | None = None) -> int:
         except NotRun as exc:
             print(f"заход не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
+        unknown = sorted(str(one) for one in set(keep) - set(files | rulebook | kit))
+        if unknown:
+            print(
+                "заготовка не положена: --keep называет путь, которого заготовка не кладёт — "
+                + ", ".join(unknown),
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
+        files = {path: text for path, text in files.items() if path not in keep}
+        rulebook = {path: text for path, text in rulebook.items() if path not in keep}
+        kit = {path: text for path, text in kit.items() if path not in keep}
         # ОБЩАЯ ВЕТКА СВЕРЯЕТСЯ ДО ЗАПИСИ (#1220): заготовка, положенная в
         # дерево с другой общей веткой, сравнивала бы гейты не с той базой.
         # Клон её не знает — это названо, а не принято за совпадение (045).
@@ -1726,6 +1787,12 @@ def main(argv: list[str] | None = None) -> int:
         free = {path: text for path, text in rulebook.items() if path not in kept}
         lay(args.write, files | free, args.repo)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
+        if keep:
+            print(
+                "оставлено своим по --keep: "
+                + ", ".join(str(one) for one in sorted(keep))
+                + f" — не тронуто; проверки их прогонов в `{paths.PIPELINE}` — off с причиной"
+            )
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
         laid = lay_free(args.write, kit, args.repo)
