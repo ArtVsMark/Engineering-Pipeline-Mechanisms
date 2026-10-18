@@ -413,7 +413,46 @@ def our_slice(where: dict[str, Any], project: str) -> dict[str, Any] | None:
     )
 
 
-def catalogue_found(where: dict[str, Any], project: str) -> list[Drift]:
+#: Статус ответа `.rules/bindings.json`, который ответом не считается. Не путать
+#: с классом проверки `pipeline_checks.UNREVIEWED`: слово то же, предмет другой.
+UNREVIEWED_ANSWER: Final = "unreviewed"
+#: Пара «заменённое → заменяющее» в находке каталога о заменённых правилах:
+#: номера правил трёхзначные, стрелка — как её пишет каталог.
+SUPERSEDED_PAIR_RE: Final = re.compile(r"(?<!\d)(\d{3}) → (\d{3})(?!\d)")
+
+
+def answered_rules(mine: dict[str, Any]) -> frozenset[str]:
+    """Номера правил, по которым у нас есть ответ, — без нерассмотренных."""
+    return frozenset(
+        str(number)
+        for number, answer in (mine.get("rules") or {}).items()
+        if str((answer or {}).get("status") or "") != UNREVIEWED_ANSWER
+    )
+
+
+def superseded_state(said: str, answered: frozenset[str]) -> bool:
+    """Находка называет заменённые правила, и по каждому заменяющему ответ у нас есть.
+
+    СОСТОЯНИЕ, А НЕ РАБОТА — И ЭТО ГОВОРИТ САМ КАТАЛОГ. Контракт его выгрузки
+    (`export/README.md`, раздел `superseded_by`): «ответ потребителя о
+    заменённом правиле — состояние, а не находка». Сводка всё равно кладёт его в
+    `findings`, и дрейф подавал его работой с советом править ответ: замер
+    18.10.2026 — двенадцать пар, все заменяющие отвечены (#1472), чинить нечего,
+    а строка висела бы в плане всегда (#1502).
+
+    Судится не текст каталога, а наши ответы. Из находки берутся только пары
+    номеров; состояние — когда каждое заменяющее у нас отвечено. Хоть одно не
+    отвечено — это работа, и находка идёт прежним путём. Пар нет вовсе — это не
+    находка о заменённых, и она тоже идёт прежним путём: незнакомая форма не
+    гасится молча (045).
+    """
+    pairs = SUPERSEDED_PAIR_RE.findall(said)
+    return bool(pairs) and all(new in answered for _, new in pairs)
+
+
+def catalogue_found(
+    where: dict[str, Any], project: str, answered: frozenset[str] = frozenset()
+) -> list[Drift]:
     """Находки каталога о НАШЕМ ответе доезжают до того, кто их чинит.
 
     КАНАЛ БЫЛ ПОСТРОЕН С ТОЙ СТОРОНЫ И НЕ ЧИТАЛСЯ С ЭТОЙ. Ключ `findings`
@@ -441,6 +480,10 @@ def catalogue_found(where: dict[str, Any], project: str) -> list[Drift]:
     ЧИНИТСЯ У НАС, А НЕ У КАТАЛОГА. Находка о нашем ответе правится в
     `.rules/bindings.json`; ставит её каталог, а закрываем мы
     ([086](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/086-the-finder-does-not-grade-the-finding.md)).
+
+    СОСТОЯНИЕ НАЗЫВАЕТСЯ, НО РАБОТОЙ НЕ ПОДАЁТСЯ. Находка о заменённых правилах,
+    у которых заменяющие отвечены (`superseded_state`, `answered` — наши
+    отвеченные номера), печатается заметкой в журнал захода, а записью — нет.
     """
     us = our_slice(where, project)
     if us is None:
@@ -450,16 +493,27 @@ def catalogue_found(where: dict[str, Any], project: str) -> list[Drift]:
         # `null` каталог ставит себе сам — находок о себе у него нет. Это
         # «не нашли», а не «не прочитали», и молчание здесь законно.
         return []
-    return [
-        Drift(
-            "catalogue-finding",
-            f"каталог нашёл в нашем ответе: {report.cut(' '.join(str(one).split()))}",
-            "перечитать ответ по этой находке и поправить `.rules/bindings.json` — "
-            "ставит её каталог, а закрываем мы (086)",
+    found: list[Drift] = []
+    for one in said:
+        text = " ".join(str(one).split())
+        if not text:
+            continue
+        if superseded_state(text, answered):
+            print(
+                f"::notice::каталог называет состоянием, и заменяющие у нас отвечены — "
+                f"работы нет: {report.cut(text)}",
+                file=sys.stderr,
+            )
+            continue
+        found.append(
+            Drift(
+                "catalogue-finding",
+                f"каталог нашёл в нашем ответе: {report.cut(text)}",
+                "перечитать ответ по этой находке и поправить `.rules/bindings.json` — "
+                "ставит её каталог, а закрываем мы (086)",
+            )
         )
-        for one in said
-        if str(one).strip()
-    ]
+    return found
 
 
 def snapshot_is_stale(where: dict[str, Any], mine: dict[str, Any], project: str) -> list[Drift]:
@@ -517,7 +571,7 @@ def family_summary(where: dict[str, Any], mine: dict[str, Any], project: str) ->
     """
     return (
         reader_is_behind(where)
-        + catalogue_found(where, project)
+        + catalogue_found(where, project, answered_rules(mine))
         + snapshot_is_stale(where, mine, project)
     )
 
@@ -561,6 +615,15 @@ def pinned_tag_moved(repo: str, token: str) -> list[Drift]:
 #: Как площадка называет право обхода для спрашивающего. «never» — не вправе
 #: никогда; прочие значения означают, что вправе при каких-то условиях.
 NEVER: Final = "never"
+#: Приставка токена установки приложения: такой выдаёт площадка прогону
+#: (`github.token`). У токена человека приставка другая — `ghp_`,
+#: `github_pat_`, — а у прокси облачного окна своя.
+RUN_TOKEN_PREFIX: Final = "ghs_"
+
+
+def is_run_token(token: str) -> bool:
+    """Заход идёт прогоном площадки, и токен — токен установки, то есть прогона."""
+    return os.environ.get("GITHUB_ACTIONS") == "true" and token.startswith(RUN_TOKEN_PREFIX)
 
 
 def declared_protection(where: Path | None = None) -> dict[str, Any]:
@@ -630,10 +693,17 @@ def protection_moved(repo: str, token: str) -> list[Drift]:
 
     ПРАВО ОБХОДА СПРАШИВАЕТСЯ ПРО СПРАШИВАЮЩЕГО. Площадка отдаёт
     `current_user_can_bypass` — ответ про ТОТ токен, которым задан вопрос.
-    Здесь это токен прогона, и объявление говорит о нём: прогон не вправе
-    толкать мимо проверок никогда. Про токен владельца поле не говорит ничего,
-    и выдавать один ответ за другой значило бы назвать проверенным то, чего не
-    спрашивали (046).
+    Объявление говорит о токене прогона: прогон не вправе толкать мимо проверок
+    никогда. Про токен владельца поле не говорит ничего, и выдавать один ответ
+    за другой значило бы назвать проверенным то, чего не спрашивали (046).
+
+    ПОЭТОМУ ВНЕ ПРОГОНА ПРАВО ОБХОДА НЕ ПРОВЕРЯЕТСЯ, А НАЗЫВАЕТСЯ НЕПРОВЕРЕННЫМ.
+    Докстрока считала токен прогона данностью, а заход из окна шёл токеном с
+    ролью администратора: 18.10.2026 у набора 22629354 обход его роли —
+    `always`, и дрейф выдал «объявлено never, площадка говорит always» о токене,
+    про который объявление не говорит (#1502). Токен прогона узнаётся
+    `is_run_token`; иначе — заметка в журнал, а прочие сверки защиты от токена
+    не зависят и идут как шли.
     """
     said = declared_protection()
     branch = str(said["branch"])
@@ -694,6 +764,13 @@ def protection_moved(repo: str, token: str) -> list[Drift]:
     # проверкой. Нашёл внешний взгляд на #272 — докстринг обещал обход всех, а
     # код читал один.
     want = str(said.get("run_token_may_bypass") or NEVER)
+    if not is_run_token(token):
+        print(
+            "::notice::право обхода не проверено: заход идёт не токеном прогона, а "
+            "объявление говорит о нём — ответ площадки был бы про спросившего (046)",
+            file=sys.stderr,
+        )
+        return found
     for ruleset in sorted(
         {one["ruleset_id"] for one in rules if one.get("ruleset_id") is not None}
     ):
