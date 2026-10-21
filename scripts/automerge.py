@@ -1132,6 +1132,40 @@ def base_ahead(repo: str, change: Change, owner_token: str) -> int:
     return ahead if isinstance(ahead, int) and not isinstance(ahead, bool) else 0
 
 
+#: Начало сообщения коммита, которым площадка подтягивает базу (`update-branch`):
+#: «Merge branch 'main' into agent/…» — замер на `921db111`, 18.10.2026.
+SYNC_MESSAGE: Final = "Merge branch '{base}'"
+
+
+def synced_from_base(repo: str, change: Change, owner_token: str) -> bool:
+    """Голова — уже коммит подтяжки базы: красное на ней своё, а не отставание (#1517)."""
+    said = ghrest.request("GET", f"repos/{repo}/commits/{change.head}", owner_token) or {}
+    parents = said.get("parents") if isinstance(said, dict) else None
+    message = str(
+        ((said.get("commit") or {}) if isinstance(said, dict) else {}).get("message") or ""
+    )
+    return (
+        isinstance(parents, list)
+        and len(parents) == 2
+        and message.startswith(SYNC_MESSAGE.format(base=change.base))
+    )
+
+
+def red_kept(repo: str, change: Change, owner_token: str, *, main_red: bool) -> str:
+    """Почему красную голову НЕ подтягивать; пусто — подтянуть базу один раз (#1517).
+
+    Причина называется всегда: «готовой головы нет» без неё не отличало
+    красное своё от красного, которое лечит общая ветка.
+    """
+    if main_red:
+        return "общая ветка красна сама — подтяжка красное не вылечит"
+    if not base_ahead(repo, change, owner_token):
+        return "база не впереди головы — красное своё"
+    if synced_from_base(repo, change, owner_token):
+        return "база уже подтянута в эту голову — красное своё, второй раз не подтягиваю"
+    return ""
+
+
 def unstick(
     repo: str,
     change: Change,
@@ -1441,11 +1475,26 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 )
                 skipped["пусты"] += 1
                 continue
+            # ОТСТАЮЩЕЕ КРАСНОЕ ПОДТЯГИВАЕТСЯ ОДИН РАЗ (#1517). Красное могла
+            # лечить общая ветка, а толкать в изменение, открытое конвейером,
+            # некому: 18.10.2026 #1514 стоял красным на починке, уже слитой
+            # #1515, пока базу не подтянули рукой. Красное ПОСЛЕ подтяжки —
+            # своё, и второй раз голова не подтягивается.
+            kept = red_kept(repo, change, owner_token, main_red=bool(troubles))
+            if not kept:
+                print(
+                    f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: красна и отстаёт от базы — "
+                    "подтягиваю базу один раз: красное могла лечить общая ветка (#1517)"
+                )
+                sync_head(repo, change.number, owner_token, dry_run=dry_run)
+                skipped["красны, база подтянута"] += 1
+                continue
             # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
             # а очередь идёт дальше: одна красная голова не обязана держать
             # остальных.
             print(
-                f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — {'; '.join(problems)}"
+                f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — "
+                f"{'; '.join(problems)}; база не подтянута: {kept}"
             )
             skipped["красны"] += 1
             continue
