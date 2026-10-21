@@ -158,6 +158,80 @@ def test_a_bump_inside_the_declared_span_passes(run_script: RunScript, tmp_path:
     assert "условия сошлись" in run.text
 
 
+def wide_span(root: Path) -> None:
+    """Диапазон на два минора: подъём версии контракта в него помещается."""
+    (root / ".pipeline.yml").write_text(
+        'schema: 4\ncontract: ">=9.9,<9.11"\nchecks:\n  lint: required\n', encoding="utf-8"
+    )
+
+
+def test_a_literal_of_the_next_contract_refuses_the_release(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Будущая версия контракта уже вписана руками — отказ выпуска с адресом строки (#1516).
+
+    Коммит выпуска проверок изменения не проходит: литерал нового числа
+    покраснел бы гейтом версии уже на следующем изменении, а тег стоял бы.
+    Ждущий фрагмент с тем же числом отказа не даёт — он уедет в `released/`.
+    """
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    wide_span(root)
+    nxt = module.next_contract(FAKE_VERSION, touched=True)
+    (root / "probe.py").write_text(f'\nWANT = "{nxt}"\n', encoding="utf-8")
+    (root / "changelog.d" / "a.contract.md").write_text(f"до {nxt}\n\n#1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "литерал"], cwd=root, check=True)
+    run = run_script("release.py", cwd=root)
+    assert run.code == 1, run.text
+    assert f"probe.py:2: версия «{nxt}»" in run.text
+    assert "a.contract.md" not in run.text.split("выпускать нельзя")[-1]
+    assert not subprocess.run(
+        ["git", "tag", "--list", "v9.10.0"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.strip()
+
+
+def test_a_literal_of_the_current_contract_does_not_refuse_a_moving_release(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Выпуск судит БУДУЩЕЕ число: нынешнее — дело гейта на изменениях, а не выпуска (097)."""
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    wide_span(root)
+    # Маркер собран по частям: целиком он стоял бы в этом файле, и гейт версии
+    # судил бы его здесь, а не в подделке.
+    opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
+    (root / "probe.py").write_text(f'"""{opening}{FAKE_VERSION}{closing}"""\n', encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "маркер"], cwd=root, check=True)
+    run = run_script("release.py", cwd=root)
+    assert run.code == 0, run.text
+
+
+def test_future_literals_skip_the_fragments_that_leave(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Литерал в ждущем фрагменте не находка — он уедет в `released/`; в прочем файле — находка."""
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    (root / "changelog.d" / "a.contract.md").write_text("до 9.10.0\n", encoding="utf-8")
+    (root / "probe.py").write_text('WANT = "9.10.0"\n', encoding="utf-8")
+    monkeypatch.chdir(root)
+    said = module.future_literals("9.10.0", module.fragments())
+    assert len(said) == 1 and "probe.py:1" in said[0], said
+
+
+def test_stale_markers_name_only_the_markers_off_the_version() -> None:
+    """Маркер с иным числом — находка, с тем же — нет; литералы вне маркера сюда не идут."""
+    check_version = load_script("check_version.py")
+    opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
+    found = [("a.md", f"{opening}1.2.3{closing}"), ("b.md", f"{opening}1.3.0{closing} 1.2.3")]
+    said = check_version.stale_markers("1.3.0", found)
+    assert len(said) == 1 and said[0].startswith("a.md:"), said
+
+
 def test_a_breaking_surface_raises_the_contract_major(
     run_script: RunScript, tmp_path: Path
 ) -> None:
