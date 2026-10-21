@@ -393,6 +393,22 @@ def refusals(
     return problems
 
 
+def staying(waiting: list[Path]) -> list[Path]:
+    """Файлы дерева, которые останутся на месте, когда ждущие фрагменты уедут.
+
+    ОДНА ВЫБОРКА НА СУХОЙ ЗАХОД И НА ЗАПИСЬ (взгляд на #1541). Выпуск уносит
+    фрагменты в `released/`, а гейт версии этот путь не судит: число во
+    фрагменте не догонит ни литерал, ни переписанный маркер. Сухой заход,
+    судивший всё дерево, обещал переписать маркер во фрагменте, которого
+    запись уже не видела.
+    """
+    leaving = {one.as_posix() for one in waiting}
+    try:
+        return [one for one in check_version.tracked_files() if one.as_posix() not in leaving]
+    except check_version.NotRun as exc:
+        raise NotRun(f"список файлов не получен: {exc}") from exc
+
+
 def future_literals(after: str, waiting: list[Path]) -> list[str]:
     """Литералы версии контракта, которую выпуск запишет, — находки гейта версии до тега.
 
@@ -409,11 +425,10 @@ def future_literals(after: str, waiting: list[Path]) -> list[str]:
     новым числом тем же коммитом (`check_version.rewrite_markers`), а здесь
     судятся только голые литералы.
     """
-    leaving = {one.as_posix() for one in waiting}
+    files = staying(waiting)
     # Охват ниже печатает гейт версии: без этой строки он читался бы как охват выпуска.
     print(f"гейт версии на будущем номере контракта {after}:")
     try:
-        files = [one for one in check_version.tracked_files() if one.as_posix() not in leaving]
         found = check_version.literals(after, check_version.texts(files))
     except check_version.NotRun as exc:
         raise NotRun(f"гейт версии на {after} не отработал: {exc}") from exc
@@ -472,9 +487,12 @@ def announce(
     said = " (НЕСОВМЕСТИМО, объявлено ключом --breaking)" if breaking else ""
     print(f"версия контракта: {now} → {after}{said}")
     # ЧТО ТРОНЕТ КОММИТ ВЫПУСКА, ВИДНО ДО НЕГО (взгляд на #1537): маркеры
-    # называются той же выборкой, которой их перепишет `do_release`.
+    # называются той же выборкой (`staying`), которой их перепишет `do_release`.
+    files = staying(waiting)
+    # Охват ниже печатает гейт версии: без шапки он читался бы как охват выпуска.
+    print(f"маркеры контракта, которые выпуск перепишет на {after}:")
     try:
-        found = check_version.texts(check_version.tracked_files())
+        found = check_version.texts(files)
     except check_version.NotRun as exc:
         raise NotRun(f"маркеры контракта не прочитаны: {exc}") from exc
     for name in check_version.marker_rewrites(after, found):
@@ -493,7 +511,8 @@ def do_release(wanted: str, *, breaking: bool = False) -> None:
     # поверхности. Нашёл это интеграционный тест, которого сначала не было, —
     # ровно тот случай, ради которого он и потребован внешним взглядом на #253
     # ([139](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/139-a-mechanism-is-confirmed-by-a-run.md)).
-    touched = bool(touches_contract(fragments()))
+    waiting = fragments()
+    touched = bool(touches_contract(waiting))
     build_changelog.do_release(wanted)
     # ВЕРСИЯ КОНТРАКТА ПИШЕТСЯ ТОЛЬКО ЕСЛИ ПОВЕРХНОСТЬ ТРОНУТА. Прежде здесь
     # стоял номер выпуска, и два числа были одним: каждый тег двигал версию
@@ -507,7 +526,7 @@ def do_release(wanted: str, *, breaking: bool = False) -> None:
         # МАРКЕРЫ — ТЕМ ЖЕ КОММИТОМ (взгляд на #1537): иначе первый же прогон
         # гейта версии после тега нашёл бы их устаревшими.
         try:
-            rewritten = check_version.rewrite_markers(contract_after, check_version.tracked_files())
+            rewritten = check_version.rewrite_markers(contract_after, staying(waiting))
         except check_version.NotRun as exc:
             raise NotRun(f"маркеры контракта не переписаны: {exc}") from exc
         for name in rewritten:
