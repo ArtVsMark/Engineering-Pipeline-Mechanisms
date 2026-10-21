@@ -18,7 +18,7 @@
         "гейт": "tests/test_report.py",
         "признак": "code_files()"
       },
-      ".github": "исключено: шаги прогонов вывод читателю не режут — grep head/tail/cut -c/${x:N:M} по .github — 0 строк (замер 17.10.2026 после #1464: прежние две, `git tag --points-at HEAD | head -1` в step-release.yml, выбирали тег, а не резали вывод, и ушли в version.py --head-tag); обрезку вывода механизма делает packages/transport/report.py::cut"
+      ".github": "исключено: шаги прогонов вывод читателю не режут — grep head/tail/cut -c/${x:N:M} по .github — 0 строк (замер 17.10.2026 после #1464: прежние две, `git tag --points-at HEAD | head -1` в step-release.yml, выбирали тег, а не резали вывод, и ушли в version.py --head-tag и --head-number. Дописано 21.10.2026: --head-number снят в #1513 тем же выпуском 1.8.0: шаг release выдаёт номер своим выходом из --head-tag, хвост по стоящему тегу берёт его из спрошенной версии и --head-tag только сверяет); обрезку вывода механизма делает packages/transport/report.py::cut"
     },
     "039": {
       "paths.SOURCES": {
