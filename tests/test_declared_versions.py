@@ -180,7 +180,10 @@ def test_every_hand_written_language_version_is_the_declared_floor() -> None:
     wrong = [
         f"{name}:{job} ставит {said}, а пол дерева — {floor}"
         for name, job, said, preview, cell in declared_steps()
-        if FROM_MATRIX not in said and said != floor and not preview and not cell
+        if FROM_MATRIX not in said
+        and said != floor
+        and not preview
+        and not cell_step(name, job, cell)
     ]
     assert not wrong, "версия истолкователя разошлась с объявленным полом (035):\n  " + "\n  ".join(
         wrong
@@ -197,6 +200,26 @@ def test_a_matrix_cell_is_not_counted_as_a_duplicate() -> None:
     """
     cells = [one for one in declared_steps() if one[4]]
     assert cells, "ни один шаг не ставит ячейку матрицы — довод про границу пуст"
+
+
+def cell_step(name: str, job: str, cell: str) -> bool:
+    """Шаг ячейки — только в джобе, чью матрицу судит `test_every_matrix_cell_has_its_own_setup`."""
+    return bool(cell) and name == MATRIX_FLOW.name and job == MATRIX_JOB
+
+
+def test_a_cell_condition_lives_only_in_the_judged_matrix() -> None:
+    """Условие на ячейку вне `ci.yml::test-matrix` — отказ: такой шаг минул бы обе проверки.
+
+    Пол его не судит (он шаг ячейки), а сверка ячеек смотрит один джоб (взгляд
+    на #1533). Появится вторая матрица с шагами ячеек — сверку расширяют, а
+    не пропускают её шаги молча.
+    """
+    stray = [
+        f"{name}:{job} (ячейка {cell})"
+        for name, job, _, _, cell in declared_steps()
+        if cell and not cell_step(name, job, cell)
+    ]
+    assert not stray, f"шаги ячеек вне сверяемой матрицы: {stray}"
 
 
 def test_every_matrix_cell_has_its_own_setup() -> None:
