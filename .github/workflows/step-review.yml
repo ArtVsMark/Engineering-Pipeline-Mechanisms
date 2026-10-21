@@ -496,7 +496,7 @@ jobs:
         # ожидание зелёной головы (#762). Это число названо в задании агенту.
         timeout-minutes: 20
         continue-on-error: true
-        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        uses: anthropics/claude-code-action@5eb090f3c3afd701a0672cd32981197ca27688f6 # v1.0.253
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # У находки должен быть адресат, иначе её нет (142): ключ ведёт
@@ -1095,7 +1095,7 @@ jobs:
         # унёс бы с собой и шаг переноса — ответ пропал бы (взгляд на #870).
         # Запас в пять минут оставлен переносу.
         timeout-minutes: 15
-        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        uses: anthropics/claude-code-action@5eb090f3c3afd701a0672cd32981197ca27688f6 # v1.0.253
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Тот же закрытый список, что у остальных заходов, и по той же
@@ -1572,7 +1572,7 @@ jobs:
         id: late
         if: steps.token.outputs.present == 'yes'
         continue-on-error: true
-        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        uses: anthropics/claude-code-action@5eb090f3c3afd701a0672cd32981197ca27688f6 # v1.0.253
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Тот же закрытый список, что и у ревью изменения, и по той же
