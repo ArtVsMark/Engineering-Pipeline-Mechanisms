@@ -36,6 +36,10 @@ import gitcall
 import paths
 import version as project_version
 
+#: Половины маркера — по частям: целиком строка в этом файле была бы маркером,
+#: и гейт нашёл бы его в себе (так он и поймал себя при первом прогоне).
+OPENING: Final = "<!--m:" + "contract-->"
+CLOSING: Final = "<!--/m:" + "contract-->"
 MARKER_RE: Final = re.compile(r"<!--m:contract-->(?P<value>[^<]*)<!--/m:contract-->")
 
 # Производные и служебные файлы: версия попадает в них сборкой, а не руками.
@@ -120,7 +124,7 @@ def stale_markers(version: str, found: list[tuple[str, str]]) -> list[str]:
     """Маркеры контракта, в которых стоит не `version`: сборка их не переписала."""
     return [
         f"{name}: в маркере стоит «{match['value'].strip()}», а источник даёт «{version}» — "
-        "маркер есть, сборка его не переписала"
+        "маркер есть, а выпуск его не переписал"
         for name, text in found
         for match in MARKER_RE.finditer(text)
         if match["value"].strip() != version
@@ -130,8 +134,9 @@ def stale_markers(version: str, found: list[tuple[str, str]]) -> list[str]:
 def literals(version: str, found: list[tuple[str, str]]) -> list[str]:
     """Рукописные вхождения `version` вне маркера — с адресом строки.
 
-    Отдельно от маркеров, потому что выпуск спрашивает только это (#1516): его
-    маркеры перепишет сборка, а литерал будущей версии — нет.
+    Отдельно от маркеров, потому что выпуск спрашивает только это (#1516):
+    маркеры он переписывает сам (`rewrite_markers`), а литерал будущей версии
+    переписать нечем.
     """
     # Границы вокруг числа: «1.2.3» не должно совпадать с «11.2.3» или «1.2.30».
     # Точка рядом с числом — граница, только если по ту её сторону цифра
@@ -148,6 +153,27 @@ def literals(version: str, found: list[tuple[str, str]]) -> list[str]:
                     f"{name}:{number}: версия «{version}» вписана вне источника и вне маркера"
                 )
     return findings
+
+
+def rewrite_markers(version: str, files: list[Path]) -> list[str]:
+    """Переписывает число в каждом маркере контракта на `version`; отдаёт тронутые файлы.
+
+    ЭТО ТА САМАЯ СБОРКА, КОТОРУЮ ОБЕЩАЕТ ДОГОВОР (`docs/dev/release.md`, «Маркер
+    в прозе»; поздний взгляд на #1525 и взгляд на #1537). Прежде её не было
+    вовсе: маркер с нынешним числом после подъёма контракта становился
+    устаревшим, а выпуск не мог ни переписать его, ни пройти. Зовёт её выпуск
+    тем же коммитом, что пишет `CONTRACT_VERSION`.
+    """
+    touched: list[str] = []
+    for name, text in texts(files):
+        after = MARKER_RE.sub(lambda _: f"{OPENING}{version}{CLOSING}", text)
+        if after != text:
+            try:
+                Path(name).write_text(after, encoding="utf-8")
+            except OSError as exc:
+                raise NotRun(f"{name}: маркер не переписан — {exc}") from exc
+            touched.append(name)
+    return touched
 
 
 def orphan_markers(files: list[Path]) -> list[str]:
