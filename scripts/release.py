@@ -471,6 +471,14 @@ def announce(
         return
     said = " (НЕСОВМЕСТИМО, объявлено ключом --breaking)" if breaking else ""
     print(f"версия контракта: {now} → {after}{said}")
+    # ЧТО ТРОНЕТ КОММИТ ВЫПУСКА, ВИДНО ДО НЕГО (взгляд на #1537): маркеры
+    # называются той же выборкой, которой их перепишет `do_release`.
+    try:
+        found = check_version.texts(check_version.tracked_files())
+    except check_version.NotRun as exc:
+        raise NotRun(f"маркеры контракта не прочитаны: {exc}") from exc
+    for name in check_version.marker_rewrites(after, found):
+        print(f"  маркер контракта будет переписан: {name}")
 
 
 def do_release(wanted: str, *, breaking: bool = False) -> None:

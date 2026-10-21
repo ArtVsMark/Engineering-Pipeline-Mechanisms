@@ -225,7 +225,10 @@ def test_a_marker_of_the_current_contract_rides_the_release(
     (root / "probe.md").write_text(f"{opening}{FAKE_VERSION}{closing}\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "маркер"], cwd=root, check=True)
-    assert run_script("release.py", cwd=root).code == 0
+    dry = run_script("release.py", cwd=root)
+    assert dry.code == 0, dry.text
+    # Сухой заход называет файл, который тронет коммит выпуска (взгляд на #1537).
+    assert "маркер контракта будет переписан: probe.md" in dry.text, dry.text
     run = run_script("release.py", "--apply", cwd=root)
     assert run.code == 0, run.text
     after = (root / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
@@ -257,6 +260,21 @@ def test_rewrite_markers_touches_only_the_markers(
     assert (tmp_path / "a.md").read_text(
         encoding="utf-8"
     ) == f"до {opening}1.3.0{closing} после 1.2.3\n"
+
+
+def test_rewrite_markers_keeps_the_line_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Файл с CRLF выпуск правит в одном числе, а не переписывает концы строк (взгляд на #1537)."""
+    check_version = load_script("check_version.py")
+    opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
+    (tmp_path / "a.md").write_bytes(f"до\r\n{opening}1.2.3{closing}\r\n".encode())
+    monkeypatch.chdir(tmp_path)
+    assert check_version.marker_rewrites("1.3.0", check_version.texts([Path("a.md")])) == {
+        "a.md": f"до\r\n{opening}1.3.0{closing}\r\n"
+    }
+    assert check_version.rewrite_markers("1.3.0", [Path("a.md")]) == ["a.md"]
+    assert (tmp_path / "a.md").read_bytes() == f"до\r\n{opening}1.3.0{closing}\r\n".encode()
 
 
 def test_future_literals_skip_the_fragments_that_leave(
