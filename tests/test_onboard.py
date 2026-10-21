@@ -598,7 +598,7 @@ def test_a_kept_answer_says_where_the_off_rows_are(
     assert module.main([*argv, *keys]) == module.EXIT_OK
     out = capsys.readouterr().out
     assert not (consumer / module.paths.PIPELINE).exists()
-    _, _, rest = out.partition("впишите в свой:\n")
+    _, _, rest = out.partition("молча теряет раздел\n")
     assert rest, out
     fragment = "\n".join(
         line
@@ -625,6 +625,26 @@ def test_the_kept_fragment_lays_rows_by_their_section() -> None:
     assert set(said["checks"]) == {"а / а"} and set(said[module.policy.BEYOND]) == {"б / б"}
     assert module.kept_row("а / а", "своё") in fragment
     assert "checks" not in module.kept_fragment(kept, on_change=[], beyond=["б / б"])
+
+
+def test_the_keep_report_names_each_path_once_by_its_kind() -> None:
+    """Каждый путь `--keep` назван ровно одной строкой своего рода (взгляд на #1539).
+
+    Ответ не попадает в строку прочих путей: та говорит «проверки не тронуты»
+    и спорила бы с напечатанным `off`. Строки `off` велено влить в разделы
+    своего ответа, а не вставить второй заголовок.
+    """
+    flows = module.paths.WORKFLOWS
+    flow, ci, answer = flows / "план.yml", flows / "ci.yml", module.paths.PIPELINE
+    lines = module.keep_report([flow, ci, answer], {flow}, "beyond_the_change:\n  row")
+    for one in (flow, ci, answer):
+        named = [line for line in lines if f"{one}" in line.split(" — ")[0]]
+        assert len(named) == 1, (one, lines)
+    (said,) = [line for line in lines if line.startswith(f"`{answer}`")]
+    assert "одноимённые разделы" in said and said.endswith("\n  row"), said
+    assert "не тронуты" not in said, said
+    alone = module.keep_report([answer], set(), "")
+    assert alone == [alone[0]] and "очередь разбора" not in alone[0], alone
 
 
 def test_a_suppliers_yaml_flow_is_kept_by_either_name(tmp_path: Path) -> None:

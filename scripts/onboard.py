@@ -1552,6 +1552,48 @@ def kept_fragment(kept: dict[str, str], *, on_change: list[str], beyond: list[st
     return "\n".join(parts)
 
 
+def keep_report(keep: list[Path], mechanisms: set[Path], fragment: str) -> list[str]:
+    """Что заход сделал с каждым путём `--keep` — строкой на род пути.
+
+    ВЫВОД НАЗЫВАЕТ ТО, ЧТО ПОЛОЖЕНО (взгляды на #1508 и #1539, правило 210).
+    Три рода — три строки, и каждый путь назван ровно в одной: прогон
+    механизма (его проверки — `off`), ответ (своё сводится с печатью захода,
+    а записи оставленных прогонов — строками `off` из `fragment`) и прочие
+    пути (сводятся, их проверки в ответе не трогаются). Прежде ответ попадал
+    в строку прочих путей, и та спорила с напечатанным `off`.
+    """
+    lines: list[str] = []
+    answer_kept = paths.PIPELINE in keep
+    if own := sorted(str(one) for one in keep if one in mechanisms):
+        where = "строки — ниже, у ответа" if answer_kept else f"в `{paths.PIPELINE}`"
+        lines.append(
+            "оставлены своими прогоны механизмов: "
+            + ", ".join(own)
+            + f" — не тронуты; их проверки — off с причиной, {where}"
+        )
+    if answer_kept:
+        said = (
+            f"`{paths.PIPELINE}` не положен (--keep): свой сведите с ответом из печати "
+            "захода без ключей"
+        )
+        if fragment:
+            said += (
+                ". У записей оставленных прогонов там очередь разбора — вместо неё "
+                "влейте строки off ниже в одноимённые разделы своего ответа, заголовок "
+                "раздела второй раз не вставляйте: повтор ключа YAML молча теряет раздел\n"
+                + fragment
+            )
+        lines.append(said)
+    if other := sorted(str(one) for one in keep if one not in mechanisms and one != paths.PIPELINE):
+        lines.append(
+            "не положено по --keep: "
+            + ", ".join(other)
+            + " — своё сведите с заготовкой из печати захода без ключей; "
+            "проверки ответа по этим путям не тронуты"
+        )
+    return lines
+
+
 def answer(
     names: list[str],
     beyond: list[str] | None = None,
@@ -1833,28 +1875,10 @@ def main(argv: list[str] | None = None) -> int:
         free = {path: text for path, text in rulebook.items() if path not in kept}
         lay(args.write, files | free, args.repo)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
-        # ВЫВОД НАЗЫВАЕТ ТО, ЧТО ПОЛОЖЕНО (взгляд на #1508, правило 210): `off`
-        # обещается только там, где он стоит. Ответ оставлен своим — строки
-        # `off` печатаются здесь же; печать захода без ключей их не несёт.
-        if own_kept := sorted(str(one) for one in keep if one in mechanisms):
-            print(
-                "оставлены своими прогоны механизмов: "
-                + ", ".join(own_kept)
-                + " — не тронуты; их проверки — off с причиной"
-                + (
-                    f": `{paths.PIPELINE}` не положен (--keep), впишите в свой:\n"
-                    + kept_fragment(kept_checks, on_change=on_change, beyond=beyond)
-                    if paths.PIPELINE in keep
-                    else f" в `{paths.PIPELINE}`"
-                )
-            )
-        if other_kept := sorted(str(one) for one in keep if one not in mechanisms):
-            print(
-                "не положено по --keep: "
-                + ", ".join(other_kept)
-                + " — своё сведите с заготовкой из печати захода без ключей; "
-                "проверки по этим путям не тронуты: прогона механизма у них нет"
-            )
+        for line in keep_report(
+            keep, mechanisms, kept_fragment(kept_checks, on_change=on_change, beyond=beyond)
+        ):
+            print(line)
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
         laid = lay_free(args.write, kit, args.repo)
