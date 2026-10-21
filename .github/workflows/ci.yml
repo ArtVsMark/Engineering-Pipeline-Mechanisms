@@ -287,6 +287,10 @@ jobs:
   pipeline:
     name: pipeline
     uses: ./.github/workflows/step-pipeline.yml
+    # У себя мета-гейты строгие и видят все источники: `paths.SOURCES` и хуки окна.
+    with:
+      mechanism-paths: scripts packages/transport .claude/hooks
+      mechanism-gates-enforce: true
     permissions:
       contents: read
       checks: read
