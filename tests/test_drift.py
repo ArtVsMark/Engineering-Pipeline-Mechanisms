@@ -891,7 +891,9 @@ def test_both_version_lists_come_from_a_matrix() -> None:
             if (said := ((step or {}).get("with") or {}).get("python-version"))
             and (not preview or ((step or {}).get("with") or {}).get("allow-prereleases"))
         ]
-        expected = cells if preview else ["${{ matrix.python }}"]
+        # Обе формы ставят число буквой: предрелизная — ради значка (03.10.2026),
+        # обязательная матрица — шагом на ячейку, по той же причине (#1527).
+        expected = cells
         assert step == expected, (
             f"{job}: шаг ставит {step}, а ожидается {expected} — источник числа разошёлся (022)"
         )

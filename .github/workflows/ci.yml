@@ -96,9 +96,21 @@ jobs:
         with:
           # Тесты гейтов ходят по истории — нужна вся.
           fetch-depth: 0
+      # ЧИСЛО БУКВОЙ, ШАГ НА ЯЧЕЙКУ — ради единого значка семьи, тем же приёмом,
+      # что в `python-next.yml` (решение владельца 03.10.2026). Действие каталога
+      # `project-badge` берёт основные версии только из `python-version: "X.Y"`,
+      # а `${{ matrix.python }}` не читает: 3.15 стояла на значке «проектом не
+      # проверяется», хотя её ячейка здесь гоняется (#1527). Условие — ячейка
+      # матрицы, число — её копия; расходиться им не даёт
+      # `tests/test_declared_versions.py::test_every_matrix_cell_has_its_own_setup`.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: matrix.python == '3.14'
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.14"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: matrix.python == '3.15'
+        with:
+          python-version: "3.15"
       - name: поставить проверки
         run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7" "pytest-randomly>=3,<4" ./packages/transport
       - name: тесты

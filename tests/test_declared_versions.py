@@ -55,6 +55,8 @@ FROM_MATRIX: Final = "matrix."
 MATRIX_FLOW: Final = WORKFLOWS / "ci.yml"
 MATRIX_JOB: Final = "test-matrix"
 MATRIX_AXIS: Final = "python"
+#: Условие шага на свою ячейку матрицы: `matrix.python == '3.15'` (#1527).
+CELL_IF: Final = re.compile(r"^\s*matrix\.python\s*==\s*'(?P<cell>[^']+)'\s*$")
 #: Ячейка, которую сверка умеет сравнить с планкой: ровно `X.Y`.
 CELL: Final = re.compile(r"(\d+)\.(\d+)")
 
@@ -93,17 +95,18 @@ def declared_versions() -> list[tuple[str, str, str]]:
     отношение, и присутствие строки его не доказывает
     ([166](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/166-check-the-link-not-the-path.md)).
     """
-    return [(name, job, said) for name, job, said, _ in declared_steps()]
+    return [(name, job, said) for name, job, said, _, _ in declared_steps()]
 
 
-def declared_steps() -> list[tuple[str, str, str, bool]]:
-    """То же, что `declared_versions`, и помечен ли шаг предрелизным.
+def declared_steps() -> list[tuple[str, str, str, bool, str]]:
+    """То же, что `declared_versions`, предрелизный ли шаг и чья он ячейка.
 
     Предрелизный — `allow-prereleases: true` в том же `with:`: так его узнаёт
     и действие единого значка каталога, и без этой пометки setup-python
-    предрелиз не поставит.
+    предрелиз не поставит. Ячейка — из условия `matrix.python == 'X.Y'`: шаг
+    ячейки ставит её число буквой (#1527); у прочих шагов — пусто.
     """
-    found: list[tuple[str, str, str, bool]] = []
+    found: list[tuple[str, str, str, bool, str]] = []
     for path in walk(WORKFLOWS, "*.y*ml"):
         document: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for job, body in (document.get("jobs") or {}).items():
@@ -112,7 +115,10 @@ def declared_steps() -> list[tuple[str, str, str, bool]]:
                 said = given.get("python-version")
                 if said is not None:
                     preview = given.get("allow-prereleases") is True
-                    found.append((path.name, str(job), str(said), preview))
+                    cell = CELL_IF.match(str((step or {}).get("if") or ""))
+                    found.append(
+                        (path.name, str(job), str(said), preview, cell["cell"] if cell else "")
+                    )
     return found
 
 
@@ -164,16 +170,17 @@ def test_every_hand_written_language_version_is_the_declared_floor() -> None:
     отстанет молча, и узнают об этом не здесь, а на шаге, который продолжит
     работать на старом истолкователе.
 
-    СУЖЕНИЕ НАЗВАНО (195): предрелизный шаг (`allow-prereleases: true`) по
-    определению ставит НЕ пол, и судит его соседняя проверка —
-    `test_a_preview_step_names_its_matrix_cell`, ячейкой матрицы своего джоба.
+    СУЖЕНИЕ НАЗВАНО (195): предрелизный шаг (`allow-prereleases: true`) и шаг
+    ячейки матрицы (`if: matrix.python == 'X.Y'`) по определению ставят НЕ пол,
+    и судят их соседние проверки — `test_a_preview_step_names_its_matrix_cell`
+    и `test_every_matrix_cell_has_its_own_setup`, ячейкой своего джоба.
     """
     major, minor = env.python_floor(ROOT)
     floor = f"{major}.{minor}"
     wrong = [
         f"{name}:{job} ставит {said}, а пол дерева — {floor}"
-        for name, job, said, preview in declared_steps()
-        if FROM_MATRIX not in said and said != floor and not preview
+        for name, job, said, preview, cell in declared_steps()
+        if FROM_MATRIX not in said and said != floor and not preview and not cell
     ]
     assert not wrong, "версия истолкователя разошлась с объявленным полом (035):\n  " + "\n  ".join(
         wrong
@@ -181,15 +188,41 @@ def test_every_hand_written_language_version_is_the_declared_floor() -> None:
 
 
 def test_a_matrix_cell_is_not_counted_as_a_duplicate() -> None:
-    """Граница гейта названа замером: матричные шаги есть, и они не предмет.
+    """Граница гейта названа замером: шаги ячеек матрицы есть, и они не предмет.
 
-    Довод «матрица — не дубль» держится тем, что матричные шаги в дереве
+    Довод «матрица — не дубль» держится тем, что шаги ячеек в дереве
     действительно есть. Исчезнут они — довод станет пустым, и это увидит
     проверка, а не читатель докстроки
     ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
     """
-    from_matrix = [one for one in declared_versions() if FROM_MATRIX in one[2]]
-    assert from_matrix, "ни один шаг не берёт версию из матрицы — довод про границу пуст"
+    cells = [one for one in declared_steps() if one[4]]
+    assert cells, "ни один шаг не ставит ячейку матрицы — довод про границу пуст"
+
+
+def test_every_matrix_cell_has_its_own_setup() -> None:
+    """У каждой ячейки `test-matrix` — свой шаг с её числом буквой, и выражения матрицы нет (#1527).
+
+    Буквой — ради единого значка семьи: действие каталога `project-badge`
+    берёт основные версии только из `python-version: "X.Y"`, а
+    `${{ matrix.python }}` не читает, и 3.15 стояла на значке «проектом не
+    проверяется». Шаг ячейки узнаётся условием `matrix.python == 'X.Y'`, и число
+    в нём — копия ячейки; копия держится здесь, а не вниманием (071).
+    """
+    cells, _ = policy.matrix_axis(MATRIX_FLOW, MATRIX_JOB, MATRIX_AXIS)
+    steps = [
+        (said, cell)
+        for name, job, said, _, cell in declared_steps()
+        if name == MATRIX_FLOW.name and job == MATRIX_JOB
+    ]
+    assert cells and steps, f"{MATRIX_FLOW.name}::{MATRIX_JOB}: матрицы или шагов нет (075)"
+    by_matrix = [said for said, _ in steps if FROM_MATRIX in said]
+    assert not by_matrix, f"версия выражением {by_matrix} — значок каталога её не прочтёт"
+    wrong = [f"шаг ячейки {cell} ставит {said}" for said, cell in steps if said != cell]
+    assert not wrong, "число шага разошлось с его ячейкой:\n  " + "\n  ".join(wrong)
+    assert sorted(cell for _, cell in steps) == sorted(cells), (
+        f"ячейки матрицы {cells}, а шаги ставят {[cell for _, cell in steps]}: "
+        "у каждой ячейки ровно один шаг"
+    )
 
 
 def test_a_preview_step_names_its_matrix_cell() -> None:
@@ -204,7 +237,7 @@ def test_a_preview_step_names_its_matrix_cell() -> None:
     Предрелизных шагов нет вовсе — отказ: иначе значок молча потерял бы версию,
     а проверка осталась бы зелёной (075).
     """
-    previews = [one for one in declared_steps() if one[3]]
+    previews = [one[:4] for one in declared_steps() if one[3]]
     assert previews, "ни одного предрелизного шага — значку нечего показать вторым числом"
     wrong: list[str] = []
     for name, job, said, _ in previews:
