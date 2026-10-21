@@ -84,9 +84,13 @@
 СВОЙ ПУТЬ НАЗЫВАЕТСЯ КЛЮЧОМ, А НЕ УБИРАЕТСЯ РУКАМИ (#1503, решение владельца
 18.10.2026). У живого проекта часть путей заготовки уже занята своим файлом с
 другим предметом — свой выпуск пакета, свои значки. `--write --keep ПУТЬ`
-этот путь не пишет и не считает занятым, а проверки прогона по нему кладёт
-в ответ классом `off` с причиной: молча проверка не пропадает. Путь, которого
-заготовка не кладёт, — отказ: опечатка в ключе иначе прошла бы молча (045).
+этот путь не пишет и не считает занятым. Путь прогона механизма проект
+заменяет своим, и проверки этого прогона ложатся в ответ классом `off` с
+причиной: молча проверка не пропадает. Оставлен и сам ответ — строки `off`
+печатаются в выводе захода, вписать их в свой `.pipeline.yml`. Прочие пути —
+`ci.yml`, сводный гейт, ответ, свод — проект сводит со своим, их проверки не
+трогаются. Путь, которого заготовка не кладёт, — отказ: опечатка в ключе иначе
+прошла бы молча (045).
 
 ОБНОВЛЕНИЕ — ВТОРАЯ ДВЕРЬ, `--update` (#1386). Наш файл сверяется с заготовкой
 СВОЕГО тега по существу вызова, а не по тексту; совпал — переписывается новой
@@ -1530,6 +1534,24 @@ def kept_records(
     return said
 
 
+def kept_row(name: str, why: str) -> str:
+    """Строка ответа `off` с причиной — одна форма для заготовки и для вывода захода."""
+    return f'  "{name}": {{class: {policy.OFF}, why: "{why}"}}'
+
+
+def kept_fragment(kept: dict[str, str], *, on_change: list[str], beyond: list[str]) -> str:
+    """Строки `off` оставленных прогонов по разделам ответа — для своего `.pipeline.yml`.
+
+    Раздел тот же, что у заготовки (`answer`): запись на изменении — `checks`,
+    вне его — `beyond`. Пустой раздел не печатается.
+    """
+    parts = []
+    for section, names in (("checks", on_change), (policy.BEYOND, beyond)):
+        if rows := [kept_row(one, kept[one]) for one in names if one in kept]:
+            parts.append(f"{section}:\n" + "\n".join(rows))
+    return "\n".join(parts)
+
+
 def answer(
     names: list[str],
     beyond: list[str] | None = None,
@@ -1553,9 +1575,7 @@ def answer(
 
     def row(name: str) -> str:
         why = (kept or {}).get(name)
-        if why:
-            return f'  "{name}": {{class: {policy.OFF}, why: "{why}"}}'
-        return f'  "{name}": {policy.UNREVIEWED}'
+        return kept_row(name, why) if why else f'  "{name}": {policy.UNREVIEWED}'
 
     rows = [row(check_name(one)) for one in names]
     rows += [row(one) for one in on_change or []]
@@ -1813,23 +1833,27 @@ def main(argv: list[str] | None = None) -> int:
         free = {path: text for path, text in rulebook.items() if path not in kept}
         lay(args.write, files | free, args.repo)
         print(f"положено в {args.write}: " + ", ".join(str(one) for one in sorted(files | free)))
+        # ВЫВОД НАЗЫВАЕТ ТО, ЧТО ПОЛОЖЕНО (взгляд на #1508, правило 210): `off`
+        # обещается только там, где он стоит. Ответ оставлен своим — строки
+        # `off` печатаются здесь же; печать захода без ключей их не несёт.
         if own_kept := sorted(str(one) for one in keep if one in mechanisms):
-            where = (
-                f"в заготовке ответа из печати захода — `{paths.PIPELINE}` не положен (--keep)"
-                if paths.PIPELINE in keep
-                else f"в `{paths.PIPELINE}`"
-            )
             print(
                 "оставлены своими прогоны механизмов: "
                 + ", ".join(own_kept)
-                + f" — не тронуты; их проверки {where} — off с причиной"
+                + " — не тронуты; их проверки — off с причиной"
+                + (
+                    f": `{paths.PIPELINE}` не положен (--keep), впишите в свой:\n"
+                    + kept_fragment(kept_checks, on_change=on_change, beyond=beyond)
+                    if paths.PIPELINE in keep
+                    else f" в `{paths.PIPELINE}`"
+                )
             )
         if other_kept := sorted(str(one) for one in keep if one not in mechanisms):
             print(
                 "не положено по --keep: "
                 + ", ".join(other_kept)
                 + " — своё сведите с заготовкой из печати захода без ключей; "
-                "проверки в ответе не тронуты"
+                "проверки по этим путям не тронуты: прогона механизма у них нет"
             )
         # ЗАГОТОВКИ ДАННЫХ — В СВОБОДНОЕ, И ЗАНЯТОЕ ОТКАЗА НЕ ДАЁТ (#1386):
         # данные взгляда — своё проекта, как свод, а не половина вызова.
