@@ -68,6 +68,9 @@ CLAIMS: Final = Path(".rules/claims.json")
 #: месте дерева, где живут механизмы. Читают её навык
 #: `a-gate-obeys-every-rule` и гейт формы `tests/test_mechanism_rules.py` (#1459).
 MECHANISM_RULES: Final = Path(".rules/mechanism-rules.json")
+#: Слежка за путями поставщика: с какого закрепления снято знание о его коде
+#: и за каким файлом оно следит — читает перехватчик подъёма (#1522).
+VENDOR_WATCH: Final = Path(".rules/vendor-watch.json")
 #: Фрагменты журнала и собранный журнал.
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
@@ -225,6 +228,7 @@ ALL: Final = (
     CONSUMERS,
     CLAIMS,
     MECHANISM_RULES,
+    VENDOR_WATCH,
     FRAGMENTS,
     RELEASED,
     CHANGELOG,
