@@ -2432,8 +2432,21 @@ def test_a_task_allowing_pytest_asks_for_the_foreground(path: Path) -> None:
 FULL_SET_TO_CI: Final = "ПОЛНЫЙ НАБОР НЕ ГОНИ"
 
 
+#: Три части указания о прогоне у каждого захода взгляда (поздний взгляд на #1505):
+#: полный набор — за CI, тесты по диффу или находке — гнать, прогнанное — назвать.
+#: Сверка одной первой части пропускала задание, из которого выпали две другие.
+LOOK_TEST_PARTS: Final = (
+    FULL_SET_TO_CI,
+    "Гони тесты, которых касается",
+    "Назови в ответе, какие тесты прогнал",
+)
+
+
 def test_a_look_task_leaves_the_full_set_to_ci() -> None:
-    """Заход взгляда не гонит полный набор: он за CI (решение владельца 18.10.2026, #1480).
+    """Заход взгляда не гонит полный набор, гонит тесты по диффу и называет их (#1480).
+
+    Решение владельца 18.10.2026. Сверяются все три части указания
+    (`LOOK_TEST_PARTS`), а не одна первая (поздний взгляд на #1505).
 
     Замер 18.10.2026: заходы с полным набором кончались за 18–19 минут при
     пределе шага 20, а три подряд — таймаутом действия без вердикта. Прежнее
@@ -2444,8 +2457,10 @@ def test_a_look_task_leaves_the_full_set_to_ci() -> None:
     looked = [one for one in commands_and_task(LOOK_BODY) if any("pytest" in c for c in one[1])]
     assert looked, f"{LOOK_BODY.name}: заходов с pytest нет — предмета у проверки нет (075)"
     for name, _, task in looked:
-        assert FULL_SET_TO_CI in task, (
-            f"{LOOK_BODY.name}, «{name}»: pytest разрешён, а задание не оставляет полный набор CI"
+        missing = [part for part in LOOK_TEST_PARTS if part not in task]
+        assert not missing, (
+            f"{LOOK_BODY.name}, «{name}»: pytest разрешён, а задание не держит "
+            f"указание о прогоне целиком — нет {missing}"
         )
 
 
