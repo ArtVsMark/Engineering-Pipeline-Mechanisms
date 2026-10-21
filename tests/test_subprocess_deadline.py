@@ -233,10 +233,26 @@ def test_the_annotation_escapes_its_properties() -> None:
 def test_a_tree_without_code_is_inapplicable(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Кода под местами нет — неприменимо с причиной, а не «чисто» (154)."""
+    """Кода под местами нет — неприменимо с причиной, а не «чисто» (154).
+
+    Дерево не пустое: `.py` с вызовом без дедлайна лежит ВНЕ мест умолчания.
+    На пустом дереве тест проходил и при обходе всего репозитория — так
+    `git ls-files --` без путей и судил бы `tests/` потребителя (поздний
+    взгляд на #1530).
+    """
     git(tmp_path, "init", "-q")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "probe.py").write_text(
+        "import subprocess\nsubprocess.run(['x'])\n", encoding="utf-8"
+    )
     assert gate.main(["--root", str(tmp_path), "--enforce"]) == gate.EXIT_OK
     assert "неприменимо" in capsys.readouterr().out
+
+
+def test_no_places_means_no_files(consumer: Path) -> None:
+    """Пустой перечень мест — пустой перечень файлов, а не всё дерево (#1530)."""
+    assert gate.code_of(consumer, []) == []
+    assert gate.code_of(consumer, ["scripts"]), "предмет пуст — проверка ничего не различает (075)"
 
 
 def test_an_unparsed_file_does_not_run(consumer: Path) -> None:
@@ -248,6 +264,12 @@ def test_an_unparsed_file_does_not_run(consumer: Path) -> None:
 def test_outside_a_repository_it_does_not_run(tmp_path: Path) -> None:
     """Без git дерево не прочитать — «не отработал», а не «кода нет»."""
     assert gate.main(["--root", str(tmp_path)]) == gate.EXIT_BROKEN
+
+
+def test_inside_git_dir_it_does_not_run(tmp_path: Path) -> None:
+    """Внутри `.git` рабочего дерева нет — «не отработал», хотя git выходит с кодом 0 (#1538)."""
+    git(tmp_path, "init", "-q")
+    assert gate.main(["--root", str(tmp_path / ".git")]) == gate.EXIT_BROKEN
 
 
 def test_our_tree_is_clean_under_the_step(capsys: pytest.CaptureFixture[str]) -> None:
