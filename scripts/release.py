@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Final
 
 import build_changelog
+import check_version
 import ghrest
 import gitcall
 import paths
@@ -387,7 +388,34 @@ def refusals(
                 f"«{span}» её не принимает: обязательная проверка `pipeline` покраснеет сразу "
                 "после выпуска. Перечитайте ответы и подвиньте диапазон в `.pipeline.yml` (157)"
             )
+    if after != current:
+        problems.extend(future_literals(after, waiting))
     return problems
+
+
+def future_literals(after: str, waiting: list[Path]) -> list[str]:
+    """Литералы версии контракта, которую выпуск запишет, — находки гейта версии до тега.
+
+    ЗАЧЕМ (#1516). Гейт версии идёт на изменениях, а коммит выпуска собирает
+    машина, и проверок изменения он не проходит. Выпуск v1.8.0 поднял
+    `CONTRACT_VERSION`, а новое число уже стояло литералом в двух тестах, и
+    первым покраснело изменение, открытое самим выпуском. Новую версию выпуск
+    знает до тега, поэтому судит дерево ею сам. Маркеры не судятся — их
+    перепишет сборка; ждущие фрагменты тоже — они уедут в `released/`.
+    """
+    leaving = {one.as_posix() for one in waiting}
+    # Охват ниже печатает гейт версии: без этой строки он читался бы как охват выпуска.
+    print(f"гейт версии на будущем номере контракта {after}:")
+    try:
+        files = [one for one in check_version.tracked_files() if one.as_posix() not in leaving]
+        found = check_version.literals(after, check_version.texts(files))
+    except check_version.NotRun as exc:
+        raise NotRun(f"гейт версии на {after} не отработал: {exc}") from exc
+    return [
+        f"выпуск запишет версию контракта {after}, а она уже вписана руками — "
+        f"после тега покраснеет гейт версии: {one}"
+        for one in found
+    ]
 
 
 def announce(

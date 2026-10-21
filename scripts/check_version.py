@@ -112,6 +112,27 @@ def texts(files: list[Path]) -> list[tuple[str, str]]:
 
 def check(version: str, files: list[Path]) -> list[str]:
     """Ищет рукописные вхождения версии и расхождения внутри маркеров."""
+    found = texts(files)
+    return stale_markers(version, found) + literals(version, found)
+
+
+def stale_markers(version: str, found: list[tuple[str, str]]) -> list[str]:
+    """Маркеры контракта, в которых стоит не `version`: сборка их не переписала."""
+    return [
+        f"{name}: в маркере стоит «{match['value'].strip()}», а источник даёт «{version}» — "
+        "маркер есть, сборка его не переписала"
+        for name, text in found
+        for match in MARKER_RE.finditer(text)
+        if match["value"].strip() != version
+    ]
+
+
+def literals(version: str, found: list[tuple[str, str]]) -> list[str]:
+    """Рукописные вхождения `version` вне маркера — с адресом строки.
+
+    Отдельно от маркеров, потому что выпуск спрашивает только это (#1516): его
+    маркеры перепишет сборка, а литерал будущей версии — нет.
+    """
     # Границы вокруг числа: «1.2.3» не должно совпадать с «11.2.3» или «1.2.30».
     # Точка рядом с числом — граница, только если по ту её сторону цифра
     # («1.2.3.4», «0.1.2.3»): точка конца предложения после версии и точка
@@ -119,15 +140,7 @@ def check(version: str, files: list[Path]) -> list[str]:
     # ответе на 222; зеркальный случай — взгляд на #1472).
     loose = re.compile(rf"(?<!\d)(?<!\d\.){re.escape(version)}(?!\d|\.\d)")
     findings: list[str] = []
-    for name, text in texts(files):
-        for match in MARKER_RE.finditer(text):
-            value = match["value"].strip()
-            if value != version:
-                findings.append(
-                    f"{name}: в маркере стоит «{value}», а источник даёт «{version}» — "
-                    "маркер есть, сборка его не переписала"
-                )
-
+    for name, text in found:
         stripped = MARKER_RE.sub("", text)
         for number, line in enumerate(stripped.splitlines(), start=1):
             if loose.search(line):
