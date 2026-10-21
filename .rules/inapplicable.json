@@ -153,16 +153,17 @@
           "python3",
           "-I",
           "-c",
-          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted([b.FACTS, b.UNIFIED, *b.BADGES, *b.PAGES]), sep='\\n')"
+          "import sys; sys.path.insert(0, 'scripts'); import build_facts as b; print(*sorted({b.FACTS, b.UNIFIED, *b.BADGES, *b.PAGES, *b.SHARED_STEP}), sep='\\n')"
         ],
         "allowed": [
           "coverage.json",
           "facts.json",
+          "family-check.json",
           "project.svg",
           "version.json",
           "who.md"
         ],
-        "why": "предмет — то, что проект издаёт для чужого прочтения; сборщик витрины издаёт числа о проекте и значки, а не перечень требований — новое изданное перечитывается на него",
+        "why": "предмет — то, что проект издаёт для чужого прочтения; сборщик витрины и общий шаг фактов (`SHARED_STEP`) издают числа о проекте, значки и разбор семьи `family-check.json` — сведения о том, кто взял наши шаги, а не перечень требований (перечитано по #1534); новое изданное перечитывается на него",
         "border": "издавать наружу список требований ОТДЕЛЬНО от их исполнения"
       },
       {
