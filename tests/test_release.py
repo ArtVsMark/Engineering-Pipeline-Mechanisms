@@ -208,10 +208,15 @@ def test_a_literal_of_the_current_contract_does_not_refuse_a_moving_release(
     assert run.code == 0, run.text
 
 
-def test_a_marker_of_the_current_contract_refuses_a_moving_release(
+def test_a_marker_of_the_current_contract_rides_the_release(
     run_script: RunScript, tmp_path: Path
 ) -> None:
-    """Маркер с нынешним числом — отказ: никто его не переписывает, и он устареет (#1525)."""
+    """Маркер нынешнего числа выпуск не держит, а переписывает тем же коммитом (#1537).
+
+    Отказ здесь делал подъём контракта невозможным: гейт изменений требует в
+    маркере нынешнее число, выпуск — будущее. После выпуска в маркере новое
+    число, и гейт версии на дереве выпуска чист.
+    """
     root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
     wide_span(root)
     # Маркер собран по частям: целиком он стоял бы в этом файле, и гейт версии
@@ -220,9 +225,38 @@ def test_a_marker_of_the_current_contract_refuses_a_moving_release(
     (root / "probe.md").write_text(f"{opening}{FAKE_VERSION}{closing}\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "маркер"], cwd=root, check=True)
-    run = run_script("release.py", cwd=root)
-    assert run.code == 1, run.text
-    assert "probe.md: в маркере стоит" in run.text and "не переписывает" in run.text
+    assert run_script("release.py", cwd=root).code == 0
+    run = run_script("release.py", "--apply", cwd=root)
+    assert run.code == 0, run.text
+    after = (root / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
+    assert after != FAKE_VERSION
+    assert (root / "probe.md").read_text(encoding="utf-8") == f"{opening}{after}{closing}\n"
+    shown = subprocess.run(
+        ["git", "show", "HEAD:probe.md"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+    assert after in shown, "маркер переписан мимо коммита выпуска"
+    assert run_script("check_version.py", cwd=root).code == 0
+
+
+def test_rewrite_markers_touches_only_the_markers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Переписывается число внутри маркера, а не текст вокруг; файл без маркера не трогается."""
+    check_version = load_script("check_version.py")
+    opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
+    (tmp_path / "a.md").write_text(f"до {opening}1.2.3{closing} после 1.2.3\n", encoding="utf-8")
+    (tmp_path / "b.md").write_text("без маркера\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    touched = check_version.rewrite_markers("1.3.0", [Path("a.md"), Path("b.md")])
+    assert touched == ["a.md"]
+    assert (tmp_path / "a.md").read_text(
+        encoding="utf-8"
+    ) == f"до {opening}1.3.0{closing} после 1.2.3\n"
 
 
 def test_future_literals_skip_the_fragments_that_leave(

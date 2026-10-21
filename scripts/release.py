@@ -403,29 +403,24 @@ def future_literals(after: str, waiting: list[Path]) -> list[str]:
     знает до тега, поэтому судит дерево ею сам. Ждущие фрагменты не судятся —
     они уедут в `released/`.
 
-    МАРКЕРЫ СУДЯТСЯ ТОЖЕ (поздний взгляд на #1525). Здесь стояло «маркеры
-    перепишет сборка», но маркеров не переписывает ни один скрипт: выпуск
-    пишет только `CONTRACT_VERSION` и журнал. Маркер с нынешним числом после
-    подъёма разошёлся бы с источником — та же беда #1516, только через маркер.
+    МАРКЕРЫ НЕ СУДЯТСЯ — ИХ ПЕРЕПИСЫВАЕТ ВЫПУСК (взгляд на #1537). Отказ на
+    маркере делал подъём контракта невозможным: гейт изменений требует в нём
+    нынешнее число, выпуск — будущее. Поэтому `do_release` переписывает маркеры
+    новым числом тем же коммитом (`check_version.rewrite_markers`), а здесь
+    судятся только голые литералы.
     """
     leaving = {one.as_posix() for one in waiting}
     # Охват ниже печатает гейт версии: без этой строки он читался бы как охват выпуска.
     print(f"гейт версии на будущем номере контракта {after}:")
     try:
         files = [one for one in check_version.tracked_files() if one.as_posix() not in leaving]
-        read = check_version.texts(files)
-        found = check_version.literals(after, read)
-        stale = check_version.stale_markers(after, read)
+        found = check_version.literals(after, check_version.texts(files))
     except check_version.NotRun as exc:
         raise NotRun(f"гейт версии на {after} не отработал: {exc}") from exc
     return [
         f"выпуск запишет версию контракта {after}, а она уже вписана руками — "
         f"после тега покраснеет гейт версии: {one}"
         for one in found
-    ] + [
-        f"выпуск запишет версию контракта {after}, а маркер её не получит — его не "
-        f"переписывает ни один скрипт, и после тега покраснеет гейт версии: {one}"
-        for one in stale
     ]
 
 
@@ -501,6 +496,14 @@ def do_release(wanted: str, *, breaking: bool = False) -> None:
     if contract_after != contract_now:
         paths.VERSION.write_text(f"{contract_after}\n", encoding="utf-8")
         print(f"версия контракта {contract_now} → {contract_after}: поверхность тронута")
+        # МАРКЕРЫ — ТЕМ ЖЕ КОММИТОМ (взгляд на #1537): иначе первый же прогон
+        # гейта версии после тега нашёл бы их устаревшими.
+        try:
+            rewritten = check_version.rewrite_markers(contract_after, check_version.tracked_files())
+        except check_version.NotRun as exc:
+            raise NotRun(f"маркеры контракта не переписаны: {exc}") from exc
+        for name in rewritten:
+            print(f"  маркер контракта переписан: {name}")
     else:
         print(f"версия контракта осталась {contract_now}: поверхность не тронута")
     build_changelog.main([])
