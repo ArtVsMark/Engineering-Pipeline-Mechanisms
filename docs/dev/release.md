@@ -31,7 +31,8 @@
 нигде, и нигде не дублируется: число, вписанное руками, устаревает молча
 ([035](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/035-version-is-never-edited-by-hand.md),
 [005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
-Число в прозе допустимо только внутри маркера, который переписывает сборка, и
+Число в прозе допустимо только внутри маркера, который переписывает выпуск
+тем же коммитом, что и `CONTRACT_VERSION` (`check_version.rewrite_markers`), и
 пропажа маркера обязана ронять сборку
 ([127](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/127-a-number-in-prose-needs-a-guarded-marker.md)).
 Держит это `scripts/check_version.py`.
@@ -49,8 +50,8 @@
 | закрывающая | `<!--` + `/m:contract` + `-->` |
 
 Между ними — число и ничего больше. Внутри маркера обязана стоять текущая
-версия из `CONTRACT_VERSION`; расхождение означает, что маркер есть, а сборка
-его не переписала, и это красное.
+версия из `CONTRACT_VERSION`; расхождение означает, что маркер есть, а выпуск
+его не переписал (число вписано в маркер руками), и это красное.
 
 Маркер, снятый **вместе** с числом, гейт не ловит и не должен: числа не
 осталось, расходиться нечему. Опасен обратный случай — маркер сняли, число
