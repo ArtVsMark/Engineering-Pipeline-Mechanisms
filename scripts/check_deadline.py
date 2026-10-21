@@ -212,8 +212,12 @@ def code_of(root: Path, places: list[str]) -> list[str]:
     """
     if not places:
         # Дерево всё равно спрашивается: вне репозитория — «не отработал», а не
-        # «кода нет» и при пустом перечне.
-        gitcall.output(["rev-parse", "--is-inside-work-tree"], NotRun, cwd=str(root))
+        # «кода нет» и при пустом перечне. Исход читается, а не только код
+        # выхода: в голом репозитории и внутри `.git` git отвечает `false` с
+        # кодом 0, а прежний `ls-files` там давал «не отработал» (взгляд на #1538).
+        inside = gitcall.output(["rev-parse", "--is-inside-work-tree"], NotRun, cwd=str(root))
+        if inside.strip() != "true":
+            raise NotRun(f"{root} — не рабочее дерево git: rev-parse ответил {inside.strip()!r}")
         return []
     listed = gitcall.output(
         ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *places],

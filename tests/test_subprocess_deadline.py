@@ -266,6 +266,12 @@ def test_outside_a_repository_it_does_not_run(tmp_path: Path) -> None:
     assert gate.main(["--root", str(tmp_path)]) == gate.EXIT_BROKEN
 
 
+def test_inside_git_dir_it_does_not_run(tmp_path: Path) -> None:
+    """Внутри `.git` рабочего дерева нет — «не отработал», хотя git выходит с кодом 0 (#1538)."""
+    git(tmp_path, "init", "-q")
+    assert gate.main(["--root", str(tmp_path / ".git")]) == gate.EXIT_BROKEN
+
+
 def test_our_tree_is_clean_under_the_step(capsys: pytest.CaptureFixture[str]) -> None:
     """Шаг в нашем `ci.yml` видит все источники и хуки и строг — и наше дерево под ним зелено.
 
