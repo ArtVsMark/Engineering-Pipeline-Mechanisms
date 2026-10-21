@@ -326,6 +326,15 @@ def describe_from(subjects: list[str], bodies: list[str]) -> Described:
             f"Согласие очереди не ставилось ни на минуту — вместо него стоит «{HOLD}».",
         ]
 
+    # ОБЪЯВЛЕНИЕ ПОЧИНКИ ЧУЖОГО КРАСНОГО ЕДЕТ ТЕМ ЖЕ ПУТЁМ (#1526, взгляд на
+    # #1531): очередь читает ТЕЛО изменения, а строка живёт в коммите. Без
+    # переноса признак до очереди не доезжал, а дописанное руками стирал
+    # следующий толчок.
+    reds = changerefs.fixes_red_in_all(bodies)
+    if reds:
+        lines += ["", "## Чинит красное соседа", ""]
+        lines += [f"{changerefs.FIXES_RED_KEY} #{number}" for number in reds]
+
     closed = changerefs.closed_items_in_all(bodies)
     if closed:
         lines += ["", "## Закрытые пункты задач", ""]
