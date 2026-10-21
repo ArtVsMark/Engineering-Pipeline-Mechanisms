@@ -866,11 +866,12 @@ def test_both_version_lists_come_from_a_matrix() -> None:
     читается в списке проверок изменения, а версия внутри шага — нет. Владелец
     прочёл именно так: «3.15 в проверках не видно» (046).
 
-    ПРЕДРЕЛИЗНЫЙ ШАГ ВПИСЫВАЕТ ЧИСЛО БУКВОЙ — копией ячейки (решение владельца
-    03.10.2026). Действие единого значка каталога выражение матрицы не читает,
-    и 3.15 со значка пропадала. Копия равна ячейке — это и проверено здесь, а
-    вписанную букву в предрелизном шаге отдельно держит
-    `tests/test_declared_versions.py::test_a_preview_step_names_its_matrix_cell`.
+    ОБА ДЖОБА ВПИСЫВАЮТ ЧИСЛО БУКВОЙ — копией ячейки. Действие единого значка
+    каталога выражение матрицы не читает: предрелизная со значка пропадала
+    (решение владельца 03.10.2026), обязательная 3.15 стояла «не проверяется»
+    (#1527). Копии равны ячейкам — это проверено здесь, а форму держат
+    `tests/test_declared_versions.py::test_a_preview_step_names_its_matrix_cell`
+    и `::test_every_matrix_cell_has_its_own_setup`.
     """
     flows = ROOT / ".github" / "workflows"
     # Предрелизная — своим прогоном (#1018), обязательная — в `ci.yml`.
@@ -891,7 +892,9 @@ def test_both_version_lists_come_from_a_matrix() -> None:
             if (said := ((step or {}).get("with") or {}).get("python-version"))
             and (not preview or ((step or {}).get("with") or {}).get("allow-prereleases"))
         ]
-        expected = cells if preview else ["${{ matrix.python }}"]
+        # Обе формы ставят число буквой: предрелизная — ради значка (03.10.2026),
+        # обязательная матрица — шагом на ячейку, по той же причине (#1527).
+        expected = cells
         assert step == expected, (
             f"{job}: шаг ставит {step}, а ожидается {expected} — источник числа разошёлся (022)"
         )
