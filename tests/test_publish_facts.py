@@ -45,6 +45,7 @@ def stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     source.write_text('{"a": 1}\n', encoding="utf-8")
     # Значок проекта шаг рисует рядом с фактами (#1282) — стенд кладёт его так же.
     (tmp_path / "project.svg").write_text("<svg/>\n", encoding="utf-8")
+    (tmp_path / "family-check.json").write_text('{"links": []}\n', encoding="utf-8")
     monkeypatch.chdir(clone)
     return {"remote": remote, "clone": clone, "source": source, "tmp": tmp_path}
 
@@ -56,6 +57,8 @@ def stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
 PUBLISHED_TO = "badges"
 PUBLISHED_PATH = ".github/badges/facts.json"
 PUBLISHED_PICTURE = ".github/badges/project.svg"
+#: Разбор семьи — по адресу, который читает каталог (`РАЗБОР_АДРЕС`, #1532).
+PUBLISHED_FAMILY = ".github/badges/family-check.json"
 
 
 def on_branch(remote: Path, path: str) -> str:
@@ -66,9 +69,10 @@ def on_branch(remote: Path, path: str) -> str:
 def test_the_first_publication_starts_the_branch(stand: dict[str, Path]) -> None:
     """Ветки нет — публикация начинает её сиротой и кладёт ровно `PUBLISHES`."""
     assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
-    assert module.PUBLISHES == (PUBLISHED_PATH, PUBLISHED_PICTURE)
+    assert module.PUBLISHES == (PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY)
     assert on_branch(stand["remote"], PUBLISHED_PATH) == '{"a": 1}\n'
     assert on_branch(stand["remote"], PUBLISHED_PICTURE) == "<svg/>\n"
+    assert on_branch(stand["remote"], PUBLISHED_FAMILY) == '{"links": []}\n'
 
 
 def test_a_missing_picture_keeps_the_old_one(
@@ -96,6 +100,12 @@ def test_targets_name_only_what_lies_beside(tmp_path: Path) -> None:
     (tmp_path / "project.svg").write_text("<svg/>", encoding="utf-8")
     (tmp_path / "findings.json").write_text("{}", encoding="utf-8")
     assert module.targets(source, archive=False) == (PUBLISHED_PATH, PUBLISHED_PICTURE)
+    (tmp_path / "family-check.json").write_text("{}", encoding="utf-8")
+    assert module.targets(source, archive=False) == (
+        PUBLISHED_PATH,
+        PUBLISHED_PICTURE,
+        PUBLISHED_FAMILY,
+    )
     assert module.targets(source, archive=True)[-1] == module.ARCHIVE
 
 
@@ -312,7 +322,9 @@ def test_the_archive_rides_the_same_commit_when_asked(stand: dict[str, Path]) ->
         ).split("\0")
         if one.strip()
     ]
-    assert sorted(touched) == sorted([PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_ARCHIVE])
+    assert sorted(touched) == sorted(
+        [PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY, PUBLISHED_ARCHIVE]
+    )
 
 
 def test_without_the_archive_input_a_foreign_archive_lives(stand: dict[str, Path]) -> None:
@@ -321,10 +333,7 @@ def test_without_the_archive_input_a_foreign_archive_lives(stand: dict[str, Path
     module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
     assert git("ls-tree", "--name-only", "-r", "-z", PUBLISHED_TO, cwd=stand["remote"]).split("\0")[
         :-1
-    ] == [
-        PUBLISHED_PATH,
-        PUBLISHED_PICTURE,
-    ]
+    ] == sorted([PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY])
 
 
 def test_a_missing_archive_does_not_hold_the_facts(

@@ -38,12 +38,20 @@ import paths
 PUBLISHES: Final = (
     (paths.BADGES_DIR / "facts.json").as_posix(),
     (paths.BADGES_DIR / "project.svg").as_posix(),
+    (paths.BADGES_DIR / "family-check.json").as_posix(),
 )
 #: Значок проекта рисует действие каталога `project-badge` (#1422), и не
 #: собрать его оно вправе: площадка не ответила о прогонах, сводка семьи не
 #: прочитана. Тогда факты всё равно едут, а на ветке остаётся ПРЕЖНИЙ значок —
 #: так решает каталог для своего исхода 2 («прежний значок лучше не трогать»).
 PICTURE: Final = PUBLISHES[1]
+#: Разбор семьи, который собирает то же действие рядом со значком: по нему
+#: каталог считает `uptake` семьи (`РАЗБОР_АДРЕС` в `scripts/family.py`
+#: каталога), и без него у всей семьи «не прочитано» (#1532). Едет и не едет
+#: вместе со значком: один заход действия даёт оба.
+FAMILY_CHECK: Final = PUBLISHES[2]
+#: Что кладётся, только если лежит рядом с фактами, — выход действия каталога.
+BESIDE: Final = (PICTURE, FAMILY_CHECK)
 #: Архив находок взгляда: кладётся тем же коммитом, только если шаг позван с
 #: входом `archive` (#1414). В `PUBLISHES` его нет намеренно: без входа шаг
 #: его не трогает, и чужой файл с этим путём на ветке потребителя живёт.
@@ -120,14 +128,14 @@ def checkout(workdir: Path) -> None:
 
 
 def targets(source: Path, *, archive: bool) -> tuple[str, ...]:
-    """Что кладётся на ветку этим заходом: факты всегда; значок и архив — если лежат рядом.
+    """Что кладётся на ветку этим заходом: факты всегда; значок, разбор семьи и архив — если рядом.
 
     Архив — только по входу `archive`. Чего рядом нет, то на ветке остаётся
     прежним: отсутствие называет `publish` предупреждением, а не молчит.
     """
     beside = source.parent
     said = [PUBLISHES[0]]
-    said += [PICTURE] if (beside / Path(PICTURE).name).is_file() else []
+    said += [one for one in BESIDE if (beside / Path(one).name).is_file()]
     said += [ARCHIVE] if archive and (beside / Path(ARCHIVE).name).is_file() else []
     return tuple(said)
 
@@ -146,7 +154,7 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
     # из-за них оставил бы витрину со вчерашними фактами. Пропуск называется,
     # а краснеет на нём свой шаг.
     chosen = targets(source, archive=archive)
-    for wanted in (PICTURE, *([ARCHIVE] if archive else [])):
+    for wanted in (*BESIDE, *([ARCHIVE] if archive else [])):
         if wanted not in chosen:
             print(f"::warning::рядом с фактами нет {Path(wanted).name} — на ветке остаётся прежний")
     checkout(workdir)
