@@ -3,14 +3,15 @@
 
 Правило 035: версия живёт в одном источнике — `CONTRACT_VERSION`. Правило 005:
 число, вписанное в прозу руками, устаревает молча. Правило 127: число в прозе
-допустимо только внутри маркера, который переписывает сборка.
+допустимо только внутри маркера, который переписывает выпуск
+(`rewrite_markers` — тем же коммитом, что пишет `CONTRACT_VERSION`).
 
 Что ловится:
 
 * версия встретилась в дереве **вне** источника и вне маркера — рукописное
   число, которое разойдётся с источником;
-* внутри маркера стоит **не** текущая версия — маркер есть, сборка его не
-  переписала.
+* внутри маркера стоит **не** текущая версия — маркер есть, выпуск его не
+  переписал: число вписано руками.
 
 Чего гейт не ловит намеренно: маркер, удалённый **вместе** с числом. Числа не
 осталось, расходиться нечему; опасен обратный случай — маркер сняли, число
@@ -105,7 +106,9 @@ def texts(files: list[Path]) -> list[tuple[str, str]]:
             skipped += 1
             continue
         try:
-            found.append((name, path.read_text(encoding="utf-8")))
+            # Концы строк — как в файле (взгляд на #1537): `rewrite_markers` пишет
+            # этот текст обратно, и CRLF не должен стать LF во всём файле.
+            found.append((name, path.read_text(encoding="utf-8", newline="")))
         except OSError, UnicodeDecodeError:
             skipped += 1
     print(f"просмотрено файлов: {len(found)}, пропущено: {skipped}")
@@ -121,7 +124,7 @@ def check(version: str, files: list[Path]) -> list[str]:
 
 
 def stale_markers(version: str, found: list[tuple[str, str]]) -> list[str]:
-    """Маркеры контракта, в которых стоит не `version`: сборка их не переписала."""
+    """Маркеры контракта, в которых стоит не `version`: выпуск их не переписал."""
     return [
         f"{name}: в маркере стоит «{match['value'].strip()}», а источник даёт «{version}» — "
         "маркер есть, а выпуск его не переписал"
@@ -155,6 +158,21 @@ def literals(version: str, found: list[tuple[str, str]]) -> list[str]:
     return findings
 
 
+def marker_rewrites(version: str, found: list[tuple[str, str]]) -> dict[str, str]:
+    """Новый текст каждого файла, где маркер контракта стоит не на `version`.
+
+    Одна выборка на сухой заход выпуска (что он перепишет) и на запись
+    (`rewrite_markers`): человек перед необратимым видит те же файлы, что
+    тронет коммит (взгляд на #1537).
+    """
+    said: dict[str, str] = {}
+    for name, text in found:
+        after = MARKER_RE.sub(lambda _: f"{OPENING}{version}{CLOSING}", text)
+        if after != text:
+            said[name] = after
+    return said
+
+
 def rewrite_markers(version: str, files: list[Path]) -> list[str]:
     """Переписывает число в каждом маркере контракта на `version`; отдаёт тронутые файлы.
 
@@ -165,22 +183,20 @@ def rewrite_markers(version: str, files: list[Path]) -> list[str]:
     тем же коммитом, что пишет `CONTRACT_VERSION`.
     """
     touched: list[str] = []
-    for name, text in texts(files):
-        after = MARKER_RE.sub(lambda _: f"{OPENING}{version}{CLOSING}", text)
-        if after != text:
-            try:
-                Path(name).write_text(after, encoding="utf-8")
-            except OSError as exc:
-                raise NotRun(f"{name}: маркер не переписан — {exc}") from exc
-            touched.append(name)
+    for name, after in marker_rewrites(version, texts(files)).items():
+        try:
+            Path(name).write_text(after, encoding="utf-8", newline="")
+        except OSError as exc:
+            raise NotRun(f"{name}: маркер не переписан — {exc}") from exc
+        touched.append(name)
     return touched
 
 
 def orphan_markers(files: list[Path]) -> list[str]:
-    """Маркеры контракта в дереве без источника: переписать их сборке нечем."""
+    """Маркеры контракта в дереве без источника: переписать их выпуску нечем."""
     return [
         f"{name}: маркер контракта «{match['value'].strip()}» стоит, а {paths.VERSION} нет — "
-        "сборке переписать его нечем"
+        "выпуску переписать его нечем"
         for name, text in texts(files)
         for match in MARKER_RE.finditer(text)
     ]
@@ -228,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {finding}")
         print(
             "\nВерсия живёт в CONTRACT_VERSION и больше нигде. Уберите число или\n"
-            "оберните его маркером контракта, который переписывает сборка.\n"
+            "оберните его маркером контракта, который переписывает выпуск.\n"
             f"Формат маркера — {paths.RELEASE_DOC}, раздел «Маркер в прозе».\n\n"
             "Пример маркера здесь не приводится намеренно: гейт ищет маркеры во\n"
             "всём дереве и на собственной подсказке нашёл бы сам себя. Это не\n"

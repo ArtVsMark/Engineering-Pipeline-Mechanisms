@@ -223,14 +223,24 @@ def test_a_marker_of_the_current_contract_rides_the_release(
     # судил бы его здесь, а не в подделке.
     opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
     (root / "probe.md").write_text(f"{opening}{FAKE_VERSION}{closing}\n", encoding="utf-8")
+    # Маркер и в ждущем фрагменте: он уедет в `released/`, и ни сухой заход,
+    # ни запись его не трогают — одна выборка на оба (взгляд на #1541).
+    fragment = root / "changelog.d" / "a.contract.md"
+    fragment.write_text(f"было {opening}{FAKE_VERSION}{closing}\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "маркер"], cwd=root, check=True)
-    assert run_script("release.py", cwd=root).code == 0
+    dry = run_script("release.py", cwd=root)
+    assert dry.code == 0, dry.text
+    # Сухой заход называет файл, который тронет коммит выпуска (взгляд на #1537).
+    assert "маркер контракта будет переписан: probe.md" in dry.text, dry.text
+    assert "будет переписан: changelog.d/" not in dry.text, dry.text
     run = run_script("release.py", "--apply", cwd=root)
     assert run.code == 0, run.text
     after = (root / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
     assert after != FAKE_VERSION
     assert (root / "probe.md").read_text(encoding="utf-8") == f"{opening}{after}{closing}\n"
+    released = next((root / "changelog.d" / "released").rglob("a.contract.md"))
+    assert f"{opening}{FAKE_VERSION}{closing}" in released.read_text(encoding="utf-8")
     shown = subprocess.run(
         ["git", "show", "HEAD:probe.md"],
         cwd=root,
@@ -257,6 +267,33 @@ def test_rewrite_markers_touches_only_the_markers(
     assert (tmp_path / "a.md").read_text(
         encoding="utf-8"
     ) == f"до {opening}1.3.0{closing} после 1.2.3\n"
+
+
+def test_rewrite_markers_keeps_the_line_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Файл с CRLF выпуск правит в одном числе, а не переписывает концы строк (взгляд на #1537)."""
+    check_version = load_script("check_version.py")
+    opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
+    (tmp_path / "a.md").write_bytes(f"до\r\n{opening}1.2.3{closing}\r\n".encode())
+    monkeypatch.chdir(tmp_path)
+    assert check_version.marker_rewrites("1.3.0", check_version.texts([Path("a.md")])) == {
+        "a.md": f"до\r\n{opening}1.3.0{closing}\r\n"
+    }
+    assert check_version.rewrite_markers("1.3.0", [Path("a.md")]) == ["a.md"]
+    assert (tmp_path / "a.md").read_bytes() == f"до\r\n{opening}1.3.0{closing}\r\n".encode()
+
+
+def test_staying_leaves_out_only_the_fragments_that_leave(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Выборка выпуска — дерево без уезжающих фрагментов; прочее в ней остаётся (#1541)."""
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    (root / "probe.md").write_text("проба\n", encoding="utf-8")
+    monkeypatch.chdir(root)
+    kept = {one.as_posix() for one in module.staying(module.fragments())}
+    assert "probe.md" in kept and "changelog.d/a.contract.md" not in kept, kept
+    assert "changelog.d/a.contract.md" in {one.as_posix() for one in module.staying([])}
 
 
 def test_future_literals_skip_the_fragments_that_leave(
