@@ -13,6 +13,7 @@
 * класс проверки заход не решает: это свойство потребителя (174).
 """
 
+import itertools
 import json
 import subprocess
 from pathlib import Path
@@ -581,7 +582,12 @@ def test_a_kept_pipeline_path_is_named_and_its_checks_stay(
 def test_a_kept_answer_says_where_the_off_rows_are(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Ответ и прогон механизма оставлены оба: `off` — в печати, а не в неположенном файле."""
+    """Ответ и прогон механизма оставлены оба: строки `off` — в выводе этого захода.
+
+    Сверяется не слово вывода, а сами строки: они разбираются как раздел
+    ответа, и каждая запись прогона в них `off` с причиной (взгляд на #1508:
+    прежде вывод отсылал к печати захода, где `off` нет).
+    """
     root = tree(
         tmp_path / "наше",
         **{"step-пример": MARKED, "step-план": MANAGED, "план": OWN_CALLER, "ci": CI_CALLER},
@@ -592,7 +598,53 @@ def test_a_kept_answer_says_where_the_off_rows_are(
     assert module.main([*argv, *keys]) == module.EXIT_OK
     out = capsys.readouterr().out
     assert not (consumer / module.paths.PIPELINE).exists()
-    assert "не положен (--keep)" in out, out
+    _, _, rest = out.partition("молча теряет раздел\n")
+    assert rest, out
+    fragment = "\n".join(
+        line
+        for line in itertools.takewhile(
+            lambda one: one.startswith("  ") or (one.endswith(":") and " " not in one),
+            rest.splitlines(),
+        )
+    )
+    said = yaml.safe_load(fragment)
+    rows = {name: item for section in said.values() for name, item in section.items()}
+    names, _ = module.own_records(root / ".github" / "workflows" / "план.yml", "план")
+    assert names and set(rows) == set(names), (names, fragment)
+    for name, item in rows.items():
+        klass, why, _ = module.policy.entry_of(item)
+        assert klass == module.policy.OFF and "--keep" in why, (name, item)
+
+
+def test_the_kept_fragment_lays_rows_by_their_section() -> None:
+    """Строка `off` ложится в раздел своей записи, пустой раздел не печатается."""
+    kept = {"а / а": "своё", "б / б": "своё"}
+    fragment = module.kept_fragment(kept, on_change=["а / а"], beyond=["б / б", "в / в"])
+    said = yaml.safe_load(fragment)
+    assert set(said) == {"checks", module.policy.BEYOND}, fragment
+    assert set(said["checks"]) == {"а / а"} and set(said[module.policy.BEYOND]) == {"б / б"}
+    assert module.kept_row("а / а", "своё") in fragment
+    assert "checks" not in module.kept_fragment(kept, on_change=[], beyond=["б / б"])
+
+
+def test_the_keep_report_names_each_path_once_by_its_kind() -> None:
+    """Каждый путь `--keep` назван ровно одной строкой своего рода (взгляд на #1539).
+
+    Ответ не попадает в строку прочих путей: та говорит «проверки не тронуты»
+    и спорила бы с напечатанным `off`. Строки `off` велено влить в разделы
+    своего ответа, а не вставить второй заголовок.
+    """
+    flows = module.paths.WORKFLOWS
+    flow, ci, answer = flows / "план.yml", flows / "ci.yml", module.paths.PIPELINE
+    lines = module.keep_report([flow, ci, answer], {flow}, "beyond_the_change:\n  row")
+    for one in (flow, ci, answer):
+        named = [line for line in lines if f"{one}" in line.split(" — ")[0]]
+        assert len(named) == 1, (one, lines)
+    (said,) = [line for line in lines if line.startswith(f"`{answer}`")]
+    assert "одноимённые разделы" in said and said.endswith("\n  row"), said
+    assert "не тронуты" not in said, said
+    alone = module.keep_report([answer], set(), "")
+    assert alone == [alone[0]] and "очередь разбора" not in alone[0], alone
 
 
 def test_a_suppliers_yaml_flow_is_kept_by_either_name(tmp_path: Path) -> None:
