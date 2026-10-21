@@ -198,13 +198,15 @@ def test_a_literal_of_the_next_contract_refuses_the_release(
 def test_a_literal_of_the_current_contract_does_not_refuse_a_moving_release(
     run_script: RunScript, tmp_path: Path
 ) -> None:
-    """Выпуск судит БУДУЩЕЕ число: нынешнее — дело гейта на изменениях, а не выпуска (097)."""
+    """Выпуск судит БУДУЩЕЕ число: нынешнее, в маркере и литералом, — дело гейта изменений (097)."""
     root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
     wide_span(root)
     # Маркер собран по частям: целиком он стоял бы в этом файле, и гейт версии
     # судил бы его здесь, а не в подделке.
     opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
-    (root / "probe.py").write_text(f'"""{opening}{FAKE_VERSION}{closing}"""\n', encoding="utf-8")
+    (root / "probe.py").write_text(
+        f'"""{opening}{FAKE_VERSION}{closing}"""\nWAS = "{FAKE_VERSION}"\n', encoding="utf-8"
+    )
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "маркер"], cwd=root, check=True)
     run = run_script("release.py", cwd=root)

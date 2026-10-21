@@ -404,6 +404,8 @@ def future_literals(after: str, waiting: list[Path]) -> list[str]:
     перепишет сборка; ждущие фрагменты тоже — они уедут в `released/`.
     """
     leaving = {one.as_posix() for one in waiting}
+    # Охват ниже печатает гейт версии: без этой строки он читался бы как охват выпуска.
+    print(f"гейт версии на будущем номере контракта {after}:")
     try:
         files = [one for one in check_version.tracked_files() if one.as_posix() not in leaving]
         found = check_version.literals(after, check_version.texts(files))
