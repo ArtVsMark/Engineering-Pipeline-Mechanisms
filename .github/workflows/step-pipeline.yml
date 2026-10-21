@@ -39,7 +39,7 @@ on:
       # предупреждение: дерево, писанное без гейта, иначе краснело бы с первым
       # подъёмом тега (051). Отказ — входом `mechanism-gates-enforce`.
       mechanism-paths:
-        description: места кода механизмов через пробел, от корня; пусто — умолчание гейта (scripts .claude/hooks)
+        description: места кода механизмов через пробел, от корня; пусто — умолчание гейта (DEFAULT_PATHS в scripts/check_deadline.py)
         type: string
         default: ""
       mechanism-gates-enforce:

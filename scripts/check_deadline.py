@@ -19,9 +19,13 @@
 Дедлайн без поимки менял бы зависание на трассу с кодом 1 — то же
 нарушение третьего исхода (039), только быстрее.
 
-`Popen` ДЕДЛАЙНА В ВЫЗОВЕ НЕ БЕРЁТ — у него `communicate(timeout=)`, — и
-предикат его отвергает целиком: у нас таких вызовов ноль, и первый появится
-вместе с решением, как его судить (075).
+`Popen` ДЕДЛАЙНА В ВЫЗОВЕ НЕ БЕРЁТ — у него `communicate(timeout=)` или
+`wait(timeout=)`. Поэтому `Popen` законен, когда в той же функции (или на
+уровне модуля, если он там) стоит такое ожидание с `timeout=` в теле `try`,
+ловящего `TimeoutExpired`. Прежде он отвергался целиком: у нас таких вызовов
+ноль, но у потребителя законная форма иначе не выполнима (взгляд на #1530).
+Предел назван: что ожидание идёт именно у этого `Popen`, предикат не сверяет —
+одного ожидания с дедлайном в той же области достаточно.
 
 ТЕЛО `try` — ТО, ЧТО ИСПОЛНЯЕТСЯ В НЁМ (находка `f7d1815`). Вызов внутри
 `def` или `lambda`, вложенных в тело, исполнится позже и вне этого `try`:
@@ -135,6 +139,32 @@ def guarded(tree: ast.AST) -> set[int]:
     return inside
 
 
+#: Ожидание процесса, у которого дедлайн — довод, а не у `Popen`.
+WAITS: Final = frozenset({"communicate", "wait"})
+
+
+def waits_with_deadline(tree: ast.AST, safe: set[int]) -> set[int]:
+    """Узлы областей (модуль, функции), где есть пойманное ожидание процесса с `timeout=`.
+
+    Отдаёт `id` каждого узла, исполняемого в такой области: `Popen` среди них законен.
+    """
+    allowed: set[int] = set()
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        inside = [node for statement in scope.body for node in executed(statement)]
+        if any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in WAITS
+            and any(word.arg == "timeout" for word in node.keywords)
+            and id(node) in safe
+            for node in inside
+        ):
+            allowed |= {id(node) for node in inside}
+    return allowed
+
+
 def undeadlined(source: str) -> list[str]:
     """Вызовы процесса исходника без дедлайна или без поимки его истечения."""
     tree = ast.parse(source)
@@ -153,12 +183,16 @@ def undeadlined(source: str) -> list[str]:
         if alias.name == "subprocess" and alias.asname
     )
     safe = guarded(tree)
+    awaited = waits_with_deadline(tree, safe)
     found: list[str] = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and is_spawn(node, imported, modules)):
             continue
         if spawned_name(node.func) == "Popen":
-            found.append(f"{node.lineno}: Popen — дедлайн не в вызове")
+            if id(node) not in awaited:
+                found.append(
+                    f"{node.lineno}: Popen без пойманного communicate(timeout=) или wait(timeout=)"
+                )
         elif not any(word.arg == "timeout" for word in node.keywords):
             found.append(f"{node.lineno}: без timeout=")
         elif id(node) not in safe:
@@ -180,18 +214,36 @@ def code_of(root: Path, places: list[str]) -> list[str]:
     return sorted(one for one in listed.split("\0") if one.endswith(".py"))
 
 
-def look(root: Path, places: list[str]) -> tuple[list[str], int]:
-    """Находки строками «файл:строка: что» и число просмотренных файлов."""
-    names = code_of(root, places)
-    found: list[str] = []
+def look(
+    root: Path, places: list[str], *, named: bool = True
+) -> tuple[list[tuple[str, str, str]], int]:
+    """Находки «файл, строка, что» и число просмотренных файлов.
+
+    Место, НАЗВАННОЕ входом, обязано быть в дереве: опечатка иначе выдала бы
+    себя за «кода нет» (075, взгляд на #1530). Место из умолчания может
+    отсутствовать — у потребителя хуков окна бывает не заведено.
+    """
+    missing = [one for one in places if not (root / one).exists()]
+    if missing and named:
+        raise NotRun(f"мест кода нет в дереве: {', '.join(missing)}")
+    names = code_of(root, [one for one in places if one not in missing])
+    found: list[tuple[str, str, str]] = []
     for name in names:
         try:
             source = (root / name).read_text(encoding="utf-8")
             bad = undeadlined(source)
         except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
             raise NotRun(f"{name} не разобран: {exc}") from exc
-        found += [f"{name}:{one}" for one in bad]
+        for one in bad:
+            line, what = one.split(": ", 1)
+            found.append((name, line, what))
     return found, len(names)
+
+
+def escaped(value: str, *, prop: bool) -> str:
+    """Значение команды площадки: `%` и переводы строк, у свойства ещё `:` и `,` (#1530)."""
+    said = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return said.replace(":", "%3A").replace(",", "%2C") if prop else said
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -200,19 +252,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     parser.add_argument(
         "--paths",
-        default=" ".join(DEFAULT_PATHS),
-        help="места кода механизмов через пробел, от корня",
+        default=None,
+        help=f"места кода механизмов через пробел, от корня; без ключа — {' '.join(DEFAULT_PATHS)}",
     )
     parser.add_argument(
         "--enforce", action="store_true", help="найденное — отказ, а не предупреждение"
     )
     args = parser.parse_args(argv)
-    places = args.paths.split()
+    named = args.paths is not None
+    places = args.paths.split() if named else list(DEFAULT_PATHS)
     if not places:
         print("гейт не отработал: мест кода не названо (075)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        found, seen = look(args.root, places)
+        found, seen = look(args.root, places, named=named)
     except NotRun as exc:
         print(f"гейт не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
@@ -232,8 +285,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     for one in found:
         # Аннотация с файлом и строкой: площадка кладёт её на строку диффа.
-        name, line, what = one.split(":", 2)
-        print(f"::{level} file={name},line={line}::{what.strip()} (100)")
+        name, line, what = one
+        print(
+            f"::{level} file={escaped(name, prop=True)},line={line}::"
+            f"{escaped(what.strip(), prop=False)} (100)"
+        )
     print(
         "Назовите timeout= и ловите subprocess.TimeoutExpired тем же исходом, что OSError: "
         "зависший процесс иначе держит гейт до предела площадки."

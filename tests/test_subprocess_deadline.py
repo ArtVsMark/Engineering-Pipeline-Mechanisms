@@ -74,6 +74,22 @@ def test_the_predicate_sees_spawns_in_the_tree() -> None:
         ),
         ("from subprocess import check_output as co\nco(['x'])\n", True),
         ("import subprocess\nsubprocess.Popen(['x'])\n", True),
+        (
+            "import subprocess\ndef f():\n    p = subprocess.Popen(['x'])\n    try:\n"
+            "        p.communicate(timeout=5)\n"
+            "    except subprocess.TimeoutExpired:\n        pass\n",
+            False,
+        ),
+        (
+            "import subprocess\ndef f():\n    p = subprocess.Popen(['x'])\n    p.wait(timeout=5)\n",
+            True,
+        ),
+        (
+            "import subprocess\ndef f():\n    p = subprocess.Popen(['x'])\n"
+            "def g(p):\n    try:\n        p.wait(timeout=5)\n"
+            "    except subprocess.TimeoutExpired:\n        pass\n",
+            True,
+        ),
         ("import re\nre.compile('x').search('y')\nrun = 1\n", False),
         (
             "import subprocess\ntry:\n    def later():\n        subprocess.run(['x'], timeout=5)\n"
@@ -105,6 +121,9 @@ def test_the_predicate_sees_spawns_in_the_tree() -> None:
         "поимка не того класса",
         "импорт под другим именем",
         "Popen",
+        "Popen-с-пойманным-communicate",
+        "Popen-с-wait-без-поимки",
+        "Popen-ожидание-в-другой-функции",
         "не процесс",
         "def-в-теле-try",
         "lambda-в-теле-try",
@@ -172,6 +191,28 @@ def test_the_places_are_an_input(consumer: Path, capsys: pytest.CaptureFixture[s
     """Места кода — вход (пункт (в)): названный иной каталог судится, умолчание — нет."""
     assert gate.main(["--root", str(consumer), "--paths", "tests", "--enforce"]) == gate.EXIT_FOUND
     assert "tests/test_x.py" in capsys.readouterr().out
+
+
+def test_a_named_place_that_is_not_there_does_not_run(consumer: Path) -> None:
+    """Опечатка в местах — «не отработал», а не «неприменимо», и со строгим ключом (#1530)."""
+    assert (
+        gate.main(["--root", str(consumer), "--paths", "scirpts", "--enforce"]) == gate.EXIT_BROKEN
+    )
+
+
+def test_a_default_place_that_is_not_there_is_skipped(
+    consumer: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Хуков окна у потребителя нет — умолчание их пропускает и судит `scripts/`."""
+    assert not (consumer / ".claude").exists()
+    assert gate.main(["--root", str(consumer), "--enforce"]) == gate.EXIT_FOUND
+    assert "scripts/gate.py" in capsys.readouterr().out
+
+
+def test_the_annotation_escapes_its_properties() -> None:
+    """Запятая и двоеточие в имени файла не ломают команду площадки (взгляд на #1530)."""
+    assert gate.escaped("a,b:c%.py", prop=True) == "a%2Cb%3Ac%25.py"
+    assert gate.escaped("без timeout=: да", prop=False) == "без timeout=: да"
 
 
 def test_a_tree_without_code_is_inapplicable(
