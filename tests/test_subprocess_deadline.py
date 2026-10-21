@@ -149,6 +149,21 @@ def test_executed_stops_at_nested_scopes() -> None:
     assert names == {"h"}
 
 
+def test_waits_with_deadline_marks_only_the_scope_of_the_wait() -> None:
+    """Пойманное ожидание с `timeout=` делает законной свою область, а не соседнюю функцию."""
+    tree = ast.parse(
+        "import subprocess\ndef f():\n    try:\n        p.wait(timeout=1)\n"
+        "    except subprocess.TimeoutExpired:\n        pass\ndef g():\n    q()\n"
+    )
+    allowed = gate.waits_with_deadline(tree, gate.guarded(tree))
+    calls = {
+        gate.spawned_name(node.func): id(node) in allowed
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    }
+    assert calls == {"wait": True, "q": False}
+
+
 def git(cwd: Path, *args: str) -> None:
     """git в подделке потребителя."""
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, timeout=30)
