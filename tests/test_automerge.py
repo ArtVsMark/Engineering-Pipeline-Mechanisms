@@ -573,15 +573,87 @@ def test_a_red_head_after_its_refresh_is_not_refreshed_again(
     assert "второй раз не подтягиваю" in capsys.readouterr().out
 
 
-def test_a_red_head_on_a_red_trunk_is_not_refreshed(
-    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+def test_a_red_repair_on_a_red_trunk_is_not_refreshed(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
 ) -> None:
-    """Общая ветка красна сама — подтяжка красное не вылечит и базу не спрашивает."""
+    """Общая ветка красна сама — даже починка с `fix-main` красное подтяжкой не лечит.
+
+    Голова с меткой проходит заморозку, и до `red_kept` доходит именно она:
+    без метки её отсеяла бы заморозка, и тест держался бы без проверки
+    (взгляд на #1528).
+    """
     lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge", module.LABEL_FIX_MAIN)]
     platform["health"] = ["ci: failure"]
     module.advance("o/r", "token", "main", dry_run=False)
     assert platform["synced"] == []
-    assert module.red_kept("o/r", change(2), "t", main_red=True).startswith("общая ветка красна")
+    assert "общая ветка красна сама" in capsys.readouterr().out
+
+
+def test_a_red_head_in_conflict_is_not_refreshed(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Красная голова в конфликте — подтяжки нет: площадка отвергла бы её 422 (взгляд на #1528)."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["states"] = {2: module.STATE_CONFLICT}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["synced"] == []
+    assert "голова в конфликте" in capsys.readouterr().out
+
+
+def test_a_refused_refresh_names_itself_and_the_queue_goes_on(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Площадка отвергла подтяжку — это причина головы, а заход идёт к соседу ниже."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge"), change(3, "automerge")]
+
+    def refused(repo: str, number: int, tok: str, *, dry_run: bool) -> None:
+        raise module.ghrest.TransportError("422 merge conflict")
+
+    monkeypatch.setattr(module, "sync_head", refused)
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert "площадка отказала в подтяжке" in capsys.readouterr().out
+    assert platform["merged"] == [3]
+
+
+def test_only_one_red_head_is_refreshed_per_run(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Две отставшие красные головы — подтягивается одна, вторая ждёт следующего захода (052)."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge"), change(3, "automerge")]
+    platform["runs"] = {n: (["journal: failure"], False) for n in (2, 3)}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == [2]
+    assert "по одной за заход" in capsys.readouterr().out
+
+
+def test_a_red_head_under_a_running_look_is_not_refreshed(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """На красной голове ещё идёт взгляд — подтяжка сняла бы его заход (#1144)."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["looking"] = {2}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == []
+
+
+def test_the_cheap_reasons_are_read_before_the_platform_is_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Конфликт, ступень и предел захода решаются без запросов к площадке."""
+
+    def asked(*_: Any, **__: Any) -> Any:
+        raise AssertionError("площадку спросили, хотя причина уже известна")
+
+    monkeypatch.setattr(module, "base_ahead", asked)
+    for kwargs, said in (
+        ({"state": module.STATE_CONFLICT}, "конфликте"),
+        ({"outranked": True}, "ступень ниже"),
+        ({"spent": True}, "по одной за заход"),
+    ):
+        assert said in module.red_kept("o/r", change(2), "t", main_red=False, **kwargs)
 
 
 @pytest.mark.parametrize(
