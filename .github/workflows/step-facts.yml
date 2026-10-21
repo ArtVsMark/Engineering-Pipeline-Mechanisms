@@ -338,10 +338,14 @@ jobs:
         run: |
           set -uo pipefail
           if [ "$OUTCOME" = "success" ]; then
-            if ! cp .project-badge/project.svg "$RUNNER_TEMP/facts/project.svg"; then
-              echo "::error::значок проекта собран, но не положен рядом с фактами"
-              exit 1
-            fi
+            # Разбор семьи едет вместе со значком: по нему каталог считает
+            # `uptake` семьи, и без него у нас «не прочитано» (#1532).
+            for made in project.svg family-check.json; do
+              if ! cp ".project-badge/$made" "$RUNNER_TEMP/facts/$made"; then
+                echo "::error::значок проекта собран, но $made не положен рядом с фактами"
+                exit 1
+              fi
+            done
           else
             echo "::warning::значок проекта не собран — на ветке остаётся прежний"
           fi

@@ -459,9 +459,20 @@ def test_a_built_unified_badge_is_laid_or_the_run_fails(tmp_path: Path) -> None:
     built = tmp_path / "built"
     (built / ".project-badge").mkdir(parents=True)
     (built / ".project-badge/project.svg").write_text("<svg/>", encoding="utf-8")
+    (built / ".project-badge/family-check.json").write_text("{}", encoding="utf-8")
     code, out = run_unified_drop(built, "success")
     assert code == 0 and out.read_text(encoding="utf-8") == "<svg/>"
+    assert (out.parent / "family-check.json").read_text(encoding="utf-8") == "{}"
     assert not (built / ".project-badge").exists(), "каталог входов остался в дереве потребителя"
+
+
+def test_a_built_badge_without_its_family_check_fails_the_run(tmp_path: Path) -> None:
+    """Значок собран, а разбора семьи рядом нет — отказ: uptake каталога иначе молчит (#1532)."""
+    built = tmp_path / "built"
+    (built / ".project-badge").mkdir(parents=True)
+    (built / ".project-badge/project.svg").write_text("<svg/>", encoding="utf-8")
+    code, _ = run_unified_drop(built, "success")
+    assert code == 1, "разбор семьи пропал бы с ветки при зелёном шаге"
 
 
 def test_an_unbuilt_badge_leaves_the_branch_alone(tmp_path: Path) -> None:
