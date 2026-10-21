@@ -6,7 +6,7 @@
     {
       "dep": "anthropics/claude-code-action",
       "path": "src/github/operations/restore-config.ts",
-      "read_at": "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc",
+      "read_at": "5eb090f3c3afd701a0672cd32981197ca27688f6",
       "by": "tests/test_review_safety.py::RESTORED_PATHS",
       "why": "`SENSITIVE_PATHS` в этом файле — пути, которые действие возвращает к базе перед заходом на изменение; задание взгляда называет их поимённо. Снято с журнала прогона 39126551465 (задание `review`, 18.10.2026) и сверено с файлом на v1.0.248 и v1.0.252 (замер 19.10.2026, #1522)."
     }
