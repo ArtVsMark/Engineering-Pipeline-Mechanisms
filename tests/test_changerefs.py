@@ -1052,3 +1052,9 @@ def test_the_red_fixer_key_rides_from_the_commit_into_the_body() -> None:
         ["Refs #1\nЧинит красное: #5", "Refs #1\nЧинит красное: #5\nЧинит красное: #7"],
     )
     assert changerefs.fixes_red_in(said.body) == [5, 7]
+
+
+def test_fixes_red_in_all_keeps_the_order_and_drops_repeats() -> None:
+    """Номера из всех тел — по первому появлению, повтор в соседнем коммите не дублирует строку."""
+    bodies = ["Чинит красное: #7\nЧинит красное: #5", "Чинит красное: #5\nЧинит красное: #9"]
+    assert changerefs.fixes_red_in_all(bodies) == [7, 5, 9]
