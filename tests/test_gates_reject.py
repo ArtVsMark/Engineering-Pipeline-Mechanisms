@@ -134,7 +134,7 @@ def test_a_period_next_to_the_version_does_not_hide_it(
 
 
 def test_stale_marker_is_a_finding(run_script: RunScript, tmp_path: Path) -> None:
-    """Маркер есть, а значение чужое — сборка его не переписала (127)."""
+    """Маркер есть, а значение чужое — выпуск его не переписал (127)."""
     repo = prepare_repo(tmp_path)
     # Теги собираются из частей: написанные парой, они стали бы настоящим
     # маркером, и check_version.py нашёл бы находку в собственном тесте.

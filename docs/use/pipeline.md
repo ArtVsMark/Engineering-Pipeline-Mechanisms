@@ -77,7 +77,7 @@
 | 13a | Дрейф: внешний вход сдвинулся | `drift.yml` → `step-drift.yml` (по расписанию) | `drift / drift` | нет, совещательный |
 | 14 | Значки, метрики, публикация | `badges.yml` | `badges` | нет |
 | 14b | Входы общего шага фактов: свои разделы и покрытие — файлом | `badges.yml` | `inputs` | нет |
-| 14c | Факты: общий издатель семьи, сверка с договором фактов каталога, публикация `facts.json` и значка `project.svg` поверх `badges` — свой файл потребителя по этим путям перезаписывается; со входом `archive` тем же коммитом — архив находок `findings.json` | `badges.yml` → `step-facts.yml` | `facts / facts` | нет |
+| 14c | Факты: общий издатель семьи, сверка с договором фактов каталога, публикация `facts.json`, значка `project.svg` и разбора семьи `family-check.json` поверх `badges` — свой файл потребителя по этим путям перезаписывается; со входом `archive` тем же коммитом — архив находок `findings.json` | `badges.yml` → `step-facts.yml` | `facts / facts` | нет |
 | 14a | Ряд прогонов: как конвейер работает на самом деле | `runs-series.yml` → `step-runs-series.yml` (по расписанию и кнопкой) | `runs-series / runs-series` | нет |
 | 15 | Состав меток: дерево — источник | `labels-sync.yml` → `step-labels-sync.yml` | `apply / apply` | нет |
 | 16 | Сверка обязательного контекста с защитой | `required-context.yml` → `step-required-context.yml` | `compare / compare` | нет |

@@ -498,7 +498,7 @@ ARCHIVE: Final = "findings.json"
 #: пишется литералом, а не через `FACTS`. Через `FACTS` он переименовался бы
 #: вместе с нашей константой и держал бы совпадение, а не файл шага (взгляд на
 #: #1227). Что литерал равен `PUBLISHES`, сверяет тест.
-SHARED_STEP: Final = ("facts.json", "project.svg")
+SHARED_STEP: Final = ("facts.json", "project.svg", "family-check.json")
 
 
 def branch_files() -> list[str]:
