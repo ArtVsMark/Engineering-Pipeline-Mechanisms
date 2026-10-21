@@ -819,21 +819,20 @@ def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.M
 WATCHED = "src/restore.ts"
 
 
-def watch_stand(work: Path, read_at: str = SHA_OLD) -> None:
-    """Стенд со слежкой: `actions/checkout` следит за `WATCHED` с `read_at`."""
+def watch_stand(work: Path, read_at: str = SHA_OLD, watched: tuple[str, ...] = (WATCHED,)) -> None:
+    """Стенд со слежкой: `actions/checkout` следит за каждым из `watched` с `read_at`."""
     (work / module.paths.VENDOR_WATCH).parent.mkdir(parents=True, exist_ok=True)
-    (work / module.paths.VENDOR_WATCH).write_text(
-        "{\n"
-        '  "watched": [\n'
+    entries = ",\n".join(
         "    {\n"
         '      "dep": "actions/checkout",\n'
-        f'      "path": "{WATCHED}",\n'
+        f'      "path": "{one}",\n'
         f'      "read_at": "{read_at}",\n'
         '      "by": "tests/x.py::Y"\n'
-        "    }\n"
-        "  ]\n"
-        "}\n",
-        encoding="utf-8",
+        "    }"
+        for one in watched
+    )
+    (work / module.paths.VENDOR_WATCH).write_text(
+        f'{{\n  "watched": [\n{entries}\n  ]\n}}\n', encoding="utf-8"
     )
     git(work, "add", "-A")
     git(work, "commit", "--quiet", "-m", "слежка")
@@ -926,6 +925,29 @@ def test_an_unproven_compare_is_not_untouched(
     with pytest.raises(getattr(module, outcome)):
         module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
     assert [one for one in said if one[0] != "GET"] == []
+
+
+def test_two_watches_from_one_pin_move_together_on_one_compare(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Две слежки с одним `read_at`: `compare` один, сдвигаются обе (взгляд на #1524)."""
+    watch_stand(stand, watched=(WATCHED, "src/other.ts"))
+    said: list[tuple[str, str]] = []
+    vendor(monkeypatch, ahead("package.json"), said)
+    planned = module.follow(stand, "actions/checkout", SHA_NEW, "t")
+    text = planned[module.paths.VENDOR_WATCH]
+    assert text.count(f'"read_at": "{SHA_NEW}"') == 2 and SHA_OLD not in text
+    assert len([one for one in said if "/compare/" in one[1]]) == 1
+
+
+def test_one_touched_watch_of_two_moves_neither(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Тронут файл второй слежки — отказ, и первая не сдвинута в одиночку."""
+    watch_stand(stand, watched=(WATCHED, "src/other.ts"))
+    vendor(monkeypatch, ahead("src/other.ts"), [])
+    with pytest.raises(module.Refused, match=r"src/other\.ts"):
+        module.follow(stand, "actions/checkout", SHA_NEW, "t")
 
 
 def test_a_missing_vendor_commit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

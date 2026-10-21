@@ -264,24 +264,34 @@ def follow(root: Path, dep: str, sha: str, token: str) -> dict[Path, str]:
 
     Отдаёт правку файла объявлений для плана подъёма; слежки нет или она уже
     на `sha` — пусто.
+
+    СНАЧАЛА СУДЯТСЯ ВСЕ СЛЕЖКИ, ПОТОМ СДВИГАЕТСЯ (взгляд на #1524). Слежки
+    одного действия с одним `read_at` естественны — знания сняты с одного
+    закрепления, — и сдвиг по первой убирал строку второй: она падала «сдвигать
+    нечего». Теперь `compare` спрашивается один раз на `read_at`, а сдвиг идёт,
+    только когда не тронут ни один файл.
     """
     found = watches(root, dep)
     if not found:
         return {}
-    before = (root / paths.VENDOR_WATCH).read_text(encoding="utf-8")
-    after = before
+    seen: dict[str, set[str]] = {}
     for one in found:
         since, path = str(one.get("read_at") or ""), str(one.get("path") or "")
         if not SHA_RE.match(since) or not path:
             raise NotRun(f"{paths.VENDOR_WATCH}: у слежки {dep} нет `read_at` по sha или `path`")
         if since == sha:
             continue
-        if path in touched(dep, since, sha, token):
+        if since not in seen:
+            seen[since] = touched(dep, since, sha, token)
+        if path in seen[since]:
             raise Refused(
                 f"{dep}: между {since[:7]} и {sha[:7]} у поставщика тронут {path} — "
                 f"перечитать {one.get('by')} по https://github.com/{dep}/blob/{sha}/{path} "
                 f"и сдвинуть `read_at` в {paths.VENDOR_WATCH}"
             )
+    before = (root / paths.VENDOR_WATCH).read_text(encoding="utf-8")
+    after = before
+    for since in seen:
         old, new = f'"read_at": "{since}"', f'"read_at": "{sha}"'
         if old not in after:
             raise NotRun(f"{paths.VENDOR_WATCH}: строки {old} нет — сдвигать нечего")
