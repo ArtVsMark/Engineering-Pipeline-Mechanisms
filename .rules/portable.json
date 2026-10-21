@@ -598,6 +598,9 @@
     "scripts/check_foreign_why.py": {
       "answer": "as-is"
     },
+    "scripts/check_deadline.py": {
+      "answer": "as-is"
+    },
     "scripts/check_invisible.py": {
       "answer": "as-is"
     },

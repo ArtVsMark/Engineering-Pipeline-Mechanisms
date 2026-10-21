@@ -33,6 +33,19 @@ on:
         description: проба переноса — стереть наш код из дерева вызывающего
         type: boolean
         default: false
+      # МЕТА-ГЕЙТЫ СЕМЬИ — ШАГАМИ ЭТОГО ДЖОБА (решение владельца 18.10.2026 по
+      # #1439): места кода механизмов потребителя называет вход, а не наш
+      # `paths.SOURCES`, и найденное у потребителя по умолчанию —
+      # предупреждение: дерево, писанное без гейта, иначе краснело бы с первым
+      # подъёмом тега (051). Отказ — входом `mechanism-gates-enforce`.
+      mechanism-paths:
+        description: места кода механизмов через пробел, от корня; пусто — умолчание гейта (DEFAULT_PATHS в scripts/check_deadline.py)
+        type: string
+        default: ""
+      mechanism-gates-enforce:
+        description: найденное мета-гейтами — отказ, а не предупреждение
+        type: boolean
+        default: false
 
 # Потолок прав: большего шаг не получит, даже если вызывающий даст больше.
 permissions:
@@ -136,3 +149,19 @@ jobs:
       - name: в дереве нет невидимых символов
         if: ${{ !cancelled() && steps.transport.outcome == 'success' }}
         run: python $MECHANISMS/scripts/check_invisible.py
+      # ДЕДЛАЙН ВЫЗОВА ПРОЦЕССА (100) — ПЕРВЫЙ МЕТА-ГЕЙТ СЕМЬИ (#1439). Предикат
+      # один: наш тест зовёт те же функции. Входы — через окружение, а не
+      # подстановкой в строку команды: строка входа иначе стала бы кодом.
+      - name: у вызова процесса в механизмах есть дедлайн
+        if: ${{ !cancelled() && steps.transport.outcome == 'success' }}
+        env:
+          PLACES: ${{ inputs.mechanism-paths }}
+          ENFORCE: ${{ inputs.mechanism-gates-enforce }}
+        # Умолчание мест — одно, у гейта (`DEFAULT_PATHS`): пустой вход его не
+        # перебивает. `:-` — предполётная гоняет строку без входов шага.
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${PLACES:-}" ]; then args+=(--paths "$PLACES"); fi
+          if [ "${ENFORCE:-false}" = "true" ]; then args+=(--enforce); fi
+          python $MECHANISMS/scripts/check_deadline.py "${args[@]}"
