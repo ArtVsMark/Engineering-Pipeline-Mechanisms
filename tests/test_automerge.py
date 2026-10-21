@@ -3354,17 +3354,29 @@ def test_the_fixed_reds_are_read_from_their_own_lines() -> None:
     assert module.changerefs.fixes_red_in(body) == [12, 15]
 
 
-def test_a_fixer_of_a_live_red_outruns_the_plan(platform: dict[str, Any], capsys: Any) -> None:
+def red_heads(monkeypatch: pytest.MonkeyPatch, *red: int) -> None:
+    """Записи проверок у голов: у названных номеров — упавшая, у прочих — зелёная."""
+
+    def runs(repo: str, item: Any, tok: str) -> list[dict[str, Any]]:
+        said = "failure" if item.number in red else "success"
+        return [{"name": "test", "status": "completed", "conclusion": said}]
+
+    monkeypatch.setattr(module, "head_runs", runs)
+
+
+def test_a_fixer_of_a_live_red_outruns_the_plan(
+    platform: dict[str, Any], capsys: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Сосед открыт и красен — починка идёт первой, хотя пришла позже (#1526)."""
     red = change(5, "automerge")
     fixer = change(9, "automerge", body="Refs #1\nЧинит красное: #5")
     plain = change(7, "automerge")
     platform["changes"] = [red, plain, fixer]
-    platform["runs"] = {5: (["test: failure"], False)}
+    red_heads(monkeypatch, 5)
     assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
     assert platform["merged"] == [9], "починка стоит за планом и держит красного соседа"
     assert (9, module.RANK_MAIN_RED) in platform["sources"]
-    assert "чинит красное #5 — ступень 0" in capsys.readouterr().out
+    assert "чинит красное #5 (test) — ступень 0" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -3400,10 +3412,12 @@ def vars_of(item: Any) -> dict[str, Any]:
     return {name: getattr(item, name) for name in item.__dataclass_fields__}
 
 
-def test_red_fixers_marks_only_the_fixer_of_a_live_red(platform: dict[str, Any]) -> None:
+def test_red_fixers_marks_only_the_fixer_of_a_live_red(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`red_fixers` ставит признак только тому, чей сосед открыт и красен; прочих не трогает."""
     red, green = change(5), change(6)
-    platform["runs"] = {5: (["test: failure"], False)}
+    red_heads(monkeypatch, 5)
     queue = [
         change(8, body="Чинит красное: #5"),
         change(9, body="Чинит красное: #6"),
@@ -3411,3 +3425,35 @@ def test_red_fixers_marks_only_the_fixer_of_a_live_red(platform: dict[str, Any])
     ]
     marked = module.red_fixers("o/r", queue, [red, green, *queue], "t")
     assert [one.fixes_red for one in marked] == [True, False, False]
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        [],
+        [{"name": "test", "status": "in_progress", "conclusion": None}],
+        [{"name": "test", "status": "completed", "conclusion": "cancelled"}],
+    ],
+    ids=["записей-нет", "идёт", "отменена"],
+)
+def test_a_starting_neighbour_is_not_red(
+    monkeypatch: pytest.MonkeyPatch, runs: list[dict[str, Any]]
+) -> None:
+    """Прогон соседа только начался или отменён — не красное: ступени 0 по гонке нет (#1531)."""
+    monkeypatch.setattr(module, "head_runs", lambda repo, item, tok: runs)
+    assert module.fallen("o/r", change(5), "t") == ""
+
+
+def test_an_unread_neighbour_names_itself_and_the_queue_goes_on(
+    monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Площадка не ответила о соседе — причина этой починки, а не падение захода (#1531)."""
+
+    def silent(repo: str, item: Any, tok: str) -> list[dict[str, Any]]:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module, "head_runs", silent)
+    fixer = change(9, body="Чинит красное: #5")
+    marked = module.red_fixers("o/r", [fixer], [change(5), fixer], "t")
+    assert not marked[0].fixes_red
+    assert "#5 не прочитано — 502" in capsys.readouterr().out

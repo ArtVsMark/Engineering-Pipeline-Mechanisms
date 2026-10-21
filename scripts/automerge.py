@@ -77,6 +77,7 @@ import paths
 import pipeline_checks as policy
 import report
 import review_findings
+import runs_series
 import squash_body
 import unlooked
 
@@ -452,6 +453,23 @@ def rank(change: Change) -> int:
     return RANK_PLAN
 
 
+def fallen(repo: str, target: Change, owner_token: str) -> str:
+    """Чем красна голова соседа; пусто — не красна или не прочитана (тогда причина в `why`).
+
+    КРАСНОЕ — ЗАВЕРШЁННАЯ ЗАПИСЬ С НАСТОЯЩИМ КРАСНЫМ ИСХОДОМ (взгляд на #1531).
+    «Записей ещё нет» и «обязательная не стартовала» из вердикта головы красным
+    не считаются: сосед, у которого прогон только начался, давал бы починке
+    ступень 0 по гонке. Исходы — те же, что у шага 9 (`runs_series.REAL_RED`).
+    """
+    runs = head_runs(repo, target, owner_token)
+    names = sorted(
+        str(run.get("name", ""))
+        for run in ci_complete.worst_per_name(runs)
+        if run.get("conclusion") in runs_series.REAL_RED
+    )
+    return ", ".join(names)
+
+
 def red_fixers(
     repo: str, queue: list[Change], changes: list[Change], owner_token: str
 ) -> list[Change]:
@@ -461,6 +479,9 @@ def red_fixers(
     ступень обычная, а причина печатается: забытая строка не должна молча
     поднимать изменение над всеми. Даёт ступень и только её — обход взгляда и
     заморозки остаётся за меткой `fix-main`.
+
+    ОТКАЗ ПЛОЩАДКИ ПО СОСЕДУ — ПРИЧИНА ЭТОЙ ПОЧИНКИ, А НЕ ПАДЕНИЕ ЗАХОДА
+    (взгляд на #1531): ради одного объявления очередь не встаёт целиком.
     """
     alive = {change.number: change for change in changes}
     marked: list[Change] = []
@@ -471,11 +492,13 @@ def red_fixers(
             if target is None:
                 why.append(f"#{number} закрыто")
                 continue
-            problems, _ = head_verdict(
-                repo, target, owner_token, head_runs(repo, target, owner_token)
-            )
-            if problems:
-                print(f"#{change.number}: чинит красное #{number} — ступень 0 (#1526)")
+            try:
+                red = fallen(repo, target, owner_token)
+            except ghrest.TransportError as exc:
+                why.append(f"#{number} не прочитано — {report.cut(str(exc))}")
+                continue
+            if red:
+                print(f"#{change.number}: чинит красное #{number} ({red}) — ступень 0 (#1526)")
                 change = replace(change, fixes_red=True)
                 break
             why.append(f"#{number} не красно")

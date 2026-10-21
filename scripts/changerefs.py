@@ -220,12 +220,14 @@ FIXES_MAIN_RE: Final = re.compile(
     r"^\s*(?P<mark>Чинит main:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
 )
 
+#: Ключ строкой: её пишет шаг открытия в тело изменения, а образец строится из неё.
+FIXES_RED_KEY: Final = "Чинит красное:"
 #: «Чинит красное: #N» — изменение чинит красное ОТКРЫТОГО соседа и стоит в
 #: очереди на ступени 0 (слово владельца 21.10.2026, #1526). Как и у «Чинит
 #: main:», окно предъявляет предмет, а не решает: очередь спрашивает у
 #: площадки, открыт ли сосед и красна ли его голова.
 FIXES_RED_RE: Final = re.compile(
-    r"^\s*(?P<mark>Чинит красное:)\s*(?P<text>#\d+)\s*$", re.IGNORECASE | re.MULTILINE
+    rf"^\s*(?P<mark>{re.escape(FIXES_RED_KEY)})\s*(?P<text>#\d+)\s*$", re.IGNORECASE | re.MULTILINE
 )
 
 #: БУКВА «Ё» НЕОБЯЗАТЕЛЬНА, И ЭТО НЕ ПОБЛАЖКА (#602). Прежний ключ `Hold:` был
@@ -808,6 +810,11 @@ def fixes_red_in(text: str) -> list[int]:
     становится (090).
     """
     return [int(found.group("text").lstrip("#")) for found in marked_lines(text, FIXES_RED_RE)]
+
+
+def fixes_red_in_all(texts: Iterable[str]) -> list[int]:
+    """Номера из всех тел по порядку, без повторов: переносит их шаг открытия (#1531)."""
+    return list(dict.fromkeys(number for text in texts for number in fixes_red_in(text)))
 
 
 def fixes_main_in_all(texts: Iterable[str]) -> str | None:
