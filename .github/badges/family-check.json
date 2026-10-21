@@ -1,0 +1,130 @@
+{
+  "schema": "1.2",
+  "project": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+  "segments": {
+    "gives": {
+      "state": "unknown",
+      "why": "манифеста нет — проект не издатель",
+      "links": []
+    },
+    "family": {
+      "state": "ok",
+      "why": "",
+      "links": [
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "release",
+          "mine": "v2.0.0",
+          "latest": "v2.0.0",
+          "where": ".github/workflows/attribution-history.yml",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "release",
+          "mine": "v2.0.0",
+          "latest": "v2.0.0",
+          "where": ".github/workflows/ci.yml",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "release",
+          "mine": "v2.0.0",
+          "latest": "v2.0.0",
+          "where": ".github/workflows/rules-inbox.yml",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "release",
+          "mine": "v2.0.0",
+          "latest": "v2.0.0",
+          "where": ".github/workflows/step-attribution.yml",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "release",
+          "mine": "v2.0.0",
+          "latest": "v2.0.0",
+          "where": ".github/workflows/step-facts.yml",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "bindings",
+          "mine": "1.9",
+          "latest": "1.9",
+          "where": ".rules/bindings.json",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "export",
+          "mine": "1.8",
+          "latest": "1.8",
+          "where": ".rules/bindings.json",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+          "what": "steps",
+          "mine": ">=0.10,<0.12",
+          "latest": "0.10",
+          "where": ".pipeline.yml:contract",
+          "state": "ok",
+          "why": ""
+        }
+      ]
+    },
+    "pairs": {
+      "state": "unknown",
+      "why": "парных связей не объявлено",
+      "links": []
+    },
+    "external": {
+      "state": "unknown",
+      "why": "фактов нет: .github/badges/facts.json не прочитан",
+      "links": []
+    }
+  },
+  "publishers": [
+    {
+      "code": "EIP",
+      "repo": "ArtVsMark/Engineering-Incidents-Playbook",
+      "state": "ok",
+      "why": ""
+    },
+    {
+      "code": "EPM",
+      "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+      "state": "unknown",
+      "why": "свой: состояние отдачи"
+    }
+  ],
+  "uptake": {
+    "code": "EPM",
+    "taken": 1,
+    "of": 5,
+    "unread": 4,
+    "by": [
+      "ArtVsMark/Engineering-Incidents-Playbook"
+    ]
+  }
+}
