@@ -541,6 +541,142 @@ def test_the_queue_names_why_no_head_was_ready(platform: dict[str, Any], capsys:
     assert "готовой головы нет: 1 красны, 1 пусты" in said, said[-300:]
 
 
+def lagging_red(platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, *, synced: bool) -> None:
+    """Красная голова #2, база впереди на три коммита; `synced` — голова уже подтяжка."""
+    platform["changes"] = [change(2, "automerge")]
+    platform["runs"] = {2: (["journal: failure"], False)}
+    monkeypatch.setattr(module, "base_ahead", lambda repo, item, tok: 3)
+    monkeypatch.setattr(module, "synced_from_base", lambda repo, item, tok: synced)
+
+
+def test_a_lagging_red_head_is_refreshed_once(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Красная и отставшая голова — база подтягивается: красное могла лечить общая ветка (#1517).
+
+    18.10.2026 #1514 стоял красным на `journal`, хотя починка уже лежала в общей
+    ветке: очередь красные головы не трогала, и подтянули её рукой.
+    """
+    lagging_red(platform, monkeypatch, synced=False)
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["synced"] == [2]
+    assert "готовой головы нет: 1 красны, база подтянута" in capsys.readouterr().out
+
+
+def test_a_red_head_after_its_refresh_is_not_refreshed_again(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Красное после подтяжки — своё: второй раз голова не подтягивается, и причина названа."""
+    lagging_red(platform, monkeypatch, synced=True)
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["synced"] == []
+    assert "второй раз не подтягиваю" in capsys.readouterr().out
+
+
+def test_a_red_repair_on_a_red_trunk_is_not_refreshed(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Общая ветка красна сама — даже починка с `fix-main` красное подтяжкой не лечит.
+
+    Голова с меткой проходит заморозку, и до `red_kept` доходит именно она:
+    без метки её отсеяла бы заморозка, и тест держался бы без проверки
+    (взгляд на #1528).
+    """
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge", module.LABEL_FIX_MAIN)]
+    platform["health"] = ["ci: failure"]
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == []
+    assert "общая ветка красна сама" in capsys.readouterr().out
+
+
+def test_a_red_head_in_conflict_is_not_refreshed(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Красная голова в конфликте — подтяжки нет: площадка отвергла бы её 422 (взгляд на #1528)."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["states"] = {2: module.STATE_CONFLICT}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["synced"] == []
+    assert "голова в конфликте" in capsys.readouterr().out
+
+
+def test_a_refused_refresh_names_itself_and_the_queue_goes_on(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Площадка отвергла подтяжку — это причина головы, а заход идёт к соседу ниже."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge"), change(3, "automerge")]
+
+    def refused(repo: str, number: int, tok: str, *, dry_run: bool) -> None:
+        raise module.ghrest.TransportError("422 merge conflict")
+
+    monkeypatch.setattr(module, "sync_head", refused)
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert "площадка отказала в подтяжке" in capsys.readouterr().out
+    assert platform["merged"] == [3]
+
+
+def test_only_one_red_head_is_refreshed_per_run(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Две отставшие красные головы — подтягивается одна, вторая ждёт следующего захода (052)."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge"), change(3, "automerge")]
+    platform["runs"] = {n: (["journal: failure"], False) for n in (2, 3)}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == [2]
+    assert "по одной за заход" in capsys.readouterr().out
+
+
+def test_a_red_head_under_a_running_look_is_not_refreshed(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """На красной голове ещё идёт взгляд — подтяжка сняла бы его заход (#1144)."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["looking"] = {2}
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert platform["synced"] == []
+
+
+def test_the_cheap_reasons_are_read_before_the_platform_is_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Конфликт, ступень и предел захода решаются без запросов к площадке."""
+
+    def asked(*_: Any, **__: Any) -> Any:
+        raise AssertionError("площадку спросили, хотя причина уже известна")
+
+    monkeypatch.setattr(module, "base_ahead", asked)
+    for kwargs, said in (
+        ({"state": module.STATE_CONFLICT}, "конфликте"),
+        ({"outranked": True}, "ступень ниже"),
+        ({"spent": True}, "по одной за заход"),
+    ):
+        assert said in module.red_kept("o/r", change(2), "t", main_red=False, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("said", "synced"),
+    [
+        ({"parents": [{}, {}], "commit": {"message": "Merge branch 'main' into agent/x"}}, True),
+        ({"parents": [{}], "commit": {"message": "Merge branch 'main' into agent/x"}}, False),
+        (
+            {"parents": [{}, {}], "commit": {"message": "Merge branch 'agent/y' into agent/x"}},
+            False,
+        ),
+        ([], False),
+    ],
+    ids=["подтяжка", "один-родитель", "чужая-ветка", "не-словарь"],
+)
+def test_a_refresh_is_read_off_the_head_commit(
+    monkeypatch: pytest.MonkeyPatch, said: Any, synced: bool
+) -> None:
+    """Подтяжка — коммит слияния базы в голову; иное подтяжкой не считается."""
+    monkeypatch.setattr(module.ghrest, "request", lambda method, path, tok, body=None: said)
+    assert module.synced_from_base("o/r", change(2), "t") is synced
+
+
 def test_dropping_a_source_touches_nothing_when_there_is_none(
     platform: dict[str, Any],
 ) -> None:
@@ -2438,6 +2574,7 @@ def test_look_records_take_both_names_and_nothing_else(monkeypatch: pytest.Monke
 SKIP_WAITS_FOR_LOOK: Final[dict[str, tuple[bool, int]]] = {
     "пусты": (False, 2),
     "красны": (False, 1),
+    "красны, база подтянута": (False, 1),
     "конфликтуют": (False, 1),
     "ждут починки находок": (False, 1),
     "ждут головы важнее": (False, 1),

@@ -1132,6 +1132,64 @@ def base_ahead(repo: str, change: Change, owner_token: str) -> int:
     return ahead if isinstance(ahead, int) and not isinstance(ahead, bool) else 0
 
 
+#: Начало сообщения коммита, которым площадка подтягивает базу (`update-branch`):
+#: «Merge branch 'main' into agent/…» — замер на `921db111`, 18.10.2026.
+SYNC_MESSAGE: Final = "Merge branch '{base}'"
+
+
+def synced_from_base(repo: str, change: Change, owner_token: str) -> bool:
+    """Голова — уже коммит подтяжки базы: красное на ней своё, а не отставание (#1517)."""
+    said = ghrest.request("GET", f"repos/{repo}/commits/{change.head}", owner_token) or {}
+    parents = said.get("parents") if isinstance(said, dict) else None
+    message = str(
+        ((said.get("commit") or {}) if isinstance(said, dict) else {}).get("message") or ""
+    )
+    return (
+        isinstance(parents, list)
+        and len(parents) == 2
+        and message.startswith(SYNC_MESSAGE.format(base=change.base))
+    )
+
+
+def red_kept(
+    repo: str,
+    change: Change,
+    owner_token: str,
+    *,
+    main_red: bool,
+    state: str = "",
+    outranked: bool = False,
+    spent: bool = False,
+) -> str:
+    """Почему красную голову НЕ подтягивать; пусто — подтянуть базу один раз (#1517).
+
+    Причина называется всегда: «готовой головы нет» без неё не отличало
+    красное своё от красного, которое лечит общая ветка. Сначала — то, что
+    заход уже знает, потом вопросы к площадке.
+
+    СОСЕДНИЕ ПУТИ ПОДТЯЖКИ СОБЛЮДАЮТСЯ И ЗДЕСЬ (взгляд на #1528, 195):
+    конфликтную голову `update-branch` отвергает (422), менее важного соседа
+    ждущей головы держание по ступени двигать запрещает, идущий взгляд
+    подтяжка сняла бы (#1144). Красная подтяжка взведения не занимает, поэтому
+    заход после неё идёт дальше, но красных подтягивает не больше одной (052).
+    """
+    if main_red:
+        return "общая ветка красна сама — подтяжка красное не вылечит"
+    if state == STATE_CONFLICT:
+        return "голова в конфликте — подтяжку площадка отвергнет, разрешает толчок окна"
+    if outranked:
+        return "ступень ниже ждущей головы — двигать её нельзя (053)"
+    if spent:
+        return "в этом заходе уже подтянута красная голова — по одной за заход (052)"
+    if not base_ahead(repo, change, owner_token):
+        return "база не впереди головы — красное своё"
+    if synced_from_base(repo, change, owner_token):
+        return "база уже подтянута в эту голову — красное своё, второй раз не подтягиваю"
+    if awaits_look(repo, change, owner_token):
+        return "на голове идёт взгляд — подтяжка сняла бы его заход (#1144)"
+    return ""
+
+
 def unstick(
     repo: str,
     change: Change,
@@ -1419,6 +1477,8 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
     # Взведённая с идущими проверками кончает заход, так что ниже не идёт никто
     # и без ступени.
     waiting_rank: int | None = None
+    # Подтянута ли в этом заходе красная голова: не больше одной (#1517).
+    red_synced = False
 
     deadline = time.monotonic() + hail.WAIT_BUDGET
     for change in queue:
@@ -1431,7 +1491,8 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # владелец пойдёт искать поломку (045). Замер 13.09.2026 на #285:
             # голова была и пуста, и красна, и очередь назвала только красноту.
             # Цена — один запрос на КРАСНУЮ голову, а не на каждого кандидата.
-            if head_look(repo, change.number, owner_token).changed == 0:
+            red_look = head_look(repo, change.number, owner_token)
+            if red_look.changed == 0:
                 name_the_emptiness(
                     repo,
                     change,
@@ -1441,11 +1502,41 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
                 )
                 skipped["пусты"] += 1
                 continue
+            # ОТСТАЮЩЕЕ КРАСНОЕ ПОДТЯГИВАЕТСЯ ОДИН РАЗ (#1517). Красное могла
+            # лечить общая ветка, а толкать в изменение, открытое конвейером,
+            # некому: 18.10.2026 #1514 стоял красным на починке, уже слитой
+            # #1515, пока базу не подтянули рукой. Красное ПОСЛЕ подтяжки —
+            # своё, и второй раз голова не подтягивается.
+            kept = red_kept(
+                repo,
+                change,
+                owner_token,
+                main_red=bool(troubles),
+                state=red_look.state,
+                outranked=waiting_rank is not None and rank(change) > waiting_rank,
+                spent=red_synced,
+            )
+            if not kept:
+                # ОТКАЗ ПЛОЩАДКИ — ПРИЧИНА ЭТОЙ ГОЛОВЫ, А НЕ ПАДЕНИЕ ЗАХОДА
+                # (взгляд на #1528): соседи ниже не обязаны стоять за ней.
+                try:
+                    sync_head(repo, change.number, owner_token, dry_run=dry_run)
+                except ghrest.TransportError as exc:
+                    kept = f"площадка отказала в подтяжке — {exc}"
+                else:
+                    red_synced = True
+                    print(
+                        f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: красна и отстаёт от "
+                        "базы — база подтянута один раз: красное могла лечить общая ветка (#1517)"
+                    )
+                    skipped["красны, база подтянута"] += 1
+                    continue
             # Красное вернуло изменение в контур 1 источником 2 ещё разметкой,
             # а очередь идёт дальше: одна красная голова не обязана держать
             # остальных.
             print(
-                f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — {'; '.join(problems)}"
+                f"#{change.number} [{RANK_NAMES[RANK_OWN_RED]}]: пропущено — "
+                f"{'; '.join(problems)}; база не подтянута: {kept}"
             )
             skipped["красны"] += 1
             continue
