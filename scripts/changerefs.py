@@ -220,6 +220,14 @@ FIXES_MAIN_RE: Final = re.compile(
     r"^\s*(?P<mark>Чинит main:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
 )
 
+#: «Чинит красное: #N» — изменение чинит красное ОТКРЫТОГО соседа и стоит в
+#: очереди на ступени 0 (слово владельца 21.10.2026, #1526). Как и у «Чинит
+#: main:», окно предъявляет предмет, а не решает: очередь спрашивает у
+#: площадки, открыт ли сосед и красна ли его голова.
+FIXES_RED_RE: Final = re.compile(
+    r"^\s*(?P<mark>Чинит красное:)\s*(?P<text>#\d+)\s*$", re.IGNORECASE | re.MULTILINE
+)
+
 #: БУКВА «Ё» НЕОБЯЗАТЕЛЬНА, И ЭТО НЕ ПОБЛАЖКА (#602). Прежний ключ `Hold:` был
 #: ASCII и этой развилки не знал; русский знает: «Ждет» вместо «Ждёт» — обычная
 #: замена при наборе, и молчаливая потеря ключа здесь стоит дорого — задержка
@@ -791,6 +799,15 @@ def fixes_main_in(text: str) -> str | None:
         if said:
             return said
     return None
+
+
+def fixes_red_in(text: str) -> list[int]:
+    """Номера соседей, чьё красное изменение объявляет чинимым (#1526).
+
+    Разбор общий с прочими ключами — пример в блоке кода объявлением не
+    становится (090).
+    """
+    return [int(found.group("text").lstrip("#")) for found in marked_lines(text, FIXES_RED_RE)]
 
 
 def fixes_main_in_all(texts: Iterable[str]) -> str | None:

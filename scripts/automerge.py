@@ -130,7 +130,7 @@ RANK_RULES: Final = 5
 RANK_PLAN: Final = 6
 
 RANK_NAMES: Final = {
-    RANK_MAIN_RED: "0 · чинит красную общую ветку",
+    RANK_MAIN_RED: "0 · чинит красное: общую ветку или открытое изменение",
     RANK_CONFLICT: "1 · конфликт слияния",
     RANK_OWN_RED: "2 · красная проверка на своём изменении",
     RANK_FINDINGS: "3 · снимает находку внешнего взгляда",
@@ -209,6 +209,9 @@ class Change:
     #: Взведено ли слияние у площадки. Читается из того же ответа, что и всё
     #: остальное: второй запрос за тем же знанием — вторая версия правды (052).
     armed: bool = False
+    #: Чинит ли изменение красное ОТКРЫТОГО соседа — по строке «Чинит красное:
+    #: #N», сверенной заходом с живым состоянием соседа (#1526).
+    fixes_red: bool = False
 
     @property
     def fixes_main(self) -> bool:
@@ -438,7 +441,7 @@ def rank(change: Change) -> int:
     Ступень «чинит» первая и на зелёной базе: починка, поданная позже,
     обгоняет готовое раньше.
     """
-    if change.fixes_main:
+    if change.fixes_main or change.fixes_red:
         return RANK_MAIN_RED
     if changerefs.resolved_in(change.body):
         return RANK_FINDINGS
@@ -447,6 +450,40 @@ def rank(change: Change) -> int:
     if RULES_ANSWER in change.files:
         return RANK_RULES
     return RANK_PLAN
+
+
+def red_fixers(
+    repo: str, queue: list[Change], changes: list[Change], owner_token: str
+) -> list[Change]:
+    """Кандидаты, чинящие ЖИВОЕ красное соседа, — со ступенью 0 (слово владельца 21.10.2026, #1526).
+
+    Объявление сверяется с соседом: открыт ли он и красна ли его голова. Иначе
+    ступень обычная, а причина печатается: забытая строка не должна молча
+    поднимать изменение над всеми. Даёт ступень и только её — обход взгляда и
+    заморозки остаётся за меткой `fix-main`.
+    """
+    alive = {change.number: change for change in changes}
+    marked: list[Change] = []
+    for change in queue:
+        why: list[str] = []
+        for number in changerefs.fixes_red_in(change.body):
+            target = alive.get(number)
+            if target is None:
+                why.append(f"#{number} закрыто")
+                continue
+            problems, _ = head_verdict(
+                repo, target, owner_token, head_runs(repo, target, owner_token)
+            )
+            if problems:
+                print(f"#{change.number}: чинит красное #{number} — ступень 0 (#1526)")
+                change = replace(change, fixes_red=True)
+                break
+            why.append(f"#{number} не красно")
+        else:
+            if why:
+                print(f"#{change.number}: «Чинит красное» без живого красного — {', '.join(why)}")
+        marked.append(change)
+    return marked
 
 
 def order(changes: list[Change], shared: frozenset[str]) -> list[Change]:
@@ -1416,7 +1453,7 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
 
     queue = [replace(change, files=files_of(repo, change.number, owner_token)) for change in queue]
     shared = shared_paths(queue)
-    queue = order(queue, shared)
+    queue = order(red_fixers(repo, queue, changes, owner_token), shared)
 
     # РАЗМЕТКА ИДЁТ ДО РЕШЕНИЯ О ЗАМОРОЗКЕ И НЕ ЗАВИСИТ ОТ НЕГО. Источник
     # работы — свойство самого изменения, а не общей ветки, и вычислять его

@@ -3340,3 +3340,74 @@ def test_base_ahead_reads_only_a_number(
     head = change(7, "automerge", armed=True)
     assert module.base_ahead("o/r", head, "token") == ahead
     assert asked == [f"repos/o/r/compare/{head.head}...{head.base}"]
+
+
+# --- починка чужого красного — ступень 0 (#1526) ---
+
+
+def test_the_fixed_reds_are_read_from_their_own_lines() -> None:
+    """Номера — только из строки «Чинит красное: #N»: не из прозы и не из примера в блоке кода."""
+    body = (
+        "Чинит красное: #12\nсм. #13 и Чинит красное: #14 в тексте\nЧинит красное:  #15 \n"
+        "```\nЧинит красное: #16\n```\n\n    Чинит красное: #17\n"
+    )
+    assert module.changerefs.fixes_red_in(body) == [12, 15]
+
+
+def test_a_fixer_of_a_live_red_outruns_the_plan(platform: dict[str, Any], capsys: Any) -> None:
+    """Сосед открыт и красен — починка идёт первой, хотя пришла позже (#1526)."""
+    red = change(5, "automerge")
+    fixer = change(9, "automerge", body="Refs #1\nЧинит красное: #5")
+    plain = change(7, "automerge")
+    platform["changes"] = [red, plain, fixer]
+    platform["runs"] = {5: (["test: failure"], False)}
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
+    assert platform["merged"] == [9], "починка стоит за планом и держит красного соседа"
+    assert (9, module.RANK_MAIN_RED) in platform["sources"]
+    assert "чинит красное #5 — ступень 0" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("changes", "runs", "said"),
+    [
+        ([], {}, "#5 закрыто"),
+        ([5], {}, "#5 не красно"),
+    ],
+    ids=["сосед-закрыт", "сосед-зелен"],
+)
+def test_a_fixer_without_a_live_red_keeps_its_step_and_says_why(
+    platform: dict[str, Any], capsys: Any, changes: list[int], runs: dict[int, Any], said: str
+) -> None:
+    """Объявление без живого красного ступени не даёт, и причина напечатана."""
+    fixer = change(9, "automerge", body="Чинит красное: #5")
+    platform["changes"] = [change(n) for n in changes] + [fixer, change(7, "automerge")]
+    platform["runs"] = runs
+    module.advance("o/r", "token", "main", dry_run=False)
+    assert (9, module.RANK_PLAN) in platform["sources"]
+    assert platform["merged"] == [7]
+    assert said in capsys.readouterr().out
+
+
+def test_a_red_fixer_does_not_skip_the_look_or_the_freeze() -> None:
+    """Ступень — и только она: обход взгляда и заморозки остаётся за меткой `fix-main`."""
+    fixer = module.Change(**{**vars_of(change(9, "automerge")), "fixes_red": True})
+    assert module.rank(fixer) == module.RANK_MAIN_RED
+    assert not fixer.fixes_main
+
+
+def vars_of(item: Any) -> dict[str, Any]:
+    """Поля изменения словарём — у класса со `slots` нет `__dict__`."""
+    return {name: getattr(item, name) for name in item.__dataclass_fields__}
+
+
+def test_red_fixers_marks_only_the_fixer_of_a_live_red(platform: dict[str, Any]) -> None:
+    """`red_fixers` ставит признак только тому, чей сосед открыт и красен; прочих не трогает."""
+    red, green = change(5), change(6)
+    platform["runs"] = {5: (["test: failure"], False)}
+    queue = [
+        change(8, body="Чинит красное: #5"),
+        change(9, body="Чинит красное: #6"),
+        change(10),
+    ]
+    marked = module.red_fixers("o/r", queue, [red, green, *queue], "t")
+    assert [one.fixes_red for one in marked] == [True, False, False]
