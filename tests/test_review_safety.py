@@ -2451,10 +2451,10 @@ def test_a_look_task_leaves_the_full_set_to_ci() -> None:
 
 #: Где действие кладёт головную версию путей, возвращённых к базе.
 HEAD_OF_RESTORED: Final = "`.claude-pr/`"
-#: Закрепление действия, с журнала которого снят перечень `RESTORED_PATHS`.
-#: Подъём действия краснит `test_the_restored_paths_are_read_from_the_pinned_action`:
-#: список путей мог смениться вместе с версией, и его перечитывают по журналу.
-RESTORED_FROM_PIN: Final = "1d6de8cb0c237e7c15e9e1bdf973826ebae490cc"
+#: Слежка, которая держит `RESTORED_PATHS`: закрепление, с которого перечень
+#: снят, и файл поставщика, за которым он следит, — в `.rules/vendor-watch.json`.
+#: Подъём действия сдвигает её `read_at` сам, пока файл не тронут (#1522).
+RESTORED_WATCH: Final = "tests/test_review_safety.py::RESTORED_PATHS"
 #: Пути, которые действие возвращает к базе перед заходом на изменение, — по
 #: журналу закреплённой версии (прогон 39126551465, задание `review`, 18.10.2026).
 RESTORED_PATHS: Final = (
@@ -2469,21 +2469,32 @@ RESTORED_PATHS: Final = (
 )
 
 
+def restored_from_pin() -> str:
+    """Закрепление, с которого снят `RESTORED_PATHS`, — из слежки, а не литералом."""
+    said = json.loads((ROOT / ".rules" / "vendor-watch.json").read_text(encoding="utf-8"))
+    found = [one for one in said["watched"] if one.get("by") == RESTORED_WATCH]
+    assert len(found) == 1, f"слежек за {RESTORED_WATCH}: {len(found)}, а нужна одна (075)"
+    return str(found[0]["read_at"])
+
+
 def test_the_restored_paths_are_read_from_the_pinned_action() -> None:
     """Перечень возвращаемых путей снят с той версии действия, что закреплена (взгляд на #1512).
 
-    Список берётся из журнала действия, а не из нашего кода, и с подъёмом
-    закрепления может смениться. Поэтому каждое закрепление
-    `anthropics/claude-code-action` в шаге взгляда совпадает с тем, с которого
-    перечень снят: подъём краснит здесь, и перечень перечитывают по журналу.
+    Список берётся из кода действия, а не из нашего, и с подъёмом закрепления
+    может смениться. Поэтому каждое закрепление `anthropics/claude-code-action`
+    в шаге взгляда совпадает с `read_at` слежки: подъём, сделанный мимо
+    перехватчика, краснит здесь, а перехватчик сдвигает `read_at` только при
+    нетронутом файле поставщика (#1522).
     """
+    pinned_at = restored_from_pin()
     pins = set(
         re.findall(r"anthropics/claude-code-action@([0-9a-f]{40})", LOOK_BODY.read_text("utf-8"))
     )
     assert pins, f"{LOOK_BODY.name}: закреплений действия не найдено — предмета нет (075)"
-    assert pins == {RESTORED_FROM_PIN}, (
-        f"действие закреплено на {sorted(pins)}, а перечень путей снят с {RESTORED_FROM_PIN}: "
-        "перечитайте журнал прогона и обновите RESTORED_PATHS"
+    assert pins == {pinned_at}, (
+        f"действие закреплено на {sorted(pins)}, а перечень путей снят с {pinned_at}: "
+        "перечитайте файл поставщика, обновите RESTORED_PATHS и `read_at` "
+        "в .rules/vendor-watch.json"
     )
 
 

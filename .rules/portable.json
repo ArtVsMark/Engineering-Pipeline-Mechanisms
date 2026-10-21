@@ -503,6 +503,12 @@
         ".rules/showcase.json"
       ]
     },
+    ".rules/vendor-watch.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/vendor-watch.json"
+      ]
+    },
     "packages/transport": {
       "answer": "as-is"
     },
@@ -679,7 +685,8 @@
       "where": [
         ".github/dependabot.yml",
         ".github/workflows/work-plan.yml",
-        ".rules/bindings.json"
+        ".rules/bindings.json",
+        ".rules/vendor-watch.json"
       ]
     },
     "scripts/drift.py": {

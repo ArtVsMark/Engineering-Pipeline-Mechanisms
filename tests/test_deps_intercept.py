@@ -811,3 +811,178 @@ def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.M
     bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
     with pytest.raises(module.Refused, match=r"уже на v7\.1\.0"):
         module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
+
+
+# --- слежка за файлом поставщика (#1522) ---
+
+#: Файл поставщика, за которым следит слежка стенда.
+WATCHED = "src/restore.ts"
+
+
+def watch_stand(work: Path, read_at: str = SHA_OLD) -> None:
+    """Стенд со слежкой: `actions/checkout` следит за `WATCHED` с `read_at`."""
+    (work / module.paths.VENDOR_WATCH).parent.mkdir(parents=True, exist_ok=True)
+    (work / module.paths.VENDOR_WATCH).write_text(
+        "{\n"
+        '  "watched": [\n'
+        "    {\n"
+        '      "dep": "actions/checkout",\n'
+        f'      "path": "{WATCHED}",\n'
+        f'      "read_at": "{read_at}",\n'
+        '      "by": "tests/x.py::Y"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    git(work, "add", "-A")
+    git(work, "commit", "--quiet", "-m", "слежка")
+    git(work, "push", "--quiet", "origin", "HEAD:main")
+
+
+def vendor(monkeypatch: pytest.MonkeyPatch, compare: Any, said: list[tuple[str, str]]) -> None:
+    """Площадка с поставщиком: тег — `SHA_NEW`, `compare` — данный ответ, запись — в `said`."""
+
+    def ask(method: str, path: str, token: str, body: Any = None) -> Any:
+        if method == "GET" and "/compare/" in path:
+            said.append((method, path))
+            return compare
+        if method == "GET":
+            return {"sha": SHA_NEW}
+        said.append((method, path))
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", ask)
+
+
+def ahead(*names: str) -> dict[str, Any]:
+    """Ответ `compare`: новый коммит впереди, тронуты `names`."""
+    return {"status": "ahead", "files": [{"filename": one} for one in names]}
+
+
+def test_an_untouched_vendor_file_moves_the_watch_in_the_same_commit(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Файл поставщика не тронут — `read_at` сдвинут тем же коммитом подъёма, сигнал закрыт."""
+    watch_stand(stand)
+    said: list[tuple[str, str]] = []
+    vendor(monkeypatch, ahead("package.json", "bun.lock"), said)
+    bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
+    branch = module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
+    watch = git(stand, "show", f"origin/{branch}:{module.paths.VENDOR_WATCH.as_posix()}")
+    assert f'"read_at": "{SHA_NEW}"' in watch and SHA_OLD not in watch
+    assert ("GET", f"repos/actions/checkout/compare/{SHA_OLD}...{SHA_NEW}") in said
+    assert ("PATCH", "repos/o/r/pulls/41") in said
+
+
+@pytest.mark.parametrize(
+    "files",
+    [[{"filename": WATCHED}], [{"filename": "src/new.ts", "previous_filename": WATCHED}]],
+    ids=["правлен", "переименован"],
+)
+def test_a_touched_vendor_file_refuses_with_its_address(
+    stand: Path, monkeypatch: pytest.MonkeyPatch, files: list[dict[str, str]]
+) -> None:
+    """Файл поставщика тронут — отказ с адресом файла: ветки нет, сигнал открыт для человека."""
+    watch_stand(stand)
+    said: list[tuple[str, str]] = []
+    vendor(monkeypatch, {"status": "ahead", "files": files}, said)
+    bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
+    with pytest.raises(module.Refused, match=f"actions/checkout/blob/{SHA_NEW}/{WATCHED}"):
+        module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
+    assert not git(stand, "ls-remote", "--heads", "origin", module.branch_of(bump.dep, "v7.1.0"))
+    assert [one for one in said if one[0] != "GET"] == []
+
+
+@pytest.mark.parametrize(
+    ("compare", "outcome"),
+    [
+        ({"status": "ahead", "files": [{"filename": f"f{n}"} for n in range(300)]}, "NotRun"),
+        ({"status": "ahead"}, "NotRun"),
+        ({}, "NotRun"),
+        ([], "NotRun"),
+        ({"status": "ahead", "files": ["src/restore.ts"]}, "NotRun"),
+        ({"status": "diverged", "files": []}, "Refused"),
+        ({"status": "behind", "files": []}, "Refused"),
+    ],
+    ids=[
+        "список-на-пределе",
+        "без-списка",
+        "без-исхода",
+        "не-словарь",
+        "файлы-не-записи",
+        "разошлись",
+        "назад",
+    ],
+)
+def test_an_unproven_compare_is_not_untouched(
+    stand: Path, monkeypatch: pytest.MonkeyPatch, compare: Any, outcome: str
+) -> None:
+    """Неполный ответ — заход не отработал, не-потомок — находка; «не тронут» ни там, ни там."""
+    watch_stand(stand)
+    said: list[tuple[str, str]] = []
+    vendor(monkeypatch, compare, said)
+    bump = module.Bump(41, "actions/checkout", "7.0.1", "7.1.0")
+    with pytest.raises(getattr(module, outcome)):
+        module.intercept(stand, "o/r", "t", bump, dry_run=False, plan_issue=7, who=WHO)
+    assert [one for one in said if one[0] != "GET"] == []
+
+
+def test_a_missing_vendor_commit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Коммита `read_at` у поставщика нет — сравнивать не с чем, это находка, а не поломка."""
+
+    def missing(method: str, path: str, token: str, body: Any = None) -> Any:
+        raise module.ghrest.NotFound("404")
+
+    monkeypatch.setattr(module.ghrest, "request", missing)
+    with pytest.raises(module.Refused, match="коммита у поставщика нет"):
+        module.touched("actions/checkout", SHA_OLD, SHA_NEW, "t")
+
+
+def test_a_watch_already_at_the_new_commit_asks_nothing(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Слежка уже на новом коммите — сравнивать нечего, и файл объявлений не правится."""
+    watch_stand(stand, read_at=SHA_NEW)
+    said: list[tuple[str, str]] = []
+    vendor(monkeypatch, {}, said)
+    assert module.follow(stand, "actions/checkout", SHA_NEW, "t") == {}
+    assert said == []
+
+
+def test_a_malformed_watch_file_does_not_run(stand: Path) -> None:
+    """Файл слежки не той формы — заход не отработал, а не «слежек нет» (039)."""
+    (stand / module.paths.VENDOR_WATCH).parent.mkdir(parents=True, exist_ok=True)
+    (stand / module.paths.VENDOR_WATCH).write_text("[]", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="не список"):
+        module.watches(stand, "actions/checkout")
+
+
+def test_a_tree_without_watches_asks_nothing(stand: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Файла слежки нет (потребитель) — `compare` не спрашивается, подъём идёт как прежде."""
+    said: list[tuple[str, str]] = []
+    vendor(monkeypatch, {}, said)
+    assert module.follow(stand, "actions/checkout", SHA_NEW, "t") == {}
+    assert said == []
+
+
+def test_every_watch_is_pinned_and_read() -> None:
+    """Слежки дерева в своей форме: `read_at` — закрепление действия в прогонах, `by` — живой адрес.
+
+    Слежка на закреплении, которого в дереве нет, сравнивала бы не то, а
+    `by` в никуда не называет, что перечитывать при отказе (076).
+    """
+    said = module.json.loads((ROOT / module.paths.VENDOR_WATCH).read_text(encoding="utf-8"))
+    assert said["watched"], f"{module.paths.VENDOR_WATCH}: слежек нет — предмета нет (075)"
+    for one in said["watched"]:
+        assert module.SHA_RE.match(one["read_at"]), f"{one['dep']}: `read_at` не sha"
+        assert one["path"] and one["why"], f"{one['dep']}: нет `path` или `why`"
+        pins = {
+            found["ref"]
+            for path in walk(ROOT / module.WORKFLOWS, "*.yml")
+            for line in path.read_text(encoding="utf-8").split("\n")
+            if (found := module.uses_re(one["dep"]).search(line))
+        }
+        assert one["read_at"] in pins, f"{one['dep']}: `read_at` не среди закреплений {pins}"
+        file, _, name = one["by"].partition("::")
+        assert name in (ROOT / file).read_text(encoding="utf-8"), f"`by` в никуда: {one['by']}"

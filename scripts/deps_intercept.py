@@ -22,7 +22,10 @@
    «одна версия механизма на дерево» иначе покраснел бы на половинном
    подъёме. Адрес общей ветки (`@main`) не трогается — это не версия.
 3. У действий каталога в том же коммите правится `origin` в
-   `.rules/bindings.json`: тег вызова и тег в ответе сверяет набор.
+   `.rules/bindings.json`: тег вызова и тег в ответе сверяет набор. У действия
+   со слежкой (`.rules/vendor-watch.json`, #1522) прежде подъёма сравнивается
+   объявленный файл поставщика между `read_at` и новым коммитом: не тронут —
+   `read_at` сдвигается тем же коммитом, тронут — отказ с адресом файла.
 4. Фрагмент журнала, коммит (автор — владелец токена, соавтор — подпись
    механизма, как у выпуска; связь — план работ проекта, найденный по
    маркеру), толчок ветки `agent/deps-…` тем же токеном: её изменение
@@ -51,6 +54,7 @@
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -188,6 +192,103 @@ def plan(root: Path, dep: str, tag: str, sha: str) -> dict[Path, str]:
     return planned
 
 
+#: Сколько файлов площадка отдаёт в ответе `compare`: дальше список обрезан
+#: молча, и отсутствие пути в нём «не тронут» уже не доказывает.
+COMPARE_FILES: Final = 300
+#: Исходы `compare`, которые площадка объявляет; иной — ответ не разобран.
+COMPARE_STATES: Final = frozenset({"identical", "ahead", "behind", "diverged"})
+
+
+def watches(root: Path, dep: str) -> list[dict[str, Any]]:
+    """Слежки за файлами поставщика у этого действия; файла объявлений нет — пусто.
+
+    У потребителя файла нет, и подъём идёт как прежде: слежку объявляет тот,
+    у кого есть знание, снятое с кода поставщика.
+    """
+    path = root / paths.VENDOR_WATCH
+    if not path.is_file():
+        return []
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise NotRun(f"{paths.VENDOR_WATCH}: не читается — {exc}") from exc
+    found = said.get("watched") if isinstance(said, dict) else None
+    if not isinstance(found, list) or not all(isinstance(one, dict) for one in found):
+        raise NotRun(f"{paths.VENDOR_WATCH}: `watched` — не список записей")
+    return [one for one in found if str(one.get("dep") or "").lower() == dep.lower()]
+
+
+def touched(dep: str, since: str, sha: str, token: str) -> set[str]:
+    """Файлы поставщика, тронутые от `since` до `sha`, — по `compare` площадки, только чтением.
+
+    ТРИ ИСХОДА, А НЕ ДВА (075). Новый коммит не потомок прежнего — что тронуто,
+    сравнением не узнать, и это находка для человека. Ответ без списка файлов
+    или со списком на пределе — заход не отработал: «пути в списке нет» там
+    не значит «не тронут».
+    """
+    try:
+        said = ghrest.request("GET", f"repos/{dep}/compare/{since}...{sha}", token) or {}
+    except ghrest.NotFound as exc:
+        raise Refused(
+            f"{dep}: сравнить {since[:7]}...{sha[:7]} нечем — коммита у поставщика нет"
+        ) from exc
+    except ghrest.TransportError as exc:
+        raise NotRun(f"{dep}: сравнение {since[:7]}...{sha[:7]} не прочитано — {exc}") from exc
+    status = said.get("status") if isinstance(said, dict) else None
+    if status not in COMPARE_STATES:
+        raise NotRun(f"{dep}: сравнение {since[:7]}...{sha[:7]} без исхода («{status}»)")
+    if status == "identical":
+        return set()
+    if status != "ahead":
+        raise Refused(
+            f"{dep}: {sha[:7]} не потомок {since[:7]} (исход «{status}») — "
+            "что тронуто у поставщика, сравнением не узнать"
+        )
+    files = said.get("files")
+    if not isinstance(files, list) or len(files) >= COMPARE_FILES:
+        raise NotRun(
+            f"{dep}: список файлов {since[:7]}...{sha[:7]} неполон — «не тронут» не доказан"
+        )
+    if not all(isinstance(one, dict) for one in files):
+        raise NotRun(f"{dep}: список файлов {since[:7]}...{sha[:7]} не той формы")
+    return {
+        str(name)
+        for one in files
+        for name in (one.get("filename"), one.get("previous_filename"))
+        if name
+    }
+
+
+def follow(root: Path, dep: str, sha: str, token: str) -> dict[Path, str]:
+    """Слежки этого действия: файл не тронут — `read_at` сдвигается до `sha`, тронут — отказ.
+
+    Отдаёт правку файла объявлений для плана подъёма; слежки нет или она уже
+    на `sha` — пусто.
+    """
+    found = watches(root, dep)
+    if not found:
+        return {}
+    before = (root / paths.VENDOR_WATCH).read_text(encoding="utf-8")
+    after = before
+    for one in found:
+        since, path = str(one.get("read_at") or ""), str(one.get("path") or "")
+        if not SHA_RE.match(since) or not path:
+            raise NotRun(f"{paths.VENDOR_WATCH}: у слежки {dep} нет `read_at` по sha или `path`")
+        if since == sha:
+            continue
+        if path in touched(dep, since, sha, token):
+            raise Refused(
+                f"{dep}: между {since[:7]} и {sha[:7]} у поставщика тронут {path} — "
+                f"перечитать {one.get('by')} по https://github.com/{dep}/blob/{sha}/{path} "
+                f"и сдвинуть `read_at` в {paths.VENDOR_WATCH}"
+            )
+        old, new = f'"read_at": "{since}"', f'"read_at": "{sha}"'
+        if old not in after:
+            raise NotRun(f"{paths.VENDOR_WATCH}: строки {old} нет — сдвигать нечего")
+        after = after.replace(old, new)
+    return {paths.VENDOR_WATCH: after} if after != before else {}
+
+
 def resolve(dep: str, new: str, token: str) -> tuple[str, str]:
     """Тег новой версии и sha его коммита — у площадки; тега нет — отказ с причиной."""
     # Сначала с `v`: так помечены выпуски почти у всех действий, а голый номер
@@ -321,6 +422,7 @@ def intercept(
                 else f"строк `uses:` {bump.dep} в дереве нет — поднимать нечего"
             )
             raise Refused(f"#{bump.number}: {why}")
+        planned.update(follow(root, bump.dep, sha, token))
         note = paths.FRAGMENTS / f"deps-{slug(bump.dep)}-{slug(tag)}.changed.md"
         planned[note] = fragment(bump.dep, tag, bump.number, plan_issue)
         print(f"#{bump.number}: {bump.dep} → {tag} ({sha[:7]}), файлов: {len(planned)}")
