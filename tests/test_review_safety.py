@@ -2432,13 +2432,16 @@ def test_a_task_allowing_pytest_asks_for_the_foreground(path: Path) -> None:
 FULL_SET_TO_CI: Final = "ПОЛНЫЙ НАБОР НЕ ГОНИ"
 
 
+#: Часть указания, которую держит и агент по обращению (поздний взгляд на #1540):
+#: объём прогона там задаёт человек, а назвать прогнанное обязан и он.
+NAME_THE_TESTS: Final = "Назови в ответе, какие тесты прогнал"
 #: Три части указания о прогоне у каждого захода взгляда (поздний взгляд на #1505):
 #: полный набор — за CI, тесты по диффу или находке — гнать, прогнанное — назвать.
 #: Сверка одной первой части пропускала задание, из которого выпали две другие.
 LOOK_TEST_PARTS: Final = (
     FULL_SET_TO_CI,
     "Гони тесты, которых касается",
-    "Назови в ответе, какие тесты прогнал",
+    NAME_THE_TESTS,
 )
 
 
@@ -2461,6 +2464,23 @@ def test_a_look_task_leaves_the_full_set_to_ci() -> None:
         assert not missing, (
             f"{LOOK_BODY.name}, «{name}»: pytest разрешён, а задание не держит "
             f"указание о прогоне целиком — нет {missing}"
+        )
+
+
+def test_the_agent_on_mention_names_the_tests_it_ran() -> None:
+    """Агент по обращению называет прогнанные тесты; объём задаёт позвавший (#1540).
+
+    Полный набор ему не запрещён: объём прогона там задаёт человек, а не
+    решение 18.10.2026 о заходах взгляда. Назвать прогнанное обязан и он —
+    вердикт по прогону и вердикт по чтению выглядят одинаково.
+    """
+    asked = [
+        one for one in commands_and_task(ON_MENTION_BODY) if any("pytest" in c for c in one[1])
+    ]
+    assert asked, f"{ON_MENTION_BODY.name}: заходов с pytest нет — предмета у проверки нет (075)"
+    for name, _, task in asked:
+        assert NAME_THE_TESTS in task, (
+            f"{ON_MENTION_BODY.name}, «{name}»: прогнанное не велено назвать"
         )
 
 
