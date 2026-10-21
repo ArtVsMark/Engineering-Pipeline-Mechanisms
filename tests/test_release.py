@@ -198,19 +198,31 @@ def test_a_literal_of_the_next_contract_refuses_the_release(
 def test_a_literal_of_the_current_contract_does_not_refuse_a_moving_release(
     run_script: RunScript, tmp_path: Path
 ) -> None:
-    """Выпуск судит БУДУЩЕЕ число: нынешнее, в маркере и литералом, — дело гейта изменений (097)."""
+    """Голый литерал нынешнего числа выпуск не держит: это дело гейта изменений (097)."""
+    root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
+    wide_span(root)
+    (root / "probe.py").write_text(f'WAS = "{FAKE_VERSION}"\n', encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "литерал"], cwd=root, check=True)
+    run = run_script("release.py", cwd=root)
+    assert run.code == 0, run.text
+
+
+def test_a_marker_of_the_current_contract_refuses_a_moving_release(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Маркер с нынешним числом — отказ: никто его не переписывает, и он устареет (#1525)."""
     root = tree(tmp_path, tag="v9.9.0", fragments=("a.contract.md",))
     wide_span(root)
     # Маркер собран по частям: целиком он стоял бы в этом файле, и гейт версии
     # судил бы его здесь, а не в подделке.
     opening, closing = "<!--m:" + "contract-->", "<!--/m:" + "contract-->"
-    (root / "probe.py").write_text(
-        f'"""{opening}{FAKE_VERSION}{closing}"""\nWAS = "{FAKE_VERSION}"\n', encoding="utf-8"
-    )
+    (root / "probe.md").write_text(f"{opening}{FAKE_VERSION}{closing}\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "маркер"], cwd=root, check=True)
     run = run_script("release.py", cwd=root)
-    assert run.code == 0, run.text
+    assert run.code == 1, run.text
+    assert "probe.md: в маркере стоит" in run.text and "не переписывает" in run.text
 
 
 def test_future_literals_skip_the_fragments_that_leave(

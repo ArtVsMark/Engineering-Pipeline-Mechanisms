@@ -400,21 +400,32 @@ def future_literals(after: str, waiting: list[Path]) -> list[str]:
     машина, и проверок изменения он не проходит. Выпуск v1.8.0 поднял
     `CONTRACT_VERSION`, а новое число уже стояло литералом в двух тестах, и
     первым покраснело изменение, открытое самим выпуском. Новую версию выпуск
-    знает до тега, поэтому судит дерево ею сам. Маркеры не судятся — их
-    перепишет сборка; ждущие фрагменты тоже — они уедут в `released/`.
+    знает до тега, поэтому судит дерево ею сам. Ждущие фрагменты не судятся —
+    они уедут в `released/`.
+
+    МАРКЕРЫ СУДЯТСЯ ТОЖЕ (поздний взгляд на #1525). Здесь стояло «маркеры
+    перепишет сборка», но маркеров не переписывает ни один скрипт: выпуск
+    пишет только `CONTRACT_VERSION` и журнал. Маркер с нынешним числом после
+    подъёма разошёлся бы с источником — та же беда #1516, только через маркер.
     """
     leaving = {one.as_posix() for one in waiting}
     # Охват ниже печатает гейт версии: без этой строки он читался бы как охват выпуска.
     print(f"гейт версии на будущем номере контракта {after}:")
     try:
         files = [one for one in check_version.tracked_files() if one.as_posix() not in leaving]
-        found = check_version.literals(after, check_version.texts(files))
+        read = check_version.texts(files)
+        found = check_version.literals(after, read)
+        stale = check_version.stale_markers(after, read)
     except check_version.NotRun as exc:
         raise NotRun(f"гейт версии на {after} не отработал: {exc}") from exc
     return [
         f"выпуск запишет версию контракта {after}, а она уже вписана руками — "
         f"после тега покраснеет гейт версии: {one}"
         for one in found
+    ] + [
+        f"выпуск запишет версию контракта {after}, а маркер её не получит — его не "
+        f"переписывает ни один скрипт, и после тега покраснеет гейт версии: {one}"
+        for one in stale
     ]
 
 
