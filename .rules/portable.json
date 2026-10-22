@@ -222,6 +222,10 @@
         ".github/workflows/badges.yml"
       ]
     },
+    ".github/workflows/facts-release.yml": {
+      "answer": "ours",
+      "why": "@provider"
+    },
     ".github/workflows/ci-complete.yml": {
       "answer": "as-is"
     },
@@ -585,6 +589,14 @@
     },
     "scripts/build_text_widths.py": {
       "answer": "as-is"
+    },
+    "scripts/check_facts.py": {
+      "answer": "ours",
+      "why": "@provider"
+    },
+    "scripts/facts_release.py": {
+      "answer": "ours",
+      "why": "@provider"
     },
     "scripts/badges_read.py": {
       "answer": "as-is"

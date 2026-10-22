@@ -329,6 +329,13 @@ SPELLING_MEANS_NOTHING: Final = {
     "main": "имя функции Python и точка входа модуля, а не имя общей ветки",
 }
 
+#: Модули, которые уезжают из дерева ОДНИ, без `paths.py` рядом: импорт якоря
+#: у них упал бы у читателя. Имя в них — литералом, и причина названа (154).
+STANDS_ALONE: Final = {
+    "check_facts.py": "едет плоским файлом на страницу выпуска договора фактов "
+    "(`facts_release.ASSETS`, #1563) и импортирует только стандартную библиотеку",
+}
+
 
 def canonical_names() -> dict[str, str]:
     """Имя константы якоря → её строковое значение."""
@@ -404,13 +411,35 @@ def test_a_canonical_name_is_not_spelled_a_second_time() -> None:
     # Один `scripts/` — та же причина, что у `scripts()`: общий низ якоря не
     # видит, и второй литерал вместо `paths.<имя>` ему не в упрёк (#1254).
     for path in walk(ROOT / "scripts", "*.py"):
-        if path.name == "paths.py":
+        if path.name == "paths.py" or path.name in STANDS_ALONE:
             continue
         for value in literals_in(path):
             name = wanted.get(value)
             if name:
                 found.append(f"{path.relative_to(ROOT)} — «{value}» вместо paths.{name}")
     assert not found, "каноническое имя написано вторым литералом:\n  " + "\n  ".join(sorted(found))
+
+
+def test_a_module_standing_alone_imports_nothing_of_ours() -> None:
+    """Исключение «уезжает один» верно, пока модуль и вправду ничего нашего не зовёт.
+
+    Стоит ему импортировать соседа — он уже не самостоятелен, и литерал вместо
+    `paths.<имя>` снова второй (155).
+    """
+    ours = {one.stem for one in walk(ROOT / "scripts", "*.py")}
+    ours |= {one.stem for one in walk(ROOT / "packages" / "transport", "*.py")}
+    for name, why in STANDS_ALONE.items():
+        assert why, name
+        tree = ast.parse((ROOT / "scripts" / name).read_text(encoding="utf-8"))
+        taken = {
+            alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for alias in (
+                node.names if isinstance(node, ast.Import) else [ast.alias(node.module or "")]
+            )
+        }
+        assert not taken & ours, f"{name} зовёт наше: {sorted(taken & ours)}"
 
 
 def test_an_exempt_name_names_its_reason() -> None:
