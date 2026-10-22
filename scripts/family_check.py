@@ -825,10 +825,51 @@ def badge(analysis: dict[str, Any]) -> str:
     return python_badge.picture(zones(analysis))
 
 
+#: ФОРМА ЗАПИСИ СВОДКИ — ВСЕ ПОЛЯ, КОТОРЫЕ МОДУЛЬ ЧИТАЕТ, И ИХ ТИП (#1567).
+#: Две находки подряд по одному месту — форме чужой записи — чинились по
+#: одному полю (`repo`, потом `release`), и третье, `gives`, осталось открытым
+#: (правило 210). Теперь запись разбирается на входе целиком: поле не той
+#: формы снимается с предупреждением, и читатели ниже видят только законную
+#: форму либо отсутствие поля, у которого исход уже есть («не опубликовано»).
+RECORD_FORM: Final = {
+    "repo": str,
+    "state": str,
+    "release": dict,
+    "gives": dict,
+    "links": dict,
+}
+
+
+def formed(projects: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Записи сводки в форме `RECORD_FORM` и названные отказы формы.
+
+    Запись не словарь или без строкового `repo` — не проект: имени, по
+    которому её сверять, нет. Прочее поле не той формы снимается: отсутствие
+    у каждого читателя уже значит «не опубликовано», а не падение.
+    """
+    kept: list[dict[str, Any]] = []
+    refused: list[str] = []
+    for n, one in enumerate(projects):
+        if not isinstance(one, dict) or not isinstance(one.get("repo"), str):
+            refused.append(f"запись {n} — без строкового repo, не проект")
+            continue
+        clean = dict(one)
+        for field, kind in RECORD_FORM.items():
+            if field in clean and clean[field] is not None and not isinstance(clean[field], kind):
+                refused.append(f"{one['repo']}: поле {field} не {kind.__name__} — снято")
+                del clean[field]
+        kept.append(clean)
+    return kept, refused
+
+
 def read_summary(
     source: str, fetch: Callable[[str], dict[str, Any]] = ghrest.raw_json
 ) -> tuple[dict[str, Any] | None, str]:
-    """Сводка семьи по адресу или пути; (сводка, беда)."""
+    """Сводка семьи по адресу или пути; (сводка, беда).
+
+    Записи приходят разобранными по `RECORD_FORM`: отказы формы печатаются
+    предупреждением, а не роняют разбор (039).
+    """
     if source.startswith("https://"):
         try:
             doc: Any = fetch(source)
@@ -840,7 +881,10 @@ def read_summary(
             return None, f"сводка семьи {source}: не прочитан файл"
     if not isinstance(doc, dict) or not isinstance(doc.get("projects"), list):
         return None, f"сводка семьи {source}: нет списка projects"
-    return doc, ""
+    projects, refused = formed(doc["projects"])
+    for why in refused:
+        print(f"::warning::сводка семьи {source}: {why}", file=sys.stderr)
+    return {**doc, "projects": projects}, ""
 
 
 def main(argv: list[str] | None = None) -> int:
