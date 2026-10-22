@@ -128,11 +128,18 @@ def test_without_a_token_the_answers_are_not_guessed(
 
 
 def test_the_live_registry_is_readable() -> None:
-    """Живой реестр дерева разбирается и называет свою пустоту словами (139)."""
+    """Живой реестр дерева разбирается тем же чтением, что у захода (139).
+
+    Перемерено 22.10.2026 (#1579): первая запись — каталог. Прежде тест держал
+    пустоту и требовал её названия; теперь он держит, что каждая запись
+    читается и называет обязательные поля, а пояснение о пустоте осталось как
+    история состояния (154).
+    """
+    rows = module.registry(ROOT)
+    assert rows, "реестр пуст — запись каталога пропала (#1579)"
+    assert {row["repo"] for row in rows} >= {"ArtVsMark/Engineering-Incidents-Playbook"}
     said = json.loads((ROOT / module.paths.CONSUMERS).read_text(encoding="utf-8"))
-    assert module.CONNECTED in said, "в реестре нет раздела подключённых"
-    assert not said[module.CONNECTED], "подключённые появились — перемерьте этот прогон"
-    assert any("пуст" in key for key in said), "пустота реестра не названа причиной (154)"
+    assert any("пуст" in key for key in said), "история пустоты реестра не названа (154)"
 
 
 #: Реестры не той формы: каждый обязан дойти до объявленного исхода, а не
