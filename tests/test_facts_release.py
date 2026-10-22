@@ -53,8 +53,11 @@ def test_publish_sets_the_page_and_attaches_every_asset(
     uploaded: list[str] = []
 
     def request(method: str, path: str, token: str, body: Any = None) -> Any:
-        asked.append((path, body))
-        return {"upload_url": "https://uploads.github.com/repos/o/r/releases/1/assets{?name}"}
+        asked.append((f"{method} {path}", body))
+        return {
+            "id": 1,
+            "upload_url": "https://uploads.github.com/repos/o/r/releases/1/assets{?name}",
+        }
 
     def upload(url: str, name: str, data: bytes, token: str) -> dict[str, Any]:
         assert data == (dist / name).read_bytes()
@@ -65,13 +68,42 @@ def test_publish_sets_the_page_and_attaches_every_asset(
     monkeypatch.setattr(fr.ghrest, "upload_asset", upload)
     said = fr.publish("o/r", "facts-v2.1.0", "2.1.0", "abc", dist, "текст", "t")
     assert "facts-v2.1.0" in said
-    ((path, body),) = asked
-    assert path == "repos/o/r/releases"
+    (create, body), (release, last) = asked
+    assert create == "POST repos/o/r/releases"
     assert body["tag_name"] == "facts-v2.1.0"
     assert body["target_commitish"] == "abc"
     assert body["make_latest"] == "false"
     assert body["body"] == "текст"
+    # Черновиком: тега у черновика нет, он ставится снятием черновика в конце.
+    assert body["draft"] is True
+    assert release == "PATCH repos/o/r/releases/1"
+    assert last == {"draft": False, "make_latest": "false"}
     assert sorted(uploaded) == sorted(one.name for one in fr.ASSETS)
+
+
+@pytest.mark.parametrize("deleted", [True, False])
+def test_a_failed_upload_leaves_no_tag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deleted: bool
+) -> None:
+    """Сбой загрузки — черновик удаляется, тег не ставится; не удалился — названо."""
+    dist = tmp_path / "dist"
+    fr.assemble(dist)
+    asked: list[str] = []
+
+    def request(method: str, path: str, token: str, body: Any = None) -> Any:
+        asked.append(f"{method} {path}")
+        if method == "DELETE" and not deleted:
+            raise fr.ghrest.TransportError("502")
+        return {"id": 7, "upload_url": "https://uploads.github.com/x{?name}"}
+
+    def upload(url: str, name: str, data: bytes, token: str) -> dict[str, Any]:
+        raise fr.ghrest.TransportError("502")
+
+    monkeypatch.setattr(fr.ghrest, "request", request)
+    monkeypatch.setattr(fr.ghrest, "upload_asset", upload)
+    with pytest.raises(fr.ghrest.TransportError, match="тега нет"):
+        fr.publish("o/r", "facts-v2.1.0", "2.1.0", "abc", dist, "", "t")
+    assert asked == ["POST repos/o/r/releases", "DELETE repos/o/r/releases/7"]
 
 
 @pytest.mark.parametrize(("token", "target"), [("", "abc"), ("t", "")])

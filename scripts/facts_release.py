@@ -194,6 +194,14 @@ def publish(
     механизмов «последний» — выпуск ``vX.Y.Z`` конвейера, и страница договора его
     не подменяет. Файл, который площадка не приняла, — отказ: страница без
     проверки хуже отсутствующей (см. шапку).
+
+    ТЕГ — ПОСЛЕДНИМ ШАГОМ (находка взгляда на #1582). Страница ставится
+    черновиком: у черновика тега ещё нет. Файлы прикладываются к нему, и только
+    когда легли все, черновик снимается — тогда площадка ставит тег. Опубликуй
+    страницу сразу, и сбой одной загрузки (транспорт POST не повторяет) оставил
+    бы тег со страницей без части файлов, а перезапуск отказал бы «тег уже
+    стоит». Не легла загрузка — черновик удаляется, и перезапуск начинает с
+    чистого места; не удалился — это названо в отказе.
     """
     if not token:
         raise ghrest.TransportError("нет токена: GH_TOKEN — тег несёт личность человека (131)")
@@ -209,14 +217,29 @@ def publish(
             "name": f"Договор фактов {number}",
             "body": body,
             "make_latest": "false",
+            "draft": True,
         },
     )
-    if not isinstance(page, dict) or not page.get("upload_url"):
+    if not isinstance(page, dict) or not page.get("upload_url") or not page.get("id"):
         raise ghrest.TransportError(f"страница {tag} поставлена без адреса загрузки: {page!r}")
-    for source in ASSETS:
-        ghrest.upload_asset(
-            str(page["upload_url"]), source.name, (dist / source.name).read_bytes(), token
-        )
+    draft = f"repos/{repo}/releases/{page['id']}"
+    try:
+        for source in ASSETS:
+            ghrest.upload_asset(
+                str(page["upload_url"]), source.name, (dist / source.name).read_bytes(), token
+            )
+    except ghrest.TransportError as exc:
+        try:
+            ghrest.request("DELETE", draft, token)
+        except ghrest.TransportError as left:
+            raise ghrest.TransportError(
+                f"файлы {tag} не легли ({exc}); черновик {draft} не удалён ({left}) — "
+                "удалите его руками, тега нет"
+            ) from exc
+        raise ghrest.TransportError(
+            f"файлы {tag} не легли ({exc}); черновик удалён, тега нет"
+        ) from exc
+    ghrest.request("PATCH", draft, token, {"draft": False, "make_latest": "false"})
     return f"выпуск {tag} поставлен на {target}: файлов {len(ASSETS)}"
 
 

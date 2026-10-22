@@ -57,8 +57,9 @@ jobs:
       - name: собрать и проверить выпуск
         if: ${{ !inputs.apply }}
         env:
-          # Сухой заход читает теги площадки тем же транспортом: без токена
-          # гейт шага его отвергает (`test_steps_get_their_token`).
+          # Сухой заход к площадке не ходит: теги читаются локально
+          # (`git tag --list` по выборке checkout). Токен здесь держит гейт
+          # шага (`test_steps_get_their_token`): скрипт выпуска зовёт транспорт.
           GH_TOKEN: ${{ github.token }}
         run: python scripts/facts_release.py --dist "$RUNNER_TEMP/facts-release" --notes "$RUNNER_TEMP/facts-notes.md"
       - name: выпустить
