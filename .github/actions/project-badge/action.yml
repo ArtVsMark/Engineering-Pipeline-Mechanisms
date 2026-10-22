@@ -1,0 +1,99 @@
+# Значок проекта в две строки у потребителя — составным действием механизмов
+# (#1563, решение владельца 22.10.2026: переехало из каталога). Сверху «CI │
+# Python │ ОС │ coverage │ release / PyPI │ version», снизу «rules │ machine │
+# own │ taken» и «family │ … │ EIP · EPM».
+#
+# СЕМЬЮ СПРОСИЛИ ПЕРВОЙ (162): действие взято у каталога вместе с его
+# расчётом — у каталога оно было готовым действием значка проекта, и приём
+# перенесён сюда переездом, а не написан заново. У соседей по семье своих
+# значков проекта нет: они звали действие каталога.
+#
+# Свой код — из выкачки действия по тегу из `uses:` (`github.action_path`), а
+# не из дерева потребителя. Считается дерево ПРОЕКТА: его прогоны, его ответ
+# каталогу, его манифест; извне приходят сводка семьи и выгрузка каталога.
+# Python ставит вызывающий джоб — чужих `uses:` здесь нет (#1387).
+#
+# ОБЩИЙ ШАГ ФАКТОВ ЭТО ДЕЙСТВИЕ НЕ ЗОВЁТ: `step-facts` исполняет те же три
+# скрипта из своей выкачки механизмов напрямую, на теге своего вызова. Действие
+# — для тех, кто рисует значки вне шага фактов.
+#
+# Рисует рядом: python.svg с python.zones.json, family.svg с разбором
+# family-check.json и project.svg. Цвет — данные, а не исход шага (004). Код
+# выхода 2 — значок не собран целиком; прежний значок публикацией лучше не
+# трогать.
+name: project-badge
+description: >-
+  Рисует значок проекта в две строки: проверки, Python, ОС, покрытие, выпуск и
+  версия сверху; правила машиной, механизмы и сверка с семьёй снизу. Серое — не
+  прочитано, с причиной в подсказке.
+inputs:
+  out-dir:
+    description: Папка для картинок относительно корня проекта.
+    default: .github/badges
+  ci-workflow:
+    description: Файл основного CI в .github/workflows — как у python-badge.
+    default: ci.yml
+  coverage-json:
+    description: Файл значка покрытия (shields endpoint); пусто — зона серая.
+    default: ""
+  coverage-all-json:
+    description: Покрытие, сведённое по всем ОС; задан — второе число в зоне.
+    default: ""
+  version-json:
+    description: Файл значка версии (shields endpoint); пусто — зона серая.
+    default: ""
+  suites:
+    description: Наборы проверок основного CI — как у python-badge.
+    default: ""
+  pypi:
+    description: Имя пакета на PyPI; пусто — зона «release / PyPI» показывает выпуск площадки.
+    default: ""
+  family:
+    description: Адрес или путь сводки семьи; пусто — сводка каталога.
+    default: ""
+  token:
+    description: Токен для чтения прогонов (нужно право actions read).
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: поставить транспорт из выкачки действия
+      shell: bash
+      run: python -m pip install --quiet "pyyaml>=6,<7" "$GITHUB_ACTION_PATH/../../../packages/transport"
+    - name: нарисовать значок проекта
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        MECHANISMS: ${{ github.action_path }}/../../..
+        OUT_DIR: ${{ inputs.out-dir }}
+        CI_WORKFLOW: ${{ inputs.ci-workflow }}
+        COVERAGE_JSON: ${{ inputs.coverage-json }}
+        COVERAGE_ALL_JSON: ${{ inputs.coverage-all-json }}
+        VERSION_JSON: ${{ inputs.version-json }}
+        PYPI: ${{ inputs.pypi }}
+        SUITES: ${{ inputs.suites }}
+        FAMILY: ${{ inputs.family }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -uo pipefail
+        # Части и склейку рисует ОДИН вызов (`project_badge.py --parts`):
+        # этот же вызов делает шаг фактов, и склейки двумя копиями оболочки не
+        # заводится (071).
+        args=(--root "$GITHUB_WORKSPACE" --parts --out "$GITHUB_WORKSPACE/$OUT_DIR/project.svg"
+          --repo "$REPO" --ci "$CI_WORKFLOW")
+        [ -n "$FAMILY" ] && args+=(--family "$FAMILY")
+        [ -n "$COVERAGE_JSON" ] && args+=(--coverage-json "$GITHUB_WORKSPACE/$COVERAGE_JSON")
+        [ -n "$COVERAGE_ALL_JSON" ] && args+=(--coverage-all-json "$GITHUB_WORKSPACE/$COVERAGE_ALL_JSON")
+        [ -n "$VERSION_JSON" ] && args+=(--version-json "$GITHUB_WORKSPACE/$VERSION_JSON")
+        [ -n "$PYPI" ] && args+=(--pypi "$PYPI")
+        [ -n "$SUITES" ] && args+=(--suites "$SUITES")
+        rc=0
+        python "$MECHANISMS/scripts/project_badge.py" ${args[@]+"${args[@]}"} || rc=$?
+        # ЗЕЛЁНЫМИ СЧИТАЮТСЯ ТОЛЬКО ОБЪЯВЛЕННЫЕ КОДЫ (068).
+        case "$rc" in
+          0) ;;
+          1) echo "::warning::значок проекта собран с серыми частями — причины выше" ;;
+          2) echo "::error::значок проекта не собран целиком — причины выше"; exit 2 ;;
+          *) echo "::error::значок проекта: код $rc не объявлен — разбирать нечем"; exit 2 ;;
+        esac

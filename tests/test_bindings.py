@@ -1397,12 +1397,7 @@ def test_a_called_catalogue_origin_names_an_action_we_call() -> None:
 #: обязаны стоять в чьём-то `origin`: иначе ответ, держащийся чужим действием,
 #: читался бы как свой — с контракта 1.9 это явное `origin_kind: own`, и
 #: вызов без ответа с `called` прошёл бы под ним молча (#1237).
-CALLED_WITHOUT_A_RULE: Final = {
-    ".github/actions/project-badge/action.yml": (
-        "рисует значок проекта по исходам прогонов и ответу каталогу; правила не держит — "
-        "держат сами прогоны, которые он показывает"
-    ),
-}
+CALLED_WITHOUT_A_RULE: Final[dict[str, str]] = {}
 
 
 def test_every_called_catalogue_action_is_someones_origin() -> None:

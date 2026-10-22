@@ -161,3 +161,12 @@ def replacements(export: dict[str, Any]) -> dict[str, str]:
         for rule in rules_of(export)
         if rule_status(rule) == SUPERSEDED and rule.get("superseded_by")
     }
+
+
+def active_rules(export: dict[str, Any]) -> set[str]:
+    """Номера действующих правил выгрузки — тем же чтением статуса, что у замен (214).
+
+    Знаменатель значка проекта: ответ о заменённом правиле законен, но правилом
+    оно больше не является (каталог, решение владельца 17.10).
+    """
+    return {str(rule.get("id")) for rule in rules_of(export) if rule_status(rule) == ACTIVE}

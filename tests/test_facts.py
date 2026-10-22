@@ -716,7 +716,7 @@ FACTS_BADGE_INPUTS_RUN: Final = (
 
 
 def test_the_shared_step_draws_the_picture_before_it_publishes() -> None:
-    """Входы, значок каталога и его перенос идут по порядку и ДО публикации (#1422).
+    """Входы, значок проекта и его перенос идут по порядку и ДО публикации (#1422).
 
     Публикация берёт `project.svg` рядом с `facts.json`; без него на ветке
     остаётся прежний значок. Снятый или переставленный шаг краснел бы только на
@@ -727,12 +727,14 @@ def test_the_shared_step_draws_the_picture_before_it_publishes() -> None:
     steps = shared["jobs"]["facts"]["steps"]
     names = [step.get("name") for step in steps]
     inputs = names.index("входы значка проекта — покрытие и версия по фактам")
-    badge = names.index("значок проекта — действием каталога")
+    badge = names.index("значок проекта")
     laid = names.index("положить значок проекта рядом с фактами")
     publish = names.index("опубликовать факты коммитом поверх ветки badges")
     assert inputs < badge < laid < publish, "значок собирается не по порядку или после публикации"
-    assert steps[badge].get("continue-on-error") is True, "отказ каталога ронял бы публикацию"
-    assert steps[badge]["with"]["out-dir"] == ".project-badge"
+    # Отказ значка не роняет публикацию: исход пишется выходом шага, и
+    # шаг переноса решает по нему (#1563), а не `continue-on-error`.
+    assert "|| rc=$?" in steps[badge]["run"], "отказ рисовальщика ронял бы публикацию"
+    assert steps[badge]["env"]["OUT_DIR"] == ".project-badge"
     assert " ".join(steps[inputs]["run"].split()) == FACTS_BADGE_INPUTS_RUN, steps[inputs]["run"]
 
 

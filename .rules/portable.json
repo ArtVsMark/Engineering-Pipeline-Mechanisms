@@ -102,6 +102,15 @@
     ".github/actions/ci-complete/action.yml": {
       "answer": "as-is"
     },
+    ".github/actions/family-badge/action.yml": {
+      "answer": "as-is"
+    },
+    ".github/actions/project-badge/action.yml": {
+      "answer": "as-is"
+    },
+    ".github/actions/python-badge/action.yml": {
+      "answer": "as-is"
+    },
     ".github/ISSUE_TEMPLATE/consumer-gap.yml": {
       "answer": "ours",
       "why": "@provider"
@@ -550,6 +559,12 @@
     },
     "scripts/family_contract.py": {
       "answer": "as-is"
+    },
+    "scripts/project_badge.py": {
+      "answer": "as-is",
+      "where": [
+        ".rules/bindings.json"
+      ]
     },
     "scripts/text_width.py": {
       "answer": "as-is"
