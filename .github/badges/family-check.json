@@ -54,16 +54,6 @@
         {
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
-          "what": "release",
-          "mine": "v2.1.0",
-          "latest": "v2.1.0",
-          "where": ".github/workflows/step-facts.yml",
-          "state": "ok",
-          "why": ""
-        },
-        {
-          "segment": "family",
-          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "bindings",
           "mine": "1.9",
           "latest": "1.9",
