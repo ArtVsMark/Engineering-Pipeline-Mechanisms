@@ -657,7 +657,9 @@ def resolved_job(path: Path, job: str) -> dict[Any, Any]:
         return dict(said)
     if remote_call(said):
         raise BadPolicy(f"{path}: джоб «{job}» зовёт {uses} — удалённый шаг локально не прочитать")
-    called = path.parents[2] / uses[len(LOCAL_USES) :]
+    # Вызываемый прогон площадка ищет только в каталоге прогонов, рядом с
+    # вызывающим: адрес `./.github/workflows/<имя>` даёт ровно его имя.
+    called = path.with_name(Path(uses).name)
     step = run_of(called)
     inner = list((step.get("jobs") or {}).values())
     if len(inner) != 1:

@@ -298,7 +298,7 @@ def test_a_lone_advisory_red_is_not_called_a_crowd() -> None:
     редакция говорила так про ЕДИНСТВЕННУЮ красную совещательную (154). Нашёл
     разбор на #101.
     """
-    said = module.rerun_reason([], ["test-next"], run=100, tries=1)
+    said = module.rerun_reason([], ["test-next / test-next"], run=100, tries=1)
     assert said == module.ADVISORY_ONLY
     assert said != module.NOT_ALONE
 
@@ -362,6 +362,9 @@ def test_the_cell_parameter_is_cut_and_nothing_else_is() -> None:
     assert module.job_of("test-next (3.15)") == "test-next"
     assert module.job_of("test-matrix (3.12)") == "test-matrix"
     assert module.job_of("debt / debt") == "debt / debt"
+    # Ячейка у вызова общего шага — перед вызванным джобом (#1556).
+    assert module.job_of("test-next (3.16) / test-next") == "test-next / test-next"
+    assert module.job_of("review / late-look (1)") == "review / late-look"
     assert module.job_of("ci-complete") == "ci-complete"
     assert module.job_of("") == ""
 
@@ -386,8 +389,9 @@ def test_a_matrix_cell_is_matched_by_the_job_name_the_list_carries() -> None:
     единого теста, — и вторая попытка зелена без правок (прогон 35714755550).
     """
     allowed = module.rerunnable()
-    assert allowed.get("test-next"), "имя с замером 22.09.2026 в список не попало"
-    cell = "test-next (3.15)"
+    assert allowed.get("test-next / test-next"), "имя с замером 22.09.2026 в список не попало"
+    # Запись ячейки вызова общего шага с матрицей вызывающего (#1556).
+    cell = "test-next (3.15) / test-next"
     assert cell not in allowed, "образец должен быть именно ЗАПИСЬЮ ячейки, а не джобом"
     assert module.rerun_reason([], [cell], run=100, tries=1, allowed=allowed) == ""
     assert module.rerun_reason([], [cell], run=100, tries=2, allowed=allowed) == module.ALREADY
