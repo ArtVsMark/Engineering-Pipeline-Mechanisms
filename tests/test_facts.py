@@ -65,8 +65,8 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     assert collected["rules"]["by_mechanism"] == {"document": 1, "gate": 1}
     assert collected["checks_per_pr"]["by_class"]["required"] == 1
     assert collected["commit"] == "голова"
-    # Договор фактов 1.6 (#1337): номер — договора, а не наш.
-    assert collected["schema"] == "1.6"
+    # Договор фактов 2.0 (#1337, #1396): номер — договора, а не наш.
+    assert collected["schema"] == "2.0"
     # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
     assert collected["none"]["python"] == facts.NO_PYTHON
     assert collected["generated_at"].endswith("+00:00")
@@ -515,7 +515,8 @@ def facts_tree(tmp_path: Path, named: str | None, body: str | None = None) -> tu
     git(repo, "checkout", "--quiet", "--orphan", "badges")
     git(repo, "rm", "-rf", "--quiet", ".")
     (repo / ".github" / "badges").mkdir(parents=True)
-    said: dict[str, str] = {"schema": "1.6"}
+    # Форма — та, что публикует шаг сегодня, а не вписанная рукой (взгляд на #1572).
+    said: dict[str, str] = {"schema": facts.common.SCHEMA}
     if named != "":
         said["commit"] = named or first
     text = json.dumps(said) if body is None else body
