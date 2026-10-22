@@ -50,6 +50,7 @@
 import os
 import re
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any, Final
 
@@ -410,12 +411,16 @@ def supplier_of() -> Path | None:
     return Path(said) if said else None
 
 
+@cache
 def supplier_repo(supplier: Path) -> str:
     """Чей код конвейера выкачан — `владелец/репозиторий` по `origin` выкачки; не узнать — пусто.
 
     Выкачка общего шага — клон `actions/checkout`, и `origin` у него — адрес
     позванного репозитория. Не клон, нет `origin` или git молчит — пусто: чей
     поставщик, неизвестно, и решать по догадке нельзя (045).
+
+    Ответ запоминается на заход (взгляд на #1583): выкачка за прогон не
+    меняется, а спрашивают её на каждом джобе, позванном по адресу.
     """
     try:
         said = gitcall.output(["remote", "get-url", "origin"], BadPolicy, cwd=str(supplier))
@@ -740,8 +745,11 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
     root = Path(str(directory)[: -len(tail)] or ".")
     if addressed:
         where = root / addressed["path"]
+        # Файла в дереве нет — вызов чужой. У потребителя его прибивают и к
+        # общей ветке поставщика (`…@main`), и читается он так же, как по тегу
+        # (взгляд на #1583, правило 195).
         if not where.is_file():
-            return None
+            return supplied_jobs(said)
     else:
         where = root / said[len(OUR_CALL) :].split("@")[0]
     if not where.is_file():
@@ -749,6 +757,15 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
             f"вызов «{said}» указывает на прогон, которого в дереве нет — "
             "проверка по нему не появится, а красного об этом не будет (045)"
         )
+    return jobs_of_called(where)
+
+
+def jobs_of_called(where: Path) -> list[str]:
+    """Имена джобов позванного прогона; без события `workflow_call` — отказ.
+
+    Один разбор на оба места, откуда берётся позванный прогон, — дерево и
+    выкачку поставщика (взгляд на #1583, правило 090).
+    """
     document = run_of(where)
     if CALLED not in triggers_of(document):
         raise BadPolicy(
@@ -792,10 +809,7 @@ def supplied_jobs(said: str) -> list[str] | None:
             f"вызов «{said}» указывает на прогон, которого нет и в выкачке "
             f"поставщика {supplier} — проверка по нему не появится (045)"
         )
-    return [
-        str((body or {}).get("name") or job_id)
-        for job_id, body in (run_of(where).get("jobs") or {}).items()
-    ]
+    return jobs_of_called(where)
 
 
 def check_names(job_id: str, body: dict[str, Any], directory: Path = WORKFLOWS) -> list[str]:

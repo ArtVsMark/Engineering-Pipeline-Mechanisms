@@ -787,9 +787,11 @@ def test_a_foreign_call_keeps_its_own_name(tmp_path: Path) -> None:
 
 
 TAG_CALL = "ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-meta.yml@v1.9.0"
+TRUNK_CALL = "ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-meta.yml@main"
 STEP_META = "name: step\non:\n  workflow_call:\njobs:\n  meta:\n    name: pr-meta\n    steps: []\n"
 
 
+@pytest.mark.parametrize("call", [TAG_CALL, TRUNK_CALL], ids=["тег", "общая-ветка"])
 @pytest.mark.parametrize(
     ("running", "origin", "named"),
     [
@@ -810,7 +812,12 @@ STEP_META = "name: step\non:\n  workflow_call:\njobs:\n  meta:\n    name: pr-met
     ids=["потребитель", "чужая-выкачка", "своё-дерево"],
 )
 def test_a_tag_call_at_the_consumer_is_named_from_the_supplier(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, running: str, origin: str, named: set[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    running: str,
+    origin: str,
+    named: set[str],
+    call: str,
 ) -> None:
     """У потребителя вызов по тегу читается из выкачки поставщика (#1568).
 
@@ -826,7 +833,7 @@ def test_a_tag_call_at_the_consumer_is_named_from_the_supplier(
     directory = called_tree(
         tmp_path / "consumer",
         caller="name: c\non: [pull_request]\njobs:\n  meta:\n    name: pr-meta\n"
-        f"    uses: {TAG_CALL}\n",
+        f"    uses: {call}\n",
     )
     assert set(policy.declared_jobs(directory)) == named
 
@@ -841,6 +848,23 @@ def test_a_tag_call_to_a_file_the_supplier_lacks_is_refused(
     monkeypatch.setenv("GITHUB_REPOSITORY", "Owner/Consumer")
     monkeypatch.setenv(policy.SUPPLIER_ENV, str(supplier))
     with pytest.raises(policy.BadPolicy, match="нет и в выкачке"):
+        policy.supplied_jobs(TAG_CALL)
+
+
+def test_a_supplied_run_without_workflow_call_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Прогон из выкачки судится тем же разбором, что из дерева: без `workflow_call` — отказ."""
+    supplier = cloned(
+        tmp_path / "mechanisms", "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms"
+    )
+    (supplier / ".github" / "workflows").mkdir(parents=True)
+    (supplier / ".github" / "workflows" / "step-meta.yml").write_text(
+        STEP_META.replace("workflow_call", "pull_request"), encoding="utf-8"
+    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", "Owner/Consumer")
+    monkeypatch.setenv(policy.SUPPLIER_ENV, str(supplier))
+    with pytest.raises(policy.BadPolicy, match="workflow_call"):
         policy.supplied_jobs(TAG_CALL)
 
 
