@@ -108,9 +108,14 @@ def declared_steps() -> list[tuple[str, str, str, bool, str]]:
     """
     found: list[tuple[str, str, str, bool, str]] = []
     for path in walk(WORKFLOWS, "*.y*ml"):
+        if path.name.startswith("step-"):
+            # Тело общего шага судится в вызывающем: там его входы (#1556).
+            continue
         document: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         for job, body in (document.get("jobs") or {}).items():
-            for step in (body or {}).get("steps") or []:
+            if policy.remote_call(body):
+                continue  # тело удалённого шага локально не прочитать
+            for step in policy.resolved_job(path, str(job)).get("steps") or []:
                 given = (step or {}).get("with") or {}
                 said = given.get("python-version")
                 if said is not None:

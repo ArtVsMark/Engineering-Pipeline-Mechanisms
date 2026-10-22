@@ -27,10 +27,11 @@
 # предупреждением, тесты не идут (решение владельца 14.10.2026, #193; шаг
 # «есть ли сборка ветки у площадки» ниже).
 #
-# ИМЯ ДЖОБА ПРЕЖНЕЕ — `test-next`, и это не забывчивость. Запись проверки
-# по-прежнему `test-next (<версия>)`: её знают ответ по классам (`.pipeline.yml`),
-# список перезапуска (`.rules/rerun.json`) и дежурный (`job_of`). Сменилось
-# место, а не имя: переименование тронуло бы трёх читателей ради украшения.
+# ИМЯ ДЖОБА ПРЕЖНЕЕ — `test-next`, и это не забывчивость. Запись проверки —
+# `test-next (<версия>) / test-next`: тело в общем шаге `step-python-next.yml`
+# (#1556), и имя составное, как у всех вынесенных. Ячейку отрезает дежурный
+# (`job_of`), и ответ по классам (`.pipeline.yml`) со списком перезапуска
+# (`.rules/rerun.json`) называют джоб без неё.
 name: python-next
 
 on:
@@ -53,83 +54,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ТОНКИЙ ВЫЗОВ (#1556): проба — общим шагом `step-python-next.yml`, здесь
+  # то, что решает проект, — на какой ветке пробовать и чем ставить и гонять
+  # свои тесты. Код шага потребитель зовёт адресом с тегом, а не копирует.
   test-next:
-    name: test-next
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    # МАТРИЦА ИЗ ОДНОЙ ВЕРСИИ — РАДИ ИМЕНИ. Площадка приписывает значения
-    # матрицы к имени джоба: запись называется `test-next (3.16)`, и по списку
-    # проверок видно, НА ЧЁМ прогнали (046). Дрейф (`scripts/drift.py`,
-    # `declared_versions`) и факты витрины (`scripts/build_facts.py`,
-    # `python_facts`) читают версию из матрицы.
+    # МАТРИЦА ИЗ ОДНОЙ ВЕРСИИ — РАДИ ИМЕНИ, И ОНА У ВЫЗЫВАЮЩЕГО (решение
+    # владельца 22.10.2026, #1556). Площадка приписывает значения матрицы к
+    # имени джоба: запись называется `test-next (3.16) / test-next`, и по
+    # списку проверок видно, НА ЧЁМ прогнали (046). Дрейф
+    # (`scripts/drift.py`, `declared_versions`), факты витрины
+    # (`scripts/build_facts.py`, `python_facts`) и значок
+    # (`scripts/python_versions.py`) читают версию из этой матрицы.
     strategy:
       # Ячейка одна, но `fail-fast` объявлен: добавят вторую предрелизную ветку —
       # и узнать надо про обе, а не про первую упавшую.
       fail-fast: false
       matrix:
         python: ["3.16"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      # СБОРКИ ВЕТКИ У ПЛОЩАДКИ МОЖЕТ ЕЩЁ НЕ БЫТЬ — ЭТО ИСХОД, А НЕ КРАСНОЕ
-      # (решение владельца 14.10.2026, #193). Ветку сюда наводят раньше, чем
-      # выходит её первая альфа: так было с 3.16 после выхода 3.15, и
-      # `setup-python` отказывал. Дежурный клал красное долгом в план, и долг
-      # загораживал работу до выхода альфы. Теперь манифест спрашивается
-      # заранее — тем же разбором, что у дрейфа (`drift.py --published`), на
-      # стабильной ветке, — и при отсутствии сборки тесты не идут, а прогон
-      # зелёный с предупреждением. Нечитаемый манифест — красное: это отказ
-      # канала, а не «версии нет» (045).
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-      - name: есть ли сборка ветки у площадки
-        id: version
-        env:
-          WANTED: ${{ matrix.python }}
-          # Манифест токена не просит, но `drift.py` ходит к площадке общим
-          # транспортом, и шаг без токена гейт отвергает (`test_steps_get_their_token`).
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -uo pipefail
-          python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
-          rc=0
-          # Сборка — файл под систему раннера, а не номер (`b1aea69`): версия
-          # системы берётся у самого раннера, а не второй записью `runs-on`.
-          system="$(. /etc/os-release && echo "${VERSION_ID:-}")"
-          # Пустая версия молча отключила бы сверку системы (взгляд на #1333):
-          # не прочитали — шаг не отработал, а не «сверять не надо» (045).
-          if [ -z "$system" ]; then
-            echo "::error::версия системы раннера не прочитана из /etc/os-release — сборку сверить не с чем"
-            exit 1
-          fi
-          python scripts/drift.py --published "$WANTED" --platform-version "$system" || rc=$?
-          case "$rc" in
-            0) echo "present=true" >>"$GITHUB_OUTPUT" ;;
-            4)
-              echo "present=false" >>"$GITHUB_OUTPUT"
-              echo "::warning::Сборки ${WANTED} под ${system} у площадки ещё нет — тесты на ней не шли; прогон зелёный и говорит именно это."
-              ;;
-            *) exit 1 ;;
-          esac
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: steps.version.outputs.present == 'true'
-        with:
-          # Выражением матрицы: действие каталога `project-badge` с v2.1.0
-          # находит предрелизную версию и по `${{ matrix.python }}` рядом с
-          # `allow-prereleases: true` (каталог #926, #928). До того здесь
-          # стояло число буквой — копия ячейки (решение владельца 03.10.2026).
-          python-version: ${{ matrix.python }}
-          # Без него setup-python предрелиз не ставит.
-          allow-prereleases: true
-      - name: поставить проверки
-        if: steps.version.outputs.present == 'true'
-        run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7" "pytest-randomly>=3,<4" ./packages/transport
-      - name: тесты на предрелизной
-        if: steps.version.outputs.present == 'true'
-        env:
-          RANDOM_SEED: ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED}
+    uses: ./.github/workflows/step-python-next.yml
+    # УСТАНОВКА И НАБОР — ДАННЫЕ ПРОЕКТА: заготовка подключения кладёт этот
+    # файл потребителю как есть, и свои `install` и `test` он ставит сам.
+    # Транспорт берётся из выкачки механизмов (`$MECHANISMS`), а не из
+    # `./packages/`: у потребителя этого пути нет, и строка установки
+    # упала бы у него на первом заходе.
+    with:
+      python: ${{ matrix.python }}
+      install: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7" "pytest-randomly>=3,<4" $MECHANISMS/packages/transport
+      test: pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED}

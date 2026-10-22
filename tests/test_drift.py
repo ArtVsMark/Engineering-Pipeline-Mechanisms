@@ -868,13 +868,15 @@ def test_both_version_lists_come_from_a_matrix() -> None:
         path = flows / flow
         jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
         cells = module.matrix_of(jobs, job, path)
+        # Джоб-вызов — телом вызванного шага: `setup-python` у него (#1556).
+        body = module.pipeline_checks.resolved_job(path, job)
         assert cells, f"{job}: версии не в матрице — из имени записи они пропадут"
         # У предрелизного джоба установок две: служебная на стабильной ветке —
         # спросить манифест, есть ли сборка (#193), — и сама предрелизная. Предмет
         # здесь — вторая, её и узнают по `allow-prereleases`.
         step = [
             said
-            for step in (jobs[job].get("steps") or [])
+            for step in (body.get("steps") or [])
             if (said := ((step or {}).get("with") or {}).get("python-version"))
             and (not preview or ((step or {}).get("with") or {}).get("allow-prereleases"))
         ]
@@ -2666,10 +2668,10 @@ def test_the_preview_run_stops_quietly_without_a_build() -> None:
     ровно то красное, которое дежурный клал долгом в план. Сверка спрашивает
     ячейку матрицы, а не букву: ветка одна на джоб.
     """
-    flow = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "python-next.yml").read_text(encoding="utf-8")
-    )
-    steps = flow["jobs"]["test-next"]["steps"]
+    # Тело — у общего шага, входы — у вызова (#1556): читается так, как исполнится.
+    steps = module.pipeline_checks.resolved_job(
+        ROOT / ".github" / "workflows" / "python-next.yml", "test-next"
+    )["steps"]
     names = [step.get("name") for step in steps]
     check = names.index("есть ли сборка ветки у площадки")
     assert 'drift.py --published "$WANTED"' in steps[check]["run"]

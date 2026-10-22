@@ -621,6 +621,67 @@ def run_of(path: Path) -> dict[Any, Any]:
     return run_text(path.read_text(encoding="utf-8"), str(path))
 
 
+#: Вход вызванного шага в его теле: `${{ inputs.<имя> }}`.
+INPUT_RE: Final = re.compile(r"\$\{\{\s*inputs\.([\w-]+)\s*\}\}")
+#: Локальный вызов шага: путь от корня дерева.
+LOCAL_USES: Final = "./"
+
+
+def remote_call(job: Any) -> bool:
+    """Зовёт ли джоб шаг удалённым адресом (`владелец/репо/…@тег`), а не путём дерева."""
+    uses = str((job or {}).get("uses") or "") if isinstance(job, dict) else ""
+    return bool(uses) and not uses.startswith(LOCAL_USES)
+
+
+def resolved_job(path: Path, job: str) -> dict[Any, Any]:
+    """Джоб прогона так, как он исполнится: вызов шага — телом вызванного (#1556).
+
+    Джоб-вызов (`uses: ./.github/workflows/step-*.yml`) своих `runs-on` и
+    `steps` не несёт: они в вызванном шаге, а у вызывающего — `strategy` и
+    входы `with:`. Читатели образа, шагов и `setup-python` спрашивали джоб
+    вызывающего и с выносом шага теряли предмет молча. Здесь вызванный джоб
+    берётся целиком, поверх кладётся `strategy` и имя вызывающего, а
+    `${{ inputs.<имя> }}` в строках тела заменяется значением `with:` либо
+    умолчанием входа — ровно то, что подставит площадка.
+
+    ОДИН ВЫЗВАННЫЙ ДЖОБ — ИНАЧЕ ОТКАЗ: какой из нескольких считать «телом»,
+    неизвестно (045). Удалённый вызов (`владелец/репо/…@тег`) локально не
+    прочитать — тоже отказ с причиной, а не джоб без шагов (075).
+    """
+    jobs = run_of(path).get("jobs") or {}
+    if job not in jobs:
+        raise BadPolicy(f"{path}: нет джоба «{job}»")
+    said = jobs[job] or {}
+    uses = str(said.get("uses") or "")
+    if not uses:
+        return dict(said)
+    if remote_call(said):
+        raise BadPolicy(f"{path}: джоб «{job}» зовёт {uses} — удалённый шаг локально не прочитать")
+    called = path.parents[2] / uses[len(LOCAL_USES) :]
+    step = run_of(called)
+    inner = list((step.get("jobs") or {}).values())
+    if len(inner) != 1:
+        raise BadPolicy(f"{called.name}: джобов {len(inner)}, а не один — тело вызова неоднозначно")
+    declared = ((events_raw(step) or {}).get(CALLED) or {}).get("inputs") or {}
+    values = {str(name): str((one or {}).get("default", "")) for name, one in declared.items()}
+    values.update({str(name): str(value) for name, value in (said.get("with") or {}).items()})
+
+    def put(value: Any) -> Any:
+        if isinstance(value, str):
+            return INPUT_RE.sub(lambda found: values.get(found[1], ""), value)
+        if isinstance(value, dict):
+            return {key: put(one) for key, one in value.items()}
+        if isinstance(value, list):
+            return [put(one) for one in value]
+        return value
+
+    body: dict[Any, Any] = put(dict(inner[0] or {}))
+    if "strategy" in said:
+        body["strategy"] = said["strategy"]
+    body["name"] = said.get("name", job)
+    return body
+
+
 def run_text(text: str, where: str) -> dict[Any, Any]:
     """Прогон из ТЕКСТА — тем же разбором, что :func:`run_of`, для заготовки и чужого дерева.
 
@@ -827,10 +888,12 @@ def matrix_axis(path: Path, job: str, axis: str) -> tuple[list[str], str]:
     которой гоняется набор, а не память. Не прочитано — отказ с причиной (045).
     """
     try:
-        said = (yaml.safe_load(path.read_text(encoding="utf-8")) or {})["jobs"][job]
+        # Джоб-вызов — телом вызванного шага: образ у него, а матрица у
+        # вызывающего (#1556).
+        said = resolved_job(path, job)
         values = [str(one) for one in said["strategy"]["matrix"][axis]]
         image = str(said["runs-on"])
-    except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
+    except (BadPolicy, KeyError, TypeError) as exc:
         raise BadPolicy(f"{path}: ось «{axis}» джоба «{job}» не прочитана ({exc!r})") from exc
     return values, image
 

@@ -276,8 +276,7 @@
       "answer": "configured",
       "where": [
         ".github/workflows/python-next.yml"
-      ],
-      "seam": "что проверяется на предрелизной версии и какая она, названо шагами и матрицей прогона, данных под это нет: тонкого вызова, как у ci.yml, заготовка под него не кладёт"
+      ]
     },
     ".github/workflows/release.yml": {
       "answer": "configured",
@@ -325,6 +324,9 @@
         ".github/authors.txt",
         ".github/attribution-since"
       ]
+    },
+    ".github/workflows/step-python-next.yml": {
+      "answer": "as-is"
     },
     ".github/workflows/step-agent-pr.yml": {
       "answer": "as-is"

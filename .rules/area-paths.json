@@ -225,7 +225,8 @@
         ".github/workflows/*",
         "pyproject.toml",
         "scripts/check_env.py",
-        ".github/workflows/python-next.yml"
+        ".github/workflows/python-next.yml",
+        ".github/workflows/step-python-next.yml"
       ]
     },
     "tracker": {
