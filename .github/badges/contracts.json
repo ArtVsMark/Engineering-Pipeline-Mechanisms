@@ -2,11 +2,11 @@
   "schema": "1.1",
   "project": "ArtVsMark/Engineering-Pipeline-Mechanisms",
   "release": {
-    "tag": "v1.8.0",
-    "sha": "7cd39af2005ceb7564cba9324a42b375331fa4c8"
+    "tag": "v1.9.0",
+    "sha": "7502e2d68926f6aff2d2036360907f8692b63e40"
   },
   "gives": {
-    "steps": "0.10"
+    "steps": "0.11"
   },
   "takes": []
 }
