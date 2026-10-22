@@ -761,7 +761,7 @@ def extra_written(args: argparse.Namespace) -> int:
 def rehydrated(facts: dict[str, Any], root: Path, supplier: str = "") -> dict[str, Any]:
     """Факты для рисования: темы `exchange` — в корень, неопубликованное — из дерева.
 
-    ОПУБЛИКОВАННЫЕ ФАКТЫ — ФОРМА ДОГОВОРА ФАКТОВ 1.6 (#1337): `rules`, `manifest` и
+    ОПУБЛИКОВАННЫЕ ФАКТЫ — ФОРМА ДОГОВОРА ФАКТОВ 1.6 и 2.0 (#1337): `rules`, `manifest` и
     `contract` в них не лежат, у каждого канон в другом месте
     (`facts_common.NOT_PUBLISHED`, `SUPPLIER_NOT_PUBLISHED`). Рисующему они нужны, и берутся тем же
     кодом, что считал их до публикации, — из дерева, а не второй записью.
