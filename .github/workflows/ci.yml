@@ -261,7 +261,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: ответ каталогу по форме и пробы «не применимо»
-        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/answer@v2.0.0
+        uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/answer@v2.1.0
 
   pr-meta:
     name: pr-meta
