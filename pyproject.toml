@@ -66,7 +66,9 @@ mypy_path = "packages/transport"
 # `yaml` три ошибки, без `pytest` шесть, без `_pytest.*` две, а без голого
 # `_pytest` — чисто, потому что сам `_pytest` дерево не импортирует нигде.
 # Запись убрана, соответствие держит `tests/test_type_leniency.py` (139).
-module = ["yaml", "pytest", "_pytest.*"]
+# `fontTools.*` — сборщик таблицы ширин `scripts/build_text_widths.py`: его
+# зовут руками, а не шагом, и fontTools в зависимости набора не входит (#1563).
+module = ["yaml", "pytest", "_pytest.*", "fontTools.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

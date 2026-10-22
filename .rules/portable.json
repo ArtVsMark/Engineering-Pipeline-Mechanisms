@@ -536,6 +536,12 @@
         ".rules/bindings.json"
       ]
     },
+    "scripts/text_width.py": {
+      "answer": "as-is"
+    },
+    "scripts/build_text_widths.py": {
+      "answer": "as-is"
+    },
     "scripts/badges_read.py": {
       "answer": "as-is"
     },
