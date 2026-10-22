@@ -515,7 +515,8 @@ def facts_tree(tmp_path: Path, named: str | None, body: str | None = None) -> tu
     git(repo, "checkout", "--quiet", "--orphan", "badges")
     git(repo, "rm", "-rf", "--quiet", ".")
     (repo / ".github" / "badges").mkdir(parents=True)
-    said: dict[str, str] = {"schema": "1.6"}
+    # Форма — та, что публикует шаг сегодня, а не вписанная рукой (взгляд на #1572).
+    said: dict[str, str] = {"schema": facts.common.SCHEMA}
     if named != "":
         said["commit"] = named or first
     text = json.dumps(said) if body is None else body
