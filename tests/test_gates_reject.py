@@ -1959,10 +1959,11 @@ def test_the_reason_of_a_refused_kind_is_read_by_form() -> None:
     [
         ("Без задачи, потому что чинится красная общая ветка", True),
         ("Без задачи, потому что", False),
+        ("Без задачи, потому что\n\nCo-Authored-By: x <x@y>", False),
         ("Тут без задачи, потому что лень", False),
         ("```\nБез задачи, потому что образец\n```", False),
     ],
-    ids=["с-причиной", "без-причины", "в-прозе", "в-блоке-кода"],
+    ids=["с-причиной", "без-причины", "без-причины-со-строкой-следом", "в-прозе", "в-блоке-кода"],
 )
 def test_no_task_with_a_reason_is_a_third_answer(
     run_script: RunScript, tmp_path: Path, body: str, passes: bool

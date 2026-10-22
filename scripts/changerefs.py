@@ -44,7 +44,7 @@ CANON: Final = {"closes": "Closes", "fixes": "Fixes", "refs": "Refs", "part of":
 CLOSING: Final = frozenset({"Closes", "Fixes"})
 
 LINK_RE: Final = re.compile(
-    r"\b(?P<verb>" + "|".join(VERBS) + r")\s+(?P<tasks>#\d+(?:\s*,\s*#?\d+)*)",
+    r"\b(?P<verb>" + "|".join(VERBS) + r")[ \t]+(?P<tasks>#\d+(?:[ \t]*,[ \t]*#?\d+)*)",
     re.IGNORECASE,
 )
 NUMBER_RE: Final = re.compile(r"#?(\d+)")
@@ -467,7 +467,14 @@ def links_in(text: str) -> list[Link]:
 #: ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
 #: Отдельной строкой, как связь: фраза внутри прозы ответом не считается.
 NO_TASK_KEY: Final = "Без задачи, потому что"
-NO_TASK_RE: Final = re.compile(rf"^{re.escape(NO_TASK_KEY)}\s+\S.*$", re.MULTILINE)
+#: Пробел после ключа — `[ \t]`, а не `\s`: `\s` переходит через перевод строки,
+#: и ключ без причины засчитался бы причиной следующей строки — трейлера
+#: (взгляд на #1584). Тот же дефект был у связи (`LINK_RE`): обе читают текст
+#: целиком. Остальные ключевые строки — снятие, род, пункт, «Чинит», «Ждёт» —
+#: читаются построчно (`marked_lines_at`) и через строку не переходят по
+#: построению; перечень форм держит `test_a_key_line_never_takes_the_next_line`
+#: (правило 210).
+NO_TASK_RE: Final = re.compile(rf"^{re.escape(NO_TASK_KEY)}[ \t]+\S.*$", re.MULTILINE)
 
 
 def no_task_in_all(texts: Iterable[str]) -> str:

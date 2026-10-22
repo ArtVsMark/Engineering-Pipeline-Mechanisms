@@ -1065,8 +1065,44 @@ def test_no_task_line_is_read_once_for_all(monkeypatch: pytest.MonkeyPatch) -> N
     said = "Без задачи, потому что чинится красная общая ветка"
     assert changerefs.no_task_in_all(["правка", f"fix: x\n\n{said}\n"]) == said
     assert changerefs.no_task_in_all(["Без задачи, потому что"]) == ""
+    # Ключ без причины не берёт причиной следующую строку (взгляд на #1584).
+    assert changerefs.no_task_in_all(["Без задачи, потому что\n\nCo-Authored-By: x"]) == ""
     monkeypatch.setattr(agent_pr, "git", lambda *args: f"fix: правка\n\n{said}\n")
     body = agent_pr.describe("agent/окно", "main").body
     assert said in body
     squash = load_script("squash_body.py")
     assert said in squash.compose_from(["fix: правка"], [f"fix: правка\n\n{said}\n"])
+
+
+@pytest.mark.parametrize(
+    ("key", "read", "below"),
+    [
+        (changerefs.NO_TASK_KEY, lambda text: changerefs.no_task_in_all([text]), "чинится ветка"),
+        (changerefs.RESOLVED_WORD, changerefs.resolved_in, "abc1234"),
+        (changerefs.CLOSED_ITEM_KEY, changerefs.closed_items_in, "пункт"),
+        (changerefs.WAITS_KEY, lambda text: changerefs.held_in_all([text]), "#9"),
+        ("Refs", changerefs.links_in, "#12"),
+        (changerefs.FIXES_RED_KEY, changerefs.fixes_red_in, "#12"),
+        ("Чинит main:", changerefs.fixes_main_in, "прогон ci"),
+    ],
+    ids=[
+        "без-задачи",
+        "разобрано",
+        "закрывает-пункт",
+        "ждёт",
+        "связь",
+        "чинит-красное",
+        "чинит-main",
+    ],
+)
+def test_a_key_line_never_takes_the_next_line(key: str, read: Any, below: str) -> None:
+    """Ключ с пустым значением не берёт значением следующую строку (#1584, правило 210).
+
+    Перечень форм — ключевые строки модуля: `\\s` после ключа переходил через
+    перевод строки, и пустое объявление засчитывалось строкой ниже. Строка
+    ниже у каждого ключа — та, что подошла бы ему значением. «Род:» исправлен
+    тем же приёмом и читается только вплотную под снятием — его держат тесты
+    снятия.
+    """
+    assert read(f"{key} {below}"), "сама форма читается"
+    assert not read(f"{key}\n{below}")
