@@ -55,7 +55,7 @@ FROM_MATRIX: Final = "matrix."
 MATRIX_FLOW: Final = WORKFLOWS / "ci.yml"
 MATRIX_JOB: Final = "test-matrix"
 MATRIX_AXIS: Final = "python"
-#: Условие шага на свою ячейку матрицы: `matrix.python == '3.15'` (#1527).
+#: Условие шага на ячейку матрицы — снятый обход #1527; вернувшийся шаг ячейки краснеет.
 CELL_IF: Final = re.compile(r"^\s*matrix\.python\s*==\s*'(?P<cell>[^']+)'\s*$")
 #: Ячейка, которую сверка умеет сравнить с планкой: ровно `X.Y`.
 CELL: Final = re.compile(r"(\d+)\.(\d+)")
@@ -103,8 +103,8 @@ def declared_steps() -> list[tuple[str, str, str, bool, str]]:
 
     Предрелизный — `allow-prereleases: true` в том же `with:`: так его узнаёт
     и действие единого значка каталога, и без этой пометки setup-python
-    предрелиз не поставит. Ячейка — из условия `matrix.python == 'X.Y'`: шаг
-    ячейки ставит её число буквой (#1527); у прочих шагов — пусто.
+    предрелиз не поставит. Ячейка — из условия `matrix.python == 'X.Y'`: так
+    выглядел снятый обход #1527, и вернувшийся шаг ячейки должен быть виден.
     """
     found: list[tuple[str, str, str, bool, str]] = []
     for path in walk(WORKFLOWS, "*.y*ml"):
@@ -170,107 +170,72 @@ def test_every_hand_written_language_version_is_the_declared_floor() -> None:
     отстанет молча, и узнают об этом не здесь, а на шаге, который продолжит
     работать на старом истолкователе.
 
-    СУЖЕНИЕ НАЗВАНО (195): предрелизный шаг (`allow-prereleases: true`) и шаг
-    ячейки матрицы (`if: matrix.python == 'X.Y'`) по определению ставят НЕ пол,
-    и судят их соседние проверки — `test_a_preview_step_names_its_matrix_cell`
-    и `test_every_matrix_cell_has_its_own_setup`, ячейкой своего джоба.
+    СУЖЕНИЕ НАЗВАНО (195): версию из матрицы (`${{ matrix.python }}`) и
+    предрелизный шаг (`allow-prereleases: true`) этот гейт не судит: они по
+    определению ставят НЕ пол. Их судят соседние проверки —
+    `test_a_matrix_job_sets_its_version_from_the_matrix` и
+    `test_a_preview_step_names_its_matrix_cell`, ячейкой своего джоба.
     """
     major, minor = env.python_floor(ROOT)
     floor = f"{major}.{minor}"
     wrong = [
         f"{name}:{job} ставит {said}, а пол дерева — {floor}"
-        for name, job, said, preview, cell in declared_steps()
-        if FROM_MATRIX not in said
-        and said != floor
-        and not preview
-        and not cell_step(name, job, cell)
+        for name, job, said, preview, _ in declared_steps()
+        if FROM_MATRIX not in said and said != floor and not preview
     ]
     assert not wrong, "версия истолкователя разошлась с объявленным полом (035):\n  " + "\n  ".join(
         wrong
     )
 
 
-def test_a_matrix_cell_is_not_counted_as_a_duplicate() -> None:
-    """Граница гейта названа замером: шаги ячеек матрицы есть, и они не предмет.
+def test_a_matrix_job_sets_its_version_from_the_matrix() -> None:
+    """`test-matrix` ставит версию одним шагом выражения матрицы, шагов на ячейку нет (#1527).
 
-    Довод «матрица — не дубль» держится тем, что шаги ячеек в дереве
-    действительно есть. Исчезнут они — довод станет пустым, и это увидит
-    проверка, а не читатель докстроки
-    ([146](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/146-a-green-gate-does-not-verify-its-premise.md)).
-    """
-    cells = [one for one in declared_steps() if one[4]]
-    assert cells, "ни один шаг не ставит ячейку матрицы — довод про границу пуст"
-
-
-def cell_step(name: str, job: str, cell: str) -> bool:
-    """Шаг ячейки — только в джобе, чью матрицу судит `test_every_matrix_cell_has_its_own_setup`."""
-    return bool(cell) and name == MATRIX_FLOW.name and job == MATRIX_JOB
-
-
-def test_a_cell_condition_lives_only_in_the_judged_matrix() -> None:
-    """Условие на ячейку вне `ci.yml::test-matrix` — отказ: такой шаг минул бы обе проверки.
-
-    Пол его не судит (он шаг ячейки), а сверка ячеек смотрит один джоб (взгляд
-    на #1533). Появится вторая матрица с шагами ячеек — сверку расширяют, а
-    не пропускают её шаги молча.
-    """
-    stray = [
-        f"{name}:{job} (ячейка {cell})"
-        for name, job, _, _, cell in declared_steps()
-        if cell and not cell_step(name, job, cell)
-    ]
-    assert not stray, f"шаги ячеек вне сверяемой матрицы: {stray}"
-
-
-def test_every_matrix_cell_has_its_own_setup() -> None:
-    """У каждой ячейки `test-matrix` — свой шаг с её числом буквой, и выражения матрицы нет (#1527).
-
-    Буквой — ради единого значка семьи: действие каталога `project-badge`
-    берёт основные версии только из `python-version: "X.Y"`, а
-    `${{ matrix.python }}` не читает, и 3.15 стояла на значке «проектом не
-    проверяется». Шаг ячейки узнаётся условием `matrix.python == 'X.Y'`, и число
-    в нём — копия ячейки; копия держится здесь, а не вниманием (071).
+    Действие каталога `project-badge` с v2.1.0 раскрывает выражение матрицы в
+    её ячейки (каталог #926, #928). До того оно читало только число буквой, и
+    здесь стоял шаг на ячейку с условием `matrix.python == 'X.Y'` — копия
+    ячейки, которую держала отдельная сверка. Обход снят вместе с подъёмом:
+    вернётся шаг ячейки — это вторая форма той же версии, и она краснеет здесь,
+    а не расходится молча (071).
     """
     cells, _ = policy.matrix_axis(MATRIX_FLOW, MATRIX_JOB, MATRIX_AXIS)
     steps = [
-        (said, cell)
-        for name, job, said, _, cell in declared_steps()
+        said
+        for name, job, said, _, _ in declared_steps()
         if name == MATRIX_FLOW.name and job == MATRIX_JOB
     ]
     assert cells and steps, f"{MATRIX_FLOW.name}::{MATRIX_JOB}: матрицы или шагов нет (075)"
-    by_matrix = [said for said, _ in steps if FROM_MATRIX in said]
-    assert not by_matrix, f"версия выражением {by_matrix} — значок каталога её не прочтёт"
-    wrong = [f"шаг ячейки {cell} ставит {said}" for said, cell in steps if said != cell]
-    assert not wrong, "число шага разошлось с его ячейкой:\n  " + "\n  ".join(wrong)
-    assert sorted(cell for _, cell in steps) == sorted(cells), (
-        f"ячейки матрицы {cells}, а шаги ставят {[cell for _, cell in steps]}: "
-        "у каждой ячейки ровно один шаг"
+    assert steps == [f"${{{{ {FROM_MATRIX}{MATRIX_AXIS} }}}}"], (
+        f"{MATRIX_FLOW.name}::{MATRIX_JOB} ставит {steps} — ожидается один шаг с выражением матрицы"
     )
+    stray = [f"{name}:{job} (ячейка {cell})" for name, job, _, _, cell in declared_steps() if cell]
+    assert not stray, f"шаг на ячейку матрицы вернулся — вторая форма той же версии: {stray}"
 
 
 def test_a_preview_step_names_its_matrix_cell() -> None:
-    """Предрелизный шаг вписывает версию буквой, и она равна ячейке матрицы его джоба.
+    """Предрелизный шаг ставит версию выражением матрицы своего джоба, и у матрицы есть ячейка.
 
-    Буквой — ради единого значка семьи: действие каталога `project-badge`
-    (верхняя строка — расчёт `python-badge`) узнаёт предрелизную версию
-    только по `python-version: "X.Y"` рядом с `allow-prereleases: true`,
-    а `${{ matrix.python }}` не читает (решение владельца 03.10.2026).
-    Буква — копия ячейки, по которой площадка называет
-    запись (`test-next (3.15)`), и копия держится здесь, а не вниманием (071).
-    Предрелизных шагов нет вовсе — отказ: иначе значок молча потерял бы версию,
-    а проверка осталась бы зелёной (075).
+    Действие каталога `project-badge` (верхняя строка — расчёт `python-badge`)
+    с v2.1.0 находит предрелизную версию и по `${{ matrix.python }}` рядом с
+    `allow-prereleases: true` (каталог #926, #928); прежде здесь требовалось
+    число буквой — копия ячейки (решение владельца 03.10.2026). Ячейка же даёт
+    версию в имени записи (`test-next (3.16)`). Предрелизных шагов нет вовсе —
+    отказ: иначе значок молча потерял бы версию, а проверка осталась бы
+    зелёной (075).
     """
     previews = [one[:4] for one in declared_steps() if one[3]]
     assert previews, "ни одного предрелизного шага — значку нечего показать вторым числом"
     wrong: list[str] = []
     for name, job, said, _ in previews:
-        if FROM_MATRIX in said:
-            wrong.append(f"{name}:{job}: версия выражением {said} — значок её не прочтёт")
+        if said != f"${{{{ {FROM_MATRIX}{MATRIX_AXIS} }}}}":
+            wrong.append(
+                f"{name}:{job}: шаг ставит {said}, а не выражение матрицы — второй источник числа"
+            )
             continue
         cells, _ = policy.matrix_axis(WORKFLOWS / name, job, MATRIX_AXIS)
-        if cells != [said]:
-            wrong.append(f"{name}:{job}: шаг ставит {said}, а матрица — {cells}")
-    assert not wrong, "предрелизная версия расходится с ячейкой:\n  " + "\n  ".join(wrong)
+        if len(cells) != 1:
+            wrong.append(f"{name}:{job}: у предрелизной матрицы ячеек {cells}, ожидается одна")
+    assert not wrong, "предрелизная версия не из матрицы:\n  " + "\n  ".join(wrong)
 
 
 def test_one_tool_is_bounded_the_same_way_everywhere() -> None:
