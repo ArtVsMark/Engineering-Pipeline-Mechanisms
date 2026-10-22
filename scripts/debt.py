@@ -471,8 +471,11 @@ def open_listed(repo: str, token: str) -> list[dict[str, Any]]:
     СОСЕДИ НАЗВАНЫ, А НЕ ПОЧИНЕНЫ ЗДЕСЬ (195). Тот же повтор взгляд нашёл в
     `work_plan`, `unlooked` и `main_red` (находка `caaa207` на #1081); их
     замер и починка — ArtVsMark/Engineering-Pipeline-Mechanisms#1084.
+
+    Само чтение — `findings.open_listed`: там пустой ответ площадки
+    перечитывается, а не роняет заход с первого раза (#1580).
     """
-    return list(ghrest.paginate(f"repos/{repo}/issues?state=open", token))
+    return findings.open_listed(repo, token)
 
 
 def open_issues(listed: list[dict[str, Any]]) -> list[dict[str, Any]]:

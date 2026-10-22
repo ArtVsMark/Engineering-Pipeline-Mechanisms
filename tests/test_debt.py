@@ -673,6 +673,40 @@ def test_a_change_is_not_a_task(monkeypatch: pytest.MonkeyPatch) -> None:
     assert debt.looks_done(debt.open_issues(debt.open_listed("o/r", "token"))) == []
 
 
+def test_an_empty_open_list_is_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пустой ответ площадки перечитывается, а не роняет заход с первого раза.
+
+    Замер 22.10.2026 (#1580): три одинаковых запроса подряд дали 0, 48 и 0
+    записей, и `debt` покраснел на трёх головах за минуту.
+    """
+    answers = iter([[], [{"number": 23, "title": "Реестр", "body": ""}]])
+    calls: list[str] = []
+
+    def paginate(path: str, token: str, key: str | None = None) -> Any:
+        calls.append(path)
+        return iter(next(answers))
+
+    monkeypatch.setattr(debt.ghrest, "paginate", paginate)
+    monkeypatch.setattr(debt.findings.time, "sleep", lambda _: None)
+    assert [row["number"] for row in debt.open_listed("o/r", "token")] == [23]
+    assert len(calls) == 2
+
+
+def test_an_open_list_empty_on_every_attempt_is_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пустой на всех попытках — отказ транспорта, а не «задач нет» (039, 045)."""
+    calls: list[str] = []
+
+    def paginate(path: str, token: str, key: str | None = None) -> Any:
+        calls.append(path)
+        return iter([])
+
+    monkeypatch.setattr(debt.ghrest, "paginate", paginate)
+    monkeypatch.setattr(debt.findings.time, "sleep", lambda _: None)
+    with pytest.raises(debt.ghrest.TransportError, match="пустой список открытых"):
+        debt.open_listed("o/r", "token")
+    assert len(calls) == debt.findings.OPEN_TRIES
+
+
 # --- закрытые «входящие» -----------------------------------------------------
 
 

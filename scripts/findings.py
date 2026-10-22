@@ -14,6 +14,7 @@
 import json
 import re
 import sys
+import time
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -278,6 +279,39 @@ def found_or_unread(number: int | None) -> int:
     return UNREAD if number is None else number
 
 
+# ПУСТОЙ СПИСОК ОТКРЫТЫХ ПЕРЕЧИТЫВАЕТСЯ, а не принимается и не роняет заход.
+# Замер 22.10.2026 (#1580): три одинаковых запроса подряд дали 0, 48 и 0
+# записей, и `debt` покраснел на трёх головах за минуту. Попыток три с паузой:
+# сумма пауз — секунды при пределе джоба в минуты (100).
+OPEN_TRIES: Final = 3
+OPEN_PAUSE: Final = 5.0
+EMPTY_OPEN: Final = (
+    "площадка вернула пустой список открытых записей — это не «задачи нет», "
+    "а подозрительный ответ: заводить вторую живую задачу по нему нельзя (045)"
+)
+
+
+def open_listed(repo: str, token: str, tries: int = OPEN_TRIES) -> list[dict[str, Any]]:
+    """Открытые записи площадки — задачи вместе с изменениями, — с перечитыванием пустого ответа.
+
+    Список открытых у живого проекта пуст не бывает: в нём всегда есть хотя бы
+    живые задачи механизмов. Пустой ответ — перебой площадки, а не состояние,
+    поэтому он перечитывается до ``tries`` раз. Пустой и на последней
+    попытке — ``TransportError``: третий исход, а не «задачи нет» (039, 045).
+
+    Читатель один на всех, кто спрашивает этот список целиком: ``debt``,
+    поиск живой задачи и сборщик плана (#1580). Списки с меткой сюда не идут:
+    пустой ответ по метке законен.
+    """
+    for attempt in range(tries):
+        if attempt:
+            time.sleep(OPEN_PAUSE)
+        listed = list(ghrest.paginate(f"repos/{repo}/issues?state=open", token))
+        if listed:
+            return listed
+    raise ghrest.TransportError(f"{EMPTY_OPEN}; попыток: {tries}")
+
+
 def live_issue(
     repo: str, token: str, marker: str = MARKER, listed: list[dict[str, Any]] | None = None
 ) -> tuple[int | None, str]:
@@ -331,7 +365,7 @@ def live_issue_seen(
     """
     found: list[tuple[int, str, str]] = []
     seen = 0
-    source = ghrest.paginate(f"repos/{repo}/issues?state=open", token) if listed is None else listed
+    source = open_listed(repo, token) if listed is None else listed
     for item in source:
         seen += 1
         # REST кладёт изменения в /issues наравне с задачами — отсеиваем.
@@ -351,10 +385,7 @@ def live_issue_seen(
         # #139 и переписал в неё 47 записей; уникального в ней не оказалось ни
         # одного — все они уже лежали в #23, и следующий заход снова писал туда.
         if not seen:
-            raise ghrest.TransportError(
-                "площадка вернула пустой список открытых записей — это не «задачи нет», "
-                "а подозрительный ответ: заводить вторую живую задачу по нему нельзя (045)"
-            )
+            raise ghrest.TransportError(EMPTY_OPEN)
         return None, "", ""
     found.sort()
     if len(found) > 1:
