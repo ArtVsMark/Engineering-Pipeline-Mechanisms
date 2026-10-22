@@ -15,51 +15,51 @@
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "release",
-          "mine": "v2.0.0",
+          "mine": "v2.1.0",
           "latest": "v2.0.0",
           "where": ".github/workflows/attribution-history.yml",
-          "state": "ok",
-          "why": ""
+          "state": "unknown",
+          "why": "опережает опубликованное — сводка отстала от издателя"
         },
         {
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "release",
-          "mine": "v2.0.0",
+          "mine": "v2.1.0",
           "latest": "v2.0.0",
           "where": ".github/workflows/ci.yml",
-          "state": "ok",
-          "why": ""
+          "state": "unknown",
+          "why": "опережает опубликованное — сводка отстала от издателя"
         },
         {
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "release",
-          "mine": "v2.0.0",
+          "mine": "v2.1.0",
           "latest": "v2.0.0",
           "where": ".github/workflows/rules-inbox.yml",
-          "state": "ok",
-          "why": ""
+          "state": "unknown",
+          "why": "опережает опубликованное — сводка отстала от издателя"
         },
         {
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "release",
-          "mine": "v2.0.0",
+          "mine": "v2.1.0",
           "latest": "v2.0.0",
           "where": ".github/workflows/step-attribution.yml",
-          "state": "ok",
-          "why": ""
+          "state": "unknown",
+          "why": "опережает опубликованное — сводка отстала от издателя"
         },
         {
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "release",
-          "mine": "v2.0.0",
+          "mine": "v2.1.0",
           "latest": "v2.0.0",
           "where": ".github/workflows/step-facts.yml",
-          "state": "ok",
-          "why": ""
+          "state": "unknown",
+          "why": "опережает опубликованное — сводка отстала от издателя"
         },
         {
           "segment": "family",
@@ -109,7 +109,7 @@
       "code": "EIP",
       "repo": "ArtVsMark/Engineering-Incidents-Playbook",
       "state": "behind",
-      "why": "export: 1.8 → 1.9"
+      "why": "release: v2.1.0 → v2.0.0 (связей 5, .github/workflows/attribution-history.yml, .github/workflows/ci.yml, .github/workflows/rules-inbox.yml, .github/workflows/step-attribution.yml, .github/workflows/step-facts.yml); export: 1.8 → 1.9 (.rules/bindings.json)"
     },
     {
       "code": "EPM",
