@@ -1952,3 +1952,23 @@ def test_the_reason_of_a_refused_kind_is_read_by_form() -> None:
     assert check.kind_problems("Разобрано: aaaaaaa\nРод: нет—опечатка", KINDS_FOR_LINES) == []
     said = " ".join(check.kind_problems("Разобрано: aaaaaaa\nРод: нет — —", KINDS_FOR_LINES))
     assert "без причины" in said
+
+
+@pytest.mark.parametrize(
+    ("body", "passes"),
+    [
+        ("Без задачи, потому что чинится красная общая ветка", True),
+        ("Без задачи, потому что", False),
+        ("Без задачи, потому что\n\nCo-Authored-By: x <x@y>", False),
+        ("Тут без задачи, потому что лень", False),
+        ("```\nБез задачи, потому что образец\n```", False),
+    ],
+    ids=["с-причиной", "без-причины", "без-причины-со-строкой-следом", "в-прозе", "в-блоке-кода"],
+)
+def test_no_task_with_a_reason_is_a_third_answer(
+    run_script: RunScript, tmp_path: Path, body: str, passes: bool
+) -> None:
+    """«Без задачи, потому что …» отдельной строкой — законный ответ о связи (#1578, 154)."""
+    env = write_event(tmp_path, ["area/docs", "documentation"], body)
+    result = run_script("check_pr_meta.py", "--files", "README.md", env=env)
+    assert ("нет связи с задачей" not in result.text) is passes, result.text

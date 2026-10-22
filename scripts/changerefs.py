@@ -44,7 +44,7 @@ CANON: Final = {"closes": "Closes", "fixes": "Fixes", "refs": "Refs", "part of":
 CLOSING: Final = frozenset({"Closes", "Fixes"})
 
 LINK_RE: Final = re.compile(
-    r"\b(?P<verb>" + "|".join(VERBS) + r")\s+(?P<tasks>#\d+(?:\s*,\s*#?\d+)*)",
+    r"\b(?P<verb>" + "|".join(VERBS) + r")[ \t]+(?P<tasks>#\d+(?:[ \t]*,[ \t]*#?\d+)*)",
     re.IGNORECASE,
 )
 NUMBER_RE: Final = re.compile(r"#?(\d+)")
@@ -457,6 +457,36 @@ def links_in(text: str) -> list[Link]:
             seen.add(key)
             found.append(Link(verb, int(number)))
     return found
+
+
+#: Объявленное отсутствие связи — третий законный ответ рядом с «Closes» и
+#: «Refs» (#1578). Взят у каталога (правило 064, его `pr_body.py`): починка
+#: красной ветки или находок обзора задачи не имеет, и заводить её ради формы
+#: значило бы плодить пустые задачи. Причина обязательна — «нет» говорится
+#: словом и с доводом
+#: ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+#: Отдельной строкой, как связь: фраза внутри прозы ответом не считается.
+NO_TASK_KEY: Final = "Без задачи, потому что"
+#: Пробел после ключа — `[ \t]`, а не `\s`: `\s` переходит через перевод строки,
+#: и ключ без причины засчитался бы причиной следующей строки — трейлера
+#: (взгляд на #1584). Тот же дефект был у связи (`LINK_RE`): обе читают текст
+#: целиком. Остальные ключевые строки — снятие, род, пункт, «Чинит», «Ждёт» —
+#: читаются построчно (`marked_lines_at`) и через строку не переходят по
+#: построению; перечень форм держит `test_a_key_line_never_takes_the_next_line`
+#: (правило 210).
+NO_TASK_RE: Final = re.compile(rf"^{re.escape(NO_TASK_KEY)}[ \t]+\S.*$", re.MULTILINE)
+
+
+def no_task_in_all(texts: Iterable[str]) -> str:
+    """Первая строка «Без задачи, потому что …» из текстов; нет — пусто.
+
+    Читается вне блоков кода, как связь: образец в документации ответом не
+    является.
+    """
+    for text in texts:
+        if found := NO_TASK_RE.search(outside_code(text)):
+            return found.group(0).strip()
+    return ""
 
 
 def has_link(text: str) -> bool:

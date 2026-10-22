@@ -44,6 +44,13 @@ STRAY_CLOSING: Final = (
 #: Пропуск проверки сообщений коммитов называется вслух (045).
 MESSAGES_UNREAD: Final = "сообщения коммитов не переданы — слово закрытия в них не проверено"
 
+#: Отказ без связи — константой: тест сверяется с ней (209).
+NO_LINK: Final = (
+    "нет связи с задачей: ни «Closes #N», ни «Refs #N», ни строки "
+    f"«{changerefs.NO_TASK_KEY} <причина>» — без связи задача не закроется при "
+    "слиянии, а приоритет очереди наследовать неоткуда"
+)
+
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
 EXIT_BROKEN: Final = 2
@@ -484,11 +491,8 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    if not links:
-        problems.append(
-            "нет связи с задачей: ни «Closes #N», ни «Refs #N» — "
-            "без неё задача не закроется при слиянии, а приоритет очереди наследовать неоткуда"
-        )
+    if not links and not changerefs.no_task_in_all(texts):
+        problems.append(NO_LINK)
 
     if problems:
         print(f"отвергнуто ({len(problems)}):", file=sys.stderr)
