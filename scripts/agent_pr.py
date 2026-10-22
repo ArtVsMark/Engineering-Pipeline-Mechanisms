@@ -34,7 +34,7 @@ import re
 import sys
 import urllib.parse
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 import changerefs
 import ci_complete
@@ -653,6 +653,31 @@ def apply_consent(repo: str, number: int, token: str, marks: set[str], dry_run: 
         print(f"согласие не проставлено: {exc} — изменение открыто, метку ставит человек")
 
 
+def finish_open(
+    repo: str, token: str, pull: dict[str, Any], said: Described, branch: str, base: str
+) -> int:
+    """Довести уже открытое изменение: зоны, задержка, починка общей, согласие, описание.
+
+    Путь один для «открыто прежним прогоном» и «создано, но ответ не дошёл»:
+    оба — одно состояние площадки, и две копии разошлись бы на первой правке.
+    Зоны доставляются и здесь, а не только при создании. Иначе отказ на шаге
+    разметки необратим: следующий прогон уходит этой веткой и выходит с нулём,
+    ни разу не попытавшись доставить метки, — а гейт разметки продолжает его
+    отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
+    """
+    number = int(pull["number"])
+    apply_zones(repo, number, token, branch, base, dry_run=False)
+    marks: set[str] = {str(item.get("name", "")) for item in pull.get("labels") or []}
+    if said.hold:
+        apply_hold(repo, number, token, said.hold, dry_run=False)
+        marks = marks | {HOLD}
+    if said.fixes and apply_fix_main(repo, number, token, said.fixes, base, dry_run=False):
+        marks = marks | {FIX_MAIN}
+    apply_consent(repo, number, token, marks, dry_run=False)
+    sync_description(repo, number, token, said.title, said.body, dry_run=False)
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -730,32 +755,35 @@ def main(argv: list[str] | None = None) -> int:
         if existing:
             number = existing[0]["number"]
             print(f"изменение для ветки уже открыто: #{number} — второе не заводится")
-            # Зоны доставляются и здесь, а не только при создании. Иначе отказ
-            # на шаге разметки необратим: изменение уже открыто, следующий
-            # прогон уходит этой веткой и выходит с нулём, ни разу не
-            # попытавшись доставить метки, — а гейт разметки продолжает его
-            # отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
-            apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
-            marks: set[str] = {
-                str(item.get("name", "")) for item in existing[0].get("labels") or []
-            }
-            if said.hold:
-                apply_hold(args.repo, number, token, said.hold, args.dry_run)
-                marks = marks | {HOLD}
-            if said.fixes and apply_fix_main(
-                args.repo, number, token, said.fixes, args.base, args.dry_run
-            ):
-                marks = marks | {FIX_MAIN}
-            apply_consent(args.repo, number, token, marks, args.dry_run)
-            sync_description(args.repo, number, token, title, body, args.dry_run)
-            return EXIT_OK
+            return finish_open(args.repo, token, existing[0], said, args.branch, args.base)
 
-        created = ghrest.request(
-            "POST",
-            f"repos/{args.repo}/pulls",
-            token,
-            {"title": title, "body": body, "head": args.branch, "base": args.base, "draft": False},
-        )
+        try:
+            created = ghrest.request(
+                "POST",
+                f"repos/{args.repo}/pulls",
+                token,
+                {
+                    "title": title,
+                    "body": body,
+                    "head": args.branch,
+                    "base": args.base,
+                    "draft": False,
+                },
+            )
+        except ghrest.TransportError as exc:
+            # ОТКАЗ НА СОЗДАНИИ НЕ ЗНАЧИТ «НЕ СОЗДАНО» (#1548). 502 и 504 отдаёт
+            # шлюз, а бэкенд мог успеть: замер 22.10.2026, #1547 создано в
+            # 08:36:39, отказ пришёл в 08:36:40, и изменение осталось без зон и
+            # согласия до следующего толчка. Повторять `POST` транспорт верно
+            # не станет (#284) — поэтому вопрос задаётся тем, что повторяемо:
+            # чтением. Нашлось — это тот же исход, что «уже открыто»; нет —
+            # прежний отказ, а не догадка.
+            print(f"создание пришло отказом: {exc} — спрашиваю, создано ли", file=sys.stderr)
+            existing = ghrest.request("GET", f"repos/{args.repo}/pulls?{query}", token) or []
+            if not existing:
+                raise
+            print(f"изменение всё же создано: #{existing[0]['number']} — дальше как с открытым")
+            return finish_open(args.repo, token, existing[0], said, args.branch, args.base)
         number = created["number"]
         print(f"открыто изменение #{number}: {created['html_url']}")
         say_lost_marks(str(created.get("body") or ""), body)
