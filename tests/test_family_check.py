@@ -174,8 +174,29 @@ def test_main_without_summary_is_the_third_outcome(
 ) -> None:
     """Сводка не прочитана — исход 2 с адресом, а не пустой значок."""
     missing = tmp_path / "нет.json"
-    assert fc.main(["--root", str(tmp_path), "--family", str(missing)]) == fc.EXIT_BROKEN
+    argv = ["--root", str(tmp_path), "--family", str(missing), "--repo", "o/p"]
+    assert fc.main(argv) == fc.EXIT_BROKEN
     assert str(missing) in capsys.readouterr().err
+
+
+def test_main_without_a_project_name_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Проект не назван — отказ, а не сверка соседа как механизмов (взгляд на #1567).
+
+    Умолчанием `--repo` стояло наше имя: сосед без довода сверял бы себя как
+    поставщика. Теперь имя даёт площадка, а без неё — исход 2 с причиной.
+    """
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    assert fc.main(["--root", str(tmp_path), "--family", str(tmp_path / "нет.json")]) == (
+        fc.EXIT_BROKEN
+    )
+    assert "проект не назван" in capsys.readouterr().err
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/p")
+    assert fc.main(["--root", str(tmp_path), "--family", str(tmp_path / "нет.json")]) == (
+        fc.EXIT_BROKEN
+    )
+    assert "проект не назван" not in capsys.readouterr().err
 
 
 def test_being_ahead_is_not_lagging() -> None:
@@ -412,6 +433,40 @@ def test_a_tree_file_not_an_object_does_not_break(tmp_path: Path, path: str) -> 
     said = summary(publisher(CATALOGUE, bindings="1.9", export="1.9"))
     links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
     assert not [one for one in links if one["where"] == path]
+
+
+def test_a_tree_value_not_a_string_is_grey_not_a_trace(tmp_path: Path) -> None:
+    """Сосед «файла не той формы»: объект, но номер в нём не строка (взгляд на #1567).
+
+    `"schema": 2` в ответе ронял сравнение в `TypeError`; теперь связь серая с
+    причиной — так же, как номер числом у издателя.
+    """
+    root = tree(tmp_path, answer={"schema": 2})
+    said = summary(publisher(CATALOGUE, bindings="1.9", export="1.9"))
+    links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
+    found = [one for one in links if one["what"] == "bindings"]
+    assert [one["state"] for one in found] == ["unknown"]
+    assert "не строка" in found[0]["why"]
+    link = fc.compare("family", CATALOGUE, "bindings", "1.9", 19, "x")
+    assert (link.state, link.mine, link.latest) == ("unknown", "1.9", None)
+
+
+def test_a_summary_record_of_another_form_does_not_break(tmp_path: Path) -> None:
+    """Запись сводки без `repo` и выпуск строкой — не падение (взгляд на #1567).
+
+    Сводка — чужие данные: запись не той формы не проект, а выпуск не объектом
+    — «не опубликовано», а не `KeyError` и `AttributeError`.
+    """
+    root = tree(tmp_path, uses=f"{MECH}/.github/workflows/step-lint.yml@v1.0.0")
+    broken = {**publisher(MECH), "release": "v1.0.0"}
+    said = summary({"state": "published"}, {"repo": 5}, broken)
+    assert fc.known(said) == {MECH.lower()}
+    assert set(fc.published(said)) == {MECH.lower()}
+    links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
+    release = [one for one in links if one["what"] == "release"]
+    assert [(one["state"], one["why"]) for one in release] == [
+        ("unknown", "у издателя не опубликовано")
+    ]
 
 
 @pytest.mark.parametrize(

@@ -42,6 +42,7 @@
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections.abc import Callable, Iterator
@@ -144,16 +145,31 @@ def compare(
     segment: str,
     publisher: str,
     what: str,
-    mine: str | None,
-    latest: str | None,
+    mine: object,
+    latest: object,
     where: str,
-    sha: str | None = None,
+    sha: object = None,
 ) -> Link:
     """Одна связь: равенство — ok; нет стороны — unknown; моё старше — behind.
 
     Моё НОВЕЕ свежего — unknown (каталог, обзор #807): опережение значит, что
     сводка отстала от издателя, а не что отстал я.
+
+    НЕ СТРОКА — НЕ ТА ФОРМА, А НЕ ТРАССА (взгляд на #1567). Номер числом в
+    дереве (`"schema": 2`) или в сводке ронял сравнение в `TypeError`, а
+    обещаны исходы 0 и 2: такая связь серая с названной причиной (039).
     """
+    strange = [
+        f"{side} «{said}»"
+        for side, said in (("у себя", mine), ("у издателя", latest))
+        if said is not None and not isinstance(said, str)
+    ]
+    mine = mine if isinstance(mine, str) else None
+    latest = latest if isinstance(latest, str) else None
+    if strange:
+        why = f"{', '.join(strange)} не строка — не та форма, сверять нечего"
+        return Link(segment, publisher, what, mine, latest, where, "unknown", why)
+    sha = sha if isinstance(sha, str) else None
     if mine is None or latest is None:
         why = "у издателя не опубликовано" if latest is None else "у себя не найдено"
         return Link(segment, publisher, what, mine, latest, where, "unknown", why)
@@ -205,16 +221,24 @@ def compare_facts(mine: str | None, latest: str | None) -> Link:
 def published(summary: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Опубликованные манифесты сводки по имени проекта в нижнем регистре."""
     return {
-        str(one["repo"]).lower(): one
+        one["repo"].lower(): one
         for one in summary.get("projects", [])
-        if isinstance(one, dict) and one.get("state") == "published"
+        if isinstance(one, dict)
+        and isinstance(one.get("repo"), str)
+        and one.get("state") == "published"
     }
 
 
 def known(summary: dict[str, Any]) -> set[str]:
-    """Имена всех проектов сводки в нижнем регистре — прочитанных и нет."""
+    """Имена всех проектов сводки в нижнем регистре — прочитанных и нет.
+
+    Запись без строкового `repo` — не проект (взгляд на #1567): сводка —
+    чужие данные, и её запись не той формы не роняет разбор `KeyError`.
+    """
     return {
-        str(one["repo"]).lower() for one in summary.get("projects", []) if isinstance(one, dict)
+        one["repo"].lower()
+        for one in summary.get("projects", [])
+        if isinstance(one, dict) and isinstance(one.get("repo"), str)
     }
 
 
@@ -324,6 +348,9 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
         if key == own.lower() or key not in known_ones:
             continue  # своё и чужое вне семьи — не здесь
         release = (publishers.get(key) or {}).get("release") or {}
+        # Выпуск не объектом — не опубликован, а не `AttributeError` (взгляд на #1567).
+        if not isinstance(release, dict):
+            release = {}
         links.append(
             compare("family", repo, "release", ref, release.get("tag"), where, release.get("sha"))
         )
@@ -821,7 +848,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--family", default=SUMMARY_URL, help="адрес или путь сводки семьи")
-    parser.add_argument("--repo", default=family_uptake.OURS, help="владелец/имя проекта")
+    # ИМЯ ПРОЕКТА — ЕГО, А НЕ НАШЕ (взгляд на #1567). Умолчанием стояло имя
+    # механизмов, и сосед без `--repo` сверял бы себя как поставщика. Теперь
+    # имя берётся у площадки (`GITHUB_REPOSITORY`), а без неё — отказ.
+    parser.add_argument(
+        "--repo",
+        default=os.environ.get("GITHUB_REPOSITORY", ""),
+        help="владелец/имя проекта; по умолчанию GITHUB_REPOSITORY",
+    )
     parser.add_argument(
         "--out",
         type=Path,
@@ -830,6 +864,12 @@ def main(argv: list[str] | None = None) -> int:
         f"разбор {VERDICT.name} ложится рядом с ним",
     )
     args = parser.parse_args(argv)
+    if not args.repo:
+        print(
+            "значок не собран: проект не назван — нет ни --repo, ни GITHUB_REPOSITORY",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
     summary, trouble = read_summary(args.family)
     if summary is None:
         print(f"значок не собран: {trouble}", file=sys.stderr)
