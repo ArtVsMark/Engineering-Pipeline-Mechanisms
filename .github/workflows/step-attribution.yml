@@ -24,6 +24,14 @@ name: step-attribution
 
 on:
   workflow_call:
+    inputs:
+      # ОТМЕТКА — ДАННЫЕ ПРОЕКТА (#1556). Здесь стоял коммит нашего дерева:
+      # у потребителя его нет, и гейт каталога молча не подрезал диапазон.
+      # Пусто — подрезки нет; наш `ci.yml` передаёт свою отметку.
+      baseline:
+        description: начало отсчёта коммитов ветки — коммит; пусто — без подрезки
+        type: string
+        default: ""
 
 # Потолок прав: большего шаг не получит, даже если вызывающий даст больше.
 permissions:
@@ -59,15 +67,8 @@ jobs:
         uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v2.1.0
         with:
           authors: .github/authors.txt
-          # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
-          # варианты — docs/decisions/001-attribution-of-merged-1.md.
-          #
-          # Отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть
-          # однозначным, и отметка тогда указывает не туда. Соседний прогон
-          # `attribution-history.yml` требует того же от своей отметки, а здесь
-          # семь знаков жили с первого дня — одно правило, два прочтения (090).
-          # Нашёл внешний взгляд на #147.
-          baseline: cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b
+          # Отметку называет вызывающий: у нашего — в `ci.yml`.
+          baseline: ${{ inputs.baseline }}
           require-declared-author: "true"
           require-coauthor: "true"
           range: origin/${{ github.event.pull_request.base.ref || 'main' }}..HEAD

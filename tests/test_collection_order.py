@@ -26,6 +26,8 @@ import yaml
 
 from tests.conftest import ROOT, load_script
 
+policy = load_script("pipeline_checks.py")
+
 WORKFLOWS: Final = ROOT / ".github" / "workflows"
 #: Джобы, которые гоняют набор, и прогон каждого. Перечислены, а не выведены:
 #: список разрешённого, и новый прогонщик набора обязан попасть сюда
@@ -34,17 +36,28 @@ RUNNERS: Final = {"test-matrix": "ci.yml", "test-next": "python-next.yml"}
 
 
 def steps_of(job: str) -> list[dict[str, object]]:
-    """Шаги названного джоба в его прогоне."""
+    """Шаги названного джоба в его прогоне — вызов шага телом вызванного (#1556)."""
     document = yaml.safe_load((WORKFLOWS / RUNNERS[job]).read_text(encoding="utf-8"))
     jobs = document.get("jobs") or {}
     assert job in jobs, f"в прогоне нет джоба {job} — предмет проверки не найден (075)"
-    steps = (jobs[job] or {}).get("steps") or []
+    steps = policy.resolved_job(WORKFLOWS / RUNNERS[job], job).get("steps") or []
     return [step for step in steps if isinstance(step, dict)]
+
+
+def command_of(step: dict[str, object]) -> str:
+    """Команда шага целиком: `run` и значения окружения.
+
+    Общий шаг получает команду проекта входом и передаёт её окружением, а не
+    подстановкой в тело (#1556): команда тогда лежит в `env`, а `run` её зовёт.
+    """
+    env = step.get("env") or {}
+    values = env.values() if isinstance(env, dict) else []
+    return " ".join([str(step.get("run") or ""), *(str(one) for one in values)])
 
 
 def suite_step(job: str) -> dict[str, object]:
     """Шаг, который запускает набор."""
-    found = [step for step in steps_of(job) if "pytest " in str(step.get("run") or "")]
+    found = [step for step in steps_of(job) if "pytest " in command_of(step)]
     assert len(found) == 1, f"{job}: шагов с набором не один, а {len(found)}"
     return found[0]
 
@@ -52,7 +65,7 @@ def suite_step(job: str) -> dict[str, object]:
 @pytest.mark.parametrize("job", RUNNERS)
 def test_the_suite_runs_in_a_random_order(job: str) -> None:
     """Набор идёт случайным порядком: связанность иначе не всплывает."""
-    run = str(suite_step(job).get("run") or "")
+    run = command_of(suite_step(job))
     assert "--randomly-seed" in run, f"{job}: порядок сбора снова единственный"
 
 
@@ -89,11 +102,7 @@ def test_the_plugin_is_declared_where_the_run_installs_it(job: str) -> None:
     Второй список тех же версий разошёлся бы с первым молча (022); сверку
     окружения с деревом ведёт `check_env.py`, читая ровно эти строки.
     """
-    installs = [
-        str(step.get("run") or "")
-        for step in steps_of(job)
-        if "pip install" in str(step.get("run") or "")
-    ]
+    installs = [command_of(step) for step in steps_of(job) if "pip install" in command_of(step)]
     assert installs, f"{job}: шага установки не нашлось"
     said = " ".join(installs)
     assert re.search(r'"pytest-randomly>=\d+,<\d+"', said), (

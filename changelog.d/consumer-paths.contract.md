@@ -1,0 +1,2 @@
+Два новых общих шага: `step-attribution-history.yml` — атрибуция истории общей ветки, отметка в `.github/attribution-since` или коммит подключения; `step-python-next.yml` — проба предрелизной версии языка, входы `python`, `install`, `test`. У `step-attribution.yml` новый вход `baseline` с пустым умолчанием: прежде там стоял коммит нашего дерева. Записи проверок стали составными: `attribution-history / attribution-history` и `test-next (<версия>) / test-next` — сверьте ответ `.pipeline.yml`.
+#1556

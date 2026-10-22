@@ -221,3 +221,33 @@ def test_a_version_file_is_a_refusal_with_address(tmp_path: Path) -> None:
         ".github/workflows/ci.yml: работа t: версия из файла .python-version — "
         "файл версии не читается, только python-version"
     ]
+
+
+def calling_flow(root: Path, given: str = "      python: ${{ matrix.python }}\n") -> Path:
+    """Прогон, зовущий общий шаг пробы с матрицей у вызова (#1556)."""
+    return flow(
+        root,
+        "on: push\njobs:\n  test-next:\n    strategy:\n      matrix:\n"
+        "        python: ['3.16']\n"
+        f"    uses: o/r/.github/workflows/{module.NEXT_STEP}@v1\n    with:\n" + given,
+        name="python-next.yml",
+    )
+
+
+def test_a_call_of_the_preview_step_declares_its_cell(tmp_path: Path) -> None:
+    """Вызов шага пробы объявляет ячейку матрицы предварительной (#1556).
+
+    Матрица у вызывающего, а `setup-python` — в шаге: без этого правила версия
+    выпала бы из значка молча. Работает и с удалённым вызовом — у потребителя
+    тело шага не прочитать, а вход вызова виден.
+    """
+    root = calling_flow(tmp_path)
+    assert in_workflows(root, preview=True) == [("python-next.yml", (3, 16))]
+    assert refusals(root) == []
+
+
+def test_a_call_of_the_preview_step_without_a_version_is_refused(tmp_path: Path) -> None:
+    """Вызов без входа `python` — отказ с адресом, а не «версий нет» (045)."""
+    root = calling_flow(tmp_path, given="      test: pytest\n")
+    assert in_workflows(root, preview=True) == []
+    assert [one for one in refusals(root) if "без входа python" in one]
