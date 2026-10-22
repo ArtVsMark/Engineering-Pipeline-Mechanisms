@@ -2806,8 +2806,22 @@ def test_the_catalogue_source_reads_the_export_once_for_both(
 ) -> None:
     """Источник «каталог» отвечает и о сдвиге выгрузки, и о гипотезе данных по одному фетчу."""
     monkeypatch.setattr(module, "ours_proposals", lambda: EVIDENCE)
-    found = module.catalogue_asked({"candidates": [{"slug": "g"}]}, {})
+    found = module.catalogue_asked({"rules": [], "candidates": [{"slug": "g"}]}, {})
     assert [one.source for one in found] == ["proposal-hypothesis"]
+
+
+@pytest.mark.parametrize("export", [{}, {"rules": None}, {"rules": "список"}])
+def test_an_export_without_rules_is_a_finding_of_the_catalogue_source(
+    monkeypatch: pytest.MonkeyPatch, export: dict[str, Any]
+) -> None:
+    """Выгрузка без списка правил — находка `export-form`, а не «замен нет» молча (#1564)."""
+    monkeypatch.setattr(module, "ours_proposals", lambda: EVIDENCE)
+    found = module.catalogue_asked(export, {})
+    (form,) = [one for one in found if one.source == "export-form"]
+    assert "rules" in form.said
+    assert module.catalogue_asked({**export, "rules": []}, {}) == [
+        one for one in found if one.source != "export-form"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2827,7 +2841,7 @@ def test_unread_proposals_do_not_silence_the_export_drift(
     if written is not None:
         proposals.write_text(written, encoding="utf-8")
     monkeypatch.setattr(module.paths, "PROPOSALS", proposals)
-    found = module.catalogue_asked({"count": 3, "candidates": []}, {"rules": {}})
+    found = module.catalogue_asked({"rules": [], "count": 3, "candidates": []}, {"rules": {}})
     assert [one.source for one in found] == ["rules-count"], found
     if written is not None:
         with pytest.raises(module.NotRun):

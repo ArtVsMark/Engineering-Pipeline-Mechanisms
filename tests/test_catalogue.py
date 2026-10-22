@@ -11,7 +11,7 @@
 """
 
 import ast
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -122,18 +122,26 @@ def test_a_broken_export_is_neither_silence_nor_transport() -> None:
     assert not issubclass(module.BadExport, module.ghrest.TransportError)
 
 
-def reads_field(node: ast.AST, field: str) -> bool:
-    """Узел читает поле записи: `rule["field"]` или `rule.get("field")` — разбором, не образцом."""
-    if isinstance(node, ast.Subscript):
-        return isinstance(node.slice, ast.Constant) and node.slice.value == field
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
-        and bool(node.args)
-        and isinstance(node.args[0], ast.Constant)
-        and node.args[0].value == field
-    )
+#: Чем узнаётся читатель статуса правила выгрузки: ключ ссылки на заменяющее и
+#: слово статуса «заменено». Имя поля `status` общее — его носят и наши ответы,
+#: и проверки площадки (замер 22.10.2026: шестнадцать файлов), — поэтому
+#: половина `status` узнаётся по слову-значению, которое второй читатель обязан
+#: с ним сравнить, а не по имени поля.
+STATUS_WORDS: Final = frozenset({"superseded_by", "superseded"})
+
+
+def names_status(node: ast.AST) -> bool:
+    """Узел называет ключ или слово статуса строкой ЦЕЛИКОМ — в любой форме записи.
+
+    Подписка, `.get`, `in`, сравнение и константа с именем (`FIELD =
+    "superseded_by"`) — все пишут строку ровно этим значением. Докстрока и
+    проза называют её внутри длинного текста, и равенством не совпадают (210,
+    взгляд на #1564: прежний разбор видел только `rule["…"]` и `rule.get("…")`).
+    `rule.get(key)` с ключом из переменной тоже узнаётся — там, где ключу
+    присвоена строка. ГРАНИЦА: ключ, собранный из частей (`"superseded" +
+    "_by"`), равенством не виден.
+    """
+    return isinstance(node, ast.Constant) and node.value in STATUS_WORDS
 
 
 @pytest.mark.parametrize(
@@ -142,30 +150,34 @@ def reads_field(node: ast.AST, field: str) -> bool:
         ('rule["superseded_by"]', True),
         ('rule.get("superseded_by")', True),
         ('rule.get("superseded_by", "")', True),
-        ('"superseded_by"', False),
+        ('"superseded_by" in rule', True),
+        ('FIELD = "superseded_by"', True),
+        ('rule.get("status") == "superseded"', True),
+        ('rule["status"] in {"superseded", "retired"}', True),
+        ('"""Поле superseded_by читает каталог."""', False),
         ('rule.get("status")', False),
+        ("rule.get(key)", False),
     ],
 )
-def test_the_field_reader_is_told_by_the_syntax_tree(source: str, reads: bool) -> None:
-    """Чтение поля узнаётся по дереву разбора: строка в тексте — ещё не чтение (210)."""
-    assert any(reads_field(node, "superseded_by") for node in ast.walk(ast.parse(source))) is reads
+def test_the_status_reader_is_told_by_the_syntax_tree(source: str, reads: bool) -> None:
+    """Читатель узнаётся по строке-значению в дереве разбора, а не по образцу текста (210)."""
+    assert any(names_status(node) for node in ast.walk(ast.parse(source))) is reads
 
 
 def test_the_rule_status_has_one_reader() -> None:
-    """Поле `superseded_by` выгрузки читает только `catalogue.py` — второго читателя нет (214).
+    """Статус правила выгрузки читает только `catalogue.py` — обе половины (214).
 
-    Дрейф читал его сам, без слова `status` выгрузки 1.9, а значок каталога —
-    слово: два чтения одного поля разошлись бы молча (#1563).
+    Дрейф читал `superseded_by` сам, без слова `status` выгрузки 1.9, а значок
+    каталога — слово: два чтения одного поля разошлись бы молча (#1563).
+    Держатся обе половины: ссылка — по имени ключа, слово — по значению
+    `superseded` (взгляд на #1564).
     """
     readers = [
         path.name
         for path in walk(ROOT / "scripts", "*.py")
-        if any(
-            reads_field(node, "superseded_by")
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        )
+        if any(names_status(node) for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))))
     ]
-    assert readers == ["catalogue.py"], f"поле superseded_by читают: {readers}"
+    assert readers == ["catalogue.py"], f"статус правила выгрузки читают: {readers}"
 
 
 def test_the_rule_status_reads_the_word_then_the_link() -> None:
