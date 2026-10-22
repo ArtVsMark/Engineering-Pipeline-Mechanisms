@@ -50,6 +50,7 @@
 import os
 import re
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any, Final
 
@@ -115,11 +116,19 @@ OUR_CALL: Final = "./"
 #: `owner/repo/<путь>@{paths.TRUNK}`. Так свой вызов прибивают к общей ветке,
 #: когда код головы исполнять нельзя (`review.yml`, #993). Читается он деревом:
 #: файла в дереве нет — вызов чужой, как прежде. Вызов по ТЕГУ сюда не входит
-#: намеренно: его файл — выпуск, а не дерево, и его имена остаются неизвестными
-#: (пробы передачи). Расхождение названо и у общей ветки: дерево — голова
-#: изменения, и правка имён джобов шага сойдётся с площадкой после слияния (046).
+#: намеренно: его файл — выпуск, а не дерево, и в нашем дереве его имена
+#: остаются неизвестными (пробы передачи). У потребителя их читает выкачка
+#: поставщика — `supplied_jobs` (#1568). Расхождение названо и у общей ветки:
+#: дерево — голова изменения, и правка имён джобов шага сойдётся с площадкой
+#: после слияния (046).
 ADDRESSED_CALL: Final = re.compile(
     rf"^[^./][^/]*/[^/]+/(?P<path>\.github/workflows/[^@]+)@{re.escape(paths.TRUNK)}$"
+)
+
+#: Вызов чужого прогона по тегу или ветке: `owner/repo/<путь>@<ссылка>`. Читается
+#: только у потребителя и только из выкачки того же репозитория (`called_jobs`).
+FOREIGN_CALL: Final = re.compile(
+    r"^(?P<repo>[^./][^/]*/[^/@]+)/(?P<path>\.github/workflows/[^@]+)@(?P<ref>.+)$"
 )
 
 #: Раздел ответа по прогонам за пределами изменения.
@@ -402,12 +411,16 @@ def supplier_of() -> Path | None:
     return Path(said) if said else None
 
 
+@cache
 def supplier_repo(supplier: Path) -> str:
     """Чей код конвейера выкачан — `владелец/репозиторий` по `origin` выкачки; не узнать — пусто.
 
     Выкачка общего шага — клон `actions/checkout`, и `origin` у него — адрес
     позванного репозитория. Не клон, нет `origin` или git молчит — пусто: чей
     поставщик, неизвестно, и решать по догадке нельзя (045).
+
+    Ответ запоминается на заход (взгляд на #1583): выкачка за прогон не
+    меняется, а спрашивают её на каждом джобе, позванном по адресу.
     """
     try:
         said = gitcall.output(["remote", "get-url", "origin"], BadPolicy, cwd=str(supplier))
@@ -702,8 +715,10 @@ def run_text(text: str, where: str) -> dict[Any, Any]:
 def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
     """Имена джобов ВЫЗЫВАЕМОГО прогона по адресу из `uses:`; ``None`` — не наш.
 
-    Чужой вызов читать нечем: его прогона в дереве нет. Возвращается ``None``,
-    и вызывающий остаётся со своим собственным именем — неполно, но честно
+    Чужой вызов читается из выкачки поставщика, если позван он сам
+    (`supplied_jobs`); иначе читать нечем — его прогона в дереве нет.
+    Возвращается ``None``, и вызывающий остаётся со своим собственным именем —
+    неполно, но честно
     ([046](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/046-name-the-gaps-do-not-level-them.md)).
 
     АДРЕС ОСТАЁТСЯ СТРОКОЙ, И ЭТО НЕ МЕЛОЧЬ. `Path("./x")` НОРМАЛИЗУЕТ ведущее
@@ -715,7 +730,7 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
     """
     addressed = ADDRESSED_CALL.match(said)
     if not said.startswith(OUR_CALL) and not addressed:
-        return None
+        return supplied_jobs(said)
     # КОРЕНЬ ВЫВОДИТСЯ ИЗ ОБЪЯВЛЕННОГО ПУТИ, А НЕ ПОДЪЁМОМ ПО ДЕРЕВУ. Адрес
     # вызова отсчитывается от корня, а подъём `.parent.parent` угадывал бы, на
     # какой глубине лежат прогоны, — и соврал бы молча, если бы она изменилась.
@@ -730,8 +745,11 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
     root = Path(str(directory)[: -len(tail)] or ".")
     if addressed:
         where = root / addressed["path"]
+        # Файла в дереве нет — вызов чужой. У потребителя его прибивают и к
+        # общей ветке поставщика (`…@main`), и читается он так же, как по тегу
+        # (взгляд на #1583, правило 195).
         if not where.is_file():
-            return None
+            return supplied_jobs(said)
     else:
         where = root / said[len(OUR_CALL) :].split("@")[0]
     if not where.is_file():
@@ -739,6 +757,15 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
             f"вызов «{said}» указывает на прогон, которого в дереве нет — "
             "проверка по нему не появится, а красного об этом не будет (045)"
         )
+    return jobs_of_called(where)
+
+
+def jobs_of_called(where: Path) -> list[str]:
+    """Имена джобов позванного прогона; без события `workflow_call` — отказ.
+
+    Один разбор на оба места, откуда берётся позванный прогон, — дерево и
+    выкачку поставщика (взгляд на #1583, правило 090).
+    """
     document = run_of(where)
     if CALLED not in triggers_of(document):
         raise BadPolicy(
@@ -749,6 +776,40 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
         str((body or {}).get("name") or job_id)
         for job_id, body in (document.get("jobs") or {}).items()
     ]
+
+
+def supplied_jobs(said: str) -> list[str] | None:
+    """Имена джобов чужого прогона, позванного по тегу, — из выкачки поставщика (#1568).
+
+    У потребителя общий шаг выкачивает код конвейера на коммите позванного
+    тега (`$MECHANISMS`), и прогоны шагов лежат там. Читать их нечем было
+    только по привычке: потребитель, взявший заготовку `onboard.py` с
+    составными именами (`pr-meta / pr-meta` — так их и пишет площадка),
+    получал от сверки по находке на каждый свой шаг.
+
+    Читается ТОЛЬКО у потребителя (`foreign`) и только когда выкачка — тот же
+    репозиторий, что в адресе вызова. В нашем дереве вызов по тегу — проба
+    передачи, и её имена остаются неизвестными намеренно (`ADDRESSED_CALL`).
+
+    ГРАНИЦА НАЗВАНА (046). Ссылка вызова с коммитом выкачки не сверяется:
+    выкачка — коммит шага, позвавшего сверку, а у потребителя все шаги
+    прибиты одним тегом и поднимаются вместе. Шаг, прибитый другим тегом, чьи
+    джобы с тех пор переименованы, получит имена выкачки — и сверка это
+    скажет находкой, а не промолчит.
+    """
+    called = FOREIGN_CALL.match(said)
+    supplier = supplier_of()
+    if not called or supplier is None or not foreign(supplier):
+        return None
+    if supplier_repo(supplier) != called["repo"].lower():
+        return None
+    where = supplier / called["path"]
+    if not where.is_file():
+        raise BadPolicy(
+            f"вызов «{said}» указывает на прогон, которого нет и в выкачке "
+            f"поставщика {supplier} — проверка по нему не появится (045)"
+        )
+    return jobs_of_called(where)
 
 
 def check_names(job_id: str, body: dict[str, Any], directory: Path = WORKFLOWS) -> list[str]:
