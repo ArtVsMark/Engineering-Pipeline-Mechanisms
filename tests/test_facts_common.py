@@ -107,8 +107,8 @@ def test_the_publisher_writes_the_file(tmp_path: Path, run_script: RunScript) ->
     assert done.code == module.EXIT_OK, done.text
     said = json.loads(out.read_text(encoding="utf-8"))
     assert said["tests"] == {"functions": 3} and said["repo"] == REPO
-    # Файл — форма договора фактов 1.6 (#1337): вторых записей в корне нет.
-    assert said["schema"] == "1.6" and not set(module.NOT_PUBLISHED) & set(said)
+    # Файл — форма договора фактов 2.0 (#1337, #1396): вторых записей в корне нет.
+    assert said["schema"] == "2.0" and not set(module.NOT_PUBLISHED) & set(said)
 
 
 @pytest.mark.parametrize(
