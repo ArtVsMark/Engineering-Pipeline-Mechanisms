@@ -1058,3 +1058,15 @@ def test_fixes_red_in_all_keeps_the_order_and_drops_repeats() -> None:
     """Номера из всех тел — по первому появлению, повтор в соседнем коммите не дублирует строку."""
     bodies = ["Чинит красное: #7\nЧинит красное: #5", "Чинит красное: #5\nЧинит красное: #9"]
     assert changerefs.fixes_red_in_all(bodies) == [7, 5, 9]
+
+
+def test_no_task_line_is_read_once_for_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Объявление «без задачи» читают один разбор, открытие и тело уплотнения (#1578)."""
+    said = "Без задачи, потому что чинится красная общая ветка"
+    assert changerefs.no_task_in_all(["правка", f"fix: x\n\n{said}\n"]) == said
+    assert changerefs.no_task_in_all(["Без задачи, потому что"]) == ""
+    monkeypatch.setattr(agent_pr, "git", lambda *args: f"fix: правка\n\n{said}\n")
+    body = agent_pr.describe("agent/окно", "main").body
+    assert said in body
+    squash = load_script("squash_body.py")
+    assert said in squash.compose_from(["fix: правка"], [f"fix: правка\n\n{said}\n"])

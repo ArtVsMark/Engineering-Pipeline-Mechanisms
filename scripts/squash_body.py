@@ -168,6 +168,10 @@ def compose_from(subjects: list[str], bodies: list[str]) -> str:
     lines = [f"- {subject}" for subject in subjects]
     if links:
         lines += ["", *[str(link) for link in links]]
+    # Объявление «без задачи» с причиной доезжает до общей ветки (#1578):
+    # иначе история показала бы слияние без связи и без довода.
+    elif none := changerefs.no_task_in_all(bodies):
+        lines += ["", none]
     if resolved:
         lines += ["", *resolved]
     if windows:

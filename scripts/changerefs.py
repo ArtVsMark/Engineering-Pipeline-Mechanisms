@@ -459,6 +459,29 @@ def links_in(text: str) -> list[Link]:
     return found
 
 
+#: Объявленное отсутствие связи — третий законный ответ рядом с «Closes» и
+#: «Refs» (#1578). Взят у каталога (правило 064, его `pr_body.py`): починка
+#: красной ветки или находок обзора задачи не имеет, и заводить её ради формы
+#: значило бы плодить пустые задачи. Причина обязательна — «нет» говорится
+#: словом и с доводом
+#: ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md)).
+#: Отдельной строкой, как связь: фраза внутри прозы ответом не считается.
+NO_TASK_KEY: Final = "Без задачи, потому что"
+NO_TASK_RE: Final = re.compile(rf"^{re.escape(NO_TASK_KEY)}\s+\S.*$", re.MULTILINE)
+
+
+def no_task_in_all(texts: Iterable[str]) -> str:
+    """Первая строка «Без задачи, потому что …» из текстов; нет — пусто.
+
+    Читается вне блоков кода, как связь: образец в документации ответом не
+    является.
+    """
+    for text in texts:
+        if found := NO_TASK_RE.search(outside_code(text)):
+            return found.group(0).strip()
+    return ""
+
+
 def has_link(text: str) -> bool:
     """Названа ли в тексте хотя бы одна задача."""
     return bool(links_in(text))
