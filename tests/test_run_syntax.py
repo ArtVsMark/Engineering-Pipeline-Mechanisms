@@ -23,15 +23,28 @@
 Прогон с умолчанием, таким образом, отвергнет первый гейт, а этот уведёт в
 «иную оболочку». Замер 17.10.2026: умолчаний оболочки в прогонах и действиях
 дерева ноль — оба прочтения сегодня держат пустоту.
+
+ЗАПАСНАЯ ОБОЛОЧКА «bash» ВЕРНА ДЛЯ LINUX И MACOS (поздний взгляд на #1479). На
+раннере `windows-*` площадка без `shell` берёт `pwsh`, и `bash -n` судил бы не
+ту оболочку. Таких `runs-on` в дереве нет — это держит
+`test_no_step_runs_on_windows`, а не слово здесь.
+
+МАССИВ ПОД `set -u` РАСКРЫВАЕТСЯ ФОРМОЙ `${a[@]+"${a[@]}"}` (поздний взгляд на
+#1530). `"${a[@]}"` у пустого массива под `set -u` в bash ниже 4.4 — «unbound
+variable», а сценарии шагов гоняет и предполётная локального окна, где на
+macOS bash 3.2. Граница названа: гейт судит форму, а не исполняет сценарий на
+старом bash — его в окружении проверки нет.
 """
 
 import re
 import subprocess
-from typing import Any
+from pathlib import Path
+from typing import Any, Final
 
+import pytest
 import yaml
 
-from tests.conftest import ROOT, walk_deep
+from tests.conftest import ROOT, walk, walk_deep
 
 #: Выражение площадки: его значение известно только в прогоне.
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
@@ -112,3 +125,61 @@ def test_every_bash_script_parses() -> None:
         if done.returncode:
             broken.append(f"{name} — {done.stderr.strip()}")
     assert not broken, "сценарий не разбирается оболочкой:\n" + "\n".join(broken)
+
+
+#: Флаг `-u` в строке `set`: `set -u`, `set -euo pipefail`, `set -uo …`.
+SET_U: Final = re.compile(r"^\s*set\s+-[a-z]*u", re.MULTILINE)
+#: Раскрытие массива без защиты пустого: `"${a[@]}"`, а не `${a[@]+"${a[@]}"}`.
+BARE_ARRAY: Final = re.compile(r'(?<!\+)"\$\{\w+\[@\]\}"')
+
+
+def shell_sources() -> list[tuple[str, str]]:
+    """Сценарии bash: шаги `run:` с этой оболочкой и хуки окна `.sh`."""
+    found = [(name, text) for name, text, shell in scripts() if shell == "bash"]
+    hooks = walk(ROOT / ".claude" / "hooks", "*.sh")
+    found += [(str(Path(one).relative_to(ROOT)), one.read_text(encoding="utf-8")) for one in hooks]
+    return found
+
+
+def bare_arrays(text: str) -> list[str]:
+    """Раскрытия массива без защиты пустого — только там, где стоит `set -u`."""
+    return BARE_ARRAY.findall(text) if SET_U.search(text) else []
+
+
+def test_an_array_under_set_u_survives_old_bash() -> None:
+    """Под `set -u` массив раскрывается формой, которую принимает и bash 3.2."""
+    seen = shell_sources()
+    assert any(SET_U.search(text) for _, text in seen), (
+        "сценариев с set -u нет — предмета нет (075)"
+    )
+    bad = {name: found for name, text in seen if (found := bare_arrays(text))}
+    assert not bad, (
+        f'массив под set -u раскрыт без защиты пустого: {bad} — пишите ${{a[@]+"${{a[@]}}"}}'
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "bad"),
+    [
+        ('set -euo pipefail\ncmd "${args[@]}"\n', 1),
+        ('set -euo pipefail\ncmd ${args[@]+"${args[@]}"}\n', 0),
+        ('set -e\ncmd "${args[@]}"\n', 0),
+        ('  set -uo pipefail\ncmd "${a[@]}" "${b[@]}"\n', 2),
+    ],
+    ids=["голый-под-u", "защищённый", "без-u", "два-голых"],
+)
+def test_the_bare_array_predicate(text: str, bad: int) -> None:
+    """Предикат различает форму и видит `-u` в любой связке флагов."""
+    assert len(bare_arrays(text)) == bad
+
+
+def test_no_step_runs_on_windows() -> None:
+    """Раннеров `windows-*` в дереве нет: запасная оболочка «bash» верна (взгляд на #1479)."""
+    windows = [
+        f"{path.relative_to(ROOT)}: {name}"
+        for path in walk_deep(ROOT / ".github", "*.yml")
+        if isinstance(document := yaml.safe_load(path.read_text(encoding="utf-8")), dict)
+        for name, job in (document.get("jobs") or {}).items()
+        if "windows" in str((job or {}).get("runs-on") or "").lower()
+    ]
+    assert not windows, f"джоб на windows: {windows} — там площадка берёт pwsh, а не bash"

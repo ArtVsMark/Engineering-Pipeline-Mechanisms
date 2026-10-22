@@ -47,8 +47,10 @@ PUBLISHES: Final = (
 PICTURE: Final = PUBLISHES[1]
 #: Разбор семьи, который собирает то же действие рядом со значком: по нему
 #: каталог считает `uptake` семьи (`РАЗБОР_АДРЕС` в `scripts/family.py`
-#: каталога), и без него у всей семьи «не прочитано» (#1532). Едет и не едет
-#: вместе со значком: один заход действия даёт оба.
+#: каталога), и без него у всей семьи «не прочитано» (#1532). ЕДЕТ ТОЛЬКО СО
+#: ЗНАЧКОМ (поздний взгляд на #1534): значка нет — оба прежних остаются; значок
+#: есть, а разбора нет — прежний разбор снимается, потому что по адресу его не
+#: отличить от живого (та же беда, от которой prune держит значки, #1198).
 FAMILY_CHECK: Final = PUBLISHES[2]
 #: Что кладётся, только если лежит рядом с фактами, — выход действия каталога.
 BESIDE: Final = (PICTURE, FAMILY_CHECK)
@@ -128,14 +130,17 @@ def checkout(workdir: Path) -> None:
 
 
 def targets(source: Path, *, archive: bool) -> tuple[str, ...]:
-    """Что кладётся на ветку этим заходом: факты всегда; значок, разбор семьи и архив — если рядом.
+    """Что кладётся на ветку этим заходом: факты всегда; значок и архив — если рядом.
+
+    Разбор семьи — только вместе со значком (`FAMILY_CHECK`).
 
     Архив — только по входу `archive`. Чего рядом нет, то на ветке остаётся
     прежним: отсутствие называет `publish` предупреждением, а не молчит.
     """
     beside = source.parent
     said = [PUBLISHES[0]]
-    said += [one for one in BESIDE if (beside / Path(one).name).is_file()]
+    if (beside / Path(PICTURE).name).is_file():
+        said += [one for one in BESIDE if (beside / Path(one).name).is_file()]
     said += [ARCHIVE] if archive and (beside / Path(ARCHIVE).name).is_file() else []
     return tuple(said)
 
@@ -154,9 +159,19 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
     # из-за них оставил бы витрину со вчерашними фактами. Пропуск называется,
     # а краснеет на нём свой шаг.
     chosen = targets(source, archive=archive)
+    stale = (FAMILY_CHECK,) if PICTURE in chosen and FAMILY_CHECK not in chosen else ()
     for wanted in (*BESIDE, *([ARCHIVE] if archive else [])):
-        if wanted not in chosen:
-            print(f"::warning::рядом с фактами нет {Path(wanted).name} — на ветке остаётся прежний")
+        if wanted in stale:
+            print(
+                f"::warning::значок собран без {Path(wanted).name} — прежний разбор снимается: "
+                "по адресу его не отличить от живого"
+            )
+        elif wanted not in chosen:
+            # Разбор семьи без значка лежит рядом, но не берётся: причина —
+            # не его отсутствие, а связь со значком (взгляд на #1546).
+            beside = (source.parent / Path(wanted).name).is_file()
+            why = "без значка не публикуется" if beside else "рядом с фактами нет"
+            print(f"::warning::{Path(wanted).name}: {why} — на ветке остаётся прежний")
     checkout(workdir)
     # СБОЙ ДИСКА И ОТСУТСТВИЕ ФАКТОВ — ТОЖЕ «НЕ ОПУБЛИКОВАНО», а не трейсбек с
     # кодом 1: шапка обещает исходы 0 и 2 и `::error::` (039, взгляд на #1233).
@@ -179,6 +194,10 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
     added = git("add", "--", *chosen, cwd=workdir)
     if added.returncode != 0:
         raise NotPublished(f"git add отказал: {reason(added)}")
+    if stale:
+        removed = git("rm", "-q", "--ignore-unmatch", "--", *stale, cwd=workdir)
+        if removed.returncode != 0:
+            raise NotPublished(f"git rm прежнего разбора отказал: {reason(removed)}")
     staged = git("diff", "--cached", "--quiet", cwd=workdir)
     if staged.returncode == 0:
         return False
