@@ -123,7 +123,7 @@ if ! .venv/bin/python scripts/check_env.py >/dev/null 2>&1; then
     editable+=(-e "$local")
   done
   # shellcheck disable=SC2086  # список — отдельные аргументы pip, а не одна строка
-  .venv/bin/pip install -q $tools "${editable[@]}" || { warn "инструменты проверки не поставлены"; exit 0; }
+  .venv/bin/pip install -q $tools ${editable[@]+"${editable[@]}"} || { warn "инструменты проверки не поставлены"; exit 0; }
 fi
 # Установка из исходников оставляет в дереве `build/` пакета, и проверка
 # типов видит модуль дважды: тот, что в пакете, и его копию в сборке. Сборка

@@ -255,10 +255,24 @@ def test_no_places_means_no_files(consumer: Path) -> None:
     assert gate.code_of(consumer, ["scripts"]), "предмет пуст — проверка ничего не различает (075)"
 
 
-def test_an_unparsed_file_does_not_run(consumer: Path) -> None:
-    """Файл не разобран — третий исход, а не «чисто» и не «найдено» (039)."""
+def test_an_unparsed_file_warns_without_enforce(
+    consumer: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Неразобранный файл без `--enforce` — предупреждение с адресом, а не красный джоб (#1530).
+
+    Решение (б): дерево, писанное без гейта, не краснеет с первым подъёмом
+    тега. Шаблон `.py`, синтаксис Python 2, чужая кодировка — такой файл
+    называется и считается, но джоб не роняет. Строгий проект своё разбирать
+    обязан: с `--enforce` это «не отработал» (039).
+    """
     (consumer / "scripts" / "broken.py").write_text("def (:\n", encoding="utf-8")
-    assert gate.main(["--root", str(consumer)]) == gate.EXIT_BROKEN
+    (consumer / "scripts" / "legacy.py").write_bytes("# \xe9\n".encode("latin-1"))
+    assert gate.main(["--root", str(consumer)]) == gate.EXIT_OK
+    out = capsys.readouterr().out
+    assert "::warning file=scripts/broken.py::файл не разобран" in out, out
+    assert "::warning file=scripts/legacy.py::файл не разобран" in out, out
+    assert "не разобрано файлов: 2" in out, out
+    assert gate.main(["--root", str(consumer), "--enforce"]) == gate.EXIT_BROKEN
 
 
 def test_outside_a_repository_it_does_not_run(tmp_path: Path) -> None:

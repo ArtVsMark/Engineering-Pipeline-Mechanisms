@@ -229,7 +229,7 @@ jobs:
             --python-matrix "$PYTHON_MATRIX" \
             --python-next "$PYTHON_NEXT" \
             --supplier "$SUPPLIER" \
-            "${args[@]}"
+            ${args[@]+"${args[@]}"}
       # СВЕРКА С ДОГОВОРОМ СЕМЬИ ДО ПУБЛИКАЦИИ — ЕГО ЖЕ ПРОВЕРКОЙ, ПО ТЕГУ
       # (#1337, #1396). Договор фактов держит каталог с 15.10.2026: он отдаёт
       # `check_facts.py`, схему и номер договора файлами выпуска, и издатель
@@ -424,7 +424,7 @@ jobs:
           fi
           rc=0
           python $MECHANISMS/scripts/findings_archive.py --repo "${GITHUB_REPOSITORY}" --out "$out" \
-            "${args[@]}" || rc=$?
+            ${args[@]+"${args[@]}"} || rc=$?
           case "$rc" in
             0) ;;
             *)

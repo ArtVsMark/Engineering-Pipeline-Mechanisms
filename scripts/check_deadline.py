@@ -39,8 +39,12 @@ subprocess as sp` даёт `sp.run`, и предикат его видит на�
 `from subprocess import run as r`.
 
 СОСЕД ЗА ГРАНИЦЕЙ (195): вызов через переменную-псевдоним (`spawn =
-subprocess.run`) и `os.system` предикат не видит. Набор тестов не судится:
-это не механизм, а его проверка, и предел ей ставит площадка.
+subprocess.run`), `os.system`, `os.popen`, `pty.spawn` и
+`asyncio.create_subprocess_exec`/`_shell` предикат не видит. У первых трёх
+дедлайна нет вовсе, у асинхронных он ставится ожиданием (`asyncio.wait_for`),
+а не доводом вызова; в нашем дереве их ноль (замер 22.10.2026 по
+`code_files`). Набор тестов не судится: это не механизм, а его проверка, и
+предел ей ставит площадка.
 
 СЕМЬЮ СПРОСИЛИ (162). У каталога нашёлся свой гейт дедлайна: он требует
 названный предел и выводит его значение из вида вызова, но поимку истечения
@@ -55,9 +59,16 @@ subprocess.run`) и `os.system` предикат не видит. Набор т�
 257 вызовов без `timeout=` в одних `tests/` (051). Где лежит код, говорит
 `--paths` (пункт (в)): наш `paths.SOURCES` у соседа не верен.
 
+ФАЙЛ, КОТОРЫЙ PYTHON РАННЕРА НЕ РАЗБИРАЕТ, — ТОЖЕ ПРЕДУПРЕЖДЕНИЕ (поздний
+взгляд на #1530, решение (б)). Шаблон `.py`, синтаксис Python 2 или новее
+раннера, чужая кодировка — дерево, писанное без гейта, иначе краснело бы с
+первым подъёмом тега исходом «не отработал». Без `--enforce` такой файл
+называется аннотацией «не разобран» и счётом, а не молчит; с `--enforce` —
+«не отработал»: строгий проект свой код разбирать обязан.
+
 Исходы (039): ``0`` чисто, предупреждено без `--enforce` или кода нет — причина
 напечатана · ``1`` найдено при `--enforce` · ``2`` не отработал (git отказал,
-файл не разобран).
+файл не прочитан, при `--enforce` — и не разобран).
 """
 
 import argparse
@@ -229,8 +240,11 @@ def code_of(root: Path, places: list[str]) -> list[str]:
 
 def look(
     root: Path, places: list[str], *, named: bool = True
-) -> tuple[list[tuple[str, str, str]], int]:
-    """Находки «файл, строка, что» и число просмотренных файлов.
+) -> tuple[list[tuple[str, str, str]], int, list[tuple[str, str]]]:
+    """Находки «файл, строка, что», число просмотренных файлов и неразобранные «файл, почему».
+
+    Неразобранный — файл, который прочитан, но этот Python его не разбирает:
+    его судит `main` по `--enforce`. Непрочитанный (`OSError`) — «не отработал».
 
     Место, НАЗВАННОЕ входом, обязано быть в дереве: опечатка иначе выдала бы
     себя за «кода нет» (075, взгляд на #1530). Место из умолчания может
@@ -241,16 +255,21 @@ def look(
         raise NotRun(f"мест кода нет в дереве: {', '.join(missing)}")
     names = code_of(root, [one for one in places if one not in missing])
     found: list[tuple[str, str, str]] = []
+    unparsed: list[tuple[str, str]] = []
     for name in names:
         try:
-            source = (root / name).read_text(encoding="utf-8")
-            bad = undeadlined(source)
-        except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
-            raise NotRun(f"{name} не разобран: {exc}") from exc
+            raw = (root / name).read_bytes()
+        except OSError as exc:
+            raise NotRun(f"{name} не прочитан: {exc}") from exc
+        try:
+            bad = undeadlined(raw.decode("utf-8"))
+        except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError) as exc:
+            unparsed.append((name, report.cut(str(exc))))
+            continue
         for one in bad:
             line, what = one.split(": ", 1)
             found.append((name, line, what))
-    return found, len(names)
+    return found, len(names), unparsed
 
 
 def escaped(value: str, *, prop: bool) -> str:
@@ -278,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         print("гейт не отработал: мест кода не названо (075)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        found, seen = look(args.root, places, named=named)
+        found, seen, unparsed = look(args.root, places, named=named)
     except NotRun as exc:
         print(f"гейт не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
@@ -289,10 +308,20 @@ def main(argv: list[str] | None = None) -> int:
             f"неприменимо: под {', '.join(places)} файлов .py нет — вызовов процесса судить негде"
         )
         return EXIT_OK
-    if not found:
-        print(f"дедлайн у каждого вызова процесса: файлов просмотрено {seen}")
-        return EXIT_OK
     level = "error" if args.enforce else "warning"
+    for name, why in unparsed:
+        print(
+            f"::{level} file={escaped(name, prop=True)}::"
+            f"{escaped(f'файл не разобран — дедлайн в нём не судился: {why}', prop=False)}"
+        )
+    if unparsed:
+        print(f"не разобрано файлов: {len(unparsed)} из {seen} — их вызовы не судились")
+        if args.enforce:
+            print("гейт не отработал: строгий проект свой код разбирать обязан", file=sys.stderr)
+            return EXIT_BROKEN
+    if not found:
+        print(f"дедлайн у каждого вызова процесса: файлов просмотрено {seen - len(unparsed)}")
+        return EXIT_OK
     print(
         f"вызов процесса без дедлайна или без его поимки (100, 039): {len(found)} из файлов {seen}"
     )

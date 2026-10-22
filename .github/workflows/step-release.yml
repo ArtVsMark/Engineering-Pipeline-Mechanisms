@@ -228,7 +228,7 @@ jobs:
           if [ -n "${ASKED_VERSION:-}" ]; then args+=(--version "$ASKED_VERSION"); fi
           if [ -n "${ASKED_ACCEPTANCE:-}" ]; then args+=(--acceptance "$ASKED_ACCEPTANCE"); fi
           if [ "${ASKED_BREAKING:-false}" = "true" ]; then args+=(--breaking); fi
-          python $MECHANISMS/scripts/release.py "${args[@]}"
+          python $MECHANISMS/scripts/release.py ${args[@]+"${args[@]}"}
 
       - name: выпустить
         id: release
@@ -254,7 +254,7 @@ jobs:
           if [ -n "${ASKED_VERSION:-}" ]; then args+=(--version "$ASKED_VERSION"); fi
           if [ -n "${ASKED_ACCEPTANCE:-}" ]; then args+=(--acceptance "$ASKED_ACCEPTANCE"); fi
           if [ "${ASKED_BREAKING:-false}" = "true" ]; then args+=(--breaking); fi
-          python $MECHANISMS/scripts/release.py "${args[@]}"
+          python $MECHANISMS/scripts/release.py ${args[@]+"${args[@]}"}
 
           # КОММИТ И ТЕГ УХОДЯТ ОДНИМ АТОМАРНЫМ ТОЛЧКОМ (#1448). Площадка
           # принимает оба ref'а или ни одного (074, 109). Прежде толчков было
