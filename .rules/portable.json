@@ -27,6 +27,7 @@
   "reasons": {
     "provider": "поставщик механизмов: отдаёт шаги потребителям по контракту и держит его поверхность; у соседа, перенёсшего конвейер к себе, потребителей этого конвейера нет",
     "family": "мерило семьи: считается у одного поставщика по клонам соседей, у каждого соседа оно дало бы то же число вторым источником",
+    "catalogue-kit": "файл кладёт потребителю заход подключения каталога (`scripts/onboard_consumer.py` каталога), и входящие остаются за каталогом (#1536): второй генератор у нас был бы второй реализацией одного алгоритма (090)",
     "skill-tree": "навык опирается на скрипты, тесты или документы дерева поставщика, которых в дереве потребителя нет: у него код конвейера живёт только выкачкой в прогоне. Ответ честный, а не окончательный — навык переводится в as-is, когда его ссылки лягут в то, что потребитель получает (решение владельца 06.10.2026 по #995, пункт 2а)"
   },
   "filling": {
@@ -122,6 +123,12 @@
     ".github/ISSUE_TEMPLATE/consumer-mismatch.yml": {
       "answer": "ours",
       "why": "@provider"
+    },
+    ".github/attribution-since": {
+      "answer": "configured",
+      "where": [
+        ".github/attribution-since"
+      ]
     },
     ".github/authors.txt": {
       "answer": "configured",
@@ -278,8 +285,7 @@
       "answer": "configured",
       "where": [
         ".github/workflows/python-next.yml"
-      ],
-      "seam": "что проверяется на предрелизной версии и какая она, названо шагами и матрицей прогона, данных под это нет: тонкого вызова, как у ci.yml, заготовка под него не кладёт"
+      ]
     },
     ".github/workflows/release.yml": {
       "answer": "configured",
@@ -300,10 +306,8 @@
       ]
     },
     ".github/workflows/rules-inbox.yml": {
-      "answer": "configured",
-      "where": [
-        ".github/workflows/rules-inbox.yml"
-      ]
+      "answer": "ours",
+      "why": "@catalogue-kit"
     },
     ".github/workflows/runs-series.yml": {
       "answer": "configured",
@@ -322,6 +326,16 @@
       "where": [
         ".github/authors.txt"
       ]
+    },
+    ".github/workflows/step-attribution-history.yml": {
+      "answer": "configured",
+      "where": [
+        ".github/authors.txt",
+        ".github/attribution-since"
+      ]
+    },
+    ".github/workflows/step-python-next.yml": {
+      "answer": "as-is"
     },
     ".github/workflows/step-agent-pr.yml": {
       "answer": "as-is"

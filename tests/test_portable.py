@@ -363,6 +363,56 @@ def test_an_as_is_flow_is_called_not_copied() -> None:
     )
 
 
+def unlaid(root: Path, answers: dict[str, Any]) -> list[str]:
+    """Прогоны с ответом `configured`, которые потребителю не достаются ничем.
+
+    Достаётся прогон двумя путями: он сам шаг (`on: workflow_call` — зовётся
+    по тегу) или его кладёт заход подключения — тонкий `ci.yml` либо свой
+    вызывающий прогон шага (`onboard.own_callers`). Ни того ни другого —
+    ответ «настройте у себя» обещает то, чего нечего настраивать (#1556).
+    """
+    onboard = load_script("onboard.py")
+    laid = {flow.name for flow in onboard.own_callers(root, onboard.steps(root)).values()}
+    laid.add(onboard.PIPELINE_FLOW)
+    found = []
+    for name, said in answers.items():
+        if not name.startswith(".github/workflows/") or said.get("answer") != "configured":
+            continue
+        flow = yaml.safe_load((root / name).read_text(encoding="utf-8")) or {}
+        events = flow.get("on", flow.get(True)) or {}
+        names = {str(one) for one in (events if isinstance(events, (dict, list)) else [events])}
+        if "workflow_call" not in names and Path(name).name not in laid:
+            found.append(Path(name).name)
+    return sorted(found)
+
+
+def test_a_configured_flow_reaches_the_consumer() -> None:
+    """Прогон с ответом `configured` — шаг по тегу или заготовка захода (#1556).
+
+    Замер 22.10.2026: так отвечали три прогона без пути к потребителю —
+    `rules-inbox` (его кладёт каталог — теперь `ours`), `attribution-history`
+    и `python-next` (теперь тонкие вызовы общих шагов). Без гейта четвёртый
+    такой появился бы незаметно: ответ читается как «перенесено».
+    """
+    assert not unlaid(ROOT, inventory()["answers"]), (
+        "прогон отвечен `configured`, а потребителю не достаётся: ни `workflow_call`, "
+        "ни заготовки `onboard` — либо вынести в шаг, либо ответить `ours` с причиной"
+    )
+
+
+def test_the_reach_gate_refuses_a_flow_nobody_lays(tmp_path: Path) -> None:
+    """Обратная половина: прогон без вызова и без заготовки гейт называет (140)."""
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "lonely.yml").write_text("on: push\njobs:\n  x:\n    runs-on: img\n", encoding="utf-8")
+    (flows / "step-y.yml").write_text("on:\n  workflow_call:\njobs: {}\n", encoding="utf-8")
+    answers = {
+        ".github/workflows/lonely.yml": {"answer": "configured"},
+        ".github/workflows/step-y.yml": {"answer": "configured"},
+    }
+    assert unlaid(tmp_path, answers) == ["lonely.yml"]
+
+
 def test_a_shared_reason_is_written_once() -> None:
     """Причина, общая для нескольких ответов, — один раз в `reasons`, а не копией (071)."""
     answers = inventory()["answers"].values()

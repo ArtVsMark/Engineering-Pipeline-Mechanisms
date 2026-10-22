@@ -243,8 +243,8 @@ def test_python_versions_come_from_the_ci_matrix() -> None:
     # непустотой (взгляд на #1004).
     # Предрелизная живёт своим прогоном (#1018) — и читается оттуда же, откуда
     # её берёт сборка, а не из `ci.yml`.
-    upcoming = yaml.safe_load(facts.paths.PYTHON_NEXT.read_text(encoding="utf-8"))
-    trial = upcoming["jobs"][facts.EXPERIMENTAL_JOB]
+    # Джоб-вызов — телом вызванного шага: образ у шага, матрица у вызова (#1556).
+    trial = facts.common.policy.resolved_job(facts.paths.PYTHON_NEXT, facts.EXPERIMENTAL_JOB)
     assert said["experimental"] == [str(one) for one in trial["strategy"]["matrix"]["python"]]
     images = {str(flow["jobs"][facts.SUPPORTED_JOB]["runs-on"]), str(trial["runs-on"])}
     assert said["os"] == sorted(images)

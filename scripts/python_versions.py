@@ -17,6 +17,12 @@
   * многострочный блок (`python-version: |`) — каждая его строка, как выше;
   * `allow-prereleases: true` в том же `with:` — версия предварительная.
 
+И ВЫЗОВ ОБЩЕГО ШАГА ПРОБЫ (#1556). Работа, зовущая `step-python-next.yml`
+со входом `python`, объявляет версию тем же разбором строки — ось её
+матрицы или число — и всегда предварительную: шаг ставит её с
+`allow-prereleases`. Матрица у вызывающего, а `setup-python` — в шаге, и без
+этого правила версия выпала бы из значка молча.
+
 `python-version-file` без `python-version` — отказ с адресом: файл версии
 разбор не читает, и версия из него не выводится. Строка не числом и не осью
 (`3.x`, `pypy3.11`) версией не считается: со значком её не сравнить.
@@ -52,6 +58,8 @@ CELL_RE: Final = re.compile(r"^(\d+)\.(\d+)$")
 FROM_MATRIX_RE: Final = re.compile(r"^\$\{\{\s*matrix\.([\w-]+)\s*\}\}$")
 #: Выражение площадки вместо значения.
 EXPRESSION: Final = "${{"
+#: Общий шаг пробы предрелизной ветки: его вход `python` — объявление версии.
+NEXT_STEP: Final = "step-python-next.yml"
 
 
 @dataclass(frozen=True)
@@ -149,6 +157,7 @@ def read(root: Path) -> tuple[list[Declared], list[Refused]]:
     for path in _flows(root):
         document = pipeline_checks.run_of(path)
         for name, job in (document.get("jobs") or {}).items():
+            declared += _called(path, str(name), job, refused)
             for step in _steps(job):
                 raw = step.get("with")
                 given: dict[str, Any] = raw if isinstance(raw, dict) else {}
@@ -173,6 +182,23 @@ def read(root: Path) -> tuple[list[Declared], list[Refused]]:
                         refused.append(Refused(path.name, str(name), why))
                     declared += [Declared(path.name, str(name), one, preview) for one in found]
     return declared, refused
+
+
+def _called(path: Path, name: str, job: Any, refused: list[Refused]) -> list[Declared]:
+    """Версии, переданные вызовом общего шага пробы; не вызов — пусто."""
+    if not isinstance(job, dict):
+        return []
+    if not str(job.get("uses") or "").split("@")[0].endswith(f"/{NEXT_STEP}"):
+        return []
+    given = job.get("with")
+    said = str(given.get("python", "")).strip() if isinstance(given, dict) else ""
+    if not said:
+        refused.append(Refused(path.name, name, f"{NEXT_STEP} позван без входа python"))
+        return []
+    found, why = _said(job, said)
+    if why:
+        refused.append(Refused(path.name, name, why))
+    return [Declared(path.name, name, one, True) for one in found]
 
 
 def _said(job: Any, said: str) -> tuple[list[tuple[int, int]], str | None]:

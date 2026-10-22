@@ -542,7 +542,8 @@ def test_a_rule_a_neighbour_holds_by_machine_and_we_do_not_is_named() -> None:
 def test_a_rule_we_hold_by_machine_is_not_behind() -> None:
     """Держим машиной — отставания нет, каким бы механизмом ни держал сосед."""
     document = summary(consumer("ArtVsMark/Glossary-Python", **{"077": ("gate", "scripts/x.py")}))
-    for ours in ("gate", "pipeline", "code"):
+    # Каждым машинным видом канона, а не списком рукой (#1566).
+    for ours in sorted(family.kinds.MACHINE):
         assert family.behind(document, mine=MINE, ours={"077": {"mechanism": ours}}) == []
 
 

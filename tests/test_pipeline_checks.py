@@ -955,6 +955,72 @@ def test_a_matrix_axis_is_read_or_refused(tmp_path: Path) -> None:
         policy.matrix_axis(flow, "нет", "python")
 
 
+CALLED_STEP = (
+    "on:\n  workflow_call:\n    inputs:\n      python:\n        type: string\n"
+    "        required: true\n      test:\n        type: string\n        default: pytest\n"
+    "jobs:\n  inner:\n    name: inner\n    runs-on: img\n    steps:\n"
+    "      - uses: actions/setup-python@v6\n        with:\n"
+    "          python-version: ${{ inputs.python }}\n"
+    '      - env:\n          TEST: ${{ inputs.test }}\n        run: bash -c "$TEST"\n'
+)
+
+
+def calling_tree(tmp_path: Path, uses: str = "./.github/workflows/step-x.yml") -> Path:
+    """Дерево с вызывающим прогоном `x.yml` и вызванным шагом `step-x.yml`."""
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "step-x.yml").write_text(CALLED_STEP, encoding="utf-8")
+    (flows / "x.yml").write_text(
+        "on: push\njobs:\n  t:\n    strategy:\n      matrix:\n        python: ['3.16']\n"
+        f"    uses: {uses}\n    with:\n      python: ${{{{ matrix.python }}}}\n",
+        encoding="utf-8",
+    )
+    return flows / "x.yml"
+
+
+def test_a_calling_job_resolves_to_the_called_body(tmp_path: Path) -> None:
+    """Джоб-вызов читается телом шага: образ и шаги у шага, матрица у вызова (#1556).
+
+    Вход берётся из `with:` вызова, а без него — умолчанием шага: ровно то, что
+    подставит площадка. Без этого читатели образа и `setup-python` теряли
+    предмет молча, как только джоб выносили в общий шаг.
+    """
+    path = calling_tree(tmp_path)
+    body = policy.resolved_job(path, "t")
+    assert body["runs-on"] == "img"
+    assert body["name"] == "t"
+    assert body["strategy"]["matrix"]["python"] == ["3.16"]
+    assert body["steps"][0]["with"]["python-version"] == "${{ matrix.python }}"
+    assert body["steps"][1]["env"]["TEST"] == "pytest"
+    assert policy.matrix_axis(path, "t", "python") == (["3.16"], "img")
+
+
+def test_a_plain_job_resolves_to_itself_and_a_remote_call_is_refused(tmp_path: Path) -> None:
+    """Обычный джоб — как есть; удалённый вызов — отказ, а не джоб без шагов (075)."""
+    path = calling_tree(tmp_path, uses="o/r/.github/workflows/step-x.yml@v1")
+    assert policy.remote_call({"uses": "o/r/.github/workflows/step-x.yml@v1"})
+    assert not policy.remote_call({"uses": "./.github/workflows/step-x.yml"})
+    assert not policy.remote_call({"runs-on": "img"})
+    with pytest.raises(policy.BadPolicy, match="удалённый"):
+        policy.resolved_job(path, "t")
+    plain = tmp_path / ".github" / "workflows" / "step-x.yml"
+    assert policy.resolved_job(plain, "inner")["runs-on"] == "img"
+    with pytest.raises(policy.BadPolicy, match="нет джоба"):
+        policy.resolved_job(plain, "нет")
+
+
+def test_a_called_step_with_two_jobs_is_ambiguous(tmp_path: Path) -> None:
+    """Два джоба в вызванном шаге — отказ: какой из них тело, неизвестно (045)."""
+    path = calling_tree(tmp_path)
+    step = path.with_name("step-x.yml")
+    step.write_text(
+        step.read_text(encoding="utf-8") + "  other:\n    runs-on: img\n    steps: []\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(policy.BadPolicy, match="неоднозначно"):
+        policy.resolved_job(path, "t")
+
+
 def test_a_mechanism_path_resolves_in_the_supplier_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

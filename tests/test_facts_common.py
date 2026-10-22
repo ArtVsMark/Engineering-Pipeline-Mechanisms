@@ -269,7 +269,8 @@ def test_machine_answers_are_split_by_origin(tmp_path: Path) -> None:
                 "origin_kind": "called",
                 "origin": "Другой/Каталог:action.yml@v1.0.0",
             },
-            "005": {"status": "active", "mechanism": "code"},
+            # Машинный ответ без происхождения — «не названо» (вид из канона, #1566).
+            "005": {"status": "active", "mechanism": "gate"},
             "006": {"status": "active", "mechanism": "document", "origin": "x"},
             "007": {"status": "not-applicable"},
         },
@@ -282,7 +283,7 @@ def test_machine_answers_are_split_by_origin(tmp_path: Path) -> None:
         "elsewhere": 1,
         "by_origin_kind": {"called": 2, "copied": 1, "own": 1, module.UNNAMED_KIND: 1},
     }
-    machine = sum(said["by_mechanism"][kind] for kind in ("gate", "pipeline", "code"))
+    machine = sum(said["by_mechanism"][kind] for kind in module.kinds.MACHINE)
     assert sum(said["machine"][key] for key in ("own", "taken", "elsewhere")) == machine
     # Поставщик не назван — взятое у него от взятого у других не отличить:
     # разбивка говорит «не прочитано», а не кладёт всё в «других».
