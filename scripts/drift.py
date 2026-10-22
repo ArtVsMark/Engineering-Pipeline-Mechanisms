@@ -343,6 +343,19 @@ def catalogue_asked(export: dict[str, Any], mine: dict[str, Any]) -> list[Drift]
     """
     found = catalogue_moved(export, mine)
     try:
+        catalogue.rules_of(export)
+    except catalogue.BadExport as exc:
+        # СЛОМАННЫЙ ДОГОВОР ВЫГРУЗКИ ГОВОРИТ ЗДЕСЬ, А НЕ ГАСНЕТ (взгляд на #1564).
+        # Замены сводки семьи без списка правил неизвестны, и там это «замен не
+        # знаем»; сама поломка — находка источника, который выгрузку читает.
+        found.append(
+            Drift(
+                "export-form",
+                f"{exc} — замены правил не прочитать, находки о заменённых идут работой",
+                "разобрать выгрузку каталога: поле `rules` — часть его договора (157)",
+            )
+        )
+    try:
         proposals = ours_proposals()
     except NotRun:
         # НЕПРОЧИТАННЫЕ ПРЕДЛОЖЕНИЯ НЕ ГАСЯТ СДВИГ ВЫГРУЗКИ (взгляд на #1377).
@@ -424,15 +437,6 @@ SUPERSEDED_PAIR_RE: Final = re.compile(r"(?<!\d)(\d{3}) → (\d{3})(?!\d)")
 RULE_NUMBER_RE: Final = re.compile(r"(?<!\d)\d{3}(?!\d)")
 
 
-def superseded_by(export: dict[str, Any]) -> dict[str, str]:
-    """Замены правил из выгрузки каталога: номер заменённого → номер заменяющего."""
-    return {
-        str(rule.get("id")): str(rule["superseded_by"])
-        for rule in export.get("rules") or []
-        if isinstance(rule, dict) and rule.get("superseded_by")
-    }
-
-
 def answered_rules(mine: dict[str, Any]) -> frozenset[str]:
     """Номера правил, по которым у нас есть ответ, — без нерассмотренных."""
     return frozenset(
@@ -454,7 +458,8 @@ def superseded_state(said: str, answered: frozenset[str], replaced: dict[str, st
 
     СУДЯТСЯ ДАННЫЕ, А НЕ ТЕКСТ (взгляд на #1511). Пара номеров в тексте — ещё не
     замена: находка другого рода со стрелкой ушла бы в заметку молча. Поэтому
-    пары находки сверяются с заменами из выгрузки (`superseded_by`): состояние —
+    пары находки сверяются с заменами из выгрузки (`catalogue.replacements`:
+    слово `status`, а без него — ссылка `superseded_by`): состояние —
     когда они совпадают ровно с заменами наших отвеченных правил, других номеров
     правил в тексте нет, а каждое заменяющее у нас отвечено. Не совпало, нашёлся
     лишний номер, заменяющее не отвечено или выгрузку прочитать не удалось
@@ -2212,12 +2217,13 @@ def look(
         return dict(once["export"])
 
     def replaced_or_none() -> dict[str, str] | None:
-        # Выгрузка не прочитана — замен не знаем, и находки о заменённых идут
-        # работой. Это не молчаливый откат: отказ выгрузки называет источник
-        # «каталог» своим исходом (045).
+        # Выгрузка не прочитана или не той формы — замен не знаем, и находки о
+        # заменённых идут работой. Это не молчаливый откат: отказ канала
+        # называет источник «каталог» своим исходом, а выгрузку без `rules` —
+        # находкой `export-form` (045, взгляд на #1564).
         try:
-            return superseded_by(export_once())
-        except ghrest.TransportError:
+            return catalogue.replacements(export_once())
+        except ghrest.TransportError, catalogue.BadExport:
             return None
 
     def protection_once() -> ProtectionRead:
