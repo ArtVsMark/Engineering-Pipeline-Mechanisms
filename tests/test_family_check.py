@@ -451,6 +451,48 @@ def test_a_tree_value_not_a_string_is_grey_not_a_trace(tmp_path: Path) -> None:
     assert (link.state, link.mine, link.latest) == ("unknown", "1.9", None)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("gives", ["bindings"]),
+        ("gives", 7),
+        ("gives", "steps"),
+        ("release", "v1.0.0"),
+        ("state", 1),
+        ("links", ["EPM"]),
+    ],
+    ids=[
+        "gives-список",
+        "gives-число",
+        "gives-строка",
+        "release-строка",
+        "state-число",
+        "links-список",
+    ],
+)
+def test_every_record_field_of_another_form_is_dropped_on_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], field: str, value: Any
+) -> None:
+    """Каждое читаемое поле записи не той формы снимается на входе (взгляд на #1567, 210).
+
+    Перечень форм — все поля `RECORD_FORM`, а не те, на которых падало:
+    вторая находка по одному месту чинилась поштучно, и третье поле осталось
+    открытым. Снятое поле называется предупреждением, а разбор идёт дальше:
+    строка `gives` больше не делает запись претендентом подстрокой.
+    """
+    root = tree(tmp_path / "t", uses=f"{MECH}/.github/workflows/step-lint.yml@v1.0.0")
+    broken = {**publisher(MECH, steps="0.7"), field: value}
+    source = tmp_path / "summary.json"
+    source.write_text(json.dumps(summary(broken, {"state": "published"})), encoding="utf-8")
+    said, trouble = fc.read_summary(str(source))
+    assert trouble == "" and said is not None
+    assert [field in one for one in said["projects"]] == [False]
+    assert f"поле {field}" in capsys.readouterr().err
+    fc.analyse(root, said, "o/p")  # не падает
+    if field == "gives":
+        assert fc.claimants(said, "steps") == []
+
+
 def test_a_summary_record_of_another_form_does_not_break(tmp_path: Path) -> None:
     """Запись сводки без `repo` и выпуск строкой — не падение (взгляд на #1567).
 
@@ -700,3 +742,32 @@ def test_by_publisher_directly() -> None:
     assert block["EIP"]["state"] == "ok"
     alone = {one["code"]: one["state"] for one in fc.by_publisher(analysis, "o/p", None)}
     assert alone == {"EIP": "ok", "EPM": "none"}
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "kept"),
+    [
+        ("links", {"EPM": ["ok"], "EIP": "taken"}, {"EIP": "taken"}),
+        ("gives", {"steps": 7, "bindings": "1.9"}, {"bindings": "1.9"}),
+        ("release", {"tag": ["v1"], "sha": SHA}, {"sha": SHA}),
+    ],
+    ids=["links-значение-список", "gives-значение-число", "release-тег-список"],
+)
+def test_a_nested_value_of_another_form_is_dropped_on_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], field: str, value: Any, kept: Any
+) -> None:
+    """Значение внутри словарного поля не строкой снимается на входе (взгляд на #1576).
+
+    Третья находка по форме записи сводки: верхний уровень разбирался, а
+    `links: {"EPM": ["ok"]}` ронял `uptake` в TypeError. Перечень форм — все
+    три словарных поля `RECORD_FORM`; каждое значение у них — строка.
+    """
+    root = tree(tmp_path / "t")
+    broken = {**publisher(MECH, steps="0.7"), field: value}
+    source = tmp_path / "summary.json"
+    source.write_text(json.dumps(summary(broken)), encoding="utf-8")
+    said, trouble = fc.read_summary(str(source))
+    assert trouble == "" and said is not None
+    assert said["projects"][0][field] == kept
+    assert f"{field}." in capsys.readouterr().err
+    fc.analyse(root, said, MECH)  # не падает, в том числе `uptake` у издателя

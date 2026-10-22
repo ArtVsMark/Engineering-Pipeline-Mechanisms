@@ -1,0 +1,82 @@
+# Значок Python «CI │ Python │ ОС │ наборы │ coverage │ release / PyPI │ version»
+# у потребителя — составным действием механизмов (#1563, решение владельца
+# 22.10.2026: переехало из каталога вместе со скриптом).
+#
+# СЕМЬЮ СПРОСИЛИ ПЕРВОЙ (162): действие взято у каталога вместе со скриптом
+# значка — у каталога оно было готовым действием значка Python, и приём
+# перенесён сюда переездом. У соседей по семье своего значка Python нет: они
+# звали действие каталога.
+#
+# СВОЙ КОД ДЕЙСТВИЕ БЕРЁТ ИЗ СВОЕЙ ЖЕ ВЫКАЧКИ, а не из дерева потребителя:
+# площадка кладёт репозиторий действия по тегу из `uses:` целиком, и
+# `github.action_path` указывает в него (тот же приём, что у `ci-complete`).
+# Прогоны спрашиваются у площадки ПРОЕКТА — того репозитория, в рабочем дереве
+# которого действие запущено.
+#
+# ЧУЖИХ `uses:` ЗДЕСЬ НЕТ НАМЕРЕННО. Python ставит вызывающий джоб: так
+# закреплённые версии живут в каталоге прогонов, где их поднимает перехват
+# Dependabot (#1387). У каталога действие ставило свой Python, и он оставался
+# в PATH следующим шагам вызывающего.
+#
+# Действие только РИСУЕТ картинку в `out` и кладёт рядом её зоны
+# (`python.zones.json`). Куда публиковать, решает проект. Код выхода 2 —
+# площадка не ответила или подписывать нечего; серым это не рисуется, и
+# прежний значок публикацией лучше не трогать.
+name: python-badge
+description: >-
+  Рисует значок «CI │ Python │ версии │ ОС │ наборы │ coverage │ release / PyPI
+  │ version»: проверки — исходами прогонов на main, покрытие и версия — из
+  файлов значков проекта, выпуск — сверкой с PyPI; серый — не проверялось.
+inputs:
+  ci-workflow:
+    description: Файл основного CI в .github/workflows — его исход красит «Python», работы — ОС.
+    default: ci.yml
+  out:
+    description: Куда положить SVG, относительно корня проекта.
+    default: .github/badges/python.svg
+  coverage-json:
+    description: Файл значка покрытия (shields endpoint); пусто — зона серая.
+    default: ""
+  coverage-all-json:
+    description: Покрытие, сведённое по всем ОС; задан — второе число в зоне покрытия.
+    default: ""
+  version-json:
+    description: Файл значка версии (shields endpoint); пусто — зона серая.
+    default: ""
+  suites:
+    description: Наборы проверок основного CI отдельной зоной, `работа[:подпись],…`, не больше четырёх.
+    default: ""
+  pypi:
+    description: Имя пакета на PyPI; пусто — зона «release / PyPI» показывает выпуск площадки.
+    default: ""
+  token:
+    description: Токен для чтения прогонов (нужно право actions read).
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: поставить транспорт из выкачки действия
+      shell: bash
+      run: python -m pip install --quiet "pyyaml>=6,<7" "$GITHUB_ACTION_PATH/../../../packages/transport"
+    - name: нарисовать значок Python
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        MECHANISMS: ${{ github.action_path }}/../../..
+        CI_WORKFLOW: ${{ inputs.ci-workflow }}
+        OUT: ${{ inputs.out }}
+        COVERAGE_JSON: ${{ inputs.coverage-json }}
+        COVERAGE_ALL_JSON: ${{ inputs.coverage-all-json }}
+        VERSION_JSON: ${{ inputs.version-json }}
+        PYPI: ${{ inputs.pypi }}
+        SUITES: ${{ inputs.suites }}
+      run: |
+        set -euo pipefail
+        args=(--root "$GITHUB_WORKSPACE" --ci "$CI_WORKFLOW" --out "$GITHUB_WORKSPACE/$OUT")
+        [ -n "$COVERAGE_JSON" ] && args+=(--coverage-json "$GITHUB_WORKSPACE/$COVERAGE_JSON")
+        [ -n "$COVERAGE_ALL_JSON" ] && args+=(--coverage-all-json "$GITHUB_WORKSPACE/$COVERAGE_ALL_JSON")
+        [ -n "$VERSION_JSON" ] && args+=(--version-json "$GITHUB_WORKSPACE/$VERSION_JSON")
+        [ -n "$PYPI" ] && args+=(--pypi "$PYPI")
+        [ -n "$SUITES" ] && args+=(--suites "$SUITES")
+        python "$MECHANISMS/scripts/python_badge.py" ${args[@]+"${args[@]}"}

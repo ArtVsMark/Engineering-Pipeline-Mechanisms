@@ -297,20 +297,21 @@ def test_no_declaration_outlives_its_badge() -> None:
     )
 
 
-#: Действие каталога, которое рисует единый значок (#1422).
-UNIFIED_ACTION: Final = "/.github/actions/project-badge@"
+#: Рисовальщик единого значка (#1422; у механизмов с #1563): шаг фактов зовёт
+#: его из выкачки `$MECHANISMS`, а не действием.
+UNIFIED_SCRIPT: Final = "$MECHANISMS/scripts/project_badge.py"
 FACTS_FLOW: Final = ROOT / ".github" / "workflows" / "step-facts.yml"
 BADGES_FLOW: Final = ROOT / ".github" / "workflows" / "badges.yml"
 
 
 def unified_step() -> dict[str, Any]:
-    """Шаг общего шага фактов, который зовёт действие единого значка, — ровно один."""
+    """Шаг общего шага фактов, который зовёт рисовальщика единого значка, — ровно один."""
     document = yaml.safe_load(FACTS_FLOW.read_text(encoding="utf-8")) or {}
     found = [
         step
         for job in (document.get("jobs") or {}).values()
         for step in (job or {}).get("steps") or []
-        if UNIFIED_ACTION in str((step or {}).get("uses") or "")
+        if UNIFIED_SCRIPT in str((step or {}).get("run") or "")
     ]
     assert len(found) == 1, f"шагов единого значка в step-facts.yml не один, а {len(found)} (075)"
     step: dict[str, Any] = found[0]
@@ -324,21 +325,21 @@ def test_the_unified_badge_is_drawn_from_the_declared_inputs() -> None:
     значок шаг прогона: без сверки объявление и шаг разошлись бы молча — витрина
     ждала бы одно имя, а прогон клал другое (022). Действие кладёт
     `project.svg` в `out-dir` под своим именем, и это имя обязано быть тем, что
-    публикует шаг фактов (`SHARED_STEP`).
+    публикует шаг фактов (`SHARED_STEP`). Входы шага — его окружение.
     """
-    said = unified_step().get("with") or {}
-    out = str(said.get("out-dir") or "")
-    assert out, "шаг значка не называет out-dir — действие писало бы в .github/badges дерева"
+    said = unified_step().get("env") or {}
+    out = str(said.get("OUT_DIR") or "")
+    assert out, "шаг значка не называет OUT_DIR — значок лёг бы в .github/badges дерева"
     assert facts.UNIFIED in facts.SHARED_STEP, (
         f"витрина ждёт {facts.UNIFIED}, а шаг фактов публикует {facts.SHARED_STEP}"
     )
     inputs = {
-        Path(str(said[key])).name for key in ("coverage-json", "version-json") if said.get(key)
+        Path(str(said[key])).name for key in ("COVERAGE_JSON", "VERSION_JSON") if said.get(key)
     }
     assert inputs == set(facts.ZONE_INPUTS), (
         f"зоны питаются {sorted(inputs)}, а объявлены {sorted(facts.ZONE_INPUTS)}"
     )
-    beside = {Path(str(said[key])).parent.as_posix() for key in ("coverage-json", "version-json")}
+    beside = {Path(str(said[key])).parent.as_posix() for key in ("COVERAGE_JSON", "VERSION_JSON")}
     assert beside == {out}, f"входы {sorted(beside)} не там, куда их кладёт сборка: {out}"
 
 
@@ -371,7 +372,7 @@ def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
     flow = yaml.safe_load(BADGES_FLOW.read_text(encoding="utf-8")) or {}
     # Шаг значка берёт файл прогона входом общего шага, а вход задаёт наш
     # вызов в `badges.yml` — или умолчание шага, если вызов его не задал.
-    given = str((unified_step().get("with") or {}).get("ci-workflow"))
+    given = str((unified_step().get("env") or {}).get("CI_WORKFLOW"))
     assert given == "${{ inputs.ci-workflow }}", f"шаг значка читает {given}, а не вход шага"
     step_flow = yaml.safe_load(FACTS_FLOW.read_text(encoding="utf-8")) or {}
     default = step_flow[True]["workflow_call"]["inputs"]["ci-workflow"]["default"]
@@ -397,7 +398,7 @@ def test_the_unified_badge_wakes_on_the_run_it_reads() -> None:
 def preview_versions() -> list[tuple[str, str]]:
     """Предрелизные шаги дерева: (файл прогона, версия) — те, что значок красит своей зоной.
 
-    Признак тот же, по которому их находит действие каталога: `python-version`
+    Признак тот же, по которому их находит рисовальщик (`python_versions`): `python-version`
     рядом с `allow-prereleases: true` в одном `with:`.
     """
     found: list[tuple[str, str]] = []
@@ -445,7 +446,7 @@ def run_unified_drop(tmp_path: Path, outcome: str) -> tuple[int, Path]:
     env = {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "RUNNER_TEMP": str(tmp_path),
-        "OUTCOME": outcome,
+        "RC": outcome,
     }
     done = subprocess.run(
         ["bash", "-e", "-c", run],
@@ -461,13 +462,13 @@ def run_unified_drop(tmp_path: Path, outcome: str) -> tuple[int, Path]:
 
 def test_a_built_unified_badge_is_laid_or_the_run_fails(tmp_path: Path) -> None:
     """Собранный значок кладётся рядом с фактами; не положить его — отказ, а не зелёный шаг."""
-    code, out = run_unified_drop(tmp_path / "lost", "success")
+    code, out = run_unified_drop(tmp_path / "lost", "0")
     assert code == 1 and not out.exists(), "значок пропал бы с ветки при зелёном шаге"
     built = tmp_path / "built"
     (built / ".project-badge").mkdir(parents=True)
     (built / ".project-badge/project.svg").write_text("<svg/>", encoding="utf-8")
     (built / ".project-badge/family-check.json").write_text("{}", encoding="utf-8")
-    code, out = run_unified_drop(built, "success")
+    code, out = run_unified_drop(built, "3")
     assert code == 0 and out.read_text(encoding="utf-8") == "<svg/>"
     assert (out.parent / "family-check.json").read_text(encoding="utf-8") == "{}"
     assert not (built / ".project-badge").exists(), "каталог входов остался в дереве потребителя"
@@ -476,13 +477,12 @@ def test_a_built_unified_badge_is_laid_or_the_run_fails(tmp_path: Path) -> None:
 def test_a_built_badge_without_its_family_check_still_lays_the_badge(tmp_path: Path) -> None:
     """Разбора семьи рядом нет — значок кладётся, разбор прежний: факты не роняются (#1534).
 
-    Собран ли разбор прибитым тегом действия каталога, дерево не проверяет, и
-    отказ здесь ронял бы публикацию фактов у каждого потребителя (084).
+    Отказ здесь ронял бы публикацию фактов у каждого потребителя (084).
     """
     built = tmp_path / "built"
     (built / ".project-badge").mkdir(parents=True)
     (built / ".project-badge/project.svg").write_text("<svg/>", encoding="utf-8")
-    code, out = run_unified_drop(built, "success")
+    code, out = run_unified_drop(built, "0")
     assert code == 0 and out.read_text(encoding="utf-8") == "<svg/>"
     assert not (out.parent / "family-check.json").exists()
 
@@ -494,5 +494,7 @@ def test_an_unbuilt_badge_leaves_the_branch_alone(tmp_path: Path) -> None:
     поэтому переносить прежний значок нечего; публикация фактов идёт без него
     (`publish_facts.targets`).
     """
-    code, out = run_unified_drop(tmp_path, "failure")
-    assert code == 0 and not out.exists()
+    # «1» — трасса Python: значок не собран, хоть код и не ноль (взгляд на #1576).
+    for rc in ("1", "2", "", "137"):
+        code, out = run_unified_drop(tmp_path / f"rc{rc or 'none'}", rc)
+        assert code == 0 and not out.exists(), rc
