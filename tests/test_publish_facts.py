@@ -143,11 +143,13 @@ def test_no_picture_keeps_both_old_files(
 
 
 #: Тег действия каталога `project-badge`, о котором сверено, что он кладёт
-#: `family-check.json` (взгляд на #1534). Сверка 22.10.2026 по `action.yml`
-#: тега: `family_check.py` пишет разбор в `out-dir`, а `project_badge.py` читает
-#: его оттуда же (`--family-json "$dir/family-check.json"`). Новый тег —
-#: повторить сверку и сдвинуть это значение тем же изменением.
-FAMILY_CHECK_VERIFIED_AT: Final = "v2.0.0"
+#: `family-check.json` (взгляд на #1534). Сверка по `action.yml` тега:
+#: `family_check.py` пишет разбор в `out-dir`, а `project_badge.py` читает его
+#: оттуда же (`--family-json "$dir/family-check.json"`) — на v2.0.0 и, повторно
+#: 22.10.2026 при подъёме (#1561), на v2.1.0: между тегами в `action.yml`
+#: тронуто только закрепление `setup-python`. Новый тег — повторить сверку и
+#: сдвинуть это значение тем же изменением.
+FAMILY_CHECK_VERIFIED_AT: Final = "v2.1.0"
 
 
 def test_the_badge_pin_was_checked_for_the_family_check() -> None:

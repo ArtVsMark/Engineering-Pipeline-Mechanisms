@@ -799,8 +799,8 @@
       "status": "active",
       "mechanism": "gate",
       "where": ".github/workflows/ci.yml — джоб attribution подключён действием каталога, а не переписан здесь; packages/transport/ghrest.py — общий транспорт вместо пяти копий, и tests/test_ghrest.py краснеет на появлении шестой",
-      "analysed": "2026-09-26",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.0.0",
+      "analysed": "2026-10-22",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.1.0",
       "origin_kind": "called"
     },
     "091": {
@@ -1064,8 +1064,8 @@
       "status": "active",
       "mechanism": "gate",
       "where": ".github/workflows/ci.yml — джоб attribution с отметкой cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b; отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть однозначным, и отметка тогда указывает не туда. Тот же полный отпечаток стоит в .github/workflows/ci.yml и в docs/decisions/001-attribution-of-merged-1.md — три места, одно написание. .github/authors.txt — список согласованных имён",
-      "analysed": "2026-09-26",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.0.0",
+      "analysed": "2026-10-22",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.1.0",
       "origin_kind": "called"
     },
     "124": {
@@ -1113,17 +1113,17 @@
       "status": "active",
       "mechanism": "gate",
       "where": ".github/workflows/ci.yml, джоб answer — действие каталога .github/actions/answer сверяет .rules/bindings.json с формой контракта ответа и прогоняет по дереву пробы «не применимо» (refuted_by); форму проверяет тот, кто её задаёт, а не наша копия (090). .rules/bindings.json — ответ по каждой записи каталога; scripts/pipeline_checks.py повторяет ту же форму для классов проверок; tests/test_bindings.py держит полноту ответа. Контракт назван целиком, а не одной его частью: `.rules/bindings.json` несёт `schema` — версию формы ответа, `answers_to` — версию ВЫГРУЗКИ, по которой ответы построены, `project` и `catalogue` — обратную ссылку на источник. Все четыре сверяются с живым каталогом: scripts/drift.py::catalogue_moved печатает отставание по каждому номеру порознь, а scripts/drift.py::reader_is_behind — по номеру, под который написан наш читатель чужой сводки",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/answer/action.yml@v2.0.0",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/answer/action.yml@v2.1.0",
       "origin_kind": "called",
       "why": "Ответ дополнен 17.09.2026. Правило перечисляет контракт потребления по частям — «экспорт, ответ о судьбе каждого правила, обратная ссылка в задачу-источник и версия схемы», — а ответ называл только вторую. Три остальные в дереве были и стояли неподписанными",
-      "analysed": "2026-10-14"
+      "analysed": "2026-10-22"
     },
     "130": {
       "status": "active",
       "mechanism": "pipeline",
       "where": ".github/workflows/rules-inbox.yml — новое правило каталога приходит не в чужой репозиторий, а ЗАДАЧЕЙ в трекер этого проекта, вместе с тремя числами долга по 177: без ответа, действующих без механизма, и разошедшийся контракт. Вторая половина правила — подбирать к новому правилу кандидатов из открытых задач — пока не сделана: список кандидатов проходная не собирает, и связывает правило с предметом окно",
-      "analysed": "2026-10-09",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v2.0.0",
+      "analysed": "2026-10-22",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v2.1.0",
       "origin_kind": "called",
       "why": "ПОЧЕМУ НЕ ГЕЙТ (перечитано 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237): новое правило приходит событием каталога по его расписанию, а не изменением этого проекта; красное на изменении отвечало бы за чужой выпуск (190). Недостроенная вторая половина — кандидаты из открытых задач — тоже была бы прогоном входящих, а не гейтом: это долг механизма, а не отказ от гейта."
     },
@@ -1168,8 +1168,8 @@
       "status": "active",
       "mechanism": "gate",
       "where": ".github/workflows/attribution-history.yml — личность записи узнаётся ЗАПИСЬЮ: первопредками общей ветки, а не тем, что окно объявило о себе. Гейт на изменении этого не видит по построению — он спрашивает коммиты ветки, а в общую ветку едет уплотнение, тело которому составляет очередь. Замер 10.09.2026: из ста первопредков после объявленной отметки шестнадцать шли без строки соавтора, и все они старше того дня, когда очередь научилась переносить трейлеры. Отметка `since` объявлена в прогоне: старый хвост переписать нечем, а вечное красное — фон, а не сигнал (051). Плюс CLAUDE.md, раздел «Подпись и открытие изменения».",
-      "analysed": "2026-09-26",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.0.0",
+      "analysed": "2026-10-22",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.1.0",
       "origin_kind": "called",
       "note": "Правило заменено правилом 221 в выгрузке 1.8 (superseded_by): действующий ответ — запись 221, эта — состояние на день замены, а не находка (export/README.md каталога). Правится ответ 221, а не этот: два ответа на один вопрос, правленные порознь, разойдутся молча (071)."
     },
@@ -1503,8 +1503,8 @@
       "status": "active",
       "mechanism": "pipeline",
       "where": ".github/workflows/rules-inbox.yml и scripts/debt.py — числа об одной величине приходят с двух сторон: каталог считает по своей выгрузке, проект — по .rules/bindings.json. При расхождении первым проверяется СВОЁ чтение: поле answers_to называет версию выгрузки, по которой построены ответы, и сверяется каталогом. Именно так расхождение и всплыло — schema была вписана по разумению окна вместо заготовки каталога, а не потому, что величины разные; scripts/drift.py — «один снимок старее другого» проверяется механизмом, а не гипотезой: сводка семьи сверяется с живым ответом дерева, и расхождение называется правилами поимённо",
-      "analysed": "2026-10-09",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v2.0.0",
+      "analysed": "2026-10-22",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:action.yml@v2.1.0",
       "origin_kind": "called",
       "why": "ПОЧЕМУ НЕ ГЕЙТ (перечитано 09.10.2026, ArtVsMark/Engineering-Pipeline-Mechanisms#1237): одна из сторон сверки — снимок каталога, обновляемый вне этого репозитория; расхождение возникает от чужого события, и гейт на изменении краснел бы на работе, которая его не трогала (190). Сверка идёт заходом дрейфа и прогоном входящих и называет расхождение поимённо."
     },
