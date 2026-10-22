@@ -1082,3 +1082,72 @@ def test_platform_time_is_parsed_in_one_place() -> None:
     """
     expected = {path: count for path, (count, _) in NOT_PLATFORM_TIME.items()}
     assert iso_parses() == expected
+
+
+class Recording(Fake):
+    """Запоминает тело и тип содержимого запроса — чтобы сверить, что ушло."""
+
+    seen: ClassVar[list[tuple[str, bytes]]] = []
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        self.seen.append((str(self.headers.get("Content-Type")), self.rfile.read(length)))
+        self.do_GET()
+
+
+def test_a_raw_body_goes_as_bytes_with_its_type() -> None:
+    """Тело байтами уходит как есть и со своим типом; JSON и байты вместе — отказ."""
+    Recording.seen = []
+    handler = type("Once", (Recording,), {"code": 201, "payload": b'{"id": 7}', "extra": {}})
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/x"
+        said = transport.request(
+            "POST", url, "t", raw=b"\x00\x01", content_type="application/octet-stream"
+        )
+        assert said == {"id": 7}
+        assert Recording.seen == [("application/octet-stream", b"\x00\x01")]
+        with pytest.raises(transport.TransportError, match="и JSON, и байтами"):
+            transport.request("POST", url, "t", {"a": 1}, raw=b"x")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_an_asset_is_uploaded_to_the_address_the_release_gave(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Адрес загрузки — из `upload_url` выпуска без шаблона, имя кодировано; иной ответ — отказ."""
+    asked: list[tuple[str, str, bytes | None, str]] = []
+
+    def fake(
+        method: str,
+        path: str,
+        token: str,
+        body: Any = None,
+        *,
+        raw: Any = None,
+        content_type: str = "",
+    ) -> Any:
+        asked.append((method, path, raw, content_type))
+        return {"name": "check_facts.py"}
+
+    monkeypatch.setattr(transport, "request", fake)
+    template = "https://uploads.github.com/repos/o/r/releases/9/assets{?name,label}"
+    said = transport.upload_asset(template, "facts schema.json", b"{}", "t")
+    assert said == {"name": "check_facts.py"}
+    assert asked == [
+        (
+            "POST",
+            "https://uploads.github.com/repos/o/r/releases/9/assets?name=facts%20schema.json",
+            b"{}",
+            "application/octet-stream",
+        )
+    ]
+    with pytest.raises(transport.TransportError, match="не той формы"):
+        transport.upload_asset("uploads/9/assets", "a", b"", "t")
+    monkeypatch.setattr(transport, "request", lambda *_a, **_k: None)
+    with pytest.raises(transport.TransportError, match="не о файле"):
+        transport.upload_asset(template, "a", b"", "t")
