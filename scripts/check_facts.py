@@ -46,6 +46,10 @@
 
 Исходы: 0 — файл отвечает договору; 1 — есть расхождения, перечислены по
 пунктам; 2 — проверка не отработала: схема, номер или файл не прочитаны.
+
+Семью спросили первой (162): проверка взята у каталога вместе с договором — у
+каталога она была готовой проверкой договора фактов, и приём перенесён сюда
+переездом; у соседей по семье своей проверки договора нет, они звали каталог.
 """
 
 import argparse
@@ -80,8 +84,15 @@ CONTRACT_PATH = beside(ROOT / "export" / "facts" / "facts-contract.md")
 
 #: Ветка, где издатель публикует факты и манифест семьи. Одна на всех.
 FACTS_REF = "badges"
+#: Исходы проверки: отвечает · расхождения названы · проверка не отработала (039).
+EXIT_OK = 0
+EXIT_FOUND = 1
+EXIT_BROKEN = 2
+
+#: Каталог фактов издателя на ветке ``badges`` — в ЕГО дереве, а не в нашем.
+BADGES_DIR = ".github/badges"
 #: Манифест семьи — рядом с фактами, на той же ветке (договор фактов 1.6, витрина #316).
-MANIFEST_PATH = ".github/badges/contracts.json"
+MANIFEST_PATH = f"{BADGES_DIR}/contracts.json"
 #: Мажор формы ``family``, на который договор соглашается. Номер, а не форма:
 #: форму целиком судит ``family_contract.form_flaw``, копии здесь нет (090).
 FAMILY_MAJOR = "1"
@@ -307,17 +318,6 @@ def contract_version(text: str) -> str:
     if not re.fullmatch(r"\d+\.\d+\.\d+", number):
         raise ValueError(f"номер договора «{number}» не формы X.Y.Z")
     return number
-
-
-def contract_series(text: str) -> str:
-    """Серия договора ``X.Y`` — то, что издатель пишет в ``schema`` своих фактов.
-
-    Разбор номера один на договор (214): сборка фактов и сборка указателя
-    спрашивают серию здесь, а не режут файл своим выражением — у сборки
-    фактов перевод строки уже однажды не срезался (обзор каталог #901).
-    """
-    # не проза: номер версии «мажор.минор.патч», уже проверенный по форме.
-    return ".".join(contract_version(text).split(".")[:2])
 
 
 #: Метки шага для CI издателя в прозе договора: между ними — блок YAML, который
@@ -691,22 +691,27 @@ def selftest() -> int:
             ("испорченный образец", spoiled.name, 1, True),
             ("образец с манифестом рядом", "family/facts.json", 0, False),
         ):
-            run = subprocess.run(
-                [
-                    sys.executable,
-                    "-I",
-                    "check_facts.py",
-                    "--file",
-                    target,
-                    "--repo",
-                    str(example["repo"]),
-                ],
-                cwd=tmp,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=600,
-            )
+            try:
+                run = subprocess.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        "check_facts.py",
+                        "--file",
+                        target,
+                        "--repo",
+                        str(example["repo"]),
+                    ],
+                    cwd=tmp,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=600,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                # Не отработал перенос — это поломка проверки, а не трасса (039).
+                broken.append(f"перенос, {name}: проверка не запустилась — {exc}")
+                continue
             warned = "манифеста семьи нет" in run.stdout
             ok = run.returncode == expected and warned == warns
             if not ok:
@@ -732,9 +737,9 @@ def selftest() -> int:
         print(annotate("error", "самопроверка провалена"), file=sys.stderr)
         for line in broken:
             print(f"  {line}", file=sys.stderr)
-        return 1
+        return EXIT_FOUND
     print("самопроверка пройдена: договор фактов держит каждое требование схемы")
-    return 0
+    return EXIT_OK
 
 
 def main() -> int:
@@ -778,7 +783,7 @@ def main() -> int:
             ),
             file=sys.stderr,
         )
-        return 2
+        return EXIT_BROKEN
     # не проза: номер версии «мажор.минор[.патч]».
     current = ".".join(number.split(".")[:2])
 
@@ -787,18 +792,18 @@ def main() -> int:
             drift = contract_drift(number, schema, CONTRACT_PATH.read_text(encoding="utf-8"))
         except OSError as error:
             print(f"проверка не отработала: проза договора не прочитана — {error}", file=sys.stderr)
-            return 2
+            return EXIT_BROKEN
         for line in drift:
             print(annotate("error", line), file=sys.stderr)
         if drift:
-            return 1
+            return EXIT_FOUND
         print(f"договор фактов {number}: схема и проза говорят тот же номер")
-        return 0
+        return EXIT_OK
 
     if args.file:
         if not args.repo:
             print("проверка не отработала: к --file нужен --repo", file=sys.stderr)
-            return 2
+            return EXIT_BROKEN
         try:
             facts = json.loads(pathlib.Path(args.file).read_text(encoding="utf-8"))
             found = check(facts, args.repo, schema)
@@ -807,20 +812,20 @@ def main() -> int:
             )
         except (OSError, ValueError) as error:
             print(f"проверка не отработала: файл не прочитан — {error}", file=sys.stderr)
-            return 2
+            return EXIT_BROKEN
         for line in found:
             print(f"  • {line}")
         for line in advise(facts, schema, current) + advise_family(manifest):
             print(f"  ⚠ {line}")
         print(f"{args.repo}: {'договору отвечает' if not found else f'расхождений {len(found)}'}")
-        return 1 if found else 0
+        return EXIT_FOUND if found else EXIT_OK
 
     print(
         "проверка не отработала: нужен --file <facts.json> --repo <владелец/имя>; "
         "факты соседей читает их читатель, а не держатель договора",
         file=sys.stderr,
     )
-    return 2
+    return EXIT_BROKEN
 
 
 if __name__ == "__main__":

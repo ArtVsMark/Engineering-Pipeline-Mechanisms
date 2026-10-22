@@ -10,6 +10,10 @@
 # прогона. Без флажка `apply` — сухой заход: выпуск собирается и проверяется,
 # но не ставится.
 #
+# СЕМЬЮ СПРОСИЛИ ПЕРВОЙ (162): прогон взят у каталога вместе с договором — у
+# каталога выпуск договора был готовым прогоном каталога, и приём перенесён
+# сюда переездом; у соседей по семье своего выпуска договора нет.
+#
 # ТРАНСПОРТ ОДИН (001). Страница и файлы ставятся `scripts/facts_release.py
 # --publish` через `ghrest`, а не `gh release create`, как у каталога.
 name: facts-release
@@ -52,6 +56,10 @@ jobs:
       - run: python -m pip install --quiet ./packages/transport
       - name: собрать и проверить выпуск
         if: ${{ !inputs.apply }}
+        env:
+          # Сухой заход читает теги площадки тем же транспортом: без токена
+          # гейт шага его отвергает (`test_steps_get_their_token`).
+          GH_TOKEN: ${{ github.token }}
         run: python scripts/facts_release.py --dist "$RUNNER_TEMP/facts-release" --notes "$RUNNER_TEMP/facts-notes.md"
       - name: выпустить
         if: inputs.apply

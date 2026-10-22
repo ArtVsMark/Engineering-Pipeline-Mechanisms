@@ -58,6 +58,7 @@ import sys
 
 import check_facts
 import ghrest
+import gitcall
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -84,16 +85,8 @@ def listed(out: str, tag: str) -> bool:
 
 def tag_exists(tag: str) -> bool:
     """Стоит ли такой тег — точной сверкой, а не по образцу."""
-    out = subprocess.run(
-        ["git", "tag", "--list", tag],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-        timeout=60,
-    ).stdout
-    return listed(out, tag)
+    # Отказ, отсутствие git и истёкший дедлайн — OSError, его ловит `main` (039).
+    return listed(gitcall.output(["tag", "--list", tag], OSError, cwd=str(ROOT), timeout=60), tag)
 
 
 def assemble(dist: pathlib.Path) -> list[pathlib.Path]:
@@ -117,14 +110,18 @@ def verify(dist: pathlib.Path, repo: str) -> list[str]:
         ("номер сходится с заголовками", ["--contract"]),
     )
     for name, args in runs:
-        run = subprocess.run(
-            [sys.executable, "-I", pathlib.Path(check_facts.__file__).name, *args],
-            cwd=dist,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=600,
-        )
+        try:
+            run = subprocess.run(
+                [sys.executable, "-I", pathlib.Path(check_facts.__file__).name, *args],
+                cwd=dist,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=600,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            found.append(f"у издателя не отработало бы: {name} — не запустилось: {exc}")
+            continue
         if run.returncode != 0:
             last = (
                 run.stderr.strip().splitlines() or run.stdout.strip().splitlines() or ["вывода нет"]
@@ -168,7 +165,7 @@ def notes(number: str, repo: str) -> str:
             "Проверить свой файл — тем же кодом, что судит его читатель:",
             "",
             "```",
-            "python check_facts.py --file .github/badges/facts.json --repo владелец/имя",
+            f"python check_facts.py --file {check_facts.BADGES_DIR}/facts.json --repo владелец/имя",
             "```",
             "",
             "Исход `0` — договору отвечает, `1` — расхождения названы, `2` — проверка не "
