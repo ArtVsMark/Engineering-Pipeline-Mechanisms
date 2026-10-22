@@ -461,7 +461,7 @@ def test_a_built_unified_badge_is_laid_or_the_run_fails(tmp_path: Path) -> None:
     (built / ".project-badge").mkdir(parents=True)
     (built / ".project-badge/project.svg").write_text("<svg/>", encoding="utf-8")
     (built / ".project-badge/family-check.json").write_text("{}", encoding="utf-8")
-    code, out = run_unified_drop(built, "1")
+    code, out = run_unified_drop(built, "3")
     assert code == 0 and out.read_text(encoding="utf-8") == "<svg/>"
     assert (out.parent / "family-check.json").read_text(encoding="utf-8") == "{}"
     assert not (built / ".project-badge").exists(), "каталог входов остался в дереве потребителя"
@@ -487,6 +487,7 @@ def test_an_unbuilt_badge_leaves_the_branch_alone(tmp_path: Path) -> None:
     поэтому переносить прежний значок нечего; публикация фактов идёт без него
     (`publish_facts.targets`).
     """
-    for rc in ("2", "", "137"):
+    # «1» — трасса Python: значок не собран, хоть код и не ноль (взгляд на #1576).
+    for rc in ("1", "2", "", "137"):
         code, out = run_unified_drop(tmp_path / f"rc{rc or 'none'}", rc)
         assert code == 0 and not out.exists(), rc

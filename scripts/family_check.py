@@ -858,6 +858,15 @@ def formed(projects: list[Any]) -> tuple[list[dict[str, Any]], list[str]]:
             if field in clean and clean[field] is not None and not isinstance(clean[field], kind):
                 refused.append(f"{one['repo']}: поле {field} не {kind.__name__} — снято")
                 del clean[field]
+            elif isinstance(clean.get(field), dict):
+                # ВЛОЖЕННОЕ ТОЖЕ (взгляд на #1576, третья находка по месту): у
+                # словарных полей значения — строки (`links` — состояние связи,
+                # `gives` — номер контракта, `release` — тег и коммит). Иное
+                # снимается: `links: {"EPM": ["ok"]}` ронял `uptake` в TypeError.
+                inner = {key: said for key, said in clean[field].items() if isinstance(said, str)}
+                for key in sorted(set(clean[field]) - set(inner), key=str):
+                    refused.append(f"{one['repo']}: {field}.{key} не строка — снято")
+                clean[field] = inner
         kept.append(clean)
     return kept, refused
 
