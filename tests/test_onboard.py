@@ -1349,6 +1349,13 @@ def test_the_family_slot_takes_the_owner_of_the_called_repo() -> None:
     assert '"Other/*"' in laid and module.FAMILY_SLOT not in laid
 
 
+@pytest.mark.parametrize("repo", ["Mechanisms", "/Mechanisms", "Other/", ""])
+def test_a_repo_without_an_owner_is_refused(repo: str) -> None:
+    """`--repo` не «владелец/имя» — отказ, а не слот с мусором вместо владельца (045)."""
+    with pytest.raises(module.NotRun, match="владелец/имя"):
+        module.data_kit(ROOT, repo)
+
+
 def test_a_kit_without_the_family_slot_is_refused(tmp_path: Path) -> None:
     """Слот пропал из заготовки — отказ, а не наше имя потребителю и не тихая выдержка (045)."""
     for one in module.DATA_KITTED:

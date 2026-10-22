@@ -926,7 +926,13 @@ def data_kit(root: Path, repo: str) -> dict[Path, str]:
             f"в заготовке {paths.DEPENDABOT} нет слота семьи «{FAMILY_SLOT}» — "
             "выпуск механизмов ждал бы у потребителя выдержку чужого"
         )
-    owner = repo.split("/", 1)[0]
+    owner, slash, name = repo.partition("/")
+    if not (owner and slash and name):
+        # Без формы «владелец/имя» владельца нет: `Mechanisms` дал бы слот
+        # «Mechanisms/*», и выпуск семьи молча ждал бы выдержку чужого (045).
+        raise NotRun(
+            f"--repo «{repo}» не «владелец/имя» — владельца семьи для {paths.DEPENDABOT} не взять"
+        )
     found[paths.DEPENDABOT] = said.replace(f'"{FAMILY_SLOT}"', f'"{owner}/*"')
     return found | {paths.AREA_PATHS: area_kit(root)}
 
