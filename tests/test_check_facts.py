@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -96,3 +97,71 @@ def test_the_ci_step_downloads_from_the_mechanisms_release() -> None:
     step = cf.ci_step(cf.CONTRACT_PATH.read_text(encoding="utf-8")) or ""
     assert "Engineering-Pipeline-Mechanisms/releases/download/$FACTS_CONTRACT/" in step
     assert "Engineering-Incidents-Playbook" not in step
+
+
+# --- имена проверки по одному ---------------------------------------------
+
+
+def schema() -> dict[str, Any]:
+    """Схема договора с диска — та, что едет на страницу выпуска."""
+    said: dict[str, Any] = json.loads(cf.SCHEMA_PATH.read_text(encoding="utf-8"))
+    return said
+
+
+def test_validate_passes_the_example_and_names_the_place_of_a_flaw() -> None:
+    """`validate`: образец чист, порча называется путём к месту."""
+    example = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    assert cf.validate(example, schema()) == []
+    assert cf.validate({"x": 1}, {"type": "object", "properties": {"x": {"type": "string"}}})
+    with pytest.raises(ValueError, match="незнакомого"):
+        cf.validate({}, {"strange": True})
+
+
+def test_advise_is_silent_on_the_example_and_names_a_root_field() -> None:
+    """`advise`: образец без советов, чужое поле корня — совет, а не отказ."""
+    example = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    # Серия «мажор.минор», а не полный номер: так зовут оба вызывающих.
+    number = cf.contract_version(cf.VERSION_PATH.read_text(encoding="utf-8"))
+    current = ".".join(number.split(".")[:2])
+    assert cf.advise(example, schema(), current) == []
+    said = cf.advise({**example, "своё": 1}, schema(), current)
+    assert any("своё" in one for one in said), said
+    assert cf.advise([], schema(), current) == []
+
+
+def test_advise_family_names_a_missing_manifest() -> None:
+    """`advise_family`: нет манифеста — совет с адресом, есть верный — тишина."""
+    assert any(cf.MANIFEST_PATH in one for one in cf.advise_family(None))
+    assert cf.advise_family("не JSON")
+
+
+def test_annotate_is_a_platform_command_only_in_a_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`annotate`: в прогоне — команда площадки, вне его — текст как есть."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert cf.annotate("warning", "т") == "::warning::т"
+    monkeypatch.delenv("GITHUB_ACTIONS")
+    assert cf.annotate("warning", "т") == "т"
+
+
+def test_contract_version_takes_only_three_numbers() -> None:
+    """`contract_version`: X.Y.Z проходит, иная форма — `ValueError`."""
+    assert cf.contract_version(" 2.1.0\n") == "2.1.0"
+    with pytest.raises(ValueError, match="не формы"):
+        cf.contract_version("2.1")
+
+
+def test_contract_drift_catches_a_number_raised_in_one_place() -> None:
+    """`contract_drift`: свой номер — пусто, чужой — расхождение названо."""
+    number = cf.contract_version(cf.VERSION_PATH.read_text(encoding="utf-8"))
+    prose = cf.CONTRACT_PATH.read_text(encoding="utf-8")
+    assert cf.contract_drift(number, schema(), prose) == []
+    assert cf.contract_drift("9.9.0", schema(), prose)
+
+
+def test_read_manifest_tells_absent_from_broken(tmp_path: Path) -> None:
+    """`read_manifest`: нет файла — `None`, не JSON — причина строкой."""
+    assert cf.read_manifest(tmp_path / "нет.json") is None
+    (tmp_path / "битый.json").write_text("{", encoding="utf-8")
+    assert cf.read_manifest(tmp_path / "битый.json") == "не JSON"
+    (tmp_path / "верный.json").write_text('{"family": "1.0"}', encoding="utf-8")
+    assert cf.read_manifest(tmp_path / "верный.json") == {"family": "1.0"}

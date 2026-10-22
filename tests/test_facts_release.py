@@ -3,6 +3,7 @@
 Переехало из каталога; своё здесь — публикация общим транспортом, а не `gh`.
 """
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -87,3 +88,28 @@ def test_a_page_without_upload_address_is_refused(
     monkeypatch.setattr(fr.ghrest, "request", lambda *_a, **_k: {"id": 1})
     with pytest.raises(fr.ghrest.TransportError, match="без адреса загрузки"):
         fr.publish("o/r", "facts-v2.1.0", "2.1.0", "abc", tmp_path, "", "t")
+
+
+def test_tag_for_is_named_by_the_contract_number() -> None:
+    """`tag_for`: тег — `facts-v` и номер; иная форма номера — отказ."""
+    assert fr.tag_for("2.1.0\n") == "facts-v2.1.0"
+    with pytest.raises(ValueError):
+        fr.tag_for("2.1")
+
+
+def test_step_files_reads_the_download_list_of_the_ci_step() -> None:
+    """`step_files`: список строки `for f in … ; do`, без строки — пусто."""
+    step = "dir=x\nfor f in check_facts.py facts.schema.json facts.version; do\n  :\ndone"
+    assert fr.step_files(step) == ["check_facts.py", "facts.schema.json", "facts.version"]
+    assert fr.step_files("echo нет") == []
+
+
+def test_verify_passes_the_assembled_release_and_names_a_broken_one(tmp_path: Path) -> None:
+    """`verify`: собранный выпуск чист у издателя, испорченный образец — назван."""
+    dist = tmp_path / "dist"
+    fr.assemble(dist)
+    example = dist / fr.check_facts.EXAMPLE_PATH.name
+    repo = str(json.loads(example.read_text(encoding="utf-8"))["repo"])
+    assert fr.verify(dist, repo) == []
+    example.write_text("{}", encoding="utf-8")
+    assert fr.verify(dist, repo)

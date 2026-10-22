@@ -60,7 +60,9 @@ import check_facts
 import ghrest
 import gitcall
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+#: Издатель договора фактов — механизмы (#1563). Имя нужно, когда прогон
+#: не назвал репозиторий: сухой заход окна выпускает за того же издателя.
+PUBLISHER = "ArtVsMark/Engineering-Pipeline-Mechanisms"
 
 #: Что лежит на странице выпуска — плоско, под своими именами. Порядок — порядок
 #: чтения издателем: проза, схема, номер, проверка, образец.
@@ -86,7 +88,7 @@ def listed(out: str, tag: str) -> bool:
 def tag_exists(tag: str) -> bool:
     """Стоит ли такой тег — точной сверкой, а не по образцу."""
     # Отказ, отсутствие git и истёкший дедлайн — OSError, его ловит `main` (039).
-    return listed(gitcall.output(["tag", "--list", tag], OSError, cwd=str(ROOT), timeout=60), tag)
+    return listed(gitcall.output(["tag", "--list", tag], OSError, timeout=60), tag)
 
 
 def assemble(dist: pathlib.Path) -> list[pathlib.Path]:
@@ -343,7 +345,7 @@ def main() -> int:
     parser.add_argument("--notes", type=pathlib.Path, help="куда записать текст страницы")
     parser.add_argument(
         "--repo",
-        default=os.environ.get("GITHUB_REPOSITORY", "ArtVsMark/Engineering-Pipeline-Mechanisms"),
+        default=os.environ.get("GITHUB_REPOSITORY", PUBLISHER),
     )
     parser.add_argument("--publish", action="store_true", help="поставить страницу и файлы")
     parser.add_argument("--target", default=os.environ.get("GITHUB_SHA", ""), help="коммит тега")
