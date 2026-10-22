@@ -65,9 +65,13 @@ U+FE0E и U+FE0F законны у него после любого знака `
 * ОДИН селектор варианта после основы его рода: стандартный и эмодзи
   (U+FE00–U+FE0F) — только в паре из `StandardizedVariants.txt` или
   `emoji-variation-sequences.txt`; идеографический (U+E0100–U+E01EF) — после
-  иероглифа; монгольский свободный (U+180B–U+180D, U+180F) — после
-  монгольской буквы. Селектор после чужой основы или два подряд — канал для
-  скрытых данных, и он краснеет;
+  знака со свойством `Unified_Ideograph`; монгольский свободный (U+180B–U+180D,
+  U+180F) — после монгольской буквы или знака, письмо `Mongolian` и категория
+  буквы или метки. Основы — данными (`selector-bases.txt`), а не именем знака:
+  двенадцать унифицированных иероглифов блока совместимости (U+FA0E …
+  U+FA29) именем «CJK COMPATIBILITY IDEOGRAPH» не узнать (поздний взгляд на
+  #1510). Селектор после чужой основы или два подряд — канал для скрытых
+  данных, и он краснеет;
 * символы-теги внутри флага-эмодзи из перечня RGI — Англии, Шотландии и
   Уэльса (`RGI_TAG_FLAGS`). Иная строка тегами — скрытая, даже внутри флага.
 
@@ -196,6 +200,10 @@ class Tables:
     modifiers: frozenset[int]
     #: Пары «основа, селектор» стандартных вариантов и вариантов эмодзи.
     variants: frozenset[tuple[int, int]]
+    #: `Unified_Ideograph` — основы идеографического селектора.
+    ideographs: frozenset[int]
+    #: Письмо `Mongolian` — из него основы монгольского селектора.
+    mongolian: frozenset[int]
 
 
 def codes(field: str) -> range:
@@ -242,6 +250,8 @@ def tables() -> Tables:
         modifiers=property_codes("pictographic.txt", "Emoji_Modifier"),
         variants=sequence_pairs("StandardizedVariants.txt")
         | sequence_pairs("emoji-variation-sequences.txt"),
+        ideographs=property_codes("selector-bases.txt", "Unified_Ideograph"),
+        mongolian=property_codes("selector-bases.txt", "Mongolian"),
     )
 
 
@@ -278,14 +288,20 @@ def joins(text: str, at: int) -> bool:
 
 
 def fits(base: str, mark: str) -> bool:
-    """Селектор `mark` законен после `base`: род селектора сверен с основой."""
-    code = ord(mark)
-    name = unicodedata.name(base, "")
+    """Селектор `mark` законен после `base`: род селектора сверен с основой по данным.
+
+    Монгольская основа — знак письма `Mongolian` категории буквы (`L*`) или
+    метки (`Mn`), но не сам селектор: это ровно те знаки, что зовутся
+    «MONGOLIAN LETTER …», без цифр и пунктуации письма.
+    """
+    code, at = ord(mark), ord(base)
     if within(code, MONGOLIAN_SELECTORS):
-        return name.startswith("MONGOLIAN LETTER")
+        mongolian = at in tables().mongolian and not selector(base)
+        category = unicodedata.category(base)
+        return mongolian and (category[0] == "L" or category == "Mn")
     if within(code, IDEOGRAPHIC_SELECTORS):
-        return name.startswith("CJK UNIFIED IDEOGRAPH")
-    return (ord(base), code) in tables().variants
+        return at in tables().ideographs
+    return (at, code) in tables().variants
 
 
 def always(char: str) -> str:

@@ -612,9 +612,28 @@ def test_a_refused_refresh_names_itself_and_the_queue_goes_on(
         raise module.ghrest.TransportError("422 merge conflict")
 
     monkeypatch.setattr(module, "sync_head", refused)
-    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_OK
-    assert "площадка отказала в подтяжке" in capsys.readouterr().out
+    # Сосед слит, но отказ не молчит: итог захода красный (взгляд на #1528, 045).
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
+    out = capsys.readouterr().out
+    assert "площадка отказала в подтяжке" in out and "исход красный" in out, out
     assert platform["merged"] == [3]
+
+
+def test_a_silent_platform_in_the_refresh_question_is_a_refusal_not_a_crash(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """Площадка не ответила в `red_kept` — причина головы и красный итог, а не упавший заход."""
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge"), change(3, "automerge")]
+
+    def silent(*_: Any, **__: Any) -> bool:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module, "base_ahead", silent)
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
+    out = capsys.readouterr().out
+    assert "площадка не ответила, подтягивать ли" in out, out
+    assert platform["merged"] == [3] and platform["synced"] == []
 
 
 def test_only_one_red_head_is_refreshed_per_run(

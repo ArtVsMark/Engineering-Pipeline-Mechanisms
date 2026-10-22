@@ -205,6 +205,40 @@ def test_a_selector_fits_only_a_base_of_its_kind(base: str, mark: str, said: boo
     assert module.fits(base, mark) is said
 
 
+@pytest.mark.parametrize(
+    ("base", "said"),
+    [("\ufa0e", True), ("\ufa29", True), ("\ufa0d", False), ("\u3400", True)],
+    ids=[
+        "совместимости-унифицированный",
+        "последний-из-двенадцати",
+        "совместимости-нет",
+        "расширение-A",
+    ],
+)
+def test_the_ideographic_base_is_the_unified_ideograph_property(base: str, said: bool) -> None:
+    """Основа идеографического селектора — `Unified_Ideograph`, а не имя знака (#1510).
+
+    Двенадцать унифицированных иероглифов блока совместимости зовутся «CJK
+    COMPATIBILITY IDEOGRAPH-…»: по имени законный селектор после них краснел.
+    """
+    assert module.fits(base, "\U000e0100") is said
+
+
+def test_the_mongolian_bases_are_those_named_letters() -> None:
+    """Основы монгольского селектора по данным — ровно знаки «MONGOLIAN LETTER …» (#1510).
+
+    Данными, а не именем: письмо `Mongolian`, категория буквы или метки, не
+    селектор. Сверка держит, что переход на данные набор не сдвинул.
+    """
+    named = {
+        code
+        for code in range(0x1800, 0x18B0)
+        if unicodedata.name(chr(code), "").startswith("MONGOLIAN LETTER")
+    }
+    by_data = {code for code in range(0x1800, 0x18B0) if module.fits(chr(code), "\u180b")}
+    assert named and by_data == named, sorted(by_data ^ named)
+
+
 def gate_python() -> str:
     """Версия языка, которой шаг конвейера исполняет гейт у потребителя."""
     import yaml

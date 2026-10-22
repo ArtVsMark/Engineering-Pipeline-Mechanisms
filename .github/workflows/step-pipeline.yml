@@ -159,9 +159,11 @@ jobs:
           ENFORCE: ${{ inputs.mechanism-gates-enforce }}
         # Умолчание мест — одно, у гейта (`DEFAULT_PATHS`): пустой вход его не
         # перебивает. `:-` — предполётная гоняет строку без входов шага.
+        # Пустой массив раскрывается формой `${a[@]+"${a[@]}"}`: под `set -u`
+        # `"${a[@]}"` у bash ниже 4.4 (macOS — 3.2) — «unbound variable».
         run: |
           set -euo pipefail
           args=()
           if [ -n "${PLACES:-}" ]; then args+=(--paths "$PLACES"); fi
           if [ "${ENFORCE:-false}" = "true" ]; then args+=(--enforce); fi
-          python $MECHANISMS/scripts/check_deadline.py "${args[@]}"
+          python $MECHANISMS/scripts/check_deadline.py ${args[@]+"${args[@]}"}

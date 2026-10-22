@@ -120,6 +120,26 @@ NO_FAMILY: Final = "сводка семьи не прочитана — числ
 NO_UPTAKE: Final = "обход клонов семьи не прочитан — кто взял наши шаги, неизвестно, а не «никто»"
 
 
+#: Чем кончается чтение файла фактов, который не разобрать: нет файла, чужая
+#: кодировка, не JSON, глубже предела разборщика. Один перечень на всех
+#: читающих (`facts_file`) — прежде у трёх была узкая ловля без двух последних.
+UNREADABLE: Final = (OSError, ValueError, RecursionError)
+
+
+def facts_file(path: Path) -> Any:
+    """Разобранный `facts.json`; любая поломка чтения — `NotRun` с причиной (#1478).
+
+    `UnicodeDecodeError` — подкласс `ValueError`, `JSONDecodeError` — тоже:
+    перечень `UNREADABLE` покрывает их, а `RecursionError` C-разборщика —
+    отдельно. Без этого глубокий или чужой кодировки файл уходил трассой с
+    кодом 1, а не причиной (039).
+    """
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except UNREADABLE as exc:
+        raise NotRun(f"{path} не прочитан — {exc!r}") from exc
+
+
 def uptake_facts(path: Path | None) -> dict[str, Any]:
     """«Взяли вызовом» — числа обхода клонов `family_uptake.py --out` (#1199).
 
@@ -132,8 +152,10 @@ def uptake_facts(path: Path | None) -> dict[str, Any]:
         said = json.loads(path.read_text(encoding="utf-8"))
         projects, steps = said["projects"], said["steps"]
         int(projects["took"]), int(projects["of"]), int(steps["taken"]), int(steps["of"])
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        print(f"warning: числа обхода не разобраны: {exc}", file=sys.stderr)
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
+        # Глубже предела разборщика — тоже «не разобраны», а не трасса,
+        # роняющая сборку фактов (тот же род, что у `family.load`).
+        print(f"warning: числа обхода не разобраны: {exc!r}", file=sys.stderr)
         return {"read": False, "why": NO_UPTAKE}
     return {"read": True, **said}
 
@@ -198,7 +220,7 @@ def family_facts(
         return picture
     try:
         ours = json.loads(answers.read_text(encoding="utf-8"))["rules"]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (*UNREADABLE, KeyError, TypeError) as exc:
         # ДЕФЕКТНЫЙ ОТВЕТ — ОТКАЗ, А НЕ ПУСТОЙ СЛОВАРЬ. Пустой дал бы
         # отставание, равное числу ВСЕХ машинных ответов семьи: правдоподобное
         # число, которое ложь. Нашёл внешний взгляд на #240.
@@ -763,9 +785,9 @@ def drawn_from(path: Path, out_dir: str, root: str = ".", supplier: str = "") ->
         print("значки не нарисованы: не назван --out-dir", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        facts = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"значки не нарисованы: {path} не прочитан — {exc}", file=sys.stderr)
+        facts = facts_file(path)
+    except NotRun as exc:
+        print(f"значки не нарисованы: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if clashed():
         return EXIT_BROKEN
@@ -814,9 +836,9 @@ def commit_of(path: Path) -> int:
     не бывает (находка `4a88697`).
     """
     try:
-        facts = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"коммит фактов не прочитан: {path} — {exc}", file=sys.stderr)
+        facts = facts_file(path)
+    except NotRun as exc:
+        print(f"коммит фактов не взят: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if not isinstance(facts, dict):
         why = f"факты не объект, а {type(facts).__name__}"
@@ -846,9 +868,9 @@ def endpoints_drawn(path: Path, out_dir: str) -> int:
     а непрочитанное называют «не прочитано», а не падают.
     """
     try:
-        facts = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"конечные точки не собраны: {path} не прочитан — {exc}", file=sys.stderr)
+        facts = facts_file(path)
+    except NotRun as exc:
+        print(f"конечные точки не собраны: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if not isinstance(facts, dict):
         print(f"конечные точки не собраны: {path} — факты не объект", file=sys.stderr)
