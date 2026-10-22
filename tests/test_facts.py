@@ -1373,6 +1373,40 @@ def test_drawn_from_refuses_what_it_cannot_read(tmp_path: Path) -> None:
     assert facts.drawn_from(thin, "") == facts.EXIT_BROKEN
 
 
+@pytest.fixture(params=["глубина", "кодировка"])
+def broken_facts(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
+    """Файл фактов, который не разобрать: глубже предела разборщика или не UTF-8."""
+    path = tmp_path / "facts.json"
+    if request.param == "глубина":
+        path.write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
+    else:
+        path.write_bytes('{"commit": "é"}'.encode("latin-1"))
+    return path
+
+
+def test_every_facts_reader_names_an_unreadable_file(
+    broken_facts: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Глубокий и не UTF-8 `facts.json` — причина и исход 2 у каждого читателя (#1478).
+
+    Прежде `drawn_from`, `commit_of` и `endpoints_drawn` ловили только
+    `OSError` и `JSONDecodeError`, и такой файл уходил трассой с кодом 1.
+    """
+    with pytest.raises(facts.NotRun, match="не прочитан"):
+        facts.facts_file(broken_facts)
+    out = str(tmp_path / "out")
+    assert facts.drawn_from(broken_facts, out) == facts.EXIT_BROKEN
+    assert facts.commit_of(broken_facts) == facts.EXIT_BROKEN
+    assert facts.endpoints_drawn(broken_facts, out) == facts.EXIT_BROKEN
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 3 and all("не прочитан —" in one for one in lines), lines
+
+
+def test_uptake_of_unreadable_numbers_is_unknown(broken_facts: Path) -> None:
+    """Числа обхода, которые не разобрать, — «не прочитано», а не упавшая сборка (#1478)."""
+    assert facts.uptake_facts(broken_facts) == {"read": False, "why": facts.NO_UPTAKE}
+
+
 def test_zeroed_names_a_count_cut_short_and_clashed_sees_no_clash(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
