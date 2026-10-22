@@ -193,3 +193,19 @@ def test_the_rules_of_an_export_skip_what_is_not_a_record() -> None:
     assert module.rules_of({"rules": [{"id": "001"}, "не правило", 7]}) == [{"id": "001"}]
     with pytest.raises(module.BadExport):
         module.rules_of({"rules": {}})
+
+
+def test_active_rules_read_the_status_once() -> None:
+    """Действующие — по `rule_status`: слово сильнее ссылки, до 1.9 решает ссылка (214)."""
+    export = {
+        "rules": [
+            {"id": "001", "status": "active"},
+            {"id": "002", "status": "superseded", "superseded_by": "001"},
+            {"id": "003", "status": "active", "superseded_by": "001"},
+            {"id": "004", "superseded_by": "001"},
+            {"id": "005"},
+        ]
+    }
+    assert module.active_rules(export) == {"001", "003", "005"}
+    with pytest.raises(module.BadExport):
+        module.active_rules({"schema": "1.9"})

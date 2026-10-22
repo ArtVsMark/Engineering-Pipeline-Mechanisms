@@ -44,7 +44,7 @@
         "признак": "\"check_*.py\""
       },
       ".claude/hooks": "не построено: роспись отказов и чистых прогонов (tests/test_gates_reject.py, tests/test_gates_pass.py) берёт только scripts/check_*.py, а её предикат читает исходы константами EXIT_* — у .claude/hooks/push_guard.py их 0 (11 литеральных return 0/2) — замер 17.10.2026: grep -c '== 2' и '== 0' по tests/test_push_guard.py — 30 и 23, то есть у единственного отвергающего хука прогоны отказа и пропуска есть, нарушений 0; новый хук без них не покраснеет нигде",
-      ".github": "исключено: прогон не гейт с предметом — он зовёт гейты scripts/, чьи отказ и чистый вход прогоняют tests/test_gates_reject.py и tests/test_gates_pass.py; составное действие ci-complete — обёртка scripts/ci_complete.py, вердикт которого прогоняет tests/test_gates_complete.py"
+      ".github": "исключено: прогон не гейт с предметом — он зовёт гейты scripts/, чьи отказ и чистый вход прогоняют tests/test_gates_reject.py и tests/test_gates_pass.py; составное действие ci-complete — обёртка scripts/ci_complete.py, вердикт которого прогоняет tests/test_gates_complete.py; составные действия значков python-badge, family-badge и project-badge (#1563) — обёртки scripts/python_badge.py, scripts/family_check.py и scripts/project_badge.py, чьи исходы прогоняют tests/test_python_badge.py, tests/test_family_check.py и tests/test_project_badge.py; собственный разбор кодов действия project-badge и его путь к транспорту исполняет tests/test_project_badge_action.py"
     },
     "158": {
       "paths.SOURCES": {

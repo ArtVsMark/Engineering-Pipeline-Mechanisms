@@ -7,7 +7,6 @@
 ушёл толчок.
 """
 
-import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +14,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import load_script
 
 module = load_script("publish_facts.py")
 
@@ -142,25 +141,20 @@ def test_no_picture_keeps_both_old_files(
     assert "family-check.json: без значка не публикуется" in capsys.readouterr().out
 
 
-#: Тег действия каталога `project-badge`, о котором сверено, что он кладёт
-#: `family-check.json` (взгляд на #1534). Сверка по `action.yml` тега:
-#: `family_check.py` пишет разбор в `out-dir`, а `project_badge.py` читает его
-#: оттуда же (`--family-json "$dir/family-check.json"`) — на v2.0.0 и, повторно
-#: 22.10.2026 при подъёме (#1561), на v2.1.0: между тегами в `action.yml`
-#: тронуто только закрепление `setup-python`. Новый тег — повторить сверку и
-#: сдвинуть это значение тем же изменением.
-FAMILY_CHECK_VERIFIED_AT: Final = "v2.1.0"
+def test_the_drawer_writes_what_the_step_publishes() -> None:
+    """Рисовальщик кладёт значок и разбор семьи под теми именами, что публикует шаг (#1532).
 
-
-def test_the_badge_pin_was_checked_for_the_family_check() -> None:
-    """Прибивка `project-badge` — та, о которой сверено, что разбор семьи она кладёт."""
-    step = (ROOT / ".github" / "workflows" / "step-facts.yml").read_text(encoding="utf-8")
-    pins = re.findall(r"/\.github/actions/project-badge@(\S+)", step)
-    assert pins, "шаг фактов не зовёт project-badge — предмета у сверки нет (075)"
-    assert set(pins) == {FAMILY_CHECK_VERIFIED_AT}, (
-        f"project-badge прибит к {pins}, а разбор семьи сверен на {FAMILY_CHECK_VERIFIED_AT}: "
-        "проверьте, что новый тег кладёт family-check.json, и сдвиньте сверку"
-    )
+    Пока значок рисовало действие каталога, это сверялось по его `action.yml`
+    на прибитом теге рукой (взгляд на #1534). С #1563 рисовальщик — наш
+    `project_badge.py --parts`, и сверка — по коду: разбор семьи ложится рядом
+    со значком именем `family_check.VERDICT`, а публикация берёт его тем же
+    именем.
+    """
+    drawer = load_script("project_badge.py")
+    published = {Path(one).name for one in module.PUBLISHES}
+    assert drawer.OUT.name in published
+    assert drawer.family_check.VERDICT.name in published
+    assert Path(module.PICTURE).name == drawer.OUT.name
 
 
 def test_a_publication_lays_over_and_keeps_the_rest(stand: dict[str, Path]) -> None:
