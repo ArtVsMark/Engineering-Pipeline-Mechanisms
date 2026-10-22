@@ -275,6 +275,30 @@ def test_an_unparsed_file_warns_without_enforce(
     assert gate.main(["--root", str(consumer), "--enforce"]) == gate.EXIT_BROKEN
 
 
+def test_nothing_parsed_is_inapplicable_not_clean(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ни один файл не разобран — «неприменимо», а не зелёное «дедлайн у каждого» (#1546)."""
+    git(tmp_path, "init", "-q")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "broken.py").write_text("def (:\n", encoding="utf-8")
+    assert gate.main(["--root", str(tmp_path)]) == gate.EXIT_OK
+    out = capsys.readouterr().out
+    assert "неприменимо: ни один из файлов 1 не разобран" in out, out
+    assert "дедлайн у каждого" not in out, out
+
+
+def test_the_counts_name_only_the_parsed_files(
+    consumer: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Счёт находок и чистого исхода — по разобранным файлам, одним знаменателем (#1546)."""
+    (consumer / "scripts" / "broken.py").write_text("def (:\n", encoding="utf-8")
+    assert gate.main(["--root", str(consumer)]) == gate.EXIT_OK
+    out = capsys.readouterr().out
+    assert "не разобрано файлов: 1 из 2" in out, out
+    assert "в разобранных файлах 1" in out, out
+
+
 def test_outside_a_repository_it_does_not_run(tmp_path: Path) -> None:
     """Без git дерево не прочитать — «не отработал», а не «кода нет»."""
     assert gate.main(["--root", str(tmp_path)]) == gate.EXIT_BROKEN

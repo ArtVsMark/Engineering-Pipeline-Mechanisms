@@ -297,7 +297,8 @@ def fits(base: str, mark: str) -> bool:
     code, at = ord(mark), ord(base)
     if within(code, MONGOLIAN_SELECTORS):
         mongolian = at in tables().mongolian and not selector(base)
-        return mongolian and unicodedata.category(base)[0] in "LM"
+        category = unicodedata.category(base)
+        return mongolian and (category[0] == "L" or category == "Mn")
     if within(code, IDEOGRAPHIC_SELECTORS):
         return at in tables().ideographs
     return (at, code) in tables().variants

@@ -167,7 +167,11 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
                 "по адресу его не отличить от живого"
             )
         elif wanted not in chosen:
-            print(f"::warning::рядом с фактами нет {Path(wanted).name} — на ветке остаётся прежний")
+            # Разбор семьи без значка лежит рядом, но не берётся: причина —
+            # не его отсутствие, а связь со значком (взгляд на #1546).
+            beside = (source.parent / Path(wanted).name).is_file()
+            why = "без значка не публикуется" if beside else "рядом с фактами нет"
+            print(f"::warning::{Path(wanted).name}: {why} — на ветке остаётся прежний")
     checkout(workdir)
     # СБОЙ ДИСКА И ОТСУТСТВИЕ ФАКТОВ — ТОЖЕ «НЕ ОПУБЛИКОВАНО», а не трейсбек с
     # кодом 1: шапка обещает исходы 0 и 2 и `::error::` (039, взгляд на #1233).

@@ -127,7 +127,9 @@ def test_a_picture_without_the_family_check_drops_the_old_one(
     assert "прежний разбор снимается" in capsys.readouterr().out
 
 
-def test_no_picture_keeps_both_old_files(stand: dict[str, Path]) -> None:
+def test_no_picture_keeps_both_old_files(
+    stand: dict[str, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
     """Значка нет — прежние значок и разбор остаются, даже если новый разбор лежит рядом."""
     assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
     (stand["tmp"] / "project.svg").unlink()
@@ -136,6 +138,8 @@ def test_no_picture_keeps_both_old_files(stand: dict[str, Path]) -> None:
     assert module.publish(stand["source"], stand["tmp"] / "w2", sha="def")
     assert on_branch(stand["remote"], PUBLISHED_PICTURE) == "<svg/>\n"
     assert on_branch(stand["remote"], PUBLISHED_FAMILY) == '{"links": []}\n'
+    # Причина названа своя: разбор лежит рядом, но без значка не берётся (#1546).
+    assert "family-check.json: без значка не публикуется" in capsys.readouterr().out
 
 
 #: Тег действия каталога `project-badge`, о котором сверено, что он кладёт
