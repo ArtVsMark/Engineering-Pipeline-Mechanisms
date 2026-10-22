@@ -1002,6 +1002,27 @@ def test_the_annotation_escape_is_one_text_in_its_two_places() -> None:
     assert len(lines) == 1, f"копии экранирования разошлись: {sorted(lines)}"
 
 
+#: Отступ тела сводки в четыре пробела — программа `sed` без `-z` (взгляд на #1485).
+INDENT_PROGRAM: Final = re.compile(r"sed '(s/\^/ +/)'")
+
+
+def test_the_summary_indent_is_one_text_in_its_two_places() -> None:
+    """Копия отступа сводки подписана, как и копия экранирования (071, взгляд на #1485).
+
+    Отступ держит тело сводки от разметки: заголовок с тремя кавычками закрыл
+    бы забор. Те же два места, что у экранирования, — и третья копия здесь
+    тоже новый повтор, а не подписанный.
+    """
+    found: dict[str, list[str]] = {}
+    for path in walk_deep(ROOT / ".github", "*.yml"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if program := INDENT_PROGRAM.search(line):
+                found.setdefault(path.relative_to(ROOT).as_posix(), []).append(program[1])
+    assert set(found) == ANNOTATION_PLACES, f"отступ сводки живёт не там: {sorted(found)}"
+    programs = {one for said in found.values() for one in said}
+    assert len(programs) == 1 and programs == {"s/^/    /"}, f"копии отступа разошлись: {programs}"
+
+
 @pytest.mark.parametrize("place", sorted(ANNOTATION_PLACES))
 def test_the_annotation_escapes_the_percent_first(place: str) -> None:
     """Знак процента экранируется ПЕРВЫМ, иначе экранирование съедает себя.

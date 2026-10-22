@@ -2512,6 +2512,25 @@ def restored_from_pin() -> str:
     return str(found[0]["read_at"])
 
 
+def test_every_watch_of_the_action_sits_at_its_pin() -> None:
+    """Каждая слежка за действием взгляда стоит на его закреплении — их две (взгляд на #1524).
+
+    Знание о возврате путей лежит в двух файлах поставщика: перечень — в
+    `restore-config.ts`, вызов и его условие — в `run.ts`. Слежка за одним
+    файлом сдвинула бы `read_at` молча при переносе вызова. Обе слежки
+    сдвигает перехватчик одним `compare` (`deps_intercept.follow`).
+    """
+    said = json.loads((ROOT / ".rules" / "vendor-watch.json").read_text(encoding="utf-8"))
+    mine = [one for one in said["watched"] if one.get("dep") == "anthropics/claude-code-action"]
+    paths = {one["path"] for one in mine}
+    assert {"src/github/operations/restore-config.ts", "src/entrypoints/run.ts"} <= paths, paths
+    pins = set(
+        re.findall(r"anthropics/claude-code-action@([0-9a-f]{40})", LOOK_BODY.read_text("utf-8"))
+    )
+    assert len(pins) == 1, f"действие взгляда закреплено не одним sha: {pins}"
+    assert {one["read_at"] for one in mine} == pins, (mine, pins)
+
+
 def test_the_restored_paths_are_read_from_the_pinned_action() -> None:
     """Перечень возвращаемых путей снят с той версии действия, что закреплена (взгляд на #1512).
 
