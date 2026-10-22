@@ -27,7 +27,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import names_used, walk
+from tests.conftest import load_script, names_used, walk
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -36,8 +36,19 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 #: Имена, под которыми транспорт ищет токен прогона (`ghrest.token_from_env`).
 TOKEN_NAMES = {"GH_TOKEN", "GITHUB_TOKEN"}
 #: Вызов скрипта в шаге прогона: имя файла берётся из строки запуска.
-CALL_RE = re.compile(r"python3?\s+scripts/([\w-]+\.py)")
+#: ФОРМ ДВЕ (#1556): из дерева — `python scripts/<имя>.py`, и из выкачки
+#: механизмов общего шага — `python "$MECHANISMS/scripts/<имя>.py"` (или
+#: `${{ env.MECHANISMS }}`). Видя только первую, гейт не судил ни одного общего
+#: шага, а с выносом `python-next` остался без предмета вовсе (206).
+CALL_RE = re.compile(
+    r"python3?\s+\"?(?:\$MECHANISMS/|\$\{\{\s*env\.MECHANISMS\s*\}\}/)?scripts/([\w-]+\.py)"
+)
 
+
+#: Режимы, в которых скрипт читает НЕ токен прогона, а названный свой: довод
+#: запуска → имя переменной. `drift.py --save-merge-ways` спрашивает настройки
+#: слияния токеном владельца (`drift.OWNER_TOKEN_ENV`) — его и несёт шаг.
+OWN_TOKEN_MODES: Final = {"--save-merge-ways": "MERGE_QUEUE_TOKEN"}
 
 #: Имя, которым механизм просит токен прогона.
 NEEDS_TOKEN: Final = "token_from_env"
@@ -103,7 +114,14 @@ def test_a_step_reading_the_platform_gets_a_token(
     продолжит. Поэтому его ловит гейт, а не прогон.
     """
     declared = set(step.get("env") or {})
-    assert declared & TOKEN_NAMES, (
+    run = str(step.get("run") or "")
+    wanted = {own for mode, own in OWN_TOKEN_MODES.items() if mode in run} or TOKEN_NAMES
+    assert declared & wanted, (
         f"{workflow}, шаг «{name}»: {script} читает площадку, а токена у шага нет — "
         "механизм молча вернётся к снимку и вынесет вердикт по прошлому (049)"
     )
+
+
+def test_the_own_token_mode_names_the_scripts_variable() -> None:
+    """Имя токена режима — то, что скрипт читает, а не вписанное рукой (005)."""
+    assert OWN_TOKEN_MODES["--save-merge-ways"] == load_script("drift.py").OWNER_TOKEN_ENV

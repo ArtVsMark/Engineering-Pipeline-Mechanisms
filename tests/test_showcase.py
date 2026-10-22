@@ -29,6 +29,7 @@ import yaml
 from tests.conftest import ROOT, badges_shown, load_script, walk
 
 facts = load_script("build_facts.py")
+policy = load_script("pipeline_checks.py")
 
 SHOWCASE = ROOT / ".rules" / "showcase.json"
 README = ROOT / "README.md"
@@ -401,9 +402,15 @@ def preview_versions() -> list[tuple[str, str]]:
     """
     found: list[tuple[str, str]] = []
     for path in walk(ROOT / ".github" / "workflows", "*.yml"):
+        if path.name.startswith("step-"):
+            # Тело общего шага судится в вызывающем: свой прогон у него не идёт.
+            continue
         document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        for body in (document.get("jobs") or {}).values():
-            for step in (body or {}).get("steps") or []:
+        for job, body in (document.get("jobs") or {}).items():
+            if policy.remote_call(body):
+                continue  # тело удалённого шага локально не прочитать
+            # Джоб-вызов — телом вызванного шага (#1556).
+            for step in policy.resolved_job(path, str(job)).get("steps") or []:
                 given = (step or {}).get("with") or {}
                 if given.get("allow-prereleases") is True and given.get("python-version"):
                     found.append((path.name, str(given["python-version"])))

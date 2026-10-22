@@ -449,6 +449,10 @@ def rerunnable(where: Path | None = None) -> dict[str, str]:
 #: стоял подстрокой в одном месте, второй читатель сравнивал имя записи целиком
 #: — и матричная проверка не совпадала ни с чем (022).
 CELL: Final = " ("
+#: Ячейка в имени записи: у своего джоба — в конце (`test-next (3.15)`), у
+#: вызова общего шага с матрицей вызывающего — перед вызванным джобом
+#: (`test-next (3.16) / test-next`, #1556).
+CELL_RE: Final = re.compile(re.escape(CELL) + r"[^()]*\)(?= / |$)")
 
 
 def job_of(name: str) -> str:
@@ -466,8 +470,12 @@ def job_of(name: str) -> str:
     объявленного в `.pipeline.yml`, то есть БЕЗ параметра, а сравнение шло с
     параметром. Форма, которой механизм не видит, и есть обход
     ([206](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/206-a-form-the-gate-cannot-see-is-a-bypass.md)).
+
+    ЯЧЕЙКА БЫВАЕТ И В СЕРЕДИНЕ (#1556). Матрица вызывающего общий шаг даёт
+    запись `test-next (3.16) / test-next`: отрезание «по первой скобке» отдало
+    бы `test-next` и потеряло вызванный джоб, а ответ называет составное имя.
     """
-    return name.split(CELL)[0]
+    return CELL_RE.sub("", name)
 
 
 def listed(name: str, allowed: dict[str, str] | None) -> bool:
