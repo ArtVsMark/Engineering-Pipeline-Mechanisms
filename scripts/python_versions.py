@@ -14,7 +14,12 @@
   * `${{ matrix.<ось> }}` — каждая ячейка оси матрицы своей работы и ячейки
     `include:` с этой осью (каталог #926); форма оси — список, одно значение,
     столбец — решает YAML, а не отступы;
+  * многострочный блок (`python-version: |`) — каждая его строка, как выше;
   * `allow-prereleases: true` в том же `with:` — версия предварительная.
+
+`python-version-file` без `python-version` — отказ с адресом: файл версии
+разбор не читает, и версия из него не выводится. Строка не числом и не осью
+(`3.x`, `pypy3.11`) версией не считается: со значком её не сравнить.
 
 ЧИСЛО БЕЗ КАВЫЧЕК ЧИТАЕТСЯ ТАК, КАК ЕГО ПРОЧТЁТ ПЛОЩАДКА. `python: [3.10]` YAML
 даёт числом 3.1, и площадка передаст setup-python именно `3.1`. Каталог
@@ -134,7 +139,7 @@ def axis_versions(job: dict[str, Any], axis: str) -> tuple[list[tuple[int, int]]
 
 
 def read(root: Path) -> tuple[list[Declared], list[Refused]]:
-    """Все объявленные версии прогонов дерева и отказы осей матриц.
+    """Все объявленные версии прогонов дерева и отказы: осей матриц и файлов версии.
 
     Прогон, который не разбирается, — `pipeline_checks.BadPolicy` у вызывающего:
     это ошибка входа, а не «версий нет» (075).
@@ -148,28 +153,38 @@ def read(root: Path) -> tuple[list[Declared], list[Refused]]:
                 raw = step.get("with")
                 given: dict[str, Any] = raw if isinstance(raw, dict) else {}
                 if "python-version" not in given:
+                    if "python-version-file" in given:
+                        refused.append(
+                            Refused(
+                                path.name,
+                                str(name),
+                                f"версия из файла {given['python-version-file']} — "
+                                "файл версии не читается, только python-version",
+                            )
+                        )
                     continue
-                said = str(given["python-version"]).strip()
                 preview = _preview(given)
-                axis = FROM_MATRIX_RE.match(said)
-                if axis:
-                    versions, why = axis_versions(job, axis[1])
+                # Строк может быть несколько: setup-python ставит каждую версию
+                # многострочного блока (`python-version: |`), и каждая — объявление
+                # (взгляд на #1565: прежде читалась только первая).
+                for said in str(given["python-version"]).splitlines():
+                    found, why = _said(job, said.strip())
                     if why:
                         refused.append(Refused(path.name, str(name), why))
-                    declared += [Declared(path.name, str(name), one, preview) for one in versions]
-                    continue
-                literal = LITERAL_RE.match(said)
-                if literal:
-                    version = (int(literal[1]), int(literal[2]))
-                    declared.append(Declared(path.name, str(name), version, preview))
+                    declared += [Declared(path.name, str(name), one, preview) for one in found]
     return declared, refused
 
 
-def in_workflows(root: Path, *, preview: bool = False) -> list[tuple[str, tuple[int, int]]]:
-    """(файл, версия) каждого объявления: закрывающие изменение или предварительные."""
-    return [(one.flow, one.version) for one in read(root)[0] if one.preview == preview]
+def _said(job: Any, said: str) -> tuple[list[tuple[int, int]], str | None]:
+    """Версии одной строки `python-version`: ось матрицы или число; иное — ни то ни другое.
 
-
-def matrix_refusals(root: Path) -> list[str]:
-    """Оси матриц, которые не разобрались, — строкой с адресом."""
-    return [str(one) for one in read(root)[1]]
+    Строка не числом и не осью (`3.x`, `pypy3.11`, пустая) версией не считается
+    и не отказ: со значком её не сравнить, а сломанным прогон от неё не стал.
+    """
+    if not said:
+        return [], None
+    axis = FROM_MATRIX_RE.match(said)
+    if axis:
+        return axis_versions(job, axis[1]) if isinstance(job, dict) else ([], "работа не словарь")
+    literal = LITERAL_RE.match(said)
+    return ([(int(literal[1]), int(literal[2]))] if literal else []), None

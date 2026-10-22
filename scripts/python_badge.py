@@ -145,8 +145,15 @@ def versions(root: Path = ROOT, ci: str = CI) -> list[tuple[str, str]]:
     планка осталась 3.14, а 3.15 стала обязательной проверкой — обе версии
     стоят в основном CI и обе держат слияние. Первая — планка.
     """
+    # ОДИН РАЗБОР ПРОГОНОВ НА ВЫЗОВ (взгляд на #1565): основные, следующие и
+    # отказы осей — из одного `read`, а не из трёх.
+    declared, refused = python_versions.read(root)
     main_ones = sorted(
-        {(f"{a}.{b}", flow) for flow, (a, b) in python_versions.in_workflows(root) if flow == ci},
+        {
+            (f"{one.version[0]}.{one.version[1]}", one.flow)
+            for one in declared
+            if one.flow == ci and not one.preview
+        },
         key=lambda one: series(one[0]),
     )
     if not main_ones and (root / python_versions.WORKFLOWS / ci).is_file():
@@ -156,13 +163,11 @@ def versions(root: Path = ROOT, ci: str = CI) -> list[tuple[str, str]]:
             floor = None
         if floor:
             main_ones = [(f"{floor[0]}.{floor[1]}", ci)]
-    upcoming = [
-        (f"{a}.{b}", flow) for flow, (a, b) in python_versions.in_workflows(root, preview=True)
-    ]
+    upcoming = [(f"{one.version[0]}.{one.version[1]}", one.flow) for one in declared if one.preview]
     # Ось матрицы не разобралась — ячейки нет, но и молчания нет (каталог #926):
     # адрес уходит предупреждением в журнал шага.
-    for refusal in python_versions.matrix_refusals(root):
-        print(f"::warning::версия из матрицы не прочитана — {refusal}", file=sys.stderr)
+    for refusal in refused:
+        print(f"::warning::версия не прочитана — {refusal}", file=sys.stderr)
     return main_ones + sorted(set(upcoming), key=lambda one: (series(one[0]), one[1]))
 
 
@@ -215,15 +220,26 @@ def by_system(jobs: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return [(name, total.get(name, "none")) for name in SYSTEMS.values()]
 
 
-def ladder() -> list[str]:
+def ladder(known: list[tuple[str, str]] | None = None) -> list[str]:
     """Версии лесенки семьи — те, что проверяет само дерево механизмов.
 
     Берутся тем же `versions()`, что рисует значок механизмов: второй записи
     лесенки нет (214). Решение владельца 16.10: у всех один набор версий.
     У соседа дерево механизмов — выкачка общего шага `$MECHANISMS`, а не его
     рабочий каталог; без неё — само дерево, где скрипт исполняется.
+
+    `known` — версии того же дерева, уже прочитанные вызывающим: второй разбор
+    одних прогонов печатал бы каждое предупреждение об оси дважды (взгляд на
+    #1565). Вызывающий отдаёт их, только когда дерево то же.
     """
-    return [label for label, _ in versions(pipeline_checks.supplier_of() or ROOT)]
+    if known is not None:
+        return [label for label, _ in known]
+    return [label for label, _ in versions(mechanisms_tree())]
+
+
+def mechanisms_tree() -> Path:
+    """Дерево механизмов: выкачка общего шага `$MECHANISMS`, без неё — рабочий каталог."""
+    return pipeline_checks.supplier_of() or ROOT
 
 
 def on_ladder(
@@ -745,7 +761,8 @@ def main(
                 file=sys.stderr,
             )
             return EXIT_BROKEN
-    steps = ladder()
+    same = mechanisms_tree().resolve() == args.root.resolve()
+    steps = ladder(pairs if same else None)
     if released is None and set(steps) - {label for label, _ in parts}:
         try:
             released = (builds or platform_builds)()

@@ -138,7 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     text = render(table)
     target = text_width.TABLE
     if args.check:
-        if target.read_text(encoding="utf-8") != text:
+        try:
+            written = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            # Нет записанной таблицы — тоже расхождение с замером, а не трасса
+            # (взгляд на #1565): исход объявлен, и чинится он записью.
+            print(f"{target} не прочитана — {exc.strerror}: с замером не сходится", file=sys.stderr)
+            return EXIT_DIFFERS
+        if written != text:
             print(f"{target} расходится с замером шрифтов", file=sys.stderr)
             return EXIT_DIFFERS
         print(f"{target.name} совпадает с замером")

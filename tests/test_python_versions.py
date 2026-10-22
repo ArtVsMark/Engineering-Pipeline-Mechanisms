@@ -17,6 +17,16 @@ module = load_script("python_versions.py")
 policy = load_script("pipeline_checks.py")
 
 
+def in_workflows(root: Path, *, preview: bool = False) -> list[tuple[str, tuple[int, int]]]:
+    """(файл, версия) объявлений дерева — закрывающих или предварительных."""
+    return [(one.flow, one.version) for one in module.read(root)[0] if one.preview == preview]
+
+
+def refusals(root: Path) -> list[str]:
+    """Отказы разбора дерева строкой с адресом."""
+    return [str(one) for one in module.read(root)[1]]
+
+
 def flow(root: Path, text: str, name: str = "ci.yml") -> Path:
     """Кладёт прогон в дерево и отдаёт корень."""
     folder = root / ".github" / "workflows"
@@ -44,14 +54,14 @@ def test_a_literal_version_is_read(tmp_path: Path) -> None:
         "      - uses: actions/setup-python@v6\n        with:\n          python-version: '3.12'\n"
         "      - uses: actions/setup-python@v6\n        with:\n          python-version: 3.13\n",
     )
-    assert module.in_workflows(root) == [("ci.yml", (3, 12)), ("ci.yml", (3, 13))]
-    assert module.matrix_refusals(root) == []
+    assert in_workflows(root) == [("ci.yml", (3, 12)), ("ci.yml", (3, 13))]
+    assert refusals(root) == []
 
 
 def test_an_unquoted_ten_is_read_as_the_platform_reads_it(tmp_path: Path) -> None:
     """`3.10` без кавычек YAML и площадка читают как 3.1 — что гоняется, то и названо."""
     root = matrix_flow(tmp_path, "      matrix:\n        python: [3.10]\n")
-    assert module.in_workflows(root) == [("ci.yml", (3, 1))]
+    assert in_workflows(root) == [("ci.yml", (3, 1))]
 
 
 def test_the_preview_mark_is_read_only_in_its_own_with(tmp_path: Path) -> None:
@@ -63,8 +73,8 @@ def test_the_preview_mark_is_read_only_in_its_own_with(tmp_path: Path) -> None:
         "      - uses: actions/setup-python@v6\n        with:\n"
         "          allow-prereleases: true\n          python-version: '3.15'\n",
     )
-    assert module.in_workflows(root) == [("ci.yml", (3, 14))]
-    assert module.in_workflows(root, preview=True) == [("ci.yml", (3, 15))]
+    assert in_workflows(root) == [("ci.yml", (3, 14))]
+    assert in_workflows(root, preview=True) == [("ci.yml", (3, 15))]
 
 
 @pytest.mark.parametrize(
@@ -105,8 +115,8 @@ def test_the_matrix_axis_is_read_in_every_form(
 ) -> None:
     """Ось матрицы разбирается во всех формах справки площадки — их решает YAML, а не отступы."""
     root = matrix_flow(tmp_path, matrix)
-    assert sorted(one for _, one in module.in_workflows(root)) == versions
-    assert module.matrix_refusals(root) == []
+    assert sorted(one for _, one in in_workflows(root)) == versions
+    assert refusals(root) == []
 
 
 @pytest.mark.parametrize(
@@ -129,10 +139,10 @@ def test_an_unreadable_axis_is_refused_with_its_address(
 ) -> None:
     """Ось не разобралась — отказ с адресом прогона и работы, а не молчаливый пропуск (045)."""
     root = matrix_flow(tmp_path, matrix)
-    refused = module.matrix_refusals(root)
+    refused = refusals(root)
     assert len(refused) == 1 and why in refused[0], refused
     assert refused[0].startswith(".github/workflows/ci.yml: работа test-matrix:")
-    assert module.in_workflows(root) == []
+    assert in_workflows(root) == []
 
 
 def test_a_preview_matrix_is_read_as_preview(tmp_path: Path) -> None:
@@ -140,8 +150,8 @@ def test_a_preview_matrix_is_read_as_preview(tmp_path: Path) -> None:
     root = matrix_flow(
         tmp_path, '      matrix:\n        python: ["3.16"]\n', "          allow-prereleases: true\n"
     )
-    assert module.in_workflows(root) == []
-    assert module.in_workflows(root, preview=True) == [("ci.yml", (3, 16))]
+    assert in_workflows(root) == []
+    assert in_workflows(root, preview=True) == [("ci.yml", (3, 16))]
 
 
 def test_an_unparsable_flow_is_an_input_error(tmp_path: Path) -> None:
@@ -162,10 +172,10 @@ def test_our_own_tree_declares_its_matrix(tmp_path: Path) -> None:
     cells, _ = policy.matrix_axis(
         root / ".github" / "workflows" / "ci.yml", "test-matrix", "python"
     )
-    declared = {f"{a}.{b}" for flow_, (a, b) in module.in_workflows(root) if flow_ == "ci.yml"}
+    declared = {f"{a}.{b}" for flow_, (a, b) in in_workflows(root) if flow_ == "ci.yml"}
     assert set(cells) <= declared, (cells, declared)
-    assert module.in_workflows(root, preview=True), "предрелизной версии в дереве не найдено"
-    assert module.matrix_refusals(root) == []
+    assert in_workflows(root, preview=True), "предрелизной версии в дереве не найдено"
+    assert refusals(root) == []
 
 
 def test_axis_versions_read_a_job_directly() -> None:
@@ -184,3 +194,30 @@ def test_a_declared_version_names_its_flow_job_and_kind(tmp_path: Path) -> None:
         tmp_path, '      matrix:\n        python: ["3.16"]\n', "          allow-prereleases: true\n"
     )
     assert module.read(root)[0] == [module.Declared("ci.yml", "test-matrix", (3, 16), True)]
+
+
+def test_a_multiline_version_declares_every_line(tmp_path: Path) -> None:
+    """`python-version: |` — каждая строка блока, а не первая (взгляд на #1565)."""
+    root = flow(
+        tmp_path,
+        "on: push\njobs:\n  t:\n    runs-on: ubuntu-26.04\n    steps:\n"
+        "      - uses: actions/setup-python@v6\n        with:\n"
+        "          python-version: |\n            3.13\n            3.14\n",
+    )
+    assert in_workflows(root) == [("ci.yml", (3, 13)), ("ci.yml", (3, 14))]
+    assert refusals(root) == []
+
+
+def test_a_version_file_is_a_refusal_with_address(tmp_path: Path) -> None:
+    """`python-version-file` без `python-version` — отказ с адресом, а не «версий нет»."""
+    root = flow(
+        tmp_path,
+        "on: push\njobs:\n  t:\n    runs-on: ubuntu-26.04\n    steps:\n"
+        "      - uses: actions/setup-python@v6\n        with:\n"
+        "          python-version-file: .python-version\n",
+    )
+    assert in_workflows(root) == []
+    assert refusals(root) == [
+        ".github/workflows/ci.yml: работа t: версия из файла .python-version — "
+        "файл версии не читается, только python-version"
+    ]

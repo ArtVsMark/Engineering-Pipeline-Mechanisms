@@ -206,3 +206,5 @@ def test_the_builder_checks_and_writes_the_table(
     assert json.loads(target.read_text(encoding="utf-8")) == table
     assert builder.main(argv) == builder.EXIT_OK
     assert json.loads(target.read_text(encoding="utf-8")) == other
+    target.unlink()
+    assert builder.main([*argv, "--check"]) == builder.EXIT_DIFFERS  # нет таблицы — не трасса

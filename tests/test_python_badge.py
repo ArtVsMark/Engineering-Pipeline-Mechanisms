@@ -865,3 +865,45 @@ def test_the_platform_release_skips_drafts_and_previews(monkeypatch: pytest.Monk
     monkeypatch.setattr(reload.ghrest, "paginate", broken)
     with pytest.raises(reload.NoAnswer):
         reload.platform_release()
+
+
+def test_a_refusal_is_warned_once_when_the_ladder_is_the_same_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Дерево механизмов — то же, что рисуется: прогоны разбираются один раз (взгляд на #1565)."""
+    tree(tmp_path)
+    (tmp_path / ".github" / "workflows" / "broken.yml").write_text(
+        "on: push\njobs:\n  t:\n    runs-on: x\n    steps:\n"
+        "      - uses: actions/setup-python@v6\n        with:\n"
+        "          python-version: ${{ matrix.python }}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MECHANISMS", str(tmp_path))
+    read: list[Path] = []
+    real = module.python_versions.read
+
+    def counted(root: Path) -> Any:
+        read.append(root)
+        return real(root)
+
+    monkeypatch.setattr(module.python_versions, "read", counted)
+    draw(
+        tmp_path,
+        tmp_path / "p.svg",
+        runs=lambda _: [run("success", "2026-10-01T10:00Z")],
+        jobs=lambda _: [job("success", "ubuntu-latest", "test")],
+    )
+    warnings = [line for line in capsys.readouterr().err.splitlines() if "::warning::" in line]
+    assert len(warnings) == 1
+    assert "broken.yml" in warnings[0]
+    assert len(read) == 1
+
+
+def test_the_mechanisms_tree_is_the_supplier_or_the_working_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Дерево механизмов — выкачка `$MECHANISMS`, без неё — рабочий каталог."""
+    monkeypatch.setenv("MECHANISMS", str(tmp_path))
+    assert module.mechanisms_tree() == tmp_path
+    monkeypatch.delenv("MECHANISMS")
+    assert module.mechanisms_tree() == module.ROOT
