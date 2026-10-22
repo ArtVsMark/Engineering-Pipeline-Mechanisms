@@ -283,6 +283,16 @@ jobs:
     name: attribution
     if: github.event_name != 'push'
     uses: ./.github/workflows/step-attribution.yml
+    with:
+      # Отметка, с которой атрибуция обязательна. Решение и отвергнутые
+      # варианты — docs/decisions/001-attribution-of-merged-1.md.
+      #
+      # Отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть
+      # однозначным, и отметка тогда указывает не туда. Соседний прогон
+      # `attribution-history.yml` требует того же от своей отметки, а здесь
+      # семь знаков жили с первого дня — одно правило, два прочтения (090).
+      # Нашёл внешний взгляд на #147.
+      baseline: cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b
     permissions:
       contents: read
       checks: read

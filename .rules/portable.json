@@ -115,6 +115,12 @@
       "answer": "ours",
       "why": "@provider"
     },
+    ".github/attribution-since": {
+      "answer": "configured",
+      "where": [
+        ".github/attribution-since"
+      ]
+    },
     ".github/authors.txt": {
       "answer": "configured",
       "where": [
@@ -311,6 +317,13 @@
       "answer": "configured",
       "where": [
         ".github/authors.txt"
+      ]
+    },
+    ".github/workflows/step-attribution-history.yml": {
+      "answer": "configured",
+      "where": [
+        ".github/authors.txt",
+        ".github/attribution-since"
       ]
     },
     ".github/workflows/step-agent-pr.yml": {

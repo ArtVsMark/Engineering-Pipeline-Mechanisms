@@ -58,7 +58,8 @@
 [`step-facts.yml`](.github/workflows/step-facts.yml) (факты о проекте для витрины семьи) ·
 [`step-agent-pr.yml`](.github/workflows/step-agent-pr.yml) (открытие изменения) ·
 [`step-task-items.yml`](.github/workflows/step-task-items.yml) (разбор слитого против задачи) ·
-[`step-deps-intercept.yml`](.github/workflows/step-deps-intercept.yml) (подъём закреплённых действий по сигналу Dependabot).
+[`step-deps-intercept.yml`](.github/workflows/step-deps-intercept.yml) (подъём закреплённых действий по сигналу Dependabot) ·
+[`step-attribution-history.yml`](.github/workflows/step-attribution-history.yml) (атрибуция в истории общей ветки).
 Токен владельца `MERGE_QUEUE_TOKEN` и ключ агента `CLAUDE_CODE_OAUTH_TOKEN`
 передаются вызовом явно, по имени: секретов вызывающего общий шаг не видит.
 

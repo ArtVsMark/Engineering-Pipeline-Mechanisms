@@ -351,7 +351,8 @@ beyond_the_change:
 
   # Атрибуция в итоговой истории общей ветки. Долг по УЖЕ слитому: правкой
   # изменения он не чинится, и слияния держать ему нечего.
-  attribution-history:
+  # Имя составное: сверка — общим шагом `step-attribution-history.yml` (#1556).
+  "attribution-history / attribution-history":
     class: advisory
     why: долг по уже слитому — правкой изменения не чинится; это источник 3, а не стоп
     addressee: scripts/main_red.py

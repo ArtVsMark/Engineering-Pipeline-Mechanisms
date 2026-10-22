@@ -22,24 +22,12 @@ import subprocess
 from typing import Final
 
 import pytest
-import yaml
 
-from tests.conftest import ROOT
+# Отметку называет шаг атрибуции, исполненный на дереве: чтение одно (090).
+from tests.test_attribution_history import boundary
 
-#: Прогон, из которого берётся объявленная отметка.
-RUN: Final = ROOT / ".github" / "workflows" / "attribution-history.yml"
 #: Тема коммита, которую составляет площадка при обычном мерже.
 PLATFORM_MERGE_RE: Final = re.compile(r"^Merge pull request #\d+ from ")
-
-
-def boundary() -> str:
-    """Объявленная отметка — из прогона атрибуции, а не из второго списка."""
-    run = yaml.safe_load(RUN.read_text(encoding="utf-8"))
-    for job in run["jobs"].values():
-        for step in job["steps"]:
-            if "attribution@" in str(step.get("uses", "")):
-                return str(step["with"]["since"]).strip()
-    raise AssertionError(f"в {RUN.name} нет шага атрибуции — отметку взять неоткуда (075)")
 
 
 def first_parents(since: str) -> list[tuple[str, str]]:

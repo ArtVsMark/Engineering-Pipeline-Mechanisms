@@ -1884,8 +1884,23 @@ def test_every_run_addressed_to_the_duty_wakes_it() -> None:
     flows = ROOT / ".github" / "workflows"
     addressed = set()
     for path in walk(flows, "*.yml"):
+        if path.name.startswith("step-"):
+            # Свого прогона у общего шага нет: его запись несёт вызывающий.
+            continue
         run = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        names = {str(job.get("name", job_id)) for job_id, job in (run.get("jobs") or {}).items()}
+        names = set()
+        for job_id, job in (run.get("jobs") or {}).items():
+            name = str(job.get("name", job_id))
+            names.add(name)
+            # ИМЯ ЗАПИСИ ВЫЗОВА СОСТАВНОЕ — «<вызывающий> / <вызванный>» (#1556):
+            # без него прогон, вынесенный в общий шаг, выпал бы из сверки молча.
+            called = str(job.get("uses", ""))
+            if called.startswith("./"):
+                step = yaml.safe_load((ROOT / called).read_text(encoding="utf-8")) or {}
+                names |= {
+                    f"{name} / {inner.get('name', inner_id)}"
+                    for inner_id, inner in (step.get("jobs") or {}).items()
+                }
         if names & mine:
             addressed.add(str(run.get("name", path.stem)))
     assert addressed, "дежурному не адресован ни один прогон — проверять нечего (075)"

@@ -384,7 +384,9 @@
     "history": {
       "paths": [
         ".github/authors.txt",
+        ".github/attribution-since",
         ".github/workflows/attribution-history.yml",
+        ".github/workflows/step-attribution-history.yml",
         "scripts/trunk_log.py",
         "scripts/archive_against_history.py",
         "CHANGELOG.md"

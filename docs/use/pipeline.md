@@ -43,7 +43,7 @@
 | 4 | Метки и связь с задачей | `ci.yml` → `step-pr-meta.yml` | `pr-meta / pr-meta` | через сводный |
 | 5 | Запись журнала | `ci.yml` → `step-journal.yml` | `journal / journal` | через сводный |
 | 6 | Атрибуция коммитов | `ci.yml` → `step-attribution.yml` | `attribution / attribution` | через сводный |
-| 6d | Атрибуция в истории общей ветки | `attribution-history.yml` | `attribution-history` | нет, совещательный |
+| 6d | Атрибуция в истории общей ветки | `attribution-history.yml` → `step-attribution-history.yml` | `attribution-history / attribution-history` | нет, совещательный |
 | 6a | Ответ по классам проверок; невидимых символов в дереве нет; у вызова процесса в механизмах есть дедлайн | `ci.yml` → `step-pipeline.yml` | `pipeline / pipeline` | через сводный |
 | 6c | Поверхность контракта не тронута молча | `ci.yml` → `step-contract.yml` | `contract / contract` | через сводный |
 | 6b | Остаток долга: находки, правила, слитое без взгляда, счёт по пунктам | `ci.yml` → `step-debt.yml` | `debt / debt` | нет, совещательный |
