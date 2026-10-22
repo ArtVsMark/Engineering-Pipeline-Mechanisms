@@ -786,6 +786,64 @@ def test_a_foreign_call_keeps_its_own_name(tmp_path: Path) -> None:
     assert set(policy.declared_jobs(directory)) == {"debt"}
 
 
+TAG_CALL = "ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-meta.yml@v1.9.0"
+STEP_META = "name: step\non:\n  workflow_call:\njobs:\n  meta:\n    name: pr-meta\n    steps: []\n"
+
+
+@pytest.mark.parametrize(
+    ("running", "origin", "named"),
+    [
+        (
+            "Owner/Consumer",
+            "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms",
+            {"pr-meta / pr-meta"},
+        ),
+        # Выкачка — другой репозиторий: адрес вызова к ней не относится.
+        ("Owner/Consumer", "https://github.com/someone/else", {"pr-meta"}),
+        # Наше дерево: вызов по тегу — проба передачи, имена намеренно неизвестны.
+        (
+            "ArtVsMark/Engineering-Pipeline-Mechanisms",
+            "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms",
+            {"pr-meta"},
+        ),
+    ],
+    ids=["потребитель", "чужая-выкачка", "своё-дерево"],
+)
+def test_a_tag_call_at_the_consumer_is_named_from_the_supplier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, running: str, origin: str, named: set[str]
+) -> None:
+    """У потребителя вызов по тегу читается из выкачки поставщика (#1568).
+
+    Заготовка `onboard.py` пишет `pr-meta / pr-meta` — так запись и называет
+    площадка, — а сверка давала голое `pr-meta`, и потребитель получал по
+    находке на каждый свой шаг.
+    """
+    supplier = cloned(tmp_path / "mechanisms", origin)
+    (supplier / ".github" / "workflows").mkdir(parents=True)
+    (supplier / ".github" / "workflows" / "step-meta.yml").write_text(STEP_META, encoding="utf-8")
+    monkeypatch.setenv("GITHUB_REPOSITORY", running)
+    monkeypatch.setenv(policy.SUPPLIER_ENV, str(supplier))
+    directory = called_tree(
+        tmp_path / "consumer",
+        caller="name: c\non: [pull_request]\njobs:\n  meta:\n    name: pr-meta\n"
+        f"    uses: {TAG_CALL}\n",
+    )
+    assert set(policy.declared_jobs(directory)) == named
+
+
+def test_a_tag_call_to_a_file_the_supplier_lacks_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Прогона нет и в выкачке — отказ, а не голое имя молча (045)."""
+    supplier = cloned(
+        tmp_path / "mechanisms", "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms"
+    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", "Owner/Consumer")
+    monkeypatch.setenv(policy.SUPPLIER_ENV, str(supplier))
+    with pytest.raises(policy.BadPolicy, match="нет и в выкачке"):
+        policy.supplied_jobs(TAG_CALL)
+
+
 #: Прогон, который И вызываемый, И идёт сам. Площадка такое не запрещает, а
 #: разбор до #612 пропускал его ЦЕЛИКОМ — оба раздела читали `workflow_call`
 #: как повод не смотреть дальше.
