@@ -17,7 +17,7 @@ import itertools
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 import yaml
@@ -52,6 +52,9 @@ DATA = {
     str(one): (
         json.dumps({"_": f"заготовка {one.name}"}, ensure_ascii=False) + "\n"
         if one.suffix == ".json"
+        # Заготовка `dependabot.yml` несёт слот семьи: без него заход отказывает.
+        else f'заготовка {one.name}\n- "{module.FAMILY_SLOT}"\n'
+        if one == module.paths.DEPENDABOT
         else f"заготовка {one.name}\n"
     )
     for one in module.DATA_KITTED
@@ -1134,7 +1137,7 @@ def test_the_live_kit_is_what_onboard_lays() -> None:
 def test_data_kit_reads_the_tree_and_derives_the_areas(tmp_path: Path) -> None:
     """Состав — файлы `kit/data/`, таблица областей — из наших областей с пустыми путями."""
     root = tree(tmp_path, **{"step-пример": MARKED})
-    kit = module.data_kit(root)
+    kit = module.data_kit(root, "o/r")
     assert sorted(map(str, kit)) == sorted([*DATA, ".rules/area-paths.json"])
     assert module.paths.BINDINGS not in kit, "ответ каталогу ушёл заготовкой"
 
@@ -1211,7 +1214,7 @@ def test_a_twin_of_our_own_data_takes_no_place(tmp_path: Path) -> None:
 def test_a_dormant_area_table_is_named_until_the_role_is_declared(tmp_path: Path) -> None:
     """Таблица областей без объявленной роли — названная спячка; роль объявлена — тишина."""
     assert module.dormant_areas_note(tmp_path) == "", "таблицы нет — и говорить не о чем"
-    module.lay(tmp_path, module.data_kit(ROOT), "o/r")
+    module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
     said = module.dormant_areas_note(tmp_path)
     assert "спит" in said and module.ROLE_PILOT in said
     roles = tmp_path / module.paths.REVIEW_ROLES
@@ -1285,7 +1288,7 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
     """
     review_map = load_script("review_map.py")
     findings = load_script("findings.py")
-    kit = module.data_kit(ROOT)
+    kit = module.data_kit(ROOT, "o/r")
     table = review_map.table_shape(json.loads(kit[Path(".rules/review-roles.json")]))
     # ПУТЬ ЦЕЛИКОМ: заготовка → `role_declared` → `area_table` → `narrow`
     # (находки `5f1a15d`, `72d2c49`). Скелет роль не объявляет — её пилот у
@@ -1312,6 +1315,49 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
     assert set(table["required"]) <= named, "обязательная роль заготовки без профиля"
     bot = yaml.safe_load(kit[Path(".github/dependabot.yml")])
     assert [one["package-ecosystem"] for one in bot["updates"]] == ["github-actions"]
+
+
+#: Своя семья — владелец каталога и механизмов: её выпуск выдержки не ждёт.
+FAMILY_OWNER: Final = "ArtVsMark/*"
+
+
+def test_the_family_is_exempt_from_the_release_cooldown() -> None:
+    """Dependabot не выдерживает выпуск своей семьи, а чужие — по-прежнему (решение 22.10.2026).
+
+    Без изъятия v2.1.0 каталога ждала бы трое суток: «Days since release : 0
+    (cooldown days 3)». Наш конфиг и ЛОЖЕНАЯ заготовка держат одно и то же:
+    потребитель иначе ждал бы наш выпуск те же три дня. Сама заготовка несёт
+    слот, а не наше имя: у соседа владелец механизмов другой.
+    """
+    ours = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    laid = yaml.safe_load(
+        module.data_kit(ROOT, "ArtVsMark/Engineering-Pipeline-Mechanisms")[
+            Path(".github/dependabot.yml")
+        ]
+    )
+    for name, said in (("наш", ours), ("заготовка", laid)):
+        [actions] = [one for one in said["updates"] if one["package-ecosystem"] == "github-actions"]
+        cooldown = actions.get("cooldown") or {}
+        assert FAMILY_OWNER in (cooldown.get("exclude") or []), f"{name}: семья не изъята"
+        assert int(cooldown.get("default-days") or 0) > 0, f"{name}: выдержка снята и с чужих"
+    assert ours["updates"][0]["cooldown"] == laid["updates"][0]["cooldown"], "выдержки разошлись"
+
+
+def test_the_family_slot_takes_the_owner_of_the_called_repo() -> None:
+    """Сосед, зовущий механизмы другого владельца, изымает из выдержки его, а не нас."""
+    laid = module.data_kit(ROOT, "Other/Mechanisms")[Path(".github/dependabot.yml")]
+    assert '"Other/*"' in laid and module.FAMILY_SLOT not in laid
+
+
+def test_a_kit_without_the_family_slot_is_refused(tmp_path: Path) -> None:
+    """Слот пропал из заготовки — отказ, а не наше имя потребителю и не тихая выдержка (045)."""
+    for one in module.DATA_KITTED:
+        target = tmp_path / module.DATA_KIT / one
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = (ROOT / module.DATA_KIT / one).read_text(encoding="utf-8")
+        target.write_text(text.replace(module.FAMILY_SLOT, "ArtVsMark/*"), encoding="utf-8")
+    with pytest.raises(module.NotRun, match="слота семьи"):
+        module.data_kit(tmp_path, "ArtVsMark/Engineering-Pipeline-Mechanisms")
 
 
 # --- данные потребителя (#996) -----------------------------------------------
@@ -1893,7 +1939,7 @@ def test_the_projects_file_is_one_sign_for_every_door() -> None:
 
 def test_a_json_kit_carries_the_license_as_its_first_field() -> None:
     """JSON комментариев не знает: лицензия — поле `_license`, и таблица ролей её пропускает."""
-    kit = module.data_kit(ROOT)[module.paths.REVIEW_ROLES]
+    kit = module.data_kit(ROOT, "o/r")[module.paths.REVIEW_ROLES]
     table = json.loads(module.licensed(module.paths.REVIEW_ROLES, kit, "o/r"))
     assert next(iter(table)) == "_license"
     assert table["_license"] == "SPDX-License-Identifier: MIT — https://github.com/o/r"

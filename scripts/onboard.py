@@ -898,7 +898,13 @@ def area_kit(root: Path) -> str:
     return json.dumps(kit, ensure_ascii=False, indent=2) + "\n"
 
 
-def data_kit(root: Path) -> dict[Path, str]:
+#: Слот владельца в заготовке `dependabot.yml`: своя семья у потребителя — это
+#: владелец механизмов, которые он зовёт, а не наше имя буквами (у соседа
+#: оно другое). Заход ставит на его место владельца из `--repo`.
+FAMILY_SLOT: Final = "OWNER/*"
+
+
+def data_kit(root: Path, repo: str) -> dict[Path, str]:
     """Заготовки данных взгляда и `dependabot.yml`: `kit/data/<путь>` → `<путь>` (#1386).
 
     Состав — `DATA_KITTED`; недостающий файл — отказ, а не тихий пропуск (045).
@@ -914,6 +920,14 @@ def data_kit(root: Path) -> dict[Path, str]:
             + " — карта взгляда у потребителя не собралась бы"
         )
     found = {path: (root / DATA_KIT / path).read_text(encoding="utf-8") for path in DATA_KITTED}
+    said = found[paths.DEPENDABOT]
+    if f'"{FAMILY_SLOT}"' not in said:
+        raise NotRun(
+            f"в заготовке {paths.DEPENDABOT} нет слота семьи «{FAMILY_SLOT}» — "
+            "выпуск механизмов ждал бы у потребителя выдержку чужого"
+        )
+    owner = repo.split("/", 1)[0]
+    found[paths.DEPENDABOT] = said.replace(f'"{FAMILY_SLOT}"', f'"{owner}/*"')
     return found | {paths.AREA_PATHS: area_kit(root)}
 
 
@@ -1755,7 +1769,7 @@ def main(argv: list[str] | None = None) -> int:
         span = contract_span(contract)
         summary = summary_kit(args.root, args.repo, pin)
         rulebook = rulebook_kit(args.root)
-        kit = data_kit(args.root)
+        kit = data_kit(args.root, args.repo)
         # Перечень данных выводится ДО печати и до записи: битый инвентарь
         # отказывает выходом захода, а не трейсбеком после положенного (#996).
         data = consumer_data(args.root, names, {paths.PIPELINE, *rulebook, *kit})
