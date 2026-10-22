@@ -80,7 +80,7 @@ CONTRACT_PATH = beside(ROOT / "export" / "facts" / "facts-contract.md")
 
 #: Ветка, где издатель публикует факты и манифест семьи. Одна на всех.
 FACTS_REF = "badges"
-#: Манифест семьи — рядом с фактами, на той же ветке (договор 1.6, витрина #316).
+#: Манифест семьи — рядом с фактами, на той же ветке (договор фактов 1.6, витрина #316).
 MANIFEST_PATH = ".github/badges/contracts.json"
 #: Мажор формы ``family``, на который договор соглашается. Номер, а не форма:
 #: форму целиком судит ``family_contract.form_flaw``, копии здесь нет (090).
@@ -190,7 +190,7 @@ def check(facts: object, repo: str, schema: dict[str, Any]) -> list[str]:
 
     * файл о том, у кого лежит: схема не знает, откуда файл прочитан;
     * версия — сборка выпуска: ``version`` начинается с ``release`` и точки.
-      Выпуск — серия ``X.Y``, версия — ``X.Y.Z`` внутри неё (договор 1.3).
+      Выпуск — серия ``X.Y``, версия — ``X.Y.Z`` внутри неё (договор фактов 1.3).
       Сверка двух полей между собой схеме подмножества не по силам, а
       расходятся они правдоподобно: забытый подъём выпуска или версия,
       убежавшая в серию, которой нет, выглядят как обычные числа.
@@ -259,7 +259,7 @@ def advise(facts: object, schema: dict[str, Any], current: str) -> list[str]:
         and tuple(map(int, published.split("."))) < tuple(map(int, current.split(".")))
     ):
         said.append(
-            f"schema: формат {published} при договоре {current} — файл отстал"
+            f"schema: формат {published} при договоре фактов {current} — файл отстал"
             # не проза: номер версии «мажор.минор[.патч]».
             + (
                 MOVED
@@ -273,7 +273,7 @@ def advise(facts: object, schema: dict[str, Any], current: str) -> list[str]:
 
 
 def advise_family(manifest: object | None) -> list[str]:
-    """Совет договора 1.6 о манифесте семьи — наличие и мажор формы. Кода не меняет.
+    """Совет договора фактов 1.6 о манифесте семьи — наличие и мажор формы. Кода не меняет.
 
     Каталог собирает манифесты семьи в сводку, и семейный значок каждого
     проекта сверяет по ней издателей; без манифеста издатель для семьи серый.
@@ -343,13 +343,15 @@ def contract_drift(number: str, schema: dict[str, Any], prose: str) -> list[str]
     # не проза: номер версии «мажор.минор[.патч]».
     series = ".".join(number.split(".")[:2])
     found: list[str] = []
-    if not str(schema.get("title", "")).endswith(f"договор {series}"):
+    if not str(schema.get("title", "")).endswith(f"договор фактов {series}"):
         found.append(
             f"facts.schema.json: заголовок «{schema.get('title')}» не "
-            f"кончается на «договор {series}»"
+            f"кончается на «договор фактов {series}»"
         )
-    if f"## Единые требования · договор {series}" not in prose:
-        found.append(f"facts-contract.md: нет заголовка «## Единые требования · договор {series}»")
+    if f"## Единые требования · договор фактов {series}" not in prose:
+        found.append(
+            f"facts-contract.md: нет заголовка «## Единые требования · договор фактов {series}»"
+        )
     # Тег в шаге для CI — третье место номера: устаревший тег прибил бы
     # издателей к прошлому выпуску молча, и шаг остался бы зелёным.
     step = ci_step(prose)
@@ -458,7 +460,7 @@ def selftest() -> int:
         ),
         ("прогон CI не файлом", with_(ci={"workflow": "CI"}), "не той формы"),
         ("файл о другом репозитории", with_(repo="Owner/Other"), "лежит у Owner/Name"),
-        # Выпуск — серия X.Y, версия — сборка X.Y.Z внутри неё (договор 1.3).
+        # Выпуск — серия X.Y, версия — сборка X.Y.Z внутри неё (договор фактов 1.3).
         ("выпуск тегом с v", with_(release="v1.3.0"), "release: «v1.3.0» не той формы"),
         ("ошибка формы выпуска — одна находка, не две", with_(release="v1.3.0"), 1),
         ("выпуск с нулевым хвостом", with_(release="1.3.0"), "release: «1.3.0» не той формы"),
@@ -528,7 +530,7 @@ def selftest() -> int:
         ("обмен — не поле корня", with_(schema="1.4", exchange={"x": {"schema": "1.0"}}), []),
         ("своё поле в корне", with_(schema="1.4", glossary={"cards": 1}), ["glossary:"]),
         ("rules — отдельно и с причиной", with_(schema="1.4", rules={}), ["rules:", "090"]),
-        ("отставший формат", with_(schema="1.2"), ["формат 1.2 при договоре 1.4"]),
+        ("отставший формат", with_(schema="1.2"), ["формат 1.2 при договоре фактов 1.4"]),
         ("формат новее договора — не отставание", with_(schema="1.5"), []),
         ("двузначный минор — сравнение числом", with_(schema="1.10"), []),
     ]
@@ -540,13 +542,13 @@ def selftest() -> int:
         if not ok:
             broken.append(f"совет, {name}: ждали {wanted or 'молчание'}, вышло {said}")
         print(f"  {'да ' if ok else 'НЕТ'} — совет: {name}")
-    # Мажор 1 при договоре 2.0 — та же форма у прежнего держателя: совет
+    # Мажор 1 при договоре фактов 2.0 — та же форма у прежнего держателя: совет
     # называет, куда переехал договор, а не только что файл отстал (каталог #843).
     said = advise(with_(schema="1.6"), schema, "2.1")
     ok = any("facts-v2.1.0" in line for line in said)
     if not ok:
         broken.append(f"совет о переезде: ждали тег механизмов, вышло {said}")
-    print(f"  {'да ' if ok else 'НЕТ'} — совет: мажор 1 при договоре 2.1 называет переезд")
+    print(f"  {'да ' if ok else 'НЕТ'} — совет: мажор 1 при договоре фактов 2.1 называет переезд")
 
     # Манифест семьи (1.6) — обе стороны: нет файла, не та форма — совет;
     # family 1.x любого минора — молчание. Форму целиком судят механизмы.
@@ -568,25 +570,25 @@ def selftest() -> int:
         print(f"  {'да ' if ok else 'НЕТ'} — манифест: {name}")
 
     # Номер договора один: заголовки схемы и прозы сверяются с источником.
-    titled = {**schema, "title": "facts.json — договор 1.4"}
+    titled = {**schema, "title": "facts.json — договор фактов 1.4"}
     prose = (
-        "x\n## Единые требования · договор 1.4\n"
+        "x\n## Единые требования · договор фактов 1.4\n"
         f"{STEP_OPEN}\n    FACTS_CONTRACT: facts-v1.4.0\n{STEP_CLOSE}\n"
     )
     drift_cases = [
         ("заголовки совпадают с номером", "1.4.0", titled, prose, 0),
-        ("схема на прежнем номере", "1.4.0", {**titled, "title": "договор 1.3"}, prose, 1),
+        ("схема на прежнем номере", "1.4.0", {**titled, "title": "договор фактов 1.3"}, prose, 1),
         (
             "проза на прежнем номере",
             "1.4.0",
             titled,
-            prose.replace("договор 1.4", "договор 1.3"),
+            prose.replace("договор фактов 1.4", "договор фактов 1.3"),
             1,
         ),
         (
             "мажор договора не принят схемой",
             "3.0.0",
-            {**titled, "title": "договор 3.0"},
+            {**titled, "title": "договор фактов 3.0"},
             prose.replace("1.4", "3.0"),
             1,
         ),
@@ -618,7 +620,7 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory(dir=os.environ.get("RUNNER_TEMP")) as tmp:
         stale = pathlib.Path(tmp) / "facts-contract.md"
         stale.write_text(
-            re.sub(r"(## Единые требования · договор )\d+\.\d+", r"\g<1>0.9", real_prose),
+            re.sub(r"(## Единые требования · договор фактов )\d+\.\d+", r"\g<1>0.9", real_prose),
             encoding="utf-8",
         )
         fresh = pathlib.Path(tmp) / "fresh.md"
@@ -659,7 +661,7 @@ def selftest() -> int:
     said = check(example, str(example.get("repo")), schema) + advise(example, schema, current)
     if said or example.get("schema") != current:
         broken.append(
-            f"образец: формат {example.get('schema')} при договоре {current}, "
+            f"образец: формат {example.get('schema')} при договоре фактов {current}, "
             f"находок и советов {len(said)} — {said}"
         )
     print(

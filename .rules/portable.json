@@ -223,7 +223,8 @@
       ]
     },
     ".github/workflows/facts-release.yml": {
-      "answer": "as-is"
+      "answer": "ours",
+      "why": "@provider"
     },
     ".github/workflows/ci-complete.yml": {
       "answer": "as-is"
@@ -590,10 +591,12 @@
       "answer": "as-is"
     },
     "scripts/check_facts.py": {
-      "answer": "as-is"
+      "answer": "ours",
+      "why": "@provider"
     },
     "scripts/facts_release.py": {
-      "answer": "as-is"
+      "answer": "ours",
+      "why": "@provider"
     },
     "scripts/badges_read.py": {
       "answer": "as-is"

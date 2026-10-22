@@ -110,7 +110,10 @@ def verify(dist: pathlib.Path, repo: str) -> list[str]:
     """
     found: list[str] = []
     runs = (
-        ("образец отвечает договору", ["--file", check_facts.EXAMPLE_PATH.name, "--repo", repo]),
+        (
+            "образец проходит проверку договора фактов",
+            ["--file", check_facts.EXAMPLE_PATH.name, "--repo", repo],
+        ),
         ("номер сходится с заголовками", ["--contract"]),
     )
     for name, args in runs:
@@ -365,7 +368,7 @@ def main() -> int:
         standing = tag_exists(tag)
         missing = [str(source) for source in ASSETS if not source.is_file()]
         if missing:
-            raise OSError(f"нет файлов договора: {', '.join(missing)}")
+            raise OSError(f"нет файлов договора фактов — {', '.join(missing)}")
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(check_facts.annotate("error", f"шаг не отработал: {error}"), file=sys.stderr)
         return 2
