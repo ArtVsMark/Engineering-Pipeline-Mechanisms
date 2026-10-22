@@ -17,16 +17,6 @@
           "what": "release",
           "mine": "v2.1.0",
           "latest": "v2.1.0",
-          "where": ".github/workflows/attribution-history.yml",
-          "state": "ok",
-          "why": ""
-        },
-        {
-          "segment": "family",
-          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
-          "what": "release",
-          "mine": "v2.1.0",
-          "latest": "v2.1.0",
           "where": ".github/workflows/ci.yml",
           "state": "ok",
           "why": ""
@@ -38,6 +28,16 @@
           "mine": "v2.1.0",
           "latest": "v2.1.0",
           "where": ".github/workflows/rules-inbox.yml",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
+          "what": "release",
+          "mine": "v2.1.0",
+          "latest": "v2.1.0",
+          "where": ".github/workflows/step-attribution-history.yml",
           "state": "ok",
           "why": ""
         },
@@ -85,7 +85,7 @@
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
           "what": "steps",
-          "mine": ">=0.10,<0.12",
+          "mine": ">=0.11,<0.13",
           "latest": "0.11",
           "where": ".pipeline.yml:contract",
           "state": "ok",
