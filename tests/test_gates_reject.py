@@ -5,6 +5,7 @@
 прогоняется каждый объявленный исход (145), включая третий — «не отработал».
 """
 
+import inspect
 import json
 import os
 import subprocess
@@ -892,11 +893,13 @@ def test_zones_are_applied_even_when_the_change_is_already_open(
     module = load_script("agent_pr.py")
     source = (ROOT / "scripts" / "agent_pr.py").read_text(encoding="utf-8")
 
-    # Ветка «уже открыто» обязана звать доставку зон до своего возврата.
+    # Ветка «уже открыто» уходит в `finish_open`, и доставка зон — в нём. Срез
+    # «от строки до первого `return EXIT_OK`» здесь стоял прежде и после
+    # выноса зеленел впустую: в срез попадал `apply_zones` пути создания (#1548).
     already = source.index("изменение для ветки уже открыто")
-    returns = source.index("return EXIT_OK", already)
-    assert "apply_zones(" in source[already:returns], "ветка «уже открыто» не доставляет зоны"
-    assert callable(module.apply_zones)
+    returns = source.index("return ", already)
+    assert source.startswith("return finish_open(", returns), "«уже открыто» мимо finish_open"
+    assert "apply_zones(" in inspect.getsource(module.finish_open), "finish_open без зон"
 
 
 def test_the_journal_unfolds_a_bounded_number_of_releases(tmp_path: Path) -> None:
