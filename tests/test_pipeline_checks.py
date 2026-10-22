@@ -851,6 +851,20 @@ def test_a_tag_call_to_a_file_the_supplier_lacks_is_refused(
         policy.supplied_jobs(TAG_CALL)
 
 
+def test_jobs_of_called_names_every_job_of_a_called_run(tmp_path: Path) -> None:
+    """`jobs_of_called`: имя джоба — его `name`, без имени — ключ; без `workflow_call` — отказ."""
+    run = tmp_path / "step.yml"
+    run.write_text(
+        "on:\n  workflow_call:\njobs:\n"
+        "  a:\n    name: первый\n    steps: []\n  b:\n    steps: []\n",
+        encoding="utf-8",
+    )
+    assert policy.jobs_of_called(run) == ["первый", "b"]
+    run.write_text("on: [push]\njobs:\n  a:\n    steps: []\n", encoding="utf-8")
+    with pytest.raises(policy.BadPolicy, match="workflow_call"):
+        policy.jobs_of_called(run)
+
+
 def test_a_supplied_run_without_workflow_call_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
