@@ -68,7 +68,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f .github/attribution-since ]; then
-            since="$(grep -v '^[[:space:]]*#' .github/attribution-since | tr -d '[:space:]')"
+            # `|| true`: `grep` без единой строки выходит кодом 1, и под
+            # `pipefail` шаг оборвался бы раньше названного отказа (взгляд на #1574).
+            since="$( { grep -v '^[[:space:]]*#' .github/attribution-since || true; } | tr -d '[:space:]')"
             if [ -z "$since" ]; then
               echo "::error::.github/attribution-since без коммита — отметка объявлена, но не названа (045)"
               exit 1

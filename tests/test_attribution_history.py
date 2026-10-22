@@ -58,7 +58,13 @@ def gate_step() -> dict[str, Any]:
 
 
 def named_since(tree: Path) -> tuple[int, str]:
-    """(код, отметка): шаг «отметка атрибуции» общего шага, исполненный на дереве.
+    """(код, отметка): шаг «отметка атрибуции» общего шага, исполненный на дереве."""
+    code, since, _ = since_run(tree)
+    return code, since
+
+
+def since_run(tree: Path) -> tuple[int, str, str]:
+    """(код, отметка, вывод шага): исполнение шага «отметка атрибуции» на дереве.
 
     ИСПОЛНЯЕТСЯ САМ ШАГ, А НЕ ВТОРОЙ РАЗБОР ФАЙЛА ОТМЕТКИ (090). Отметку
     читает `run` шага на площадке; разбор, написанный здесь заново, мог бы
@@ -86,7 +92,7 @@ def named_since(tree: Path) -> tuple[int, str]:
         )
     finally:
         out.unlink()
-    return done.returncode, said.get("since", "")
+    return done.returncode, said.get("since", ""), done.stdout + done.stderr
 
 
 def boundary() -> str:
@@ -168,8 +174,12 @@ def test_the_file_names_the_boundary_and_an_empty_one_refuses(tmp_path: Path) ->
     declared = tmp_path / ".github" / "attribution-since"
     declared.write_text("# пояснение\nabc123\n", encoding="utf-8")
     assert named_since(tmp_path) == (0, "abc123")
-    declared.write_text("# одно пояснение\n", encoding="utf-8")
-    assert named_since(tmp_path)[0] != 0
+    # ОТКАЗ НАЗВАН, А НЕ ОБОРВАН (взгляд на #1574, 107): ненулевой код дал бы и
+    # `grep` без строк под `pipefail` — сверяется причина в выводе шага.
+    for text in ("# одно пояснение\n", ""):
+        declared.write_text(text, encoding="utf-8")
+        code, _, said = since_run(tmp_path)
+        assert code != 0 and "отметка объявлена, но не названа" in said, repr(text)
 
 
 def revision(name: str) -> str | None:
