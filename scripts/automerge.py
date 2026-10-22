@@ -1567,22 +1567,30 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # некому: 18.10.2026 #1514 стоял красным на починке, уже слитой
             # #1515, пока базу не подтянули рукой. Красное ПОСЛЕ подтяжки —
             # своё, и второй раз голова не подтягивается.
-            kept = red_kept(
-                repo,
-                change,
-                owner_token,
-                main_red=bool(troubles),
-                state=red_look.state,
-                outranked=waiting_rank is not None and rank(change) > waiting_rank,
-                spent=red_synced,
-            )
+            # ОТКАЗ ПЛОЩАДКИ — ПРИЧИНА ЭТОЙ ГОЛОВЫ, А НЕ ПАДЕНИЕ ЗАХОДА
+            # (взгляды на #1528): соседи ниже не обязаны стоять за ней. Но он
+            # и не молчит: попадает в `refused`, и итог захода красный (045).
+            # Отвечает площадка и на вопросы `red_kept` (база впереди, уже
+            # подтянуто, идёт взгляд) — они под той же ловлей.
+            try:
+                kept = red_kept(
+                    repo,
+                    change,
+                    owner_token,
+                    main_red=bool(troubles),
+                    state=red_look.state,
+                    outranked=waiting_rank is not None and rank(change) > waiting_rank,
+                    spent=red_synced,
+                )
+            except ghrest.TransportError as exc:
+                kept = f"площадка не ответила, подтягивать ли — {exc}"
+                refused.append(f"#{change.number}: {kept}")
             if not kept:
-                # ОТКАЗ ПЛОЩАДКИ — ПРИЧИНА ЭТОЙ ГОЛОВЫ, А НЕ ПАДЕНИЕ ЗАХОДА
-                # (взгляд на #1528): соседи ниже не обязаны стоять за ней.
                 try:
                     sync_head(repo, change.number, owner_token, dry_run=dry_run)
                 except ghrest.TransportError as exc:
                     kept = f"площадка отказала в подтяжке — {exc}"
+                    refused.append(f"#{change.number}: {kept}")
                 else:
                     red_synced = True
                     print(
@@ -1835,7 +1843,9 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
         return EXIT_BROKEN if refused else EXIT_OK
 
     if refused:
-        print(f"взвести не удалось ни одну голову: отказов {len(refused)}")
+        print(f"отказы площадки по головам: {len(refused)} — исход красный")
+        for one in refused:
+            print(f"  {one}")
         return EXIT_BROKEN
     why = ", ".join(f"{count} {said}" for said, count in sorted(skipped.items()))
     print(f"готовой головы нет: {why}" if why else "готовой головы нет: кандидатов не осталось")
