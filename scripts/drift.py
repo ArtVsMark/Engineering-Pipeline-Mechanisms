@@ -424,15 +424,6 @@ SUPERSEDED_PAIR_RE: Final = re.compile(r"(?<!\d)(\d{3}) → (\d{3})(?!\d)")
 RULE_NUMBER_RE: Final = re.compile(r"(?<!\d)\d{3}(?!\d)")
 
 
-def superseded_by(export: dict[str, Any]) -> dict[str, str]:
-    """Замены правил из выгрузки каталога: номер заменённого → номер заменяющего."""
-    return {
-        str(rule.get("id")): str(rule["superseded_by"])
-        for rule in export.get("rules") or []
-        if isinstance(rule, dict) and rule.get("superseded_by")
-    }
-
-
 def answered_rules(mine: dict[str, Any]) -> frozenset[str]:
     """Номера правил, по которым у нас есть ответ, — без нерассмотренных."""
     return frozenset(
@@ -2216,8 +2207,8 @@ def look(
         # работой. Это не молчаливый откат: отказ выгрузки называет источник
         # «каталог» своим исходом (045).
         try:
-            return superseded_by(export_once())
-        except ghrest.TransportError:
+            return catalogue.replacements(export_once())
+        except ghrest.TransportError, catalogue.BadExport:
             return None
 
     def protection_once() -> ProtectionRead:

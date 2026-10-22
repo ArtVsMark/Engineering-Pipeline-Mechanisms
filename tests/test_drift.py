@@ -222,20 +222,6 @@ def test_a_finding_without_pairs_is_never_a_state() -> None:
     assert not module.superseded_state("1002 → 2240", ANSWERED, {"1002": "2240"})
 
 
-def test_superseded_by_reads_the_export() -> None:
-    """Замены — из `superseded_by` выгрузки; правила без замены и не словари пропускаются."""
-    export = {
-        "rules": [
-            {"id": "002", "superseded_by": "224"},
-            {"id": "003"},
-            {"id": "005", "superseded_by": ""},
-            "не правило",
-        ]
-    }
-    assert module.superseded_by(export) == {"002": "224"}
-    assert module.superseded_by({}) == {}
-
-
 def test_answered_rules_skip_the_unreviewed() -> None:
     """Отвеченные — все, кроме нерассмотренных; пустой ответ — не отвеченное правило."""
     mine = {"rules": {"001": {"status": "active"}, "002": {"status": "unreviewed"}, "003": {}}}
