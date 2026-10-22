@@ -542,6 +542,15 @@
     "scripts/python_badge.py": {
       "answer": "as-is"
     },
+    "scripts/family_check.py": {
+      "answer": "as-is",
+      "where": [
+        ".rules/bindings.json"
+      ]
+    },
+    "scripts/family_contract.py": {
+      "answer": "as-is"
+    },
     "scripts/text_width.py": {
       "answer": "as-is"
     },
