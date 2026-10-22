@@ -1,5 +1,5 @@
 # Поверхность транспорта, формат 4. Пишет `python scripts/transport_surface.py`; рукой не правится (#1048).
-VERSION 0.5.0
+VERSION 0.6.0
 requires-python >=3.14
 dependencies —
 ghrest.API_ROOT
@@ -24,6 +24,7 @@ ghrest.TIMEOUT
 ghrest.TRANSIENT
 ghrest.TRIES
 ghrest.TransportError(RuntimeError)
+ghrest.UPLOAD_TEMPLATE
 ghrest.files_of(repo: str, number: int, token: str) -> frozenset[str]
 ghrest.graphql(query: str, variables: dict[str, Any], token: str) -> dict[str, Any]
 ghrest.merged_changes(repo: str, token: str, limit: int=MERGED_WINDOW) -> list[dict[str, Any]]
@@ -35,8 +36,9 @@ ghrest.quota_floor() -> int
 ghrest.quote(value: str) -> str
 ghrest.raw_json(url: str, timeout: int=30) -> dict[str, Any]
 ghrest.raw_text(url: str, timeout: int=30) -> str
-ghrest.request(method: str, path: str, token: str, body: dict[str, Any] | None=None) -> Any
+ghrest.request(method: str, path: str, token: str, body: dict[str, Any] | None=None, *, raw: bytes | None=None, content_type: str='application/json') -> Any
 ghrest.token_from_env() -> str
+ghrest.upload_asset(upload_url: str, name: str, data: bytes, token: str) -> dict[str, Any]
 report.DRY
 report.LIMIT
 report.announce(dry_run: bool) -> None

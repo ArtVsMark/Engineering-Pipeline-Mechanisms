@@ -222,6 +222,9 @@
         ".github/workflows/badges.yml"
       ]
     },
+    ".github/workflows/facts-release.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/ci-complete.yml": {
       "answer": "as-is"
     },
@@ -584,6 +587,12 @@
       "answer": "as-is"
     },
     "scripts/build_text_widths.py": {
+      "answer": "as-is"
+    },
+    "scripts/check_facts.py": {
+      "answer": "as-is"
+    },
+    "scripts/facts_release.py": {
       "answer": "as-is"
     },
     "scripts/badges_read.py": {

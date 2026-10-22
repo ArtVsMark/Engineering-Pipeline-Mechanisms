@@ -324,14 +324,23 @@ def request(
     path: str,
     token: str,
     body: dict[str, Any] | None = None,
+    *,
+    raw: bytes | None = None,
+    content_type: str = "application/json",
 ) -> Any:
     """Один запрос к площадке. Отдаёт разобранный ответ или None на пустой.
 
     Отказ по учётным данным называется отдельно: истёкший токен и незаданный
     выглядят снаружи одинаково — «перестало работать», — и если их не
     различить, искать будут в механизме, а искать надо в сроке секрета.
+
+    `raw` — тело байтами со своим `content_type` вместо JSON: так площадка
+    принимает файл выпуска (`upload_asset`). Вход тот же, повтор и разбор
+    отказа те же — второй обвязки для одного запроса не заводится (090).
     """
-    data = json.dumps(body).encode() if body is not None else None
+    if body is not None and raw is not None:
+        raise TransportError(f"{method} {path} → тело и JSON, и байтами: читать нечего")
+    data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
 
     def prepare() -> urllib.request.Request:
         """Свежий запрос на каждую попытку: тело ответа и поток одноразовы."""
@@ -340,7 +349,7 @@ def request(
         asked.add_header("Accept", "application/vnd.github+json")
         asked.add_header("X-GitHub-Api-Version", API_VERSION)
         if data is not None:
-            asked.add_header("Content-Type", "application/json")
+            asked.add_header("Content-Type", content_type)
         return asked
 
     # ВРЕМЕННЫЙ ОТКАЗ ПЕРЕЖИВАЕТСЯ ПОВТОРОМ, А НЕ РУКОЙ. Замер 13.09.2026,
@@ -429,6 +438,33 @@ def request(
         raise TransportError(f"{method} {path} → {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise TransportError(f"{method} {path} → площадка недоступна: {exc.reason}") from exc
+
+
+#: Шаблон адреса загрузки в ответе о выпуске: `…/assets{?name,label}`.
+UPLOAD_TEMPLATE: Final = "{?"
+
+
+def upload_asset(upload_url: str, name: str, data: bytes, token: str) -> dict[str, Any]:
+    """Прикладывает файл к странице выпуска; отдаёт ответ площадки о файле.
+
+    Адрес берётся из `upload_url` ответа о выпуске, а не собирается: хост
+    загрузок у площадки свой (`uploads.github.com`), и выписанный рукой адрес
+    разошёлся бы с ним при первой смене. Шаблон `{?name,label}` срезается, имя
+    подставляется кодированным.
+    """
+    base = upload_url.split(UPLOAD_TEMPLATE, 1)[0]
+    if not base.startswith("https://"):
+        raise TransportError(f"адрес загрузки «{upload_url}» не той формы: файлу некуда лечь")
+    said = request(
+        "POST",
+        f"{base}?name={quote(name)}",
+        token,
+        raw=data,
+        content_type="application/octet-stream",
+    )
+    if not isinstance(said, dict):
+        raise TransportError(f"загрузка {name} → ответ не о файле: {said!r}")
+    return said
 
 
 #: Адрес GraphQL. Он здесь ОДИН и с единственным входом ниже: правило каталога
