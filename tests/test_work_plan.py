@@ -184,6 +184,18 @@ def quiet_platform(monkeypatch: pytest.MonkeyPatch, *, body: str = BODY) -> list
     monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (639, body))
     # Задачи дрейфа нет: дрейф не заводит пустую, и это «пусто», а не отказ.
     monkeypatch.setattr(module.findings, "live_issue_seen", lambda *_, **__: (None, "", ""))
+    # Список открытых пустым не бывает: в нём всегда есть хотя бы сам план, а
+    # пустой ответ читатель перечитывает и отвергает (#1580).
+    # Подставленный тестом `paginate` по-прежнему читается — к нему лишь
+    # добавляется план, когда тест открытых записей не дал.
+    monkeypatch.setattr(
+        module.findings,
+        "open_listed",
+        lambda repo, token: (
+            list(module.ghrest.paginate(f"repos/{repo}/issues?state=open", token))
+            or [{"number": 639, "title": "План", "body": ""}]
+        ),
+    )
     monkeypatch.setattr(module.debt, "branch_debt", lambda *_: ([], []))
     monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], [], []))
     monkeypatch.setattr(module.debt, "findings_debt", lambda *_: [])

@@ -297,9 +297,7 @@ def sources(
         blind = ""
         try:
             opened = debt.open_changes(
-                ghrest.paginate(f"repos/{repo}/issues?state=open", token)
-                if listed is None
-                else listed
+                findings.open_listed(repo, token) if listed is None else listed
             )
         except ghrest.TransportError as exc:
             opened = None
@@ -627,7 +625,7 @@ def born_rows(
     if not parents:
         return []
     found: dict[int, tuple[str, int]] = {}
-    opened = ghrest.paginate(f"repos/{repo}/issues?state=open", token) if listed is None else listed
+    opened = findings.open_listed(repo, token) if listed is None else listed
     for issue in opened:
         if not may_be_born(issue, repo, parents | taken):
             continue
