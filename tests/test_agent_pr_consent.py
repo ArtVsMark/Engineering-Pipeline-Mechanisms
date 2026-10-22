@@ -564,3 +564,52 @@ def test_kinds_and_meetings_survive_normalised_whitespace() -> None:
         "Род: каскад по одному месту — окно: scripts/x.py — разбор\n"
     )
     assert module.kept_the_marks(sent.replace("\n", "\r\n"), sent) == []
+
+
+# --- отказ на создании не значит «не создано» (#1548) -------------------------
+
+
+def gateway_refusal(monkeypatch: pytest.MonkeyPatch, created: bool) -> list[tuple[str, str]]:
+    """Площадка, которая на `POST /pulls` отвечает 502 — создав или не создав.
+
+    Замер #1547: изменение создано в 08:36:39, отказ шлюза пришёл в 08:36:40.
+    Первое чтение «есть ли открытое» — пусто, второе — по исходу создания.
+    """
+    seen: list[tuple[str, str]] = []
+    reads = iter([[], [{"number": 9, "labels": []}] if created else []])
+
+    def platform(method: str, path: str, token: str, body: Any = None) -> Any:
+        seen.append((method, path))
+        if method == "POST" and path.endswith("/pulls"):
+            raise module.ghrest.TransportError(f"POST {path} → 502: Server Error")
+        if method == "GET" and "/pulls?" in path:
+            return next(reads)
+        return {}
+
+    monkeypatch.setenv("MERGE_QUEUE_TOKEN", "токен")
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    monkeypatch.setattr(
+        module, "describe", lambda *_: module.Described(title="т", body="б", hold=None)
+    )
+    monkeypatch.setattr(module, "changed_files", lambda *_: ["scripts/agent_pr.py"])
+    return seen
+
+
+def test_a_change_created_behind_a_gateway_refusal_is_finished(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Создано, но ответ не дошёл: зоны и согласие доставлены, исход — успех."""
+    seen = gateway_refusal(monkeypatch, created=True)
+    assert module.main(["--repo", "о/р", "--branch", "agent/x"]) == module.EXIT_OK
+    labelled = [path for method, path in seen if method == "POST" and path.endswith("/labels")]
+    assert labelled == ["repos/о/р/issues/9/labels"] * 2, seen
+    assert sum(method == "POST" and path.endswith("/pulls") for method, path in seen) == 1
+
+
+def test_a_refused_creation_that_created_nothing_stays_a_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Не создано — прежний третий исход, а не догадка об успехе."""
+    seen = gateway_refusal(monkeypatch, created=False)
+    assert module.main(["--repo", "о/р", "--branch", "agent/x"]) == module.EXIT_BROKEN
+    assert not any(path.endswith("/labels") for _, path in seen)
