@@ -34,6 +34,24 @@
 исполняются сразу, при определении, то есть в `try`, — их предикат тоже не
 засчитывает, и это строгость, а не дыра.
 
+ПОИМКА У ВЫЗЫВАЮЩЕГО ЗАСЧИТЫВАЕТСЯ (решение владельца 23.10.2026, #1569).
+Хук каталога ловит истечение в `main()`, а не у вызова, и нарочно: там он
+решает исход — толчок закрывает, прочую команду пропускает. Обёртка у вызова
+была бы кодом ради формы проверки. Поэтому вызов без своей поимки законен,
+когда функция верхнего уровня, где он стоит (`f`), вызывается в том же модуле
+хотя бы раз, и КАЖДЫЙ её вызов стоит в теле `try` с поимкой из `CATCHES` либо
+исполняется в функции, которая сама так засчитана (цепочка, предел глубины
+`CALLER_DEPTH`). Имя `f`, взятое значением — довод, словарь, присваивание, —
+снимает засчёт: вызывающий тогда неизвестен. Имя, которое берёт ДРУГОЙ
+просмотренный модуль (`from hook import f`, `hook.f`), засчёт тоже снимает:
+вызывающие есть вне файла, и судить по одним здешним значило бы зеленеть на
+непойманном (взгляд на #1589, `exported_names`). Генератор и `async def`
+не засчитываются вовсе: их тело исполняется при обходе или `await`, а не в
+месте вызова, и `try` вокруг `f()` их истечения не ловит. Граница названа:
+модуль вне просмотренных мест (набор тестов, чужое дерево), зовущий `f`, не
+виден, и засчёт по нему не снимается. Методы классов и вложенные функции не
+засчитываются: имя у них не верхнего уровня.
+
 МОДУЛЬ ПОД ДРУГИМ ИМЕНЕМ — ТОТ ЖЕ МОДУЛЬ (находка `bde3e93`): `import
 subprocess as sp` даёт `sp.run`, и предикат его видит наравне с
 `from subprocess import run as r`.
@@ -94,6 +112,11 @@ CATCHES: Final = frozenset({"TimeoutExpired", "SubprocessError", "Exception"})
 #: `lambda` исполняется позже и вне него, тело `class` — сразу, и его гейт судит
 #: строже, чем исполняется (предел назван в шапке).
 SCOPES: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+#: Глубина цепочки «пойман у вызывающего вызывающего». Предел — не догадка о
+#: дереве, а защита от разбора без конца: цикл вызовов засчёта не даёт вовсе.
+CALLER_DEPTH: Final = 8
 
 
 class NotRun(RuntimeError):
@@ -176,8 +199,123 @@ def waits_with_deadline(tree: ast.AST, safe: set[int]) -> set[int]:
     return allowed
 
 
-def undeadlined(source: str) -> list[str]:
-    """Вызовы процесса исходника без дедлайна или без поимки его истечения."""
+def yields(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Генератор ли функция: `yield` в её собственном теле, не во вложенных."""
+    return any(
+        isinstance(node, (ast.Yield, ast.YieldFrom))
+        for statement in function.body
+        for node in executed(statement)
+    )
+
+
+def exported_names(trees: dict[str, ast.Module]) -> dict[str, frozenset[str]]:
+    """Имя модуля → его имена, которые берут другие просмотренные модули (#1589).
+
+    Ключ — последнее звено имени модуля (`push_guard` у `.claude/hooks/push_guard.py`):
+    импорт в дереве механизмов идёт по нему. Берётся `from push_guard import f`
+    и `модуль.имя` после `import модуль` (с псевдонимом — по псевдониму).
+    """
+    found: dict[str, set[str]] = {stem: set() for stem in trees}
+    for tree in trees.values():
+        aliases: dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                stem = node.module.rsplit(".", 1)[-1]
+                if stem in found:
+                    found[stem] |= {alias.name for alias in node.names}
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    stem = alias.name.rsplit(".", 1)[-1]
+                    if stem in found:
+                        aliases[alias.asname or alias.name] = stem
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in aliases
+            ):
+                found[aliases[node.value.id]].add(node.attr)
+    return {stem: frozenset(names) for stem, names in found.items()}
+
+
+def caught_by_callers(
+    tree: ast.Module, safe: set[int], exported: frozenset[str] = frozenset()
+) -> set[int]:
+    """Узлы функций верхнего уровня, чьё истечение ловит каждый их вызывающий (#1569).
+
+    Отдаёт `id` каждого узла, исполняемого в теле такой функции: вызов процесса
+    среди них засчитан пойманным. Условия и граница — в шапке модуля.
+
+    `exported` — имена этого модуля, которые берут ДРУГИЕ просмотренные модули
+    (`exported_names`): у такой функции вызывающие есть и вне файла, и засчёт
+    по одним здешним вызовам был бы дырой (взгляд на #1589).
+    """
+    top = {
+        one.name: one
+        for one in tree.body
+        if isinstance(one, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    executed_in = {
+        id(node): name
+        for name, one in top.items()
+        for statement in one.body
+        for node in executed(statement)
+    }
+    callees = {
+        id(node.func)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    sites: dict[str, list[ast.Call]] = {name: [] for name in top}
+    # Генератор и сопрограмма исполняются не в месте вызова, а при обходе или
+    # `await` — `try` вокруг `f()` их истечения не ловит (взгляд на #1589).
+    taken: set[str] = {
+        name for name, one in top.items() if isinstance(one, ast.AsyncFunctionDef) or yields(one)
+    } | (exported & set(top))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in sites:
+                sites[node.func.id].append(node)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            # Вызов через точку с тем же именем (`obj.f()`, `mod.f()`): тот ли
+            # это объект, разбор одного файла не знает — вызывающий неизвестен,
+            # засчёт снимается, а не угадывается (045).
+            if node.func.attr in top:
+                taken.add(node.func.attr)
+        elif (
+            isinstance(node, ast.Name)
+            and node.id in top
+            and isinstance(node.ctx, ast.Load)
+            and id(node) not in callees
+        ):
+            taken.add(node.id)
+
+    def covered(name: str, depth: int, seen: frozenset[str]) -> bool:
+        """Ловит ли истечение каждый вызывающий `name`."""
+        if name in taken or not sites[name] or depth > CALLER_DEPTH or name in seen:
+            return False
+        for call in sites[name]:
+            if id(call) in safe:
+                continue
+            outer = executed_in.get(id(call))
+            if outer is None or not covered(outer, depth + 1, seen | {name}):
+                return False
+        return True
+
+    return {
+        id(node)
+        for name, one in top.items()
+        if covered(name, 0, frozenset())
+        for statement in one.body
+        for node in executed(statement)
+    }
+
+
+def undeadlined(source: str, exported: frozenset[str] = frozenset()) -> list[str]:
+    """Вызовы процесса исходника без дедлайна или без поимки его истечения.
+
+    `exported` — имена модуля, которые берут другие модули (`exported_names`).
+    """
     tree = ast.parse(source)
     imported = {
         alias.asname or alias.name
@@ -195,6 +333,7 @@ def undeadlined(source: str) -> list[str]:
     )
     safe = guarded(tree)
     awaited = waits_with_deadline(tree, safe)
+    by_callers = caught_by_callers(tree, safe, exported)
     found: list[str] = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and is_spawn(node, imported, modules)):
@@ -206,7 +345,7 @@ def undeadlined(source: str) -> list[str]:
                 )
         elif not any(word.arg == "timeout" for word in node.keywords):
             found.append(f"{node.lineno}: без timeout=")
-        elif id(node) not in safe:
+        elif id(node) not in safe and id(node) not in by_callers:
             found.append(f"{node.lineno}: TimeoutExpired не пойман")
     return found
 
@@ -256,16 +395,23 @@ def look(
     names = code_of(root, [one for one in places if one not in missing])
     found: list[tuple[str, str, str]] = []
     unparsed: list[tuple[str, str]] = []
+    sources: dict[str, str] = {}
     for name in names:
         try:
             raw = (root / name).read_bytes()
         except OSError as exc:
             raise NotRun(f"{name} не прочитан: {exc}") from exc
         try:
-            bad = undeadlined(raw.decode("utf-8"))
+            sources[name] = raw.decode("utf-8")
+            ast.parse(sources[name])
         except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError) as exc:
+            sources.pop(name, None)
             unparsed.append((name, report.cut(str(exc))))
-            continue
+    # Кто чьи имена берёт — по всем просмотренным модулям сразу (взгляд на #1589):
+    # поимка у вызывающего засчитывается, только если вызывающих вне файла нет.
+    exported = exported_names({Path(name).stem: ast.parse(text) for name, text in sources.items()})
+    for name, text in sources.items():
+        bad = undeadlined(text, exported.get(Path(name).stem, frozenset()))
         for one in bad:
             line, what = one.split(": ", 1)
             found.append((name, line, what))
