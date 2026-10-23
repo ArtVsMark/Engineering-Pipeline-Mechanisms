@@ -130,12 +130,16 @@ jobs:
           GITHUB_BASE_REF: ${{ github.base_ref }}
           # Метка `scope/*` шире ответа классификатора расширяет выбор (#1599).
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          # Повторный толчок судится от последней зелёной головы (#1602): её
+          # спрашивают у площадки по номеру изменения, токеном прогона на чтение.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           selected=()
           if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
             rc=0
-            said="$(python scripts/scope.py --tests --labels "${PR_LABELS:-}")" || rc=$?
+            said="$(python scripts/scope.py --tests --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}")" || rc=$?
             if [ "$rc" != 0 ]; then
               echo "::warning::выбор тестов не отработал (код $rc) — полный набор"
             elif [ -z "$said" ]; then
@@ -144,7 +148,7 @@ jobs:
             elif [ "$said" != "ALL" ]; then
               mapfile -t selected <<<"$said"
             fi
-            python scripts/scope.py --labels "${PR_LABELS:-}" || true
+            python scripts/scope.py --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}" || true
           fi
           pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED} ${selected[@]+"${selected[@]}"}
 

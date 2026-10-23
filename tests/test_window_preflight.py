@@ -1368,7 +1368,7 @@ def test_a_refused_choice_falls_back_to_the_whole_set(
 ) -> None:
     """Классификатор отказал — полный набор и слово об этом; `--all` — полный без вопроса."""
 
-    def refused(root: Path, base: str) -> object:
+    def refused(root: Path, base: str, since: str = "") -> object:
         raise preflight.scope.NotRun("базы нет")
 
     monkeypatch.setattr(preflight.scope, "choose", refused)

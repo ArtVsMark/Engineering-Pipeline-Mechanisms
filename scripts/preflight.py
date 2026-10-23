@@ -346,7 +346,7 @@ def chosen_scope(root: Path, *, everything: bool) -> scope.Choice | None:
         print("выбор тестов: полный набор (--all)")
         return None
     try:
-        said = scope.choose(root, journal_base())
+        said = scope.choose(root, journal_base(), pushed(root))
     except scope.NotRun as exc:
         print(f"выбор тестов не отработал — полный набор: {report.cut(str(exc))}")
         return None
@@ -355,6 +355,20 @@ def chosen_scope(root: Path, *, everything: bool) -> scope.Choice | None:
         f"сценарий: {said.scenario}; тест-файлов: {shown}" + (f" — {said.why}" if said.why else "")
     )
     return said
+
+
+def pushed(root: Path) -> str:
+    """Толкнутая голова ветки окна — прежняя зелёная (#1602); не толкнута — пусто.
+
+    Зелёной её делает порядок окна: ветку толкает `--push` после зелёной
+    предполётной. Ветки нет на площадке или git не ответил — пусто, и суд идёт
+    от общего предка: ошибка в сторону «больше» (039).
+    """
+    try:
+        name = gitcall.branch(scope.NotRun, cwd=str(root))
+        return scope.git(root, "rev-parse", "--verify", "--quiet", f"origin/{name}").strip()
+    except scope.NotRun:
+        return ""
 
 
 def journal_base() -> str:

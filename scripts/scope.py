@@ -48,6 +48,7 @@ Bazel `rdeps`. Код не переносится, только идея.
 
 import argparse
 import ast
+import os
 import subprocess
 import sys
 import tempfile
@@ -56,6 +57,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+import ghrest
 import gitcall
 import journal
 import paths
@@ -117,6 +119,8 @@ SCRIPT_CALLS: Final = frozenset({"load_script", "run_script"})
 CODE_WALKS: Final = frozenset({"code_files", "code_roots"})
 #: Предел времени git: дерево базы и списки путей — локальные операции.
 GIT_TIMEOUT: Final = 120
+#: Сводный гейт, чей зелёный исход делает голову «проверенной» (#1602).
+GREEN_CHECK: Final = "ci-complete"
 
 
 class NotRun(RuntimeError):
@@ -424,15 +428,109 @@ def base_graph(root: Path, fork: str) -> dict[str, Edges]:
         return graph(Path(room), tracked(root, fork))
 
 
-def choose(root: Path, base: str) -> Choice:
-    """Полный ответ: тронутое от общего предка, граф базы и головы, выбор."""
+def fork_of(root: Path, base: str, head: str = "HEAD") -> str:
+    """Общий предок головы с базой; не найден — `NotRun`."""
     try:
-        fork = journal.common_ancestor(base, root=root)
+        return journal.common_ancestor(base, head, root=root)
     except journal.NotRun as exc:
         raise NotRun(str(exc)) from exc
-    touched = touched_paths(root, fork)
+
+
+def common(left: tuple[str, ...] | None, right: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    """Пересечение выборов; None — «все», и пересечение с ним — другой выбор."""
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return tuple(sorted(set(left) & set(right)))
+
+
+def joined(left: tuple[str, ...], right: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    """Объединение выборов; None — «все»."""
+    return None if right is None else tuple(sorted({*left, *right}))
+
+
+def again(root: Path, base: str, since: str, fork: str, edges: dict[str, Edges]) -> Choice:
+    """Повторный толчок: судится изменённое с зелёной головы `since` (#1602).
+
+    СВОЁ — ТО, ЧТО ПОМЕНЯЛОСЬ С `since` И ОТЛИЧАЕТСЯ ОТ ВЕРШИНЫ БАЗЫ. Файл,
+    совпадающий с новой базой, пришёл влитой базой и проверен на ней: судить его
+    здесь значило бы гнать чужое. Поменялось только сообщение коммита — дерево
+    то же, своего нет, тестов ноль.
+
+    ПРИШЕДШЕЕ В БАЗУ — ПЕРЕСЕЧЕНИЕМ. Сдвинулся общий предок — база принесла
+    своё. Ломает изменение только то, что задевает и его, и пришедшее: тесты
+    пересечения двух выборов. Пустое — повтор ничего не скажет. ГРАНИЦА НАЗВАНА
+    (046): правки, не связанные графом, всё же могут сломать друг друга — это
+    ловит полный набор слияния и общей ветки, а не этот выбор.
+    """
+    own = touched_paths(root, since) & touched_paths(root, base)
+    kind, why = scenario(own)
+    note = f"повторный толчок от {since[:12]}"
+    if kind in (FULL, FLOWS):
+        return Choice(kind, None, f"{note}: {why}")
+    picked = chosen(edges, own)
+    tests: tuple[str, ...] | None = picked
+    before = fork_of(root, base, since)
+    if before != fork:
+        came = {
+            one
+            for one in git(root, "diff", "-z", "--name-only", "--no-renames", before, fork).split(
+                "\0"
+            )
+            if one
+        }
+        mine = classify(touched_paths(root, fork), edges).tests
+        tests = joined(picked, common(classify(came, edges).tests, mine))
+        note += f"; база сдвинулась с {before[:12]}"
+    return Choice(kind, tests, note)
+
+
+def choose(root: Path, base: str, since: str = "") -> Choice:
+    """Полный ответ: тронутое от общего предка или от зелёной головы, граф, выбор.
+
+    `since` — последняя голова с зелёным сводным гейтом; пусто — первый толчок
+    или красная прежняя голова, и суд идёт от общего предка.
+    """
+    fork = fork_of(root, base)
     edges = merged(base_graph(root, fork), graph(root, tracked(root)))
-    return classify(touched, edges)
+    if since:
+        return again(root, base, since, fork, edges)
+    return classify(touched_paths(root, fork), edges)
+
+
+def last_green(repo: str, number: int, token: str, root: Path) -> str:
+    """Последняя голова изменения, кроме нынешней, с зелёным `ci-complete` (#1602).
+
+    Головы — коммиты изменения от новых к старым; голова засчитывается, если она
+    есть в дереве (переписанная история её теряет) и сводный гейт на ней
+    `success`. Нет такой — пусто: суд от общего предка. Отказ площадки — `NotRun`:
+    зовущий судит от предка, а не «ничего не тронуто» (039).
+    """
+    head = git(root, "rev-parse", "HEAD").strip()
+    try:
+        said = ghrest.request("GET", f"repos/{repo}/pulls/{number}/commits?per_page=100", token)
+        for one in reversed(said or []):
+            sha = str(one.get("sha") or "")
+            if not sha or sha == head:
+                continue
+            runs = ghrest.request(
+                "GET",
+                f"repos/{repo}/commits/{sha}/check-runs?check_name={GREEN_CHECK}",
+                token,
+            )
+            if not any(
+                run.get("conclusion") == "success" for run in (runs or {}).get("check_runs", [])
+            ):
+                continue
+            try:
+                git(root, "cat-file", "-e", f"{sha}^{{commit}}")
+            except NotRun:
+                continue
+            return sha
+    except ghrest.TransportError as exc:
+        raise NotRun(f"зелёная голова не найдена: {exc}") from exc
+    return ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -444,9 +542,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--labels", default="", help="метки изменения через пробел: `scope/*` расширяет сценарий"
     )
+    parser.add_argument(
+        "--since", default="", help="зелёная прежняя голова: судить изменённое с неё"
+    )
+    parser.add_argument(
+        "--pr", type=int, default=0, help="номер изменения: зелёную голову спросить у площадки"
+    )
     args = parser.parse_args(argv)
+    since = args.since
+    if not since and args.pr:
+        try:
+            since = last_green(
+                os.environ.get("GITHUB_REPOSITORY", ""), args.pr, ghrest.token_from_env(), args.root
+            )
+        except NotRun as exc:
+            print(f"зелёная голова не найдена — суд от общего предка: {exc}", file=sys.stderr)
     try:
-        said = choose(args.root, journal.base_from_env(args.base))
+        said = choose(args.root, journal.base_from_env(args.base), since)
     except NotRun as exc:
         print(f"выбор не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

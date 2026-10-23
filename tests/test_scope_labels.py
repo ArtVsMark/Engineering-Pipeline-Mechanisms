@@ -63,7 +63,9 @@ def test_main_takes_the_labels(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`--labels` доезжает до выбора: с `scope/full` печатается ALL."""
-    monkeypatch.setattr(scope, "choose", lambda root, base: scope.Choice(scope.TEXT, (), ""))
+    monkeypatch.setattr(
+        scope, "choose", lambda root, base, since="": scope.Choice(scope.TEXT, (), "")
+    )
     assert scope.main(["--tests", "--base", "main", "--labels", "bug scope/full"]) == 0
     assert capsys.readouterr().out.strip() == "ALL"
 
