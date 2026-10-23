@@ -40,6 +40,14 @@
 краснеющая на законном, приучает себя обходить
 ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
 
+РОД С ПРАВИЛОМ — НЕ ПОВОД ДЛЯ ВТОРОГО (#1607). Правило, родившееся из рода,
+ставит у него отметку «правило с #N» — номер слитого изменения, с которого оно
+действует. Такой род из долга уходит: его встречи до отметки — история, а
+встречи после считаются отдельно и печатаются списком «правило есть, а род
+встречается» — вопрос к механизму правила. Замер 23.10.2026: в долге стояли
+17 родов, и у 13 из них правило каталога уже было — повод для нового правила
+и повод доработать старое печатались одним списком.
+
 Исходы (правило 039): ``0`` роды названы · ``2`` не отработал.
 """
 
@@ -93,6 +101,11 @@ PREVIOUS: Final = "прежде"
 #: «нет — —» — нет (взгляд на #1090).
 REFUSED_RE: Final = re.compile(r"^нет[^\w]+(?=.*\w)(?P<why>.+)$", re.IGNORECASE)
 FATE_RE: Final = re.compile(r"^(?P<kind>предложено|своё|есть)\s+—\s+(?P<said>\S.*)$")
+#: Отметка начала правила у рода (#1607): номер слитого изменения, с которого
+#: правило действует. Встречи ДО неё — история рода, к порогу нового правила
+#: не идут; встречи ПОСЛЕ — сигнал «правило не держит», а не повод для второго.
+SINCE: Final = "правило с"
+SINCE_RE: Final = changerefs.WHOLE_REF_RE
 
 
 class NotRun(RuntimeError):
@@ -308,6 +321,78 @@ def with_history(
     return merged, {name: one for name, one in met.items() if name not in kinds}
 
 
+def since_of(body: dict[str, Any]) -> int | None:
+    """Номер изменения из отметки «правило с»; отметки нет — `None`, не та форма — `NotRun`."""
+    said = body.get(SINCE)
+    if said is None:
+        return None
+    found = SINCE_RE.match(str(said).strip())
+    if not found:
+        raise NotRun(f"«{SINCE}» — номер слитого изменения вида #N, а не «{said}»")
+    return int(found["number"])
+
+
+def marks_of(kinds: dict[str, Any], numbered: list[tuple[int, str]]) -> dict[str, int]:
+    """Род с отметкой → МЕСТО слияния отметки в истории; отметки нет в истории — `NotRun`.
+
+    МЕСТО, А НЕ НОМЕР. Номер изменения порядка слияния не держит: замер
+    23.10.2026 — 187 мест, где слитое позже несёт номер меньше (#1605 слито
+    раньше #1604). Отбор `n <= N` унёс бы в «до правила» изменение с меньшим
+    номером, слитое после отметки, — и сигнал «правило не держит» молча
+    пропустил бы его встречу (взгляд на #1611). Отметка, которой в истории нет,
+    — опечатка или изменение ещё не слито; место ей не подставляется (045).
+    """
+    place = {number: at for at, (number, _) in enumerate(numbered)}
+    found: dict[str, int] = {}
+    for name, body in kinds.items():
+        number = since_of(body)
+        if number is None:
+            continue
+        if number not in place:
+            raise NotRun(f"«{name}»: «{SINCE}» #{number} — среди слитых изменений его нет")
+        found[name] = place[number]
+    return found
+
+
+def undated(kinds: dict[str, Any], numbered: list[tuple[int, str]]) -> set[str]:
+    """Роды, чья отметка раньше первой строки `Род:` в истории: их «после» — нижняя граница.
+
+    Замороженный список `встречен` копился до строк `Род:` и дат не несёт: встречи
+    между такой отметкой и первой строкой лежат в нём неотличимо от встреч до
+    правила. Замер 23.10.2026: таких отметок 13 из 21 (взгляд на #1611). Число не
+    чинится — данных нет, — но и не выдаётся за точное (075).
+    """
+    first = next(
+        (at for at, (_, body) in enumerate(numbered) if met_in_history([body], kinds)),
+        len(numbered),
+    )
+    return {name for name, at in marks_of(kinds, numbered).items() if at < first}
+
+
+def after_rule(kinds: dict[str, Any], numbered: list[tuple[int, str]]) -> dict[str, list[str]]:
+    """Род с отметкой «правило с #N» → встречи истории в слияниях ПОСЛЕ #N (#1607).
+
+    ОДИН СЧЁТ, ДВА ОТРЕЗКА. Встречи считает тот же `met_in_history` по всей
+    истории и по её началу до места #N включительно; «после» — разность.
+    Отдельный счёт по хвосту истории потерял бы сведение двойников с началом:
+    цепочка, чей отпечаток уже встречен до правила, засчиталась бы снова (022).
+    Замороженный список `встречен` целиком считается «до»; где это неверно —
+    называет `undated`.
+    """
+    whole = met_in_history([body for _, body in numbered], kinds)
+    marks = marks_of(kinds, numbered)
+    # Начало истории считается по разу на место, а не на род: отметок у родов
+    # меньше, чем родов, и каждый проход — разбор всей истории до места.
+    starts = {
+        at: met_in_history([body for _, body in numbered[: at + 1]], kinds)
+        for at in set(marks.values())
+    }
+    return {
+        name: [one for one in whole.get(name, []) if one not in set(starts[number].get(name, []))]
+        for name, number in marks.items()
+    }
+
+
 def repeated(kinds: dict[str, Any]) -> list[tuple[str, int]]:
     """Роды, встреченные не реже :data:`REPEATED_AT` раз, — от частых к редким."""
     counted = [(name, len(body.get("встречен") or [])) for name, body in kinds.items()]
@@ -318,12 +403,25 @@ def repeated(kinds: dict[str, Any]) -> list[tuple[str, int]]:
 
 
 def unheld(kinds: dict[str, Any]) -> list[tuple[str, int]]:
-    """Повторяющиеся роды, которые не закрыты механизмом, — это и есть долг."""
+    """Повторяющиеся роды, которые не закрыты механизмом и без правила, — долг.
+
+    Род с отметкой «правило с» сюда не идёт (#1607): правило из него уже
+    родилось, и его встречи — вопрос к тому правилу (`not_held`), а не повод
+    рождать второе.
+    """
     return [
         (name, times)
         for name, times in repeated(kinds)
-        if said_no(str(kinds[name].get("закрыт", "")))
+        if said_no(str(kinds[name].get("закрыт", ""))) and kinds[name].get(SINCE) is None
     ]
+
+
+def not_held(after: dict[str, list[str]]) -> list[tuple[str, int]]:
+    """Роды, встреченные после своего правила не реже порога: правило не держит (#1607)."""
+    return sorted(
+        ((name, len(met)) for name, met in after.items() if len(met) >= REPEATED_AT),
+        key=lambda one: (-one[1], one[0]),
+    )
 
 
 def fate(body: dict[str, Any]) -> tuple[str, str] | None:
@@ -623,7 +721,10 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
     try:
         frozen = read(Path(args.kinds) if args.kinds else None)
-        kinds, outside = with_history(frozen, trunk_log.merged_bodies(ref=args.trunk))
+        numbered = trunk_log.merged_numbered(ref=args.trunk)
+        kinds, outside = with_history(frozen, [body for _, body in numbered])
+        after = after_rule(frozen, numbered)
+        lower = undated(frozen, numbered)
         unseen = trunk_log.unseen(ref=args.trunk)
         archived, gap = in_archive(Path(args.archive)) if args.archive else ({}, "")
     except (NotRun, trunk_log.NotRun) as refusal:
@@ -654,7 +755,9 @@ def main(argv: list[str] | None = None) -> int:
         split = f" (взгляд {seen}, окно {caught})" if caught else ""
         kept = archived.get(name)
         stored = f"  архив: {kept[0]}, снято работой {kept[1]}, дублем {kept[2]}" if kept else ""
-        print(f"  {times:>2}  {name}{split}  [{mark}]{stored}")
+        least = "не меньше " if name in lower else ""
+        rule = f"  после правила {body[SINCE]}: {least}{len(after[name])}" if name in after else ""
+        print(f"  {times:>2}  {name}{split}  [{mark}]{rule}{stored}")
         if born:
             print(f"      породил: {'; '.join(born)}")
     # РОД АРХИВА ВНЕ СЛОВАРЯ НЕ ВЫПАДАЕТ МОЛЧА: переименованный, снятый или
@@ -669,9 +772,21 @@ def main(argv: list[str] | None = None) -> int:
         total, worked, twinned = archived[NO_KIND]
         print(f"  {KINDLESS} {total} — снято работой {worked}, дублем {twinned}")
 
+    loose = not_held(after)
+    if loose:
+        print(f"\nПРАВИЛО ЕСТЬ, А РОД ВСТРЕЧАЕТСЯ (от {REPEATED_AT} встреч после отметки):")
+        for name, times in loose:
+            said = fate(kinds[name])
+            number = RULE_NUMBER_RE.match(said[1]) if said and said[0] == "есть" else None
+            whose = f"правило {number.group(0)}" if number else "своё правило"
+            print(f"  {times}× {name} — {whose}, отметка {kinds[name][SINCE]}")
+        print(
+            "Правило не держит — повод доработать его, а не рождать второе (#1607):"
+            "\nмеханизма нет, механизм слабее правила или правило мягче беды."
+        )
     debt = unheld(kinds)
     if not debt:
-        print(f"\nповторяющихся родов без механизма нет (порог — {REPEATED_AT} встречи)")
+        print(f"\nповторяющихся родов без механизма и правила нет (порог — {REPEATED_AT} встречи)")
         return EXIT_OK
     print(f"\nПОВТОРЯЕТСЯ И НЕ ДЕРЖИТСЯ НИЧЕМ (от {REPEATED_AT} встреч):")
     for name, times in debt:

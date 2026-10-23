@@ -32,7 +32,6 @@
 
 import argparse
 import os
-import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -117,7 +116,7 @@ STUCK_HOLD_MUTE: Final = "стоп-метка не называет, чего ж
 #: обратными кавычками, забором или отступом — условием не считается. Своя
 #: регулярка этого не умела вовсе.
 #: Разрешимая форма названного: «#262».
-SUBJECT_RE: Final = re.compile(r"^#(?P<number>\d+)$")
+SUBJECT_RE: Final = changerefs.WHOLE_REF_RE
 
 
 class NotRun(RuntimeError):
