@@ -282,7 +282,7 @@ def parse_fragments(paths: list[Path], form: journal.FragmentForm | None = None)
 
 
 def fragments_of(paths: list[str]) -> list[Fragment]:
-    """Разбирает фрагменты, которые тронуло ИЗМЕНЕНИЕ, и только их.
+    """Разбирает фрагменты, которые тронуло ИЗМЕНЕНИЕ; тронут ответ проекта — все копящиеся.
 
     Берутся все `.md` под `changelog.d/`, а не только правильно названные:
     иначе файл с негодным именем выпал бы из отбора ровно потому, что негоден,
@@ -293,6 +293,15 @@ def fragments_of(paths: list[str]) -> list[Fragment]:
         for name in paths
         if name.startswith(f"{FRAGMENTS}/") and name.endswith(".md") and name.count("/") == 1
     ]
+    # ПРАВКА ОТВЕТА ПРОЕКТА СУДИТ ВСЁ КОПЯЩЕЕСЯ (взгляд на #1590). Форма конца
+    # приходит из `.pipeline.yml`: изменение, тронувшее его, могло сменить
+    # `tail`, и слитые, но не выпущенные фрагменты, принятые прежней формой,
+    # уронили бы сборку на выпуске — далеко от правки, которая их сломала.
+    # Поэтому такое изменение отвечает за все копящиеся фрагменты разом:
+    # смена формы и перепись фрагментов едут одним изменением. Выпущенное
+    # (`released/`) не судится и тут — его задним числом не правят (#1172).
+    if pipeline_checks.DEFAULT_PATH.as_posix() in paths:
+        touched = sorted({*touched, *FRAGMENTS.glob("*.md")})
     form = project_form()
     fragments = parse_fragments(touched, form)
     # ФОРМА — ТОЛЬКО У НОВОГО (#1172). Выпущенное — источник журнала, и править
