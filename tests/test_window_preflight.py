@@ -1378,3 +1378,76 @@ def test_a_refused_choice_falls_back_to_the_whole_set(
     assert "--all" in capsys.readouterr().out
     monkeypatch.setenv("GITHUB_BASE_REF", "main")
     assert preflight.journal_base() == "origin/main"
+
+
+def git_in(root: Path, *args: str) -> None:
+    """Git в дереве подделки, с дедлайном: тест не должен виснуть на git."""
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, timeout=60)
+
+
+def test_the_contract_gate_is_run_and_reddens_before_the_push(tmp_path: Path) -> None:
+    """Гейт поверхности спрашивается своим прогоном и краснеет до толчка (#1575).
+
+    На #1574 предполётная прошла зелёной, а `contract` покраснел на площадке:
+    фетч базы жил в блоке шага, и блок целиком считался требующим площадки.
+    """
+    contract_steps = [step for step in preflight.steps() if "check_contract.py" in step.command]
+    assert [preflight.plain(step.command) for step in contract_steps] == [
+        "python scripts/check_contract.py"
+    ]
+    # Тот же вызов на дереве с новым общим шагом без фрагмента `contract` — красное.
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (tmp_path / "changelog.d").mkdir()
+    step = "on:\n  workflow_call:\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n"
+    (flows / "step-a.yml").write_text(step, encoding="utf-8")
+    git_in(tmp_path, "init", "-q")
+    git_in(tmp_path, "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A")
+    git_in(tmp_path, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-qm", "база")
+    git_in(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (flows / "step-b.yml").write_text(step, encoding="utf-8")
+    git_in(tmp_path, "add", "-A")
+    git_in(tmp_path, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-qm", "новый шаг")
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "packages" / "transport")}
+    env.pop("GITHUB_BASE_REF", None)
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_contract.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        timeout=120,
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "step-b.yml: новый прогон" in done.stdout
+
+
+def test_without_the_base_the_contract_gate_is_the_third_outcome(tmp_path: Path) -> None:
+    """Без `origin/<база>` у окна — названный отказ с кодом 2, а не «зелено» (#1575)."""
+    git_in(tmp_path, "init", "-q")
+    git_in(
+        tmp_path,
+        "-c",
+        "user.email=a@b",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "x",
+    )
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "packages" / "transport")}
+    env.pop("GITHUB_BASE_REF", None)
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_contract.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        timeout=120,
+    )
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert "не отработал" in done.stderr
