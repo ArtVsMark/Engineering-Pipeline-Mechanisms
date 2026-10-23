@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-22T09:17:05+00:00",
+  "updated": "2026-10-23T09:12:45+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -7212,262 +7212,45 @@
     },
     "2026-10-22": {
       "runs": {
-        "schedules-seen": {
-          "runs": 63,
+        "automerge": {
+          "runs": 64,
           "red": 0,
-          "cancelled": 0,
-          "seconds": 211,
-          "timed": 63,
+          "cancelled": 27,
+          "seconds": 1283,
+          "timed": 64,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "main-red": {
-          "runs": 78,
-          "red": 0,
-          "cancelled": 6,
-          "seconds": 1254,
-          "timed": 78,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "claude": {
-          "runs": 27,
+          "runs": 41,
           "red": 0,
           "cancelled": 0,
-          "seconds": 116,
-          "timed": 27,
+          "seconds": 859,
+          "timed": 41,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "verify-queue": {
-          "runs": 63,
-          "red": 0,
-          "cancelled": 4,
-          "seconds": 1081,
-          "timed": 63,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "ci-complete-wake": {
-          "runs": 62,
+          "runs": 32,
           "red": 0,
           "cancelled": 0,
-          "seconds": 410,
-          "timed": 62,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "stuck": {
-          "runs": 62,
-          "red": 0,
-          "cancelled": 11,
-          "seconds": 1548,
-          "timed": 62,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "hail": {
-          "runs": 65,
-          "red": 0,
-          "cancelled": 11,
-          "seconds": 1425,
-          "timed": 65,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "automerge": {
-          "runs": 124,
-          "red": 0,
-          "cancelled": 66,
-          "seconds": 2536,
-          "timed": 124,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "work-plan": {
-          "runs": 64,
-          "red": 0,
-          "cancelled": 14,
-          "seconds": 2471,
-          "timed": 64,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "ci": {
-          "runs": 64,
-          "red": 2,
-          "cancelled": 43,
-          "seconds": 9765,
-          "timed": 64,
-          "red_jobs": {
-            "pr-meta / pr-meta": 2,
-            "attribution / attribution": 1,
-            "journal / journal": 1,
-            "test": 1,
-            "test-matrix (3.14)": 1,
-            "test-matrix (3.15)": 1
-          },
-          "red_steps": {
-            "pr-meta / pr-meta · метки и связь с задачей": 2,
-            "attribution / attribution · сверить атрибуцию": 1,
-            "journal / journal · фрагмент журнала": 1,
-            "test · вердикт матрицы": 1,
-            "test-matrix (3.14) · тесты": 1,
-            "test-matrix (3.15) · тесты": 1
-          },
-          "red_marks": {},
-          "red_whose": {
-            "свой": 7
-          }
-        },
-        "ci-complete": {
-          "runs": 60,
-          "red": 2,
-          "cancelled": 47,
-          "seconds": 8730,
-          "timed": 60,
-          "red_jobs": {
-            "ci-complete": 2
-          },
-          "red_steps": {
-            "ci-complete · опросить проверки на голове": 2
-          },
-          "red_marks": {
-            "ci-complete · сводный гейт опросил голову раньше соседей": 2
-          },
-          "red_whose": {
-            "свой": 2
-          }
-        },
-        "agent-pr": {
-          "runs": 11,
-          "red": 1,
-          "cancelled": 0,
-          "seconds": 266,
-          "timed": 11,
-          "red_jobs": {
-            "agent-pr / agent-pr": 1
-          },
-          "red_steps": {
-            "agent-pr / agent-pr · открыть изменение от лица владельца": 1
-          },
-          "red_marks": {},
-          "red_whose": {
-            "свой": 1
-          }
-        },
-        "Шаг открытия доводит изменение, созданное за отказом шлюза": {
-          "runs": 2,
-          "red": 0,
-          "cancelled": 2,
-          "seconds": 327,
-          "timed": 2,
+          "seconds": 524,
+          "timed": 32,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "badges": {
-          "runs": 7,
+          "runs": 6,
           "red": 0,
           "cancelled": 1,
-          "seconds": 3923,
-          "timed": 7,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "python-next": {
-          "runs": 3,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 53,
-          "timed": 3,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "attribution-history": {
-          "runs": 3,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 44,
-          "timed": 3,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "task-items": {
-          "runs": 5,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 214,
-          "timed": 5,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "github_actions in /. - Update #1644818017": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 83,
-          "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "drift": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 32,
-          "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Пробы «неприменимо» берут перечень у канона и сужают место, а не хост (+6)": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 991,
-          "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Пробы «неприменимо» берут перечень у канона и сужают место, а не хост (+5)": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 1,
-          "seconds": 117,
-          "timed": 1,
+          "seconds": 3456,
+          "timed": 6,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -7477,117 +7260,465 @@
           "runs": 2,
           "red": 0,
           "cancelled": 0,
-          "seconds": 617,
+          "seconds": 270,
           "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Пробы «неприменимо» берут перечень у канона и сужают место, а не хост (+4)": {
+        "ci-complete-wake": {
+          "runs": 32,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 228,
+          "timed": 32,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 33,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 580,
+          "timed": 33,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 33,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 116,
+          "timed": 33,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 32,
+          "red": 0,
+          "cancelled": 4,
+          "seconds": 650,
+          "timed": 32,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 32,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 1429,
+          "timed": 32,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
           "runs": 2,
           "red": 0,
-          "cancelled": 1,
-          "seconds": 853,
+          "cancelled": 0,
+          "seconds": 36,
           "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Гейт дедлайна не роняет джоб на неразобранном файле, массивы — на bash 3.2 (+3)": {
+        "attribution-history": {
           "runs": 2,
           "red": 0,
           "cancelled": 0,
-          "seconds": 2270,
+          "seconds": 31,
           "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "github_actions in /. - Update #1644746189": {
+        "task-items": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 105,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 31,
+          "red": 0,
+          "cancelled": 20,
+          "seconds": 5742,
+          "timed": 31,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 25,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 29,
+          "red": 0,
+          "cancelled": 22,
+          "seconds": 5233,
+          "timed": 29,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Каталог — объявленный потребитель; граница его очереди названа": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2549,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 66,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Связь с задачей: «Без задачи, потому что …» — третий законный ответ": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 79,
+          "seconds": 1141,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 93.9
+    },
+    "2026-10-23": {
+      "runs": {
+        "verify-queue": {
+          "runs": 51,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 1038,
+          "timed": 51,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 55,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 273,
+          "timed": 55,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 16,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Поднят anthropics/claude-code-action до v1.0.254": {
+        "task-items": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 48,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 1056,
+          "seconds": 17,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "deps-intercept": {
+        "schedules-seen": {
+          "runs": 52,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 129,
+          "timed": 52,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 55,
+          "red": 0,
+          "cancelled": 11,
+          "seconds": 1328,
+          "timed": 55,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 53,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 331,
+          "timed": 53,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 52,
+          "red": 0,
+          "cancelled": 11,
+          "seconds": 1406,
+          "timed": 52,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 105,
+          "red": 0,
+          "cancelled": 57,
+          "seconds": 2085,
+          "timed": 105,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 53,
+          "red": 0,
+          "cancelled": 17,
+          "seconds": 2368,
+          "timed": 53,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 52,
+          "red": 1,
+          "cancelled": 40,
+          "seconds": 7430,
+          "timed": 52,
+          "red_jobs": {
+            "attribution / attribution": 1,
+            "journal / journal": 1,
+            "pr-meta / pr-meta": 1,
+            "test": 1,
+            "test-matrix (3.14)": 1,
+            "test-matrix (3.15)": 1
+          },
+          "red_steps": {
+            "attribution / attribution · сверить атрибуцию": 1,
+            "journal / journal · фрагмент журнала": 1,
+            "pr-meta / pr-meta · метки и связь с задачей": 1,
+            "test · вердикт матрицы": 1,
+            "test-matrix (3.14) · тесты": 1,
+            "test-matrix (3.15) · тесты": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 6
+          }
+        },
+        "ci-complete": {
+          "runs": 53,
+          "red": 1,
+          "cancelled": 42,
+          "seconds": 7661,
+          "timed": 53,
+          "red_jobs": {
+            "ci-complete": 1
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 1
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 1
+          },
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "agent-pr": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 153,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 10,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 624,
+          "timed": 10,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт дедлайна засчитывает поимку истечения у вызывающего": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1762,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Наполнение фрагмента журнала задаёт потребитель: раздел journal": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1626,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ссылки на правила в литералах кода — входы проверок, а не ссылки": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 26,
+          "seconds": 1225,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "verify 0b24ecb": {
+        "handover-probe": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 56,
+          "seconds": 54,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "verify 8d5f173": {
+        "facts-release": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 39,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify e39af42": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 48,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify 9db4031": {
           "runs": 1,
           "red": 0,
           "cancelled": 1,
-          "seconds": 12,
+          "seconds": 4,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "verify 874ec3c": {
+        "verify df62429": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 30,
+          "seconds": 25,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Bump anthropics/claude-code-action from 1.0.248 to 1.0.254": {
+        "Bump anthropics/claude-code-action from 1.0.254 to 1.0.255": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 14,
+          "seconds": 10,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "github_actions in /. - Update #1644287950": {
+        "github_actions in /. - Update #1646859556": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 75,
+          "seconds": 73,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
