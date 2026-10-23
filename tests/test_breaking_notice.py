@@ -292,13 +292,37 @@ def test_a_declared_consumer_is_judged_by_the_window_in_its_tree(
 def test_an_unread_window_makes_the_minor_partial(
     tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Окно не прочитано — не «покрывает»: сосед назван, и исход частичный (045)."""
-    notified = family_of(monkeypatch, [took("o/взял", None)], declared=["O/ВЗЯЛ"])
+    """Окно не прочитано — не «покрывает»: сосед назван один раз, и исход частичный (045)."""
+    notified = family_of(
+        monkeypatch, [took("o/взял", None)], unread=["O/ВЗЯЛ"], declared=["O/ВЗЯЛ"]
+    )
     assert module.main(["--tag", "v1.7.0", *OURS]) == module.EXIT_PARTIAL
     assert notified == []
     out = capsys.readouterr().out
     assert "окно не прочитано" in out
-    assert "не прочитаны: o/взял;" in out
+    assert "не прочитаны: O/ВЗЯЛ;" in out
+
+
+@pytest.mark.parametrize(
+    ("said", "why"),
+    [({}, "не объявлено"), ({"contract": "любое"}, "не разбирается")],
+    ids=["окна нет", "окно не разобрано"],
+)
+def test_a_window_only_the_neighbour_can_fix_is_notified_not_red(
+    tree: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    said: dict[str, str],
+    why: str,
+) -> None:
+    """Окна нет или оно не разобрано — сосед оповещён, а шаг не красный на каждом миноре."""
+    notified = family_of(monkeypatch, [], declared=["o/объявлен"])
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "т")
+    monkeypatch.setattr(module, "asked_owner", lambda token: "владелец")
+    monkeypatch.setattr(module.consumers, "answer_of", lambda repo, token: said)
+    assert module.main(["--tag", "v1.7.0", *OURS]) == module.EXIT_OK
+    assert notified == ["o/объявлен"]
+    assert why in capsys.readouterr().out
 
 
 def test_a_major_ignores_the_window(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -348,8 +372,7 @@ def test_window_of_and_covers_name_their_refusals(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(module.NotRun, match="токена"):
         module.window_of(took("o/взял", None), "")
     monkeypatch.setattr(module.consumers, "answer_of", lambda repo, token: {})
-    with pytest.raises(module.NotRun, match="не объявлено"):
-        module.window_of(took("o/взял", None), "т")
+    assert module.window_of(took("o/взял", None), "т") is None
     with pytest.raises(module.NotRun, match="не разобрано"):
         module.covers("любое", "1.0.0")
     assert module.covers(">=1.2,<1.3", "1.2.4")
@@ -363,6 +386,11 @@ def test_the_minor_body_names_the_window_it_left() -> None:
     assert 'contract: ">=1.2,<1.3"' in body
     assert "- Правка" in body
     assert "1.3.0" in module.minor_title("v1.7.0", "1.3.0")
+    bare = module.minor_body_of("v1.7.0", "1.2.0", "1.3.0", None, [])
+    assert "не объявлено" in bare
+    assert "«любое» не разбирается" in module.minor_body_of(
+        "v1.7.0", "1.2.0", "1.3.0", "любое", [], "«любое» не разбирается"
+    )
 
 
 def test_a_major_release_notifies_only_who_took_our_steps(

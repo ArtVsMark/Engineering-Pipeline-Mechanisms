@@ -23,8 +23,10 @@
 АДРЕСАТЫ МИНОРА — ВЗЯВШИЕ И ОБЪЯВЛЕННЫЕ. К обходу семьи добавляется реестр
 `.rules/consumers.json`, читатель у него один — `consumers.py`. Окно взявшего
 застаёт обход в его клоне; окно объявившегося, которого обход не застал, —
-`consumers.answer_of` у площадки. Окно не прочитано или не разобрано — не
-«покрывает»: такой назван, и исход частичный (045). У мажора адресаты прежние:
+`consumers.answer_of` у площадки. Окно не прочитано — не «покрывает»: такой
+назван, и исход частичный (045). Прочитано, но не объявлено или не разобрано —
+состояние соседа, повтор хвоста его не исправит: сосед оповещается, и тело
+просит объявить окно (взгляд на #1591). У мажора адресаты прежние:
 тело называет позванные шаги, а у объявленного без обхода их не знает никто.
 
 ПРОБНЫЙ ЗАХОД ДО ВЫПУСКА — `--to X.Y.Z`. Тег ещё не поставлен, и версия «после»
@@ -189,15 +191,30 @@ def body_of(tag: str, was: str, now: str, took: family_uptake.Took, changed: lis
     return "\n".join(lines) + "\n"
 
 
-def minor_body_of(tag: str, was: str, now: str, span: str, changed: list[str]) -> str:
-    """Тело оповещения о миноре: переход, окно соседа, которое его не покрывает, и изменившееся."""
+def minor_body_of(
+    tag: str, was: str, now: str, span: str | None, changed: list[str], why: str = ""
+) -> str:
+    """Тело оповещения о миноре: переход, окно соседа, которое его не покрывает, и изменившееся.
+
+    Окна нет (`span` — `None`) или оно не разобрано (`why`) — тело так и говорит:
+    судить о покрытии может только сосед, объявив окно.
+    """
+    if span is None or why:
+        window = (
+            f"Окно `contract:` в вашем `.pipeline.yml` {why or 'не объявлено'} — "
+            f"покрывает ли оно `{now}`, судить нечем. Объявите окно вида "
+            '`">=X.Y,<A.B"`: тогда о миноре внутри него оповещений не будет.'
+        )
+    else:
+        window = f'Окно `contract: "{span}"` в вашем `.pipeline.yml` версию `{now}` не покрывает.'
+
     tree = f"https://github.com/{family_uptake.OURS}/blob/{tag}"
     lines = [
         marker(tag),
         "",
         f"Механизмы выпустили `{tag}`: версия контракта `{was}` → `{now}`.",
         "",
-        f'Окно `contract: "{span}"` в вашем `.pipeline.yml` версию `{now}` не покрывает. '
+        f"{window} "
         "Новый минор приносит то, по чему нужен ваш ответ: подъём тега — это "
         "перечитать ответы и сдвинуть окно, а не поднять число (157).",
         "",
@@ -229,10 +246,13 @@ def addressees(took: list[family_uptake.Took], declared: list[str]) -> list[fami
     return [*took, *extra]
 
 
-def window_of(one: family_uptake.Took, token: str) -> str:
+def window_of(one: family_uptake.Took, token: str) -> str | None:
     """Окно `contract:` соседа: из обхода, иначе из его дерева у площадки.
 
-    Не прочитано — `NotRun` с причиной: «окна не видно» не значит «покрывает».
+    Не прочитано — `NotRun` с причиной: «окна не видно» не значит «покрывает»,
+    и повтор хвоста может его прочитать. Прочитано, но окна нет — `None`: это
+    состояние соседа, повтором его не исправить, и сосед оповещается (взгляд
+    на #1591).
     """
     if one.span:
         return one.span
@@ -243,9 +263,7 @@ def window_of(one: family_uptake.Took, token: str) -> str:
     except (consumers.NotRun, ghrest.TransportError, ValueError) as exc:
         # ValueError — битый base64 или не UTF-8 в чужом файле: тоже «не прочитано» (039).
         raise NotRun(f"окно не прочитано: {exc}") from exc
-    if not span:
-        raise NotRun("окно `contract:` не объявлено")
-    return str(span)
+    return str(span) if span else None
 
 
 def covers(span: str, now: str) -> bool:
@@ -388,14 +406,21 @@ def main(argv: list[str] | None = None) -> int:
         for one in reached:
             try:
                 span = window_of(one, token)
-                if covers(span, now):
-                    print(f"{one.repo}: окно {span} покрывает {now} — не оповещается")
-                    continue
             except NotRun as exc:
                 print(f"{one.repo}: {report.cut(str(exc), SHOWN)}")
                 unread.append(one.repo)
                 continue
-            body = minor_body_of(args.tag, was, now, span, changed)
+            why = "" if span else "не объявлено"
+            if span:
+                try:
+                    if covers(span, now):
+                        print(f"{one.repo}: окно {span} покрывает {now} — не оповещается")
+                        continue
+                except NotRun:
+                    why = f"«{span}» не разбирается"
+            if why:
+                print(f"{one.repo}: окно {why} — оповещается: исправить его может только он")
+            body = minor_body_of(args.tag, was, now, span, changed, why)
             targets.append((one.repo, body, minor_title(args.tag, now)))
     failed: list[str] = []
     for repo, body, title in targets:
@@ -406,6 +431,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"::warning::{repo}: не оповещён — {report.cut(str(exc), SHOWN)}", file=sys.stderr
             )
             failed.append(repo)
+    # Сосед бывает непрочитан дважды — клоном у обхода и окном у площадки, и в
+    # разном регистре: назван он один раз (взгляд на #1591).
+    spelled: dict[str, str] = {}
+    for name in unread:
+        spelled.setdefault(name.casefold(), name)
+    unread = list(spelled.values())
     if unread or failed:
         print(f"не прочитаны: {', '.join(unread) or '—'}; не оповещены: {', '.join(failed) or '—'}")
         return EXIT_PARTIAL
