@@ -1395,7 +1395,11 @@ def test_the_contract_gate_is_run_and_reddens_before_the_push(tmp_path: Path) ->
     assert [preflight.plain(step.command) for step in contract_steps] == [
         "python scripts/check_contract.py"
     ]
-    # Тот же вызов на дереве с новым общим шагом без фрагмента `contract` — красное.
+    # Тот же шаг на дереве с новым общим шагом без фрагмента `contract` — красное.
+    # Шаг идёт через `preflight.run`, а не прямым вызовом скрипта: его cwd и
+    # окружение — те, что у предполётной (взгляд на #1617). Код конвейера
+    # предполётная берёт из корня, и корень несёт его ссылками.
+    code_beside(tmp_path)
     flows = tmp_path / ".github" / "workflows"
     flows.mkdir(parents=True)
     (tmp_path / "changelog.d").mkdir()
@@ -1408,23 +1412,20 @@ def test_the_contract_gate_is_run_and_reddens_before_the_push(tmp_path: Path) ->
     (flows / "step-b.yml").write_text(step, encoding="utf-8")
     git_in(tmp_path, "add", "-A")
     git_in(tmp_path, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-qm", "новый шаг")
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "packages" / "transport")}
-    env.pop("GITHUB_BASE_REF", None)
-    done = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_contract.py")],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-        timeout=120,
-    )
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert "step-b.yml: новый прогон" in done.stdout
+    code, said = preflight.run(contract_steps[0], tmp_path)
+    assert code == 1, said
+    assert "step-b.yml: новый прогон" in said
+
+
+def code_beside(root: Path) -> None:
+    """Код конвейера рядом с деревом подделки — ссылками: предполётная берёт его из корня."""
+    for part in ("scripts", "packages"):
+        (root / part).symlink_to(ROOT / part, target_is_directory=True)
 
 
 def test_without_the_base_the_contract_gate_is_the_third_outcome(tmp_path: Path) -> None:
     """Без `origin/<база>` у окна — названный отказ с кодом 2, а не «зелено» (#1575)."""
+    code_beside(tmp_path)
     git_in(tmp_path, "init", "-q")
     git_in(
         tmp_path,
@@ -1438,16 +1439,7 @@ def test_without_the_base_the_contract_gate_is_the_third_outcome(tmp_path: Path)
         "-m",
         "x",
     )
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "packages" / "transport")}
-    env.pop("GITHUB_BASE_REF", None)
-    done = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_contract.py")],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-        timeout=120,
-    )
-    assert done.returncode == 2, done.stdout + done.stderr
-    assert "не отработал" in done.stderr
+    step = next(step for step in preflight.steps() if "check_contract.py" in step.command)
+    code, said = preflight.run(step, tmp_path)
+    assert code == 2, said
+    assert "не отработал" in said
