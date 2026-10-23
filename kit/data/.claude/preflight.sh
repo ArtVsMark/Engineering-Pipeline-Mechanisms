@@ -41,7 +41,7 @@ cache="${XDG_CACHE_HOME:-$HOME/.cache}/mechanisms/${supplier//\//_}@$tag"
 if [ ! -f "$cache/scripts/preflight.py" ]; then
   origin="${MECHANISMS_ORIGIN:-https://github.com}/$supplier.git"
   rm -rf "$cache.part"
-  timeout 300 git clone -q --depth 1 --branch "$tag" "$origin" "$cache.part" \
+  timeout 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$cache.part" \
     || refuse "механизмы $supplier@$tag не выкачаны из $origin"
   rm -rf "$cache"
   mv "$cache.part" "$cache"
