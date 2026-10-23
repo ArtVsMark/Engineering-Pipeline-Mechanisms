@@ -267,3 +267,15 @@ def test_the_fork_and_the_miss_are_asked_by_name(tmp_path: Path) -> None:
         scope.fork_of(root, "origin/нет")
     report = junit(tmp_path, "tests.test_a")
     assert scope.said_missed(root, "HEAD^", report) == scope.EXIT_OK
+
+
+def test_only_the_newest_heads_are_asked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Зелёная голова старше `MAX_HEADS` прежних не ищется: суд от предка, а не опрос истории."""
+    root = tree(tmp_path)
+    old = green_head(root)
+    newer = []
+    for step in range(scope.MAX_HEADS + 1):
+        write(root, "scripts/b.py", f"B = {step}\n")
+        newer.append(commit(root, f"толчок {step}"))
+    platform(monkeypatch, [old, *newer], {old})
+    assert scope.last_green("о/р", 7, "т", root) == ""

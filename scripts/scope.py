@@ -124,6 +124,9 @@ CODE_WALKS: Final = frozenset({"code_files", "code_roots"})
 GIT_TIMEOUT: Final = 120
 #: Сводный гейт, чей зелёный исход делает голову «проверенной» (#1602).
 GREEN_CHECK: Final = "ci-complete"
+#: Сколько прежних голов спрашивать: дальше суд от общего предка — дедлайн
+#: прогона тестов (10 мин) не тратится на опрос длинной истории (100).
+MAX_HEADS: Final = 20
 
 
 class NotRun(RuntimeError):
@@ -538,26 +541,24 @@ def choose(root: Path, base: str, since: str = "") -> Choice:
 def last_green(repo: str, number: int, token: str, root: Path) -> str:
     """Последняя голова изменения, кроме нынешней, с зелёным `ci-complete` (#1602).
 
-    Головы — коммиты изменения от новых к старым; голова засчитывается, если она
-    есть в дереве (переписанная история её теряет) и сводный гейт на ней
-    `success`. Нет такой — пусто: суд от общего предка. Отказ площадки — `NotRun`:
+    Головы — коммиты изменения от новых к старым, не больше `MAX_HEADS`;
+    голова засчитывается, если она есть в дереве (переписанная история её
+    теряет) и сводный гейт на ней `success`. Нет такой — пусто: суд от общего предка. Отказ площадки — `NotRun`:
     зовущий судит от предка, а не «ничего не тронуто» (039).
     """
     head = git(root, "rev-parse", "HEAD").strip()
     try:
-        said = ghrest.request("GET", f"repos/{repo}/pulls/{number}/commits?per_page=100", token)
-        for one in reversed(said or []):
-            sha = str(one.get("sha") or "")
-            if not sha or sha == head:
-                continue
-            runs = ghrest.request(
-                "GET",
+        heads = [
+            str(one.get("sha") or "")
+            for one in ghrest.paginate(f"repos/{repo}/pulls/{number}/commits", token)
+        ]
+        for sha in [one for one in reversed(heads) if one and one != head][:MAX_HEADS]:
+            runs = ghrest.paginate(
                 f"repos/{repo}/commits/{sha}/check-runs?check_name={GREEN_CHECK}",
                 token,
+                key="check_runs",
             )
-            if not any(
-                run.get("conclusion") == "success" for run in (runs or {}).get("check_runs", [])
-            ):
+            if not any(run.get("conclusion") == "success" for run in runs):
                 continue
             try:
                 git(root, "cat-file", "-e", f"{sha}^{{commit}}")
