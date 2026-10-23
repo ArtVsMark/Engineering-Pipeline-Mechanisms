@@ -311,9 +311,25 @@ def span_said(text: str) -> str | None:
         return None
 
 
+def file_text(path: Path, what: str) -> str:
+    """Текст файла в UTF-8; не читается или не UTF-8 — `BadPolicy` с причиной (039).
+
+    Один читатель на прогоны и ответ проекта (взгляд на #1567): прогон не в
+    UTF-8 ронял `family_check.pinned` трассой `UnicodeDecodeError` мимо
+    обещанного «не прочитано», а `load` и `span` — мимо `BadPolicy`.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise BadPolicy(f"{what} {path} не прочитан: {exc}") from exc
+
+
 def span(path: Path = DEFAULT_PATH) -> str:
     """Диапазон совместимости, прочитанный с диска: тот же разбор, что у `load`."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
+    try:
+        raw = yaml.safe_load(file_text(path, "ответ проекта")) if path.is_file() else None
+    except yaml.YAMLError as exc:
+        raise BadPolicy(f"{path}: ответ проекта не разбирается: {exc}") from exc
     if not isinstance(raw, dict):
         raise BadPolicy(f"{path}: ответ проекта не прочитан — диапазон спросить не у чего")
     return span_of(raw, path)
@@ -497,7 +513,7 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
         raise BadPolicy(f"ответа по проверкам нет: {path} — ошибка входа, а не «нечего опрашивать»")
 
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = yaml.safe_load(file_text(path, "ответ по проверкам"))
     except yaml.YAMLError as exc:
         raise BadPolicy(f"ответ по проверкам не разбирается: {exc}") from exc
 
@@ -657,7 +673,7 @@ def run_of(path: Path) -> dict[Any, Any]:
     """
     if not path.is_file():
         raise BadPolicy(f"нет прогона {path}: предмет чтения не найден (075)")
-    return run_text(path.read_text(encoding="utf-8"), str(path))
+    return run_text(file_text(path, "прогон"), str(path))
 
 
 #: Вход вызванного шага в его теле: `${{ inputs.<имя> }}`.
