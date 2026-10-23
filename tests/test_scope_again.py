@@ -255,3 +255,15 @@ def test_an_unreadable_report_is_the_third_outcome(tmp_path: Path) -> None:
     bad.write_text("<не xml", encoding="utf-8")
     argv = ["--root", str(root), "--base", "HEAD^", "--missed", str(bad)]
     assert scope.main(argv) == scope.EXIT_BROKEN
+
+
+def test_the_fork_and_the_miss_are_asked_by_name(tmp_path: Path) -> None:
+    """`fork_of` — общий предок с базой, нет базы — `NotRun`; `said_missed` — исход шага."""
+    root = tree(tmp_path / "дерево")
+    base = git(root, "rev-parse", "HEAD").strip()
+    green_head(root)
+    assert scope.fork_of(root, "origin/main") == base
+    with pytest.raises(scope.NotRun):
+        scope.fork_of(root, "origin/нет")
+    report = junit(tmp_path, "tests.test_a")
+    assert scope.said_missed(root, "HEAD^", report) == scope.EXIT_OK

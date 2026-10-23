@@ -62,7 +62,9 @@ import ghrest
 import gitcall
 import journal
 import paths
+import pipeline_checks
 import report
+import scope_areas
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -314,14 +316,18 @@ def is_test(name: str) -> bool:
     return name.startswith(TESTS) and Path(name).name.startswith("test_")
 
 
-def scenario(touched: set[str]) -> tuple[str, str]:
-    """Сценарий по тронутому и причина, когда он `full`."""
+def scenario(touched: set[str], areas: tuple[scope_areas.Area, ...] = ()) -> tuple[str, str]:
+    """Сценарий по тронутому и причина, когда он `full`; пути областей — известные места."""
     if not touched:
         return TEXT, ""
     if hit := sorted(touched & WHOLE_FILES):
         return FULL, f"тронут общий для всех файл: {', '.join(hit)}"
     if strange := sorted(
-        one for one in touched if not one.startswith(KNOWN) and one not in KNOWN_FILES
+        one
+        for one in touched
+        if not one.startswith(KNOWN)
+        and one not in KNOWN_FILES
+        and not scope_areas.known(one, areas)
     ):
         return FULL, f"место вне известных: {', '.join(strange[:3])}"
     if any(one.startswith(FLOWS_ROOTS) for one in touched):
@@ -331,12 +337,28 @@ def scenario(touched: set[str]) -> tuple[str, str]:
     return TEXT, ""
 
 
-def classify(touched: set[str], edges: dict[str, Edges]) -> Choice:
-    """Сценарий и выбор тестов для тронутого по готовому графу."""
-    kind, why = scenario(touched)
+def classify(
+    touched: set[str], edges: dict[str, Edges], areas: tuple[scope_areas.Area, ...] = ()
+) -> Choice:
+    """Сценарий и выбор тестов для тронутого по готовому графу или по областям.
+
+    ОБЛАСТИ ЗАМЕНЯЮТ ГРАФ, А НЕ ДОПОЛНЯЮТ (#1600). Объявлены — выбор начинается
+    со всех тестов и теряет тесты нетронутых областей: граф судит формами
+    нашего дерева, и у потребителя с иными формами он выбрал бы меньше, чем
+    задето. Общие для всех файлы, неизвестное место и прогоны — полный набор
+    и при областях.
+    """
+    kind, why = scenario(touched, areas)
     if kind in (FULL, FLOWS):
         return Choice(kind, None, why)
-    return Choice(kind, chosen(edges, touched), "")
+    if not areas:
+        return Choice(kind, chosen(edges, touched), "")
+    every = sorted(name for name in edges if is_test(name))
+    kept = scope_areas.narrowed(every, touched, areas)
+    if len(kept) == len(every):
+        return Choice(kind, None, "области: тронутое задевает все")
+    quiet = [area.name for area in areas if not area.touched_by(touched)]
+    return Choice(kind, kept, f"области не задеты: {', '.join(quiet)}")
 
 
 def label_of(kind: str) -> str:
@@ -446,12 +468,21 @@ def common(left: tuple[str, ...] | None, right: tuple[str, ...] | None) -> tuple
     return tuple(sorted(set(left) & set(right)))
 
 
-def joined(left: tuple[str, ...], right: tuple[str, ...] | None) -> tuple[str, ...] | None:
-    """Объединение выборов; None — «все»."""
-    return None if right is None else tuple(sorted({*left, *right}))
+def joined(left: tuple[str, ...] | None, right: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    """Объединение выборов; None — «все», и объединение с ним — «все»."""
+    if left is None or right is None:
+        return None
+    return tuple(sorted({*left, *right}))
 
 
-def again(root: Path, base: str, since: str, fork: str, edges: dict[str, Edges]) -> Choice:
+def again(
+    root: Path,
+    base: str,
+    since: str,
+    fork: str,
+    edges: dict[str, Edges],
+    areas: tuple[scope_areas.Area, ...] = (),
+) -> Choice:
     """Повторный толчок: судится изменённое с зелёной головы `since` (#1602).
 
     СВОЁ — ТО, ЧТО ПОМЕНЯЛОСЬ С `since` И ОТЛИЧАЕТСЯ ОТ ВЕРШИНЫ БАЗЫ. Файл,
@@ -466,11 +497,11 @@ def again(root: Path, base: str, since: str, fork: str, edges: dict[str, Edges])
     ловит полный набор слияния и общей ветки, а не этот выбор.
     """
     own = touched_paths(root, since) & touched_paths(root, base)
-    kind, why = scenario(own)
+    kind, why = scenario(own, areas)
     note = f"повторный толчок от {since[:12]}"
     if kind in (FULL, FLOWS):
         return Choice(kind, None, f"{note}: {why}")
-    picked = chosen(edges, own)
+    picked = classify(own, edges, areas).tests if areas else chosen(edges, own)
     tests: tuple[str, ...] | None = picked
     before = fork_of(root, base, since)
     if before != fork:
@@ -481,8 +512,8 @@ def again(root: Path, base: str, since: str, fork: str, edges: dict[str, Edges])
             )
             if one
         }
-        mine = classify(touched_paths(root, fork), edges).tests
-        tests = joined(picked, common(classify(came, edges).tests, mine))
+        mine = classify(touched_paths(root, fork), edges, areas).tests
+        tests = joined(picked, common(classify(came, edges, areas).tests, mine))
         note += f"; база сдвинулась с {before[:12]}"
     return Choice(kind, tests, note)
 
@@ -494,10 +525,14 @@ def choose(root: Path, base: str, since: str = "") -> Choice:
     или красная прежняя голова, и суд идёт от общего предка.
     """
     fork = fork_of(root, base)
+    try:
+        areas = pipeline_checks.areas_for_tests(root / paths.PIPELINE)
+    except scope_areas.BadAreas as exc:
+        raise NotRun(str(exc)) from exc
     edges = merged(base_graph(root, fork), graph(root, tracked(root)))
     if since:
-        return again(root, base, since, fork, edges)
-    return classify(touched_paths(root, fork), edges)
+        return again(root, base, since, fork, edges, areas)
+    return classify(touched_paths(root, fork), edges, areas)
 
 
 def last_green(repo: str, number: int, token: str, root: Path) -> str:

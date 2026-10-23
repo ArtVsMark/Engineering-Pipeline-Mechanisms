@@ -966,6 +966,9 @@
     },
     "scripts/scope.py": {
       "answer": "as-is"
+    },
+    "scripts/scope_areas.py": {
+      "answer": "as-is"
     }
   }
 }
