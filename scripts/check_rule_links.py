@@ -75,7 +75,8 @@ def known() -> dict[str, str]:
         # и поднимается он до точки входа нетронутым (039).
         raise
     # Списка правил нет — сломан договор выгрузки, и это названо им самим, а не
-    # «ни одного правила»: чтение одно на всех читателей (`catalogue.rules_of`).
+    # «ни одного правила»: читается тем же `catalogue.rules_of`, что у дрейфа
+    # (строже читает только `audit_profile.export_rules` — см. check_foreign_why).
     try:
         rules = catalogue.rules_of(export)
     except catalogue.BadExport as exc:
