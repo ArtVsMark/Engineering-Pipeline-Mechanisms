@@ -43,6 +43,9 @@ import ghrest
 import gitcall
 import kinds
 import paths
+import pipeline_checks
+import scope
+import scope_areas
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -56,6 +59,8 @@ MACHINE: Final = kinds.MACHINE
 EXPORT_URL: Final = catalogue.EXPORT_URL
 #: Файл ответа каталогу — он же предмет подделки, если читать его из головы.
 ANSWER: Final = paths.BINDINGS
+#: Ключ таблицы ролей: сценарий → обязательные роли, что остаются на нём (#1608).
+BY_SCOPE: Final = "by_scope"
 
 
 class NotRun(RuntimeError):
@@ -146,6 +151,17 @@ def table_shape(table: Any) -> dict[str, Any]:
             and strings(rule.get("roles", []))
         ):
             raise NotRun(f"`by_path[{at}]` — не правило с `paths` и `roles` списками строк")
+    by_scope = table.get(BY_SCOPE, {})
+    if not isinstance(by_scope, dict) or not all(strings(one) for one in by_scope.values()):
+        raise NotRun(f"`{BY_SCOPE}` — не словарь сценария на список обязательных ролей")
+    unknown = sorted(set(by_scope) - set(scope.ORDER))
+    if unknown:
+        raise NotRun(f"`{BY_SCOPE}`: сценарии {', '.join(unknown)} неизвестны, из {scope.ORDER}")
+    extra = sorted({r for one in by_scope.values() for r in one} - set(table.get("required", [])))
+    if extra:
+        raise NotRun(
+            f"`{BY_SCOPE}`: роли {', '.join(extra)} не обязательные — сценарий только сужает"
+        )
     return table
 
 
@@ -195,6 +211,118 @@ def roles_for(files: list[str], table: dict[str, Any]) -> tuple[list[str], dict[
     return required, dict(sorted(context.items()))
 
 
+def scenario_of(labels: set[str] | None, own: scope.Choice | None = None) -> str:
+    """Сценарий взгляда: шире из метки и своего ответа классификатора; не прочитать — `full`.
+
+    МЕТКА — ОТВЕТ КЛАССИФИКАТОРА (#1599): её ставит `agent_pr`, гейт разметки
+    отвергает метку уже ответа, владелец ставит шире. Нет метки — полный
+    состав: ошибка вширь стоит минут взгляда, а не пропущенной роли (045).
+
+    МЕТКА НЕ СУЖАЕТ ВЗГЛЯД СВЕРХ СВОЕГО ОТВЕТА (взгляд на #1609). Гейт разметки
+    судит метку на своём прогоне, а метку вправе сузить и после него: тогда
+    роли и тесты урезала бы метка, которой гейт уже не видел. Поэтому карта
+    берёт шире из метки и своего `classify` по тронутому. `own` — None: свой
+    ответ не спрашивали; не посчитать его, когда спросили, — полный состав, и
+    это решает вызывающий (`roles_section`).
+    """
+    said = scope.widest(labels or ())
+    if said is None:
+        return scope.FULL
+    if own is None:
+        return said
+    return scope.widest(scope.label_of(one) for one in (said, own.scenario)) or scope.FULL
+
+
+def labels_of(repo: str, number: int, token: str) -> set[str] | None:
+    """Метки изменения у площадки; не прочитаны — `None`, и состав полный."""
+    if not number or not repo or not token:
+        return None
+    try:
+        return {
+            str(one.get("name") or "")
+            for one in ghrest.paginate(f"repos/{repo}/issues/{number}/labels", token)
+        }
+    except ghrest.TransportError as exc:
+        print(f"метки изменения не прочитаны — состав полный: {exc}", file=sys.stderr)
+        return None
+
+
+def for_scenario(required: list[str], table: dict[str, Any], kind: str) -> list[str]:
+    """Обязательные роли сценария: `by_scope` таблицы сужает их, нет записи — все."""
+    kept = table.get(BY_SCOPE, {}).get(kind)
+    return required if kept is None else [one for one in required if one in kept]
+
+
+def own_choice(files: list[str], root: Path = Path()) -> scope.Choice | None:
+    """Свой ответ классификатора по тронутому и графу дерева базы; не посчитать — `None`.
+
+    ГРАНИЦА НАЗВАНА (046): джоб карты стоит на базе, и граф — графом базы.
+    Модуль, новый в голове, граф не знает; полный набор на изменении всё равно
+    гонит CI — выбор взгляда только говорит, на чём ему смотреть.
+    """
+    try:
+        areas = pipeline_checks.areas_for_tests(root / paths.PIPELINE)
+        edges = scope.graph(root, scope.tracked(root))
+        return scope.classify(set(files), edges, areas)
+    except (scope.NotRun, scope_areas.BadAreas) as exc:
+        print(f"выбор тестов взгляда не посчитан: {exc}", file=sys.stderr)
+        return None
+
+
+def present_in(ref: str, names: list[str], root: Path = Path()) -> frozenset[str] | None:
+    """Пути, которые есть в дереве `ref`; git не ответил — `None`, а не «нет ни одного»."""
+    if not names:
+        return frozenset()
+    listed = git(["-C", str(root), "ls-tree", "-z", "--name-only", ref, "--", *sorted(set(names))])
+    if listed.returncode != 0:
+        print(f"дерево {ref} не прочитано: {listed.stderr.strip()}", file=sys.stderr)
+        return None
+    return frozenset(one for one in listed.stdout.split("\0") if one)
+
+
+def chosen_tests(
+    files: list[str], root: Path = Path(), head: str = "", own: scope.Choice | None = None
+) -> tuple[str, ...] | None:
+    """Тесты, задетые изменением, — те, что есть в голове; не посчитать — `None` (#1608).
+
+    Тронутые тест-файлы входят в выбор сами. ТЕСТ, УДАЛЁННЫЙ ИЗМЕНЕНИЕМ, В
+    КОМАНДУ НЕ ИДЁТ (взгляд на #1609): площадка отдаёт в путях и удалённые, а
+    граф базы их ещё знает — pytest получил бы несуществующий путь и не прогнал
+    бы ни одного теста выбора. Голова (`head`) не названа — дерево не сверяется:
+    у позднего взгляда база и есть слитая голова.
+    """
+    said = own if own is not None else own_choice(files, root)
+    if said is None or said.tests is None:
+        return None
+    tests = sorted({*said.tests, *(one for one in files if scope.is_test(one))})
+    if not head:
+        return tuple(tests)
+    alive = present_in(head, tests, root)
+    return None if alive is None else tuple(one for one in tests if one in alive)
+
+
+def tests_said(kind: str, tests: tuple[str, ...] | None) -> list[str]:
+    """Строки карты о тестах взгляда по сценарию; пусто — прежнее указание процедуры."""
+    if kind == scope.TEXT:
+        return [
+            "",
+            f"**Тесты не гоняй:** сценарий `{scope.label_of(kind)}` — изменение не задело",
+            "кода, и судить тестами нечего. Смотри текст глазами ролей (#1608).",
+        ]
+    if kind == scope.CODE and tests is not None:
+        shown = " ".join(tests) if tests else ""
+        if not shown:
+            return ["", "**Тесты не гоняй:** выбор классификатора пуст — судить нечего (#1608)."]
+        return [
+            "",
+            f"**Тесты — только выбор классификатора** (сценарий `{scope.label_of(kind)}`,",
+            "#1608), а не тесты диффа на глаз:",
+            "",
+            f"`python -m pytest -q {shown}`",
+        ]
+    return []
+
+
 def changed_files(repo: str, number: int, token: str) -> list[str]:
     """Пути изменения — у площадки: у позднего взгляда голова уже общая ветка."""
     return [
@@ -205,7 +333,13 @@ def changed_files(repo: str, number: int, token: str) -> list[str]:
 
 
 def render_roles(
-    procedure: str, required: list[str], context: dict[str, list[str]], *, unread: str = ""
+    procedure: str,
+    required: list[str],
+    context: dict[str, list[str]],
+    *,
+    unread: str = "",
+    tests: list[str] | None = None,
+    narrowed: str = "",
 ) -> str:
     """Раздел карты: процедура взгляда и роли этого изменения."""
     lines = [
@@ -217,6 +351,10 @@ def render_roles(
         "",
         f"**Обязательные роли:** {', '.join(required)}.",
     ]
+    # СУЖЕНИЕ НАЗЫВАЕТ СВОЮ ПРИЧИНУ (взгляд на #1609): ревизор, увидевший две
+    # обязательные роли вместо пяти, иначе не отличит сценарий от поломки таблицы.
+    if narrowed:
+        lines += ["", narrowed]
     if unread:
         lines += [
             "",
@@ -231,7 +369,7 @@ def render_roles(
             lines.append(f"- **{role}** — {shown}{more}")
     else:
         lines += ["", "**Ролей по контексту нет:** тронутые пути не названы таблицей."]
-    return "\n".join([*lines, "", procedure.strip(), ""]) + "\n"
+    return "\n".join([*lines, *(tests or []), "", procedure.strip(), ""]) + "\n"
 
 
 def export_meta() -> tuple[dict[str, str], dict[str, list[str]]]:
@@ -687,7 +825,7 @@ def main(argv: list[str] | None = None) -> int:
         touched=touches_the_answer(args.base, args.head),
         note=note,
     )
-    text += roles_section(args.base, args.repo, args.pr, files=files, unread=unread)
+    text += roles_section(args.base, args.repo, args.pr, files=files, unread=unread, head=args.head)
     args.out.write_text(text, encoding="utf-8")
     # СОБИРАЕТСЯ СПИСКОМ, А НЕ СКЛЕЙКОЙ. При пустом `denied` склейка давала
     # висящую запятую и двойной пробел: «глазами 8,  → путь». Нашёл внешний
@@ -716,6 +854,7 @@ def roles_section(
     *,
     files: list[str] | None = None,
     unread: str = "",
+    head: str = "",
 ) -> str:
     """Раздел ролей для карты; его отказ не роняет карту, а называется в ней (084).
 
@@ -737,7 +876,23 @@ def roles_section(
     if files is None:
         files, unread = touched_files(repo, number)
     required, context = roles_for(files, table)
-    return render_roles(procedure, required, context, unread=unread)
+    own = own_choice(files) if files else None
+    labels = labels_of(repo, number, ghrest.token_from_env())
+    # Свой ответ спросили и не посчитали — состав полный: ошибка вширь (045).
+    kind = scope.FULL if files and own is None else scenario_of(labels, own)
+    picked = for_scenario(required, table, kind)
+    dropped = [one for one in required if one not in picked]
+    narrowed = (
+        f"**Сценарий `{kind}`** (метка — `{scope.widest(labels or ()) or 'нет'}`, свой ответ — "
+        f"`{own.scenario if own else 'не посчитан'}`): записью `{BY_SCOPE}` таблицы ролей "
+        f"сняты {', '.join(dropped)}."
+        if dropped
+        else ""
+    )
+    tests = tests_said(
+        kind, chosen_tests(files, head=head, own=own) if kind == scope.CODE and files else None
+    )
+    return render_roles(procedure, picked, context, unread=unread, tests=tests, narrowed=narrowed)
 
 
 if __name__ == "__main__":

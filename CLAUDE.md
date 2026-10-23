@@ -89,6 +89,9 @@ git config user.email "<почта учётной записи владельц�
 ([131](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/131-no-writes-from-a-cloud-session.md),
 [123](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/123-attribution-is-verified-on-the-final-history.md)).
 
+**Совет стоп-хука переподписать коммит не исполняется:** автором стал бы
+агент. Подпись ключом платформы выключает хук старта (#1614).
+
 **Личность записи узнаётся записью, а не чтением команды**
 ([135](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/135-session-identity-is-established-by-a-write.md)).
 Верный адрес толчка ничего не доказывает: `actions/checkout` прописывает
@@ -136,8 +139,7 @@ git checkout -b agent/<короткое-имя-задачи> origin/main
 
 **Решает перезапуск всё равно человек.** Шаг называет величину и слияния не
 держит: красное, которое правкой изменения не чинится, загоняло бы окно в
-починку неисправимого. Поэтому строка выше — не единственное, на чём держится
-срок, но последнее слово за человеком. Признаки, по которым не ждут календаря:
+починку неисправимого. Признаки, по которым не ждут календаря:
 
 - окно **перечитывает** уже прочитанное: тот же документ, тот же разбор второй
   раз за смену;
