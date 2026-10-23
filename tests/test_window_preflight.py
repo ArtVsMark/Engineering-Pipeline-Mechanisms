@@ -1426,3 +1426,68 @@ def test_the_code_of_the_steps_is_the_checkout(tmp_path: Path) -> None:
     step = preflight.Step("где код", f'test "${preflight.MECHANISMS}" = "{supplier.resolve()}"')
     assert preflight.run(step, tree, supplier)[0] == 0
     assert preflight.run(step, tree)[0] != 0
+
+
+def git_in(root: Path, *args: str) -> None:
+    """Git в дереве подделки, с дедлайном: тест не должен виснуть на git."""
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, timeout=60)
+
+
+def test_the_contract_gate_is_run_and_reddens_before_the_push(tmp_path: Path) -> None:
+    """Гейт поверхности спрашивается своим прогоном и краснеет до толчка (#1575).
+
+    На #1574 предполётная прошла зелёной, а `contract` покраснел на площадке:
+    фетч базы жил в блоке шага, и блок целиком считался требующим площадки.
+    """
+    contract_steps = [step for step in preflight.steps() if "check_contract.py" in step.command]
+    assert [preflight.plain(step.command) for step in contract_steps] == [
+        "python scripts/check_contract.py"
+    ]
+    # Тот же шаг на дереве с новым общим шагом без фрагмента `contract` — красное.
+    # Шаг идёт через `preflight.run`, а не прямым вызовом скрипта: его cwd и
+    # окружение — те, что у предполётной (взгляд на #1617). Код конвейера
+    # предполётная берёт из корня, и корень несёт его ссылками.
+    code_beside(tmp_path)
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (tmp_path / "changelog.d").mkdir()
+    step = "on:\n  workflow_call:\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n"
+    (flows / "step-a.yml").write_text(step, encoding="utf-8")
+    git_in(tmp_path, "init", "-q")
+    git_in(tmp_path, "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A")
+    git_in(tmp_path, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-qm", "база")
+    git_in(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (flows / "step-b.yml").write_text(step, encoding="utf-8")
+    git_in(tmp_path, "add", "-A")
+    git_in(tmp_path, "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-qm", "новый шаг")
+    code, said = preflight.run(contract_steps[0], tmp_path)
+    assert code == 1, said
+    assert "step-b.yml: новый прогон" in said
+
+
+def code_beside(root: Path) -> None:
+    """Код конвейера рядом с деревом подделки — ссылками: предполётная берёт его из корня."""
+    for part in ("scripts", "packages"):
+        (root / part).symlink_to(ROOT / part, target_is_directory=True)
+
+
+def test_without_the_base_the_contract_gate_is_the_third_outcome(tmp_path: Path) -> None:
+    """Без `origin/<база>` у окна — названный отказ с кодом 2, а не «зелено» (#1575)."""
+    code_beside(tmp_path)
+    git_in(tmp_path, "init", "-q")
+    git_in(
+        tmp_path,
+        "-c",
+        "user.email=a@b",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "x",
+    )
+    step = next(step for step in preflight.steps() if "check_contract.py" in step.command)
+    code, said = preflight.run(step, tmp_path)
+    assert code == 2, said
+    assert "не отработал" in said

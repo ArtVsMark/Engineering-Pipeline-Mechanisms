@@ -130,11 +130,19 @@ jobs:
         with:
           python-version: "3.14"
       - run: python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport
-      - name: поверхность контракта не тронута молча
+      # БАЗА ПОДТЯГИВАЕТСЯ ОТДЕЛЬНЫМ ШАГОМ, как у шага журнала (#1575). Свой
+      # прогон перед толчком берёт команды блоками целиком, и блок с `git
+      # fetch` запустить не может: локально это правка чужого дерева. Пока
+      # фетч жил внутри, гейт поверхности видела только площадка — #1574
+      # прошёл предполётную зелёным и покраснел на `contract` после толчка.
+      - name: подтянуть базу
         env:
           GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
           base="${GITHUB_BASE_REF:-main}"
           git fetch --no-tags origin "$base:refs/remotes/origin/$base"
-          python $MECHANISMS/scripts/check_contract.py
+      - name: поверхность контракта не тронута молча
+        env:
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python $MECHANISMS/scripts/check_contract.py
