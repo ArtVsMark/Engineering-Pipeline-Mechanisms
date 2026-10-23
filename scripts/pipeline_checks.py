@@ -314,9 +314,11 @@ def span_said(text: str) -> str | None:
 def file_text(path: Path, what: str) -> str:
     """Текст файла в UTF-8; не читается или не UTF-8 — `BadPolicy` с причиной (039).
 
-    Один читатель на прогоны и ответ проекта (взгляд на #1567): прогон не в
-    UTF-8 ронял `family_check.pinned` трассой `UnicodeDecodeError` мимо
-    обещанного «не прочитано», а `load` и `span` — мимо `BadPolicy`.
+    Один читатель на прогоны, ответ проекта и версию контракта (взгляд на
+    #1567 и на #1593): прогон не в UTF-8 ронял `family_check.pinned` трассой
+    `UnicodeDecodeError` мимо обещанного «не прочитано», а `load`, `span` и
+    `contract_of` — мимо `BadPolicy`. Через него же читают `fragment_form` и
+    `family_check.steps_links`; свои ловли у них сняты.
     """
     try:
         return path.read_text(encoding="utf-8")
@@ -491,7 +493,7 @@ def contract_of(tree: Path, supplier: Path | None) -> str | None:
     """
     own = tree / paths.VERSION
     if own.is_file() and not foreign(supplier):
-        return own.read_text(encoding="utf-8").strip()
+        return file_text(own, "версия контракта").strip()
     if supplier is None:
         return None
     said = supplier / paths.VERSION
@@ -500,7 +502,7 @@ def contract_of(tree: Path, supplier: Path | None) -> str | None:
             f"версия контракта позванного тега не найдена: {said} — выкачка "
             "поставщика без неё не та, что ждёт сверка окна (075)"
         )
-    return said.read_text(encoding="utf-8").strip()
+    return file_text(said, "версия контракта поставщика").strip()
 
 
 def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, Check]:
@@ -581,8 +583,8 @@ def fragment_form(path: Path = DEFAULT_PATH) -> journal.FragmentForm:
     if not path.is_file():
         return journal.DEFAULT_FORM
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raw = yaml.safe_load(file_text(path, "ответ проекта"))
+    except (BadPolicy, yaml.YAMLError) as exc:
         raise journal.NotRun(f"{path} не прочитан: {exc}") from exc
     return journal.form_of(raw.get(journal.SECTION) if isinstance(raw, dict) else None)
 

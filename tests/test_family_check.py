@@ -781,3 +781,11 @@ def test_a_run_not_in_utf8_is_named_unread_not_a_trace(tmp_path: Path) -> None:
     found, refused = fc.pinned(tmp_path)
     assert found == []
     assert [one.split(":")[0] for one in refused] == [".github/workflows/x.yml"]
+
+
+def test_steps_links_of_an_answer_not_in_utf8_is_grey(tmp_path: Path) -> None:
+    """Ответ проекта не в UTF-8 — серая связь с причиной от `file_text` (взгляд на #1593)."""
+    (tmp_path / ".pipeline.yml").write_bytes("contract: ы\n".encode("cp1251"))
+    (link,) = fc.steps_links(tmp_path, {"projects": []})
+    assert link.state == "unknown"
+    assert "не прочитан" in link.why

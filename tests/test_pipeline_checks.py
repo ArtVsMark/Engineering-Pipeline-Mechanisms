@@ -1260,3 +1260,18 @@ def test_span_names_a_broken_yaml(tmp_path: Path) -> None:
     path.write_text("contract: [\n", encoding="utf-8")
     with pytest.raises(policy.BadPolicy, match="не разбирается"):
         policy.span(path)
+
+
+def test_a_contract_version_not_in_utf8_is_a_refusal(tmp_path: Path) -> None:
+    """`CONTRACT_VERSION` не в UTF-8 — `BadPolicy` у `contract_of` (взгляд на #1593)."""
+    (tmp_path / "CONTRACT_VERSION").write_bytes("1.0.0 ы\n".encode("cp1251"))
+    with pytest.raises(policy.BadPolicy, match="версия контракта"):
+        policy.contract_of(tmp_path, None)
+
+
+def test_fragment_form_of_a_file_not_in_utf8_is_named(tmp_path: Path) -> None:
+    """`fragment_form` читает тем же `file_text`: не UTF-8 — `journal.NotRun` с причиной."""
+    path = tmp_path / ".pipeline.yml"
+    path.write_bytes("journal: ы\n".encode("cp1251"))
+    with pytest.raises(policy.journal.NotRun, match="не прочитан"):
+        policy.fragment_form(path)
