@@ -151,6 +151,8 @@ SKILL_RUNS: Final = Path(".claude/state/skill-runs.jsonl")
 ENTRANCE: Final = Path("README.md")
 #: Согласованные имена атрибуции.
 AUTHORS: Final = Path(".github/authors.txt")
+#: Отметка атрибуции в истории общей ветки — данные проекта, а не шага (#1556).
+ATTRIBUTION_SINCE: Final = Path(".github/attribution-since")
 #: Где факты и значки лежат в ветке `badges` — по контракту фактов семьи (#759).
 #: Это адрес ПРОИЗВОДНОГО в ветке `badges`, а не файл общей ветки.
 BADGES_DIR: Final = Path(".github/badges")
@@ -263,6 +265,7 @@ ALL: Final = (
     RELEASE_DOC,
     PIPELINE_DOC,
     ONBOARDING,
+    ATTRIBUTION_SINCE,
 )
 
 #: Адреса ДАННЫХ ОКНА: в дереве их нет по построению — файл появляется при
