@@ -69,6 +69,10 @@ TEXT: Final = "text"
 CODE: Final = "code"
 FLOWS: Final = "flows"
 FULL: Final = "full"
+#: Порядок сценариев: индекс — ширина.
+ORDER: Final = (TEXT, CODE, FLOWS, FULL)
+#: Приставка метки сценария.
+LABEL_PREFIX: Final = "scope/"
 #: Корни кода: модуль отсюда — узел графа по имени файла без расширения.
 #: Источники — из объявления `paths.SOURCES`, хуки окна — их соседи по графу.
 CODE_ROOTS: Final = (*(f"{one.as_posix()}/" for one in paths.SOURCES), ".claude/hooks/")
@@ -330,6 +334,37 @@ def classify(touched: set[str], edges: dict[str, Edges]) -> Choice:
     return Choice(kind, chosen(edges, touched), "")
 
 
+def label_of(kind: str) -> str:
+    """Метка сценария: `scope/<сценарий>`."""
+    return f"{LABEL_PREFIX}{kind}"
+
+
+def widest(names: Iterable[str]) -> str | None:
+    """Самый широкий сценарий среди меток; меток сценария нет — None.
+
+    Чужое слово после приставки — не сценарий и не учитывается: список меток
+    разрешительный, и необъявленную метку судит гейт разметки (068).
+    """
+    kinds = [name.removeprefix(LABEL_PREFIX) for name in names if name.startswith(LABEL_PREFIX)]
+    known = [kind for kind in kinds if kind in ORDER]
+    return max(known, key=ORDER.index) if known else None
+
+
+def widened(choice: Choice, names: Iterable[str]) -> Choice:
+    """Выбор с поправкой на метку владельца: метка только расширяет (#1599).
+
+    МЕТКА — СЛЕД КЛАССИФИКАТОРА, А НЕ ВХОД, кроме одного направления. Метка уже
+    ответа не сужает выбор: сузить значило бы пропустить красное по слову, а не
+    по графу, — такую метку отвергает гейт разметки. Шире — владелец хочет
+    больше проверок, чем вывел граф, и `flows`/`full` дают полный набор.
+    """
+    labelled = widest(names)
+    if labelled is None or ORDER.index(labelled) <= ORDER.index(choice.scenario):
+        return choice
+    tests = None if labelled in (FLOWS, FULL) else choice.tests
+    return Choice(labelled, tests, f"сценарий расширен меткой {label_of(labelled)}")
+
+
 def git(root: Path, *args: str) -> str:
     """Git с дедлайном; отказ, отсутствие или истёкший предел — `NotRun` (gitcall)."""
     return gitcall.output(["-C", str(root), *args], NotRun, timeout=GIT_TIMEOUT)
@@ -406,12 +441,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", default="", help="с чем сравнивать; по умолчанию база изменения")
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     parser.add_argument("--tests", action="store_true", help="напечатать выбранные тест-файлы")
+    parser.add_argument(
+        "--labels", default="", help="метки изменения через пробел: `scope/*` расширяет сценарий"
+    )
     args = parser.parse_args(argv)
     try:
         said = choose(args.root, journal.base_from_env(args.base))
     except NotRun as exc:
         print(f"выбор не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    said = widened(said, args.labels.split())
     if args.tests:
         if said.tests is None:
             print("ALL")

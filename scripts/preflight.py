@@ -45,6 +45,7 @@ import check_env
 import check_open_limit
 import ghrest
 import gitcall
+import journal
 import paths
 import report
 import scope
@@ -358,7 +359,7 @@ def chosen_scope(root: Path, *, everything: bool) -> scope.Choice | None:
 
 def journal_base() -> str:
     """База сравнения — та же, что у гейтов журнала и контракта."""
-    return scope.journal.base_from_env()
+    return journal.base_from_env()
 
 
 def plain(line: str) -> str:

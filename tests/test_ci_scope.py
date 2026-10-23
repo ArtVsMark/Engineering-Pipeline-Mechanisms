@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, load_script
 
 #: Имя шага тестов в джобе матрицы.
 STEP = "тесты"
@@ -72,7 +72,9 @@ def test_a_change_runs_the_chosen_files(tmp_path: Path) -> None:
     """На изменении pytest получает выбранные тест-файлы."""
     done = run_block(tmp_path, "pull_request", "tests/test_a.py\ntests/test_b.py\n")
     assert done.returncode == 0, done.stderr
-    assert args_of(tmp_path)[-2:] == ["tests/test_a.py", "tests/test_b.py"]
+    args = args_of(tmp_path)
+    assert args is not None, "pytest не зван"
+    assert args[-2:] == ["tests/test_a.py", "tests/test_b.py"]
 
 
 @pytest.mark.parametrize(
@@ -116,3 +118,19 @@ def test_a_consumer_keeps_the_whole_set() -> None:
     assert shared, "общих шагов не найдено — гейт ничего не проверил (075)"
     taking = [one.name for one in shared if "scope.py" in one.read_text(encoding="utf-8")]
     assert not taking, f"общий шаг берёт выбор тестов до настройки потребителя: {taking}"
+
+
+def test_nothing_to_judge_is_counted_and_a_skip_is_not(tmp_path: Path) -> None:
+    """«Судить нечего» даёт `success`, и `ci-complete` его засчитывает; `skipped` — нет (#1599).
+
+    Потому пропуск и оформлен вердиктом, а не `if:` у джоба: пропущенный
+    обязательный джоб сводный гейт объявляет отказом (187).
+    """
+    ci_complete = load_script("ci_complete.py")
+    done = run_block(tmp_path, "pull_request", "")
+    conclusion = "success" if done.returncode == 0 else "failure"
+    head = [{"name": "test-matrix", "status": "completed", "conclusion": conclusion}]
+    assert ci_complete.verdict(head, ["test-matrix"], "ci-complete") == ([], False)
+    skipped = [{"name": "test-matrix", "status": "completed", "conclusion": "skipped"}]
+    problems, _ = ci_complete.verdict(skipped, ["test-matrix"], "ci-complete")
+    assert problems

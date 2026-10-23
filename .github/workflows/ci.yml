@@ -128,12 +128,14 @@ jobs:
         env:
           RANDOM_SEED: ${{ github.run_id }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
+          # Метка `scope/*` шире ответа классификатора расширяет выбор (#1599).
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
         run: |
           set -euo pipefail
           selected=()
           if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
             rc=0
-            said="$(python scripts/scope.py --tests)" || rc=$?
+            said="$(python scripts/scope.py --tests --labels "${PR_LABELS:-}")" || rc=$?
             if [ "$rc" != 0 ]; then
               echo "::warning::выбор тестов не отработал (код $rc) — полный набор"
             elif [ -z "$said" ]; then
@@ -142,7 +144,7 @@ jobs:
             elif [ "$said" != "ALL" ]; then
               mapfile -t selected <<<"$said"
             fi
-            python scripts/scope.py || true
+            python scripts/scope.py --labels "${PR_LABELS:-}" || true
           fi
           pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED} ${selected[@]+"${selected[@]}"}
 

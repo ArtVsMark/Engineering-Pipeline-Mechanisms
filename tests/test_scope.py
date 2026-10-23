@@ -7,6 +7,7 @@
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,9 +20,17 @@ DIRS = frozenset({"scripts", ".rules", "docs", "docs/use"})
 INDEX = scope.modules(FILES)
 
 
-def edges(text: str) -> object:
+def edges(text: str) -> Any:
     """Рёбра исходника на подделке индекса."""
-    return scope.edges_of(text.encode(), INDEX, FILES, DIRS)
+    found = scope.edges_of(text.encode(), INDEX, FILES, DIRS)
+    assert isinstance(found, scope.Edges)
+    return found
+
+
+def test_fresh_edges_are_empty_and_understood() -> None:
+    """Пустые рёбра — ни кода, ни данных, и граф файл понял: `whole` пуст."""
+    fresh = scope.Edges()
+    assert (fresh.code, fresh.data, fresh.whole) == (set(), set(), "")
 
 
 @pytest.mark.parametrize(
@@ -93,10 +102,16 @@ def test_helpers_name_their_subject() -> None:
     """Помощники разбора: имя зовомого, литерал довода, путь, каталоги, покрытие."""
     import ast
 
-    call = ast.parse('obj.walk("docs", 1)').body[0].value
+    def call_of(text: str) -> ast.Call:
+        """Вызов из строки исходника."""
+        node = ast.parse(text).body[0]
+        assert isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+        return node.value
+
+    call = call_of('obj.walk("docs", 1)')
     assert scope.called_name(call) == "walk"
     assert scope.first_text(call) == "docs"
-    assert scope.first_text(ast.parse("f(x)").body[0].value) is None
+    assert scope.first_text(call_of("f(x)")) is None
     assert scope.as_path("./docs/", FILES, DIRS) == "docs/"
     assert scope.as_path(".rules/x.json", FILES, DIRS) == ".rules/x.json"
     assert scope.as_path("нет", FILES, DIRS) is None
