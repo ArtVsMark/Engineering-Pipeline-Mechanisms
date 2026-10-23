@@ -118,11 +118,33 @@ jobs:
         # окон не читаются вовсе, и напечатанное в них зерно пропало бы вместе с
         # логом. Номер прогона виден в его адресе — то есть порядок
         # воспроизводим снаружи (139).
+        #
+        # НА ИЗМЕНЕНИИ — ТЕСТЫ ПО ЗАДЕТОМУ (#1598, эпик #1596). Классификатор
+        # `scope.py` выводит граф из кода и называет тест-файлы, которые изменение
+        # задело; на общей ветке набор полный всегда — он ловит, что выбор
+        # пропустил. Отказ классификатора — полный набор, а не «судить нечего»:
+        # ошибка в сторону «больше» стоит минут, в сторону «меньше» — красного.
+        # База — `origin/<база>` из полной истории checkout (`fetch-depth: 0`).
         env:
           RANDOM_SEED: ${{ github.run_id }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED}
+          selected=()
+          if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
+            rc=0
+            said="$(python scripts/scope.py --tests)" || rc=$?
+            if [ "$rc" != 0 ]; then
+              echo "::warning::выбор тестов не отработал (код $rc) — полный набор"
+            elif [ -z "$said" ]; then
+              echo "судить нечего: изменение не задело ни одного теста"
+              exit 0
+            elif [ "$said" != "ALL" ]; then
+              mapfile -t selected <<<"$said"
+            fi
+            python scripts/scope.py || true
+          fi
+          pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED} ${selected[@]+"${selected[@]}"}
 
   # АГРЕГАТ, А НЕ ВТОРОЙ ПРОГОН ТЕСТОВ. Он ничего не проверяет сам — он несёт
   # ОДНО имя, которое можно объявить обязательным, и краснеет ровно тогда, когда
