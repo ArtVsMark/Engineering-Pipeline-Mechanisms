@@ -2129,6 +2129,27 @@ def test_the_labels_kit_carries_a_zone_for_every_path() -> None:
     assert zones and any("**" in one.get("paths", []) for one in zones)
 
 
+#: Метки нашего состава, которых заготовка не несёт, — и почему: их ставят
+#: механизмы в НАШЕМ трекере о потребителях, у потребителя предмета нет.
+LABELS_OURS_ONLY: Final = frozenset({"consumer/jam", "consumer/gap", "consumer/mismatch"})
+
+
+def test_the_labels_kit_follows_our_labels() -> None:
+    """Каждая наша метка, кроме зон и названных своих, есть в заготовке (взгляд на #1613).
+
+    Метку механизма — `automerge`, `hold`, `source/*`, `scope/*` — ставит и
+    читает код, и у потребителя без неё механизм молча не сработает: новая
+    метка в `.github/labels.yml` обязана приехать и в заготовку (195).
+    """
+    ours = yaml.safe_load((ROOT / module.paths.LABELS).read_text(encoding="utf-8"))
+    kit = yaml.safe_load((ROOT / module.DATA_KIT / module.paths.LABELS).read_text(encoding="utf-8"))
+    want = {str(one["name"]) for one in ours if not str(one["name"]).startswith("area/")}
+    have = {str(one["name"]) for one in kit if not str(one["name"]).startswith("area/")}
+    assert sorted(want - have - LABELS_OURS_ONLY) == [], "метка механизма не приехала в заготовку"
+    assert sorted(have - want) == [], "в заготовке метка, которой у механизмов нет"
+    assert want >= LABELS_OURS_ONLY, "объявление своей метки пережило её"
+
+
 def test_the_kinds_kit_carries_no_meetings_of_ours() -> None:
     """Заготовка словаря родов — имена и признаки, без наших встреч, механизмов и отметок."""
     kit = json.loads(

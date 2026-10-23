@@ -952,7 +952,7 @@ def data_kit(root: Path, repo: str) -> dict[Path, str]:
         raise NotRun(
             f"заготовок данных нет в {DATA_KIT}/: "
             + ", ".join(str(one) for one in missing)
-            + " — карта взгляда у потребителя не собралась бы"
+            + " — шаги, что читают эти данные, у потребителя не отработали бы"
         )
     found = {path: (root / DATA_KIT / path).read_text(encoding="utf-8") for path in DATA_KITTED}
     said = found[paths.DEPENDABOT]
