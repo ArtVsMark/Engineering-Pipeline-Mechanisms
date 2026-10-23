@@ -65,7 +65,9 @@ import gitcall
 PUBLISHER = "ArtVsMark/Engineering-Pipeline-Mechanisms"
 
 #: Корень дерева: шаг для CI издателя читает файлы из дерева тега по этим путям.
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+#: Корень — рабочий каталог прогона, как у всех механизмов (`paths.py`, 115), а не
+#: подъём от файла: поиск вверх нашёл бы чужое дерево.
+ROOT = pathlib.Path()
 #: Откуда шаг для CI берёт файлы — дерево издателя договора по тегу.
 TREE_RAW = f"https://raw.githubusercontent.com/{PUBLISHER}"
 

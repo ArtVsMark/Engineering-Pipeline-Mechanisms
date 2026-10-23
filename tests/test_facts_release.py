@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 fr = load_script("facts_release.py")
 
@@ -224,4 +224,4 @@ def test_step_refusals_want_the_tag_tree(tmp_path: Path) -> None:
     assert fr.step_refusals("echo нет", tmp_path)
     # Шаг самого договора чист: всё, что он скачивает, есть в дереве.
     prose = fr.check_facts.CONTRACT_PATH.read_text(encoding="utf-8")
-    assert fr.step_refusals(fr.check_facts.ci_step(prose) or "") == []
+    assert fr.step_refusals(fr.check_facts.ci_step(prose) or "", ROOT) == []
