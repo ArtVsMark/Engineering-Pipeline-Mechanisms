@@ -208,3 +208,16 @@ def test_the_builder_checks_and_writes_the_table(
     assert json.loads(target.read_text(encoding="utf-8")) == other
     target.unlink()
     assert builder.main([*argv, "--check"]) == builder.EXIT_DIFFERS  # нет таблицы — не трасса
+
+
+def test_the_builder_names_a_table_not_in_utf8_as_differs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--check на таблице не в UTF-8 — расхождение кодом 1, а не трасса (сосед «нет таблицы»)."""
+    target = tmp_path / "text_widths.json"
+    target.write_bytes(b'{"about": "\xff\xfe"}')
+    monkeypatch.setattr(builder.text_width, "TABLE", target)
+    monkeypatch.setattr(builder, "build", lambda *_: {"about": "x"})
+    code = builder.main(["--verdana", "v.ttf", "--inter", "i", "--check"])
+    assert code == builder.EXIT_DIFFERS
+    assert "UTF-8" in capsys.readouterr().err

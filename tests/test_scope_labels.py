@@ -138,8 +138,10 @@ def test_a_refused_scenario_does_not_lose_the_change(monkeypatch: pytest.MonkeyP
 
 
 def test_an_open_change_gets_its_scenario_too() -> None:
-    """Уже открытое изменение получает сценарий тем же путём, что зону."""
-    assert "apply_scope(" in inspect.getsource(agent_pr.finish_open)
+    """Сценарий ставит общая цепочка `settle`, которую зовут оба пути — создание и «уже открыто»."""
+    assert "apply_scope(" in inspect.getsource(agent_pr.settle)
+    assert "settle(" in inspect.getsource(agent_pr.finish_open)
+    assert "settle(" in inspect.getsource(agent_pr.main)
 
 
 @pytest.mark.parametrize(

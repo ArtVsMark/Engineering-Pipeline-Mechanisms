@@ -246,11 +246,19 @@ def export_meta() -> tuple[dict[str, str], dict[str, list[str]]]:
     except ghrest.TransportError as exc:
         print(f"::warning::Заголовки правил не пришли: {exc}", file=sys.stderr)
         return {}, {}
+    # СПИСКА ПРАВИЛ НЕТ — СЛОМАН ДОГОВОР, А НЕ «ПРАВИЛ НОЛЬ» (075). Прежде
+    # `export.get("rules") or []` отдавал пустые заголовки молча, тогда как
+    # дрейф ту же поломку называет находкой `export-form`: одна поломка
+    # читалась двумя способами. Чтение одно — `catalogue.rules_of` (взгляд на
+    # #1564). Карта взгляда совещательна и не падает, но причину называет.
+    try:
+        rules = catalogue.rules_of(export)
+    except catalogue.BadExport as exc:
+        print(f"::warning::Заголовки правил не прочитаны: {exc} (export-form)", file=sys.stderr)
+        return {}, {}
     found: dict[str, str] = {}
     areas: dict[str, list[str]] = {}
-    for rule in export.get("rules") or []:
-        if not isinstance(rule, dict):
-            continue
+    for rule in rules:
         number = str(rule.get("id") or rule.get("number") or "").strip()
         # Заголовок у каталога двуязычный: берётся русский — язык этого
         # проекта. Отсутствие русского не подменяется английским молча.

@@ -53,6 +53,16 @@ def test_an_empty_catalogue_is_the_third_outcome(monkeypatch: pytest.MonkeyPatch
         module.known()
 
 
+@pytest.mark.parametrize("export", [{}, {"rules": None}, {"rules": {}}])
+def test_an_export_without_a_rule_list_is_named_as_its_form(
+    monkeypatch: pytest.MonkeyPatch, export: Any
+) -> None:
+    """Списка правил нет — «не отработал» с причиной формы, а не «ни одного правила» (075)."""
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", lambda *_: export)
+    with pytest.raises(module.NotRun, match="нет списка «rules»"):
+        module.known()
+
+
 def test_an_unreachable_catalogue_is_its_own_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
     """Каталог недоступен — СВОЙ исход: не «не спросили» и не «всё сошлось».
 

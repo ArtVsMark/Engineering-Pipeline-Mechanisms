@@ -218,9 +218,9 @@ def test_a_step_with_its_own_caller_is_printed_as_that_caller(
     kit = module.own_kit(root / ".github" / "workflows" / "план.yml", "план", "О/Р", "v2.5.0")
     assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in kit
     assert "workflow_dispatch" in kit, "свои события вызывающего потерялись"
-    assert module.main(["--root", str(root), "--repo", "О/Р"]) == module.EXIT_OK
+    assert module.main(["--root", str(root), "--repo", "O/R"]) == module.EXIT_OK
     out = capsys.readouterr().out
-    assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in out
+    assert "uses: O/R/.github/workflows/step-план.yml@v2.5.0" in out
     assert "uses: ./.github/workflows/step-план.yml" not in out, "внутренний путь ушёл в заготовку"
     assert "  пример:\n    name: пример\n" in out, "шаг конвейера перестал быть джобом ci.yml"
     assert "  план:\n    name: план\n" not in out, "управляющий механизм напечатан джобом ci.yml"
@@ -247,7 +247,7 @@ def test_the_answer_of_a_mechanism_follows_its_flow_not_its_file(
         ["обход-всех / обход-всех"],
         True,
     )
-    assert module.main(["--root", str(root), "--repo", "О/Р"]) == module.EXIT_OK
+    assert module.main(["--root", str(root), "--repo", "O/R"]) == module.EXIT_OK
     checks, _, beyond = capsys.readouterr().out.partition(f"{policy.BEYOND}:")
     assert '"обход-всех / обход-всех"' in checks, "запись механизма на изменении ушла не туда"
     assert '"обход / обход"' not in checks + beyond, "имя записи собрано из имени файла"
@@ -1349,7 +1349,33 @@ def test_the_family_slot_takes_the_owner_of_the_called_repo() -> None:
     assert '"Other/*"' in laid and module.FAMILY_SLOT not in laid
 
 
-@pytest.mark.parametrize("repo", ["Mechanisms", "/Mechanisms", "Other/", ""])
+@pytest.mark.parametrize(
+    ("repo", "owner"),
+    [("my-org/Pipe.Mechanisms_2", "my-org"), ("O" * 39 + "/r", "O" * 39), ("a/b", "a")],
+)
+def test_a_repo_in_the_platform_shape_gives_its_owner(repo: str, owner: str) -> None:
+    """Законные формы `REPO_RE` проходят: сужение формы не отвергает живых имён."""
+    laid = module.data_kit(ROOT, repo)[Path(".github/dependabot.yml")]
+    assert f'"{owner}/*"' in laid
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "Mechanisms",
+        "/Mechanisms",
+        "Other/",
+        "",
+        # Соседние формы (195): лишняя косая, владелец не по форме площадки.
+        "a/b/c",
+        "my org/Mechanisms",
+        'Other"/Mechanisms',
+        "-Other/Mechanisms",
+        "Other-/Mechanisms",
+        "O" * 40 + "/Mechanisms",
+        "Other/Mech anisms",
+    ],
+)
 def test_a_repo_without_an_owner_is_refused(repo: str) -> None:
     """`--repo` не «владелец/имя» — отказ, а не слот с мусором вместо владельца (045)."""
     with pytest.raises(module.NotRun, match="владелец/имя"):
