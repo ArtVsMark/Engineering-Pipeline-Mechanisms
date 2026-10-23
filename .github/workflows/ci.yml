@@ -109,7 +109,10 @@ jobs:
         run: python -m pip install --quiet "pytest>=8,<10" "pyyaml>=6,<7" "pytest-randomly>=3,<4" ./packages/transport
       - name: тесты
         # Прогон без единого теста — ошибка входа, а не «чисто» (075). Ключ
-        # ниже делает пустой сбор красным, а не зелёным.
+        # ниже делает пустой сбор красным, а не зелёным. ИСКЛЮЧЕНИЕ НАЗВАНО:
+        # пустой ВЫБОР на изменении — не пустой сбор, а вердикт классификатора
+        # «судить нечего»; pytest тогда не зовётся вовсе, и шаг говорит это
+        # словами (#1599). Пустой сбор при непустом выборе — по-прежнему красный.
         #
         # ПОРЯДОК СБОРА СЛУЧАЕН, А ЗЕРНО — НОМЕР ПРОГОНА. Связанность тестов
         # ловится только другим порядком, и прежде набор ходил единственным,
@@ -132,14 +135,18 @@ jobs:
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
           # Повторный толчок судится от последней зелёной головы (#1602): её
           # спрашивают у площадки по номеру изменения, токеном прогона на чтение.
+          # Токен — только вызову классификатора, не тестам (взгляд на #1605):
+          # тест, читающий токен без подмены, в CI и у окна вёл бы себя по-разному.
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          GH_TOKEN: ${{ github.token }}
+          PR_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          pr_token="${PR_TOKEN:-}"
+          unset PR_TOKEN
           selected=()
           if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
             rc=0
-            said="$(python scripts/scope.py --tests --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}")" || rc=$?
+            said="$(GH_TOKEN="$pr_token" python scripts/scope.py --tests --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}")" || rc=$?
             if [ "$rc" != 0 ]; then
               echo "::warning::выбор тестов не отработал (код $rc) — гоним полный набор вместо выбора по задетому"
             elif [ -z "$said" ]; then
@@ -148,7 +155,7 @@ jobs:
             elif [ "$said" != "ALL" ]; then
               mapfile -t selected <<<"$said"
             fi
-            python scripts/scope.py --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}" || true
+            GH_TOKEN="$pr_token" python scripts/scope.py --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}" || true
           fi
           # ПОЛНЫЙ ПРОГОН ОБЩЕЙ ВЕТКИ НАЗЫВАЕТ, ЧТО ВЫБОР ПРОПУСТИЛ (#1598). Слитое
           # изменение гнало выбор, общая ветка — весь набор; упавший тест вне

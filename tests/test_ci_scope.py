@@ -27,7 +27,7 @@ def step_block() -> str:
 
 
 def run_block(
-    tmp_path: Path, event: str, said: str, code: int = 0, red: int = 0
+    tmp_path: Path, event: str, said: str, code: int = 0, red: int = 0, token: str = ""
 ) -> subprocess.CompletedProcess[str]:
     """Исполняет блок: `scope.py` отвечает `said` с кодом `code`, pytest пишет доводы.
 
@@ -39,6 +39,7 @@ def run_block(
     python = bin_dir / "python"
     python.write_text(
         "#!/bin/bash\n"
+        f'echo "${{GH_TOKEN:-}}" >> "{tmp_path}/scope-token.txt"\n'
         'if [ "$1" = scripts/scope.py ] && [ "${2:-}" = --tests ]; then\n'
         f'  cat "{tmp_path}/said.txt"; exit {code}\n'
         "fi\n"
@@ -48,7 +49,9 @@ def run_block(
     )
     pytest_bin = bin_dir / "pytest"
     pytest_bin.write_text(
-        f'#!/bin/bash\necho "$@" > "{tmp_path}/args.txt"\nexit {red}\n', encoding="utf-8"
+        f'#!/bin/bash\necho "$@" > "{tmp_path}/args.txt"\n'
+        f'echo "${{GH_TOKEN:-}}${{PR_TOKEN:-}}" > "{tmp_path}/pytest-token.txt"\nexit {red}\n',
+        encoding="utf-8",
     )
     for one in (python, pytest_bin):
         one.chmod(one.stat().st_mode | stat.S_IEXEC)
@@ -58,6 +61,10 @@ def run_block(
         "GITHUB_EVENT_NAME": event,
         "RANDOM_SEED": "1",
         "RUNNER_TEMP": str(tmp_path),
+        "PR_TOKEN": token,
+        # Токен окружения окна снимается: блок обязан выдать его сам и только классификатору.
+        "GH_TOKEN": "",
+        "GITHUB_TOKEN": "",
     }
     return subprocess.run(
         ["bash", "-c", step_block()],
@@ -166,3 +173,11 @@ def test_the_miss_is_asked_only_of_a_red_full_run(tmp_path: Path, event: str, re
     done = run_block(tmp_path, event, "tests/test_a.py\n", red=red)
     assert done.returncode == red
     assert "--missed" not in calls_of(tmp_path)
+
+
+def test_the_token_reaches_the_classifier_not_the_tests(tmp_path: Path) -> None:
+    """Токен прогона получает вызов `scope.py`, а pytest его не видит (взгляд на #1605)."""
+    done = run_block(tmp_path, "pull_request", "tests/test_a.py\n", token="секрет")
+    assert done.returncode == 0, done.stderr
+    assert "секрет" in (tmp_path / "scope-token.txt").read_text(encoding="utf-8")
+    assert (tmp_path / "pytest-token.txt").read_text(encoding="utf-8").strip() == ""

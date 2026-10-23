@@ -312,3 +312,27 @@ def test_every_test_file_of_the_tree_is_tied_to_something() -> None:
         if scope.is_test(name) and not (said.code or said.data or said.whole)
     ]
     assert not loose, f"тест-файлы без рёбер графа: {loose}"
+
+
+def test_a_removed_test_file_is_not_handed_to_pytest(tmp_path: Path) -> None:
+    """Удалён тест-файл — в выборе его нет: граф базы помнит имя, а в голове файла нет."""
+    root = repo(tmp_path)
+    (root / "scripts" / "gone.py").write_text("X = 2\n", encoding="utf-8")
+    (root / "tests" / "test_gone.py").unlink()
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "тест снят")
+    said = scope.choose(root, "origin/main")
+    assert "tests/test_gone.py" not in (said.tests or ())
+
+
+def test_nothing_touched_picks_nothing_even_a_whole_test() -> None:
+    """Тронутого нет — тестов нет, и «дерево целиком» не идёт (взгляд на #1605)."""
+    edges = {"tests/test_x.py": scope.Edges(whole="не разобран")}
+    assert scope.chosen(edges, set()) == ()
+    assert scope.chosen(edges, {"docs/a.md"}) == ("tests/test_x.py",)
+
+
+def test_the_head_filter_keeps_a_full_choice() -> None:
+    """Полный выбор фильтр не трогает: «все» — это все, что есть."""
+    full = scope.Choice(scope.FULL, None, "x")
+    assert scope.present(full, set()) is full

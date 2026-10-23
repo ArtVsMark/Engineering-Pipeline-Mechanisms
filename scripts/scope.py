@@ -286,7 +286,13 @@ def touched_code(edges: dict[str, Edges], touched: set[str]) -> set[str]:
 
 
 def chosen(edges: dict[str, Edges], touched: set[str]) -> tuple[str, ...]:
-    """Тесты, которые изменение задело: кодом по цепочке, данными в один шаг."""
+    """Тесты, которые изменение задело: кодом по цепочке, данными в один шаг.
+
+    Тронутого нет — тестов нет, и тест «дерево целиком» тоже не идёт: он
+    зависит от всего, а от ничего не зависит никто (взгляд на #1605).
+    """
+    if not touched:
+        return ()
     code = touched_code(edges, touched)
 
     def reads(name: str, *, own: bool) -> bool:
@@ -533,9 +539,24 @@ def choose(root: Path, base: str, since: str = "") -> Choice:
     except scope_areas.BadAreas as exc:
         raise NotRun(str(exc)) from exc
     edges = merged(base_graph(root, fork), graph(root, tracked(root)))
-    if since:
-        return again(root, base, since, fork, edges, areas)
-    return classify(touched_paths(root, fork), edges, areas)
+    said = (
+        again(root, base, since, fork, edges, areas)
+        if since
+        else classify(touched_paths(root, fork), edges, areas)
+    )
+    return present(said, set(tracked(root)))
+
+
+def present(choice: Choice, files: set[str]) -> Choice:
+    """Выбор без тест-файлов, которых в голове нет (взгляд на #1605).
+
+    Граф объединяет базу и голову: тест, удалённый или переименованный
+    изменением, есть в графе базы и выбирается по прежнему имени — pytest
+    получил бы несуществующий путь и покраснел ошибкой сбора.
+    """
+    if choice.tests is None:
+        return choice
+    return Choice(choice.scenario, tuple(one for one in choice.tests if one in files), choice.why)
 
 
 def last_green(repo: str, number: int, token: str, root: Path) -> str:
