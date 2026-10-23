@@ -761,7 +761,11 @@ def main(
                 file=sys.stderr,
             )
             return EXIT_BROKEN
-    same = mechanisms_tree().resolve() == args.root.resolve()
+    # Своими `pairs` лесенка берётся, только когда они и есть `versions()` дерева
+    # механизмов: то же дерево И тот же основной CI. С другим `--ci` у того же
+    # дерева `pairs` — версии чужого прогона, и недостающие ступени семьи
+    # пропали бы с картинки (взгляд на #1565, сосед «тот же каталог»).
+    same = mechanisms_tree().resolve() == args.root.resolve() and args.ci == CI
     steps = ladder(pairs if same else None)
     if released is None and set(steps) - {label for label, _ in parts}:
         try:
