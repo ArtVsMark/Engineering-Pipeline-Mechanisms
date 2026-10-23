@@ -376,7 +376,7 @@ def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
 
 #: Строка, которой `check_facts.py --file` выпуска называет расхождения:
 #: `print(f"{args.repo}: {'договору отвечает' if not found else f'расхождений {len(found)}'}")`
-#: (тег `facts-v2.0.0` каталога — строка та же, что у витрины 1.6).
+#: (тег `facts-v2.1.0` механизмов — строка та же, что у `facts-v2.0.0` каталога).
 #: Шаг судит по ней, а не по одному коду.
 MISMATCH: str = "o/a: расхождений 3"
 
