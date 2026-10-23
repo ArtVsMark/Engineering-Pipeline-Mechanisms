@@ -1423,3 +1423,41 @@ def test_a_label_step_without_the_number_is_refused(tmp_path: Path) -> None:
     assert run.returncode == 1, run.stdout + run.stderr
     assert "::error::" in run.stdout and "Номер выпуска не назван" in run.stdout, run.stdout
     assert not said.exists()
+
+
+def test_a_broken_step_keeps_the_refusals_gathered_before_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`refusals`/`gather`: обрыв `NotRun` посреди сбора везёт собранное в ``found``."""
+    tree(tmp_path, tag="v9.9.0")
+
+    def broken() -> str:
+        raise module.NotRun("версия контракта не прочитана")
+
+    monkeypatch.setattr(module, "declared_version", broken)
+    with pytest.raises(module.NotRun) as caught:
+        module.refusals("9.10.0", acceptance="", push="never")
+    assert any("право обхода" in one for one in caught.value.found), caught.value.found
+    # `gather` дописывает в переданный список — его и читает обёртка.
+    kept: list[str] = []
+    with pytest.raises(module.NotRun):
+        module.gather(kept, "9.10.0", acceptance="", state="", breaking=False, push="never")
+    assert any("право обхода" in one for one in kept), kept
+
+
+def test_main_prints_the_refusals_gathered_before_a_break(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Исход 2, но отказы, собранные до обрыва, напечатаны, а не потеряны."""
+    tree(tmp_path, tag="v9.9.0")
+
+    def broken(*_a: object, **_k: object) -> list[str]:
+        exc = module.NotRun("гейт версии не отработал")
+        exc.found = ("дерево грязно: собрано до обрыва",)
+        raise exc
+
+    monkeypatch.setattr(module, "refusals", broken)
+    monkeypatch.setattr(module, "push_token", lambda: "")
+    assert module.main(["--version", "9.10.0"]) == module.EXIT_BROKEN
+    said = capsys.readouterr().out
+    assert "дерево грязно: собрано до обрыва" in said, said
