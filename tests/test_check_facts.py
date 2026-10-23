@@ -93,9 +93,16 @@ def test_a_number_apart_from_the_prose_is_refused(
 
 
 def test_the_ci_step_downloads_from_the_mechanisms_release() -> None:
-    """Шаг для CI издателя скачивает проверку со страниц выпуска механизмов, а не каталога."""
+    """Шаг для CI издателя читает проверку из дерева механизмов по тегу, а не каталога.
+
+    Из дерева, а не со страницы выпуска: файлы страницы заменяются, не трогая тега.
+    """
     step = cf.ci_step(cf.CONTRACT_PATH.read_text(encoding="utf-8")) or ""
-    assert "Engineering-Pipeline-Mechanisms/releases/download/$FACTS_CONTRACT/" in step
+    assert (
+        "raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/$FACTS_CONTRACT/"
+        in step
+    )
+    assert "releases/download" not in step
     assert "Engineering-Incidents-Playbook" not in step
 
 

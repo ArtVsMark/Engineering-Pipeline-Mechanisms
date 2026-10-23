@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 fr = load_script("facts_release.py")
 
@@ -145,3 +145,83 @@ def test_verify_passes_the_assembled_release_and_names_a_broken_one(tmp_path: Pa
     assert fr.verify(dist, repo) == []
     example.write_text("{}", encoding="utf-8")
     assert fr.verify(dist, repo)
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome", "after"),
+    [
+        ("published", None, ["PATCH", "GET"]),
+        ("draft", "черновик удалён, тега нет", ["PATCH", "GET", "DELETE"]),
+        ("undeletable", "удалите его руками", ["PATCH", "GET", "DELETE"]),
+        ("silent", "неизвестно", ["PATCH", "GET"]),
+    ],
+    ids=["снят-обрывом", "черновик-удалён", "черновик-не-удалён", "страница-молчит"],
+)
+def test_a_failed_undraft_after_the_files_is_settled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: str,
+    outcome: str | None,
+    after: list[str],
+) -> None:
+    """`undraft`: файлы легли, PATCH упал — исход спрашивается у страницы, а не угадывается.
+
+    Снят обрывом — выпуск стоит; черновик — удаляется (перезапуск не заведёт
+    второго); не удалился или страница молчит — названо, что смотреть руками.
+    """
+    dist = tmp_path / "dist"
+    fr.assemble(dist)
+    asked: list[str] = []
+
+    def request(method: str, path: str, token: str, body: Any = None) -> Any:
+        if method != "POST":
+            asked.append(method)
+        if method == "PATCH":
+            raise fr.ghrest.TransportError("обрыв")
+        if method == "GET":
+            if answer == "silent":
+                raise fr.ghrest.TransportError("502")
+            return {"id": 7, "draft": answer != "published"}
+        if method == "DELETE" and answer == "undeletable":
+            raise fr.ghrest.TransportError("502")
+        return {"id": 7, "upload_url": "https://uploads.github.com/x{?name}"}
+
+    monkeypatch.setattr(fr.ghrest, "request", request)
+    monkeypatch.setattr(fr.ghrest, "upload_asset", lambda *_a: {})
+    if outcome is None:
+        said = fr.publish("o/r", "facts-v2.1.0", "2.1.0", "abc", dist, "", "t")
+        assert "facts-v2.1.0" in said
+    else:
+        with pytest.raises(fr.ghrest.TransportError, match=outcome):
+            fr.publish("o/r", "facts-v2.1.0", "2.1.0", "abc", dist, "", "t")
+    assert asked == after
+
+
+def test_undraft_that_passes_asks_nothing_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`undraft`: принятый PATCH — один запрос, без проверки и удаления."""
+    asked: list[str] = []
+    monkeypatch.setattr(fr.ghrest, "request", lambda method, *_a, **_k: asked.append(method))
+    fr.undraft("repos/o/r/releases/7", "facts-v2.1.0", "t")
+    assert asked == ["PATCH"]
+
+
+def test_step_refusals_want_the_tag_tree(tmp_path: Path) -> None:
+    """`step_refusals`: шаг читает из дерева тега, и каждый путь — файл дерева."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "check_facts.py").write_text("", encoding="utf-8")
+    good = (
+        f'for f in scripts/check_facts.py; do\n  curl -o x "{fr.TREE_RAW}/$FACTS_CONTRACT/$f"\ndone'
+    )
+    assert fr.step_refusals(good, tmp_path) == []
+    page = good.replace(
+        f"{fr.TREE_RAW}/$FACTS_CONTRACT/$f", "https://github.com/o/r/releases/download/$T/$f"
+    )
+    assert any("не из дерева тега" in one for one in fr.step_refusals(page, tmp_path))
+    absent = good.replace("scripts/check_facts.py;", "scripts/check_facts.py nope.json;")
+    assert fr.step_refusals(absent, tmp_path) == [
+        "шаг для CI скачивает nope.json, а в дереве его нет"
+    ]
+    assert fr.step_refusals("echo нет", tmp_path)
+    # Шаг самого договора чист: всё, что он скачивает, есть в дереве.
+    prose = fr.check_facts.CONTRACT_PATH.read_text(encoding="utf-8")
+    assert fr.step_refusals(fr.check_facts.ci_step(prose) or "", ROOT) == []

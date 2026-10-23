@@ -139,7 +139,9 @@ def test_the_live_registry_is_readable() -> None:
     assert rows, "реестр пуст — запись каталога пропала (#1579)"
     assert {row["repo"] for row in rows} >= {"ArtVsMark/Engineering-Incidents-Playbook"}
     said = json.loads((ROOT / module.paths.CONSUMERS).read_text(encoding="utf-8"))
-    assert any("пуст" in key for key in said), "история пустоты реестра не названа (154)"
+    # Ключ по имени, а не по слову (находка `b2c23d5`): «пуст» держал и
+    # устаревший заголовок «пустота законна», хотя список уже не пуст.
+    assert "_история_пустоты" in said, "история пустоты реестра не названа (154)"
 
 
 #: Реестры не той формы: каждый обязан дойти до объявленного исхода, а не
@@ -238,6 +240,8 @@ def test_without_a_sweep_the_silent_are_named_unseen(
     assert out.strip().splitlines()[-1] == module.NO_SWEEP
     assert out.count(module.NO_SWEEP) == 1, "итог без обхода сказан дважды"
     assert "среди тех, кого видно" in out and "это состояние" not in out
+    # Почему видно не всех, сказано один раз — итогом (находка `1c3cce0`).
+    assert out.count("молча подключённые") == 1, out
 
 
 def test_a_declared_registry_without_a_sweep_is_not_read_whole(
@@ -275,18 +279,29 @@ def test_unread_answers_are_said_in_the_stream_of_the_verdict(
     Отказ по отдельному проекту остаётся диагностикой — в stderr.
     """
     root = registry_with(tmp_path, {"repo": "o/r", "since": "2026-09-19", "why": "берёт линтер"})
-    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "токен")
-
-    def refuse(*_: Any, **__: Any) -> Any:
-        raise module.ghrest.TransportError("502")
-
-    monkeypatch.setattr(module.ghrest, "request", refuse)
+    # Отказ площадки — тем же помощником, что ниже (находка `4f33b17`): две
+    # копии одной подготовки разошлись бы.
+    refusing(monkeypatch)
     assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
         module.EXIT_UNREAD
     )
     said = capsys.readouterr()
     assert said.out.strip().splitlines()[-1] == "не прочитано ответов: 1 из 1"
     assert "o/r: не прочитан" in said.err
+
+
+def test_registry_repeats_in_another_case_are_one_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Повтор реестра в другом регистре — один проект и одна единица в счёте (`cfbc3d0`)."""
+    first = {"repo": "Owner/Repo", "since": "2026-09-19", "why": "берёт линтер"}
+    root = registry_with(tmp_path, first, {**first, "repo": "owner/repo"})
+    assert [row["repo"] for row in module.registry(root)] == ["Owner/Repo"]
+    refusing(monkeypatch)
+    assert module.main(["--root", str(root), "--uptake", str(empty_sweep(tmp_path))]) == (
+        module.EXIT_UNREAD
+    )
+    assert capsys.readouterr().out.strip().splitlines()[-1] == "не прочитано ответов: 1 из 1"
 
 
 # --- все исходы неполноты — одним путём (взгляд на #1483, правило 210) --------
@@ -379,7 +394,7 @@ def test_the_sweep_drops_unread_repeats_without_case(tmp_path: Path) -> None:
             {"swept_given": True, "unswept": 1, "unread": 1, "total": 3, "token": True},
             [
                 "не прочитано ответов: 1 из 3",
-                "обход семьи не прочитал проектов: 1 — список выше неполон",
+                module.UNSWEPT.format(1),
             ],
         ),
     ],
@@ -389,6 +404,9 @@ def test_the_gaps_are_named_together_and_decide_the_outcome(
     given: dict[str, Any], said: list[str], capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Неполнота называется вся разом, каждая строка один раз, и она же решает исход."""
+    # Итог читается сам: «список выше» на выходе без токена ни на что не
+    # указывал (находка `76dc127`).
+    assert all("выше" not in one for one in said)
     gaps = module.gaps_of(**given)
     assert gaps == said
     code = module.finish(gaps)

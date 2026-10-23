@@ -64,6 +64,13 @@ import gitcall
 #: не назвал репозиторий: сухой заход окна выпускает за того же издателя.
 PUBLISHER = "ArtVsMark/Engineering-Pipeline-Mechanisms"
 
+#: Корень дерева: шаг для CI издателя читает файлы из дерева тега по этим путям.
+#: Корень — рабочий каталог прогона, как у всех механизмов (`paths.py`, 115), а не
+#: подъём от файла: поиск вверх нашёл бы чужое дерево.
+ROOT = pathlib.Path()
+#: Откуда шаг для CI берёт файлы — дерево издателя договора по тегу.
+TREE_RAW = f"https://raw.githubusercontent.com/{PUBLISHER}"
+
 #: Что лежит на странице выпуска — плоско, под своими именами. Порядок — порядок
 #: чтения издателем: проза, схема, номер, проверка, образец.
 ASSETS = (
@@ -136,7 +143,7 @@ def verify(dist: pathlib.Path, repo: str) -> list[str]:
 
 
 def step_files(step: str) -> list[str]:
-    """Имена файлов, которые шаг для CI скачивает со страницы выпуска (строка ``for f in``)."""
+    """Пути, которые шаг для CI скачивает из дерева тега (строка ``for f in``)."""
     for line in step.splitlines():
         words = line.split()
         if words[:2] == ["for", "f"] and "in" in words:
@@ -146,6 +153,30 @@ def step_files(step: str) -> list[str]:
                 if word not in (";", "do")
             ]
     return []
+
+
+def step_refusals(step: str, root: pathlib.Path = ROOT) -> list[str]:
+    """Что не так с шагом для CI издателя: пусто — шаг читает файлы из дерева тега.
+
+    ИЗ ДЕРЕВА ПО ТЕГУ, А НЕ С ФАЙЛОВ СТРАНИЦЫ (взгляд). Файлы страницы выпуска
+    заменяются, не трогая тега, и проверку, которую издатель запускает, это
+    подменило бы молча. Дерево тега так не меняется. Каждый путь строки
+    ``for f in`` обязан быть файлом дерева, которое тег прибьёт: иначе у
+    издателей ``curl`` упал бы на 404 после выпуска.
+    """
+    wanted = step_files(step)
+    if not wanted:
+        return ["шаг для CI не называет, что скачивать: нет строки for f in"]
+    found = [
+        f"шаг для CI скачивает {one}, а в дереве его нет"
+        for one in wanted
+        if not (root / one).is_file()
+    ]
+    if f"{TREE_RAW}/$FACTS_CONTRACT/$f" not in step:
+        found.append(
+            f"шаг для CI читает не из дерева тега: нет адреса {TREE_RAW}/$FACTS_CONTRACT/$f"
+        )
+    return found
 
 
 def notes(number: str, repo: str) -> str:
@@ -201,7 +232,8 @@ def publish(
     страницу сразу, и сбой одной загрузки (транспорт POST не повторяет) оставил
     бы тег со страницей без части файлов, а перезапуск отказал бы «тег уже
     стоит». Не легла загрузка — черновик удаляется, и перезапуск начинает с
-    чистого места; не удалился — это названо в отказе.
+    чистого места; не удалился — это названо в отказе. Не снялся черновик —
+    `undraft`.
     """
     if not token:
         raise ghrest.TransportError("нет токена: GH_TOKEN — тег несёт личность человека (131)")
@@ -239,8 +271,44 @@ def publish(
         raise ghrest.TransportError(
             f"файлы {tag} не легли ({exc}); черновик удалён, тега нет"
         ) from exc
-    ghrest.request("PATCH", draft, token, {"draft": False, "make_latest": "false"})
+    undraft(draft, tag, token)
     return f"выпуск {tag} поставлен на {target}: файлов {len(ASSETS)}"
+
+
+def undraft(draft: str, tag: str, token: str) -> None:
+    """Снимает черновик ``draft`` — тогда площадка ставит тег. Сбой — отказ с исходом.
+
+    ИСХОД ОБРЫВА НЕИЗВЕСТЕН (взгляд). Транспорт ``PATCH`` повторяет, и после
+    обрыва неизвестно, снят ли черновик. Поэтому сбой не удаляет вслепую —
+    удаление снятой страницы оставило бы тег без файлов, — а спрашивает
+    страницу: снята — выпуск стоит; черновик — удаляется, как при сбое
+    загрузки, и перезапуск начинает с чистого места; не ответила — названо,
+    что смотреть руками, иначе перезапуск завёл бы второй черновик.
+    """
+    try:
+        ghrest.request("PATCH", draft, token, {"draft": False, "make_latest": "false"})
+        return
+    except ghrest.TransportError as exc:
+        failed = exc
+    try:
+        page = ghrest.request("GET", draft, token)
+    except ghrest.TransportError as unread:
+        raise ghrest.TransportError(
+            f"файлы {tag} легли, черновик {draft} не снят ({failed}), и страница не ответила "
+            f"({unread}): снят ли он, неизвестно — посмотрите руками до перезапуска"
+        ) from failed
+    if isinstance(page, dict) and page.get("draft") is False:
+        return
+    try:
+        ghrest.request("DELETE", draft, token)
+    except ghrest.TransportError as left:
+        raise ghrest.TransportError(
+            f"файлы {tag} легли, черновик {draft} не снят ({failed}) и не удалён ({left}) — "
+            "удалите его руками, тега нет"
+        ) from failed
+    raise ghrest.TransportError(
+        f"файлы {tag} легли, черновик не снят ({failed}); черновик удалён, тега нет"
+    ) from failed
 
 
 def selftest() -> int:
@@ -262,22 +330,22 @@ def selftest() -> int:
             pass
     print("  да  — тег: facts-v и три числа, иная форма номера — отказ")
 
-    # Шаг для CI издателя: скачивает только то, что лежит в выпуске (иначе у
-    # издателя curl упадёт на 404), прибит к тегу текущего номера и попадает
-    # на страницу выпуска — из прозы, а не копией.
+    # Шаг для CI издателя: скачивает из дерева тега только то, что в дереве
+    # есть (иначе у издателя curl упадёт на 404), прибит к тегу текущего номера
+    # и попадает на страницу выпуска — из прозы, а не копией.
     number = check_facts.contract_version(check_facts.VERSION_PATH.read_text(encoding="utf-8"))
     step = check_facts.ci_step(check_facts.CONTRACT_PATH.read_text(encoding="utf-8")) or ""
     wanted = step_files(step)
-    shipped = {source.name for source in ASSETS}
-    if not wanted or set(wanted) - shipped:
-        broken.append(f"шаг для CI скачивает {wanted}, а в выпуске {sorted(shipped)}")
+    said_step = step_refusals(step)
+    if said_step:
+        broken.append(f"шаг для CI: {said_step}")
     if f"FACTS_CONTRACT: {tag_for(number)}" not in step or step not in notes(number, repo):
         broken.append("шаг для CI не прибит к текущему тегу или не попал на страницу")
     if step_files("    for f in a.py b.json; do") != ["a.py", "b.json"] or step_files("x") != []:
         broken.append("разбор строки for f in в шаге для CI неверен")
     print(
-        f"  {'да ' if wanted and not set(wanted) - shipped else 'НЕТ'} — шаг для CI: "
-        f"скачивает {len(wanted)} файла из выпуска, прибит к {tag_for(number)}"
+        f"  {'да ' if not said_step else 'НЕТ'} — шаг для CI: "
+        f"скачивает {len(wanted)} файла из дерева тега, прибит к {tag_for(number)}"
     )
 
     with tempfile.TemporaryDirectory(dir=os.environ.get("RUNNER_TEMP")) as tmp:
@@ -397,11 +465,9 @@ def main() -> int:
 
     refusals = list(drift)
     # Шаг для CI раздаётся пятерым издателям разом: скачивай он файл, которого
-    # на странице нет, — у всех пятерых curl упал бы на 404 после выпуска.
+    # в дереве тега нет, — у всех пятерых curl упал бы на 404 после выпуска.
     step = check_facts.ci_step(check_facts.CONTRACT_PATH.read_text(encoding="utf-8")) or ""
-    missing = sorted(set(step_files(step)) - {source.name for source in ASSETS})
-    if not step_files(step) or missing:
-        refusals.append(f"шаг для CI скачивает того, чего в выпуске нет: {missing or 'ничего'}")
+    refusals += step_refusals(step)
     if standing:
         refusals.append(
             f"тег {tag} уже стоит: выпуск, на который прибились, не "

@@ -892,6 +892,17 @@ def order(minor: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def stable_build(one: dict[str, Any]) -> bool:
+    """Стабильна ли сборка манифеста — ОДНО понимание поля на `minors` и `published`.
+
+    Прежде `minors` читал `stable` на истинность, а `published` — ровно `True`,
+    и при `"stable": 1` ветка была стабильной для одного и пробной для другого
+    (находка `d1e7ad7`). Незнакомое значение умолчанием «стабильна» не
+    подменяется: стабильной сборку называет только `true` манифеста (045).
+    """
+    return one.get("stable") is True
+
+
 def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
     """Ветки языка из манифеста: со стабильным выпуском и пока только с пробным.
 
@@ -909,7 +920,7 @@ def minors(manifest: list[Any]) -> tuple[list[str], list[str]]:
             continue
         minor = found.group("minor")
         seen.add(minor)
-        if one.get("stable"):
+        if stable_build(one):
             stable.add(minor)
     ordered = sorted(stable, key=order)
     return ordered, sorted(seen - stable, key=order)
@@ -949,7 +960,7 @@ def published(
         found = MINOR_RE.match(str(one.get("version") or ""))
         if not found or found.group("minor") != minor:
             continue
-        if stable_only and one.get("stable") is not True:
+        if stable_only and not stable_build(one):
             continue
         for file in one.get("files") or []:
             if (
@@ -2192,6 +2203,24 @@ SOURCES: Final = (
 )
 
 
+def read_once(cache: dict[str, Any], key: str, read: Callable[[], Any]) -> Any:
+    """Исход чтения `key` — один на всех спрашивающих: и ответ, и отказ.
+
+    Помнить только удачу значит читать заново после отказа: второй вопрос шёл
+    бы в сеть с полным таймаутом, а удавшееся второе чтение дало бы двум
+    вердиктам разные исходы одного адреса (022). Отказ поднимается тот же.
+    """
+    if key not in cache:
+        try:
+            cache[key] = (read(), None)
+        except Exception as exc:
+            cache[key] = (None, exc)
+    value, failed = cache[key]
+    if failed is not None:
+        raise failed
+    return value
+
+
 def look(
     repo: str, token: str, mine: dict[str, Any], merge_said: dict[str, Any] | None = None
 ) -> tuple[list[Drift], list[str]]:
@@ -2209,12 +2238,13 @@ def look(
     # ОДНО ЧТЕНИЕ НА ДВА ВОПРОСА: выгрузку читают «каталог» и замены в сводке
     # семьи, защиту — её сверки и право обхода. Второе чтение того же ответа
     # могло бы прийти другим, и вердикты разошлись бы молча (022).
+    # Запоминается и ОТКАЗ (находки `efbc37a`, `830d88f`): иначе второй
+    # спрашивающий снова шёл в сеть с полным таймаутом, а удавшееся второе
+    # чтение судило бы его по другому исходу того же адреса, чем первого.
     once: dict[str, Any] = {}
 
     def export_once() -> dict[str, Any]:
-        if "export" not in once:
-            once["export"] = fetch(EXPORT_URL)
-        return dict(once["export"])
+        return dict(read_once(once, "export", lambda: fetch(EXPORT_URL)))
 
     def replaced_or_none() -> dict[str, str] | None:
         # Выгрузка не прочитана или не той формы — замен не знаем, и находки о
@@ -2227,9 +2257,7 @@ def look(
             return None
 
     def protection_once() -> ProtectionRead:
-        if "protection" not in once:
-            once["protection"] = protection_read(repo, token)
-        read: ProtectionRead = once["protection"]
+        read: ProtectionRead = read_once(once, "protection", lambda: protection_read(repo, token))
         return read
 
     asks: tuple[tuple[str, Any], ...] = (
