@@ -107,8 +107,8 @@ def test_the_publisher_writes_the_file(tmp_path: Path, run_script: RunScript) ->
     assert done.code == module.EXIT_OK, done.text
     said = json.loads(out.read_text(encoding="utf-8"))
     assert said["tests"] == {"functions": 3} and said["repo"] == REPO
-    # Файл — форма договора фактов 2.0 (#1337, #1396): вторых записей в корне нет.
-    assert said["schema"] == "2.0" and not set(module.NOT_PUBLISHED) & set(said)
+    # Файл — форма договора фактов (#1337, #1396): вторых записей в корне нет.
+    assert said["schema"] == module.SCHEMA and not set(module.NOT_PUBLISHED) & set(said)
 
 
 @pytest.mark.parametrize(
@@ -376,7 +376,7 @@ def test_the_contract_tag_matches_the_schema_and_the_step() -> None:
 
 #: Строка, которой `check_facts.py --file` выпуска называет расхождения:
 #: `print(f"{args.repo}: {'договору отвечает' if not found else f'расхождений {len(found)}'}")`
-#: (тег `facts-v2.0.0` каталога — строка та же, что у витрины 1.6).
+#: (тег `facts-v2.1.0` механизмов — строка та же, что у `facts-v2.0.0` каталога).
 #: Шаг судит по ней, а не по одному коду.
 MISMATCH: str = "o/a: расхождений 3"
 

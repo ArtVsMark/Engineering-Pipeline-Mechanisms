@@ -65,8 +65,9 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     assert collected["rules"]["by_mechanism"] == {"document": 1, "gate": 1}
     assert collected["checks_per_pr"]["by_class"]["required"] == 1
     assert collected["commit"] == "голова"
-    # Договор фактов 2.0 (#1337, #1396): номер — договора, а не наш.
-    assert collected["schema"] == "2.0"
+    # Номер — договора, а не наш (#1337, #1396), и берётся у константы, а не
+    # вписывается здесь второй раз: подъём 2.0 → 2.1 (#1563) иначе краснел бы тут.
+    assert collected["schema"] == facts.SCHEMA
     # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
     assert collected["none"]["python"] == facts.NO_PYTHON
     assert collected["generated_at"].endswith("+00:00")
