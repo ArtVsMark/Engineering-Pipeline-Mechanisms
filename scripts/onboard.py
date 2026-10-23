@@ -856,7 +856,35 @@ DATA_KIT: Final = paths.KIT / "data"
 #: каталога: решение владельца назвало состав поимённо, а якорь у каждого пути
 #: уже есть. Таблица областей сюда не входит — она собирается (`area_kit`).
 #: Совпадение перечня с `kit/data/` держит `tests/test_onboard.py`.
-DATA_KITTED: Final = (paths.REVIEW_ROLES, paths.REVIEW_PROCEDURE, paths.ROLES, paths.DEPENDABOT)
+DATA_KITTED: Final = (
+    paths.REVIEW_ROLES,
+    paths.REVIEW_PROCEDURE,
+    paths.ROLES,
+    paths.DEPENDABOT,
+    # #1557: почти целиком общие — состав меток и словарь родов находок; форма
+    # без наполнения — очередь предложений, перезапуск; требование конвейера —
+    # объявление защиты ветки; наши числа как умолчание — границы ряда прогонов.
+    paths.LABELS,
+    paths.FINDING_KINDS,
+    paths.PROPOSALS,
+    paths.PROTECTION,
+    paths.SERIES,
+    paths.RERUN,
+)
+#: Данные потребителя, которым заготовки НЕТ, — с причиной (#1557). Каждый путь
+#: `consumer_data` стоит либо в `DATA_KITTED`, либо здесь; держит это
+#: `tests/test_onboard.py`, и путь, исчезнувший из перечня, здесь не переживает.
+KIT_REFUSED: Final = {
+    paths.ATTRIBUTION_SINCE: "отметка — коммит ВАШЕЙ истории, с которого атрибуция обязательна",
+    paths.AUTHORS: "имена — ваших людей; наши дали бы чужим право подписи",
+    paths.BINDINGS: "ответ проекта каталогу: его форму ведёт каталог (решение 17.10.2026)",
+    paths.SCHEDULES: "цена и роль ВАШИХ прогонов по расписанию: состав знает только ваше дерево",
+    paths.SHOWCASE: "вопросы вашей витрины: наш набор отвечал бы о нашем проекте",
+    paths.VENDOR_WATCH: "знание, снятое с кода ваших закреплений действий, а не наших",
+    paths.BEHAVIOUR: "шаги называют документ ссылкой в сообщении; порядок работ — ваш",
+    paths.RELEASE_DOC: "шаги называют документ ссылкой в сообщении; порядок выпуска — ваш",
+    paths.DECISIONS: "записи ваших решений; пустой каталог законен",
+}
 #: Пути области в заготовке: ЛЮБОЙ путь — в корне и вглубь (`review_map.matches`).
 #: Не пустые: пустой `paths` карта читает «поверхности нет» и правила области
 #: роли не отдаёт, то есть незаполненная заготовка давала бы роли МЕНЬШЕ, чем
@@ -912,7 +940,7 @@ REPO_RE: Final = re.compile(
 
 
 def data_kit(root: Path, repo: str) -> dict[Path, str]:
-    """Заготовки данных взгляда и `dependabot.yml`: `kit/data/<путь>` → `<путь>` (#1386).
+    """Заготовки данных потребителя: `kit/data/<путь>` → `<путь>` (#1386, #1557).
 
     Состав — `DATA_KITTED`; недостающий файл — отказ, а не тихий пропуск (045).
     `bindings.json` заготовкой не кладётся
@@ -924,7 +952,7 @@ def data_kit(root: Path, repo: str) -> dict[Path, str]:
         raise NotRun(
             f"заготовок данных нет в {DATA_KIT}/: "
             + ", ".join(str(one) for one in missing)
-            + " — карта взгляда у потребителя не собралась бы"
+            + " — шаги, что читают эти данные, у потребителя не отработали бы"
         )
     found = {path: (root / DATA_KIT / path).read_text(encoding="utf-8") for path in DATA_KITTED}
     said = found[paths.DEPENDABOT]
@@ -1996,9 +2024,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"#    {one}")
     if data == []:
         print("#    (инвентарь переноса не называет ни одного)")
-    print("#    Заготовки данных взгляда и `dependabot.yml` кладут ключи --write и --update,")
+    print("#    Заготовки данных кладут ключи --write и --update,")
     print("#    только в свободные пути: " + ", ".join(f"`{one}`" for one in sorted(kit)))
-    print(f"#    `{paths.BINDINGS}` заготовкой не кладётся: это ответ проекта каталогу правил.")
+    for path, why in sorted(KIT_REFUSED.items()):
+        print(f"#    `{path}` заготовкой не кладётся: {why}.")
     print("\n# 6. В свой README — значок проекта; README заход не трогает (#1282).")
     print("#    Значок рисует общий шаг фактов на ветке `badges` после первого прогона;")
     print(f"#    {PRIVATE_NOTE}.\n")
